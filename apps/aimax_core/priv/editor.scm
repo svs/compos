@@ -60,7 +60,7 @@
     (".ex" "elixir-mode") (".exs" "elixir-mode")
     (".json" "json-mode") (".rs" "rust-mode")
     (".html" "html-mode") (".htm" "html-mode")
-    (".md" "text-mode") (".txt" "text-mode") (".org" "text-mode")))
+    (".md" "text-mode") (".txt" "text-mode") (".org" "org-mode")))
 
 (define (auto-mode path)
   (for-each

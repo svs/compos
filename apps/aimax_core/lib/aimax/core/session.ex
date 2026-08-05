@@ -110,7 +110,7 @@ defmodule Aimax.Core.Session do
 
   defp load_stdlib!(interp) do
     interp =
-      Enum.reduce(["editor.scm", "dired.scm", "themes.scm"], interp, fn file, interp ->
+      Enum.reduce(["editor.scm", "dired.scm", "org.scm", "themes.scm"], interp, fn file, interp ->
         path = Application.app_dir(:aimax_core, "priv/#{file}")
 
         case Scheme.eval_string(interp, File.read!(path)) do

@@ -140,12 +140,17 @@ defmodule Aimax.Scheme.Builtins do
         |> Enum.map(fn [{ms, len} | _] -> [ms, ms + len] end)
       end,
       "re-groups" => fn [pat, s, start] ->
-        case Regex.run(re!(pat), s, return: :index, offset: start) do
+        # PCRE truncates trailing unmatched groups; wrapping the pattern
+        # with a final always-matching () forces every group to report
+        # ({-1,0} for non-participants), then we drop the sentinel
+        case Regex.run(re!("(?:" <> pat <> ")()"), s, return: :index, offset: start) do
           nil ->
             false
 
           groups ->
-            Enum.map(groups, fn
+            groups
+            |> Enum.drop(-1)
+            |> Enum.map(fn
               {-1, 0} -> false
               {gs, len} -> [gs, gs + len]
             end)

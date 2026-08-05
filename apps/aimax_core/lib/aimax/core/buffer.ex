@@ -524,18 +524,6 @@ defmodule Aimax.Core.Buffer do
   defp apply_motion(:bob, _text, _pos, _), do: 0
   defp apply_motion(:eob, text, _pos, _), do: Kernel.byte_size(text)
   defp apply_motion(:bol, text, pos, _), do: text |> line_bounds(pos) |> elem(0)
-  defp in_hidden?(p, hidden), do: Enum.any?(hidden, fn {s, e} -> p > s and p <= e end)
-
-  defp skip_hidden(motion, text, point, goal, hidden, orig) do
-    next = apply_motion(motion, text, point, goal)
-
-    cond do
-      next == point -> orig
-      in_hidden?(next, hidden) -> skip_hidden(motion, text, next, goal, hidden, orig)
-      true -> next
-    end
-  end
-
   defp apply_motion(:eol, text, pos, _), do: text |> line_bounds(pos) |> elem(1)
 
   defp apply_motion(:next_line, text, pos, goal) do
@@ -572,6 +560,18 @@ defmodule Aimax.Core.Buffer do
   defp apply_motion(:backward_word, text, pos, _) do
     pos = skip_back_while(text, pos, &(!word_byte?(&1)))
     skip_back_while(text, pos, &word_byte?/1)
+  end
+
+  defp in_hidden?(p, hidden), do: Enum.any?(hidden, fn {s, e} -> p > s and p <= e end)
+
+  defp skip_hidden(motion, text, point, goal, hidden, orig) do
+    next = apply_motion(motion, text, point, goal)
+
+    cond do
+      next == point -> orig
+      in_hidden?(next, hidden) -> skip_hidden(motion, text, next, goal, hidden, orig)
+      true -> next
+    end
   end
 
   defp word_byte?(b),

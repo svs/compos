@@ -89,7 +89,11 @@ defmodule Aimax.Scheme do
     {val, store} = Eval.apply_fn(f, args, interp.store)
     {:ok, val, %{interp | store: store}}
   rescue
-    e in [Eval.Error, Env.UnboundError] -> {:error, Exception.message(e)}
+    e in [Eval.Error, Env.UnboundError] ->
+      {:error, Exception.message(e)}
+
+    e in [FunctionClauseError, MatchError, ArithmeticError, CaseClauseError, ArgumentError] ->
+      {:error, "bad arguments: #{Exception.message(e)}"}
   end
 
   defdelegate print(value), to: Printer

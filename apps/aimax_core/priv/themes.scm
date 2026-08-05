@@ -41,7 +41,20 @@
     (list 'hl-line 'bg "#f5f1e6")
     (list 'linenum 'fg "#b3ac9c")
     (list 'border 'bg "#cbc4b1")
-    (list 'warn 'fg "#7a5a1a")))
+    (list 'warn 'fg "#7a5a1a")
+    (list 'org-level-1 'fg "#26356b" 'weight "700")
+    (list 'org-level-2 'fg "#7a5a1a" 'weight "600")
+    (list 'org-level-3 'fg "#3d6b4f" 'weight "600")
+    (list 'org-level-4 'fg "#6b3d5b" 'weight "600")
+    (list 'org-todo 'fg "#a03020" 'weight "700")
+    (list 'org-done 'fg "#3d6b4f" 'decoration "line-through")
+    (list 'org-priority 'fg "#7a5a1a" 'weight "600")
+    (list 'org-date 'fg "#26356b" 'style "italic")
+    (list 'org-tag 'fg "#8a857a")
+    (list 'org-checkbox 'fg "#26356b" 'weight "600")
+    (list 'org-cookie 'fg "#7a5a1a")
+    (list 'org-meta 'fg "#8a857a")
+    (list 'fold-marker 'fg "#8a857a")))
 
 (define-theme "paper-night"          ; the design's warm dark
   (list
@@ -68,7 +81,20 @@
     (list 'hl-line 'bg "#262218")
     (list 'linenum 'fg "#4a443a")
     (list 'border 'bg "#39342b")
-    (list 'warn 'fg "#d5ac66")))
+    (list 'warn 'fg "#d5ac66")
+    (list 'org-level-1 'fg "#9fb0ea" 'weight "700")
+    (list 'org-level-2 'fg "#d5ac66" 'weight "600")
+    (list 'org-level-3 'fg "#79bd93" 'weight "600")
+    (list 'org-level-4 'fg "#c99ac2" 'weight "600")
+    (list 'org-todo 'fg "#e0705a" 'weight "700")
+    (list 'org-done 'fg "#79bd93" 'decoration "line-through")
+    (list 'org-priority 'fg "#d5ac66" 'weight "600")
+    (list 'org-date 'fg "#9fb0ea" 'style "italic")
+    (list 'org-tag 'fg "#a79d8c")
+    (list 'org-checkbox 'fg "#9fb0ea" 'weight "600")
+    (list 'org-cookie 'fg "#d5ac66")
+    (list 'org-meta 'fg "#a79d8c")
+    (list 'fold-marker 'fg "#a79d8c")))
 
 (define-theme "aimax-dark"
   (list

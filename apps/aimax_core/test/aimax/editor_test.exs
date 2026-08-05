@@ -645,6 +645,40 @@ defmodule Aimax.EditorTest do
     File.rm_rf!(root)
   end
 
+  test "desktop: editor state survives save/restore" do
+    path = Path.join(System.tmp_dir!(), "aimax-desk-#{System.unique_integer([:positive])}.ex")
+    File.write!(path, "defmodule Desk do\nend\n")
+
+    # open the file, set a point, split, load a theme face
+    press(["C-x", "C-f"])
+    type(path)
+    press(["RET"])
+    press(["C-f", "C-f", "C-f"])
+    press(["C-x", "3"])
+    {:ok, _} = Aimax.Core.Session.eval(~s{(set-face-attribute! 'desk-test 'fg "#123456")})
+
+    assert :ok = Aimax.Core.Desktop.save_now()
+
+    # wreck the state: single window on scratch, kill the file buffer
+    press(["C-x", "1"])
+    Editor.set_window_buffer("*scratch*")
+    Aimax.Core.kill_buffer(path)
+    refute Buffer.exists?(path)
+
+    assert :ok = Aimax.Core.Desktop.restore_now()
+
+    # buffer is back with point, mode, the split, and the face
+    assert Buffer.exists?(path)
+    assert Buffer.point(path) == 3
+    assert Buffer.get_local(path, "mode-name") == "elixir-mode"
+    assert %{type: :split, dir: :h} = Editor.render_state().tree
+    assert Editor.render_state().faces["desk-test"] == %{"fg" => "#123456"}
+    assert Editor.current_buffer() == path
+
+    press(["C-x", "1"])
+    File.rm!(path)
+  end
+
   test "orderless: space-separated terms match in any order" do
     press(["M-x"])
     type("window split")

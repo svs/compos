@@ -82,6 +82,10 @@ defmodule Aimax.Core.Editor do
   def other_window, do: GenServer.call(__MODULE__, :other_window)
   def set_window_buffer(buffer), do: GenServer.call(__MODULE__, {:set_window_buffer, buffer})
 
+  @doc "Replace the whole window tree from a {:leaf, name} | {:split, dir, a, b} spec."
+  def restore_tree(spec, active_buffer),
+    do: GenServer.call(__MODULE__, {:restore_tree, spec, active_buffer})
+
   # --- server ----------------------------------------------------------------
 
   @impl true
@@ -275,6 +279,21 @@ defmodule Aimax.Core.Editor do
     changed(:ok, %{state | tree: tree})
   end
 
+  def handle_call({:restore_tree, spec, active_buffer}, _from, state) do
+    {tree, next_win} = build_tree(spec, state.next_win)
+
+    Enum.each(leaf_ids_buffers(tree), fn {_id, buffer} ->
+      unless Aimax.Core.Buffer.exists?(buffer), do: Aimax.Core.create_buffer(buffer)
+    end)
+
+    active =
+      Enum.find_value(leaf_ids_buffers(tree), fn {id, buffer} ->
+        if buffer == active_buffer, do: id
+      end) || first_leaf(tree).id
+
+    changed(:ok, %{state | tree: tree, next_win: next_win, active: active})
+  end
+
   defp changed(reply, state) do
     Events.broadcast_editor(:changed)
     {:reply, reply, state}
@@ -413,6 +432,19 @@ defmodule Aimax.Core.Editor do
 
   defp first_leaf(%{type: :leaf} = leaf), do: leaf
   defp first_leaf(%{type: :split, children: [a | _]}), do: first_leaf(a)
+
+  defp build_tree({:leaf, buffer}, n), do: {%{type: :leaf, id: n, buffer: buffer}, n + 1}
+
+  defp build_tree({:split, dir, a, b}, n) do
+    {ta, n} = build_tree(a, n)
+    {tb, n} = build_tree(b, n)
+    {%{type: :split, dir: dir, children: [ta, tb]}, n}
+  end
+
+  defp leaf_ids_buffers(%{type: :leaf, id: id, buffer: b}), do: [{id, b}]
+
+  defp leaf_ids_buffers(%{type: :split, children: c}),
+    do: Enum.flat_map(c, &leaf_ids_buffers/1)
 
   defp leaf_ids(%{type: :leaf, id: id}), do: [id]
   defp leaf_ids(%{type: :split, children: children}), do: Enum.flat_map(children, &leaf_ids/1)

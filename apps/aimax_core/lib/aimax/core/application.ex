@@ -14,7 +14,8 @@ defmodule Aimax.Core.Application do
       {Task.Supervisor, name: Aimax.Core.TaskSupervisor},
       Aimax.Core.Reactor,
       Aimax.Core.Editor,
-      Aimax.Core.Session
+      Aimax.Core.Session,
+      Aimax.Core.Desktop
     ]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Aimax.Core.Supervisor)

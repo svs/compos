@@ -30,10 +30,26 @@ defmodule Aimax.Core.LLM do
     Application.get_env(:aimax_core, :llm_request_fun, &default_request/1)
   end
 
-  defp default_request(prompt) do
+  defp api_key do
     case System.get_env("ANTHROPIC_API_KEY") do
+      key when key not in [nil, ""] ->
+        key
+
+      _ ->
+        # fallback: ~/.aimax/anthropic-key (single line)
+        path = Path.expand("~/.aimax/anthropic-key")
+
+        case File.read(path) do
+          {:ok, key} -> String.trim(key)
+          _ -> nil
+        end
+    end
+  end
+
+  defp default_request(prompt) do
+    case api_key() do
       key when key in [nil, ""] ->
-        {:error, "ANTHROPIC_API_KEY not set"}
+        {:error, "no API key: set ANTHROPIC_API_KEY or write ~/.aimax/anthropic-key"}
 
       key ->
         case Req.post("https://api.anthropic.com/v1/messages",

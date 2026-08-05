@@ -175,7 +175,9 @@
   (lambda ()
     (let loop ((sources (capf-sources)))
       (if (null? sources)
-          (completion-dismiss!)
+          (begin
+            (completion-dismiss!)
+            (message "No completions here"))
           (let ((r ((car sources))))
             (if r
                 (completion-show! (car r) (cadr r) (caddr r))

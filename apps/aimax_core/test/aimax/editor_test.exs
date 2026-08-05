@@ -526,6 +526,33 @@ defmodule Aimax.EditorTest do
     File.rm_rf!(root)
   end
 
+  test "find-file filters orderless; unique match opens on RET" do
+    root = Path.join(System.tmp_dir!(), "aimax-of-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(root)
+    File.write!(Path.join(root, "HANDOFF.html"), "<h1>hi</h1>")
+    File.write!(Path.join(root, "notes.md"), "# notes")
+    File.write!(Path.join(root, "code.ex"), "defmodule A do\nend\n")
+
+    press(["C-x", "C-f"])
+    type(root <> "/")
+    # substring, not prefix: "html" finds HANDOFF.html
+    type("html")
+    mb = Editor.render_state().minibuffer
+    assert Enum.map(mb.candidates, & &1.label) == ["HANDOFF.html"]
+
+    # unique match: RET opens it without arrowing
+    press(["RET"])
+    assert Editor.current_buffer() == Path.join(root, "HANDOFF.html")
+
+    # non-unique filter still lets you create a new file by typing a name
+    press(["C-x", "C-f"])
+    type(root <> "/brand-new.txt")
+    press(["RET"])
+    assert Editor.current_buffer() == Path.join(root, "brand-new.txt")
+
+    File.rm_rf!(root)
+  end
+
   test "find-file on a directory opens dired" do
     root = Path.join(System.tmp_dir!(), "aimax-ffd-#{System.unique_integer([:positive])}")
     File.mkdir_p!(root)

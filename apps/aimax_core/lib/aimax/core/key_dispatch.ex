@@ -86,7 +86,10 @@ defmodule Aimax.Core.KeyDispatch do
   # the user explicitly arrowed onto a candidate, resolve it through the
   # completion closure first — "down, RET" must enter the highlighted entry.
   defp confirm_value(%{on_complete: oc} = mb) when oc not in [nil, false] do
-    if mb[:sel_touched] && mb[:selected] do
+    # resolve the selection when the user arrowed onto it, or when the filter
+    # narrowed to exactly one candidate (type "html", RET — no arrowing);
+    # otherwise the typed input wins, so new files can still be created
+    if (mb[:sel_touched] || mb[:total] == 1) && mb[:selected] do
       case Session.call_fn(oc, [mb.input, mb[:selected]]) do
         {:ok, [new_input, _cands]} when is_binary(new_input) -> new_input
         _ -> mb.input

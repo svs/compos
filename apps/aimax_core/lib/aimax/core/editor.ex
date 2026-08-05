@@ -288,7 +288,12 @@ defmodule Aimax.Core.Editor do
 
   # returns the full minibuffer map (with handlers, plus :selected) or nil
   def handle_call(:mb_close, _from, state) do
-    reply = state.minibuffer && Map.put(state.minibuffer, :selected, selected_label(state.minibuffer))
+    reply =
+      state.minibuffer &&
+        state.minibuffer
+        |> Map.put(:selected, selected_label(state.minibuffer))
+        |> Map.put(:total, length(filtered(state.minibuffer)))
+
     changed(reply, %{state | minibuffer: nil})
   end
 
@@ -477,11 +482,14 @@ defmodule Aimax.Core.Editor do
   end
 
   # on_complete prompts (find-file): candidates are the current directory's
-  # listing; narrow by prefix on the basename segment (cheap — the expensive
-  # re-listing only happens in Scheme when the directory part changes)
+  # listing; narrow the basename segment with the same orderless/flex matcher
+  # as everywhere else, ranked (exact > prefix > substring > subsequence)
   defp filtered(%{on_complete: oc} = mb) when oc != nil and oc != false do
     frag = mb.input |> String.split("/") |> List.last()
-    Enum.filter(mb.candidates, &String.starts_with?(&1.label, frag))
+
+    mb.candidates
+    |> Enum.filter(&fuzzy_match?(&1.label, frag))
+    |> Enum.sort_by(&match_rank(&1.label, frag))
   end
 
   defp filtered(%{input: ""} = mb), do: mb.candidates

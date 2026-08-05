@@ -36,7 +36,10 @@ defmodule Aimax.Core.Buffer do
             goal_col: nil,
             last_insert_end: nil,
             insert_run: 0,
-            undo_next: 0
+            undo_next: 0,
+            overlays: %{},
+            overlay_gen: 0,
+            hidden: []
 
   # --- client ----------------------------------------------------------------
 
@@ -68,6 +71,18 @@ defmodule Aimax.Core.Buffer do
   def set_local(name, key, val), do: GenServer.call(via(name), {:set_local, key, val})
   def get_local(name, key), do: GenServer.call(via(name), {:get_local, key})
   def locals(name), do: GenServer.call(via(name), :locals)
+
+  # overlays: per-tag face ranges (fontification). Byte positions auto-adjust
+  # on edits (like mark); modes replace their whole tag set on recompute.
+  def set_overlays(name, tag, ranges), do: GenServer.call(via(name), {:set_overlays, tag, ranges})
+  def clear_overlays(name, tag \\ :all), do: GenServer.call(via(name), {:clear_overlays, tag})
+  def overlays(name), do: GenServer.call(via(name), :overlays)
+  def overlay_gen(name), do: GenServer.call(via(name), :overlay_gen)
+
+  # hidden: folded byte ranges — filtered out of the display, skipped by
+  # line motion. Auto-adjusted like overlays.
+  def set_hidden(name, ranges), do: GenServer.call(via(name), {:set_hidden, ranges})
+  def hidden(name), do: GenServer.call(via(name), :hidden)
 
   def forward_word(name), do: GenServer.call(via(name), {:motion, :forward_word})
   def backward_word(name), do: GenServer.call(via(name), {:motion, :backward_word})

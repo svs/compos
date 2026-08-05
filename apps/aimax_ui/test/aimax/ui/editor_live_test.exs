@@ -14,6 +14,10 @@ defmodule Aimax.Ui.EditorLiveTest do
   defp type(view, str), do: keys(view, String.graphemes(str))
 
   setup do
+    Aimax.Core.Editor.minibuffer_close()
+    Aimax.Core.Editor.completion_dismiss()
+    Aimax.Core.Editor.set_pending([])
+    Aimax.Core.Editor.set_total_rows(40)
     Aimax.Core.Editor.delete_other_windows()
     Aimax.Core.Editor.set_window_buffer("ui-test-#{System.unique_integer([:positive])}")
     {:ok, conn: build_conn()}

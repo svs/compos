@@ -14,7 +14,7 @@ defmodule Aimax.Core.Editor do
 
   use GenServer
 
-  alias Aimax.Core.Events
+  alias Aimax.Core.{Buffer, Events}
 
   @scratch "*scratch*"
 
@@ -97,6 +97,14 @@ defmodule Aimax.Core.Editor do
   def restore_tree(spec, active_buffer),
     do: GenServer.call(__MODULE__, {:restore_tree, spec, active_buffer})
 
+  # viewport: client reports how many text rows fit; wheel scrolls the
+  # active window server-side; any key re-enables point auto-follow
+  def set_total_rows(rows), do: GenServer.call(__MODULE__, {:set_total_rows, rows})
+  def scroll_active(delta_lines), do: GenServer.call(__MODULE__, {:scroll_active, delta_lines})
+  def user_acted, do: GenServer.call(__MODULE__, :user_acted)
+  def window_rows, do: GenServer.call(__MODULE__, :window_rows)
+  def recenter, do: GenServer.call(__MODULE__, :recenter)
+
   # --- server ----------------------------------------------------------------
 
   @impl true
@@ -105,7 +113,7 @@ defmodule Aimax.Core.Editor do
 
     {:ok,
      %{
-       tree: %{type: :leaf, id: 1, buffer: @scratch},
+       tree: %{type: :leaf, id: 1, buffer: @scratch, top: 0, manual: false},
        active: 1,
        next_win: 2,
        pending: [],
@@ -116,7 +124,8 @@ defmodule Aimax.Core.Editor do
        faces: %{},
        local_keymaps: %{},
        last_command: "",
-       completion: nil
+       completion: nil,
+       total_rows: 40
      }}
   end
 
@@ -153,9 +162,12 @@ defmodule Aimax.Core.Editor do
   end
 
   def handle_call(:render_state, _from, state) do
+    {tree, rendered} = render_walk(state.tree, state.total_rows)
+    state = %{state | tree: tree}
+
     {:reply,
      %{
-       tree: render_tree(state.tree),
+       tree: rendered,
        active: state.active,
        pending: state.pending,
        minibuffer: state.minibuffer && render_minibuffer(state.minibuffer),
@@ -164,6 +176,40 @@ defmodule Aimax.Core.Editor do
        echo: state.echo,
        faces: state.faces
      }, state}
+  end
+
+  def handle_call({:set_total_rows, rows}, _from, state),
+    do: {:reply, :ok, %{state | total_rows: rows |> max(5) |> min(500)}}
+
+  def handle_call({:scroll_active, delta}, _from, state) do
+    leaf = find_leaf(state.tree, state.active)
+    top = max(leaf.top + delta, 0)
+    tree = replace_leaf(state.tree, state.active, %{leaf | top: top, manual: true})
+    changed(:ok, %{state | tree: tree})
+  end
+
+  def handle_call(:user_acted, _from, state),
+    do: {:reply, :ok, %{state | tree: clear_manual(state.tree)}}
+
+  def handle_call(:window_rows, _from, state) do
+    {:reply, rows_for(state.tree, state.active, state.total_rows) || state.total_rows, state}
+  end
+
+  def handle_call(:recenter, _from, state) do
+    leaf = find_leaf(state.tree, state.active)
+    rows = rows_for(state.tree, state.active, state.total_rows) || state.total_rows
+
+    top =
+      if Buffer.exists?(leaf.buffer) do
+        text = Buffer.text(leaf.buffer)
+        cl = cursor_line(text, Buffer.point(leaf.buffer))
+        max(cl - div(rows, 2), 0)
+      else
+        0
+      end
+
+    tree = replace_leaf(state.tree, state.active, %{leaf | top: top, manual: false})
+    changed(:ok, %{state | tree: tree})
   end
 
   def handle_call({:bind_key, seq, command}, _from, state),
@@ -291,7 +337,7 @@ defmodule Aimax.Core.Editor do
 
   def handle_call({:split, dir}, _from, state) do
     old = find_leaf(state.tree, state.active)
-    new_leaf = %{type: :leaf, id: state.next_win, buffer: old.buffer}
+    new_leaf = %{type: :leaf, id: state.next_win, buffer: old.buffer, top: old.top, manual: false}
     split = %{type: :split, dir: dir, children: [old, new_leaf]}
     tree = replace_leaf(state.tree, state.active, split)
     changed(:ok, %{state | tree: tree, next_win: state.next_win + 1})
@@ -321,7 +367,7 @@ defmodule Aimax.Core.Editor do
   def handle_call({:set_window_buffer, buffer}, _from, state) do
     unless Aimax.Core.Buffer.exists?(buffer), do: Aimax.Core.create_buffer(buffer)
     leaf = find_leaf(state.tree, state.active)
-    tree = replace_leaf(state.tree, state.active, %{leaf | buffer: buffer})
+    tree = replace_leaf(state.tree, state.active, %{leaf | buffer: buffer, top: 0, manual: false})
     changed(:ok, %{state | tree: tree})
   end
 
@@ -492,7 +538,8 @@ defmodule Aimax.Core.Editor do
   defp first_leaf(%{type: :leaf} = leaf), do: leaf
   defp first_leaf(%{type: :split, children: [a | _]}), do: first_leaf(a)
 
-  defp build_tree({:leaf, buffer}, n), do: {%{type: :leaf, id: n, buffer: buffer}, n + 1}
+  defp build_tree({:leaf, buffer}, n),
+    do: {%{type: :leaf, id: n, buffer: buffer, top: 0, manual: false}, n + 1}
 
   defp build_tree({:split, dir, a, b}, n) do
     {ta, n} = build_tree(a, n)
@@ -508,25 +555,67 @@ defmodule Aimax.Core.Editor do
   defp leaf_ids(%{type: :leaf, id: id}), do: [id]
   defp leaf_ids(%{type: :split, children: children}), do: Enum.flat_map(children, &leaf_ids/1)
 
-  defp render_tree(%{type: :leaf, id: id, buffer: buffer}) do
-    alias Aimax.Core.Buffer
+  # render walk: computes per-window rows (v-splits divide), clamps and
+  # auto-follows the viewport top (unless manually scrolled), and returns
+  # both the updated tree (tops persist) and the render payload
+  defp render_walk(%{type: :split, dir: dir, children: [a, b]} = split, rows) do
+    child_rows = if dir == :v, do: max(div(rows, 2), 3), else: rows
+    {a2, ra} = render_walk(a, child_rows)
+    {b2, rb} = render_walk(b, child_rows)
+    {%{split | children: [a2, b2]}, %{type: :split, dir: dir, children: [ra, rb]}}
+  end
 
+  defp render_walk(%{type: :leaf, id: id, buffer: buffer} = leaf, rows) do
     exists = Buffer.exists?(buffer)
+    text = if exists, do: Buffer.text(buffer), else: ""
+    point = if exists, do: Buffer.point(buffer), else: 0
 
-    %{
+    total_lines = length(:binary.matches(text, "\n")) + 1
+    cl = cursor_line(text, point)
+
+    top = leaf.top |> min(max(total_lines - 1, 0)) |> max(0)
+
+    top =
+      cond do
+        leaf.manual -> top
+        cl < top -> cl
+        cl >= top + rows -> cl - rows + 1
+        true -> top
+      end
+
+    rendered = %{
       type: :leaf,
       id: id,
       buffer: buffer,
-      text: if(exists, do: Buffer.text(buffer), else: ""),
-      point: if(exists, do: Buffer.point(buffer), else: 0),
+      text: text,
+      point: point,
       mark: if(exists, do: Buffer.mark(buffer), else: nil),
       version: if(exists, do: Buffer.version(buffer), else: 0),
       modified: exists && Buffer.modified?(buffer),
       mode: (exists && Buffer.get_local(buffer, "mode-name")) || "Fundamental",
-      ts_lang: exists && Buffer.get_local(buffer, "ts-lang")
+      ts_lang: exists && Buffer.get_local(buffer, "ts-lang"),
+      top: top,
+      rows: rows,
+      total_lines: total_lines,
+      line_numbers: !(exists && Buffer.get_local(buffer, "line-numbers") == "off")
     }
+
+    {%{leaf | top: top}, rendered}
   end
 
-  defp render_tree(%{type: :split, dir: dir, children: children}),
-    do: %{type: :split, dir: dir, children: Enum.map(children, &render_tree/1)}
+  defp cursor_line(text, point),
+    do: length(:binary.matches(binary_part(text, 0, point), "\n"))
+
+  defp clear_manual(%{type: :leaf} = leaf), do: %{leaf | manual: false}
+
+  defp clear_manual(%{type: :split} = split),
+    do: %{split | children: Enum.map(split.children, &clear_manual/1)}
+
+  defp rows_for(%{type: :leaf, id: id}, id, rows), do: rows
+  defp rows_for(%{type: :leaf}, _id, _rows), do: nil
+
+  defp rows_for(%{type: :split, dir: dir, children: children}, id, rows) do
+    child_rows = if dir == :v, do: max(div(rows, 2), 3), else: rows
+    Enum.find_value(children, &rows_for(&1, id, child_rows))
+  end
 end

@@ -50,7 +50,7 @@ defmodule Aimax.Ui.Layouts do
           .window.active { background: var(--window-bg, #fdfcf8); }
           .buf {
             flex: 1;
-            overflow-y: auto; overflow-x: hidden;
+            overflow: hidden; /* the server owns scrolling (viewport windowing) */
             padding: 12px 0 22px;
             font-family: var(--font-mono);
             font-size: 13px;
@@ -112,6 +112,12 @@ defmodule Aimax.Ui.Layouts do
             background: transparent; color: inherit; animation: none;
             outline: 1px solid var(--linenum-fg, #b3ac9c);
           }
+          /* OS window unfocused: hollow, no blink (Emacs frame behavior) */
+          body.unfocused .cursor {
+            background: transparent !important; color: inherit !important; animation: none !important;
+            outline: 1px solid var(--linenum-fg, #b3ac9c);
+          }
+          .no-nums .linenum { display: none; }
           .region { background: var(--region-bg, #e7e9f1); }
           /* font-lock scopes (tree-sitter) — themeable via --ts-<scope>-fg */
           .ts-keyword { color: var(--ts-keyword-fg, #26356b); font-weight: 600; }
@@ -233,7 +239,8 @@ defmodule Aimax.Ui.Layouts do
           const NAMED = {
             "Enter": "RET", "Backspace": "DEL", "Tab": "TAB", " ": "SPC",
             "Escape": "ESC", "ArrowLeft": "<left>", "ArrowRight": "<right>",
-            "ArrowUp": "<up>", "ArrowDown": "<down>", "Home": "<home>", "End": "<end>"
+            "ArrowUp": "<up>", "ArrowDown": "<down>", "Home": "<home>", "End": "<end>",
+            "PageUp": "<prior>", "PageDown": "<next>"
           };
           // macOS Option-key produces transformed chars ("≈"); recover the
           // intended key from e.code for M- bindings.
@@ -281,8 +288,49 @@ defmodule Aimax.Ui.Layouts do
                   this.pushEvent("key", { k: spec });
                 };
                 window.addEventListener("keydown", this.handler);
+
+                // viewport geometry: tell the server how many rows fit
+                this.lineHeight = 22;
+                this.sendViewport = () => {
+                  const line = document.querySelector(".line");
+                  if (line) this.lineHeight = line.getBoundingClientRect().height || 22;
+                  const area = document.querySelector(".windows");
+                  if (area) this.pushEvent("viewport", { rows: Math.max(5, Math.floor(area.clientHeight / this.lineHeight)) });
+                };
+                requestAnimationFrame(this.sendViewport);
+                this.resizeH = () => {
+                  clearTimeout(this._rt);
+                  this._rt = setTimeout(this.sendViewport, 150);
+                };
+                window.addEventListener("resize", this.resizeH);
+
+                // wheel scrolls the server-side viewport of the active window
+                this.wheelAcc = 0;
+                this.wheelH = (e) => {
+                  e.preventDefault();
+                  this.wheelAcc += e.deltaY;
+                  const lines = Math.trunc(this.wheelAcc / this.lineHeight);
+                  if (lines !== 0) {
+                    this.wheelAcc -= lines * this.lineHeight;
+                    this.pushEvent("scroll", { lines });
+                  }
+                };
+                window.addEventListener("wheel", this.wheelH, { passive: false });
+
+                // hollow, non-blinking cursor when the OS window is unfocused
+                this.focusH = () => document.body.classList.remove("unfocused");
+                this.blurH = () => document.body.classList.add("unfocused");
+                window.addEventListener("focus", this.focusH);
+                window.addEventListener("blur", this.blurH);
+                if (!document.hasFocus()) document.body.classList.add("unfocused");
               },
-              destroyed() { window.removeEventListener("keydown", this.handler); }
+              destroyed() {
+                window.removeEventListener("keydown", this.handler);
+                window.removeEventListener("resize", this.resizeH);
+                window.removeEventListener("wheel", this.wheelH);
+                window.removeEventListener("focus", this.focusH);
+                window.removeEventListener("blur", this.blurH);
+              }
             }
           };
 

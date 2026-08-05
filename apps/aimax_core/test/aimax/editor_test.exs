@@ -12,6 +12,7 @@ defmodule Aimax.EditorTest do
     name = "test-#{System.unique_integer([:positive])}"
     # reset editor state a failed test may have left behind
     Editor.minibuffer_close()
+    Editor.completion_dismiss()
     Editor.set_pending([])
     Editor.set_echo("")
     Editor.delete_other_windows()
@@ -723,6 +724,69 @@ defmodule Aimax.EditorTest do
     comp = Editor.render_state().completion
     assert [%{label: "from-lsp", hint: "lsp"}] = comp.candidates
     press(["C-g"])
+  end
+
+  describe "viewport windowing" do
+    setup %{buf: buf} do
+      Editor.set_total_rows(10)
+      for i <- 1..100, do: Buffer.append(buf, "line #{i}\n")
+      Buffer.goto(buf, 0)
+      on_exit(fn -> Editor.set_total_rows(40) end)
+      :ok
+    end
+
+    test "renders only the visible slice; auto-follows point", %{buf: buf} do
+      leaf = find_active_leaf(Editor.render_state().tree, Editor.snapshot().active)
+      assert leaf.top == 0
+      assert leaf.rows == 10
+      assert leaf.total_lines == 101
+
+      # point to the end: viewport follows
+      press(["M->"])
+      leaf = find_active_leaf(Editor.render_state().tree, Editor.snapshot().active)
+      assert leaf.top == 101 - 10
+      assert Buffer.point(buf) > 0
+    end
+
+    test "C-v pages down, M-v pages back, C-l recenters", %{buf: buf} do
+      press(["C-v"])
+      # 8 lines down; lines 1-9 are 7 bytes ("line N\n")
+      assert Buffer.point(buf) == 8 * 7
+
+      press(["M-v"])
+      assert Buffer.point(buf) == 0
+
+      {:ok, _} = Aimax.Core.Session.eval("(goto-char! 400)")
+      press(["C-l"])
+      leaf = find_active_leaf(Editor.render_state().tree, Editor.snapshot().active)
+      # byte 400 sits on 0-based line 51; centered top = 51 - rows/2
+      assert leaf.top == 46
+    end
+
+    test "manual scroll holds until a key re-follows point" do
+      Editor.scroll_active(50)
+      leaf = find_active_leaf(Editor.render_state().tree, Editor.snapshot().active)
+      assert leaf.top == 50
+
+      # a key breaks the override; point (line 0) pulls the view back
+      press(["C-f"])
+      leaf = find_active_leaf(Editor.render_state().tree, Editor.snapshot().active)
+      assert leaf.top == 0
+    end
+
+    test "display-line-numbers-mode toggles the flag" do
+      press(["M-x"])
+      type("display-line-numbers-mode")
+      press(["RET"])
+      leaf = find_active_leaf(Editor.render_state().tree, Editor.snapshot().active)
+      assert leaf.line_numbers == false
+
+      press(["M-x"])
+      type("display-line-numbers-mode")
+      press(["RET"])
+      leaf = find_active_leaf(Editor.render_state().tree, Editor.snapshot().active)
+      assert leaf.line_numbers == true
+    end
   end
 
   test "orderless: space-separated terms match in any order" do

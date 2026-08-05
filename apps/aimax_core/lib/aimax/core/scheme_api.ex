@@ -350,6 +350,11 @@ defmodule Aimax.Core.SchemeAPI do
       end,
       "key-for-command" => fn [name] -> Editor.key_for_command(name) end,
       "last-command" => fn [] -> Editor.last_command() end,
+      "window-rows" => fn [] -> Editor.window_rows() end,
+      "recenter!" => fn [] ->
+        Editor.recenter()
+        :void
+      end,
 
       # completion popup: candidates = strings or (label hint) pairs
       "completion-show!" => fn [start, _end, candidates] ->

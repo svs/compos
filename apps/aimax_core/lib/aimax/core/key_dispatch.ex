@@ -162,6 +162,8 @@ defmodule Aimax.Core.KeyDispatch do
   # --- buffer routing --------------------------------------------------------
 
   defp buffer_key(key, pending) do
+    # a key ends any manual-scroll override: the view follows point again
+    Editor.user_acted()
     Editor.set_echo("")
     seq = pending ++ [key]
 

@@ -32,6 +32,16 @@ defmodule Aimax.Ui.EditorLive do
     {:noreply, refresh(socket)}
   end
 
+  def handle_event("viewport", %{"rows" => rows}, socket) when is_integer(rows) do
+    Aimax.Core.Editor.set_total_rows(rows)
+    {:noreply, refresh(socket)}
+  end
+
+  def handle_event("scroll", %{"lines" => lines}, socket) when is_integer(lines) do
+    Aimax.Core.Editor.scroll_active(lines)
+    {:noreply, refresh(socket)}
+  end
+
   @impl true
   def handle_info({:editor_change, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
   def handle_info({:buffer_change, _, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
@@ -84,7 +94,9 @@ defmodule Aimax.Ui.EditorLive do
         _ -> build_static(leaf)
       end
 
-    lines = render_pass(static, leaf.text, leaf.point, leaf.mark)
+    # viewport: only the visible slice (+overscan) becomes DOM
+    visible = Enum.slice(static, leaf.top, leaf.rows + 4)
+    lines = render_pass(visible, leaf.text, leaf.point, leaf.mark)
     {Map.put(leaf, :lines, lines), Map.put(cache, leaf.id, {raw_key, static})}
   end
 
@@ -206,7 +218,7 @@ defmodule Aimax.Ui.EditorLive do
       )
 
     ~H"""
-    <div class={"window #{if @active?, do: "active", else: "inactive"}"}>
+    <div class={"window #{if @active?, do: "active", else: "inactive"} #{if !@node.line_numbers, do: "no-nums"}"}>
       <div class="buf">
         <div :for={ln <- @lines} class={"line #{if ln.current, do: "hl-line"}"}>
           <span class="linenum">{ln.num}</span>
@@ -225,7 +237,7 @@ defmodule Aimax.Ui.EditorLive do
         <span class="name">{@node.buffer}</span>
         <span class="ml-mode">{@node.mode}</span>
         <span class="mb-spacer"></span>
-        <span class="ml-pos">L{@line}:C{@col}</span>
+        <span class="ml-pos">{pct(@node)} · L{@line}:C{@col}</span>
       </div>
     </div>
     """
@@ -317,6 +329,13 @@ defmodule Aimax.Ui.EditorLive do
       end
     end)
   end
+
+  defp pct(%{top: 0, rows: rows, total_lines: total}) when total <= rows, do: "All"
+  defp pct(%{top: 0}), do: "Top"
+  defp pct(%{top: top, rows: rows, total_lines: total}) when top + rows >= total, do: "Bot"
+
+  defp pct(%{top: top, total_lines: total}),
+    do: "#{min(div(top * 100, max(total - 1, 1)), 99)}%"
 
   # popup anchor column in ch units (monospace): graphemes from line start
   # to the completion region start

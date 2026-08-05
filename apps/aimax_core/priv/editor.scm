@@ -202,6 +202,32 @@
 
 (define-command "indent-for-tab" (lambda () (insert! "  ")))
 
+;;; --- scrolling (viewport) ------------------------------------------------------
+
+(define (move-lines n mover)
+  (let loop ((i 0))
+    (if (< i n)
+        (begin (mover) (loop (+ i 1))))))
+
+(define-command "scroll-up-command"
+  (lambda () (move-lines (- (window-rows) 2) next-line!)))
+
+(define-command "scroll-down-command"
+  (lambda () (move-lines (- (window-rows) 2) previous-line!)))
+
+(define-command "recenter-top-bottom" (lambda () (recenter!)))
+
+(define-command "display-line-numbers-mode"
+  (lambda ()
+    (let ((cur (buffer-local (current-buffer) 'line-numbers)))
+      (if (equal? cur "off")
+          (begin
+            (buffer-set-local! (current-buffer) 'line-numbers "on")
+            (message "Line numbers enabled"))
+          (begin
+            (buffer-set-local! (current-buffer) 'line-numbers "off")
+            (message "Line numbers disabled"))))))
+
 (define-command "back-to-indentation"
   (lambda ()
     (beginning-of-line!)
@@ -530,6 +556,11 @@
 (global-set-key "M-g g" "goto-line")
 (global-set-key "M-g M-g" "goto-line")
 (global-set-key "M-m" "back-to-indentation")
+(global-set-key "C-v" "scroll-up-command")
+(global-set-key "M-v" "scroll-down-command")
+(global-set-key "<next>" "scroll-up-command")
+(global-set-key "<prior>" "scroll-down-command")
+(global-set-key "C-l" "recenter-top-bottom")
 (global-set-key "C-M-i" "completion-at-point")
 (global-set-key "M-/" "completion-at-point")
 (global-set-key "C-M-f" "forward-sexp")

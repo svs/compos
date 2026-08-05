@@ -83,6 +83,22 @@ defmodule Aimax.Ui.Layouts do
             outline: 1px solid var(--linenum-fg, #b3ac9c);
           }
           .region { background: var(--region-bg, #e7e9f1); }
+          /* font-lock scopes (tree-sitter) — themeable via --ts-<scope>-fg */
+          .ts-keyword { color: var(--ts-keyword-fg, #26356b); font-weight: 600; }
+          .ts-function { color: var(--ts-function-fg, #1b1a17); font-weight: 500; }
+          .ts-string { color: var(--ts-string-fg, #2e6b45); }
+          .ts-comment { color: var(--ts-comment-fg, #8a857a); font-style: italic; }
+          .ts-number { color: var(--ts-number-fg, #7a5a1a); }
+          .ts-constant { color: var(--ts-constant-fg, #7a5a1a); }
+          .ts-type { color: var(--ts-type-fg, #7a5a1a); font-weight: 500; }
+          .ts-module { color: var(--ts-module-fg, #7a5a1a); font-weight: 500; }
+          .ts-variable { color: var(--ts-variable-fg, inherit); }
+          .ts-property { color: var(--ts-property-fg, #57534a); }
+          .ts-attribute { color: var(--ts-attribute-fg, #7a5a1a); }
+          .ts-operator { color: var(--ts-operator-fg, #a09a8b); }
+          .ts-punctuation { color: var(--ts-punctuation-fg, #a09a8b); }
+          .ts-escape { color: var(--ts-escape-fg, #7a5a1a); }
+          .ts-embedded { color: inherit; }
           .modeline {
             display: flex; align-items: center; gap: 8px;
             height: 26px; padding: 0 10px;

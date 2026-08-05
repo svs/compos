@@ -45,6 +45,16 @@
 
 (define-theme "paper-night"          ; the design's warm dark
   (list
+    (list 'ts-keyword 'fg "#9fb0ea")
+    (list 'ts-function 'fg "#efe9dc")
+    (list 'ts-string 'fg "#79bd93")
+    (list 'ts-comment 'fg "#a79d8c")
+    (list 'ts-number 'fg "#d5ac66")
+    (list 'ts-constant 'fg "#d5ac66")
+    (list 'ts-type 'fg "#d5ac66")
+    (list 'ts-module 'fg "#d5ac66")
+    (list 'ts-operator 'fg "#9a9182")
+    (list 'ts-punctuation 'fg "#9a9182")
     (list 'default 'bg "#100f0c" 'fg "#efe9dc")
     (list 'window 'bg "#201d18")
     (list 'window-inactive 'bg "#161410")
@@ -62,6 +72,16 @@
 
 (define-theme "aimax-dark"
   (list
+    (list 'ts-keyword 'fg "#7aa2f7")
+    (list 'ts-function 'fg "#d6d8de")
+    (list 'ts-string 'fg "#9ece6a")
+    (list 'ts-comment 'fg "#8b8fa3")
+    (list 'ts-number 'fg "#e0af68")
+    (list 'ts-constant 'fg "#e0af68")
+    (list 'ts-type 'fg "#2ac3de")
+    (list 'ts-module 'fg "#2ac3de")
+    (list 'ts-operator 'fg "#8b8fa3")
+    (list 'ts-punctuation 'fg "#8b8fa3")
     (list 'default 'bg "#1e1f22" 'fg "#d6d8de")
     (list 'window 'bg "#23242a")
     (list 'window-inactive 'bg "#1e1f22")
@@ -79,6 +99,16 @@
 
 (define-theme "catppuccin-mocha"
   (list
+    (list 'ts-keyword 'fg "#cba6f7")
+    (list 'ts-function 'fg "#89b4fa")
+    (list 'ts-string 'fg "#a6e3a1")
+    (list 'ts-comment 'fg "#6c7086")
+    (list 'ts-number 'fg "#fab387")
+    (list 'ts-constant 'fg "#fab387")
+    (list 'ts-type 'fg "#f9e2af")
+    (list 'ts-module 'fg "#f9e2af")
+    (list 'ts-operator 'fg "#89dceb")
+    (list 'ts-punctuation 'fg "#9399b2")
     (list 'default 'bg "#1e1e2e" 'fg "#cdd6f4")
     (list 'window 'bg "#181825")
     (list 'window-inactive 'bg "#11111b")
@@ -96,6 +126,16 @@
 
 (define-theme "tokyo-night"
   (list
+    (list 'ts-keyword 'fg "#bb9af7")
+    (list 'ts-function 'fg "#7aa2f7")
+    (list 'ts-string 'fg "#9ece6a")
+    (list 'ts-comment 'fg "#565f89")
+    (list 'ts-number 'fg "#ff9e64")
+    (list 'ts-constant 'fg "#ff9e64")
+    (list 'ts-type 'fg "#2ac3de")
+    (list 'ts-module 'fg "#2ac3de")
+    (list 'ts-operator 'fg "#89ddff")
+    (list 'ts-punctuation 'fg "#565f89")
     (list 'default 'bg "#1a1b26" 'fg "#c0caf5")
     (list 'window 'bg "#16161e")
     (list 'window-inactive 'bg "#1a1b26")

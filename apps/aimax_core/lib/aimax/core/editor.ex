@@ -289,11 +289,19 @@ defmodule Aimax.Core.Editor do
     end)
   end
 
-  # subsequence match, case-insensitive — the design's fuzzy()
+  # orderless + flex matching, case-insensitive:
+  # space-separated terms each match as substrings in any order;
+  # a single term falls back to subsequence (flex) matching
   def fuzzy_match?(_label, ""), do: true
 
   def fuzzy_match?(label, query) do
-    do_fuzzy(String.downcase(label), String.downcase(query))
+    dl = String.downcase(label)
+
+    case String.split(query, " ", trim: true) do
+      [] -> true
+      [single] -> do_fuzzy(dl, String.downcase(single))
+      terms -> Enum.all?(terms, &String.contains?(dl, String.downcase(&1)))
+    end
   end
 
   defp do_fuzzy(_label, ""), do: true
@@ -423,7 +431,8 @@ defmodule Aimax.Core.Editor do
       mark: if(exists, do: Buffer.mark(buffer), else: nil),
       version: if(exists, do: Buffer.version(buffer), else: 0),
       modified: exists && Buffer.modified?(buffer),
-      mode: (exists && Buffer.get_local(buffer, "mode-name")) || "Fundamental"
+      mode: (exists && Buffer.get_local(buffer, "mode-name")) || "Fundamental",
+      ts_lang: exists && Buffer.get_local(buffer, "ts-lang")
     }
   end
 

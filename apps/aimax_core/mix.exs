@@ -27,7 +27,8 @@ defmodule Aimax.Core.MixProject do
   defp deps do
     [
       {:aimax_scheme, in_umbrella: true},
-      {:req, "~> 0.5"}
+      {:req, "~> 0.5"},
+      {:rustler, "~> 0.36.0"}
     ]
   end
 end

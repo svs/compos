@@ -240,6 +240,37 @@ defmodule Aimax.Core.SchemeAPI do
         end
       end,
 
+      # tree-sitter: structural nav + queries on the current buffer.
+      # Language comes from the buffer-local "ts-lang" (set by modes).
+      "ts-nav" => fn [op] ->
+        buf = Editor.current_buffer()
+
+        case Buffer.get_local(buf, "ts-lang") do
+          nil ->
+            false
+
+          lang ->
+            case Aimax.Core.TS.ts_nav(lang, Buffer.text(buf), Buffer.point(buf), plain(op)) do
+              nil -> false
+              pos -> pos
+            end
+        end
+      end,
+      "ts-query" => fn [query] ->
+        buf = Editor.current_buffer()
+
+        case Buffer.get_local(buf, "ts-lang") do
+          nil ->
+            []
+
+          lang ->
+            lang
+            |> Aimax.Core.TS.ts_query_nif(Buffer.text(buf), query)
+            |> Enum.map(fn {cap, s, e} -> [cap, s, e] end)
+        end
+      end,
+      "ts-langs" => fn [] -> Aimax.Core.TS.ts_langs() end,
+
       # search: returns (start end) byte range or #f
       "buffer-search" => fn [q, from] ->
         case Buffer.search(Editor.current_buffer(), q, from, :forward) do

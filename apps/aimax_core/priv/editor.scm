@@ -55,6 +55,8 @@
 
 (define *auto-mode-alist*
   '((".scm" "scheme-mode") (".el" "scheme-mode")
+    (".ex" "elixir-mode") (".exs" "elixir-mode")
+    (".json" "json-mode") (".rs" "rust-mode")
     (".md" "text-mode") (".txt" "text-mode") (".org" "text-mode")))
 
 (define (auto-mode path)
@@ -65,7 +67,25 @@
     *auto-mode-alist*))
 
 (define-mode "text-mode" (lambda () #t))
-(define-mode "scheme-mode" (lambda () #t))   ; font-lock arrives with tree-sitter
+(define-mode "scheme-mode" (lambda () #t))   ; scheme grammar pending
+
+(define (ts-mode lang)
+  (lambda () (buffer-set-local! (current-buffer) 'ts-lang lang)))
+
+(define-mode "elixir-mode" (ts-mode "elixir"))
+(define-mode "json-mode" (ts-mode "json"))
+(define-mode "rust-mode" (ts-mode "rust"))
+
+;;; --- sexp / structural navigation (tree-sitter) ------------------------------
+
+(define (ts-goto op)
+  (let ((p (ts-nav op)))
+    (if p (goto-char! p) (message "No structural navigation here"))))
+
+(define-command "forward-sexp" (lambda () (ts-goto 'forward)))
+(define-command "backward-sexp" (lambda () (ts-goto 'backward)))
+(define-command "backward-up-list" (lambda () (ts-goto 'up)))
+(define-command "down-list" (lambda () (ts-goto 'down)))
 
 ;;; --- word motion & editing ---------------------------------------------------
 
@@ -463,6 +483,10 @@
 (global-set-key "M-g g" "goto-line")
 (global-set-key "M-g M-g" "goto-line")
 (global-set-key "M-m" "back-to-indentation")
+(global-set-key "C-M-f" "forward-sexp")
+(global-set-key "C-M-b" "backward-sexp")
+(global-set-key "C-M-u" "backward-up-list")
+(global-set-key "C-M-d" "down-list")
 
 (global-set-key "C-SPC" "set-mark-command")
 (global-set-key "C-w" "kill-region")

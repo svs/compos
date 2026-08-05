@@ -76,24 +76,50 @@ defmodule Aimax.Ui.EditorLive do
   end
 
   defp decorate(%{type: :leaf} = leaf, cache) do
-    raw_key = {leaf.buffer, leaf.version}
+    raw_key = {leaf.buffer, leaf.version, leaf.ts_lang}
 
-    raw =
+    static =
       case cache[leaf.id] do
-        {^raw_key, raw} -> raw
-        _ -> split_raw(leaf.text)
+        {^raw_key, static} -> static
+        _ -> build_static(leaf)
       end
 
-    lines = render_lines(raw, leaf.text, leaf.point, leaf.mark)
-    {Map.put(leaf, :lines, lines), Map.put(cache, leaf.id, {raw_key, raw})}
+    lines = render_pass(static, leaf.text, leaf.point, leaf.mark)
+    {Map.put(leaf, :lines, lines), Map.put(cache, leaf.id, {raw_key, static})}
   end
 
-  defp split_raw(text) do
-    text
+  # static per-version work: line split + font-lock spans + ts-only segs.
+  # Overlapping captures resolve last-wins (tree-sitter highlight semantics).
+  defp build_static(leaf) do
+    spans =
+      case leaf.ts_lang do
+        nil ->
+          []
+
+        lang ->
+          lang
+          |> Aimax.Core.TS.ts_highlight(leaf.text)
+          |> Enum.with_index()
+          |> Enum.map(fn {{s, e, scope}, i} -> {s, e, "ts-" <> scope, i} end)
+      end
+
+    leaf.text
     |> String.split("\n")
     |> Enum.map_reduce(0, fn part, start -> {{part, start}, start + byte_size(part) + 1} end)
     |> elem(0)
     |> Enum.with_index(1)
+    |> Enum.map(fn {{part, start}, num} ->
+      le = start + byte_size(part)
+      line_ts = Enum.filter(spans, fn {s, e, _, _} -> s < le and e > start end)
+
+      %{
+        part: part,
+        start: start,
+        num: num,
+        ts: line_ts,
+        segs: seg_build(part, start, line_ts, [])
+      }
+    end)
   end
 
   defp visible_buffers(%{type: :leaf, buffer: b}), do: [b]
@@ -198,9 +224,9 @@ defmodule Aimax.Ui.EditorLive do
     """
   end
 
-  # --- per-line display list: numbers, hl-line, cursor/region spans ----------
+  # --- per-line display list: numbers, hl-line, font-lock + overlays ----------
 
-  defp render_lines(raw, text, point, mark) do
+  defp render_pass(static, text, point, mark) do
     {rs, re} =
       case mark do
         nil -> {point, point}
@@ -215,58 +241,74 @@ defmodule Aimax.Ui.EditorLive do
         {g, _} -> point + byte_size(g)
       end
 
-    Enum.map(raw, fn {{part, start}, num} ->
-      line_end = start + byte_size(part)
-      current = point >= start and point <= line_end
-
-      touched? =
-        current or
-          (rs != re and rs < line_end + 1 and re > start)
+    Enum.map(static, fn line ->
+      le = line.start + byte_size(line.part)
+      current = point >= line.start and point <= le
+      touched? = current or (rs != re and rs < le + 1 and re > line.start)
 
       segs =
-        if touched?,
-          do: line_segs(part, start, point, cursor_end, rs, re),
-          else: [{part, ""}]
+        if touched? do
+          overlays =
+            [
+              if(rs != re, do: {rs, re, "region"}),
+              if(point < cursor_end, do: {point, cursor_end, "cursor"})
+            ]
+            |> Enum.reject(&is_nil/1)
 
-      %{num: num, current: current, segs: segs}
+          segs = seg_build(line.part, line.start, line.ts, overlays)
+
+          # cursor sitting on this line's newline (or at EOF on the last line)
+          if point >= line.start and point == le,
+            do: segs ++ [{" ", "cursor"}],
+            else: segs
+        else
+          line.segs
+        end
+
+      %{num: line.num, current: current, segs: segs}
     end)
   end
 
-  defp line_segs(part, ls, point, cursor_end, rs, re) do
+  # cut the line at every range boundary; each segment takes the last-wins
+  # ts class plus any active overlay classes
+  defp seg_build(part, ls, ts_ranges, overlays) do
     plen = byte_size(part)
     le = ls + plen
-    region? = rs != re
-
     rel = fn abs -> abs |> max(ls) |> min(le) |> Kernel.-(ls) end
-    bounds = Enum.sort(Enum.uniq([0, plen, rel.(rs), rel.(re), rel.(point), rel.(cursor_end)]))
 
-    segs =
-      bounds
-      |> Enum.chunk_every(2, 1, :discard)
-      |> Enum.flat_map(fn [a, b] ->
-        if b > a do
-          abs_a = ls + a
+    cuts =
+      Enum.flat_map(ts_ranges, fn {s, e, _, _} -> [rel.(s), rel.(e)] end) ++
+        Enum.flat_map(overlays, fn {s, e, _} -> [rel.(s), rel.(e)] end)
 
-          cls =
-            [
-              if(region? and abs_a >= rs and ls + b <= re, do: "region"),
-              if(abs_a >= point and ls + b <= cursor_end and point < le, do: "cursor")
-            ]
-            |> Enum.reject(&is_nil/1)
-            |> Enum.join(" ")
+    ([0, plen] ++ cuts)
+    |> Enum.uniq()
+    |> Enum.sort()
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.flat_map(fn [a, b] ->
+      if b > a do
+        a2 = ls + a
+        b2 = ls + b
 
-          [{binary_part(part, a, b - a), cls}]
-        else
-          []
-        end
-      end)
+        ts_cls =
+          ts_ranges
+          |> Enum.filter(fn {s, e, _, _} -> s <= a2 and e >= b2 end)
+          |> Enum.max_by(fn {_, _, _, i} -> i end, fn -> nil end)
+          |> case do
+            {_, _, cls, _} -> cls
+            nil -> nil
+          end
 
-    # cursor sitting on this line's newline (or at EOF on the last line)
-    if point >= ls and point == le do
-      segs ++ [{" ", "cursor"}]
-    else
-      segs
-    end
+        ov_cls =
+          overlays
+          |> Enum.filter(fn {s, e, _} -> s <= a2 and e >= b2 end)
+          |> Enum.map(fn {_, _, cls} -> cls end)
+
+        cls = Enum.join(Enum.reject([ts_cls | ov_cls], &is_nil/1), " ")
+        [{binary_part(part, a, b - a), cls}]
+      else
+        []
+      end
+    end)
   end
 
   defp face_css(faces) do

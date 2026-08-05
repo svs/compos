@@ -582,6 +582,45 @@ defmodule Aimax.EditorTest do
     assert echo() == "paper"
   end
 
+  test "tree-sitter: elixir mode enables highlighting, sexp nav works" do
+    path = Path.join(System.tmp_dir!(), "aimax-ts-#{System.unique_integer([:positive])}.exs")
+    File.write!(path, "defmodule Foo do\n  def bar do\n    [1, 2, 3]\n  end\nend\n")
+
+    press(["C-x", "C-f"])
+    type(path)
+    press(["RET"])
+    assert Editor.current_buffer() == path
+    assert Buffer.get_local(path, "ts-lang") == "elixir"
+    assert Buffer.get_local(path, "mode-name") == "elixir-mode"
+
+    # highlight spans exist and include a keyword scope
+    spans = Aimax.Core.TS.ts_highlight("elixir", Buffer.text(path))
+    assert Enum.any?(spans, fn {_, _, scope} -> scope == "keyword" end)
+
+    # C-M-f moves over successive sexps: symbol, then alias (Emacs-style)
+    press(["M-<", "C-M-f"])
+    assert Buffer.point(path) == 9
+    press(["C-M-f"])
+    assert Buffer.point(path) == 13
+
+    # C-M-u from inside the list goes to an enclosing structure start
+    {:ok, _} = Aimax.Core.Session.eval("(goto-char! 36)")
+    press(["C-M-u"])
+    assert Buffer.point(path) < 36
+
+    File.rm!(path)
+  end
+
+  test "orderless: space-separated terms match in any order" do
+    press(["M-x"])
+    type("window split")
+    mb = Editor.render_state().minibuffer
+    labels = Enum.map(mb.candidates, & &1.label)
+    assert "split-window-below" in labels
+    assert "split-window-right" in labels
+    press(["C-g"])
+  end
+
   test "which-key panel appears for pending prefix" do
     press(["C-x"])
     wk = Editor.render_state().which_key

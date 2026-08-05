@@ -62,6 +62,9 @@ defmodule Aimax.Core.Editor do
 
   def key_for_command(command), do: GenServer.call(__MODULE__, {:key_for_command, command})
 
+  @doc "Buffers in most-recently-displayed order (Emacs buffer list)."
+  def buffer_mru, do: GenServer.call(__MODULE__, :buffer_mru)
+
   # Emacs last-command (yank-pop and friends dispatch on it)
   def set_last_command(name), do: GenServer.call(__MODULE__, {:set_last_command, name})
   def last_command, do: GenServer.call(__MODULE__, :last_command)
@@ -125,7 +128,8 @@ defmodule Aimax.Core.Editor do
        local_keymaps: %{},
        last_command: "",
        completion: nil,
-       total_rows: 40
+       total_rows: 40,
+       mru: [@scratch]
      }}
   end
 
@@ -269,6 +273,12 @@ defmodule Aimax.Core.Editor do
     changed(reply, %{state | minibuffer: nil})
   end
 
+  def handle_call(:buffer_mru, _from, state) do
+    live = Enum.filter(state.mru, &Buffer.exists?/1)
+    rest = Aimax.Core.list_buffers() -- live
+    {:reply, live ++ Enum.sort(rest), state}
+  end
+
   def handle_call({:set_last_command, name}, _from, state),
     do: {:reply, :ok, %{state | last_command: name}}
 
@@ -368,7 +378,8 @@ defmodule Aimax.Core.Editor do
     unless Aimax.Core.Buffer.exists?(buffer), do: Aimax.Core.create_buffer(buffer)
     leaf = find_leaf(state.tree, state.active)
     tree = replace_leaf(state.tree, state.active, %{leaf | buffer: buffer, top: 0, manual: false})
-    changed(:ok, %{state | tree: tree})
+    mru = Enum.take([buffer | List.delete(state.mru, buffer)], 50)
+    changed(:ok, %{state | tree: tree, mru: mru})
   end
 
   def handle_call({:restore_tree, spec, active_buffer}, _from, state) do

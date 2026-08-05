@@ -403,15 +403,24 @@
               (list 'initial dd)
               (list 'confirm visit))))))
 
+;; MRU-ordered, current excluded: first candidate = the buffer you just
+;; left, so C-x b RET toggles between two buffers (Emacs buffer ring)
 (define (buffer-candidates)
   (map (lambda (b)
          (list b (let ((p (buffer-path b))) (if p p ""))))
-       (filter (lambda (b) (not (equal? b (current-buffer)))) (buffer-list))))
+       (filter (lambda (b) (not (equal? b (current-buffer)))) (buffer-list-mru))))
 
 (define-command "switch-to-buffer"
   (lambda ()
-    (minibuffer-read "Switch to buffer: " (buffer-candidates)
-      (lambda (name) (switch-to-buffer! name)))))
+    (let ((cands (buffer-candidates)))
+      (minibuffer-read
+        (if (null? cands)
+            "Switch to buffer: "
+            (string-append "Switch to buffer (default " (car (car cands)) "): "))
+        cands
+        (lambda (name)
+          (if (not (equal? name ""))
+              (switch-to-buffer! name)))))))
 
 (define-command "kill-buffer"
   (lambda ()
@@ -423,7 +432,11 @@
           (let ((target (if (equal? name "") cur name)))
             (buffer-kill! target)
             (if (equal? target cur)
-                (switch-to-buffer! "*scratch*"))
+                ;; land on the most recently used other buffer
+                (let ((others (filter (lambda (b) (not (equal? b target)))
+                                      (buffer-list-mru))))
+                  (switch-to-buffer!
+                    (if (null? others) "*scratch*" (car others)))))
             (message (string-append "Killed " target))))))))
 
 ;;; --- shell (comint) --------------------------------------------------------

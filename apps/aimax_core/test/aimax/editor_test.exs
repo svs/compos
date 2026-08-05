@@ -797,7 +797,31 @@ defmodule Aimax.EditorTest do
     press(["RET"])
 
     assert eventually(fn -> not Buffer.exists?(buf) end)
-    assert Editor.current_buffer() == "*scratch*"
+    # MRU semantics: we land on the most recently used OTHER buffer
+    assert Editor.current_buffer() != buf
+    assert Buffer.exists?(Editor.current_buffer())
+  end
+
+  test "buffer ring: C-x b defaults to previous buffer; kill lands on MRU", %{buf: a} do
+    b = "ring-b-#{System.unique_integer([:positive])}"
+    c = "ring-c-#{System.unique_integer([:positive])}"
+    Editor.set_window_buffer(a)
+    Editor.set_window_buffer(b)
+    Editor.set_window_buffer(c)
+
+    # default is the buffer we just left: b
+    press(["C-x", "b"])
+    assert Editor.snapshot().minibuffer.prompt =~ "default #{b}"
+    press(["RET"])
+    assert Editor.current_buffer() == b
+
+    # toggle back
+    press(["C-x", "b", "RET"])
+    assert Editor.current_buffer() == c
+
+    # killing current lands on MRU (b), not *scratch*
+    press(["C-x", "k", "RET"])
+    assert Editor.current_buffer() == b
   end
 
   test "orderless: space-separated terms match in any order" do

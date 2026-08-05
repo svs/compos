@@ -26,6 +26,7 @@ defmodule Aimax.Core.SchemeAPI do
         name
       end,
       "buffer-list" => fn [] -> Core.list_buffers() end,
+      "buffer-list-mru" => fn [] -> Editor.buffer_mru() end,
       "buffer-exists?" => fn [name] -> Buffer.exists?(name) end,
       "buffer-text" => fn [name] -> Buffer.text(name) end,
       "buffer-size" => fn [name] -> Buffer.byte_size(name) end,

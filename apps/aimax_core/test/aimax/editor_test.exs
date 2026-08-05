@@ -824,6 +824,68 @@ defmodule Aimax.EditorTest do
     assert Editor.current_buffer() == b
   end
 
+  describe "display-buffer & popper" do
+    test "M-x shell opens as a bottom popup; C-` toggles; q quits", %{buf: buf} do
+      press(["M-x"])
+      type("shell")
+      press(["RET"])
+      assert eventually(fn -> Aimax.Core.Proc.running?("*shell*") end)
+
+      # popup: two windows, bottom one active showing *shell*, ~30% rows
+      state = Editor.render_state()
+      assert %{type: :split, dir: :v, ratio: 0.7} = state.tree
+      assert Editor.current_buffer() == "*shell*"
+
+      # C-` closes the popup, back to a single window on our buffer
+      press(["C-`"])
+      assert %{type: :leaf} = Editor.render_state().tree
+      assert Editor.current_buffer() == buf
+
+      # C-` reopens the same popup buffer
+      press(["C-`"])
+      assert Editor.current_buffer() == "*shell*"
+
+      # q (via quit-window) closes it too... shell is editable, use M-x
+      press(["M-x"])
+      type("quit-window")
+      press(["RET"])
+      assert %{type: :leaf} = Editor.render_state().tree
+      Aimax.Core.Proc.kill("*shell*")
+    end
+
+    test "dired q quits back to the previous buffer", %{buf: buf} do
+      root = Path.join(System.tmp_dir!(), "aimax-q-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(root)
+      {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
+      assert Editor.current_buffer() == root
+
+      press(["q"])
+      assert Editor.current_buffer() == buf
+      File.rm_rf!(root)
+    end
+
+    test "scroll-other-window scrolls the inactive window", %{buf: buf} do
+      for i <- 1..100, do: Buffer.append(buf, "row #{i}\n")
+      press(["C-x", "3"])
+
+      # find the other (inactive) window id
+      active = Editor.snapshot().active
+      {other_id, _} = Editor.list_windows() |> Enum.find(fn {id, _} -> id != active end)
+
+      press(["C-M-v"])
+      other_leaf = find_leaf_by_id(Editor.render_state().tree, other_id)
+      assert other_leaf.top > 0
+
+      press(["C-x", "1"])
+    end
+  end
+
+  defp find_leaf_by_id(%{type: :leaf, id: id} = leaf, id), do: leaf
+  defp find_leaf_by_id(%{type: :leaf}, _id), do: nil
+
+  defp find_leaf_by_id(%{type: :split, children: c}, id),
+    do: Enum.find_value(c, &find_leaf_by_id(&1, id))
+
   test "orderless: space-separated terms match in any order" do
     press(["M-x"])
     type("window split")

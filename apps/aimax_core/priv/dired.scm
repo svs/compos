@@ -80,6 +80,7 @@
       (local-set-key "d" "dired-flag-delete")
       (local-set-key "x" "dired-do-flagged-delete")
       (local-set-key "+" "dired-mkdir")
+      (local-set-key "q" "quit-window")
       buf)))
 
 ;; The entry named on the current line, or #f (header/.. lines return the

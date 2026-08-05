@@ -90,8 +90,14 @@ defmodule Aimax.Core.Editor do
   def set_face(name, attrs), do: GenServer.call(__MODULE__, {:set_face, name, attrs})
 
   # windows
-  def split(dir) when dir in [:h, :v], do: GenServer.call(__MODULE__, {:split, dir})
+  def split(dir, ratio \\ 0.5) when dir in [:h, :v],
+    do: GenServer.call(__MODULE__, {:split, dir, ratio})
+
   def delete_window, do: GenServer.call(__MODULE__, :delete_window)
+  def delete_window_by_id(id), do: GenServer.call(__MODULE__, {:delete_window_by_id, id})
+  def list_windows, do: GenServer.call(__MODULE__, :list_windows)
+  def set_active(id), do: GenServer.call(__MODULE__, {:set_active, id})
+  def active_window, do: GenServer.call(__MODULE__, :active_window)
   def delete_other_windows, do: GenServer.call(__MODULE__, :delete_other_windows)
   def other_window, do: GenServer.call(__MODULE__, :other_window)
   def set_window_buffer(buffer), do: GenServer.call(__MODULE__, {:set_window_buffer, buffer})
@@ -104,6 +110,7 @@ defmodule Aimax.Core.Editor do
   # active window server-side; any key re-enables point auto-follow
   def set_total_rows(rows), do: GenServer.call(__MODULE__, {:set_total_rows, rows})
   def scroll_active(delta_lines), do: GenServer.call(__MODULE__, {:scroll_active, delta_lines})
+  def scroll_window(id, delta_lines), do: GenServer.call(__MODULE__, {:scroll_window, id, delta_lines})
   def user_acted, do: GenServer.call(__MODULE__, :user_acted)
   def window_rows, do: GenServer.call(__MODULE__, :window_rows)
   def recenter, do: GenServer.call(__MODULE__, :recenter)
@@ -190,6 +197,18 @@ defmodule Aimax.Core.Editor do
     top = max(leaf.top + delta, 0)
     tree = replace_leaf(state.tree, state.active, %{leaf | top: top, manual: true})
     changed(:ok, %{state | tree: tree})
+  end
+
+  def handle_call({:scroll_window, id, delta}, _from, state) do
+    case find_leaf(state.tree, id) do
+      nil ->
+        {:reply, {:error, :no_window}, state}
+
+      leaf ->
+        top = max(leaf.top + delta, 0)
+        tree = replace_leaf(state.tree, id, %{leaf | top: top, manual: true})
+        changed(:ok, %{state | tree: tree})
+    end
   end
 
   def handle_call(:user_acted, _from, state),
@@ -345,13 +364,35 @@ defmodule Aimax.Core.Editor do
 
   def handle_call(:kill_size, _from, state), do: {:reply, length(state.kill_ring), state}
 
-  def handle_call({:split, dir}, _from, state) do
+  def handle_call({:split, dir, ratio}, _from, state) do
     old = find_leaf(state.tree, state.active)
     new_leaf = %{type: :leaf, id: state.next_win, buffer: old.buffer, top: old.top, manual: false}
-    split = %{type: :split, dir: dir, children: [old, new_leaf]}
+    split = %{type: :split, dir: dir, ratio: ratio, children: [old, new_leaf]}
     tree = replace_leaf(state.tree, state.active, split)
     changed(:ok, %{state | tree: tree, next_win: state.next_win + 1})
   end
+
+  def handle_call({:delete_window_by_id, id}, _from, state) do
+    case remove_leaf(state.tree, id) do
+      nil ->
+        {:reply, {:error, :sole_window}, state}
+
+      tree ->
+        active = if state.active == id, do: first_leaf(tree).id, else: state.active
+        changed(:ok, %{state | tree: tree, active: active})
+    end
+  end
+
+  def handle_call(:list_windows, _from, state),
+    do: {:reply, leaf_ids_buffers(state.tree), state}
+
+  def handle_call({:set_active, id}, _from, state) do
+    if find_leaf(state.tree, id),
+      do: changed(:ok, %{state | active: id}),
+      else: {:reply, {:error, :no_window}, state}
+  end
+
+  def handle_call(:active_window, _from, state), do: {:reply, state.active, state}
 
   def handle_call(:delete_window, _from, state) do
     case remove_leaf(state.tree, state.active) do
@@ -552,10 +593,12 @@ defmodule Aimax.Core.Editor do
   defp build_tree({:leaf, buffer}, n),
     do: {%{type: :leaf, id: n, buffer: buffer, top: 0, manual: false}, n + 1}
 
-  defp build_tree({:split, dir, a, b}, n) do
+  defp build_tree({:split, dir, a, b}, n), do: build_tree({:split, dir, 0.5, a, b}, n)
+
+  defp build_tree({:split, dir, ratio, a, b}, n) do
     {ta, n} = build_tree(a, n)
     {tb, n} = build_tree(b, n)
-    {%{type: :split, dir: dir, children: [ta, tb]}, n}
+    {%{type: :split, dir: dir, ratio: ratio, children: [ta, tb]}, n}
   end
 
   defp leaf_ids_buffers(%{type: :leaf, id: id, buffer: b}), do: [{id, b}]
@@ -570,10 +613,20 @@ defmodule Aimax.Core.Editor do
   # auto-follows the viewport top (unless manually scrolled), and returns
   # both the updated tree (tops persist) and the render payload
   defp render_walk(%{type: :split, dir: dir, children: [a, b]} = split, rows) do
-    child_rows = if dir == :v, do: max(div(rows, 2), 3), else: rows
-    {a2, ra} = render_walk(a, child_rows)
-    {b2, rb} = render_walk(b, child_rows)
-    {%{split | children: [a2, b2]}, %{type: :split, dir: dir, children: [ra, rb]}}
+    ratio = Map.get(split, :ratio, 0.5)
+    {rows_a, rows_b} = split_rows(dir, rows, ratio)
+    {a2, ra} = render_walk(a, rows_a)
+    {b2, rb} = render_walk(b, rows_b)
+
+    {%{split | children: [a2, b2]},
+     %{type: :split, dir: dir, ratio: ratio, children: [ra, rb]}}
+  end
+
+  defp split_rows(:h, rows, _ratio), do: {rows, rows}
+
+  defp split_rows(:v, rows, ratio) do
+    a = max(round(rows * ratio), 3)
+    {a, max(rows - a, 3)}
   end
 
   defp render_walk(%{type: :leaf, id: id, buffer: buffer} = leaf, rows) do
@@ -625,8 +678,9 @@ defmodule Aimax.Core.Editor do
   defp rows_for(%{type: :leaf, id: id}, id, rows), do: rows
   defp rows_for(%{type: :leaf}, _id, _rows), do: nil
 
-  defp rows_for(%{type: :split, dir: dir, children: children}, id, rows) do
-    child_rows = if dir == :v, do: max(div(rows, 2), 3), else: rows
-    Enum.find_value(children, &rows_for(&1, id, child_rows))
+  defp rows_for(%{type: :split, dir: dir, children: [a, b]} = split, id, rows) do
+    ratio = Map.get(split, :ratio, 0.5)
+    {rows_a, rows_b} = split_rows(dir, rows, ratio)
+    rows_for(a, id, rows_a) || rows_for(b, id, rows_b)
   end
 end

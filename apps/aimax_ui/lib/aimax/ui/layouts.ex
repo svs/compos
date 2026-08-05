@@ -40,7 +40,8 @@ defmodule Aimax.Ui.Layouts do
           .split { flex: 1; display: flex; min-width: 0; min-height: 0; }
           .split.h { flex-direction: row; }
           .split.v { flex-direction: column; }
-          .split > * { flex: 1; min-width: 0; min-height: 0; }
+          .split-child { display: flex; min-width: 0; min-height: 0; }
+          .split-child > * { flex: 1; min-width: 0; min-height: 0; }
           .window {
             display: flex; flex-direction: column;
             background: var(--window-inactive-bg, #f4f0e6);

@@ -199,9 +199,16 @@ defmodule Aimax.Ui.EditorLive do
   end
 
   defp tree(%{node: %{type: :split}} = assigns) do
+    assigns = assign(assigns, ratio: Map.get(assigns.node, :ratio, 0.5))
+
     ~H"""
     <div class={"split #{@node.dir}"}>
-      <.tree :for={child <- @node.children} node={child} active={@active} completion={@completion} />
+      <div class="split-child" style={"flex: #{@ratio} 1 0%"}>
+        <.tree node={Enum.at(@node.children, 0)} active={@active} completion={@completion} />
+      </div>
+      <div class="split-child" style={"flex: #{1.0 - @ratio} 1 0%"}>
+        <.tree node={Enum.at(@node.children, 1)} active={@active} completion={@completion} />
+      </div>
     </div>
     """
   end

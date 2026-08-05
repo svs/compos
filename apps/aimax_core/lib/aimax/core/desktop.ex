@@ -99,8 +99,8 @@ defmodule Aimax.Core.Desktop do
 
   defp serialize(%{type: :leaf, buffer: b}), do: {:leaf, b}
 
-  defp serialize(%{type: :split, dir: dir, children: [a, b]}),
-    do: {:split, dir, serialize(a), serialize(b)}
+  defp serialize(%{type: :split, dir: dir, children: [a, b]} = split),
+    do: {:split, dir, Map.get(split, :ratio, 0.5), serialize(a), serialize(b)}
 
   defp active_buffer(tree, active_id), do: find_buffer(tree, active_id)
 

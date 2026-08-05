@@ -439,6 +439,87 @@
                     (if (null? others) "*scratch*" (car others)))))
             (message (string-append "Killed " target))))))))
 
+;;; --- display-buffer & popups (popper) ----------------------------------------
+;;; *display-buffer-alist*: (pattern action) rules; pattern is a substring
+;;; match on the buffer name; actions: 'same | 'popup (bottom side window).
+;;; The popup window is popper-style: one at a time, C-` toggles it.
+
+(define *display-buffer-alist*
+  '(("*shell*" popup) ("*messages*" popup) ("*llm*" popup)))
+
+(define (add-display-rule! pattern action)
+  (set! *display-buffer-alist*
+    (cons (list pattern action) *display-buffer-alist*)))
+
+(define (display-action-for name)
+  (let loop ((rules *display-buffer-alist*))
+    (if (null? rules)
+        'same
+        (if (string-contains? name (car (car rules)))
+            (cadr (car rules))
+            (loop (cdr rules))))))
+
+(define *popup-window* #f)
+(define *popup-buffer* #f)
+
+(define (window-exists? id)
+  (assoc id (window-list)))
+
+(define (popup-open?)
+  (and *popup-window* (window-exists? *popup-window*)))
+
+(define (popup-show name)
+  (set! *popup-buffer* name)
+  (if (popup-open?)
+      (begin
+        (select-window! *popup-window*)
+        (switch-to-buffer! name))
+      (begin
+        (split-window! 'v 0.7)          ; bottom ~30% side window
+        (other-window!)
+        (set! *popup-window* (active-window))
+        (switch-to-buffer! name))))
+
+(define (display-buffer name)
+  (if (equal? (display-action-for name) 'popup)
+      (popup-show name)
+      (switch-to-buffer! name)))
+
+(define-command "popup-toggle"
+  (lambda ()
+    (if (popup-open?)
+        (begin
+          (delete-window-id! *popup-window*)
+          (set! *popup-window* #f))
+        (if *popup-buffer*
+            (popup-show *popup-buffer*)
+            (message "No popup buffer yet")))))
+
+;; q in special buffers: close the popup, or fall back to the MRU buffer
+(define-command "quit-window"
+  (lambda ()
+    (if (and (popup-open?) (equal? (active-window) *popup-window*))
+        (begin
+          (delete-window-id! *popup-window*)
+          (set! *popup-window* #f))
+        (let ((others (buffer-candidates)))
+          (if (null? others)
+              (message "Nothing to quit to")
+              (switch-to-buffer! (car (car others))))))))
+
+(define-command "view-messages" (lambda () (display-buffer "*messages*")))
+
+(define-command "scroll-other-window"
+  (lambda ()
+    (let ((wins (window-list)))
+      (if (null? (cdr wins))
+          (message "No other window")
+          (let loop ((ws wins))
+            (if (equal? (car (car ws)) (active-window))
+                (let ((next (if (null? (cdr ws)) (car wins) (car (cdr ws)))))
+                  (scroll-window! (car next) (- (window-rows) 2)))
+                (loop (cdr ws))))))))
+
 ;;; --- shell (comint) --------------------------------------------------------
 ;;; RET in a process buffer sends the current line to the process (deleting
 ;;; it first — the pty echo brings it back); RET elsewhere is just a newline.
@@ -455,7 +536,7 @@
   (lambda ()
     (if (not (process-running? "*shell*"))
         (start-process! "*shell*" *shell-command*))
-    (switch-to-buffer! "*shell*")
+    (display-buffer "*shell*")
     (buffer-set-local! "*shell*" 'mode-name "Shell")
     (end-of-buffer!)))
 
@@ -575,6 +656,8 @@
 (global-set-key "M-g g" "goto-line")
 (global-set-key "M-g M-g" "goto-line")
 (global-set-key "M-m" "back-to-indentation")
+(global-set-key "C-`" "popup-toggle")
+(global-set-key "C-M-v" "scroll-other-window")
 (global-set-key "C-v" "scroll-up-command")
 (global-set-key "M-v" "scroll-down-command")
 (global-set-key "<next>" "scroll-up-command")

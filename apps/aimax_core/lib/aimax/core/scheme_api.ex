@@ -46,6 +46,28 @@ defmodule Aimax.Core.SchemeAPI do
         :ok = Buffer.delete_range(name, pos, len, source: :editor)
         :void
       end,
+      # overlays: (overlay-set! buf 'org (list (list s e "org-todo") ...))
+      # replaces the tag's whole range set — the fontification model is
+      # "mode recomputes"; positions auto-adjust between recomputes
+      "overlay-set!" => fn [name, tag, ranges] ->
+        :ok = Buffer.set_overlays(name, plain(tag), Enum.map(ranges, fn [s, e, f] -> {s, e, plain(f)} end))
+        :void
+      end,
+      "overlay-clear!" => fn [name, tag] ->
+        :ok = Buffer.clear_overlays(name, if(plain(tag) == "all", do: :all, else: plain(tag)))
+        :void
+      end,
+      "buffer-overlays" => fn [name] ->
+        Enum.map(Buffer.overlays(name), fn {s, e, f} -> [s, e, f] end)
+      end,
+      # folding: ranges is a list of (start end) byte ranges to hide
+      "buffer-set-hidden!" => fn [name, ranges] ->
+        :ok = Buffer.set_hidden(name, Enum.map(ranges, fn [s, e] -> {s, e} end))
+        :void
+      end,
+      "buffer-hidden" => fn [name] ->
+        Enum.map(Buffer.hidden(name), fn {s, e} -> [s, e] end)
+      end,
       "buffer-set-read-only!" => fn [name, bool] ->
         Buffer.set_read_only(name, bool == true)
         :void

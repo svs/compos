@@ -102,7 +102,7 @@ defmodule Aimax.Ui.EditorLive do
   end
 
   defp decorate(%{type: :leaf} = leaf, cache, _faces) do
-    raw_key = {leaf.buffer, leaf.version, leaf.ts_lang}
+    raw_key = {leaf.buffer, leaf.version, leaf.ts_lang, leaf.overlay_gen}
 
     static =
       case cache[leaf.id] do
@@ -131,6 +131,8 @@ defmodule Aimax.Ui.EditorLive do
           |> Enum.map(fn {{s, e, scope}, i} -> {s, e, "ts-" <> scope, i} end)
       end
 
+    ovs = Enum.map(leaf.overlays, fn {s, e, face} -> {s, e, "f-" <> face} end)
+
     leaf.text
     |> String.split("\n")
     |> Enum.map_reduce(0, fn part, start -> {{part, start}, start + byte_size(part) + 1} end)
@@ -139,13 +141,15 @@ defmodule Aimax.Ui.EditorLive do
     |> Enum.map(fn {{part, start}, num} ->
       le = start + byte_size(part)
       line_ts = Enum.filter(spans, fn {s, e, _, _} -> s < le and e > start end)
+      line_ov = Enum.filter(ovs, fn {s, e, _} -> s < le and e > start end)
 
       %{
         part: part,
         start: start,
         num: num,
         ts: line_ts,
-        segs: seg_build(part, start, line_ts, [])
+        ov: line_ov,
+        segs: seg_build(part, start, line_ts, line_ov)
       }
     end)
   end
@@ -301,7 +305,7 @@ defmodule Aimax.Ui.EditorLive do
             ]
             |> Enum.reject(&is_nil/1)
 
-          segs = seg_build(line.part, line.start, line.ts, overlays)
+          segs = seg_build(line.part, line.start, line.ts, line.ov ++ overlays)
 
           # cursor sitting on this line's newline (or at EOF on the last line)
           if point >= line.start and point == le,
@@ -418,7 +422,20 @@ defmodule Aimax.Ui.EditorLive do
         Enum.map_join(attrs, "", fn {k, v} -> "--#{face}-#{k}:#{v};" end)
       end)
 
-    ":root{#{vars}}"
+    # every registered face is also a span class (.f-NAME) so Scheme can
+    # define new faces and put them on overlay ranges with zero CSS edits
+    classes =
+      faces
+      |> Enum.filter(fn {face, _} -> face =~ ~r/^[a-zA-Z0-9_-]+$/ end)
+      |> Enum.map_join("", fn {face, _attrs} ->
+        ".f-#{face}{color:var(--#{face}-fg,inherit);" <>
+          "background:var(--#{face}-bg,transparent);" <>
+          "font-weight:var(--#{face}-weight,inherit);" <>
+          "font-style:var(--#{face}-style,inherit);" <>
+          "text-decoration:var(--#{face}-decoration,none);}"
+      end)
+
+    ":root{#{vars}}#{classes}"
   end
 
   defp line_col(text, point) do

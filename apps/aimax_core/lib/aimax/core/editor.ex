@@ -606,6 +606,8 @@ defmodule Aimax.Core.Editor do
       modified: exists && Buffer.modified?(buffer),
       mode: (exists && Buffer.get_local(buffer, "mode-name")) || "Fundamental",
       ts_lang: exists && Buffer.get_local(buffer, "ts-lang"),
+      overlays: if(exists, do: Buffer.overlays(buffer), else: []),
+      overlay_gen: if(exists, do: Buffer.overlay_gen(buffer), else: 0),
       render_mode: exists && Buffer.get_local(buffer, "render-mode"),
       top: top,
       rows: rows,

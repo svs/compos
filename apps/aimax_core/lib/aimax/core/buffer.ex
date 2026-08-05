@@ -177,6 +177,37 @@ defmodule Aimax.Core.Buffer do
 
   def handle_call(:locals, _from, state), do: {:reply, state.locals, state}
 
+  def handle_call({:set_overlays, tag, ranges}, _from, state) do
+    {:reply, :ok,
+     %{
+       state
+       | overlays: Map.put(state.overlays, tag, ranges),
+         overlay_gen: state.overlay_gen + 1
+     }}
+  end
+
+  def handle_call({:clear_overlays, :all}, _from, state),
+    do: {:reply, :ok, %{state | overlays: %{}, overlay_gen: state.overlay_gen + 1}}
+
+  def handle_call({:clear_overlays, tag}, _from, state) do
+    {:reply, :ok,
+     %{
+       state
+       | overlays: Map.delete(state.overlays, tag),
+         overlay_gen: state.overlay_gen + 1
+     }}
+  end
+
+  def handle_call(:overlays, _from, state),
+    do: {:reply, state.overlays |> Map.values() |> Enum.concat(), state}
+
+  def handle_call(:overlay_gen, _from, state), do: {:reply, state.overlay_gen, state}
+
+  def handle_call({:set_hidden, ranges}, _from, state),
+    do: {:reply, :ok, %{state | hidden: Enum.sort(ranges)}}
+
+  def handle_call(:hidden, _from, state), do: {:reply, state.hidden, state}
+
   # read-only blocks :user mutations only — programmatic sources (:editor,
   # :process, agents) are the inhibit-read-only path (dired regenerates its
   # own read-only buffer this way)
@@ -332,6 +363,7 @@ defmodule Aimax.Core.Buffer do
     state = maybe_snapshot_insert(state, pos, text, src)
     state = %{state | rope: Rope.insert(state.rope, pos, text), version: state.version + 1}
     state = adjust_point_insert(state, pos, Kernel.byte_size(text))
+    state = adjust_ranges(state, &adjust_insert(&1, pos, Kernel.byte_size(text)))
     state = %{
       state
       | goal_col: nil,
@@ -363,6 +395,7 @@ defmodule Aimax.Core.Buffer do
     state = snapshot(state)
     state = %{state | rope: Rope.delete(state.rope, pos, len), version: state.version + 1}
     state = adjust_point_delete(state, pos, len)
+    state = adjust_ranges(state, &adjust_delete(&1, pos, len))
     state = %{state | goal_col: nil, last_insert_end: nil, insert_run: 0, undo_next: 0}
     broadcast(state, pos, "", len, src)
     state
@@ -387,6 +420,25 @@ defmodule Aimax.Core.Buffer do
       | point: adjust_delete(state.point, pos, len),
         mark: state.mark && adjust_delete(state.mark, pos, len)
     }
+  end
+
+  # shift overlay + hidden range endpoints through an edit; collapsed
+  # ranges (start >= end after a delete) are dropped
+  defp adjust_ranges(state, f) do
+    overlays =
+      Map.new(state.overlays, fn {tag, ranges} ->
+        {tag,
+         ranges
+         |> Enum.map(fn {s, e, face} -> {f.(s), f.(e), face} end)
+         |> Enum.reject(fn {s, e, _} -> s >= e end)}
+      end)
+
+    hidden =
+      state.hidden
+      |> Enum.map(fn {s, e} -> {f.(s), f.(e)} end)
+      |> Enum.reject(fn {s, e} -> s >= e end)
+
+    %{state | overlays: overlays, hidden: hidden}
   end
 
   defp adjust_insert(p, pos, len) when p >= pos, do: p + len

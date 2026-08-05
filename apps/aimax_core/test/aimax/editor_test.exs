@@ -629,6 +629,22 @@ defmodule Aimax.EditorTest do
     File.rm!(lib)
   end
 
+  test "dired RET visit runs auto-mode (elixir file gets highlighting)" do
+    root = Path.join(System.tmp_dir!(), "aimax-dm-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(root)
+    File.write!(Path.join(root, "code.ex"), "defmodule X do\nend\n")
+
+    {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
+    press(["n", "RET"])
+
+    path = Path.join(root, "code.ex")
+    assert Editor.current_buffer() == path
+    assert Buffer.get_local(path, "mode-name") == "elixir-mode"
+    assert Buffer.get_local(path, "ts-lang") == "elixir"
+
+    File.rm_rf!(root)
+  end
+
   test "orderless: space-separated terms match in any order" do
     press(["M-x"])
     type("window split")

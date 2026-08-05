@@ -135,9 +135,8 @@
   (lambda ()
     (let ((p (dired-path-at-point)))
       (if p
-          (if (file-directory? p)
-              (dired-open p)
-              (switch-to-buffer! (find-file p)))
+          ;; visit handles dirs (dired) AND files (auto-mode + find-file-hook)
+          (visit p)
           (message "No file on this line")))))
 
 (define-command "dired-up"

@@ -85,6 +85,29 @@ defmodule Aimax.Scheme.Eval do
   def eval([{:sym, "and"} | args], env, store), do: eval_and(args, env, store)
   def eval([{:sym, "or"} | args], env, store), do: eval_or(args, env, store)
 
+  def eval([{:sym, "cond"} | clauses], env, store), do: eval_cond(clauses, env, store)
+
+  def eval([{:sym, "when"}, test | body], env, store) do
+    {val, store} = eval_arg(test, env, store)
+    if val == false, do: {:void, store}, else: eval_seq(body, env, store)
+  end
+
+  def eval([{:sym, "unless"}, test | body], env, store) do
+    {val, store} = eval_arg(test, env, store)
+    if val == false, do: eval_seq(body, env, store), else: {:void, store}
+  end
+
+  # let*: each binding sees the previous ones — a fresh frame per binding
+  def eval([{:sym, "let*"}, bindings | body], env, store) do
+    {frame, store} =
+      Enum.reduce(bindings, {env, store}, fn [{:sym, name}, form], {env, store} ->
+        {val, store} = eval_arg(form, env, store)
+        Env.new_frame(store, env, %{name => val})
+      end)
+
+    eval_seq(body, frame, store)
+  end
+
   # application
   def eval([op | arg_forms], env, store) do
     {f, store} = eval_arg(op, env, store)
@@ -138,6 +161,20 @@ defmodule Aimax.Scheme.Eval do
   end
 
   defp eval_seq([], _env, store), do: {:void, store}
+
+  defp eval_cond([], _env, store), do: {:void, store}
+
+  defp eval_cond([[{:sym, "else"} | body] | _rest], env, store), do: eval_seq(body, env, store)
+
+  defp eval_cond([[test | body] | rest], env, store) do
+    {val, store} = eval_arg(test, env, store)
+
+    cond do
+      val == false -> eval_cond(rest, env, store)
+      body == [] -> {val, store}
+      true -> eval_seq(body, env, store)
+    end
+  end
 
   defp eval_and([], _env, store), do: {true, store}
   defp eval_and([last], env, store), do: eval(last, env, store)

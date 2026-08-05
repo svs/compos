@@ -19,6 +19,19 @@ defmodule Aimax.Scheme.Builtins do
       ">=" => cmp(fn a, b -> a >= b end),
       "equal?" => fn [a, b] -> a == b end,
       "not" => fn [a] -> a == false end,
+      "modulo" => fn [a, b] -> Integer.mod(a, b) end,
+      "remainder" => fn [a, b] -> rem(a, b) end,
+      "quotient" => fn [a, b] -> div(a, b) end,
+      "min" => fn args -> Enum.min(args) end,
+      "max" => fn args -> Enum.max(args) end,
+      "abs" => fn [x] -> abs(x) end,
+      "member" => fn [x, l] ->
+        case Enum.drop_while(l, &(&1 != x)) do
+          [] -> false
+          tail -> tail
+        end
+      end,
+      "sort" => fn [l] -> Enum.sort(l) end,
       "cons" => fn [h, t] when is_list(t) -> [h | t] end,
       "car" => fn [[h | _]] -> h end,
       "cdr" => fn [[_ | t]] -> t end,
@@ -57,6 +70,26 @@ defmodule Aimax.Scheme.Builtins do
               |> Enum.map_join(&elem(&1, 0))
             end)
         end
+      end,
+      "string-index" => fn [s, sub] ->
+        case :binary.match(s, sub) do
+          :nomatch -> false
+          {pos, _len} -> pos
+        end
+      end,
+      "string-upcase" => fn [s] -> String.upcase(s) end,
+      "string-downcase" => fn [s] -> String.downcase(s) end,
+      "string-trim" => fn [s] -> String.trim(s) end,
+      "string-repeat" => fn [s, n] -> String.duplicate(s, n) end,
+      # byte-offset variants: compose with point/overlay/search positions,
+      # which are all byte-based (grapheme substring/string-length are not)
+      "string-byte-length" => fn [s] -> byte_size(s) end,
+      "substring-bytes" => fn [s, from, to] ->
+        if from < 0 or to < from or to > byte_size(s) do
+          raise Eval.Error, message: "substring-bytes: range #{from}..#{to} out of 0..#{byte_size(s)}"
+        end
+
+        :binary.part(s, from, to - from)
       end,
       "string-split" => fn [s, sep] -> String.split(s, sep) end,
       "string-join" => fn [parts, sep] -> Enum.join(parts, sep) end,

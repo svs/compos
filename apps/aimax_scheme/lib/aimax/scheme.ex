@@ -32,6 +32,12 @@ defmodule Aimax.Scheme do
   (define (cadr l) (car (cdr l)))
   (define (caddr l) (car (cdr (cdr l))))
   (define (split-lines s) (string-split s "\\n"))
+  (define (assq key lst) (assoc key lst))
+  (define (remove pred lst) (filter (lambda (x) (not (pred x))) lst))
+  (define (list-ref lst i) (if (= i 0) (car lst) (list-ref (cdr lst) (- i 1))))
+  (define (iota n)
+    (let loop ((i 0) (acc '()))
+      (if (= i n) (reverse acc) (loop (+ i 1) (cons i acc)))))
   """
 
   @doc "Create an interpreter. Options: `:primitives` — map of name -> fun/1 or fun/2."

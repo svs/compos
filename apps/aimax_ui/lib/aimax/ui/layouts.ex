@@ -272,6 +272,9 @@ defmodule Aimax.Ui.Layouts do
             const base = baseKey(e);
             if (base === null) return null;
             let spec = base;
+            // S- only for named keys (TAB, arrows, RET...): printable chars
+            // already encode shift in the character itself, Emacs-style
+            if (e.shiftKey && base.length > 1) spec = "S-" + spec;
             if (e.altKey) spec = "M-" + spec;
             if (e.ctrlKey) spec = "C-" + spec;
             return spec;

@@ -197,9 +197,44 @@ defmodule Aimax.Core.Session do
       end,
       "eval-buffer" => fn [buffer], store ->
         eval_src.(Buffer.text(buffer), store)
+      end,
+      # (on-change! buf (lambda (pos inserted deleted-len source) ...)) -> id
+      # Fires ~30ms-debounced on every change, ALL sources (:user, :editor,
+      # :undo, agents) — handlers that edit the buffer must write with
+      # :editor-source primitives and be idempotent, or they loop.
+      # The Reactor handler runs in a Task, so calling back into this
+      # GenServer just queues behind the triggering eval.
+      "on-change!" => fn [buf, callback] ->
+        {:ok, id} =
+          Aimax.Core.Reactor.on_change(
+            buf,
+            :any,
+            fn changes -> apply_callback(callback, change_args(changes)) end,
+            debounce: 30,
+            sources: :all
+          )
+
+        id
+      end,
+      "remove-on-change!" => fn [id] ->
+        Aimax.Core.Reactor.remove(id)
+        :void
       end
     }
   end
+
+  # debounce coalesces bursts: first pos, all inserted text, total deleted
+  defp change_args(changes) do
+    [
+      hd(changes).pos,
+      Enum.map_join(changes, & &1.inserted),
+      changes |> Enum.map(& &1.deleted) |> Enum.sum(),
+      changes |> List.last() |> Map.fetch!(:source) |> source_str()
+    ]
+  end
+
+  defp source_str({:agent, id}), do: "agent:#{id}"
+  defp source_str(src), do: to_string(src)
 
   defp command_name({:sym, s}), do: s
   defp command_name(s) when is_binary(s), do: s

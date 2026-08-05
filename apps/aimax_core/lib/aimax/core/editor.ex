@@ -536,8 +536,10 @@ defmodule Aimax.Core.Editor do
   defp first_leaf(%{type: :leaf} = leaf), do: leaf
   defp first_leaf(%{type: :split, children: [a | _]}), do: first_leaf(a)
 
-  defp build_tree({:leaf, buffer}, n),
-    do: {%{type: :leaf, id: n, buffer: buffer, top: 0, manual: false}, n + 1}
+  defp build_tree({:leaf, buffer}, n), do: build_tree({:leaf, buffer, 0}, n)
+
+  defp build_tree({:leaf, buffer, top}, n),
+    do: {%{type: :leaf, id: n, buffer: buffer, top: top, manual: false}, n + 1}
 
   defp build_tree({:split, dir, a, b}, n), do: build_tree({:split, dir, 0.5, a, b}, n)
 

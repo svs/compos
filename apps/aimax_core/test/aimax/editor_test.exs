@@ -710,6 +710,34 @@ defmodule Aimax.EditorTest do
     File.rm!(path)
   end
 
+  test "desktop: preview-mode and hand-set modes survive restore" do
+    path = Path.join(System.tmp_dir!(), "aimax-desk-#{System.unique_integer([:positive])}.md")
+    File.write!(path, "# Title\n\nbody\n")
+
+    press(["C-x", "C-f"])
+    type(path)
+    press(["RET"])
+    press(["C-c", "C-v"])
+    assert Buffer.get_local(path, "render-mode") == "markdown"
+    {:ok, _} = Aimax.Core.Session.eval(~s{(set-mode! "rust-mode")})
+    assert Buffer.get_local(path, "ts-lang") == "rust"
+
+    assert :ok = Aimax.Core.Desktop.save_now()
+
+    Editor.set_window_buffer("*scratch*")
+    Aimax.Core.kill_buffer(path)
+    assert eventually(fn -> not Buffer.exists?(path) end)
+
+    assert :ok = Aimax.Core.Desktop.restore_now()
+
+    # auto-mode would have said text-mode; the saved state wins
+    assert Buffer.get_local(path, "mode-name") == "rust-mode"
+    assert Buffer.get_local(path, "ts-lang") == "rust"
+    assert Buffer.get_local(path, "render-mode") == "markdown"
+
+    File.rm!(path)
+  end
+
   test "completion-at-point: dabbrev popup, selection, accept, refilter", %{buf: buf} do
     type("hello helper")
     press(["RET"])

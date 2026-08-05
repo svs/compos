@@ -77,7 +77,7 @@ defmodule Aimax.Core.Desktop do
           Buffer.exists?(name),
           bpath = Buffer.path(name),
           bpath != nil do
-        {bpath, Buffer.point(name)}
+        {bpath, Buffer.point(name), savable_locals(name)}
       end
 
     desktop = %{
@@ -97,10 +97,27 @@ defmodule Aimax.Core.Desktop do
       :error
   end
 
-  defp serialize(%{type: :leaf, buffer: b}), do: {:leaf, b}
+  defp serialize(%{type: :leaf, buffer: b} = leaf), do: {:leaf, b, Map.get(leaf, :top, 0)}
 
   defp serialize(%{type: :split, dir: dir, children: [a, b]} = split),
     do: {:split, dir, Map.get(split, :ratio, 0.5), serialize(a), serialize(b)}
+
+  # everything Scheme put on the buffer, minus values that can't survive
+  # a daemon restart (closures, pids, refs)
+  defp savable_locals(name) do
+    name |> Buffer.locals() |> Map.filter(fn {_k, v} -> serializable?(v) end)
+  end
+
+  defp serializable?(v) when is_function(v) or is_pid(v) or is_reference(v) or is_port(v),
+    do: false
+
+  defp serializable?(v) when is_list(v), do: Enum.all?(v, &serializable?/1)
+  defp serializable?(v) when is_tuple(v), do: v |> Tuple.to_list() |> Enum.all?(&serializable?/1)
+
+  defp serializable?(v) when is_map(v),
+    do: Enum.all?(v, fn {k, val} -> serializable?(k) and serializable?(val) end)
+
+  defp serializable?(_), do: true
 
   defp active_buffer(tree, active_id), do: find_buffer(tree, active_id)
 
@@ -115,10 +132,19 @@ defmodule Aimax.Core.Desktop do
   defp do_restore do
     with {:ok, bin} <- File.read(path()),
          %{buffers: buffers, tree: tree} = desktop <- :erlang.binary_to_term(bin) do
-      # reopen through visit so modes + hooks apply
-      for {bpath, point} <- buffers, File.exists?(bpath) do
+      # reopen through visit so modes + hooks apply, then lay the saved
+      # buffer-locals back on top so toggled state (preview, line numbers,
+      # a hand-picked mode) survives too
+      for entry <- buffers, bpath = elem(entry, 0), File.exists?(bpath) do
+        {point, locals} =
+          case entry do
+            {_, point} -> {point, %{}}
+            {_, point, locals} -> {point, locals}
+          end
+
         Session.eval(~s{(visit "#{bpath}")})
         Buffer.goto(bpath, point)
+        restore_locals(bpath, locals)
       end
 
       Editor.restore_tree(tree, desktop[:active_buffer])
@@ -137,5 +163,18 @@ defmodule Aimax.Core.Desktop do
     e ->
       Logger.warning("desktop restore failed: #{Exception.message(e)}")
       :error
+  end
+
+  # visit already ran auto-mode; if the saved mode differs (user set it by
+  # hand) re-run it through set-mode! so its setup fn and hooks apply, then
+  # write the saved locals back verbatim
+  defp restore_locals(bpath, locals) do
+    saved_mode = locals["mode-name"]
+
+    if saved_mode && saved_mode != Buffer.get_local(bpath, "mode-name") do
+      Session.eval(~s{(set-mode! "#{saved_mode}")})
+    end
+
+    Enum.each(locals, fn {k, v} -> Buffer.set_local(bpath, k, v) end)
   end
 end

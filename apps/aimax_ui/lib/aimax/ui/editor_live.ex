@@ -58,7 +58,7 @@ defmodule Aimax.Ui.EditorLive do
 
   defp refresh(socket) do
     state = Aimax.Core.Editor.render_state()
-    {tree, line_cache} = decorate(state.tree, socket.assigns.line_cache)
+    {tree, line_cache} = decorate(state.tree, socket.assigns.line_cache, state.faces)
     state = %{state | tree: tree}
 
     subscribed =
@@ -80,26 +80,28 @@ defmodule Aimax.Ui.EditorLive do
   # two-level cache: the raw line split is keyed by buffer VERSION only, so
   # cursor motion never re-splits the buffer; span decoration (cursor/region/
   # hl-line) is recomputed per render but only for lines it actually touches
-  defp decorate(%{type: :split} = split, cache) do
-    {children, cache} = Enum.map_reduce(split.children, cache, &decorate/2)
+  defp decorate(%{type: :split} = split, cache, faces) do
+    {children, cache} = Enum.map_reduce(split.children, cache, &decorate(&1, &2, faces))
     {%{split | children: children}, cache}
   end
 
-  # preview buffers skip the line machinery entirely
-  defp decorate(%{type: :leaf, render_mode: rm} = leaf, cache) when rm in ["html", "markdown"] do
-    key = {leaf.buffer, leaf.version, rm}
+  # preview buffers skip the line machinery entirely; the theme is baked into
+  # the srcdoc (the sandboxed iframe can't see the parent's CSS vars)
+  defp decorate(%{type: :leaf, render_mode: rm} = leaf, cache, faces)
+       when rm in ["html", "markdown"] do
+    key = {leaf.buffer, leaf.version, rm, :erlang.phash2(faces)}
 
     html =
       case cache[{:preview, leaf.id}] do
         {^key, html} -> html
-        _ -> preview_html(rm, leaf.text)
+        _ -> preview_html(rm, leaf.text, faces)
       end
 
     {Map.merge(leaf, %{lines: [], preview: html}),
      Map.put(cache, {:preview, leaf.id}, {key, html})}
   end
 
-  defp decorate(%{type: :leaf} = leaf, cache) do
+  defp decorate(%{type: :leaf} = leaf, cache, _faces) do
     raw_key = {leaf.buffer, leaf.version, leaf.ts_lang}
 
     static =
@@ -355,31 +357,40 @@ defmodule Aimax.Ui.EditorLive do
     end)
   end
 
-  # markdown gets the paper stylesheet; html renders as authored
-  defp preview_html("html", text), do: text
+  # markdown gets a stylesheet built from the live theme faces; html renders
+  # as authored (an unstyled html doc still shows the themed --window-bg
+  # through the transparent srcdoc canvas)
+  defp preview_html("html", text, _faces), do: text
 
-  defp preview_html("markdown", text) do
+  defp preview_html("markdown", text, faces) do
     body =
       case Earmark.as_html(text, compact_output: false) do
         {:ok, html, _} -> html
         {:error, html, _} -> html
       end
 
+    bg = face(faces, "window", "bg", "#fdfcf8")
+    fg = face(faces, "default", "fg", "#1b1a17")
+    accent = face(faces, "accent", "fg", "#26356b")
+    dim = face(faces, "dim", "fg", "#8a857a")
+    border = face(faces, "border", "bg", "#cbc4b1")
+    inset = face(faces, "window-inactive", "bg", "#f4f0e6")
+
     """
     <!DOCTYPE html><html><head><meta charset="utf-8"><style>
     body{margin:0;padding:26px 34px 60px;max-width:62em;
-         font:16px/1.65 Spectral,Georgia,serif;color:#1b1a17;background:#fdfcf8}
+         font:16px/1.65 Spectral,Georgia,serif;color:#{fg};background:#{bg}}
     h1,h2,h3,h4{font-family:Spectral,Georgia,serif;line-height:1.25;margin:26px 0 8px}
-    h1{font-size:28px}h2{font-size:22px;border-bottom:1px solid #cbc4b1;padding-bottom:4px}
-    h3{font-size:18px;color:#26356b}
+    h1{font-size:28px}h2{font-size:22px;border-bottom:1px solid #{border};padding-bottom:4px}
+    h3{font-size:18px;color:#{accent}}
     code,pre{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:13.5px}
-    code{background:#f4f0e6;padding:1px 4px;border-radius:2px}
-    pre{background:#f4f0e6;padding:10px 12px;border-left:3px solid #26356b;overflow-x:auto}
+    code{background:#{inset};padding:1px 4px;border-radius:2px}
+    pre{background:#{inset};padding:10px 12px;border-left:3px solid #{accent};overflow-x:auto}
     pre code{background:none;padding:0}
-    a{color:#26356b}blockquote{margin:12px 0;padding:2px 14px;border-left:3px solid #cbc4b1;color:#57534a}
-    table{border-collapse:collapse;font-size:14px}th,td{border:1px solid #cbc4b1;padding:5px 9px}
-    th{background:#f4f0e6;text-align:left}
-    img{max-width:100%}hr{border:0;border-top:1px solid #cbc4b1;margin:22px 0}
+    a{color:#{accent}}blockquote{margin:12px 0;padding:2px 14px;border-left:3px solid #{border};color:#{dim}}
+    table{border-collapse:collapse;font-size:14px}th,td{border:1px solid #{border};padding:5px 9px}
+    th{background:#{inset};text-align:left}
+    img{max-width:100%}hr{border:0;border-top:1px solid #{border};margin:22px 0}
     </style></head><body>#{body}</body></html>
     """
   end
@@ -397,6 +408,9 @@ defmodule Aimax.Ui.EditorLive do
     len = comp_start |> max(line_start) |> min(byte_size(text))
     text |> binary_part(line_start, len - line_start) |> String.length()
   end
+
+  defp face(faces, name, attr, fallback),
+    do: get_in(faces, [name, attr]) || fallback
 
   defp face_css(faces) do
     vars =

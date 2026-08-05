@@ -67,6 +67,7 @@ defmodule Aimax.Core.Buffer do
   # buffer-local variables (mode name, mode state, anything Scheme wants)
   def set_local(name, key, val), do: GenServer.call(via(name), {:set_local, key, val})
   def get_local(name, key), do: GenServer.call(via(name), {:get_local, key})
+  def locals(name), do: GenServer.call(via(name), :locals)
 
   def forward_word(name), do: GenServer.call(via(name), {:motion, :forward_word})
   def backward_word(name), do: GenServer.call(via(name), {:motion, :backward_word})
@@ -158,6 +159,8 @@ defmodule Aimax.Core.Buffer do
 
   def handle_call({:get_local, key}, _from, state),
     do: {:reply, Map.get(state.locals, key), state}
+
+  def handle_call(:locals, _from, state), do: {:reply, state.locals, state}
 
   # read-only blocks :user mutations only — programmatic sources (:editor,
   # :process, agents) are the inhibit-read-only path (dired regenerates its

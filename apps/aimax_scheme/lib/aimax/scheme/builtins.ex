@@ -6,6 +6,9 @@ defmodule Aimax.Scheme.Builtins do
 
   alias Aimax.Scheme.{Eval, Printer}
 
+  # :calendar.datetime_to_gregorian_seconds at the unix epoch
+  @unix_epoch_gregorian 62_167_219_200
+
   def all do
     %{
       "+" => &arith(&1, 0, fn a, b -> a + b end),
@@ -117,8 +120,78 @@ defmodule Aimax.Scheme.Builtins do
       end,
       "error" => fn args ->
         raise Eval.Error, message: Enum.map_join(args, " ", &Printer.display/1)
-      end
+      end,
+      "re-match?" => fn [pat, s] -> Regex.match?(re!(pat), s) end,
+      "re-match" => fn [pat, s] ->
+        case Regex.run(re!(pat), s) do
+          nil -> false
+          groups -> groups
+        end
+      end,
+      "re-find" => fn [pat, s, start] ->
+        case Regex.run(re!(pat), s, return: :index, offset: start) do
+          nil -> false
+          [{ms, len} | _] -> [ms, ms + len]
+        end
+      end,
+      "re-find*" => fn [pat, s] ->
+        re!(pat)
+        |> Regex.scan(s, return: :index)
+        |> Enum.map(fn [{ms, len} | _] -> [ms, ms + len] end)
+      end,
+      "re-groups" => fn [pat, s, start] ->
+        case Regex.run(re!(pat), s, return: :index, offset: start) do
+          nil ->
+            false
+
+          groups ->
+            Enum.map(groups, fn
+              {-1, 0} -> false
+              {gs, len} -> [gs, gs + len]
+            end)
+        end
+      end,
+      "re-replace" => fn [pat, s, repl] -> Regex.replace(re!(pat), s, repl, global: false) end,
+      "re-replace-all" => fn [pat, s, repl] -> Regex.replace(re!(pat), s, repl) end,
+      "current-time" => fn [] -> System.os_time(:second) end,
+      "time->parts" => fn [secs] ->
+        {{y, mo, d}, {h, mi, _s}} = :calendar.system_time_to_local_time(trunc(secs), :second)
+        [y, mo, d, h, mi, :calendar.day_of_the_week({y, mo, d})]
+      end,
+      "parts->time" => fn [y, mo, d, h, mi] ->
+        case :calendar.local_time_to_universal_time_dst({{y, mo, d}, {h, mi, 0}}) do
+          [utc | _] -> :calendar.datetime_to_gregorian_seconds(utc) - @unix_epoch_gregorian
+          [] -> raise Eval.Error, message: "parts->time: invalid local time"
+        end
+      end,
+      "format-time" => fn [secs, fmt] ->
+        {{y, mo, d}, {h, mi, s}} = :calendar.system_time_to_local_time(trunc(secs), :second)
+        {:ok, ndt} = NaiveDateTime.new(y, mo, d, h, mi, s)
+        Calendar.strftime(ndt, fmt)
+      end,
+      "time+" => fn [secs, days] -> secs + days * 86_400 end
     }
+  end
+
+  # compiled-regex cache: org refontification runs the same handful of
+  # patterns on every change, so compile each pattern exactly once
+  defp re!(pat) do
+    key = {:aimax_scheme_re, pat}
+
+    case :persistent_term.get(key, nil) do
+      nil ->
+        case Regex.compile(pat, "u") do
+          {:ok, re} ->
+            :persistent_term.put(key, re)
+            re
+
+          {:error, {msg, at}} ->
+            raise Eval.Error, message: "bad regex #{inspect(pat)}: #{msg} at #{at}"
+        end
+
+      re ->
+        re
+    end
   end
 
   defp arith(args, init, op) do

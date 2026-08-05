@@ -581,9 +581,12 @@ defmodule Aimax.Core.Editor do
     exists = Buffer.exists?(buffer)
     text = if exists, do: Buffer.text(buffer), else: ""
     point = if exists, do: Buffer.point(buffer), else: 0
+    hidden = if exists, do: Buffer.hidden(buffer), else: []
 
-    total_lines = length(:binary.matches(text, "\n")) + 1
-    cl = cursor_line(text, point)
+    # folds put top/cursor/total in VISIBLE-line space; the scroll and
+    # auto-follow math below then works unchanged. Line *numbers* stay
+    # logical (folds show numbering gaps, like Emacs).
+    {total_lines, cl, hidden_lines} = visible_geometry(text, point, hidden)
 
     top = leaf.top |> min(max(total_lines - 1, 0)) |> max(0)
 
@@ -608,6 +611,7 @@ defmodule Aimax.Core.Editor do
       ts_lang: exists && Buffer.get_local(buffer, "ts-lang"),
       overlays: if(exists, do: Buffer.overlays(buffer), else: []),
       overlay_gen: if(exists, do: Buffer.overlay_gen(buffer), else: 0),
+      hidden_lines: hidden_lines,
       render_mode: exists && Buffer.get_local(buffer, "render-mode"),
       top: top,
       rows: rows,
@@ -620,6 +624,33 @@ defmodule Aimax.Core.Editor do
 
   defp cursor_line(text, point),
     do: length(:binary.matches(binary_part(text, 0, point), "\n"))
+
+  # {visible line count, cursor's visible-line index, MapSet of hidden
+  # logical line indexes}. A line is hidden when its start byte falls
+  # strictly inside a hidden range (the range's own start line stays
+  # visible — that's the folded headline). Ranges are clamped: they can
+  # be momentarily stale after an undo swaps the rope out from under them.
+  defp visible_geometry(text, point, []),
+    do: {length(:binary.matches(text, "\n")) + 1, cursor_line(text, point), MapSet.new()}
+
+  defp visible_geometry(text, point, hidden) do
+    len = byte_size(text)
+    starts = [0 | Enum.map(:binary.matches(text, "\n"), fn {p, _} -> p + 1 end)]
+    ranges = for {s, e} <- hidden, s < len, do: {s, min(e, len)}
+
+    hidden_lines =
+      for {start, idx} <- Enum.with_index(starts),
+          Enum.any?(ranges, fn {s, e} -> start > s and start <= e end),
+          into: MapSet.new(),
+          do: idx
+
+    logical_cl = cursor_line(text, point)
+
+    visible_cl =
+      Enum.count(0..(logical_cl - 1)//1, &(not MapSet.member?(hidden_lines, &1)))
+
+    {length(starts) - MapSet.size(hidden_lines), visible_cl, hidden_lines}
+  end
 
   defp clear_manual(%{type: :leaf} = leaf), do: %{leaf | manual: false}
 

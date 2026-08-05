@@ -309,6 +309,14 @@ defmodule Aimax.Core.Buffer do
       end
 
     point = apply_motion(motion, text, state.point, state.goal_col)
+
+    # line motion may not land inside a fold — keep going in the same
+    # direction; if the fold runs to a buffer edge, stay where we were
+    point =
+      if motion in [:next_line, :prev_line] and in_hidden?(point, state.hidden),
+        do: skip_hidden(motion, text, point, state.goal_col, state.hidden, state.point),
+        else: point
+
     {:reply, point, %{state | point: point}}
   end
 
@@ -516,6 +524,18 @@ defmodule Aimax.Core.Buffer do
   defp apply_motion(:bob, _text, _pos, _), do: 0
   defp apply_motion(:eob, text, _pos, _), do: Kernel.byte_size(text)
   defp apply_motion(:bol, text, pos, _), do: text |> line_bounds(pos) |> elem(0)
+  defp in_hidden?(p, hidden), do: Enum.any?(hidden, fn {s, e} -> p > s and p <= e end)
+
+  defp skip_hidden(motion, text, point, goal, hidden, orig) do
+    next = apply_motion(motion, text, point, goal)
+
+    cond do
+      next == point -> orig
+      in_hidden?(next, hidden) -> skip_hidden(motion, text, next, goal, hidden, orig)
+      true -> next
+    end
+  end
+
   defp apply_motion(:eol, text, pos, _), do: text |> line_bounds(pos) |> elem(1)
 
   defp apply_motion(:next_line, text, pos, goal) do

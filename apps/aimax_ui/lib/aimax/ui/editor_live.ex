@@ -110,9 +110,29 @@ defmodule Aimax.Ui.EditorLive do
         _ -> build_static(leaf)
       end
 
-    # viewport: only the visible slice (+overscan) becomes DOM
-    visible = Enum.slice(static, leaf.top, leaf.rows + 4)
-    lines = render_pass(visible, leaf.text, leaf.point, leaf.mark)
+    # viewport: folded lines drop out, then only the visible slice
+    # (+overscan) becomes DOM. leaf.top is in visible-line space.
+    hidden = leaf.hidden_lines
+
+    visible =
+      static
+      |> then(fn lines ->
+        if MapSet.size(hidden) == 0,
+          do: lines,
+          else: Enum.reject(lines, &MapSet.member?(hidden, &1.num - 1))
+      end)
+      |> Enum.slice(leaf.top, leaf.rows + 4)
+
+    lines =
+      visible
+      |> render_pass(leaf.text, leaf.point, leaf.mark)
+      |> Enum.map(fn ln ->
+        # a visible line whose successor is folded gets a fold marker
+        if MapSet.member?(hidden, ln.num),
+          do: %{ln | segs: ln.segs ++ [{" …", "f-fold-marker"}]},
+          else: ln
+      end)
+
     {Map.put(leaf, :lines, lines), Map.put(cache, leaf.id, {raw_key, static})}
   end
 

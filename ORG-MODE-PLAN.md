@@ -1,5 +1,10 @@
 # Org-mode for ai-max.el
 
+> **Status (2026-08-06):** PR1–PR6 implemented on the `org-mode` branch —
+> interpreter additions, regex/time builtins, overlays, folding, S- keys,
+> on-change hook, and `priv/org.scm` with the de-dent extension. Phase 2
+> (timestamps, agenda, tags, links, tables) not started.
+
 ## Context
 
 Goal: make `.org` files first-class — outline folding, headline fontification, TODO cycling, structure editing — with org-mode itself written in userland Scheme (per the "Scheme is the brain" commitment; `dired.scm` is the reference mode). Exploration of all three layers (core, Scheme userland, rendering) shows the mode-definition machinery is ready (`define-mode`, `*auto-mode-alist*`, per-buffer keymaps, `define-command`), but four core capabilities org needs don't exist at any layer:

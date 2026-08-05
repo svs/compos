@@ -54,14 +54,17 @@ defmodule Aimax.Core.KeyDispatch do
         Editor.set_echo("")
 
       key == "DEL" ->
-        Editor.completion_dismiss()
+        # narrow in place: the popup's own query shrinks with the buffer text
         Buffer.delete_char(Editor.current_buffer(), -1)
-        run("completion-at-point")
+        requery_completion()
 
-      printable?(key) or key == "SPC" ->
+      key == "SPC" ->
         Editor.completion_dismiss()
-        self_insert(if(key == "SPC", do: " ", else: key))
-        if key != "SPC", do: run("completion-at-point")
+        self_insert(" ")
+
+      printable?(key) ->
+        self_insert(key)
+        requery_completion()
 
       true ->
         # any other key dismisses and acts normally
@@ -187,6 +190,24 @@ defmodule Aimax.Core.KeyDispatch do
           pending == [] and printable?(key) -> self_insert(key)
           true -> Editor.set_echo(Enum.join(seq, " ") <> " is undefined")
         end
+    end
+  end
+
+  # text typed since the popup opened is the popup's query (orderless narrowing)
+  defp requery_completion do
+    case Editor.snapshot().completion do
+      %{start: start} ->
+        buf = Editor.current_buffer()
+        point = Buffer.point(buf)
+
+        if point > start do
+          Editor.completion_query(binary_part(Buffer.text(buf), start, point - start))
+        else
+          Editor.completion_dismiss()
+        end
+
+      _ ->
+        :ok
     end
   end
 

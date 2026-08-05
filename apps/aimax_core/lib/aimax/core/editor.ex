@@ -14,7 +14,7 @@ defmodule Aimax.Core.Editor do
 
   use GenServer
 
-  alias Aimax.Core.{Buffer, Events}
+  alias Aimax.Core.{Buffer, Candidates, Events}
 
   @scratch "*scratch*"
 
@@ -74,6 +74,9 @@ defmodule Aimax.Core.Editor do
     do: GenServer.call(__MODULE__, {:completion_show, start, candidates})
 
   def completion_move(delta), do: GenServer.call(__MODULE__, {:completion_move, delta})
+
+  @doc "Narrow the open popup by prefix typed since it opened."
+  def completion_query(q), do: GenServer.call(__MODULE__, {:completion_query, q})
 
   @doc "Accept the selection: returns {start, label} and clears, or nil."
   def completion_accept, do: GenServer.call(__MODULE__, :completion_accept)
@@ -142,7 +145,15 @@ defmodule Aimax.Core.Editor do
 
   @impl true
   def handle_call(:snapshot, _from, state) do
-    {:reply, Map.take(state, [:pending, :minibuffer, :echo, :active, :completion]), state}
+    snap = Map.take(state, [:pending, :minibuffer, :echo, :active, :completion])
+    # expose the selection flag KeyDispatch needs without leaking the list
+    snap =
+      case snap.minibuffer do
+        nil -> snap
+        mb -> %{snap | minibuffer: Map.put(mb, :sel_touched, mb.list.touched)}
+      end
+
+    {:reply, snap, state}
   end
 
   def handle_call(:current_buffer, _from, state) do
@@ -251,48 +262,44 @@ defmodule Aimax.Core.Editor do
     mb =
       %{on_confirm: nil, on_complete: nil, on_change: nil, on_cancel: nil, input: ""}
       |> Map.merge(handlers)
-      |> Map.merge(%{
-        prompt: prompt,
-        candidates: normalize(candidates),
-        sel: 0,
-        sel_touched: false
-      })
+      |> Map.put(:prompt, prompt)
 
+    mb = Map.put(mb, :list, Candidates.new(candidates, query: mb_query(mb)))
     changed(:ok, %{state | minibuffer: mb})
   end
 
-  def handle_call({:mb_input, input}, _from, %{minibuffer: %{} = mb} = state),
-    do: changed(:ok, %{state | minibuffer: %{mb | input: input, sel: 0, sel_touched: false}})
+  def handle_call({:mb_input, input}, _from, %{minibuffer: %{} = mb} = state) do
+    mb = %{mb | input: input}
+    changed(:ok, %{state | minibuffer: %{mb | list: Candidates.put_query(mb.list, mb_query(mb))}})
+  end
 
   def handle_call({:mb_input, _}, _from, state), do: {:reply, {:error, :inactive}, state}
 
   def handle_call({:mb_candidates, candidates}, _from, %{minibuffer: %{} = mb} = state) do
-    mb = %{mb | candidates: normalize(candidates), sel: 0, sel_touched: false}
-    changed(:ok, %{state | minibuffer: mb})
+    list = mb.list |> Candidates.put_items(candidates) |> Candidates.put_query(mb_query(mb))
+    changed(:ok, %{state | minibuffer: %{mb | list: list}})
   end
 
   def handle_call({:mb_candidates, _}, _from, state), do: {:reply, {:error, :inactive}, state}
 
-  def handle_call({:mb_move_sel, delta}, _from, %{minibuffer: %{} = mb} = state) do
-    n = length(filtered(mb))
-    sel = if n == 0, do: 0, else: mb.sel |> Kernel.+(delta) |> max(0) |> min(n - 1)
-    changed(:ok, %{state | minibuffer: %{mb | sel: sel, sel_touched: true}})
-  end
+  def handle_call({:mb_move_sel, delta}, _from, %{minibuffer: %{} = mb} = state),
+    do: changed(:ok, %{state | minibuffer: %{mb | list: Candidates.move(mb.list, delta)}})
 
   def handle_call({:mb_move_sel, _}, _from, state), do: {:reply, {:error, :inactive}, state}
 
   def handle_call(:mb_selected, _from, %{minibuffer: %{} = mb} = state),
-    do: {:reply, selected_label(mb), state}
+    do: {:reply, Candidates.selected(mb.list), state}
 
   def handle_call(:mb_selected, _from, state), do: {:reply, nil, state}
 
-  # returns the full minibuffer map (with handlers, plus :selected) or nil
+  # returns the minibuffer map (handlers + :selected/:total/:sel_touched) or nil
   def handle_call(:mb_close, _from, state) do
     reply =
       state.minibuffer &&
         state.minibuffer
-        |> Map.put(:selected, selected_label(state.minibuffer))
-        |> Map.put(:total, length(filtered(state.minibuffer)))
+        |> Map.put(:selected, Candidates.selected(state.minibuffer.list))
+        |> Map.put(:total, Candidates.total(state.minibuffer.list))
+        |> Map.put(:sel_touched, state.minibuffer.list.touched)
 
     changed(reply, %{state | minibuffer: nil})
   end
@@ -309,34 +316,43 @@ defmodule Aimax.Core.Editor do
   def handle_call(:last_command, _from, state), do: {:reply, state.last_command, state}
 
   def handle_call({:completion_show, start, candidates}, _from, state) do
-    case normalize(candidates) do
+    case Candidates.normalize(candidates) do
       [] ->
         changed(:ok, %{state | completion: nil})
 
-      cands ->
-        changed(:ok, %{state | completion: %{start: start, candidates: cands, sel: 0}})
+      _ ->
+        changed(:ok, %{state | completion: %{start: start, list: Candidates.new(candidates)}})
     end
   end
 
-  def handle_call({:completion_move, delta}, _from, %{completion: %{} = c} = state) do
-    n = length(c.candidates)
-    sel = c.sel |> Kernel.+(delta) |> max(0) |> min(n - 1)
-    changed(:ok, %{state | completion: %{c | sel: sel}})
-  end
+  def handle_call({:completion_move, delta}, _from, %{completion: %{} = c} = state),
+    do: changed(:ok, %{state | completion: %{c | list: Candidates.move(c.list, delta)}})
 
   def handle_call({:completion_move, _}, _from, state), do: {:reply, :ok, state}
 
+  # narrow the popup in place as the user types — no source re-query
+  def handle_call({:completion_query, q}, _from, %{completion: %{} = c} = state) do
+    list = Candidates.put_query(c.list, q)
+
+    if Candidates.total(list) == 0,
+      do: changed(:ok, %{state | completion: nil}),
+      else: changed(:ok, %{state | completion: %{c | list: list}})
+  end
+
+  def handle_call({:completion_query, _}, _from, state), do: {:reply, :ok, state}
+
   def handle_call(:completion_accept, _from, %{completion: %{} = c} = state) do
     reply =
-      case Enum.at(c.candidates, c.sel) do
-        %{label: label} -> {c.start, label}
+      case Candidates.selected(c.list) do
         nil -> nil
+        label -> {c.start, label}
       end
 
     changed(reply, %{state | completion: nil})
   end
 
   def handle_call(:completion_accept, _from, state), do: {:reply, nil, state}
+
 
   def handle_call(:completion_dismiss, _from, state),
     do: changed(:ok, %{state | completion: nil})
@@ -450,111 +466,33 @@ defmodule Aimax.Core.Editor do
 
   # --- minibuffer helpers (vertico-style: fuzzy filter + selection) ----------
 
-  defp normalize(candidates) do
-    Enum.map(candidates, fn
-      [label, hint] when is_binary(label) -> %{label: label, hint: to_string(hint)}
-      label when is_binary(label) -> %{label: label, hint: ""}
-    end)
-  end
+  # what the minibuffer matches on: the whole input, except hierarchical
+  # (on_complete) prompts, which match the segment after the last "/"
+  defp mb_query(%{on_complete: oc, input: input}) when oc not in [nil, false],
+    do: input |> String.split("/") |> List.last()
 
-  # orderless + flex matching, case-insensitive:
-  # space-separated terms each match as substrings in any order;
-  # a single term falls back to subsequence (flex) matching
-  def fuzzy_match?(_label, ""), do: true
-
-  def fuzzy_match?(label, query) do
-    dl = String.downcase(label)
-
-    case String.split(query, " ", trim: true) do
-      [] -> true
-      [single] -> do_fuzzy(dl, String.downcase(single))
-      terms -> Enum.all?(terms, &String.contains?(dl, String.downcase(&1)))
-    end
-  end
-
-  defp do_fuzzy(_label, ""), do: true
-
-  defp do_fuzzy(label, <<c::utf8, rest::binary>>) do
-    case :binary.match(label, <<c::utf8>>) do
-      :nomatch -> false
-      {i, l} -> do_fuzzy(binary_part(label, i + l, byte_size(label) - i - l), rest)
-    end
-  end
-
-  # on_complete prompts (find-file): candidates are the current directory's
-  # listing; narrow the basename segment with the same orderless/flex matcher
-  # as everywhere else, ranked (exact > prefix > substring > subsequence)
-  defp filtered(%{on_complete: oc} = mb) when oc != nil and oc != false do
-    frag = mb.input |> String.split("/") |> List.last()
-
-    mb.candidates
-    |> Enum.filter(&fuzzy_match?(&1.label, frag))
-    |> Enum.sort_by(&match_rank(&1.label, frag))
-  end
-
-  defp filtered(%{input: ""} = mb), do: mb.candidates
-
-  # exact match outranks prefix outranks subsequence — "paper" must select
-  # paper, not paper-night
-  defp filtered(mb) do
-    mb.candidates
-    |> Enum.filter(&fuzzy_match?(&1.label, mb.input))
-    |> Enum.sort_by(&match_rank(&1.label, mb.input))
-  end
-
-  defp match_rank(label, input) do
-    dl = String.downcase(label)
-    di = String.downcase(input)
-
-    cond do
-      dl == di -> 0
-      String.starts_with?(dl, di) -> 1
-      String.contains?(dl, di) -> 2
-      true -> 3
-    end
-  end
-
-  defp selected_label(mb) do
-    case Enum.at(filtered(mb), mb.sel) do
-      %{label: label} -> label
-      nil -> nil
-    end
-  end
+  defp mb_query(%{input: input}), do: input
 
   defp render_minibuffer(mb) do
-    list = filtered(mb)
-    sel = min(mb.sel, max(length(list) - 1, 0))
-    # keep the selection visible in an 8-row window
-    offset = max(0, sel - 7)
-
-    rows =
-      list
-      |> Enum.slice(offset, 8)
-      |> Enum.with_index(offset)
-      |> Enum.map(fn {c, i} -> Map.put(c, :selected, i == sel and list != []) end)
-
     %{
       prompt: mb.prompt,
       input: mb.input,
-      candidates: rows,
-      sel: sel,
-      total: length(list),
+      candidates: Candidates.rows(mb.list),
+      sel: mb.list.sel,
+      total: Candidates.total(mb.list),
       completing: mb.on_complete not in [nil, false]
     }
   end
 
   defp render_completion(c) do
-    sel = min(c.sel, length(c.candidates) - 1)
-    offset = max(0, sel - 7)
-
-    rows =
-      c.candidates
-      |> Enum.slice(offset, 8)
-      |> Enum.with_index(offset)
-      |> Enum.map(fn {cand, i} -> Map.put(cand, :selected, i == sel) end)
-
-    %{start: c.start, candidates: rows, sel: sel, total: length(c.candidates)}
+    %{
+      start: c.start,
+      candidates: Candidates.rows(c.list),
+      sel: c.list.sel,
+      total: Candidates.total(c.list)
+    }
   end
+
 
   defp which_key(%{pending: []}), do: nil
 

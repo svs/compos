@@ -342,7 +342,7 @@ defmodule Aimax.EditorTest do
 
       # x executes the flagged deletion after confirmation
       press(["x"])
-      assert Editor.snapshot().minibuffer.prompt =~ "Delete 1 file(s)"
+      assert Editor.render_state().minibuffer.prompt =~ "Delete 1 file(s)"
       type("yes")
       press(["RET"])
       refute File.exists?(Path.join(root, "alpha.txt"))
@@ -366,7 +366,7 @@ defmodule Aimax.EditorTest do
     test "find-file prefills default-directory; // resets (Emacs rule)", %{root: root} do
       {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
       press(["C-x", "C-f"])
-      mb = Editor.snapshot().minibuffer
+      mb = Editor.render_state().minibuffer
       assert mb.input == root <> "/"
 
       # typing an absolute path over the prefill: // rule takes over
@@ -456,8 +456,11 @@ defmodule Aimax.EditorTest do
 
   test "M-x runs a command by name", %{buf: buf} do
     press(["M-x"])
-    assert %{prompt: "M-x ", candidates: candidates} = Editor.snapshot().minibuffer
+    assert %{prompt: "M-x "} = Editor.render_state().minibuffer
+    type("other-window")
+    assert %{candidates: candidates} = Editor.render_state().minibuffer
     assert Enum.any?(candidates, &(&1.label == "other-window"))
+    press(List.duplicate("DEL", String.length("other-window")))
     type("end-of-buffer")
     press(["RET"])
     assert Editor.snapshot().minibuffer == nil
@@ -477,13 +480,13 @@ defmodule Aimax.EditorTest do
     type(root <> "/re")
     press(["TAB"])
     # common prefix of readme.txt + recipe.md is "re"; candidates narrowed
-    mb = Editor.snapshot().minibuffer
+    mb = Editor.render_state().minibuffer
     assert mb.input == root <> "/re"
     assert mb.candidates |> Enum.map(& &1.label) |> Enum.sort() == ["readme.txt", "recipe.md"]
 
     type("a")
     press(["TAB"])
-    assert Editor.snapshot().minibuffer.input == root <> "/readme.txt"
+    assert Editor.render_state().minibuffer.input == root <> "/readme.txt"
 
     press(["C-g"])
 
@@ -491,7 +494,7 @@ defmodule Aimax.EditorTest do
     press(["C-x", "C-f"])
     type(root <> "/su")
     press(["TAB"])
-    mb = Editor.snapshot().minibuffer
+    mb = Editor.render_state().minibuffer
     assert mb.input == root <> "/subdir/"
     assert Enum.map(mb.candidates, & &1.label) == ["inner.txt"]
     press(["C-g"])
@@ -509,12 +512,12 @@ defmodule Aimax.EditorTest do
     type(root <> "/")
 
     # candidates appeared live, no TAB needed
-    mb = Editor.snapshot().minibuffer
+    mb = Editor.render_state().minibuffer
     assert Enum.map(mb.candidates, & &1.label) == ["alpha.txt", "subdir/"]
 
     # arrow onto subdir/, TAB inserts it and lists inside
     press(["C-n", "TAB"])
-    mb = Editor.snapshot().minibuffer
+    mb = Editor.render_state().minibuffer
     assert mb.input == root <> "/subdir/"
     assert Enum.map(mb.candidates, & &1.label) == ["inner.txt"]
 
@@ -573,7 +576,7 @@ defmodule Aimax.EditorTest do
     press(["M-x"])
     type("split-window-b")
     press(["TAB"])
-    assert Editor.snapshot().minibuffer.input == "split-window-below"
+    assert Editor.render_state().minibuffer.input == "split-window-below"
     press(["C-g"])
   end
 
@@ -819,7 +822,7 @@ defmodule Aimax.EditorTest do
   test "C-x k defaults to killing the current buffer", %{buf: buf} do
     type("doomed")
     press(["C-x", "k"])
-    mb = Editor.snapshot().minibuffer
+    mb = Editor.render_state().minibuffer
     assert mb.prompt =~ "default #{buf}"
     press(["RET"])
 
@@ -838,7 +841,7 @@ defmodule Aimax.EditorTest do
 
     # default is the buffer we just left: b
     press(["C-x", "b"])
-    assert Editor.snapshot().minibuffer.prompt =~ "default #{b}"
+    assert Editor.render_state().minibuffer.prompt =~ "default #{b}"
     press(["RET"])
     assert Editor.current_buffer() == b
 
@@ -944,6 +947,23 @@ defmodule Aimax.EditorTest do
     {:ok, _} = Aimax.Core.Session.eval("(set-llm-model! #{before})")
   end
 
+  test "both surfaces share one engine: popup narrows orderless too", %{buf: buf} do
+    type("transformation transducer")
+    press(["RET"])
+    type("tra")
+    press(["C-M-i"])
+    assert Enum.map(Editor.render_state().completion.candidates, & &1.label) ==
+             ["transducer", "transformation"]
+
+    # typing narrows the OPEN popup in place (no source re-query), orderless:
+    # "tras" is a subsequence of transformation only... use "nsd" for transducer
+    type("nsd")
+    assert Enum.map(Editor.render_state().completion.candidates, & &1.label) == ["transducer"]
+
+    press(["RET"])
+    assert Buffer.text(buf) =~ "transducer\ntransducer"
+  end
+
   test "orderless: space-separated terms match in any order" do
     press(["M-x"])
     type("window split")
@@ -983,7 +1003,7 @@ defmodule Aimax.EditorTest do
 
   test "C-g quits the minibuffer" do
     press(["C-x", "C-f"])
-    assert Editor.snapshot().minibuffer.prompt == "Find file: "
+    assert Editor.render_state().minibuffer.prompt == "Find file: "
     press(["C-g"])
     assert Editor.snapshot().minibuffer == nil
     assert echo() == "Quit"

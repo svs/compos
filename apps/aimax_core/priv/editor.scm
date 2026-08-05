@@ -45,7 +45,9 @@
 (define *mode-setups* '())
 
 (define (define-mode name setup)
-  (set! *mode-setups* (cons (list name setup) *mode-setups*)))
+  (set! *mode-setups* (cons (list name setup) *mode-setups*))
+  ;; every mode is an M-x command, like Emacs
+  (define-command name (lambda () (set-mode! name))))
 
 (define (set-mode! name)
   (buffer-set-local! (current-buffer) 'mode-name name)

@@ -611,6 +611,24 @@ defmodule Aimax.EditorTest do
     File.rm!(path)
   end
 
+  test "modes are M-x commands; (load path) evaluates a scheme file", %{buf: buf} do
+    press(["M-x"])
+    type("elixir-mode")
+    press(["RET"])
+    assert Buffer.get_local(buf, "mode-name") == "elixir-mode"
+    assert Buffer.get_local(buf, "ts-lang") == "elixir"
+
+    lib = Path.join(System.tmp_dir!(), "aimax-lib-#{System.unique_integer([:positive])}.scm")
+    File.write!(lib, ~s{(define-command "from-lib" (lambda () (message "lib loaded!")))})
+    {:ok, _} = Aimax.Core.Session.eval(~s{(load "#{lib}")})
+
+    press(["M-x"])
+    type("from-lib")
+    press(["RET"])
+    assert echo() == "lib loaded!"
+    File.rm!(lib)
+  end
+
   test "orderless: space-separated terms match in any order" do
     press(["M-x"])
     type("window split")

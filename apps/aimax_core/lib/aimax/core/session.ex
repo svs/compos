@@ -109,18 +109,38 @@ defmodule Aimax.Core.Session do
   end
 
   defp load_stdlib!(interp) do
-    Enum.reduce(["editor.scm", "dired.scm", "themes.scm"], interp, fn file, interp ->
-      path = Application.app_dir(:aimax_core, "priv/#{file}")
+    interp =
+      Enum.reduce(["editor.scm", "dired.scm", "themes.scm"], interp, fn file, interp ->
+        path = Application.app_dir(:aimax_core, "priv/#{file}")
 
-      case Scheme.eval_string(interp, File.read!(path)) do
-        {:ok, _, interp} ->
-          interp
+        case Scheme.eval_string(interp, File.read!(path)) do
+          {:ok, _, interp} ->
+            interp
 
-        {:error, msg} ->
-          # the stdlib must load — a broken stdlib is a broken editor
-          raise "#{file} failed to load: #{msg}"
-      end
-    end)
+          {:error, msg} ->
+            # the stdlib must load — a broken stdlib is a broken editor
+            raise "#{file} failed to load: #{msg}"
+        end
+      end)
+
+    load_init(interp)
+  end
+
+  # user config: ~/.aimax/init.scm — errors log loudly but never brick boot
+  defp load_init(interp) do
+    path = Path.expand("~/.aimax/init.scm")
+
+    with true <- File.exists?(path),
+         {:ok, _, interp2} <- Scheme.eval_string(interp, File.read!(path)) do
+      interp2
+    else
+      false ->
+        interp
+
+      {:error, msg} ->
+        Logger.error("init.scm error: #{msg}")
+        interp
+    end
   end
 
   defp session_primitives(global) do
@@ -151,6 +171,18 @@ defmodule Aimax.Core.Session do
         :void
       end,
       "eval-string" => fn [src], store -> eval_src.(src, store) end,
+      # load-library: evaluate a Scheme file in the live session
+      "load" => fn [path], store ->
+        expanded = Path.expand(path)
+
+        case File.read(expanded) do
+          {:ok, src} ->
+            eval_src.(src, store)
+
+          {:error, reason} ->
+            raise Aimax.Scheme.Eval.Error, message: "cannot load #{expanded}: #{reason}"
+        end
+      end,
       "eval-region" => fn [buffer, s, e], store ->
         src = buffer |> Buffer.text() |> binary_part(s, e - s)
         eval_src.(src, store)

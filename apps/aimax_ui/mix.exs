@@ -25,6 +25,7 @@ defmodule Aimax.Ui.MixProject do
   defp deps do
     [
       {:aimax_core, in_umbrella: true},
+      {:earmark, "~> 1.4"},
       {:phoenix, "~> 1.8"},
       {:phoenix_live_view, "~> 1.1"},
       {:bandit, "~> 1.5"},

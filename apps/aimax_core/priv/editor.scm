@@ -59,6 +59,7 @@
   '((".scm" "scheme-mode") (".el" "scheme-mode")
     (".ex" "elixir-mode") (".exs" "elixir-mode")
     (".json" "json-mode") (".rs" "rust-mode")
+    (".html" "html-mode") (".htm" "html-mode")
     (".md" "text-mode") (".txt" "text-mode") (".org" "text-mode")))
 
 (define (auto-mode path)
@@ -73,6 +74,38 @@
 
 (define (ts-mode lang)
   (lambda () (buffer-set-local! (current-buffer) 'ts-lang lang)))
+
+(define-mode "html-mode" (lambda () #t))
+
+;; preview-mode: render the buffer instead of showing its source.
+;; Renderer picked by *preview-renderers* (extension -> renderer); the
+;; frontend knows "html" and "markdown". Add your own:
+;;   (set! *preview-renderers* (cons '(".rst" "markdown") *preview-renderers*))
+(define *preview-renderers*
+  '((".html" "html") (".htm" "html") (".svg" "html")
+    (".md" "markdown") (".markdown" "markdown") (".org" "markdown")
+    (".txt" "markdown")))
+
+(define (preview-renderer-for name)
+  (let loop ((rs *preview-renderers*))
+    (if (null? rs)
+        #f
+        (if (string-suffix? (car (car rs)) name)
+            (cadr (car rs))
+            (loop (cdr rs))))))
+
+(define-command "preview-mode"
+  (lambda ()
+    (if (buffer-local (current-buffer) 'render-mode)
+        (begin
+          (buffer-set-local! (current-buffer) 'render-mode #f)
+          (message "Preview off"))
+        (let ((r (preview-renderer-for (current-buffer))))
+          (if r
+              (begin
+                (buffer-set-local! (current-buffer) 'render-mode r)
+                (message (string-append "Preview on (" r ") — C-c C-v toggles")))
+              (message "No preview renderer for this buffer"))))))
 
 (define-mode "elixir-mode" (ts-mode "elixir"))
 (define-mode "json-mode" (ts-mode "json"))
@@ -727,6 +760,7 @@
 (global-set-key "M-g g" "goto-line")
 (global-set-key "M-g M-g" "goto-line")
 (global-set-key "M-m" "back-to-indentation")
+(global-set-key "C-c C-v" "preview-mode")
 (global-set-key "C-`" "popup-toggle")
 (global-set-key "C-M-v" "scroll-other-window")
 (global-set-key "C-v" "scroll-up-command")

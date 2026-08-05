@@ -28,6 +28,7 @@ defmodule Aimax.Core.MixProject do
     [
       {:aimax_scheme, in_umbrella: true},
       {:req, "~> 0.5"},
+      {:earmark, "~> 1.4"},
       {:rustler, "~> 0.36.0"}
     ]
   end

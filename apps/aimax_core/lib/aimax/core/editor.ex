@@ -658,6 +658,7 @@ defmodule Aimax.Core.Editor do
       modified: exists && Buffer.modified?(buffer),
       mode: (exists && Buffer.get_local(buffer, "mode-name")) || "Fundamental",
       ts_lang: exists && Buffer.get_local(buffer, "ts-lang"),
+      render_mode: exists && Buffer.get_local(buffer, "render-mode"),
       top: top,
       rows: rows,
       total_lines: total_lines,

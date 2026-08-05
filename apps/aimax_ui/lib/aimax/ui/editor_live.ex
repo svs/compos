@@ -85,6 +85,20 @@ defmodule Aimax.Ui.EditorLive do
     {%{split | children: children}, cache}
   end
 
+  # preview buffers skip the line machinery entirely
+  defp decorate(%{type: :leaf, render_mode: rm} = leaf, cache) when rm in ["html", "markdown"] do
+    key = {leaf.buffer, leaf.version, rm}
+
+    html =
+      case cache[{:preview, leaf.id}] do
+        {^key, html} -> html
+        _ -> preview_html(rm, leaf.text)
+      end
+
+    {Map.merge(leaf, %{lines: [], preview: html}),
+     Map.put(cache, {:preview, leaf.id}, {key, html})}
+  end
+
   defp decorate(%{type: :leaf} = leaf, cache) do
     raw_key = {leaf.buffer, leaf.version, leaf.ts_lang}
 
@@ -226,6 +240,9 @@ defmodule Aimax.Ui.EditorLive do
 
     ~H"""
     <div class={"window #{if @active?, do: "active", else: "inactive"} #{if !@node.line_numbers, do: "no-nums"}"}>
+      <%= if @node.render_mode in ["html", "markdown"] do %>
+        <iframe class="html-preview" sandbox="" srcdoc={@node.preview} title={@node.buffer}></iframe>
+      <% else %>
       <div class="buf">
         <div :for={ln <- @lines} class={"line #{if ln.current, do: "hl-line"}"}>
           <span class="linenum">{ln.num}</span>
@@ -239,6 +256,7 @@ defmodule Aimax.Ui.EditorLive do
             ><span class="cap-label">{c.label}</span><span class="cap-kind">{c.hint}</span></span></span></span>
         </div>
       </div>
+      <% end %>
       <div class="modeline">
         <span class={"ml-dot #{if @node.modified, do: "modified"}"}></span>
         <span class="name">{@node.buffer}</span>
@@ -335,6 +353,35 @@ defmodule Aimax.Ui.EditorLive do
         []
       end
     end)
+  end
+
+  # markdown gets the paper stylesheet; html renders as authored
+  defp preview_html("html", text), do: text
+
+  defp preview_html("markdown", text) do
+    body =
+      case Earmark.as_html(text, compact_output: false) do
+        {:ok, html, _} -> html
+        {:error, html, _} -> html
+      end
+
+    """
+    <!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    body{margin:0;padding:26px 34px 60px;max-width:62em;
+         font:16px/1.65 Spectral,Georgia,serif;color:#1b1a17;background:#fdfcf8}
+    h1,h2,h3,h4{font-family:Spectral,Georgia,serif;line-height:1.25;margin:26px 0 8px}
+    h1{font-size:28px}h2{font-size:22px;border-bottom:1px solid #cbc4b1;padding-bottom:4px}
+    h3{font-size:18px;color:#26356b}
+    code,pre{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:13.5px}
+    code{background:#f4f0e6;padding:1px 4px;border-radius:2px}
+    pre{background:#f4f0e6;padding:10px 12px;border-left:3px solid #26356b;overflow-x:auto}
+    pre code{background:none;padding:0}
+    a{color:#26356b}blockquote{margin:12px 0;padding:2px 14px;border-left:3px solid #cbc4b1;color:#57534a}
+    table{border-collapse:collapse;font-size:14px}th,td{border:1px solid #cbc4b1;padding:5px 9px}
+    th{background:#f4f0e6;text-align:left}
+    img{max-width:100%}hr{border:0;border-top:1px solid #cbc4b1;margin:22px 0}
+    </style></head><body>#{body}</body></html>
+    """
   end
 
   defp pct(%{top: 0, rows: rows, total_lines: total}) when total <= rows, do: "All"

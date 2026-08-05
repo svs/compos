@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ai-max.el — session handoff</title>
+<style>
+  :root{--paper:#fdfcf8;--ink:#1b1a17;--soft:#57534a;--faint:#8a857a;--rule:#cbc4b1;
+        --indigo:#26356b;--green:#2e6b45;--amber:#7a5a1a;--red:#a83a2b;--wash:#e7e9f1;}
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px 34px 60px;background:var(--paper);color:var(--ink);
+       font:15px/1.6 "IBM Plex Sans",system-ui,sans-serif;max-width:60em}
+  h1{font:600 26px/1.2 Spectral,Georgia,serif;margin:0 0 4px}
+  h2{font:600 19px/1.3 Spectral,Georgia,serif;margin:30px 0 8px;
+     border-bottom:1px solid var(--rule);padding-bottom:4px}
+  h3{font:600 15px/1.3 "IBM Plex Sans",sans-serif;margin:18px 0 6px;color:var(--indigo)}
+  .sub{color:var(--faint);margin:0 0 18px;font-size:13px}
+  code,pre{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:13px}
+  code{background:#f4f0e6;padding:1px 4px;border-radius:2px}
+  pre{background:#f4f0e6;padding:10px 12px;border-left:3px solid var(--indigo);
+      overflow-x:auto;margin:8px 0}
+  pre code{background:none;padding:0}
+  ul{margin:6px 0 6px 20px;padding:0}li{margin:3px 0}
+  table{border-collapse:collapse;margin:10px 0;font-size:13.5px;width:100%}
+  th{text-align:left;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+     color:var(--faint);border-bottom:1px solid var(--rule);padding:5px 8px 5px 0}
+  td{border-top:1px solid #e2dbc9;padding:5px 8px 5px 0;vertical-align:top}
+  .rule{font-weight:600;color:var(--indigo)}
+  .done{color:var(--green)}.next{color:var(--red);font-weight:600}
+  .box{background:var(--wash);border-left:3px solid var(--indigo);padding:10px 14px;margin:14px 0}
+  .warn{background:#f7ece9;border-left-color:var(--red)}
+  kbd{font-family:"IBM Plex Mono",monospace;font-size:12px;background:#fff;
+      border:1px solid var(--rule);border-bottom-width:2px;border-radius:3px;padding:0 4px}
+</style>
+</head>
+<body>
+
+<h1>ai-max.el — session handoff</h1>
+<p class="sub">Written 2026-08-06 · read this in the editor itself:
+<code>C-x C-f ~/src/ai-max.el/HANDOFF.html RET</code> then <kbd>C-c C-v</kbd></p>
+
+<div class="box">
+<strong>What this is:</strong> Emacs rebuilt on the BEAM, scripted in Scheme, with a
+Phoenix LiveView frontend. Repo <code>/Users/svs/src/ai-max.el</code>, git-committed.
+Reference implementation being ported from: <code>/Users/svs/src/aimax</code> (Rust+Steel, read-only).
+</div>
+
+<h2>The one rule (never break it)</h2>
+<p class="rule">Elixir supplies mechanism. Scheme decides policy.</p>
+<p>Loops over bytes, parsers, sockets, PTYs, NIFs → Elixir primitive.
+What a key means, what a command does, how something is presented → Scheme in
+<code>apps/aimax_core/priv/*.scm</code>. When adding a feature, ask first: can this be
+Scheme with one new primitive? Usually yes. Full detail in <code>ARCHITECTURE.md</code>.</p>
+
+<h2>Working rhythm (the user's expectations)</h2>
+<ul>
+<li><strong>Be terse.</strong> Lead with the outcome; bullets; no recaps; no "verified" narration
+beyond one line. The user is recreating Emacs — don't hedge or over-flag.</li>
+<li><strong>Test everything</strong>, especially the Scheme kernel. Suite must stay green
+(<code>mix test</code>, currently 124 tests).</li>
+<li><strong>Verify in the real browser</strong> after each cycle, then <strong>commit</strong>.</li>
+<li><strong>Screenshot</strong> the window when UI changes — the user asks for this.</li>
+<li>Use <strong>subagents</strong> for verification sweeps to keep context clean.</li>
+</ul>
+
+<h3>The dev loop</h3>
+<pre><code>mix test                                   # all 4 apps
+pkill -f "mix run"; sleep 1
+(mix run --no-halt &gt;&gt; ~/.aimax/daemon.log 2&gt;&amp;1 &amp;); sleep 6
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4004/
+git add -A &amp;&amp; git commit -m "..."</code></pre>
+<p>A restart is required to reload <code>priv/*.scm</code>. The browser auto-reloads itself
+(boot-id mechanism) — no manual refresh needed.</p>
+
+<h3>Driving the editor from the outside</h3>
+<pre><code>printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(buffer-list)"}}' \
+  | nc -U ~/.aimax/sock</code></pre>
+
+<h3>Driving the browser (Chrome MCP tools)</h3>
+<p>The extension's <code>type</code>/<code>key</code> actions do <strong>not</strong> reach the editor —
+CDP text insertion emits no keydown events. Dispatch synthetic events instead, in
+<em>short</em> JS bursts (long loops freeze the renderer):</p>
+<pre><code>const send=(k,o={})=&gt;window.dispatchEvent(
+  new KeyboardEvent("keydown",{bubbles:true,key:k,...o}));
+send("x",{ctrlKey:true}); send("f",{ctrlKey:true});   // C-x C-f
+send("x",{altKey:true});                              // M-x</code></pre>
+
+<h2>Landmines discovered the hard way</h2>
+<table>
+<tr><th>Trap</th><th>Reality</th></tr>
+<tr><td>Chrome port 4045</td><td>Blocklisted by Chrome. We use <strong>4004</strong>.</td></tr>
+<tr><td>HEEx <code>&lt;style&gt;</code></td><td><code>{}</code> interpolation is disabled inside style tags — use <code>&lt;%= raw(...) %&gt;</code>.</td></tr>
+<tr><td>Stale browser pages</td><td>LiveView patches DOM but never re-fetches head CSS/JS. Fixed by boot-id auto-reload; don't regress it.</td></tr>
+<tr><td>Umbrella tests</td><td>All apps run in ONE BEAM sequentially — core tests dirty the global Editor that UI tests then use. Setups reset state; occasional flake remains. Real fix = per-client frames (#36, deferred).</td></tr>
+<tr><td>Kill ring / MRU in tests</td><td>Global across tests — assert relatively, not absolutely.</td></tr>
+<tr><td>Buffer byte math</td><td>Points are <em>byte</em> offsets. Test arithmetic bit me twice ("line 1".."line 9" are 7 bytes, not 8).</td></tr>
+<tr><td>zsh in comint</td><td>Needs <code>+o zle +o prompt_cr +o prompt_sp</code> and <code>stty -echo</code>; fish refuses dumb terminals (belongs in term-mode).</td></tr>
+</table>
+
+<h2>Current state — what works</h2>
+<p><span class="done">✓</span>
+editing (Emacs undo w/ redo-by-chain-break, word ops, transpose, yank-pop, goal column) ·
+keymaps global+buffer-local · which-key · vertico-style minibuffer with orderless ·
+M-x · isearch · marks/regions · tiling windows with ratio splits ·
+viewport windowing (C-v/M-v/C-l, wheel, auto-follow) · display-buffer rules +
+popper popups (<kbd>C-`</kbd>) · quit-window · MRU buffer ring · dired (100% Scheme,
+marks/flags/columns) · modes + auto-mode + hooks · themes (5, all Scheme) ·
+tree-sitter font-lock + sexp nav (C-M-f/b/u/d) · completion framework (capf, dabbrev,
+dropdown at point) · comint shells · desktop persistence · LLM (multi-provider,
+doppler keys, <kbd>M-|</kbd> pipes, <kbd>C-c c</kbd> chat buffer) · HTML preview
+(<kbd>C-c C-v</kbd>) · JSON-RPC socket.</p>
+
+<h2>Next up — the queue</h2>
+<table>
+<tr><th>#</th><th>Task</th><th>Notes</th></tr>
+<tr><td class="next">43</td><td>Adopt <code>req_llm</code> backend</td><td>Keep <code>(llm ...)</code> surface + doppler keys; unlocks streaming/tools. User asked directly.</td></tr>
+<tr><td class="next">41</td><td>show-paren + paredit-lite</td><td>User asked. Match highlight via char-scan or ts-nav; then slurp/barf/wrap.</td></tr>
+<tr><td class="next">35</td><td>visual-line-mode</td><td>User chose the client-geometry route: <code>caretPositionFromPoint(x, y±lineHeight)</code> → byte offset → goto. No CSS shortcut exists.</td></tr>
+<tr><td>20</td><td>Copilot ghost text</td><td>Overlays + existing <code>llm</code> primitive + debounced change hook; TAB accepts.</td></tr>
+<tr><td>39</td><td>Multiple cursors</td><td>Design agreed: <code>extra_cursors</code> in Buffer, per-cursor command loop at the KeyDispatch chokepoint, undo grouping, <code>mc-run-once</code> list in Scheme.</td></tr>
+<tr><td>44</td><td>ACP client (pi / codex)</td><td>Port-based JSON-RPC primitive + <code>acp.scm</code>; permission gates = minibuffer prompts.</td></tr>
+<tr><td>45</td><td>MCP server</td><td>Semantic tools over the RPC core; gate raw eval.</td></tr>
+<tr><td>38</td><td>notmuch.scm</td><td>User excited about this: "world's best email client". Needs <code>json-parse</code> primitive; dired pattern applied to mail.</td></tr>
+<tr><td>26</td><td>term-mode</td><td>xterm.js pane bound to a Proc PTY (for fish/htop/vim/claude CLI).</td></tr>
+<tr><td>—</td><td>LSP client</td><td>First real capf source; JSON-RPC over Port. Big user-visible win.</td></tr>
+<tr><td>36</td><td>Per-client frames</td><td><strong>Deferred</strong> by user ("multiplayer far future") — but it's the real fix for test flake.</td></tr>
+<tr><td>31</td><td>Idle 1s/sec LiveView diffs</td><td>Verifier saw it; may be cured by boot-id fix. Recheck.</td></tr>
+</table>
+
+<h2>Known debt (honest list)</h2>
+<ul>
+<li><strong>Scheme env frames are never GC'd</strong> — long sessions grow memory. Needs a reachability sweep.</li>
+<li>Rope has no rebalancing and no line index; byte offsets only.</li>
+<li>No macros (<code>define-syntax</code>) and no call/cc in the Scheme.</li>
+<li>Modified-flag is version-based: undoing back to the saved state doesn't clear <code>**</code>.</li>
+<li>RPC socket has no auth (localhost only).</li>
+<li>Scheme grammar for tree-sitter not wired — <code>.scm</code> files aren't highlighted.</li>
+<li>No test covers agent/RPC edits landing mid-undo-run.</li>
+</ul>
+
+<h2>User's vision (keep this in view)</h2>
+<p>"Vibe coders will use it to get their hands dirty in the code." LSP, documentation
+rendered as beautiful HTML, visual mail — <em>not like Emacs at all</em> in presentation,
+but Emacs-true in its bones: everything programmable, everything a buffer, keyboard-first,
+transient windows. The HTML frontend isn't a compromise — it's the point.</p>
+
+<div class="box warn">
+<strong>If something looks broken in the user's window:</strong> first suspect a stale page
+(hard reload), then check <code>~/.aimax/daemon.log</code>. The user does fiddle with the
+editor between your turns — their buffers/windows may not match what you left.
+</div>
+
+</body>
+</html>

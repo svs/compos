@@ -119,6 +119,11 @@ defmodule Aimax.Ui.Layouts do
             outline: 1px solid var(--linenum-fg, #b3ac9c);
           }
           .no-nums .linenum { display: none; }
+          /* HTML preview: sandboxed (no scripts), styles/images allowed */
+          .html-preview {
+            flex: 1; width: 100%; border: 0;
+            background: var(--window-bg, #fdfcf8);
+          }
           .region { background: var(--region-bg, #e7e9f1); }
           /* font-lock scopes (tree-sitter) — themeable via --ts-<scope>-fg */
           .ts-keyword { color: var(--ts-keyword-fg, #26356b); font-weight: 600; }

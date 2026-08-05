@@ -1,0 +1,164 @@
+defmodule Aimax.Scheme.Eval do
+  @moduledoc """
+  Tail-recursive evaluator. Runs entirely on BEAM terms; proper tail calls
+  come from the BEAM itself (all tail positions are direct recursive calls).
+
+  Closures: `{:closure, params, body, env_ref}`
+  Builtins: `{:builtin, name, fun}` where fun is `(args -> value)` or
+            `(args, store -> {value, store})` for store-aware primitives.
+  """
+
+  alias Aimax.Scheme.Env
+
+  defmodule Error do
+    defexception [:message]
+  end
+
+  @doc "Evaluate one form. Returns {value, store}."
+  def eval(expr, env, store)
+
+  def eval({:sym, name}, env, store), do: {Env.lookup(store, env, name), store}
+
+  def eval(expr, _env, store)
+      when is_number(expr) or is_binary(expr) or is_boolean(expr),
+      do: {expr, store}
+
+  def eval([{:sym, "quote"}, form], _env, store), do: {form, store}
+
+  def eval([{:sym, "if"}, c, t], env, store), do: eval([{:sym, "if"}, c, t, :void], env, store)
+
+  def eval([{:sym, "if"}, c, t, e], env, store) do
+    {cond_val, store} = eval_arg(c, env, store)
+
+    cond do
+      cond_val == false -> if e == :void, do: {:void, store}, else: eval(e, env, store)
+      true -> eval(t, env, store)
+    end
+  end
+
+  def eval([{:sym, "define"}, {:sym, name}, value_form], env, store) do
+    {val, store} = eval_arg(value_form, env, store)
+    {:void, Env.define(store, env, name, val)}
+  end
+
+  # (define (f a b) body...) sugar
+  def eval([{:sym, "define"}, [{:sym, name} | params] | body], env, store) do
+    eval([{:sym, "define"}, {:sym, name}, [{:sym, "lambda"}, params | body]], env, store)
+  end
+
+  def eval([{:sym, "lambda"}, params | body], env, store) do
+    {{:closure, param_names!(params), body, env}, store}
+  end
+
+  def eval([{:sym, "set!"}, {:sym, name}, value_form], env, store) do
+    {val, store} = eval_arg(value_form, env, store)
+    {:void, Env.set!(store, env, name, val)}
+  end
+
+  def eval([{:sym, "begin"} | body], env, store), do: eval_seq(body, env, store)
+
+  # named let: (let loop ((i 0)) ... (loop (+ i 1))) — tail-recursive iteration
+  def eval([{:sym, "let"}, {:sym, name}, bindings | body], env, store) do
+    {names, forms} =
+      bindings
+      |> Enum.map(fn [{:sym, n}, form] -> {n, form} end)
+      |> Enum.unzip()
+
+    {vals, store} = eval_args(forms, env, store, [])
+    {frame, store} = Env.new_frame(store, env)
+    closure = {:closure, names, body, frame}
+    store = Env.define(store, frame, name, closure)
+    apply_fn(closure, vals, store)
+  end
+
+  def eval([{:sym, "let"}, bindings | body], env, store) do
+    {vars, store} =
+      Enum.reduce(bindings, {%{}, store}, fn [{:sym, name}, form], {vars, store} ->
+        {val, store} = eval_arg(form, env, store)
+        {Map.put(vars, name, val), store}
+      end)
+
+    {frame, store} = Env.new_frame(store, env, vars)
+    eval_seq(body, frame, store)
+  end
+
+  def eval([{:sym, "and"} | args], env, store), do: eval_and(args, env, store)
+  def eval([{:sym, "or"} | args], env, store), do: eval_or(args, env, store)
+
+  # application
+  def eval([op | arg_forms], env, store) do
+    {f, store} = eval_arg(op, env, store)
+    {args, store} = eval_args(arg_forms, env, store, [])
+    apply_fn(f, args, store)
+  end
+
+  def eval(other, _env, _store) do
+    raise Error, message: "cannot evaluate: #{inspect(other)}"
+  end
+
+  @doc "Apply a Scheme callable to already-evaluated args."
+  def apply_fn({:closure, params, body, closure_env}, args, store) do
+    if length(params) != length(args) do
+      raise Error, message: "arity mismatch: expected #{length(params)}, got #{length(args)}"
+    end
+
+    vars = params |> Enum.zip(args) |> Map.new()
+    {frame, store} = Env.new_frame(store, closure_env, vars)
+    eval_seq(body, frame, store)
+  end
+
+  def apply_fn({:builtin, _name, fun}, args, store) when is_function(fun, 1),
+    do: {fun.(args), store}
+
+  def apply_fn({:builtin, _name, fun}, args, store) when is_function(fun, 2),
+    do: fun.(args, store)
+
+  def apply_fn(other, _args, _store) do
+    raise Error, message: "not a function: #{inspect(other)}"
+  end
+
+  # --- helpers ---------------------------------------------------------------
+
+  # non-tail evaluation of a subexpression
+  defp eval_arg(form, env, store), do: eval(form, env, store)
+
+  defp eval_args([], _env, store, acc), do: {Enum.reverse(acc), store}
+
+  defp eval_args([form | rest], env, store, acc) do
+    {val, store} = eval_arg(form, env, store)
+    eval_args(rest, env, store, [val | acc])
+  end
+
+  # last form is in tail position
+  defp eval_seq([form], env, store), do: eval(form, env, store)
+
+  defp eval_seq([form | rest], env, store) do
+    {_val, store} = eval_arg(form, env, store)
+    eval_seq(rest, env, store)
+  end
+
+  defp eval_seq([], _env, store), do: {:void, store}
+
+  defp eval_and([], _env, store), do: {true, store}
+  defp eval_and([last], env, store), do: eval(last, env, store)
+
+  defp eval_and([form | rest], env, store) do
+    {val, store} = eval_arg(form, env, store)
+    if val == false, do: {false, store}, else: eval_and(rest, env, store)
+  end
+
+  defp eval_or([], _env, store), do: {false, store}
+  defp eval_or([last], env, store), do: eval(last, env, store)
+
+  defp eval_or([form | rest], env, store) do
+    {val, store} = eval_arg(form, env, store)
+    if val == false, do: eval_or(rest, env, store), else: {val, store}
+  end
+
+  defp param_names!(params) do
+    Enum.map(params, fn
+      {:sym, name} -> name
+      other -> raise Error, message: "bad parameter: #{inspect(other)}"
+    end)
+  end
+end

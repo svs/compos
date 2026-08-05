@@ -1,0 +1,19 @@
+defmodule Aimax.Scheme.Printer do
+  @moduledoc "Scheme value -> string. `print` is `write`-style, `display` is human-style."
+
+  def print(true), do: "#t"
+  def print(false), do: "#f"
+  def print(:void), do: ""
+  def print({:sym, s}), do: s
+  def print(s) when is_binary(s), do: inspect(s)
+  def print(i) when is_integer(i), do: Integer.to_string(i)
+  def print(f) when is_float(f), do: Float.to_string(f)
+  def print(l) when is_list(l), do: "(" <> Enum.map_join(l, " ", &print/1) <> ")"
+  def print({:closure, params, _, _}), do: "#<procedure (#{Enum.join(params, " ")})>"
+  def print({:builtin, name, _}), do: "#<builtin #{name}>"
+  def print(other), do: inspect(other)
+
+  def display(s) when is_binary(s), do: s
+  def display(l) when is_list(l), do: "(" <> Enum.map_join(l, " ", &display/1) <> ")"
+  def display(other), do: print(other)
+end

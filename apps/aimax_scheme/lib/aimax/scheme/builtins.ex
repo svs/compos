@@ -1,0 +1,105 @@
+defmodule Aimax.Scheme.Builtins do
+  @moduledoc """
+  Core builtins. Higher-order library functions (map/filter/etc.) live in the
+  Scheme prelude instead — they need `apply`, which the prelude gets for free.
+  """
+
+  alias Aimax.Scheme.{Eval, Printer}
+
+  def all do
+    %{
+      "+" => &arith(&1, 0, fn a, b -> a + b end),
+      "*" => &arith(&1, 1, fn a, b -> a * b end),
+      "-" => &sub/1,
+      "/" => &divide/1,
+      "=" => cmp(fn a, b -> a == b end),
+      "<" => cmp(fn a, b -> a < b end),
+      ">" => cmp(fn a, b -> a > b end),
+      "<=" => cmp(fn a, b -> a <= b end),
+      ">=" => cmp(fn a, b -> a >= b end),
+      "equal?" => fn [a, b] -> a == b end,
+      "not" => fn [a] -> a == false end,
+      "cons" => fn [h, t] when is_list(t) -> [h | t] end,
+      "car" => fn [[h | _]] -> h end,
+      "cdr" => fn [[_ | t]] -> t end,
+      "list" => fn args -> args end,
+      "null?" => fn [x] -> x == [] end,
+      "pair?" => fn [x] -> is_list(x) and x != [] end,
+      "length" => fn [l] -> length(l) end,
+      "append" => fn lists -> Enum.concat(lists) end,
+      "reverse" => fn [l] -> Enum.reverse(l) end,
+      "number?" => fn [x] -> is_number(x) end,
+      "string?" => fn [x] -> is_binary(x) end,
+      "symbol?" => fn [x] -> match?({:sym, _}, x) end,
+      "procedure?" => fn [x] -> match?({:closure, _, _, _}, x) or match?({:builtin, _, _}, x) end,
+      "string-append" => fn args -> Enum.join(args) end,
+      "string-length" => fn [s] -> String.length(s) end,
+      "string-contains?" => fn [s, sub] -> String.contains?(s, sub) end,
+      "string-prefix?" => fn [pre, s] -> String.starts_with?(s, pre) end,
+      "string-suffix?" => fn [suf, s] -> String.ends_with?(s, suf) end,
+      "string-rindex" => fn [s, sub] ->
+        case :binary.matches(s, sub) do
+          [] -> false
+          matches -> matches |> List.last() |> elem(0)
+        end
+      end,
+      "common-prefix" => fn [strings] ->
+        case strings do
+          [] ->
+            ""
+
+          [first | rest] ->
+            Enum.reduce(rest, first, fn s, acc ->
+              acc
+              |> String.graphemes()
+              |> Enum.zip(String.graphemes(s))
+              |> Enum.take_while(fn {a, b} -> a == b end)
+              |> Enum.map_join(&elem(&1, 0))
+            end)
+        end
+      end,
+      "string-split" => fn [s, sep] -> String.split(s, sep) end,
+      "string-join" => fn [parts, sep] -> Enum.join(parts, sep) end,
+      "string-pad-left" => fn [s, n] -> String.pad_leading(s, n) end,
+      "string-pad-right" => fn [s, n] -> String.pad_trailing(s, n) end,
+      "substring" => fn [s, from, to] -> String.slice(s, from, to - from) end,
+      "number->string" => fn [n] -> Printer.print(n) end,
+      "value->string" => fn [v] -> Printer.print(v) end,
+      "string->number" => fn [s] ->
+        case Integer.parse(s) do
+          {i, ""} -> i
+          _ -> with {f, ""} <- Float.parse(s), do: f
+        end
+      end,
+      "symbol->string" => fn [{:sym, s}] -> s end,
+      "string->symbol" => fn [s] -> {:sym, s} end,
+      "apply" => fn [f, args], store -> Eval.apply_fn(f, args, store) end,
+      "display" => fn [x] ->
+        IO.write(Printer.display(x))
+        :void
+      end,
+      "newline" => fn [] ->
+        IO.write("\n")
+        :void
+      end,
+      "error" => fn args ->
+        raise Eval.Error, message: Enum.map_join(args, " ", &Printer.display/1)
+      end
+    }
+  end
+
+  defp arith(args, init, op) do
+    Enum.reduce(args, init, fn x, acc when is_number(x) -> op.(acc, x) end)
+  end
+
+  defp sub([x]), do: -x
+  defp sub([x | rest]), do: Enum.reduce(rest, x, fn b, a -> a - b end)
+
+  defp divide([x | rest]), do: Enum.reduce(rest, x, fn b, a -> a / b end)
+
+  defp cmp(op) do
+    fn args ->
+      args |> Enum.chunk_every(2, 1, :discard) |> Enum.all?(fn [a, b] -> op.(a, b) end)
+    end
+  end
+end

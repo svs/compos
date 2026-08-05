@@ -886,6 +886,37 @@ defmodule Aimax.EditorTest do
   defp find_leaf_by_id(%{type: :split, children: c}, id),
     do: Enum.find_value(c, &find_leaf_by_id(&1, id))
 
+  test "chat buffer: C-c RET sends the transcript, reply appends", %{buf: _buf} do
+    Application.put_env(:aimax_core, :llm_request_fun, fn prompt ->
+      assert prompt =~ "what is 6*7"
+      {:ok, "42"}
+    end)
+
+    on_exit(fn ->
+      Application.delete_env(:aimax_core, :llm_request_fun)
+      Aimax.Core.kill_buffer("*chat*")
+    end)
+
+    press(["M-x"])
+    type("chat")
+    press(["RET"])
+    assert Editor.current_buffer() == "*chat*"
+    assert Buffer.text("*chat*") =~ "### You"
+
+    type("what is 6*7")
+    press(["C-c", "RET"])
+
+    assert eventually(fn -> Buffer.text("*chat*") =~ "### Assistant" end)
+    assert eventually(fn -> Buffer.text("*chat*") =~ "42" end)
+  end
+
+  test "set-llm-model! changes the model" do
+    {:ok, before} = Aimax.Core.Session.eval("(llm-model)")
+    {:ok, _} = Aimax.Core.Session.eval(~s{(set-llm-model! "luna-5.6")})
+    assert {:ok, ~s{"luna-5.6"}} = Aimax.Core.Session.eval("(llm-model)")
+    {:ok, _} = Aimax.Core.Session.eval("(set-llm-model! #{before})")
+  end
+
   test "orderless: space-separated terms match in any order" do
     press(["M-x"])
     type("window split")

@@ -126,21 +126,24 @@ defmodule Aimax.Core.Session do
     load_init(interp)
   end
 
-  # user config: ~/.aimax/init.scm — errors log loudly but never brick boot
+  # user config: ~/.aimax/ai-config.scm then init.scm — errors log loudly
+  # but never brick boot. (load "...") works from inside either.
   defp load_init(interp) do
-    path = Path.expand("~/.aimax/init.scm")
+    Enum.reduce(["ai-config.scm", "init.scm"], interp, fn file, interp ->
+      path = Path.expand("~/.aimax/#{file}")
 
-    with true <- File.exists?(path),
-         {:ok, _, interp2} <- Scheme.eval_string(interp, File.read!(path)) do
-      interp2
-    else
-      false ->
-        interp
+      with true <- File.exists?(path),
+           {:ok, _, interp2} <- Scheme.eval_string(interp, File.read!(path)) do
+        interp2
+      else
+        false ->
+          interp
 
-      {:error, msg} ->
-        Logger.error("init.scm error: #{msg}")
-        interp
-    end
+        {:error, msg} ->
+          Logger.error("#{file} error: #{msg}")
+          interp
+      end
+    end)
   end
 
   defp session_primitives(global) do
@@ -170,6 +173,11 @@ defmodule Aimax.Core.Session do
         Aimax.Core.LLM.complete(prompt, fn text -> apply_callback(callback, [text]) end)
         :void
       end,
+      "set-llm-model!" => fn [m] ->
+        Aimax.Core.LLM.set_model(m)
+        :void
+      end,
+      "llm-model" => fn [] -> Aimax.Core.LLM.model() end,
       "eval-string" => fn [src], store -> eval_src.(src, store) end,
       # load-library: evaluate a Scheme file in the live session
       "load" => fn [path], store ->

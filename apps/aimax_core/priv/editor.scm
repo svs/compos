@@ -592,6 +592,77 @@
 
 (global-set-key "M-|" "llm-pipe-region")
 
+;;; --- chat buffer (gptel-style) -------------------------------------------------
+;;; *chat* is an ordinary editable buffer. Type after the "### You" marker,
+;;; press C-c RET, and the whole buffer becomes the conversation context.
+
+(define *chat-buffer* "*chat*")
+
+(define (chat-prompt-marker) "\n### You\n")
+(define (chat-reply-marker) "\n### Assistant\n")
+
+(define-command "chat"
+  (lambda ()
+    (if (not (buffer-exists? *chat-buffer*))
+        (begin
+          (buffer-create *chat-buffer*)
+          (buffer-append! *chat-buffer*
+            (string-append ";; ai-max chat · " (llm-model)
+                           " · C-c RET sends · C-c m switches model"
+                           (chat-prompt-marker)))))
+    (switch-to-buffer! *chat-buffer*)
+    (buffer-set-local! *chat-buffer* 'mode-name "Chat")
+    (local-set-key "C-c RET" "chat-send")
+    (local-set-key "C-c m" "chat-set-model")
+    (end-of-buffer!)))
+
+(define-command "chat-send"
+  (lambda ()
+    (let ((convo (buffer-text *chat-buffer*)))
+      (buffer-append! *chat-buffer* (chat-reply-marker))
+      (end-of-buffer!)
+      (message "LLM thinking...")
+      (llm (string-append
+             "You are the assistant in an editor chat buffer. The transcript "
+             "follows; reply to the last user turn only, in markdown.\n\n"
+             convo)
+           (lambda (reply)
+             (buffer-append! *chat-buffer*
+               (string-append reply (chat-prompt-marker)))
+             (end-of-buffer!)
+             (message "Reply ready"))))))
+
+;; Models offered by C-c m / M-x chat-set-model. Override in your
+;; ~/.aimax/ai-config.scm:  (set! *llm-models* (list "openrouter:openai/luna-5.6" ...))
+(define *llm-models*
+  (list "openrouter:openai/luna-5.6"
+        "openrouter:anthropic/claude-sonnet-5"
+        "claude-sonnet-5"
+        "claude-opus-5"
+        "claude-haiku-4-5-20251001"))
+
+(define-command "chat-set-model"
+  (lambda ()
+    (minibuffer-read (string-append "Model (now " (llm-model) "): ")
+      *llm-models*
+      (lambda (m)
+        (set-llm-model! m)
+        (message (string-append "LLM model: " m))))))
+
+;; send the region to the chat buffer as context, then open it
+(define-command "chat-send-region"
+  (lambda ()
+    (let ((text (region-text)))
+      (if (equal? text "")
+          (message "No region")
+          (begin
+            (chat)
+            (insert! (string-append "```\n" text "\n```\n"))
+            (message "Region added to chat"))))))
+
+(global-set-key "C-c c" "chat")
+(global-set-key "C-c r" "chat-send-region")
+
 ;;; --- M-x and eval ----------------------------------------------------------
 
 (define-command "execute-extended-command"

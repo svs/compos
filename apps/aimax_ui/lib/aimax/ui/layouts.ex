@@ -65,7 +65,37 @@ defmodule Aimax.Ui.Layouts do
             font-size: 11px; color: var(--linenum-fg, #b3ac9c);
             user-select: none;
           }
-          .line-content { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; }
+          .line-content { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; position: relative; }
+          /* completion-at-point popup: inline card anchored under the prefix */
+          .cap-pop {
+            position: absolute; top: calc(100% + 3px); z-index: 15;
+            display: block; min-width: 240px; max-width: 380px;
+            background: var(--window-bg, #fdfcf8);
+            border: 1px solid var(--default-fg, #1b1a17);
+            box-shadow: 3px 3px 0 rgba(27, 26, 23, 0.18);
+            animation: rise 90ms ease-out;
+            white-space: nowrap;
+          }
+          .cap-title {
+            display: flex; padding: 4px 10px 5px;
+            border-bottom: 1px solid var(--border, #e2dbc9);
+            font-size: 10px; letter-spacing: 0.13em; text-transform: uppercase;
+            color: var(--dim-fg, #8a857a);
+          }
+          .cap-row {
+            display: flex; align-items: baseline; gap: 10px; padding: 3px 10px;
+            border-left: 2px solid transparent; font-size: 12.5px;
+          }
+          .cap-row.selected {
+            background: var(--select-bg, #e7e9f1);
+            border-left-color: var(--accent-fg, #26356b);
+          }
+          .cap-row.selected .cap-label { color: var(--accent-fg, #26356b); font-weight: 600; }
+          .cap-label { white-space: nowrap; }
+          .cap-kind {
+            margin-left: auto; font-size: 10px; letter-spacing: 0.1em;
+            text-transform: uppercase; color: var(--dim-fg, #8a857a);
+          }
           /* off-phase shows the glyph as normal text (Emacs GUI behavior) —
              never blink the character itself away */
           @keyframes blink { 50%, 100% { background-color: transparent; color: inherit; } }

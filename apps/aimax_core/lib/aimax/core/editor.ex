@@ -66,6 +66,17 @@ defmodule Aimax.Core.Editor do
   def set_last_command(name), do: GenServer.call(__MODULE__, {:set_last_command, name})
   def last_command, do: GenServer.call(__MODULE__, :last_command)
 
+  # completion-at-point popup (anchored at a buffer position)
+  def completion_show(start, candidates),
+    do: GenServer.call(__MODULE__, {:completion_show, start, candidates})
+
+  def completion_move(delta), do: GenServer.call(__MODULE__, {:completion_move, delta})
+
+  @doc "Accept the selection: returns {start, label} and clears, or nil."
+  def completion_accept, do: GenServer.call(__MODULE__, :completion_accept)
+
+  def completion_dismiss, do: GenServer.call(__MODULE__, :completion_dismiss)
+
   # kill ring
   def kill_push(text), do: GenServer.call(__MODULE__, {:kill_push, text})
   def kill_top, do: GenServer.call(__MODULE__, :kill_top)
@@ -104,13 +115,14 @@ defmodule Aimax.Core.Editor do
        echo: "",
        faces: %{},
        local_keymaps: %{},
-       last_command: ""
+       last_command: "",
+       completion: nil
      }}
   end
 
   @impl true
   def handle_call(:snapshot, _from, state) do
-    {:reply, Map.take(state, [:pending, :minibuffer, :echo, :active]), state}
+    {:reply, Map.take(state, [:pending, :minibuffer, :echo, :active, :completion]), state}
   end
 
   def handle_call(:current_buffer, _from, state) do
@@ -148,6 +160,7 @@ defmodule Aimax.Core.Editor do
        pending: state.pending,
        minibuffer: state.minibuffer && render_minibuffer(state.minibuffer),
        which_key: which_key(state),
+       completion: state.completion && render_completion(state.completion),
        echo: state.echo,
        faces: state.faces
      }, state}
@@ -214,6 +227,39 @@ defmodule Aimax.Core.Editor do
     do: {:reply, :ok, %{state | last_command: name}}
 
   def handle_call(:last_command, _from, state), do: {:reply, state.last_command, state}
+
+  def handle_call({:completion_show, start, candidates}, _from, state) do
+    case normalize(candidates) do
+      [] ->
+        changed(:ok, %{state | completion: nil})
+
+      cands ->
+        changed(:ok, %{state | completion: %{start: start, candidates: cands, sel: 0}})
+    end
+  end
+
+  def handle_call({:completion_move, delta}, _from, %{completion: %{} = c} = state) do
+    n = length(c.candidates)
+    sel = c.sel |> Kernel.+(delta) |> max(0) |> min(n - 1)
+    changed(:ok, %{state | completion: %{c | sel: sel}})
+  end
+
+  def handle_call({:completion_move, _}, _from, state), do: {:reply, :ok, state}
+
+  def handle_call(:completion_accept, _from, %{completion: %{} = c} = state) do
+    reply =
+      case Enum.at(c.candidates, c.sel) do
+        %{label: label} -> {c.start, label}
+        nil -> nil
+      end
+
+    changed(reply, %{state | completion: nil})
+  end
+
+  def handle_call(:completion_accept, _from, state), do: {:reply, nil, state}
+
+  def handle_call(:completion_dismiss, _from, state),
+    do: changed(:ok, %{state | completion: nil})
 
   def handle_call({:key_for_command, command}, _from, state) do
     reply =
@@ -389,6 +435,19 @@ defmodule Aimax.Core.Editor do
       total: length(list),
       completing: mb.on_complete not in [nil, false]
     }
+  end
+
+  defp render_completion(c) do
+    sel = min(c.sel, length(c.candidates) - 1)
+    offset = max(0, sel - 7)
+
+    rows =
+      c.candidates
+      |> Enum.slice(offset, 8)
+      |> Enum.with_index(offset)
+      |> Enum.map(fn {cand, i} -> Map.put(cand, :selected, i == sel) end)
+
+    %{start: c.start, candidates: rows, sel: sel, total: length(c.candidates)}
   end
 
   defp which_key(%{pending: []}), do: nil

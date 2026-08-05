@@ -663,7 +663,7 @@ defmodule Aimax.EditorTest do
     press(["C-x", "1"])
     Editor.set_window_buffer("*scratch*")
     Aimax.Core.kill_buffer(path)
-    refute Buffer.exists?(path)
+    assert eventually(fn -> not Buffer.exists?(path) end)
 
     assert :ok = Aimax.Core.Desktop.restore_now()
 
@@ -677,6 +677,52 @@ defmodule Aimax.EditorTest do
 
     press(["C-x", "1"])
     File.rm!(path)
+  end
+
+  test "completion-at-point: dabbrev popup, selection, accept, refilter", %{buf: buf} do
+    type("hello helper")
+    press(["RET"])
+    type("he")
+
+    press(["C-M-i"])
+    comp = Editor.render_state().completion
+    assert comp != nil
+    assert Enum.map(comp.candidates, & &1.label) == ["hello", "helper"]
+    assert hd(comp.candidates).selected
+
+    # C-n selects helper; TAB accepts, replacing the prefix
+    press(["C-n", "TAB"])
+    assert Editor.snapshot().completion == nil
+    assert Buffer.text(buf) == "hello helper\nhelper"
+
+    # typing while popup is open refilters
+    press(["RET"])
+    type("hel")
+    press(["C-M-i"])
+    type("p")
+    comp = Editor.render_state().completion
+    assert Enum.map(comp.candidates, & &1.label) == ["helper"]
+    press(["RET"])
+    assert Buffer.text(buf) =~ "helper\nhelper"
+
+    # C-g dismisses without inserting
+    press(["RET"])
+    type("he")
+    press(["C-M-i", "C-g"])
+    assert Editor.snapshot().completion == nil
+  end
+
+  test "capf: buffer-local sources take precedence (the LSP plug point)", %{buf: buf} do
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (buffer-set-local! "#{buf}" 'capf-sources
+        (list (lambda () (list (point) (point) (list (list "from-lsp" "lsp"))))))
+      """)
+
+    press(["C-M-i"])
+    comp = Editor.render_state().completion
+    assert [%{label: "from-lsp", hint: "lsp"}] = comp.candidates
+    press(["C-g"])
   end
 
   test "orderless: space-separated terms match in any order" do

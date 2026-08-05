@@ -133,7 +133,7 @@ defmodule Aimax.Ui.EditorLive do
     <div id="editor" class="editor-root" phx-hook="Keys" data-boot={@boot_id}>
       <style :if={@state.faces != %{}}><%= Phoenix.HTML.raw(face_css(@state.faces)) %></style>
       <div class="windows">
-        <.tree node={@state.tree} active={@state.active} />
+        <.tree node={@state.tree} active={@state.active} completion={@state.completion} />
       </div>
       <div :if={@state.which_key && @state.minibuffer == nil} class="which-key">
         <div class="wk-title">{Enum.join(@state.pending, " ")} —  {length(@state.which_key)} bindings</div>
@@ -189,7 +189,7 @@ defmodule Aimax.Ui.EditorLive do
   defp tree(%{node: %{type: :split}} = assigns) do
     ~H"""
     <div class={"split #{@node.dir}"}>
-      <.tree :for={child <- @node.children} node={child} active={@active} />
+      <.tree :for={child <- @node.children} node={child} active={@active} completion={@completion} />
     </div>
     """
   end
@@ -210,7 +210,14 @@ defmodule Aimax.Ui.EditorLive do
       <div class="buf">
         <div :for={ln <- @lines} class={"line #{if ln.current, do: "hl-line"}"}>
           <span class="linenum">{ln.num}</span>
-          <span class="line-content"><span :for={{txt, cls} <- ln.segs} class={cls}>{txt}</span></span>
+          <span class="line-content"><span :for={{txt, cls} <- ln.segs} class={cls}>{txt}</span><span
+              :if={@active? && @completion && ln.current}
+              class="cap-pop"
+              style={"left: #{pop_col(@node.text, ln.start, @completion.start)}ch"}
+            ><span class="cap-title">completion-at-point · {@completion.total}</span><span
+              :for={c <- @completion.candidates}
+              class={"cap-row #{if c.selected, do: "selected"}"}
+            ><span class="cap-label">{c.label}</span><span class="cap-kind">{c.hint}</span></span></span></span>
         </div>
       </div>
       <div class="modeline">
@@ -265,7 +272,7 @@ defmodule Aimax.Ui.EditorLive do
           line.segs
         end
 
-      %{num: line.num, current: current, segs: segs}
+      %{num: line.num, current: current, start: line.start, segs: segs}
     end)
   end
 
@@ -309,6 +316,13 @@ defmodule Aimax.Ui.EditorLive do
         []
       end
     end)
+  end
+
+  # popup anchor column in ch units (monospace): graphemes from line start
+  # to the completion region start
+  defp pop_col(text, line_start, comp_start) do
+    len = comp_start |> max(line_start) |> min(byte_size(text))
+    text |> binary_part(line_start, len - line_start) |> String.length()
   end
 
   defp face_css(faces) do

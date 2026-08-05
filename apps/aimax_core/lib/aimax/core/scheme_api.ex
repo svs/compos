@@ -350,6 +350,27 @@ defmodule Aimax.Core.SchemeAPI do
       end,
       "key-for-command" => fn [name] -> Editor.key_for_command(name) end,
       "last-command" => fn [] -> Editor.last_command() end,
+
+      # completion popup: candidates = strings or (label hint) pairs
+      "completion-show!" => fn [start, _end, candidates] ->
+        Editor.completion_show(start, candidates)
+        :void
+      end,
+      "completion-dismiss!" => fn [] ->
+        Editor.completion_dismiss()
+        :void
+      end,
+      # words in the current buffer with the given prefix (dabbrev fuel)
+      "buffer-words" => fn [prefix] ->
+        text = Buffer.text(Editor.current_buffer())
+
+        ~r/[A-Za-z_][A-Za-z0-9_?!-]*/
+        |> Regex.scan(text)
+        |> List.flatten()
+        |> Enum.uniq()
+        |> Enum.filter(&(String.starts_with?(&1, prefix) and &1 != prefix))
+        |> Enum.sort()
+      end,
       "minibuffer-set-candidates!" => fn [candidates] ->
         Editor.minibuffer_set_candidates(candidates)
         :void

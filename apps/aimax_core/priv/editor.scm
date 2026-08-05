@@ -153,6 +153,49 @@
                 (insert! (kill-nth *yank-index*)))))
         (message "Previous command was not a yank"))))
 
+;;; --- completion framework (capf) ---------------------------------------------
+;;; A completion source is a closure of no arguments returning either
+;;;   #f                                — source has nothing here
+;;;   (list start end candidates)      — region to replace + candidates,
+;;;                                       each a string or (label hint) pair
+;;; Sources are tried in order; first non-#f wins (Emacs capf semantics).
+;;; An LSP client is just another source returning the same shape.
+;;; Buffer-local sources: (buffer-set-local! buf 'capf-sources (list fn ...))
+
+(define *capf-sources* '())
+
+(define (add-capf! fn)
+  (set! *capf-sources* (cons fn *capf-sources*)))
+
+(define (capf-sources)
+  (let ((local (buffer-local (current-buffer) 'capf-sources)))
+    (if local (append local *capf-sources*) *capf-sources*)))
+
+(define-command "completion-at-point"
+  (lambda ()
+    (let loop ((sources (capf-sources)))
+      (if (null? sources)
+          (completion-dismiss!)
+          (let ((r ((car sources))))
+            (if r
+                (completion-show! (car r) (cadr r) (caddr r))
+                (loop (cdr sources))))))))
+
+;; dabbrev: complete the word before point from words in this buffer
+(define (capf-dabbrev)
+  (let ((e (point)))
+    (let ((s (backward-word!)))
+      (goto-char! e)
+      (if (and (< s e) (> e s))
+          (let ((prefix (buffer-substring s e)))
+            (let ((words (buffer-words prefix)))
+              (if (null? words)
+                  #f
+                  (list s e (map (lambda (w) (list w "dabbrev")) words)))))
+          #f))))
+
+(add-capf! capf-dabbrev)
+
 ;;; --- misc editing --------------------------------------------------------------
 
 (define-command "indent-for-tab" (lambda () (insert! "  ")))
@@ -485,6 +528,8 @@
 (global-set-key "M-g g" "goto-line")
 (global-set-key "M-g M-g" "goto-line")
 (global-set-key "M-m" "back-to-indentation")
+(global-set-key "C-M-i" "completion-at-point")
+(global-set-key "M-/" "completion-at-point")
 (global-set-key "C-M-f" "forward-sexp")
 (global-set-key "C-M-b" "backward-sexp")
 (global-set-key "C-M-u" "backward-up-list")

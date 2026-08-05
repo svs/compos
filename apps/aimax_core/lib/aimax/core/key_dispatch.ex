@@ -16,10 +16,58 @@ defmodule Aimax.Core.KeyDispatch do
   @named ~w(RET DEL TAB SPC ESC <left> <right> <up> <down> <home> <end>)
 
   def handle_key(key) do
-    %{minibuffer: mb, pending: pending} = Editor.snapshot()
+    %{minibuffer: mb, pending: pending, completion: completion} = Editor.snapshot()
 
-    if mb, do: minibuffer_key(key, mb), else: buffer_key(key, pending)
+    cond do
+      mb -> minibuffer_key(key, mb)
+      completion -> completion_key(key, pending)
+      true -> buffer_key(key, pending)
+    end
+
     :ok
+  end
+
+  # --- completion popup routing ----------------------------------------------
+
+  defp completion_key(key, pending) do
+    cond do
+      key in ["C-n", "<down>"] ->
+        Editor.completion_move(1)
+
+      key in ["C-p", "<up>"] ->
+        Editor.completion_move(-1)
+
+      key in ["RET", "TAB"] ->
+        case Editor.completion_accept() do
+          {start, label} ->
+            buf = Editor.current_buffer()
+            point = Buffer.point(buf)
+            if point > start, do: Buffer.delete_range(buf, start, point - start)
+            Buffer.insert(buf, label)
+
+          nil ->
+            :ok
+        end
+
+      key in ["C-g", "ESC"] ->
+        Editor.completion_dismiss()
+        Editor.set_echo("")
+
+      key == "DEL" ->
+        Editor.completion_dismiss()
+        Buffer.delete_char(Editor.current_buffer(), -1)
+        run("completion-at-point")
+
+      printable?(key) or key == "SPC" ->
+        Editor.completion_dismiss()
+        self_insert(if(key == "SPC", do: " ", else: key))
+        if key != "SPC", do: run("completion-at-point")
+
+      true ->
+        # any other key dismisses and acts normally
+        Editor.completion_dismiss()
+        buffer_key(key, pending)
+    end
   end
 
   # --- minibuffer routing ----------------------------------------------------

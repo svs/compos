@@ -789,6 +789,17 @@ defmodule Aimax.EditorTest do
     end
   end
 
+  test "C-x k defaults to killing the current buffer", %{buf: buf} do
+    type("doomed")
+    press(["C-x", "k"])
+    mb = Editor.snapshot().minibuffer
+    assert mb.prompt =~ "default #{buf}"
+    press(["RET"])
+
+    assert eventually(fn -> not Buffer.exists?(buf) end)
+    assert Editor.current_buffer() == "*scratch*"
+  end
+
   test "orderless: space-separated terms match in any order" do
     press(["M-x"])
     type("window split")

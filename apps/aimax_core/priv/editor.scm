@@ -415,10 +415,16 @@
 
 (define-command "kill-buffer"
   (lambda ()
-    (minibuffer-read "Kill buffer: " (buffer-list)
-      (lambda (name)
-        (buffer-kill! name)
-        (switch-to-buffer! "*scratch*")))))
+    (let ((cur (current-buffer)))
+      ;; current buffer is the default: first candidate, RET kills it
+      (minibuffer-read (string-append "Kill buffer (default " cur "): ")
+        (cons (list cur "current") (buffer-candidates))
+        (lambda (name)
+          (let ((target (if (equal? name "") cur name)))
+            (buffer-kill! target)
+            (if (equal? target cur)
+                (switch-to-buffer! "*scratch*"))
+            (message (string-append "Killed " target))))))))
 
 ;;; --- shell (comint) --------------------------------------------------------
 ;;; RET in a process buffer sends the current line to the process (deleting

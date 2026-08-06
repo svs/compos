@@ -140,6 +140,87 @@ defmodule Aimax.Ui.Layouts do
             background: var(--window-bg, #fdfcf8);
           }
           .region { background: var(--region-bg, #e7e9f1); }
+          /* --- agent transcript (the Modern Emacs agent-chat design) ------- */
+          .agent-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+          .ag-scroll { flex: 1; overflow-y: auto; padding: 14px 18px 6px; }
+          .ag-label {
+            font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em;
+            color: var(--agent-meta-fg, #8a8577); flex-shrink: 0; padding-top: 3px;
+          }
+          .ag-user {
+            display: flex; gap: 12px; margin: 10px 0;
+            background: var(--agent-you-bg, rgba(99, 110, 200, 0.10));
+            border-radius: 8px; padding: 8px 12px;
+          }
+          .ag-user-text { font-family: var(--font-mono); font-size: 12.5px; white-space: pre-wrap; }
+          .ag-prose {
+            font-family: var(--font-serif); font-size: 15px; line-height: 1.6;
+            margin: 8px 0; max-width: 62ch;
+          }
+          .ag-prose code, .ag-prose pre {
+            font-family: var(--font-mono); font-size: 12px;
+            background: var(--agent-code-bg, rgba(0,0,0,0.06)); border-radius: 4px;
+          }
+          .ag-prose code { padding: 1px 4px; }
+          .ag-prose pre { padding: 8px 10px; overflow-x: auto; margin: 6px 0; }
+          .ag-prose pre code { background: none; padding: 0; }
+          .ag-prose p { margin: 6px 0; }
+          .ag-prose ul, .ag-prose ol { margin: 6px 0 6px 1.4em; }
+          .ag-tool, .ag-thought {
+            margin: 8px 0; border: 1px solid var(--agent-card-border, rgba(0,0,0,0.10));
+            border-radius: 8px; font-family: var(--font-mono); font-size: 12px;
+          }
+          .ag-tool summary, .ag-thought summary {
+            display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+            cursor: pointer; list-style: none; user-select: none;
+          }
+          .ag-tool summary::-webkit-details-marker { display: none; }
+          .ag-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--agent-meta-fg, #999); }
+          .ag-dot.running { background: var(--warn-fg, #e0af68); animation: ag-pulse 1.2s ease-in-out infinite; }
+          .ag-dot.done { background: var(--string-fg, #4a7a4a); }
+          .ag-verb { color: var(--agent-tool-fg, #26356b); font-weight: 600; }
+          .ag-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .ag-tstatus { color: var(--agent-meta-fg, #8a8577); font-size: 10px; }
+          .ag-body {
+            border-top: 1px solid var(--agent-card-border, rgba(0,0,0,0.08));
+            padding: 8px 10px; overflow-x: auto; max-height: 260px; overflow-y: auto;
+            white-space: pre-wrap; color: var(--agent-thought-fg, #6a675e);
+          }
+          .ag-thought summary { color: var(--agent-thought-fg, #8a8577); font-size: 10.5px; }
+          .ag-thought-text { padding: 6px 10px; white-space: pre-wrap; color: var(--agent-thought-fg, #8a8577); }
+          .ag-plan {
+            font-family: var(--font-mono); font-size: 12px; margin: 8px 0;
+            padding: 8px 12px; border-left: 2px solid var(--agent-card-border, rgba(0,0,0,0.15));
+            white-space: pre-wrap;
+          }
+          .ag-perm {
+            display: flex; align-items: center; gap: 10px; margin: 10px 0;
+            border: 1px solid var(--agent-permission-fg, #e0af68); border-radius: 8px;
+            padding: 8px 12px; font-family: var(--font-mono); font-size: 12px;
+          }
+          .ag-perm-title { flex: 1; color: var(--agent-permission-fg, #a8741a); }
+          .ag-btn {
+            font-family: var(--font-mono); font-size: 11px; padding: 3px 12px;
+            border-radius: 6px; border: 1px solid var(--agent-card-border, rgba(0,0,0,0.2));
+            background: transparent; color: inherit; cursor: pointer;
+          }
+          .ag-btn.allow { border-color: var(--string-fg, #4a7a4a); color: var(--string-fg, #4a7a4a); }
+          .ag-btn.deny { border-color: var(--error-fg, #a8342a); color: var(--error-fg, #a8342a); }
+          .ag-wait {
+            font-family: var(--font-mono); font-size: 12px; margin: 8px 0;
+            color: var(--agent-thought-fg, #8a8577); animation: ag-pulse 1.4s ease-in-out infinite;
+          }
+          .ag-meta { font-family: var(--font-mono); font-size: 11.5px; color: var(--agent-meta-fg, #8a8577); margin: 6px 0; }
+          @keyframes ag-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+          .ag-inputrow {
+            display: flex; align-items: baseline; gap: 12px; margin: 6px 14px 12px;
+            border: 1px solid var(--agent-card-border, rgba(0,0,0,0.14));
+            border-radius: 10px; padding: 9px 14px;
+            background: var(--window-bg, rgba(255,255,255,0.5));
+          }
+          .ag-input { flex: 1; font-family: var(--font-mono); font-size: 12.5px; white-space: pre-wrap; }
+          .ag-queued { color: var(--agent-queued-fg, #9a958a); }
+          .ag-hint { font-family: var(--font-mono); font-size: 10px; color: var(--agent-meta-fg, #8a8577); flex-shrink: 0; }
           /* font-lock scopes (tree-sitter) — themeable via --ts-<scope>-fg */
           .ts-keyword { color: var(--ts-keyword-fg, #26356b); font-weight: 600; }
           .ts-function { color: var(--ts-function-fg, #1b1a17); font-weight: 500; }
@@ -297,6 +378,21 @@ defmodule Aimax.Ui.Layouts do
 
           const PAGE_BOOT = document.querySelector("meta[name='boot-id']").getAttribute("content");
           const Hooks = {
+            // transcript follows output unless the reader scrolled up
+            AgentScroll: {
+              mounted() {
+                this.scroller = this.el.querySelector(".ag-scroll");
+                this.stick = true;
+                this.scroller.addEventListener("scroll", () => {
+                  const s = this.scroller;
+                  this.stick = s.scrollHeight - s.scrollTop - s.clientHeight < 40;
+                });
+                this.scroller.scrollTop = this.scroller.scrollHeight;
+              },
+              updated() {
+                if (this.stick) this.scroller.scrollTop = this.scroller.scrollHeight;
+              }
+            },
             Keys: {
               mounted() {
                 // remounted against a restarted server: this page's CSS/JS is

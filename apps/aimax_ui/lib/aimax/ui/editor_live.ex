@@ -51,6 +51,17 @@ defmodule Aimax.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
+  # transcript buttons (permission allow/deny etc.) — same shape as ml_info:
+  # focus the window, run the command. agent-* commands only.
+  def handle_event("agent_cmd", %{"win" => win, "cmd" => "agent-" <> _ = cmd}, socket) do
+    with {id, ""} <- Integer.parse(to_string(win)) do
+      Aimax.Core.Editor.set_active(id)
+      Aimax.Core.Session.run_command(cmd)
+    end
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
   def handle_event("viewport", %{"rows" => rows}, socket) when is_integer(rows) do
     Aimax.Core.Editor.set_total_rows(rows)
     {:noreply, socket |> drain() |> refresh()}
@@ -128,6 +139,22 @@ defmodule Aimax.Ui.EditorLive do
 
     {Map.merge(leaf, %{lines: [], preview: html}),
      Map.put(cache, {:preview, leaf.id}, {key, html})}
+  end
+
+  # rich agent transcript: blocks (from agent.scm's block model) become
+  # typed DOM — serif prose, tool cards, permission buttons. The buffer
+  # text stays canonical; this is a pure view over byte ranges.
+  defp decorate(%{type: :leaf, render_mode: "agent", agent: %{} = ag} = leaf, cache, _faces) do
+    key = {leaf.buffer, leaf.version, :agent}
+
+    blocks =
+      case cache[{:agent, leaf.id}] do
+        {^key, blocks} -> blocks
+        _ -> ag.blocks |> Enum.reverse() |> Enum.map(&ag_block(&1, leaf.text)) |> Enum.reject(&is_nil/1)
+      end
+
+    {Map.merge(leaf, %{lines: [], ag_blocks: blocks, ag_input: ag_input(leaf, ag)}),
+     Map.put(cache, {:agent, leaf.id}, {key, blocks})}
   end
 
   defp decorate(%{type: :leaf} = leaf, cache, _faces) do
@@ -323,6 +350,67 @@ defmodule Aimax.Ui.EditorLive do
       class={"window #{if @active?, do: "active", else: "inactive"} #{if !@node.line_numbers, do: "no-nums"}"}
       data-win-id={@node.id}
     >
+      <%= if @node.render_mode == "agent" and Map.has_key?(@node, :ag_blocks) do %>
+        <div class="agent-view" id={"agent-#{@node.id}"} phx-hook="AgentScroll">
+          <div class="ag-scroll">
+            <%= for b <- @node.ag_blocks do %>
+              <%= case b.kind do %>
+                <% :user -> %>
+                  <div class="ag-user"><span class="ag-label">YOU</span><div class="ag-user-text">{b.text}</div></div>
+                <% :prose -> %>
+                  <div class="ag-prose">{Phoenix.HTML.raw(b.html)}</div>
+                <% :thought -> %>
+                  <details class="ag-thought"><summary>thought</summary><div class="ag-thought-text">{b.text}</div></details>
+                <% :tool -> %>
+                  <details class="ag-tool" open={b.status == "running"}>
+                    <summary>
+                      <span class={"ag-dot #{b.status}"}></span><span class="ag-verb">{b.verb}</span>
+                      <span class="ag-title">{b.title}</span>
+                      <span class="ag-tstatus">{b.status}</span>
+                    </summary>
+                    <pre :if={b.body != ""} class="ag-body">{b.body}</pre>
+                  </details>
+                <% :plan -> %>
+                  <pre class="ag-plan">{b.text}</pre>
+                <% :permission -> %>
+                  <div class="ag-perm">
+                    <span class="ag-perm-title">needs permission — {b.title}</span>
+                    <button
+                      class="ag-btn allow"
+                      phx-click="agent_cmd"
+                      phx-value-win={@node.id}
+                      phx-value-cmd="agent-permission-allow"
+                    >Allow</button>
+                    <button
+                      class="ag-btn allow"
+                      phx-click="agent_cmd"
+                      phx-value-win={@node.id}
+                      phx-value-cmd="agent-permission-always"
+                    >Always</button>
+                    <button
+                      class="ag-btn deny"
+                      phx-click="agent_cmd"
+                      phx-value-win={@node.id}
+                      phx-value-cmd="agent-permission-deny"
+                    >Deny</button>
+                  </div>
+                <% :waiting -> %>
+                  <div class="ag-wait">⋯ thinking</div>
+                <% :meta -> %>
+                  <div class="ag-meta">{b.text}</div>
+              <% end %>
+            <% end %>
+          </div>
+          <div class="ag-inputrow">
+            <span class="ag-label">YOU</span>
+            <span class="ag-input"><span class="ag-queued">{@node.ag_input.queued}</span>{@node.ag_input.pre}<span
+                :if={@node.ag_input.cur != ""}
+                class="cursor"
+              >{@node.ag_input.cur}</span>{@node.ag_input.post}</span>
+            <span class="ag-hint">RET sends · C-RET interrupts</span>
+          </div>
+        </div>
+      <% else %>
       <%= if @node.render_mode in ["html", "markdown"] do %>
         <iframe class="html-preview" sandbox="" srcdoc={@node.preview} title={@node.buffer}></iframe>
       <% else %>
@@ -339,6 +427,7 @@ defmodule Aimax.Ui.EditorLive do
             ><span class="cap-label">{c.label}</span><span class="cap-kind">{c.hint}</span></span></span></span>
         </div>
       </div>
+      <% end %>
       <% end %>
       <div class="modeline">
         <span class={"ml-dot #{if @node.modified, do: "modified"}"}></span>
@@ -448,6 +537,88 @@ defmodule Aimax.Ui.EditorLive do
 
   # both previews follow the live theme; `(buffer-set-local! buf
   # 'preview-authored #t)` renders html exactly as authored instead
+  # --- agent transcript blocks ------------------------------------------------
+
+  defp safe_slice(text, s, e) do
+    size = byte_size(text)
+    s = s |> max(0) |> min(size)
+    e = e |> max(s) |> min(size)
+    binary_part(text, s, e - s)
+  end
+
+  defp ag_block([s, e, "user" | meta], text) do
+    text_of =
+      case meta do
+        [msg | _] when is_binary(msg) -> msg
+        _ -> text |> safe_slice(s, e) |> String.trim() |> String.replace_prefix("╰─ you ▸ ", "")
+      end
+
+    %{kind: :user, text: text_of}
+  end
+
+  defp ag_block([s, e, "prose" | _], text) do
+    md = safe_slice(text, s, e)
+
+    html =
+      case Earmark.as_html(md, compact_output: false) do
+        {:ok, html, _} -> html
+        {:error, html, _} -> html
+      end
+
+    %{kind: :prose, html: html}
+  end
+
+  defp ag_block([s, e, "thought" | _], text),
+    do: %{kind: :thought, text: String.trim(safe_slice(text, s, e))}
+
+  defp ag_block([_s, e, "tool", id, title, kind, status, body_start | _], text) do
+    %{
+      kind: :tool,
+      id: id,
+      title: title,
+      verb: kind,
+      status: status,
+      body: String.trim_trailing(safe_slice(text, body_start, e))
+    }
+  end
+
+  defp ag_block([s, e, "plan" | _], text),
+    do: %{kind: :plan, text: String.trim(safe_slice(text, s, e))}
+
+  defp ag_block([_s, _e, "permission", title | _], _text),
+    do: %{kind: :permission, title: title}
+
+  defp ag_block([_s, _e, "waiting" | _], _text), do: %{kind: :waiting}
+
+  defp ag_block([s, e, "meta" | _], text),
+    do: %{kind: :meta, text: String.trim(safe_slice(text, s, e))}
+
+  defp ag_block(_, _), do: nil
+
+  # the input region: [queued (muted)][live text][cursor when point is home]
+  defp ag_input(leaf, ag) do
+    start = ag.mark + ag.marker_bytes
+    queued_len = ag.queued |> Enum.filter(&is_integer/1) |> Enum.sum()
+    queued = safe_slice(leaf.text, start, start + queued_len)
+    live_start = start + queued_len
+    live = safe_slice(leaf.text, live_start, byte_size(leaf.text))
+
+    {pre, cur, post} =
+      if leaf.point >= live_start do
+        rel = min(leaf.point - live_start, byte_size(live))
+        rest = binary_part(live, rel, byte_size(live) - rel)
+
+        case String.next_grapheme(rest) do
+          nil -> {live, " ", ""}
+          {g, more} -> {binary_part(live, 0, rel), g, more}
+        end
+      else
+        {live, "", ""}
+      end
+
+    %{queued: queued, pre: pre, cur: cur, post: post}
+  end
+
   defp preview_html("html", text, _faces, true), do: text
 
   # shr-style theming (Emacs eww): authored LAYOUT and typography survive,

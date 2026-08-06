@@ -155,6 +155,18 @@ defmodule Aimax.AgentTest do
     assert s <= body and body < e
     assert Buffer.text(buf) =~ "╰─ you ▸"
     assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
+
+    # the block model mapped every span: user turn, merged prose, closed tool
+    blocks = Buffer.get_local(buf, "agent-blocks") |> Enum.reverse()
+    kinds = Enum.map(blocks, fn [_, _, k | _] -> k end)
+    assert "user" in kinds and "prose" in kinds and "tool" in kinds
+    refute "waiting" in kinds
+
+    [_, _, "tool", "tc1", "Read foo.ex", "read", "done", body_start] =
+      Enum.find(blocks, fn [_, _, k | _] -> k == "tool" end)
+
+    assert binary_part(text, body_start, 13) == "defmodule Foo"
+    assert Buffer.get_local(buf, "render-mode") == "agent"
   end
 
   test "typing at the marker + RET steers; queued while running; queue pops on turn end" do
@@ -253,12 +265,53 @@ defmodule Aimax.AgentTest do
     assert eventually(fn -> Buffer.text(buf) =~ "needs permission: Write foo.ex" end)
     assert %{status: :needs_attention} = Agent.info(slug)
 
+    # banner is in the block model while pending
+    assert eventually(fn ->
+             (Buffer.get_local(buf, "agent-blocks") || [])
+             |> Enum.any?(&match?([_, _, "permission" | _], &1))
+           end)
+
     focus(buf)
     press(["C-c", "C-y"])
 
     assert_receive {:frame, %{"id" => 77, "result" => %{"outcome" => outcome}}}, 1_000
     assert outcome == %{"outcome" => "selected", "optionId" => "opt-allow"}
     assert eventually(fn -> match?(%{status: :running}, Agent.info(slug)) end)
+
+    # answered -> the stale banner leaves the rich view
+    assert eventually(fn ->
+             not ((Buffer.get_local(buf, "agent-blocks") || [])
+                  |> Enum.any?(&match?([_, _, "permission" | _], &1)))
+           end)
+  end
+
+  test "allow-always picks the allow_always option" do
+    {slug, _buf, agent} = boot("")
+
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "go")])
+    assert_receive {:frame, %{"method" => "session/prompt"}}, 1_000
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => 88,
+      "method" => "session/request_permission",
+      "params" => %{
+        "sessionId" => "sess-1",
+        "toolCall" => %{"title" => "Bash", "kind" => "execute"},
+        "options" => [
+          %{"optionId" => "o-once", "name" => "Allow", "kind" => "allow_once"},
+          %{"optionId" => "o-always", "name" => "Always", "kind" => "allow_always"},
+          %{"optionId" => "o-no", "name" => "Reject", "kind" => "reject_once"}
+        ]
+      }
+    })
+
+    assert eventually(fn -> match?(%{status: :needs_attention}, Agent.info(slug)) end)
+    focus("*agent: a1*")
+    press(["C-c", "C-a"])
+
+    assert_receive {:frame, %{"id" => 88, "result" => %{"outcome" => outcome}}}, 1_000
+    assert outcome == %{"outcome" => "selected", "optionId" => "o-always"}
   end
 
   test "C-RET cancels the running turn" do

@@ -716,6 +716,7 @@ defmodule Aimax.Core.Editor do
       col: snap.col,
       style: Map.get(locals, "style"),
       render_mode: Map.get(locals, "render-mode"),
+      agent: agent_leaf(locals),
       preview_authored: Map.get(locals, "preview-authored") == true,
       top: top,
       rows: rows,
@@ -731,6 +732,20 @@ defmodule Aimax.Core.Editor do
   # strictly inside a hidden range (the range's own start line stays
   # visible — that's the folded headline). Ranges are clamped: they can
   # be momentarily stale after an undo swaps the rope out from under them.
+  # everything the rich agent transcript renderer needs, straight from the
+  # buffer-locals agent.scm maintains — nil unless the buffer opted in
+  defp agent_leaf(%{"render-mode" => "agent"} = locals) do
+    %{
+      blocks: Map.get(locals, "agent-blocks") || [],
+      mark: Map.get(locals, "agent-saved-mark") || 0,
+      marker_bytes: Map.get(locals, "agent-marker-bytes") || 0,
+      queued: Map.get(locals, "agent-queued") || [],
+      slug: Map.get(locals, "agent-slug")
+    }
+  end
+
+  defp agent_leaf(_), do: nil
+
   defp visible_geometry(text, point, hidden) do
     len = byte_size(text)
     starts = [0 | Enum.map(:binary.matches(text, "\n"), fn {p, _} -> p + 1 end)]

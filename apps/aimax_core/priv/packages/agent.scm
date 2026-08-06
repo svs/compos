@@ -123,6 +123,56 @@
                        #t)))
               (else (loop (cdr fs) (cons (car fs) acc) hit)))))))
 
+;;; --- block model --------------------------------------------------------------
+;;; 'agent-blocks: newest-first list of (start end kind meta...) over byte
+;;; ranges — the rich renderer's map of the transcript. Text stays canonical;
+;;; blocks only say what each span IS. Kinds: "user" "prose" "thought" "tool"
+;;; "plan" "permission" "waiting" "meta". Appends land at the mark, after
+;;; every recorded range, so stored offsets never shift.
+
+(define (agent-blocks buf) (or (buffer-local buf 'agent-blocks) '()))
+
+(define (agent-block-push! buf start end kind meta)
+  (buffer-set-local! buf 'agent-blocks
+    (cons (append (list start end kind) meta) (agent-blocks buf))))
+
+;; consecutive same-kind streaming spans melt into one block
+(define (agent-block-extend-or-push! buf start end kind)
+  (let ((bs (agent-blocks buf)))
+    (if (and (not (null? bs))
+             (equal? (car (cdr (cdr (car bs)))) kind)
+             (= (car (cdr (car bs))) start))
+        (buffer-set-local! buf 'agent-blocks
+          (cons (append (list (car (car bs)) end kind)
+                        (cdr (cdr (cdr (car bs)))))
+                (cdr bs)))
+        (agent-block-push! buf start end kind '()))))
+
+(define (nth n l) (if (= n 0) (car l) (nth (- n 1) (cdr l))))
+
+;; a tool block closes when its update completes: extend to the body end,
+;; flip status. Block: (start end "tool" id title kind status body-start).
+;; Newest-first scan; tool updates always hit recent blocks.
+(define (agent-block-close-tool! buf id end status)
+  (buffer-set-local! buf 'agent-blocks
+    (let loop ((bs (agent-blocks buf)) (acc '()))
+      (cond ((null? bs) (reverse acc))
+            ((and (equal? (nth 2 (car bs)) "tool")
+                  (equal? (nth 3 (car bs)) id))
+             (let ((b (car bs)))
+               (append (reverse acc)
+                       (cons (list (nth 0 b) end "tool" id
+                                   (nth 4 b) (nth 5 b) status (nth 7 b))
+                             (cdr bs)))))
+            (else (loop (cdr bs) (cons (car bs) acc)))))))
+
+(define (agent-block-drop-kind! buf kind)
+  (buffer-set-local! buf 'agent-blocks
+    (let loop ((bs (agent-blocks buf)) (acc '()))
+      (cond ((null? bs) (reverse acc))
+            ((equal? (car (cdr (cdr (car bs)))) kind) (loop (cdr bs) acc))
+            (else (loop (cdr bs) (cons (car bs) acc)))))))
+
 ;;; --- rendering ----------------------------------------------------------------
 
 ;; face #f -> plain text
@@ -151,6 +201,7 @@
          (w (buffer-local buf 'agent-waiting)))
     (when w
       (buffer-delete-range! buf (car w) (- (car (cdr w)) (car w)))
+      (agent-block-drop-kind! buf "waiting")
       (buffer-set-local! buf 'agent-waiting #f)
       (buffer-set-local! buf 'agent-saved-mark (agent-mark slug)))))
 
@@ -163,20 +214,29 @@
     (cond
       ((equal? type 'user-msg)
        (agent-pop-queued! slug)
-       (agent-render! slug
-         (string-append "\n╰─ you ▸ " (plist-get e 'text) "\n\n") "agent-you")
+       (let ((start (agent-render! slug
+                      (string-append "\n╰─ you ▸ " (plist-get e 'text) "\n\n")
+                      "agent-you")))
+         (agent-block-push! buf start (agent-mark slug) "user"
+           (list (plist-get e 'text))))
        (agent-show-waiting! slug))
 
       ((equal? type 'chunk)
-       (agent-render! slug (plist-get e 'text) #f))
+       (let ((start (agent-render! slug (plist-get e 'text) #f)))
+         (agent-block-extend-or-push! buf start (agent-mark slug) "prose")))
 
       ((equal? type 'thought)
-       (agent-render! slug (plist-get e 'text) "agent-thought"))
+       (let ((start (agent-render! slug (plist-get e 'text) "agent-thought")))
+         (agent-block-extend-or-push! buf start (agent-mark slug) "thought")))
 
       ((equal? type 'tool-call)
-       (agent-render! slug
-         (string-append "\n▸ " (plist-get e 'kind) " · " (plist-get e 'title) "\n")
-         "agent-tool")
+       (let ((start (agent-render! slug
+                      (string-append "\n▸ " (plist-get e 'kind) " · "
+                                     (plist-get e 'title) "\n")
+                      "agent-tool")))
+         (agent-block-push! buf start (agent-mark slug) "tool"
+           (list (plist-get e 'id) (plist-get e 'title) (plist-get e 'kind)
+                 "running" (agent-mark slug))))
        ;; remember where this tool's body will start (= current mark)
        (buffer-set-local! buf 'agent-tool-bodies
          (cons (list (plist-get e 'id) (agent-mark slug))
@@ -187,41 +247,56 @@
          (unless (equal? text "")
            (agent-render! slug text #f))
          (when (equal? (plist-get e 'status) "completed")
+           (agent-block-close-tool! buf (plist-get e 'id)
+             (agent-mark slug) "done")
            (let ((entry (assoc (plist-get e 'id)
                                (or (buffer-local buf 'agent-tool-bodies) '()))))
              (when (and entry (> (agent-mark slug) (car (cdr entry))))
                (agent-add-fold! buf (car (cdr entry)) (agent-mark slug)))))))
 
       ((equal? type 'plan)
-       (agent-render! slug
-         (string-append "\n"
-           (string-join
-             (let loop ((es (plist-get e 'entries)) (acc '()))
-               (if (null? es) (reverse acc)
-                   (loop (cdr es)
-                         (cons (string-append "  □ " (car (car es))) acc))))
-             "\n")
-           "\n")
-         "agent-meta"))
+       (let ((start (agent-render! slug
+                      (string-append "\n"
+                        (string-join
+                          (let loop ((es (plist-get e 'entries)) (acc '()))
+                            (if (null? es) (reverse acc)
+                                (loop (cdr es)
+                                      (cons (string-append "  □ " (car (car es))) acc))))
+                          "\n")
+                        "\n")
+                      "agent-meta")))
+         (agent-block-push! buf start (agent-mark slug) "plan" '())))
 
       ((equal? type 'permission)
-       (agent-render! slug
-         (string-append "\n── needs permission: " (plist-get e 'title)
-                        " ── C-c C-y allow · C-c C-n deny\n")
-         "agent-permission")
+       (let ((start (agent-render! slug
+                      (string-append "\n── needs permission: " (plist-get e 'title)
+                                     " ── C-c C-y allow · C-c C-n deny\n")
+                      "agent-permission")))
+         (agent-block-push! buf start (agent-mark slug) "permission"
+           (list (plist-get e 'title))))
        (message (string-append "agent " slug " needs permission: "
                                (plist-get e 'title))))
 
       ((equal? type 'turn-end)
        (buffer-set-local! buf 'agent-cancelling #f)
+       (agent-block-drop-kind! buf "permission")
        (message (string-append "agent " slug ": done")))
 
       ((equal? type 'error)
-       (agent-render! slug
-         (string-append "\n[error: " (plist-get e 'text) "]\n") "agent-meta"))
+       (let ((start (agent-render! slug
+                      (string-append "\n[error: " (plist-get e 'text) "]\n")
+                      "agent-meta")))
+         (agent-block-push! buf start (agent-mark slug) "meta" '())))
 
       ((equal? type 'dead)
-       (agent-render! slug "\n[agent exited]\n" "agent-meta"))
+       (agent-block-drop-kind! buf "permission")
+       (let ((start (agent-render! slug "\n[agent exited]\n" "agent-meta")))
+         (agent-block-push! buf start (agent-mark slug) "meta" '())))
+
+      ((equal? type 'status)
+       ;; answered/cancelled permission -> its banner leaves the rich view
+       (unless (equal? (plist-get e 'status) 'needs_attention)
+         (agent-block-drop-kind! buf "permission")))
 
       (else #f))))
 
@@ -233,31 +308,38 @@
 
 ;;; --- permission answers -------------------------------------------------------
 
-;; pick the first option whose kind matches, else the first option
-(define (agent-answer-permission! slug allow?)
+;; option whose kind matches exactly, else by prefix — options are
+;; (option-id name kind) triples from the ACP request
+(define (agent-perm-option options exact prefix)
+  (let loop ((os options) (by-prefix #f))
+    (cond ((null? os) by-prefix)
+          ((equal? (nth 2 (car os)) exact) (car os))
+          ((and (not by-prefix) (string-prefix? prefix (nth 2 (car os))))
+           (loop (cdr os) (car os)))
+          (else (loop (cdr os) by-prefix)))))
+
+;; want: "allow_once" | "allow_always" | "reject_once"; no match -> cancel
+(define (agent-answer-permission! slug exact prefix)
   (let ((info (agent-info slug)))
     (let ((perm (and info (plist-get info 'permission))))
       (if (not perm)
           (message "no pending permission")
-          (let ((wanted (if allow? "allow" "reject"))
-                (all (plist-get perm 'options)))
-            (let loop ((os all))
-              (cond ((null? os)
-                     ;; no kind match — first option for allow, cancel for deny
-                     (if (and allow? (not (null? all)))
-                         (agent-permission-respond! slug (plist-get perm 'rpc-id)
-                           (car (car all)))
-                         (agent-permission-respond! slug (plist-get perm 'rpc-id) #f)))
-                    ((string-prefix? wanted (car (cdr (cdr (car os)))))
-                     (agent-permission-respond! slug (plist-get perm 'rpc-id)
-                       (car (car os))))
-                    (else (loop (cdr os))))))))))
+          (let ((opt (agent-perm-option (plist-get perm 'options) exact prefix)))
+            (agent-permission-respond! slug (plist-get perm 'rpc-id)
+              (if opt (car opt) #f)))))))
 
 (define-command "agent-permission-allow"
-  (lambda () (agent-answer-permission! (agent-slug-of (current-buffer)) #t)))
+  (lambda () (agent-answer-permission! (agent-slug-of (current-buffer))
+                                       "allow_once" "allow")))
+
+;; allow this AND stop asking for this tool (ACP allow_always)
+(define-command "agent-permission-always"
+  (lambda () (agent-answer-permission! (agent-slug-of (current-buffer))
+                                       "allow_always" "allow")))
 
 (define-command "agent-permission-deny"
-  (lambda () (agent-answer-permission! (agent-slug-of (current-buffer)) #f)))
+  (lambda () (agent-answer-permission! (agent-slug-of (current-buffer))
+                                       "reject_once" "reject")))
 
 ;;; --- steering -----------------------------------------------------------------
 
@@ -457,8 +539,18 @@
   (local-set-key* buf "C-RET" "agent-interrupt-send")
   (local-set-key* buf "TAB" "agent-toggle-fold")
   (local-set-key* buf "C-c C-y" "agent-permission-allow")
+  (local-set-key* buf "C-c C-a" "agent-permission-always")
   (local-set-key* buf "C-c C-n" "agent-permission-deny")
-  (local-set-key* buf "C-c C-r" "agent-rename"))
+  (local-set-key* buf "C-c C-r" "agent-rename")
+  (local-set-key* buf "C-c C-v" "agent-toggle-view"))
+
+(define-command "agent-toggle-view"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (when (agent-slug-of buf)
+        (let ((rich? (equal? (buffer-local buf 'render-mode) "agent")))
+          (buffer-set-local! buf 'render-mode (if rich? #f "agent"))
+          (message (if rich? "plain transcript" "rich transcript")))))))
 
 ;; rename = new buffer carrying the transcript + thread identity; the
 ;; runtime (registered by slug) restarts under the new name if it was alive
@@ -496,9 +588,17 @@
 (define (agent-mode-setup! buf)
   (buffer-set-local! buf 'mode-name "agent-mode")
   (buffer-set-local! buf 'modeline-info-command "agent-switch")
+  ;; rich transcript by default; C-c C-v drops to the plain text view
+  (buffer-set-local! buf 'render-mode "agent")
+  (buffer-set-local! buf 'agent-marker-bytes
+    (string-byte-length *agent-prompt-marker*))
   ;; derive the modeline from whatever locals survived — buffers saved
   ;; before this feature existed have none
   (agent-update-modeline! buf)
+  ;; a restored thread has no live runtime: pending banners are stale by
+  ;; definition
+  (agent-block-drop-kind! buf "permission")
+  (agent-block-drop-kind! buf "waiting")
   (agent-install-keys! buf)
   (let ((ovs (buffer-local buf 'agent-overlays)))
     (when ovs (overlay-set! buf 'agent ovs)))

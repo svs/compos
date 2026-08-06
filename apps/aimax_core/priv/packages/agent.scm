@@ -184,6 +184,7 @@
                                (plist-get e 'title))))
 
       ((equal? type 'turn-end)
+       (buffer-set-local! buf 'agent-cancelling #f)
        (message (string-append "agent " slug ": done")))
 
       ((equal? type 'error)
@@ -269,7 +270,8 @@
           (message "not an agent buffer")
           (minibuffer-read "Connector: " (connector-names)
             (lambda (cname)
-              (minibuffer-read "Model (empty = connector default): " *llm-models*
+              (minibuffer-read "Model (empty = connector default): "
+                (connector-models cname)
                 (lambda (model)
                   (agent-reconnect! slug cname model)))))))))
 
@@ -290,19 +292,26 @@
                          (message "sent"))
                      (end-of-buffer!)))))))))
 
+;; C-RET escalates: dead -> revive; running -> polite session/cancel;
+;; still running on the next press -> hard reset (kill + reattach, same
+;; connector/model, transcript kept). The deterministic unstick gesture.
 (define-command "agent-interrupt-send"
   (lambda ()
-    (let ((slug (agent-slug-of (current-buffer))))
+    (let ((slug (agent-slug-of (current-buffer)))
+          (buf (current-buffer)))
       (when slug
-        (if (equal? (agent-status slug) 'dead)
-            (message "agent exited — C-c a n starts a new thread")
-            (begin
-              (agent-cancel! slug)
-              (let ((input (string-trim (agent-input slug))))
-                (unless (equal? input "")
-                  (agent-clear-input! slug)
-                  (agent-prompt! slug input)))
-              (message "interrupted")))))))
+        (cond ((equal? (agent-status slug) 'dead)
+               (agent-revive! slug))
+              ((buffer-local buf 'agent-cancelling)
+               (buffer-set-local! buf 'agent-cancelling #f)
+               (agent-reconnect! slug
+                 (or (buffer-local buf 'agent-connector) *default-connector*)
+                 (or (buffer-local buf 'agent-model) ""))
+               (message "agent restarted (hard reset)"))
+              (else
+               (buffer-set-local! buf 'agent-cancelling #t)
+               (agent-cancel! slug)
+               (message "cancel requested — C-RET again forces a restart")))))))
 
 ;;; --- connectors ---------------------------------------------------------------
 ;;; A connector is a named config plist for a thread's backend: 'cmd (the ACP
@@ -328,12 +337,22 @@
   (let ((e (assoc name *agent-connectors*)))
     (if e (car (cdr e)) '())))
 
-(define-connector! "claude-code" '(cmd "claude-code-acp"))
-;; codex rides a ChatGPT subscription; needs the codex-acp adapter on PATH
+(define-connector! "claude-code"
+  '(cmd "claude-code-acp"
+    models ("claude-sonnet-5" "claude-opus-5" "claude-haiku-4-5-20251001")))
+;; codex rides a ChatGPT subscription; needs the codex-acp adapter on PATH.
+;; No 'models declared -> the switch prompt is freeform.
 (define-connector! "codex" '(cmd "codex-acp"))
 ;; direct API calls through the editor's own LLM plumbing (req_llm eventually):
 ;; no subprocess, no tools — the cheap chat lane
 (define-connector! "llm" '(type llm))
+
+;; what the switch prompt offers: the connector's declared 'models; llm
+;; threads can use anything the llm primitive routes (*llm-models*)
+(define (connector-models name)
+  (let ((conf (connector-config name)))
+    (or (plist-get conf 'models)
+        (if (equal? (plist-get conf 'type) 'llm) *llm-models* '()))))
 
 ;; CLAUDE_CODE_SUBAGENT_MODEL too: the adapter's bundled SDK defaults
 ;; subagents to a retired model id (404s) unless told otherwise
@@ -341,15 +360,16 @@
   (list 'env (list (list "ANTHROPIC_MODEL" m)
                    (list "CLAUDE_CODE_SUBAGENT_MODEL" m))))
 
-;; per-call opts win over the connector; ANTHROPIC_MODEL defaults to the
-;; editor's model when nothing else claims 'env and it is an anthropic model
+;; per-call opts win over the connector. The editor's model rides in as
+;; ANTHROPIC_MODEL only when this connector actually offers it — a codex
+;; thread must not inherit an anthropic model id (or claim it in the
+;; modeline).
 (define (agent-resolve-config opts)
-  (let ((conf (append opts (connector-config
-                             (or (plist-get opts 'connector)
-                                 *default-connector*)))))
+  (let* ((cname (or (plist-get opts 'connector) *default-connector*))
+         (conf (append opts (connector-config cname))))
     (if (or (plist-get conf 'env)
             (plist-get conf 'type)              ; llm threads need no env
-            (string-contains? (llm-model) ":"))
+            (not (member (llm-model) (connector-models cname))))
         conf
         (append conf (agent-model-env (llm-model))))))
 
@@ -399,6 +419,9 @@
 (define (agent-mode-setup! buf)
   (buffer-set-local! buf 'mode-name "agent-mode")
   (buffer-set-local! buf 'modeline-info-command "agent-switch")
+  ;; derive the modeline from whatever locals survived — buffers saved
+  ;; before this feature existed have none
+  (agent-update-modeline! buf)
   (agent-install-keys! buf)
   (let ((ovs (buffer-local buf 'agent-overlays)))
     (when ovs (overlay-set! buf 'agent ovs)))

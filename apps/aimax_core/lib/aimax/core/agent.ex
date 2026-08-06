@@ -361,10 +361,19 @@ defmodule Aimax.Core.Agent do
         |> pop_prompt_queue()
 
       {_, %{"error" => err}} ->
-        enqueue(
-          state,
-          plist(type: :error, text: "#{method}: #{Map.get(err, "message", inspect(err))}")
-        )
+        state =
+          enqueue(
+            state,
+            plist(type: :error, text: "#{method}: #{Map.get(err, "message", inspect(err))}")
+          )
+
+        # a failed prompt still ends the turn — a thread must never wedge
+        # in :running with no reply coming
+        if method == "session/prompt" do
+          state |> set_status(:idle) |> pop_prompt_queue()
+        else
+          state
+        end
 
       _ ->
         state

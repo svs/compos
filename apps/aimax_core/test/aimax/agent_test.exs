@@ -242,6 +242,13 @@ defmodule Aimax.AgentTest do
 
     assert {:ok, ~s["test-conn"]} =
              Session.eval(~s[(buffer-local (agent-buffer "a1") 'agent-connector)])
+
+    # model choice is scoped to what the connector declares
+    assert {:ok, models} = Session.eval(~s[(connector-models "claude-code")])
+    assert models =~ "claude-sonnet-5"
+    assert {:ok, "()"} = Session.eval(~s[(connector-models "test-conn")])
+    assert {:ok, llm_models} = Session.eval(~s[(connector-models "llm")])
+    assert llm_models =~ "openrouter" or llm_models =~ "claude"
   end
 
   test "desktop: agent transcript, folds, and overlays survive restore; thread revives on RET" do
@@ -375,6 +382,23 @@ defmodule Aimax.AgentTest do
 
     assert {:ok, ~s["llm · ] <> _} =
              Session.eval(~s[(buffer-local "*agent: a1*" 'modeline-info)])
+  end
+
+  test "a failed prompt returns the thread to idle instead of wedging in :running" do
+    {slug, buf, agent} = boot("")
+
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "go")])
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => pid}}, 1_000
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => pid,
+      "error" => %{"code" => -32603, "message" => "Internal error"}
+    })
+
+    assert eventually(fn -> Buffer.text(buf) =~ "Internal error" end)
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
+    refute Buffer.text(buf) =~ "⋯ thinking"
   end
 
   test "adapter exit renders a death notice and marks the thread dead" do

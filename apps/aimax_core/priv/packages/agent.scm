@@ -108,13 +108,35 @@
     (buffer-set-local! buf 'agent-saved-mark (agent-mark slug))
     start))
 
+;;; the waiting line: rendered after each user turn, deleted on the turn's
+;;; first output. It is the last text before the marker, so deleting it never
+;;; shifts a fold; the runtime re-adjusts its mark automatically.
+(define (agent-show-waiting! slug)
+  (let* ((buf (agent-buffer slug))
+         (text "⋯ thinking\n")
+         (start (agent-render! slug text "agent-thought")))
+    (buffer-set-local! buf 'agent-waiting
+      (list start (+ start (string-byte-length text))))))
+
+(define (agent-clear-waiting! slug)
+  (let* ((buf (agent-buffer slug))
+         (w (buffer-local buf 'agent-waiting)))
+    (when w
+      (buffer-delete-range! buf (car w) (- (car (cdr w)) (car w)))
+      (buffer-set-local! buf 'agent-waiting #f)
+      (buffer-set-local! buf 'agent-saved-mark (agent-mark slug)))))
+
 (define (agent-handle-event slug e)
   (let ((buf (agent-buffer slug))
         (type (plist-get e 'type)))
+    ;; any sign of life ends the waiting state
+    (unless (or (equal? type 'user-msg) (equal? type 'status))
+      (agent-clear-waiting! slug))
     (cond
       ((equal? type 'user-msg)
        (agent-render! slug
-         (string-append "\n╰─ you ▸ " (plist-get e 'text) "\n\n") "agent-you"))
+         (string-append "\n╰─ you ▸ " (plist-get e 'text) "\n\n") "agent-you")
+       (agent-show-waiting! slug))
 
       ((equal? type 'chunk)
        (agent-render! slug (plist-get e 'text) #f))
@@ -175,7 +197,9 @@
 
 (agent-on-event!
   (lambda (slug events)
-    (for-each (lambda (e) (agent-handle-event slug e)) events)))
+    ;; batches race buffer kills — a dead thread's events just drop
+    (when (buffer-exists? (agent-buffer slug))
+      (for-each (lambda (e) (agent-handle-event slug e)) events))))
 
 ;;; --- permission answers -------------------------------------------------------
 
@@ -224,7 +248,7 @@
                 (append (list 'connector (or (buffer-local buf 'agent-connector)
                                              *default-connector*))
                         (if (and m (not (equal? m "")))
-                            (list 'env (list (list "ANTHROPIC_MODEL" m)))
+                            (agent-model-env m)
                             '())))))
     (message (string-append "agent " slug ": revived (fresh session)"))))
 
@@ -305,6 +329,17 @@
     (if e (car (cdr e)) '())))
 
 (define-connector! "claude-code" '(cmd "claude-code-acp"))
+;; codex rides a ChatGPT subscription; needs the codex-acp adapter on PATH
+(define-connector! "codex" '(cmd "codex-acp"))
+;; direct API calls through the editor's own LLM plumbing (req_llm eventually):
+;; no subprocess, no tools — the cheap chat lane
+(define-connector! "llm" '(type llm))
+
+;; CLAUDE_CODE_SUBAGENT_MODEL too: the adapter's bundled SDK defaults
+;; subagents to a retired model id (404s) unless told otherwise
+(define (agent-model-env m)
+  (list 'env (list (list "ANTHROPIC_MODEL" m)
+                   (list "CLAUDE_CODE_SUBAGENT_MODEL" m))))
 
 ;; per-call opts win over the connector; ANTHROPIC_MODEL defaults to the
 ;; editor's model when nothing else claims 'env and it is an anthropic model
@@ -313,9 +348,10 @@
                              (or (plist-get opts 'connector)
                                  *default-connector*)))))
     (if (or (plist-get conf 'env)
+            (plist-get conf 'type)              ; llm threads need no env
             (string-contains? (llm-model) ":"))
         conf
-        (append conf (list 'env (list (list "ANTHROPIC_MODEL" (llm-model))))))))
+        (append conf (agent-model-env (llm-model))))))
 
 (define (connector-names)
   (let loop ((cs *agent-connectors*) (acc '()))
@@ -340,11 +376,15 @@
 
 ;;; --- thread creation ----------------------------------------------------------
 
+;; skip live runtimes AND existing thread buffers — restored transcripts
+;; keep their slug even though no agent is attached yet
 (define (agent-next-slug)
   (let loop ((n 1))
-    (if (member (string-append "a" (number->string n)) (agent-list))
-        (loop (+ n 1))
-        (string-append "a" (number->string n)))))
+    (let ((slug (string-append "a" (number->string n))))
+      (if (or (member slug (agent-list))
+              (buffer-exists? (agent-buffer slug)))
+          (loop (+ n 1))
+          slug))))
 
 (define (agent-install-keys! buf)
   (local-set-key* buf "RET" "agent-send")
@@ -379,7 +419,10 @@
       (let ((conf (agent-resolve-config opts)))
         (buffer-set-local! buf 'agent-connector
           (or (plist-get opts 'connector) *default-connector*))
-        (buffer-set-local! buf 'agent-model (agent-conf-model conf))
+        (buffer-set-local! buf 'agent-model
+          (or (agent-conf-model conf)
+              ;; llm threads ride the editor's model — show it
+              (and (equal? (plist-get conf 'type) 'llm) (llm-model))))
         (agent-update-modeline! buf)
         (buffer-append! buf (string-append ";; agent thread · " slug "\n"))
         (let ((mark (buffer-size buf)))

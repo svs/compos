@@ -95,16 +95,29 @@ defmodule Aimax.Core.Agent do
     Aimax.Core.create_buffer(buffer)
     Events.subscribe(buffer)
 
-    transport = Aimax.Core.Agent.Transport.impl()
-    cmd = Map.get(config, "cmd", "claude-code-acp")
+    # "llm" threads skip the subprocess entirely: prompts go straight to the
+    # in-process LLM (req-based today, req_llm later) with history kept here.
+    llm? = Map.get(config, "type") == "llm"
 
-    {:ok, tp} =
-      transport.open(cmd, [cd: Map.get(config, "cwd"), env: Map.get(config, "env")], self())
+    {transport, tp} =
+      if llm? do
+        {nil, nil}
+      else
+        transport = Aimax.Core.Agent.Transport.impl()
+        cmd = Map.get(config, "cmd", "claude-code-acp")
+
+        {:ok, tp} =
+          transport.open(cmd, [cd: Map.get(config, "cwd"), env: Map.get(config, "env")], self())
+
+        {transport, tp}
+      end
 
     state = %{
       slug: slug,
       buffer: buffer,
       config: config,
+      llm?: llm?,
+      history: [],
       transport: transport,
       tp: tp,
       partial: "",
@@ -121,13 +134,17 @@ defmodule Aimax.Core.Agent do
       pending_permission: nil
     }
 
-    {:ok,
-     request(state, "initialize", %{
-       "protocolVersion" => 1,
-       "clientCapabilities" => %{
-         "fs" => %{"readTextFile" => false, "writeTextFile" => false}
-       }
-     })}
+    if llm? do
+      {:ok, set_status(state, :idle)}
+    else
+      {:ok,
+       request(state, "initialize", %{
+         "protocolVersion" => 1,
+         "clientCapabilities" => %{
+           "fs" => %{"readTextFile" => false, "writeTextFile" => false}
+         }
+       })}
+    end
   end
 
   @impl true
@@ -226,6 +243,27 @@ defmodule Aimax.Core.Agent do
     {:noreply, state}
   end
 
+  def handle_info({:llm_reply, result}, state) do
+    state =
+      case result do
+        {:ok, text} ->
+          state
+          |> Map.put(:history, state.history ++ [{:assistant, text}])
+          |> enqueue(plist(type: :chunk, text: text))
+
+        {:error, msg} ->
+          enqueue(state, plist(type: :error, text: msg))
+      end
+
+    state =
+      state
+      |> enqueue(plist(type: :"turn-end", "stop-reason": "end_turn"))
+      |> set_status(:idle)
+      |> pop_prompt_queue()
+
+    {:noreply, state}
+  end
+
   def handle_info(_msg, state), do: {:noreply, state}
 
   @impl true
@@ -235,6 +273,8 @@ defmodule Aimax.Core.Agent do
   end
 
   @impl true
+  def terminate(_reason, %{llm?: true}), do: :ok
+
   def terminate(_reason, state) do
     state.transport.close(state.tp)
     :ok
@@ -445,6 +485,21 @@ defmodule Aimax.Core.Agent do
 
   # --- lifecycle helpers ------------------------------------------------------
 
+  defp send_prompt(%{llm?: true} = state, text) do
+    me = self()
+    history = state.history ++ [{:user, text}]
+
+    Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
+      send(me, {:llm_reply, Aimax.Core.LLM.request(llm_prompt(history))})
+    end)
+
+    state
+    |> enqueue(plist(type: :"user-msg", text: text))
+    |> Map.put(:history, history)
+    |> Map.put(:status, :running)
+    |> emit_status(:running)
+  end
+
   defp send_prompt(state, text) do
     state
     # echo the user turn into the transcript via the ordered event channel —
@@ -456,6 +511,17 @@ defmodule Aimax.Core.Agent do
       "sessionId" => state.session_id,
       "prompt" => [%{"type" => "text", "text" => text}]
     })
+  end
+
+  defp llm_prompt(history) do
+    turns =
+      Enum.map_join(history, "\n\n", fn
+        {:user, t} -> "User: #{t}"
+        {:assistant, t} -> "Assistant: #{t}"
+      end)
+
+    "You are the assistant in an editor chat thread. Reply to the last user " <>
+      "turn only, in markdown.\n\n" <> turns
   end
 
   defp pop_prompt_queue(%{prompt_queue: [next | rest], status: :idle} = state),

@@ -84,9 +84,18 @@ defmodule Aimax.Core.Session do
     {:ok, %{interp: interp, last_live: map_size(interp.store.frames)}}
   end
 
+  # a primitive calling a dead GenServer (buffer killed while a callback was
+  # queued) exits — that must fail the eval, never the Session: this process
+  # is the editor's single writer, and its crash loops on the named ETS tables
+  defp safe(fun) do
+    fun.()
+  catch
+    :exit, reason -> {:error, "exit: #{inspect(reason)}"}
+  end
+
   @impl true
   def handle_call({:eval, src}, _from, state) do
-    case Scheme.eval_string(state.interp, src) do
+    case safe(fn -> Scheme.eval_string(state.interp, src) end) do
       {:ok, val, interp} -> {:reply, {:ok, Scheme.print(val)}, put_interp(state, interp, val)}
       {:error, msg} -> {:reply, {:error, msg}, state}
     end
@@ -98,7 +107,7 @@ defmodule Aimax.Core.Session do
         {:reply, {:error, "undefined command"}, state}
 
       [{^name, closure}] ->
-        case Scheme.call(state.interp, closure, []) do
+        case safe(fn -> Scheme.call(state.interp, closure, []) end) do
           {:ok, val, interp} -> {:reply, :ok, put_interp(state, interp, val)}
           {:error, msg} -> {:reply, {:error, msg}, state}
         end
@@ -106,7 +115,7 @@ defmodule Aimax.Core.Session do
   end
 
   def handle_call({:apply, closure, args}, _from, state) do
-    case Scheme.call(state.interp, closure, args) do
+    case safe(fn -> Scheme.call(state.interp, closure, args) end) do
       {:ok, val, interp} ->
         {:reply, :ok, put_interp(state, interp, val)}
 
@@ -117,7 +126,7 @@ defmodule Aimax.Core.Session do
   end
 
   def handle_call({:call_fn, closure, args}, _from, state) do
-    case Scheme.call(state.interp, closure, args) do
+    case safe(fn -> Scheme.call(state.interp, closure, args) end) do
       {:ok, val, interp} -> {:reply, {:ok, val}, put_interp(state, interp, val)}
       {:error, msg} -> {:reply, {:error, msg}, state}
     end

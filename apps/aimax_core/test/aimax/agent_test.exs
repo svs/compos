@@ -324,6 +324,59 @@ defmodule Aimax.AgentTest do
     assert eventually(fn -> Buffer.text(buf) =~ "╰─ you ▸ are you alive\n" end)
   end
 
+  test "waiting line shows after send, clears on first output" do
+    {slug, buf, agent} = boot("")
+
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "go")])
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => pid}}, 1_000
+    assert eventually(fn -> Buffer.text(buf) =~ "⋯ thinking" end)
+
+    update(agent, "sess-1", %{
+      "sessionUpdate" => "agent_message_chunk",
+      "content" => %{"type" => "text", "text" => "On it."}
+    })
+
+    assert eventually(fn -> Buffer.text(buf) =~ "On it." end)
+    refute Buffer.text(buf) =~ "⋯ thinking"
+
+    inject(agent, %{"jsonrpc" => "2.0", "id" => pid, "result" => %{"stopReason" => "end_turn"}})
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
+    refute Buffer.text(buf) =~ "⋯ thinking"
+  end
+
+  test "llm connector: in-process thread, history accumulates, no subprocess" do
+    prompts = :ets.new(:llm_prompts, [:public])
+
+    Application.put_env(:aimax_core, :llm_request_fun, fn prompt ->
+      :ets.insert(prompts, {System.unique_integer([:monotonic]), prompt})
+      {:ok, "reply-#{:ets.info(prompts, :size)}"}
+    end)
+
+    on_exit(fn -> Application.delete_env(:aimax_core, :llm_request_fun) end)
+
+    {:ok, _} = Session.eval(~s{(execute* "what is 6*7" '(connector "llm"))})
+    buf = "*agent: a1*"
+
+    # no ACP handshake — no transport was opened
+    refute_receive {:transport_open, _}, 200
+    assert eventually(fn -> Buffer.text(buf) =~ "reply-1" end)
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
+
+    focus(buf)
+    type("and 8*8")
+    press(["RET"])
+
+    assert eventually(fn -> Buffer.text(buf) =~ "reply-2" end)
+    # second request carries the whole conversation
+    [{_, last} | _] = prompts |> :ets.tab2list() |> Enum.sort(:desc)
+    assert last =~ "what is 6*7"
+    assert last =~ "reply-1"
+    assert last =~ "and 8*8"
+
+    assert {:ok, ~s["llm · ] <> _} =
+             Session.eval(~s[(buffer-local "*agent: a1*" 'modeline-info)])
+  end
+
   test "adapter exit renders a death notice and marks the thread dead" do
     {slug, buf, agent} = boot("")
 

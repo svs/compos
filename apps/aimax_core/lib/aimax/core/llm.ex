@@ -14,6 +14,9 @@ defmodule Aimax.Core.LLM do
 
   alias Aimax.Core.Session
 
+  @doc "Synchronous request — for callers managing their own tasks (LLM threads)."
+  def request(prompt), do: request_fun().(prompt)
+
   def complete(prompt, callback) when is_function(callback, 1) do
     {:ok, _} =
       Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->

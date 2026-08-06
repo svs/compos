@@ -18,7 +18,7 @@ defmodule Aimax.Core.Buffer do
   # (a restart would resurrect it empty anyway; better to stay dead loudly)
   use GenServer, restart: :temporary
 
-  alias Aimax.Core.{Events, Rope, Text}
+  alias Aimax.Core.{Events, Rope, Text, TS}
 
   @registry Aimax.Core.BufferRegistry
   @undo_limit 500
@@ -41,7 +41,8 @@ defmodule Aimax.Core.Buffer do
             undo_next: 0,
             overlays: %{},
             overlay_gen: 0,
-            hidden: []
+            hidden: [],
+            ts: nil
 
   # --- client ----------------------------------------------------------------
 
@@ -126,6 +127,12 @@ defmodule Aimax.Core.Buffer do
   def render_snapshot(name), do: GenServer.call(via(name), :render_snapshot)
 
   @doc """
+  Highlight spans from the buffer's incremental tree-sitter state ([] if the
+  buffer has no ts-lang). Cached per version, shared by every client.
+  """
+  def ts_highlight(name), do: GenServer.call(via(name), :ts_highlight, 30_000)
+
+  @doc """
   Break the undo chain (Emacs: any command other than undo does this).
   After a break, undo reverses the previous undos — that IS redo.
   """
@@ -177,8 +184,11 @@ defmodule Aimax.Core.Buffer do
   def handle_call({:set_read_only, bool}, _from, state),
     do: {:reply, :ok, %{state | read_only: bool}}
 
-  def handle_call({:set_local, key, val}, _from, state),
-    do: {:reply, :ok, %{state | locals: Map.put(state.locals, key, val)}}
+  def handle_call({:set_local, key, val}, _from, state) do
+    state = %{state | locals: Map.put(state.locals, key, val)}
+    state = if key == "ts-lang", do: init_ts(state, val), else: state
+    {:reply, :ok, state}
+  end
 
   def handle_call({:get_local, key}, _from, state),
     do: {:reply, Map.get(state.locals, key), state}
@@ -360,6 +370,7 @@ defmodule Aimax.Core.Buffer do
             insert_run: 0
         }
 
+        state = ts_invalidate(state)
         broadcast(state, 0, "", 0, :undo)
         {:reply, :ok, state}
     end
@@ -389,6 +400,17 @@ defmodule Aimax.Core.Buffer do
      }, state}
   end
 
+  def handle_call(:ts_highlight, _from, %{ts: nil} = state), do: {:reply, [], state}
+
+  def handle_call(:ts_highlight, _from, %{ts: %{spans: spans}} = state) when spans != nil,
+    do: {:reply, spans, state}
+
+  def handle_call(:ts_highlight, _from, %{ts: ts} = state) do
+    {text, state} = fetch_text(state)
+    spans = TS.ts_state_highlight(ts.res, text)
+    {:reply, spans, %{state | ts: %{ts | spans: spans}}}
+  end
+
   def handle_call(:break_undo_chain, _from, state),
     do: {:reply, :ok, %{state | undo_next: 0}}
 
@@ -408,7 +430,9 @@ defmodule Aimax.Core.Buffer do
 
   defp do_insert(state, pos, text, src) do
     state = maybe_snapshot_insert(state, pos, text, src)
+    old_rope = state.rope
     state = %{state | rope: Rope.insert(state.rope, pos, text), bin: nil, version: state.version + 1}
+    state = ts_track(state, old_rope, pos, pos, pos + Kernel.byte_size(text))
     state = adjust_point_insert(state, pos, Kernel.byte_size(text))
     state = adjust_ranges(state, &adjust_insert(&1, pos, Kernel.byte_size(text)))
     state = %{
@@ -440,7 +464,9 @@ defmodule Aimax.Core.Buffer do
 
   defp do_delete(state, pos, len, src) do
     state = snapshot(state)
+    old_rope = state.rope
     state = %{state | rope: Rope.delete(state.rope, pos, len), bin: nil, version: state.version + 1}
+    state = ts_track(state, old_rope, pos, pos + len, pos)
     state = adjust_point_delete(state, pos, len)
     state = adjust_ranges(state, &adjust_delete(&1, pos, len))
     state = %{state | goal_col: nil, last_insert_end: nil, insert_run: 0, undo_next: 0}
@@ -527,6 +553,41 @@ defmodule Aimax.Core.Buffer do
   end
 
   defp fetch_text(state), do: {state.bin, state}
+
+  # --- incremental tree-sitter ------------------------------------------------
+
+  defp init_ts(state, lang) do
+    case lang && TS.ts_state_new(lang) do
+      nil -> %{state | ts: nil}
+      res -> %{state | ts: %{res: res, spans: nil}}
+    end
+  end
+
+  # feed the edit into the held tree; points are O(log n) rope lookups.
+  # start is identical in old and new text; old_end reads the pre-edit rope,
+  # new_end the post-edit one.
+  defp ts_track(%{ts: nil} = state, _old_rope, _start, _old_end, _new_end), do: state
+
+  defp ts_track(%{ts: ts} = state, old_rope, start, old_end, new_end) do
+    {sr, sc} = ts_point(old_rope, start)
+    {oer, oec} = ts_point(old_rope, old_end)
+    {ner, nec} = ts_point(state.rope, new_end)
+    TS.ts_state_edit(ts.res, start, old_end, new_end, sr, sc, oer, oec, ner, nec)
+    %{state | ts: %{ts | spans: nil}}
+  end
+
+  # undo (or any wholesale content swap): no edit to feed — drop the tree
+  defp ts_invalidate(%{ts: nil} = state), do: state
+
+  defp ts_invalidate(%{ts: ts} = state) do
+    TS.ts_state_reset(ts.res)
+    %{state | ts: %{ts | spans: nil}}
+  end
+
+  defp ts_point(rope, pos) do
+    line = Rope.byte_to_line(rope, pos)
+    {line, pos - Rope.line_to_byte(rope, line)}
+  end
 
   defp clamp(pos, state), do: pos |> max(0) |> min(Rope.byte_size(state.rope))
 

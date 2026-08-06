@@ -55,7 +55,7 @@ defmodule Aimax.Core.LLM do
   defp file_key(var) do
     name = var |> String.replace("_API_KEY", "") |> String.downcase()
 
-    case File.read(Path.expand("~/.aimax/#{name}-key")) do
+    case File.read(Path.join(Aimax.Core.home(), "#{name}-key")) do
       {:ok, key} -> non_empty(String.trim(key))
       _ -> nil
     end

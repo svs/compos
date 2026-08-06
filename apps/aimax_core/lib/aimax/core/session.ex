@@ -192,11 +192,12 @@ defmodule Aimax.Core.Session do
     end)
   end
 
-  # user config: ~/.aimax/ai-config.scm then init.scm — errors log loudly
-  # but never brick boot. (load "...") works from inside either.
+  # user config: <home>/ai-config.scm then init.scm — errors log loudly
+  # but never brick boot. (load "...") works from inside either. Tests set
+  # :home to a tmp dir so the user's real init.scm stays out of them.
   defp load_init(interp) do
     Enum.reduce(["ai-config.scm", "init.scm"], interp, fn file, interp ->
-      path = Path.expand("~/.aimax/#{file}")
+      path = Path.join(Aimax.Core.home(), file)
 
       with true <- File.exists?(path),
            {:ok, _, interp2} <- Scheme.eval_string(interp, File.read!(path)) do

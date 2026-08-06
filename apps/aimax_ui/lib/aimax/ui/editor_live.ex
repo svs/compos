@@ -142,15 +142,18 @@ defmodule Aimax.Ui.EditorLive do
 
   # static per-version work: line split + font-lock spans + ts-only segs.
   # Overlapping captures resolve last-wins (tree-sitter highlight semantics).
+  # Spans come from the buffer's incremental parser (cached per version,
+  # shared across clients); a racing edit between snapshot and highlight can
+  # skew one frame, which the edit's own broadcast then re-renders.
   defp build_static(leaf) do
     spans =
       case leaf.ts_lang do
         nil ->
           []
 
-        lang ->
-          lang
-          |> Aimax.Core.TS.ts_highlight(leaf.text)
+        _lang ->
+          leaf.buffer
+          |> Aimax.Core.Buffer.ts_highlight()
           |> Enum.with_index()
           |> Enum.map(fn {{s, e, scope}, i} -> {s, e, "ts-" <> scope, i} end)
       end

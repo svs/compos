@@ -24,7 +24,11 @@ config :phoenix, :json_library, Jason
 
 if config_env() == :test do
   config :aimax_rpc, socket_path: "/tmp/aimax-rpc-test.sock"
-  config :aimax_core, desktop_path: "/tmp/aimax-desktop-test.etf", desktop_autorestore: false
+
+  config :aimax_core,
+    home: "/tmp/aimax-test-home",
+    desktop_path: "/tmp/aimax-desktop-test.etf",
+    desktop_autorestore: false
   config :logger, level: :warning
 
   config :aimax_ui, Aimax.Ui.Endpoint,

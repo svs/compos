@@ -6,6 +6,9 @@ defmodule Aimax.Core do
   @registry Aimax.Core.BufferRegistry
   @buffer_sup Aimax.Core.BufferSupervisor
 
+  @doc "The aimax home dir (config, keys, desktop). Tests point :home at a tmp dir."
+  def home, do: Application.get_env(:aimax_core, :home) || Path.expand("~/.aimax")
+
   def create_buffer(name, opts \\ []) do
     case DynamicSupervisor.start_child(@buffer_sup, {Buffer, Keyword.put(opts, :name, name)}) do
       {:ok, _pid} -> {:ok, name}

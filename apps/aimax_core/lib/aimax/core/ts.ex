@@ -18,4 +18,18 @@ defmodule Aimax.Core.TS do
   def ts_query_nif(_lang, _text, _query), do: :erlang.nif_error(:nif_not_loaded)
 
   def ts_langs, do: :erlang.nif_error(:nif_not_loaded)
+
+  # stateful parser resource (incremental fontification; owned by a Buffer)
+  @doc "Parser resource for a language, or nil if unknown."
+  def ts_state_new(_lang), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc "Feed one edit into the held tree (byte offsets + row/byte-col points)."
+  def ts_state_edit(_res, _sb, _oeb, _neb, _sr, _sc, _oer, _oec, _ner, _nec),
+    do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc "Drop the held tree — next highlight is a full reparse."
+  def ts_state_reset(_res), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc "Parse (incrementally if possible) and return highlight spans."
+  def ts_state_highlight(_res, _text), do: :erlang.nif_error(:nif_not_loaded)
 end

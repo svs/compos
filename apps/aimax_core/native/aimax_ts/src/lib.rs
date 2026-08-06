@@ -1,9 +1,12 @@
 //! Tree-sitter NIF: the structural sensor (aimax axiom #1).
-//! Stateless v1 — parse per call on dirty CPU schedulers. Incremental
-//! trees-as-resources come with the display-list work.
+//! Two layers: stateless per-call parses (nav, arbitrary queries) and a
+//! stateful parser resource for fontification — the tree survives across
+//! edits, so a keystroke reparses only what changed.
 
+use rustler::ResourceArc;
+use std::sync::Mutex;
 use streaming_iterator::StreamingIterator;
-use tree_sitter::{Language, Node, Parser, Query, QueryCursor};
+use tree_sitter::{InputEdit, Language, Node, Parser, Point, Query, QueryCursor};
 
 fn language(name: &str) -> Option<Language> {
     match name {
@@ -164,6 +167,98 @@ fn ts_query_nif(lang_name: String, text: String, query_src: String) -> Vec<(Stri
 #[rustler::nif]
 fn ts_langs() -> Vec<String> {
     vec!["elixir".into(), "json".into(), "rust".into()]
+}
+
+// --- stateful parsing (incremental fontification) ---------------------------
+
+struct TsState {
+    parser: Parser,
+    query: Query,
+    tree: Option<tree_sitter::Tree>,
+}
+
+struct TsRes(Mutex<TsState>);
+
+#[rustler::resource_impl]
+impl rustler::Resource for TsRes {}
+
+/// A parser + compiled highlight query + (eventually) a tree, owned by one
+/// buffer process. None for unknown languages.
+#[rustler::nif]
+fn ts_state_new(lang_name: String) -> Option<ResourceArc<TsRes>> {
+    let lang = language(&lang_name)?;
+    let hq = highlights_query(&lang_name)?;
+    let mut parser = Parser::new();
+    parser.set_language(&lang).ok()?;
+    let query = Query::new(&lang, hq).ok()?;
+    Some(ResourceArc::new(TsRes(Mutex::new(TsState {
+        parser,
+        query,
+        tree: None,
+    }))))
+}
+
+/// Record an edit against the held tree so the next parse is incremental.
+/// Byte offsets plus (row, byte-column) points, per tree-sitter's InputEdit.
+#[rustler::nif]
+#[allow(clippy::too_many_arguments)]
+fn ts_state_edit(
+    res: ResourceArc<TsRes>,
+    start_byte: usize,
+    old_end_byte: usize,
+    new_end_byte: usize,
+    start_row: usize,
+    start_col: usize,
+    old_end_row: usize,
+    old_end_col: usize,
+    new_end_row: usize,
+    new_end_col: usize,
+) {
+    let mut st = res.0.lock().unwrap();
+    if let Some(tree) = st.tree.as_mut() {
+        tree.edit(&InputEdit {
+            start_byte,
+            old_end_byte,
+            new_end_byte,
+            start_position: Point::new(start_row, start_col),
+            old_end_position: Point::new(old_end_row, old_end_col),
+            new_end_position: Point::new(new_end_row, new_end_col),
+        });
+    }
+}
+
+/// Forget the tree (undo swaps content wholesale): next highlight reparses
+/// from scratch.
+#[rustler::nif]
+fn ts_state_reset(res: ResourceArc<TsRes>) {
+    res.0.lock().unwrap().tree = None;
+}
+
+/// Parse (incrementally when a tree is held) and return highlight spans —
+/// same shape as the stateless ts_highlight.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn ts_state_highlight(res: ResourceArc<TsRes>, text: String) -> Vec<(usize, usize, String)> {
+    let mut guard = res.0.lock().unwrap();
+    let st = &mut *guard;
+    st.tree = st.parser.parse(&text, st.tree.as_ref());
+
+    let mut out = Vec::new();
+    let Some(tree) = st.tree.as_ref() else {
+        return out;
+    };
+    let names = st.query.capture_names();
+    let mut cursor = QueryCursor::new();
+    let mut captures = cursor.captures(&st.query, tree.root_node(), text.as_bytes());
+    while let Some((m, ix)) = captures.next() {
+        let cap = m.captures[*ix];
+        let scope = names[cap.index as usize]
+            .split('.')
+            .next()
+            .unwrap_or("")
+            .to_string();
+        out.push((cap.node.start_byte(), cap.node.end_byte(), scope));
+    }
+    out
 }
 
 rustler::init!("Elixir.Aimax.Core.TS");

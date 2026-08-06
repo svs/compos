@@ -795,6 +795,71 @@
     (minibuffer-read "Eval: " '()
       (lambda (src) (message (value->string (eval-string src)))))))
 
+;;; --- live eval: the editor is its own REPL -----------------------------------
+
+(define (echo-value v) (message (string-append "=> " (value->string v))))
+
+(define (char-before i)
+  (if (> i 0) (buffer-substring (- i 1) i) #f))
+
+(define (eval-skip-ws-back i)
+  (if (member (char-before i) '(" " "\n" "\t"))
+      (eval-skip-ws-back (- i 1))
+      i))
+
+;; matching opener for the closer just before i (naive about escaped quotes)
+(define (sexp-open-before i depth in-str)
+  (if (= i 0) 0
+      (let ((c (char-before i)))
+        (cond
+          (in-str (sexp-open-before (- i 1) depth (not (equal? c "\""))))
+          ((equal? c "\"") (sexp-open-before (- i 1) depth #t))
+          ((equal? c ")") (sexp-open-before (- i 1) (+ depth 1) #f))
+          ((equal? c "(") (if (= depth 1) (- i 1)
+                              (sexp-open-before (- i 1) (- depth 1) #f)))
+          (else (sexp-open-before (- i 1) depth #f))))))
+
+(define (atom-start i)
+  (if (or (= i 0) (member (char-before i) '(" " "\n" "\t" "(" ")")))
+      i
+      (atom-start (- i 1))))
+
+(define (last-sexp-start p)
+  (if (equal? (char-before p) ")")
+      (sexp-open-before p 0 #f)
+      (atom-start p)))
+
+(define-command "eval-last-sexp"
+  (lambda ()
+    (let* ((p (eval-skip-ws-back (point)))
+           (s (last-sexp-start p)))
+      (if (< s p)
+          (echo-value (eval-region (current-buffer) s p))
+          (message "No sexp before point")))))
+
+(define-command "eval-buffer"
+  (lambda () (echo-value (eval-buffer (current-buffer)))))
+
+(define-command "eval-region"
+  (lambda ()
+    (if (mark)
+        (echo-value (eval-region (current-buffer) (region-beginning) (region-end)))
+        (message "No region — set the mark first (C-SPC)"))))
+
+;; hot-reload a Scheme file into the live session (stdlib included)
+(define-command "load-file"
+  (lambda ()
+    (let ((dd (default-directory)))
+      (set! *file-nav-dir* dd)
+      (minibuffer-read* "Load file: " (list-dir dd)
+        (list (list 'complete file-complete)
+              (list 'change file-nav-change)
+              (list 'initial dd)
+              (list 'confirm
+                (lambda (path)
+                  (load path)
+                  (message (string-append "Loaded " path)))))))))
+
 (define-command "keyboard-quit"
   (lambda ()
     (set-mark! #f)
@@ -875,6 +940,7 @@
 
 (global-set-key "M-x" "execute-extended-command")
 (global-set-key "M-:" "eval-expression")
+(global-set-key "C-x C-e" "eval-last-sexp")
 
 (global-set-key "C-x 2" "split-window-below")
 (global-set-key "C-x 3" "split-window-right")

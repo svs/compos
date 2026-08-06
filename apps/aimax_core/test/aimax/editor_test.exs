@@ -26,6 +26,34 @@ defmodule Aimax.EditorTest do
     {:ok, buf: fresh_buffer()}
   end
 
+  test "eval-last-sexp evals the sexp before point (C-x C-e)", %{buf: _buf} do
+    type("(+ 1 (* 2 3))")
+    press(["C-x", "C-e"])
+    assert echo() == "=> 7"
+
+    # atom before point (with trailing whitespace)
+    type(" 42 ")
+    press(["C-x", "C-e"])
+    assert echo() == "=> 42"
+
+    # strings containing parens don't break the scan
+    type(" (string-append \"a)\" \"b\")")
+    press(["C-x", "C-e"])
+    assert echo() == "=> \"a)b\""
+  end
+
+  test "eval-buffer and eval-region commands", %{buf: buf} do
+    type("(define eval-test-x 20)\n(+ eval-test-x 2)")
+    Aimax.Core.Session.run_command("eval-buffer")
+    assert echo() == "=> 22"
+
+    # region over just the define: evals only that
+    Buffer.set_mark(buf, 0)
+    Buffer.goto(buf, 23)
+    Aimax.Core.Session.run_command("eval-region")
+    assert echo() == "=> "
+  end
+
   test "self-insert, newline, backspace", %{buf: buf} do
     type("hey")
     press(["RET"])

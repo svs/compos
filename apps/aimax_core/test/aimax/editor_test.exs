@@ -375,6 +375,24 @@ defmodule Aimax.EditorTest do
       assert Editor.current_buffer() == Path.join(root, "beta.txt")
       assert Buffer.text(Editor.current_buffer()) == "B"
     end
+
+    test "find-file DEL at a directory boundary kills one component", %{root: root} do
+      {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
+      press(["C-x", "C-f"])
+      assert Editor.render_state().minibuffer.input == root <> "/"
+
+      press(["DEL"])
+      assert Editor.render_state().minibuffer.input ==
+               (root |> Path.dirname()) <> "/"
+
+      # mid-name it's still one char at a time
+      type("ab")
+      press(["DEL"])
+      assert Editor.render_state().minibuffer.input ==
+               (root |> Path.dirname()) <> "/a"
+
+      press(["C-g"])
+    end
   end
 
   test "llm primitive: async completion drives a scheme handler", %{buf: buf} do

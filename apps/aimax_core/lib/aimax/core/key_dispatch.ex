@@ -119,8 +119,20 @@ defmodule Aimax.Core.KeyDispatch do
     Editor.set_echo("Quit")
   end
 
+  # in a path prompt, DEL at a directory boundary kills the whole
+  # component ("~/src/ai-max.el/" -> "~/src/"); mid-name it's one char
+  defp minibuffer_key("DEL", %{on_complete: oc, input: input} = mb)
+       when oc not in [nil, false] do
+    trimmed = String.replace(input, ~r{[^/]+/$}, "")
+
+    if trimmed != input,
+      do: set_input(mb, trimmed),
+      else: set_input(mb, String.slice(input, 0..-2//1))
+  end
+
   defp minibuffer_key("DEL", mb),
     do: set_input(mb, String.slice(mb.input, 0..-2//1))
+
 
   defp minibuffer_key("TAB", %{on_complete: oc} = mb) when oc != nil and oc != false do
     # completion policy is a Scheme closure:

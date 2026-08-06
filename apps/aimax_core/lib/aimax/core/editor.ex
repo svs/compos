@@ -124,6 +124,9 @@ defmodule Aimax.Core.Editor do
   # viewport: client reports how many text rows fit; wheel scrolls the
   # active window server-side; any key re-enables point auto-follow
   def set_total_rows(rows), do: GenServer.call(__MODULE__, {:set_total_rows, rows})
+
+  @doc "Per-window measured rows (%{win_id => rows}) — line height varies per buffer."
+  def set_window_rows(map), do: GenServer.call(__MODULE__, {:set_window_rows, map})
   def scroll_active(delta_lines), do: GenServer.call(__MODULE__, {:scroll_active, delta_lines})
   def scroll_window(id, delta_lines), do: GenServer.call(__MODULE__, {:scroll_window, id, delta_lines})
   def user_acted, do: GenServer.call(__MODULE__, :user_acted)
@@ -151,6 +154,7 @@ defmodule Aimax.Core.Editor do
        last_command: "",
        completion: nil,
        total_rows: 40,
+       win_rows: %{},
        mru: [@scratch],
        mb_redirect: true
      }}
@@ -211,7 +215,7 @@ defmodule Aimax.Core.Editor do
   end
 
   def handle_call(:render_state, _from, state) do
-    {tree, rendered} = render_walk(state.tree, state.total_rows)
+    {tree, rendered} = render_walk(state.tree, state.total_rows, state.win_rows)
     state = %{state | tree: tree}
 
     {:reply,
@@ -229,6 +233,14 @@ defmodule Aimax.Core.Editor do
 
   def handle_call({:set_total_rows, rows}, _from, state),
     do: {:reply, :ok, %{state | total_rows: rows |> max(5) |> min(500)}}
+
+  # no-op guard: the client re-reports after every patch; only real changes
+  # may broadcast or this loops forever
+  def handle_call({:set_window_rows, map}, _from, %{win_rows: map} = state),
+    do: {:reply, :ok, state}
+
+  def handle_call({:set_window_rows, map}, _from, state) when is_map(map),
+    do: changed(:ok, %{state | win_rows: map})
 
   def handle_call({:scroll_active, delta}, _from, state) do
     leaf = find_leaf(state.tree, state.active)
@@ -253,12 +265,19 @@ defmodule Aimax.Core.Editor do
     do: {:reply, :ok, %{state | tree: clear_manual(state.tree)}}
 
   def handle_call(:window_rows, _from, state) do
-    {:reply, rows_for(state.tree, state.active, state.total_rows) || state.total_rows, state}
+    rows =
+      Map.get(state.win_rows, state.active) ||
+        rows_for(state.tree, state.active, state.total_rows) || state.total_rows
+
+    {:reply, rows, state}
   end
 
   def handle_call(:recenter, _from, state) do
     leaf = find_leaf(state.tree, state.active)
-    rows = rows_for(state.tree, state.active, state.total_rows) || state.total_rows
+
+    rows =
+      Map.get(state.win_rows, state.active) ||
+        rows_for(state.tree, state.active, state.total_rows) || state.total_rows
 
     top =
       if Buffer.exists?(leaf.buffer) do
@@ -631,11 +650,11 @@ defmodule Aimax.Core.Editor do
   # render walk: computes per-window rows (v-splits divide), clamps and
   # auto-follows the viewport top (unless manually scrolled), and returns
   # both the updated tree (tops persist) and the render payload
-  defp render_walk(%{type: :split, dir: dir, children: [a, b]} = split, rows) do
+  defp render_walk(%{type: :split, dir: dir, children: [a, b]} = split, rows, win_rows) do
     ratio = Map.get(split, :ratio, 0.5)
     {rows_a, rows_b} = split_rows(dir, rows, ratio)
-    {a2, ra} = render_walk(a, rows_a)
-    {b2, rb} = render_walk(b, rows_b)
+    {a2, ra} = render_walk(a, rows_a, win_rows)
+    {b2, rb} = render_walk(b, rows_b, win_rows)
 
     {%{split | children: [a2, b2]},
      %{type: :split, dir: dir, ratio: ratio, children: [ra, rb]}}
@@ -648,7 +667,11 @@ defmodule Aimax.Core.Editor do
     {a, max(rows - a, 3)}
   end
 
-  defp render_walk(%{type: :leaf, id: id, buffer: buffer} = leaf, rows) do
+  defp render_walk(%{type: :leaf, id: id, buffer: buffer} = leaf, rows, win_rows) do
+    # the client's measured row count for this window wins over split math:
+    # line height varies per buffer, so only the client knows what fits
+    rows = Map.get(win_rows, id, rows)
+
     # one round trip per leaf — this runs on every render of every window
     snap = if Buffer.exists?(buffer), do: Buffer.render_snapshot(buffer), else: @empty_snapshot
     %{text: text, point: point, locals: locals} = snap
@@ -691,6 +714,7 @@ defmodule Aimax.Core.Editor do
       col: snap.col,
       style: Map.get(locals, "style"),
       render_mode: Map.get(locals, "render-mode"),
+      preview_authored: Map.get(locals, "preview-authored") == true,
       top: top,
       rows: rows,
       total_lines: total_lines,

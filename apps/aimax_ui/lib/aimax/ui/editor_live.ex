@@ -41,6 +41,16 @@ defmodule Aimax.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
+  # per-window row counts: line height varies per buffer (per-buffer styles),
+  # so the client measures each window against its own lines
+  def handle_event("win_rows", %{"rows" => rows}, socket) when is_map(rows) do
+    parsed =
+      for {id, n} <- rows, is_integer(n), id_int = safe_int(id), into: %{}, do: {id_int, n}
+
+    Aimax.Core.Editor.set_window_rows(parsed)
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
   def handle_event("scroll", %{"lines" => lines}, socket) when is_integer(lines) do
     Aimax.Core.Editor.scroll_active(lines)
     {:noreply, socket |> drain() |> refresh()}
@@ -93,12 +103,12 @@ defmodule Aimax.Ui.EditorLive do
   # the srcdoc (the sandboxed iframe can't see the parent's CSS vars)
   defp decorate(%{type: :leaf, render_mode: rm} = leaf, cache, faces)
        when rm in ["html", "markdown"] do
-    key = {leaf.buffer, leaf.version, rm, :erlang.phash2(faces)}
+    key = {leaf.buffer, leaf.version, rm, leaf.preview_authored, :erlang.phash2(faces)}
 
     html =
       case cache[{:preview, leaf.id}] do
         {^key, html} -> html
-        _ -> preview_html(rm, leaf.text, faces)
+        _ -> preview_html(rm, leaf.text, faces, leaf.preview_authored)
       end
 
     {Map.merge(leaf, %{lines: [], preview: html}),
@@ -183,6 +193,15 @@ defmodule Aimax.Ui.EditorLive do
 
   defp visible_buffers(%{type: :leaf, buffer: b}), do: [b]
   defp visible_buffers(%{type: :split, children: c}), do: Enum.flat_map(c, &visible_buffers/1)
+
+  defp safe_int(v) when is_integer(v), do: v
+
+  defp safe_int(v) when is_binary(v) do
+    case Integer.parse(v) do
+      {n, ""} -> n
+      _ -> nil
+    end
+  end
 
   # --- rendering -------------------------------------------------------------
 
@@ -284,7 +303,10 @@ defmodule Aimax.Ui.EditorLive do
       )
 
     ~H"""
-    <div class={"window #{if @active?, do: "active", else: "inactive"} #{if !@node.line_numbers, do: "no-nums"}"}>
+    <div
+      class={"window #{if @active?, do: "active", else: "inactive"} #{if !@node.line_numbers, do: "no-nums"}"}
+      data-win-id={@node.id}
+    >
       <%= if @node.render_mode in ["html", "markdown"] do %>
         <iframe class="html-preview" sandbox="" srcdoc={@node.preview} title={@node.buffer}></iframe>
       <% else %>
@@ -400,24 +422,43 @@ defmodule Aimax.Ui.EditorLive do
     end)
   end
 
-  # markdown gets a stylesheet built from the live theme faces; html renders
-  # as authored (an unstyled html doc still shows the themed --window-bg
-  # through the transparent srcdoc canvas)
-  defp preview_html("html", text, _faces), do: text
+  # both previews follow the live theme; `(buffer-set-local! buf
+  # 'preview-authored #t)` renders html exactly as authored instead
+  defp preview_html("html", text, _faces, true), do: text
 
-  defp preview_html("markdown", text, faces) do
+  # element-level overrides injected AFTER the document's own styles win
+  # ties against authored element rules, while classed/id'd rules still
+  # take precedence — themed canvas, authored structure
+  defp preview_html("html", text, faces, _authored) do
+    p = preview_palette(faces)
+
+    style = """
+    <style>
+    :root{color-scheme:none}
+    body{background:#{p.bg};color:#{p.fg}}
+    a{color:#{p.accent}}
+    code,pre,kbd{background:#{p.inset};color:#{p.fg}}
+    blockquote{border-color:#{p.border};color:#{p.dim}}
+    th{background:#{p.inset}}th,td{border-color:#{p.border}}
+    hr{border-color:#{p.border}}
+    </style>
+    """
+
+    case String.split(text, ~r{</body>}i, parts: 2) do
+      [before, rest] -> before <> style <> "</body>" <> rest
+      [_] -> text <> style
+    end
+  end
+
+  defp preview_html("markdown", text, faces, _authored) do
     body =
       case Earmark.as_html(text, compact_output: false) do
         {:ok, html, _} -> html
         {:error, html, _} -> html
       end
 
-    bg = face(faces, "window", "bg", "#fdfcf8")
-    fg = face(faces, "default", "fg", "#1b1a17")
-    accent = face(faces, "accent", "fg", "#26356b")
-    dim = face(faces, "dim", "fg", "#8a857a")
-    border = face(faces, "border", "bg", "#cbc4b1")
-    inset = face(faces, "window-inactive", "bg", "#f4f0e6")
+    %{bg: bg, fg: fg, accent: accent, dim: dim, border: border, inset: inset} =
+      preview_palette(faces)
 
     """
     <!DOCTYPE html><html><head><meta charset="utf-8"><style>
@@ -454,6 +495,17 @@ defmodule Aimax.Ui.EditorLive do
 
   defp face(faces, name, attr, fallback),
     do: get_in(faces, [name, attr]) || fallback
+
+  defp preview_palette(faces) do
+    %{
+      bg: face(faces, "window", "bg", "#fdfcf8"),
+      fg: face(faces, "default", "fg", "#1b1a17"),
+      accent: face(faces, "accent", "fg", "#26356b"),
+      dim: face(faces, "dim", "fg", "#8a857a"),
+      border: face(faces, "border", "bg", "#cbc4b1"),
+      inset: face(faces, "window-inactive", "bg", "#f4f0e6")
+    }
+  end
 
   defp face_css(faces) do
     vars =

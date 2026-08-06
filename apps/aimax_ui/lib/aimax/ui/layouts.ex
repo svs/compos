@@ -313,13 +313,31 @@ defmodule Aimax.Ui.Layouts do
                 };
                 window.addEventListener("keydown", this.handler);
 
-                // viewport geometry: tell the server how many rows fit
+                // viewport geometry: overall estimate for split math, plus
+                // exact per-window rows (line height varies per buffer)
                 this.lineHeight = 22;
+                this.lastWinRows = "";
                 this.sendViewport = () => {
                   const line = document.querySelector(".line");
                   if (line) this.lineHeight = line.getBoundingClientRect().height || 22;
                   const area = document.querySelector(".windows");
                   if (area) this.pushEvent("viewport", { rows: Math.max(5, Math.floor(area.clientHeight / this.lineHeight)) });
+                  this.sendWinRows();
+                };
+                this.sendWinRows = () => {
+                  const rows = {};
+                  document.querySelectorAll(".window[data-win-id]").forEach((win) => {
+                    const buf = win.querySelector(".buf");
+                    if (!buf) return; // preview windows have no line grid
+                    const ln = buf.querySelector(".line");
+                    const h = ln ? ln.getBoundingClientRect().height : this.lineHeight;
+                    if (h > 0) rows[win.dataset.winId] = Math.max(3, Math.floor(buf.clientHeight / h));
+                  });
+                  const key = JSON.stringify(rows);
+                  if (key !== this.lastWinRows && Object.keys(rows).length > 0) {
+                    this.lastWinRows = key;
+                    this.pushEvent("win_rows", { rows });
+                  }
                 };
                 requestAnimationFrame(this.sendViewport);
                 this.resizeH = () => {
@@ -347,6 +365,12 @@ defmodule Aimax.Ui.Layouts do
                 window.addEventListener("focus", this.focusH);
                 window.addEventListener("blur", this.blurH);
                 if (!document.hasFocus()) document.body.classList.add("unfocused");
+              },
+              updated() {
+                // re-measure after every patch: splits, buffer switches and
+                // per-buffer styles all change how many rows fit where
+                clearTimeout(this._wrt);
+                this._wrt = setTimeout(this.sendWinRows, 30);
               },
               destroyed() {
                 window.removeEventListener("keydown", this.handler);

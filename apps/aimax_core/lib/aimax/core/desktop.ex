@@ -198,6 +198,10 @@ defmodule Aimax.Core.Desktop do
       Session.eval(~s{(begin (switch-to-buffer! "#{name}") (set-mode! "#{mode}"))})
     end
 
+    if locals["minor-modes"] not in [nil, []] do
+      Session.eval(~s{(restore-minor-modes! "#{name}")})
+    end
+
     Buffer.goto(name, point)
   end
 
@@ -212,5 +216,10 @@ defmodule Aimax.Core.Desktop do
     end
 
     Enum.each(locals, fn {k, v} -> Buffer.set_local(bpath, k, v) end)
+
+    # minor modes rebuild their presentation from the locals just restored
+    if locals["minor-modes"] not in [nil, []] do
+      Session.eval(~s{(restore-minor-modes! "#{bpath}")})
+    end
   end
 end

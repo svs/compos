@@ -408,6 +408,10 @@ defmodule Aimax.Core.SchemeAPI do
         |> Enum.filter(&(String.starts_with?(&1, prefix) and &1 != prefix))
         |> Enum.sort()
       end,
+      # whitespace-separated word count (writing-mode modeline, M-x count-words)
+      "count-words" => fn [buf] ->
+        ~r/\S+/ |> Regex.scan(Buffer.text(buf)) |> length()
+      end,
       "minibuffer-set-candidates!" => fn [candidates] ->
         Editor.minibuffer_set_candidates(candidates)
         :void

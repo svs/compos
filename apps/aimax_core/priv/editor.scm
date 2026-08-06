@@ -79,6 +79,50 @@
     (if m ((cadr m))))
   (run-hooks (string->symbol (string-append name "-hook"))))
 
+;;; --- minor modes --------------------------------------------------------------
+;;; A minor mode = its name in the buffer-local 'minor-modes list + an
+;;; idempotent setup fn taking the buffer. Desktop restore re-runs the
+;;; setup (restore-minor-modes!) after locals come back, the same way
+;;; set-mode! re-runs major-mode setup — so setup fns must rebuild
+;;; presentation from the locals they find, never stack hooks twice.
+
+(define *minor-mode-setups* '())   ; (name setup teardown)
+
+(define (register-minor-mode! name setup &optional teardown)
+  (set! *minor-mode-setups*
+    (cons (list name setup teardown) *minor-mode-setups*)))
+
+(define (minor-mode-on? buf name)
+  (let ((ms (buffer-local buf 'minor-modes)))
+    (if (and ms (member name ms)) #t #f)))
+
+(define (enable-minor-mode! buf name)
+  (let ((cur (or (buffer-local buf 'minor-modes) '())))
+    (unless (member name cur)
+      (buffer-set-local! buf 'minor-modes (cons name cur))))
+  (let ((m (assoc name *minor-mode-setups*)))
+    (if m ((cadr m) buf))))
+
+(define (disable-minor-mode! buf name)
+  (buffer-set-local! buf 'minor-modes
+    (remove (lambda (n) (equal? n name))
+            (or (buffer-local buf 'minor-modes) '())))
+  (let ((m (assoc name *minor-mode-setups*)))
+    (if (and m (caddr m)) ((caddr m) buf))))
+
+(define (toggle-minor-mode! name)
+  (let ((buf (current-buffer)))
+    (if (minor-mode-on? buf name)
+        (begin (disable-minor-mode! buf name) #f)
+        (begin (enable-minor-mode! buf name) #t))))
+
+(define (restore-minor-modes! buf)
+  (for-each
+    (lambda (name)
+      (let ((m (assoc name *minor-mode-setups*)))
+        (if m ((cadr m) buf))))
+    (or (buffer-local buf 'minor-modes) '())))
+
 (define *auto-mode-alist*
   '((".scm" "scheme-mode") (".el" "scheme-mode")
     (".ex" "elixir-mode") (".exs" "elixir-mode")

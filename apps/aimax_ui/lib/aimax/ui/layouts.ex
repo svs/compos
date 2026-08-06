@@ -136,6 +136,16 @@ defmodule Aimax.Ui.Layouts do
             outline: 1px solid var(--linenum-fg, #b3ac9c);
           }
           .no-nums .linenum { display: none; }
+          /* --- writing-mode: centered measure, quiet chrome ---------------- */
+          .window.writing .buf { padding-top: clamp(20px, 6vh, 90px); }
+          .window.writing .line {
+            max-width: var(--writing-measure, 62ch);
+            width: 100%; margin: 0 auto; box-sizing: border-box;
+            padding: 0 16px;
+          }
+          .window.writing.active .line.hl-line { background: transparent; }
+          .window.writing .modeline { opacity: 0.35; transition: opacity 0.2s ease; }
+          .window.writing .modeline:hover { opacity: 1; }
           /* HTML preview: sandboxed (no scripts), styles/images allowed */
           .html-preview {
             flex: 1; width: 100%; border: 0;

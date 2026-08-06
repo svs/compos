@@ -731,7 +731,9 @@ defmodule Aimax.Core.Editor do
       top: top,
       rows: rows,
       total_lines: total_lines,
-      line_numbers: Map.get(locals, "line-numbers") != "off"
+      line_numbers: Map.get(locals, "line-numbers") != "off",
+      # extra CSS class on the window div (writing-mode centering etc.)
+      window_class: Map.get(locals, "window-class") || nil
     }
 
     {%{leaf | top: top}, rendered}

@@ -348,7 +348,7 @@ defmodule Aimax.Ui.EditorLive do
     ~H"""
     <div
       id={"win-#{@node.id}"}
-      class={"window #{if @active?, do: "active", else: "inactive"} #{if !@node.line_numbers, do: "no-nums"}"}
+      class={"window #{if @active?, do: "active", else: "inactive"} #{if !@node.line_numbers, do: "no-nums"} #{@node.window_class}"}
       data-win-id={@node.id}
     >
       <%= if @node.render_mode == "agent" and Map.has_key?(@node, :ag_blocks) do %>

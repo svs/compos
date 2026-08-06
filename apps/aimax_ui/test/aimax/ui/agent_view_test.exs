@@ -67,9 +67,9 @@ defmodule Aimax.Ui.AgentViewTest do
     assert html =~ "ag-verb"
     assert html =~ "M-x profile"
     assert html =~ "p95 9.4ms"
-    # input row carries the typed tail and the hint
+    # input row carries the typed tail; the hint yields its space while typing
     assert html =~ "half-typed"
-    assert html =~ "RET sends"
+    refute html =~ "RET sends"
     # no raw marker rendered in rich mode
     refute html =~ "╰─ you ▸ profile"
   end
@@ -119,5 +119,7 @@ defmodule Aimax.Ui.AgentViewTest do
 
     assert html =~ "agent-view"
     assert html =~ "site"
+    # empty input row shows the keybinding hint
+    assert html =~ "RET sends"
   end
 end

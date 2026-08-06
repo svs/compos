@@ -460,7 +460,10 @@ defmodule Aimax.Ui.EditorLive do
                 :if={@node.ag_input.cur != ""}
                 class="cursor"
               >{@node.ag_input.cur}</span>{@node.ag_input.post}</span>
-            <span class="ag-hint">RET sends · C-RET interrupts</span>
+            <span
+              :if={@node.ag_input.pre == "" and @node.ag_input.post == "" and @node.ag_input.queued == ""}
+              class="ag-hint"
+            >RET sends · C-RET interrupts</span>
           </div>
         </div>
       <% else %>

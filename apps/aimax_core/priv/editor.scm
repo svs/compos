@@ -769,7 +769,11 @@
           (string-append "companion · " (llm-model)))
         (chat-clear-waiting! buf)
         (local-set-key "RET" "chat-send")
-        (local-set-key "C-c C-v" "chat-toggle-view")))))
+        (local-set-key "S-RET" "newline")
+        (local-set-key "C-c C-v" "chat-toggle-view")
+        ;; a restored point can land inside the marker — typing/pasting
+        ;; there corrupts the input boundary (bytes end up pre-marker)
+        (chat-snap-to-input!)))))
 
 ;; adopt the most recent titled chat after a daemon restart
 ;; (unless fresh — chat-new wants a brand new conversation)

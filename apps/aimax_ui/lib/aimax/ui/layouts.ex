@@ -168,10 +168,13 @@ defmodule Aimax.Ui.Layouts do
             background: var(--agent-you-bg, rgba(99, 110, 200, 0.10));
             border-radius: 8px; padding: 8px 12px;
           }
-          .ag-user-text { font-family: var(--font-mono); font-size: 12.5px; white-space: pre-wrap; }
+          .ag-user-text {
+            min-width: 0; font-family: var(--font-mono); font-size: 12.5px;
+            white-space: pre-wrap; overflow-wrap: anywhere;
+          }
           .ag-prose {
             font-family: var(--font-serif); font-size: 15px; line-height: 1.6;
-            margin: 8px 0; max-width: 62ch;
+            margin: 8px 0; max-width: 62ch; overflow-wrap: anywhere;
           }
           .ag-prose code, .ag-prose pre {
             font-family: var(--font-mono); font-size: 12px;
@@ -200,7 +203,7 @@ defmodule Aimax.Ui.Layouts do
           .ag-body {
             border-top: 1px solid var(--agent-card-border, rgba(0,0,0,0.08));
             padding: 8px 10px; overflow-x: auto; max-height: 260px; overflow-y: auto;
-            white-space: pre-wrap; color: var(--agent-thought-fg, #6a675e);
+            white-space: pre-wrap; overflow-wrap: anywhere; color: var(--agent-thought-fg, #6a675e);
           }
           .ag-thought summary { color: var(--agent-thought-fg, #8a8577); font-size: 10.5px; }
           .ag-thought-text { padding: 6px 10px; white-space: pre-wrap; color: var(--agent-thought-fg, #8a8577); }
@@ -240,7 +243,10 @@ defmodule Aimax.Ui.Layouts do
             border-radius: 10px; padding: 9px 14px;
             background: var(--window-bg, rgba(255,255,255,0.5));
           }
-          .ag-input { flex: 1; font-family: var(--font-mono); font-size: 12.5px; white-space: pre-wrap; }
+          .ag-input {
+            flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 12.5px;
+            white-space: pre-wrap; overflow-wrap: anywhere;
+          }
           .ag-queued { color: var(--agent-queued-fg, #9a958a); }
           .ag-hint { font-family: var(--font-mono); font-size: 10px; color: var(--agent-meta-fg, #8a8577); flex-shrink: 0; }
           .ml-extra {
@@ -542,6 +548,9 @@ defmodule Aimax.Ui.Layouts do
                 // wheel scrolls the server-side viewport of the active window
                 this.wheelAcc = 0;
                 this.wheelH = (e) => {
+                  // agent/chat transcripts own their scrolling (.ag-scroll);
+                  // the server viewport only drives line-grid buffers
+                  if (e.target.closest && e.target.closest(".ag-scroll")) return;
                   e.preventDefault();
                   this.wheelAcc += e.deltaY;
                   const lines = Math.trunc(this.wheelAcc / this.lineHeight);

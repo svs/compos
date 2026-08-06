@@ -1082,6 +1082,32 @@ defmodule Aimax.EditorTest do
     assert eventually(fn -> Buffer.text("*chat*") =~ "42" end)
   end
 
+  test "C-c q asks the LLM from the minibuffer, reply pops up in *llm*", %{buf: _buf} do
+    # llm-ask routes through chat-llm, i.e. the tool loop by default
+    Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: [%{content: prompt} | _]} ->
+      assert prompt =~ "what is 6*7"
+
+      {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "42"}]}}
+    end)
+
+    on_exit(fn ->
+      Application.delete_env(:aimax_core, :llm_chat_fun)
+      Aimax.Core.kill_buffer("*llm*")
+    end)
+
+    press(["C-c", "q"])
+    assert Editor.snapshot().minibuffer.prompt == "Ask LLM: "
+    type("what is 6*7")
+    press(["RET"])
+
+    assert eventually(fn -> Buffer.exists?("*llm*") and Buffer.text("*llm*") =~ "42" end)
+    assert Buffer.text("*llm*") =~ "what is 6*7"
+
+    # reply was displayed in the popup window; close it again
+    assert eventually(fn -> length(Editor.list_windows()) == 2 end)
+    press(["C-x", "1"])
+  end
+
   test "set-llm-model! changes the model" do
     {:ok, before} = Aimax.Core.Session.eval("(llm-model)")
     {:ok, _} = Aimax.Core.Session.eval(~s{(set-llm-model! "luna-5.6")})

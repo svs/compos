@@ -761,8 +761,30 @@
             (insert! (string-append "```\n" text "\n```\n"))
             (message "Region added to chat"))))))
 
+;; C-c q : one-shot question from the minibuffer. Goes through chat-llm,
+;; so the model gets the tool loop when chat-use-tools is on. Reply lands
+;; in the *llm* popup; prompts are kept in minibuffer history.
+(define-command "llm-ask"
+  (lambda ()
+    (minibuffer-read "Ask LLM: " (history-items 'llm-ask)
+      (lambda (prompt)
+        (history-push! 'llm-ask prompt)
+        (message "LLM thinking...")
+        (chat-llm
+          (string-append
+            "You are the assistant inside the ai-max editor. Use your tools "
+            "when they help. Answer concisely in markdown.\n\n"
+            prompt)
+          (lambda (reply)
+            (buffer-create "*llm*")
+            (buffer-append! "*llm*"
+              (string-append "\n;; " prompt "\n" reply "\n"))
+            (display-buffer "*llm*")
+            (message "LLM done -> *llm*")))))))
+
 (global-set-key "C-c c" "chat")
 (global-set-key "C-c r" "chat-send-region")
+(global-set-key "C-c q" "llm-ask")
 
 ;;; --- minibuffer history (vertico-style: last-used first) --------------------
 ;;; The candidate ranking in the core is a stable sort, so passing

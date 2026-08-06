@@ -29,6 +29,28 @@
   (lambda ()
     (if (not (undo!)) (message "No further undo information"))))
 
+;;; --- minibuffer --------------------------------------------------------------
+;;; The minibuffer is a real buffer (" *minibuf*"): point motion, kill/yank,
+;;; undo and M-DEL all work in prompts for free via the global keymap. Only
+;;; prompt-specific behavior is bound here, in its local keymap.
+
+(define-command "minibuffer-confirm" (lambda () (minibuffer-confirm!)))
+(define-command "minibuffer-cancel" (lambda () (minibuffer-cancel!)))
+(define-command "minibuffer-complete" (lambda () (minibuffer-complete!)))
+(define-command "minibuffer-next-candidate" (lambda () (minibuffer-next!)))
+(define-command "minibuffer-previous-candidate" (lambda () (minibuffer-prev!)))
+(define-command "minibuffer-delete-backward" (lambda () (minibuffer-del!)))
+
+(let ((mb (minibuffer-buffer)))
+  (local-set-key* mb "RET" "minibuffer-confirm")
+  (local-set-key* mb "C-g" "minibuffer-cancel")
+  (local-set-key* mb "TAB" "minibuffer-complete")
+  (local-set-key* mb "C-n" "minibuffer-next-candidate")
+  (local-set-key* mb "<down>" "minibuffer-next-candidate")
+  (local-set-key* mb "C-p" "minibuffer-previous-candidate")
+  (local-set-key* mb "<up>" "minibuffer-previous-candidate")
+  (local-set-key* mb "DEL" "minibuffer-delete-backward"))
+
 ;;; --- hooks (Emacs-style, all Scheme) ----------------------------------------
 
 (define *hooks* '())
@@ -353,7 +375,9 @@
 (define (isearch backward)
   (set! *isearch-origin* (point))
   (minibuffer-read* (if backward "I-search backward: " "I-search: ") '()
-    (list (list 'change (lambda (q) (isearch-update q backward)))
+    (list (list 'change (lambda (q)
+                          (with-window-buffer
+                            (lambda () (isearch-update q backward)))))
           (list 'confirm (lambda (q) (set-mark! #f)))
           (list 'cancel (lambda ()
                           (set-mark! #f)

@@ -16,6 +16,12 @@ defmodule Aimax.Core.Editor do
 
   alias Aimax.Core.{Buffer, Candidates, Events}
 
+  # the minibuffer's backing buffer (Emacs-style: prompt input IS a buffer,
+  # so point motion, kill/yank, undo and local keymaps all just work).
+  # Space-prefixed = hidden from buffer lists, like Emacs.
+  @minibuf " *minibuf*"
+  def minibuf_name, do: @minibuf
+
   @scratch "*scratch*"
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -59,6 +65,12 @@ defmodule Aimax.Core.Editor do
   def minibuffer_selected, do: GenServer.call(__MODULE__, :mb_selected)
 
   def minibuffer_close, do: GenServer.call(__MODULE__, :mb_close)
+
+  @doc "Re-read input from the minibuf buffer. :unchanged | {:changed, input}."
+  def minibuffer_sync_input, do: GenServer.call(__MODULE__, :mb_sync_input)
+
+  @doc "While false, current_buffer ignores an active minibuffer (handler escape hatch)."
+  def set_mb_redirect(bool), do: GenServer.call(__MODULE__, {:mb_redirect, bool})
 
   def key_for_command(command), do: GenServer.call(__MODULE__, {:key_for_command, command})
 
@@ -139,7 +151,8 @@ defmodule Aimax.Core.Editor do
        last_command: "",
        completion: nil,
        total_rows: 40,
-       mru: [@scratch]
+       mru: [@scratch],
+       mb_redirect: true
      }}
   end
 
@@ -156,12 +169,26 @@ defmodule Aimax.Core.Editor do
     {:reply, snap, state}
   end
 
+  # while a prompt is active the minibuffer IS the current buffer (Emacs:
+  # the minibuffer window is selected) — all point-relative primitives and
+  # the local-keymap lookup route there. with-window-buffer flips
+  # mb_redirect off so a handler can act on the window's buffer instead
+  # (Emacs' with-minibuffer-selected-window).
+  def handle_call(:current_buffer, _from, %{minibuffer: %{}, mb_redirect: true} = state) do
+    {:reply, @minibuf, state}
+  end
+
   def handle_call(:current_buffer, _from, state) do
     {:reply, find_leaf(state.tree, state.active).buffer, state}
   end
 
+  def handle_call({:mb_redirect, bool}, _from, state),
+    do: {:reply, :ok, %{state | mb_redirect: bool}}
+
   def handle_call({:lookup_key, seq}, _from, state) do
-    buffer = find_leaf(state.tree, state.active).buffer
+    buffer =
+      if state.minibuffer, do: @minibuf, else: find_leaf(state.tree, state.active).buffer
+
     local = Map.get(state.local_keymaps, buffer, %{})
 
     reply =
@@ -264,16 +291,29 @@ defmodule Aimax.Core.Editor do
       |> Map.merge(handlers)
       |> Map.put(:prompt, prompt)
 
+    reset_minibuf_buffer(mb.input)
     mb = Map.put(mb, :list, Candidates.new(candidates, query: mb_query(mb)))
     changed(:ok, %{state | minibuffer: mb})
   end
 
   def handle_call({:mb_input, input}, _from, %{minibuffer: %{} = mb} = state) do
-    mb = %{mb | input: input}
-    changed(:ok, %{state | minibuffer: %{mb | list: Candidates.put_query(mb.list, mb_query(mb))}})
+    reset_minibuf_buffer(input)
+    changed(:ok, %{state | minibuffer: put_mb_input(mb, input)})
   end
 
   def handle_call({:mb_input, _}, _from, state), do: {:reply, {:error, :inactive}, state}
+
+  # pull the input back out of the minibuffer buffer after keys edited it
+  # (self-insert, DEL, yank, undo — anything); requery candidates on change
+  def handle_call(:mb_sync_input, _from, %{minibuffer: %{} = mb} = state) do
+    input = Buffer.text(@minibuf)
+
+    if input == mb.input,
+      do: {:reply, :unchanged, state},
+      else: changed({:changed, input}, %{state | minibuffer: put_mb_input(mb, input)})
+  end
+
+  def handle_call(:mb_sync_input, _from, state), do: {:reply, :unchanged, state}
 
   def handle_call({:mb_candidates, candidates}, _from, %{minibuffer: %{} = mb} = state) do
     list = mb.list |> Candidates.put_items(candidates) |> Candidates.put_query(mb_query(mb))
@@ -307,7 +347,9 @@ defmodule Aimax.Core.Editor do
   def handle_call(:buffer_mru, _from, state) do
     live = Enum.filter(state.mru, &Buffer.exists?/1)
     rest = Aimax.Core.list_buffers() -- live
-    {:reply, live ++ Enum.sort(rest), state}
+
+    # space-prefixed buffers are internal (the minibuf), hidden like Emacs
+    {:reply, Enum.reject(live ++ Enum.sort(rest), &String.starts_with?(&1, " ")), state}
   end
 
   def handle_call({:set_last_command, name}, _from, state),
@@ -473,10 +515,25 @@ defmodule Aimax.Core.Editor do
 
   defp mb_query(%{input: input}), do: input
 
+  defp put_mb_input(mb, input) do
+    mb = %{mb | input: input}
+    %{mb | list: Candidates.put_query(mb.list, mb_query(mb))}
+  end
+
+  # (re)fill the backing buffer and park point at the end
+  defp reset_minibuf_buffer(input) do
+    unless Buffer.exists?(@minibuf), do: Aimax.Core.create_buffer(@minibuf)
+    size = Buffer.byte_size(@minibuf)
+    if size > 0, do: Buffer.delete_range(@minibuf, 0, size, source: :editor)
+    if input != "", do: Buffer.append(@minibuf, input, source: :editor)
+    Buffer.goto(@minibuf, Kernel.byte_size(input))
+  end
+
   defp render_minibuffer(mb) do
     %{
       prompt: mb.prompt,
       input: mb.input,
+      point: (Buffer.exists?(@minibuf) && Buffer.point(@minibuf)) || Kernel.byte_size(mb.input),
       candidates: Candidates.rows(mb.list),
       sel: mb.list.sel,
       total: Candidates.total(mb.list),

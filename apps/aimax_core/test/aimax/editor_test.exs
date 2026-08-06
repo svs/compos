@@ -1142,3 +1142,66 @@ defmodule Aimax.EditorTest do
   defp collect_buffers(%{type: :leaf, buffer: b}), do: [b]
   defp collect_buffers(%{type: :split, children: c}), do: Enum.flat_map(c, &collect_buffers/1)
 end
+
+defmodule Aimax.MinibufferEditingTest do
+  @moduledoc "The minibuffer is a buffer: real editing commands work in prompts."
+
+  use ExUnit.Case
+
+  alias Aimax.Core.{Buffer, Editor, KeyDispatch}
+
+  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+  defp type(str), do: str |> String.graphemes() |> press()
+  defp input, do: Editor.render_state().minibuffer.input
+
+  setup do
+    Editor.minibuffer_close()
+    Editor.set_pending([])
+    Editor.delete_other_windows()
+    Editor.set_window_buffer("mb-edit-#{System.unique_integer([:positive])}")
+    press(["M-x"])
+    assert Editor.render_state().minibuffer
+    on_exit(fn -> Editor.minibuffer_close() end)
+    :ok
+  end
+
+  test "point motion and mid-input insertion" do
+    type("firword")
+    press(["C-b", "C-b", "C-b", "C-b"])
+    type("st-")
+    assert input() == "first-word"
+
+    press(["C-a"])
+    type(">")
+    assert input() == ">first-word"
+
+    press(["C-e"])
+    type("<")
+    assert input() == ">first-word<"
+  end
+
+  test "M-DEL kills a word, C-y yanks into the prompt" do
+    type("hello world")
+    press(["M-DEL"])
+    assert input() == "hello "
+
+    # kill ring content yanks into the minibuffer
+    press(["C-y"])
+    assert input() == "hello world"
+  end
+
+  test "DEL deletes at point, not just at the end" do
+    type("abc")
+    press(["C-b"])
+    press(["DEL"])
+    assert input() == "ac"
+  end
+
+  test "current_buffer routes back to the window after close" do
+    win = Editor.render_state() |> Map.get(:tree) |> then(& &1.buffer)
+    assert Editor.current_buffer() == Editor.minibuf_name()
+    press(["C-g"])
+    assert Editor.current_buffer() == win
+    assert Buffer.text(Editor.minibuf_name()) == ""
+  end
+end

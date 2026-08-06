@@ -25,6 +25,7 @@ defmodule Aimax.Core.Buffer do
 
   defstruct name: nil,
             rope: nil,
+            bin: nil,
             version: 0,
             saved_version: 0,
             path: nil,
@@ -150,7 +151,10 @@ defmodule Aimax.Core.Buffer do
   end
 
   @impl true
-  def handle_call(:text, _from, state), do: {:reply, Rope.to_binary(state.rope), state}
+  def handle_call(:text, _from, state) do
+    {text, state} = fetch_text(state)
+    {:reply, text, state}
+  end
   def handle_call(:byte_size, _from, state), do: {:reply, Rope.byte_size(state.rope), state}
   def handle_call(:version, _from, state), do: {:reply, state.version, state}
   def handle_call(:path, _from, state), do: {:reply, state.path, state}

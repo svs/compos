@@ -241,9 +241,124 @@ defmodule Aimax.Core.Session do
       "remove-on-change!" => fn [id] ->
         Aimax.Core.Reactor.remove(id)
         :void
+      end,
+
+      # Emacs' with-minibuffer-selected-window: run a thunk with
+      # current-buffer pointing at the WINDOW's buffer even though a prompt
+      # is active — isearch's change handler moves point in the file, not
+      # in the prompt it is typing into
+      "with-window-buffer" => fn [thunk], store ->
+        Editor.set_mb_redirect(false)
+
+        try do
+          Aimax.Scheme.Eval.apply_fn(thunk, [], store)
+        after
+          Editor.set_mb_redirect(true)
+        end
+      end,
+
+      # --- minibuffer commands (bound in the *minibuf* local keymap) ---------
+      # Store-aware: handler closures apply in the CURRENT store — these run
+      # inside the Session, so calling back via apply_callback would deadlock.
+      "minibuffer-buffer" => fn [] -> Editor.minibuf_name() end,
+      "minibuffer-confirm!" => fn [], store ->
+        case Editor.minibuffer_close() do
+          %{on_confirm: oc} = mb when oc not in [nil, false] ->
+            {value, store} = mb_confirm_value(mb, store)
+            {_, store} = Aimax.Scheme.Eval.apply_fn(oc, [value], store)
+            {:void, store}
+
+          _ ->
+            {:void, store}
+        end
+      end,
+      "minibuffer-cancel!" => fn [], store ->
+        store =
+          case Editor.minibuffer_close() do
+            %{on_cancel: oc} when oc not in [nil, false] ->
+              {_, store} = Aimax.Scheme.Eval.apply_fn(oc, [], store)
+              store
+
+            _ ->
+              store
+          end
+
+        Editor.set_echo("Quit")
+        {:void, store}
+      end,
+      "minibuffer-complete!" => fn [], store ->
+        mb = Editor.snapshot().minibuffer
+
+        cond do
+          mb == nil ->
+            {:void, store}
+
+          mb.on_complete not in [nil, false] ->
+            selected = (mb.sel_touched && Editor.minibuffer_selected()) || false
+
+            case Aimax.Scheme.Eval.apply_fn(mb.on_complete, [mb.input, selected], store) do
+              {[new_input, candidates], store}
+              when is_binary(new_input) and is_list(candidates) ->
+                Editor.minibuffer_set_input(new_input)
+                Editor.minibuffer_set_candidates(candidates)
+                {:void, store}
+
+              {_, store} ->
+                {:void, store}
+            end
+
+          true ->
+            case Editor.minibuffer_selected() do
+              nil -> :ok
+              label -> Editor.minibuffer_set_input(label)
+            end
+
+            {:void, store}
+        end
+      end,
+      "minibuffer-next!" => fn [] ->
+        Editor.minibuffer_move_sel(1)
+        :void
+      end,
+      "minibuffer-prev!" => fn [] ->
+        Editor.minibuffer_move_sel(-1)
+        :void
+      end,
+      # DEL: in a path prompt at a directory boundary, kill the whole
+      # component (vertico-directory); otherwise one char back at point
+      "minibuffer-del!" => fn [] ->
+        mb = Editor.snapshot().minibuffer
+        input = Buffer.text(Editor.minibuf_name())
+        trimmed = String.replace(input, ~r{[^/]+/$}, "")
+
+        if mb && mb.on_complete not in [nil, false] and trimmed != input and
+             String.ends_with?(input, "/") do
+          Editor.minibuffer_set_input(trimmed)
+        else
+          Buffer.delete_char(Editor.minibuf_name(), -1)
+        end
+
+        :void
       end
     }
   end
+
+  # on_complete prompts (find-file): the input is the path being built. If
+  # the user arrowed onto a candidate (or the filter narrowed to one),
+  # resolve it through the completion closure — "down, RET" must enter the
+  # highlighted entry; otherwise the typed input wins so new files work.
+  defp mb_confirm_value(%{on_complete: oc} = mb, store) when oc not in [nil, false] do
+    if (mb[:sel_touched] || mb[:total] == 1) && mb[:selected] do
+      case Aimax.Scheme.Eval.apply_fn(oc, [mb.input, mb[:selected]], store) do
+        {[new_input, _cands], store} when is_binary(new_input) -> {new_input, store}
+        {_, store} -> {mb.input, store}
+      end
+    else
+      {mb.input, store}
+    end
+  end
+
+  defp mb_confirm_value(mb, store), do: {mb[:selected] || mb.input, store}
 
   # debounce coalesces bursts: first pos, all inserted text, total deleted
   defp change_args(changes) do

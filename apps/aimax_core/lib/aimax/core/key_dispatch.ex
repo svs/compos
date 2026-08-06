@@ -19,7 +19,7 @@ defmodule Aimax.Core.KeyDispatch do
     %{minibuffer: mb, pending: pending, completion: completion} = Editor.snapshot()
 
     cond do
-      mb -> minibuffer_key(key, mb)
+      mb -> minibuffer_key(key, mb, pending)
       completion -> completion_key(key, pending)
       true -> buffer_key(key, pending)
     end
@@ -74,103 +74,43 @@ defmodule Aimax.Core.KeyDispatch do
   end
 
   # --- minibuffer routing ----------------------------------------------------
+  # The minibuffer is a buffer: keys go through the normal keymap machinery.
+  # Its local map (bound in editor.scm) shadows the global one for RET/C-g/
+  # TAB/C-n/C-p/DEL; everything else — motion, kill/yank, undo, M-DEL — is
+  # just the global editing commands acting on the *minibuf* buffer, which
+  # Editor.current_buffer/lookup_key route to while a prompt is active.
 
-  defp minibuffer_key("RET", _mb) do
-    case Editor.minibuffer_close() do
-      %{on_confirm: oc} = mb when oc != nil and oc != false ->
-        Session.apply_callback(oc, [confirm_value(mb)])
+  defp minibuffer_key(key, mb, pending) do
+    seq = pending ++ [key]
 
-      _ ->
-        :ok
-    end
-  end
+    case Editor.lookup_key(seq) do
+      {:command, name} ->
+        Editor.set_pending([])
+        run(name)
 
-  # on_complete prompts (find-file): the input is the path being built. If
-  # the user explicitly arrowed onto a candidate, resolve it through the
-  # completion closure first — "down, RET" must enter the highlighted entry.
-  defp confirm_value(%{on_complete: oc} = mb) when oc not in [nil, false] do
-    # resolve the selection when the user arrowed onto it, or when the filter
-    # narrowed to exactly one candidate (type "html", RET — no arrowing);
-    # otherwise the typed input wins, so new files can still be created
-    if (mb[:sel_touched] || mb[:total] == 1) && mb[:selected] do
-      case Session.call_fn(oc, [mb.input, mb[:selected]]) do
-        {:ok, [new_input, _cands]} when is_binary(new_input) -> new_input
-        _ -> mb.input
-      end
-    else
-      mb.input
-    end
-  end
+      :prefix ->
+        Editor.set_pending(seq)
+        Editor.set_echo(Enum.join(seq, " ") <> "-")
 
-  defp confirm_value(mb), do: mb[:selected] || mb.input
+      :none ->
+        Editor.set_pending([])
 
-  defp minibuffer_key(key, _mb) when key in ["C-n", "<down>"],
-    do: Editor.minibuffer_move_sel(1)
-
-  defp minibuffer_key(key, _mb) when key in ["C-p", "<up>"],
-    do: Editor.minibuffer_move_sel(-1)
-
-  defp minibuffer_key("C-g", _mb) do
-    case Editor.minibuffer_close() do
-      %{on_cancel: oc} when oc != nil and oc != false -> Session.apply_callback(oc, [])
-      _ -> :ok
+        cond do
+          pending == [] and key == "SPC" -> self_insert(" ")
+          pending == [] and printable?(key) -> self_insert(key)
+          true -> :ok
+        end
     end
 
-    Editor.set_echo("Quit")
-  end
-
-  # in a path prompt, DEL at a directory boundary kills the whole
-  # component ("~/src/ai-max.el/" -> "~/src/"); mid-name it's one char
-  defp minibuffer_key("DEL", %{on_complete: oc, input: input} = mb)
-       when oc not in [nil, false] do
-    trimmed = String.replace(input, ~r{[^/]+/$}, "")
-
-    if trimmed != input,
-      do: set_input(mb, trimmed),
-      else: set_input(mb, String.slice(input, 0..-2//1))
-  end
-
-  defp minibuffer_key("DEL", mb),
-    do: set_input(mb, String.slice(mb.input, 0..-2//1))
-
-
-  defp minibuffer_key("TAB", %{on_complete: oc} = mb) when oc != nil and oc != false do
-    # completion policy is a Scheme closure:
-    #   (input selected-or-#f) -> (list new-input candidates)
-    # an arrowed-onto candidate is inserted (and directories auto-descend)
-    selected = (mb[:sel_touched] && Editor.minibuffer_selected()) || false
-
-    case Session.call_fn(oc, [mb.input, selected]) do
-      {:ok, [new_input, candidates]} when is_binary(new_input) and is_list(candidates) ->
-        Editor.minibuffer_set_input(new_input)
-        Editor.minibuffer_set_candidates(candidates)
-
-      _ ->
-        :ok
-    end
-  end
-
-  # no completion fn: TAB completes the input to the selected candidate
-  defp minibuffer_key("TAB", _mb) do
-    case Editor.minibuffer_selected() do
-      nil -> :ok
-      label -> Editor.minibuffer_set_input(label)
-    end
-  end
-
-  defp minibuffer_key("SPC", mb), do: set_input(mb, mb.input <> " ")
-
-  defp minibuffer_key(key, mb) do
-    if printable?(key), do: set_input(mb, mb.input <> key), else: :ok
-  end
-
-  # input edits fire the minibuffer's on_change handler (isearch et al.)
-  defp set_input(mb, new_input) do
-    Editor.minibuffer_set_input(new_input)
-
-    case mb do
-      %{on_change: oc} when oc != nil and oc != false ->
-        Session.apply_callback(oc, [new_input])
+    # any edit to the backing buffer fires the prompt's on_change handler
+    # (isearch, find-file filtering); confirm/cancel closed the prompt, so
+    # sync is a no-op there
+    case Editor.minibuffer_sync_input() do
+      {:changed, input} ->
+        case mb do
+          %{on_change: oc} when oc not in [nil, false] -> Session.apply_callback(oc, [input])
+          _ -> :ok
+        end
 
       _ ->
         :ok

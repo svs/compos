@@ -214,7 +214,7 @@ defmodule Aimax.Ui.EditorLive do
           </div>
           <div class="mb-input-row">
             <span class="prompt">{@state.minibuffer.prompt}</span>
-            <span class="mb-input">{@state.minibuffer.input}<span class="cursor">&nbsp;</span></span>
+            <span class="mb-input"><%= with {pre, cur, post} <- mb_split(@state.minibuffer) do %>{pre}<span class="cursor">{cur}</span>{post}<% end %></span>
             <span class="mb-spacer"></span>
             <span class="mb-count">{count_text(@state.minibuffer)}</span>
           </div>
@@ -229,6 +229,20 @@ defmodule Aimax.Ui.EditorLive do
     </div>
     """
   end
+
+  # cursor sits at the minibuffer's point (it's a real buffer): split the
+  # input into before-point, the grapheme under the cursor, and the rest
+  defp mb_split(%{input: input, point: point}) do
+    point = point |> min(byte_size(input)) |> max(0)
+    rest = binary_part(input, point, byte_size(input) - point)
+
+    case String.next_grapheme(rest) do
+      nil -> {binary_part(input, 0, point), " ", ""}
+      {g, post} -> {binary_part(input, 0, point), g, post}
+    end
+  end
+
+  defp mb_split(mb), do: {mb.input, " ", ""}
 
   defp count_text(%{total: total, sel: sel, completing: completing}) do
     cond do

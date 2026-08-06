@@ -383,6 +383,11 @@ defmodule Aimax.Core.SchemeAPI do
         Editor.local_bind_key(Editor.current_buffer(), String.split(seq, " "), command)
         :void
       end,
+      # explicit-buffer variant: bind without the buffer being current
+      "local-set-key*" => fn [buf, seq, command] ->
+        Editor.local_bind_key(buf, String.split(seq, " "), command)
+        :void
+      end,
       "key-for-command" => fn [name] -> Editor.key_for_command(name) end,
       "last-command" => fn [] -> Editor.last_command() end,
       "window-rows" => fn [] -> Editor.window_rows() end,

@@ -581,13 +581,25 @@
 
 (defgroup 'org "Org mode.")
 
+;; re-apply the font remap to every live org buffer so customize changes
+;; (including ones made by the LLM's tools) repaint immediately
+(define (org--apply-fonts! _v)
+  (for-each
+    (lambda (buf)
+      (if (equal? (buffer-local buf 'mode-name) "org-mode")
+          (face-remap-in! buf 'default
+            (list 'family org-font-family
+                  'size org-font-size
+                  'line-height "1.75"))))
+    (buffer-list)))
+
 (defcustom 'org-font-family "Spectral, Georgia, serif"
   "Font family for org-mode buffer text."
-  'group 'org 'type 'string)
+  'group 'org 'type 'string 'set org--apply-fonts!)
 
 (defcustom 'org-font-size "14.5px"
   "Font size for org-mode buffer text (any CSS size)."
-  'group 'org 'type 'string)
+  'group 'org 'type 'string 'set org--apply-fonts!)
 
 (define-mode "org-mode"
   (lambda ()

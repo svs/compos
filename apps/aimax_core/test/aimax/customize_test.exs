@@ -151,5 +151,16 @@ defmodule Aimax.CustomizeTest do
 
       assert Buffer.get_local(buf, "style") =~ "--default-family:CustomOrgFont;"
     end
+
+    test "customizing org fonts repaints live org buffers immediately" do
+      buf = fresh_buffer("cz-org-live-#{System.unique_integer([:positive])}.org", "* headline\n")
+      eval!(~s{(set-mode! "org-mode")})
+      refute Buffer.get_local(buf, "style") =~ "--default-size:19px;"
+
+      eval!(~s{(customize-set! 'org-font-size "19px")})
+      assert Buffer.get_local(buf, "style") =~ "--default-size:19px;"
+
+      eval!(~s{(customize-set! 'org-font-size "14.5px")})
+    end
   end
 end

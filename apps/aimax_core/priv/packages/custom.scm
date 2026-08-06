@@ -142,13 +142,15 @@
                                        ";"))))))
         "" remap))
 
-(define (face-remap! face &rest attrs)
-  (let* ((buf (current-buffer))
-         (old (or (buffer-local buf 'face-remap) '()))
+(define (face-remap-in! buf face attrs)
+  (let* ((old (or (buffer-local buf 'face-remap) '()))
          (remap (custom--alist-put old face attrs)))
     (buffer-set-local! buf 'face-remap remap)
     (buffer-set-local! buf 'style (face-remap--css remap))
     remap))
+
+(define (face-remap! face &rest attrs)
+  (face-remap-in! (current-buffer) face attrs))
 
 ;; (buffer-face! 'family "Spectral" 'size "17px") — remap the default face,
 ;; i.e. this buffer's text font. Emacs: buffer-face-mode.

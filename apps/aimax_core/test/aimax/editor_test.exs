@@ -1058,13 +1058,14 @@ defmodule Aimax.EditorTest do
     do: Enum.find_value(c, &find_leaf_by_id(&1, id))
 
   test "chat buffer: C-c RET sends the transcript, reply appends", %{buf: _buf} do
-    Application.put_env(:aimax_core, :llm_request_fun, fn prompt ->
+    # chat routes through the tool loop by default (chat-use-tools)
+    Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: [%{content: prompt} | _]} ->
       assert prompt =~ "what is 6*7"
-      {:ok, "42"}
+      {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "42"}]}}
     end)
 
     on_exit(fn ->
-      Application.delete_env(:aimax_core, :llm_request_fun)
+      Application.delete_env(:aimax_core, :llm_chat_fun)
       Aimax.Core.kill_buffer("*chat*")
     end)
 

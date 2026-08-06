@@ -8,11 +8,19 @@ defmodule Aimax.Core.LLM do
   text (via Session, so it can touch buffers). Errors land in *messages*.
 
   Pluggable request fun (`:llm_request_fun` app env) keeps tests hermetic.
-  TODO: streaming (on-chunk handler), conversation state, tool use — the
-  agent runtime builds on this.
+
+  Tool use (gptel-style, native): `complete_tools/5` runs the Anthropic
+  tool_use loop. Tool definitions and handlers live in the Scheme registry
+  (packages/tools.scm, `define-tool!`); this module only converts specs to
+  JSON, drives the round-trips, and dispatches calls back into the session
+  (`Session.call_fn` on the Scheme dispatcher closure). The `:llm_chat_fun`
+  app env stubs the wire for tests.
+  TODO: streaming (on-chunk handler), tools for openai-style providers.
   """
 
   alias Aimax.Core.Session
+
+  @max_tool_rounds 25
 
   @doc "Synchronous request — for callers managing their own tasks (LLM threads)."
   def request(prompt), do: request_fun().(prompt)
@@ -31,6 +39,133 @@ defmodule Aimax.Core.LLM do
 
   defp request_fun do
     Application.get_env(:aimax_core, :llm_request_fun, &default_request/1)
+  end
+
+  @doc """
+  Async tool loop. `specs` is Scheme data: ((name description params) ...)
+  with params ((pname type description [optional]) ...). `dispatcher` is a
+  Scheme closure `(name args-plist) -> result`; `callback` gets the final text.
+  """
+  def complete_tools(prompt, system, specs, dispatcher, callback)
+      when is_function(callback, 1) do
+    tools = Enum.map(specs, &tool_json/1)
+
+    {:ok, _} =
+      Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
+        case tool_loop([%{role: "user", content: prompt}], system, tools, dispatcher, 0) do
+          {:ok, text} -> callback.(text)
+          {:error, msg} -> Session.message("llm error: #{msg}")
+        end
+      end)
+
+    :ok
+  end
+
+  defp tool_loop(_messages, _system, _tools, _dispatcher, rounds)
+       when rounds >= @max_tool_rounds,
+       do: {:error, "tool loop exceeded #{@max_tool_rounds} rounds"}
+
+  defp tool_loop(messages, system, tools, dispatcher, rounds) do
+    case chat_fun().(%{messages: messages, system: system, tools: tools}) do
+      {:ok, %{"stop_reason" => "tool_use", "content" => blocks}} ->
+        results =
+          for %{"type" => "tool_use"} = b <- blocks do
+            %{
+              type: "tool_result",
+              tool_use_id: b["id"],
+              content: run_tool(dispatcher, b["name"], b["input"])
+            }
+          end
+
+        messages =
+          messages ++ [%{role: "assistant", content: blocks}, %{role: "user", content: results}]
+
+        tool_loop(messages, system, tools, dispatcher, rounds + 1)
+
+      {:ok, %{"content" => blocks}} ->
+        {:ok, Enum.map_join(blocks, "", &(&1["text"] || ""))}
+
+      {:error, msg} ->
+        {:error, msg}
+    end
+  end
+
+  defp run_tool(dispatcher, name, input) do
+    Session.message("tool: #{name} #{inspect(input)}")
+
+    case Session.call_fn(dispatcher, [name, json_to_scheme(input)]) do
+      {:ok, v} when is_binary(v) -> v
+      {:ok, v} -> Aimax.Scheme.Printer.print(v)
+      {:error, msg} -> "error: #{msg}"
+    end
+  catch
+    :exit, _ -> "error: tool dispatch timed out"
+  end
+
+  # JSON objects -> flat plists with {:sym, key} keys (house convention);
+  # null -> #f (this Scheme has no nil)
+  defp json_to_scheme(map) when is_map(map),
+    do: Enum.flat_map(map, fn {k, v} -> [{:sym, k}, json_to_scheme(v)] end)
+
+  defp json_to_scheme(l) when is_list(l), do: Enum.map(l, &json_to_scheme/1)
+  defp json_to_scheme(nil), do: false
+  defp json_to_scheme(v), do: v
+
+  defp tool_json([name, description, params]) do
+    properties =
+      Map.new(params, fn [p, type, pdesc | _] ->
+        {plain(p), %{type: plain(type), description: pdesc}}
+      end)
+
+    required =
+      for [p, _, _ | rest] <- params, {:sym, "optional"} not in rest, do: plain(p)
+
+    %{
+      name: plain(name),
+      description: description,
+      input_schema: %{type: "object", properties: properties, required: required}
+    }
+  end
+
+  defp plain({:sym, s}), do: s
+  defp plain(s) when is_binary(s), do: s
+
+  defp chat_fun do
+    Application.get_env(:aimax_core, :llm_chat_fun, &default_chat/1)
+  end
+
+  defp default_chat(%{messages: messages, system: system, tools: tools}) do
+    case model() do
+      "openrouter:" <> _ ->
+        {:error, "tool use needs an Anthropic model — (set-llm-model! \"claude-sonnet-5\")"}
+
+      "openai:" <> _ ->
+        {:error, "tool use needs an Anthropic model — (set-llm-model! \"claude-sonnet-5\")"}
+
+      m ->
+        anthropic_chat(m, messages, system, tools)
+    end
+  end
+
+  defp anthropic_chat(model, messages, system, tools) do
+    case api_key("ANTHROPIC_API_KEY") do
+      key when key in [nil, ""] ->
+        {:error, "no ANTHROPIC_API_KEY (env, ~/.aimax/anthropic-key, or doppler)"}
+
+      key ->
+        body = %{model: model, max_tokens: 4096, messages: messages, tools: tools}
+        body = if system, do: Map.put(body, :system, system), else: body
+
+        Req.post("https://api.anthropic.com/v1/messages",
+          json: body,
+          headers: [{"x-api-key", key}, {"anthropic-version", "2023-06-01"}],
+          receive_timeout: 180_000
+        )
+        |> case do
+          {:ok, %{status: 200, body: body}} -> {:ok, body}
+          other -> format_error(other)
+        end
+    end
   end
 
   @doc "Set the model for subsequent requests (scheme: set-llm-model!)."

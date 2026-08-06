@@ -262,6 +262,22 @@ defmodule Aimax.Core.Session do
 
         :void
       end,
+      # gptel-style native tool use: specs/dispatcher come from the Scheme
+      # registry (packages/tools.scm) — the loop lives in LLM.complete_tools
+      "llm-tools" => fn [prompt, system, specs, dispatcher, callback] ->
+        key = {:llm_tools, make_ref()}
+        :ets.insert(@escaped, {key, [dispatcher, callback]})
+
+        Aimax.Core.LLM.complete_tools(prompt, system, specs, dispatcher, fn text ->
+          try do
+            apply_callback(callback, [text])
+          after
+            :ets.delete(@escaped, key)
+          end
+        end)
+
+        :void
+      end,
       "set-llm-model!" => fn [m] ->
         Aimax.Core.LLM.set_model(m)
         :void

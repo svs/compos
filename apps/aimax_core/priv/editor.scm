@@ -710,13 +710,19 @@
     (set-mode! "chat-mode")
     (end-of-buffer!)))
 
+;; tools when the tools package is loaded and chat-use-tools is on
+(define (chat-llm prompt handler)
+  (if (and (boundp (quote chat-use-tools)) chat-use-tools)
+      (llm-with-tools prompt handler)
+      (llm prompt handler)))
+
 (define-command "chat-send"
   (lambda ()
     (let ((convo (buffer-text *chat-buffer*)))
       (buffer-append! *chat-buffer* (chat-reply-marker))
       (end-of-buffer!)
       (message "LLM thinking...")
-      (llm (string-append
+      (chat-llm (string-append
              "You are the assistant in an editor chat buffer. The transcript "
              "follows; reply to the last user turn only, in markdown.\n\n"
              convo)

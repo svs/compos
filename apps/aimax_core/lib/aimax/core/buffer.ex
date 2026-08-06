@@ -18,7 +18,7 @@ defmodule Aimax.Core.Buffer do
   # (a restart would resurrect it empty anyway; better to stay dead loudly)
   use GenServer, restart: :temporary
 
-  alias Aimax.Core.{Events, Rope}
+  alias Aimax.Core.{Events, Rope, Text}
 
   @registry Aimax.Core.BufferRegistry
   @undo_limit 500
@@ -33,6 +33,7 @@ defmodule Aimax.Core.Buffer do
             mark: nil,
             read_only: false,
             history: [],
+            history_len: 0,
             locals: %{},
             goal_col: nil,
             last_insert_end: nil,
@@ -120,6 +121,9 @@ defmodule Aimax.Core.Buffer do
   def end_of_buffer(name), do: GenServer.call(via(name), {:motion, :eob})
 
   def undo(name), do: GenServer.call(via(name), :undo)
+
+  @doc "All render inputs (text, point, mark, version, locals, overlays, hidden) in one call."
+  def render_snapshot(name), do: GenServer.call(via(name), :render_snapshot)
 
   @doc """
   Break the undo chain (Emacs: any command other than undo does this).
@@ -228,7 +232,7 @@ defmodule Aimax.Core.Buffer do
     do: {:reply, :ok, %{state | mark: clamp(pos, state)}}
 
   def handle_call({:search, q, from, dir}, _from, state) do
-    text = Rope.to_binary(state.rope)
+    {text, state} = fetch_text(state)
 
     result =
       case dir do
@@ -241,13 +245,19 @@ defmodule Aimax.Core.Buffer do
           end
 
         :backward ->
-          text
-          |> :binary.matches(q)
-          |> Enum.filter(fn {s, _} -> s < from end)
-          |> List.last()
-          |> case do
-            {s, l} -> {s, s + l}
-            nil -> nil
+          # scope so the scan stops at `from` (matches must start before it)
+          scope_len =
+            (from - 1 + Kernel.byte_size(q))
+            |> min(Kernel.byte_size(text))
+            |> max(0)
+
+          case scope_len > 0 && :binary.matches(text, q, scope: {0, scope_len}) do
+            [_ | _] = matches ->
+              {s, l} = List.last(matches)
+              {s, s + l}
+
+            _ ->
+              nil
           end
       end
 
@@ -272,7 +282,7 @@ defmodule Aimax.Core.Buffer do
   end
 
   def handle_call({:delete_char, n, src}, _from, state) do
-    text = Rope.to_binary(state.rope)
+    {text, state} = fetch_text(state)
 
     {pos, len} =
       if n >= 0 do
@@ -288,8 +298,8 @@ defmodule Aimax.Core.Buffer do
   end
 
   def handle_call({:kill_line, src}, _from, state) do
-    text = Rope.to_binary(state.rope)
-    {_bol, eol} = line_bounds(text, state.point)
+    {text, state} = fetch_text(state)
+    {_bol, eol} = Text.line_bounds(text, state.point)
     len = if state.point == eol and eol < Kernel.byte_size(text), do: 1, else: eol - state.point
 
     if len == 0 do
@@ -301,12 +311,12 @@ defmodule Aimax.Core.Buffer do
   end
 
   def handle_call({:motion, motion}, _from, state) do
-    text = Rope.to_binary(state.rope)
+    {text, state} = fetch_text(state)
 
     state =
       if motion in [:next_line, :prev_line] do
         # goal column: crossing a short line must not lose the column
-        {bol, _} = line_bounds(text, state.point)
+        {bol, _} = Text.line_bounds(text, state.point)
         %{state | goal_col: state.goal_col || state.point - bol}
       else
         %{state | goal_col: nil}
@@ -334,14 +344,14 @@ defmodule Aimax.Core.Buffer do
         {:reply, {:error, :no_undo}, state}
 
       {rope, point, mark} ->
-        current = {state.rope, state.point, state.mark}
+        state = push_history(state, {state.rope, state.point, state.mark})
 
         state = %{
           state
           | rope: rope,
+            bin: nil,
             point: point,
             mark: mark,
-            history: Enum.take([current | state.history], @undo_limit),
             version: state.version + 1,
             # +1 for the push above, +1 to step past the restored state
             undo_next: state.undo_next + 2,
@@ -355,6 +365,24 @@ defmodule Aimax.Core.Buffer do
     end
   end
 
+  # everything the renderer needs, in one round trip
+  def handle_call(:render_snapshot, _from, state) do
+    {text, state} = fetch_text(state)
+
+    {:reply,
+     %{
+       text: text,
+       point: state.point,
+       mark: state.mark,
+       version: state.version,
+       modified: state.version != state.saved_version,
+       locals: state.locals,
+       overlays: state.overlays |> Map.values() |> Enum.concat(),
+       overlay_gen: state.overlay_gen,
+       hidden: state.hidden
+     }, state}
+  end
+
   def handle_call(:break_undo_chain, _from, state),
     do: {:reply, :ok, %{state | undo_next: 0}}
 
@@ -364,7 +392,8 @@ defmodule Aimax.Core.Buffer do
         {:reply, {:error, :no_path}, state}
 
       path ->
-        File.write!(path, Rope.to_binary(state.rope))
+        {text, state} = fetch_text(state)
+        File.write!(path, text)
         {:reply, {:ok, path}, %{state | path: path, saved_version: state.version}}
     end
   end
@@ -373,7 +402,7 @@ defmodule Aimax.Core.Buffer do
 
   defp do_insert(state, pos, text, src) do
     state = maybe_snapshot_insert(state, pos, text, src)
-    state = %{state | rope: Rope.insert(state.rope, pos, text), version: state.version + 1}
+    state = %{state | rope: Rope.insert(state.rope, pos, text), bin: nil, version: state.version + 1}
     state = adjust_point_insert(state, pos, Kernel.byte_size(text))
     state = adjust_ranges(state, &adjust_insert(&1, pos, Kernel.byte_size(text)))
     state = %{
@@ -405,7 +434,7 @@ defmodule Aimax.Core.Buffer do
 
   defp do_delete(state, pos, len, src) do
     state = snapshot(state)
-    state = %{state | rope: Rope.delete(state.rope, pos, len), version: state.version + 1}
+    state = %{state | rope: Rope.delete(state.rope, pos, len), bin: nil, version: state.version + 1}
     state = adjust_point_delete(state, pos, len)
     state = adjust_ranges(state, &adjust_delete(&1, pos, len))
     state = %{state | goal_col: nil, last_insert_end: nil, insert_run: 0, undo_next: 0}
@@ -413,9 +442,18 @@ defmodule Aimax.Core.Buffer do
     state
   end
 
-  defp snapshot(state) do
-    history = Enum.take([{state.rope, state.point, state.mark} | state.history], @undo_limit)
-    %{state | history: history}
+  # trim lazily at 2x the cap: amortizes the O(limit) Enum.take so a burst of
+  # keystrokes doesn't rebuild a 500-cons list on every edit
+  defp snapshot(state),
+    do: push_history(state, {state.rope, state.point, state.mark})
+
+  defp push_history(state, entry) do
+    history = [entry | state.history]
+    len = state.history_len + 1
+
+    if len > @undo_limit * 2,
+      do: %{state | history: Enum.take(history, @undo_limit), history_len: @undo_limit},
+      else: %{state | history: history, history_len: len}
   end
 
   defp adjust_point_insert(state, pos, len) do
@@ -476,50 +514,35 @@ defmodule Aimax.Core.Buffer do
 
   defp ro(state), do: {:reply, {:error, :read_only}, state}
 
+  # flattening the rope is O(buffer) — do it once per version, not per read
+  defp fetch_text(%{bin: nil} = state) do
+    bin = Rope.to_binary(state.rope)
+    {bin, %{state | bin: bin}}
+  end
+
+  defp fetch_text(state), do: {state.bin, state}
+
   defp clamp(pos, state), do: pos |> max(0) |> min(Rope.byte_size(state.rope))
 
   # --- text geometry (grapheme-aware, byte offsets) --------------------------
 
+  # byte length of the next n graphemes — iterates instead of materializing
+  # the whole rest of the buffer as a grapheme list
   defp chars_len(text, pos, n) do
     rest = binary_part(text, pos, Kernel.byte_size(text) - pos)
-
-    rest
-    |> String.graphemes()
-    |> Enum.take(n)
-    |> Enum.map(&Kernel.byte_size/1)
-    |> Enum.sum()
+    take_graphemes(rest, n, 0)
   end
 
-  defp back_up(text, pos, n) do
-    binary_part(text, 0, pos)
-    |> String.graphemes()
-    |> Enum.reverse()
-    |> Enum.take(n)
-    |> Enum.map(&Kernel.byte_size/1)
-    |> Enum.sum()
-    |> then(&(pos - &1))
+  defp take_graphemes(_bin, 0, acc), do: acc
+
+  defp take_graphemes(bin, n, acc) do
+    case String.next_grapheme(bin) do
+      nil -> acc
+      {g, rest} -> take_graphemes(rest, n - 1, acc + Kernel.byte_size(g))
+    end
   end
 
-  defp line_bounds(text, pos) do
-    before = binary_part(text, 0, pos)
-
-    bol =
-      case :binary.matches(before, "\n") do
-        [] -> 0
-        matches -> matches |> List.last() |> elem(0) |> Kernel.+(1)
-      end
-
-    total = Kernel.byte_size(text)
-    rest = binary_part(text, pos, total - pos)
-
-    eol =
-      case :binary.match(rest, "\n") do
-        :nomatch -> total
-        {off, _} -> pos + off
-      end
-
-    {bol, eol}
-  end
+  defp back_up(text, pos, n), do: Text.back_graphemes(text, pos, n)
 
   defp apply_motion(motion, text, pos, goal_col \\ nil)
 
@@ -527,29 +550,29 @@ defmodule Aimax.Core.Buffer do
   defp apply_motion(:backward, text, pos, _), do: back_up(text, pos, 1)
   defp apply_motion(:bob, _text, _pos, _), do: 0
   defp apply_motion(:eob, text, _pos, _), do: Kernel.byte_size(text)
-  defp apply_motion(:bol, text, pos, _), do: text |> line_bounds(pos) |> elem(0)
-  defp apply_motion(:eol, text, pos, _), do: text |> line_bounds(pos) |> elem(1)
+  defp apply_motion(:bol, text, pos, _), do: text |> Text.line_bounds(pos) |> elem(0)
+  defp apply_motion(:eol, text, pos, _), do: text |> Text.line_bounds(pos) |> elem(1)
 
   defp apply_motion(:next_line, text, pos, goal) do
-    {bol, eol} = line_bounds(text, pos)
+    {bol, eol} = Text.line_bounds(text, pos)
     col = goal || pos - bol
 
     if eol >= Kernel.byte_size(text) do
       pos
     else
-      {nbol, neol} = line_bounds(text, eol + 1)
+      {nbol, neol} = Text.line_bounds(text, eol + 1)
       min(nbol + col, neol)
     end
   end
 
   defp apply_motion(:prev_line, text, pos, goal) do
-    {bol, _eol} = line_bounds(text, pos)
+    {bol, _eol} = Text.line_bounds(text, pos)
     col = goal || pos - bol
 
     if bol == 0 do
       pos
     else
-      {pbol, peol} = line_bounds(text, bol - 1)
+      {pbol, peol} = Text.line_bounds(text, bol - 1)
       min(pbol + col, peol)
     end
   end

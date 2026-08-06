@@ -26,20 +26,24 @@ defmodule Aimax.Ui.EditorLive do
     {:ok, refresh(socket)}
   end
 
+  # drain before refresh: the dispatch above already broadcast its change
+  # notifications to this process (Events sends before the GenServer replies),
+  # so without the drain every keystroke rendered twice — once here, once in
+  # handle_info
   @impl true
   def handle_event("key", %{"k" => spec}, socket) do
     KeyDispatch.handle_key(spec)
-    {:noreply, refresh(socket)}
+    {:noreply, socket |> drain() |> refresh()}
   end
 
   def handle_event("viewport", %{"rows" => rows}, socket) when is_integer(rows) do
     Aimax.Core.Editor.set_total_rows(rows)
-    {:noreply, refresh(socket)}
+    {:noreply, socket |> drain() |> refresh()}
   end
 
   def handle_event("scroll", %{"lines" => lines}, socket) when is_integer(lines) do
     Aimax.Core.Editor.scroll_active(lines)
-    {:noreply, refresh(socket)}
+    {:noreply, socket |> drain() |> refresh()}
   end
 
   @impl true
@@ -472,16 +476,5 @@ defmodule Aimax.Ui.EditorLive do
     ":root{#{vars}}#{classes}"
   end
 
-  defp line_col(text, point) do
-    before_c = binary_part(text, 0, point)
-    newlines = :binary.matches(before_c, "\n")
-
-    bol =
-      case newlines do
-        [] -> 0
-        list -> list |> List.last() |> elem(0) |> Kernel.+(1)
-      end
-
-    {length(newlines) + 1, point - bol}
-  end
+  defp line_col(text, point), do: Aimax.Core.Text.line_col(text, point)
 end

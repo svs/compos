@@ -614,6 +614,18 @@ defmodule Aimax.Core.Editor do
   defp leaf_ids(%{type: :leaf, id: id}), do: [id]
   defp leaf_ids(%{type: :split, children: children}), do: Enum.flat_map(children, &leaf_ids/1)
 
+  @empty_snapshot %{
+    text: "",
+    point: 0,
+    mark: nil,
+    version: 0,
+    modified: false,
+    locals: %{},
+    overlays: [],
+    overlay_gen: 0,
+    hidden: []
+  }
+
   # render walk: computes per-window rows (v-splits divide), clamps and
   # auto-follows the viewport top (unless manually scrolled), and returns
   # both the updated tree (tops persist) and the render payload
@@ -635,15 +647,14 @@ defmodule Aimax.Core.Editor do
   end
 
   defp render_walk(%{type: :leaf, id: id, buffer: buffer} = leaf, rows) do
-    exists = Buffer.exists?(buffer)
-    text = if exists, do: Buffer.text(buffer), else: ""
-    point = if exists, do: Buffer.point(buffer), else: 0
-    hidden = if exists, do: Buffer.hidden(buffer), else: []
+    # one round trip per leaf — this runs on every render of every window
+    snap = if Buffer.exists?(buffer), do: Buffer.render_snapshot(buffer), else: @empty_snapshot
+    %{text: text, point: point, locals: locals} = snap
 
     # folds put top/cursor/total in VISIBLE-line space; the scroll and
     # auto-follow math below then works unchanged. Line *numbers* stay
     # logical (folds show numbering gaps, like Emacs).
-    {total_lines, cl, hidden_lines} = visible_geometry(text, point, hidden)
+    {total_lines, cl, hidden_lines} = visible_geometry(text, point, snap.hidden)
 
     top = leaf.top |> min(max(total_lines - 1, 0)) |> max(0)
 
@@ -661,26 +672,25 @@ defmodule Aimax.Core.Editor do
       buffer: buffer,
       text: text,
       point: point,
-      mark: if(exists, do: Buffer.mark(buffer), else: nil),
-      version: if(exists, do: Buffer.version(buffer), else: 0),
-      modified: exists && Buffer.modified?(buffer),
-      mode: (exists && Buffer.get_local(buffer, "mode-name")) || "Fundamental",
-      ts_lang: exists && Buffer.get_local(buffer, "ts-lang"),
-      overlays: if(exists, do: Buffer.overlays(buffer), else: []),
-      overlay_gen: if(exists, do: Buffer.overlay_gen(buffer), else: 0),
+      mark: snap.mark,
+      version: snap.version,
+      modified: snap.modified,
+      mode: Map.get(locals, "mode-name") || "Fundamental",
+      ts_lang: Map.get(locals, "ts-lang"),
+      overlays: snap.overlays,
+      overlay_gen: snap.overlay_gen,
       hidden_lines: hidden_lines,
-      render_mode: exists && Buffer.get_local(buffer, "render-mode"),
+      render_mode: Map.get(locals, "render-mode"),
       top: top,
       rows: rows,
       total_lines: total_lines,
-      line_numbers: !(exists && Buffer.get_local(buffer, "line-numbers") == "off")
+      line_numbers: Map.get(locals, "line-numbers") != "off"
     }
 
     {%{leaf | top: top}, rendered}
   end
 
-  defp cursor_line(text, point),
-    do: length(:binary.matches(binary_part(text, 0, point), "\n"))
+  defp cursor_line(text, point), do: Aimax.Core.Text.line_index(text, point)
 
   # {visible line count, cursor's visible-line index, MapSet of hidden
   # logical line indexes}. A line is hidden when its start byte falls
@@ -688,7 +698,7 @@ defmodule Aimax.Core.Editor do
   # visible — that's the folded headline). Ranges are clamped: they can
   # be momentarily stale after an undo swaps the rope out from under them.
   defp visible_geometry(text, point, []),
-    do: {length(:binary.matches(text, "\n")) + 1, cursor_line(text, point), MapSet.new()}
+    do: {Aimax.Core.Text.newline_count(text) + 1, cursor_line(text, point), MapSet.new()}
 
   defp visible_geometry(text, point, hidden) do
     len = byte_size(text)

@@ -96,5 +96,12 @@ defmodule Aimax.Scheme do
       {:error, "bad arguments: #{Exception.message(e)}"}
   end
 
+  @doc """
+  Garbage-collect environment frames. `roots` is a list of arbitrary terms;
+  closures found anywhere inside them (plus the global frame) keep their
+  captured environments alive. Everything else is dropped.
+  """
+  defdelegate gc(interp, roots), to: Aimax.Scheme.GC, as: :sweep
+
   defdelegate print(value), to: Printer
 end

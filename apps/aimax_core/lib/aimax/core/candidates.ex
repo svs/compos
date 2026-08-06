@@ -15,16 +15,16 @@ defmodule Aimax.Core.Candidates do
 
   @window 8
 
-  defstruct items: [], query: "", sel: 0, touched: false
+  defstruct items: [], query: "", sel: 0, touched: false, filtered: []
 
   @doc "Build from raw candidates: strings or [label, hint] pairs."
   def new(candidates, opts \\ []) do
-    %__MODULE__{
+    refilter(%__MODULE__{
       items: normalize(candidates),
       query: Keyword.get(opts, :query, ""),
       sel: 0,
       touched: false
-    }
+    })
   end
 
   def normalize(candidates) do
@@ -36,24 +36,32 @@ defmodule Aimax.Core.Candidates do
   end
 
   def put_items(list, candidates),
-    do: %{list | items: normalize(candidates), sel: 0, touched: false}
+    do: refilter(%{list | items: normalize(candidates), sel: 0, touched: false})
 
-  def put_query(list, query), do: %{list | query: query, sel: 0, touched: false}
+  def put_query(list, query),
+    do: refilter(%{list | query: query, sel: 0, touched: false})
 
   @doc "Move the selection; marks the list as explicitly touched by the user."
   def move(list, delta) do
-    n = length(filtered(list))
+    n = length(list.filtered)
     sel = if n == 0, do: 0, else: list.sel |> Kernel.+(delta) |> max(0) |> min(n - 1)
     %{list | sel: sel, touched: true}
   end
 
-  @doc "Candidates surviving the query, best match first."
-  def filtered(%{query: ""} = list), do: list.items
+  @doc "Candidates surviving the query, best match first (memoized)."
+  def filtered(list), do: list.filtered
 
-  def filtered(list) do
-    list.items
-    |> Enum.filter(&matches?(&1.label, list.query))
-    |> Enum.sort_by(&rank(&1.label, list.query))
+  # filter + rank once, when items/query change — not on every read (a single
+  # minibuffer render reads this several times)
+  defp refilter(%{query: ""} = list), do: %{list | filtered: list.items}
+
+  defp refilter(list) do
+    filtered =
+      list.items
+      |> Enum.filter(&matches?(&1.label, list.query))
+      |> Enum.sort_by(&rank(&1.label, list.query))
+
+    %{list | filtered: filtered}
   end
 
   def selected(list) do

@@ -21,6 +21,14 @@ defmodule Aimax.Core.Session do
 
   @messages "*messages*"
 
+  # closures that escaped the store into opaque Elixir funs (Reactor handlers,
+  # LLM callbacks) — the GC can't see through funs, so they register here
+  @escaped :aimax_escaped_closures
+
+  # sweep when the frame count doubles since the last sweep (with a floor so
+  # small sessions never bother)
+  @gc_floor 5_000
+
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   @doc "Evaluate Scheme source. Returns {:ok, printed_value} | {:error, msg}."
@@ -62,19 +70,24 @@ defmodule Aimax.Core.Session do
   @impl true
   def init(_opts) do
     :ets.new(Aimax.Core.SchemeAPI.commands_table(), [:named_table, :public, :set])
+    :ets.new(@escaped, [:named_table, :public, :set])
     {:ok, _} = Aimax.Core.create_buffer(@messages)
 
     interp = Scheme.new(primitives: Aimax.Core.SchemeAPI.primitives())
     interp = Scheme.register(interp, session_primitives(interp.global))
     interp = load_stdlib!(interp)
 
-    {:ok, %{interp: interp}}
+    # loading leaves a pile of dead frames behind — sweep once so the
+    # doubling threshold starts from a live baseline
+    interp = Scheme.gc(interp, external_roots())
+
+    {:ok, %{interp: interp, last_live: map_size(interp.store.frames)}}
   end
 
   @impl true
   def handle_call({:eval, src}, _from, state) do
     case Scheme.eval_string(state.interp, src) do
-      {:ok, val, interp} -> {:reply, {:ok, Scheme.print(val)}, %{state | interp: interp}}
+      {:ok, val, interp} -> {:reply, {:ok, Scheme.print(val)}, put_interp(state, interp, val)}
       {:error, msg} -> {:reply, {:error, msg}, state}
     end
   end
@@ -86,7 +99,7 @@ defmodule Aimax.Core.Session do
 
       [{^name, closure}] ->
         case Scheme.call(state.interp, closure, []) do
-          {:ok, _val, interp} -> {:reply, :ok, %{state | interp: interp}}
+          {:ok, val, interp} -> {:reply, :ok, put_interp(state, interp, val)}
           {:error, msg} -> {:reply, {:error, msg}, state}
         end
     end
@@ -94,7 +107,9 @@ defmodule Aimax.Core.Session do
 
   def handle_call({:apply, closure, args}, _from, state) do
     case Scheme.call(state.interp, closure, args) do
-      {:ok, _val, interp} -> {:reply, :ok, %{state | interp: interp}}
+      {:ok, val, interp} ->
+        {:reply, :ok, put_interp(state, interp, val)}
+
       {:error, msg} ->
         message("error: " <> msg)
         {:reply, {:error, msg}, state}
@@ -103,9 +118,38 @@ defmodule Aimax.Core.Session do
 
   def handle_call({:call_fn, closure, args}, _from, state) do
     case Scheme.call(state.interp, closure, args) do
-      {:ok, val, interp} -> {:reply, {:ok, val}, %{state | interp: interp}}
+      {:ok, val, interp} -> {:reply, {:ok, val}, put_interp(state, interp, val)}
       {:error, msg} -> {:reply, {:error, msg}, state}
     end
+  end
+
+  # --- frame GC --------------------------------------------------------------
+
+  defp put_interp(state, interp, result) do
+    state = %{state | interp: interp}
+
+    if map_size(interp.store.frames) > max(state.last_live * 2, @gc_floor) do
+      interp = Scheme.gc(interp, [result | external_roots()])
+      %{state | interp: interp, last_live: map_size(interp.store.frames)}
+    else
+      state
+    end
+  end
+
+  # every place a live closure can be held outside the store: the commands
+  # table, escaped fun-wrapped handlers, active minibuffer handlers (Editor
+  # state), and buffer-local values
+  defp external_roots do
+    minibuffer = Process.whereis(Editor) && Editor.snapshot().minibuffer
+
+    [
+      :ets.tab2list(Aimax.Core.SchemeAPI.commands_table()),
+      :ets.tab2list(@escaped),
+      minibuffer,
+      Enum.map(Aimax.Core.list_buffers(), fn name ->
+        if Buffer.exists?(name), do: Buffer.locals(name), else: %{}
+      end)
+    ]
   end
 
   defp load_stdlib!(interp) do
@@ -192,7 +236,19 @@ defmodule Aimax.Core.Session do
         end
       end,
       "llm" => fn [prompt, callback] ->
-        Aimax.Core.LLM.complete(prompt, fn text -> apply_callback(callback, [text]) end)
+        # the callback vanishes into an opaque fun until the reply arrives —
+        # root it for the GC, and unroot once it has fired
+        key = {:llm, make_ref()}
+        :ets.insert(@escaped, {key, callback})
+
+        Aimax.Core.LLM.complete(prompt, fn text ->
+          try do
+            apply_callback(callback, [text])
+          after
+            :ets.delete(@escaped, key)
+          end
+        end)
+
         :void
       end,
       "set-llm-model!" => fn [m] ->
@@ -236,10 +292,14 @@ defmodule Aimax.Core.Session do
             sources: :all
           )
 
+        # the Reactor holds the callback inside an opaque fun — root it for
+        # the GC for as long as the rule lives
+        :ets.insert(@escaped, {{:reactor, id}, callback})
         id
       end,
       "remove-on-change!" => fn [id] ->
         Aimax.Core.Reactor.remove(id)
+        :ets.delete(@escaped, {:reactor, id})
         :void
       end,
 

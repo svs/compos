@@ -138,23 +138,7 @@ defmodule Aimax.Core.SchemeAPI do
       "line-text" => fn [] ->
         buf = Editor.current_buffer()
         text = Buffer.text(buf)
-        p = Buffer.point(buf)
-        before = binary_part(text, 0, p)
-
-        bol =
-          case :binary.matches(before, "\n") do
-            [] -> 0
-            m -> m |> List.last() |> elem(0) |> Kernel.+(1)
-          end
-
-        rest = binary_part(text, p, Kernel.byte_size(text) - p)
-
-        eol =
-          case :binary.match(rest, "\n") do
-            :nomatch -> Kernel.byte_size(text)
-            {off, _} -> p + off
-          end
-
+        {bol, eol} = Aimax.Core.Text.line_bounds(text, Buffer.point(buf))
         binary_part(text, bol, eol - bol)
       end
     }

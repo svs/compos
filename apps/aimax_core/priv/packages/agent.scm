@@ -104,6 +104,8 @@
     (agent-append! slug text)
     (when face
       (agent-add-overlay! buf start (+ start (string-byte-length text)) face))
+    ;; persisted with the buffer — how a restored thread finds its mark
+    (buffer-set-local! buf 'agent-saved-mark (agent-mark slug))
     start))
 
 (define (agent-handle-event slug e)
@@ -205,13 +207,55 @@
 
 ;;; --- steering -----------------------------------------------------------------
 
+;; a restored (or crashed) thread is a live transcript with a dead runtime —
+;; reattach a fresh agent on its connector. New ACP session: the transcript
+;; stays; server-side context isn't replayed yet (resume lands with P5).
+(define (agent-revive! slug)
+  (let* ((buf (agent-buffer slug))
+         (mark (or (buffer-local buf 'agent-saved-mark)
+                   ;; older transcript: mark sits at the marker's last occurrence
+                   (let loop ((ms (re-find* *agent-prompt-marker* (buffer-text buf)))
+                              (last (buffer-size buf)))
+                     (if (null? ms) last (loop (cdr ms) (car (car ms)))))))
+         (m (buffer-local buf 'agent-model)))
+    (agent-start! slug
+      (append (list 'buffer buf 'mark mark)
+              (agent-resolve-config
+                (append (list 'connector (or (buffer-local buf 'agent-connector)
+                                             *default-connector*))
+                        (if (and m (not (equal? m "")))
+                            (list 'env (list (list "ANTHROPIC_MODEL" m)))
+                            '())))))
+    (message (string-append "agent " slug ": revived (fresh session)"))))
+
+;; switch a thread's connector/model: kill + reattach. Fresh session — the
+;; transcript stays, server-side context doesn't.
+(define (agent-reconnect! slug cname model)
+  (let ((buf (agent-buffer slug)))
+    (agent-kill! slug)
+    (buffer-set-local! buf 'agent-connector cname)
+    (buffer-set-local! buf 'agent-model (if (equal? model "") #f model))
+    (agent-update-modeline! buf)
+    (agent-revive! slug)))
+
+(define-command "agent-switch"
+  (lambda ()
+    (let ((slug (agent-slug-of (current-buffer))))
+      (if (not slug)
+          (message "not an agent buffer")
+          (minibuffer-read "Connector: " (connector-names)
+            (lambda (cname)
+              (minibuffer-read "Model (empty = connector default): " *llm-models*
+                (lambda (model)
+                  (agent-reconnect! slug cname model)))))))))
+
 (define-command "agent-send"
   (lambda ()
     (let ((slug (agent-slug-of (current-buffer))))
       (cond ((not slug) (message "not an agent buffer"))
-            ((equal? (agent-status slug) 'dead)
-             (message "agent exited — C-c a n starts a new thread"))
             (else
+             (when (equal? (agent-status slug) 'dead)
+               (agent-revive! slug))
              (let ((input (string-trim (agent-input slug))))
                (if (equal? input "")
                    (insert! "\n")
@@ -273,6 +317,27 @@
         conf
         (append conf (list 'env (list (list "ANTHROPIC_MODEL" (llm-model))))))))
 
+(define (connector-names)
+  (let loop ((cs *agent-connectors*) (acc '()))
+    (if (null? cs) (reverse acc) (loop (cdr cs) (cons (car (car cs)) acc)))))
+
+;; the model a resolved config lands on: explicit 'model, else the
+;; ANTHROPIC_MODEL env pair, else #f (adapter's own default)
+(define (agent-conf-model conf)
+  (or (plist-get conf 'model)
+      (let loop ((es (or (plist-get conf 'env) '())))
+        (cond ((null? es) #f)
+              ((equal? (car (car es)) "ANTHROPIC_MODEL") (car (cdr (car es))))
+              (else (loop (cdr es)))))))
+
+;; modeline: "connector · model" — the thread's economic identity; click it
+;; to switch (modeline-info-command -> agent-switch)
+(define (agent-update-modeline! buf)
+  (let ((c (or (buffer-local buf 'agent-connector) *default-connector*))
+        (m (buffer-local buf 'agent-model)))
+    (buffer-set-local! buf 'modeline-info
+      (if (and m (not (equal? m ""))) (string-append c " · " m) c))))
+
 ;;; --- thread creation ----------------------------------------------------------
 
 (define (agent-next-slug)
@@ -293,6 +358,7 @@
 ;; not survive a restart — the transcript does, status reads 'dead)
 (define (agent-mode-setup! buf)
   (buffer-set-local! buf 'mode-name "agent-mode")
+  (buffer-set-local! buf 'modeline-info-command "agent-switch")
   (agent-install-keys! buf)
   (let ((ovs (buffer-local buf 'agent-overlays)))
     (when ovs (overlay-set! buf 'agent ovs)))
@@ -310,24 +376,24 @@
     (let ((buf (agent-buffer slug)))
       (buffer-create buf)
       (buffer-set-local! buf 'agent-slug slug)
-      (let ((cname (or (plist-get opts 'connector) *default-connector*)))
-        (buffer-set-local! buf 'agent-connector cname)
-        ;; modeline shows the connector — it's the economic identity of the
-        ;; thread (whose subscription/keys it burns)
-        (buffer-set-local! buf 'modeline-info cname))
-      (buffer-append! buf (string-append ";; agent thread · " slug "\n"))
-      (let ((mark (buffer-size buf)))
-        (buffer-append! buf *agent-prompt-marker*)
-        (agent-mode-setup! buf)
-        (agent-start! slug
-          (append (list 'buffer buf 'mark mark) (agent-resolve-config opts)))
-        (unless (equal? prompt "")
-          (agent-prompt! slug prompt))
-        (display-buffer buf)
-        ;; popup selects the thread window — land point in the input region
-        (when (equal? (current-buffer) buf)
-          (end-of-buffer!))
-        slug))))
+      (let ((conf (agent-resolve-config opts)))
+        (buffer-set-local! buf 'agent-connector
+          (or (plist-get opts 'connector) *default-connector*))
+        (buffer-set-local! buf 'agent-model (agent-conf-model conf))
+        (agent-update-modeline! buf)
+        (buffer-append! buf (string-append ";; agent thread · " slug "\n"))
+        (let ((mark (buffer-size buf)))
+          (buffer-append! buf *agent-prompt-marker*)
+          (agent-mode-setup! buf)
+          (agent-start! slug
+            (append (list 'buffer buf 'mark mark) conf))
+          (unless (equal? prompt "")
+            (agent-prompt! slug prompt))
+          (display-buffer buf)
+          ;; popup selects the thread window — land point in the input region
+          (when (equal? (current-buffer) buf)
+            (end-of-buffer!))
+          slug)))))
 
 (define-command "agent-open"
   (lambda ()

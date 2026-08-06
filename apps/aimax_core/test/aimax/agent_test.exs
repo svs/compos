@@ -244,7 +244,7 @@ defmodule Aimax.AgentTest do
              Session.eval(~s[(buffer-local (agent-buffer "a1") 'agent-connector)])
   end
 
-  test "desktop: agent transcript, folds, and overlays survive restore; dead thread says so" do
+  test "desktop: agent transcript, folds, and overlays survive restore; thread revives on RET" do
     {slug, buf, agent} = boot("")
 
     {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "go")])
@@ -295,10 +295,33 @@ defmodule Aimax.AgentTest do
     assert Buffer.overlays(buf) |> Enum.map(&Tuple.to_list/1) ==
              Buffer.get_local(buf, "agent-overlays")
 
-    # local keys are back but the thread is dead: RET explains, no crash
+    # local keys are back; interacting with the dead thread revives it
     focus(buf)
     press(["RET"])
-    assert Editor.snapshot().echo =~ "agent exited"
+    assert Editor.snapshot().echo =~ "revived"
+    assert_receive {:transport_open, _fresh}, 1_000
+  end
+
+  test "RET on a dead thread revives it on its connector and sends" do
+    {slug, buf, agent} = boot("")
+    Agent.kill(slug)
+    assert eventually(fn -> Agent.list() == [] end)
+
+    focus(buf)
+    type("are you alive")
+    press(["RET"])
+
+    # a fresh runtime attaches to the same buffer
+    assert_receive {:transport_open, agent2}, 1_000
+    assert agent2 != agent
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(agent2, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{}})
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+    inject(agent2, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "sess-2"}})
+
+    assert_receive {:frame, %{"method" => "session/prompt", "params" => p}}, 1_000
+    assert [%{"text" => "are you alive"}] = p["prompt"]
+    assert eventually(fn -> Buffer.text(buf) =~ "╰─ you ▸ are you alive\n" end)
   end
 
   test "adapter exit renders a death notice and marks the thread dead" do

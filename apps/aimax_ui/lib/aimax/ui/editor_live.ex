@@ -36,6 +36,21 @@ defmodule Aimax.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
+  # clicking a window's modeline-info segment runs that buffer's
+  # modeline-info-command (policy lives in scheme; this is just dispatch)
+  def handle_event("ml_info", %{"win" => win, "buf" => buf}, socket) do
+    with {id, ""} <- Integer.parse(to_string(win)) do
+      Aimax.Core.Editor.set_active(id)
+
+      case Aimax.Core.Buffer.get_local(buf, "modeline-info-command") do
+        cmd when is_binary(cmd) -> Aimax.Core.Session.run_command(cmd)
+        _ -> :ok
+      end
+    end
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
   def handle_event("viewport", %{"rows" => rows}, socket) when is_integer(rows) do
     Aimax.Core.Editor.set_total_rows(rows)
     {:noreply, socket |> drain() |> refresh()}
@@ -329,7 +344,14 @@ defmodule Aimax.Ui.EditorLive do
         <span class={"ml-dot #{if @node.modified, do: "modified"}"}></span>
         <span class="name">{@node.buffer}</span>
         <span class="ml-mode">{@node.mode}</span>
-        <span :if={@node.modeline_info} class="ml-mode">{@node.modeline_info}</span>
+        <span
+          :if={@node.modeline_info}
+          class="ml-mode"
+          style="cursor:pointer"
+          phx-click="ml_info"
+          phx-value-win={@node.id}
+          phx-value-buf={@node.buffer}
+        >{@node.modeline_info}</span>
         <span class="mb-spacer"></span>
         <span class="ml-pos">{pct(@node)} · L{@line}:C{@col}</span>
       </div>

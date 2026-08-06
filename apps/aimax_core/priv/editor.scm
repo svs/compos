@@ -735,11 +735,24 @@
 (define (chat-prompt-marker) "\n### You\n")
 (define (chat-reply-marker) "\n### Assistant\n")
 
-;; a real mode so desktop restore can rebuild the local keys
+;; a real mode so desktop restore can rebuild the local keys. A chat that
+;; carries the block model ('agent-saved-mark) is a rich companion surface:
+;; it opts into the same native renderer as agent threads, RET sends, and
+;; a stale "⋯ thinking" from before a restart is swept away.
 (define-mode "chat-mode"
   (lambda ()
-    (local-set-key "C-c RET" "chat-send")
-    (local-set-key "C-c m" "chat-set-model")))
+    (let ((buf (current-buffer)))
+      (local-set-key "C-c RET" "chat-send")
+      (local-set-key "C-c m" "chat-set-model")
+      (when (buffer-local buf 'agent-saved-mark)
+        (buffer-set-local! buf 'render-mode "agent")
+        (buffer-set-local! buf 'agent-marker-bytes
+          (string-byte-length *chat-input-marker*))
+        (buffer-set-local! buf 'modeline-info
+          (string-append "companion · " (llm-model)))
+        (chat-clear-waiting! buf)
+        (local-set-key "RET" "chat-send")
+        (local-set-key "C-c C-v" "chat-toggle-view")))))
 
 ;; adopt the most recent titled chat after a daemon restart
 ;; (unless fresh — chat-new wants a brand new conversation)
@@ -774,26 +787,189 @@
       (llm-with-tools prompt handler)
       (llm prompt handler)))
 
+;; the per-send system preamble: companion chats point the model at their
+;; document (pull context — the tools read the live buffer, so it is never
+;; stale); with tools off the document is pushed inline instead
+(define (chat-preamble buf)
+  (let ((doc (buffer-local buf 'companion-of)))
+    (if (and doc (buffer-exists? doc))
+        (string-append
+          "You are the user's writing companion in a side chat. They are "
+          "writing in the editor buffer named \"" doc "\"."
+          (if (and (boundp (quote chat-use-tools)) chat-use-tools)
+              (string-append
+                " Never guess its contents: call read-doc with that buffer "
+                "name before commenting, and change it with edit-doc "
+                "(exact unique old string -> new string; it edits the live "
+                "buffer, never the file). Match the document's voice and "
+                "make the smallest edit that does the job.")
+              (string-append
+                "\n\nThe document right now:\n\n" (buffer-text doc)))
+          "\n\nThe chat transcript follows; reply to the last user turn "
+          "only, in markdown.\n\n")
+        (string-append
+          "You are the assistant in an editor chat buffer. The transcript "
+          "follows; reply to the last user turn only, in markdown.\n\n"))))
+
+;; sends from whichever chat buffer it is invoked in (chat-mode-local key);
+;; rich companion surfaces take the block path, plain chats the markdown one
 (define-command "chat-send"
   (lambda ()
-    (let ((convo (buffer-text *chat-buffer*)))
-      (buffer-append! *chat-buffer* (chat-reply-marker))
-      (end-of-buffer!)
-      (message "LLM thinking...")
-      (chat-llm (string-append
-             "You are the assistant in an editor chat buffer. The transcript "
-             "follows; reply to the last user turn only, in markdown.\n\n"
-             convo)
-           (lambda (reply)
-             (buffer-append! *chat-buffer*
-               (string-append
-                 (if (equal? (string-trim reply) "")
-                     "(no reply — the model returned no text; its tool calls are traced in *messages*)"
-                     reply)
-                 (chat-prompt-marker)))
-             (end-of-buffer!)
-             (message "Reply ready")
+    (let ((buf (current-buffer)))
+      (if (buffer-local buf 'agent-saved-mark)
+          (chat-send-rich! buf)
+          (chat-send-plain! buf)))))
+
+;; the reply appends by name, and point only follows when the user is
+;; still in the chat — a companion must not yank point in the document
+(define (chat-send-plain! buf)
+  (let ((convo (buffer-text buf)))
+    (buffer-append! buf (chat-reply-marker))
+    (end-of-buffer!)
+    (message "LLM thinking...")
+    (chat-llm (string-append (chat-preamble buf) convo)
+         (lambda (reply)
+           (buffer-append! buf
+             (string-append
+               (if (equal? (string-trim reply) "")
+                   "(no reply — the model returned no text; its tool calls are traced in *messages*)"
+                   reply)
+               (chat-prompt-marker)))
+           (when (equal? (current-buffer) buf)
+             (end-of-buffer!))
+           (message "Reply ready")
+           (when (equal? buf "*chat*")
              (chat-maybe-title!))))))
+
+;;; --- rich chat transcript (the agent thread design) ---------------------------
+;;; A companion chat maintains the exact locals the native agent renderer
+;;; reads — render-mode "agent", 'agent-blocks byte ranges, 'agent-saved-mark
+;;; + 'agent-marker-bytes for the ╰─ you ▸ input region — so it inherits the
+;;; serif prose, user cards, and tool cards wholesale. No runtime behind it:
+;;; the mark lives in 'agent-saved-mark, the conversation in 'chat-turns.
+;;; Buffer layout: [help][transcript … mark][╰─ you ▸ ][input].
+
+(define *chat-input-marker* "\n╰─ you ▸ ")
+
+(define (chat-mark buf) (or (buffer-local buf 'agent-saved-mark) 0))
+
+(define (chat-blocks-push! buf start end kind meta)
+  (buffer-set-local! buf 'agent-blocks
+    (cons (append (list start end kind) meta)
+          (or (buffer-local buf 'agent-blocks) '()))))
+
+(define (chat-blocks-drop! buf kind)
+  (buffer-set-local! buf 'agent-blocks
+    (filter (lambda (b) (not (equal? (car (cdr (cdr b))) kind)))
+            (or (buffer-local buf 'agent-blocks) '()))))
+
+;; append at the mark — after every recorded range, so stored offsets
+;; never shift; the input region past the marker slides along
+(define (chat-render! buf text)
+  (let ((start (chat-mark buf)))
+    (buffer-insert! buf start text)
+    (buffer-set-local! buf 'agent-saved-mark
+      (+ start (string-byte-length text)))
+    start))
+
+(define (chat-input buf)
+  (substring-bytes (buffer-text buf)
+                   (+ (chat-mark buf) (string-byte-length *chat-input-marker*))
+                   (buffer-size buf)))
+
+(define (chat-clear-input! buf)
+  (let ((start (+ (chat-mark buf) (string-byte-length *chat-input-marker*))))
+    (buffer-delete-range! buf start (- (buffer-size buf) start))))
+
+;; the conversation the LLM sees — decoupled from buffer text, which now
+;; also holds tool cards and help
+(define (chat-turns buf) (or (buffer-local buf 'chat-turns) '()))
+
+(define (chat-turn-push! buf role text)
+  (buffer-set-local! buf 'chat-turns
+    (cons (list role text) (chat-turns buf))))
+
+(define (chat-transcript buf)
+  (let loop ((ts (reverse (chat-turns buf))) (acc ""))
+    (if (null? ts)
+        acc
+        (loop (cdr ts)
+              (string-append acc
+                (if (equal? (car (car ts)) "user") "### You\n" "### Assistant\n")
+                (car (cdr (car ts))) "\n\n")))))
+
+(define (chat-show-waiting! buf)
+  (let ((start (chat-render! buf "⋯ thinking\n")))
+    (chat-blocks-push! buf start (chat-mark buf) "waiting" '())
+    (buffer-set-local! buf 'chat-waiting (list start (chat-mark buf)))))
+
+(define (chat-clear-waiting! buf)
+  (let ((w (buffer-local buf 'chat-waiting)))
+    (when w
+      (buffer-delete-range! buf (car w) (- (car (cdr w)) (car w)))
+      (buffer-set-local! buf 'agent-saved-mark
+        (- (chat-mark buf) (- (car (cdr w)) (car w))))
+      (chat-blocks-drop! buf "waiting")
+      (buffer-set-local! buf 'chat-waiting #f))))
+
+(define (chat-ellipsize s n)
+  (if (> (string-length s) n) (string-append (substring s 0 n) " …") s))
+
+;; every tool call becomes a card: header + trimmed result body, closed
+;; "done" immediately (the loop is synchronous per call)
+(define (chat-tool-dispatch buf)
+  (lambda (name args)
+    ;; first sign of life ends the waiting line — before any block lands,
+    ;; so its deletion can never shift recorded offsets
+    (chat-clear-waiting! buf)
+    (let* ((hstart (chat-render! buf (string-append "\n▸ " name "\n")))
+           (bstart (chat-mark buf))
+           (result (llm-tool-call name args))
+           (shown (chat-ellipsize
+                    (string-trim (if (string? result) result (value->string result)))
+                    400)))
+      (unless (equal? shown "")
+        (chat-render! buf (string-append shown "\n")))
+      (chat-blocks-push! buf hstart (chat-mark buf) "tool"
+        (list (number->string hstart) name "tool" "done" bstart))
+      result)))
+
+(define (chat-llm-rich buf prompt handler)
+  (if (and (boundp (quote chat-use-tools)) chat-use-tools)
+      (llm-tools prompt *llm-system* (llm-tool-specs)
+                 (chat-tool-dispatch buf) handler)
+      (llm prompt handler)))
+
+(define (chat-send-rich! buf)
+  (let ((input (string-trim (chat-input buf))))
+    (if (equal? input "")
+        (message "Say something first")
+        (begin
+          (chat-clear-input! buf)
+          (chat-turn-push! buf "user" input)
+          (let ((start (chat-render! buf
+                         (string-append "\n╰─ you ▸ " input "\n\n"))))
+            (chat-blocks-push! buf start (chat-mark buf) "user" (list input)))
+          (chat-show-waiting! buf)
+          (message "LLM thinking...")
+          (chat-llm-rich buf
+            (string-append (chat-preamble buf) (chat-transcript buf))
+            (lambda (reply)
+              (chat-clear-waiting! buf)
+              (let ((text (if (equal? (string-trim reply) "")
+                              "(no reply — the model returned no text)"
+                              reply)))
+                (chat-turn-push! buf "assistant" text)
+                (let ((start (chat-render! buf (string-append text "\n"))))
+                  (chat-blocks-push! buf start (chat-mark buf) "prose" '())))
+              (message "Reply ready")))))))
+
+(define-command "chat-toggle-view"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (rich? (equal? (buffer-local buf 'render-mode) "agent")))
+      (buffer-set-local! buf 'render-mode (if rich? #f "agent"))
+      (message (if rich? "plain transcript" "rich transcript")))))
 
 ;;; --- chat titles -------------------------------------------------------------
 ;;; The first reply names the chat: a cheap llm call summarises the
@@ -818,6 +994,9 @@
       (let ((was (active-window)))
         (buffer-create new)
         (buffer-append! new (buffer-text old))
+        ;; a companion link must survive the rename
+        (let ((doc (buffer-local old 'companion-of)))
+          (when doc (buffer-set-local! new 'companion-of doc)))
         (for-each
           (lambda (w)
             (if (equal? (cadr w) old)
@@ -857,6 +1036,9 @@
       *llm-models*
       (lambda (m)
         (set-llm-model! m)
+        (when (buffer-local (current-buffer) 'agent-saved-mark)
+          (buffer-set-local! (current-buffer) 'modeline-info
+            (string-append "companion · " m)))
         (message (string-append "LLM model: " m))))))
 
 ;; send the region to the chat buffer as context, then open it
@@ -869,6 +1051,117 @@
             (run-command "chat")
             (insert! (string-append "```\n" text "\n```\n"))
             (message "Region added to chat"))))))
+
+;;; --- companion chat: two panes, document + writing agent ---------------------
+;;; C-c w from a document: the doc keeps ~60% on the left, a chat linked to
+;;; it opens on the right. The link is the buffer-local 'companion-of; the
+;;; preamble + read-doc/edit-doc tools do the rest. Not a popup — the
+;;; companion name avoids the "*chat*"/"*llm:" display rules on purpose.
+
+(define (chat-companion-name doc)
+  (string-append "*chat:" doc "*"))
+
+(define (window-showing name)
+  (let ((ws (filter (lambda (w) (equal? (cadr w) name)) (window-list))))
+    (if (null? ws) #f (car (car ws)))))
+
+;; any chat already linked to this doc (an adopted one keeps its own name)
+(define (chat-companion-for doc)
+  (let loop ((bs (buffer-list)))
+    (cond ((null? bs) #f)
+          ((equal? (buffer-local (car bs) 'companion-of) doc) (car bs))
+          (else (loop (cdr bs))))))
+
+(define (chat-buffer? b)
+  (equal? (buffer-local b 'mode-name) "chat-mode"))
+
+;; a fresh companion is a rich surface from birth: help on top (a "meta"
+;; card in the agent design), then the ╰─ you ▸ input region
+(define (chat-companion-init! buf doc)
+  (let ((help (string-append
+                "writing companion · " doc "\n"
+                "RET sends · C-c w hops to the document · "
+                "C-c m model · C-c C-v plain view\n"
+                "it reads the live buffer before it speaks, "
+                "and edits it in place when you ask\n")))
+    (buffer-append! buf help)
+    (chat-blocks-push! buf 0 (string-byte-length help) "meta" '())
+    (buffer-set-local! buf 'agent-saved-mark (string-byte-length help))
+    (buffer-append! buf *chat-input-marker*)))
+
+;; ensure the two-pane layout (doc left, companion right) and select the
+;; companion window; returns the companion buffer name
+(define (chat-companion-show! doc)
+  (let ((buf (or (chat-companion-for doc) (chat-companion-name doc))))
+    (unless (buffer-exists? buf)
+      (buffer-create buf)
+      (chat-companion-init! buf doc))
+    (buffer-set-local! buf 'companion-of doc)
+    (let ((w (window-showing buf)))
+      (if w
+          (select-window! w)
+          (begin
+            (delete-other-windows!)
+            (split-window! 'h 0.6)
+            (other-window!)
+            (switch-to-buffer! buf))))
+    (set-mode! "chat-mode")
+    (end-of-buffer!)
+    buf))
+
+;; make an existing conversation the companion of a document: the link is
+;; only the 'companion-of local, so adoption is one minibuffer question
+(define-command "chat-adopt"
+  (lambda ()
+    (let ((chat (current-buffer)))
+      (minibuffer-read "Companion for buffer: "
+        (filter (lambda (b) (not (equal? b chat))) (buffer-list-mru))
+        (lambda (doc)
+          (if (not (buffer-exists? doc))
+              (message (string-append "No buffer " doc))
+              (begin
+                (buffer-set-local! chat 'companion-of doc)
+                (delete-other-windows!)
+                (switch-to-buffer! doc)
+                (split-window! 'h 0.6)
+                (other-window!)
+                (switch-to-buffer! chat)
+                (set-mode! "chat-mode")
+                (end-of-buffer!)
+                (message (string-append chat " now accompanies " doc)))))))))
+
+;; C-c w toggles sides: in the document it opens (or refocuses) the
+;; companion; in the companion it hops back to the document; in a chat
+;; with no document yet it offers to adopt one
+(define-command "chat-companion"
+  (lambda ()
+    (let* ((cur (current-buffer))
+           (doc (buffer-local cur 'companion-of)))
+      (cond (doc
+             (let ((w (window-showing doc)))
+               (if w (select-window! w) (switch-to-buffer! doc))))
+            ((chat-buffer? cur)
+             (run-command "chat-adopt"))
+            (else (chat-companion-show! cur))))))
+
+;; C-c RET in the document: talk to the companion without leaving it —
+;; minibuffer prompt becomes a companion turn, point stays in the doc,
+;; the reply lands in the right pane. (In chat buffers the chat-mode
+;; local C-c RET = chat-send wins.)
+(define-command "chat-companion-ask"
+  (lambda ()
+    (let ((doc (current-buffer)))
+      (if (or (buffer-local doc 'companion-of) (chat-buffer? doc))
+          (run-command "chat-send")
+          (minibuffer-read "Ask companion: " (history-items 'companion-ask)
+            (lambda (prompt)
+              (history-push! 'companion-ask prompt)
+              (let ((back (active-window)))
+                (chat-companion-show! doc)
+                (insert! prompt)
+                (run-command "chat-send")
+                (when (window-exists? back)
+                  (select-window! back)))))))))
 
 ;; C-c q : ask from anywhere. The prompt becomes a normal *chat* turn, the
 ;; chat opens as a bottom popup, and the conversation continues there —
@@ -898,6 +1191,8 @@
 (global-set-key "C-c c" "chat")
 (global-set-key "C-c r" "chat-send-region")
 (global-set-key "C-c q" "llm-ask")
+(global-set-key "C-c w" "chat-companion")
+(global-set-key "C-c RET" "chat-companion-ask")
 
 ;;; --- minibuffer history (vertico-style: last-used first) --------------------
 ;;; The candidate ranking in the core is a stable sort, so passing

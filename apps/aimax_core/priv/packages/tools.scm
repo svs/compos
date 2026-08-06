@@ -132,6 +132,44 @@
     (load-theme (custom--plist-get args 'name))
     "ok"))
 
+;;; --- document tools (companion chats) ----------------------------------------
+;;; Pull-style context: the model reads the live buffer when it needs it —
+;;; never stale, and long documents cost tokens only when actually read.
+
+(define-tool! 'read-doc
+  "Read the live text of an editor buffer (may have unsaved changes — always fresher than the file on disk). Call this before commenting on or editing a document; never rely on an earlier read after the user may have typed."
+  (list (list 'buffer "string" "Buffer name, e.g. the document named in the system context"))
+  (lambda (args)
+    (let ((b (custom--plist-get args 'buffer)))
+      (if (buffer-exists? b)
+          (buffer-text b)
+          (string-append "no such buffer: " b)))))
+
+(define-tool! 'edit-doc
+  "Edit a buffer by exact replacement: old must occur exactly once and is replaced by new. Edits the live buffer, never the file on disk. Copy old verbatim from read-doc; widen it with surrounding text if it is not unique."
+  (list (list 'buffer "string" "Buffer name")
+        (list 'old "string" "Exact existing text, unique in the buffer")
+        (list 'new "string" "Replacement text"))
+  (lambda (args)
+    (let ((b (custom--plist-get args 'buffer))
+          (old (custom--plist-get args 'old))
+          (new (custom--plist-get args 'new)))
+      (cond ((not (buffer-exists? b)) (string-append "no such buffer: " b))
+            ((equal? old "") "error: old must be non-empty")
+            (else
+              (let ((hits (- (length (string-split (buffer-text b) old)) 1)))
+                (cond ((equal? hits 0)
+                       "error: old text not found — read-doc and copy it exactly")
+                      ((> hits 1)
+                       (string-append "error: old text occurs "
+                                      (number->string hits)
+                                      " times — include surrounding text to make it unique"))
+                      (else
+                        (let ((pos (string-index (buffer-text b) old)))
+                          (buffer-delete-range! b pos (string-byte-length old))
+                          (buffer-insert! b pos new)
+                          "edited")))))))))
+
 ;; chat integration: chat-send routes through llm-with-tools when this is on
 (defcustom 'chat-use-tools #t
   "When true, the *chat* buffer's LLM can act on the editor via tools."

@@ -1107,6 +1107,138 @@ defmodule Aimax.EditorTest do
     assert eventually(fn -> Buffer.text("*chat*") =~ "(no reply" end)
   end
 
+  test "C-c w opens a writing companion chat linked to the document", %{buf: buf} do
+    companion = "*chat:#{buf}*"
+    type("Roses are red")
+
+    Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: [%{content: prompt} | _]} ->
+      # the preamble names the document and the pull tools
+      assert prompt =~ "writing companion"
+      assert prompt =~ ~s{"#{buf}"}
+      assert prompt =~ "read-doc"
+      assert prompt =~ "make it rhyme"
+      {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "try violets"}]}}
+    end)
+
+    on_exit(fn ->
+      Application.delete_env(:aimax_core, :llm_chat_fun)
+      Aimax.Core.kill_buffer(companion)
+    end)
+
+    press(["C-c", "w"])
+    assert Editor.current_buffer() == companion
+    assert length(Editor.list_windows()) == 2
+    assert Buffer.get_local(companion, "companion-of") == buf
+    assert Buffer.get_local(companion, "mode-name") == "chat-mode"
+
+    # rich surface from birth: agent renderer + help meta card + input marker
+    assert Buffer.get_local(companion, "render-mode") == "agent"
+    assert Buffer.text(companion) =~ "writing companion"
+    assert Buffer.text(companion) =~ "╰─ you ▸"
+
+    type("make it rhyme")
+    press(["RET"])
+    assert eventually(fn -> Buffer.text(companion) =~ "try violets" end)
+
+    # the transcript is block-modeled like an agent thread
+    kinds = Buffer.get_local(companion, "agent-blocks") |> Enum.map(&Enum.at(&1, 2))
+    assert "meta" in kinds
+    assert "user" in kinds
+    assert "prose" in kinds
+    refute "waiting" in kinds
+
+    # companion chats keep their doc-derived name — no auto-title rename
+    assert Buffer.exists?(companion)
+
+    # C-c w toggles sides: companion -> doc -> companion, no new splits
+    press(["C-c", "w"])
+    assert Editor.current_buffer() == buf
+    press(["C-c", "w"])
+    assert Editor.current_buffer() == companion
+    assert length(Editor.list_windows()) == 2
+
+    press(["C-x", "1"])
+  end
+
+  test "C-c RET talks to the companion without leaving the document", %{buf: buf} do
+    companion = "*chat:#{buf}*"
+    type("A koan about ropes.")
+
+    Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: [%{content: prompt} | _]} ->
+      assert prompt =~ "tighten this up"
+      {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "knot bad"}]}}
+    end)
+
+    on_exit(fn ->
+      Application.delete_env(:aimax_core, :llm_chat_fun)
+      Aimax.Core.kill_buffer(companion)
+    end)
+
+    point = Buffer.point(buf)
+    press(["C-c", "RET"])
+    assert Editor.snapshot().minibuffer.prompt == "Ask companion: "
+    type("tighten this up")
+    press(["RET"])
+
+    # pane opened, prompt became a turn, reply landed — focus never left the doc
+    assert eventually(fn -> Buffer.text(companion) =~ "knot bad" end)
+    assert Editor.current_buffer() == buf
+    assert Buffer.point(buf) == point
+    assert length(Editor.list_windows()) == 2
+
+    press(["C-x", "1"])
+  end
+
+  test "C-c w in a plain chat adopts a document; auto-title keeps the link", %{buf: buf} do
+    titled = "*llm:rope koans*"
+
+    Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: [%{content: prompt} | _]} ->
+      assert prompt =~ "writing companion"
+      assert prompt =~ ~s{"#{buf}"}
+      {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "ok"}]}}
+    end)
+
+    Application.put_env(:aimax_core, :llm_request_fun, fn _ -> {:ok, "Rope Koans"} end)
+
+    on_exit(fn ->
+      Application.delete_env(:aimax_core, :llm_chat_fun)
+      Application.delete_env(:aimax_core, :llm_request_fun)
+      Aimax.Core.Session.eval(~s{(set! *chat-buffer* "*chat*")})
+      Aimax.Core.kill_buffer("*chat*")
+      Aimax.Core.kill_buffer(titled)
+    end)
+
+    type("Draft about ropes.")
+    press(["M-x"])
+    type("chat")
+    press(["RET"])
+    assert Editor.current_buffer() == "*chat*"
+
+    # C-c w in an unlinked chat asks which buffer to accompany (MRU-first)
+    press(["C-c", "w"])
+    assert Editor.snapshot().minibuffer.prompt == "Companion for buffer: "
+    press(["RET"])
+
+    assert Buffer.get_local("*chat*", "companion-of") == buf
+    assert Editor.current_buffer() == "*chat*"
+    assert length(Editor.list_windows()) == 2
+
+    type("thoughts?")
+    press(["C-c", "RET"])
+
+    # first reply retitles *chat* — the companion link must ride along
+    assert eventually(fn -> Buffer.exists?(titled) end)
+    assert eventually(fn -> Buffer.get_local(titled, "companion-of") == buf end)
+
+    # C-c w from the doc refocuses the adopted (now retitled) chat
+    press(["C-c", "w"])
+    assert Editor.current_buffer() == buf
+    press(["C-c", "w"])
+    assert Editor.current_buffer() == titled
+
+    press(["C-x", "1"])
+  end
+
   test "C-c q asks from the minibuffer into the *chat* popup; conversation continues" do
     titled = "*llm:org mode font change*"
 

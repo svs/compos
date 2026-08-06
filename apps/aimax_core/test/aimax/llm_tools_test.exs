@@ -47,7 +47,7 @@ defmodule Aimax.LLMToolsTest do
 
     test "specs include the built-in toolbox" do
       specs = eval!("(map car (llm-tool-specs))")
-      for t <- ~w(eval-scheme apropos-api describe-variables customize-save customize-save-face list-themes load-theme) do
+      for t <- ~w(eval-scheme apropos-api describe-variables customize-save customize-save-face list-themes load-theme read-doc edit-doc) do
         assert specs =~ t
       end
     end
@@ -73,7 +73,7 @@ defmodule Aimax.LLMToolsTest do
       # an M-x command (lives in the ETS registry, not the global env)
       out = eval!(~s{(llm-tool-call "describe-function" (list 'name "chat-send"))})
       assert out =~ "M-x command"
-      assert out =~ "chat-reply-marker"
+      assert out =~ "chat-send-rich!"
 
       # a builtin is opaque Elixir
       out = eval!(~s{(llm-tool-call "describe-function" (list 'name "car"))})
@@ -81,6 +81,39 @@ defmodule Aimax.LLMToolsTest do
 
       out = eval!(~s{(llm-tool-call "describe-function" (list 'name "zz-nope"))})
       assert out =~ "no function or command"
+    end
+  end
+
+  describe "document tools" do
+    test "read-doc returns live buffer text; missing buffer reports" do
+      on_exit(fn -> Aimax.Core.kill_buffer("*zz-doc*") end)
+      eval!(~s{(buffer-create "*zz-doc*")})
+      eval!(~s{(buffer-append! "*zz-doc*" "Thé quick fox.")})
+
+      assert eval!(~s{(llm-tool-call "read-doc" (list 'buffer "*zz-doc*"))}) ==
+               ~s{"Thé quick fox."}
+
+      assert eval!(~s{(llm-tool-call "read-doc" (list 'buffer "*zz-none*"))}) =~
+               "no such buffer"
+    end
+
+    test "edit-doc: unique replacement (byte-safe); missing and ambiguous rejected" do
+      on_exit(fn -> Aimax.Core.kill_buffer("*zz-edit*") end)
+      eval!(~s{(buffer-create "*zz-edit*")})
+      eval!(~s{(buffer-append! "*zz-edit*" "héllo old world, olde times")})
+
+      # ambiguous: "old" also occurs inside "olde" — buffer untouched
+      out = eval!(~s{(llm-tool-call "edit-doc" (list 'buffer "*zz-edit*" 'old "old" 'new "new"))})
+      assert out =~ "2 times"
+      assert eval!(~s{(buffer-text "*zz-edit*")}) == ~s{"héllo old world, olde times"}
+
+      out = eval!(~s{(llm-tool-call "edit-doc" (list 'buffer "*zz-edit*" 'old "zebra" 'new "x"))})
+      assert out =~ "not found"
+
+      # unique match sits after a multibyte char: byte offsets must line up
+      out = eval!(~s{(llm-tool-call "edit-doc" (list 'buffer "*zz-edit*" 'old "old world" 'new "new wörld"))})
+      assert out == ~s{"edited"}
+      assert eval!(~s{(buffer-text "*zz-edit*")}) == ~s{"héllo new wörld, olde times"}
     end
   end
 

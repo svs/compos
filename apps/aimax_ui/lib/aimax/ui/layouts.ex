@@ -154,6 +154,8 @@ defmodule Aimax.Ui.Layouts do
             background: var(--window-bg, #fdfcf8);
           }
           .region { background: var(--region-bg, #e7e9f1); }
+          /* native drag-selection matches the editor region it becomes */
+          ::selection { background: var(--region-bg, #e7e9f1); }
           /* --- agent transcript (the Modern Emacs agent-chat design) ------- */
           .agent-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
           .ag-scroll { flex: 1; overflow-y: auto; padding: 14px 18px 6px; }
@@ -426,12 +428,83 @@ defmodule Aimax.Ui.Layouts do
                   return;
                 }
                 this.handler = (e) => {
+                  // Cmd-C with no native selection: copy the editor region
+                  // (with one, the browser's own copy handles it)
+                  if (e.metaKey && !e.ctrlKey && !e.altKey && e.key === "c" &&
+                      window.getSelection().isCollapsed) {
+                    e.preventDefault();
+                    this.pushEvent("copy", {});
+                    return;
+                  }
                   const spec = keySpec(e);
                   if (spec === null) return;
                   e.preventDefault();
                   this.pushEvent("key", { k: spec });
                 };
                 window.addEventListener("keydown", this.handler);
+
+                // system clipboard: Cmd-V fires a native paste event (cmd
+                // keys pass through keySpec untouched)
+                this.pasteH = (e) => {
+                  const text = e.clipboardData && e.clipboardData.getData("text/plain");
+                  if (!text) return;
+                  e.preventDefault();
+                  this.pushEvent("paste", { text });
+                };
+                window.addEventListener("paste", this.pasteH);
+                this.handleEvent("clipboard", ({ text }) => {
+                  if (text) navigator.clipboard.writeText(text);
+                });
+
+                // mouse: a click selects the window and places point; a drag
+                // leaves a native selection, mirrored into mark + point.
+                // Positions are (logical line, char offset) — the server maps
+                // them to bytes via the rope.
+                const posIn = (node, offset) => {
+                  if (!node) return null;
+                  const el = node.nodeType === 1 ? node : node.parentElement;
+                  const lineEl = el && el.closest(".line");
+                  if (!lineEl) return null;
+                  const content = lineEl.querySelector(".line-content");
+                  const numEl = lineEl.querySelector(".linenum");
+                  if (!content || !numEl) return null;
+                  let col = 0, found = false;
+                  const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+                  let t;
+                  while ((t = walker.nextNode())) {
+                    if (t === node) { col += offset; found = true; break; }
+                    col += t.textContent.length;
+                  }
+                  if (!found && !content.contains(node)) col = 0;
+                  return { line: parseInt(numEl.textContent, 10), col };
+                };
+                this.mouseH = (e) => {
+                  if (e.button !== 0) return;
+                  if (e.target.closest("button, [phx-click]")) return;
+                  const winEl = e.target.closest(".window[data-win-id]");
+                  if (!winEl) return;
+                  const win = parseInt(winEl.dataset.winId, 10);
+                  const sel = window.getSelection();
+                  if (sel && !sel.isCollapsed &&
+                      winEl.contains(sel.anchorNode) && winEl.contains(sel.focusNode)) {
+                    const a = posIn(sel.anchorNode, sel.anchorOffset);
+                    const f = posIn(sel.focusNode, sel.focusOffset);
+                    if (a && f) {
+                      this.pushEvent("mouse_sel", { win, al: a.line, ac: a.col, fl: f.line, fc: f.col });
+                      return;
+                    }
+                  }
+                  let pos = null;
+                  if (document.caretPositionFromPoint) {
+                    const cp = document.caretPositionFromPoint(e.clientX, e.clientY);
+                    if (cp) pos = posIn(cp.offsetNode, cp.offset);
+                  } else if (document.caretRangeFromPoint) {
+                    const r = document.caretRangeFromPoint(e.clientX, e.clientY);
+                    if (r) pos = posIn(r.startContainer, r.startOffset);
+                  }
+                  this.pushEvent("mouse", pos ? { win, line: pos.line, col: pos.col } : { win });
+                };
+                window.addEventListener("mouseup", this.mouseH);
 
                 // viewport geometry: overall estimate for split math, plus
                 // exact per-window rows (line height varies per buffer)
@@ -498,6 +571,8 @@ defmodule Aimax.Ui.Layouts do
                 window.removeEventListener("wheel", this.wheelH);
                 window.removeEventListener("focus", this.focusH);
                 window.removeEventListener("blur", this.blurH);
+                window.removeEventListener("paste", this.pasteH);
+                window.removeEventListener("mouseup", this.mouseH);
               }
             }
           };

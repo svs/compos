@@ -112,6 +112,9 @@ defmodule Aimax.Core.Buffer do
   @doc "Delete point..end-of-line (or the newline if at eol). Returns killed text."
   def kill_line(name, opts \\ []), do: GenServer.call(via(name), {:kill_line, source(opts)})
 
+  @doc "1-based logical line -> {start_byte, line_text sans newline}, clamped."
+  def line_at(name, line), do: GenServer.call(via(name), {:line_at, line})
+
   def forward_char(name), do: GenServer.call(via(name), {:motion, :forward})
   def backward_char(name), do: GenServer.call(via(name), {:motion, :backward})
   def next_line(name), do: GenServer.call(via(name), {:motion, :next_line})
@@ -238,6 +241,15 @@ defmodule Aimax.Core.Buffer do
   def handle_call({:delete_range, _, _, :user}, _f, %{read_only: true} = s), do: ro(s)
   def handle_call({:delete_char, _, :user}, _f, %{read_only: true} = s), do: ro(s)
   def handle_call({:kill_line, :user}, _f, %{read_only: true} = s), do: ro(s)
+
+  def handle_call({:line_at, line}, _from, state) do
+    rope = state.rope
+    count = Rope.line_count(rope)
+    line = line |> max(1) |> min(count)
+    s = Rope.line_to_byte(rope, line - 1)
+    e = if line == count, do: Rope.byte_size(rope), else: Rope.line_to_byte(rope, line)
+    {:reply, {s, rope |> Rope.slice(s, e - s) |> String.trim_trailing("\n")}, state}
+  end
 
   def handle_call({:set_mark, nil}, _from, state), do: {:reply, :ok, %{state | mark: nil}}
 

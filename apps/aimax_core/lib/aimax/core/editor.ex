@@ -131,6 +131,17 @@ defmodule Aimax.Core.Editor do
   def set_window_rows(map), do: GenServer.call(__MODULE__, {:set_window_rows, map})
   def scroll_active(delta_lines), do: GenServer.call(__MODULE__, {:scroll_active, delta_lines})
   def scroll_window(id, delta_lines), do: GenServer.call(__MODULE__, {:scroll_window, id, delta_lines})
+
+  # mouse: place point at (logical line, char col) in a window's buffer;
+  # or set a region from a drag's anchor/focus positions
+  def mouse_goto(id, line, col), do: GenServer.call(__MODULE__, {:mouse_goto, id, line, col})
+
+  def mouse_region(id, al, ac, fl, fc),
+    do: GenServer.call(__MODULE__, {:mouse_region, id, al, ac, fl, fc})
+
+  # Cmd-C with no native selection: the active region (pushed onto the kill
+  # ring, Emacs kill-ring-save) or, without one, the kill-ring top
+  def copy_text, do: GenServer.call(__MODULE__, :copy_text)
   def user_acted, do: GenServer.call(__MODULE__, :user_acted)
   def window_rows, do: GenServer.call(__MODULE__, :window_rows)
   def recenter, do: GenServer.call(__MODULE__, :recenter)
@@ -262,6 +273,44 @@ defmodule Aimax.Core.Editor do
         top = max(leaf.top + delta, 0)
         tree = replace_leaf(state.tree, id, %{leaf | top: top, manual: true})
         changed(:ok, %{state | tree: tree})
+    end
+  end
+
+  def handle_call({:mouse_goto, id, line, col}, _from, state) do
+    case find_leaf(state.tree, id) do
+      nil ->
+        {:reply, {:error, :no_window}, state}
+
+      leaf ->
+        Buffer.goto(leaf.buffer, mouse_pos(leaf.buffer, line, col))
+        changed(:ok, state)
+    end
+  end
+
+  def handle_call({:mouse_region, id, al, ac, fl, fc}, _from, state) do
+    case find_leaf(state.tree, id) do
+      nil ->
+        {:reply, {:error, :no_window}, state}
+
+      leaf ->
+        Buffer.set_mark(leaf.buffer, mouse_pos(leaf.buffer, al, ac))
+        Buffer.goto(leaf.buffer, mouse_pos(leaf.buffer, fl, fc))
+        changed(:ok, state)
+    end
+  end
+
+  def handle_call(:copy_text, _from, state) do
+    buf = active_buffer_of(state)
+    snap = Buffer.render_snapshot(buf)
+
+    case snap.mark do
+      mark when is_integer(mark) and mark != snap.point ->
+        {s, e} = {min(mark, snap.point), max(mark, snap.point)}
+        region = binary_part(snap.text, s, e - s)
+        {:reply, region, %{state | kill_ring: Enum.take([region | state.kill_ring], 60)}}
+
+      _ ->
+        {:reply, List.first(state.kill_ring, ""), state}
     end
   end
 
@@ -594,6 +643,15 @@ defmodule Aimax.Core.Editor do
 
   # --- tree helpers ----------------------------------------------------------
 
+  defp active_buffer_of(state), do: find_leaf(state.tree, state.active).buffer
+
+  # (1-based logical line, char col) -> byte offset; line lookup is the
+  # rope NIF, only the clicked line's text is materialized for the col
+  defp mouse_pos(buf, line, col) do
+    {start, line_text} = Buffer.line_at(buf, line)
+    start + byte_size(String.slice(line_text, 0, max(col, 0)))
+  end
+
   defp find_leaf(%{type: :leaf} = leaf, id), do: if(leaf.id == id, do: leaf, else: nil)
 
   defp find_leaf(%{type: :split, children: children}, id),
@@ -726,7 +784,7 @@ defmodule Aimax.Core.Editor do
       col: snap.col,
       style: Map.get(locals, "style"),
       render_mode: Map.get(locals, "render-mode"),
-      agent: agent_leaf(locals),
+      agent: agent_leaf(locals, text),
       preview_authored: Map.get(locals, "preview-authored") == true,
       top: top,
       rows: rows,
@@ -746,17 +804,23 @@ defmodule Aimax.Core.Editor do
   # be momentarily stale after an undo swaps the rope out from under them.
   # everything the rich agent transcript renderer needs, straight from the
   # buffer-locals agent.scm maintains — nil unless the buffer opted in
-  defp agent_leaf(%{"render-mode" => "agent"} = locals) do
+  defp agent_leaf(%{"render-mode" => "agent"} = locals, text) do
+    marker_bytes = Map.get(locals, "agent-marker-bytes") || 0
+    mark = Map.get(locals, "agent-saved-mark") || 0
+
     %{
       blocks: Map.get(locals, "agent-blocks") || [],
-      mark: Map.get(locals, "agent-saved-mark") || 0,
-      marker_bytes: Map.get(locals, "agent-marker-bytes") || 0,
+      # the mark is a plain local, so text edits it doesn't know about
+      # (undo, edits before it) can strand it past the end of the buffer —
+      # clamp so the input region and cursor never vanish
+      mark: mark |> min(byte_size(text) - marker_bytes) |> max(0),
+      marker_bytes: marker_bytes,
       queued: Map.get(locals, "agent-queued") || [],
       slug: Map.get(locals, "agent-slug")
     }
   end
 
-  defp agent_leaf(_), do: nil
+  defp agent_leaf(_, _), do: nil
 
   defp visible_geometry(text, point, hidden) do
     len = byte_size(text)

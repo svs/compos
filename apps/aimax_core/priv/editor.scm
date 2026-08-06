@@ -1334,7 +1334,32 @@
 (define-command "delete-window"
   (lambda () (if (not (delete-window!)) (message "Attempt to delete sole window"))))
 (define-command "delete-other-windows" (lambda () (delete-other-windows!)))
-(define-command "other-window" (lambda () (other-window!)))
+
+;; landing in a rich chat/agent window puts point in its input region —
+;; the transcript is for reading, the prompt is where typing goes
+(define (chat-snap-to-input!)
+  (let ((buf (current-buffer)))
+    (when (equal? (buffer-local buf 'render-mode) "agent")
+      (let ((mark (or (buffer-local buf 'agent-saved-mark) 0))
+            (mb (or (buffer-local buf 'agent-marker-bytes) 0)))
+        (when (< (point) (+ mark mb))
+          (end-of-buffer!))))))
+
+(define-command "other-window"
+  (lambda ()
+    (other-window!)
+    (chat-snap-to-input!)))
+
+;; the UI reports clicks; which window gets focus and what that means
+;; (chat focuses its input) is policy
+(define (mouse-select-window! id)
+  (select-window! id)
+  (chat-snap-to-input!))
+
+;; system clipboard: paste lands on the kill ring too (Emacs interprogram-paste)
+(define (clipboard-paste! text)
+  (kill-push! text)
+  (insert! text))
 
 ;;; --- default keymap --------------------------------------------------------
 

@@ -82,6 +82,58 @@ defmodule Aimax.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
+  # mouse click: select the window (policy in scheme — a chat snaps point to
+  # its input region), then place point when the click hit a text line
+  def handle_event("mouse", %{"win" => win} = params, socket) do
+    with id when is_integer(id) <- safe_int(win) do
+      Aimax.Core.Session.eval("(mouse-select-window! #{id})")
+
+      case params do
+        %{"line" => line, "col" => col} when is_integer(line) and is_integer(col) ->
+          Aimax.Core.Editor.mouse_goto(id, line, col)
+
+        _ ->
+          :ok
+      end
+    end
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
+  # drag: the native selection, mirrored into mark + point
+  def handle_event("mouse_sel", %{"win" => win, "al" => al, "ac" => ac, "fl" => fl, "fc" => fc}, socket)
+      when is_integer(al) and is_integer(ac) and is_integer(fl) and is_integer(fc) do
+    with id when is_integer(id) <- safe_int(win) do
+      Aimax.Core.Session.eval("(mouse-select-window! #{id})")
+      Aimax.Core.Editor.mouse_region(id, al, ac, fl, fc)
+    end
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
+  # system clipboard: Cmd-V arrives as a browser paste event
+  def handle_event("paste", %{"text" => text}, socket) when is_binary(text) do
+    Aimax.Core.Session.eval("(clipboard-paste! #{scheme_string(text)})")
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
+  # Cmd-C with no native selection: reply with the region (or kill top)
+  # for the client to put on the OS clipboard
+  def handle_event("copy", _params, socket) do
+    {:noreply,
+     socket |> push_event("clipboard", %{text: Aimax.Core.Editor.copy_text()}) |> drain() |> refresh()}
+  end
+
+  defp scheme_string(text) do
+    escaped =
+      text
+      |> String.replace("\\", "\\\\")
+      |> String.replace("\"", "\\\"")
+      |> String.replace("\n", "\\n")
+
+    ~s{"#{escaped}"}
+  end
+
   @impl true
   def handle_info({:editor_change, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
   def handle_info({:buffer_change, _, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
@@ -542,9 +594,26 @@ defmodule Aimax.Ui.EditorLive do
 
   defp safe_slice(text, s, e) do
     size = byte_size(text)
-    s = s |> max(0) |> min(size)
-    e = e |> max(s) |> min(size)
+    s = s |> max(0) |> min(size) |> utf8_floor(text)
+    e = e |> max(s) |> min(size) |> utf8_floor(text)
     binary_part(text, s, e - s)
+  end
+
+  # block offsets can go stale (they're laid down at insert time, and text
+  # before them may be edited); a mid-codepoint slice is invalid UTF-8 and
+  # kills the whole render (Earmark, HEEx). Snap down to a char boundary.
+  defp utf8_floor(i, _text) when i <= 0, do: 0
+
+  defp utf8_floor(i, text) do
+    if i >= byte_size(text) do
+      byte_size(text)
+    else
+      # UTF-8 continuation bytes are 0b10xxxxxx
+      case :binary.at(text, i) do
+        b when b >= 128 and b < 192 -> utf8_floor(i - 1, text)
+        _ -> i
+      end
+    end
   end
 
   defp ag_block([s, e, "user" | meta], text) do
@@ -606,7 +675,7 @@ defmodule Aimax.Ui.EditorLive do
 
     {pre, cur, post} =
       if leaf.point >= live_start do
-        rel = min(leaf.point - live_start, byte_size(live))
+        rel = (leaf.point - live_start) |> min(byte_size(live)) |> utf8_floor(live)
         rest = binary_part(live, rel, byte_size(live) - rel)
 
         case String.next_grapheme(rest) do

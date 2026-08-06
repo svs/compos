@@ -95,4 +95,29 @@ defmodule Aimax.Ui.AgentViewTest do
     view |> element("button.ag-btn.allow", "Allow") |> render_click()
     assert render(view) =~ "no pending permission"
   end
+
+  # block offsets go stale when text before them is edited; a boundary that
+  # lands mid-codepoint must not take down the whole render (Earmark badarg)
+  test "stale block offsets mid-multibyte char still render", %{conn: conn} do
+    buf = "*agent: utf8-test*"
+    {:ok, _} = Aimax.Core.create_buffer(buf)
+
+    p_start = 0
+    Buffer.append(buf, "site — dash\n", source: :editor)
+    mark = Buffer.byte_size(buf)
+    Buffer.append(buf, "\n╰─ you ▸ ", source: :editor)
+
+    Buffer.set_local(buf, "render-mode", "agent")
+    Buffer.set_local(buf, "agent-slug", "utf8-test")
+    Buffer.set_local(buf, "agent-saved-mark", mark)
+    Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n╰─ you ▸ "))
+    # "site — dash\n": the em dash starts at byte 5; end offset 6 is inside it
+    Buffer.set_local(buf, "agent-blocks", [[p_start, 6, "prose"]])
+
+    Editor.set_window_buffer(buf)
+    {:ok, _view, html} = live(conn, "/")
+
+    assert html =~ "agent-view"
+    assert html =~ "site"
+  end
 end

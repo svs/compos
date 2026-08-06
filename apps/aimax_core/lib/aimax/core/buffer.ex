@@ -187,6 +187,9 @@ defmodule Aimax.Core.Buffer do
   def handle_call({:set_local, key, val}, _from, state) do
     state = %{state | locals: Map.put(state.locals, key, val)}
     state = if key == "ts-lang", do: init_ts(state, val), else: state
+    # locals feed rendering ('style, mode-name, line-numbers) and persistence —
+    # clients must repaint and the desktop must persist without a buffer edit
+    Events.broadcast_editor(:locals)
     {:reply, :ok, state}
   end
 

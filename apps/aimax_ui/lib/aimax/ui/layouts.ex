@@ -68,9 +68,11 @@ defmodule Aimax.Ui.Layouts do
             flex: 1;
             overflow: hidden; /* the server owns scrolling (viewport windowing) */
             padding: 12px 0 22px;
-            font-family: var(--font-mono);
-            font-size: 13px;
-            line-height: 1.7;
+            /* default face drives the text font; themes/customize set the
+               vars, buffer-face! overrides them per window via inline style */
+            font-family: var(--default-family, var(--font-mono));
+            font-size: var(--default-size, 13px);
+            line-height: var(--default-line-height, 1.7);
             font-variant-ligatures: common-ligatures;
             letter-spacing: -0.1px;
           }

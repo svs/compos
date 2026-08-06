@@ -201,11 +201,12 @@ defmodule Aimax.Core.Session do
     end)
   end
 
-  # user config: <home>/ai-config.scm then init.scm — errors log loudly
+  # user config: <home>/ai-config.scm, init.scm, then custom.scm (saved
+  # customizations load last so they win over init) — errors log loudly
   # but never brick boot. (load "...") works from inside either. Tests set
   # :home to a tmp dir so the user's real init.scm stays out of them.
   defp load_init(interp) do
-    Enum.reduce(["ai-config.scm", "init.scm"], interp, fn file, interp ->
+    Enum.reduce(["ai-config.scm", "init.scm", "custom.scm"], interp, fn file, interp ->
       path = Path.join(Aimax.Core.home(), file)
 
       with true <- File.exists?(path),
@@ -361,6 +362,16 @@ defmodule Aimax.Core.Session do
       end,
       "llm-model" => fn [] -> Aimax.Core.LLM.model() end,
       "eval-string" => fn [src], store -> eval_src.(src, store) end,
+      # dynamic global access by symbol — what defcustom/customize are built on
+      "symbol-value" => fn [{:sym, name}], store ->
+        {Aimax.Scheme.Env.lookup(store, global, name), store}
+      end,
+      "set-symbol-value!" => fn [{:sym, name}, val], store ->
+        {val, Aimax.Scheme.Env.define(store, global, name, val)}
+      end,
+      "boundp" => fn [{:sym, name}], store ->
+        {match?({:ok, _}, Aimax.Scheme.Env.fetch(store, global, name)), store}
+      end,
       # load-library: evaluate a Scheme file in the live session
       "load" => fn [path], store ->
         expanded = Path.expand(path)

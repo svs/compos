@@ -32,6 +32,17 @@ defmodule Aimax.Scheme.Env do
     end
   end
 
+  @doc "Like lookup but returns {:ok, val} | :error instead of raising."
+  def fetch(store, ref, name) do
+    {vars, parent} = Map.fetch!(store.frames, ref)
+
+    case vars do
+      %{^name => val} -> {:ok, val}
+      _ when parent != nil -> fetch(store, parent, name)
+      _ -> :error
+    end
+  end
+
   @doc "Bind name in the given frame (define)."
   def define(store, ref, name, val) do
     {vars, parent} = Map.fetch!(store.frames, ref)

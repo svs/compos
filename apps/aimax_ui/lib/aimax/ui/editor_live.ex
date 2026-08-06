@@ -718,6 +718,8 @@ defmodule Aimax.Ui.EditorLive do
           "background:var(--#{face}-bg,transparent);" <>
           "font-weight:var(--#{face}-weight,inherit);" <>
           "font-style:var(--#{face}-style,inherit);" <>
+          "font-family:var(--#{face}-family,inherit);" <>
+          "font-size:var(--#{face}-size,inherit);" <>
           "text-decoration:var(--#{face}-decoration,none);}"
       end)
 

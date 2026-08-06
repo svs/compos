@@ -579,13 +579,23 @@
                       (org-after-change buf pos inserted deleted source))))
             *org-hooks*))))
 
+(defgroup 'org "Org mode.")
+
+(defcustom 'org-font-family "Spectral, Georgia, serif"
+  "Font family for org-mode buffer text."
+  'group 'org 'type 'string)
+
+(defcustom 'org-font-size "14.5px"
+  "Font size for org-mode buffer text (any CSS size)."
+  'group 'org 'type 'string)
+
 (define-mode "org-mode"
   (lambda ()
-    (let ((buf (current-buffer)))
-      (org-install-keys)
-      (org-ensure-hook! buf)
-      ;; per-buffer style: prose reads better in the serif at a roomier
-      ;; measure (any mode can set 'style — raw CSS on the text area)
-      (buffer-set-local! buf 'style
-        "font-family: var(--font-serif); font-size: 14.5px; line-height: 1.75")
-      (org-refontify! buf))))
+    (org-install-keys)
+    (org-ensure-hook! (current-buffer))
+    ;; prose reads better in the serif at a roomier measure; customizable
+    ;; (already-open org buffers pick changes up on revisit or set-mode!)
+    (buffer-face! 'family org-font-family
+                  'size org-font-size
+                  'line-height "1.75")
+    (org-refontify! (current-buffer))))

@@ -63,6 +63,25 @@ defmodule Aimax.LLMToolsTest do
       assert eval!("*llm-system*") =~ "NOT Emacs Lisp"
       assert eval!("*llm-system*") =~ "buffer-append!"
     end
+
+    test "describe-function returns real source for userland fns and commands" do
+      # a userland function: full lambda source, body included
+      out = eval!(~s{(llm-tool-call "describe-function" (list 'name "chat-llm"))})
+      assert out =~ "lambda"
+      assert out =~ "llm-with-tools"
+
+      # an M-x command (lives in the ETS registry, not the global env)
+      out = eval!(~s{(llm-tool-call "describe-function" (list 'name "chat-send"))})
+      assert out =~ "M-x command"
+      assert out =~ "chat-reply-marker"
+
+      # a builtin is opaque Elixir
+      out = eval!(~s{(llm-tool-call "describe-function" (list 'name "car"))})
+      assert out =~ "builtin"
+
+      out = eval!(~s{(llm-tool-call "describe-function" (list 'name "zz-nope"))})
+      assert out =~ "no function or command"
+    end
   end
 
   describe "tool loop" do

@@ -48,6 +48,28 @@ defmodule Aimax.Scheme.Builtins do
       "string?" => fn [x] -> is_binary(x) end,
       "symbol?" => fn [x] -> match?({:sym, _}, x) end,
       "procedure?" => fn [x] -> match?({:closure, _, _, _}, x) or match?({:builtin, _, _}, x) end,
+      # introspection: closures carry their AST, so userland functions can
+      # print their own source; builtins are opaque Elixir
+      "function-source" => fn [v] ->
+        case v do
+          {:closure, {req, opt, rest}, body, _env} ->
+            params =
+              req ++
+                if(opt == [], do: [], else: ["&optional" | opt]) ++
+                if(rest, do: ["&rest", rest], else: [])
+
+            Aimax.Scheme.Printer.print([
+              {:sym, "lambda"},
+              Enum.map(params, &{:sym, &1}) | body
+            ])
+
+          {:builtin, name, _} ->
+            "#<builtin #{name} — implemented in Elixir, no Scheme source>"
+
+          other ->
+            Aimax.Scheme.Printer.print(other)
+        end
+      end,
       "string-append" => fn args -> Enum.join(args) end,
       "string-length" => fn [s] -> String.length(s) end,
       "string-contains?" => fn [s, sub] -> String.contains?(s, sub) end,

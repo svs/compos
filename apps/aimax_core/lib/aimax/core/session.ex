@@ -240,6 +240,12 @@ defmodule Aimax.Core.Session do
         :void
       end,
       "command-names" => fn [] -> command_names() end,
+      "command-fn" => fn [name] ->
+        case :ets.lookup(Aimax.Core.SchemeAPI.commands_table(), command_name(name)) do
+          [] -> false
+          [{_, closure}] -> closure
+        end
+      end,
       "run-command" => fn [name], store ->
         case :ets.lookup(Aimax.Core.SchemeAPI.commands_table(), command_name(name)) do
           [] -> raise Aimax.Scheme.Eval.Error, message: "undefined command: #{command_name(name)}"

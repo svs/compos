@@ -52,8 +52,9 @@
     "(insert! TEXT) at point in the current buffer; (message TEXT) echoes; "
     "(run-command \"name\") runs any M-x command. File buffers are named by "
     "full path. Before writing code with a name you are not sure exists, "
-    "check it with apropos-api. Keep replies short; the user is in an "
-    "editor, not a browser."))
+    "check it with apropos-api, and read any function's real source with "
+    "describe-function. Keep replies short; the user is in an editor, not "
+    "a browser."))
 
 (define (llm-with-tools prompt handler)
   (llm-tools prompt *llm-system* (llm-tool-specs) llm-tool-call handler))
@@ -65,6 +66,22 @@
   (list (list 'code "string" "Scheme source to evaluate"))
   (lambda (args)
     (value->string (eval-string (custom--plist-get args 'code)))))
+
+;; Emacs-grade introspection: most of the editor is userland Scheme, and
+;; closures carry their AST — so a function's real source is one call away.
+(define (describe-function name)
+  (cond ((boundp name)
+         (function-source (symbol-value name)))
+        ((command-fn name)
+         (string-append "M-x command:\n" (function-source (command-fn name))))
+        (else (string-append "no function or command named "
+                             (symbol->string name)))))
+
+(define-tool! 'describe-function
+  "Read a function's actual implementation. Userland functions and M-x commands return their full Scheme source (most of the editor — dired, org, chat, modes — is userland); builtins are Elixir and return only a marker. Use it to understand how something works before changing it."
+  (list (list 'name "string" "Function or command name, e.g. chat-send or face-remap!"))
+  (lambda (args)
+    (describe-function (string->symbol (custom--plist-get args 'name)))))
 
 (define-tool! 'apropos-api
   "Search the editor's Scheme API by regex: every global function/variable and every M-x command. Use this to find the right name before writing eval-scheme code."

@@ -304,6 +304,7 @@ defmodule Aimax.Ui.EditorLive do
 
     ~H"""
     <div
+      id={"win-#{@node.id}"}
       class={"window #{if @active?, do: "active", else: "inactive"} #{if !@node.line_numbers, do: "no-nums"}"}
       data-win-id={@node.id}
     >
@@ -426,21 +427,20 @@ defmodule Aimax.Ui.EditorLive do
   # 'preview-authored #t)` renders html exactly as authored instead
   defp preview_html("html", text, _faces, true), do: text
 
-  # element-level overrides injected AFTER the document's own styles win
-  # ties against authored element rules, while classed/id'd rules still
-  # take precedence — themed canvas, authored structure
+  # shr-style theming (Emacs eww): authored LAYOUT and typography survive,
+  # authored COLORS don't — half-themed documents (authored light panel,
+  # themed light text) are unreadable, so colors are all-or-nothing
   defp preview_html("html", text, faces, _authored) do
     p = preview_palette(faces)
 
     style = """
     <style>
-    :root{color-scheme:none}
-    body{background:#{p.bg};color:#{p.fg}}
-    a{color:#{p.accent}}
-    code,pre,kbd{background:#{p.inset};color:#{p.fg}}
-    blockquote{border-color:#{p.border};color:#{p.dim}}
-    th{background:#{p.inset}}th,td{border-color:#{p.border}}
-    hr{border-color:#{p.border}}
+    body{background:#{p.bg} !important;color:#{p.fg} !important}
+    *,*::before,*::after{background-color:transparent !important;color:inherit !important;border-color:#{p.border} !important}
+    a{color:#{p.accent} !important}
+    code,pre,kbd{background-color:#{p.inset} !important}
+    blockquote{color:#{p.dim} !important}
+    th{background-color:#{p.inset} !important}
     </style>
     """
 

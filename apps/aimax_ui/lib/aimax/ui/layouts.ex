@@ -204,8 +204,14 @@ defmodule Aimax.Ui.Layouts do
             border-radius: 6px; border: 1px solid var(--agent-card-border, rgba(0,0,0,0.2));
             background: transparent; color: inherit; cursor: pointer;
           }
-          .ag-btn.allow { border-color: var(--string-fg, #4a7a4a); color: var(--string-fg, #4a7a4a); }
-          .ag-btn.deny { border-color: var(--error-fg, #a8342a); color: var(--error-fg, #a8342a); }
+          /* bb's hierarchy: affirmative filled, session-scope outlined, deny
+             a quiet ghost that stays visible without competing */
+          .ag-btn.allow {
+            background: var(--string-fg, #4a7a4a); border-color: var(--string-fg, #4a7a4a);
+            color: var(--window-bg, #fdfcf8); font-weight: 600;
+          }
+          .ag-btn.session { border-color: var(--string-fg, #4a7a4a); color: var(--string-fg, #4a7a4a); }
+          .ag-btn.deny { border-color: transparent; color: var(--error-fg, #a8342a); opacity: 0.8; }
           .ag-wait {
             font-family: var(--font-mono); font-size: 12px; margin: 8px 0;
             color: var(--agent-thought-fg, #8a8577); animation: ag-pulse 1.4s ease-in-out infinite;
@@ -221,6 +227,10 @@ defmodule Aimax.Ui.Layouts do
           .ag-input { flex: 1; font-family: var(--font-mono); font-size: 12.5px; white-space: pre-wrap; }
           .ag-queued { color: var(--agent-queued-fg, #9a958a); }
           .ag-hint { font-family: var(--font-mono); font-size: 10px; color: var(--agent-meta-fg, #8a8577); flex-shrink: 0; }
+          .ml-extra {
+            font-family: var(--font-mono); font-size: 11px; padding: 0 8px;
+            color: var(--agent-permission-fg, #a8741a); font-weight: 600;
+          }
           /* font-lock scopes (tree-sitter) — themeable via --ts-<scope>-fg */
           .ts-keyword { color: var(--ts-keyword-fg, #26356b); font-weight: 600; }
           .ts-function { color: var(--ts-function-fg, #1b1a17); font-weight: 500; }

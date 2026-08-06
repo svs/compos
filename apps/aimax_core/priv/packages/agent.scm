@@ -304,7 +304,10 @@
   (lambda (slug events)
     ;; batches race buffer kills — a dead thread's events just drop
     (when (buffer-exists? (agent-buffer slug))
-      (for-each (lambda (e) (agent-handle-event slug e)) events))))
+      (for-each (lambda (e) (agent-handle-event slug e)) events)
+      ;; fleet surfaces track every batch: the erc-track segment + *agents*
+      (agents-modeline-refresh!)
+      (agents-refresh!))))
 
 ;;; --- permission answers -------------------------------------------------------
 
@@ -318,7 +321,9 @@
            (loop (cdr os) (car os)))
           (else (loop (cdr os) by-prefix)))))
 
-;; want: "allow_once" | "allow_always" | "reject_once"; no match -> cancel
+;; want: "allow_once" | "allow_always" | "reject_once"; no match -> cancel.
+;; bb's rule, adopted: approving is invisible, denying is recorded — an
+;; allowed tool just runs, a denial leaves a line in the transcript.
 (define (agent-answer-permission! slug exact prefix)
   (let ((info (agent-info slug)))
     (let ((perm (and info (plist-get info 'permission))))
@@ -326,7 +331,14 @@
           (message "no pending permission")
           (let ((opt (agent-perm-option (plist-get perm 'options) exact prefix)))
             (agent-permission-respond! slug (plist-get perm 'rpc-id)
-              (if opt (car opt) #f)))))))
+              (if opt (car opt) #f))
+            (when (string-prefix? "reject" prefix)
+              (let ((start (agent-render! slug
+                             (string-append "permission denied: "
+                                            (plist-get perm 'title) "\n")
+                             "agent-meta")))
+                (agent-block-push! (agent-buffer slug) start
+                  (agent-mark slug) "meta" '()))))))))
 
 (define-command "agent-permission-allow"
   (lambda () (agent-answer-permission! (agent-slug-of (current-buffer))
@@ -643,4 +655,174 @@
     (minibuffer-read "Task (empty for blank thread): " '()
       (lambda (task) (execute task)))))
 
+;;; --- the fleet: *agents* ------------------------------------------------------
+;;; dired for threads. One line each, needs-attention first; single-key ops.
+;;; Live + dead-but-buffered threads both list (a transcript is a thread).
+
+(define *agents-buffer* "*agents*")
+(add-display-rule! *agents-buffer* 'popup)
+
+;; every thread the editor knows: (slug status) — status from the runtime
+;; when alive, 'dead for restored transcripts
+(define (agent-threads)
+  (let loop ((bs (buffer-list)) (acc '()))
+    (cond ((null? bs) (reverse acc))
+          ((and (string-prefix? "*agent: " (car bs))
+                (buffer-local (car bs) 'agent-slug))
+           (loop (cdr bs)
+                 (cons (list (buffer-local (car bs) 'agent-slug)
+                             (agent-status (buffer-local (car bs) 'agent-slug)))
+                       acc)))
+          (else (loop (cdr bs) acc)))))
+
+(define (agent-status-rank s)
+  (cond ((equal? s 'needs_attention) 0)
+        ((equal? s 'running) 1)
+        ((equal? s 'starting) 1)
+        ((equal? s 'idle) 2)
+        (else 3)))
+
+(define (agent-status-glyph s)
+  (cond ((equal? s 'needs_attention) "!")
+        ((equal? s 'running) "*")
+        ((equal? s 'starting) "*")
+        ((equal? s 'idle) "-")
+        (else "x")))
+
+;; rank buckets — the builtin sort takes no comparator
+(define (agents-sorted)
+  (let ((ts (agent-threads)))
+    (let loop ((rank 0) (acc '()))
+      (if (> rank 3) (reverse acc)
+          (loop (+ rank 1)
+                (let inner ((ts ts) (acc acc))
+                  (cond ((null? ts) acc)
+                        ((= (agent-status-rank (car (cdr (car ts)))) rank)
+                         (inner (cdr ts) (cons (car ts) acc)))
+                        (else (inner (cdr ts) acc)))))))))
+
+(define (agents-line t)
+  (let* ((slug (car t))
+         (status (car (cdr t)))
+         (buf (agent-buffer slug))
+         (info (agent-info slug)))
+    (string-append
+      (agent-status-glyph status) " "
+      (string-pad-right slug 12)
+      (string-pad-right (or (buffer-local buf 'modeline-info) "") 30)
+      (string-pad-right (symbol->string status) 17)
+      (if (and info (> (plist-get info 'queued) 0))
+          (string-append "+" (number->string (plist-get info 'queued)) " queued")
+          ""))))
+
+(define (agents-refresh!)
+  (when (buffer-exists? *agents-buffer*)
+    (let ((buf *agents-buffer*)
+          (ts (agents-sorted)))
+      (buffer-delete-range! buf 0 (buffer-size buf))
+      (buffer-append! buf
+        (string-append ";; agents — RET visit · s steer · y/n permission · "
+                       "k kill · x archive · + new · g refresh\n"))
+      (buffer-set-local! buf 'agents-slugs
+        (let loop ((ts ts) (acc '()))
+          (if (null? ts) (reverse acc)
+              (begin (buffer-append! buf (string-append (agents-line (car ts)) "\n"))
+                     (loop (cdr ts) (cons (car (car ts)) acc)))))))))
+
+;; slug on the current line: line 0 is the header, entries follow in the
+;; order 'agents-slugs recorded
+(define (agents-current-slug)
+  (let* ((slugs (or (buffer-local *agents-buffer* 'agents-slugs) '()))
+         (before (substring-bytes (buffer-text *agents-buffer*) 0 (point)))
+         (ln (- (length (string-split before "\n")) 2)))
+    (if (and (>= ln 0) (< ln (length slugs))) (nth ln slugs) #f)))
+
+(define (agents-visit-current)
+  (let ((slug (agents-current-slug)))
+    (when slug (switch-to-buffer! (agent-buffer slug)) (end-of-buffer!))))
+
+(define-command "agents-visit" (lambda () (agents-visit-current)))
+
+(define-command "agents-steer"
+  (lambda ()
+    (let ((slug (agents-current-slug)))
+      (when slug
+        (minibuffer-read (string-append "Steer " slug ": ") '()
+          (lambda (msg)
+            (unless (equal? msg "")
+              (when (equal? (agent-status slug) 'dead) (agent-revive! slug))
+              (agent-prompt! slug msg)
+              (agents-refresh!))))))))
+
+(define-command "agents-allow"
+  (lambda ()
+    (let ((slug (agents-current-slug)))
+      (when slug (agent-answer-permission! slug "allow_once" "allow")
+                 (agents-refresh!)))))
+
+(define-command "agents-deny"
+  (lambda ()
+    (let ((slug (agents-current-slug)))
+      (when slug (agent-answer-permission! slug "reject_once" "reject")
+                 (agents-refresh!)))))
+
+(define-command "agents-kill"
+  (lambda ()
+    (let ((slug (agents-current-slug)))
+      (when slug (agent-kill! slug) (agents-refresh!)
+                 (message (string-append slug " killed (transcript kept)"))))))
+
+;; archive: runtime + buffer both go (desktop stops restoring it)
+(define-command "agents-archive"
+  (lambda ()
+    (let ((slug (agents-current-slug)))
+      (when slug
+        (agent-kill! slug)
+        (buffer-kill! (agent-buffer slug))
+        (agents-refresh!)
+        (message (string-append slug " archived"))))))
+
+(define-command "agents-refresh" (lambda () (agents-refresh!)))
+
+(define-command "agents-list"
+  (lambda ()
+    (buffer-create *agents-buffer*)
+    (buffer-set-local! *agents-buffer* 'mode-name "Agents")
+    (local-set-key* *agents-buffer* "RET" "agents-visit")
+    (local-set-key* *agents-buffer* "s" "agents-steer")
+    (local-set-key* *agents-buffer* "y" "agents-allow")
+    (local-set-key* *agents-buffer* "n" "agents-deny")
+    (local-set-key* *agents-buffer* "k" "agents-kill")
+    (local-set-key* *agents-buffer* "x" "agents-archive")
+    (local-set-key* *agents-buffer* "g" "agents-refresh")
+    (local-set-key* *agents-buffer* "+" "agent-open")
+    (local-set-key* *agents-buffer* "q" "quit-window")
+    (buffer-set-read-only! *agents-buffer* #t)
+    (agents-refresh!)
+    (display-buffer *agents-buffer*)))
+
+;;; --- attention: the erc-track segment -----------------------------------------
+
+(define (agents-attention)
+  (let loop ((ts (agent-threads)) (acc '()))
+    (cond ((null? ts) (reverse acc))
+          ((equal? (car (cdr (car ts))) 'needs_attention)
+           (loop (cdr ts) (cons (car (car ts)) acc)))
+          (else (loop (cdr ts) acc)))))
+
+(define (agents-modeline-refresh!)
+  (let ((att (agents-attention)))
+    (set-modeline-extra!
+      (if (null? att) "" (string-append "! " (string-join att " "))))))
+
+(define-command "agent-goto-attention"
+  (lambda ()
+    (let ((att (agents-attention)))
+      (if (null? att)
+          (message "no agent needs attention")
+          (begin (switch-to-buffer! (agent-buffer (car att)))
+                 (end-of-buffer!))))))
+
 (global-set-key "C-c a n" "agent-open")
+(global-set-key "C-c a l" "agents-list")
+(global-set-key "C-c a a" "agent-goto-attention")

@@ -502,6 +502,56 @@ defmodule Aimax.AgentTest do
     refute Buffer.text(buf) =~ "⋯ thinking"
   end
 
+  test "*agents* fleet: sorted by attention, y answers the current line's thread" do
+    # thread 1: running; thread 2: needs permission
+    {_, _, agent1} = boot("")
+    {:ok, _} = Session.eval(~s[(agent-prompt! "a1" "task one")])
+    assert_receive {:frame, %{"method" => "session/prompt"}}, 1_000
+
+    {:ok, _} = Session.eval(~s{(execute "")})
+    assert_receive {:transport_open, agent2}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(agent2, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{}})
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+    inject(agent2, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "sess-2"}})
+    {:ok, _} = Session.eval(~s[(agent-prompt! "a2" "task two")])
+    assert_receive {:frame, %{"method" => "session/prompt"}}, 1_000
+
+    inject(agent2, %{
+      "jsonrpc" => "2.0",
+      "id" => 91,
+      "method" => "session/request_permission",
+      "params" => %{
+        "sessionId" => "sess-2",
+        "toolCall" => %{"title" => "Write x", "kind" => "edit"},
+        "options" => [%{"optionId" => "ok", "name" => "Allow", "kind" => "allow_once"}]
+      }
+    })
+
+    assert eventually(fn -> match?(%{status: :needs_attention}, Agent.info("a2")) end)
+
+    # attention segment lists a2
+    assert eventually(fn -> Editor.render_state().modeline_extra =~ "a2" end)
+
+    {:ok, _} = Session.eval(~s[(run-command "agents-list")])
+    text = Buffer.text("*agents*")
+    [_header, first_line | _] = String.split(text, "\n")
+    assert first_line =~ "a2"
+    assert first_line =~ "needs_attention"
+
+    # point lands after the header refresh; move to the first entry and answer
+    focus("*agents*")
+    {:ok, _} = Session.eval("(begin (beginning-of-buffer!) (next-line!))")
+    press(["y"])
+
+    assert_receive {:frame, %{"id" => 91, "result" => %{"outcome" => outcome}}}, 1_000
+    assert outcome == %{"outcome" => "selected", "optionId" => "ok"}
+
+    # attention clears once answered
+    assert eventually(fn -> Editor.render_state().modeline_extra == "" end)
+    _ = agent1
+  end
+
   test "adapter exit renders a death notice and marks the thread dead" do
     {slug, buf, agent} = boot("")
 

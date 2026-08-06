@@ -41,6 +41,8 @@ defmodule Aimax.Core.Editor do
   # pending prefix + echo
   def set_pending(seq), do: GenServer.call(__MODULE__, {:set_pending, seq})
   def set_echo(msg), do: GenServer.call(__MODULE__, {:set_echo, msg})
+  # one global always-visible segment in the echo bar (agent attention etc.)
+  def set_modeline_extra(s), do: GenServer.call(__MODULE__, {:set_modeline_extra, s})
 
   # minibuffer
   def minibuffer_activate(prompt, candidates, on_confirm, on_complete \\ nil) do
@@ -149,6 +151,7 @@ defmodule Aimax.Core.Editor do
        kill_ring: [],
        keymap: %{},
        echo: "",
+       modeline_extra: "",
        faces: %{},
        local_keymaps: %{},
        last_command: "",
@@ -227,6 +230,7 @@ defmodule Aimax.Core.Editor do
        which_key: which_key(state),
        completion: state.completion && render_completion(state.completion),
        echo: state.echo,
+       modeline_extra: state.modeline_extra,
        faces: state.faces
      }, state}
   end
@@ -301,6 +305,12 @@ defmodule Aimax.Core.Editor do
 
   def handle_call({:set_echo, msg}, _from, %{echo: msg} = state), do: {:reply, :ok, state}
   def handle_call({:set_echo, msg}, _from, state), do: changed(:ok, %{state | echo: msg})
+
+  def handle_call({:set_modeline_extra, s}, _from, %{modeline_extra: s} = state),
+    do: {:reply, :ok, state}
+
+  def handle_call({:set_modeline_extra, s}, _from, state),
+    do: changed(:ok, %{state | modeline_extra: s})
 
   def handle_call({:mb_activate, prompt, candidates, handlers}, _from, state) do
     mb =

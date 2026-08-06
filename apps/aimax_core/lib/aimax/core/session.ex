@@ -355,6 +355,10 @@ defmodule Aimax.Core.Session do
         :ets.insert(@escaped, {{:agent_handler}, handler})
         :void
       end,
+      "set-modeline-extra!" => fn [s] ->
+        Editor.set_modeline_extra(to_string(s))
+        :void
+      end,
       "llm-model" => fn [] -> Aimax.Core.LLM.model() end,
       "eval-string" => fn [src], store -> eval_src.(src, store) end,
       # load-library: evaluate a Scheme file in the live session

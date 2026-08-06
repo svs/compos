@@ -291,7 +291,8 @@ defmodule Aimax.Ui.EditorLive do
         <div class="echo-bar">
           <span class="echo">{@state.echo}</span>
           <span class="mb-spacer"></span>
-          <span class="echo-hint" :if={@state.echo == ""}>C-x C-f · C-x b · C-x d · M-x · M-| · C-g</span>
+          <span :if={@state.modeline_extra != ""} class="ml-extra">{@state.modeline_extra}</span>
+          <span class="echo-hint" :if={@state.echo == ""}>C-x C-f · C-x b · C-x d · C-c a n agent · M-x · C-g</span>
         </div>
       <% end %>
     </div>
@@ -382,7 +383,7 @@ defmodule Aimax.Ui.EditorLive do
                       phx-value-cmd="agent-permission-allow"
                     >Allow</button>
                     <button
-                      class="ag-btn allow"
+                      class="ag-btn session"
                       phx-click="agent_cmd"
                       phx-value-win={@node.id}
                       phx-value-cmd="agent-permission-always"

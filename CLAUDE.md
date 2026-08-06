@@ -25,7 +25,10 @@ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4004/
 
 A daemon restart is required to reload `priv/*.scm`. Browser clients reload
 themselves (boot-id). Editor state (buffers, windows, theme) is restored from
-`~/.aimax/desktop.etf`.
+`~/.aimax/desktop.etf`. **Rule: everything survives a reload** — file buffers
+reopen via `(visit)`; non-file buffers (chat, agent threads, scratch) persist
+content+point+locals, and the mode setup fn rebuilds keys/overlays/folds from
+locals on restore. New buffer kinds must keep this true.
 
 Drive the editor headlessly:
 

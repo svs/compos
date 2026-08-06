@@ -76,7 +76,9 @@ defmodule Aimax.Ui.Layouts do
             font-variant-ligatures: common-ligatures;
             letter-spacing: -0.1px;
           }
-          .line { display: flex; align-items: flex-start; gap: 12px; padding: 0 16px 0 8px; }
+          .line { display: flex; align-items: flex-start; gap: 12px; padding: 0 16px 0 8px;
+                  /* empty lines must keep their height even with .linenum hidden (no-nums, writing-mode) */
+                  min-height: 1lh; }
           .window.active .line.hl-line { background: var(--hl-line-bg, #f5f1e6); }
           .linenum {
             flex: 0 0 30px; text-align: right;

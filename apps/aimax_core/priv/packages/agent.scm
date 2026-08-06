@@ -110,6 +110,10 @@
   (let ((buf (agent-buffer slug))
         (type (plist-get e 'type)))
     (cond
+      ((equal? type 'user-msg)
+       (agent-render! slug
+         (string-append "\n╰─ you ▸ " (plist-get e 'text) "\n\n") "agent-you"))
+
       ((equal? type 'chunk)
        (agent-render! slug (plist-get e 'text) #f))
 
@@ -204,28 +208,70 @@
 (define-command "agent-send"
   (lambda ()
     (let ((slug (agent-slug-of (current-buffer))))
-      (if (not slug)
-          (message "not an agent buffer")
-          (let ((input (string-trim (agent-input slug))))
-            (if (equal? input "")
-                (insert! "\n")
-                (begin
-                  (agent-clear-input! slug)
-                  (if (equal? (agent-prompt! slug input) 'queued)
-                      (message "queued — agent is mid-turn")
-                      (message "sent"))
-                  (end-of-buffer!))))))))
+      (cond ((not slug) (message "not an agent buffer"))
+            ((equal? (agent-status slug) 'dead)
+             (message "agent exited — C-c a n starts a new thread"))
+            (else
+             (let ((input (string-trim (agent-input slug))))
+               (if (equal? input "")
+                   (insert! "\n")
+                   (begin
+                     (agent-clear-input! slug)
+                     (if (equal? (agent-prompt! slug input) 'queued)
+                         (message "queued — agent is mid-turn")
+                         (message "sent"))
+                     (end-of-buffer!)))))))))
 
 (define-command "agent-interrupt-send"
   (lambda ()
     (let ((slug (agent-slug-of (current-buffer))))
       (when slug
-        (agent-cancel! slug)
-        (let ((input (string-trim (agent-input slug))))
-          (unless (equal? input "")
-            (agent-clear-input! slug)
-            (agent-prompt! slug input)))
-        (message "interrupted")))))
+        (if (equal? (agent-status slug) 'dead)
+            (message "agent exited — C-c a n starts a new thread")
+            (begin
+              (agent-cancel! slug)
+              (let ((input (string-trim (agent-input slug))))
+                (unless (equal? input "")
+                  (agent-clear-input! slug)
+                  (agent-prompt! slug input)))
+              (message "interrupted")))))))
+
+;;; --- connectors ---------------------------------------------------------------
+;;; A connector is a named config plist for a thread's backend: 'cmd (the ACP
+;;; adapter), 'env (auth/model context), 'cwd, 'mcp-servers. The point is
+;;; economic as much as technical — a codex connector rides a ChatGPT
+;;; subscription, claude-code rides a Max plan, an api connector burns tokens.
+;;; Define your own in ~/.aimax/ai-config.scm:
+;;;   (define-connector! "codex" '(cmd "codex-acp"))
+;;;   (set! *default-connector* "codex")
+
+(define *agent-connectors* '())
+(define *default-connector* "claude-code")
+
+(define (define-connector! name config)
+  (set! *agent-connectors*
+    (cons (list name config)
+          (let loop ((cs *agent-connectors*) (acc '()))
+            (cond ((null? cs) (reverse acc))
+                  ((equal? (car (car cs)) name) (loop (cdr cs) acc))
+                  (else (loop (cdr cs) (cons (car cs) acc))))))))
+
+(define (connector-config name)
+  (let ((e (assoc name *agent-connectors*)))
+    (if e (car (cdr e)) '())))
+
+(define-connector! "claude-code" '(cmd "claude-code-acp"))
+
+;; per-call opts win over the connector; ANTHROPIC_MODEL defaults to the
+;; editor's model when nothing else claims 'env and it is an anthropic model
+(define (agent-resolve-config opts)
+  (let ((conf (append opts (connector-config
+                             (or (plist-get opts 'connector)
+                                 *default-connector*)))))
+    (if (or (plist-get conf 'env)
+            (string-contains? (llm-model) ":"))
+        conf
+        (append conf (list 'env (list (list "ANTHROPIC_MODEL" (llm-model))))))))
 
 ;;; --- thread creation ----------------------------------------------------------
 
@@ -242,30 +288,39 @@
   (local-set-key* buf "C-c C-y" "agent-permission-allow")
   (local-set-key* buf "C-c C-n" "agent-permission-deny"))
 
-;; (execute "task")                    — spawn a thread, hand it the task, show it
-;; (execute* "task" '(cwd "/x"))       — extra config plist entries pass through
+;; setup doubles as desktop-restore: keys, overlays, and folds all come
+;; back from the persisted buffer-locals (the agent process itself does
+;; not survive a restart — the transcript does, status reads 'dead)
+(define (agent-mode-setup! buf)
+  (buffer-set-local! buf 'mode-name "agent-mode")
+  (agent-install-keys! buf)
+  (let ((ovs (buffer-local buf 'agent-overlays)))
+    (when ovs (overlay-set! buf 'agent ovs)))
+  (agent-apply-folds! buf))
+
+(define-mode "agent-mode" (lambda () (agent-mode-setup! (current-buffer))))
+
+;; (execute "task")                         — spawn a thread on the default connector
+;; (execute* "task" '(connector "codex"))   — pick a connector; other config
+;;                                            plist entries override it
 (define (execute prompt) (execute* prompt '()))
 
 (define (execute* prompt opts)
   (let ((slug (agent-next-slug)))
     (let ((buf (agent-buffer slug)))
       (buffer-create buf)
-      (buffer-set-local! buf 'mode-name "Agent")
       (buffer-set-local! buf 'agent-slug slug)
+      (let ((cname (or (plist-get opts 'connector) *default-connector*)))
+        (buffer-set-local! buf 'agent-connector cname)
+        ;; modeline shows the connector — it's the economic identity of the
+        ;; thread (whose subscription/keys it burns)
+        (buffer-set-local! buf 'modeline-info cname))
       (buffer-append! buf (string-append ";; agent thread · " slug "\n"))
       (let ((mark (buffer-size buf)))
         (buffer-append! buf *agent-prompt-marker*)
-        (agent-install-keys! buf)
-        ;; agents default to the editor's model (until presets land); the
-        ;; adapter honors ANTHROPIC_MODEL. Only when it IS an anthropic model
-        ;; — (llm-model) may point at another provider. An 'env in opts wins.
+        (agent-mode-setup! buf)
         (agent-start! slug
-          (append (list 'buffer buf 'mark mark)
-                  (if (or (plist-get opts 'env)
-                          (string-contains? (llm-model) ":"))
-                      opts
-                      (append (list 'env (list (list "ANTHROPIC_MODEL" (llm-model))))
-                              opts))))
+          (append (list 'buffer buf 'mark mark) (agent-resolve-config opts)))
         (unless (equal? prompt "")
           (agent-prompt! slug prompt))
         (display-buffer buf)

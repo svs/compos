@@ -69,8 +69,18 @@ defmodule Aimax.Core.Agent do
 
   defp call(slug, msg) do
     case Registry.lookup(@registry, slug) do
-      [{pid, _}] -> GenServer.call(pid, msg)
-      [] -> {:error, :no_agent}
+      [{pid, _}] ->
+        # the agent can die between lookup and call (kill racing a queued
+        # render batch) — that must surface as an error, not an exit that
+        # takes the CALLER (often the Session) down with it
+        try do
+          GenServer.call(pid, msg)
+        catch
+          :exit, _ -> {:error, :no_agent}
+        end
+
+      [] ->
+        {:error, :no_agent}
     end
   end
 
@@ -437,6 +447,9 @@ defmodule Aimax.Core.Agent do
 
   defp send_prompt(state, text) do
     state
+    # echo the user turn into the transcript via the ordered event channel —
+    # queued messages appear exactly when their turn actually starts
+    |> enqueue(plist(type: :"user-msg", text: text))
     |> Map.put(:status, :running)
     |> emit_status(:running)
     |> request("session/prompt", %{

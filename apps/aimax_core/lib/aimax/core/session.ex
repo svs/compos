@@ -292,7 +292,12 @@ defmodule Aimax.Core.Session do
           {:error, r} -> raise_scheme("agent-append!: #{inspect(r)}")
         end
       end,
-      "agent-mark" => fn [slug] -> Aimax.Core.Agent.mark(s(slug)) end,
+      "agent-mark" => fn [slug] ->
+        case Aimax.Core.Agent.mark(s(slug)) do
+          mark when is_integer(mark) -> mark
+          {:error, r} -> raise_scheme("agent-mark: #{inspect(r)}")
+        end
+      end,
       "agent-list" => fn [] -> Aimax.Core.Agent.list() end,
       "agent-kill!" => fn [slug] ->
         Aimax.Core.Agent.kill(s(slug))

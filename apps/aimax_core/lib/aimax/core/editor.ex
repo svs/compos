@@ -706,6 +706,8 @@ defmodule Aimax.Core.Editor do
       version: snap.version,
       modified: snap.modified,
       mode: Map.get(locals, "mode-name") || "Fundamental",
+      # free-form per-buffer modeline segment (agent connector, etc.)
+      modeline_info: Map.get(locals, "modeline-info"),
       ts_lang: Map.get(locals, "ts-lang"),
       overlays: snap.overlays,
       overlay_gen: snap.overlay_gen,

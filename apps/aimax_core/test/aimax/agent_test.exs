@@ -165,8 +165,9 @@ defmodule Aimax.AgentTest do
 
     assert_receive {:frame, %{"method" => "session/prompt", "id" => pid, "params" => p}}, 1_000
     assert [%{"text" => "first message"}] = p["prompt"]
-    # input region cleared back to the marker
+    # input region cleared back to the marker; message echoed into the transcript
     assert eventually(fn -> String.ends_with?(Buffer.text(buf), "╰─ you ▸ ") end)
+    assert eventually(fn -> Buffer.text(buf) =~ "╰─ you ▸ first message\n" end)
 
     # second message while running -> queued, no frame yet
     focus(buf)
@@ -225,6 +226,79 @@ defmodule Aimax.AgentTest do
                    1_000
 
     _ = agent
+  end
+
+  test "connectors: named config resolves into the session; per-call opts win" do
+    {:ok, _} =
+      Session.eval(~s{(define-connector! "test-conn" '(cwd "/tmp/conn-home" cmd "fake-acp"))})
+
+    {:ok, _} = Session.eval(~s{(execute* "" '(connector "test-conn"))})
+    assert_receive {:transport_open, agent}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(agent, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{}})
+
+    assert_receive {:frame, %{"method" => "session/new", "params" => %{"cwd" => "/tmp/conn-home"}}},
+                   1_000
+
+    assert {:ok, ~s["test-conn"]} =
+             Session.eval(~s[(buffer-local (agent-buffer "a1") 'agent-connector)])
+  end
+
+  test "desktop: agent transcript, folds, and overlays survive restore; dead thread says so" do
+    {slug, buf, agent} = boot("")
+
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "go")])
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => pid}}, 1_000
+
+    update(agent, "sess-1", %{
+      "sessionUpdate" => "agent_message_chunk",
+      "content" => %{"type" => "text", "text" => "Hello world.\n"}
+    })
+
+    update(agent, "sess-1", %{
+      "sessionUpdate" => "tool_call",
+      "toolCallId" => "tc1",
+      "title" => "Read foo.ex",
+      "kind" => "read",
+      "status" => "pending"
+    })
+
+    update(agent, "sess-1", %{
+      "sessionUpdate" => "tool_call_update",
+      "toolCallId" => "tc1",
+      "status" => "completed",
+      "content" => [
+        %{"type" => "content", "content" => %{"type" => "text", "text" => "defmodule Foo\n"}}
+      ]
+    })
+
+    inject(agent, %{"jsonrpc" => "2.0", "id" => pid, "result" => %{"stopReason" => "end_turn"}})
+    assert eventually(fn -> Buffer.text(buf) =~ "defmodule Foo" end)
+    assert eventually(fn -> Buffer.hidden(buf) != [] end)
+    hidden = Buffer.hidden(buf)
+
+    assert :ok = Aimax.Core.Desktop.save_now()
+
+    # a daemon restart: the agent process and the buffer are both gone
+    Agent.kill(slug)
+    Aimax.Core.kill_buffer(buf)
+    assert eventually(fn -> not Buffer.exists?(buf) end)
+
+    assert :ok = Aimax.Core.Desktop.restore_now()
+
+    assert Buffer.text(buf) =~ "Hello world."
+    assert Buffer.text(buf) =~ "defmodule Foo"
+    assert Buffer.get_local(buf, "mode-name") == "agent-mode"
+    # mode setup rebuilt presentation from the persisted locals (live overlays
+    # drift as appends land at their edges — the locals hold authored ranges)
+    assert Buffer.hidden(buf) == hidden
+    assert Buffer.overlays(buf) |> Enum.map(&Tuple.to_list/1) ==
+             Buffer.get_local(buf, "agent-overlays")
+
+    # local keys are back but the thread is dead: RET explains, no crash
+    focus(buf)
+    press(["RET"])
+    assert Editor.snapshot().echo =~ "agent exited"
   end
 
   test "adapter exit renders a death notice and marks the thread dead" do

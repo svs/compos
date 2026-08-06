@@ -329,6 +329,7 @@ defmodule Aimax.Ui.EditorLive do
         <span class={"ml-dot #{if @node.modified, do: "modified"}"}></span>
         <span class="name">{@node.buffer}</span>
         <span class="ml-mode">{@node.mode}</span>
+        <span :if={@node.modeline_info} class="ml-mode">{@node.modeline_info}</span>
         <span class="mb-spacer"></span>
         <span class="ml-pos">{pct(@node)} · L{@line}:C{@col}</span>
       </div>

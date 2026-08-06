@@ -256,6 +256,91 @@ defmodule Aimax.Core.Session do
         Aimax.Core.LLM.set_model(m)
         :void
       end,
+
+      # --- agent threads (ACP runtime, see Aimax.Core.Agent) -----------------
+      # config/info/events cross the boundary as flat plists: (key val ...)
+      # with symbol keys — this Scheme has no dotted pairs.
+      "agent-start!" => fn [slug, config] ->
+        case Aimax.Core.Agent.start(to_string(slug), plist_to_map(config)) do
+          {:ok, _pid} -> to_string(slug)
+          {:error, {:already_started, _}} -> raise_scheme("agent already running: #{s(slug)}")
+          {:error, reason} -> raise_scheme("agent-start!: #{inspect(reason)}")
+        end
+      end,
+      "agent-prompt!" => fn [slug, text] ->
+        case Aimax.Core.Agent.prompt(s(slug), to_string(text)) do
+          :sent -> {:sym, "sent"}
+          :queued -> {:sym, "queued"}
+          {:error, r} -> raise_scheme("agent-prompt!: #{inspect(r)}")
+        end
+      end,
+      "agent-cancel!" => fn [slug] ->
+        Aimax.Core.Agent.cancel(s(slug))
+        :void
+      end,
+      "agent-permission-respond!" => fn [slug, rpc_id, option_id] ->
+        option = if option_id in [false, :void], do: nil, else: s(option_id)
+
+        case Aimax.Core.Agent.respond_permission(s(slug), rpc_id, option) do
+          :ok -> :void
+          {:error, r} -> raise_scheme("agent-permission-respond!: #{inspect(r)}")
+        end
+      end,
+      "agent-append!" => fn [slug, text] ->
+        case Aimax.Core.Agent.append_at_mark(s(slug), to_string(text)) do
+          mark when is_integer(mark) -> mark
+          {:error, r} -> raise_scheme("agent-append!: #{inspect(r)}")
+        end
+      end,
+      "agent-mark" => fn [slug] -> Aimax.Core.Agent.mark(s(slug)) end,
+      "agent-list" => fn [] -> Aimax.Core.Agent.list() end,
+      "agent-kill!" => fn [slug] ->
+        Aimax.Core.Agent.kill(s(slug))
+        :void
+      end,
+      # -> (slug "a1" buffer "*agent: a1*" status idle queued 0 permission #f)
+      "agent-info" => fn [slug] ->
+        case Aimax.Core.Agent.info(s(slug)) do
+          {:error, _} ->
+            false
+
+          info ->
+            perm =
+              case info.permission do
+                nil ->
+                  false
+
+                p ->
+                  [
+                    {:sym, "rpc-id"},
+                    p.rpc_id,
+                    {:sym, "title"},
+                    p.title,
+                    {:sym, "options"},
+                    Enum.map(p.options, fn {oid, name, kind} -> [oid, name, kind] end)
+                  ]
+              end
+
+            [
+              {:sym, "slug"},
+              info.slug,
+              {:sym, "buffer"},
+              info.buffer,
+              {:sym, "status"},
+              {:sym, to_string(info.status)},
+              {:sym, "queued"},
+              info.queued,
+              {:sym, "permission"},
+              perm
+            ]
+        end
+      end,
+      # one global handler for all agent events: (lambda (slug events) ...).
+      # It escapes into the Agent GenServers as an opaque fun — root it.
+      "agent-on-event!" => fn [handler] ->
+        :ets.insert(@escaped, {{:agent_handler}, handler})
+        :void
+      end,
       "llm-model" => fn [] -> Aimax.Core.LLM.model() end,
       "eval-string" => fn [src], store -> eval_src.(src, store) end,
       # load-library: evaluate a Scheme file in the live session
@@ -450,4 +535,22 @@ defmodule Aimax.Core.Session do
 
   defp command_name({:sym, s}), do: s
   defp command_name(s) when is_binary(s), do: s
+
+  # --- agent primitive helpers -------------------------------------------------
+
+  defp s({:sym, str}), do: str
+  defp s(str) when is_binary(str), do: str
+
+  defp raise_scheme(msg), do: raise(Aimax.Scheme.Eval.Error, message: msg)
+
+  # ('cmd "claude-code-acp" 'cwd "/x") -> %{"cmd" => "...", "cwd" => "/x"}
+  defp plist_to_map(plist) when is_list(plist) do
+    plist
+    |> Enum.chunk_every(2)
+    |> Map.new(fn [k, v] -> {s(k), plist_val_to_elixir(v)} end)
+  end
+
+  defp plist_val_to_elixir({:sym, str}), do: str
+  defp plist_val_to_elixir(v) when is_list(v), do: Enum.map(v, &plist_val_to_elixir/1)
+  defp plist_val_to_elixir(v), do: v
 end

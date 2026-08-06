@@ -112,6 +112,14 @@ defmodule Aimax.Core.SchemeAPI do
       end,
       "file-exists?" => fn [p] -> File.exists?(Path.expand(p)) end,
       "file-directory?" => fn [p] -> File.dir?(Path.expand(p)) end,
+      "write-file!" => fn [p, text] ->
+        path = Path.expand(p)
+        File.mkdir_p!(Path.dirname(path))
+        File.write!(path, text)
+        true
+      end,
+      # the aimax home dir (config, persisted settings) as a string
+      "aimax-home" => fn [] -> Aimax.Core.home() end,
 
       # processes (comint)
       "start-process!" => fn [buffer, cmd] ->

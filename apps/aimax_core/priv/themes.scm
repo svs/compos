@@ -16,11 +16,20 @@
 
 (define (theme-names) (map car *themes*))
 
+(define (theme-file) (string-append (aimax-home) "/theme.scm"))
+
+;; the chosen theme survives daemon restarts as policy, not raw faces:
+;; the NAME is written to <home>/theme.scm and re-derived at boot, so
+;; theme edits in this file apply on restart instead of stale face values
+(define (persist-theme! name)
+  (write-file! (theme-file) (string-append "(load-theme \"" name "\")\n")))
+
 (define (load-theme name)
   (let ((t (assoc name *themes*)))
     (if t
         (begin
           (for-each (lambda (spec) (apply set-face-attribute! spec)) (cadr t))
+          (persist-theme! name)
           (message (string-append "Loaded theme " name)))
         (message (string-append "No such theme: " name)))))
 
@@ -183,3 +192,6 @@
       (lambda (name)
         (history-push! 'theme name)
         (load-theme name)))))
+
+;;; boot: reapply the persisted theme choice (written by load-theme)
+(if (file-exists? (theme-file)) (load (theme-file)))

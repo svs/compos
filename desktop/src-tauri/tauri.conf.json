@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ai-max",
+  "version": "0.1.0",
+  "identifier": "io.svs.aimax",
+  "build": {
+    "frontendDist": "ui"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "ai-max.el",
+        "url": "splash.html",
+        "width": 1280,
+        "height": 860,
+        "minWidth": 480,
+        "minHeight": 320
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false
+  }
+}

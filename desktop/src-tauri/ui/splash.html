@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>ai-max.el</title>
+<style>
+  /* paper tokens, matching the editor's default theme */
+  html, body {
+    height: 100%; margin: 0;
+    background: #e6e0d2; color: #57534a;
+    font: 13px/1.6 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .card { text-align: center; }
+  .name { font-size: 17px; font-weight: 600; color: #1b1a17; letter-spacing: 0.02em; }
+  .status { margin-top: 10px; font-size: 11.5px; color: #8a857a; }
+  .dot::after {
+    content: ""; display: inline-block; width: 7px; height: 7px;
+    margin-left: 8px; border-radius: 50%;
+    background: #26356b; vertical-align: baseline;
+    animation: pulse 1.1s ease-in-out infinite;
+  }
+  @keyframes pulse { 50% { opacity: 0.25; } }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="name">ai-max.el</div>
+    <div class="status dot" id="status">starting the editor daemon</div>
+  </div>
+  <!-- the shell (Rust) polls the daemon and navigates this window there;
+       this page is purely the waiting room -->
+
+</body>
+</html>

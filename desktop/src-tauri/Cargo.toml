@@ -1,0 +1,15 @@
+[package]
+name = "aimax-shell"
+version = "0.1.0"
+edition = "2021"
+description = "Desktop shell for ai-max.el — a thin Tauri client over the editor daemon"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[profile.release]
+lto = true
+strip = true

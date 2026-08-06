@@ -291,6 +291,12 @@ defmodule Aimax.Ui.Layouts do
           .modeline .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
           .ml-pos { font-family: var(--font-mono); font-size: 10.5px; opacity: 0.75; }
           .ml-mode { font-family: var(--font-mono); font-size: 10.5px; opacity: 0.6; white-space: nowrap; }
+          .ml-group {
+            font-family: var(--font-mono); font-size: 10.5px;
+            color: var(--accent-fg, #26356b); opacity: 0.85;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            max-width: 16ch; flex: 0 1 auto;
+          }
           .echo-bar {
             display: flex; align-items: baseline; gap: 14px;
             min-height: 30px; padding: 7px 14px 8px;

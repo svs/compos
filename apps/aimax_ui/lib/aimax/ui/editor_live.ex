@@ -488,6 +488,7 @@ defmodule Aimax.Ui.EditorLive do
       <div class="modeline">
         <span class={"ml-dot #{if @node.modified, do: "modified"}"}></span>
         <span class="name">{@node.buffer}</span>
+        <span :if={@node.group} class="ml-group">⊞ {@node.group}</span>
         <span class="ml-mode">{@node.mode}</span>
         <span
           :if={@node.modeline_info}

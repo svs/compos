@@ -1128,12 +1128,14 @@ defmodule Aimax.EditorTest do
     press(["C-c", "w"])
     assert Editor.current_buffer() == companion
     assert length(Editor.list_windows()) == 2
-    assert Buffer.get_local(companion, "companion-of") == buf
+    # the group is the tag: doc and chat both carry it, nothing points anywhere
+    assert Buffer.get_local(buf, "group") == buf
+    assert Buffer.get_local(companion, "group") == buf
     assert Buffer.get_local(companion, "mode-name") == "chat-mode"
 
     # rich surface from birth: agent renderer + help meta card + input marker
     assert Buffer.get_local(companion, "render-mode") == "agent"
-    assert Buffer.text(companion) =~ "writing companion"
+    assert Buffer.text(companion) =~ "companion · #{buf}"
     assert Buffer.text(companion) =~ "╰─ you ▸"
 
     type("make it rhyme")
@@ -1176,7 +1178,7 @@ defmodule Aimax.EditorTest do
 
     point = Buffer.point(buf)
     press(["C-c", "RET"])
-    assert Editor.snapshot().minibuffer.prompt == "Ask companion: "
+    assert Editor.snapshot().minibuffer.prompt == "Ask #{buf}: "
     type("tighten this up")
     press(["RET"])
 
@@ -1219,16 +1221,17 @@ defmodule Aimax.EditorTest do
     assert Editor.snapshot().minibuffer.prompt == "Companion for buffer: "
     press(["RET"])
 
-    assert Buffer.get_local("*chat*", "companion-of") == buf
+    assert Buffer.get_local("*chat*", "group") == buf
+    assert Buffer.get_local(buf, "group") == buf
     assert Editor.current_buffer() == "*chat*"
     assert length(Editor.list_windows()) == 2
 
     type("thoughts?")
     press(["C-c", "RET"])
 
-    # first reply retitles *chat* — the companion link must ride along
+    # first reply retitles *chat* — the group tag must ride along
     assert eventually(fn -> Buffer.exists?(titled) end)
-    assert eventually(fn -> Buffer.get_local(titled, "companion-of") == buf end)
+    assert eventually(fn -> Buffer.get_local(titled, "group") == buf end)
 
     # C-c w from the doc refocuses the adopted (now retitled) chat
     press(["C-c", "w"])
@@ -1237,6 +1240,100 @@ defmodule Aimax.EditorTest do
     assert Editor.current_buffer() == titled
 
     press(["C-x", "1"])
+  end
+
+  test "buffer groups: C-c g tags members, C-c q talks to the group's one chat",
+       %{buf: buf} do
+    notes = "notes-#{System.unique_integer([:positive])}"
+    chat = "*chat:proj*"
+    type("defmodule Rope do end")
+
+    Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: [%{content: prompt} | _]} ->
+      # the preamble enumerates the whole group, not one document
+      assert prompt =~ ~s{group "proj"}
+      assert prompt =~ ~s{"#{buf}"}
+      assert prompt =~ ~s{"#{notes}"}
+      assert prompt =~ "read-doc"
+      {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "aye"}]}}
+    end)
+
+    on_exit(fn ->
+      Application.delete_env(:aimax_core, :llm_chat_fun)
+      Aimax.Core.kill_buffer(chat)
+      Aimax.Core.kill_buffer(notes)
+    end)
+
+    # C-c g founds the group from the code buffer, then the notes join it
+    press(["C-c", "g"])
+    assert Editor.snapshot().minibuffer.prompt == "Group: "
+    type("proj")
+    press(["RET"])
+    assert Buffer.get_local(buf, "group") == "proj"
+
+    {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-create "#{notes}")})
+    Editor.set_window_buffer(notes)
+    press(["C-c", "g"])
+    type("proj")
+    press(["RET"])
+    assert Buffer.get_local(notes, "group") == "proj"
+
+    # C-c q in a grouped buffer routes to the group chat, focus stays put
+    point = Buffer.point(notes)
+    press(["C-c", "q"])
+    assert Editor.snapshot().minibuffer.prompt == "Ask proj: "
+    type("thoughts?")
+    press(["RET"])
+
+    assert eventually(fn -> Buffer.text(chat) =~ "aye" end)
+    assert Buffer.get_local(chat, "group") == "proj"
+    assert Editor.current_buffer() == notes
+    assert Buffer.point(notes) == point
+    assert length(Editor.list_windows()) == 2
+
+    # a second ask reuses the same conversation
+    press(["C-c", "q"])
+    type("more?")
+    press(["RET"])
+    assert eventually(fn ->
+             length(String.split(Buffer.text(chat), "aye")) == 3
+           end)
+
+    # C-c w hops chat -> most recent work buffer and back
+    Editor.set_window_buffer(chat)
+    {:ok, _} = Aimax.Core.Session.eval(~s{(set-mode! "chat-mode")})
+    press(["C-c", "w"])
+    assert Editor.current_buffer() == notes
+    press(["C-c", "w"])
+    assert Editor.current_buffer() == chat
+
+    # kill the chat: nothing dangles, the next ask remakes it in the group
+    press(["C-x", "1"])
+    Aimax.Core.kill_buffer(chat)
+    Editor.set_window_buffer(notes)
+    press(["C-c", "q"])
+    type("again?")
+    press(["RET"])
+    assert eventually(fn ->
+             Buffer.exists?(chat) && Buffer.text(chat) =~ "aye"
+           end)
+    assert Buffer.get_local(chat, "group") == "proj"
+
+    press(["C-x", "1"])
+  end
+
+  test "legacy companion-of pointers migrate to group tags on mode setup", %{buf: buf} do
+    chat = "*old-companion*"
+    {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-create "#{chat}")})
+    Buffer.set_local(chat, "companion-of", buf)
+
+    on_exit(fn -> Aimax.Core.kill_buffer(chat) end)
+
+    Editor.set_window_buffer(chat)
+    {:ok, _} = Aimax.Core.Session.eval(~s{(set-mode! "chat-mode")})
+
+    # both ends now carry the tag; the pointer is only read as a fallback
+    assert Buffer.get_local(chat, "group") == buf
+    assert Buffer.get_local(buf, "group") == buf
   end
 
   test "C-c q asks from the minibuffer into the *chat* popup; conversation continues" do

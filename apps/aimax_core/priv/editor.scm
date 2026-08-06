@@ -761,6 +761,17 @@
     (let ((buf (current-buffer)))
       (local-set-key "C-c RET" "chat-send")
       (local-set-key "C-c m" "chat-set-model")
+      ;; legacy: pre-group companions carried a 'companion-of pointer —
+      ;; upgrade both ends to the 'group tag (idempotent, so desktop
+      ;; restore migrates old sessions by itself)
+      (let ((doc (buffer-local buf 'companion-of)))
+        (when (and doc (not (buffer-local buf 'group)))
+          (let ((g (or (and (buffer-exists? doc) (buffer-local doc 'group))
+                       doc)))
+            (buffer-set-local! buf 'group g)
+            (when (and (buffer-exists? doc)
+                       (not (buffer-local doc 'group)))
+              (buffer-set-local! doc 'group g)))))
       (when (buffer-local buf 'agent-saved-mark)
         (buffer-set-local! buf 'render-mode "agent")
         (buffer-set-local! buf 'agent-marker-bytes
@@ -808,29 +819,59 @@
       (llm-with-tools prompt handler)
       (llm prompt handler)))
 
-;; the per-send system preamble: companion chats point the model at their
-;; document (pull context — the tools read the live buffer, so it is never
-;; stale); with tools off the document is pushed inline instead
+;; the per-send system preamble: a grouped chat points the model at the
+;; group's work buffers (pull context — the tools read live buffers, so it
+;; is never stale); with tools off the documents are pushed inline instead
 (define (chat-preamble buf)
-  (let ((doc (buffer-local buf 'companion-of)))
-    (if (and doc (buffer-exists? doc))
-        (string-append
-          "You are the user's writing companion in a side chat. They are "
-          "writing in the editor buffer named \"" doc "\"."
-          (if (and (boundp (quote chat-use-tools)) chat-use-tools)
-              (string-append
-                " Never guess its contents: call read-doc with that buffer "
-                "name before commenting, and change it with edit-doc "
-                "(exact unique old string -> new string; it edits the live "
-                "buffer, never the file). Match the document's voice and "
-                "make the smallest edit that does the job.")
-              (string-append
-                "\n\nThe document right now:\n\n" (buffer-text doc)))
-          "\n\nThe chat transcript follows; reply to the last user turn "
-          "only, in markdown.\n\n")
-        (string-append
-          "You are the assistant in an editor chat buffer. The transcript "
-          "follows; reply to the last user turn only, in markdown.\n\n"))))
+  (let* ((g (buffer-group buf))
+         (docs (if g (group-docs g) '()))
+         (tools? (and (boundp (quote chat-use-tools)) chat-use-tools)))
+    (cond
+      ((null? docs)
+       (string-append
+         "You are the assistant in an editor chat buffer. The transcript "
+         "follows; reply to the last user turn only, in markdown.\n\n"))
+      ((null? (cdr docs))
+       ;; one document: the writing-companion voice
+       (let ((doc (car docs)))
+         (string-append
+           "You are the user's writing companion in a side chat. They are "
+           "writing in the editor buffer named \"" doc "\"."
+           (if tools?
+               (string-append
+                 " Never guess its contents: call read-doc with that buffer "
+                 "name before commenting, and change it with edit-doc "
+                 "(exact unique old string -> new string; it edits the live "
+                 "buffer, never the file). Match the document's voice and "
+                 "make the smallest edit that does the job.")
+               (string-append
+                 "\n\nThe document right now:\n\n" (buffer-text doc)))
+           "\n\nThe chat transcript follows; reply to the last user turn "
+           "only, in markdown.\n\n")))
+      (else
+       ;; several buffers: enumerate the group, let the tools pull content
+       (string-append
+         "You are the user's companion in a side chat for their buffer "
+         "group \"" g "\". The group's buffers:\n"
+         (fold (lambda (acc d)
+                 (string-append acc "- \"" d "\""
+                   (let ((m (buffer-local d 'mode-name)))
+                     (if m (string-append " (" m ")") ""))
+                   "\n"))
+               "" docs)
+         (if tools?
+             (string-append
+               "Never guess their contents: call read-doc with a buffer "
+               "name before commenting, and change one with edit-doc "
+               "(exact unique old string -> new string; it edits the live "
+               "buffer, never the file). Make the smallest edit that does "
+               "the job.")
+             (fold (lambda (acc d)
+                     (string-append acc "\n\"" d "\" right now:\n\n"
+                                    (buffer-text d) "\n"))
+                   "" docs))
+         "\n\nThe chat transcript follows; reply to the last user turn "
+         "only, in markdown.\n\n")))))
 
 ;; sends from whichever chat buffer it is invoked in (chat-mode-local key);
 ;; rich companion surfaces take the block path, plain chats the markdown one
@@ -1015,9 +1056,9 @@
       (let ((was (active-window)))
         (buffer-create new)
         (buffer-append! new (buffer-text old))
-        ;; a companion link must survive the rename
-        (let ((doc (buffer-local old 'companion-of)))
-          (when doc (buffer-set-local! new 'companion-of doc)))
+        ;; group membership must survive the rename
+        (let ((g (buffer-group old)))
+          (when g (buffer-set-local! new 'group g)))
         (for-each
           (lambda (w)
             (if (equal? (cadr w) old)
@@ -1073,51 +1114,83 @@
             (insert! (string-append "```\n" text "\n```\n"))
             (message "Region added to chat"))))))
 
-;;; --- companion chat: two panes, document + writing agent ---------------------
-;;; C-c w from a document: the doc keeps ~60% on the left, a chat linked to
-;;; it opens on the right. The link is the buffer-local 'companion-of; the
-;;; preamble + read-doc/edit-doc tools do the rest. Not a popup — the
-;;; companion name avoids the "*chat*"/"*llm:" display rules on purpose.
+;;; --- buffer groups: work buffers + one chat, tied by a tag --------------------
+;;; A group is nothing but a shared buffer-local: every member — code, doc,
+;;; AND the chat — carries 'group "name". The group is stored nowhere else;
+;;; (group-buffers g) derives it on demand. So membership persists with the
+;;; locals (desktop restore included), a killed buffer simply leaves the
+;;; set, and the chat is found by role (chat-mode member), not by pointer.
+;;; C-c w from a work buffer groups it by itself and opens the group chat
+;;; on the right; C-c g joins a named group; C-c q talks to the group chat.
+;;; The "*chat:" names avoid the "*chat*"/"*llm:" popup rules on purpose.
 
-(define (chat-companion-name doc)
-  (string-append "*chat:" doc "*"))
+(define (buffer-group b)
+  (or (buffer-local b 'group)
+      ;; legacy: a pre-group companion pointer doubles as a group tag
+      (buffer-local b 'companion-of)))
+
+(define (group-buffers g)
+  (filter (lambda (b) (equal? (buffer-group b) g)) (buffer-list)))
+
+;; members in MRU order; buffers never visited this session trail behind
+(define (group-buffers-mru g)
+  (let ((mru (filter (lambda (b) (equal? (buffer-group b) g))
+                     (buffer-list-mru))))
+    (append mru (remove (lambda (b) (member b mru)) (group-buffers g)))))
+
+(define (group-names)
+  (fold (lambda (acc b)
+          (let ((g (buffer-group b)))
+            (if (and g (not (member g acc))) (append acc (list g)) acc)))
+        '() (append (buffer-list-mru) (buffer-list))))
+
+(define (chat-buffer? b)
+  (equal? (buffer-local b 'mode-name) "chat-mode"))
+
+(define (group-docs g) (remove chat-buffer? (group-buffers-mru g)))
 
 (define (window-showing name)
   (let ((ws (filter (lambda (w) (equal? (cadr w) name)) (window-list))))
     (if (null? ws) #f (car (car ws)))))
 
-;; any chat already linked to this doc (an adopted one keeps its own name)
-(define (chat-companion-for doc)
-  (let loop ((bs (buffer-list)))
-    (cond ((null? bs) #f)
-          ((equal? (buffer-local (car bs) 'companion-of) doc) (car bs))
-          (else (loop (cdr bs))))))
+;; a buffer with no group founds one named after itself
+(define (group-ensure! b)
+  (or (buffer-group b)
+      (begin (buffer-set-local! b 'group b) b)))
 
-(define (chat-buffer? b)
-  (equal? (buffer-local b 'mode-name) "chat-mode"))
-
-;; a fresh companion is a rich surface from birth: help on top (a "meta"
+;; a fresh group chat is a rich surface from birth: help on top (a "meta"
 ;; card in the agent design), then the ╰─ you ▸ input region
-(define (chat-companion-init! buf doc)
+(define (group-chat-init! buf g)
   (let ((help (string-append
-                "writing companion · " doc "\n"
+                "companion · " g "\n"
                 "RET sends · C-c w hops to the document · "
                 "C-c m model · C-c C-v plain view\n"
-                "it reads the live buffer before it speaks, "
-                "and edits it in place when you ask\n")))
+                "it reads the live buffers before it speaks, "
+                "and edits them in place when you ask\n")))
     (buffer-append! buf help)
     (chat-blocks-push! buf 0 (string-byte-length help) "meta" '())
     (buffer-set-local! buf 'agent-saved-mark (string-byte-length help))
     (buffer-append! buf *chat-input-marker*)))
 
-;; ensure the two-pane layout (doc left, companion right) and select the
-;; companion window; returns the companion buffer name
-(define (chat-companion-show! doc)
-  (let ((buf (or (chat-companion-for doc) (chat-companion-name doc))))
-    (unless (buffer-exists? buf)
-      (buffer-create buf)
-      (chat-companion-init! buf doc))
-    (buffer-set-local! buf 'companion-of doc)
+(define (group-chat-name g) (string-append "*chat:" g "*"))
+
+;; the group's chat = its most recently used chat-mode member; created on
+;; demand already tagged, so a killed chat is simply remade next time
+(define (group-chat g)
+  (let ((chats (filter chat-buffer? (group-buffers-mru g))))
+    (if (pair? chats)
+        (car chats)
+        (let ((buf (group-chat-name g)))
+          (unless (buffer-exists? buf)
+            (buffer-create buf)
+            (group-chat-init! buf g))
+          (buffer-set-local! buf 'group g)
+          buf))))
+
+;; ensure the two-pane layout (work left, group chat right) and select the
+;; chat window; returns the chat buffer name
+(define (group-chat-show! g)
+  (let ((buf (group-chat g)))
     (let ((w (window-showing buf)))
       (if w
           (select-window! w)
@@ -1130,8 +1203,56 @@
     (end-of-buffer!)
     buf))
 
-;; make an existing conversation the companion of a document: the link is
-;; only the 'companion-of local, so adoption is one minibuffer question
+;; legacy entry point kept for scripts: DOC's companion = its group's chat
+(define (chat-companion-show! doc)
+  (group-chat-show! (group-ensure! doc)))
+
+;; ask the group without leaving the current buffer: the minibuffer prompt
+;; becomes a group-chat turn, point stays put, the reply lands on the right
+(define (group-ask! g)
+  (minibuffer-read (string-append "Ask " g ": ") (history-items 'companion-ask)
+    (lambda (prompt)
+      (history-push! 'companion-ask prompt)
+      (let ((back (active-window)))
+        (group-chat-show! g)
+        (insert! prompt)
+        (run-command "chat-send")
+        (when (window-exists? back)
+          (select-window! back))))))
+
+;; C-c g : join (or found) a named group — read the code, the doc, and
+;; chat about them all in one place
+(define-command "group-add"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (minibuffer-read "Group: " (group-names)
+        (lambda (g)
+          (if (equal? (string-trim g) "")
+              (message "Group needs a name")
+              (begin
+                (buffer-set-local! buf 'group g)
+                (message (string-append buf " joined group " g)))))))))
+
+(define-command "group-remove"
+  (lambda ()
+    (let* ((buf (current-buffer)) (g (buffer-group buf)))
+      (if g
+          (begin
+            (buffer-set-local! buf 'group #f)
+            (buffer-set-local! buf 'companion-of #f)
+            (message (string-append buf " left group " g)))
+          (message "Not in a group")))))
+
+(define-command "group-list"
+  (lambda ()
+    (let ((g (buffer-group (current-buffer))))
+      (if g
+          (message (string-append g ": "
+                     (string-join (group-buffers-mru g) " · ")))
+          (message "Not in a group")))))
+
+;; make an existing conversation a group's chat: pick a buffer, join its
+;; group (founding one named after it if it has none)
 (define-command "chat-adopt"
   (lambda ()
     (let ((chat (current-buffer)))
@@ -1140,8 +1261,8 @@
         (lambda (doc)
           (if (not (buffer-exists? doc))
               (message (string-append "No buffer " doc))
-              (begin
-                (buffer-set-local! chat 'companion-of doc)
+              (let ((g (group-ensure! doc)))
+                (buffer-set-local! chat 'group g)
                 (delete-other-windows!)
                 (switch-to-buffer! doc)
                 (split-window! 'h 0.6)
@@ -1149,44 +1270,38 @@
                 (switch-to-buffer! chat)
                 (set-mode! "chat-mode")
                 (end-of-buffer!)
-                (message (string-append chat " now accompanies " doc)))))))))
+                (message (string-append chat " now accompanies " g)))))))))
 
-;; C-c w toggles sides: in the document it opens (or refocuses) the
-;; companion; in the companion it hops back to the document; in a chat
-;; with no document yet it offers to adopt one
+;; C-c w toggles sides: in a work buffer it opens (or refocuses) the group
+;; chat, grouping the buffer by itself first if needed; in the chat it hops
+;; to the group's most recent work buffer; in a groupless chat it adopts
 (define-command "chat-companion"
   (lambda ()
     (let* ((cur (current-buffer))
-           (doc (buffer-local cur 'companion-of)))
-      (cond (doc
-             (let ((w (window-showing doc)))
-               (if w (select-window! w) (switch-to-buffer! doc))))
-            ((chat-buffer? cur)
-             (run-command "chat-adopt"))
-            (else (chat-companion-show! cur))))))
+           (g (buffer-group cur)))
+      (cond ((and (chat-buffer? cur) g)
+             (let ((docs (group-docs g)))
+               (if (null? docs)
+                   (message (string-append "Group " g " has no work buffers"))
+                   (let ((w (window-showing (car docs))))
+                     (if w
+                         (select-window! w)
+                         (switch-to-buffer! (car docs)))))))
+            ((chat-buffer? cur) (run-command "chat-adopt"))
+            (else (group-chat-show! (group-ensure! cur)))))))
 
-;; C-c RET in the document: talk to the companion without leaving it —
-;; minibuffer prompt becomes a companion turn, point stays in the doc,
-;; the reply lands in the right pane. (In chat buffers the chat-mode
-;; local C-c RET = chat-send wins.)
+;; C-c RET in a work buffer: talk to the group chat without leaving it.
+;; (In chat buffers the chat-mode local C-c RET = chat-send wins.)
 (define-command "chat-companion-ask"
   (lambda ()
-    (let ((doc (current-buffer)))
-      (if (or (buffer-local doc 'companion-of) (chat-buffer? doc))
+    (let ((cur (current-buffer)))
+      (if (chat-buffer? cur)
           (run-command "chat-send")
-          (minibuffer-read "Ask companion: " (history-items 'companion-ask)
-            (lambda (prompt)
-              (history-push! 'companion-ask prompt)
-              (let ((back (active-window)))
-                (chat-companion-show! doc)
-                (insert! prompt)
-                (run-command "chat-send")
-                (when (window-exists? back)
-                  (select-window! back)))))))))
+          (group-ask! (group-ensure! cur))))))
 
-;; C-c q : ask from anywhere. The prompt becomes a normal *chat* turn, the
-;; chat opens as a bottom popup, and the conversation continues there —
-;; follow-ups with C-c RET, tool loop as in chat-send, C-` dismisses.
+;; C-c q : ask from anywhere. In a grouped buffer (its chat included) the
+;; prompt becomes a turn in the group's one chat; ungrouped, it goes to
+;; the global *chat* bottom popup — follow-ups with C-c RET, C-` dismisses.
 (add-display-rule! "*chat*" 'popup)
 (add-display-rule! "*llm:" 'popup)
 
@@ -1199,20 +1314,24 @@
 
 (define-command "llm-ask"
   (lambda ()
-    (minibuffer-read "Ask LLM: " (history-items 'llm-ask)
-      (lambda (prompt)
-        (history-push! 'llm-ask prompt)
-        (chat-ensure!)
-        (display-buffer *chat-buffer*)
-        (set-mode! "chat-mode")
-        (end-of-buffer!)
-        (insert! prompt)
-        (run-command "chat-send")))))
+    (let ((g (buffer-group (current-buffer))))
+      (if g
+          (group-ask! g)
+          (minibuffer-read "Ask LLM: " (history-items 'llm-ask)
+            (lambda (prompt)
+              (history-push! 'llm-ask prompt)
+              (chat-ensure!)
+              (display-buffer *chat-buffer*)
+              (set-mode! "chat-mode")
+              (end-of-buffer!)
+              (insert! prompt)
+              (run-command "chat-send")))))))
 
 (global-set-key "C-c c" "chat")
 (global-set-key "C-c r" "chat-send-region")
 (global-set-key "C-c q" "llm-ask")
 (global-set-key "C-c w" "chat-companion")
+(global-set-key "C-c g" "group-add")
 (global-set-key "C-c RET" "chat-companion-ask")
 
 ;;; --- minibuffer history (vertico-style: last-used first) --------------------
@@ -1506,6 +1625,10 @@
 (public! 'llm "(llm PROMPT HANDLER) — async completion; HANDLER gets the text")
 (public! 'llm-model "Current model id")
 (public! 'set-llm-model! "(set-llm-model! ID) — provider prefix routes: openai:/openrouter:/bare=anthropic")
+(public! 'buffer-group "(buffer-group NAME) -> the buffer's group tag or #f")
+(public! 'group-buffers "(group-buffers G) -> names of the buffers tagged 'group G")
+(public! 'group-chat "(group-chat G) — find or create G's chat buffer; returns its name")
+(public! 'group-chat-show! "(group-chat-show! G) — open/focus G's chat pane; returns its name")
 (public! 'chat-companion-show! "(chat-companion-show! DOC) — open/focus DOC's companion chat; returns its name")
 
 (message "editor.scm loaded")

@@ -288,7 +288,7 @@ defmodule Aimax.Ui.EditorLive do
       <%= if @node.render_mode in ["html", "markdown"] do %>
         <iframe class="html-preview" sandbox="" srcdoc={@node.preview} title={@node.buffer}></iframe>
       <% else %>
-      <div class="buf">
+      <div class="buf" style={@node.style}>
         <div :for={ln <- @lines} class={"line #{if ln.current, do: "hl-line"}"}>
           <span class="linenum">{ln.num}</span>
           <span class="line-content"><span :for={{txt, cls} <- ln.segs} class={cls}>{txt}</span><span

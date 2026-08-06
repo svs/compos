@@ -300,6 +300,18 @@
             (buffer-set-local! (current-buffer) 'line-numbers "off")
             (message "Line numbers disabled"))))))
 
+;; window split/resize animations — CSS falls back to 140ms when the
+;; chrome face doesn't say otherwise; this flips it to 0ms and back
+(define *window-animations* #t)
+
+(define-command "toggle-window-animations"
+  (lambda ()
+    (set! *window-animations* (not *window-animations*))
+    (set-face-attribute! 'chrome 'anim (if *window-animations* "140ms" "0ms"))
+    (message (if *window-animations*
+                 "Window animations on"
+                 "Window animations off"))))
+
 (define-command "back-to-indentation"
   (lambda ()
     (beginning-of-line!)

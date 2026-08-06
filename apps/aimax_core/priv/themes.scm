@@ -63,7 +63,11 @@
     (list 'org-checkbox 'fg "#26356b" 'weight "600")
     (list 'org-cookie 'fg "#7a5a1a")
     (list 'org-meta 'fg "#8a857a")
-    (list 'fold-marker 'fg "#8a857a")))
+    (list 'fold-marker 'fg "#8a857a")
+    ;; window chrome: gap between panels, rounded cards, soft shadow
+    (list 'chrome 'gap "6px" 'radius "5px"
+          'border "1px solid #d5cdb9"
+          'shadow "0 2px 10px rgba(27, 26, 23, 0.07)")))
 
 (define-theme "paper-night"          ; the design's warm dark
   (list
@@ -103,7 +107,10 @@
     (list 'org-checkbox 'fg "#9fb0ea" 'weight "600")
     (list 'org-cookie 'fg "#d5ac66")
     (list 'org-meta 'fg "#a79d8c")
-    (list 'fold-marker 'fg "#a79d8c")))
+    (list 'fold-marker 'fg "#a79d8c")
+    (list 'chrome 'gap "6px" 'radius "5px"
+          'border "1px solid #39342b"
+          'shadow "0 2px 14px rgba(0, 0, 0, 0.35)")))
 
 (define-theme "aimax-dark"
   (list
@@ -130,7 +137,10 @@
     (list 'hl-line 'bg "#26272e")
     (list 'linenum 'fg "#4a4d59")
     (list 'border 'bg "#15161a")
-    (list 'warn 'fg "#e0af68")))
+    (list 'warn 'fg "#e0af68")
+    (list 'chrome 'gap "6px" 'radius "5px"
+          'border "1px solid #15161a"
+          'shadow "0 2px 14px rgba(0, 0, 0, 0.4)")))
 
 (define-theme "catppuccin-mocha"
   (list
@@ -157,7 +167,10 @@
     (list 'hl-line 'bg "#232338")
     (list 'linenum 'fg "#45475a")
     (list 'border 'bg "#11111b")
-    (list 'warn 'fg "#fab387")))
+    (list 'warn 'fg "#fab387")
+    (list 'chrome 'gap "6px" 'radius "5px"
+          'border "1px solid #11111b"
+          'shadow "0 2px 14px rgba(0, 0, 0, 0.4)")))
 
 (define-theme "tokyo-night"
   (list
@@ -184,7 +197,10 @@
     (list 'hl-line 'bg "#1f2029")
     (list 'linenum 'fg "#3b4261")
     (list 'border 'bg "#101014")
-    (list 'warn 'fg "#e0af68")))
+    (list 'warn 'fg "#e0af68")
+    (list 'chrome 'gap "6px" 'radius "5px"
+          'border "1px solid #101014"
+          'shadow "0 2px 14px rgba(0, 0, 0, 0.4)")))
 
 (define-command "load-theme"
   (lambda ()

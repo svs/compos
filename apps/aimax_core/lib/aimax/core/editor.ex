@@ -689,6 +689,7 @@ defmodule Aimax.Core.Editor do
       hidden_lines: hidden_lines,
       line: snap.line,
       col: snap.col,
+      style: Map.get(locals, "style"),
       render_mode: Map.get(locals, "render-mode"),
       top: top,
       rows: rows,

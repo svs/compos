@@ -35,18 +35,33 @@ defmodule Aimax.Ui.Layouts do
             -webkit-font-smoothing: antialiased;
           }
           .editor-root { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
-          .windows { flex: 1; display: flex; min-height: 0; background: var(--default-bg, #d5cdb9); }
+          /* window chrome is themable: a 'chrome face maps to these vars
+             (gap, radius, border, shadow, anim) — zero values reproduce the
+             flat flush look */
+          .windows {
+            flex: 1; display: flex; min-height: 0;
+            background: var(--default-bg, #d5cdb9);
+            padding: var(--chrome-gap, 0);
+          }
           .windows > * { flex: 1; min-width: 0; min-height: 0; }
-          .split { flex: 1; display: flex; min-width: 0; min-height: 0; }
+          .split { flex: 1; display: flex; min-width: 0; min-height: 0; gap: var(--chrome-gap, 0); }
           .split.h { flex-direction: row; }
           .split.v { flex-direction: column; }
-          .split-child { display: flex; min-width: 0; min-height: 0; }
+          .split-child {
+            display: flex; min-width: 0; min-height: 0;
+            transition: flex-grow var(--chrome-anim, 140ms) ease-out;
+          }
           .split-child > * { flex: 1; min-width: 0; min-height: 0; }
+          @keyframes win-in { from { opacity: 0; transform: scale(0.985); } to { opacity: 1; transform: none; } }
           .window {
             display: flex; flex-direction: column;
             background: var(--window-inactive-bg, #f4f0e6);
-            box-shadow: inset -1px -1px 0 0 var(--border, #d5cdb9);
+            border: var(--chrome-border, none);
+            border-radius: var(--chrome-radius, 0);
+            box-shadow: var(--chrome-shadow, inset -1px -1px 0 0 var(--border, #d5cdb9));
+            overflow: hidden;
             min-width: 0; min-height: 0;
+            animation: win-in var(--chrome-anim, 140ms) ease-out;
           }
           .window.active { background: var(--window-bg, #fdfcf8); }
           .buf {

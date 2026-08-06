@@ -719,9 +719,10 @@
              (message "Reply ready"))))))
 
 ;; Models offered by C-c m / M-x chat-set-model. Override in your
-;; ~/.aimax/ai-config.scm:  (set! *llm-models* (list "openrouter:openai/luna-5.6" ...))
+;; ~/.aimax/ai-config.scm:  (set! *llm-models* (list "openai:gpt-5.6-luna" ...))
+;; Provider prefix routes the request (llm.ex): openai:/openrouter:/bare=anthropic.
 (define *llm-models*
-  (list "openrouter:openai/luna-5.6"
+  (list "openai:gpt-5.6-luna"
         "openrouter:anthropic/claude-sonnet-5"
         "claude-sonnet-5"
         "claude-opus-5"

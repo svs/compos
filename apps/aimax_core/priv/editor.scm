@@ -551,8 +551,12 @@
 (define (window-exists? id)
   (assoc id (window-list)))
 
+;; a leftover popup that became the sole window (C-x 1 from inside it)
+;; is not a popup anymore — treat it as closed so display-buffer splits
 (define (popup-open?)
-  (and *popup-window* (window-exists? *popup-window*)))
+  (and *popup-window*
+       (window-exists? *popup-window*)
+       (not (null? (cdr (window-list))))))
 
 (define (popup-show name)
   (set! *popup-buffer* name)
@@ -687,6 +691,12 @@
 (define (chat-prompt-marker) "\n### You\n")
 (define (chat-reply-marker) "\n### Assistant\n")
 
+;; a real mode so desktop restore can rebuild the local keys
+(define-mode "chat-mode"
+  (lambda ()
+    (local-set-key "C-c RET" "chat-send")
+    (local-set-key "C-c m" "chat-set-model")))
+
 (define-command "chat"
   (lambda ()
     (if (not (buffer-exists? *chat-buffer*))
@@ -697,9 +707,7 @@
                            " · C-c RET sends · C-c m switches model"
                            (chat-prompt-marker)))))
     (switch-to-buffer! *chat-buffer*)
-    (buffer-set-local! *chat-buffer* 'mode-name "Chat")
-    (local-set-key "C-c RET" "chat-send")
-    (local-set-key "C-c m" "chat-set-model")
+    (set-mode! "chat-mode")
     (end-of-buffer!)))
 
 (define-command "chat-send"

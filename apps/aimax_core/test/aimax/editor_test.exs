@@ -821,6 +821,36 @@ defmodule Aimax.EditorTest do
     File.rm!(path)
   end
 
+  test "desktop: non-file buffers (chat) survive restore with content, mode, and keys" do
+    on_exit(fn -> Aimax.Core.kill_buffer("*chat*") end)
+
+    press(["M-x"])
+    type("chat")
+    press(["RET"])
+    assert Editor.current_buffer() == "*chat*"
+    type("remember me")
+    point = Buffer.point("*chat*")
+
+    assert :ok = Aimax.Core.Desktop.save_now()
+
+    Editor.set_window_buffer("*scratch*")
+    Aimax.Core.kill_buffer("*chat*")
+    assert eventually(fn -> not Buffer.exists?("*chat*") end)
+
+    assert :ok = Aimax.Core.Desktop.restore_now()
+
+    assert Buffer.exists?("*chat*")
+    assert Buffer.text("*chat*") =~ "remember me"
+    assert Buffer.point("*chat*") == point
+    assert Buffer.get_local("*chat*", "mode-name") == "chat-mode"
+
+    # the mode setup reinstalled the local keymap: C-c m prompts for a model
+    Editor.set_window_buffer("*chat*")
+    press(["C-c", "m"])
+    assert Editor.snapshot().minibuffer.prompt =~ "Model"
+    press(["C-g"])
+  end
+
   test "completion-at-point: dabbrev popup, selection, accept, refilter", %{buf: buf} do
     type("hello helper")
     press(["RET"])

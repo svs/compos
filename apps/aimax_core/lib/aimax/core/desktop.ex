@@ -80,8 +80,21 @@ defmodule Aimax.Core.Desktop do
         {bpath, Buffer.point(name), savable_locals(name)}
       end
 
+    # the rule: EVERYTHING survives a reload. Non-file buffers (chat, agent
+    # threads, scratch, shells) have no file to reopen — their content is the
+    # only source of truth, so it's saved along with point and locals.
+    # Space-prefixed names are internal (Emacs convention: " *minibuf*").
+    scratch =
+      for name <- Aimax.Core.list_buffers(),
+          Buffer.exists?(name),
+          Buffer.path(name) == nil,
+          not String.starts_with?(name, " ") do
+        {name, Buffer.text(name), Buffer.point(name), savable_locals(name)}
+      end
+
     desktop = %{
       buffers: buffers,
+      scratch: scratch,
       tree: serialize(render.tree),
       active_buffer: active_buffer(render.tree, render.active),
       faces: render.faces
@@ -147,6 +160,10 @@ defmodule Aimax.Core.Desktop do
         restore_locals(bpath, locals)
       end
 
+      for {name, text, point, locals} <- desktop[:scratch] || [] do
+        restore_scratch(name, text, point, locals)
+      end
+
       Editor.restore_tree(tree, desktop[:active_buffer])
 
       for {face, attrs} <- desktop[:faces] || %{} do
@@ -163,6 +180,25 @@ defmodule Aimax.Core.Desktop do
     e ->
       Logger.warning("desktop restore failed: #{Exception.message(e)}")
       :error
+  end
+
+  # non-file buffer: content and locals go down first, THEN set-mode! —
+  # the mode's setup fn rebuilds presentation (local keys, overlays,
+  # folds) from the locals it finds on the buffer
+  defp restore_scratch(name, text, point, locals) do
+    unless Buffer.exists?(name), do: Aimax.Core.create_buffer(name)
+
+    size = Buffer.byte_size(name)
+    if size > 0, do: Buffer.delete_range(name, 0, size, source: :editor)
+    if text != "", do: Buffer.append(name, text, source: :editor)
+
+    Enum.each(locals, fn {k, v} -> Buffer.set_local(name, k, v) end)
+
+    if mode = locals["mode-name"] do
+      Session.eval(~s{(begin (switch-to-buffer! "#{name}") (set-mode! "#{mode}"))})
+    end
+
+    Buffer.goto(name, point)
   end
 
   # visit already ran auto-mode; if the saved mode differs (user set it by

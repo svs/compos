@@ -750,8 +750,11 @@
 
 (define (agents-refresh!)
   (when (buffer-exists? *agents-buffer*)
-    (let ((buf *agents-buffer*)
-          (ts (agents-sorted)))
+    (let* ((buf *agents-buffer*)
+           (ts (agents-sorted))
+           ;; a rewrite dumps point to 0 — keep the reader's place (dired)
+           (cur? (equal? (current-buffer) buf))
+           (p (if cur? (point) 0)))
       (buffer-delete-range! buf 0 (buffer-size buf))
       (buffer-append! buf
         (string-append ";; agents — RET visit · s steer · y/n permission · "
@@ -760,7 +763,8 @@
         (let loop ((ts ts) (acc '()))
           (if (null? ts) (reverse acc)
               (begin (buffer-append! buf (string-append (agents-line (car ts)) "\n"))
-                     (loop (cdr ts) (cons (car (car ts)) acc)))))))))
+                     (loop (cdr ts) (cons (car (car ts)) acc))))))
+      (when cur? (goto-char! (min p (buffer-size buf)))))))
 
 ;; slug on the current line: line 0 is the header, entries follow in the
 ;; order 'agents-slugs recorded
@@ -799,21 +803,50 @@
       (when slug (agent-answer-permission! slug "reject_once" "reject")
                  (agents-refresh!)))))
 
+;; mark the transcript BEFORE the runtime dies (the mark primitive needs it
+;; alive) so windows showing the thread refresh honestly
+(define (agent-note-stopped! slug)
+  (unless (equal? (agent-status slug) 'dead)
+    (let ((buf (agent-buffer slug)))
+      (agent-clear-waiting! slug)
+      (agent-block-drop-kind! buf "permission")
+      (let ((start (agent-render! slug "\n[agent stopped]\n" "agent-meta")))
+        (agent-block-push! buf start (agent-mark slug) "meta" '())))))
+
+;; point any window showing BUF somewhere else (interactive kill-buffer's
+;; dance) — killing a displayed buffer leaves a ghost that resurrects empty
+(define (agent-release-windows! buf)
+  (for-each
+    (lambda (w)
+      (when (equal? (car (cdr w)) buf)
+        (select-window! (car w))
+        (let ((others (filter (lambda (b) (and (not (equal? b buf))
+                                               (not (string-prefix? "*agent" b))))
+                              (buffer-list-mru))))
+          (switch-to-buffer! (if (null? others) "*scratch*" (car others))))))
+    (window-list)))
+
 (define-command "agents-kill"
   (lambda ()
     (let ((slug (agents-current-slug)))
-      (when slug (agent-kill! slug) (agents-refresh!)
-                 (message (string-append slug " killed (transcript kept)"))))))
+      (when slug
+        (agent-note-stopped! slug)
+        (agent-kill! slug)
+        (agents-refresh!)
+        (message (string-append slug " killed (transcript kept)"))))))
 
 ;; archive: runtime + buffer both go (desktop stops restoring it)
 (define-command "agents-archive"
   (lambda ()
     (let ((slug (agents-current-slug)))
       (when slug
-        (agent-kill! slug)
-        (buffer-kill! (agent-buffer slug))
-        (agents-refresh!)
-        (message (string-append slug " archived"))))))
+        (let ((here (active-window)))
+          (agent-kill! slug)
+          (agent-release-windows! (agent-buffer slug))
+          (buffer-kill! (agent-buffer slug))
+          (when (window-exists? here) (select-window! here))
+          (agents-refresh!)
+          (message (string-append slug " archived")))))))
 
 (define-command "agents-refresh" (lambda () (agents-refresh!)))
 

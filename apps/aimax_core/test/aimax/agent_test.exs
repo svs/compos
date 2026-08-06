@@ -556,6 +556,27 @@ defmodule Aimax.AgentTest do
     _ = agent1
   end
 
+  test "k in *agents* notes the stop in the transcript; x releases windows before killing" do
+    {slug, buf, _agent} = boot("")
+
+    # show the thread in the main window, then open the fleet popup
+    focus(buf)
+    {:ok, _} = Session.eval(~s[(run-command "agents-list")])
+    focus("*agents*")
+    {:ok, _} = Session.eval("(begin (beginning-of-buffer!) (next-line!))")
+
+    press(["k"])
+    assert eventually(fn -> Buffer.text(buf) =~ "[agent stopped]" end)
+    assert eventually(fn -> Agent.list() == [] end)
+    assert Buffer.text("*agents*") =~ "x #{slug}"
+
+    press(["x"])
+    assert eventually(fn -> not Buffer.exists?(buf) end)
+    # no window points at the killed buffer (no empty-ghost resurrection)
+    windows = Editor.list_windows()
+    refute Enum.any?(windows, fn {_id, b} -> b == buf end)
+  end
+
   test "adapter exit renders a death notice and marks the thread dead" do
     {slug, buf, agent} = boot("")
 

@@ -367,6 +367,7 @@
                      (if (null? ms) last (loop (cdr ms) (car (car ms)))))))
          (m (buffer-local buf 'agent-model)))
     (buffer-set-local! buf 'agent-queued '())
+    (when (> mark 0) (buffer-set-local! buf 'agent-seed-context #t))
     (agent-start! slug
       (append (list 'buffer buf 'mark mark)
               (agent-resolve-config
@@ -399,6 +400,38 @@
                 (lambda (model)
                   (agent-reconnect! slug cname model)))))))))
 
+;; a revived/switched thread runs a FRESH provider session (different
+;; provider = different session ids; resume can't cross). Seed its first
+;; prompt with the transcript tail so the conversation continues instead of
+;; restarting from nothing. Whole lines only — a byte-offset cut could
+;; split a utf-8 char and poison the json encoder.
+(define *agent-context-cap* 12000)
+
+(define (agent-transcript-tail buf)
+  (let* ((mark (or (buffer-local buf 'agent-saved-mark) (buffer-size buf)))
+         (text (substring-bytes (buffer-text buf) 0 mark)))
+    (if (<= (string-byte-length text) *agent-context-cap*)
+        text
+        (let loop ((ls (string-split text "\n")))
+          (let ((joined (string-join ls "\n")))
+            (if (or (<= (string-byte-length joined) *agent-context-cap*)
+                    (null? (cdr ls)))
+                joined
+                (loop (cdr ls))))))))
+
+(define (agent-send-msg! slug msg)
+  (let ((buf (agent-buffer slug)))
+    (if (buffer-local buf 'agent-seed-context)
+        (begin
+          (buffer-set-local! buf 'agent-seed-context #f)
+          (agent-prompt! slug
+            (string-append
+              "Context: this continues an earlier conversation from the"
+              " user's editor (possibly with a different agent). Transcript"
+              " tail:\n\n" (agent-transcript-tail buf)
+              "\n\nContinue naturally from there. New message:\n" msg)))
+        (agent-prompt! slug msg))))
+
 (define-command "agent-send"
   (lambda ()
     (let ((slug (agent-slug-of (current-buffer))))
@@ -409,7 +442,7 @@
              (let ((input (string-trim (agent-input slug))))
                (if (equal? input "")
                    (insert! "\n")
-                   (if (equal? (agent-prompt! slug input) 'queued)
+                   (if (equal? (agent-send-msg! slug input) 'queued)
                        ;; mid-turn: the text stays put, muted, until its turn
                        (begin
                          (agent-mark-queued! slug)
@@ -751,7 +784,7 @@
           (lambda (msg)
             (unless (equal? msg "")
               (when (equal? (agent-status slug) 'dead) (agent-revive! slug))
-              (agent-prompt! slug msg)
+              (agent-send-msg! slug msg)
               (agents-refresh!))))))))
 
 (define-command "agents-allow"

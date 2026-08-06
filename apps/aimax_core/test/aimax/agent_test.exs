@@ -428,7 +428,11 @@ defmodule Aimax.AgentTest do
     inject(agent2, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "sess-2"}})
 
     assert_receive {:frame, %{"method" => "session/prompt", "params" => p}}, 1_000
-    assert [%{"text" => "are you alive"}] = p["prompt"]
+    # the fresh session's first prompt carries the transcript tail as context
+    [%{"text" => sent}] = p["prompt"]
+    assert sent =~ "are you alive"
+    assert sent =~ "Context: this continues an earlier conversation"
+    assert sent =~ ";; agent thread"
     assert eventually(fn -> Buffer.text(buf) =~ "╰─ you ▸ are you alive\n" end)
   end
 

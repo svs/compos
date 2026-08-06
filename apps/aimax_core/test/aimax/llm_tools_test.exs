@@ -52,16 +52,32 @@ defmodule Aimax.LLMToolsTest do
       end
     end
 
-    test "apropos-api finds globals and commands by regex" do
+    test "apropos-api searches the documented public surface by default" do
+      # public hits come back as (name doc) pairs
       out = eval!(~s{(llm-tool-call "apropos-api" (list 'pattern "buffer-append"))})
       assert out =~ "buffer-append!"
+      assert out =~ "the usual way to add text"
 
+      # commands are always searchable
       out = eval!(~s{(llm-tool-call "apropos-api" (list 'pattern "^chat"))})
       assert out =~ "chat-send"
 
-      # the system skill warns the model off elisp and teaches the core API
+      # internals stay out of the default scope, reachable via scope "all"
+      out = eval!(~s{(llm-tool-call "apropos-api" (list 'pattern "chat-blocks-push"))})
+      refute out =~ "chat-blocks-push!"
+
+      out = eval!(~s{(llm-tool-call "apropos-api" (list 'pattern "chat-blocks-push" 'scope "all"))})
+      assert out =~ "chat-blocks-push!"
+
+      # (public! ...) extends the surface at runtime
+      eval!(~s{(public! 'zz-shiny "A test entry.")})
+      out = eval!(~s{(llm-tool-call "apropos-api" (list 'pattern "zz-shiny"))})
+      assert out =~ "A test entry."
+
+      # the system skill warns the model off elisp and teaches the split
       assert eval!("*llm-system*") =~ "NOT Emacs Lisp"
       assert eval!("*llm-system*") =~ "buffer-append!"
+      assert eval!("*llm-system*") =~ "public"
     end
 
     test "describe-function returns real source for userland fns and commands" do

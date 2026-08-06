@@ -654,6 +654,9 @@
 ;; (execute "task")                         — spawn a thread on the default connector
 ;; (execute* "task" '(connector "codex"))   — pick a connector; other config
 ;;                                            plist entries override it
+(public! 'execute "(execute \"task\") — spawn an agent thread; returns its slug")
+(public! 'execute* "(execute* \"task\" '(connector \"codex\")) — spawn with config")
+
 (define (execute prompt) (execute* prompt '()))
 
 (define (execute* prompt opts)

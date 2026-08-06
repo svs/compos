@@ -3,6 +3,23 @@
 ;;; The Elixir core knows nothing about what keys mean or what commands do.
 ;;; Everything here is userland: redefine any of it from init.scm or M-:.
 
+;;; --- public API registry -----------------------------------------------------
+;;; The supported surface, curated: name + one-line doc. Everything else in
+;;; the global namespace is implementation detail — callable, but private by
+;;; convention. The LLM's apropos-api searches this registry by default, so
+;;; the model discovers a documented API instead of hundreds of internals.
+;;; Declare yours next to its definition: (public! 'my-fn "what it does").
+
+(define *public-api* '())
+
+(define (public! name doc)
+  (set! *public-api*
+    (cons (list (symbol->string name) doc)
+          (remove (lambda (e) (equal? (car e) (symbol->string name)))
+                  *public-api*))))
+
+(define (public-api) (reverse *public-api*))
+
 ;;; --- editing commands ------------------------------------------------------
 
 (define-command "forward-char" (lambda () (forward-char!)))
@@ -1392,5 +1409,74 @@
 (global-set-key "C-x 0" "delete-window")
 (global-set-key "C-x 1" "delete-other-windows")
 (global-set-key "C-x o" "other-window")
+
+;;; --- the public API ----------------------------------------------------------
+;;; The supported, documented surface — what apropos-api shows the LLM (and
+;;; anyone) by default. One line each; keep it curated, not exhaustive.
+
+;; buffers
+(public! 'buffer-list "All buffer names")
+(public! 'buffer-list-mru "Buffer names, most recently used first")
+(public! 'buffer-exists? "(buffer-exists? NAME) -> bool")
+(public! 'buffer-text "(buffer-text NAME) -> the buffer's full text")
+(public! 'buffer-size "(buffer-size NAME) -> size in bytes")
+(public! 'buffer-create "(buffer-create NAME) — create if missing")
+(public! 'buffer-kill! "(buffer-kill! NAME) — kill a buffer; repoint its windows first")
+(public! 'buffer-append! "(buffer-append! NAME TEXT) — append; the usual way to add text")
+(public! 'buffer-insert! "(buffer-insert! NAME BYTE-POS TEXT)")
+(public! 'buffer-delete-range! "(buffer-delete-range! NAME BYTE-POS BYTE-LEN)")
+(public! 'buffer-path "(buffer-path NAME) -> file path or #f")
+(public! 'buffer-modified? "(buffer-modified? NAME) -> unsaved changes?")
+(public! 'buffer-local "(buffer-local NAME KEY) -> buffer-local value or #f")
+(public! 'buffer-set-local! "(buffer-set-local! NAME KEY VALUE) — locals persist with the desktop")
+(public! 'current-buffer "Name of the buffer point is in")
+(public! 'switch-to-buffer! "(switch-to-buffer! NAME) — show in the active window")
+(public! 'visit "(visit PATH) — open a file (Emacs find-file)")
+(public! 'buffer-save! "Save the current buffer to its file")
+
+;; point, region, editing (current buffer)
+(public! 'point "Point as a byte offset")
+(public! 'goto-char! "(goto-char! BYTE-POS)")
+(public! 'insert! "(insert! TEXT) at point")
+(public! 'delete-char! "(delete-char! N) — negative deletes backward")
+(public! 'region-text "Text between mark and point (\"\" when no mark)")
+(public! 'set-mark! "(set-mark! BYTE-POS or #f)")
+(public! 'buffer-substring "(buffer-substring START END) of the current buffer")
+(public! 'line-text "Text of the current line")
+(public! 'end-of-buffer! "Move point to the end")
+(public! 'beginning-of-buffer! "Move point to the start")
+
+;; windows
+(public! 'window-list "((id buffer-name) ...) for every window")
+(public! 'active-window "Id of the selected window")
+(public! 'select-window! "(select-window! ID)")
+(public! 'split-window! "(split-window! 'h|'v [RATIO]) — ratio = first pane's share")
+(public! 'delete-window-id! "(delete-window-id! ID)")
+(public! 'delete-other-windows! "Make the active window the only one")
+(public! 'other-window! "Select the next window")
+(public! 'display-buffer "(display-buffer NAME) — honors display rules (popups)")
+(public! 'add-display-rule! "(add-display-rule! SUBSTRING 'popup|'same)")
+
+;; interaction
+(public! 'message "(message TEXT) — echo area")
+(public! 'minibuffer-read "(minibuffer-read PROMPT CANDIDATES HANDLER) — async; HANDLER gets the choice")
+
+;; commands, keys, modes, hooks
+(public! 'define-command "(define-command NAME THUNK) — register an M-x command")
+(public! 'run-command "(run-command NAME) — invoke any M-x command")
+(public! 'command-names "All M-x command names")
+(public! 'global-set-key "(global-set-key KEYS COMMAND-NAME), e.g. \"C-c x\"")
+(public! 'local-set-key "(local-set-key KEYS COMMAND-NAME) in the current buffer")
+(public! 'define-mode "(define-mode NAME SETUP) — major mode; SETUP must rebuild from locals")
+(public! 'set-mode! "(set-mode! NAME) on the current buffer")
+(public! 'add-hook! "(add-hook! 'name-hook FN)")
+(public! 'overlay-set! "(overlay-set! NAME TAG ((START END FACE) ...)) — replaces TAG's ranges")
+(public! 'overlay-clear! "(overlay-clear! NAME TAG)")
+
+;; llm, chat, companion
+(public! 'llm "(llm PROMPT HANDLER) — async completion; HANDLER gets the text")
+(public! 'llm-model "Current model id")
+(public! 'set-llm-model! "(set-llm-model! ID) — provider prefix routes: openai:/openrouter:/bare=anthropic")
+(public! 'chat-companion-show! "(chat-companion-show! DOC) — open/focus DOC's companion chat; returns its name")
 
 (message "editor.scm loaded")

@@ -198,3 +198,9 @@
                      (symbol->string name) " = "
                      (value->string (custom--plist-get d 'value))
                      " — " (or (custom--plist-get d 'doc) "undocumented"))))))))
+
+;; the supported customize surface
+(public! 'defcustom "(defcustom 'name DEFAULT DOC 'group G 'type T) — declare a customizable variable")
+(public! 'customize-save! "(customize-save! 'name VALUE) — set + persist to custom.scm")
+(public! 'customize-apropos "(customize-apropos PATTERN) — search customizables by name/doc")
+(public! 'customize-save-face! "(customize-save-face! 'face 'attr VALUE) — persist one face attribute")

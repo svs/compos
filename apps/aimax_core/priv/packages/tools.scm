@@ -51,7 +51,12 @@
     "(visit PATH) opens a file; (switch-to-buffer! NAME); (current-buffer); "
     "(insert! TEXT) at point in the current buffer; (message TEXT) echoes; "
     "(run-command \"name\") runs any M-x command. File buffers are named by "
-    "full path. Before writing code with a name you are not sure exists, "
+    "full path. The API has a public and a private side: apropos-api "
+    "searches the public, documented surface — start there and trust its "
+    "one-line docs. Everything else in the namespace is private "
+    "implementation detail; only reach for it via apropos-api scope "
+    "\"all\" plus describe-function when nothing public fits, and prefer "
+    "not to. Before writing code with a name you are not sure exists, "
     "check it with apropos-api, and read any function's real source with "
     "describe-function. Keep replies short; the user is in an editor, not "
     "a browser."))
@@ -84,13 +89,18 @@
     (describe-function (string->symbol (custom--plist-get args 'name)))))
 
 (define-tool! 'apropos-api
-  "Search the editor's Scheme API by regex: every global function/variable and every M-x command. Use this to find the right name before writing eval-scheme code."
-  (list (list 'pattern "string" "Regex over names, e.g. \"buffer\" or \"window|frame\""))
+  "Search the editor's PUBLIC Scheme API by regex: each hit is (name one-line-doc), plus matching M-x commands. This is the supported, documented surface — prefer it and trust its docs. Pass scope \"all\" only when nothing public fits: that searches every global including undocumented internals, which may change without notice."
+  (list (list 'pattern "string" "Regex over names, e.g. \"buffer\" or \"window|frame\"")
+        (list 'scope "string" "\"public\" (default) or \"all\"" 'optional))
   (lambda (args)
-    (let ((pat (custom--plist-get args 'pattern)))
+    (let ((pat (custom--plist-get args 'pattern))
+          (scope (or (custom--plist-get args 'scope) "public")))
       (value->string
-        (list 'globals (filter (lambda (n) (re-match? pat n)) (global-names))
-              'commands (filter (lambda (n) (re-match? pat n)) (command-names)))))))
+        (if (equal? scope "all")
+            (list 'globals (filter (lambda (n) (re-match? pat n)) (global-names))
+                  'commands (filter (lambda (n) (re-match? pat n)) (command-names)))
+            (list 'api (filter (lambda (e) (re-match? pat (car e))) (public-api))
+                  'commands (filter (lambda (n) (re-match? pat n)) (command-names))))))))
 
 (define-tool! 'describe-variables
   "Search customizable variables by regex over names and docstrings. Returns plists of name, current value, default, doc, group, type."
@@ -169,6 +179,9 @@
                           (buffer-delete-range! b pos (string-byte-length old))
                           (buffer-insert! b pos new)
                           "edited")))))))))
+
+(public! 'define-tool! "(define-tool! 'name DESC PARAMS HANDLER) — register an LLM tool")
+(public! 'llm-with-tools "(llm-with-tools PROMPT HANDLER) — completion with the full tool loop")
 
 ;; chat integration: chat-send routes through llm-with-tools when this is on
 (defcustom 'chat-use-tools #t

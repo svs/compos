@@ -1064,8 +1064,11 @@ defmodule Aimax.EditorTest do
       {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "42"}]}}
     end)
 
+    {:ok, _} = Aimax.Core.Session.eval("(set! *chat-auto-title* #f)")
+
     on_exit(fn ->
       Application.delete_env(:aimax_core, :llm_chat_fun)
+      Aimax.Core.Session.eval("(set! *chat-auto-title* #t)")
       Aimax.Core.kill_buffer("*chat*")
     end)
 
@@ -1082,17 +1085,26 @@ defmodule Aimax.EditorTest do
     assert eventually(fn -> Buffer.text("*chat*") =~ "42" end)
   end
 
-  test "C-c q asks the LLM from the minibuffer, reply pops up in *llm*", %{buf: _buf} do
-    # llm-ask routes through chat-llm, i.e. the tool loop by default
+  test "C-c q asks from the minibuffer into the *chat* popup; conversation continues" do
+    titled = "*llm:org mode font change*"
+
     Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: [%{content: prompt} | _]} ->
       assert prompt =~ "what is 6*7"
 
       {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "42"}]}}
     end)
 
+    # the title summarisation goes through the plain llm primitive
+    Application.put_env(:aimax_core, :llm_request_fun, fn _prompt ->
+      {:ok, "Org Mode. Font Change!"}
+    end)
+
     on_exit(fn ->
       Application.delete_env(:aimax_core, :llm_chat_fun)
-      Aimax.Core.kill_buffer("*llm*")
+      Application.delete_env(:aimax_core, :llm_request_fun)
+      Aimax.Core.Session.eval(~s{(set! *chat-buffer* "*chat*")})
+      Aimax.Core.kill_buffer("*chat*")
+      Aimax.Core.kill_buffer(titled)
     end)
 
     press(["C-c", "q"])
@@ -1100,11 +1112,23 @@ defmodule Aimax.EditorTest do
     type("what is 6*7")
     press(["RET"])
 
-    assert eventually(fn -> Buffer.exists?("*llm*") and Buffer.text("*llm*") =~ "42" end)
-    assert Buffer.text("*llm*") =~ "what is 6*7"
-
-    # reply was displayed in the popup window; close it again
+    # question became a chat turn, chat opened as a bottom popup, reply arrived,
+    # and the first reply titled the chat: buffer renamed, popup follows
     assert eventually(fn -> length(Editor.list_windows()) == 2 end)
+    assert eventually(fn -> Buffer.exists?(titled) end)
+    assert eventually(fn -> Editor.current_buffer() == titled end)
+    refute Buffer.exists?("*chat*")
+    assert Buffer.text(titled) =~ "what is 6*7"
+    assert Buffer.text(titled) =~ "42"
+
+    # the popup is a live conversation: follow-up via C-c RET gets a reply too
+    type("and again?")
+    press(["C-c", "RET"])
+
+    assert eventually(fn ->
+             Buffer.text(titled) |> String.split("### Assistant") |> length() == 3
+           end)
+
     press(["C-x", "1"])
   end
 

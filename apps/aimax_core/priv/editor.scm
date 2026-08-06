@@ -697,15 +697,29 @@
     (local-set-key "C-c RET" "chat-send")
     (local-set-key "C-c m" "chat-set-model")))
 
+;; adopt the most recent titled chat after a daemon restart
+;; (unless fresh — chat-new wants a brand new conversation)
+(define (chat-ensure! &optional fresh)
+  (if (not (buffer-exists? *chat-buffer*))
+      (let ((chats (if fresh
+                       '()
+                       (append
+                         (filter (lambda (b) (string-prefix? "*llm:" b))
+                                 (buffer-list-mru))
+                         (filter (lambda (b) (string-prefix? "*llm:" b))
+                                 (buffer-list))))))
+        (if (null? chats)
+            (begin
+              (buffer-create *chat-buffer*)
+              (buffer-append! *chat-buffer*
+                (string-append ";; ai-max chat · " (llm-model)
+                               " · C-c RET sends · C-c m switches model"
+                               (chat-prompt-marker))))
+            (set! *chat-buffer* (car chats))))))
+
 (define-command "chat"
   (lambda ()
-    (if (not (buffer-exists? *chat-buffer*))
-        (begin
-          (buffer-create *chat-buffer*)
-          (buffer-append! *chat-buffer*
-            (string-append ";; ai-max chat · " (llm-model)
-                           " · C-c RET sends · C-c m switches model"
-                           (chat-prompt-marker)))))
+    (chat-ensure!)
     (switch-to-buffer! *chat-buffer*)
     (set-mode! "chat-mode")
     (end-of-buffer!)))
@@ -730,7 +744,54 @@
              (buffer-append! *chat-buffer*
                (string-append reply (chat-prompt-marker)))
              (end-of-buffer!)
-             (message "Reply ready"))))))
+             (message "Reply ready")
+             (chat-maybe-title!))))))
+
+;;; --- chat titles -------------------------------------------------------------
+;;; The first reply names the chat: a cheap llm call summarises the
+;;; conversation and the buffer becomes e.g. "*llm:org mode font change*".
+;;; There is no rename primitive, so retitle = copy text + mode into the
+;;; new name, repoint windows, kill the old buffer.
+
+(define *chat-auto-title* #t)   ; tests switch this off
+
+(define (chat-title->name title)
+  (let* ((clean (string-trim
+                  (re-replace-all " +"
+                    (re-replace-all "[^a-z0-9 -]" (string-downcase title) "")
+                    " ")))
+         (short (if (> (string-length clean) 40)
+                    (substring clean 0 40)
+                    clean)))
+    (string-append "*llm:" short "*")))
+
+(define (chat-retitle! old new)
+  (if (and (buffer-exists? old) (not (buffer-exists? new)))
+      (let ((was (active-window)))
+        (buffer-create new)
+        (buffer-append! new (buffer-text old))
+        (for-each
+          (lambda (w)
+            (if (equal? (cadr w) old)
+                (begin
+                  (select-window! (car w))
+                  (switch-to-buffer! new)
+                  (set-mode! "chat-mode")
+                  (end-of-buffer!))))
+          (window-list))
+        (if (equal? *popup-buffer* old) (set! *popup-buffer* new))
+        (if (equal? *chat-buffer* old) (set! *chat-buffer* new))
+        (buffer-kill! old)
+        (if (window-exists? was) (select-window! was)))))
+
+(define (chat-maybe-title!)
+  (if (and *chat-auto-title* (equal? *chat-buffer* "*chat*"))
+      (let ((convo (buffer-text *chat-buffer*)))
+        (llm (string-append
+               "Give a 3-6 word title for this conversation. Reply with ONLY "
+               "the title: lower case, no punctuation, no quotes.\n\n" convo)
+             (lambda (title)
+               (chat-retitle! "*chat*" (chat-title->name title)))))))
 
 ;; Models offered by C-c m / M-x chat-set-model. Override in your
 ;; ~/.aimax/ai-config.scm:  (set! *llm-models* (list "openai:gpt-5.6-luna" ...))
@@ -757,30 +818,34 @@
       (if (equal? text "")
           (message "No region")
           (begin
-            (chat)
+            (run-command "chat")
             (insert! (string-append "```\n" text "\n```\n"))
             (message "Region added to chat"))))))
 
-;; C-c q : one-shot question from the minibuffer. Goes through chat-llm,
-;; so the model gets the tool loop when chat-use-tools is on. Reply lands
-;; in the *llm* popup; prompts are kept in minibuffer history.
+;; C-c q : ask from anywhere. The prompt becomes a normal *chat* turn, the
+;; chat opens as a bottom popup, and the conversation continues there —
+;; follow-ups with C-c RET, tool loop as in chat-send, C-` dismisses.
+(add-display-rule! "*chat*" 'popup)
+(add-display-rule! "*llm:" 'popup)
+
+;; start a fresh conversation (the old one keeps its titled buffer)
+(define-command "chat-new"
+  (lambda ()
+    (set! *chat-buffer* "*chat*")
+    (chat-ensure! #t)
+    (run-command "chat")))
+
 (define-command "llm-ask"
   (lambda ()
     (minibuffer-read "Ask LLM: " (history-items 'llm-ask)
       (lambda (prompt)
         (history-push! 'llm-ask prompt)
-        (message "LLM thinking...")
-        (chat-llm
-          (string-append
-            "You are the assistant inside the ai-max editor. Use your tools "
-            "when they help. Answer concisely in markdown.\n\n"
-            prompt)
-          (lambda (reply)
-            (buffer-create "*llm*")
-            (buffer-append! "*llm*"
-              (string-append "\n;; " prompt "\n" reply "\n"))
-            (display-buffer "*llm*")
-            (message "LLM done -> *llm*")))))))
+        (chat-ensure!)
+        (display-buffer *chat-buffer*)
+        (set-mode! "chat-mode")
+        (end-of-buffer!)
+        (insert! prompt)
+        (run-command "chat-send")))))
 
 (global-set-key "C-c c" "chat")
 (global-set-key "C-c r" "chat-send-region")

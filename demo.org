@@ -1,0 +1,18 @@
+#+TITLE: ai-max.el org-mode demo
+
+* TODO [#A] Ship org-mode :editor:scheme:
+The whole mode is userland Scheme — see priv/org.scm.
+** DONE Overlays and folding
+Press TAB on a headline to fold this body away.
+** TODO Phase 2 [1/3]
+- [X] plan written
+- [ ] timestamps <2026-08-06 Thu>
+- [ ] agenda
+  bing — a de-dented continuation line, aligned with the bullet
+* Notes
+S-TAB cycles the whole file. C-c C-t cycles TODO states.
+M-arrows promote/demote and move subtrees.
+** Deeper nesting [0%]
+*** Level three gets its own color
+- [ ] percent cookies work too
+**** Level four, then colors wrap around

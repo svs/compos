@@ -35,7 +35,7 @@
 <body>
 
 <h1>ai-max.el — session handoff</h1>
-<p class="sub">Written 2026-08-06 · read this in the editor itself:
+<p class="sub">Updated 2026-08-06 (agents session) · read this in the editor itself:
 <code>C-x C-f ~/src/ai-max.el/HANDOFF.html RET</code> then <kbd>C-c C-v</kbd></p>
 
 <div class="box">
@@ -105,9 +105,35 @@ viewport windowing (C-v/M-v/C-l, wheel, auto-follow) · display-buffer rules +
 popper popups (<kbd>C-`</kbd>) · quit-window · MRU buffer ring · dired (100% Scheme,
 marks/flags/columns) · modes + auto-mode + hooks · themes (5, all Scheme) ·
 tree-sitter font-lock + sexp nav (C-M-f/b/u/d) · completion framework (capf, dabbrev,
-dropdown at point) · comint shells · desktop persistence · LLM (multi-provider,
-doppler keys, <kbd>M-|</kbd> pipes, <kbd>C-c c</kbd> chat buffer) · HTML preview
-(<kbd>C-c C-v</kbd>) · JSON-RPC socket.</p>
+dropdown at point) · comint shells · desktop persistence · org-mode (outline folding,
+fontification, structure editing, TODO cycling, promote/demote — 100% Scheme,
+<code>priv/packages/org.scm</code>) · LLM (multi-provider, doppler keys, <kbd>M-|</kbd>
+pipes, <kbd>C-c c</kbd> chat buffer) · HTML preview (<kbd>C-c C-v</kbd>) ·
+JSON-RPC socket.</p>
+
+<h3>Agent threads (this session's focus — now the deepest subsystem)</h3>
+<p><span class="done">✓</span>
+ACP runtime with pluggable connectors: <strong>llm-direct</strong> (in-process, no
+subprocess, req_llm-ready) and <strong>codex</strong> (codex-acp over PTY, model via
+<code>-c model="..."</code> TOML-quoted flag — the bare form is silently ignored) ·
+connector-scoped model lists (<code>*llm-models*</code> vs. codex's declared set;
+editor-model default only applies if the connector actually offers it) ·
+native rich transcript render-mode "agent": indigo YOU turns, Earmark markdown,
+collapsible tool cards, plan blocks, permission banners (Allow/Always/Deny,
+kind-aware: allow_once/allow_always/reject_once, <kbd>C-c C-a</kbd> for always;
+denials leave a transcript record, approvals stay invisible per bb's study) ·
+pulsing "⋯ thinking" line · queued steering shown muted (agent-queued face) until
+its turn · <kbd>C-RET</kbd> hard-escalates (cancel → kill+reattach, transcript kept) ·
+failed prompts idle the thread instead of wedging :running · agent-rename
+(<kbd>C-c C-r</kbd>) carries identity+transcript to a new slug · threads open
+full-window (no popup) · restored buffers rebuild modeline/keys from locals ·
+<strong>*agents* fleet buffer</strong> (<kbd>C-c a l</kbd>, popup): dired-style list,
+needs-attention first, RET visit / s steer (revives dead threads) / y·n answer
+permission inline / k kill / x archive / + new / g refresh, live-refreshed from
+the agent event handler · modeline-extra segment (new <code>set-modeline-extra!</code>
+primitive) shows "! a2 a5" for threads needing attention, <kbd>C-c a a</kbd> jumps
+to the first · Session wraps Scheme eval in <code>catch :exit</code> so a primitive
+hitting a dead GenServer fails the eval instead of crash-looping the editor.</p>
 
 <h2>Next up — the queue</h2>
 <table>
@@ -117,13 +143,13 @@ doppler keys, <kbd>M-|</kbd> pipes, <kbd>C-c c</kbd> chat buffer) · HTML previe
 <tr><td class="next">35</td><td>visual-line-mode</td><td>User chose the client-geometry route: <code>caretPositionFromPoint(x, y±lineHeight)</code> → byte offset → goto. No CSS shortcut exists.</td></tr>
 <tr><td>20</td><td>Copilot ghost text</td><td>Overlays + existing <code>llm</code> primitive + debounced change hook; TAB accepts.</td></tr>
 <tr><td>39</td><td>Multiple cursors</td><td>Design agreed: <code>extra_cursors</code> in Buffer, per-cursor command loop at the KeyDispatch chokepoint, undo grouping, <code>mc-run-once</code> list in Scheme.</td></tr>
-<tr><td>44</td><td>ACP client (pi / codex)</td><td>Port-based JSON-RPC primitive + <code>acp.scm</code>; permission gates = minibuffer prompts.</td></tr>
 <tr><td>45</td><td>MCP server</td><td>Semantic tools over the RPC core; gate raw eval.</td></tr>
 <tr><td>38</td><td>notmuch.scm</td><td>User excited about this: "world's best email client". Needs <code>json-parse</code> primitive; dired pattern applied to mail.</td></tr>
 <tr><td>26</td><td>term-mode</td><td>xterm.js pane bound to a Proc PTY (for fish/htop/vim/claude CLI).</td></tr>
 <tr><td>—</td><td>LSP client</td><td>First real capf source; JSON-RPC over Port. Big user-visible win.</td></tr>
 <tr><td>36</td><td>Per-client frames</td><td><strong>Deferred</strong> by user ("multiplayer far future") — but it's the real fix for test flake.</td></tr>
 <tr><td>31</td><td>Idle 1s/sec LiveView diffs</td><td>Verifier saw it; may be cured by boot-id fix. Recheck.</td></tr>
+<tr><td>—</td><td>req_llm for agent connectors too</td><td>llm-direct connector currently hand-rolled; #43's backend swap should cover it.</td></tr>
 </table>
 
 <h2>Known debt (honest list)</h2>

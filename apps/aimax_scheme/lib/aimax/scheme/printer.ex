@@ -9,7 +9,11 @@ defmodule Aimax.Scheme.Printer do
   def print(i) when is_integer(i), do: Integer.to_string(i)
   def print(f) when is_float(f), do: Float.to_string(f)
   def print(l) when is_list(l), do: "(" <> Enum.map_join(l, " ", &print/1) <> ")"
-  def print({:closure, params, _, _}), do: "#<procedure (#{Enum.join(params, " ")})>"
+  def print({:closure, {req, opt, rest}, _, _}) do
+    opt = if opt == [], do: [], else: ["&optional" | opt]
+    rest = if rest, do: ["&rest", rest], else: []
+    "#<procedure (#{Enum.join(req ++ opt ++ rest, " ")})>"
+  end
   def print({:builtin, name, _}), do: "#<builtin #{name}>"
   def print(other), do: inspect(other)
 

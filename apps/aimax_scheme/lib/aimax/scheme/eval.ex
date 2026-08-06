@@ -3,7 +3,9 @@ defmodule Aimax.Scheme.Eval do
   Tail-recursive evaluator. Runs entirely on BEAM terms; proper tail calls
   come from the BEAM itself (all tail positions are direct recursive calls).
 
-  Closures: `{:closure, params, body, env_ref}`
+  Closures: `{:closure, {required, optional, rest}, body, env_ref}` — param
+  lists use elisp-style `&optional` / `&rest` markers (flat, no dotted pairs);
+  missing optionals bind `#f`, `&rest` binds a (possibly empty) list.
   Builtins: `{:builtin, name, fun}` where fun is `(args -> value)` or
             `(args, store -> {value, store})` for store-aware primitives.
   """
@@ -66,7 +68,7 @@ defmodule Aimax.Scheme.Eval do
 
     {vals, store} = eval_args(forms, env, store, [])
     {frame, store} = Env.new_frame(store, env)
-    closure = {:closure, names, body, frame}
+    closure = {:closure, {names, [], nil}, body, frame}
     store = Env.define(store, frame, name, closure)
     apply_fn(closure, vals, store)
   end
@@ -120,12 +122,8 @@ defmodule Aimax.Scheme.Eval do
   end
 
   @doc "Apply a Scheme callable to already-evaluated args."
-  def apply_fn({:closure, params, body, closure_env}, args, store) do
-    if length(params) != length(args) do
-      raise Error, message: "arity mismatch: expected #{length(params)}, got #{length(args)}"
-    end
-
-    vars = params |> Enum.zip(args) |> Map.new()
+  def apply_fn({:closure, {req, opt, rest}, body, closure_env}, args, store) do
+    vars = bind_params!(req, opt, rest, args)
     {frame, store} = Env.new_frame(store, closure_env, vars)
     eval_seq(body, frame, store)
   end
@@ -193,9 +191,61 @@ defmodule Aimax.Scheme.Eval do
   end
 
   defp param_names!(params) do
-    Enum.map(params, fn
+    params
+    |> Enum.map(fn
       {:sym, name} -> name
       other -> raise Error, message: "bad parameter: #{inspect(other)}"
     end)
+    |> parse_params!([], :req)
+  end
+
+  # flat elisp-style param list -> {required, optional, rest-name-or-nil}
+  defp parse_params!([], req, :req), do: {Enum.reverse(req), [], nil}
+
+  defp parse_params!(["&optional" | more], req, :req) do
+    {opt, rest} = parse_optionals!(more, [])
+    {Enum.reverse(req), opt, rest}
+  end
+
+  defp parse_params!(["&rest" | more], req, :req),
+    do: {Enum.reverse(req), [], rest_name!(more)}
+
+  defp parse_params!([name | more], req, :req), do: parse_params!(more, [name | req], :req)
+
+  defp parse_optionals!([], opt), do: {Enum.reverse(opt), nil}
+  defp parse_optionals!(["&rest" | more], opt), do: {Enum.reverse(opt), rest_name!(more)}
+
+  defp parse_optionals!(["&optional" | _], _),
+    do: raise(Error, message: "&optional appears twice in parameter list")
+
+  defp parse_optionals!([name | more], opt), do: parse_optionals!(more, [name | opt])
+
+  defp rest_name!([name]) when name not in ["&optional", "&rest"], do: name
+  defp rest_name!(other), do: raise(Error, message: "&rest takes exactly one name, got: #{inspect(other)}")
+
+  defp bind_params!(req, opt, rest, args) do
+    nreq = length(req)
+    nargs = length(args)
+    max = if rest, do: nil, else: nreq + length(opt)
+
+    cond do
+      nargs < nreq and opt == [] and rest == nil ->
+        raise Error, message: "arity mismatch: expected #{nreq}, got #{nargs}"
+
+      nargs < nreq ->
+        raise Error, message: "arity mismatch: expected at least #{nreq}, got #{nargs}"
+
+      max != nil and nargs > max ->
+        expected = if opt == [], do: "#{nreq}", else: "at most #{max}"
+        raise Error, message: "arity mismatch: expected #{expected}, got #{nargs}"
+
+      true ->
+        {req_args, more} = Enum.split(args, nreq)
+        {opt_args, rest_args} = Enum.split(more, length(opt))
+        opt_vals = opt_args ++ List.duplicate(false, length(opt) - length(opt_args))
+
+        vars = Map.new(Enum.zip(req, req_args) ++ Enum.zip(opt, opt_vals))
+        if rest, do: Map.put(vars, rest, rest_args), else: vars
+    end
   end
 end

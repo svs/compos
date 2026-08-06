@@ -179,5 +179,7 @@
 
 (define-command "load-theme"
   (lambda ()
-    (minibuffer-read "Load theme: " (theme-names)
-      (lambda (name) (load-theme name)))))
+    (minibuffer-read "Load theme: " (history-order 'theme (theme-names))
+      (lambda (name)
+        (history-push! 'theme name)
+        (load-theme name)))))

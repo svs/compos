@@ -737,13 +737,46 @@
 (global-set-key "C-c c" "chat")
 (global-set-key "C-c r" "chat-send-region")
 
+;;; --- minibuffer history (vertico-style: last-used first) --------------------
+;;; The candidate ranking in the core is a stable sort, so passing
+;;; candidates history-first keeps them first among equal matches — the
+;;; empty prompt shows pure recency, typing re-ranks fuzzily within it.
+
+(define *minibuffer-history* '())   ; ((key (item ...)) ...), most recent first
+(define *minibuffer-history-max* 50)
+
+(define (history-items key)
+  (let ((e (assoc key *minibuffer-history*)))
+    (if e (cadr e) '())))
+
+(define (take-n lst n)
+  (if (or (null? lst) (= n 0))
+      '()
+      (cons (car lst) (take-n (cdr lst) (- n 1)))))
+
+(define (history-push! key item)
+  (let ((items (cons item (filter (lambda (x) (not (equal? x item)))
+                                  (history-items key)))))
+    (set! *minibuffer-history*
+      (cons (list key (take-n items *minibuffer-history-max*))
+            (filter (lambda (e) (not (equal? (car e) key)))
+                    *minibuffer-history*)))))
+
+;; reorder candidates so remembered ones lead, in recency order
+(define (history-order key candidates)
+  (let ((hist (filter (lambda (h) (member h candidates)) (history-items key))))
+    (append hist (filter (lambda (c) (not (member c hist))) candidates))))
+
 ;;; --- M-x and eval ----------------------------------------------------------
 
 (define-command "execute-extended-command"
   (lambda ()
     (minibuffer-read "M-x "
-      (map (lambda (c) (list c (key-for-command c))) (command-names))
-      (lambda (cmd) (run-command cmd)))))
+      (map (lambda (c) (list c (key-for-command c)))
+           (history-order 'M-x (command-names)))
+      (lambda (cmd)
+        (history-push! 'M-x cmd)
+        (run-command cmd)))))
 
 (define-command "eval-expression"
   (lambda ()

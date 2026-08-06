@@ -47,9 +47,21 @@ defmodule Aimax.LLMToolsTest do
 
     test "specs include the built-in toolbox" do
       specs = eval!("(map car (llm-tool-specs))")
-      for t <- ~w(eval-scheme describe-variables customize-save customize-save-face list-themes load-theme) do
+      for t <- ~w(eval-scheme apropos-api describe-variables customize-save customize-save-face list-themes load-theme) do
         assert specs =~ t
       end
+    end
+
+    test "apropos-api finds globals and commands by regex" do
+      out = eval!(~s{(llm-tool-call "apropos-api" (list 'pattern "buffer-append"))})
+      assert out =~ "buffer-append!"
+
+      out = eval!(~s{(llm-tool-call "apropos-api" (list 'pattern "^chat"))})
+      assert out =~ "chat-send"
+
+      # the system skill warns the model off elisp and teaches the core API
+      assert eval!("*llm-system*") =~ "NOT Emacs Lisp"
+      assert eval!("*llm-system*") =~ "buffer-append!"
     end
   end
 

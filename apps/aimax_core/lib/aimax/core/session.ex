@@ -388,6 +388,12 @@ defmodule Aimax.Core.Session do
       "boundp" => fn [{:sym, name}], store ->
         {match?({:ok, _}, Aimax.Scheme.Env.fetch(store, global, name)), store}
       end,
+      # every globally bound name (builtins + userland defines) — the
+      # discovery surface for agents writing eval-scheme code
+      "global-names" => fn [], store ->
+        {vars, _parent} = Map.fetch!(store.frames, global)
+        {vars |> Map.keys() |> Enum.sort(), store}
+      end,
       # load-library: evaluate a Scheme file in the live session
       "load" => fn [path], store ->
         expanded = Path.expand(path)

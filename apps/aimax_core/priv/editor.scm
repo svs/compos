@@ -742,7 +742,11 @@
              convo)
            (lambda (reply)
              (buffer-append! *chat-buffer*
-               (string-append reply (chat-prompt-marker)))
+               (string-append
+                 (if (equal? (string-trim reply) "")
+                     "(no reply — the model returned no text; its tool calls are traced in *messages*)"
+                     reply)
+                 (chat-prompt-marker)))
              (end-of-buffer!)
              (message "Reply ready")
              (chat-maybe-title!))))))

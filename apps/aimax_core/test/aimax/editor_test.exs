@@ -1085,6 +1085,28 @@ defmodule Aimax.EditorTest do
     assert eventually(fn -> Buffer.text("*chat*") =~ "42" end)
   end
 
+  test "an empty model reply leaves a visible placeholder, not a blank turn" do
+    Application.put_env(:aimax_core, :llm_chat_fun, fn _ ->
+      {:ok, %{"stop_reason" => "end_turn", "content" => []}}
+    end)
+
+    {:ok, _} = Aimax.Core.Session.eval("(set! *chat-auto-title* #f)")
+
+    on_exit(fn ->
+      Application.delete_env(:aimax_core, :llm_chat_fun)
+      Aimax.Core.Session.eval("(set! *chat-auto-title* #t)")
+      Aimax.Core.kill_buffer("*chat*")
+    end)
+
+    press(["M-x"])
+    type("chat")
+    press(["RET"])
+    type("hello?")
+    press(["C-c", "RET"])
+
+    assert eventually(fn -> Buffer.text("*chat*") =~ "(no reply" end)
+  end
+
   test "C-c q asks from the minibuffer into the *chat* popup; conversation continues" do
     titled = "*llm:org mode font change*"
 

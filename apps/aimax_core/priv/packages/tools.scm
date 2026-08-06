@@ -42,9 +42,18 @@
     "restarts. To change how something looks: discover the knob with "
     "describe-variables (try patterns like \"font\" or \"theme\"), set it "
     "with customize-save, then confirm briefly what you changed. "
-    "eval-scheme is the escape hatch for everything else — buffers, modes, "
-    "keybindings; values print write-style. Keep replies short; the user is "
-    "in an editor, not a browser."))
+    "eval-scheme is the escape hatch for everything else. IMPORTANT: the "
+    "language is ai-max's own small Scheme, NOT Emacs Lisp — elisp names "
+    "like get-buffer, set-buffer, goto-char, point-max, insert, "
+    "save-excursion, with-current-buffer do not exist. Core API: "
+    "(buffer-list) names; (buffer-text NAME); (buffer-append! NAME TEXT) "
+    "append to any buffer — the usual way to add text; (buffer-create NAME); "
+    "(visit PATH) opens a file; (switch-to-buffer! NAME); (current-buffer); "
+    "(insert! TEXT) at point in the current buffer; (message TEXT) echoes; "
+    "(run-command \"name\") runs any M-x command. File buffers are named by "
+    "full path. Before writing code with a name you are not sure exists, "
+    "check it with apropos-api. Keep replies short; the user is in an "
+    "editor, not a browser."))
 
 (define (llm-with-tools prompt handler)
   (llm-tools prompt *llm-system* (llm-tool-specs) llm-tool-call handler))
@@ -52,10 +61,19 @@
 ;;; --- the built-in toolbox ----------------------------------------------------
 
 (define-tool! 'eval-scheme
-  "Evaluate Scheme in the live editor session. Full editor API: buffers, windows, faces, modes, customize. Returns the printed value."
+  "Evaluate Scheme in the live editor session. Full editor API: buffers, windows, faces, modes, customize. NOT Emacs Lisp — verify unfamiliar names with apropos-api first. Returns the printed value."
   (list (list 'code "string" "Scheme source to evaluate"))
   (lambda (args)
     (value->string (eval-string (custom--plist-get args 'code)))))
+
+(define-tool! 'apropos-api
+  "Search the editor's Scheme API by regex: every global function/variable and every M-x command. Use this to find the right name before writing eval-scheme code."
+  (list (list 'pattern "string" "Regex over names, e.g. \"buffer\" or \"window|frame\""))
+  (lambda (args)
+    (let ((pat (custom--plist-get args 'pattern)))
+      (value->string
+        (list 'globals (filter (lambda (n) (re-match? pat n)) (global-names))
+              'commands (filter (lambda (n) (re-match? pat n)) (command-names)))))))
 
 (define-tool! 'describe-variables
   "Search customizable variables by regex over names and docstrings. Returns plists of name, current value, default, doc, group, type."

@@ -35,6 +35,7 @@
 ;;; prompt-specific behavior is bound here, in its local keymap.
 
 (define-command "minibuffer-confirm" (lambda () (minibuffer-confirm!)))
+(define-command "minibuffer-confirm-input" (lambda () (minibuffer-confirm-input!)))
 (define-command "minibuffer-cancel" (lambda () (minibuffer-cancel!)))
 (define-command "minibuffer-complete" (lambda () (minibuffer-complete!)))
 (define-command "minibuffer-next-candidate" (lambda () (minibuffer-next!)))
@@ -43,6 +44,7 @@
 
 (let ((mb (minibuffer-buffer)))
   (local-set-key* mb "RET" "minibuffer-confirm")
+  (local-set-key* mb "M-RET" "minibuffer-confirm-input")
   (local-set-key* mb "C-g" "minibuffer-cancel")
   (local-set-key* mb "TAB" "minibuffer-complete")
   (local-set-key* mb "C-n" "minibuffer-next-candidate")

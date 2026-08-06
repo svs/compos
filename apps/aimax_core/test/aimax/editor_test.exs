@@ -574,6 +574,43 @@ defmodule Aimax.EditorTest do
     File.rm_rf!(root)
   end
 
+  test "RET takes the highlighted first candidate without arrowing" do
+    root = Path.join(System.tmp_dir!(), "aimax-sel-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(root)
+    File.write!(Path.join(root, "alpha.txt"), "A")
+    File.write!(Path.join(root, "april.txt"), "B")
+
+    press(["C-x", "C-f"])
+    # "a" matches both files: first is highlighted, list is NOT unique
+    type(root <> "/a")
+    mb = Editor.render_state().minibuffer
+    assert [%{label: "alpha.txt", selected: true}, %{label: "april.txt"}] = mb.candidates
+
+    # no C-n: the highlighted candidate is what RET must open
+    press(["RET"])
+    assert Editor.current_buffer() == Path.join(root, "alpha.txt")
+
+    File.rm_rf!(root)
+  end
+
+  test "M-RET confirms the typed input literally despite matches" do
+    root = Path.join(System.tmp_dir!(), "aimax-lit-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(root)
+    File.write!(Path.join(root, "foo-bar.txt"), "X")
+
+    press(["C-x", "C-f"])
+    # "foo.txt" fuzzy-matches foo-bar.txt, so RET would open that —
+    # M-RET must create the literally typed file instead
+    type(root <> "/foo.txt")
+    mb = Editor.render_state().minibuffer
+    assert [%{label: "foo-bar.txt"} | _] = mb.candidates
+
+    press(["M-RET"])
+    assert Editor.current_buffer() == Path.join(root, "foo.txt")
+
+    File.rm_rf!(root)
+  end
+
   test "find-file on a directory opens dired" do
     root = Path.join(System.tmp_dir!(), "aimax-ffd-#{System.unique_integer([:positive])}")
     File.mkdir_p!(root)

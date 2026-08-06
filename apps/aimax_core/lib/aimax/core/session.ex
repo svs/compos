@@ -332,6 +332,19 @@ defmodule Aimax.Core.Session do
             {:void, store}
         end
       end,
+      # M-RET: submit the typed input as-is, ignoring the highlighted
+      # candidate (vertico-exit-input) — creates files whose names fuzzy-
+      # match existing ones
+      "minibuffer-confirm-input!" => fn [], store ->
+        case Editor.minibuffer_close() do
+          %{on_confirm: oc} = mb when oc not in [nil, false] ->
+            {_, store} = Aimax.Scheme.Eval.apply_fn(oc, [mb.input], store)
+            {:void, store}
+
+          _ ->
+            {:void, store}
+        end
+      end,
       "minibuffer-cancel!" => fn [], store ->
         store =
           case Editor.minibuffer_close() do
@@ -403,12 +416,13 @@ defmodule Aimax.Core.Session do
     }
   end
 
-  # on_complete prompts (find-file): the input is the path being built. If
-  # the user arrowed onto a candidate (or the filter narrowed to one),
-  # resolve it through the completion closure — "down, RET" must enter the
-  # highlighted entry; otherwise the typed input wins so new files work.
+  # on_complete prompts (find-file): the input is the path being built.
+  # RET means the HIGHLIGHTED candidate whenever one exists (vertico) —
+  # resolve it through the completion closure. The typed input wins only
+  # when nothing matches (that's how new files are created); M-RET
+  # (minibuffer-confirm-input!) always submits the input literally.
   defp mb_confirm_value(%{on_complete: oc} = mb, store) when oc not in [nil, false] do
-    if (mb[:sel_touched] || mb[:total] == 1) && mb[:selected] do
+    if mb[:selected] do
       case Aimax.Scheme.Eval.apply_fn(oc, [mb.input, mb[:selected]], store) do
         {[new_input, _cands], store} when is_binary(new_input) -> {new_input, store}
         {_, store} -> {mb.input, store}

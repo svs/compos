@@ -13,8 +13,10 @@
 (set-face-attribute! 'agent-thought 'fg "#787c99")
 (set-face-attribute! 'agent-permission 'fg "#e0af68")
 (set-face-attribute! 'agent-meta 'fg "#787c99")
+(set-face-attribute! 'agent-queued 'fg "#565a6e")
 
-(add-display-rule! "*agent" 'popup)
+;; threads are primary work surfaces, not popups — they take the full window
+;; (the *agents* fleet list, when it lands, is the popup-weight surface)
 
 ;;; --- small helpers ------------------------------------------------------------
 
@@ -36,16 +38,42 @@
 (define (agent-input-start slug)
   (+ (agent-mark slug) (string-byte-length *agent-prompt-marker*)))
 
+;; messages steered mid-turn stay in the input region, muted, until their
+;; turn starts — 'agent-queued holds their raw byte lengths, oldest first
+(define (agent-queued-bytes buf)
+  (let loop ((q (or (buffer-local buf 'agent-queued) '())) (n 0))
+    (if (null? q) n (loop (cdr q) (+ n (car q))))))
+
+;; the live (not-yet-queued) tail of the input region
 (define (agent-input slug)
   (let ((buf (agent-buffer slug)))
     (substring-bytes (buffer-text buf)
-                     (agent-input-start slug)
+                     (+ (agent-input-start slug) (agent-queued-bytes buf))
                      (buffer-size buf))))
 
 (define (agent-clear-input! slug)
-  (let ((buf (agent-buffer slug))
-        (start (agent-input-start slug)))
-    (buffer-delete-range! buf start (- (buffer-size buf) start))))
+  (let ((buf (agent-buffer slug)))
+    (let ((start (+ (agent-input-start slug) (agent-queued-bytes buf))))
+      (buffer-delete-range! buf start (- (buffer-size buf) start)))))
+
+;; mute the live tail instead of clearing it
+(define (agent-mark-queued! slug)
+  (let* ((buf (agent-buffer slug))
+         (start (+ (agent-input-start slug) (agent-queued-bytes buf)))
+         (end (buffer-size buf)))
+    (buffer-set-local! buf 'agent-queued
+      (append (or (buffer-local buf 'agent-queued) '())
+              (list (- end start))))
+    (agent-add-overlay! buf start end "agent-queued")))
+
+;; its turn started: the muted text leaves the input region (the rendered
+;; ╰─ you ▸ line replaces it)
+(define (agent-pop-queued! slug)
+  (let* ((buf (agent-buffer slug))
+         (q (or (buffer-local buf 'agent-queued) '())))
+    (unless (null? q)
+      (buffer-delete-range! buf (agent-input-start slug) (car q))
+      (buffer-set-local! buf 'agent-queued (cdr q)))))
 
 (define (agent-status slug)
   (let ((info (agent-info slug)))
@@ -134,6 +162,7 @@
       (agent-clear-waiting! slug))
     (cond
       ((equal? type 'user-msg)
+       (agent-pop-queued! slug)
        (agent-render! slug
          (string-append "\n╰─ you ▸ " (plist-get e 'text) "\n\n") "agent-you")
        (agent-show-waiting! slug))
@@ -243,13 +272,14 @@
                               (last (buffer-size buf)))
                      (if (null? ms) last (loop (cdr ms) (car (car ms)))))))
          (m (buffer-local buf 'agent-model)))
+    (buffer-set-local! buf 'agent-queued '())
     (agent-start! slug
       (append (list 'buffer buf 'mark mark)
               (agent-resolve-config
                 (append (list 'connector (or (buffer-local buf 'agent-connector)
                                              *default-connector*))
                         (if (and m (not (equal? m "")))
-                            (agent-model-env m)
+                            (list 'model m)
                             '())))))
     (message (string-append "agent " slug ": revived (fresh session)"))))
 
@@ -285,12 +315,16 @@
              (let ((input (string-trim (agent-input slug))))
                (if (equal? input "")
                    (insert! "\n")
-                   (begin
-                     (agent-clear-input! slug)
-                     (if (equal? (agent-prompt! slug input) 'queued)
-                         (message "queued — agent is mid-turn")
-                         (message "sent"))
-                     (end-of-buffer!)))))))))
+                   (if (equal? (agent-prompt! slug input) 'queued)
+                       ;; mid-turn: the text stays put, muted, until its turn
+                       (begin
+                         (agent-mark-queued! slug)
+                         (end-of-buffer!)
+                         (message "queued — runs when this turn ends"))
+                       (begin
+                         (agent-clear-input! slug)
+                         (end-of-buffer!)
+                         (message "sent"))))))))))
 
 ;; C-RET escalates: dead -> revive; running -> polite session/cancel;
 ;; still running on the next press -> hard reset (kill + reattach, same
@@ -340,9 +374,12 @@
 (define-connector! "claude-code"
   '(cmd "claude-code-acp"
     models ("claude-sonnet-5" "claude-opus-5" "claude-haiku-4-5-20251001")))
-;; codex rides a ChatGPT subscription; needs the codex-acp adapter on PATH.
-;; No 'models declared -> the switch prompt is freeform.
-(define-connector! "codex" '(cmd "codex-acp"))
+;; codex rides a ChatGPT subscription (auth from `codex login`). Models are
+;; what the bundled codex core recognizes; the thread's model is passed as a
+;; config override on the adapter's command line ('model-flag).
+(define-connector! "codex"
+  '(cmd "codex-acp" model-flag "-c model="
+    models ("gpt-5.5" "gpt-5.5-pro" "gpt-5.4" "gpt-5.4-mini" "gpt-5.3-codex")))
 ;; direct API calls through the editor's own LLM plumbing (req_llm eventually):
 ;; no subprocess, no tools — the cheap chat lane
 (define-connector! "llm" '(type llm))
@@ -360,18 +397,27 @@
   (list 'env (list (list "ANTHROPIC_MODEL" m)
                    (list "CLAUDE_CODE_SUBAGENT_MODEL" m))))
 
-;; per-call opts win over the connector. The editor's model rides in as
-;; ANTHROPIC_MODEL only when this connector actually offers it — a codex
-;; thread must not inherit an anthropic model id (or claim it in the
-;; modeline).
+;; per-call opts win over the connector. A thread's model ('model in conf,
+;; defaulting to the editor's model when this connector offers it) reaches
+;; the backend by whatever route the connector declares: 'model-flag appends
+;; it to the adapter command line (codex -c model=...), otherwise it rides
+;; the anthropic env pair. Connectors that offer neither stay untouched.
 (define (agent-resolve-config opts)
   (let* ((cname (or (plist-get opts 'connector) *default-connector*))
-         (conf (append opts (connector-config cname))))
-    (if (or (plist-get conf 'env)
-            (plist-get conf 'type)              ; llm threads need no env
-            (not (member (llm-model) (connector-models cname))))
-        conf
-        (append conf (agent-model-env (llm-model))))))
+         (conf (append opts (connector-config cname)))
+         (m (or (plist-get conf 'model)
+                (and (member (llm-model) (connector-models cname)) (llm-model)))))
+    (cond ((plist-get conf 'type) conf)          ; in-process: nothing to wire
+          ((not m) conf)
+          ((plist-get conf 'model-flag)
+           ;; value must be quoted TOML — codex ignores the bare form
+           (append (list 'model m
+                         'cmd (string-append (plist-get conf 'cmd) " "
+                                             (plist-get conf 'model-flag)
+                                             "\"" m "\""))
+                   conf))
+          ((plist-get conf 'env) conf)           ; explicit env wins
+          (else (append (list 'model m) conf (agent-model-env m))))))
 
 (define (connector-names)
   (let loop ((cs *agent-connectors*) (acc '()))
@@ -411,7 +457,38 @@
   (local-set-key* buf "C-RET" "agent-interrupt-send")
   (local-set-key* buf "TAB" "agent-toggle-fold")
   (local-set-key* buf "C-c C-y" "agent-permission-allow")
-  (local-set-key* buf "C-c C-n" "agent-permission-deny"))
+  (local-set-key* buf "C-c C-n" "agent-permission-deny")
+  (local-set-key* buf "C-c C-r" "agent-rename"))
+
+;; rename = new buffer carrying the transcript + thread identity; the
+;; runtime (registered by slug) restarts under the new name if it was alive
+(define (agent-do-rename! old new)
+  (let ((obuf (agent-buffer old))
+        (nbuf (agent-buffer new))
+        (alive (not (equal? (agent-status old) 'dead))))
+    (agent-kill! old)
+    (buffer-create nbuf)
+    (buffer-append! nbuf (buffer-text obuf))
+    (for-each
+      (lambda (k) (buffer-set-local! nbuf k (buffer-local obuf k)))
+      '(agent-connector agent-model agent-saved-mark agent-folds agent-overlays))
+    (buffer-set-local! nbuf 'agent-slug new)
+    (switch-to-buffer! nbuf)
+    (buffer-kill! obuf)
+    (agent-mode-setup! nbuf)
+    (when alive (agent-revive! new))
+    (message (string-append "thread renamed: " old " -> " new))))
+
+(define-command "agent-rename"
+  (lambda ()
+    (let ((old (agent-slug-of (current-buffer))))
+      (if (not old)
+          (message "not an agent buffer")
+          (minibuffer-read (string-append "Rename thread " old " to: ") '()
+            (lambda (new)
+              (cond ((equal? new "") (message "rename cancelled"))
+                    ((buffer-exists? (agent-buffer new)) (message "name taken"))
+                    (else (agent-do-rename! old new)))))))))
 
 ;; setup doubles as desktop-restore: keys, overlays, and folds all come
 ;; back from the persisted buffer-locals (the agent process itself does

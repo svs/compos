@@ -8,9 +8,10 @@ defmodule Aimax.AgentTest.FakeTransport do
   @behaviour Aimax.Core.Agent.Transport
 
   @impl true
-  def open(_cmd, _opts, owner) do
+  def open(cmd, _opts, owner) do
     test = :persistent_term.get(:agent_test_pid)
     send(test, {:transport_open, owner})
+    send(test, {:transport_cmd, cmd})
     {:ok, test}
   end
 
@@ -169,17 +170,64 @@ defmodule Aimax.AgentTest do
     assert eventually(fn -> String.ends_with?(Buffer.text(buf), "╰─ you ▸ ") end)
     assert eventually(fn -> Buffer.text(buf) =~ "╰─ you ▸ first message\n" end)
 
-    # second message while running -> queued, no frame yet
+    # second message while running -> queued: stays visible (muted), no frame yet
     focus(buf)
     type("second message")
     press(["RET"])
     refute_receive {:frame, %{"method" => "session/prompt"}}, 200
     assert %{queued: 1} = Agent.info(slug)
+    assert Buffer.text(buf) =~ "▸ second message"
 
     inject(agent, %{"jsonrpc" => "2.0", "id" => pid, "result" => %{"stopReason" => "end_turn"}})
 
     assert_receive {:frame, %{"method" => "session/prompt", "params" => p2}}, 1_000
     assert [%{"text" => "second message"}] = p2["prompt"]
+    # its turn started: the muted copy left the input region, the rendered
+    # user line replaced it — exactly one occurrence remains
+    assert eventually(fn -> Buffer.text(buf) =~ "╰─ you ▸ second message\n" end)
+
+    assert eventually(fn ->
+             parts = String.split(Buffer.text(buf), "second message")
+             length(parts) == 2
+           end)
+  end
+
+  test "codex-style connectors wire the model through the command line" do
+    {:ok, cmd} =
+      Session.eval(
+        ~s[(plist-get (agent-resolve-config '(connector "codex" model "gpt-5.5")) 'cmd)]
+      )
+
+    assert cmd == ~s["codex-acp -c model=\\"gpt-5.5\\""]
+
+    # and the FLAGGED cmd is what actually reaches the transport — duplicate
+    # plist keys must resolve first-wins on the elixir side too
+    {:ok, _} =
+      Session.eval(~s{(execute* "" '(connector "codex" model "gpt-5.5" cmd "fake"))})
+
+    assert_receive {:transport_open, _}, 1_000
+    assert_receive {:transport_cmd, spawned}, 1_000
+    assert spawned == ~s[fake -c model="gpt-5.5"]
+  end
+
+  test "agent-rename carries transcript + identity, restarts the runtime" do
+    {_slug, buf, _agent} = boot("")
+
+    {:ok, _} = Session.eval(~s{(agent-do-rename! "a1" "rope-fix")})
+
+    # runtime restarted under the new slug
+    assert_receive {:transport_open, agent2}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(agent2, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{}})
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+    inject(agent2, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "sess-3"}})
+
+    refute Buffer.exists?(buf)
+    assert Buffer.text("*agent: rope-fix*") =~ ";; agent thread · a1"
+    assert eventually(fn -> "rope-fix" in Agent.list() end)
+
+    assert {:ok, ~s["rope-fix"]} =
+             Session.eval(~s[(buffer-local "*agent: rope-fix*" 'agent-slug)])
   end
 
   test "permission request: needs_attention, inline banner, C-c C-y answers allow option" do

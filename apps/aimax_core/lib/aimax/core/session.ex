@@ -558,9 +558,12 @@ defmodule Aimax.Core.Session do
   defp raise_scheme(msg), do: raise(Aimax.Scheme.Eval.Error, message: msg)
 
   # ('cmd "claude-code-acp" 'cwd "/x") -> %{"cmd" => "...", "cwd" => "/x"}
+  # Duplicate keys: FIRST wins, matching scheme's plist-get (configs are
+  # built by prepending overrides) — Map.new alone would keep the last.
   defp plist_to_map(plist) when is_list(plist) do
     plist
     |> Enum.chunk_every(2)
+    |> Enum.reverse()
     |> Map.new(fn [k, v] -> {s(k), plist_val_to_elixir(v)} end)
   end
 

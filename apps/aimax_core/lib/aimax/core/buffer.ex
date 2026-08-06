@@ -365,9 +365,11 @@ defmodule Aimax.Core.Buffer do
     end
   end
 
-  # everything the renderer needs, in one round trip
+  # everything the renderer needs, in one round trip; line geometry is
+  # O(log n) rope lookups, not text scans
   def handle_call(:render_snapshot, _from, state) do
     {text, state} = fetch_text(state)
+    cursor_line = Rope.byte_to_line(state.rope, state.point)
 
     {:reply,
      %{
@@ -379,7 +381,11 @@ defmodule Aimax.Core.Buffer do
        locals: state.locals,
        overlays: state.overlays |> Map.values() |> Enum.concat(),
        overlay_gen: state.overlay_gen,
-       hidden: state.hidden
+       hidden: state.hidden,
+       total_lines: Rope.line_count(state.rope),
+       cursor_line: cursor_line,
+       line: cursor_line + 1,
+       col: state.point - Rope.line_to_byte(state.rope, cursor_line)
      }, state}
   end
 

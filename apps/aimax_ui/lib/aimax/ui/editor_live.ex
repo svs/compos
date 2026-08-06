@@ -272,13 +272,11 @@ defmodule Aimax.Ui.EditorLive do
   end
 
   defp tree(%{node: %{type: :leaf}} = assigns) do
-    {line, col} = line_col(assigns.node.text, assigns.node.point)
-
     assigns =
       assign(assigns,
         lines: assigns.node.lines,
-        line: line,
-        col: col,
+        line: assigns.node.line,
+        col: assigns.node.col,
         active?: assigns.node.id == assigns.active
       )
 
@@ -476,5 +474,4 @@ defmodule Aimax.Ui.EditorLive do
     ":root{#{vars}}#{classes}"
   end
 
-  defp line_col(text, point), do: Aimax.Core.Text.line_col(text, point)
 end

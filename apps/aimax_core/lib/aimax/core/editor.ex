@@ -262,9 +262,7 @@ defmodule Aimax.Core.Editor do
 
     top =
       if Buffer.exists?(leaf.buffer) do
-        text = Buffer.text(leaf.buffer)
-        cl = cursor_line(text, Buffer.point(leaf.buffer))
-        max(cl - div(rows, 2), 0)
+        max(Buffer.render_snapshot(leaf.buffer).cursor_line - div(rows, 2), 0)
       else
         0
       end
@@ -623,7 +621,11 @@ defmodule Aimax.Core.Editor do
     locals: %{},
     overlays: [],
     overlay_gen: 0,
-    hidden: []
+    hidden: [],
+    total_lines: 1,
+    cursor_line: 0,
+    line: 1,
+    col: 0
   }
 
   # render walk: computes per-window rows (v-splits divide), clamps and
@@ -653,8 +655,13 @@ defmodule Aimax.Core.Editor do
 
     # folds put top/cursor/total in VISIBLE-line space; the scroll and
     # auto-follow math below then works unchanged. Line *numbers* stay
-    # logical (folds show numbering gaps, like Emacs).
-    {total_lines, cl, hidden_lines} = visible_geometry(text, point, snap.hidden)
+    # logical (folds show numbering gaps, like Emacs). The no-fold case is
+    # O(log n) rope lookups from the snapshot; folds still scan.
+    {total_lines, cl, hidden_lines} =
+      case snap.hidden do
+        [] -> {snap.total_lines, snap.cursor_line, MapSet.new()}
+        hidden -> visible_geometry(text, point, hidden)
+      end
 
     top = leaf.top |> min(max(total_lines - 1, 0)) |> max(0)
 
@@ -680,6 +687,8 @@ defmodule Aimax.Core.Editor do
       overlays: snap.overlays,
       overlay_gen: snap.overlay_gen,
       hidden_lines: hidden_lines,
+      line: snap.line,
+      col: snap.col,
       render_mode: Map.get(locals, "render-mode"),
       top: top,
       rows: rows,
@@ -690,16 +699,11 @@ defmodule Aimax.Core.Editor do
     {%{leaf | top: top}, rendered}
   end
 
-  defp cursor_line(text, point), do: Aimax.Core.Text.line_index(text, point)
-
   # {visible line count, cursor's visible-line index, MapSet of hidden
   # logical line indexes}. A line is hidden when its start byte falls
   # strictly inside a hidden range (the range's own start line stays
   # visible — that's the folded headline). Ranges are clamped: they can
   # be momentarily stale after an undo swaps the rope out from under them.
-  defp visible_geometry(text, point, []),
-    do: {Aimax.Core.Text.newline_count(text) + 1, cursor_line(text, point), MapSet.new()}
-
   defp visible_geometry(text, point, hidden) do
     len = byte_size(text)
     starts = [0 | Enum.map(:binary.matches(text, "\n"), fn {p, _} -> p + 1 end)]
@@ -711,7 +715,7 @@ defmodule Aimax.Core.Editor do
           into: MapSet.new(),
           do: idx
 
-    logical_cl = cursor_line(text, point)
+    logical_cl = Aimax.Core.Text.line_index(text, point)
 
     visible_cl =
       Enum.count(0..(logical_cl - 1)//1, &(not MapSet.member?(hidden_lines, &1)))

@@ -41,6 +41,9 @@ defmodule Aimax.Ui.EditorLiveTest do
     html = keys(view, ["M-x"])
     assert html =~ "M-x "
     assert html =~ "mb-cand selected"
+
+    # candidate order is recency-first, so filter before asserting a name
+    html = type(view, "backwardchar")
     assert html =~ "backward-char"
     keys(view, ["C-g"])
   end

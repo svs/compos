@@ -110,7 +110,7 @@ defmodule Aimax.Core.Session do
 
   defp load_stdlib!(interp) do
     interp =
-      Enum.reduce(["editor.scm", "dired.scm", "org.scm", "themes.scm"], interp, fn file, interp ->
+      Enum.reduce(["editor.scm", "dired.scm", "themes.scm"], interp, fn file, interp ->
         path = Application.app_dir(:aimax_core, "priv/#{file}")
 
         case Scheme.eval_string(interp, File.read!(path)) do
@@ -123,7 +123,29 @@ defmodule Aimax.Core.Session do
         end
       end)
 
-    load_init(interp)
+    interp |> load_packages() |> load_init()
+  end
+
+  # bundled packages: priv/packages/*.scm, loaded after the stdlib. Unlike
+  # the stdlib these are severable — org-mode lives here so it can be
+  # extracted into a real package later, and a broken package logs loudly
+  # instead of bricking boot.
+  defp load_packages(interp) do
+    :aimax_core
+    |> Application.app_dir("priv/packages")
+    |> Path.join("*.scm")
+    |> Path.wildcard()
+    |> Enum.sort()
+    |> Enum.reduce(interp, fn path, interp ->
+      case Scheme.eval_string(interp, File.read!(path)) do
+        {:ok, _, interp2} ->
+          interp2
+
+        {:error, msg} ->
+          Logger.error("package #{Path.basename(path)} failed to load: #{msg}")
+          interp
+      end
+    end)
   end
 
   # user config: ~/.aimax/ai-config.scm then init.scm — errors log loudly

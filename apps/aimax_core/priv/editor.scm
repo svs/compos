@@ -94,6 +94,21 @@
             (cadr (car rs))
             (loop (cdr rs))))))
 
+;; revert-buffer: re-read the file from disk (discards buffer edits).
+;; Kill + re-visit so modes, hooks and fontification re-apply cleanly.
+(define-command "revert-buffer"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (path (buffer-path buf))
+           (p (point)))
+      (if (not path)
+          (message "Buffer is not visiting a file")
+          (begin
+            (buffer-kill! buf)
+            (visit path)
+            (goto-char! (min p (buffer-size (current-buffer))))
+            (message "Reverted"))))))
+
 (define-command "preview-mode"
   (lambda ()
     (if (buffer-local (current-buffer) 'render-mode)

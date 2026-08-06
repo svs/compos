@@ -565,13 +565,23 @@
   (local-set-key "S-<down>" "org-priority-down")
   (local-set-key "C-c C-c" "org-ctrl-c-ctrl-c"))
 
+;; change-hook registry keyed by buffer NAME in global state (not a
+;; buffer-local): rules outlive buffer kill + recreate (revert-buffer),
+;; so re-entering the mode must not stack duplicates
+(define *org-hooks* '())
+
+(define (org-ensure-hook! buf)
+  (unless (assoc buf *org-hooks*)
+    (set! *org-hooks*
+      (cons (list buf
+                  (on-change! buf
+                    (lambda (pos inserted deleted source)
+                      (org-after-change buf pos inserted deleted source))))
+            *org-hooks*))))
+
 (define-mode "org-mode"
   (lambda ()
     (let ((buf (current-buffer)))
       (org-install-keys)
-      (unless (buffer-local buf 'org-hook-id)
-        (buffer-set-local! buf 'org-hook-id
-          (on-change! buf
-            (lambda (pos inserted deleted source)
-              (org-after-change buf pos inserted deleted source)))))
+      (org-ensure-hook! buf)
       (org-refontify! buf))))

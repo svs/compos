@@ -19,6 +19,9 @@ defmodule Aimax.Core.TS do
 
   def ts_langs, do: :erlang.nif_error(:nif_not_loaded)
 
+  @doc "dlopen a grammar library and register it: \"ok\" | \"error: ...\"."
+  def ts_load_grammar(_name, _lib_path, _highlights), do: :erlang.nif_error(:nif_not_loaded)
+
   # stateful parser resource (incremental fontification; owned by a Buffer)
   @doc "Parser resource for a language, or nil if unknown."
   def ts_state_new(_lang), do: :erlang.nif_error(:nif_not_loaded)

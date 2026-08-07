@@ -20,7 +20,13 @@ defmodule Aimax.Core.Application do
       Aimax.Core.Editor,
       Aimax.Core.Session,
       Aimax.Core.Desktop,
-      Aimax.Core.LLMDb
+      Aimax.Core.LLMDb,
+      # one-shot: register user-installed grammars with the NIF
+      %{
+        id: :grammar_boot,
+        start: {Task, :start_link, [&Aimax.Core.TreeSitter.load_installed/0]},
+        restart: :temporary
+      }
     ]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Aimax.Core.Supervisor)

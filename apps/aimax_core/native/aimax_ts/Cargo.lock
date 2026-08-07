@@ -15,11 +15,13 @@ dependencies = [
 name = "aimax_ts"
 version = "0.1.0"
 dependencies = [
+ "libloading",
  "rustler",
  "streaming-iterator",
  "tree-sitter",
  "tree-sitter-elixir",
  "tree-sitter-json",
+ "tree-sitter-language",
  "tree-sitter-rust",
 ]
 

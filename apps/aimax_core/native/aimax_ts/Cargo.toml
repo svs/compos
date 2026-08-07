@@ -10,7 +10,9 @@ crate-type = ["cdylib"]
 [dependencies]
 rustler = "0.36"
 streaming-iterator = "0.1"
+libloading = "0.8"
 tree-sitter = "0.25"
+tree-sitter-language = "0.1"
 tree-sitter-elixir = "0.3"
 tree-sitter-json = "0.24"
 tree-sitter-rust = "0.24"

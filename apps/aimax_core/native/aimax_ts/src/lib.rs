@@ -4,26 +4,71 @@
 //! edits, so a keystroke reparses only what changed.
 
 use rustler::ResourceArc;
-use std::sync::Mutex;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{InputEdit, Language, Node, Parser, Point, Query, QueryCursor};
+
+/// Grammars loaded at runtime (ts_load_grammar): name -> (language, query).
+/// The dlopen'd libraries are intentionally leaked — the Language fn
+/// pointers must outlive every tree ever parsed with them.
+fn dynamic() -> &'static Mutex<HashMap<String, (Language, String)>> {
+    static DYNAMIC: OnceLock<Mutex<HashMap<String, (Language, String)>>> = OnceLock::new();
+    DYNAMIC.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 fn language(name: &str) -> Option<Language> {
     match name {
         "elixir" => Some(tree_sitter_elixir::LANGUAGE.into()),
         "json" => Some(tree_sitter_json::LANGUAGE.into()),
         "rust" => Some(tree_sitter_rust::LANGUAGE.into()),
-        _ => None,
+        _ => dynamic().lock().unwrap().get(name).map(|(l, _)| l.clone()),
     }
 }
 
-fn highlights_query(name: &str) -> Option<&'static str> {
+fn highlights_query(name: &str) -> Option<String> {
     match name {
-        "elixir" => Some(tree_sitter_elixir::HIGHLIGHTS_QUERY),
-        "json" => Some(tree_sitter_json::HIGHLIGHTS_QUERY),
-        "rust" => Some(tree_sitter_rust::HIGHLIGHTS_QUERY),
-        _ => None,
+        "elixir" => Some(tree_sitter_elixir::HIGHLIGHTS_QUERY.to_string()),
+        "json" => Some(tree_sitter_json::HIGHLIGHTS_QUERY.to_string()),
+        "rust" => Some(tree_sitter_rust::HIGHLIGHTS_QUERY.to_string()),
+        _ => dynamic().lock().unwrap().get(name).map(|(_, q)| q.clone()),
     }
+}
+
+/// Load a grammar shared library at runtime: dlopen, resolve
+/// `tree_sitter_<name>`, sanity-check it against this tree-sitter and the
+/// given highlight query, then register it for every other NIF. Returns
+/// "ok" or an error message.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn ts_load_grammar(name: String, lib_path: String, highlights: String) -> String {
+    let symbol = format!("tree_sitter_{}", name.replace('-', "_"));
+
+    let lang: Language = unsafe {
+        let lib = match libloading::Library::new(&lib_path) {
+            Ok(l) => l,
+            Err(e) => return format!("error: open {lib_path}: {e}"),
+        };
+        let func: libloading::Symbol<unsafe extern "C" fn() -> *const ()> =
+            match lib.get(symbol.as_bytes()) {
+                Ok(f) => f,
+                Err(e) => return format!("error: no symbol {symbol}: {e}"),
+            };
+        let lang_fn = tree_sitter_language::LanguageFn::from_raw(*func);
+        // the library must never be unloaded — its code backs the Language
+        std::mem::forget(lib);
+        Language::new(lang_fn)
+    };
+
+    let mut parser = Parser::new();
+    if let Err(e) = parser.set_language(&lang) {
+        return format!("error: incompatible grammar ABI: {e}");
+    }
+    if let Err(e) = Query::new(&lang, &highlights) {
+        return format!("error: bad highlights query: {e}");
+    }
+
+    dynamic().lock().unwrap().insert(name, (lang, highlights));
+    "ok".into()
 }
 
 fn parse(lang: Language, text: &str) -> Option<tree_sitter::Tree> {
@@ -42,7 +87,7 @@ fn ts_highlight(lang_name: String, text: String) -> Vec<(usize, usize, String)> 
     let Some(tree) = parse(lang.clone(), &text) else {
         return out;
     };
-    let Ok(query) = Query::new(&lang, hq) else {
+    let Ok(query) = Query::new(&lang, &hq) else {
         return out;
     };
     let names = query.capture_names();
@@ -166,7 +211,10 @@ fn ts_query_nif(lang_name: String, text: String, query_src: String) -> Vec<(Stri
 
 #[rustler::nif]
 fn ts_langs() -> Vec<String> {
-    vec!["elixir".into(), "json".into(), "rust".into()]
+    let mut langs: Vec<String> = vec!["elixir".into(), "json".into(), "rust".into()];
+    langs.extend(dynamic().lock().unwrap().keys().cloned());
+    langs.sort();
+    langs
 }
 
 // --- stateful parsing (incremental fontification) ---------------------------
@@ -190,7 +238,7 @@ fn ts_state_new(lang_name: String) -> Option<ResourceArc<TsRes>> {
     let hq = highlights_query(&lang_name)?;
     let mut parser = Parser::new();
     parser.set_language(&lang).ok()?;
-    let query = Query::new(&lang, hq).ok()?;
+    let query = Query::new(&lang, &hq).ok()?;
     Some(ResourceArc::new(TsRes(Mutex::new(TsState {
         parser,
         query,

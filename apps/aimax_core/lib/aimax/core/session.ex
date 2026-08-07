@@ -362,6 +362,21 @@ defmodule Aimax.Core.Session do
       "priv-path" => fn [rel] ->
         Path.join(Application.app_dir(:aimax_core, "priv"), rel)
       end,
+      # --- runtime tree-sitter grammars (Aimax.Core.TreeSitter) --------------
+      "ts-install-grammar!" => fn [name, url] ->
+        n = s(name)
+        u = s(url)
+
+        Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
+          case Aimax.Core.TreeSitter.install(n, u) do
+            "ok" -> message("grammar #{n} installed — buffers pick it up on their next mode set")
+            err -> message("grammar #{n}: #{err}")
+          end
+        end)
+
+        :void
+      end,
+      "ts-installed-grammars" => fn [] -> Aimax.Core.TreeSitter.installed() end,
       "format-usd" => fn [amount] when is_number(amount) ->
         "$" <> :erlang.float_to_binary(amount * 1.0, decimals: 4)
       end,

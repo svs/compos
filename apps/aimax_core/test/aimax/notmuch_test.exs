@@ -67,6 +67,8 @@ defmodule Aimax.NotmuchTest do
           *) cat "$dir/show.json";;
         esac;;
       reply) cat "$dir/reply.json";;
+      config) printf 'query.inbox.query=tag:inbox\nquery.unread.query=tag:unread\n';;
+      count) cat - > /dev/null; printf '5\n2\n';;
     esac
     """)
 
@@ -95,7 +97,7 @@ defmodule Aimax.NotmuchTest do
   end
 
   test "notmuch opens a search listing of threads" do
-    eval!(~s{(run-command "notmuch")})
+    eval!(~s{(run-command "notmuch-inbox")})
     assert eval!("(current-buffer)") == ~s{"*notmuch*"}
 
     text = eval!(~s{(buffer-text "*notmuch*")})
@@ -106,7 +108,7 @@ defmodule Aimax.NotmuchTest do
   end
 
   test "RET opens the thread, renders text/plain only, marks it read", %{dir: dir} do
-    eval!(~s{(run-command "notmuch")})
+    eval!(~s{(run-command "notmuch-inbox")})
     press("RET")
 
     assert eval!("(current-buffer)") == ~s{"*mail*"}
@@ -121,13 +123,13 @@ defmodule Aimax.NotmuchTest do
   end
 
   test "a archives the thread at point", %{dir: dir} do
-    eval!(~s{(run-command "notmuch")})
+    eval!(~s{(run-command "notmuch-inbox")})
     press("a")
     assert calls(dir) =~ "tag -inbox -- thread:0001"
   end
 
   test "the search buffer survives a mode re-setup (desktop restore path)" do
-    eval!(~s{(run-command "notmuch")})
+    eval!(~s{(run-command "notmuch-inbox")})
     # restore re-runs set-mode! with locals already down — same path
     eval!(~s{(set-mode! "notmuch-mode")})
     text = eval!(~s{(buffer-text "*notmuch*")})
@@ -137,7 +139,7 @@ defmodule Aimax.NotmuchTest do
   end
 
   test "context providers explain the selection to chat and agents" do
-    eval!(~s{(run-command "notmuch")})
+    eval!(~s{(run-command "notmuch-inbox")})
 
     ctx = eval!(~s{(editor-context "*some-chat*")})
     assert ctx =~ "Hello world"
@@ -159,7 +161,7 @@ defmodule Aimax.NotmuchTest do
   end
 
   test "reply is a message-mode buffer: headers, separator, quote, point at body", %{dir: dir} do
-    eval!(~s{(run-command "notmuch")})
+    eval!(~s{(run-command "notmuch-inbox")})
     press("RET")
     press("r")
 
@@ -195,7 +197,7 @@ defmodule Aimax.NotmuchTest do
   end
 
   test "an HTML message renders as an HTML document; v toggles text", %{dir: _} do
-    eval!(~s{(begin (run-command "notmuch") (next-line!) (beginning-of-line!))})
+    eval!(~s{(begin (run-command "notmuch-inbox") (next-line!) (beginning-of-line!))})
     press("RET")
 
     assert eval!("(current-buffer)") == ~s{"*mail*"}
@@ -216,7 +218,7 @@ defmodule Aimax.NotmuchTest do
 
   test "moving the highlight updates the shown mail and marks it read", %{dir: dir} do
     eval!(~s{(set! notmuch-auto-preview #t)})
-    eval!(~s{(run-command "notmuch")})
+    eval!(~s{(run-command "notmuch-inbox")})
     press("n")
     assert calls(dir) =~ "show --format=json --include-html thread:0002"
     assert calls(dir) =~ "tag -unread -- thread:0002"
@@ -226,7 +228,7 @@ defmodule Aimax.NotmuchTest do
   end
 
   test "r in the index replies to the thread's newest message", %{dir: dir} do
-    eval!(~s{(run-command "notmuch")})
+    eval!(~s{(run-command "notmuch-inbox")})
     press("r")
     assert eval!("(current-buffer)") == ~s{"*compose*"}
     assert calls(dir) =~ "search --output=messages --limit=1 -- thread:0001"
@@ -234,7 +236,7 @@ defmodule Aimax.NotmuchTest do
   end
 
   test "SPC previews in the other window, focus stays", %{dir: dir} do
-    eval!(~s{(run-command "notmuch")})
+    eval!(~s{(run-command "notmuch-inbox")})
     press("SPC")
     assert eval!("(current-buffer)") == ~s{"*notmuch*"}
     assert eval!("(length (window-list))") == "2"
@@ -242,26 +244,26 @@ defmodule Aimax.NotmuchTest do
   end
 
   test "u smart-untags on a simple tag search", %{dir: dir} do
-    eval!(~s{(run-command "notmuch")})
+    eval!(~s{(run-command "notmuch-inbox")})
     press("u")
     assert calls(dir) =~ "tag -inbox -- thread:0001"
   end
 
   test "m toggles the mark tag", %{dir: dir} do
-    eval!(~s{(run-command "notmuch")})
+    eval!(~s{(run-command "notmuch-inbox")})
     press("m")
     assert calls(dir) =~ "tag +m -- thread:0001"
   end
 
   test "@ narrows the search to the sender", %{dir: dir} do
-    eval!(~s{(run-command "notmuch")})
+    eval!(~s{(run-command "notmuch-inbox")})
     press("@")
     assert calls(dir) =~ "show --format=json --body=false thread:0001"
     assert eval!(~s{(buffer-text "*notmuch*")}) =~ "from:alice@example.com"
   end
 
   test "the search buffer carries column and status overlays" do
-    eval!(~s{(run-command "notmuch")})
+    eval!(~s{(run-command "notmuch-inbox")})
     ovs = eval!(~s{(buffer-overlays "*notmuch*")})
     assert ovs =~ "nm-date"
     assert ovs =~ "nm-author"
@@ -271,7 +273,7 @@ defmodule Aimax.NotmuchTest do
   end
 
   test "one *mail* buffer is reused; its derived content is transient" do
-    eval!(~s{(run-command "notmuch")})
+    eval!(~s{(run-command "notmuch-inbox")})
     press("RET")
     assert eval!("(current-buffer)") == ~s{"*mail*"}
     assert eval!(~s{(buffer-text "*mail*")}) =~ "Hi there, this is the body."
@@ -294,7 +296,7 @@ defmodule Aimax.NotmuchTest do
     eval!(~s{(define-command "test-mail-scene" "index | message | chat"
       (lambda ()
         (delete-other-windows!)
-        (run-command "notmuch")
+        (nm--open-index! notmuch-default-query)
         (split-window! 'h 0.32)
         (let ((idx (active-window)))
           (other-window!)
@@ -326,8 +328,25 @@ defmodule Aimax.NotmuchTest do
     assert ctx =~ "open email thread"
   end
 
-  test "M-< and M-> jump to the first and last thread" do
+  test "notmuch starts at the mailboxes; RET opens, q returns", %{dir: dir} do
     eval!(~s{(run-command "notmuch")})
+    assert eval!("(current-buffer)") == ~s{"*mailboxes*"}
+    text = eval!(~s{(buffer-text "*mailboxes*")})
+    assert text =~ "mailboxes"
+    assert text =~ "inbox"
+    assert text =~ "5"
+    assert calls(dir) =~ "count --batch"
+
+    press("RET")
+    assert eval!("(current-buffer)") == ~s{"*notmuch*"}
+    assert eval!(~s{(buffer-local "*notmuch*" 'notmuch-query)}) == ~s{"tag:inbox"}
+
+    press("q")
+    assert eval!("(current-buffer)") == ~s{"*mailboxes*"}
+  end
+
+  test "M-< and M-> jump to the first and last thread" do
+    eval!(~s{(run-command "notmuch-inbox")})
     press("M->")
     assert eval!(~s{(nm--thread-at (current-buffer))}) =~ "0002"
     press("M-<")

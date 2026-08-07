@@ -59,13 +59,15 @@ when a message has no text/plain part." 'group 'notmuch)
 (define (nm--quote s)
   (string-append "'" (string-join (string-split s "'") "'\\''") "'"))
 
+(define (nm--cmd args)
+  (string-append
+    (if (equal? notmuch-profile "")
+        ""
+        (string-append "NOTMUCH_PROFILE=" (nm--quote notmuch-profile) " "))
+    notmuch-program " " args))
+
 (define (nm--run args)
-  (shell-command->string
-    (string-append
-      (if (equal? notmuch-profile "")
-          ""
-          (string-append "NOTMUCH_PROFILE=" (nm--quote notmuch-profile) " "))
-      notmuch-program " " args)))
+  (shell-command->string (nm--cmd args)))
 
 (define (nm--json args)
   (json-parse (nm--run args)))
@@ -197,22 +199,128 @@ when a message has no text/plain part." 'group 'notmuch)
       (local-set-key "T" "notmuch-edit-tags")
       (local-set-key "s" "notmuch-search")
       (local-set-key "g" "notmuch-refresh")
-      (local-set-key "q" "quit-window")
+      ;; like notmuch-emacs: q in the index goes back to the mailboxes
+      (local-set-key "q" "notmuch")
       ;; derived content: desktop saves locals + point, never the text
       (buffer-set-local! buf 'transient #t)
       ;; fresh open and desktop restore take the same path: rebuild the
       ;; listing from the 'notmuch-query local (live data beats stale text)
       (nm--refresh! buf))))
 
-(define-command "notmuch" "Open the notmuch mail search buffer"
+(define (nm--open-index! query)
+  (let ((buf *notmuch-search-buffer*))
+    (unless (buffer-exists? buf) (buffer-create buf))
+    (buffer-set-local! buf 'notmuch-query query)
+    (switch-to-buffer! buf)
+    (set-mode! "notmuch-mode")
+    (goto-char! 0) (next-line!) (beginning-of-line!)))
+
+(define-command "notmuch-inbox" "Open the mail index on the default query"
+  (lambda () (nm--open-index! notmuch-default-query)))
+
+;;; --- mailboxes (notmuch-hello): saved searches with counts -----------------------
+
+(define *notmuch-hello-buffer* "*mailboxes*")
+
+;; query.NAME.query=Q entries from the notmuch config
+(define (nm--saved-searches)
+  (let loop ((ls (string-split (nm--run "config list") "\n")) (acc '()))
+    (if (null? ls)
+        (reverse acc)
+        (let ((line (car ls)))
+          (if (string-prefix? "query." line)
+              (let* ((name (car (string-split
+                                  (substring line 6 (string-length line)) ".")))
+                     (parts (string-split line "="))
+                     (q (if (pair? (cdr parts)) (string-join (cdr parts) "=") "")))
+                (loop (cdr ls) (cons (list name q) acc)))
+              (loop (cdr ls) acc))))))
+
+;; one notmuch invocation for all counts
+(define (nm--batch-count queries)
+  (if (null? queries)
+      '()
+      (map (lambda (s) (or (string->number s) 0))
+           (string-split
+             (string-trim
+               (shell-command->string
+                 (string-append "printf '%s\\n' "
+                                (string-join (map nm--quote queries) " ")
+                                " | " (nm--cmd "count --batch"))))
+             "\n"))))
+
+(define (nm--hello-refresh! buf)
+  (let* ((searches (nm--saved-searches))
+         (queries (map cadr searches))
+         (totals (nm--batch-count queries))
+         (unreads (nm--batch-count
+                    (map (lambda (q) (string-append "( " q " ) and tag:unread"))
+                         queries)))
+         (old-point (buffer-point buf))
+         (header "mailboxes\n"))
+    (buffer-set-local! buf 'notmuch-searches searches)
+    (buffer-delete-range! buf 0 (buffer-size buf))
+    (buffer-append! buf header)
+    (let loop ((ss searches) (ts totals) (us unreads)
+               (off (string-byte-length header)) (ovs '()))
+      (if (null? ss)
+          (overlay-set! buf 'notmuch (reverse ovs))
+          (let* ((name (nm--fit (car (car ss)) 16))
+                 (unread (car us))
+                 (counts (string-append
+                           (string-pad-left (number->string unread) 6) " / "
+                           (string-pad-left (number->string (car ts)) 6)))
+                 (line (string-append "  " name counts "   " (cadr (car ss)) "\n"))
+                 (n-start (+ off 2))
+                 (n-end (+ n-start (string-byte-length name)))
+                 (c-end (+ n-end (string-byte-length counts)))
+                 (l-end (+ off (string-byte-length line))))
+            (buffer-append! buf line)
+            (loop (cdr ss) (cdr ts) (cdr us) l-end
+                  (cons (list c-end (- l-end 1) "nm-tags")
+                        (cons (list n-end c-end "nm-date")
+                              (cons (list n-start n-end
+                                          (if (> unread 0) "nm-unread" "nm-author"))
+                                    ovs)))))))
+    (when (equal? buf (current-buffer))
+      (goto-char! (min old-point (buffer-size buf))))))
+
+(define (nm--hello-at buf)
+  (let* ((before (substring-bytes (buffer-text buf) 0 (buffer-point buf)))
+         (line (- (length (string-split before "\n")) 1))
+         (ss (or (buffer-local buf 'notmuch-searches) '())))
+    (and (>= line 1) (<= line (length ss)) (list-ref ss (- line 1)))))
+
+(define-mode "notmuch-hello-mode"
   (lambda ()
-    (let ((buf *notmuch-search-buffer*))
+    (let ((buf (current-buffer)))
+      (buffer-set-read-only! buf #t)
+      (buffer-set-local! buf 'transient #t)
+      (local-set-key "n" "next-line")
+      (local-set-key "p" "previous-line")
+      (local-set-key "RET" "notmuch-hello-open")
+      (local-set-key "g" "notmuch-hello-refresh")
+      (local-set-key "s" "notmuch-search")
+      (local-set-key "q" "quit-window")
+      (nm--hello-refresh! buf))))
+
+(define-command "notmuch" "Open the mailboxes (saved searches)"
+  (lambda ()
+    (let ((buf *notmuch-hello-buffer*))
       (unless (buffer-exists? buf) (buffer-create buf))
       (switch-to-buffer! buf)
-      (unless (buffer-local buf 'notmuch-query)
-        (buffer-set-local! buf 'notmuch-query notmuch-default-query))
-      (set-mode! "notmuch-mode")
+      (set-mode! "notmuch-hello-mode")
       (goto-char! 0) (next-line!) (beginning-of-line!))))
+
+(define-command "notmuch-hello-open" "Open the saved search at point"
+  (lambda ()
+    (let ((s (nm--hello-at (current-buffer))))
+      (if s
+          (nm--open-index! (cadr s))
+          (message "No mailbox on this line")))))
+
+(define-command "notmuch-hello-refresh" "Refresh the mailbox counts"
+  (lambda () (nm--hello-refresh! (current-buffer)) (message "Refreshed")))
 
 ;; the preview helpers target the *next* window in cyclic order, so any
 ;; window arrangement works: put the index left of where you want mail
@@ -584,7 +692,6 @@ when a message has no text/plain part." 'group 'notmuch)
     (buffer-set-local! buf 'notmuch-thread thread-id)
     (buffer-set-local! buf 'notmuch-subject subject)
     (buffer-set-local! buf 'transient #t)
-    (buffer-set-local! buf 'modeline-info (nm--trunc subject 60))
     ;; a view inherits its index's group, so a grouped mail scene keeps
     ;; the open message inside the group (group-docs, chat read-doc, ⊞)
     (let ((g (and (buffer-exists? *notmuch-search-buffer*)

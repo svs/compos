@@ -229,7 +229,11 @@ defmodule Aimax.Ui.EditorLive do
           do: lines,
           else: Enum.reject(lines, &MapSet.member?(hidden, &1.num - 1))
       end)
-      |> Enum.slice(leaf.top, leaf.rows + 4)
+      # 3x overscan: leaf.rows is measured against WRAPPED line height (so
+      # cursor-follow stays wrap-aware), but wrap factors vary per line —
+      # under-slicing leaves blank space below. Excess DOM is cheap and
+      # .buf{overflow:hidden} clips it.
+      |> Enum.slice(leaf.top, leaf.rows * 3 + 8)
 
     lines =
       visible

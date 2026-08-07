@@ -124,6 +124,14 @@ defmodule Aimax.Core.SchemeAPI do
         [cmd] -> shell_to_string(cmd, File.cwd!())
         [cmd, dir] -> shell_to_string(cmd, Path.expand(dir))
       end,
+      # (json-parse STR) — objects become flat plists with symbol keys,
+      # null becomes #f; #f on parse failure
+      "json-parse" => fn [s] ->
+        case Jason.decode(s) do
+          {:ok, v} -> Aimax.Core.LLM.json_to_scheme(v)
+          {:error, _} -> false
+        end
+      end,
       "write-file!" => fn [p, text] ->
         path = Path.expand(p)
         File.mkdir_p!(Path.dirname(path))
@@ -169,6 +177,7 @@ defmodule Aimax.Core.SchemeAPI do
       # point & motion — operate on the current (active window's) buffer
       "current-buffer" => fn [] -> Editor.current_buffer() end,
       "point" => fn [] -> Buffer.point(Editor.current_buffer()) end,
+      "buffer-point" => fn [name] -> Buffer.point(name) end,
       "goto-char!" => fn [pos] ->
         Buffer.goto(Editor.current_buffer(), pos)
         pos

@@ -188,7 +188,13 @@ defmodule Aimax.Core.Session do
     |> Application.app_dir("priv/packages")
     |> Path.join("*.scm")
     |> Path.wildcard()
-    |> Enum.sort()
+    # load order: custom.scm (defcustom) before tools.scm (define-tool!)
+    # before everything else — packages register into those registries at
+    # load time; the rest load alphabetically
+    |> Enum.sort_by(
+      &{Enum.find_index(["custom.scm", "tools.scm"], fn n -> n == Path.basename(&1) end) || 99,
+        &1}
+    )
     |> Enum.reduce(interp, fn path, interp ->
       case Scheme.eval_string(interp, File.read!(path)) do
         {:ok, _, interp2} ->

@@ -103,13 +103,13 @@ defmodule Aimax.Core.LLM do
   end
 
   # JSON objects -> flat plists with {:sym, key} keys (house convention);
-  # null -> #f (this Scheme has no nil)
-  defp json_to_scheme(map) when is_map(map),
+  # null -> #f (this Scheme has no nil). Also the (json-parse) primitive.
+  def json_to_scheme(map) when is_map(map),
     do: Enum.flat_map(map, fn {k, v} -> [{:sym, k}, json_to_scheme(v)] end)
 
-  defp json_to_scheme(l) when is_list(l), do: Enum.map(l, &json_to_scheme/1)
-  defp json_to_scheme(nil), do: false
-  defp json_to_scheme(v), do: v
+  def json_to_scheme(l) when is_list(l), do: Enum.map(l, &json_to_scheme/1)
+  def json_to_scheme(nil), do: false
+  def json_to_scheme(v), do: v
 
   defp tool_json([name, description, params]) do
     properties =

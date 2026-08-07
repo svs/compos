@@ -420,7 +420,9 @@
                 (loop (cdr ls))))))))
 
 (define (agent-send-msg! slug msg)
-  (let ((buf (agent-buffer slug)))
+  (let* ((buf (agent-buffer slug))
+         ;; what the user is looking at in the other windows — "this" works
+         (msg (string-append (editor-context-preamble buf) msg)))
     (if (buffer-local buf 'agent-seed-context)
         (begin
           (buffer-set-local! buf 'agent-seed-context #f)

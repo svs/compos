@@ -173,6 +173,45 @@
 (define-mode "text-mode" (lambda () #t))
 (define-mode "scheme-mode" (lambda () #t))   ; scheme grammar pending
 
+;;; --- context providers --------------------------------------------------------
+;;; A mode can explain what the user is looking at: (register-context-provider!
+;;; "notmuch-mode" fn) where fn takes the buffer name and returns a short
+;;; description or #f. chat-send and agent-send prepend the visible windows'
+;;; contexts, so "this" in a chat means the thing selected in the other window.
+
+(define *context-providers* '())   ; ((mode-name fn) ...)
+
+(define (register-context-provider! mode fn)
+  (set! *context-providers*
+    (cons (list mode fn)
+          (filter (lambda (e) (not (equal? (car e) mode))) *context-providers*))))
+
+(define (buffer-context buf)
+  (let ((p (assoc (or (buffer-local buf 'mode-name) "") *context-providers*)))
+    (and p ((cadr p) buf))))
+
+;; contexts of every visible buffer except EXCLUDE (the chat itself),
+;; deduped; "" when no provider speaks up
+(define (editor-context exclude)
+  (let loop ((ws (window-list)) (seen '()) (acc '()))
+    (if (null? ws)
+        (string-join (reverse acc) "\n")
+        (let ((buf (cadr (car ws))))
+          (if (or (equal? buf exclude) (member buf seen))
+              (loop (cdr ws) seen acc)
+              (let ((ctx (buffer-context buf)))
+                (loop (cdr ws) (cons buf seen)
+                      (if ctx (cons ctx acc) acc))))))))
+
+;; the paragraph chat/agent sends prepend when a context provider fires
+(define (editor-context-preamble exclude)
+  (let ((ctx (editor-context exclude)))
+    (if (equal? ctx "")
+        ""
+        (string-append
+          "[Editor context — what the user is looking at right now:\n" ctx
+          "\nWhen the user says \"this\" they mean the item above.]\n\n"))))
+
 (define (ts-mode lang)
   (lambda () (buffer-set-local! (current-buffer) 'ts-lang lang)))
 
@@ -852,7 +891,12 @@
   (let* ((g (buffer-group buf))
          (docs (if g (group-docs g) '()))
          (tools? (and (boundp (quote chat-use-tools)) chat-use-tools)))
-    (cond
+    (string-append
+      (editor-context-preamble buf)
+      (chat-preamble-body g docs tools?))))
+
+(define (chat-preamble-body g docs tools?)
+  (cond
       ((null? docs)
        (string-append
          "You are the assistant in an editor chat buffer. The transcript "
@@ -897,7 +941,7 @@
                                     (buffer-text d) "\n"))
                    "" docs))
          "\n\nThe chat transcript follows; reply to the last user turn "
-         "only, in markdown.\n\n")))))
+         "only, in markdown.\n\n"))))
 
 ;; sends from whichever chat buffer it is invoked in (chat-mode-local key);
 ;; rich companion surfaces take the block path, plain chats the markdown one
@@ -1735,6 +1779,10 @@
 
 ;; point, region, editing (current buffer)
 (public! 'point "Point as a byte offset")
+(public! 'buffer-point "(buffer-point NAME) — a named buffer's point as a byte offset")
+(public! 'json-parse "(json-parse STR) — JSON to Scheme: objects become plists with symbol keys, null becomes #f; #f on bad input")
+(public! 'register-context-provider! "(register-context-provider! MODE FN) — FN buf -> description of what the user is looking at, or #f; chat/agent sends prepend it")
+(public! 'editor-context "(editor-context EXCLUDE-BUF) — visible-window contexts from registered providers, \"\" if none")
 (public! 'goto-char! "(goto-char! BYTE-POS)")
 (public! 'insert! "(insert! TEXT) at point")
 (public! 'delete-char! "(delete-char! N) — negative deletes backward")

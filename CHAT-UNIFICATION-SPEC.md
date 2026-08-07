@@ -109,6 +109,95 @@ dispatcher have to be per-buffer (config plist at attach), not global.
 - Every chat, whatever the backend: tools, queue, interrupt, revive,
   cost, `.chat` save, whole-chat model switching.
 
+## Phase 2: one runtime, many backends (ACP included)
+
+Phase 1 makes every chat a thread. Phase 2 makes every *backend* a
+module behind one behaviour, so ACP is not privileged — it is one
+implementation among several.
+
+### Why it's cheap
+
+`agent.ex` is ~693 lines. Backend-agnostic already: the status machine
+(`starting/idle/running/needs_attention/dead`), the prompt queue, event
+batching to the buffer, mark/append rendering, permission bookkeeping,
+info/kill. ACP-specific: `request/notify/respond/send_frame`,
+`handle_frame`, `handle_update`, `acp_servers` — roughly lines 300–560.
+And a second backend already lives inside (`{:llm_reply, …}`), proving
+the runtime does not care where events come from. There is also already
+a `Transport` behaviour one level below (stdio vs the test fake), so the
+pattern is established.
+
+### The contract
+
+```elixir
+@behaviour Aimax.Core.Agent.Backend
+
+@callback start(config :: map, owner :: pid) :: {:ok, handle} | {:error, term}
+@callback prompt(handle, text :: String.t()) :: :ok
+@callback cancel(handle) :: :ok
+@callback close(handle) :: :ok
+# optional, guarded by capabilities/0
+@callback set_model(handle, model_id :: String.t()) :: :ok
+@callback respond_permission(handle, id :: term, option :: String.t() | nil) :: :ok
+@callback capabilities() :: [:models | :permissions | :slash_commands | :resume | :tools]
+```
+
+Backends send the owner `{:agent_event, event}` — and **the event
+vocabulary is the real contract**, not the callbacks. It already exists
+(ACP's shapes, flattened into plists by `plist/1`): `chunk`, `thought`,
+`tool-call`, `tool-update`, `plan`, `permission`, `user-msg`,
+`turn-end`, `error`, `model-state`, `status`. Any backend that emits
+those renders correctly with zero Scheme changes — that is the whole
+trick.
+
+Implementations:
+
+- `Backend.ACP` — today's frame code, moved wholesale. Capabilities:
+  `[:models, :permissions, :slash_commands, :resume, :tools]`.
+- `Backend.LLM` — the in-process tool loop from Phase 1 §1, emitting
+  `tool-call`/`tool-update` around each dispatch. Capabilities:
+  `[:models, :tools]` (add `:permissions` if §1 gates).
+- future: `Backend.Remote` (an agent over ssh/socket), `Backend.Replay`
+  (a `.chat` file as a fake backend, for tests/demos).
+
+### The gentle hooks
+
+Two layers, both userland:
+
+1. **Event hooks (Scheme).** `agent-handle-event` becomes hook-driven:
+   `(add-agent-event-hook! 'tool-call fn)` where `fn` returns `#t` to
+   consume the event or `#f` to fall through to the default renderer.
+   That is how a package customizes without forking the renderer —
+   e.g. mail-specific rendering for `notmuch-tag` tool cards, or
+   auto-approving read-only tools.
+2. **Capability queries.** `(agent-supports? slug 'permissions)` so
+   Scheme adapts instead of guessing: no permission keys advertised on a
+   backend that never asks, `C-c m` picks in-place vs reconnect by
+   `'models`, slash-command passthrough only where `'slash_commands`.
+
+Connectors already carry per-backend config (`define-connector!` in
+init.scm); add `'backend` to the plist (default `acp`), so
+`(define-connector! "llm" '(backend llm))` replaces the current
+`'type llm` special case, and a user can register a backend module from
+config without touching core.
+
+### Ordering
+
+Phase 1 first (it deletes the fork and gives `Backend.LLM` its tool
+loop). Phase 2 is then mostly moving code: extract `Backend.ACP`, define
+the behaviour, route `handle_info({:agent_event, e})` generically, and
+delete the `:llm`-type branches. Tests barely change — the FakeTransport
+tests exercise `Backend.ACP`; add one `Backend.Stub` that emits a scripted
+event list to prove the runtime is backend-blind.
+
+### Definition of done (phase 2)
+
+- `agent.ex` contains no JSON-RPC: `grep -n "jsonrpc\|sessionUpdate"
+  lib/aimax/core/agent.ex` returns nothing.
+- Adding a backend touches one new file plus one `define-connector!`.
+- A `Backend.Stub` test drives the full transcript rendering (chunks,
+  tool cards, folds, turn-end) with no wire at all.
+
 ## Known adjacent bugs (fix or note while in here)
 
 - Permission cards sometimes don't render in reset chats — the thread

@@ -176,6 +176,46 @@ defmodule Aimax.FramesTest do
     assert Enum.all?(windows, fn {_id, b} -> b == buf end)
   end
 
+  test "two frames prompt at once; keys and C-g stay in their own prompt" do
+    {:ok, fa} = Editor.attach_frame(nil)
+    {:ok, fb} = Editor.attach_frame(nil)
+
+    KeyDispatch.handle_key(fa, "M-x")
+    KeyDispatch.handle_key(fb, "M-x")
+    assert Editor.snapshot(fa).minibuffer
+    assert Editor.snapshot(fb).minibuffer
+
+    # typing lands in the dispatching frame's prompt only
+    for k <- ["f", "o", "r"], do: KeyDispatch.handle_key(fa, k)
+    assert Editor.render_state(fa).minibuffer.input == "for"
+    assert Editor.render_state(fb).minibuffer.input == ""
+
+    # C-g cancels one prompt, not the other
+    KeyDispatch.handle_key(fb, "C-g")
+    assert Editor.snapshot(fb).minibuffer == nil
+    assert Editor.render_state(fa).minibuffer.input == "for"
+    assert Editor.snapshot(fa).echo != "Quit"
+
+    KeyDispatch.handle_key(fa, "C-g")
+    assert Editor.snapshot(fa).minibuffer == nil
+  end
+
+  test "each frame has its own minibuffer buffer; deleting the frame kills it" do
+    {:ok, fid} = Editor.attach_frame(nil)
+    name = Editor.minibuf_name(fid)
+    assert name =~ fid
+    refute name == Editor.minibuf_name("f-main")
+
+    KeyDispatch.handle_key(fid, "M-x")
+    assert Buffer.exists?(name)
+    KeyDispatch.handle_key(fid, "C-g")
+
+    Editor.delete_frame(fid)
+    # Registry entries clear asynchronously after the buffer process dies
+    Enum.find(1..100, fn _ -> Process.sleep(5) && not Buffer.exists?(name) end)
+    refute Buffer.exists?(name)
+  end
+
   test "echo and pending are per frame" do
     {:ok, fid} = Editor.attach_frame(nil)
     Editor.set_echo("", "f-main")

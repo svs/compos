@@ -24,11 +24,17 @@ defmodule Aimax.Core.Editor do
 
   alias Aimax.Core.{Buffer, Candidates, Events, Frame}
 
-  # the minibuffer's backing buffer (Emacs-style: prompt input IS a buffer,
-  # so point motion, kill/yank, undo and local keymaps all just work).
-  # Space-prefixed = hidden from buffer lists, like Emacs.
+  # every frame has its own minibuffer backing buffer, " *minibuf-<fid>*"
+  # (Emacs-style: prompt input IS a buffer, so point motion, kill/yank, undo
+  # and local keymaps all just work; per-frame so two prompts can be open at
+  # once). Space-prefixed = hidden from buffer lists, like Emacs. The bare
+  # " *minibuf*" is the shared local-KEYMAP namespace: binds and lookups on
+  # any frame's minibuf buffer normalize to it, so editor.scm binds the
+  # prompt keys once for all frames.
   @minibuf " *minibuf*"
-  def minibuf_name, do: @minibuf
+
+  @doc "The calling frame's minibuffer buffer name."
+  def minibuf_name(fid \\ nil), do: GenServer.call(__MODULE__, {:minibuf_name, fid(fid)})
 
   @scratch "*scratch*"
   @main_frame "f-main"
@@ -295,7 +301,8 @@ defmodule Aimax.Core.Editor do
       true ->
         # hand the closed prompt back so the caller can fire on_cancel
         # (this server must never call into Session — deadlock)
-        mb = state.frames[id].minibuffer
+        f = state.frames[id]
+        Aimax.Core.kill_buffer(minibuf_of(f))
 
         state = %{
           state
@@ -303,7 +310,7 @@ defmodule Aimax.Core.Editor do
             frame_mru: List.delete(state.frame_mru, id)
         }
 
-        changed({:ok, mb}, state, id)
+        changed({:ok, f.minibuffer}, state, id)
     end
   end
 
@@ -378,12 +385,15 @@ defmodule Aimax.Core.Editor do
 
     reply =
       case f do
-        %{minibuffer: %{}, mb_redirect: true} -> @minibuf
+        %{minibuffer: %{}, mb_redirect: true} -> minibuf_of(f)
         _ -> find_leaf(f.tree, f.active).buffer
       end
 
     {:reply, reply, state}
   end
+
+  def handle_call({:minibuf_name, fid}, _from, state),
+    do: {:reply, minibuf_of(frame(state, fid)), state}
 
   def handle_call({:mb_redirect, bool, fid}, _from, state) do
     f = frame(state, fid)
@@ -392,8 +402,8 @@ defmodule Aimax.Core.Editor do
 
   def handle_call({:lookup_key, seq, fid}, _from, state) do
     f = frame(state, fid)
-    buffer = if f.minibuffer, do: @minibuf, else: find_leaf(f.tree, f.active).buffer
-    local = Map.get(state.local_keymaps, buffer, %{})
+    buffer = if f.minibuffer, do: minibuf_of(f), else: find_leaf(f.tree, f.active).buffer
+    local = Map.get(state.local_keymaps, keymap_key(buffer), %{})
 
     reply =
       cond do
@@ -425,6 +435,8 @@ defmodule Aimax.Core.Editor do
   end
 
   def handle_call({:local_bind_key, buffer, seq, command}, _from, state) do
+    buffer = keymap_key(buffer)
+
     local_keymaps =
       Map.update(state.local_keymaps, buffer, %{seq => command}, &Map.put(&1, seq, command))
 
@@ -442,7 +454,7 @@ defmodule Aimax.Core.Editor do
        tree: rendered,
        active: f.active,
        pending: f.pending,
-       minibuffer: f.minibuffer && render_minibuffer(f.minibuffer),
+       minibuffer: f.minibuffer && render_minibuffer(f.minibuffer, minibuf_of(f)),
        which_key: which_key(state, f),
        completion: f.completion && render_completion(f.completion),
        echo: f.echo,
@@ -638,7 +650,7 @@ defmodule Aimax.Core.Editor do
       |> Map.merge(handlers)
       |> Map.put(:prompt, prompt)
 
-    reset_minibuf_buffer(mb.input)
+    reset_minibuf_buffer(minibuf_of(f), mb.input)
     mb = Map.put(mb, :list, Candidates.new(candidates, query: mb_query(mb)))
     changed(:ok, put_frame(state, %{f | minibuffer: mb}), f.id)
   end
@@ -646,7 +658,7 @@ defmodule Aimax.Core.Editor do
   def handle_call({:mb_input, input, fid}, _from, state) do
     case frame(state, fid) do
       %{minibuffer: %{} = mb} = f ->
-        reset_minibuf_buffer(input)
+        reset_minibuf_buffer(minibuf_of(f), input)
         changed(:ok, put_frame(state, %{f | minibuffer: put_mb_input(mb, input)}), f.id)
 
       _ ->
@@ -659,7 +671,7 @@ defmodule Aimax.Core.Editor do
   def handle_call({:mb_sync_input, fid}, _from, state) do
     case frame(state, fid) do
       %{minibuffer: %{} = mb} = f ->
-        input = Buffer.text(@minibuf)
+        input = Buffer.text(minibuf_of(f))
 
         if input == mb.input,
           do: {:reply, :unchanged, state},
@@ -977,20 +989,26 @@ defmodule Aimax.Core.Editor do
     %{mb | list: Candidates.put_query(mb.list, mb_query(mb))}
   end
 
+  defp minibuf_of(%{id: fid}), do: " *minibuf-" <> fid <> "*"
+
+  # any frame's minibuf buffer shares one local-keymap namespace
+  defp keymap_key(" *minibuf" <> _), do: @minibuf
+  defp keymap_key(name), do: name
+
   # (re)fill the backing buffer and park point at the end
-  defp reset_minibuf_buffer(input) do
-    unless Buffer.exists?(@minibuf), do: Aimax.Core.create_buffer(@minibuf)
-    size = Buffer.byte_size(@minibuf)
-    if size > 0, do: Buffer.delete_range(@minibuf, 0, size, source: :editor)
-    if input != "", do: Buffer.append(@minibuf, input, source: :editor)
-    Buffer.goto(@minibuf, Kernel.byte_size(input))
+  defp reset_minibuf_buffer(name, input) do
+    unless Buffer.exists?(name), do: Aimax.Core.create_buffer(name)
+    size = Buffer.byte_size(name)
+    if size > 0, do: Buffer.delete_range(name, 0, size, source: :editor)
+    if input != "", do: Buffer.append(name, input, source: :editor)
+    Buffer.goto(name, Kernel.byte_size(input))
   end
 
-  defp render_minibuffer(mb) do
+  defp render_minibuffer(mb, name) do
     %{
       prompt: mb.prompt,
       input: mb.input,
-      point: (Buffer.exists?(@minibuf) && Buffer.point(@minibuf)) || Kernel.byte_size(mb.input),
+      point: (Buffer.exists?(name) && Buffer.point(name)) || Kernel.byte_size(mb.input),
       candidates: Candidates.rows(mb.list),
       # widest label of the WHOLE set, not the visible window — the names
       # column keeps one width for the session instead of reflowing per key

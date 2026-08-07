@@ -384,6 +384,44 @@ defmodule Aimax.EditorTest do
       assert Buffer.text(root) =~ "newdir/"
     end
 
+    test "filters narrow the listing, persist as a local, and restore-run", %{root: root} do
+      File.write!(Path.join(root, "notes.scm"), ";;")
+      File.write!(Path.join(root, ".hidden"), "h")
+
+      {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
+
+      # / e narrows to one extension; header names the active filter
+      press(["/", "e"])
+      type("scm")
+      press(["RET"])
+      text = Buffer.text(root)
+      assert text =~ "notes.scm"
+      refute text =~ "alpha.txt"
+      assert text =~ "ext:scm"
+
+      # type filter stacks: directories only — nothing matches both
+      {:ok, _} = Aimax.Core.Session.eval(~s{(dired-filter-push! (list "type" "dir"))})
+      refute Buffer.text(root) =~ "notes.scm"
+
+      # pop restores the previous narrowing
+      press(["/", "p"])
+      assert Buffer.text(root) =~ "notes.scm"
+
+      # dotfiles toggle and clear
+      press(["/", "/"])
+      assert Buffer.text(root) =~ ".hidden"
+      press(["/", "."])
+      refute Buffer.text(root) =~ ".hidden"
+
+      # the stack lives in a serializable local, and the registered mode
+      # reapplies it: this is exactly what desktop restore runs
+      {:ok, filters} = Aimax.Core.Session.eval(~s{(buffer-local "#{root}" 'dired-filters)})
+      assert filters =~ "dot"
+      {:ok, _} = Aimax.Core.Session.eval(~s{(begin (switch-to-buffer! "#{root}") (set-mode! "Dired"))})
+      refute Buffer.text(root) =~ ".hidden"
+      assert Buffer.text(root) =~ "alpha.txt"
+    end
+
     test "dired lines carry perms/size/date columns", %{root: root} do
       {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
       text = Buffer.text(root)

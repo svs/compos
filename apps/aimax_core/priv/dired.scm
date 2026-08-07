@@ -8,6 +8,8 @@
 ;;;   n/p move · RET visit · ^ up · g revert
 ;;;   m mark · u unmark · d flag for deletion · x execute flags
 ;;;   + mkdir
+;;;   / n name-regex · / e extension · / t type (dir/file/link/exec)
+;;;   / . hide dotfiles · / p pop filter · / / clear filters
 ;;;
 ;;; Line format:  <mark> <perms>  <size>  <date>  <name>
 
@@ -48,14 +50,103 @@
       (caddr st) " "
       e "\n")))
 
+;;; --- filters (dired-filter style) ---------------------------------------------
+;;; A stack of narrowings in the 'dired-filters buffer-local — persists with
+;;; the buffer, so a restored dired keeps its view. Entries:
+;;;   ("name" REGEX) ("ext" EXT) ("type" dir|file|link|exec) ("dot" hide)
+
+(define (dired-filters buf) (or (buffer-local buf 'dired-filters) '()))
+
+(define (dired-filter-match? dir e f)
+  (let ((kind (car f)) (arg (car (cdr f))))
+    (cond ((equal? kind "name") (re-match? arg e))
+          ((equal? kind "ext") (string-suffix? (string-append "." arg) e))
+          ((equal? kind "dot") (not (string-prefix? "." e)))
+          ((equal? kind "type")
+           (let ((perms (car (file-stat (string-append dir "/" e)))))
+             (cond ((equal? arg "dir") (string-prefix? "d" perms))
+                   ((equal? arg "link") (string-prefix? "l" perms))
+                   ((equal? arg "exec") (if (string-index perms "x") #t #f))
+                   (else (string-prefix? "-" perms)))))
+          (else #t))))
+
+(define (dired-visible buf dir)
+  (let ((fs (dired-filters buf)))
+    (filter (lambda (e)
+              (let loop ((l fs))
+                (cond ((null? l) #t)
+                      ((dired-filter-match? dir e (car l)) (loop (cdr l)))
+                      (else #f))))
+            (list-dir dir))))
+
+(define (dired-filters-label buf)
+  (let ((fs (dired-filters buf)))
+    (if (null? fs)
+        ""
+        (fold (lambda (acc f)
+                (string-append acc "  " (car f) ":"
+                  (let ((a (car (cdr f)))) (if (string? a) a "on"))))
+              "   ·" (reverse fs)))))
+
+(define (dired-filter-push! f)
+  (let ((buf (current-buffer)))
+    (buffer-set-local! buf 'dired-filters (cons f (dired-filters buf)))
+    (dired-refresh buf (dired-dir buf))
+    (dired-goto-first-entry)))
+
+(define-command "dired-filter-name" "Narrow dired to names matching a regex"
+  (lambda ()
+    (minibuffer-read "Filter names (regex): " '()
+      (lambda (pat) (unless (equal? pat "") (dired-filter-push! (list "name" pat)))))))
+
+(define-command "dired-filter-ext" "Narrow dired to one extension"
+  (lambda ()
+    (minibuffer-read "Filter extension: " '()
+      (lambda (e) (unless (equal? e "") (dired-filter-push! (list "ext" e)))))))
+
+(define-command "dired-filter-type" "Narrow dired by entry type (file mode)"
+  (lambda ()
+    (minibuffer-read "Type: "
+      (list (list "dir" "directories only")
+            (list "file" "regular files only")
+            (list "link" "symlinks only")
+            (list "exec" "anything executable"))
+      (lambda (t) (unless (equal? t "") (dired-filter-push! (list "type" t)))))))
+
+(define-command "dired-filter-dotfiles" "Toggle hiding dotfiles"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (fs (dired-filters buf))
+           (had (assoc "dot" fs)))
+      (buffer-set-local! buf 'dired-filters
+        (if had (filter (lambda (f) (not (equal? (car f) "dot"))) fs) fs))
+      (if had
+          (begin (dired-refresh buf (dired-dir buf)) (dired-goto-first-entry))
+          (dired-filter-push! (list "dot" #t))))))
+
+(define-command "dired-filter-pop" "Drop the most recent dired filter"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (buffer-set-local! buf 'dired-filters
+        (let ((fs (dired-filters buf))) (if (null? fs) '() (cdr fs))))
+      (dired-refresh buf (dired-dir buf))
+      (dired-goto-first-entry))))
+
+(define-command "dired-filter-clear" "Drop every dired filter"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (buffer-set-local! buf 'dired-filters '())
+      (dired-refresh buf (dired-dir buf))
+      (dired-goto-first-entry))))
+
 (define (dired-refresh buf dir)
   (let ((old-point (point)))
     (buffer-delete-range! buf 0 (buffer-size buf))
-    (buffer-append! buf (string-append dir ":\n"))
+    (buffer-append! buf (string-append dir ":" (dired-filters-label buf) "\n"))
     (buffer-append! buf "  ..\n")
     (for-each
       (lambda (e) (buffer-append! buf (dired-line buf dir e)))
-      (list-dir dir))
+      (dired-visible buf dir))
     (goto-char! old-point)))
 
 (define (dired-goto-first-entry)
@@ -74,7 +165,14 @@
   (local-set-key "d" "dired-flag-delete")
   (local-set-key "x" "dired-do-flagged-delete")
   (local-set-key "+" "dired-mkdir")
-  (local-set-key "q" "quit-window"))
+  (local-set-key "q" "quit-window")
+  ;; dired-filter style narrowing under the / prefix
+  (local-set-key "/ n" "dired-filter-name")
+  (local-set-key "/ e" "dired-filter-ext")
+  (local-set-key "/ t" "dired-filter-type")
+  (local-set-key "/ ." "dired-filter-dotfiles")
+  (local-set-key "/ p" "dired-filter-pop")
+  (local-set-key "/ /" "dired-filter-clear"))
 
 ;; a registered mode so desktop restore can re-run the setup — without it
 ;; a restored dired came back as a plain editable buffer (no keymap, no

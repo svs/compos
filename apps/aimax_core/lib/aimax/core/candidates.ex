@@ -64,6 +64,11 @@ defmodule Aimax.Core.Candidates do
     %{list | filtered: filtered}
   end
 
+  @doc "Widest label in the full set, in characters (0 when empty)."
+  def label_width(list) do
+    list.items |> Enum.map(&String.length(&1.label)) |> Enum.max(fn -> 0 end)
+  end
+
   def selected(list) do
     case Enum.at(filtered(list), list.sel) do
       %{label: label} -> label

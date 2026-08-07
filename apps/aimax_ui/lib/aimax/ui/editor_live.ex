@@ -322,7 +322,7 @@ defmodule Aimax.Ui.EditorLive do
           <div class="mb-label-row">
             {String.trim_trailing(@state.minibuffer.prompt, ": ")} · TAB completes · RET accepts · C-n/C-p selects · C-g quits
           </div>
-          <div class="mb-cands">
+          <div class="mb-cands" style={"--mb-label-w: #{@state.minibuffer.label_width}ch"}>
             <div
               :for={c <- @state.minibuffer.candidates}
               class={"mb-cand #{if c.selected, do: "selected"}"}

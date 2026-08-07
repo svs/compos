@@ -610,6 +610,9 @@ defmodule Aimax.Core.Editor do
       input: mb.input,
       point: (Buffer.exists?(@minibuf) && Buffer.point(@minibuf)) || Kernel.byte_size(mb.input),
       candidates: Candidates.rows(mb.list),
+      # widest label of the WHOLE set, not the visible window — the names
+      # column keeps one width for the session instead of reflowing per key
+      label_width: Candidates.label_width(mb.list),
       sel: mb.list.sel,
       total: Candidates.total(mb.list),
       completing: mb.on_complete not in [nil, false]

@@ -327,11 +327,13 @@ defmodule Aimax.Ui.Layouts do
             letter-spacing: 0.13em; text-transform: uppercase;
             color: var(--dim-fg, #8a857a);
           }
-          /* candidates column fits the longest label; marginalia sits in the
-             column immediately after it, aligned across rows */
+          /* the names column expands to the longest name in the whole set
+             (--mb-label-w, from the core) — marginalia sits immediately
+             after it and the column never reflows while narrowing */
           .mb-cands {
             max-height: 40dvh; overflow-y: auto;
-            display: grid; grid-template-columns: max-content minmax(0, auto);
+            display: grid;
+            grid-template-columns: var(--mb-label-w, max-content) minmax(0, auto);
             justify-content: start;
           }
           .mb-cand {

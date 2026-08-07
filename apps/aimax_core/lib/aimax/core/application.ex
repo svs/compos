@@ -18,6 +18,7 @@ defmodule Aimax.Core.Application do
       {Task.Supervisor, name: Aimax.Core.TaskSupervisor},
       Aimax.Core.Reactor,
       Aimax.Core.Editor,
+      Aimax.Core.Input,
       Aimax.Core.Session,
       Aimax.Core.Desktop,
       Aimax.Core.LLMDb,

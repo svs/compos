@@ -10,7 +10,7 @@ defmodule Aimax.Ui.EditorLive do
 
   use Phoenix.LiveView
 
-  alias Aimax.Core.{Events, KeyDispatch}
+  alias Aimax.Core.{Events, Input}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -32,7 +32,7 @@ defmodule Aimax.Ui.EditorLive do
   # handle_info
   @impl true
   def handle_event("key", %{"k" => spec}, socket) do
-    KeyDispatch.handle_key(spec)
+    Input.dispatch(spec)
     {:noreply, socket |> drain() |> refresh()}
   end
 
@@ -40,12 +40,14 @@ defmodule Aimax.Ui.EditorLive do
   # modeline-info-command (policy lives in scheme; this is just dispatch)
   def handle_event("ml_info", %{"win" => win, "buf" => buf}, socket) do
     with {id, ""} <- Integer.parse(to_string(win)) do
-      Aimax.Core.Editor.set_active(id)
+      Input.run(fn ->
+        Aimax.Core.Editor.set_active(id)
 
-      case Aimax.Core.Buffer.get_local(buf, "modeline-info-command") do
-        cmd when is_binary(cmd) -> Aimax.Core.Session.run_command(cmd)
-        _ -> :ok
-      end
+        case Aimax.Core.Buffer.get_local(buf, "modeline-info-command") do
+          cmd when is_binary(cmd) -> Aimax.Core.Session.run_command(cmd)
+          _ -> :ok
+        end
+      end)
     end
 
     {:noreply, socket |> drain() |> refresh()}
@@ -55,8 +57,10 @@ defmodule Aimax.Ui.EditorLive do
   # focus the window, run the command. agent-* commands only.
   def handle_event("agent_cmd", %{"win" => win, "cmd" => "agent-" <> _ = cmd}, socket) do
     with {id, ""} <- Integer.parse(to_string(win)) do
-      Aimax.Core.Editor.set_active(id)
-      Aimax.Core.Session.run_command(cmd)
+      Input.run(fn ->
+        Aimax.Core.Editor.set_active(id)
+        Aimax.Core.Session.run_command(cmd)
+      end)
     end
 
     {:noreply, socket |> drain() |> refresh()}
@@ -86,15 +90,17 @@ defmodule Aimax.Ui.EditorLive do
   # its input region), then place point when the click hit a text line
   def handle_event("mouse", %{"win" => win} = params, socket) do
     with id when is_integer(id) <- safe_int(win) do
-      Aimax.Core.Session.eval("(mouse-select-window! #{id})")
+      Input.run(fn ->
+        Aimax.Core.Session.eval("(mouse-select-window! #{id})")
 
-      case params do
-        %{"line" => line, "col" => col} when is_integer(line) and is_integer(col) ->
-          Aimax.Core.Editor.mouse_goto(id, line, col)
+        case params do
+          %{"line" => line, "col" => col} when is_integer(line) and is_integer(col) ->
+            Aimax.Core.Editor.mouse_goto(id, line, col)
 
-        _ ->
-          :ok
-      end
+          _ ->
+            :ok
+        end
+      end)
     end
 
     {:noreply, socket |> drain() |> refresh()}
@@ -104,8 +110,10 @@ defmodule Aimax.Ui.EditorLive do
   def handle_event("mouse_sel", %{"win" => win, "al" => al, "ac" => ac, "fl" => fl, "fc" => fc}, socket)
       when is_integer(al) and is_integer(ac) and is_integer(fl) and is_integer(fc) do
     with id when is_integer(id) <- safe_int(win) do
-      Aimax.Core.Session.eval("(mouse-select-window! #{id})")
-      Aimax.Core.Editor.mouse_region(id, al, ac, fl, fc)
+      Input.run(fn ->
+        Aimax.Core.Session.eval("(mouse-select-window! #{id})")
+        Aimax.Core.Editor.mouse_region(id, al, ac, fl, fc)
+      end)
     end
 
     {:noreply, socket |> drain() |> refresh()}
@@ -113,7 +121,7 @@ defmodule Aimax.Ui.EditorLive do
 
   # system clipboard: Cmd-V arrives as a browser paste event
   def handle_event("paste", %{"text" => text}, socket) when is_binary(text) do
-    Aimax.Core.Session.eval("(clipboard-paste! #{scheme_string(text)})")
+    Input.run(fn -> Aimax.Core.Session.eval("(clipboard-paste! #{scheme_string(text)})") end)
     {:noreply, socket |> drain() |> refresh()}
   end
 

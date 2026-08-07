@@ -373,7 +373,20 @@
                    (let loop ((ms (re-find* *agent-prompt-marker* (buffer-text buf)))
                               (last (buffer-size buf)))
                      (if (null? ms) last (loop (cdr ms) (car (car ms)))))))
-         (m (buffer-local buf 'agent-model)))
+         (cname (or (buffer-local buf 'agent-connector) *default-connector*))
+         ;; a model left over from ANOTHER connector is worse than none:
+         ;; the adapter silently ignores it and runs its default while the
+         ;; modeline repeats the stale name. Foreign -> connector default.
+         (m (let ((m0 (buffer-local buf 'agent-model))
+                  (declared (connector-models cname)))
+              (if (and m0 (pair? declared) (not (member m0 declared)))
+                  (begin
+                    (buffer-set-local! buf 'agent-model #f)
+                    (agent-update-modeline! buf)
+                    (message (string-append m0 " isn't a " cname
+                                            " model — using its default"))
+                    #f)
+                  m0))))
     (buffer-set-local! buf 'agent-queued '())
     ;; seed only when there IS a conversation — a fresh surface's meta
     ;; card alone is chrome, not context

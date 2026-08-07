@@ -193,6 +193,31 @@ defmodule Aimax.ChatResetTest do
     assert eval!(~s{(buffer-local (current-buffer) 'modeline-info)}) =~ "claude-opus-5"
   end
 
+  test "a stale cross-connector model is dropped on revive" do
+    :persistent_term.put(:chat_reset_test_pid, self())
+    Application.put_env(:aimax_core, :acp_transport, Aimax.ChatResetTest.FakeTransport)
+
+    on_exit(fn ->
+      Application.delete_env(:aimax_core, :acp_transport)
+      Aimax.Core.Agent.kill("zz8")
+    end)
+
+    eval!(~s{(begin
+      (switch-to-buffer! (group-chat "staleg"))
+      (set-mode! "chat-mode")
+      (buffer-set-local! (current-buffer) 'agent-slug "zz8")
+      (buffer-set-local! (current-buffer) 'agent-connector "claude-code")
+      (buffer-set-local! (current-buffer) 'agent-model "gpt-5.6-luna")
+      (agent-revive! "zz8")
+      #t)})
+
+    assert_receive {:transport_open, _}, 1_000
+    assert eval!(~s{(buffer-local (current-buffer) 'agent-model)}) == "#f"
+    modeline = eval!(~s{(buffer-local (current-buffer) 'modeline-info)})
+    assert modeline =~ "claude-code"
+    refute modeline =~ "gpt-5.6-luna"
+  end
+
   test "outside a chat it refuses politely" do
     eval!(~s{(begin (switch-to-buffer! "*scratch*") (run-command "chat-reset"))})
     assert eval!(~s{(buffer-exists? "*scratch*")}) == "#t"

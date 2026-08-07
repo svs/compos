@@ -826,6 +826,7 @@
     (let ((buf (current-buffer)))
       (local-set-key "C-c RET" "chat-send")
       (local-set-key "C-c m" "chat-set-model")
+      (local-set-key "C-c $" "chat-cost")
       ;; legacy: pre-group companions carried a 'companion-of pointer —
       ;; upgrade both ends to the 'group tag (idempotent, so desktop
       ;; restore migrates old sessions by itself)
@@ -878,10 +879,14 @@
     (set-mode! "chat-mode")
     (end-of-buffer!)))
 
-;; tools when the tools package is loaded and chat-use-tools is on
-(define (chat-llm prompt handler)
+;; tools when the tools package is loaded and chat-use-tools is on; presets
+;; and cost tracking apply to plain chats exactly like rich ones
+(define (chat-llm buf prompt handler)
   (if (and (boundp (quote chat-use-tools)) chat-use-tools)
-      (llm-with-tools prompt handler)
+      (llm-tools prompt *llm-system*
+                 (append (llm-tool-specs) (chat-extra-specs buf))
+                 llm-tool-call handler
+                 (lambda (u) (chat-usage-note! buf u)))
       (llm prompt handler)))
 
 ;; the per-send system preamble: a grouped chat points the model at the
@@ -959,7 +964,7 @@
     (buffer-append! buf (chat-reply-marker))
     (end-of-buffer!)
     (message "LLM thinking...")
-    (chat-llm (string-append (chat-preamble buf) convo)
+    (chat-llm buf (string-append (chat-preamble buf) convo)
          (lambda (reply)
            (buffer-append! buf
              (string-append
@@ -969,7 +974,7 @@
                (chat-prompt-marker)))
            (when (equal? (current-buffer) buf)
              (end-of-buffer!))
-           (message "Reply ready")
+           (message (chat-ready-message buf))
            (when (equal? buf "*chat*")
              (chat-maybe-title!))))))
 
@@ -1066,10 +1071,37 @@
         (list (number->string hstart) name "tool" "done" bstart))
       result)))
 
+;; presets (packages/mcp.scm) add MCP tool specs per chat; usage lands in
+;; buffer-locals so every chat knows what it cost (persists with the chat)
+(define (chat-extra-specs buf)
+  (if (boundp (quote chat-extra-tool-specs))
+      (chat-extra-tool-specs buf)
+      '()))
+
+(define (chat-usage-note! buf u)
+  (let ((cost (custom--plist-get u 'cost)))
+    (buffer-set-local! buf 'chat-last-usage u)
+    (when cost
+      (let ((total (+ (or (buffer-local buf 'chat-cost) 0) cost)))
+        (buffer-set-local! buf 'chat-cost total)
+        (when (buffer-local buf 'agent-saved-mark)
+          (buffer-set-local! buf 'modeline-info
+            (string-append "companion · " (llm-model) " · " (format-usd total))))))))
+
+(define (chat-ready-message buf)
+  (let ((u (buffer-local buf 'chat-last-usage)))
+    (string-append "Reply ready"
+      (if (and u (custom--plist-get u 'cost))
+          (string-append " · " (format-usd (custom--plist-get u 'cost))
+                         " (chat total " (format-usd (or (buffer-local buf 'chat-cost) 0)) ")")
+          ""))))
+
 (define (chat-llm-rich buf prompt handler)
   (if (and (boundp (quote chat-use-tools)) chat-use-tools)
-      (llm-tools prompt *llm-system* (llm-tool-specs)
-                 (chat-tool-dispatch buf) handler)
+      (llm-tools prompt *llm-system*
+                 (append (llm-tool-specs) (chat-extra-specs buf))
+                 (chat-tool-dispatch buf) handler
+                 (lambda (u) (chat-usage-note! buf u)))
       (llm prompt handler)))
 
 (define (chat-send-rich! buf)
@@ -1094,7 +1126,7 @@
                 (chat-turn-push! buf "assistant" text)
                 (let ((start (chat-render! buf (string-append text "\n"))))
                   (chat-blocks-push! buf start (chat-mark buf) "prose" '())))
-              (message "Reply ready")))))))
+              (message (chat-ready-message buf))))))))
 
 (define-command "chat-toggle-view" "Toggle between rich and plain chat transcript"
   (lambda ()
@@ -1126,9 +1158,14 @@
       (let ((was (active-window)))
         (buffer-create new)
         (buffer-append! new (buffer-text old))
-        ;; group membership must survive the rename
+        ;; group membership, presets, and spend must survive the rename
         (let ((g (buffer-group old)))
           (when g (buffer-set-local! new 'group g)))
+        (for-each
+          (lambda (k)
+            (let ((v (buffer-local old k)))
+              (when v (buffer-set-local! new k v))))
+          '(chat-presets chat-cost chat-last-usage chat-turns))
         (for-each
           (lambda (w)
             (if (equal? (cadr w) old)
@@ -1374,6 +1411,47 @@
 ;; the global *chat* bottom popup — follow-ups with C-c RET, C-` dismisses.
 (add-display-rule! "*chat*" 'popup)
 (add-display-rule! "*llm:" 'popup)
+(add-display-rule! "*llm-costs*" 'popup)
+
+;;; --- llm cost inspection -----------------------------------------------------
+;;; Every request is priced (models.dev catalog, cached in ~/.aimax/llmdb.json,
+;;; refreshed daily) and recorded in ~/.aimax/llm-usage.jsonl; each chat also
+;;; sums its own spend in the 'chat-cost buffer-local.
+
+(define-command "chat-cost" "Show what this chat has cost"
+  (lambda ()
+    (let ((c (buffer-local (current-buffer) 'chat-cost))
+          (u (buffer-local (current-buffer) 'chat-last-usage)))
+      (if (not c)
+          (message "No priced requests in this chat yet")
+          (message
+            (string-append "This chat: " (format-usd c)
+              (if u
+                  (string-append " · last turn "
+                    (number->string (custom--plist-get u 'input)) "→"
+                    (number->string (custom--plist-get u 'output)) " tokens"
+                    (let ((tc (custom--plist-get u 'cost)))
+                      (if tc (string-append " (" (format-usd tc) ")") "")))
+                  "")))))))
+
+(define-command "llm-costs" "Show LLM spend by day and model (the usage ledger)"
+  (lambda ()
+    (let ((rows (llm-cost-report))
+          (buf "*llm-costs*"))
+      (buffer-create buf)
+      (buffer-delete-range! buf 0 (string-byte-length (buffer-text buf)))
+      (buffer-append! buf
+        (fold (lambda (acc r)
+                (string-append acc
+                  (custom--plist-get r 'day) "  "
+                  (format-usd (custom--plist-get r 'cost)) "  "
+                  (number->string (custom--plist-get r 'requests)) " reqs  "
+                  (number->string (custom--plist-get r 'input)) "→"
+                  (number->string (custom--plist-get r 'output)) "  "
+                  (custom--plist-get r 'model) "\n"))
+              "LLM spend · ledger ~/.aimax/llm-usage.jsonl · per-chat: C-c $\n\n"
+              rows))
+      (switch-to-buffer! buf))))
 
 ;; start a fresh conversation (the old one keeps its titled buffer)
 (define-command "chat-new" "Start a fresh chat conversation"
@@ -1732,6 +1810,8 @@
 (global-set-key "C-x k" "kill-buffer")
 
 (global-set-key "M-x" "execute-extended-command")
+(global-set-key "M-<" "beginning-of-buffer")
+(global-set-key "M->" "end-of-buffer")
 (global-set-key "M-:" "eval-expression")
 (global-set-key "C-x C-e" "eval-last-sexp")
 

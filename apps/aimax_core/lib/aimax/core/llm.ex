@@ -43,31 +43,44 @@ defmodule Aimax.Core.LLM do
 
   @doc """
   Async tool loop. `specs` is Scheme data: ((name description params) ...)
-  with params ((pname type description [optional]) ...). `dispatcher` is a
-  Scheme closure `(name args-plist) -> result`; `callback` gets the final text.
+  with params ((pname type description [optional]) ...) — or, for bridged
+  MCP tools, a JSON input-schema string in place of the params list.
+  `dispatcher` is a Scheme closure `(name args-plist) -> result`; `callback`
+  gets the final text. opts: `:on_usage` is called (before `callback`) with
+  the summed usage map of every round, plus "cost" when llmdb prices the
+  model; the request is also recorded in the LLMDb ledger.
   """
-  def complete_tools(prompt, system, specs, dispatcher, callback)
+  def complete_tools(prompt, system, specs, dispatcher, callback, opts \\ [])
       when is_function(callback, 1) do
     tools = Enum.map(specs, &tool_json/1)
 
     {:ok, _} =
       Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
-        case tool_loop([%{role: "user", content: prompt}], system, tools, dispatcher, 0) do
-          {:ok, text} -> callback.(text)
-          {:error, msg} -> Session.message("llm error: #{msg}")
+        case tool_loop([%{role: "user", content: prompt}], system, tools, dispatcher, 0, %{}) do
+          {:ok, text, usage} ->
+            deliver_usage(usage, opts[:on_usage])
+            callback.(text)
+
+          {:error, msg} ->
+            Session.message("llm error: #{msg}")
         end
       end)
 
     :ok
   end
 
-  defp tool_loop(_messages, _system, _tools, _dispatcher, rounds)
+  defp deliver_usage(usage, on_usage) do
+    cost = Aimax.Core.LLMDb.record(model(), usage)
+    if on_usage, do: on_usage.(Map.put(usage, "cost", cost))
+  end
+
+  defp tool_loop(_messages, _system, _tools, _dispatcher, rounds, _usage)
        when rounds >= @max_tool_rounds,
        do: {:error, "tool loop exceeded #{@max_tool_rounds} rounds"}
 
-  defp tool_loop(messages, system, tools, dispatcher, rounds) do
+  defp tool_loop(messages, system, tools, dispatcher, rounds, usage) do
     case chat_fun().(%{messages: messages, system: system, tools: tools}) do
-      {:ok, %{"stop_reason" => "tool_use", "content" => blocks}} ->
+      {:ok, %{"stop_reason" => "tool_use", "content" => blocks} = resp} ->
         results =
           for %{"type" => "tool_use"} = b <- blocks do
             %{
@@ -80,13 +93,30 @@ defmodule Aimax.Core.LLM do
         messages =
           messages ++ [%{role: "assistant", content: blocks}, %{role: "user", content: results}]
 
-        tool_loop(messages, system, tools, dispatcher, rounds + 1)
+        tool_loop(messages, system, tools, dispatcher, rounds + 1, add_usage(usage, resp))
 
-      {:ok, %{"content" => blocks}} ->
-        {:ok, Enum.map_join(blocks, "", &(&1["text"] || ""))}
+      {:ok, %{"content" => blocks} = resp} ->
+        {:ok, Enum.map_join(blocks, "", &(&1["text"] || "")), add_usage(usage, resp)}
 
       {:error, msg} ->
         {:error, msg}
+    end
+  end
+
+  # sum token counts across the loop's rounds
+  defp add_usage(acc, %{"usage" => usage}) when is_map(usage),
+    do: Map.merge(acc, usage, fn _k, a, b -> if is_number(a) and is_number(b), do: a + b, else: b end)
+
+  defp add_usage(acc, _), do: acc
+
+  # MCP tools dispatch in Elixir, never through the Scheme session — a slow
+  # web fetch inside Session.call_fn would block every keystroke
+  defp run_tool(_dispatcher, "mcp__" <> _ = name, input) do
+    Session.message("tool: #{name} #{inspect(input)}")
+
+    case Aimax.Core.MCP.call_qualified(name, input) do
+      {:ok, text} -> text
+      {:error, msg} -> "error: #{msg}"
     end
   end
 
@@ -110,6 +140,10 @@ defmodule Aimax.Core.LLM do
   def json_to_scheme(l) when is_list(l), do: Enum.map(l, &json_to_scheme/1)
   def json_to_scheme(nil), do: false
   def json_to_scheme(v), do: v
+
+  # MCP-bridged tools carry their original JSON schema verbatim
+  defp tool_json([name, description, schema]) when is_binary(schema),
+    do: %{name: plain(name), description: description, input_schema: Jason.decode!(schema)}
 
   defp tool_json([name, description, params]) do
     properties =
@@ -178,53 +212,9 @@ defmodule Aimax.Core.LLM do
     end
   end
 
-  # key sources per var: env -> ~/.aimax/<lowercased>-key -> doppler (cached)
-  defp api_key(var \\ "ANTHROPIC_API_KEY") do
-    with nil <- non_empty(System.get_env(var)),
-         nil <- file_key(var),
-         nil <- doppler_key(var) do
-      nil
-    end
-  end
-
-  defp non_empty(s) when s in [nil, ""], do: nil
-  defp non_empty(s), do: s
-
-  defp file_key(var) do
-    name = var |> String.replace("_API_KEY", "") |> String.downcase()
-
-    case File.read(Path.join(Aimax.Core.home(), "#{name}-key")) do
-      {:ok, key} -> non_empty(String.trim(key))
-      _ -> nil
-    end
-  end
-
-  # doppler (project personal / config dev), same source as ~/.emacs.d/secrets.el
-  defp doppler_key(var) do
-    cache_key = {:aimax_doppler, var}
-
-    case :persistent_term.get(cache_key, :unset) do
-      :unset ->
-        key =
-          case System.cmd(
-                 "doppler",
-                 ["secrets", "get", var, "--project", "personal", "--config", "dev", "--plain"],
-                 stderr_to_stdout: true
-               ) do
-            {out, 0} -> non_empty(String.trim(out))
-            _ -> nil
-          end
-
-        :persistent_term.put(cache_key, key)
-        key
-
-      cached ->
-        cached
-    end
-  rescue
-    # doppler binary missing
-    _ -> nil
-  end
+  # key sources per var: env -> ~/.aimax/<lowercased>-key -> doppler (cached);
+  # shared with MCP server specs via Aimax.Core.Keys
+  defp api_key(var), do: Aimax.Core.Keys.get(var)
 
   # Provider routing by model name:
   #   "openrouter:<model>"      -> OpenRouter (openai-compatible)
@@ -261,7 +251,8 @@ defmodule Aimax.Core.LLM do
           receive_timeout: 180_000
         )
         |> case do
-          {:ok, %{status: 200, body: %{"content" => blocks}}} ->
+          {:ok, %{status: 200, body: %{"content" => blocks} = body}} ->
+            if is_map(body["usage"]), do: Aimax.Core.LLMDb.record(model, body["usage"])
             {:ok, Enum.map_join(blocks, "", &(&1["text"] || ""))}
 
           other ->
@@ -282,7 +273,8 @@ defmodule Aimax.Core.LLM do
           receive_timeout: 180_000
         )
         |> case do
-          {:ok, %{status: 200, body: %{"choices" => [%{"message" => %{"content" => text}} | _]}}} ->
+          {:ok, %{status: 200, body: %{"choices" => [%{"message" => %{"content" => text}} | _]} = body}} ->
+            if is_map(body["usage"]), do: Aimax.Core.LLMDb.record(model(), body["usage"])
             {:ok, text}
 
           other ->

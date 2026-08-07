@@ -1,0 +1,58 @@
+# Minimal MCP server over stdio for tests: newline-delimited JSON-RPC,
+# initialize handshake, one tool ("echo"). Uses OTP's :json — no deps, so it
+# runs as `elixir fake_mcp_server.exs` straight from a Port.
+defmodule FakeMCP do
+  def loop do
+    case IO.gets("") do
+      :eof -> :ok
+      {:error, _} -> :ok
+      line ->
+        line |> String.trim() |> handle()
+        loop()
+    end
+  end
+
+  defp handle(""), do: :ok
+
+  defp handle(line) do
+    case :json.decode(line) do
+      %{"method" => "initialize", "id" => id, "params" => params} ->
+        reply(id, %{
+          protocolVersion: params["protocolVersion"],
+          capabilities: %{tools: %{}},
+          serverInfo: %{name: "fake-mcp", version: "0.0.1"}
+        })
+
+      %{"method" => "tools/list", "id" => id} ->
+        reply(id, %{
+          tools: [
+            %{
+              name: "echo",
+              description: "Echo back v.",
+              inputSchema: %{
+                type: "object",
+                properties: %{v: %{type: "string", description: "value to echo"}},
+                required: ["v"]
+              }
+            }
+          ]
+        })
+
+      %{"method" => "tools/call", "id" => id, "params" => params} ->
+        v = params["arguments"]["v"] || ""
+        reply(id, %{content: [%{type: "text", text: "echo:" <> v}]})
+
+      %{"method" => _, "id" => id} ->
+        send_msg(%{jsonrpc: "2.0", id: id, error: %{code: -32601, message: "method not found"}})
+
+      _notification ->
+        :ok
+    end
+  end
+
+  defp reply(id, result), do: send_msg(%{jsonrpc: "2.0", id: id, result: result})
+
+  defp send_msg(msg), do: msg |> :json.encode() |> IO.iodata_to_binary() |> IO.puts()
+end
+
+FakeMCP.loop()

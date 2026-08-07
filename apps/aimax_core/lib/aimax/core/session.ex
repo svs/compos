@@ -286,20 +286,71 @@ defmodule Aimax.Core.Session do
         :void
       end,
       # gptel-style native tool use: specs/dispatcher come from the Scheme
-      # registry (packages/tools.scm) — the loop lives in LLM.complete_tools
-      "llm-tools" => fn [prompt, system, specs, dispatcher, callback] ->
+      # registry (packages/tools.scm) — the loop lives in LLM.complete_tools.
+      # An optional sixth arg is a usage callback: it gets a plist of summed
+      # token counts + cost before the text callback fires.
+      "llm-tools" => fn [prompt, system, specs, dispatcher, callback | rest] ->
+        usage_cb = List.first(rest)
         key = {:llm_tools, make_ref()}
-        :ets.insert(@escaped, {key, [dispatcher, callback]})
+        :ets.insert(@escaped, {key, [dispatcher, callback, usage_cb]})
 
-        Aimax.Core.LLM.complete_tools(prompt, system, specs, dispatcher, fn text ->
-          try do
-            apply_callback(callback, [text])
-          after
-            :ets.delete(@escaped, key)
-          end
-        end)
+        on_usage =
+          usage_cb &&
+            fn usage -> apply_callback(usage_cb, [usage_to_plist(usage)]) end
+
+        Aimax.Core.LLM.complete_tools(
+          prompt,
+          system,
+          specs,
+          dispatcher,
+          fn text ->
+            try do
+              apply_callback(callback, [text])
+            after
+              :ets.delete(@escaped, key)
+            end
+          end,
+          on_usage: on_usage
+        )
 
         :void
+      end,
+
+      # --- MCP client (Aimax.Core.MCP; policy in packages/mcp.scm) ----------
+      "mcp-connect!" => fn [name, spec] ->
+        case Aimax.Core.MCP.connect(s(name), mcp_spec(spec)) do
+          {:ok, _} -> :void
+          {:error, msg} -> raise_scheme("mcp-connect!: #{inspect(msg)}")
+        end
+      end,
+      "mcp-disconnect!" => fn [name] ->
+        Aimax.Core.MCP.disconnect(s(name))
+        :void
+      end,
+      "mcp-connections" => fn [] ->
+        for c <- Aimax.Core.MCP.connections() do
+          [c.name, to_string(c.status), c.tools]
+        end
+      end,
+      "mcp-tool-specs" => fn [names] ->
+        Aimax.Core.MCP.tool_specs(Enum.map(names, &s/1))
+      end,
+      "format-usd" => fn [amount] when is_number(amount) ->
+        "$" <> :erlang.float_to_binary(amount * 1.0, decimals: 4)
+      end,
+      "llm-price" => fn [model] ->
+        case Aimax.Core.LLMDb.price(s(model)) do
+          nil -> false
+          p -> [{:sym, "input"}, p.input, {:sym, "output"}, p.output,
+                {:sym, "cache-read"}, p.cache_read, {:sym, "cache-write"}, p.cache_write]
+        end
+      end,
+      "llm-cost-report" => fn [] ->
+        for row <- Aimax.Core.LLMDb.report() do
+          [{:sym, "day"}, row.day, {:sym, "model"}, row.model,
+           {:sym, "requests"}, row.requests, {:sym, "input"}, row.input,
+           {:sym, "output"}, row.output, {:sym, "cost"}, row.cost * 1.0]
+        end
       end,
       "set-llm-model!" => fn [m] ->
         Aimax.Core.LLM.set_model(m)
@@ -630,4 +681,25 @@ defmodule Aimax.Core.Session do
   defp plist_val_to_elixir({:sym, str}), do: str
   defp plist_val_to_elixir(v) when is_list(v), do: Enum.map(v, &plist_val_to_elixir/1)
   defp plist_val_to_elixir(v), do: v
+
+  # MCP spec plist: 'env and 'headers values are themselves plists -> maps
+  defp mcp_spec(plist) do
+    plist
+    |> plist_to_map()
+    |> Map.new(fn
+      {k, v} when k in ["env", "headers"] and is_list(v) ->
+        {k, v |> Enum.chunk_every(2) |> Map.new(fn [a, b] -> {to_string(a), b} end)}
+
+      kv ->
+        kv
+    end)
+  end
+
+  defp usage_to_plist(usage) do
+    t = Aimax.Core.LLMDb.tokens(usage)
+
+    [{:sym, "input"}, t.input, {:sym, "output"}, t.output,
+     {:sym, "cache-read"}, t.cache_read, {:sym, "cache-write"}, t.cache_write,
+     {:sym, "cost"}, usage["cost"] || false]
+  end
 end

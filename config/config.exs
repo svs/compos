@@ -28,7 +28,9 @@ if config_env() == :test do
   config :aimax_core,
     home: "/tmp/aimax-test-home",
     desktop_path: "/tmp/aimax-desktop-test.etf",
-    desktop_autorestore: false
+    desktop_autorestore: false,
+    # no models.dev fetches from tests
+    llmdb_auto: false
   config :logger, level: :warning
 
   config :aimax_ui, Aimax.Ui.Endpoint,

@@ -878,14 +878,17 @@
           (string-byte-length *chat-input-marker*))
         ;; the modeline states the backend: connector for agent-backed
         ;; chats, "companion · model" for the API lane. An agent-backed
-        ;; chat also sheds stale permission/waiting cards on restore —
-        ;; the runtime they belonged to did not survive the restart
-        ;; (agent-mode-setup! does the same for *agent:* buffers)
+        ;; chat also sheds stale permission/waiting cards on restore (the
+        ;; runtime they belonged to did not survive the restart) and gets
+        ;; its overlays and folds back from the persisted locals
         (if (buffer-local buf 'agent-slug)
             (begin
               (agent-update-modeline! buf)
               (agent-block-drop-kind! buf "permission")
-              (agent-block-drop-kind! buf "waiting"))
+              (agent-block-drop-kind! buf "waiting")
+              (let ((ovs (buffer-local buf 'agent-overlays)))
+                (when ovs (overlay-set! buf 'agent ovs)))
+              (agent-apply-folds! buf))
             (buffer-set-local! buf 'modeline-info
               (string-append "companion · " (llm-model))))
         (chat-clear-waiting! buf)
@@ -1018,10 +1021,14 @@
 ;;; thread binds to it by slug, and the agent's MCP servers come from the
 ;;; chat's presets plus the editor's own tool proxy. C-c b switches.
 
-(define (chat-attach-agent! buf connector)
+;; opts (a config plist) rides in front, so per-call keys — cmd, model,
+;; cwd — win over the connector's declared config, first-wins
+(define (chat-attach-agent! buf connector &optional model opts)
   (let ((slug (or (buffer-local buf 'agent-slug) (agent-next-slug))))
     (buffer-set-local! buf 'agent-slug slug)
     (buffer-set-local! buf 'agent-connector connector)
+    (when (and model (not (equal? model "")))
+      (buffer-set-local! buf 'agent-model model))
     (let ((mark (or (buffer-local buf 'agent-saved-mark)
                     ;; plain chat: give it the marker structure threads use
                     (let ((m (buffer-size buf)))
@@ -1036,11 +1043,28 @@
       (agent-start! slug
         (append (list 'buffer buf 'mark mark)
                 (agent-resolve-config
-                  (list 'connector connector
-                        'presets (if (boundp (quote chat-presets-of))
-                                     (chat-presets-of buf)
-                                     '())))))
+                  (append
+                    (or opts '())
+                    (list 'connector connector
+                          'presets (if (boundp (quote chat-presets-of))
+                                       (chat-presets-of buf)
+                                       '()))
+                    (if (and model (not (equal? model "")))
+                        (list 'model model)
+                        '())))))
       slug)))
+
+;; a task chat's surface: meta card + input marker — the thread flavor
+;; of group-chat-init!, used by (execute ...)
+(define (chat-task-init! buf label)
+  (let ((help (string-append
+                "chat · " label "\n"
+                "RET sends · C-RET interrupts · TAB folds tool output · "
+                "C-c b backend · C-c m model\n")))
+    (buffer-append! buf help)
+    (chat-blocks-push! buf 0 (string-byte-length help) "meta" '())
+    (buffer-set-local! buf 'agent-saved-mark (string-byte-length help))
+    (buffer-append! buf *chat-input-marker*)))
 
 ;; a chat saved as a file IS a revivable conversation: the transcript
 ;; format is ### You / ### Assistant (whole buffer = context) and .chat

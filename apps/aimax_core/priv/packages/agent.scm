@@ -1,11 +1,10 @@
-;;; agent.scm — agent threads. A thread is a buffer; no sidebars.
-;;;
-;;; (execute "task") is the API — spawns an ACP agent (Claude Code et al.)
-;;; whose transcript streams into *agent: <slug>*. Steer by typing at the
-;;; ╰─ you ▸ marker and RET (queued if the agent is mid-turn). C-RET
-;;; interrupts. TAB folds/unfolds tool output. C-c C-y / C-c C-n answer
-;;; permission requests. The Elixir side (Aimax.Core.Agent) is mechanism
-;;; only: subprocess, framing, event batches. Everything visible lives here.
+;;; agent.scm — ACP thread machinery for chats. There is only chat: a
+;;; thread is a chat buffer riding an ACP backend (chat-set-backend, or
+;;; (execute "task") which spawns a fresh *chat:<slug>*). Steer by typing
+;;; at the ╰─ you ▸ marker and RET (queued if the agent is mid-turn).
+;;; C-RET interrupts. TAB folds/unfolds tool output. C-c C-y / C-c C-n
+;;; answer permission requests. The Elixir side (Aimax.Core.Agent) is
+;;; mechanism only: subprocess, framing, event batches.
 
 ;;; --- faces --------------------------------------------------------------------
 
@@ -660,7 +659,6 @@
   (local-set-key* buf "C-c C-y" "agent-permission-allow")
   (local-set-key* buf "C-c C-a" "agent-permission-always")
   (local-set-key* buf "C-c C-n" "agent-permission-deny")
-  (local-set-key* buf "C-c C-r" "agent-rename")
   (local-set-key* buf "C-c C-v" "agent-toggle-view"))
 
 (define-command "agent-toggle-view" "Toggle rich and plain transcript rendering"
@@ -671,99 +669,36 @@
           (buffer-set-local! buf 'render-mode (if rich? #f "agent"))
           (message (if rich? "plain transcript" "rich transcript")))))))
 
-;; rename = new buffer carrying the transcript + thread identity; the
-;; runtime (registered by slug) restarts under the new name if it was alive
-(define (agent-do-rename! old new)
-  (let ((obuf (agent-buffer old))
-        (nbuf (agent-buffer new))
-        (alive (not (equal? (agent-status old) 'dead))))
-    (agent-kill! old)
-    (buffer-create nbuf)
-    (buffer-append! nbuf (buffer-text obuf))
-    (for-each
-      (lambda (k) (buffer-set-local! nbuf k (buffer-local obuf k)))
-      '(agent-connector agent-model agent-saved-mark agent-folds agent-overlays))
-    (buffer-set-local! nbuf 'agent-slug new)
-    (switch-to-buffer! nbuf)
-    (buffer-kill! obuf)
-    (agent-mode-setup! nbuf)
-    (when alive (agent-revive! new))
-    (message (string-append "thread renamed: " old " -> " new))))
 
-(define-command "agent-rename" "Rename this thread, keeping its transcript"
-  (lambda ()
-    (let ((old (agent-slug-of (current-buffer))))
-      (if (not old)
-          (message "not an agent buffer")
-          (minibuffer-read (string-append "Rename thread " old " to: ") '()
-            (lambda (new)
-              (cond ((equal? new "") (message "rename cancelled"))
-                    ((buffer-exists? (agent-buffer new)) (message "name taken"))
-                    (else (agent-do-rename! old new)))))))))
+;; legacy: pre-unification *agent:* buffers restore straight into
+;; chat-mode — there is only chat, riding ACP or the API. chat-mode's
+;; setup rebuilds keys, overlays, and folds from the persisted locals.
+(define-mode "agent-mode" (lambda () (set-mode! "chat-mode")))
 
-;; setup doubles as desktop-restore: keys, overlays, and folds all come
-;; back from the persisted buffer-locals (the agent process itself does
-;; not survive a restart — the transcript does, status reads 'dead)
-(define (agent-mode-setup! buf)
-  (buffer-set-local! buf 'mode-name "agent-mode")
-  (buffer-set-local! buf 'modeline-info-command "agent-switch")
-  ;; rich transcript by default; C-c C-v drops to the plain text view
-  (buffer-set-local! buf 'render-mode "agent")
-  (buffer-set-local! buf 'agent-marker-bytes
-    (string-byte-length *agent-prompt-marker*))
-  ;; derive the modeline from whatever locals survived — buffers saved
-  ;; before this feature existed have none
-  (agent-update-modeline! buf)
-  ;; a restored thread has no live runtime: pending banners are stale by
-  ;; definition
-  (agent-block-drop-kind! buf "permission")
-  (agent-block-drop-kind! buf "waiting")
-  ;; ...and so is queued-send bookkeeping — the runtime prompt queue it
-  ;; mirrors died with the daemon. Left in place it deadlocks the input
-  ;; region (muted text waiting for a turn that nothing will start); the
-  ;; text itself stays, as ordinary editable input.
-  (buffer-set-local! buf 'agent-queued #f)
-  (agent-install-keys! buf)
-  (let ((ovs (buffer-local buf 'agent-overlays)))
-    (when ovs (overlay-set! buf 'agent ovs)))
-  (agent-apply-folds! buf))
-
-(define-mode "agent-mode" (lambda () (agent-mode-setup! (current-buffer))))
-
-;; (execute "task")                         — spawn a thread on the default connector
-;; (execute* "task" '(connector "codex"))   — pick a connector; other config
-;;                                            plist entries override it
-(public! 'execute "(execute \"task\") — spawn an agent thread; returns its slug")
-(public! 'execute* "(execute* \"task\" '(connector \"codex\")) — spawn with config")
+;; (execute "task")                         — spawn a task chat on the default connector
+;; (execute* "task" '(connector "codex"))   — pick a connector / pin a model
+(public! 'execute "(execute \"task\") — spawn a task chat on an ACP backend; returns its slug")
+(public! 'execute* "(execute* \"task\" '(connector \"codex\" model \"...\")) — spawn with config")
 
 (define (execute prompt) (execute* prompt '()))
 
 (define (execute* prompt opts)
-  (let ((slug (agent-next-slug)))
-    (let ((buf (agent-buffer slug)))
-      (buffer-create buf)
-      (buffer-set-local! buf 'agent-slug slug)
-      (let ((conf (agent-resolve-config opts)))
-        (buffer-set-local! buf 'agent-connector
-          (or (plist-get opts 'connector) *default-connector*))
-        ;; in-process llm threads pin nothing: every request follows the
-        ;; editor's current default model (ai-config / set-llm-model!), so a
-        ;; stored snapshot here would only drift from the truth
-        (buffer-set-local! buf 'agent-model (agent-conf-model conf))
-        (agent-update-modeline! buf)
-        (buffer-append! buf (string-append ";; agent thread · " slug "\n"))
-        (let ((mark (buffer-size buf)))
-          (buffer-append! buf *agent-prompt-marker*)
-          (agent-mode-setup! buf)
-          (agent-start! slug
-            (append (list 'buffer buf 'mark mark) conf))
-          (unless (equal? prompt "")
-            (agent-prompt! slug prompt))
-          (display-buffer buf)
-          ;; popup selects the thread window — land point in the input region
-          (when (equal? (current-buffer) buf)
-            (end-of-buffer!))
-          slug)))))
+  (let* ((slug (agent-next-slug))
+         (buf (string-append "*chat:" slug "*")))
+    (buffer-create buf)
+    (buffer-set-local! buf 'agent-slug slug)
+    (chat-task-init! buf slug)
+    (chat-attach-agent! buf
+      (or (plist-get opts 'connector) *default-connector*)
+      (plist-get opts 'model)
+      opts)
+    (display-buffer buf)
+    (when (equal? (current-buffer) buf)
+      (set-mode! "chat-mode")
+      (end-of-buffer!))
+    (unless (equal? prompt "")
+      (agent-prompt! slug prompt))
+    slug))
 
 (define-command "agent-open" "Prompt for a task and spawn a new agent thread"
   (lambda ()
@@ -782,8 +717,8 @@
 (define (agent-threads)
   (let loop ((bs (buffer-list)) (acc '()))
     (cond ((null? bs) (reverse acc))
-          ((and (string-prefix? "*agent: " (car bs))
-                (buffer-local (car bs) 'agent-slug))
+          ;; any buffer claiming a slug is a thread — chats included
+          ((buffer-local (car bs) 'agent-slug)
            (loop (cdr bs)
                  (cons (list (buffer-local (car bs) 'agent-slug)
                              (agent-status (buffer-local (car bs) 'agent-slug)))

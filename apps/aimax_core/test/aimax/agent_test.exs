@@ -47,7 +47,8 @@ defmodule Aimax.AgentTest do
       Enum.each(Agent.list(), &Agent.kill/1)
 
       Enum.each(Aimax.Core.list_buffers(), fn name ->
-        if String.starts_with?(name, "*agent"), do: Aimax.Core.kill_buffer(name)
+        if String.starts_with?(name, "*agent") or Buffer.get_local(name, "agent-slug"),
+          do: Aimax.Core.kill_buffer(name)
       end)
 
       # (execute) pops a window — don't leak it into later suites
@@ -80,7 +81,7 @@ defmodule Aimax.AgentTest do
     assert is_binary(np["cwd"])
     inject(agent, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "sess-1"}})
 
-    {"a1", "*agent: a1*", agent}
+    {"a1", "*chat:a1*", agent}
   end
 
   defp focus(buf) do
@@ -95,7 +96,7 @@ defmodule Aimax.AgentTest do
     assert [%{"type" => "text", "text" => "fix the bug"}] = p["prompt"]
     assert p["sessionId"] == "sess-1"
 
-    assert Buffer.text(buf) =~ ";; agent thread · a1"
+    assert Buffer.text(buf) =~ "chat · a1"
     assert Buffer.text(buf) =~ "╰─ you ▸"
     assert %{status: :running} = Agent.info("a1")
     _ = agent
@@ -222,26 +223,6 @@ defmodule Aimax.AgentTest do
     assert spawned == ~s[fake -c model="gpt-5.5"]
   end
 
-  test "agent-rename carries transcript + identity, restarts the runtime" do
-    {_slug, buf, _agent} = boot("")
-
-    {:ok, _} = Session.eval(~s{(agent-do-rename! "a1" "rope-fix")})
-
-    # runtime restarted under the new slug
-    assert_receive {:transport_open, agent2}, 1_000
-    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
-    inject(agent2, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{}})
-    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
-    inject(agent2, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "sess-3"}})
-
-    refute Buffer.exists?(buf)
-    assert Buffer.text("*agent: rope-fix*") =~ ";; agent thread · a1"
-    assert eventually(fn -> "rope-fix" in Agent.list() end)
-
-    assert {:ok, ~s["rope-fix"]} =
-             Session.eval(~s[(buffer-local "*agent: rope-fix*" 'agent-slug)])
-  end
-
   test "permission request: needs_attention, inline banner, C-c C-y answers allow option" do
     {slug, buf, agent} = boot("")
 
@@ -307,7 +288,7 @@ defmodule Aimax.AgentTest do
     })
 
     assert eventually(fn -> match?(%{status: :needs_attention}, Agent.info(slug)) end)
-    focus("*agent: a1*")
+    focus("*chat:a1*")
     press(["C-c", "C-a"])
 
     assert_receive {:frame, %{"id" => 88, "result" => %{"outcome" => outcome}}}, 1_000
@@ -342,7 +323,7 @@ defmodule Aimax.AgentTest do
                    1_000
 
     assert {:ok, ~s["test-conn"]} =
-             Session.eval(~s[(buffer-local (agent-buffer "a1") 'agent-connector)])
+             Session.eval(~s[(buffer-local (agent-buf "a1") 'agent-connector)])
 
     # model choice is scoped to what the connector declares
     assert {:ok, models} = Session.eval(~s[(connector-models "claude-code")])
@@ -396,7 +377,7 @@ defmodule Aimax.AgentTest do
 
     assert Buffer.text(buf) =~ "Hello world."
     assert Buffer.text(buf) =~ "defmodule Foo"
-    assert Buffer.get_local(buf, "mode-name") == "agent-mode"
+    assert Buffer.get_local(buf, "mode-name") == "chat-mode"
     # mode setup rebuilt presentation from the persisted locals (live overlays
     # drift as appends land at their edges — the locals hold authored ranges)
     assert Buffer.hidden(buf) == hidden
@@ -428,11 +409,11 @@ defmodule Aimax.AgentTest do
     inject(agent2, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "sess-2"}})
 
     assert_receive {:frame, %{"method" => "session/prompt", "params" => p}}, 1_000
-    # the fresh session's first prompt carries the transcript tail as context
+    # an EMPTY conversation (meta card only) seeds nothing — the message
+    # goes out bare; seeding with history is covered by the restart test
     [%{"text" => sent}] = p["prompt"]
-    assert sent =~ "are you alive"
-    assert sent =~ "Context: this continues an earlier conversation"
-    assert sent =~ ";; agent thread"
+    assert sent == "are you alive"
+    refute sent =~ "Context: this continues an earlier conversation"
     assert eventually(fn -> Buffer.text(buf) =~ "╰─ you ▸ are you alive\n" end)
   end
 
@@ -467,7 +448,7 @@ defmodule Aimax.AgentTest do
     on_exit(fn -> Application.delete_env(:aimax_core, :llm_request_fun) end)
 
     {:ok, _} = Session.eval(~s{(execute* "what is 6*7" '(connector "llm"))})
-    buf = "*agent: a1*"
+    buf = "*chat:a1*"
 
     # no ACP handshake — no transport was opened
     refute_receive {:transport_open, _}, 200
@@ -488,7 +469,7 @@ defmodule Aimax.AgentTest do
     # no pinned model in the modeline: the llm lane follows the editor's
     # default model at request time (ai-config / set-llm-model!)
     assert {:ok, ~s["llm"]} =
-             Session.eval(~s[(buffer-local "*agent: a1*" 'modeline-info)])
+             Session.eval(~s[(buffer-local "*chat:a1*" 'modeline-info)])
   end
 
   test "a failed prompt returns the thread to idle instead of wedging in :running" do

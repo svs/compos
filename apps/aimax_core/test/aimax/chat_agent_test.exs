@@ -140,7 +140,7 @@ defmodule Aimax.ChatAgentTest do
     slug = String.trim(eval!(~s{(execute* "" '(connector "llm"))}), "\"")
 
     on_exit(fn ->
-      Aimax.Core.kill_buffer("*agent: #{slug}*")
+      Aimax.Core.kill_buffer("*chat:#{slug}*")
       Aimax.Core.Editor.delete_other_windows()
     end)
 

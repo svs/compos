@@ -340,13 +340,20 @@ defmodule Aimax.EditorTest do
       refute text =~ "*zz-ib-b*"
       assert text =~ "mode:zz-mode"
 
-      # flag the first entry and execute
-      press(["/", "/"])
+      # still narrowed to zz-mode: the only line is *zz-ib-a* — flag + kill
       {:ok, _} = Aimax.Core.Session.eval("(begin (goto-char! 0) (next-line!) (beginning-of-line!))")
-      {:ok, entry} = Aimax.Core.Session.eval("(ibuffer-current)")
-      entry = String.trim(entry, "\"")
+      assert {:ok, ~s{"*zz-ib-a*"}} = Aimax.Core.Session.eval("(ibuffer-current)")
       press(["d", "x"])
-      refute Aimax.Core.Buffer.exists?(entry)
+      refute Aimax.Core.Buffer.exists?("*zz-ib-a*")
+
+      # RET lands the selection in the window ibuffer was opened from
+      {:ok, _} = Aimax.Core.Session.eval(~s{(begin
+        (buffer-set-local! "*ibuffer*" 'ibuffer-filters '())
+        (ibuffer-filter-push! (list "name" "zz-ib"))
+        (goto-char! 0) (next-line!) (beginning-of-line!))})
+      assert {:ok, ~s{"*zz-ib-b*"}} = Aimax.Core.Session.eval("(ibuffer-current)")
+      press(["RET"])
+      assert Editor.current_buffer() == "*zz-ib-b*"
     end
   end
 

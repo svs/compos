@@ -84,20 +84,28 @@
 
 (define-command "ibuffer" "List buffers dired-style: filter, mark, act"
   (lambda ()
-    (buffer-create *ibuffer-buffer*)
-    (display-buffer *ibuffer-buffer*)
-    (switch-to-buffer! *ibuffer-buffer*)
-    (set-mode! "ibuffer-mode")
-    (ibuffer-refresh!)
-    (goto-char! 0)
-    (next-line!)
-    (beginning-of-line!)))
+    (let ((home (active-window)))
+      (buffer-create *ibuffer-buffer*)
+      ;; RET targets the window you came from — remember it
+      (buffer-set-local! *ibuffer-buffer* 'ibuffer-home-window home)
+      (display-buffer *ibuffer-buffer*)
+      (switch-to-buffer! *ibuffer-buffer*)
+      (set-mode! "ibuffer-mode")
+      (ibuffer-refresh!)
+      (goto-char! 0)
+      (next-line!)
+      (beginning-of-line!))))
 
-(define-command "ibuffer-visit" "Visit the buffer on this line"
+(define-command "ibuffer-visit" "Show the selected buffer in the window ibuffer came from"
   (lambda ()
-    (let ((b (ibuffer-current)))
+    (let ((b (ibuffer-current))
+          (home (buffer-local *ibuffer-buffer* 'ibuffer-home-window)))
       (if (and b (buffer-exists? b))
-          (begin (run-command "quit-window") (switch-to-buffer! b))
+          (begin
+            (run-command "quit-window")
+            (when (and home (window-exists? home))
+              (select-window! home))
+            (switch-to-buffer! b))
           (message "no buffer here")))))
 
 (define-command "ibuffer-refresh" "Refresh the buffer list"

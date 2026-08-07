@@ -886,10 +886,17 @@
     (set-mode! "chat-mode")
     (end-of-buffer!)))
 
+;; the native tool loop is Anthropic-only — on an openai:/openrouter: model
+;; a chat quietly runs tool-less instead of erroring, so any default model
+;; from ai-config just works
+(define (chat-tools-usable?)
+  (not (or (string-prefix? "openai:" (llm-model))
+           (string-prefix? "openrouter:" (llm-model)))))
+
 ;; tools when the tools package is loaded and chat-use-tools is on; presets
 ;; and cost tracking apply to plain chats exactly like rich ones
 (define (chat-llm buf prompt handler)
-  (if (and (boundp (quote chat-use-tools)) chat-use-tools)
+  (if (and (boundp (quote chat-use-tools)) chat-use-tools (chat-tools-usable?))
       (llm-tools prompt *llm-system*
                  (append (llm-tool-specs) (chat-extra-specs buf))
                  llm-tool-call handler
@@ -1185,7 +1192,7 @@
           ""))))
 
 (define (chat-llm-rich buf prompt handler)
-  (if (and (boundp (quote chat-use-tools)) chat-use-tools)
+  (if (and (boundp (quote chat-use-tools)) chat-use-tools (chat-tools-usable?))
       (llm-tools prompt *llm-system*
                  (append (llm-tool-specs) (chat-extra-specs buf))
                  (chat-tool-dispatch buf) handler

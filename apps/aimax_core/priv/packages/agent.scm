@@ -527,7 +527,7 @@
 ;; config override on the adapter's command line ('model-flag).
 (define-connector! "codex"
   '(cmd "codex-acp" model-flag "-c model="
-    models ("gpt-5.5" "gpt-5.5-pro" "gpt-5.4" "gpt-5.4-mini" "gpt-5.3-codex")))
+    models ("gpt-5.6-luna" "gpt-5.5" "gpt-5.5-pro" "gpt-5.4" "gpt-5.4-mini" "gpt-5.3-codex")))
 ;; direct API calls through the editor's own LLM plumbing (req_llm eventually):
 ;; no subprocess, no tools — the cheap chat lane
 (define-connector! "llm" '(type llm))

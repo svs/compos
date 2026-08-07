@@ -164,12 +164,17 @@
     (".md" "text-mode") (".txt" "text-mode") (".org" "org-mode")
     (".chat" "chat-mode")))
 
+;; the mode a file name would open in, without switching anything —
+;; dired filters by it, and (auto-mode) applies it
+(define (auto-mode-for name)
+  (let loop ((es *auto-mode-alist*))
+    (cond ((null? es) #f)
+          ((string-suffix? (car (car es)) name) (car (cdr (car es))))
+          (else (loop (cdr es))))))
+
 (define (auto-mode path)
-  (for-each
-    (lambda (entry)
-      (if (string-suffix? (car entry) path)
-          (set-mode! (cadr entry))))
-    *auto-mode-alist*))
+  (let ((m (auto-mode-for path)))
+    (when m (set-mode! m))))
 
 (define-mode "text-mode" (lambda () #t))
 (define-mode "scheme-mode" (lambda () #t))   ; scheme grammar pending
@@ -848,9 +853,13 @@
       (local-set-key "C-c b" "chat-set-backend")
       (local-set-key "C-c C-k" "chat-reset")
       ;; an agent-backed chat needs the thread keys back after restore
-      ;; (the runtime itself does not survive — agent-send revives it)
+      ;; (the runtime itself does not survive — agent-send revives it),
+      ;; and its queued-send bookkeeping is stale for the same reason:
+      ;; the runtime queue died with the daemon. Cleared, the muted text
+      ;; rejoins the editable input instead of deadlocking RET.
       (when (and (buffer-local buf 'agent-slug)
                  (boundp (quote agent-install-keys!)))
+        (buffer-set-local! buf 'agent-queued #f)
         (agent-install-keys! buf))
       ;; legacy: pre-group companions carried a 'companion-of pointer —
       ;; upgrade both ends to the 'group tag (idempotent, so desktop

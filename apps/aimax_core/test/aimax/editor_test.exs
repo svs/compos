@@ -314,6 +314,42 @@ defmodule Aimax.EditorTest do
     assert Buffer.text(other) == "z"
   end
 
+  describe "ibuffer" do
+    test "lists, filters by mode, flags and kills" do
+      on_exit(fn ->
+        for b <- ["*zz-ib-a*", "*zz-ib-b*", "*ibuffer*"], do: Aimax.Core.kill_buffer(b)
+        Editor.delete_other_windows()
+      end)
+
+      {:ok, _} = Aimax.Core.Session.eval(~s{(begin
+        (buffer-create "*zz-ib-a*")
+        (buffer-set-local! "*zz-ib-a*" 'mode-name "zz-mode")
+        (buffer-create "*zz-ib-b*")
+        (run-command "ibuffer"))})
+
+      assert Editor.current_buffer() == "*ibuffer*"
+      assert Buffer.read_only?("*ibuffer*")
+      text = Buffer.text("*ibuffer*")
+      assert text =~ "*zz-ib-a*"
+      assert text =~ "zz-mode"
+
+      # narrow to one major mode; the header names the filter
+      {:ok, _} = Aimax.Core.Session.eval(~s{(ibuffer-filter-push! (list "mode" "zz-mode"))})
+      text = Buffer.text("*ibuffer*")
+      assert text =~ "*zz-ib-a*"
+      refute text =~ "*zz-ib-b*"
+      assert text =~ "mode:zz-mode"
+
+      # flag the first entry and execute
+      press(["/", "/"])
+      {:ok, _} = Aimax.Core.Session.eval("(begin (goto-char! 0) (next-line!) (beginning-of-line!))")
+      {:ok, entry} = Aimax.Core.Session.eval("(ibuffer-current)")
+      entry = String.trim(entry, "\"")
+      press(["d", "x"])
+      refute Aimax.Core.Buffer.exists?(entry)
+    end
+  end
+
   describe "dired (pure Scheme userland)" do
     setup do
       root = Path.join(System.tmp_dir!(), "aimax-dired-#{System.unique_integer([:positive])}")

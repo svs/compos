@@ -68,6 +68,11 @@
                    ((equal? arg "link") (string-prefix? "l" perms))
                    ((equal? arg "exec") (if (string-index perms "x") #t #f))
                    (else (string-prefix? "-" perms)))))
+          ;; major mode the file would open in (auto-mode-alist); directories
+          ;; stay visible so the tree remains navigable while narrowed
+          ((equal? kind "mode")
+           (or (string-suffix? "/" e)
+               (equal? (auto-mode-for e) arg)))
           (else #t))))
 
 (define (dired-visible buf dir)
@@ -103,6 +108,20 @@
   (lambda ()
     (minibuffer-read "Filter extension: " '()
       (lambda (e) (unless (equal? e "") (dired-filter-push! (list "ext" e)))))))
+
+(define (dired-mode-candidates)
+  (let loop ((es *auto-mode-alist*) (acc '()))
+    (if (null? es)
+        (reverse acc)
+        (loop (cdr es)
+              (let ((m (car (cdr (car es)))))
+                (if (member m acc) acc (cons m acc)))))))
+
+(define-command "dired-filter-mode" "Narrow dired to files opening in one major mode"
+  (lambda ()
+    (minibuffer-read "Filter by mode: "
+      (dired-mode-candidates)
+      (lambda (m) (unless (equal? m "") (dired-filter-push! (list "mode" m)))))))
 
 (define-command "dired-filter-type" "Narrow dired by entry type (file mode)"
   (lambda ()
@@ -168,6 +187,7 @@
   (local-set-key "q" "quit-window")
   ;; dired-filter style narrowing under the / prefix
   (local-set-key "/ n" "dired-filter-name")
+  (local-set-key "/ m" "dired-filter-mode")
   (local-set-key "/ e" "dired-filter-ext")
   (local-set-key "/ t" "dired-filter-type")
   (local-set-key "/ ." "dired-filter-dotfiles")

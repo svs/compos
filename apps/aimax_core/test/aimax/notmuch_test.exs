@@ -62,7 +62,11 @@ defmodule Aimax.NotmuchTest do
     dir="$(dirname "$0")"
     echo "$@" >> "$dir/calls.log"
     case "$1" in
-      search) cat "$dir/search.json";;
+      search)
+        case "$*" in
+          *--output=messages*) echo "id:m1";;
+          *) cat "$dir/search.json";;
+        esac;;
       show)
         case "$*" in
           *thread:0002*) cat "$dir/show-html.json";;
@@ -87,7 +91,7 @@ defmodule Aimax.NotmuchTest do
       (switch-to-buffer! "*scratch*")
       (for-each (lambda (b)
                   (when (or (equal? b "*notmuch*")
-                            (string-prefix? "*mail:" b)
+                            (string-prefix? "*mail" b)
                             (equal? b "*compose*"))
                     (buffer-kill! b)))
                 (buffer-list))
@@ -111,7 +115,7 @@ defmodule Aimax.NotmuchTest do
     eval!(~s{(run-command "notmuch")})
     press("RET")
 
-    assert eval!("(current-buffer)") == ~s{"*mail: Hello world*"}
+    assert eval!("(current-buffer)") == ~s{"*mail*"}
     text = eval!(~s{(buffer-text (current-buffer))})
     assert text =~ "From: Alice <alice@example.com>"
     assert text =~ "Hi there, this is the body."
@@ -135,7 +139,7 @@ defmodule Aimax.NotmuchTest do
     text = eval!(~s{(buffer-text "*notmuch*")})
     assert text =~ "Hello world"
     press("RET")
-    assert eval!("(current-buffer)") == ~s{"*mail: Hello world*"}
+    assert eval!("(current-buffer)") == ~s{"*mail*"}
   end
 
   test "context providers explain the selection to chat and agents" do
@@ -182,7 +186,7 @@ defmodule Aimax.NotmuchTest do
     eval!(~s{(begin (run-command "notmuch") (next-line!) (beginning-of-line!))})
     press("RET")
 
-    assert eval!("(current-buffer)") == ~s{"*mail: Quarterly report*"}
+    assert eval!("(current-buffer)") == ~s{"*mail*"}
     assert eval!(~s{(buffer-local (current-buffer) 'render-mode)}) == ~s{"html"}
     text = eval!(~s{(buffer-text (current-buffer))})
     assert text =~ "<!doctype html"
@@ -198,11 +202,23 @@ defmodule Aimax.NotmuchTest do
     assert eval!(~s{(buffer-local (current-buffer) 'render-mode)}) == ~s{"html"}
   end
 
-  test "n marks the thread read and moves on", %{dir: dir} do
+  test "moving the highlight updates the shown mail and marks it read", %{dir: dir} do
+    eval!(~s{(set! notmuch-auto-preview #t)})
     eval!(~s{(run-command "notmuch")})
     press("n")
-    assert calls(dir) =~ "tag -unread -- thread:0001"
+    assert calls(dir) =~ "show --format=json --include-html thread:0002"
+    assert calls(dir) =~ "tag -unread -- thread:0002"
     assert eval!("(current-buffer)") == ~s{"*notmuch*"}
+    assert eval!("(length (window-list))") == "2"
+    eval!(~s{(set! notmuch-auto-preview #f)})
+  end
+
+  test "r in the index replies to the thread's newest message", %{dir: dir} do
+    eval!(~s{(run-command "notmuch")})
+    press("r")
+    assert eval!("(current-buffer)") == ~s{"*compose*"}
+    assert calls(dir) =~ "search --output=messages --limit=1 -- thread:0001"
+    assert eval!(~s{(buffer-text "*compose*")}) =~ "Subject: Re: Hello world"
   end
 
   test "SPC previews in the other window, focus stays", %{dir: dir} do
@@ -242,18 +258,22 @@ defmodule Aimax.NotmuchTest do
     assert ovs =~ "nm-subject"
   end
 
-  test "old show buffers get culled past notmuch-max-show-buffers" do
-    eval!(~s{(set! notmuch-max-show-buffers 1)})
+  test "one *mail* buffer is reused; its derived content is transient" do
     eval!(~s{(run-command "notmuch")})
     press("RET")
-    assert eval!(~s{(buffer-exists? "*mail: Hello world*")}) == "#t"
+    assert eval!("(current-buffer)") == ~s{"*mail*"}
+    assert eval!(~s{(buffer-text "*mail*")}) =~ "Hi there, this is the body."
 
     eval!(~s{(begin (switch-to-buffer! "*notmuch*") (goto-char! 0)
                     (next-line!) (next-line!) (beginning-of-line!))})
     press("RET")
-    assert eval!(~s{(buffer-exists? "*mail: Quarterly report*")}) == "#t"
-    assert eval!(~s{(buffer-exists? "*mail: Hello world*")}) == "#f"
-    eval!(~s{(set! notmuch-max-show-buffers 5)})
+    assert eval!(~s{(buffer-text "*mail*")}) =~ "Quarterly report"
+    refute eval!(~s{(buffer-text "*mail*")}) =~ "Hi there"
+
+    # exactly one mail view exists, and desktop-save skips its content
+    assert eval!(~s{(length (filter (lambda (b) (string-prefix? "*mail" b)) (buffer-list)))}) == "1"
+    assert eval!(~s{(buffer-local "*mail*" 'transient)}) == "#t"
+    assert eval!(~s{(buffer-local "*notmuch*" 'transient)}) == "#t"
   end
 
   test "a config-level three-pane scene: index | message | chat" do
@@ -278,7 +298,7 @@ defmodule Aimax.NotmuchTest do
     assert eval!("(current-buffer)") == ~s{"*notmuch*"}
     bufs = eval!("(map cadr (window-list))")
     assert bufs =~ "*notmuch*"
-    assert bufs =~ "*mail: Hello world*"
+    assert bufs =~ "*mail*"
 
     # the chat pane's context carries the index selection and the open mail
     ctx = eval!(~s{(editor-context "*chat*")})

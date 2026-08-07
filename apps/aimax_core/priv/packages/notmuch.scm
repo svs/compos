@@ -46,9 +46,6 @@ when a message has no text/plain part." 'group 'notmuch)
 (defcustom 'notmuch-auto-preview #t
   "n/p in the search buffer preview the thread in the other window."
   'group 'notmuch)
-(defcustom 'notmuch-max-show-buffers 5
-  "How many *mail: thread buffers to keep; older ones are killed
-(visible ones always survive)." 'group 'notmuch)
 
 ;; (substring-of-From-or-filename  send-command) — first match wins,
 ;; "" is the fallback route. set! your accounts' routes in init.scm.
@@ -176,8 +173,13 @@ when a message has no text/plain part." 'group 'notmuch)
       (buffer-set-read-only! buf #t)
       (local-set-key "n" "notmuch-next")
       (local-set-key "p" "notmuch-prev")
+      (local-set-key "<down>" "notmuch-next")
+      (local-set-key "<up>" "notmuch-prev")
+      (local-set-key "C-n" "notmuch-next")
+      (local-set-key "C-p" "notmuch-prev")
       (local-set-key "RET" "notmuch-open-thread")
       (local-set-key "SPC" "notmuch-preview")
+      (local-set-key "r" "notmuch-reply")
       (local-set-key "a" "notmuch-archive")
       (local-set-key "d" "notmuch-trash")
       (local-set-key "u" "notmuch-smart-untag")
@@ -194,6 +196,8 @@ when a message has no text/plain part." 'group 'notmuch)
       (local-set-key "s" "notmuch-search")
       (local-set-key "g" "notmuch-refresh")
       (local-set-key "q" "quit-window")
+      ;; derived content: desktop saves locals + point, never the text
+      (buffer-set-local! buf 'transient #t)
       ;; fresh open and desktop restore take the same path: rebuild the
       ;; listing from the 'notmuch-query local (live data beats stale text)
       (nm--refresh! buf))))
@@ -226,7 +230,10 @@ when a message has no text/plain part." 'group 'notmuch)
   (let ((th (nm--thread-at buf)))
     (when th
       (nm--in-other-window!
-        (lambda () (nm--open-thread! (nm--th-id th) (nm--th-subject th)))))))
+        (lambda () (nm--open-thread! (nm--th-id th) (nm--th-subject th))))
+      ;; opening marked it read — show that in the index right away
+      (when (member "unread" (nm--th-tags th))
+        (nm--refresh! buf)))))
 
 (define-command "notmuch-preview" "Preview the thread at point in the other window"
   (lambda () (nm--preview! (current-buffer))))
@@ -234,16 +241,14 @@ when a message has no text/plain part." 'group 'notmuch)
 (define (nm--maybe-preview! buf)
   (when notmuch-auto-preview (nm--preview! buf)))
 
-(define-command "notmuch-next" "Mark this thread read, move down, preview"
+;; the shown mail follows the highlight: every move previews, and opening
+;; a thread marks it read (the open itself tags -unread)
+(define-command "notmuch-next" "Move down; the shown mail follows"
   (lambda ()
-    (let* ((buf (current-buffer)) (th (nm--thread-at buf)))
-      (when (and th (member "unread" (nm--th-tags th)))
-        (nm--run (string-append "tag -unread -- thread:" (nm--th-id th))))
-      (next-line!) (beginning-of-line!)
-      (when th (nm--refresh! buf))
-      (nm--maybe-preview! buf))))
+    (next-line!) (beginning-of-line!)
+    (nm--maybe-preview! (current-buffer))))
 
-(define-command "notmuch-prev" "Move up and preview"
+(define-command "notmuch-prev" "Move up; the shown mail follows"
   (lambda ()
     (previous-line!) (beginning-of-line!)
     (nm--maybe-preview! (current-buffer))))
@@ -553,32 +558,22 @@ when a message has no text/plain part." 'group 'notmuch)
                   (buffer-set-local! buf 'notmuch-msgs (cadr rendered))))
             (goto-char! 0)))))))
 
-(define (nm--visible? b)
-  (let loop ((ws (window-list)))
-    (cond ((null? ws) #f)
-          ((equal? (cadr (car ws)) b) #t)
-          (else (loop (cdr ws))))))
-
-;; auto-preview would otherwise mint a buffer per n — keep the MRU few
-(define (nm--cleanup-show-buffers!)
-  (let loop ((bs (filter (lambda (b) (string-prefix? "*mail:" b))
-                         (buffer-list-mru)))
-             (kept 0))
-    (unless (null? bs)
-      (if (or (< kept notmuch-max-show-buffers) (nm--visible? (car bs)))
-          (loop (cdr bs) (+ kept 1))
-          (begin (buffer-kill! (car bs)) (loop (cdr bs) kept))))))
+;; ONE show buffer, reused — it is a view, not a document. The subject
+;; lives in the modeline; 'transient keeps its derived content out of the
+;; desktop file (the mode re-renders from 'notmuch-thread on restore).
+(define *notmuch-show-buffer* "*mail*")
 
 (define (nm--open-thread! thread-id subject)
-  (let ((buf (string-append "*mail: " (nm--trunc subject 48) "*")))
+  (let ((buf *notmuch-show-buffer*))
     (unless (buffer-exists? buf) (buffer-create buf))
     (buffer-set-local! buf 'notmuch-thread thread-id)
     (buffer-set-local! buf 'notmuch-subject subject)
+    (buffer-set-local! buf 'transient #t)
+    (buffer-set-local! buf 'modeline-info (nm--trunc subject 60))
     (switch-to-buffer! buf)
     (set-mode! "notmuch-show-mode")
     ;; reading marks read, like every mail client
     (nm--run (string-append "tag -unread -- thread:" thread-id))
-    (nm--cleanup-show-buffers!)
     buf))
 
 (define-command "notmuch-open-thread" "Open the thread at point"
@@ -621,20 +616,41 @@ when a message has no text/plain part." 'group 'notmuch)
     (local-set-key "C-c C-c" "mail-send")
     (local-set-key "C-c C-k" "mail-abort")))
 
+(define (nm--compose-reply! msg-id)
+  (let ((template (nm--run (string-append "reply id:" (nm--quote msg-id))))
+        (buf "*compose*"))
+    (unless (buffer-exists? buf) (buffer-create buf))
+    (buffer-delete-range! buf 0 (buffer-size buf))
+    (buffer-append! buf template)
+    (switch-to-buffer! buf)
+    (set-mode! "mail-compose-mode")
+    (end-of-buffer!)
+    (message "C-c C-c sends, C-c C-k aborts")))
+
 (define-command "notmuch-show-reply" "Reply to the message at point"
   (lambda ()
     (let ((msg (nm--msg-at (current-buffer))))
-      (if (not msg)
-          (message "No message at point")
-          (let ((template (nm--run (string-append "reply id:" (nm--quote (cadr msg)))))
-                (buf "*compose*"))
-            (unless (buffer-exists? buf) (buffer-create buf))
-            (buffer-delete-range! buf 0 (buffer-size buf))
-            (buffer-append! buf template)
-            (switch-to-buffer! buf)
-            (set-mode! "mail-compose-mode")
-            (end-of-buffer!)
-            (message "C-c C-c sends, C-c C-k aborts"))))))
+      (if msg
+          (nm--compose-reply! (cadr msg))
+          (message "No message at point")))))
+
+;; newest message id of a thread (search sorts newest-first)
+(define (nm--newest-msg-id thread-id)
+  (let ((out (string-trim
+               (nm--run (string-append "search --output=messages --limit=1 -- thread:"
+                                       thread-id)))))
+    (and (string-prefix? "id:" out)
+         (substring out 3 (string-length out)))))
+
+(define-command "notmuch-reply" "Reply to the newest message of the thread at point"
+  (lambda ()
+    (let ((th (nm--thread-at (current-buffer))))
+      (if (not th)
+          (message "No thread on this line")
+          (let ((id (nm--newest-msg-id (nm--th-id th))))
+            (if id
+                (nm--compose-reply! id)
+                (message "No message found in thread")))))))
 
 (define (nm--send-route text)
   (let loop ((rs notmuch-send-routes))

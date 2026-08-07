@@ -84,12 +84,16 @@ defmodule Aimax.Core.Desktop do
     # threads, scratch, shells) have no file to reopen — their content is the
     # only source of truth, so it's saved along with point and locals.
     # Space-prefixed names are internal (Emacs convention: " *minibuf*").
+    # Buffers with a truthy 'transient local (mail views, listings) hold
+    # derived state their mode setup re-renders from locals — name, point,
+    # and locals are saved so windows and modes restore, content is not.
     scratch =
       for name <- Aimax.Core.list_buffers(),
           Buffer.exists?(name),
           Buffer.path(name) == nil,
           not String.starts_with?(name, " ") do
-        {name, Buffer.text(name), Buffer.point(name), savable_locals(name)}
+        content = if Buffer.get_local(name, "transient"), do: "", else: Buffer.text(name)
+        {name, content, Buffer.point(name), savable_locals(name)}
       end
 
     desktop = %{

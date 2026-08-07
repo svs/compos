@@ -686,6 +686,11 @@
   ;; definition
   (agent-block-drop-kind! buf "permission")
   (agent-block-drop-kind! buf "waiting")
+  ;; ...and so is queued-send bookkeeping — the runtime prompt queue it
+  ;; mirrors died with the daemon. Left in place it deadlocks the input
+  ;; region (muted text waiting for a turn that nothing will start); the
+  ;; text itself stays, as ordinary editable input.
+  (buffer-set-local! buf 'agent-queued #f)
   (agent-install-keys! buf)
   (let ((ovs (buffer-local buf 'agent-overlays)))
     (when ovs (overlay-set! buf 'agent ovs)))

@@ -124,7 +124,10 @@ defmodule Aimax.Core.Desktop do
       :error
   end
 
-  defp serialize(%{type: :leaf, buffer: b} = leaf), do: {:leaf, b, Map.get(leaf, :top, 0)}
+  # the rendered leaf carries the per-window point — saved so each window
+  # reopens at its own spot
+  defp serialize(%{type: :leaf, buffer: b} = leaf),
+    do: {:leaf, b, Map.get(leaf, :top, 0), Map.get(leaf, :point, 0)}
 
   defp serialize(%{type: :split, dir: dir, children: [a, b]} = split),
     do: {:split, dir, Map.get(split, :ratio, 0.5), serialize(a), serialize(b)}

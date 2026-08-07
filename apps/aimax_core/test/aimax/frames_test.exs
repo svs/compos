@@ -216,6 +216,114 @@ defmodule Aimax.FramesTest do
     refute Buffer.exists?(name)
   end
 
+  # --- per-window points -----------------------------------------------------
+
+  defp type(fid, str), do: for(k <- String.graphemes(str), do: KeyDispatch.handle_key(fid, k))
+
+  test "two windows on one buffer in one frame keep independent points" do
+    {:ok, fid} = Editor.attach_frame(nil)
+    buf = "wp-one-#{System.unique_integer([:positive])}"
+    Editor.set_window_buffer(buf, fid)
+    type(fid, "one two")
+
+    Editor.split(:h, 0.5, fid)
+    [{w1, _}, {w2, _}] = Editor.list_windows(fid)
+    assert Editor.active_window(fid) == w1
+
+    Editor.other_window(fid)
+    Buffer.goto(buf, 0)
+
+    # the deselected window kept its spot; the selected one moved
+    assert Buffer.win_point(buf, w1) == 7
+    assert Buffer.win_point(buf, w2) == 0
+
+    points = for %{type: :leaf} = l <- Editor.render_state(fid).tree.children, do: l.point
+    assert Enum.sort(points) == [0, 7]
+  end
+
+  test "two frames on one buffer: typing in one never moves the other's point" do
+    {:ok, fa} = Editor.attach_frame(nil)
+    {:ok, fb} = Editor.attach_frame(nil)
+    buf = "wp-two-#{System.unique_integer([:positive])}"
+    Editor.set_window_buffer(buf, fa)
+    Editor.set_window_buffer(buf, fb)
+    [{wa, _}] = Editor.list_windows(fa)
+    [{wb, _}] = Editor.list_windows(fb)
+
+    type(fa, "hello")
+    # fb still at 0; typing there prepends
+    type(fb, "X")
+
+    assert Buffer.text(buf) == "Xhello"
+    # fa's point rode the insertion above it: end of its "hello"
+    assert Buffer.win_point(buf, wa) == 6
+    assert Buffer.win_point(buf, wb) == 1
+  end
+
+  test "marker semantics: insert above shifts, insert AT stays before, delete across collapses" do
+    {:ok, fa} = Editor.attach_frame(nil)
+    {:ok, fb} = Editor.attach_frame(nil)
+    buf = "wp-marker-#{System.unique_integer([:positive])}"
+    Editor.set_window_buffer(buf, fa)
+    Editor.set_window_buffer(buf, fb)
+    [{wa, _}] = Editor.list_windows(fa)
+
+    type(fa, "abcd")
+    Buffer.goto(buf, 2)
+    # deselect fa's window so its point (2) is a stored entry
+    KeyDispatch.handle_key(fb, "C-g")
+    assert Buffer.win_point(buf, wa) == 2
+
+    # insertion exactly at the stored point leaves it before the new text
+    Buffer.insert_at(buf, 2, "ZZ", source: :editor)
+    assert Buffer.win_point(buf, wa) == 2
+
+    # insertion strictly above shifts it
+    Buffer.insert_at(buf, 0, "Y", source: :editor)
+    assert Buffer.win_point(buf, wa) == 3
+
+    # delete spanning the point collapses it to the delete start
+    Buffer.delete_range(buf, 1, 4, source: :editor)
+    assert Buffer.win_point(buf, wa) == 1
+  end
+
+  test "switching a window away from a buffer and back restores its point" do
+    {:ok, fid} = Editor.attach_frame(nil)
+    buf1 = "wp-back1-#{System.unique_integer([:positive])}"
+    buf2 = "wp-back2-#{System.unique_integer([:positive])}"
+    Editor.set_window_buffer(buf1, fid)
+    type(fid, "some text")
+    Buffer.goto(buf1, 4)
+
+    Editor.set_window_buffer(buf2, fid)
+    # someone else moves buf1's plain point meanwhile
+    Buffer.goto(buf1, 0)
+
+    Editor.set_window_buffer(buf1, fid)
+    assert Buffer.point(buf1) == 4
+  end
+
+  test "desktop round-trips per-window points" do
+    {:ok, fid} = Editor.attach_frame(nil)
+    buf = "wp-dt-#{System.unique_integer([:positive])}"
+    Editor.set_window_buffer(buf, fid)
+    type(fid, "line one\nline two")
+
+    Editor.split(:v, 0.5, fid)
+    Editor.other_window(fid)
+    Buffer.goto(buf, 3)
+    # windows now at 3 (active) and 17 (stored)
+
+    assert :ok = Desktop.save_now()
+    Editor.delete_other_windows(fid)
+    assert :ok = Desktop.restore_now()
+
+    points =
+      for %{type: :leaf} = l <- Editor.render_state(fid).tree.children, do: {l.point, l.buffer}
+
+    assert Enum.sort(points) == [{3, buf}, {17, buf}]
+  end
+
   test "echo and pending are per frame" do
     {:ok, fid} = Editor.attach_frame(nil)
     Editor.set_echo("", "f-main")

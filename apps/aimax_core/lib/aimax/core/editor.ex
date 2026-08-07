@@ -247,6 +247,9 @@ defmodule Aimax.Core.Editor do
      %{
        frames: %{@main_frame => frame},
        frame_mru: [@main_frame],
+       # the one window whose point is swapped into its buffer (the selected
+       # window of the last-active frame): {frame_id, win_id, buffer}
+       swapped: nil,
        next_win: 2,
        kill_ring: [],
        keymap: %{},
@@ -266,7 +269,7 @@ defmodule Aimax.Core.Editor do
   def handle_call({:attach_frame, id}, _from, state) do
     case state.frames[id] do
       %{} ->
-        {:reply, {:ok, id}, bump_frame(state, id)}
+        {:reply, {:ok, id}, state |> bump_frame(id) |> resync_swap()}
 
       nil ->
         id = if valid_frame_id?(id), do: id, else: gen_frame_id()
@@ -286,7 +289,7 @@ defmodule Aimax.Core.Editor do
         }
 
         state = %{state | frames: Map.put(state.frames, id, frame), next_win: state.next_win + 1}
-        changed({:ok, id}, bump_frame(state, id), id)
+        changed({:ok, id}, state |> bump_frame(id) |> resync_swap(), id)
     end
   end
 
@@ -304,13 +307,17 @@ defmodule Aimax.Core.Editor do
         f = state.frames[id]
         Aimax.Core.kill_buffer(minibuf_of(f))
 
+        Enum.each(leaf_ids_buffers(f.tree), fn {win, buf} ->
+          if Buffer.exists?(buf), do: Buffer.drop_win_point(buf, win)
+        end)
+
         state = %{
           state
           | frames: Map.delete(state.frames, id),
             frame_mru: List.delete(state.frame_mru, id)
         }
 
-        changed({:ok, f.minibuffer}, state, id)
+        changed({:ok, f.minibuffer}, resync_swap(state), id)
     end
   end
 
@@ -321,7 +328,7 @@ defmodule Aimax.Core.Editor do
 
   def handle_call({:select_frame, id}, _from, state) do
     if state.frames[id],
-      do: changed(:ok, bump_frame(state, id), id),
+      do: changed(:ok, state |> bump_frame(id) |> resync_swap(), id),
       else: {:reply, {:error, :no_frame}, state}
   end
 
@@ -330,7 +337,7 @@ defmodule Aimax.Core.Editor do
 
   def handle_call({:touch_frame, id}, _from, state) do
     if state.frames[id],
-      do: {:reply, :ok, bump_frame(state, id)},
+      do: {:reply, :ok, state |> bump_frame(id) |> resync_swap()},
       else: {:reply, :ok, state}
   end
 
@@ -356,7 +363,7 @@ defmodule Aimax.Core.Editor do
         leaf = find_leaf(f.tree, win_id)
         tree = replace_leaf(f.tree, win_id, %{leaf | buffer: buffer, top: 0, manual: false})
         mru = Enum.take([buffer | List.delete(state.mru, buffer)], 50)
-        changed(:ok, put_frame(%{state | mru: mru}, %{f | tree: tree}), f.id)
+        changed(:ok, resync_swap(put_frame(%{state | mru: mru}, %{f | tree: tree})), f.id)
     end
   end
 
@@ -564,7 +571,7 @@ defmodule Aimax.Core.Editor do
   def handle_call({:copy_text, fid}, _from, state) do
     f = frame(state, fid)
     buf = find_leaf(f.tree, f.active).buffer
-    snap = Buffer.render_snapshot(buf)
+    snap = Buffer.render_snapshot(buf, f.active)
 
     case snap.mark do
       mark when is_integer(mark) and mark != snap.point ->
@@ -602,7 +609,7 @@ defmodule Aimax.Core.Editor do
 
     top =
       if Buffer.exists?(leaf.buffer) do
-        max(Buffer.render_snapshot(leaf.buffer).cursor_line - div(rows, 2), 0)
+        max(Buffer.render_snapshot(leaf.buffer, f.active).cursor_line - div(rows, 2), 0)
       else
         0
       end
@@ -839,6 +846,12 @@ defmodule Aimax.Core.Editor do
     new_leaf = %{type: :leaf, id: state.next_win, buffer: old.buffer, top: old.top, manual: false}
     split = %{type: :split, dir: dir, ratio: ratio, children: [old, new_leaf]}
     tree = replace_leaf(f.tree, f.active, split)
+
+    # the new window starts at the old one's point and diverges from here
+    # (Emacs split-window)
+    if Buffer.exists?(old.buffer),
+      do: Buffer.set_win_point(old.buffer, new_leaf.id, Buffer.win_point(old.buffer, old.id))
+
     changed(:ok, put_frame(%{state | next_win: state.next_win + 1}, %{f | tree: tree}), f.id)
   end
 
@@ -853,8 +866,15 @@ defmodule Aimax.Core.Editor do
             {:reply, {:error, :sole_window}, state}
 
           tree ->
+            leaf = find_leaf(f.tree, id)
+            if Buffer.exists?(leaf.buffer), do: Buffer.drop_win_point(leaf.buffer, id)
             active = if f.active == id, do: first_leaf(tree).id, else: f.active
-            changed(:ok, put_frame(state, %{f | tree: tree, active: active}), f.id)
+
+            changed(
+              :ok,
+              state |> put_frame(%{f | tree: tree, active: active}) |> resync_swap(),
+              f.id
+            )
         end
     end
   end
@@ -870,7 +890,7 @@ defmodule Aimax.Core.Editor do
   def handle_call({:set_active, id}, _from, state) do
     case find_window_frame(state, id) do
       nil -> {:reply, {:error, :no_window}, state}
-      f -> changed(:ok, state |> put_frame(%{f | active: id}) |> bump_frame(f.id), f.id)
+      f -> changed(:ok, state |> put_frame(%{f | active: id}) |> bump_frame(f.id) |> resync_swap(), f.id)
     end
   end
 
@@ -879,27 +899,43 @@ defmodule Aimax.Core.Editor do
 
   def handle_call({:delete_window, fid}, _from, state) do
     f = frame(state, fid)
+    leaf = find_leaf(f.tree, f.active)
 
     case remove_leaf(f.tree, f.active) do
       nil ->
         {:reply, {:error, :sole_window}, state}
 
       tree ->
-        changed(:ok, put_frame(state, %{f | tree: tree, active: first_leaf(tree).id}), f.id)
+        if Buffer.exists?(leaf.buffer), do: Buffer.drop_win_point(leaf.buffer, leaf.id)
+
+        changed(
+          :ok,
+          state |> put_frame(%{f | tree: tree, active: first_leaf(tree).id}) |> resync_swap(),
+          f.id
+        )
     end
   end
 
   def handle_call({:delete_other_windows, fid}, _from, state) do
     f = frame(state, fid)
     leaf = find_leaf(f.tree, f.active)
-    changed(:ok, put_frame(state, %{f | tree: leaf}), f.id)
+
+    for {win, buf} <- leaf_ids_buffers(f.tree), win != leaf.id, Buffer.exists?(buf) do
+      Buffer.drop_win_point(buf, win)
+    end
+
+    changed(:ok, state |> put_frame(%{f | tree: leaf}) |> resync_swap(), f.id)
   end
 
   def handle_call({:other_window, fid}, _from, state) do
     f = frame(state, fid)
     ids = leaf_ids(f.tree)
     idx = Enum.find_index(ids, &(&1 == f.active)) || 0
-    changed(:ok, put_frame(state, %{f | active: Enum.at(ids, rem(idx + 1, length(ids)))}), f.id)
+    changed(
+      :ok,
+      state |> put_frame(%{f | active: Enum.at(ids, rem(idx + 1, length(ids)))}) |> resync_swap(),
+      f.id
+    )
   end
 
   def handle_call({:set_window_buffer, buffer, fid}, _from, state) do
@@ -908,7 +944,7 @@ defmodule Aimax.Core.Editor do
     leaf = find_leaf(f.tree, f.active)
     tree = replace_leaf(f.tree, f.active, %{leaf | buffer: buffer, top: 0, manual: false})
     mru = Enum.take([buffer | List.delete(state.mru, buffer)], 50)
-    changed(:ok, put_frame(%{state | mru: mru}, %{f | tree: tree}), f.id)
+    changed(:ok, resync_swap(put_frame(%{state | mru: mru}, %{f | tree: tree})), f.id)
   end
 
   def handle_call({:preview_buffer, buffer, fid}, _from, state) do
@@ -924,18 +960,32 @@ defmodule Aimax.Core.Editor do
 
   def handle_call({:restore_tree, spec, active_buffer, fid}, _from, state) do
     f = frame(state, fid)
+
+    # the old windows are gone — their stored points go with them
+    Enum.each(leaf_ids_buffers(f.tree), fn {id, buffer} ->
+      if Buffer.exists?(buffer), do: Buffer.drop_win_point(buffer, id)
+    end)
+
     {tree, next_win} = build_tree(spec, state.next_win)
 
     Enum.each(leaf_ids_buffers(tree), fn {_id, buffer} ->
       unless Aimax.Core.Buffer.exists?(buffer), do: Aimax.Core.create_buffer(buffer)
     end)
 
+    # lay saved per-window points down; the active window's swaps into the
+    # buffer point via resync below
+    tree = apply_init_points(tree)
+
     active =
       Enum.find_value(leaf_ids_buffers(tree), fn {id, buffer} ->
         if buffer == active_buffer, do: id
       end) || first_leaf(tree).id
 
-    changed(:ok, put_frame(%{state | next_win: next_win}, %{f | tree: tree, active: active}), f.id)
+    changed(
+      :ok,
+      resync_swap(put_frame(%{state | next_win: next_win}, %{f | tree: tree, active: active})),
+      f.id
+    )
   end
 
   # scope: a frame id (only that frame's clients re-render) or :all (global
@@ -963,6 +1013,35 @@ defmodule Aimax.Core.Editor do
 
   defp bump_frame(state, fid),
     do: %{state | frame_mru: [fid | List.delete(state.frame_mru, fid)]}
+
+  # Emacs point-swapping, one window at a time: the invariant is that the
+  # buffer point of the swapped-in window's buffer IS that window's point.
+  # Any change to (last-active frame, its selected window, that window's
+  # buffer) saves the old window's point back into its buffer's win_points
+  # and installs the new one's. Call after every mutation that can move any
+  # of the three.
+  defp resync_swap(state) do
+    f = state.frames[hd(state.frame_mru)]
+    leaf = find_leaf(f.tree, f.active)
+    target = {f.id, f.active, leaf.buffer}
+
+    if state.swapped == target do
+      state
+    else
+      case state.swapped do
+        {_ofid, owin, obuf} ->
+          # skip windows that no longer exist — their entries were dropped
+          if find_window_frame(state, owin) && Buffer.exists?(obuf),
+            do: Buffer.win_point_save(obuf, owin)
+
+        nil ->
+          :ok
+      end
+
+      if Buffer.exists?(leaf.buffer), do: Buffer.win_point_swap_in(leaf.buffer, f.active)
+      %{state | swapped: target}
+    end
+  end
 
   defp find_window_frame(state, win_id) do
     Enum.find_value(state.frames, fn {_fid, f} ->
@@ -1093,6 +1172,13 @@ defmodule Aimax.Core.Editor do
   defp build_tree({:leaf, buffer, top}, n),
     do: {%{type: :leaf, id: n, buffer: buffer, top: top, manual: false}, n + 1}
 
+  # 4-tuple carries a saved window point (desktop v2); it rides on the leaf
+  # as :init_point until restore_tree writes it into the buffer
+  defp build_tree({:leaf, buffer, top, point}, n) do
+    {leaf, n} = build_tree({:leaf, buffer, top}, n)
+    {Map.put(leaf, :init_point, point), n}
+  end
+
   defp build_tree({:split, dir, a, b}, n), do: build_tree({:split, dir, 0.5, a, b}, n)
 
   defp build_tree({:split, dir, ratio, a, b}, n) do
@@ -1100,6 +1186,20 @@ defmodule Aimax.Core.Editor do
     {tb, n} = build_tree(b, n)
     {%{type: :split, dir: dir, ratio: ratio, children: [ta, tb]}, n}
   end
+
+  defp apply_init_points(%{type: :leaf} = leaf) do
+    case Map.pop(leaf, :init_point) do
+      {nil, leaf} ->
+        leaf
+
+      {point, leaf} ->
+        if Buffer.exists?(leaf.buffer), do: Buffer.set_win_point(leaf.buffer, leaf.id, point)
+        leaf
+    end
+  end
+
+  defp apply_init_points(%{type: :split} = split),
+    do: %{split | children: Enum.map(split.children, &apply_init_points/1)}
 
   defp leaf_ids_buffers(%{type: :leaf, id: id, buffer: b}), do: [{id, b}]
 
@@ -1160,8 +1260,9 @@ defmodule Aimax.Core.Editor do
     # line height varies per buffer, so only the client knows what fits
     rows = Map.get(win_rows, id, rows)
 
-    # one round trip per leaf — this runs on every render of every window
-    snap = if Buffer.exists?(buffer), do: Buffer.render_snapshot(buffer), else: @empty_snapshot
+    # one round trip per leaf — this runs on every render of every window;
+    # point/mark/cursor geometry are the WINDOW's (per-window points)
+    snap = if Buffer.exists?(buffer), do: Buffer.render_snapshot(buffer, id), else: @empty_snapshot
     %{text: text, point: point, locals: locals} = snap
 
     # folds put top/cursor/total in VISIBLE-line space; the scroll and

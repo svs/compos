@@ -11,7 +11,15 @@ defmodule Aimax.Core.Buffer do
   self-inserts), redo via Emacs-style undo-the-undos.
 
   Point is a byte offset; motion ops are grapheme-aware. TODO: goal column
-  for line motion, marks, per-window points, text properties.
+  for line motion, marks, text properties.
+
+  Per-window points (Emacs window-point): `win_points` holds a point/mark/goal
+  per window id for every window displaying this buffer EXCEPT the one
+  swapped in (the selected window of the last-active frame — the Editor
+  deletes its entry and the plain buffer point is authoritative for it).
+  Entries adjust through edits like markers, atomically with the edit;
+  insertion exactly at a stored window point leaves it before the inserted
+  text (Emacs window-point-insertion-type nil).
   """
 
   # :temporary — a crashed buffer must not restart-storm the supervisor
@@ -42,7 +50,8 @@ defmodule Aimax.Core.Buffer do
             overlays: %{},
             overlay_gen: 0,
             hidden: [],
-            ts: nil
+            ts: nil,
+            win_points: %{}
 
   # --- client ----------------------------------------------------------------
 
@@ -126,8 +135,27 @@ defmodule Aimax.Core.Buffer do
 
   def undo(name), do: GenServer.call(via(name), :undo)
 
-  @doc "All render inputs (text, point, mark, version, locals, overlays, hidden) in one call."
-  def render_snapshot(name), do: GenServer.call(via(name), :render_snapshot)
+  @doc """
+  All render inputs (text, point, mark, version, locals, overlays, hidden)
+  in one call. With a win_id, point/mark/cursor geometry come from that
+  window's stored point when it has one (the swapped-in window doesn't —
+  it falls through to the buffer point, which is its live point).
+  """
+  def render_snapshot(name, win_id \\ nil),
+    do: GenServer.call(via(name), {:render_snapshot, win_id})
+
+  # per-window points: the Editor drives these on selection changes
+  @doc "Install win_id's stored point/mark/goal as the buffer's and drop the entry."
+  def win_point_swap_in(name, win_id), do: GenServer.call(via(name), {:wp_swap_in, win_id})
+
+  @doc "Store the buffer's point/mark/goal under win_id (window deselected)."
+  def win_point_save(name, win_id), do: GenServer.call(via(name), {:wp_save, win_id})
+
+  def set_win_point(name, win_id, pos), do: GenServer.call(via(name), {:wp_set, win_id, pos})
+  def drop_win_point(name, win_id), do: GenServer.call(via(name), {:wp_drop, win_id})
+
+  @doc "win_id's effective point: its stored one, or the buffer point (swapped in / no entry)."
+  def win_point(name, win_id), do: GenServer.call(via(name), {:wp_get, win_id})
 
   @doc """
   Highlight spans from the buffer's incremental tree-sitter state ([] if the
@@ -397,15 +425,23 @@ defmodule Aimax.Core.Buffer do
 
   # everything the renderer needs, in one round trip; line geometry is
   # O(log n) rope lookups, not text scans
-  def handle_call(:render_snapshot, _from, state) do
+  def handle_call({:render_snapshot, win_id}, _from, state) do
     {text, state} = fetch_text(state)
-    cursor_line = Rope.byte_to_line(state.rope, state.point)
+
+    {point, mark} =
+      case win_id && state.win_points[win_id] do
+        # undo swaps the rope wholesale under stored points — clamp on read
+        %{point: p, mark: m} -> {clamp(p, state), m && clamp(m, state)}
+        nil -> {state.point, state.mark}
+      end
+
+    cursor_line = Rope.byte_to_line(state.rope, point)
 
     {:reply,
      %{
        text: text,
-       point: state.point,
-       mark: state.mark,
+       point: point,
+       mark: mark,
        version: state.version,
        modified: state.version != state.saved_version,
        locals: state.locals,
@@ -415,8 +451,46 @@ defmodule Aimax.Core.Buffer do
        total_lines: Rope.line_count(state.rope),
        cursor_line: cursor_line,
        line: cursor_line + 1,
-       col: state.point - Rope.line_to_byte(state.rope, cursor_line)
+       col: point - Rope.line_to_byte(state.rope, cursor_line)
      }, state}
+  end
+
+  def handle_call({:wp_swap_in, win_id}, _from, state) do
+    case state.win_points[win_id] do
+      nil ->
+        # first display in this window: it inherits the buffer point
+        {:reply, :ok, state}
+
+      %{point: p, mark: m, goal: g} ->
+        {:reply, :ok,
+         %{
+           state
+           | point: clamp(p, state),
+             mark: m && clamp(m, state),
+             goal_col: g,
+             win_points: Map.delete(state.win_points, win_id)
+         }}
+    end
+  end
+
+  def handle_call({:wp_save, win_id}, _from, state) do
+    entry = %{point: state.point, mark: state.mark, goal: state.goal_col}
+    {:reply, :ok, %{state | win_points: Map.put(state.win_points, win_id, entry)}}
+  end
+
+  def handle_call({:wp_set, win_id, pos}, _from, state) do
+    entry = %{point: clamp(pos, state), mark: nil, goal: nil}
+    {:reply, :ok, %{state | win_points: Map.put(state.win_points, win_id, entry)}}
+  end
+
+  def handle_call({:wp_drop, win_id}, _from, state),
+    do: {:reply, :ok, %{state | win_points: Map.delete(state.win_points, win_id)}}
+
+  def handle_call({:wp_get, win_id}, _from, state) do
+    case state.win_points[win_id] do
+      %{point: p} -> {:reply, clamp(p, state), state}
+      nil -> {:reply, state.point, state}
+    end
   end
 
   def handle_call(:ts_highlight, _from, %{ts: nil} = state), do: {:reply, [], state}
@@ -514,7 +588,8 @@ defmodule Aimax.Core.Buffer do
     %{
       state
       | point: adjust_insert(state.point, pos, len),
-        mark: state.mark && adjust_insert(state.mark, pos, len)
+        mark: state.mark && adjust_insert(state.mark, pos, len),
+        win_points: adjust_win_points(state.win_points, &adjust_insert_stay(&1, pos, len))
     }
   end
 
@@ -522,8 +597,15 @@ defmodule Aimax.Core.Buffer do
     %{
       state
       | point: adjust_delete(state.point, pos, len),
-        mark: state.mark && adjust_delete(state.mark, pos, len)
+        mark: state.mark && adjust_delete(state.mark, pos, len),
+        win_points: adjust_win_points(state.win_points, &adjust_delete(&1, pos, len))
     }
+  end
+
+  defp adjust_win_points(win_points, f) do
+    Map.new(win_points, fn {w, wp} ->
+      {w, %{wp | point: f.(wp.point), mark: wp.mark && f.(wp.mark)}}
+    end)
   end
 
   # shift overlay + hidden range endpoints through an edit; collapsed
@@ -547,6 +629,11 @@ defmodule Aimax.Core.Buffer do
 
   defp adjust_insert(p, pos, len) when p >= pos, do: p + len
   defp adjust_insert(p, _pos, _len), do: p
+
+  # window points don't advance over text inserted exactly at them
+  # (Emacs window-point-insertion-type nil) — the buffer point does
+  defp adjust_insert_stay(p, pos, len) when p > pos, do: p + len
+  defp adjust_insert_stay(p, _pos, _len), do: p
 
   defp adjust_delete(p, pos, len) do
     cond do

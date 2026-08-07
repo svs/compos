@@ -21,7 +21,14 @@ defmodule Aimax.Core.KeyDispatch do
   the last-active frame (tests, RPC).
   """
   def handle_key(fid, key) do
-    if fid, do: Frame.put(fid), else: Frame.clear()
+    if fid do
+      Frame.put(fid)
+      # make it the last-active frame and swap its window's point in
+      Editor.touch_frame(fid)
+    else
+      Frame.clear()
+    end
+
     handle_key(key)
   end
 

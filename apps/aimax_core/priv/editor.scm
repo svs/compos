@@ -1396,8 +1396,13 @@
               (cond ((equal? choice "") #f)
                     ((equal? choice "api")
                      (let ((slug (buffer-local buf 'agent-slug)))
-                       (when slug (agent-kill! slug))
+                       (when (and slug (not (equal? (agent-status slug) 'dead)))
+                         (agent-kill! slug))
                        (buffer-set-local! buf 'agent-slug #f)
+                       ;; the thread keys stay bound otherwise — RET would
+                       ;; hit agent-send and refuse ("not an agent buffer")
+                       (local-set-key "RET" "chat-send")
+                       (local-set-key "C-RET" "chat-send")
                        (message "chat backend: api")))
                     (else
                       (chat-attach-agent! buf choice)

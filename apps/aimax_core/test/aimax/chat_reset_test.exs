@@ -220,6 +220,23 @@ defmodule Aimax.ChatResetTest do
     refute modeline =~ "gpt-5.6-luna"
   end
 
+  test "switching an ACP chat back to the api rebinds RET to chat-send" do
+    eval!(~s{(begin
+      (switch-to-buffer! (group-chat "backg"))
+      (set-mode! "chat-mode")
+      (buffer-set-local! (current-buffer) 'agent-slug "no-such")
+      (agent-install-keys! (current-buffer))
+      #t)})
+
+    eval!(~s{(run-command "chat-set-backend")})
+    Enum.each(String.graphemes("api"), &Aimax.Core.KeyDispatch.handle_key/1)
+    Aimax.Core.KeyDispatch.handle_key("RET")
+
+    assert eval!(~s{(buffer-local (current-buffer) 'agent-slug)}) == "#f"
+    # RET must send through the chat path now, not the dead thread path
+    assert Aimax.Core.Editor.lookup_key(["RET"]) == {:command, "chat-send"}
+  end
+
   test "outside a chat it refuses politely" do
     eval!(~s{(begin (switch-to-buffer! "*scratch*") (run-command "chat-reset"))})
     assert eval!(~s{(buffer-exists? "*scratch*")}) == "#t"

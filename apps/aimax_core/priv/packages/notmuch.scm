@@ -46,12 +46,14 @@ when a message has no text/plain part." 'group 'notmuch)
 (defcustom 'notmuch-auto-preview #t
   "n/p in the search buffer preview the thread in the other window."
   'group 'notmuch)
+(defcustom 'notmuch-max-show-buffers 5
+  "How many *mail: thread buffers to keep; older ones are killed
+(visible ones always survive)." 'group 'notmuch)
 
 ;; (substring-of-From-or-filename  send-command) — first match wins,
-;; "" is the fallback route. Override in init.scm for other accounts.
+;; "" is the fallback route. set! your accounts' routes in init.scm.
 (define notmuch-send-routes
-  '(("svsrecruiting" "gmi send -t -C ~/Mail/svsrecruiting")
-    ("" "msmtp -t")))
+  '(("" "msmtp -t")))
 
 (define *notmuch-search-buffer* "*notmuch*")
 
@@ -206,15 +208,10 @@ when a message has no text/plain part." 'group 'notmuch)
       (set-mode! "notmuch-mode")
       (goto-char! 0) (next-line!) (beginning-of-line!))))
 
-(define-command "notmuch-recruiting" "Open mail for the svsrecruiting account"
-  (lambda ()
-    (set! notmuch-profile "")
-    (run-command "notmuch")))
-
-(define-command "notmuch-svs-io" "Open mail for the svs.io account"
-  (lambda ()
-    (set! notmuch-profile "svs.io")
-    (run-command "notmuch")))
+;; the preview helpers target the *next* window in cyclic order, so any
+;; window arrangement works: put the index left of where you want mail
+;; shown and SPC/n/p keep filling that pane. Personal scenes (three-pane
+;; layouts, per-account profile commands, keybindings) belong in init.scm.
 
 ;;; --- preview: thread in the other window, focus stays --------------------------
 
@@ -556,6 +553,22 @@ when a message has no text/plain part." 'group 'notmuch)
                   (buffer-set-local! buf 'notmuch-msgs (cadr rendered))))
             (goto-char! 0)))))))
 
+(define (nm--visible? b)
+  (let loop ((ws (window-list)))
+    (cond ((null? ws) #f)
+          ((equal? (cadr (car ws)) b) #t)
+          (else (loop (cdr ws))))))
+
+;; auto-preview would otherwise mint a buffer per n — keep the MRU few
+(define (nm--cleanup-show-buffers!)
+  (let loop ((bs (filter (lambda (b) (string-prefix? "*mail:" b))
+                         (buffer-list-mru)))
+             (kept 0))
+    (unless (null? bs)
+      (if (or (< kept notmuch-max-show-buffers) (nm--visible? (car bs)))
+          (loop (cdr bs) (+ kept 1))
+          (begin (buffer-kill! (car bs)) (loop (cdr bs) kept))))))
+
 (define (nm--open-thread! thread-id subject)
   (let ((buf (string-append "*mail: " (nm--trunc subject 48) "*")))
     (unless (buffer-exists? buf) (buffer-create buf))
@@ -565,6 +578,7 @@ when a message has no text/plain part." 'group 'notmuch)
     (set-mode! "notmuch-show-mode")
     ;; reading marks read, like every mail client
     (nm--run (string-append "tag -unread -- thread:" thread-id))
+    (nm--cleanup-show-buffers!)
     buf))
 
 (define-command "notmuch-open-thread" "Open the thread at point"
@@ -732,6 +746,3 @@ when a message has no text/plain part." 'group 'notmuch)
         (nm--refresh! *notmuch-search-buffer*))
       "done")))
 
-(global-set-key "C-c n" "notmuch")
-(global-set-key "C-c m" "notmuch-recruiting")
-(global-set-key "C-c M" "notmuch-svs-io")

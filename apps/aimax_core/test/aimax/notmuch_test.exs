@@ -242,6 +242,50 @@ defmodule Aimax.NotmuchTest do
     assert ovs =~ "nm-subject"
   end
 
+  test "old show buffers get culled past notmuch-max-show-buffers" do
+    eval!(~s{(set! notmuch-max-show-buffers 1)})
+    eval!(~s{(run-command "notmuch")})
+    press("RET")
+    assert eval!(~s{(buffer-exists? "*mail: Hello world*")}) == "#t"
+
+    eval!(~s{(begin (switch-to-buffer! "*notmuch*") (goto-char! 0)
+                    (next-line!) (next-line!) (beginning-of-line!))})
+    press("RET")
+    assert eval!(~s{(buffer-exists? "*mail: Quarterly report*")}) == "#t"
+    assert eval!(~s{(buffer-exists? "*mail: Hello world*")}) == "#f"
+    eval!(~s{(set! notmuch-max-show-buffers 5)})
+  end
+
+  test "a config-level three-pane scene: index | message | chat" do
+    # the scene lives in the user's init.scm — same code, defined here,
+    # proving the layout is buildable from config alone
+    eval!(~s{(define-command "test-mail-scene" "index | message | chat"
+      (lambda ()
+        (delete-other-windows!)
+        (run-command "notmuch")
+        (split-window! 'h 0.32)
+        (let ((idx (active-window)))
+          (other-window!)
+          (split-window! 'h 0.55)
+          (other-window!)
+          (run-command "chat")
+          (select-window! idx)
+          (nm--preview! (current-buffer)))))})
+
+    eval!(~s{(run-command "test-mail-scene")})
+
+    assert eval!("(length (window-list))") == "3"
+    assert eval!("(current-buffer)") == ~s{"*notmuch*"}
+    bufs = eval!("(map cadr (window-list))")
+    assert bufs =~ "*notmuch*"
+    assert bufs =~ "*mail: Hello world*"
+
+    # the chat pane's context carries the index selection and the open mail
+    ctx = eval!(~s{(editor-context "*chat*")})
+    assert ctx =~ "selected in the mail list"
+    assert ctx =~ "open email thread"
+  end
+
   test "mail tools search and read through the same renderer" do
     out = eval!(~s{(llm-tool-call "notmuch-search" (list 'query "tag:inbox"))})
     assert out =~ "thread:0001"

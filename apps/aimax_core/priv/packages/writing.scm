@@ -110,13 +110,13 @@
 
 (register-minor-mode! "writing-mode" writing--apply! writing--teardown!)
 
-(define-command "writing-mode"
+(define-command "writing-mode" "Toggle writing mode in the current buffer"
   (lambda ()
     (if (toggle-minor-mode! "writing-mode")
         (message "Writing mode enabled")
         (message "Writing mode disabled"))))
 
-(define-command "count-words"
+(define-command "count-words" "Display the number of words in the buffer"
   (lambda ()
     (message (string-append "Buffer has "
                             (number->string (count-words (current-buffer)))

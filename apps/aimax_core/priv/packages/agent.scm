@@ -104,7 +104,7 @@
     (cons (list s e #f) (or (buffer-local buf 'agent-folds) '())))
   (agent-apply-folds! buf))
 
-(define-command "agent-toggle-fold"
+(define-command "agent-toggle-fold" "Toggle the transcript fold at or around point"
   (lambda ()
     (let ((buf (current-buffer)) (p (point)))
       (let loop ((fs (or (buffer-local buf 'agent-folds) '())) (acc '()) (hit #f))
@@ -340,16 +340,16 @@
                 (agent-block-push! (agent-buffer slug) start
                   (agent-mark slug) "meta" '()))))))))
 
-(define-command "agent-permission-allow"
+(define-command "agent-permission-allow" "Allow the pending permission request once"
   (lambda () (agent-answer-permission! (agent-slug-of (current-buffer))
                                        "allow_once" "allow")))
 
 ;; allow this AND stop asking for this tool (ACP allow_always)
-(define-command "agent-permission-always"
+(define-command "agent-permission-always" "Allow and stop asking for this tool"
   (lambda () (agent-answer-permission! (agent-slug-of (current-buffer))
                                        "allow_always" "allow")))
 
-(define-command "agent-permission-deny"
+(define-command "agent-permission-deny" "Deny the pending permission request"
   (lambda () (agent-answer-permission! (agent-slug-of (current-buffer))
                                        "reject_once" "reject")))
 
@@ -388,7 +388,7 @@
     (agent-update-modeline! buf)
     (agent-revive! slug)))
 
-(define-command "agent-switch"
+(define-command "agent-switch" "Reattach this thread to a new connector and model"
   (lambda ()
     (let ((slug (agent-slug-of (current-buffer))))
       (if (not slug)
@@ -432,7 +432,7 @@
               "\n\nContinue naturally from there. New message:\n" msg)))
         (agent-prompt! slug msg))))
 
-(define-command "agent-send"
+(define-command "agent-send" "Send the input to the agent, reviving it if dead"
   (lambda ()
     (let ((slug (agent-slug-of (current-buffer))))
       (cond ((not slug) (message "not an agent buffer"))
@@ -456,7 +456,7 @@
 ;; C-RET escalates: dead -> revive; running -> polite session/cancel;
 ;; still running on the next press -> hard reset (kill + reattach, same
 ;; connector/model, transcript kept). The deterministic unstick gesture.
-(define-command "agent-interrupt-send"
+(define-command "agent-interrupt-send" "Revive, cancel, or hard-reset the agent"
   (lambda ()
     (let ((slug (agent-slug-of (current-buffer)))
           (buf (current-buffer)))
@@ -589,7 +589,7 @@
   (local-set-key* buf "C-c C-r" "agent-rename")
   (local-set-key* buf "C-c C-v" "agent-toggle-view"))
 
-(define-command "agent-toggle-view"
+(define-command "agent-toggle-view" "Toggle rich and plain transcript rendering"
   (lambda ()
     (let ((buf (current-buffer)))
       (when (agent-slug-of buf)
@@ -616,7 +616,7 @@
     (when alive (agent-revive! new))
     (message (string-append "thread renamed: " old " -> " new))))
 
-(define-command "agent-rename"
+(define-command "agent-rename" "Rename this thread, keeping its transcript"
   (lambda ()
     (let ((old (agent-slug-of (current-buffer))))
       (if (not old)
@@ -686,7 +686,7 @@
             (end-of-buffer!))
           slug)))))
 
-(define-command "agent-open"
+(define-command "agent-open" "Prompt for a task and spawn a new agent thread"
   (lambda ()
     (minibuffer-read "Task (empty for blank thread): " '()
       (lambda (task) (execute task)))))
@@ -781,9 +781,10 @@
   (let ((slug (agents-current-slug)))
     (when slug (switch-to-buffer! (agent-buffer slug)) (end-of-buffer!))))
 
-(define-command "agents-visit" (lambda () (agents-visit-current)))
+(define-command "agents-visit" "Visit the thread on the current line"
+  (lambda () (agents-visit-current)))
 
-(define-command "agents-steer"
+(define-command "agents-steer" "Send a steering message to the thread at point"
   (lambda ()
     (let ((slug (agents-current-slug)))
       (when slug
@@ -794,13 +795,13 @@
               (agent-send-msg! slug msg)
               (agents-refresh!))))))))
 
-(define-command "agents-allow"
+(define-command "agents-allow" "Allow the pending permission for the thread at point"
   (lambda ()
     (let ((slug (agents-current-slug)))
       (when slug (agent-answer-permission! slug "allow_once" "allow")
                  (agents-refresh!)))))
 
-(define-command "agents-deny"
+(define-command "agents-deny" "Deny the pending permission for the thread at point"
   (lambda ()
     (let ((slug (agents-current-slug)))
       (when slug (agent-answer-permission! slug "reject_once" "reject")
@@ -829,7 +830,7 @@
           (switch-to-buffer! (if (null? others) "*scratch*" (car others))))))
     (window-list)))
 
-(define-command "agents-kill"
+(define-command "agents-kill" "Kill the thread at point, keeping its transcript"
   (lambda ()
     (let ((slug (agents-current-slug)))
       (when slug
@@ -839,7 +840,7 @@
         (message (string-append slug " killed (transcript kept)"))))))
 
 ;; archive: runtime + buffer both go (desktop stops restoring it)
-(define-command "agents-archive"
+(define-command "agents-archive" "Kill the thread at point and drop its buffer"
   (lambda ()
     (let ((slug (agents-current-slug)))
       (when slug
@@ -851,9 +852,10 @@
           (agents-refresh!)
           (message (string-append slug " archived")))))))
 
-(define-command "agents-refresh" (lambda () (agents-refresh!)))
+(define-command "agents-refresh" "Refresh the *agents* listing"
+  (lambda () (agents-refresh!)))
 
-(define-command "agents-list"
+(define-command "agents-list" "Show all agent threads in the *agents* buffer"
   (lambda ()
     (buffer-create *agents-buffer*)
     (buffer-set-local! *agents-buffer* 'mode-name "Agents")
@@ -884,7 +886,7 @@
     (set-modeline-extra!
       (if (null? att) "" (string-append "! " (string-join att " "))))))
 
-(define-command "agent-goto-attention"
+(define-command "agent-goto-attention" "Jump to the first thread needing attention"
   (lambda ()
     (let ((att (agents-attention)))
       (if (null? att)

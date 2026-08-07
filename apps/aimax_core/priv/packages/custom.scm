@@ -179,17 +179,17 @@
   (minibuffer-read "Customize variable: " (custom--var-candidates)
     (lambda (name) (k (string->symbol name)))))
 
-(define-command "customize-set-variable"
+(define-command "customize-set-variable" "Set a variable for this session only"
   (lambda () (custom--pick-variable (lambda (name) (custom--read-value name #f)))))
 
-(define-command "customize-save-variable"
+(define-command "customize-save-variable" "Set a variable and save it for future sessions"
   (lambda () (custom--pick-variable (lambda (name) (custom--read-value name #t)))))
 
 ;; M-x customize — pick, set, save. The friendly path.
-(define-command "customize"
+(define-command "customize" "Pick a customizable variable, set it, and save"
   (lambda () (custom--pick-variable (lambda (name) (custom--read-value name #t)))))
 
-(define-command "describe-variable"
+(define-command "describe-variable" "Display a variable's value and documentation"
   (lambda ()
     (custom--pick-variable
       (lambda (name)

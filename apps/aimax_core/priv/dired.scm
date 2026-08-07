@@ -116,7 +116,7 @@
               (path-directory p)
               (string-append (expand-path "~") "/"))))))
 
-(define-command "dired"
+(define-command "dired" "Prompt for a directory and open it in Dired"
   (lambda ()
     (let ((dd (default-directory)))
       (set! *file-nav-dir* dd)
@@ -126,13 +126,13 @@
               (list 'initial dd)
               (list 'confirm (lambda (d) (dired-open (normalize-file-input d)))))))))
 
-(define-command "dired-next"
+(define-command "dired-next" "Move down to the next line in the Dired buffer"
   (lambda () (next-line!) (beginning-of-line!)))
 
-(define-command "dired-prev"
+(define-command "dired-prev" "Move up to the previous line in the Dired buffer"
   (lambda () (previous-line!) (beginning-of-line!)))
 
-(define-command "dired-visit"
+(define-command "dired-visit" "Visit the file or directory named on this line"
   (lambda ()
     (let ((p (dired-path-at-point)))
       (if p
@@ -140,11 +140,11 @@
           (visit p)
           (message "No file on this line")))))
 
-(define-command "dired-up"
+(define-command "dired-up" "Open the parent directory in Dired"
   (lambda ()
     (dired-open (expand-path (string-append (dired-dir (current-buffer)) "/..")))))
 
-(define-command "dired-revert"
+(define-command "dired-revert" "Re-read the directory and refresh the listing"
   (lambda ()
     (dired-refresh (current-buffer) (dired-dir (current-buffer)))
     (message "Reverted")))
@@ -159,14 +159,17 @@
           (beginning-of-line!))
         (message "No file on this line"))))
 
-(define-command "dired-mark" (lambda () (dired-mark-and-advance "*")))
-(define-command "dired-unmark" (lambda () (dired-mark-and-advance #f)))
-(define-command "dired-flag-delete" (lambda () (dired-mark-and-advance "D")))
+(define-command "dired-mark" "Mark the file at point and move to the next line"
+  (lambda () (dired-mark-and-advance "*")))
+(define-command "dired-unmark" "Unmark the file at point and move to the next line"
+  (lambda () (dired-mark-and-advance #f)))
+(define-command "dired-flag-delete" "Flag the file at point for deletion"
+  (lambda () (dired-mark-and-advance "D")))
 
 (define (dired-flagged buf)
   (map car (filter (lambda (m) (equal? (cadr m) "D")) (dired-marks buf))))
 
-(define-command "dired-do-flagged-delete"
+(define-command "dired-do-flagged-delete" "Delete the files flagged for deletion"
   (lambda ()
     (let ((buf (current-buffer)))
       (let ((flagged (dired-flagged buf)))
@@ -189,7 +192,7 @@
                                               (number->string (length flagged)) " file(s)")))
                     (message "Cancelled")))))))))
 
-(define-command "dired-mkdir"
+(define-command "dired-mkdir" "Prompt for a name and create a directory here"
   (lambda ()
     (minibuffer-read "Create directory: " '()
       (lambda (name)

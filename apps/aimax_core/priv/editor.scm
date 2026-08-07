@@ -22,27 +22,36 @@
 
 ;;; --- editing commands ------------------------------------------------------
 
-(define-command "forward-char" (lambda () (forward-char!)))
-(define-command "backward-char" (lambda () (backward-char!)))
-(define-command "next-line" (lambda () (next-line!)))
-(define-command "previous-line" (lambda () (previous-line!)))
-(define-command "beginning-of-line" (lambda () (beginning-of-line!)))
-(define-command "end-of-line" (lambda () (end-of-line!)))
-(define-command "beginning-of-buffer" (lambda () (beginning-of-buffer!)))
-(define-command "end-of-buffer" (lambda () (end-of-buffer!)))
+(define-command "forward-char" "Move point one character forward"
+  (lambda () (forward-char!)))
+(define-command "backward-char" "Move point one character backward"
+  (lambda () (backward-char!)))
+(define-command "next-line" "Move point down one line" (lambda () (next-line!)))
+(define-command "previous-line" "Move point up one line" (lambda () (previous-line!)))
+(define-command "beginning-of-line" "Move point to the beginning of the line"
+  (lambda () (beginning-of-line!)))
+(define-command "end-of-line" "Move point to the end of the line"
+  (lambda () (end-of-line!)))
+(define-command "beginning-of-buffer" "Move point to the beginning of the buffer"
+  (lambda () (beginning-of-buffer!)))
+(define-command "end-of-buffer" "Move point to the end of the buffer"
+  (lambda () (end-of-buffer!)))
 
-(define-command "newline" (lambda () (insert! "\n")))
-(define-command "delete-backward-char" (lambda () (delete-char! -1)))
-(define-command "delete-char" (lambda () (delete-char! 1)))
+(define-command "newline" "Insert a newline at point" (lambda () (insert! "\n")))
+(define-command "delete-backward-char" "Delete the character before point"
+  (lambda () (delete-char! -1)))
+(define-command "delete-char" "Delete the character after point"
+  (lambda () (delete-char! 1)))
 
-(define-command "kill-line"
+(define-command "kill-line" "Kill text from point to end of line"
   (lambda ()
     (let ((killed (kill-line!)))
       (if (equal? killed "") #f (kill-push! killed)))))
 
-(define-command "yank" (lambda () (insert! (kill-top))))
+(define-command "yank" "Reinsert the last killed text at point"
+  (lambda () (insert! (kill-top))))
 
-(define-command "undo"
+(define-command "undo" "Undo the last change"
   (lambda ()
     (if (not (undo!)) (message "No further undo information"))))
 
@@ -51,13 +60,20 @@
 ;;; undo and M-DEL all work in prompts for free via the global keymap. Only
 ;;; prompt-specific behavior is bound here, in its local keymap.
 
-(define-command "minibuffer-confirm" (lambda () (minibuffer-confirm!)))
-(define-command "minibuffer-confirm-input" (lambda () (minibuffer-confirm-input!)))
-(define-command "minibuffer-cancel" (lambda () (minibuffer-cancel!)))
-(define-command "minibuffer-complete" (lambda () (minibuffer-complete!)))
-(define-command "minibuffer-next-candidate" (lambda () (minibuffer-next!)))
-(define-command "minibuffer-previous-candidate" (lambda () (minibuffer-prev!)))
-(define-command "minibuffer-delete-backward" (lambda () (minibuffer-del!)))
+(define-command "minibuffer-confirm" "Accept the selected minibuffer candidate"
+  (lambda () (minibuffer-confirm!)))
+(define-command "minibuffer-confirm-input" "Accept the minibuffer input exactly as typed"
+  (lambda () (minibuffer-confirm-input!)))
+(define-command "minibuffer-cancel" "Cancel the minibuffer prompt"
+  (lambda () (minibuffer-cancel!)))
+(define-command "minibuffer-complete" "Complete the minibuffer input"
+  (lambda () (minibuffer-complete!)))
+(define-command "minibuffer-next-candidate" "Select the next minibuffer candidate"
+  (lambda () (minibuffer-next!)))
+(define-command "minibuffer-previous-candidate" "Select the previous minibuffer candidate"
+  (lambda () (minibuffer-prev!)))
+(define-command "minibuffer-delete-backward" "Delete the character before point"
+  (lambda () (minibuffer-del!)))
 
 (let ((mb (minibuffer-buffer)))
   (local-set-key* mb "RET" "minibuffer-confirm")
@@ -181,7 +197,7 @@
 
 ;; revert-buffer: re-read the file from disk (discards buffer edits).
 ;; Kill + re-visit so modes, hooks and fontification re-apply cleanly.
-(define-command "revert-buffer"
+(define-command "revert-buffer" "Re-read the current buffer's file from disk"
   (lambda ()
     (let* ((buf (current-buffer))
            (path (buffer-path buf))
@@ -194,7 +210,7 @@
             (goto-char! (min p (buffer-size (current-buffer))))
             (message "Reverted"))))))
 
-(define-command "preview-mode"
+(define-command "preview-mode" "Toggle rendered preview of the current buffer"
   (lambda ()
     (if (buffer-local (current-buffer) 'render-mode)
         (begin
@@ -217,10 +233,14 @@
   (let ((p (ts-nav op)))
     (if p (goto-char! p) (message "No structural navigation here"))))
 
-(define-command "forward-sexp" (lambda () (ts-goto 'forward)))
-(define-command "backward-sexp" (lambda () (ts-goto 'backward)))
-(define-command "backward-up-list" (lambda () (ts-goto 'up)))
-(define-command "down-list" (lambda () (ts-goto 'down)))
+(define-command "forward-sexp" "Move forward across one balanced expression"
+  (lambda () (ts-goto 'forward)))
+(define-command "backward-sexp" "Move backward across one balanced expression"
+  (lambda () (ts-goto 'backward)))
+(define-command "backward-up-list" "Move backward out of one level of parentheses"
+  (lambda () (ts-goto 'up)))
+(define-command "down-list" "Move forward down one level of parentheses"
+  (lambda () (ts-goto 'down)))
 
 ;;; --- word motion & editing ---------------------------------------------------
 
@@ -230,10 +250,11 @@
   (delete-region!)
   (set-mark! #f))
 
-(define-command "forward-word" (lambda () (forward-word!)))
-(define-command "backward-word" (lambda () (backward-word!)))
+(define-command "forward-word" "Move point forward one word" (lambda () (forward-word!)))
+(define-command "backward-word" "Move point backward one word"
+  (lambda () (backward-word!)))
 
-(define-command "kill-word"
+(define-command "kill-word" "Kill characters forward to the end of a word"
   (lambda ()
     (let ((s (point)))
       (let ((e (forward-word!)))
@@ -242,7 +263,7 @@
               (kill-push! (buffer-substring s e))
               (delete-between! s e)))))))
 
-(define-command "backward-kill-word"
+(define-command "backward-kill-word" "Kill characters backward to the start of a word"
   (lambda ()
     (let ((e (point)))
       (let ((s (backward-word!)))
@@ -251,7 +272,7 @@
               (kill-push! (buffer-substring s e))
               (delete-between! s e)))))))
 
-(define-command "transpose-chars"
+(define-command "transpose-chars" "Interchange characters around point"
   (lambda ()
     (if (= (point) (buffer-size (current-buffer))) (backward-char!))
     (if (> (point) 0)
@@ -269,13 +290,13 @@
 (define *yank-start* 0)
 (define *yank-index* 0)
 
-(define-command "yank"
+(define-command "yank" "Reinsert the last killed text at point"
   (lambda ()
     (set! *yank-index* 0)
     (set! *yank-start* (point))
     (insert! (kill-top))))
 
-(define-command "yank-pop"
+(define-command "yank-pop" "Replace just-yanked text with an earlier kill"
   (lambda ()
     (if (or (equal? (last-command) "yank") (equal? (last-command) "yank-pop"))
         (let ((n (kill-ring-size)))
@@ -304,7 +325,7 @@
   (let ((local (buffer-local (current-buffer) 'capf-sources)))
     (if local (append local *capf-sources*) *capf-sources*)))
 
-(define-command "completion-at-point"
+(define-command "completion-at-point" "Perform completion on the text around point"
   (lambda ()
     (let loop ((sources (capf-sources)))
       (if (null? sources)
@@ -333,7 +354,8 @@
 
 ;;; --- misc editing --------------------------------------------------------------
 
-(define-command "indent-for-tab" (lambda () (insert! "  ")))
+(define-command "indent-for-tab" "Indent by inserting two spaces"
+  (lambda () (insert! "  ")))
 
 ;;; --- scrolling (viewport) ------------------------------------------------------
 
@@ -342,15 +364,16 @@
     (if (< i n)
         (begin (mover) (loop (+ i 1))))))
 
-(define-command "scroll-up-command"
+(define-command "scroll-up-command" "Scroll text upward nearly a full screen"
   (lambda () (move-lines (- (window-rows) 2) next-line!)))
 
-(define-command "scroll-down-command"
+(define-command "scroll-down-command" "Scroll text downward nearly a full screen"
   (lambda () (move-lines (- (window-rows) 2) previous-line!)))
 
-(define-command "recenter-top-bottom" (lambda () (recenter!)))
+(define-command "recenter-top-bottom" "Recenter point in the window"
+  (lambda () (recenter!)))
 
-(define-command "display-line-numbers-mode"
+(define-command "display-line-numbers-mode" "Toggle line numbers in the current buffer"
   (lambda ()
     (let ((cur (buffer-local (current-buffer) 'line-numbers)))
       (if (equal? cur "off")
@@ -365,7 +388,7 @@
 ;; chrome face doesn't say otherwise; this flips it to 0ms and back
 (define *window-animations* #t)
 
-(define-command "toggle-window-animations"
+(define-command "toggle-window-animations" "Toggle window split and resize animations"
   (lambda ()
     (set! *window-animations* (not *window-animations*))
     (set-face-attribute! 'chrome 'anim (if *window-animations* "140ms" "0ms"))
@@ -373,7 +396,7 @@
                  "Window animations on"
                  "Window animations off"))))
 
-(define-command "back-to-indentation"
+(define-command "back-to-indentation" "Move point to the first non-space on this line"
   (lambda ()
     (beginning-of-line!)
     (let loop ()
@@ -382,7 +405,7 @@
                  (equal? (buffer-substring p (+ p 1)) " "))
             (begin (forward-char!) (loop)))))))
 
-(define-command "goto-line"
+(define-command "goto-line" "Go to a line number read from the minibuffer"
   (lambda ()
     (minibuffer-read "Goto line: " '()
       (lambda (s)
@@ -398,12 +421,12 @@
 
 ;;; --- mark & region ---------------------------------------------------------
 
-(define-command "set-mark-command"
+(define-command "set-mark-command" "Set the mark where point is"
   (lambda ()
     (set-mark! (point))
     (message "Mark set")))
 
-(define-command "kill-region"
+(define-command "kill-region" "Kill the text between point and mark"
   (lambda ()
     (let ((text (region-text)))
       (if (equal? text "")
@@ -413,7 +436,7 @@
             (delete-region!)
             (set-mark! #f))))))
 
-(define-command "copy-region-as-kill"
+(define-command "copy-region-as-kill" "Save the region as if killed, but don't kill it"
   (lambda ()
     (let ((text (region-text)))
       (if (equal? text "")
@@ -423,7 +446,7 @@
             (set-mark! #f)
             (message "Copied"))))))
 
-(define-command "exchange-point-and-mark"
+(define-command "exchange-point-and-mark" "Exchange positions of point and mark"
   (lambda ()
     (if (not (exchange-point-and-mark!))
         (message "No mark set in this buffer"))))
@@ -458,12 +481,14 @@
                           (set-mark! #f)
                           (goto-char! *isearch-origin*))))))
 
-(define-command "isearch-forward" (lambda () (isearch #f)))
-(define-command "isearch-backward" (lambda () (isearch #t)))
+(define-command "isearch-forward" "Do incremental search forward"
+  (lambda () (isearch #f)))
+(define-command "isearch-backward" "Do incremental search backward"
+  (lambda () (isearch #t)))
 
 ;;; --- files & buffers -------------------------------------------------------
 
-(define-command "save-buffer"
+(define-command "save-buffer" "Save the current buffer to its file"
   (lambda ()
     (run-hooks 'before-save-hook)
     (let ((path (buffer-save!)))
@@ -540,7 +565,7 @@
           (auto-mode path)
           (run-hooks 'find-file-hook)))))
 
-(define-command "find-file"
+(define-command "find-file" "Visit a file, prompting with filename completion"
   (lambda ()
     (let ((dd (default-directory)))
       (set! *file-nav-dir* dd)
@@ -557,7 +582,7 @@
          (list b (let ((p (buffer-path b))) (if p p ""))))
        (filter (lambda (b) (not (equal? b (current-buffer)))) (buffer-list-mru))))
 
-(define-command "switch-to-buffer"
+(define-command "switch-to-buffer" "Switch to another buffer in the current window"
   (lambda ()
     (let ((cands (buffer-candidates)))
       (minibuffer-read
@@ -569,7 +594,7 @@
           (if (not (equal? name ""))
               (switch-to-buffer! name)))))))
 
-(define-command "kill-buffer"
+(define-command "kill-buffer" "Kill a buffer, defaulting to the current one"
   (lambda ()
     (let ((cur (current-buffer)))
       ;; current buffer is the default: first candidate, RET kills it
@@ -636,7 +661,7 @@
       (popup-show name)
       (switch-to-buffer! name)))
 
-(define-command "popup-toggle"
+(define-command "popup-toggle" "Toggle the bottom popup window"
   (lambda ()
     (if (popup-open?)
         (begin
@@ -647,7 +672,7 @@
             (message "No popup buffer yet")))))
 
 ;; q in special buffers: close the popup, or fall back to the MRU buffer
-(define-command "quit-window"
+(define-command "quit-window" "Close the popup or fall back to the previous buffer"
   (lambda ()
     (if (and (popup-open?) (equal? (active-window) *popup-window*))
         (begin
@@ -658,9 +683,10 @@
               (message "Nothing to quit to")
               (switch-to-buffer! (car (car others))))))))
 
-(define-command "view-messages" (lambda () (display-buffer "*messages*")))
+(define-command "view-messages" "Display the *messages* buffer"
+  (lambda () (display-buffer "*messages*")))
 
-(define-command "scroll-other-window"
+(define-command "scroll-other-window" "Scroll the next window up nearly a full screen"
   (lambda ()
     (let ((wins (window-list)))
       (if (null? (cdr wins))
@@ -683,7 +709,7 @@
 ;; Override *shell-command* in your init.scm.
 (define *shell-command* "exec /bin/zsh -f -i +o zle +o prompt_cr +o prompt_sp")
 
-(define-command "shell"
+(define-command "shell" "Run an inferior shell in the *shell* buffer"
   (lambda ()
     (if (not (process-running? "*shell*"))
         (start-process! "*shell*" *shell-command*))
@@ -691,7 +717,7 @@
     (buffer-set-local! "*shell*" 'mode-name "Shell")
     (end-of-buffer!)))
 
-(define-command "newline-or-send"
+(define-command "newline-or-send" "Send input to the process, or insert a newline"
   (lambda ()
     (if (process-running? (current-buffer))
         ;; comint: input = text after the process mark. Typed input STAYS in
@@ -719,7 +745,7 @@
                handler)))))
 
 ;; M-| : region -> LLM -> *llm* buffer
-(define-command "llm-pipe-region"
+(define-command "llm-pipe-region" "Pipe the region through the LLM into *llm*"
   (lambda ()
     (minibuffer-read "LLM instruction: " '()
       (lambda (instr)
@@ -730,7 +756,7 @@
             (message "LLM done -> *llm*")))))))
 
 ;; region -> LLM -> replaced in place
-(define-command "llm-replace-region"
+(define-command "llm-replace-region" "Transform the region in place with the LLM"
   (lambda ()
     (minibuffer-read "Transform region: " '()
       (lambda (instr)
@@ -806,7 +832,7 @@
                                (chat-prompt-marker))))
             (set! *chat-buffer* (car chats))))))
 
-(define-command "chat"
+(define-command "chat" "Open the LLM chat buffer"
   (lambda ()
     (chat-ensure!)
     (switch-to-buffer! *chat-buffer*)
@@ -875,7 +901,7 @@
 
 ;; sends from whichever chat buffer it is invoked in (chat-mode-local key);
 ;; rich companion surfaces take the block path, plain chats the markdown one
-(define-command "chat-send"
+(define-command "chat-send" "Send the current chat input to the LLM"
   (lambda ()
     (let ((buf (current-buffer)))
       (if (buffer-local buf 'agent-saved-mark)
@@ -1026,7 +1052,7 @@
                   (chat-blocks-push! buf start (chat-mark buf) "prose" '())))
               (message "Reply ready")))))))
 
-(define-command "chat-toggle-view"
+(define-command "chat-toggle-view" "Toggle between rich and plain chat transcript"
   (lambda ()
     (let* ((buf (current-buffer))
            (rich? (equal? (buffer-local buf 'render-mode) "agent")))
@@ -1092,7 +1118,7 @@
         "claude-opus-5"
         "claude-haiku-4-5-20251001"))
 
-(define-command "chat-set-model"
+(define-command "chat-set-model" "Choose the LLM model from the minibuffer"
   (lambda ()
     (minibuffer-read (string-append "Model (now " (llm-model) "): ")
       *llm-models*
@@ -1104,7 +1130,7 @@
         (message (string-append "LLM model: " m))))))
 
 ;; send the region to the chat buffer as context, then open it
-(define-command "chat-send-region"
+(define-command "chat-send-region" "Add the region to the chat buffer as context"
   (lambda ()
     (let ((text (region-text)))
       (if (equal? text "")
@@ -1222,7 +1248,7 @@
 
 ;; C-c g : join (or found) a named group — read the code, the doc, and
 ;; chat about them all in one place
-(define-command "group-add"
+(define-command "group-add" "Join or found a named buffer group"
   (lambda ()
     (let ((buf (current-buffer)))
       (minibuffer-read "Group: " (group-names)
@@ -1233,7 +1259,7 @@
                 (buffer-set-local! buf 'group g)
                 (message (string-append buf " joined group " g)))))))))
 
-(define-command "group-remove"
+(define-command "group-remove" "Remove the current buffer from its group"
   (lambda ()
     (let* ((buf (current-buffer)) (g (buffer-group buf)))
       (if g
@@ -1243,7 +1269,7 @@
             (message (string-append buf " left group " g)))
           (message "Not in a group")))))
 
-(define-command "group-list"
+(define-command "group-list" "List the current buffer's group members"
   (lambda ()
     (let ((g (buffer-group (current-buffer))))
       (if g
@@ -1253,7 +1279,7 @@
 
 ;; make an existing conversation a group's chat: pick a buffer, join its
 ;; group (founding one named after it if it has none)
-(define-command "chat-adopt"
+(define-command "chat-adopt" "Make this chat the companion of a chosen buffer"
   (lambda ()
     (let ((chat (current-buffer)))
       (minibuffer-read "Companion for buffer: "
@@ -1275,7 +1301,7 @@
 ;; C-c w toggles sides: in a work buffer it opens (or refocuses) the group
 ;; chat, grouping the buffer by itself first if needed; in the chat it hops
 ;; to the group's most recent work buffer; in a groupless chat it adopts
-(define-command "chat-companion"
+(define-command "chat-companion" "Toggle between a work buffer and its group chat"
   (lambda ()
     (let* ((cur (current-buffer))
            (g (buffer-group cur)))
@@ -1292,7 +1318,7 @@
 
 ;; C-c RET in a work buffer: talk to the group chat without leaving it.
 ;; (In chat buffers the chat-mode local C-c RET = chat-send wins.)
-(define-command "chat-companion-ask"
+(define-command "chat-companion-ask" "Ask the group chat without leaving this buffer"
   (lambda ()
     (let ((cur (current-buffer)))
       (if (chat-buffer? cur)
@@ -1306,13 +1332,13 @@
 (add-display-rule! "*llm:" 'popup)
 
 ;; start a fresh conversation (the old one keeps its titled buffer)
-(define-command "chat-new"
+(define-command "chat-new" "Start a fresh chat conversation"
   (lambda ()
     (set! *chat-buffer* "*chat*")
     (chat-ensure! #t)
     (run-command "chat")))
 
-(define-command "llm-ask"
+(define-command "llm-ask" "Ask the LLM from anywhere via the minibuffer"
   (lambda ()
     (let ((g (buffer-group (current-buffer))))
       (if g
@@ -1366,16 +1392,25 @@
 
 ;;; --- M-x and eval ----------------------------------------------------------
 
+;; marginalia: each candidate carries its keybinding and docstring
+(define (command-annotation c)
+  (let ((key (key-for-command c))
+        (doc (command-doc c)))
+    (cond ((equal? key "") doc)
+          ((equal? doc "") key)
+          (else (string-append key " · " doc)))))
+
 (define-command "execute-extended-command"
+  "Run a command by name, with its keybinding and doc alongside"
   (lambda ()
     (minibuffer-read "M-x "
-      (map (lambda (c) (list c (key-for-command c)))
+      (map (lambda (c) (list c (command-annotation c)))
            (history-order 'M-x (command-names)))
       (lambda (cmd)
         (history-push! 'M-x cmd)
         (run-command cmd)))))
 
-(define-command "eval-expression"
+(define-command "eval-expression" "Evaluate a Scheme expression from the minibuffer"
   (lambda ()
     (minibuffer-read "Eval: " '()
       (lambda (src) (message (value->string (eval-string src)))))))
@@ -1414,7 +1449,7 @@
       (sexp-open-before p 0 #f)
       (atom-start p)))
 
-(define-command "eval-last-sexp"
+(define-command "eval-last-sexp" "Evaluate sexp before point and echo the value"
   (lambda ()
     (let* ((p (eval-skip-ws-back (point)))
            (s (last-sexp-start p)))
@@ -1422,17 +1457,17 @@
           (echo-value (eval-region (current-buffer) s p))
           (message "No sexp before point")))))
 
-(define-command "eval-buffer"
+(define-command "eval-buffer" "Evaluate the current buffer as Scheme"
   (lambda () (echo-value (eval-buffer (current-buffer)))))
 
-(define-command "eval-region"
+(define-command "eval-region" "Evaluate the region as Scheme"
   (lambda ()
     (if (mark)
         (echo-value (eval-region (current-buffer) (region-beginning) (region-end)))
         (message "No region — set the mark first (C-SPC)"))))
 
 ;; hot-reload a Scheme file into the live session (stdlib included)
-(define-command "load-file"
+(define-command "load-file" "Load a Scheme file into the live session"
   (lambda ()
     (let ((dd (default-directory)))
       (set! *file-nav-dir* dd)
@@ -1445,18 +1480,21 @@
                   (load path)
                   (message (string-append "Loaded " path)))))))))
 
-(define-command "keyboard-quit"
+(define-command "keyboard-quit" "Quit the current operation and clear the mark"
   (lambda ()
     (set-mark! #f)
     (message "Quit")))
 
 ;;; --- tiling windows --------------------------------------------------------
 
-(define-command "split-window-below" (lambda () (split-window! 'v)))
-(define-command "split-window-right" (lambda () (split-window! 'h)))
-(define-command "delete-window"
+(define-command "split-window-below" "Split the window in two, one above the other"
+  (lambda () (split-window! 'v)))
+(define-command "split-window-right" "Split the window in two, side by side"
+  (lambda () (split-window! 'h)))
+(define-command "delete-window" "Delete the selected window"
   (lambda () (if (not (delete-window!)) (message "Attempt to delete sole window"))))
-(define-command "delete-other-windows" (lambda () (delete-other-windows!)))
+(define-command "delete-other-windows" "Make the selected window the only one"
+  (lambda () (delete-other-windows!)))
 
 ;; landing in a rich chat/agent window puts point in its input region —
 ;; the transcript is for reading, the prompt is where typing goes
@@ -1468,10 +1506,70 @@
         (when (< (point) (+ mark mb))
           (end-of-buffer!))))))
 
-(define-command "other-window"
+(define-command "other-window" "Select another window in cyclic order"
   (lambda ()
     (other-window!)
     (chat-snap-to-input!)))
+
+;; Cmd-<left>/<right> (s- = super) walk the window ring in tree order —
+;; leftward/rightward in the usual side-by-side layouts
+(define (window-cycle! dir)
+  (let* ((ws (map car (window-list)))
+         (n (length ws)))
+    (if (< n 2)
+        (message "No other window")
+        (let loop ((l ws) (i 0))
+          (cond ((null? l) #f)
+                ((equal? (car l) (active-window))
+                 (select-window! (list-ref ws (modulo (+ i dir) n)))
+                 (chat-snap-to-input!))
+                (else (loop (cdr l) (+ i 1))))))))
+
+(define-command "windmove-left" "Select the window to the left"
+  (lambda () (window-cycle! -1)))
+(define-command "windmove-right" "Select the window to the right"
+  (lambda () (window-cycle! 1)))
+
+;; Cmd-Shift-<left>/<right>: carry the buffer over — swap this pane's
+;; buffer with the neighbor's and follow it (Emacs windmove-swap-states)
+(define (window-swap! dir)
+  (let* ((ws (window-list))
+         (n (length ws)))
+    (if (< n 2)
+        (message "No other window")
+        (let loop ((l ws) (i 0))
+          (cond ((null? l) #f)
+                ((equal? (car (car l)) (active-window))
+                 (let* ((mine (cadr (car l)))
+                        (nb (list-ref ws (modulo (+ i dir) n))))
+                   (switch-to-buffer! (cadr nb))
+                   (select-window! (car nb))
+                   (switch-to-buffer! mine)
+                   (chat-snap-to-input!)))
+                (else (loop (cdr l) (+ i 1))))))))
+
+(define-command "window-swap-left" "Swap this window's buffer leftward and follow it"
+  (lambda () (window-swap! -1)))
+(define-command "window-swap-right" "Swap this window's buffer rightward and follow it"
+  (lambda () (window-swap! 1)))
+
+;; S-<left>/<right>: cycle the active window's buffer through the buffer
+;; list (stable order, so repeated presses progress; hidden " *..." skipped)
+(define (buffer-cycle! dir)
+  (let* ((bs (filter (lambda (b) (not (string-prefix? " " b))) (buffer-list)))
+         (n (length bs)))
+    (if (< n 2)
+        (message "No other buffer")
+        (let loop ((l bs) (i 0))
+          (cond ((null? l) (switch-to-buffer! (car bs)))
+                ((equal? (car l) (current-buffer))
+                 (switch-to-buffer! (list-ref bs (modulo (+ i dir) n))))
+                (else (loop (cdr l) (+ i 1))))))))
+
+(define-command "next-buffer" "Switch to the next buffer in the buffer list"
+  (lambda () (buffer-cycle! 1)))
+(define-command "previous-buffer" "Switch to the previous buffer in the buffer list"
+  (lambda () (buffer-cycle! -1)))
 
 ;; the UI reports clicks; which window gets focus and what that means
 ;; (chat focuses its input) is policy
@@ -1557,6 +1655,14 @@
 (global-set-key "C-x 0" "delete-window")
 (global-set-key "C-x 1" "delete-other-windows")
 (global-set-key "C-x o" "other-window")
+(global-set-key "s-<left>" "windmove-left")
+(global-set-key "s-<right>" "windmove-right")
+(global-set-key "s-S-<left>" "window-swap-left")
+(global-set-key "s-S-<right>" "window-swap-right")
+(global-set-key "S-<left>" "previous-buffer")
+(global-set-key "S-<right>" "next-buffer")
+(global-set-key "C-x <left>" "previous-buffer")
+(global-set-key "C-x <right>" "next-buffer")
 
 ;;; --- the public API ----------------------------------------------------------
 ;;; The supported, documented surface — what apropos-api shows the LLM (and
@@ -1610,9 +1716,11 @@
 (public! 'minibuffer-read "(minibuffer-read PROMPT CANDIDATES HANDLER) — async; HANDLER gets the choice")
 
 ;; commands, keys, modes, hooks
-(public! 'define-command "(define-command NAME THUNK) — register an M-x command")
+(public! 'define-command "(define-command NAME [DOC] THUNK) — register an M-x command; DOC shows in M-x")
 (public! 'run-command "(run-command NAME) — invoke any M-x command")
 (public! 'command-names "All M-x command names")
+(public! 'command-doc "(command-doc NAME) -> the command's docstring (\"\" if none)")
+(public! 'key-for-command "(key-for-command NAME) -> its global keybinding (\"\" if none)")
 (public! 'global-set-key "(global-set-key KEYS COMMAND-NAME), e.g. \"C-c x\"")
 (public! 'local-set-key "(local-set-key KEYS COMMAND-NAME) in the current buffer")
 (public! 'define-mode "(define-mode NAME SETUP) — major mode; SETUP must rebuild from locals")

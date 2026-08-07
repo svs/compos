@@ -112,6 +112,18 @@ defmodule Aimax.Core.SchemeAPI do
       end,
       "file-exists?" => fn [p] -> File.exists?(Path.expand(p)) end,
       "file-directory?" => fn [p] -> File.dir?(Path.expand(p)) end,
+      # (read-file PATH) -> contents, or #f if unreadable
+      "read-file" => fn [p] ->
+        case File.read(Path.expand(p)) do
+          {:ok, text} -> text
+          {:error, _} -> false
+        end
+      end,
+      # (shell-command->string CMD [DIR]) — sync, stderr folded in, "" on spawn failure
+      "shell-command->string" => fn
+        [cmd] -> shell_to_string(cmd, File.cwd!())
+        [cmd, dir] -> shell_to_string(cmd, Path.expand(dir))
+      end,
       "write-file!" => fn [p, text] ->
         path = Path.expand(p)
         File.mkdir_p!(Path.dirname(path))
@@ -443,6 +455,13 @@ defmodule Aimax.Core.SchemeAPI do
 
   defp plain({:sym, s}), do: s
   defp plain(v), do: v
+
+  defp shell_to_string(cmd, dir) do
+    {out, _status} = System.cmd("/bin/sh", ["-c", cmd], cd: dir, stderr_to_stdout: true)
+    out
+  rescue
+    _ -> ""
+  end
 
   defp format_mode(stat) do
     type = if stat.type == :directory, do: "d", else: "-"

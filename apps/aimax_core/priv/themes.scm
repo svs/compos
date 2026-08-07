@@ -202,7 +202,7 @@
           'border "1px solid #101014"
           'shadow "0 2px 14px rgba(0, 0, 0, 0.4)")))
 
-(define-command "load-theme"
+(define-command "load-theme" "Prompt for a color theme and apply it"
   (lambda ()
     (minibuffer-read "Load theme: " (history-order 'theme (theme-names))
       (lambda (name)

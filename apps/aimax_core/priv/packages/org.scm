@@ -127,7 +127,7 @@
       (org-set-folds! buf (filter (lambda (x) (not (equal? x h))) (org-folds buf)))
       (org-set-folds! buf (cons h (org-folds buf)))))
 
-(define-command "org-cycle"
+(define-command "org-cycle" "Toggle folding of the headline at point, else indent"
   (lambda ()
     (let* ((buf (current-buffer))
            (ln (org-line-at buf (point))))
@@ -135,7 +135,7 @@
           (org-toggle-fold buf (car ln))
           (run-command "indent-for-tab")))))
 
-(define-command "org-global-cycle"
+(define-command "org-global-cycle" "Cycle global visibility: overview or show all"
   (lambda ()
     (let ((buf (current-buffer)))
       (if (null? (org-folds buf))
@@ -260,7 +260,7 @@
         (f buf (car ln) (cadr ln) (org-heading-level (cadr ln)))
         (message "Not on a headline"))))
 
-(define-command "org-todo"
+(define-command "org-todo" "Cycle the TODO state of the headline at point"
   (lambda ()
     (org-on-heading-line
       (lambda (buf start line lv)
@@ -302,8 +302,10 @@
           (string-append head (if next (string-append "[#" next "] ") "") rest))
         (org-refontify! buf)))))
 
-(define-command "org-priority-up" (lambda () (org-priority-cycle 'up)))
-(define-command "org-priority-down" (lambda () (org-priority-cycle 'down)))
+(define-command "org-priority-up" "Increase the priority of the current item"
+  (lambda () (org-priority-cycle 'up)))
+(define-command "org-priority-down" "Decrease the priority of the current item"
+  (lambda () (org-priority-cycle 'down)))
 
 ;;; --- structure editing -------------------------------------------------------
 
@@ -338,8 +340,10 @@
                                (org-shift-indent (cadr ln) n))
             (org-refontify! buf)))))
 
-(define-command "org-promote" (lambda () (org-promote-demote -1)))
-(define-command "org-demote" (lambda () (org-promote-demote 1)))
+(define-command "org-promote" "Promote the headline at point, or de-dent the line"
+  (lambda () (org-promote-demote -1)))
+(define-command "org-demote" "Demote the headline at point, or indent the line"
+  (lambda () (org-promote-demote 1)))
 
 (define (org-subtree-shift n)
   (org-on-heading-line
@@ -360,8 +364,10 @@
                         (org-lines buf))))
             (org-refontify! buf))))))
 
-(define-command "org-promote-subtree" (lambda () (org-subtree-shift -1)))
-(define-command "org-demote-subtree" (lambda () (org-subtree-shift 1)))
+(define-command "org-promote-subtree" "Promote the entire subtree at point"
+  (lambda () (org-subtree-shift -1)))
+(define-command "org-demote-subtree" "Demote the entire subtree at point"
+  (lambda () (org-subtree-shift 1)))
 
 ;; swap [s1,e1) with the adjacent [e1,e2); returns nothing useful.
 ;; Normalizes a missing trailing newline on the second block (last
@@ -402,7 +408,7 @@
   ;; subtree end as an EXCLUSIVE offset (past the trailing newline)
   (min (+ (org-subtree-end buf h lv) 1) (buffer-size buf)))
 
-(define-command "org-move-subtree-down"
+(define-command "org-move-subtree-down" "Move the subtree down past its next sibling"
   (lambda ()
     (org-on-heading-line
       (lambda (buf start line lv)
@@ -417,7 +423,7 @@
                   (goto-char! (+ start blen))
                   (org-refontify! buf)))))))))
 
-(define-command "org-move-subtree-up"
+(define-command "org-move-subtree-up" "Move the subtree up past its previous sibling"
   (lambda ()
     (org-on-heading-line
       (lambda (buf start line lv)
@@ -438,14 +444,14 @@
   (let ((h (org-enclosing-heading buf (point))))
     (if h (cadr h) 1)))
 
-(define-command "org-meta-return"
+(define-command "org-meta-return" "Insert a new headline at the current level"
   (lambda ()
     (let* ((buf (current-buffer))
            (lv (org-current-level buf)))
       (end-of-line!)
       (insert! (string-append "\n" (string-repeat "*" lv) " ")))))
 
-(define-command "org-insert-heading-after-subtree"
+(define-command "org-insert-heading-after-subtree" "Insert a headline after the subtree"
   (lambda ()
     (let* ((buf (current-buffer))
            (h (org-enclosing-heading buf (point))))
@@ -530,7 +536,7 @@
                          new-cookie
                          (substring-bytes txt (cadr old) (string-byte-length txt))))))))
 
-(define-command "org-ctrl-c-ctrl-c"
+(define-command "org-ctrl-c-ctrl-c" "Toggle the checkbox at point and update cookies"
   (lambda ()
     (let* ((buf (current-buffer))
            (ln (org-line-at buf (point)))

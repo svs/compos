@@ -106,7 +106,7 @@ defmodule Aimax.Core.Session do
       [] ->
         {:reply, {:error, "undefined command"}, state}
 
-      [{^name, closure}] ->
+      [{^name, closure, _doc}] ->
         case safe(fn -> Scheme.call(state.interp, closure, []) end) do
           {:ok, val, interp} -> {:reply, :ok, put_interp(state, interp, val)}
           {:error, msg} -> {:reply, {:error, msg}, state}
@@ -235,21 +235,32 @@ defmodule Aimax.Core.Session do
         message(to_string(text))
         :void
       end,
-      "define-command" => fn [name, closure] ->
-        :ets.insert(Aimax.Core.SchemeAPI.commands_table(), {command_name(name), closure})
-        :void
+      "define-command" => fn
+        [name, closure] ->
+          :ets.insert(Aimax.Core.SchemeAPI.commands_table(), {command_name(name), closure, ""})
+          :void
+
+        [name, doc, closure] when is_binary(doc) ->
+          :ets.insert(Aimax.Core.SchemeAPI.commands_table(), {command_name(name), closure, doc})
+          :void
       end,
       "command-names" => fn [] -> command_names() end,
       "command-fn" => fn [name] ->
         case :ets.lookup(Aimax.Core.SchemeAPI.commands_table(), command_name(name)) do
           [] -> false
-          [{_, closure}] -> closure
+          [{_, closure, _}] -> closure
+        end
+      end,
+      "command-doc" => fn [name] ->
+        case :ets.lookup(Aimax.Core.SchemeAPI.commands_table(), command_name(name)) do
+          [] -> ""
+          [{_, _, doc}] -> doc
         end
       end,
       "run-command" => fn [name], store ->
         case :ets.lookup(Aimax.Core.SchemeAPI.commands_table(), command_name(name)) do
           [] -> raise Aimax.Scheme.Eval.Error, message: "undefined command: #{command_name(name)}"
-          [{_, closure}] -> Aimax.Scheme.Eval.apply_fn(closure, [], store)
+          [{_, closure, _}] -> Aimax.Scheme.Eval.apply_fn(closure, [], store)
         end
       end,
       "llm" => fn [prompt, callback] ->

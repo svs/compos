@@ -476,13 +476,12 @@ defmodule Aimax.Core.Editor do
     do: changed(:ok, %{state | completion: nil})
 
   def handle_call({:key_for_command, command}, _from, state) do
+    # several keys may run one command (C-n and <down>) — show the tersest
     reply =
       state.keymap
-      |> Enum.find(fn {_seq, cmd} -> cmd == command end)
-      |> case do
-        {seq, _} -> Enum.join(seq, " ")
-        nil -> ""
-      end
+      |> Enum.filter(fn {_seq, cmd} -> cmd == command end)
+      |> Enum.map(fn {seq, _} -> Enum.join(seq, " ") end)
+      |> Enum.min_by(&{String.length(&1), &1}, fn -> "" end)
 
     {:reply, reply, state}
   end

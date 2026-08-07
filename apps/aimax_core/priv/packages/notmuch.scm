@@ -390,13 +390,24 @@ when a message has no text/plain part." 'group 'notmuch)
 
 ;;; --- tagging ------------------------------------------------------------------
 
+(define (nm--goto-index! buf i)
+  (goto-char! 0)
+  (let loop ((k (+ i 1)))
+    (when (> k 0) (next-line!) (loop (- k 1))))
+  (beginning-of-line!))
+
+;; tag, refresh, stay at the same list INDEX — when the change removes the
+;; row (archive/trash on an inbox view) that index IS the next thread —
+;; then the shown mail follows
 (define (nm--tag! buf changes)
-  (let ((th (nm--thread-at buf)))
+  (let ((th (nm--thread-at buf)) (i (nm--index-at buf)))
     (if th
         (begin
           (nm--run (string-append "tag " changes " -- thread:" (nm--th-id th)))
           (nm--refresh! buf)
-          (next-line!) (beginning-of-line!)
+          (let ((n (length (or (buffer-local buf 'notmuch-threads) '()))))
+            (when (and i (> n 0)) (nm--goto-index! buf (min i (- n 1)))))
+          (nm--maybe-preview! buf)
           (message changes))
         (message "No thread on this line"))))
 
@@ -471,7 +482,10 @@ when a message has no text/plain part." 'group 'notmuch)
   (lambda ()
     (let* ((buf (current-buffer)) (th (nm--thread-at buf)))
       (if th
-          (nm--tag! buf (if (member "m" (nm--th-tags th)) "-m" "+m"))
+          (begin
+            (nm--tag! buf (if (member "m" (nm--th-tags th)) "-m" "+m"))
+            ;; marking keeps the row — advance past it, dired-style
+            (next-line!) (beginning-of-line!))
           (message "No thread on this line")))))
 
 (define-command "notmuch-mark-all" "Mark every thread in this search"

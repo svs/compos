@@ -178,6 +178,8 @@ defmodule Aimax.Core.SchemeAPI do
       "current-buffer" => fn [] -> Editor.current_buffer() end,
       "point" => fn [] -> Buffer.point(Editor.current_buffer()) end,
       "buffer-point" => fn [name] -> Buffer.point(name) end,
+      # ~/.aimax in real life, a tmp dir in tests — config and user packages
+      "aimax-home" => fn [] -> Aimax.Core.home() end,
       "goto-char!" => fn [pos] ->
         Buffer.goto(Editor.current_buffer(), pos)
         pos

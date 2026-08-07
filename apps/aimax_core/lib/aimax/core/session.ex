@@ -85,10 +85,13 @@ defmodule Aimax.Core.Session do
   end
 
   # a primitive calling a dead GenServer (buffer killed while a callback was
-  # queued) exits — that must fail the eval, never the Session: this process
-  # is the editor's single writer, and its crash loops on the named ETS tables
+  # queued) exits, and a primitive fed garbage (string-prefix? on #f) raises —
+  # both must fail the eval, never the Session: this process is the editor's
+  # single writer, and its crash cascades into an app shutdown (500s everywhere)
   defp safe(fun) do
     fun.()
+  rescue
+    e -> {:error, Exception.message(e)}
   catch
     :exit, reason -> {:error, "exit: #{inspect(reason)}"}
   end
@@ -184,18 +187,29 @@ defmodule Aimax.Core.Session do
   # extracted into a real package later, and a broken package logs loudly
   # instead of bricking boot.
   defp load_packages(interp) do
-    :aimax_core
-    |> Application.app_dir("priv/packages")
-    |> Path.join("*.scm")
-    |> Path.wildcard()
-    # load order: custom.scm (defcustom) before tools.scm (define-tool!)
-    # before everything else — packages register into those registries at
-    # load time; the rest load alphabetically
-    |> Enum.sort_by(
-      &{Enum.find_index(["custom.scm", "tools.scm"], fn n -> n == Path.basename(&1) end) || 99,
-        &1}
-    )
-    |> Enum.reduce(interp, fn path, interp ->
+    bundled =
+      :aimax_core
+      |> Application.app_dir("priv/packages")
+      |> Path.join("*.scm")
+      |> Path.wildcard()
+      # load order: custom.scm (defcustom) before tools.scm (define-tool!)
+      # before everything else — packages register into those registries at
+      # load time; the rest load alphabetically
+      |> Enum.sort_by(
+        &{Enum.find_index(["custom.scm", "tools.scm"], fn n -> n == Path.basename(&1) end) ||
+           99, &1}
+      )
+
+    # user packages (~/.aimax/packages/*.scm, e.g. installed from github via
+    # package-install) load after the bundled set so they can build on it
+    user =
+      Aimax.Core.home()
+      |> Path.join("packages")
+      |> Path.join("*.scm")
+      |> Path.wildcard()
+      |> Enum.sort()
+
+    Enum.reduce(bundled ++ user, interp, fn path, interp ->
       case Scheme.eval_string(interp, File.read!(path)) do
         {:ok, _, interp2} ->
           interp2

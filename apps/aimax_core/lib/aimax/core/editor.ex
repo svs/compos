@@ -305,10 +305,14 @@ defmodule Aimax.Core.Editor do
         # hand the closed prompt back so the caller can fire on_cancel
         # (this server must never call into Session — deadlock)
         f = state.frames[id]
-        Aimax.Core.kill_buffer(minibuf_of(f))
+
+        # async: kill_buffer heals windows through Editor.release_buffer,
+        # which must not be called from inside this server (self-call)
+        mb_buf = minibuf_of(f)
+        Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn -> Aimax.Core.kill_buffer(mb_buf) end)
 
         Enum.each(leaf_ids_buffers(f.tree), fn {win, buf} ->
-          if Buffer.exists?(buf), do: Buffer.drop_win_point(buf, win)
+          if Buffer.exists?(buf), do: wp_safely(fn -> Buffer.drop_win_point(buf, win) end)
         end)
 
         state = %{
@@ -571,7 +575,7 @@ defmodule Aimax.Core.Editor do
   def handle_call({:copy_text, fid}, _from, state) do
     f = frame(state, fid)
     buf = find_leaf(f.tree, f.active).buffer
-    snap = Buffer.render_snapshot(buf, f.active)
+    snap = safe_snapshot(buf, f.active)
 
     case snap.mark do
       mark when is_integer(mark) and mark != snap.point ->
@@ -607,12 +611,7 @@ defmodule Aimax.Core.Editor do
       Map.get(f.win_rows, f.active) ||
         rows_for(f.tree, f.active, f.total_rows) || f.total_rows
 
-    top =
-      if Buffer.exists?(leaf.buffer) do
-        max(Buffer.render_snapshot(leaf.buffer, f.active).cursor_line - div(rows, 2), 0)
-      else
-        0
-      end
+    top = max(safe_snapshot(leaf.buffer, f.active).cursor_line - div(rows, 2), 0)
 
     tree = replace_leaf(f.tree, f.active, %{leaf | top: top, manual: false})
     changed(:ok, put_frame(state, %{f | tree: tree}), f.id)
@@ -850,7 +849,10 @@ defmodule Aimax.Core.Editor do
     # the new window starts at the old one's point and diverges from here
     # (Emacs split-window)
     if Buffer.exists?(old.buffer),
-      do: Buffer.set_win_point(old.buffer, new_leaf.id, Buffer.win_point(old.buffer, old.id))
+      do:
+        wp_safely(fn ->
+          Buffer.set_win_point(old.buffer, new_leaf.id, Buffer.win_point(old.buffer, old.id))
+        end)
 
     changed(:ok, put_frame(%{state | next_win: state.next_win + 1}, %{f | tree: tree}), f.id)
   end
@@ -867,7 +869,9 @@ defmodule Aimax.Core.Editor do
 
           tree ->
             leaf = find_leaf(f.tree, id)
-            if Buffer.exists?(leaf.buffer), do: Buffer.drop_win_point(leaf.buffer, id)
+
+            if Buffer.exists?(leaf.buffer),
+              do: wp_safely(fn -> Buffer.drop_win_point(leaf.buffer, id) end)
             active = if f.active == id, do: first_leaf(tree).id, else: f.active
 
             changed(
@@ -906,7 +910,8 @@ defmodule Aimax.Core.Editor do
         {:reply, {:error, :sole_window}, state}
 
       tree ->
-        if Buffer.exists?(leaf.buffer), do: Buffer.drop_win_point(leaf.buffer, leaf.id)
+        if Buffer.exists?(leaf.buffer),
+          do: wp_safely(fn -> Buffer.drop_win_point(leaf.buffer, leaf.id) end)
 
         changed(
           :ok,
@@ -921,7 +926,7 @@ defmodule Aimax.Core.Editor do
     leaf = find_leaf(f.tree, f.active)
 
     for {win, buf} <- leaf_ids_buffers(f.tree), win != leaf.id, Buffer.exists?(buf) do
-      Buffer.drop_win_point(buf, win)
+      wp_safely(fn -> Buffer.drop_win_point(buf, win) end)
     end
 
     changed(:ok, state |> put_frame(%{f | tree: leaf}) |> resync_swap(), f.id)
@@ -963,7 +968,7 @@ defmodule Aimax.Core.Editor do
 
     # the old windows are gone — their stored points go with them
     Enum.each(leaf_ids_buffers(f.tree), fn {id, buffer} ->
-      if Buffer.exists?(buffer), do: Buffer.drop_win_point(buffer, id)
+      if Buffer.exists?(buffer), do: wp_safely(fn -> Buffer.drop_win_point(buffer, id) end)
     end)
 
     {tree, next_win} = build_tree(spec, state.next_win)
@@ -1020,6 +1025,15 @@ defmodule Aimax.Core.Editor do
   # buffer) saves the old window's point back into its buffer's win_points
   # and installs the new one's. Call after every mutation that can move any
   # of the three.
+  # a buffer can die between exists? and the call (its registry entry
+  # outlives the process for a moment) — win-point bookkeeping must never
+  # take the Editor down with it
+  defp wp_safely(fun) do
+    fun.()
+  catch
+    :exit, _ -> :ok
+  end
+
   defp resync_swap(state) do
     f = state.frames[hd(state.frame_mru)]
     leaf = find_leaf(f.tree, f.active)
@@ -1032,13 +1046,15 @@ defmodule Aimax.Core.Editor do
         {_ofid, owin, obuf} ->
           # skip windows that no longer exist — their entries were dropped
           if find_window_frame(state, owin) && Buffer.exists?(obuf),
-            do: Buffer.win_point_save(obuf, owin)
+            do: wp_safely(fn -> Buffer.win_point_save(obuf, owin) end)
 
         nil ->
           :ok
       end
 
-      if Buffer.exists?(leaf.buffer), do: Buffer.win_point_swap_in(leaf.buffer, f.active)
+      if Buffer.exists?(leaf.buffer),
+        do: wp_safely(fn -> Buffer.win_point_swap_in(leaf.buffer, f.active) end)
+
       %{state | swapped: target}
     end
   end
@@ -1193,7 +1209,9 @@ defmodule Aimax.Core.Editor do
         leaf
 
       {point, leaf} ->
-        if Buffer.exists?(leaf.buffer), do: Buffer.set_win_point(leaf.buffer, leaf.id, point)
+        if Buffer.exists?(leaf.buffer),
+          do: wp_safely(fn -> Buffer.set_win_point(leaf.buffer, leaf.id, point) end)
+
         leaf
     end
   end
@@ -1242,6 +1260,14 @@ defmodule Aimax.Core.Editor do
     {a, max(rows - a, 3)}
   end
 
+  # exists? then call still races a dying buffer (registry entries linger);
+  # a dead buffer renders empty instead of crashing the Editor
+  defp safe_snapshot(buffer, win_id) do
+    if Buffer.exists?(buffer), do: Buffer.render_snapshot(buffer, win_id), else: @empty_snapshot
+  catch
+    :exit, _ -> @empty_snapshot
+  end
+
   # render walk: computes per-window rows (v-splits divide), clamps and
   # auto-follows the viewport top (unless manually scrolled), and returns
   # both the updated tree (tops persist) and the render payload
@@ -1262,7 +1288,7 @@ defmodule Aimax.Core.Editor do
 
     # one round trip per leaf — this runs on every render of every window;
     # point/mark/cursor geometry are the WINDOW's (per-window points)
-    snap = if Buffer.exists?(buffer), do: Buffer.render_snapshot(buffer, id), else: @empty_snapshot
+    snap = safe_snapshot(buffer, id)
     %{text: text, point: point, locals: locals} = snap
 
     # folds put top/cursor/total in VISIBLE-line space; the scroll and

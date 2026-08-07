@@ -1511,64 +1511,105 @@
     (other-window!)
     (chat-snap-to-input!)))
 
-;; Cmd-<left>/<right> (s- = super) walk the window ring in tree order —
-;; leftward/rightward in the usual side-by-side layouts
-(define (window-cycle! dir)
-  (let* ((ws (map car (window-list)))
-         (n (length ws)))
-    (if (< n 2)
-        (message "No other window")
-        (let loop ((l ws) (i 0))
-          (cond ((null? l) #f)
-                ((equal? (car l) (active-window))
-                 (select-window! (list-ref ws (modulo (+ i dir) n)))
-                 (chat-snap-to-input!))
-                (else (loop (cdr l) (+ i 1))))))))
+;; Cmd-arrows (s- = super) are geometric windmove: window-rects gives each
+;; leaf's normalized frame rectangle, and the neighbor in DIR is the nearest
+;; window past the active edge whose span contains the active center — so
+;; motion follows what's on screen, not the split tree's shape.
+(define (window-in-direction dir)
+  (let* ((rs (window-rects))
+         (me (let find ((l rs))
+               (cond ((null? l) #f)
+                     ((equal? (car (car l)) (active-window)) (car l))
+                     (else (find (cdr l)))))))
+    (and me
+         (let* ((mx (list-ref me 2)) (my (list-ref me 3))
+                (cx (+ mx (/ (list-ref me 4) 2)))
+                (cy (+ my (/ (list-ref me 5) 2)))
+                (eps 0.000001))
+           (let loop ((l rs) (best #f) (bestd 999))
+             (if (null? l)
+                 best
+                 (let* ((r (car l))
+                        (x (list-ref r 2)) (y (list-ref r 3))
+                        (w (list-ref r 4)) (h (list-ref r 5))
+                        (d (cond ((equal? dir 'left)
+                                  (and (<= (+ x w) (+ mx eps)) (<= y cy) (< cy (+ y h))
+                                       (- mx (+ x w))))
+                                 ((equal? dir 'right)
+                                  (and (>= (+ x eps) (+ mx (list-ref me 4))) (<= y cy) (< cy (+ y h))
+                                       (- x (+ mx (list-ref me 4)))))
+                                 ((equal? dir 'up)
+                                  (and (<= (+ y h) (+ my eps)) (<= x cx) (< cx (+ x w))
+                                       (- my (+ y h))))
+                                 (else
+                                  (and (>= (+ y eps) (+ my (list-ref me 5))) (<= x cx) (< cx (+ x w))
+                                       (- y (+ my (list-ref me 5))))))))
+                   (if (and d (< d bestd))
+                       (loop (cdr l) r d)
+                       (loop (cdr l) best bestd)))))))))
+
+(define (windmove! dir)
+  (let ((w (window-in-direction dir)))
+    (if w
+        (begin (select-window! (car w))
+               (chat-snap-to-input!))
+        (message (string-append "No window " (symbol->string dir))))))
 
 (define-command "windmove-left" "Select the window to the left"
-  (lambda () (window-cycle! -1)))
+  (lambda () (windmove! 'left)))
 (define-command "windmove-right" "Select the window to the right"
-  (lambda () (window-cycle! 1)))
+  (lambda () (windmove! 'right)))
+(define-command "windmove-up" "Select the window above"
+  (lambda () (windmove! 'up)))
+(define-command "windmove-down" "Select the window below"
+  (lambda () (windmove! 'down)))
 
-;; Cmd-Shift-<left>/<right>: carry the buffer over — swap this pane's
-;; buffer with the neighbor's and follow it (Emacs windmove-swap-states)
+;; Cmd-Shift-arrows: carry the buffer over — swap this pane's buffer with
+;; the directional neighbor's and follow it (Emacs windmove-swap-states)
 (define (window-swap! dir)
-  (let* ((ws (window-list))
-         (n (length ws)))
-    (if (< n 2)
-        (message "No other window")
-        (let loop ((l ws) (i 0))
-          (cond ((null? l) #f)
-                ((equal? (car (car l)) (active-window))
-                 (let* ((mine (cadr (car l)))
-                        (nb (list-ref ws (modulo (+ i dir) n))))
-                   (switch-to-buffer! (cadr nb))
-                   (select-window! (car nb))
-                   (switch-to-buffer! mine)
-                   (chat-snap-to-input!)))
-                (else (loop (cdr l) (+ i 1))))))))
+  (let ((nb (window-in-direction dir)))
+    (if nb
+        (let ((mine (current-buffer)))
+          (switch-to-buffer! (cadr nb))
+          (select-window! (car nb))
+          (switch-to-buffer! mine)
+          (chat-snap-to-input!))
+        (message (string-append "No window " (symbol->string dir))))))
 
 (define-command "window-swap-left" "Swap this window's buffer leftward and follow it"
-  (lambda () (window-swap! -1)))
+  (lambda () (window-swap! 'left)))
 (define-command "window-swap-right" "Swap this window's buffer rightward and follow it"
-  (lambda () (window-swap! 1)))
+  (lambda () (window-swap! 'right)))
+(define-command "window-swap-up" "Swap this window's buffer upward and follow it"
+  (lambda () (window-swap! 'up)))
+(define-command "window-swap-down" "Swap this window's buffer downward and follow it"
+  (lambda () (window-swap! 'down)))
 
-;; S-<left>/<right>: cycle the active window's buffer through the buffer
-;; list (stable order, so repeated presses progress; hidden " *..." skipped)
+;; S-<left>/<right>: walk buffer history — S-<left> goes to the buffer you
+;; just left (MRU), pressing again goes deeper; S-<right> walks back. The
+;; list freezes for the duration of a run (yank-pop's last-command trick),
+;; else each switch would reorder MRU and the walk would toggle forever.
+(define *buffer-cycle-ring* '())
+(define *buffer-cycle-pos* 0)
+
 (define (buffer-cycle! dir)
-  (let* ((bs (filter (lambda (b) (not (string-prefix? " " b))) (buffer-list)))
-         (n (length bs)))
+  (unless (member (last-command) '("next-buffer" "previous-buffer"))
+    (set! *buffer-cycle-ring*
+      (cons (current-buffer)
+            (filter (lambda (b) (and (not (string-prefix? " " b))
+                                     (not (equal? b (current-buffer)))))
+                    (buffer-list-mru))))
+    (set! *buffer-cycle-pos* 0))
+  (let ((n (length *buffer-cycle-ring*)))
     (if (< n 2)
         (message "No other buffer")
-        (let loop ((l bs) (i 0))
-          (cond ((null? l) (switch-to-buffer! (car bs)))
-                ((equal? (car l) (current-buffer))
-                 (switch-to-buffer! (list-ref bs (modulo (+ i dir) n))))
-                (else (loop (cdr l) (+ i 1))))))))
+        (begin
+          (set! *buffer-cycle-pos* (modulo (+ *buffer-cycle-pos* dir) n))
+          (switch-to-buffer! (list-ref *buffer-cycle-ring* *buffer-cycle-pos*))))))
 
-(define-command "next-buffer" "Switch to the next buffer in the buffer list"
+(define-command "previous-buffer" "Switch to the previously used buffer (again = deeper)"
   (lambda () (buffer-cycle! 1)))
-(define-command "previous-buffer" "Switch to the previous buffer in the buffer list"
+(define-command "next-buffer" "Walk back toward the most recently used buffer"
   (lambda () (buffer-cycle! -1)))
 
 ;; the UI reports clicks; which window gets focus and what that means
@@ -1657,8 +1698,12 @@
 (global-set-key "C-x o" "other-window")
 (global-set-key "s-<left>" "windmove-left")
 (global-set-key "s-<right>" "windmove-right")
+(global-set-key "s-<up>" "windmove-up")
+(global-set-key "s-<down>" "windmove-down")
 (global-set-key "s-S-<left>" "window-swap-left")
 (global-set-key "s-S-<right>" "window-swap-right")
+(global-set-key "s-S-<up>" "window-swap-up")
+(global-set-key "s-S-<down>" "window-swap-down")
 (global-set-key "S-<left>" "previous-buffer")
 (global-set-key "S-<right>" "next-buffer")
 (global-set-key "C-x <left>" "previous-buffer")

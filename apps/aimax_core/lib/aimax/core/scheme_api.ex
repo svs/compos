@@ -336,6 +336,7 @@ defmodule Aimax.Core.SchemeAPI do
       "delete-window!" => fn [] -> Editor.delete_window() == :ok end,
       "delete-window-id!" => fn [id] -> Editor.delete_window_by_id(id) == :ok end,
       "window-list" => fn [] -> Enum.map(Editor.list_windows(), fn {id, b} -> [id, b] end) end,
+      "window-rects" => fn [] -> Editor.window_rects() end,
       "select-window!" => fn [id] -> Editor.set_active(id) == :ok end,
       "active-window" => fn [] -> Editor.active_window() end,
       "scroll-window!" => fn [id, lines] ->

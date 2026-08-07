@@ -113,6 +113,7 @@ defmodule Aimax.Core.Editor do
   def delete_window, do: GenServer.call(__MODULE__, :delete_window)
   def delete_window_by_id(id), do: GenServer.call(__MODULE__, {:delete_window_by_id, id})
   def list_windows, do: GenServer.call(__MODULE__, :list_windows)
+  def window_rects, do: GenServer.call(__MODULE__, :window_rects)
   def set_active(id), do: GenServer.call(__MODULE__, {:set_active, id})
   def active_window, do: GenServer.call(__MODULE__, :active_window)
   def delete_other_windows, do: GenServer.call(__MODULE__, :delete_other_windows)
@@ -524,6 +525,9 @@ defmodule Aimax.Core.Editor do
   def handle_call(:list_windows, _from, state),
     do: {:reply, leaf_ids_buffers(state.tree), state}
 
+  def handle_call(:window_rects, _from, state),
+    do: {:reply, leaf_rects(state.tree, {0.0, 0.0, 1.0, 1.0}), state}
+
   def handle_call({:set_active, id}, _from, state) do
     if find_leaf(state.tree, id),
       do: changed(:ok, %{state | active: id}),
@@ -697,6 +701,16 @@ defmodule Aimax.Core.Editor do
 
   defp leaf_ids_buffers(%{type: :split, children: c}),
     do: Enum.flat_map(c, &leaf_ids_buffers/1)
+
+  # normalized frame geometry per leaf — windmove's map of the screen
+  defp leaf_rects(%{type: :leaf, id: id, buffer: b}, {x, y, w, h}),
+    do: [[id, b, x, y, w, h]]
+
+  defp leaf_rects(%{type: :split, dir: :h, ratio: r, children: [a, b]}, {x, y, w, h}),
+    do: leaf_rects(a, {x, y, w * r, h}) ++ leaf_rects(b, {x + w * r, y, w * (1 - r), h})
+
+  defp leaf_rects(%{type: :split, dir: :v, ratio: r, children: [a, b]}, {x, y, w, h}),
+    do: leaf_rects(a, {x, y, w, h * r}) ++ leaf_rects(b, {x, y + h * r, w, h * (1 - r)})
 
   defp leaf_ids(%{type: :leaf, id: id}), do: [id]
   defp leaf_ids(%{type: :split, children: children}), do: Enum.flat_map(children, &leaf_ids/1)

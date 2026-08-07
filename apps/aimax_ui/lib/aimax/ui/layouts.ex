@@ -409,9 +409,13 @@ defmodule Aimax.Ui.Layouts do
             return null;
           }
 
+          // cmd combos belong to the browser (cmd-c/v/q, and cmd-v's native
+          // paste event) — except the arrows, claimed for window motion
+          const CMD_KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
+
           function keySpec(e) {
             if (["Control", "Meta", "Alt", "Shift"].includes(e.key)) return null;
-            if (e.metaKey) return null; // let cmd-c/v/q etc. through to the browser
+            if (e.metaKey && !CMD_KEYS.includes(e.key)) return null;
             const base = baseKey(e);
             if (base === null) return null;
             let spec = base;
@@ -420,6 +424,7 @@ defmodule Aimax.Ui.Layouts do
             if (e.shiftKey && base.length > 1) spec = "S-" + spec;
             if (e.altKey) spec = "M-" + spec;
             if (e.ctrlKey) spec = "C-" + spec;
+            if (e.metaKey) spec = "s-" + spec; // s- = super = Cmd
             return spec;
           }
 

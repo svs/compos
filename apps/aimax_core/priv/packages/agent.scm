@@ -471,6 +471,14 @@
   (or (chat-flatten buf) (agent-conversation-text buf)))
 
 (define (agent-send-msg! slug msg)
+  (if (string-prefix? "/" msg)
+      ;; slash commands belong to the BACKEND (claude-code /skills,
+      ;; /compact, codex /review...): verbatim — no context preamble, no
+      ;; seed wrapper, and the seed stays armed for the next real message
+      (agent-prompt! slug msg)
+      (agent-send-msg-wrapped! slug msg)))
+
+(define (agent-send-msg-wrapped! slug msg)
   (let* ((buf (agent-buf slug))
          ;; what the user is looking at in the other windows — "this" works
          (msg (string-append (editor-context-preamble buf) msg)))

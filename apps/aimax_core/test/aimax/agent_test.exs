@@ -101,6 +101,20 @@ defmodule Aimax.AgentTest do
     _ = agent
   end
 
+  test "slash commands pass through verbatim, seed stays armed" do
+    {slug, buf, _agent} = boot("")
+
+    {:ok, _} = Session.eval(~s[(buffer-set-local! "#{buf}" 'agent-seed-context #t)])
+    {:ok, _} = Session.eval(~s[(agent-send-msg! "#{slug}" "/skills")])
+
+    assert_receive {:frame, %{"method" => "session/prompt", "params" => p}}, 1_000
+    assert [%{"type" => "text", "text" => "/skills"}] = p["prompt"]
+
+    # no context preamble, no seed wrapper — and the seed survives for
+    # the next real message
+    assert {:ok, "#t"} = Session.eval(~s[(buffer-local "#{buf}" 'agent-seed-context)])
+  end
+
   test "chunks stream in order across a tool-call interleave; body folds on completion" do
     {slug, buf, agent} = boot("")
 

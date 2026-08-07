@@ -332,6 +332,26 @@ when a message has no text/plain part." 'group 'notmuch)
 (define-command "notmuch-hello-refresh" "Refresh the mailbox counts"
   (lambda () (nm--hello-refresh! (current-buffer)) (message "Refreshed")))
 
+;; the mail views are derived state — killing them loses nothing. The
+;; chat survives (it holds a conversation); a scene toggle in init.scm
+;; can lean on this for teardown.
+(define (nm--view-buffers)
+  (filter (lambda (b) (member b (list *notmuch-search-buffer*
+                                      *notmuch-hello-buffer*
+                                      *notmuch-show-buffer*)))
+          (buffer-list)))
+
+(define-command "notmuch-quit" "Close mail: kill the view buffers, back to work"
+  (lambda ()
+    (let ((others (filter (lambda (b)
+                            (and (not (member b (nm--view-buffers)))
+                                 (not (equal? (buffer-group b) "mail"))))
+                          (buffer-list-mru))))
+      (delete-other-windows!)
+      (switch-to-buffer! (if (null? others) "*scratch*" (car others)))
+      (for-each buffer-kill! (nm--view-buffers))
+      (message "Mail closed"))))
+
 ;; the preview helpers target the *next* window in cyclic order, so any
 ;; window arrangement works: put the index left of where you want mail
 ;; shown and SPC/n/p keep filling that pane. Personal scenes (three-pane

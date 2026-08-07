@@ -381,6 +381,19 @@ defmodule Aimax.NotmuchTest do
     assert eval!(~s{(nm--thread-at (current-buffer))}) =~ "0001"
   end
 
+  test "notmuch-quit kills the mail views and lands on work" do
+    eval!(~s{(begin (visit "/tmp/some-work.txt") #t)})
+    eval!(~s{(run-command "notmuch")})
+    eval!(~s{(run-command "notmuch-inbox")})
+    press("RET")
+
+    eval!(~s{(run-command "notmuch-quit")})
+    assert eval!(~s{(buffer-exists? "*notmuch*")}) == "#f"
+    assert eval!(~s{(buffer-exists? "*mailboxes*")}) == "#f"
+    assert eval!(~s{(buffer-exists? "*mail*")}) == "#f"
+    assert eval!("(current-buffer)") == ~s{"/tmp/some-work.txt"}
+  end
+
   test "mail tools search and read through the same renderer" do
     out = eval!(~s{(llm-tool-call "notmuch-search" (list 'query "tag:inbox"))})
     assert out =~ "thread:0001"

@@ -328,7 +328,6 @@ defmodule Aimax.Ui.EditorLive do
               class={"mb-cand #{if c.selected, do: "selected"}"}
             >
               <span class="mb-label">{c.label}</span>
-              <span class="mb-spacer"></span>
               <span class="mb-hint">{c.hint}</span>
             </div>
           </div>

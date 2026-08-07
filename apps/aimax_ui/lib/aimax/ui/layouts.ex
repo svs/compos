@@ -327,9 +327,16 @@ defmodule Aimax.Ui.Layouts do
             letter-spacing: 0.13em; text-transform: uppercase;
             color: var(--dim-fg, #8a857a);
           }
-          .mb-cands { max-height: 40dvh; overflow-y: auto; }
+          /* candidates column fits the longest label; marginalia sits in the
+             column immediately after it, aligned across rows */
+          .mb-cands {
+            max-height: 40dvh; overflow-y: auto;
+            display: grid; grid-template-columns: max-content minmax(0, auto);
+            justify-content: start;
+          }
           .mb-cand {
-            display: flex; align-items: baseline; gap: 12px;
+            display: grid; grid-template-columns: subgrid; grid-column: 1 / -1;
+            align-items: baseline; column-gap: 12px;
             padding: 3px 14px;
             border-left: 2px solid transparent;
             font-family: var(--font-mono); font-size: 12.5px;

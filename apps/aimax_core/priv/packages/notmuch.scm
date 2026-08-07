@@ -5,9 +5,19 @@
 ;;; renders search and thread buffers, tags, replies, and sends. The
 ;;; extensibility bar, same as dired: primitives + shell + json-parse.
 ;;;
-;;; Search buffer keys:  n/p move · RET open thread · a archive · d trash
-;;;                      t edit tags · s new search · g refresh · q quit
-;;; Thread buffer keys:  a archive · r reply · q quit
+;;; HTML first — we are in a browser. When a message carries a text/html
+;;; part the thread buffer becomes an HTML document rendered by the UI's
+;;; sandboxed iframe (render-mode "html" + preview-authored); v toggles the
+;;; text view. Tools always read text, through notmuch-html-renderer when
+;;; a message has no text/plain part.
+;;;
+;;; Search buffer keys (ported from the user's Emacs config):
+;;;   n/p next/prev (n marks read; both auto-preview) · RET open · SPC preview
+;;;   a archive · d trash · u smart-untag · . toggle unread · @ by sender
+;;;   m mark+advance · M mark all · U unmark all · F show marked
+;;;   A archive marked · D trash marked · t tag marked · T tag this thread
+;;;   s new search · g refresh · q quit
+;;; Thread buffer keys:  v html/text view · a archive · r reply · q quit
 ;;; Compose buffer keys: C-c C-c send · C-c C-k abort
 ;;;
 ;;; Chat integration: context providers tell chat/agent what "this" means
@@ -18,10 +28,24 @@
 
 (defcustom 'notmuch-program "notmuch"
   "The notmuch executable." 'group 'notmuch)
+(defcustom 'notmuch-profile ""
+  "NOTMUCH_PROFILE for every call; \"\" uses the default database."
+  'group 'notmuch)
 (defcustom 'notmuch-search-limit 50
   "How many threads a search buffer shows." 'group 'notmuch)
 (defcustom 'notmuch-default-query "tag:inbox"
   "The query the notmuch command opens with." 'group 'notmuch)
+(defcustom 'notmuch-prefer-html #t
+  "Render threads as HTML when a message has an HTML part (v toggles text)."
+  'group 'notmuch)
+(defcustom 'notmuch-html-renderer "w3m -dump -O utf-8 -T text/html"
+  "Command that turns HTML into text, for the text view and the mail tools
+when a message has no text/plain part." 'group 'notmuch)
+(defcustom 'notmuch-show-newest-first #t
+  "Show the newest message of a thread first." 'group 'notmuch)
+(defcustom 'notmuch-auto-preview #t
+  "n/p in the search buffer preview the thread in the other window."
+  'group 'notmuch)
 
 ;; (substring-of-From-or-filename  send-command) — first match wins,
 ;; "" is the fallback route. Override in init.scm for other accounts.
@@ -37,7 +61,12 @@
   (string-append "'" (string-join (string-split s "'") "'\\''") "'"))
 
 (define (nm--run args)
-  (shell-command->string (string-append notmuch-program " " args)))
+  (shell-command->string
+    (string-append
+      (if (equal? notmuch-profile "")
+          ""
+          (string-append "NOTMUCH_PROFILE=" (nm--quote notmuch-profile) " "))
+      notmuch-program " " args)))
 
 (define (nm--json args)
   (json-parse (nm--run args)))
@@ -54,33 +83,76 @@
   (let ((s (or s "")))
     (if (> (string-length s) n) (substring s 0 n) s)))
 
+(define (nm--html-escape s)
+  (let* ((s (string-join (string-split s "&") "&amp;"))
+         (s (string-join (string-split s "<") "&lt;"))
+         (s (string-join (string-split s ">") "&gt;")))
+    s))
+
+(define (nm--html->text html)
+  (let ((tmp (string-append (expand-path "~") "/.aimax/mail-part.html")))
+    (write-file! tmp html)
+    (shell-command->string
+      (string-append notmuch-html-renderer " < " (nm--quote tmp)))))
+
 ;;; --- search buffer ------------------------------------------------------------
+
+(set-face-attribute! 'nm-date 'fg "#8a8a8a")
+(set-face-attribute! 'nm-author 'fg "#26356b")
+(set-face-attribute! 'nm-unread 'weight "700")
+(set-face-attribute! 'nm-tags 'fg "#9a9a72")
+(set-face-attribute! 'nm-marked 'fg "#a03020" 'weight "700")
 
 (define (nm--search-json query limit)
   (or (nm--json (string-append "search --format=json --limit="
                                (number->string limit) " -- " (nm--quote query)))
       '()))
 
-(define (nm--search-line th)
-  (string-append
-    (nm--fit (nm--get th 'date_relative) 13) " "
-    (nm--fit (nm--get th 'authors) 24) " "
-    (nm--get th 'subject)
-    "  (" (string-join (nm--get th 'tags) " ") ")\n"))
+;; stored per line: (thread-id subject authors tags)
+(define (nm--th-id th) (car th))
+(define (nm--th-subject th) (cadr th))
+(define (nm--th-authors th) (caddr th))
+(define (nm--th-tags th) (list-ref th 3))
 
 (define (nm--refresh! buf)
   (let* ((query (or (buffer-local buf 'notmuch-query) notmuch-default-query))
          (threads (nm--search-json query notmuch-search-limit))
-         (old-point (buffer-point buf)))
+         (old-point (buffer-point buf))
+         (header (string-append "notmuch: " query
+                                " (" (number->string (length threads)) ")\n")))
     (buffer-set-local! buf 'notmuch-threads
       (map (lambda (th) (list (nm--get th 'thread)
-                              (nm--get th 'subject)
-                              (nm--get th 'authors)))
+                              (or (nm--get th 'subject) "")
+                              (or (nm--get th 'authors) "")
+                              (or (nm--get th 'tags) '())))
            threads))
     (buffer-delete-range! buf 0 (buffer-size buf))
-    (buffer-append! buf (string-append "notmuch: " query
-                                       " (" (number->string (length threads)) ")\n"))
-    (for-each (lambda (th) (buffer-append! buf (nm--search-line th))) threads)
+    (buffer-append! buf header)
+    ;; columns get faces by byte range; unread/marked rows a subject face
+    (let loop ((ts threads) (off (string-byte-length header)) (ovs '()))
+      (if (null? ts)
+          (overlay-set! buf 'notmuch (reverse ovs))
+          (let* ((th (car ts))
+                 (date (nm--fit (nm--get th 'date_relative) 13))
+                 (auth (nm--fit (nm--get th 'authors) 24))
+                 (subj (or (nm--get th 'subject) ""))
+                 (tags (or (nm--get th 'tags) '()))
+                 (tagstr (string-append "  (" (string-join tags " ") ")"))
+                 (d-end (+ off (string-byte-length date)))
+                 (a-start (+ d-end 1))
+                 (a-end (+ a-start (string-byte-length auth)))
+                 (s-start (+ a-end 1))
+                 (s-end (+ s-start (string-byte-length subj)))
+                 (t-end (+ s-end (string-byte-length tagstr))))
+            (buffer-append! buf (string-append date " " auth " " subj tagstr "\n"))
+            (loop (cdr ts) (+ t-end 1)
+                  (cons (list s-end t-end "nm-tags")
+                        (cons (list s-start s-end
+                                    (cond ((member "m" tags) "nm-marked")
+                                          ((member "unread" tags) "nm-unread")
+                                          (else "nm-subject")))
+                              (cons (list a-start a-end "nm-author")
+                                    (cons (list off d-end "nm-date") ovs))))))))
     (when (equal? buf (current-buffer))
       (goto-char! (min old-point (buffer-size buf))))))
 
@@ -92,7 +164,6 @@
          (n (length (or (buffer-local buf 'notmuch-threads) '()))))
     (and (>= line 1) (<= line n) (- line 1))))
 
-;; (thread-id subject authors) under BUF's point, or #f
 (define (nm--thread-at buf)
   (let ((i (nm--index-at buf)))
     (and i (list-ref (buffer-local buf 'notmuch-threads) i))))
@@ -104,9 +175,20 @@
       (local-set-key "n" "notmuch-next")
       (local-set-key "p" "notmuch-prev")
       (local-set-key "RET" "notmuch-open-thread")
+      (local-set-key "SPC" "notmuch-preview")
       (local-set-key "a" "notmuch-archive")
       (local-set-key "d" "notmuch-trash")
-      (local-set-key "t" "notmuch-edit-tags")
+      (local-set-key "u" "notmuch-smart-untag")
+      (local-set-key "." "notmuch-toggle-unread")
+      (local-set-key "@" "notmuch-filter-by-sender")
+      (local-set-key "m" "notmuch-mark-toggle")
+      (local-set-key "M" "notmuch-mark-all")
+      (local-set-key "U" "notmuch-unmark-all")
+      (local-set-key "F" "notmuch-filter-marked")
+      (local-set-key "A" "notmuch-archive-marked")
+      (local-set-key "D" "notmuch-trash-marked")
+      (local-set-key "t" "notmuch-tag-marked")
+      (local-set-key "T" "notmuch-edit-tags")
       (local-set-key "s" "notmuch-search")
       (local-set-key "g" "notmuch-refresh")
       (local-set-key "q" "quit-window")
@@ -124,10 +206,50 @@
       (set-mode! "notmuch-mode")
       (goto-char! 0) (next-line!) (beginning-of-line!))))
 
-(define-command "notmuch-next" "Move to the next thread"
-  (lambda () (next-line!) (beginning-of-line!)))
-(define-command "notmuch-prev" "Move to the previous thread"
-  (lambda () (previous-line!) (beginning-of-line!)))
+(define-command "notmuch-recruiting" "Open mail for the svsrecruiting account"
+  (lambda ()
+    (set! notmuch-profile "")
+    (run-command "notmuch")))
+
+(define-command "notmuch-svs-io" "Open mail for the svs.io account"
+  (lambda ()
+    (set! notmuch-profile "svs.io")
+    (run-command "notmuch")))
+
+;;; --- preview: thread in the other window, focus stays --------------------------
+
+(define (nm--in-other-window! thunk)
+  (let ((back (active-window)))
+    (when (null? (cdr (window-list))) (split-window! 'h 0.45))
+    (other-window!)
+    (thunk)
+    (select-window! back)))
+
+(define (nm--preview! buf)
+  (let ((th (nm--thread-at buf)))
+    (when th
+      (nm--in-other-window!
+        (lambda () (nm--open-thread! (nm--th-id th) (nm--th-subject th)))))))
+
+(define-command "notmuch-preview" "Preview the thread at point in the other window"
+  (lambda () (nm--preview! (current-buffer))))
+
+(define (nm--maybe-preview! buf)
+  (when notmuch-auto-preview (nm--preview! buf)))
+
+(define-command "notmuch-next" "Mark this thread read, move down, preview"
+  (lambda ()
+    (let* ((buf (current-buffer)) (th (nm--thread-at buf)))
+      (when (and th (member "unread" (nm--th-tags th)))
+        (nm--run (string-append "tag -unread -- thread:" (nm--th-id th))))
+      (next-line!) (beginning-of-line!)
+      (when th (nm--refresh! buf))
+      (nm--maybe-preview! buf))))
+
+(define-command "notmuch-prev" "Move up and preview"
+  (lambda ()
+    (previous-line!) (beginning-of-line!)
+    (nm--maybe-preview! (current-buffer))))
 
 (define-command "notmuch-refresh" "Re-run the search and refresh the listing"
   (lambda () (nm--refresh! (current-buffer)) (message "Refreshed")))
@@ -141,11 +263,13 @@
           (nm--refresh! buf)
           (goto-char! 0) (next-line!) (beginning-of-line!))))))
 
+;;; --- tagging ------------------------------------------------------------------
+
 (define (nm--tag! buf changes)
   (let ((th (nm--thread-at buf)))
     (if th
         (begin
-          (nm--run (string-append "tag " changes " -- thread:" (car th)))
+          (nm--run (string-append "tag " changes " -- thread:" (nm--th-id th)))
           (nm--refresh! buf)
           (next-line!) (beginning-of-line!)
           (message changes))
@@ -153,8 +277,28 @@
 
 (define-command "notmuch-archive" "Archive the thread at point (-inbox)"
   (lambda () (nm--tag! (current-buffer) "-inbox")))
-(define-command "notmuch-trash" "Trash the thread at point (+trash -inbox)"
-  (lambda () (nm--tag! (current-buffer) "+trash -inbox")))
+(define-command "notmuch-trash" "Trash the thread at point (+trash -inbox -unread)"
+  (lambda () (nm--tag! (current-buffer) "+trash -inbox -unread")))
+
+(define-command "notmuch-toggle-unread" "Toggle the unread tag on the thread at point"
+  (lambda ()
+    (let* ((buf (current-buffer)) (th (nm--thread-at buf)))
+      (if th
+          (nm--tag! buf (if (member "unread" (nm--th-tags th)) "-unread" "+unread"))
+          (message "No thread on this line")))))
+
+;; on a plain tag:X search, u strips that tag from the thread — inbox zero
+;; as a single keystroke on any tag view
+(define-command "notmuch-smart-untag" "Remove the searched-for tag from this thread"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (query (or (buffer-local buf 'notmuch-query) ""))
+           (th (nm--thread-at buf)))
+      (cond ((not th) (message "No thread on this line"))
+            ((and (string-prefix? "tag:" query)
+                  (not (string-contains? query " ")))
+             (nm--tag! buf (string-append "-" (substring query 4 (string-length query)))))
+            (else (message "Not a simple tag: search"))))))
 
 (define-command "notmuch-edit-tags" "Edit tags of the thread at point (+tag -tag ...)"
   (lambda ()
@@ -163,6 +307,87 @@
           (minibuffer-read "Tags (+add -remove): " '()
             (lambda (changes) (nm--tag! buf changes)))
           (message "No thread on this line")))))
+
+(define-command "notmuch-filter-by-sender" "Narrow the search to this thread's sender"
+  (lambda ()
+    (let* ((buf (current-buffer)) (th (nm--thread-at buf)))
+      (if (not th)
+          (message "No thread on this line")
+          (let* ((msgs (nm--flatten-msgs
+                         (or (nm--json (string-append "show --format=json --body=false thread:"
+                                                      (nm--th-id th)))
+                             '())))
+                 (from (if (null? msgs)
+                           ""
+                           (or (nm--get (nm--get (car msgs) 'headers) 'From) "")))
+                 (email (let ((parts (string-split from "<")))
+                          (if (null? (cdr parts))
+                              (string-trim from)
+                              (car (string-split (cadr parts) ">"))))))
+            (if (equal? email "")
+                (message "Could not extract the sender")
+                (begin
+                  (buffer-set-local! buf 'notmuch-query (string-append "from:" email))
+                  (nm--refresh! buf)
+                  (goto-char! 0) (next-line!) (beginning-of-line!)
+                  (message (string-append "from:" email)))))))))
+
+;;; --- marks: dired-style bulk operations via the m tag ---------------------------
+
+(define (nm--query-of buf)
+  (or (buffer-local buf 'notmuch-query) notmuch-default-query))
+
+(define (nm--tag-marked! buf changes)
+  (nm--run (string-append "tag " changes " -- ( "
+                          (nm--query-of buf) " ) and tag:m"))
+  (nm--refresh! buf))
+
+(define-command "notmuch-mark-toggle" "Toggle the m tag on this thread, move down"
+  (lambda ()
+    (let* ((buf (current-buffer)) (th (nm--thread-at buf)))
+      (if th
+          (nm--tag! buf (if (member "m" (nm--th-tags th)) "-m" "+m"))
+          (message "No thread on this line")))))
+
+(define-command "notmuch-mark-all" "Mark every thread in this search"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (nm--run (string-append "tag +m -- ( " (nm--query-of buf) " )"))
+      (nm--refresh! buf)
+      (message "Marked all"))))
+
+(define-command "notmuch-unmark-all" "Unmark every thread in this search"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (nm--run (string-append "tag -m -- ( " (nm--query-of buf) " )"))
+      (nm--refresh! buf)
+      (message "Unmarked all"))))
+
+(define-command "notmuch-filter-marked" "Show only the marked threads"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (buffer-set-local! buf 'notmuch-query "tag:m")
+      (nm--refresh! buf)
+      (goto-char! 0) (next-line!) (beginning-of-line!))))
+
+(define (nm--confirm-marked buf verb changes)
+  (minibuffer-read (string-append verb " all marked threads? ")
+    (list "yes" "no")
+    (lambda (ans)
+      (if (equal? ans "yes")
+          (begin (nm--tag-marked! buf changes) (message "Done"))
+          (message "Cancelled")))))
+
+(define-command "notmuch-archive-marked" "Archive all marked threads"
+  (lambda () (nm--confirm-marked (current-buffer) "Archive" "-inbox -m")))
+(define-command "notmuch-trash-marked" "Trash all marked threads"
+  (lambda () (nm--confirm-marked (current-buffer) "Trash" "+trash -inbox -unread -m")))
+
+(define-command "notmuch-tag-marked" "Apply tag changes to all marked threads"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (minibuffer-read "Tag marked (+add -remove): " '()
+        (lambda (changes) (nm--tag-marked! buf changes) (message changes))))))
 
 ;;; --- thread (show) buffer -------------------------------------------------------
 
@@ -181,12 +406,28 @@
                  (nm--part-text (car plains)))))
           ((pair? content) (nm--parts-text content))
           ((and (string-prefix? "text/plain" ct) (string? content)) content)
+          ((and (string-prefix? "text/html" ct)) "")
           ((nm--get part 'filename)
            (string-append "[attachment: " (nm--get part 'filename) "]\n"))
           (else ""))))
 
 (define (nm--parts-text parts)
   (fold (lambda (acc p) (string-append acc (nm--part-text p))) "" parts))
+
+;; first text/html part's content, or #f
+(define (nm--part-html part)
+  (let ((ct (or (nm--get part 'content-type) ""))
+        (content (nm--get part 'content)))
+    (cond ((and (string-prefix? "text/html" ct) (string? content)) content)
+          ((pair? content) (nm--parts-html content))
+          (else #f))))
+
+(define (nm--parts-html parts)
+  (let loop ((ps parts))
+    (if (null? ps)
+        #f
+        (let ((h (nm--part-html (car ps))))
+          (if h h (loop (cdr ps)))))))
 
 ;; notmuch show nests messages as [msg, [replies...]] pairs — flatten
 (define (nm--flatten-msgs forest)
@@ -199,6 +440,22 @@
               (nm--flatten-msgs entry)))
         (nm--flatten-msgs (cdr forest)))))
 
+(define (nm--show-msgs thread-id)
+  (let ((msgs (nm--flatten-msgs
+                (or (nm--json (string-append
+                                "show --format=json --include-html thread:" thread-id))
+                    '()))))
+    (if notmuch-show-newest-first (reverse msgs) msgs)))
+
+;; text body of one message; falls back to the html part through
+;; notmuch-html-renderer when there is no text/plain
+(define (nm--msg-body-text msg)
+  (let ((plain (nm--parts-text (nm--get msg 'body))))
+    (if (equal? (string-trim plain) "")
+        (let ((html (nm--parts-html (nm--get msg 'body))))
+          (if html (nm--html->text html) plain))
+        plain)))
+
 (define (nm--msg-render msg)
   (let ((h (nm--get msg 'headers)))
     (string-append
@@ -207,32 +464,60 @@
       (let ((to (nm--get h 'To)))
         (if to (string-append "To: " to "\n") ""))
       "\n"
-      (nm--parts-text (nm--get msg 'body))
+      (nm--msg-body-text msg)
       "\n")))
 
-(define (nm--show-render thread-id)
-  (let* ((forest (or (nm--json (string-append
-                                 "show --format=json --include-html=false thread:"
-                                 thread-id))
-                     '()))
-         (msgs (nm--flatten-msgs forest)))
-    (if (null? msgs)
-        (list "" '())
-        (let loop ((ms msgs) (n 1) (text (string-append
-                                           (or (nm--get (nm--get (car msgs) 'headers) 'Subject) "")
-                                           "\n"))
-                   (offsets '()))
-          (if (null? ms)
-              (list text (reverse offsets))
-              (let ((header (string-append
-                              "\n── message " (number->string n) " of "
-                              (number->string (length msgs)) " ──\n")))
-                (loop (cdr ms) (+ n 1)
-                      (string-append text header (nm--msg-render (car ms)))
-                      (cons (list (string-byte-length text)
-                                  (nm--get (car ms) 'id)
-                                  (nm--get (car ms) 'filename))
-                            offsets))))))))
+;; -> (text ((byte-offset id filename) ...))
+(define (nm--render-text subject msgs)
+  (if (null? msgs)
+      (list "" '())
+      (let loop ((ms msgs) (n 1)
+                 (text (string-append subject "\n"))
+                 (offsets '()))
+        (if (null? ms)
+            (list text (reverse offsets))
+            (let ((header (string-append
+                            "\n── message " (number->string n) " of "
+                            (number->string (length msgs)) " ──\n")))
+              (loop (cdr ms) (+ n 1)
+                    (string-append text header (nm--msg-render (car ms)))
+                    (cons (list (string-byte-length text)
+                                (nm--get (car ms) 'id)
+                                (nm--get (car ms) 'filename))
+                          offsets)))))))
+
+;; the whole thread as one HTML document for the sandboxed iframe:
+;; our headers, their bodies (plain text becomes <pre>)
+(define (nm--msg-html msg)
+  (let* ((h (nm--get msg 'headers))
+         (html (nm--parts-html (nm--get msg 'body)))
+         (body (or html
+                   (string-append "<pre style=\"white-space:pre-wrap;font:13px/1.5 ui-monospace,monospace\">"
+                                  (nm--html-escape (nm--parts-text (nm--get msg 'body)))
+                                  "</pre>"))))
+    (string-append
+      "<div style=\"border-top:1px solid #d0c8b8;margin-top:14px;padding:6px 0;"
+      "font:12px system-ui;color:#666\"><b>"
+      (nm--html-escape (or (nm--get h 'From) "")) "</b> · "
+      (nm--html-escape (or (nm--get h 'Date) ""))
+      (let ((to (nm--get h 'To)))
+        (if to (string-append " · to " (nm--html-escape to)) ""))
+      "</div>" body)))
+
+(define (nm--thread-html subject msgs)
+  (string-append
+    "<!doctype html><meta charset=\"utf-8\"><title>"
+    (nm--html-escape subject)
+    "</title><body style=\"margin:14px;font-family:system-ui\">"
+    "<div style=\"font:600 15px system-ui\">" (nm--html-escape subject) "</div>"
+    (fold (lambda (acc m) (string-append acc (nm--msg-html m))) "" msgs)
+    "</body>"))
+
+(define (nm--any-html? msgs)
+  (let loop ((ms msgs))
+    (cond ((null? ms) #f)
+          ((nm--parts-html (nm--get (car ms) 'body)) #t)
+          (else (loop (cdr ms))))))
 
 (define-mode "notmuch-show-mode"
   (lambda ()
@@ -240,13 +525,35 @@
       (buffer-set-read-only! buf #t)
       (local-set-key "a" "notmuch-show-archive")
       (local-set-key "r" "notmuch-show-reply")
+      (local-set-key "v" "notmuch-show-toggle-view")
       (local-set-key "q" "quit-window")
       (let ((th (buffer-local buf 'notmuch-thread)))
         (when th
-          (let ((rendered (nm--show-render th)))
+          (let* ((subject (or (buffer-local buf 'notmuch-subject) ""))
+                 (msgs (nm--show-msgs th))
+                 (html? (and notmuch-prefer-html
+                             (not (equal? (buffer-local buf 'notmuch-view) "text"))
+                             (nm--any-html? msgs))))
             (buffer-delete-range! buf 0 (buffer-size buf))
-            (buffer-append! buf (car rendered))
-            (buffer-set-local! buf 'notmuch-msgs (cadr rendered))
+            (if html?
+                (begin
+                  (buffer-append! buf (nm--thread-html subject msgs))
+                  (buffer-set-local! buf 'render-mode "html")
+                  (buffer-set-local! buf 'preview-authored #t)
+                  ;; fake ascending offsets: point stays 0 in the html view,
+                  ;; so "message at point" means the first (newest) message
+                  (buffer-set-local! buf 'notmuch-msgs
+                    (let loop ((ms msgs) (i 0) (acc '()))
+                      (if (null? ms)
+                          (reverse acc)
+                          (loop (cdr ms) (+ i 1)
+                                (cons (list i (nm--get (car ms) 'id)
+                                            (nm--get (car ms) 'filename))
+                                      acc))))))
+                (let ((rendered (nm--render-text subject msgs)))
+                  (buffer-append! buf (car rendered))
+                  (buffer-set-local! buf 'render-mode #f)
+                  (buffer-set-local! buf 'notmuch-msgs (cadr rendered))))
             (goto-char! 0)))))))
 
 (define (nm--open-thread! thread-id subject)
@@ -264,8 +571,15 @@
   (lambda ()
     (let ((th (nm--thread-at (current-buffer))))
       (if th
-          (nm--open-thread! (car th) (cadr th))
+          (nm--open-thread! (nm--th-id th) (nm--th-subject th))
           (message "No thread on this line")))))
+
+(define-command "notmuch-show-toggle-view" "Switch between the HTML and text views"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (buffer-set-local! buf 'notmuch-view
+        (if (equal? (buffer-local buf 'notmuch-view) "text") "html" "text"))
+      (set-mode! "notmuch-show-mode"))))
 
 (define-command "notmuch-show-archive" "Archive this thread and go back"
   (lambda ()
@@ -348,8 +662,8 @@
     (let ((th (nm--thread-at buf)))
       (and th
            (string-append "the email thread selected in the mail list: \""
-                          (cadr th) "\" from " (caddr th)
-                          " (notmuch thread:" (car th) ")")))))
+                          (nm--th-subject th) "\" from " (nm--th-authors th)
+                          " (notmuch thread:" (nm--th-id th) ")")))))
 
 (register-context-provider! "notmuch-show-mode"
   (lambda (buf)
@@ -394,8 +708,9 @@
            (id (if (string-prefix? "thread:" raw)
                    (substring raw 7 (string-length raw))
                    raw))
-           (text (car (nm--show-render id))))
-      (cond ((equal? text "") "no such thread")
+           (msgs (nm--show-msgs id))
+           (text (car (nm--render-text "" msgs))))
+      (cond ((equal? (string-trim text) "") "no such thread")
             ;; char-based cut — a byte cut could split utf-8 and poison
             ;; the json encoder (see agent-transcript-tail)
             ((> (string-length text) 8000)
@@ -418,3 +733,5 @@
       "done")))
 
 (global-set-key "C-c n" "notmuch")
+(global-set-key "C-c m" "notmuch-recruiting")
+(global-set-key "C-c M" "notmuch-svs-io")

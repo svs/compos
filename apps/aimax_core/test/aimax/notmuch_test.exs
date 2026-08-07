@@ -32,6 +32,10 @@ defmodule Aimax.NotmuchTest do
   [[[{"id": "m1", "match": true, "excluded": false, "filename": ["/Users/svs/Mail/svsrecruiting/mail/cur/abc:2,S"], "timestamp": 1786065644, "date_relative": "Today 06:50", "tags": ["inbox", "unread"], "duplicate": 1, "body": [{"id": 1, "content-type": "multipart/alternative", "content": [{"id": 2, "content-type": "text/plain", "content": "Hi there, this is the body.\n"}, {"id": 3, "content-type": "text/html", "content-charset": "utf-8", "content-length": 100}]}], "headers": {"Subject": "Hello world", "From": "Alice <alice@example.com>", "To": "svs@svsrecruiting.com", "Date": "Thu, 07 Aug 2026 06:50:44 +0530"}}, []]]]
   """
 
+  @show_html_json ~S"""
+  [[[{"id": "m2", "match": true, "excluded": false, "filename": ["/Users/svs/Mail/svsrecruiting/mail/cur/def:2,S"], "timestamp": 1786037671, "date_relative": "Yest. 23:04", "tags": ["inbox"], "duplicate": 1, "body": [{"id": 1, "content-type": "text/html", "content": "<p>Hello <b>HTML</b> world</p>"}], "headers": {"Subject": "Quarterly report", "From": "Bob <bob@example.com>", "To": "svs@svsrecruiting.com", "Date": "Wed, 06 Aug 2026 23:04:31 +0530"}}, []]]]
+  """
+
   @reply_template """
   From: svs@svsrecruiting.com
   To: Alice <alice@example.com>
@@ -51,13 +55,19 @@ defmodule Aimax.NotmuchTest do
 
     stub = Path.join(dir, "notmuch")
 
+    File.write!(Path.join(dir, "show-html.json"), @show_html_json)
+
     File.write!(stub, """
     #!/bin/sh
     dir="$(dirname "$0")"
     echo "$@" >> "$dir/calls.log"
     case "$1" in
       search) cat "$dir/search.json";;
-      show) cat "$dir/show.json";;
+      show)
+        case "$*" in
+          *thread:0002*) cat "$dir/show-html.json";;
+          *) cat "$dir/show.json";;
+        esac;;
       reply) cat "$dir/reply.txt";;
     esac
     """)
@@ -72,6 +82,8 @@ defmodule Aimax.NotmuchTest do
 
     eval!(~s{(begin
       (set! notmuch-program "#{stub}")
+      (set! notmuch-auto-preview #f)
+      (set! notmuch-html-renderer "cat")
       (switch-to-buffer! "*scratch*")
       (for-each (lambda (b)
                   (when (or (equal? b "*notmuch*")
@@ -164,6 +176,70 @@ defmodule Aimax.NotmuchTest do
     press(["C-c", "C-c"])
     assert Editor.snapshot().echo == "Sent"
     assert eval!(~s{(buffer-exists? "*compose*")}) == "#t"
+  end
+
+  test "an HTML message renders as an HTML document; v toggles text", %{dir: _} do
+    eval!(~s{(begin (run-command "notmuch") (next-line!) (beginning-of-line!))})
+    press("RET")
+
+    assert eval!("(current-buffer)") == ~s{"*mail: Quarterly report*"}
+    assert eval!(~s{(buffer-local (current-buffer) 'render-mode)}) == ~s{"html"}
+    text = eval!(~s{(buffer-text (current-buffer))})
+    assert text =~ "<!doctype html"
+    assert text =~ "Hello <b>HTML</b> world"
+    assert text =~ "Quarterly report"
+
+    press("v")
+    assert eval!(~s{(buffer-local (current-buffer) 'render-mode)}) == "#f"
+    # renderer is stubbed to cat, so the text view carries the raw html
+    assert eval!(~s{(buffer-text (current-buffer))}) =~ "Hello <b>HTML"
+
+    press("v")
+    assert eval!(~s{(buffer-local (current-buffer) 'render-mode)}) == ~s{"html"}
+  end
+
+  test "n marks the thread read and moves on", %{dir: dir} do
+    eval!(~s{(run-command "notmuch")})
+    press("n")
+    assert calls(dir) =~ "tag -unread -- thread:0001"
+    assert eval!("(current-buffer)") == ~s{"*notmuch*"}
+  end
+
+  test "SPC previews in the other window, focus stays", %{dir: dir} do
+    eval!(~s{(run-command "notmuch")})
+    press("SPC")
+    assert eval!("(current-buffer)") == ~s{"*notmuch*"}
+    assert eval!("(length (window-list))") == "2"
+    assert calls(dir) =~ "show --format=json --include-html thread:0001"
+  end
+
+  test "u smart-untags on a simple tag search", %{dir: dir} do
+    eval!(~s{(run-command "notmuch")})
+    press("u")
+    assert calls(dir) =~ "tag -inbox -- thread:0001"
+  end
+
+  test "m toggles the mark tag", %{dir: dir} do
+    eval!(~s{(run-command "notmuch")})
+    press("m")
+    assert calls(dir) =~ "tag +m -- thread:0001"
+  end
+
+  test "@ narrows the search to the sender", %{dir: dir} do
+    eval!(~s{(run-command "notmuch")})
+    press("@")
+    assert calls(dir) =~ "show --format=json --body=false thread:0001"
+    assert eval!(~s{(buffer-text "*notmuch*")}) =~ "from:alice@example.com"
+  end
+
+  test "the search buffer carries column and status overlays" do
+    eval!(~s{(run-command "notmuch")})
+    ovs = eval!(~s{(buffer-overlays "*notmuch*")})
+    assert ovs =~ "nm-date"
+    assert ovs =~ "nm-author"
+    # thread 0001 is unread, 0002 is not
+    assert ovs =~ "nm-unread"
+    assert ovs =~ "nm-subject"
   end
 
   test "mail tools search and read through the same renderer" do

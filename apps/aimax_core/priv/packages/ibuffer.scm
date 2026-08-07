@@ -89,7 +89,14 @@
       ;; RET targets the window you came from — remember it
       (buffer-set-local! *ibuffer-buffer* 'ibuffer-home-window home)
       (display-buffer *ibuffer-buffer*)
-      (switch-to-buffer! *ibuffer-buffer*)
+      ;; select the popup window the display rule opened; switching the
+      ;; current window would clobber the very window RET should target
+      (let loop ((ws (window-list)))
+        (cond ((null? ws) (switch-to-buffer! *ibuffer-buffer*))
+              ((and (equal? (car (cdr (car ws))) *ibuffer-buffer*)
+                    (not (equal? (car (car ws)) home)))
+               (select-window! (car (car ws))))
+              (else (loop (cdr ws)))))
       (set-mode! "ibuffer-mode")
       (ibuffer-refresh!)
       (goto-char! 0)

@@ -36,14 +36,8 @@ defmodule Aimax.NotmuchTest do
   [[[{"id": "m2", "match": true, "excluded": false, "filename": ["/Users/svs/Mail/svsrecruiting/mail/cur/def:2,S"], "timestamp": 1786037671, "date_relative": "Yest. 23:04", "tags": ["inbox"], "duplicate": 1, "body": [{"id": 1, "content-type": "text/html", "content": "<p>Hello <b>HTML</b> world</p>"}], "headers": {"Subject": "Quarterly report", "From": "Bob <bob@example.com>", "To": "svs@svsrecruiting.com", "Date": "Wed, 06 Aug 2026 23:04:31 +0530"}}, []]]]
   """
 
-  @reply_template """
-  From: svs@svsrecruiting.com
-  To: Alice <alice@example.com>
-  Subject: Re: Hello world
-  In-Reply-To: <m1>
-
-  On Thu, Alice wrote:
-  > Hi there, this is the body.
+  @reply_json ~S"""
+  {"reply-headers": {"Subject": "Re: Hello world", "From": "SVS <svs@svsrecruiting.com>", "To": "Alice <alice@example.com>", "In-reply-to": "<m1>", "References": "<m1>"}, "original": {"id": "m1", "match": false, "excluded": false, "filename": ["/Users/svs/Mail/svsrecruiting/mail/cur/abc:2,S"], "timestamp": 1786065644, "date_relative": "Today 06:50", "tags": ["inbox"], "body": [{"id": 1, "content-type": "multipart/alternative", "content": [{"id": 2, "content-type": "text/plain", "content": "Hi there, this is the body.\n"}, {"id": 3, "content-type": "text/html", "content-length": 100}]}], "headers": {"Subject": "Hello world", "From": "Alice <alice@example.com>", "To": "svs@svsrecruiting.com", "Date": "Thu, 07 Aug 2026 06:50:44 +0530"}}}
   """
 
   setup do
@@ -51,7 +45,7 @@ defmodule Aimax.NotmuchTest do
     File.mkdir_p!(dir)
     File.write!(Path.join(dir, "search.json"), @search_json)
     File.write!(Path.join(dir, "show.json"), @show_json)
-    File.write!(Path.join(dir, "reply.txt"), @reply_template)
+    File.write!(Path.join(dir, "reply.json"), @reply_json)
 
     stub = Path.join(dir, "notmuch")
 
@@ -72,7 +66,7 @@ defmodule Aimax.NotmuchTest do
           *thread:0002*) cat "$dir/show-html.json";;
           *) cat "$dir/show.json";;
         esac;;
-      reply) cat "$dir/reply.txt";;
+      reply) cat "$dir/reply.json";;
     esac
     """)
 
@@ -164,22 +158,40 @@ defmodule Aimax.NotmuchTest do
     assert eval!(~s{(editor-context-preamble "*some-chat*")}) == ~s{""}
   end
 
-  test "reply composes from the notmuch template and C-c C-c sends", %{dir: dir} do
+  test "reply is a message-mode buffer: headers, separator, quote, point at body", %{dir: dir} do
     eval!(~s{(run-command "notmuch")})
     press("RET")
     press("r")
 
     assert eval!("(current-buffer)") == ~s{"*compose*"}
     text = eval!(~s{(buffer-text "*compose*")})
+    assert text =~ "From: SVS <svs@svsrecruiting.com>"
+    assert text =~ "To: Alice <alice@example.com>"
     assert text =~ "Subject: Re: Hello world"
-    assert text =~ "> Hi there"
-    assert calls(dir) =~ "reply id:"
+    assert text =~ "In-Reply-To: <m1>"
+    assert text =~ "--text follows this line--"
+    assert text =~ "Alice <alice@example.com> writes:"
+    assert text =~ "> Hi there, this is the body."
+    assert calls(dir) =~ "reply --format=json id:"
 
-    # route the send through a harmless command
-    eval!(~s{(set! notmuch-send-routes (list (list "" "cat > /dev/null")))})
+    # point sits on the empty line right after the separator
+    before = eval!(~s{(substring-bytes (buffer-text "*compose*") 0 (point))})
+    assert String.ends_with?(before, ~S(line--\n") <> "")
+
+    # header names and separator carry faces
+    ovs = eval!(~s{(buffer-overlays "*compose*")})
+    assert ovs =~ "nm-hdr"
+    assert ovs =~ "nm-sep"
+
+    # sending turns the separator into the RFC822 blank line
+    eval!(~s{(set! notmuch-send-routes (list (list "" "cat > #{dir}/sent.eml")))})
     press(["C-c", "C-c"])
     assert Editor.snapshot().echo == "Sent"
-    assert eval!(~s{(buffer-exists? "*compose*")}) == "#t"
+    sent = File.read!("#{dir}/sent.eml")
+    refute sent =~ "text follows this line"
+    assert sent =~ "Subject: Re: Hello world"
+    assert sent =~ "In-Reply-To: <m1>"
+    assert sent =~ "References: <m1>\n\n"
   end
 
   test "an HTML message renders as an HTML document; v toggles text", %{dir: _} do

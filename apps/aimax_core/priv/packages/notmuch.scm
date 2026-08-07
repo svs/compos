@@ -631,16 +631,66 @@ when a message has no text/plain part." 'group 'notmuch)
     (local-set-key "C-c C-c" "mail-send")
     (local-set-key "C-c C-k" "mail-abort")))
 
+;; message-mode layout: headers, the separator, an empty line for the
+;; reply (point lands there), attribution, the original quoted as text
+(define *mail-header-separator* "--text follows this line--")
+
+(set-face-attribute! 'nm-hdr 'fg "#26356b" 'weight "600")
+(set-face-attribute! 'nm-sep 'fg "#9a9a72")
+
+(define (nm--quote-text text)
+  (string-append "> "
+    (string-join (string-split (string-trim text) "\n") "\n> ")
+    "\n"))
+
+;; face the header names and the separator — they sit above point, so
+;; typing in the body never shifts them
+(define (nm--compose-overlays! buf head)
+  (let loop ((lines (string-split head "\n")) (off 0) (ovs '()))
+    (if (null? lines)
+        (overlay-set! buf 'compose (reverse ovs))
+        (let* ((line (car lines))
+               (len (string-byte-length line))
+               (parts (string-split line ": ")))
+          (loop (cdr lines) (+ off len 1)
+                (cond ((equal? line *mail-header-separator*)
+                       (cons (list off (+ off len) "nm-sep") ovs))
+                      ((and (> len 0) (pair? (cdr parts)))
+                       (cons (list off (+ off (string-byte-length (car parts)) 1) "nm-hdr")
+                             ovs))
+                      (else ovs)))))))
+
 (define (nm--compose-reply! msg-id)
-  (let ((template (nm--run (string-append "reply id:" (nm--quote msg-id))))
-        (buf "*compose*"))
-    (unless (buffer-exists? buf) (buffer-create buf))
-    (buffer-delete-range! buf 0 (buffer-size buf))
-    (buffer-append! buf template)
-    (switch-to-buffer! buf)
-    (set-mode! "mail-compose-mode")
-    (end-of-buffer!)
-    (message "C-c C-c sends, C-c C-k aborts")))
+  (let* ((j (nm--json (string-append "reply --format=json id:" (nm--quote msg-id))))
+         (rh (and j (nm--get j 'reply-headers)))
+         (orig (and j (nm--get j 'original))))
+    (if (not rh)
+        (message "notmuch reply failed")
+        (let* ((buf "*compose*")
+               (hdr (lambda (name key)
+                      (let ((v (nm--get rh key)))
+                        (if v (string-append name ": " v "\n") ""))))
+               (head (string-append
+                       (hdr "From" 'From) (hdr "To" 'To) (hdr "Cc" 'Cc)
+                       (hdr "Subject" 'Subject)
+                       (hdr "In-Reply-To" 'In-reply-to)
+                       (hdr "References" 'References)
+                       *mail-header-separator* "\n"))
+               (attrib (let ((h (and orig (nm--get orig 'headers))))
+                         (if (and h (nm--get h 'From))
+                             (string-append (nm--get h 'From) " writes:\n\n")
+                             "")))
+               ;; quote the RENDERED text (nm--msg-body-text goes through the
+               ;; html renderer when there is no text/plain) — never raw html
+               (quoted (if orig (nm--quote-text (nm--msg-body-text orig)) "")))
+          (unless (buffer-exists? buf) (buffer-create buf))
+          (buffer-delete-range! buf 0 (buffer-size buf))
+          (buffer-append! buf (string-append head "\n" attrib quoted))
+          (switch-to-buffer! buf)
+          (set-mode! "mail-compose-mode")
+          (nm--compose-overlays! buf head)
+          (goto-char! (string-byte-length head))
+          (message "C-c C-c sends, C-c C-k aborts")))))
 
 (define-command "notmuch-show-reply" "Reply to the message at point"
   (lambda ()
@@ -678,7 +728,11 @@ when a message has no text/plain part." 'group 'notmuch)
 (define-command "mail-send" "Send this buffer as an email"
   (lambda ()
     (let* ((buf (current-buffer))
-           (text (buffer-text buf))
+           ;; the separator line becomes the RFC822 blank line
+           (text (string-join
+                   (string-split (buffer-text buf)
+                                 (string-append "\n" *mail-header-separator* "\n"))
+                   "\n\n"))
            (route (nm--send-route text))
            (tmp (string-append (expand-path "~") "/.aimax/outgoing.eml")))
       (if (not route)

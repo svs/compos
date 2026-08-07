@@ -536,7 +536,24 @@
           (begin
             (run-hooks 'after-save-hook)
             (message (string-append "Wrote " path)))
-          (message "Buffer has no file")))))
+          ;; no file: prompt once and the buffer BECOMES the file buffer
+          ;; (visit reads it back; auto-mode applies — a chat saved as
+          ;; .chat opens as a chat, forever after C-x C-s just saves)
+          (let ((old (current-buffer)))
+            (minibuffer-read (string-append "Write " old " to file: ") '()
+              (lambda (path0)
+                (unless (equal? (string-trim path0) "")
+                  (let ((p (expand-path (string-trim path0)))
+                        (g (buffer-group old))
+                        (turns (buffer-local old 'chat-turns)))
+                    (write-file! p (buffer-text old))
+                    (visit p)
+                    (when g (buffer-set-local! (current-buffer) 'group g))
+                    (when turns
+                      (buffer-set-local! (current-buffer) 'chat-turns turns))
+                    (buffer-kill! old)
+                    (run-hooks 'after-save-hook)
+                    (message (string-append "Wrote " p)))))))))))
 
 ;; Filename completion — pure Scheme over list-dir/string primitives.
 ;; A completion fn maps input -> (list new-input candidates).

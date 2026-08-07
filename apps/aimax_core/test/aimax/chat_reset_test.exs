@@ -75,6 +75,34 @@ defmodule Aimax.ChatResetTest do
     assert File.read!("#{path}.chat") =~ "hello there"
   end
 
+  test "C-x C-s on a non-file chat converts it to a .chat file buffer" do
+    dir = Path.join(System.tmp_dir!(), "chat-cxs-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    path = Path.join(dir, "talk.chat")
+
+    eval!(~s{(begin
+      (buffer-create "*cxs-chat*")
+      (switch-to-buffer! "*cxs-chat*")
+      (set-mode! "chat-mode")
+      (buffer-append! (current-buffer) "### You\nsave me properly\n")
+      #t)})
+
+    eval!(~s{(run-command "save-buffer")})
+    Enum.each(String.graphemes("#{path}"), &Aimax.Core.KeyDispatch.handle_key/1)
+    Aimax.Core.KeyDispatch.handle_key("RET")
+
+    assert File.read!(path) =~ "save me properly"
+    # the buffer became the file buffer, still a chat, old name gone
+    assert eval!("(current-buffer)") == ~s{"#{path}"}
+    assert eval!(~s{(buffer-local (current-buffer) 'mode-name)}) == ~s{"chat-mode"}
+    assert eval!(~s{(buffer-exists? "*cxs-chat*")}) == "#f"
+
+    # from now on C-x C-s just overwrites
+    eval!(~s{(begin (end-of-buffer!) (insert! "more words") #t)})
+    eval!(~s{(run-command "save-buffer")})
+    assert File.read!(path) =~ "more words"
+  end
+
   test "outside a chat it refuses politely" do
     eval!(~s{(begin (switch-to-buffer! "*scratch*") (run-command "chat-reset"))})
     assert eval!(~s{(buffer-exists? "*scratch*")}) == "#t"

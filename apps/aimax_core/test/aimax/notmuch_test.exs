@@ -300,7 +300,9 @@ defmodule Aimax.NotmuchTest do
           (other-window!)
           (split-window! 'h 0.55)
           (other-window!)
-          (run-command "chat")
+          (buffer-set-local! "*notmuch*" 'group "mail")
+          (switch-to-buffer! (group-chat "mail"))
+          (set-mode! "chat-mode")
           (select-window! idx)
           (nm--preview! (current-buffer)))))})
 
@@ -311,9 +313,15 @@ defmodule Aimax.NotmuchTest do
     bufs = eval!("(map cadr (window-list))")
     assert bufs =~ "*notmuch*"
     assert bufs =~ "*mail*"
+    assert bufs =~ "*chat:mail*"
+
+    # the whole scene is one group: index and open message are its docs
+    docs = eval!(~s{(group-docs "mail")})
+    assert docs =~ "*notmuch*"
+    assert docs =~ "*mail*"
 
     # the chat pane's context carries the index selection and the open mail
-    ctx = eval!(~s{(editor-context "*chat*")})
+    ctx = eval!(~s{(editor-context "*chat:mail*")})
     assert ctx =~ "selected in the mail list"
     assert ctx =~ "open email thread"
   end

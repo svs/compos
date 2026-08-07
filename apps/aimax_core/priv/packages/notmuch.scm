@@ -585,6 +585,11 @@ when a message has no text/plain part." 'group 'notmuch)
     (buffer-set-local! buf 'notmuch-subject subject)
     (buffer-set-local! buf 'transient #t)
     (buffer-set-local! buf 'modeline-info (nm--trunc subject 60))
+    ;; a view inherits its index's group, so a grouped mail scene keeps
+    ;; the open message inside the group (group-docs, chat read-doc, ⊞)
+    (let ((g (and (buffer-exists? *notmuch-search-buffer*)
+                  (buffer-local *notmuch-search-buffer* 'group))))
+      (when g (buffer-set-local! buf 'group g)))
     (switch-to-buffer! buf)
     (set-mode! "notmuch-show-mode")
     ;; reading marks read, like every mail client

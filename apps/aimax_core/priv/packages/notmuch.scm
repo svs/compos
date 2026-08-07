@@ -1031,7 +1031,7 @@ when a message has no text/plain part." 'group 'notmuch)
            (text (car (nm--render-text "" msgs))))
       (cond ((equal? (string-trim text) "") "no such thread")
             ;; char-based cut — a byte cut could split utf-8 and poison
-            ;; the json encoder (see agent-transcript-tail)
+            ;; the json encoder
             ((> (string-length text) 8000)
              (string-append (substring text 0 8000) "\n[...truncated]"))
             (else text)))))

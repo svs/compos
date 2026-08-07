@@ -130,10 +130,21 @@ defmodule Aimax.ChatResetTest do
       (chat-blocks-push! buf s (buffer-size buf) "user" '())
       (buffer-set-local! buf 'agent-saved-mark (buffer-size buf))
       #t)})
-    tail = eval!(~s{(agent-transcript-tail (current-buffer))})
+    tail = eval!(~s{(agent-seed-transcript (current-buffer))})
     assert tail =~ "what shipped today?"
     refute tail =~ "companion"
     refute tail =~ "RET sends"
+
+    # with turns present, the seed is the whole flattened chat
+    eval!(~s{(begin
+      (chat-turn-push! (current-buffer) "user" "what shipped today?")
+      (chat-turn-push! (current-buffer) "assistant" "the whole mail client")
+      #t)})
+    seed = eval!(~s{(agent-seed-transcript (current-buffer))})
+    assert seed =~ "### You"
+    assert seed =~ "### Assistant"
+    assert seed =~ "the whole mail client"
+    refute seed =~ "companion"
   end
 
   test "outside a chat it refuses politely" do

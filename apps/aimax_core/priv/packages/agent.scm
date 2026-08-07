@@ -378,7 +378,7 @@
     ;; seed only when there IS a conversation — a fresh surface's meta
     ;; card alone is chrome, not context
     (when (and (> mark 0)
-               (not (equal? (string-trim (agent-conversation-text buf)) "")))
+               (not (equal? (string-trim (agent-seed-transcript buf)) "")))
       (buffer-set-local! buf 'agent-seed-context #t))
     (agent-start! slug
       (append (list 'buffer buf 'mark mark)
@@ -428,7 +428,6 @@
 ;; prompt with the transcript tail so the conversation continues instead of
 ;; restarting from nothing. Whole lines only — a byte-offset cut could
 ;; split a utf-8 char and poison the json encoder.
-(define *agent-context-cap* 12000)
 
 ;; the conversation as text: block-mapped spans minus the chrome (meta
 ;; cards, waiting/permission banners) — seeding a fresh session with the
@@ -451,16 +450,12 @@
                             (substring-bytes text (car b)
                                              (min (cadr b) mark)))))))))))
 
-(define (agent-transcript-tail buf)
-  (let ((text (agent-conversation-text buf)))
-    (if (<= (string-byte-length text) *agent-context-cap*)
-        text
-        (let loop ((ls (string-split text "\n")))
-          (let ((joined (string-join ls "\n")))
-            (if (or (<= (string-byte-length joined) *agent-context-cap*)
-                    (null? (cdr ls)))
-                joined
-                (loop (cdr ls))))))))
+;; the seed for a fresh session is simply the WHOLE conversation, in the
+;; portable transcript format (### You / ### Assistant — same as .chat
+;; files): chat-turns when the chat has them, block text minus chrome for
+;; legacy buffers. No cap, no tail games — switching models sends the chat.
+(define (agent-seed-transcript buf)
+  (or (chat-flatten buf) (agent-conversation-text buf)))
 
 (define (agent-send-msg! slug msg)
   (let* ((buf (agent-buf slug))
@@ -472,8 +467,8 @@
           (agent-prompt! slug
             (string-append
               "Context: this continues an earlier conversation from the"
-              " user's editor (possibly with a different agent). Transcript"
-              " tail:\n\n" (agent-transcript-tail buf)
+              " user's editor (possibly with a different model). The"
+              " conversation so far:\n\n" (agent-seed-transcript buf)
               "\n\nContinue naturally from there. New message:\n" msg)))
         (agent-prompt! slug msg))))
 

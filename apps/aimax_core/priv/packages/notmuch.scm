@@ -179,6 +179,8 @@ when a message has no text/plain part." 'group 'notmuch)
       (local-set-key "C-p" "notmuch-prev")
       (local-set-key "RET" "notmuch-open-thread")
       (local-set-key "SPC" "notmuch-preview")
+      (local-set-key "M-<" "notmuch-first-thread")
+      (local-set-key "M->" "notmuch-last-thread")
       (local-set-key "r" "notmuch-reply")
       (local-set-key "a" "notmuch-archive")
       (local-set-key "d" "notmuch-trash")
@@ -251,6 +253,19 @@ when a message has no text/plain part." 'group 'notmuch)
 (define-command "notmuch-prev" "Move up; the shown mail follows"
   (lambda ()
     (previous-line!) (beginning-of-line!)
+    (nm--maybe-preview! (current-buffer))))
+
+(define-command "notmuch-first-thread" "Jump to the newest thread"
+  (lambda ()
+    (goto-char! 0) (next-line!) (beginning-of-line!)
+    (nm--maybe-preview! (current-buffer))))
+
+(define-command "notmuch-last-thread" "Jump to the oldest listed thread"
+  (lambda ()
+    (end-of-buffer!) (beginning-of-line!)
+    ;; the listing ends with a newline — land on the last entry, not after it
+    (when (not (nm--thread-at (current-buffer)))
+      (previous-line!) (beginning-of-line!))
     (nm--maybe-preview! (current-buffer))))
 
 (define-command "notmuch-refresh" "Re-run the search and refresh the listing"

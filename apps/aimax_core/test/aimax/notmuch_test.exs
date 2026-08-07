@@ -306,6 +306,14 @@ defmodule Aimax.NotmuchTest do
     assert ctx =~ "open email thread"
   end
 
+  test "M-< and M-> jump to the first and last thread" do
+    eval!(~s{(run-command "notmuch")})
+    press("M->")
+    assert eval!(~s{(nm--thread-at (current-buffer))}) =~ "0002"
+    press("M-<")
+    assert eval!(~s{(nm--thread-at (current-buffer))}) =~ "0001"
+  end
+
   test "mail tools search and read through the same renderer" do
     out = eval!(~s{(llm-tool-call "notmuch-search" (list 'query "tag:inbox"))})
     assert out =~ "thread:0001"

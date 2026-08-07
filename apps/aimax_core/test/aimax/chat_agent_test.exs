@@ -136,6 +136,24 @@ defmodule Aimax.ChatAgentTest do
     end)
   end
 
+  test "in-process llm threads never pin a model — the editor default rules" do
+    slug = String.trim(eval!(~s{(execute* "" '(connector "llm"))}), "\"")
+
+    on_exit(fn ->
+      Aimax.Core.kill_buffer("*agent: #{slug}*")
+      Aimax.Core.Editor.delete_other_windows()
+    end)
+
+    assert eval!("(buffer-local (agent-buf \"#{slug}\") 'agent-model)") == "#f"
+
+    # even an explicit pick on the switch path stays unpinned for the llm lane
+    eval!(~s{(agent-reconnect! "#{slug}" "llm" "claude-opus-5")})
+    assert eval!("(buffer-local (agent-buf \"#{slug}\") 'agent-model)") == "#f"
+
+    {:ok, text} = Session.eval(~s{(buffer-text "*messages*")})
+    assert text =~ "follow the default model"
+  end
+
   test "the proxy surface serves the registry and calls tools, base64 both ways" do
     tools =
       eval!("(mcp-proxy-tools-json)")

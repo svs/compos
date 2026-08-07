@@ -393,10 +393,17 @@
 ;; switch a thread's connector/model: kill + reattach. Fresh session — the
 ;; transcript stays, server-side context doesn't.
 (define (agent-reconnect! slug cname model)
-  (let ((buf (agent-buf slug)))
+  (let ((buf (agent-buf slug))
+        ;; the in-process llm lane has no session to pin a model into —
+        ;; requests always follow the editor default, so never store one
+        (llm? (equal? (plist-get (connector-config cname) 'type) 'llm)))
     (agent-kill! slug)
     (buffer-set-local! buf 'agent-connector cname)
-    (buffer-set-local! buf 'agent-model (if (equal? model "") #f model))
+    (buffer-set-local! buf 'agent-model
+      (if (or llm? (equal? model "")) #f model))
+    (when (and llm? (not (equal? model "")))
+      (message (string-append "llm threads follow the default model — "
+                              "(set-llm-model! \"" model "\") to change it")))
     (agent-update-modeline! buf)
     (agent-revive! slug)))
 
@@ -694,10 +701,10 @@
       (let ((conf (agent-resolve-config opts)))
         (buffer-set-local! buf 'agent-connector
           (or (plist-get opts 'connector) *default-connector*))
-        (buffer-set-local! buf 'agent-model
-          (or (agent-conf-model conf)
-              ;; llm threads ride the editor's model — show it
-              (and (equal? (plist-get conf 'type) 'llm) (llm-model))))
+        ;; in-process llm threads pin nothing: every request follows the
+        ;; editor's current default model (ai-config / set-llm-model!), so a
+        ;; stored snapshot here would only drift from the truth
+        (buffer-set-local! buf 'agent-model (agent-conf-model conf))
         (agent-update-modeline! buf)
         (buffer-append! buf (string-append ";; agent thread · " slug "\n"))
         (let ((mark (buffer-size buf)))

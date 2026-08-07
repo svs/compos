@@ -485,7 +485,9 @@ defmodule Aimax.AgentTest do
     assert last =~ "reply-1"
     assert last =~ "and 8*8"
 
-    assert {:ok, ~s["llm · ] <> _} =
+    # no pinned model in the modeline: the llm lane follows the editor's
+    # default model at request time (ai-config / set-llm-model!)
+    assert {:ok, ~s["llm"]} =
              Session.eval(~s[(buffer-local "*agent: a1*" 'modeline-info)])
   end
 

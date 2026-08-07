@@ -162,20 +162,20 @@ defmodule Aimax.ChatAgentTest do
       |> Jason.decode!()
 
     names = Enum.map(tools, & &1["name"])
-    assert "read-doc" in names
     assert "eval-scheme" in names
     assert Enum.all?(tools, & &1["inputSchema"])
 
     eval!(~s{(buffer-create "*zz-uchat*")})
     eval!(~s{(buffer-append! "*zz-uchat*" "proxy sees mé")})
 
-    args = Base.encode64(Jason.encode!(%{"buffer" => "*zz-uchat*"}))
+    args = Base.encode64(Jason.encode!(%{"code" => ~s{(buffer-text "*zz-uchat*")}}))
 
     result =
-      eval!(~s{(mcp-proxy-call "read-doc" "#{args}")})
+      eval!(~s{(mcp-proxy-call "eval-scheme" "#{args}")})
       |> String.trim("\"")
       |> Base.decode64!()
 
-    assert result == "proxy sees mé"
+    # eval-scheme returns the printed value, quotes included
+    assert result == ~s{"proxy sees mé"}
   end
 end

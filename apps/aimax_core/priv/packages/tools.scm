@@ -36,19 +36,21 @@
 (define *llm-system*
   (string-append
     "You are the assistant inside ai-max, an Emacs-style editor scripted in "
-    "Scheme, and you can act on the live editor through tools. "
-    "Appearance and behavior are controlled by customizable variables and "
-    "faces; changes made through the customize tools persist across "
-    "restarts. To change how something looks: discover the knob with "
-    "describe-variables (try patterns like \"font\" or \"theme\"), set it "
-    "with customize-save, then confirm briefly what you changed. "
-    "eval-scheme is the escape hatch for everything else. IMPORTANT: the "
+    "Scheme, and you act on the live editor through eval-scheme — one tool, "
+    "the whole editor. Appearance and behavior are controlled by "
+    "customizable variables and faces; changes made through customize "
+    "persist across restarts. To change how something looks: discover the "
+    "knob with (customize-apropos \"font\"), set it with "
+    "(customize-save! 'name value), then confirm briefly what you "
+    "changed. IMPORTANT: the "
     "language is ai-max's own small Scheme, NOT Emacs Lisp — elisp names "
     "like get-buffer, set-buffer, goto-char, point-max, insert, "
     "save-excursion, with-current-buffer do not exist. Core API: "
     "(buffer-list) names; (buffer-text NAME); (buffer-append! NAME TEXT) "
     "append to any buffer — the usual way to add text; (buffer-create NAME); "
-    "(visit PATH) opens a file; (switch-to-buffer! NAME); (current-buffer); "
+    "(buffer-replace! NAME OLD NEW) exact unique replacement in a live "
+    "buffer; (visit PATH) opens a file; (switch-to-buffer! NAME); "
+    "(current-buffer); "
     "(insert! TEXT) at point in the current buffer; (message TEXT) echoes; "
     "(run-command \"name\") runs any M-x command. File buffers are named by "
     "full path. The API has a public and a private side: apropos-api "
@@ -89,12 +91,86 @@
                          (string-join (map car (actions-for type)) ", "))))))
 
 ;;; --- the built-in toolbox ----------------------------------------------------
+;;; One tool is viable only because failure is instructive: a model that
+;;; guesses `buffer-insert` gets back the nearest real names with their
+;;; signatures instead of six blind retries.
+
+(define (tool--edit-distance a b)
+  (let ((la (string-length a)) (lb (string-length b)))
+    (let loop ((i 0) (row (iota (+ lb 1))))
+      (if (= i la)
+          (list-ref row lb)
+          (loop (+ i 1)
+                (let inner ((j 1) (diag (car row)) (acc (list (+ i 1))))
+                  (if (> j lb)
+                      (reverse acc)
+                      (let ((cost (if (equal? (substring a i (+ i 1))
+                                              (substring b (- j 1) j))
+                                      0 1)))
+                        (inner (+ j 1)
+                               (list-ref row j)
+                               (cons (min (+ (car acc) 1)
+                                          (+ (list-ref row j) 1)
+                                          (+ diag cost))
+                                     acc))))))))))
+
+;; nearest public-api entries: edit distance <= 2 first, shared prefix after
+(define (tool--suggest name)
+  (let* ((scored (map (lambda (e) (list (tool--edit-distance name (car e)) e))
+                      (public-api)))
+         (pick (lambda (d)
+                 (map cadr (filter (lambda (s) (equal? (car s) d)) scored))))
+         (prefix (filter (lambda (e)
+                           (and (> (string-length name) 3)
+                                (or (string-prefix? name (car e))
+                                    (string-prefix? (car e) name))
+                                (> (tool--edit-distance name (car e)) 2)))
+                         (public-api))))
+    (take-n (append (pick 0) (pick 1) (pick 2) prefix) 3)))
+
+(define (tool--format-suggestions entries)
+  (fold (lambda (acc e)
+          (string-append acc "\n  " (car e) " — " (cadr e)))
+        "" entries))
+
+;; the feedback that makes one-tool work: name the real API on a miss
+(define (tool--error-hint msg code)
+  (cond
+    ((re-match? "unbound variable: " msg)
+     (let* ((name (string-trim (car (reverse (string-split msg "unbound variable: ")))))
+            (hits (tool--suggest name)))
+       (if (null? hits)
+           "\nNo close public-api match — search with apropos-api before retrying."
+           (string-append "\nunbound: " name " — did you mean:"
+                          (tool--format-suggestions hits)))))
+    ;; a builtin fed the wrong arguments names itself before the colon
+    ((re-match? "no function clause matching" msg)
+     (let* ((name (car (string-split msg ":")))
+            (hits (tool--suggest name)))
+       (if (null? hits)
+           ""
+           (string-append "\nbad arguments to " name " — check:"
+                          (tool--format-suggestions hits)))))
+    ((re-match? "arity mismatch" msg)
+     ;; a userland lambda's arity error carries no name: surface
+     ;; signatures for every public name the code mentions
+     (let ((named (filter (lambda (e) (string-contains? code (car e)))
+                          (public-api))))
+       (if (null? named)
+           ""
+           (string-append "\ncheck the signatures:"
+                          (tool--format-suggestions (take-n named 5))))))
+    (else "")))
 
 (define-tool! 'eval-scheme
-  "Evaluate Scheme in the live editor session. Full editor API: buffers, windows, faces, modes, customize. NOT Emacs Lisp — verify unfamiliar names with apropos-api first. Returns the printed value."
+  "Evaluate Scheme in the live editor session. Full editor API: buffers, windows, faces, modes, customize. NOT Emacs Lisp — verify unfamiliar names with apropos-api first. Returns the printed value; on an unbound name the error suggests the nearest real API."
   (list (list 'code "string" "Scheme source to evaluate"))
   (lambda (args)
-    (value->string (eval-string (custom--plist-get args 'code)))))
+    (let* ((code (custom--plist-get args 'code))
+           (r (eval-string-safe code)))
+      (if (equal? (car r) 'ok)
+          (value->string (cadr r))
+          (string-append "error: " (cadr r) (tool--error-hint (cadr r) code))))))
 
 ;; Emacs-grade introspection: most of the editor is userland Scheme, and
 ;; closures carry their AST — so a function's real source is one call away.
@@ -126,83 +202,27 @@
             (list 'api (filter (lambda (e) (re-match? pat (car e))) (public-api))
                   'commands (filter (lambda (n) (re-match? pat n)) (command-names))))))))
 
-(define-tool! 'describe-variables
-  "Search customizable variables by regex over names and docstrings. Returns plists of name, current value, default, doc, group, type."
-  (list (list 'pattern "string" "Regex, e.g. \"font\" or \"org\""))
-  (lambda (args)
-    (value->string (customize-apropos (custom--plist-get args 'pattern)))))
+;; the edit primitive the old edit-doc tool wrapped — now a public function
+;; reached through eval-scheme. Edits the live buffer, never the file.
+(define (buffer-replace! b old new)
+  (cond ((not (buffer-exists? b)) (string-append "no such buffer: " b))
+        ((equal? old "") "error: old must be non-empty")
+        (else
+          (let ((hits (- (length (string-split (buffer-text b) old)) 1)))
+            (cond ((equal? hits 0)
+                   "error: old text not found — read the buffer and copy it exactly")
+                  ((> hits 1)
+                   (string-append "error: old text occurs "
+                                  (number->string hits)
+                                  " times — include surrounding text to make it unique"))
+                  (else
+                    (let ((pos (string-index (buffer-text b) old)))
+                      (buffer-delete-range! b pos (string-byte-length old))
+                      (buffer-insert! b pos new)
+                      "edited")))))))
 
-(define-tool! 'customize-save
-  "Set a customizable variable and persist it to custom.scm (survives restarts). Value is a Scheme expression — strings need quotes, e.g. \"\\\"17px\\\"\"."
-  (list (list 'name "string" "Variable name, e.g. org-font-family")
-        (list 'value "string" "Scheme expression for the new value"))
-  (lambda (args)
-    (let ((name (string->symbol (custom--plist-get args 'name)))
-          (value (eval-string (custom--plist-get args 'value))))
-      (customize-save! name value)
-      (string-append "saved " (custom--plist-get args 'name)
-                     " = " (value->string value)))))
-
-(define-tool! 'customize-save-face
-  "Set one face attribute globally and persist it (wins over themes). Attributes: fg, bg, family, size, weight, style, decoration."
-  (list (list 'face "string" "Face name, e.g. default, modeline, org-level-1")
-        (list 'attribute "string" "Attribute name")
-        (list 'value "string" "CSS value, e.g. #c04040 or 15px or Spectral"))
-  (lambda (args)
-    (customize-save-face! (string->symbol (custom--plist-get args 'face))
-                          (string->symbol (custom--plist-get args 'attribute))
-                          (custom--plist-get args 'value))
-    (string-append "saved face " (custom--plist-get args 'face))))
-
-(define-tool! 'list-themes
-  "List the available color themes."
-  '()
-  (lambda (args) (value->string (map car *themes*))))
-
-(define-tool! 'load-theme
-  "Switch to a color theme by name (persists across restarts)."
-  (list (list 'name "string" "Theme name from list-themes"))
-  (lambda (args)
-    (load-theme (custom--plist-get args 'name))
-    "ok"))
-
-;;; --- document tools (companion chats) ----------------------------------------
-;;; Pull-style context: the model reads the live buffer when it needs it —
-;;; never stale, and long documents cost tokens only when actually read.
-
-(define-tool! 'read-doc
-  "Read the live text of an editor buffer (may have unsaved changes — always fresher than the file on disk). Call this before commenting on or editing a document; never rely on an earlier read after the user may have typed."
-  (list (list 'buffer "string" "Buffer name, e.g. the document named in the system context"))
-  (lambda (args)
-    (let ((b (custom--plist-get args 'buffer)))
-      (if (buffer-exists? b)
-          (buffer-text b)
-          (string-append "no such buffer: " b)))))
-
-(define-tool! 'edit-doc
-  "Edit a buffer by exact replacement: old must occur exactly once and is replaced by new. Edits the live buffer, never the file on disk. Copy old verbatim from read-doc; widen it with surrounding text if it is not unique."
-  (list (list 'buffer "string" "Buffer name")
-        (list 'old "string" "Exact existing text, unique in the buffer")
-        (list 'new "string" "Replacement text"))
-  (lambda (args)
-    (let ((b (custom--plist-get args 'buffer))
-          (old (custom--plist-get args 'old))
-          (new (custom--plist-get args 'new)))
-      (cond ((not (buffer-exists? b)) (string-append "no such buffer: " b))
-            ((equal? old "") "error: old must be non-empty")
-            (else
-              (let ((hits (- (length (string-split (buffer-text b) old)) 1)))
-                (cond ((equal? hits 0)
-                       "error: old text not found — read-doc and copy it exactly")
-                      ((> hits 1)
-                       (string-append "error: old text occurs "
-                                      (number->string hits)
-                                      " times — include surrounding text to make it unique"))
-                      (else
-                        (let ((pos (string-index (buffer-text b) old)))
-                          (buffer-delete-range! b pos (string-byte-length old))
-                          (buffer-insert! b pos new)
-                          "edited")))))))))
+(public! 'buffer-replace!
+  "(buffer-replace! NAME OLD NEW) — replace exact, unique OLD with NEW in a live buffer")
 
 ;;; --- the MCP proxy surface ----------------------------------------------------
 ;;; External ACP agents get this same registry over MCP: the bundled

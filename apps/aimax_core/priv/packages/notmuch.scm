@@ -1033,60 +1033,49 @@ when a message has no text/plain part." 'group 'notmuch)
                           " (notmuch thread:" th ")"
                           (if msg (string-append ", message id:" (cadr msg)) ""))))))
 
-;;; --- tools: the model reads mail through the same code the UI uses ---------------
+;;; --- mail for the model -------------------------------------------------------
+;;; No per-domain tools: mail is reached through eval-scheme + act. Search
+;;; and read are public functions over the same code the UI uses.
 
-(define-tool! 'notmuch-search
-  (string-append
-    "Search the user's local email with notmuch. Query syntax: from:, to:, "
-    "subject:, tag: (inbox, unread, important...), date:since..until, plus "
-    "bare words for full-text. Returns one thread per line with its "
-    "thread:ID for read-email-thread.")
-  (list (list 'query "string" "notmuch query string"))
-  (lambda (args)
-    (let ((threads (nm--search-json (custom--plist-get args 'query) 20)))
-      (if (null? threads)
-          "no matches"
-          (fold (lambda (acc th)
-                  (string-append acc
-                    (nm--get th 'date_relative) " | "
-                    (nm--get th 'authors) " | "
-                    (nm--get th 'subject) " | "
-                    (string-join (nm--get th 'tags) ",") " | thread:"
-                    (nm--get th 'thread) "\n"))
-                "" threads)))))
+(define (mail-search query)
+  (let ((threads (nm--search-json query 20)))
+    (if (null? threads)
+        "no matches"
+        (fold (lambda (acc th)
+                (string-append acc
+                  (nm--get th 'date_relative) " | "
+                  (nm--get th 'authors) " | "
+                  (nm--get th 'subject) " | "
+                  (string-join (nm--get th 'tags) ",") " | thread:"
+                  (nm--get th 'thread) "\n"))
+              "" threads))))
 
-(define-tool! 'read-email-thread
-  (string-append
-    "Read a full email thread. THREAD is a notmuch thread id — from a "
-    "notmuch-search result (thread:...) or from the editor context when the "
-    "user has an email selected.")
-  (list (list 'thread "string" "thread id, with or without the thread: prefix"))
-  (lambda (args)
-    (let* ((raw (custom--plist-get args 'thread))
-           (id (if (string-prefix? "thread:" raw)
-                   (substring raw 7 (string-length raw))
-                   raw))
-           (msgs (nm--show-msgs id))
-           (text (car (nm--render-text "" msgs))))
-      (cond ((equal? (string-trim text) "") "no such thread")
-            ;; char-based cut — a byte cut could split utf-8 and poison
-            ;; the json encoder
-            ((> (string-length text) 8000)
-             (string-append (substring text 0 8000) "\n[...truncated]"))
-            (else text)))))
+(define (mail-read-thread raw)
+  (let* ((id (if (string-prefix? "thread:" raw)
+                 (substring raw 7 (string-length raw))
+                 raw))
+         (msgs (nm--show-msgs id))
+         (text (car (nm--render-text "" msgs))))
+    (cond ((equal? (string-trim text) "") "no such thread")
+          ;; char-based cut — a byte cut could split utf-8 and poison
+          ;; the json encoder
+          ((> (string-length text) 8000)
+           (string-append (substring text 0 8000) "\n[...truncated]"))
+          (else text))))
 
-(define-tool! 'notmuch-tag
-  "Change tags on a notmuch thread, e.g. \"-inbox\" to archive or \"+important\". Ask before destructive changes."
-  (list (list 'thread "string" "thread id")
-        (list 'changes "string" "space-separated +tag/-tag changes"))
-  (lambda (args)
-    (let* ((raw (custom--plist-get args 'thread))
-           (id (if (string-prefix? "thread:" raw)
-                   (substring raw 7 (string-length raw))
-                   raw)))
-      (nm--run (string-append "tag " (custom--plist-get args 'changes)
-                              " -- thread:" id))
-      (when (buffer-exists? *notmuch-search-buffer*)
-        (nm--refresh! *notmuch-search-buffer*))
-      "done")))
+(define (mail-tag! raw changes)
+  (let ((id (if (string-prefix? "thread:" raw)
+                (substring raw 7 (string-length raw))
+                raw)))
+    (nm--run (string-append "tag " changes " -- thread:" id))
+    (when (buffer-exists? *notmuch-search-buffer*)
+      (nm--refresh! *notmuch-search-buffer*))
+    "done"))
+
+(public! 'mail-search
+  "(mail-search QUERY) — notmuch search (from:, to:, subject:, tag:, dates, free text); one thread per line with its thread:ID")
+(public! 'mail-read-thread
+  "(mail-read-thread THREAD-ID) — full text of an email thread, thread: prefix optional")
+(public! 'mail-tag!
+  "(mail-tag! THREAD-ID CHANGES) — apply space-separated +tag/-tag changes to a thread")
 

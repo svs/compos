@@ -1238,10 +1238,11 @@
            "writing in the editor buffer named \"" doc "\"."
            (if tools?
                (string-append
-                 " Never guess its contents: call read-doc with that buffer "
-                 "name before commenting, and change it with edit-doc "
-                 "(exact unique old string -> new string; it edits the live "
-                 "buffer, never the file). Match the document's voice and "
+                 " Never guess its contents: read it with eval-scheme "
+                 "(buffer-text \"NAME\") before commenting, and change it "
+                 "with (buffer-replace! \"NAME\" OLD NEW) — exact unique "
+                 "old string -> new; it edits the live buffer, never the "
+                 "file. Match the document's voice and "
                  "make the smallest edit that does the job.")
                (string-append
                  "\n\nThe document right now:\n\n" (buffer-text doc)))
@@ -1260,10 +1261,11 @@
                "" docs)
          (if tools?
              (string-append
-               "Never guess their contents: call read-doc with a buffer "
-               "name before commenting, and change one with edit-doc "
-               "(exact unique old string -> new string; it edits the live "
-               "buffer, never the file). Make the smallest edit that does "
+               "Never guess their contents: read one with eval-scheme "
+               "(buffer-text \"NAME\") before commenting, and change one "
+               "with (buffer-replace! \"NAME\" OLD NEW) — exact unique "
+               "old string -> new; it edits the live buffer, never the "
+               "file. Make the smallest edit that does "
                "the job.")
              (fold (lambda (acc d)
                      (string-append acc "\n\"" d "\" right now:\n\n"

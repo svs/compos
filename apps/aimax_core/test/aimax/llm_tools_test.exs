@@ -45,11 +45,31 @@ defmodule Aimax.LLMToolsTest do
       assert eval!(~s{(llm-tool-call "no-such" '())}) == ~s{"no such tool: no-such"}
     end
 
-    test "specs include the built-in toolbox" do
+    test "the built-in toolbox is exactly the four-tool surface" do
       specs = eval!("(map car (llm-tool-specs))")
-      for t <- ~w(eval-scheme apropos-api describe-variables customize-save customize-save-face list-themes load-theme read-doc edit-doc) do
+      for t <- ~w(eval-scheme apropos-api describe-function act) do
         assert specs =~ t
       end
+
+      # nothing else ships (test-registered zz-* tools excluded)
+      count =
+        eval!(~s{(length (filter (lambda (t) (not (string-prefix? "zz-" (symbol->string (car t))))) *llm-tools*))})
+
+      assert count == "4"
+    end
+
+    test "eval-scheme errors suggest the real name with its signature" do
+      out = eval!(~s{(llm-tool-call "eval-scheme" (list 'code "(buffer-insert \\"x\\")"))})
+      assert out =~ "unbound"
+      assert out =~ "did you mean"
+      assert out =~ "buffer-insert!"
+      # the suggestion carries the public-api doc line, i.e. the signature
+      assert out =~ "BYTE-POS"
+
+      # a builtin fed wrong arguments gets its own signature back
+      out = eval!(~s{(llm-tool-call "eval-scheme" (list 'code "(buffer-text)"))})
+      assert out =~ "bad arguments to buffer-text"
+      assert out =~ "(buffer-text NAME)"
     end
 
     test "apropos-api searches the documented public surface by default" do
@@ -100,34 +120,33 @@ defmodule Aimax.LLMToolsTest do
     end
   end
 
-  describe "document tools" do
-    test "read-doc returns live buffer text; missing buffer reports" do
+  describe "buffer editing through eval-scheme" do
+    test "the tool reads live buffer text" do
       on_exit(fn -> Aimax.Core.kill_buffer("*zz-doc*") end)
       eval!(~s{(buffer-create "*zz-doc*")})
       eval!(~s{(buffer-append! "*zz-doc*" "Thé quick fox.")})
 
-      assert eval!(~s{(llm-tool-call "read-doc" (list 'buffer "*zz-doc*"))}) ==
-               ~s{"Thé quick fox."}
-
-      assert eval!(~s{(llm-tool-call "read-doc" (list 'buffer "*zz-none*"))}) =~
-               "no such buffer"
+      assert eval!(~s{(llm-tool-call "eval-scheme" (list 'code "(buffer-text \\"*zz-doc*\\")"))}) =~
+               "Thé quick fox."
     end
 
-    test "edit-doc: unique replacement (byte-safe); missing and ambiguous rejected" do
+    test "buffer-replace!: unique replacement (byte-safe); missing and ambiguous rejected" do
       on_exit(fn -> Aimax.Core.kill_buffer("*zz-edit*") end)
       eval!(~s{(buffer-create "*zz-edit*")})
       eval!(~s{(buffer-append! "*zz-edit*" "héllo old world, olde times")})
 
       # ambiguous: "old" also occurs inside "olde" — buffer untouched
-      out = eval!(~s{(llm-tool-call "edit-doc" (list 'buffer "*zz-edit*" 'old "old" 'new "new"))})
+      out = eval!(~s{(buffer-replace! "*zz-edit*" "old" "new")})
       assert out =~ "2 times"
       assert eval!(~s{(buffer-text "*zz-edit*")}) == ~s{"héllo old world, olde times"}
 
-      out = eval!(~s{(llm-tool-call "edit-doc" (list 'buffer "*zz-edit*" 'old "zebra" 'new "x"))})
+      out = eval!(~s{(buffer-replace! "*zz-edit*" "zebra" "x")})
       assert out =~ "not found"
 
+      assert eval!(~s{(buffer-replace! "*zz-none*" "a" "b")}) =~ "no such buffer"
+
       # unique match sits after a multibyte char: byte offsets must line up
-      out = eval!(~s{(llm-tool-call "edit-doc" (list 'buffer "*zz-edit*" 'old "old world" 'new "new wörld"))})
+      out = eval!(~s{(buffer-replace! "*zz-edit*" "old world" "new wörld")})
       assert out == ~s{"edited"}
       assert eval!(~s{(buffer-text "*zz-edit*")}) == ~s{"héllo new wörld, olde times"}
     end
@@ -154,8 +173,8 @@ defmodule Aimax.LLMToolsTest do
                %{
                  "type" => "tool_use",
                  "id" => "tu_1",
-                 "name" => "customize-save",
-                 "input" => %{"name" => "org-font-family", "value" => ~s{"ToolFont"}}
+                 "name" => "eval-scheme",
+                 "input" => %{"code" => ~s{(customize-save! 'org-font-family "ToolFont")}}
                }
              ]
            }}
@@ -174,9 +193,9 @@ defmodule Aimax.LLMToolsTest do
 
       # the request carried the registry as JSON tool defs + the system skill
       assert_received {:chat, _, tools, system}
-      save = Enum.find(tools, &(&1.name == "customize-save"))
-      assert save.input_schema.properties["name"].type == "string"
-      assert "value" in save.input_schema.required
+      evaltool = Enum.find(tools, &(&1.name == "eval-scheme"))
+      assert evaltool.input_schema.properties["code"].type == "string"
+      assert "code" in evaltool.input_schema.required
       assert system =~ "ai-max"
 
       # round 2 saw the tool_result
@@ -223,7 +242,7 @@ defmodule Aimax.LLMToolsTest do
          %{
            "stop_reason" => "tool_use",
            "content" => [
-             %{"type" => "tool_use", "id" => "tu_n", "name" => "list-themes", "input" => %{}}
+             %{"type" => "tool_use", "id" => "tu_n", "name" => "eval-scheme", "input" => %{"code" => "(+ 1 1)"}}
            ]
          }}
       end)

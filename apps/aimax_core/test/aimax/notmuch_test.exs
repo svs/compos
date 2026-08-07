@@ -428,16 +428,16 @@ defmodule Aimax.NotmuchTest do
     assert out =~ "archive"
   end
 
-  test "mail tools search and read through the same renderer" do
-    out = eval!(~s{(llm-tool-call "notmuch-search" (list 'query "tag:inbox"))})
+  test "mail functions search and read through the same renderer (eval-scheme surface)" do
+    out = eval!(~s{(mail-search "tag:inbox")})
     assert out =~ "thread:0001"
     assert out =~ "Hello world"
     assert out =~ "Alice"
 
-    out = eval!(~s{(llm-tool-call "read-email-thread" (list 'thread "thread:0001"))})
+    out = eval!(~s{(mail-read-thread "thread:0001")})
     assert out =~ "Hi there, this is the body."
 
-    out = eval!(~s{(llm-tool-call "notmuch-tag" (list 'thread "0002" 'changes "+important"))})
+    out = eval!(~s{(mail-tag! "0002" "+important")})
     assert out =~ "done"
   end
 end

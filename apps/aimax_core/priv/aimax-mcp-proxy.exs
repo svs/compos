@@ -1,7 +1,7 @@
 # aimax-mcp-proxy — the editor's tool registry served as an MCP server.
 #
-# External ACP agents (claude-code, codex) get read-doc/edit-doc/customize
-# and everything else in packages/tools.scm through this bridge: stdio MCP
+# External ACP agents (claude-code, codex) get eval-scheme — and with it
+# the whole editor API — through this bridge: stdio MCP
 # on this side, the daemon's JSON-RPC socket (~/.aimax/sock, AIMAX_SOCK to
 # override) on the other. Spawned per agent session via the 'aimax entry
 # the mcp package registers; runs on OTP's :json — no deps.

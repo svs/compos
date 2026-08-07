@@ -501,6 +501,19 @@ defmodule Aimax.Core.Session do
       end,
       "llm-model" => fn [] -> Aimax.Core.LLM.model() end,
       "eval-string" => fn [src], store -> eval_src.(src, store) end,
+      # (eval-string-safe SRC) -> (ok VAL) | (error MSG) — the catch this
+      # dialect lacks; the eval-scheme tool's did-you-mean feedback needs to
+      # observe the error instead of aborting the whole handler
+      "eval-string-safe" => fn [src], store ->
+        try do
+          {val, store2} = eval_src.(src, store)
+          {[{:sym, "ok"}, val], store2}
+        rescue
+          e -> {[{:sym, "error"}, Exception.message(e)], store}
+        catch
+          :exit, reason -> {[{:sym, "error"}, "exit: #{inspect(reason)}"], store}
+        end
+      end,
       # dynamic global access by symbol — what defcustom/customize are built on
       "symbol-value" => fn [{:sym, name}], store ->
         {Aimax.Scheme.Env.lookup(store, global, name), store}

@@ -1345,9 +1345,9 @@ defmodule Aimax.EditorTest do
     assert_received {:chat, req}
     # all chats work the same: tools attached, pull-model preamble — the
     # provider difference is translated at the wire, not surfaced here
-    assert Enum.any?(req.tools, &(&1.name == "read-doc"))
+    assert Enum.any?(req.tools, &(&1.name == "eval-scheme"))
     prompt = req.messages |> hd() |> Map.get(:content)
-    assert prompt =~ "read-doc"
+    assert prompt =~ "buffer-text"
     refute prompt =~ "Dear hiring manager"
     press(["C-x", "1"])
   end
@@ -1360,7 +1360,7 @@ defmodule Aimax.EditorTest do
       # the preamble names the document and the pull tools
       assert prompt =~ "writing companion"
       assert prompt =~ ~s{"#{buf}"}
-      assert prompt =~ "read-doc"
+      assert prompt =~ "buffer-text"
       assert prompt =~ "make it rhyme"
       {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "try violets"}]}}
     end)
@@ -1480,7 +1480,7 @@ defmodule Aimax.EditorTest do
       assert prompt =~ ~s{group "proj"}
       assert prompt =~ ~s{"#{buf}"}
       assert prompt =~ ~s{"#{notes}"}
-      assert prompt =~ "read-doc"
+      assert prompt =~ "buffer-text"
       {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "aye"}]}}
     end)
 

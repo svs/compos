@@ -1,7 +1,99 @@
 # SIMPLIFY: one tool, one send path, one runtime, no theater
 
-Written 2026-08-08 for a fresh session. Read `ARCHITECTURE.md` and
-`CLAUDE.md` first. Nothing here is started unless marked LANDED.
+Written 2026-08-08 for a fresh session with no prior context. Nothing
+here is started unless marked LANDED.
+
+## What this project is
+
+**ai-max** is Emacs rebuilt on the BEAM: buffers, windows, keymaps and
+modes implemented in Elixir/OTP, *scripted in a small Scheme*, rendered
+by Phoenix LiveView in a browser. An umbrella of four apps:
+
+```
+apps/aimax_scheme   the interpreter (values are BEAM terms; symbols are {:sym, _})
+apps/aimax_core     buffers, editor state, primitives, NIFs, procs, LLM, desktop
+  priv/editor.scm   the editor itself: commands, keymaps, modes, chat, groups
+  priv/packages/    severable packages: notmuch (mail), org, agent, tools, evil…
+apps/aimax_ui       LiveView frontend — a client, no editor logic
+apps/aimax_rpc      JSON-RPC over ~/.aimax/sock ("eval is the API")
+```
+
+**The one rule: Elixir supplies mechanism, Scheme decides policy.**
+Before adding Elixir, ask whether Scheme plus one small primitive does
+it. Commands, keybindings, modes, hooks, themes, dired, mail, chat —
+all live in `priv/*.scm`. Elixir grows only for NIFs, sockets, PTYs,
+parsers, schedulers, and raw buffer mechanics.
+
+Read `ARCHITECTURE.md` once before changing anything. `CLAUDE.md` has
+the house style. `HANDOFF.html` has broader project state.
+
+## The part this spec changes: chat and agents
+
+The mental model, because every work item below assumes it:
+
+- **A chat is an ordinary buffer.** No sidebars, no special window. Its
+  state lives in **buffer-locals** — which is also how it survives a
+  daemon restart (`desktop.ex` persists locals + text; the mode's setup
+  fn rebuilds keys, overlays and folds from them).
+- **There is only `chat-mode`.** A former separate `agent-mode` was
+  deleted (`693e0d3`); it survives as a one-line shim that upgrades old
+  restored buffers.
+- **A chat may be "backed" by an agent runtime.** If the buffer-local
+  `'agent-slug` is set, a GenServer (`Aimax.Core.Agent`) owns a
+  subprocess speaking **ACP** (Agent Client Protocol: JSON-RPC 2.0 over
+  stdio — `initialize`, `session/new`, `session/prompt`, streaming
+  `session/update` notifications, and callbacks like
+  `session/request_permission`). Without a slug, the chat talks to the
+  HTTP API directly. **That split is the main thing this spec deletes
+  (W3).**
+- **Events, not frames, are what Scheme sees.** The runtime flattens ACP
+  into plists (`chunk`, `tool-call`, `tool-update`, `permission`,
+  `turn-end`, `model-state`…) and Scheme renders them into the buffer,
+  recording a **block model**: `'agent-blocks` is a list of
+  `(start end kind …)` byte ranges saying what each span *is*. The
+  LiveView renders blocks as typed DOM (prose, tool cards, permission
+  banners). Buffer text stays canonical; blocks are a view over it.
+- **The input region** is everything after `'agent-saved-mark` plus the
+  `╰─ you ▸` marker. RET sends it; mid-turn sends are queued (muted)
+  until the turn ends.
+- **Tools.** The LLM tool loop lives in `llm.ex`; tool definitions live
+  in the Scheme registry (`packages/tools.scm`, `define-tool!`). ACP
+  agents get the same tools through a synthesized MCP server
+  (`mcp__aimax__*`) passed in `session/new`.
+
+Vocabulary you will meet in the code:
+
+| term | meaning |
+|---|---|
+| **connector** | a named backend config (`define-connector!`): cmd, models, env, cwd. `claude-code`, `codex`, `llm` |
+| **slug** | a thread id (`a1`); the buffer claiming it is the thread's surface |
+| **mark** | `'agent-saved-mark` — end of transcript, start of the input region |
+| **block** | `(start end kind …)` — the renderer's map of a byte range |
+| **group** | `'group` buffer-local tying work buffers + one chat together |
+| **target / action** | embark: the typed thing at point + the verbs for its type |
+| **transient** | buffer-local meaning "derived content — desktop saves locals, not text" |
+
+## Dev loop
+
+```sh
+mix test                                    # all four apps must stay green
+pkill -f "mix run"; sleep 1
+(mix run --no-halt >> ~/.aimax/daemon.log 2>&1 &); sleep 6
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4004/
+```
+
+A daemon restart is required to reload `priv/*.scm`; browser clients
+reload themselves. Editor state is restored from `~/.aimax/desktop.etf`.
+Drive the editor headlessly (invaluable for verifying without a browser):
+
+```sh
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(buffer-list)"}}' \
+  | nc -U ~/.aimax/sock
+```
+
+Tests drive the editor through `KeyDispatch.handle_key/1` — the same
+path the GUI uses. ACP work is tested against a `FakeTransport`
+(`test/aimax/agent_test.exs`), no adapter binary needed.
 
 ## The design rules this follows
 

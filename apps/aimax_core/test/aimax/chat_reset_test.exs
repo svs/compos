@@ -56,23 +56,28 @@ defmodule Aimax.ChatResetTest do
     assert eval!(~s{(buffer-text (current-buffer))}) =~ "ship mail"
   end
 
-  test "chat-save writes the transcript as a .chat file" do
-    dir = Path.join(System.tmp_dir!(), "chat-save-#{System.unique_integer([:positive])}")
+  test "C-x C-s on a rich chat writes the flattened transcript" do
+    dir = Path.join(System.tmp_dir!(), "chat-flat-#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
-    path = Path.join(dir, "kept")
+    path = Path.join(dir, "rich.chat")
 
     eval!(~s{(begin
-      (buffer-create "*save-me*")
-      (switch-to-buffer! "*save-me*")
+      (switch-to-buffer! (group-chat "flatg"))
       (set-mode! "chat-mode")
-      (buffer-append! (current-buffer) "### You\nhello there\n")
+      (chat-turn-push! (current-buffer) "user" "what shipped?")
+      (chat-turn-push! (current-buffer) "assistant" "the mail client")
       #t)})
-    eval!(~s{(run-command "chat-save")})
-    # answer the minibuffer prompt
+    eval!(~s{(run-command "save-buffer")})
     Enum.each(String.graphemes("#{path}"), &Aimax.Core.KeyDispatch.handle_key/1)
     Aimax.Core.KeyDispatch.handle_key("RET")
 
-    assert File.read!("#{path}.chat") =~ "hello there"
+    saved = File.read!(path)
+    assert saved =~ "### You\nwhat shipped?"
+    assert saved =~ "### Assistant\nthe mail client"
+    # no block-render artifacts in the artifact
+    refute saved =~ "you ▸"
+    assert eval!("(current-buffer)") == ~s{"#{path}"}
+    assert eval!(~s{(buffer-local (current-buffer) 'mode-name)}) == ~s{"chat-mode"}
   end
 
   test "C-x C-s on a non-file chat converts it to a .chat file buffer" do

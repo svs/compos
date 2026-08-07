@@ -546,7 +546,7 @@
                   (let ((p (expand-path (string-trim path0)))
                         (g (buffer-group old))
                         (turns (buffer-local old 'chat-turns)))
-                    (write-file! p (buffer-text old))
+                    (write-file! p (or (chat-flatten old) (buffer-text old)))
                     (visit p)
                     (when g (buffer-set-local! (current-buffer) 'group g))
                     (when turns
@@ -847,7 +847,6 @@
       (local-set-key "C-c $" "chat-cost")
       (local-set-key "C-c b" "chat-set-backend")
       (local-set-key "C-c C-k" "chat-reset")
-      (local-set-key "C-c C-s" "chat-save")
       ;; an agent-backed chat needs the thread keys back after restore
       ;; (the runtime itself does not survive — agent-send revives it)
       (when (and (buffer-local buf 'agent-slug)
@@ -1034,36 +1033,23 @@
                                      '())))))
       slug)))
 
-;; a chat saved as a file IS a revivable conversation: the plain-chat
-;; transcript is its own format (### You / ### Assistant, whole buffer =
-;; context), and .chat files open straight into chat-mode. Rich block
-;; chats flatten to that plain form on save.
-(define-command "chat-save" "Save this chat as a .chat file (revivable)"
-  (lambda ()
-    (let ((buf (current-buffer)))
-      (if (not (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
-          (message "not a chat buffer")
-          (minibuffer-read "Save chat to: " '()
-            (lambda (path0)
-              (let ((path (expand-path
-                            (if (string-suffix? ".chat" path0)
-                                path0
-                                (string-append path0 ".chat")))))
-                (write-file! path
-                  (if (buffer-local buf 'agent-saved-mark)
-                      ;; flatten the block transcript to the plain format
-                      (let loop ((ts (reverse (chat-turns buf))) (acc ""))
-                        (if (null? ts)
-                            (string-append acc (chat-prompt-marker))
-                            (loop (cdr ts)
-                                  (string-append acc
-                                    (if (equal? (car (car ts)) "user")
-                                        (chat-prompt-marker)
-                                        (chat-reply-marker))
-                                    (cadr (car ts)) "\n"))))
-                      (buffer-text buf)))
-                (message (string-append "Saved — (visit \"" path
-                                        "\") revives it")))))))))
+;; a chat saved as a file IS a revivable conversation: the transcript
+;; format is ### You / ### Assistant (whole buffer = context) and .chat
+;; files open straight into chat-mode. One save gesture — C-x C-s — does
+;; the right thing: block chats flatten to that portable form via this
+;; helper; everything else saves its text.
+(define (chat-flatten buf)
+  (and (buffer-local buf 'agent-saved-mark)
+       (pair? (chat-turns buf))
+       (let loop ((ts (reverse (chat-turns buf))) (acc ""))
+         (if (null? ts)
+             (string-append acc (chat-prompt-marker))
+             (loop (cdr ts)
+                   (string-append acc
+                     (if (equal? (car (car ts)) "user")
+                         (chat-prompt-marker)
+                         (chat-reply-marker))
+                     (cadr (car ts)) "\n"))))))
 
 ;; wipe the conversation, keep the surface: group, model, backend and keys
 ;; survive; rich chats get their meta card back, plain chats their banner

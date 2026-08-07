@@ -1357,16 +1357,34 @@
         "claude-opus-5"
         "claude-haiku-4-5-20251001"))
 
-(define-command "chat-set-model" "Choose the LLM model from the minibuffer"
+(define-command "chat-set-model" "Choose this chat's model"
   (lambda ()
-    (minibuffer-read (string-append "Model (now " (llm-model) "): ")
-      *llm-models*
-      (lambda (m)
-        (set-llm-model! m)
-        (when (buffer-local (current-buffer) 'agent-saved-mark)
-          (buffer-set-local! (current-buffer) 'modeline-info
-            (string-append "companion · " m)))
-        (message (string-append "LLM model: " m))))))
+    (let* ((buf (current-buffer))
+           (slug (buffer-local buf 'agent-slug)))
+      (if (and slug (boundp (quote agent-reconnect!)))
+          ;; ACP-backed: the session's model can't change in place — a
+          ;; model change is a fresh session on the same connector, and
+          ;; the whole chat seeds it. The label now always tells the truth.
+          (let ((cname (or (buffer-local buf 'agent-connector) *default-connector*)))
+            (minibuffer-read
+              (string-append "Model (now "
+                             (or (buffer-local buf 'agent-model) "connector default")
+                             "): ")
+              (connector-models cname)
+              (lambda (m)
+                (agent-reconnect! slug cname m)
+                (message (string-append cname
+                                        (if (equal? m "") "" (string-append " · " m))
+                                        " — fresh session, the chat carries over")))))
+          ;; API-backed: stateless — switching is just a variable
+          (minibuffer-read (string-append "Model (now " (llm-model) "): ")
+            *llm-models*
+            (lambda (m)
+              (set-llm-model! m)
+              (when (buffer-local buf 'agent-saved-mark)
+                (buffer-set-local! buf 'modeline-info
+                  (string-append "companion · " m)))
+              (message (string-append "LLM model: " m))))))))
 
 ;; send the region to the chat buffer as context, then open it
 (define-command "chat-send-region" "Add the region to the chat buffer as context"

@@ -1,3 +1,21 @@
+defmodule Aimax.ChatResetTest.FakeTransport do
+  @behaviour Aimax.Core.Agent.Transport
+
+  @impl true
+  def open(cmd, _opts, owner) do
+    test = :persistent_term.get(:chat_reset_test_pid)
+    send(test, {:transport_open, owner})
+    send(test, {:transport_cmd, cmd})
+    {:ok, test}
+  end
+
+  @impl true
+  def send_frame(_test, _data), do: :ok
+
+  @impl true
+  def close(_test), do: :ok
+end
+
 defmodule Aimax.ChatResetTest do
   @moduledoc "chat-reset wipes the conversation but keeps the surface."
 
@@ -145,6 +163,34 @@ defmodule Aimax.ChatResetTest do
     assert seed =~ "### Assistant"
     assert seed =~ "the whole mail client"
     refute seed =~ "companion"
+  end
+
+  test "C-c m on an ACP chat reconnects on the new model" do
+    :persistent_term.put(:chat_reset_test_pid, self())
+    Application.put_env(:aimax_core, :acp_transport, Aimax.ChatResetTest.FakeTransport)
+
+    on_exit(fn ->
+      Application.delete_env(:aimax_core, :acp_transport)
+      Aimax.Core.Agent.kill("zz9")
+    end)
+
+    eval!(~s{(begin
+      (switch-to-buffer! (group-chat "modelg"))
+      (set-mode! "chat-mode")
+      (buffer-set-local! (current-buffer) 'agent-slug "zz9")
+      (buffer-set-local! (current-buffer) 'agent-connector "claude-code")
+      #t)})
+
+    eval!(~s{(run-command "chat-set-model")})
+    Enum.each(String.graphemes("claude-opus-5"), &Aimax.Core.KeyDispatch.handle_key/1)
+    Aimax.Core.KeyDispatch.handle_key("RET")
+
+    # a fresh session spawned on the connector, model pinned and shown
+    assert_receive {:transport_open, _}, 1_000
+    assert_receive {:transport_cmd, cmd}, 1_000
+    assert cmd =~ "claude-code-acp"
+    assert eval!(~s{(buffer-local (current-buffer) 'agent-model)}) == ~s{"claude-opus-5"}
+    assert eval!(~s{(buffer-local (current-buffer) 'modeline-info)}) =~ "claude-opus-5"
   end
 
   test "outside a chat it refuses politely" do

@@ -31,14 +31,26 @@ Known debt: env frames are never collected — long sessions grow.
 - **Buffer** — one GenServer per buffer: rope, point/mark, buffer-local vars,
   read-only flag, Emacs undo (undos push onto the same history; any other
   command breaks the chain, so undo-after-break = redo; 20-char insert
-  amalgamation). Every mutation broadcasts a change event **with provenance**
-  (`:user | :editor | :process | {:agent, id}`). Provenance is load-bearing:
-  it's how read-only works (only `:user` is blocked) and how the reactor avoids
-  agent feedback loops.
-- **Editor** — window tree (ratio splits), active window, keymaps (global +
-  buffer-local), minibuffer state, completion popup state, faces, kill ring,
-  MRU buffer ring, viewport rows. Renders a *display payload*: only the visible
-  slice of each window.
+  amalgamation), per-window points (`win_points`, marker-adjusted with every
+  edit; the selected window of the last-active frame is "swapped in" — its
+  point IS the buffer point, Emacs-style). Every mutation broadcasts a change
+  event **with provenance** (`:user | :editor | :process | {:agent, id}`).
+  Provenance is load-bearing: it's how read-only works (only `:user` is
+  blocked) and how the reactor avoids agent feedback loops.
+- **Editor** — a map of **frames**, one per attached browser: each frame has
+  its own window tree (ratio splits), active window, minibuffer
+  (` *minibuf-<fid>*` backing buffer), echo, completion popup, viewport rows.
+  Shared across frames: keymaps (global + buffer-local), faces, kill ring,
+  MRU buffer ring. Window ids are global integers, so a bare id names one
+  window anywhere; selecting a foreign window selects its frame. Clients
+  attach by frame id (localStorage) and reattach across reloads and daemon
+  restarts. Renders a per-frame *display payload*: only the visible slice of
+  each window.
+- **Frame / Input** — the dispatching frame rides the process dictionary
+  (`Frame.current/0`); Input is the serialized input queue (one keystroke =
+  one atomic multi-call dispatch), stamping the frame and bumping the frame
+  MRU. Async work (timers, agents, RPC eval) falls back to the last-active
+  frame; RPC can retarget with `(select-frame! id)`.
 - **KeyDispatch** — runs in the *caller's* process (never inside Editor or
   Session), so commands can call both freely. Routes: minibuffer → completion
   popup → buffer keymap; breaks the undo chain for non-undo commands.
@@ -49,7 +61,8 @@ Known debt: env frames are never collected — long sessions grow.
 - **Proc** — PTY processes streaming into buffers (comint).
 - **Reactor** — debounced buffer-change rules (the agent trigger primitive).
 - **LLM** — one async primitive; provider routing; key resolution.
-- **Desktop** — snapshot/restore of buffers, window tree, faces.
+- **Desktop** — snapshot/restore of buffers, every frame's window tree
+  (with per-window points), faces. v2 format; reads v1 single-tree files.
 
 ### aimax_ui
 Pure view. Receives the display payload, renders spans (font-lock scopes,

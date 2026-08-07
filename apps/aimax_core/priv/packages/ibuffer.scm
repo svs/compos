@@ -118,6 +118,24 @@
 (define-command "ibuffer-refresh" "Refresh the buffer list"
   (lambda () (ibuffer-refresh!)))
 
+;; the home window follows the highlight (the notmuch pattern): moving in
+;; the list previews without leaving it
+(define (ibuffer-preview!)
+  (let ((b (ibuffer-current))
+        (home (buffer-local *ibuffer-buffer* 'ibuffer-home-window))
+        (me (active-window)))
+    (when (and b (buffer-exists? b) home (window-exists? home)
+               (not (equal? home me)))
+      (select-window! home)
+      (switch-to-buffer! b)
+      (select-window! me))))
+
+(define-command "ibuffer-next" "Move down and preview in the home window"
+  (lambda () (next-line!) (ibuffer-preview!)))
+
+(define-command "ibuffer-prev" "Move up and preview in the home window"
+  (lambda () (previous-line!) (ibuffer-preview!)))
+
 (define-command "ibuffer-flag" "Flag this buffer for killing"
   (lambda ()
     (let ((b (ibuffer-current)))
@@ -169,8 +187,8 @@
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-local! buf 'mode-name "ibuffer-mode")
-      (local-set-key "n" "next-line")
-      (local-set-key "p" "previous-line")
+      (local-set-key "n" "ibuffer-next")
+      (local-set-key "p" "ibuffer-prev")
       (local-set-key "RET" "ibuffer-visit")
       (local-set-key "g" "ibuffer-refresh")
       (local-set-key "d" "ibuffer-flag")

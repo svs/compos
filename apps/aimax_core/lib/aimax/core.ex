@@ -29,8 +29,14 @@ defmodule Aimax.Core do
 
   def kill_buffer(name) do
     case Registry.lookup(@registry, name) do
-      [{pid, _}] -> DynamicSupervisor.terminate_child(@buffer_sup, pid)
-      [] -> {:error, :not_found}
+      [{pid, _}] ->
+        # windows must never point at the dead: a later interaction with
+        # a killed buffer crashes the Editor (taking the keymap with it)
+        if Process.whereis(Aimax.Core.Editor), do: Aimax.Core.Editor.release_buffer(name)
+        DynamicSupervisor.terminate_child(@buffer_sup, pid)
+
+      [] ->
+        {:error, :not_found}
     end
   end
 end

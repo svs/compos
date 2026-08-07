@@ -83,6 +83,11 @@ defmodule Aimax.Core.Editor do
   def set_last_command(name), do: GenServer.call(__MODULE__, {:set_last_command, name})
   def last_command, do: GenServer.call(__MODULE__, :last_command)
 
+  # commands that manage their own undo boundaries (Scheme registers them;
+  # KeyDispatch skips its automatic break for these — "undo" is one from birth)
+  def add_undo_exempt(name), do: GenServer.call(__MODULE__, {:add_undo_exempt, name})
+  def undo_exempt?(name), do: GenServer.call(__MODULE__, {:undo_exempt?, name})
+
   # completion-at-point popup (anchored at a buffer position)
   def completion_show(start, candidates),
     do: GenServer.call(__MODULE__, {:completion_show, start, candidates})
@@ -119,6 +124,9 @@ defmodule Aimax.Core.Editor do
   def delete_other_windows, do: GenServer.call(__MODULE__, :delete_other_windows)
   def other_window, do: GenServer.call(__MODULE__, :other_window)
   def set_window_buffer(buffer), do: GenServer.call(__MODULE__, {:set_window_buffer, buffer})
+
+  @doc "A buffer is dying: swap every window showing it onto a live one."
+  def release_buffer(buffer), do: GenServer.call(__MODULE__, {:release_buffer, buffer})
 
   @doc "Replace the whole window tree from a {:leaf, name} | {:split, dir, a, b} spec."
   def restore_tree(spec, active_buffer),
@@ -167,6 +175,7 @@ defmodule Aimax.Core.Editor do
        faces: %{},
        local_keymaps: %{},
        last_command: "",
+       undo_exempt: MapSet.new(["undo"]),
        completion: nil,
        total_rows: 40,
        win_rows: %{},
@@ -282,10 +291,30 @@ defmodule Aimax.Core.Editor do
       nil ->
         {:reply, {:error, :no_window}, state}
 
+      # a window can briefly show a killed buffer (kill_buffer heals the
+      # tree, but a click can race it — and the registry entry outlives
+      # the process for a moment, so exists? isn't enough). A dead buffer
+      # must never crash the Editor: its crash wipes the keymap with it.
       leaf ->
-        Buffer.goto(leaf.buffer, mouse_pos(leaf.buffer, line, col))
-        changed(:ok, state)
+        try do
+          Buffer.goto(leaf.buffer, mouse_pos(leaf.buffer, line, col))
+          changed(:ok, state)
+        catch
+          :exit, _ -> {:reply, {:error, :no_buffer}, state}
+        end
     end
+  end
+
+  # swap every window off BUFFER (it is being killed) onto the most
+  # recent live buffer — windows must never point at the dead
+  def handle_call({:release_buffer, buffer}, _from, state) do
+    fallback =
+      Enum.find(state.mru, @scratch, fn b ->
+        b != buffer and Buffer.exists?(b)
+      end)
+
+    tree = swap_buffer(state.tree, buffer, fallback)
+    changed(:ok, %{state | tree: tree, mru: List.delete(state.mru, buffer)})
   end
 
   def handle_call({:mouse_region, id, al, ac, fl, fc}, _from, state) do
@@ -294,9 +323,13 @@ defmodule Aimax.Core.Editor do
         {:reply, {:error, :no_window}, state}
 
       leaf ->
-        Buffer.set_mark(leaf.buffer, mouse_pos(leaf.buffer, al, ac))
-        Buffer.goto(leaf.buffer, mouse_pos(leaf.buffer, fl, fc))
-        changed(:ok, state)
+        try do
+          Buffer.set_mark(leaf.buffer, mouse_pos(leaf.buffer, al, ac))
+          Buffer.goto(leaf.buffer, mouse_pos(leaf.buffer, fl, fc))
+          changed(:ok, state)
+        catch
+          :exit, _ -> {:reply, {:error, :no_buffer}, state}
+        end
     end
   end
 
@@ -433,6 +466,12 @@ defmodule Aimax.Core.Editor do
     do: {:reply, :ok, %{state | last_command: name}}
 
   def handle_call(:last_command, _from, state), do: {:reply, state.last_command, state}
+
+  def handle_call({:add_undo_exempt, name}, _from, state),
+    do: {:reply, :ok, %{state | undo_exempt: MapSet.put(state.undo_exempt, name)}}
+
+  def handle_call({:undo_exempt?, name}, _from, state),
+    do: {:reply, MapSet.member?(state.undo_exempt, name), state}
 
   def handle_call({:completion_show, start, candidates}, _from, state) do
     case Candidates.normalize(candidates) do
@@ -662,6 +701,12 @@ defmodule Aimax.Core.Editor do
 
   defp find_leaf(%{type: :split, children: children}, id),
     do: Enum.find_value(children, &find_leaf(&1, id))
+
+  defp swap_buffer(%{type: :leaf} = leaf, from, to),
+    do: if(leaf.buffer == from, do: %{leaf | buffer: to, top: 0, manual: false}, else: leaf)
+
+  defp swap_buffer(%{type: :split} = split, from, to),
+    do: %{split | children: Enum.map(split.children, &swap_buffer(&1, from, to))}
 
   defp replace_leaf(%{type: :leaf} = leaf, id, new),
     do: if(leaf.id == id, do: new, else: leaf)

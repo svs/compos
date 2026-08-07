@@ -827,6 +827,12 @@
       (local-set-key "C-c RET" "chat-send")
       (local-set-key "C-c m" "chat-set-model")
       (local-set-key "C-c $" "chat-cost")
+      (local-set-key "C-c b" "chat-set-backend")
+      ;; an agent-backed chat needs the thread keys back after restore
+      ;; (the runtime itself does not survive — agent-send revives it)
+      (when (and (buffer-local buf 'agent-slug)
+                 (boundp (quote agent-install-keys!)))
+        (agent-install-keys! buf))
       ;; legacy: pre-group companions carried a 'companion-of pointer —
       ;; upgrade both ends to the 'group tag (idempotent, so desktop
       ;; restore migrates old sessions by itself)
@@ -953,9 +959,64 @@
 (define-command "chat-send" "Send the current chat input to the LLM"
   (lambda ()
     (let ((buf (current-buffer)))
-      (if (buffer-local buf 'agent-saved-mark)
-          (chat-send-rich! buf)
-          (chat-send-plain! buf)))))
+      (cond ((buffer-local buf 'agent-slug)
+             ;; agent-backed chat: the thread machinery owns the turn
+             ;; (streaming, tool cards, permissions, revive-on-dead)
+             (run-command "agent-send"))
+            ((buffer-local buf 'agent-saved-mark)
+             (chat-send-rich! buf))
+            (else (chat-send-plain! buf))))))
+
+;;; --- chat backends -------------------------------------------------------------
+;;; A chat can ride an ACP agent (claude-code, codex — subscription billing)
+;;; instead of the metered API: the buffer stays the same conversation, a
+;;; thread binds to it by slug, and the agent's MCP servers come from the
+;;; chat's presets plus the editor's own tool proxy. C-c b switches.
+
+(define (chat-attach-agent! buf connector)
+  (let ((slug (or (buffer-local buf 'agent-slug) (agent-next-slug))))
+    (buffer-set-local! buf 'agent-slug slug)
+    (buffer-set-local! buf 'agent-connector connector)
+    (let ((mark (or (buffer-local buf 'agent-saved-mark)
+                    ;; plain chat: give it the marker structure threads use
+                    (let ((m (buffer-size buf)))
+                      (buffer-append! buf *chat-input-marker*)
+                      (buffer-set-local! buf 'agent-marker-bytes
+                        (string-byte-length *chat-input-marker*))
+                      (buffer-set-local! buf 'render-mode "agent")
+                      m))))
+      (buffer-set-local! buf 'agent-saved-mark mark)
+      (agent-install-keys! buf)
+      (agent-update-modeline! buf)
+      (agent-start! slug
+        (append (list 'buffer buf 'mark mark)
+                (agent-resolve-config
+                  (list 'connector connector
+                        'presets (if (boundp (quote chat-presets-of))
+                                     (chat-presets-of buf)
+                                     '())))))
+      slug)))
+
+(define-command "chat-set-backend" "Power this chat by the API or an agent connector"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (not (equal? (buffer-local buf 'mode-name) "chat-mode"))
+          (message "not a chat buffer")
+          (minibuffer-read "Backend: "
+            (cons (list "api" "direct API — metered, cached, cheap lane")
+                  (map (lambda (c) (list c "ACP agent — rides your subscription"))
+                       (connector-names)))
+            (lambda (choice)
+              (cond ((equal? choice "") #f)
+                    ((equal? choice "api")
+                     (let ((slug (buffer-local buf 'agent-slug)))
+                       (when slug (agent-kill! slug))
+                       (buffer-set-local! buf 'agent-slug #f)
+                       (message "chat backend: api")))
+                    (else
+                      (chat-attach-agent! buf choice)
+                      (message (string-append "chat backend: " choice
+                                " — subscription billing, editor tools via MCP"))))))))))
 
 ;; the reply appends by name, and point only follows when the user is
 ;; still in the chat — a companion must not yank point in the document

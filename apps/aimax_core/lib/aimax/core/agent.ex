@@ -344,7 +344,10 @@ defmodule Aimax.Core.Agent do
       {"initialize", %{"result" => _}} ->
         request(state, "session/new", %{
           "cwd" => Map.get(state.config, "cwd", File.cwd!()),
-          "mcpServers" => Map.get(state.config, "mcp_servers", [])
+          "mcpServers" =>
+            acp_servers(
+              Map.get(state.config, "mcp-servers") || Map.get(state.config, "mcp_servers") || []
+            )
         })
 
       {"session/new", %{"result" => %{"sessionId" => sid}}} ->
@@ -491,6 +494,32 @@ defmodule Aimax.Core.Agent do
       Enum.map_join(String.split(old, "\n"), "", &"-#{&1}\n") <>
       Enum.map_join(String.split(new, "\n"), "", &"+#{&1}\n")
   end
+
+  # mcp_servers config (Scheme plists via mcp-acp-servers) -> ACP session/new
+  # shape. Env values starting with "@" are key references resolved here —
+  # the same convention as MCP client specs, so config files carry no secrets.
+  defp acp_servers(servers) when is_list(servers), do: Enum.map(servers, &acp_server/1)
+
+  defp acp_server(flat) when is_list(flat) do
+    m = flat |> Enum.chunk_every(2) |> Map.new(fn [k, v] -> {to_string(k), v} end)
+
+    env =
+      for [k, v] <- m["env"] || [] do
+        %{"name" => to_string(k), "value" => resolve_key(v)}
+      end
+
+    %{
+      "name" => m["name"],
+      "command" => m["command"],
+      "args" => m["args"] || [],
+      "env" => env
+    }
+  end
+
+  defp acp_server(other), do: other
+
+  defp resolve_key("@" <> var), do: Aimax.Core.Keys.get(var) || ""
+  defp resolve_key(v), do: to_string(v)
 
   # --- lifecycle helpers ------------------------------------------------------
 

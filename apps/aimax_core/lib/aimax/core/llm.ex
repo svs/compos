@@ -141,11 +141,16 @@ defmodule Aimax.Core.LLM do
   def json_to_scheme(nil), do: false
   def json_to_scheme(v), do: v
 
+  @doc """
+  One Scheme tool spec -> Anthropic tool JSON. Public because the MCP proxy
+  surface (tool-specs-json primitive) reuses it to serve the same registry
+  to external ACP agents.
+  """
   # MCP-bridged tools carry their original JSON schema verbatim
-  defp tool_json([name, description, schema]) when is_binary(schema),
+  def tool_json([name, description, schema]) when is_binary(schema),
     do: %{name: plain(name), description: description, input_schema: Jason.decode!(schema)}
 
-  defp tool_json([name, description, params]) do
+  def tool_json([name, description, params]) do
     properties =
       Map.new(params, fn [p, type, pdesc | _] ->
         {plain(p), %{type: plain(type), description: pdesc}}

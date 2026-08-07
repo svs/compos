@@ -128,11 +128,27 @@ defmodule Aimax.Scheme.Eval do
     eval_seq(body, frame, store)
   end
 
-  def apply_fn({:builtin, _name, fun}, args, store) when is_function(fun, 1),
-    do: {fun.(args), store}
+  # A builtin fed bad arguments must surface as a Scheme error, not a raw
+  # Elixir exception: raw exceptions crash the hosting GenServer (the whole
+  # editor Session died to a (string-prefix? s #f) once) — Error is caught
+  # by the usual error paths instead.
+  def apply_fn({:builtin, name, fun}, args, store) when is_function(fun, 1),
+    do: {builtin_apply(name, fn -> fun.(args) end), store}
 
-  def apply_fn({:builtin, _name, fun}, args, store) when is_function(fun, 2),
-    do: fun.(args, store)
+  def apply_fn({:builtin, name, fun}, args, store) when is_function(fun, 2),
+    do: builtin_apply(name, fn -> fun.(args, store) end)
+
+  defp builtin_apply(name, thunk) do
+    thunk.()
+  rescue
+    e in Error ->
+      reraise e, __STACKTRACE__
+
+    e in [ArgumentError, FunctionClauseError, MatchError, CaseClauseError, ArithmeticError, KeyError] ->
+      reraise Error,
+              [message: "#{name}: #{Exception.message(e)}"],
+              __STACKTRACE__
+  end
 
   def apply_fn(other, _args, _store) do
     raise Error, message: "not a function: #{inspect(other)}"

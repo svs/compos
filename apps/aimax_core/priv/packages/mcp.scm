@@ -130,3 +130,42 @@
 
 ;; Which servers exist is user config, not core: declare them with
 ;; mcp-register!/define-preset! in ~/.aimax/ai-config.scm.
+
+;;; --- ACP: agents get the same servers -----------------------------------------
+;;; A registered stdio server translates to an ACP session/new mcpServers
+;;; entry; the caller (an agent thread's config, a chat's presets) decides
+;;; which servers each agent session sees. "@VAR" env values resolve
+;;; Elixir-side at spawn — config files stay secret-free.
+
+;; the editor itself as an MCP server: the define-tool! registry bridged
+;; over the daemon socket, so external agents read and edit live buffers
+(mcp-register! 'aimax
+  (list 'command "elixir" 'args (list (priv-path "aimax-mcp-proxy.exs"))))
+
+(define (mcp-acp-server name)
+  (let* ((e (assoc name *mcp-registry*))
+         (spec (and e (car (cdr e)))))
+    (and spec (plist-get spec 'command)
+         (list 'name (symbol->string name)
+               'command (plist-get spec 'command)
+               'args (or (plist-get spec 'args) '())
+               'env (let loop ((es (or (plist-get spec 'env) '())) (acc '()))
+                      (if (null? es)
+                          (reverse acc)
+                          (loop (cdr (cdr es))
+                                (cons (list (symbol->string (car es))
+                                            (car (cdr es)))
+                                      acc))))))))
+
+(define (mcp-acp-servers names)
+  (filter (lambda (x) x) (map mcp-acp-server names)))
+
+;; presets -> an agent session's server list: editor tools always, the
+;; presets' servers on top
+(define (presets-acp-servers presets)
+  (mcp-acp-servers
+    (cons 'aimax
+          (fold (lambda (acc p)
+                  (fold (lambda (a s) (if (member s a) a (cons s a)))
+                        acc (preset-servers p)))
+                '() presets))))

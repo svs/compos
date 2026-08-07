@@ -335,6 +335,19 @@ defmodule Aimax.Core.Session do
       "mcp-tool-specs" => fn [names] ->
         Aimax.Core.MCP.tool_specs(Enum.map(names, &s/1))
       end,
+      # MCP-shaped JSON for a list of registry tool specs — the proxy's
+      # tools/list payload (input_schema key renamed to MCP's camelCase)
+      "tool-specs-json" => fn [specs] ->
+        specs
+        |> Enum.map(fn spec ->
+          %{input_schema: schema} = t = Aimax.Core.LLM.tool_json(spec)
+          t |> Map.delete(:input_schema) |> Map.put(:inputSchema, schema)
+        end)
+        |> Jason.encode!()
+      end,
+      "priv-path" => fn [rel] ->
+        Path.join(Application.app_dir(:aimax_core, "priv"), rel)
+      end,
       "format-usd" => fn [amount] when is_number(amount) ->
         "$" <> :erlang.float_to_binary(amount * 1.0, decimals: 4)
       end,

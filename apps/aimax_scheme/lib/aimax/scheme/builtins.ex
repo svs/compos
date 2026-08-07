@@ -122,6 +122,15 @@ defmodule Aimax.Scheme.Builtins do
         to = utf8_floor(s, to)
         :binary.part(s, from, max(to - from, 0))
       end,
+      # binary-safe transport encoding (MCP proxy, anything crossing RPC
+      # where printed-string escaping would be ambiguous)
+      "base64-encode" => fn [s] -> Base.encode64(s) end,
+      "base64-decode" => fn [s] ->
+        case Base.decode64(s) do
+          {:ok, v} -> v
+          :error -> raise Eval.Error, message: "base64-decode: invalid input"
+        end
+      end,
       "string-split" => fn [s, sep] -> String.split(s, sep) end,
       "string-join" => fn [parts, sep] -> Enum.join(parts, sep) end,
       "string-pad-left" => fn [s, n] -> String.pad_leading(s, n) end,

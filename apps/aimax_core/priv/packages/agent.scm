@@ -32,6 +32,14 @@
 
 (define (agent-buffer slug) (string-append "*agent: " slug "*"))
 
+;; the buffer a thread renders into: any buffer claiming the slug — chats
+;; host threads too (chat-set-backend) — else the conventional name above
+(define (agent-buf slug)
+  (let loop ((bs (buffer-list)))
+    (cond ((null? bs) (agent-buffer slug))
+          ((equal? (buffer-local (car bs) 'agent-slug) slug) (car bs))
+          (else (loop (cdr bs))))))
+
 (define (agent-slug-of buf) (buffer-local buf 'agent-slug))
 
 ;; input region: [.. transcript .. mark][marker][user input ..]
@@ -46,19 +54,19 @@
 
 ;; the live (not-yet-queued) tail of the input region
 (define (agent-input slug)
-  (let ((buf (agent-buffer slug)))
+  (let ((buf (agent-buf slug)))
     (substring-bytes (buffer-text buf)
                      (+ (agent-input-start slug) (agent-queued-bytes buf))
                      (buffer-size buf))))
 
 (define (agent-clear-input! slug)
-  (let ((buf (agent-buffer slug)))
+  (let ((buf (agent-buf slug)))
     (let ((start (+ (agent-input-start slug) (agent-queued-bytes buf))))
       (buffer-delete-range! buf start (- (buffer-size buf) start)))))
 
 ;; mute the live tail instead of clearing it
 (define (agent-mark-queued! slug)
-  (let* ((buf (agent-buffer slug))
+  (let* ((buf (agent-buf slug))
          (start (+ (agent-input-start slug) (agent-queued-bytes buf)))
          (end (buffer-size buf)))
     (buffer-set-local! buf 'agent-queued
@@ -69,7 +77,7 @@
 ;; its turn started: the muted text leaves the input region (the rendered
 ;; ╰─ you ▸ line replaces it)
 (define (agent-pop-queued! slug)
-  (let* ((buf (agent-buffer slug))
+  (let* ((buf (agent-buf slug))
          (q (or (buffer-local buf 'agent-queued) '())))
     (unless (null? q)
       (buffer-delete-range! buf (agent-input-start slug) (car q))
@@ -177,7 +185,7 @@
 
 ;; face #f -> plain text
 (define (agent-render! slug text face)
-  (let ((buf (agent-buffer slug))
+  (let ((buf (agent-buf slug))
         (start (agent-mark slug)))
     (agent-append! slug text)
     (when face
@@ -190,14 +198,14 @@
 ;;; first output. It is the last text before the marker, so deleting it never
 ;;; shifts a fold; the runtime re-adjusts its mark automatically.
 (define (agent-show-waiting! slug)
-  (let* ((buf (agent-buffer slug))
+  (let* ((buf (agent-buf slug))
          (text "⋯ thinking\n")
          (start (agent-render! slug text "agent-thought")))
     (buffer-set-local! buf 'agent-waiting
       (list start (+ start (string-byte-length text))))))
 
 (define (agent-clear-waiting! slug)
-  (let* ((buf (agent-buffer slug))
+  (let* ((buf (agent-buf slug))
          (w (buffer-local buf 'agent-waiting)))
     (when w
       (buffer-delete-range! buf (car w) (- (car (cdr w)) (car w)))
@@ -206,7 +214,7 @@
       (buffer-set-local! buf 'agent-saved-mark (agent-mark slug)))))
 
 (define (agent-handle-event slug e)
-  (let ((buf (agent-buffer slug))
+  (let ((buf (agent-buf slug))
         (type (plist-get e 'type)))
     ;; any sign of life ends the waiting state
     (unless (or (equal? type 'user-msg) (equal? type 'status))
@@ -303,7 +311,7 @@
 (agent-on-event!
   (lambda (slug events)
     ;; batches race buffer kills — a dead thread's events just drop
-    (when (buffer-exists? (agent-buffer slug))
+    (when (buffer-exists? (agent-buf slug))
       (for-each (lambda (e) (agent-handle-event slug e)) events)
       ;; fleet surfaces track every batch: the erc-track segment + *agents*
       (agents-modeline-refresh!)
@@ -337,7 +345,7 @@
                              (string-append "permission denied: "
                                             (plist-get perm 'title) "\n")
                              "agent-meta")))
-                (agent-block-push! (agent-buffer slug) start
+                (agent-block-push! (agent-buf slug) start
                   (agent-mark slug) "meta" '()))))))))
 
 (define-command "agent-permission-allow" "Allow the pending permission request once"
@@ -359,7 +367,7 @@
 ;; reattach a fresh agent on its connector. New ACP session: the transcript
 ;; stays; server-side context isn't replayed yet (resume lands with P5).
 (define (agent-revive! slug)
-  (let* ((buf (agent-buffer slug))
+  (let* ((buf (agent-buf slug))
          (mark (or (buffer-local buf 'agent-saved-mark)
                    ;; older transcript: mark sits at the marker's last occurrence
                    (let loop ((ms (re-find* *agent-prompt-marker* (buffer-text buf)))
@@ -375,13 +383,17 @@
                                              *default-connector*))
                         (if (and m (not (equal? m "")))
                             (list 'model m)
-                            '())))))
+                            '())
+                        ;; agent-backed chats keep their preset MCP servers
+                        ;; across revives
+                        (let ((ps (buffer-local buf 'chat-presets)))
+                          (if ps (list 'presets ps) '()))))))
     (message (string-append "agent " slug ": revived (fresh session)"))))
 
 ;; switch a thread's connector/model: kill + reattach. Fresh session — the
 ;; transcript stays, server-side context doesn't.
 (define (agent-reconnect! slug cname model)
-  (let ((buf (agent-buffer slug)))
+  (let ((buf (agent-buf slug)))
     (agent-kill! slug)
     (buffer-set-local! buf 'agent-connector cname)
     (buffer-set-local! buf 'agent-model (if (equal? model "") #f model))
@@ -420,7 +432,7 @@
                 (loop (cdr ls))))))))
 
 (define (agent-send-msg! slug msg)
-  (let* ((buf (agent-buffer slug))
+  (let* ((buf (agent-buf slug))
          ;; what the user is looking at in the other windows — "this" works
          (msg (string-append (editor-context-preamble buf) msg)))
     (if (buffer-local buf 'agent-seed-context)
@@ -532,6 +544,19 @@
 ;; it to the adapter command line (codex -c model=...), otherwise it rides
 ;; the anthropic env pair. Connectors that offer neither stay untouched.
 (define (agent-resolve-config opts)
+  (let ((conf (agent-resolve-config* opts)))
+    ;; ACP threads get MCP servers: the editor's own tools (aimax proxy)
+    ;; plus whatever presets the caller names — the caller controls the
+    ;; agent's tool surface, exactly as with API chats
+    (if (or (plist-get conf 'type)
+            (plist-get conf 'mcp-servers)
+            (not (boundp (quote presets-acp-servers))))
+        conf
+        (append conf
+          (list 'mcp-servers
+                (presets-acp-servers (or (plist-get conf 'presets) '())))))))
+
+(define (agent-resolve-config* opts)
   (let* ((cname (or (plist-get opts 'connector) *default-connector*))
          (conf (append opts (connector-config cname)))
          (m (or (plist-get conf 'model)
@@ -742,7 +767,7 @@
 (define (agents-line t)
   (let* ((slug (car t))
          (status (car (cdr t)))
-         (buf (agent-buffer slug))
+         (buf (agent-buf slug))
          (info (agent-info slug)))
     (string-append
       (agent-status-glyph status) " "
@@ -781,7 +806,7 @@
 
 (define (agents-visit-current)
   (let ((slug (agents-current-slug)))
-    (when slug (switch-to-buffer! (agent-buffer slug)) (end-of-buffer!))))
+    (when slug (switch-to-buffer! (agent-buf slug)) (end-of-buffer!))))
 
 (define-command "agents-visit" "Visit the thread on the current line"
   (lambda () (agents-visit-current)))
@@ -813,7 +838,7 @@
 ;; alive) so windows showing the thread refresh honestly
 (define (agent-note-stopped! slug)
   (unless (equal? (agent-status slug) 'dead)
-    (let ((buf (agent-buffer slug)))
+    (let ((buf (agent-buf slug)))
       (agent-clear-waiting! slug)
       (agent-block-drop-kind! buf "permission")
       (let ((start (agent-render! slug "\n[agent stopped]\n" "agent-meta")))
@@ -848,8 +873,8 @@
       (when slug
         (let ((here (active-window)))
           (agent-kill! slug)
-          (agent-release-windows! (agent-buffer slug))
-          (buffer-kill! (agent-buffer slug))
+          (agent-release-windows! (agent-buf slug))
+          (buffer-kill! (agent-buf slug))
           (when (window-exists? here) (select-window! here))
           (agents-refresh!)
           (message (string-append slug " archived")))))))
@@ -893,7 +918,7 @@
     (let ((att (agents-attention)))
       (if (null? att)
           (message "no agent needs attention")
-          (begin (switch-to-buffer! (agent-buffer (car att)))
+          (begin (switch-to-buffer! (agent-buf (car att)))
                  (end-of-buffer!))))))
 
 (global-set-key "C-c a n" "agent-open")

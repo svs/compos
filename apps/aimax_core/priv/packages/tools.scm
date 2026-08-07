@@ -180,6 +180,20 @@
                           (buffer-insert! b pos new)
                           "edited")))))))))
 
+;;; --- the MCP proxy surface ----------------------------------------------------
+;;; External ACP agents get this same registry over MCP: the bundled
+;;; aimax-mcp-proxy.exs bridges stdio MCP to the daemon socket and calls
+;;; these two. Payloads are base64 both ways — RPC eval returns printed
+;;; values, and printed-string escaping is not JSON-safe for every byte.
+
+(define (mcp-proxy-tools-json)
+  (base64-encode (tool-specs-json (llm-tool-specs))))
+
+(define (mcp-proxy-call name args-b64)
+  (base64-encode
+    (let ((r (llm-tool-call name (json-parse (base64-decode args-b64)))))
+      (if (string? r) r (value->string r)))))
+
 (public! 'define-tool! "(define-tool! 'name DESC PARAMS HANDLER) — register an LLM tool")
 (public! 'llm-with-tools "(llm-with-tools PROMPT HANDLER) — completion with the full tool loop")
 

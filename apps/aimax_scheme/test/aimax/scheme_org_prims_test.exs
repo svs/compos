@@ -75,6 +75,12 @@ defmodule Aimax.SchemeOrgPrimsTest do
     assert err(~s{(substring-bytes "ab" 0 5)}) =~ "out of"
   end
 
+  test "a builtin fed bad arguments raises a catchable Scheme error, not a raw crash" do
+    # this exact shape once killed the editor Session GenServer
+    assert err(~s{(string-prefix? "allow_always" #f)}) =~ "string-prefix?"
+    assert err(~s{(+ 1 "two")}) =~ "+"
+  end
+
   test "substring-bytes snaps mid-codepoint offsets to boundaries" do
     # "é" is bytes 1-2; offsets inside it must not produce invalid UTF-8
     # (stale marker state fed such a slice to the rope NIF and killed a

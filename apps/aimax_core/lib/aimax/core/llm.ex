@@ -187,8 +187,24 @@ defmodule Aimax.Core.LLM do
         {:error, "no ANTHROPIC_API_KEY (env, ~/.aimax/anthropic-key, or doppler)"}
 
       key ->
-        body = %{model: model, max_tokens: 4096, messages: messages, tools: tools}
-        body = if system, do: Map.put(body, :system, system), else: body
+        # cache breakpoints on tools, system, and the last message: chat
+        # resends the whole transcript every turn and the tool loop resends
+        # it every round — with the prefix cached, repeat input bills at the
+        # cache-read rate (~10%) instead of full price
+        body = %{
+          model: model,
+          max_tokens: 4096,
+          messages: cache_last(messages),
+          tools: cache_last_tool(tools)
+        }
+
+        body =
+          if system,
+            do:
+              Map.put(body, :system, [
+                %{type: "text", text: system, cache_control: %{type: "ephemeral"}}
+              ]),
+            else: body
 
         Req.post("https://api.anthropic.com/v1/messages",
           json: body,
@@ -201,6 +217,29 @@ defmodule Aimax.Core.LLM do
         end
     end
   end
+
+  # moving cache breakpoint: the last message's last content block. Each
+  # request extends the previous one's prefix, so round N of the tool loop
+  # (and turn N of a chat) reads rounds 1..N-1 from cache.
+  defp cache_last([]), do: []
+
+  defp cache_last(messages) do
+    List.update_at(messages, -1, fn
+      %{content: content} = m when is_binary(content) ->
+        %{m | content: [%{type: "text", text: content, cache_control: %{type: "ephemeral"}}]}
+
+      %{content: blocks} = m when is_list(blocks) ->
+        %{m | content: List.update_at(blocks, -1, &Map.put(&1, :cache_control, %{type: "ephemeral"}))}
+
+      m ->
+        m
+    end)
+  end
+
+  defp cache_last_tool([]), do: []
+
+  defp cache_last_tool(tools),
+    do: List.update_at(tools, -1, &Map.put(&1, :cache_control, %{type: "ephemeral"}))
 
   @doc "Set the model for subsequent requests (scheme: set-llm-model!)."
   def set_model(model), do: :persistent_term.put(:aimax_llm_model, model)

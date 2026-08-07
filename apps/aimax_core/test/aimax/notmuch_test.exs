@@ -257,6 +257,20 @@ defmodule Aimax.NotmuchTest do
     assert calls(dir) =~ "tag +m -- thread:0001"
   end
 
+  test "* marks every thread in the search", %{dir: dir} do
+    eval!(~s{(run-command "notmuch-inbox")})
+    assert eval!("(current-buffer)") == ~s{"*notmuch*"}
+    press("*")
+    echo = Editor.snapshot().echo
+    assert calls(dir) =~ "tag +m -- ( tag:inbox )", "echo was: #{inspect(echo)}"
+
+    # the bulk flow: archive everything marked, with confirmation
+    press("A")
+    Enum.each(String.graphemes("yes"), &Aimax.Core.KeyDispatch.handle_key/1)
+    Aimax.Core.KeyDispatch.handle_key("RET")
+    assert calls(dir) =~ "tag -inbox -m -- ( tag:inbox ) and tag:m"
+  end
+
   test "@ narrows the search to the sender", %{dir: dir} do
     eval!(~s{(run-command "notmuch-inbox")})
     press("@")

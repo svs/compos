@@ -64,6 +64,30 @@
 (define (llm-with-tools prompt handler)
   (llm-tools prompt *llm-system* (llm-tool-specs) llm-tool-call handler))
 
+;; embark for the model: the same target/action table C-. uses. The
+;; editor context names the target ids; act runs the verb on one.
+(define-tool! 'act
+  (string-append
+    "Run an editor action on a target. The editor context names targets "
+    "(e.g. an email's notmuch thread id). type: the target type, e.g. "
+    "\"email\". id: the target id (an email's thread id, without the "
+    "thread: prefix). action: one of the type's verbs — email: archive, "
+    "trash, unread, mark, read, reply.")
+  (list (list 'type "string" "target type, e.g. email")
+        (list 'id "string" "target id")
+        (list 'action "string" "the verb to run"))
+  (lambda (args)
+    (let* ((type (string->symbol (custom--plist-get args 'type)))
+           (raw (custom--plist-get args 'id))
+           (id (if (string-prefix? "thread:" raw)
+                   (substring raw 7 (string-length raw))
+                   raw))
+           (a (assoc (custom--plist-get args 'action) (actions-for type))))
+      (if a
+          (begin ((cadr a) id) "done")
+          (string-append "no such action; " (symbol->string type) " has: "
+                         (string-join (map car (actions-for type)) ", "))))))
+
 ;;; --- the built-in toolbox ----------------------------------------------------
 
 (define-tool! 'eval-scheme

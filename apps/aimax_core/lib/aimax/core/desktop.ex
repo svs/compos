@@ -152,7 +152,7 @@ defmodule Aimax.Core.Desktop do
       # reopen through visit so modes + hooks apply, then lay the saved
       # buffer-locals back on top so toggled state (preview, line numbers,
       # a hand-picked mode) survives too
-      for entry <- buffers, bpath = elem(entry, 0), File.exists?(bpath) do
+      for entry <- buffers, bpath = elem(entry, 0), restorable?(bpath) do
         {point, locals} =
           case entry do
             {_, point} -> {point, %{}}
@@ -160,8 +160,11 @@ defmodule Aimax.Core.Desktop do
           end
 
         Session.eval(~s{(visit "#{bpath}")})
-        Buffer.goto(bpath, point)
-        restore_locals(bpath, locals)
+        # visit can decline (unreachable remote host) — skip, don't crash boot
+        if Buffer.exists?(bpath) do
+          Buffer.goto(bpath, point)
+          restore_locals(bpath, locals)
+        end
       end
 
       for {name, text, point, locals} <- desktop[:scratch] || [] do
@@ -189,6 +192,11 @@ defmodule Aimax.Core.Desktop do
   # non-file buffer: content and locals go down first, THEN set-mode! —
   # the mode's setup fn rebuilds presentation (local keys, overlays,
   # folds) from the locals it finds on the buffer
+  # remote buffers restore by re-fetching over ssh — (visit) does that;
+  # a vanished local file is the only thing that drops a buffer
+  defp restorable?(bpath),
+    do: File.exists?(bpath) or String.starts_with?(bpath, "/ssh:")
+
   defp restore_scratch(name, text, point, locals) do
     unless Buffer.exists?(name), do: Aimax.Core.create_buffer(name)
 

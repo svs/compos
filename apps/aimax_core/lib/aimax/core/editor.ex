@@ -38,6 +38,10 @@ defmodule Aimax.Core.Editor do
   def local_bind_key(buffer, seq, command),
     do: GenServer.call(__MODULE__, {:local_bind_key, buffer, seq, command})
 
+  @doc "Emacs [remap]: in BUFFER, any key that resolves to FROM runs TO instead."
+  def local_remap(buffer, from, to),
+    do: GenServer.call(__MODULE__, {:local_remap, buffer, from, to})
+
   # pending prefix + echo
   def set_pending(seq), do: GenServer.call(__MODULE__, {:set_pending, seq})
   def set_echo(msg), do: GenServer.call(__MODULE__, {:set_echo, msg})
@@ -125,6 +129,9 @@ defmodule Aimax.Core.Editor do
   def other_window, do: GenServer.call(__MODULE__, :other_window)
   def set_window_buffer(buffer), do: GenServer.call(__MODULE__, {:set_window_buffer, buffer})
 
+  @doc "Show BUFFER in the active window WITHOUT touching the MRU ring — candidate preview must not reorder the buffer history."
+  def preview_buffer(buffer), do: GenServer.call(__MODULE__, {:preview_buffer, buffer})
+
   @doc "A buffer is dying: swap every window showing it onto a live one."
   def release_buffer(buffer), do: GenServer.call(__MODULE__, {:release_buffer, buffer})
 
@@ -174,6 +181,7 @@ defmodule Aimax.Core.Editor do
        modeline_extra: "",
        faces: %{},
        local_keymaps: %{},
+       remaps: %{},
        last_command: "",
        undo_exempt: MapSet.new(["undo"]),
        completion: nil,
@@ -228,7 +236,24 @@ defmodule Aimax.Core.Editor do
         true -> :none
       end
 
+    # Emacs command remapping: the buffer substitutes its own command for
+    # a resolved one — every key bound to the original follows, arrows and
+    # C-n alike, including user rebindings
+    reply =
+      case reply do
+        {:command, name} ->
+          {:command, state.remaps |> Map.get(buffer, %{}) |> Map.get(name, name)}
+
+        other ->
+          other
+      end
+
     {:reply, reply, state}
+  end
+
+  def handle_call({:local_remap, buffer, from, to}, _from, state) do
+    remaps = Map.update(state.remaps, buffer, %{from => to}, &Map.put(&1, from, to))
+    {:reply, :ok, %{state | remaps: remaps}}
   end
 
   def handle_call({:local_bind_key, buffer, seq, command}, _from, state) do
@@ -308,10 +333,17 @@ defmodule Aimax.Core.Editor do
   # swap every window off BUFFER (it is being killed) onto the most
   # recent live buffer — windows must never point at the dead
   def handle_call({:release_buffer, buffer}, _from, state) do
+    # prefer a buffer not already on screen — swapping to one that is
+    # (e.g. *ibuffer* while killing from inside it) duplicates windows
+    visible = visible_buffers(state.tree)
+
     fallback =
-      Enum.find(state.mru, @scratch, fn b ->
-        b != buffer and Buffer.exists?(b)
-      end)
+      Enum.find(state.mru, fn b ->
+        b != buffer and b not in visible and Buffer.exists?(b)
+      end) ||
+        Enum.find(state.mru, @scratch, fn b ->
+          b != buffer and Buffer.exists?(b)
+        end)
 
     tree = swap_buffer(state.tree, buffer, fallback)
     changed(:ok, %{state | tree: tree, mru: List.delete(state.mru, buffer)})
@@ -604,6 +636,16 @@ defmodule Aimax.Core.Editor do
     changed(:ok, %{state | tree: tree, mru: mru})
   end
 
+  def handle_call({:preview_buffer, buffer}, _from, state) do
+    if Aimax.Core.Buffer.exists?(buffer) do
+      leaf = find_leaf(state.tree, state.active)
+      tree = replace_leaf(state.tree, state.active, %{leaf | buffer: buffer, top: 0, manual: false})
+      changed(:ok, %{state | tree: tree})
+    else
+      {:reply, {:error, :no_buffer}, state}
+    end
+  end
+
   def handle_call({:restore_tree, spec, active_buffer}, _from, state) do
     {tree, next_win} = build_tree(spec, state.next_win)
 
@@ -701,6 +743,11 @@ defmodule Aimax.Core.Editor do
 
   defp find_leaf(%{type: :split, children: children}, id),
     do: Enum.find_value(children, &find_leaf(&1, id))
+
+  defp visible_buffers(%{type: :leaf, buffer: b}), do: [b]
+
+  defp visible_buffers(%{type: :split, children: children}),
+    do: Enum.flat_map(children, &visible_buffers/1)
 
   defp swap_buffer(%{type: :leaf} = leaf, from, to),
     do: if(leaf.buffer == from, do: %{leaf | buffer: to, top: 0, manual: false}, else: leaf)

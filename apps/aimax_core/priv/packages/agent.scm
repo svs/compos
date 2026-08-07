@@ -15,7 +15,7 @@
 (set-face-attribute! 'agent-queued 'fg "#565a6e")
 
 ;; threads are primary work surfaces, not popups — they take the full window
-;; (the *agents* fleet list, when it lands, is the popup-weight surface)
+;; (the *chats* fleet list is the popup-weight surface)
 
 ;;; --- small helpers ------------------------------------------------------------
 
@@ -320,7 +320,7 @@
     ;; batches race buffer kills — a dead thread's events just drop
     (when (buffer-exists? (agent-buf slug))
       (for-each (lambda (e) (agent-handle-event slug e)) events)
-      ;; fleet surfaces track every batch: the erc-track segment + *agents*
+      ;; fleet surfaces track every batch: the erc-track segment + *chats*
       (agents-modeline-refresh!)
       (agents-refresh!))))
 
@@ -717,11 +717,13 @@
     (minibuffer-read "Task (empty for blank thread): " '()
       (lambda (task) (execute task)))))
 
-;;; --- the fleet: *agents* ------------------------------------------------------
+;;; --- the fleet: *chats*, every chat in one list ------------------------------------------------------
 ;;; dired for threads. One line each, needs-attention first; single-key ops.
 ;;; Live + dead-but-buffered threads both list (a transcript is a thread).
 
-(define *agents-buffer* "*agents*")
+;; there is only chat: the fleet list shows every chat — agent-backed
+;; threads with live status, API companions as plain "chat" rows
+(define *agents-buffer* "*chats*")
 (add-display-rule! *agents-buffer* 'popup)
 
 ;; every thread the editor knows: (slug status) — status from the runtime
@@ -742,6 +744,7 @@
         ((equal? s 'running) 1)
         ((equal? s 'starting) 1)
         ((equal? s 'idle) 2)
+        ((equal? s 'api) 2)
         (else 3)))
 
 (define (agent-status-glyph s)
@@ -749,29 +752,45 @@
         ((equal? s 'running) "*")
         ((equal? s 'starting) "*")
         ((equal? s 'idle) "-")
+        ((equal? s 'api) "-")
         (else "x")))
+
+;; every chat the editor knows: agent-backed threads carry their runtime
+;; status, plain API companions read 'api
+(define (chat-list-bufs)
+  (let loop ((bs (buffer-list)) (acc '()))
+    (cond ((null? bs) (reverse acc))
+          ((and (not (string-prefix? " " (car bs)))
+                (or (buffer-local (car bs) 'agent-slug)
+                    (chat-buffer? (car bs))))
+           (loop (cdr bs) (cons (car bs) acc)))
+          (else (loop (cdr bs) acc)))))
+
+(define (chat-row-status b)
+  (let ((slug (buffer-local b 'agent-slug)))
+    (if slug (agent-status slug) 'api)))
 
 ;; rank buckets — the builtin sort takes no comparator
 (define (agents-sorted)
-  (let ((ts (agent-threads)))
+  (let ((bs (chat-list-bufs)))
     (let loop ((rank 0) (acc '()))
       (if (> rank 3) (reverse acc)
           (loop (+ rank 1)
-                (let inner ((ts ts) (acc acc))
-                  (cond ((null? ts) acc)
-                        ((= (agent-status-rank (car (cdr (car ts)))) rank)
-                         (inner (cdr ts) (cons (car ts) acc)))
-                        (else (inner (cdr ts) acc)))))))))
+                (let inner ((bs bs) (acc acc))
+                  (cond ((null? bs) acc)
+                        ((= (agent-status-rank (chat-row-status (car bs))) rank)
+                         (inner (cdr bs) (cons (car bs) acc)))
+                        (else (inner (cdr bs) acc)))))))))
 
-(define (agents-line t)
-  (let* ((slug (car t))
-         (status (car (cdr t)))
-         (buf (agent-buf slug))
-         (info (agent-info slug)))
+(define (agents-line b)
+  (let* ((slug (buffer-local b 'agent-slug))
+         (status (chat-row-status b))
+         (info (and slug (agent-info slug))))
     (string-append
       (agent-status-glyph status) " "
-      (string-pad-right slug 12)
-      (string-pad-right (or (buffer-local buf 'modeline-info) "") 30)
+      (string-pad-right (or slug "chat") 12)
+      (string-pad-right b 26) " "
+      (string-pad-right (or (buffer-local b 'modeline-info) "") 32) " "
       (string-pad-right (symbol->string status) 17)
       (if (and info (> (plist-get info 'queued) 0))
           (string-append "+" (number->string (plist-get info 'queued)) " queued")
@@ -780,32 +799,49 @@
 (define (agents-refresh!)
   (when (buffer-exists? *agents-buffer*)
     (let* ((buf *agents-buffer*)
-           (ts (agents-sorted))
+           (bs (agents-sorted))
            ;; a rewrite dumps point to 0 — keep the reader's place (dired)
            (cur? (equal? (current-buffer) buf))
            (p (if cur? (point) 0)))
       (buffer-delete-range! buf 0 (buffer-size buf))
       (buffer-append! buf
-        (string-append ";; agents — RET visit · s steer · y/n permission · "
+        (string-append ";; chats — RET visit · s steer · y/n permission · "
                        "k kill · x archive · + new · g refresh\n"))
-      (buffer-set-local! buf 'agents-slugs
-        (let loop ((ts ts) (acc '()))
-          (if (null? ts) (reverse acc)
-              (begin (buffer-append! buf (string-append (agents-line (car ts)) "\n"))
-                     (loop (cdr ts) (cons (car (car ts)) acc))))))
+      (buffer-set-local! buf 'agents-bufs
+        (let loop ((bs bs) (acc '()))
+          (if (null? bs) (reverse acc)
+              (begin (buffer-append! buf (string-append (agents-line (car bs)) "\n"))
+                     (loop (cdr bs) (cons (car bs) acc))))))
       (when cur? (goto-char! (min p (buffer-size buf)))))))
 
-;; slug on the current line: line 0 is the header, entries follow in the
-;; order 'agents-slugs recorded
-(define (agents-current-slug)
-  (let* ((slugs (or (buffer-local *agents-buffer* 'agents-slugs) '()))
+;; chat buffer on the current line: line 0 is the header, entries follow
+;; in the order 'agents-bufs recorded
+(define (agents-current-buf)
+  (let* ((bufs (or (buffer-local *agents-buffer* 'agents-bufs) '()))
          (before (substring-bytes (buffer-text *agents-buffer*) 0 (point)))
          (ln (- (length (string-split before "\n")) 2)))
-    (if (and (>= ln 0) (< ln (length slugs))) (nth ln slugs) #f)))
+    (if (and (>= ln 0) (< ln (length bufs))) (nth ln bufs) #f)))
+
+;; the slug on the current line, #f on an API-chat row
+(define (agents-current-slug)
+  (let ((b (agents-current-buf)))
+    (and b (buffer-local b 'agent-slug))))
 
 (define (agents-visit-current)
-  (let ((slug (agents-current-slug)))
-    (when slug (switch-to-buffer! (agent-buf slug)) (end-of-buffer!))))
+  (let ((b (agents-current-buf)))
+    (when b (switch-to-buffer! b) (end-of-buffer!))))
+
+;; the other window follows the highlight, like ibuffer/notmuch
+(define (agents-preview!)
+  (let ((b (agents-current-buf)))
+    (when (and b (buffer-exists? b))
+      (display-buffer-other-window! b))))
+
+(define-command "agents-next" "Move down and preview the chat in another window"
+  (lambda () (next-line!) (agents-preview!)))
+
+(define-command "agents-prev" "Move up and preview the chat in another window"
+  (lambda () (previous-line!) (agents-preview!)))
 
 (define-command "agents-visit" "Visit the thread on the current line"
   (lambda () (agents-visit-current)))
@@ -813,13 +849,14 @@
 (define-command "agents-steer" "Send a steering message to the thread at point"
   (lambda ()
     (let ((slug (agents-current-slug)))
-      (when slug
-        (minibuffer-read (string-append "Steer " slug ": ") '()
-          (lambda (msg)
-            (unless (equal? msg "")
-              (when (equal? (agent-status slug) 'dead) (agent-revive! slug))
-              (agent-send-msg! slug msg)
-              (agents-refresh!))))))))
+      (if (not slug)
+          (message "not an agent-backed chat")
+          (minibuffer-read (string-append "Steer " slug ": ") '()
+            (lambda (msg)
+              (unless (equal? msg "")
+                (when (equal? (agent-status slug) 'dead) (agent-revive! slug))
+                (agent-send-msg! slug msg)
+                (agents-refresh!))))))))
 
 (define-command "agents-allow" "Allow the pending permission for the thread at point"
   (lambda ()
@@ -859,33 +896,39 @@
 (define-command "agents-kill" "Kill the thread at point, keeping its transcript"
   (lambda ()
     (let ((slug (agents-current-slug)))
-      (when slug
-        (agent-note-stopped! slug)
-        (agent-kill! slug)
-        (agents-refresh!)
-        (message (string-append slug " killed (transcript kept)"))))))
+      (if (not slug)
+          (message "not an agent-backed chat (x drops the buffer)")
+          (begin
+            (agent-note-stopped! slug)
+            (agent-kill! slug)
+            (agents-refresh!)
+            (message (string-append slug " killed (transcript kept)")))))))
 
-;; archive: runtime + buffer both go (desktop stops restoring it)
-(define-command "agents-archive" "Kill the thread at point and drop its buffer"
+;; archive: runtime (if any) + buffer both go (desktop stops restoring it)
+(define-command "agents-archive" "Kill the chat at point and drop its buffer"
   (lambda ()
-    (let ((slug (agents-current-slug)))
-      (when slug
-        (let ((here (active-window)))
-          (agent-kill! slug)
-          (agent-release-windows! (agent-buf slug))
-          (buffer-kill! (agent-buf slug))
+    (let ((b (agents-current-buf)))
+      (when b
+        (let ((here (active-window))
+              (slug (buffer-local b 'agent-slug)))
+          (when slug (agent-kill! slug))
+          (agent-release-windows! b)
+          (buffer-kill! b)
           (when (window-exists? here) (select-window! here))
           (agents-refresh!)
-          (message (string-append slug " archived")))))))
+          (message (string-append b " archived")))))))
 
-(define-command "agents-refresh" "Refresh the *agents* listing"
+(define-command "agents-refresh" "Refresh the chat list"
   (lambda () (agents-refresh!)))
 
-(define-command "agents-list" "Show all agent threads in the *agents* buffer"
+(define-command "chat-list" "List every chat: agent threads and API companions"
   (lambda ()
     (buffer-create *agents-buffer*)
-    (buffer-set-local! *agents-buffer* 'mode-name "Agents")
+    (buffer-set-local! *agents-buffer* 'mode-name "Chats")
     (local-set-key* *agents-buffer* "RET" "agents-visit")
+    ;; line movement remaps to move-and-preview (n is taken: deny)
+    (local-remap*! *agents-buffer* "next-line" "agents-next")
+    (local-remap*! *agents-buffer* "previous-line" "agents-prev")
     (local-set-key* *agents-buffer* "s" "agents-steer")
     (local-set-key* *agents-buffer* "y" "agents-allow")
     (local-set-key* *agents-buffer* "n" "agents-deny")
@@ -921,5 +964,5 @@
                  (end-of-buffer!))))))
 
 (global-set-key "C-c a n" "agent-open")
-(global-set-key "C-c a l" "agents-list")
+(global-set-key "C-c a l" "chat-list")
 (global-set-key "C-c a a" "agent-goto-attention")

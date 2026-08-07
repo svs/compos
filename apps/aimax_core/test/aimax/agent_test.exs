@@ -559,14 +559,14 @@ defmodule Aimax.AgentTest do
     # attention segment lists a2
     assert eventually(fn -> Editor.render_state().modeline_extra =~ "a2" end)
 
-    {:ok, _} = Session.eval(~s[(run-command "agents-list")])
-    text = Buffer.text("*agents*")
+    {:ok, _} = Session.eval(~s[(run-command "chat-list")])
+    text = Buffer.text("*chats*")
     [_header, first_line | _] = String.split(text, "\n")
     assert first_line =~ "a2"
     assert first_line =~ "needs_attention"
 
     # point lands after the header refresh; move to the first entry and answer
-    focus("*agents*")
+    focus("*chats*")
     {:ok, _} = Session.eval("(begin (beginning-of-buffer!) (next-line!))")
     press(["y"])
 
@@ -583,14 +583,27 @@ defmodule Aimax.AgentTest do
 
     # show the thread in the main window, then open the fleet popup
     focus(buf)
-    {:ok, _} = Session.eval(~s[(run-command "agents-list")])
-    focus("*agents*")
-    {:ok, _} = Session.eval("(begin (beginning-of-buffer!) (next-line!))")
+    {:ok, _} = Session.eval(~s[(run-command "chat-list")])
+    focus("*chats*")
+
+    # the list holds every chat — put point on THIS thread's row
+    rows = Buffer.get_local("*chats*", "agents-bufs")
+    row = Enum.find_index(rows, &(&1 == buf))
+    assert row, "thread #{buf} not listed in #{inspect(rows)}"
+    {:ok, _} = Session.eval("(beginning-of-buffer!)")
+    for _ <- 0..row, do: {:ok, _} = Session.eval("(next-line!)")
 
     press(["k"])
     assert eventually(fn -> Buffer.text(buf) =~ "[agent stopped]" end)
     assert eventually(fn -> Agent.list() == [] end)
-    assert Buffer.text("*agents*") =~ "x #{slug}"
+    assert Buffer.text("*chats*") =~ "x #{slug}"
+
+    # the refresh re-sorted (dead ranks last) — find the row again
+    rows = Buffer.get_local("*chats*", "agents-bufs")
+    row = Enum.find_index(rows, &(&1 == buf))
+    assert row, "thread #{buf} not listed in #{inspect(rows)}"
+    {:ok, _} = Session.eval("(beginning-of-buffer!)")
+    for _ <- 0..row, do: {:ok, _} = Session.eval("(next-line!)")
 
     press(["x"])
     assert eventually(fn -> not Buffer.exists?(buf) end)

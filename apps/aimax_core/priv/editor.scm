@@ -69,11 +69,37 @@
 (define-command "minibuffer-complete" "Complete the minibuffer input"
   (lambda () (minibuffer-complete!)))
 (define-command "minibuffer-next-candidate" "Select the next minibuffer candidate"
-  (lambda () (minibuffer-next!)))
+  (lambda () (minibuffer-next!) (mb-select-notify!)))
 (define-command "minibuffer-previous-candidate" "Select the previous minibuffer candidate"
-  (lambda () (minibuffer-prev!)))
+  (lambda () (minibuffer-prev!) (mb-select-notify!)))
 (define-command "minibuffer-delete-backward" "Delete the character before point"
   (lambda () (minibuffer-del!)))
+
+;;; --- candidate preview (the consult mechanism) -------------------------------
+;;; Emacs previews by hooking SELECTION, not windows: consult registers a
+;;; state function that fires as the highlighted candidate changes, shows
+;;; it in the window the prompt was invoked from (minibuffer-selected-
+;;; window), and restores on quit. Same here: a prompt can register a
+;;; select hook; it fires after C-n/C-p and after typing refilters. The
+;;; preview itself uses window-preview-buffer!, which never touches the
+;;; MRU ring — cancelling leaves history exactly as it was.
+
+(define *mb-select-fn* #f)
+
+(define (mb-select-notify!)
+  (when *mb-select-fn*
+    (let ((sel (minibuffer-selected)))
+      (when sel (*mb-select-fn* sel)))))
+
+;; minibuffer-read with live candidate preview: ON-SELECT fires per
+;; highlight move, ON-CONFIRM with the choice, ON-CANCEL on C-g (restore
+;; whatever the preview displaced there)
+(define (minibuffer-read-preview prompt cands on-select on-confirm on-cancel)
+  (set! *mb-select-fn* on-select)
+  (minibuffer-read* prompt cands
+    (list (list 'confirm (lambda (v) (set! *mb-select-fn* #f) (on-confirm v)))
+          (list 'cancel  (lambda () (set! *mb-select-fn* #f) (on-cancel)))
+          (list 'change  (lambda (input) (mb-select-notify!))))))
 
 (let ((mb (minibuffer-buffer)))
   (local-set-key* mb "RET" "minibuffer-confirm")
@@ -208,6 +234,57 @@
               (let ((ctx (buffer-context buf)))
                 (loop (cdr ws) (cons buf seen)
                       (if ctx (cons ctx acc) acc))))))))
+
+;;; --- targets & actions (embark) -----------------------------------------------
+;;; The thing at point is a typed TARGET: (type id label). Modes register
+;;; a provider; types register ACTIONS ((name fn) ...). One table serves
+;;; every consumer: C-. pops the action menu, and the act tool lets the
+;;; model drive the same verbs the keyboard does.
+
+(define *target-providers* '())   ; ((mode-name fn) ...), fn: buf -> target|#f
+
+(define (register-target-provider! mode fn)
+  (set! *target-providers*
+    (cons (list mode fn)
+          (filter (lambda (e) (not (equal? (car e) mode))) *target-providers*))))
+
+(define (target-at buf)
+  (let ((p (assoc (or (buffer-local buf 'mode-name) "") *target-providers*)))
+    (and p ((cadr p) buf))))
+
+(define *embark-actions* '())     ; ((type ((name fn) ...)) ...)
+
+(define (register-actions! type actions)
+  (set! *embark-actions*
+    (cons (list type actions)
+          (filter (lambda (e) (not (equal? (car e) type))) *embark-actions*))))
+
+(define (actions-for type)
+  (let ((e (assoc type *embark-actions*)))
+    (if e (cadr e) '())))
+
+(define-command "embark-act" "Act on the thing at point"
+  (lambda ()
+    (let ((t (target-at (current-buffer))))
+      (if (not t)
+          (message "nothing at point to act on")
+          (let* ((type (car t)) (id (cadr t)) (label (caddr t))
+                 (acts (actions-for type)))
+            (if (null? acts)
+                (message (string-append "no actions for "
+                                        (symbol->string type)))
+                (minibuffer-read
+                  (string-append (symbol->string type) " · " label " → ")
+                  (map (lambda (a) (list (car a) "")) acts)
+                  (lambda (name)
+                    (let ((a (assoc name acts)))
+                      (when a ((cadr a) id)))))))))))
+
+(global-set-key "C-." "embark-act")
+
+(public! 'register-target-provider! "(register-target-provider! MODE FN) — FN buf -> (type id label) target at point, or #f")
+(public! 'register-actions! "(register-actions! 'type '((name fn)...)) — verbs for a target type; C-. and the act tool use them")
+(public! 'target-at "(target-at BUF) — the typed target at BUF's point, or #f")
 
 ;; the paragraph chat/agent sends prepend when a context provider fires
 (define (editor-context-preamble exclude)
@@ -533,9 +610,26 @@
 
 ;;; --- files & buffers -------------------------------------------------------
 
+;; remote buffers save over ssh, never through the local filesystem
+(define (save-remote-buffer! bpath)
+  (let ((hp (remote-parse bpath)))
+    (let ((r (remote-write (car hp) (cadr hp) (buffer-text (current-buffer)))))
+      (if (pair? r)   ; (error MSG)
+          (message (string-append "Write failed: " (cadr r)))
+          (begin
+            (buffer-mark-saved! (current-buffer))
+            (run-hooks 'after-save-hook)
+            (message (string-append "Wrote " bpath)))))))
+
 (define-command "save-buffer" "Save the current buffer to its file"
   (lambda ()
     (run-hooks 'before-save-hook)
+    (let ((bpath (buffer-path (current-buffer))))
+      (if (and bpath (remote-path? bpath))
+          (save-remote-buffer! bpath)
+          (save-local-buffer!)))))
+
+(define (save-local-buffer!)
     (let ((path (buffer-save!)))
       (if path
           (begin
@@ -558,7 +652,7 @@
                       (buffer-set-local! (current-buffer) 'chat-turns turns))
                     (buffer-kill! old)
                     (run-hooks 'after-save-hook)
-                    (message (string-append "Wrote " p)))))))))))
+                    (message (string-append "Wrote " p))))))))))
 
 ;; Filename completion — pure Scheme over list-dir/string primitives.
 ;; A completion fn maps input -> (list new-input candidates).
@@ -618,14 +712,128 @@
           (set! *file-nav-dir* dir)
           (minibuffer-set-candidates! (list-dir dir))))))
 
+;;; --- remote files (/ssh:host:/path — TRAMP-lite) ---------------------------
+;;; Transport is two primitives (remote-read / remote-write; ssh underneath,
+;;; so ~/.ssh/config aliases, agent and ControlMaster all apply). Everything
+;;; else is policy here: a remote buffer is an ordinary file buffer whose
+;;; path starts with /ssh: — modes, undo, revert (kill + re-visit) and
+;;; desktop restore (re-fetch via visit) just work; only visit and
+;;; save-buffer branch on the prefix.
+
+(define (remote-path? p) (string-prefix? "/ssh:" p))
+
+;; "/ssh:user@host:/path" -> (host path), #f if malformed
+(define (remote-parse p)
+  (let ((rest (substring p 5 (string-length p))))
+    (let ((i (string-index rest ":")))
+      (and i (> i 0)
+           (list (substring rest 0 i)
+                 (substring rest (+ i 1) (string-length rest)))))))
+
+;; One ls -lA round-trip per directory feeds both list-dir and file-stat:
+;; listing a dir re-fetches and caches, stat lookups ride the cache — so a
+;; dired refresh costs one ssh call, not one per file.
+(define *remote-ls-cache* '())   ; ((dir ((name (perms size date)) ...)) ...)
+
+(define (remote-dir-key d)       ; ".../log/" -> ".../log", but keep ":/" roots
+  (if (and (string-suffix? "/" d) (not (string-suffix? ":/" d)))
+      (substring d 0 (- (string-length d) 1))
+      d))
+
+(define (remote-ls! dir0)
+  (let ((dir (remote-dir-key dir0)))
+    (let ((hp (remote-parse dir)))
+      (if (not hp)
+          '()
+          (let ((r (remote-list-dir (car hp) (cadr hp))))
+            (if (and (pair? r) (symbol? (car r)))   ; (error MSG)
+                (begin (message (cadr r)) '())
+                (begin
+                  (set! *remote-ls-cache*
+                    (cons (list dir r)
+                          (filter (lambda (c) (not (equal? (car c) dir)))
+                                  *remote-ls-cache*)))
+                  r)))))))
+
+(define (remote-ls-cached dir0)
+  (let ((c (assoc (remote-dir-key dir0) *remote-ls-cache*)))
+    (if c (cadr c) (remote-ls! dir0))))
+
+(define (remote-sh! host cmd)
+  (let ((r (remote-sh host cmd)))
+    (if (pair? r) (begin (message (cadr r)) #f) #t)))
+
+;; list-dir / file-stat / delete-file! / make-directory! grow a remote
+;; branch under the same names and contracts — dired, file completion and
+;; friends work on /ssh: paths without knowing it.
+(define local-list-dir list-dir)
+(define (list-dir dir)
+  (if (remote-path? dir)
+      (map car (remote-ls! dir))
+      (local-list-dir dir)))
+
+(define local-file-stat file-stat)
+(define (file-stat p0)
+  (if (remote-path? p0)
+      (let ((parts (path-split (remote-dir-key p0))))
+        (let ((entries (remote-ls-cached (car parts)))
+              (base (cadr parts)))
+          (let ((e (or (assoc base entries)
+                       (assoc (string-append base "/") entries))))
+            (if e (cadr e) (list "----------" "?" "?")))))
+      (local-file-stat p0)))
+
+(define local-delete-file! delete-file!)
+(define (delete-file! p)
+  (if (remote-path? p)
+      (let ((hp (remote-parse p)))
+        (let ((q (sh-quote (cadr hp))))
+          ;; parity with the local primitive: files rm, dirs rmdir (empty only)
+          (remote-sh! (car hp)
+            (string-append "if [ -d " q " ]; then rmdir -- " q "; else rm -- " q "; fi"))))
+      (local-delete-file! p)))
+
+(define local-make-directory! make-directory!)
+(define (make-directory! p)
+  (if (remote-path? p)
+      (let ((hp (remote-parse p)))
+        (remote-sh! (car hp) (string-append "mkdir -p -- " (sh-quote (cadr hp)))))
+      (local-make-directory! p)))
+
+(define (remote-visit path)
+  (if (buffer-exists? path)
+      (switch-to-buffer! path)
+      (let ((hp (remote-parse path)))
+        (if (not hp)
+            (message "Remote path is /ssh:HOST:/PATH")
+            (let ((r (remote-read (car hp) (cadr hp))))
+              (cond
+                ((equal? r 'directory) (dired-open path))
+                ((pair? r)   ; (error MSG) — unreachable host, unreadable file
+                 (message (string-append path ": " (cadr r))))
+                (else
+                  (begin
+                    ;; find-file names the buffer after the path and records
+                    ;; it as the buffer's file (no such local file — empty)
+                    (find-file path)
+                    (when (string? r)
+                      (buffer-insert! path 0 r)
+                      (buffer-mark-saved! path))
+                    (switch-to-buffer! path)
+                    (goto-char! 0)
+                    (auto-mode path)
+                    (run-hooks 'find-file-hook)
+                    (if (equal? r 'absent) (message "(New remote file)"))))))))))
+
 (define (visit path0)
   (let ((path (normalize-file-input path0)))
-    (if (file-directory? path)
-        (dired-open path)
-        (begin
-          (switch-to-buffer! (find-file path))
-          (auto-mode path)
-          (run-hooks 'find-file-hook)))))
+    (cond
+      ((remote-path? path) (remote-visit path))
+      ((file-directory? path) (dired-open path))
+      (else
+        (switch-to-buffer! (find-file path))
+        (auto-mode path)
+        (run-hooks 'find-file-hook)))))
 
 (define-command "find-file" "Visit a file, prompting with filename completion"
   (lambda ()
@@ -646,15 +854,21 @@
 
 (define-command "switch-to-buffer" "Switch to another buffer in the current window"
   (lambda ()
-    (let ((cands (buffer-candidates)))
-      (minibuffer-read
+    (let ((cands (buffer-candidates))
+          (orig (current-buffer)))
+      (minibuffer-read-preview
         (if (null? cands)
             "Switch to buffer: "
             (string-append "Switch to buffer (default " (car (car cands)) "): "))
         cands
+        ;; the invoking window live-previews the highlighted buffer
+        (lambda (b) (when (buffer-exists? b) (window-preview-buffer! b)))
         (lambda (name)
-          (if (not (equal? name ""))
-              (switch-to-buffer! name)))))))
+          (cond ((not (equal? name "")) (switch-to-buffer! name))
+                ((pair? cands) (switch-to-buffer! (car (car cands))))
+                (else #f)))
+        ;; C-g: put back what you were looking at
+        (lambda () (window-preview-buffer! orig))))))
 
 (define-command "kill-buffer" "Kill a buffer, defaulting to the current one"
   (lambda ()
@@ -664,6 +878,8 @@
         (cons (list cur "current") (buffer-candidates))
         (lambda (name)
           (let ((target (if (equal? name "") cur name)))
+            ;; a live process (shell, tail) dies with its buffer
+            (if (process-running? target) (process-kill! target))
             (buffer-kill! target)
             (if (equal? target cur)
                 ;; land on the most recently used other buffer
@@ -722,6 +938,35 @@
   (if (equal? (display-action-for name) 'popup)
       (popup-show name)
       (switch-to-buffer! name)))
+
+;; show NAME in a window other than the selected one, point staying put —
+;; the display-buffer contract behind Emacs previews (occur/grep/consult):
+;; windows are never remembered, they are chosen HERE, at display time —
+;; reuse a window already showing NAME, else the first other window, else
+;; split. Returns the window used.
+(define (display-buffer-other-window! name)
+  (let* ((me (active-window))
+         (showing (window-showing name))
+         (target
+           (if (and showing (not (equal? showing me)))
+               showing
+               (let loop ((ws (window-list)))
+                 (cond ((null? ws) #f)
+                       ((not (equal? (car (car ws)) me)) (car (car ws)))
+                       (else (loop (cdr ws))))))))
+    (if target
+        (begin
+          (select-window! target)
+          (switch-to-buffer! name)
+          (select-window! me)
+          target)
+        (begin
+          (split-window! 'h 0.5)
+          (other-window!)
+          (switch-to-buffer! name)
+          (let ((w (active-window)))
+            (select-window! me)
+            w)))))
 
 (define-command "popup-toggle" "Toggle the bottom popup window"
   (lambda ()
@@ -791,6 +1036,54 @@
             (process-send! (current-buffer) (string-append input "\n"))))
         (insert! "\n"))))
 
+;;; --- tail (follow a growing file) ------------------------------------------
+;;; tail -F under the comint layer — local or /ssh: remote. The buffer is
+;;; 'transient: the desktop saves its mode + tail-path but not content, and
+;;; tail-mode's setup restarts the tail on restore. end-of-buffer! puts
+;;; point at the end, where process appends keep pushing it — follow for free.
+
+(define (sh-quote s)
+  (string-append "'" (string-join (string-split s "'") "'\\''") "'"))
+
+(define (tail-command path)
+  (if (remote-path? path)
+      (let ((hp (remote-parse path)))
+        ;; double-quoted: the inner quoting survives to the remote shell
+        (string-append "exec " (sh-quote (ssh-command)) " " (sh-quote (car hp)) " "
+                       (sh-quote (string-append "tail -n 200 -F " (sh-quote (cadr hp))))))
+      (string-append "exec tail -n 200 -F " (sh-quote path))))
+
+(define-mode "tail-mode"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (let ((path (buffer-local buf 'tail-path)))
+        (buffer-set-read-only! buf #t)
+        (buffer-set-local! buf 'transient #t)
+        (local-set-key "q" "quit-window")
+        (when (and path (not (process-running? buf)))
+          (start-process! buf (tail-command path)))))))
+
+(define (tail-open path)
+  (if (and (remote-path? path) (not (remote-parse path)))
+      (message "Remote path is /ssh:HOST:/PATH")
+      (let ((buf (string-append "*tail: " path "*")))
+        (buffer-create buf)
+        (buffer-set-local! buf 'tail-path path)
+        (switch-to-buffer! buf)
+        (set-mode! "tail-mode")
+        (end-of-buffer!))))
+
+(define-command "tail-file" "Follow a file as it grows (local or /ssh: remote)"
+  (lambda ()
+    (let ((dd (default-directory)))
+      (set! *file-nav-dir* dd)
+      (minibuffer-read* "Tail file: " (list-dir dd)
+        (list (list 'complete file-complete)
+              (list 'change file-nav-change)
+              (list 'initial dd)
+              (list 'confirm (lambda (input)
+                               (tail-open (normalize-file-input input)))))))))
+
 ;;; --- LLM pipes (gptel) -----------------------------------------------------
 ;;; (llm prompt handler) is the async primitive; everything here is
 ;;; composition. Handlers are ordinary closures — build your own pipelines.
@@ -835,7 +1128,6 @@
 ;;; *chat* is an ordinary editable buffer. Type after the "### You" marker,
 ;;; press C-c RET, and the whole buffer becomes the conversation context.
 
-(define *chat-buffer* "*chat*")
 
 (define (chat-prompt-marker) "\n### You\n")
 (define (chat-reply-marker) "\n### Assistant\n")
@@ -899,32 +1191,14 @@
         ;; there corrupts the input boundary (bytes end up pre-marker)
         (chat-snap-to-input!)))))
 
-;; adopt the most recent titled chat after a daemon restart
-;; (unless fresh — chat-new wants a brand new conversation)
-(define (chat-ensure! &optional fresh)
-  (if (not (buffer-exists? *chat-buffer*))
-      (let ((chats (if fresh
-                       '()
-                       (append
-                         (filter (lambda (b) (string-prefix? "*llm:" b))
-                                 (buffer-list-mru))
-                         (filter (lambda (b) (string-prefix? "*llm:" b))
-                                 (buffer-list))))))
-        (if (null? chats)
-            (begin
-              (buffer-create *chat-buffer*)
-              (buffer-append! *chat-buffer*
-                (string-append ";; ai-max chat · " (llm-model)
-                               " · C-c RET sends · C-c m switches model"
-                               (chat-prompt-marker))))
-            (set! *chat-buffer* (car chats))))))
-
-(define-command "chat" "Open the LLM chat buffer"
+;; there is only one chat interface: the rich group-chat surface. C-c c
+;; opens the current buffer's group chat (founding a group if needed);
+;; from inside a chat it is a no-op.
+(define-command "chat" "Open the group chat for this buffer"
   (lambda ()
-    (chat-ensure!)
-    (switch-to-buffer! *chat-buffer*)
-    (set-mode! "chat-mode")
-    (end-of-buffer!)))
+    (let ((cur (current-buffer)))
+      (unless (chat-buffer? cur)
+        (group-chat-show! (group-ensure! cur))))))
 
 ;; the native tool loop is Anthropic-only — on an openai:/openrouter: model
 ;; a chat quietly runs tool-less instead of erroring, so any default model
@@ -941,15 +1215,27 @@
                  (append (llm-tool-specs) (chat-extra-specs buf))
                  llm-tool-call handler
                  (lambda (u) (chat-usage-note! buf u)))
-      (llm prompt handler)))
+      (begin
+        ;; degrading to toolless must be LOUD — a mail chat that answers
+        ;; "I can't modify your mailbox" with no explanation is a lie
+        (when (and (boundp (quote chat-use-tools)) chat-use-tools
+                   (not (chat-tools-usable?)))
+          (message (string-append "tools off: " (llm-model)
+                                  " can't run the tool loop — C-c m for an"
+                                  " Anthropic model, or C-c b for claude-code")))
+        (llm prompt handler))))
 
 ;; the per-send system preamble: a grouped chat points the model at the
 ;; group's work buffers (pull context — the tools read live buffers, so it
-;; is never stale); with tools off the documents are pushed inline instead
+;; is never stale); with tools off the documents are pushed inline instead.
+;; "tools off" must mean the same thing here as in chat-llm — a model the
+;; tool loop can't serve (openai:/openrouter:) gets the inline push, never
+;; instructions to call tools it won't have
 (define (chat-preamble buf)
   (let* ((g (buffer-group buf))
          (docs (if g (group-docs g) '()))
-         (tools? (and (boundp (quote chat-use-tools)) chat-use-tools)))
+         (tools? (and (boundp (quote chat-use-tools)) chat-use-tools
+                      (chat-tools-usable?))))
     (string-append
       (editor-context-preamble buf)
       (chat-preamble-body g docs tools?))))
@@ -1085,14 +1371,14 @@
                      (cadr (car ts)) "\n"))))))
 
 ;; wipe the conversation, keep the surface: group, model, backend and keys
-;; survive; rich chats get their meta card back, plain chats their banner
+;; survive; every chat comes back as the one rich surface (a legacy plain
+;; chat upgrades on reset)
 (define-command "chat-reset" "Reset this chat: clear the transcript, start fresh"
   (lambda ()
     (let ((buf (current-buffer)))
       (if (not (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
           (message "not a chat buffer")
-          (let ((rich? (buffer-local buf 'agent-saved-mark))
-                (g (buffer-group buf)))
+          (let ((g (buffer-group buf)))
             ;; an ACP-backed chat holds a server-side session too — reset
             ;; severs it (and the seed-context flag), so the next send
             ;; starts a genuinely fresh conversation on the same backend
@@ -1108,12 +1394,7 @@
                             'agent-folds 'agent-queued 'chat-cost
                             'chat-last-usage 'agent-saved-mark))
             (buffer-delete-range! buf 0 (buffer-size buf))
-            (if rich?
-                (group-chat-init! buf (or g buf))
-                (buffer-append! buf
-                  (string-append ";; ai-max chat · " (llm-model)
-                                 " · C-c RET sends · C-c m switches model"
-                                 (chat-prompt-marker))))
+            (group-chat-init! buf (or g buf))
             (set-mode! "chat-mode")
             (end-of-buffer!)
             (message "Chat reset"))))))
@@ -1156,9 +1437,7 @@
                (chat-prompt-marker)))
            (when (equal? (current-buffer) buf)
              (end-of-buffer!))
-           (message (chat-ready-message buf))
-           (when (equal? buf "*chat*")
-             (chat-maybe-title!))))))
+           (message (chat-ready-message buf))))))
 
 ;;; --- rich chat transcript (the agent thread design) ---------------------------
 ;;; A companion chat maintains the exact locals the native agent renderer
@@ -1317,59 +1596,8 @@
       (buffer-set-local! buf 'render-mode (if rich? #f "agent"))
       (message (if rich? "plain transcript" "rich transcript")))))
 
-;;; --- chat titles -------------------------------------------------------------
-;;; The first reply names the chat: a cheap llm call summarises the
-;;; conversation and the buffer becomes e.g. "*llm:org mode font change*".
-;;; There is no rename primitive, so retitle = copy text + mode into the
-;;; new name, repoint windows, kill the old buffer.
-
-(define *chat-auto-title* #t)   ; tests switch this off
-
-(define (chat-title->name title)
-  (let* ((clean (string-trim
-                  (re-replace-all " +"
-                    (re-replace-all "[^a-z0-9 -]" (string-downcase title) "")
-                    " ")))
-         (short (if (> (string-length clean) 40)
-                    (substring clean 0 40)
-                    clean)))
-    (string-append "*llm:" short "*")))
-
-(define (chat-retitle! old new)
-  (if (and (buffer-exists? old) (not (buffer-exists? new)))
-      (let ((was (active-window)))
-        (buffer-create new)
-        (buffer-append! new (buffer-text old))
-        ;; group membership, presets, and spend must survive the rename
-        (let ((g (buffer-group old)))
-          (when g (buffer-set-local! new 'group g)))
-        (for-each
-          (lambda (k)
-            (let ((v (buffer-local old k)))
-              (when v (buffer-set-local! new k v))))
-          '(chat-presets chat-cost chat-last-usage chat-turns))
-        (for-each
-          (lambda (w)
-            (if (equal? (cadr w) old)
-                (begin
-                  (select-window! (car w))
-                  (switch-to-buffer! new)
-                  (set-mode! "chat-mode")
-                  (end-of-buffer!))))
-          (window-list))
-        (if (equal? *popup-buffer* old) (set! *popup-buffer* new))
-        (if (equal? *chat-buffer* old) (set! *chat-buffer* new))
-        (buffer-kill! old)
-        (if (window-exists? was) (select-window! was)))))
-
-(define (chat-maybe-title!)
-  (if (and *chat-auto-title* (equal? *chat-buffer* "*chat*"))
-      (let ((convo (buffer-text *chat-buffer*)))
-        (llm (string-append
-               "Give a 3-6 word title for this conversation. Reply with ONLY "
-               "the title: lower case, no punctuation, no quotes.\n\n" convo)
-             (lambda (title)
-               (chat-retitle! "*chat*" (chat-title->name title)))))))
+;;; (chat auto-titling died with the bare *chat* surface: a group chat is
+;;; named for its group, and there is only one chat interface)
 
 ;; Models offered by C-c m / M-x chat-set-model. Override in your
 ;; ~/.aimax/ai-config.scm:  (set! *llm-models* (list "openai:gpt-5.6-luna" ...))
@@ -1661,27 +1889,17 @@
               rows))
       (switch-to-buffer! buf))))
 
-;; start a fresh conversation (the old one keeps its titled buffer)
+;; a fresh conversation on the same surface: open the group chat, wipe it
 (define-command "chat-new" "Start a fresh chat conversation"
   (lambda ()
-    (set! *chat-buffer* "*chat*")
-    (chat-ensure! #t)
-    (run-command "chat")))
+    (run-command "chat")
+    (run-command "chat-reset")))
 
+;; C-c q from anywhere: the prompt becomes a turn in this buffer's group
+;; chat (founding the group first if needed) — one chat interface, always
 (define-command "llm-ask" "Ask the LLM from anywhere via the minibuffer"
   (lambda ()
-    (let ((g (buffer-group (current-buffer))))
-      (if g
-          (group-ask! g)
-          (minibuffer-read "Ask LLM: " (history-items 'llm-ask)
-            (lambda (prompt)
-              (history-push! 'llm-ask prompt)
-              (chat-ensure!)
-              (display-buffer *chat-buffer*)
-              (set-mode! "chat-mode")
-              (end-of-buffer!)
-              (insert! prompt)
-              (run-command "chat-send")))))))
+    (group-ask! (group-ensure! (current-buffer)))))
 
 (global-set-key "C-c c" "chat")
 (global-set-key "C-c r" "chat-send-region")
@@ -2062,7 +2280,8 @@
 (public! 'buffer-set-local! "(buffer-set-local! NAME KEY VALUE) — locals persist with the desktop")
 (public! 'current-buffer "Name of the buffer point is in")
 (public! 'switch-to-buffer! "(switch-to-buffer! NAME) — show in the active window")
-(public! 'visit "(visit PATH) — open a file (Emacs find-file)")
+(public! 'visit "(visit PATH) — open a file (Emacs find-file); /ssh:HOST:/PATH opens over ssh")
+(public! 'tail-open "(tail-open PATH) — follow a file with tail -F, local or /ssh: remote")
 (public! 'buffer-save! "Save the current buffer to its file")
 
 ;; point, region, editing (current buffer)
@@ -2090,11 +2309,14 @@
 (public! 'delete-other-windows! "Make the active window the only one")
 (public! 'other-window! "Select the next window")
 (public! 'display-buffer "(display-buffer NAME) — honors display rules (popups)")
+(public! 'display-buffer-other-window! "(display-buffer-other-window! NAME) — show NAME without leaving this window; picks the window at display time (reuse → other → split)")
 (public! 'add-display-rule! "(add-display-rule! SUBSTRING 'popup|'same)")
 
 ;; interaction
 (public! 'message "(message TEXT) — echo area")
 (public! 'minibuffer-read "(minibuffer-read PROMPT CANDIDATES HANDLER) — async; HANDLER gets the choice")
+(public! 'minibuffer-read-preview "(minibuffer-read-preview PROMPT CANDIDATES ON-SELECT ON-CONFIRM ON-CANCEL) — consult-style: ON-SELECT fires with the highlighted candidate as selection moves")
+(public! 'window-preview-buffer! "(window-preview-buffer! NAME) — show NAME in the active window without touching the MRU ring")
 
 ;; commands, keys, modes, hooks
 (public! 'define-command "(define-command NAME [DOC] THUNK) — register an M-x command; DOC shows in M-x")
@@ -2104,6 +2326,8 @@
 (public! 'key-for-command "(key-for-command NAME) -> its global keybinding (\"\" if none)")
 (public! 'global-set-key "(global-set-key KEYS COMMAND-NAME), e.g. \"C-c x\"")
 (public! 'local-set-key "(local-set-key KEYS COMMAND-NAME) in the current buffer")
+(public! 'local-remap! "(local-remap! FROM-COMMAND TO-COMMAND) — Emacs [remap]: every key bound to FROM runs TO in this buffer (arrows, C-n/C-p, user bindings alike)")
+(public! 'local-remap*! "(local-remap*! BUF FROM-COMMAND TO-COMMAND) — remap in an explicit buffer")
 (public! 'define-mode "(define-mode NAME SETUP) — major mode; SETUP must rebuild from locals")
 (public! 'set-mode! "(set-mode! NAME) on the current buffer")
 (public! 'add-hook! "(add-hook! 'name-hook FN)")

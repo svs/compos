@@ -72,12 +72,11 @@
           (mcp-tool-specs (map symbol->string servers))))))
 
 ;; which chat does a preset command act on? the current buffer if it is a
-;; chat, else the current buffer's group chat, else the default *chat*
+;; chat, else the current buffer's group chat
 (define (chat-preset-target)
   (let ((cur (current-buffer)))
     (cond ((chat-buffer? cur) cur)
           ((buffer-group cur) (group-chat (buffer-group cur)))
-          ((buffer-exists? *chat-buffer*) *chat-buffer*)
           (else #f))))
 
 (define-command "chat-load-preset" "Enable a tool preset (MCP servers) in this chat"

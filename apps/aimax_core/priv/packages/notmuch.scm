@@ -179,10 +179,10 @@ when a message has no text/plain part." 'group 'notmuch)
       (buffer-set-read-only! buf #t)
       (local-set-key "n" "notmuch-next")
       (local-set-key "p" "notmuch-prev")
-      (local-set-key "<down>" "notmuch-next")
-      (local-set-key "<up>" "notmuch-prev")
-      (local-set-key "C-n" "notmuch-next")
-      (local-set-key "C-p" "notmuch-prev")
+      ;; the standard: remap line movement — arrows/C-n/C-p and any user
+      ;; binding of next-line follow automatically
+      (local-remap! "next-line" "notmuch-next")
+      (local-remap! "previous-line" "notmuch-prev")
       (local-set-key "RET" "notmuch-open-thread")
       (local-set-key "SPC" "notmuch-preview")
       (local-set-key "M-<" "notmuch-first-thread")
@@ -195,6 +195,7 @@ when a message has no text/plain part." 'group 'notmuch)
       (local-set-key "@" "notmuch-filter-by-sender")
       (local-set-key "m" "notmuch-mark-toggle")
       (local-set-key "M" "notmuch-mark-all")
+      (local-set-key "*" "notmuch-mark-all")
       (local-set-key "U" "notmuch-unmark-all")
       (local-set-key "F" "notmuch-filter-marked")
       (local-set-key "A" "notmuch-archive-marked")
@@ -561,9 +562,11 @@ when a message has no text/plain part." 'group 'notmuch)
 (define (nm--query-of buf)
   (or (buffer-local buf 'notmuch-query) notmuch-default-query))
 
+;; bulk queries carry parens — shell syntax unless quoted as one argument
 (define (nm--tag-marked! buf changes)
-  (nm--run (string-append "tag " changes " -- ( "
-                          (nm--query-of buf) " ) and tag:m"))
+  (nm--run (string-append "tag " changes " -- "
+                          (nm--quote (string-append "( " (nm--query-of buf)
+                                                    " ) and tag:m"))))
   (nm--refresh! buf))
 
 (define-command "notmuch-mark-toggle" "Toggle the m tag on this thread, move down"
@@ -579,14 +582,16 @@ when a message has no text/plain part." 'group 'notmuch)
 (define-command "notmuch-mark-all" "Mark every thread in this search"
   (lambda ()
     (let ((buf (current-buffer)))
-      (nm--run (string-append "tag +m -- ( " (nm--query-of buf) " )"))
+      (nm--run (string-append "tag +m -- "
+                              (nm--quote (string-append "( " (nm--query-of buf) " )"))))
       (nm--refresh! buf)
       (message "Marked all"))))
 
 (define-command "notmuch-unmark-all" "Unmark every thread in this search"
   (lambda ()
     (let ((buf (current-buffer)))
-      (nm--run (string-append "tag -m -- ( " (nm--query-of buf) " )"))
+      (nm--run (string-append "tag -m -- "
+                              (nm--quote (string-append "( " (nm--query-of buf) " )"))))
       (nm--refresh! buf)
       (message "Unmarked all"))))
 
@@ -973,6 +978,40 @@ when a message has no text/plain part." 'group 'notmuch)
       (buffer-kill! buf)
       (switch-to-buffer! (if (null? others) "*scratch*" (car others)))
       (message "Aborted"))))
+
+;;; --- targets & actions: the email at point, embark-style -------------------------
+
+(define (nm--email-tag-act changes)
+  (lambda (id)
+    (nm--run (string-append "tag " changes " -- thread:" id))
+    (when (buffer-exists? *notmuch-search-buffer*)
+      (nm--refresh! *notmuch-search-buffer*))
+    (message changes)))
+
+(register-target-provider! "notmuch-mode"
+  (lambda (buf)
+    (let ((th (nm--thread-at buf)))
+      (and th (list 'email (nm--th-id th) (nm--th-subject th))))))
+
+(register-target-provider! "notmuch-show-mode"
+  (lambda (buf)
+    (let ((th (buffer-local buf 'notmuch-thread)))
+      (and th (list 'email th (or (buffer-local buf 'notmuch-subject) ""))))))
+
+(register-actions! 'email
+  (list (list "archive"  (nm--email-tag-act "-inbox"))
+        (list "trash"    (nm--email-tag-act "+trash -inbox -unread"))
+        (list "unread"   (nm--email-tag-act "+unread"))
+        (list "mark"     (nm--email-tag-act "+m"))
+        (list "read"     (lambda (id)
+                           (nm--open-thread! id
+                             (let ((th (nm--thread-at (current-buffer))))
+                               (if th (nm--th-subject th) "")))))
+        (list "reply"    (lambda (id)
+                           (let ((mid (nm--newest-msg-id id)))
+                             (if mid
+                                 (nm--compose-reply! mid)
+                                 (message "no message in thread")))))))
 
 ;;; --- context: "this" in a chat means the selected email --------------------------
 

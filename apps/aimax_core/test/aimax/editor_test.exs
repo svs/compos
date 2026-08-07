@@ -355,6 +355,57 @@ defmodule Aimax.EditorTest do
       press(["RET"])
       assert Editor.current_buffer() == "*zz-ib-b*"
     end
+
+    test "n/p preview the highlighted buffer in the home window" do
+      on_exit(fn ->
+        for b <- ["*zz-pv-a*", "*zz-pv-b*", "*ibuffer*"], do: Aimax.Core.kill_buffer(b)
+        Editor.delete_other_windows()
+      end)
+
+      {:ok, _} = Aimax.Core.Session.eval(~s{(begin
+        (buffer-create "*zz-pv-a*")
+        (buffer-create "*zz-pv-b*")
+        (delete-other-windows!)
+        (switch-to-buffer! "*zz-pv-a*")
+        (run-command "ibuffer")
+        (buffer-set-local! "*ibuffer*" 'ibuffer-filters '())
+        (ibuffer-filter-push! (list "name" "zz-pv"))
+        (goto-char! 0) (next-line!) (beginning-of-line!))})
+
+      assert Editor.current_buffer() == "*ibuffer*"
+      home = window_of("*zz-pv-a*")
+      assert home
+
+      # first entry is highlighted; n moves to the second and previews it
+      press(["n"])
+      assert {:ok, ~s{"*zz-pv-b*"}} = Aimax.Core.Session.eval("(ibuffer-current)")
+      assert buffer_in(home) == "*zz-pv-b*"
+      # point stays in the list
+      assert Editor.current_buffer() == "*ibuffer*"
+
+      press(["p"])
+      assert buffer_in(home) == "*zz-pv-a*"
+
+      # arrows are the gesture people actually use — same preview
+      press(["<down>"])
+      assert buffer_in(home) == "*zz-pv-b*"
+      press(["<up>"])
+      assert buffer_in(home) == "*zz-pv-a*"
+    end
+  end
+
+  defp window_of(buffer) do
+    {:ok, wins} = Aimax.Core.Session.eval("(window-list)")
+    wins
+    |> then(fn s -> Regex.scan(~r/\((\d+) "([^"]+)"\)/, s) end)
+    |> Enum.find_value(fn [_, id, b] -> if b == buffer, do: String.to_integer(id) end)
+  end
+
+  defp buffer_in(win_id) do
+    {:ok, wins} = Aimax.Core.Session.eval("(window-list)")
+    wins
+    |> then(fn s -> Regex.scan(~r/\((\d+) "([^"]+)"\)/, s) end)
+    |> Enum.find_value(fn [_, id, b] -> if String.to_integer(id) == win_id, do: b end)
   end
 
   describe "dired (pure Scheme userland)" do
@@ -902,31 +953,32 @@ defmodule Aimax.EditorTest do
     File.rm!(path)
   end
 
-  test "desktop: non-file buffers (chat) survive restore with content, mode, and keys" do
-    on_exit(fn -> Aimax.Core.kill_buffer("*chat*") end)
+  test "desktop: non-file buffers (chat) survive restore with content, mode, and keys", %{buf: buf} do
+    companion = "*chat:#{buf}*"
+    on_exit(fn -> Aimax.Core.kill_buffer(companion) end)
 
     press(["M-x"])
     type("chat")
     press(["RET"])
-    assert Editor.current_buffer() == "*chat*"
+    assert Editor.current_buffer() == companion
     type("remember me")
-    point = Buffer.point("*chat*")
+    point = Buffer.point(companion)
 
     assert :ok = Aimax.Core.Desktop.save_now()
 
     Editor.set_window_buffer("*scratch*")
-    Aimax.Core.kill_buffer("*chat*")
-    assert eventually(fn -> not Buffer.exists?("*chat*") end)
+    Aimax.Core.kill_buffer(companion)
+    assert eventually(fn -> not Buffer.exists?(companion) end)
 
     assert :ok = Aimax.Core.Desktop.restore_now()
 
-    assert Buffer.exists?("*chat*")
-    assert Buffer.text("*chat*") =~ "remember me"
-    assert Buffer.point("*chat*") == point
-    assert Buffer.get_local("*chat*", "mode-name") == "chat-mode"
+    assert Buffer.exists?(companion)
+    assert Buffer.text(companion) =~ "remember me"
+    assert Buffer.point(companion) == point
+    assert Buffer.get_local(companion, "mode-name") == "chat-mode"
 
     # the mode setup reinstalled the local keymap: C-c m prompts for a model
-    Editor.set_window_buffer("*chat*")
+    Editor.set_window_buffer(companion)
     press(["C-c", "m"])
     assert Editor.snapshot().minibuffer.prompt =~ "Model"
     press(["C-g"])
@@ -1183,54 +1235,119 @@ defmodule Aimax.EditorTest do
   defp find_leaf_by_id(%{type: :split, children: c}, id),
     do: Enum.find_value(c, &find_leaf_by_id(&1, id))
 
-  test "chat buffer: C-c RET sends the transcript, reply appends", %{buf: _buf} do
+  test "chat opens the group companion; RET sends, reply appends", %{buf: buf} do
+    companion = "*chat:#{buf}*"
+
     # chat routes through the tool loop by default (chat-use-tools)
     Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: [%{content: prompt} | _]} ->
       assert prompt =~ "what is 6*7"
       {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "42"}]}}
     end)
 
-    {:ok, _} = Aimax.Core.Session.eval("(set! *chat-auto-title* #f)")
-
     on_exit(fn ->
       Application.delete_env(:aimax_core, :llm_chat_fun)
-      Aimax.Core.Session.eval("(set! *chat-auto-title* #t)")
-      Aimax.Core.kill_buffer("*chat*")
+      Aimax.Core.kill_buffer(companion)
     end)
 
     press(["M-x"])
     type("chat")
     press(["RET"])
-    assert Editor.current_buffer() == "*chat*"
-    assert Buffer.text("*chat*") =~ "### You"
+    # one chat interface: C-c c is the group companion, rich from birth
+    assert Editor.current_buffer() == companion
+    assert Buffer.get_local(companion, "render-mode") == "agent"
+    assert Buffer.text(companion) =~ "companion · #{buf}"
 
     type("what is 6*7")
-    press(["C-c", "RET"])
+    press(["RET"])
 
-    assert eventually(fn -> Buffer.text("*chat*") =~ "### Assistant" end)
-    assert eventually(fn -> Buffer.text("*chat*") =~ "42" end)
+    assert eventually(fn -> Buffer.text(companion) =~ "42" end)
+    press(["C-x", "1"])
   end
 
-  test "an empty model reply leaves a visible placeholder, not a blank turn" do
+  test "an empty model reply leaves a visible placeholder, not a blank turn", %{buf: buf} do
+    companion = "*chat:#{buf}*"
+
     Application.put_env(:aimax_core, :llm_chat_fun, fn _ ->
       {:ok, %{"stop_reason" => "end_turn", "content" => []}}
     end)
 
-    {:ok, _} = Aimax.Core.Session.eval("(set! *chat-auto-title* #f)")
-
     on_exit(fn ->
       Application.delete_env(:aimax_core, :llm_chat_fun)
-      Aimax.Core.Session.eval("(set! *chat-auto-title* #t)")
-      Aimax.Core.kill_buffer("*chat*")
+      Aimax.Core.kill_buffer(companion)
     end)
 
     press(["M-x"])
     type("chat")
     press(["RET"])
     type("hello?")
-    press(["C-c", "RET"])
+    press(["RET"])
 
-    assert eventually(fn -> Buffer.text("*chat*") =~ "(no reply" end)
+    assert eventually(fn -> Buffer.text(companion) =~ "(no reply" end)
+    press(["C-x", "1"])
+  end
+
+  test "C-x b previews the highlighted buffer in the invoking window; C-g restores it", %{buf: buf} do
+    other = "zz-cxb-#{System.unique_integer([:positive])}"
+    {:ok, _} = Aimax.Core.Session.eval(~s{(begin (buffer-create "#{other}") #t)})
+    on_exit(fn -> Aimax.Core.kill_buffer(other) end)
+
+    win = Editor.active_window()
+    shown = fn -> Enum.find_value(Editor.list_windows(), fn {id, b} -> if id == win, do: b end) end
+
+    # type enough to filter to `other`: the refilter previews it live
+    press(["C-x", "b"])
+    assert Editor.snapshot().minibuffer
+    type("zz-cxb")
+    assert Aimax.Core.Session.eval("(minibuffer-selected)") == {:ok, ~s{"#{other}"}}
+    assert shown.() == other
+
+    # C-g restores the displaced buffer; the buffer ring is untouched
+    press(["C-g"])
+    refute Editor.snapshot().minibuffer
+    assert shown.() == buf
+    assert {:ok, first} = Aimax.Core.Session.eval("(car (car (buffer-candidates)))")
+    refute first == ~s{"#{other}"}
+
+    # RET actually switches
+    press(["C-x", "b"])
+    type("zz-cxb")
+    press(["RET"])
+    assert shown.() == other
+    assert Editor.current_buffer() == other
+  end
+
+  test "openai models get documents pushed inline, never tool instructions", %{buf: buf} do
+    companion = "*chat:#{buf}*"
+    type("Dear hiring manager")
+
+    {:ok, before} = Aimax.Core.Session.eval("(llm-model)")
+    parent = self()
+
+    Application.put_env(:aimax_core, :llm_request_fun, fn prompt ->
+      send(parent, {:prompt, prompt})
+      {:ok, "ok then"}
+    end)
+
+    on_exit(fn ->
+      Application.delete_env(:aimax_core, :llm_request_fun)
+      Aimax.Core.Session.eval("(set-llm-model! #{before})")
+      Aimax.Core.kill_buffer(companion)
+    end)
+
+    {:ok, _} = Aimax.Core.Session.eval(~s{(set-llm-model! "openai:gpt-5.6-test")})
+
+    press(["C-c", "w"])
+    assert Editor.current_buffer() == companion
+    type("draft a reply")
+    press(["RET"])
+
+    assert eventually(fn -> Buffer.text(companion) =~ "ok then" end)
+    assert_received {:prompt, prompt}
+    # the tool loop can't serve this model: the preamble must push the
+    # document inline instead of telling the model to call read-doc
+    assert prompt =~ "Dear hiring manager"
+    refute prompt =~ "read-doc"
+    press(["C-x", "1"])
   end
 
   test "C-c w opens a writing companion chat linked to the document", %{buf: buf} do
@@ -1317,53 +1434,35 @@ defmodule Aimax.EditorTest do
     press(["C-x", "1"])
   end
 
-  test "C-c w in a plain chat adopts a document; auto-title keeps the link", %{buf: buf} do
-    titled = "*llm:rope koans*"
-
-    Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: [%{content: prompt} | _]} ->
-      assert prompt =~ "writing companion"
-      assert prompt =~ ~s{"#{buf}"}
-      {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "ok"}]}}
-    end)
-
-    Application.put_env(:aimax_core, :llm_request_fun, fn _ -> {:ok, "Rope Koans"} end)
-
-    on_exit(fn ->
-      Application.delete_env(:aimax_core, :llm_chat_fun)
-      Application.delete_env(:aimax_core, :llm_request_fun)
-      Aimax.Core.Session.eval(~s{(set! *chat-buffer* "*chat*")})
-      Aimax.Core.kill_buffer("*chat*")
-      Aimax.Core.kill_buffer(titled)
-    end)
+  test "C-c w in a groupless (legacy) chat adopts a document", %{buf: buf} do
+    legacy = "*llm:legacy*"
+    on_exit(fn -> Aimax.Core.kill_buffer(legacy) end)
 
     type("Draft about ropes.")
-    press(["M-x"])
-    type("chat")
-    press(["RET"])
-    assert Editor.current_buffer() == "*chat*"
+
+    # a groupless chat only comes from an old desktop — recreate one by hand
+    {:ok, _} =
+      Aimax.Core.Session.eval(~s{(begin
+        (buffer-create "#{legacy}")
+        (switch-to-buffer! "#{legacy}")
+        (set-mode! "chat-mode"))})
+
+    assert Editor.current_buffer() == legacy
 
     # C-c w in an unlinked chat asks which buffer to accompany (MRU-first)
     press(["C-c", "w"])
     assert Editor.snapshot().minibuffer.prompt == "Companion for buffer: "
     press(["RET"])
 
-    assert Buffer.get_local("*chat*", "group") == buf
+    assert Buffer.get_local(legacy, "group") == buf
     assert Buffer.get_local(buf, "group") == buf
-    assert Editor.current_buffer() == "*chat*"
-    assert length(Editor.list_windows()) == 2
+    assert Editor.current_buffer() == legacy
 
-    type("thoughts?")
-    press(["C-c", "RET"])
-
-    # first reply retitles *chat* — the group tag must ride along
-    assert eventually(fn -> Buffer.exists?(titled) end)
-    assert eventually(fn -> Buffer.get_local(titled, "group") == buf end)
-
-    # C-c w from the doc refocuses the adopted (now retitled) chat
+    # C-c w from the doc refocuses the adopted chat
     press(["C-c", "w"])
     assert Editor.current_buffer() == buf
     press(["C-c", "w"])
-    assert Editor.current_buffer() == titled
+    assert Editor.current_buffer() == legacy
 
     press(["C-x", "1"])
   end
@@ -1462,8 +1561,8 @@ defmodule Aimax.EditorTest do
     assert Buffer.get_local(buf, "group") == buf
   end
 
-  test "C-c q asks from the minibuffer into the *chat* popup; conversation continues" do
-    titled = "*llm:org mode font change*"
+  test "C-c q founds a group and asks its one chat from the minibuffer", %{buf: buf} do
+    companion = "*chat:#{buf}*"
 
     Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: [%{content: prompt} | _]} ->
       assert prompt =~ "what is 6*7"
@@ -1471,40 +1570,20 @@ defmodule Aimax.EditorTest do
       {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "42"}]}}
     end)
 
-    # the title summarisation goes through the plain llm primitive
-    Application.put_env(:aimax_core, :llm_request_fun, fn _prompt ->
-      {:ok, "Org Mode. Font Change!"}
-    end)
-
     on_exit(fn ->
       Application.delete_env(:aimax_core, :llm_chat_fun)
-      Application.delete_env(:aimax_core, :llm_request_fun)
-      Aimax.Core.Session.eval(~s{(set! *chat-buffer* "*chat*")})
-      Aimax.Core.kill_buffer("*chat*")
-      Aimax.Core.kill_buffer(titled)
+      Aimax.Core.kill_buffer(companion)
     end)
 
     press(["C-c", "q"])
-    assert Editor.snapshot().minibuffer.prompt == "Ask LLM: "
+    assert Editor.snapshot().minibuffer.prompt == "Ask #{buf}: "
     type("what is 6*7")
     press(["RET"])
 
-    # question became a chat turn, chat opened as a bottom popup, reply arrived,
-    # and the first reply titled the chat: buffer renamed, popup follows
-    assert eventually(fn -> length(Editor.list_windows()) == 2 end)
-    assert eventually(fn -> Buffer.exists?(titled) end)
-    assert eventually(fn -> Editor.current_buffer() == titled end)
-    refute Buffer.exists?("*chat*")
-    assert Buffer.text(titled) =~ "what is 6*7"
-    assert Buffer.text(titled) =~ "42"
-
-    # the popup is a live conversation: follow-up via C-c RET gets a reply too
-    type("and again?")
-    press(["C-c", "RET"])
-
-    assert eventually(fn ->
-             Buffer.text(titled) |> String.split("### Assistant") |> length() == 3
-           end)
+    # the question became a turn in the group's one chat; point stayed put
+    assert eventually(fn -> Buffer.text(companion) =~ "42" end)
+    assert Buffer.text(companion) =~ "what is 6*7"
+    assert Editor.current_buffer() == buf
 
     press(["C-x", "1"])
   end

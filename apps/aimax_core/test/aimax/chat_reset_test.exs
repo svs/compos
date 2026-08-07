@@ -48,7 +48,7 @@ defmodule Aimax.ChatResetTest do
     assert text =~ "you ▸"
   end
 
-  test "a plain chat resets to its banner" do
+  test "a legacy plain chat resets onto the one rich surface" do
     eval!(~s{(begin
       (buffer-create "*plain-reset*")
       (switch-to-buffer! "*plain-reset*")
@@ -59,8 +59,10 @@ defmodule Aimax.ChatResetTest do
     eval!(~s{(run-command "chat-reset")})
 
     text = eval!(~s{(buffer-text "*plain-reset*")})
-    assert text =~ ";; ai-max chat"
+    assert text =~ "companion ·"
+    assert text =~ "you ▸"
     refute text =~ "stale conversation"
+    assert eval!(~s{(if (buffer-local (current-buffer) 'agent-saved-mark) #t #f)}) == "#t"
   end
 
   test "a saved .chat file revives as a live conversation" do

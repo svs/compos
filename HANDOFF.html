@@ -108,7 +108,9 @@ tree-sitter font-lock + sexp nav (C-M-f/b/u/d) · completion framework (capf, da
 dropdown at point) · comint shells · desktop persistence · org-mode (outline folding,
 fontification, structure editing, TODO cycling, promote/demote — 100% Scheme,
 <code>priv/packages/org.scm</code>) · LLM (multi-provider, doppler keys, <kbd>M-|</kbd>
-pipes, <kbd>C-c c</kbd> chat buffer) · HTML preview (<kbd>C-c C-v</kbd>) ·
+pipes, <kbd>C-c c</kbd> opens the group companion chat — <strong>there is only one
+chat interface</strong>, the rich group-chat surface; the bare <code>*chat*</code>
+banner buffer and auto-titling are gone) · HTML preview (<kbd>C-c C-v</kbd>) ·
 JSON-RPC socket.</p>
 
 <h3>Agent threads (this session's focus — now the deepest subsystem)</h3>
@@ -127,10 +129,11 @@ its turn · <kbd>C-RET</kbd> hard-escalates (cancel → kill+reattach, transcrip
 failed prompts idle the thread instead of wedging :running · agent-rename
 (<kbd>C-c C-r</kbd>) carries identity+transcript to a new slug · threads open
 full-window (no popup) · restored buffers rebuild modeline/keys from locals ·
-<strong>*agents* fleet buffer</strong> (<kbd>C-c a l</kbd>, popup): dired-style list,
-needs-attention first, RET visit / s steer (revives dead threads) / y·n answer
-permission inline / k kill / x archive / + new / g refresh, live-refreshed from
-the agent event handler · modeline-extra segment (new <code>set-modeline-extra!</code>
+<strong>*chats* fleet buffer</strong> (<kbd>C-c a l</kbd>, <code>chat-list</code>, popup):
+dired-style list of <em>every</em> chat — agent threads with live status,
+needs-attention first, API companions as plain rows — RET visit / s steer (revives
+dead threads) / y·n answer permission inline / k kill / x archive (works on any
+chat) / + new / g refresh, live-refreshed from the agent event handler · modeline-extra segment (new <code>set-modeline-extra!</code>
 primitive) shows "! a2 a5" for threads needing attention, <kbd>C-c a a</kbd> jumps
 to the first · Session wraps Scheme eval in <code>catch :exit</code> so a primitive
 hitting a dead GenServer fails the eval instead of crash-looping the editor.</p>

@@ -176,6 +176,9 @@
 (define (dired-install-keys!)
   (local-set-key "n" "dired-next")
   (local-set-key "p" "dired-prev")
+  ;; the standard: remap line movement so arrows/C-n/C-p behave like n/p
+  (local-remap! "next-line" "dired-next")
+  (local-remap! "previous-line" "dired-prev")
   (local-set-key "RET" "dired-visit")
   (local-set-key "g" "dired-revert")
   (local-set-key "^" "dired-up")

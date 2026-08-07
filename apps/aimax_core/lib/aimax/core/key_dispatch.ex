@@ -172,8 +172,9 @@ defmodule Aimax.Core.KeyDispatch do
 
   defp run(name) do
     # Emacs: any command except undo breaks the undo chain — a subsequent
-    # undo then reverses the undos, which is how redo works
-    if name != "undo" do
+    # undo then reverses the undos, which is how redo works. Commands that
+    # manage their own boundaries (evil's dispatchers) register as exempt.
+    unless Editor.undo_exempt?(name) do
       buffer = Editor.current_buffer()
       if Buffer.exists?(buffer), do: Buffer.break_undo_chain(buffer)
     end

@@ -82,19 +82,22 @@
     (cons f (ibuffer-filters)))
   (ibuffer-refresh!))
 
+;; No window bookkeeping: like Emacs, RET/preview never remember where
+;; they came from — the target window is chosen at display time by
+;; display-buffer-other-window! (reuse → other → split), so stale window
+;; ids simply cannot exist.
+
 (define-command "ibuffer" "List buffers dired-style: filter, mark, act"
   (lambda ()
-    (let ((home (active-window)))
+    (let ((from (active-window)))
       (buffer-create *ibuffer-buffer*)
-      ;; RET targets the window you came from — remember it
-      (buffer-set-local! *ibuffer-buffer* 'ibuffer-home-window home)
       (display-buffer *ibuffer-buffer*)
       ;; select the popup window the display rule opened; switching the
-      ;; current window would clobber the very window RET should target
+      ;; current window would clobber the window previews should target
       (let loop ((ws (window-list)))
         (cond ((null? ws) (switch-to-buffer! *ibuffer-buffer*))
               ((and (equal? (car (cdr (car ws))) *ibuffer-buffer*)
-                    (not (equal? (car (car ws)) home)))
+                    (not (equal? (car (car ws)) from)))
                (select-window! (car (car ws))))
               (else (loop (cdr ws)))))
       (set-mode! "ibuffer-mode")
@@ -103,32 +106,26 @@
       (next-line!)
       (beginning-of-line!))))
 
-(define-command "ibuffer-visit" "Show the selected buffer in the window ibuffer came from"
+(define-command "ibuffer-visit" "Show the selected buffer in another window and go there"
   (lambda ()
-    (let ((b (ibuffer-current))
-          (home (buffer-local *ibuffer-buffer* 'ibuffer-home-window)))
+    (let ((b (ibuffer-current)))
       (if (and b (buffer-exists? b))
-          (begin
+          (let ((w (display-buffer-other-window! b)))
             (run-command "quit-window")
-            (when (and home (window-exists? home))
-              (select-window! home))
+            (when (and w (window-exists? w))
+              (select-window! w))
             (switch-to-buffer! b))
           (message "no buffer here")))))
 
 (define-command "ibuffer-refresh" "Refresh the buffer list"
   (lambda () (ibuffer-refresh!)))
 
-;; the home window follows the highlight (the notmuch pattern): moving in
-;; the list previews without leaving it
+;; the other window follows the highlight (the occur/consult pattern):
+;; moving in the list previews without leaving it
 (define (ibuffer-preview!)
-  (let ((b (ibuffer-current))
-        (home (buffer-local *ibuffer-buffer* 'ibuffer-home-window))
-        (me (active-window)))
-    (when (and b (buffer-exists? b) home (window-exists? home)
-               (not (equal? home me)))
-      (select-window! home)
-      (switch-to-buffer! b)
-      (select-window! me))))
+  (let ((b (ibuffer-current)))
+    (when (and b (buffer-exists? b))
+      (display-buffer-other-window! b))))
 
 (define-command "ibuffer-next" "Move down and preview in the home window"
   (lambda () (next-line!) (ibuffer-preview!)))
@@ -189,6 +186,10 @@
       (buffer-set-local! buf 'mode-name "ibuffer-mode")
       (local-set-key "n" "ibuffer-next")
       (local-set-key "p" "ibuffer-prev")
+      ;; the standard: line movement REMAPS, so arrows, C-n/C-p, and any
+      ;; user binding of next-line all move-and-preview identically
+      (local-remap! "next-line" "ibuffer-next")
+      (local-remap! "previous-line" "ibuffer-prev")
       (local-set-key "RET" "ibuffer-visit")
       (local-set-key "g" "ibuffer-refresh")
       (local-set-key "d" "ibuffer-flag")

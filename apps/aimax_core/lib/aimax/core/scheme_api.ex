@@ -77,6 +77,39 @@ defmodule Aimax.Core.SchemeAPI do
         Core.kill_buffer(name)
         :void
       end,
+      # remote files: ssh transport only — /ssh: path syntax, remote buffers,
+      # and save interception are Scheme (priv/editor.scm)
+      "ssh-command" => fn [] -> Aimax.Core.Remote.ssh() end,
+      "remote-read" => fn [host, path] ->
+        case Aimax.Core.Remote.read(host, path) do
+          {:ok, text} -> text
+          :directory -> {:sym, "directory"}
+          :absent -> {:sym, "absent"}
+          {:error, msg} -> [{:sym, "error"}, msg]
+        end
+      end,
+      "remote-list-dir" => fn [host, dir] ->
+        case Aimax.Core.Remote.list_dir(host, dir) do
+          {:ok, entries} -> entries
+          {:error, msg} -> [{:sym, "error"}, msg]
+        end
+      end,
+      "remote-sh" => fn [host, cmd] ->
+        case Aimax.Core.Remote.sh(host, cmd) do
+          :ok -> true
+          {:error, msg} -> [{:sym, "error"}, msg]
+        end
+      end,
+      "remote-write" => fn [host, path, text] ->
+        case Aimax.Core.Remote.write(host, path, text) do
+          :ok -> true
+          {:error, msg} -> [{:sym, "error"}, msg]
+        end
+      end,
+      "buffer-mark-saved!" => fn [name] ->
+        Buffer.mark_saved(name)
+        :void
+      end,
       "find-file" => fn [path] ->
         case Core.open_file(path) do
           {:ok, name} -> name
@@ -216,6 +249,16 @@ defmodule Aimax.Core.SchemeAPI do
       end,
       "undo!" => fn [] ->
         Buffer.undo(Editor.current_buffer()) == :ok
+      end,
+      # undo boundary control (evil et al. group their own edits)
+      "break-undo-chain!" => fn [] ->
+        buf = Editor.current_buffer()
+        if Buffer.exists?(buf), do: Buffer.break_undo_chain(buf)
+        :void
+      end,
+      "undo-exempt!" => fn [name] ->
+        Editor.add_undo_exempt(name)
+        :void
       end,
       "buffer-save!" => fn [] ->
         case Buffer.save(Editor.current_buffer()) do
@@ -404,6 +447,16 @@ defmodule Aimax.Core.SchemeAPI do
         Editor.local_bind_key(buf, String.split(seq, " "), command)
         :void
       end,
+      # Emacs [remap COMMAND]: every key bound to FROM runs TO in this
+      # buffer — arrows, C-n/C-p, and user rebindings all follow at once
+      "local-remap!" => fn [from, to] ->
+        Editor.local_remap(Editor.current_buffer(), from, to)
+        :void
+      end,
+      "local-remap*!" => fn [buf, from, to] ->
+        Editor.local_remap(buf, from, to)
+        :void
+      end,
       "key-for-command" => fn [name] -> Editor.key_for_command(name) end,
       "last-command" => fn [] -> Editor.last_command() end,
       "window-rows" => fn [] -> Editor.window_rows() end,
@@ -435,6 +488,13 @@ defmodule Aimax.Core.SchemeAPI do
       # whitespace-separated word count (writing-mode modeline, M-x count-words)
       "count-words" => fn [buf] ->
         ~r/\S+/ |> Regex.scan(Buffer.text(buf)) |> length()
+      end,
+      # the highlighted candidate (consult-style preview reads it on move)
+      "minibuffer-selected" => fn [] -> Editor.minibuffer_selected() end,
+      # show a buffer in the active window without MRU bookkeeping —
+      # candidate preview must not reorder the buffer ring
+      "window-preview-buffer!" => fn [name] ->
+        Editor.preview_buffer(name) == :ok
       end,
       "minibuffer-set-candidates!" => fn [candidates] ->
         Editor.minibuffer_set_candidates(candidates)

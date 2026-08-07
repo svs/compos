@@ -144,6 +144,10 @@ defmodule Aimax.Core.Buffer do
   @doc "Write buffer to its path (or the given path). {:ok, path} | {:error, :no_path}."
   def save(name, path \\ nil), do: GenServer.call(via(name), {:save, path})
 
+  # for buffers whose contents were written by other means (remote files):
+  # the buffer counts as saved without touching the local filesystem
+  def mark_saved(name), do: GenServer.call(via(name), :mark_saved)
+
   defp source(opts), do: Keyword.get(opts, :source, :user)
 
   # --- server ----------------------------------------------------------------
@@ -428,6 +432,9 @@ defmodule Aimax.Core.Buffer do
 
   def handle_call(:break_undo_chain, _from, state),
     do: {:reply, :ok, %{state | undo_next: 0}}
+
+  def handle_call(:mark_saved, _from, state),
+    do: {:reply, :ok, %{state | saved_version: state.version}}
 
   def handle_call({:save, override}, _from, state) do
     case override || state.path do

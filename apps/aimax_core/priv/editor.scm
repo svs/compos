@@ -1069,6 +1069,14 @@
           (message "not a chat buffer")
           (let ((rich? (buffer-local buf 'agent-saved-mark))
                 (g (buffer-group buf)))
+            ;; an ACP-backed chat holds a server-side session too — reset
+            ;; severs it (and the seed-context flag), so the next send
+            ;; starts a genuinely fresh conversation on the same backend
+            (let ((slug (buffer-local buf 'agent-slug)))
+              (when (and slug (boundp (quote agent-kill!)))
+                (unless (equal? (agent-status slug) 'dead)
+                  (agent-kill! slug))
+                (buffer-set-local! buf 'agent-seed-context #f)))
             (overlay-clear! buf "all")
             (buffer-set-hidden! buf '())
             (for-each (lambda (k) (buffer-set-local! buf k #f))

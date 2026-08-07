@@ -108,6 +108,18 @@ defmodule Aimax.ChatResetTest do
     assert File.read!(path) =~ "more words"
   end
 
+  test "reset severs a dead ACP backend without erroring" do
+    eval!(~s{(begin
+      (switch-to-buffer! (group-chat "acp-reset"))
+      (set-mode! "chat-mode")
+      (buffer-set-local! (current-buffer) 'agent-slug "no-such-agent")
+      (buffer-set-local! (current-buffer) 'agent-seed-context #t)
+      #t)})
+    eval!(~s{(run-command "chat-reset")})
+    assert eval!(~s{(buffer-local (current-buffer) 'agent-seed-context)}) == "#f"
+    assert eval!(~s{(buffer-text (current-buffer))}) =~ "companion · acp-reset"
+  end
+
   test "outside a chat it refuses politely" do
     eval!(~s{(begin (switch-to-buffer! "*scratch*") (run-command "chat-reset"))})
     assert eval!(~s{(buffer-exists? "*scratch*")}) == "#t"

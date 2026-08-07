@@ -198,6 +198,108 @@ event list to prove the runtime is backend-blind.
 - A `Backend.Stub` test drives the full transcript rendering (chunks,
   tool cards, folds, turn-end) with no wire at all.
 
+## Phase 3: use what ACP actually offers the client
+
+Research notes (svs, 2026-08-08; reading `claude-agent-acp` and the bb
+client). ACP gives the *client* four levers. We currently use one and a
+half. Each maps onto a Phase 2 capability, so they land as backend
+features, not special cases.
+
+### 3a. Client fs capabilities — agent edits through live buffers
+
+We advertise `fs: {readTextFile: false, writeTextFile: false}`
+(`agent.ex:146`) and refuse `fs/read_text_file` / `fs/write_text_file`
+with `-32601` ("Phase 4"). So every agent edit goes to **disk**, behind
+the editor's back: unsaved buffer state is invisible to the agent, and
+its writes silently diverge from what the user is looking at.
+
+Flip it on and the agent's file tools become *our* buffer ops:
+
+- `fs/read_text_file` → `Buffer.text` of the visiting buffer if one
+  exists (the live, unsaved content), else read the file.
+- `fs/write_text_file` → `visit` + replace buffer contents, leaving the
+  change **undoable, visible, and unsaved** — the user reviews and saves,
+  or `C-/` reverts. Never touch disk directly.
+
+This is the single highest-value ACP feature for this editor: it is
+exactly the "everything is a live buffer" thesis, and no terminal-based
+client can do it. bb does the same trick for the same reason (it
+advertises fs, then enforces write roots on that path).
+
+It also becomes an **enforcement chokepoint**: writes outside the
+project/group can be refused with a JSON-RPC error before the agent ever
+asks permission.
+
+### 3b. Permission policy in Scheme (not "ask the human every time")
+
+There is no upfront permission model in ACP: the agent asks per call via
+`session/request_permission` with a menu (`allow_once`, `allow_always`,
+`reject_once`, `reject_always`), and **the client's policy is whatever it
+answers**. Today we always block on a human — which is why a mail triage
+turn stalls on `mcp__aimax__notmuch-tag` mid-sweep.
+
+Add a userland policy hook, consulted before the permission event is
+rendered:
+
+```scheme
+(add-permission-policy!
+  (lambda (slug title kind)
+    (cond ((equal? kind "read") 'allow-once)      ; reads never block
+          ((string-prefix? "mcp__aimax__" title) 'allow-always)
+          (else #f))))                            ; #f = ask the user
+```
+
+Returning `#f` falls through to today's interactive banner. Defaults ship
+conservative (reads auto-allowed, everything else asks); the user's own
+rules live in init.scm. This is precisely bb's `handlePermissionRequest`,
+in Scheme instead of TypeScript.
+
+### 3c. Session modes
+
+Agents advertise modes at `session/new` (`modes.currentModeId` +
+`availableModes`; claude-code offers `default` / `plan` / `acceptEdits` /
+`bypassPermissions`) and the client switches with `session/set_mode`.
+We parse `models` from that same payload already (`e4e23a4`) and drop
+`modes` on the floor.
+
+Wire it exactly like models: a `mode-state` event → `'agent-modes` /
+`'agent-mode` locals → modeline segment → `C-c ,` (or a `mode` action in
+the embark table) → `session/set_mode`. Gate on capability
+`:session_modes`. Plan mode is the natural default for a mail/triage
+chat; `acceptEdits` for a coding thread.
+
+### 3d. `_meta` — the per-connector escape hatch
+
+`claude-agent-acp` accepts `_meta.claudeCode.options` on `session/new`:
+`permissionMode`, `allowedTools` / `disallowedTools`, `systemPrompt`,
+`env`, and more. That is the answer to "little customisations per ACP
+backend" (and to making `/skills`-style behavior configurable per
+backend): connectors carry a `'meta` plist, forwarded verbatim.
+
+```scheme
+(define-connector! "claude-code-plan"
+  '(cmd "claude-code-acp"
+    meta (claudeCode (options (permissionMode "plan")))))
+```
+
+Keep it verbatim and un-validated — it is adapter-specific by design,
+and Scheme is where adapter-specific policy belongs.
+
+### 3e. `terminal/*` — agent shells in comint buffers
+
+bb declines terminal support because it has nowhere to put a shell. We
+have `Proc` and comint buffers. Advertising `terminal: true` would let an
+agent's shell commands run in a **visible editor shell buffer** the user
+can watch, scroll, and interrupt. Lower priority than 3a, same shape:
+client capability → our surface becomes the agent's tool.
+
+### What we already do right
+
+Handing the agent client-defined tools via a synthesized MCP server
+(`mcp__aimax__*`) is exactly bb's `tool-proxy-mcp` pattern — per-session
+`mcpServers` in `session/new`, tools executed back in the editor. That
+part of the architecture needs no change.
+
 ## Known adjacent bugs (fix or note while in here)
 
 - Permission cards sometimes don't render in reset chats — the thread

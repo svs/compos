@@ -1201,41 +1201,25 @@
         (group-chat-show! (group-ensure! cur))))))
 
 ;; the native tool loop is Anthropic-only — on an openai:/openrouter: model
-;; a chat quietly runs tool-less instead of erroring, so any default model
-;; from ai-config just works
-(define (chat-tools-usable?)
-  (not (or (string-prefix? "openai:" (llm-model))
-           (string-prefix? "openrouter:" (llm-model)))))
-
 ;; tools when the tools package is loaded and chat-use-tools is on; presets
-;; and cost tracking apply to plain chats exactly like rich ones
+;; and cost tracking apply to plain chats exactly like rich ones. The tool
+;; loop serves every provider (anthropic natively, openai-style translated
+;; at the wire) — all chats work the same, whatever the model.
 (define (chat-llm buf prompt handler)
-  (if (and (boundp (quote chat-use-tools)) chat-use-tools (chat-tools-usable?))
+  (if (and (boundp (quote chat-use-tools)) chat-use-tools)
       (llm-tools prompt *llm-system*
                  (append (llm-tool-specs) (chat-extra-specs buf))
                  llm-tool-call handler
                  (lambda (u) (chat-usage-note! buf u)))
-      (begin
-        ;; degrading to toolless must be LOUD — a mail chat that answers
-        ;; "I can't modify your mailbox" with no explanation is a lie
-        (when (and (boundp (quote chat-use-tools)) chat-use-tools
-                   (not (chat-tools-usable?)))
-          (message (string-append "tools off: " (llm-model)
-                                  " can't run the tool loop — C-c m for an"
-                                  " Anthropic model, or C-c b for claude-code")))
-        (llm prompt handler))))
+      (llm prompt handler)))
 
 ;; the per-send system preamble: a grouped chat points the model at the
 ;; group's work buffers (pull context — the tools read live buffers, so it
-;; is never stale); with tools off the documents are pushed inline instead.
-;; "tools off" must mean the same thing here as in chat-llm — a model the
-;; tool loop can't serve (openai:/openrouter:) gets the inline push, never
-;; instructions to call tools it won't have
+;; is never stale); with tools off the documents are pushed inline instead
 (define (chat-preamble buf)
   (let* ((g (buffer-group buf))
          (docs (if g (group-docs g) '()))
-         (tools? (and (boundp (quote chat-use-tools)) chat-use-tools
-                      (chat-tools-usable?))))
+         (tools? (and (boundp (quote chat-use-tools)) chat-use-tools)))
     (string-append
       (editor-context-preamble buf)
       (chat-preamble-body g docs tools?))))
@@ -1558,7 +1542,7 @@
           ""))))
 
 (define (chat-llm-rich buf prompt handler)
-  (if (and (boundp (quote chat-use-tools)) chat-use-tools (chat-tools-usable?))
+  (if (and (boundp (quote chat-use-tools)) chat-use-tools)
       (llm-tools prompt *llm-system*
                  (append (llm-tool-specs) (chat-extra-specs buf))
                  (chat-tool-dispatch buf) handler

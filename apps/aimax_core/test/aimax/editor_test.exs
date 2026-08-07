@@ -1316,20 +1316,20 @@ defmodule Aimax.EditorTest do
     assert Editor.current_buffer() == other
   end
 
-  test "openai models get documents pushed inline, never tool instructions", %{buf: buf} do
+  test "openai models run the tool loop like every other model", %{buf: buf} do
     companion = "*chat:#{buf}*"
     type("Dear hiring manager")
 
     {:ok, before} = Aimax.Core.Session.eval("(llm-model)")
     parent = self()
 
-    Application.put_env(:aimax_core, :llm_request_fun, fn prompt ->
-      send(parent, {:prompt, prompt})
-      {:ok, "ok then"}
+    Application.put_env(:aimax_core, :llm_chat_fun, fn req ->
+      send(parent, {:chat, req})
+      {:ok, %{"stop_reason" => "end_turn", "content" => [%{"text" => "ok then"}]}}
     end)
 
     on_exit(fn ->
-      Application.delete_env(:aimax_core, :llm_request_fun)
+      Application.delete_env(:aimax_core, :llm_chat_fun)
       Aimax.Core.Session.eval("(set-llm-model! #{before})")
       Aimax.Core.kill_buffer(companion)
     end)
@@ -1342,11 +1342,13 @@ defmodule Aimax.EditorTest do
     press(["RET"])
 
     assert eventually(fn -> Buffer.text(companion) =~ "ok then" end)
-    assert_received {:prompt, prompt}
-    # the tool loop can't serve this model: the preamble must push the
-    # document inline instead of telling the model to call read-doc
-    assert prompt =~ "Dear hiring manager"
-    refute prompt =~ "read-doc"
+    assert_received {:chat, req}
+    # all chats work the same: tools attached, pull-model preamble — the
+    # provider difference is translated at the wire, not surfaced here
+    assert Enum.any?(req.tools, &(&1.name == "read-doc"))
+    prompt = req.messages |> hd() |> Map.get(:content)
+    assert prompt =~ "read-doc"
+    refute prompt =~ "Dear hiring manager"
     press(["C-x", "1"])
   end
 

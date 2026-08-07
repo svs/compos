@@ -239,4 +239,57 @@ defmodule Aimax.LLMToolsTest do
       assert {:ok, "#f"} = Session.eval("(boundp 'zz-runaway)")
     end
   end
+
+  describe "openai wire translation" do
+    alias Aimax.Core.LLM
+
+    test "responses with tool_calls become the loop's anthropic shape" do
+      resp =
+        LLM.from_openai_response(%{
+          "choices" => [
+            %{
+              "message" => %{
+                "content" => nil,
+                "tool_calls" => [
+                  %{"id" => "c1", "function" => %{"name" => "act", "arguments" => ~s({"id":"7"})}}
+                ]
+              }
+            }
+          ],
+          "usage" => %{"prompt_tokens" => 3, "completion_tokens" => 5}
+        })
+
+      assert resp["stop_reason"] == "tool_use"
+      assert [%{"type" => "tool_use", "id" => "c1", "name" => "act", "input" => %{"id" => "7"}}] =
+               resp["content"]
+      assert resp["usage"] == %{"input_tokens" => 3, "output_tokens" => 5}
+    end
+
+    test "loop messages flatten to openai form: system, tool_calls, tool results" do
+      blocks = [
+        %{"type" => "text", "text" => "on it"},
+        %{"type" => "tool_use", "id" => "c1", "name" => "act", "input" => %{"id" => "7"}}
+      ]
+
+      msgs =
+        LLM.to_openai_messages(
+          [
+            %{role: "user", content: "hi"},
+            %{role: "assistant", content: blocks},
+            %{role: "user", content: [%{type: "tool_result", tool_use_id: "c1", content: "done"}]}
+          ],
+          "sys"
+        )
+
+      assert [
+               %{role: "system", content: "sys"},
+               %{role: "user", content: "hi"},
+               %{role: "assistant", content: "on it", tool_calls: [call]},
+               %{role: "tool", tool_call_id: "c1", content: "done"}
+             ] = msgs
+
+      assert call.function.name == "act"
+      assert Jason.decode!(call.function.arguments) == %{"id" => "7"}
+    end
+  end
 end

@@ -408,6 +408,26 @@ defmodule Aimax.NotmuchTest do
     assert eval!("(current-buffer)") == ~s{"/tmp/some-work.txt"}
   end
 
+  test "C-. acts on the email at point; the act tool drives the same table", %{dir: dir} do
+    eval!(~s{(run-command "notmuch-inbox")})
+
+    assert eval!(~s{(target-at "*notmuch*")}) =~ "email"
+    assert eval!(~s{(target-at "*notmuch*")}) =~ "0001"
+
+    press("C-.")
+    Enum.each(String.graphemes("archive"), &Aimax.Core.KeyDispatch.handle_key/1)
+    Aimax.Core.KeyDispatch.handle_key("RET")
+    assert calls(dir) =~ "tag -inbox -- thread:0001"
+
+    out = eval!(~s{(llm-tool-call "act" (list 'type "email" 'id "thread:0002" 'action "trash"))})
+    assert out =~ "done"
+    assert calls(dir) =~ "tag +trash -inbox -unread -- thread:0002"
+
+    out = eval!(~s{(llm-tool-call "act" (list 'type "email" 'id "0002" 'action "explode"))})
+    assert out =~ "no such action"
+    assert out =~ "archive"
+  end
+
   test "mail tools search and read through the same renderer" do
     out = eval!(~s{(llm-tool-call "notmuch-search" (list 'query "tag:inbox"))})
     assert out =~ "thread:0001"

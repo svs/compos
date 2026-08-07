@@ -173,18 +173,144 @@ defmodule Aimax.Core.LLM do
     Application.get_env(:aimax_core, :llm_chat_fun, &default_chat/1)
   end
 
+  # every provider runs the same loop: the internal shapes stay
+  # Anthropic-style and openai-compatible wires translate at the edge —
+  # all chats work the same, whatever the model
   defp default_chat(%{messages: messages, system: system, tools: tools}) do
     case model() do
-      "openrouter:" <> _ ->
-        {:error, "tool use needs an Anthropic model — (set-llm-model! \"claude-sonnet-5\")"}
+      "openrouter:" <> m ->
+        openai_tools_chat(
+          "https://openrouter.ai/api/v1/chat/completions",
+          "OPENROUTER_API_KEY",
+          m,
+          messages,
+          system,
+          tools,
+          [{"http-referer", "https://github.com/svs/ai-max.el"}, {"x-title", "ai-max.el"}]
+        )
 
-      "openai:" <> _ ->
-        {:error, "tool use needs an Anthropic model — (set-llm-model! \"claude-sonnet-5\")"}
+      "openai:" <> m ->
+        openai_tools_chat(
+          "https://api.openai.com/v1/chat/completions",
+          "OPENAI_API_KEY",
+          m,
+          messages,
+          system,
+          tools,
+          []
+        )
 
       m ->
         anthropic_chat(m, messages, system, tools)
     end
   end
+
+  defp openai_tools_chat(url, key_var, model, messages, system, tools, extra_headers) do
+    case api_key(key_var) do
+      key when key in [nil, ""] ->
+        {:error, "no #{key_var} (env, ~/.aimax/#{String.downcase(key_var)}, or doppler)"}
+
+      key ->
+        oai_tools =
+          for t <- tools do
+            %{
+              type: "function",
+              function: %{name: t.name, description: t.description, parameters: t.input_schema}
+            }
+          end
+
+        body = %{model: model, messages: to_openai_messages(messages, system)}
+        body = if oai_tools == [], do: body, else: Map.put(body, :tools, oai_tools)
+
+        Req.post(url,
+          json: body,
+          headers: [{"authorization", "Bearer #{key}"} | extra_headers],
+          receive_timeout: 180_000
+        )
+        |> case do
+          {:ok, %{status: 200, body: rbody}} -> {:ok, from_openai_response(rbody)}
+          other -> format_error(other)
+        end
+    end
+  end
+
+  # internal messages are Anthropic-shaped (assistant tool_use blocks with
+  # string keys from the wire or from from_openai_response; tool_result
+  # blocks with atom keys built by the loop) — flatten to OpenAI form
+  @doc false
+  def to_openai_messages(messages, system) do
+    sys = if system, do: [%{role: "system", content: system}], else: []
+    sys ++ Enum.flat_map(messages, &openai_msg/1)
+  end
+
+  defp openai_msg(%{role: "assistant", content: blocks}) when is_list(blocks) do
+    text =
+      blocks |> Enum.filter(&(&1["type"] == "text")) |> Enum.map_join("", &(&1["text"] || ""))
+
+    calls =
+      for %{"type" => "tool_use"} = b <- blocks do
+        %{
+          id: b["id"],
+          type: "function",
+          function: %{name: b["name"], arguments: Jason.encode!(b["input"] || %{})}
+        }
+      end
+
+    msg = %{role: "assistant", content: if(text == "", do: nil, else: text)}
+    [if(calls == [], do: msg, else: Map.put(msg, :tool_calls, calls))]
+  end
+
+  defp openai_msg(%{role: "user", content: blocks}) when is_list(blocks) do
+    Enum.map(blocks, fn
+      %{type: "tool_result", tool_use_id: id, content: c} ->
+        %{role: "tool", tool_call_id: id, content: to_string(c)}
+
+      %{"type" => "tool_result", "tool_use_id" => id, "content" => c} ->
+        %{role: "tool", tool_call_id: id, content: to_string(c)}
+
+      other ->
+        %{role: "user", content: inspect(other)}
+    end)
+  end
+
+  defp openai_msg(%{role: role, content: text}), do: [%{role: role, content: text}]
+
+  @doc false
+  def from_openai_response(%{"choices" => [%{"message" => msg} | _]} = body) do
+    calls = msg["tool_calls"] || []
+
+    blocks =
+      if(msg["content"] in [nil, ""],
+        do: [],
+        else: [%{"type" => "text", "text" => msg["content"]}]
+      ) ++
+        for c <- calls do
+          %{
+            "type" => "tool_use",
+            "id" => c["id"],
+            "name" => get_in(c, ["function", "name"]),
+            "input" =>
+              case Jason.decode(get_in(c, ["function", "arguments"]) || "{}") do
+                {:ok, m} when is_map(m) -> m
+                _ -> %{}
+              end
+          }
+        end
+
+    %{
+      "stop_reason" => if(calls == [], do: "end_turn", else: "tool_use"),
+      "content" => blocks,
+      "usage" => normalize_usage(body["usage"])
+    }
+  end
+
+  def from_openai_response(body), do: %{"stop_reason" => "end_turn", "content" => [], "usage" => normalize_usage(body["usage"])}
+
+  defp normalize_usage(%{"prompt_tokens" => i, "completion_tokens" => o}),
+    do: %{"input_tokens" => i, "output_tokens" => o}
+
+  defp normalize_usage(u) when is_map(u), do: u
+  defp normalize_usage(_), do: %{}
 
   defp anthropic_chat(model, messages, system, tools) do
     case api_key("ANTHROPIC_API_KEY") do

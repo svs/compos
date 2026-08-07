@@ -539,8 +539,10 @@
                (message "cancel requested — C-RET again forces a restart")))))))
 
 ;;; --- connectors ---------------------------------------------------------------
-;;; A connector is a named config plist for a thread's backend: 'cmd (the ACP
-;;; adapter), 'env (auth/model context), 'cwd, 'mcp-servers. The point is
+;;; A connector is a named config plist for a thread's backend: 'backend
+;;; (which Elixir Backend module runs turns — "acp" default, "stub" for
+;;; tests), 'cmd (the ACP adapter), 'env (auth/model context), 'cwd,
+;;; 'mcp-servers. The point is
 ;;; economic as much as technical — a codex connector rides a ChatGPT
 ;;; subscription, claude-code rides a Max plan, an api connector burns tokens.
 ;;; Define your own in ~/.aimax/ai-config.scm:

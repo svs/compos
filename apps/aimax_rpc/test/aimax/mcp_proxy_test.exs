@@ -27,16 +27,18 @@ defmodule Aimax.McpProxyTest do
 
     send_msg(port, %{jsonrpc: "2.0", id: 2, method: "tools/list", params: %{}})
     assert %{"id" => 2, "result" => %{"tools" => tools}} = recv(port)
-    assert "read-doc" in Enum.map(tools, & &1["name"])
+    assert "eval-scheme" in Enum.map(tools, & &1["name"])
 
     send_msg(port, %{
       jsonrpc: "2.0",
       id: 3,
       method: "tools/call",
-      params: %{name: "read-doc", arguments: %{buffer: "*proxy-doc*"}}
+      params: %{name: "eval-scheme", arguments: %{code: ~s{(buffer-text "*proxy-doc*")}}}
     })
 
-    assert %{"id" => 3, "result" => %{"content" => [%{"text" => "hello from aimax"}]}} = recv(port)
+    # eval-scheme returns the printed value, quotes included
+    assert %{"id" => 3, "result" => %{"content" => [%{"text" => ~s{"hello from aimax"}}]}} =
+             recv(port)
 
     Port.close(port)
   end

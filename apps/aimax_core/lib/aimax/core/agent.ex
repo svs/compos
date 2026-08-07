@@ -1,10 +1,12 @@
 defmodule Aimax.Core.Agent do
   @moduledoc """
-  One agent thread: a GenServer owning an ACP (Agent Client Protocol) adapter
-  subprocess — JSON-RPC over stdio, newline-framed. Mechanism only: session
-  lifecycle, framing, the event queue, the prompt queue, permission plumbing.
-  Everything visible (transcript rendering, keybindings, presets, the *agents*
-  list) is Scheme in `priv/packages/agent.scm`.
+  One agent thread: a GenServer owning backend-agnostic thread machinery —
+  status machine (`:starting → :idle → :running → :needs_attention → :dead`),
+  prompt queue, ordered event pipeline, output mark, permission bookkeeping.
+  Turn execution lives behind `Aimax.Core.Agent.Backend` (ACP subprocess,
+  in-process LLM, test stub). Everything visible (transcript rendering,
+  keybindings, presets, the *agents* list) is Scheme in
+  `priv/packages/agent.scm`.
 
   Events are delivered to Scheme in ordered batches through one global handler
   (`agent-on-event!`), via `Session.apply_callback` from a Task — never
@@ -19,6 +21,7 @@ defmodule Aimax.Core.Agent do
   use GenServer, restart: :temporary
 
   alias Aimax.Core.{Buffer, Events, Session}
+  alias Aimax.Core.Agent.Backend
 
   @registry Aimax.Core.AgentRegistry
   @escaped :aimax_escaped_closures
@@ -46,13 +49,13 @@ defmodule Aimax.Core.Agent do
   @doc "Send or queue a user message. Returns :sent | :queued."
   def prompt(slug, text), do: call(slug, {:prompt, text})
 
-  @doc "Cancel the current turn (ACP session/cancel)."
+  @doc "Cancel the current turn."
   def cancel(slug), do: call(slug, :cancel)
 
-  @doc "Ask the adapter to switch the session's model (ACP session/set_model)."
+  @doc "Ask the backend to switch the session's model in place."
   def set_model(slug, model_id), do: call(slug, {:set_model, model_id})
 
-  @doc "Answer a pending session/request_permission by option id (nil = cancel)."
+  @doc "Answer a pending permission request by option id (nil = cancel)."
   def respond_permission(slug, rpc_id, option_id),
     do: call(slug, {:respond_permission, rpc_id, option_id})
 
@@ -98,21 +101,18 @@ defmodule Aimax.Core.Agent do
     Aimax.Core.create_buffer(buffer)
     Events.subscribe(buffer)
 
-    # "llm" threads skip the subprocess entirely: prompts go straight to the
-    # in-process LLM (req-based today, req_llm later) with history kept here.
+    # "llm" threads skip the backend entirely: prompts go straight to the
+    # in-process LLM with history kept here. (Deleted by W3 — Backend.ReqLLM
+    # is the proper version of this.)
     llm? = Map.get(config, "type") == "llm"
 
-    {transport, tp} =
+    {backend, handle} =
       if llm? do
         {nil, nil}
       else
-        transport = Aimax.Core.Agent.Transport.impl()
-        cmd = Map.get(config, "cmd", "claude-code-acp")
-
-        {:ok, tp} =
-          transport.open(cmd, [cd: Map.get(config, "cwd"), env: Map.get(config, "env")], self())
-
-        {transport, tp}
+        backend = Backend.module(config)
+        {:ok, handle} = backend.start(config, self())
+        {backend, handle}
       end
 
     state = %{
@@ -121,12 +121,8 @@ defmodule Aimax.Core.Agent do
       config: config,
       llm?: llm?,
       history: [],
-      transport: transport,
-      tp: tp,
-      partial: "",
-      next_id: 1,
-      pending_rpc: %{},
-      session_id: nil,
+      backend: backend,
+      handle: handle,
       status: :starting,
       # scheme writes banner + steering marker before starting the runtime and
       # tells us where output goes (just before the marker)
@@ -140,13 +136,7 @@ defmodule Aimax.Core.Agent do
     if llm? do
       {:ok, set_status(state, :idle)}
     else
-      {:ok,
-       request(state, "initialize", %{
-         "protocolVersion" => 1,
-         "clientCapabilities" => %{
-           "fs" => %{"readTextFile" => false, "writeTextFile" => false}
-         }
-       })}
+      {:ok, state}
     end
   end
 
@@ -164,25 +154,17 @@ defmodule Aimax.Core.Agent do
     end
   end
 
-  def handle_call({:set_model, model_id}, _from, state) do
-    if state.session_id do
-      {:reply, :ok,
-       request(state, "session/set_model", %{
-         "sessionId" => state.session_id,
-         "modelId" => model_id
-       })}
-    else
-      {:reply, {:error, :no_session}, state}
-    end
-  end
+  def handle_call({:set_model, _model_id}, _from, %{llm?: true} = state),
+    do: {:reply, {:error, :unsupported}, state}
+
+  def handle_call({:set_model, model_id}, _from, state),
+    do: {:reply, state.backend.set_model(state.handle, model_id), state}
+
+  def handle_call(:cancel, _from, %{llm?: true} = state), do: {:reply, :ok, state}
 
   def handle_call(:cancel, _from, state) do
-    state =
-      if state.status in [:running, :needs_attention] and state.session_id do
-        notify(state, "session/cancel", %{"sessionId" => state.session_id})
-      else
-        state
-      end
+    if state.status in [:running, :needs_attention],
+      do: state.backend.cancel(state.handle)
 
     {:reply, :ok, state}
   end
@@ -190,14 +172,10 @@ defmodule Aimax.Core.Agent do
   def handle_call({:respond_permission, rpc_id, option_id}, _from, state) do
     case state.pending_permission do
       %{rpc_id: ^rpc_id} ->
-        outcome =
-          if option_id,
-            do: %{"outcome" => "selected", "optionId" => option_id},
-            else: %{"outcome" => "cancelled"}
+        state.backend.respond_permission(state.handle, rpc_id, option_id)
 
         state =
           state
-          |> respond(rpc_id, %{"outcome" => outcome})
           |> Map.put(:pending_permission, nil)
           |> set_status(:running)
 
@@ -222,7 +200,6 @@ defmodule Aimax.Core.Agent do
        slug: state.slug,
        buffer: state.buffer,
        status: state.status,
-       session_id: state.session_id,
        queued: length(state.prompt_queue),
        permission:
          case state.pending_permission do
@@ -232,18 +209,11 @@ defmodule Aimax.Core.Agent do
      }, state}
   end
 
-  # --- incoming bytes (real port or fake transport) ---------------------------
+  # --- backend events ----------------------------------------------------------
 
   @impl true
-  def handle_info({:acp_data, data}, state), do: {:noreply, ingest(state, data)}
-
-  def handle_info({port, {:data, data}}, %{tp: port} = state),
-    do: {:noreply, ingest(state, data)}
-
-  def handle_info({:acp_exit, status}, state), do: adapter_exit(state, status)
-
-  def handle_info({port, {:exit_status, status}}, %{tp: port} = state),
-    do: adapter_exit(state, status)
+  def handle_info({:backend_event, event}, state),
+    do: {:noreply, apply_backend_event(state, event)}
 
   # keep the output mark ahead of user edits above it; our own inserts via
   # append_at_mark already moved it
@@ -264,15 +234,15 @@ defmodule Aimax.Core.Agent do
         {:ok, text} ->
           state
           |> Map.put(:history, state.history ++ [{:assistant, text}])
-          |> enqueue(plist(type: :chunk, text: text))
+          |> enqueue(Backend.plist(type: :chunk, text: text))
 
         {:error, msg} ->
-          enqueue(state, plist(type: :error, text: msg))
+          enqueue(state, Backend.plist(type: :error, text: msg))
       end
 
     state =
       state
-      |> enqueue(plist(type: :"turn-end", "stop-reason": "end_turn"))
+      |> enqueue(Backend.plist(type: :"turn-end", "stop-reason": "end_turn"))
       |> set_status(:idle)
       |> pop_prompt_queue()
 
@@ -291,276 +261,54 @@ defmodule Aimax.Core.Agent do
   def terminate(_reason, %{llm?: true}), do: :ok
 
   def terminate(_reason, state) do
-    state.transport.close(state.tp)
+    state.backend.close(state.handle)
     :ok
   end
 
-  # --- framing ----------------------------------------------------------------
+  # the status machine reads the event stream; control events (ready,
+  # turn-failed) are consumed here and never reach Scheme
+  defp apply_backend_event(state, event) do
+    case Backend.event_type(event) do
+      "ready" ->
+        state |> set_status(:idle) |> pop_prompt_queue()
 
-  defp ingest(state, data) do
-    {lines, partial} = split_lines(state.partial <> data)
-    state = %{state | partial: partial}
+      "turn-failed" ->
+        state |> set_status(:idle) |> pop_prompt_queue()
 
-    Enum.reduce(lines, state, fn line, state ->
-      case Jason.decode(line) do
-        {:ok, frame} -> handle_frame(state, frame)
-        # not JSON — adapter chatter on stdout; ignore
-        {:error, _} -> state
-      end
-    end)
-  end
-
-  defp split_lines(data) do
-    parts = String.split(data, "\n")
-    {partial, lines} = List.pop_at(parts, -1)
-    {Enum.reject(lines, &(String.trim(&1) == "")), partial}
-  end
-
-  # --- json-rpc ---------------------------------------------------------------
-
-  defp request(state, method, params) do
-    id = state.next_id
-    frame = %{"jsonrpc" => "2.0", "id" => id, "method" => method, "params" => params}
-    send_frame(state, frame)
-    %{state | next_id: id + 1, pending_rpc: Map.put(state.pending_rpc, id, method)}
-  end
-
-  defp notify(state, method, params) do
-    send_frame(state, %{"jsonrpc" => "2.0", "method" => method, "params" => params})
-    state
-  end
-
-  defp respond(state, id, result) do
-    send_frame(state, %{"jsonrpc" => "2.0", "id" => id, "result" => result})
-    state
-  end
-
-  defp respond_error(state, id, code, message) do
-    send_frame(state, %{
-      "jsonrpc" => "2.0",
-      "id" => id,
-      "error" => %{"code" => code, "message" => message}
-    })
-
-    state
-  end
-
-  defp send_frame(state, frame) do
-    state.transport.send_frame(state.tp, [Jason.encode!(frame), "\n"])
-  end
-
-  # responses to our requests
-  defp handle_frame(state, %{"id" => id} = frame)
-       when not is_map_key(frame, "method") do
-    {method, pending} = Map.pop(state.pending_rpc, id)
-    state = %{state | pending_rpc: pending}
-
-    case {method, frame} do
-      {"initialize", %{"result" => _}} ->
-        request(state, "session/new", %{
-          "cwd" => Map.get(state.config, "cwd", File.cwd!()),
-          "mcpServers" =>
-            acp_servers(
-              Map.get(state.config, "mcp-servers") || Map.get(state.config, "mcp_servers") || []
-            )
-        })
-
-      {"session/new", %{"result" => %{"sessionId" => sid} = result}} ->
-        state = %{state | session_id: sid}
-
-        # the adapter reports which model the session ACTUALLY runs (and
-        # the pickable list) — the truth the modeline shows
-        state =
-          case result do
-            %{"models" => %{"currentModelId" => cur} = ms} ->
-              enqueue(
-                state,
-                plist(
-                  type: :"model-state",
-                  current: cur,
-                  available:
-                    for m <- Map.get(ms, "availableModels", []) do
-                      [Map.get(m, "modelId"), Map.get(m, "name", "")]
-                    end
-                )
-              )
-
-            _ ->
-              state
-          end
-
+      "turn-end" ->
         state
+        |> enqueue(event)
         |> set_status(:idle)
         |> pop_prompt_queue()
 
-      {"session/set_model", %{"result" => _}} ->
-        state
-
-      {"session/prompt", %{"result" => result}} ->
-        state
-        |> enqueue(
-          plist(type: :"turn-end", "stop-reason": Map.get(result, "stopReason", "end_turn"))
-        )
-        |> set_status(:idle)
-        |> pop_prompt_queue()
-
-      {_, %{"error" => err}} ->
-        state =
-          enqueue(
-            state,
-            plist(type: :error, text: "#{method}: #{Map.get(err, "message", inspect(err))}")
-          )
-
-        # a failed prompt still ends the turn — a thread must never wedge
-        # in :running with no reply coming
-        if method == "session/prompt" do
-          state |> set_status(:idle) |> pop_prompt_queue()
-        else
-          state
-        end
-
-      _ ->
-        state
-    end
-  end
-
-  # requests and notifications from the agent
-  defp handle_frame(state, %{"method" => method} = frame) do
-    id = Map.get(frame, "id")
-    params = Map.get(frame, "params", %{})
-
-    case method do
-      "session/update" ->
-        handle_update(state, Map.get(params, "update", %{}))
-
-      "session/request_permission" ->
+      "permission" ->
         options =
-          for opt <- get_in(params, ["options"]) || [] do
-            {Map.get(opt, "optionId"), Map.get(opt, "name", ""), Map.get(opt, "kind", "")}
+          for [oid, name, kind] <- Backend.plist_get(event, "options") || [] do
+            {oid, name, kind}
           end
 
-        title = get_in(params, ["toolCall", "title"]) || "tool call"
-        kind = get_in(params, ["toolCall", "kind"]) || ""
+        pending = %{
+          rpc_id: Backend.plist_get(event, "rpc-id"),
+          title: Backend.plist_get(event, "title"),
+          kind: Backend.plist_get(event, "kind"),
+          options: options
+        }
 
-        %{state | pending_permission: %{rpc_id: id, title: title, kind: kind, options: options}}
+        %{state | pending_permission: pending}
         |> set_status(:needs_attention)
-        |> enqueue(
-          plist(
-            type: :permission,
-            "rpc-id": id,
-            title: title,
-            kind: kind,
-            options: Enum.map(options, fn {oid, name, k} -> [oid, name, k] end)
-          )
-        )
+        |> enqueue(event)
 
-      # fs proxy lands in Phase 4; refuse politely so adapters fall back
-      m when m in ["fs/read_text_file", "fs/write_text_file"] ->
-        respond_error(state, id, -32601, "not supported")
-
-      _ when is_nil(id) ->
+      "dead" ->
+        # deliver what's queued; the thread stays registered so the
+        # transcript keeps working (revive reattaches a fresh backend)
         state
+        |> Map.put(:status, :dead)
+        |> enqueue(event)
 
       _ ->
-        respond_error(state, id, -32601, "method not found: #{method}")
+        enqueue(state, event)
     end
   end
-
-  defp handle_frame(state, _frame), do: state
-
-  defp handle_update(state, %{"sessionUpdate" => kind} = update) do
-    case kind do
-      "agent_message_chunk" ->
-        enqueue(state, plist(type: :chunk, text: content_text(Map.get(update, "content"))))
-
-      "agent_thought_chunk" ->
-        enqueue(state, plist(type: :thought, text: content_text(Map.get(update, "content"))))
-
-      "tool_call" ->
-        enqueue(
-          state,
-          plist(
-            type: :"tool-call",
-            id: Map.get(update, "toolCallId", ""),
-            title: Map.get(update, "title", ""),
-            kind: Map.get(update, "kind", ""),
-            status: Map.get(update, "status", "pending")
-          )
-        )
-
-      "tool_call_update" ->
-        enqueue(
-          state,
-          plist(
-            type: :"tool-update",
-            id: Map.get(update, "toolCallId", ""),
-            status: Map.get(update, "status", ""),
-            text: tool_content_text(Map.get(update, "content"))
-          )
-        )
-
-      "plan" ->
-        entries =
-          for e <- Map.get(update, "entries") || [] do
-            [Map.get(e, "content", ""), Map.get(e, "status", "")]
-          end
-
-        enqueue(state, plist(type: :plan, entries: entries))
-
-      _ ->
-        state
-    end
-  end
-
-  defp handle_update(state, _), do: state
-
-  defp content_text(%{"type" => "text", "text" => t}), do: t
-  defp content_text(_), do: ""
-
-  defp tool_content_text(nil), do: ""
-
-  defp tool_content_text(blocks) when is_list(blocks) do
-    Enum.map_join(blocks, "", fn
-      %{"type" => "content", "content" => c} -> content_text(c)
-      %{"type" => "diff"} = d -> diff_text(d)
-      _ -> ""
-    end)
-  end
-
-  defp diff_text(%{"path" => path} = d) do
-    old = Map.get(d, "oldText") || ""
-    new = Map.get(d, "newText", "")
-
-    "--- #{path}\n" <>
-      Enum.map_join(String.split(old, "\n"), "", &"-#{&1}\n") <>
-      Enum.map_join(String.split(new, "\n"), "", &"+#{&1}\n")
-  end
-
-  # mcp_servers config (Scheme plists via mcp-acp-servers) -> ACP session/new
-  # shape. Env values starting with "@" are key references resolved here —
-  # the same convention as MCP client specs, so config files carry no secrets.
-  defp acp_servers(servers) when is_list(servers), do: Enum.map(servers, &acp_server/1)
-
-  defp acp_server(flat) when is_list(flat) do
-    m = flat |> Enum.chunk_every(2) |> Map.new(fn [k, v] -> {to_string(k), v} end)
-
-    env =
-      for [k, v] <- m["env"] || [] do
-        %{"name" => to_string(k), "value" => resolve_key(v)}
-      end
-
-    %{
-      "name" => m["name"],
-      "command" => m["command"],
-      "args" => m["args"] || [],
-      "env" => env
-    }
-  end
-
-  defp acp_server(other), do: other
-
-  defp resolve_key("@" <> var), do: Aimax.Core.Keys.get(var) || ""
-  defp resolve_key(v), do: to_string(v)
 
   # --- lifecycle helpers ------------------------------------------------------
 
@@ -573,23 +321,23 @@ defmodule Aimax.Core.Agent do
     end)
 
     state
-    |> enqueue(plist(type: :"user-msg", text: text))
+    |> enqueue(Backend.plist(type: :"user-msg", text: text))
     |> Map.put(:history, history)
     |> Map.put(:status, :running)
     |> emit_status(:running)
   end
 
   defp send_prompt(state, text) do
+    state =
+      state
+      # echo the user turn into the transcript via the ordered event channel —
+      # queued messages appear exactly when their turn actually starts
+      |> enqueue(Backend.plist(type: :"user-msg", text: text))
+      |> Map.put(:status, :running)
+      |> emit_status(:running)
+
+    state.backend.prompt(state.handle, text, %{})
     state
-    # echo the user turn into the transcript via the ordered event channel —
-    # queued messages appear exactly when their turn actually starts
-    |> enqueue(plist(type: :"user-msg", text: text))
-    |> Map.put(:status, :running)
-    |> emit_status(:running)
-    |> request("session/prompt", %{
-      "sessionId" => state.session_id,
-      "prompt" => [%{"type" => "text", "text" => text}]
-    })
   end
 
   defp llm_prompt(history) do
@@ -614,29 +362,9 @@ defmodule Aimax.Core.Agent do
     do: state |> Map.put(:status, status) |> emit_status(status)
 
   defp emit_status(state, status),
-    do: enqueue(state, plist(type: :status, status: status))
-
-  defp adapter_exit(state, status) do
-    state =
-      state
-      |> Map.put(:status, :dead)
-      |> enqueue(plist(type: :dead, exit: status))
-
-    # deliver what's queued, then stop once the batch drains
-    {:noreply, maybe_deliver(%{state | partial: ""})}
-  end
+    do: enqueue(state, Backend.plist(type: :status, status: status))
 
   # --- event queue -> scheme ---------------------------------------------------
-
-  # events are scheme plists: (type chunk text "...") — flat lists, symbol keys
-  defp plist(kvs) do
-    Enum.flat_map(kvs, fn {k, v} -> [{:sym, to_string(k)}, plist_val(v)] end)
-  end
-
-  defp plist_val(v) when is_atom(v) and not is_nil(v) and not is_boolean(v),
-    do: {:sym, to_string(v)}
-
-  defp plist_val(v), do: v
 
   defp enqueue(state, event) do
     maybe_deliver(%{state | events: state.events ++ [event]})

@@ -881,12 +881,6 @@
             ;; a live process (shell, tail) dies with its buffer
             (if (process-running? target) (process-kill! target))
             (buffer-kill! target)
-            (if (equal? target cur)
-                ;; land on the most recently used other buffer
-                (let ((others (filter (lambda (b) (not (equal? b target)))
-                                      (buffer-list-mru))))
-                  (switch-to-buffer!
-                    (if (null? others) "*scratch*" (car others)))))
             (message (string-append "Killed " target))))))))
 
 ;;; --- display-buffer & popups (popper) ----------------------------------------
@@ -909,8 +903,33 @@
             (cadr (car rules))
             (loop (cdr rules))))))
 
-(define *popup-window* #f)
-(define *popup-buffer* #f)
+;; frame-local policy state: values keyed by the selected frame — each
+;; browser gets its own popup, its own ibuffer home window. Pruned when a
+;; frame is deleted.
+(define *frame-locals* '())   ; ((frame ((key val) ...)) ...)
+
+(define (frame-local key)
+  (let ((fr (assoc (selected-frame) *frame-locals*)))
+    (if fr
+        (let ((kv (assoc key (cadr fr))))
+          (if kv (cadr kv) #f))
+        #f)))
+
+(define (set-frame-local! key val)
+  (let* ((frame (selected-frame))
+         (fr (assoc frame *frame-locals*))
+         (locals (if fr (cadr fr) '()))
+         (rest (filter (lambda (e) (not (equal? (car e) frame))) *frame-locals*))
+         (others (filter (lambda (e) (not (equal? (car e) key))) locals)))
+    (set! *frame-locals* (cons (list frame (cons (list key val) others)) rest))))
+
+(define (prune-frame-locals!)
+  (let ((live (frame-list)))
+    (set! *frame-locals*
+      (filter (lambda (e) (member (car e) live)) *frame-locals*))))
+
+(define (popup-window) (frame-local 'popup-window))
+(define (popup-buffer) (frame-local 'popup-buffer))
 
 (define (window-exists? id)
   (assoc id (window-list)))
@@ -918,20 +937,20 @@
 ;; a leftover popup that became the sole window (C-x 1 from inside it)
 ;; is not a popup anymore — treat it as closed so display-buffer splits
 (define (popup-open?)
-  (and *popup-window*
-       (window-exists? *popup-window*)
+  (and (popup-window)
+       (window-exists? (popup-window))
        (not (null? (cdr (window-list))))))
 
 (define (popup-show name)
-  (set! *popup-buffer* name)
+  (set-frame-local! 'popup-buffer name)
   (if (popup-open?)
       (begin
-        (select-window! *popup-window*)
+        (select-window! (popup-window))
         (switch-to-buffer! name))
       (begin
         (split-window! 'v 0.7)          ; bottom ~30% side window
         (other-window!)
-        (set! *popup-window* (active-window))
+        (set-frame-local! 'popup-window (active-window))
         (switch-to-buffer! name))))
 
 (define (display-buffer name)
@@ -972,19 +991,19 @@
   (lambda ()
     (if (popup-open?)
         (begin
-          (delete-window-id! *popup-window*)
-          (set! *popup-window* #f))
-        (if *popup-buffer*
-            (popup-show *popup-buffer*)
+          (delete-window-id! (popup-window))
+          (set-frame-local! 'popup-window #f))
+        (if (popup-buffer)
+            (popup-show (popup-buffer))
             (message "No popup buffer yet")))))
 
 ;; q in special buffers: close the popup, or fall back to the MRU buffer
 (define-command "quit-window" "Close the popup or fall back to the previous buffer"
   (lambda ()
-    (if (and (popup-open?) (equal? (active-window) *popup-window*))
+    (if (and (popup-open?) (equal? (active-window) (popup-window)))
         (begin
-          (delete-window-id! *popup-window*)
-          (set! *popup-window* #f))
+          (delete-window-id! (popup-window))
+          (set-frame-local! 'popup-window #f))
         (let ((others (buffer-candidates)))
           (if (null? others)
               (message "Nothing to quit to")
@@ -2038,7 +2057,9 @@
 ;; immediately re-attaches under the same id); deleting a disconnected
 ;; frame removes it for good.
 (define-command "delete-frame" "Delete the selected frame"
-  (lambda () (delete-frame!)))
+  (lambda ()
+    (delete-frame!)
+    (prune-frame-locals!)))
 
 ;; landing in a rich chat/agent window puts point in its input region —
 ;; the transcript is for reading, the prompt is where typing goes

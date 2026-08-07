@@ -23,11 +23,15 @@ config :aimax_ui, Aimax.Ui.Endpoint,
 config :phoenix, :json_library, Jason
 
 if config_env() == :test do
-  config :aimax_rpc, socket_path: "/tmp/aimax-rpc-test.sock"
+  # per-checkout suffix: concurrent test runs from different worktrees must
+  # not share sockets or fixture files, or evals land in the other VM
+  suffix = Integer.to_string(:erlang.phash2(Path.expand(".")), 36)
+
+  config :aimax_rpc, socket_path: "/tmp/aimax-rpc-test-#{suffix}.sock"
 
   config :aimax_core,
-    home: "/tmp/aimax-test-home",
-    desktop_path: "/tmp/aimax-desktop-test.etf",
+    home: "/tmp/aimax-test-home-#{suffix}",
+    desktop_path: "/tmp/aimax-desktop-test-#{suffix}.etf",
     desktop_autorestore: false,
     # no models.dev fetches from tests
     llmdb_auto: false

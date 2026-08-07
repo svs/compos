@@ -2033,6 +2033,13 @@
 (define-command "delete-other-windows" "Make the selected window the only one"
   (lambda () (delete-other-windows!)))
 
+;; frames: one per attached browser. Deleting the selected frame while its
+;; browser is still connected resets it to a fresh single window (the client
+;; immediately re-attaches under the same id); deleting a disconnected
+;; frame removes it for good.
+(define-command "delete-frame" "Delete the selected frame"
+  (lambda () (delete-frame!)))
+
 ;; landing in a rich chat/agent window puts point in its input region —
 ;; the transcript is for reading, the prompt is where typing goes
 (define (chat-snap-to-input!)

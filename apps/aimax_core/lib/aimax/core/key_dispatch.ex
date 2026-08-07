@@ -11,9 +11,19 @@ defmodule Aimax.Core.KeyDispatch do
   `"DEL"`, `"TAB"`, `"SPC"`, `"<left>"`.
   """
 
-  alias Aimax.Core.{Buffer, Editor, Session}
+  alias Aimax.Core.{Buffer, Editor, Frame, Session}
 
   @named ~w(RET DEL TAB SPC ESC <left> <right> <up> <down> <home> <end>)
+
+  @doc """
+  Dispatch a key for a frame: stamps the frame context so every Editor and
+  Session call below resolves against it. nil clears — the key then acts on
+  the last-active frame (tests, RPC).
+  """
+  def handle_key(fid, key) do
+    if fid, do: Frame.put(fid), else: Frame.clear()
+    handle_key(key)
+  end
 
   def handle_key(key) do
     %{minibuffer: mb, pending: pending, completion: completion} = Editor.snapshot()

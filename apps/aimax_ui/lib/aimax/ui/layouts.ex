@@ -483,6 +483,12 @@ defmodule Aimax.Ui.Layouts do
                   if (text) navigator.clipboard.writeText(text);
                 });
 
+                // this browser's frame: the server assigns/confirms the id,
+                // localStorage carries it across reloads and daemon restarts
+                this.handleEvent("frame", ({ id }) => {
+                  if (id) localStorage.setItem("aimax-frame", id);
+                });
+
                 // mouse: a click selects the window and places point; a drag
                 // leaves a native selection, mirrored into mark + point.
                 // Positions are (logical line, char offset) — the server maps
@@ -566,7 +572,8 @@ defmodule Aimax.Ui.Layouts do
                 };
                 window.addEventListener("resize", this.resizeH);
 
-                // wheel scrolls the server-side viewport of the active window
+                // wheel scrolls the server-side viewport of the hovered
+                // window (falling back to the active one)
                 this.wheelAcc = 0;
                 this.wheelH = (e) => {
                   // agent/chat transcripts own their scrolling (.ag-scroll);
@@ -577,7 +584,10 @@ defmodule Aimax.Ui.Layouts do
                   const lines = Math.trunc(this.wheelAcc / this.lineHeight);
                   if (lines !== 0) {
                     this.wheelAcc -= lines * this.lineHeight;
-                    this.pushEvent("scroll", { lines });
+                    const winEl = e.target.closest && e.target.closest(".window[data-win-id]");
+                    this.pushEvent("scroll", winEl
+                      ? { lines, win: parseInt(winEl.dataset.winId, 10) }
+                      : { lines });
                   }
                 };
                 window.addEventListener("wheel", this.wheelH, { passive: false });
@@ -609,7 +619,8 @@ defmodule Aimax.Ui.Layouts do
 
           const csrf = document.querySelector("meta[name='csrf-token']").getAttribute("content");
           const liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
-            hooks: Hooks, params: { _csrf_token: csrf }
+            hooks: Hooks,
+            params: () => ({ _csrf_token: csrf, frame: localStorage.getItem("aimax-frame") })
           });
           liveSocket.connect();
           if (liveSocket.disableDebug) liveSocket.disableDebug();

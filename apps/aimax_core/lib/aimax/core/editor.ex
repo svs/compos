@@ -53,6 +53,19 @@ defmodule Aimax.Core.Editor do
   def select_frame(id), do: GenServer.call(__MODULE__, {:select_frame, id})
   def frame_of_window(win_id), do: GenServer.call(__MODULE__, {:frame_of_window, win_id})
 
+  @doc "Bump a frame in the MRU without broadcasting — the top of every input dispatch."
+  def touch_frame(id), do: GenServer.call(__MODULE__, {:touch_frame, id})
+
+  @doc "Active minibuffer maps of every frame (Session GC roots live closures)."
+  def all_minibuffers, do: GenServer.call(__MODULE__, :all_minibuffers)
+
+  @doc "All windows across all frames, frame-MRU order: [{win_id, buffer, frame_id}]."
+  def list_windows_all, do: GenServer.call(__MODULE__, :list_windows_all)
+
+  @doc "Set any window's buffer, any frame, without selecting it."
+  def window_set_buffer(win_id, buffer),
+    do: GenServer.call(__MODULE__, {:window_set_buffer, win_id, buffer})
+
   # keymap
   def bind_key(seq, command), do: GenServer.call(__MODULE__, {:bind_key, seq, command})
 
@@ -243,6 +256,7 @@ defmodule Aimax.Core.Editor do
 
   # --- frame lifecycle --------------------------------------------------------
 
+  @impl true
   def handle_call({:attach_frame, id}, _from, state) do
     case state.frames[id] do
       %{} ->
@@ -266,7 +280,7 @@ defmodule Aimax.Core.Editor do
         }
 
         state = %{state | frames: Map.put(state.frames, id, frame), next_win: state.next_win + 1}
-        changed({:ok, id}, bump_frame(state, id))
+        changed({:ok, id}, bump_frame(state, id), id)
     end
   end
 
@@ -289,7 +303,7 @@ defmodule Aimax.Core.Editor do
             frame_mru: List.delete(state.frame_mru, id)
         }
 
-        changed({:ok, mb}, state)
+        changed({:ok, mb}, state, id)
     end
   end
 
@@ -300,12 +314,44 @@ defmodule Aimax.Core.Editor do
 
   def handle_call({:select_frame, id}, _from, state) do
     if state.frames[id],
-      do: changed(:ok, bump_frame(state, id)),
+      do: changed(:ok, bump_frame(state, id), id),
       else: {:reply, {:error, :no_frame}, state}
   end
 
   def handle_call({:frame_of_window, win_id}, _from, state),
     do: {:reply, (f = find_window_frame(state, win_id)) && f.id, state}
+
+  def handle_call({:touch_frame, id}, _from, state) do
+    if state.frames[id],
+      do: {:reply, :ok, bump_frame(state, id)},
+      else: {:reply, :ok, state}
+  end
+
+  def handle_call(:all_minibuffers, _from, state),
+    do: {:reply, for({_id, f} <- state.frames, f.minibuffer, do: f.minibuffer), state}
+
+  def handle_call(:list_windows_all, _from, state) do
+    reply =
+      for fid <- state.frame_mru,
+          {id, buf} <- leaf_ids_buffers(state.frames[fid].tree),
+          do: {id, buf, fid}
+
+    {:reply, reply, state}
+  end
+
+  def handle_call({:window_set_buffer, win_id, buffer}, _from, state) do
+    case find_window_frame(state, win_id) do
+      nil ->
+        {:reply, {:error, :no_window}, state}
+
+      f ->
+        unless Aimax.Core.Buffer.exists?(buffer), do: Aimax.Core.create_buffer(buffer)
+        leaf = find_leaf(f.tree, win_id)
+        tree = replace_leaf(f.tree, win_id, %{leaf | buffer: buffer, top: 0, manual: false})
+        mru = Enum.take([buffer | List.delete(state.mru, buffer)], 50)
+        changed(:ok, put_frame(%{state | mru: mru}, %{f | tree: tree}), f.id)
+    end
+  end
 
   # --- frame-scoped state -----------------------------------------------------
 
@@ -417,7 +463,7 @@ defmodule Aimax.Core.Editor do
 
     if f.win_rows == map,
       do: {:reply, :ok, state},
-      else: changed(:ok, put_frame(state, %{f | win_rows: map}))
+      else: changed(:ok, put_frame(state, %{f | win_rows: map}), f.id)
   end
 
   def handle_call({:scroll_active, delta, fid}, _from, state) do
@@ -425,7 +471,7 @@ defmodule Aimax.Core.Editor do
     leaf = find_leaf(f.tree, f.active)
     top = max(leaf.top + delta, 0)
     tree = replace_leaf(f.tree, f.active, %{leaf | top: top, manual: true})
-    changed(:ok, put_frame(state, %{f | tree: tree}))
+    changed(:ok, put_frame(state, %{f | tree: tree}), f.id)
   end
 
   def handle_call({:scroll_window, id, delta}, _from, state) do
@@ -437,7 +483,7 @@ defmodule Aimax.Core.Editor do
         leaf = find_leaf(f.tree, id)
         top = max(leaf.top + delta, 0)
         tree = replace_leaf(f.tree, id, %{leaf | top: top, manual: true})
-        changed(:ok, put_frame(state, %{f | tree: tree}))
+        changed(:ok, put_frame(state, %{f | tree: tree}), f.id)
     end
   end
 
@@ -550,7 +596,7 @@ defmodule Aimax.Core.Editor do
       end
 
     tree = replace_leaf(f.tree, f.active, %{leaf | top: top, manual: false})
-    changed(:ok, put_frame(state, %{f | tree: tree}))
+    changed(:ok, put_frame(state, %{f | tree: tree}), f.id)
   end
 
   def handle_call({:bind_key, seq, command}, _from, state),
@@ -562,7 +608,7 @@ defmodule Aimax.Core.Editor do
 
     if f.pending == seq,
       do: {:reply, :ok, state},
-      else: changed(:ok, put_frame(state, %{f | pending: seq}))
+      else: changed(:ok, put_frame(state, %{f | pending: seq}), f.id)
   end
 
   def handle_call({:set_echo, msg, fid}, _from, state) do
@@ -570,7 +616,7 @@ defmodule Aimax.Core.Editor do
 
     if f.echo == msg,
       do: {:reply, :ok, state},
-      else: changed(:ok, put_frame(state, %{f | echo: msg}))
+      else: changed(:ok, put_frame(state, %{f | echo: msg}), f.id)
   end
 
   def handle_call({:set_echo_all, msg}, _from, state) do
@@ -594,14 +640,14 @@ defmodule Aimax.Core.Editor do
 
     reset_minibuf_buffer(mb.input)
     mb = Map.put(mb, :list, Candidates.new(candidates, query: mb_query(mb)))
-    changed(:ok, put_frame(state, %{f | minibuffer: mb}))
+    changed(:ok, put_frame(state, %{f | minibuffer: mb}), f.id)
   end
 
   def handle_call({:mb_input, input, fid}, _from, state) do
     case frame(state, fid) do
       %{minibuffer: %{} = mb} = f ->
         reset_minibuf_buffer(input)
-        changed(:ok, put_frame(state, %{f | minibuffer: put_mb_input(mb, input)}))
+        changed(:ok, put_frame(state, %{f | minibuffer: put_mb_input(mb, input)}), f.id)
 
       _ ->
         {:reply, {:error, :inactive}, state}
@@ -618,7 +664,7 @@ defmodule Aimax.Core.Editor do
         if input == mb.input,
           do: {:reply, :unchanged, state},
           else:
-            changed({:changed, input}, put_frame(state, %{f | minibuffer: put_mb_input(mb, input)}))
+            changed({:changed, input}, put_frame(state, %{f | minibuffer: put_mb_input(mb, input)}), f.id)
 
       _ ->
         {:reply, :unchanged, state}
@@ -629,7 +675,7 @@ defmodule Aimax.Core.Editor do
     case frame(state, fid) do
       %{minibuffer: %{} = mb} = f ->
         list = mb.list |> Candidates.put_items(candidates) |> Candidates.put_query(mb_query(mb))
-        changed(:ok, put_frame(state, %{f | minibuffer: %{mb | list: list}}))
+        changed(:ok, put_frame(state, %{f | minibuffer: %{mb | list: list}}), f.id)
 
       _ ->
         {:reply, {:error, :inactive}, state}
@@ -639,7 +685,7 @@ defmodule Aimax.Core.Editor do
   def handle_call({:mb_move_sel, delta, fid}, _from, state) do
     case frame(state, fid) do
       %{minibuffer: %{} = mb} = f ->
-        changed(:ok, put_frame(state, %{f | minibuffer: %{mb | list: Candidates.move(mb.list, delta)}}))
+        changed(:ok, put_frame(state, %{f | minibuffer: %{mb | list: Candidates.move(mb.list, delta)}}), f.id)
 
       _ ->
         {:reply, {:error, :inactive}, state}
@@ -664,7 +710,7 @@ defmodule Aimax.Core.Editor do
         |> Map.put(:total, Candidates.total(f.minibuffer.list))
         |> Map.put(:sel_touched, f.minibuffer.list.touched)
 
-    changed(reply, put_frame(state, %{f | minibuffer: nil}))
+    changed(reply, put_frame(state, %{f | minibuffer: nil}), f.id)
   end
 
   def handle_call(:buffer_mru, _from, state) do
@@ -691,12 +737,13 @@ defmodule Aimax.Core.Editor do
 
     case Candidates.normalize(candidates) do
       [] ->
-        changed(:ok, put_frame(state, %{f | completion: nil}))
+        changed(:ok, put_frame(state, %{f | completion: nil}), f.id)
 
       _ ->
         changed(
           :ok,
-          put_frame(state, %{f | completion: %{start: start, list: Candidates.new(candidates)}})
+          put_frame(state, %{f | completion: %{start: start, list: Candidates.new(candidates)}}),
+          f.id
         )
     end
   end
@@ -704,7 +751,7 @@ defmodule Aimax.Core.Editor do
   def handle_call({:completion_move, delta, fid}, _from, state) do
     case frame(state, fid) do
       %{completion: %{} = c} = f ->
-        changed(:ok, put_frame(state, %{f | completion: %{c | list: Candidates.move(c.list, delta)}}))
+        changed(:ok, put_frame(state, %{f | completion: %{c | list: Candidates.move(c.list, delta)}}), f.id)
 
       _ ->
         {:reply, :ok, state}
@@ -718,8 +765,8 @@ defmodule Aimax.Core.Editor do
         list = Candidates.put_query(c.list, q)
 
         if Candidates.total(list) == 0,
-          do: changed(:ok, put_frame(state, %{f | completion: nil})),
-          else: changed(:ok, put_frame(state, %{f | completion: %{c | list: list}}))
+          do: changed(:ok, put_frame(state, %{f | completion: nil}), f.id),
+          else: changed(:ok, put_frame(state, %{f | completion: %{c | list: list}}), f.id)
 
       _ ->
         {:reply, :ok, state}
@@ -735,7 +782,7 @@ defmodule Aimax.Core.Editor do
             label -> {c.start, label}
           end
 
-        changed(reply, put_frame(state, %{f | completion: nil}))
+        changed(reply, put_frame(state, %{f | completion: nil}), f.id)
 
       _ ->
         {:reply, nil, state}
@@ -744,7 +791,7 @@ defmodule Aimax.Core.Editor do
 
   def handle_call({:completion_dismiss, fid}, _from, state) do
     f = frame(state, fid)
-    changed(:ok, put_frame(state, %{f | completion: nil}))
+    changed(:ok, put_frame(state, %{f | completion: nil}), f.id)
   end
 
   def handle_call({:key_for_command, command}, _from, state) do
@@ -780,7 +827,7 @@ defmodule Aimax.Core.Editor do
     new_leaf = %{type: :leaf, id: state.next_win, buffer: old.buffer, top: old.top, manual: false}
     split = %{type: :split, dir: dir, ratio: ratio, children: [old, new_leaf]}
     tree = replace_leaf(f.tree, f.active, split)
-    changed(:ok, put_frame(%{state | next_win: state.next_win + 1}, %{f | tree: tree}))
+    changed(:ok, put_frame(%{state | next_win: state.next_win + 1}, %{f | tree: tree}), f.id)
   end
 
   def handle_call({:delete_window_by_id, id}, _from, state) do
@@ -795,7 +842,7 @@ defmodule Aimax.Core.Editor do
 
           tree ->
             active = if f.active == id, do: first_leaf(tree).id, else: f.active
-            changed(:ok, put_frame(state, %{f | tree: tree, active: active}))
+            changed(:ok, put_frame(state, %{f | tree: tree, active: active}), f.id)
         end
     end
   end
@@ -811,7 +858,7 @@ defmodule Aimax.Core.Editor do
   def handle_call({:set_active, id}, _from, state) do
     case find_window_frame(state, id) do
       nil -> {:reply, {:error, :no_window}, state}
-      f -> changed(:ok, state |> put_frame(%{f | active: id}) |> bump_frame(f.id))
+      f -> changed(:ok, state |> put_frame(%{f | active: id}) |> bump_frame(f.id), f.id)
     end
   end
 
@@ -826,21 +873,21 @@ defmodule Aimax.Core.Editor do
         {:reply, {:error, :sole_window}, state}
 
       tree ->
-        changed(:ok, put_frame(state, %{f | tree: tree, active: first_leaf(tree).id}))
+        changed(:ok, put_frame(state, %{f | tree: tree, active: first_leaf(tree).id}), f.id)
     end
   end
 
   def handle_call({:delete_other_windows, fid}, _from, state) do
     f = frame(state, fid)
     leaf = find_leaf(f.tree, f.active)
-    changed(:ok, put_frame(state, %{f | tree: leaf}))
+    changed(:ok, put_frame(state, %{f | tree: leaf}), f.id)
   end
 
   def handle_call({:other_window, fid}, _from, state) do
     f = frame(state, fid)
     ids = leaf_ids(f.tree)
     idx = Enum.find_index(ids, &(&1 == f.active)) || 0
-    changed(:ok, put_frame(state, %{f | active: Enum.at(ids, rem(idx + 1, length(ids)))}))
+    changed(:ok, put_frame(state, %{f | active: Enum.at(ids, rem(idx + 1, length(ids)))}), f.id)
   end
 
   def handle_call({:set_window_buffer, buffer, fid}, _from, state) do
@@ -849,7 +896,7 @@ defmodule Aimax.Core.Editor do
     leaf = find_leaf(f.tree, f.active)
     tree = replace_leaf(f.tree, f.active, %{leaf | buffer: buffer, top: 0, manual: false})
     mru = Enum.take([buffer | List.delete(state.mru, buffer)], 50)
-    changed(:ok, put_frame(%{state | mru: mru}, %{f | tree: tree}))
+    changed(:ok, put_frame(%{state | mru: mru}, %{f | tree: tree}), f.id)
   end
 
   def handle_call({:preview_buffer, buffer, fid}, _from, state) do
@@ -876,11 +923,20 @@ defmodule Aimax.Core.Editor do
         if buffer == active_buffer, do: id
       end) || first_leaf(tree).id
 
-    changed(:ok, put_frame(%{state | next_win: next_win}, %{f | tree: tree, active: active}))
+    changed(:ok, put_frame(%{state | next_win: next_win}, %{f | tree: tree, active: active}), f.id)
   end
 
-  defp changed(reply, state) do
+  # scope: a frame id (only that frame's clients re-render) or :all (global
+  # mutations — faces, kill ring — reach every frame). :editor is the
+  # firehose non-view subscribers (Desktop, Reactor, Agent) listen on.
+  defp changed(reply, state, scope \\ :all) do
     Events.broadcast_editor(:changed)
+
+    case scope do
+      :all -> Enum.each(Map.keys(state.frames), &Events.broadcast_frame/1)
+      fid -> Events.broadcast_frame(fid)
+    end
+
     {:reply, reply, state}
   end
 
@@ -1061,6 +1117,13 @@ defmodule Aimax.Core.Editor do
     col: 0
   }
 
+  defp split_rows(:h, rows, _ratio), do: {rows, rows}
+
+  defp split_rows(:v, rows, ratio) do
+    a = max(round(rows * ratio), 3)
+    {a, max(rows - a, 3)}
+  end
+
   # render walk: computes per-window rows (v-splits divide), clamps and
   # auto-follows the viewport top (unless manually scrolled), and returns
   # both the updated tree (tops persist) and the render payload
@@ -1072,13 +1135,6 @@ defmodule Aimax.Core.Editor do
 
     {%{split | children: [a2, b2]},
      %{type: :split, dir: dir, ratio: ratio, children: [ra, rb]}}
-  end
-
-  defp split_rows(:h, rows, _ratio), do: {rows, rows}
-
-  defp split_rows(:v, rows, ratio) do
-    a = max(round(rows * ratio), 3)
-    {a, max(rows - a, 3)}
   end
 
   defp render_walk(%{type: :leaf, id: id, buffer: buffer} = leaf, rows, win_rows) do

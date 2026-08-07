@@ -3,13 +3,14 @@ defmodule Aimax.FramesTest do
 
   use ExUnit.Case
 
-  alias Aimax.Core.{Buffer, Editor}
+  alias Aimax.Core.{Buffer, Desktop, Editor, KeyDispatch, Session}
 
   # every other test assumes the single default frame — leave none behind
   setup do
     on_exit(fn ->
       for fid <- Editor.frame_list(), fid != "f-main", do: Editor.delete_frame(fid)
       Editor.select_frame("f-main")
+      File.rm(Desktop.path())
     end)
 
     :ok
@@ -92,6 +93,87 @@ defmodule Aimax.FramesTest do
 
     Editor.select_frame("f-main")
     refute Editor.current_buffer() == buf
+  end
+
+  test "keys dispatch to their frame: text, prefix and echo stay put" do
+    {:ok, fa} = Editor.attach_frame(nil)
+    {:ok, fb} = Editor.attach_frame(nil)
+    bufa = "frames-ka-#{System.unique_integer([:positive])}"
+    bufb = "frames-kb-#{System.unique_integer([:positive])}"
+    Editor.set_window_buffer(bufa, fa)
+    Editor.set_window_buffer(bufb, fb)
+
+    KeyDispatch.handle_key(fa, "h")
+    KeyDispatch.handle_key(fb, "x")
+    KeyDispatch.handle_key(fa, "i")
+
+    assert Buffer.text(bufa) == "hi"
+    assert Buffer.text(bufb) == "x"
+
+    # a prefix in one frame leaves the other's pending untouched
+    KeyDispatch.handle_key(fa, "C-x")
+    assert Editor.snapshot(fa).pending == ["C-x"]
+    assert Editor.snapshot(fb).pending == []
+    KeyDispatch.handle_key(fa, "C-g")
+  end
+
+  test "scheme commands run against the dispatching frame" do
+    {:ok, fa} = Editor.attach_frame(nil)
+    {:ok, fb} = Editor.attach_frame(nil)
+
+    assert {:ok, _} = Session.eval("(split-window! 'h)", fb)
+    assert length(Editor.list_windows(fb)) == 2
+    assert length(Editor.list_windows(fa)) == 1
+
+    assert {:ok, fid} = Session.eval("(selected-frame)", fb)
+    assert fid == inspect(fb) or fid == fb or fid =~ fb
+  end
+
+  test "delete-frame! from scheme; sole frame refused" do
+    {:ok, fid} = Editor.attach_frame(nil)
+    assert {:ok, _} = Session.eval("(delete-frame!)", fid)
+    refute fid in Editor.frame_list()
+
+    assert {:error, msg} = Session.eval("(delete-frame!)", "f-main")
+    assert msg =~ "sole frame"
+  end
+
+  test "desktop v2 round-trips every frame's layout" do
+    buf = "frames-dt-#{System.unique_integer([:positive])}"
+    {:ok, fid} = Editor.attach_frame(nil)
+    Editor.set_window_buffer(buf, fid)
+    Editor.split(:h, 0.5, fid)
+
+    assert :ok = Desktop.save_now()
+
+    # wreck the layout, then restore over it
+    Editor.delete_other_windows(fid)
+    assert :ok = Desktop.restore_now()
+
+    assert fid in Editor.frame_list()
+    windows = Editor.list_windows(fid)
+    assert length(windows) == 2
+    assert Enum.all?(windows, fn {_id, b} -> b == buf end)
+  end
+
+  test "a v1 desktop (single tree) restores into the default frame" do
+    buf = "frames-v1-#{System.unique_integer([:positive])}"
+    Aimax.Core.create_buffer(buf)
+
+    v1 = %{
+      buffers: [],
+      scratch: [],
+      tree: {:split, :h, 0.5, {:leaf, buf, 0}, {:leaf, buf, 0}},
+      active_buffer: buf,
+      faces: %{}
+    }
+
+    File.write!(Desktop.path(), :erlang.term_to_binary(v1))
+    assert :ok = Desktop.restore_now()
+
+    windows = Editor.list_windows("f-main")
+    assert length(windows) == 2
+    assert Enum.all?(windows, fn {_id, b} -> b == buf end)
   end
 
   test "echo and pending are per frame" do

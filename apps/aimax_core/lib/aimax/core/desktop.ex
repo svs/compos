@@ -70,8 +70,6 @@ defmodule Aimax.Core.Desktop do
   # --- snapshot --------------------------------------------------------------
 
   defp do_save do
-    render = Editor.render_state()
-
     buffers =
       for name <- Aimax.Core.list_buffers(),
           Buffer.exists?(name),
@@ -96,12 +94,24 @@ defmodule Aimax.Core.Desktop do
         {name, content, Buffer.point(name), savable_locals(name)}
       end
 
+    # v2: every frame's layout, in frame-MRU order (head = most recent)
+    frames =
+      for fid <- Editor.frame_list() do
+        render = Editor.render_state(fid)
+
+        %{
+          id: fid,
+          tree: serialize(render.tree),
+          active_buffer: active_buffer(render.tree, render.active)
+        }
+      end
+
     desktop = %{
+      version: 2,
       buffers: buffers,
       scratch: scratch,
-      tree: serialize(render.tree),
-      active_buffer: active_buffer(render.tree, render.active),
-      faces: render.faces
+      frames: frames,
+      faces: Editor.render_state().faces
     }
 
     file = path()
@@ -148,7 +158,7 @@ defmodule Aimax.Core.Desktop do
 
   defp do_restore do
     with {:ok, bin} <- File.read(path()),
-         %{buffers: buffers, tree: tree} = desktop <- :erlang.binary_to_term(bin) do
+         %{buffers: buffers} = desktop <- :erlang.binary_to_term(bin) do
       # reopen through visit so modes + hooks apply, then lay the saved
       # buffer-locals back on top so toggled state (preview, line numbers,
       # a hand-picked mode) survives too
@@ -171,7 +181,7 @@ defmodule Aimax.Core.Desktop do
         restore_scratch(name, text, point, locals)
       end
 
-      Editor.restore_tree(tree, desktop[:active_buffer])
+      restore_frames(desktop)
 
       for {face, attrs} <- desktop[:faces] || %{} do
         Editor.set_face(face, attrs)
@@ -188,6 +198,22 @@ defmodule Aimax.Core.Desktop do
       Logger.warning("desktop restore failed: #{Exception.message(e)}")
       :error
   end
+
+  # v2: recreate every saved frame and lay its tree back; reversed so the
+  # MRU head attaches last and ends up last-active. A browser that connected
+  # before restore ran gets its same-id frame overwritten and re-renders.
+  # v1 (single :tree key): one frame, restored into the default.
+  defp restore_frames(%{frames: frames}) do
+    for %{id: fid, tree: tree, active_buffer: active} <- Enum.reverse(frames) do
+      {:ok, ^fid} = Editor.attach_frame(fid)
+      Editor.restore_tree(tree, active, fid)
+    end
+  end
+
+  defp restore_frames(%{tree: tree} = desktop),
+    do: Editor.restore_tree(tree, desktop[:active_buffer])
+
+  defp restore_frames(_), do: :ok
 
   # non-file buffer: content and locals go down first, THEN set-mode! —
   # the mode's setup fn rebuilds presentation (local keys, overlays,

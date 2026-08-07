@@ -603,15 +603,23 @@
 
 ;;; --- thread creation ----------------------------------------------------------
 
-;; skip live runtimes AND existing thread buffers — restored transcripts
-;; keep their slug even though no agent is attached yet
+;; skip live runtimes, existing thread buffers, AND slugs claimed by any
+;; buffer's 'agent-slug local — chats host threads under their own names
+;; now, so checking *agent:* buffers alone hands out duplicates (two chats
+;; on one slug = events and prompts routed into the wrong buffer)
+(define (agent-claimed-slugs)
+  (filter (lambda (s) s)
+          (map (lambda (b) (buffer-local b 'agent-slug)) (buffer-list))))
+
 (define (agent-next-slug)
-  (let loop ((n 1))
-    (let ((slug (string-append "a" (number->string n))))
-      (if (or (member slug (agent-list))
-              (buffer-exists? (agent-buffer slug)))
-          (loop (+ n 1))
-          slug))))
+  (let ((claimed (agent-claimed-slugs)))
+    (let loop ((n 1))
+      (let ((slug (string-append "a" (number->string n))))
+        (if (or (member slug (agent-list))
+                (buffer-exists? (agent-buffer slug))
+                (member slug claimed))
+            (loop (+ n 1))
+            slug)))))
 
 (define (agent-install-keys! buf)
   (local-set-key* buf "RET" "agent-send")

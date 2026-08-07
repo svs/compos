@@ -17,9 +17,12 @@
 
 (define (dired-dir buf)
   (let ((e (assoc buf *dired-dirs*)))
-    (if e (cadr e) #f)))
+    (if e (cadr e) (buffer-local buf 'dired-dir))))
 
 (define (dired-remember buf dir)
+  ;; the buffer-local is the durable copy — the alist dies with the daemon,
+  ;; locals ride desktop.etf so a restored dired knows its directory
+  (buffer-set-local! buf 'dired-dir dir)
   (set! *dired-dirs* (cons (list buf dir) *dired-dirs*)))
 
 (define (dired-marks buf)
@@ -60,27 +63,39 @@
   (next-line!)
   (beginning-of-line!))
 
+(define (dired-install-keys!)
+  (local-set-key "n" "dired-next")
+  (local-set-key "p" "dired-prev")
+  (local-set-key "RET" "dired-visit")
+  (local-set-key "g" "dired-revert")
+  (local-set-key "^" "dired-up")
+  (local-set-key "m" "dired-mark")
+  (local-set-key "u" "dired-unmark")
+  (local-set-key "d" "dired-flag-delete")
+  (local-set-key "x" "dired-do-flagged-delete")
+  (local-set-key "+" "dired-mkdir")
+  (local-set-key "q" "quit-window"))
+
+;; a registered mode so desktop restore can re-run the setup — without it
+;; a restored dired came back as a plain editable buffer (no keymap, no
+;; read-only: RET inserted newlines instead of visiting)
+(define-mode "Dired"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (buffer-set-local! buf 'mode-name "Dired")
+      (dired-install-keys!)
+      (let ((dir (dired-dir buf)))
+        (when dir (dired-refresh buf dir)))
+      (buffer-set-read-only! buf #t))))
+
 (define (dired-open dir0)
   (let ((dir (expand-path dir0)))
     (let ((buf dir))
       (buffer-create buf)
       (dired-remember buf dir)
-      (buffer-set-read-only! buf #t)
-      (buffer-set-local! buf 'mode-name "Dired")
       (switch-to-buffer! buf)
-      (dired-refresh buf dir)
+      (set-mode! "Dired")
       (dired-goto-first-entry)
-      (local-set-key "n" "dired-next")
-      (local-set-key "p" "dired-prev")
-      (local-set-key "RET" "dired-visit")
-      (local-set-key "g" "dired-revert")
-      (local-set-key "^" "dired-up")
-      (local-set-key "m" "dired-mark")
-      (local-set-key "u" "dired-unmark")
-      (local-set-key "d" "dired-flag-delete")
-      (local-set-key "x" "dired-do-flagged-delete")
-      (local-set-key "+" "dired-mkdir")
-      (local-set-key "q" "quit-window")
       buf)))
 
 ;; The entry named on the current line, or #f (header/.. lines return the

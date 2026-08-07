@@ -28,26 +28,29 @@ defmodule Aimax.Core.Agent.Transport.Port do
   def open(cmd, opts, _owner) do
     [exe | args] = String.split(cmd, " ", trim: true)
 
+    env =
+      case Keyword.get(opts, :env) do
+        nil ->
+          []
+
+        env ->
+          # from scheme this is a list of (name value) pairs, not tuples
+          Enum.map(env, fn
+            {k, v} -> {to_charlist(k), to_charlist(v)}
+            [k, v] -> {to_charlist(k), to_charlist(v)}
+          end)
+      end
+
     port_opts =
       [:binary, :exit_status, args: args] ++
         case Keyword.get(opts, :cd) do
           nil -> []
           cwd -> [cd: to_charlist(cwd)]
         end ++
-        case Keyword.get(opts, :env) do
-          nil ->
-            []
-
-          env ->
-            # from scheme this is a list of (name value) pairs, not tuples
-            [
-              env:
-                Enum.map(env, fn
-                  {k, v} -> {to_charlist(k), to_charlist(v)}
-                  [k, v] -> {to_charlist(k), to_charlist(v)}
-                end)
-            ]
-        end
+        # the daemon is often launched from inside a Claude Code shell;
+        # claude-code-acp refuses to nest when it inherits CLAUDECODE
+        # (false in a port env deletes the var from the child)
+        [env: [{~c"CLAUDECODE", false} | env]]
 
     exe_path = System.find_executable(exe) || raise "agent adapter not found: #{exe}"
     port = Port.open({:spawn_executable, exe_path}, port_opts)

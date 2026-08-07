@@ -445,6 +445,13 @@ defmodule Aimax.Core.Session do
         Aimax.Core.Agent.kill(s(slug))
         :void
       end,
+      # live model switch on the running session (ACP session/set_model)
+      "agent-set-model!" => fn [slug, model] ->
+        case Aimax.Core.Agent.set_model(s(slug), s(model)) do
+          :ok -> true
+          {:error, _} -> false
+        end
+      end,
       # -> (slug "a1" buffer "*agent: a1*" status idle queued 0 permission #f)
       "agent-info" => fn [slug] ->
         case Aimax.Core.Agent.info(s(slug)) do

@@ -223,6 +223,45 @@ defmodule Aimax.AgentTest do
     assert spawned == ~s[fake -c model="gpt-5.5"]
   end
 
+  test "the adapter's reported model is the modeline truth; C-c m switches in place" do
+    {:ok, _} = Session.eval(~s[(execute "")])
+    assert_receive {:transport_open, agent}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(agent, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{"protocolVersion" => 1}})
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => nid,
+      "result" => %{
+        "sessionId" => "sess-m",
+        "models" => %{
+          "currentModelId" => "claude-opus-4-6",
+          "availableModels" => [
+            %{"modelId" => "claude-opus-4-6", "name" => "Opus"},
+            %{"modelId" => "claude-sonnet-5", "name" => "Sonnet"}
+          ]
+        }
+      }
+    })
+
+    buf = "*chat:a1*"
+    assert eventually(fn -> Buffer.get_local(buf, "agent-model") == "claude-opus-4-6" end)
+    assert {:ok, ml} = Session.eval(~s[(buffer-local "#{buf}" 'modeline-info)])
+    assert ml =~ "claude-opus-4-6"
+
+    # C-c m: live switch over session/set_model — no reconnect, context kept
+    focus(buf)
+    press(["C-c", "m"])
+    type("claude-sonnet-5")
+    press(["RET"])
+
+    assert_receive {:frame, %{"method" => "session/set_model", "params" => sp}}, 1_000
+    assert sp["modelId"] == "claude-sonnet-5"
+    assert sp["sessionId"] == "sess-m"
+    assert eventually(fn -> Buffer.get_local(buf, "agent-model") == "claude-sonnet-5" end)
+  end
+
   test "permission request: needs_attention, inline banner, C-c C-y answers allow option" do
     {slug, buf, agent} = boot("")
 

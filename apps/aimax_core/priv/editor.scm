@@ -1386,20 +1386,28 @@
     (let* ((buf (current-buffer))
            (slug (buffer-local buf 'agent-slug)))
       (if (and slug (boundp (quote agent-reconnect!)))
-          ;; ACP-backed: the session's model can't change in place — a
-          ;; model change is a fresh session on the same connector, and
-          ;; the whole chat seeds it. The label now always tells the truth.
-          (let ((cname (or (buffer-local buf 'agent-connector) *default-connector*)))
+          ;; ACP-backed. A live session that advertises models switches IN
+          ;; PLACE (session/set_model — context survives); otherwise a
+          ;; model change is a fresh session seeded with the whole chat.
+          (let* ((cname (or (buffer-local buf 'agent-connector) *default-connector*))
+                 (models (buffer-local buf 'agent-models))
+                 (live? (and models (not (equal? (agent-status slug) 'dead)))))
             (minibuffer-read
               (string-append "Model (now "
                              (or (buffer-local buf 'agent-model) "connector default")
                              "): ")
-              (connector-models cname)
+              (or models (connector-models cname))
               (lambda (m)
-                (agent-reconnect! slug cname m)
-                (message (string-append cname
-                                        (if (equal? m "") "" (string-append " · " m))
-                                        " — fresh session, the chat carries over")))))
+                (cond ((equal? (string-trim m) "") #f)
+                      ((and live? (agent-set-model! slug m))
+                       (buffer-set-local! buf 'agent-model m)
+                       (agent-update-modeline! buf)
+                       (message (string-append cname " · " m " — switched in place")))
+                      (else
+                        (agent-reconnect! slug cname m)
+                        (message (string-append cname
+                                   (if (equal? m "") "" (string-append " · " m))
+                                   " — fresh session, the chat carries over")))))))
           ;; API-backed: stateless — switching is just a variable
           (minibuffer-read (string-append "Model (now " (llm-model) "): ")
             *llm-models*

@@ -49,6 +49,9 @@ defmodule Aimax.Core.Agent do
   @doc "Cancel the current turn (ACP session/cancel)."
   def cancel(slug), do: call(slug, :cancel)
 
+  @doc "Ask the adapter to switch the session's model (ACP session/set_model)."
+  def set_model(slug, model_id), do: call(slug, {:set_model, model_id})
+
   @doc "Answer a pending session/request_permission by option id (nil = cancel)."
   def respond_permission(slug, rpc_id, option_id),
     do: call(slug, {:respond_permission, rpc_id, option_id})
@@ -158,6 +161,18 @@ defmodule Aimax.Core.Agent do
 
       :dead ->
         {:reply, {:error, :dead}, state}
+    end
+  end
+
+  def handle_call({:set_model, model_id}, _from, state) do
+    if state.session_id do
+      {:reply, :ok,
+       request(state, "session/set_model", %{
+         "sessionId" => state.session_id,
+         "modelId" => model_id
+       })}
+    else
+      {:reply, {:error, :no_session}, state}
     end
   end
 
@@ -350,10 +365,36 @@ defmodule Aimax.Core.Agent do
             )
         })
 
-      {"session/new", %{"result" => %{"sessionId" => sid}}} ->
-        %{state | session_id: sid}
+      {"session/new", %{"result" => %{"sessionId" => sid} = result}} ->
+        state = %{state | session_id: sid}
+
+        # the adapter reports which model the session ACTUALLY runs (and
+        # the pickable list) — the truth the modeline shows
+        state =
+          case result do
+            %{"models" => %{"currentModelId" => cur} = ms} ->
+              enqueue(
+                state,
+                plist(
+                  type: :"model-state",
+                  current: cur,
+                  available:
+                    for m <- Map.get(ms, "availableModels", []) do
+                      [Map.get(m, "modelId"), Map.get(m, "name", "")]
+                    end
+                )
+              )
+
+            _ ->
+              state
+          end
+
+        state
         |> set_status(:idle)
         |> pop_prompt_queue()
+
+      {"session/set_model", %{"result" => _}} ->
+        state
 
       {"session/prompt", %{"result" => result}} ->
         state

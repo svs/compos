@@ -219,6 +219,14 @@
     (unless (or (equal? type 'user-msg) (equal? type 'status))
       (agent-clear-waiting! slug))
     (cond
+      ((equal? type 'model-state)
+       ;; the adapter says which model the session ACTUALLY runs — the
+       ;; modeline shows that truth, and C-c m picks from this list
+       (buffer-set-local! buf 'agent-models (plist-get e 'available))
+       (let ((cur (plist-get e 'current)))
+         (when cur (buffer-set-local! buf 'agent-model cur)))
+       (agent-update-modeline! buf))
+
       ((equal? type 'user-msg)
        (agent-pop-queued! slug)
        (let ((start (agent-render! slug
@@ -377,7 +385,11 @@
          ;; the adapter silently ignores it and runs its default while the
          ;; modeline repeats the stale name. Foreign -> connector default.
          (m (let ((m0 (buffer-local buf 'agent-model))
-                  (declared (connector-models cname)))
+                  ;; legit ids: the connector's declared list plus what
+                  ;; the adapter itself reported for this session
+                  (declared (append (connector-models cname)
+                                    (map car (or (buffer-local buf 'agent-models)
+                                                 '())))))
               (if (and m0 (pair? declared) (not (member m0 declared)))
                   (begin
                     (buffer-set-local! buf 'agent-model #f)

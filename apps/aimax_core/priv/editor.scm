@@ -849,8 +849,18 @@
         (buffer-set-local! buf 'render-mode "agent")
         (buffer-set-local! buf 'agent-marker-bytes
           (string-byte-length *chat-input-marker*))
-        (buffer-set-local! buf 'modeline-info
-          (string-append "companion · " (llm-model)))
+        ;; the modeline states the backend: connector for agent-backed
+        ;; chats, "companion · model" for the API lane. An agent-backed
+        ;; chat also sheds stale permission/waiting cards on restore —
+        ;; the runtime they belonged to did not survive the restart
+        ;; (agent-mode-setup! does the same for *agent:* buffers)
+        (if (buffer-local buf 'agent-slug)
+            (begin
+              (agent-update-modeline! buf)
+              (agent-block-drop-kind! buf "permission")
+              (agent-block-drop-kind! buf "waiting"))
+            (buffer-set-local! buf 'modeline-info
+              (string-append "companion · " (llm-model))))
         (chat-clear-waiting! buf)
         (local-set-key "RET" "chat-send")
         (local-set-key "S-RET" "newline")

@@ -15,6 +15,7 @@ defmodule Aimax.NotmuchTest do
   end
 
   defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+  defp type(str), do: str |> String.graphemes() |> press()
 
   defp calls(dir) do
     case File.read(Path.join(dir, "calls.log")) do
@@ -59,6 +60,7 @@ defmodule Aimax.NotmuchTest do
       search)
         case "$*" in
           *--output=messages*) echo "id:m1";;
+          *--output=tags*) printf 'important\ninbox\nunread\n';;
           *) cat "$dir/search.json";;
         esac;;
       show)
@@ -343,6 +345,32 @@ defmodule Aimax.NotmuchTest do
 
     press("q")
     assert eval!("(current-buffer)") == ~s{"*mailboxes*"}
+  end
+
+  test "j jumps to a saved search by name", %{dir: _} do
+    eval!(~s{(run-command "notmuch-inbox")})
+    press("j")
+    type("unread")
+    press("RET")
+    assert eval!(~s{(buffer-local "*notmuch*" 'notmuch-query)}) == ~s{"tag:unread"}
+  end
+
+  test "/ narrows the current search", %{dir: _} do
+    eval!(~s{(run-command "notmuch-inbox")})
+    press("/")
+    type("from:alice")
+    press("RET")
+    assert eval!(~s{(buffer-local "*notmuch*" 'notmuch-query)}) ==
+             ~s{"( tag:inbox ) and from:alice"}
+  end
+
+  test "+ adds a tag with completion from the database", %{dir: dir} do
+    eval!(~s{(run-command "notmuch-inbox")})
+    press("+")
+    type("important")
+    press("RET")
+    assert calls(dir) =~ "search --output=tags"
+    assert calls(dir) =~ "tag +important -- thread:0001"
   end
 
   test "M-< and M-> jump to the first and last thread" do

@@ -151,8 +151,9 @@ defmodule Aimax.Ui.Layouts do
           /* HTML preview: sandboxed (no scripts), styles/images allowed */
           .html-preview {
             flex: 1; width: 100%; border: 0;
-            background: var(--window-bg, #fdfcf8);
+            background: var(--window-inactive-bg, #f4f0e6);
           }
+          .window.active .html-preview { background: var(--window-bg, #fdfcf8); }
           .region { background: var(--region-bg, #e7e9f1); }
           /* native drag-selection matches the editor region it becomes */
           ::selection { background: var(--region-bg, #e7e9f1); }

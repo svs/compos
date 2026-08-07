@@ -38,6 +38,10 @@
 (defcustom 'notmuch-prefer-html #t
   "Render threads as HTML when a message has an HTML part (v toggles text)."
   'group 'notmuch)
+(defcustom 'notmuch-html-original-colors #f
+  "Render emails with their authored colors on a white canvas. Off, the
+theme repaints them (shr-style: layout survives, colors follow the theme
+— readable in dark mode)." 'group 'notmuch)
 (defcustom 'notmuch-html-renderer "w3m -dump -O utf-8 -T text/html"
   "Command that turns HTML into text, for the text view and the mail tools
 when a message has no text/plain part." 'group 'notmuch)
@@ -197,6 +201,11 @@ when a message has no text/plain part." 'group 'notmuch)
       (local-set-key "D" "notmuch-trash-marked")
       (local-set-key "t" "notmuch-tag-marked")
       (local-set-key "T" "notmuch-edit-tags")
+      (local-set-key "+" "notmuch-add-tag")
+      (local-set-key "-" "notmuch-remove-tag")
+      (local-set-key "j" "notmuch-jump")
+      (local-set-key "/" "notmuch-filter")
+      (local-set-key "l" "notmuch-filter")
       (local-set-key "s" "notmuch-search")
       (local-set-key "g" "notmuch-refresh")
       ;; like notmuch-emacs: q in the index goes back to the mailboxes
@@ -300,6 +309,7 @@ when a message has no text/plain part." 'group 'notmuch)
       (local-set-key "p" "previous-line")
       (local-set-key "RET" "notmuch-hello-open")
       (local-set-key "g" "notmuch-hello-refresh")
+      (local-set-key "j" "notmuch-jump")
       (local-set-key "s" "notmuch-search")
       (local-set-key "q" "quit-window")
       (nm--hello-refresh! buf))))
@@ -443,6 +453,64 @@ when a message has no text/plain part." 'group 'notmuch)
           (minibuffer-read "Tags (+add -remove): " '()
             (lambda (changes) (nm--tag! buf changes)))
           (message "No thread on this line")))))
+
+;; every tag in the database — the completion source for +
+(define (nm--all-tags)
+  (filter (lambda (t) (not (equal? t "")))
+          (string-split (string-trim (nm--run "search --output=tags '*'")) "\n")))
+
+(define-command "notmuch-add-tag" "Add a tag to the thread at point (completes)"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (nm--thread-at buf)
+          (minibuffer-read "Add tag: " (nm--all-tags)
+            (lambda (tag)
+              (unless (equal? (string-trim tag) "")
+                (nm--tag! buf (string-append "+" (string-trim tag))))))
+          (message "No thread on this line")))))
+
+(define-command "notmuch-remove-tag" "Remove a tag from the thread at point (completes)"
+  (lambda ()
+    (let* ((buf (current-buffer)) (th (nm--thread-at buf)))
+      (if th
+          (minibuffer-read "Remove tag: " (nm--th-tags th)
+            (lambda (tag)
+              (unless (equal? (string-trim tag) "")
+                (nm--tag! buf (string-append "-" (string-trim tag))))))
+          (message "No thread on this line")))))
+
+;;; --- jump & filter ---------------------------------------------------------------
+
+;; ((key name query) ...) — personal jump table, set in init.scm; empty
+;; falls back to the saved searches by name
+(define notmuch-jump-searches '())
+
+(define-command "notmuch-jump" "Jump to a saved search (j, then its key)"
+  (lambda ()
+    (if (null? notmuch-jump-searches)
+        (let ((ss (nm--saved-searches)))
+          (minibuffer-read "Jump: "
+            (map (lambda (s) (list (car s) (cadr s))) ss)
+            (lambda (name)
+              (let ((e (assoc name ss)))
+                (when e (nm--open-index! (cadr e)))))))
+        (minibuffer-read "Jump: "
+          (map (lambda (s) (list (car s) (string-append (cadr s) " · " (caddr s))))
+               notmuch-jump-searches)
+          (lambda (key)
+            (let ((e (assoc key notmuch-jump-searches)))
+              (when e (nm--open-index! (caddr e)))))))))
+
+(define-command "notmuch-filter" "Narrow this search with more terms (and)"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (minibuffer-read "Filter (and): " '()
+        (lambda (terms)
+          (unless (equal? (string-trim terms) "")
+            (buffer-set-local! buf 'notmuch-query
+              (string-append "( " (nm--query-of buf) " ) and " (string-trim terms)))
+            (nm--refresh! buf)
+            (goto-char! 0) (next-line!) (beginning-of-line!)))))))
 
 (define-command "notmuch-filter-by-sender" "Narrow the search to this thread's sender"
   (lambda ()
@@ -665,6 +733,7 @@ when a message has no text/plain part." 'group 'notmuch)
       (local-set-key "a" "notmuch-show-archive")
       (local-set-key "r" "notmuch-show-reply")
       (local-set-key "v" "notmuch-show-toggle-view")
+      (local-set-key "j" "notmuch-jump")
       (local-set-key "q" "quit-window")
       (let ((th (buffer-local buf 'notmuch-thread)))
         (when th
@@ -678,7 +747,12 @@ when a message has no text/plain part." 'group 'notmuch)
                 (begin
                   (buffer-append! buf (nm--thread-html subject msgs))
                   (buffer-set-local! buf 'render-mode "html")
-                  (buffer-set-local! buf 'preview-authored #t)
+                  ;; authored colors assume a white canvas — by default the
+                  ;; theme repaints the document instead (dark mode stays
+                  ;; readable); customize notmuch-html-original-colors to
+                  ;; get the untouched rendering back
+                  (buffer-set-local! buf 'preview-authored
+                    notmuch-html-original-colors)
                   ;; fake ascending offsets: point stays 0 in the html view,
                   ;; so "message at point" means the first (newest) message
                   (buffer-set-local! buf 'notmuch-msgs

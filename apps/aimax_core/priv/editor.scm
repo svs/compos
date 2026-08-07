@@ -828,6 +828,7 @@
       (local-set-key "C-c m" "chat-set-model")
       (local-set-key "C-c $" "chat-cost")
       (local-set-key "C-c b" "chat-set-backend")
+      (local-set-key "C-c C-k" "chat-reset")
       ;; an agent-backed chat needs the thread keys back after restore
       ;; (the runtime itself does not survive — agent-send revives it)
       (when (and (buffer-local buf 'agent-slug)
@@ -996,6 +997,32 @@
                                      (chat-presets-of buf)
                                      '())))))
       slug)))
+
+;; wipe the conversation, keep the surface: group, model, backend and keys
+;; survive; rich chats get their meta card back, plain chats their banner
+(define-command "chat-reset" "Reset this chat: clear the transcript, start fresh"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (not (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
+          (message "not a chat buffer")
+          (let ((rich? (buffer-local buf 'agent-saved-mark))
+                (g (buffer-group buf)))
+            (overlay-clear! buf "all")
+            (buffer-set-hidden! buf '())
+            (for-each (lambda (k) (buffer-set-local! buf k #f))
+                      (list 'chat-turns 'agent-blocks 'agent-overlays
+                            'agent-folds 'agent-queued 'chat-cost
+                            'chat-last-usage 'agent-saved-mark))
+            (buffer-delete-range! buf 0 (buffer-size buf))
+            (if rich?
+                (group-chat-init! buf (or g buf))
+                (buffer-append! buf
+                  (string-append ";; ai-max chat · " (llm-model)
+                                 " · C-c RET sends · C-c m switches model"
+                                 (chat-prompt-marker))))
+            (set-mode! "chat-mode")
+            (end-of-buffer!)
+            (message "Chat reset"))))))
 
 (define-command "chat-set-backend" "Power this chat by the API or an agent connector"
   (lambda ()

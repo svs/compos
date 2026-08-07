@@ -120,6 +120,22 @@ defmodule Aimax.ChatResetTest do
     assert eval!(~s{(buffer-text (current-buffer))}) =~ "companion · acp-reset"
   end
 
+  test "seed context carries the conversation, never the meta-card chrome" do
+    eval!(~s{(begin (switch-to-buffer! (group-chat "seedg")) #t)})
+    # fresh surface: only the meta card — nothing to seed
+    assert eval!(~s{(string-trim (agent-conversation-text (current-buffer)))}) == ~s{""}
+
+    eval!(~s{(let* ((buf (current-buffer)) (s (buffer-size buf)))
+      (buffer-append! buf "what shipped today?")
+      (chat-blocks-push! buf s (buffer-size buf) "user" '())
+      (buffer-set-local! buf 'agent-saved-mark (buffer-size buf))
+      #t)})
+    tail = eval!(~s{(agent-transcript-tail (current-buffer))})
+    assert tail =~ "what shipped today?"
+    refute tail =~ "companion"
+    refute tail =~ "RET sends"
+  end
+
   test "outside a chat it refuses politely" do
     eval!(~s{(begin (switch-to-buffer! "*scratch*") (run-command "chat-reset"))})
     assert eval!(~s{(buffer-exists? "*scratch*")}) == "#t"

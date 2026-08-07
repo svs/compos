@@ -375,7 +375,11 @@
                      (if (null? ms) last (loop (cdr ms) (car (car ms)))))))
          (m (buffer-local buf 'agent-model)))
     (buffer-set-local! buf 'agent-queued '())
-    (when (> mark 0) (buffer-set-local! buf 'agent-seed-context #t))
+    ;; seed only when there IS a conversation — a fresh surface's meta
+    ;; card alone is chrome, not context
+    (when (and (> mark 0)
+               (not (equal? (string-trim (agent-conversation-text buf)) "")))
+      (buffer-set-local! buf 'agent-seed-context #t))
     (agent-start! slug
       (append (list 'buffer buf 'mark mark)
               (agent-resolve-config
@@ -426,9 +430,29 @@
 ;; split a utf-8 char and poison the json encoder.
 (define *agent-context-cap* 12000)
 
+;; the conversation as text: block-mapped spans minus the chrome (meta
+;; cards, waiting/permission banners) — seeding a fresh session with the
+;; help banner is noise, not context. Buffers from before the block model
+;; fall back to the raw region below the mark.
+(define (agent-conversation-text buf)
+  (let ((bs (or (buffer-local buf 'agent-blocks) '()))
+        (text (buffer-text buf))
+        (mark (or (buffer-local buf 'agent-saved-mark) (buffer-size buf))))
+    (if (null? bs)
+        (substring-bytes text 0 mark)
+        (let loop ((bs (reverse bs)) (acc ""))
+          (if (null? bs)
+              acc
+              (let ((b (car bs)))
+                (loop (cdr bs)
+                      (if (member (caddr b) (list "meta" "waiting" "permission"))
+                          acc
+                          (string-append acc
+                            (substring-bytes text (car b)
+                                             (min (cadr b) mark)))))))))))
+
 (define (agent-transcript-tail buf)
-  (let* ((mark (or (buffer-local buf 'agent-saved-mark) (buffer-size buf)))
-         (text (substring-bytes (buffer-text buf) 0 mark)))
+  (let ((text (agent-conversation-text buf)))
     (if (<= (string-byte-length text) *agent-context-cap*)
         text
         (let loop ((ls (string-split text "\n")))

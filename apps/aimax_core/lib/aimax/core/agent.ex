@@ -59,9 +59,20 @@ defmodule Aimax.Core.Agent do
   @doc "Ask the backend to switch the session's model in place."
   def set_model(slug, model_id), do: call(slug, {:set_model, model_id})
 
-  @doc "Answer a pending permission request by option id (nil = cancel)."
+  @doc """
+  Answer a pending permission request by option id (nil = cancel).
+  Idempotent: answering one that is already resolved is a no-op, not an
+  error — a banner and a deadline racing must never surface as a failure.
+  """
   def respond_permission(slug, rpc_id, option_id),
     do: call(slug, {:respond_permission, rpc_id, option_id})
+
+  @doc """
+  Auto-resolve the pending permission as cancelled after `ms` unless it is
+  answered first. Scheme arms this for chats no one is looking at, so
+  headless work can never hang on a banner nobody will see.
+  """
+  def permission_deadline(slug, ms), do: call(slug, {:permission_deadline, ms})
 
   @doc "Insert rendered output at the output mark. Returns the new mark."
   def append_at_mark(slug, text), do: call(slug, {:append_at_mark, text})
@@ -151,19 +162,22 @@ defmodule Aimax.Core.Agent do
   end
 
   def handle_call({:respond_permission, rpc_id, option_id}, _from, state) do
+    # CAS on rpc_id: only the request still pending resolves, and a stale
+    # answer is a silent no-op
     case state.pending_permission do
-      %{rpc_id: ^rpc_id} ->
-        state.backend.respond_permission(state.handle, rpc_id, option_id)
+      %{rpc_id: ^rpc_id} -> {:reply, :ok, resolve_permission(state, option_id)}
+      _ -> {:reply, :ok, state}
+    end
+  end
 
-        state =
-          state
-          |> Map.put(:pending_permission, nil)
-          |> set_status(:running)
-
+  def handle_call({:permission_deadline, ms}, _from, state) do
+    case state.pending_permission do
+      %{rpc_id: id} ->
+        Process.send_after(self(), {:permission_timeout, id}, ms)
         {:reply, :ok, state}
 
       _ ->
-        {:reply, {:error, :no_pending_permission}, state}
+        {:reply, :ok, state}
     end
   end
 
@@ -209,6 +223,25 @@ defmodule Aimax.Core.Agent do
     {:noreply, state}
   end
 
+  # nobody is looking at this chat and nobody answered — deny and say so,
+  # rather than leaving the turn wedged forever
+  def handle_info({:permission_timeout, id}, state) do
+    case state.pending_permission do
+      %{rpc_id: ^id, title: title} ->
+        state =
+          state
+          |> enqueue(
+            Backend.plist(type: :"permission-timeout", title: title)
+          )
+          |> resolve_permission(nil)
+
+        {:noreply, state}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
   def handle_info(_msg, state), do: {:noreply, state}
 
   @impl true
@@ -219,8 +252,23 @@ defmodule Aimax.Core.Agent do
 
   @impl true
   def terminate(_reason, state) do
+    # a killed thread must never leave a backend blocked on an answer
+    if state.pending_permission do
+      state.backend.respond_permission(state.handle, state.pending_permission.rpc_id, nil)
+    end
+
     state.backend.close(state.handle)
     :ok
+  end
+
+  # one place resolves a pending request: answer the backend, clear the
+  # slot, return to running
+  defp resolve_permission(state, option_id) do
+    state.backend.respond_permission(state.handle, state.pending_permission.rpc_id, option_id)
+
+    state
+    |> Map.put(:pending_permission, nil)
+    |> set_status(:running)
   end
 
   # the status machine reads the event stream; control events (ready,
@@ -234,7 +282,10 @@ defmodule Aimax.Core.Agent do
         state |> set_status(:idle) |> pop_prompt_queue()
 
       "turn-end" ->
+        # a turn that ends with a request still open (the agent gave up,
+        # the wire died) resolves it cancelled — never a stuck banner
         state
+        |> then(fn s -> if s.pending_permission, do: resolve_permission(s, nil), else: s end)
         |> enqueue(event)
         |> set_status(:idle)
         |> pop_prompt_queue()

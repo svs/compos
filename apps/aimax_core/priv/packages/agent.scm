@@ -297,15 +297,37 @@
                       "agent-meta")))
          (agent-block-push! buf start (agent-mark slug) "plan" '())))
 
+      ;; the policy decides, not the backend: approvals are invisible
+      ;; (the tool just runs), denials and asks are recorded
       ((equal? type 'permission)
+       (let* ((title (plist-get e 'title))
+              (kind (or (plist-get e 'kind) ""))
+              (verdict (*permission-policy* buf title kind (or (plist-get e 'raw) ""))))
+         (cond
+           ((equal? verdict 'allow)
+            (agent-answer-permission! slug "allow_once" "allow"))
+           ((equal? verdict 'allow-always)
+            (agent-answer-permission! slug "allow_always" "allow"))
+           ((equal? verdict 'reject)
+            (agent-answer-permission! slug "reject_once" "reject"))
+           (else
+             (let ((start (agent-render! slug
+                            (string-append "\n── needs permission: " title
+                                           " ── C-c C-y allow · C-c C-n deny\n")
+                            "agent-permission")))
+               (agent-block-push! buf start (agent-mark slug) "permission"
+                 (list title)))
+             (agent-arm-permission-deadline! slug)
+             (message (string-append "agent " slug " needs permission: " title))))))
+
+      ;; nobody was watching and nobody answered — the transcript says so
+      ((equal? type 'permission-timeout)
+       (agent-block-drop-kind! buf "permission")
        (let ((start (agent-render! slug
-                      (string-append "\n── needs permission: " (plist-get e 'title)
-                                     " ── C-c C-y allow · C-c C-n deny\n")
-                      "agent-permission")))
-         (agent-block-push! buf start (agent-mark slug) "permission"
-           (list (plist-get e 'title))))
-       (message (string-append "agent " slug " needs permission: "
-                               (plist-get e 'title))))
+                      (string-append "permission timed out (denied): "
+                                     (plist-get e 'title) "\n")
+                      "agent-meta")))
+         (agent-block-push! buf start (agent-mark slug) "meta" '())))
 
       ;; the direct lane prices every turn; ACP rides a subscription and
       ;; emits none, so its modeline stays connector · model
@@ -363,6 +385,88 @@
       ;; fleet surfaces track every batch: the erc-track segment + *chats*
       (agents-modeline-refresh!)
       (agents-refresh!))))
+
+;;; --- permissions: one policy, three modalities --------------------------------
+;;; Threat model: an agent holding eval-scheme in a local editor is already
+;;; trusted — per-call modals are theater EXCEPT for irreversible,
+;;; outward-facing acts (send mail, permanent deletion, push/publish).
+;;; So: ONE policy function, consulted identically on both lanes.
+;;;
+;;;   ask     — every tool call banners (the old ACP behavior)
+;;;   approve — the deny-list banners, everything else runs (default)
+;;;   auto    — approve, and the backend is told to stop asking too (W4)
+;;;
+;;; The deny-list never relies on a backend asking: it also holds at OUR
+;;; chokepoints — the direct lane's dispatcher gate and the MCP proxy —
+;;; because every deny-listed verb reaches the world through one of those.
+
+(define *permission-default-mode* 'approve)
+
+(define (chat-permission-mode buf)
+  (or (buffer-local buf 'chat-permission-mode) *permission-default-mode*))
+
+;; verb-shaped patterns over the tool name/title/payload
+(define *permission-deny-patterns*
+  (list "send[-_ ]*mail" "sendmail" "mail[-_ ]*send" "smtp"
+        "send[-_ ]*(message|email|sms|text)"
+        "(permanently|forever)[-_ ]*delete" "delete[-_ ]*(permanently|forever)"
+        "empty[-_ ]*trash" "trash[-_ ]*empty" "expunge"
+        "rm[-_ ]+-[a-z]*[rf]" "git[-_ ]+push" "force[-_ ]*push"
+        "\\bpublish\\b" "\\bdeploy\\b"))
+
+;; -> the matching pattern, or #f
+(define (permission-denied-verb? text)
+  (let ((t (string-downcase text)))
+    (let loop ((ps *permission-deny-patterns*))
+      (cond ((null? ps) #f)
+            ((re-match? (car ps) t) (car ps))
+            (else (loop (cdr ps)))))))
+
+;; The one policy. Override wholesale in ~/.aimax/init.scm:
+;;   (set! *permission-policy* (lambda (buf title kind raw) 'allow))
+;; -> 'allow | 'allow-always | 'ask | 'reject
+(define *permission-policy*
+  (lambda (buf title kind raw)
+    (cond ((permission-denied-verb?
+             (string-append (or title "") " " (or kind "") " " (or raw "")))
+           'ask)
+          ((equal? (chat-permission-mode buf) 'ask) 'ask)
+          (else 'allow-always))))
+
+;; the direct lane's gate (Backend.ReqLLM calls this before every tool):
+;; collapse to the three verdicts Elixir understands
+(agent-permission-fn!
+  (lambda (slug name kind raw)
+    (let* ((buf (agent-buf slug))
+           (v (*permission-policy* buf name kind raw)))
+      (cond ((equal? v 'reject) 'reject)
+            ((equal? v 'ask) 'ask)
+            (else 'allow)))))
+
+;; a chat nobody is looking at cannot answer a banner — give it a deadline
+;; so headless work denies and moves on instead of hanging forever
+(defcustom 'permission-timeout-ms 120000
+  "Auto-deny an unanswered permission after this long, in chats no window shows."
+  'group 'chat 'type 'integer)
+
+(define (agent-arm-permission-deadline! slug)
+  (unless (window-showing (agent-buf slug))
+    (agent-permission-deadline! slug permission-timeout-ms)))
+
+(define-command "chat-set-permission-mode" "Cycle this chat's permission mode"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (m (chat-permission-mode buf))
+           (next (cond ((equal? m 'approve) 'auto)
+                       ((equal? m 'auto) 'ask)
+                       (else 'approve))))
+      (buffer-set-local! buf 'chat-permission-mode next)
+      (agent-update-modeline! buf)
+      (message
+        (string-append "permissions: " (symbol->string next)
+          (cond ((equal? next 'ask) " — every tool call asks")
+                ((equal? next 'approve) " — only irreversible acts ask")
+                (else " — the agent stops asking too; the deny-list still holds")))))))
 
 ;;; --- permission answers -------------------------------------------------------
 
@@ -701,7 +805,9 @@
     (buffer-set-local! buf 'modeline-info
       (string-append c
         (if (and m (not (equal? m ""))) (string-append " · " m) "")
-        (if cost (string-append " · " (format-usd cost)) "")))))
+        (if cost (string-append " · " (format-usd cost)) "")
+        ;; what will and won't stop to ask — never leave this ambiguous
+        " · " (symbol->string (chat-permission-mode buf))))))
 
 ;;; --- thread creation ----------------------------------------------------------
 
@@ -730,6 +836,7 @@
   (local-set-key* buf "C-c C-y" "agent-permission-allow")
   (local-set-key* buf "C-c C-a" "agent-permission-always")
   (local-set-key* buf "C-c C-n" "agent-permission-deny")
+  (local-set-key* buf "C-c p" "chat-set-permission-mode")
   (local-set-key* buf "C-c C-v" "agent-toggle-view"))
 
 (define-command "agent-toggle-view" "Toggle rich and plain transcript rendering"
@@ -758,6 +865,10 @@
          (buf (string-append "*chat:" slug "*")))
     (buffer-create buf)
     (buffer-set-local! buf 'agent-slug slug)
+    ;; a spawned chat may declare its permission posture up front — the
+    ;; first turn can start before anyone could press C-c p
+    (let ((pm (plist-get opts 'permission-mode)))
+      (when pm (buffer-set-local! buf 'chat-permission-mode pm)))
     (chat-task-init! buf slug)
     (chat-attach-agent! buf
       (or (plist-get opts 'connector) *default-connector*)

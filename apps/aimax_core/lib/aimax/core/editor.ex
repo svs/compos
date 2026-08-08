@@ -894,6 +894,8 @@ defmodule Aimax.Core.Editor do
       col: snap.col,
       style: Map.get(locals, "style"),
       render_mode: Map.get(locals, "render-mode"),
+      # web buffers: the page the frame points at (render-mode "web")
+      url: Map.get(locals, "url"),
       agent: agent_leaf(locals, text),
       preview_authored: Map.get(locals, "preview-authored") == true,
       top: top,

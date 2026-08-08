@@ -80,7 +80,10 @@ defmodule Aimax.Core.LLM do
   Event opts (all optional): `:on_chunk` / `:on_thinking` receive streamed
   text deltas (and, when the wire didn't stream, the whole final text);
   `:on_tool` receives `(id, name, input)` before a dispatch; `:on_tool_done`
-  receives `(id, result)` after. `:model` overrides `model/0`.
+  receives `(id, result)` after; `:gate` receives `(name, input)` before a
+  dispatch and returns `:allow` or `{:deny, reason}` — the permission
+  chokepoint every direct-lane tool call passes through. `:model`
+  overrides `model/0`.
   """
   def run_tool_loop(messages, system, specs, dispatcher, opts \\ []) do
     tools = Enum.map(specs, &tool_json/1)
@@ -110,7 +113,13 @@ defmodule Aimax.Core.LLM do
         results =
           for %{"type" => "tool_use"} = b <- blocks do
             if opts[:on_tool], do: opts[:on_tool].(b["id"], b["name"], b["input"])
-            result = run_tool(dispatcher, b["name"], b["input"])
+
+            result =
+              case gate_call(opts[:gate], b["name"], b["input"]) do
+                :allow -> run_tool(dispatcher, b["name"], b["input"])
+                {:deny, why} -> "permission denied: #{why}"
+              end
+
             if opts[:on_tool_done], do: opts[:on_tool_done].(b["id"], result)
 
             %{type: "tool_result", tool_use_id: b["id"], content: result}
@@ -132,6 +141,10 @@ defmodule Aimax.Core.LLM do
 
   defp maybe_put(map, _k, nil), do: map
   defp maybe_put(map, k, v), do: Map.put(map, k, v)
+
+  # no gate configured (a bare (llm-tools ...) call) runs as before
+  defp gate_call(nil, _name, _input), do: :allow
+  defp gate_call(gate, name, input), do: gate.(name, input)
 
   # a stubbed (or non-streaming) wire emits no deltas — feed the round's
   # text through on_chunk so renderers see it exactly once either way

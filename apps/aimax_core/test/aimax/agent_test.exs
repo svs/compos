@@ -69,9 +69,11 @@ defmodule Aimax.AgentTest do
     })
   end
 
-  # boot a thread through (execute ...) and complete the ACP handshake
+  # boot a thread through (execute ...) and complete the ACP handshake.
+  # Threads boot in ask mode here: these tests are about the banner flow,
+  # and the default (approve) answers most requests without one.
   defp boot(task) do
-    {:ok, _} = Session.eval(~s[(execute "#{task}")])
+    {:ok, _} = Session.eval(~s[(execute* "#{task}" '(permission-mode ask))])
     assert_receive {:transport_open, agent}, 1_000
 
     assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
@@ -543,7 +545,7 @@ defmodule Aimax.AgentTest do
     {:ok, _} = Session.eval(~s[(agent-prompt! "a1" "task one")])
     assert_receive {:frame, %{"method" => "session/prompt"}}, 1_000
 
-    {:ok, _} = Session.eval(~s{(execute "")})
+    {:ok, _} = Session.eval(~s{(execute* "" '(permission-mode ask))})
     assert_receive {:transport_open, agent2}, 1_000
     assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
     inject(agent2, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{}})

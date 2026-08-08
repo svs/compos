@@ -65,7 +65,9 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
        owner: owner,
        slug: Map.get(config, "slug"),
        model: Map.get(config, "model"),
-       task: nil
+       task: nil,
+       next_rpc_id: 1,
+       pending: nil
      }}
   end
 
@@ -85,6 +87,7 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
   end
 
   def handle_call(:cancel, _from, %{task: %Task{} = task} = state) do
+    state = release_pending(state, :deny)
     Task.shutdown(task, :brutal_kill)
     emit(state, type: :"turn-end", "stop-reason": "cancelled")
     {:reply, :ok, %{state | task: nil}}
@@ -95,9 +98,52 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
   def handle_call({:set_model, model_id}, _from, state),
     do: {:reply, :ok, %{state | model: model_id}}
 
-  # no wire to answer — permission flow lands with W5's dispatcher gate
-  def handle_call({:respond_permission, _rpc_id, _option_id}, _from, state),
-    do: {:reply, :ok, state}
+  # the turn task asks before running a gated tool; the reply comes later,
+  # when the user (or a deadline) answers — hence no immediate {:reply, ...}
+  def handle_call({:ask_permission, title, kind, raw}, from, state) do
+    id = state.next_rpc_id
+
+    emit(state,
+      type: :permission,
+      "rpc-id": id,
+      title: title,
+      kind: kind,
+      # what the gate judged — the renderer re-consults the same policy
+      # and must not see less than the gate did
+      raw: raw,
+      options: [
+        ["allow", "Allow", "allow_once"],
+        ["always", "Always", "allow_always"],
+        ["deny", "Reject", "reject_once"]
+      ]
+    )
+
+    {:noreply, %{state | next_rpc_id: id + 1, pending: %{rpc_id: id, from: from}}}
+  end
+
+  # CAS on rpc_id: answering a request that is already resolved (or was
+  # never ours) is a NO-OP, never an error — double answers are routine
+  # when a banner and a deadline race
+  def handle_call({:respond_permission, rpc_id, option_id}, _from, state) do
+    case state.pending do
+      %{rpc_id: ^rpc_id} ->
+        {:reply, :ok, release_pending(state, verdict_of(option_id))}
+
+      _ ->
+        {:reply, :ok, state}
+    end
+  end
+
+  defp verdict_of(nil), do: :deny
+  defp verdict_of("deny"), do: :deny
+  defp verdict_of(opt) when is_binary(opt), do: if(opt == "always", do: :always, else: :allow)
+
+  defp release_pending(%{pending: %{from: from}} = state, verdict) do
+    GenServer.reply(from, verdict)
+    %{state | pending: nil}
+  end
+
+  defp release_pending(state, _verdict), do: state
 
   # events from the turn task, forwarded in arrival order
   @impl GenServer
@@ -137,12 +183,20 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
 
   # turn task crashed (a cancel's :brutal_kill DOWN is flushed above)
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{task: %Task{ref: ref}} = state) do
+    state = release_pending(state, :deny)
     emit(state, type: :error, text: "turn crashed: #{inspect(reason)}")
     emit(state, type: :"turn-end", "stop-reason": "error")
     {:noreply, %{state | task: nil}}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
+
+  # a closing backend must never leave a turn task blocked on an answer
+  @impl GenServer
+  def terminate(_reason, state) do
+    release_pending(state, :deny)
+    :ok
+  end
 
   defp emit(state, kvs) do
     send(state.owner, {:backend_event, Backend.plist(kvs)})
@@ -166,6 +220,9 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
           model: model,
           on_chunk: fn t -> ev.(type: :chunk, text: t) end,
           on_thinking: fn t -> ev.(type: :thought, text: t) end,
+          # aimax owns permissions on BOTH lanes: the same Scheme policy
+          # that answers ACP's requests gates every direct-lane tool call
+          gate: fn name, input -> gate(backend, slug, name, input) end,
           on_tool: fn id, name, _input ->
             ev.(type: :"tool-call", id: id, title: name, kind: "tool", status: "pending")
           end,
@@ -176,6 +233,45 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
 
       {:error, msg} ->
         {:error, msg}
+    end
+  end
+
+  # the permission gate: ask Scheme's policy, and only when it says "ask"
+  # block the turn on a real request (which the banner, or a deadline,
+  # answers). A missing policy fn means no gate — never a wedged turn.
+  defp gate(backend, slug, name, input) do
+    case permission_verdict(slug, name, input) do
+      :allow ->
+        :allow
+
+      :reject ->
+        {:deny, "denied by policy"}
+
+      {:ask, raw} ->
+        case GenServer.call(backend, {:ask_permission, name, "tool", raw}, :infinity) do
+          :deny -> {:deny, "denied"}
+          _ -> :allow
+        end
+    end
+  catch
+    # a policy that crashes must not wedge the turn — fail open, exactly
+    # as an ungated tool would run
+    :exit, _ -> :allow
+  end
+
+  defp permission_verdict(slug, name, input) do
+    case :ets.lookup(@escaped, {:agent_permission}) do
+      [] ->
+        :allow
+
+      [{_, fun}] ->
+        raw = name <> " " <> inspect(input)
+
+        case Session.call_fn(fun, [slug, name, "tool", raw]) do
+          {:ok, {:sym, "ask"}} -> {:ask, raw}
+          {:ok, {:sym, "reject"}} -> :reject
+          _ -> :allow
+        end
     end
   end
 

@@ -52,7 +52,7 @@ defmodule Aimax.BackendStubTest do
   test "stub backend: chunks + tool card + permission round-trip, no wire" do
     {:ok, _} =
       Session.eval("""
-      (execute* "go" '(backend "stub" script
+      (execute* "go" '(permission-mode ask backend "stub" script
         (((type chunk text "Hello ")
           (type chunk text "world.\\n")
           (type tool-call id "tc1" title "Read foo.ex" kind "read" status "pending")

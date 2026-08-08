@@ -233,10 +233,24 @@
 (define (mcp-proxy-tools-json)
   (base64-encode (tool-specs-json (llm-tool-specs))))
 
+;; the second chokepoint. In auto mode the agent stops asking us
+;; ANYTHING — but the deny-list must still hold, and every deny-listed
+;; verb reaches the world either through the direct lane's gate or
+;; through this proxy. So the payload is checked here too, whatever the
+;; backend decided upstream.
 (define (mcp-proxy-call name args-b64)
   (base64-encode
-    (let ((r (llm-tool-call name (json-parse (base64-decode args-b64)))))
-      (if (string? r) r (value->string r)))))
+    (let* ((args-json (base64-decode args-b64))
+           (denied (and (boundp (quote permission-denied-verb?))
+                        (permission-denied-verb?
+                          (string-append name " " args-json)))))
+      (if denied
+          (string-append
+            "refused: this is an irreversible, outward-facing action ("
+            denied "). Ask the user to run it, or have them approve it in "
+            "the chat.")
+          (let ((r (llm-tool-call name (json-parse args-json))))
+            (if (string? r) r (value->string r)))))))
 
 (public! 'define-tool! "(define-tool! 'name DESC PARAMS HANDLER) — register an LLM tool")
 (public! 'llm-with-tools "(llm-with-tools PROMPT HANDLER) — completion with the full tool loop")

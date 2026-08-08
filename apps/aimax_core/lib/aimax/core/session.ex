@@ -510,6 +510,19 @@ defmodule Aimax.Core.Session do
         :ets.insert(@escaped, {{:agent_context}, handler})
         :void
       end,
+      # the permission policy the DIRECT lane consults before every tool
+      # call: (lambda (slug name kind raw) ...) -> allow | ask | reject.
+      # (The ACP lane answers its own requests through the same policy,
+      # from the event handler.) Rooted like the handlers above.
+      "agent-permission-fn!" => fn [handler] ->
+        :ets.insert(@escaped, {{:agent_permission}, handler})
+        :void
+      end,
+      # arm an auto-deny deadline on the thread's pending permission
+      "agent-permission-deadline!" => fn [slug, ms] ->
+        Aimax.Core.Agent.permission_deadline(s(slug), trunc(ms))
+        :void
+      end,
       "set-modeline-extra!" => fn [s] ->
         Editor.set_modeline_extra(to_string(s))
         :void

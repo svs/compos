@@ -70,7 +70,19 @@ defmodule Aimax.NotmuchTest do
         esac;;
       reply) cat "$dir/reply.json";;
       config) printf 'query.inbox.query=tag:inbox\nquery.unread.query=tag:unread\n';;
-      count) cat - > /dev/null; printf '5\n2\n';;
+      # two different shapes: `count --batch` reads queries on stdin and
+      # answers one line each (the mailbox list), while a plain `count`
+      # must NOT touch stdin — draining a pipe nobody writes to blocks
+      # forever and wedges the Session for every later eval.
+      count)
+        case "$*" in
+          *--batch*)
+            while read -r q; do
+              case "$q" in *unread*) printf '2\n';; *) printf '5\n';; esac
+            done;;
+          *no-such*) printf '0\n';;
+          *) printf '5\n';;
+        esac;;
     esac
     """)
 
@@ -419,9 +431,16 @@ defmodule Aimax.NotmuchTest do
     Aimax.Core.KeyDispatch.handle_key("RET")
     assert calls(dir) =~ "tag -inbox -- thread:0001"
 
+    # the tool reports what the ACTION did, never a blind "done" — a model
+    # that is told an archive succeeded when it didn't will keep going
     out = eval!(~s{(llm-tool-call "act" (list 'type "email" 'id "thread:0002" 'action "trash"))})
-    assert out =~ "done"
+    assert out =~ "0002"
+    assert out =~ "+trash -inbox -unread"
     assert calls(dir) =~ "tag +trash -inbox -unread -- thread:0002"
+
+    # a thread that isn't there says so, instead of claiming success
+    out = eval!(~s{(llm-tool-call "act" (list 'type "email" 'id "no-such-thread" 'action "trash"))})
+    assert out =~ "no such thread"
 
     out = eval!(~s{(llm-tool-call "act" (list 'type "email" 'id "0002" 'action "explode"))})
     assert out =~ "no such action"
@@ -438,6 +457,8 @@ defmodule Aimax.NotmuchTest do
     assert out =~ "Hi there, this is the body."
 
     out = eval!(~s{(mail-tag! "0002" "+important")})
-    assert out =~ "done"
+    assert out =~ "tagged"
+    assert out =~ "0002"
+    assert out =~ "+important"
   end
 end

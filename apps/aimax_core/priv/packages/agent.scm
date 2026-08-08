@@ -592,14 +592,17 @@
 ;; connector that has never reported models) can't validate anything, so
 ;; nothing is filtered then. On rejection: clear the buffer local so the
 ;; foreign id doesn't keep coming back, and warn once.
+;; the pure half: is this buffer's pinned model one this connector could
+;; actually run? (Used by the modeline, which must never claim a model the
+;; session isn't running — and must not have side effects.)
+(define (agent-model-foreign? buf cname m)
+  (let ((declared (append (connector-models cname)
+                          (map car (or (buffer-local buf 'agent-models) '())))))
+    (and m (pair? declared) (not (member m declared)))))
+
 (define (agent-model-for-connector buf cname)
-  (let* ((m0 (buffer-local buf 'agent-model))
-         ;; legit ids: the connector's declared list plus what the
-         ;; adapter itself reported for this session
-         (declared (append (connector-models cname)
-                           (map car (or (buffer-local buf 'agent-models)
-                                        '())))))
-    (if (and m0 (pair? declared) (not (member m0 declared)))
+  (let ((m0 (buffer-local buf 'agent-model)))
+    (if (agent-model-foreign? buf cname m0)
         (begin
           (buffer-set-local! buf 'agent-model #f)
           (agent-update-modeline! buf)
@@ -893,8 +896,12 @@
 ;; carries its running cost; ACP rides a subscription and shows none.
 (define (agent-update-modeline! buf)
   (let* ((c (or (buffer-local buf 'agent-connector) *default-connector*))
-         (m (or (buffer-local buf 'agent-model)
-                (and (connector-api? c) (llm-model))))
+         ;; never name a model this connector can't run: a pinned id left
+         ;; over from another backend (an ACP "default" sentinel, say) is
+         ;; about to be dropped at send time anyway
+         (pinned (let ((m (buffer-local buf 'agent-model)))
+                   (and m (not (agent-model-foreign? buf c m)) m)))
+         (m (or pinned (and (connector-api? c) (llm-model))))
          (cost (and (connector-api? c) (buffer-local buf 'chat-cost))))
     (buffer-set-local! buf 'modeline-info
       (string-append c

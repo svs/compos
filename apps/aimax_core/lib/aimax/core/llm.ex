@@ -1,28 +1,33 @@
 defmodule Aimax.Core.LLM do
   @moduledoc """
   The one async LLM primitive everything composes over: gptel pipes, copilot
-  completions, agents. Runs in a supervised Task — a slow or failing request
-  can never block a keystroke.
+  completions, chat backends. Runs in a supervised Task — a slow or failing
+  request can never block a keystroke.
 
-  `(llm prompt handler)` from Scheme: handler is called with the completion
-  text (via Session, so it can touch buffers). Errors land in *messages*.
+  The wire is `req_llm`: provider translation, streaming, and tool-call
+  encoding are the library's job. This module owns the tool loop, the
+  Scheme-registry integration, prompt-cache policy, and the usage ledger.
+  Internal loop shapes stay Anthropic-style (`%{"stop_reason" => ...,
+  "content" => blocks}`) — `req_llm` structs translate at the edge, and the
+  `:llm_request_fun` / `:llm_chat_fun` app-env seams stub the wire for tests
+  exactly as before.
 
-  Pluggable request fun (`:llm_request_fun` app env) keeps tests hermetic.
+  Model routing (`model/0` strings): `"openai:<m>"` / `"openrouter:<m>"`
+  route to those providers; a bare id is Anthropic. Keys come from
+  `Aimax.Core.Keys` (env -> ~/.aimax/<var>-key -> doppler).
 
-  Tool use (gptel-style, native): `complete_tools/5` runs the Anthropic
-  tool_use loop. Tool definitions and handlers live in the Scheme registry
-  (packages/tools.scm, `define-tool!`); this module only converts specs to
-  JSON, drives the round-trips, and dispatches calls back into the session
-  (`Session.call_fn` on the Scheme dispatcher closure). The `:llm_chat_fun`
-  app env stubs the wire for tests.
-  TODO: streaming (on-chunk handler), tools for openai-style providers.
+  Tool use (gptel-style, native): `complete_tools/6` runs the tool_use loop.
+  Tool definitions and handlers live in the Scheme registry
+  (packages/tools.scm, `define-tool!`); this module converts specs to JSON,
+  drives the round-trips, and dispatches calls back into the session
+  (`Session.call_fn` on the Scheme dispatcher closure).
   """
 
   alias Aimax.Core.Session
 
   @max_tool_rounds 25
 
-  @doc "Synchronous request — for callers managing their own tasks (LLM threads)."
+  @doc "Synchronous request — for callers managing their own tasks."
   def request(prompt), do: request_fun().(prompt)
 
   def complete(prompt, callback) when is_function(callback, 1) do
@@ -52,11 +57,9 @@ defmodule Aimax.Core.LLM do
   """
   def complete_tools(prompt, system, specs, dispatcher, callback, opts \\ [])
       when is_function(callback, 1) do
-    tools = Enum.map(specs, &tool_json/1)
-
     {:ok, _} =
       Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
-        case tool_loop([%{role: "user", content: prompt}], system, tools, dispatcher, 0, %{}) do
+        case run_tool_loop([%{role: "user", content: prompt}], system, specs, dispatcher, opts) do
           {:ok, text, usage} ->
             deliver_usage(usage, opts[:on_usage])
             callback.(text)
@@ -69,39 +72,81 @@ defmodule Aimax.Core.LLM do
     :ok
   end
 
+  @doc """
+  The synchronous tool loop — `complete_tools/6` wraps it in a Task, and
+  `Backend.ReqLLM` drives it from its own turn task. `messages` are
+  Anthropic-shaped; returns `{:ok, final_text, summed_usage}`.
+
+  Event opts (all optional): `:on_chunk` / `:on_thinking` receive streamed
+  text deltas (and, when the wire didn't stream, the whole final text);
+  `:on_tool` receives `(id, name, input)` before a dispatch; `:on_tool_done`
+  receives `(id, result)` after. `:model` overrides `model/0`.
+  """
+  def run_tool_loop(messages, system, specs, dispatcher, opts \\ []) do
+    tools = Enum.map(specs, &tool_json/1)
+    tool_loop(messages, system, tools, dispatcher, 0, %{}, Map.new(opts))
+  end
+
   defp deliver_usage(usage, on_usage) do
     cost = Aimax.Core.LLMDb.record(model(), usage)
     if on_usage, do: on_usage.(Map.put(usage, "cost", cost))
   end
 
-  defp tool_loop(_messages, _system, _tools, _dispatcher, rounds, _usage)
+  defp tool_loop(_messages, _system, _tools, _dispatcher, rounds, _usage, _opts)
        when rounds >= @max_tool_rounds,
        do: {:error, "tool loop exceeded #{@max_tool_rounds} rounds"}
 
-  defp tool_loop(messages, system, tools, dispatcher, rounds, usage) do
-    case chat_fun().(%{messages: messages, system: system, tools: tools}) do
+  defp tool_loop(messages, system, tools, dispatcher, rounds, usage, opts) do
+    req =
+      %{messages: messages, system: system, tools: tools}
+      |> maybe_put(:on_chunk, opts[:on_chunk])
+      |> maybe_put(:on_thinking, opts[:on_thinking])
+      |> maybe_put(:model, opts[:model])
+
+    case chat_fun().(req) do
       {:ok, %{"stop_reason" => "tool_use", "content" => blocks} = resp} ->
+        emit_unstreamed_text(resp, opts)
+
         results =
           for %{"type" => "tool_use"} = b <- blocks do
-            %{
-              type: "tool_result",
-              tool_use_id: b["id"],
-              content: run_tool(dispatcher, b["name"], b["input"])
-            }
+            if opts[:on_tool], do: opts[:on_tool].(b["id"], b["name"], b["input"])
+            result = run_tool(dispatcher, b["name"], b["input"])
+            if opts[:on_tool_done], do: opts[:on_tool_done].(b["id"], result)
+
+            %{type: "tool_result", tool_use_id: b["id"], content: result}
           end
 
         messages =
           messages ++ [%{role: "assistant", content: blocks}, %{role: "user", content: results}]
 
-        tool_loop(messages, system, tools, dispatcher, rounds + 1, add_usage(usage, resp))
+        tool_loop(messages, system, tools, dispatcher, rounds + 1, add_usage(usage, resp), opts)
 
       {:ok, %{"content" => blocks} = resp} ->
+        emit_unstreamed_text(resp, opts)
         {:ok, Enum.map_join(blocks, "", &(&1["text"] || "")), add_usage(usage, resp)}
 
       {:error, msg} ->
         {:error, msg}
     end
   end
+
+  defp maybe_put(map, _k, nil), do: map
+  defp maybe_put(map, k, v), do: Map.put(map, k, v)
+
+  # a stubbed (or non-streaming) wire emits no deltas — feed the round's
+  # text through on_chunk so renderers see it exactly once either way
+  defp emit_unstreamed_text(%{"streamed" => true}, _opts), do: :ok
+
+  defp emit_unstreamed_text(%{"content" => blocks}, %{on_chunk: on_chunk})
+       when is_function(on_chunk, 1) do
+    # the same extraction the loop uses for its final text — a tool_use
+    # block simply has no "text", so it contributes nothing
+    text = Enum.map_join(blocks, "", &(&1["text"] || ""))
+    if text != "", do: on_chunk.(text)
+    :ok
+  end
+
+  defp emit_unstreamed_text(_resp, _opts), do: :ok
 
   # sum token counts across the loop's rounds
   defp add_usage(acc, %{"usage" => usage}) when is_map(usage),
@@ -173,124 +218,173 @@ defmodule Aimax.Core.LLM do
     Application.get_env(:aimax_core, :llm_chat_fun, &default_chat/1)
   end
 
-  # every provider runs the same loop: the internal shapes stay
-  # Anthropic-style and openai-compatible wires translate at the edge —
-  # all chats work the same, whatever the model
-  defp default_chat(%{messages: messages, system: system, tools: tools}) do
-    case model() do
-      "openrouter:" <> m ->
-        openai_tools_chat(
-          "https://openrouter.ai/api/v1/chat/completions",
-          "OPENROUTER_API_KEY",
-          m,
-          messages,
-          system,
-          tools,
-          [{"http-referer", "https://github.com/svs/ai-max.el"}, {"x-title", "ai-max.el"}]
-        )
+  # --- the req_llm wire ---------------------------------------------------------
 
-      "openai:" <> m ->
-        openai_tools_chat(
-          "https://api.openai.com/v1/chat/completions",
-          "OPENAI_API_KEY",
-          m,
-          messages,
-          system,
-          tools,
-          []
-        )
+  # one chat round: our Anthropic-shaped request -> req_llm -> back. Streams
+  # when the caller passed :on_chunk; the response then carries "streamed"
+  # so the loop doesn't re-emit the text.
+  defp default_chat(%{messages: messages, system: system, tools: tools} = req) do
+    model = req[:model] || model()
+    spec = req_model_spec(model)
 
-      m ->
-        anthropic_chat(m, messages, system, tools)
+    with :ok <- ensure_key(spec) do
+      ctx = to_req_context(messages, system)
+      opts = req_opts(spec, tools)
+
+      if req[:on_chunk] do
+        case ReqLLM.stream_text(spec, ctx, opts) do
+          {:ok, sr} ->
+            tee =
+              Stream.map(sr.stream, fn chunk ->
+                case chunk.type do
+                  :content -> if chunk.text not in [nil, ""], do: req.on_chunk.(chunk.text)
+                  :thinking -> if req[:on_thinking] && chunk.text, do: req.on_thinking.(chunk.text)
+                  _ -> :ok
+                end
+
+                chunk
+              end)
+
+            case ReqLLM.StreamResponse.to_response(%{sr | stream: tee}) do
+              {:ok, resp} -> {:ok, Map.put(from_req_response(resp), "streamed", true)}
+              {:error, e} -> {:error, err_msg(e)}
+            end
+
+          {:error, e} ->
+            {:error, err_msg(e)}
+        end
+      else
+        case ReqLLM.generate_text(spec, ctx, opts) do
+          {:ok, resp} -> {:ok, from_req_response(resp)}
+          {:error, e} -> {:error, err_msg(e)}
+        end
+      end
     end
   end
 
-  defp openai_tools_chat(url, key_var, model, messages, system, tools, extra_headers) do
-    case api_key(key_var) do
-      key when key in [nil, ""] ->
-        {:error, "no #{key_var} (env, ~/.aimax/#{String.downcase(key_var)}, or doppler)"}
+  # Provider routing by model name:
+  #   "openrouter:<model>" | "openai:<model>" -> that provider
+  #   anything else                           -> Anthropic
+  def req_model_spec(model) do
+    if String.contains?(model, ":"), do: model, else: "anthropic:" <> model
+  end
 
-      key ->
-        oai_tools =
-          for t <- tools do
-            %{
-              type: "function",
-              function: %{name: t.name, description: t.description, parameters: t.input_schema}
-            }
-          end
+  defp provider_of(spec), do: spec |> String.split(":", parts: 2) |> hd()
 
-        body = %{model: model, messages: to_openai_messages(messages, system)}
-        body = if oai_tools == [], do: body, else: Map.put(body, :tools, oai_tools)
+  @provider_keys %{
+    "anthropic" => {"ANTHROPIC_API_KEY", :anthropic_api_key},
+    "openai" => {"OPENAI_API_KEY", :openai_api_key},
+    "openrouter" => {"OPENROUTER_API_KEY", :openrouter_api_key}
+  }
 
-        Req.post(url,
-          json: body,
-          headers: [{"authorization", "Bearer #{key}"} | extra_headers],
-          receive_timeout: 180_000
-        )
-        |> case do
-          {:ok, %{status: 200, body: rbody}} -> {:ok, from_openai_response(rbody)}
-          other -> format_error(other)
+  defp ensure_key(spec) do
+    case @provider_keys[provider_of(spec)] do
+      nil ->
+        # an exotic provider spec: let req_llm's own key config handle it
+        :ok
+
+      {var, key} ->
+        case Aimax.Core.Keys.get(var) do
+          k when k in [nil, ""] ->
+            {:error, "no #{var} (env, ~/.aimax/#{String.downcase(var)}, or doppler)"}
+
+          k ->
+            ReqLLM.put_key(key, k)
+            :ok
         end
     end
   end
 
-  # internal messages are Anthropic-shaped (assistant tool_use blocks with
-  # string keys from the wire or from from_openai_response; tool_result
-  # blocks with atom keys built by the loop) — flatten to OpenAI form
-  @doc false
-  def to_openai_messages(messages, system) do
-    sys = if system, do: [%{role: "system", content: system}], else: []
-    sys ++ Enum.flat_map(messages, &openai_msg/1)
+  defp req_opts(spec, tools) do
+    base = [receive_timeout: 180_000, max_tokens: 4096]
+
+    tools_opt =
+      if tools == [], do: [], else: [tools: Enum.map(tools, &to_req_tool/1)]
+
+    # cache breakpoints on tools, system, and the last message: chat resends
+    # the whole transcript every turn and the tool loop resends it every
+    # round — with the prefix cached, repeat input bills at the cache-read
+    # rate (~10%) instead of full price
+    cache_opt =
+      if provider_of(spec) == "anthropic",
+        do: [provider_options: [anthropic_prompt_cache: true, anthropic_cache_messages: true]],
+        else: []
+
+    # test seam: e.g. [req_http_options: [plug: ...]] to capture the exact
+    # request req_llm builds. Merged, not appended — duplicate keys in a
+    # keyword list resolve first-wins, which would silently drop it.
+    extra = Application.get_env(:aimax_core, :llm_req_opts, [])
+
+    Keyword.merge(base ++ tools_opt ++ cache_opt, extra, fn
+      _k, a, b when is_list(a) and is_list(b) -> Keyword.merge(a, b)
+      _k, _a, b -> b
+    end)
   end
 
-  defp openai_msg(%{role: "assistant", content: blocks}) when is_list(blocks) do
+  # our tools never execute through req_llm (the loop dispatches into the
+  # Scheme session itself) — the callback is a required-but-inert stub
+  defp to_req_tool(%{name: name, description: description, input_schema: schema}) do
+    {:ok, tool} =
+      ReqLLM.Tool.new(
+        name: name,
+        description: description,
+        parameter_schema: schema |> Jason.encode!() |> Jason.decode!(),
+        callback: fn _args -> {:ok, ""} end
+      )
+
+    tool
+  end
+
+  # Anthropic-shaped loop messages -> ReqLLM.Context
+  defp to_req_context(messages, system) do
+    sys = if system, do: [ReqLLM.Context.system(system)], else: []
+    ReqLLM.Context.new(sys ++ Enum.flat_map(messages, &to_req_msg/1))
+  end
+
+  defp to_req_msg(%{role: "assistant", content: blocks}) when is_list(blocks) do
     text =
       blocks |> Enum.filter(&(&1["type"] == "text")) |> Enum.map_join("", &(&1["text"] || ""))
 
     calls =
       for %{"type" => "tool_use"} = b <- blocks do
-        %{
-          id: b["id"],
-          type: "function",
-          function: %{name: b["name"], arguments: Jason.encode!(b["input"] || %{})}
-        }
+        ReqLLM.ToolCall.new(b["id"], b["name"], Jason.encode!(b["input"] || %{}))
       end
 
-    msg = %{role: "assistant", content: if(text == "", do: nil, else: text)}
-    [if(calls == [], do: msg, else: Map.put(msg, :tool_calls, calls))]
+    if calls == [],
+      do: [ReqLLM.Context.assistant(text)],
+      else: [ReqLLM.Context.assistant(text, tool_calls: calls)]
   end
 
-  defp openai_msg(%{role: "user", content: blocks}) when is_list(blocks) do
+  defp to_req_msg(%{role: "user", content: blocks}) when is_list(blocks) do
     Enum.map(blocks, fn
       %{type: "tool_result", tool_use_id: id, content: c} ->
-        %{role: "tool", tool_call_id: id, content: to_string(c)}
+        ReqLLM.Context.tool_result(id, to_string(c))
 
       %{"type" => "tool_result", "tool_use_id" => id, "content" => c} ->
-        %{role: "tool", tool_call_id: id, content: to_string(c)}
+        ReqLLM.Context.tool_result(id, to_string(c))
 
       other ->
-        %{role: "user", content: inspect(other)}
+        ReqLLM.Context.user(inspect(other))
     end)
   end
 
-  defp openai_msg(%{role: role, content: text}), do: [%{role: role, content: text}]
+  defp to_req_msg(%{role: "user", content: text}), do: [ReqLLM.Context.user(text)]
+  defp to_req_msg(%{role: "assistant", content: text}), do: [ReqLLM.Context.assistant(text)]
 
-  @doc false
-  def from_openai_response(%{"choices" => [%{"message" => msg} | _]} = body) do
-    calls = msg["tool_calls"] || []
+  # ReqLLM.Response -> the loop's Anthropic shape
+  defp from_req_response(resp) do
+    text = ReqLLM.Response.text(resp) || ""
+    calls = ReqLLM.Response.tool_calls(resp) || []
 
     blocks =
-      if(msg["content"] in [nil, ""],
-        do: [],
-        else: [%{"type" => "text", "text" => msg["content"]}]
-      ) ++
-        for c <- calls do
+      if(text == "", do: [], else: [%{"type" => "text", "text" => text}]) ++
+        for tc <- calls do
           %{
             "type" => "tool_use",
-            "id" => c["id"],
-            "name" => get_in(c, ["function", "name"]),
+            "id" => tc.id,
+            "name" => tc.function.name,
             "input" =>
-              case Jason.decode(get_in(c, ["function", "arguments"]) || "{}") do
+              case Jason.decode(tc.function.arguments || "{}") do
                 {:ok, m} when is_map(m) -> m
                 _ -> %{}
               end
@@ -300,77 +394,24 @@ defmodule Aimax.Core.LLM do
     %{
       "stop_reason" => if(calls == [], do: "end_turn", else: "tool_use"),
       "content" => blocks,
-      "usage" => normalize_usage(body["usage"])
+      "usage" => usage_strings(ReqLLM.Response.usage(resp))
     }
   end
 
-  def from_openai_response(body), do: %{"stop_reason" => "end_turn", "content" => [], "usage" => normalize_usage(body["usage"])}
-
-  defp normalize_usage(%{"prompt_tokens" => i, "completion_tokens" => o}),
-    do: %{"input_tokens" => i, "output_tokens" => o}
-
-  defp normalize_usage(u) when is_map(u), do: u
-  defp normalize_usage(_), do: %{}
-
-  defp anthropic_chat(model, messages, system, tools) do
-    case api_key("ANTHROPIC_API_KEY") do
-      key when key in [nil, ""] ->
-        {:error, "no ANTHROPIC_API_KEY (env, ~/.aimax/anthropic-key, or doppler)"}
-
-      key ->
-        # cache breakpoints on tools, system, and the last message: chat
-        # resends the whole transcript every turn and the tool loop resends
-        # it every round — with the prefix cached, repeat input bills at the
-        # cache-read rate (~10%) instead of full price
-        body = %{
-          model: model,
-          max_tokens: 4096,
-          messages: cache_last(messages),
-          tools: cache_last_tool(tools)
-        }
-
-        body =
-          if system,
-            do:
-              Map.put(body, :system, [
-                %{type: "text", text: system, cache_control: %{type: "ephemeral"}}
-              ]),
-            else: body
-
-        Req.post("https://api.anthropic.com/v1/messages",
-          json: body,
-          headers: [{"x-api-key", key}, {"anthropic-version", "2023-06-01"}],
-          receive_timeout: 180_000
-        )
-        |> case do
-          {:ok, %{status: 200, body: body}} -> {:ok, body}
-          other -> format_error(other)
-        end
-    end
+  # req_llm usage (atom keys) -> the ledger's Anthropic field names
+  defp usage_strings(usage) when is_map(usage) do
+    %{
+      "input_tokens" => Map.get(usage, :input_tokens, 0),
+      "output_tokens" => Map.get(usage, :output_tokens, 0),
+      "cache_read_input_tokens" => Map.get(usage, :cached_tokens, 0),
+      "cache_creation_input_tokens" => Map.get(usage, :cache_creation_tokens, 0)
+    }
   end
 
-  # moving cache breakpoint: the last message's last content block. Each
-  # request extends the previous one's prefix, so round N of the tool loop
-  # (and turn N of a chat) reads rounds 1..N-1 from cache.
-  defp cache_last([]), do: []
+  defp usage_strings(_), do: %{}
 
-  defp cache_last(messages) do
-    List.update_at(messages, -1, fn
-      %{content: content} = m when is_binary(content) ->
-        %{m | content: [%{type: "text", text: content, cache_control: %{type: "ephemeral"}}]}
-
-      %{content: blocks} = m when is_list(blocks) ->
-        %{m | content: List.update_at(blocks, -1, &Map.put(&1, :cache_control, %{type: "ephemeral"}))}
-
-      m ->
-        m
-    end)
-  end
-
-  defp cache_last_tool([]), do: []
-
-  defp cache_last_tool(tools),
-    do: List.update_at(tools, -1, &Map.put(&1, :cache_control, %{type: "ephemeral"}))
+  defp err_msg(%{__exception__: true} = e), do: Exception.message(e)
+  defp err_msg(other), do: inspect(other)
 
   @doc "Set the model for subsequent requests (scheme: set-llm-model!)."
   def set_model(model), do: :persistent_term.put(:aimax_llm_model, model)
@@ -382,78 +423,19 @@ defmodule Aimax.Core.LLM do
     end
   end
 
-  # key sources per var: env -> ~/.aimax/<lowercased>-key -> doppler (cached);
-  # shared with MCP server specs via Aimax.Core.Keys
-  defp api_key(var), do: Aimax.Core.Keys.get(var)
-
-  # Provider routing by model name:
-  #   "openrouter:<model>"      -> OpenRouter (openai-compatible)
-  #   "openai:<model>"          -> OpenAI
-  #   anything else             -> Anthropic
+  # the plain one-shot completion (the (llm ...) primitive)
   defp default_request(prompt) do
-    case model() do
-      "openrouter:" <> m ->
-        openai_style(
-          "https://openrouter.ai/api/v1/chat/completions",
-          "OPENROUTER_API_KEY",
-          m,
-          prompt,
-          [{"http-referer", "https://github.com/svs/ai-max.el"}, {"x-title", "ai-max.el"}]
-        )
+    spec = req_model_spec(model())
 
-      "openai:" <> m ->
-        openai_style("https://api.openai.com/v1/chat/completions", "OPENAI_API_KEY", m, prompt, [])
+    with :ok <- ensure_key(spec) do
+      case ReqLLM.generate_text(spec, prompt, req_opts(spec, [])) do
+        {:ok, resp} ->
+          Aimax.Core.LLMDb.record(model(), usage_strings(ReqLLM.Response.usage(resp)))
+          {:ok, ReqLLM.Response.text(resp) || ""}
 
-      m ->
-        anthropic(m, prompt)
+        {:error, e} ->
+          {:error, err_msg(e)}
+      end
     end
   end
-
-  defp anthropic(model, prompt) do
-    case api_key("ANTHROPIC_API_KEY") do
-      key when key in [nil, ""] ->
-        {:error, "no ANTHROPIC_API_KEY (env, ~/.aimax/anthropic-key, or doppler)"}
-
-      key ->
-        Req.post("https://api.anthropic.com/v1/messages",
-          json: %{model: model, max_tokens: 4096, messages: [%{role: "user", content: prompt}]},
-          headers: [{"x-api-key", key}, {"anthropic-version", "2023-06-01"}],
-          receive_timeout: 180_000
-        )
-        |> case do
-          {:ok, %{status: 200, body: %{"content" => blocks} = body}} ->
-            if is_map(body["usage"]), do: Aimax.Core.LLMDb.record(model, body["usage"])
-            {:ok, Enum.map_join(blocks, "", &(&1["text"] || ""))}
-
-          other ->
-            format_error(other)
-        end
-    end
-  end
-
-  defp openai_style(url, key_var, model, prompt, extra_headers) do
-    case api_key(key_var) do
-      key when key in [nil, ""] ->
-        {:error, "no #{key_var} (env, ~/.aimax/..., or doppler)"}
-
-      key ->
-        Req.post(url,
-          json: %{model: model, messages: [%{role: "user", content: prompt}]},
-          headers: [{"authorization", "Bearer #{key}"} | extra_headers],
-          receive_timeout: 180_000
-        )
-        |> case do
-          {:ok, %{status: 200, body: %{"choices" => [%{"message" => %{"content" => text}} | _]} = body}} ->
-            if is_map(body["usage"]), do: Aimax.Core.LLMDb.record(model(), body["usage"])
-            {:ok, text}
-
-          other ->
-            format_error(other)
-        end
-    end
-  end
-
-  defp format_error({:ok, %{status: status, body: body}}), do: {:error, "HTTP #{status}: #{inspect(body)}"}
-  defp format_error({:error, e}), do: {:error, Exception.message(e)}
-  defp format_error(other), do: {:error, inspect(other)}
 end

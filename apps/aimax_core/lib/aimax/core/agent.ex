@@ -46,8 +46,12 @@ defmodule Aimax.Core.Agent do
     Registry.select(@registry, [{{:"$1", :_, :_}, [], [:"$1"]}]) |> Enum.sort()
   end
 
-  @doc "Send or queue a user message. Returns :sent | :queued."
-  def prompt(slug, text), do: call(slug, {:prompt, text})
+  @doc """
+  Send or queue a user message. Returns :sent | :queued. `display` is what
+  the transcript shows and records as the user turn when it differs from the
+  wire text (seed prompts carry context the user never typed).
+  """
+  def prompt(slug, text, display \\ nil), do: call(slug, {:prompt, text, display})
 
   @doc "Cancel the current turn."
   def cancel(slug), do: call(slug, :cancel)
@@ -101,66 +105,43 @@ defmodule Aimax.Core.Agent do
     Aimax.Core.create_buffer(buffer)
     Events.subscribe(buffer)
 
-    # "llm" threads skip the backend entirely: prompts go straight to the
-    # in-process LLM with history kept here. (Deleted by W3 — Backend.ReqLLM
-    # is the proper version of this.)
-    llm? = Map.get(config, "type") == "llm"
+    backend = Backend.module(config)
+    {:ok, handle} = backend.start(Map.put(config, "slug", slug), self())
 
-    {backend, handle} =
-      if llm? do
-        {nil, nil}
-      else
-        backend = Backend.module(config)
-        {:ok, handle} = backend.start(config, self())
-        {backend, handle}
-      end
-
-    state = %{
-      slug: slug,
-      buffer: buffer,
-      config: config,
-      llm?: llm?,
-      history: [],
-      backend: backend,
-      handle: handle,
-      status: :starting,
-      # scheme writes banner + steering marker before starting the runtime and
-      # tells us where output goes (just before the marker)
-      mark: Map.get(config, "mark", Buffer.byte_size(buffer)),
-      events: [],
-      in_flight: false,
-      prompt_queue: [],
-      pending_permission: nil
-    }
-
-    if llm? do
-      {:ok, set_status(state, :idle)}
-    else
-      {:ok, state}
-    end
+    {:ok,
+     %{
+       slug: slug,
+       buffer: buffer,
+       config: config,
+       backend: backend,
+       handle: handle,
+       status: :starting,
+       # scheme writes banner + steering marker before starting the runtime and
+       # tells us where output goes (just before the marker)
+       mark: Map.get(config, "mark", Buffer.byte_size(buffer)),
+       events: [],
+       in_flight: false,
+       prompt_queue: [],
+       pending_permission: nil
+     }}
   end
 
   @impl true
-  def handle_call({:prompt, text}, _from, state) do
+  def handle_call({:prompt, text, display}, _from, state) do
     case state.status do
       :idle ->
-        {:reply, :sent, send_prompt(state, text)}
+        {:reply, :sent, send_prompt(state, text, display)}
 
       s when s in [:starting, :running, :needs_attention] ->
-        {:reply, :queued, %{state | prompt_queue: state.prompt_queue ++ [text]}}
+        {:reply, :queued, %{state | prompt_queue: state.prompt_queue ++ [{text, display}]}}
 
       :dead ->
         {:reply, {:error, :dead}, state}
     end
   end
 
-  def handle_call({:set_model, _model_id}, _from, %{llm?: true} = state),
-    do: {:reply, {:error, :unsupported}, state}
-
   def handle_call({:set_model, model_id}, _from, state),
     do: {:reply, state.backend.set_model(state.handle, model_id), state}
-
-  def handle_call(:cancel, _from, %{llm?: true} = state), do: {:reply, :ok, state}
 
   def handle_call(:cancel, _from, state) do
     if state.status in [:running, :needs_attention],
@@ -228,27 +209,6 @@ defmodule Aimax.Core.Agent do
     {:noreply, state}
   end
 
-  def handle_info({:llm_reply, result}, state) do
-    state =
-      case result do
-        {:ok, text} ->
-          state
-          |> Map.put(:history, state.history ++ [{:assistant, text}])
-          |> enqueue(Backend.plist(type: :chunk, text: text))
-
-        {:error, msg} ->
-          enqueue(state, Backend.plist(type: :error, text: msg))
-      end
-
-    state =
-      state
-      |> enqueue(Backend.plist(type: :"turn-end", "stop-reason": "end_turn"))
-      |> set_status(:idle)
-      |> pop_prompt_queue()
-
-    {:noreply, state}
-  end
-
   def handle_info(_msg, state), do: {:noreply, state}
 
   @impl true
@@ -258,8 +218,6 @@ defmodule Aimax.Core.Agent do
   end
 
   @impl true
-  def terminate(_reason, %{llm?: true}), do: :ok
-
   def terminate(_reason, state) do
     state.backend.close(state.handle)
     :ok
@@ -312,47 +270,23 @@ defmodule Aimax.Core.Agent do
 
   # --- lifecycle helpers ------------------------------------------------------
 
-  defp send_prompt(%{llm?: true} = state, text) do
-    me = self()
-    history = state.history ++ [{:user, text}]
-
-    Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
-      send(me, {:llm_reply, Aimax.Core.LLM.request(llm_prompt(history))})
-    end)
-
-    state
-    |> enqueue(Backend.plist(type: :"user-msg", text: text))
-    |> Map.put(:history, history)
-    |> Map.put(:status, :running)
-    |> emit_status(:running)
-  end
-
-  defp send_prompt(state, text) do
+  defp send_prompt(state, text, display) do
     state =
       state
       # echo the user turn into the transcript via the ordered event channel —
-      # queued messages appear exactly when their turn actually starts
-      |> enqueue(Backend.plist(type: :"user-msg", text: text))
+      # queued messages appear exactly when their turn actually starts. The
+      # event carries the DISPLAY text: what the user typed, not the seed
+      # context wrapped around it on the wire.
+      |> enqueue(Backend.plist(type: :"user-msg", text: display || text))
       |> Map.put(:status, :running)
       |> emit_status(:running)
 
-    state.backend.prompt(state.handle, text, %{})
+    state.backend.prompt(state.handle, text, %{display: display || text})
     state
   end
 
-  defp llm_prompt(history) do
-    turns =
-      Enum.map_join(history, "\n\n", fn
-        {:user, t} -> "User: #{t}"
-        {:assistant, t} -> "Assistant: #{t}"
-      end)
-
-    "You are the assistant in an editor chat thread. Reply to the last user " <>
-      "turn only, in markdown.\n\n" <> turns
-  end
-
-  defp pop_prompt_queue(%{prompt_queue: [next | rest], status: :idle} = state),
-    do: send_prompt(%{state | prompt_queue: rest}, next)
+  defp pop_prompt_queue(%{prompt_queue: [{next, display} | rest], status: :idle} = state),
+    do: send_prompt(%{state | prompt_queue: rest}, next, display)
 
   defp pop_prompt_queue(state), do: state
 

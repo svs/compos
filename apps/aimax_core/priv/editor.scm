@@ -208,7 +208,7 @@
 ;;; --- context providers --------------------------------------------------------
 ;;; A mode can explain what the user is looking at: (register-context-provider!
 ;;; "notmuch-mode" fn) where fn takes the buffer name and returns a short
-;;; description or #f. chat-send and agent-send prepend the visible windows'
+;;; description or #f. agent-send prepends the visible windows'
 ;;; contexts, so "this" in a chat means the thing selected in the other window.
 
 (define *context-providers* '())   ; ((mode-name fn) ...)
@@ -1139,20 +1139,15 @@
 (define-mode "chat-mode"
   (lambda ()
     (let ((buf (current-buffer)))
-      (local-set-key "C-c RET" "chat-send")
       (local-set-key "C-c m" "chat-set-model")
       (local-set-key "C-c $" "chat-cost")
       (local-set-key "C-c b" "chat-set-backend")
       (local-set-key "C-c C-k" "chat-reset")
-      ;; an agent-backed chat needs the thread keys back after restore
-      ;; (the runtime itself does not survive — agent-send revives it),
-      ;; and its queued-send bookkeeping is stale for the same reason:
-      ;; the runtime queue died with the daemon. Cleared, the muted text
-      ;; rejoins the editable input instead of deadlocking RET.
-      (when (and (buffer-local buf 'agent-slug)
-                 (boundp (quote agent-install-keys!)))
-        (buffer-set-local! buf 'agent-queued #f)
-        (agent-install-keys! buf))
+      ;; thread bookkeeping from before a restart is stale — the runtime
+      ;; queue died with the daemon. Cleared, muted queued text rejoins the
+      ;; editable input instead of deadlocking RET.
+      (when (buffer-local buf 'agent-slug)
+        (buffer-set-local! buf 'agent-queued #f))
       ;; legacy: pre-group companions carried a 'companion-of pointer —
       ;; upgrade both ends to the 'group tag (idempotent, so desktop
       ;; restore migrates old sessions by itself)
@@ -1182,9 +1177,12 @@
                 (when ovs (overlay-set! buf 'agent ovs)))
               (agent-apply-folds! buf))
             (buffer-set-local! buf 'modeline-info
-              (string-append "companion · " (llm-model))))
+              (string-append "api · " (llm-model))))
         (chat-clear-waiting! buf)
-        (local-set-key "RET" "chat-send")
+        ;; ONE key set for every chat: RET is agent-send everywhere — a
+        ;; chat without a runtime attaches the api backend on first send
+        (when (boundp (quote agent-install-keys!))
+          (agent-install-keys! buf))
         (local-set-key "S-RET" "newline")
         (local-set-key "C-c C-v" "chat-toggle-view")
         ;; a restored point can land inside the marker — typing/pasting
@@ -1200,29 +1198,16 @@
       (unless (chat-buffer? cur)
         (group-chat-show! (group-ensure! cur))))))
 
-;; the native tool loop is Anthropic-only — on an openai:/openrouter: model
-;; tools when the tools package is loaded and chat-use-tools is on; presets
-;; and cost tracking apply to plain chats exactly like rich ones. The tool
-;; loop serves every provider (anthropic natively, openai-style translated
-;; at the wire) — all chats work the same, whatever the model.
-(define (chat-llm buf prompt handler)
-  (if (and (boundp (quote chat-use-tools)) chat-use-tools)
-      (llm-tools prompt *llm-system*
-                 (append (llm-tool-specs) (chat-extra-specs buf))
-                 llm-tool-call handler
-                 (lambda (u) (chat-usage-note! buf u)))
-      (llm prompt handler)))
-
 ;; the per-send system preamble: a grouped chat points the model at the
 ;; group's work buffers (pull context — the tools read live buffers, so it
-;; is never stale); with tools off the documents are pushed inline instead
+;; is never stale); with tools off the documents are pushed inline instead.
+;; (What the user is LOOKING at rides the message itself —
+;; editor-context-preamble in agent-send-msg! — on every backend.)
 (define (chat-preamble buf)
   (let* ((g (buffer-group buf))
          (docs (if g (group-docs g) '()))
          (tools? (and (boundp (quote chat-use-tools)) chat-use-tools)))
-    (string-append
-      (editor-context-preamble buf)
-      (chat-preamble-body g docs tools?))))
+    (chat-preamble-body g docs tools?)))
 
 (define (chat-preamble-body g docs tools?)
   (cond
@@ -1274,19 +1259,6 @@
          "\n\nThe chat transcript follows; reply to the last user turn "
          "only, in markdown.\n\n"))))
 
-;; sends from whichever chat buffer it is invoked in (chat-mode-local key);
-;; rich companion surfaces take the block path, plain chats the markdown one
-(define-command "chat-send" "Send the current chat input to the LLM"
-  (lambda ()
-    (let ((buf (current-buffer)))
-      (cond ((buffer-local buf 'agent-slug)
-             ;; agent-backed chat: the thread machinery owns the turn
-             ;; (streaming, tool cards, permissions, revive-on-dead)
-             (run-command "agent-send"))
-            ((buffer-local buf 'agent-saved-mark)
-             (chat-send-rich! buf))
-            (else (chat-send-plain! buf))))))
-
 ;;; --- chat backends -------------------------------------------------------------
 ;;; A chat can ride an ACP agent (claude-code, codex — subscription billing)
 ;;; instead of the metered API: the buffer stays the same conversation, a
@@ -1296,7 +1268,12 @@
 ;; opts (a config plist) rides in front, so per-call keys — cmd, model,
 ;; cwd — win over the connector's declared config, first-wins
 (define (chat-attach-agent! buf connector &optional model opts)
-  (let ((slug (or (buffer-local buf 'agent-slug) (agent-next-slug))))
+  (let ((slug (or (buffer-local buf 'agent-slug) (agent-next-slug)))
+        ;; a model pinned on the buffer (C-c m before the first send, or a
+        ;; .chat header) is part of the chat's identity — carry it in
+        (model (if (and model (not (equal? model "")))
+                   model
+                   (buffer-local buf 'agent-model))))
     (buffer-set-local! buf 'agent-slug slug)
     (buffer-set-local! buf 'agent-connector connector)
     (when (and model (not (equal? model "")))
@@ -1385,50 +1362,36 @@
             (end-of-buffer!)
             (message "Chat reset"))))))
 
+;; every backend is a connector now — "api" included. Switching kills the
+;; old runtime and attaches the new one on the SAME slug; the conversation
+;; ('chat-turns) carries over: replayed per-turn on the api lane, seeded
+;; into the first prompt on a fresh ACP session. No key rebinding anywhere.
+(define (chat-switch-backend! buf choice)
+  (let ((slug (buffer-local buf 'agent-slug)))
+    (when (and slug (not (equal? (agent-status slug) 'dead)))
+      (agent-kill! slug)))
+  (buffer-set-local! buf 'agent-seed-context
+    (and (not (connector-api? choice)) (pair? (chat-turns buf))))
+  ;; a model pinned for another connector is stale — connector default
+  (buffer-set-local! buf 'agent-model #f)
+  (buffer-set-local! buf 'agent-models #f)
+  (chat-attach-agent! buf choice))
+
 (define-command "chat-set-backend" "Power this chat by the API or an agent connector"
   (lambda ()
     (let ((buf (current-buffer)))
       (if (not (equal? (buffer-local buf 'mode-name) "chat-mode"))
           (message "not a chat buffer")
           (minibuffer-read "Backend: "
-            (cons (list "api" "direct API — metered, cached, cheap lane")
-                  (map (lambda (c) (list c "ACP agent — rides your subscription"))
-                       (connector-names)))
+            (map (lambda (c)
+                   (list c (if (connector-api? c)
+                               "direct API — metered, cached, cheap lane"
+                               "ACP agent — rides your subscription")))
+                 (connector-names))
             (lambda (choice)
-              (cond ((equal? choice "") #f)
-                    ((equal? choice "api")
-                     (let ((slug (buffer-local buf 'agent-slug)))
-                       (when (and slug (not (equal? (agent-status slug) 'dead)))
-                         (agent-kill! slug))
-                       (buffer-set-local! buf 'agent-slug #f)
-                       ;; the thread keys stay bound otherwise — RET would
-                       ;; hit agent-send and refuse ("not an agent buffer")
-                       (local-set-key "RET" "chat-send")
-                       (local-set-key "C-RET" "chat-send")
-                       (message "chat backend: api")))
-                    (else
-                      (chat-attach-agent! buf choice)
-                      (message (string-append "chat backend: " choice
-                                " — subscription billing, editor tools via MCP"))))))))))
-
-;; the reply appends by name, and point only follows when the user is
-;; still in the chat — a companion must not yank point in the document
-(define (chat-send-plain! buf)
-  (let ((convo (buffer-text buf)))
-    (buffer-append! buf (chat-reply-marker))
-    (end-of-buffer!)
-    (message "LLM thinking...")
-    (chat-llm buf (string-append (chat-preamble buf) convo)
-         (lambda (reply)
-           (buffer-append! buf
-             (string-append
-               (if (equal? (string-trim reply) "")
-                   "(no reply — the model returned no text; its tool calls are traced in *messages*)"
-                   reply)
-               (chat-prompt-marker)))
-           (when (equal? (current-buffer) buf)
-             (end-of-buffer!))
-           (message (chat-ready-message buf))))))
+              (unless (equal? choice "")
+                (chat-switch-backend! buf choice)
+                (message (string-append "chat backend: " choice)))))))))
 
 ;;; --- rich chat transcript (the agent thread design) ---------------------------
 ;;; A companion chat maintains the exact locals the native agent renderer
@@ -1501,28 +1464,6 @@
       (chat-blocks-drop! buf "waiting")
       (buffer-set-local! buf 'chat-waiting #f))))
 
-(define (chat-ellipsize s n)
-  (if (> (string-length s) n) (string-append (substring s 0 n) " …") s))
-
-;; every tool call becomes a card: header + trimmed result body, closed
-;; "done" immediately (the loop is synchronous per call)
-(define (chat-tool-dispatch buf)
-  (lambda (name args)
-    ;; first sign of life ends the waiting line — before any block lands,
-    ;; so its deletion can never shift recorded offsets
-    (chat-clear-waiting! buf)
-    (let* ((hstart (chat-render! buf (string-append "\n▸ " name "\n")))
-           (bstart (chat-mark buf))
-           (result (llm-tool-call name args))
-           (shown (chat-ellipsize
-                    (string-trim (if (string? result) result (value->string result)))
-                    400)))
-      (unless (equal? shown "")
-        (chat-render! buf (string-append shown "\n")))
-      (chat-blocks-push! buf hstart (chat-mark buf) "tool"
-        (list (number->string hstart) name "tool" "done" bstart))
-      result)))
-
 ;; presets (packages/mcp.scm) add MCP tool specs per chat; usage lands in
 ;; buffer-locals so every chat knows what it cost (persists with the chat)
 (define (chat-extra-specs buf)
@@ -1534,11 +1475,9 @@
   (let ((cost (custom--plist-get u 'cost)))
     (buffer-set-local! buf 'chat-last-usage u)
     (when cost
-      (let ((total (+ (or (buffer-local buf 'chat-cost) 0) cost)))
-        (buffer-set-local! buf 'chat-cost total)
-        (when (buffer-local buf 'agent-saved-mark)
-          (buffer-set-local! buf 'modeline-info
-            (string-append "companion · " (llm-model) " · " (format-usd total))))))))
+      (buffer-set-local! buf 'chat-cost
+        (+ (or (buffer-local buf 'chat-cost) 0) cost))
+      (agent-update-modeline! buf))))
 
 (define (chat-ready-message buf)
   (let ((u (buffer-local buf 'chat-last-usage)))
@@ -1548,37 +1487,39 @@
                          " (chat total " (format-usd (or (buffer-local buf 'chat-cost) 0)) ")")
           ""))))
 
-(define (chat-llm-rich buf prompt handler)
-  (if (and (boundp (quote chat-use-tools)) chat-use-tools)
-      (llm-tools prompt *llm-system*
-                 (append (llm-tool-specs) (chat-extra-specs buf))
-                 (chat-tool-dispatch buf) handler
-                 (lambda (u) (chat-usage-note! buf u)))
-      (llm prompt handler)))
+;;; --- the direct lane's turn context ---------------------------------------------
+;;; Backend.ReqLLM pulls this fresh at every turn start: the transcript
+;;; truth ('chat-turns), the per-send system preamble (group pull-context
+;;; can never go stale), and the chat's tool surface (registry + presets).
 
-(define (chat-send-rich! buf)
-  (let ((input (string-trim (chat-input buf))))
-    (if (equal? input "")
-        (message "Say something first")
-        (begin
-          (chat-clear-input! buf)
-          (chat-turn-push! buf "user" input)
-          (let ((start (chat-render! buf
-                         (string-append "\n╰─ you ▸ " input "\n\n"))))
-            (chat-blocks-push! buf start (chat-mark buf) "user" (list input)))
-          (chat-show-waiting! buf)
-          (message "LLM thinking...")
-          (chat-llm-rich buf
-            (string-append (chat-preamble buf) (chat-transcript buf))
-            (lambda (reply)
-              (chat-clear-waiting! buf)
-              (let ((text (if (equal? (string-trim reply) "")
-                              "(no reply — the model returned no text)"
-                              reply)))
-                (chat-turn-push! buf "assistant" text)
-                (let ((start (chat-render! buf (string-append text "\n"))))
-                  (chat-blocks-push! buf start (chat-mark buf) "prose" '())))
-              (message (chat-ready-message buf))))))))
+;; the tool dispatcher the direct lane hands the loop — a named global so
+;; the closure's environment is the global frame (never GC'd while it
+;; rides inside the backend's turn task)
+(define (chat-tool-dispatch name args) (llm-tool-call name args))
+
+;; display: the in-flight user message. The user-msg event may or may not
+;; have pushed it onto 'chat-turns before this runs (batches are async) —
+;; a matching newest turn is stripped; the backend appends the wire text
+;; itself as the final user message.
+(define (chat-thread-context slug display)
+  (let* ((buf (agent-buf slug))
+         (all (chat-turns buf))
+         (all (if (and (pair? all)
+                       (equal? (car (car all)) "user")
+                       (equal? (car (cdr (car all))) display))
+                  (cdr all)
+                  all))
+         (tools? (and (boundp (quote chat-use-tools)) chat-use-tools)))
+    (list 'turns (reverse all)
+          'system (if tools?
+                      (string-append *llm-system* "\n\n" (chat-preamble buf))
+                      (chat-preamble buf))
+          'tools (if tools?
+                     (append (llm-tool-specs) (chat-extra-specs buf))
+                     '())
+          'dispatcher chat-tool-dispatch)))
+
+(agent-context-fn! (lambda (slug display) (chat-thread-context slug display)))
 
 (define-command "chat-toggle-view" "Toggle between rich and plain chat transcript"
   (lambda ()
@@ -1600,20 +1541,24 @@
         "claude-opus-5"
         "claude-haiku-4-5-20251001"))
 
+;; one path for every backend: a live session that can take the model
+;; switches IN PLACE (the api lane always can — it is stateless; ACP only
+;; when the adapter advertised models); otherwise it is a fresh session
+;; seeded with the whole chat.
 (define-command "chat-set-model" "Choose this chat's model"
   (lambda ()
     (let* ((buf (current-buffer))
-           (slug (buffer-local buf 'agent-slug)))
-      (if (and slug (boundp (quote agent-reconnect!)))
-          ;; ACP-backed. A live session that advertises models switches IN
-          ;; PLACE (session/set_model — context survives); otherwise a
-          ;; model change is a fresh session seeded with the whole chat.
-          (let* ((cname (or (buffer-local buf 'agent-connector) *default-connector*))
-                 (models (buffer-local buf 'agent-models))
-                 (live? (and models (not (equal? (agent-status slug) 'dead)))))
+           (slug (buffer-local buf 'agent-slug))
+           (cname (or (buffer-local buf 'agent-connector) "api")))
+      (if (not (or slug (buffer-local buf 'agent-saved-mark)))
+          (message "not a chat buffer")
+          (let* ((models (buffer-local buf 'agent-models))
+                 (live? (and slug (not (equal? (agent-status slug) 'dead))
+                             (or models (connector-api? cname)))))
             (minibuffer-read
               (string-append "Model (now "
-                             (or (buffer-local buf 'agent-model) "connector default")
+                             (or (buffer-local buf 'agent-model)
+                                 (if (connector-api? cname) (llm-model) "connector default"))
                              "): ")
               (or models (connector-models cname))
               (lambda (m)
@@ -1622,20 +1567,15 @@
                        (buffer-set-local! buf 'agent-model m)
                        (agent-update-modeline! buf)
                        (message (string-append cname " · " m " — switched in place")))
-                      (else
+                      (slug
                         (agent-reconnect! slug cname m)
-                        (message (string-append cname
-                                   (if (equal? m "") "" (string-append " · " m))
-                                   " — fresh session, the chat carries over")))))))
-          ;; API-backed: stateless — switching is just a variable
-          (minibuffer-read (string-append "Model (now " (llm-model) "): ")
-            *llm-models*
-            (lambda (m)
-              (set-llm-model! m)
-              (when (buffer-local buf 'agent-saved-mark)
-                (buffer-set-local! buf 'modeline-info
-                  (string-append "companion · " m)))
-              (message (string-append "LLM model: " m))))))))
+                        (message (string-append cname " · " m
+                                   " — fresh session, the chat carries over")))
+                      (else
+                        ;; no runtime yet: the model is just an identity local
+                        (buffer-set-local! buf 'agent-model m)
+                        (agent-update-modeline! buf)
+                        (message (string-append cname " · " m)))))))))))
 
 ;; send the region to the chat buffer as context, then open it
 (define-command "chat-send-region" "Add the region to the chat buffer as context"
@@ -1750,7 +1690,7 @@
       (let ((back (active-window)))
         (group-chat-show! g)
         (insert! prompt)
-        (run-command "chat-send")
+        (run-command "agent-send")
         (when (window-exists? back)
           (select-window! back))))))
 
@@ -1825,12 +1765,12 @@
             (else (group-chat-show! (group-ensure! cur)))))))
 
 ;; C-c RET in a work buffer: talk to the group chat without leaving it.
-;; (In chat buffers the chat-mode local C-c RET = chat-send wins.)
+;; (In a chat buffer it just sends, exactly like RET.)
 (define-command "chat-companion-ask" "Ask the group chat without leaving this buffer"
   (lambda ()
     (let ((cur (current-buffer)))
       (if (chat-buffer? cur)
-          (run-command "chat-send")
+          (run-command "agent-send")
           (group-ask! (group-ensure! cur))))))
 
 ;; C-c q : ask from anywhere. In a grouped buffer (its chat included) the

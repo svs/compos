@@ -136,22 +136,26 @@ defmodule Aimax.ChatAgentTest do
     end)
   end
 
-  test "in-process llm threads never pin a model — the editor default rules" do
-    slug = String.trim(eval!(~s{(execute* "" '(connector "llm"))}), "\"")
+  test "api threads pin a per-chat model and take a switch in place" do
+    slug = String.trim(eval!(~s{(execute* "" '(connector "api"))}), "\"")
+    buf = "*chat:#{slug}*"
 
     on_exit(fn ->
-      Aimax.Core.kill_buffer("*chat:#{slug}*")
+      Aimax.Core.kill_buffer(buf)
       Aimax.Core.Editor.delete_other_windows()
     end)
 
+    # unpinned, the modeline follows the editor default
     assert eval!("(buffer-local (agent-buf \"#{slug}\") 'agent-model)") == "#f"
+    assert eval!(~s{(buffer-local "#{buf}" 'modeline-info)}) =~ "api"
 
-    # even an explicit pick on the switch path stays unpinned for the llm lane
-    eval!(~s{(agent-reconnect! "#{slug}" "llm" "claude-opus-5")})
-    assert eval!("(buffer-local (agent-buf \"#{slug}\") 'agent-model)") == "#f"
+    # the direct lane is stateless: a model switch always lands in place,
+    # so the conversation never restarts for a model change
+    assert eval!(~s{(agent-set-model! "#{slug}" "claude-opus-5")}) == "#t"
+    eval!(~s{(begin (buffer-set-local! "#{buf}" 'agent-model "claude-opus-5")
+                    (agent-update-modeline! "#{buf}"))})
 
-    {:ok, text} = Session.eval(~s{(buffer-text "*messages*")})
-    assert text =~ "follow the default model"
+    assert eval!(~s{(buffer-local "#{buf}" 'modeline-info)}) =~ "claude-opus-5"
   end
 
   test "the proxy surface serves the registry and calls tools, base64 both ways" do

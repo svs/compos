@@ -102,14 +102,14 @@ defmodule Aimax.LLMToolsTest do
 
     test "describe-function returns real source for userland fns and commands" do
       # a userland function: full lambda source, body included
-      out = eval!(~s{(llm-tool-call "describe-function" (list 'name "chat-llm"))})
+      out = eval!(~s{(llm-tool-call "describe-function" (list 'name "chat-thread-context"))})
       assert out =~ "lambda"
-      assert out =~ "llm-tools"
+      assert out =~ "llm-tool-specs"
 
       # an M-x command (lives in the ETS registry, not the global env)
-      out = eval!(~s{(llm-tool-call "describe-function" (list 'name "chat-send"))})
+      out = eval!(~s{(llm-tool-call "describe-function" (list 'name "agent-send"))})
       assert out =~ "M-x command"
-      assert out =~ "chat-send-rich!"
+      assert out =~ "agent-send-msg!"
 
       # a builtin is opaque Elixir
       out = eval!(~s{(llm-tool-call "describe-function" (list 'name "car"))})
@@ -259,56 +259,70 @@ defmodule Aimax.LLMToolsTest do
     end
   end
 
-  describe "openai wire translation" do
+  describe "the req_llm wire" do
     alias Aimax.Core.LLM
 
-    test "responses with tool_calls become the loop's anthropic shape" do
-      resp =
-        LLM.from_openai_response(%{
-          "choices" => [
-            %{
-              "message" => %{
-                "content" => nil,
-                "tool_calls" => [
-                  %{"id" => "c1", "function" => %{"name" => "act", "arguments" => ~s({"id":"7"})}}
-                ]
-              }
-            }
-          ],
-          "usage" => %{"prompt_tokens" => 3, "completion_tokens" => 5}
-        })
+    test "provider routing: a bare model id is anthropic, prefixes pass through" do
+      assert LLM.req_model_spec("claude-sonnet-5") == "anthropic:claude-sonnet-5"
+      assert LLM.req_model_spec("openai:gpt-5.6-luna") == "openai:gpt-5.6-luna"
 
-      assert resp["stop_reason"] == "tool_use"
-      assert [%{"type" => "tool_use", "id" => "c1", "name" => "act", "input" => %{"id" => "7"}}] =
-               resp["content"]
-      assert resp["usage"] == %{"input_tokens" => 3, "output_tokens" => 5}
+      assert LLM.req_model_spec("openrouter:anthropic/claude-sonnet-5") ==
+               "openrouter:anthropic/claude-sonnet-5"
     end
 
-    test "loop messages flatten to openai form: system, tool_calls, tool results" do
-      blocks = [
-        %{"type" => "text", "text" => "on it"},
-        %{"type" => "tool_use", "id" => "c1", "name" => "act", "input" => %{"id" => "7"}}
-      ]
+    test "the built request carries the tool registry, the system prompt, and cache breakpoints" do
+      me = self()
 
-      msgs =
-        LLM.to_openai_messages(
-          [
-            %{role: "user", content: "hi"},
-            %{role: "assistant", content: blocks},
-            %{role: "user", content: [%{type: "tool_result", tool_use_id: "c1", content: "done"}]}
-          ],
-          "sys"
-        )
+      # capture the actual HTTP request req_llm builds, at the wire
+      Application.put_env(:aimax_core, :llm_req_opts,
+        req_http_options: [
+          plug: fn conn ->
+            {:ok, body, conn} = Plug.Conn.read_body(conn)
+            send(me, {:wire, Jason.decode!(body)})
 
-      assert [
-               %{role: "system", content: "sys"},
-               %{role: "user", content: "hi"},
-               %{role: "assistant", content: "on it", tool_calls: [call]},
-               %{role: "tool", tool_call_id: "c1", content: "done"}
-             ] = msgs
+            conn
+            |> Plug.Conn.put_resp_content_type("application/json")
+            |> Plug.Conn.resp(
+              200,
+              Jason.encode!(%{
+                "id" => "msg_1",
+                "type" => "message",
+                "role" => "assistant",
+                "model" => "claude-sonnet-5",
+                "content" => [%{"type" => "text", "text" => "wired"}],
+                "stop_reason" => "end_turn",
+                "usage" => %{"input_tokens" => 11, "output_tokens" => 3}
+              })
+            )
+          end
+        ]
+      )
 
-      assert call.function.name == "act"
-      assert Jason.decode!(call.function.arguments) == %{"id" => "7"}
+      prev = System.get_env("ANTHROPIC_API_KEY")
+      System.put_env("ANTHROPIC_API_KEY", "sk-test")
+
+      on_exit(fn ->
+        Application.delete_env(:aimax_core, :llm_req_opts)
+        if prev, do: System.put_env("ANTHROPIC_API_KEY", prev), else: System.delete_env("ANTHROPIC_API_KEY")
+      end)
+
+      eval!(~s{(llm-with-tools "hello" (lambda (t) (set-symbol-value! 'zz-wire t)))})
+      wait_until(fn -> match?({:ok, "#t"}, Session.eval("(boundp 'zz-wire)")) end)
+      assert eval!("zz-wire") == ~s{"wired"}
+
+      assert_received {:wire, body}
+
+      # the registry crossed as anthropic tool defs
+      names = Enum.map(body["tools"] || [], & &1["name"])
+      assert "eval-scheme" in names
+
+      # prompt-cache breakpoints survived the port: system, last tool, and
+      # the last message each carry cache_control (the api lane's economics)
+      assert [%{"cache_control" => %{"type" => "ephemeral"}} | _] = Enum.reverse(body["system"])
+      assert %{"cache_control" => %{"type" => "ephemeral"}} = List.last(body["tools"])
+
+      last_block = body["messages"] |> List.last() |> Map.get("content") |> List.last()
+      assert %{"cache_control" => %{"type" => "ephemeral"}} = last_block
     end
   end
 end

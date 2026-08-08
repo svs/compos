@@ -409,8 +409,16 @@ defmodule Aimax.Core.Session do
           {:error, reason} -> raise_scheme("agent-start!: #{inspect(reason)}")
         end
       end,
-      "agent-prompt!" => fn [slug, text] ->
-        case Aimax.Core.Agent.prompt(s(slug), to_string(text)) do
+      # optional third arg: the display text (what the transcript shows and
+      # records as the user turn) when the wire text carries seed context
+      "agent-prompt!" => fn [slug, text | rest] ->
+        display =
+          case rest do
+            [d] when is_binary(d) -> d
+            _ -> nil
+          end
+
+        case Aimax.Core.Agent.prompt(s(slug), to_string(text), display) do
           :sent -> {:sym, "sent"}
           :queued -> {:sym, "queued"}
           {:error, r} -> raise_scheme("agent-prompt!: #{inspect(r)}")
@@ -493,6 +501,13 @@ defmodule Aimax.Core.Session do
       # It escapes into the Agent GenServers as an opaque fun — root it.
       "agent-on-event!" => fn [handler] ->
         :ets.insert(@escaped, {{:agent_handler}, handler})
+        :void
+      end,
+      # the direct lane's context provider: (lambda (slug display-text) ...)
+      # -> (turns ... system ... tools ... dispatcher ...), called by
+      # Backend.ReqLLM at each turn start. Rooted like the event handler.
+      "agent-context-fn!" => fn [handler] ->
+        :ets.insert(@escaped, {{:agent_context}, handler})
         :void
       end,
       "set-modeline-extra!" => fn [s] ->

@@ -1343,12 +1343,14 @@ defmodule Aimax.EditorTest do
 
     assert eventually(fn -> Buffer.text(companion) =~ "ok then" end)
     assert_received {:chat, req}
-    # all chats work the same: tools attached, pull-model preamble — the
-    # provider difference is translated at the wire, not surfaced here
+    # all chats work the same: tools attached, pull-model preamble in the
+    # system prompt — the provider difference is translated at the wire
     assert Enum.any?(req.tools, &(&1.name == "eval-scheme"))
-    prompt = req.messages |> hd() |> Map.get(:content)
-    assert prompt =~ "buffer-text"
-    refute prompt =~ "Dear hiring manager"
+    assert req.system =~ "buffer-text"
+    refute req.system =~ "Dear hiring manager"
+    # the message carries what the user typed, not the document
+    prompt = req.messages |> List.last() |> Map.get(:content)
+    assert prompt =~ "draft a reply"
     press(["C-x", "1"])
   end
 
@@ -1356,12 +1358,13 @@ defmodule Aimax.EditorTest do
     companion = "*chat:#{buf}*"
     type("Roses are red")
 
-    Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: [%{content: prompt} | _]} ->
-      # the preamble names the document and the pull tools
-      assert prompt =~ "writing companion"
-      assert prompt =~ ~s{"#{buf}"}
-      assert prompt =~ "buffer-text"
-      assert prompt =~ "make it rhyme"
+    Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: messages, system: system} ->
+      # the per-send system preamble names the document and the pull tools
+      assert system =~ "writing companion"
+      assert system =~ ~s{"#{buf}"}
+      assert system =~ "buffer-text"
+      # the turn itself is what the user typed
+      assert messages |> List.last() |> Map.get(:content) =~ "make it rhyme"
       {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "try violets"}]}}
     end)
 
@@ -1411,8 +1414,8 @@ defmodule Aimax.EditorTest do
     companion = "*chat:#{buf}*"
     type("A koan about ropes.")
 
-    Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: [%{content: prompt} | _]} ->
-      assert prompt =~ "tighten this up"
+    Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: messages} ->
+      assert messages |> List.last() |> Map.get(:content) =~ "tighten this up"
       {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "knot bad"}]}}
     end)
 
@@ -1475,12 +1478,12 @@ defmodule Aimax.EditorTest do
     chat = "*chat:proj*"
     type("defmodule Rope do end")
 
-    Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: [%{content: prompt} | _]} ->
-      # the preamble enumerates the whole group, not one document
-      assert prompt =~ ~s{group "proj"}
-      assert prompt =~ ~s{"#{buf}"}
-      assert prompt =~ ~s{"#{notes}"}
-      assert prompt =~ "buffer-text"
+    Application.put_env(:aimax_core, :llm_chat_fun, fn %{system: system} ->
+      # the per-send preamble enumerates the whole group, not one document
+      assert system =~ ~s{group "proj"}
+      assert system =~ ~s{"#{buf}"}
+      assert system =~ ~s{"#{notes}"}
+      assert system =~ "buffer-text"
       {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "aye"}]}}
     end)
 

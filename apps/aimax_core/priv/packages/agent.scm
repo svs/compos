@@ -212,12 +212,18 @@
       (buffer-set-local! buf 'agent-waiting #f)
       (buffer-set-local! buf 'agent-saved-mark (agent-mark slug)))))
 
+;; event kinds that count as the turn having produced something visible —
+;; a turn-end after none of them is a silent turn
+(define *agent-output-kinds* '(chunk thought tool-call tool-update plan error))
+
 (define (agent-handle-event slug e)
   (let ((buf (agent-buf slug))
         (type (plist-get e 'type)))
     ;; any sign of life ends the waiting state
     (unless (or (equal? type 'user-msg) (equal? type 'status))
       (agent-clear-waiting! slug))
+    (when (member type *agent-output-kinds*)
+      (buffer-set-local! buf 'agent-turn-any #t))
     (cond
       ((equal? type 'model-state)
        ;; the adapter says which model the session ACTUALLY runs — the
@@ -229,6 +235,10 @@
 
       ((equal? type 'user-msg)
        (agent-pop-queued! slug)
+       ;; 'chat-turns is the conversation truth on EVERY backend: the api
+       ;; lane replays it per request, ACP seeds a fresh session from it,
+       ;; and both flatten it to .chat files
+       (chat-turn-push! buf "user" (plist-get e 'text))
        (let ((start (agent-render! slug
                       (string-append "\n╰─ you ▸ " (plist-get e 'text) "\n\n")
                       "agent-you")))
@@ -237,6 +247,11 @@
        (agent-show-waiting! slug))
 
       ((equal? type 'chunk)
+       ;; the assistant's prose accumulates across the turn; turn-end
+       ;; records it as one turn
+       (buffer-set-local! buf 'agent-turn-text
+         (string-append (or (buffer-local buf 'agent-turn-text) "")
+                        (plist-get e 'text)))
        (let ((start (agent-render! slug (plist-get e 'text) #f)))
          (agent-block-extend-or-push! buf start (agent-mark slug) "prose")))
 
@@ -292,8 +307,33 @@
        (message (string-append "agent " slug " needs permission: "
                                (plist-get e 'title))))
 
+      ;; the direct lane prices every turn; ACP rides a subscription and
+      ;; emits none, so its modeline stays connector · model
+      ((equal? type 'usage)
+       (chat-usage-note! buf
+         (list 'input (plist-get e 'input) 'output (plist-get e 'output)
+               'cache-read (plist-get e 'cache-read)
+               'cache-write (plist-get e 'cache-write)
+               'cost (plist-get e 'cost))))
+
       ((equal? type 'turn-end)
        (buffer-set-local! buf 'agent-cancelling #f)
+       (let ((text (buffer-local buf 'agent-turn-text)))
+         (cond
+           ((and text (not (equal? (string-trim text) "")))
+            (chat-turn-push! buf "assistant" text))
+           ;; a completed turn that rendered NOTHING at all would look like
+           ;; the send vanished — say so. (A turn that ran tools, was
+           ;; cancelled, or errored already left its own trace.)
+           ((and (equal? (plist-get e 'stop-reason) "end_turn")
+                 (not (buffer-local buf 'agent-turn-any)))
+            (let ((start (agent-render! slug
+                           "(no reply — the model returned no text)\n"
+                           "agent-meta")))
+              (agent-block-push! buf start (agent-mark slug) "meta" '())))
+           (else #f)))
+       (buffer-set-local! buf 'agent-turn-text #f)
+       (buffer-set-local! buf 'agent-turn-any #f)
        (agent-block-drop-kind! buf "permission")
        (message (string-append "agent " slug ": done")))
 
@@ -400,8 +440,10 @@
                   m0))))
     (buffer-set-local! buf 'agent-queued '())
     ;; seed only when there IS a conversation — a fresh surface's meta
-    ;; card alone is chrome, not context
-    (when (and (> mark 0)
+    ;; card alone is chrome, not context. The api lane never seeds: its
+    ;; turns are replayed in full on every request anyway.
+    (when (and (not (connector-api? cname))
+               (> mark 0)
                (not (equal? (string-trim (agent-seed-transcript buf)) "")))
       (buffer-set-local! buf 'agent-seed-context #t))
     (agent-start! slug
@@ -421,17 +463,10 @@
 ;; switch a thread's connector/model: kill + reattach. Fresh session — the
 ;; transcript stays, server-side context doesn't.
 (define (agent-reconnect! slug cname model)
-  (let ((buf (agent-buf slug))
-        ;; the in-process llm lane has no session to pin a model into —
-        ;; requests always follow the editor default, so never store one
-        (llm? (equal? (plist-get (connector-config cname) 'type) 'llm)))
+  (let ((buf (agent-buf slug)))
     (agent-kill! slug)
     (buffer-set-local! buf 'agent-connector cname)
-    (buffer-set-local! buf 'agent-model
-      (if (or llm? (equal? model "")) #f model))
-    (when (and llm? (not (equal? model "")))
-      (message (string-append "llm threads follow the default model — "
-                              "(set-llm-model! \"" model "\") to change it")))
+    (buffer-set-local! buf 'agent-model (if (equal? model "") #f model))
     (agent-update-modeline! buf)
     (agent-revive! slug)))
 
@@ -481,10 +516,13 @@
 (define (agent-seed-transcript buf)
   (or (chat-flatten buf) (agent-conversation-text buf)))
 
-(define (agent-send-msg! slug msg)
+;; the wire text may carry chrome (editor context, seed transcript) the
+;; user never typed — the raw input rides along as the DISPLAY text: it is
+;; what the transcript renders and what 'chat-turns records as the turn
+(define (agent-send-msg! slug raw)
   (let* ((buf (agent-buf slug))
          ;; what the user is looking at in the other windows — "this" works
-         (msg (string-append (editor-context-preamble buf) msg)))
+         (msg (string-append (editor-context-preamble buf) raw)))
     (if (buffer-local buf 'agent-seed-context)
         (begin
           (buffer-set-local! buf 'agent-seed-context #f)
@@ -493,12 +531,19 @@
               "Context: this continues an earlier conversation from the"
               " user's editor (possibly with a different model). The"
               " conversation so far:\n\n" (agent-seed-transcript buf)
-              "\n\nContinue naturally from there. New message:\n" msg)))
-        (agent-prompt! slug msg))))
+              "\n\nContinue naturally from there. New message:\n" msg)
+            raw))
+        (agent-prompt! slug msg raw))))
 
 (define-command "agent-send" "Send the input to the agent, reviving it if dead"
   (lambda ()
-    (let ((slug (agent-slug-of (current-buffer))))
+    (let* ((buf (current-buffer))
+           ;; a chat without a runtime gets one on first send — the api
+           ;; backend by default; RET is agent-send on EVERY chat
+           (slug (or (agent-slug-of buf)
+                     (and (equal? (buffer-local buf 'mode-name) "chat-mode")
+                          (buffer-local buf 'agent-saved-mark)
+                          (chat-attach-agent! buf "api")))))
       (cond ((not slug) (message "not an agent buffer"))
             (else
              (when (equal? (agent-status slug) 'dead)
@@ -573,16 +618,19 @@
 (define-connector! "codex"
   '(cmd "codex-acp" model-flag "-c model="
     models ("gpt-5.6-luna" "gpt-5.5" "gpt-5.5-pro" "gpt-5.4" "gpt-5.4-mini" "gpt-5.3-codex")))
-;; direct API calls through the editor's own LLM plumbing (req_llm eventually):
-;; no subprocess, no tools — the cheap chat lane
-(define-connector! "llm" '(type llm))
+;; the direct-API lane: in-process req_llm turns — streaming, tools, cost
+;; tracking, no subprocess. "api" is just another connector.
+(define-connector! "api" '(backend "req-llm"))
 
-;; what the switch prompt offers: the connector's declared 'models; llm
-;; threads can use anything the llm primitive routes (*llm-models*)
+(define (connector-api? name)
+  (equal? (plist-get (connector-config name) 'backend) "req-llm"))
+
+;; what the switch prompt offers: the connector's declared 'models; the api
+;; lane can use anything the llm wire routes (*llm-models*)
 (define (connector-models name)
   (let ((conf (connector-config name)))
     (or (plist-get conf 'models)
-        (if (equal? (plist-get conf 'type) 'llm) *llm-models* '()))))
+        (if (connector-api? name) *llm-models* '()))))
 
 ;; CLAUDE_CODE_SUBAGENT_MODEL too: the adapter's bundled SDK defaults
 ;; subagents to a retired model id (404s) unless told otherwise
@@ -599,8 +647,9 @@
   (let ((conf (agent-resolve-config* opts)))
     ;; ACP threads get MCP servers: the editor's own tools (aimax proxy)
     ;; plus whatever presets the caller names — the caller controls the
-    ;; agent's tool surface, exactly as with API chats
-    (if (or (plist-get conf 'type)
+    ;; agent's tool surface, exactly as with API chats. The direct lane
+    ;; needs none: its tool surface is read fresh at every send.
+    (if (or (equal? (plist-get conf 'backend) "req-llm")
             (plist-get conf 'mcp-servers)
             (not (boundp (quote presets-acp-servers))))
         conf
@@ -613,8 +662,10 @@
          (conf (append opts (connector-config cname)))
          (m (or (plist-get conf 'model)
                 (and (member (llm-model) (connector-models cname)) (llm-model)))))
-    (cond ((plist-get conf 'type) conf)          ; in-process: nothing to wire
-          ((not m) conf)
+    (cond ((not m) conf)
+          ((equal? (plist-get conf 'backend) "req-llm")
+           ;; in-process: the model is config, not wiring
+           (append (list 'model m) conf))
           ((plist-get conf 'model-flag)
            ;; value must be quoted TOML — codex ignores the bare form
            (append (list 'model m
@@ -638,13 +689,19 @@
               ((equal? (car (car es)) "ANTHROPIC_MODEL") (car (cdr (car es))))
               (else (loop (cdr es)))))))
 
-;; modeline: "connector · model" — the thread's economic identity; click it
-;; to switch (modeline-info-command -> agent-switch)
+;; modeline: "connector · model [· $cost]" — the thread's economic
+;; identity; click it to switch (modeline-info-command -> agent-switch).
+;; The api lane follows the editor default when no model is pinned, and
+;; carries its running cost; ACP rides a subscription and shows none.
 (define (agent-update-modeline! buf)
-  (let ((c (or (buffer-local buf 'agent-connector) *default-connector*))
-        (m (buffer-local buf 'agent-model)))
+  (let* ((c (or (buffer-local buf 'agent-connector) *default-connector*))
+         (m (or (buffer-local buf 'agent-model)
+                (and (connector-api? c) (llm-model))))
+         (cost (and (connector-api? c) (buffer-local buf 'chat-cost))))
     (buffer-set-local! buf 'modeline-info
-      (if (and m (not (equal? m ""))) (string-append c " · " m) c))))
+      (string-append c
+        (if (and m (not (equal? m ""))) (string-append " · " m) "")
+        (if cost (string-append " · " (format-usd cost)) "")))))
 
 ;;; --- thread creation ----------------------------------------------------------
 

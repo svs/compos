@@ -28,7 +28,11 @@ defmodule Aimax.Core.MixProject do
     [
       {:aimax_scheme, in_umbrella: true},
       {:req, "~> 0.5"},
+      {:req_llm, "~> 1.19"},
       {:jason, "~> 1.4"},
+      # the wire seam: Req's plug adapter lets tests inspect the exact
+      # request req_llm builds (cache breakpoints, tool defs) with no network
+      {:plug, "~> 1.18", only: :test},
       {:earmark, "~> 1.4"},
       {:rustler, "~> 0.36.0"}
     ]

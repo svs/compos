@@ -31,6 +31,7 @@ defmodule Aimax.Core.Agent.Backend do
   def module(config) do
     case Map.get(config, "backend", "acp") do
       "stub" -> __MODULE__.Stub
+      "req-llm" -> __MODULE__.ReqLLM
       _ -> __MODULE__.ACP
     end
   end

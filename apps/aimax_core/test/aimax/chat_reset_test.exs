@@ -220,7 +220,7 @@ defmodule Aimax.ChatResetTest do
     refute modeline =~ "gpt-5.6-luna"
   end
 
-  test "switching an ACP chat back to the api rebinds RET to chat-send" do
+  test "switching backends never rebinds keys: RET is agent-send on every lane" do
     eval!(~s{(begin
       (switch-to-buffer! (group-chat "backg"))
       (set-mode! "chat-mode")
@@ -228,13 +228,17 @@ defmodule Aimax.ChatResetTest do
       (agent-install-keys! (current-buffer))
       #t)})
 
+    assert Aimax.Core.Editor.lookup_key(["RET"]) == {:command, "agent-send"}
+
     eval!(~s{(run-command "chat-set-backend")})
     Enum.each(String.graphemes("api"), &Aimax.Core.KeyDispatch.handle_key/1)
     Aimax.Core.KeyDispatch.handle_key("RET")
 
-    assert eval!(~s{(buffer-local (current-buffer) 'agent-slug)}) == "#f"
-    # RET must send through the chat path now, not the dead thread path
-    assert Aimax.Core.Editor.lookup_key(["RET"]) == {:command, "chat-send"}
+    # the api lane is a connector like any other: same slug machinery,
+    # same keys — the ec8cba3 bug class is structurally gone
+    assert eval!(~s{(buffer-local (current-buffer) 'agent-connector)}) == ~s{"api"}
+    assert eval!(~s{(buffer-local (current-buffer) 'agent-slug)}) != "#f"
+    assert Aimax.Core.Editor.lookup_key(["RET"]) == {:command, "agent-send"}
   end
 
   test "outside a chat it refuses politely" do

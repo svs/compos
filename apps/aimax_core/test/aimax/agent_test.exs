@@ -368,8 +368,8 @@ defmodule Aimax.AgentTest do
     assert {:ok, models} = Session.eval(~s[(connector-models "claude-code")])
     assert models =~ "claude-sonnet-5"
     assert {:ok, "()"} = Session.eval(~s[(connector-models "test-conn")])
-    assert {:ok, llm_models} = Session.eval(~s[(connector-models "llm")])
-    assert llm_models =~ "openrouter" or llm_models =~ "claude"
+    assert {:ok, api_models} = Session.eval(~s[(connector-models "api")])
+    assert api_models =~ "openrouter" or api_models =~ "claude"
   end
 
   test "desktop: agent transcript, folds, and overlays survive restore; thread revives on RET" do
@@ -476,17 +476,24 @@ defmodule Aimax.AgentTest do
     refute Buffer.text(buf) =~ "⋯ thinking"
   end
 
-  test "llm connector: in-process thread, history accumulates, no subprocess" do
-    prompts = :ets.new(:llm_prompts, [:public])
+  test "api connector: in-process thread, turns accumulate, no subprocess" do
+    rounds = :ets.new(:api_rounds, [:public])
 
-    Application.put_env(:aimax_core, :llm_request_fun, fn prompt ->
-      :ets.insert(prompts, {System.unique_integer([:monotonic]), prompt})
-      {:ok, "reply-#{:ets.info(prompts, :size)}"}
+    Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: messages} ->
+      n = :ets.info(rounds, :size) + 1
+      :ets.insert(rounds, {n, messages})
+
+      {:ok,
+       %{
+         "stop_reason" => "end_turn",
+         "content" => [%{"type" => "text", "text" => "reply-#{n}"}],
+         "usage" => %{"input_tokens" => 10, "output_tokens" => 5}
+       }}
     end)
 
-    on_exit(fn -> Application.delete_env(:aimax_core, :llm_request_fun) end)
+    on_exit(fn -> Application.delete_env(:aimax_core, :llm_chat_fun) end)
 
-    {:ok, _} = Session.eval(~s{(execute* "what is 6*7" '(connector "llm"))})
+    {:ok, _} = Session.eval(~s{(execute* "what is 6*7" '(connector "api"))})
     buf = "*chat:a1*"
 
     # no ACP handshake — no transport was opened
@@ -499,16 +506,18 @@ defmodule Aimax.AgentTest do
     press(["RET"])
 
     assert eventually(fn -> Buffer.text(buf) =~ "reply-2" end)
-    # second request carries the whole conversation
-    [{_, last} | _] = prompts |> :ets.tab2list() |> Enum.sort(:desc)
-    assert last =~ "what is 6*7"
-    assert last =~ "reply-1"
-    assert last =~ "and 8*8"
 
-    # no pinned model in the modeline: the llm lane follows the editor's
-    # default model at request time (ai-config / set-llm-model!)
-    assert {:ok, ~s["llm"]} =
-             Session.eval(~s[(buffer-local "*chat:a1*" 'modeline-info)])
+    # the second request replays the whole conversation from 'chat-turns —
+    # no private history in the runtime
+    [{_, msgs} | _] = rounds |> :ets.tab2list() |> Enum.sort(:desc)
+    flat = Enum.map_join(msgs, "\n", fn m -> inspect(m.content) end)
+    assert flat =~ "what is 6*7"
+    assert flat =~ "reply-1"
+    assert flat =~ "and 8*8"
+
+    # the modeline names the running backend and its model
+    assert {:ok, ml} = Session.eval(~s[(buffer-local "*chat:a1*" 'modeline-info)])
+    assert ml =~ "api"
   end
 
   test "a failed prompt returns the thread to idle instead of wedging in :running" do

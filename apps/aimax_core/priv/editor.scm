@@ -625,9 +625,17 @@
   (lambda ()
     (run-hooks 'before-save-hook)
     (let ((bpath (buffer-path (current-buffer))))
-      (if (and bpath (remote-path? bpath))
-          (save-remote-buffer! bpath)
-          (save-local-buffer!)))))
+      (cond ((and bpath (remote-path? bpath)) (save-remote-buffer! bpath))
+            ;; a rich chat's buffer text is a rendering (cards, folds, the
+            ;; input marker); what belongs in the FILE is its identity plus
+            ;; the portable transcript, which is what an opened .chat reads
+            ((and bpath (boundp (quote chat-file-text))
+                  (chat-file-text (current-buffer)))
+             (write-file! bpath (chat-file-text (current-buffer)))
+             (buffer-mark-saved! (current-buffer))
+             (run-hooks 'after-save-hook)
+             (message (string-append "Wrote " bpath)))
+            (else (save-local-buffer!))))))
 
 (define (save-local-buffer!)
     (let ((path (buffer-save!)))
@@ -645,7 +653,7 @@
                   (let ((p (expand-path (string-trim path0)))
                         (g (buffer-group old))
                         (turns (buffer-local old 'chat-turns)))
-                    (write-file! p (or (chat-flatten old) (buffer-text old)))
+                    (write-file! p (or (chat-file-text old) (buffer-text old)))
                     (visit p)
                     (when g (buffer-set-local! (current-buffer) 'group g))
                     (when turns
@@ -1150,6 +1158,14 @@
       ;; same setup fn also runs via set-mode! on LIVE chats, where the
       ;; slug is the only handle on a running thread.
       (chat-sweep-runtime-locals! buf)
+      ;; a .chat file just opened from disk: if we wrote it, its header
+      ;; restores the identity and its markers become 'chat-turns, so the
+      ;; conversation continues instead of restarting. Headerless files
+      ;; (hand-written, or saved before this) are left exactly as they are.
+      (when (and (buffer-path buf)
+                 (not (buffer-local buf 'agent-saved-mark))
+                 (boundp (quote chat-file-init!)))
+        (chat-file-init! buf))
       ;; legacy: pre-group companions carried a 'companion-of pointer —
       ;; upgrade both ends to the 'group tag (idempotent, so desktop
       ;; restore migrates old sessions by itself)
@@ -1341,6 +1357,115 @@
                          (chat-prompt-marker)
                          (chat-reply-marker))
                      (cadr (car ts)) "\n"))))))
+
+;;; --- .chat files carry their identity ------------------------------------------
+;;; A flattened transcript is text; a chat is text PLUS who was running it.
+;;; One optional header line closes that gap, so an opened .chat continues
+;;; where it ran instead of starting over on the default backend:
+;;;
+;;;   #+chat: (connector "codex" model "gpt-5.5" presets (dev) permission-mode approve)
+;;;
+;;; The header is written by us and read on visit. It never reaches a
+;;; model: chat-flatten (the seed) does not include it. Headerless files —
+;;; anything written before this, or by hand — behave exactly as before.
+
+(define *chat-file-header* "#+chat:")
+
+(define (chat-header-line buf)
+  (string-append *chat-file-header* " (connector "
+    (value->string (or (buffer-local buf 'agent-connector) "api"))
+    (let ((m (buffer-local buf 'agent-model)))
+      (if m (string-append " model " (value->string m)) ""))
+    (let ((ps (buffer-local buf 'chat-presets)))
+      (if (pair? ps) (string-append " presets " (value->string ps)) ""))
+    " permission-mode "
+    (symbol->string (if (boundp (quote chat-permission-mode))
+                        (chat-permission-mode buf)
+                        'approve))
+    ")\n"))
+
+;; what C-x C-s writes: identity, then the portable transcript
+(define (chat-file-text buf)
+  (let ((body (chat-flatten buf)))
+    (and body (string-append (chat-header-line buf) body))))
+
+;; the header's plist, or #f. Read INSIDE a quote so a hand-edited file can
+;; never execute anything: the reader sees one quoted datum, and a failed
+;; read just means "no header".
+(define (chat-parse-header line)
+  (and (string-prefix? *chat-file-header* line)
+       (let ((r (eval-string-safe
+                  (string-append "(quote "
+                                 (substring line (string-length *chat-file-header*)
+                                            (string-length line))
+                                 ")"))))
+         (and (equal? (car r) 'ok) (pair? (cadr r)) (cadr r)))))
+
+;; "### You\nhi\n\n### Assistant\nhello\n" -> (("user" "hi") ("assistant" "hello"))
+(define (chat-parse-transcript text)
+  (let loop ((parts (cdr (string-split text "\n### "))) (acc '()))
+    (if (null? parts)
+        (reverse acc)
+        (let* ((p (car parts))
+               (role (cond ((string-prefix? "You\n" p) "user")
+                           ((string-prefix? "Assistant\n" p) "assistant")
+                           (else #f)))
+               (body (and role
+                          (string-trim
+                            (substring p (string-index p "\n")
+                                       (string-length p))))))
+          (loop (cdr parts)
+                (if (and role (not (equal? body "")))
+                    (cons (list role body) acc)
+                    acc))))))
+
+;; a headered .chat opened from disk becomes a live chat again: its
+;; identity comes back, its turns become 'chat-turns (the truth every
+;; backend runs against), and the rich surface is rebuilt from those turns
+;; so RET continues the conversation.
+(define (chat-file-init! buf)
+  (let* ((text (buffer-text buf))
+         (nl (string-index text "\n"))
+         (line (if nl (substring text 0 nl) text))
+         (header (chat-parse-header line)))
+    (when header
+      (for-each
+        (lambda (pair)
+          (let ((v (plist-get header (car pair))))
+            (when v (buffer-set-local! buf (cadr pair) v))))
+        '((connector agent-connector) (model agent-model)
+          (presets chat-presets) (permission-mode chat-permission-mode)))
+      (let ((turns (chat-parse-transcript (substring text nl (string-length text)))))
+        (buffer-set-local! buf 'chat-turns (reverse turns))
+        ;; rebuild the surface from the turns, exactly as a live chat
+        ;; renders them — the header and the ### markers are file format,
+        ;; not transcript
+        (buffer-delete-range! buf 0 (buffer-size buf))
+        (buffer-set-local! buf 'agent-blocks '())
+        (buffer-set-local! buf 'agent-saved-mark 0)
+        (for-each
+          (lambda (t)
+            (let ((start (chat-render! buf
+                           (if (equal? (car t) "user")
+                               (string-append "\n╰─ you ▸ " (cadr t) "\n\n")
+                               (string-append (cadr t) "\n")))))
+              (chat-blocks-push! buf start (chat-mark buf)
+                (if (equal? (car t) "user") "user" "prose")
+                (if (equal? (car t) "user") (list (cadr t)) '()))))
+          turns)
+        (buffer-append! buf *chat-input-marker*)
+        (buffer-set-local! buf 'agent-marker-bytes
+          (string-byte-length *chat-input-marker*))
+        (buffer-set-local! buf 'render-mode "agent")
+        ;; a fresh ACP session has to be told what was already said; the
+        ;; api lane replays 'chat-turns on every request anyway
+        (buffer-set-local! buf 'agent-seed-context
+          (and (pair? turns)
+               (boundp (quote connector-api?))
+               (not (connector-api? (or (buffer-local buf 'agent-connector) "api")))))
+        ;; the rewrite is presentation, not an edit the user made
+        (buffer-mark-saved! buf))
+      #t)))
 
 ;;; --- what a chat is made of -----------------------------------------------------
 ;;; The reset/restore bug class (a stale 'agent-queued deadlocking RET, a

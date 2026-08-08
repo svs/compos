@@ -1143,11 +1143,13 @@
       (local-set-key "C-c $" "chat-cost")
       (local-set-key "C-c b" "chat-set-backend")
       (local-set-key "C-c C-k" "chat-reset")
-      ;; thread bookkeeping from before a restart is stale — the runtime
-      ;; queue died with the daemon. Cleared, muted queued text rejoins the
-      ;; editable input instead of deadlocking RET.
-      (when (buffer-local buf 'agent-slug)
-        (buffer-set-local! buf 'agent-queued #f))
+      ;; On desktop restore EVERY runtime local is a lie: the process it
+      ;; described died with the daemon. Clear the whole class — not just
+      ;; the 'agent-queued that once deadlocked RET — so that bug cannot
+      ;; grow a new head. Guarded on the runtime being gone, because this
+      ;; same setup fn also runs via set-mode! on LIVE chats, where the
+      ;; slug is the only handle on a running thread.
+      (chat-sweep-runtime-locals! buf)
       ;; legacy: pre-group companions carried a 'companion-of pointer —
       ;; upgrade both ends to the 'group tag (idempotent, so desktop
       ;; restore migrates old sessions by itself)
@@ -1163,19 +1165,23 @@
         (buffer-set-local! buf 'render-mode "agent")
         (buffer-set-local! buf 'agent-marker-bytes
           (string-byte-length *chat-input-marker*))
-        ;; the modeline states the backend: connector for agent-backed
-        ;; chats, "companion · model" for the API lane. An agent-backed
-        ;; chat also sheds stale permission/waiting cards on restore (the
-        ;; runtime they belonged to did not survive the restart) and gets
-        ;; its overlays and folds back from the persisted locals
-        (if (buffer-local buf 'agent-slug)
-            (begin
-              (agent-update-modeline! buf)
-              (agent-block-drop-kind! buf "permission")
-              (agent-block-drop-kind! buf "waiting")
-              (let ((ovs (buffer-local buf 'agent-overlays)))
-                (when ovs (overlay-set! buf 'agent ovs)))
-              (agent-apply-folds! buf))
+        ;; Rebuild presentation from the CONVERSATION locals — overlays and
+        ;; folds come back, and chrome belonging to a runtime that didn't
+        ;; survive the restart is dropped. None of this depends on there
+        ;; being a live thread (the sweep above may just have removed the
+        ;; slug), so it is not gated on one.
+        (when (boundp (quote agent-block-drop-kind!))
+          (agent-block-drop-kind! buf "permission")
+          (agent-block-drop-kind! buf "waiting")
+          (let ((ovs (buffer-local buf 'agent-overlays)))
+            (when ovs (overlay-set! buf 'agent ovs)))
+          (agent-apply-folds! buf))
+        ;; the modeline states the chat's identity — its connector, which
+        ;; survives everything. A chat that has never attached one will
+        ;; get "api" on its first send, so that is what it advertises.
+        (if (and (buffer-local buf 'agent-connector)
+                 (boundp (quote agent-update-modeline!)))
+            (agent-update-modeline! buf)
             (buffer-set-local! buf 'modeline-info
               (string-append "api · " (llm-model))))
         (chat-clear-waiting! buf)
@@ -1270,10 +1276,13 @@
 (define (chat-attach-agent! buf connector &optional model opts)
   (let ((slug (or (buffer-local buf 'agent-slug) (agent-next-slug)))
         ;; a model pinned on the buffer (C-c m before the first send, or a
-        ;; .chat header) is part of the chat's identity — carry it in
+        ;; .chat header) is part of the chat's identity — carry it in, but
+        ;; only if it actually belongs to THIS connector: a bare id left
+        ;; over from an earlier ACP session (its own "default" sentinel,
+        ;; say) must not ride into the api lane's wire unmodified
         (model (if (and model (not (equal? model "")))
                    model
-                   (buffer-local buf 'agent-model))))
+                   (agent-model-for-connector buf connector))))
     (buffer-set-local! buf 'agent-slug slug)
     (buffer-set-local! buf 'agent-connector connector)
     (when (and model (not (equal? model "")))
@@ -1333,29 +1342,70 @@
                          (chat-reply-marker))
                      (cadr (car ts)) "\n"))))))
 
-;; wipe the conversation, keep the surface: group, model, backend and keys
-;; survive; every chat comes back as the one rich surface (a legacy plain
-;; chat upgrades on reset)
+;;; --- what a chat is made of -----------------------------------------------------
+;;; The reset/restore bug class (a stale 'agent-queued deadlocking RET, a
+;;; banner from a runtime that no longer exists, a help card fed back to a
+;;; model as context) had ONE cause: which local means what was implicit,
+;;; and reset, restore, and save each kept their own partial list. So the
+;;; partition is defined once, here, and everything else consults it.
+;;;
+;;; STANDING RULE: any new chat buffer-local goes into exactly one of these
+;;; three lists, in the same commit that introduces it.
+
+;; who the chat IS — survives reset, restart, and save
+(define chat-identity-locals
+  '(group agent-connector agent-model chat-presets chat-permission-mode))
+
+;; what was SAID — survives restart and save; reset clears it
+(define chat-conversation-locals
+  '(chat-turns agent-blocks agent-overlays agent-folds
+    chat-cost chat-last-usage agent-saved-mark agent-marker-bytes))
+
+;; PROCESS state — mirrors a live runtime, so it is always stale after a
+;; restart and meaningless after a reset: both clear it wholesale
+(define chat-runtime-locals
+  '(agent-slug agent-queued agent-waiting chat-waiting
+    agent-cancelling agent-seed-context agent-tool-bodies
+    agent-turn-text agent-turn-any
+    agent-models agent-mode agent-modes chat-mcp-dirty))
+
+(define (chat-clear-locals! buf keys)
+  (for-each (lambda (k) (buffer-set-local! buf k #f)) keys))
+
+;; a chat whose runtime is gone (restored from desktop, or crashed) is
+;; carrying a description of a process that no longer exists — drop it.
+;; A LIVE runtime's locals are the handle on it and must never be swept.
+(define (chat-live-runtime? buf)
+  (let ((slug (buffer-local buf 'agent-slug)))
+    (and slug
+         (boundp (quote agent-list))
+         (member slug (agent-list))
+         #t)))
+
+(define (chat-sweep-runtime-locals! buf)
+  (unless (chat-live-runtime? buf)
+    (chat-clear-locals! buf chat-runtime-locals)))
+
+;; wipe the conversation, keep the identity: group, backend, model,
+;; presets and permission mode survive; every chat comes back as the one
+;; rich surface (a legacy plain chat upgrades on reset). Idempotent.
 (define-command "chat-reset" "Reset this chat: clear the transcript, start fresh"
   (lambda ()
     (let ((buf (current-buffer)))
       (if (not (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
           (message "not a chat buffer")
           (let ((g (buffer-group buf)))
-            ;; an ACP-backed chat holds a server-side session too — reset
-            ;; severs it (and the seed-context flag), so the next send
-            ;; starts a genuinely fresh conversation on the same backend
+            ;; FIRST: resolve anything the runtime is waiting on. A pending
+            ;; permission answered after its blocks are gone is the
+            ;; blind-banner race; killing the thread resolves it cancelled.
             (let ((slug (buffer-local buf 'agent-slug)))
               (when (and slug (boundp (quote agent-kill!)))
                 (unless (equal? (agent-status slug) 'dead)
-                  (agent-kill! slug))
-                (buffer-set-local! buf 'agent-seed-context #f)))
+                  (agent-kill! slug))))
             (overlay-clear! buf "all")
             (buffer-set-hidden! buf '())
-            (for-each (lambda (k) (buffer-set-local! buf k #f))
-                      (list 'chat-turns 'agent-blocks 'agent-overlays
-                            'agent-folds 'agent-queued 'chat-cost
-                            'chat-last-usage 'agent-saved-mark))
+            (chat-clear-locals! buf chat-conversation-locals)
+            (chat-clear-locals! buf chat-runtime-locals)
             (buffer-delete-range! buf 0 (buffer-size buf))
             (group-chat-init! buf (or g buf))
             (set-mode! "chat-mode")
@@ -1381,6 +1431,21 @@
          (or (connector-api? cname)          ; stateless: always takeable
              (let ((offered (map car (or (buffer-local buf 'agent-models) '()))))
                (and (pair? offered) (member model offered)))))))
+
+;; A chat with no runtime gets one on its OWN connector — identity
+;; survives resets, restarts, and the runtime sweep, so a restored
+;; claude-code chat comes back as claude-code, not as the api default.
+;; Whatever was already said is seeded into the fresh session.
+(define (chat-ensure-runtime! buf)
+  (or (buffer-local buf 'agent-slug)
+      (let* ((cname (or (buffer-local buf 'agent-connector) "api"))
+             (had-turns? (pair? (chat-turns buf))))
+        (buffer-set-local! buf 'agent-seed-context
+          (and had-turns? (not (connector-api? cname))))
+        (let ((slug (chat-attach-agent! buf cname)))
+          (when had-turns?
+            (message (string-append "agent " slug ": revived (fresh session)")))
+          slug))))
 
 ;; the one switch. connector #f keeps the current one; model "" means the
 ;; connector's own default.

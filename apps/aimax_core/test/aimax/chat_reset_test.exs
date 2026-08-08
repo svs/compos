@@ -241,6 +241,165 @@ defmodule Aimax.ChatResetTest do
     assert Aimax.Core.Editor.lookup_key(["RET"]) == {:command, "agent-send"}
   end
 
+  describe "the locals partition (W8)" do
+    # every kind of chat resets to the identical clean state
+    setup do
+      :persistent_term.put(:chat_reset_test_pid, self())
+      Application.put_env(:aimax_core, :acp_transport, Aimax.ChatResetTest.FakeTransport)
+
+      on_exit(fn ->
+        Application.delete_env(:aimax_core, :acp_transport)
+        Enum.each(Aimax.Core.Agent.list(), &Aimax.Core.Agent.kill/1)
+
+        Enum.each(Aimax.Core.list_buffers(), fn name ->
+          if String.starts_with?(name, "*chat:"), do: Aimax.Core.kill_buffer(name)
+        end)
+
+        Aimax.Core.Editor.delete_other_windows()
+      end)
+
+      :ok
+    end
+
+    # what "clean" means, checked the same way for every case
+    defp assert_clean(buf) do
+      # conversation gone...
+      for k <- ~w(chat-turns agent-folds chat-cost chat-last-usage) do
+        assert Aimax.Core.Buffer.get_local(buf, k) in [nil, false, []],
+               "#{k} survived the reset: #{inspect(Aimax.Core.Buffer.get_local(buf, k))}"
+      end
+
+      # ...blocks hold nothing but the freshly rebuilt meta card: no user
+      # turn, no prose, no tool card, and above all no stale banner
+      kinds =
+        (Aimax.Core.Buffer.get_local(buf, "agent-blocks") || [])
+        |> Enum.map(fn [_, _, k | _] -> k end)
+        |> Enum.uniq()
+
+      assert kinds -- ["meta"] == [], "reset left #{inspect(kinds)} blocks behind"
+
+      for k <- ~w(agent-slug agent-queued agent-waiting agent-seed-context
+                  agent-tool-bodies agent-models agent-mode chat-mcp-dirty
+                  agent-turn-text agent-turn-any) do
+        assert Aimax.Core.Buffer.get_local(buf, k) in [nil, false, []],
+               "#{k} survived the reset: #{inspect(Aimax.Core.Buffer.get_local(buf, k))}"
+      end
+
+      # ...the surface is rebuilt, and RET still sends
+      assert Aimax.Core.Buffer.get_local(buf, "agent-saved-mark")
+      assert Aimax.Core.Buffer.text(buf) =~ "you ▸"
+      assert Aimax.Core.Buffer.hidden(buf) == []
+    end
+
+    defp fresh_chat(name) do
+      eval!(~s[(begin (buffer-create "#{name}") (switch-to-buffer! "#{name}")
+                      (set-mode! "chat-mode") (chat-task-init! "#{name}" "t") #t)])
+
+      name
+    end
+
+    test "reset leaves the same clean state from every starting point" do
+      # 1. an api chat mid-conversation, with cost and blocks
+      a = fresh_chat("*chat:reset-api*")
+      eval!(~s[(begin
+        (buffer-set-local! "#{a}" 'agent-connector "api")
+        (buffer-set-local! "#{a}" 'chat-turns '(("user" "hi")))
+        (buffer-set-local! "#{a}" 'chat-cost 0.25)
+        (buffer-set-local! "#{a}" 'agent-turn-text "half a reply")
+        (switch-to-buffer! "#{a}") (run-command "chat-reset") #t)])
+
+      assert_clean(a)
+      # identity survived
+      assert Aimax.Core.Buffer.get_local(a, "agent-connector") == "api"
+
+      # 2. a chat with queued prompts and a waiting line (the deadlock case)
+      b = fresh_chat("*chat:reset-queued*")
+      eval!(~s[(begin
+        (buffer-set-local! "#{b}" 'agent-slug "gone")
+        (buffer-set-local! "#{b}" 'agent-queued '(12 34))
+        (buffer-set-local! "#{b}" 'agent-waiting '(1 2))
+        (switch-to-buffer! "#{b}") (run-command "chat-reset") #t)])
+
+      assert_clean(b)
+
+      # 3. a chat with a pending permission banner and folds
+      c = fresh_chat("*chat:reset-perm*")
+      eval!(~s[(begin
+        (buffer-set-local! "#{c}" 'agent-blocks '((0 5 "permission" "Send mail")))
+        (buffer-set-local! "#{c}" 'agent-folds '((0 5 #f)))
+        (buffer-set-local! "#{c}" 'chat-mcp-dirty #t)
+        (switch-to-buffer! "#{c}") (run-command "chat-reset") #t)])
+
+      assert_clean(c)
+
+      # 4. a live ACP chat: reset kills the thread too
+      {:ok, _} = Session.eval(~s[(execute "")])
+      assert_receive {:transport_open, _}, 1_000
+      d = "*chat:a1*"
+      slug = Aimax.Core.Buffer.get_local(d, "agent-slug")
+      assert slug in Aimax.Core.Agent.list()
+
+      eval!(~s[(begin (switch-to-buffer! "#{d}") (run-command "chat-reset") #t)])
+      assert_clean(d)
+      # the thread itself is gone, not just forgotten by the buffer
+      refute slug in Aimax.Core.Agent.list()
+
+      # 5. reset o reset = reset (idempotent)
+      before = Aimax.Core.Buffer.text(d)
+      eval!(~s[(begin (switch-to-buffer! "#{d}") (run-command "chat-reset") #t)])
+      assert Aimax.Core.Buffer.text(d) == before
+      assert_clean(d)
+    end
+
+    test "a restored chat sheds its dead runtime state; a live one keeps it" do
+      # restore = locals laid down, then set-mode!. The runtime they name
+      # is gone, so every one of them is a lie and must be swept.
+      r = "*chat:restored*"
+      eval!(~s[(begin (buffer-create "#{r}") (switch-to-buffer! "#{r}")
+                      (chat-task-init! "#{r}" "t")
+                      (buffer-set-local! "#{r}" 'agent-slug "dead-slug")
+                      (buffer-set-local! "#{r}" 'agent-connector "codex")
+                      (buffer-set-local! "#{r}" 'agent-queued '(5))
+                      (buffer-set-local! "#{r}" 'chat-turns '(("user" "before the restart")))
+                      (set-mode! "chat-mode") #t)])
+
+      on_exit(fn -> Aimax.Core.kill_buffer(r) end)
+
+      assert Aimax.Core.Buffer.get_local(r, "agent-slug") in [nil, false]
+      assert Aimax.Core.Buffer.get_local(r, "agent-queued") in [nil, false]
+      # ...but what was SAID and who the chat IS both survive
+      assert Aimax.Core.Buffer.get_local(r, "chat-turns") != nil
+      assert Aimax.Core.Buffer.get_local(r, "agent-connector") == "codex"
+
+      # a LIVE chat's runtime locals are its handle on a running thread —
+      # set-mode! must never sweep those
+      {:ok, _} = Session.eval(~s[(execute "")])
+      assert_receive {:transport_open, _}, 1_000
+      live = "*chat:a1*"
+      eval!(~s[(begin (switch-to-buffer! "#{live}") (set-mode! "chat-mode") #t)])
+      assert Aimax.Core.Buffer.get_local(live, "agent-slug") == "a1"
+    end
+
+    test "the three lists are disjoint and cover every local reset touches" do
+      identity = eval!("chat-identity-locals")
+      conversation = eval!("chat-conversation-locals")
+      runtime = eval!("chat-runtime-locals")
+
+      all = [identity, conversation, runtime] |> Enum.join(" ")
+
+      # the locals that once caused the bugs are each classified exactly once
+      for k <- ~w(agent-queued agent-slug chat-turns agent-saved-mark
+                  chat-permission-mode agent-mode chat-mcp-dirty) do
+        assert all =~ k, "#{k} is in none of the three lists"
+      end
+
+      # disjoint: nothing is in two lists at once
+      names = fn s -> s |> String.trim("(") |> String.trim(")") |> String.split() end
+      combined = names.(identity) ++ names.(conversation) ++ names.(runtime)
+      assert length(combined) == length(Enum.uniq(combined))
+    end
+  end
+
   test "outside a chat it refuses politely" do
     eval!(~s{(begin (switch-to-buffer! "*scratch*") (run-command "chat-reset"))})
     assert eval!(~s{(buffer-exists? "*scratch*")}) == "#t"

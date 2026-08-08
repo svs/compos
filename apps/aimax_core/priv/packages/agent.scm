@@ -583,6 +583,31 @@
 
 ;;; --- steering -----------------------------------------------------------------
 
+;; a model saved on a buffer may belong to a DIFFERENT connector — an
+;; earlier ACP session's model-state (its "current" id, e.g. an adapter's
+;; own "default" sentinel), or a pin left from before a connector switch.
+;; Carrying it verbatim into a new connector is worse than none: an ACP
+;; adapter just ignores an id it doesn't recognize, but the api lane's
+;; wire sends it to the provider unmodified and 404s. Declared empty (a
+;; connector that has never reported models) can't validate anything, so
+;; nothing is filtered then. On rejection: clear the buffer local so the
+;; foreign id doesn't keep coming back, and warn once.
+(define (agent-model-for-connector buf cname)
+  (let* ((m0 (buffer-local buf 'agent-model))
+         ;; legit ids: the connector's declared list plus what the
+         ;; adapter itself reported for this session
+         (declared (append (connector-models cname)
+                           (map car (or (buffer-local buf 'agent-models)
+                                        '())))))
+    (if (and m0 (pair? declared) (not (member m0 declared)))
+        (begin
+          (buffer-set-local! buf 'agent-model #f)
+          (agent-update-modeline! buf)
+          (message (string-append m0 " isn't a " cname
+                                  " model — using its default"))
+          #f)
+        m0)))
+
 ;; a restored (or crashed) thread is a live transcript with a dead runtime —
 ;; reattach a fresh agent on its connector. New ACP session: the transcript
 ;; stays; server-side context isn't replayed yet (resume lands with P5).
@@ -594,23 +619,7 @@
                               (last (buffer-size buf)))
                      (if (null? ms) last (loop (cdr ms) (car (car ms)))))))
          (cname (or (buffer-local buf 'agent-connector) *default-connector*))
-         ;; a model left over from ANOTHER connector is worse than none:
-         ;; the adapter silently ignores it and runs its default while the
-         ;; modeline repeats the stale name. Foreign -> connector default.
-         (m (let ((m0 (buffer-local buf 'agent-model))
-                  ;; legit ids: the connector's declared list plus what
-                  ;; the adapter itself reported for this session
-                  (declared (append (connector-models cname)
-                                    (map car (or (buffer-local buf 'agent-models)
-                                                 '())))))
-              (if (and m0 (pair? declared) (not (member m0 declared)))
-                  (begin
-                    (buffer-set-local! buf 'agent-model #f)
-                    (agent-update-modeline! buf)
-                    (message (string-append m0 " isn't a " cname
-                                            " model — using its default"))
-                    #f)
-                  m0))))
+         (m (agent-model-for-connector buf cname)))
     (buffer-set-local! buf 'agent-queued '())
     ;; seed only when there IS a conversation — a fresh surface's meta
     ;; card alone is chrome, not context. The api lane never seeds: its
@@ -716,12 +725,12 @@
 (define-command "agent-send" "Send the input to the agent, reviving it if dead"
   (lambda ()
     (let* ((buf (current-buffer))
-           ;; a chat without a runtime gets one on first send — the api
-           ;; backend by default; RET is agent-send on EVERY chat
+           ;; a chat without a runtime gets one on first send, on its own
+           ;; connector; RET is agent-send on EVERY chat
            (slug (or (agent-slug-of buf)
                      (and (equal? (buffer-local buf 'mode-name) "chat-mode")
                           (buffer-local buf 'agent-saved-mark)
-                          (chat-attach-agent! buf "api")))))
+                          (chat-ensure-runtime! buf)))))
       (cond ((not slug) (message "not an agent buffer"))
             (else
              ;; a preset changed under a live ACP session: its tool list is

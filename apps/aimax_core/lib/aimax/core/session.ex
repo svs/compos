@@ -460,6 +460,14 @@ defmodule Aimax.Core.Session do
           {:error, _} -> false
         end
       end,
+      # live permission-mode switch (ACP session/set_mode); #f when the
+      # backend doesn't do modes — the caller then answers requests itself
+      "agent-set-mode!" => fn [slug, mode] ->
+        case Aimax.Core.Agent.set_mode(s(slug), s(mode)) do
+          :ok -> true
+          {:error, _} -> false
+        end
+      end,
       # -> (slug "a1" buffer "*agent: a1*" status idle queued 0 permission #f)
       "agent-info" => fn [slug] ->
         case Aimax.Core.Agent.info(s(slug)) do
@@ -765,8 +773,16 @@ defmodule Aimax.Core.Session do
     plist
     |> Enum.chunk_every(2)
     |> Enum.reverse()
-    |> Map.new(fn [k, v] -> {s(k), plist_val_to_elixir(v)} end)
+    |> Map.new(fn [k, v] -> {s(k), config_val(s(k), v)} end)
   end
+
+  # 'meta is forwarded to an adapter as JSON, where an OBJECT and an ARRAY
+  # are different things — and only the {:sym, _} keys tell them apart
+  # ((settingSources ()) is a one-key object; ("user" "local") is a list).
+  # Flattening symbols here would erase that, so this value stays raw and
+  # the backend converts it.
+  defp config_val("meta", v), do: v
+  defp config_val(_k, v), do: plist_val_to_elixir(v)
 
   defp plist_val_to_elixir({:sym, str}), do: str
   defp plist_val_to_elixir(v) when is_list(v), do: Enum.map(v, &plist_val_to_elixir/1)

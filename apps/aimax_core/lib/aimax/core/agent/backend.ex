@@ -27,6 +27,15 @@ defmodule Aimax.Core.Agent.Backend do
   @callback respond_permission(handle :: term, id :: term, option :: String.t() | nil) :: :ok
   @callback capabilities() :: [:models | :streaming | :session_modes | :resume]
 
+  @doc """
+  Switch the backend's permission/session mode. Optional: only backends
+  advertising `:session_modes` implement it, so the caller checks
+  capabilities rather than rescuing UndefinedFunctionError.
+  """
+  @callback set_mode(handle :: term, mode_id :: String.t()) :: :ok | {:error, term}
+
+  @optional_callbacks set_mode: 2
+
   @doc "Pick the backend module a resolved connector config names (default acp)."
   def module(config) do
     case Map.get(config, "backend", "acp") do

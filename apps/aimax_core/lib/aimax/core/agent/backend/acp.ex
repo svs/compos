@@ -37,11 +37,14 @@ defmodule Aimax.Core.Agent.Backend.ACP do
   def set_model(pid, model_id), do: GenServer.call(pid, {:set_model, model_id})
 
   @impl Backend
+  def set_mode(pid, mode_id), do: GenServer.call(pid, {:set_mode, mode_id})
+
+  @impl Backend
   def respond_permission(pid, rpc_id, option_id),
     do: GenServer.call(pid, {:respond_permission, rpc_id, option_id})
 
   @impl Backend
-  def capabilities, do: [:models, :streaming]
+  def capabilities, do: [:models, :streaming, :session_modes]
 
   # --- server -----------------------------------------------------------------
 
@@ -97,6 +100,18 @@ defmodule Aimax.Core.Agent.Backend.ACP do
        request(state, "session/set_model", %{
          "sessionId" => state.session_id,
          "modelId" => model_id
+       })}
+    else
+      {:reply, {:error, :no_session}, state}
+    end
+  end
+
+  def handle_call({:set_mode, mode_id}, _from, state) do
+    if state.session_id do
+      {:reply, :ok,
+       request(state, "session/set_mode", %{
+         "sessionId" => state.session_id,
+         "modeId" => mode_id
        })}
     else
       {:reply, {:error, :no_session}, state}
@@ -200,13 +215,26 @@ defmodule Aimax.Core.Agent.Backend.ACP do
 
     case {method, frame} do
       {"initialize", %{"result" => _}} ->
-        request(state, "session/new", %{
+        params = %{
           "cwd" => Map.get(state.config, "cwd", File.cwd!()),
           "mcpServers" =>
             acp_servers(
               Map.get(state.config, "mcp-servers") || Map.get(state.config, "mcp_servers") || []
             )
-        })
+        }
+
+        # connector-declared adapter config, forwarded verbatim. This is how
+        # aimax takes control of the agent's surface — the claude-code
+        # connector ships settingSources: [] so the adapter loads NONE of
+        # the user's own MCP servers or permission settings, leaving our
+        # mcpServers and our answers the only sources.
+        params =
+          case Map.get(state.config, "meta") do
+            nil -> params
+            meta -> Map.put(params, "_meta", meta_json(meta))
+          end
+
+        request(state, "session/new", params)
 
       {"session/new", %{"result" => %{"sessionId" => sid} = result}} ->
         state = %{state | session_id: sid}
@@ -229,9 +257,16 @@ defmodule Aimax.Core.Agent.Backend.ACP do
               state
           end
 
+        # ...and which permission modes it offers, in the SAME payload. We
+        # used to drop this: it is how `auto` stops the agent asking at all.
+        state = emit_mode_state(state, Map.get(result, "modes"))
+
         emit(state, type: :ready)
 
       {"session/set_model", %{"result" => _}} ->
+        state
+
+      {"session/set_mode", %{"result" => _}} ->
         state
 
       {"session/prompt", %{"result" => result}} ->
@@ -328,6 +363,11 @@ defmodule Aimax.Core.Agent.Backend.ACP do
 
         emit(state, type: :plan, entries: entries)
 
+      # the agent switched modes on its own (claude-code does this when it
+      # enters plan mode) — the modeline must follow, not guess
+      "current_mode_update" ->
+        emit(state, type: :"mode-state", current: Map.get(update, "currentModeId", ""))
+
       _ ->
         state
     end
@@ -356,6 +396,45 @@ defmodule Aimax.Core.Agent.Backend.ACP do
       Enum.map_join(String.split(old, "\n"), "", &"-#{&1}\n") <>
       Enum.map_join(String.split(new, "\n"), "", &"+#{&1}\n")
   end
+
+  defp emit_mode_state(state, %{"currentModeId" => cur} = modes) do
+    emit(state,
+      type: :"mode-state",
+      current: cur,
+      available:
+        for m <- Map.get(modes, "availableModes", []) do
+          [Map.get(m, "id"), Map.get(m, "name", ""), Map.get(m, "description", "")]
+        end
+    )
+  end
+
+  defp emit_mode_state(state, _), do: state
+
+  # connector 'meta plists -> JSON. Nested plists become objects, so a
+  # connector can declare (meta (claudeCode (options (settingSources ())))).
+  # Symbols become strings; the empty list is an empty ARRAY, which is what
+  # settingSources: [] needs.
+  defp meta_json(plist) when is_list(plist) do
+    if plist_shaped?(plist) do
+      plist |> Enum.chunk_every(2) |> Map.new(fn [k, v] -> {to_string(key(k)), meta_json(v)} end)
+    else
+      Enum.map(plist, &meta_json/1)
+    end
+  end
+
+  defp meta_json({:sym, s}), do: s
+  defp meta_json(v), do: v
+
+  # a plist is an even-length list whose every other element is a symbol key
+  defp plist_shaped?(list) do
+    n = length(list)
+
+    n > 0 and rem(n, 2) == 0 and
+      list |> Enum.take_every(2) |> Enum.all?(&match?({:sym, _}, &1))
+  end
+
+  defp key({:sym, s}), do: s
+  defp key(k), do: k
 
   defp adapter_exit(state, status) do
     emit(state, type: :dead, exit: status)

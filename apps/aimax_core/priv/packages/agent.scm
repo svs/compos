@@ -233,6 +233,19 @@
          (when cur (buffer-set-local! buf 'agent-model cur)))
        (agent-update-modeline! buf))
 
+      ;; likewise for permission modes: the adapter's own list, and which
+      ;; one it is actually in (it switches itself when it enters plan mode)
+      ((equal? type 'mode-state)
+       (let ((avail (plist-get e 'available))
+             (cur (plist-get e 'current)))
+         (when avail (buffer-set-local! buf 'agent-modes avail))
+         (when (and cur (not (equal? cur "")))
+           (buffer-set-local! buf 'agent-mode cur)))
+       ;; a chat already in auto mode pushes that down to the agent as
+       ;; soon as it learns the session can take it
+       (agent-sync-permission-mode! slug)
+       (agent-update-modeline! buf))
+
       ((equal? type 'user-msg)
        (agent-pop-queued! slug)
        ;; 'chat-turns is the conversation truth on EVERY backend: the api
@@ -453,6 +466,58 @@
   (unless (window-showing (agent-buf slug))
     (agent-permission-deadline! slug permission-timeout-ms)))
 
+;; `auto` is approve PLUS backend-side permissiveness: an agent that
+;; advertises session modes is told to stop asking us at all, which is the
+;; only way a long unattended run avoids round-tripping every tool call.
+;; The deny-list does NOT rely on this — it holds at our own chokepoints.
+;; First match wins, so a backend offering only some of these still works.
+(define *permission-auto-modes* '("dontAsk" "acceptEdits" "bypassPermissions"))
+(define *permission-ask-modes* '("default"))
+
+(define (agent--pick-mode buf wanted)
+  (let ((avail (map car (or (buffer-local buf 'agent-modes) '()))))
+    (let loop ((ws wanted))
+      (cond ((null? ws) #f)
+            ((member (car ws) avail) (car ws))
+            (else (loop (cdr ws)))))))
+
+;; auto pushes a permissive mode down; leaving auto reverts ONLY the mode
+;; we imposed. Anything else the agent is in — plan mode above all — is
+;; the user's or the agent's choice and is never stomped.
+(define (agent-sync-permission-mode! slug)
+  (let* ((buf (agent-buf slug))
+         (cur (buffer-local buf 'agent-mode))
+         (auto? (equal? (chat-permission-mode buf) 'auto))
+         (want (cond (auto? (agent--pick-mode buf *permission-auto-modes*))
+                     ((member cur *permission-auto-modes*)
+                      (agent--pick-mode buf *permission-ask-modes*))
+                     (else #f))))
+    (when (and want (not (equal? want cur)))
+      (when (agent-set-mode! slug want)
+        (buffer-set-local! buf 'agent-mode want)))))
+
+;; the agent's OWN mode list (claude-code: default/acceptEdits/plan/
+;; dontAsk/bypassPermissions) — plan mode in particular has no aimax
+;; equivalent, so it is worth picking directly
+(define-command "agent-set-mode" "Switch the agent session's mode (plan, acceptEdits, ...)"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (slug (buffer-local buf 'agent-slug))
+           (modes (buffer-local buf 'agent-modes)))
+      (cond ((not slug) (message "not an agent chat"))
+            ((not modes) (message "this backend has no session modes"))
+            (else
+              (minibuffer-read
+                (string-append "Mode (now " (or (buffer-local buf 'agent-mode) "?") "): ")
+                (map (lambda (m) (list (car m) (or (nth 2 m) ""))) modes)
+                (lambda (m)
+                  (unless (equal? (string-trim m) "")
+                    (if (agent-set-mode! slug m)
+                        (begin (buffer-set-local! buf 'agent-mode m)
+                               (agent-update-modeline! buf)
+                               (message (string-append "agent mode: " m)))
+                        (message "the agent refused that mode"))))))))))
+
 (define-command "chat-set-permission-mode" "Cycle this chat's permission mode"
   (lambda ()
     (let* ((buf (current-buffer))
@@ -461,6 +526,10 @@
                        ((equal? m 'auto) 'ask)
                        (else 'approve))))
       (buffer-set-local! buf 'chat-permission-mode next)
+      ;; a live agent hears about it immediately, not at the next reconnect
+      (let ((slug (buffer-local buf 'agent-slug)))
+        (when (and slug (not (equal? (agent-status slug) 'dead)))
+          (agent-sync-permission-mode! slug)))
       (agent-update-modeline! buf)
       (message
         (string-append "permissions: " (symbol->string next)
@@ -713,8 +782,15 @@
   (let ((e (assoc name *agent-connectors*)))
     (if e (car (cdr e)) '())))
 
+;; 'meta rides verbatim into session/new as _meta. claude-code-acp spreads
+;; _meta.claudeCode.options over its own defaults, so settingSources ()
+;; makes the adapter load NO user-level config: aimax's mcpServers and
+;; aimax's permission answers become the only sources. (Verified against
+;; @zed-industries/claude-code-acp 0.16.2: options = {...defaults,
+;; ...userProvidedOptions, ...ACP-controlled fields}.)
 (define-connector! "claude-code"
   '(cmd "claude-code-acp"
+    meta (claudeCode (options (settingSources ())))
     models ("claude-sonnet-5" "claude-opus-5" "claude-haiku-4-5-20251001")))
 ;; codex rides a ChatGPT subscription (auth from `codex login`). Models are
 ;; what the bundled codex core recognizes; the thread's model is passed as a
@@ -807,7 +883,11 @@
         (if (and m (not (equal? m ""))) (string-append " · " m) "")
         (if cost (string-append " · " (format-usd cost)) "")
         ;; what will and won't stop to ask — never leave this ambiguous
-        " · " (symbol->string (chat-permission-mode buf))))))
+        " · " (symbol->string (chat-permission-mode buf))
+        ;; the agent's own mode, when it is running something other than
+        ;; its default (plan mode especially changes what a turn DOES)
+        (let ((am (buffer-local buf 'agent-mode)))
+          (if (and am (not (equal? am "default"))) (string-append " · " am) ""))))))
 
 ;;; --- thread creation ----------------------------------------------------------
 

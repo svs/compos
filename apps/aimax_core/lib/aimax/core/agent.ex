@@ -60,6 +60,13 @@ defmodule Aimax.Core.Agent do
   def set_model(slug, model_id), do: call(slug, {:set_model, model_id})
 
   @doc """
+  Switch the session's permission mode. `{:error, :unsupported}` when the
+  backend doesn't advertise `:session_modes` — the caller then falls back
+  to answering requests itself, which is always available.
+  """
+  def set_mode(slug, mode_id), do: call(slug, {:set_mode, mode_id})
+
+  @doc """
   Answer a pending permission request by option id (nil = cancel).
   Idempotent: answering one that is already resolved is a no-op, not an
   error — a banner and a deadline racing must never surface as a failure.
@@ -153,6 +160,14 @@ defmodule Aimax.Core.Agent do
 
   def handle_call({:set_model, model_id}, _from, state),
     do: {:reply, state.backend.set_model(state.handle, model_id), state}
+
+  def handle_call({:set_mode, mode_id}, _from, state) do
+    if :session_modes in state.backend.capabilities() do
+      {:reply, state.backend.set_mode(state.handle, mode_id), state}
+    else
+      {:reply, {:error, :unsupported}, state}
+    end
+  end
 
   def handle_call(:cancel, _from, state) do
     if state.status in [:running, :needs_attention],

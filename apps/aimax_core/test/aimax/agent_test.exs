@@ -632,6 +632,87 @@ defmodule Aimax.AgentTest do
     assert eventually(fn -> match?(%{status: :dead}, Agent.info(slug)) end)
   end
 
+  test "session/new carries our mcpServers and _meta; the adapter loads no user config" do
+    {:ok, _} = Session.eval(~s[(execute "")])
+    assert_receive {:transport_open, agent}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid, "params" => ip}}, 1_000
+
+    # fs/* stays refused: agents read live editor state through mcp__aimax__,
+    # not through a filesystem shim over buffers
+    assert %{"fs" => %{"readTextFile" => false, "writeTextFile" => false}} =
+             ip["clientCapabilities"]
+
+    inject(agent, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{"protocolVersion" => 1}})
+
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid, "params" => np}}, 1_000
+
+    # aimax's own tool proxy is handed over as an MCP server...
+    assert Enum.any?(np["mcpServers"] || [], &(&1["name"] == "aimax"))
+
+    # ...and settingSources: [] means the adapter loads NONE of the user's
+    # own MCP servers or permission settings. aimax is the only source.
+    assert %{"claudeCode" => %{"options" => %{"settingSources" => []}}} = np["_meta"]
+
+    # session modes come back in the same payload we used to drop
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => nid,
+      "result" => %{
+        "sessionId" => "sess-md",
+        "modes" => %{
+          "currentModeId" => "default",
+          "availableModes" => [
+            %{"id" => "default", "name" => "Default", "description" => "asks"},
+            %{"id" => "plan", "name" => "Plan Mode", "description" => "no execution"},
+            %{"id" => "dontAsk", "name" => "Don't Ask", "description" => "no prompts"}
+          ]
+        }
+      }
+    })
+
+    buf = "*chat:a1*"
+    assert eventually(fn -> Buffer.get_local(buf, "agent-mode") == "default" end)
+
+    assert [["default", "Default", "asks"] | _] = Buffer.get_local(buf, "agent-modes")
+
+    # agent-set-mode! reaches the wire, and the agent's own switch is heard
+    assert {:ok, "#t"} = Session.eval(~s[(agent-set-mode! "a1" "plan")])
+    assert_receive {:frame, %{"method" => "session/set_mode", "params" => sp}}, 1_000
+    assert sp == %{"sessionId" => "sess-md", "modeId" => "plan"}
+
+    update(agent, "sess-md", %{"sessionUpdate" => "current_mode_update", "currentModeId" => "plan"})
+    assert eventually(fn -> Buffer.get_local(buf, "agent-mode") == "plan" end)
+    assert eventually(fn -> Buffer.get_local(buf, "modeline-info") =~ "plan" end)
+  end
+
+  test "auto mode tells a session-mode backend to stop asking us at all" do
+    {:ok, _} = Session.eval(~s[(execute* "" '(permission-mode auto))])
+    assert_receive {:transport_open, agent}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(agent, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{}})
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => nid,
+      "result" => %{
+        "sessionId" => "sess-auto",
+        "modes" => %{
+          "currentModeId" => "default",
+          "availableModes" => [
+            %{"id" => "default", "name" => "Default"},
+            %{"id" => "dontAsk", "name" => "Don't Ask"}
+          ]
+        }
+      }
+    })
+
+    # learning the session takes modes is enough — no user gesture needed
+    assert_receive {:frame, %{"method" => "session/set_mode", "params" => sp}}, 1_000
+    assert sp["modeId"] == "dontAsk"
+    assert eventually(fn -> Buffer.get_local("*chat:a1*", "agent-mode") == "dontAsk" end)
+  end
+
   defp eventually(fun, tries \\ 40) do
     cond do
       fun.() -> true

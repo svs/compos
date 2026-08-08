@@ -1362,20 +1362,59 @@
             (end-of-buffer!)
             (message "Chat reset"))))))
 
-;; every backend is a connector now — "api" included. Switching kills the
-;; old runtime and attaches the new one on the SAME slug; the conversation
-;; ('chat-turns) carries over: replayed per-turn on the api lane, seeded
-;; into the first prompt on a fresh ACP session. No key rebinding anywhere.
-(define (chat-switch-backend! buf choice)
-  (let ((slug (buffer-local buf 'agent-slug)))
-    (when (and slug (not (equal? (agent-status slug) 'dead)))
-      (agent-kill! slug)))
-  (buffer-set-local! buf 'agent-seed-context
-    (and (not (connector-api? choice)) (pair? (chat-turns buf))))
-  ;; a model pinned for another connector is stale — connector default
-  (buffer-set-local! buf 'agent-model #f)
-  (buffer-set-local! buf 'agent-models #f)
-  (chat-attach-agent! buf choice))
+;;; --- switching, transparently ---------------------------------------------------
+;;; "Transparent" means testable: the buffer, its group, 'chat-turns,
+;;; presets, permission mode, cost history, and keybindings survive EVERY
+;;; switch — the user just keeps typing. Keys are free (RET is agent-send
+;;; on every lane), so one function with two mechanisms covers it:
+;;;
+;;;   live session + backend takes the model + target is offered
+;;;       -> set_model in place; server-side context survives
+;;;   anything else (lane change, dead session, model not takeable)
+;;;       -> close the handle, attach the new backend, seed the transcript
+
+;; can this chat's RUNNING backend take this model without a new session?
+(define (chat-model-takeable? buf slug model)
+  (and slug
+       (not (equal? (agent-status slug) 'dead))
+       (let ((cname (or (buffer-local buf 'agent-connector) *default-connector*)))
+         (or (connector-api? cname)          ; stateless: always takeable
+             (let ((offered (map car (or (buffer-local buf 'agent-models) '()))))
+               (and (pair? offered) (member model offered)))))))
+
+;; the one switch. connector #f keeps the current one; model "" means the
+;; connector's own default.
+(define (chat-switch! buf connector model)
+  (let* ((slug (buffer-local buf 'agent-slug))
+         (cur (or (buffer-local buf 'agent-connector) *default-connector*))
+         (cname (or connector cur))
+         (same-lane? (equal? cname cur)))
+    (cond
+      ;; in place: nothing restarts, so nothing can be lost
+      ((and same-lane? (not (equal? model ""))
+            (chat-model-takeable? buf slug model)
+            (agent-set-model! slug model))
+       (buffer-set-local! buf 'agent-model model)
+       (agent-update-modeline! buf)
+       'in-place)
+      (else
+        (when (and slug (not (equal? (agent-status slug) 'dead)))
+          (agent-kill! slug))
+        ;; identity that belongs to the OLD backend must not follow the
+        ;; conversation across (a foreign model id is silently ignored by
+        ;; an adapter while the modeline keeps repeating it)
+        (unless same-lane?
+          (buffer-set-local! buf 'agent-models #f)
+          (buffer-set-local! buf 'agent-modes #f)
+          (buffer-set-local! buf 'agent-mode #f))
+        (buffer-set-local! buf 'agent-model (if (equal? model "") #f model))
+        ;; the api lane replays 'chat-turns on every request; an ACP
+        ;; session starts empty and has to be seeded
+        (buffer-set-local! buf 'agent-seed-context
+          (and (not (connector-api? cname)) (pair? (chat-turns buf))))
+        (buffer-set-local! buf 'chat-mcp-dirty #f)
+        (chat-attach-agent! buf cname model)
+        'reattached))))
 
 (define-command "chat-set-backend" "Power this chat by the API or an agent connector"
   (lambda ()
@@ -1390,8 +1429,9 @@
                  (connector-names))
             (lambda (choice)
               (unless (equal? choice "")
-                (chat-switch-backend! buf choice)
-                (message (string-append "chat backend: " choice)))))))))
+                (chat-switch! buf choice "")
+                (message (string-append "chat backend: " choice
+                                        " — the conversation carries over")))))))))
 
 ;;; --- rich chat transcript (the agent thread design) ---------------------------
 ;;; A companion chat maintains the exact locals the native agent renderer
@@ -1541,10 +1581,8 @@
         "claude-opus-5"
         "claude-haiku-4-5-20251001"))
 
-;; one path for every backend: a live session that can take the model
-;; switches IN PLACE (the api lane always can — it is stateless; ACP only
-;; when the adapter advertised models); otherwise it is a fresh session
-;; seeded with the whole chat.
+;; the same switch, keeping the connector: in place when the running
+;; backend can take the model, a seeded fresh session otherwise
 (define-command "chat-set-model" "Choose this chat's model"
   (lambda ()
     (let* ((buf (current-buffer))
@@ -1552,30 +1590,25 @@
            (cname (or (buffer-local buf 'agent-connector) "api")))
       (if (not (or slug (buffer-local buf 'agent-saved-mark)))
           (message "not a chat buffer")
-          (let* ((models (buffer-local buf 'agent-models))
-                 (live? (and slug (not (equal? (agent-status slug) 'dead))
-                             (or models (connector-api? cname)))))
-            (minibuffer-read
-              (string-append "Model (now "
-                             (or (buffer-local buf 'agent-model)
-                                 (if (connector-api? cname) (llm-model) "connector default"))
-                             "): ")
-              (or models (connector-models cname))
-              (lambda (m)
-                (cond ((equal? (string-trim m) "") #f)
-                      ((and live? (agent-set-model! slug m))
-                       (buffer-set-local! buf 'agent-model m)
-                       (agent-update-modeline! buf)
-                       (message (string-append cname " · " m " — switched in place")))
-                      (slug
-                        (agent-reconnect! slug cname m)
-                        (message (string-append cname " · " m
-                                   " — fresh session, the chat carries over")))
-                      (else
-                        ;; no runtime yet: the model is just an identity local
-                        (buffer-set-local! buf 'agent-model m)
-                        (agent-update-modeline! buf)
-                        (message (string-append cname " · " m)))))))))))
+          (minibuffer-read
+            (string-append "Model (now "
+                           (or (buffer-local buf 'agent-model)
+                               (if (connector-api? cname) (llm-model) "connector default"))
+                           "): ")
+            (or (buffer-local buf 'agent-models) (connector-models cname))
+            (lambda (m)
+              (unless (equal? (string-trim m) "")
+                (if slug
+                    (message
+                      (string-append cname " · " m
+                        (if (equal? (chat-switch! buf #f m) 'in-place)
+                            " — switched in place"
+                            " — fresh session, the chat carries over")))
+                    ;; no runtime yet: the model is just an identity local
+                    (begin
+                      (buffer-set-local! buf 'agent-model m)
+                      (agent-update-modeline! buf)
+                      (message (string-append cname " · " m)))))))))))
 
 ;; send the region to the chat buffer as context, then open it
 (define-command "chat-send-region" "Add the region to the chat buffer as context"

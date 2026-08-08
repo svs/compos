@@ -633,8 +633,12 @@
                           (if ps (list 'presets ps) '()))))))
     (message (string-append "agent " slug ": revived (fresh session)"))))
 
-;; switch a thread's connector/model: kill + reattach. Fresh session — the
-;; transcript stays, server-side context doesn't.
+;; the low-level reattach: kill + start again on this connector/model.
+;; Fresh session — the transcript stays, server-side context doesn't.
+;; Callers that want a SWITCH (which may not need a restart at all) go
+;; through chat-switch! in editor.scm; this is for the paths that must
+;; restart whatever happens: the C-RET hard reset, and a preset change
+;; whose whole point is a new mcpServers list.
 (define (agent-reconnect! slug cname model)
   (let ((buf (agent-buf slug)))
     (agent-kill! slug)
@@ -645,15 +649,16 @@
 
 (define-command "agent-switch" "Reattach this thread to a new connector and model"
   (lambda ()
-    (let ((slug (agent-slug-of (current-buffer))))
-      (if (not slug)
+    (let ((buf (current-buffer)))
+      (if (not (agent-slug-of buf))
           (message "not an agent buffer")
           (minibuffer-read "Connector: " (connector-names)
             (lambda (cname)
               (minibuffer-read "Model (empty = connector default): "
                 (connector-models cname)
                 (lambda (model)
-                  (agent-reconnect! slug cname model)))))))))
+                  ;; one switch function for every path (editor.scm)
+                  (chat-switch! buf cname model)))))))))
 
 ;; a revived/switched thread runs a FRESH provider session (different
 ;; provider = different session ids; resume can't cross). Seed its first

@@ -719,6 +719,10 @@
                           (chat-attach-agent! buf "api")))))
       (cond ((not slug) (message "not an agent buffer"))
             (else
+             ;; a preset changed under a live ACP session: its tool list is
+             ;; fixed at session/new, so reattach before sending
+             (when (boundp (quote chat-apply-pending-presets!))
+               (chat-apply-pending-presets! buf))
              (when (equal? (agent-status slug) 'dead)
                (agent-revive! slug))
              (let ((input (string-trim (agent-input slug))))

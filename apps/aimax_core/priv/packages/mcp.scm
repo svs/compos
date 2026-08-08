@@ -79,6 +79,47 @@
           ((buffer-group cur) (group-chat (buffer-group cur)))
           (else #f))))
 
+;; An ACP session's mcpServers are fixed at session/new, so changing a
+;; preset under a live agent changes NOTHING until the session restarts —
+;; a silent no-op reads as a broken feature. Mark the chat dirty, say so,
+;; and let the next send reattach (the ordinary reconnect path: same
+;; connector and model, transcript seeded, new server list). The api lane
+;; needs none of this: its specs are read fresh at every send.
+(define (chat-presets-changed! buf what)
+  (let ((slug (buffer-local buf 'agent-slug)))
+    (if (and slug
+             (not (connector-api? (or (buffer-local buf 'agent-connector)
+                                      *default-connector*)))
+             (not (equal? (agent-status slug) 'dead)))
+        (begin
+          (buffer-set-local! buf 'chat-mcp-dirty #t)
+          (minibuffer-read
+            (string-append what " — the agent's tools are fixed for this "
+                           "session. Reconnect now? ")
+            '("yes" "no")
+            (lambda (answer)
+              (if (equal? answer "yes")
+                  (begin
+                    (chat-reattach-for-presets! buf)
+                    (message (string-append what " — reconnected with the new tools")))
+                  (message (string-append
+                             what " — takes effect on the next send"))))))
+        (message (string-append what " for " buf)))))
+
+;; kill + attach the same connector/model: a fresh session with the new
+;; server list, seeded from the transcript so the conversation continues
+(define (chat-reattach-for-presets! buf)
+  (let ((slug (buffer-local buf 'agent-slug))
+        (cname (or (buffer-local buf 'agent-connector) *default-connector*))
+        (model (or (buffer-local buf 'agent-model) "")))
+    (buffer-set-local! buf 'chat-mcp-dirty #f)
+    (agent-reconnect! slug cname model)))
+
+;; the next send honours a pending preset change before prompting
+(define (chat-apply-pending-presets! buf)
+  (when (buffer-local buf 'chat-mcp-dirty)
+    (chat-reattach-for-presets! buf)))
+
 (define-command "chat-load-preset" "Enable a tool preset (MCP servers) in this chat"
   (lambda ()
     (let ((buf (chat-preset-target)))
@@ -95,7 +136,7 @@
                     (buffer-set-local! buf 'chat-presets
                                        (cons p (chat-presets-of buf))))
                   (for-each mcp-ensure! (preset-servers p))
-                  (message (string-append "Preset " name " on for " buf))))))))))
+                  (chat-presets-changed! buf (string-append "Preset " name " on"))))))))))
 
 (define-command "chat-unload-preset" "Disable a tool preset in this chat"
   (lambda ()
@@ -109,7 +150,7 @@
                 (buffer-set-local! buf 'chat-presets
                   (remove (lambda (p) (equal? p (string->symbol name)))
                           (chat-presets-of buf)))
-                (message (string-append "Preset " name " off")))))))))
+                (chat-presets-changed! buf (string-append "Preset " name " off")))))))))
 
 (define-command "mcp-status" "Show MCP server connections"
   (lambda ()

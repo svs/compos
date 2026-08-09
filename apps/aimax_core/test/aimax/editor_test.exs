@@ -707,6 +707,38 @@ defmodule Aimax.EditorTest do
     File.rm_rf!(root)
   end
 
+  test "find-file offers the current buffer's directory, inherited or by name" do
+    root = Path.join(System.tmp_dir!(), "aimax-dd-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(root)
+    File.write!(Path.join(root, "alpha.txt"), "A")
+
+    # a file buffer answers with its own directory
+    {:ok, _} = Aimax.Core.Session.eval(~s{(visit "#{Path.join(root, "alpha.txt")}")})
+    press(["C-x", "C-f"])
+    assert Editor.render_state().minibuffer.input == root <> "/"
+    press(["C-g"])
+
+    # a buffer with no file inherits the directory it was created in
+    {:ok, _} =
+      Aimax.Core.Session.eval(
+        ~s{(begin (buffer-create "*dd-child*") (switch-to-buffer! "*dd-child*"))}
+      )
+
+    press(["C-x", "C-f"])
+    assert Editor.render_state().minibuffer.input == root <> "/"
+    press(["C-g"])
+
+    # a path-shaped name is a directory too, even with no file behind it
+    {:ok, _} =
+      Aimax.Core.Session.eval(~s{(switch-to-buffer! "#{Path.join(root, "never-opened.txt")}")})
+
+    press(["C-x", "C-f"])
+    assert Editor.render_state().minibuffer.input == root <> "/"
+    press(["C-g"])
+
+    File.rm_rf!(root)
+  end
+
   test "find-file filters orderless; unique match opens on RET" do
     root = Path.join(System.tmp_dir!(), "aimax-of-#{System.unique_integer([:positive])}")
     File.mkdir_p!(root)

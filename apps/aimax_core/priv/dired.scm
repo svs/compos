@@ -238,19 +238,24 @@
             (string-append dir "/" e))
         #f)))
 
-;; default-directory: dired's dir, else the file's dir, else ~
+;; default-directory: dired's dir, else the file's dir, else a path-shaped
+;; buffer name, else the dir the buffer was born in (buffer-create copies
+;; it from the creating buffer), else ~
 (define (path-directory p)
   (let ((i (string-rindex p "/")))
     (if i (substring p 0 (+ i 1)) p)))
 
-(define (default-directory)
-  (let ((dd (dired-dir (current-buffer))))
-    (if dd
-        (string-append dd "/")
-        (let ((p (buffer-path (current-buffer))))
-          (if p
-              (path-directory p)
-              (string-append (expand-path "~") "/"))))))
+(define (default-directory) (buffer-directory (current-buffer)))
+
+(define (buffer-directory buf)
+  (let ((dd (dired-dir buf))
+        (p (buffer-path buf))
+        (born (buffer-local buf 'default-directory)))
+    (cond (dd (string-append dd "/"))
+          (p (path-directory p))
+          ((string-prefix? "/" buf) (path-directory buf))
+          (born born)
+          (else (string-append (expand-path "~") "/")))))
 
 (define-command "dired" "Prompt for a directory and open it in Dired"
   (lambda ()

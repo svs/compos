@@ -209,6 +209,13 @@ defmodule Aimax.Ui.EditorLive do
      Map.put(cache, {:agent, leaf.id}, {key, blocks})}
   end
 
+  # below this many lines, ship the whole buffer once and let the browser
+  # own scroll position natively — build_static already computes every
+  # line regardless of size, so this is purely a display decision, not
+  # new server work. Above it, keep the windowed/virtualized path: DOM
+  # node count and per-render diff cost both scale with what we ship.
+  @ship_all_threshold 3000
+
   defp decorate(%{type: :leaf} = leaf, cache, _faces) do
     raw_key = {leaf.buffer, leaf.version, leaf.ts_lang, leaf.overlay_gen}
 
@@ -218,22 +225,41 @@ defmodule Aimax.Ui.EditorLive do
         _ -> build_static(leaf)
       end
 
-    # viewport: folded lines drop out, then only the visible slice
-    # (+overscan) becomes DOM. leaf.top is in visible-line space.
+    # viewport: folded lines drop out, then (for large buffers) only the
+    # visible slice (+overscan) becomes DOM. leaf.top is in visible-line
+    # space.
     hidden = leaf.hidden_lines
+    size = tuple_size(static)
+    client_scroll? = size <= @ship_all_threshold
+    # 3x overscan: leaf.rows is measured against WRAPPED line height (so
+    # cursor-follow stays wrap-aware), but wrap factors vary per line —
+    # under-slicing leaves blank space below. Excess DOM is cheap and
+    # .buf{overflow:hidden} clips it. Only applies to the windowed path —
+    # a client-scrolled buffer ships everything, no slice to overscan.
+    want = leaf.rows * 3 + 8
 
     visible =
-      static
-      |> then(fn lines ->
-        if MapSet.size(hidden) == 0,
-          do: lines,
-          else: Enum.reject(lines, &MapSet.member?(hidden, &1.num - 1))
-      end)
-      # 3x overscan: leaf.rows is measured against WRAPPED line height (so
-      # cursor-follow stays wrap-aware), but wrap factors vary per line —
-      # under-slicing leaves blank space below. Excess DOM is cheap and
-      # .buf{overflow:hidden} clips it.
-      |> Enum.slice(leaf.top, leaf.rows * 3 + 8)
+      cond do
+        client_scroll? ->
+          static |> Tuple.to_list() |> Enum.reject(&MapSet.member?(hidden, &1.num - 1))
+
+        MapSet.size(hidden) == 0 ->
+          # static is a tuple: elem/2 is O(1), so a deep scroll position
+          # costs the same as line 1 — Enum.slice on a list re-walks from
+          # element 0 every tick, so cost grows with leaf.top as you scroll
+          first = min(leaf.top, size)
+          last = min(first + want, size) - 1
+          if last < first, do: [], else: for(i <- first..last, do: elem(static, i))
+
+        true ->
+          # a fold can drop any line, so which raw index is the leaf.top-th
+          # VISIBLE one can't be found without walking the folded sequence —
+          # correctness over micro-perf here; folds are the uncommon case
+          static
+          |> Tuple.to_list()
+          |> Enum.reject(&MapSet.member?(hidden, &1.num - 1))
+          |> Enum.slice(leaf.top, want)
+      end
 
     lines =
       visible
@@ -245,6 +271,7 @@ defmodule Aimax.Ui.EditorLive do
           else: ln
       end)
 
+    leaf = Map.put(leaf, :client_scroll?, client_scroll?)
     {Map.put(leaf, :lines, lines), Map.put(cache, leaf.id, {raw_key, static})}
   end
 
@@ -268,6 +295,10 @@ defmodule Aimax.Ui.EditorLive do
 
     ovs = Enum.map(leaf.overlays, fn {s, e, face} -> {s, e, "f-" <> face} end)
 
+    # a tuple, not a list: decorate/3 slices this by scroll position on
+    # every render, and elem/2 is O(1) where Enum.slice on a list is
+    # O(top) — this is the buffer's full line count, walked once here,
+    # cached by {buffer, version, ts_lang, overlay_gen} until the next edit
     leaf.text
     |> String.split("\n")
     |> Enum.map_reduce(0, fn part, start -> {{part, start}, start + byte_size(part) + 1} end)
@@ -287,6 +318,7 @@ defmodule Aimax.Ui.EditorLive do
         segs: seg_build(part, start, line_ts, line_ov)
       }
     end)
+    |> List.to_tuple()
   end
 
   defp visible_buffers(%{type: :leaf, buffer: b}), do: [b]
@@ -473,8 +505,12 @@ defmodule Aimax.Ui.EditorLive do
       <%= if @node.render_mode in ["html", "markdown"] do %>
         <iframe class="html-preview" sandbox="" srcdoc={@node.preview} title={@node.buffer}></iframe>
       <% else %>
-      <div class="buf" style={@node.style}>
-        <div :for={ln <- @lines} class={"line #{if ln.current, do: "hl-line"}"}>
+      <div class={"buf #{if @node.client_scroll?, do: "client-scroll"}"} style={@node.style}>
+        <div
+          :for={ln <- @lines}
+          id={"ln-#{@node.id}-#{ln.num}"}
+          class={"line #{if ln.current, do: "hl-line"}"}
+        >
           <span class="linenum">{ln.num}</span>
           <span class="line-content"><span :for={{txt, cls} <- ln.segs} class={cls}>{txt}</span><span
               :if={@active? && @completion && ln.current}

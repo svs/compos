@@ -85,8 +85,10 @@
                    (substring raw 7 (string-length raw))
                    raw))
            (a (assoc (custom--plist-get args 'action) (actions-for type))))
+      ;; the action's own return is the report — a hardcoded "done" here
+      ;; would mean this tool call, whatever the action actually did
       (if a
-          (begin ((cadr a) id) "done")
+          ((cadr a) id)
           (string-append "no such action; " (symbol->string type) " has: "
                          (string-join (map car (actions-for type)) ", "))))))
 

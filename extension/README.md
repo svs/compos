@@ -17,6 +17,19 @@ of them.
 2. Turn on **Developer mode** (top right)
 3. **Load unpacked** → pick this directory
 
+## Getting there
+
+Type **`aimax`** in the address bar, then space or Tab. It lists the daemons
+that are actually running, by name, and Enter takes you to one — focusing an
+existing ai-max tab rather than opening a second (a second tab on the same
+daemon is a second frame, which is rarely what you meant).
+
+**Alt+Shift+A** jumps to this window's ai-max directly. Rebind it at
+`chrome://extensions/shortcuts`.
+
+No `/etc/hosts` entry and no port-80 listener: a hosts file maps a name to an
+address, not a port, and Chrome treats a bare word as a search anyway.
+
 ## Configure
 
 The extension serves **every daemon you run**. By default it connects to port

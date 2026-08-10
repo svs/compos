@@ -374,6 +374,83 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   return true; // async reply
 });
 
+// --- getting there ---------------------------------------------------------
+//
+// Typing "aimax" in the address bar. /etc/hosts can't do this on its own — it
+// maps a name to an address, not a port — and dropping the port would mean
+// listening on 80. The omnibox needs neither, and unlike a bookmark it knows
+// which daemons are actually up, so it offers them by name.
+//
+// It focuses an existing ai-max tab rather than opening another: a second tab
+// on the same daemon is a second frame, which is rarely what "take me to my
+// editor" means.
+
+async function focusOrOpen(port, windowId) {
+  const url = `http://localhost:${port}/`;
+  const existing = await chrome.tabs.query({ url: `${url}*` });
+
+  // prefer one already in this window — one window, one ai-max
+  const here = existing.find((t) => t.windowId === windowId) || existing[0];
+  if (here) {
+    await chrome.tabs.update(here.id, { active: true });
+    await chrome.windows.update(here.windowId, { focused: true });
+    return here.id;
+  }
+
+  const t = await chrome.tabs.create({ url, active: true });
+  return t.id;
+}
+
+function liveDaemons() {
+  return [...conns.values()].filter((c) => c.up).sort((a, b) => a.port - b.port);
+}
+
+chrome.omnibox.onInputChanged.addListener((text, suggest) => {
+  const live = liveDaemons();
+  const q = text.trim().toLowerCase();
+  const match = (c) => !q || c.name.toLowerCase().includes(q) || String(c.port).includes(q);
+
+  chrome.omnibox.setDefaultSuggestion({
+    description: live.length
+      ? `ai-max — ${live.length} running: ${live.map((c) => c.name).join(", ")}`
+      : "ai-max — nothing running"
+  });
+
+  suggest(
+    live.filter(match).map((c) => ({
+      content: String(c.port),
+      description: `<match>${c.name}</match> — localhost:${c.port}`
+    }))
+  );
+});
+
+chrome.omnibox.onInputEntered.addListener(async (text) => {
+  const live = liveDaemons();
+  const typed = parseInt(text.trim(), 10);
+  const pick =
+    live.find((c) => c.port === typed) ||
+    live.find((c) => c.name.toLowerCase() === text.trim().toLowerCase()) ||
+    live[0];
+
+  const win = (await chrome.windows.getCurrent()).id;
+  // nothing connected? still go somewhere useful — the default port
+  await focusOrOpen(pick ? pick.port : DEFAULTS.ports[0], win);
+});
+
+// Alt+Shift+A: this window's ai-max, or the nearest one.
+chrome.commands.onCommand.addListener(async (name) => {
+  if (name !== "focus-aimax") return;
+  const win = (await chrome.windows.getCurrent()).id;
+  const ed = editorFor(win);
+  if (ed) {
+    await chrome.tabs.update(ed.tabId, { active: true });
+    await chrome.windows.update(win, { focused: true });
+    return;
+  }
+  const live = liveDaemons();
+  await focusOrOpen(live.length ? live[0].port : DEFAULTS.ports[0], win);
+});
+
 // --- discovery -------------------------------------------------------------
 
 async function sweep() {

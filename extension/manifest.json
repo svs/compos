@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ai-max",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "ai-max's keys and commands in every tab, and a wire so the editor can drive any of them.",
   "permissions": [
     "tabs",
@@ -34,5 +34,16 @@
       "run_at": "document_idle",
       "all_frames": false
     }
-  ]
+  ],
+  "omnibox": {
+    "keyword": "aimax"
+  },
+  "commands": {
+    "focus-aimax": {
+      "suggested_key": {
+        "default": "Alt+Shift+A"
+      },
+      "description": "Jump to ai-max in this window"
+    }
+  }
 }

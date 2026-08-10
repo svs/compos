@@ -351,6 +351,14 @@
 ;; and the fire-and-forget verbs pass this one
 (define (chrome-ignore reply) #t)
 
+;; Take either a tab id or a whole tab plist. The assistant reaches these
+;; through apropos-api's one-line docs, and "TAB" reads like the thing
+;; tab-list just handed it — passing the plist made the extension fail with
+;; "no ai-max in tab [object Object]", once per retry, until the tool loop hit
+;; its turn limit. Being liberal here is cheaper than being right about it.
+(define (chrome--tab-id t)
+  (if (number? t) t (chrome--get t 'id)))
+
 (define (chrome-call op args k)
   (browser-call op args
     (lambda (reply)
@@ -360,38 +368,39 @@
   (chrome-call "tabs" '() (lambda (r) (k (chrome--get r 'tabs)))))
 
 (define (tab-eval tab code k)
-  (chrome-call "eval" (list 'tab tab 'code code) (lambda (r) (k (chrome--get r 'value)))))
+  (chrome-call "eval" (list 'tab (chrome--tab-id tab) 'code code)
+    (lambda (r) (k (chrome--get r 'value)))))
 
 ;; world "main" reaches the page's own globals; the default sees the DOM only
 (define (tab-eval-main tab code k)
-  (chrome-call "eval" (list 'tab tab 'code code 'world "main")
+  (chrome-call "eval" (list 'tab (chrome--tab-id tab) 'code code 'world "main")
     (lambda (r) (k (chrome--get r 'value)))))
 
 (define (tab-read tab k)
-  (chrome-call "read" (list 'tab tab) k))
+  (chrome-call "read" (list 'tab (chrome--tab-id tab)) k))
 
 ;; put a line on the tab's screen — this is how the editor talks to a page
 (define (tab-say tab text)
-  (chrome-call "overlay" (list 'tab tab 'text text) chrome-ignore))
+  (chrome-call "overlay" (list 'tab (chrome--tab-id tab) 'text text) chrome-ignore))
 
 (define (tab-warn tab text)
-  (chrome-call "overlay" (list 'tab tab 'text text 'kind "error") chrome-ignore))
+  (chrome-call "overlay" (list 'tab (chrome--tab-id tab) 'text text 'kind "error") chrome-ignore))
 
 ;; trusted input: CDP attaches for this and lets go when idle
 (define (tab-type tab text)
-  (chrome-call "type" (list 'tab tab 'text text) chrome-ignore))
+  (chrome-call "type" (list 'tab (chrome--tab-id tab) 'text text) chrome-ignore))
 
 (define (tab-click tab x y)
-  (chrome-call "click" (list 'tab tab 'x x 'y y) chrome-ignore))
+  (chrome-call "click" (list 'tab (chrome--tab-id tab) 'x x 'y y) chrome-ignore))
 
 (define (tab-open url) (chrome-call "open" (list 'url url) chrome-ignore))
-(define (tab-activate tab) (chrome-call "activate" (list 'tab tab) chrome-ignore))
-(define (tab-close tab) (chrome-call "close" (list 'tab tab) chrome-ignore))
-(define (tab-release tab) (chrome-call "release" (list 'tab tab) chrome-ignore))
+(define (tab-activate tab) (chrome-call "activate" (list 'tab (chrome--tab-id tab)) chrome-ignore))
+(define (tab-close tab) (chrome-call "close" (list 'tab (chrome--tab-id tab)) chrome-ignore))
+(define (tab-release tab) (chrome-call "release" (list 'tab (chrome--tab-id tab)) chrome-ignore))
 
 ;; the raw protocol, for anything the verbs above don't cover
 (define (tab-cdp tab method params k)
-  (chrome-call "cdp" (list 'tab tab 'method method 'params params) k))
+  (chrome-call "cdp" (list 'tab (chrome--tab-id tab) 'method method 'params params) k))
 
 ;;; --- commands ----------------------------------------------------------------
 
@@ -425,8 +434,8 @@
               (if id (tab-activate id) (message "No such tab")))))))))
 
 (public! 'tab-list "(tab-list K) — K gets every open browser tab as plists: id, title, url, active")
-(public! 'tab-eval "(tab-eval TAB CODE K) — run JS in a tab; K gets the value")
-(public! 'tab-read "(tab-read TAB K) — K gets the tab's url, title and visible text")
+(public! 'tab-eval "(tab-eval TAB CODE K) — run JS in a tab; TAB is an id or a tab from tab-list")
+(public! 'tab-read "(tab-read TAB K) — K gets the tab's url, title and visible text; TAB is an id or a tab from tab-list")
 (public! 'tab-say "(tab-say TAB TEXT) — put a line on that tab's screen")
 (public! 'tab-type "(tab-type TAB TEXT) — type into the tab for real (trusted input, via CDP)")
 (public! 'tab-click "(tab-click TAB X Y) — a real click at viewport coordinates")

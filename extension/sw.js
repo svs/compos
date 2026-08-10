@@ -173,6 +173,12 @@ chrome.tabs.onRemoved.addListener((tabId) => attached.delete(tabId));
 // --- talking to a tab's content script -------------------------------------
 
 async function tell(tabId, msg, tries = 8) {
+  // fail immediately and legibly on a bad id, rather than retrying eight times
+  // and reporting "no ai-max in tab [object Object]" — that cost an assistant
+  // its whole turn budget
+  if (typeof tabId !== "number") {
+    throw new Error(`bad tab id ${JSON.stringify(tabId)} — pass the id, or a tab from tab-list`);
+  }
   for (let i = 0; i < tries; i++) {
     try {
       const r = await chrome.tabs.sendMessage(tabId, msg);

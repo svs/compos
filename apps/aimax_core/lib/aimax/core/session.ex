@@ -416,7 +416,54 @@ defmodule Aimax.Core.Session do
       end,
       "mcp-connections" => fn [] ->
         for c <- Aimax.Core.MCP.connections() do
-          [c.name, to_string(c.status), c.tools]
+          [c.name, to_string(c.status), c.tools, to_string(c.type), c.resources, c.prompts]
+        end
+      end,
+      # what the hub's detail view reads: false for a server never started
+      "mcp-server-detail" => fn [name] ->
+        case Aimax.Core.MCP.detail(s(name)) do
+          nil ->
+            false
+
+          d ->
+            [
+              {:sym, "status"},
+              to_string(d.status),
+              {:sym, "type"},
+              to_string(d.type),
+              {:sym, "server-name"},
+              d.server_info["name"] || "",
+              {:sym, "server-version"},
+              d.server_info["version"] || "",
+              {:sym, "reason"},
+              d.reason,
+              {:sym, "tools"},
+              d.tools,
+              {:sym, "resources"},
+              for(r <- d.resources, do: [r["name"] || "", r["uri"] || "", r["description"] || ""]),
+              {:sym, "prompts"},
+              for(p <- d.prompts, do: [p["name"] || "", p["description"] || ""])
+            ]
+        end
+      end,
+      # (mcp-on-change! (lambda (name status) ...)) — the hub redraws itself
+      # when a server becomes ready, dies, or fails. Rooted like the agent
+      # event handler.
+      "mcp-on-change!" => fn [handler] ->
+        :ets.insert(@escaped, {{:mcp_handler}, handler})
+        :void
+      end,
+      "mcp-log" => fn [name] ->
+        for e <- Aimax.Core.MCP.log(s(name)) do
+          [
+            # the reader is looking at a clock on their own wall, not UTC
+            e.at
+            |> :calendar.system_time_to_local_time(:millisecond)
+            |> NaiveDateTime.from_erl!()
+            |> Calendar.strftime("%H:%M:%S"),
+            to_string(e.dir),
+            e.text
+          ]
         end
       end,
       "mcp-tool-specs" => fn [names] ->

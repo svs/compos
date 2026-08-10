@@ -1,6 +1,10 @@
 # Minimal MCP server over stdio for tests: newline-delimited JSON-RPC,
 # initialize handshake, one tool ("echo"). Uses OTP's :json — no deps, so it
 # runs as `elixir fake_mcp_server.exs` straight from a Port.
+#
+# It advertises resources AND prompts but only implements resources/list:
+# prompts/list falls through to -32601, which is exactly what a real server
+# that overstates its capabilities does, and the client must survive it.
 defmodule FakeMCP do
   def loop do
     case IO.gets("") do
@@ -19,8 +23,15 @@ defmodule FakeMCP do
       %{"method" => "initialize", "id" => id, "params" => params} ->
         reply(id, %{
           protocolVersion: params["protocolVersion"],
-          capabilities: %{tools: %{}},
+          capabilities: %{tools: %{}, resources: %{}, prompts: %{}},
           serverInfo: %{name: "fake-mcp", version: "0.0.1"}
+        })
+
+      %{"method" => "resources/list", "id" => id} ->
+        reply(id, %{
+          resources: [
+            %{uri: "file:///fake.txt", name: "fake.txt", description: "A fake file."}
+          ]
         })
 
       %{"method" => "tools/list", "id" => id} ->
@@ -52,7 +63,12 @@ defmodule FakeMCP do
 
   defp reply(id, result), do: send_msg(%{jsonrpc: "2.0", id: id, result: result})
 
-  defp send_msg(msg), do: msg |> :json.encode() |> IO.iodata_to_binary() |> IO.puts()
+  # the client may disconnect mid-reply; a dead stdout is not news
+  defp send_msg(msg) do
+    msg |> :json.encode() |> IO.iodata_to_binary() |> IO.puts()
+  catch
+    _, _ -> :ok
+  end
 end
 
 FakeMCP.loop()

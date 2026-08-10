@@ -105,7 +105,15 @@ viewport windowing (C-v/M-v/C-l, wheel, auto-follow) · display-buffer rules +
 popper popups (<kbd>C-`</kbd>) · quit-window · MRU buffer ring · dired (100% Scheme,
 marks/flags/columns) · modes + auto-mode + hooks · themes (5, all Scheme) ·
 tree-sitter font-lock + sexp nav (C-M-f/b/u/d) · completion framework (capf, dabbrev,
-dropdown at point) · comint shells · desktop persistence · org-mode (outline folding,
+dropdown at point) · comint shells · desktop persistence ·
+<strong>MCP hub</strong> (<kbd>C-c a m</kbd>, <code>mcp-hub</code>, after
+mcp.el's): every registered server with type/status/tool·resource·prompt
+counts/presets, <kbd>s</kbd>/<kbd>k</kbd>/<kbd>r</kbd> start·stop·restart
+(<kbd>S</kbd>/<kbd>K</kbd>/<kbd>R</kbd> for all), <kbd>RET</kbd> the detail
+view, <kbd>l</kbd> the JSON-RPC frames; rows redraw themselves via
+<code>mcp-on-change!</code>, and a server that died leaves its status+log
+behind (<code>MCP.last/1</code>) so the row that went red can say why ·
+org-mode (outline folding,
 fontification, structure editing, TODO cycling, promote/demote — 100% Scheme,
 <code>priv/packages/org.scm</code>) · LLM (multi-provider, doppler keys, <kbd>M-|</kbd>
 pipes, <kbd>C-c c</kbd> opens the group companion chat — <strong>there is only one
@@ -164,6 +172,11 @@ hitting a dead GenServer fails the eval instead of crash-looping the editor.</p>
 <li>RPC socket has no auth (localhost only).</li>
 <li>Scheme grammar for tree-sitter not wired — <code>.scm</code> files aren't highlighted.</li>
 <li>No test covers agent/RPC edits landing mid-undo-run.</li>
+<li>MCP client speaks tools/resources/prompts only — no roots
+(<code>+</code>/<code>-</code>/<code>=</code> in mcp.el's hub) and no resource
+templates. A stdio server's stderr still goes to <code>~/.aimax/daemon.log</code>,
+not to the hub's <kbd>l</kbd> log: merging it into the frame stream risks
+interleaving a half-written line into a JSON frame.</li>
 </ul>
 
 <h2>User's vision (keep this in view)</h2>

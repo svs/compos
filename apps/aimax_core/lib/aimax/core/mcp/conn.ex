@@ -13,9 +13,18 @@ defmodule Aimax.Core.MCP.Conn do
 
   The handshake (initialize -> notifications/initialized -> tools/list) runs
   async on connect; when the tool list lands it is published via
-  MCP.publish/2 and the editor gets a `mcp: <name> ready` message. Requests
-  in flight live in `pending` (id -> from | internal tag); a died subprocess
-  fails them all instead of leaving callers hanging.
+  MCP.publish/2 and the editor gets a `mcp: <name> ready` message. Resources
+  and prompts are asked for afterwards, and only when `initialize` advertised
+  the capability — an unsolicited `resources/list` earns a -32601 from
+  servers that have none, and a failed handshake request kills the
+  connection. They are cold data (the hub's detail view), so they stay in
+  this process rather than in the persistent_term the tool loop reads.
+
+  Requests in flight live in `pending` (id -> from | internal tag); a died
+  subprocess fails them all instead of leaving callers hanging. Every frame
+  in either direction, plus lifecycle notes, lands in a bounded `log` —
+  what `l` shows in the hub, and the only way to see why a server that
+  won't start won't start.
   """
 
   use GenServer, restart: :temporary
@@ -25,6 +34,8 @@ defmodule Aimax.Core.MCP.Conn do
 
   @protocol "2025-06-18"
   @call_timeout 120_000
+  @log_max 200
+  @log_line 4_000
 
   def start_link({name, spec}) do
     GenServer.start_link(__MODULE__, {name, spec},
@@ -45,10 +56,47 @@ defmodule Aimax.Core.MCP.Conn do
     :exit, _ -> {:error, "mcp call timed out or connection died"}
   end
 
+  @doc "Status plus the counts the hub lists: %{status, type, resources, prompts}."
+  def summary(pid) do
+    GenServer.call(pid, :summary, 5_000)
+  catch
+    :exit, _ -> %{status: :busy, type: :unknown, resources: 0, prompts: 0}
+  end
+
+  @doc "Everything the hub's detail view shows: server_info, resources, prompts."
+  def detail(pid) do
+    GenServer.call(pid, :detail, 5_000)
+  catch
+    :exit, _ -> nil
+  end
+
+  @doc "The frame log, oldest first: [%{at, dir, text}]."
+  def log(pid) do
+    GenServer.call(pid, :log, 5_000)
+  catch
+    :exit, _ -> []
+  end
+
   @impl true
   def init({name, spec}) do
     Process.flag(:trap_exit, true)
-    {:ok, %{name: name, spec: spec, transport: nil, status: :connecting, buf: "", pending: %{}, next_id: 1}, {:continue, :connect}}
+
+    state = %{
+      name: name,
+      spec: spec,
+      transport: nil,
+      status: :connecting,
+      buf: "",
+      pending: %{},
+      next_id: 1,
+      server_info: %{},
+      caps: %{},
+      resources: [],
+      prompts: [],
+      log: []
+    }
+
+    {:ok, state, {:continue, :connect}}
   end
 
   @impl true
@@ -90,6 +138,29 @@ defmodule Aimax.Core.MCP.Conn do
   @impl true
   def handle_call(:status, _from, state), do: {:reply, state.status, state}
 
+  def handle_call(:summary, _from, state) do
+    {:reply,
+     %{
+       status: state.status,
+       type: transport_type(state),
+       resources: length(state.resources),
+       prompts: length(state.prompts)
+     }, state}
+  end
+
+  def handle_call(:detail, _from, state) do
+    {:reply,
+     %{
+       status: state.status,
+       type: transport_type(state),
+       server_info: state.server_info,
+       resources: state.resources,
+       prompts: state.prompts
+     }, state}
+  end
+
+  def handle_call(:log, _from, state), do: {:reply, Enum.reverse(state.log), state}
+
   def handle_call({:call_tool, tool, args}, from, state) do
     {:noreply, send_req(state, "tools/call", %{name: tool, arguments: args}, {:reply, from})}
   end
@@ -107,7 +178,8 @@ defmodule Aimax.Core.MCP.Conn do
     Session.message("mcp: #{state.name} exited (#{code})")
     for {_, {:reply, from}} <- state.pending, do: GenServer.reply(from, {:error, "mcp server exited"})
     :persistent_term.erase({:aimax_mcp, state.name})
-    {:stop, :normal, state}
+    state = log(state, :note, "process exited (#{code})")
+    {:stop, :normal, if(code == 0, do: state, else: %{state | status: :error})}
   end
 
   # a Task doing an HTTP round-trip delivers the decoded response here
@@ -139,13 +211,32 @@ defmodule Aimax.Core.MCP.Conn do
   def handle_info({:EXIT, _, _}, state), do: {:noreply, state}
   def handle_info(_, state), do: {:noreply, state}
 
+  # a connection that fails takes its log with it, and the hub would have
+  # nothing to show for the row that just went red — leave the last words
+  # (status, reason, frames) behind for MCP.last/1
   @impl true
-  def terminate(_reason, %{transport: {:stdio, port}}) do
-    if port_alive?(port), do: Port.close(port)
+  def terminate(reason, state) do
+    status = if state.status == :error, do: :error, else: :stopped
+
+    MCP.remember(state.name, %{
+      status: status,
+      reason: reason_text(reason),
+      log: Enum.reverse(state.log)
+    })
+
+    MCP.notify(state.name, status)
+
+    case state.transport do
+      {:stdio, port} -> if port_alive?(port), do: Port.close(port)
+      _ -> :ok
+    end
+
     :ok
   end
 
-  def terminate(_reason, _state), do: :ok
+  defp reason_text(:normal), do: ""
+  defp reason_text(:shutdown), do: ""
+  defp reason_text(reason), do: inspect(reason)
 
   # --- protocol -------------------------------------------------------------
 
@@ -164,8 +255,12 @@ defmodule Aimax.Core.MCP.Conn do
     end
   end
 
+  # every frame is logged before it is acted on, so the hub's log reads as
+  # the conversation actually happened
+  defp handle_message(msg, state), do: dispatch(msg, log(state, :in, msg))
+
   # responses to our requests
-  defp handle_message(%{"id" => id} = msg, state) when not is_map_key(msg, "method") do
+  defp dispatch(%{"id" => id} = msg, state) when not is_map_key(msg, "method") do
     {tag, pending} = Map.pop(state.pending, id)
     state = %{state | pending: pending}
 
@@ -181,18 +276,32 @@ defmodule Aimax.Core.MCP.Conn do
         GenServer.reply(from, {:error, err["message"] || Jason.encode!(err)})
         state
 
-      {_internal, %{"error" => err}} ->
+      # only the handshake is fatal: a server that declines to list its
+      # resources still serves tools perfectly well
+      {handshake, %{"error" => err}} when handshake in [:initialize, :tools] ->
         fail_boot(state, err["message"] || Jason.encode!(err))
 
-      {:initialize, %{"result" => _}} ->
+      {_optional, %{"error" => _}} ->
         state
+
+      {:initialize, %{"result" => result}} ->
+        %{state | server_info: result["serverInfo"] || %{}, caps: result["capabilities"] || %{}}
         |> send_notification("notifications/initialized", %{})
         |> send_req("tools/list", %{}, :tools)
 
       {:tools, %{"result" => %{"tools" => tools}}} ->
         MCP.publish(state.name, tools)
         Session.message("mcp: #{state.name} ready (#{length(tools)} tools)")
-        %{state | status: :ready}
+        MCP.notify(state.name, :ready)
+        discover(%{state | status: :ready})
+
+      {:resources, %{"result" => %{"resources" => rs}}} ->
+        MCP.notify(state.name, :ready)
+        %{state | resources: rs}
+
+      {:prompts, %{"result" => %{"prompts" => ps}}} ->
+        MCP.notify(state.name, :ready)
+        %{state | prompts: ps}
 
       _ ->
         state
@@ -200,10 +309,19 @@ defmodule Aimax.Core.MCP.Conn do
   end
 
   # server-initiated: answer pings, ignore the rest (logging/progress)
-  defp handle_message(%{"method" => "ping", "id" => id}, state),
+  defp dispatch(%{"method" => "ping", "id" => id}, state),
     do: send_msg(state, %{jsonrpc: "2.0", id: id, result: %{}})
 
-  defp handle_message(_msg, state), do: state
+  defp dispatch(_msg, state), do: state
+
+  # the optional halves of the protocol, asked for only where advertised
+  defp discover(state) do
+    Enum.reduce([{"resources", :resources}, {"prompts", :prompts}], state, fn {cap, tag}, acc ->
+      if is_map(state.caps[cap]),
+        do: send_req(acc, "#{cap}/list", %{}, tag),
+        else: acc
+    end)
+  end
 
   defp result_text(%{"isError" => true} = result), do: {:error, content_text(result)}
   defp result_text(result), do: {:ok, content_text(result)}
@@ -233,12 +351,14 @@ defmodule Aimax.Core.MCP.Conn do
   defp send_notification(state, method, params),
     do: send_msg(state, %{jsonrpc: "2.0", method: method, params: params})
 
-  defp send_msg(%{transport: {:stdio, port}} = state, msg) do
+  defp send_msg(state, msg), do: state |> log(:out, msg) |> transmit(msg)
+
+  defp transmit(%{transport: {:stdio, port}} = state, msg) do
     Port.command(port, Jason.encode!(msg) <> "\n")
     state
   end
 
-  defp send_msg(%{transport: {:http, url, headers, session_id}} = state, msg) do
+  defp transmit(%{transport: {:http, url, headers, session_id}} = state, msg) do
     me = self()
     id = msg[:id]
 
@@ -304,6 +424,19 @@ defmodule Aimax.Core.MCP.Conn do
   defp resolve_headers(headers),
     do: for({k, v} <- headers, do: {k, resolve_value(v)})
 
+  defp transport_type(%{transport: {:stdio, _}}), do: :stdio
+  defp transport_type(%{transport: {:http, _, _, _}}), do: :http
+  defp transport_type(_), do: :unknown
+
+  # newest first while it lives here (cheap prepend), reversed on the way out
+  defp log(state, dir, msg) do
+    entry = %{at: System.system_time(:millisecond), dir: dir, text: log_text(msg)}
+    %{state | log: Enum.take([entry | state.log], @log_max)}
+  end
+
+  defp log_text(msg) when is_binary(msg), do: String.slice(msg, 0, @log_line)
+  defp log_text(msg), do: msg |> Jason.encode!() |> String.slice(0, @log_line)
+
   defp resolve_value("@" <> var), do: Keys.get(var) || ""
   defp resolve_value(v), do: to_string(v)
 
@@ -312,7 +445,7 @@ defmodule Aimax.Core.MCP.Conn do
   defp fail_boot(state, msg) do
     Session.message("mcp: #{state.name} failed — #{msg}")
     send(self(), :stop_conn)
-    %{state | status: :error}
+    %{log(state, :note, "failed — #{msg}") | status: :error}
   end
 
   defp split_lines(buf) do

@@ -19,7 +19,10 @@ defmodule Aimax.Core.MCP do
   Server names are [a-z0-9-] so the qualified form splits unambiguously.
   """
 
+  alias Aimax.Core.{Session}
   alias Aimax.Core.MCP.Conn
+
+  @escaped :aimax_escaped_closures
 
   def connect(name, spec) when is_binary(name) do
     cond do
@@ -53,12 +56,82 @@ defmodule Aimax.Core.MCP do
     end
   end
 
-  @doc "All connections: [%{name, status, tools}]."
+  @doc "All connections: [%{name, status, type, tools, resources, prompts}]."
   def connections do
     Registry.select(Aimax.Core.MCPRegistry, [{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
     |> Enum.map(fn {name, pid} ->
-      %{name: name, status: Conn.status(pid), tools: length(specs_for(name))}
+      s = Conn.summary(pid)
+
+      %{
+        name: name,
+        status: s.status,
+        type: s.type,
+        tools: length(specs_for(name)),
+        resources: s.resources,
+        prompts: s.prompts
+      }
     end)
+  end
+
+  @doc """
+  Everything the hub's detail view shows for one server, live or dead:
+  %{status, type, server_info, tools, resources, prompts, log}. A server
+  that died leaves the record `remember/2` stored, so the row that just
+  went red can still say why.
+  """
+  def detail(name) do
+    case whereis(name) do
+      nil ->
+        case last(name) do
+          nil -> nil
+          l -> %{status: l.status, type: :unknown, server_info: %{}, tools: [],
+                 resources: [], prompts: [], log: l.log, reason: l.reason}
+        end
+
+      pid ->
+        case Conn.detail(pid) do
+          nil -> nil
+          d -> Map.merge(d, %{tools: tools_of(name), log: Conn.log(pid), reason: ""})
+        end
+    end
+  end
+
+  @doc "The frame log for a server, live or last-known."
+  def log(name) do
+    case whereis(name) do
+      nil -> (last(name) || %{log: []}).log
+      pid -> Conn.log(pid)
+    end
+  end
+
+  @doc """
+  Tell Scheme a server changed state, if anything registered interest
+  (`mcp-on-change!`). A hub whose rows sit on "connecting" forever reads as
+  broken, and there is no timer in the editor to poll with.
+  """
+  def notify(name, status) do
+    with tid when tid != :undefined <- :ets.whereis(@escaped),
+         [{_, handler}] <- :ets.lookup(tid, {:mcp_handler}) do
+      Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
+        Session.apply_callback(handler, [name, to_string(status)])
+      end)
+    end
+
+    :ok
+  end
+
+  @doc "What a connection left behind when it stopped: %{status, reason, log}."
+  def remember(name, record), do: :persistent_term.put({:aimax_mcp_last, name}, record)
+
+  def last(name), do: :persistent_term.get({:aimax_mcp_last, name}, nil)
+
+  # [name, description] per bridged tool, unqualified — the detail view
+  # reads like the server's own documentation, not like our tool namespace
+  defp tools_of(name) do
+    prefix = "mcp__#{name}__"
+
+    for [qualified, desc | _] <- specs_for(name),
+        do: [String.replace_prefix(qualified, prefix, ""), desc]
   end
 
   @doc "Scheme-shaped tool specs for the given server names (ready servers only)."

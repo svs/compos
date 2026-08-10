@@ -277,7 +277,7 @@ defmodule Aimax.ChromeTest do
       assert eval!(~s[(car (chrome--tab-candidate (car #{tabs})))]) == ~s("🌐 Hacker News")
 
       # only this browser window's tabs — C-x b offers what is beside you
-      eval!("(set! *chrome-window* 1)")
+      eval!("(set-frame-local! 'chrome-window 1)")
       assert eval!(~s[(length (chrome--here-tabs #{tabs}))]) == "1"
 
       # and the label round-trips back to the tab it names
@@ -304,24 +304,24 @@ defmodule Aimax.ChromeTest do
     # the other place is often a tab, and pressing it twice should come back.
     test "RET alone toggles across the boundary: buffer, tab, buffer" do
       tabs = ~s{'((id 7 title "Hacker News" url "https://news.ycombinator.com/" window 1))}
-      eval!("(set! *chrome-window* 1)")
+      eval!("(set-frame-local! 'chrome-window 1)")
 
       # pressed in a tab: RET goes back to the buffer you left
       assert eval!(~s[(chrome--default "*scratch*" '(("*other*" "")) #{tabs} #t)]) ==
                ~s("*scratch*")
 
       # now inside ai-max, having come from tab 7: RET goes back to the tab
-      eval!("(set! *chrome-last-tab* 7)")
+      eval!("(set-frame-local! 'chrome-last-tab 7)")
       assert eval!(~s[(chrome--default "*scratch*" '(("*other*" "")) #{tabs} #f)]) ==
                ~s("🌐 Hacker News")
 
       # with no tab behind you it is Emacs's previous buffer, unchanged
-      eval!("(set! *chrome-last-tab* #f)")
+      eval!("(set-frame-local! 'chrome-last-tab #f)")
       assert eval!(~s[(chrome--default "*scratch*" '(("*other*" "")) #{tabs} #f)]) ==
                ~s("*other*")
 
       # and a remembered tab that has since closed doesn't strand the default
-      eval!("(set! *chrome-last-tab* 999)")
+      eval!("(set-frame-local! 'chrome-last-tab 999)")
       assert eval!(~s[(chrome--default "*scratch*" '(("*other*" "")) #{tabs} #f)]) ==
                ~s("*other*")
     end

@@ -58,8 +58,20 @@ defmodule Aimax.Core.Browser do
 
   @impl true
   def handle_cast({:attach, pid}, state) do
+    Logger.info("browser: extension attached")
     Process.monitor(pid)
-    {:noreply, %{state | sock: pid}}
+    state = %{state | sock: pid}
+
+    # Tell Scheme the browser is here, so it can warm anything it wants ready
+    # before the first keystroke — the tab list, in chrome.scm's case. Without
+    # it the first C-x b of a session opens with no tabs and only the second
+    # one has them, which reads as the feature being broken.
+    if state.handler do
+      handler = state.handler
+      run(fn -> Session.call_fn(handler, ["attached", []], nil) end)
+    end
+
+    {:noreply, state}
   end
 
   def handle_cast({:detach, pid}, %{sock: pid} = state), do: {:noreply, drop(state)}
@@ -75,6 +87,7 @@ defmodule Aimax.Core.Browser do
   def handle_cast({:call, op, args, callback}, state) do
     id = state.next_id
     frame = args |> Map.new() |> Map.merge(%{"id" => id, "op" => op})
+    Logger.info("browser => #{op} #{brief(args)}")
     send(state.sock, {:browser_send, Jason.encode!(frame)})
 
     timer = Process.send_after(self(), {:timeout, id}, @timeout)
@@ -117,12 +130,19 @@ defmodule Aimax.Core.Browser do
     # minibuffer and window calls resolve to the right frame with no plumbing
     # of their own.
     fid = msg["frame"]
+    Logger.info("browser <- #{op} #{brief(args)} frame=#{fid || "-"}")
 
     run(fn ->
       reply =
         case Session.call_fn(handler, [op, Aimax.Core.LLM.json_to_scheme(args)], fid) do
-          {:ok, value} -> %{"id" => id, "ok" => true, "result" => Session.scheme_to_json(value)}
-          {:error, msg} -> %{"id" => id, "ok" => false, "error" => msg}
+          {:ok, value} ->
+            result = Session.scheme_to_json(value)
+            Logger.info("browser -> #{op} ok #{brief(result)}")
+            %{"id" => id, "ok" => true, "result" => result}
+
+          {:error, reason} ->
+            Logger.warning("browser -> #{op} FAILED: #{reason}")
+            %{"id" => id, "ok" => false, "error" => reason}
         end
 
       send(sock, {:browser_send, Jason.encode!(reply)})
@@ -136,6 +156,14 @@ defmodule Aimax.Core.Browser do
 
   # --- outbound --------------------------------------------------------------
 
+  # One line per hop, short enough to read in a tail. A bridge failure used to
+  # be invisible here — you saw keystrokes in the LiveView log and nothing at
+  # all about what the browser was asked or answered.
+  defp brief(v) do
+    s = inspect(v, limit: 6, printable_limit: 90)
+    if String.length(s) > 160, do: String.slice(s, 0, 157) <> "...", else: s
+  end
+
   defp reply_of(%{"ok" => true, "result" => result}), do: {:ok, result}
   defp reply_of(%{"ok" => true}), do: {:ok, %{}}
   defp reply_of(%{"error" => error}), do: {:error, to_string(error)}
@@ -148,6 +176,12 @@ defmodule Aimax.Core.Browser do
 
       {{callback, timer}, rest} ->
         if expired != :expired, do: Process.cancel_timer(timer)
+
+        case reply do
+          {:ok, r} -> Logger.info("browser <= ok #{brief(r)}")
+          {:error, e} -> Logger.warning("browser <= FAILED: #{e}")
+        end
+
         run(fn -> callback.(reply) end)
         %{state | pending: rest}
     end

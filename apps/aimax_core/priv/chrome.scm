@@ -101,9 +101,10 @@
           (else (loop (cdr ts))))))
 
 (define (chrome--here-tabs tabs)
-  (if *chrome-window*
-      (filter (lambda (t) (equal? (chrome--get t 'window) *chrome-window*)) tabs)
-      tabs))
+  (let ((w (frame-local 'chrome-window)))
+    (if w
+        (filter (lambda (t) (equal? (chrome--get t 'window) w)) tabs)
+        tabs)))
 
 (define (chrome--tab-by-id id tabs)
   (let loop ((ts tabs))
@@ -111,10 +112,11 @@
           ((equal? (chrome--get (car ts) 'id) id) (car ts))
           (else (loop (cdr ts))))))
 
-;; The tab you last pressed a key in. C-x b RET has always meant "the other
-;; place" in Emacs; once tabs are in the list, the other place is often a tab,
-;; and pressing it twice should bring you back — buffer, tab, buffer.
-(define *chrome-last-tab* #f)
+;; Which browser window this frame belongs to, and the tab you last pressed a
+;; key in, both kept in *frame-locals* rather than as globals: one ai-max per
+;; browser window means each frame has its OWN answer, and a global would have
+;; the second window quietly overwriting the first. Same home the popup window
+;; and ibuffer use, and it is pruned when a frame goes away.
 
 ;; Set while a browser request is being served, so the command below can tell
 ;; where the keystroke came from. The candidate LIST is the same either way —
@@ -132,15 +134,32 @@
 (define (chrome--default here cands tabs from-page)
   (if from-page
       here
-      (let ((t (if *chrome-last-tab* (chrome--tab-by-id *chrome-last-tab* tabs) #f)))
+      (let* ((last (frame-local 'chrome-last-tab))
+             (t (if last (chrome--tab-by-id last tabs) #f)))
         (cond (t (car (chrome--tab-candidate t)))
               ((null? cands) here)
               (else (car (car cands)))))))
 
+(define (chrome--entry label cands)
+  (let loop ((cs cands))
+    (cond ((null? cs) (list label ""))
+          ((equal? (car (car cs)) label) (car cs))
+          (else (loop (cdr cs))))))
+
+(define (chrome--without label cands)
+  (filter (lambda (c) (not (equal? (car c) label))) cands))
+
+;; Order matters twice over. RET with nothing typed takes the FIRST candidate,
+;; not the prompt's advertised default — so the default has to lead the list or
+;; the prompt lies about what RET will do. And tabs went last, which with a
+;; real number of buffers put them past the end of the visible window: present
+;; in the list, invisible unless you typed. Default first, then the handful of
+;; tabs, then the buffers.
 (define (chrome--prompt-switch here cands tabs from-page)
   (let* ((tab-cands (map chrome--tab-candidate tabs))
-         (all (append cands tab-cands))
-         (fallback (chrome--default here cands tabs from-page)))
+         (pool (append tab-cands cands))
+         (fallback (chrome--default here cands tabs from-page))
+         (all (cons (chrome--entry fallback pool) (chrome--without fallback pool))))
     (minibuffer-read-preview
       (string-append "Switch to buffer (default " fallback "): ")
       all
@@ -175,16 +194,14 @@
 ;; deciding.
 (define *chrome-tab-cache* '())
 
+;; Refreshes the cache and nothing else. It used to also rewrite an open
+;; prompt's candidates, which re-sorted the list under your fingers — and did
+;; it in the wrong order, putting the tabs back past the end of the visible
+;; window. The cache is primed when the extension attaches and refreshed on
+;; every command, so a prompt can just read it and be right.
 (define (chrome--refresh-tabs)
   (when (browser-connected?)
-    (tab-list
-      (lambda (all)
-        (set! *chrome-tab-cache* all)
-        ;; still at the prompt? fold the fresh tabs in underneath you
-        (when (minibuffer-state)
-          (minibuffer-set-candidates!
-            (append (buffer-candidates)
-                    (map chrome--tab-candidate (chrome--here-tabs all)))))))))
+    (tab-list (lambda (all) (set! *chrome-tab-cache* all)))))
 
 (define-command "switch-to-buffer"
   "Switch to another buffer — or to a browser tab in this window"
@@ -256,19 +273,21 @@
 ;; the tab asking "is a prompt up?" — after a chord, or on reconnect
 (define (chrome--mb-state) (chrome--with-mb '()))
 
-;; Which browser window the request came from. One window, one ai-max, so this
-;; also says which tabs count as "here" — C-x b offers the tabs beside you, not
-;; every tab on the machine.
-(define *chrome-window* #f)
-
 (define (chrome--serve op args)
   (let ((w (chrome--get args 'window)))
-    (when w (set! *chrome-window* w)))
+    (when w (set-frame-local! 'chrome-window w)))
   ;; the overlay is disabled on the editor's own page, so any request that
   ;; names a tab came from a real web page — that is the place to come back to
   (let ((tb (chrome--get args 'tab)))
-    (when tb (set! *chrome-last-tab* tb)))
-  (cond ((equal? op "commands") (list 'commands (chrome--commands)))
+    (when tb (set-frame-local! 'chrome-last-tab tb)))
+  ;; Keep the tab cache warm on the ops a person actually initiates, so the
+  ;; FIRST C-x b already has tabs in it. Not on mb-key/mb-state: those are the
+  ;; overlay polling while a prompt is open, and a round-trip per keystroke is
+  ;; both pointless and slow.
+  (when (or (equal? op "commands") (equal? op "chord") (equal? op "run"))
+    (chrome--refresh-tabs))
+  (cond ((equal? op "attached") (chrome--refresh-tabs) (list 'ok #t))
+        ((equal? op "commands") (list 'commands (chrome--commands)))
         ((equal? op "run") (chrome--run (chrome--get args 'name)))
         ((equal? op "chord") (chrome--chord (or (chrome--get args 'keys) '())))
         ((equal? op "mb-key") (chrome--mb-key (chrome--get args 'spec)))
@@ -281,10 +300,17 @@
 
 ;; Every call is async — a page operation is slow and keystrokes must not queue
 ;; behind it. Without a handler, failures land in the echo area.
+;; Must return #f on failure, explicitly. (message ...) answers with something
+;; truthy, so returning it directly made every failed call fall through to its
+;; continuation with a reply that has no result in it — a failed tab refresh
+;; then wrote #f over the tab cache, and every filter after that died on a
+;; value that was no longer a list.
 (define (chrome--report reply)
   (if (chrome--get reply 'ok)
       #t
-      (message (string-append "browser: " (or (chrome--get reply 'error) "failed")))))
+      (begin
+        (message (string-append "browser: " (or (chrome--get reply 'error) "failed")))
+        #f)))
 
 ;; this Scheme has no rest arguments, so every call takes an explicit handler
 ;; and the fire-and-forget verbs pass this one

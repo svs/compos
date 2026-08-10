@@ -487,6 +487,12 @@ defmodule Aimax.Ui.Layouts do
                   if (text) navigator.clipboard.writeText(text);
                 });
 
+                // this browser's frame: the server assigns/confirms the id,
+                // localStorage carries it across reloads and daemon restarts
+                this.handleEvent("frame", ({ id }) => {
+                  if (id) localStorage.setItem("aimax-frame", id);
+                });
+
                 // mouse: a click selects the window and places point; a drag
                 // leaves a native selection, mirrored into mark + point.
                 // Positions are (logical line, char offset) — the server maps
@@ -570,22 +576,29 @@ defmodule Aimax.Ui.Layouts do
                 };
                 window.addEventListener("resize", this.resizeH);
 
-                // wheel scrolls the server-side viewport of the active window
-                // — batched to one round-trip per animation frame. Raw wheel
-                // events fire at native OS resolution (60-100+/sec on a
-                // trackpad); sending every line crossing as its own
-                // pushEvent means a full server diff/patch cycle on nearly
-                // every tick of a fast scroll. Summing into one flush per
-                // frame cuts round-trips without changing the line math.
+                // wheel scrolls the server-side viewport of the hovered window
+                // (falling back to the active one) — batched to one round-trip
+                // per animation frame. Raw wheel events fire at native OS
+                // resolution (60-100+/sec on a trackpad); sending every line
+                // crossing as its own pushEvent means a full server diff/patch
+                // cycle on nearly every tick of a fast scroll. Summing into one
+                // flush per frame cuts round-trips without changing the line
+                // math.
+                //
+                // Pending lines are kept PER WINDOW: one accumulator would
+                // credit a scroll over window A to whichever window happened to
+                // flush, which is wrong the moment a frame has more than one.
                 this.wheelAcc = 0;
-                this.wheelPending = 0;
+                this.wheelPending = new Map();
                 this.wheelScheduled = false;
                 this.flushWheel = () => {
                   this.wheelScheduled = false;
-                  if (this.wheelPending !== 0) {
-                    this.pushEvent("scroll", { lines: this.wheelPending });
-                    this.wheelPending = 0;
+                  for (const [win, lines] of this.wheelPending) {
+                    if (lines !== 0) {
+                      this.pushEvent("scroll", win === null ? { lines } : { lines, win });
+                    }
                   }
+                  this.wheelPending.clear();
                 };
                 this.wheelH = (e) => {
                   // agent/chat transcripts (.ag-scroll) and buffers under
@@ -602,7 +615,9 @@ defmodule Aimax.Ui.Layouts do
                   const lines = Math.trunc(this.wheelAcc / this.lineHeight);
                   if (lines !== 0) {
                     this.wheelAcc -= lines * this.lineHeight;
-                    this.wheelPending += lines;
+                    const winEl = e.target.closest && e.target.closest(".window[data-win-id]");
+                    const win = winEl ? parseInt(winEl.dataset.winId, 10) : null;
+                    this.wheelPending.set(win, (this.wheelPending.get(win) || 0) + lines);
                     if (!this.wheelScheduled) {
                       this.wheelScheduled = true;
                       requestAnimationFrame(this.flushWheel);
@@ -656,7 +671,8 @@ defmodule Aimax.Ui.Layouts do
 
           const csrf = document.querySelector("meta[name='csrf-token']").getAttribute("content");
           const liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
-            hooks: Hooks, params: { _csrf_token: csrf }
+            hooks: Hooks,
+            params: () => ({ _csrf_token: csrf, frame: localStorage.getItem("aimax-frame") })
           });
           liveSocket.connect();
           if (liveSocket.disableDebug) liveSocket.disableDebug();

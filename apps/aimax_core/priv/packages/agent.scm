@@ -1155,18 +1155,18 @@
       (let ((start (agent-render! slug "\n[agent stopped]\n" "agent-meta")))
         (agent-block-push! buf start (agent-mark slug) "meta" '())))))
 
-;; point any window showing BUF somewhere else (interactive kill-buffer's
-;; dance) — killing a displayed buffer leaves a ghost that resurrects empty
+;; point any window showing BUF somewhere else, in every frame — killing a
+;; displayed buffer leaves a ghost that resurrects empty
 (define (agent-release-windows! buf)
-  (for-each
-    (lambda (w)
-      (when (equal? (car (cdr w)) buf)
-        (select-window! (car w))
-        (let ((others (filter (lambda (b) (and (not (equal? b buf))
-                                               (not (string-prefix? "*agent" b))))
-                              (buffer-list-mru))))
-          (switch-to-buffer! (if (null? others) "*scratch*" (car others))))))
-    (window-list)))
+  (let* ((others (filter (lambda (b) (and (not (equal? b buf))
+                                          (not (string-prefix? "*agent" b))))
+                         (buffer-list-mru)))
+         (repl (if (null? others) "*scratch*" (car others))))
+    (for-each
+      (lambda (w)
+        (when (equal? (car (cdr w)) buf)
+          (window-set-buffer! (car w) repl)))
+      (window-list-all))))
 
 (define-command "agents-kill" "Kill the thread at point, keeping its transcript"
   (lambda ()

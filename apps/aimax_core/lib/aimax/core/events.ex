@@ -40,4 +40,24 @@ defmodule Aimax.Core.Events do
       for {pid, _} <- entries, do: send(pid, {:editor_change, what})
     end)
   end
+
+  @doc """
+  One frame's view changed. Clients subscribe to their own frame so frame
+  A's window churn never re-renders frame B; `:editor` stays the firehose
+  for non-view subscribers (Desktop, Reactor, Agent).
+  """
+  def subscribe_frame(id) do
+    {:ok, _} = Registry.register(@registry, {:frame, id}, nil)
+    :ok
+  end
+
+  def unsubscribe_frame(id) do
+    Registry.unregister(@registry, {:frame, id})
+  end
+
+  def broadcast_frame(id) do
+    Registry.dispatch(@registry, {:frame, id}, fn entries ->
+      for {pid, _} <- entries, do: send(pid, {:frame_change, id})
+    end)
+  end
 end

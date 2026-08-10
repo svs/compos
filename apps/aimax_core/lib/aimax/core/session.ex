@@ -16,7 +16,7 @@ defmodule Aimax.Core.Session do
 
   require Logger
 
-  alias Aimax.Core.{Buffer, Editor}
+  alias Aimax.Core.{Buffer, Editor, Frame}
   alias Aimax.Scheme
 
   @messages "*messages*"
@@ -31,19 +31,28 @@ defmodule Aimax.Core.Session do
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
+  # every entry point carries the caller's frame context into this process:
+  # the Scheme runs here, so primitives resolve their frame from OUR pdict,
+  # stamped per-call from the fid the caller (Input, LiveView, RPC) passed —
+  # nil falls back to the last-active frame
+
   @doc "Evaluate Scheme source. Returns {:ok, printed_value} | {:error, msg}."
-  def eval(src), do: GenServer.call(__MODULE__, {:eval, src}, 30_000)
+  def eval(src, fid \\ nil), do: GenServer.call(__MODULE__, {:eval, src, fid(fid)}, 30_000)
 
   @doc "Run a named command (Scheme closure from the commands table)."
-  def run_command(name), do: GenServer.call(__MODULE__, {:run_command, name}, 30_000)
+  def run_command(name, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:run_command, name, fid(fid)}, 30_000)
 
   @doc "Apply a Scheme closure (e.g. a minibuffer confirm callback)."
-  def apply_callback(closure, args),
-    do: GenServer.call(__MODULE__, {:apply, closure, args}, 30_000)
+  def apply_callback(closure, args, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:apply, closure, args, fid(fid)}, 30_000)
 
   @doc "Apply a Scheme closure and return its value (e.g. a completion fn)."
-  def call_fn(closure, args),
-    do: GenServer.call(__MODULE__, {:call_fn, closure, args}, 30_000)
+  def call_fn(closure, args, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:call_fn, closure, args, fid(fid)}, 30_000)
+
+  defp fid(nil), do: Frame.current()
+  defp fid(fid), do: fid
 
   def eval_region(buffer, start_pos, end_pos) do
     src = buffer |> Buffer.text() |> binary_part(start_pos, end_pos - start_pos)
@@ -54,7 +63,9 @@ defmodule Aimax.Core.Session do
 
   def message(text) do
     Buffer.append(@messages, text <> "\n", source: :editor)
-    Editor.set_echo(text)
+    # Emacs: echo in the frame that triggered; with no frame context (agent
+    # events, timers) every frame gets it — *messages* is shared either way
+    if Frame.current(), do: Editor.set_echo(text), else: Editor.set_echo_all(text)
     :ok
   end
 
@@ -96,29 +107,39 @@ defmodule Aimax.Core.Session do
     :exit, reason -> {:error, "exit: #{inspect(reason)}"}
   end
 
+  # the caller's frame context, stamped into THIS process for the duration
+  # of the Scheme execution — primitives resolve their frame from it. nil
+  # clears (a stale pdict from the previous command must not leak forward).
+  defp with_fid(nil, fun) do
+    Frame.clear()
+    fun.()
+  end
+
+  defp with_fid(fid, fun), do: Frame.with_frame(fid, fun)
+
   @impl true
-  def handle_call({:eval, src}, _from, state) do
-    case safe(fn -> Scheme.eval_string(state.interp, src) end) do
+  def handle_call({:eval, src, fid}, _from, state) do
+    case safe(fn -> with_fid(fid, fn -> Scheme.eval_string(state.interp, src) end) end) do
       {:ok, val, interp} -> {:reply, {:ok, Scheme.print(val)}, put_interp(state, interp, val)}
       {:error, msg} -> {:reply, {:error, msg}, state}
     end
   end
 
-  def handle_call({:run_command, name}, _from, state) do
+  def handle_call({:run_command, name, fid}, _from, state) do
     case :ets.lookup(Aimax.Core.SchemeAPI.commands_table(), name) do
       [] ->
         {:reply, {:error, "undefined command"}, state}
 
       [{^name, closure, _doc}] ->
-        case safe(fn -> Scheme.call(state.interp, closure, []) end) do
+        case safe(fn -> with_fid(fid, fn -> Scheme.call(state.interp, closure, []) end) end) do
           {:ok, val, interp} -> {:reply, :ok, put_interp(state, interp, val)}
           {:error, msg} -> {:reply, {:error, msg}, state}
         end
     end
   end
 
-  def handle_call({:apply, closure, args}, _from, state) do
-    case safe(fn -> Scheme.call(state.interp, closure, args) end) do
+  def handle_call({:apply, closure, args, fid}, _from, state) do
+    case safe(fn -> with_fid(fid, fn -> Scheme.call(state.interp, closure, args) end) end) do
       {:ok, val, interp} ->
         {:reply, :ok, put_interp(state, interp, val)}
 
@@ -128,8 +149,8 @@ defmodule Aimax.Core.Session do
     end
   end
 
-  def handle_call({:call_fn, closure, args}, _from, state) do
-    case safe(fn -> Scheme.call(state.interp, closure, args) end) do
+  def handle_call({:call_fn, closure, args, fid}, _from, state) do
+    case safe(fn -> with_fid(fid, fn -> Scheme.call(state.interp, closure, args) end) end) do
       {:ok, val, interp} -> {:reply, {:ok, val}, put_interp(state, interp, val)}
       {:error, msg} -> {:reply, {:error, msg}, state}
     end
@@ -152,12 +173,14 @@ defmodule Aimax.Core.Session do
   # table, escaped fun-wrapped handlers, active minibuffer handlers (Editor
   # state), and buffer-local values
   defp external_roots do
-    minibuffer = Process.whereis(Editor) && Editor.snapshot().minibuffer
+    # every frame's prompt, not just one — a live on_confirm in a background
+    # frame must not be collected
+    minibuffers = (Process.whereis(Editor) && Editor.all_minibuffers()) || []
 
     [
       :ets.tab2list(Aimax.Core.SchemeAPI.commands_table()),
       :ets.tab2list(@escaped),
-      minibuffer,
+      minibuffers,
       Enum.map(Aimax.Core.list_buffers(), fn name ->
         if Buffer.exists?(name), do: Buffer.locals(name), else: %{}
       end)
@@ -623,6 +646,31 @@ defmodule Aimax.Core.Session do
           Aimax.Scheme.Eval.apply_fn(thunk, [], store)
         after
           Editor.set_mb_redirect(true)
+        end
+      end,
+
+      # store-aware (an active prompt's on_cancel closure applies in the
+      # CURRENT store); refuses the sole frame
+      "delete-frame!" => fn args, store ->
+        fid =
+          case args do
+            [] -> Frame.current() || Editor.last_active_frame()
+            [id] -> s(id)
+          end
+
+        case Editor.delete_frame(fid) do
+          {:ok, %{on_cancel: oc}} when oc not in [nil, false] ->
+            {_, store} = Aimax.Scheme.Eval.apply_fn(oc, [], store)
+            {true, store}
+
+          {:ok, _} ->
+            {true, store}
+
+          {:error, :last_frame} ->
+            raise_scheme("delete-frame!: cannot delete the sole frame")
+
+          {:error, :no_frame} ->
+            {false, store}
         end
       end,
 

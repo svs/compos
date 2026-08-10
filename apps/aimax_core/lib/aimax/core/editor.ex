@@ -1,36 +1,76 @@
 defmodule Aimax.Core.Editor do
   @moduledoc """
-  Editor state holder: tiling window tree, keymap table, minibuffer state,
-  kill ring, echo area. **Policy-free by design** — every command and default
-  keybinding is Scheme (`priv/editor.scm`); this process only stores state and
-  applies small mutations. Key routing lives in `Aimax.Core.KeyDispatch`,
-  which runs in the caller's process so Scheme primitives can call back into
-  this server without deadlock.
+  Editor state holder: frames (each a tiling window tree + minibuffer + echo
+  + viewport geometry), keymap table, kill ring. **Policy-free by design** —
+  every command and default keybinding is Scheme (`priv/editor.scm`); this
+  process only stores state and applies small mutations. Key routing lives in
+  `Aimax.Core.KeyDispatch`, which runs outside this server so Scheme
+  primitives can call back in without deadlock.
 
-  Window tree: `%{type: :leaf, id, buffer}` | `%{type: :split, dir: :h | :v,
-  children: [tree, tree]}`. Each leaf shows a buffer; `:h` = side-by-side.
-  TODO: per-window points, ratios, window resizing.
+  A frame is one client's view: its own window tree and selection, sharing
+  buffers, keymaps, faces and the kill ring with every other frame. Frame
+  ids are short stable strings; window ids are integers, globally unique
+  across all frames, so a bare window id always names one window.
+
+  Window tree: `%{type: :leaf, id, buffer, top, manual}` | `%{type: :split,
+  dir: :h | :v, ratio, children: [tree, tree]}`. `:h` = side-by-side.
+  TODO: per-window points, window resizing.
+
+  Calls that take a frame accept nil, resolved server-side to the
+  last-active frame (the fallback for async callers with no frame context).
   """
 
   use GenServer
 
-  alias Aimax.Core.{Buffer, Candidates, Events}
+  alias Aimax.Core.{Buffer, Candidates, Events, Frame}
 
-  # the minibuffer's backing buffer (Emacs-style: prompt input IS a buffer,
-  # so point motion, kill/yank, undo and local keymaps all just work).
-  # Space-prefixed = hidden from buffer lists, like Emacs.
+  # every frame has its own minibuffer backing buffer, " *minibuf-<fid>*"
+  # (Emacs-style: prompt input IS a buffer, so point motion, kill/yank, undo
+  # and local keymaps all just work; per-frame so two prompts can be open at
+  # once). Space-prefixed = hidden from buffer lists, like Emacs. The bare
+  # " *minibuf*" is the shared local-KEYMAP namespace: binds and lookups on
+  # any frame's minibuf buffer normalize to it, so editor.scm binds the
+  # prompt keys once for all frames.
   @minibuf " *minibuf*"
-  def minibuf_name, do: @minibuf
+
+  @doc "The calling frame's minibuffer buffer name."
+  def minibuf_name(fid \\ nil), do: GenServer.call(__MODULE__, {:minibuf_name, fid(fid)})
 
   @scratch "*scratch*"
+  @main_frame "f-main"
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   # readers
-  def snapshot, do: GenServer.call(__MODULE__, :snapshot)
-  def current_buffer, do: GenServer.call(__MODULE__, :current_buffer)
-  def lookup_key(seq), do: GenServer.call(__MODULE__, {:lookup_key, seq})
-  def render_state, do: GenServer.call(__MODULE__, :render_state)
+  def snapshot(fid \\ nil), do: GenServer.call(__MODULE__, {:snapshot, fid(fid)})
+  def current_buffer(fid \\ nil), do: GenServer.call(__MODULE__, {:current_buffer, fid(fid)})
+  def lookup_key(seq, fid \\ nil), do: GenServer.call(__MODULE__, {:lookup_key, seq, fid(fid)})
+  def render_state(fid \\ nil), do: GenServer.call(__MODULE__, {:render_state, fid(fid)})
+
+  # frames
+  @doc "Attach a client: nil -> fresh frame; known id -> reattach; unknown id -> create with it."
+  def attach_frame(id), do: GenServer.call(__MODULE__, {:attach_frame, id})
+
+  @doc "Returns {:ok, closed_minibuffer | nil} so the caller can fire on_cancel."
+  def delete_frame(id), do: GenServer.call(__MODULE__, {:delete_frame, id})
+
+  def frame_list, do: GenServer.call(__MODULE__, :frame_list)
+  def last_active_frame, do: GenServer.call(__MODULE__, :last_active_frame)
+  def select_frame(id), do: GenServer.call(__MODULE__, {:select_frame, id})
+  def frame_of_window(win_id), do: GenServer.call(__MODULE__, {:frame_of_window, win_id})
+
+  @doc "Bump a frame in the MRU without broadcasting — the top of every input dispatch."
+  def touch_frame(id), do: GenServer.call(__MODULE__, {:touch_frame, id})
+
+  @doc "Active minibuffer maps of every frame (Session GC roots live closures)."
+  def all_minibuffers, do: GenServer.call(__MODULE__, :all_minibuffers)
+
+  @doc "All windows across all frames, frame-MRU order: [{win_id, buffer, frame_id}]."
+  def list_windows_all, do: GenServer.call(__MODULE__, :list_windows_all)
+
+  @doc "Set any window's buffer, any frame, without selecting it."
+  def window_set_buffer(win_id, buffer),
+    do: GenServer.call(__MODULE__, {:window_set_buffer, win_id, buffer})
 
   # keymap
   def bind_key(seq, command), do: GenServer.call(__MODULE__, {:bind_key, seq, command})
@@ -43,8 +83,12 @@ defmodule Aimax.Core.Editor do
     do: GenServer.call(__MODULE__, {:local_remap, buffer, from, to})
 
   # pending prefix + echo
-  def set_pending(seq), do: GenServer.call(__MODULE__, {:set_pending, seq})
-  def set_echo(msg), do: GenServer.call(__MODULE__, {:set_echo, msg})
+  def set_pending(seq, fid \\ nil), do: GenServer.call(__MODULE__, {:set_pending, seq, fid(fid)})
+  def set_echo(msg, fid \\ nil), do: GenServer.call(__MODULE__, {:set_echo, msg, fid(fid)})
+
+  @doc "Echo a message in every frame (async sources: agents, timers)."
+  def set_echo_all(msg), do: GenServer.call(__MODULE__, {:set_echo_all, msg})
+
   # one global always-visible segment in the echo bar (agent attention etc.)
   def set_modeline_extra(s), do: GenServer.call(__MODULE__, {:set_modeline_extra, s})
 
@@ -57,26 +101,29 @@ defmodule Aimax.Core.Editor do
   end
 
   @doc "Handlers: %{on_confirm:, on_complete:, on_change:, on_cancel:} (all optional closures)."
-  def minibuffer_activate_full(prompt, candidates, handlers),
-    do: GenServer.call(__MODULE__, {:mb_activate, prompt, candidates, handlers})
+  def minibuffer_activate_full(prompt, candidates, handlers, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:mb_activate, prompt, candidates, handlers, fid(fid)})
 
-  def minibuffer_set_input(input), do: GenServer.call(__MODULE__, {:mb_input, input})
+  def minibuffer_set_input(input, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:mb_input, input, fid(fid)})
 
-  def minibuffer_set_candidates(candidates),
-    do: GenServer.call(__MODULE__, {:mb_candidates, candidates})
+  def minibuffer_set_candidates(candidates, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:mb_candidates, candidates, fid(fid)})
 
-  def minibuffer_move_sel(delta), do: GenServer.call(__MODULE__, {:mb_move_sel, delta})
+  def minibuffer_move_sel(delta, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:mb_move_sel, delta, fid(fid)})
 
   @doc "Currently selected candidate label (after fuzzy filter), or nil."
-  def minibuffer_selected, do: GenServer.call(__MODULE__, :mb_selected)
+  def minibuffer_selected(fid \\ nil), do: GenServer.call(__MODULE__, {:mb_selected, fid(fid)})
 
-  def minibuffer_close, do: GenServer.call(__MODULE__, :mb_close)
+  def minibuffer_close(fid \\ nil), do: GenServer.call(__MODULE__, {:mb_close, fid(fid)})
 
   @doc "Re-read input from the minibuf buffer. :unchanged | {:changed, input}."
-  def minibuffer_sync_input, do: GenServer.call(__MODULE__, :mb_sync_input)
+  def minibuffer_sync_input(fid \\ nil), do: GenServer.call(__MODULE__, {:mb_sync_input, fid(fid)})
 
   @doc "While false, current_buffer ignores an active minibuffer (handler escape hatch)."
-  def set_mb_redirect(bool), do: GenServer.call(__MODULE__, {:mb_redirect, bool})
+  def set_mb_redirect(bool, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:mb_redirect, bool, fid(fid)})
 
   def key_for_command(command), do: GenServer.call(__MODULE__, {:key_for_command, command})
 
@@ -93,18 +140,19 @@ defmodule Aimax.Core.Editor do
   def undo_exempt?(name), do: GenServer.call(__MODULE__, {:undo_exempt?, name})
 
   # completion-at-point popup (anchored at a buffer position)
-  def completion_show(start, candidates),
-    do: GenServer.call(__MODULE__, {:completion_show, start, candidates})
+  def completion_show(start, candidates, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:completion_show, start, candidates, fid(fid)})
 
-  def completion_move(delta), do: GenServer.call(__MODULE__, {:completion_move, delta})
+  def completion_move(delta, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:completion_move, delta, fid(fid)})
 
   @doc "Narrow the open popup by prefix typed since it opened."
-  def completion_query(q), do: GenServer.call(__MODULE__, {:completion_query, q})
+  def completion_query(q, fid \\ nil), do: GenServer.call(__MODULE__, {:completion_query, q, fid(fid)})
 
   @doc "Accept the selection: returns {start, label} and clears, or nil."
-  def completion_accept, do: GenServer.call(__MODULE__, :completion_accept)
+  def completion_accept(fid \\ nil), do: GenServer.call(__MODULE__, {:completion_accept, fid(fid)})
 
-  def completion_dismiss, do: GenServer.call(__MODULE__, :completion_dismiss)
+  def completion_dismiss(fid \\ nil), do: GenServer.call(__MODULE__, {:completion_dismiss, fid(fid)})
 
   # kill ring
   def kill_push(text), do: GenServer.call(__MODULE__, {:kill_push, text})
@@ -116,36 +164,46 @@ defmodule Aimax.Core.Editor do
   def set_face(name, attrs), do: GenServer.call(__MODULE__, {:set_face, name, attrs})
 
   # windows
-  def split(dir, ratio \\ 0.5) when dir in [:h, :v],
-    do: GenServer.call(__MODULE__, {:split, dir, ratio})
+  def split(dir, ratio \\ 0.5, fid \\ nil) when dir in [:h, :v],
+    do: GenServer.call(__MODULE__, {:split, dir, ratio, fid(fid)})
 
-  def delete_window, do: GenServer.call(__MODULE__, :delete_window)
+  def delete_window(fid \\ nil), do: GenServer.call(__MODULE__, {:delete_window, fid(fid)})
   def delete_window_by_id(id), do: GenServer.call(__MODULE__, {:delete_window_by_id, id})
-  def list_windows, do: GenServer.call(__MODULE__, :list_windows)
-  def window_rects, do: GenServer.call(__MODULE__, :window_rects)
+  def list_windows(fid \\ nil), do: GenServer.call(__MODULE__, {:list_windows, fid(fid)})
+  def window_rects(fid \\ nil), do: GenServer.call(__MODULE__, {:window_rects, fid(fid)})
+
+  @doc "Selecting a window selects its frame (Emacs: windows live on frames)."
   def set_active(id), do: GenServer.call(__MODULE__, {:set_active, id})
-  def active_window, do: GenServer.call(__MODULE__, :active_window)
-  def delete_other_windows, do: GenServer.call(__MODULE__, :delete_other_windows)
-  def other_window, do: GenServer.call(__MODULE__, :other_window)
-  def set_window_buffer(buffer), do: GenServer.call(__MODULE__, {:set_window_buffer, buffer})
+  def active_window(fid \\ nil), do: GenServer.call(__MODULE__, {:active_window, fid(fid)})
+  def delete_other_windows(fid \\ nil), do: GenServer.call(__MODULE__, {:delete_other_windows, fid(fid)})
+  def other_window(fid \\ nil), do: GenServer.call(__MODULE__, {:other_window, fid(fid)})
 
   @doc "Show BUFFER in the active window WITHOUT touching the MRU ring — candidate preview must not reorder the buffer history."
-  def preview_buffer(buffer), do: GenServer.call(__MODULE__, {:preview_buffer, buffer})
+  def preview_buffer(buffer, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:preview_buffer, buffer, fid(fid)})
 
-  @doc "A buffer is dying: swap every window showing it onto a live one."
+  @doc "A buffer is dying: swap every window showing it (any frame) onto a live one."
   def release_buffer(buffer), do: GenServer.call(__MODULE__, {:release_buffer, buffer})
 
-  @doc "Replace the whole window tree from a {:leaf, name} | {:split, dir, a, b} spec."
-  def restore_tree(spec, active_buffer),
-    do: GenServer.call(__MODULE__, {:restore_tree, spec, active_buffer})
+  def set_window_buffer(buffer, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_window_buffer, buffer, fid(fid)})
 
-  # viewport: client reports how many text rows fit; wheel scrolls the
-  # active window server-side; any key re-enables point auto-follow
-  def set_total_rows(rows), do: GenServer.call(__MODULE__, {:set_total_rows, rows})
+  @doc "Replace a frame's window tree from a {:leaf, name} | {:split, dir, a, b} spec."
+  def restore_tree(spec, active_buffer, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:restore_tree, spec, active_buffer, fid(fid)})
+
+  # viewport: each client reports how many text rows fit its frame; wheel
+  # scrolls server-side; any key re-enables point auto-follow
+  def set_total_rows(rows, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_total_rows, rows, fid(fid)})
 
   @doc "Per-window measured rows (%{win_id => rows}) — line height varies per buffer."
-  def set_window_rows(map), do: GenServer.call(__MODULE__, {:set_window_rows, map})
-  def scroll_active(delta_lines), do: GenServer.call(__MODULE__, {:scroll_active, delta_lines})
+  def set_window_rows(map, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_window_rows, map, fid(fid)})
+
+  def scroll_active(delta_lines, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:scroll_active, delta_lines, fid(fid)})
+
   def scroll_window(id, delta_lines), do: GenServer.call(__MODULE__, {:scroll_window, id, delta_lines})
 
   # mouse: place point at (logical line, char col) in a window's buffer;
@@ -157,10 +215,14 @@ defmodule Aimax.Core.Editor do
 
   # Cmd-C with no native selection: the active region (pushed onto the kill
   # ring, Emacs kill-ring-save) or, without one, the kill-ring top
-  def copy_text, do: GenServer.call(__MODULE__, :copy_text)
-  def user_acted, do: GenServer.call(__MODULE__, :user_acted)
-  def window_rows, do: GenServer.call(__MODULE__, :window_rows)
-  def recenter, do: GenServer.call(__MODULE__, :recenter)
+  def copy_text(fid \\ nil), do: GenServer.call(__MODULE__, {:copy_text, fid(fid)})
+  def user_acted(fid \\ nil), do: GenServer.call(__MODULE__, {:user_acted, fid(fid)})
+  def window_rows(fid \\ nil), do: GenServer.call(__MODULE__, {:window_rows, fid(fid)})
+  def recenter(fid \\ nil), do: GenServer.call(__MODULE__, {:recenter, fid(fid)})
+
+  # explicit nil beats an unset pdict; the server resolves nil -> last active
+  defp fid(nil), do: Frame.current()
+  defp fid(fid), do: fid
 
   # --- server ----------------------------------------------------------------
 
@@ -168,33 +230,152 @@ defmodule Aimax.Core.Editor do
   def init(_opts) do
     Aimax.Core.create_buffer(@scratch)
 
+    frame = %{
+      id: @main_frame,
+      tree: %{type: :leaf, id: 1, buffer: @scratch, top: 0, manual: false},
+      active: 1,
+      pending: [],
+      minibuffer: nil,
+      mb_redirect: true,
+      echo: "",
+      completion: nil,
+      total_rows: 40,
+      win_rows: %{}
+    }
+
     {:ok,
      %{
-       tree: %{type: :leaf, id: 1, buffer: @scratch, top: 0, manual: false},
-       active: 1,
+       frames: %{@main_frame => frame},
+       frame_mru: [@main_frame],
+       # the one window whose point is swapped into its buffer (the selected
+       # window of the last-active frame): {frame_id, win_id, buffer}
+       swapped: nil,
        next_win: 2,
-       pending: [],
-       minibuffer: nil,
        kill_ring: [],
        keymap: %{},
-       echo: "",
        modeline_extra: "",
        faces: %{},
        local_keymaps: %{},
        remaps: %{},
        last_command: "",
        undo_exempt: MapSet.new(["undo"]),
-       completion: nil,
-       total_rows: 40,
-       win_rows: %{},
-       mru: [@scratch],
-       mb_redirect: true
+       mru: [@scratch]
      }}
   end
 
+  # --- frame lifecycle --------------------------------------------------------
+
   @impl true
-  def handle_call(:snapshot, _from, state) do
-    snap = Map.take(state, [:pending, :minibuffer, :echo, :active, :completion])
+  def handle_call({:attach_frame, id}, _from, state) do
+    case state.frames[id] do
+      %{} ->
+        {:reply, {:ok, id}, state |> bump_frame(id) |> resync_swap()}
+
+      nil ->
+        id = if valid_frame_id?(id), do: id, else: gen_frame_id()
+        buffer = List.first(Enum.filter(state.mru, &Buffer.exists?/1)) || @scratch
+
+        frame = %{
+          id: id,
+          tree: %{type: :leaf, id: state.next_win, buffer: buffer, top: 0, manual: false},
+          active: state.next_win,
+          pending: [],
+          minibuffer: nil,
+          mb_redirect: true,
+          echo: "",
+          completion: nil,
+          total_rows: 40,
+          win_rows: %{}
+        }
+
+        state = %{state | frames: Map.put(state.frames, id, frame), next_win: state.next_win + 1}
+        changed({:ok, id}, state |> bump_frame(id) |> resync_swap(), id)
+    end
+  end
+
+  def handle_call({:delete_frame, id}, _from, state) do
+    cond do
+      state.frames[id] == nil ->
+        {:reply, {:error, :no_frame}, state}
+
+      map_size(state.frames) == 1 ->
+        {:reply, {:error, :last_frame}, state}
+
+      true ->
+        # hand the closed prompt back so the caller can fire on_cancel
+        # (this server must never call into Session — deadlock)
+        f = state.frames[id]
+
+        # async: kill_buffer heals windows through Editor.release_buffer,
+        # which must not be called from inside this server (self-call)
+        mb_buf = minibuf_of(f)
+        Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn -> Aimax.Core.kill_buffer(mb_buf) end)
+
+        Enum.each(leaf_ids_buffers(f.tree), fn {win, buf} ->
+          if Buffer.exists?(buf), do: wp_safely(fn -> Buffer.drop_win_point(buf, win) end)
+        end)
+
+        state = %{
+          state
+          | frames: Map.delete(state.frames, id),
+            frame_mru: List.delete(state.frame_mru, id)
+        }
+
+        changed({:ok, f.minibuffer}, resync_swap(state), id)
+    end
+  end
+
+  def handle_call(:frame_list, _from, state), do: {:reply, state.frame_mru, state}
+
+  def handle_call(:last_active_frame, _from, state),
+    do: {:reply, hd(state.frame_mru), state}
+
+  def handle_call({:select_frame, id}, _from, state) do
+    if state.frames[id],
+      do: changed(:ok, state |> bump_frame(id) |> resync_swap(), id),
+      else: {:reply, {:error, :no_frame}, state}
+  end
+
+  def handle_call({:frame_of_window, win_id}, _from, state),
+    do: {:reply, (f = find_window_frame(state, win_id)) && f.id, state}
+
+  def handle_call({:touch_frame, id}, _from, state) do
+    if state.frames[id],
+      do: {:reply, :ok, state |> bump_frame(id) |> resync_swap()},
+      else: {:reply, :ok, state}
+  end
+
+  def handle_call(:all_minibuffers, _from, state),
+    do: {:reply, for({_id, f} <- state.frames, f.minibuffer, do: f.minibuffer), state}
+
+  def handle_call(:list_windows_all, _from, state) do
+    reply =
+      for fid <- state.frame_mru,
+          {id, buf} <- leaf_ids_buffers(state.frames[fid].tree),
+          do: {id, buf, fid}
+
+    {:reply, reply, state}
+  end
+
+  def handle_call({:window_set_buffer, win_id, buffer}, _from, state) do
+    case find_window_frame(state, win_id) do
+      nil ->
+        {:reply, {:error, :no_window}, state}
+
+      f ->
+        unless Aimax.Core.Buffer.exists?(buffer), do: Aimax.Core.create_buffer(buffer)
+        leaf = find_leaf(f.tree, win_id)
+        tree = replace_leaf(f.tree, win_id, %{leaf | buffer: buffer, top: 0, manual: false})
+        mru = Enum.take([buffer | List.delete(state.mru, buffer)], 50)
+        changed(:ok, resync_swap(put_frame(%{state | mru: mru}, %{f | tree: tree})), f.id)
+    end
+  end
+
+  # --- frame-scoped state -----------------------------------------------------
+
+  def handle_call({:snapshot, fid}, _from, state) do
+    f = frame(state, fid)
+    snap = Map.take(f, [:pending, :minibuffer, :echo, :active, :completion])
     # expose the selection flag KeyDispatch needs without leaking the list
     snap =
       case snap.minibuffer do
@@ -210,22 +391,30 @@ defmodule Aimax.Core.Editor do
   # the local-keymap lookup route there. with-window-buffer flips
   # mb_redirect off so a handler can act on the window's buffer instead
   # (Emacs' with-minibuffer-selected-window).
-  def handle_call(:current_buffer, _from, %{minibuffer: %{}, mb_redirect: true} = state) do
-    {:reply, @minibuf, state}
+  def handle_call({:current_buffer, fid}, _from, state) do
+    f = frame(state, fid)
+
+    reply =
+      case f do
+        %{minibuffer: %{}, mb_redirect: true} -> minibuf_of(f)
+        _ -> find_leaf(f.tree, f.active).buffer
+      end
+
+    {:reply, reply, state}
   end
 
-  def handle_call(:current_buffer, _from, state) do
-    {:reply, find_leaf(state.tree, state.active).buffer, state}
+  def handle_call({:minibuf_name, fid}, _from, state),
+    do: {:reply, minibuf_of(frame(state, fid)), state}
+
+  def handle_call({:mb_redirect, bool, fid}, _from, state) do
+    f = frame(state, fid)
+    {:reply, :ok, put_frame(state, %{f | mb_redirect: bool})}
   end
 
-  def handle_call({:mb_redirect, bool}, _from, state),
-    do: {:reply, :ok, %{state | mb_redirect: bool}}
-
-  def handle_call({:lookup_key, seq}, _from, state) do
-    buffer =
-      if state.minibuffer, do: @minibuf, else: find_leaf(state.tree, state.active).buffer
-
-    local = Map.get(state.local_keymaps, buffer, %{})
+  def handle_call({:lookup_key, seq, fid}, _from, state) do
+    f = frame(state, fid)
+    buffer = if f.minibuffer, do: minibuf_of(f), else: find_leaf(f.tree, f.active).buffer
+    local = Map.get(state.local_keymaps, keymap_key(buffer), %{})
 
     reply =
       cond do
@@ -257,62 +446,72 @@ defmodule Aimax.Core.Editor do
   end
 
   def handle_call({:local_bind_key, buffer, seq, command}, _from, state) do
+    buffer = keymap_key(buffer)
+
     local_keymaps =
       Map.update(state.local_keymaps, buffer, %{seq => command}, &Map.put(&1, seq, command))
 
     {:reply, :ok, %{state | local_keymaps: local_keymaps}}
   end
 
-  def handle_call(:render_state, _from, state) do
-    {tree, rendered} = render_walk(state.tree, state.total_rows, state.win_rows)
-    state = %{state | tree: tree}
+  def handle_call({:render_state, fid}, _from, state) do
+    f = frame(state, fid)
+    {tree, rendered} = render_walk(f.tree, f.total_rows, f.win_rows)
+    state = put_frame(state, %{f | tree: tree})
 
     {:reply,
      %{
+       frame: f.id,
        tree: rendered,
-       active: state.active,
-       pending: state.pending,
-       minibuffer: state.minibuffer && render_minibuffer(state.minibuffer),
-       which_key: which_key(state),
-       completion: state.completion && render_completion(state.completion),
-       echo: state.echo,
+       active: f.active,
+       pending: f.pending,
+       minibuffer: f.minibuffer && render_minibuffer(f.minibuffer, minibuf_of(f)),
+       which_key: which_key(state, f),
+       completion: f.completion && render_completion(f.completion),
+       echo: f.echo,
        modeline_extra: state.modeline_extra,
        faces: state.faces
      }, state}
   end
 
-  def handle_call({:set_total_rows, rows}, _from, state),
-    do: {:reply, :ok, %{state | total_rows: rows |> max(5) |> min(500)}}
+  def handle_call({:set_total_rows, rows, fid}, _from, state) do
+    f = frame(state, fid)
+    {:reply, :ok, put_frame(state, %{f | total_rows: rows |> max(5) |> min(500)})}
+  end
 
   # no-op guard: the client re-reports after every patch; only real changes
   # may broadcast or this loops forever
-  def handle_call({:set_window_rows, map}, _from, %{win_rows: map} = state),
-    do: {:reply, :ok, state}
+  def handle_call({:set_window_rows, map, fid}, _from, state) when is_map(map) do
+    f = frame(state, fid)
 
-  def handle_call({:set_window_rows, map}, _from, state) when is_map(map),
-    do: changed(:ok, %{state | win_rows: map})
+    if f.win_rows == map,
+      do: {:reply, :ok, state},
+      else: changed(:ok, put_frame(state, %{f | win_rows: map}), f.id)
+  end
 
-  def handle_call({:scroll_active, delta}, _from, state) do
-    leaf = find_leaf(state.tree, state.active)
+  def handle_call({:scroll_active, delta, fid}, _from, state) do
+    f = frame(state, fid)
+    leaf = find_leaf(f.tree, f.active)
     top = max(leaf.top + delta, 0)
-    tree = replace_leaf(state.tree, state.active, %{leaf | top: top, manual: true})
-    changed(:ok, %{state | tree: tree})
+    tree = replace_leaf(f.tree, f.active, %{leaf | top: top, manual: true})
+    changed(:ok, put_frame(state, %{f | tree: tree}), f.id)
   end
 
   def handle_call({:scroll_window, id, delta}, _from, state) do
-    case find_leaf(state.tree, id) do
+    case find_window_frame(state, id) do
       nil ->
         {:reply, {:error, :no_window}, state}
 
-      leaf ->
+      f ->
+        leaf = find_leaf(f.tree, id)
         top = max(leaf.top + delta, 0)
-        tree = replace_leaf(state.tree, id, %{leaf | top: top, manual: true})
-        changed(:ok, %{state | tree: tree})
+        tree = replace_leaf(f.tree, id, %{leaf | top: top, manual: true})
+        changed(:ok, put_frame(state, %{f | tree: tree}), f.id)
     end
   end
 
   def handle_call({:mouse_goto, id, line, col}, _from, state) do
-    case find_leaf(state.tree, id) do
+    case find_window_frame(state, id) do
       nil ->
         {:reply, {:error, :no_window}, state}
 
@@ -320,7 +519,9 @@ defmodule Aimax.Core.Editor do
       # tree, but a click can race it — and the registry entry outlives
       # the process for a moment, so exists? isn't enough). A dead buffer
       # must never crash the Editor: its crash wipes the keymap with it.
-      leaf ->
+      f ->
+        leaf = find_leaf(f.tree, id)
+
         try do
           Buffer.goto(leaf.buffer, mouse_pos(leaf.buffer, line, col))
           changed(:ok, state)
@@ -335,7 +536,7 @@ defmodule Aimax.Core.Editor do
   def handle_call({:release_buffer, buffer}, _from, state) do
     # prefer a buffer not already on screen — swapping to one that is
     # (e.g. *ibuffer* while killing from inside it) duplicates windows
-    visible = visible_buffers(state.tree)
+    visible = Enum.flat_map(state.frames, fn {_id, f} -> visible_buffers(f.tree) end)
 
     fallback =
       Enum.find(state.mru, fn b ->
@@ -345,16 +546,22 @@ defmodule Aimax.Core.Editor do
           b != buffer and Buffer.exists?(b)
         end)
 
-    tree = swap_buffer(state.tree, buffer, fallback)
-    changed(:ok, %{state | tree: tree, mru: List.delete(state.mru, buffer)})
+    frames =
+      Map.new(state.frames, fn {id, f} ->
+        {id, %{f | tree: swap_buffer(f.tree, buffer, fallback)}}
+      end)
+
+    changed(:ok, %{state | frames: frames, mru: List.delete(state.mru, buffer)})
   end
 
   def handle_call({:mouse_region, id, al, ac, fl, fc}, _from, state) do
-    case find_leaf(state.tree, id) do
+    case find_window_frame(state, id) do
       nil ->
         {:reply, {:error, :no_window}, state}
 
-      leaf ->
+      f ->
+        leaf = find_leaf(f.tree, id)
+
         try do
           Buffer.set_mark(leaf.buffer, mouse_pos(leaf.buffer, al, ac))
           Buffer.goto(leaf.buffer, mouse_pos(leaf.buffer, fl, fc))
@@ -365,9 +572,10 @@ defmodule Aimax.Core.Editor do
     end
   end
 
-  def handle_call(:copy_text, _from, state) do
-    buf = active_buffer_of(state)
-    snap = Buffer.render_snapshot(buf)
+  def handle_call({:copy_text, fid}, _from, state) do
+    f = frame(state, fid)
+    buf = find_leaf(f.tree, f.active).buffer
+    snap = safe_snapshot(buf, f.active)
 
     case snap.mark do
       mark when is_integer(mark) and mark != snap.point ->
@@ -380,46 +588,59 @@ defmodule Aimax.Core.Editor do
     end
   end
 
-  def handle_call(:user_acted, _from, state),
-    do: {:reply, :ok, %{state | tree: clear_manual(state.tree)}}
+  def handle_call({:user_acted, fid}, _from, state) do
+    f = frame(state, fid)
+    {:reply, :ok, put_frame(state, %{f | tree: clear_manual(f.tree)})}
+  end
 
-  def handle_call(:window_rows, _from, state) do
+  def handle_call({:window_rows, fid}, _from, state) do
+    f = frame(state, fid)
+
     rows =
-      Map.get(state.win_rows, state.active) ||
-        rows_for(state.tree, state.active, state.total_rows) || state.total_rows
+      Map.get(f.win_rows, f.active) ||
+        rows_for(f.tree, f.active, f.total_rows) || f.total_rows
 
     {:reply, rows, state}
   end
 
-  def handle_call(:recenter, _from, state) do
-    leaf = find_leaf(state.tree, state.active)
+  def handle_call({:recenter, fid}, _from, state) do
+    f = frame(state, fid)
+    leaf = find_leaf(f.tree, f.active)
 
     rows =
-      Map.get(state.win_rows, state.active) ||
-        rows_for(state.tree, state.active, state.total_rows) || state.total_rows
+      Map.get(f.win_rows, f.active) ||
+        rows_for(f.tree, f.active, f.total_rows) || f.total_rows
 
-    top =
-      if Buffer.exists?(leaf.buffer) do
-        max(Buffer.render_snapshot(leaf.buffer).cursor_line - div(rows, 2), 0)
-      else
-        0
-      end
+    top = max(safe_snapshot(leaf.buffer, f.active).cursor_line - div(rows, 2), 0)
 
-    tree = replace_leaf(state.tree, state.active, %{leaf | top: top, manual: false})
-    changed(:ok, %{state | tree: tree})
+    tree = replace_leaf(f.tree, f.active, %{leaf | top: top, manual: false})
+    changed(:ok, put_frame(state, %{f | tree: tree}), f.id)
   end
 
   def handle_call({:bind_key, seq, command}, _from, state),
     do: {:reply, :ok, %{state | keymap: Map.put(state.keymap, seq, command)}}
 
   # no-op writes must not broadcast — echo("")/pending([]) fire on every key
-  def handle_call({:set_pending, seq}, _from, %{pending: seq} = state),
-    do: {:reply, :ok, state}
+  def handle_call({:set_pending, seq, fid}, _from, state) do
+    f = frame(state, fid)
 
-  def handle_call({:set_pending, seq}, _from, state), do: changed(:ok, %{state | pending: seq})
+    if f.pending == seq,
+      do: {:reply, :ok, state},
+      else: changed(:ok, put_frame(state, %{f | pending: seq}), f.id)
+  end
 
-  def handle_call({:set_echo, msg}, _from, %{echo: msg} = state), do: {:reply, :ok, state}
-  def handle_call({:set_echo, msg}, _from, state), do: changed(:ok, %{state | echo: msg})
+  def handle_call({:set_echo, msg, fid}, _from, state) do
+    f = frame(state, fid)
+
+    if f.echo == msg,
+      do: {:reply, :ok, state},
+      else: changed(:ok, put_frame(state, %{f | echo: msg}), f.id)
+  end
+
+  def handle_call({:set_echo_all, msg}, _from, state) do
+    frames = Map.new(state.frames, fn {id, f} -> {id, %{f | echo: msg}} end)
+    changed(:ok, %{state | frames: frames})
+  end
 
   def handle_call({:set_modeline_extra, s}, _from, %{modeline_extra: s} = state),
     do: {:reply, :ok, state}
@@ -427,63 +648,87 @@ defmodule Aimax.Core.Editor do
   def handle_call({:set_modeline_extra, s}, _from, state),
     do: changed(:ok, %{state | modeline_extra: s})
 
-  def handle_call({:mb_activate, prompt, candidates, handlers}, _from, state) do
+  def handle_call({:mb_activate, prompt, candidates, handlers, fid}, _from, state) do
+    f = frame(state, fid)
+
     mb =
       %{on_confirm: nil, on_complete: nil, on_change: nil, on_cancel: nil, input: ""}
       |> Map.merge(handlers)
       |> Map.put(:prompt, prompt)
 
-    reset_minibuf_buffer(mb.input)
+    reset_minibuf_buffer(minibuf_of(f), mb.input)
     mb = Map.put(mb, :list, Candidates.new(candidates, query: mb_query(mb)))
-    changed(:ok, %{state | minibuffer: mb})
+    changed(:ok, put_frame(state, %{f | minibuffer: mb}), f.id)
   end
 
-  def handle_call({:mb_input, input}, _from, %{minibuffer: %{} = mb} = state) do
-    reset_minibuf_buffer(input)
-    changed(:ok, %{state | minibuffer: put_mb_input(mb, input)})
-  end
+  def handle_call({:mb_input, input, fid}, _from, state) do
+    case frame(state, fid) do
+      %{minibuffer: %{} = mb} = f ->
+        reset_minibuf_buffer(minibuf_of(f), input)
+        changed(:ok, put_frame(state, %{f | minibuffer: put_mb_input(mb, input)}), f.id)
 
-  def handle_call({:mb_input, _}, _from, state), do: {:reply, {:error, :inactive}, state}
+      _ ->
+        {:reply, {:error, :inactive}, state}
+    end
+  end
 
   # pull the input back out of the minibuffer buffer after keys edited it
   # (self-insert, DEL, yank, undo — anything); requery candidates on change
-  def handle_call(:mb_sync_input, _from, %{minibuffer: %{} = mb} = state) do
-    input = Buffer.text(@minibuf)
+  def handle_call({:mb_sync_input, fid}, _from, state) do
+    case frame(state, fid) do
+      %{minibuffer: %{} = mb} = f ->
+        input = Buffer.text(minibuf_of(f))
 
-    if input == mb.input,
-      do: {:reply, :unchanged, state},
-      else: changed({:changed, input}, %{state | minibuffer: put_mb_input(mb, input)})
+        if input == mb.input,
+          do: {:reply, :unchanged, state},
+          else:
+            changed({:changed, input}, put_frame(state, %{f | minibuffer: put_mb_input(mb, input)}), f.id)
+
+      _ ->
+        {:reply, :unchanged, state}
+    end
   end
 
-  def handle_call(:mb_sync_input, _from, state), do: {:reply, :unchanged, state}
+  def handle_call({:mb_candidates, candidates, fid}, _from, state) do
+    case frame(state, fid) do
+      %{minibuffer: %{} = mb} = f ->
+        list = mb.list |> Candidates.put_items(candidates) |> Candidates.put_query(mb_query(mb))
+        changed(:ok, put_frame(state, %{f | minibuffer: %{mb | list: list}}), f.id)
 
-  def handle_call({:mb_candidates, candidates}, _from, %{minibuffer: %{} = mb} = state) do
-    list = mb.list |> Candidates.put_items(candidates) |> Candidates.put_query(mb_query(mb))
-    changed(:ok, %{state | minibuffer: %{mb | list: list}})
+      _ ->
+        {:reply, {:error, :inactive}, state}
+    end
   end
 
-  def handle_call({:mb_candidates, _}, _from, state), do: {:reply, {:error, :inactive}, state}
+  def handle_call({:mb_move_sel, delta, fid}, _from, state) do
+    case frame(state, fid) do
+      %{minibuffer: %{} = mb} = f ->
+        changed(:ok, put_frame(state, %{f | minibuffer: %{mb | list: Candidates.move(mb.list, delta)}}), f.id)
 
-  def handle_call({:mb_move_sel, delta}, _from, %{minibuffer: %{} = mb} = state),
-    do: changed(:ok, %{state | minibuffer: %{mb | list: Candidates.move(mb.list, delta)}})
+      _ ->
+        {:reply, {:error, :inactive}, state}
+    end
+  end
 
-  def handle_call({:mb_move_sel, _}, _from, state), do: {:reply, {:error, :inactive}, state}
-
-  def handle_call(:mb_selected, _from, %{minibuffer: %{} = mb} = state),
-    do: {:reply, Candidates.selected(mb.list), state}
-
-  def handle_call(:mb_selected, _from, state), do: {:reply, nil, state}
+  def handle_call({:mb_selected, fid}, _from, state) do
+    case frame(state, fid) do
+      %{minibuffer: %{} = mb} -> {:reply, Candidates.selected(mb.list), state}
+      _ -> {:reply, nil, state}
+    end
+  end
 
   # returns the minibuffer map (handlers + :selected/:total/:sel_touched) or nil
-  def handle_call(:mb_close, _from, state) do
-    reply =
-      state.minibuffer &&
-        state.minibuffer
-        |> Map.put(:selected, Candidates.selected(state.minibuffer.list))
-        |> Map.put(:total, Candidates.total(state.minibuffer.list))
-        |> Map.put(:sel_touched, state.minibuffer.list.touched)
+  def handle_call({:mb_close, fid}, _from, state) do
+    f = frame(state, fid)
 
-    changed(reply, %{state | minibuffer: nil})
+    reply =
+      f.minibuffer &&
+        f.minibuffer
+        |> Map.put(:selected, Candidates.selected(f.minibuffer.list))
+        |> Map.put(:total, Candidates.total(f.minibuffer.list))
+        |> Map.put(:sel_touched, f.minibuffer.list.touched)
+
+    changed(reply, put_frame(state, %{f | minibuffer: nil}), f.id)
   end
 
   def handle_call(:buffer_mru, _from, state) do
@@ -505,47 +750,67 @@ defmodule Aimax.Core.Editor do
   def handle_call({:undo_exempt?, name}, _from, state),
     do: {:reply, MapSet.member?(state.undo_exempt, name), state}
 
-  def handle_call({:completion_show, start, candidates}, _from, state) do
+  def handle_call({:completion_show, start, candidates, fid}, _from, state) do
+    f = frame(state, fid)
+
     case Candidates.normalize(candidates) do
       [] ->
-        changed(:ok, %{state | completion: nil})
+        changed(:ok, put_frame(state, %{f | completion: nil}), f.id)
 
       _ ->
-        changed(:ok, %{state | completion: %{start: start, list: Candidates.new(candidates)}})
+        changed(
+          :ok,
+          put_frame(state, %{f | completion: %{start: start, list: Candidates.new(candidates)}}),
+          f.id
+        )
     end
   end
 
-  def handle_call({:completion_move, delta}, _from, %{completion: %{} = c} = state),
-    do: changed(:ok, %{state | completion: %{c | list: Candidates.move(c.list, delta)}})
+  def handle_call({:completion_move, delta, fid}, _from, state) do
+    case frame(state, fid) do
+      %{completion: %{} = c} = f ->
+        changed(:ok, put_frame(state, %{f | completion: %{c | list: Candidates.move(c.list, delta)}}), f.id)
 
-  def handle_call({:completion_move, _}, _from, state), do: {:reply, :ok, state}
+      _ ->
+        {:reply, :ok, state}
+    end
+  end
 
   # narrow the popup in place as the user types — no source re-query
-  def handle_call({:completion_query, q}, _from, %{completion: %{} = c} = state) do
-    list = Candidates.put_query(c.list, q)
+  def handle_call({:completion_query, q, fid}, _from, state) do
+    case frame(state, fid) do
+      %{completion: %{} = c} = f ->
+        list = Candidates.put_query(c.list, q)
 
-    if Candidates.total(list) == 0,
-      do: changed(:ok, %{state | completion: nil}),
-      else: changed(:ok, %{state | completion: %{c | list: list}})
+        if Candidates.total(list) == 0,
+          do: changed(:ok, put_frame(state, %{f | completion: nil}), f.id),
+          else: changed(:ok, put_frame(state, %{f | completion: %{c | list: list}}), f.id)
+
+      _ ->
+        {:reply, :ok, state}
+    end
   end
 
-  def handle_call({:completion_query, _}, _from, state), do: {:reply, :ok, state}
+  def handle_call({:completion_accept, fid}, _from, state) do
+    case frame(state, fid) do
+      %{completion: %{} = c} = f ->
+        reply =
+          case Candidates.selected(c.list) do
+            nil -> nil
+            label -> {c.start, label}
+          end
 
-  def handle_call(:completion_accept, _from, %{completion: %{} = c} = state) do
-    reply =
-      case Candidates.selected(c.list) do
-        nil -> nil
-        label -> {c.start, label}
-      end
+        changed(reply, put_frame(state, %{f | completion: nil}), f.id)
 
-    changed(reply, %{state | completion: nil})
+      _ ->
+        {:reply, nil, state}
+    end
   end
 
-  def handle_call(:completion_accept, _from, state), do: {:reply, nil, state}
-
-
-  def handle_call(:completion_dismiss, _from, state),
-    do: changed(:ok, %{state | completion: nil})
+  def handle_call({:completion_dismiss, fid}, _from, state) do
+    f = frame(state, fid)
+    changed(:ok, put_frame(state, %{f | completion: nil}), f.id)
+  end
 
   def handle_call({:key_for_command, command}, _from, state) do
     # several keys may run one command (C-n and <down>) — show the tersest
@@ -574,97 +839,236 @@ defmodule Aimax.Core.Editor do
 
   def handle_call(:kill_size, _from, state), do: {:reply, length(state.kill_ring), state}
 
-  def handle_call({:split, dir, ratio}, _from, state) do
-    old = find_leaf(state.tree, state.active)
+  def handle_call({:split, dir, ratio, fid}, _from, state) do
+    f = frame(state, fid)
+    old = find_leaf(f.tree, f.active)
     new_leaf = %{type: :leaf, id: state.next_win, buffer: old.buffer, top: old.top, manual: false}
     split = %{type: :split, dir: dir, ratio: ratio, children: [old, new_leaf]}
-    tree = replace_leaf(state.tree, state.active, split)
-    changed(:ok, %{state | tree: tree, next_win: state.next_win + 1})
+    tree = replace_leaf(f.tree, f.active, split)
+
+    # the new window starts at the old one's point and diverges from here
+    # (Emacs split-window)
+    if Buffer.exists?(old.buffer),
+      do:
+        wp_safely(fn ->
+          Buffer.set_win_point(old.buffer, new_leaf.id, Buffer.win_point(old.buffer, old.id))
+        end)
+
+    changed(:ok, put_frame(%{state | next_win: state.next_win + 1}, %{f | tree: tree}), f.id)
   end
 
   def handle_call({:delete_window_by_id, id}, _from, state) do
-    case remove_leaf(state.tree, id) do
+    case find_window_frame(state, id) do
       nil ->
-        {:reply, {:error, :sole_window}, state}
+        {:reply, {:error, :no_window}, state}
 
-      tree ->
-        active = if state.active == id, do: first_leaf(tree).id, else: state.active
-        changed(:ok, %{state | tree: tree, active: active})
+      f ->
+        case remove_leaf(f.tree, id) do
+          nil ->
+            {:reply, {:error, :sole_window}, state}
+
+          tree ->
+            leaf = find_leaf(f.tree, id)
+
+            if Buffer.exists?(leaf.buffer),
+              do: wp_safely(fn -> Buffer.drop_win_point(leaf.buffer, id) end)
+            active = if f.active == id, do: first_leaf(tree).id, else: f.active
+
+            changed(
+              :ok,
+              state |> put_frame(%{f | tree: tree, active: active}) |> resync_swap(),
+              f.id
+            )
+        end
     end
   end
 
-  def handle_call(:list_windows, _from, state),
-    do: {:reply, leaf_ids_buffers(state.tree), state}
+  def handle_call({:list_windows, fid}, _from, state),
+    do: {:reply, leaf_ids_buffers(frame(state, fid).tree), state}
 
-  def handle_call(:window_rects, _from, state),
-    do: {:reply, leaf_rects(state.tree, {0.0, 0.0, 1.0, 1.0}), state}
+  def handle_call({:window_rects, fid}, _from, state),
+    do: {:reply, leaf_rects(frame(state, fid).tree, {0.0, 0.0, 1.0, 1.0}), state}
 
+  # selecting a window selects its frame: bare window ids arrive from Scheme
+  # (ibuffer buffer-locals, agent closures) with no frame attached
   def handle_call({:set_active, id}, _from, state) do
-    if find_leaf(state.tree, id),
-      do: changed(:ok, %{state | active: id}),
-      else: {:reply, {:error, :no_window}, state}
+    case find_window_frame(state, id) do
+      nil -> {:reply, {:error, :no_window}, state}
+      f -> changed(:ok, state |> put_frame(%{f | active: id}) |> bump_frame(f.id) |> resync_swap(), f.id)
+    end
   end
 
-  def handle_call(:active_window, _from, state), do: {:reply, state.active, state}
+  def handle_call({:active_window, fid}, _from, state),
+    do: {:reply, frame(state, fid).active, state}
 
-  def handle_call(:delete_window, _from, state) do
-    case remove_leaf(state.tree, state.active) do
+  def handle_call({:delete_window, fid}, _from, state) do
+    f = frame(state, fid)
+    leaf = find_leaf(f.tree, f.active)
+
+    case remove_leaf(f.tree, f.active) do
       nil ->
         {:reply, {:error, :sole_window}, state}
 
       tree ->
-        changed(:ok, %{state | tree: tree, active: first_leaf(tree).id})
+        if Buffer.exists?(leaf.buffer),
+          do: wp_safely(fn -> Buffer.drop_win_point(leaf.buffer, leaf.id) end)
+
+        changed(
+          :ok,
+          state |> put_frame(%{f | tree: tree, active: first_leaf(tree).id}) |> resync_swap(),
+          f.id
+        )
     end
   end
 
-  def handle_call(:delete_other_windows, _from, state) do
-    leaf = find_leaf(state.tree, state.active)
-    changed(:ok, %{state | tree: leaf})
+  def handle_call({:delete_other_windows, fid}, _from, state) do
+    f = frame(state, fid)
+    leaf = find_leaf(f.tree, f.active)
+
+    for {win, buf} <- leaf_ids_buffers(f.tree), win != leaf.id, Buffer.exists?(buf) do
+      wp_safely(fn -> Buffer.drop_win_point(buf, win) end)
+    end
+
+    changed(:ok, state |> put_frame(%{f | tree: leaf}) |> resync_swap(), f.id)
   end
 
-  def handle_call(:other_window, _from, state) do
-    ids = leaf_ids(state.tree)
-    idx = Enum.find_index(ids, &(&1 == state.active)) || 0
-    changed(:ok, %{state | active: Enum.at(ids, rem(idx + 1, length(ids)))})
+  def handle_call({:other_window, fid}, _from, state) do
+    f = frame(state, fid)
+    ids = leaf_ids(f.tree)
+    idx = Enum.find_index(ids, &(&1 == f.active)) || 0
+    changed(
+      :ok,
+      state |> put_frame(%{f | active: Enum.at(ids, rem(idx + 1, length(ids)))}) |> resync_swap(),
+      f.id
+    )
   end
 
-  def handle_call({:set_window_buffer, buffer}, _from, state) do
+  def handle_call({:set_window_buffer, buffer, fid}, _from, state) do
     unless Aimax.Core.Buffer.exists?(buffer), do: Aimax.Core.create_buffer(buffer)
-    leaf = find_leaf(state.tree, state.active)
-    tree = replace_leaf(state.tree, state.active, %{leaf | buffer: buffer, top: 0, manual: false})
+    f = frame(state, fid)
+    leaf = find_leaf(f.tree, f.active)
+    tree = replace_leaf(f.tree, f.active, %{leaf | buffer: buffer, top: 0, manual: false})
     mru = Enum.take([buffer | List.delete(state.mru, buffer)], 50)
-    changed(:ok, %{state | tree: tree, mru: mru})
+    changed(:ok, resync_swap(put_frame(%{state | mru: mru}, %{f | tree: tree})), f.id)
   end
 
-  def handle_call({:preview_buffer, buffer}, _from, state) do
+  def handle_call({:preview_buffer, buffer, fid}, _from, state) do
     if Aimax.Core.Buffer.exists?(buffer) do
-      leaf = find_leaf(state.tree, state.active)
-      tree = replace_leaf(state.tree, state.active, %{leaf | buffer: buffer, top: 0, manual: false})
-      changed(:ok, %{state | tree: tree})
+      f = frame(state, fid)
+      leaf = find_leaf(f.tree, f.active)
+      tree = replace_leaf(f.tree, f.active, %{leaf | buffer: buffer, top: 0, manual: false})
+      changed(:ok, put_frame(state, %{f | tree: tree}))
     else
       {:reply, {:error, :no_buffer}, state}
     end
   end
 
-  def handle_call({:restore_tree, spec, active_buffer}, _from, state) do
+  def handle_call({:restore_tree, spec, active_buffer, fid}, _from, state) do
+    f = frame(state, fid)
+
+    # the old windows are gone — their stored points go with them
+    Enum.each(leaf_ids_buffers(f.tree), fn {id, buffer} ->
+      if Buffer.exists?(buffer), do: wp_safely(fn -> Buffer.drop_win_point(buffer, id) end)
+    end)
+
     {tree, next_win} = build_tree(spec, state.next_win)
 
     Enum.each(leaf_ids_buffers(tree), fn {_id, buffer} ->
       unless Aimax.Core.Buffer.exists?(buffer), do: Aimax.Core.create_buffer(buffer)
     end)
 
+    # lay saved per-window points down; the active window's swaps into the
+    # buffer point via resync below
+    tree = apply_init_points(tree)
+
     active =
       Enum.find_value(leaf_ids_buffers(tree), fn {id, buffer} ->
         if buffer == active_buffer, do: id
       end) || first_leaf(tree).id
 
-    changed(:ok, %{state | tree: tree, next_win: next_win, active: active})
+    changed(
+      :ok,
+      resync_swap(put_frame(%{state | next_win: next_win}, %{f | tree: tree, active: active})),
+      f.id
+    )
   end
 
-  defp changed(reply, state) do
+  # scope: a frame id (only that frame's clients re-render) or :all (global
+  # mutations — faces, kill ring — reach every frame). :editor is the
+  # firehose non-view subscribers (Desktop, Reactor, Agent) listen on.
+  defp changed(reply, state, scope \\ :all) do
     Events.broadcast_editor(:changed)
+
+    case scope do
+      :all -> Enum.each(Map.keys(state.frames), &Events.broadcast_frame/1)
+      fid -> Events.broadcast_frame(fid)
+    end
+
     {:reply, reply, state}
   end
+
+  # --- frame helpers ---------------------------------------------------------
+
+  # nil frame = the last-active one: the fallback for callers with no
+  # frame context (timers, agent events, RPC eval)
+  defp frame(state, nil), do: state.frames[hd(state.frame_mru)]
+  defp frame(state, fid), do: state.frames[fid] || state.frames[hd(state.frame_mru)]
+
+  defp put_frame(state, f), do: %{state | frames: Map.put(state.frames, f.id, f)}
+
+  defp bump_frame(state, fid),
+    do: %{state | frame_mru: [fid | List.delete(state.frame_mru, fid)]}
+
+  # Emacs point-swapping, one window at a time: the invariant is that the
+  # buffer point of the swapped-in window's buffer IS that window's point.
+  # Any change to (last-active frame, its selected window, that window's
+  # buffer) saves the old window's point back into its buffer's win_points
+  # and installs the new one's. Call after every mutation that can move any
+  # of the three.
+  # a buffer can die between exists? and the call (its registry entry
+  # outlives the process for a moment) — win-point bookkeeping must never
+  # take the Editor down with it
+  defp wp_safely(fun) do
+    fun.()
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp resync_swap(state) do
+    f = state.frames[hd(state.frame_mru)]
+    leaf = find_leaf(f.tree, f.active)
+    target = {f.id, f.active, leaf.buffer}
+
+    if state.swapped == target do
+      state
+    else
+      case state.swapped do
+        {_ofid, owin, obuf} ->
+          # skip windows that no longer exist — their entries were dropped
+          if find_window_frame(state, owin) && Buffer.exists?(obuf),
+            do: wp_safely(fn -> Buffer.win_point_save(obuf, owin) end)
+
+        nil ->
+          :ok
+      end
+
+      if Buffer.exists?(leaf.buffer),
+        do: wp_safely(fn -> Buffer.win_point_swap_in(leaf.buffer, f.active) end)
+
+      %{state | swapped: target}
+    end
+  end
+
+  defp find_window_frame(state, win_id) do
+    Enum.find_value(state.frames, fn {_fid, f} ->
+      if find_leaf(f.tree, win_id), do: f
+    end)
+  end
+
+  defp valid_frame_id?(id), do: is_binary(id) and String.starts_with?(id, "f-") and byte_size(id) <= 24
+
+  defp gen_frame_id,
+    do: "f-" <> Base.encode32(:crypto.strong_rand_bytes(4), case: :lower, padding: false)
 
   # --- minibuffer helpers (vertico-style: fuzzy filter + selection) ----------
 
@@ -680,20 +1084,26 @@ defmodule Aimax.Core.Editor do
     %{mb | list: Candidates.put_query(mb.list, mb_query(mb))}
   end
 
+  defp minibuf_of(%{id: fid}), do: " *minibuf-" <> fid <> "*"
+
+  # any frame's minibuf buffer shares one local-keymap namespace
+  defp keymap_key(" *minibuf" <> _), do: @minibuf
+  defp keymap_key(name), do: name
+
   # (re)fill the backing buffer and park point at the end
-  defp reset_minibuf_buffer(input) do
-    unless Buffer.exists?(@minibuf), do: Aimax.Core.create_buffer(@minibuf)
-    size = Buffer.byte_size(@minibuf)
-    if size > 0, do: Buffer.delete_range(@minibuf, 0, size, source: :editor)
-    if input != "", do: Buffer.append(@minibuf, input, source: :editor)
-    Buffer.goto(@minibuf, Kernel.byte_size(input))
+  defp reset_minibuf_buffer(name, input) do
+    unless Buffer.exists?(name), do: Aimax.Core.create_buffer(name)
+    size = Buffer.byte_size(name)
+    if size > 0, do: Buffer.delete_range(name, 0, size, source: :editor)
+    if input != "", do: Buffer.append(name, input, source: :editor)
+    Buffer.goto(name, Kernel.byte_size(input))
   end
 
-  defp render_minibuffer(mb) do
+  defp render_minibuffer(mb, name) do
     %{
       prompt: mb.prompt,
       input: mb.input,
-      point: (Buffer.exists?(@minibuf) && Buffer.point(@minibuf)) || Kernel.byte_size(mb.input),
+      point: (Buffer.exists?(name) && Buffer.point(name)) || Kernel.byte_size(mb.input),
       candidates: Candidates.rows(mb.list),
       # widest label of the WHOLE set, not the visible window — the names
       # column keeps one width for the session instead of reflowing per key
@@ -713,24 +1123,21 @@ defmodule Aimax.Core.Editor do
     }
   end
 
+  defp which_key(_state, %{pending: []}), do: nil
 
-  defp which_key(%{pending: []}), do: nil
-
-  defp which_key(state) do
-    buffer = find_leaf(state.tree, state.active).buffer
+  defp which_key(state, f) do
+    buffer = find_leaf(f.tree, f.active).buffer
     local = Map.get(state.local_keymaps, buffer, %{})
 
     [local, state.keymap]
     |> Enum.flat_map(&Map.to_list/1)
-    |> Enum.filter(fn {seq, _} -> List.starts_with?(seq, state.pending) and seq != state.pending end)
-    |> Enum.map(fn {seq, cmd} -> %{key: Enum.join(Enum.drop(seq, length(state.pending)), " "), command: cmd} end)
+    |> Enum.filter(fn {seq, _} -> List.starts_with?(seq, f.pending) and seq != f.pending end)
+    |> Enum.map(fn {seq, cmd} -> %{key: Enum.join(Enum.drop(seq, length(f.pending)), " "), command: cmd} end)
     |> Enum.uniq_by(& &1.key)
     |> Enum.sort_by(& &1.key)
   end
 
   # --- tree helpers ----------------------------------------------------------
-
-  defp active_buffer_of(state), do: find_leaf(state.tree, state.active).buffer
 
   # (1-based logical line, char col) -> byte offset; line lookup is the
   # rope NIF, only the clicked line's text is materialized for the col
@@ -781,6 +1188,13 @@ defmodule Aimax.Core.Editor do
   defp build_tree({:leaf, buffer, top}, n),
     do: {%{type: :leaf, id: n, buffer: buffer, top: top, manual: false}, n + 1}
 
+  # 4-tuple carries a saved window point (desktop v2); it rides on the leaf
+  # as :init_point until restore_tree writes it into the buffer
+  defp build_tree({:leaf, buffer, top, point}, n) do
+    {leaf, n} = build_tree({:leaf, buffer, top}, n)
+    {Map.put(leaf, :init_point, point), n}
+  end
+
   defp build_tree({:split, dir, a, b}, n), do: build_tree({:split, dir, 0.5, a, b}, n)
 
   defp build_tree({:split, dir, ratio, a, b}, n) do
@@ -788,6 +1202,22 @@ defmodule Aimax.Core.Editor do
     {tb, n} = build_tree(b, n)
     {%{type: :split, dir: dir, ratio: ratio, children: [ta, tb]}, n}
   end
+
+  defp apply_init_points(%{type: :leaf} = leaf) do
+    case Map.pop(leaf, :init_point) do
+      {nil, leaf} ->
+        leaf
+
+      {point, leaf} ->
+        if Buffer.exists?(leaf.buffer),
+          do: wp_safely(fn -> Buffer.set_win_point(leaf.buffer, leaf.id, point) end)
+
+        leaf
+    end
+  end
+
+  defp apply_init_points(%{type: :split} = split),
+    do: %{split | children: Enum.map(split.children, &apply_init_points/1)}
 
   defp leaf_ids_buffers(%{type: :leaf, id: id, buffer: b}), do: [{id, b}]
 
@@ -823,6 +1253,21 @@ defmodule Aimax.Core.Editor do
     col: 0
   }
 
+  defp split_rows(:h, rows, _ratio), do: {rows, rows}
+
+  defp split_rows(:v, rows, ratio) do
+    a = max(round(rows * ratio), 3)
+    {a, max(rows - a, 3)}
+  end
+
+  # exists? then call still races a dying buffer (registry entries linger);
+  # a dead buffer renders empty instead of crashing the Editor
+  defp safe_snapshot(buffer, win_id) do
+    if Buffer.exists?(buffer), do: Buffer.render_snapshot(buffer, win_id), else: @empty_snapshot
+  catch
+    :exit, _ -> @empty_snapshot
+  end
+
   # render walk: computes per-window rows (v-splits divide), clamps and
   # auto-follows the viewport top (unless manually scrolled), and returns
   # both the updated tree (tops persist) and the render payload
@@ -836,20 +1281,14 @@ defmodule Aimax.Core.Editor do
      %{type: :split, dir: dir, ratio: ratio, children: [ra, rb]}}
   end
 
-  defp split_rows(:h, rows, _ratio), do: {rows, rows}
-
-  defp split_rows(:v, rows, ratio) do
-    a = max(round(rows * ratio), 3)
-    {a, max(rows - a, 3)}
-  end
-
   defp render_walk(%{type: :leaf, id: id, buffer: buffer} = leaf, rows, win_rows) do
     # the client's measured row count for this window wins over split math:
     # line height varies per buffer, so only the client knows what fits
     rows = Map.get(win_rows, id, rows)
 
-    # one round trip per leaf — this runs on every render of every window
-    snap = if Buffer.exists?(buffer), do: Buffer.render_snapshot(buffer), else: @empty_snapshot
+    # one round trip per leaf — this runs on every render of every window;
+    # point/mark/cursor geometry are the WINDOW's (per-window points)
+    snap = safe_snapshot(buffer, id)
     %{text: text, point: point, locals: locals} = snap
 
     # folds put top/cursor/total in VISIBLE-line space; the scroll and

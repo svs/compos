@@ -170,9 +170,6 @@
         (if t (car (chrome--tab-candidate t)) #f))
       (chrome--here)))
 
-(define (chrome--without label cands)
-  (filter (lambda (c) (not (equal? (car c) label))) cands))
-
 ;; Order matters twice over. RET with nothing typed takes the FIRST candidate,
 ;; not the prompt's advertised default — so the default has to lead the list or
 ;; the prompt lies about what RET will do. And tabs went last, which with a
@@ -281,11 +278,14 @@
 (define *chrome-raise?* #t)
 
 (define (chrome--confirmed)
-  (let ((r *chrome-raise?*))
-    (set! *chrome-raise?* #t)
-    (append (chrome--with-mb '()) (list 'raise r))))
+  (append (chrome--with-mb '()) (list 'raise *chrome-raise?*)))
 
 (define (chrome--mb-key spec)
+  ;; Fresh for every key. This used to be reset only when a from-page confirm
+  ;; read it, so picking a tab with ai-max's OWN C-x b left it #f with nothing
+  ;; to clear it — and the next time you came back from a page the editor
+  ;; silently refused to come forward.
+  (set! *chrome-raise?* #t)
   (cond ((not (minibuffer-state)) (list 'message "no prompt"))
         ((equal? spec "RET") (minibuffer-confirm!) (chrome--confirmed))
         ((equal? spec "M-RET") (minibuffer-confirm-input!) (chrome--confirmed))

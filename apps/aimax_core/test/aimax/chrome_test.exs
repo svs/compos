@@ -300,30 +300,33 @@ defmodule Aimax.ChromeTest do
       Session.eval("(minibuffer-cancel!)")
     end
 
-    # C-x b RET has always meant "the other place". Once tabs are in the list
-    # the other place is often a tab, and pressing it twice should come back.
-    test "RET alone toggles across the boundary: buffer, tab, buffer" do
-      tabs = ~s{'((id 7 title "Hacker News" url "https://news.ycombinator.com/" window 1))}
-      eval!("(set-frame-local! 'chrome-window 1)")
+    # One list, most recently used first. The default is just the top of it
+    # that isn't where you are standing — no tab-versus-buffer rule, and no
+    # sticky slot that lets one tab outrank every later buffer visit.
+    test "the list is ordered by when you were last in each place" do
+      eval!("(set-frame-local! 'chrome-mru #f)")
+      cands = ~s{'(("*a*" "") ("*b*" "") ("🌐 News" ""))}
 
-      # pressed in a tab: RET goes back to the buffer you left
-      assert eval!(~s[(chrome--default "*scratch*" '(("*other*" "")) #{tabs} #t)]) ==
-               ~s("*scratch*")
+      # nothing visited yet: natural order survives
+      assert eval!(~s[(map car (chrome--by-mru #{cands}))]) == ~s{("*a*" "*b*" "🌐 News")}
 
-      # now inside ai-max, having come from tab 7: RET goes back to the tab
-      eval!("(set-frame-local! 'chrome-last-tab 7)")
-      assert eval!(~s[(chrome--default "*scratch*" '(("*other*" "")) #{tabs} #f)]) ==
-               ~s("🌐 Hacker News")
+      # visit the tab, then a buffer: most recent leads
+      eval!(~s[(chrome--touch! "🌐 News")])
+      eval!(~s[(chrome--touch! "*b*")])
+      assert eval!(~s[(map car (chrome--by-mru #{cands}))]) == ~s{("*b*" "🌐 News" "*a*")}
 
-      # with no tab behind you it is Emacs's previous buffer, unchanged
-      eval!("(set-frame-local! 'chrome-last-tab #f)")
-      assert eval!(~s[(chrome--default "*scratch*" '(("*other*" "")) #{tabs} #f)]) ==
-               ~s("*other*")
+      # back to the tab and it leads again — this is the toggle, with no rule
+      # of its own
+      eval!(~s[(chrome--touch! "🌐 News")])
+      assert eval!(~s[(map car (chrome--by-mru #{cands}))]) == ~s{("🌐 News" "*b*" "*a*")}
+    end
 
-      # and a remembered tab that has since closed doesn't strand the default
-      eval!("(set-frame-local! 'chrome-last-tab 999)")
-      assert eval!(~s[(chrome--default "*scratch*" '(("*other*" "")) #{tabs} #f)]) ==
-               ~s("*other*")
+    test "where you are standing is never what RET offers" do
+      eval!("(set-frame-local! 'chrome-mru #f)")
+      eval!(~s[(chrome--touch! "*a*")])
+      # standing in *a*, so *a* drops out and the next-most-recent leads
+      assert eval!(~s[(map car (chrome--without "*a*" (chrome--by-mru '(("*a*" "") ("*b*" "")))))]) ==
+               ~s{("*b*")}
     end
 
     test "C-x b from a page routes to the returning command, not raw dispatch" do

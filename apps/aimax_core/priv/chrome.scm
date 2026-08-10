@@ -112,33 +112,60 @@
           ((equal? (chrome--get (car ts) 'id) id) (car ts))
           (else (loop (cdr ts))))))
 
-;; Which browser window this frame belongs to, and the tab you last pressed a
-;; key in, both kept in *frame-locals* rather than as globals: one ai-max per
-;; browser window means each frame has its OWN answer, and a global would have
-;; the second window quietly overwriting the first. Same home the popup window
-;; and ibuffer use, and it is pruned when a frame goes away.
+;;; --- one list, most recently used first --------------------------------------
+;;;
+;;; Buffers and tabs are not two kinds of thing that need reconciling. They are
+;;; one list of places, ordered by when you were last in them, and the default
+;;; is whatever is at the top that isn't where you are standing. Everything
+;;; else — the toggle, coming back from a page, tabs being reachable — falls
+;;; out of that ordering rather than needing a rule of its own.
+;;;
+;;; Kept per frame: one ai-max per browser window, so each frame has its own
+;;; history. Same home the popup window and ibuffer use.
+
+(define (chrome--mru) (or (frame-local 'chrome-mru) '()))
+
+(define (chrome--touch! label)
+  (when label
+    (set-frame-local! 'chrome-mru
+      (cons label (filter (lambda (l) (not (equal? l label))) (chrome--mru))))))
+
+(define (chrome--find label cands)
+  (let loop ((cs cands))
+    (cond ((null? cs) #f)
+          ((equal? (car (car cs)) label) (car cs))
+          (else (loop (cdr cs))))))
+
+(define (chrome--seen? label)
+  (let loop ((ls (chrome--mru)))
+    (cond ((null? ls) #f)
+          ((equal? (car ls) label) #t)
+          (else (loop (cdr ls))))))
+
+;; the ones we have a history for, in that order, then everything else in
+;; whatever order it arrived (buffer-list-mru is already recency-ordered)
+(define (chrome--by-mru cands)
+  (let loop ((ls (chrome--mru)) (acc '()))
+    (if (null? ls)
+        (append (reverse acc)
+                (filter (lambda (c) (not (chrome--seen? (car c)))) cands))
+        (let ((hit (chrome--find (car ls) cands)))
+          (loop (cdr ls) (if hit (cons hit acc) acc))))))
 
 ;; Set while a browser request is being served, so the command below can tell
 ;; where the keystroke came from. The candidate LIST is the same either way —
 ;; what differs is what selecting does.
 (define *chrome-from-page* #f)
 
-;; Inside ai-max this is Emacs: default is the PREVIOUS buffer, and the
-;; highlight live-previews in the invoking window. Arriving from a page the
-;; default is where you already were, because you are returning rather than
-;; switching. Same list either way — that is the point.
-;; What RET alone picks. From a page: the buffer you left, because you are
-;; returning. From inside ai-max: the tab you last came from if there is one —
-;; that's what makes C-x b RET twice a toggle across the boundary — otherwise
-;; Emacs's previous buffer.
-(define (chrome--default here cands tabs from-page)
+;; Where you are standing right now, and therefore the one place RET should
+;; never mean. In the editor that's the selected window's buffer; in a page
+;; it's the tab you pressed the key in.
+(define (chrome--standing-on from-page)
   (if from-page
-      here
-      (let* ((last (frame-local 'chrome-last-tab))
-             (t (if last (chrome--tab-by-id last tabs) #f)))
-        (cond (t (car (chrome--tab-candidate t)))
-              ((null? cands) here)
-              (else (car (car cands)))))))
+      (let* ((id (frame-local 'chrome-tab))
+             (t (if id (chrome--tab-by-id id *chrome-tab-cache*) #f)))
+        (if t (car (chrome--tab-candidate t)) #f))
+      (chrome--here)))
 
 (define (chrome--entry label cands)
   (let loop ((cs cands))
@@ -156,10 +183,13 @@
 ;; in the list, invisible unless you typed. Default first, then the handful of
 ;; tabs, then the buffers.
 (define (chrome--prompt-switch here cands tabs from-page)
-  (let* ((tab-cands (map chrome--tab-candidate tabs))
-         (pool (append tab-cands cands))
-         (fallback (chrome--default here cands tabs from-page))
-         (all (cons (chrome--entry fallback pool) (chrome--without fallback pool))))
+  (let* ((standing (chrome--standing-on from-page))
+         ;; one pool, ordered by when you were last in each, minus where you
+         ;; are now. RET takes the first candidate, so the top of that ordering
+         ;; IS the default — there is nothing else to decide.
+         (pool (chrome--by-mru (append cands (map chrome--tab-candidate tabs))))
+         (all (chrome--without standing pool))
+         (fallback (if (null? all) here (car (car all)))))
     (minibuffer-read-preview
       (string-append "Switch to buffer (default " fallback "): ")
       all
@@ -172,14 +202,17 @@
             ;; a tab: go there, and don't drag the editor in front of the thing
             ;; you just asked for
             (tab (set! *chrome-raise?* #f)
+                 (chrome--touch! picked)
                  (tab-activate (chrome--get tab 'id)))
             ;; returning from a page: if it is already on screen, go to the
             ;; window showing it rather than rearranging the scene you are
             ;; trying to get back to
             (from-page
+              (chrome--touch! picked)
               (let ((win (chrome--window-showing picked)))
                 (if win (select-window! win) (switch-to-buffer! picked))))
-            (else (switch-to-buffer! picked)))))
+            (else (chrome--touch! picked)
+                  (switch-to-buffer! picked)))))
       ;; C-g puts back whatever the preview displaced — without this the
       ;; invoking window keeps the last buffer you happened to highlight
       (lambda () (when (buffer-exists? here) (window-preview-buffer! here))))))
@@ -209,7 +242,12 @@
     ;; captured before the prompt opens: while a minibuffer is active,
     ;; current-buffer answers with the minibuffer
     (let ((here (chrome--here))
-          (cands (buffer-candidates))
+          ;; the whole list, recency-ordered; buffer-candidates drops the
+          ;; current buffer, which from a page is the very thing you came back
+          ;; for. Internals (space-prefixed) stay hidden, as ibuffer does.
+          (cands (map (lambda (b) (list b ""))
+                      (filter (lambda (b) (not (string-prefix? " " b)))
+                              (buffer-list-mru))))
           (from-page *chrome-from-page*))
       (chrome--prompt-switch here cands (chrome--here-tabs *chrome-tab-cache*) from-page)
       (chrome--refresh-tabs))))
@@ -279,7 +317,10 @@
   ;; the overlay is disabled on the editor's own page, so any request that
   ;; names a tab came from a real web page — that is the place to come back to
   (let ((tb (chrome--get args 'tab)))
-    (when tb (set-frame-local! 'chrome-last-tab tb)))
+    (when tb
+      (set-frame-local! 'chrome-tab tb)
+      (let ((t (chrome--tab-by-id tb *chrome-tab-cache*)))
+        (when t (chrome--touch! (car (chrome--tab-candidate t)))))))
   ;; Keep the tab cache warm on the ops a person actually initiates, so the
   ;; FIRST C-x b already has tabs in it. Not on mb-key/mb-state: those are the
   ;; overlay polling while a prompt is open, and a round-trip per keystroke is

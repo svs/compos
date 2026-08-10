@@ -11,6 +11,22 @@
 
 const HOST_ID = "aimax-overlay-host";
 
+// Reloading the extension orphans every content script already running in an
+// open page: chrome.runtime.id goes undefined and every sendMessage throws
+// "Extension context invalidated". An orphan that keeps its keydown listener
+// is worse than no extension at all — it still swallows C-x and M-x and then
+// fails — so it tears itself down the moment it notices.
+if (window.__aimaxOverlay) throw new Error("ai-max overlay already in this page");
+window.__aimaxOverlay = true;
+
+const alive = () => {
+  try {
+    return !!chrome.runtime?.id;
+  } catch {
+    return false;
+  }
+};
+
 let host = null;
 let root = null;
 let palette = null;
@@ -68,12 +84,44 @@ function ensureRoot() {
 
 function ask(msg) {
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(msg, (r) => {
-      if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
-      if (!r) return reject(new Error("no answer"));
-      r.ok ? resolve(r.result) : reject(new Error(r.error));
-    });
+    if (!alive()) {
+      teardown();
+      return reject(new Error("ai-max was reloaded — refresh this page"));
+    }
+    try {
+      chrome.runtime.sendMessage(msg, (r) => {
+        const err = chrome.runtime.lastError;
+        if (err) {
+          if (/context invalidated|receiving end/i.test(err.message)) teardown();
+          return reject(new Error(err.message));
+        }
+        if (!r) return reject(new Error("no answer"));
+        r.ok ? resolve(r.result) : reject(new Error(r.error));
+      });
+    } catch (e) {
+      teardown();
+      reject(e);
+    }
   });
+}
+
+// Give the page its keyboard back. An orphan holding onto C-x is a worse
+// citizen than one that quietly disappears.
+let torndown = false;
+
+function teardown() {
+  if (torndown) return;
+  torndown = true;
+  enabled = false;
+  pending = null;
+  window.removeEventListener("keydown", onKey, true);
+  try {
+    palette?.wrap.remove();
+    host?.remove();
+  } catch {
+    /* already gone */
+  }
+  palette = null;
 }
 
 let echoTimer;
@@ -252,6 +300,9 @@ async function runCommand(name) {
 
 async function onKey(e) {
   if (!enabled) return;
+  // checked before any preventDefault: an orphaned script must not eat a key
+  // it can no longer act on
+  if (!alive()) return teardown();
 
   // a prompt from the daemon is the daemon's to answer: every key goes there,
   // so the minibuffer keymap stays in one place instead of being reimplemented

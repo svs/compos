@@ -386,6 +386,28 @@ async function sweep() {
   }
 }
 
+// Reloading the extension leaves every open tab running the OLD content
+// script, orphaned and useless — normally you'd have to refresh each tab by
+// hand. Re-inject on install/update instead. The fresh script bails if one is
+// already live in the page, and the orphan tears itself down when it notices
+// its context died, so no tab ends up with two.
+async function reinject() {
+  const tabs = await chrome.tabs.query({});
+  await Promise.all(
+    tabs.map(async (t) => {
+      if (!t.id || !/^https?:/.test(t.url || "")) return;
+      try {
+        await chrome.scripting.executeScript({ target: { tabId: t.id }, files: ["overlay.js"] });
+      } catch {
+        /* a page we're not allowed into */
+      }
+    })
+  );
+}
+
+chrome.runtime.onInstalled.addListener(reinject);
+chrome.runtime.onStartup.addListener(reinject);
+
 chrome.storage.sync.onChanged.addListener(sweep);
 sweep();
 setInterval(sweep, RESCAN_MS);

@@ -77,6 +77,11 @@ class Conn {
     if (this.up) this.ws.send(JSON.stringify(msg));
   }
 
+  /** send a line to the daemon's log — see below for why */
+  say(level, text) {
+    this.post({ event: "log", level, text });
+  }
+
   /** ask the daemon something and await its reply */
   ask(op, args = {}) {
     return new Promise((resolve, reject) => {
@@ -406,6 +411,34 @@ async function reinject() {
 
 chrome.runtime.onInstalled.addListener(reinject);
 chrome.runtime.onStartup.addListener(reinject);
+
+// --- make the extension visible --------------------------------------------
+//
+// The service worker's console lives in a devtools window nobody has open, so
+// an error in here was simply invisible — every failure had to be inferred
+// from the daemon side. Forward it instead: one stream, both halves. See
+// `bin/aimax bridge`.
+function report(level, args) {
+  const text = args
+    .map((a) => (a instanceof Error ? `${a.message}` : typeof a === "string" ? a : JSON.stringify(a)))
+    .join(" ");
+  for (const c of conns.values()) if (c.up) c.say(level, text);
+}
+
+for (const level of ["warn", "error"]) {
+  const original = console[level].bind(console);
+  console[level] = (...args) => {
+    original(...args);
+    try {
+      report(level, args);
+    } catch {
+      /* never let logging break the thing it is logging */
+    }
+  };
+}
+
+self.addEventListener("error", (e) => report("error", [e.message]));
+self.addEventListener("unhandledrejection", (e) => report("error", [String(e.reason)]));
 
 chrome.storage.sync.onChanged.addListener(sweep);
 sweep();

@@ -96,6 +96,16 @@ defmodule Aimax.Core.Browser do
 
   def handle_cast({:incoming, text}, state) do
     case Jason.decode(text) do
+      # the extension's own console, forwarded. Its service worker log lives in
+      # a devtools window nobody has open, so an error in there used to be
+      # invisible from here — one stream is worth a lot when the bug could be
+      # in either half.
+      {:ok, %{"event" => "log", "level" => level, "text" => line}} ->
+        if level == "error",
+          do: Logger.error("browser-ext: #{line}"),
+          else: Logger.warning("browser-ext: #{line}")
+
+        {:noreply, state}
       # a reply to something we asked
       {:ok, %{"id" => id, "ok" => _} = msg} -> {:noreply, resolve(state, id, reply_of(msg))}
       # a request from the browser

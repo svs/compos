@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""aimax — drive a running daemon and watch what it does.
+
+    bin/aimax eval '(buffer-list)'      evaluate Scheme, print the value
+    bin/aimax log [-n 40] [-f]          the daemon log, noise stripped
+    bin/aimax bridge [-n 40] [-f]       only the browser bridge, both directions
+    bin/aimax state                     frames, windows, buffers, browser
+    bin/aimax keys C-x b                dispatch keys as if typed
+    bin/aimax tabs                      what the browser says is open
+
+Every command takes --home (default ~/.aimax-web) or AIMAX_HOME, so it points
+at whichever daemon you mean.
+
+This exists because a failure used to be invisible: the daemon log was
+LiveView keystrokes and the extension's own log lived in a devtools window
+nobody was looking at. `bridge` shows every op in and out; the extension
+forwards its errors here too, so one stream has the whole story.
+"""
+import argparse, json, os, socket, subprocess, sys, time
+
+DEFAULT_HOME = os.environ.get("AIMAX_HOME", os.path.expanduser("~/.aimax-web"))
+
+# LiveView narrates every keystroke and re-render; none of it is ever the bug
+NOISE = ("HANDLE EVENT", "Replied in", "Parameters:", "Processing with",
+         "Pipelines:", "[debug]")
+
+
+def rpc(home, code, timeout=30):
+    sock = os.path.join(home, "sock")
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        s.connect(sock)
+    except (FileNotFoundError, ConnectionRefusedError):
+        sys.exit(f"no daemon at {sock} — is it running?")
+    s.sendall((json.dumps({"jsonrpc": "2.0", "id": 1, "method": "eval",
+                           "params": {"code": code}}) + "\n").encode())
+    buf = b""
+    while not buf.endswith(b"\n"):
+        chunk = s.recv(65536)
+        if not chunk:
+            break
+        buf += chunk
+    s.close()
+    r = json.loads(buf)
+    if "error" in r:
+        sys.exit(f"error: {r['error'].get('message', r['error'])}")
+    return r["result"]
+
+
+def cmd_eval(a):
+    print(rpc(a.home, a.code))
+
+
+def tail(path, n, follow, keep=None, drop=NOISE):
+    if not os.path.exists(path):
+        sys.exit(f"no log at {path}")
+
+    def show(line):
+        if keep and not any(k in line for k in keep):
+            return
+        if not keep and any(d in line for d in drop):
+            return
+        sys.stdout.write(line)
+        sys.stdout.flush()
+
+    with open(path) as f:
+        lines = f.readlines()
+    for line in lines[-n * 6:]:
+        show(line)
+
+    if follow:
+        with open(path) as f:
+            f.seek(0, 2)
+            while True:
+                line = f.readline()
+                if line:
+                    show(line)
+                else:
+                    time.sleep(0.3)
+
+
+def cmd_log(a):
+    tail(os.path.join(a.home, "daemon.log"), a.n, a.follow)
+
+
+def cmd_bridge(a):
+    # both directions of the wire, plus whatever the extension forwarded
+    tail(os.path.join(a.home, "daemon.log"), a.n, a.follow,
+         keep=("browser <-", "browser ->", "browser =>", "browser <=",
+               "browser:", "browser-ext"))
+
+
+def cmd_state(a):
+    q = {
+        "frames": "(frame-list)",
+        "this frame": "(selected-frame)",
+        "windows": "(window-list)",
+        "current buffer": "(chrome--here)",
+        "prompt open": "(if (minibuffer-state) (chrome--get (minibuffer-state) 'prompt) #f)",
+        "browser": "(browser-connected?)",
+        "tab cache": "(length *chrome-tab-cache*)",
+        "buffers": "(length (buffer-list))",
+    }
+    for label, code in q.items():
+        print(f"{label:>15}: {rpc(a.home, code)}")
+
+
+def cmd_keys(a):
+    keys = " ".join(f'"{k}"' for k in a.keys)
+    rpc(a.home, f"(dispatch-keys (list {keys}))")
+    time.sleep(0.4)
+    print(rpc(a.home, "(if (minibuffer-state) (chrome--get (minibuffer-state) 'prompt) 'no-prompt)"))
+
+
+def cmd_tabs(a):
+    print(rpc(a.home, "*chrome-tab-cache*"))
+
+
+def main():
+    p = argparse.ArgumentParser(prog="aimax", description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--home", default=DEFAULT_HOME)
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    e = sub.add_parser("eval"); e.add_argument("code"); e.set_defaults(fn=cmd_eval)
+
+    for name, fn in (("log", cmd_log), ("bridge", cmd_bridge)):
+        s = sub.add_parser(name)
+        s.add_argument("-n", type=int, default=40)
+        s.add_argument("-f", "--follow", action="store_true")
+        s.set_defaults(fn=fn)
+
+    sub.add_parser("state").set_defaults(fn=cmd_state)
+    sub.add_parser("tabs").set_defaults(fn=cmd_tabs)
+
+    k = sub.add_parser("keys"); k.add_argument("keys", nargs="+"); k.set_defaults(fn=cmd_keys)
+
+    a = p.parse_args()
+    a.fn(a)
+
+
+if __name__ == "__main__":
+    main()

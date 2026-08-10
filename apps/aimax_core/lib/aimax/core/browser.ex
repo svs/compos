@@ -112,14 +112,20 @@ defmodule Aimax.Core.Browser do
     sock = state.sock
     args = Map.drop(msg, ["id", "op"])
 
+    # The frame the request came from — one browser window, one ai-max frame.
+    # Session stamps it for the duration of the Scheme call, so chrome.scm's
+    # minibuffer and window calls resolve to the right frame with no plumbing
+    # of their own.
+    fid = msg["frame"]
+
     run(fn ->
-      frame =
-        case Session.call_fn(handler, [op, Aimax.Core.LLM.json_to_scheme(args)]) do
+      reply =
+        case Session.call_fn(handler, [op, Aimax.Core.LLM.json_to_scheme(args)], fid) do
           {:ok, value} -> %{"id" => id, "ok" => true, "result" => Session.scheme_to_json(value)}
           {:error, msg} -> %{"id" => id, "ok" => false, "error" => msg}
         end
 
-      send(sock, {:browser_send, Jason.encode!(frame)})
+      send(sock, {:browser_send, Jason.encode!(reply)})
     end)
 
     state

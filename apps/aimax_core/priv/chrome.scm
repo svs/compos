@@ -51,23 +51,76 @@
   (run-command name)
   (chrome--with-mb (list 'message (string-append "ran " name))))
 
+;;; --- coming back to the editor -----------------------------------------------
+;;;
+;;; Inside ai-max, C-x b pulls a buffer into the selected window — Emacs.
+;;; Arriving from a web page it has to mean something slightly different: you
+;;; are not switching, you are RETURNING. If the buffer you name is already on
+;;; screen (notmuch's index/show/chat scene, say) then pulling it somewhere
+;;; else would destroy the layout you are trying to get back to. So: visible
+;;; means go to it, invisible means pull it in. That is pop-to-buffer, and it
+;;; is why this is its own command rather than a raw C-x b.
+
+(define (chrome--window-showing buf)
+  (let loop ((ws (window-list)))
+    (cond ((null? ws) #f)
+          ((equal? (car (cdr (car ws))) buf) (car (car ws)))
+          (else (loop (cdr ws))))))
+
+(define-command "chrome-switch-to-buffer"
+  "Return to ai-max showing a buffer, keeping the scene if it is already up"
+  (lambda ()
+    ;; captured before the prompt opens — while a minibuffer is active,
+    ;; current-buffer answers with the minibuffer
+    (let ((here (current-buffer))
+          (cands (buffer-candidates)))
+      (minibuffer-read
+        (string-append "Buffer (default " here "): ")
+        ;; the default is where you already were: from a page, C-x b RET means
+        ;; "put me back", not Emacs's "switch me away to the other buffer"
+        (cons (list here "here") cands)
+        (lambda (name)
+          (let* ((target (if (equal? name "") here name))
+                 (win (chrome--window-showing target)))
+            (if win
+                (select-window! win)
+                (switch-to-buffer! target))))))))
+
+;; Chords a page should not send through raw dispatch, because returning from
+;; outside wants different semantics than moving around inside.
+(define *chrome-chord-commands*
+  '(("C-x b" "chrome-switch-to-buffer")))
+
+(define (chrome--chord-command keys)
+  (let ((entry (assoc (string-join keys " ") *chrome-chord-commands*)))
+    (if entry (car (cdr entry)) #f)))
+
 ;; A chord goes through the same dispatcher the GUI uses, one key at a time, so
 ;; C-x b from a page means what C-x b means everywhere else.
 (define (chrome--chord keys)
-  ;; one call, not one per key: the prefix and its suffix must reach the
-  ;; dispatcher in order, or C-x b arrives as two unrelated keys and does
-  ;; nothing at all
-  (dispatch-keys keys)
-  ;; dispatch runs off-process to avoid deadlocking the interpreter, so the
-  ;; prompt may not be up yet when we look — the tab asks again a moment later
-  (chrome--with-mb (list 'message (string-join keys " "))))
+  (let ((cmd (chrome--chord-command keys)))
+    (if cmd
+        (chrome--run cmd)
+        (begin
+          ;; one call, not one per key: the prefix and its suffix must reach
+          ;; the dispatcher in order, or C-x b arrives as two unrelated keys
+          ;; and does nothing at all
+          (dispatch-keys keys)
+          ;; dispatch runs off-process to avoid deadlocking the interpreter, so
+          ;; the prompt may not be up yet — the tab asks again a moment later
+          (chrome--with-mb (list 'message (string-join keys " ")))))))
 
 ;; A key aimed at an open prompt. The editor's own minibuffer keymap is the
 ;; reference: same keys, same meanings, just arriving from a page.
+;; Answering a question means you want to see the answer: confirming raises the
+;; editor's tab. Cancelling doesn't — you changed your mind, stay where you are.
+(define (chrome--confirmed)
+  (append (chrome--with-mb '()) (list 'raise #t)))
+
 (define (chrome--mb-key spec)
   (cond ((not (minibuffer-state)) (list 'message "no prompt"))
-        ((equal? spec "RET") (minibuffer-confirm!) (chrome--with-mb '()))
-        ((equal? spec "M-RET") (minibuffer-confirm-input!) (chrome--with-mb '()))
+        ((equal? spec "RET") (minibuffer-confirm!) (chrome--confirmed))
+        ((equal? spec "M-RET") (minibuffer-confirm-input!) (chrome--confirmed))
         ((equal? spec "C-g") (minibuffer-cancel!) (chrome--with-mb '()))
         ((equal? spec "ESC") (minibuffer-cancel!) (chrome--with-mb '()))
         ((equal? spec "TAB") (minibuffer-complete!) (chrome--with-mb '()))

@@ -362,7 +362,46 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   }
 });
 
-chrome.storage.sync.get({ keys: true }).then((s) => (enabled = s.keys));
-chrome.storage.sync.onChanged.addListener((ch) => {
-  if (ch.keys) enabled = ch.keys.newValue;
-});
+// --- am I the editor? ------------------------------------------------------
+//
+// An ai-max page has its own minibuffer and its own key handling, so this
+// overlay must keep its hands off it entirely — M-x there belongs to the
+// editor. What the page does instead is announce which frame it is, so every
+// OTHER tab in this browser window knows where its commands should land.
+//
+// The frame id arrives from the server after the LiveView connects, so it may
+// not be in localStorage yet when this script runs.
+
+function isEditorPage() {
+  return !!document.getElementById("editor");
+}
+
+async function registerFrame(tries = 20) {
+  for (let i = 0; i < tries; i++) {
+    const frame = localStorage.getItem("aimax-frame");
+    if (frame) {
+      try {
+        await ask({ cmd: "register", frame });
+      } catch {
+        /* worker asleep; the next visibility change retries */
+      }
+      return;
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
+
+if (isEditorPage()) {
+  enabled = false; // never capture keys on the editor itself
+  registerFrame();
+  // a daemon restart hands out a new frame id, and the tab may have been
+  // dragged to another window since we registered
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) registerFrame(1);
+  });
+} else {
+  chrome.storage.sync.get({ keys: true }).then((s) => (enabled = s.keys));
+  chrome.storage.sync.onChanged.addListener((ch) => {
+    if (ch.keys) enabled = ch.keys.newValue;
+  });
+}

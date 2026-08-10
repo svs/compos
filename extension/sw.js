@@ -276,17 +276,44 @@ const OPS = {
 };
 
 // --- the tab side ----------------------------------------------------------
-// The overlay asks the daemon for its command list and sends back whatever the
-// reader picked. Which daemon? The first one connected — with several running,
-// a tab belongs to whoever answers.
+//
+// One browser window, one ai-max. A window's ai-max tab announces which frame
+// it is when it loads, and from then on every other tab in that window belongs
+// to that frame: M-x there runs against it, prompts open in it, and "raise"
+// brings it forward. That single binding is what makes C-x b from a random
+// page have an unambiguous target.
+
+/** chrome windowId -> {tabId, frame} */
+const editors = new Map();
 
 function anyConn() {
   for (const c of conns.values()) if (c.up) return c;
   return null;
 }
 
+// the ai-max tab for a window, if this window has one
+function editorFor(windowId) {
+  return editors.get(windowId) || null;
+}
+
+// a tab closing or navigating away takes its window's binding with it
+chrome.tabs.onRemoved.addListener((tabId) => {
+  for (const [win, ed] of editors) if (ed.tabId === tabId) editors.delete(win);
+});
+
+// dragging a tab between windows moves the binding with it
+chrome.tabs.onAttached.addListener((tabId, { newWindowId }) => {
+  for (const [win, ed] of editors) {
+    if (ed.tabId === tabId) {
+      editors.delete(win);
+      editors.set(newWindowId, ed);
+    }
+  }
+});
+
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   const tab = sender.tab?.id;
+  const windowId = sender.tab?.windowId;
 
   const answer = async () => {
     if (msg.cmd === "status") {
@@ -300,15 +327,31 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
 
     if (msg.cmd === "settings") return settings();
 
+    // an ai-max page telling us which frame it is
+    if (msg.cmd === "register") {
+      editors.set(windowId, { tabId: tab, frame: msg.frame });
+      return { registered: msg.frame };
+    }
+
     const conn = anyConn();
     if (!conn) throw new Error("no ai-max daemon running");
 
+    const ed = editorFor(windowId);
+    const frame = ed?.frame;
+
+    // Bring this window's ai-max forward. The daemon says WHEN (a confirmed
+    // prompt); the extension knows WHICH tab.
+    const maybeRaise = async (result) => {
+      if (result?.raise && ed) await chrome.tabs.update(ed.tabId, { active: true });
+      return result;
+    };
+
     switch (msg.cmd) {
-      case "commands": return conn.ask("commands", { tab });
-      case "run": return conn.ask("run", { tab, name: msg.name });
-      case "chord": return conn.ask("chord", { tab, keys: msg.keys });
-      case "mb-key": return conn.ask("mb-key", { tab, spec: msg.spec });
-      case "mb-state": return conn.ask("mb-state", { tab });
+      case "commands": return conn.ask("commands", { tab, frame });
+      case "run": return maybeRaise(await conn.ask("run", { tab, frame, name: msg.name }));
+      case "chord": return maybeRaise(await conn.ask("chord", { tab, frame, keys: msg.keys }));
+      case "mb-key": return maybeRaise(await conn.ask("mb-key", { tab, frame, spec: msg.spec }));
+      case "mb-state": return conn.ask("mb-state", { tab, frame });
       default: throw new Error(`unknown ${msg.cmd}`);
     }
   };

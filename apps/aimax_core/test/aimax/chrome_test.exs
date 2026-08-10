@@ -240,6 +240,55 @@ defmodule Aimax.ChromeTest do
     end
   end
 
+  # Coming back from a web page is not the same as moving around inside the
+  # editor. You clicked a link out of a mail, and C-x b RET has to put you back
+  # where you were — not rearrange the three-window scene you left.
+  describe "returning from a page" do
+    test "a buffer already on screen is selected, not pulled somewhere else" do
+      eval!(~s[(begin (buffer-create "*mail-index*") (buffer-create "*mail-show*"))])
+      # a two-window scene, with the target visible in the OTHER window
+      eval!(~s[(begin (switch-to-buffer! "*mail-index*") (split-window! "h")
+                      (other-window!) (switch-to-buffer! "*mail-show*") (other-window!))])
+
+      before = eval!("(window-list)")
+      assert before =~ "*mail-show*"
+      assert eval!("(current-buffer)") == ~s("*mail-index*")
+
+      # the window showing it is found, so nothing is pulled
+      win = eval!(~s[(chrome--window-showing "*mail-show*")])
+      refute win == "#f"
+
+      eval!(~s[(select-window! #{win})])
+      assert eval!("(current-buffer)") == ~s("*mail-show*")
+      # the scene is intact: both windows still show what they showed
+      assert eval!("(window-list)") == before
+    end
+
+    test "a buffer that is not on screen has no window to go to" do
+      eval!(~s[(buffer-create "*off-screen*")])
+      assert eval!(~s[(chrome--window-showing "*off-screen*")]) == "#f"
+    end
+
+    test "C-x b from a page routes to the returning command, not raw dispatch" do
+      assert eval!(~s[(chrome--chord-command '("C-x" "b"))]) == ~s("chrome-switch-to-buffer")
+      # anything without its own browser meaning still goes through the keymap
+      assert eval!(~s[(chrome--chord-command '("C-x" "o"))]) == "#f"
+    end
+
+    test "confirming a prompt raises the editor; cancelling does not" do
+      stub_socket()
+      open_prompt()
+
+      request(20, "mb-key", %{"spec" => "RET"})
+      assert_receive {:frame, %{"id" => 20, "ok" => true, "result" => %{"raise" => true}}}, 2000
+
+      open_prompt()
+      request(21, "mb-key", %{"spec" => "C-g"})
+      assert_receive {:frame, %{"id" => 21, "ok" => true, "result" => r}}, 2000
+      refute r["raise"]
+    end
+  end
+
   describe "scheme_to_json" do
     test "a plist becomes an object, a plain list an array" do
       assert Session.scheme_to_json([{:sym, "a"}, 1, {:sym, "b"}, 2]) == %{"a" => 1, "b" => 2}

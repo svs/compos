@@ -410,4 +410,13 @@ chrome.runtime.onStartup.addListener(reinject);
 
 chrome.storage.sync.onChanged.addListener(sweep);
 sweep();
+
+// setInterval alone is not enough. MV3 suspends an idle service worker after
+// ~30s, and a suspended worker's timers never fire — so once a daemon goes
+// away there is no socket traffic to keep us awake, the rescan stops, and the
+// extension never reconnects no matter how long the daemon has been back.
+// chrome.alarms survives suspension and wakes the worker to run the sweep.
+// The interval stays for the case where we ARE awake and want a faster retry.
 setInterval(sweep, RESCAN_MS);
+chrome.alarms.create("sweep", { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener((a) => a.name === "sweep" && sweep());

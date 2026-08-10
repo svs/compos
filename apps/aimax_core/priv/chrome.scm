@@ -65,6 +65,20 @@
 ;;; means go to it, invisible means pull it in. That is pop-to-buffer, and it
 ;;; is why this is its own command rather than a raw C-x b.
 
+;; The buffer you are actually looking at in this frame.
+;;
+;; NOT (current-buffer): while a minibuffer is active that answers with the
+;; minibuffer, and a prompt left open in the editor is enough to make "the
+;; buffer I was on" come back as " *minibuf-f-xxxx*". Asking the selected
+;; WINDOW is immune to that, which matters most here — the whole point of
+;; C-x b RET from a page is to land back where you were.
+(define (chrome--here)
+  (let ((w (active-window)))
+    (let loop ((ws (window-list)))
+      (cond ((null? ws) (current-buffer))
+            ((equal? (car (car ws)) w) (car (cdr (car ws))))
+            (else (loop (cdr ws)))))))
+
 (define (chrome--window-showing buf)
   (let loop ((ws (window-list)))
     (cond ((null? ws) #f)
@@ -154,22 +168,34 @@
 ;; Redefined, not rebound: keeping the name means C-x b, which-key and every
 ;; other reference still point at it, and the editor's behaviour is unchanged
 ;; except that the browser's tabs are now in the list.
+;; Last known tabs. C-x b must NOT wait on the browser: it is a core editor
+;; command, and a sleeping MV3 service worker would stall it for as long as the
+;; round-trip takes. So the prompt opens immediately from this cache and the
+;; refresh lands behind it, updating the candidates in place if you are still
+;; deciding.
+(define *chrome-tab-cache* '())
+
+(define (chrome--refresh-tabs)
+  (when (browser-connected?)
+    (tab-list
+      (lambda (all)
+        (set! *chrome-tab-cache* all)
+        ;; still at the prompt? fold the fresh tabs in underneath you
+        (when (minibuffer-state)
+          (minibuffer-set-candidates!
+            (append (buffer-candidates)
+                    (map chrome--tab-candidate (chrome--here-tabs all)))))))))
+
 (define-command "switch-to-buffer"
   "Switch to another buffer — or to a browser tab in this window"
   (lambda ()
     ;; captured before the prompt opens: while a minibuffer is active,
     ;; current-buffer answers with the minibuffer
-    (let ((here (current-buffer))
+    (let ((here (chrome--here))
           (cands (buffer-candidates))
           (from-page *chrome-from-page*))
-      (if (browser-connected?)
-          ;; ask the browser first, prompt second — the tabs are part of the
-          ;; candidate set, not a second prompt
-          (tab-list
-            (lambda (all)
-              (chrome--prompt-switch here cands (chrome--here-tabs all) from-page)))
-          ;; no extension: exactly the buffer list it always was
-          (chrome--prompt-switch here cands '() from-page)))))
+      (chrome--prompt-switch here cands (chrome--here-tabs *chrome-tab-cache*) from-page)
+      (chrome--refresh-tabs))))
 
 ;; Chords a page should not send through raw dispatch, because returning from
 ;; outside wants different semantics than moving around inside.

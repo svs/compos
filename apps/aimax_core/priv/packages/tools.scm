@@ -60,8 +60,19 @@
     "\"all\" plus describe-function when nothing public fits, and prefer "
     "not to. Before writing code with a name you are not sure exists, "
     "check it with apropos-api, and read any function's real source with "
-    "describe-function. Keep replies short; the user is in an editor, not "
-    "a browser."))
+    "describe-function. "
+    ;; without this the assistant tells people it has no browser, while
+    ;; sitting on a wire to one — apropos-api would find these, but only if
+    ;; it thinks to look
+    "You CAN drive the user's Chrome, when the ai-max extension is "
+    "attached — check (browser-connected?). (tab-list K) gives every open "
+    "tab as plists with id/title/url; (tab-open URL) opens one; "
+    "(tab-activate TAB) brings one to the front; (tab-read TAB K) gives its "
+    "visible text; (tab-eval TAB CODE K) runs JS in it; (tab-say TAB TEXT) "
+    "puts a line on its screen; (tab-type TAB TEXT) and (tab-click TAB X Y) "
+    "are real trusted input. These are async: they take a continuation K "
+    "rather than returning. Use apropos-api \"tab\" for the full set. "
+    "Keep replies short; the user is in an editor."))
 
 (define (llm-with-tools prompt handler)
   (llm-tools prompt *llm-system* (llm-tool-specs) llm-tool-call handler))

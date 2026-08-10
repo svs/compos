@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "ai-max",
+  "version": "0.3.0",
+  "description": "ai-max's keys and commands in every tab, and a wire so the editor can drive any of them.",
+  "permissions": [
+    "tabs",
+    "scripting",
+    "storage",
+    "debugger",
+    "alarms"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "sw.js"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_title": "ai-max \u2014 click to toggle keys on this site"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "overlay.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}

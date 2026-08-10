@@ -1301,7 +1301,12 @@ defmodule Aimax.Core.Editor do
         hidden -> visible_geometry(text, point, hidden)
       end
 
-    top = leaf.top |> min(max(total_lines - 1, 0)) |> max(0)
+    # Clamped to the last SCREENFUL, not the last line. Scrolling had no upper
+    # bound of its own, and clamping to total-1 still let a short buffer end up
+    # with one line stranded at the top of an otherwise empty window — which
+    # then persisted, because tops are written back. A window can no longer be
+    # scrolled past its own content, and a reload always lands somewhere real.
+    top = leaf.top |> min(max(total_lines - rows, 0)) |> max(0)
 
     top =
       cond do

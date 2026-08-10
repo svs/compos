@@ -26,11 +26,9 @@
 
 ;;; --- what a tab may ask us ---------------------------------------------------
 
-;; M-x in a page offers exactly what M-x offers in the editor, most-recently
-;; used first, each with the annotation the minibuffer would show.
-(define (chrome--commands)
-  (map (lambda (c) (list 'name c 'doc (command-annotation c)))
-       (history-order 'M-x (command-names))))
+;; M-x in a page is the editor's own execute-extended-command — the extension
+;; asks for it by name and renders the minibuffer it opens. There is no second
+;; command list and no second matcher.
 
 ;; Half the interesting commands ask a question — C-x b, C-x C-f, M-x itself.
 ;; The answer has to be given where the question was asked, so every reply
@@ -114,29 +112,33 @@
 
 ;;; --- one list, most recently used first --------------------------------------
 ;;;
-;;; Buffers and tabs are not two kinds of thing that need reconciling. They are
-;;; one list of places, ordered by when you were last in them, and the default
-;;; is whatever is at the top that isn't where you are standing. Everything
-;;; else — the toggle, coming back from a page, tabs being reachable — falls
-;;; out of that ordering rather than needing a rule of its own.
+;;; The editor already keeps this. buffer-list-mru is its ring, updated
+;;; wherever a buffer gets displayed — the same single choke point Emacs uses
+;;; in record_buffer, rather than each command remembering to mark. Keeping a
+;;; second history here was the mistake: it only saw switches that went through
+;;; this one command, so it drifted from the truth and then outranked it.
 ;;;
-;;; Kept per frame: one ai-max per browser window, so each frame has its own
-;;; history. Same home the popup window and ibuffer use.
+;;; So buffers are not tracked at all. The only thing missing from the ring is
+;;; tabs, and for those one fact is enough: the tab you were last in, plus the
+;;; buffer that was at the head of the ring at that moment. If the head has not
+;;; moved since, nothing has been displayed after that tab and it is still the
+;;; most recent place. If it has moved, a buffer is. That is the whole
+;;; interleave, and it invalidates itself.
 
-(define (chrome--mru) (or (frame-local 'chrome-mru) '()))
-
-(define (chrome--touch! label)
+(define (chrome--note-tab! label)
   (when label
-    (set-frame-local! 'chrome-mru
-      (cons label (filter (lambda (l) (not (equal? l label))) (chrome--mru))))))
+    (set-frame-local! 'chrome-tab-visit (list label (car (buffer-list-mru))))))
 
-;; A place we have never seen, remembered at the BOTTOM of the history rather
-;; than the top. You got to it somehow — the editor has its own buffer MRU and
-;; plenty of ways to move that this list never sees — so it belongs in the
-;; ordering, but it must not leapfrog somewhere you actually just came from.
-(define (chrome--seed! label)
-  (when (and label (not (chrome--seen? label)))
-    (set-frame-local! 'chrome-mru (append (chrome--mru) (list label)))))
+(define (chrome--tab-is-latest?)
+  (let ((v (frame-local 'chrome-tab-visit)))
+    (if v (equal? (car (cdr v)) (car (buffer-list-mru))) #f)))
+
+(define (chrome--last-tab-label)
+  (let ((v (frame-local 'chrome-tab-visit)))
+    (if v (car v) #f)))
+
+(define (chrome--without label cands)
+  (filter (lambda (c) (not (equal? (car c) label))) cands))
 
 (define (chrome--find label cands)
   (let loop ((cs cands))
@@ -144,21 +146,14 @@
           ((equal? (car (car cs)) label) (car cs))
           (else (loop (cdr cs))))))
 
-(define (chrome--seen? label)
-  (let loop ((ls (chrome--mru)))
-    (cond ((null? ls) #f)
-          ((equal? (car ls) label) #t)
-          (else (loop (cdr ls))))))
-
-;; the ones we have a history for, in that order, then everything else in
-;; whatever order it arrived (buffer-list-mru is already recency-ordered)
-(define (chrome--by-mru cands)
-  (let loop ((ls (chrome--mru)) (acc '()))
-    (if (null? ls)
-        (append (reverse acc)
-                (filter (lambda (c) (not (chrome--seen? (car c)))) cands))
-        (let ((hit (chrome--find (car ls) cands)))
-          (loop (cdr ls) (if hit (cons hit acc) acc))))))
+;; buffers in the editor's own order, tabs behind them — unless the last place
+;; you were was a tab, in which case it leads.
+(define (chrome--order buffers tabs)
+  (let* ((label (chrome--last-tab-label))
+         (hit (if (and label (chrome--tab-is-latest?)) (chrome--find label tabs) #f)))
+    (if hit
+        (cons hit (append buffers (chrome--without label tabs)))
+        (append buffers tabs))))
 
 ;; Set while a browser request is being served, so the command below can tell
 ;; where the keystroke came from. The candidate LIST is the same either way —
@@ -175,12 +170,6 @@
         (if t (car (chrome--tab-candidate t)) #f))
       (chrome--here)))
 
-(define (chrome--entry label cands)
-  (let loop ((cs cands))
-    (cond ((null? cs) (list label ""))
-          ((equal? (car (car cs)) label) (car cs))
-          (else (loop (cdr cs))))))
-
 (define (chrome--without label cands)
   (filter (lambda (c) (not (equal? (car c) label))) cands))
 
@@ -192,17 +181,10 @@
 ;; tabs, then the buffers.
 (define (chrome--prompt-switch here cands tabs from-page)
   (let* ((standing (chrome--standing-on from-page))
-         ;; where the editor is sitting counts as somewhere you have been,
-         ;; however you got there
-         (_ (chrome--seed! here))
          ;; one pool, ordered by when you were last in each, minus where you
          ;; are now. RET takes the first candidate, so the top of that ordering
          ;; IS the default — there is nothing else to decide.
-         ;; tabs lead the raw pool so that AFTER the MRU sort the ones you
-         ;; have never visited still sit above buffers you have never visited
-         ;; — an open tab is a live thing, a cold buffer isn't more recent
-         ;; than it. Anything you have actually been in outranks both.
-         (pool (chrome--by-mru (append (map chrome--tab-candidate tabs) cands)))
+         (pool (chrome--order cands (map chrome--tab-candidate tabs)))
          (all (chrome--without standing pool))
          (fallback (if (null? all) here (car (car all)))))
     (minibuffer-read-preview
@@ -217,17 +199,15 @@
             ;; a tab: go there, and don't drag the editor in front of the thing
             ;; you just asked for
             (tab (set! *chrome-raise?* #f)
-                 (chrome--touch! picked)
+                 (chrome--note-tab! picked)
                  (tab-activate (chrome--get tab 'id)))
             ;; returning from a page: if it is already on screen, go to the
             ;; window showing it rather than rearranging the scene you are
             ;; trying to get back to
             (from-page
-              (chrome--touch! picked)
               (let ((win (chrome--window-showing picked)))
                 (if win (select-window! win) (switch-to-buffer! picked))))
-            (else (chrome--touch! picked)
-                  (switch-to-buffer! picked)))))
+            (else (switch-to-buffer! picked)))))
       ;; C-g puts back whatever the preview displaced — without this the
       ;; invoking window keeps the last buffer you happened to highlight
       (lambda () (when (buffer-exists? here) (window-preview-buffer! here))))))
@@ -335,15 +315,14 @@
     (when tb
       (set-frame-local! 'chrome-tab tb)
       (let ((t (chrome--tab-by-id tb *chrome-tab-cache*)))
-        (when t (chrome--touch! (car (chrome--tab-candidate t)))))))
+        (when t (chrome--note-tab! (car (chrome--tab-candidate t)))))))
   ;; Keep the tab cache warm on the ops a person actually initiates, so the
   ;; FIRST C-x b already has tabs in it. Not on mb-key/mb-state: those are the
   ;; overlay polling while a prompt is open, and a round-trip per keystroke is
   ;; both pointless and slow.
-  (when (or (equal? op "commands") (equal? op "chord") (equal? op "run"))
+  (when (or (equal? op "chord") (equal? op "run"))
     (chrome--refresh-tabs))
   (cond ((equal? op "attached") (chrome--refresh-tabs) (list 'ok #t))
-        ((equal? op "commands") (list 'commands (chrome--commands)))
         ((equal? op "run") (chrome--run (chrome--get args 'name)))
         ((equal? op "chord") (chrome--chord (or (chrome--get args 'keys) '())))
         ((equal? op "mb-key") (chrome--mb-key (chrome--get args 'spec)))

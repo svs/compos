@@ -124,17 +124,28 @@ defmodule Aimax.ChromeTest do
   end
 
   describe "inbound — a tab asks the daemon" do
-    test "M-x in a page is offered the editor's real command table" do
+    # M-x in a page runs the editor's own execute-extended-command and renders
+    # the minibuffer it opens. There is no second command list and no second
+    # matcher — the overlay used to filter its own copy with a cruder match, so
+    # the same query ranked differently in a tab than in ai-max.
+    test "M-x is the editor's own command, prompt and all" do
       stub_socket()
-      request(1, "commands", %{"tab" => 12})
+      request(1, "run", %{"tab" => 12, "name" => "execute-extended-command"})
 
-      assert_receive {:frame, %{"id" => 1, "ok" => true, "result" => result}}, 2000
-      names = Enum.map(result["commands"], & &1["name"])
+      assert_receive {:frame, %{"id" => 1, "ok" => true, "result" => r}}, 2000
+      assert r["open"] == true
+      assert r["minibuffer"]["prompt"] == "M-x "
 
-      # not a copy of the command list — the actual one
+      # the real table, not a copy: hundreds of commands, MRU-ordered, each
+      # annotated the way the editor's own M-x annotates them
+      assert r["minibuffer"]["total"] > 100
+      names = Enum.map(r["minibuffer"]["candidates"], & &1["label"])
       assert "execute-extended-command" in names
-      assert "list-tabs" in names
-      assert Enum.all?(result["commands"], &is_binary(&1["doc"]))
+
+      # and it filters with the editor's matcher, not one of the overlay's
+      eval!(~s[(minibuffer-input! "listtab")])
+      assert eval!(~s[(map (lambda (c) (chrome--get c 'label))
+                           (chrome--get (minibuffer-state) 'candidates))]) =~ "list-tabs"
     end
 
     test "picking a command runs it here, in the daemon" do
@@ -300,33 +311,29 @@ defmodule Aimax.ChromeTest do
       Session.eval("(minibuffer-cancel!)")
     end
 
-    # One list, most recently used first. The default is just the top of it
-    # that isn't where you are standing — no tab-versus-buffer rule, and no
-    # sticky slot that lets one tab outrank every later buffer visit.
-    test "the list is ordered by when you were last in each place" do
-      eval!("(set-frame-local! 'chrome-mru #f)")
-      cands = ~s{'(("*a*" "") ("*b*" "") ("🌐 News" ""))}
+    # Buffers are not tracked here at all — buffer-list-mru is the editor's own
+    # ring, updated wherever a buffer is displayed, the same choke point Emacs
+    # uses. A second history here only saw switches through this one command,
+    # so it drifted and then outranked the truth. The only fact kept is the tab
+    # you were last in and the ring's head at that moment; if the head has not
+    # moved, nothing has been displayed since and the tab still leads.
+    test "buffers keep the editor's order; a tab leads only while it is latest" do
+      bufs = ~s{'(("*a*" "") ("*b*" ""))}
+      tabs = ~s{'(("🌐 News" ""))}
 
-      # nothing visited yet: natural order survives
-      assert eval!(~s[(map car (chrome--by-mru #{cands}))]) == ~s{("*a*" "*b*" "🌐 News")}
+      eval!("(set-frame-local! 'chrome-tab-visit #f)")
+      assert eval!(~s[(map car (chrome--order #{bufs} #{tabs}))]) == ~s{("*a*" "*b*" "🌐 News")}
 
-      # visit the tab, then a buffer: most recent leads
-      eval!(~s[(chrome--touch! "🌐 News")])
-      eval!(~s[(chrome--touch! "*b*")])
-      assert eval!(~s[(map car (chrome--by-mru #{cands}))]) == ~s{("*b*" "🌐 News" "*a*")}
+      # a keypress in the tab: it is now the most recent place
+      eval!(~s[(chrome--note-tab! "🌐 News")])
+      assert eval!("(chrome--tab-is-latest?)") == "#t"
+      assert eval!(~s[(map car (chrome--order #{bufs} #{tabs}))]) == ~s{("🌐 News" "*a*" "*b*")}
 
-      # back to the tab and it leads again — this is the toggle, with no rule
-      # of its own
-      eval!(~s[(chrome--touch! "🌐 News")])
-      assert eval!(~s[(map car (chrome--by-mru #{cands}))]) == ~s{("🌐 News" "*b*" "*a*")}
-    end
-
-    test "where you are standing is never what RET offers" do
-      eval!("(set-frame-local! 'chrome-mru #f)")
-      eval!(~s[(chrome--touch! "*a*")])
-      # standing in *a*, so *a* drops out and the next-most-recent leads
-      assert eval!(~s[(map car (chrome--without "*a*" (chrome--by-mru '(("*a*" "") ("*b*" "")))))]) ==
-               ~s{("*b*")}
+      # display a buffer and the ring's head moves, so the tab is stale — no
+      # bookkeeping needed here, the editor's own ring invalidates it
+      eval!(~s[(begin (buffer-create "*ring-moved*") (switch-to-buffer! "*ring-moved*"))])
+      assert eval!("(chrome--tab-is-latest?)") == "#f"
+      assert eval!(~s[(map car (chrome--order #{bufs} #{tabs}))]) == ~s{("*a*" "*b*" "🌐 News")}
     end
 
     test "C-x b from a page routes to the returning command, not raw dispatch" do

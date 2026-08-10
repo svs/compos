@@ -1,9 +1,9 @@
 // overlay.js — ai-max's minibuffer, in every tab.
 //
-// M-x opens a command palette over whatever page you're on; the list comes
-// from the daemon and the command runs there, so a tab gets the real editor's
-// commands rather than a copy of them. C-x starts a chord and hands the whole
-// sequence to the daemon's key dispatch.
+// M-x and C-x run the editor's own commands and render the editor's own
+// minibuffer. Nothing here filters, ranks or completes: the daemon does all of
+// it, so a prompt in a page behaves identically to the same prompt in ai-max,
+// down to the matcher. This file is a keyboard and a screen.
 //
 // The UI lives in a shadow root: pages have opinions about `div`, and none of
 // them should reach this. Everything is drawn from scratch so a page's CSS
@@ -161,19 +161,15 @@ function closePalette() {
   palette = null;
 }
 
-// serverDriven: the daemon's minibuffer already filtered and chose, so we draw
-// its answer verbatim. Otherwise this is our own M-x list and we filter here.
-function render(serverDriven) {
+// A renderer, nothing more. The daemon has already filtered, ranked and
+// chosen — this draws its answer. There is no second matcher here: the editor's
+// orderless+flex is the only one, so M-x in a page ranks exactly as M-x in
+// ai-max does.
+function render() {
   if (!palette) return;
 
-  const shown = serverDriven
-    ? palette.items
-    : palette.items
-        .filter((it) => matches(it.name.toLowerCase(), palette.input.toLowerCase()))
-        .slice(0, 200);
-
+  const shown = palette.items;
   palette.shown = shown;
-  if (!serverDriven) palette.sel = Math.max(0, Math.min(palette.sel, shown.length - 1));
 
   const list = palette.wrap.querySelector(".cands");
   list.textContent = "";
@@ -193,18 +189,7 @@ function render(serverDriven) {
   list.children[palette.sel]?.scrollIntoView({ block: "nearest" });
   palette.wrap.querySelector(".typed").textContent = palette.input;
   palette.wrap.querySelector(".count").textContent =
-    serverDriven && palette.total != null ? `${palette.total}` : `${shown.length}`;
-}
-
-function matches(name, q) {
-  if (!q) return true;
-  let i = 0;
-  for (const ch of q) {
-    i = name.indexOf(ch, i);
-    if (i === -1) return false;
-    i++;
-  }
-  return true;
+    palette.total != null ? `${palette.total}` : `${shown.length}`;
 }
 
 // --- keys ------------------------------------------------------------------
@@ -266,7 +251,7 @@ function showMinibuffer(mb) {
   palette.sel = mb.sel || 0;
   palette.input = mb.input || "";
   palette.total = mb.total;
-  render(true);
+  render();
 }
 
 // A reply either carries a prompt to show, or means the prompt is gone.
@@ -306,8 +291,9 @@ async function awaitPrompt(tries = 14, gap = 150) {
   }
 }
 
+// M-x, C-x b, C-x C-f — all the same shape: run the editor's command, then
+// render whatever prompt it opens. There is no local variant of any of this.
 async function runCommand(name) {
-  closePalette();
   try {
     applyReply(await ask({ cmd: "run", name }));
     if (!prompting) await awaitPrompt();
@@ -332,24 +318,6 @@ async function onKey(e) {
     return;
   }
 
-  // while our own palette is up it owns the keyboard
-  if (palette) {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const s = spec(e);
-    if (s === "ESC" || s === "C-g") return closePalette();
-    if (s === "RET") {
-      const pick = palette.shown[palette.sel];
-      return pick ? runCommand(pick.name) : closePalette();
-    }
-    if (s === "C-n" || e.key === "ArrowDown") { palette.sel++; return render(); }
-    if (s === "C-p" || e.key === "ArrowUp") { palette.sel--; return render(); }
-    if (s === "DEL") { palette.input = palette.input.slice(0, -1); return render(); }
-    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) { palette.input += e.key; return render(); }
-    return;
-  }
-
   // mid-chord: this key completes it
   if (pending) {
     e.preventDefault();
@@ -371,12 +339,9 @@ async function onKey(e) {
   if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === "KeyX") {
     e.preventDefault();
     e.stopPropagation();
-    try {
-      const { commands } = await ask({ cmd: "commands" });
-      openPalette(commands || []);
-    } catch (err) {
-      echo(String(err.message || err), "error");
-    }
+    // the editor's own M-x, so the command list, its ordering, its annotations
+    // and its matcher are all the real ones
+    await runCommand("execute-extended-command");
     return;
   }
 

@@ -285,8 +285,23 @@ defmodule Aimax.ChromeTest do
       assert eval!(~s[(chrome--tab-by-label "*scratch*" #{tabs})]) == "#f"
     end
 
+    # the same list wherever you press it — only what selecting DOES differs
+    test "C-x b is the editor's own command, redefined rather than rebound" do
+      assert eval!(~s[(key-for-command "switch-to-buffer")]) == ~s("C-x b")
+    end
+
+    test "with no extension attached it is still just the buffer list" do
+      Browser.detach(self())
+      refute Browser.connected?()
+
+      Session.eval(~s[(run-command "switch-to-buffer")])
+      # a prompt opened rather than the command dying on the missing browser
+      assert eval!(~s[(chrome--get (minibuffer-state) 'prompt)]) =~ "Switch to buffer (default"
+      Session.eval("(minibuffer-cancel!)")
+    end
+
     test "C-x b from a page routes to the returning command, not raw dispatch" do
-      assert eval!(~s[(chrome--chord-command '("C-x" "b"))]) == ~s("chrome-switch-to-buffer")
+      assert eval!(~s[(chrome--chord-command '("C-x" "b"))]) == ~s("switch-to-buffer")
       # anything without its own browser meaning still goes through the keymap
       assert eval!(~s[(chrome--chord-command '("C-x" "o"))]) == "#f"
     end

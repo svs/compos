@@ -48,7 +48,11 @@
 ;; is still the thing doing the work.
 (define (chrome--run name)
   (history-push! 'M-x name)
+  ;; the command captures this while it runs; a prompt it opens keeps the
+  ;; answer in its own closure, so clearing it afterwards is safe
+  (set! *chrome-from-page* #t)
   (run-command name)
+  (set! *chrome-from-page* #f)
   (chrome--with-mb (list 'message (string-append "ran " name))))
 
 ;;; --- coming back to the editor -----------------------------------------------
@@ -87,42 +91,67 @@
       (filter (lambda (t) (equal? (chrome--get t 'window) *chrome-window*)) tabs)
       tabs))
 
-(define-command "chrome-switch-to-buffer"
-  "Return to ai-max showing a buffer — or switch to a tab in this window"
+;; Set while a browser request is being served, so the command below can tell
+;; where the keystroke came from. The candidate LIST is the same either way —
+;; what differs is what selecting does.
+(define *chrome-from-page* #f)
+
+;; Inside ai-max this is Emacs: default is the PREVIOUS buffer, and the
+;; highlight live-previews in the invoking window. Arriving from a page the
+;; default is where you already were, because you are returning rather than
+;; switching. Same list either way — that is the point.
+(define (chrome--prompt-switch here cands tabs from-page)
+  (let* ((tab-cands (map chrome--tab-candidate tabs))
+         (all (append cands tab-cands))
+         (fallback (if (or from-page (null? cands)) here (car (car cands)))))
+    (minibuffer-read-preview
+      (string-append "Switch to buffer (default " fallback "): ")
+      all
+      ;; a tab has no buffer to preview; leave the window alone
+      (lambda (b) (when (buffer-exists? b) (window-preview-buffer! b)))
+      (lambda (name)
+        (let* ((picked (if (equal? name "") fallback name))
+               (tab (chrome--tab-by-label picked tabs)))
+          (cond
+            ;; a tab: go there, and don't drag the editor in front of the thing
+            ;; you just asked for
+            (tab (set! *chrome-raise?* #f)
+                 (tab-activate (chrome--get tab 'id)))
+            ;; returning from a page: if it is already on screen, go to the
+            ;; window showing it rather than rearranging the scene you are
+            ;; trying to get back to
+            (from-page
+              (let ((win (chrome--window-showing picked)))
+                (if win (select-window! win) (switch-to-buffer! picked))))
+            (else (switch-to-buffer! picked)))))
+      ;; C-g puts back whatever the preview displaced — without this the
+      ;; invoking window keeps the last buffer you happened to highlight
+      (lambda () (when (buffer-exists? here) (window-preview-buffer! here))))))
+
+;; Redefined, not rebound: keeping the name means C-x b, which-key and every
+;; other reference still point at it, and the editor's behaviour is unchanged
+;; except that the browser's tabs are now in the list.
+(define-command "switch-to-buffer"
+  "Switch to another buffer — or to a browser tab in this window"
   (lambda ()
-    ;; captured before the prompt opens — while a minibuffer is active,
+    ;; captured before the prompt opens: while a minibuffer is active,
     ;; current-buffer answers with the minibuffer
     (let ((here (current-buffer))
-          (cands (buffer-candidates)))
-      ;; ask the browser first, prompt second: the tab list is part of the
-      ;; candidate set, not a second prompt
-      (tab-list
-        (lambda (all)
-          (let ((tabs (chrome--here-tabs all)))
-            (minibuffer-read
-              (string-append "Buffer (default " here "): ")
-              ;; the default is where you already were: from a page, C-x b RET
-              ;; means "put me back", not Emacs's "switch me away"
-              (append (list (list here "here"))
-                      cands
-                      (map chrome--tab-candidate tabs))
-              (lambda (name)
-                (let ((tab (chrome--tab-by-label name tabs)))
-                  (if tab
-                      ;; a tab: go there, and don't drag the editor forward
-                      (begin
-                        (set! *chrome-raise?* #f)
-                        (tab-activate (chrome--get tab 'id)))
-                      (let* ((target (if (equal? name "") here name))
-                             (win (chrome--window-showing target)))
-                        (if win
-                            (select-window! win)
-                            (switch-to-buffer! target)))))))))))))
+          (cands (buffer-candidates))
+          (from-page *chrome-from-page*))
+      (if (browser-connected?)
+          ;; ask the browser first, prompt second — the tabs are part of the
+          ;; candidate set, not a second prompt
+          (tab-list
+            (lambda (all)
+              (chrome--prompt-switch here cands (chrome--here-tabs all) from-page)))
+          ;; no extension: exactly the buffer list it always was
+          (chrome--prompt-switch here cands '() from-page)))))
 
 ;; Chords a page should not send through raw dispatch, because returning from
 ;; outside wants different semantics than moving around inside.
 (define *chrome-chord-commands*
-  '(("C-x b" "chrome-switch-to-buffer")))
+  '(("C-x b" "switch-to-buffer")))
 
 (define (chrome--chord-command keys)
   (let ((entry (assoc (string-join keys " ") *chrome-chord-commands*)))

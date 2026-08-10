@@ -289,10 +289,28 @@ async function mbKey(spec) {
   }
 }
 
+// A command may prompt LATER than it replies. dispatch-keys runs off-process
+// so the interpreter can't deadlock, and a command like chrome-switch-to-buffer
+// asks the browser for the tab list before it opens its prompt — a whole
+// round-trip back through here. So after a command reports no prompt, keep
+// asking for a while before concluding there isn't one.
+async function awaitPrompt(tries = 14, gap = 150) {
+  for (let i = 0; i < tries && !prompting; i++) {
+    await new Promise((r) => setTimeout(r, gap));
+    try {
+      const r = await ask({ cmd: "mb-state" });
+      if (r?.minibuffer) return applyReply(r);
+    } catch {
+      return; // daemon or extension went away
+    }
+  }
+}
+
 async function runCommand(name) {
   closePalette();
   try {
     applyReply(await ask({ cmd: "run", name }));
+    if (!prompting) await awaitPrompt();
   } catch (e) {
     echo(String(e.message || e), "error");
   }
@@ -342,18 +360,7 @@ async function onKey(e) {
     if (s === "C-g" || s === "ESC") return echo("quit");
     try {
       applyReply(await ask({ cmd: "chord", keys }));
-      // dispatch-key runs off-process so the prompt may not be up yet when the
-      // chord replies — ask once more before giving up on it
-      if (!prompting) {
-        setTimeout(async () => {
-          try {
-            const r = await ask({ cmd: "mb-state" });
-            if (r && r.minibuffer) applyReply(r);
-          } catch {
-            /* daemon went away */
-          }
-        }, 120);
-      }
+      if (!prompting) await awaitPrompt();
     } catch (err) {
       echo(String(err.message || err), "error");
     }

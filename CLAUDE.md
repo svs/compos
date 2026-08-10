@@ -48,6 +48,21 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(buffer
 
 ## House style
 
+- Write to **ASD-STE100 (Simplified Technical English)**. The rules that
+  matter here:
+  - One idea per sentence. Maximum 20 words in instructions, 25 in
+    descriptions. Maximum 6 sentences per paragraph.
+  - Use the active voice. Name the agent: "the setup fn rebuilds the keys",
+    not "the keys are rebuilt".
+  - Use simple tenses. Do not use the perfect tenses.
+  - Use one word for one thing. Do not call it a server here and a
+    connection there.
+  - Keep technical names and technical verbs: `mcpServers`, GenServer, byte
+    offset, connect, publish. These are approved terms.
+  - Do not use metaphor, idiom, or literary phrasing. Write "the row shows
+    the error", not "the row that went red can say why".
+  - Do not remove articles or other words to make a sentence shorter.
+  - This applies to replies, commit messages, and comments in code.
 - Terse replies: outcome first, bullets, no recaps, no verification narration.
 - Test everything, especially the Scheme kernel; drive tests through
   `KeyDispatch.handle_key/1` — the same path the GUI uses.

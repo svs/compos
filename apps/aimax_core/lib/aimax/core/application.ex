@@ -18,6 +18,10 @@ defmodule Aimax.Core.Application do
       {Task.Supervisor, name: Aimax.Core.TaskSupervisor},
       Aimax.Core.Reactor,
       Aimax.Core.Editor,
+      # before Session: chrome.scm registers its request handler while the
+      # stdlib loads, and a cast to a process that isn't up yet is silently
+      # dropped — the browser would then be told this daemon serves nothing
+      Aimax.Core.Browser,
       Aimax.Core.Session,
       Aimax.Core.Desktop,
       Aimax.Core.LLMDb,

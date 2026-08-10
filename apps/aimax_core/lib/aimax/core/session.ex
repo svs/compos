@@ -166,7 +166,7 @@ defmodule Aimax.Core.Session do
 
   defp load_stdlib!(interp) do
     interp =
-      Enum.reduce(["editor.scm", "dired.scm", "themes.scm"], interp, fn file, interp ->
+      Enum.reduce(["editor.scm", "dired.scm", "themes.scm", "chrome.scm"], interp, fn file, interp ->
         path = Application.app_dir(:aimax_core, "priv/#{file}")
 
         case Scheme.eval_string(interp, File.read!(path)) do
@@ -326,6 +326,52 @@ defmodule Aimax.Core.Session do
           end,
           on_usage: on_usage
         )
+
+        :void
+      end,
+
+      # --- browser (Aimax.Core.Browser; policy in chrome.scm) ---------------
+      # Outbound: OP is the extension verb ("tabs", "eval", "read", "overlay",
+      # "type", "click"...), ARGS a plist, CALLBACK gets a plist back — 'ok #t
+      # plus the reply, or 'ok #f and 'error. Async because a page operation is
+      # slow and keystrokes must not block behind it.
+      "browser-call" => fn [op, args, callback] ->
+        key = {:browser, make_ref()}
+        :ets.insert(@escaped, {key, callback})
+
+        Aimax.Core.Browser.call(s(op), browser_args(args), fn reply ->
+          try do
+            apply_callback(callback, [browser_reply(reply)])
+          after
+            :ets.delete(@escaped, key)
+          end
+        end)
+
+        :void
+      end,
+      # Inbound: HANDLER answers what the browser asks — (HANDLER OP ARGS).
+      # M-x in a tab is this: the extension asks "commands", chrome.scm says
+      # what the list is. Rooted, since it outlives the call that made it.
+      "browser-serve!" => fn [handler] ->
+        :ets.insert(@escaped, {{:browser_handler, :serve}, handler})
+        Aimax.Core.Browser.serve(handler)
+        :void
+      end,
+      "browser-connected?" => fn [] -> Aimax.Core.Browser.connected?() end,
+      # A chord arriving from a tab goes through the same dispatcher the GUI
+      # uses. It has to run OFF this process: KeyDispatch calls back into
+      # Session, and calling it from inside Session would deadlock — hence the
+      # task, and hence no return value to hand back.
+      #
+      # The whole sequence goes in ONE task, in order. A task per key races,
+      # and a prefix that arrives after its own suffix composes into nothing —
+      # which is exactly how C-x b silently did nothing.
+      "dispatch-keys" => fn [specs] ->
+        keys = Enum.map(specs, &s/1)
+
+        Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
+          Enum.each(keys, &Aimax.Core.KeyDispatch.handle_key/1)
+        end)
 
         :void
       end,
@@ -630,6 +676,35 @@ defmodule Aimax.Core.Session do
       # Store-aware: handler closures apply in the CURRENT store — these run
       # inside the Session, so calling back via apply_callback would deadlock.
       "minibuffer-buffer" => fn [] -> Editor.minibuf_name() end,
+      # What the minibuffer is currently asking, as data — #f when it isn't
+      # asking anything. The GUI reads this off the render payload; a browser
+      # tab has no render payload, so it reads it here and draws its own.
+      "minibuffer-state" => fn [] ->
+        case Editor.snapshot().minibuffer do
+          nil ->
+            false
+
+          mb ->
+            [
+              {:sym, "prompt"},
+              mb.prompt,
+              {:sym, "input"},
+              mb.input,
+              {:sym, "sel"},
+              mb.list.sel,
+              {:sym, "total"},
+              Aimax.Core.Candidates.total(mb.list),
+              {:sym, "candidates"},
+              Enum.map(Aimax.Core.Candidates.rows(mb.list), fn c ->
+                [{:sym, "label"}, c.label, {:sym, "hint"}, c.hint || ""]
+              end)
+            ]
+        end
+      end,
+      "minibuffer-input!" => fn [input] ->
+        Editor.minibuffer_set_input(s(input))
+        :void
+      end,
       "minibuffer-confirm!" => fn [], store ->
         case Editor.minibuffer_close() do
           %{on_confirm: oc} = mb when oc not in [nil, false] ->
@@ -799,6 +874,57 @@ defmodule Aimax.Core.Session do
       kv ->
         kv
     end)
+  end
+
+  # Scheme plist -> JSON object for the extension. Keys are symbols by the
+  # house convention; #f becomes null so an omitted arg reads as absent.
+  defp browser_args(args) do
+    args
+    |> Enum.chunk_every(2)
+    |> Enum.flat_map(fn
+      [{:sym, k}, false] -> [{k, nil}]
+      [{:sym, k}, v] -> [{k, scheme_to_json(v)}]
+      _ -> []
+    end)
+    |> Map.new()
+  end
+
+  defp browser_reply({:ok, result}) when is_map(result),
+    do: [{:sym, "ok"}, true | Aimax.Core.LLM.json_to_scheme(result)]
+
+  defp browser_reply({:ok, _}), do: [{:sym, "ok"}, true]
+  defp browser_reply({:error, msg}), do: [{:sym, "ok"}, false, {:sym, "error"}, msg]
+
+  @doc """
+  The inverse of `Aimax.Core.LLM.json_to_scheme/1`, for values headed out to
+  JSON.
+
+  A Scheme list is ambiguous — it might be a plist or a plain list — so the
+  house convention decides: even length with a `{:sym, _}` in every key slot
+  means an object, anything else is an array.
+  """
+  def scheme_to_json(false), do: false
+  def scheme_to_json(true), do: true
+  def scheme_to_json({:sym, name}), do: name
+  def scheme_to_json(:void), do: nil
+
+  def scheme_to_json(list) when is_list(list) do
+    if plist?(list) do
+      list
+      |> Enum.chunk_every(2)
+      |> Map.new(fn [{:sym, k}, v] -> {k, scheme_to_json(v)} end)
+    else
+      Enum.map(list, &scheme_to_json/1)
+    end
+  end
+
+  def scheme_to_json(other), do: other
+
+  defp plist?([]), do: false
+
+  defp plist?(list) do
+    rem(length(list), 2) == 0 and
+      list |> Enum.take_every(2) |> Enum.all?(&match?({:sym, _}, &1))
   end
 
   defp usage_to_plist(usage) do

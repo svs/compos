@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>ai-max</title>
+    <style>
+      body {
+        font: 14px/1.6 ui-sans-serif, system-ui, -apple-system, sans-serif;
+        max-width: 40em; margin: 40px auto; padding: 0 20px;
+        color: #2b2a26; background: #fdfcf8;
+      }
+      h1 { font-size: 20px; margin: 0 0 4px; }
+      h2 { font-size: 15px; margin: 34px 0 6px; }
+      p.sub { margin: 0 0 28px; color: #6f6a5e; }
+      label { display: block; font-weight: 600; margin: 20px 0 4px; }
+      .hint { font-weight: 400; color: #6f6a5e; font-size: 13px; }
+      input[type="text"], input[type="number"] {
+        font: inherit; padding: 6px 8px; border: 1px solid #d8d2c4;
+        border-radius: 3px; background: #fff;
+      }
+      input[type="text"] { width: 100%; box-sizing: border-box; }
+      input[type="number"] { width: 7em; }
+      .row { display: flex; align-items: center; gap: 8px; }
+      button {
+        font: inherit; margin-top: 24px; padding: 7px 16px;
+        border: 1px solid #c9c2b1; border-radius: 3px;
+        background: #f0ece1; cursor: pointer;
+      }
+      #status { margin-left: 12px; color: #4a7a4a; }
+      table { border-collapse: collapse; margin-top: 10px; font-size: 13px; width: 100%; }
+      th, td { text-align: left; padding: 5px 10px; border-bottom: 1px solid #eae5d8; }
+      th { color: #6f6a5e; font-weight: 600; }
+      .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+      .up { background: #4a7a4a; }
+      .down { background: #cbc5b6; }
+      kbd {
+        font: 12px ui-monospace, Menlo, monospace; border: 1px solid #d8d2c4;
+        border-bottom-width: 2px; border-radius: 3px; padding: 1px 5px; background: #f7f4ec;
+      }
+      @media (prefers-color-scheme: dark) {
+        body { color: #e6e2d8; background: #1c1b19; }
+        p.sub, .hint, th { color: #9a9386; }
+        input[type="text"], input[type="number"] { background: #26241f; color: inherit; border-color: #3c382f; }
+        button, kbd { background: #2e2b25; border-color: #464136; color: inherit; }
+        th, td { border-bottom-color: #2e2b25; }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>ai-max</h1>
+    <p class="sub">
+      ai-max's keys and commands, in every tab. <kbd>M-x</kbd> opens the command
+      palette; <kbd>C-x</kbd> starts a chord. Both run in the daemon, so a tab
+      gets the real editor's commands rather than a copy.
+    </p>
+
+    <label>
+      <span class="row"><input type="checkbox" id="keys" /> Capture keys in pages</span>
+      <span class="hint">— turn off if <kbd>C-x</kbd> is fighting a site you use.</span>
+    </label>
+
+    <h2>Daemons</h2>
+    <p class="sub" style="margin-bottom: 0">
+      Each daemon gets its own connection. Tabs are shared — any daemon can
+      address any tab.
+    </p>
+
+    <label>
+      Ports
+      <span class="hint">— comma separated. Always connected, and retried if down.</span>
+    </label>
+    <input type="text" id="ports" placeholder="4004, 4005" />
+
+    <label>
+      <span class="row"><input type="checkbox" id="scan" /> Also scan a range</span>
+      <span class="hint">— picks up a daemon you just started, with no config.</span>
+    </label>
+    <p class="row">
+      <input type="number" id="scanFrom" min="1" max="65535" />
+      <span>to</span>
+      <input type="number" id="scanTo" min="1" max="65535" />
+    </p>
+
+    <p><button id="save">Save</button><span id="status"></span></p>
+
+    <h2>Connections</h2>
+    <table>
+      <thead>
+        <tr><th style="width: 2em"></th><th>Port</th><th>Daemon</th></tr>
+      </thead>
+      <tbody id="conns"></tbody>
+    </table>
+
+    <script src="options.js"></script>
+  </body>
+</html>

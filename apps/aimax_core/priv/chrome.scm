@@ -130,6 +130,14 @@
     (set-frame-local! 'chrome-mru
       (cons label (filter (lambda (l) (not (equal? l label))) (chrome--mru))))))
 
+;; A place we have never seen, remembered at the BOTTOM of the history rather
+;; than the top. You got to it somehow — the editor has its own buffer MRU and
+;; plenty of ways to move that this list never sees — so it belongs in the
+;; ordering, but it must not leapfrog somewhere you actually just came from.
+(define (chrome--seed! label)
+  (when (and label (not (chrome--seen? label)))
+    (set-frame-local! 'chrome-mru (append (chrome--mru) (list label)))))
+
 (define (chrome--find label cands)
   (let loop ((cs cands))
     (cond ((null? cs) #f)
@@ -184,10 +192,17 @@
 ;; tabs, then the buffers.
 (define (chrome--prompt-switch here cands tabs from-page)
   (let* ((standing (chrome--standing-on from-page))
+         ;; where the editor is sitting counts as somewhere you have been,
+         ;; however you got there
+         (_ (chrome--seed! here))
          ;; one pool, ordered by when you were last in each, minus where you
          ;; are now. RET takes the first candidate, so the top of that ordering
          ;; IS the default — there is nothing else to decide.
-         (pool (chrome--by-mru (append cands (map chrome--tab-candidate tabs))))
+         ;; tabs lead the raw pool so that AFTER the MRU sort the ones you
+         ;; have never visited still sit above buffers you have never visited
+         ;; — an open tab is a live thing, a cold buffer isn't more recent
+         ;; than it. Anything you have actually been in outranks both.
+         (pool (chrome--by-mru (append (map chrome--tab-candidate tabs) cands)))
          (all (chrome--without standing pool))
          (fallback (if (null? all) here (car (car all)))))
     (minibuffer-read-preview

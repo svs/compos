@@ -227,6 +227,13 @@ defmodule Aimax.Core.SchemeAPI do
       "end-of-line!" => fn [] -> Buffer.end_of_line(Editor.current_buffer()) end,
       "beginning-of-buffer!" => fn [] -> Buffer.beginning_of_buffer(Editor.current_buffer()) end,
       "end-of-buffer!" => fn [] -> Buffer.end_of_buffer(Editor.current_buffer()) end,
+      # 1-based line -> its start byte offset, O(log n) via the rope's own
+      # line index (same lookup mouse-click position resolution already
+      # uses) — for goto-line, never walk next-line! in a loop for this
+      "line-start-position" => fn [line] ->
+        {start, _text} = Buffer.line_at(Editor.current_buffer(), trunc(line))
+        start
+      end,
 
       # editing (user-sourced: respects read-only)
       "insert!" => fn [text] ->
@@ -409,6 +416,35 @@ defmodule Aimax.Core.SchemeAPI do
         name
       end,
 
+      # frames: one per attached client; window primitives above act on the
+      # selected frame implicitly. delete-frame! lives in Session (it must
+      # fire an active prompt's on_cancel in the current store).
+      "frame-list" => fn [] -> Editor.frame_list() end,
+      "selected-frame" => fn [] ->
+        Aimax.Core.Frame.current() || Editor.last_active_frame()
+      end,
+      "select-frame!" => fn [id] ->
+        # commands run with the dispatching frame stamped in the pdict —
+        # retarget it too, or the next primitive undoes the selection
+        ok = Editor.select_frame(id) == :ok
+        if ok, do: Aimax.Core.Frame.put(id)
+        ok
+      end,
+      "make-frame!" => fn [] ->
+        {:ok, id} = Editor.attach_frame(nil)
+        id
+      end,
+      # every window everywhere: ((id buffer frame-id) ...) — the cross-frame
+      # walk for kill-buffer replacement, agent window release
+      "window-list-all" => fn [] ->
+        Enum.map(Editor.list_windows_all(), fn {id, b, fid} -> [id, b, fid] end)
+      end,
+      # set any window's buffer without selecting it (no frame/focus change)
+      "window-set-buffer!" => fn [id, name] ->
+        Editor.window_set_buffer(id, name) == :ok
+      end,
+      "frame-of-window" => fn [id] -> Editor.frame_of_window(id) || false end,
+
       # minibuffer & keymap — 3-arity: (prompt candidates on-confirm);
       # 4-arity adds an on-complete fn: input -> (list new-input candidates)
       "minibuffer-read" => fn
@@ -491,6 +527,14 @@ defmodule Aimax.Core.SchemeAPI do
       end,
       # the highlighted candidate (consult-style preview reads it on move)
       "minibuffer-selected" => fn [] -> Editor.minibuffer_selected() end,
+      # escape hatch: current-buffer defaults to the minibuffer's OWN text
+      # while one is active, so a preview hook that wants to act on the
+      # invoking buffer (e.g. goto-char! for a same-buffer position
+      # preview) must toggle this off around that call, then back on
+      "set-mb-redirect!" => fn [bool] ->
+        Editor.set_mb_redirect(bool)
+        :void
+      end,
       # show a buffer in the active window without MRU bookkeeping —
       # candidate preview must not reorder the buffer ring
       "window-preview-buffer!" => fn [name] ->

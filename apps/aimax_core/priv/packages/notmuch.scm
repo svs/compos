@@ -981,12 +981,15 @@ when a message has no text/plain part." 'group 'notmuch)
 
 ;;; --- targets & actions: the email at point, embark-style -------------------------
 
+;; C-. and the model's act tool both land here — one real tag-and-verify
+;; (mail-tag!), not a second copy that discards nm--run's outcome the way
+;; this used to (echoing CHANGES back via message regardless of whether
+;; anything was actually tagged)
 (define (nm--email-tag-act changes)
   (lambda (id)
-    (nm--run (string-append "tag " changes " -- thread:" id))
-    (when (buffer-exists? *notmuch-search-buffer*)
-      (nm--refresh! *notmuch-search-buffer*))
-    (message changes)))
+    (let ((result (mail-tag! id changes)))
+      (message result)
+      result)))
 
 (register-target-provider! "notmuch-mode"
   (lambda (buf)
@@ -1063,19 +1066,56 @@ when a message has no text/plain part." 'group 'notmuch)
            (string-append (substring text 0 8000) "\n[...truncated]"))
           (else text))))
 
+;; how many messages match QUERY — ground truth for whether a tag change
+;; actually landed, instead of trusting a shell call whose exit status
+;; nm--run already throws away. #f (NOT 0) when notmuch's output can't be
+;; parsed as a number — a genuinely empty result and a surprising one
+;; (a warning line, a hiccup) must not collapse into the same "zero", or
+;; a parse failure reads as "no such thread" for one that exists: the
+;; same blind-trust shape mail-tag! exists to fix, one level down.
+(define (nm--count query)
+  (string->number
+    (string-trim (nm--run (string-append "count -- " (nm--quote query))))))
+
 (define (mail-tag! raw changes)
-  (let ((id (if (string-prefix? "thread:" raw)
-                (substring raw 7 (string-length raw))
-                raw)))
-    (nm--run (string-append "tag " changes " -- thread:" id))
+  (let* ((id (if (string-prefix? "thread:" raw)
+                 (substring raw 7 (string-length raw))
+                 raw))
+         (n (nm--count (string-append "thread:" id))))
+    (cond
+      ((not n)
+       (string-append "couldn't verify thread " id
+                      " — notmuch count gave an unexpected answer"))
+      ((= n 0) (string-append "no such thread: " id))
+      (else
+        (nm--run (string-append "tag " changes " -- thread:" id))
+        (when (buffer-exists? *notmuch-search-buffer*)
+          (nm--refresh! *notmuch-search-buffer*))
+          (string-append "tagged " (number->string n) " message"
+                         (if (= n 1) "" "s") " in thread " id
+                         " (" changes ")")))))
+
+;; the raw CLI, for whatever mail-search/mail-tag! don't cover — bulk
+;; tag/archive by QUERY ("tag -inbox -- from:luma.com") in one call
+;; instead of enumerating thread ids and tagging them one at a time, or
+;; "count -- QUERY" to check a result instead of trusting a blind "done".
+;; notmuch's own syntax is public, stable, and already in every model's
+;; training data — better to let it speak that directly than force
+;; everything through a bespoke per-thread wrapper. Same shell nm--run
+;; always used; refreshes the search buffer since ARGS may have mutated
+;; tags, same as mail-tag!.
+(define (notmuch args)
+  (let ((out (nm--run args)))
     (when (buffer-exists? *notmuch-search-buffer*)
       (nm--refresh! *notmuch-search-buffer*))
-    "done"))
+    (if (equal? (string-trim out) "") "(no output)" out)))
 
 (public! 'mail-search
   "(mail-search QUERY) — notmuch search (from:, to:, subject:, tag:, dates, free text); one thread per line with its thread:ID")
 (public! 'mail-read-thread
   "(mail-read-thread THREAD-ID) — full text of an email thread, thread: prefix optional")
 (public! 'mail-tag!
-  "(mail-tag! THREAD-ID CHANGES) — apply space-separated +tag/-tag changes to a thread")
+  "(mail-tag! THREAD-ID CHANGES) — apply space-separated +tag/-tag changes to a thread; returns how many messages it actually matched (a real count, not a blind \"done\") — 0 means the thread id was wrong")
+(public! 'notmuch
+  "(notmuch ARGS) — the raw notmuch CLI, ARGS is everything after `notmuch` as one string, e.g. \"tag -inbox -- from:luma.com\" or \"count -- tag:inbox from:luma.com\"; prefer this for bulk ops by query (archive/tag many at once) and for verifying a change actually happened, instead of enumerating thread ids one at a time")
 

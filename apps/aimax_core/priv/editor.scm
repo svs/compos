@@ -91,14 +91,33 @@
     (let ((sel (minibuffer-selected)))
       (when sel (*mb-select-fn* sel)))))
 
+;; current-buffer defaults to the minibuffer's OWN text while one is
+;; active (the normal case: typing in the minibuffer should act on the
+;; minibuffer). A preview callback is the opposite by definition — its
+;; whole job is to act on what you're previewing, in the window you
+;; invoked it from — so wrap it here, once, rather than trust every
+;; future caller to remember set-mb-redirect! for themselves. Forgetting
+;; it doesn't error; it just silently moves point in text nobody sees,
+;; which is exactly the bug this replaced.
+(define (with-invoking-buffer thunk)
+  (set-mb-redirect! #f)
+  (let ((result (thunk)))
+    (set-mb-redirect! #t)
+    result))
+
 ;; minibuffer-read with live candidate preview: ON-SELECT fires per
 ;; highlight move, ON-CONFIRM with the choice, ON-CANCEL on C-g (restore
-;; whatever the preview displaced there)
+;; whatever the preview displaced there). All three run against the
+;; invoking buffer, not the minibuffer's — see with-invoking-buffer.
 (define (minibuffer-read-preview prompt cands on-select on-confirm on-cancel)
-  (set! *mb-select-fn* on-select)
+  (set! *mb-select-fn* (lambda (sel) (with-invoking-buffer (lambda () (on-select sel)))))
   (minibuffer-read* prompt cands
-    (list (list 'confirm (lambda (v) (set! *mb-select-fn* #f) (on-confirm v)))
-          (list 'cancel  (lambda () (set! *mb-select-fn* #f) (on-cancel)))
+    (list (list 'confirm (lambda (v)
+                            (set! *mb-select-fn* #f)
+                            (with-invoking-buffer (lambda () (on-confirm v)))))
+          (list 'cancel  (lambda ()
+                            (set! *mb-select-fn* #f)
+                            (with-invoking-buffer on-cancel)))
           (list 'change  (lambda (input) (mb-select-notify!))))))
 
 (let ((mb (minibuffer-buffer)))
@@ -533,13 +552,62 @@
       (lambda (s)
         (let ((n (string->number s)))
           (if (number? n)
-              (begin
-                (goto-char! 0)
-                (let loop ((i 1))
-                  (if (< i n)
-                      (begin (next-line!) (loop (+ i 1)))))
-                (beginning-of-line!))
+              ;; direct rope lookup — O(log n), not a next-line! walk from
+              ;; line 1 (which made jumping deep into a large file cost
+              ;; proportional to how far you jumped)
+              (goto-char! (line-start-position n))
               (message "Not a number")))))))
+
+;;; --- imenu: jump to a definition, tree-sitter-driven ------------------------
+;;; One query per definition SHAPE a language's grammar uses. Every pattern
+;;; must anchor EVERY adjacent sibling with '.' — an unanchored capture
+;;; matches the pattern anywhere later in the list, not just next (bit us
+;;; once already: "+" inside a function body spuriously matched as a name).
+;;; Only the @name capture is read; @kw exists purely for the #eq? filter.
+
+(define *imenu-queries*
+  (list
+    (list "scheme"
+      "(list . (symbol) @kw . (symbol) @name (#eq? @kw \"define\"))
+       (list . (symbol) @kw . (list . (symbol) @name) (#eq? @kw \"define\"))
+       (list . (symbol) @kw . (string) @name (#eq? @kw \"define-command\"))")))
+
+;; (label start) pairs, buffer order. A string capture's quotes are part
+;; of its byte range (define-command names) — stripped for display.
+(define (imenu-candidates)
+  (let ((q (assoc (buffer-local (current-buffer) 'ts-lang) *imenu-queries*)))
+    (if (not q)
+        '()
+        (reverse
+          (fold (lambda (acc cap)
+                  (if (equal? (car cap) "name")
+                      (let* ((start (car (cdr cap))) (end (car (cdr (cdr cap))))
+                             (text (buffer-substring start end))
+                             (label (if (string-prefix? "\"" text)
+                                        (substring text 1 (- (string-length text) 1))
+                                        text)))
+                        (cons (list label start) acc))
+                      acc))
+                '() (ts-query (car (cdr q))))))))
+
+(define-command "imenu" "Jump to a definition in this buffer (tree-sitter)"
+  (lambda ()
+    (let ((cands (imenu-candidates)) (orig (point)))
+      (if (null? cands)
+          (message
+            (if (assoc (buffer-local (current-buffer) 'ts-lang) *imenu-queries*)
+                "no definitions found"
+                "imenu: no query defined for this buffer's language"))
+          (minibuffer-read-preview "Imenu: "
+            (map (lambda (c) (list (car c) "")) cands)
+            (lambda (label)
+              (let ((c (assoc label cands))) (when c (goto-char! (car (cdr c))))))
+            (lambda (label)
+              (let ((c (assoc label cands)))
+                (goto-char! (if c (car (cdr c)) orig))))
+            (lambda () (goto-char! orig)))))))
+
+(global-set-key "M-g i" "imenu")
 
 ;;; --- mark & region ---------------------------------------------------------
 
@@ -609,6 +677,18 @@
   (lambda () (isearch #t)))
 
 ;;; --- files & buffers -------------------------------------------------------
+
+;; A new buffer inherits the directory of the buffer that made it (Emacs:
+;; default-directory is buffer-local and copied from the current buffer at
+;; creation). Without this, every non-file buffer — chat, shell, agent
+;; thread, listing — answers "~" and C-x C-f from it loses your place.
+(define raw-buffer-create buffer-create)
+(define (buffer-create name)
+  (let ((fresh (not (buffer-exists? name))))
+    (raw-buffer-create name)
+    (when (and fresh (boundp (quote default-directory)))
+      (buffer-set-local! name 'default-directory (default-directory)))
+    name))
 
 ;; remote buffers save over ssh, never through the local filesystem
 (define (save-remote-buffer! bpath)
@@ -889,12 +969,6 @@
             ;; a live process (shell, tail) dies with its buffer
             (if (process-running? target) (process-kill! target))
             (buffer-kill! target)
-            (if (equal? target cur)
-                ;; land on the most recently used other buffer
-                (let ((others (filter (lambda (b) (not (equal? b target)))
-                                      (buffer-list-mru))))
-                  (switch-to-buffer!
-                    (if (null? others) "*scratch*" (car others)))))
             (message (string-append "Killed " target))))))))
 
 ;;; --- display-buffer & popups (popper) ----------------------------------------
@@ -917,8 +991,33 @@
             (cadr (car rules))
             (loop (cdr rules))))))
 
-(define *popup-window* #f)
-(define *popup-buffer* #f)
+;; frame-local policy state: values keyed by the selected frame — each
+;; browser gets its own popup, its own ibuffer home window. Pruned when a
+;; frame is deleted.
+(define *frame-locals* '())   ; ((frame ((key val) ...)) ...)
+
+(define (frame-local key)
+  (let ((fr (assoc (selected-frame) *frame-locals*)))
+    (if fr
+        (let ((kv (assoc key (cadr fr))))
+          (if kv (cadr kv) #f))
+        #f)))
+
+(define (set-frame-local! key val)
+  (let* ((frame (selected-frame))
+         (fr (assoc frame *frame-locals*))
+         (locals (if fr (cadr fr) '()))
+         (rest (filter (lambda (e) (not (equal? (car e) frame))) *frame-locals*))
+         (others (filter (lambda (e) (not (equal? (car e) key))) locals)))
+    (set! *frame-locals* (cons (list frame (cons (list key val) others)) rest))))
+
+(define (prune-frame-locals!)
+  (let ((live (frame-list)))
+    (set! *frame-locals*
+      (filter (lambda (e) (member (car e) live)) *frame-locals*))))
+
+(define (popup-window) (frame-local 'popup-window))
+(define (popup-buffer) (frame-local 'popup-buffer))
 
 (define (window-exists? id)
   (assoc id (window-list)))
@@ -926,20 +1025,20 @@
 ;; a leftover popup that became the sole window (C-x 1 from inside it)
 ;; is not a popup anymore — treat it as closed so display-buffer splits
 (define (popup-open?)
-  (and *popup-window*
-       (window-exists? *popup-window*)
+  (and (popup-window)
+       (window-exists? (popup-window))
        (not (null? (cdr (window-list))))))
 
 (define (popup-show name)
-  (set! *popup-buffer* name)
+  (set-frame-local! 'popup-buffer name)
   (if (popup-open?)
       (begin
-        (select-window! *popup-window*)
+        (select-window! (popup-window))
         (switch-to-buffer! name))
       (begin
         (split-window! 'v 0.7)          ; bottom ~30% side window
         (other-window!)
-        (set! *popup-window* (active-window))
+        (set-frame-local! 'popup-window (active-window))
         (switch-to-buffer! name))))
 
 (define (display-buffer name)
@@ -980,19 +1079,19 @@
   (lambda ()
     (if (popup-open?)
         (begin
-          (delete-window-id! *popup-window*)
-          (set! *popup-window* #f))
-        (if *popup-buffer*
-            (popup-show *popup-buffer*)
+          (delete-window-id! (popup-window))
+          (set-frame-local! 'popup-window #f))
+        (if (popup-buffer)
+            (popup-show (popup-buffer))
             (message "No popup buffer yet")))))
 
 ;; q in special buffers: close the popup, or fall back to the MRU buffer
 (define-command "quit-window" "Close the popup or fall back to the previous buffer"
   (lambda ()
-    (if (and (popup-open?) (equal? (active-window) *popup-window*))
+    (if (and (popup-open?) (equal? (active-window) (popup-window)))
         (begin
-          (delete-window-id! *popup-window*)
-          (set! *popup-window* #f))
+          (delete-window-id! (popup-window))
+          (set-frame-local! 'popup-window #f))
         (let ((others (buffer-candidates)))
           (if (null? others)
               (message "Nothing to quit to")
@@ -1478,8 +1577,11 @@
 ;;; three lists, in the same commit that introduces it.
 
 ;; who the chat IS — survives reset, restart, and save
+;; ('default-directory is on every buffer, chats included: where it was
+;; opened from, which is identity, not conversation or runtime)
 (define chat-identity-locals
-  '(group agent-connector agent-model chat-presets chat-permission-mode))
+  '(group agent-connector agent-model chat-presets chat-permission-mode
+    default-directory))
 
 ;; what was SAID — survives restart and save; reset clears it
 (define chat-conversation-locals
@@ -2198,6 +2300,15 @@
 (define-command "delete-other-windows" "Make the selected window the only one"
   (lambda () (delete-other-windows!)))
 
+;; frames: one per attached browser. Deleting the selected frame while its
+;; browser is still connected resets it to a fresh single window (the client
+;; immediately re-attaches under the same id); deleting a disconnected
+;; frame removes it for good.
+(define-command "delete-frame" "Delete the selected frame"
+  (lambda ()
+    (delete-frame!)
+    (prune-frame-locals!)))
+
 ;; landing in a rich chat/agent window puts point in its input region —
 ;; the transcript is for reading, the prompt is where typing goes
 (define (chat-snap-to-input!)
@@ -2445,6 +2556,8 @@
 (public! 'register-context-provider! "(register-context-provider! MODE FN) — FN buf -> description of what the user is looking at, or #f; chat/agent sends prepend it")
 (public! 'editor-context "(editor-context EXCLUDE-BUF) — visible-window contexts from registered providers, \"\" if none")
 (public! 'goto-char! "(goto-char! BYTE-POS)")
+(public! 'set-mb-redirect! "(set-mb-redirect! BOOL) — #f makes current-buffer ignore an active minibuffer, so a preview hook can act on the invoking buffer; restore to #t after")
+(public! 'line-start-position "(line-start-position LINE) — 1-based line's start byte offset, O(log n)")
 (public! 'insert! "(insert! TEXT) at point")
 (public! 'delete-char! "(delete-char! N) — negative deletes backward")
 (public! 'region-text "Text between mark and point (\"\" when no mark)")

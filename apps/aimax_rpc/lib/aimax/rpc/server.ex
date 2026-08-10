@@ -8,6 +8,13 @@ defmodule Aimax.Rpc.Server do
         | nc -U ~/.aimax/sock
 
   Methods: `eval` (params.code), `ping`.
+
+  Frames: eval runs against the **last-active frame** (the one that saw
+  input most recently). Window primitives act there; target another frame
+  explicitly with `(select-frame! id)` — ids from `(frame-list)`. Note that
+  `select-frame!`/`select-window!` make that frame last-active, so the next
+  browser keystroke notwithstanding, subsequent evals stay there.
+
   TODO: `subscribe` (buffer events pushed as JSON-RPC notifications), auth
   once the socket can leave localhost, MCP server layered on the same core.
   """

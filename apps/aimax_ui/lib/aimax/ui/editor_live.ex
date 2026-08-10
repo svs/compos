@@ -10,19 +10,30 @@ defmodule Aimax.Ui.EditorLive do
 
   use Phoenix.LiveView
 
-  alias Aimax.Core.{Events, KeyDispatch}
+  alias Aimax.Core.{Events, Input}
 
   @impl true
   def mount(_params, _session, socket) do
-    if connected?(socket), do: Events.subscribe_editor()
+    # each browser is a frame: the client sends its remembered frame id
+    # (localStorage) in the connect params; unknown ids are honored so the
+    # frame survives a wiped desktop.etf, absent ids get a fresh frame
+    frame =
+      if connected?(socket) do
+        requested = get_connect_params(socket)["frame"]
+        {:ok, fid} = Aimax.Core.Editor.attach_frame(requested)
+        Events.subscribe_frame(fid)
+        fid
+      end
 
     socket =
       assign(socket,
+        frame: frame,
         subscribed: MapSet.new(),
         line_cache: %{},
         boot_id: :persistent_term.get(:aimax_boot_id, "dev")
       )
 
+    socket = if frame, do: push_event(socket, "frame", %{id: frame}), else: socket
     {:ok, refresh(socket)}
   end
 
@@ -32,7 +43,7 @@ defmodule Aimax.Ui.EditorLive do
   # handle_info
   @impl true
   def handle_event("key", %{"k" => spec}, socket) do
-    KeyDispatch.handle_key(spec)
+    Input.dispatch(socket.assigns.frame, spec)
     {:noreply, socket |> drain() |> refresh()}
   end
 
@@ -40,12 +51,14 @@ defmodule Aimax.Ui.EditorLive do
   # modeline-info-command (policy lives in scheme; this is just dispatch)
   def handle_event("ml_info", %{"win" => win, "buf" => buf}, socket) do
     with {id, ""} <- Integer.parse(to_string(win)) do
-      Aimax.Core.Editor.set_active(id)
+      Input.run(socket.assigns.frame, fn ->
+        Aimax.Core.Editor.set_active(id)
 
-      case Aimax.Core.Buffer.get_local(buf, "modeline-info-command") do
-        cmd when is_binary(cmd) -> Aimax.Core.Session.run_command(cmd)
-        _ -> :ok
-      end
+        case Aimax.Core.Buffer.get_local(buf, "modeline-info-command") do
+          cmd when is_binary(cmd) -> Aimax.Core.Session.run_command(cmd)
+          _ -> :ok
+        end
+      end)
     end
 
     {:noreply, socket |> drain() |> refresh()}
@@ -55,15 +68,17 @@ defmodule Aimax.Ui.EditorLive do
   # focus the window, run the command. agent-* commands only.
   def handle_event("agent_cmd", %{"win" => win, "cmd" => "agent-" <> _ = cmd}, socket) do
     with {id, ""} <- Integer.parse(to_string(win)) do
-      Aimax.Core.Editor.set_active(id)
-      Aimax.Core.Session.run_command(cmd)
+      Input.run(socket.assigns.frame, fn ->
+        Aimax.Core.Editor.set_active(id)
+        Aimax.Core.Session.run_command(cmd)
+      end)
     end
 
     {:noreply, socket |> drain() |> refresh()}
   end
 
   def handle_event("viewport", %{"rows" => rows}, socket) when is_integer(rows) do
-    Aimax.Core.Editor.set_total_rows(rows)
+    Aimax.Core.Editor.set_total_rows(rows, socket.assigns.frame)
     {:noreply, socket |> drain() |> refresh()}
   end
 
@@ -73,12 +88,18 @@ defmodule Aimax.Ui.EditorLive do
     parsed =
       for {id, n} <- rows, is_integer(n), id_int = safe_int(id), into: %{}, do: {id_int, n}
 
-    Aimax.Core.Editor.set_window_rows(parsed)
+    Aimax.Core.Editor.set_window_rows(parsed, socket.assigns.frame)
     {:noreply, socket |> drain() |> refresh()}
   end
 
-  def handle_event("scroll", %{"lines" => lines}, socket) when is_integer(lines) do
-    Aimax.Core.Editor.scroll_active(lines)
+  # wheel scrolls the hovered window when the client identified one,
+  # falling back to this frame's active window
+  def handle_event("scroll", %{"lines" => lines} = params, socket) when is_integer(lines) do
+    case safe_int(params["win"]) do
+      win when is_integer(win) -> Aimax.Core.Editor.scroll_window(win, lines)
+      _ -> Aimax.Core.Editor.scroll_active(lines, socket.assigns.frame)
+    end
+
     {:noreply, socket |> drain() |> refresh()}
   end
 
@@ -86,15 +107,17 @@ defmodule Aimax.Ui.EditorLive do
   # its input region), then place point when the click hit a text line
   def handle_event("mouse", %{"win" => win} = params, socket) do
     with id when is_integer(id) <- safe_int(win) do
-      Aimax.Core.Session.eval("(mouse-select-window! #{id})")
+      Input.run(socket.assigns.frame, fn ->
+        Aimax.Core.Session.eval("(mouse-select-window! #{id})")
 
-      case params do
-        %{"line" => line, "col" => col} when is_integer(line) and is_integer(col) ->
-          Aimax.Core.Editor.mouse_goto(id, line, col)
+        case params do
+          %{"line" => line, "col" => col} when is_integer(line) and is_integer(col) ->
+            Aimax.Core.Editor.mouse_goto(id, line, col)
 
-        _ ->
-          :ok
-      end
+          _ ->
+            :ok
+        end
+      end)
     end
 
     {:noreply, socket |> drain() |> refresh()}
@@ -104,8 +127,10 @@ defmodule Aimax.Ui.EditorLive do
   def handle_event("mouse_sel", %{"win" => win, "al" => al, "ac" => ac, "fl" => fl, "fc" => fc}, socket)
       when is_integer(al) and is_integer(ac) and is_integer(fl) and is_integer(fc) do
     with id when is_integer(id) <- safe_int(win) do
-      Aimax.Core.Session.eval("(mouse-select-window! #{id})")
-      Aimax.Core.Editor.mouse_region(id, al, ac, fl, fc)
+      Input.run(socket.assigns.frame, fn ->
+        Aimax.Core.Session.eval("(mouse-select-window! #{id})")
+        Aimax.Core.Editor.mouse_region(id, al, ac, fl, fc)
+      end)
     end
 
     {:noreply, socket |> drain() |> refresh()}
@@ -113,7 +138,10 @@ defmodule Aimax.Ui.EditorLive do
 
   # system clipboard: Cmd-V arrives as a browser paste event
   def handle_event("paste", %{"text" => text}, socket) when is_binary(text) do
-    Aimax.Core.Session.eval("(clipboard-paste! #{scheme_string(text)})")
+    Input.run(socket.assigns.frame, fn ->
+      Aimax.Core.Session.eval("(clipboard-paste! #{scheme_string(text)})")
+    end)
+
     {:noreply, socket |> drain() |> refresh()}
   end
 
@@ -121,7 +149,10 @@ defmodule Aimax.Ui.EditorLive do
   # for the client to put on the OS clipboard
   def handle_event("copy", _params, socket) do
     {:noreply,
-     socket |> push_event("clipboard", %{text: Aimax.Core.Editor.copy_text()}) |> drain() |> refresh()}
+     socket
+     |> push_event("clipboard", %{text: Aimax.Core.Editor.copy_text(socket.assigns.frame)})
+     |> drain()
+     |> refresh()}
   end
 
   defp scheme_string(text) do
@@ -135,12 +166,14 @@ defmodule Aimax.Ui.EditorLive do
   end
 
   @impl true
+  def handle_info({:frame_change, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
   def handle_info({:editor_change, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
   def handle_info({:buffer_change, _, _}, socket), do: {:noreply, socket |> drain() |> refresh()}
 
   # coalesce bursts: drain all queued change notifications, render once
   defp drain(socket) do
     receive do
+      {:frame_change, _} -> drain(socket)
       {:editor_change, _} -> drain(socket)
       {:buffer_change, _, _} -> drain(socket)
     after
@@ -149,7 +182,20 @@ defmodule Aimax.Ui.EditorLive do
   end
 
   defp refresh(socket) do
-    state = Aimax.Core.Editor.render_state()
+    fid = socket.assigns[:frame]
+    state = Aimax.Core.Editor.render_state(fid)
+
+    # our frame was deleted out from under us (M-x delete-frame elsewhere,
+    # RPC): render_state fell back to another frame — recreate ours fresh
+    # under the same id so the client's stored id stays good
+    state =
+      if fid && state.frame != fid do
+        {:ok, ^fid} = Aimax.Core.Editor.attach_frame(fid)
+        Aimax.Core.Editor.render_state(fid)
+      else
+        state
+      end
+
     {tree, line_cache} = decorate(state.tree, socket.assigns.line_cache, state.faces)
     state = %{state | tree: tree}
 
@@ -209,6 +255,13 @@ defmodule Aimax.Ui.EditorLive do
      Map.put(cache, {:agent, leaf.id}, {key, blocks})}
   end
 
+  # below this many lines, ship the whole buffer once and let the browser
+  # own scroll position natively — build_static already computes every
+  # line regardless of size, so this is purely a display decision, not
+  # new server work. Above it, keep the windowed/virtualized path: DOM
+  # node count and per-render diff cost both scale with what we ship.
+  @ship_all_threshold 3000
+
   defp decorate(%{type: :leaf} = leaf, cache, _faces) do
     raw_key = {leaf.buffer, leaf.version, leaf.ts_lang, leaf.overlay_gen}
 
@@ -218,22 +271,41 @@ defmodule Aimax.Ui.EditorLive do
         _ -> build_static(leaf)
       end
 
-    # viewport: folded lines drop out, then only the visible slice
-    # (+overscan) becomes DOM. leaf.top is in visible-line space.
+    # viewport: folded lines drop out, then (for large buffers) only the
+    # visible slice (+overscan) becomes DOM. leaf.top is in visible-line
+    # space.
     hidden = leaf.hidden_lines
+    size = tuple_size(static)
+    client_scroll? = size <= @ship_all_threshold
+    # 3x overscan: leaf.rows is measured against WRAPPED line height (so
+    # cursor-follow stays wrap-aware), but wrap factors vary per line —
+    # under-slicing leaves blank space below. Excess DOM is cheap and
+    # .buf{overflow:hidden} clips it. Only applies to the windowed path —
+    # a client-scrolled buffer ships everything, no slice to overscan.
+    want = leaf.rows * 3 + 8
 
     visible =
-      static
-      |> then(fn lines ->
-        if MapSet.size(hidden) == 0,
-          do: lines,
-          else: Enum.reject(lines, &MapSet.member?(hidden, &1.num - 1))
-      end)
-      # 3x overscan: leaf.rows is measured against WRAPPED line height (so
-      # cursor-follow stays wrap-aware), but wrap factors vary per line —
-      # under-slicing leaves blank space below. Excess DOM is cheap and
-      # .buf{overflow:hidden} clips it.
-      |> Enum.slice(leaf.top, leaf.rows * 3 + 8)
+      cond do
+        client_scroll? ->
+          static |> Tuple.to_list() |> Enum.reject(&MapSet.member?(hidden, &1.num - 1))
+
+        MapSet.size(hidden) == 0 ->
+          # static is a tuple: elem/2 is O(1), so a deep scroll position
+          # costs the same as line 1 — Enum.slice on a list re-walks from
+          # element 0 every tick, so cost grows with leaf.top as you scroll
+          first = min(leaf.top, size)
+          last = min(first + want, size) - 1
+          if last < first, do: [], else: for(i <- first..last, do: elem(static, i))
+
+        true ->
+          # a fold can drop any line, so which raw index is the leaf.top-th
+          # VISIBLE one can't be found without walking the folded sequence —
+          # correctness over micro-perf here; folds are the uncommon case
+          static
+          |> Tuple.to_list()
+          |> Enum.reject(&MapSet.member?(hidden, &1.num - 1))
+          |> Enum.slice(leaf.top, want)
+      end
 
     lines =
       visible
@@ -245,6 +317,7 @@ defmodule Aimax.Ui.EditorLive do
           else: ln
       end)
 
+    leaf = Map.put(leaf, :client_scroll?, client_scroll?)
     {Map.put(leaf, :lines, lines), Map.put(cache, leaf.id, {raw_key, static})}
   end
 
@@ -268,6 +341,10 @@ defmodule Aimax.Ui.EditorLive do
 
     ovs = Enum.map(leaf.overlays, fn {s, e, face} -> {s, e, "f-" <> face} end)
 
+    # a tuple, not a list: decorate/3 slices this by scroll position on
+    # every render, and elem/2 is O(1) where Enum.slice on a list is
+    # O(top) — this is the buffer's full line count, walked once here,
+    # cached by {buffer, version, ts_lang, overlay_gen} until the next edit
     leaf.text
     |> String.split("\n")
     |> Enum.map_reduce(0, fn part, start -> {{part, start}, start + byte_size(part) + 1} end)
@@ -287,6 +364,7 @@ defmodule Aimax.Ui.EditorLive do
         segs: seg_build(part, start, line_ts, line_ov)
       }
     end)
+    |> List.to_tuple()
   end
 
   defp visible_buffers(%{type: :leaf, buffer: b}), do: [b]
@@ -473,8 +551,12 @@ defmodule Aimax.Ui.EditorLive do
       <%= if @node.render_mode in ["html", "markdown"] do %>
         <iframe class="html-preview" sandbox="" srcdoc={@node.preview} title={@node.buffer}></iframe>
       <% else %>
-      <div class="buf" style={@node.style}>
-        <div :for={ln <- @lines} class={"line #{if ln.current, do: "hl-line"}"}>
+      <div class={"buf #{if @node.client_scroll?, do: "client-scroll"}"} style={@node.style}>
+        <div
+          :for={ln <- @lines}
+          id={"ln-#{@node.id}-#{ln.num}"}
+          class={"line #{if ln.current, do: "hl-line"}"}
+        >
           <span class="linenum">{ln.num}</span>
           <span class="line-content"><span :for={{txt, cls} <- ln.segs} class={cls}>{txt}</span><span
               :if={@active? && @completion && ln.current}

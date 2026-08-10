@@ -76,6 +76,10 @@ defmodule Aimax.Ui.Layouts do
             font-variant-ligatures: common-ligatures;
             letter-spacing: -0.1px;
           }
+          /* buffers under the ship-all threshold get every line at once
+             (editor_live.ex) — the browser owns scroll position natively
+             here, no server round-trip per scroll tick */
+          .buf.client-scroll { overflow: hidden auto; }
           .line { display: flex; align-items: flex-start; gap: 12px; padding: 0 16px 0 8px;
                   /* empty lines must keep their height even with .linenum hidden (no-nums, writing-mode) */
                   min-height: 1lh; }
@@ -483,6 +487,12 @@ defmodule Aimax.Ui.Layouts do
                   if (text) navigator.clipboard.writeText(text);
                 });
 
+                // this browser's frame: the server assigns/confirms the id,
+                // localStorage carries it across reloads and daemon restarts
+                this.handleEvent("frame", ({ id }) => {
+                  if (id) localStorage.setItem("aimax-frame", id);
+                });
+
                 // mouse: a click selects the window and places point; a drag
                 // leaves a native selection, mirrored into mark + point.
                 // Positions are (logical line, char offset) — the server maps
@@ -566,18 +576,52 @@ defmodule Aimax.Ui.Layouts do
                 };
                 window.addEventListener("resize", this.resizeH);
 
-                // wheel scrolls the server-side viewport of the active window
+                // wheel scrolls the server-side viewport of the hovered window
+                // (falling back to the active one) — batched to one round-trip
+                // per animation frame. Raw wheel events fire at native OS
+                // resolution (60-100+/sec on a trackpad); sending every line
+                // crossing as its own pushEvent means a full server diff/patch
+                // cycle on nearly every tick of a fast scroll. Summing into one
+                // flush per frame cuts round-trips without changing the line
+                // math.
+                //
+                // Pending lines are kept PER WINDOW: one accumulator would
+                // credit a scroll over window A to whichever window happened to
+                // flush, which is wrong the moment a frame has more than one.
                 this.wheelAcc = 0;
+                this.wheelPending = new Map();
+                this.wheelScheduled = false;
+                this.flushWheel = () => {
+                  this.wheelScheduled = false;
+                  for (const [win, lines] of this.wheelPending) {
+                    if (lines !== 0) {
+                      this.pushEvent("scroll", win === null ? { lines } : { lines, win });
+                    }
+                  }
+                  this.wheelPending.clear();
+                };
                 this.wheelH = (e) => {
-                  // agent/chat transcripts own their scrolling (.ag-scroll);
-                  // the server viewport only drives line-grid buffers
-                  if (e.target.closest && e.target.closest(".ag-scroll")) return;
+                  // agent/chat transcripts (.ag-scroll) and buffers under
+                  // the ship-all threshold (.buf.client-scroll) own their
+                  // scrolling natively — the server viewport only drives
+                  // large line-grid buffers still using the windowed path
+                  if (
+                    e.target.closest &&
+                    e.target.closest(".ag-scroll, .buf.client-scroll")
+                  )
+                    return;
                   e.preventDefault();
                   this.wheelAcc += e.deltaY;
                   const lines = Math.trunc(this.wheelAcc / this.lineHeight);
                   if (lines !== 0) {
                     this.wheelAcc -= lines * this.lineHeight;
-                    this.pushEvent("scroll", { lines });
+                    const winEl = e.target.closest && e.target.closest(".window[data-win-id]");
+                    const win = winEl ? parseInt(winEl.dataset.winId, 10) : null;
+                    this.wheelPending.set(win, (this.wheelPending.get(win) || 0) + lines);
+                    if (!this.wheelScheduled) {
+                      this.wheelScheduled = true;
+                      requestAnimationFrame(this.flushWheel);
+                    }
                   }
                 };
                 window.addEventListener("wheel", this.wheelH, { passive: false });
@@ -594,6 +638,24 @@ defmodule Aimax.Ui.Layouts do
                 // per-buffer styles all change how many rows fit where
                 clearTimeout(this._wrt);
                 this._wrt = setTimeout(this.sendWinRows, 30);
+
+                // client-scrolled buffers (.buf.client-scroll) ship every
+                // line — the server no longer computes a windowing top to
+                // keep point visible for them, so as point moves (edits,
+                // cursor motion, goto-line/imenu jumps) the browser has to
+                // do it instead. Only touch it when actually out of view —
+                // routine typing shouldn't re-center on every keystroke —
+                // but a deliberate jump to a distant line should land in
+                // the middle of the window, not right at the edge.
+                document.querySelectorAll(".buf.client-scroll .line.hl-line").forEach((el) => {
+                  const container = el.closest(".buf.client-scroll");
+                  if (!container) return;
+                  const eb = el.getBoundingClientRect();
+                  const cb = container.getBoundingClientRect();
+                  if (eb.top < cb.top || eb.bottom > cb.bottom) {
+                    el.scrollIntoView({ block: "center" });
+                  }
+                });
               },
               destroyed() {
                 window.removeEventListener("keydown", this.handler);
@@ -609,7 +671,8 @@ defmodule Aimax.Ui.Layouts do
 
           const csrf = document.querySelector("meta[name='csrf-token']").getAttribute("content");
           const liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
-            hooks: Hooks, params: { _csrf_token: csrf }
+            hooks: Hooks,
+            params: () => ({ _csrf_token: csrf, frame: localStorage.getItem("aimax-frame") })
           });
           liveSocket.connect();
           if (liveSocket.disableDebug) liveSocket.disableDebug();

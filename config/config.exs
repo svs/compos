@@ -22,12 +22,28 @@ config :aimax_ui, Aimax.Ui.Endpoint,
 
 config :phoenix, :json_library, Jason
 
-if config_env() == :test do
-  config :aimax_rpc, socket_path: "/tmp/aimax-rpc-test.sock"
+# AIMAX_VERIFY=1 mix run --no-halt: an isolated daemon (own port, home,
+# socket) for verifying changes from a worktree while the real one runs
+if config_env() == :dev and System.get_env("AIMAX_VERIFY") do
+  config :aimax_ui, Aimax.Ui.Endpoint, http: [ip: {127, 0, 0, 1}, port: 4104]
 
   config :aimax_core,
-    home: "/tmp/aimax-test-home",
-    desktop_path: "/tmp/aimax-desktop-test.etf",
+    home: "/tmp/aimax-verify-home",
+    desktop_path: "/tmp/aimax-verify-home/desktop.etf"
+
+  config :aimax_rpc, socket_path: "/tmp/aimax-verify.sock"
+end
+
+if config_env() == :test do
+  # per-checkout suffix: concurrent test runs from different worktrees must
+  # not share sockets or fixture files, or evals land in the other VM
+  suffix = Integer.to_string(:erlang.phash2(Path.expand(".")), 36)
+
+  config :aimax_rpc, socket_path: "/tmp/aimax-rpc-test-#{suffix}.sock"
+
+  config :aimax_core,
+    home: "/tmp/aimax-test-home-#{suffix}",
+    desktop_path: "/tmp/aimax-desktop-test-#{suffix}.etf",
     desktop_autorestore: false,
     # no models.dev fetches from tests
     llmdb_auto: false

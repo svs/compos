@@ -269,6 +269,22 @@ defmodule Aimax.ChromeTest do
       assert eval!(~s[(chrome--window-showing "*off-screen*")]) == "#f"
     end
 
+    # a tab you can switch to belongs in the same list as the buffers
+    test "tabs in this window become candidates, marked with a globe" do
+      tabs = ~s{'((id 7 title "Hacker News" url "https://news.ycombinator.com/" window 1)
+                  (id 8 title "Luma" url "https://luma.com/" window 2))}
+
+      assert eval!(~s[(car (chrome--tab-candidate (car #{tabs})))]) == ~s("🌐 Hacker News")
+
+      # only this browser window's tabs — C-x b offers what is beside you
+      eval!("(set! *chrome-window* 1)")
+      assert eval!(~s[(length (chrome--here-tabs #{tabs}))]) == "1"
+
+      # and the label round-trips back to the tab it names
+      assert eval!(~s[(chrome--get (chrome--tab-by-label "🌐 Luma" #{tabs}) 'id)]) == "8"
+      assert eval!(~s[(chrome--tab-by-label "*scratch*" #{tabs})]) == "#f"
+    end
+
     test "C-x b from a page routes to the returning command, not raw dispatch" do
       assert eval!(~s[(chrome--chord-command '("C-x" "b"))]) == ~s("chrome-switch-to-buffer")
       # anything without its own browser meaning still goes through the keymap

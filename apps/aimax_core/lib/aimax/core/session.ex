@@ -361,10 +361,14 @@ defmodule Aimax.Core.Session do
       "browser-call" => fn [op, args, callback] ->
         key = {:browser, make_ref()}
         :ets.insert(@escaped, {key, callback})
+        # the frame that asked, carried across the round-trip: a command that
+        # queries the browser and only then prompts must prompt in the frame
+        # it came from, not in whichever was last active when the reply landed
+        fid = Frame.current()
 
         Aimax.Core.Browser.call(s(op), browser_args(args), fn reply ->
           try do
-            apply_callback(callback, [browser_reply(reply)])
+            apply_callback(callback, [browser_reply(reply)], fid)
           after
             :ets.delete(@escaped, key)
           end

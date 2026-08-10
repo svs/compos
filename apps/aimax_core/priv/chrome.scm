@@ -67,24 +67,57 @@
           ((equal? (car (cdr (car ws))) buf) (car (car ws)))
           (else (loop (cdr ws))))))
 
+;; A tab in this window is a place you can switch to, so it belongs in the same
+;; list as the buffers. The globe marks which is which, and doubles as the key
+;; we match on when the choice comes back.
+(define *chrome-tab-mark* "🌐 ")
+
+(define (chrome--tab-candidate t)
+  (list (string-append *chrome-tab-mark* (or (chrome--get t 'title) "(untitled)"))
+        (or (chrome--get t 'url) "")))
+
+(define (chrome--tab-by-label label tabs)
+  (let loop ((ts tabs))
+    (cond ((null? ts) #f)
+          ((equal? (car (chrome--tab-candidate (car ts))) label) (car ts))
+          (else (loop (cdr ts))))))
+
+(define (chrome--here-tabs tabs)
+  (if *chrome-window*
+      (filter (lambda (t) (equal? (chrome--get t 'window) *chrome-window*)) tabs)
+      tabs))
+
 (define-command "chrome-switch-to-buffer"
-  "Return to ai-max showing a buffer, keeping the scene if it is already up"
+  "Return to ai-max showing a buffer — or switch to a tab in this window"
   (lambda ()
     ;; captured before the prompt opens — while a minibuffer is active,
     ;; current-buffer answers with the minibuffer
     (let ((here (current-buffer))
           (cands (buffer-candidates)))
-      (minibuffer-read
-        (string-append "Buffer (default " here "): ")
-        ;; the default is where you already were: from a page, C-x b RET means
-        ;; "put me back", not Emacs's "switch me away to the other buffer"
-        (cons (list here "here") cands)
-        (lambda (name)
-          (let* ((target (if (equal? name "") here name))
-                 (win (chrome--window-showing target)))
-            (if win
-                (select-window! win)
-                (switch-to-buffer! target))))))))
+      ;; ask the browser first, prompt second: the tab list is part of the
+      ;; candidate set, not a second prompt
+      (tab-list
+        (lambda (all)
+          (let ((tabs (chrome--here-tabs all)))
+            (minibuffer-read
+              (string-append "Buffer (default " here "): ")
+              ;; the default is where you already were: from a page, C-x b RET
+              ;; means "put me back", not Emacs's "switch me away"
+              (append (list (list here "here"))
+                      cands
+                      (map chrome--tab-candidate tabs))
+              (lambda (name)
+                (let ((tab (chrome--tab-by-label name tabs)))
+                  (if tab
+                      ;; a tab: go there, and don't drag the editor forward
+                      (begin
+                        (set! *chrome-raise?* #f)
+                        (tab-activate (chrome--get tab 'id)))
+                      (let* ((target (if (equal? name "") here name))
+                             (win (chrome--window-showing target)))
+                        (if win
+                            (select-window! win)
+                            (switch-to-buffer! target)))))))))))))
 
 ;; Chords a page should not send through raw dispatch, because returning from
 ;; outside wants different semantics than moving around inside.
@@ -114,8 +147,15 @@
 ;; reference: same keys, same meanings, just arriving from a page.
 ;; Answering a question means you want to see the answer: confirming raises the
 ;; editor's tab. Cancelling doesn't — you changed your mind, stay where you are.
+;; A confirm handler that sends you somewhere else (picking a TAB rather than a
+;; buffer) clears this, so we don't yank the editor in front of the tab you
+;; just asked for.
+(define *chrome-raise?* #t)
+
 (define (chrome--confirmed)
-  (append (chrome--with-mb '()) (list 'raise #t)))
+  (let ((r *chrome-raise?*))
+    (set! *chrome-raise?* #t)
+    (append (chrome--with-mb '()) (list 'raise r))))
 
 (define (chrome--mb-key spec)
   (cond ((not (minibuffer-state)) (list 'message "no prompt"))
@@ -138,7 +178,14 @@
 ;; the tab asking "is a prompt up?" — after a chord, or on reconnect
 (define (chrome--mb-state) (chrome--with-mb '()))
 
+;; Which browser window the request came from. One window, one ai-max, so this
+;; also says which tabs count as "here" — C-x b offers the tabs beside you, not
+;; every tab on the machine.
+(define *chrome-window* #f)
+
 (define (chrome--serve op args)
+  (let ((w (chrome--get args 'window)))
+    (when w (set! *chrome-window* w)))
   (cond ((equal? op "commands") (list 'commands (chrome--commands)))
         ((equal? op "run") (chrome--run (chrome--get args 'name)))
         ((equal? op "chord") (chrome--chord (or (chrome--get args 'keys) '())))

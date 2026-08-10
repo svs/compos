@@ -347,11 +347,11 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     };
 
     switch (msg.cmd) {
-      case "commands": return conn.ask("commands", { tab, frame });
-      case "run": return maybeRaise(await conn.ask("run", { tab, frame, name: msg.name }));
-      case "chord": return maybeRaise(await conn.ask("chord", { tab, frame, keys: msg.keys }));
-      case "mb-key": return maybeRaise(await conn.ask("mb-key", { tab, frame, spec: msg.spec }));
-      case "mb-state": return conn.ask("mb-state", { tab, frame });
+      case "commands": return conn.ask("commands", { tab, frame, window: windowId });
+      case "run": return maybeRaise(await conn.ask("run", { tab, frame, window: windowId, name: msg.name }));
+      case "chord": return maybeRaise(await conn.ask("chord", { tab, frame, window: windowId, keys: msg.keys }));
+      case "mb-key": return maybeRaise(await conn.ask("mb-key", { tab, frame, window: windowId, spec: msg.spec }));
+      case "mb-state": return conn.ask("mb-state", { tab, frame, window: windowId });
       default: throw new Error(`unknown ${msg.cmd}`);
     }
   };

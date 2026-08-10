@@ -91,6 +91,17 @@
       (filter (lambda (t) (equal? (chrome--get t 'window) *chrome-window*)) tabs)
       tabs))
 
+(define (chrome--tab-by-id id tabs)
+  (let loop ((ts tabs))
+    (cond ((null? ts) #f)
+          ((equal? (chrome--get (car ts) 'id) id) (car ts))
+          (else (loop (cdr ts))))))
+
+;; The tab you last pressed a key in. C-x b RET has always meant "the other
+;; place" in Emacs; once tabs are in the list, the other place is often a tab,
+;; and pressing it twice should bring you back — buffer, tab, buffer.
+(define *chrome-last-tab* #f)
+
 ;; Set while a browser request is being served, so the command below can tell
 ;; where the keystroke came from. The candidate LIST is the same either way —
 ;; what differs is what selecting does.
@@ -100,10 +111,22 @@
 ;; highlight live-previews in the invoking window. Arriving from a page the
 ;; default is where you already were, because you are returning rather than
 ;; switching. Same list either way — that is the point.
+;; What RET alone picks. From a page: the buffer you left, because you are
+;; returning. From inside ai-max: the tab you last came from if there is one —
+;; that's what makes C-x b RET twice a toggle across the boundary — otherwise
+;; Emacs's previous buffer.
+(define (chrome--default here cands tabs from-page)
+  (if from-page
+      here
+      (let ((t (if *chrome-last-tab* (chrome--tab-by-id *chrome-last-tab* tabs) #f)))
+        (cond (t (car (chrome--tab-candidate t)))
+              ((null? cands) here)
+              (else (car (car cands)))))))
+
 (define (chrome--prompt-switch here cands tabs from-page)
   (let* ((tab-cands (map chrome--tab-candidate tabs))
          (all (append cands tab-cands))
-         (fallback (if (or from-page (null? cands)) here (car (car cands)))))
+         (fallback (chrome--default here cands tabs from-page)))
     (minibuffer-read-preview
       (string-append "Switch to buffer (default " fallback "): ")
       all
@@ -215,6 +238,10 @@
 (define (chrome--serve op args)
   (let ((w (chrome--get args 'window)))
     (when w (set! *chrome-window* w)))
+  ;; the overlay is disabled on the editor's own page, so any request that
+  ;; names a tab came from a real web page — that is the place to come back to
+  (let ((tb (chrome--get args 'tab)))
+    (when tb (set! *chrome-last-tab* tb)))
   (cond ((equal? op "commands") (list 'commands (chrome--commands)))
         ((equal? op "run") (chrome--run (chrome--get args 'name)))
         ((equal? op "chord") (chrome--chord (or (chrome--get args 'keys) '())))

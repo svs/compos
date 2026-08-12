@@ -9,14 +9,20 @@ defmodule Aimax.Core.SchemeAPI do
   """
 
   alias Aimax.Core
-  alias Aimax.Core.{Buffer, Editor}
+  alias Aimax.Core.{Buffer, Editor, Git}
 
   @commands :aimax_commands
+
+  # closures that escape into a Task must stay rooted, or the Session GC
+  # collects the frames they capture (see Session's @escaped)
+  @escaped :aimax_escaped_closures
 
   def commands_table, do: @commands
 
   def primitives do
-    Map.merge(buffer_primitives(), editor_primitives())
+    buffer_primitives()
+    |> Map.merge(editor_primitives())
+    |> Map.merge(git_primitives())
   end
 
   defp buffer_primitives do
@@ -563,6 +569,167 @@ defmodule Aimax.Core.SchemeAPI do
       end
     }
   end
+
+  # --- git (Aimax.Core.Git; policy in packages/git.scm) ----------------------
+  # Every primitive takes an optional trailing callback. With one, the git
+  # command runs in a supervised Task and the callback gets the value — the
+  # Session never blocks on git. Without one, the caller waits: an agent
+  # through the RPC `eval` path needs an answer, not a promise.
+  #
+  # Values cross as plists — (key value ...) with symbol keys. An error is
+  # the plist (error "message"), which `list?` tells apart from a string.
+  defp git_primitives do
+    %{
+      "git-root" => fn [dir | rest] ->
+        git_dispatch(rest, fn -> Git.root(dir) end, & &1)
+      end,
+      "git-status" => fn [dir | rest] ->
+        git_dispatch(rest, fn -> Git.status(dir) end, &Enum.map(&1, fn e -> status_plist(e) end))
+      end,
+      # (git-diff DIR) | (git-diff DIR OPTS) | (git-diff DIR OPTS CALLBACK)
+      "git-diff" => fn
+        [dir] ->
+          git_dispatch([], fn -> Git.diff(dir, []) end, &diff_plist/1)
+
+        [dir, opts] ->
+          if callback?(opts) do
+            git_dispatch([opts], fn -> Git.diff(dir, []) end, &diff_plist/1)
+          else
+            git_dispatch([], fn -> Git.diff(dir, diff_opts(opts)) end, &diff_plist/1)
+          end
+
+        [dir, opts | rest] ->
+          git_dispatch(rest, fn -> Git.diff(dir, diff_opts(opts)) end, &diff_plist/1)
+      end,
+      "git-log" => fn [dir, n | rest] ->
+        git_dispatch(rest, fn -> Git.log(dir, n) end, &Enum.map(&1, fn c -> log_plist(c) end))
+      end,
+      "git-show" => fn [dir, ref | rest] ->
+        git_dispatch(rest, fn -> Git.show(dir, plain(ref)) end, & &1)
+      end
+    }
+  end
+
+  defp git_dispatch([], work, shape), do: git_value(work.(), shape)
+
+  defp git_dispatch([callback | _], work, shape) do
+    key = {:git_call, make_ref()}
+    rooted? = root_closure(key, callback)
+
+    Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
+      value = git_value(work.(), shape)
+
+      try do
+        Aimax.Core.Session.apply_callback(callback, [value])
+      after
+        if rooted?, do: :ets.delete(@escaped, key)
+      end
+    end)
+
+    :void
+  end
+
+  # the table belongs to the Session; a primitive called without one (tests)
+  # has no GC to defend against
+  defp root_closure(key, callback) do
+    case :ets.whereis(@escaped) do
+      :undefined ->
+        false
+
+      _tid ->
+        :ets.insert(@escaped, {key, callback})
+        true
+    end
+  end
+
+  defp git_value({:ok, value}, shape), do: shape.(value)
+  defp git_value({:error, msg}, _shape), do: [{:sym, "error"}, msg]
+
+  defp callback?({:closure, _, _, _}), do: true
+  defp callback?({:builtin, _, _}), do: true
+  defp callback?(_), do: false
+
+  defp status_plist(e) do
+    [
+      {:sym, "path"},
+      e.path,
+      {:sym, "orig-path"},
+      e.orig_path || false,
+      {:sym, "index"},
+      e.index,
+      {:sym, "worktree"},
+      e.worktree
+    ]
+  end
+
+  defp diff_plist(files) do
+    for f <- files do
+      [
+        {:sym, "file-a"},
+        f.file_a || false,
+        {:sym, "file-b"},
+        f.file_b || false,
+        {:sym, "binary?"},
+        f.binary?,
+        {:sym, "hunks"},
+        Enum.map(f.hunks, &hunk_plist/1)
+      ]
+    end
+  end
+
+  defp hunk_plist(h) do
+    [
+      {:sym, "header"},
+      h.header,
+      {:sym, "old-start"},
+      h.old_start,
+      {:sym, "old-count"},
+      h.old_count,
+      {:sym, "new-start"},
+      h.new_start,
+      {:sym, "new-count"},
+      h.new_count,
+      {:sym, "lines"},
+      for({tag, text} <- h.lines, do: [{:sym, Atom.to_string(tag)}, text])
+    ]
+  end
+
+  defp log_plist(c) do
+    [
+      {:sym, "sha"},
+      c.sha,
+      {:sym, "short-sha"},
+      c.short_sha,
+      {:sym, "author"},
+      c.author,
+      {:sym, "date"},
+      c.date,
+      {:sym, "subject"},
+      c.subject
+    ]
+  end
+
+  # (base "HEAD" path "lib/x.ex" staged #t) — a #f base drops the ref and
+  # diffs the work tree against the index
+  defp diff_opts(plist) when is_list(plist), do: diff_opts(plist, [])
+  defp diff_opts(_), do: []
+
+  defp diff_opts([key, value | rest], acc) do
+    acc =
+      case plain(key) do
+        "base" -> Keyword.put(acc, :base, opt_string(value))
+        "path" -> Keyword.put(acc, :path, opt_string(value))
+        "staged" -> Keyword.put(acc, :staged, value == true)
+        _ -> acc
+      end
+
+    diff_opts(rest, acc)
+  end
+
+  defp diff_opts(_, acc), do: acc
+
+  defp opt_string(false), do: nil
+  defp opt_string(value), do: plain(value)
 
   defp dir_atom({:sym, "h"}), do: :h
   defp dir_atom({:sym, "v"}), do: :v

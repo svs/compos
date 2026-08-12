@@ -2791,4 +2791,14 @@
 (public! 'group-chat-show! "(group-chat-show! G) — open/focus G's chat pane; returns its name")
 (public! 'chat-companion-show! "(chat-companion-show! DOC) — open/focus DOC's companion chat; returns its name")
 
+;; git
+;; Every one takes an optional trailing CALLBACK. With one the call returns
+;; at once and the callback gets the value; without one the caller waits.
+;; An error comes back as the plist (error "message").
+(public! 'git-root "(git-root DIR [CB]) -> absolute work-tree root; resolves from a subdirectory")
+(public! 'git-status "(git-status DIR [CB]) -> list of (path P orig-path P2|#f index X worktree Y); X/Y are the git status columns, ? is untracked")
+(public! 'git-diff "(git-diff DIR [OPTS] [CB]) -> list of (file-a A file-b B binary? BOOL hunks (...)); each hunk is (header H old-start N old-count N new-start N new-count N lines ((ctx|add|del TEXT) ...)). OPTS: (base \"HEAD\" path P staged #t); a #f base diffs the work tree against the index")
+(public! 'git-log "(git-log DIR N [CB]) -> last N commits as (sha S short-sha S author A date ISO subject S)")
+(public! 'git-show "(git-show DIR REF [CB]) -> the raw text of one commit")
+
 (message "editor.scm loaded")

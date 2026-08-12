@@ -29,6 +29,10 @@ defmodule Aimax.Core.Session do
   # small sessions never bother)
   @gc_floor 5_000
 
+  # how long a waiting mcp-call! waits. The RPC layer gives an eval 30s, so
+  # the call must give up first and say so.
+  @mcp_wait 25_000
+
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   # every entry point carries the caller's frame context into this process:
@@ -469,6 +473,53 @@ defmodule Aimax.Core.Session do
       "mcp-tool-specs" => fn [names] ->
         Aimax.Core.MCP.tool_specs(Enum.map(names, &s/1))
       end,
+      # Wait for a server that is still shaking hands, up to the same
+      # bound. An empty tool list reads as "this server serves nothing",
+      # which is a lie the caller cannot tell from the truth.
+      "mcp-await-ready" => fn args ->
+        [server | rest] = args
+        server = s(server)
+        wait = if is_integer(List.first(rest)), do: List.first(rest), else: @mcp_wait
+
+        task =
+          Task.Supervisor.async_nolink(Aimax.Core.TaskSupervisor, fn ->
+            Aimax.Core.MCP.await_ready(server, wait)
+          end)
+
+        case Task.yield(task, wait) || Task.shutdown(task, :brutal_kill) do
+          {:ok, ready?} -> ready?
+          _ -> false
+        end
+      end,
+      # Call one tool on one server. The work runs in a task, never here:
+      # this process draws the editor, and a server that answers in its own
+      # time must not stop it. With a callback the call returns at once;
+      # without one the caller waits, bounded, because the eval path (an
+      # agent through the aimax proxy) needs an answer, not a promise.
+      "mcp-tool-call" => fn
+        [server, tool, args] ->
+          mcp_wait_call(s(server), s(tool), mcp_args(args), @mcp_wait)
+
+        [server, tool, args, timeout] when is_integer(timeout) ->
+          mcp_wait_call(s(server), s(tool), mcp_args(args), timeout)
+
+        [server, tool, args, callback] ->
+          key = {:mcp_call, make_ref()}
+          :ets.insert(@escaped, {key, callback})
+          {server, tool, args} = {s(server), s(tool), mcp_args(args)}
+
+          Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
+            result = Aimax.Core.MCP.call_when_ready(server, tool, args, @mcp_wait)
+
+            try do
+              apply_callback(callback, mcp_callback_args(result))
+            after
+              :ets.delete(@escaped, key)
+            end
+          end)
+
+          :void
+      end,
       # MCP-shaped JSON for a list of registry tool specs — the proxy's
       # tools/list payload (input_schema key renamed to MCP's camelCase)
       "tool-specs-json" => fn [specs] ->
@@ -842,6 +893,32 @@ defmodule Aimax.Core.Session do
         Editor.set_echo("Quit")
         {:void, store}
       end,
+      # collect: close the prompt WITHOUT running any handler, and hand the
+      # caller everything the prompt was — the candidates that survive the
+      # current input, and the handler closures themselves. Scheme adopts
+      # them, so the prompt continues as a buffer (embark-collect). This is
+      # the only way out of a prompt that neither confirms nor cancels.
+      "minibuffer-detach!" => fn [] ->
+        case Editor.minibuffer_close() do
+          nil ->
+            false
+
+          mb ->
+            [
+              [{:sym, "prompt"}, mb.prompt],
+              [{:sym, "input"}, mb.input],
+              [
+                {:sym, "candidates"},
+                Enum.map(Aimax.Core.Candidates.filtered(mb.list), fn c ->
+                  [c.label, c.hint || ""]
+                end)
+              ],
+              [{:sym, "confirm"}, mb[:on_confirm] || false],
+              [{:sym, "cancel"}, mb[:on_cancel] || false],
+              [{:sym, "complete"}, mb[:on_complete] || false]
+            ]
+        end
+      end,
       "minibuffer-complete!" => fn [], store ->
         mb = Editor.snapshot().minibuffer
 
@@ -961,6 +1038,44 @@ defmodule Aimax.Core.Session do
   defp plist_val_to_elixir({:sym, str}), do: str
   defp plist_val_to_elixir(v) when is_list(v), do: Enum.map(v, &plist_val_to_elixir/1)
   defp plist_val_to_elixir(v), do: v
+
+  # the task owns the timeout, not the connection: Conn gives a tool call
+  # two minutes, and the session cannot wait that long for anything
+  defp mcp_wait_call(server, tool, args, timeout) do
+    task =
+      Task.Supervisor.async_nolink(Aimax.Core.TaskSupervisor, fn ->
+        Aimax.Core.MCP.call_when_ready(server, tool, args, timeout)
+      end)
+
+    case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {:ok, text}} -> text
+      {:ok, {:error, msg}} -> raise_scheme("mcp-call!: #{msg}")
+      _ -> raise_scheme("mcp-call!: #{server} #{tool} did not answer in time")
+    end
+  end
+
+  # tool arguments come as a JSON string (what an agent writes through
+  # eval-scheme) or as a plist (what Scheme code writes)
+  defp mcp_args(json) when is_binary(json) do
+    case Jason.decode(json) do
+      {:ok, map} when is_map(map) -> map
+      _ -> %{}
+    end
+  end
+
+  defp mcp_args(args) when is_list(args) do
+    case scheme_to_json(args) do
+      map when is_map(map) -> map
+      _ -> %{}
+    end
+  end
+
+  defp mcp_args(_), do: %{}
+
+  # (lambda (ok text) ...) — an error is text too, and a handler that only
+  # displays the answer needs no second branch
+  defp mcp_callback_args({:ok, text}), do: [true, text]
+  defp mcp_callback_args({:error, msg}), do: [false, to_string(msg)]
 
   # MCP spec plist: 'env and 'headers values are themselves plists -> maps
   defp mcp_spec(plist) do

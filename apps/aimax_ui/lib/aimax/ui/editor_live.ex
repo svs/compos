@@ -402,7 +402,7 @@ defmodule Aimax.Ui.EditorLive do
       <%= if @state.minibuffer do %>
         <div class="mb-panel">
           <div class="mb-label-row">
-            {String.trim_trailing(@state.minibuffer.prompt, ": ")} · TAB completes · RET accepts · C-n/C-p selects · C-g quits
+            {String.trim_trailing(@state.minibuffer.prompt, ": ")} · TAB completes · RET accepts · C-n/C-p selects · C-c C-o collects · C-g quits
           </div>
           <div class="mb-cands" style={"--mb-label-w: #{@state.minibuffer.label_width}ch"}>
             <div
@@ -709,7 +709,7 @@ defmodule Aimax.Ui.EditorLive do
     text_of =
       case meta do
         [msg | _] when is_binary(msg) -> msg
-        _ -> text |> safe_slice(s, e) |> String.trim() |> String.replace_prefix("╰─ you ▸ ", "")
+        _ -> text |> safe_slice(s, e) |> String.trim() |> String.replace_prefix(">>> you: ", "")
       end
 
     %{kind: :user, text: text_of}
@@ -724,7 +724,7 @@ defmodule Aimax.Ui.EditorLive do
         {:error, html, _} -> html
       end
 
-    %{kind: :prose, html: html}
+    %{kind: :prose, html: wrap_tables(html)}
   end
 
   defp ag_block([s, e, "thought" | _], text),
@@ -753,6 +753,15 @@ defmodule Aimax.Ui.EditorLive do
     do: %{kind: :meta, text: String.trim(safe_slice(text, s, e))}
 
   defp ag_block(_, _), do: nil
+
+  # A table always shrinks to the width it is given, and then clips what
+  # does not fit. So the scrollbar must sit on an element OUTSIDE the
+  # table. Earmark emits a bare <table>; give each one a box to scroll in.
+  defp wrap_tables(html) do
+    html
+    |> String.replace("<table>", ~s(<div class="ag-table"><table>))
+    |> String.replace("</table>", "</table></div>")
+  end
 
   # the input region: [queued (muted)][live text][cursor when point is home]
   defp ag_input(leaf, ag) do

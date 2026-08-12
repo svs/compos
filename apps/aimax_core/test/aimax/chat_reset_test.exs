@@ -45,7 +45,7 @@ defmodule Aimax.ChatResetTest do
     assert eval!(~s{(buffer-group (current-buffer))}) == ~s{"resetg"}
     # rich again: a fresh mark exists and the input marker is in place
     assert eval!(~s{(if (buffer-local (current-buffer) 'agent-saved-mark) #t #f)}) == "#t"
-    assert text =~ "you ▸"
+    assert text =~ "you: "
   end
 
   test "a legacy plain chat resets onto the one rich surface" do
@@ -60,7 +60,7 @@ defmodule Aimax.ChatResetTest do
 
     text = eval!(~s{(buffer-text "*plain-reset*")})
     assert text =~ "companion ·"
-    assert text =~ "you ▸"
+    assert text =~ "you: "
     refute text =~ "stale conversation"
     assert eval!(~s{(if (buffer-local (current-buffer) 'agent-saved-mark) #t #f)}) == "#t"
   end
@@ -95,7 +95,7 @@ defmodule Aimax.ChatResetTest do
     assert saved =~ "### You\nwhat shipped?"
     assert saved =~ "### Assistant\nthe mail client"
     # no block-render artifacts in the artifact
-    refute saved =~ "you ▸"
+    refute saved =~ "you: "
     assert eval!("(current-buffer)") == ~s{"#{path}"}
     assert eval!(~s{(buffer-local (current-buffer) 'mode-name)}) == ~s{"chat-mode"}
   end
@@ -287,7 +287,7 @@ defmodule Aimax.ChatResetTest do
 
       # ...the surface is rebuilt, and RET still sends
       assert Aimax.Core.Buffer.get_local(buf, "agent-saved-mark")
-      assert Aimax.Core.Buffer.text(buf) =~ "you ▸"
+      assert Aimax.Core.Buffer.text(buf) =~ "you: "
       assert Aimax.Core.Buffer.hidden(buf) == []
     end
 

@@ -225,9 +225,9 @@ defmodule Aimax.Core.Agent.Backend.ACP do
 
         # connector-declared adapter config, forwarded verbatim. This is how
         # aimax takes control of the agent's surface — the claude-code
-        # connector ships settingSources: [] so the adapter loads NONE of
-        # the user's own MCP servers or permission settings, leaving our
-        # mcpServers and our answers the only sources.
+        # connector ships settingSources: [] and strictMcpConfig: true, so
+        # the adapter reads no user settings file and no user MCP registry,
+        # leaving our mcpServers and our answers the only sources.
         params =
           case Map.get(state.config, "meta") do
             nil -> params
@@ -449,20 +449,30 @@ defmodule Aimax.Core.Agent.Backend.ACP do
   defp acp_server(flat) when is_list(flat) do
     m = flat |> Enum.chunk_every(2) |> Map.new(fn [k, v] -> {to_string(k), v} end)
 
-    env =
-      for [k, v] <- m["env"] || [] do
-        %{"name" => to_string(k), "value" => resolve_key(v)}
-      end
-
-    %{
-      "name" => m["name"],
-      "command" => m["command"],
-      "args" => m["args"] || [],
-      "env" => env
-    }
+    if m["url"] do
+      # an http server carries a type — that key is how the adapter tells
+      # the two variants apart — and its headers as a name/value list
+      %{
+        "name" => m["name"],
+        "type" => m["type"] || "http",
+        "url" => m["url"],
+        "headers" => acp_pairs(m["headers"])
+      }
+    else
+      %{
+        "name" => m["name"],
+        "command" => m["command"],
+        "args" => m["args"] || [],
+        "env" => acp_pairs(m["env"])
+      }
+    end
   end
 
   defp acp_server(other), do: other
+
+  defp acp_pairs(pairs) do
+    for [k, v] <- pairs || [], do: %{"name" => to_string(k), "value" => resolve_key(v)}
+  end
 
   defp resolve_key("@" <> var), do: Aimax.Core.Keys.get(var) || ""
   defp resolve_key(v), do: to_string(v)

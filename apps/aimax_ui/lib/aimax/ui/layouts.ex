@@ -177,10 +177,19 @@ defmodule Aimax.Ui.Layouts do
             min-width: 0; font-family: var(--font-mono); font-size: 12.5px;
             white-space: pre-wrap; overflow-wrap: anywhere;
           }
+          /* The measure belongs to the text, not to the block: five table
+             columns do not fit in 62ch. `overflow-wrap: anywhere` made it
+             worse. `anywhere` counts every character as a wrap opportunity
+             when the browser computes a cell's minimum width, so the table
+             algorithm shrank a "Rating" header to one letter per line.
+             `break-word` still breaks a long URL, and it leaves the
+             minimum width alone. */
           .ag-prose {
             font-family: var(--font-serif); font-size: 15px; line-height: 1.6;
-            margin: 8px 0; max-width: 62ch; overflow-wrap: anywhere;
+            margin: 8px 0; overflow-wrap: break-word;
           }
+          .ag-prose > * { max-width: 62ch; }
+          .ag-prose > pre, .ag-prose > .ag-table { max-width: 100%; }
           .ag-prose code, .ag-prose pre {
             font-family: var(--font-mono); font-size: 12px;
             background: var(--agent-code-bg, rgba(0,0,0,0.06)); border-radius: 4px;
@@ -190,6 +199,22 @@ defmodule Aimax.Ui.Layouts do
           .ag-prose pre code { background: none; padding: 0; }
           .ag-prose p { margin: 6px 0; }
           .ag-prose ul, .ag-prose ol { margin: 6px 0 6px 1.4em; }
+          /* The wrapper scrolls, the table does not (see wrap_tables/1).
+             The table takes the pane width and wraps its cells while that
+             still fits. When even the longest word no longer fits, the
+             table grows past the wrapper and the wrapper scrolls. */
+          .ag-table { overflow-x: auto; margin: 10px 0; }
+          .ag-prose table {
+            width: auto; max-width: 100%; border-collapse: collapse;
+            font-family: var(--font-sans); font-size: 13px;
+            font-variant-numeric: tabular-nums;
+          }
+          .ag-prose th, .ag-prose td {
+            border: 1px solid var(--agent-card-border, rgba(0,0,0,0.12));
+            padding: 5px 9px; text-align: left; vertical-align: top;
+          }
+          /* a header names the column: it never reads better wrapped */
+          .ag-prose th { font-weight: 600; white-space: nowrap; }
           .ag-tool, .ag-thought {
             margin: 8px 0; border: 1px solid var(--agent-card-border, rgba(0,0,0,0.10));
             border-radius: 8px; font-family: var(--font-mono); font-size: 12px;

@@ -112,7 +112,15 @@ counts/presets, <kbd>s</kbd>/<kbd>k</kbd>/<kbd>r</kbd> start·stop·restart
 (<kbd>S</kbd>/<kbd>K</kbd>/<kbd>R</kbd> for all), <kbd>RET</kbd> the detail
 view, <kbd>l</kbd> the JSON-RPC frames; rows redraw themselves via
 <code>mcp-on-change!</code>, and a server that died leaves its status+log
-behind (<code>MCP.last/1</code>) so the row that went red can say why ·
+behind (<code>MCP.last/1</code>) so the row that went red can say why.
+Registered servers reach agent threads too, stdio and http alike
+(<code>mcp-acp-server</code> — an http server rides into
+<code>session/new</code> as a type/url/headers entry). Any caller outside
+the chat tool loop calls a tool with
+<code>(mcp-call! 'name TOOL ARGS)</code>: it connects the server, waits for
+the handshake, and returns the text. It runs in a task, never in the
+session process; pass a <code>(lambda (ok text) ...)</code> callback and it
+returns at once ·
 org-mode (outline folding,
 fontification, structure editing, TODO cycling, promote/demote — 100% Scheme,
 <code>priv/packages/org.scm</code>) · LLM (multi-provider, doppler keys, <kbd>M-|</kbd>

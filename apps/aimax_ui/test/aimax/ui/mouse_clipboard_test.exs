@@ -73,8 +73,8 @@ defmodule Aimax.Ui.MouseClipboardTest do
   end
 
   test "selecting a chat window snaps point into the input region", %{conn: conn} do
-    buf = fresh_buffer("*chat: mc-#{System.unique_integer([:positive])}*", "transcript\n╰─ you ▸ ")
-    marker = "\n╰─ you ▸ "
+    buf = fresh_buffer("*chat: mc-#{System.unique_integer([:positive])}*", "transcript\n>>> you: ")
+    marker = "\n>>> you: "
     Buffer.set_local(buf, "render-mode", "agent")
     Buffer.set_local(buf, "agent-slug", "mc")
     Buffer.set_local(buf, "agent-saved-mark", 10)
@@ -88,8 +88,8 @@ defmodule Aimax.Ui.MouseClipboardTest do
   end
 
   test "a stranded agent mark is clamped so the input region survives", %{conn: conn} do
-    buf = fresh_buffer("*chat: mc-heal-#{System.unique_integer([:positive])}*", "text\n╰─ you ▸ hi")
-    marker = "\n╰─ you ▸ "
+    buf = fresh_buffer("*chat: mc-heal-#{System.unique_integer([:positive])}*", "text\n>>> you: hi")
+    marker = "\n>>> you: "
     Buffer.set_local(buf, "render-mode", "agent")
     Buffer.set_local(buf, "agent-slug", "mc-heal")
     Buffer.set_local(buf, "agent-saved-mark", Buffer.byte_size(buf) + 12)

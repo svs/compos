@@ -101,7 +101,7 @@ defmodule Aimax.ChatFileTest do
     assert saved =~ "### You\nwhat shipped?"
     assert saved =~ "### Assistant\nthe mail client"
     # no rendering artifacts in the file
-    refute saved =~ "you ▸"
+    refute saved =~ "you: "
 
     # --- open it fresh, as if after a restart ---------------------------
     eval!(~s[(begin (buffer-kill! "#{path}") #t)])
@@ -122,11 +122,11 @@ defmodule Aimax.ChatFileTest do
 
     # and as a live surface: rendered cards, an input marker, RET sends
     text = Buffer.text(buf)
-    assert text =~ "╰─ you ▸ what shipped?"
+    assert text =~ ">>> you: what shipped?"
     assert text =~ "the mail client"
     refute text =~ "#+chat:"
     refute text =~ "### You"
-    assert String.ends_with?(text, "╰─ you ▸ ")
+    assert String.ends_with?(text, ">>> you: ")
     assert Buffer.get_local(buf, "agent-saved-mark")
     assert Editor.lookup_key(["RET"]) == {:command, "agent-send"}
   end

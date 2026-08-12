@@ -32,7 +32,7 @@ defmodule Aimax.Ui.AgentViewTest do
 
     Buffer.append(buf, ";; agent thread\n", source: :editor)
     u_start = Buffer.byte_size(buf)
-    Buffer.append(buf, "\n╰─ you ▸ profile redisplay\n\n", source: :editor)
+    Buffer.append(buf, "\n>>> you: profile redisplay\n\n", source: :editor)
     p_start = Buffer.byte_size(buf)
     Buffer.append(buf, "Paint is **0.6ms** now.\n", source: :editor)
     t_start = Buffer.byte_size(buf)
@@ -40,13 +40,13 @@ defmodule Aimax.Ui.AgentViewTest do
     b_start = Buffer.byte_size(buf)
     Buffer.append(buf, "p95 9.4ms\n", source: :editor)
     mark = Buffer.byte_size(buf)
-    Buffer.append(buf, "\n╰─ you ▸ ", source: :editor)
+    Buffer.append(buf, "\n>>> you: ", source: :editor)
     Buffer.append(buf, "half-typed", source: :editor)
 
     Buffer.set_local(buf, "render-mode", "agent")
     Buffer.set_local(buf, "agent-slug", "view-test")
     Buffer.set_local(buf, "agent-saved-mark", mark)
-    Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n╰─ you ▸ "))
+    Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
     Buffer.set_local(buf, "agent-queued", [])
 
     Buffer.set_local(buf, "agent-blocks", [
@@ -71,18 +71,18 @@ defmodule Aimax.Ui.AgentViewTest do
     assert html =~ "half-typed"
     refute html =~ "RET sends"
     # no raw marker rendered in rich mode
-    refute html =~ "╰─ you ▸ profile"
+    refute html =~ ">>> you: profile"
   end
 
   test "permission block renders buttons that dispatch agent commands", %{conn: conn} do
     buf = "*agent: perm-test*"
     {:ok, _} = Aimax.Core.create_buffer(buf)
-    Buffer.append(buf, "x\n── needs permission: Write foo.ex ──\n╰─ you ▸ ", source: :editor)
+    Buffer.append(buf, "x\n── needs permission: Write foo.ex ──\n>>> you: ", source: :editor)
 
     Buffer.set_local(buf, "render-mode", "agent")
     Buffer.set_local(buf, "agent-slug", "perm-test")
     Buffer.set_local(buf, "agent-saved-mark", 37)
-    Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n╰─ you ▸ "))
+    Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
     Buffer.set_local(buf, "agent-blocks", [[1, 37, "permission", "Write foo.ex"]])
 
     Editor.set_window_buffer(buf)
@@ -105,12 +105,12 @@ defmodule Aimax.Ui.AgentViewTest do
     p_start = 0
     Buffer.append(buf, "site — dash\n", source: :editor)
     mark = Buffer.byte_size(buf)
-    Buffer.append(buf, "\n╰─ you ▸ ", source: :editor)
+    Buffer.append(buf, "\n>>> you: ", source: :editor)
 
     Buffer.set_local(buf, "render-mode", "agent")
     Buffer.set_local(buf, "agent-slug", "utf8-test")
     Buffer.set_local(buf, "agent-saved-mark", mark)
-    Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n╰─ you ▸ "))
+    Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
     # "site — dash\n": the em dash starts at byte 5; end offset 6 is inside it
     Buffer.set_local(buf, "agent-blocks", [[p_start, 6, "prose"]])
 
@@ -122,4 +122,39 @@ defmodule Aimax.Ui.AgentViewTest do
     # empty input row shows the keybinding hint
     assert html =~ "RET sends"
   end
+
+  # A table shrinks to the width it is given and clips the rest, so the
+  # scrollbar must sit on a box OUTSIDE it. Earmark emits a bare <table>;
+  # the renderer wraps each one. Lose the wrapper and a wide table clips.
+  test "a markdown table renders inside its own scroll box", %{conn: conn} do
+    buf = "*agent: table-test*"
+    {:ok, _} = Aimax.Core.create_buffer(buf)
+
+    md = """
+    | Name | Rating |
+    |------|--------|
+    | Amandeep Yadav | 3/5 |
+    """
+
+    Buffer.append(buf, md, source: :editor)
+    mark = Buffer.byte_size(buf)
+    Buffer.append(buf, "\n>>> you: ", source: :editor)
+
+    Buffer.set_local(buf, "render-mode", "agent")
+    Buffer.set_local(buf, "agent-slug", "table-test")
+    Buffer.set_local(buf, "agent-saved-mark", mark)
+    Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
+    Buffer.set_local(buf, "agent-blocks", [[0, mark, "prose"]])
+
+    Editor.set_window_buffer(buf)
+    {:ok, _view, html} = live(conn, "/")
+
+    assert html =~ ~s(<div class="ag-table"><table>)
+    assert html =~ "</table></div>"
+    assert html =~ "Amandeep Yadav"
+    # every wrapper opens and closes: an unbalanced replace breaks the layout
+    assert count(html, ~s(<div class="ag-table">)) == count(html, "</table></div>")
+  end
+
+  defp count(haystack, needle), do: length(String.split(haystack, needle)) - 1
 end

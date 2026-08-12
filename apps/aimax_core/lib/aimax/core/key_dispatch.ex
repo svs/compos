@@ -103,6 +103,10 @@ defmodule Aimax.Core.KeyDispatch do
     case Editor.lookup_key(seq) do
       {:command, name} ->
         Editor.set_pending([])
+        # the prefix echo ("C-c-") must not outlive the sequence: the
+        # command can close the prompt, and the echo bar comes back into
+        # view still showing it
+        if pending != [], do: Editor.set_echo("")
         run(name)
 
       :prefix ->

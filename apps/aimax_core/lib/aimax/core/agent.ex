@@ -197,8 +197,18 @@ defmodule Aimax.Core.Agent do
   end
 
   def handle_call({:append_at_mark, text}, _from, state) do
-    Buffer.insert_at(state.buffer, state.mark, text, source: {:agent, state.slug})
     mark = state.mark + byte_size(text)
+
+    # The renderer slices the input region from 'agent-saved-mark. The
+    # insert grows the transcript ABOVE that mark, so the mark has to
+    # advance in the same breath. Set from Scheme afterwards, it lagged by
+    # one frame, and the input row rendered the new transcript text and
+    # the ">>> you: " marker with it — the flash while a reply prints.
+    Buffer.insert_at(state.buffer, state.mark, text,
+      source: {:agent, state.slug},
+      locals: %{"agent-saved-mark" => mark}
+    )
+
     {:reply, mark, %{state | mark: mark}}
   end
 

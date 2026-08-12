@@ -157,7 +157,7 @@ defmodule Aimax.ApiLaneTest do
     press(["RET"])
     refute_receive {:sent, _, _}, 200
     assert %{queued: 1} = Agent.info("a1")
-    assert Buffer.text(buf) =~ "▸ second message"
+    assert Buffer.text(buf) =~ ": second message"
 
     # release round 1 -> the queue pops by itself
     send(task1, :release)
@@ -165,13 +165,54 @@ defmodule Aimax.ApiLaneTest do
     assert second =~ "second message"
 
     # its turn started: the muted copy left the input region
-    assert eventually(fn -> Buffer.text(buf) =~ "╰─ you ▸ second message\n" end)
+    assert eventually(fn -> Buffer.text(buf) =~ ">>> you: second message\n" end)
 
     # C-RET cancels the running turn: the thread returns to idle without
     # waiting for the (still-blocked) wire
     focus(buf)
     press(["C-RET"])
     assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
+  end
+
+  test "C-g aborts the turn in flight, and quits the usual way when idle" do
+    me = self()
+
+    stub_chat(fn req ->
+      send(me, {:sent, req.messages |> List.last() |> Map.get(:content), self()})
+
+      receive do
+        :release -> :ok
+      after
+        5_000 -> :ok
+      end
+
+      {:ok,
+       %{
+         "stop_reason" => "end_turn",
+         "content" => [%{"type" => "text", "text" => "ok"}],
+         "usage" => %{"input_tokens" => 1, "output_tokens" => 1}
+       }}
+    end)
+
+    {:ok, _} = Session.eval(~s{(execute* "" '(connector "api"))})
+    buf = "*chat:a1*"
+    focus(buf)
+
+    type("a long question")
+    press(["RET"])
+    assert_receive {:sent, _, _task}, 2_000
+    assert eventually(fn -> match?(%{status: :running}, Agent.info("a1")) end)
+
+    press(["C-g"])
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
+
+    # the thinking marker went with it
+    refute Buffer.text(buf) =~ "thinking"
+
+    # nothing running: C-g is keyboard-quit again, and the thread lives on
+    focus(buf)
+    press(["C-g"])
+    assert %{status: :idle} = Agent.info("a1")
   end
 
   defp eventually(fun, tries \\ 40) do

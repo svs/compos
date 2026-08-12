@@ -186,6 +186,105 @@ defmodule Aimax.PresetTest do
     assert Buffer.get_local(buf, "chat-presets") == []
   end
 
+  test "an http server reaches the agent too, with its headers resolved" do
+    System.put_env("ZZ_MCP_TOKEN", "sekrit")
+    on_exit(fn -> System.delete_env("ZZ_MCP_TOKEN") end)
+
+    {:ok, _} =
+      Session.eval("""
+      (begin
+        (mcp-register! 'zz-http '(type "http" url "https://zz.test/mcp"
+                                  headers (Authorization "@ZZ_MCP_TOKEN")))
+        (define-preset! 'zz-httppack "http pack" '(zz-http)))
+      """)
+
+    {:ok, _} = Session.eval(~s{(execute* "" '(presets (zz-httppack)))})
+    assert_receive {:transport_open, agent}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(agent, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{}})
+    assert_receive {:frame, %{"method" => "session/new", "params" => np}}, 1_000
+
+    entry = Enum.find(np["mcpServers"], &(&1["name"] == "zz-http"))
+    assert entry["type"] == "http"
+    assert entry["url"] == "https://zz.test/mcp"
+    assert entry["headers"] == [%{"name" => "Authorization", "value" => "sekrit"}]
+
+    # an http entry carries no command: the adapter starts no subprocess
+    refute Map.has_key?(entry, "command")
+
+    # and the prompt names every registered server, so a thread that holds
+    # no tool for one still knows it is a server and not a host
+    assert %{"systemPrompt" => %{"append" => note}} = np["_meta"]
+    assert note =~ "zz-http"
+    assert note =~ "mcp-call!"
+
+    # the connector's own _meta survives beside it — BOTH keys. Losing
+    # strictMcpConfig is the silent failure: the CLI reads the user's own
+    # MCP registry from ~/.claude.json, which no setting source covers,
+    # and merges it in. The preset then stops being the whole surface.
+    assert %{
+             "claudeCode" => %{
+               "options" => %{"settingSources" => [], "strictMcpConfig" => true}
+             }
+           } = np["_meta"]
+  end
+
+  test "presets declared at spawn survive a revive: they land in the buffer-local" do
+    {:ok, _} =
+      Session.eval("""
+      (begin
+        (mcp-register! 'zz-spawn '(command "zz" args ("--stdio")))
+        (define-preset! 'zz-spawnpack "spawn pack" '(zz-spawn)))
+      """)
+
+    {:ok, _} = Session.eval(~s{(execute* "" '(presets (zz-spawnpack)))})
+    assert_receive {:transport_open, agent}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(agent, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{}})
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid, "params" => np}}, 1_000
+    assert "zz-spawn" in servers(np)
+    inject(agent, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "s1"}})
+
+    # the spawn config alone is not enough: agent-revive! reads the
+    # buffer-local, so a thread that only carried it in opts came back bare
+    buf = Enum.find(Aimax.Core.list_buffers(), &(Buffer.get_local(&1, "agent-slug") == "a1"))
+    assert Buffer.get_local(buf, "chat-presets") == [{:sym, "zz-spawnpack"}]
+
+    {:ok, _} = Session.eval(~s[(begin (agent-kill! "a1") (agent-revive! "a1"))])
+    assert_receive {:transport_open, agent2}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid2}}, 1_000
+    inject(agent2, %{"jsonrpc" => "2.0", "id" => iid2, "result" => %{}})
+    assert_receive {:frame, %{"method" => "session/new", "params" => np2}}, 1_000
+    assert "zz-spawn" in servers(np2)
+  end
+
+  test "chat-tool-surface names every server the chat's agent holds, and no other" do
+    {:ok, _} =
+      Session.eval("""
+      (begin
+        (mcp-register! 'zz-surface '(command "zz" args ("--stdio")))
+        (define-preset! 'zz-surfacepack "surface pack" '(zz-surface)))
+      """)
+
+    {:ok, _} = Session.eval(~s{(execute* "" '(presets (zz-surfacepack)))})
+    assert_receive {:transport_open, agent}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(agent, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{}})
+    assert_receive {:frame, %{"method" => "session/new", "params" => np}}, 1_000
+
+    buf = Enum.find(Aimax.Core.list_buffers(), &(Buffer.get_local(&1, "agent-slug") == "a1"))
+    {:ok, _} = Session.eval(~s[(begin (switch-to-buffer! "#{buf}") (run-command "chat-tool-surface"))])
+
+    text = Buffer.text("*chat tools*")
+    on_exit(fn -> Aimax.Core.kill_buffer("*chat tools*") end)
+
+    # the report names exactly the servers that went over the wire
+    for s <- np["mcpServers"], do: assert(text =~ s["name"])
+    assert text =~ "zz-surfacepack"
+    assert text =~ "zz --stdio"
+    refute text =~ "google-search"
+  end
+
   test "the api lane needs no reconnect: its tool specs are read at send time" do
     {:ok, _} = Session.eval(~s{(execute* "" '(connector "api"))})
     buf = "*chat:a1*"

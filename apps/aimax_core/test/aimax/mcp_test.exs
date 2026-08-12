@@ -161,6 +161,95 @@ defmodule Aimax.MCPTest do
                              (chat-extra-tool-specs "*zz-mcp-chat*"))}) == "()"
     end
 
+    test "an http server translates to an ACP entry; a spec with neither is dropped" do
+      eval!(~s{(mcp-register! 'zzhttp '(type "http" url "https://zz.test/mcp"
+                                       headers (Authorization "Bearer zz")))})
+      eval!(~s{(mcp-register! 'zzstdio '(command "zz-bin" args ("--stdio") env (K "v")))})
+      eval!(~s{(mcp-register! 'zzempty '(note "no transport here"))})
+
+      assert eval!("(mcp-acp-server 'zzhttp)") ==
+               ~s{(name "zzhttp" type "http" url "https://zz.test/mcp" } <>
+                 ~s{headers (("Authorization" "Bearer zz")))}
+
+      assert eval!("(mcp-acp-server 'zzstdio)") ==
+               ~s{(name "zzstdio" command "zz-bin" args ("--stdio") env (("K" "v")))}
+
+      assert eval!("(mcp-acp-server 'zzempty)") == "#f"
+      assert eval!("(mcp-acp-servers '(zzempty zzhttp))") =~ "zzhttp"
+      refute eval!("(mcp-acp-servers '(zzempty zzhttp))") =~ "zzempty"
+    end
+
+    test "mcp-call! connects, waits for the handshake, and returns the tool's text" do
+      on_exit(fn -> MCP.disconnect("zzcall") end)
+      eval!(~s{(mcp-register! 'zzcall (list 'command "elixir" 'args (list "#{@fixture}")))})
+
+      # never connected: the call does that itself and waits for the tools
+      refute MCP.connected?("zzcall")
+      assert eval!(~S[(mcp-call! 'zzcall "echo" "{\"v\":\"hi\"}")]) == ~s["echo:hi"]
+
+      # a plist is arguments too — Scheme code should not write JSON by hand
+      assert eval!(~s[(mcp-call! 'zzcall "echo" '(v "there"))]) == ~s["echo:there"]
+    end
+
+    test "the callback form returns at once and hands the text over later" do
+      on_exit(fn -> MCP.disconnect("zzcb") end)
+      eval!(~s{(mcp-register! 'zzcb (list 'command "elixir" 'args (list "#{@fixture}")))})
+
+      assert eval!(~s[(mcp-call! 'zzcb "echo" '(v "later")
+                        (lambda (ok text) (set-symbol-value! 'zz-cb-reply (list ok text))))]) == ""
+
+      wait_until(fn -> match?({:ok, "#t"}, Session.eval("(boundp 'zz-cb-reply)")) end)
+      assert eval!("zz-cb-reply") == ~s[(#t "echo:later")]
+    end
+
+    test "mcp-tools connects first, so the list is never falsely empty" do
+      on_exit(fn -> MCP.disconnect("zztools") end)
+      eval!(~s{(mcp-register! 'zztools (list 'command "elixir" 'args (list "#{@fixture}")))})
+
+      refute MCP.connected?("zztools")
+      assert eval!("(mcp-tools 'zztools)") == ~s[(("echo" "Echo back v."))]
+
+      # the arguments, so nobody guesses parameter names
+      schema = eval!(~s[(mcp-tool-schema 'zztools "echo")])
+      assert schema =~ "required"
+      assert schema =~ "\\\"v\\\""
+      assert eval!(~s[(mcp-tool-schema 'zztools "no-such-tool")]) == ~s[""]
+    end
+
+    test "mcp-find searches every server's tools the way apropos-api does" do
+      on_exit(fn -> MCP.disconnect("zzfind") end)
+      eval!(~s{(mcp-register! 'zzfind (list 'command "elixir" 'args (list "#{@fixture}")))})
+
+      # by description, not only by name — "echo" never appears as a word
+      # in the request a user actually writes
+      assert eval!(~s[(mcp-find "back v" 'zzfind)]) == ~s[(("zzfind" "echo" "Echo back v."))]
+      assert eval!(~s[(mcp-find "nothing|missing" 'zzfind)]) == "()"
+
+      # several words, any of which may hit
+      assert eval!(~s[(mcp-find "zzz|echo" 'zzfind)]) =~ "echo"
+    end
+
+    test "the system note names the servers and the way to call one" do
+      eval!(~s{(mcp-register! 'zznote '(type "http" url "https://zz.test/mcp"))})
+      note = eval!("(mcp-system-note)")
+
+      assert note =~ "zznote"
+      assert note =~ "never ssh"
+      assert note =~ "mcp-call!"
+
+      # the direct lane carries it in the system text of every turn
+      on_exit(fn -> Aimax.Core.kill_buffer("*zz-note-chat*") end)
+      eval!(~s{(buffer-create "*zz-note-chat*")})
+      eval!(~s{(buffer-set-local! "*zz-note-chat*" 'agent-slug "zznoteslug")})
+      eval!(~s{(buffer-set-local! "*zz-note-chat*" 'chat-use-tools #t)})
+      assert eval!(~s{(chat-mcp-note)}) =~ "zznote"
+    end
+
+    test "a call to a server that is not there fails with words, not a hang" do
+      assert {:error, msg} = Session.eval(~S[(mcp-call! 'zz-not-a-server "echo" "{}")])
+      assert msg =~ "not connected"
+    end
+
     test "unknown presets and servers stay quiet failures, not crashes" do
       assert eval!("(preset-servers 'zz-none)") == "()"
       eval!("(mcp-ensure! 'zz-unregistered)")

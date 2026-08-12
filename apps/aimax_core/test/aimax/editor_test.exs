@@ -1416,7 +1416,7 @@ defmodule Aimax.EditorTest do
     # rich surface from birth: agent renderer + help meta card + input marker
     assert Buffer.get_local(companion, "render-mode") == "agent"
     assert Buffer.text(companion) =~ "companion · #{buf}"
-    assert Buffer.text(companion) =~ "╰─ you ▸"
+    assert Buffer.text(companion) =~ ">>> you:"
 
     type("make it rhyme")
     press(["RET"])

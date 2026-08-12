@@ -129,6 +129,8 @@
   (local-set-key* mb "<down>" "minibuffer-next-candidate")
   (local-set-key* mb "C-p" "minibuffer-previous-candidate")
   (local-set-key* mb "<up>" "minibuffer-previous-candidate")
+  ;; the prompt continues as a buffer — see minibuffer-collect below
+  (local-set-key* mb "C-c C-o" "minibuffer-collect")
   (local-set-key* mb "DEL" "minibuffer-delete-backward"))
 
 ;;; --- hooks (Emacs-style, all Scheme) ----------------------------------------
@@ -1097,6 +1099,175 @@
               (message "Nothing to quit to")
               (switch-to-buffer! (car (car others))))))))
 
+;;; --- collect: the prompt continues as a buffer (embark-collect) ------------
+;;; C-c C-o in any prompt closes it and writes the candidates that survive
+;;; your input into *Collect*. The buffer keeps the prompt's behaviour:
+;;; n/p preview in the window the prompt ran in, RET accepts, q cancels.
+;;; The handlers come from the prompt itself — minibuffer-detach! closes it
+;;; without firing anything and hands them over — so every prompt collects.
+
+(define *collect-buffer* "*Collect*")
+
+;; the detached prompt lives in globals, not in buffer-locals: a closure
+;; cannot survive a restart, and desktop.etf must not hold one. After a
+;; restart the buffer is text — the keys say so and stop.
+(define *collect-select* #f)     ; the preview hook, from minibuffer-read-preview
+(define *collect-confirm* #f)
+(define *collect-cancel* #f)
+(define *collect-complete* #f)   ; path prompts resolve a label through it
+(define *collect-input* "")
+(define *collect-window* #f)     ; the window the prompt ran in
+
+(define (collect-forget!)
+  (set! *collect-select* #f)
+  (set! *collect-confirm* #f)
+  (set! *collect-cancel* #f)
+  (set! *collect-complete* #f))
+
+(define (collect-fill! prompt cands)
+  (let ((buf *collect-buffer*))
+    (buffer-delete-range! buf 0 (buffer-size buf))
+    (buffer-append! buf
+      (string-append ";; " (string-trim prompt) " "
+                     (number->string (length cands))
+                     " candidates · n/p previews · RET accepts · q quits\n"))
+    (buffer-set-local! buf 'collect-labels (map car cands))
+    (for-each
+      (lambda (c)
+        (buffer-append! buf
+          (string-append (car c)
+                         (if (equal? (cadr c) "") "" (string-append "  " (cadr c)))
+                         "\n")))
+      cands)))
+
+;; the list opens in another window: the window the prompt ran in must keep
+;; showing what the preview acts on
+(define (collect-open! prompt cands)
+  (buffer-create *collect-buffer*)
+  (collect-fill! prompt cands)
+  (let ((showing (window-showing *collect-buffer*)))
+    (if showing
+        (select-window! showing)
+        (begin (split-window! 'v 0.6) (other-window!))))
+  (switch-to-buffer! *collect-buffer*)
+  (set-mode! "collect-mode")
+  (goto-char! 0)
+  (next-line!)
+  (beginning-of-line!)
+  (collect-preview!))
+
+;; the label on the current line — the header is line 0, entries follow
+(define (collect-current)
+  (if (not (buffer-exists? *collect-buffer*))
+      #f
+      (collect-label-at)))
+
+(define (collect-label-at)
+  (let* ((labels (or (buffer-local *collect-buffer* 'collect-labels) '()))
+         (before (substring-bytes (buffer-text *collect-buffer*) 0 (point)))
+         (ln (- (length (string-split before "\n")) 2)))
+    (if (and (>= ln 0) (< ln (length labels))) (list-ref labels ln) #f)))
+
+;; the preview goes where the prompt's preview went: the window the prompt
+;; ran in. If that window is gone, any other window does. The preview must
+;; never land in the list itself, so a lone *Collect* window previews
+;; nothing.
+(define (collect-target-window)
+  (let ((me (active-window)))
+    (if (and *collect-window* (window-exists? *collect-window*)
+             (not (equal? *collect-window* me)))
+        *collect-window*
+        (let loop ((ws (window-list)))
+          (cond ((null? ws) #f)
+                ((not (equal? (car (car ws)) me)) (car (car ws)))
+                (else (loop (cdr ws))))))))
+
+(define (collect-preview!)
+  (let ((label (collect-current)) (w (collect-target-window)))
+    (when (and *collect-select* label)
+      (if w
+          (let ((back (active-window)))
+            (select-window! w)
+            (*collect-select* label)
+            (set! *collect-window* w)
+            (select-window! back))
+          (message "No other window to preview in")))))
+
+;; path prompts resolve a label through their completion fn — that is how
+;; find-file turns "editor.scm" back into a full path (see mb_confirm_value)
+(define (collect-resolve label)
+  (if *collect-complete*
+      (let ((r (*collect-complete* *collect-input* label)))
+        (if (and (pair? r) (string? (car r))) (car r) label))
+      label))
+
+(define (collect-close!)
+  (if (null? (cdr (window-list)))
+      (run-command "quit-window")
+      (delete-window!))
+  (buffer-kill! *collect-buffer*))
+
+(define-command "collect-next" "Move down; the preview follows"
+  (lambda () (next-line!) (beginning-of-line!) (collect-preview!)))
+
+(define-command "collect-prev" "Move up; the preview follows"
+  (lambda ()
+    (previous-line!) (beginning-of-line!)
+    (unless (collect-current) (next-line!) (beginning-of-line!))
+    (collect-preview!)))
+
+(define-command "collect-accept" "Accept the candidate on this line"
+  (lambda ()
+    (let ((label (collect-current))
+          (fn *collect-confirm*)
+          (w (collect-target-window)))
+      (cond ((not label) (message "No candidate on this line"))
+            ((not fn) (message "This list is stale — run the command again"))
+            (else
+              (let ((value (collect-resolve label)))
+                (collect-forget!)
+                (collect-close!)
+                (when (and w (window-exists? w)) (select-window! w))
+                (fn value)))))))
+
+(define-command "collect-quit" "Close the list; put back what the preview moved"
+  (lambda ()
+    (let ((fn *collect-cancel*) (w (collect-target-window)))
+      (collect-forget!)
+      (collect-close!)
+      (when (and w (window-exists? w)) (select-window! w))
+      (when fn (fn)))))
+
+(define-command "minibuffer-collect" "Write the prompt's candidates into a buffer"
+  (lambda ()
+    (let ((d (minibuffer-detach!)))
+      (if (not d)
+          (message "No prompt to collect")
+          (let ((select *mb-select-fn*))
+            (set! *mb-select-fn* #f)
+            (set! *collect-select* select)
+            (set! *collect-confirm* (cadr (assoc 'confirm d)))
+            (set! *collect-cancel* (cadr (assoc 'cancel d)))
+            (set! *collect-complete* (cadr (assoc 'complete d)))
+            (set! *collect-input* (cadr (assoc 'input d)))
+            (set! *collect-window* (active-window))
+            (collect-open! (cadr (assoc 'prompt d))
+                           (cadr (assoc 'candidates d))))))))
+
+(define-mode "collect-mode"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (buffer-set-local! buf 'mode-name "collect-mode")
+      (local-set-key "n" "collect-next")
+      (local-set-key "p" "collect-prev")
+      ;; line movement REMAPS, so arrows, C-n/C-p and any user binding of
+      ;; next-line all move-and-preview identically
+      (local-remap! "next-line" "collect-next")
+      (local-remap! "previous-line" "collect-prev")
+      (local-set-key "RET" "collect-accept")
+      (local-set-key "q" "collect-quit")
+      (buffer-set-read-only! buf #t))))
+
 (define-command "view-messages" "Display the *messages* buffer"
   (lambda () (display-buffer "*messages*")))
 
@@ -1432,7 +1603,7 @@
 (define (chat-task-init! buf label)
   (let ((help (string-append
                 "chat · " label "\n"
-                "RET sends · C-RET interrupts · TAB folds tool output · "
+                "RET sends · C-g aborts · C-RET interrupts · TAB folds tool output · "
                 "C-c b backend · C-c m model\n")))
     (buffer-append! buf help)
     (chat-blocks-push! buf 0 (string-byte-length help) "meta" '())
@@ -1546,7 +1717,7 @@
           (lambda (t)
             (let ((start (chat-render! buf
                            (if (equal? (car t) "user")
-                               (string-append "\n╰─ you ▸ " (cadr t) "\n\n")
+                               (string-append "\n>>> you: " (cadr t) "\n\n")
                                (string-append (cadr t) "\n")))))
               (chat-blocks-push! buf start (chat-mark buf)
                 (if (equal? (car t) "user") "user" "prose")
@@ -1594,7 +1765,8 @@
   '(agent-slug agent-queued agent-waiting chat-waiting
     agent-cancelling agent-seed-context agent-tool-bodies
     agent-turn-text agent-turn-any
-    agent-models agent-mode agent-modes chat-mcp-dirty))
+    agent-models agent-mode agent-modes chat-mcp-dirty
+    chat-history-pos chat-history-draft))
 
 (define (chat-clear-locals! buf keys)
   (for-each (lambda (k) (buffer-set-local! buf k #f)) keys))
@@ -1728,12 +1900,12 @@
 ;;; --- rich chat transcript (the agent thread design) ---------------------------
 ;;; A companion chat maintains the exact locals the native agent renderer
 ;;; reads — render-mode "agent", 'agent-blocks byte ranges, 'agent-saved-mark
-;;; + 'agent-marker-bytes for the ╰─ you ▸ input region — so it inherits the
+;;; + 'agent-marker-bytes for the >>> you: input region — so it inherits the
 ;;; serif prose, user cards, and tool cards wholesale. No runtime behind it:
 ;;; the mark lives in 'agent-saved-mark, the conversation in 'chat-turns.
-;;; Buffer layout: [help][transcript … mark][╰─ you ▸ ][input].
+;;; Buffer layout: [help][transcript … mark][>>> you: ][input].
 
-(define *chat-input-marker* "\n╰─ you ▸ ")
+(define *chat-input-marker* "\n>>> you: ")
 
 (define (chat-mark buf) (or (buffer-local buf 'agent-saved-mark) 0))
 
@@ -1829,6 +2001,13 @@
 ;; rides inside the backend's turn task)
 (define (chat-tool-dispatch name args) (llm-tool-call name args))
 
+;; the mcp package loads after this file, and a user can unload it
+(define (chat-mcp-note)
+  (if (boundp (quote mcp-system-note))
+      (let ((note (mcp-system-note)))
+        (if (equal? note "") "" (string-append note "\n\n")))
+      ""))
+
 ;; display: the in-flight user message. The user-msg event may or may not
 ;; have pushed it onto 'chat-turns before this runs (batches are async) —
 ;; a matching newest turn is stripped; the backend appends the wire text
@@ -1844,7 +2023,8 @@
          (tools? (and (boundp (quote chat-use-tools)) chat-use-tools)))
     (list 'turns (reverse all)
           'system (if tools?
-                      (string-append *llm-system* "\n\n" (chat-preamble buf))
+                      (string-append *llm-system* "\n\n" (chat-mcp-note)
+                                     (chat-preamble buf))
                       (chat-preamble buf))
           'tools (if tools?
                      (append (llm-tool-specs) (chat-extra-specs buf))
@@ -1958,7 +2138,7 @@
       (begin (buffer-set-local! b 'group b) b)))
 
 ;; a fresh group chat is a rich surface from birth: help on top (a "meta"
-;; card in the agent design), then the ╰─ you ▸ input region
+;; card in the agent design), then the >>> you: input region
 (define (group-chat-init! buf g)
   (let ((help (string-append
                 "companion · " g "\n"

@@ -99,7 +99,7 @@ defmodule Aimax.AgentTest do
     assert p["sessionId"] == "sess-1"
 
     assert Buffer.text(buf) =~ "chat · a1"
-    assert Buffer.text(buf) =~ "╰─ you ▸"
+    assert Buffer.text(buf) =~ ">>> you:"
     assert %{status: :running} = Agent.info("a1")
     _ = agent
   end
@@ -156,7 +156,7 @@ defmodule Aimax.AgentTest do
     # tool body hidden; marker still at the very end
     assert [{s, e} | _] = Buffer.hidden(buf)
     assert s <= body and body < e
-    assert Buffer.text(buf) =~ "╰─ you ▸"
+    assert Buffer.text(buf) =~ ">>> you:"
     assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
 
     # the block model mapped every span: user turn, merged prose, closed tool
@@ -182,8 +182,8 @@ defmodule Aimax.AgentTest do
     assert_receive {:frame, %{"method" => "session/prompt", "id" => pid, "params" => p}}, 1_000
     assert [%{"text" => "first message"}] = p["prompt"]
     # input region cleared back to the marker; message echoed into the transcript
-    assert eventually(fn -> String.ends_with?(Buffer.text(buf), "╰─ you ▸ ") end)
-    assert eventually(fn -> Buffer.text(buf) =~ "╰─ you ▸ first message\n" end)
+    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: ") end)
+    assert eventually(fn -> Buffer.text(buf) =~ ">>> you: first message\n" end)
 
     # second message while running -> queued: stays visible (muted), no frame yet
     focus(buf)
@@ -191,7 +191,7 @@ defmodule Aimax.AgentTest do
     press(["RET"])
     refute_receive {:frame, %{"method" => "session/prompt"}}, 200
     assert %{queued: 1} = Agent.info(slug)
-    assert Buffer.text(buf) =~ "▸ second message"
+    assert Buffer.text(buf) =~ ": second message"
 
     inject(agent, %{"jsonrpc" => "2.0", "id" => pid, "result" => %{"stopReason" => "end_turn"}})
 
@@ -199,7 +199,7 @@ defmodule Aimax.AgentTest do
     assert [%{"text" => "second message"}] = p2["prompt"]
     # its turn started: the muted copy left the input region, the rendered
     # user line replaced it — exactly one occurrence remains
-    assert eventually(fn -> Buffer.text(buf) =~ "╰─ you ▸ second message\n" end)
+    assert eventually(fn -> Buffer.text(buf) =~ ">>> you: second message\n" end)
 
     assert eventually(fn ->
              parts = String.split(Buffer.text(buf), "second message")
@@ -455,7 +455,7 @@ defmodule Aimax.AgentTest do
     [%{"text" => sent}] = p["prompt"]
     assert sent == "are you alive"
     refute sent =~ "Context: this continues an earlier conversation"
-    assert eventually(fn -> Buffer.text(buf) =~ "╰─ you ▸ are you alive\n" end)
+    assert eventually(fn -> Buffer.text(buf) =~ ">>> you: are you alive\n" end)
   end
 
   test "waiting line shows after send, clears on first output" do
@@ -623,6 +623,160 @@ defmodule Aimax.AgentTest do
     refute Enum.any?(windows, fn {_id, b} -> b == buf end)
   end
 
+  # The renderer slices the input region from 'agent-saved-mark. An append
+  # grows the transcript ABOVE that mark, so both have to land in one
+  # buffer message. While Scheme set the local in a second call, every
+  # streamed chunk painted a frame in which the mark was stale, and the
+  # input row rendered the new text and the ">>> you: " marker with it.
+  test "an append moves the saved mark in the same buffer message" do
+    {slug, buf, agent} = boot("")
+
+    before_mark = Buffer.get_local(buf, "agent-saved-mark")
+    text = "streamed reply\n"
+
+    update(agent, "sess-1", %{
+      "sessionUpdate" => "agent_message_chunk",
+      "content" => %{"type" => "text", "text" => text}
+    })
+
+    assert eventually(fn -> Buffer.text(buf) =~ "streamed reply" end)
+
+    # the mark advanced past the appended text, and the marker still sits
+    # after it — the input region holds no transcript and no marker
+    mark = Buffer.get_local(buf, "agent-saved-mark")
+    assert mark > before_mark
+    assert Agent.mark(slug) == mark
+
+    input = binary_part(Buffer.text(buf), mark, byte_size(Buffer.text(buf)) - mark)
+    assert String.starts_with?(input, "\n>>> you: ")
+    refute String.contains?(binary_part(input, 10, byte_size(input) - 10), ">>> you:")
+  end
+
+  # Up and down walk what you sent, like a shell. The draft you were
+  # typing comes back when you walk down past the newest message.
+  test "up and down recall sent messages, and give the draft back" do
+    {slug, buf, agent} = boot("")
+
+    # a queued second message would still sit in the input region, so let
+    # each turn finish before typing the next one
+    send_turn = fn text ->
+      focus(buf)
+      type(text)
+      press(["RET"])
+      assert_receive {:frame, %{"method" => "session/prompt", "id" => id}}, 1_000
+      inject(agent, %{"jsonrpc" => "2.0", "id" => id, "result" => %{"stopReason" => "end_turn"}})
+      assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
+      assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: ") end)
+    end
+
+    send_turn.("first message")
+    send_turn.("second message")
+
+    # a half-typed draft, then walk back through the history
+    focus(buf)
+    type("draft")
+    press(["<up>"])
+    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: second message") end)
+
+    press(["<up>"])
+    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: first message") end)
+
+    # nothing older: the input holds still rather than emptying
+    press(["<up>"])
+    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: first message") end)
+
+    press(["<down>"])
+    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: second message") end)
+
+    # ...and back to what was typed before the walk started
+    press(["<down>"])
+    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: draft") end)
+
+    # the walk reads 'chat-turns — there is no second copy of the messages
+    turns = Buffer.get_local(buf, "chat-turns")
+    assert Enum.filter(turns, fn [role, _] -> role == "user" end) == [
+             ["user", "second message"],
+             ["user", "first message"]
+           ]
+  end
+
+  # A chat restored from a .chat file gets its turns back. Walking must
+  # come back with them: a separate history local would start empty and
+  # leave every existing chat with no history at all.
+  test "up walks the turns a restored chat already has" do
+    {_slug, buf, _agent} = boot("")
+
+    {:ok, _} =
+      Session.eval("""
+      (buffer-set-local! "#{buf}" 'chat-turns
+        '(("assistant" "sure") ("user" "newer question")
+          ("assistant" "ok") ("user" "older question")))
+      """)
+
+    focus(buf)
+    press(["<up>"])
+    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: newer question") end)
+
+    press(["<up>"])
+    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: older question") end)
+  end
+
+  # The case that matters most: reopen the editor and press up. A restored
+  # chat has no 'agent-slug until its first send, so the walk must read the
+  # buffer-locals, never the runtime.
+  test "up works on a restored chat that has no runtime yet" do
+    buf = "*chat:restored*"
+    {:ok, _} = Aimax.Core.create_buffer(buf)
+
+    {:ok, _} =
+      Session.eval("""
+      (begin
+        (buffer-append! "#{buf}" "chat\\n")
+        (buffer-set-local! "#{buf}" 'agent-saved-mark (buffer-size "#{buf}"))
+        (buffer-append! "#{buf}" "\\n>>> you: ")
+        (buffer-set-local! "#{buf}" 'agent-marker-bytes 10)
+        (buffer-set-local! "#{buf}" 'chat-turns '(("user" "what I asked before")))
+        (switch-to-buffer! "#{buf}")
+        ;; the mode setup is what a desktop restore runs — it binds the keys
+        (set-mode! "chat-mode")
+        (end-of-buffer!))
+      """)
+
+    refute Buffer.get_local(buf, "agent-slug")
+
+    press(["<up>"])
+    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: what I asked before") end)
+
+    press(["<down>"])
+    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: ") end)
+
+    Aimax.Core.kill_buffer(buf)
+  end
+
+  test "up inside a multi-line input still moves the cursor" do
+    {slug, buf, agent} = boot("")
+
+    focus(buf)
+    type("line one")
+    press(["RET"])
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => id}}, 1_000
+    inject(agent, %{"jsonrpc" => "2.0", "id" => id, "result" => %{"stopReason" => "end_turn"}})
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
+    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: ") end)
+
+    # RET sends, so build a two-line input without sending
+    focus(buf)
+    {:ok, _} = Session.eval(~s[(begin (end-of-buffer!) (insert! "aaa\\nbbb"))])
+
+    # point sits on the last line, with a line above it: up is motion
+    press(["<up>"])
+    assert String.ends_with?(Buffer.text(buf), "aaa\nbbb")
+
+    # now on the first line, so up recalls the newest sent message
+    press(["<up>"])
+    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: line one") end)
+  end
+
   test "adapter exit renders a death notice and marks the thread dead" do
     {slug, buf, agent} = boot("")
 
@@ -649,9 +803,15 @@ defmodule Aimax.AgentTest do
     # aimax's own tool proxy is handed over as an MCP server...
     assert Enum.any?(np["mcpServers"] || [], &(&1["name"] == "aimax"))
 
-    # ...and settingSources: [] means the adapter loads NONE of the user's
-    # own MCP servers or permission settings. aimax is the only source.
-    assert %{"claudeCode" => %{"options" => %{"settingSources" => []}}} = np["_meta"]
+    # ...and the two keys that make aimax the only source. settingSources
+    # [] drops the user's settings files; strictMcpConfig true drops the
+    # user's own MCP registry in ~/.claude.json, which no setting source
+    # covers and which otherwise merges into every session.
+    assert %{
+             "claudeCode" => %{
+               "options" => %{"settingSources" => [], "strictMcpConfig" => true}
+             }
+           } = np["_meta"]
 
     # session modes come back in the same payload we used to drop
     inject(agent, %{

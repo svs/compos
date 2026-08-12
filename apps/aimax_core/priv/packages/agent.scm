@@ -1,10 +1,11 @@
 ;;; agent.scm — ACP thread machinery for chats. There is only chat: a
 ;;; thread is a chat buffer riding an ACP backend (chat-set-backend, or
 ;;; (execute "task") which spawns a fresh *chat:<slug>*). Steer by typing
-;;; at the ╰─ you ▸ marker and RET (queued if the agent is mid-turn).
-;;; C-RET interrupts. TAB folds/unfolds tool output. C-c C-y / C-c C-n
-;;; answer permission requests. The Elixir side (Aimax.Core.Agent) is
-;;; mechanism only: subprocess, framing, event batches.
+;;; at the >>> you: marker and RET (queued if the agent is mid-turn).
+;;; C-g aborts the reply in flight; C-RET escalates to a hard reset. TAB
+;;; folds/unfolds tool output. C-c C-y / C-c C-n answer permission
+;;; requests. The Elixir side (Aimax.Core.Agent) is mechanism only:
+;;; subprocess, framing, event batches.
 
 ;;; --- faces --------------------------------------------------------------------
 
@@ -19,7 +20,7 @@
 
 ;;; --- small helpers ------------------------------------------------------------
 
-(define *agent-prompt-marker* "\n╰─ you ▸ ")
+(define *agent-prompt-marker* "\n>>> you: ")
 
 ;; events/config are flat plists (no dotted pairs in this scheme)
 (define (plist-get pl key)
@@ -74,7 +75,7 @@
     (agent-add-overlay! buf start end "agent-queued")))
 
 ;; its turn started: the muted text leaves the input region (the rendered
-;; ╰─ you ▸ line replaces it)
+;; >>> you: line replaces it)
 (define (agent-pop-queued! slug)
   (let* ((buf (agent-buf slug))
          (q (or (buffer-local buf 'agent-queued) '())))
@@ -189,8 +190,9 @@
     (agent-append! slug text)
     (when face
       (agent-add-overlay! buf start (+ start (string-byte-length text)) face))
-    ;; persisted with the buffer — how a restored thread finds its mark
-    (buffer-set-local! buf 'agent-saved-mark (agent-mark slug))
+    ;; agent-append! moves 'agent-saved-mark itself, in the same buffer
+    ;; message as the insert. Setting it here as well is a second frame in
+    ;; which the mark is stale, and the input row shows the marker.
     start))
 
 ;;; the waiting line: rendered after each user turn, deleted on the turn's
@@ -253,7 +255,7 @@
        ;; and both flatten it to .chat files
        (chat-turn-push! buf "user" (plist-get e 'text))
        (let ((start (agent-render! slug
-                      (string-append "\n╰─ you ▸ " (plist-get e 'text) "\n\n")
+                      (string-append "\n>>> you: " (plist-get e 'text) "\n\n")
                       "agent-you")))
          (agent-block-push! buf start (agent-mark slug) "user"
            (list (plist-get e 'text))))
@@ -745,16 +747,135 @@
              (let ((input (string-trim (agent-input slug))))
                (if (equal? input "")
                    (insert! "\n")
-                   (if (equal? (agent-send-msg! slug input) 'queued)
-                       ;; mid-turn: the text stays put, muted, until its turn
-                       (begin
-                         (agent-mark-queued! slug)
-                         (end-of-buffer!)
-                         (message "queued — runs when this turn ends"))
-                       (begin
-                         (agent-clear-input! slug)
-                         (end-of-buffer!)
-                         (message "sent"))))))))))
+                   (begin
+                     ;; the message itself lands in 'chat-turns when its
+                     ;; turn starts; only the walk position resets here
+                     (chat-history-reset! buf)
+                     (if (equal? (agent-send-msg! slug input) 'queued)
+                         ;; mid-turn: the text stays put, muted, until its turn
+                         (begin
+                           (agent-mark-queued! slug)
+                           (end-of-buffer!)
+                           (message "queued — runs when this turn ends"))
+                         (begin
+                           (agent-clear-input! slug)
+                           (end-of-buffer!)
+                           (message "sent")))))))))))
+
+;;; --- input history --------------------------------------------------------------
+;;; Up and down walk the messages you sent, the way a shell walks its
+;;; history. The text you were typing is kept as the draft, so walking
+;;; back down to the bottom returns it.
+;;;
+;;; The messages come from 'chat-turns, which every backend already fills
+;;; and which the desktop, .chat files, and the api lane already read. A
+;;; second copy would be a second truth: a chat restored from a .chat file
+;;; gets its turns back, so it must get its history back with them.
+;;;
+;;; Up and down still move the cursor inside a multi-line input. Only the
+;;; first line recalls an earlier message, and only the last line walks
+;;; back toward the draft.
+
+;; how far back up walks — a long conversation needs no more
+(define *chat-history-limit* 200)
+
+;; your messages, newest first ('chat-turns is already newest first)
+(define (chat-history buf)
+  (chat-history-take
+    (let loop ((ts (if (boundp (quote chat-turns)) (chat-turns buf) '())) (acc '()))
+      (cond ((null? ts) (reverse acc))
+            ((equal? (car (car ts)) "user")
+             (loop (cdr ts) (cons (car (cdr (car ts))) acc)))
+            (else (loop (cdr ts) acc))))
+    *chat-history-limit*))
+
+(define (chat-history-take xs n)
+  (if (or (null? xs) (= n 0))
+      '()
+      (cons (car xs) (chat-history-take (cdr xs) (- n 1)))))
+
+;; back to "not walking": the next up starts from the newest message again
+(define (chat-history-reset! buf)
+  (buffer-set-local! buf 'chat-history-pos #f)
+  (buffer-set-local! buf 'chat-history-draft #f))
+
+;; The input region comes from the buffer-locals, never from the runtime.
+;; A restored chat has no 'agent-slug until its first send, and that is
+;; exactly when you reach for up: open the editor, press up, get your last
+;; message back.
+(define (chat-input-start buf)
+  (+ (or (buffer-local buf 'agent-saved-mark) 0)
+     (or (buffer-local buf 'agent-marker-bytes)
+         (string-byte-length *agent-prompt-marker*))))
+
+(define (chat-live-input-start buf)
+  (+ (chat-input-start buf) (agent-queued-bytes buf)))
+
+(define (chat-input-text buf)
+  (substring-bytes (buffer-text buf) (chat-live-input-start buf) (buffer-size buf)))
+
+(define (chat-replace-input! buf text)
+  (let ((start (chat-live-input-start buf)))
+    (buffer-delete-range! buf start (- (buffer-size buf) start)))
+  (end-of-buffer!)
+  (unless (equal? text "") (insert! text)))
+
+;; The marker shares a line with the first line of input (">>> you: aaa"),
+;; so moving up from the second line lands point INSIDE the marker. That
+;; is still the input area: measure from the mark, not from the text after
+;; the marker, or the next up walks out of the input entirely.
+(define (chat-in-input? buf)
+  (>= (point) (or (buffer-local buf 'agent-saved-mark) 0)))
+
+;; no newline between the input start and point
+(define (chat-on-first-input-line? buf)
+  (let ((start (chat-live-input-start buf)))
+    (or (<= (point) start)
+        (not (string-contains?
+               (substring-bytes (buffer-text buf) start (point))
+               "\n")))))
+
+(define (chat-on-last-input-line? buf)
+  (not (string-contains?
+         (substring-bytes (buffer-text buf) (point) (buffer-size buf))
+         "\n")))
+
+;; 'chat-history-pos is #f while you edit your own draft, else an index
+;; into the history (0 is the newest message).
+(define (chat-history-recall! buf dir)
+  (let* ((h (chat-history buf))
+         (pos (or (buffer-local buf 'chat-history-pos) -1))
+         (next (if (< dir 0) (+ pos 1) (- pos 1))))
+    (cond ((>= next (length h)) (message "no earlier message"))
+          ((< next -1) #f)
+          (else
+            ;; hold the draft the first time you step off it
+            (when (= pos -1)
+              (buffer-set-local! buf 'chat-history-draft (chat-input-text buf)))
+            (buffer-set-local! buf 'chat-history-pos (if (= next -1) #f next))
+            (chat-replace-input! buf
+              (if (= next -1)
+                  (or (buffer-local buf 'chat-history-draft) "")
+                  (nth next h)))))))
+
+(define (chat-history-move! dir)
+  (let* ((buf (current-buffer))
+         (motion (if (< dir 0) "previous-line" "next-line")))
+    (if (or (not (buffer-local buf 'agent-saved-mark))
+            (not (chat-in-input? buf))
+            (null? (chat-history buf))
+            ;; inside a multi-line input, up and down are still motion
+            (if (< dir 0)
+                (not (chat-on-first-input-line? buf))
+                (not (chat-on-last-input-line? buf))))
+        (run-command motion)
+        (chat-history-recall! buf dir))))
+
+(define-command "chat-history-previous" "Recall the previous message you sent"
+  (lambda () (chat-history-move! -1)))
+
+(define-command "chat-history-next" "Recall the next message you sent"
+  (lambda () (chat-history-move! 1)))
 
 ;; C-RET escalates: dead -> revive; running -> polite session/cancel;
 ;; still running on the next press -> hard reset (kill + reattach, same
@@ -776,6 +897,24 @@
                (buffer-set-local! buf 'agent-cancelling #t)
                (agent-cancel! slug)
                (message "cancel requested — C-RET again forces a restart")))))))
+
+;; The plain half of that ladder, on the key Emacs aborts with. C-g stops
+;; the reply in flight and leaves the thread alone — no restart, no
+;; escalation. With nothing running it quits the usual way, so C-g in a
+;; chat still clears the mark and closes the minibuffer.
+(define-command "chat-abort" "Stop the reply in flight in this chat"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (slug (agent-slug-of buf)))
+      (if (and slug (member (agent-status slug) '(running starting needs_attention)))
+          (begin
+            (agent-cancel! slug)
+            ;; both waiting markers: a thread renders its own ('agent-waiting),
+            ;; a chat that never attached a runtime renders 'chat-waiting
+            (agent-clear-waiting! slug)
+            (chat-clear-waiting! buf)
+            (message "aborted"))
+          (run-command "keyboard-quit")))))
 
 ;;; --- connectors ---------------------------------------------------------------
 ;;; A connector is a named config plist for a thread's backend: 'backend
@@ -804,14 +943,31 @@
     (if e (car (cdr e)) '())))
 
 ;; 'meta rides verbatim into session/new as _meta. claude-code-acp spreads
-;; _meta.claudeCode.options over its own defaults, so settingSources ()
-;; makes the adapter load NO user-level config: aimax's mcpServers and
-;; aimax's permission answers become the only sources. (Verified against
+;; _meta.claudeCode.options over its own defaults, so this plist is how
+;; aimax takes control of the agent's surface. (Verified against
 ;; @zed-industries/claude-code-acp 0.16.2: options = {...defaults,
 ;; ...userProvidedOptions, ...ACP-controlled fields}.)
+;;
+;; It takes BOTH keys. settingSources () stops the adapter reading
+;; settings.json and CLAUDE.md. It does NOT stop MCP servers: the CLI reads
+;; those from ~/.claude.json, which no setting source covers, and merges
+;; them into --mcp-config. strictMcpConfig #t adds --strict-mcp-config,
+;; which makes --mcp-config the only source. Without it every thread also
+;; carried the user's own claude.ai connectors — Gmail, Slack, Exa — that
+;; no preset asked for.
+;;
+;; The same plist takes the rest of the Agent SDK tool controls, so a
+;; connector can cut the surface further:
+;;   (options (settingSources () strictMcpConfig #t
+;;             disallowedTools ("WebSearch" "WebFetch")))
 (define-connector! "claude-code"
-  '(cmd "claude-code-acp"
-    meta (claudeCode (options (settingSources ())))
+  ;; npm's @zed-industries/claude-code-acp lags upstream (pins an old
+  ;; claude-agent-sdk with a stale model catalog: no Sonnet 5/Opus 5/Fable,
+  ;; no pricing) — bare "claude-code-acp" resolves the stale global npm
+  ;; install via PATH, so point at a from-source build instead:
+  ;; ~/src/claude-code-acp, `npm run build` with node >=22.
+  '(cmd "/Users/svs/.asdf/installs/nodejs/24.0.2/bin/node /Users/svs/src/claude-code-acp/dist/index.js"
+    meta (claudeCode (options (settingSources () strictMcpConfig #t)))
     models ("claude-sonnet-5" "claude-opus-5" "claude-haiku-4-5-20251001")))
 ;; codex rides a ChatGPT subscription (auth from `codex login`). Models are
 ;; what the bundled codex core recognizes; the thread's model is passed as a
@@ -854,9 +1010,22 @@
             (plist-get conf 'mcp-servers)
             (not (boundp (quote presets-acp-servers))))
         conf
-        (append conf
-          (list 'mcp-servers
-                (presets-acp-servers (or (plist-get conf 'presets) '())))))))
+        (agent-config-with-mcp-note
+          (append conf
+            (list 'mcp-servers
+                  (presets-acp-servers (or (plist-get conf 'presets) '()))))))))
+
+;; ...and the sentence that says the other servers exist. An agent holds
+;; the preset's tools and nothing else, so a server outside the preset is
+;; invisible to it — it guessed ssh for one. _meta.systemPrompt.append
+;; rides on the claude-code preset prompt rather than replacing it.
+(define (agent-config-with-mcp-note conf)
+  (let ((note (if (boundp (quote mcp-system-note)) (mcp-system-note) "")))
+    (if (equal? note "")
+        conf
+        (append (list 'meta (append (list 'systemPrompt (list 'append note))
+                                    (or (plist-get conf 'meta) '())))
+                conf))))
 
 (define (agent-resolve-config* opts)
   (let* ((cname (or (plist-get opts 'connector) *default-connector*))
@@ -937,7 +1106,10 @@
 (define (agent-install-keys! buf)
   (local-set-key* buf "RET" "agent-send")
   (local-set-key* buf "C-RET" "agent-interrupt-send")
+  (local-set-key* buf "C-g" "chat-abort")
   (local-set-key* buf "TAB" "agent-toggle-fold")
+  (local-set-key* buf "<up>" "chat-history-previous")
+  (local-set-key* buf "<down>" "chat-history-next")
   (local-set-key* buf "C-c C-y" "agent-permission-allow")
   (local-set-key* buf "C-c C-a" "agent-permission-always")
   (local-set-key* buf "C-c C-n" "agent-permission-deny")
@@ -974,6 +1146,13 @@
     ;; first turn can start before anyone could press C-c p
     (let ((pm (plist-get opts 'permission-mode)))
       (when pm (buffer-set-local! buf 'chat-permission-mode pm)))
+    ;; ...and its presets, which must land in the buffer-local, not only in
+    ;; this one call's config. 'chat-presets is the single source of truth
+    ;; for a chat's tools: agent-revive! and the desktop restore both read
+    ;; it. A spawn that skips it starts with the right servers and loses
+    ;; them at the first revive.
+    (let ((ps (plist-get opts 'presets)))
+      (when ps (buffer-set-local! buf 'chat-presets ps)))
     (chat-task-init! buf slug)
     (chat-attach-agent! buf
       (or (plist-get opts 'connector) *default-connector*)

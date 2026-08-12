@@ -108,8 +108,16 @@ defmodule Aimax.Core.Buffer do
 
   def append(name, text, opts \\ []), do: GenServer.call(via(name), {:append, text, source(opts)})
 
+  # `:locals` writes buffer-locals in the SAME message as the insert. A
+  # local that names a byte position (the agent's saved mark) must move
+  # with the text it points at. Written in a second call, the broadcast
+  # from this one already painted a frame in which the position is stale.
   def insert_at(name, pos, text, opts \\ []),
-    do: GenServer.call(via(name), {:insert_at, pos, text, source(opts)})
+    do:
+      GenServer.call(
+        via(name),
+        {:insert_at, pos, text, source(opts), Keyword.get(opts, :locals, %{})}
+      )
 
   def delete_range(name, pos, len, opts \\ []),
     do: GenServer.call(via(name), {:delete_range, pos, len, source(opts)})
@@ -269,7 +277,7 @@ defmodule Aimax.Core.Buffer do
   # own read-only buffer this way)
   def handle_call({:insert, _, :user}, _f, %{read_only: true} = s), do: ro(s)
   def handle_call({:append, _, :user}, _f, %{read_only: true} = s), do: ro(s)
-  def handle_call({:insert_at, _, _, :user}, _f, %{read_only: true} = s), do: ro(s)
+  def handle_call({:insert_at, _, _, :user, _locals}, _f, %{read_only: true} = s), do: ro(s)
   def handle_call({:delete_range, _, _, :user}, _f, %{read_only: true} = s), do: ro(s)
   def handle_call({:delete_char, _, :user}, _f, %{read_only: true} = s), do: ro(s)
   def handle_call({:kill_line, :user}, _f, %{read_only: true} = s), do: ro(s)
@@ -330,7 +338,10 @@ defmodule Aimax.Core.Buffer do
     {:reply, :ok, do_insert(state, Rope.byte_size(state.rope), text, src)}
   end
 
-  def handle_call({:insert_at, pos, text, src}, _from, state) do
+  def handle_call({:insert_at, pos, text, src, locals}, _from, state) do
+    # locals first: do_insert broadcasts, and the frame it paints must
+    # already see them
+    state = %{state | locals: Map.merge(state.locals, locals)}
     {:reply, :ok, do_insert(state, pos, text, src)}
   end
 

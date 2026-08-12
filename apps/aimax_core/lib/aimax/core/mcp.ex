@@ -14,7 +14,9 @@ defmodule Aimax.Core.MCP do
   Tool names are qualified `mcp__<server>__<tool>` (Anthropic tool-name
   charset). `LLM.run_tool/3` routes that prefix straight here — MCP calls
   must NOT dispatch through the Scheme session: a slow web fetch inside
-  Session.call_fn would block every keystroke for its duration.
+  Session.call_fn would block every keystroke for its duration. Scheme
+  calls a tool with `mcp-call!`, and that primitive obeys the same rule —
+  it runs `call_when_ready/4` in a task, never in the session process.
 
   Server names are [a-z0-9-] so the qualified form splits unambiguously.
   """
@@ -153,6 +155,33 @@ defmodule Aimax.Core.MCP do
   end
 
   def call_qualified(name, _), do: {:error, "bad mcp tool name: #{name}"}
+
+  @doc """
+  Call a tool, waiting up to `wait_ms` for a server that is still shaking
+  hands. A caller that connects a server and calls it in the same breath
+  has no other way to know when the tools arrive. Run this in a task: it
+  sleeps.
+  """
+  def call_when_ready(server, tool, args, wait_ms) do
+    if await_ready(server, wait_ms),
+      do: call(server, tool, args),
+      else: {:error, "mcp server not connected: #{server}"}
+  end
+
+  @doc "Wait for the handshake to publish a server's tools. Run this in a task: it sleeps."
+  def await_ready(server, wait_ms) do
+    cond do
+      ready?(server) -> true
+      whereis(server) == nil -> false
+      wait_ms <= 0 -> false
+      true ->
+        Process.sleep(50)
+        await_ready(server, wait_ms - 50)
+    end
+  end
+
+  @doc "True once the handshake published the server's tools."
+  def ready?(server), do: :persistent_term.get({:aimax_mcp, server}, nil) != nil
 
   def call(server, qualified_tool, args) do
     with pid when pid != nil <- whereis(server),

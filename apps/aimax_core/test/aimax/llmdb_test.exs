@@ -50,6 +50,44 @@ defmodule Aimax.LLMDbTest do
                     1.0e-9
   end
 
+  # Only the provider adapter knows whether input_tokens already includes
+  # the cached tokens — OpenAI's does, Anthropic's does not. req_llm prices
+  # the request knowing that; our table cannot, so it bills every cached
+  # OpenAI token twice. A usage map carrying its own cost wins.
+  test "a usage map's own cost beats the local table" do
+    usage = %{
+      "input_tokens" => 1000,
+      "output_tokens" => 2000,
+      "cache_read_input_tokens" => 500,
+      "cache_creation_input_tokens" => 0,
+      "cost" => 0.0125
+    }
+
+    assert LLMDb.cost("claude-sonnet-5", usage) == 0.0125
+
+    # ...even for a model the local table prices at nothing
+    assert LLMDb.cost("no-such-model", usage) == 0.0125
+
+    # the ledger records the supplied figure, not the recomputed one
+    assert LLMDb.record("claude-sonnet-5", usage) == 0.0125
+    [row | _] = ledger_rows()
+    assert row["cost"] == 0.0125
+    assert row["input"] == 1000
+  end
+
+  test "a non-numeric or absent cost falls back to the table" do
+    usage = %{"input_tokens" => 1000, "output_tokens" => 2000}
+    assert_in_delta LLMDb.cost("claude-sonnet-5", usage), 0.033, 1.0e-9
+    assert_in_delta LLMDb.cost("claude-sonnet-5", Map.put(usage, "cost", nil)), 0.033, 1.0e-9
+  end
+
+  defp ledger_rows do
+    Path.join(Aimax.Core.home(), "llm-usage.jsonl")
+    |> File.read!()
+    |> String.split("\n", trim: true)
+    |> Enum.map(&Jason.decode!/1)
+  end
+
   test "record appends to the ledger and report aggregates by day+model" do
     LLMDb.record("claude-sonnet-5", %{"input_tokens" => 100, "output_tokens" => 10})
     LLMDb.record("claude-sonnet-5", %{"input_tokens" => 300, "output_tokens" => 30})

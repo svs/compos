@@ -44,7 +44,21 @@ defmodule Aimax.Core.LLMDb do
     end)
   end
 
-  @doc "Dollars for a usage map (Anthropic or OpenAI field names), nil when the model is unpriced."
+  @doc """
+  Dollars for a usage map (Anthropic or OpenAI field names), nil when the
+  model is unpriced.
+
+  A usage map that carries its own "cost" wins. That is req_llm's figure,
+  priced against its model database, and it is the accurate one: only the
+  provider adapter knows whether `input_tokens` already includes the
+  cached tokens. OpenAI's does, Anthropic's does not — so the fallback
+  below bills every cached OpenAI token twice.
+
+  The fallback stays for the models req_llm prices at nothing: a model
+  missing from its database, or a lane that reports usage without a cost.
+  """
+  def cost(_model, %{"cost" => c}) when is_number(c), do: c
+
   def cost(model, usage) do
     case price(model) do
       nil ->

@@ -411,7 +411,14 @@ defmodule Aimax.Core.LLM do
     }
   end
 
-  # req_llm usage (atom keys) -> the ledger's Anthropic field names
+  # req_llm usage (atom keys) -> the ledger's Anthropic field names.
+  #
+  # 'total_cost rides along because req_llm already priced this request
+  # against its own model database, and it knows something we cannot see
+  # from the token counts alone: whether the provider's input_tokens
+  # ALREADY INCLUDES the cached tokens. OpenAI's does, Anthropic's does
+  # not. Pricing the raw counts ourselves billed every cached OpenAI token
+  # twice — once at the input rate, once at the cache rate.
   defp usage_strings(usage) when is_map(usage) do
     %{
       "input_tokens" => Map.get(usage, :input_tokens, 0),
@@ -419,9 +426,13 @@ defmodule Aimax.Core.LLM do
       "cache_read_input_tokens" => Map.get(usage, :cached_tokens, 0),
       "cache_creation_input_tokens" => Map.get(usage, :cache_creation_tokens, 0)
     }
+    |> maybe_put("cost", numeric(Map.get(usage, :total_cost)))
   end
 
   defp usage_strings(_), do: %{}
+
+  defp numeric(n) when is_number(n), do: n
+  defp numeric(_), do: nil
 
   defp err_msg(%{__exception__: true} = e), do: Exception.message(e)
   defp err_msg(other), do: inspect(other)

@@ -324,5 +324,78 @@ defmodule Aimax.LLMToolsTest do
       last_block = body["messages"] |> List.last() |> Map.get("content") |> List.last()
       assert %{"cache_control" => %{"type" => "ephemeral"}} = last_block
     end
+
+    # req_llm prices the request against its own model database, and it
+    # knows the one thing the token counts don't say: whether the
+    # provider's input_tokens already includes the cached tokens. Ours
+    # cannot, so its figure — not our table's — is what the ledger keeps.
+    test "the ledger records req_llm's cost, not the local table's" do
+      ledger = Path.join(Aimax.Core.home(), "llm-usage.jsonl")
+      File.rm(ledger)
+
+      # a deliberately absurd local price: if this figure ever reaches the
+      # ledger, the local table won and the wiring is broken
+      :persistent_term.put(:aimax_llmdb, %{
+        "anthropic" => %{
+          "models" => %{
+            "claude-sonnet-5" => %{
+              "cost" => %{"input" => 9999.0, "output" => 9999.0,
+                          "cache_read" => 9999.0, "cache_write" => 9999.0}
+            }
+          }
+        }
+      })
+
+      Application.put_env(:aimax_core, :llm_req_opts,
+        req_http_options: [
+          plug: fn conn ->
+            conn
+            |> Plug.Conn.put_resp_content_type("application/json")
+            |> Plug.Conn.resp(
+              200,
+              Jason.encode!(%{
+                "id" => "msg_1",
+                "type" => "message",
+                "role" => "assistant",
+                "model" => "claude-sonnet-5",
+                "content" => [%{"type" => "text", "text" => "priced"}],
+                "stop_reason" => "end_turn",
+                "usage" => %{
+                  "input_tokens" => 11,
+                  "output_tokens" => 3,
+                  "cache_read_input_tokens" => 100,
+                  "cache_creation_input_tokens" => 50
+                }
+              })
+            )
+          end
+        ]
+      )
+
+      prev = System.get_env("ANTHROPIC_API_KEY")
+      System.put_env("ANTHROPIC_API_KEY", "sk-test")
+
+      on_exit(fn ->
+        Application.delete_env(:aimax_core, :llm_req_opts)
+        :persistent_term.erase(:aimax_llmdb)
+        if prev, do: System.put_env("ANTHROPIC_API_KEY", prev), else: System.delete_env("ANTHROPIC_API_KEY")
+      end)
+
+      eval!(~s{(llm-with-tools "hello" (lambda (t) (set-symbol-value! 'zz-cost t)))})
+      wait_until(fn -> match?({:ok, "#t"}, Session.eval("(boundp 'zz-cost)")) end)
+      wait_until(fn -> File.exists?(ledger) end)
+
+      row = ledger |> File.read!() |> String.split("\n", trim: true) |> List.last() |> Jason.decode!()
+
+      # the token counts still land verbatim
+      assert row["input"] == 11
+      assert row["cache_read"] == 100
+      assert row["cache_write"] == 50
+
+      # a real price, and nowhere near the absurd local one (which would
+      # bill 161 tokens x $9999/M ≈ $1.61)
+      assert is_number(row["cost"]) and row["cost"] > 0
+      assert row["cost"] < 0.01
+    end
   end
 end

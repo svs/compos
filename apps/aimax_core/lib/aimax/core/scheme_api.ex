@@ -165,6 +165,10 @@ defmodule Aimax.Core.SchemeAPI do
           {:error, _} -> false
         end
       end,
+      # (json-encode V) — the inverse: a plist becomes an object, any other
+      # list an array. Escaping is the encoder's job, so a value survives a
+      # round trip through a file that the printer's own escapes do not.
+      "json-encode" => fn [v] -> Jason.encode!(Aimax.Core.Session.scheme_to_json(v)) end,
       "write-file!" => fn [p, text] ->
         path = Path.expand(p)
         File.mkdir_p!(Path.dirname(path))

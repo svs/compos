@@ -689,6 +689,15 @@ defmodule Aimax.Core.Session do
         :ets.insert(@escaped, {{:agent_context}, handler})
         :void
       end,
+      # the direct lane's record writer: (lambda (slug role blocks wire) ...),
+      # called by the turn task for every message it puts on the wire. The
+      # task reads the record and writes it in ONE order, so the next turn
+      # replays exactly what the last one sent. Rooted like the handlers
+      # above.
+      "agent-record-fn!" => fn [handler] ->
+        :ets.insert(@escaped, {{:agent_record}, handler})
+        :void
+      end,
       # the permission policy the DIRECT lane consults before every tool
       # call: (lambda (slug name kind raw) ...) -> allow | ask | reject.
       # (The ACP lane answers its own requests through the same policy,

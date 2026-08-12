@@ -250,10 +250,12 @@
 
       ((equal? type 'user-msg)
        (agent-pop-queued! slug)
-       ;; 'chat-turns is the conversation truth on EVERY backend: the api
+       ;; the conversation of record is the truth on EVERY backend: the api
        ;; lane replays it per request, ACP seeds a fresh session from it,
-       ;; and both flatten it to .chat files
-       (chat-turn-push! buf "user" (plist-get e 'text))
+       ;; and both flatten it to .chat files. The api lane's turn task
+       ;; already recorded this turn from the wire — chat-record-event!
+       ;; knows, and does not record it twice.
+       (chat-record-event! buf "user" (list (list "text" (plist-get e 'text))))
        (let ((start (agent-render! slug
                       (string-append "\n>>> you: " (plist-get e 'text) "\n\n")
                       "agent-you")))
@@ -358,7 +360,7 @@
        (let ((text (buffer-local buf 'agent-turn-text)))
          (cond
            ((and text (not (equal? (string-trim text) "")))
-            (chat-turn-push! buf "assistant" text))
+            (chat-record-event! buf "assistant" (list (list "text" text))))
            ;; a completed turn that rendered NOTHING at all would look like
            ;; the send vanished — say so. (A turn that ran tools, was
            ;; cancelled, or errored already left its own trace.)
@@ -626,6 +628,8 @@
          (cname (or (buffer-local buf 'agent-connector) *default-connector*))
          (m (agent-model-for-connector buf cname)))
     (buffer-set-local! buf 'agent-queued '())
+    ;; the fresh runtime decides who writes the record again (editor.scm)
+    (buffer-set-local! buf 'chat-wire-record (connector-api? cname))
     ;; seed only when there IS a conversation — a fresh surface's meta
     ;; card alone is chrome, not context. The api lane never seeds: its
     ;; turns are replayed in full on every request anyway.
@@ -703,14 +707,14 @@
 
 ;; the seed for a fresh session is simply the WHOLE conversation, in the
 ;; portable transcript format (### You / ### Assistant — same as .chat
-;; files): chat-turns when the chat has them, block text minus chrome for
+;; files): the record when the chat has one, block text minus chrome for
 ;; legacy buffers. No cap, no tail games — switching models sends the chat.
 (define (agent-seed-transcript buf)
   (or (chat-flatten buf) (agent-conversation-text buf)))
 
 ;; the wire text may carry chrome (editor context, seed transcript) the
 ;; user never typed — the raw input rides along as the DISPLAY text: it is
-;; what the transcript renders and what 'chat-turns records as the turn
+;; what the transcript renders and what the record keeps as the turn
 (define (agent-send-msg! slug raw)
   (let* ((buf (agent-buf slug))
          ;; what the user is looking at in the other windows — "this" works
@@ -748,7 +752,7 @@
                (if (equal? input "")
                    (insert! "\n")
                    (begin
-                     ;; the message itself lands in 'chat-turns when its
+                     ;; the message itself lands in the record when its
                      ;; turn starts; only the walk position resets here
                      (chat-history-reset! buf)
                      (if (equal? (agent-send-msg! slug input) 'queued)
@@ -767,7 +771,7 @@
 ;;; history. The text you were typing is kept as the draft, so walking
 ;;; back down to the bottom returns it.
 ;;;
-;;; The messages come from 'chat-turns, which every backend already fills
+;;; The messages come from the record, which every backend already fills
 ;;; and which the desktop, .chat files, and the api lane already read. A
 ;;; second copy would be a second truth: a chat restored from a .chat file
 ;;; gets its turns back, so it must get its history back with them.
@@ -779,7 +783,7 @@
 ;; how far back up walks — a long conversation needs no more
 (define *chat-history-limit* 200)
 
-;; your messages, newest first ('chat-turns is already newest first)
+;; your messages, newest first (the record is already newest first)
 (define (chat-history buf)
   (chat-history-take
     (let loop ((ts (if (boundp (quote chat-turns)) (chat-turns buf) '())) (acc '()))

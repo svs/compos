@@ -6,8 +6,16 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
 
   History is NOT kept here: each turn pulls fresh context (turns, system
   preamble, tool specs, dispatcher) from Scheme through the global
-  `agent-context-fn!` closure — `'chat-turns` stays the single truth, and
-  the per-send system prompt (group pull-context) can never go stale.
+  `agent-context-fn!` closure — the chat's conversation of record stays the
+  single truth, and the per-send system prompt (group pull-context) can
+  never go stale.
+
+  The turn task both READS and WRITES that record, in one order: it reads
+  it, appends the user message it is about to send, and reports every
+  further message the tool loop appends (`agent-record-fn!`). So the next
+  turn replays byte-for-byte what this one sent — tool calls and tool
+  results included — and the provider's prompt cache hits. Nothing is
+  reconstructed from rendered text, and no event batch can race the read.
 
   Each prompt runs in a supervised task; events funnel through this
   GenServer so their order is preserved. `cancel` kills the task and ends
@@ -210,7 +218,13 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
 
     case fetch_context(slug, display) do
       {:ok, ctx} ->
-        messages = Enum.map(ctx.turns, fn [role, t] -> %{role: to_string(role), content: t} end)
+        messages = Enum.map(ctx.turns, &turn_to_message/1)
+
+        # the user turn joins the record before the wire carries it. The
+        # blocks hold what the transcript shows; `wire` holds what was
+        # actually sent, which carries the editor context preamble the
+        # user never typed.
+        record(slug, "user", [["text", display]], if(text == display, do: false, else: text))
 
         LLM.run_tool_loop(
           messages ++ [%{role: "user", content: text}],
@@ -218,6 +232,7 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
           ctx.tools,
           ctx.dispatcher,
           model: model,
+          on_record: fn role, blocks -> record(slug, role, blocks_to_record(blocks), false) end,
           on_chunk: fn t -> ev.(type: :chunk, text: t) end,
           on_thinking: fn t -> ev.(type: :thought, text: t) end,
           # aimax owns permissions on BOTH lanes: the same Scheme policy
@@ -353,7 +368,78 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
     end
   end
 
-  # (turns ((role text)...) system "..." tools (spec...) dispatcher <fn>) —
+  # --- the conversation of record <-> the wire --------------------------------
+  #
+  # A recorded turn is a Scheme plist:
+  #
+  #   (role "user"|"assistant" blocks BLOCKS wire WIRE)
+  #
+  # BLOCKS is a list of ("text" STRING), ("tool-use" ID NAME INPUT-JSON) and
+  # ("tool-result" ID OUTPUT ERROR?). WIRE is the exact user text that was
+  # sent, when it differs from what the transcript shows.
+
+  defp turn_to_message(turn) do
+    blocks = Backend.plist_get(turn, "blocks") || []
+
+    case Backend.plist_get(turn, "role") do
+      "user" -> user_message(blocks, Backend.plist_get(turn, "wire"))
+      _ -> %{role: "assistant", content: Enum.map(blocks, &block_to_wire/1)}
+    end
+  end
+
+  # a user turn is either prose (one string, so the wire text wins when we
+  # have it) or a round of tool results (blocks, never prose)
+  defp user_message(_blocks, wire) when is_binary(wire), do: %{role: "user", content: wire}
+
+  defp user_message(blocks, _wire) do
+    if Enum.all?(blocks, &match?(["text" | _], &1)) do
+      %{role: "user", content: Enum.map_join(blocks, "", fn ["text", t] -> t end)}
+    else
+      %{role: "user", content: Enum.map(blocks, &block_to_wire/1)}
+    end
+  end
+
+  defp block_to_wire(["text", t]), do: %{"type" => "text", "text" => t}
+
+  defp block_to_wire(["tool-use", id, name, input]),
+    do: %{"type" => "tool_use", "id" => id, "name" => name, "input" => decode_input(input)}
+
+  defp block_to_wire(["tool-result", id, out, err]),
+    do: %{type: "tool_result", tool_use_id: id, content: out, is_error: err == true}
+
+  defp decode_input(json) when is_binary(json) do
+    case Jason.decode(json) do
+      {:ok, m} when is_map(m) -> m
+      _ -> %{}
+    end
+  end
+
+  defp decode_input(_), do: %{}
+
+  # the loop's wire blocks -> record blocks. The tool input is kept as JSON
+  # text: it is what goes back on the wire, and it survives a .chat file
+  # without a lossy detour through Scheme data.
+  defp blocks_to_record(blocks), do: for(b <- blocks, r = block_to_record(b), do: r)
+
+  defp block_to_record(%{"type" => "text", "text" => t}), do: ["text", t]
+
+  defp block_to_record(%{"type" => "tool_use"} = b),
+    do: ["tool-use", b["id"], b["name"], Jason.encode!(b["input"] || %{})]
+
+  defp block_to_record(%{type: "tool_result", tool_use_id: id, content: c} = b),
+    do: ["tool-result", id, to_string(c), Map.get(b, :is_error, false) == true]
+
+  defp block_to_record(_), do: nil
+
+  # append one turn to the chat's record, synchronously, from the turn task
+  defp record(slug, role, blocks, wire) do
+    case :ets.lookup(@escaped, {:agent_record}) do
+      [] -> :ok
+      [{_, fun}] -> Session.call_fn(fun, [slug, role, blocks, wire])
+    end
+  end
+
+  # (turns (TURN...) system "..." tools (spec...) dispatcher <fn>) —
   # from the global agent-context-fn! closure, called with (slug display)
   defp fetch_context(slug, display) do
     case :ets.lookup(@escaped, {:agent_context}) do

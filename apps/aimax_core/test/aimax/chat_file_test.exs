@@ -117,8 +117,8 @@ defmodule Aimax.ChatFileTest do
     assert Buffer.get_local(buf, "chat-permission-mode") == {:sym, "ask"}
 
     # the conversation is back as TURNS, not just text
-    turns = Buffer.get_local(buf, "chat-turns") |> Enum.reverse()
-    assert turns == [["user", "what shipped?"], ["assistant", "the mail client"]]
+    assert {:ok, ~s{(("user" "what shipped?") ("assistant" "the mail client"))}} =
+             Session.eval(~s{(reverse (chat-turns "#{buf}"))})
 
     # and as a live surface: rendered cards, an input marker, RET sends
     text = Buffer.text(buf)
@@ -181,7 +181,7 @@ defmodule Aimax.ChatFileTest do
     # opens as a chat, text untouched, no surface rebuilt behind the user's back
     assert Buffer.get_local(path, "mode-name") == "chat-mode"
     assert Buffer.text(path) == "### You\nold hand-written notes\n### Assistant\nfine\n"
-    assert Buffer.get_local(path, "chat-turns") in [nil, false]
+    assert Buffer.get_local(path, "chat-wire-turns") in [nil, false]
     assert Buffer.get_local(path, "agent-saved-mark") in [nil, false]
   end
 

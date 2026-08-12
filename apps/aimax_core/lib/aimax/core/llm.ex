@@ -82,8 +82,10 @@ defmodule Aimax.Core.LLM do
   `:on_tool` receives `(id, name, input)` before a dispatch; `:on_tool_done`
   receives `(id, result)` after; `:gate` receives `(name, input)` before a
   dispatch and returns `:allow` or `{:deny, reason}` — the permission
-  chokepoint every direct-lane tool call passes through. `:model`
-  overrides `model/0`.
+  chokepoint every direct-lane tool call passes through. `:on_record`
+  receives `(role, blocks)` for every message this loop appends to
+  `messages` — the caller's conversation of record grows by exactly what
+  went on the wire. `:model` overrides `model/0`.
   """
   def run_tool_loop(messages, system, specs, dispatcher, opts \\ []) do
     tools = Enum.map(specs, &tool_json/1)
@@ -114,16 +116,21 @@ defmodule Aimax.Core.LLM do
           for %{"type" => "tool_use"} = b <- blocks do
             if opts[:on_tool], do: opts[:on_tool].(b["id"], b["name"], b["input"])
 
-            result =
+            {result, error?} =
               case gate_call(opts[:gate], b["name"], b["input"]) do
                 :allow -> run_tool(dispatcher, b["name"], b["input"])
-                {:deny, why} -> "permission denied: #{why}"
+                {:deny, why} -> {"permission denied: #{why}", true}
               end
 
             if opts[:on_tool_done], do: opts[:on_tool_done].(b["id"], result)
 
-            %{type: "tool_result", tool_use_id: b["id"], content: result}
+            %{type: "tool_result", tool_use_id: b["id"], content: result, is_error: error?}
           end
+
+        # a tool round appends two messages. Both go into the record, in
+        # this order: the model re-reads its own call beside its result.
+        record(opts, "assistant", blocks)
+        record(opts, "user", results)
 
         messages =
           messages ++ [%{role: "assistant", content: blocks}, %{role: "user", content: results}]
@@ -132,6 +139,7 @@ defmodule Aimax.Core.LLM do
 
       {:ok, %{"content" => blocks} = resp} ->
         emit_unstreamed_text(resp, opts)
+        record(opts, "assistant", blocks)
         {:ok, Enum.map_join(blocks, "", &(&1["text"] || "")), add_usage(usage, resp)}
 
       {:error, msg} ->
@@ -145,6 +153,13 @@ defmodule Aimax.Core.LLM do
   # no gate configured (a bare (llm-tools ...) call) runs as before
   defp gate_call(nil, _name, _input), do: :allow
   defp gate_call(gate, name, input), do: gate.(name, input)
+
+  # An empty content list is not a message any provider accepts, so it is
+  # not a record entry either.
+  defp record(%{on_record: f}, role, blocks) when is_function(f, 2) and blocks != [],
+    do: f.(role, blocks)
+
+  defp record(_opts, _role, _blocks), do: :ok
 
   # a stubbed (or non-streaming) wire emits no deltas — feed the round's
   # text through on_chunk so renderers see it exactly once either way
@@ -168,13 +183,15 @@ defmodule Aimax.Core.LLM do
   defp add_usage(acc, _), do: acc
 
   # MCP tools dispatch in Elixir, never through the Scheme session — a slow
-  # web fetch inside Session.call_fn would block every keystroke
+  # web fetch inside Session.call_fn would block every keystroke.
+  # Returns {result-text, error?}: the wire marks a failed tool result, and
+  # the record keeps the mark.
   defp run_tool(_dispatcher, "mcp__" <> _ = name, input) do
     Session.message("tool: #{name} #{inspect(input)}")
 
     case Aimax.Core.MCP.call_qualified(name, input) do
-      {:ok, text} -> text
-      {:error, msg} -> "error: #{msg}"
+      {:ok, text} -> {text, false}
+      {:error, msg} -> {"error: #{msg}", true}
     end
   end
 
@@ -182,12 +199,12 @@ defmodule Aimax.Core.LLM do
     Session.message("tool: #{name} #{inspect(input)}")
 
     case Session.call_fn(dispatcher, [name, json_to_scheme(input)]) do
-      {:ok, v} when is_binary(v) -> v
-      {:ok, v} -> Aimax.Scheme.Printer.print(v)
-      {:error, msg} -> "error: #{msg}"
+      {:ok, v} when is_binary(v) -> {v, false}
+      {:ok, v} -> {Aimax.Scheme.Printer.print(v), false}
+      {:error, msg} -> {"error: #{msg}", true}
     end
   catch
-    :exit, _ -> "error: tool dispatch timed out"
+    :exit, _ -> {"error: tool dispatch timed out", true}
   end
 
   # JSON objects -> flat plists with {:sym, key} keys (house convention);

@@ -264,7 +264,7 @@ defmodule Aimax.ChatResetTest do
     # what "clean" means, checked the same way for every case
     defp assert_clean(buf) do
       # conversation gone...
-      for k <- ~w(chat-turns agent-folds chat-cost chat-last-usage) do
+      for k <- ~w(chat-wire-turns chat-turns agent-folds chat-cost chat-last-usage) do
         assert Aimax.Core.Buffer.get_local(buf, k) in [nil, false, []],
                "#{k} survived the reset: #{inspect(Aimax.Core.Buffer.get_local(buf, k))}"
       end
@@ -303,7 +303,7 @@ defmodule Aimax.ChatResetTest do
       a = fresh_chat("*chat:reset-api*")
       eval!(~s[(begin
         (buffer-set-local! "#{a}" 'agent-connector "api")
-        (buffer-set-local! "#{a}" 'chat-turns '(("user" "hi")))
+        (buffer-set-local! "#{a}" 'chat-wire-turns '((role "user" blocks (("text" "hi")))))
         (buffer-set-local! "#{a}" 'chat-cost 0.25)
         (buffer-set-local! "#{a}" 'agent-turn-text "half a reply")
         (switch-to-buffer! "#{a}") (run-command "chat-reset") #t)])
@@ -360,7 +360,7 @@ defmodule Aimax.ChatResetTest do
                       (buffer-set-local! "#{r}" 'agent-slug "dead-slug")
                       (buffer-set-local! "#{r}" 'agent-connector "codex")
                       (buffer-set-local! "#{r}" 'agent-queued '(5))
-                      (buffer-set-local! "#{r}" 'chat-turns '(("user" "before the restart")))
+                      (buffer-set-local! "#{r}" 'chat-wire-turns '((role "user" blocks (("text" "before the restart")))))
                       (set-mode! "chat-mode") #t)])
 
       on_exit(fn -> Aimax.Core.kill_buffer(r) end)
@@ -368,7 +368,7 @@ defmodule Aimax.ChatResetTest do
       assert Aimax.Core.Buffer.get_local(r, "agent-slug") in [nil, false]
       assert Aimax.Core.Buffer.get_local(r, "agent-queued") in [nil, false]
       # ...but what was SAID and who the chat IS both survive
-      assert Aimax.Core.Buffer.get_local(r, "chat-turns") != nil
+      assert Aimax.Core.Buffer.get_local(r, "chat-wire-turns") != nil
       assert Aimax.Core.Buffer.get_local(r, "agent-connector") == "codex"
 
       # a LIVE chat's runtime locals are its handle on a running thread —
@@ -388,7 +388,7 @@ defmodule Aimax.ChatResetTest do
       all = [identity, conversation, runtime] |> Enum.join(" ")
 
       # the locals that once caused the bugs are each classified exactly once
-      for k <- ~w(agent-queued agent-slug chat-turns agent-saved-mark
+      for k <- ~w(agent-queued agent-slug chat-wire-turns chat-wire-record agent-saved-mark
                   chat-permission-mode agent-mode chat-mcp-dirty) do
         assert all =~ k, "#{k} is in none of the three lists"
       end

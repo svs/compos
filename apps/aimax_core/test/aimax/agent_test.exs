@@ -509,7 +509,7 @@ defmodule Aimax.AgentTest do
 
     assert eventually(fn -> Buffer.text(buf) =~ "reply-2" end)
 
-    # the second request replays the whole conversation from 'chat-turns —
+    # the second request replays the whole conversation from the record —
     # no private history in the runtime
     [{_, msgs} | _] = rounds |> :ets.tab2list() |> Enum.sort(:desc)
     flat = Enum.map_join(msgs, "\n", fn m -> inspect(m.content) end)
@@ -692,12 +692,12 @@ defmodule Aimax.AgentTest do
     press(["<down>"])
     assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: draft") end)
 
-    # the walk reads 'chat-turns — there is no second copy of the messages
-    turns = Buffer.get_local(buf, "chat-turns")
-    assert Enum.filter(turns, fn [role, _] -> role == "user" end) == [
-             ["user", "second message"],
-             ["user", "first message"]
-           ]
+    # the walk reads the conversation of record — there is no second copy
+    # of the messages
+    assert {:ok, ~s{(("user" "second message") ("user" "first message"))}} =
+             Session.eval(
+               ~s{(filter (lambda (t) (equal? (car t) "user")) (chat-turns "#{buf}"))}
+             )
   end
 
   # A chat restored from a .chat file gets its turns back. Walking must
@@ -708,9 +708,11 @@ defmodule Aimax.AgentTest do
 
     {:ok, _} =
       Session.eval("""
-      (buffer-set-local! "#{buf}" 'chat-turns
-        '(("assistant" "sure") ("user" "newer question")
-          ("assistant" "ok") ("user" "older question")))
+      (buffer-set-local! "#{buf}" 'chat-wire-turns
+        '((role "assistant" blocks (("text" "sure")))
+          (role "user" blocks (("text" "newer question")))
+          (role "assistant" blocks (("text" "ok")))
+          (role "user" blocks (("text" "older question")))))
       """)
 
     focus(buf)

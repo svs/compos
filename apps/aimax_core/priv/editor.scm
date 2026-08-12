@@ -20,6 +20,18 @@
 
 (define (public-api) (reverse *public-api*))
 
+;;; --- plists ------------------------------------------------------------------
+;;; Flat plists — (key value key value ...) with symbol keys — are the house
+;;; record shape: events, configs, conversation turns. This dialect has no
+;;; dotted pairs, so there are no alists to confuse them with.
+
+(define (plist-get pl key)
+  (let loop ((pl pl))
+    (cond ((null? pl) #f)
+          ((null? (cdr pl)) #f)
+          ((equal? (car pl) key) (car (cdr pl)))
+          (else (loop (cdr (cdr pl)))))))
+
 ;;; --- editing commands ------------------------------------------------------
 
 (define-command "forward-char" "Move point one character forward"
@@ -734,12 +746,12 @@
                 (unless (equal? (string-trim path0) "")
                   (let ((p (expand-path (string-trim path0)))
                         (g (buffer-group old))
-                        (turns (buffer-local old 'chat-turns)))
+                        (record (buffer-local old 'chat-wire-turns)))
                     (write-file! p (or (chat-file-text old) (buffer-text old)))
                     (visit p)
                     (when g (buffer-set-local! (current-buffer) 'group g))
-                    (when turns
-                      (buffer-set-local! (current-buffer) 'chat-turns turns))
+                    (when record
+                      (buffer-set-local! (current-buffer) 'chat-wire-turns record))
                     (buffer-kill! old)
                     (run-hooks 'after-save-hook)
                     (message (string-append "Wrote " p))))))))))
@@ -1428,9 +1440,13 @@
       ;; same setup fn also runs via set-mode! on LIVE chats, where the
       ;; slug is the only handle on a running thread.
       (chat-sweep-runtime-locals! buf)
+      ;; a chat saved before the conversation of record existed carries the
+      ;; old (role text) pairs — read them once, here, so a restored chat
+      ;; has a record like any other
+      (chat-record-migrate! buf)
       ;; a .chat file just opened from disk: if we wrote it, its header
-      ;; restores the identity and its markers become 'chat-turns, so the
-      ;; conversation continues instead of restarting. Headerless files
+      ;; restores the identity and its transcript becomes the record, so
+      ;; the conversation continues instead of restarting. Headerless files
       ;; (hand-written, or saved before this) are left exactly as they are.
       (when (and (buffer-path buf)
                  (not (buffer-local buf 'agent-saved-mark))
@@ -1571,6 +1587,11 @@
                    (agent-model-for-connector buf connector))))
     (buffer-set-local! buf 'agent-slug slug)
     (buffer-set-local! buf 'agent-connector connector)
+    ;; who writes this chat's record: the api lane's turn task writes it
+    ;; from the wire it sends, every other backend leaves us to derive it
+    ;; from the event stream. (R6 reads this from the backend's declared
+    ;; capabilities instead of asking the connector.)
+    (buffer-set-local! buf 'chat-wire-record (connector-api? connector))
     (when (and model (not (equal? model "")))
       (buffer-set-local! buf 'agent-model model))
     (let ((mark (or (buffer-local buf 'agent-saved-mark)
@@ -1654,10 +1675,38 @@
                         'approve))
     ")\n"))
 
-;; what C-x C-s writes: identity, then the portable transcript
+;;; The v2 section carries what the transcript cannot: the conversation of
+;;; record, tool calls and tool results included, as one JSON line below
+;;; the transcript. Everything above it is exactly what v1 wrote, so a v2
+;;; file still reads as a v1 file, and a v1 file (or a hand-written one)
+;;; still opens — it simply has no blocks to replay.
+
+(define *chat-record-marker* "#+chat-record: ")
+
+;; what C-x C-s writes: identity, the portable transcript, then the record
 (define (chat-file-text buf)
   (let ((body (chat-flatten buf)))
-    (and body (string-append (chat-header-line buf) body))))
+    (and body
+         (string-append (chat-header-line buf) body
+           (let ((r (chat-record buf)))
+             (if (null? r)
+                 ""
+                 (string-append "\n" *chat-record-marker*
+                                (json-encode (reverse r)) "\n")))))))
+
+;; where the record section starts, in bytes, or #f
+(define (chat-file-record-at text)
+  (string-index text (string-append "\n" *chat-record-marker*)))
+
+;; the recorded turns, oldest first, or #f
+(define (chat-file-record text)
+  (let ((i (chat-file-record-at text)))
+    (and i
+         (let* ((start (+ i 1 (string-byte-length *chat-record-marker*)))
+                (rest (substring-bytes text start (string-byte-length text)))
+                (nl (string-index rest "\n"))
+                (v (json-parse (if nl (substring-bytes rest 0 nl) rest))))
+           (and (pair? v) v)))))
 
 ;; the header's plist, or #f. Read INSIDE a quote so a hand-edited file can
 ;; never execute anything: the reader sees one quoted datum, and a failed
@@ -1680,23 +1729,25 @@
                (role (cond ((string-prefix? "You\n" p) "user")
                            ((string-prefix? "Assistant\n" p) "assistant")
                            (else #f)))
+               ;; string-index counts bytes, so the cut must too — a
+               ;; transcript is arbitrary prose, not ASCII
                (body (and role
                           (string-trim
-                            (substring p (string-index p "\n")
-                                       (string-length p))))))
+                            (substring-bytes p (string-index p "\n")
+                                             (string-byte-length p))))))
           (loop (cdr parts)
                 (if (and role (not (equal? body "")))
                     (cons (list role body) acc)
                     acc))))))
 
 ;; a headered .chat opened from disk becomes a live chat again: its
-;; identity comes back, its turns become 'chat-turns (the truth every
-;; backend runs against), and the rich surface is rebuilt from those turns
-;; so RET continues the conversation.
+;; identity comes back, its turns become the conversation of record (the
+;; truth every backend runs against), and the rich surface is rebuilt from
+;; those turns so RET continues the conversation.
 (define (chat-file-init! buf)
   (let* ((text (buffer-text buf))
          (nl (string-index text "\n"))
-         (line (if nl (substring text 0 nl) text))
+         (line (if nl (substring-bytes text 0 nl) text))
          (header (chat-parse-header line)))
     (when header
       (for-each
@@ -1705,8 +1756,18 @@
             (when v (buffer-set-local! buf (cadr pair) v))))
         '((connector agent-connector) (model agent-model)
           (presets chat-presets) (permission-mode chat-permission-mode)))
-      (let ((turns (chat-parse-transcript (substring text nl (string-length text)))))
-        (buffer-set-local! buf 'chat-turns (reverse turns))
+      (let* ((end (or (chat-file-record-at text) (string-byte-length text)))
+             (recorded (chat-file-record text))
+             (turns (chat-parse-transcript (substring-bytes text (or nl 0) end))))
+        ;; v2 replays the record whole — tool calls and tool results come
+        ;; back, so the next request repeats the prefix the file recorded.
+        ;; v1 has only the transcript: its turns become text turns.
+        (buffer-set-local! buf 'chat-wire-turns
+          (if recorded
+              (reverse recorded)
+              (map (lambda (t) (list 'role (car t)
+                                     'blocks (list (list "text" (car (cdr t))))))
+                   (reverse turns))))
         ;; rebuild the surface from the turns, exactly as a live chat
         ;; renders them — the header and the ### markers are file format,
         ;; not transcript
@@ -1728,7 +1789,7 @@
           (string-byte-length *chat-input-marker*))
         (buffer-set-local! buf 'render-mode "agent")
         ;; a fresh ACP session has to be told what was already said; the
-        ;; api lane replays 'chat-turns on every request anyway
+        ;; api lane replays the record on every request anyway
         (buffer-set-local! buf 'agent-seed-context
           (and (pair? turns)
                (boundp (quote connector-api?))
@@ -1755,8 +1816,11 @@
     default-directory))
 
 ;; what was SAID — survives restart and save; reset clears it
+;; ('chat-turns is the pre-record shape: chat-record-migrate! reads it once
+;; on setup and clears it, and it stays listed so a reset cannot leave one
+;; behind for the migration to read again)
 (define chat-conversation-locals
-  '(chat-turns agent-blocks agent-overlays agent-folds
+  '(chat-wire-turns chat-turns agent-blocks agent-overlays agent-folds
     chat-cost chat-last-usage agent-saved-mark agent-marker-bytes))
 
 ;; PROCESS state — mirrors a live runtime, so it is always stale after a
@@ -1764,7 +1828,7 @@
 (define chat-runtime-locals
   '(agent-slug agent-queued agent-waiting chat-waiting
     agent-cancelling agent-seed-context agent-tool-bodies
-    agent-turn-text agent-turn-any
+    agent-turn-text agent-turn-any chat-wire-record
     agent-models agent-mode agent-modes chat-mcp-dirty
     chat-history-pos chat-history-draft))
 
@@ -1812,7 +1876,7 @@
             (message "Chat reset"))))))
 
 ;;; --- switching, transparently ---------------------------------------------------
-;;; "Transparent" means testable: the buffer, its group, 'chat-turns,
+;;; "Transparent" means testable: the buffer, its group, the record,
 ;;; presets, permission mode, cost history, and keybindings survive EVERY
 ;;; switch — the user just keeps typing. Keys are free (RET is agent-send
 ;;; on every lane), so one function with two mechanisms covers it:
@@ -1872,7 +1936,7 @@
           (buffer-set-local! buf 'agent-modes #f)
           (buffer-set-local! buf 'agent-mode #f))
         (buffer-set-local! buf 'agent-model (if (equal? model "") #f model))
-        ;; the api lane replays 'chat-turns on every request; an ACP
+        ;; the api lane replays the record on every request; an ACP
         ;; session starts empty and has to be seeded
         (buffer-set-local! buf 'agent-seed-context
           (and (not (connector-api? cname)) (pair? (chat-turns buf))))
@@ -1902,7 +1966,7 @@
 ;;; reads — render-mode "agent", 'agent-blocks byte ranges, 'agent-saved-mark
 ;;; + 'agent-marker-bytes for the >>> you: input region — so it inherits the
 ;;; serif prose, user cards, and tool cards wholesale. No runtime behind it:
-;;; the mark lives in 'agent-saved-mark, the conversation in 'chat-turns.
+;;; the mark lives in 'agent-saved-mark, the conversation in 'chat-wire-turns.
 ;;; Buffer layout: [help][transcript … mark][>>> you: ][input].
 
 (define *chat-input-marker* "\n>>> you: ")
@@ -1937,22 +2001,76 @@
   (let ((start (+ (chat-mark buf) (string-byte-length *chat-input-marker*))))
     (buffer-delete-range! buf start (- (buffer-size buf) start))))
 
-;; the conversation the LLM sees — decoupled from buffer text, which now
-;; also holds tool cards and help
-(define (chat-turns buf) (or (buffer-local buf 'chat-turns) '()))
+;;; --- the conversation of record ------------------------------------------------
+;;; ONE list per chat, 'chat-wire-turns, newest first. It is what the model
+;;; saw, not what the buffer shows. A turn is a plist:
+;;;
+;;;   (role "user"|"assistant" blocks BLOCKS wire WIRE)
+;;;
+;;; BLOCKS is a list of
+;;;   ("text" STRING)
+;;;   ("tool-use" ID NAME INPUT-JSON)
+;;;   ("tool-result" ID OUTPUT ERROR?)
+;;; WIRE is the exact user text that was sent, present only when it differs
+;;; from the display text (the editor context preamble, a seed transcript).
+;;;
+;;; The api lane replays this list verbatim. Because the record holds the
+;;; tool calls and the tool results too, every turn resends the SAME prefix
+;;; and the provider's prompt cache hits. Rendered text can never be the
+;;; record: it drops the blocks, and no reconstruction of it matches what
+;;; was sent.
 
-(define (chat-turn-push! buf role text)
-  (buffer-set-local! buf 'chat-turns
-    (cons (list role text) (chat-turns buf))))
+(define (chat-record buf) (or (buffer-local buf 'chat-wire-turns) '()))
 
-(define (chat-transcript buf)
-  (let loop ((ts (reverse (chat-turns buf))) (acc ""))
+(define (chat-record-push! buf role blocks wire)
+  (buffer-set-local! buf 'chat-wire-turns
+    (cons (append (list 'role role 'blocks blocks)
+                  (if (and (string? wire) (not (equal? wire ""))) (list 'wire wire) '()))
+          (chat-record buf))))
+
+;; the display text of a turn: its text blocks, joined. A turn made only of
+;; tool calls or tool results has none — it is wire, not conversation.
+(define (chat-turn-display t)
+  (let loop ((bs (or (plist-get t 'blocks) '())) (acc ""))
+    (cond ((null? bs) acc)
+          ((equal? (car (car bs)) "text")
+           (loop (cdr bs) (string-append acc (car (cdr (car bs))))))
+          (else (loop (cdr bs) acc)))))
+
+;; the conversation as (role text) pairs, newest first — what every display
+;; surface reads: .chat files, the seed transcript, the input history.
+(define (chat-turns buf)
+  (let loop ((ts (chat-record buf)) (acc '()))
     (if (null? ts)
-        acc
-        (loop (cdr ts)
-              (string-append acc
-                (if (equal? (car (car ts)) "user") "### You\n" "### Assistant\n")
-                (car (cdr (car ts))) "\n\n")))))
+        (reverse acc)
+        (let ((txt (chat-turn-display (car ts))))
+          (loop (cdr ts)
+                (if (equal? txt "")
+                    acc
+                    (cons (list (plist-get (car ts) 'role) txt) acc)))))))
+
+;; a turn that is only prose — every caller with text and no blocks
+(define (chat-turn-push! buf role text)
+  (chat-record-push! buf role (list (list "text" text)) #f))
+
+;; Backends that do NOT write the record themselves get it from the event
+;; stream instead: an ACP adapter runs its turn in a subprocess, and its
+;; events are all we see. 'chat-wire-record says the backend already wrote
+;; this turn from the wire it sent; recording the event too would double
+;; every turn.
+(define (chat-record-event! buf role blocks)
+  (unless (buffer-local buf 'chat-wire-record)
+    (chat-record-push! buf role blocks #f)))
+
+;; a chat saved before the record existed carries (role text) pairs — read
+;; them once, as text turns, and drop the old local
+(define (chat-record-migrate! buf)
+  (let ((old (buffer-local buf 'chat-turns)))
+    (when (and old (null? (chat-record buf)))
+      (buffer-set-local! buf 'chat-wire-turns
+        (map (lambda (t) (list 'role (car t) 'blocks (list (list "text" (car (cdr t))))))
+             old))
+      (buffer-set-local! buf 'chat-turns #f))))
 
 (define (chat-show-waiting! buf)
   (let ((start (chat-render! buf "⋯ thinking\n")))
@@ -1993,7 +2111,7 @@
 
 ;;; --- the direct lane's turn context ---------------------------------------------
 ;;; Backend.ReqLLM pulls this fresh at every turn start: the transcript
-;;; truth ('chat-turns), the per-send system preamble (group pull-context
+;;; truth (the record), the per-send system preamble (group pull-context
 ;;; can never go stale), and the chat's tool surface (registry + presets).
 
 ;; the tool dispatcher the direct lane hands the loop — a named global so
@@ -2008,20 +2126,14 @@
         (if (equal? note "") "" (string-append note "\n\n")))
       ""))
 
-;; display: the in-flight user message. The user-msg event may or may not
-;; have pushed it onto 'chat-turns before this runs (batches are async) —
-;; a matching newest turn is stripped; the backend appends the wire text
-;; itself as the final user message.
+;; The record, oldest first, exactly as it was sent. The backend appends
+;; the new user message itself and records it in the same breath, so there
+;; is no in-flight turn to strip here: `display` is now unused, and the
+;; dedup hack it used to need is gone with it.
 (define (chat-thread-context slug display)
   (let* ((buf (agent-buf slug))
-         (all (chat-turns buf))
-         (all (if (and (pair? all)
-                       (equal? (car (car all)) "user")
-                       (equal? (car (cdr (car all))) display))
-                  (cdr all)
-                  all))
          (tools? (and (boundp (quote chat-use-tools)) chat-use-tools)))
-    (list 'turns (reverse all)
+    (list 'turns (reverse (chat-record buf))
           'system (if tools?
                       (string-append *llm-system* "\n\n" (chat-mcp-note)
                                      (chat-preamble buf))
@@ -2032,6 +2144,17 @@
           'dispatcher chat-tool-dispatch)))
 
 (agent-context-fn! (lambda (slug display) (chat-thread-context slug display)))
+
+;; ...and the other half of that seam: the turn task appends to the record
+;; every message it puts on the wire, synchronously, in the order it sends
+;; them. Reading and writing from one process is what makes the replayed
+;; prefix byte-identical.
+(agent-record-fn!
+  (lambda (slug role blocks wire)
+    (let ((buf (agent-buf slug)))
+      (when (buffer-exists? buf)
+        (chat-record-push! buf role blocks wire))
+      #t)))
 
 (define-command "chat-toggle-view" "Toggle between rich and plain chat transcript"
   (lambda ()

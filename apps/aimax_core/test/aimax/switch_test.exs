@@ -246,8 +246,9 @@ defmodule Aimax.SwitchTest do
     assert Editor.lookup_key(["RET"]) == {:command, "agent-send"}
 
     # the transcript is one continuous conversation
-    turns = Buffer.get_local(buf, "chat-turns") |> Enum.reverse() |> Enum.map(&hd/1)
-    assert turns == ["user", "assistant", "user", "assistant", "user", "assistant", "user", "assistant"]
+    {:ok, roles} = Session.eval(~s{(map car (reverse (chat-turns "#{buf}")))})
+    assert roles ==
+             ~s{("user" "assistant" "user" "assistant" "user" "assistant" "user" "assistant")}
   end
 
   defp eventually(fun, tries \\ 40) do

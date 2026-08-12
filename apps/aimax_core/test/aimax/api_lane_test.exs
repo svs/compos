@@ -107,9 +107,17 @@ defmodule Aimax.ApiLaneTest do
     assert [{s, e} | _] = Buffer.hidden(buf)
     assert s <= body and body < e
 
-    # 'chat-turns is the conversation truth — not buffer text
-    turns = Buffer.get_local(buf, "chat-turns") |> Enum.reverse()
-    assert [["user", "what is 20+22"], ["assistant", "All set."]] = turns
+    # the record is the conversation truth — not buffer text. It holds the
+    # tool round too: the call the model made and the result it got back.
+    assert {:ok, ~s{(("user" "what is 20+22") ("assistant" "All set."))}} =
+             Session.eval(~s{(reverse (chat-turns "#{buf}"))})
+
+    kinds =
+      for turn <- Enum.reverse(Buffer.get_local(buf, "chat-wire-turns")),
+          block <- Aimax.Core.Agent.Backend.plist_get(turn, "blocks"),
+          do: hd(block)
+
+    assert kinds == ["text", "tool-use", "tool-result", "text"]
 
     # both rounds' usage summed onto the chat (pricing itself depends on
     # the models.dev catalog, so 'chat-cost only lands for a priced model)

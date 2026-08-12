@@ -141,6 +141,22 @@ screenshot, commit.
 
 ### R1 — One conversation of record
 
+*Done 2026-08-13 on `refactor/r1-conversation-of-record`.* Two corrections
+to the plan, both because the code moved: (1) the local is the ONLY stored
+turn list — `chat-turns` became a derived accessor over it, so the display
+surfaces (`.chat`, the seed transcript, input history) keep working with
+one truth behind them, and a legacy `'chat-turns` migrates on mode setup;
+(2) the record cannot be written from the event stream on the api lane —
+event batches race the next turn's context read, which is what the dedup
+hack was papering over. The turn task writes it synchronously instead
+(`agent-record-fn!`), reading and writing in one order. ACP has no wire to
+write, so it still records from events; a runtime local, `chat-wire-record`,
+says which lane a chat is on. R6 should read that from the backend's
+declared capabilities and delete the `connector-api?` test. The `.chat` v2
+section is one JSON line below an unchanged v1 transcript, so v2 files
+still read as v1. New `json-encode` primitive (the printer's escapes do not
+round-trip `\r`). Tests: `test/aimax/chat_record_test.exs`.
+
 **Why.** A1/A2/A3 share one root: `'chat-turns` is display text, but the wire
 needs blocks. B5 (dedup drops a real turn) and C8 (persistence cannot
 represent tool calls) are the same defect.

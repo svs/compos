@@ -142,6 +142,22 @@
 (define (run-hooks hook)
   (for-each (lambda (h) (if (equal? (car h) hook) ((cadr h)))) *hooks*))
 
+;;; --- the filesystem-change hook ----------------------------------------------
+;;; run-hooks calls its handlers with no arguments, and this one carries the
+;;; root, so it keeps its own list. Elixir holds ONE handler (fs-on-change!)
+;;; and this dispatcher fans it out. Keep the handlers small: they schedule a
+;;; refresh, they do not do the work. Watch debounces, but a slow handler
+;;; still runs once per burst per root.
+
+(define *fs-change-hooks* '())
+
+(define (on-fs-change! fn)
+  (set! *fs-change-hooks* (cons fn *fs-change-hooks*)))
+
+(fs-on-change!
+  (lambda (root)
+    (for-each (lambda (fn) (fn root)) *fs-change-hooks*)))
+
 ;;; --- modes ------------------------------------------------------------------
 ;;; A major mode = mode-name buffer-local + a setup fn (local keys, vars).
 ;;; The registry, auto-mode-alist, everything: userland.
@@ -2800,5 +2816,13 @@
 (public! 'git-diff "(git-diff DIR [OPTS] [CB]) -> list of (file-a A file-b B binary? BOOL hunks (...)); each hunk is (header H old-start N old-count N new-start N new-count N lines ((ctx|add|del TEXT) ...)). OPTS: (base \"HEAD\" path P staged #t); a #f base diffs the work tree against the index")
 (public! 'git-log "(git-log DIR N [CB]) -> last N commits as (sha S short-sha S author A date ISO subject S)")
 (public! 'git-show "(git-show DIR REF [CB]) -> the raw text of one commit")
+
+;; the file watcher
+;; The event is content-free: it names the root, and the handler re-queries.
+;; Watch coalesces a burst of writes into one event per root.
+(public! 'watch-path! "(watch-path! DIR) -> the watched root; refcounted, so two watchers of one directory share one subscription")
+(public! 'unwatch-path! "(unwatch-path! DIR) — drop one reference; the subscription stops at zero")
+(public! 'watched-paths "The watched roots")
+(public! 'on-fs-change! "(on-fs-change! FN) — FN gets the root string when a watched tree changes; keep it small, it schedules a refresh")
 
 (message "editor.scm loaded")

@@ -17,6 +17,7 @@ defmodule Aimax.Core.Application do
       {DynamicSupervisor, name: Aimax.Core.MCPSupervisor, strategy: :one_for_one},
       {Task.Supervisor, name: Aimax.Core.TaskSupervisor},
       Aimax.Core.Reactor,
+      Aimax.Core.Watch,
       Aimax.Core.Editor,
       Aimax.Core.Input,
       # before Session: chrome.scm registers its request handler while the

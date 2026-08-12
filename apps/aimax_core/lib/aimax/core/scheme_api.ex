@@ -23,6 +23,7 @@ defmodule Aimax.Core.SchemeAPI do
     buffer_primitives()
     |> Map.merge(editor_primitives())
     |> Map.merge(git_primitives())
+    |> Map.merge(watch_primitives())
   end
 
   defp buffer_primitives do
@@ -606,6 +607,31 @@ defmodule Aimax.Core.SchemeAPI do
       end,
       "git-show" => fn [dir, ref | rest] ->
         git_dispatch(rest, fn -> Git.show(dir, plain(ref)) end, & &1)
+      end
+    }
+  end
+
+  # --- the file watcher (Aimax.Core.Watch) -----------------------------------
+  # The event is content-free: it names the root and nothing else, so the
+  # handler re-queries. `fs-on-change!` holds ONE handler, like
+  # `mcp-on-change!`; editor.scm keeps the subscriber list, because a list of
+  # subscribers is policy.
+  defp watch_primitives do
+    %{
+      "watch-path!" => fn [dir] ->
+        case Aimax.Core.Watch.watch(plain(dir)) do
+          {:ok, root} -> root
+          {:error, msg} -> [{:sym, "error"}, msg]
+        end
+      end,
+      "unwatch-path!" => fn [dir] ->
+        Aimax.Core.Watch.unwatch(plain(dir))
+        :void
+      end,
+      "watched-paths" => fn [] -> Aimax.Core.Watch.watching() end,
+      "fs-on-change!" => fn [handler] ->
+        :ets.insert(@escaped, {{:fs_handler}, handler})
+        :void
       end
     }
   end

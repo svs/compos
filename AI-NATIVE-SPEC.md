@@ -179,8 +179,10 @@ replays tool blocks.
   One `*chat-edit-protocol*` string replaces the three drifted copies
   (dup #28).
 - Freeze the tool list per conversation: snapshot `(llm-tool-specs)` ++
-  `(chat-extra-specs)` into a conversation local on first send; a mid-chat
-  MCP handshake changes it only on explicit user action (A6).
+  `(chat-extra-specs)` into a conversation local on first send. A mid-chat
+  MCP handshake does not change a running chat. A `chat-refresh-tools`
+  command adopts the live set (one deliberate cache miss); the modeline
+  shows a hint when the frozen set drifts from the live set (A6).
 - Cache controls: keep breakpoints, add `anthropic_prompt_cache_ttl: "1h"`
   as a defcustom; extend the gate to OpenRouter-routed Anthropic models
   (`llm.ex:322`) (A5, A7).
@@ -195,7 +197,8 @@ replays tool blocks.
   and a hit-rate; the modeline dollar total stays (A10).
 - Context management: token-estimate the record; above a defcustom threshold,
   summarize the head into one block (an `llm` call), keep the tail verbatim
-  (A7). This is Scheme policy over the R1 record.
+  (A7). Never silent: the transcript shows a "compacted N turns" block where
+  the head was. This is Scheme policy over the R1 record.
 
 **Done when.** A three-turn tool chat shows `cache_read > 0` on turns 2–3 in
 `chat-cost`; a forced 529 (stub) retries; a cancelled turn writes a ledger row.
@@ -215,8 +218,12 @@ replays tool blocks.
   whenever `manual` is true; desktop saves `manual`. `user_acted` clears
   `manual` only on the window that received the key. `recenter` and `pct`
   compute from the same fields on both paths.
-- **Frames** (S5, S13, S14): frame id moves to `sessionStorage` (per tab)
-  with a one-shot migration read of the old `localStorage` key. Delete the
+- **Frames** (S5, S13, S14): one frame per **browser window** (decided
+  2026-08-12). The Chrome extension knows the window: it stamps the chrome
+  window id and the page keys its frame by it, so two tabs in one window
+  attach the same frame and two windows get two frames. Without the
+  extension, fall back to `sessionStorage` (one frame per tab). One-shot
+  migration read of the old `localStorage` key. Delete the
   `push_event("frame", ...)`; the client reads `state.frame` from the payload.
   The disconnected mount renders a neutral splash, not another frame.
 - **Rich-view state** (S4, S6, S7): `ag_blocks` entries gain an `open` field
@@ -281,7 +288,9 @@ CAS, deny-on-close, option-kind vocabulary. Backends supply
   the tool in a Task, not in Session (`tools.scm:255-267`).
 - `mcp-system-note` lists only the servers the chat's presets actually expose
   (B6).
-- Keep fail-open on policy crash, but log it loudly (B7).
+- Fail closed on policy crash: deny the call, raise a needs-attention banner,
+  log the crash. A buggy policy stalls agents until fixed; that is the
+  intended trade (B7 — decided 2026-08-12, reverses the current fail-open).
 
 ### R6 — Backend seam honesty
 
@@ -438,10 +447,16 @@ Mechanism (Elixir), one module each, all off the Session process:
   iframes and images.
 
 Policy (Scheme, `priv/packages/`):
-- `git.scm` — diff-mode buffer: faces per line kind, tagged hunk folds,
-  n/p/j/k nav, `RET` → `(visit file)` + goto line, `g` refresh, watch mode
+- `git.scm` — diff-mode buffer, rendered as a rich render-mode (decided
+  2026-08-12): the buffer text stays the unified diff — the byte-addressable
+  source of truth, so point motion, `RET`, folds, and restore all work — and
+  the payload ships a parsed block model on top: per-file cards with
+  side-by-side old/new rows, intra-line word diff, controlled open state
+  (the R3 pattern). `decorate/3` grows a "diff" branch beside "agent".
+  `C-c C-v` toggles the plain unified view, like chat. Keys: n/p hunks,
+  N/P files, `RET` → `(visit file)` + goto line, `g` refresh, `w` watch mode
   (auto-refresh on `fs-changed` and on `{:agent, id}`-provenance buffer
-  changes). Word-level intra-line diff via overlays.
+  changes).
 - `code.scm` — code-browse minor mode: hjkl structural nav with indent
   fallback, scope highlight overlay, default fold policy, imenu jump.
 - preview — file-backed HTML buffers preview via `/raw` iframe (relative
@@ -454,6 +469,17 @@ Policy (Scheme, `priv/packages/`):
 The epic (Linear project "Code browser", team Svsrecruiting) carries the
 execution plan: issue-level detail, ordered, each executable by Sonnet
 without this conversation.
+
+### Tree-sitter now, LSP later
+
+The browser's navigation is syntax-level: tree-sitter gives structure,
+folding, scope, and outline per file, with zero setup and an indentation
+fallback. Semantics — cross-file go-to-definition, references, hover types —
+need LSP, which is already queued in `HANDOFF.html` as its own subsystem
+(JSON-RPC over Port, per-language servers). The browser does not wait for
+it. It leaves the seam: symbol jump routes to `(lsp-definition)` when a
+server is attached and falls back to a tree-sitter same-file search when
+not — the same degradation pattern as ts → indentation.
 
 ### Prerequisites from Part 2
 

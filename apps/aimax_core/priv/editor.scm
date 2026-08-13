@@ -2006,14 +2006,63 @@
       (+ start (string-byte-length text)))
     start))
 
-(define (chat-input buf)
-  (substring-bytes (buffer-text buf)
-                   (+ (chat-mark buf) (string-byte-length *chat-input-marker*))
-                   (buffer-size buf)))
+;;; --- the input region ------------------------------------------------------------
+;;; Layout: [transcript … mark][marker][queued, muted][live input]
+;;;
+;;; ONE function says where it starts. "Where does the input begin" used to
+;;; be computed five ways — twice in Scheme off the runtime mark, once off
+;;; the buffer-local, once in the payload builder, once in the renderer —
+;;; and only one of them knew about both 'agent-marker-bytes and the queued
+;;; prefix. Every reader takes it from here now, and the payload ships the
+;;; same number to the client.
+;;;
+;;; It reads buffer-locals, never a runtime: a restored chat has no thread
+;;; until its first send, and up-arrow has to work before then.
+
+;; messages steered mid-turn stay in the input region, muted, until their
+;; turn starts — 'agent-queued holds their raw byte lengths, oldest first
+(define (chat-queued-bytes buf)
+  (fold (lambda (acc n) (+ acc n)) 0 (or (buffer-local buf 'agent-queued) '())))
+
+;; just past the marker: where the queued prefix begins
+(define (chat-input-start buf)
+  (+ (chat-mark buf)
+     (or (buffer-local buf 'agent-marker-bytes)
+         (string-byte-length *chat-input-marker*))))
+
+;; (START END) of the LIVE input — what RET sends, past anything queued
+(define (chat-input-region buf)
+  (list (+ (chat-input-start buf) (chat-queued-bytes buf)) (buffer-size buf)))
+
+(define (chat-input-text buf)
+  (let ((r (chat-input-region buf)))
+    (substring-bytes (buffer-text buf) (car r) (car (cdr r)))))
 
 (define (chat-clear-input! buf)
-  (let ((start (+ (chat-mark buf) (string-byte-length *chat-input-marker*))))
-    (buffer-delete-range! buf start (- (buffer-size buf) start))))
+  (let ((r (chat-input-region buf)))
+    (buffer-delete-range! buf (car r) (- (car (cdr r)) (car r)))))
+
+(define (chat-replace-input! buf text)
+  (chat-clear-input! buf)
+  (end-of-buffer!)
+  (unless (equal? text "") (insert! text)))
+
+;; mute the live tail instead of clearing it: its turn has not started
+(define (chat-mark-queued! buf)
+  (let* ((r (chat-input-region buf))
+         (start (car r))
+         (end (car (cdr r))))
+    (buffer-set-local! buf 'agent-queued
+      (append (or (buffer-local buf 'agent-queued) '()) (list (- end start))))
+    (agent-add-overlay! buf start end "agent-queued")))
+
+;; its turn started: the muted text leaves the input region (the rendered
+;; >>> you: line replaces it)
+(define (chat-pop-queued! buf)
+  (let ((q (or (buffer-local buf 'agent-queued) '())))
+    (unless (null? q)
+      (buffer-delete-range! buf (chat-input-start buf) (car q))
+      (buffer-set-local! buf 'agent-queued (cdr q)))))
 
 ;;; --- the conversation of record ------------------------------------------------
 ;;; ONE list per chat, 'chat-wire-turns, newest first. It is what the model
@@ -2816,10 +2865,8 @@
 (define (chat-snap-to-input!)
   (let ((buf (current-buffer)))
     (when (equal? (buffer-local buf 'render-mode) "agent")
-      (let ((mark (or (buffer-local buf 'agent-saved-mark) 0))
-            (mb (or (buffer-local buf 'agent-marker-bytes) 0)))
-        (when (< (point) (+ mark mb))
-          (end-of-buffer!))))))
+      (when (< (point) (chat-input-start buf))
+        (end-of-buffer!)))))
 
 (define-command "other-window" "Select another window in cyclic order"
   (lambda ()

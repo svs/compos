@@ -765,7 +765,7 @@ defmodule Aimax.Ui.EditorLive do
 
   # the input region: [queued (muted)][live text][cursor when point is home]
   defp ag_input(leaf, ag) do
-    start = ag.mark + ag.marker_bytes
+    start = ag.input_start
     queued_len = ag.queued |> Enum.filter(&is_integer/1) |> Enum.sum()
     queued = safe_slice(leaf.text, start, start + queued_len)
     live_start = start + queued_len

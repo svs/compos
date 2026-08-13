@@ -20,16 +20,6 @@
 
 ;;; --- small helpers ------------------------------------------------------------
 
-(define *agent-prompt-marker* "\n>>> you: ")
-
-;; events/config are flat plists (no dotted pairs in this scheme)
-(define (plist-get pl key)
-  (let loop ((pl pl))
-    (cond ((null? pl) #f)
-          ((null? (cdr pl)) #f)
-          ((equal? (car pl) key) (car (cdr pl)))
-          (else (loop (cdr (cdr pl)))))))
-
 (define (agent-buffer slug) (string-append "*agent: " slug "*"))
 
 ;; the buffer a thread renders into: any buffer claiming the slug — chats
@@ -42,46 +32,8 @@
 
 (define (agent-slug-of buf) (buffer-local buf 'agent-slug))
 
-;; input region: [.. transcript .. mark][marker][user input ..]
-(define (agent-input-start slug)
-  (+ (agent-mark slug) (string-byte-length *agent-prompt-marker*)))
-
-;; messages steered mid-turn stay in the input region, muted, until their
-;; turn starts — 'agent-queued holds their raw byte lengths, oldest first
-(define (agent-queued-bytes buf)
-  (let loop ((q (or (buffer-local buf 'agent-queued) '())) (n 0))
-    (if (null? q) n (loop (cdr q) (+ n (car q))))))
-
-;; the live (not-yet-queued) tail of the input region
-(define (agent-input slug)
-  (let ((buf (agent-buf slug)))
-    (substring-bytes (buffer-text buf)
-                     (+ (agent-input-start slug) (agent-queued-bytes buf))
-                     (buffer-size buf))))
-
-(define (agent-clear-input! slug)
-  (let ((buf (agent-buf slug)))
-    (let ((start (+ (agent-input-start slug) (agent-queued-bytes buf))))
-      (buffer-delete-range! buf start (- (buffer-size buf) start)))))
-
-;; mute the live tail instead of clearing it
-(define (agent-mark-queued! slug)
-  (let* ((buf (agent-buf slug))
-         (start (+ (agent-input-start slug) (agent-queued-bytes buf)))
-         (end (buffer-size buf)))
-    (buffer-set-local! buf 'agent-queued
-      (append (or (buffer-local buf 'agent-queued) '())
-              (list (- end start))))
-    (agent-add-overlay! buf start end "agent-queued")))
-
-;; its turn started: the muted text leaves the input region (the rendered
-;; >>> you: line replaces it)
-(define (agent-pop-queued! slug)
-  (let* ((buf (agent-buf slug))
-         (q (or (buffer-local buf 'agent-queued) '())))
-    (unless (null? q)
-      (buffer-delete-range! buf (agent-input-start slug) (car q))
-      (buffer-set-local! buf 'agent-queued (cdr q)))))
+;; the input region lives in editor.scm: chat-input-region and friends,
+;; keyed by BUFFER, because a restored chat has locals and no runtime
 
 (define (agent-status slug)
   (let ((info (agent-info slug)))
@@ -249,7 +201,7 @@
        (agent-update-modeline! buf))
 
       ((equal? type 'user-msg)
-       (agent-pop-queued! slug)
+       (chat-pop-queued! buf)
        ;; the conversation of record is the truth on EVERY backend: the api
        ;; lane replays it per request, ACP seeds a fresh session from it,
        ;; and both flatten it to .chat files. The api lane's turn task
@@ -634,7 +586,7 @@
   (let* ((buf (agent-buf slug))
          (mark (or (buffer-local buf 'agent-saved-mark)
                    ;; older transcript: mark sits at the marker's last occurrence
-                   (let loop ((ms (re-find* *agent-prompt-marker* (buffer-text buf)))
+                   (let loop ((ms (re-find* *chat-input-marker* (buffer-text buf)))
                               (last (buffer-size buf)))
                      (if (null? ms) last (loop (cdr ms) (car (car ms)))))))
          (cname (or (buffer-local buf 'agent-connector) *default-connector*))
@@ -764,7 +716,7 @@
                (chat-apply-pending-presets! buf))
              (when (equal? (agent-status slug) 'dead)
                (agent-revive! slug))
-             (let ((input (string-trim (agent-input slug))))
+             (let ((input (string-trim (chat-input-text buf))))
                (if (equal? input "")
                    (insert! "\n")
                    (begin
@@ -774,11 +726,11 @@
                      (if (equal? (agent-send-msg! slug input) 'queued)
                          ;; mid-turn: the text stays put, muted, until its turn
                          (begin
-                           (agent-mark-queued! slug)
+                           (chat-mark-queued! buf)
                            (end-of-buffer!)
                            (message "queued — runs when this turn ends"))
                          (begin
-                           (agent-clear-input! slug)
+                           (chat-clear-input! buf)
                            (end-of-buffer!)
                            (message "sent")))))))))))
 
@@ -819,27 +771,6 @@
   (buffer-set-local! buf 'chat-history-pos #f)
   (buffer-set-local! buf 'chat-history-draft #f))
 
-;; The input region comes from the buffer-locals, never from the runtime.
-;; A restored chat has no 'agent-slug until its first send, and that is
-;; exactly when you reach for up: open the editor, press up, get your last
-;; message back.
-(define (chat-input-start buf)
-  (+ (or (buffer-local buf 'agent-saved-mark) 0)
-     (or (buffer-local buf 'agent-marker-bytes)
-         (string-byte-length *agent-prompt-marker*))))
-
-(define (chat-live-input-start buf)
-  (+ (chat-input-start buf) (agent-queued-bytes buf)))
-
-(define (chat-input-text buf)
-  (substring-bytes (buffer-text buf) (chat-live-input-start buf) (buffer-size buf)))
-
-(define (chat-replace-input! buf text)
-  (let ((start (chat-live-input-start buf)))
-    (buffer-delete-range! buf start (- (buffer-size buf) start)))
-  (end-of-buffer!)
-  (unless (equal? text "") (insert! text)))
-
 ;; The marker shares a line with the first line of input (">>> you: aaa"),
 ;; so moving up from the second line lands point INSIDE the marker. That
 ;; is still the input area: measure from the mark, not from the text after
@@ -849,7 +780,7 @@
 
 ;; no newline between the input start and point
 (define (chat-on-first-input-line? buf)
-  (let ((start (chat-live-input-start buf)))
+  (let ((start (car (chat-input-region buf))))
     (or (<= (point) start)
         (not (string-contains?
                (substring-bytes (buffer-text buf) start (point))

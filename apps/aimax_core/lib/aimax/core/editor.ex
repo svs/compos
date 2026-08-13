@@ -1362,13 +1362,19 @@ defmodule Aimax.Core.Editor do
     marker_bytes = Map.get(locals, "agent-marker-bytes") || 0
     mark = Map.get(locals, "agent-saved-mark") || 0
 
+    # the mark is a plain local, so text edits it doesn't know about (undo,
+    # edits before it) can strand it past the end of the buffer — clamp so
+    # the input region and cursor never vanish
+    mark = mark |> min(byte_size(text) - marker_bytes) |> max(0)
+
     %{
       blocks: Map.get(locals, "agent-blocks") || [],
-      # the mark is a plain local, so text edits it doesn't know about
-      # (undo, edits before it) can strand it past the end of the buffer —
-      # clamp so the input region and cursor never vanish
-      mark: mark |> min(byte_size(text) - marker_bytes) |> max(0),
+      mark: mark,
       marker_bytes: marker_bytes,
+      # where the input region begins, computed once. The client used to
+      # add these two together itself, which made it a fourth place that
+      # had to agree with Scheme about what a chat's layout is.
+      input_start: mark + marker_bytes,
       queued: Map.get(locals, "agent-queued") || [],
       slug: Map.get(locals, "agent-slug")
     }

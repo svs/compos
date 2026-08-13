@@ -351,6 +351,32 @@ CAS, deny-on-close, option-kind vocabulary. Backends supply
 
 ### R6 — Backend seam honesty
 
+*Partly done 2026-08-13 on `refactor/r6-backend-seam`.* Landed: the thread
+assembles a turn's context and hands it through `Backend.prompt/3`; the
+backend no longer reads the ETS closure (the entry stays — it is what
+roots a closure that escapes into long-lived processes; ONE caller looks
+it up now). The fetch runs in a task and must, or the session waits on the
+thread while the thread waits on the session — so the context comes back
+stamped with its turn, and a cancel racing a fetch can no longer start a
+turn for a message the user took back (C9's guard, plus a `:busy` reply on
+a second prompt). `Aimax.Scheme.Text` replaces the four UTF-8 boundary
+copies (dup #10).
+**Not done:** presentation out of `req_llm.ex` (tool-card title, summary,
+truncation), the one error model (C6 — `inspect/1` still reaches
+transcripts on the crash paths), capabilities read from `capabilities()`
+in Scheme (C7, which would also delete the `chat-wire-record` connector
+test R1 left behind), and `:resume` (A12).
+**Open bug, and it is mine:** the `C-c q` group-ask test
+(`editor_test.exs:1601`) fails about one run in ten on this branch —
+1/6 full suites, 1/33 isolated. It does not reproduce on `main` or on
+R1/R2/R4/R5 at 8 isolated runs each, so the sample cannot yet say which
+change did it; the async context fetch is the obvious suspect. The
+symptom is that the chat buffer holds a freshly built companion surface
+where the conversation should be — a chat re-initialised under a live
+conversation, which is the S2/S11 bug class. **Chase this before the stack
+merges.** Repro:
+`for i in $(seq 1 15); do mix test apps/aimax_core/test/aimax/editor_test.exs:1601 --seed $i; done`
+
 **Why.** C1, C4, C6, C7; A12.
 
 **What.**

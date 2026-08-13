@@ -476,6 +476,23 @@ sig + category, and one that asserts every registered primitive carries a doc.
 
 ### R8 — `define-list-mode!`
 
+*Partly done 2026-08-13 on `refactor/r8-list-mode`.* `define-list-mode!`
+owns marks, the filter stack and its label, the point-preserving refresh,
+`(list-current)`, the n/p remap, per-row overlays, and mode registration —
+so S8 falls out rather than being fixed separately (`*chats*` named
+"Chats", a mode that did not exist). `line-index-at` takes the header
+height as an argument instead of assuming it, replacing six copies with
+three different conventions. Ported: **ibuffer, `*chats*`, mcp-hub**.
+**Not ported, and not mechanically portable: dired and notmuch.** dired
+opens ONE BUFFER PER DIRECTORY, its rows are read back out of the line
+text by column offset, and its marks live in a global alist keyed by
+buffer. `define-list-mode!` assumes one fixed buffer per mode with a
+stored entry list. Porting dired means generalising the abstraction to
+per-buffer instances — a design change, not a port — and dired is the
+most-used list in the editor. notmuch is 1122 lines with thin coverage.
+Do these two together, deliberately, or leave them: three of five already
+removes the duplication that was actually costing.
+
 **Why.** Dup #4, #5. Five copies of tabulated-list.
 
 **What.** One `define-list-mode!` in editor.scm taking `rows-fn`, `render-row`,

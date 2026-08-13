@@ -35,7 +35,7 @@
 <body>
 
 <h1>ai-max.el — session handoff</h1>
-<p class="sub">Updated 2026-08-06 (agents session) · read this in the editor itself:
+<p class="sub">Updated 2026-08-13 (AI-native refactor: R1–R10) · read this in the editor itself:
 <code>C-x C-f ~/src/ai-max.el/HANDOFF.html RET</code> then <kbd>C-c C-v</kbd></p>
 
 <div class="box">
@@ -56,7 +56,7 @@ Scheme with one new primitive? Usually yes. Full detail in <code>ARCHITECTURE.md
 <li><strong>Be terse.</strong> Lead with the outcome; bullets; no recaps; no "verified" narration
 beyond one line. The user is recreating Emacs — don't hedge or over-flag.</li>
 <li><strong>Test everything</strong>, especially the Scheme kernel. Suite must stay green
-(<code>mix test</code>, currently 124 tests).</li>
+(<code>mix test</code>, currently 506 tests across the four apps).</li>
 <li><strong>Verify in the real browser</strong> after each cycle, then <strong>commit</strong>.</li>
 <li><strong>Screenshot</strong> the window when UI changes — the user asks for this.</li>
 <li>Use <strong>subagents</strong> for verification sweeps to keep context clean.</li>

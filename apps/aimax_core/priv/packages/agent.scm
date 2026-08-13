@@ -1025,15 +1025,36 @@
             (plist-get conf 'mcp-servers)
             (not (boundp (quote presets-acp-servers))))
         conf
-        (agent-config-with-mcp-note
-          (append conf
-            (list 'mcp-servers
-                  (presets-acp-servers (or (plist-get conf 'presets) '()))))))))
+        (agent-config-with-primer
+          (agent-config-with-mcp-note
+            (append conf
+              (list 'mcp-servers
+                    (presets-acp-servers (or (plist-get conf 'presets) '())))))))))
 
 ;; ...and the sentence that says the other servers exist. An agent holds
 ;; the preset's tools and nothing else, so a server outside the preset is
 ;; invisible to it — it guessed ssh for one. _meta.systemPrompt.append
 ;; rides on the claude-code preset prompt rather than replacing it.
+;; ...and the primer, so an ACP agent gets the same cold start a socket
+;; client gets from `initialize`. It holds the aimax tools through the MCP
+;; proxy; without this it holds them and does not know what they are for.
+(define (agent-config-with-primer conf)
+  (let ((primer (if (boundp (quote hello)) (hello) "")))
+    (if (equal? primer "")
+        conf
+        (agent-config-append-system conf primer))))
+
+(define (agent-config-append-system conf text)
+  (let* ((meta (or (plist-get conf 'meta) '()))
+         (sp (or (plist-get meta 'systemPrompt) '()))
+         (had (or (plist-get sp 'append) "")))
+    (append (list 'meta (append (list 'systemPrompt
+                                      (list 'append (if (equal? had "")
+                                                        text
+                                                        (string-append had "\n\n" text))))
+                                meta))
+            conf)))
+
 (define (agent-config-with-mcp-note conf)
   (let ((note (if (and (boundp (quote mcp-system-note))
                        (boundp (quote preset-servers)))
@@ -1047,9 +1068,7 @@
                   "")))
     (if (equal? note "")
         conf
-        (append (list 'meta (append (list 'systemPrompt (list 'append note))
-                                    (or (plist-get conf 'meta) '())))
-                conf))))
+        (agent-config-append-system conf note))))
 
 (define (agent-resolve-config* opts)
   (let* ((cname (or (plist-get opts 'connector) *default-connector*))

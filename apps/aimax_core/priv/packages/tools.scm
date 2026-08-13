@@ -344,6 +344,7 @@
 (category! 'discovery)
 (public! 'hello "(hello) — what this editor is and how to find anything in it")
 
+
 ;; the edit primitive the old edit-doc tool wrapped — now a public function
 ;; reached through eval-scheme. Edits the live buffer, never the file.
 (define (buffer-replace! b old new)

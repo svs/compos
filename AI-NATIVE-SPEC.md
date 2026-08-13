@@ -411,6 +411,31 @@ wait at all.
 
 ### R7 — apropos: exemplary discovery
 
+*Done 2026-08-13 on `refactor/r7-apropos`, minus the primitive doc sweep.*
+One correction, and it reverses a decision in this file: **there is no
+`apropos-ask`.** I built it and deleted it. The caller of that tool is
+already a model, with the primer in its context; `(apropos "words")`
+answers deterministically, recipes hand back the whole composition, and a
+wrong name comes back with the nearest real ones and their signatures. A
+second model call — with the whole catalog re-inlined — buys nothing the
+first call lacks, and adds cost, latency, and a hallucination that has to
+be checked with `boundp` before it can be trusted. The catalog belongs in
+the caller's context, which is where it already is.
+
+`public!` parses the signature out of the doc (the house convention had
+written one for 95 of 126 entries with nothing reading it) and carries a
+category, set once per section with `(category! 'name)`. `(apropos ...)`
+searches recipes first, then the public API, the M-x commands and their
+docstrings, the keybindings, and the defcustoms — word-AND, with an
+edit-distance fallback. `recipes.scm` holds ~30 task→expression lines. The
+RPC server answers `initialize` with `(hello)`, and raw-socket eval errors
+run the same did-you-mean the tool path gets. An ACP agent gets the primer
+on `session/new`.
+**Not done:** one-line docs for the ~260 internal Elixir primitives. The
+curated surface is fully searchable; the internals are still name-only
+under scope "all". That is a mechanical sweep, and it is the honest
+remaining gap.
+
 **Why.** Part 1.5. The agent's first question is "what can I call"; today
 the honest answer is "read the source".
 

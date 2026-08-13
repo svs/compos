@@ -348,7 +348,7 @@ defmodule Aimax.EditorTest do
 
       # RET lands the selection in the window ibuffer was opened from
       {:ok, _} = Aimax.Core.Session.eval(~s{(begin
-        (buffer-set-local! "*ibuffer*" 'ibuffer-filters '())
+        (list-filter-clear! "*ibuffer*")
         (ibuffer-filter-push! (list "name" "zz-ib"))
         (goto-char! 0) (next-line!) (beginning-of-line!))})
       assert {:ok, ~s{"*zz-ib-b*"}} = Aimax.Core.Session.eval("(ibuffer-current)")

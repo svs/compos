@@ -1283,29 +1283,9 @@
 
 (define (agents-refresh!)
   (when (buffer-exists? *agents-buffer*)
-    (let* ((buf *agents-buffer*)
-           (bs (agents-sorted))
-           ;; a rewrite dumps point to 0 — keep the reader's place (dired)
-           (cur? (equal? (current-buffer) buf))
-           (p (if cur? (point) 0)))
-      (buffer-delete-range! buf 0 (buffer-size buf))
-      (buffer-append! buf
-        (string-append ";; chats — RET visit · s steer · y/n permission · "
-                       "k kill · x archive · + new · g refresh\n"))
-      (buffer-set-local! buf 'agents-bufs
-        (let loop ((bs bs) (acc '()))
-          (if (null? bs) (reverse acc)
-              (begin (buffer-append! buf (string-append (agents-line (car bs)) "\n"))
-                     (loop (cdr bs) (cons (car bs) acc))))))
-      (when cur? (goto-char! (min p (buffer-size buf)))))))
+    (list-refresh! *agents-buffer*)))
 
-;; chat buffer on the current line: line 0 is the header, entries follow
-;; in the order 'agents-bufs recorded
-(define (agents-current-buf)
-  (let* ((bufs (or (buffer-local *agents-buffer* 'agents-bufs) '()))
-         (before (substring-bytes (buffer-text *agents-buffer*) 0 (point)))
-         (ln (- (length (string-split before "\n")) 2)))
-    (if (and (>= ln 0) (< ln (length bufs))) (nth ln bufs) #f)))
+(define (agents-current-buf) (list-current *agents-buffer*))
 
 ;; the slug on the current line, #f on an API-chat row
 (define (agents-current-slug)
@@ -1406,25 +1386,22 @@
 (define-command "agents-refresh" "Refresh the chat list"
   (lambda () (agents-refresh!)))
 
-(define-command "chat-list" "List every chat: agent threads and API companions"
-  (lambda ()
-    (buffer-create *agents-buffer*)
-    (buffer-set-local! *agents-buffer* 'mode-name "Chats")
-    (local-set-key* *agents-buffer* "RET" "agents-visit")
+(define-list-mode! "chats-mode"
+  (list
+    'buffer *agents-buffer*
+    'rows agents-sorted
+    'render agents-line
+    'header (lambda ()
+              (string-append ";; chats — RET visit · s steer · y/n permission · "
+                             "k kill · x archive · + new · g refresh"))
+    'keys '(("RET" "agents-visit") ("s" "agents-steer") ("y" "agents-allow")
+            ("n" "agents-deny") ("k" "agents-kill") ("x" "agents-archive")
+            ("g" "agents-refresh") ("+" "agent-open") ("q" "quit-window"))
     ;; line movement remaps to move-and-preview (n is taken: deny)
-    (local-remap*! *agents-buffer* "next-line" "agents-next")
-    (local-remap*! *agents-buffer* "previous-line" "agents-prev")
-    (local-set-key* *agents-buffer* "s" "agents-steer")
-    (local-set-key* *agents-buffer* "y" "agents-allow")
-    (local-set-key* *agents-buffer* "n" "agents-deny")
-    (local-set-key* *agents-buffer* "k" "agents-kill")
-    (local-set-key* *agents-buffer* "x" "agents-archive")
-    (local-set-key* *agents-buffer* "g" "agents-refresh")
-    (local-set-key* *agents-buffer* "+" "agent-open")
-    (local-set-key* *agents-buffer* "q" "quit-window")
-    (buffer-set-read-only! *agents-buffer* #t)
-    (agents-refresh!)
-    (display-buffer *agents-buffer*)))
+    'remap '(("next-line" "agents-next") ("previous-line" "agents-prev"))))
+
+(define-command "chat-list" "List every chat: agent threads and API companions"
+  (lambda () (list-mode-show! "chats-mode")))
 
 ;;; --- attention: the erc-track segment -----------------------------------------
 

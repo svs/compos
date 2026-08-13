@@ -74,6 +74,161 @@
           ((member (nth 3 (car es)) acc) (loop (cdr es) acc))
           (else (loop (cdr es) (cons (nth 3 (car es)) acc))))))
 
+;;; --- tabulated lists -----------------------------------------------------------
+;;; Five buffers are the same buffer: dired, ibuffer, *chats*, mcp-hub and
+;;; notmuch. Each had its own marks, its own filter stack, its own
+;;; point-preserving refresh, its own n/p remap, and its own copy of
+;;; "which entry is on the current line" — six copies of that one, with
+;;; three different header-offset conventions between them.
+;;;
+;;; define-list-mode! owns all of it. A caller says where the rows come
+;;; from and how one renders; everything else is the same list behaviour it
+;;; was always going to need. It registers a real mode, so a restored list
+;;; buffer comes back with its keys and its read-only flag instead of inert
+;;; (S8), and the setup fn rebuilds from the buffer-locals like every other
+;;; mode.
+;;;
+;;; OPTS is a plist:
+;;;   buffer  the list buffer's name
+;;;   rows    () -> entries. Any value; render turns one into a line.
+;;;   render  (entry) -> one line, no trailing newline
+;;;   key     (entry) -> a string identity, for marks. Default: the entry.
+;;;   header  () -> the header line, no trailing newline
+;;;   keys    ((KEY COMMAND) ...)
+;;;   remap   ((FROM-COMMAND TO-COMMAND) ...)
+
+(define *list-modes* '())
+
+(define (list-mode-opts name)
+  (let ((e (assoc name *list-modes*)))
+    (if e (car (cdr e)) '())))
+
+(define (list-mode-of buf) (buffer-local buf 'list-mode))
+
+(define (list-opt buf key)
+  (plist-get (list-mode-opts (list-mode-of buf)) key))
+
+;; how many lines of header sit above the first entry — a header may be
+;; several lines, and every one of the five had hardcoded its own count
+(define (list-header-lines buf)
+  (let ((h (list-header-text buf)))
+    (length (string-split h "\n"))))
+
+(define (list-header-text buf)
+  (let ((f (list-opt buf 'header)))
+    (if f (f) "")))
+
+;; the 0-based index of the entry line point is on, or #f above the entries
+(define (line-index-at buf header-lines)
+  (let* ((before (substring-bytes (buffer-text buf) 0 (point)))
+         (ln (- (length (string-split before "\n")) 1 header-lines)))
+    (and (>= ln 0) ln)))
+
+(define (list-entries buf) (or (buffer-local buf 'list-entries) '()))
+
+(define (list-key buf e)
+  (let ((f (list-opt buf 'key)))
+    (if f (f e) e)))
+
+;; the entry on the current line, or #f
+(define (list-current buf)
+  (let ((i (line-index-at buf (list-header-lines buf)))
+        (es (list-entries buf)))
+    (and i (< i (length es)) (nth i es))))
+
+;;; marks — a list of (KEY CHAR), on the list buffer
+
+(define (list-marks buf) (or (buffer-local buf 'list-marks) '()))
+
+(define (list-mark-of buf e)
+  (let ((m (assoc (list-key buf e) (list-marks buf))))
+    (if m (car (cdr m)) " ")))
+
+(define (list-mark! buf e ch)
+  (let* ((k (list-key buf e))
+         (rest (filter (lambda (m) (not (equal? (car m) k))) (list-marks buf))))
+    (buffer-set-local! buf 'list-marks (if ch (cons (list k ch) rest) rest))))
+
+(define (list-marked buf ch)
+  (map car (filter (lambda (m) (equal? (car (cdr m)) ch)) (list-marks buf))))
+
+(define (list-clear-marks! buf) (buffer-set-local! buf 'list-marks '()))
+
+;;; filters — a stack of (LABEL ARG), newest first
+
+(define (list-filters buf) (or (buffer-local buf 'list-filters) '()))
+
+(define (list-filter-push! buf f)
+  (buffer-set-local! buf 'list-filters (cons f (list-filters buf)))
+  (list-refresh! buf))
+
+(define (list-filter-pop! buf)
+  (let ((fs (list-filters buf)))
+    (unless (null? fs) (buffer-set-local! buf 'list-filters (cdr fs)))
+    (list-refresh! buf)))
+
+(define (list-filter-clear! buf)
+  (buffer-set-local! buf 'list-filters '())
+  (list-refresh! buf))
+
+(define (list-filters-label buf)
+  (let ((fs (list-filters buf)))
+    (if (null? fs)
+        ""
+        (fold (lambda (acc f) (string-append acc "  " (car f) ":" (car (cdr f))))
+              "   ·" (reverse fs)))))
+
+;;; the refresh every one of them wrote by hand
+
+(define (list-refresh! buf)
+  (when (buffer-exists? buf)
+    (let* ((rows ((list-opt buf 'rows)))
+           (render (list-opt buf 'render))
+           ;; a rewrite dumps point to 0 — keep the reader's place
+           (cur? (equal? (current-buffer) buf))
+           (p (if cur? (point) 0))
+           (ro (buffer-read-only? buf)))
+      ;; our own rewrite is not a user edit, and the buffer is read-only
+      (buffer-set-read-only! buf #f)
+      (buffer-delete-range! buf 0 (buffer-size buf))
+      (buffer-append! buf (string-append (list-header-text buf) "\n"))
+      (buffer-set-local! buf 'list-entries rows)
+      (for-each (lambda (e) (buffer-append! buf (string-append (render e) "\n"))) rows)
+      (buffer-set-read-only! buf ro)
+      (when cur? (goto-char! (min p (buffer-size buf)))))))
+
+;; Everything a list buffer needs to BE one, applied to an explicit
+;; buffer. The mode setup calls it with (current-buffer); opening a list
+;; calls it with the buffer it just made, so neither has to select first.
+(define (list-mode-init! buf name)
+  (let ((opts (list-mode-opts name)))
+    (buffer-set-local! buf 'list-mode name)
+    (for-each (lambda (k) (local-set-key* buf (car k) (car (cdr k))))
+              (or (plist-get opts 'keys) '()))
+    (for-each (lambda (r) (local-remap*! buf (car r) (car (cdr r))))
+              (or (plist-get opts 'remap) '()))
+    (buffer-set-read-only! buf #t)
+    (list-refresh! buf)))
+
+(define (define-list-mode! name opts)
+  (set! *list-modes*
+    (cons (list name opts)
+          (remove (lambda (e) (equal? (car e) name)) *list-modes*)))
+  ;; a real mode: a restored list buffer gets its keys and its read-only
+  ;; flag back from here, not from whatever command first opened it
+  (define-mode name (lambda () (list-mode-init! (current-buffer) name)))
+  name)
+
+;; open (or re-open) a list buffer in its mode
+(define (list-mode-show! name)
+  (let ((buf (plist-get (list-mode-opts name) 'buffer)))
+    (buffer-create buf)
+    ;; mode-name so a desktop restore re-runs the setup above
+    (buffer-set-local! buf 'mode-name name)
+    (list-mode-init! buf name)
+    (display-buffer buf)
+    buf))
+
 ;;; --- plists ------------------------------------------------------------------
 ;;; Flat plists — (key value key value ...) with symbol keys — are the house
 ;;; record shape: events, configs, conversation turns. This dialect has no

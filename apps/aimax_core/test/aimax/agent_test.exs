@@ -598,7 +598,7 @@ defmodule Aimax.AgentTest do
     focus("*chats*")
 
     # the list holds every chat — put point on THIS thread's row
-    rows = Buffer.get_local("*chats*", "agents-bufs")
+    rows = Buffer.get_local("*chats*", "list-entries")
     row = Enum.find_index(rows, &(&1 == buf))
     assert row, "thread #{buf} not listed in #{inspect(rows)}"
     {:ok, _} = Session.eval("(beginning-of-buffer!)")
@@ -610,7 +610,7 @@ defmodule Aimax.AgentTest do
     assert Buffer.text("*chats*") =~ "x #{slug}"
 
     # the refresh re-sorted (dead ranks last) — find the row again
-    rows = Buffer.get_local("*chats*", "agents-bufs")
+    rows = Buffer.get_local("*chats*", "list-entries")
     row = Enum.find_index(rows, &(&1 == buf))
     assert row, "thread #{buf} not listed in #{inspect(rows)}"
     {:ok, _} = Session.eval("(beginning-of-buffer!)")

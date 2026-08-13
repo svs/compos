@@ -9,9 +9,6 @@
 (define *ibuffer-buffer* "*ibuffer*")
 (add-display-rule! *ibuffer-buffer* 'popup)
 
-(define (ibuffer-filters)
-  (or (buffer-local *ibuffer-buffer* 'ibuffer-filters) '()))
-
 (define (ibuffer-filter-match? b f)
   (let ((kind (car f)) (arg (car (cdr f))))
     (cond ((equal? kind "mode")
@@ -19,68 +16,29 @@
           ((equal? kind "name") (re-match? arg b))
           (else #t))))
 
+;; the rows: every buffer that is not this list, not an internal, and not
+;; filtered out
 (define (ibuffer-visible)
   (filter (lambda (b)
             (and (not (equal? b *ibuffer-buffer*))
                  (not (string-prefix? " " b))
-                 (let loop ((fs (ibuffer-filters)))
+                 (let loop ((fs (list-filters *ibuffer-buffer*)))
                    (cond ((null? fs) #t)
                          ((ibuffer-filter-match? b (car fs)) (loop (cdr fs)))
                          (else #f)))))
           (buffer-list-mru)))
 
-(define (ibuffer-marks)
-  (or (buffer-local *ibuffer-buffer* 'ibuffer-marks) '()))
-
-(define (ibuffer-mark-of b)
-  (let ((m (assoc b (ibuffer-marks))))
-    (if m (car (cdr m)) " ")))
-
-(define (ibuffer-set-mark! b ch)
-  (buffer-set-local! *ibuffer-buffer* 'ibuffer-marks
-    (let ((rest (filter (lambda (m) (not (equal? (car m) b))) (ibuffer-marks))))
-      (if ch (cons (list b ch) rest) rest))))
-
-(define (ibuffer-filters-label)
-  (let ((fs (ibuffer-filters)))
-    (if (null? fs)
-        ""
-        (fold (lambda (acc f) (string-append acc "  " (car f) ":" (car (cdr f))))
-              "   ·" (reverse fs)))))
-
 (define (ibuffer-line b)
   (string-append
-    (ibuffer-mark-of b)
+    (list-mark-of *ibuffer-buffer* b)
     (if (buffer-modified? b) "*" " ") " "
     (string-pad-left (number->string (buffer-size b)) 8) "  "
     (string-pad-right (or (buffer-local b 'mode-name) "-") 18)
-    b "\n"))
+    b))
 
-(define (ibuffer-refresh!)
-  (let* ((buf *ibuffer-buffer*)
-         (bs (ibuffer-visible))
-         (cur? (equal? (current-buffer) buf))
-         (p (if cur? (point) 0)))
-    (buffer-delete-range! buf 0 (buffer-size buf))
-    (buffer-append! buf
-      (string-append ";; buffers — RET visit · d flag · x kill flagged · "
-                     "/ m mode · / n name · g refresh"
-                     (ibuffer-filters-label) "\n"))
-    (buffer-set-local! buf 'ibuffer-names bs)
-    (for-each (lambda (b) (buffer-append! buf (ibuffer-line b))) bs)
-    (when cur? (goto-char! (min p (buffer-size buf))))))
-
-;; buffer named on the current line — header is line 0, entries follow
-(define (ibuffer-current)
-  (let* ((names (or (buffer-local *ibuffer-buffer* 'ibuffer-names) '()))
-         (before (substring-bytes (buffer-text *ibuffer-buffer*) 0 (point)))
-         (ln (- (length (string-split before "\n")) 2)))
-    (if (and (>= ln 0) (< ln (length names))) (nth ln names) #f)))
-
-(define (ibuffer-filter-push! f)
-  (buffer-set-local! *ibuffer-buffer* 'ibuffer-filters
-    (cons f (ibuffer-filters)))
-  (ibuffer-refresh!))
+(define (ibuffer-refresh!) (list-refresh! *ibuffer-buffer*))
+(define (ibuffer-current) (list-current *ibuffer-buffer*))
+(define (ibuffer-filter-push! f) (list-filter-push! *ibuffer-buffer* f))
 
 ;; No window bookkeeping: like Emacs, RET/preview never remember where
 ;; they came from — the target window is chosen at display time by
@@ -136,19 +94,19 @@
 (define-command "ibuffer-flag" "Flag this buffer for killing"
   (lambda ()
     (let ((b (ibuffer-current)))
-      (when b (ibuffer-set-mark! b "D") (ibuffer-refresh!) (next-line!)))))
+      (when b (list-mark! *ibuffer-buffer* b "D") (ibuffer-refresh!) (next-line!)))))
 
 (define-command "ibuffer-unmark" "Unmark this buffer"
   (lambda ()
     (let ((b (ibuffer-current)))
-      (when b (ibuffer-set-mark! b #f) (ibuffer-refresh!) (next-line!)))))
+      (when b (list-mark! *ibuffer-buffer* b #f) (ibuffer-refresh!) (next-line!)))))
 
 (define-command "ibuffer-do-kill" "Kill every buffer flagged with D"
   (lambda ()
-    (let ((doomed (filter (lambda (m) (equal? (car (cdr m)) "D")) (ibuffer-marks))))
-      (for-each (lambda (m)
-                  (when (buffer-exists? (car m)) (buffer-kill! (car m)))
-                  (ibuffer-set-mark! (car m) #f))
+    (let ((doomed (list-marked *ibuffer-buffer* "D")))
+      (for-each (lambda (b)
+                  (when (buffer-exists? b) (buffer-kill! b))
+                  (list-mark! *ibuffer-buffer* b #f))
                 doomed)
       (ibuffer-refresh!)
       (message (string-append "killed " (number->string (length doomed)) " buffers")))))
@@ -170,38 +128,29 @@
       (lambda (pat) (unless (equal? pat "") (ibuffer-filter-push! (list "name" pat)))))))
 
 (define-command "ibuffer-filter-pop" "Drop the most recent filter"
-  (lambda ()
-    (buffer-set-local! *ibuffer-buffer* 'ibuffer-filters
-      (let ((fs (ibuffer-filters))) (if (null? fs) '() (cdr fs))))
-    (ibuffer-refresh!)))
+  (lambda () (list-filter-pop! *ibuffer-buffer*)))
 
 (define-command "ibuffer-filter-clear" "Drop every filter"
-  (lambda ()
-    (buffer-set-local! *ibuffer-buffer* 'ibuffer-filters '())
-    (ibuffer-refresh!)))
+  (lambda () (list-filter-clear! *ibuffer-buffer*)))
 
-(define-mode "ibuffer-mode"
-  (lambda ()
-    (let ((buf (current-buffer)))
-      (buffer-set-local! buf 'mode-name "ibuffer-mode")
-      (local-set-key "n" "ibuffer-next")
-      (local-set-key "p" "ibuffer-prev")
-      ;; the standard: line movement REMAPS, so arrows, C-n/C-p, and any
-      ;; user binding of next-line all move-and-preview identically
-      (local-remap! "next-line" "ibuffer-next")
-      (local-remap! "previous-line" "ibuffer-prev")
-      (local-set-key "RET" "ibuffer-visit")
-      (local-set-key "g" "ibuffer-refresh")
-      (local-set-key "d" "ibuffer-flag")
-      (local-set-key "u" "ibuffer-unmark")
-      (local-set-key "x" "ibuffer-do-kill")
-      (local-set-key "q" "quit-window")
-      (local-set-key "/ m" "ibuffer-filter-mode")
-      (local-set-key "/ n" "ibuffer-filter-name")
-      (local-set-key "/ p" "ibuffer-filter-pop")
-      (local-set-key "/ /" "ibuffer-filter-clear")
-      (ibuffer-refresh!)
-      (buffer-set-read-only! buf #t))))
+(define-list-mode! "ibuffer-mode"
+  (list
+    'buffer *ibuffer-buffer*
+    'rows ibuffer-visible
+    'render ibuffer-line
+    'header (lambda ()
+              (string-append
+                ";; buffers — RET visit · d flag · x kill flagged · "
+                "/ m mode · / n name · g refresh"
+                (list-filters-label *ibuffer-buffer*)))
+    'keys '(("RET" "ibuffer-visit") ("g" "ibuffer-refresh") ("d" "ibuffer-flag")
+            ("u" "ibuffer-unmark") ("x" "ibuffer-do-kill") ("q" "quit-window")
+            ("n" "ibuffer-next") ("p" "ibuffer-prev")
+            ("/ m" "ibuffer-filter-mode") ("/ n" "ibuffer-filter-name")
+            ("/ p" "ibuffer-filter-pop") ("/ /" "ibuffer-filter-clear"))
+    ;; the standard: line movement REMAPS, so arrows, C-n/C-p, and any
+    ;; user binding of next-line all move-and-preview identically
+    'remap '(("next-line" "ibuffer-next") ("previous-line" "ibuffer-prev"))))
 
 (global-set-key "C-x C-b" "ibuffer")
 

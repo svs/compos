@@ -283,16 +283,10 @@
           "(mcp-call! 'SERVER \"TOOL\" \"JSON\") calls it and returns the "
           "text. describe-function and apropos document Scheme only."))))
 
+;; the hub IS the status display — one line of echo area was a second,
+;; worse rendering of the same thing
 (define-command "mcp-status" "Show MCP server connections"
-  (lambda ()
-    (let ((cs (mcp-connections)))
-      (if (null? cs)
-          (message "mcp: no connections")
-          (message
-            (fold (lambda (acc c)
-                    (string-append acc (car c) " " (car (cdr c)) " ("
-                                   (number->string (car (cdr (cdr c)))) " tools)  "))
-                  "mcp: " cs))))))
+  (lambda () (run-command "mcp-hub")))
 
 (category! 'mcp)
 (public! 'mcp-register! "(mcp-register! 'name SPEC) — declare an MCP server (stdio or http)")

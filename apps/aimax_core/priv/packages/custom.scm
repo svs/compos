@@ -12,10 +12,10 @@
 ;;; Optional opts: 'group SYM  'type SYM  'set FN (called with the new value
 ;;; after the variable is set — for customizations needing a side effect).
 
-(define (custom--plist-get pl key)
-  (cond ((null? pl) #f)
-        ((equal? (car pl) key) (cadr pl))
-        (else (custom--plist-get (cdr (cdr pl)) key))))
+;; one plist-get, in editor.scm. This name stays — 27 call sites use it —
+;; but the implementation does not: the copy here crashed on an
+;; odd-length plist where the original returns #f.
+(define (custom--plist-get pl key) (plist-get pl key))
 
 (define (custom--alist-put alist key val)
   (cons (list key val)

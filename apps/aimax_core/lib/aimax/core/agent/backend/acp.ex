@@ -430,27 +430,7 @@ defmodule Aimax.Core.Agent.Backend.ACP do
   # connector can declare (meta (claudeCode (options (settingSources ())))).
   # Symbols become strings; the empty list is an empty ARRAY, which is what
   # settingSources: [] needs.
-  defp meta_json(plist) when is_list(plist) do
-    if plist_shaped?(plist) do
-      plist |> Enum.chunk_every(2) |> Map.new(fn [k, v] -> {to_string(key(k)), meta_json(v)} end)
-    else
-      Enum.map(plist, &meta_json/1)
-    end
-  end
-
-  defp meta_json({:sym, s}), do: s
-  defp meta_json(v), do: v
-
-  # a plist is an even-length list whose every other element is a symbol key
-  defp plist_shaped?(list) do
-    n = length(list)
-
-    n > 0 and rem(n, 2) == 0 and
-      list |> Enum.take_every(2) |> Enum.all?(&match?({:sym, _}, &1))
-  end
-
-  defp key({:sym, s}), do: s
-  defp key(k), do: k
+  defp meta_json(plist), do: Aimax.Core.Plist.to_json(plist)
 
   defp adapter_exit(state, status) do
     emit(state, type: :dead, exit: status)

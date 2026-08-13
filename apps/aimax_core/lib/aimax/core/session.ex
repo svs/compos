@@ -1125,18 +1125,9 @@ defmodule Aimax.Core.Session do
     end)
   end
 
-  # Scheme plist -> JSON object for the extension. Keys are symbols by the
-  # house convention; #f becomes null so an omitted arg reads as absent.
-  defp browser_args(args) do
-    args
-    |> Enum.chunk_every(2)
-    |> Enum.flat_map(fn
-      [{:sym, k}, false] -> [{k, nil}]
-      [{:sym, k}, v] -> [{k, scheme_to_json(v)}]
-      _ -> []
-    end)
-    |> Map.new()
-  end
+  # Scheme plist -> JSON object for the extension. #f becomes null here,
+  # because to the extension an omitted argument is absent, not false.
+  defp browser_args(args), do: Aimax.Core.Plist.to_json(args, :null)
 
   defp browser_reply({:ok, result}) when is_map(result),
     do: [{:sym, "ok"}, true | Aimax.Core.LLM.json_to_scheme(result)]
@@ -1146,35 +1137,11 @@ defmodule Aimax.Core.Session do
 
   @doc """
   The inverse of `Aimax.Core.LLM.json_to_scheme/1`, for values headed out to
-  JSON.
-
-  A Scheme list is ambiguous — it might be a plist or a plain list — so the
-  house convention decides: even length with a `{:sym, _}` in every key slot
-  means an object, anything else is an array.
+  JSON. The convention lives in `Aimax.Core.Plist`, because three places
+  had three slightly different ideas of what counted as a plist.
   """
-  def scheme_to_json(false), do: false
-  def scheme_to_json(true), do: true
-  def scheme_to_json({:sym, name}), do: name
-  def scheme_to_json(:void), do: nil
+  defdelegate scheme_to_json(value), to: Aimax.Core.Plist, as: :to_json
 
-  def scheme_to_json(list) when is_list(list) do
-    if plist?(list) do
-      list
-      |> Enum.chunk_every(2)
-      |> Map.new(fn [{:sym, k}, v] -> {k, scheme_to_json(v)} end)
-    else
-      Enum.map(list, &scheme_to_json/1)
-    end
-  end
-
-  def scheme_to_json(other), do: other
-
-  defp plist?([]), do: false
-
-  defp plist?(list) do
-    rem(length(list), 2) == 0 and
-      list |> Enum.take_every(2) |> Enum.all?(&match?({:sym, _}, &1))
-  end
 
   defp usage_to_plist(usage) do
     t = Aimax.Core.LLMDb.tokens(usage)

@@ -524,7 +524,11 @@ tagged folds (SVS-193), `markdown_html/1` (SVS-198). *`read-file-name`
 tail-file, load-file and dired. One isearch engine (#13) landed the same
 day: `isearch-loop` + `search-find`/`search-find-wrap` behind both C-s
 and evil's / ? n N; each surface keeps its own hit rendering and wrap
-policy.* **Not done:** the
+policy. #21–23 landed the same day: `resolve_and_run` is the one lookup
+ladder, `dispatch-keys` goes through the serialized input queue with the
+caller's frame, and the completion popup's keys are a " *completion*"
+keymap in editor.scm over two new primitives — only narrowing mechanics
+stay in Elixir.* **Not done:** the
 KeyDispatch ladder merge and completion keymap (#21-23), `ml_info`/
 `agent_cmd` merge (#24), raw locals in the payload (#25),
 `buffer-candidates` and tabs (#6, #7), `define-theme-from` (#33),

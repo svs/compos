@@ -170,13 +170,13 @@ four stale spec bullets) are fixed in the last two commits.
 <tr><th>Item</th><th>State</th><th>What is left</th></tr>
 <tr><td>R1 conversation of record</td><td class="done">done</td><td>—</td></tr>
 <tr><td>R2 cache economics</td><td class="done">done</td><td><strong>The empirical acceptance is unproven.</strong> A three-turn tool chat must show <code>cache_read &gt; 0</code> on turns 2–3. Needs a real API key; the mechanism is tested, the number is not.</td></tr>
-<tr><td>R3 frontend = daemon state</td><td class="next">BLOCKED</td><td>Waits on SVS-193 (tagged folds, leaf <code>path</code>/<code>read_only</code>) from the code-browser worktree. Nothing started. Its restore round-trip suite is R10's one missing piece.</td></tr>
+<tr><td>R3 frontend = daemon state</td><td class="next">UNBLOCKED</td><td>SVS-193 (tagged folds, leaf <code>path</code>/<code>read_only</code>) merged with the code browser 2026-08-13 (<code>59fb925</code>). Nothing started. The biggest remaining item; its restore round-trip suite is R10's one missing piece.</td></tr>
 <tr><td>R4 one chat surface</td><td class="done">done</td><td>—</td></tr>
 <tr><td>R5 one permission gate</td><td class="done">done</td><td><code>mcp-proxy-call</code> still dispatches in the session. It cannot do otherwise — the surface it serves is the Scheme tool registry, and a Scheme handler runs in the session by definition. Getting it off needs a deferred-reply RPC design.</td></tr>
 <tr><td>R6 backend seam</td><td class="done">done</td><td>—</td></tr>
 <tr><td>R7 apropos</td><td class="done">done</td><td>— (the doc sweep landed 2026-08-13: 276 internal primitives carry one-line docs, tests hold coverage and format)</td></tr>
 <tr><td>R8 <code>define-list-mode!</code></td><td>3 of 5</td><td><strong>dired and notmuch are not mechanically portable.</strong> dired opens one buffer PER DIRECTORY, reads rows back out of line text by column offset, and keeps marks in a global alist; the abstraction assumes one fixed buffer with a stored entry list. Porting it means generalising to per-buffer instances — a design change, and dired is the most-used list in the editor. notmuch is 1122 lines with thin coverage.</td></tr>
-<tr><td>R9 housekeeping</td><td>7 of ~16</td><td>Done: <code>Text</code>, <code>Plist</code>, one <code>plist-get</code>, window helpers, <code>mcp-status</code>, <code>read-file-name</code> (#17), one isearch engine (#13). Left: the KeyDispatch ladder merge + completion keymap from Scheme (#21–23), <code>ml_info</code>/<code>agent_cmd</code> merge (#24), raw locals in the payload (#25), <code>buffer-candidates</code> + tabs (#6, #7), <code>define-theme-from</code> (#33), <code>kill-region-1</code>/<code>llm-on-region</code> (#30), <code>advise!</code>. Carved out to the code browser: tagged folds (SVS-193), <code>markdown_html/1</code> (SVS-198).</td></tr>
+<tr><td>R9 housekeeping</td><td>10 of ~16</td><td>Done: <code>Text</code>, <code>Plist</code>, one <code>plist-get</code>, window helpers, <code>mcp-status</code>, <code>read-file-name</code> (#17), one isearch engine (#13), one KeyDispatch ladder + <code>dispatch-keys</code> through Input + completion keymap from Scheme (#21–23). Left: <code>ml_info</code>/<code>agent_cmd</code> merge (#24), raw locals in the payload (#25), <code>buffer-candidates</code> + tabs (#6, #7), <code>define-theme-from</code> (#33), <code>kill-region-1</code>/<code>llm-on-region</code> (#30), <code>advise!</code>. Tagged folds (SVS-193) and <code>markdown_html/1</code> (SVS-198) landed with the code browser.</td></tr>
 <tr><td>R10 tests</td><td class="done">done</td><td>Except R3's restore suite. Tests live with their items: <code>chat_record_test</code>, <code>cache_economics_test</code>, <code>permission_test</code>'s "one gate", <code>apropos_test</code>.</td></tr>
 </table>
 
@@ -185,9 +185,8 @@ four stale spec bullets) are fixed in the last two commits.
 rewrites (+3664/−1054 over 47 files); the code-browser worktree
 (<code>worktree-svs-191</code>, 4 commits plus uncommitted work) only adds
 (+452/−5 on the six shared files). Additions rebase cheaply over rewrites;
-rewrites replay expensively over additions. <strong>The worktree session
-must rebase onto the new <code>main</code></strong> — expect small
-conflicts in <code>scheme_api.ex</code> and <code>editor.scm</code>.</p>
+rewrites replay expensively over additions. The worktree merged the same
+day (<code>59fb925</code>), which lands SVS-193 and unblocks R3.</p>
 
 <h3>One thing still open</h3>
 <ul>

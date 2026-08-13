@@ -52,12 +52,8 @@
       (display-buffer *ibuffer-buffer*)
       ;; select the popup window the display rule opened; switching the
       ;; current window would clobber the window previews should target
-      (let loop ((ws (window-list)))
-        (cond ((null? ws) (switch-to-buffer! *ibuffer-buffer*))
-              ((and (equal? (car (cdr (car ws))) *ibuffer-buffer*)
-                    (not (equal? (car (car ws)) from)))
-               (select-window! (car (car ws))))
-              (else (loop (cdr ws)))))
+      (let ((w (window-showing-other *ibuffer-buffer* from)))
+        (if w (select-window! w) (switch-to-buffer! *ibuffer-buffer*)))
       (set-mode! "ibuffer-mode")
       (ibuffer-refresh!)
       (goto-char! 0)

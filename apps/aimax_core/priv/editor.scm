@@ -1293,10 +1293,7 @@
          (target
            (if (and showing (not (equal? showing me)))
                showing
-               (let loop ((ws (window-list)))
-                 (cond ((null? ws) #f)
-                       ((not (equal? (car (car ws)) me)) (car (car ws)))
-                       (else (loop (cdr ws))))))))
+               (other-window-id me))))
     (if target
         (begin
           (select-window! target)
@@ -1411,10 +1408,7 @@
     (if (and *collect-window* (window-exists? *collect-window*)
              (not (equal? *collect-window* me)))
         *collect-window*
-        (let loop ((ws (window-list)))
-          (cond ((null? ws) #f)
-                ((not (equal? (car (car ws)) me)) (car (car ws)))
-                (else (loop (cdr ws))))))))
+        (other-window-id me))))
 
 (define (collect-preview!)
   (let ((label (collect-current)) (w (collect-target-window)))
@@ -2716,9 +2710,34 @@
 
 (define (group-docs g) (remove chat-buffer? (group-buffers-mru g)))
 
+;;; --- asking about windows -------------------------------------------------------
+;;; (window-list) is ((id buffer) ...) and five places walked it by hand,
+;;; each with its own loop and its own idea of what to return when nothing
+;;; matched. These are the four questions that were being asked.
+
+;; the window showing NAME, or #f
 (define (window-showing name)
   (let ((ws (filter (lambda (w) (equal? (cadr w) name)) (window-list))))
     (if (null? ws) #f (car (car ws)))))
+
+;; ...that is not EXCEPT — for "put it somewhere other than here"
+(define (window-showing-other name except)
+  (let ((ws (filter (lambda (w) (and (equal? (cadr w) name)
+                                     (not (equal? (car w) except))))
+                    (window-list))))
+    (if (null? ws) #f (car (car ws)))))
+
+;; the buffer a window is showing, or #f
+(define (window-buffer id)
+  (let ((w (assoc id (window-list))))
+    (and w (cadr w))))
+
+;; any window that is not ME, or #f when ME is the only one
+(define (other-window-id me)
+  (let loop ((ws (window-list)))
+    (cond ((null? ws) #f)
+          ((not (equal? (car (car ws)) me)) (car (car ws)))
+          (else (loop (cdr ws))))))
 
 ;; a buffer with no group founds one named after itself
 (define (group-ensure! b)
@@ -3351,6 +3370,9 @@
 
 (category! 'windows)
 (public! 'window-list "((id buffer-name) ...) for every window")
+(public! 'window-showing "(window-showing NAME) — the window showing NAME, or #f")
+(public! 'window-buffer "(window-buffer ID) — the buffer that window shows, or #f")
+(public! 'other-window-id "(other-window-id ME) — any window that is not ME, or #f")
 (public! 'active-window "Id of the selected window")
 (public! 'select-window! "(select-window! ID)")
 (public! 'split-window! "(split-window! 'h|'v [RATIO]) — ratio = first pane's share")

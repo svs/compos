@@ -71,17 +71,9 @@
 ;; WINDOW is immune to that, which matters most here — the whole point of
 ;; C-x b RET from a page is to land back where you were.
 (define (chrome--here)
-  (let ((w (active-window)))
-    (let loop ((ws (window-list)))
-      (cond ((null? ws) (current-buffer))
-            ((equal? (car (car ws)) w) (car (cdr (car ws))))
-            (else (loop (cdr ws)))))))
+  (or (window-buffer (active-window)) (current-buffer)))
 
-(define (chrome--window-showing buf)
-  (let loop ((ws (window-list)))
-    (cond ((null? ws) #f)
-          ((equal? (car (cdr (car ws))) buf) (car (car ws)))
-          (else (loop (cdr ws))))))
+(define (chrome--window-showing buf) (window-showing buf))
 
 ;; A tab in this window is a place you can switch to, so it belongs in the same
 ;; list as the buffers. The globe marks which is which, and doubles as the key

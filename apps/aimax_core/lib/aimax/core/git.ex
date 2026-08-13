@@ -30,6 +30,20 @@ defmodule Aimax.Core.Git do
   end
 
   @doc """
+  Where `dir` sits inside its work tree, as a relative path with a trailing
+  slash — `"lib/web/"`, or `""` at the root.
+
+  This is the scope of a diff. It has to come from git rather than from
+  string arithmetic on `root`: the root is a resolved real path and the
+  directory the reader is in may reach it through a symlink.
+  """
+  def prefix(dir) do
+    with {:ok, out} <- run(dir, ["rev-parse", "--show-prefix"]) do
+      {:ok, String.trim_trailing(out, "\n")}
+    end
+  end
+
+  @doc """
   The work tree status as a list of
 
       %{path: p, orig_path: nil | p2, index: "M", worktree: "M"}
@@ -37,11 +51,17 @@ defmodule Aimax.Core.Git do
   `index` is the X column and `worktree` is the Y column of `git status`.
   Untracked files carry `"?"` in both. A rename or a copy fills `orig_path`.
   """
-  def status(dir) do
-    with {:ok, out} <- run(dir, ["status", "--porcelain=v1", "-z"]) do
+  def status(dir, path \\ nil) do
+    args = ["status", "--porcelain=v1", "-z"] ++ pathspec(path)
+
+    with {:ok, out} <- run(dir, args) do
       {:ok, parse_status(out)}
     end
   end
+
+  # a pathspec scopes every read to one subtree: the diff you asked for is
+  # the directory you are looking at, not the whole repository
+  defp pathspec(path), do: if(blank?(path), do: [], else: ["--", path])
 
   @doc """
   A parsed unified diff: one entry per file, each with its hunks.
@@ -64,7 +84,7 @@ defmodule Aimax.Core.Git do
       ["diff", "--no-color", "--no-ext-diff", "-U3"] ++
         if(staged, do: ["--cached"], else: []) ++
         if(blank?(base), do: [], else: [base]) ++
-        if(blank?(path), do: [], else: ["--", path])
+        pathspec(path)
 
     with {:ok, out} <- run(dir, args) do
       {:ok, parse_diff(out)}
@@ -74,10 +94,13 @@ defmodule Aimax.Core.Git do
   @doc """
   The last `n` commits as `%{sha, short_sha, author, date, subject}`.
 
-  `date` is the author date in ISO 8601.
+  `date` is the author date in ISO 8601. With a `path`, only the commits
+  that touched it.
   """
-  def log(dir, n) when is_integer(n) and n > 0 do
-    args = ["log", "-n", Integer.to_string(n), "--format=%H%x00%an%x00%aI%x00%s", "-z"]
+  def log(dir, n, path \\ nil) when is_integer(n) and n > 0 do
+    args =
+      ["log", "-n", Integer.to_string(n), "--format=%H%x00%an%x00%aI%x00%s", "-z"] ++
+        pathspec(path)
 
     with {:ok, out} <- run(dir, args) do
       {:ok, parse_log(out)}

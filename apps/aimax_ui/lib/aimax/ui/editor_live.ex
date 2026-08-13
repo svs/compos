@@ -77,14 +77,14 @@ defmodule Aimax.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
-  # clicking a diff card header folds or unfolds it. The client holds a
-  # buffer and a file name, so it needs a closure rather than a command —
-  # git.scm registered one with diff-on-card-click!.
-  def handle_event("diff_card", %{"win" => win, "file" => file}, socket) do
-    with {id, ""} <- Integer.parse(to_string(win)) do
+  # clicking a block that carries a click id. The id is the mode's own
+  # word; the view hands it back and knows nothing else. diff-mode
+  # registered the handler with block-on-click!.
+  def handle_event("block_click", %{"win" => win, "id" => id}, socket) do
+    with {wid, ""} <- Integer.parse(to_string(win)) do
       Input.run(socket.assigns.frame, fn ->
-        Aimax.Core.Editor.set_active(id)
-        Aimax.Core.SchemeAPI.diff_card_click(Aimax.Core.Editor.current_buffer(), file)
+        Aimax.Core.Editor.set_active(wid)
+        Aimax.Core.SchemeAPI.block_click(Aimax.Core.Editor.current_buffer(), id)
       end)
     end
 
@@ -272,10 +272,23 @@ defmodule Aimax.Ui.EditorLive do
   # rich diff: the buffer text IS the unified diff, so the cards are parsed
   # out of the same bytes the plain view shows. Only the controlled state —
   # which cards are open, git's status letters — rides the payload.
-  defp decorate(%{type: :leaf, render_mode: "diff", diff: %{cards: cards}} = leaf, cache, _faces) do
-    cur = Aimax.Core.DiffView.current_file(cards, Aimax.Core.Text.line_index(leaf.text, leaf.point) + 1)
+  # a generic block tree the mode composed. This clause converts plists to
+  # maps and finds the buffer line point is on; it does not know what any
+  # block means.
+  defp decorate(%{type: :leaf, render_mode: "blocks"} = leaf, cache, _faces) do
+    raw = Map.get(leaf, :blocks) || []
+    key = {leaf.buffer, leaf.version, :erlang.phash2(raw)}
 
-    {Map.merge(leaf, %{lines: [], diff_cards: cards, diff_current: cur}), cache}
+    blocks =
+      case cache[{:blocks, leaf.id}] do
+        {^key, blocks} -> blocks
+        _ -> Enum.map(raw, &block_view/1)
+      end
+
+    line = Aimax.Core.Text.line_index(leaf.text, leaf.point) + 1
+
+    {Map.merge(leaf, %{lines: [], blk: blocks, blk_line: line}),
+     Map.put(cache, {:blocks, leaf.id}, {key, blocks})}
   end
 
   # below this many lines, ship the whole buffer once and let the browser
@@ -409,6 +422,7 @@ defmodule Aimax.Ui.EditorLive do
     ~H"""
     <div id="editor" class="editor-root" phx-hook="Keys" data-boot={@boot_id}>
       <style :if={@state.faces != %{}}><%= Phoenix.HTML.raw(face_css(@state.faces)) %></style>
+    <style :if={@state.styles != %{}}><%= Phoenix.HTML.raw(Enum.join(Map.values(@state.styles), "\n")) %></style>
       <div class="windows">
         <.tree node={@state.tree} active={@state.active} completion={@state.completion} />
       </div>
@@ -513,51 +527,10 @@ defmodule Aimax.Ui.EditorLive do
       data-path={@path}
       data-read-only={to_string(@read_only)}
     >
-      <%= if @node.render_mode == "diff" and Map.has_key?(@node, :diff_cards) do %>
-        <div class="diff-view">
-          <div class="diff-scroll">
-            <div :if={@node.diff_cards == []} class="diff-empty">no changes</div>
-            <div
-              :for={c <- @node.diff_cards}
-              class={"diff-card #{if c.file == @node.diff_current, do: "current", else: ""}"}
-            >
-              <div
-                class="diff-card-head"
-                phx-click="diff_card"
-                phx-value-win={@node.id}
-                phx-value-file={c.file}
-              >
-                <span class="diff-caret">{if c.open, do: "▾", else: "▸"}</span>
-                <span class="diff-status">{c.status}</span>
-                <span class="diff-file">{c.file}</span>
-                <span :if={c.old_file && c.old_file != c.file} class="diff-oldfile">
-                  ← {c.old_file}
-                </span>
-              </div>
-              <div :if={c.open} class="diff-hunks">
-                <div :if={c.binary?} class="diff-binary">binary file</div>
-                <div :if={!c.binary? and c.hunks == []} class="diff-binary">no diff content</div>
-                <div :for={h <- c.hunks} class="diff-hunk">
-                  <div class="diff-hunk-head">{h.header}</div>
-                  <div class="diff-grid">
-                    <%= for r <- h.rows do %>
-                      <%= if r.kind == :gap do %>
-                        <div class="diff-gap">· · ·  {r.count} unchanged lines</div>
-                      <% else %>
-                        <div class={"diff-side old k-#{r.kind}"}>
-                          <span class="diff-no">{r.old_no}</span>
-                          <span :if={r.old != nil} class="diff-text"><%= elem(r.old_parts, 0) %><em><%= elem(r.old_parts, 1) %></em><%= elem(r.old_parts, 2) %></span>
-                        </div>
-                        <div class={"diff-side new k-#{r.kind}"}>
-                          <span class="diff-no">{r.new_no}</span>
-                          <span :if={r.new != nil} class="diff-text"><%= elem(r.new_parts, 0) %><em><%= elem(r.new_parts, 1) %></em><%= elem(r.new_parts, 2) %></span>
-                        </div>
-                      <% end %>
-                    <% end %>
-                  </div>
-                </div>
-              </div>
-            </div>
+      <%= if @node.render_mode == "blocks" and Map.has_key?(@node, :blk) do %>
+        <div class="blocks-view" id={"blocks-#{@node.id}"} phx-hook="BlockScroll">
+          <div class="blocks-scroll">
+            <.blk :for={b <- @node.blk} b={b} line={@node.blk_line} win={@node.id} />
           </div>
         </div>
       <% else %>
@@ -831,6 +804,61 @@ defmodule Aimax.Ui.EditorLive do
     do: %{kind: :meta, text: String.trim(safe_slice(text, s, e))}
 
   defp ag_block(_, _), do: nil
+
+  # The one renderer for block trees. Structure only: tags, classes, segs,
+  # click ids and the point mark all come from the mode. The mark: a block
+  # with a mark class and a line range gets that class while point's line is
+  # inside the range — and, when it also has an anchor, a data-current
+  # attribute the scroll hook follows.
+  defp blk(%{b: %{tag: "pre"}} = assigns) do
+    ~H|<pre class={blk_class(@b, @line)}>{@b.text}</pre>|
+  end
+
+  defp blk(%{b: %{tag: "span"}} = assigns) do
+    ~H|<span class={blk_class(@b, @line)}><span :for={{c, t} <- @b.segs} class={c}>{t}</span><%= if @b.text do %>{@b.text}<% end %></span>|
+  end
+
+  defp blk(assigns) do
+    ~H"""
+    <div
+      class={blk_class(@b, @line)}
+      data-anchor={@b.anchor}
+      data-current={if @b.anchor && blk_current?(@b, @line), do: "1"}
+      phx-click={@b.click && "block_click"}
+      phx-value-win={@b.click && @win}
+      phx-value-id={@b.click}
+    ><span :for={{c, t} <- @b.segs} class={c}>{t}</span><%= if @b.text do %>{@b.text}<% end %><.blk :for={c <- @b.children} b={c} line={@line} win={@win} /></div>
+    """
+  end
+
+  defp blk_class(b, line),
+    do: if(blk_current?(b, line), do: "#{b.class} #{b.mark}", else: b.class)
+
+  defp blk_current?(%{lines: [a, b], mark: m}, line) when is_binary(m),
+    do: line >= a and line <= b
+
+  defp blk_current?(_, _), do: false
+
+  defp block_view(pl) do
+    %{
+      tag: pget(pl, "tag") || "div",
+      class: pget(pl, "class") || "",
+      anchor: falsy(pget(pl, "anchor")),
+      lines: falsy(pget(pl, "lines")),
+      mark: falsy(pget(pl, "mark")),
+      click: falsy(pget(pl, "click")),
+      text: falsy(pget(pl, "text")),
+      segs: for([c, t] <- pget(pl, "segs") || [], do: {c, t}),
+      children: Enum.map(pget(pl, "children") || [], &block_view/1)
+    }
+  end
+
+  defp pget([{:sym, k}, v | _], k), do: v
+  defp pget([_, _ | rest], k), do: pget(rest, k)
+  defp pget(_, _), do: nil
+
+  defp falsy(false), do: nil
+  defp falsy(v), do: v
 
   # A table always shrinks to the width it is given, and then clips what
   # does not fit. So the scrollbar must sit on an element OUTSIDE the

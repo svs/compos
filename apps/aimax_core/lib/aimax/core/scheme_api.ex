@@ -170,6 +170,14 @@ defmodule Aimax.Core.SchemeAPI do
             ["----------", "?", "?"]
         end
       end,
+      # a sortable mtime (posix seconds), 0 when the file is gone — file-stat
+      # formats for display and cannot be ordered
+      "file-mtime" => fn [p] ->
+        case File.stat(Path.expand(p), time: :posix) do
+          {:ok, stat} -> stat.mtime
+          {:error, _} -> 0
+        end
+      end,
       "file-exists?" => fn [p] -> File.exists?(Path.expand(p)) end,
       "file-directory?" => fn [p] -> File.dir?(Path.expand(p)) end,
       # (read-file PATH) -> contents, or #f if unreadable
@@ -527,6 +535,13 @@ defmodule Aimax.Core.SchemeAPI do
         :void
       end,
       "key-for-command" => fn [name] -> Editor.key_for_command(name) end,
+      # a mode's own stylesheet, rendered into the page beside the face
+      # variables. Modes are trusted code — they can eval anything — so the
+      # CSS ships raw.
+      "define-style!" => fn [name, css] ->
+        Editor.set_style(plain(name), css)
+        :void
+      end,
       "last-command" => fn [] -> Editor.last_command() end,
       "window-rows" => fn [] -> Editor.window_rows() end,
       "recenter!" => fn [] ->
@@ -610,8 +625,46 @@ defmodule Aimax.Core.SchemeAPI do
       "git-root" => fn [dir | rest] ->
         git_dispatch(rest, fn -> Git.root(dir) end, & &1)
       end,
+      # (git-status DIR [PATHSPEC] [CALLBACK]) — a pathspec scopes the read
+      # to one subtree, so the diff you get is the directory you are in
+      # (diff-word-range OLD NEW) -> ((OS OE) (NS NE)), or #f when the two
+      # lines differ at neither end. Byte scanning with UTF-8 boundaries is
+      # mechanism; deciding what to emphasise with it is diff-mode's.
+      "diff-word-range" => fn [old, new] ->
+        case word_range(old, new) do
+          nil -> false
+          {{os, oe}, {ns, ne}} -> [[os, oe], [ns, ne]]
+        end
+      end,
+      # (diff-parse TEXT) -> the same file plists git-diff returns. Text that
+      # git handed us whole — a commit — has no structured form of its own.
+      "diff-parse" => fn [text] ->
+        for f <- Aimax.Core.Git.parse(text) do
+          [
+            {:sym, "file-a"}, f.file_a || false,
+            {:sym, "file-b"}, f.file_b || false,
+            {:sym, "binary?"}, f.binary?,
+            {:sym, "hunks"},
+            for h <- f.hunks do
+              [
+                {:sym, "header"}, h.header,
+                {:sym, "old-start"}, h.old_start,
+                {:sym, "old-count"}, h.old_count,
+                {:sym, "new-start"}, h.new_start,
+                {:sym, "new-count"}, h.new_count,
+                {:sym, "lines"}, for({tag, t} <- h.lines, do: [{:sym, Atom.to_string(tag)}, t])
+              ]
+            end
+          ]
+        end
+      end,
+      "git-prefix" => fn [dir | rest] ->
+        git_dispatch(rest, fn -> Git.prefix(dir) end, & &1)
+      end,
       "git-status" => fn [dir | rest] ->
-        git_dispatch(rest, fn -> Git.status(dir) end, &Enum.map(&1, fn e -> status_plist(e) end))
+        {path, rest} = opt_path(rest)
+        git_dispatch(rest, fn -> Git.status(dir, path) end,
+          &Enum.map(&1, fn e -> status_plist(e) end))
       end,
       # (git-diff DIR) | (git-diff DIR OPTS) | (git-diff DIR OPTS CALLBACK)
       "git-diff" => fn
@@ -629,7 +682,9 @@ defmodule Aimax.Core.SchemeAPI do
           git_dispatch(rest, fn -> Git.diff(dir, diff_opts(opts)) end, &diff_plist/1)
       end,
       "git-log" => fn [dir, n | rest] ->
-        git_dispatch(rest, fn -> Git.log(dir, n) end, &Enum.map(&1, fn c -> log_plist(c) end))
+        {path, rest} = opt_path(rest)
+        git_dispatch(rest, fn -> Git.log(dir, n, path) end,
+          &Enum.map(&1, fn c -> log_plist(c) end))
       end,
       "git-show" => fn [dir, ref | rest] ->
         git_dispatch(rest, fn -> Git.show(dir, plain(ref)) end, & &1)
@@ -659,28 +714,79 @@ defmodule Aimax.Core.SchemeAPI do
         :ets.insert(@escaped, {{:fs_handler}, handler})
         :void
       end,
-      # clicking a diff card's header. The client has a buffer and a file
-      # name, not a command, so it needs a closure to hand them to — the
-      # same one-handler shape as mcp-on-change! and fs-on-change!.
-      "diff-on-card-click!" => fn [handler] ->
-        :ets.insert(@escaped, {{:diff_card_handler}, handler})
+      # clicking a block in a rich view. The client holds a buffer and the
+      # block's own id string, not a command, so it needs a closure to hand
+      # them to — the same one-handler shape as mcp-on-change! and
+      # fs-on-change!. What an id means is the mode's business.
+      "block-on-click!" => fn [handler] ->
+        :ets.insert(@escaped, {{:block_click_handler}, handler})
         :void
       end
     }
   end
 
   @doc """
-  Run the registered diff-card click handler. The UI calls this: it holds a
-  buffer and a file name, and the policy for what a click does is Scheme's.
+  Run the registered block click handler. The UI calls this: it holds a
+  buffer and an opaque block id, and the policy for what a click does is
+  Scheme's.
   """
-  def diff_card_click(buffer, file) do
+  def block_click(buffer, id) do
     with tid when tid != :undefined <- :ets.whereis(@escaped),
-         [{_, handler}] <- :ets.lookup(tid, {:diff_card_handler}) do
-      Aimax.Core.Session.apply_callback(handler, [buffer, file])
+         [{_, handler}] <- :ets.lookup(tid, {:block_click_handler}) do
+      Aimax.Core.Session.apply_callback(handler, [buffer, id])
     end
 
     :ok
   end
+
+  # The intra-line diff: strip the common prefix and the common suffix and
+  # report what is left on each side. Exact when one span changed, which is
+  # what most edited lines are, and it never lies about the ends.
+  defp word_range(old, new) do
+    p = common_prefix_len(old, new)
+    s = common_suffix_len(binary_part(old, p, byte_size(old) - p), binary_part(new, p, byte_size(new) - p))
+
+    omid = byte_size(old) - p - s
+    nmid = byte_size(new) - p - s
+
+    if omid <= 0 and nmid <= 0,
+      do: nil,
+      else: {{p, p + omid}, {p, p + nmid}}
+  end
+
+  defp common_prefix_len(a, b), do: common_prefix_len(a, b, 0)
+
+  defp common_prefix_len(a, b, i) do
+    if i < byte_size(a) and i < byte_size(b) and :binary.at(a, i) == :binary.at(b, i),
+      do: common_prefix_len(a, b, i + 1),
+      else: utf8_floor(a, i)
+  end
+
+  defp common_suffix_len(a, b), do: common_suffix_len(a, b, 0)
+
+  defp common_suffix_len(a, b, i) do
+    sa = byte_size(a) - 1 - i
+    sb = byte_size(b) - 1 - i
+
+    if sa >= 0 and sb >= 0 and :binary.at(a, sa) == :binary.at(b, sb),
+      do: common_suffix_len(a, b, i + 1),
+      # the suffix STARTS at byte_size - i, and that index must be a
+      # character boundary too, or the emphasis splits a codepoint
+      else: byte_size(a) - utf8_floor(a, byte_size(a) - i)
+  end
+
+  # never split a multi-byte character: walk back off a continuation byte
+  defp utf8_floor(_bin, 0), do: 0
+
+  defp utf8_floor(bin, i) do
+    if i < byte_size(bin) and Bitwise.band(:binary.at(bin, i), 0xC0) == 0x80,
+      do: utf8_floor(bin, i - 1),
+      else: i
+  end
+
+  # a leading string in the tail is a pathspec; a closure is the callback
+  defp opt_path([p | rest]) when is_binary(p), do: {p, rest}
+  defp opt_path(rest), do: {nil, rest}
 
   defp git_dispatch([], work, shape), do: git_value(work.(), shape)
 

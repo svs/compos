@@ -1312,6 +1312,19 @@
 
 (global-set-key "C-x C-q" "read-only-mode")
 
+;; A file you reach from a browsing surface (diff-mode, code.scm) opens
+;; READ-ONLY. You came to read it, and a stray keystroke in a file you are
+;; only passing through is an edit you did not mean. C-x C-q makes it
+;; writable. Set *browse-read-only* to #f in init.scm to opt out.
+(define *browse-read-only* #t)
+
+(define (browse-visit path)
+  (visit path)
+  (when *browse-read-only*
+    (buffer-set-read-only! (current-buffer) #t)))
+
+(public! 'browse-visit "(browse-visit PATH) — open a file the way the code browser does: read-only unless *browse-read-only* is #f. C-x C-q makes it writable")
+
 (define-command "view-messages" "Display the *messages* buffer"
   (lambda () (display-buffer "*messages*")))
 

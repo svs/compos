@@ -161,79 +161,11 @@ defmodule Aimax.Ui.Layouts do
           .region { background: var(--region-bg, #e7e9f1); }
           /* native drag-selection matches the editor region it becomes */
           ::selection { background: var(--region-bg, #e7e9f1); }
-          /* --- git diff cards ---------------------------------------------- */
-          .diff-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-          .diff-scroll { flex: 1; overflow-y: auto; padding: 10px 12px 8px; }
-          .diff-empty {
-            font-family: var(--font-mono); font-size: 12px; padding: 12px;
-            color: var(--dim-fg, #8a857a);
-          }
-          .diff-card {
-            margin: 0 0 10px; border-radius: 7px;
-            border: 1px solid var(--diff-file-fg, rgba(0,0,0,0.14));
-            overflow: hidden;
-          }
-          .diff-card.current { box-shadow: 0 0 0 2px var(--accent-fg, #26356b) inset; }
-          .diff-card-head {
-            display: flex; align-items: baseline; gap: 8px; cursor: pointer;
-            padding: 6px 10px; user-select: none;
-            font-family: var(--font-mono); font-size: 12px;
-            background: var(--hl-line-bg, rgba(0,0,0,0.03));
-          }
-          .diff-caret { color: var(--dim-fg, #8a857a); width: 1ch; }
-          .diff-status {
-            font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
-            color: var(--dim-fg, #8a857a); min-width: 8ch;
-          }
-          .diff-file { font-weight: 600; color: var(--diff-file-fg, inherit); }
-          .diff-oldfile { color: var(--dim-fg, #8a857a); font-size: 11px; }
-          .diff-binary {
-            padding: 8px 12px; font-family: var(--font-mono); font-size: 11.5px;
-            color: var(--dim-fg, #8a857a);
-          }
-          .diff-hunk-head {
-            padding: 4px 10px; font-family: var(--font-mono); font-size: 11px;
-            color: var(--diff-hunk-fg, #6a675e);
-            background: var(--diff-hunk-bg, transparent);
-            border-top: 1px solid var(--border-bg, rgba(0,0,0,0.08));
-          }
-          /* the two panes: old on the left, new on the right */
-          .diff-grid {
-            /* minmax(0,...), not 1fr: a grid track defaults to min-width
-               auto, so one long line would push the other pane off screen */
-            display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-            font-family: var(--font-mono); font-size: 12px; line-height: 1.5;
-          }
-          .diff-side { display: flex; gap: 8px; padding: 0 8px; min-width: 0; }
-          .diff-side.old { border-right: 1px solid var(--border-bg, rgba(0,0,0,0.08)); }
-          .diff-no {
-            color: var(--linenum-fg, #b3ac9c); min-width: 4ch; text-align: right;
-            flex: none; user-select: none;
-          }
-          .diff-text {
-            flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere;
-          }
-          .diff-side.k-del.old, .diff-side.k-mod.old {
-            background: var(--diff-del-bg, rgba(160, 48, 32, 0.10));
-            color: var(--diff-del-fg, inherit);
-          }
-          .diff-side.k-add.new, .diff-side.k-mod.new {
-            background: var(--diff-add-bg, rgba(61, 107, 79, 0.12));
-            color: var(--diff-add-fg, inherit);
-          }
-          /* the intra-line span: what actually changed inside the line */
-          .diff-side em { font-style: normal; border-radius: 2px; padding: 0 1px; }
-          /* an unchanged line has no emphasis span; padding alone would
-             still draw a coloured sliver at the end of the text */
-          .diff-side em:empty { display: none; }
-          .diff-side.old em { background: var(--diff-del-word-bg, rgba(160, 48, 32, 0.28)); }
-          .diff-side.new em { background: var(--diff-add-word-bg, rgba(61, 107, 79, 0.30)); }
-          .diff-gap {
-            grid-column: 1 / -1; padding: 2px 10px;
-            font-family: var(--font-mono); font-size: 10.5px;
-            color: var(--dim-fg, #8a857a);
-            background: var(--hl-line-bg, rgba(0,0,0,0.02));
-          }
+          /* --- block views -------------------------------------------------- */
+          /* only the container: a mode composes blocks and ships its own
+             stylesheet via define-style! (diff-mode.scm is the precedent) */
+          .blocks-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+          .blocks-scroll { flex: 1; overflow-y: auto; padding: 10px 12px 8px; }
           /* --- agent transcript (the Modern Emacs agent-chat design) ------- */
           .agent-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
           .ag-scroll { flex: 1; overflow-y: auto; padding: 14px 18px 6px; }
@@ -548,6 +480,32 @@ defmodule Aimax.Ui.Layouts do
                 if (this.stick) this.scroller.scrollTop = this.scroller.scrollHeight;
               }
             },
+            // point moves in the buffer, so the mark moves in the block
+            // view — and the reader has to be able to see where it went.
+            // The renderer stamps data-current on marked, anchored blocks;
+            // the LAST match in document order is the innermost. Only scroll
+            // when it actually changed, or every unrelated re-render would
+            // yank the view back.
+            BlockScroll: {
+              mounted() {
+                this.scroller = this.el.querySelector(".blocks-scroll");
+                this.last = null;
+                this.follow();
+              },
+              updated() {
+                this.follow();
+              },
+              follow() {
+                if (!this.scroller) return;
+                const marked = this.el.querySelectorAll("[data-current]");
+                const cur = marked.length ? marked[marked.length - 1] : null;
+                if (!cur) return;
+                const key = cur.dataset.anchor || null;
+                if (key !== null && key === this.last) return;
+                this.last = key;
+                cur.scrollIntoView({ block: "nearest" });
+              }
+            },
             Keys: {
               mounted() {
                 // remounted against a restarted server: this page's CSS/JS is
@@ -699,13 +657,14 @@ defmodule Aimax.Ui.Layouts do
                   this.wheelPending.clear();
                 };
                 this.wheelH = (e) => {
-                  // agent/chat transcripts (.ag-scroll) and buffers under
-                  // the ship-all threshold (.buf.client-scroll) own their
-                  // scrolling natively — the server viewport only drives
-                  // large line-grid buffers still using the windowed path
+                  // agent/chat transcripts (.ag-scroll), diff cards
+                  // (.diff-scroll) and buffers under the ship-all threshold
+                  // (.buf.client-scroll) own their scrolling natively — the
+                  // server viewport only drives large line-grid buffers
+                  // still using the windowed path
                   if (
                     e.target.closest &&
-                    e.target.closest(".ag-scroll, .buf.client-scroll")
+                    e.target.closest(".ag-scroll, .blocks-scroll, .buf.client-scroll")
                   )
                     return;
                   e.preventDefault();

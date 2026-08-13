@@ -451,7 +451,7 @@ defmodule Aimax.Ui.EditorLive do
               <span class="mb-hint">{c.hint}</span>
             </div>
           </div>
-          <div class="mb-input-row">
+          <div class={"mb-input-row #{if Map.get(@state.minibuffer, :prompt_sel), do: "selected"}"}>
             <span class="prompt">{@state.minibuffer.prompt}</span>
             <span class="mb-input"><%= with {pre, cur, post} <- mb_split(@state.minibuffer) do %>{pre}<span class="cursor">{cur}</span>{post}<% end %></span>
             <span class="mb-spacer"></span>
@@ -484,8 +484,10 @@ defmodule Aimax.Ui.EditorLive do
 
   defp mb_split(mb), do: {mb.input, " ", ""}
 
-  defp count_text(%{total: total, sel: sel, completing: completing}) do
+  defp count_text(%{total: total, sel: sel, completing: completing} = mb) do
     cond do
+      # the prompt holds the selection: RET opens this directory
+      total > 0 and Map.get(mb, :prompt_sel) -> "#{total} · RET opens dir"
       total > 0 -> "#{sel + 1}/#{total}"
       completing -> "TAB completes"
       true -> "no match"

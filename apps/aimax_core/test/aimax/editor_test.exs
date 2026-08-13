@@ -693,8 +693,10 @@ defmodule Aimax.EditorTest do
     mb = Editor.render_state().minibuffer
     assert Enum.map(mb.candidates, & &1.label) == ["alpha.txt", "subdir/"]
 
-    # arrow onto subdir/, TAB inserts it and lists inside
-    press(["C-n", "TAB"])
+    # the input names a directory, so the prompt holds the selection: the
+    # first C-n lands on alpha.txt, the second on subdir/. TAB inserts it
+    # and lists inside
+    press(["C-n", "C-n", "TAB"])
     mb = Editor.render_state().minibuffer
     assert mb.input == root <> "/subdir/"
     assert Enum.map(mb.candidates, & &1.label) == ["inner.txt"]
@@ -1733,6 +1735,36 @@ defmodule Aimax.EditorTest do
     assert File.read!(path) == "on disk + edited"
     assert echo() =~ "Wrote"
     File.rm!(path)
+  end
+
+  test "TAB into a directory, then RET opens dired (not the first entry)" do
+    root = Path.join(System.tmp_dir!(), "aimax-dir-#{System.unique_integer([:positive])}")
+    sub = Path.join(root, "onlysub")
+    File.mkdir_p!(sub)
+    File.write!(Path.join(sub, "a.txt"), "a")
+    File.write!(Path.join(sub, "b.txt"), "b")
+
+    press(["C-x", "C-f"])
+    type(root <> "/only")
+    press(["TAB"])
+
+    mb = Editor.render_state().minibuffer
+    assert mb.input == sub <> "/"
+    # the prompt holds the selection, so no candidate row is marked
+    assert mb.prompt_sel
+    refute Enum.any?(mb.candidates, & &1.selected)
+
+    press(["RET"])
+    assert Editor.current_buffer() == sub
+    assert Buffer.get_local(sub, "mode-name") == "Dired"
+
+    # C-n takes the selection back to the candidates: RET then means the file
+    press(["C-x", "C-f"])
+    type(root <> "/only")
+    press(["TAB", "C-n", "RET"])
+    assert Editor.current_buffer() == Path.join(sub, "a.txt")
+
+    File.rm_rf!(root)
   end
 
   test "switch-to-buffer via C-x b", %{buf: buf} do

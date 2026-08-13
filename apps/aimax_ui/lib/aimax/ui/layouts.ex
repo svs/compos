@@ -394,6 +394,8 @@ defmodule Aimax.Ui.Layouts do
             border-top: 1px solid var(--border, #e2dbc9);
             background: var(--default-bg, #efeadf);
           }
+          /* the prompt line holds the selection: the input names a directory */
+          .mb-input-row.selected { background: var(--select-bg, #e7e9f1); }
           .mb-count { font-family: var(--font-mono); color: var(--dim-fg, #8a857a); font-size: 10.5px; }
           /* which-key: transient prefix panel */
           .which-key {

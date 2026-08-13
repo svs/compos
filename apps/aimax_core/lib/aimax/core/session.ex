@@ -1177,10 +1177,12 @@ defmodule Aimax.Core.Session do
   # on_complete prompts (find-file): the input is the path being built.
   # RET means the HIGHLIGHTED candidate whenever one exists (vertico) —
   # resolve it through the completion closure. The typed input wins only
-  # when nothing matches (that's how new files are created); M-RET
+  # when nothing matches (that's how new files are created), or when the
+  # input names a directory and the user did not touch the selection —
+  # then RET opens the directory (Editor.prompt_preselected?/1). M-RET
   # (minibuffer-confirm-input!) always submits the input literally.
   defp mb_confirm_value(%{on_complete: oc} = mb, store) when oc not in [nil, false] do
-    if mb[:selected] do
+    if mb[:selected] && not Editor.prompt_preselected?(mb) do
       case Aimax.Scheme.Eval.apply_fn(oc, [mb.input, mb[:selected]], store) do
         {[new_input, _cands], store} when is_binary(new_input) -> {new_input, store}
         {_, store} -> {mb.input, store}

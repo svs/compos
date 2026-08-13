@@ -732,6 +732,9 @@ defmodule Aimax.Core.Editor do
   def handle_call({:mb_move_sel, delta, fid}, _from, state) do
     case frame(state, fid) do
       %{minibuffer: %{} = mb} = f ->
+        # the prompt holds the selection (a directory input): the first move
+        # down takes it to the first candidate, it does not skip one
+        delta = if prompt_preselected?(mb) and delta > 0, do: delta - 1, else: delta
         changed(:ok, put_frame(state, %{f | minibuffer: %{mb | list: Candidates.move(mb.list, delta)}}), f.id)
 
       _ ->
@@ -1117,6 +1120,22 @@ defmodule Aimax.Core.Editor do
 
   defp mb_query(%{input: input}), do: input
 
+  @doc """
+  True when the prompt line itself is the selection, not a candidate row
+  (vertico-preselect 'directory).
+
+  A file prompt whose input ends with "/" names a directory. RET must open
+  that directory, not the first file in it — TAB descends into a directory
+  and leaves its contents listed. C-n/C-p touch the list and take the
+  selection back to the candidates.
+  """
+  def prompt_preselected?(mb) do
+    touched = Map.get(mb, :sel_touched) || (mb[:list] && mb.list.touched) || false
+
+    mb[:on_complete] not in [nil, false] and not touched and
+      String.ends_with?(mb.input, "/")
+  end
+
   defp put_mb_input(mb, input) do
     mb = %{mb | input: input}
     %{mb | list: Candidates.put_query(mb.list, mb_query(mb))}
@@ -1138,11 +1157,20 @@ defmodule Aimax.Core.Editor do
   end
 
   defp render_minibuffer(mb, name) do
+    prompt_sel = prompt_preselected?(mb)
+
     %{
       prompt: mb.prompt,
       input: mb.input,
       point: (Buffer.exists?(name) && Buffer.point(name)) || Kernel.byte_size(mb.input),
-      candidates: Candidates.rows(mb.list),
+      # the prompt holds the selection: mark no row, so the highlight always
+      # shows what RET takes
+      prompt_sel: prompt_sel,
+      candidates:
+        if(prompt_sel,
+          do: Enum.map(Candidates.rows(mb.list), &%{&1 | selected: false}),
+          else: Candidates.rows(mb.list)
+        ),
       # widest label of the WHOLE set, not the visible window — the names
       # column keeps one width for the session instead of reflowing per key
       label_width: Candidates.label_width(mb.list),

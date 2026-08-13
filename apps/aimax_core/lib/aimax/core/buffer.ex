@@ -243,9 +243,14 @@ defmodule Aimax.Core.Buffer do
   def handle_call({:set_local, key, val}, _from, state) do
     state = %{state | locals: Map.put(state.locals, key, val)}
     state = if key == "ts-lang", do: init_ts(state, val), else: state
-    # locals feed rendering ('style, mode-name, line-numbers) and persistence —
-    # clients must repaint and the desktop must persist without a buffer edit
+    # Locals feed rendering ('style, mode-name, 'render-blocks) and
+    # persistence. The editor firehose reaches the Desktop; the buffer's own
+    # channel reaches every frame that shows the buffer, so views repaint
+    # when a local is the ONLY thing that changed — an async render chain
+    # ends exactly that way. The :locals source is unknown to every reactor
+    # whitelist, so the phantom change triggers no rules.
     Events.broadcast_editor(:locals)
+    broadcast(state, state.point, "", 0, :locals)
     {:reply, :ok, state}
   end
 

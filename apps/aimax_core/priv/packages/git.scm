@@ -111,15 +111,17 @@
 ;; The directory the diff is about. The current buffer's directory when it
 ;; sits in a repository; otherwise the most recent buffer that does — C-x g
 ;; from a chat or *scratch* means "the project I am working in", not the
-;; home directory. The scan is capped: MRU means a hit comes early.
+;; home directory. Standing in a subdirectory scopes the diff to it; the
+;; fallback takes the found buffer's ROOT, because a chat has no place in
+;; the tree. The scan is capped: MRU means a hit comes early.
 (define (git--context-dir)
   (let ((here (default-directory)))
     (if (string? (git-root here))
         here
         (let loop ((bs (buffer-list-mru)) (left 10))
           (cond ((or (null? bs) (= left 0)) here)
-                ((let ((d (buffer-directory (car bs))))
-                   (and (string? (git-root d)) d)))
+                ((let ((r (git-root (buffer-directory (car bs)))))
+                   (and (string? r) r)))
                 (else (loop (cdr bs) (- left 1))))))))
 
 (define-command "git-diff" "Show the diff for the directory you are in"

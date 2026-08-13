@@ -193,7 +193,10 @@
 ;; closures carry their AST — so a function's real source is one call away.
 (define (describe-function name)
   (cond ((boundp name)
-         (function-source (symbol-value name)))
+         ;; a builtin has no Scheme source, but it has a one-line doc
+         (let ((src (function-source (symbol-value name)))
+               (doc (primitive-doc name)))
+           (if doc (string-append doc "\n" src) src)))
         ((command-fn name)
          (string-append "M-x command:\n" (function-source (command-fn name))))
         (else (string-append "no function or command named "
@@ -254,6 +257,12 @@
 
 (define (apropos--compact xs) (filter (lambda (x) x) xs))
 
+;; an internal entry carries its doc when the primitive has one; a bare
+;; userland define stays a bare name — describe-function has its source
+(define (apropos--internal n doc words)
+  (and (apropos--hit? (if doc (string-append n " " doc) n) words)
+       (if doc (list 'kind "internal" 'name n 'doc doc) n)))
+
 ;; QUERY is words, not a regex: "split window", "open a file", "chat cost".
 ;; Recipes come first: a task-level hit beats four name-level ones, and it
 ;; is the answer the caller actually wanted.
@@ -295,7 +304,8 @@
     "the cost commands. This is the supported surface and the place to "
     "start. Nothing matched? You get the closest names instead. Pass "
     "category to list one area whole, or scope \"all\" to include "
-    "undocumented internals, which may change without notice.")
+    "the internal primitives, one-line docs only, which may change "
+    "without notice.")
   (list (list 'query "string" "words, e.g. \"open a file\" or \"buffer text\"")
         (list 'category "string" "list this category whole instead of searching" 'optional)
         (list 'scope "string" "\"public\" (default) or \"all\"" 'optional))
@@ -307,9 +317,12 @@
         (cond
           (cat (apropos-category (string->symbol cat)))
           ((equal? scope "all")
-           (list 'public (apropos q)
-                 'globals (filter (lambda (n) (apropos--hit? n (apropos--words q)))
-                                  (global-names))))
+           (let ((words (apropos--words q)))
+             (list 'public (apropos q)
+                   'globals (apropos--compact
+                              (map (lambda (n)
+                                     (apropos--internal n (primitive-doc n) words))
+                                   (global-names))))))
           (else (apropos q)))))))
 
 (define-tool! 'apropos-categories

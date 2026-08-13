@@ -127,4 +127,53 @@ defmodule Aimax.AproposTest do
       assert hello =~ "(visit"
     end
   end
+
+  describe "internal primitives" do
+    # R7's last gap: scope "all" listed names with no docs. The sweep gave
+    # every Elixir primitive a one-line doc; these hold that line.
+
+    test "every builtin bound in the session carries a doc" do
+      # session_primitives is private, so the interpreter is the registry
+      # of record: a builtin global without a doc is the sweep regressing
+      assert {:ok, "()"} =
+               Session.eval("""
+               (filter (lambda (n)
+                         (and (string-prefix? "#<builtin"
+                                (function-source (symbol-value (string->symbol n))))
+                              (not (primitive-doc n))))
+                       (global-names))
+               """)
+    end
+
+    test "no doc names a primitive that does not exist" do
+      assert {:ok, "()"} =
+               Session.eval("""
+               (filter (lambda (p) (not (boundp (string->symbol (car p)))))
+                       (primitive-docs))
+               """)
+    end
+
+    test "docs cover the registration maps exactly, both ways" do
+      for {prims, docs} <- [
+            {Aimax.Scheme.Builtins.all(), Aimax.Scheme.Builtins.docs()},
+            {Aimax.Core.SchemeAPI.primitives(), Aimax.Core.SchemeAPI.docs()}
+          ] do
+        assert Enum.sort(Map.keys(prims)) == Enum.sort(Map.keys(docs))
+      end
+    end
+
+    test "every doc is written the house way: signature, dash, sentence" do
+      all =
+        Aimax.Scheme.Builtins.docs()
+        |> Map.merge(Aimax.Core.SchemeAPI.docs())
+        |> Map.merge(Aimax.Core.Session.docs())
+
+      bad =
+        Enum.reject(all, fn {name, doc} ->
+          String.starts_with?(doc, "(#{name}") and String.contains?(doc, " — ")
+        end)
+
+      assert bad == []
+    end
+  end
 end

@@ -270,6 +270,147 @@ defmodule Aimax.Core.Session do
     end)
   end
 
+  # one merged map: the three registration modules' docs
+  defp primitive_docs do
+    Aimax.Scheme.Builtins.docs()
+    |> Map.merge(Aimax.Core.SchemeAPI.docs())
+    |> Map.merge(docs())
+  end
+
+  defp doc_name({:sym, n}), do: n
+  defp doc_name(n) when is_binary(n), do: n
+
+  @doc """
+  One-line doc string for every primitive that `session_primitives/1`
+  registers. Format: a call signature, then " — ", then one sentence.
+  """
+  def docs do
+    %{
+      "primitive-doc" =>
+        "(primitive-doc NAME) — return the one-line doc for an Elixir primitive, or #f.",
+      "primitive-docs" =>
+        "(primitive-docs) — return (NAME DOC) pairs for every Elixir primitive, sorted.",
+      "message" => "(message TEXT) — show TEXT in the echo area.",
+      "define-command" =>
+        "(define-command NAME [DOC] FN) — register an M-x command; DOC shows in M-x.",
+      "command-names" => "(command-names) — return every M-x command name.",
+      "global-keys" => "(global-keys) — return ((KEYS COMMAND) ...) for every global key binding.",
+      "command-fn" => "(command-fn NAME) — return the command's closure, or #f.",
+      "command-doc" =>
+        "(command-doc NAME) — return the command's doc string; empty when it has none.",
+      "run-command" => "(run-command NAME) — run the named command; error when it is undefined.",
+      "llm" => "(llm PROMPT CALLBACK) — start an async completion; CALLBACK gets the reply text.",
+      "llm-tools" =>
+        "(llm-tools PROMPT SYSTEM SPECS DISPATCHER CB [USAGE-CB]) — async tool loop; CB gets text.",
+      "browser-call" =>
+        "(browser-call OP ARGS CB) — send OP to the browser; CB gets a reply plist.",
+      "browser-serve!" =>
+        "(browser-serve! HANDLER) — set the handler for browser requests: (HANDLER OP ARGS).",
+      "browser-connected?" =>
+        "(browser-connected?) — return #t when a browser extension is connected.",
+      "dispatch-keys" =>
+        "(dispatch-keys KEYS) — dispatch a list of key chords through the GUI key path, in order.",
+      "mcp-connect!" => "(mcp-connect! NAME SPEC) — connect an MCP server from a spec plist.",
+      "mcp-disconnect!" => "(mcp-disconnect! NAME) — disconnect the named MCP server.",
+      "mcp-connections" =>
+        "(mcp-connections) — return (name status tools type resources prompts) per connection.",
+      "mcp-server-detail" =>
+        "(mcp-server-detail NAME) — return a status plist, or #f when never started.",
+      "mcp-on-change!" =>
+        "(mcp-on-change! HANDLER) — set the handler that gets (NAME STATUS) on server changes.",
+      "mcp-log" => "(mcp-log NAME) — return ((time dir text) ...) JSON-RPC frames, oldest first.",
+      "mcp-tool-specs" => "(mcp-tool-specs NAMES) — return the tool specs of the named servers.",
+      "mcp-await-ready" =>
+        "(mcp-await-ready SERVER [MS]) — wait until the server is ready; return #t or #f.",
+      "mcp-tool-call" =>
+        "(mcp-tool-call SERVER TOOL ARGS [TIMEOUT|CB]) — call one tool; without CB, wait for text.",
+      "tool-specs-json" =>
+        "(tool-specs-json SPECS) — return the specs as MCP tools/list JSON text.",
+      "priv-path" =>
+        "(priv-path REL) — return the absolute path of REL in the aimax_core priv directory.",
+      "ts-install-grammar!" =>
+        "(ts-install-grammar! NAME URL) — install a tree-sitter grammar in the background.",
+      "ts-installed-grammars" =>
+        "(ts-installed-grammars) — return the installed tree-sitter grammar names.",
+      "format-usd" => "(format-usd AMOUNT) — return AMOUNT as a dollar string with 4 decimals.",
+      "llm-price" => "(llm-price MODEL) — return the model's token price plist, or #f.",
+      "llm-cost-report" =>
+        "(llm-cost-report) — return one usage plist per day and model, with cost.",
+      "set-llm-model!" => "(set-llm-model! MODEL) — set the active LLM model.",
+      "set-llm-cache-ttl!" =>
+        "(set-llm-cache-ttl! TTL) — set how long the provider holds a cached prefix.",
+      "backend-capabilities" =>
+        "(backend-capabilities NAME) — return the backend's capability symbols.",
+      "llm-max-tokens" =>
+        "(llm-max-tokens MODEL) — return the model's maximum output tokens, or #f.",
+      "agent-start!" => "(agent-start! SLUG CONFIG) — start an agent thread from a config plist.",
+      "agent-prompt!" =>
+        "(agent-prompt! SLUG TEXT [DISPLAY]) — send a prompt; return 'sent or 'queued.",
+      "agent-cancel!" => "(agent-cancel! SLUG) — cancel the agent's current turn.",
+      "agent-permission-respond!" =>
+        "(agent-permission-respond! SLUG RPC-ID OPTION-ID) — answer a pending permission request.",
+      "agent-append!" =>
+        "(agent-append! SLUG TEXT) — insert TEXT at the agent's mark; return the new byte offset.",
+      "agent-mark" => "(agent-mark SLUG) — return the agent's output mark as a byte offset.",
+      "agent-list" => "(agent-list) — return the slugs of the running agent threads, sorted.",
+      "agent-kill!" => "(agent-kill! SLUG) — stop the agent thread.",
+      "agent-set-model!" =>
+        "(agent-set-model! SLUG MODEL) — switch the live session's model; return #t or #f.",
+      "agent-set-mode!" =>
+        "(agent-set-mode! SLUG MODE) — switch the permission mode; #f when unsupported.",
+      "agent-info" =>
+        "(agent-info SLUG) — return a plist: slug, buffer, status, queued, permission; or #f.",
+      "agent-on-event!" =>
+        "(agent-on-event! HANDLER) — set the global agent event handler: (HANDLER SLUG EVENTS).",
+      "agent-context-fn!" =>
+        "(agent-context-fn! HANDLER) — set the direct lane's context provider for each turn.",
+      "agent-record-fn!" =>
+        "(agent-record-fn! HANDLER) — set the direct lane's record writer for wire messages.",
+      "agent-permission-fn!" =>
+        "(agent-permission-fn! HANDLER) — set the tool policy; it returns allow, ask, or reject.",
+      "agent-permission-deadline!" =>
+        "(agent-permission-deadline! SLUG MS) — arm an auto-deny deadline on the permission.",
+      "set-modeline-extra!" =>
+        "(set-modeline-extra! TEXT) — set the extra text that the modeline shows.",
+      "llm-model" => "(llm-model) — return the active LLM model id.",
+      "eval-string" => "(eval-string SRC) — evaluate SRC as Scheme; return the last value.",
+      "eval-string-safe" =>
+        "(eval-string-safe SRC) — evaluate SRC; return (ok VAL) or (error MSG).",
+      "symbol-value" => "(symbol-value 'NAME) — return the global value of the symbol.",
+      "set-symbol-value!" => "(set-symbol-value! 'NAME VAL) — set the global value of the symbol.",
+      "boundp" => "(boundp 'NAME) — return #t when the symbol has a global binding.",
+      "global-names" => "(global-names) — return every globally bound name, sorted.",
+      "load" => "(load PATH) — evaluate a Scheme file in the live session.",
+      "eval-region" =>
+        "(eval-region BUF START END) — evaluate the text between byte offsets START and END.",
+      "eval-buffer" => "(eval-buffer BUF) — evaluate the whole buffer as Scheme.",
+      "on-change!" =>
+        "(on-change! BUF CB) — call (CB POS INSERTED DELETED-LEN SOURCE) on changes; return an id.",
+      "remove-on-change!" => "(remove-on-change! ID) — remove a change handler by its id.",
+      "with-window-buffer" =>
+        "(with-window-buffer THUNK) — run THUNK with the window's buffer current, not the prompt.",
+      "delete-frame!" =>
+        "(delete-frame! [ID]) — delete the frame and run its prompt's cancel handler.",
+      "minibuffer-buffer" => "(minibuffer-buffer) — return the minibuffer's buffer name.",
+      "minibuffer-state" => "(minibuffer-state) — return the active prompt as a plist, or #f.",
+      "minibuffer-input!" => "(minibuffer-input! INPUT) — set the minibuffer input text.",
+      "minibuffer-confirm!" =>
+        "(minibuffer-confirm!) — close the prompt; run its confirm handler with the value.",
+      "minibuffer-confirm-input!" =>
+        "(minibuffer-confirm-input!) — close the prompt; submit the input, not the candidate.",
+      "minibuffer-cancel!" =>
+        "(minibuffer-cancel!) — close the prompt; run its cancel handler; echo Quit.",
+      "minibuffer-detach!" =>
+        "(minibuffer-detach!) — close the prompt; return its state and closures, or #f.",
+      "minibuffer-complete!" =>
+        "(minibuffer-complete!) — run the prompt's completion, or copy the selection to the input.",
+      "minibuffer-next!" => "(minibuffer-next!) — move the candidate selection down one.",
+      "minibuffer-prev!" => "(minibuffer-prev!) — move the candidate selection up one.",
+      "minibuffer-del!" =>
+        "(minibuffer-del!) — delete one char back; at a directory boundary, delete the component."
+    }
+  end
+
   defp session_primitives(global) do
     eval_src = fn src, store ->
       Enum.reduce(Aimax.Scheme.Reader.read_all(src), {:void, store}, fn form, {_v, store} ->
@@ -771,6 +912,24 @@ defmodule Aimax.Core.Session do
       "global-names" => fn [], store ->
         {vars, _parent} = Map.fetch!(store.frames, global)
         {vars |> Map.keys() |> Enum.sort(), store}
+      end,
+      # the doc sweep's surface: apropos scope "all" and describe-function
+      # read these instead of showing a bare name. A userland alias of a
+      # builtin — (define raw-buffer-create buffer-create) — carries the
+      # builtin value, so the lookup follows the value to the real name.
+      "primitive-doc" => fn [name], store ->
+        n = doc_name(name)
+
+        resolved =
+          case Aimax.Scheme.Env.fetch(store, global, n) do
+            {:ok, {:builtin, builtin_name, _}} -> builtin_name
+            _ -> n
+          end
+
+        {primitive_docs()[resolved] || primitive_docs()[n] || false, store}
+      end,
+      "primitive-docs" => fn [] ->
+        primitive_docs() |> Enum.sort() |> Enum.map(fn {n, d} -> [n, d] end)
       end,
       # load-library: evaluate a Scheme file in the live session
       "load" => fn [path], store ->

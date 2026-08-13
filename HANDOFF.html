@@ -156,13 +156,14 @@ hitting a dead GenServer fails the eval instead of crash-looping the editor.</p>
 
 <h2>The AI-native refactor — where it stands (2026-08-13)</h2>
 
-<div class="box warn">
-<strong>23 commits sit unmerged on <code>refactor/r7-apropos</code></strong> (the
-branch name lags: R8 and R9 landed on it too). It is a straight line off
-<code>main</code> — the other <code>refactor/r*</code> names are just bookmarks
-on it, so merging that one branch lands everything. Per-item detail, including
-every correction to the plan, is in <code>AI-NATIVE-SPEC.md</code>: each item
-carries a dated status note.
+<div class="box">
+<strong>Merged to <code>main</code> 2026-08-13</strong> (fast-forward, 27
+commits, two green full runs before the merge). The <code>refactor/r*</code>
+names remain as bookmarks. Per-item detail, including every correction to
+the plan, is in <code>AI-NATIVE-SPEC.md</code>: each item carries a dated
+status note. A verification sweep checked each item's claims against the
+code before the merge; its two findings (a dead <code>connector-api?</code>,
+four stale spec bullets) are fixed in the last two commits.
 </div>
 
 <table>
@@ -179,12 +180,17 @@ carries a dated status note.
 <tr><td>R10 tests</td><td class="done">done</td><td>Except R3's restore suite. Tests live with their items: <code>chat_record_test</code>, <code>cache_economics_test</code>, <code>permission_test</code>'s "one gate", <code>apropos_test</code>.</td></tr>
 </table>
 
-<h3>Two things to decide before merging</h3>
+<h3>Merge order — decided 2026-08-13</h3>
+<p>The refactor merged first. The numbers made the call: the refactor
+rewrites (+3664/−1054 over 47 files); the code-browser worktree
+(<code>worktree-svs-191</code>, 4 commits plus uncommitted work) only adds
+(+452/−5 on the six shared files). Additions rebase cheaply over rewrites;
+rewrites replay expensively over additions. <strong>The worktree session
+must rebase onto the new <code>main</code></strong> — expect small
+conflicts in <code>scheme_api.ex</code> and <code>editor.scm</code>.</p>
+
+<h3>One thing still open</h3>
 <ul>
-<li><strong>Merge order against the code-browser worktree.</strong> It touches
-<code>editor.scm</code>, <code>scheme_api.ex</code>, <code>editor_live.ex</code> and
-<code>agent.scm</code> — all reworked heavily here. Whoever merges second pays,
-most in <code>editor.scm</code>. Decide the order deliberately.</li>
 <li><strong>Suite flakiness.</strong> ~1 full run in 3 shows a single failure in
 the shared-Editor tests (notmuch <code>:noproc</code> on a buffer another test
 killed, chrome window selection). Same rate on <code>main</code>. The

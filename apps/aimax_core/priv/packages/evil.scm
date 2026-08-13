@@ -33,7 +33,6 @@
 (define *evil-reg-linewise* #f)
 (define *evil-search* "")
 (define *evil-search-dir* 1)
-(define *evil-search-origin* 0)
 (define *evil-visual-anchor* #f)
 
 (define (evil-state) (or (buffer-local (current-buffer) 'evil-state) "normal"))
@@ -431,40 +430,27 @@
 
 ;;; --- search (/ ? n N) --------------------------------------------------------------
 
+;; vim jump: wrap on a miss (the engine says "Search wrapped"), land on
+;; the match start, no region
 (define (evil--search-jump q d from)
-  (let ((m (if (> d 0) (buffer-search q from) (buffer-search-backward q from))))
+  (let ((m (search-find-wrap q (< d 0) from)))
     (if m
         (goto-char! (car m))
-        (let ((m2 (if (> d 0)
-                      (buffer-search q 0)
-                      (buffer-search-backward q (buffer-size (current-buffer))))))
-          (if m2
-              (begin (goto-char! (car m2)) (message "Search wrapped"))
-              (message (string-append "Pattern not found: " q)))))))
+        (message (string-append "Pattern not found: " q)))))
 
 (define (evil-search dir)
-  (set! *evil-search-origin* (point))
-  (minibuffer-read* (if (> dir 0) "/" "?") '()
-    (list (list 'change
-            (lambda (q)
-              (with-window-buffer
-                (lambda ()
-                  (if (equal? q "")
-                      (goto-char! *evil-search-origin*)
-                      (let ((m (if (> dir 0)
-                                   (buffer-search q *evil-search-origin*)
-                                   (buffer-search-backward q *evil-search-origin*))))
-                        (if m (goto-char! (car m)))))))))
-          (list 'confirm
-            (lambda (q)
-              (if (equal? q "")
-                  (goto-char! *evil-search-origin*)
-                  (begin
-                    (set! *evil-search* q)
-                    (set! *evil-search-dir* dir)
-                    (evil--search-jump q dir *evil-search-origin*)))))
-          (list 'cancel
-            (lambda () (goto-char! *evil-search-origin*))))))
+  (isearch-loop (if (> dir 0) "/" "?") (< dir 0)
+    (lambda (m q origin)
+      (cond ((equal? q "") (goto-char! origin))
+            (m (goto-char! (car m)))))
+    (lambda (q origin)
+      (if (equal? q "")
+          (goto-char! origin)
+          (begin
+            (set! *evil-search* q)
+            (set! *evil-search-dir* dir)
+            (evil--search-jump q dir origin))))
+    (lambda (origin) #f)))
 
 (define (evil--search-next dir)
   (if (equal? *evil-search* "")

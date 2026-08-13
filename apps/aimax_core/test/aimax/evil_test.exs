@@ -277,6 +277,15 @@ defmodule Aimax.EvilTest do
     assert Buffer.point(buf) == 6
   end
 
+  test "? searches backward and wraps at the top" do
+    buf = fresh_evil_buffer("alpha beta\ngamma beta\n")
+    # nothing before point 0: the engine retries from the buffer end
+    press(["?"])
+    type("beta")
+    press(["RET"])
+    assert Buffer.point(buf) == 17
+  end
+
   test ": with a number goes to that line, and any M-x name runs" do
     buf = fresh_evil_buffer("one\ntwo\nthree\n")
     press([":"])

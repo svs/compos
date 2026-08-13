@@ -878,34 +878,55 @@
         (message "No mark set in this buffer"))))
 
 ;;; --- isearch ---------------------------------------------------------------
-;;; Incremental: each keystroke re-searches from the origin. The current match
-;;; is shown as the region (mark at match start, point at match end).
-;;; RET accepts, C-g restores point. (C-s-repeat needs minibuffer keymaps: TODO.)
+;;; ONE search engine (dup #13), two surfaces: C-s/C-r here, evil's
+;;; / ? n N in evil.scm. The engine owns the directional find, the wrap
+;;; retry, and the incremental loop — capture the origin, re-search from
+;;; it on every keystroke, restore it on cancel. The surface owns what a
+;;; hit shows, what a miss says, and what RET keeps.
+;;; (C-s-repeat needs minibuffer keymaps: TODO.)
 
-(define *isearch-origin* 0)
+;; (search-find q backward from) -> (start end) or #f
+(define (search-find q backward from)
+  (if backward (buffer-search-backward q from) (buffer-search q from)))
 
-(define (isearch-update query backward)
-  (if (equal? query "")
-      (begin (set-mark! #f) (goto-char! *isearch-origin*))
-      (let ((m (if backward
-                   (buffer-search-backward query *isearch-origin*)
-                   (buffer-search query *isearch-origin*))))
-        (if m
-            (if backward
-                (begin (set-mark! (cadr m)) (goto-char! (car m)))
-                (begin (set-mark! (car m)) (goto-char! (cadr m))))
-            (message (string-append "Failing I-search: " query))))))
+;; miss -> one retry from the far end, and the echo area says so
+(define (search-find-wrap q backward from)
+  (or (search-find q backward from)
+      (let ((m (search-find q backward
+                            (if backward (buffer-size (current-buffer)) 0))))
+        (when m (message "Search wrapped"))
+        m)))
 
+;; The loop. SHOW gets (match q origin) on every keystroke — match is #f
+;; on a miss and on an empty query. ACCEPT gets (q origin) on RET.
+;; CANCEL gets (origin) on C-g, after the point returns to it.
+(define (isearch-loop prompt backward show accept cancel)
+  (let ((origin (point)))
+    (minibuffer-read* prompt '()
+      (list (list 'change
+              (lambda (q)
+                (with-window-buffer
+                  (lambda ()
+                    (show (and (not (equal? q ""))
+                               (search-find q backward origin))
+                          q origin)))))
+            (list 'confirm (lambda (q) (accept q origin)))
+            (list 'cancel (lambda ()
+                            (goto-char! origin)
+                            (cancel origin)))))))
+
+;; Emacs surface: the current match is the region (mark at one end, point
+;; at the other), a miss says so, RET keeps the point and drops the region.
 (define (isearch backward)
-  (set! *isearch-origin* (point))
-  (minibuffer-read* (if backward "I-search backward: " "I-search: ") '()
-    (list (list 'change (lambda (q)
-                          (with-window-buffer
-                            (lambda () (isearch-update q backward)))))
-          (list 'confirm (lambda (q) (set-mark! #f)))
-          (list 'cancel (lambda ()
-                          (set-mark! #f)
-                          (goto-char! *isearch-origin*))))))
+  (isearch-loop (if backward "I-search backward: " "I-search: ") backward
+    (lambda (m q origin)
+      (cond ((equal? q "") (set-mark! #f) (goto-char! origin))
+            (m (if backward
+                   (begin (set-mark! (cadr m)) (goto-char! (car m)))
+                   (begin (set-mark! (car m)) (goto-char! (cadr m)))))
+            (else (message (string-append "Failing I-search: " q)))))
+    (lambda (q origin) (set-mark! #f))
+    (lambda (origin) (set-mark! #f))))
 
 (define-command "isearch-forward" "Do incremental search forward"
   (lambda () (isearch #f)))

@@ -131,6 +131,72 @@
             ((equal? (car (cdr (cdr (car bs)))) kind) (loop (cdr bs) acc))
             (else (loop (cdr bs) (cons (car bs) acc)))))))
 
+;;; --- tool cards ---------------------------------------------------------------
+;;; What a card SAYS is presentation, so it is decided here. The backend
+;;; sends the call and the result; an adapter that has only a title sends
+;;; that instead, and these fall back to it.
+;;;
+;;; A card used to read "tool eval-scheme" and open onto nothing: the
+;;; arguments were thrown away and the body held only the result, which is
+;;; often empty. Fifteen identical cards tell you nothing about what
+;;; happened.
+
+(defcustom 'agent-tool-body-limit 2000
+  "How many bytes of a tool result a card body shows. The model still gets all of it."
+  'group 'chat 'type 'integer)
+
+(defcustom 'agent-tool-title-limit 72
+  "How many bytes of a tool call's main argument the card's title shows."
+  'group 'chat 'type 'integer)
+
+(define (agent-first-line s)
+  (let ((i (string-index s "\n")))
+    (if i (substring-bytes s 0 i) s)))
+
+(define (agent-clip s n)
+  (if (> (string-byte-length s) n) (substring-bytes s 0 n) s))
+
+;; most tools have one argument that matters; show that rather than a blob
+(define (agent-tool-primary args)
+  (or (plist-get args 'code) (plist-get args 'query)
+      (plist-get args 'path) (plist-get args 'name)))
+
+(define (agent-tool-args e)
+  (let ((json (plist-get e 'input)))
+    (and (string? json) (json-parse json))))
+
+;; "name · the first line of what it was called with"
+(define (agent-tool-title e)
+  (let ((name (plist-get e 'name))
+        (args (agent-tool-args e)))
+    (if (not name)
+        (or (plist-get e 'title) "tool")     ; an adapter's own title
+        (let ((v (and args (agent-tool-primary args))))
+          (if (and v (string? v) (not (equal? (string-trim v) "")))
+              (string-append name " · "
+                (agent-clip (string-trim (agent-first-line v)) agent-tool-title-limit))
+              name)))))
+
+(define (agent-tool-input-text e)
+  (let* ((args (agent-tool-args e))
+         (v (and args (agent-tool-primary args))))
+    (cond ((not args) "")
+          ((null? args) "")
+          ((and v (string? v)) (string-append (string-trim v) "\n\n"))
+          (else (string-append (string-trim (plist-get e 'input)) "\n\n")))))
+
+;; a result can be enormous (buffer-text of a big file). The card shows a
+;; readable slice; the model already got the whole thing.
+(define (agent-tool-update-text e)
+  (let ((out (plist-get e 'output)))
+    (if (not (string? out))
+        (or (plist-get e 'text) "")          ; an adapter's own rendering
+        (let ((s (string-trim out)))
+          (cond ((equal? s "") "")
+                ((> (string-byte-length s) agent-tool-body-limit)
+                 (string-append (substring-bytes s 0 agent-tool-body-limit) "\n[…]\n"))
+                (else (string-append s "\n")))))))
+
 ;;; --- rendering ----------------------------------------------------------------
 
 ;; face #f -> plain text
@@ -227,20 +293,24 @@
          (agent-block-extend-or-push! buf start (agent-mark slug) "thought")))
 
       ((equal? type 'tool-call)
-       (let ((start (agent-render! slug
-                      (string-append "\n▸ " (plist-get e 'kind) " · "
-                                     (plist-get e 'title) "\n")
-                      "agent-tool")))
-         (agent-block-push! buf start (agent-mark slug) "tool"
-           (list (plist-get e 'id) (plist-get e 'title) (plist-get e 'kind)
-                 "running" (agent-mark slug))))
+       (let ((title (agent-tool-title e)))
+         (let ((start (agent-render! slug
+                        (string-append "\n▸ " (plist-get e 'kind) " · " title "\n")
+                        "agent-tool")))
+           (agent-block-push! buf start (agent-mark slug) "tool"
+             (list (plist-get e 'id) title (plist-get e 'kind)
+                   "running" (agent-mark slug)))))
        ;; remember where this tool's body will start (= current mark)
        (buffer-set-local! buf 'agent-tool-bodies
          (cons (list (plist-get e 'id) (agent-mark slug))
-               (or (buffer-local buf 'agent-tool-bodies) '()))))
+               (or (buffer-local buf 'agent-tool-bodies) '())))
+       ;; the arguments open the body, ahead of the result, so an opened
+       ;; card shows the whole call and not just what came back
+       (let ((args (agent-tool-input-text e)))
+         (unless (equal? args "") (agent-render! slug args #f))))
 
       ((equal? type 'tool-update)
-       (let ((text (plist-get e 'text)))
+       (let ((text (agent-tool-update-text e)))
          (unless (equal? text "")
            (agent-render! slug text #f))
          (when (equal? (plist-get e 'status) "completed")

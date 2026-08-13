@@ -371,8 +371,11 @@ that outlives the daemon and nothing persists one; declaring a capability
 no backend can honour is worse than not having it. The seed path stays and
 now says so in the transcript — a pasted conversation must not pass for a
 continued one.
-**Not done:** presentation out of `req_llm.ex` (tool-card title, summary,
-truncation — dup #8's "event/card formatting per backend").
+Presentation is out: the backend sends `name` + `input` + `output` raw,
+and `agent-tool-title` / `agent-tool-input-text` / `agent-tool-update-text`
+in `agent.scm` decide what a card says, with two defcustoms for the
+limits. An adapter that has only a title still keeps its title, so the ACP
+lane is unchanged. **R6 is done.**
 **Suite health:** seed 0 is green, but roughly one full run in three shows
 a single failure somewhere in the shared-Editor tests (notmuch, chrome —
 `:noproc` on a buffer another test killed, window state). The parent

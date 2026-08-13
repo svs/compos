@@ -221,22 +221,21 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
           # aimax owns permissions on BOTH lanes: the same Scheme policy
           # that answers ACP's requests gates every direct-lane tool call
           gate: fn name, input -> gate(ev, slug, name, input) end,
+          # the call and the result, raw. What a card SAYS — its title, how
+          # much of a result it shows — is presentation, and presentation
+          # is Scheme's (packages/agent.scm).
           on_tool: fn id, name, input ->
-            # the title carries a one-line summary so the card says what it
-            # DID without being opened; the input itself goes into the body,
-            # ahead of the result, so opening one shows the whole call
             ev.(
               type: :"tool-call",
               id: id,
-              title: tool_card_title(name, input),
+              name: name,
+              input: Jason.encode!(input || %{}),
               kind: "tool",
               status: "pending"
             )
-
-            ev.(type: :"tool-update", id: id, status: "running", text: tool_input_text(input))
           end,
           on_tool_done: fn id, result ->
-            ev.(type: :"tool-update", id: id, status: "completed", text: tool_card_text(result))
+            ev.(type: :"tool-update", id: id, status: "completed", output: to_string(result))
           end
         )
   end
@@ -294,60 +293,6 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
           {:ok, _} -> :allow
           {:error, msg} -> {:crash, msg}
         end
-    end
-  end
-
-  # tool results can be huge (buffer-text of a big file) — the card shows a
-  # trimmed body; the model still gets the full result
-# A tool card used to read "tool eval-scheme" and open onto nothing: the
-  # input was thrown away and the body held only the result, which is often
-  # empty. Fifteen identical cards tell you nothing about what happened.
-  defp tool_card_title(name, input) do
-    case summarise(input) do
-      "" -> name
-      s -> "#{name} · #{s}"
-    end
-  end
-
-  # one line, enough to tell two calls apart in a list
-  defp summarise(input) do
-    input
-    |> primary_arg()
-    |> to_string()
-    |> String.replace(~r/\s+/, " ")
-    |> String.trim()
-    |> String.slice(0, 72)
-  end
-
-  # most tools have one argument that matters; show that rather than a blob
-  defp primary_arg(input) when is_map(input) do
-    case input do
-      %{"code" => c} -> c
-      %{"query" => q} -> q
-      %{"path" => p} -> p
-      %{"name" => n} -> n
-      other -> Jason.encode!(other)
-    end
-  end
-
-  defp primary_arg(other), do: other
-
-  defp tool_input_text(input) when is_map(input) and map_size(input) == 0, do: ""
-
-  defp tool_input_text(input) do
-    body =
-      case input do
-        %{"code" => c} -> c
-        other -> Jason.encode!(other, pretty: true)
-      end
-
-    String.trim_trailing(to_string(body)) <> "\n\n"
-  end
-
-  defp tool_card_text(result) do
-    case result |> to_string() |> String.trim() do
-      "" -> ""
-      s -> Aimax.Scheme.Text.truncate(s, 2000, "\n[…]") <> "\n"
     end
   end
 

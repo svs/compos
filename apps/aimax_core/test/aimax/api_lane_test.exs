@@ -100,6 +100,25 @@ defmodule Aimax.ApiLaneTest do
     flat = inspect(msgs)
     assert flat =~ "42"
 
+    # the card says what it DID without being opened: the tool's name and
+    # the first line of the argument that matters. Formatting is Scheme's
+    # (packages/agent.scm) — the backend sends the call and the result raw.
+    assert text =~ "▸ tool · eval-scheme · (+ 20 22)"
+
+    # an adapter that has only a title keeps its title
+    assert {:ok, ~s{"Read foo.ex"}} =
+             Session.eval(~s{(agent-tool-title '(title "Read foo.ex" kind "read"))})
+
+    # a result longer than the limit is clipped for the card, never for the
+    # model — the record already holds the whole thing
+    big = String.duplicate("x", 3000)
+
+    assert {:ok, clipped} =
+             Session.eval(~s{(agent-tool-update-text (list 'output "#{big}"))})
+
+    assert byte_size(clipped) < 2100
+    assert clipped =~ "[…]"
+
     # blocks map every span; the tool body folded closed on completion
     blocks = Buffer.get_local(buf, "agent-blocks") |> Enum.reverse()
     kinds = Enum.map(blocks, fn [_, _, k | _] -> k end)

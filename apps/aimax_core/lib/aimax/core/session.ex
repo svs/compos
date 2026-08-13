@@ -309,7 +309,7 @@ defmodule Aimax.Core.Session do
       "browser-connected?" =>
         "(browser-connected?) — return #t when a browser extension is connected.",
       "dispatch-keys" =>
-        "(dispatch-keys KEYS) — dispatch a list of key chords through the GUI key path, in order.",
+        "(dispatch-keys KEYS) — dispatch key chords through the serialized GUI input queue, in order.",
       "mcp-connect!" => "(mcp-connect! NAME SPEC) — connect an MCP server from a spec plist.",
       "mcp-disconnect!" => "(mcp-disconnect! NAME) — disconnect the named MCP server.",
       "mcp-connections" =>
@@ -542,11 +542,15 @@ defmodule Aimax.Core.Session do
       # The whole sequence goes in ONE task, in order. A task per key races,
       # and a prefix that arrives after its own suffix composes into nothing —
       # which is exactly how C-x b silently did nothing.
+      # the Task waits on the input queue, so the injected sequence runs
+      # after the event that asked for it and cannot interleave with a
+      # user keystroke mid-chord (dup #23). It carries the caller's frame.
       "dispatch-keys" => fn [specs] ->
         keys = Enum.map(specs, &s/1)
+        fid = Aimax.Core.Frame.current()
 
         Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
-          Enum.each(keys, &Aimax.Core.KeyDispatch.handle_key/1)
+          Enum.each(keys, &Aimax.Core.Input.dispatch(fid, &1))
         end)
 
         :void

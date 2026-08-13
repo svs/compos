@@ -98,30 +98,8 @@ defmodule Aimax.Core.KeyDispatch do
   # Editor.current_buffer/lookup_key route to while a prompt is active.
 
   defp minibuffer_key(key, mb, pending) do
-    seq = pending ++ [key]
-
-    case Editor.lookup_key(seq) do
-      {:command, name} ->
-        Editor.set_pending([])
-        # the prefix echo ("C-c-") must not outlive the sequence: the
-        # command can close the prompt, and the echo bar comes back into
-        # view still showing it
-        if pending != [], do: Editor.set_echo("")
-        run(name)
-
-      :prefix ->
-        Editor.set_pending(seq)
-        Editor.set_echo(Enum.join(seq, " ") <> "-")
-
-      :none ->
-        Editor.set_pending([])
-
-        cond do
-          pending == [] and key == "SPC" -> self_insert(" ")
-          pending == [] and printable?(key) -> self_insert(key)
-          true -> :ok
-        end
-    end
+    # unresolved chords stay silent here: the echo area is the prompt
+    resolve_and_run(key, pending, fn _seq -> :ok end)
 
     # any edit to the backing buffer fires the prompt's on_change handler
     # (isearch, find-file filtering); confirm/cancel closed the prompt, so
@@ -144,11 +122,27 @@ defmodule Aimax.Core.KeyDispatch do
     # a key ends any manual-scroll override: the view follows point again
     Editor.user_acted()
     Editor.set_echo("")
+
+    resolve_and_run(key, pending, fn seq ->
+      Editor.set_echo(Enum.join(seq, " ") <> " is undefined")
+    end)
+  end
+
+  # THE lookup ladder (dup #21) — every surface resolves a key the same
+  # way: append it to the pending prefix, look the sequence up, and fall
+  # through. A command runs; a prefix accumulates and echoes; anything
+  # else clears the prefix, self-inserts a printable, and otherwise defers
+  # to UNDEFINED — the one point where the surfaces differ.
+  defp resolve_and_run(key, pending, undefined) do
     seq = pending ++ [key]
 
     case Editor.lookup_key(seq) do
       {:command, name} ->
         Editor.set_pending([])
+        # the prefix echo ("C-c-") must not outlive the sequence: the
+        # command can close the prompt, and the echo bar comes back into
+        # view still showing it
+        if pending != [], do: Editor.set_echo("")
         run(name)
 
       :prefix ->
@@ -161,7 +155,7 @@ defmodule Aimax.Core.KeyDispatch do
         cond do
           pending == [] and key == "SPC" -> self_insert(" ")
           pending == [] and printable?(key) -> self_insert(key)
-          true -> Editor.set_echo(Enum.join(seq, " ") <> " is undefined")
+          true -> undefined.(seq)
         end
     end
   end

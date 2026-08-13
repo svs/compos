@@ -274,7 +274,7 @@ defmodule Aimax.Core.Agent.Backend.ACP do
 
       {_, %{"error" => err}} ->
         state =
-          emit(state, type: :error, text: "#{method}: #{Map.get(err, "message", inspect(err))}")
+          emit(state, type: :error, text: "#{method}: #{Map.get(err, "message") || Backend.error_text(err)}")
 
         # a failed prompt still ends the turn — a thread must never wedge
         # in :running with no reply coming

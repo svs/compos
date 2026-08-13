@@ -61,7 +61,7 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
     do: GenServer.call(pid, {:respond_permission, rpc_id, option_id})
 
   @impl Backend
-  def capabilities, do: [:models, :streaming]
+  def capabilities, do: [:models, :streaming, :stateless, :metered]
 
   # --- server -----------------------------------------------------------------
 
@@ -161,7 +161,7 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
   # turn task crashed (a cancel's :brutal_kill DOWN is flushed above)
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{task: %Task{ref: ref}} = state) do
     state = bill(state)
-    emit(state, type: :error, text: "turn crashed: #{inspect(reason)}")
+    emit(state, type: :error, text: "the turn crashed: #{Backend.error_text(reason)}")
     emit(state, type: :"turn-end", "stop-reason": "error")
     {:noreply, %{state | task: nil}}
   end
@@ -273,8 +273,8 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
         end
     end
   catch
-    kind, reason ->
-      why = "#{inspect(kind)} #{inspect(reason)}"
+    _kind, reason ->
+      why = Backend.error_text(reason)
       Logger.error("permission gate crashed: #{why}")
       ev.(type: :error, text: "the permission gate crashed — denying: #{why}")
       {:deny, "the permission gate crashed; denied"}

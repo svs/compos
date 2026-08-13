@@ -4,6 +4,13 @@ defmodule Aimax.Core.Agent.Backend do
   prompt queue, event pipeline, output mark) and whatever executes turns
   (an ACP adapter subprocess, the in-process ReqLLM lane, a test stub).
 
+  There is no `:resume`. ACP defines `session/load`, but resuming needs a
+  session id that outlives the daemon, and nothing persists one — so a
+  revived thread seeds a fresh session with the transcript instead, and
+  SAYS so in the transcript rather than letting a pasted conversation pass
+  for a continued one. Declaring a capability no backend can honour is
+  worse than not having it.
+
   A backend is started per thread and sends its owner pid
   `{:backend_event, plist}` messages — the same flat Scheme plists the event
   pipeline delivers to the renderer. The event vocabulary IS the contract:
@@ -27,7 +34,22 @@ defmodule Aimax.Core.Agent.Backend do
   @callback close(handle :: term) :: :ok
   @callback set_model(handle :: term, model_id :: String.t()) :: :ok | {:error, term}
   @callback respond_permission(handle :: term, id :: term, option :: String.t() | nil) :: :ok
-  @callback capabilities() :: [:models | :streaming | :session_modes | :resume]
+  @callback capabilities() :: [
+              :models
+              | :streaming
+              | :session_modes
+              # no server-side session: the whole conversation of record is
+              # replayed on every turn. Three things follow, and Scheme reads
+              # this rather than asking which connector it is — a new lane
+              # declares itself instead of being special-cased.
+              #   * a switched model needs no new session
+              #   * a fresh runtime needs no seed transcript
+              #   * the backend writes the record, because it replays it
+              | :stateless
+              # turns are billed and report usage, rather than riding a
+              # subscription
+              | :metered
+            ]
 
   @doc """
   Switch the backend's permission/session mode. Optional: only backends
@@ -80,6 +102,25 @@ defmodule Aimax.Core.Agent.Backend do
       _ -> __MODULE__.ACP
     end
   end
+
+  @doc "What the named backend can do, for Scheme (`connector-capabilities`)."
+  def capabilities_of(name), do: module(%{"backend" => name}).capabilities()
+
+  @doc """
+  A crash reason as a sentence, not a term dump.
+
+  `inspect/1` output in a transcript is noise the reader cannot act on and
+  the model cannot parse. Anything that reaches a chat says what happened.
+  """
+  def error_text(%{__exception__: true} = e), do: Exception.message(e)
+  def error_text({:exit, reason}), do: error_text(reason)
+  def error_text({e, stack}) when is_list(stack), do: error_text(e)
+  def error_text(:killed), do: "the turn was stopped"
+  def error_text(:normal), do: "the turn ended early"
+  def error_text(:timeout), do: "the turn timed out"
+  def error_text(reason) when is_binary(reason), do: reason
+  def error_text(reason) when is_atom(reason), do: reason |> to_string() |> String.replace("_", " ")
+  def error_text(reason), do: inspect(reason, limit: 5, printable_limit: 200)
 
   # --- event plist helpers (shared by Agent and every backend) ---------------
 

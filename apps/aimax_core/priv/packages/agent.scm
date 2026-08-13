@@ -661,6 +661,14 @@
     (if (buffer-local buf 'agent-seed-context)
         (begin
           (buffer-set-local! buf 'agent-seed-context #f)
+          ;; Say it. This is not a resumed session — the adapter has no
+          ;; memory of any of this, and the conversation above is being
+          ;; pasted into its first message. A reader who thinks the agent
+          ;; remembers will misread everything that follows.
+          (let ((start (agent-render! slug
+                         "\n[fresh session — the conversation above was replayed into it]\n"
+                         "agent-meta")))
+            (agent-block-push! buf start (agent-mark slug) "meta" '()))
           (agent-prompt! slug
             (string-append
               "Context: this continues an earlier conversation from the"
@@ -899,6 +907,21 @@
 (define-connector! "api"
   (list 'backend "req-llm" 'models (lambda () *llm-models*)))
 
+;; What a connector's backend CAN DO, asked of the backend itself. Every
+;; question that used to be "is this the api lane?" is one of these now: a
+;; new lane declares what it is instead of being special-cased by name.
+;;   stateless     — no server-side session; the record is replayed whole
+;;   metered       — turns are billed and report usage
+;;   session_modes — the adapter has its own permission modes
+;;   models        — it can switch model in place
+(define (connector-capabilities name)
+  (backend-capabilities (or (plist-get (connector-config name) 'backend) "acp")))
+
+(define (connector-can? name cap)
+  (and (member cap (connector-capabilities name)) #t))
+
+;; the api lane IS the stateless one; kept for config resolution, which
+;; asks about the backend module rather than about behaviour
 (define (connector-api? name)
   (equal? (plist-get (connector-config name) 'backend) "req-llm"))
 
@@ -1001,8 +1024,8 @@
          ;; about to be dropped at send time anyway
          (pinned (let ((m (buffer-local buf 'agent-model)))
                    (and m (not (agent-model-foreign? buf c m)) m)))
-         (m (or pinned (and (connector-api? c) (llm-model))))
-         (cost (and (connector-api? c) (buffer-local buf 'chat-cost))))
+         (m (or pinned (and (connector-can? c 'stateless) (llm-model))))
+         (cost (and (connector-can? c 'metered) (buffer-local buf 'chat-cost))))
     (buffer-set-local! buf 'modeline-info
       (string-append c
         (if (and m (not (equal? m ""))) (string-append " · " m) "")

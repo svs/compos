@@ -89,8 +89,9 @@
 (define (chat-presets-changed! buf what)
   (let ((slug (buffer-local buf 'agent-slug)))
     (if (and slug
-             (not (connector-api? (or (buffer-local buf 'agent-connector)
-                                      *default-connector*)))
+             (not (connector-can? (or (buffer-local buf 'agent-connector)
+                                      *default-connector*)
+                                  'stateless))
              (not (equal? (agent-status slug) 'dead)))
         (begin
           (buffer-set-local! buf 'chat-mcp-dirty #t)

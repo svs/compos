@@ -361,11 +361,24 @@ stamped with its turn, and a cancel racing a fetch can no longer start a
 turn for a message the user took back (C9's guard, plus a `:busy` reply on
 a second prompt). `Aimax.Scheme.Text` replaces the four UTF-8 boundary
 copies (dup #10).
+C6: `Backend.error_text/1` turns a crash reason into a sentence; no
+`inspect/1` reaches a transcript. C7: backends declare `:stateless` and
+`:metered`, Scheme asks `connector-can?`, and every "is this the api
+lane?" test is gone — including the `chat-wire-record` local R1 left
+behind, which is deleted. A12: `:resume` is REMOVED rather than
+implemented. ACP defines `session/load`, but resuming needs a session id
+that outlives the daemon and nothing persists one; declaring a capability
+no backend can honour is worse than not having it. The seed path stays and
+now says so in the transcript — a pasted conversation must not pass for a
+continued one.
 **Not done:** presentation out of `req_llm.ex` (tool-card title, summary,
-truncation), the one error model (C6 — `inspect/1` still reaches
-transcripts on the crash paths), capabilities read from `capabilities()`
-in Scheme (C7, which would also delete the `chat-wire-record` connector
-test R1 left behind), and `:resume` (A12).
+truncation — dup #8's "event/card formatting per backend").
+**Suite health:** seed 0 is green, but roughly one full run in three shows
+a single failure somewhere in the shared-Editor tests (notmuch, chrome —
+`:noproc` on a buffer another test killed, window state). The parent
+commit does the same at the same rate. Given what the `C-c q` bug turned
+out to be, some of these are probably latent test bugs that timing shifts
+expose. Worth a sweep of its own.
 *The `C-c q` flake was a test bug, not a regression.* The fixture buffer is
 named `test-<counter>`, the counter often contains `42`, and the stub's
 reply was the string `"42"` — so `eventually(text =~ "42")` matched the

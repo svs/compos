@@ -583,6 +583,11 @@ defmodule Aimax.Core.Session do
         Aimax.Core.LLM.set_cache_ttl(to_string(ttl))
         :void
       end,
+      # what a backend can do, by its resolved 'backend name — Scheme asks
+      # this instead of asking which connector it is looking at
+      "backend-capabilities" => fn [name] ->
+        Enum.map(Aimax.Core.Agent.Backend.capabilities_of(s(name)), &{:sym, to_string(&1)})
+      end,
       "llm-max-tokens" => fn [model] ->
         Aimax.Core.LLMDb.max_tokens(s(model)) || false
       end,

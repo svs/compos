@@ -1601,11 +1601,6 @@
                    (agent-model-for-connector buf connector))))
     (buffer-set-local! buf 'agent-slug slug)
     (buffer-set-local! buf 'agent-connector connector)
-    ;; who writes this chat's record: the api lane's turn task writes it
-    ;; from the wire it sends, every other backend leaves us to derive it
-    ;; from the event stream. (R6 reads this from the backend's declared
-    ;; capabilities instead of asking the connector.)
-    (buffer-set-local! buf 'chat-wire-record (connector-api? connector))
     (when (and model (not (equal? model "")))
       (buffer-set-local! buf 'agent-model model))
     (let ((mark (or (buffer-local buf 'agent-saved-mark)
@@ -1815,8 +1810,8 @@
         ;; api lane replays the record on every request anyway
         (buffer-set-local! buf 'agent-seed-context
           (and (pair? turns)
-               (boundp (quote connector-api?))
-               (not (connector-api? (or (buffer-local buf 'agent-connector) "api")))))
+               (boundp (quote connector-can?))
+               (not (chat-stateless? buf))))
         ;; the rewrite is presentation, not an edit the user made
         (buffer-mark-saved! buf))
       #t)))
@@ -1852,7 +1847,7 @@
 (define chat-runtime-locals
   '(agent-slug agent-queued agent-waiting chat-waiting
     agent-cancelling agent-seed-context agent-tool-bodies
-    agent-turn-text agent-turn-any chat-wire-record chat-compacting
+    agent-turn-text agent-turn-any chat-compacting
     agent-models agent-mode agent-modes chat-mcp-dirty
     chat-history-pos chat-history-draft))
 
@@ -1915,7 +1910,7 @@
   (and slug
        (not (equal? (agent-status slug) 'dead))
        (let ((cname (or (buffer-local buf 'agent-connector) *default-connector*)))
-         (or (connector-api? cname)          ; stateless: always takeable
+         (or (connector-can? cname 'stateless)   ; no session to lose
              (let ((offered (map car (or (buffer-local buf 'agent-models) '()))))
                (and (pair? offered) (member model offered)))))))
 
@@ -1942,7 +1937,7 @@
     ;; a fresh ACP session starts empty and has to be seeded; the api lane
     ;; replays the record on every request anyway
     (buffer-set-local! buf 'agent-seed-context
-      (and (not (connector-api? cname)) (> mark 0) (not (equal? said ""))))
+      (and (not (connector-can? cname 'stateless)) (> mark 0) (not (equal? said ""))))
     (let ((slug (chat-attach-agent! buf cname)))
       (unless (equal? said "")
         (message (string-append "agent " slug ": revived (fresh session)")))
@@ -1993,7 +1988,7 @@
           (message "not a chat buffer")
           (minibuffer-read "Backend: "
             (map (lambda (c)
-                   (list c (if (connector-api? c)
+                   (list c (if (connector-can? c 'stateless)
                                "direct API — metered, cached, cheap lane"
                                "ACP agent — rides your subscription")))
                  (connector-names))
@@ -2146,12 +2141,17 @@
 
 ;; Backends that do NOT write the record themselves get it from the event
 ;; stream instead: an ACP adapter runs its turn in a subprocess, and its
-;; events are all we see. 'chat-wire-record says the backend already wrote
-;; this turn from the wire it sent; recording the event too would double
-;; every turn.
+;; events are all we see. A stateless backend replays the record, so it
+;; writes the record — and recording its events too would double every
+;; turn.
 (define (chat-record-event! buf role blocks)
-  (unless (buffer-local buf 'chat-wire-record)
+  (unless (chat-stateless? buf)
     (chat-record-push! buf role blocks #f)))
+
+;; does this chat's backend hold the conversation, or do we?
+(define (chat-stateless? buf)
+  (and (boundp (quote connector-can?))
+       (connector-can? (or (buffer-local buf 'agent-connector) "api") 'stateless)))
 
 ;;; --- compaction ------------------------------------------------------------------
 ;;; A conversation that never ends grows without bound, and every turn
@@ -2430,7 +2430,9 @@
           (minibuffer-read
             (string-append "Model (now "
                            (or (buffer-local buf 'agent-model)
-                               (if (connector-api? cname) (llm-model) "connector default"))
+                               (if (connector-can? cname 'stateless)
+                                   (llm-model)
+                                   "connector default"))
                            "): ")
             (or (buffer-local buf 'agent-models) (connector-models cname))
             (lambda (m)

@@ -388,7 +388,7 @@ defmodule Aimax.ChatResetTest do
       all = [identity, conversation, runtime] |> Enum.join(" ")
 
       # the locals that once caused the bugs are each classified exactly once
-      for k <- ~w(agent-queued agent-slug chat-wire-turns chat-wire-record agent-saved-mark
+      for k <- ~w(agent-queued agent-slug chat-wire-turns chat-compacting agent-saved-mark
                   chat-permission-mode agent-mode chat-mcp-dirty) do
         assert all =~ k, "#{k} is in none of the three lists"
       end

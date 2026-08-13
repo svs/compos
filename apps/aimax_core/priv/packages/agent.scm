@@ -1040,11 +1040,6 @@
   (local-set-key* buf "C-c t" "chat-refresh-tools")
   (local-set-key* buf "C-c C-v" "chat-toggle-view"))
 
-;; legacy: pre-unification *agent:* buffers restore straight into
-;; chat-mode — there is only chat, riding ACP or the API. chat-mode's
-;; setup rebuilds keys, overlays, and folds from the persisted locals.
-(define-mode "agent-mode" (lambda () (set-mode! "chat-mode")))
-
 ;; (execute "task")                         — spawn a task chat on the default connector
 ;; (execute* "task" '(connector "codex"))   — pick a connector / pin a model
 (public! 'execute "(execute \"task\") — spawn a task chat on an ACP backend; returns its slug")

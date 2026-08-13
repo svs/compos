@@ -142,6 +142,23 @@
 (define (run-hooks hook)
   (for-each (lambda (h) (if (equal? (car h) hook) ((cadr h)))) *hooks*))
 
+;;; --- folds --------------------------------------------------------------------
+;;; Folds are tagged, because a buffer has several fold owners: org folds
+;;; headlines, the agent transcript folds tool output, diff-mode folds hunks.
+;;; Each owner replaces only its own tag. The display hides the union.
+;;;
+;;; fold-toggle! is for an owner whose state IS the hidden-range list. An
+;;; owner that derives its ranges from something else — org from headline
+;;; offsets, agent from (start end open?) triples — toggles its own model
+;;; and calls fold-set! with the result.
+
+(define (fold-toggle! buf tag range)
+  (let ((cur (fold-get buf tag)))
+    (fold-set! buf tag
+      (if (member range cur)
+          (filter (lambda (r) (not (equal? r range))) cur)
+          (cons range cur)))))
+
 ;;; --- the filesystem-change hook ----------------------------------------------
 ;;; run-hooks calls its handlers with no arguments, and this one carries the
 ;;; root, so it keeps its own list. Elixir holds ONE handler (fs-on-change!)
@@ -1818,7 +1835,9 @@
                 (unless (equal? (agent-status slug) 'dead)
                   (agent-kill! slug))))
             (overlay-clear! buf "all")
-            (buffer-set-hidden! buf '())
+            ;; every tag: a reset empties the buffer, so no owner's ranges
+            ;; still mean anything
+            (fold-clear! buf 'all)
             (chat-clear-locals! buf chat-conversation-locals)
             (chat-clear-locals! buf chat-runtime-locals)
             (buffer-delete-range! buf 0 (buffer-size buf))
@@ -2824,5 +2843,13 @@
 (public! 'unwatch-path! "(unwatch-path! DIR) — drop one reference; the subscription stops at zero")
 (public! 'watched-paths "The watched roots")
 (public! 'on-fs-change! "(on-fs-change! FN) — FN gets the root string when a watched tree changes; keep it small, it schedules a refresh")
+
+;; folds
+;; Tagged, because a buffer has several fold owners. Each owner replaces
+;; only its own tag; the display hides the union of every tag.
+(public! 'fold-set! "(fold-set! BUF TAG RANGES) — replace TAG's hidden byte ranges, a list of (START END)")
+(public! 'fold-get "(fold-get BUF [TAG]) -> TAG's hidden ranges; no TAG, or 'all, gives the union")
+(public! 'fold-clear! "(fold-clear! BUF [TAG]) — drop TAG's folds; no TAG, or 'all, drops every owner's")
+(public! 'fold-toggle! "(fold-toggle! BUF TAG RANGE) — add or remove one (START END) in TAG; for owners whose state is the range list itself")
 
 (message "editor.scm loaded")

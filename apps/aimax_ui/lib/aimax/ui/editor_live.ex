@@ -475,6 +475,10 @@ defmodule Aimax.Ui.EditorLive do
         lines: assigns.node.lines,
         line: assigns.node.line,
         col: assigns.node.col,
+        # the file the window shows, and whether it refuses typing. The
+        # client renders neither yet; /raw previews and the modeline will.
+        path: assigns.node.path,
+        read_only: assigns.node.read_only,
         active?: assigns.node.id == assigns.active
       )
 
@@ -483,6 +487,8 @@ defmodule Aimax.Ui.EditorLive do
       id={"win-#{@node.id}"}
       class={"window #{if @active?, do: "active", else: "inactive"} #{if !@node.line_numbers, do: "no-nums"} #{@node.window_class}"}
       data-win-id={@node.id}
+      data-path={@path}
+      data-read-only={to_string(@read_only)}
     >
       <%= if @node.render_mode == "agent" and Map.has_key?(@node, :ag_blocks) do %>
         <div class="agent-view" id={"agent-#{@node.id}"} phx-hook="AgentScroll">

@@ -1247,6 +1247,8 @@ defmodule Aimax.Core.Editor do
     overlays: [],
     overlay_gen: 0,
     hidden: [],
+    path: nil,
+    read_only: false,
     total_lines: 1,
     cursor_line: 0,
     line: 1,
@@ -1320,6 +1322,10 @@ defmodule Aimax.Core.Editor do
       type: :leaf,
       id: id,
       buffer: buffer,
+      # the file this buffer visits, nil for the rest. /raw URLs and the
+      # modeline read these two; the client renders no UI for them yet.
+      path: snap.path,
+      read_only: snap.read_only,
       text: text,
       point: point,
       mark: snap.mark,

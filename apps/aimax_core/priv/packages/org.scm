@@ -3,7 +3,7 @@
 ;;; Outline folding, headline fontification, TODO states, priorities,
 ;;; structure editing, checkboxes with statistics cookies. Built from the
 ;;; same primitives as dired plus overlays (overlay-set!), hidden ranges
-;;; (buffer-set-hidden!) and the change hook (on-change!).
+;;; (fold-set!) and the change hook (on-change!).
 ;;;
 ;;; OFFSET RULE: every index that touches the buffer, an overlay, or a
 ;;; re-find/re-groups result is a BYTE offset. Use string-byte-length and
@@ -91,9 +91,11 @@
 
 ;;; --- folding -----------------------------------------------------------------
 ;;; Fold state: buffer-local 'org-folds = headline start offsets. The
-;;; Buffer's hidden ranges are DERIVED from it (org-apply-folds!), and the
-;;; fold list is re-anchored + revalidated by the change hook — that's
-;;; also what heals after undo swaps the rope underneath us.
+;;; Buffer's hidden ranges are DERIVED from it (org-apply-folds!) under the
+;;; 'org tag, and the fold list is re-anchored + revalidated by the change
+;;; hook — that's also what heals after undo swaps the rope underneath us.
+;;; The local is the truth; the tag is only how it reaches the display, so
+;;; the mode setup fn re-derives it after a restart.
 
 (define (org-folds buf)
   (let ((f (buffer-local buf 'org-folds)))
@@ -109,7 +111,7 @@
 (define (org-apply-folds! buf)
   (let ((folds (org-valid-folds buf)))
     (buffer-set-local! buf 'org-folds folds)
-    (buffer-set-hidden! buf
+    (fold-set! buf 'org
       (map
         (lambda (h)
           (let* ((ln (org-line-at buf h))
@@ -616,4 +618,8 @@
     (buffer-face! 'family org-font-family
                   'size org-font-size
                   'line-height "1.75")
+    ;; Hidden ranges die with the daemon; the 'org-folds local survives.
+    ;; Re-derive them here, or a restored org buffer comes back fully
+    ;; unfolded and stays that way until the next edit.
+    (org-apply-folds! (current-buffer))
     (org-refontify! (current-buffer))))

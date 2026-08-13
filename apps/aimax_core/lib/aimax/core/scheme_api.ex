@@ -67,13 +67,33 @@ defmodule Aimax.Core.SchemeAPI do
       "buffer-overlays" => fn [name] ->
         Enum.map(Buffer.overlays(name), fn {s, e, f} -> [s, e, f] end)
       end,
-      # folding: ranges is a list of (start end) byte ranges to hide
+      # folding: ranges is a list of (start end) byte ranges to hide.
+      # A buffer has several fold owners, so ranges are tagged and each
+      # owner replaces only its own tag. The display hides the union.
+      # The untagged pair below writes and reads the "default" tag.
       "buffer-set-hidden!" => fn [name, ranges] ->
         :ok = Buffer.set_hidden(name, Enum.map(ranges, fn [s, e] -> {s, e} end))
         :void
       end,
       "buffer-hidden" => fn [name] ->
         Enum.map(Buffer.hidden(name), fn {s, e} -> [s, e] end)
+      end,
+      "fold-set!" => fn [name, tag, ranges] ->
+        :ok = Buffer.set_hidden(name, plain(tag), Enum.map(ranges, fn [s, e] -> {s, e} end))
+        :void
+      end,
+      "fold-get" => fn
+        [name] -> Enum.map(Buffer.hidden(name), fn {s, e} -> [s, e] end)
+        [name, tag] -> Enum.map(Buffer.hidden(name, fold_tag(tag)), fn {s, e} -> [s, e] end)
+      end,
+      "fold-clear!" => fn
+        [name] ->
+          :ok = Buffer.clear_hidden(name)
+          :void
+
+        [name, tag] ->
+          :ok = Buffer.clear_hidden(name, fold_tag(tag))
+          :void
       end,
       "buffer-set-read-only!" => fn [name, bool] ->
         Buffer.set_read_only(name, bool == true)
@@ -764,6 +784,9 @@ defmodule Aimax.Core.SchemeAPI do
 
   defp plain({:sym, s}), do: s
   defp plain(v), do: v
+
+  # (fold-get BUF 'all) reads the union, the same word overlay-clear! uses
+  defp fold_tag(tag), do: if(plain(tag) == "all", do: :all, else: plain(tag))
 
   defp shell_to_string(cmd, dir) do
     {out, _status} = System.cmd("/bin/sh", ["-c", cmd], cd: dir, stderr_to_stdout: true)

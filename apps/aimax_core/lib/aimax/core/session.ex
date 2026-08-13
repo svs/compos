@@ -292,6 +292,10 @@ defmodule Aimax.Core.Session do
           :void
       end,
       "command-names" => fn [] -> command_names() end,
+      # ((KEYS COMMAND) ...) for every global binding
+      "global-keys" => fn [] ->
+        for {seq, cmd} <- Editor.global_keys(), do: [seq, cmd]
+      end,
       "command-fn" => fn [name] ->
         case :ets.lookup(Aimax.Core.SchemeAPI.commands_table(), command_name(name)) do
           [] -> false

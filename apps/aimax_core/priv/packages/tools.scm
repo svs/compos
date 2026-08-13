@@ -53,13 +53,14 @@
     "(current-buffer); "
     "(insert! TEXT) at point in the current buffer; (message TEXT) echoes; "
     "(run-command \"name\") runs any M-x command. File buffers are named by "
-    "full path. The API has a public and a private side: apropos-api "
-    "searches the public, documented surface — start there and trust its "
-    "one-line docs. Everything else in the namespace is private "
-    "implementation detail; only reach for it via apropos-api scope "
-    "\"all\" plus describe-function when nothing public fits, and prefer "
-    "not to. Before writing code with a name you are not sure exists, "
-    "check it with apropos-api, and read any function's real source with "
+    "full path. Discovery is ONE call: apropos searches the public API, "
+    "the M-x commands, the keybindings and the settings by WORDS — "
+    "(apropos \"split window\"), not a regex — and returns signatures. "
+    "apropos-categories shows the shape of the surface first. Everything "
+    "outside the public API is private implementation detail; reach for it "
+    "with scope \"all\" plus describe-function only when nothing public "
+    "fits. Before writing code with a name you are not sure exists, check "
+    "it with apropos, and read any function's real source with "
     "describe-function. "
     ;; without this the assistant tells people it has no browser, while
     ;; sitting on a wire to one — apropos-api would find these, but only if
@@ -141,9 +142,12 @@
                          (public-api))))
     (take-n (append (pick 0) (pick 1) (pick 2) prefix) 3)))
 
+;; a suggestion shows the SIGNATURE, not just the name: the point of
+;; "did you mean" is that the next call works, and the arguments are half
+;; of that
 (define (tool--format-suggestions entries)
   (fold (lambda (acc e)
-          (string-append acc "\n  " (car e) " — " (cadr e)))
+          (string-append acc "\n  " (nth 2 e) " — " (cadr e)))
         "" entries))
 
 ;; the feedback that makes one-tool work: name the real API on a miss
@@ -201,19 +205,114 @@
   (lambda (args)
     (describe-function (string->symbol (custom--plist-get args 'name)))))
 
-(define-tool! 'apropos-api
-  "Search the editor's PUBLIC Scheme API by regex: each hit is (name one-line-doc), plus matching M-x commands. This is the supported, documented surface — prefer it and trust its docs. Pass scope \"all\" only when nothing public fits: that searches every global including undocumented internals, which may change without notice."
-  (list (list 'pattern "string" "Regex over names, e.g. \"buffer\" or \"window|frame\"")
+;;; --- apropos: one search over everything ---------------------------------------
+;;; The first question an agent asks is "what can I call". Four registries
+;;; held the answer and nothing searched across them: the public API, the
+;;; M-x commands and their docstrings, the keybindings, and the
+;;; defcustoms. The old apropos-api matched names only — never doc text —
+;;; so "how do I split a window" found nothing while split-window! sat
+;;; there with a doc saying exactly that.
+;;;
+;;; Matching is word-AND, like mcp-find: every word of the query must
+;;; appear somewhere in the entry. A query that finds nothing falls back to
+;;; edit distance, so a near-miss on a name still lands.
+
+(define (apropos--words q)
+  (filter (lambda (w) (not (equal? w "")))
+          (string-split (string-downcase (string-trim q)) " ")))
+
+(define (apropos--hit? hay words)
+  (let ((h (string-downcase hay)))
+    (let loop ((ws words))
+      (cond ((null? ws) #t)
+            ((string-contains? h (car ws)) (loop (cdr ws)))
+            (else #f)))))
+
+(define (apropos--fn e words)
+  (and (apropos--hit? (string-append (car e) " " (nth 1 e) " " (nth 2 e) " "
+                                     (symbol->string (nth 3 e)))
+                      words)
+       (list 'kind "function" 'name (car e) 'sig (nth 2 e)
+             'doc (nth 1 e) 'category (symbol->string (nth 3 e)))))
+
+(define (apropos--command n words)
+  (let ((doc (command-doc n)))
+    (and (apropos--hit? (string-append n " " doc) words)
+         (list 'kind "command" 'name n 'doc doc
+               'key (let ((k (key-for-command n))) (if (equal? k "") #f k))))))
+
+(define (apropos--key row words)
+  (and (apropos--hit? (string-append (car row) " " (nth 1 row)) words)
+       (list 'kind "key" 'name (car row) 'runs (nth 1 row))))
+
+(define (apropos--var v words)
+  (let* ((rec (cadr v))
+         (name (symbol->string (car v)))
+         (doc (or (custom--plist-get rec 'doc) "")))
+    (and (apropos--hit? (string-append name " " doc) words)
+         (list 'kind "variable" 'name name 'doc doc))))
+
+(define (apropos--compact xs) (filter (lambda (x) x) xs))
+
+;; QUERY is words, not a regex: "split window", "open a file", "chat cost".
+(define (apropos query)
+  (let* ((words (apropos--words query))
+         (hits (append
+                 (apropos--compact (map (lambda (e) (apropos--fn e words)) (public-api)))
+                 (apropos--compact (map (lambda (n) (apropos--command n words)) (command-names)))
+                 (apropos--compact (map (lambda (r) (apropos--key r words)) (global-keys)))
+                 (apropos--compact (map (lambda (v) (apropos--var v words)) *custom-vars*)))))
+    (if (or (pair? hits) (null? words))
+        hits
+        ;; nothing matched: the query is probably a near-miss on a name
+        (map (lambda (e)
+               (list 'kind "function" 'name (car e) 'sig (nth 2 e) 'doc (nth 1 e)
+                     'category (symbol->string (nth 3 e)) 'note "closest name"))
+             (tool--suggest (string-trim query))))))
+
+;; everything in one category — the shape of the API, not a search of it
+(define (apropos-category name)
+  (map (lambda (e)
+         (list 'kind "function" 'name (car e) 'sig (nth 2 e) 'doc (nth 1 e)))
+       (filter (lambda (e) (equal? (nth 3 e) name)) (public-api))))
+
+(category! 'discovery)
+(public! 'apropos
+  "(apropos \"words\") — search the whole editor by words: public functions, M-x commands, keybindings and settings. Start here.")
+(public! 'apropos-category
+  "(apropos-category 'windows) — every public function in one category")
+(public! 'public-categories "(public-categories) — the category names")
+
+(define-tool! 'apropos
+  (string-append
+    "Search the editor by WORDS, not by regex: public functions with their "
+    "signatures, M-x commands with their docstrings, keybindings, and "
+    "settings. Every word must appear somewhere in the entry, so "
+    "\"split window\" finds the window splitters and \"chat cost\" finds "
+    "the cost commands. This is the supported surface and the place to "
+    "start. Nothing matched? You get the closest names instead. Pass "
+    "category to list one area whole, or scope \"all\" to include "
+    "undocumented internals, which may change without notice.")
+  (list (list 'query "string" "words, e.g. \"open a file\" or \"buffer text\"")
+        (list 'category "string" "list this category whole instead of searching" 'optional)
         (list 'scope "string" "\"public\" (default) or \"all\"" 'optional))
   (lambda (args)
-    (let ((pat (custom--plist-get args 'pattern))
+    (let ((q (or (custom--plist-get args 'query) ""))
+          (cat (custom--plist-get args 'category))
           (scope (or (custom--plist-get args 'scope) "public")))
       (value->string
-        (if (equal? scope "all")
-            (list 'globals (filter (lambda (n) (re-match? pat n)) (global-names))
-                  'commands (filter (lambda (n) (re-match? pat n)) (command-names)))
-            (list 'api (filter (lambda (e) (re-match? pat (car e))) (public-api))
-                  'commands (filter (lambda (n) (re-match? pat n)) (command-names))))))))
+        (cond
+          (cat (apropos-category (string->symbol cat)))
+          ((equal? scope "all")
+           (list 'public (apropos q)
+                 'globals (filter (lambda (n) (apropos--hit? n (apropos--words q)))
+                                  (global-names))))
+          (else (apropos q)))))))
+
+(define-tool! 'apropos-categories
+  "List the editor API's categories. Cheapest way to see the shape of the surface before searching it."
+  '()
+  (lambda (args) (value->string (public-categories))))
 
 ;; the edit primitive the old edit-doc tool wrapped — now a public function
 ;; reached through eval-scheme. Edits the live buffer, never the file.

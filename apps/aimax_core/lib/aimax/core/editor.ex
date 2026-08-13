@@ -45,6 +45,9 @@ defmodule Aimax.Core.Editor do
   def snapshot(fid \\ nil), do: GenServer.call(__MODULE__, {:snapshot, fid(fid)})
   def current_buffer(fid \\ nil), do: GenServer.call(__MODULE__, {:current_buffer, fid(fid)})
   def lookup_key(seq, fid \\ nil), do: GenServer.call(__MODULE__, {:lookup_key, seq, fid(fid)})
+
+  @doc "Every global binding as {key-sequence, command-name}."
+  def global_keys, do: GenServer.call(__MODULE__, :global_keys)
   def render_state(fid \\ nil), do: GenServer.call(__MODULE__, {:render_state, fid(fid)})
 
   # frames
@@ -810,6 +813,12 @@ defmodule Aimax.Core.Editor do
   def handle_call({:completion_dismiss, fid}, _from, state) do
     f = frame(state, fid)
     changed(:ok, put_frame(state, %{f | completion: nil}), f.id)
+  end
+
+  # every global binding, as {"C-x C-f", "find-file"} — apropos searches
+  # keys, and 249 bindings existed with nothing that could look one up
+  def handle_call(:global_keys, _from, state) do
+    {:reply, Enum.map(state.keymap, fn {seq, cmd} -> {Enum.join(seq, " "), cmd} end), state}
   end
 
   def handle_call({:key_for_command, command}, _from, state) do

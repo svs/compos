@@ -45,9 +45,9 @@ defmodule Aimax.LLMToolsTest do
       assert eval!(~s{(llm-tool-call "no-such" '())}) == ~s{"no such tool: no-such"}
     end
 
-    test "the built-in toolbox is exactly the four-tool surface" do
+    test "the built-in toolbox is exactly the five-tool surface" do
       specs = eval!("(map car (llm-tool-specs))")
-      for t <- ~w(eval-scheme apropos-api describe-function act) do
+      for t <- ~w(eval-scheme apropos apropos-categories describe-function act) do
         assert specs =~ t
       end
 
@@ -55,7 +55,7 @@ defmodule Aimax.LLMToolsTest do
       count =
         eval!(~s{(length (filter (lambda (t) (not (string-prefix? "zz-" (symbol->string (car t))))) *llm-tools*))})
 
-      assert count == "4"
+      assert count == "5"
     end
 
     test "eval-scheme errors suggest the real name with its signature" do
@@ -72,26 +72,44 @@ defmodule Aimax.LLMToolsTest do
       assert out =~ "(buffer-text NAME)"
     end
 
-    test "apropos-api searches the documented public surface by default" do
-      # public hits come back as (name doc) pairs
-      out = eval!(~s{(llm-tool-call "apropos-api" (list 'pattern "buffer-append"))})
+    test "apropos searches names, docs, commands, keys and settings by word" do
+      # a hit carries its signature, not just its name
+      out = eval!(~s{(llm-tool-call "apropos" (list 'query "buffer append"))})
       assert out =~ "buffer-append!"
       assert out =~ "the usual way to add text"
+      assert out =~ "(buffer-append! NAME TEXT)"
 
-      # commands are always searchable
-      out = eval!(~s{(llm-tool-call "apropos-api" (list 'pattern "^chat"))})
-      assert out =~ "chat-send"
+      # DOC TEXT is searched, which is the whole point: this phrase is in
+      # no function name anywhere
+      out = eval!(~s{(llm-tool-call "apropos" (list 'query "split"))})
+      assert out =~ "split"
+
+      # commands come with their docstrings
+      out = eval!(~s{(llm-tool-call "apropos" (list 'query "chat cost"))})
+      assert out =~ "chat-cost"
+
+      # every word must appear: this pair shares no entry
+      out = eval!(~s{(llm-tool-call "apropos" (list 'query "buffer zzzzquux"))})
+      refute out =~ "buffer-append!"
+
+      # a near-miss on a name still lands, marked as such
+      out = eval!(~s{(llm-tool-call "apropos" (list 'query "buffer-apend!"))})
+      assert out =~ "closest name"
 
       # internals stay out of the default scope, reachable via scope "all"
-      out = eval!(~s{(llm-tool-call "apropos-api" (list 'pattern "chat-blocks-push"))})
+      out = eval!(~s{(llm-tool-call "apropos" (list 'query "chat-blocks-push"))})
       refute out =~ "chat-blocks-push!"
 
-      out = eval!(~s{(llm-tool-call "apropos-api" (list 'pattern "chat-blocks-push" 'scope "all"))})
+      out = eval!(~s{(llm-tool-call "apropos" (list 'query "chat-blocks-push" 'scope "all"))})
       assert out =~ "chat-blocks-push!"
+
+      # a category lists one area whole
+      out = eval!(~s{(llm-tool-call "apropos" (list 'query "" 'category "discovery"))})
+      assert out =~ "apropos-category"
 
       # (public! ...) extends the surface at runtime
       eval!(~s{(public! 'zz-shiny "A test entry.")})
-      out = eval!(~s{(llm-tool-call "apropos-api" (list 'pattern "zz-shiny"))})
+      out = eval!(~s{(llm-tool-call "apropos" (list 'query "zz-shiny"))})
       assert out =~ "A test entry."
 
       # the system skill warns the model off elisp and teaches the split

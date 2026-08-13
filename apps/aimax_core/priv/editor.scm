@@ -12,13 +12,67 @@
 
 (define *public-api* '())
 
-(define (public! name doc)
-  (set! *public-api*
-    (cons (list (symbol->string name) doc)
-          (remove (lambda (e) (equal? (car e) (symbol->string name)))
-                  *public-api*))))
+;;; Every entry is (NAME DOC SIG CATEGORY).
+;;;
+;;; The signature comes out of the doc, because the house convention
+;;; already writes one: "(fn ARGS) — what it does". Ninety-five of these
+;;; were written that way before anything parsed them, so public! splits
+;;; the string rather than making every caller say it twice. A doc with no
+;;; leading form gets "(name)".
+;;;
+;;; The category comes from (category! 'name), which holds until the next
+;;; one — declared once per section instead of once per entry. An agent
+;;; asking "what can I do with windows" wants the category, not a regex.
+
+(define *public-category* 'misc)
+
+(define (category! name) (set! *public-category* name))
+
+;; the balanced leading form of DOC, and the rest with its dash removed
+(define (public--split doc)
+  (if (not (string-prefix? "(" doc))
+      (list #f doc)
+      (let loop ((i 0) (depth 0))
+        (cond
+          ((>= i (string-byte-length doc)) (list #f doc))
+          ((equal? (substring-bytes doc i (+ i 1)) "(") (loop (+ i 1) (+ depth 1)))
+          ((equal? (substring-bytes doc i (+ i 1)) ")")
+           (if (= depth 1)
+               (list (substring-bytes doc 0 (+ i 1))
+                     (public--undash
+                       (substring-bytes doc (+ i 1) (string-byte-length doc))))
+               (loop (+ i 1) (- depth 1))))
+          (else (loop (+ i 1) depth))))))
+
+(define (public--undash rest)
+  (let ((s (string-trim rest)))
+    (cond ((string-prefix? "— " s) (string-trim (substring-bytes s 4 (string-byte-length s))))
+          ((string-prefix? "-> " s) (string-trim (substring-bytes s 3 (string-byte-length s))))
+          ((string-prefix? "-- " s) (string-trim (substring-bytes s 3 (string-byte-length s))))
+          (else s))))
+
+(define (public! name doc &optional category)
+  (let* ((n (symbol->string name))
+         (parts (public--split doc))
+         (sig (or (car parts) (string-append "(" n ")")))
+         (text (car (cdr parts))))
+    (set! *public-api*
+      (cons (list n text sig (or category *public-category*))
+            (remove (lambda (e) (equal? (car e) n)) *public-api*)))))
 
 (define (public-api) (reverse *public-api*))
+
+(define (public-entry name)
+  (let loop ((es *public-api*))
+    (cond ((null? es) #f)
+          ((equal? (car (car es)) name) (car es))
+          (else (loop (cdr es))))))
+
+(define (public-categories)
+  (let loop ((es (public-api)) (acc '()))
+    (cond ((null? es) (reverse acc))
+          ((member (nth 3 (car es)) acc) (loop (cdr es) acc))
+          (else (loop (cdr es) (cons (nth 3 (car es)) acc))))))
 
 ;;; --- plists ------------------------------------------------------------------
 ;;; Flat plists — (key value key value ...) with symbol keys — are the house

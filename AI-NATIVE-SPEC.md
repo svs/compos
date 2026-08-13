@@ -519,7 +519,9 @@ sites and loses its body, which crashed on an odd-length plist),
 four functions, because five hand-rolled scans were asking four different
 questions and disagreeing about what "no match" returned).
 **Skipped by carve-out:**
-tagged folds (SVS-193), `markdown_html/1` (SVS-198). **Not done:** `read-file-name` (#17), one isearch engine (#13), the
+tagged folds (SVS-193), `markdown_html/1` (SVS-198). *`read-file-name`
+(#17) landed 2026-08-13 on `main`: one file prompt behind find-file,
+tail-file, load-file and dired.* **Not done:** one isearch engine (#13), the
 KeyDispatch ladder merge and completion keymap (#21-23), `ml_info`/
 `agent_cmd` merge (#24), raw locals in the payload (#25),
 `buffer-candidates` and tabs (#6, #7), `define-theme-from` (#33),

@@ -16,7 +16,6 @@
 ;;; reads as a broken feature, and the editor has no timer to poll with.
 
 (define *mcp-hub-buffer* "*mcp-hub*")
-(define *mcp-hub-header-lines* 2)
 
 (set-face-attribute! 'mcp-ready 'fg "#2e6b45" 'weight "600")
 (set-face-attribute! 'mcp-error 'fg "#a83a2b" 'weight "600")
@@ -102,55 +101,37 @@
       (mcp-hub-count (list-ref row 5))
       (string-join (mcp-hub-presets (car row)) " "))))
 
-(define (mcp-hub-refresh!)
-  (when (buffer-exists? *mcp-hub-buffer*)
-    (let* ((buf *mcp-hub-buffer*)
-           (names (mcp-hub-names))
-           (cur? (equal? (current-buffer) buf))
-           (p (buffer-point buf))
-           (head (string-append
-                   ";; mcp servers — s start · k stop · r restart · S/K/R all · "
-                   "RET tools · l log · g refresh\n"
-                   "  "
-                   (mcp-hub-fit "NAME" 16) " " (mcp-hub-fit "TYPE" 5) " "
-                   (mcp-hub-fit "STATUS" 10) " "
-                   (mcp-hub-fit "TOOLS" 6) (mcp-hub-fit "RES" 6)
-                   (mcp-hub-fit "PROM" 6) "PRESETS\n")))
-      (buffer-delete-range! buf 0 (buffer-size buf))
-      (buffer-append! buf head)
-      (buffer-set-local! buf 'mcp-hub-rows names)
-      ;; the status column carries the only colour that matters, so it is
-      ;; overlaid by byte range like every other list buffer here
-      (let loop ((ns names) (off (string-byte-length head)) (ovs '()))
-        (if (null? ns)
-            (overlay-set! buf 'mcp-hub (reverse ovs))
-            (let* ((row (mcp-hub-row (car ns)))
-                   (line (mcp-hub-line row))
-                   ;; the glyph is three bytes wide: an overlay that ends
-                   ;; mid-character renders as mojibake, not as colour
-                   (g-end (+ off (string-byte-length (mcp-hub-glyph (cadr row)))))
-                   (n-start (+ g-end 1))
-                   (n-end (+ n-start (string-byte-length (mcp-hub-fit (car row) 16))))
-                   (s-start (+ n-end 7))            ; space + type column + space
-                   (s-end (+ s-start (string-byte-length (cadr row)))))
-              (buffer-append! buf (string-append line "\n"))
-              (loop (cdr ns)
-                    (+ off (string-byte-length line) 1)
-                    (cons (list s-start s-end (mcp-hub-status-face (cadr row)))
-                          (cons (list off g-end (mcp-hub-status-face (cadr row)))
-                                (cons (list n-start n-end "mcp-name") ovs)))))))
-      (buffer-set-read-only! buf #t)
-      (when cur? (goto-char! (min p (buffer-size buf)))))))
+(define (mcp-hub-header)
+  (string-append
+    ";; mcp servers — s start · k stop · r restart · S/K/R all · "
+    "RET tools · l log · g refresh\n"
+    "  "
+    (mcp-hub-fit "NAME" 16) " " (mcp-hub-fit "TYPE" 5) " "
+    (mcp-hub-fit "STATUS" 10) " "
+    (mcp-hub-fit "TOOLS" 6) (mcp-hub-fit "RES" 6)
+    (mcp-hub-fit "PROM" 6) "PRESETS"))
+
+;; the status column carries the only colour that matters. OFF is where
+;; this row's line starts, which the list hands us — the glyph is three
+;; bytes wide, and an overlay ending mid-character renders as mojibake
+;; rather than as colour.
+(define (mcp-hub-overlays name off)
+  (let* ((row (mcp-hub-row name))
+         (g-end (+ off (string-byte-length (mcp-hub-glyph (cadr row)))))
+         (n-start (+ g-end 1))
+         (n-end (+ n-start (string-byte-length (mcp-hub-fit (car row) 16))))
+         (s-start (+ n-end 7))              ; space + type column + space
+         (s-end (+ s-start (string-byte-length (cadr row)))))
+    (list (list off g-end (mcp-hub-status-face (cadr row)))
+          (list n-start n-end "mcp-name")
+          (list s-start s-end (mcp-hub-status-face (cadr row))))))
+
+(define (mcp-hub-refresh!) (list-refresh! *mcp-hub-buffer*))
 
 ;; a connection changing state redraws the list, if anyone is looking
 (mcp-on-change! (lambda (name status) (mcp-hub-refresh!)))
 
-(define (mcp-hub-current)
-  (let* ((rows (or (buffer-local *mcp-hub-buffer* 'mcp-hub-rows) '()))
-         (before (substring-bytes (buffer-text *mcp-hub-buffer*) 0
-                                  (buffer-point *mcp-hub-buffer*)))
-         (ln (- (length (string-split before "\n")) 1 *mcp-hub-header-lines*)))
-    (if (and (>= ln 0) (< ln (length rows))) (nth ln rows) #f)))
+(define (mcp-hub-current) (list-current *mcp-hub-buffer*))
 
 ;;; --- start, stop, restart -----------------------------------------------------
 
@@ -367,28 +348,20 @@
 
 ;;; --- the hub -------------------------------------------------------------------
 
-(define (mcp-hub-setup! buf)
-  (local-set-key* buf "RET" "mcp-hub-detail")
-  (local-set-key* buf "d" "mcp-hub-detail")
-  (local-set-key* buf "s" "mcp-hub-start")
-  (local-set-key* buf "k" "mcp-hub-stop")
-  (local-set-key* buf "r" "mcp-hub-restart")
-  (local-set-key* buf "S" "mcp-hub-start-all")
-  (local-set-key* buf "K" "mcp-hub-stop-all")
-  (local-set-key* buf "R" "mcp-hub-restart-all")
-  (local-set-key* buf "l" "mcp-hub-log")
-  (local-set-key* buf "g" "mcp-hub-refresh")
-  (local-set-key* buf "q" "quit-window")
-  (mcp-hub-refresh!))
-
-(define-mode "mcp-hub-mode" (lambda () (mcp-hub-setup! (current-buffer))))
+(define-list-mode! "mcp-hub-mode"
+  (list
+    'buffer *mcp-hub-buffer*
+    'rows mcp-hub-names
+    'render (lambda (name) (mcp-hub-line (mcp-hub-row name)))
+    'header mcp-hub-header
+    'overlays mcp-hub-overlays
+    'keys '(("RET" "mcp-hub-detail") ("d" "mcp-hub-detail") ("s" "mcp-hub-start")
+            ("k" "mcp-hub-stop") ("r" "mcp-hub-restart") ("S" "mcp-hub-start-all")
+            ("K" "mcp-hub-stop-all") ("R" "mcp-hub-restart-all")
+            ("l" "mcp-hub-log") ("g" "mcp-hub-refresh") ("q" "quit-window"))))
 
 (define-command "mcp-hub" "List every MCP server: status, tools, presets"
-  (lambda ()
-    (buffer-create *mcp-hub-buffer*)
-    (buffer-set-local! *mcp-hub-buffer* 'mode-name "mcp-hub-mode")
-    (mcp-hub-setup! *mcp-hub-buffer*)
-    (display-buffer *mcp-hub-buffer*)))
+  (lambda () (list-mode-show! "mcp-hub-mode")))
 
 (global-set-key "C-c a m" "mcp-hub")
 

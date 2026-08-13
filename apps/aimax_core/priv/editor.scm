@@ -193,7 +193,18 @@
       (buffer-delete-range! buf 0 (buffer-size buf))
       (buffer-append! buf (string-append (list-header-text buf) "\n"))
       (buffer-set-local! buf 'list-entries rows)
-      (for-each (lambda (e) (buffer-append! buf (string-append (render e) "\n"))) rows)
+      ;; a row may want colour, and colour is byte ranges — so the list
+      ;; tells the row where its line landed rather than making the caller
+      ;; keep its own running offset
+      (let ((ovf (list-opt buf 'overlays)))
+        (let loop ((es rows) (off (buffer-size buf)) (ovs '()))
+          (if (null? es)
+              (when ovf (overlay-set! buf 'list (reverse ovs)))
+              (let ((line (render (car es))))
+                (buffer-append! buf (string-append line "\n"))
+                (loop (cdr es)
+                      (+ off (string-byte-length line) 1)
+                      (if ovf (append (reverse (ovf (car es) off)) ovs) ovs))))))
       (buffer-set-read-only! buf ro)
       (when cur? (goto-char! (min p (buffer-size buf)))))))
 

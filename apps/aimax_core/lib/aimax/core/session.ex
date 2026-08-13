@@ -562,12 +562,29 @@ defmodule Aimax.Core.Session do
         for row <- Aimax.Core.LLMDb.report() do
           [{:sym, "day"}, row.day, {:sym, "model"}, row.model,
            {:sym, "requests"}, row.requests, {:sym, "input"}, row.input,
-           {:sym, "output"}, row.output, {:sym, "cost"}, row.cost * 1.0]
+           {:sym, "output"}, row.output,
+           {:sym, "cache-read"}, row.cache_read, {:sym, "cache-write"}, row.cache_write,
+           # as whole percent: Scheme has no float formatting worth the name
+           {:sym, "hit-rate"},
+           (case Aimax.Core.LLMDb.hit_rate(row) do
+              nil -> false
+              r -> round(r * 100)
+            end),
+           {:sym, "cost"}, row.cost * 1.0]
         end
       end,
       "set-llm-model!" => fn [m] ->
         Aimax.Core.LLM.set_model(m)
         :void
+      end,
+      # how long the provider holds a cached prefix ("5m", "1h") — the
+      # defcustom llm-cache-ttl sets it
+      "set-llm-cache-ttl!" => fn [ttl] ->
+        Aimax.Core.LLM.set_cache_ttl(to_string(ttl))
+        :void
+      end,
+      "llm-max-tokens" => fn [model] ->
+        Aimax.Core.LLMDb.max_tokens(s(model)) || false
       end,
 
       # --- agent threads (ACP runtime, see Aimax.Core.Agent) -----------------

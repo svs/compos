@@ -45,6 +45,29 @@ defmodule Aimax.Core.LLMDb do
   end
 
   @doc """
+  The model's own output-token limit from the catalog, or nil.
+
+  A flat cap truncates a long reply on a model that allows far more, and
+  the provider reports that truncation as a length stop — which the editor
+  then has to show, rather than pretending the model finished.
+  """
+  def max_tokens(model) do
+    model = model |> String.replace_prefix("openrouter:", "") |> String.replace_prefix("openai:", "")
+    model = model |> String.replace_prefix("anthropic:", "")
+    db = :persistent_term.get(:aimax_llmdb, %{})
+
+    Enum.find_value(["anthropic", "openai", "openrouter"] ++ Map.keys(db), fn p ->
+      with %{"models" => models} <- db[p],
+           %{"limit" => %{"output" => out}} <- models[model] || models[Path.basename(model)],
+           true <- is_integer(out) and out > 0 do
+        out
+      else
+        _ -> nil
+      end
+    end)
+  end
+
+  @doc """
   Dollars for a usage map (Anthropic or OpenAI field names), nil when the
   model is unpriced.
 
@@ -80,14 +103,20 @@ defmodule Aimax.Core.LLMDb do
     }
   end
 
-  @doc "Record one request in the durable ledger; returns the computed cost (or nil)."
-  def record(model, usage) when is_map(usage) do
+  @doc """
+  Record one request in the durable ledger; returns the computed cost (or nil).
+
+  `slug` names the chat that spent it. Without it the ledger could say what
+  a day cost but never which conversation ran up the bill.
+  """
+  def record(model, usage, slug \\ nil) when is_map(usage) do
     t = tokens(usage)
     cost = cost(model, usage)
 
     row =
       t
       |> Map.merge(%{ts: DateTime.to_iso8601(DateTime.utc_now()), model: model, cost: cost})
+      |> then(fn row -> if slug, do: Map.put(row, :slug, slug), else: row end)
 
     File.write(ledger_path(), Jason.encode!(row) <> "\n", [:append])
     cost
@@ -111,21 +140,40 @@ defmodule Aimax.Core.LLMDb do
     end
   end
 
-  @doc "Aggregate the ledger by day and model: [%{day, model, requests, input, output, cost}]."
+  @doc """
+  Aggregate the ledger by day and model.
+
+  The cache columns are the point of the report: `cache_read` against
+  `input + cache_read` is the hit rate, and a hit rate near zero means the
+  chat is paying full price for a prefix it resends every turn.
+  """
   def report do
     ledger()
     |> Enum.group_by(fn row -> {String.slice(row["ts"] || "", 0, 10), row["model"]} end)
     |> Enum.map(fn {{day, model}, rows} ->
+      sum = fn key -> rows |> Enum.map(&(&1[key] || 0)) |> Enum.sum() end
+
       %{
         day: day,
         model: model,
         requests: length(rows),
-        input: rows |> Enum.map(&(&1["input"] || 0)) |> Enum.sum(),
-        output: rows |> Enum.map(&(&1["output"] || 0)) |> Enum.sum(),
-        cost: rows |> Enum.map(&(&1["cost"] || 0)) |> Enum.sum()
+        input: sum.("input"),
+        output: sum.("output"),
+        cache_read: sum.("cache_read"),
+        cache_write: sum.("cache_write"),
+        cost: sum.("cost")
       }
     end)
     |> Enum.sort_by(&{&1.day, &1.model}, :desc)
+  end
+
+  @doc """
+  The share of billed input that came from cache, 0.0..1.0, or nil when
+  there was no input to bill.
+  """
+  def hit_rate(%{input: input, cache_read: read}) do
+    total = input + read
+    if total > 0, do: read / total, else: nil
   end
 
   def refresh, do: GenServer.cast(__MODULE__, :refresh)

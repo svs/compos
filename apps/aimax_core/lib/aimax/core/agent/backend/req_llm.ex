@@ -74,6 +74,13 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
        slug: Map.get(config, "slug"),
        model: Map.get(config, "model"),
        task: nil,
+       # the model this turn is actually running, captured when it starts:
+       # C-c m mid-turn used to move state.model, and the finished turn was
+       # then priced against a model it never ran on
+       turn_model: nil,
+       # what the turn has spent so far, reported round by round. A turn
+       # that is cancelled or crashes still spent it.
+       turn_usage: %{},
        next_rpc_id: 1,
        pending: nil
      }}
@@ -91,12 +98,13 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
         run_turn(me, slug, model, text, display)
       end)
 
-    {:reply, :ok, %{state | task: task}}
+    {:reply, :ok, %{state | task: task, turn_model: model, turn_usage: %{}}}
   end
 
   def handle_call(:cancel, _from, %{task: %Task{} = task} = state) do
     state = release_pending(state, :deny)
     Task.shutdown(task, :brutal_kill)
+    state = bill(state)
     emit(state, type: :"turn-end", "stop-reason": "cancelled")
     {:reply, :ok, %{state | task: nil}}
   end
@@ -160,31 +168,29 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
     {:noreply, state}
   end
 
+  # the running usage total, after every round of the loop
+  def handle_cast({:turn_usage, usage}, state), do: {:noreply, %{state | turn_usage: usage}}
+
   # turn task finished
   @impl GenServer
   def handle_info({ref, result}, %{task: %Task{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
 
-    case result do
-      {:ok, _text, usage} ->
-        cost = Aimax.Core.LLMDb.record(state.model || LLM.model(), usage)
-        t = Aimax.Core.LLMDb.tokens(usage)
+    state =
+      case result do
+        {:ok, _text, usage, stop} ->
+          state = bill(%{state | turn_usage: usage})
+          emit(state, type: :"turn-end", "stop-reason": stop)
+          state
 
-        emit(state,
-          type: :usage,
-          input: t.input,
-          output: t.output,
-          "cache-read": t.cache_read,
-          "cache-write": t.cache_write,
-          cost: cost || false
-        )
-
-        emit(state, type: :"turn-end", "stop-reason": "end_turn")
-
-      {:error, msg} ->
-        emit(state, type: :error, text: msg)
-        emit(state, type: :"turn-end", "stop-reason": "error")
-    end
+        # the loop ended without a result — a round cap, a wire error. It
+        # still ran rounds, and those rounds still cost money.
+        {:error, msg} ->
+          state = bill(state)
+          emit(state, type: :error, text: msg)
+          emit(state, type: :"turn-end", "stop-reason": "error")
+          state
+      end
 
     {:noreply, %{state | task: nil}}
   end
@@ -192,6 +198,7 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
   # turn task crashed (a cancel's :brutal_kill DOWN is flushed above)
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{task: %Task{ref: ref}} = state) do
     state = release_pending(state, :deny)
+    state = bill(state)
     emit(state, type: :error, text: "turn crashed: #{inspect(reason)}")
     emit(state, type: :"turn-end", "stop-reason": "error")
     {:noreply, %{state | task: nil}}
@@ -209,6 +216,28 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
   defp emit(state, kvs) do
     send(state.owner, {:backend_event, Backend.plist(kvs)})
     state
+  end
+
+  # Every path out of a turn passes through here — done, error, round cap,
+  # crash, cancel — so the ledger and the chat's own total never disagree
+  # with what was actually sent. An empty total (a turn that died before
+  # its first round returned) bills nothing.
+  defp bill(%{turn_usage: usage} = state) when map_size(usage) == 0, do: state
+
+  defp bill(state) do
+    cost = Aimax.Core.LLMDb.record(state.turn_model || LLM.model(), state.turn_usage, state.slug)
+    t = Aimax.Core.LLMDb.tokens(state.turn_usage)
+
+    emit(state,
+      type: :usage,
+      input: t.input,
+      output: t.output,
+      "cache-read": t.cache_read,
+      "cache-write": t.cache_write,
+      cost: cost || false
+    )
+
+    %{state | turn_usage: %{}}
   end
 
   # --- the turn (runs in a supervised task) -----------------------------------
@@ -233,6 +262,7 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
           ctx.dispatcher,
           model: model,
           on_record: fn role, blocks -> record(slug, role, blocks_to_record(blocks), false) end,
+          on_round_usage: fn usage -> GenServer.cast(backend, {:turn_usage, usage}) end,
           on_chunk: fn t -> ev.(type: :chunk, text: t) end,
           on_thinking: fn t -> ev.(type: :thought, text: t) end,
           # aimax owns permissions on BOTH lanes: the same Scheme policy

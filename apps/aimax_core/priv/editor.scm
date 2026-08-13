@@ -1506,18 +1506,33 @@
       (unless (chat-buffer? cur)
         (group-chat-show! (group-ensure! cur))))))
 
-;; the per-send system preamble: a grouped chat points the model at the
-;; group's work buffers (pull context — the tools read live buffers, so it
-;; is never stale); with tools off the documents are pushed inline instead.
-;; (What the user is LOOKING at rides the message itself —
-;; editor-context-preamble in agent-send-msg! — on every backend.)
+;;; The system prompt is the cache prefix. Every byte of it is resent on
+;;; every turn and on every tool round, so nothing that CHANGES may live
+;;; here: one edit to a watched buffer used to invalidate the whole cached
+;;; prefix, and the chat paid the cache-write surcharge again from turn
+;;; one. So the system prompt names the group's buffers and states the
+;;; edit protocol — both stable for the life of the chat — and the live
+;;; document text rides the LAST user message instead (chat-context-block,
+;;; sent by agent-send-msg!). Older turns keep the text they were sent
+;;; with; only the newest message carries fresh bytes.
+
+;; how to read and change a live buffer. One string: the two copies of
+;; this paragraph had drifted apart. (R7 folds it into one primer with
+;; *llm-system* and the mcp note.)
+(define *chat-edit-protocol*
+  (string-append
+    "Never guess a buffer's contents: read it with eval-scheme "
+    "(buffer-text \"NAME\") before commenting, and change it with "
+    "(buffer-replace! \"NAME\" OLD NEW) — exact unique old string -> new; "
+    "it edits the live buffer, never the file. Make the smallest edit "
+    "that does the job."))
+
 (define (chat-preamble buf)
   (let* ((g (buffer-group buf))
-         (docs (if g (group-docs g) '()))
-         (tools? (and (boundp (quote chat-use-tools)) chat-use-tools)))
-    (chat-preamble-body g docs tools?)))
+         (docs (if g (group-docs g) '())))
+    (chat-preamble-body g docs)))
 
-(define (chat-preamble-body g docs tools?)
+(define (chat-preamble-body g docs)
   (cond
       ((null? docs)
        (string-append
@@ -1528,21 +1543,13 @@
        (let ((doc (car docs)))
          (string-append
            "You are the user's writing companion in a side chat. They are "
-           "writing in the editor buffer named \"" doc "\"."
-           (if tools?
-               (string-append
-                 " Never guess its contents: read it with eval-scheme "
-                 "(buffer-text \"NAME\") before commenting, and change it "
-                 "with (buffer-replace! \"NAME\" OLD NEW) — exact unique "
-                 "old string -> new; it edits the live buffer, never the "
-                 "file. Match the document's voice and "
-                 "make the smallest edit that does the job.")
-               (string-append
-                 "\n\nThe document right now:\n\n" (buffer-text doc)))
+           "writing in the editor buffer named \"" doc "\". "
+           *chat-edit-protocol*
+           " Match the document's voice."
            "\n\nThe chat transcript follows; reply to the last user turn "
            "only, in markdown.\n\n")))
       (else
-       ;; several buffers: enumerate the group, let the tools pull content
+       ;; several buffers: enumerate the group, name nothing that changes
        (string-append
          "You are the user's companion in a side chat for their buffer "
          "group \"" g "\". The group's buffers:\n"
@@ -1552,20 +1559,26 @@
                      (if m (string-append " (" m ")") ""))
                    "\n"))
                "" docs)
-         (if tools?
-             (string-append
-               "Never guess their contents: read one with eval-scheme "
-               "(buffer-text \"NAME\") before commenting, and change one "
-               "with (buffer-replace! \"NAME\" OLD NEW) — exact unique "
-               "old string -> new; it edits the live buffer, never the "
-               "file. Make the smallest edit that does "
-               "the job.")
-             (fold (lambda (acc d)
-                     (string-append acc "\n\"" d "\" right now:\n\n"
-                                    (buffer-text d) "\n"))
-                   "" docs))
+         *chat-edit-protocol*
          "\n\nThe chat transcript follows; reply to the last user turn "
          "only, in markdown.\n\n"))))
+
+;; the other half: the live text, on the LAST user message, where a change
+;; costs one turn's cache instead of the whole conversation's. With tools
+;; on there is nothing to push — the model reads the buffers itself, and a
+;; pulled read is never stale.
+(define (chat-context-block buf)
+  (let* ((tools? (and (boundp (quote chat-use-tools)) chat-use-tools))
+         (g (and (not tools?) (buffer-group buf)))
+         (docs (if g (group-docs g) '())))
+    (if (null? docs)
+        ""
+        (string-append
+          "[The group's buffers as they are right now:\n"
+          (fold (lambda (acc d)
+                  (string-append acc "\n\"" d "\":\n\n" (buffer-text d) "\n"))
+                "" docs)
+          "]\n\n"))))
 
 ;;; --- chat backends -------------------------------------------------------------
 ;;; A chat can ride an ACP agent (claude-code, codex — subscription billing)
@@ -1821,14 +1834,15 @@
 ;; behind for the migration to read again)
 (define chat-conversation-locals
   '(chat-wire-turns chat-turns agent-blocks agent-overlays agent-folds
-    chat-cost chat-last-usage agent-saved-mark agent-marker-bytes))
+    chat-tool-specs chat-cost chat-last-usage chat-usage-total
+    agent-saved-mark agent-marker-bytes))
 
 ;; PROCESS state — mirrors a live runtime, so it is always stale after a
 ;; restart and meaningless after a reset: both clear it wholesale
 (define chat-runtime-locals
   '(agent-slug agent-queued agent-waiting chat-waiting
     agent-cancelling agent-seed-context agent-tool-bodies
-    agent-turn-text agent-turn-any chat-wire-record
+    agent-turn-text agent-turn-any chat-wire-record chat-compacting
     agent-models agent-mode agent-modes chat-mcp-dirty
     chat-history-pos chat-history-draft))
 
@@ -2062,6 +2076,105 @@
   (unless (buffer-local buf 'chat-wire-record)
     (chat-record-push! buf role blocks #f)))
 
+;;; --- compaction ------------------------------------------------------------------
+;;; A conversation that never ends grows without bound, and every turn
+;;; resends all of it: cost grows with the square of the conversation.
+;;; Above a threshold the head of the record becomes one summary and the
+;;; recent turns stay verbatim — the recent turns are what the model is
+;;; working on, and they are also what the cache holds.
+;;;
+;;; It is never silent. The transcript shows a line where the head went,
+;;; and the summary is a turn like any other: it saves, restores, and
+;;; replays with the rest of the record.
+
+;;; (The two knobs are defcustoms in packages/tools.scm — defcustom itself
+;;; is userland and loads after this file.)
+
+(define (chat-block-bytes b)
+  (fold (lambda (acc v) (+ acc (if (string? v) (string-byte-length v) 0))) 0 b))
+
+(define (chat-turn-bytes t)
+  (+ (fold (lambda (acc b) (+ acc (chat-block-bytes b))) 0 (or (plist-get t 'blocks) '()))
+     (string-byte-length (or (plist-get t 'wire) ""))))
+
+;; four bytes to the token: close enough to decide WHEN, and no tokenizer
+;; in the editor can be closer than the provider's own count
+(define (chat-record-tokens buf)
+  (quotient (fold (lambda (acc t) (+ acc (chat-turn-bytes t))) 0 (chat-record buf)) 4))
+
+;; how many of the newest turns to keep: at least chat-compact-keep, then
+;; on to the next user turn, so the kept window opens the way a
+;; conversation does rather than mid-exchange
+(define (chat-compact-keep-count all)
+  (let loop ((ts all) (n 0))
+    (cond ((null? ts) n)
+          ((and (>= n chat-compact-keep)
+                (equal? (plist-get (car ts) 'role) "user"))
+           (+ n 1))
+          (else (loop (cdr ts) (+ n 1))))))
+
+(define (chat-take xs n)
+  (if (or (null? xs) (<= n 0)) '() (cons (car xs) (chat-take (cdr xs) (- n 1)))))
+
+(define (chat-drop xs n)
+  (if (or (null? xs) (<= n 0)) xs (chat-drop (cdr xs) (- n 1))))
+
+;; record turns (oldest first) as the portable transcript the summarizer reads
+(define (chat-turns-text turns)
+  (fold (lambda (acc t)
+          (let ((txt (chat-turn-display t)))
+            (if (equal? txt "")
+                acc
+                (string-append acc
+                  (if (equal? (plist-get t 'role) "user") "### You\n" "### Assistant\n")
+                  txt "\n\n"))))
+        "" turns))
+
+(define (chat-should-compact? buf)
+  (and (> chat-compact-threshold 0)
+       (not (buffer-local buf 'chat-compacting))
+       (> (chat-record-tokens buf) chat-compact-threshold)
+       (let ((all (chat-record buf)))
+         (> (length all) (chat-compact-keep-count all)))))
+
+;; The summary call is async, and the record can grow while it is in
+;; flight. So the head is identified by COUNT at request time and replaced
+;; only if the record still ends with it: a turn that landed meanwhile
+;; stays put, and a reset that emptied the record cancels the whole thing.
+(define (chat-compact! buf slug)
+  (let* ((all (chat-record buf))
+         (keep (chat-compact-keep-count all))
+         (head (chat-drop all keep))
+         (n (length head)))
+    (buffer-set-local! buf 'chat-compacting n)
+    (llm (string-append
+           "Summarize this conversation between a user and the assistant "
+           "inside their editor. Keep every decision, file name, command, "
+           "and open question. Drop the pleasantries. Write notes the "
+           "assistant can act on, not prose about the conversation. No "
+           "preamble.\n\n"
+           (chat-turns-text (reverse head)))
+         (lambda (summary) (chat-compact-apply! buf slug n summary)))))
+
+(define (chat-compact-apply! buf slug n summary)
+  (buffer-set-local! buf 'chat-compacting #f)
+  (let ((all (chat-record buf)))
+    (when (and (buffer-exists? buf) (> (length all) n))
+      (buffer-set-local! buf 'chat-wire-turns
+        (append (chat-take all (- (length all) n))
+                (list (list 'role "user"
+                            'blocks (list (list "text"
+                              (string-append
+                                "[Earlier in this conversation, compacted to notes:]\n\n"
+                                summary)))))))
+      ;; say so where the reader can see it
+      (let ((start (agent-render! slug
+                     (string-append "\n[compacted " (number->string n)
+                                    " earlier turns into a summary]\n")
+                     "agent-meta")))
+        (agent-block-push! buf start (agent-mark slug) "meta" '()))
+      (message (string-append "compacted " (number->string n) " turns")))))
+
 ;; a chat saved before the record existed carries (role text) pairs — read
 ;; them once, as text turns, and drop the old local
 (define (chat-record-migrate! buf)
@@ -2093,13 +2206,79 @@
       (chat-extra-tool-specs buf)
       '()))
 
+;;; The tool list is part of the cache prefix, so a chat freezes it at its
+;;; first send. An MCP server finishing its handshake mid-conversation used
+;;; to change the list under a running chat, and every cached token went
+;;; with it. The frozen list is conversation state: it survives a restart,
+;;; and a reset starts a new one.
+;;;
+;;; C-c t adopts the live set. That costs exactly one cache miss, and it is
+;;; the user's choice to spend — the modeline says when the two differ.
+
+(define (chat-live-tool-specs buf)
+  (append (llm-tool-specs) (chat-extra-specs buf)))
+
+(define (chat-tools buf)
+  (or (buffer-local buf 'chat-tool-specs)
+      (let ((specs (chat-live-tool-specs buf)))
+        (buffer-set-local! buf 'chat-tool-specs specs)
+        specs)))
+
+(define (chat-tool-names specs) (map car specs))
+
+;; has the editor's tool surface moved since this chat froze its own?
+(define (chat-tools-stale? buf)
+  (let ((frozen (buffer-local buf 'chat-tool-specs)))
+    (and frozen
+         (not (equal? (chat-tool-names frozen)
+                      (chat-tool-names (chat-live-tool-specs buf))))
+         #t)))
+
+(define-command "chat-refresh-tools" "Adopt the editor's current tool list in this chat"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (not (buffer-local buf 'agent-saved-mark))
+          (message "not a chat buffer")
+          (let ((n (length (chat-live-tool-specs buf))))
+            (buffer-set-local! buf 'chat-tool-specs (chat-live-tool-specs buf))
+            (when (boundp (quote agent-update-modeline!)) (agent-update-modeline! buf))
+            (message (string-append "tools refreshed: " (number->string n)
+                                    " — the next turn rewrites the prompt cache")))))))
+
+;; the chat's running totals, so C-c $ can state a hit rate over the whole
+;; conversation rather than the last turn alone
+(define (chat-usage-total buf)
+  (or (buffer-local buf 'chat-usage-total)
+      '(input 0 output 0 cache-read 0 cache-write 0)))
+
+(define (chat-usage-add total u key)
+  (+ (or (plist-get total key) 0) (or (custom--plist-get u key) 0)))
+
 (define (chat-usage-note! buf u)
-  (let ((cost (custom--plist-get u 'cost)))
+  (let ((cost (custom--plist-get u 'cost))
+        (total (chat-usage-total buf)))
     (buffer-set-local! buf 'chat-last-usage u)
+    (buffer-set-local! buf 'chat-usage-total
+      (list 'input (chat-usage-add total u 'input)
+            'output (chat-usage-add total u 'output)
+            'cache-read (chat-usage-add total u 'cache-read)
+            'cache-write (chat-usage-add total u 'cache-write)))
     (when cost
       (buffer-set-local! buf 'chat-cost
-        (+ (or (buffer-local buf 'chat-cost) 0) cost))
-      (agent-update-modeline! buf))))
+        (+ (or (buffer-local buf 'chat-cost) 0) cost)))
+    ;; every turn, priced or not: the modeline also carries the tool-drift
+    ;; hint, and an unpriced model must not hide it
+    (agent-update-modeline! buf)))
+
+;; the share of billed input that came from the cache, as a percentage
+;; string, or #f when nothing was billed yet
+(define (chat-hit-rate total)
+  (let ((read (or (plist-get total 'cache-read) 0))
+        (fresh (or (plist-get total 'input) 0)))
+    (if (= (+ read fresh) 0)
+        #f
+        (string-append
+          (number->string (quotient (* 100 read) (+ read fresh))) "%"))))
 
 (define (chat-ready-message buf)
   (let ((u (buffer-local buf 'chat-last-usage)))
@@ -2138,9 +2317,7 @@
                       (string-append *llm-system* "\n\n" (chat-mcp-note)
                                      (chat-preamble buf))
                       (chat-preamble buf))
-          'tools (if tools?
-                     (append (llm-tool-specs) (chat-extra-specs buf))
-                     '())
+          'tools (if tools? (chat-tools buf) '())
           'dispatcher chat-tool-dispatch)))
 
 (agent-context-fn! (lambda (slug display) (chat-thread-context slug display)))
@@ -2413,18 +2590,30 @@
 ;;; refreshed daily) and recorded in ~/.aimax/llm-usage.jsonl; each chat also
 ;;; sums its own spend in the 'chat-cost buffer-local.
 
-(define-command "chat-cost" "Show what this chat has cost"
+;; What a chat cost, and — the number that decides whether it was worth it
+;; — how much of its input the provider served from cache. A conversation
+;; resends its whole history every turn. At a healthy hit rate that history
+;; bills at about a tenth of the price; at 0% it bills at full price twice
+;; over, because a cache WRITE costs more than a plain read.
+(define-command "chat-cost" "Show what this chat has cost, and its cache hit rate"
   (lambda ()
-    (let ((c (buffer-local (current-buffer) 'chat-cost))
-          (u (buffer-local (current-buffer) 'chat-last-usage)))
-      (if (not c)
+    (let* ((buf (current-buffer))
+           (c (buffer-local buf 'chat-cost))
+           (u (buffer-local buf 'chat-last-usage))
+           (total (chat-usage-total buf))
+           (rate (chat-hit-rate total)))
+      (if (not (or c u))
           (message "No priced requests in this chat yet")
           (message
-            (string-append "This chat: " (format-usd c)
+            (string-append
+              "This chat: " (if c (format-usd c) "unpriced")
+              " · cache " (number->string (or (plist-get total 'cache-read) 0)) " read / "
+              (number->string (or (plist-get total 'cache-write) 0)) " written"
+              (if rate (string-append " · " rate " of input cached") "")
               (if u
                   (string-append " · last turn "
-                    (number->string (custom--plist-get u 'input)) "→"
-                    (number->string (custom--plist-get u 'output)) " tokens"
+                    (number->string (or (custom--plist-get u 'input) 0)) "→"
+                    (number->string (or (custom--plist-get u 'output) 0)) " tokens"
                     (let ((tc (custom--plist-get u 'cost)))
                       (if tc (string-append " (" (format-usd tc) ")") "")))
                   "")))))))
@@ -2443,8 +2632,18 @@
                   (number->string (custom--plist-get r 'requests)) " reqs  "
                   (number->string (custom--plist-get r 'input)) "→"
                   (number->string (custom--plist-get r 'output)) "  "
-                  (custom--plist-get r 'model) "\n"))
-              "LLM spend · ledger ~/.aimax/llm-usage.jsonl · per-chat: C-c $\n\n"
+                  ;; the cache columns: read is what the prefix cost a tenth
+                  ;; of, written is what it cost a quarter more than usual
+                  "cache " (number->string (custom--plist-get r 'cache-read)) "r/"
+                  (number->string (custom--plist-get r 'cache-write)) "w  "
+                  (let ((h (custom--plist-get r 'hit-rate)))
+                    (string-pad-right
+                      (if h (string-append (number->string h) "% cached") "") 12))
+                  "  " (custom--plist-get r 'model) "\n"))
+              (string-append
+                "LLM spend · ledger ~/.aimax/llm-usage.jsonl · per-chat: C-c $\n"
+                "hit rate is cached input over billed input: low means the "
+                "prefix is being rewritten every turn\n\n")
               rows))
       (switch-to-buffer! buf))))
 

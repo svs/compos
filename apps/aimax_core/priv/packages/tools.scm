@@ -272,3 +272,28 @@
 (defcustom 'chat-use-tools #t
   "When true, the *chat* buffer's LLM can act on the editor via tools."
   'group 'chat 'type 'boolean)
+
+;; How long the provider holds a cached prefix. The default five minutes
+;; expires while the user reads the reply, so the next turn pays the write
+;; surcharge on the whole transcript again. An hour covers a sitting.
+;; Anthropic bills a longer TTL at a higher write rate, so "5m" is the
+;; cheaper choice for a chat answered in bursts.
+(defcustom 'llm-cache-ttl "1h"
+  "How long the provider holds this chat's cached prompt prefix: \"5m\" or \"1h\"."
+  'group 'chat 'type 'string
+  'set (lambda (v) (set-llm-cache-ttl! v)))
+
+(set-llm-cache-ttl! llm-cache-ttl)
+
+;; Compaction: a conversation that never ends resends all of itself every
+;; turn, so cost grows with the square of its length. Past the threshold
+;; the head becomes one summary and the recent turns stay verbatim. The
+;; mechanism is in editor.scm (chat-should-compact?, chat-compact!); these
+;; are the knobs.
+(defcustom 'chat-compact-threshold 60000
+  "Compact a chat once its record passes this many estimated tokens. 0 disables it."
+  'group 'chat 'type 'integer)
+
+(defcustom 'chat-compact-keep 8
+  "How many recent turns a compaction keeps verbatim."
+  'group 'chat 'type 'integer)

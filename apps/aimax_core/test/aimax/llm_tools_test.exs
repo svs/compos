@@ -104,7 +104,7 @@ defmodule Aimax.LLMToolsTest do
       # a userland function: full lambda source, body included
       out = eval!(~s{(llm-tool-call "describe-function" (list 'name "chat-thread-context"))})
       assert out =~ "lambda"
-      assert out =~ "llm-tool-specs"
+      assert out =~ "chat-record"
 
       # an M-x command (lives in the ETS registry, not the global env)
       out = eval!(~s{(llm-tool-call "describe-function" (list 'name "agent-send"))})

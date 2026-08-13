@@ -60,7 +60,7 @@ defmodule Aimax.Core.LLM do
     {:ok, _} =
       Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
         case run_tool_loop([%{role: "user", content: prompt}], system, specs, dispatcher, opts) do
-          {:ok, text, usage} ->
+          {:ok, text, usage, _stop} ->
             deliver_usage(usage, opts[:on_usage])
             callback.(text)
 
@@ -75,7 +75,9 @@ defmodule Aimax.Core.LLM do
   @doc """
   The synchronous tool loop — `complete_tools/6` wraps it in a Task, and
   `Backend.ReqLLM` drives it from its own turn task. `messages` are
-  Anthropic-shaped; returns `{:ok, final_text, summed_usage}`.
+  Anthropic-shaped; returns `{:ok, final_text, summed_usage, stop_reason}`.
+  The stop reason is the provider's own: a reply cut off at the token limit
+  says so instead of passing for a finished one.
 
   Event opts (all optional): `:on_chunk` / `:on_thinking` receive streamed
   text deltas (and, when the wire didn't stream, the whole final text);
@@ -85,7 +87,9 @@ defmodule Aimax.Core.LLM do
   chokepoint every direct-lane tool call passes through. `:on_record`
   receives `(role, blocks)` for every message this loop appends to
   `messages` — the caller's conversation of record grows by exactly what
-  went on the wire. `:model` overrides `model/0`.
+  went on the wire. `:on_round_usage` receives the running usage total
+  after each round, so a turn that never returns can still be billed.
+  `:model` overrides `model/0`.
   """
   def run_tool_loop(messages, system, specs, dispatcher, opts \\ []) do
     tools = Enum.map(specs, &tool_json/1)
@@ -135,17 +139,30 @@ defmodule Aimax.Core.LLM do
         messages =
           messages ++ [%{role: "assistant", content: blocks}, %{role: "user", content: results}]
 
-        tool_loop(messages, system, tools, dispatcher, rounds + 1, add_usage(usage, resp), opts)
+        usage = add_usage(usage, resp)
+        report_usage(opts, usage)
+        tool_loop(messages, system, tools, dispatcher, rounds + 1, usage, opts)
 
       {:ok, %{"content" => blocks} = resp} ->
         emit_unstreamed_text(resp, opts)
         record(opts, "assistant", blocks)
-        {:ok, Enum.map_join(blocks, "", &(&1["text"] || "")), add_usage(usage, resp)}
+        usage = add_usage(usage, resp)
+        report_usage(opts, usage)
+        {:ok, Enum.map_join(blocks, "", &(&1["text"] || "")), usage, stop_of(resp)}
 
       {:error, msg} ->
         {:error, msg}
     end
   end
+
+  defp stop_of(%{"stop_reason" => r}) when is_binary(r), do: r
+  defp stop_of(_), do: "end_turn"
+
+  # The running total, after every round. A turn that is cancelled or that
+  # dies mid-loop still spent what it spent: the caller holds this figure
+  # and can bill it even though no result ever came back.
+  defp report_usage(%{on_round_usage: f}, usage) when is_function(f, 1), do: f.(usage)
+  defp report_usage(_opts, _usage), do: :ok
 
   defp maybe_put(map, _k, nil), do: map
   defp maybe_put(map, k, v), do: Map.put(map, k, v)
@@ -262,7 +279,9 @@ defmodule Aimax.Core.LLM do
       opts = req_opts(spec, tools)
 
       if req[:on_chunk] do
-        case ReqLLM.stream_text(spec, ctx, opts) do
+        # only the call that STARTS the stream retries: once a delta has
+        # reached the renderer, a second attempt would print the reply twice
+        case with_retry(fn -> ReqLLM.stream_text(spec, ctx, opts) end) do
           {:ok, sr} ->
             tee =
               Stream.map(sr.stream, fn chunk ->
@@ -284,12 +303,57 @@ defmodule Aimax.Core.LLM do
             {:error, err_msg(e)}
         end
       else
-        case ReqLLM.generate_text(spec, ctx, opts) do
+        case with_retry(fn -> ReqLLM.generate_text(spec, ctx, opts) end) do
           {:ok, resp} -> {:ok, from_req_response(resp)}
           {:error, e} -> {:error, err_msg(e)}
         end
       end
     end
+  end
+
+  # 500 and 529 are the provider saying "not now". req_llm retries transport
+  # errors and 429; it does not retry these, so the user did — by resending
+  # a whole uncached transcript, which is the most expensive gesture in the
+  # editor. Three tries, jittered, then the error stands.
+  @retry_max 3
+
+  defp with_retry(fun, attempt \\ 1) do
+    case fun.() do
+      {:error, e} = err ->
+        if attempt < @retry_max and retryable?(e) do
+          Process.sleep(backoff_ms(attempt))
+          with_retry(fun, attempt + 1)
+        else
+          err
+        end
+
+      ok ->
+        ok
+    end
+  end
+
+  @retry_statuses [500, 502, 503, 529]
+
+  # req_llm reports the status as an integer on one error struct and as a
+  # string on another, and wraps a provider error inside a request error —
+  # so look at the whole chain rather than one field's declared type
+  defp retryable?(%{status: status}) when status in @retry_statuses, do: true
+
+  defp retryable?(%{status: status}) when is_binary(status) do
+    case Integer.parse(status) do
+      {n, _} -> n in @retry_statuses
+      :error -> false
+    end
+  end
+
+  defp retryable?(%{reason: reason}) when is_map(reason), do: retryable?(reason)
+  defp retryable?(_), do: false
+
+  # 500ms, then 1s, each plus up to half its own width — two clients hitting
+  # the same overloaded provider must not march in step
+  defp backoff_ms(attempt) do
+    base = Application.get_env(:aimax_core, :llm_retry_base_ms, 500) * Integer.pow(2, attempt - 1)
+    base + :rand.uniform(max(div(base, 2), 1))
   end
 
   # Provider routing by model name:
@@ -326,7 +390,7 @@ defmodule Aimax.Core.LLM do
   end
 
   defp req_opts(spec, tools) do
-    base = [receive_timeout: 180_000, max_tokens: 4096]
+    base = [receive_timeout: 180_000, max_tokens: max_tokens(spec)]
 
     tools_opt =
       if tools == [], do: [], else: [tools: Enum.map(tools, &to_req_tool/1)]
@@ -334,10 +398,18 @@ defmodule Aimax.Core.LLM do
     # cache breakpoints on tools, system, and the last message: chat resends
     # the whole transcript every turn and the tool loop resends it every
     # round — with the prefix cached, repeat input bills at the cache-read
-    # rate (~10%) instead of full price
+    # rate (~10%) instead of full price. The TTL buys the gap between two
+    # messages in one sitting: the default five minutes expires while the
+    # user reads the reply, and the next turn pays the write again.
     cache_opt =
-      if provider_of(spec) == "anthropic",
-        do: [provider_options: [anthropic_prompt_cache: true, anthropic_cache_messages: true]],
+      if anthropic_cached?(spec),
+        do: [
+          provider_options: [
+            anthropic_prompt_cache: true,
+            anthropic_cache_messages: true,
+            anthropic_prompt_cache_ttl: cache_ttl()
+          ]
+        ],
         else: []
 
     # test seam: e.g. [req_http_options: [plug: ...]] to capture the exact
@@ -349,6 +421,33 @@ defmodule Aimax.Core.LLM do
       _k, a, b when is_list(a) and is_list(b) -> Keyword.merge(a, b)
       _k, _a, b -> b
     end)
+  end
+
+  # Anthropic's cache is Anthropic's whether the request goes direct or
+  # through OpenRouter — the gate used to read the provider prefix alone,
+  # so every openrouter:anthropic/* chat paid full price for a prefix the
+  # model would have cached.
+  defp anthropic_cached?(spec) do
+    case String.split(spec, ":", parts: 2) do
+      ["anthropic", _] -> true
+      ["openrouter", model] -> String.starts_with?(model, "anthropic/")
+      _ -> false
+    end
+  end
+
+  @doc """
+  How long the provider holds a cached prefix. Scheme owns the policy
+  (defcustom `llm-cache-ttl`); this is where the value lands.
+  """
+  def set_cache_ttl(ttl) when is_binary(ttl), do: :persistent_term.put(:aimax_llm_cache_ttl, ttl)
+
+  defp cache_ttl, do: :persistent_term.get(:aimax_llm_cache_ttl, "1h")
+
+  # The model's own output limit, from the models.dev catalog. A flat 4096
+  # truncated long replies on models that allow far more, and a length stop
+  # reported itself as a clean end_turn — the reply just stopped.
+  defp max_tokens(spec) do
+    Application.get_env(:aimax_core, :llm_max_tokens) || Aimax.Core.LLMDb.max_tokens(spec) || 4096
   end
 
   # our tools never execute through req_llm (the loop dispatches into the
@@ -422,10 +521,22 @@ defmodule Aimax.Core.LLM do
         end
 
     %{
-      "stop_reason" => if(calls == [], do: "end_turn", else: "tool_use"),
+      "stop_reason" => stop_reason(resp, calls),
       "content" => blocks,
       "usage" => usage_strings(ReqLLM.Response.usage(resp))
     }
+  end
+
+  # The provider's own finish reason, not a guess from the block list. A
+  # reply cut off at the token limit used to arrive as "end_turn": the
+  # transcript showed a sentence stopping mid-word and said nothing.
+  defp stop_reason(resp, calls) do
+    case Map.get(resp, :finish_reason) do
+      :length -> "max_tokens"
+      :content_filter -> "content_filter"
+      _ when calls != [] -> "tool_use"
+      _ -> "end_turn"
+    end
   end
 
   # req_llm usage (atom keys) -> the ledger's Anthropic field names.
@@ -469,7 +580,7 @@ defmodule Aimax.Core.LLM do
     spec = req_model_spec(model())
 
     with :ok <- ensure_key(spec) do
-      case ReqLLM.generate_text(spec, prompt, req_opts(spec, [])) do
+      case with_retry(fn -> ReqLLM.generate_text(spec, prompt, req_opts(spec, [])) end) do
         {:ok, resp} ->
           Aimax.Core.LLMDb.record(model(), usage_strings(ReqLLM.Response.usage(resp)))
           {:ok, ReqLLM.Response.text(resp) || ""}

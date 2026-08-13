@@ -364,16 +364,28 @@
            ;; a completed turn that rendered NOTHING at all would look like
            ;; the send vanished — say so. (A turn that ran tools, was
            ;; cancelled, or errored already left its own trace.)
-           ((and (equal? (plist-get e 'stop-reason) "end_turn")
+           ((and (member (plist-get e 'stop-reason) '("end_turn" "max_tokens"))
                  (not (buffer-local buf 'agent-turn-any)))
             (let ((start (agent-render! slug
                            "(no reply — the model returned no text)\n"
                            "agent-meta")))
               (agent-block-push! buf start (agent-mark slug) "meta" '())))
            (else #f)))
+       ;; the reply hit the model's output limit. It stopped mid-sentence,
+       ;; and a transcript that says nothing about it reads as an answer.
+       (when (equal? (plist-get e 'stop-reason) "max_tokens")
+         (let ((start (agent-render! slug
+                        "\n[truncated — the reply hit the model's output limit]\n"
+                        "agent-meta")))
+           (agent-block-push! buf start (agent-mark slug) "meta" '())))
        (buffer-set-local! buf 'agent-turn-text #f)
        (buffer-set-local! buf 'agent-turn-any #f)
        (agent-block-drop-kind! buf "permission")
+       ;; between turns is the only safe moment to rewrite the record: the
+       ;; head a compaction drops is the head a running request already
+       ;; sent
+       (when (and (boundp (quote chat-should-compact?)) (chat-should-compact? buf))
+         (chat-compact! buf slug))
        (message (string-append "agent " slug ": done")))
 
       ((equal? type 'error)
@@ -718,7 +730,11 @@
 (define (agent-send-msg! slug raw)
   (let* ((buf (agent-buf slug))
          ;; what the user is looking at in the other windows — "this" works
-         (msg (string-append (editor-context-preamble buf) raw)))
+         ;; — and, with tools off, the group's live text. Both ride the
+         ;; MESSAGE, never the system prompt: everything above this turn is
+         ;; already cached, and an edit must not cost that cache.
+         (msg (string-append (chat-context-block buf)
+                             (editor-context-preamble buf) raw)))
     (if (buffer-local buf 'agent-seed-context)
         (begin
           (buffer-set-local! buf 'agent-seed-context #f)
@@ -1085,7 +1101,12 @@
         ;; the agent's own mode, when it is running something other than
         ;; its default (plan mode especially changes what a turn DOES)
         (let ((am (buffer-local buf 'agent-mode)))
-          (if (and am (not (equal? am "default"))) (string-append " · " am) ""))))))
+          (if (and am (not (equal? am "default"))) (string-append " · " am) ""))
+        ;; the editor has tools this chat froze out. Say so: adopting them
+        ;; (C-c t) costs a cache miss, so it is the user's call, not ours.
+        (if (and (boundp (quote chat-tools-stale?)) (chat-tools-stale? buf))
+            " · tools stale"
+            "")))))
 
 ;;; --- thread creation ----------------------------------------------------------
 
@@ -1118,6 +1139,7 @@
   (local-set-key* buf "C-c C-a" "agent-permission-always")
   (local-set-key* buf "C-c C-n" "agent-permission-deny")
   (local-set-key* buf "C-c p" "chat-set-permission-mode")
+  (local-set-key* buf "C-c t" "chat-refresh-tools")
   (local-set-key* buf "C-c C-v" "agent-toggle-view"))
 
 (define-command "agent-toggle-view" "Toggle rich and plain transcript rendering"

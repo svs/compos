@@ -186,6 +186,20 @@ replays tool blocks.
 
 ### R2 — Cache economics
 
+*Done 2026-08-13 on `refactor/r2-cache-economics`, except the empirical
+acceptance.* All of A4–A11 and B3 landed. Notes: the retry belongs on
+`default_request` as well as `default_chat`, and req_llm reports a status
+as an integer on one error struct and a string on another, nested — the
+predicate walks the chain. The compaction knobs are defcustoms in
+`tools.scm`, not `editor.scm`: `defcustom` is userland and loads after the
+editor. Compaction runs on `turn-end` and only between turns, because the
+head it replaces is the head a running request already sent; the summary
+call is async, so the head is identified by count and replaced only if the
+record still ends with it. **Open:** the empirical check — a three-turn
+tool chat showing `cache_read > 0` on turns 2–3 — needs a real key and was
+not run; everything structural around it is tested
+(`test/aimax/cache_economics_test.exs`).
+
 **Why.** A4–A11, B3. The current config pays a surcharge for nothing.
 
 **What.**

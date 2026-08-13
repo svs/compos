@@ -438,10 +438,14 @@ edit-distance fallback. `recipes.scm` holds ~30 task→expression lines. The
 RPC server answers `initialize` with `(hello)`, and raw-socket eval errors
 run the same did-you-mean the tool path gets. An ACP agent gets the primer
 on `session/new`.
-**Not done:** one-line docs for the ~260 internal Elixir primitives. The
-curated surface is fully searchable; the internals are still name-only
-under scope "all". That is a mechanical sweep, and it is the honest
-remaining gap.
+*The doc sweep landed 2026-08-13 (post-merge, on `main`).* Three `docs/0`
+maps beside the three registration maps (75 + 124 + 77 entries), served
+by `(primitive-doc NAME)` and `(primitive-docs)`. `describe-function`
+shows the doc above a builtin's source marker; scope "all" returns
+internals as `(kind name doc)` entries and matches on doc text. One
+find during the sweep: five "undocumented" names were userland aliases
+of builtins — the lookup now resolves through the value to the real
+name. Four tests hold coverage and format. **R7 is done.**
 
 **Why.** Part 1.5. The agent's first question is "what can I call"; today
 the honest answer is "read the source".

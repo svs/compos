@@ -52,7 +52,7 @@
 ;;; never move.
 
 (define (agent-apply-folds! buf)
-  (buffer-set-hidden! buf
+  (fold-set! buf 'agent
     (let loop ((fs (or (buffer-local buf 'agent-folds) '())) (acc '()))
       (cond ((null? fs) acc)
             ((car (cdr (cdr (car fs)))) (loop (cdr fs) acc)) ; open — not hidden

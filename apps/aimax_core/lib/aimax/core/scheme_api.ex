@@ -9,14 +9,21 @@ defmodule Aimax.Core.SchemeAPI do
   """
 
   alias Aimax.Core
-  alias Aimax.Core.{Buffer, Editor}
+  alias Aimax.Core.{Buffer, Editor, Git}
 
   @commands :aimax_commands
+
+  # closures that escape into a Task must stay rooted, or the Session GC
+  # collects the frames they capture (see Session's @escaped)
+  @escaped :aimax_escaped_closures
 
   def commands_table, do: @commands
 
   def primitives do
-    Map.merge(buffer_primitives(), editor_primitives())
+    buffer_primitives()
+    |> Map.merge(editor_primitives())
+    |> Map.merge(git_primitives())
+    |> Map.merge(watch_primitives())
   end
 
   @doc "One-line doc for every primitive: signature, then an em dash, then one sentence."
@@ -37,6 +44,25 @@ defmodule Aimax.Core.SchemeAPI do
       "overlay-clear!" => "(overlay-clear! BUF TAG) — remove TAG's overlays; the tag 'all removes every overlay.",
       "buffer-overlays" => "(buffer-overlays BUF) — return all overlays as (START END FACE) byte ranges.",
       "buffer-set-hidden!" => "(buffer-set-hidden! BUF RANGES) — hide (fold) the given (START END) byte ranges.",
+      "fold-set!" => "(fold-set! BUF TAG RANGES) — replace TAG's hidden (START END) byte ranges; the display hides the union of all tags.",
+      "fold-get" => "(fold-get BUF [TAG]) — return TAG's hidden ranges; no TAG, or 'all, returns the union.",
+      "fold-clear!" => "(fold-clear! BUF [TAG]) — drop TAG's folds; no TAG, or 'all, drops every tag's.",
+      "buffer-goto!" => "(buffer-goto! BUF POS) — move the named buffer's point to byte POS.",
+      "file-mtime" => "(file-mtime PATH) — return the file's mtime in posix seconds, or 0 if it is gone.",
+      "git-root" => "(git-root DIR [CB]) — return the absolute work-tree root of DIR, or (error MSG).",
+      "git-prefix" => "(git-prefix DIR [CB]) — return DIR's path inside its work tree with a trailing slash, or \"\" at the root.",
+      "git-status" => "(git-status DIR [PATHSPEC] [CB]) — return (path P orig-path P2 index X worktree Y) plists; a pathspec scopes the read.",
+      "git-diff" => "(git-diff DIR [OPTS] [CB]) — return parsed file plists; OPTS is (base REF path P staged BOOL).",
+      "git-log" => "(git-log DIR N [PATHSPEC] [CB]) — return the last N commits as (sha short-sha author date subject) plists.",
+      "git-show" => "(git-show DIR REF [CB]) — return the raw text of one commit.",
+      "diff-parse" => "(diff-parse TEXT) — parse unified-diff TEXT into the same file plists git-diff returns.",
+      "diff-word-range" => "(diff-word-range OLD NEW) — return ((OS OE) (NS NE)) byte ranges of the differing span, or #f.",
+      "watch-path!" => "(watch-path! DIR) — watch DIR for changes, refcounted; return the watched root or (error MSG).",
+      "unwatch-path!" => "(unwatch-path! DIR) — drop one watch reference; the subscription stops at zero.",
+      "watched-paths" => "(watched-paths) — return the watched roots.",
+      "fs-on-change!" => "(fs-on-change! FN) — register the ONE handler that gets a root when a watched tree changes.",
+      "block-on-click!" => "(block-on-click! FN) — register the ONE handler that gets (BUF ID) when a block with a click id is clicked.",
+      "define-style!" => "(define-style! NAME CSS) — register a stylesheet the page renders; modes ship their own CSS with this.",
       "buffer-hidden" => "(buffer-hidden BUF) — return the hidden (folded) byte ranges as (START END) pairs.",
       "buffer-set-read-only!" => "(buffer-set-read-only! BUF BOOL) — set the buffer's read-only flag.",
       "buffer-read-only?" => "(buffer-read-only? BUF) — return #t if the buffer is read-only.",
@@ -190,13 +216,33 @@ defmodule Aimax.Core.SchemeAPI do
       "buffer-overlays" => fn [name] ->
         Enum.map(Buffer.overlays(name), fn {s, e, f} -> [s, e, f] end)
       end,
-      # folding: ranges is a list of (start end) byte ranges to hide
+      # folding: ranges is a list of (start end) byte ranges to hide.
+      # A buffer has several fold owners, so ranges are tagged and each
+      # owner replaces only its own tag. The display hides the union.
+      # The untagged pair below writes and reads the "default" tag.
       "buffer-set-hidden!" => fn [name, ranges] ->
         :ok = Buffer.set_hidden(name, Enum.map(ranges, fn [s, e] -> {s, e} end))
         :void
       end,
       "buffer-hidden" => fn [name] ->
         Enum.map(Buffer.hidden(name), fn {s, e} -> [s, e] end)
+      end,
+      "fold-set!" => fn [name, tag, ranges] ->
+        :ok = Buffer.set_hidden(name, plain(tag), Enum.map(ranges, fn [s, e] -> {s, e} end))
+        :void
+      end,
+      "fold-get" => fn
+        [name] -> Enum.map(Buffer.hidden(name), fn {s, e} -> [s, e] end)
+        [name, tag] -> Enum.map(Buffer.hidden(name, fold_tag(tag)), fn {s, e} -> [s, e] end)
+      end,
+      "fold-clear!" => fn
+        [name] ->
+          :ok = Buffer.clear_hidden(name)
+          :void
+
+        [name, tag] ->
+          :ok = Buffer.clear_hidden(name, fold_tag(tag))
+          :void
       end,
       "buffer-set-read-only!" => fn [name, bool] ->
         Buffer.set_read_only(name, bool == true)
@@ -273,6 +319,14 @@ defmodule Aimax.Core.SchemeAPI do
             ["----------", "?", "?"]
         end
       end,
+      # a sortable mtime (posix seconds), 0 when the file is gone — file-stat
+      # formats for display and cannot be ordered
+      "file-mtime" => fn [p] ->
+        case File.stat(Path.expand(p), time: :posix) do
+          {:ok, stat} -> stat.mtime
+          {:error, _} -> 0
+        end
+      end,
       "file-exists?" => fn [p] -> File.exists?(Path.expand(p)) end,
       "file-directory?" => fn [p] -> File.dir?(Path.expand(p)) end,
       # (read-file PATH) -> contents, or #f if unreadable
@@ -346,6 +400,12 @@ defmodule Aimax.Core.SchemeAPI do
       "aimax-home" => fn [] -> Aimax.Core.home() end,
       "goto-char!" => fn [pos] ->
         Buffer.goto(Editor.current_buffer(), pos)
+        pos
+      end,
+      # goto-char! in a named buffer: an async refresh restores point in the
+      # buffer it rebuilt, which is not always the current one
+      "buffer-goto!" => fn [name, pos] ->
+        Buffer.goto(name, pos)
         pos
       end,
       "forward-char!" => fn [] -> Buffer.forward_char(Editor.current_buffer()) end,
@@ -625,6 +685,13 @@ defmodule Aimax.Core.SchemeAPI do
         :void
       end,
       "key-for-command" => fn [name] -> Editor.key_for_command(name) end,
+      # a mode's own stylesheet, rendered into the page beside the face
+      # variables. Modes are trusted code — they can eval anything — so the
+      # CSS ships raw.
+      "define-style!" => fn [name, css] ->
+        Editor.set_style(plain(name), css)
+        :void
+      end,
       "last-command" => fn [] -> Editor.last_command() end,
       "window-rows" => fn [] -> Editor.window_rows() end,
       "recenter!" => fn [] ->
@@ -695,6 +762,303 @@ defmodule Aimax.Core.SchemeAPI do
     }
   end
 
+  # --- git (Aimax.Core.Git; policy in packages/git.scm) ----------------------
+  # Every primitive takes an optional trailing callback. With one, the git
+  # command runs in a supervised Task and the callback gets the value — the
+  # Session never blocks on git. Without one, the caller waits: an agent
+  # through the RPC `eval` path needs an answer, not a promise.
+  #
+  # Values cross as plists — (key value ...) with symbol keys. An error is
+  # the plist (error "message"), which `list?` tells apart from a string.
+  defp git_primitives do
+    %{
+      "git-root" => fn [dir | rest] ->
+        git_dispatch(rest, fn -> Git.root(dir) end, & &1)
+      end,
+      # (git-status DIR [PATHSPEC] [CALLBACK]) — a pathspec scopes the read
+      # to one subtree, so the diff you get is the directory you are in
+      # (diff-word-range OLD NEW) -> ((OS OE) (NS NE)), or #f when the two
+      # lines differ at neither end. Byte scanning with UTF-8 boundaries is
+      # mechanism; deciding what to emphasise with it is diff-mode's.
+      "diff-word-range" => fn [old, new] ->
+        case word_range(old, new) do
+          nil -> false
+          {{os, oe}, {ns, ne}} -> [[os, oe], [ns, ne]]
+        end
+      end,
+      # (diff-parse TEXT) -> the same file plists git-diff returns. Text that
+      # git handed us whole — a commit — has no structured form of its own.
+      "diff-parse" => fn [text] ->
+        for f <- Aimax.Core.Git.parse(text) do
+          [
+            {:sym, "file-a"}, f.file_a || false,
+            {:sym, "file-b"}, f.file_b || false,
+            {:sym, "binary?"}, f.binary?,
+            {:sym, "hunks"},
+            for h <- f.hunks do
+              [
+                {:sym, "header"}, h.header,
+                {:sym, "old-start"}, h.old_start,
+                {:sym, "old-count"}, h.old_count,
+                {:sym, "new-start"}, h.new_start,
+                {:sym, "new-count"}, h.new_count,
+                {:sym, "lines"}, for({tag, t} <- h.lines, do: [{:sym, Atom.to_string(tag)}, t])
+              ]
+            end
+          ]
+        end
+      end,
+      "git-prefix" => fn [dir | rest] ->
+        git_dispatch(rest, fn -> Git.prefix(dir) end, & &1)
+      end,
+      "git-status" => fn [dir | rest] ->
+        {path, rest} = opt_path(rest)
+        git_dispatch(rest, fn -> Git.status(dir, path) end,
+          &Enum.map(&1, fn e -> status_plist(e) end))
+      end,
+      # (git-diff DIR) | (git-diff DIR OPTS) | (git-diff DIR OPTS CALLBACK)
+      "git-diff" => fn
+        [dir] ->
+          git_dispatch([], fn -> Git.diff(dir, []) end, &diff_plist/1)
+
+        [dir, opts] ->
+          if callback?(opts) do
+            git_dispatch([opts], fn -> Git.diff(dir, []) end, &diff_plist/1)
+          else
+            git_dispatch([], fn -> Git.diff(dir, diff_opts(opts)) end, &diff_plist/1)
+          end
+
+        [dir, opts | rest] ->
+          git_dispatch(rest, fn -> Git.diff(dir, diff_opts(opts)) end, &diff_plist/1)
+      end,
+      "git-log" => fn [dir, n | rest] ->
+        {path, rest} = opt_path(rest)
+        git_dispatch(rest, fn -> Git.log(dir, n, path) end,
+          &Enum.map(&1, fn c -> log_plist(c) end))
+      end,
+      "git-show" => fn [dir, ref | rest] ->
+        git_dispatch(rest, fn -> Git.show(dir, plain(ref)) end, & &1)
+      end
+    }
+  end
+
+  # --- the file watcher (Aimax.Core.Watch) -----------------------------------
+  # The event is content-free: it names the root and nothing else, so the
+  # handler re-queries. `fs-on-change!` holds ONE handler, like
+  # `mcp-on-change!`; editor.scm keeps the subscriber list, because a list of
+  # subscribers is policy.
+  defp watch_primitives do
+    %{
+      "watch-path!" => fn [dir] ->
+        case Aimax.Core.Watch.watch(plain(dir)) do
+          {:ok, root} -> root
+          {:error, msg} -> [{:sym, "error"}, msg]
+        end
+      end,
+      "unwatch-path!" => fn [dir] ->
+        Aimax.Core.Watch.unwatch(plain(dir))
+        :void
+      end,
+      "watched-paths" => fn [] -> Aimax.Core.Watch.watching() end,
+      "fs-on-change!" => fn [handler] ->
+        :ets.insert(@escaped, {{:fs_handler}, handler})
+        :void
+      end,
+      # clicking a block in a rich view. The client holds a buffer and the
+      # block's own id string, not a command, so it needs a closure to hand
+      # them to — the same one-handler shape as mcp-on-change! and
+      # fs-on-change!. What an id means is the mode's business.
+      "block-on-click!" => fn [handler] ->
+        :ets.insert(@escaped, {{:block_click_handler}, handler})
+        :void
+      end
+    }
+  end
+
+  @doc """
+  Run the registered block click handler. The UI calls this: it holds a
+  buffer and an opaque block id, and the policy for what a click does is
+  Scheme's.
+  """
+  def block_click(buffer, id) do
+    with tid when tid != :undefined <- :ets.whereis(@escaped),
+         [{_, handler}] <- :ets.lookup(tid, {:block_click_handler}) do
+      Aimax.Core.Session.apply_callback(handler, [buffer, id])
+    end
+
+    :ok
+  end
+
+  # The intra-line diff: strip the common prefix and the common suffix and
+  # report what is left on each side. Exact when one span changed, which is
+  # what most edited lines are, and it never lies about the ends.
+  defp word_range(old, new) do
+    p = common_prefix_len(old, new)
+    s = common_suffix_len(binary_part(old, p, byte_size(old) - p), binary_part(new, p, byte_size(new) - p))
+
+    omid = byte_size(old) - p - s
+    nmid = byte_size(new) - p - s
+
+    if omid <= 0 and nmid <= 0,
+      do: nil,
+      else: {{p, p + omid}, {p, p + nmid}}
+  end
+
+  defp common_prefix_len(a, b), do: common_prefix_len(a, b, 0)
+
+  defp common_prefix_len(a, b, i) do
+    if i < byte_size(a) and i < byte_size(b) and :binary.at(a, i) == :binary.at(b, i),
+      do: common_prefix_len(a, b, i + 1),
+      else: utf8_floor(a, i)
+  end
+
+  defp common_suffix_len(a, b), do: common_suffix_len(a, b, 0)
+
+  defp common_suffix_len(a, b, i) do
+    sa = byte_size(a) - 1 - i
+    sb = byte_size(b) - 1 - i
+
+    if sa >= 0 and sb >= 0 and :binary.at(a, sa) == :binary.at(b, sb),
+      do: common_suffix_len(a, b, i + 1),
+      # the suffix STARTS at byte_size - i, and that index must be a
+      # character boundary too, or the emphasis splits a codepoint
+      else: byte_size(a) - utf8_floor(a, byte_size(a) - i)
+  end
+
+  # never split a multi-byte character: walk back off a continuation byte
+  defp utf8_floor(_bin, 0), do: 0
+
+  defp utf8_floor(bin, i) do
+    if i < byte_size(bin) and Bitwise.band(:binary.at(bin, i), 0xC0) == 0x80,
+      do: utf8_floor(bin, i - 1),
+      else: i
+  end
+
+  # a leading string in the tail is a pathspec; a closure is the callback
+  defp opt_path([p | rest]) when is_binary(p), do: {p, rest}
+  defp opt_path(rest), do: {nil, rest}
+
+  defp git_dispatch([], work, shape), do: git_value(work.(), shape)
+
+  defp git_dispatch([callback | _], work, shape) do
+    key = {:git_call, make_ref()}
+    rooted? = root_closure(key, callback)
+
+    Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
+      value = git_value(work.(), shape)
+
+      try do
+        Aimax.Core.Session.apply_callback(callback, [value])
+      after
+        if rooted?, do: :ets.delete(@escaped, key)
+      end
+    end)
+
+    :void
+  end
+
+  # the table belongs to the Session; a primitive called without one (tests)
+  # has no GC to defend against
+  defp root_closure(key, callback) do
+    case :ets.whereis(@escaped) do
+      :undefined ->
+        false
+
+      _tid ->
+        :ets.insert(@escaped, {key, callback})
+        true
+    end
+  end
+
+  defp git_value({:ok, value}, shape), do: shape.(value)
+  defp git_value({:error, msg}, _shape), do: [{:sym, "error"}, msg]
+
+  defp callback?({:closure, _, _, _}), do: true
+  defp callback?({:builtin, _, _}), do: true
+  defp callback?(_), do: false
+
+  defp status_plist(e) do
+    [
+      {:sym, "path"},
+      e.path,
+      {:sym, "orig-path"},
+      e.orig_path || false,
+      {:sym, "index"},
+      e.index,
+      {:sym, "worktree"},
+      e.worktree
+    ]
+  end
+
+  defp diff_plist(files) do
+    for f <- files do
+      [
+        {:sym, "file-a"},
+        f.file_a || false,
+        {:sym, "file-b"},
+        f.file_b || false,
+        {:sym, "binary?"},
+        f.binary?,
+        {:sym, "hunks"},
+        Enum.map(f.hunks, &hunk_plist/1)
+      ]
+    end
+  end
+
+  defp hunk_plist(h) do
+    [
+      {:sym, "header"},
+      h.header,
+      {:sym, "old-start"},
+      h.old_start,
+      {:sym, "old-count"},
+      h.old_count,
+      {:sym, "new-start"},
+      h.new_start,
+      {:sym, "new-count"},
+      h.new_count,
+      {:sym, "lines"},
+      for({tag, text} <- h.lines, do: [{:sym, Atom.to_string(tag)}, text])
+    ]
+  end
+
+  defp log_plist(c) do
+    [
+      {:sym, "sha"},
+      c.sha,
+      {:sym, "short-sha"},
+      c.short_sha,
+      {:sym, "author"},
+      c.author,
+      {:sym, "date"},
+      c.date,
+      {:sym, "subject"},
+      c.subject
+    ]
+  end
+
+  # (base "HEAD" path "lib/x.ex" staged #t) — a #f base drops the ref and
+  # diffs the work tree against the index
+  defp diff_opts(plist) when is_list(plist), do: diff_opts(plist, [])
+  defp diff_opts(_), do: []
+
+  defp diff_opts([key, value | rest], acc) do
+    acc =
+      case plain(key) do
+        "base" -> Keyword.put(acc, :base, opt_string(value))
+        "path" -> Keyword.put(acc, :path, opt_string(value))
+        "staged" -> Keyword.put(acc, :staged, value == true)
+        _ -> acc
+      end
+
+    diff_opts(rest, acc)
+  end
+
+  defp diff_opts(_, acc), do: acc
+
+  defp opt_string(false), do: nil
+  defp opt_string(value), do: plain(value)
+
   defp dir_atom({:sym, "h"}), do: :h
   defp dir_atom({:sym, "v"}), do: :v
   defp dir_atom("h"), do: :h
@@ -702,6 +1066,9 @@ defmodule Aimax.Core.SchemeAPI do
 
   defp plain({:sym, s}), do: s
   defp plain(v), do: v
+
+  # (fold-get BUF 'all) reads the union, the same word overlay-clear! uses
+  defp fold_tag(tag), do: if(plain(tag) == "all", do: :all, else: plain(tag))
 
   defp shell_to_string(cmd, dir) do
     {out, _status} = System.cmd("/bin/sh", ["-c", cmd], cd: dir, stderr_to_stdout: true)

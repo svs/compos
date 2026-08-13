@@ -49,7 +49,7 @@ defmodule Aimax.Core.Buffer do
             undo_next: 0,
             overlays: %{},
             overlay_gen: 0,
-            hidden: [],
+            hidden: %{},
             ts: nil,
             win_points: %{}
 
@@ -93,8 +93,21 @@ defmodule Aimax.Core.Buffer do
 
   # hidden: folded byte ranges — filtered out of the display, skipped by
   # line motion. Auto-adjusted like overlays.
-  def set_hidden(name, ranges), do: GenServer.call(via(name), {:set_hidden, ranges})
-  def hidden(name), do: GenServer.call(via(name), :hidden)
+  #
+  # Ranges are TAGGED, like overlays, because a buffer has more than one
+  # fold owner: org folds headlines, the agent transcript folds tool
+  # output, diff-mode folds hunks, code-browse folds bodies. Each owner
+  # replaces its own tag's ranges. The display hides the union.
+  @default_tag "default"
+
+  def set_hidden(name, ranges), do: set_hidden(name, @default_tag, ranges)
+
+  def set_hidden(name, tag, ranges), do: GenServer.call(via(name), {:set_hidden, tag, ranges})
+
+  @doc "One tag's ranges, or the union of every tag with `:all`."
+  def hidden(name, tag \\ :all), do: GenServer.call(via(name), {:hidden, tag})
+
+  def clear_hidden(name, tag \\ :all), do: GenServer.call(via(name), {:clear_hidden, tag})
 
   def forward_word(name), do: GenServer.call(via(name), {:motion, :forward_word})
   def backward_word(name), do: GenServer.call(via(name), {:motion, :backward_word})
@@ -267,10 +280,24 @@ defmodule Aimax.Core.Buffer do
 
   def handle_call(:overlay_gen, _from, state), do: {:reply, state.overlay_gen, state}
 
-  def handle_call({:set_hidden, ranges}, _from, state),
-    do: {:reply, :ok, %{state | hidden: Enum.sort(ranges)}}
+  # an empty range list drops the tag: an owner with nothing folded costs
+  # nothing to union
+  def handle_call({:set_hidden, tag, []}, _from, state),
+    do: {:reply, :ok, %{state | hidden: Map.delete(state.hidden, tag)}}
 
-  def handle_call(:hidden, _from, state), do: {:reply, state.hidden, state}
+  def handle_call({:set_hidden, tag, ranges}, _from, state),
+    do: {:reply, :ok, %{state | hidden: Map.put(state.hidden, tag, Enum.sort(ranges))}}
+
+  def handle_call({:hidden, :all}, _from, state), do: {:reply, hidden_union(state), state}
+
+  def handle_call({:hidden, tag}, _from, state),
+    do: {:reply, Map.get(state.hidden, tag, []), state}
+
+  def handle_call({:clear_hidden, :all}, _from, state),
+    do: {:reply, :ok, %{state | hidden: %{}}}
+
+  def handle_call({:clear_hidden, tag}, _from, state),
+    do: {:reply, :ok, %{state | hidden: Map.delete(state.hidden, tag)}}
 
   # read-only blocks :user mutations only — programmatic sources (:editor,
   # :process, agents) are the inhibit-read-only path (dired regenerates its
@@ -393,10 +420,13 @@ defmodule Aimax.Core.Buffer do
     point = apply_motion(motion, text, state.point, state.goal_col)
 
     # line motion may not land inside a fold — keep going in the same
-    # direction; if the fold runs to a buffer edge, stay where we were
+    # direction; if the fold runs to a buffer edge, stay where we were.
+    # Every tag's ranges hide, so motion reads the union.
+    hidden = hidden_union(state)
+
     point =
-      if motion in [:next_line, :prev_line] and in_hidden?(point, state.hidden),
-        do: skip_hidden(motion, text, point, state.goal_col, state.hidden, state.point),
+      if motion in [:next_line, :prev_line] and in_hidden?(point, hidden),
+        do: skip_hidden(motion, text, point, state.goal_col, hidden, state.point),
         else: point
 
     {:reply, point, %{state | point: point}}
@@ -458,7 +488,9 @@ defmodule Aimax.Core.Buffer do
        locals: state.locals,
        overlays: state.overlays |> Map.values() |> Enum.concat(),
        overlay_gen: state.overlay_gen,
-       hidden: state.hidden,
+       hidden: hidden_union(state),
+       path: state.path,
+       read_only: state.read_only,
        total_lines: Rope.line_count(state.rope),
        cursor_line: cursor_line,
        line: cursor_line + 1,
@@ -630,13 +662,23 @@ defmodule Aimax.Core.Buffer do
          |> Enum.reject(fn {s, e, _} -> s >= e end)}
       end)
 
+    # the same adjustment, per tag: a tag that loses every range drops out
     hidden =
       state.hidden
-      |> Enum.map(fn {s, e} -> {f.(s), f.(e)} end)
-      |> Enum.reject(fn {s, e} -> s >= e end)
+      |> Enum.map(fn {tag, ranges} ->
+        {tag,
+         ranges
+         |> Enum.map(fn {s, e} -> {f.(s), f.(e)} end)
+         |> Enum.reject(fn {s, e} -> s >= e end)}
+      end)
+      |> Enum.reject(fn {_tag, ranges} -> ranges == [] end)
+      |> Map.new()
 
     %{state | overlays: overlays, hidden: hidden}
   end
+
+  defp hidden_union(state),
+    do: state.hidden |> Map.values() |> Enum.concat() |> Enum.sort()
 
   defp adjust_insert(p, pos, len) when p >= pos, do: p + len
   defp adjust_insert(p, _pos, _len), do: p

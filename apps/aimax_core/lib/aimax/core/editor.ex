@@ -166,6 +166,10 @@ defmodule Aimax.Core.Editor do
   # faces: name -> attrs map, merged; frontends map them to CSS vars
   def set_face(name, attrs), do: GenServer.call(__MODULE__, {:set_face, name, attrs})
 
+  # styles: name -> a stylesheet the mode wrote; the page renders them all.
+  # Faces carry colors; styles carry structure (grids, cards, spacing).
+  def set_style(name, css), do: GenServer.call(__MODULE__, {:set_style, name, css})
+
   # windows
   def split(dir, ratio \\ 0.5, fid \\ nil) when dir in [:h, :v],
     do: GenServer.call(__MODULE__, {:split, dir, ratio, fid(fid)})
@@ -258,6 +262,7 @@ defmodule Aimax.Core.Editor do
        keymap: %{},
        modeline_extra: "",
        faces: %{},
+       styles: %{},
        local_keymaps: %{},
        remaps: %{},
        last_command: "",
@@ -473,7 +478,8 @@ defmodule Aimax.Core.Editor do
        completion: f.completion && render_completion(f.completion),
        echo: f.echo,
        modeline_extra: state.modeline_extra,
-       faces: state.faces
+       faces: state.faces,
+       styles: state.styles
      }, state}
   end
 
@@ -839,6 +845,9 @@ defmodule Aimax.Core.Editor do
     faces = Map.update(state.faces, name, attrs, &Map.merge(&1, attrs))
     changed(:ok, %{state | faces: faces})
   end
+
+  def handle_call({:set_style, name, css}, _from, state),
+    do: changed(:ok, %{state | styles: Map.put(state.styles, name, css)})
 
   def handle_call(:kill_top, _from, state),
     do: {:reply, List.first(state.kill_ring, ""), state}
@@ -1256,6 +1265,8 @@ defmodule Aimax.Core.Editor do
     overlays: [],
     overlay_gen: 0,
     hidden: [],
+    path: nil,
+    read_only: false,
     total_lines: 1,
     cursor_line: 0,
     line: 1,
@@ -1329,6 +1340,10 @@ defmodule Aimax.Core.Editor do
       type: :leaf,
       id: id,
       buffer: buffer,
+      # the file this buffer visits, nil for the rest. /raw URLs and the
+      # modeline read these two; the client renders no UI for them yet.
+      path: snap.path,
+      read_only: snap.read_only,
       text: text,
       point: point,
       mark: snap.mark,
@@ -1348,6 +1363,7 @@ defmodule Aimax.Core.Editor do
       style: Map.get(locals, "style"),
       render_mode: Map.get(locals, "render-mode"),
       agent: agent_leaf(locals, text),
+      blocks: blocks_leaf(locals),
       preview_authored: Map.get(locals, "preview-authored") == true,
       top: top,
       rows: rows,
@@ -1390,6 +1406,18 @@ defmodule Aimax.Core.Editor do
   end
 
   defp agent_leaf(_, _), do: nil
+
+  # the diff card model. The cards are a projection of the buffer text —
+  # the unified diff — so the card view and the plain view read the same
+  # bytes. Only the open set, git's status letters, and the watch flag come
+  # from locals: the text cannot say those.
+  # a rich view the mode composed as a generic block tree. The client draws
+  # it and decides nothing; the core carries it and reads nothing. diff-mode
+  # writes it today; any mode can.
+  defp blocks_leaf(%{"render-mode" => "blocks"} = locals),
+    do: Map.get(locals, "render-blocks") || []
+
+  defp blocks_leaf(_), do: nil
 
   defp visible_geometry(text, point, hidden) do
     len = byte_size(text)

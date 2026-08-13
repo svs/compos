@@ -161,6 +161,11 @@ defmodule Aimax.Ui.Layouts do
           .region { background: var(--region-bg, #e7e9f1); }
           /* native drag-selection matches the editor region it becomes */
           ::selection { background: var(--region-bg, #e7e9f1); }
+          /* --- block views -------------------------------------------------- */
+          /* only the container: a mode composes blocks and ships its own
+             stylesheet via define-style! (diff-mode.scm is the precedent) */
+          .blocks-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+          .blocks-scroll { flex: 1; overflow-y: auto; padding: 10px 12px 8px; }
           /* --- agent transcript (the Modern Emacs agent-chat design) ------- */
           .agent-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
           .ag-scroll { flex: 1; overflow-y: auto; padding: 14px 18px 6px; }
@@ -475,6 +480,32 @@ defmodule Aimax.Ui.Layouts do
                 if (this.stick) this.scroller.scrollTop = this.scroller.scrollHeight;
               }
             },
+            // point moves in the buffer, so the mark moves in the block
+            // view — and the reader has to be able to see where it went.
+            // The renderer stamps data-current on marked, anchored blocks;
+            // the LAST match in document order is the innermost. Only scroll
+            // when it actually changed, or every unrelated re-render would
+            // yank the view back.
+            BlockScroll: {
+              mounted() {
+                this.scroller = this.el.querySelector(".blocks-scroll");
+                this.last = null;
+                this.follow();
+              },
+              updated() {
+                this.follow();
+              },
+              follow() {
+                if (!this.scroller) return;
+                const marked = this.el.querySelectorAll("[data-current]");
+                const cur = marked.length ? marked[marked.length - 1] : null;
+                if (!cur) return;
+                const key = cur.dataset.anchor || null;
+                if (key !== null && key === this.last) return;
+                this.last = key;
+                cur.scrollIntoView({ block: "nearest" });
+              }
+            },
             Keys: {
               mounted() {
                 // remounted against a restarted server: this page's CSS/JS is
@@ -626,13 +657,14 @@ defmodule Aimax.Ui.Layouts do
                   this.wheelPending.clear();
                 };
                 this.wheelH = (e) => {
-                  // agent/chat transcripts (.ag-scroll) and buffers under
-                  // the ship-all threshold (.buf.client-scroll) own their
-                  // scrolling natively — the server viewport only drives
-                  // large line-grid buffers still using the windowed path
+                  // agent/chat transcripts (.ag-scroll), diff cards
+                  // (.diff-scroll) and buffers under the ship-all threshold
+                  // (.buf.client-scroll) own their scrolling natively — the
+                  // server viewport only drives large line-grid buffers
+                  // still using the windowed path
                   if (
                     e.target.closest &&
-                    e.target.closest(".ag-scroll, .buf.client-scroll")
+                    e.target.closest(".ag-scroll, .blocks-scroll, .buf.client-scroll")
                   )
                     return;
                   e.preventDefault();

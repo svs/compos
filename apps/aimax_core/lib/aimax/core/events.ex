@@ -60,4 +60,24 @@ defmodule Aimax.Core.Events do
       for {pid, _} <- entries, do: send(pid, {:frame_change, id})
     end)
   end
+
+  @doc """
+  A watched directory tree changed (`Aimax.Core.Watch`). The message carries
+  the root and nothing else: subscribers re-query. One topic for every root,
+  because the roots are few and the subscribers filter.
+
+      {:fs_changed, root}
+  """
+  def subscribe_fs do
+    {:ok, _} = Registry.register(@registry, :fs, nil)
+    :ok
+  end
+
+  def unsubscribe_fs, do: Registry.unregister(@registry, :fs)
+
+  def broadcast_fs(root) do
+    Registry.dispatch(@registry, :fs, fn entries ->
+      for {pid, _} <- entries, do: send(pid, {:fs_changed, root})
+    end)
+  end
 end

@@ -375,6 +375,39 @@
 (define (run-hooks hook)
   (for-each (lambda (h) (if (equal? (car h) hook) ((cadr h)))) *hooks*))
 
+;;; --- folds --------------------------------------------------------------------
+;;; Folds are tagged, because a buffer has several fold owners: org folds
+;;; headlines, the agent transcript folds tool output, diff-mode folds hunks.
+;;; Each owner replaces only its own tag. The display hides the union.
+;;;
+;;; fold-toggle! is for an owner whose state IS the hidden-range list. An
+;;; owner that derives its ranges from something else — org from headline
+;;; offsets, agent from (start end open?) triples — toggles its own model
+;;; and calls fold-set! with the result.
+
+(define (fold-toggle! buf tag range)
+  (let ((cur (fold-get buf tag)))
+    (fold-set! buf tag
+      (if (member range cur)
+          (filter (lambda (r) (not (equal? r range))) cur)
+          (cons range cur)))))
+
+;;; --- the filesystem-change hook ----------------------------------------------
+;;; run-hooks calls its handlers with no arguments, and this one carries the
+;;; root, so it keeps its own list. Elixir holds ONE handler (fs-on-change!)
+;;; and this dispatcher fans it out. Keep the handlers small: they schedule a
+;;; refresh, they do not do the work. Watch debounces, but a slow handler
+;;; still runs once per burst per root.
+
+(define *fs-change-hooks* '())
+
+(define (on-fs-change! fn)
+  (set! *fs-change-hooks* (cons fn *fs-change-hooks*)))
+
+(fs-on-change!
+  (lambda (root)
+    (for-each (lambda (fn) (fn root)) *fs-change-hooks*)))
+
 ;;; --- modes ------------------------------------------------------------------
 ;;; A major mode = mode-name buffer-local + a setup fn (local keys, vars).
 ;;; The registry, auto-mode-alist, everything: userland.
@@ -1521,6 +1554,30 @@
       (local-set-key "q" "collect-quit")
       (buffer-set-read-only! buf #t))))
 
+;; Emacs' C-x C-q. The way out of a read-only buffer, and the reason a mode
+;; may open files read-only without trapping the reader.
+(define-command "read-only-mode" "Toggle whether this buffer refuses edits"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (ro? (buffer-read-only? buf)))
+      (buffer-set-read-only! buf (not ro?))
+      (message (if ro? "writable" "read-only")))))
+
+(global-set-key "C-x C-q" "read-only-mode")
+
+;; A file you reach from a browsing surface (diff-mode, code.scm) opens
+;; READ-ONLY. You came to read it, and a stray keystroke in a file you are
+;; only passing through is an edit you did not mean. C-x C-q makes it
+;; writable. Set *browse-read-only* to #f in init.scm to opt out.
+(define *browse-read-only* #t)
+
+(define (browse-visit path)
+  (visit path)
+  (when *browse-read-only*
+    (buffer-set-read-only! (current-buffer) #t)))
+
+(public! 'browse-visit "(browse-visit PATH) — open a file the way the code browser does: read-only unless *browse-read-only* is #f. C-x C-q makes it writable")
+
 (define-command "view-messages" "Display the *messages* buffer"
   (lambda () (display-buffer "*messages*")))
 
@@ -2119,7 +2176,9 @@
                 (unless (equal? (agent-status slug) 'dead)
                   (agent-kill! slug))))
             (overlay-clear! buf "all")
-            (buffer-set-hidden! buf '())
+            ;; every tag: a reset empties the buffer, so no owner's ranges
+            ;; still mean anything
+            (fold-clear! buf 'all)
             (chat-clear-locals! buf chat-conversation-locals)
             (chat-clear-locals! buf chat-runtime-locals)
             (buffer-delete-range! buf 0 (buffer-size buf))
@@ -3427,5 +3486,31 @@
 (public! 'group-buffers "(group-buffers G) -> names of the buffers tagged 'group G")
 (public! 'group-chat "(group-chat G) — find or create G's chat buffer; returns its name")
 (public! 'group-chat-show! "(group-chat-show! G) — open/focus G's chat pane; returns its name")
+
+;; git
+;; Every one takes an optional trailing CALLBACK. With one the call returns
+;; at once and the callback gets the value; without one the caller waits.
+;; An error comes back as the plist (error "message").
+(public! 'git-root "(git-root DIR [CB]) -> absolute work-tree root; resolves from a subdirectory")
+(public! 'git-status "(git-status DIR [CB]) -> list of (path P orig-path P2|#f index X worktree Y); X/Y are the git status columns, ? is untracked")
+(public! 'git-diff "(git-diff DIR [OPTS] [CB]) -> list of (file-a A file-b B binary? BOOL hunks (...)); each hunk is (header H old-start N old-count N new-start N new-count N lines ((ctx|add|del TEXT) ...)). OPTS: (base \"HEAD\" path P staged #t); a #f base diffs the work tree against the index")
+(public! 'git-log "(git-log DIR N [CB]) -> last N commits as (sha S short-sha S author A date ISO subject S)")
+(public! 'git-show "(git-show DIR REF [CB]) -> the raw text of one commit")
+
+;; the file watcher
+;; The event is content-free: it names the root, and the handler re-queries.
+;; Watch coalesces a burst of writes into one event per root.
+(public! 'watch-path! "(watch-path! DIR) -> the watched root; refcounted, so two watchers of one directory share one subscription")
+(public! 'unwatch-path! "(unwatch-path! DIR) — drop one reference; the subscription stops at zero")
+(public! 'watched-paths "The watched roots")
+(public! 'on-fs-change! "(on-fs-change! FN) — FN gets the root string when a watched tree changes; keep it small, it schedules a refresh")
+
+;; folds
+;; Tagged, because a buffer has several fold owners. Each owner replaces
+;; only its own tag; the display hides the union of every tag.
+(public! 'fold-set! "(fold-set! BUF TAG RANGES) — replace TAG's hidden byte ranges, a list of (START END)")
+(public! 'fold-get "(fold-get BUF [TAG]) -> TAG's hidden ranges; no TAG, or 'all, gives the union")
+(public! 'fold-clear! "(fold-clear! BUF [TAG]) — drop TAG's folds; no TAG, or 'all, drops every owner's")
+(public! 'fold-toggle! "(fold-toggle! BUF TAG RANGE) — add or remove one (START END) in TAG; for owners whose state is the range list itself")
 
 (message "editor.scm loaded")

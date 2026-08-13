@@ -34,6 +34,8 @@ defmodule Aimax.Core.MixProject do
       # request req_llm builds (cache breakpoints, tool defs) with no network
       {:plug, "~> 1.18", only: :test},
       {:earmark, "~> 1.4"},
+      # fsevents/inotify: how a diff buffer learns that an agent wrote to disk
+      {:file_system, "~> 1.0"},
       {:rustler, "~> 0.36.0"}
     ]
   end

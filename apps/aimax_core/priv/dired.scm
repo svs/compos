@@ -259,13 +259,8 @@
 
 (define-command "dired" "Prompt for a directory and open it in Dired"
   (lambda ()
-    (let ((dd (default-directory)))
-      (set! *file-nav-dir* dd)
-      (minibuffer-read* "Dired (directory): " (list-dir dd)
-        (list (list 'complete file-complete)
-              (list 'change file-nav-change)
-              (list 'initial dd)
-              (list 'confirm (lambda (d) (dired-open (normalize-file-input d)))))))))
+    (read-file-name "Dired (directory): "
+      (lambda (d) (dired-open (normalize-file-input d))))))
 
 (define-command "dired-next" "Move down to the next line in the Dired buffer"
   (lambda () (next-line!) (beginning-of-line!)))

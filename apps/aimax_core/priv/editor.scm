@@ -1036,6 +1036,17 @@
           (set! *file-nav-dir* dir)
           (minibuffer-set-candidates! (list-dir dir))))))
 
+;; ONE file prompt (dup #17): minibuffer with filename completion, rooted
+;; at default-directory. K receives the confirmed text exactly as typed.
+(define (read-file-name prompt k)
+  (let ((dd (default-directory)))
+    (set! *file-nav-dir* dd)
+    (minibuffer-read* prompt (list-dir dd)
+      (list (list 'complete file-complete)
+            (list 'change file-nav-change)
+            (list 'initial dd)
+            (list 'confirm k)))))
+
 ;;; --- remote files (/ssh:host:/path — TRAMP-lite) ---------------------------
 ;;; Transport is two primitives (remote-read / remote-write; ssh underneath,
 ;;; so ~/.ssh/config aliases, agent and ControlMaster all apply). Everything
@@ -1160,14 +1171,7 @@
         (run-hooks 'find-file-hook)))))
 
 (define-command "find-file" "Visit a file, prompting with filename completion"
-  (lambda ()
-    (let ((dd (default-directory)))
-      (set! *file-nav-dir* dd)
-      (minibuffer-read* "Find file: " (list-dir dd)
-        (list (list 'complete file-complete)
-              (list 'change file-nav-change)
-              (list 'initial dd)
-              (list 'confirm visit))))))
+  (lambda () (read-file-name "Find file: " visit)))
 
 ;; MRU-ordered, current excluded: first candidate = the buffer you just
 ;; left, so C-x b RET toggles between two buffers (Emacs buffer ring)
@@ -1581,14 +1585,8 @@
 
 (define-command "tail-file" "Follow a file as it grows (local or /ssh: remote)"
   (lambda ()
-    (let ((dd (default-directory)))
-      (set! *file-nav-dir* dd)
-      (minibuffer-read* "Tail file: " (list-dir dd)
-        (list (list 'complete file-complete)
-              (list 'change file-nav-change)
-              (list 'initial dd)
-              (list 'confirm (lambda (input)
-                               (tail-open (normalize-file-input input)))))))))
+    (read-file-name "Tail file: "
+      (lambda (input) (tail-open (normalize-file-input input))))))
 
 ;;; --- LLM pipes (gptel) -----------------------------------------------------
 ;;; (llm prompt handler) is the async primitive; everything here is
@@ -3074,16 +3072,10 @@
 ;; hot-reload a Scheme file into the live session (stdlib included)
 (define-command "load-file" "Load a Scheme file into the live session"
   (lambda ()
-    (let ((dd (default-directory)))
-      (set! *file-nav-dir* dd)
-      (minibuffer-read* "Load file: " (list-dir dd)
-        (list (list 'complete file-complete)
-              (list 'change file-nav-change)
-              (list 'initial dd)
-              (list 'confirm
-                (lambda (path)
-                  (load path)
-                  (message (string-append "Loaded " path)))))))))
+    (read-file-name "Load file: "
+      (lambda (path)
+        (load path)
+        (message (string-append "Loaded " path))))))
 
 (define-command "keyboard-quit" "Quit the current operation and clear the mark"
   (lambda ()
@@ -3386,6 +3378,7 @@
 (category! 'interaction)
 (public! 'message "(message TEXT) — echo area")
 (public! 'minibuffer-read "(minibuffer-read PROMPT CANDIDATES HANDLER) — async; HANDLER gets the choice")
+(public! 'read-file-name "(read-file-name PROMPT K) — prompt with filename completion from default-directory; K gets the typed path")
 (public! 'minibuffer-read-preview "(minibuffer-read-preview PROMPT CANDIDATES ON-SELECT ON-CONFIRM ON-CANCEL) — consult-style: ON-SELECT fires with the highlighted candidate as selection moves")
 (public! 'window-preview-buffer! "(window-preview-buffer! NAME) — show NAME in the active window without touching the MRU ring")
 

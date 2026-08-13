@@ -1049,6 +1049,18 @@ defmodule Aimax.EditorTest do
     assert Editor.snapshot().completion == nil
   end
 
+  test "completion keys are Scheme policy: a userland rebind works", %{buf: buf} do
+    # C-j is unbound in the popup map; one local-set-key* makes it move
+    {:ok, _} =
+      Aimax.Core.Session.eval(~s{(local-set-key* " *completion*" "C-j" "completion-next")})
+
+    type("hello helper")
+    press(["RET"])
+    type("he")
+    press(["C-M-i", "C-j", "TAB"])
+    assert Buffer.text(buf) == "hello helper\nhelper"
+  end
+
   test "capf: buffer-local sources take precedence (the LSP plug point)", %{buf: buf} do
     {:ok, _} =
       Aimax.Core.Session.eval("""

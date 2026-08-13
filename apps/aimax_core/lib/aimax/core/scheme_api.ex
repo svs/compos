@@ -164,6 +164,9 @@ defmodule Aimax.Core.SchemeAPI do
       "recenter!" => "(recenter!) — center the active window on the cursor line.",
       "completion-show!" => "(completion-show! START END CANDIDATES) — show the completion popup for byte START.",
       "completion-dismiss!" => "(completion-dismiss!) — dismiss the completion popup.",
+      "completion-move!" => "(completion-move! DELTA) — move the popup selection by DELTA rows.",
+      "completion-accept!" =>
+        "(completion-accept!) — close the popup; return (START LABEL) of the selection, or #f.",
       "buffer-words" => "(buffer-words PREFIX) — return the buffer's words with PREFIX, sorted, without PREFIX itself.",
       "count-words" => "(count-words BUF) — return the buffer's whitespace-separated word count.",
       "minibuffer-selected" => "(minibuffer-selected) — return the highlighted minibuffer candidate.",
@@ -703,6 +706,16 @@ defmodule Aimax.Core.SchemeAPI do
       "completion-show!" => fn [start, _end, candidates] ->
         Editor.completion_show(start, candidates)
         :void
+      end,
+      "completion-move!" => fn [delta] ->
+        Editor.completion_move(delta)
+        :void
+      end,
+      "completion-accept!" => fn [] ->
+        case Editor.completion_accept() do
+          {start, label} -> [start, label]
+          nil -> false
+        end
       end,
       "completion-dismiss!" => fn [] ->
         Editor.completion_dismiss()

@@ -46,6 +46,13 @@ defmodule Aimax.Core.Editor do
   def current_buffer(fid \\ nil), do: GenServer.call(__MODULE__, {:current_buffer, fid(fid)})
   def lookup_key(seq, fid \\ nil), do: GenServer.call(__MODULE__, {:lookup_key, seq, fid(fid)})
 
+  @doc """
+  Look SEQ up in one named keymap only — no buffer resolution, no global
+  fallback, no remaps. The completion popup's map lives under the
+  pseudo-buffer name `" *completion*"`.
+  """
+  def lookup_keymap(name, seq), do: GenServer.call(__MODULE__, {:lookup_keymap, name, seq})
+
   @doc "Every global binding as {key-sequence, command-name}."
   def global_keys, do: GenServer.call(__MODULE__, :global_keys)
   def render_state(fid \\ nil), do: GenServer.call(__MODULE__, {:render_state, fid(fid)})
@@ -443,6 +450,19 @@ defmodule Aimax.Core.Editor do
 
         other ->
           other
+      end
+
+    {:reply, reply, state}
+  end
+
+  def handle_call({:lookup_keymap, name, seq}, _from, state) do
+    local = Map.get(state.local_keymaps, name, %{})
+
+    reply =
+      cond do
+        Map.has_key?(local, seq) -> {:command, local[seq]}
+        Enum.any?(Map.keys(local), &List.starts_with?(&1, seq)) -> :prefix
+        true -> :none
       end
 
     {:reply, reply, state}

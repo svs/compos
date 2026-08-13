@@ -747,6 +747,33 @@
                 (completion-show! (car r) (cadr r) (caddr r))
                 (loop (cdr sources))))))))
 
+;; The popup's keys are policy (dup #22): while it shows, KeyDispatch
+;; consults this map first. Unbound printables narrow; anything else
+;; unbound dismisses the popup and acts normally.
+(define-command "completion-next" "Select the next completion candidate"
+  (lambda () (completion-move! 1)))
+(define-command "completion-prev" "Select the previous completion candidate"
+  (lambda () (completion-move! -1)))
+(define-command "completion-accept" "Insert the selected completion at point"
+  (lambda ()
+    (let ((a (completion-accept!)))
+      (when a
+        (let ((start (car a)) (label (car (cdr a))))
+          (when (> (point) start)
+            (buffer-delete-range! (current-buffer) start (- (point) start)))
+          (insert! label))))))
+(define-command "completion-quit" "Dismiss the completion popup"
+  (lambda () (completion-dismiss!) (message "")))
+
+(local-set-key* " *completion*" "C-n" "completion-next")
+(local-set-key* " *completion*" "<down>" "completion-next")
+(local-set-key* " *completion*" "C-p" "completion-prev")
+(local-set-key* " *completion*" "<up>" "completion-prev")
+(local-set-key* " *completion*" "RET" "completion-accept")
+(local-set-key* " *completion*" "TAB" "completion-accept")
+(local-set-key* " *completion*" "C-g" "completion-quit")
+(local-set-key* " *completion*" "ESC" "completion-quit")
+
 ;; dabbrev: complete the word before point from words in this buffer
 (define (capf-dabbrev)
   (let ((e (point)))

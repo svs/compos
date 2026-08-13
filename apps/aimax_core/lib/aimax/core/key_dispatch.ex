@@ -45,48 +45,38 @@ defmodule Aimax.Core.KeyDispatch do
   end
 
   # --- completion popup routing ----------------------------------------------
+  # What the popup's keys MEAN is Scheme's business (dup #22): the
+  # " *completion*" keymap in editor.scm binds move/accept/quit, rebindable
+  # like any map. Only the mechanics stay here: an unbound printable keeps
+  # narrowing, SPC and everything else dismiss and act normally.
+
+  @completion_map " *completion*"
 
   defp completion_key(key, pending) do
-    cond do
-      key in ["C-n", "<down>"] ->
-        Editor.completion_move(1)
+    case Editor.lookup_keymap(@completion_map, [key]) do
+      {:command, name} ->
+        run(name)
 
-      key in ["C-p", "<up>"] ->
-        Editor.completion_move(-1)
+      _ ->
+        cond do
+          key == "DEL" ->
+            # narrow in place: the popup's query shrinks with the buffer text
+            Buffer.delete_char(Editor.current_buffer(), -1)
+            requery_completion()
 
-      key in ["RET", "TAB"] ->
-        case Editor.completion_accept() do
-          {start, label} ->
-            buf = Editor.current_buffer()
-            point = Buffer.point(buf)
-            if point > start, do: Buffer.delete_range(buf, start, point - start)
-            Buffer.insert(buf, label)
+          key == "SPC" ->
+            Editor.completion_dismiss()
+            self_insert(" ")
 
-          nil ->
-            :ok
+          printable?(key) ->
+            self_insert(key)
+            requery_completion()
+
+          true ->
+            # any other key dismisses and acts normally
+            Editor.completion_dismiss()
+            buffer_key(key, pending)
         end
-
-      key in ["C-g", "ESC"] ->
-        Editor.completion_dismiss()
-        Editor.set_echo("")
-
-      key == "DEL" ->
-        # narrow in place: the popup's own query shrinks with the buffer text
-        Buffer.delete_char(Editor.current_buffer(), -1)
-        requery_completion()
-
-      key == "SPC" ->
-        Editor.completion_dismiss()
-        self_insert(" ")
-
-      printable?(key) ->
-        self_insert(key)
-        requery_completion()
-
-      true ->
-        # any other key dismisses and acts normally
-        Editor.completion_dismiss()
-        buffer_key(key, pending)
     end
   end
 

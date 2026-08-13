@@ -205,4 +205,5 @@
 
 (global-set-key "C-x C-b" "ibuffer")
 
+(category! 'buffers)
 (public! 'ibuffer-refresh! "(ibuffer-refresh!) — rebuild the *ibuffer* listing")

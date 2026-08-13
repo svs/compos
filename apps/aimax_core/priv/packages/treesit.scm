@@ -47,4 +47,5 @@
 ;; but the NIF just returns no spans
 (define-mode "scheme-mode" (ts-mode "scheme"))
 
+(category! 'syntax)
 (public! 'ts-install-grammar! "(ts-install-grammar! NAME URL) — async grammar install")

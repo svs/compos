@@ -1148,6 +1148,7 @@
 
 ;; (execute "task")                         — spawn a task chat on the default connector
 ;; (execute* "task" '(connector "codex"))   — pick a connector / pin a model
+(category! 'chat)
 (public! 'execute "(execute \"task\") — spawn a task chat on an ACP backend; returns its slug")
 (public! 'execute* "(execute* \"task\" '(connector \"codex\" model \"...\")) — spawn with config")
 

@@ -1110,6 +1110,7 @@ when a message has no text/plain part." 'group 'notmuch)
       (nm--refresh! *notmuch-search-buffer*))
     (if (equal? (string-trim out) "") "(no output)" out)))
 
+(category! 'mail)
 (public! 'mail-search
   "(mail-search QUERY) — notmuch search (from:, to:, subject:, tag:, dates, free text); one thread per line with its thread:ID")
 (public! 'mail-read-thread

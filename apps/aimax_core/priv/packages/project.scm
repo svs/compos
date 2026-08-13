@@ -94,6 +94,7 @@
 (global-set-key "C-x p p" "project-switch-project")
 (global-set-key "C-x p d" "project-dired")
 
+(category! 'project)
 (public! 'project-current "Root of the current project, #f when outside one")
 (public! 'project-files "(project-files ROOT) -> project file paths, git-aware")
 (public! 'known-projects "Project roots the editor has seen")

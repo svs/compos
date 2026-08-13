@@ -200,6 +200,7 @@
                      " — " (or (custom--plist-get d 'doc) "undocumented"))))))))
 
 ;; the supported customize surface
+(category! 'customize)
 (public! 'defcustom "(defcustom 'name DEFAULT DOC 'group G 'type T) — declare a customizable variable")
 (public! 'customize-save! "(customize-save! 'name VALUE) — set + persist to custom.scm")
 (public! 'customize-apropos "(customize-apropos PATTERN) — search customizables by name/doc")

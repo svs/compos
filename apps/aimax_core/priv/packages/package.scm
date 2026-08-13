@@ -63,5 +63,6 @@
                    "no user packages installed"
                    (string-join ps " · "))))))
 
+(category! 'packages)
 (public! 'package-install! "(package-install! SPEC) — fetch a .scm (github user/repo[/path] or url) into <aimax-home>/packages and load it")
 (public! 'package-list "Names of installed user packages")

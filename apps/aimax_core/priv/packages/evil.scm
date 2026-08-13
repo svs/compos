@@ -828,5 +828,6 @@
         (message "Evil here — ESC for normal mode")
         (message "Evil off in this buffer"))))
 
+(category! 'evil)
 (public! 'evil-mode-on! "Enable Vim emulation everywhere; put (evil-mode-on!) in init.scm to make it stick")
 (public! 'evil-mode-off! "Disable Vim emulation everywhere")

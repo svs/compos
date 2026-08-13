@@ -6,7 +6,7 @@
 ;;; --- public API registry -----------------------------------------------------
 ;;; The supported surface, curated: name + one-line doc. Everything else in
 ;;; the global namespace is implementation detail — callable, but private by
-;;; convention. The LLM's apropos-api searches this registry by default, so
+;;; convention. The LLM's apropos searches this registry by default, so
 ;;; the model discovers a documented API instead of hundreds of internals.
 ;;; Declare yours next to its definition: (public! 'my-fn "what it does").
 
@@ -370,6 +370,7 @@
 
 (global-set-key "C-." "embark-act")
 
+(category! 'targets)
 (public! 'register-target-provider! "(register-target-provider! MODE FN) — FN buf -> (type id label) target at point, or #f")
 (public! 'register-actions! "(register-actions! 'type '((name fn)...)) — verbs for a target type; C-. and the act tool use them")
 (public! 'target-at "(target-at BUF) — the typed target at BUF's point, or #f")
@@ -3138,10 +3139,12 @@
 (global-set-key "C-x <right>" "next-buffer")
 
 ;;; --- the public API ----------------------------------------------------------
-;;; The supported, documented surface — what apropos-api shows the LLM (and
+;;; The supported, documented surface — what apropos shows the LLM (and
 ;;; anyone) by default. One line each; keep it curated, not exhaustive.
+;;; Each section opens with (category! 'name): the category is how an agent
+;;; asks for the shape of an area instead of guessing at a search.
 
-;; buffers
+(category! 'buffers)
 (public! 'buffer-list "All buffer names")
 (public! 'buffer-list-mru "Buffer names, most recently used first")
 (public! 'buffer-exists? "(buffer-exists? NAME) -> bool")
@@ -3162,7 +3165,7 @@
 (public! 'tail-open "(tail-open PATH) — follow a file with tail -F, local or /ssh: remote")
 (public! 'buffer-save! "Save the current buffer to its file")
 
-;; point, region, editing (current buffer)
+(category! 'editing)
 (public! 'point "Point as a byte offset")
 (public! 'buffer-point "(buffer-point NAME) — a named buffer's point as a byte offset")
 (public! 'json-parse "(json-parse STR) — JSON to Scheme: objects become plists with symbol keys, null becomes #f; #f on bad input")
@@ -3180,7 +3183,7 @@
 (public! 'end-of-buffer! "Move point to the end")
 (public! 'beginning-of-buffer! "Move point to the start")
 
-;; windows
+(category! 'windows)
 (public! 'window-list "((id buffer-name) ...) for every window")
 (public! 'active-window "Id of the selected window")
 (public! 'select-window! "(select-window! ID)")
@@ -3192,13 +3195,13 @@
 (public! 'display-buffer-other-window! "(display-buffer-other-window! NAME) — show NAME without leaving this window; picks the window at display time (reuse → other → split)")
 (public! 'add-display-rule! "(add-display-rule! SUBSTRING 'popup|'same)")
 
-;; interaction
+(category! 'interaction)
 (public! 'message "(message TEXT) — echo area")
 (public! 'minibuffer-read "(minibuffer-read PROMPT CANDIDATES HANDLER) — async; HANDLER gets the choice")
 (public! 'minibuffer-read-preview "(minibuffer-read-preview PROMPT CANDIDATES ON-SELECT ON-CONFIRM ON-CANCEL) — consult-style: ON-SELECT fires with the highlighted candidate as selection moves")
 (public! 'window-preview-buffer! "(window-preview-buffer! NAME) — show NAME in the active window without touching the MRU ring")
 
-;; commands, keys, modes, hooks
+(category! 'commands)
 (public! 'define-command "(define-command NAME [DOC] THUNK) — register an M-x command; DOC shows in M-x")
 (public! 'run-command "(run-command NAME) — invoke any M-x command")
 (public! 'command-names "All M-x command names")
@@ -3214,7 +3217,7 @@
 (public! 'overlay-set! "(overlay-set! NAME TAG ((START END FACE) ...)) — replaces TAG's ranges")
 (public! 'overlay-clear! "(overlay-clear! NAME TAG)")
 
-;; llm, chat, companion
+(category! 'chat)
 (public! 'llm "(llm PROMPT HANDLER) — async completion; HANDLER gets the text")
 (public! 'llm-model "Current model id")
 (public! 'set-llm-model! "(set-llm-model! ID) — provider prefix routes: openai:/openrouter:/bare=anthropic")

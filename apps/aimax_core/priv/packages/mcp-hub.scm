@@ -392,6 +392,7 @@
 
 (global-set-key "C-c a m" "mcp-hub")
 
+(category! 'mcp)
 (public! 'mcp-hub-refresh! "(mcp-hub-refresh!) — redraw *mcp-hub* if it exists")
 (public! 'mcp-server-detail "(mcp-server-detail NAME) — plist: status, type, tools, resources, prompts")
 (public! 'mcp-log "(mcp-log NAME) — ((time dir text) ...) JSON-RPC frames, oldest first")

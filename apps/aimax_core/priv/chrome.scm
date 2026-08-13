@@ -352,7 +352,7 @@
 (define (chrome-ignore reply) #t)
 
 ;; Take either a tab id or a whole tab plist. The assistant reaches these
-;; through apropos-api's one-line docs, and "TAB" reads like the thing
+;; through apropos's one-line docs, and "TAB" reads like the thing
 ;; tab-list just handed it — passing the plist made the extension fail with
 ;; "no ai-max in tab [object Object]", once per retry, until the tool loop hit
 ;; its turn limit. Being liberal here is cheaper than being right about it.
@@ -433,6 +433,7 @@
             (let ((id (string->number (car (string-split pick " ")))))
               (if id (tab-activate id) (message "No such tab")))))))))
 
+(category! 'chrome)
 (public! 'tab-list "(tab-list K) — K gets every open browser tab as plists: id, title, url, active")
 (public! 'tab-eval "(tab-eval TAB CODE K) — run JS in a tab; TAB is an id or a tab from tab-list")
 (public! 'tab-read "(tab-read TAB K) — K gets the tab's url, title and visible text; TAB is an id or a tab from tab-list")

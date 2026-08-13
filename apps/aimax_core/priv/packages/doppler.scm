@@ -84,6 +84,7 @@
 (define (doppler args)
   (dp--run args))
 
+(category! 'secrets)
 (public! 'doppler-projects
   "(doppler-projects) — list Doppler project names (with descriptions)")
 (public! 'doppler-configs

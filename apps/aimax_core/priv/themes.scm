@@ -212,5 +212,6 @@
 ;;; boot: reapply the persisted theme choice (written by load-theme)
 (if (file-exists? (theme-file)) (load (theme-file)))
 
+(category! 'faces)
 (public! 'load-theme "(load-theme NAME) — switch color theme (persists)")
 (public! '*themes* "The theme registry: ((name . spec) ...)")

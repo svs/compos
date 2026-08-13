@@ -63,7 +63,7 @@
     "it with apropos, and read any function's real source with "
     "describe-function. "
     ;; without this the assistant tells people it has no browser, while
-    ;; sitting on a wire to one — apropos-api would find these, but only if
+    ;; sitting on a wire to one — apropos would find these, but only if
     ;; it thinks to look
     "You CAN drive the user's Chrome, when the ai-max extension is "
     "attached — check (browser-connected?). (tab-list K) gives every open "
@@ -72,7 +72,7 @@
     "visible text; (tab-eval TAB CODE K) runs JS in it; (tab-say TAB TEXT) "
     "puts a line on its screen; (tab-type TAB TEXT) and (tab-click TAB X Y) "
     "are real trusted input. These are async: they take a continuation K "
-    "rather than returning. Use apropos-api \"tab\" for the full set. "
+    "rather than returning. Use (apropos \"tab\") for the full set. "
     "Keep replies short; the user is in an editor."))
 
 (define (llm-with-tools prompt handler)
@@ -157,7 +157,7 @@
      (let* ((name (string-trim (car (reverse (string-split msg "unbound variable: ")))))
             (hits (tool--suggest name)))
        (if (null? hits)
-           "\nNo close public-api match — search with apropos-api before retrying."
+           "\nNo close public-api match — search with (apropos \"words\") before retrying."
            (string-append "\nunbound: " name " — did you mean:"
                           (tool--format-suggestions hits)))))
     ;; a builtin fed the wrong arguments names itself before the colon
@@ -180,7 +180,7 @@
     (else "")))
 
 (define-tool! 'eval-scheme
-  "Evaluate Scheme in the live editor session. Full editor API: buffers, windows, faces, modes, customize. NOT Emacs Lisp — verify unfamiliar names with apropos-api first. Returns the printed value; on an unbound name the error suggests the nearest real API."
+  "Evaluate Scheme in the live editor session. Full editor API: buffers, windows, faces, modes, customize. NOT Emacs Lisp — verify unfamiliar names with apropos first. Returns the printed value; on an unbound name the error suggests the nearest real API."
   (list (list 'code "string" "Scheme source to evaluate"))
   (lambda (args)
     (let* ((code (custom--plist-get args 'code))
@@ -255,9 +255,12 @@
 (define (apropos--compact xs) (filter (lambda (x) x) xs))
 
 ;; QUERY is words, not a regex: "split window", "open a file", "chat cost".
+;; Recipes come first: a task-level hit beats four name-level ones, and it
+;; is the answer the caller actually wanted.
 (define (apropos query)
   (let* ((words (apropos--words query))
          (hits (append
+                 (if (boundp (quote recipe-search)) (recipe-search query) '())
                  (apropos--compact (map (lambda (e) (apropos--fn e words)) (public-api)))
                  (apropos--compact (map (lambda (n) (apropos--command n words)) (command-names)))
                  (apropos--compact (map (lambda (r) (apropos--key r words)) (global-keys)))
@@ -314,6 +317,33 @@
   '()
   (lambda (args) (value->string (public-categories))))
 
+;;; --- hello: the cold start ------------------------------------------------------
+;;; An agent that connects to the socket used to learn nothing: it got a
+;;; prompt and no idea what was on the other end. (hello) is the primer —
+;;; what this is, the one call that answers everything else, and the
+;;; category list so the next question can name an area instead of
+;;; guessing. The RPC server answers `initialize` with the same text, so a
+;;; cold client is one round-trip from being able to work.
+
+(define (hello)
+  (string-append
+    "ai-max — an Emacs-style editor on the BEAM, scripted in this Scheme. "
+    "Everything the GUI can do, you can do: eval is the whole API.\n\n"
+    "DISCOVERY — one call:\n"
+    "  (apropos \"words\")        search functions, commands, keys and "
+    "settings by WORDS, not regex. Returns signatures.\n"
+    "  (apropos-category 'NAME) list one area whole.\n"
+    "  (describe-function 'NAME) read the real source.\n\n"
+    "Categories: " (string-join (map symbol->string (public-categories)) ", ") "\n\n"
+    "NOTE: this is ai-max's own small Scheme, NOT Emacs Lisp. Names like "
+    "get-buffer, goto-char, save-excursion and with-current-buffer do not "
+    "exist. Check a name with apropos before you write it; an unbound name "
+    "comes back with the nearest real ones and their signatures.\n\n"
+    (if (boundp (quote recipes-text)) (recipes-text) "")))
+
+(category! 'discovery)
+(public! 'hello "(hello) — what this editor is and how to find anything in it")
+
 ;; the edit primitive the old edit-doc tool wrapped — now a public function
 ;; reached through eval-scheme. Edits the live buffer, never the file.
 (define (buffer-replace! b old new)
@@ -333,6 +363,7 @@
                       (buffer-insert! b pos new)
                       "edited")))))))
 
+(category! 'editing)
 (public! 'buffer-replace!
   "(buffer-replace! NAME OLD NEW) — replace exact, unique OLD with NEW in a live buffer")
 
@@ -382,6 +413,7 @@
   (let ((r (llm-tool-call name (json-parse args-json))))
     (if (string? r) r (value->string r))))
 
+(category! 'chat)
 (public! 'define-tool! "(define-tool! 'name DESC PARAMS HANDLER) — register an LLM tool")
 (public! 'llm-with-tools "(llm-with-tools PROMPT HANDLER) — completion with the full tool loop")
 

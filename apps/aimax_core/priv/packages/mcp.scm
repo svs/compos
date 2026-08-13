@@ -202,7 +202,7 @@
 ;; model knows a tool's name and guesses its parameters; it went looking
 ;; for the schema in describe-function, which documents Scheme and knows
 ;; nothing about the server. mcp-tools/mcp-tool-schema are to a server what
-;; apropos-api/describe-function are to the editor.
+;; apropos/describe-function are to the editor.
 (define (mcp-tool-schema name tool)
   (unless (mcp-self? name)
     (mcp-ensure! name)
@@ -222,7 +222,7 @@
 ;; an MCP server. The browser paragraph in *llm-system* exists for the same
 ;; reason.
 ;; Search every registered server's tools by name and description. This is
-;; apropos-api for MCP: the prompt carries the server names and this verb,
+;; apropos for MCP: the prompt carries the server names and this verb,
 ;; nothing more, and the model pulls the one tool it needs. Injecting 66
 ;; tool schemas into every send buys the same knowledge for tens of
 ;; thousands of tokens a turn.
@@ -277,11 +277,11 @@
           "nothing else in the editor API knows anything about it: "
           "(mcp-find \"words|more words\") searches every server's tools by "
           "name and description and returns (SERVER TOOL DESCRIPTION) — "
-          "start here, the way you start with apropos-api for the editor; "
+          "start here, the way you start with apropos for the editor; "
           "(mcp-tool-schema 'SERVER \"TOOL\") gives that tool's JSON "
           "argument schema, which you read before calling and never guess; "
           "(mcp-call! 'SERVER \"TOOL\" \"JSON\") calls it and returns the "
-          "text. describe-function and apropos-api document Scheme only."))))
+          "text. describe-function and apropos document Scheme only."))))
 
 (define-command "mcp-status" "Show MCP server connections"
   (lambda ()
@@ -294,6 +294,7 @@
                                    (number->string (car (cdr (cdr c)))) " tools)  "))
                   "mcp: " cs))))))
 
+(category! 'mcp)
 (public! 'mcp-register! "(mcp-register! 'name SPEC) — declare an MCP server (stdio or http)")
 (public! 'mcp-ensure! "(mcp-ensure! 'name) — connect a registered MCP server if needed")
 (public! 'define-preset! "(define-preset! 'name DESC SERVERS) — name a loadable tool collection")

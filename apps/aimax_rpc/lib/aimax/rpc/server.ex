@@ -87,8 +87,29 @@ defmodule Aimax.Rpc.Server do
 
   defp handle_request(%{"method" => "eval", "params" => %{"code" => code}} = req) do
     case Session.eval(code) do
-      {:ok, printed} -> %{jsonrpc: "2.0", id: req["id"], result: printed}
-      {:error, msg} -> error_resp(req["id"], -32000, msg)
+      {:ok, printed} ->
+        %{jsonrpc: "2.0", id: req["id"], result: printed}
+
+      {:error, msg} ->
+        # the same did-you-mean the eval-scheme tool gets. A raw socket
+        # client used to receive "unbound variable: buffer-insert" and
+        # nothing else, while the tool path handed back the nearest real
+        # names with their signatures.
+        error_resp(req["id"], -32000, suggest(msg))
+    end
+  end
+
+  # A client that connects cold used to learn nothing: it got a socket and
+  # no idea what was on the other end. `initialize` answers with the
+  # primer — what this is, the one call that finds everything else, and the
+  # category list — so being useful is one round-trip away.
+  defp handle_request(%{"method" => "initialize"} = req) do
+    case Session.eval("(hello)") do
+      {:ok, printed} ->
+        %{jsonrpc: "2.0", id: req["id"], result: %{primer: unquote_printed(printed)}}
+
+      {:error, msg} ->
+        error_resp(req["id"], -32000, msg)
     end
   end
 
@@ -99,4 +120,29 @@ defmodule Aimax.Rpc.Server do
 
   defp error_resp(id, code, message),
     do: %{jsonrpc: "2.0", id: id, error: %{code: code, message: message}}
+
+  # eval returns a PRINTED value, so a string comes back quoted
+  defp unquote_printed(<<?", _::binary>> = printed) do
+    case Code.string_to_quoted(printed) do
+      {:ok, s} when is_binary(s) -> s
+      _ -> printed
+    end
+  end
+
+  defp unquote_printed(printed), do: printed
+
+  defp suggest("unbound variable: " <> name = msg) do
+    case Session.eval(~s{(tool--format-suggestions (tool--suggest "#{name}"))}) do
+      {:ok, printed} ->
+        case unquote_printed(printed) do
+          "" -> msg
+          hits -> msg <> " — did you mean:" <> hits
+        end
+
+      _ ->
+        msg
+    end
+  end
+
+  defp suggest(msg), do: msg
 end

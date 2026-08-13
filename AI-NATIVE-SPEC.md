@@ -503,6 +503,19 @@ Port dired, ibuffer, *chats*, mcp-hub, notmuch one per commit. One
 
 ### R9 — Housekeeping bundle
 
+*Partly done 2026-08-13.* Landed across the items that carried them:
+`Aimax.Scheme.Text` (dup #10, in R6), `Aimax.Core.Plist` (dup #11), one
+`plist-get` (dup #12 — `custom--plist-get` keeps its name for its 27 call
+sites and loses its body, which crashed on an odd-length plist),
+`mcp-status` delegates to the hub (dup #31). **Skipped by carve-out:**
+tagged folds (SVS-193), `markdown_html/1` (SVS-198). **Not done:** window
+helpers (#16), `read-file-name` (#17), one isearch engine (#13), the
+KeyDispatch ladder merge and completion keymap (#21-23), `ml_info`/
+`agent_cmd` merge (#24), raw locals in the payload (#25),
+`buffer-candidates` and tabs (#6, #7), `define-theme-from` (#33),
+`kill-region-1`/`llm-on-region` (#30), `advise!`.
+
+
 Small, independent, one commit each:
 - `Text.floor_utf8/2`/`ceil_utf8/2`; delete the other three (dup #10).
 - `Aimax.Core.Plist.to_json/2`; delete acp/session copies (dup #11).
@@ -531,6 +544,19 @@ Small, independent, one commit each:
   hand-rolled wrap-by-redefinition sites.
 
 ### R10 — Tests that hold the line
+
+*Done 2026-08-13, except the restore suite.* Written with each item rather
+than at the end: `chat_record_test.exs` (prefix identity across two turns,
+a silent tool round in the record, the `.chat` block round trip, v1 still
+opening), `cache_economics_test.exs` (the system prompt holding still, the
+frozen tool list, a cancelled turn billed, the hit rate, truncation, the
+529 retry, catalog `max_tokens`), `permission_test.exs`'s "one gate"
+(the same payload refused at all three chokepoints, ask mode holding on
+the proxy, the fail-closed crash path), `apropos_test.exs` (every entry
+carrying a sig and a category, doc text searched, the cold start).
+Key-level tests drive `KeyDispatch.handle_key/1` throughout. **The restore
+round-trip suite belongs to R3, which is blocked.**
+
 
 - Cache: two-turn request-body prefix equality (R1/R2).
 - Restore: the R3 round-trip suite.

@@ -35,7 +35,7 @@ defmodule Aimax.CacheEconomicsTest do
       Enum.each(Agent.list(), &Agent.kill/1)
 
       Enum.each(Aimax.Core.list_buffers(), fn name ->
-        if String.starts_with?(name, "*chat:") or String.starts_with?(name, "*doc") or
+        if String.starts_with?(name, "*chat") or String.starts_with?(name, "*doc") or
              Buffer.get_local(name, "agent-slug"),
            do: Aimax.Core.kill_buffer(name)
       end)
@@ -68,16 +68,19 @@ defmodule Aimax.CacheEconomicsTest do
 
     # a companion chat over one document, tools OFF: the branch that used
     # to inline the whole buffer into the system prompt
-    eval!(~s[(begin
-      (buffer-create "*doc1*")
-      (buffer-append! "*doc1*" "the first draft\\n")
-      (switch-to-buffer! "*doc1*")
-      (set! chat-use-tools #f)
-      (run-command "chat")
-      #t)])
+    # name the chat from the command's own result: picking it out of the
+    # buffer list finds whichever *chat:* another test left behind
+    chat =
+      eval!(~s[(begin
+        (buffer-create "*doc1*")
+        (buffer-append! "*doc1*" "the first draft\\n")
+        (switch-to-buffer! "*doc1*")
+        (set! chat-use-tools #f)
+        (run-command "chat")
+        (current-buffer))])
+      |> String.trim(~s{"})
 
-    chat = Enum.find(Aimax.Core.list_buffers(), &String.starts_with?(&1, "*chat"))
-    assert chat
+    assert String.starts_with?(chat, "*chat")
 
     focus(chat)
     type("read it")

@@ -1,4 +1,6 @@
 defmodule Aimax.Scheme.Builtins do
+  alias Aimax.Scheme.Text
+
   @moduledoc """
   Core builtins. Higher-order library functions (map/filter/etc.) live in the
   Scheme prelude instead — they need `apply`, which the prelude gets for free.
@@ -114,13 +116,8 @@ defmodule Aimax.Scheme.Builtins do
           raise Eval.Error, message: "substring-bytes: range #{from}..#{to} out of 0..#{byte_size(s)}"
         end
 
-        # snap both ends down to codepoint boundaries: byte offsets often
-        # come from stored marker state that can go stale, and a
-        # mid-codepoint slice is invalid UTF-8 — which the rope NIF rejects
-        # hard enough to kill a buffer process if it ever gets inserted
-        from = utf8_floor(s, from)
-        to = utf8_floor(s, to)
-        :binary.part(s, from, max(to - from, 0))
+        # snap both ends down to codepoint boundaries (Text says why)
+        Text.slice(s, from, to)
       end,
       # binary-safe transport encoding (MCP proxy, anything crossing RPC
       # where printed-string escaping would be ambiguous)
@@ -251,15 +248,4 @@ defmodule Aimax.Scheme.Builtins do
     end
   end
 
-  # walk back over UTF-8 continuation bytes (10xxxxxx) to a codepoint start
-  defp utf8_floor(_s, i) when i <= 0, do: 0
-
-  defp utf8_floor(s, i) when i >= byte_size(s), do: byte_size(s)
-
-  defp utf8_floor(s, i) do
-    case :binary.at(s, i) do
-      b when b >= 128 and b < 192 -> utf8_floor(s, i - 1)
-      _ -> i
-    end
-  end
 end

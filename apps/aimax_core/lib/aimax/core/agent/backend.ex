@@ -15,8 +15,10 @@ defmodule Aimax.Core.Agent.Backend do
     * `turn-failed` — the turn died with no result; idle without a turn-end
 
   `prompt/3`'s context map carries what a backend may need to execute a turn
-  against the transcript truth: `turns`, `system`, `tools`, `dispatcher`.
-  ACP ignores most of it (the adapter holds server-side state).
+  against the transcript truth: `turns`, `system`, `tools`, `dispatcher`,
+  `display`. The Agent assembles it at turn start and hands it over — a
+  backend does not go looking for its own conversation. ACP ignores most of
+  it (the adapter holds server-side state).
   """
 
   @callback start(config :: map, owner :: pid) :: {:ok, handle :: term} | {:error, term}
@@ -35,6 +37,40 @@ defmodule Aimax.Core.Agent.Backend do
   @callback set_mode(handle :: term, mode_id :: String.t()) :: :ok | {:error, term}
 
   @optional_callbacks set_mode: 2
+
+  @escaped :aimax_escaped_closures
+
+  @doc """
+  The context one turn runs against, from Scheme's `agent-context-fn!`.
+
+  Called by the Agent, in a task, at turn start. The closure stays rooted
+  in ETS because it escapes into long-lived processes, but ONE caller
+  looks it up: a backend is handed its context, it does not fetch it.
+  """
+  def context(slug, display) do
+    case :ets.lookup(@escaped, {:agent_context}) do
+      [] ->
+        {:error, "no agent-context-fn! registered"}
+
+      [{_, fun}] ->
+        case Aimax.Core.Session.call_fn(fun, [slug, display]) do
+          {:ok, plist} ->
+            {:ok,
+             %{
+               turns: plist_get(plist, "turns") || [],
+               system: plist_str(plist_get(plist, "system")),
+               tools: plist_get(plist, "tools") || [],
+               dispatcher: plist_get(plist, "dispatcher")
+             }}
+
+          {:error, msg} ->
+            {:error, "the chat could not say what this turn should send: #{msg}"}
+        end
+    end
+  end
+
+  defp plist_str(v) when is_binary(v), do: v
+  defp plist_str(_), do: nil
 
   @doc "Pick the backend module a resolved connector config names (default acp)."
   def module(config) do

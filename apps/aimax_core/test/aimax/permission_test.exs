@@ -274,18 +274,22 @@ defmodule Aimax.PermissionTest do
 
       {:ok, _} =
         Session.eval("""
-        (execute* "go" '(permission-mode ask backend "stub" script
+        (execute* "" '(permission-mode ask backend "stub" script
           (((type permission rpc-id 3 title "Write z" kind "edit"
                   options (("ok" "Allow" "allow_once")))
             (type chunk text "moved on")))))
         """)
 
       buf = "*chat:a1*"
-      assert eventually(fn -> match?(%{status: :needs_attention}, Agent.info("a1")) end)
 
-      # nobody is looking at it (execute pops a window — hide it first)
+      # nobody is looking at it BEFORE the request arrives — that is the
+      # condition that arms the deadline, so the turn starts after the
+      # window is gone rather than racing it
       Editor.delete_other_windows()
       {:ok, _} = Session.eval(~s[(switch-to-buffer! "*scratch*")])
+
+      {:ok, _} = Session.eval(~s[(agent-prompt! "a1" "go")])
+      assert eventually(fn -> match?(%{status: :needs_attention}, Agent.info("a1")) end)
 
       # ...so it denies itself and the turn continues
       assert eventually(fn -> Buffer.text(buf) =~ "timed out" end, 60)

@@ -156,6 +156,8 @@ defmodule Aimax.Core.Agent do
        in_flight: false,
        prompt_queue: [],
        pending_permission: nil,
+       # which turn a context fetch belongs to (see send_prompt)
+       epoch: 0,
        # ids for the requests WE raise; an adapter's own requests arrive
        # carrying theirs
        next_rpc_id: 1
@@ -290,6 +292,27 @@ defmodule Aimax.Core.Agent do
   @impl true
   def handle_info({:backend_event, event}, state),
     do: {:noreply, apply_backend_event(state, event)}
+
+  # the context for a turn that is still the current one
+  def handle_info({:context, epoch, text, display, result}, %{epoch: epoch} = state) do
+    case result do
+      {:ok, context} ->
+        state.backend.prompt(state.handle, text, Map.put(context, :display, display))
+        {:noreply, state}
+
+      {:error, why} ->
+        state =
+          state
+          |> enqueue(Backend.plist(type: :error, text: why))
+          |> set_status(:idle)
+          |> pop_prompt_queue()
+
+        {:noreply, state}
+    end
+  end
+
+  # ...and for one that was cancelled while we were fetching it
+  def handle_info({:context, _epoch, _text, _display, _result}, state), do: {:noreply, state}
 
   # keep the output mark ahead of user edits above it; our own inserts via
   # append_at_mark already moved it
@@ -433,8 +456,29 @@ defmodule Aimax.Core.Agent do
       |> Map.put(:status, :running)
       |> emit_status(:running)
 
-    state.backend.prompt(state.handle, text, %{display: display || text})
-    state
+    # The context a turn runs against is assembled HERE, once, and handed
+    # to the backend — a backend no longer reaches into a global to find
+    # out what conversation it is in.
+    #
+    # It is assembled in a task, and it must be: the fetch calls into the
+    # Scheme session, and this GenServer is often called FROM the session
+    # (agent-prompt!). Fetching it inline would have the session waiting on
+    # us while we wait on the session. It happens at turn start rather than
+    # at send time so a queued message gets a fresh system prompt.
+    # The context comes back THROUGH this process, stamped with the turn
+    # it was fetched for. A cancel while the fetch is in flight ends that
+    # turn and pops the next one; without the stamp the late context would
+    # then start a turn for a message the user already took back.
+    me = self()
+    slug = state.slug
+    epoch = state.epoch + 1
+    display = display || text
+
+    Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
+      send(me, {:context, epoch, text, display, Backend.context(slug, display)})
+    end)
+
+    %{state | epoch: epoch}
   end
 
   defp pop_prompt_queue(%{prompt_queue: [{next, display} | rest], status: :idle} = state),

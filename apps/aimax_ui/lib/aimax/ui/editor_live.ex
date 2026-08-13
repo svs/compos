@@ -11,6 +11,7 @@ defmodule Aimax.Ui.EditorLive do
   use Phoenix.LiveView
 
   alias Aimax.Core.{Events, Input}
+  alias Aimax.Scheme.Text
 
   @impl true
   def mount(_params, _session, socket) do
@@ -681,29 +682,10 @@ defmodule Aimax.Ui.EditorLive do
   # 'preview-authored #t)` renders html exactly as authored instead
   # --- agent transcript blocks ------------------------------------------------
 
-  defp safe_slice(text, s, e) do
-    size = byte_size(text)
-    s = s |> max(0) |> min(size) |> utf8_floor(text)
-    e = e |> max(s) |> min(size) |> utf8_floor(text)
-    binary_part(text, s, e - s)
-  end
-
   # block offsets can go stale (they're laid down at insert time, and text
   # before them may be edited); a mid-codepoint slice is invalid UTF-8 and
-  # kills the whole render (Earmark, HEEx). Snap down to a char boundary.
-  defp utf8_floor(i, _text) when i <= 0, do: 0
-
-  defp utf8_floor(i, text) do
-    if i >= byte_size(text) do
-      byte_size(text)
-    else
-      # UTF-8 continuation bytes are 0b10xxxxxx
-      case :binary.at(text, i) do
-        b when b >= 128 and b < 192 -> utf8_floor(i - 1, text)
-        _ -> i
-      end
-    end
-  end
+  # kills the whole render (Earmark, HEEx).
+  defp safe_slice(text, s, e), do: Text.slice(text, s, e)
 
   defp ag_block([s, e, "user" | meta], text) do
     text_of =
@@ -773,7 +755,7 @@ defmodule Aimax.Ui.EditorLive do
 
     {pre, cur, post} =
       if leaf.point >= live_start do
-        rel = (leaf.point - live_start) |> min(byte_size(live)) |> utf8_floor(live)
+        rel = (leaf.point - live_start) |> min(byte_size(live)) |> then(&Text.floor_utf8(live, &1))
         rest = binary_part(live, rel, byte_size(live) - rel)
 
         case String.next_grapheme(rest) do

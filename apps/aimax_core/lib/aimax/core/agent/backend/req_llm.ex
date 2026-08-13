@@ -4,11 +4,10 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
   req_llm tool loop — streaming deltas, tool cards, usage, queue/interrupt —
   the same thread surface as ACP, no subprocess.
 
-  History is NOT kept here: each turn pulls fresh context (turns, system
-  preamble, tool specs, dispatcher) from Scheme through the global
-  `agent-context-fn!` closure — the chat's conversation of record stays the
-  single truth, and the per-send system prompt (group pull-context) can
-  never go stale.
+  History is NOT kept here: the Agent hands each turn its context (turns,
+  system preamble, tool specs, dispatcher) at turn start — the chat's
+  conversation of record stays the single truth, and the per-send system
+  prompt (group pull-context) can never go stale.
 
   The turn task both READS and WRITES that record, in one order: it reads
   it, appends the user message it is about to send, and reports every
@@ -87,15 +86,21 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
   end
 
   @impl GenServer
+  # A second prompt while one is in flight would strand the first task:
+  # nothing would ever reap its DOWN, and the turn it is running would
+  # report into a state that no longer knows about it. The thread queues
+  # prompts, so this is a bug in the caller, not a race to absorb.
+  def handle_call({:prompt, _text, _context}, _from, %{task: %Task{}} = state),
+    do: {:reply, {:error, :busy}, state}
+
   def handle_call({:prompt, text, context}, _from, state) do
     me = self()
     slug = state.slug
     model = state.model || LLM.model()
-    display = Map.get(context, :display, text)
 
     task =
       Task.Supervisor.async_nolink(Aimax.Core.TaskSupervisor, fn ->
-        run_turn(me, slug, model, text, display)
+        run_turn(me, slug, model, text, context)
       end)
 
     {:reply, :ok, %{state | task: task, turn_model: model, turn_usage: %{}}}
@@ -192,12 +197,10 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
 
   # --- the turn (runs in a supervised task) -----------------------------------
 
-  defp run_turn(backend, slug, model, text, display) do
+  defp run_turn(backend, slug, model, text, ctx) do
     ev = fn kvs -> GenServer.cast(backend, {:turn_event, kvs}) end
-
-    case fetch_context(slug, display) do
-      {:ok, ctx} ->
-        messages = Enum.map(ctx.turns, &turn_to_message/1)
+    display = Map.get(ctx, :display, text)
+    messages = Enum.map(ctx.turns, &turn_to_message/1)
 
         # the user turn joins the record before the wire carries it. The
         # blocks hold what the transcript shows; `wire` holds what was
@@ -236,10 +239,6 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
             ev.(type: :"tool-update", id: id, status: "completed", text: tool_card_text(result))
           end
         )
-
-      {:error, msg} ->
-        {:error, msg}
-    end
   end
 
   # The permission gate: ask Scheme's policy, and only when it says "ask"
@@ -346,22 +345,9 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
   end
 
   defp tool_card_text(result) do
-    s = result |> to_string() |> String.trim()
-
-    case s do
+    case result |> to_string() |> String.trim() do
       "" -> ""
-      s when byte_size(s) > 2000 -> binary_part(s, 0, floor_utf8(s, 2000)) <> "\n[…]\n"
-      s -> s <> "\n"
-    end
-  end
-
-  # a mid-UTF-8 cut poisons the JSON encoder — back off to a char boundary
-  defp floor_utf8(_bin, at) when at <= 0, do: 0
-
-  defp floor_utf8(bin, at) do
-    case binary_part(bin, at, 1) do
-      <<b>> when b < 128 or b >= 192 -> at
-      _ -> floor_utf8(bin, at - 1)
+      s -> Aimax.Scheme.Text.truncate(s, 2000, "\n[…]") <> "\n"
     end
   end
 
@@ -436,30 +422,4 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
     end
   end
 
-  # (turns (TURN...) system "..." tools (spec...) dispatcher <fn>) —
-  # from the global agent-context-fn! closure, called with (slug display)
-  defp fetch_context(slug, display) do
-    case :ets.lookup(@escaped, {:agent_context}) do
-      [] ->
-        {:error, "no agent-context-fn! registered"}
-
-      [{_, fun}] ->
-        case Session.call_fn(fun, [slug, display]) do
-          {:ok, plist} ->
-            {:ok,
-             %{
-               turns: Backend.plist_get(plist, "turns") || [],
-               system: plist_str(Backend.plist_get(plist, "system")),
-               tools: Backend.plist_get(plist, "tools") || [],
-               dispatcher: Backend.plist_get(plist, "dispatcher")
-             }}
-
-          {:error, msg} ->
-            {:error, "context fn failed: #{msg}"}
-        end
-    end
-  end
-
-  defp plist_str(v) when is_binary(v), do: v
-  defp plist_str(_), do: nil
 end

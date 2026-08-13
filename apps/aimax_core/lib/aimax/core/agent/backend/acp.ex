@@ -304,14 +304,20 @@ defmodule Aimax.Core.Agent.Backend.ACP do
             [Map.get(opt, "optionId"), Map.get(opt, "name", ""), Map.get(opt, "kind", "")]
           end
 
-        title = get_in(params, ["toolCall", "title"]) || "tool call"
-        kind = get_in(params, ["toolCall", "kind"]) || ""
+        tool_call = Map.get(params, "toolCall") || %{}
+        title = Map.get(tool_call, "title") || "tool call"
+        kind = Map.get(tool_call, "kind") || ""
 
         emit(state,
           type: :permission,
           "rpc-id": id,
           title: title,
           kind: kind,
+          # The whole tool call, so the deny patterns see the ARGUMENTS.
+          # A title says "Run command"; only the payload says `git push
+          # --force`. Without this the deny-list was blind on this lane
+          # while holding on the other.
+          raw: raw_of(tool_call),
           options: options
         )
 
@@ -329,6 +335,16 @@ defmodule Aimax.Core.Agent.Backend.ACP do
   end
 
   defp handle_frame(state, _frame), do: state
+
+  # a tool call as one searchable string; an adapter may put anything in
+  # there, so an unencodable payload degrades to inspect rather than
+  # taking the connection down
+  defp raw_of(tool_call) do
+    case Jason.encode(tool_call) do
+      {:ok, json} -> json
+      _ -> inspect(tool_call)
+    end
+  end
 
   defp handle_update(state, %{"sessionUpdate" => kind} = update) do
     case kind do

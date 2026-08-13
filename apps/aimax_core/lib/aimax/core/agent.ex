@@ -75,6 +75,21 @@ defmodule Aimax.Core.Agent do
     do: call(slug, {:respond_permission, rpc_id, option_id})
 
   @doc """
+  Ask this thread for a verdict on a tool call, and block until it comes.
+
+  ONE gate. A backend that runs turns itself (the direct lane) calls this
+  rather than keeping its own rpc-id counter, pending slot and CAS; a
+  backend whose agent asks US (ACP) emits a `permission` event and the
+  same slot answers it. Either way the thread owns the id, the CAS, the
+  deadline and the deny-on-close, so the two lanes cannot drift apart on
+  what an unanswered request means.
+
+  Returns `:allow | :always | :deny`.
+  """
+  def ask_permission(slug, %{title: _, kind: _, raw: _} = request),
+    do: call(slug, {:ask_permission, request}, :infinity)
+
+  @doc """
   Auto-resolve the pending permission as cancelled after `ms` unless it is
   answered first. Scheme arms this for chats no one is looking at, so
   headless work can never hang on a banner nobody will see.
@@ -95,14 +110,14 @@ defmodule Aimax.Core.Agent do
     end
   end
 
-  defp call(slug, msg) do
+  defp call(slug, msg, timeout \\ 5000) do
     case Registry.lookup(@registry, slug) do
       [{pid, _}] ->
         # the agent can die between lookup and call (kill racing a queued
         # render batch) — that must surface as an error, not an exit that
         # takes the CALLER (often the Session) down with it
         try do
-          GenServer.call(pid, msg)
+          GenServer.call(pid, msg, timeout)
         catch
           :exit, _ -> {:error, :no_agent}
         end
@@ -140,7 +155,10 @@ defmodule Aimax.Core.Agent do
        events: [],
        in_flight: false,
        prompt_queue: [],
-       pending_permission: nil
+       pending_permission: nil,
+       # ids for the requests WE raise; an adapter's own requests arrive
+       # carrying theirs
+       next_rpc_id: 1
      }}
   end
 
@@ -174,6 +192,44 @@ defmodule Aimax.Core.Agent do
       do: state.backend.cancel(state.handle)
 
     {:reply, :ok, state}
+  end
+
+  # a backend that runs its own turns asks US. No immediate reply: the
+  # verdict comes when the banner, a deadline, or a close resolves the
+  # slot — the same slot an adapter's own request would occupy.
+  def handle_call({:ask_permission, req}, from, state) do
+    id = state.next_rpc_id
+
+    options = [
+      ["allow", "Allow", "allow_once"],
+      ["always", "Always", "allow_always"],
+      ["deny", "Reject", "reject_once"]
+    ]
+
+    pending = %{
+      rpc_id: id,
+      title: req.title,
+      kind: req.kind,
+      options: for([oid, name, kind] <- options, do: {oid, name, kind}),
+      # WE asked: the verdict goes back to this caller, not out to a backend
+      from: from
+    }
+
+    state =
+      %{state | next_rpc_id: id + 1, pending_permission: pending}
+      |> set_status(:needs_attention)
+      |> enqueue(
+        Backend.plist(
+          type: :permission,
+          "rpc-id": id,
+          title: req.title,
+          kind: req.kind,
+          raw: req.raw,
+          options: options
+        )
+      )
+
+    {:noreply, state}
   end
 
   def handle_call({:respond_permission, rpc_id, option_id}, _from, state) do
@@ -277,23 +333,43 @@ defmodule Aimax.Core.Agent do
 
   @impl true
   def terminate(_reason, state) do
-    # a killed thread must never leave a backend blocked on an answer
-    if state.pending_permission do
-      state.backend.respond_permission(state.handle, state.pending_permission.rpc_id, nil)
-    end
+    # a killed thread must never leave anyone blocked on an answer: not an
+    # adapter waiting on the wire, and not a turn task waiting on us
+    if state.pending_permission, do: resolve_permission(state, nil)
 
     state.backend.close(state.handle)
     :ok
   end
 
-  # one place resolves a pending request: answer the backend, clear the
-  # slot, return to running
+  # One place resolves a pending request, whichever side raised it: reply
+  # to the turn task that is blocked on us, or answer the adapter that
+  # asked. Then clear the slot and go back to running.
   defp resolve_permission(state, option_id) do
-    state.backend.respond_permission(state.handle, state.pending_permission.rpc_id, option_id)
+    case state.pending_permission do
+      %{from: from} = pending when not is_nil(from) ->
+        GenServer.reply(from, verdict_of(pending, option_id))
+
+      pending ->
+        state.backend.respond_permission(state.handle, pending.rpc_id, option_id)
+    end
 
     state
     |> Map.put(:pending_permission, nil)
     |> set_status(:running)
+  end
+
+  # The option's KIND is the vocabulary, not its id: an adapter names its
+  # own ids and ours are only ours, but every ACP option declares a kind.
+  # No option (a cancel, a close, a deadline) is a denial.
+  defp verdict_of(_pending, nil), do: :deny
+
+  defp verdict_of(%{options: options}, option_id) do
+    case List.keyfind(options, option_id, 0) do
+      {_, _, "allow_always"} -> :always
+      {_, _, "allow_once"} -> :allow
+      {_, _, kind} -> if String.starts_with?(to_string(kind), "allow"), do: :allow, else: :deny
+      nil -> :deny
+    end
   end
 
   # the status machine reads the event stream; control events (ready,

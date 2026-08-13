@@ -246,24 +246,42 @@
 (define (mcp-proxy-tools-json)
   (base64-encode (tool-specs-json (llm-tool-specs))))
 
-;; the second chokepoint. In auto mode the agent stops asking us
-;; ANYTHING — but the deny-list must still hold, and every deny-listed
-;; verb reaches the world either through the direct lane's gate or
-;; through this proxy. So the payload is checked here too, whatever the
-;; backend decided upstream.
+;; The third chokepoint. In auto mode the agent stops asking us ANYTHING,
+;; and every deny-listed verb reaches the world through one of our three
+;; gates — so this one asks the SAME policy the other two ask, not a
+;; hand-rolled subset of it. It used to apply the deny-list alone, which
+;; meant a chat in `ask` mode was in ask mode everywhere except here.
+;;
+;; Nobody can answer a banner for a proxy call: it arrives on the socket
+;; from an agent we are not rendering, with no chat to raise it in. So
+;; `ask` is a refusal here, with a sentence saying how to get it done.
+;; That is the fail-closed rule, applied where it bites.
 (define (mcp-proxy-call name args-b64)
   (base64-encode
     (let* ((args-json (base64-decode args-b64))
-           (denied (and (boundp (quote permission-denied-verb?))
-                        (permission-denied-verb?
-                          (string-append name " " args-json)))))
-      (if denied
+           (raw (string-append name " " args-json))
+           (verdict (if (boundp (quote *permission-policy*))
+                        (*permission-policy* #f name "tool" raw)
+                        'allow)))
+      (cond
+        ((member verdict '(allow allow-always))
+         (mcp-proxy-dispatch name args-json))
+        (else
           (string-append
-            "refused: this is an irreversible, outward-facing action ("
-            denied "). Ask the user to run it, or have them approve it in "
-            "the chat.")
-          (let ((r (llm-tool-call name (json-parse args-json))))
-            (if (string? r) r (value->string r)))))))
+            "refused: aimax's permission policy did not allow this ("
+            (or (and (boundp (quote permission-denied-verb?))
+                     (permission-denied-verb? raw))
+                (symbol->string verdict))
+            "). Ask the user to run it, or to approve it in the chat."))))))
+
+;; This surface serves mcp-proxy-tools-json — the Scheme registry — so
+;; every name it dispatches is a Scheme handler, and a Scheme handler runs
+;; in the session by definition. (The "never dispatch in the session" rule
+;; in mcp.ex is about MCP tools, which this surface does not expose;
+;; mcp-call! already obeys it for those.)
+(define (mcp-proxy-dispatch name args-json)
+  (let ((r (llm-tool-call name (json-parse args-json))))
+    (if (string? r) r (value->string r))))
 
 (public! 'define-tool! "(define-tool! 'name DESC PARAMS HANDLER) — register an LLM tool")
 (public! 'llm-with-tools "(llm-with-tools PROMPT HANDLER) — completion with the full tool loop")

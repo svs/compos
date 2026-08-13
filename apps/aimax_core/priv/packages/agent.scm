@@ -381,8 +381,12 @@
 
 (define *permission-default-mode* 'approve)
 
+;; A gate with no chat behind it — the MCP proxy, which answers an agent
+;; we are not rendering — has no chat mode to read. The policy must stay
+;; total: every chokepoint calls it, and one of them has no buffer.
 (define (chat-permission-mode buf)
-  (or (buffer-local buf 'chat-permission-mode) *permission-default-mode*))
+  (or (and buf (buffer-exists? buf) (buffer-local buf 'chat-permission-mode))
+      *permission-default-mode*))
 
 ;; verb-shaped patterns over the tool name/title/payload
 (define *permission-deny-patterns*
@@ -938,7 +942,16 @@
 ;; invisible to it — it guessed ssh for one. _meta.systemPrompt.append
 ;; rides on the claude-code preset prompt rather than replacing it.
 (define (agent-config-with-mcp-note conf)
-  (let ((note (if (boundp (quote mcp-system-note)) (mcp-system-note) "")))
+  (let ((note (if (and (boundp (quote mcp-system-note))
+                       (boundp (quote preset-servers)))
+                  ;; only what this thread's presets expose — the same set
+                  ;; its mcpServers list holds
+                  (mcp-system-note
+                    (fold (lambda (acc p)
+                            (fold (lambda (acc2 s) (if (member s acc2) acc2 (cons s acc2)))
+                                  acc (preset-servers p)))
+                          '() (or (plist-get conf 'presets) '())))
+                  "")))
     (if (equal? note "")
         conf
         (append (list 'meta (append (list 'systemPrompt (list 'append note))

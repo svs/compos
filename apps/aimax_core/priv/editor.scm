@@ -2362,10 +2362,11 @@
 ;; rides inside the backend's turn task)
 (define (chat-tool-dispatch name args) (llm-tool-call name args))
 
-;; the mcp package loads after this file, and a user can unload it
-(define (chat-mcp-note)
-  (if (boundp (quote mcp-system-note))
-      (let ((note (mcp-system-note)))
+;; the mcp package loads after this file, and a user can unload it. The
+;; note names the servers THIS chat holds, never the whole registry.
+(define (chat-mcp-note buf)
+  (if (and (boundp (quote mcp-system-note)) (boundp (quote chat-active-servers)))
+      (let ((note (mcp-system-note (chat-active-servers buf))))
         (if (equal? note "") "" (string-append note "\n\n")))
       ""))
 
@@ -2378,7 +2379,7 @@
          (tools? (and (boundp (quote chat-use-tools)) chat-use-tools)))
     (list 'turns (reverse (chat-record buf))
           'system (if tools?
-                      (string-append *llm-system* "\n\n" (chat-mcp-note)
+                      (string-append *llm-system* "\n\n" (chat-mcp-note buf)
                                      (chat-preamble buf))
                       (chat-preamble buf))
           'tools (if tools? (chat-tools buf) '())

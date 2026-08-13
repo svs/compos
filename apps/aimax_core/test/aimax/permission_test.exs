@@ -97,7 +97,8 @@ defmodule Aimax.PermissionTest do
         |> Base.decode64!()
 
       assert out =~ "refused"
-      assert out =~ "irreversible"
+      # the pattern that caught it, so the agent knows what to ask for
+      assert out =~ "mail"
 
       # an ordinary payload still runs
       ok = Base.encode64(Jason.encode!(%{"code" => "(+ 20 22)"}))
@@ -289,6 +290,100 @@ defmodule Aimax.PermissionTest do
       # ...so it denies itself and the turn continues
       assert eventually(fn -> Buffer.text(buf) =~ "timed out" end, 60)
       assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end, 60)
+    end
+  end
+
+  # R5: one gate. Three chokepoints used to hold three policies — the ACP
+  # lane could not see a tool call's arguments at all, the proxy applied
+  # the deny-list alone, and a crashing policy let the call through.
+  describe "one gate" do
+    test "the same payload is refused on all three chokepoints" do
+      payload = ~s{(mail-send "bob@example.com" "hi")}
+
+      # 1. the policy, asked directly — what both lanes consult
+      assert eval!(~s{(*permission-policy* #f "eval-scheme" "tool" #{inspect(payload)})}) == "ask"
+
+      # 2. the ACP lane sees the same string, because the permission event
+      #    now carries the tool call's arguments and not just its title
+      assert eval!(~s{(permission-denied-verb? #{inspect("Run command " <> payload)})}) != "#f"
+
+      # 3. the proxy, which nobody can answer, refuses outright
+      args = Base.encode64(Jason.encode!(%{"code" => payload}))
+
+      out =
+        eval!(~s{(mcp-proxy-call "eval-scheme" "#{args}")})
+        |> String.trim("\"")
+        |> Base.decode64!()
+
+      assert out =~ "refused"
+    end
+
+    test "a chat in ask mode is in ask mode on the proxy too" do
+      # the proxy has no chat, so it reads the default — which IS the
+      # chat-wide setting a user changes with C-c p
+      eval!("(set! *permission-default-mode* 'ask)")
+      on_exit(fn -> Session.eval("(set! *permission-default-mode* 'approve)") end)
+
+      args = Base.encode64(Jason.encode!(%{"code" => "(+ 1 1)"}))
+
+      out =
+        eval!(~s{(mcp-proxy-call "eval-scheme" "#{args}")})
+        |> String.trim("\"")
+        |> Base.decode64!()
+
+      # it used to run: the proxy applied the deny-list and nothing else
+      assert out =~ "refused"
+      assert out =~ "ask"
+    end
+
+    test "a policy that crashes denies the call instead of waving it through" do
+      me = self()
+
+      Application.put_env(:aimax_core, :llm_chat_fun, fn req ->
+        if Enum.any?(req.messages, &is_list(&1.content)) do
+          send(me, {:result, req.messages |> List.last() |> Map.get(:content)})
+
+          {:ok,
+           %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "done"}],
+             "usage" => %{"input_tokens" => 1, "output_tokens" => 1}}}
+        else
+          {:ok,
+           %{
+             "stop_reason" => "tool_use",
+             "content" => [
+               %{"type" => "tool_use", "id" => "t1", "name" => "eval-scheme",
+                 "input" => %{"code" => "(+ 1 1)"}}
+             ],
+             "usage" => %{"input_tokens" => 1, "output_tokens" => 1}
+           }}
+        end
+      end)
+
+      # a policy that raises on every call — the shape of a user's broken
+      # override in ~/.aimax/init.scm
+      eval!("(agent-permission-fn! (lambda (slug name kind raw) (car '())))")
+
+      on_exit(fn ->
+        Session.eval("""
+        (agent-permission-fn!
+          (lambda (slug name kind raw)
+            (let* ((buf (agent-buf slug)) (v (*permission-policy* buf name kind raw)))
+              (cond ((equal? v 'reject) 'reject) ((equal? v 'ask) 'ask) (else 'allow)))))
+        """)
+      end)
+
+      {:ok, _} = Session.eval(~s{(execute* "" '(connector "api"))})
+      buf = "*chat:a1*"
+      focus(buf)
+      Session.eval(~s{(agent-prompt! "a1" "run the tool")})
+
+      assert_receive {:result, [%{content: result} | _]}, 3_000
+
+      # fail closed: the tool did not run, and the transcript names the
+      # thing to fix rather than silently allowing everything
+      assert result =~ "crashed"
+      refute result == "2"
+      assert eventually(fn -> Buffer.text(buf) =~ "permission policy crashed" end)
     end
   end
 

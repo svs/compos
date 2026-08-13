@@ -231,18 +231,27 @@ defmodule Aimax.MCPTest do
 
     test "the system note names the servers and the way to call one" do
       eval!(~s{(mcp-register! 'zznote '(type "http" url "https://zz.test/mcp"))})
-      note = eval!("(mcp-system-note)")
+      note = eval!("(mcp-system-note '(zznote))")
 
       assert note =~ "zznote"
       assert note =~ "never ssh"
       assert note =~ "mcp-call!"
 
-      # the direct lane carries it in the system text of every turn
+      # a chat that holds no servers is told about none: advertising one
+      # its tool gate does not hold sends the agent looking for a host
+      assert eval!("(mcp-system-note '())") == ~s{""}
+
+      # the direct lane carries it in the system text of every turn, for
+      # the servers THIS chat's presets expose
       on_exit(fn -> Aimax.Core.kill_buffer("*zz-note-chat*") end)
       eval!(~s{(buffer-create "*zz-note-chat*")})
       eval!(~s{(buffer-set-local! "*zz-note-chat*" 'agent-slug "zznoteslug")})
       eval!(~s{(buffer-set-local! "*zz-note-chat*" 'chat-use-tools #t)})
-      assert eval!(~s{(chat-mcp-note)}) =~ "zznote"
+      refute eval!(~s{(chat-mcp-note "*zz-note-chat*")}) =~ "zznote"
+
+      eval!(~s{(define-preset! 'zznotepreset "a test preset" '(zznote))})
+      eval!(~s{(buffer-set-local! "*zz-note-chat*" 'chat-presets '(zznotepreset))})
+      assert eval!(~s{(chat-mcp-note "*zz-note-chat*")}) =~ "zznote"
     end
 
     test "a call to a server that is not there fails with words, not a hang" do

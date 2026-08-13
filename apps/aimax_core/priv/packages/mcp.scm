@@ -259,8 +259,12 @@
             ((string-contains? hay (car ws)) #t)
             (else (loop (cdr ws)))))))
 
-(define (mcp-system-note)
-  (let ((names (map (lambda (e) (symbol->string (car e))) (reverse *mcp-registry*))))
+;; SERVERS is the list this chat actually holds — its presets' servers,
+;; not the editor's whole registry. Advertising a server the chat's tool
+;; gate does not hold is worse than silence: the agent believes it has
+;; tools it cannot call, and goes looking for the host by ssh.
+(define (mcp-system-note servers)
+  (let ((names (map symbol->string servers)))
     (if (null? names)
         ""
         (string-append

@@ -317,6 +317,24 @@ it — that also removes one `connector-api?` call site ahead of R6.
 
 ### R5 — One permission gate
 
+*Done 2026-08-13 on `refactor/r5-one-permission-gate`, except one half of
+B2.* The thread owns the pending slot for both lanes: `Agent.ask_permission/2`
+blocks the direct lane's turn task on the same slot an adapter's own
+request occupies, so one rpc id, one CAS, one deadline, one deny-on-close.
+The verdict now reads the option's **kind**, not its id — an adapter names
+its own ids. ACP supplies `raw` from the whole tool call, so the deny
+patterns finally see arguments on that lane. The gate fails closed on a
+policy crash and says which policy to fix.
+**Open:** `mcp-proxy-call` routes through the one policy now (that was the
+real defect — it applied the deny-list alone, so a chat in `ask` mode was
+in ask mode everywhere except there), but it still dispatches in the
+session. It cannot do otherwise: the surface it serves is the Scheme tool
+registry, and a Scheme handler runs in the session by definition. The
+"never dispatch in the session" rule in `mcp.ex` is about MCP tools, which
+this surface does not expose. Getting a proxy call off the session needs a
+deferred-reply RPC design — worth its own item if it matters. A proxy call
+has no chat to raise a banner in, so `ask` is a refusal there.
+
 **Why.** B1, B2, B7, C2, C3. Three chokepoints, three policies.
 
 **What.** The gate lives in `agent.ex`: rpc-id allocation, pending slot,

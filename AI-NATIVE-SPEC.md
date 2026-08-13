@@ -507,9 +507,11 @@ Port dired, ibuffer, *chats*, mcp-hub, notmuch one per commit. One
 `Aimax.Scheme.Text` (dup #10, in R6), `Aimax.Core.Plist` (dup #11), one
 `plist-get` (dup #12 — `custom--plist-get` keeps its name for its 27 call
 sites and loses its body, which crashed on an odd-length plist),
-`mcp-status` delegates to the hub (dup #31). **Skipped by carve-out:**
-tagged folds (SVS-193), `markdown_html/1` (SVS-198). **Not done:** window
-helpers (#16), `read-file-name` (#17), one isearch engine (#13), the
+`mcp-status` delegates to the hub (dup #31), the window helpers (dup #16 —
+four functions, because five hand-rolled scans were asking four different
+questions and disagreeing about what "no match" returned).
+**Skipped by carve-out:**
+tagged folds (SVS-193), `markdown_html/1` (SVS-198). **Not done:** `read-file-name` (#17), one isearch engine (#13), the
 KeyDispatch ladder merge and completion keymap (#21-23), `ml_info`/
 `agent_cmd` merge (#24), raw locals in the payload (#25),
 `buffer-candidates` and tabs (#6, #7), `define-theme-from` (#33),

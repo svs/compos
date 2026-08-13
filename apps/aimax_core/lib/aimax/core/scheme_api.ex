@@ -244,6 +244,12 @@ defmodule Aimax.Core.SchemeAPI do
         Buffer.goto(Editor.current_buffer(), pos)
         pos
       end,
+      # goto-char! in a named buffer: an async refresh restores point in the
+      # buffer it rebuilt, which is not always the current one
+      "buffer-goto!" => fn [name, pos] ->
+        Buffer.goto(name, pos)
+        pos
+      end,
       "forward-char!" => fn [] -> Buffer.forward_char(Editor.current_buffer()) end,
       "backward-char!" => fn [] -> Buffer.backward_char(Editor.current_buffer()) end,
       "forward-word!" => fn [] -> Buffer.forward_word(Editor.current_buffer()) end,
@@ -652,8 +658,28 @@ defmodule Aimax.Core.SchemeAPI do
       "fs-on-change!" => fn [handler] ->
         :ets.insert(@escaped, {{:fs_handler}, handler})
         :void
+      end,
+      # clicking a diff card's header. The client has a buffer and a file
+      # name, not a command, so it needs a closure to hand them to — the
+      # same one-handler shape as mcp-on-change! and fs-on-change!.
+      "diff-on-card-click!" => fn [handler] ->
+        :ets.insert(@escaped, {{:diff_card_handler}, handler})
+        :void
       end
     }
+  end
+
+  @doc """
+  Run the registered diff-card click handler. The UI calls this: it holds a
+  buffer and a file name, and the policy for what a click does is Scheme's.
+  """
+  def diff_card_click(buffer, file) do
+    with tid when tid != :undefined <- :ets.whereis(@escaped),
+         [{_, handler}] <- :ets.lookup(tid, {:diff_card_handler}) do
+      Aimax.Core.Session.apply_callback(handler, [buffer, file])
+    end
+
+    :ok
   end
 
   defp git_dispatch([], work, shape), do: git_value(work.(), shape)

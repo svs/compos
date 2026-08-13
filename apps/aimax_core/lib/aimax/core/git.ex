@@ -87,6 +87,15 @@ defmodule Aimax.Core.Git do
   @doc "The raw text of one commit."
   def show(dir, ref), do: run(dir, ["show", "--no-color", "--no-ext-diff", ref])
 
+  @doc """
+  Parse unified-diff text that did not come from `diff/2`.
+
+  diff-mode's buffer text IS the unified diff, and the renderer reads the
+  same bytes the reader sees. It parses them with this, so the card view
+  and the plain view can never disagree.
+  """
+  def parse(text) when is_binary(text), do: parse_diff(text)
+
   # --- running git -----------------------------------------------------------
 
   defp run(dir, args) do

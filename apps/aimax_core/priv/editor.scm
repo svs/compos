@@ -1301,6 +1301,17 @@
       (local-set-key "q" "collect-quit")
       (buffer-set-read-only! buf #t))))
 
+;; Emacs' C-x C-q. The way out of a read-only buffer, and the reason a mode
+;; may open files read-only without trapping the reader.
+(define-command "read-only-mode" "Toggle whether this buffer refuses edits"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (ro? (buffer-read-only? buf)))
+      (buffer-set-read-only! buf (not ro?))
+      (message (if ro? "writable" "read-only")))))
+
+(global-set-key "C-x C-q" "read-only-mode")
+
 (define-command "view-messages" "Display the *messages* buffer"
   (lambda () (display-buffer "*messages*")))
 

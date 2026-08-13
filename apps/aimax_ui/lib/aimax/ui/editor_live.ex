@@ -77,6 +77,20 @@ defmodule Aimax.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
+  # clicking a diff card header folds or unfolds it. The client holds a
+  # buffer and a file name, so it needs a closure rather than a command —
+  # git.scm registered one with diff-on-card-click!.
+  def handle_event("diff_card", %{"win" => win, "file" => file}, socket) do
+    with {id, ""} <- Integer.parse(to_string(win)) do
+      Input.run(socket.assigns.frame, fn ->
+        Aimax.Core.Editor.set_active(id)
+        Aimax.Core.SchemeAPI.diff_card_click(Aimax.Core.Editor.current_buffer(), file)
+      end)
+    end
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
   def handle_event("viewport", %{"rows" => rows}, socket) when is_integer(rows) do
     Aimax.Core.Editor.set_total_rows(rows, socket.assigns.frame)
     {:noreply, socket |> drain() |> refresh()}
@@ -253,6 +267,15 @@ defmodule Aimax.Ui.EditorLive do
 
     {Map.merge(leaf, %{lines: [], ag_blocks: blocks, ag_input: ag_input(leaf, ag)}),
      Map.put(cache, {:agent, leaf.id}, {key, blocks})}
+  end
+
+  # rich diff: the buffer text IS the unified diff, so the cards are parsed
+  # out of the same bytes the plain view shows. Only the controlled state —
+  # which cards are open, git's status letters — rides the payload.
+  defp decorate(%{type: :leaf, render_mode: "diff", diff: %{cards: cards}} = leaf, cache, _faces) do
+    cur = Aimax.Core.DiffView.current_file(cards, Aimax.Core.Text.line_index(leaf.text, leaf.point) + 1)
+
+    {Map.merge(leaf, %{lines: [], diff_cards: cards, diff_current: cur}), cache}
   end
 
   # below this many lines, ship the whole buffer once and let the browser
@@ -490,6 +513,54 @@ defmodule Aimax.Ui.EditorLive do
       data-path={@path}
       data-read-only={to_string(@read_only)}
     >
+      <%= if @node.render_mode == "diff" and Map.has_key?(@node, :diff_cards) do %>
+        <div class="diff-view">
+          <div class="diff-scroll">
+            <div :if={@node.diff_cards == []} class="diff-empty">no changes</div>
+            <div
+              :for={c <- @node.diff_cards}
+              class={"diff-card #{if c.file == @node.diff_current, do: "current", else: ""}"}
+            >
+              <div
+                class="diff-card-head"
+                phx-click="diff_card"
+                phx-value-win={@node.id}
+                phx-value-file={c.file}
+              >
+                <span class="diff-caret">{if c.open, do: "▾", else: "▸"}</span>
+                <span class="diff-status">{c.status}</span>
+                <span class="diff-file">{c.file}</span>
+                <span :if={c.old_file && c.old_file != c.file} class="diff-oldfile">
+                  ← {c.old_file}
+                </span>
+              </div>
+              <div :if={c.open} class="diff-hunks">
+                <div :if={c.binary?} class="diff-binary">binary file</div>
+                <div :if={!c.binary? and c.hunks == []} class="diff-binary">no diff content</div>
+                <div :for={h <- c.hunks} class="diff-hunk">
+                  <div class="diff-hunk-head">{h.header}</div>
+                  <div class="diff-grid">
+                    <%= for r <- h.rows do %>
+                      <%= if r.kind == :gap do %>
+                        <div class="diff-gap">· · ·  {r.count} unchanged lines</div>
+                      <% else %>
+                        <div class={"diff-side old k-#{r.kind}"}>
+                          <span class="diff-no">{r.old_no}</span>
+                          <span :if={r.old != nil} class="diff-text"><%= elem(r.old_parts, 0) %><em><%= elem(r.old_parts, 1) %></em><%= elem(r.old_parts, 2) %></span>
+                        </div>
+                        <div class={"diff-side new k-#{r.kind}"}>
+                          <span class="diff-no">{r.new_no}</span>
+                          <span :if={r.new != nil} class="diff-text"><%= elem(r.new_parts, 0) %><em><%= elem(r.new_parts, 1) %></em><%= elem(r.new_parts, 2) %></span>
+                        </div>
+                      <% end %>
+                    <% end %>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      <% else %>
       <%= if @node.render_mode == "agent" and Map.has_key?(@node, :ag_blocks) do %>
         <div class="agent-view" id={"agent-#{@node.id}"} phx-hook="AgentScroll">
           <div class="ag-scroll">
@@ -574,6 +645,7 @@ defmodule Aimax.Ui.EditorLive do
             ><span class="cap-label">{c.label}</span><span class="cap-kind">{c.hint}</span></span></span></span>
         </div>
       </div>
+      <% end %>
       <% end %>
       <% end %>
       <div class="modeline">

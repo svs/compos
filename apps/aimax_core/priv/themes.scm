@@ -65,6 +65,12 @@
     (list 'org-meta 'fg "#8a857a")
     (list 'fold-marker 'fg "#8a857a")
     ;; window chrome: gap between panels, rounded cards, soft shadow
+    (list 'diff-file 'fg "#26356b" 'weight "600")
+    (list 'diff-hunk 'fg "#7a5a1a")
+    (list 'diff-add 'fg "#20502f" 'bg "rgba(61, 107, 79, 0.13)")
+    (list 'diff-del 'fg "#7d2418" 'bg "rgba(160, 48, 32, 0.11)")
+    (list 'diff-add-word 'bg "rgba(61, 107, 79, 0.30)")
+    (list 'diff-del-word 'bg "rgba(160, 48, 32, 0.26)")
     (list 'chrome 'gap "6px" 'radius "5px"
           'border "1px solid #d5cdb9"
           'shadow "0 2px 10px rgba(27, 26, 23, 0.07)")))
@@ -108,6 +114,12 @@
     (list 'org-cookie 'fg "#d5ac66")
     (list 'org-meta 'fg "#a79d8c")
     (list 'fold-marker 'fg "#a79d8c")
+    (list 'diff-file 'fg "#9fb0ea" 'weight "600")
+    (list 'diff-hunk 'fg "#d5ac66")
+    (list 'diff-add 'fg "#9fd8b0" 'bg "rgba(121, 189, 147, 0.13)")
+    (list 'diff-del 'fg "#eb9282" 'bg "rgba(224, 112, 90, 0.13)")
+    (list 'diff-add-word 'bg "rgba(121, 189, 147, 0.32)")
+    (list 'diff-del-word 'bg "rgba(224, 112, 90, 0.30)")
     (list 'chrome 'gap "6px" 'radius "5px"
           'border "1px solid #39342b"
           'shadow "0 2px 14px rgba(0, 0, 0, 0.35)")))
@@ -138,6 +150,12 @@
     (list 'linenum 'fg "#4a4d59")
     (list 'border 'bg "#15161a")
     (list 'warn 'fg "#e0af68")
+    (list 'diff-file 'fg "#7aa2f7" 'weight "600")
+    (list 'diff-hunk 'fg "#e0af68")
+    (list 'diff-add 'fg "#9ece6a" 'bg "rgba(158, 206, 106, 0.13)")
+    (list 'diff-del 'fg "#f7768e" 'bg "rgba(247, 118, 142, 0.13)")
+    (list 'diff-add-word 'bg "rgba(158, 206, 106, 0.30)")
+    (list 'diff-del-word 'bg "rgba(247, 118, 142, 0.28)")
     (list 'chrome 'gap "6px" 'radius "5px"
           'border "1px solid #15161a"
           'shadow "0 2px 14px rgba(0, 0, 0, 0.4)")))
@@ -168,6 +186,12 @@
     (list 'linenum 'fg "#45475a")
     (list 'border 'bg "#11111b")
     (list 'warn 'fg "#fab387")
+    (list 'diff-file 'fg "#89b4fa" 'weight "600")
+    (list 'diff-hunk 'fg "#fab387")
+    (list 'diff-add 'fg "#a6e3a1" 'bg "rgba(166, 227, 161, 0.13)")
+    (list 'diff-del 'fg "#f38ba8" 'bg "rgba(243, 139, 168, 0.13)")
+    (list 'diff-add-word 'bg "rgba(166, 227, 161, 0.30)")
+    (list 'diff-del-word 'bg "rgba(243, 139, 168, 0.28)")
     (list 'chrome 'gap "6px" 'radius "5px"
           'border "1px solid #11111b"
           'shadow "0 2px 14px rgba(0, 0, 0, 0.4)")))
@@ -198,6 +222,12 @@
     (list 'linenum 'fg "#3b4261")
     (list 'border 'bg "#101014")
     (list 'warn 'fg "#e0af68")
+    (list 'diff-file 'fg "#7aa2f7" 'weight "600")
+    (list 'diff-hunk 'fg "#e0af68")
+    (list 'diff-add 'fg "#9ece6a" 'bg "rgba(158, 206, 106, 0.13)")
+    (list 'diff-del 'fg "#f7768e" 'bg "rgba(247, 118, 142, 0.13)")
+    (list 'diff-add-word 'bg "rgba(158, 206, 106, 0.30)")
+    (list 'diff-del-word 'bg "rgba(247, 118, 142, 0.28)")
     (list 'chrome 'gap "6px" 'radius "5px"
           'border "1px solid #101014"
           'shadow "0 2px 14px rgba(0, 0, 0, 0.4)")))

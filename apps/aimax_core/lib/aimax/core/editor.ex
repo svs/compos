@@ -1345,6 +1345,7 @@ defmodule Aimax.Core.Editor do
       style: Map.get(locals, "style"),
       render_mode: Map.get(locals, "render-mode"),
       agent: agent_leaf(locals, text),
+      diff: diff_leaf(locals, text),
       preview_authored: Map.get(locals, "preview-authored") == true,
       top: top,
       rows: rows,
@@ -1381,6 +1382,24 @@ defmodule Aimax.Core.Editor do
   end
 
   defp agent_leaf(_, _), do: nil
+
+  # the diff card model. The cards are a projection of the buffer text —
+  # the unified diff — so the card view and the plain view read the same
+  # bytes. Only the open set, git's status letters, and the watch flag come
+  # from locals: the text cannot say those.
+  defp diff_leaf(%{"render-mode" => "diff"} = locals, text) do
+    open = MapSet.new(Map.get(locals, "diff-open-cards") || [])
+    status = Map.new(Map.get(locals, "diff-status") || [], fn [f, xy] -> {f, xy} end)
+
+    %{
+      root: Map.get(locals, "git-root"),
+      open: open,
+      watch: Map.get(locals, "git-watch") == true,
+      cards: Aimax.Core.DiffView.cards(text, open, status)
+    }
+  end
+
+  defp diff_leaf(_, _), do: nil
 
   defp visible_geometry(text, point, hidden) do
     len = byte_size(text)

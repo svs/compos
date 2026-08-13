@@ -366,16 +366,15 @@ truncation), the one error model (C6 — `inspect/1` still reaches
 transcripts on the crash paths), capabilities read from `capabilities()`
 in Scheme (C7, which would also delete the `chat-wire-record` connector
 test R1 left behind), and `:resume` (A12).
-**Open bug, and it is mine:** the `C-c q` group-ask test
-(`editor_test.exs:1601`) fails about one run in ten on this branch —
-1/6 full suites, 1/33 isolated. It does not reproduce on `main` or on
-R1/R2/R4/R5 at 8 isolated runs each, so the sample cannot yet say which
-change did it; the async context fetch is the obvious suspect. The
-symptom is that the chat buffer holds a freshly built companion surface
-where the conversation should be — a chat re-initialised under a live
-conversation, which is the S2/S11 bug class. **Chase this before the stack
-merges.** Repro:
-`for i in $(seq 1 15); do mix test apps/aimax_core/test/aimax/editor_test.exs:1601 --seed $i; done`
+*The `C-c q` flake was a test bug, not a regression.* The fixture buffer is
+named `test-<counter>`, the counter often contains `42`, and the stub's
+reply was the string `"42"` — so `eventually(text =~ "42")` matched the
+buffer's own name in the help card and returned before the turn had
+rendered anything. The next assertion then raced the event batch. Moving
+the context fetch into a task made the batch land late enough to expose
+it. The stub now replies with words, and both assertions wait. 100 repeats
+clean. Worth remembering: an `eventually` that can match chrome is not a
+wait at all.
 
 **Why.** C1, C4, C6, C7; A12.
 

@@ -1273,7 +1273,11 @@ defmodule Aimax.EditorTest do
     # chat routes through the tool loop by default (chat-use-tools)
     Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: [%{content: prompt} | _]} ->
       assert prompt =~ "what is 6*7"
-      {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "42"}]}}
+      # NOT a bare number: the fixture buffer is named test-<counter>, and
+      # a reply of "42" matched the digits of its own name in the help card
+      # — the wait below passed before the turn had rendered anything
+      {:ok,
+       %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "six times seven"}]}}
     end)
 
     on_exit(fn ->
@@ -1292,7 +1296,8 @@ defmodule Aimax.EditorTest do
     type("what is 6*7")
     press(["RET"])
 
-    assert eventually(fn -> Buffer.text(companion) =~ "42" end)
+    assert eventually(fn -> Buffer.text(companion) =~ "six times seven" end)
+    assert eventually(fn -> Buffer.text(companion) =~ ">>> you: what is 6*7" end)
     press(["C-x", "1"])
   end
 
@@ -1604,7 +1609,11 @@ defmodule Aimax.EditorTest do
     Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: [%{content: prompt} | _]} ->
       assert prompt =~ "what is 6*7"
 
-      {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "42"}]}}
+      # NOT a bare number: the fixture buffer is named test-<counter>, and
+      # a reply of "42" matched the digits of its own name in the help card
+      # — the wait below passed before the turn had rendered anything
+      {:ok,
+       %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "six times seven"}]}}
     end)
 
     on_exit(fn ->
@@ -1618,8 +1627,8 @@ defmodule Aimax.EditorTest do
     press(["RET"])
 
     # the question became a turn in the group's one chat; point stayed put
-    assert eventually(fn -> Buffer.text(companion) =~ "42" end)
-    assert Buffer.text(companion) =~ "what is 6*7"
+    assert eventually(fn -> Buffer.text(companion) =~ "six times seven" end)
+    assert eventually(fn -> Buffer.text(companion) =~ "what is 6*7" end)
     assert Editor.current_buffer() == buf
 
     press(["C-x", "1"])

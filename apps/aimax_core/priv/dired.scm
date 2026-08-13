@@ -342,3 +342,15 @@
         (message "Created")))))
 
 (global-set-key "C-x d" "dired")
+
+;;; --- the public surface -------------------------------------------------------
+;;; Dired's callable surface is mostly its M-x commands, which apropos
+;;; searches with their docstrings. These are the entry points an agent
+;;; calls directly from eval-scheme.
+
+(category! 'files)
+(public! 'dired-open "(dired-open PATH) — open PATH in a Dired buffer; returns the buffer name")
+(public! 'dired-dir "(dired-dir BUF) — the directory a Dired buffer is showing")
+(public! 'dired-visible "(dired-visible BUF DIR) — the entries a Dired buffer is showing, after its filters")
+(public! 'dired-marks "(dired-marks BUF) — the marked entries, as (name . mark-char) pairs")
+

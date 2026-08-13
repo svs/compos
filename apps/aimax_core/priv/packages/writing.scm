@@ -121,3 +121,9 @@
     (message (string-append "Buffer has "
                             (number->string (count-words (current-buffer)))
                             " words"))))
+
+(category! 'writing)
+;; the rest of this file is writing-- internals; the surface is its two
+;; M-x commands, which apropos searches with their docstrings
+(public! 'count-words "(count-words BUF) — how many words a buffer holds")
+

@@ -990,11 +990,6 @@
 (define (connector-can? name cap)
   (and (member cap (connector-capabilities name)) #t))
 
-;; the api lane IS the stateless one; kept for config resolution, which
-;; asks about the backend module rather than about behaviour
-(define (connector-api? name)
-  (equal? (plist-get (connector-config name) 'backend) "req-llm"))
-
 ;; ONE model catalog, keyed by connector: what the switch prompt offers,
 ;; what a pinned model is validated against, what C-c m lists. 'models is
 ;; a list, or a thunk when the set is dynamic.

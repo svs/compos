@@ -458,6 +458,29 @@ defmodule Aimax.GitDiffTest do
     assert unstaged == ["b.txt", "a.txt"]
   end
 
+  test "C-x g from a repo-less buffer means the most recent repository", ctx do
+    # a buffer that lives in the repo, displayed a moment ago
+    host = "ctx-host-#{System.unique_integer([:positive])}"
+    {:ok, _} = Aimax.Core.create_buffer(host)
+    {:ok, _} = Session.eval(~s[(buffer-set-local! "#{host}" 'default-directory "#{ctx.dir}/")])
+    Editor.set_window_buffer(host)
+
+    # then a buffer with no repository around it at all
+    outside = Path.join(System.tmp_dir!(), "no-repo-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(outside)
+    on_exit(fn -> File.rm_rf!(outside) end)
+
+    stray = "ctx-stray-#{System.unique_integer([:positive])}"
+    {:ok, _} = Aimax.Core.create_buffer(stray)
+    {:ok, _} = Session.eval(~s[(buffer-set-local! "#{stray}" 'default-directory "#{outside}/")])
+    Editor.set_window_buffer(stray)
+
+    {:ok, _} = Session.eval(~s[(run-command "git-diff")])
+
+    assert wait_for(fn -> Buffer.exists?(ctx.buf) and Buffer.text(ctx.buf) =~ "@@" end),
+           "the fallback never found the repository"
+  end
+
   # --- a clean tree ----------------------------------------------------------
 
   test "a clean tree shows the recent commits, and RET opens one", ctx do

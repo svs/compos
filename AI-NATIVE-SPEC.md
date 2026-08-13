@@ -292,7 +292,9 @@ is gone with the rest: pre-unification desktops are not a case we carry
 (decided 2026-08-13). `nth` was not duplicated; it moved to `editor.scm` beside
 `plist-get`, since this dialect has no `list-ref`. The one genuine
 duplicate registration was `aimax-home`, twice in the same `scheme_api.ex`
-map. The `models` key of a connector now accepts a thunk, which is how the
+map. `chat-clear-input!` comes off the delete list: it is a two-line
+helper over the one `chat-input-region`, so it is part of the unification,
+not a casualty of it. The `models` key of a connector now accepts a thunk, which is how the
 api lane declares `*llm-models*` without `connector-models` special-casing
 it — that also removes one `connector-api?` call site ahead of R6.
 
@@ -307,7 +309,7 @@ it — that also removes one `connector-api?` call site ahead of R6.
   becomes a filter over it.
 - One model catalog keyed by connector; the api lane is a connector like the
   others (`editor.scm:2049`, `agent.scm:1088-1105`).
-- Delete: `chat-transcript`, `chat-input`, `chat-clear-input!`,
+- Delete: `chat-transcript`, `chat-input`,
   `chat-show-waiting!`, `chat-ready-message`, `chat-companion-show!`,
   `agent-toggle-view` (bind `chat-toggle-view` everywhere), first `yank`,
   `agent-mode` shim, `nth`, `chat-history-take`, duplicate `aimax-home`
@@ -334,6 +336,10 @@ registry, and a Scheme handler runs in the session by definition. The
 this surface does not expose. Getting a proxy call off the session needs a
 deferred-reply RPC design — worth its own item if it matters. A proxy call
 has no chat to raise a banner in, so `ask` is a refusal there.
+A second open edge (found 2026-08-13): the fail-closed crash guard sits on
+the Elixir gate only. The ACP lane (`agent.scm:342`) and the proxy
+(`tools.scm`) call `*permission-policy*` from Scheme with no guard of
+their own; a policy crash there fails the eval instead of denying cleanly.
 
 **Why.** B1, B2, B7, C2, C3. Three chokepoints, three policies.
 
@@ -361,8 +367,9 @@ stamped with its turn, and a cancel racing a fetch can no longer start a
 turn for a message the user took back (C9's guard, plus a `:busy` reply on
 a second prompt). `Aimax.Scheme.Text` replaces the four UTF-8 boundary
 copies (dup #10).
-C6: `Backend.error_text/1` turns a crash reason into a sentence; no
-`inspect/1` reaches a transcript. C7: backends declare `:stateless` and
+C6: `Backend.error_text/1` turns a crash reason into a sentence; an
+unrecognized reason falls back to a bounded `inspect` (limit 5, 200
+printable bytes) — a short raw term can still reach a transcript. C7: backends declare `:stateless` and
 `:metered`, Scheme asks `connector-can?`, and every "is this the api
 lane?" test is gone — including the `chat-wire-record` local R1 left
 behind, which is deleted. A12: `:resume` is REMOVED rather than
@@ -462,12 +469,9 @@ the honest answer is "read the source".
   did-you-mean layer (`server.ex:88-91` wraps eval like the tool path does).
 - **ACP parity.** The MCP proxy exposes `apropos` as a tool and the primer
   rides `session/new` system text.
-- **LLM assist, no RAG.** The catalog is ~400 entries ≈ small. Skip
-  embeddings. Add `(apropos-ask QUESTION)`: one `llm` call with the full
-  structured catalog inlined, answering with the exact expression to run.
-  Cheap model, cacheable system block (the catalog), correct by construction
-  against hallucinated names because the answer is checked with `boundp`
-  before returning. If the catalog outgrows one prompt, revisit.
+- **LLM assist, no RAG.** ~~Add `(apropos-ask QUESTION)`~~ — REVERSED, see
+  the status note above. The caller is already a model with the primer in
+  its context; a second model call buys nothing `(apropos ...)` lacks.
 
 **Done when.** A cold agent on the socket resolves "split the window and open
 file X in it" to the right expression in one `initialize` + one `(apropos ...)`
@@ -523,7 +527,8 @@ Small, independent, one commit each:
 - `Aimax.Core.Plist.to_json/2`; delete acp/session copies (dup #11).
 - One `plist-get` in editor.scm; delete custom/agent/chrome/notmuch copies
   (dup #12).
-- `(window-showing)`, `(other-window-id)`, `(next-window-id)` (dup #16).
+- Window helpers (dup #16) — landed as four: `window-showing`,
+  `window-showing-other`, `window-buffer`, `other-window-id`.
 - `(read-file-name prompt k)` (dup #17).
 - One isearch engine, two surfaces (dup #13).
 - Tagged folds: `(fold-set! buf tag ranges)` over `buffer-set-hidden!`; org

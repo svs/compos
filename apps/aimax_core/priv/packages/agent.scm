@@ -108,8 +108,6 @@
                 (cdr bs)))
         (agent-block-push! buf start end kind '()))))
 
-(define (nth n l) (if (= n 0) (car l) (nth (- n 1) (cdr l))))
-
 ;; a tool block closes when its update completes: extend to the body end,
 ;; flip status. Block: (start end "tool" id title kind status body-start).
 ;; Newest-first scan; tool updates always hit recent blocks.
@@ -579,41 +577,10 @@
           #f)
         m0)))
 
-;; a restored (or crashed) thread is a live transcript with a dead runtime —
-;; reattach a fresh agent on its connector. New ACP session: the transcript
-;; stays; server-side context isn't replayed yet (resume lands with P5).
-(define (agent-revive! slug)
-  (let* ((buf (agent-buf slug))
-         (mark (or (buffer-local buf 'agent-saved-mark)
-                   ;; older transcript: mark sits at the marker's last occurrence
-                   (let loop ((ms (re-find* *chat-input-marker* (buffer-text buf)))
-                              (last (buffer-size buf)))
-                     (if (null? ms) last (loop (cdr ms) (car (car ms)))))))
-         (cname (or (buffer-local buf 'agent-connector) *default-connector*))
-         (m (agent-model-for-connector buf cname)))
-    (buffer-set-local! buf 'agent-queued '())
-    ;; the fresh runtime decides who writes the record again (editor.scm)
-    (buffer-set-local! buf 'chat-wire-record (connector-api? cname))
-    ;; seed only when there IS a conversation — a fresh surface's meta
-    ;; card alone is chrome, not context. The api lane never seeds: its
-    ;; turns are replayed in full on every request anyway.
-    (when (and (not (connector-api? cname))
-               (> mark 0)
-               (not (equal? (string-trim (agent-seed-transcript buf)) "")))
-      (buffer-set-local! buf 'agent-seed-context #t))
-    (agent-start! slug
-      (append (list 'buffer buf 'mark mark)
-              (agent-resolve-config
-                (append (list 'connector (or (buffer-local buf 'agent-connector)
-                                             *default-connector*))
-                        (if (and m (not (equal? m "")))
-                            (list 'model m)
-                            '())
-                        ;; agent-backed chats keep their preset MCP servers
-                        ;; across revives
-                        (let ((ps (buffer-local buf 'chat-presets)))
-                          (if ps (list 'presets ps) '()))))))
-    (message (string-append "agent " slug ": revived (fresh session)"))))
+;; a restored (or crashed) thread is a live transcript with a dead runtime.
+;; The slug-keyed door onto the one attach function (editor.scm): a fresh
+;; agent on its own connector, seeded with what was said.
+(define (agent-revive! slug) (chat-attach! (agent-buf slug)))
 
 ;; the low-level reattach: kill + start again on this connector/model.
 ;; Fresh session — the transcript stays, server-side context doesn't.
@@ -753,18 +720,13 @@
 
 ;; your messages, newest first (the record is already newest first)
 (define (chat-history buf)
-  (chat-history-take
+  (chat-take
     (let loop ((ts (if (boundp (quote chat-turns)) (chat-turns buf) '())) (acc '()))
       (cond ((null? ts) (reverse acc))
             ((equal? (car (car ts)) "user")
              (loop (cdr ts) (cons (car (cdr (car ts))) acc)))
             (else (loop (cdr ts) acc))))
     *chat-history-limit*))
-
-(define (chat-history-take xs n)
-  (if (or (null? xs) (= n 0))
-      '()
-      (cons (car xs) (chat-history-take (cdr xs) (- n 1)))))
 
 ;; back to "not walking": the next up starts from the newest message again
 (define (chat-history-reset! buf)
@@ -927,18 +889,23 @@
   '(cmd "codex-acp" model-flag "-c model="
     models ("gpt-5.6-luna" "gpt-5.5" "gpt-5.5-pro" "gpt-5.4" "gpt-5.4-mini" "gpt-5.3-codex")))
 ;; the direct-API lane: in-process req_llm turns — streaming, tools, cost
-;; tracking, no subprocess. "api" is just another connector.
-(define-connector! "api" '(backend "req-llm"))
+;; tracking, no subprocess. "api" is just another connector, and it
+;; declares its models like any other — as a thunk, because the set is
+;; *llm-models*, which a user can set! at any time.
+(define-connector! "api"
+  (list 'backend "req-llm" 'models (lambda () *llm-models*)))
 
 (define (connector-api? name)
   (equal? (plist-get (connector-config name) 'backend) "req-llm"))
 
-;; what the switch prompt offers: the connector's declared 'models; the api
-;; lane can use anything the llm wire routes (*llm-models*)
+;; ONE model catalog, keyed by connector: what the switch prompt offers,
+;; what a pinned model is validated against, what C-c m lists. 'models is
+;; a list, or a thunk when the set is dynamic.
 (define (connector-models name)
-  (let ((conf (connector-config name)))
-    (or (plist-get conf 'models)
-        (if (connector-api? name) *llm-models* '()))))
+  (let ((m (plist-get (connector-config name) 'models)))
+    (cond ((procedure? m) (m))
+          (m m)
+          (else '()))))
 
 ;; CLAUDE_CODE_SUBAGENT_MODEL too: the adapter's bundled SDK defaults
 ;; subagents to a retired model id (404s) unless told otherwise
@@ -1071,16 +1038,7 @@
   (local-set-key* buf "C-c C-n" "agent-permission-deny")
   (local-set-key* buf "C-c p" "chat-set-permission-mode")
   (local-set-key* buf "C-c t" "chat-refresh-tools")
-  (local-set-key* buf "C-c C-v" "agent-toggle-view"))
-
-(define-command "agent-toggle-view" "Toggle rich and plain transcript rendering"
-  (lambda ()
-    (let ((buf (current-buffer)))
-      (when (agent-slug-of buf)
-        (let ((rich? (equal? (buffer-local buf 'render-mode) "agent")))
-          (buffer-set-local! buf 'render-mode (if rich? #f "agent"))
-          (message (if rich? "plain transcript" "rich transcript")))))))
-
+  (local-set-key* buf "C-c C-v" "chat-toggle-view"))
 
 ;; legacy: pre-unification *agent:* buffers restore straight into
 ;; chat-mode — there is only chat, riding ACP or the API. chat-mode's
@@ -1137,18 +1095,13 @@
 (define *agents-buffer* "*chats*")
 (add-display-rule! *agents-buffer* 'popup)
 
-;; every thread the editor knows: (slug status) — status from the runtime
-;; when alive, 'dead for restored transcripts
+;; every thread the editor knows: (slug status). One scan of the fleet —
+;; chat-list-bufs — answers both questions; a thread is just a chat that
+;; claims a slug, so this is a filter over it, not a second walk with its
+;; own idea of what counts.
 (define (agent-threads)
-  (let loop ((bs (buffer-list)) (acc '()))
-    (cond ((null? bs) (reverse acc))
-          ;; any buffer claiming a slug is a thread — chats included
-          ((buffer-local (car bs) 'agent-slug)
-           (loop (cdr bs)
-                 (cons (list (buffer-local (car bs) 'agent-slug)
-                             (agent-status (buffer-local (car bs) 'agent-slug)))
-                       acc)))
-          (else (loop (cdr bs) acc)))))
+  (map (lambda (b) (list (buffer-local b 'agent-slug) (chat-row-status b)))
+       (filter (lambda (b) (buffer-local b 'agent-slug)) (chat-list-bufs))))
 
 (define (agent-status-rank s)
   (cond ((equal? s 'needs_attention) 0)

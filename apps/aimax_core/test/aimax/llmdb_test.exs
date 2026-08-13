@@ -132,7 +132,8 @@ defmodule Aimax.LLMDbTest do
     eval.(~s{(chat-usage-note! "*zz-cost-chat*" (list 'input 200 'output 20 'cost 0.02))})
 
     assert eval.(~s{(format-usd (buffer-local "*zz-cost-chat*" 'chat-cost))}) == ~s{"$0.0300"}
-    assert eval.(~s{(chat-ready-message "*zz-cost-chat*")}) =~ "chat total $0.03"
+    # the running totals travel with the cost, so C-c $ can state a hit rate
+    assert eval.(~s{(plist-get (chat-usage-total "*zz-cost-chat*") 'input)}) == "300"
 
     # an unpriced turn keeps the running total instead of poisoning it
     eval.(~s{(chat-usage-note! "*zz-cost-chat*" (list 'input 5 'output 5 'cost #f))})

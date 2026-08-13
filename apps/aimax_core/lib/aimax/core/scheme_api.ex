@@ -175,9 +175,6 @@ defmodule Aimax.Core.SchemeAPI do
         File.write!(path, text)
         true
       end,
-      # the aimax home dir (config, persisted settings) as a string
-      "aimax-home" => fn [] -> Aimax.Core.home() end,
-
       # processes (comint)
       "start-process!" => fn [buffer, cmd] ->
         case Aimax.Core.Proc.start(buffer, cmd) do

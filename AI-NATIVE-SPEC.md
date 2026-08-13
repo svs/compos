@@ -287,6 +287,17 @@ frames. Add `test/aimax/desktop_restore_test.exs` covering each.
 
 ### R4 — One chat surface implementation
 
+*Done 2026-08-13 on `refactor/r4-one-chat-surface`.* One deviation, on
+purpose: the `agent-mode` shim stays. It is not dead code beside its
+replacement — it is the only path that rescues a pre-unification desktop,
+and deleting it restores those buffers inert, which is exactly S8's bug
+class. `nth` was not duplicated either; it moved to `editor.scm` beside
+`plist-get`, since this dialect has no `list-ref`. The one genuine
+duplicate registration was `aimax-home`, twice in the same `scheme_api.ex`
+map. The `models` key of a connector now accepts a thunk, which is how the
+api lane declares `*llm-models*` without `connector-models` special-casing
+it — that also removes one `connector-api?` call site ahead of R6.
+
 **Why.** Dup #1, #2, #3, #15, #18, #19, #20, #29, #32.
 
 **What.** Keep the buf-keyed set; delete the `agent-*` wrappers.

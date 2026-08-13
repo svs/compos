@@ -32,6 +32,10 @@
           ((equal? (car pl) key) (car (cdr pl)))
           (else (loop (cdr (cdr pl)))))))
 
+;; list-ref by its Emacs name — this dialect has no builtin for it, and it
+;; was living as a private helper inside packages/agent.scm
+(define (nth n l) (if (= n 0) (car l) (nth (- n 1) (cdr l))))
+
 ;;; --- editing commands ------------------------------------------------------
 
 (define-command "forward-char" "Move point one character forward"
@@ -59,9 +63,6 @@
   (lambda ()
     (let ((killed (kill-line!)))
       (if (equal? killed "") #f (kill-push! killed)))))
-
-(define-command "yank" "Reinsert the last killed text at point"
-  (lambda () (insert! (kill-top))))
 
 (define-command "undo" "Undo the last change"
   (lambda ()
@@ -1632,17 +1633,26 @@
                         '())))))
       slug)))
 
-;; a task chat's surface: meta card + input marker — the thread flavor
-;; of group-chat-init!, used by (execute ...)
-(define (chat-task-init! buf label)
-  (let ((help (string-append
-                "chat · " label "\n"
-                "RET sends · C-g aborts · C-RET interrupts · TAB folds tool output · "
-                "C-c b backend · C-c m model\n")))
+;; Every chat surface is built the same way: one meta card of help, then
+;; the >>> you: input region. Only the card's words differ, so only the
+;; words are a parameter — the two builders had drifted into setting
+;; different locals for the same layout.
+(define (chat-surface-init! buf title lines)
+  (let ((help (string-append title "\n" lines)))
     (buffer-append! buf help)
     (chat-blocks-push! buf 0 (string-byte-length help) "meta" '())
     (buffer-set-local! buf 'agent-saved-mark (string-byte-length help))
-    (buffer-append! buf *chat-input-marker*)))
+    (buffer-set-local! buf 'agent-marker-bytes
+      (string-byte-length *chat-input-marker*))
+    (buffer-append! buf *chat-input-marker*)
+    buf))
+
+;; a task chat's surface, used by (execute ...)
+(define (chat-task-init! buf label)
+  (chat-surface-init! buf (string-append "chat · " label)
+    (string-append
+      "RET sends · C-g aborts · C-RET interrupts · TAB folds tool output · "
+      "C-c b backend · C-c m model\n")))
 
 ;; a chat saved as a file IS a revivable conversation: the transcript
 ;; format is ### You / ### Assistant (whole buffer = context) and .chat
@@ -1909,20 +1919,37 @@
              (let ((offered (map car (or (buffer-local buf 'agent-models) '()))))
                (and (pair? offered) (member model offered)))))))
 
-;; A chat with no runtime gets one on its OWN connector — identity
-;; survives resets, restarts, and the runtime sweep, so a restored
-;; claude-code chat comes back as claude-code, not as the api default.
-;; Whatever was already said is seeded into the fresh session.
+;; a transcript from before the mark was a buffer-local: it sits at the
+;; marker's last occurrence
+(define (chat-legacy-mark buf)
+  (let loop ((ms (re-find* *chat-input-marker* (buffer-text buf)))
+             (last (buffer-size buf)))
+    (if (null? ms) last (loop (cdr ms) (car (car ms))))))
+
+;; ONE attach. A chat that never had a runtime and a chat whose runtime
+;; died are the same situation: put a fresh thread on the chat's OWN
+;; connector — identity survives resets, restarts, and the runtime sweep,
+;; so a restored claude-code chat comes back as claude-code — and tell it
+;; what was already said. The two functions that did this had drifted:
+;; one reset 'agent-queued and rescued a legacy mark, the other decided
+;; seeding from a different test.
+(define (chat-attach! buf)
+  (let* ((cname (or (buffer-local buf 'agent-connector) "api"))
+         (mark (or (buffer-local buf 'agent-saved-mark) (chat-legacy-mark buf)))
+         (said (string-trim (agent-seed-transcript buf))))
+    (buffer-set-local! buf 'agent-saved-mark mark)
+    (buffer-set-local! buf 'agent-queued '())
+    ;; a fresh ACP session starts empty and has to be seeded; the api lane
+    ;; replays the record on every request anyway
+    (buffer-set-local! buf 'agent-seed-context
+      (and (not (connector-api? cname)) (> mark 0) (not (equal? said ""))))
+    (let ((slug (chat-attach-agent! buf cname)))
+      (unless (equal? said "")
+        (message (string-append "agent " slug ": revived (fresh session)")))
+      slug)))
+
 (define (chat-ensure-runtime! buf)
-  (or (buffer-local buf 'agent-slug)
-      (let* ((cname (or (buffer-local buf 'agent-connector) "api"))
-             (had-turns? (pair? (chat-turns buf))))
-        (buffer-set-local! buf 'agent-seed-context
-          (and had-turns? (not (connector-api? cname))))
-        (let ((slug (chat-attach-agent! buf cname)))
-          (when had-turns?
-            (message (string-append "agent " slug ": revived (fresh session)")))
-          slug))))
+  (or (buffer-local buf 'agent-slug) (chat-attach! buf)))
 
 ;; the one switch. connector #f keeps the current one; model "" means the
 ;; connector's own default.
@@ -1940,8 +1967,6 @@
        (agent-update-modeline! buf)
        'in-place)
       (else
-        (when (and slug (not (equal? (agent-status slug) 'dead)))
-          (agent-kill! slug))
         ;; identity that belongs to the OLD backend must not follow the
         ;; conversation across (a foreign model id is silently ignored by
         ;; an adapter while the modeline keeps repeating it)
@@ -1949,13 +1974,16 @@
           (buffer-set-local! buf 'agent-models #f)
           (buffer-set-local! buf 'agent-modes #f)
           (buffer-set-local! buf 'agent-mode #f))
-        (buffer-set-local! buf 'agent-model (if (equal? model "") #f model))
-        ;; the api lane replays the record on every request; an ACP
-        ;; session starts empty and has to be seeded
-        (buffer-set-local! buf 'agent-seed-context
-          (and (not (connector-api? cname)) (pair? (chat-turns buf))))
         (buffer-set-local! buf 'chat-mcp-dirty #f)
-        (chat-attach-agent! buf cname model)
+        ;; the restart itself is agent-reconnect!'s job — the same one
+        ;; C-RET and a preset change use. Reimplementing it here is how
+        ;; the two paths drifted.
+        (if slug
+            (agent-reconnect! slug cname model)
+            (begin
+              (buffer-set-local! buf 'agent-connector cname)
+              (buffer-set-local! buf 'agent-model (if (equal? model "") #f model))
+              (chat-attach! buf)))
         'reattached))))
 
 (define-command "chat-set-backend" "Power this chat by the API or an agent connector"
@@ -2234,11 +2262,6 @@
              old))
       (buffer-set-local! buf 'chat-turns #f))))
 
-(define (chat-show-waiting! buf)
-  (let ((start (chat-render! buf "⋯ thinking\n")))
-    (chat-blocks-push! buf start (chat-mark buf) "waiting" '())
-    (buffer-set-local! buf 'chat-waiting (list start (chat-mark buf)))))
-
 (define (chat-clear-waiting! buf)
   (let ((w (buffer-local buf 'chat-waiting)))
     (when w
@@ -2328,14 +2351,6 @@
         #f
         (string-append
           (number->string (quotient (* 100 read) (+ read fresh))) "%"))))
-
-(define (chat-ready-message buf)
-  (let ((u (buffer-local buf 'chat-last-usage)))
-    (string-append "Reply ready"
-      (if (and u (custom--plist-get u 'cost))
-          (string-append " · " (format-usd (custom--plist-get u 'cost))
-                         " (chat total " (format-usd (or (buffer-local buf 'chat-cost) 0)) ")")
-          ""))))
 
 ;;; --- the direct lane's turn context ---------------------------------------------
 ;;; Backend.ReqLLM pulls this fresh at every turn start: the transcript
@@ -2489,16 +2504,12 @@
 ;; a fresh group chat is a rich surface from birth: help on top (a "meta"
 ;; card in the agent design), then the >>> you: input region
 (define (group-chat-init! buf g)
-  (let ((help (string-append
-                "companion · " g "\n"
-                "RET sends · C-c w hops to the document · "
-                "C-c m model · C-c C-v plain view\n"
-                "it reads the live buffers before it speaks, "
-                "and edits them in place when you ask\n")))
-    (buffer-append! buf help)
-    (chat-blocks-push! buf 0 (string-byte-length help) "meta" '())
-    (buffer-set-local! buf 'agent-saved-mark (string-byte-length help))
-    (buffer-append! buf *chat-input-marker*)))
+  (chat-surface-init! buf (string-append "companion · " g)
+    (string-append
+      "RET sends · C-c w hops to the document · "
+      "C-c m model · C-c C-v plain view\n"
+      "it reads the live buffers before it speaks, "
+      "and edits them in place when you ask\n")))
 
 (define (group-chat-name g) (string-append "*chat:" g "*"))
 
@@ -2530,10 +2541,6 @@
     (set-mode! "chat-mode")
     (end-of-buffer!)
     buf))
-
-;; legacy entry point kept for scripts: DOC's companion = its group's chat
-(define (chat-companion-show! doc)
-  (group-chat-show! (group-ensure! doc)))
 
 ;; ask the group without leaving the current buffer: the minibuffer prompt
 ;; becomes a group-chat turn, point stays put, the reply lands on the right
@@ -2590,14 +2597,14 @@
           (if (not (buffer-exists? doc))
               (message (string-append "No buffer " doc))
               (let ((g (group-ensure! doc)))
+                ;; joining the group is the whole act; the layout is
+                ;; group-chat-show!'s job, and it is the only place that
+                ;; knows what a chat's two panes look like
                 (buffer-set-local! chat 'group g)
-                (delete-other-windows!)
+                ;; the document takes this window first, so the layout
+                ;; builder lands the chat beside it rather than on it
                 (switch-to-buffer! doc)
-                (split-window! 'h 0.6)
-                (other-window!)
-                (switch-to-buffer! chat)
-                (set-mode! "chat-mode")
-                (end-of-buffer!)
+                (group-chat-show! g)
                 (message (string-append chat " now accompanies " g)))))))))
 
 ;; C-c w toggles sides: in a work buffer it opens (or refocuses) the group
@@ -3158,6 +3165,5 @@
 (public! 'group-buffers "(group-buffers G) -> names of the buffers tagged 'group G")
 (public! 'group-chat "(group-chat G) — find or create G's chat buffer; returns its name")
 (public! 'group-chat-show! "(group-chat-show! G) — open/focus G's chat pane; returns its name")
-(public! 'chat-companion-show! "(chat-companion-show! DOC) — open/focus DOC's companion chat; returns its name")
 
 (message "editor.scm loaded")

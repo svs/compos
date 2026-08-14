@@ -129,7 +129,7 @@ defmodule Aimax.Core.SchemeAPI do
       "exchange-point-and-mark!" => "(exchange-point-and-mark!) — swap point and mark; return #f if no mark is set.",
       "ts-nav" => "(ts-nav OP) — tree-sitter motion 'forward|'backward|'up|'down; return a byte pos or #f.",
       "ts-node" =>
-        "(ts-node START END OP) — the node covering the range, or its 'at|'parent|'child|'next|'prev|'top; return (KIND START END) or #f.",
+        "(ts-node KIND START END OP) — the node KIND covers the range (\"\" for the smallest); return its 'at|'parent|'child|'next|'prev|'top as (KIND START END), or #f.",
       "ts-query" => "(ts-query QUERY) — run a tree-sitter query; return (CAPTURE START END) byte ranges.",
       "ts-langs" => "(ts-langs) — return the names of the loaded tree-sitter languages.",
       "buffer-search" => "(buffer-search Q FROM) — search forward from byte FROM; return (START END) or #f.",
@@ -543,7 +543,7 @@ defmodule Aimax.Core.SchemeAPI do
       end,
       # node identity is a byte range, so the caller can walk from the node
       # it stands on instead of from the deepest node under point
-      "ts-node" => fn [start, stop, op] ->
+      "ts-node" => fn [kind, start, stop, op] ->
         buf = Editor.current_buffer()
 
         case Buffer.get_local(buf, "ts-lang") do
@@ -551,7 +551,9 @@ defmodule Aimax.Core.SchemeAPI do
             false
 
           lang ->
-            case Aimax.Core.TS.ts_node(lang, Buffer.text(buf), start, stop, plain(op)) do
+            kind = if is_binary(kind), do: kind, else: ""
+
+            case Aimax.Core.TS.ts_node(lang, Buffer.text(buf), kind, start, stop, plain(op)) do
               nil -> false
               {kind, s, e} -> [kind, s, e]
             end

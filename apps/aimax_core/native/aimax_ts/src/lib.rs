@@ -108,12 +108,17 @@ fn ts_highlight(lang_name: String, text: String) -> Vec<(usize, usize, String)> 
 /// The named node covering [start, end), and its neighbours in the tree.
 /// ops: at | parent | child | next | prev | top ("top" is the ancestor
 /// whose own parent is the root). Returns (kind, start, end), or None.
-/// The caller passes the range of the node it is on, so a node knows
-/// itself: start == end means "the smallest node containing point".
+///
+/// The caller passes the node it stands on, so a node knows itself:
+/// start == end with an empty kind means "the smallest node containing
+/// point". The kind matters because nested nodes can cover the SAME byte
+/// range — an Elixir `arguments` and the call inside it — and the range
+/// alone would then name the wrong one.
 #[rustler::nif(schedule = "DirtyCpu")]
 fn ts_node(
     lang_name: String,
     text: String,
+    kind: String,
     start: usize,
     end: usize,
     op: String,
@@ -123,7 +128,12 @@ fn ts_node(
     let root = tree.root_node();
     let start = start.min(text.len());
     let end = end.clamp(start, text.len());
-    let node = root.named_descendant_for_byte_range(start, end)?;
+    let smallest = root.named_descendant_for_byte_range(start, end)?;
+    let node = if kind.is_empty() {
+        smallest
+    } else {
+        same_range_kind(smallest, &kind).unwrap_or(smallest)
+    };
 
     let target = match op.as_str() {
         "at" => Some(node),
@@ -150,6 +160,22 @@ fn ts_node(
         target.start_byte(),
         target.end_byte(),
     ))
+}
+
+/// Climb from NODE while the parent covers the same bytes, looking for
+/// the kind the caller named.
+fn same_range_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
+    let (s, e) = (node.start_byte(), node.end_byte());
+    let mut n = node;
+    loop {
+        if n.kind() == kind {
+            return Some(n);
+        }
+        match n.parent() {
+            Some(p) if p.start_byte() == s && p.end_byte() == e => n = p,
+            _ => return None,
+        }
+    }
 }
 
 fn named_parent(node: Node) -> Option<Node> {

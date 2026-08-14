@@ -15,10 +15,12 @@ defmodule Aimax.Core.TS do
   def ts_nav(_lang, _text, _pos, _op), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc """
-  The named node covering [start, stop) and its neighbours.
+  The named node {kind, start, stop} and its neighbours. An empty kind
+  means the smallest node covering the range; nested nodes can share a
+  range, so the kind names which one the caller stands on.
   op: at | parent | child | next | prev | top -> {kind, start, stop} or nil.
   """
-  def ts_node(_lang, _text, _start, _stop, _op), do: :erlang.nif_error(:nif_not_loaded)
+  def ts_node(_lang, _text, _kind, _start, _stop, _op), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc "Arbitrary query: [{capture, start, stop}]."
   def ts_query_nif(_lang, _text, _query), do: :erlang.nif_error(:nif_not_loaded)

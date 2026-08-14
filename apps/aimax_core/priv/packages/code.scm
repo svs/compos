@@ -30,48 +30,81 @@
 (define (code--start n) (cadr n))
 (define (code--end n) (caddr n))
 
-(define (code--text n)
-  (substring-bytes (buffer-text (current-buffer)) (code--start n) (code--end n)))
+(define (code--text buf n)
+  (substring-bytes (buffer-text buf) (code--start n) (code--end n)))
 
 ;; a node worth stopping on covers more than one line
-(define (code--multiline? n)
-  (if (string-index (code--text n) "\n") #t #f))
+(define (code--multiline? buf n)
+  (if (string-index (code--text buf n) "\n") #t #f))
 
-;; the buffer has a grammar the NIF knows
-(define (code--ts? buf)
-  (if (buffer-local buf 'ts-lang) #t #f))
+;; Which backend answers. The mode decides once, on entry: a grammar that
+;; parses this buffer wins, and everything else browses by indentation.
+;; Asking per keypress would reparse the file to learn what does not
+;; change while the reader reads.
+(define (code--pick-backend! buf)
+  (buffer-set-local! buf 'code-backend
+    (if (and (buffer-local buf 'ts-lang) (ts-node "" 0 0 'at)) "ts" "indent")))
 
-;; ONE node question, answered by whichever backend the buffer has.
+;; ONE node question, answered by the backend the mode picked. KIND names
+;; which node the caller stands on, because nested nodes can cover the
+;; same bytes; "" asks for the smallest node at the range.
 ;; OP is 'at, 'parent, 'child, 'next, 'prev or 'top.
-(define (code--ask buf s e op)
-  (if (code--ts? buf)
-      (ts-node s e op)
+(define (code--ask buf kind s e op)
+  (if (equal? (buffer-local buf 'code-backend) "ts")
+      (ts-node kind s e op)
       (code--indent-ask buf s e op)))
+
+;; the same question, asked about a node the caller holds
+(define (code--ask-node buf n op)
+  (code--ask buf (code--kind n) (code--start n) (code--end n) op))
 
 ;;; --- motion policy ------------------------------------------------------------
 
+;; Browsing starts on the code of a line, not on the indentation before
+;; it: point at the start of "  def a do" means the def, not the block
+;; that holds it.
+(define (code--anchor buf pos)
+  (let* ((text (buffer-text buf))
+         (size (string-byte-length text))
+         (bol (let loop ((i pos))
+                (if (or (= i 0) (equal? (substring-bytes text (- i 1) i) "\n"))
+                    i
+                    (loop (- i 1)))))
+         (code (let loop ((i bol))
+                 (cond ((>= i size) i)
+                       ((member (substring-bytes text i (+ i 1)) '(" " "\t")) (loop (+ i 1)))
+                       (else i)))))
+    (if (< pos code) code pos)))
+
 ;; The smallest node around POS that spans more than one line. A reader
 ;; browses blocks; the identifier under point is not a place to stand.
-(define (code--enclosing buf pos)
-  (let loop ((n (code--ask buf pos pos 'at)) (depth 0))
+(define (code--enclosing buf pos0)
+  (let ((pos (code--anchor buf pos0)))
+    (code--enclosing-at buf pos)))
+
+(define (code--enclosing-at buf pos)
+  (let loop ((n (code--ask buf "" pos pos 'at)) (depth 0))
     (cond ((not n) #f)
           ((> depth 30) n)
-          ((code--multiline? n) n)
+          ;; an outline line is a node in its own right; a tree-sitter
+          ;; identifier is not — it is a word inside one
+          ((equal? (buffer-local buf 'code-backend) "indent") n)
+          ((code--multiline? buf n) n)
           (else
-            (let ((up (code--ask buf (code--start n) (code--end n) 'parent)))
+            (let ((up (code--ask-node buf n 'parent)))
               (if up (loop up (+ depth 1)) n))))))
 
 ;; Descend to the first child that spans more than one line — the block,
 ;; not the keyword before it. With no such child, take the first child.
 (define (code--descend buf n)
-  (let ((first (code--ask buf (code--start n) (code--end n) 'child)))
-    (if (not first)
-        #f
+  (let ((first (code--ask-node buf n 'child)))
+    (if (or (not first) (equal? (buffer-local buf 'code-backend) "indent"))
+        first
         (let loop ((cur first) (steps 0))
-          (cond ((code--multiline? cur) cur)
+          (cond ((code--multiline? buf cur) cur)
                 ((> steps 50) first)
                 (else
-                  (let ((nx (code--ask buf (code--start cur) (code--end cur) 'next)))
+                  (let ((nx (code--ask-node buf cur 'next)))
                     (if nx (loop nx (+ steps 1)) first))))))))
 
 ;; The node the reader stands on. Point at the node start means the stored
@@ -83,12 +116,24 @@
         n
         (code--enclosing buf (point)))))
 
-(define (code--goto! buf n)
+;; the tint and the modeline for a node — no point motion, so the restore
+;; path can rebuild the look of a buffer that is not the current one
+(define (code--show! buf n)
   (buffer-set-local! buf 'code-node n)
-  (goto-char! (code--start n))
-  (overlay-set! buf 'code-scope
-    (list (list (code--start n) (code--end n) "code-scope")))
+  ;; a tint over the whole file says nothing about where the reader is
+  (if (code--whole-buffer? buf n)
+      (overlay-clear! buf 'code-scope)
+      (overlay-set! buf 'code-scope
+        (list (list (code--start n) (code--end n) "code-scope"))))
   (buffer-set-local! buf 'modeline-info (string-append "browse " (code--kind n))))
+
+(define (code--whole-buffer? buf n)
+  (and (= (code--start n) 0)
+       (>= (code--end n) (- (string-byte-length (buffer-text buf)) 1))))
+
+(define (code--goto! buf n)
+  (code--show! buf n)
+  (goto-char! (code--start n)))
 
 (define (code--move! op)
   (let* ((buf (current-buffer))
@@ -97,7 +142,7 @@
         (message "code-browse: no structure here")
         (let ((target (if (equal? op 'child)
                           (code--descend buf cur)
-                          (code--ask buf (code--start cur) (code--end cur) op))))
+                          (code--ask-node buf cur op))))
           (if target
               (code--goto! buf target)
               (message (string-append "code-browse: no " (symbol->string op))))))))
@@ -106,14 +151,14 @@
 
 ;; A node folds its body: from the end of its first line to its end. The
 ;; first line stays on screen, so the reader keeps the signature.
-(define (code--body n)
-  (let ((nl (string-index (code--text n) "\n")))
+(define (code--body buf n)
+  (let ((nl (string-index (code--text buf n) "\n")))
     (and nl (list (+ (code--start n) nl) (code--end n)))))
 
 (define (code--toggle-fold!)
   (let* ((buf (current-buffer))
          (n (code--node buf))
-         (r (and n (code--body n))))
+         (r (and n (code--body buf n))))
     (if (not r)
         (message "code-browse: nothing to fold here")
         (begin
@@ -122,17 +167,17 @@
 
 ;; Every node under the root, in buffer order.
 (define (code--children buf n)
-  (let loop ((c (code--ask buf (code--start n) (code--end n) 'child)) (acc '()))
+  (let loop ((c (code--ask-node buf n 'child)) (acc '()))
     (if (not c)
         (reverse acc)
-        (loop (code--ask buf (code--start c) (code--end c) 'next) (cons c acc)))))
+        (loop (code--ask-node buf c 'next) (cons c acc)))))
 
 (define (code--top-nodes buf)
-  (let ((first (code--ask buf 0 0 'top)))
+  (let ((first (code--ask buf "" 0 0 'top)))
     (if (not first)
         '()
         (let loop ((n first) (acc (list first)))
-          (let ((nx (code--ask buf (code--start n) (code--end n) 'next)))
+          (let ((nx (code--ask-node buf n 'next)))
             (if nx (loop nx (cons nx acc)) (reverse acc)))))))
 
 ;; What to fold: the top-level nodes, unless one node wraps the whole file
@@ -155,8 +200,9 @@
 (define (code--fold-defaults! buf)
   (when (> (code--buffer-lines buf) code-browse-fold-lines)
     (let ((ranges (filter (lambda (r) r)
-                          (map code--body
-                               (filter code--multiline? (code--fold-nodes buf))))))
+                          (map (lambda (n) (code--body buf n))
+                               (filter (lambda (n) (code--multiline? buf n))
+                                       (code--fold-nodes buf))))))
       (fold-set! buf 'code ranges)
       (buffer-set-local! buf 'code-folds ranges))))
 
@@ -278,7 +324,7 @@
                (if (and (< i size) (word? (substring-bytes text i (+ i 1))))
                    (loop (+ i 1))
                    i))))
-      (and (> e s) (substring-bytes text s e))))
+      (and (> e s) (substring-bytes text s e)))))
 
 ;; A definition line names the symbol after a defining word. The list is
 ;; short on purpose: it covers the languages the editor parses today.
@@ -364,14 +410,21 @@
                              code--keys)))))
   (for-each (lambda (k) (local-set-key* buf (car k) (cadr k))) code--keys)
   (buffer-set-read-only! buf #t)
-  (let ((folds (buffer-local buf 'code-folds)))
-    (if folds
-        (fold-set! buf 'code folds)
-        (code--fold-defaults! buf)))
-  (let ((n (or (buffer-local buf 'code-node) (code--enclosing buf (point)))))
-    (if n
-        (code--goto! buf n)
-        (buffer-set-local! buf 'modeline-info "browse"))))
+  ;; the node questions read the CURRENT buffer, so a restore of a buffer
+  ;; that is not on screen rebuilds from the locals alone
+  (let ((here (equal? buf (current-buffer)))
+        (stored (buffer-local buf 'code-node))
+        (folds (buffer-local buf 'code-folds)))
+    (when here (code--pick-backend! buf))
+    (cond (folds (fold-set! buf 'code folds))
+          (here (code--fold-defaults! buf)))
+    (cond (stored (code--show! buf stored))
+          (here
+            (let ((n (code--enclosing buf (point))))
+              (if n
+                  (code--goto! buf n)
+                  (buffer-set-local! buf 'modeline-info "browse"))))
+          (else (buffer-set-local! buf 'modeline-info "browse")))))
 
 (define (code--saved buf key)
   (let ((hit (assoc key (or (buffer-local buf 'code-saved) '()))))
@@ -390,6 +443,7 @@
   (fold-clear! buf 'code)
   (buffer-set-local! buf 'code-folds #f)
   (buffer-set-local! buf 'code-node #f)
+  (buffer-set-local! buf 'code-backend #f)
   (buffer-set-local! buf 'code-saved #f))
 
 (register-minor-mode! "code-browse-mode" code--setup! code--teardown!)

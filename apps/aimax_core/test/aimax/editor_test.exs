@@ -1211,6 +1211,24 @@ defmodule Aimax.EditorTest do
 
       press(["q"])
       assert Editor.current_buffer() == buf
+      refute Aimax.Core.Buffer.exists?(root)
+      File.rm_rf!(root)
+    end
+
+    test "q walks out of nested dired buffers, it does not flip", %{buf: buf} do
+      root = Path.join(System.tmp_dir!(), "aimax-q2-#{System.unique_integer([:positive])}")
+      sub = Path.join(root, "sub")
+      File.mkdir_p!(sub)
+      {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
+      {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{sub}")})
+      assert Editor.current_buffer() == sub
+
+      # q kills the child listing: back to the parent, and it stays gone
+      press(["q"])
+      assert Editor.current_buffer() == root
+      # q again leaves dired for good — no flip back to the child
+      press(["q"])
+      assert Editor.current_buffer() == buf
       File.rm_rf!(root)
     end
 

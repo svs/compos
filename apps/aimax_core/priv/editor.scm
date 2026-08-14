@@ -197,8 +197,9 @@
       ;; our own rewrite is not a user edit, and the buffer is read-only
       (buffer-set-read-only! buf #f)
       (buffer-delete-range! buf 0 (buffer-size buf))
-      (buffer-append! buf (string-append (list-header-text buf) "\n"))
+      ;; entries first: the header may state the row count
       (buffer-set-local! buf 'list-entries rows)
+      (buffer-append! buf (string-append (list-header-text buf) "\n"))
       ;; a row may want colour, and colour is byte ranges — so the list
       ;; tells the row where its line landed rather than making the caller
       ;; keep its own running offset
@@ -1462,17 +1463,22 @@
             (popup-show (popup-buffer))
             (message "No popup buffer yet")))))
 
-;; q in special buffers: close the popup, or fall back to the MRU buffer
-(define-command "quit-window" "Close the popup or fall back to the previous buffer"
+;; q in special buffers: close the popup, or kill this buffer and go back.
+;; Every buffer that binds q is a listing you can make again — dired,
+;; ibuffer, help, diff, notmuch, agents, mcp-hub. The kill is what stops q
+;; from flipping between two listings: a buffer that only moves down the
+;; MRU ring is still the candidate the next q picks. buffer-kill! puts the
+;; most recent buffer that is not on screen in the window.
+(define-command "quit-window" "Close the popup, or kill this buffer and go back"
   (lambda ()
     (if (and (popup-open?) (equal? (active-window) (popup-window)))
         (begin
           (delete-window-id! (popup-window))
           (set-frame-local! 'popup-window #f))
-        (let ((others (buffer-candidates)))
-          (if (null? others)
-              (message "Nothing to quit to")
-              (switch-to-buffer! (car (car others))))))))
+        (let ((cur (current-buffer)))
+          ;; a live process (tail, shell) dies with its buffer
+          (if (process-running? cur) (process-kill! cur))
+          (buffer-kill! cur)))))
 
 ;;; --- collect: the prompt continues as a buffer (embark-collect) ------------
 ;;; C-c C-o in any prompt closes it and writes the candidates that survive
@@ -1575,9 +1581,8 @@
 
 (define (collect-close!)
   (if (null? (cdr (window-list)))
-      (run-command "quit-window")
-      (delete-window!))
-  (buffer-kill! *collect-buffer*))
+      (run-command "quit-window")        ; kills *Collect* and goes back
+      (begin (delete-window!) (buffer-kill! *collect-buffer*))))
 
 (define-command "collect-next" "Move down; the preview follows"
   (lambda () (next-line!) (beginning-of-line!) (collect-preview!)))

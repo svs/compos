@@ -105,6 +105,61 @@ fn ts_highlight(lang_name: String, text: String) -> Vec<(usize, usize, String)> 
     out
 }
 
+/// The named node covering [start, end), and its neighbours in the tree.
+/// ops: at | parent | child | next | prev | top ("top" is the ancestor
+/// whose own parent is the root). Returns (kind, start, end), or None.
+/// The caller passes the range of the node it is on, so a node knows
+/// itself: start == end means "the smallest node containing point".
+#[rustler::nif(schedule = "DirtyCpu")]
+fn ts_node(
+    lang_name: String,
+    text: String,
+    start: usize,
+    end: usize,
+    op: String,
+) -> Option<(String, usize, usize)> {
+    let lang = language(&lang_name)?;
+    let tree = parse(lang, &text)?;
+    let root = tree.root_node();
+    let start = start.min(text.len());
+    let end = end.clamp(start, text.len());
+    let node = root.named_descendant_for_byte_range(start, end)?;
+
+    let target = match op.as_str() {
+        "at" => Some(node),
+        // an anonymous parent carries no structure a reader can name
+        "parent" => named_parent(node),
+        "child" => node.named_child(0),
+        "next" => node.next_named_sibling(),
+        "prev" => node.prev_named_sibling(),
+        "top" => {
+            let mut n = node;
+            loop {
+                let p = named_parent(n)?;
+                if p.id() == root.id() {
+                    break Some(n);
+                }
+                n = p;
+            }
+        }
+        _ => None,
+    }?;
+
+    Some((
+        target.kind().to_string(),
+        target.start_byte(),
+        target.end_byte(),
+    ))
+}
+
+fn named_parent(node: Node) -> Option<Node> {
+    let mut n = node.parent()?;
+    while !n.is_named() {
+        n = n.parent()?;
+    }
+    Some(n)
+}
+
 /// Structural navigation: forward/backward (sexp), up (enclosing), down (into).
 /// Returns the target byte position, or None.
 #[rustler::nif(schedule = "DirtyCpu")]

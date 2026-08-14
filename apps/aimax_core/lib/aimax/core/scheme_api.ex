@@ -128,6 +128,8 @@ defmodule Aimax.Core.SchemeAPI do
       "delete-region!" => "(delete-region!) — delete the text between point and mark.",
       "exchange-point-and-mark!" => "(exchange-point-and-mark!) — swap point and mark; return #f if no mark is set.",
       "ts-nav" => "(ts-nav OP) — tree-sitter motion 'forward|'backward|'up|'down; return a byte pos or #f.",
+      "ts-node" =>
+        "(ts-node START END OP) — the node covering the range, or its 'at|'parent|'child|'next|'prev|'top; return (KIND START END) or #f.",
       "ts-query" => "(ts-query QUERY) — run a tree-sitter query; return (CAPTURE START END) byte ranges.",
       "ts-langs" => "(ts-langs) — return the names of the loaded tree-sitter languages.",
       "buffer-search" => "(buffer-search Q FROM) — search forward from byte FROM; return (START END) or #f.",
@@ -156,6 +158,7 @@ defmodule Aimax.Core.SchemeAPI do
       "global-set-key" => "(global-set-key SEQ COMMAND) — bind the key sequence SEQ to COMMAND globally.",
       "local-set-key" => "(local-set-key SEQ COMMAND) — bind SEQ to COMMAND in the current buffer.",
       "local-set-key*" => "(local-set-key* BUF SEQ COMMAND) — bind SEQ to COMMAND in buffer BUF.",
+      "local-unset-key*" => "(local-unset-key* BUF SEQ) — drop BUF's own binding for SEQ.",
       "local-remap!" => "(local-remap! FROM TO) — in the current buffer, every key bound to FROM runs TO.",
       "local-remap*!" => "(local-remap*! BUF FROM TO) — in buffer BUF, every key bound to FROM runs TO.",
       "key-for-command" => "(key-for-command COMMAND) — return the tersest key sequence bound to COMMAND, or \"\".",
@@ -538,6 +541,22 @@ defmodule Aimax.Core.SchemeAPI do
             end
         end
       end,
+      # node identity is a byte range, so the caller can walk from the node
+      # it stands on instead of from the deepest node under point
+      "ts-node" => fn [start, stop, op] ->
+        buf = Editor.current_buffer()
+
+        case Buffer.get_local(buf, "ts-lang") do
+          nil ->
+            false
+
+          lang ->
+            case Aimax.Core.TS.ts_node(lang, Buffer.text(buf), start, stop, plain(op)) do
+              nil -> false
+              {kind, s, e} -> [kind, s, e]
+            end
+        end
+      end,
       "ts-query" => fn [query] ->
         buf = Editor.current_buffer()
 
@@ -675,6 +694,11 @@ defmodule Aimax.Core.SchemeAPI do
       # explicit-buffer variant: bind without the buffer being current
       "local-set-key*" => fn [buf, seq, command] ->
         Editor.local_bind_key(buf, String.split(seq, " "), command)
+        :void
+      end,
+      # the inverse: a minor mode restores the map it borrowed
+      "local-unset-key*" => fn [buf, seq] ->
+        Editor.local_unbind_key(buf, String.split(seq, " "))
         :void
       end,
       # Emacs [remap COMMAND]: every key bound to FROM runs TO in this

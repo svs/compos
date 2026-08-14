@@ -98,6 +98,10 @@ defmodule Aimax.Core.Editor do
   def local_bind_key(buffer, seq, command),
     do: GenServer.call(__MODULE__, {:local_bind_key, buffer, seq, command})
 
+  @doc "Drop BUFFER's own binding for SEQ; the global one applies again."
+  def local_unbind_key(buffer, seq),
+    do: GenServer.call(__MODULE__, {:local_unbind_key, buffer, seq})
+
   @doc "Emacs [remap]: in BUFFER, any key that resolves to FROM runs TO instead."
   def local_remap(buffer, from, to),
     do: GenServer.call(__MODULE__, {:local_remap, buffer, from, to})
@@ -504,6 +508,12 @@ defmodule Aimax.Core.Editor do
     local_keymaps =
       Map.update(state.local_keymaps, buffer, %{seq => command}, &Map.put(&1, seq, command))
 
+    {:reply, :ok, %{state | local_keymaps: local_keymaps}}
+  end
+
+  def handle_call({:local_unbind_key, buffer, seq}, _from, state) do
+    buffer = keymap_key(buffer)
+    local_keymaps = Map.update(state.local_keymaps, buffer, %{}, &Map.delete(&1, seq))
     {:reply, :ok, %{state | local_keymaps: local_keymaps}}
   end
 

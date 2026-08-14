@@ -88,12 +88,17 @@
 ;;; (S8), and the setup fn rebuilds from the buffer-locals like every other
 ;;; mode.
 ;;;
+;;; A mode can have MANY buffers (dired: one per directory): every
+;;; callback gets the buffer first, so rows and header can read the
+;;; buffer's own locals. State — entries, marks, filters — is
+;;; buffer-local already.
+;;;
 ;;; OPTS is a plist:
-;;;   buffer  the list buffer's name
-;;;   rows    () -> entries. Any value; render turns one into a line.
-;;;   render  (entry) -> one line, no trailing newline
-;;;   key     (entry) -> a string identity, for marks. Default: the entry.
-;;;   header  () -> the header line, no trailing newline
+;;;   buffer  the fixed buffer name, for one-buffer modes (list-mode-show!)
+;;;   rows    (buf) -> entries. Any value; render turns one into a line.
+;;;   render  (buf entry) -> one line, no trailing newline
+;;;   key     (buf entry) -> a string identity, for marks. Default: the entry.
+;;;   header  (buf) -> the header line, no trailing newline
 ;;;   keys    ((KEY COMMAND) ...)
 ;;;   remap   ((FROM-COMMAND TO-COMMAND) ...)
 ;;;   doc     what the list is for — "?" shows it above the key table
@@ -117,7 +122,7 @@
 
 (define (list-header-text buf)
   (let ((f (list-opt buf 'header)))
-    (if f (f) "")))
+    (if f (f buf) "")))
 
 ;; the 0-based index of the entry line point is on, or #f above the entries
 (define (line-index-at buf header-lines)
@@ -129,7 +134,7 @@
 
 (define (list-key buf e)
   (let ((f (list-opt buf 'key)))
-    (if f (f e) e)))
+    (if f (f buf e) e)))
 
 ;; the entry on the current line, or #f
 (define (list-current buf)
@@ -183,7 +188,7 @@
 
 (define (list-refresh! buf)
   (when (buffer-exists? buf)
-    (let* ((rows ((list-opt buf 'rows)))
+    (let* ((rows ((list-opt buf 'rows) buf))
            (render (list-opt buf 'render))
            ;; a rewrite dumps point to 0 — keep the reader's place
            (cur? (equal? (current-buffer) buf))
@@ -201,11 +206,11 @@
         (let loop ((es rows) (off (buffer-size buf)) (ovs '()))
           (if (null? es)
               (when ovf (overlay-set! buf 'list (reverse ovs)))
-              (let ((line (render (car es))))
+              (let ((line (render buf (car es))))
                 (buffer-append! buf (string-append line "\n"))
                 (loop (cdr es)
                       (+ off (string-byte-length line) 1)
-                      (if ovf (append (reverse (ovf (car es) off)) ovs) ovs))))))
+                      (if ovf (append (reverse (ovf buf (car es) off)) ovs) ovs))))))
       (buffer-set-read-only! buf ro)
       (when cur? (goto-char! (min p (buffer-size buf)))))))
 

@@ -1435,9 +1435,9 @@
            "`n` answer a permission request, `k` kills a runtime and `x` archives "
            "the chat.")
     'buffer *agents-buffer*
-    'rows agents-sorted
-    'render agents-line
-    'header (lambda ()
+    'rows (lambda (buf) (agents-sorted))
+    'render (lambda (buf row) (agents-line row))
+    'header (lambda (buf)
               (string-append ";; chats — RET visit · s steer · y/n permission · "
                              "k kill · x archive · + new · g refresh"))
     'keys '(("RET" "agents-visit") ("s" "agents-steer") ("y" "agents-allow")

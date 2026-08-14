@@ -356,10 +356,10 @@
            "stop and restart one server; the capital keys do the same to all of "
            "them.")
     'buffer *mcp-hub-buffer*
-    'rows mcp-hub-names
-    'render (lambda (name) (mcp-hub-line (mcp-hub-row name)))
-    'header mcp-hub-header
-    'overlays mcp-hub-overlays
+    'rows (lambda (buf) (mcp-hub-names))
+    'render (lambda (buf name) (mcp-hub-line (mcp-hub-row name)))
+    'header (lambda (buf) (mcp-hub-header))
+    'overlays (lambda (buf name off) (mcp-hub-overlays name off))
     'keys '(("RET" "mcp-hub-detail") ("d" "mcp-hub-detail") ("s" "mcp-hub-start")
             ("k" "mcp-hub-stop") ("r" "mcp-hub-restart") ("S" "mcp-hub-start-all")
             ("K" "mcp-hub-stop-all") ("R" "mcp-hub-restart-all")

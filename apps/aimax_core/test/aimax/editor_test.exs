@@ -509,7 +509,7 @@ defmodule Aimax.EditorTest do
 
       # the stack lives in a serializable local, and the registered mode
       # reapplies it: this is exactly what desktop restore runs
-      {:ok, filters} = Aimax.Core.Session.eval(~s{(buffer-local "#{root}" 'dired-filters)})
+      {:ok, filters} = Aimax.Core.Session.eval(~s{(buffer-local "#{root}" 'list-filters)})
       assert filters =~ "dot"
       {:ok, _} = Aimax.Core.Session.eval(~s{(begin (switch-to-buffer! "#{root}") (set-mode! "Dired"))})
       refute Buffer.text(root) =~ ".hidden"

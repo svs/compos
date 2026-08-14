@@ -137,13 +137,13 @@
            "filters, flag buffers with `d`, then kill the flagged ones with `x`. "
            "Moving the highlight previews the buffer in the other window.")
     'buffer *ibuffer-buffer*
-    'rows ibuffer-visible
-    'render ibuffer-line
-    'header (lambda ()
+    'rows (lambda (buf) (ibuffer-visible))
+    'render (lambda (buf b) (ibuffer-line b))
+    'header (lambda (buf)
               (string-append
                 ";; buffers — RET visit · d flag · x kill flagged · "
                 "/ m mode · / n name · g refresh"
-                (list-filters-label *ibuffer-buffer*)))
+                (list-filters-label buf)))
     'keys '(("RET" "ibuffer-visit") ("g" "ibuffer-refresh") ("d" "ibuffer-flag")
             ("u" "ibuffer-unmark") ("x" "ibuffer-do-kill") ("q" "quit-window")
             ("n" "ibuffer-next") ("p" "ibuffer-prev")

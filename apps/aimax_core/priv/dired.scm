@@ -2,7 +2,10 @@
 ;;;
 ;;; The extensibility bar: no Elixir knows what dired is. Built from
 ;;; primitives: list-dir, file-stat, buffer ops, read-only buffers,
-;;; local keymaps, the minibuffer.
+;;; local keymaps, the minibuffer — and define-list-mode!, which owns
+;;; the rows, the marks, the filter stack and the refresh (R8). Dired
+;;; is the per-buffer case: one buffer PER DIRECTORY, so every callback
+;;; reads the buffer's own 'dired-dir local.
 ;;;
 ;;; Keys (buffer-local):
 ;;;   n/p move · RET visit · ^ up · g revert
@@ -13,49 +16,24 @@
 ;;;
 ;;; Line format:  <mark> <perms>  <size>  <date>  <name>
 
-(define *dired-dirs* '())
-(define *dired-marks* '())          ; ((buf . ((name . mark-char) ...)) ...)
-(define *dired-name-col* 37)        ; 1 mark + 1 sp + 10 perms + 2 + 8 size + 2 + 12 date + 1
-
-(define (dired-dir buf)
-  (let ((e (assoc buf *dired-dirs*)))
-    (if e (cadr e) (buffer-local buf 'dired-dir))))
-
-(define (dired-remember buf dir)
-  ;; the buffer-local is the durable copy — the alist dies with the daemon,
-  ;; locals ride desktop.etf so a restored dired knows its directory
-  (buffer-set-local! buf 'dired-dir dir)
-  (set! *dired-dirs* (cons (list buf dir) *dired-dirs*)))
-
-(define (dired-marks buf)
-  (let ((e (assoc buf *dired-marks*)))
-    (if e (cadr e) '())))
-
-(define (dired-set-mark buf name ch)
-  (let ((marks (filter (lambda (m) (not (equal? (car m) name))) (dired-marks buf))))
-    (set! *dired-marks*
-      (cons (list buf (if ch (cons (list name ch) marks) marks))
-            (filter (lambda (e) (not (equal? (car e) buf))) *dired-marks*)))))
-
-(define (dired-mark-of buf name)
-  (let ((m (assoc name (dired-marks buf))))
-    (if m (cadr m) " ")))
+;; the buffer-local is the durable copy: locals ride desktop.etf, so a
+;; restored dired knows its directory before its mode setup re-renders
+(define (dired-dir buf) (buffer-local buf 'dired-dir))
 
 (define (dired-line buf dir e)
   (let ((st (file-stat (string-append dir "/" e))))
     (string-append
-      (dired-mark-of buf e) " "
+      (list-mark-of buf e) " "
       (car st) "  "
       (string-pad-left (cadr st) 8) "  "
       (caddr st) " "
-      e "\n")))
+      e)))
 
 ;;; --- filters (dired-filter style) ---------------------------------------------
-;;; A stack of narrowings in the 'dired-filters buffer-local — persists with
-;;; the buffer, so a restored dired keeps its view. Entries:
-;;;   ("name" REGEX) ("ext" EXT) ("type" dir|file|link|exec) ("dot" hide)
-
-(define (dired-filters buf) (or (buffer-local buf 'dired-filters) '()))
+;;; The stack and its label are list-mode's ('list-filters, per buffer,
+;;; persists with the desktop); only the matching language is dired's:
+;;;   ("name" REGEX) ("ext" EXT) ("type" dir|file|link|exec)
+;;;   ("dot" "on") ("mode" MAJOR-MODE)
 
 (define (dired-filter-match? dir e f)
   (let ((kind (car f)) (arg (car (cdr f))))
@@ -76,7 +54,7 @@
           (else #t))))
 
 (define (dired-visible buf dir)
-  (let ((fs (dired-filters buf)))
+  (let ((fs (list-filters buf)))
     (filter (lambda (e)
               (let loop ((l fs))
                 (cond ((null? l) #t)
@@ -84,20 +62,9 @@
                       (else #f))))
             (list-dir dir))))
 
-(define (dired-filters-label buf)
-  (let ((fs (dired-filters buf)))
-    (if (null? fs)
-        ""
-        (fold (lambda (acc f)
-                (string-append acc "  " (car f) ":"
-                  (let ((a (car (cdr f)))) (if (string? a) a "on"))))
-              "   ·" (reverse fs)))))
-
 (define (dired-filter-push! f)
-  (let ((buf (current-buffer)))
-    (buffer-set-local! buf 'dired-filters (cons f (dired-filters buf)))
-    (dired-refresh buf (dired-dir buf))
-    (dired-goto-first-entry)))
+  (list-filter-push! (current-buffer) f)
+  (dired-goto-first-entry))
 
 (define-command "dired-filter-name" "Narrow dired to names matching a regex"
   (lambda ()
@@ -135,99 +102,74 @@
 (define-command "dired-filter-dotfiles" "Toggle hiding dotfiles"
   (lambda ()
     (let* ((buf (current-buffer))
-           (fs (dired-filters buf))
+           (fs (list-filters buf))
            (had (assoc "dot" fs)))
-      (buffer-set-local! buf 'dired-filters
-        (if had (filter (lambda (f) (not (equal? (car f) "dot"))) fs) fs))
       (if had
-          (begin (dired-refresh buf (dired-dir buf)) (dired-goto-first-entry))
-          (dired-filter-push! (list "dot" #t))))))
+          (begin
+            (buffer-set-local! buf 'list-filters
+              (filter (lambda (f) (not (equal? (car f) "dot"))) fs))
+            (list-refresh! buf)
+            (dired-goto-first-entry))
+          (dired-filter-push! (list "dot" "on"))))))
 
 (define-command "dired-filter-pop" "Drop the most recent dired filter"
   (lambda ()
-    (let ((buf (current-buffer)))
-      (buffer-set-local! buf 'dired-filters
-        (let ((fs (dired-filters buf))) (if (null? fs) '() (cdr fs))))
-      (dired-refresh buf (dired-dir buf))
-      (dired-goto-first-entry))))
+    (list-filter-pop! (current-buffer))
+    (dired-goto-first-entry)))
 
 (define-command "dired-filter-clear" "Drop every dired filter"
   (lambda ()
-    (let ((buf (current-buffer)))
-      (buffer-set-local! buf 'dired-filters '())
-      (dired-refresh buf (dired-dir buf))
-      (dired-goto-first-entry))))
-
-(define (dired-refresh buf dir)
-  (let ((old-point (point)))
-    (buffer-delete-range! buf 0 (buffer-size buf))
-    (buffer-append! buf (string-append dir ":" (dired-filters-label buf) "\n"))
-    (buffer-append! buf "  ..\n")
-    (for-each
-      (lambda (e) (buffer-append! buf (dired-line buf dir e)))
-      (dired-visible buf dir))
-    (goto-char! old-point)))
+    (list-filter-clear! (current-buffer))
+    (dired-goto-first-entry)))
 
 (define (dired-goto-first-entry)
   (goto-char! 0)
   (next-line!)
   (beginning-of-line!))
 
-(define (dired-install-keys!)
-  (local-set-key "n" "dired-next")
-  (local-set-key "p" "dired-prev")
-  ;; the standard: remap line movement so arrows/C-n/C-p behave like n/p
-  (local-remap! "next-line" "dired-next")
-  (local-remap! "previous-line" "dired-prev")
-  (local-set-key "RET" "dired-visit")
-  (local-set-key "g" "dired-revert")
-  (local-set-key "^" "dired-up")
-  (local-set-key "m" "dired-mark")
-  (local-set-key "u" "dired-unmark")
-  (local-set-key "d" "dired-flag-delete")
-  (local-set-key "x" "dired-do-flagged-delete")
-  (local-set-key "+" "dired-mkdir")
-  (local-set-key "q" "quit-window")
-  ;; dired-filter style narrowing under the / prefix
-  (local-set-key "/ n" "dired-filter-name")
-  (local-set-key "/ m" "dired-filter-mode")
-  (local-set-key "/ e" "dired-filter-ext")
-  (local-set-key "/ t" "dired-filter-type")
-  (local-set-key "/ ." "dired-filter-dotfiles")
-  (local-set-key "/ p" "dired-filter-pop")
-  (local-set-key "/ /" "dired-filter-clear"))
-
-;; a registered mode so desktop restore can re-run the setup — without it
-;; a restored dired came back as a plain editable buffer (no keymap, no
-;; read-only: RET inserted newlines instead of visiting)
-(define-mode "Dired"
-  (lambda ()
-    (let ((buf (current-buffer)))
-      (buffer-set-local! buf 'mode-name "Dired")
-      (dired-install-keys!)
-      (let ((dir (dired-dir buf)))
-        (when dir (dired-refresh buf dir)))
-      (buffer-set-read-only! buf #t))))
+;; ".." is entry zero, so RET on it works through the same list-current
+;; path as every real row; marks skip it
+(define-list-mode! "Dired"
+  (list
+    'doc (string-append
+           "One directory as a list: mark files with `m`, flag them with `d`, "
+           "delete the flagged ones with `x`. `RET` visits, `^` goes up. "
+           "Narrow the listing with the `/` filters; the filters persist "
+           "with the buffer.")
+    'rows (lambda (buf)
+            (let ((dir (dired-dir buf)))
+              (if dir (cons ".." (dired-visible buf dir)) '())))
+    'render (lambda (buf e)
+              (if (equal? e "..")
+                  "  .."
+                  (dired-line buf (dired-dir buf) e)))
+    'header (lambda (buf)
+              (string-append (or (dired-dir buf) "") ":"
+                             (list-filters-label buf)))
+    'keys '(("RET" "dired-visit") ("g" "dired-revert") ("^" "dired-up")
+            ("n" "dired-next") ("p" "dired-prev")
+            ("m" "dired-mark") ("u" "dired-unmark")
+            ("d" "dired-flag-delete") ("x" "dired-do-flagged-delete")
+            ("+" "dired-mkdir") ("q" "quit-window")
+            ("/ n" "dired-filter-name") ("/ m" "dired-filter-mode")
+            ("/ e" "dired-filter-ext") ("/ t" "dired-filter-type")
+            ("/ ." "dired-filter-dotfiles") ("/ p" "dired-filter-pop")
+            ("/ /" "dired-filter-clear"))
+    'remap '(("next-line" "dired-next") ("previous-line" "dired-prev"))))
 
 (define (dired-open dir0)
   (let ((dir (expand-path dir0)))
     (let ((buf dir))
       (buffer-create buf)
-      (dired-remember buf dir)
+      ;; the dir local first: the mode setup's refresh reads it
+      (buffer-set-local! buf 'dired-dir dir)
       (switch-to-buffer! buf)
       (set-mode! "Dired")
       (dired-goto-first-entry)
       buf)))
 
-;; The entry named on the current line, or #f (header/.. lines return the
-;; ".." token so navigation still works).
-(define (dired-entry)
-  (let ((line (line-text)))
-    (if (equal? line "  ..")
-        ".."
-        (if (> (string-length line) *dired-name-col*)
-            (substring line *dired-name-col* (string-length line))
-            #f))))
+;; the entry on the current line: a name, the ".." token, or #f above them
+(define (dired-entry) (list-current (current-buffer)))
 
 (define (dired-path-at-point)
   (let ((e (dired-entry))
@@ -282,15 +224,16 @@
 
 (define-command "dired-revert" "Re-read the directory and refresh the listing"
   (lambda ()
-    (dired-refresh (current-buffer) (dired-dir (current-buffer)))
+    (list-refresh! (current-buffer))
     (message "Reverted")))
 
 (define (dired-mark-and-advance ch)
-  (let ((e (dired-entry)))
+  (let ((buf (current-buffer))
+        (e (dired-entry)))
     (if (and e (not (equal? e "..")))
         (begin
-          (dired-set-mark (current-buffer) e ch)
-          (dired-refresh (current-buffer) (dired-dir (current-buffer)))
+          (list-mark! buf e ch)
+          (list-refresh! buf)
           (next-line!)
           (beginning-of-line!))
         (message "No file on this line"))))
@@ -302,13 +245,10 @@
 (define-command "dired-flag-delete" "Flag the file at point for deletion"
   (lambda () (dired-mark-and-advance "D")))
 
-(define (dired-flagged buf)
-  (map car (filter (lambda (m) (equal? (cadr m) "D")) (dired-marks buf))))
-
 (define-command "dired-do-flagged-delete" "Delete the files flagged for deletion"
   (lambda ()
     (let ((buf (current-buffer)))
-      (let ((flagged (dired-flagged buf)))
+      (let ((flagged (list-marked buf "D")))
         (if (null? flagged)
             (message "No files flagged for deletion")
             (minibuffer-read
@@ -321,9 +261,9 @@
                       (for-each
                         (lambda (name)
                           (delete-file! (string-append (dired-dir buf) "/" name))
-                          (dired-set-mark buf name #f))
+                          (list-mark! buf name #f))
                         flagged)
-                      (dired-refresh buf (dired-dir buf))
+                      (list-refresh! buf)
                       (message (string-append "Deleted "
                                               (number->string (length flagged)) " file(s)")))
                     (message "Cancelled")))))))))
@@ -333,7 +273,7 @@
     (minibuffer-read "Create directory: " '()
       (lambda (name)
         (make-directory! (string-append (dired-dir (current-buffer)) "/" name))
-        (dired-refresh (current-buffer) (dired-dir (current-buffer)))
+        (list-refresh! (current-buffer))
         (message "Created")))))
 
 (global-set-key "C-x d" "dired")
@@ -343,9 +283,10 @@
 ;;; searches with their docstrings. These are the entry points an agent
 ;;; calls directly from eval-scheme.
 
+(define (dired-marks buf) (list-marks buf))
+
 (category! 'files)
 (public! 'dired-open "(dired-open PATH) — open PATH in a Dired buffer; returns the buffer name")
 (public! 'dired-dir "(dired-dir BUF) — the directory a Dired buffer is showing")
 (public! 'dired-visible "(dired-visible BUF DIR) — the entries a Dired buffer is showing, after its filters")
-(public! 'dired-marks "(dired-marks BUF) — the marked entries, as (name . mark-char) pairs")
-
+(public! 'dired-marks "(dired-marks BUF) — the marked entries, as (name mark-char) pairs")

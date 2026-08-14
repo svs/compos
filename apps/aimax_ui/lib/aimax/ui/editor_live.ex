@@ -15,27 +15,36 @@ defmodule Aimax.Ui.EditorLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    # each browser is a frame: the client sends its remembered frame id
-    # (localStorage) in the connect params; unknown ids are honored so the
-    # frame survives a wiped desktop.etf, absent ids get a fresh frame
-    frame =
-      if connected?(socket) do
-        requested = get_connect_params(socket)["frame"]
-        {:ok, fid} = Aimax.Core.Editor.attach_frame(requested)
-        Events.subscribe_frame(fid)
-        fid
-      end
+    # each browser TAB is a frame (S5): the client sends its remembered
+    # frame id (sessionStorage, per tab) in the connect params; unknown
+    # ids are honored so the frame survives a wiped desktop.etf, absent
+    # ids get a fresh frame. The id rides the payload as data-frame —
+    # there is no separate frame event (S13).
+    if connected?(socket) do
+      requested = get_connect_params(socket)["frame"]
+      {:ok, fid} = Aimax.Core.Editor.attach_frame(requested)
+      Events.subscribe_frame(fid)
 
-    socket =
-      assign(socket,
-        frame: frame,
-        subscribed: MapSet.new(),
-        line_cache: %{},
-        boot_id: :persistent_term.get(:aimax_boot_id, "dev")
-      )
+      socket =
+        assign(socket,
+          frame: fid,
+          subscribed: MapSet.new(),
+          line_cache: %{},
+          boot_id: :persistent_term.get(:aimax_boot_id, "dev")
+        )
 
-    socket = if frame, do: push_event(socket, "frame", %{id: frame}), else: socket
-    {:ok, refresh(socket)}
+      {:ok, refresh(socket)}
+    else
+      # no frame, no editor state: the static mount is a splash (S14)
+      {:ok,
+       assign(socket,
+         frame: nil,
+         state: nil,
+         subscribed: MapSet.new(),
+         line_cache: %{},
+         boot_id: :persistent_term.get(:aimax_boot_id, "dev")
+       )}
+    end
   end
 
   # drain before refresh: the dispatch above already broadcast its change
@@ -513,9 +522,21 @@ defmodule Aimax.Ui.EditorLive do
   # --- rendering -------------------------------------------------------------
 
   @impl true
+  # the disconnected mount is not a client: it attaches no frame and
+  # renders a neutral splash — the connected mount replaces it (S14)
+  def render(%{state: nil} = assigns) do
+    ~H"""
+    <div id="editor" class="editor-root splash" phx-hook="Keys" data-boot={@boot_id}>
+      <div style="display:flex;align-items:center;justify-content:center;height:100vh;opacity:.5;font-family:monospace">
+        ai-max — connecting…
+      </div>
+    </div>
+    """
+  end
+
   def render(assigns) do
     ~H"""
-    <div id="editor" class="editor-root" phx-hook="Keys" data-boot={@boot_id}>
+    <div id="editor" class="editor-root" phx-hook="Keys" data-boot={@boot_id} data-frame={@frame}>
       <style :if={@state.faces != %{}}><%= Phoenix.HTML.raw(face_css(@state.faces)) %></style>
     <style :if={@state.styles != %{}}><%= Phoenix.HTML.raw(Enum.join(Map.values(@state.styles), "\n")) %></style>
       <div class="windows">

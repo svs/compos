@@ -561,11 +561,12 @@ defmodule Aimax.Ui.Layouts do
                   if (text) navigator.clipboard.writeText(text);
                 });
 
-                // this browser's frame: the server assigns/confirms the id,
-                // localStorage carries it across reloads and daemon restarts
-                this.handleEvent("frame", ({ id }) => {
-                  if (id) localStorage.setItem("aimax-frame", id);
-                });
+                // this TAB's frame rides the payload as data-frame (S5,
+                // S13): sessionStorage carries it across reloads, per tab —
+                // two tabs are two frames and stop fighting over win_rows
+                if (this.el.dataset.frame) {
+                  sessionStorage.setItem("aimax-frame", this.el.dataset.frame);
+                }
 
                 // mouse: a click selects the window and places point; a drag
                 // leaves a native selection, mirrored into mark + point.
@@ -773,7 +774,21 @@ defmodule Aimax.Ui.Layouts do
           const csrf = document.querySelector("meta[name='csrf-token']").getAttribute("content");
           const liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
             hooks: Hooks,
-            params: () => ({ _csrf_token: csrf, frame: localStorage.getItem("aimax-frame") })
+            params: () => ({
+              _csrf_token: csrf,
+              // per-tab frame id; one-shot migration claims the old
+              // per-profile key for the first tab that connects
+              frame:
+                sessionStorage.getItem("aimax-frame") ||
+                (() => {
+                  const old = localStorage.getItem("aimax-frame");
+                  if (old) {
+                    localStorage.removeItem("aimax-frame");
+                    sessionStorage.setItem("aimax-frame", old);
+                  }
+                  return old;
+                })()
+            })
           });
           liveSocket.connect();
           if (liveSocket.disableDebug) liveSocket.disableDebug();

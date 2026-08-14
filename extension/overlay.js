@@ -401,7 +401,7 @@ function isEditorPage() {
 
 async function registerFrame(tries = 20) {
   for (let i = 0; i < tries; i++) {
-    const frame = localStorage.getItem("aimax-frame");
+    const frame = sessionStorage.getItem("aimax-frame");
     if (frame) {
       try {
         await ask({ cmd: "register", frame });

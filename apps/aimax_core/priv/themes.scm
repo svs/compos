@@ -14,6 +14,15 @@
 (define (define-theme name faces)
   (set! *themes* (cons (list name faces) *themes*)))
 
+;; a theme built on another (dup #33): BASE's faces, with OVERRIDES
+;; replacing every face they name. The base must be defined first.
+(define (define-theme-from name base overrides)
+  (let* ((b (assoc base *themes*))
+         (named (map car overrides))
+         (kept (filter (lambda (f) (not (member (car f) named)))
+                       (if b (car (cdr b)) '()))))
+    (define-theme name (append overrides kept))))
+
 (define (theme-names) (map car *themes*))
 
 (define (theme-file) (string-append (aimax-home) "/theme.scm"))
@@ -37,6 +46,19 @@
 
 (define-theme "paper"                ; the design default (light) — restorable
   (list
+    ;; every theme must set the ts-* faces: load-theme only writes the
+    ;; faces a theme names, so a theme without them keeps the previous
+    ;; theme's syntax colors on screen
+    (list 'ts-keyword 'fg "#26356b")
+    (list 'ts-function 'fg "#1b1a17")
+    (list 'ts-string 'fg "#3d6b4f")
+    (list 'ts-comment 'fg "#8a857a")
+    (list 'ts-number 'fg "#7a5a1a")
+    (list 'ts-constant 'fg "#7a5a1a")
+    (list 'ts-type 'fg "#7a5a1a")
+    (list 'ts-module 'fg "#7a5a1a")
+    (list 'ts-operator 'fg "#57534a")
+    (list 'ts-punctuation 'fg "#57534a")
     (list 'default 'bg "#e6e0d2" 'fg "#1b1a17")
     (list 'window 'bg "#fdfcf8")
     (list 'window-inactive 'bg "#f4f0e6")
@@ -196,16 +218,15 @@
           'border "1px solid #11111b"
           'shadow "0 2px 14px rgba(0, 0, 0, 0.4)")))
 
-(define-theme "tokyo-night"
+;; built on aimax-dark: it inherits the strings, types, cursor, warn and
+;; diff faces and overrides the rest of the palette
+(define-theme-from "tokyo-night" "aimax-dark"
   (list
     (list 'ts-keyword 'fg "#bb9af7")
     (list 'ts-function 'fg "#7aa2f7")
-    (list 'ts-string 'fg "#9ece6a")
     (list 'ts-comment 'fg "#565f89")
     (list 'ts-number 'fg "#ff9e64")
     (list 'ts-constant 'fg "#ff9e64")
-    (list 'ts-type 'fg "#2ac3de")
-    (list 'ts-module 'fg "#2ac3de")
     (list 'ts-operator 'fg "#89ddff")
     (list 'ts-punctuation 'fg "#565f89")
     (list 'default 'bg "#1a1b26" 'fg "#c0caf5")
@@ -213,21 +234,12 @@
     (list 'window-inactive 'bg "#1a1b26")
     (list 'modeline 'bg "#24283b" 'fg "#565f89")
     (list 'modeline-active 'bg "#414868" 'fg "#c0caf5")
-    (list 'cursor 'bg "#c0caf5")
     (list 'region 'bg "#33467c")
-    (list 'accent 'fg "#7aa2f7")
     (list 'dim 'fg "#565f89")
     (list 'select 'bg "#292e42")
     (list 'hl-line 'bg "#1f2029")
     (list 'linenum 'fg "#3b4261")
     (list 'border 'bg "#101014")
-    (list 'warn 'fg "#e0af68")
-    (list 'diff-file 'fg "#7aa2f7" 'weight "600")
-    (list 'diff-hunk 'fg "#e0af68")
-    (list 'diff-add 'fg "#9ece6a" 'bg "rgba(158, 206, 106, 0.13)")
-    (list 'diff-del 'fg "#f7768e" 'bg "rgba(247, 118, 142, 0.13)")
-    (list 'diff-add-word 'bg "rgba(158, 206, 106, 0.30)")
-    (list 'diff-del-word 'bg "rgba(247, 118, 142, 0.28)")
     (list 'chrome 'gap "6px" 'radius "5px"
           'border "1px solid #101014"
           'shadow "0 2px 14px rgba(0, 0, 0, 0.4)")))

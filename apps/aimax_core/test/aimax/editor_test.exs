@@ -1696,9 +1696,18 @@ defmodule Aimax.EditorTest do
     faces = Editor.render_state().faces
     assert faces["default"]["bg"] == "#1a1b26"
     assert faces["accent"]["fg"] == "#7aa2f7"
+    # tokyo-night is define-theme-from aimax-dark: the override wins,
+    # the unnamed face inherits
+    assert faces["ts-keyword"]["fg"] == "#bb9af7"
+    assert faces["warn"]["fg"] == "#e0af68"
 
     {:ok, _} = Aimax.Core.Session.eval(~s{(load-theme "catppuccin-mocha")})
     assert Editor.render_state().faces["default"]["bg"] == "#1e1e2e"
+
+    # paper names its own syntax faces — a theme that omits them keeps
+    # the previous theme's colors on screen
+    {:ok, _} = Aimax.Core.Session.eval(~s{(load-theme "paper")})
+    assert Editor.render_state().faces["ts-keyword"]["fg"] == "#26356b"
 
     # restore
     {:ok, _} = Aimax.Core.Session.eval(~s{(load-theme "aimax-dark")})

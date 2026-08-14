@@ -188,6 +188,45 @@ rewrites (+3664/−1054 over 47 files); the code-browser worktree
 rewrites replay expensively over additions. The worktree merged the same
 day (<code>59fb925</code>), which lands SVS-193 and unblocks R3.</p>
 
+<h3>Review note for the next session (left 2026-08-15)</h3>
+<div class="box">
+<p>The 2026-08-14 session closed R2, R8 and R9 in eleven commits
+(<code>98fb401..d13ad83</code>). The suites are green and each change got a
+headless smoke test on the live daemon. Four spots deserve a real-browser
+review — they changed click or restore behaviour that headless checks
+cannot fully see:</p>
+<ul>
+<li><strong>C-x b from a browser page</strong> (<code>1194323</code>). chrome's
+  <code>switch-to-buffer</code> copy became the <code>switch-buffer-source</code>
+  seam. Verify from a page: tabs in the list, RET on a tab does not raise the
+  editor, RET on a visible buffer goes to its window. The from-page flag is
+  captured at prompt open — check a slow confirm still picks the right
+  branch.</li>
+<li><strong>The modeline-info click</strong> (<code>98fb401</code>). One
+  <code>ui_cmd</code> event; the whitelist moved to Scheme's
+  <code>ui-command!</code>. The click on a chat's modeline now really runs
+  <code>agent-switch</code> — it was dead before. Click one and confirm the
+  connector prompt opens.</li>
+<li><strong>Dired restore</strong> (<code>bb6227f</code>). Dired buffers are
+  now <code>transient</code>: the desktop saves locals, not content, and the
+  mode setup re-renders from <code>'dired-dir</code>. Restart with a dired
+  buffer open (marks + a filter set) and confirm all three survive. Also
+  open a REMOTE directory — the remote path was not smoke-tested.</li>
+<li><strong>notmuch in anger</strong> (<code>e3f2434</code>). The index and
+  mailboxes ride <code>define-list-mode!</code>. Read real mail for a few
+  minutes: tag with <code>a</code>/<code>d</code> and confirm point lands on
+  the next thread, check the auto-preview follows n/p, check the hello
+  counts.</li>
+</ul>
+<p>Two cross-session facts: commit <code>e162b97</code> (the other session's
+"q kills the listing") swept in this session's unstaged
+<code>list-refresh!</code> reorder — intentional content, odd home. And
+<code>packages/code.scm</code> was half-written on disk during the run; it
+failed to load on every boot and caused one transient mcp-hub test failure.
+If it still fails to load, that session's work is unfinished — do not "fix"
+it blind.</p>
+</div>
+
 <h3>One thing still open</h3>
 <ul>
 <li><strong>Suite flakiness.</strong> ~1 full run in 3 shows a single failure in

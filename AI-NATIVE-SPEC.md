@@ -249,9 +249,19 @@ defaults only when unset); S12's copy (`clipboard-copy` in Scheme);
 S15 (unsubscribe on window-leave, cache prune, list buffers transient,
 read-only `Editor.desktop_view` for save); S16 (which-key under the
 normalized keymap key; rich transcript skips `visible_geometry`);
-A13 (per-block transcript cache). `desktop_restore_test.exs` holds S2,
-S4/S6, and S8. **Left: scroll (S1/S9/S10) and frames (S5/S13/S14),
-then the full done-when round-trip.**
+A13 (per-block transcript cache). *Same day, the last two slices:*
+S1/S9 (scroll is daemon state — `manual`/`ctop` per leaf, the cscroll
+mirror, per-window `user_acted`, desktop 6-tuple leaves; verified in the
+browser: refresh returns the reader's 120px), S5/S13/S14 (one frame per
+browser TAB via sessionStorage with a one-shot localStorage migration;
+the id rides the payload as `data-frame`; the disconnected mount is a
+splash and costs no frame; verified live: two tabs, two frames).
+`desktop_restore_test.exs` holds S2, S4/S6, S8, S1, and S9. **R3 is
+done**, with three refinements recorded, not blocking: the extension
+window-stamp (two tabs in ONE chrome window sharing a frame — today the
+fallback per-tab keying applies everywhere), recenter/pct on
+client-scrolled windows (C-l no-ops there, as before), and a shell
+restore test for the new `shell-mode` setup.
 
 **Why.** S1–S16. The invariant is stated; make it true.
 

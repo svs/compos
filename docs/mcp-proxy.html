@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ai-max.el — the MCP proxy</title>
+<style>
+  :root{--paper:#fdfcf8;--ink:#1b1a17;--soft:#57534a;--faint:#8a857a;--rule:#cbc4b1;
+        --indigo:#26356b;--green:#2e6b45;--amber:#7a5a1a;--red:#a83a2b;--wash:#e7e9f1;}
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px 34px 60px;background:var(--paper);color:var(--ink);
+       font:15px/1.6 "IBM Plex Sans",system-ui,sans-serif;max-width:60em}
+  h1{font:600 26px/1.2 Spectral,Georgia,serif;margin:0 0 4px}
+  h2{font:600 19px/1.3 Spectral,Georgia,serif;margin:30px 0 8px;
+     border-bottom:1px solid var(--rule);padding-bottom:4px}
+  h3{font:600 15px/1.3 "IBM Plex Sans",sans-serif;margin:18px 0 6px;color:var(--indigo)}
+  .sub{color:var(--faint);margin:0 0 18px;font-size:13px}
+  code,pre{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:13px}
+  code{background:#f4f0e6;padding:1px 4px;border-radius:2px}
+  pre{background:#f4f0e6;padding:10px 12px;border-left:3px solid var(--indigo);
+      overflow-x:auto;margin:8px 0}
+  pre code{background:none;padding:0}
+  ul{margin:6px 0 6px 20px;padding:0}li{margin:3px 0}
+  table{border-collapse:collapse;margin:10px 0;font-size:13.5px;width:100%}
+  th{text-align:left;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+     color:var(--faint);border-bottom:1px solid var(--rule);padding:5px 8px 5px 0}
+  td{border-top:1px solid #e2dbc9;padding:5px 8px 5px 0;vertical-align:top}
+  .box{background:var(--wash);border-left:3px solid var(--indigo);padding:10px 14px;margin:14px 0}
+  .warn{background:#f7ece9;border-left-color:var(--red)}
+  kbd{font-family:"IBM Plex Mono",monospace;font-size:12px;background:#fff;
+      border:1px solid var(--rule);border-bottom-width:2px;border-radius:3px;padding:0 4px}
+</style>
+</head>
+<body>
+
+<h1>The MCP proxy</h1>
+<p class="sub">How an external agent gets the editor's tools ·
+<code>priv/aimax-mcp-proxy.exs</code> + <code>priv/packages/tools.scm</code> ·
+updated 2026-08-14</p>
+
+<h2>What it is</h2>
+<p>The editor keeps ONE tool registry in Scheme (<code>define-tool!</code>,
+served by <code>llm-tool-specs</code>). The in-editor chat reads that registry
+directly. An external ACP agent (claude-code, codex) runs as a subprocess and
+cannot — it speaks MCP. The proxy is the bridge: a small stdio MCP server that
+forwards each MCP request to the daemon's JSON-RPC socket. The agent sees a
+normal MCP server named <code>aimax</code>. The editor sees two evals.</p>
+
+<div class="box">
+Same registry, two consumers. The tool list an external agent gets from
+<code>tools/list</code> is byte-for-byte the list the companion chat sends to
+the model. A tool added with <code>define-tool!</code> appears in both, with
+no second registration.
+</div>
+
+<h2>The pipeline</h2>
+<pre><code>ACP agent (claude-code / codex)
+   │  stdio MCP: initialize · tools/list · tools/call
+   ▼
+aimax-mcp-proxy.exs           one process per agent session; OTP :json, no deps
+   │  JSON-RPC eval on ~/.aimax/sock (AIMAX_SOCK overrides)
+   ▼
+daemon Session ── (mcp-proxy-tools-json)          tools/list
+              └── (mcp-proxy-call name args-b64)  tools/call
+                     │ permission gate (*permission-policy*)
+                     ▼
+                  llm-tool-call → the Scheme handler runs</code></pre>
+
+<p>The <code>mcp</code> package registers the proxy as the <code>aimax</code>
+entry in each agent's <code>session/new</code>, so every agent session spawns
+its own proxy process. The proxy handles four methods:
+<code>initialize</code>, <code>tools/list</code>, <code>tools/call</code>, and
+<code>ping</code>. Everything else gets <code>-32601</code>.</p>
+
+<h2>Why base64</h2>
+<p>The RPC socket's <code>eval</code> returns <em>printed</em> Scheme values.
+Printed-string escaping is not JSON-safe for every byte, so a raw JSON payload
+can break in either direction. Both entry points therefore move payloads as
+base64: the proxy encodes the MCP <code>arguments</code> before the eval, and
+the Scheme side encodes its result before the print. The proxy strips the
+quotes from the printed value and decodes. Base64 survives both transports
+untouched.</p>
+
+<h2>The permission gate — the third chokepoint</h2>
+<p>Every deny-listed verb reaches the world through one of three gates: the
+api lane's tool loop, the ACP permission banner, and this proxy.
+<code>mcp-proxy-call</code> asks the SAME <code>*permission-policy*</code> the
+other two ask. It used to apply the deny-list alone — which meant a chat in
+<code>ask</code> mode was in ask mode everywhere except here.</p>
+
+<table>
+<tr><th>verdict</th><th>what happens</th></tr>
+<tr><td><code>allow</code> / <code>allow-always</code></td>
+    <td>The call dispatches to the Scheme handler.</td></tr>
+<tr><td><code>ask</code></td>
+    <td>Refused, fail-closed. A proxy call arrives on the socket from an
+    agent the editor does not render — there is no chat to raise an
+    Allow/Deny banner in, so nobody can answer one. The refusal text tells
+    the agent to ask the user to run it, or to approve it in the chat.</td></tr>
+<tr><td><code>deny</code></td>
+    <td>Refused, with the deny-listed verb named
+    (<code>permission-denied-verb?</code>).</td></tr>
+</table>
+
+<h2>The open edge (R5)</h2>
+<div class="box warn">
+<p><strong><code>mcp-proxy-dispatch</code> runs the handler in the
+session.</strong> The names it dispatches come from the Scheme registry, and
+a Scheme handler runs in the Session GenServer by definition — the same
+single-threaded interpreter every keystroke goes through. The
+"never dispatch in the session" rule in <code>mcp.ex</code> is about MCP
+tools on other servers; <code>mcp-call!</code> obeys it for those by running
+in a Task. This surface cannot: the handlers ARE Scheme.</p>
+<p>Consequence: a slow handler stalls the editor while it runs, because the
+socket's request holds the session until the eval returns. The fix needs a
+deferred-reply RPC design — the socket request returns at once, the session
+queues the work, and the reply is delivered when the handler finishes. This
+is the last open piece of the AI-native refactor.</p>
+</div>
+
+<h2>Where the code is</h2>
+<table>
+<tr><th>piece</th><th>file</th><th>role</th></tr>
+<tr><td><code>aimax-mcp-proxy.exs</code></td>
+    <td><code>apps/aimax_core/priv/</code></td>
+    <td>The stdio MCP server. Spawned per agent session; forwards to the
+    socket.</td></tr>
+<tr><td><code>mcp-proxy-tools-json</code></td>
+    <td><code>priv/packages/tools.scm</code></td>
+    <td>The registry as JSON, base64-wrapped, for <code>tools/list</code>.</td></tr>
+<tr><td><code>mcp-proxy-call</code></td>
+    <td><code>priv/packages/tools.scm</code></td>
+    <td>Permission gate + dispatch, for <code>tools/call</code>.</td></tr>
+<tr><td><code>permission_test.exs</code> "one gate"</td>
+    <td><code>apps/aimax_core/test/</code></td>
+    <td>Asserts the same payload is refused at all three chokepoints, and
+    that ask mode holds on the proxy.</td></tr>
+</table>
+
+<p class="sub">Read this in the editor: <code>C-x C-f docs/mcp-proxy.html RET</code>
+then <kbd>C-c C-v</kbd>.</p>
+
+</body>
+</html>

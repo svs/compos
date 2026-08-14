@@ -109,6 +109,55 @@ defmodule Aimax.CacheEconomicsTest do
     assert last =~ "now read it again"
   end
 
+  test "switching between two group buffers does not move the system prompt" do
+    me = self()
+    stub_chat(fn req -> send(me, {:req, req}) && reply("ok") end)
+
+    # a group of TWO documents, tools OFF: the branch that enumerates the
+    # members into the system prompt. group-docs orders them by MRU, so a
+    # plain switch used to reorder the list and rewrite the prompt.
+    chat =
+      eval!(~s[(begin
+        (buffer-create "*doc-a*")
+        (buffer-append! "*doc-a*" "alpha draft\\n")
+        (buffer-create "*doc-b*")
+        (buffer-append! "*doc-b*" "beta draft\\n")
+        (buffer-set-local! "*doc-a*" 'group "*doc-a*")
+        (buffer-set-local! "*doc-b*" 'group "*doc-a*")
+        (set! chat-use-tools #f)
+        (switch-to-buffer! "*doc-a*")
+        (run-command "chat")
+        (current-buffer))])
+      |> String.trim(~s{"})
+
+    assert String.starts_with?(chat, "*chat")
+    on_exit(fn -> Session.eval("(set! chat-use-tools #t)") end)
+
+    # turn 1 with *doc-a* most recently used
+    order1 = eval!(~s[(begin (switch-to-buffer! "*doc-a*") (group-docs "*doc-a*"))])
+    focus(chat)
+    type("first")
+    press(["RET"])
+    assert_receive {:req, first}, 2_000
+
+    # turn 2 with *doc-b* most recently used — the MRU order flips
+    order2 = eval!(~s[(begin (switch-to-buffer! "*doc-b*") (group-docs "*doc-a*"))])
+    focus(chat)
+    type("second")
+    press(["RET"])
+    assert_receive {:req, second}, 2_000
+
+    # the switch really reordered the members: the test is not vacuous
+    refute order1 == order2
+
+    # both members are in the multi-doc branch of the prompt...
+    assert first.system =~ "*doc-a*"
+    assert first.system =~ "*doc-b*"
+
+    # THE invariant: the reorder did not move the cached prefix
+    assert first.system == second.system
+  end
+
   test "a chat freezes its tool list, says when it is stale, and refreshes on request" do
     me = self()
     stub_chat(fn req -> send(me, {:req, req}) && reply("ok") end)

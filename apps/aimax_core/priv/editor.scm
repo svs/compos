@@ -1957,7 +1957,11 @@
            "\n\nThe chat transcript follows; reply to the last user turn "
            "only, in markdown.\n\n")))
       (else
-       ;; several buffers: enumerate the group, name nothing that changes
+       ;; several buffers: enumerate the group in a fixed order. group-docs is
+       ;; MRU-ordered, so a plain switch between two members would reorder this
+       ;; list and rewrite the system prompt, and the prompt cache pays for the
+       ;; whole prefix again. sort by name: the order changes only when
+       ;; membership changes, not when the user switches buffers.
        (string-append
          "You are the user's companion in a side chat for their buffer "
          "group \"" g "\". The group's buffers:\n"
@@ -1966,7 +1970,7 @@
                    (let ((m (buffer-local d 'mode-name)))
                      (if m (string-append " (" m ")") ""))
                    "\n"))
-               "" docs)
+               "" (sort docs))
          *chat-edit-protocol*
          "\n\nThe chat transcript follows; reply to the last user turn "
          "only, in markdown.\n\n"))))
@@ -3563,6 +3567,7 @@
 (public! 'switch-to-buffer! "(switch-to-buffer! NAME) — show in the active window")
 (public! 'visit "(visit PATH) — open a file (Emacs find-file); /ssh:HOST:/PATH opens over ssh")
 (public! 'tail-open "(tail-open PATH) — follow a file with tail -F, local or /ssh: remote")
+(public! 'sh-quote "(sh-quote S) — S as one safe single-quoted word for a shell command")
 (public! 'buffer-save! "Save the current buffer to its file")
 
 (category! 'editing)

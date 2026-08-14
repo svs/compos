@@ -1662,6 +1662,10 @@
     (let* ((buf (current-buffer))
            (ro? (buffer-read-only? buf)))
       (buffer-set-read-only! buf (not ro?))
+      ;; a file you make writable must show you the bytes you edit: an
+      ;; html file opens rendered, and the render hides them
+      (when (and ro? (buffer-path buf) (buffer-local buf 'render-mode))
+        (buffer-set-local! buf 'render-mode #f))
       (message (if ro? "writable" "read-only")))))
 
 (global-set-key "C-x C-q" "read-only-mode")

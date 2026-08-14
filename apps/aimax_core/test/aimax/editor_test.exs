@@ -987,6 +987,44 @@ defmodule Aimax.EditorTest do
     File.rm!(path)
   end
 
+  test "a mode hook can open a file rendered and read-only; C-x C-q gives back the source" do
+    path = Path.join(System.tmp_dir!(), "aimax-html-#{System.unique_integer([:positive])}.html")
+    File.write!(path, "<h1>Hi</h1>\n")
+    on_exit(fn -> File.rm(path) end)
+
+    # what a user config does: html-mode-hook renders and locks the buffer
+    {:ok, _} =
+      Aimax.Core.Session.eval(~s{(add-hook! 'html-mode-hook
+                                   (lambda ()
+                                     (buffer-set-local! (current-buffer) 'render-mode "html")
+                                     (buffer-set-read-only! (current-buffer) #t)))})
+
+    press(["C-x", "C-f"])
+    type(path)
+    press(["RET"])
+    assert Editor.current_buffer() == path
+    assert Buffer.get_local(path, "render-mode") == "html"
+    assert Buffer.read_only?(path)
+
+    # read-only means read-only: typing does not reach the file
+    press(["x"])
+    assert Buffer.text(path) == "<h1>Hi</h1>\n"
+
+    # C-x C-q to edit: the render goes with it, so you see the bytes
+    press(["C-x", "C-q"])
+    refute Buffer.read_only?(path)
+    refute Buffer.get_local(path, "render-mode")
+    press(["x"])
+    assert String.starts_with?(Buffer.text(path), "x<h1>")
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(~s{(set! *hooks*
+                                   (remove (lambda (h) (equal? (car h) 'html-mode-hook))
+                                           *hooks*))})
+
+    Aimax.Core.kill_buffer(path)
+  end
+
   test "desktop: non-file buffers (chat) survive restore with content, mode, and keys", %{buf: buf} do
     companion = "*chat:#{buf}*"
     on_exit(fn -> Aimax.Core.kill_buffer(companion) end)
@@ -1211,7 +1249,7 @@ defmodule Aimax.EditorTest do
 
       press(["q"])
       assert Editor.current_buffer() == buf
-      refute Aimax.Core.Buffer.exists?(root)
+      assert eventually(fn -> not Buffer.exists?(root) end)
       File.rm_rf!(root)
     end
 
@@ -1243,7 +1281,7 @@ defmodule Aimax.EditorTest do
       # nothing binds q here — the read-only keymap does
       press(["q"])
       assert Editor.current_buffer() == buf
-      refute Buffer.exists?("*ro*")
+      assert eventually(fn -> not Buffer.exists?("*ro*") end)
 
       # a writable buffer keeps q as text
       press(["q"])

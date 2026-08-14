@@ -1476,9 +1476,19 @@
           (delete-window-id! (popup-window))
           (set-frame-local! 'popup-window #f))
         (let ((cur (current-buffer)))
-          ;; a live process (tail, shell) dies with its buffer
-          (if (process-running? cur) (process-kill! cur))
-          (buffer-kill! cur)))))
+          ;; a file with edits you did not save is not a listing: say so and
+          ;; stay. A listing reports itself as modified — it has no path.
+          (if (and (buffer-path cur) (buffer-modified? cur))
+              (message "Buffer is modified — save it, or C-x k to kill it")
+              (begin
+                ;; a live process (tail, shell) dies with its buffer
+                (if (process-running? cur) (process-kill! cur))
+                (buffer-kill! cur)))))))
+
+;; q quits every buffer you cannot type in. The read-only keymap sits
+;; between the buffer's own map and the global one, so a mode that wants q
+;; for something else — code-mode's exit, notmuch's search — still wins.
+(local-set-key* " *read-only*" "q" "quit-window")
 
 ;;; --- collect: the prompt continues as a buffer (embark-collect) ------------
 ;;; C-c C-o in any prompt closes it and writes the candidates that survive

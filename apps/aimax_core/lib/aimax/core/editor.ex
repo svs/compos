@@ -39,6 +39,10 @@ defmodule Aimax.Core.Editor do
   @scratch "*scratch*"
   @main_frame "f-main"
 
+  # the keymap every read-only buffer inherits. No buffer holds this name:
+  # a space prefix keeps it out of the buffer lists, as " *minibuf*" is.
+  @readonly_map " *read-only*"
+
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   # readers
@@ -448,11 +452,21 @@ defmodule Aimax.Core.Editor do
     buffer = if f.minibuffer, do: minibuf_of(f), else: find_leaf(f.tree, f.active).buffer
     local = Map.get(state.local_keymaps, keymap_key(buffer), %{})
 
+    # a read-only buffer takes a third map between the local one and the
+    # global one. What it holds is Scheme's business (dup #22): editor.scm
+    # binds q there, so every buffer you cannot type in quits the same way.
+    # The mode's own map still wins — code-mode keeps q for its exit. The
+    # buffer only answers read_only? for a key that map claims, so the
+    # other 200 keys per minute cost one map lookup.
+    ro = if readonly_hit?(state, seq, buffer), do: readonly_map(state), else: %{}
+
     reply =
       cond do
         Map.has_key?(local, seq) -> {:command, local[seq]}
+        Map.has_key?(ro, seq) -> {:command, ro[seq]}
         Map.has_key?(state.keymap, seq) -> {:command, state.keymap[seq]}
         Enum.any?(Map.keys(local), &List.starts_with?(&1, seq)) -> :prefix
+        Enum.any?(Map.keys(ro), &List.starts_with?(&1, seq)) -> :prefix
         Enum.any?(Map.keys(state.keymap), &List.starts_with?(&1, seq)) -> :prefix
         true -> :none
       end
@@ -897,9 +911,13 @@ defmodule Aimax.Core.Editor do
   # one buffer's own bindings, as {"RET", "ibuffer-visit"} — describe-mode
   # reads the keymap the buffer really has, not a copy in the mode's source
   def handle_call({:local_keys, buffer}, _from, state) do
+    # a read-only buffer really does answer to the read-only map as well,
+    # and its own map wins — describe-mode must show the same ladder
+    ro = if read_only_buffer?(buffer), do: readonly_map(state), else: %{}
+
     keys =
-      state.local_keymaps
-      |> Map.get(keymap_key(buffer), %{})
+      ro
+      |> Map.merge(Map.get(state.local_keymaps, keymap_key(buffer), %{}))
       |> Enum.map(fn {seq, cmd} -> {Enum.join(seq, " "), cmd} end)
 
     {:reply, keys, state}
@@ -1201,6 +1219,18 @@ defmodule Aimax.Core.Editor do
   # any frame's minibuf buffer shares one local-keymap namespace
   defp keymap_key(" *minibuf" <> _), do: @minibuf
   defp keymap_key(name), do: name
+
+  defp readonly_map(state), do: Map.get(state.local_keymaps, @readonly_map, %{})
+
+  defp read_only_buffer?(buffer), do: Buffer.exists?(buffer) and Buffer.read_only?(buffer)
+
+  # does the read-only map claim this sequence, and is the buffer read-only?
+  defp readonly_hit?(state, seq, buffer) do
+    map = readonly_map(state)
+
+    (Map.has_key?(map, seq) or Enum.any?(Map.keys(map), &List.starts_with?(&1, seq))) and
+      read_only_buffer?(buffer)
+  end
 
   # the desktop's read-only tree: structure, tops, points, scroll state
   defp dtree(%{type: :leaf, id: id, buffer: b} = leaf) do

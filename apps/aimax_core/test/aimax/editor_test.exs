@@ -1232,6 +1232,36 @@ defmodule Aimax.EditorTest do
       File.rm_rf!(root)
     end
 
+    test "q quits any read-only buffer, and the mode's own q still wins", %{buf: buf} do
+      {:ok, _} =
+        Aimax.Core.Session.eval(~s{(begin (buffer-create "*ro*")
+                                          (switch-to-buffer! "*ro*")
+                                          (buffer-set-read-only! "*ro*" #t))})
+
+      assert Editor.current_buffer() == "*ro*"
+
+      # nothing binds q here — the read-only keymap does
+      press(["q"])
+      assert Editor.current_buffer() == buf
+      refute Buffer.exists?("*ro*")
+
+      # a writable buffer keeps q as text
+      press(["q"])
+      assert Editor.current_buffer() == buf
+      assert String.contains?(Buffer.text(buf), "q")
+
+      # the buffer's own map beats the read-only one
+      {:ok, _} =
+        Aimax.Core.Session.eval(~s{(begin (buffer-create "*ro2*")
+                                          (switch-to-buffer! "*ro2*")
+                                          (buffer-set-read-only! "*ro2*" #t)
+                                          (local-set-key* "*ro2*" "q" "beginning-of-buffer"))})
+
+      press(["q"])
+      assert Editor.current_buffer() == "*ro2*"
+      {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-kill! "*ro2*")})
+    end
+
     test "s-arrows move between windows, S-arrows walk buffer history", %{buf: _buf} do
       press(["C-x", "3"])
       active = Editor.snapshot().active

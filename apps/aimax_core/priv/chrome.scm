@@ -162,53 +162,10 @@
         (if t (car (chrome--tab-candidate t)) #f))
       (chrome--here)))
 
-;; Order matters twice over. RET with nothing typed takes the FIRST candidate,
-;; not the prompt's advertised default — so the default has to lead the list or
-;; the prompt lies about what RET will do. And tabs went last, which with a
-;; real number of buffers put them past the end of the visible window: present
-;; in the list, invisible unless you typed. Default first, then the handful of
-;; tabs, then the buffers.
-(define (chrome--prompt-switch here cands tabs from-page)
-  (let* ((standing (chrome--standing-on from-page))
-         ;; one pool, ordered by when you were last in each, minus where you
-         ;; are now. RET takes the first candidate, so the top of that ordering
-         ;; IS the default — there is nothing else to decide.
-         (pool (chrome--order cands (map chrome--tab-candidate tabs)))
-         (all (chrome--without standing pool))
-         (fallback (if (null? all) here (car (car all)))))
-    (minibuffer-read-preview
-      (string-append "Switch to buffer (default " fallback "): ")
-      all
-      ;; a tab has no buffer to preview; leave the window alone
-      (lambda (b) (when (buffer-exists? b) (window-preview-buffer! b)))
-      (lambda (name)
-        (let* ((picked (if (equal? name "") fallback name))
-               (tab (chrome--tab-by-label picked tabs)))
-          (cond
-            ;; a tab: go there, and don't drag the editor in front of the thing
-            ;; you just asked for
-            (tab (set! *chrome-raise?* #f)
-                 (chrome--note-tab! picked)
-                 (tab-activate (chrome--get tab 'id)))
-            ;; returning from a page: if it is already on screen, go to the
-            ;; window showing it rather than rearranging the scene you are
-            ;; trying to get back to
-            (from-page
-              (let ((win (chrome--window-showing picked)))
-                (if win (select-window! win) (switch-to-buffer! picked))))
-            (else (switch-to-buffer! picked)))))
-      ;; C-g puts back whatever the preview displaced — without this the
-      ;; invoking window keeps the last buffer you happened to highlight
-      (lambda () (when (buffer-exists? here) (window-preview-buffer! here))))))
-
-;; Redefined, not rebound: keeping the name means C-x b, which-key and every
-;; other reference still point at it, and the editor's behaviour is unchanged
-;; except that the browser's tabs are now in the list.
 ;; Last known tabs. C-x b must NOT wait on the browser: it is a core editor
 ;; command, and a sleeping MV3 service worker would stall it for as long as the
 ;; round-trip takes. So the prompt opens immediately from this cache and the
-;; refresh lands behind it, updating the candidates in place if you are still
-;; deciding.
+;; refresh lands behind it, in time for the next command.
 (define *chrome-tab-cache* '())
 
 ;; Refreshes the cache and nothing else. It used to also rewrite an open
@@ -220,21 +177,39 @@
   (when (browser-connected?)
     (tab-list (lambda (all) (set! *chrome-tab-cache* all)))))
 
-(define-command "switch-to-buffer"
-  "Switch to another buffer — or to a browser tab in this window"
-  (lambda ()
-    ;; captured before the prompt opens: while a minibuffer is active,
-    ;; current-buffer answers with the minibuffer
-    (let ((here (chrome--here))
-          ;; the whole list, recency-ordered; buffer-candidates drops the
-          ;; current buffer, which from a page is the very thing you came back
-          ;; for. Internals (space-prefixed) stay hidden, as ibuffer does.
-          (cands (map (lambda (b) (list b ""))
-                      (filter (lambda (b) (not (string-prefix? " " b)))
-                              (buffer-list-mru))))
-          (from-page *chrome-from-page*))
-      (chrome--prompt-switch here cands (chrome--here-tabs *chrome-tab-cache*) from-page)
-      (chrome--refresh-tabs))))
+;; ONE way to go to a tab (dup #7): record the visit, activate it, and do
+;; not drag the editor window in front of the thing you just asked for.
+(define (chrome--goto-tab! tab label)
+  (set! *chrome-raise?* #f)
+  (chrome--note-tab! label)
+  (tab-activate tab))
+
+;; C-x b keeps the editor's own command; this source adds the browser's
+;; tabs through the seam instead of redefining it (dup #6). Tabs used to
+;; go last, which with a real number of buffers put them past the end of
+;; the visible window — chrome--order interleaves by recency instead.
+;; The candidate pool is the same from either side; what differs is what
+;; standing means (from a page it is the tab you pressed the key in) and
+;; what picking does.
+(set! switch-buffer-source
+  (lambda (cands)
+    (let* ((from-page *chrome-from-page*)
+           (tabs (chrome--here-tabs *chrome-tab-cache*))
+           (pool (chrome--order cands (map chrome--tab-candidate tabs))))
+      (chrome--refresh-tabs)
+      (list pool
+            (chrome--standing-on from-page)
+            (lambda (picked)
+              (let ((tab (chrome--tab-by-label picked tabs)))
+                (cond
+                  (tab (chrome--goto-tab! tab picked) #t)
+                  ;; returning from a page: if it is already on screen, go
+                  ;; to the window showing it rather than rearranging the
+                  ;; scene you are trying to get back to
+                  (from-page
+                   (let ((win (chrome--window-showing picked)))
+                     (if win (begin (select-window! win) #t) #f)))
+                  (else #f))))))))
 
 ;; Chords a page should not send through raw dispatch, because returning from
 ;; outside wants different semantics than moving around inside.
@@ -396,10 +371,8 @@
 
 ;;; --- commands ----------------------------------------------------------------
 
-(define (chrome--tab-label t)
-  (string-append (number->string (chrome--get t 'id)) "  "
-                 (or (chrome--get t 'title) "")))
-
+;; every surface names a tab the same way (dup #7): the label from
+;; chrome--tab-candidate, resolved back with chrome--tab-by-label
 (define-command "list-tabs" "Show the browser's open tabs in a buffer"
   (lambda ()
     (tab-list
@@ -409,7 +382,7 @@
           (buffer-delete-range! buf 0 (buffer-size buf))
           (for-each
             (lambda (t)
-              (buffer-append! buf (string-append (chrome--tab-label t) "\n"
+              (buffer-append! buf (string-append (car (chrome--tab-candidate t)) "\n"
                                                  "    " (or (chrome--get t 'url) "") "\n")))
             tabs)
           (display-buffer buf)
@@ -420,10 +393,10 @@
     (tab-list
       (lambda (tabs)
         (minibuffer-read "Tab: "
-          (map (lambda (t) (list (chrome--tab-label t) (or (chrome--get t 'url) ""))) tabs)
+          (map chrome--tab-candidate tabs)
           (lambda (pick)
-            (let ((id (string->number (car (string-split pick " ")))))
-              (if id (tab-activate id) (message "No such tab")))))))))
+            (let ((tab (chrome--tab-by-label pick tabs)))
+              (if tab (chrome--goto-tab! tab pick) (message "No such tab")))))))))
 
 (category! 'chrome)
 (public! 'tab-list "(tab-list K) — K gets every open browser tab as plists: id, title, url, active")

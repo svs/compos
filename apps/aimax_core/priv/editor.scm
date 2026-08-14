@@ -1288,30 +1288,53 @@
 (define-command "find-file" "Visit a file, prompting with filename completion"
   (lambda () (read-file-name "Find file: " visit)))
 
-;; MRU-ordered, current excluded: first candidate = the buffer you just
-;; left, so C-x b RET toggles between two buffers (Emacs buffer ring)
-(define (buffer-candidates)
-  (map (lambda (b)
-         (list b (let ((p (buffer-path b))) (if p p ""))))
-       (filter (lambda (b) (not (equal? b (current-buffer)))) (buffer-list-mru))))
+;; ONE candidate shape for every buffer prompt (dup #6): name + path
+;; annotation, MRU-ordered. Internals (space-prefixed) stay hidden, as
+;; ibuffer hides them.
+(define (buffer-candidates-all)
+  (map (lambda (b) (list b (or (buffer-path b) "")))
+       (filter (lambda (b) (not (string-prefix? " " b))) (buffer-list-mru))))
 
-(define-command "switch-to-buffer" "Switch to another buffer in the current window"
+;; current excluded: first candidate = the buffer you just left, so
+;; C-x b RET toggles between two buffers (Emacs buffer ring)
+(define (buffer-candidates)
+  (filter (lambda (c) (not (equal? (car c) (current-buffer))))
+          (buffer-candidates-all)))
+
+;; the buffer prompt's extension seam (dup #6). The command calls this
+;; at prompt open with the base candidates; it returns (pool standing
+;; pick). POOL is the full candidate list. STANDING is where you are
+;; now, and therefore the one place RET must never mean. PICK sees the
+;; choice first and returns #t when it handled it. chrome adds browser
+;; tabs through this seam instead of redefining the command.
+(define switch-buffer-source
+  (lambda (cands)
+    (list cands (current-buffer) (lambda (picked) #f))))
+
+;; RET with nothing typed takes the FIRST candidate, so the top of the
+;; pool IS the default — the prompt must advertise exactly that.
+(define-command "switch-to-buffer"
+  "Switch to another buffer in the current window"
   (lambda ()
-    (let ((cands (buffer-candidates))
-          (orig (current-buffer)))
+    (let* ((here (or (window-buffer (active-window)) (current-buffer)))
+           (source (switch-buffer-source (buffer-candidates-all)))
+           (pool (car source))
+           (standing (car (cdr source)))
+           (pick (car (cdr (cdr source))))
+           (all (filter (lambda (c) (not (equal? (car c) standing))) pool))
+           (fallback (if (null? all) here (car (car all)))))
       (minibuffer-read-preview
-        (if (null? cands)
-            "Switch to buffer: "
-            (string-append "Switch to buffer (default " (car (car cands)) "): "))
-        cands
-        ;; the invoking window live-previews the highlighted buffer
+        (string-append "Switch to buffer (default " fallback "): ")
+        all
+        ;; the invoking window live-previews the highlighted buffer; a
+        ;; candidate with no buffer (a tab) leaves the window alone
         (lambda (b) (when (buffer-exists? b) (window-preview-buffer! b)))
         (lambda (name)
-          (cond ((not (equal? name "")) (switch-to-buffer! name))
-                ((pair? cands) (switch-to-buffer! (car (car cands))))
-                (else #f)))
+          (let ((picked (if (equal? name "") fallback name)))
+            (unless (pick picked)
+              (switch-to-buffer! picked))))
         ;; C-g: put back what you were looking at
-        (lambda () (window-preview-buffer! orig))))))
+        (lambda () (when (buffer-exists? here) (window-preview-buffer! here)))))))
 
 (define-command "kill-buffer" "Kill a buffer, defaulting to the current one"
   (lambda ()

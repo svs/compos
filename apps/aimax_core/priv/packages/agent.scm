@@ -1168,7 +1168,9 @@
         ;; (C-c t) costs a cache miss, so it is the user's call, not ours.
         (if (and (boundp (quote chat-tools-stale?)) (chat-tools-stale? buf))
             " · tools stale"
-            "")))))
+            "")))
+    ;; the segment is clickable: ui-command! runs this on a click
+    (buffer-set-local! buf 'modeline-info-command "agent-switch")))
 
 ;;; --- thread creation ----------------------------------------------------------
 

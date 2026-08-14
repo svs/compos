@@ -57,30 +57,18 @@ defmodule Aimax.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
-  # clicking a window's modeline-info segment runs that buffer's
-  # modeline-info-command (policy lives in scheme; this is just dispatch)
-  def handle_event("ml_info", %{"win" => win, "buf" => buf}, socket) do
+  # one handler for every click that runs a command: a transcript button
+  # sends a command name, the modeline-info segment sends its buffer.
+  # The Scheme gate ui-command! holds the whitelist — no policy here.
+  def handle_event("ui_cmd", %{"win" => win} = params, socket) do
     with {id, ""} <- Integer.parse(to_string(win)) do
       Input.run(socket.assigns.frame, fn ->
         Aimax.Core.Editor.set_active(id)
 
-        case Aimax.Core.Buffer.get_local(buf, "modeline-info-command") do
-          cmd when is_binary(cmd) -> Aimax.Core.Session.run_command(cmd)
-          _ -> :ok
-        end
-      end)
-    end
-
-    {:noreply, socket |> drain() |> refresh()}
-  end
-
-  # transcript buttons (permission allow/deny etc.) — same shape as ml_info:
-  # focus the window, run the command. agent-* commands only.
-  def handle_event("agent_cmd", %{"win" => win, "cmd" => "agent-" <> _ = cmd}, socket) do
-    with {id, ""} <- Integer.parse(to_string(win)) do
-      Input.run(socket.assigns.frame, fn ->
-        Aimax.Core.Editor.set_active(id)
-        Aimax.Core.Session.run_command(cmd)
+        Aimax.Core.Session.call_named("ui-command!", [
+          params["cmd"] || false,
+          params["buf"] || false
+        ])
       end)
     end
 
@@ -691,19 +679,19 @@ defmodule Aimax.Ui.EditorLive do
                     <span class="ag-perm-title">needs permission — {b.title}</span>
                     <button
                       class="ag-btn allow"
-                      phx-click="agent_cmd"
+                      phx-click="ui_cmd"
                       phx-value-win={@node.id}
                       phx-value-cmd="agent-permission-allow"
                     >Allow</button>
                     <button
                       class="ag-btn session"
-                      phx-click="agent_cmd"
+                      phx-click="ui_cmd"
                       phx-value-win={@node.id}
                       phx-value-cmd="agent-permission-always"
                     >Always</button>
                     <button
                       class="ag-btn deny"
-                      phx-click="agent_cmd"
+                      phx-click="ui_cmd"
                       phx-value-win={@node.id}
                       phx-value-cmd="agent-permission-deny"
                     >Deny</button>
@@ -765,7 +753,7 @@ defmodule Aimax.Ui.EditorLive do
           :if={@node.modeline_info}
           class="ml-mode"
           style="cursor:pointer"
-          phx-click="ml_info"
+          phx-click="ui_cmd"
           phx-value-win={@node.id}
           phx-value-buf={@node.buffer}
         >{@node.modeline_info}</span>

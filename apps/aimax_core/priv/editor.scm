@@ -3380,6 +3380,18 @@
   (select-window! id)
   (chat-snap-to-input!))
 
+;; one gate for clicks that run a command (dup #24). A transcript button
+;; sends a command name; the modeline-info segment sends its buffer. The
+;; whitelist lives here: a button runs agent-* commands only, a modeline
+;; click runs the buffer's own modeline-info-command.
+(define (ui-command! cmd buf)
+  (cond ((and (string? cmd) (string-prefix? "agent-" cmd))
+         (run-command cmd))
+        ((string? buf)
+         (let ((c (buffer-local buf 'modeline-info-command)))
+           (when (string? c) (run-command c))))
+        (else #f)))
+
 ;; system clipboard: paste lands on the kill ring too (Emacs interprogram-paste)
 (define (clipboard-paste! text)
   (kill-push! text)

@@ -96,6 +96,26 @@ defmodule Aimax.Ui.AgentViewTest do
     assert render(view) =~ "no pending permission"
   end
 
+  # the other branch of the one ui_cmd gate: the modeline-info segment
+  # sends its buffer, and ui-command! runs that buffer's own command local
+  test "modeline-info click runs the buffer's modeline-info-command", %{conn: conn} do
+    buf = "*agent: ml-test*"
+    {:ok, _} = Aimax.Core.create_buffer(buf)
+    Buffer.append(buf, "x\n", source: :editor)
+    Buffer.set_local(buf, "modeline-info", "api · test-model")
+    Buffer.set_local(buf, "modeline-info-command", "split-window-below")
+
+    Editor.set_window_buffer(buf)
+    {:ok, view, html} = live(conn, "/")
+
+    assert html =~ "api · test-model"
+    assert count(html, ~s(<span class="name">*agent: ml-test*)) == 1
+
+    view |> element(~s(span[phx-click="ui_cmd"])) |> render_click()
+    # the command ran: the buffer now shows in two windows
+    assert count(render(view), ~s(<span class="name">*agent: ml-test*)) == 2
+  end
+
   # block offsets go stale when text before them is edited; a boundary that
   # lands mid-codepoint must not take down the whole render (Earmark badarg)
   test "stale block offsets mid-multibyte char still render", %{conn: conn} do

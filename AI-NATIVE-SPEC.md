@@ -556,11 +556,26 @@ policy. #21–23 landed the same day: `resolve_and_run` is the one lookup
 ladder, `dispatch-keys` goes through the serialized input queue with the
 caller's frame, and the completion popup's keys are a " *completion*"
 keymap in editor.scm over two new primitives — only narrowing mechanics
-stay in Elixir.* **Not done:** the
-KeyDispatch ladder merge and completion keymap (#21-23), `ml_info`/
-`agent_cmd` merge (#24), raw locals in the payload (#25),
-`buffer-candidates` and tabs (#6, #7), `define-theme-from` (#33),
-`kill-region-1`/`llm-on-region` (#30), `advise!`.
+stay in Elixir.*
+
+*Done 2026-08-14 — the R9 list is closed.* The last five landed in five
+commits: one `ui_cmd` click gate with the whitelist in Scheme's
+`ui-command!`, and the modeline-info click now really runs
+`agent-switch` (#24) · the payload `group` field reads the raw local;
+chat setup owns the companion-of migration (#25) ·
+`buffer-candidates-all` is the one candidate shape and
+`switch-buffer-source` is the buffer prompt's seam — chrome adds tabs
+through it and its full command copy is deleted; one tab label
+(`chrome--tab-candidate`) and one `chrome--goto-tab!` (#6, #7) ·
+`define-theme-from` builds tokyo-night on aimax-dark, and paper names
+its own `ts-*` faces so a theme switch cannot keep the previous theme's
+syntax colors (#33) · `kill-region-1` behind kill-word,
+backward-kill-word and kill-region; `llm-on-region` already existed
+(#30). **`advise!` is closed without code:** the wrap-by-redefinition
+sites it was to replace no longer exist — chrome's `switch-to-buffer`
+copy became the seam, the double `yank` fell earlier — and a helper
+with zero call sites is dead code. Reopen it only when a real wrap
+site appears.
 
 
 Small, independent, one commit each:

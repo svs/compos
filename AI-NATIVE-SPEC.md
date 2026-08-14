@@ -519,22 +519,28 @@ sig + category, and one that asserts every registered primitive carries a doc.
 
 ### R8 — `define-list-mode!`
 
-*Partly done 2026-08-13 on `refactor/r8-list-mode`.* `define-list-mode!`
-owns marks, the filter stack and its label, the point-preserving refresh,
-`(list-current)`, the n/p remap, per-row overlays, and mode registration —
-so S8 falls out rather than being fixed separately (`*chats*` named
-"Chats", a mode that did not exist). `line-index-at` takes the header
-height as an argument instead of assuming it, replacing six copies with
-three different conventions. Ported: **ibuffer, `*chats*`, mcp-hub**.
-**Not ported, and not mechanically portable: dired and notmuch.** dired
-opens ONE BUFFER PER DIRECTORY, its rows are read back out of the line
-text by column offset, and its marks live in a global alist keyed by
-buffer. `define-list-mode!` assumes one fixed buffer per mode with a
-stored entry list. Porting dired means generalising the abstraction to
-per-buffer instances — a design change, not a port — and dired is the
-most-used list in the editor. notmuch is 1122 lines with thin coverage.
-Do these two together, deliberately, or leave them: three of five already
-removes the duplication that was actually costing.
+*Done 2026-08-14.* `define-list-mode!` owns marks, the filter stack and
+its label, the point-preserving refresh, `(list-current)`, the n/p
+remap, per-row overlays, and mode registration — so S8 falls out rather
+than being fixed separately. `line-index-at` takes the header height as
+an argument instead of assuming it. Ported 2026-08-13: **ibuffer,
+`*chats*`, mcp-hub**.
+
+*The last two landed 2026-08-14.* The generalisation was small: every
+callback (`rows`, `render`, `header`, `overlays`, `key`) now gets the
+buffer as its first argument, so a callback can read the buffer's own
+locals — state (entries, marks, filters) was buffer-local already. The
+refresh also sets `list-entries` before it renders the header, so a
+header can state the row count. **dired** is the per-buffer case: one
+buffer per directory, `'dired-dir` on each. The port deleted the global
+dirs and marks alists, the column-offset row parser, and the hand-rolled
+refresh and filter stack; marks and filters now persist with the
+desktop, and the mode keeps the name "Dired", the line format, and the
+whole command surface. **notmuch** ported both lists (the search index
+and the mailboxes): rows fetch the JSON, one column helper feeds render
+and the overlay fn, and `nm--refresh!`/`nm--index-at`/`nm--thread-at`
+stay as aliases for their call sites. notmuch's marks stay a real
+notmuch tag — that is mail state, not list state.
 
 **Why.** Dup #4, #5. Five copies of tabulated-list.
 

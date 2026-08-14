@@ -11,13 +11,16 @@ defmodule Aimax.Ui.Endpoint do
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [connect_info: [session: @session_options]]
 
-  # The Chrome extension's wire. check_origin is off because the dialer is
-  # chrome-extension://<id>, which no origin list can name ahead of time; the
-  # listener is on loopback either way. path: "/" mounts it at /browser rather
-  # than Phoenix's default /browser/websocket — the extension scans ports, so
-  # the address it dials should be the one a person would write down.
+  # The Chrome extension's wire. The extension dials from its service worker,
+  # so Chrome stamps Origin: chrome-extension://<id> on the handshake. A web
+  # page cannot forge that header, so the origin check rejects every https://
+  # page that dials this loopback port — the one real attacker here, since a
+  # page you visit runs on your machine and reaches 127.0.0.1 too. Loopback
+  # alone does not stop it. path: "/" mounts it at /browser rather than
+  # Phoenix's default /browser/websocket — the extension scans ports, so the
+  # address it dials should be the one a person would write down.
   socket "/browser", Aimax.Ui.BrowserSocket,
-    websocket: [check_origin: false, path: "/"],
+    websocket: [check_origin: {__MODULE__, :browser_origin?, []}, path: "/"],
     longpoll: false
 
   # LiveView's browser JS is shipped prebuilt inside the hex packages —
@@ -27,4 +30,16 @@ defmodule Aimax.Ui.Endpoint do
 
   plug Plug.Session, @session_options
   plug Aimax.Ui.Router
+
+  @doc """
+  Accept the browser bridge only from a Chrome extension origin.
+
+  Phoenix passes the parsed Origin URI. The extension's service worker dials
+  with scheme "chrome-extension"; a web page dials with "http"/"https" and
+  cannot change that header. So this refuses every page and admits the
+  extension. Any installed extension passes — pin the id with a manifest "key"
+  and match uri.host to tighten this to one extension.
+  """
+  def browser_origin?(%URI{scheme: "chrome-extension"}), do: true
+  def browser_origin?(_), do: false
 end

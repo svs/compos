@@ -694,6 +694,16 @@
   (delete-region!)
   (set-mark! #f))
 
+;; ONE kill: push S..E to the kill ring, then delete it (dup #30).
+;; Returns #t when the range was non-empty.
+(define (kill-region-1 s e)
+  (if (> e s)
+      (begin
+        (kill-push! (buffer-substring s e))
+        (delete-between! s e)
+        #t)
+      #f))
+
 (define-command "forward-word" "Move point forward one word" (lambda () (forward-word!)))
 (define-command "backward-word" "Move point backward one word"
   (lambda () (backward-word!)))
@@ -701,20 +711,12 @@
 (define-command "kill-word" "Kill characters forward to the end of a word"
   (lambda ()
     (let ((s (point)))
-      (let ((e (forward-word!)))
-        (if (> e s)
-            (begin
-              (kill-push! (buffer-substring s e))
-              (delete-between! s e)))))))
+      (kill-region-1 s (forward-word!)))))
 
 (define-command "backward-kill-word" "Kill characters backward to the start of a word"
   (lambda ()
     (let ((e (point)))
-      (let ((s (backward-word!)))
-        (if (< s e)
-            (begin
-              (kill-push! (buffer-substring s e))
-              (delete-between! s e)))))))
+      (kill-region-1 (backward-word!) e))))
 
 (define-command "transpose-chars" "Interchange characters around point"
   (lambda ()
@@ -948,13 +950,8 @@
 
 (define-command "kill-region" "Kill the text between point and mark"
   (lambda ()
-    (let ((text (region-text)))
-      (if (equal? text "")
-          (message "The region is empty")
-          (begin
-            (kill-push! text)
-            (delete-region!)
-            (set-mark! #f))))))
+    (unless (kill-region-1 (region-beginning) (region-end))
+      (message "The region is empty"))))
 
 (define-command "copy-region-as-kill" "Save the region as if killed, but don't kill it"
   (lambda ()

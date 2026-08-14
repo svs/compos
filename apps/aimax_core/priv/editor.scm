@@ -1637,12 +1637,21 @@
 ;; Override *shell-command* in your init.scm.
 (define *shell-command* "exec /bin/zsh -f -i +o zle +o prompt_cr +o prompt_sp")
 
+;; a real mode (S8): restore re-runs this setup, so a restored shell
+;; keeps its transcript and gets a fresh process under it (tail-mode's
+;; pattern)
+(define-mode "shell-mode"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (unless (process-running? buf)
+        (start-process! buf *shell-command*)))))
+
 (define-command "shell" "Run an inferior shell in the *shell* buffer"
   (lambda ()
     (if (not (process-running? "*shell*"))
         (start-process! "*shell*" *shell-command*))
     (display-buffer "*shell*")
-    (buffer-set-local! "*shell*" 'mode-name "Shell")
+    (buffer-set-local! "*shell*" 'mode-name "shell-mode")
     (end-of-buffer!)))
 
 (define-command "newline-or-send" "Send input to the process, or insert a newline"
@@ -1789,7 +1798,9 @@
                        (not (buffer-local doc 'group)))
               (buffer-set-local! doc 'group g)))))
       (when (buffer-local buf 'agent-saved-mark)
-        (buffer-set-local! buf 'render-mode "agent")
+        ;; the view is identity: default it only when never chosen (S11)
+        (unless (buffer-local buf 'render-mode)
+          (buffer-set-local! buf 'render-mode "agent"))
         (buffer-set-local! buf 'agent-marker-bytes
           (string-byte-length *chat-input-marker*))
         ;; Rebuild presentation from the CONVERSATION locals — overlays and
@@ -2153,9 +2164,11 @@
 ;; who the chat IS — survives reset, restart, and save
 ;; ('default-directory is on every buffer, chats included: where it was
 ;; opened from, which is identity, not conversation or runtime)
+;; 'render-mode is the chat's chosen VIEW ("agent" rich, "plain" text) —
+;; a choice about the chat, so identity (S11)
 (define chat-identity-locals
   '(group agent-connector agent-model chat-presets chat-permission-mode
-    default-directory))
+    render-mode default-directory))
 
 ;; what was SAID — survives restart and save; reset clears it
 ;; ('chat-turns is the pre-record shape: chat-record-migrate! reads it once
@@ -2730,7 +2743,9 @@
   (lambda ()
     (let* ((buf (current-buffer))
            (rich? (equal? (buffer-local buf 'render-mode) "agent")))
-      (buffer-set-local! buf 'render-mode (if rich? #f "agent"))
+      ;; "plain", not #f: the chosen view is identity (S11), and a cleared
+      ;; local reads as "never chosen" — which the setup would re-default
+      (buffer-set-local! buf 'render-mode (if rich? "plain" "agent"))
       (message (if rich? "plain transcript" "rich transcript")))))
 
 ;;; (chat auto-titling died with the bare *chat* surface: a group chat is
@@ -3341,6 +3356,15 @@
 (define (clipboard-paste! text)
   (kill-push! text)
   (insert! text))
+
+;; Cmd-C with no native selection (S12, dup #26): the region when one
+;; exists — pushed to the kill ring, Emacs interprogram-cut — else the
+;; newest kill
+(define (clipboard-copy)
+  (let ((text (region-text)))
+    (if (equal? text "")
+        (kill-top)
+        (begin (kill-push! text) text))))
 
 ;;; --- default keymap --------------------------------------------------------
 

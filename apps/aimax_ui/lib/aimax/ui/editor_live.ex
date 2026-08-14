@@ -191,11 +191,20 @@ defmodule Aimax.Ui.EditorLive do
   end
 
   # Cmd-C with no native selection: reply with the region (or kill top)
-  # for the client to put on the OS clipboard
+  # for the client to put on the OS clipboard — what "copy" MEANS is
+  # Scheme's (clipboard-copy), like paste (S12, dup #26)
   def handle_event("copy", _params, socket) do
+    text =
+      Input.run(socket.assigns.frame, fn ->
+        case Aimax.Core.Session.call_named("clipboard-copy", []) do
+          {:ok, text} when is_binary(text) -> text
+          _ -> ""
+        end
+      end)
+
     {:noreply,
      socket
-     |> push_event("clipboard", %{text: Aimax.Core.Editor.copy_text(socket.assigns.frame)})
+     |> push_event("clipboard", %{text: text})
      |> drain()
      |> refresh()}
   end

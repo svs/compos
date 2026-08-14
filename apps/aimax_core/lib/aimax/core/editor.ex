@@ -229,7 +229,6 @@ defmodule Aimax.Core.Editor do
 
   # Cmd-C with no native selection: the active region (pushed onto the kill
   # ring, Emacs kill-ring-save) or, without one, the kill-ring top
-  def copy_text(fid \\ nil), do: GenServer.call(__MODULE__, {:copy_text, fid(fid)})
   def user_acted(fid \\ nil), do: GenServer.call(__MODULE__, {:user_acted, fid(fid)})
   def window_rows(fid \\ nil), do: GenServer.call(__MODULE__, {:window_rows, fid(fid)})
   def recenter(fid \\ nil), do: GenServer.call(__MODULE__, {:recenter, fid(fid)})
@@ -598,22 +597,6 @@ defmodule Aimax.Core.Editor do
         catch
           :exit, _ -> {:reply, {:error, :no_buffer}, state}
         end
-    end
-  end
-
-  def handle_call({:copy_text, fid}, _from, state) do
-    f = frame(state, fid)
-    buf = find_leaf(f.tree, f.active).buffer
-    snap = safe_snapshot(buf, f.active)
-
-    case snap.mark do
-      mark when is_integer(mark) and mark != snap.point ->
-        {s, e} = {min(mark, snap.point), max(mark, snap.point)}
-        region = binary_part(snap.text, s, e - s)
-        {:reply, region, %{state | kill_ring: Enum.take([region | state.kill_ring], 60)}}
-
-      _ ->
-        {:reply, List.first(state.kill_ring, ""), state}
     end
   end
 

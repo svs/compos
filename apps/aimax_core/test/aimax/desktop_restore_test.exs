@@ -58,6 +58,27 @@ defmodule Aimax.DesktopRestoreTest do
     assert Buffer.get_local(name, "seen") == "marker"
   end
 
+  # S8: `buffer-set-local! 'mode-name X` without `define-mode X` is a
+  # bug — restore re-runs the setup fn, and a name with no setup restores
+  # to nothing. Scan the sources for literal writers, check the registry.
+  test "every literal mode-name write names a registered mode" do
+    priv = to_string(:code.priv_dir(:aimax_core))
+    src = priv |> Path.join("**/*.scm") |> Path.wildcard() |> Enum.map_join("\n", &File.read!/1)
+
+    written =
+      ~r/'mode-name\s+"([^"]+)"/
+      |> Regex.scan(src)
+      |> Enum.map(fn [_, m] -> m end)
+      |> Enum.uniq()
+
+    assert written != []
+
+    for mode <- written do
+      assert eval!(~s{(and (assoc "#{mode}" *mode-setups*) #t)}) == "#t",
+             ~s{mode-name "#{mode}" is written but no define-mode registers it}
+    end
+  end
+
   # S4/S6: a tool card has ONE open-state — the 'agent-open-cards chat
   # local. It drives the rich view's <details>, the plain view's fold,
   # and it survives restore.

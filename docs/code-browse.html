@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ai-max.el — code-browse</title>
+<style>
+  :root{--paper:#fdfcf8;--ink:#1b1a17;--soft:#57534a;--faint:#8a857a;--rule:#cbc4b1;
+        --indigo:#26356b;--green:#2e6b45;--amber:#7a5a1a;--red:#a83a2b;--wash:#e7e9f1;}
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px 34px 60px;background:var(--paper);color:var(--ink);
+       font:15px/1.6 "IBM Plex Sans",system-ui,sans-serif;max-width:60em}
+  h1{font:600 26px/1.2 Spectral,Georgia,serif;margin:0 0 4px}
+  h2{font:600 19px/1.3 Spectral,Georgia,serif;margin:30px 0 8px;
+     border-bottom:1px solid var(--rule);padding-bottom:4px}
+  h3{font:600 15px/1.3 "IBM Plex Sans",sans-serif;margin:18px 0 6px;color:var(--indigo)}
+  .sub{color:var(--faint);margin:0 0 18px;font-size:13px}
+  code,pre{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:13px}
+  code{background:#f4f0e6;padding:1px 4px;border-radius:2px}
+  pre{background:#f4f0e6;padding:10px 12px;border-left:3px solid var(--indigo);
+      overflow-x:auto;margin:8px 0}
+  pre code{background:none;padding:0}
+  ul{margin:6px 0 6px 20px;padding:0}li{margin:3px 0}
+  table{border-collapse:collapse;margin:10px 0;font-size:13.5px;width:100%}
+  th{text-align:left;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+     color:var(--faint);border-bottom:1px solid var(--rule);padding:5px 8px 5px 0}
+  td{border-top:1px solid #e2dbc9;padding:5px 8px 5px 0;vertical-align:top}
+  .box{background:var(--wash);border-left:3px solid var(--indigo);padding:10px 14px;margin:14px 0}
+  .warn{background:#f7ece9;border-left-color:var(--red)}
+  kbd{font-family:"IBM Plex Mono",monospace;font-size:12px;background:#fff;
+      border:1px solid var(--rule);border-bottom-width:2px;border-radius:3px;padding:0 4px}
+</style>
+</head>
+<body>
+
+<h1>code-browse</h1>
+<p class="sub">Read a source file with structural keys ·
+<code>priv/packages/code.scm</code> + the <code>ts-node</code> primitive ·
+Linear CB7 · updated 2026-08-14</p>
+
+<h2>What it is</h2>
+<p><code>M-x code-browse</code> turns the current buffer into a reader. The
+buffer becomes read-only, single keys move over the structure of the code
+instead of over characters, the node you stand on carries a tint, and a long
+file folds its definitions so you see the signatures first. <kbd>RET</kbd>
+gives the buffer back, exactly as it was.</p>
+
+<p>It is a MINOR mode: the buffer keeps its major mode, its syntax colors and
+its file. <code>elixir-mode</code> stays <code>elixir-mode</code>.</p>
+
+<div class="box">
+<strong>The reason it exists.</strong> An agent writes code faster than a human
+reads it. Reading is now the bottleneck, so reading gets first-class verbs:
+move by definition, fold what you do not need, tint what encloses you.
+</div>
+
+<h2>The keys</h2>
+<table>
+<tr><th>key</th><th>command</th><th>what it does</th></tr>
+<tr><td><kbd>h</kbd></td><td><code>code-browse-parent</code></td>
+    <td>Move to the node that encloses this one.</td></tr>
+<tr><td><kbd>l</kbd></td><td><code>code-browse-child</code></td>
+    <td>Move into the first block inside this node.</td></tr>
+<tr><td><kbd>j</kbd></td><td><code>code-browse-next</code></td>
+    <td>Move to the next node at this level.</td></tr>
+<tr><td><kbd>k</kbd></td><td><code>code-browse-prev</code></td>
+    <td>Move to the previous node at this level.</td></tr>
+<tr><td><kbd>TAB</kbd></td><td><code>code-browse-toggle-fold</code></td>
+    <td>Fold or unfold the body of the node at point.</td></tr>
+<tr><td><kbd>RET</kbd> · <kbd>q</kbd></td><td><code>code-browse-exit</code></td>
+    <td>Leave the mode. Point stays where it is.</td></tr>
+<tr><td><kbd>M-.</kbd></td><td><code>code-goto-definition</code></td>
+    <td>Go to the definition of the symbol at point.</td></tr>
+</table>
+
+<p>Every motion lands point at the start of the node. The modeline shows
+<code>browse &lt;kind&gt;</code> — the grammar's own name for what you stand on
+(<code>call</code>, <code>do_block</code>, <code>block</code>).</p>
+
+<h2>The node</h2>
+<p>One shape carries everything: <code>(KIND START END)</code>, in BYTE offsets,
+because point is a byte offset and tree-sitter reports bytes. There is no
+character math anywhere in this mode.</p>
+
+<div class="box warn">
+<strong>Landmine — a byte range does not name a node.</strong> Nested nodes can
+cover the SAME bytes. In Elixir, <code>def alpha(x)</code> is an
+<code>arguments</code> node and a <code>call</code> node over identical bytes.
+Ask "what follows the node at 27..35" and the parser answers about the inner
+call, which has no next sibling, so sibling motion stops one step in. The KIND
+travels with the range for this reason: <code>ts-node</code> climbs from the
+smallest node while the parent covers the same bytes, and stops at the kind the
+caller named.
+</div>
+
+<h2>Two backends, one question</h2>
+<p>The mode asks six questions — <code>at</code>, <code>parent</code>,
+<code>child</code>, <code>next</code>, <code>prev</code>, <code>top</code> —
+and two backends answer them.</p>
+
+<table>
+<tr><th>backend</th><th>when</th><th>how</th></tr>
+<tr><td>tree-sitter</td><td>The buffer has a <code>ts-lang</code> local and the
+    grammar parses it.</td>
+    <td>The <code>ts-node</code> NIF walks the real syntax tree.</td></tr>
+<tr><td>indentation</td><td>Every other buffer: an outline, a text file, a
+    <code>.scm</code> (no grammar is wired yet).</td>
+    <td>Pure Scheme over the lines. A block is one line plus the deeper lines
+    below it. A sibling has the same indent, a parent has less, a child has
+    more.</td></tr>
+</table>
+
+<p>The mode picks the backend ONCE, on entry, and stores it in
+<code>'code-backend</code>. Asking per keypress would reparse the file to learn
+something that does not change while you read.</p>
+
+<h3>Where the two differ</h3>
+<ul>
+<li><strong>Entry.</strong> With tree-sitter, the node under point is usually an
+identifier — a word, not a place to stand — so the mode climbs to the first
+ancestor that spans more than one line. With indentation, every line is
+already a node, so it stands where you are.</li>
+<li><strong>Descent.</strong> <kbd>l</kbd> with tree-sitter skips to the first
+child that spans more than one line: the block, not the keyword before it.
+With indentation it takes the first child line.</li>
+</ul>
+
+<p>Both share the anchor rule: point at the start of <code>"  def a do"</code>
+means the def, not the block that holds it. Browsing starts on the code of the
+line, never on the indentation before it.</p>
+
+<h2>Folds</h2>
+<p>A node folds its BODY: from the end of its first line to its end. The first
+line stays on screen, so a folded definition still shows its signature and a
+<code>…</code> marker.</p>
+
+<p>Folds are tagged (CB3): this mode owns the tag <code>'code</code> and never
+touches org's or the diff's. <kbd>TAB</kbd> calls <code>fold-toggle!</code> and
+mirrors the result into <code>'code-folds</code>.</p>
+
+<h3>The fold policy needs no language table</h3>
+<p>On entry, a file over <code>code-browse-fold-lines</code> (default 80) folds
+its definitions. What counts as a definition is decided by shape, not by a list
+of keywords per language:</p>
+<pre><code>fold the top-level nodes
+  unless ONE node covers more than 4/5 of the file
+    then fold the nodes inside it instead (up to three levels deep)</code></pre>
+<p>An Elixir <code>defmodule</code> wraps the whole file, so the rule descends
+through it and folds the <code>def</code>s. A Rust file has its
+<code>fn</code>s at the top already, so the rule folds them where they are.</p>
+
+<h2>The tint</h2>
+<p>After every motion the mode replaces one overlay under the tag
+<code>'code-scope</code>, using the face <code>code-scope</code> — a low-alpha
+background in all four base palettes (<code>tokyo-night</code> inherits from
+<code>aimax-dark</code>). There is no point-move hook: the tint is recomputed by
+the browse commands and by nothing else.</p>
+
+<p>A node that covers the whole buffer gets NO tint. A tint over every line
+says nothing about where the reader is.</p>
+
+<h2>What survives a restart</h2>
+<div class="box">
+Everything the mode does rebuilds from buffer-locals, because the setup fn runs
+on enable AND on desktop restore.
+</div>
+<table>
+<tr><th>local</th><th>holds</th></tr>
+<tr><td><code>'code-node</code></td><td>The node the reader stands on.</td></tr>
+<tr><td><code>'code-folds</code></td><td>The fold ranges this mode owns.</td></tr>
+<tr><td><code>'code-backend</code></td><td><code>"ts"</code> or <code>"indent"</code>.</td></tr>
+<tr><td><code>'code-saved</code></td><td>What the mode clobbered: the read-only
+    flag, the modeline text, and the prior binding of every key it takes.</td></tr>
+</table>
+
+<p>The saved keys matter. A minor mode that binds <kbd>j</kbd> must give
+<kbd>j</kbd> back, so teardown restores the prior command or calls the new
+<code>local-unset-key*</code> primitive when there was none.</p>
+
+<p>The setup fn also runs for a buffer that is NOT on screen, because desktop
+restore walks every buffer. The node primitives read the CURRENT buffer, so in
+that case the mode rebuilds the tint and the folds from the locals alone, and
+asks the parser nothing.</p>
+
+<h2>Go to definition — the LSP seam</h2>
+<p>This mode is syntax-level by design. <kbd>M-.</kbd> calls
+<code>(lsp-definition SYM)</code> when a language server binds that name, and
+otherwise searches the same file for a line that names the symbol after a
+defining word (<code>def</code>, <code>defp</code>, <code>fn</code>,
+<code>class</code>, …). One <code>boundp</code> check, no LSP code. The
+degradation is the same shape as tree-sitter falling back to indentation.</p>
+
+<h2>The primitive</h2>
+<pre><code>(ts-node KIND START END OP)
+  ;; KIND ""      -> the smallest node covering START..END
+  ;; KIND "call"  -> that node, when nested nodes share the range
+  ;; OP 'at 'parent 'child 'next 'prev 'top
+  ;; -> (KIND START END), or #f</code></pre>
+<p>Mechanism in Rust, policy in Scheme: the NIF reports the tree and says
+nothing about what a reader should stop on. <code>'top</code> is the ancestor
+whose own parent is the root — the fold policy's entry point.</p>
+
+<h2>Where the code is</h2>
+<table>
+<tr><th>piece</th><th>file</th><th>role</th></tr>
+<tr><td><code>code.scm</code></td><td><code>apps/aimax_core/priv/packages/</code></td>
+    <td>The whole mode: keys, motion policy, fold policy, both backends.</td></tr>
+<tr><td><code>ts_node</code></td><td><code>apps/aimax_core/native/aimax_ts/src/lib.rs</code></td>
+    <td>The node and its neighbours, by kind and byte range.</td></tr>
+<tr><td><code>ts-node</code>, <code>local-unset-key*</code></td>
+    <td><code>apps/aimax_core/lib/aimax/core/scheme_api.ex</code></td>
+    <td>The two new primitives.</td></tr>
+<tr><td><code>code-scope</code></td><td><code>apps/aimax_core/priv/themes.scm</code></td>
+    <td>The tint, in all four base palettes.</td></tr>
+<tr><td><code>code_browse_test.exs</code></td><td><code>apps/aimax_core/test/aimax/</code></td>
+    <td>Eleven tests through <code>KeyDispatch.handle_key/1</code>, over an
+    Elixir fixture and an outline fixture, including the restore path.</td></tr>
+</table>
+
+<h2>Limits, today</h2>
+<ul>
+<li>Grammars are elixir, json and rust, plus any grammar loaded at runtime.
+Everything else browses by indentation.</li>
+<li>The entry climb reparses the file once per step, up to three or four steps
+on a big file. It is fast enough to keep, and a cached tree per buffer version
+is the fix if it stops being fast enough.</li>
+<li>The kinds in the modeline are the grammar's names, not friendly ones.
+That is honest, and a name table would be one more thing to keep true.</li>
+<li>There is no global binding. The mode is <code>M-x code-browse</code>
+until a key earns it.</li>
+</ul>
+
+<p class="sub">Read this in the editor: <code>C-x C-f docs/code-browse.html RET</code>
+then <kbd>C-c C-v</kbd>.</p>
+
+</body>
+</html>

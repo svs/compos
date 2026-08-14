@@ -235,6 +235,24 @@ not run; everything structural around it is tested
 
 ### R3 — The frontend is a function of daemon state
 
+*Started 2026-08-14 on `main`; four of six slices landed.* Done: S2 (one
+`apply_saved_state`, locals before an unconditional `set-mode!`, point
+last, `Session.call_named` instead of interpolation — a restored org
+file comes back folded); S4/S6 (one open-state per tool card in
+`agent-open-cards`, controlled `<details>`, TAB and click share it);
+S7 (`agent-unstick` + `agent-scroll-top` runtime locals — refresh keeps
+the reader's place; stored inverted because a cleared local is `#f` and
+must mean "follow"); S8 (`shell-mode` is a real mode that restarts its
+process on restore; a source-scan test enforces mode-name ⊆ registered
+modes); S11 (`render-mode` is identity; toggle writes `"plain"`, setup
+defaults only when unset); S12's copy (`clipboard-copy` in Scheme);
+S15 (unsubscribe on window-leave, cache prune, list buffers transient,
+read-only `Editor.desktop_view` for save); S16 (which-key under the
+normalized keymap key; rich transcript skips `visible_geometry`);
+A13 (per-block transcript cache). `desktop_restore_test.exs` holds S2,
+S4/S6, and S8. **Left: scroll (S1/S9/S10) and frames (S5/S13/S14),
+then the full done-when round-trip.**
+
 **Why.** S1–S16. The invariant is stated; make it true.
 
 **What.**

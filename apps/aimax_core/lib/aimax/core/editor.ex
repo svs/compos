@@ -1483,8 +1483,9 @@ defmodule Aimax.Core.Editor do
       mode: Map.get(locals, "mode-name") || "Fundamental",
       # free-form per-buffer modeline segment (agent connector, etc.)
       modeline_info: Map.get(locals, "modeline-info"),
-      # buffer-group tag ("companion-of" is the pre-group legacy pointer)
-      group: Map.get(locals, "group") || Map.get(locals, "companion-of"),
+      # buffer-group tag — chat setup migrates the legacy companion-of
+      # pointer to this local, so the payload reads only the raw local
+      group: Map.get(locals, "group"),
       ts_lang: Map.get(locals, "ts-lang"),
       overlays: snap.overlays,
       overlay_gen: snap.overlay_gen,

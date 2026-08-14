@@ -236,61 +236,59 @@ when a message has no text/plain part." 'group 'notmuch)
                                 " | " (nm--cmd "count --batch"))))
              "\n"))))
 
-(define (nm--hello-refresh! buf)
+;; one row: (name query total unread)
+(define (nm--hello-rows buf)
   (let* ((searches (nm--saved-searches))
          (queries (map cadr searches))
          (totals (nm--batch-count queries))
          (unreads (nm--batch-count
                     (map (lambda (q) (string-append "( " q " ) and tag:unread"))
-                         queries)))
-         (old-point (buffer-point buf))
-         (header "mailboxes\n"))
-    (buffer-set-local! buf 'notmuch-searches searches)
-    (buffer-delete-range! buf 0 (buffer-size buf))
-    (buffer-append! buf header)
-    (let loop ((ss searches) (ts totals) (us unreads)
-               (off (string-byte-length header)) (ovs '()))
-      (if (null? ss)
-          (overlay-set! buf 'notmuch (reverse ovs))
-          (let* ((name (nm--fit (car (car ss)) 16))
-                 (unread (car us))
-                 (counts (string-append
-                           (string-pad-left (number->string unread) 6) " / "
-                           (string-pad-left (number->string (car ts)) 6)))
-                 (line (string-append "  " name counts "   " (cadr (car ss)) "\n"))
-                 (n-start (+ off 2))
-                 (n-end (+ n-start (string-byte-length name)))
-                 (c-end (+ n-end (string-byte-length counts)))
-                 (l-end (+ off (string-byte-length line))))
-            (buffer-append! buf line)
-            (loop (cdr ss) (cdr ts) (cdr us) l-end
-                  (cons (list c-end (- l-end 1) "nm-tags")
-                        (cons (list n-end c-end "nm-date")
-                              (cons (list n-start n-end
-                                          (if (> unread 0) "nm-unread" "nm-author"))
-                                    ovs)))))))
-    (when (equal? buf (current-buffer))
-      (goto-char! (min old-point (buffer-size buf))))))
+                         queries))))
+    (let loop ((ss searches) (ts totals) (us unreads) (acc '()))
+      (if (or (null? ss) (null? ts) (null? us))
+          (reverse acc)
+          (loop (cdr ss) (cdr ts) (cdr us)
+                (cons (list (car (car ss)) (cadr (car ss)) (car ts) (car us))
+                      acc))))))
 
-(define (nm--hello-at buf)
-  (let* ((before (substring-bytes (buffer-text buf) 0 (buffer-point buf)))
-         (line (- (length (string-split before "\n")) 1))
-         (ss (or (buffer-local buf 'notmuch-searches) '())))
-    (and (>= line 1) (<= line (length ss)) (list-ref ss (- line 1)))))
+(define (nm--hello-cols row)
+  (list (nm--fit (car row) 16)
+        (string-append
+          (string-pad-left (number->string (list-ref row 3)) 6) " / "
+          (string-pad-left (number->string (list-ref row 2)) 6))))
 
-(define-mode "notmuch-hello-mode"
-  (lambda ()
-    (let ((buf (current-buffer)))
-      (buffer-set-read-only! buf #t)
-      (buffer-set-local! buf 'transient #t)
-      (local-set-key "n" "next-line")
-      (local-set-key "p" "previous-line")
-      (local-set-key "RET" "notmuch-hello-open")
-      (local-set-key "g" "notmuch-hello-refresh")
-      (local-set-key "j" "notmuch-jump")
-      (local-set-key "s" "notmuch-search")
-      (local-set-key "q" "quit-window")
-      (nm--hello-refresh! buf))))
+(define (nm--hello-line row)
+  (let ((c (nm--hello-cols row)))
+    (string-append "  " (car c) (cadr c) "   " (cadr row))))
+
+(define (nm--hello-overlays buf row off)
+  (let* ((c (nm--hello-cols row))
+         (n-start (+ off 2))
+         (n-end (+ n-start (string-byte-length (car c))))
+         (c-end (+ n-end (string-byte-length (cadr c))))
+         (l-end (+ off (string-byte-length (nm--hello-line row)))))
+    (list (list n-start n-end
+                (if (> (list-ref row 3) 0) "nm-unread" "nm-author"))
+          (list n-end c-end "nm-date")
+          (list c-end l-end "nm-tags"))))
+
+(define (nm--hello-at buf) (list-current buf))
+
+(define-list-mode! "notmuch-hello-mode"
+  (list
+    'doc (string-append
+           "The mailboxes: every saved search with its unread and total "
+           "counts. `RET` opens one as a thread list; `s` runs a free-form "
+           "search.")
+    'buffer *notmuch-hello-buffer*
+    'rows nm--hello-rows
+    'render (lambda (buf row) (nm--hello-line row))
+    'overlays nm--hello-overlays
+    'header (lambda (buf) "mailboxes")
+    'keys '(("n" "next-line") ("p" "previous-line")
+            ("RET" "notmuch-hello-open") ("g" "notmuch-hello-refresh")
+            ("j" "notmuch-jump") ("s" "notmuch-search")
+            ("q" "quit-window"))))
 
 (define-command "notmuch" "Open the mailboxes (saved searches)"
   (lambda ()
@@ -308,7 +306,7 @@ when a message has no text/plain part." 'group 'notmuch)
           (message "No mailbox on this line")))))
 
 (define-command "notmuch-hello-refresh" "Refresh the mailbox counts"
-  (lambda () (nm--hello-refresh! (current-buffer)) (message "Refreshed")))
+  (lambda () (list-refresh! (current-buffer)) (message "Refreshed")))
 
 ;; the mail views are derived state — killing them loses nothing. The
 ;; chat survives (it holds a conversation); a scene toggle in init.scm
@@ -413,7 +411,7 @@ when a message has no text/plain part." 'group 'notmuch)
         (begin
           (nm--run (string-append "tag " changes " -- thread:" (nm--th-id th)))
           (nm--refresh! buf)
-          (let ((n (length (or (buffer-local buf 'notmuch-threads) '()))))
+          (let ((n (length (list-entries buf))))
             (when (and i (> n 0)) (nm--goto-index! buf (min i (- n 1)))))
           (nm--maybe-preview! buf)
           (message changes))

@@ -186,19 +186,26 @@ replays tool blocks.
 
 ### R2 — Cache economics
 
-*Done 2026-08-13 on `refactor/r2-cache-economics`, except the empirical
-acceptance.* All of A4–A11 and B3 landed. Notes: the retry belongs on
-`default_request` as well as `default_chat`, and req_llm reports a status
-as an integer on one error struct and a string on another, nested — the
-predicate walks the chain. The compaction knobs are defcustoms in
-`tools.scm`, not `editor.scm`: `defcustom` is userland and loads after the
-editor. Compaction runs on `turn-end` and only between turns, because the
-head it replaces is the head a running request already sent; the summary
-call is async, so the head is identified by count and replaced only if the
-record still ends with it. **Open:** the empirical check — a three-turn
-tool chat showing `cache_read > 0` on turns 2–3 — needs a real key and was
-not run; everything structural around it is tested
+*Done 2026-08-13 on `refactor/r2-cache-economics`.* All of A4–A11 and B3
+landed. Notes: the retry belongs on `default_request` as well as
+`default_chat`, and req_llm reports a status as an integer on one error
+struct and a string on another, nested — the predicate walks the chain.
+The compaction knobs are defcustoms in `tools.scm`, not `editor.scm`:
+`defcustom` is userland and loads after the editor. Compaction runs on
+`turn-end` and only between turns, because the head it replaces is the
+head a running request already sent; the summary call is async, so the
+head is identified by count and replaced only if the record still ends
+with it. Everything structural is tested
 (`test/aimax/cache_economics_test.exs`).
+
+**Empirical acceptance passed 2026-08-14.** A three-turn tool chat
+(companion chat, api lane, `claude-sonnet-5`, one `eval-scheme` tool call
+per turn) ran on an isolated `AIMAX_VERIFY` daemon with a real key. The
+ledger rows: turn 1 `cache_write 2349, cache_read 2286` (the tool round
+already reads the just-written prefix), turn 2 `cache_read 4720`, turn 3
+`cache_read 4889`. Fresh `input` stays at 4 tokens on every request —
+the hit rate over the conversation is 11895 read / 12 fresh (~99.9%),
+total cost $0.0105.
 
 **Why.** A4–A11, B3. The current config pays a surcharge for nothing.
 

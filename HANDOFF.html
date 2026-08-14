@@ -169,7 +169,7 @@ four stale spec bullets) are fixed in the last two commits.
 <table>
 <tr><th>Item</th><th>State</th><th>What is left</th></tr>
 <tr><td>R1 conversation of record</td><td class="done">done</td><td>—</td></tr>
-<tr><td>R2 cache economics</td><td class="done">done</td><td><strong>The empirical acceptance is unproven.</strong> A three-turn tool chat must show <code>cache_read &gt; 0</code> on turns 2–3. Needs a real API key; the mechanism is tested, the number is not.</td></tr>
+<tr><td>R2 cache economics</td><td class="done">done</td><td>Empirical acceptance passed 2026-08-14: a real three-turn tool chat (claude-sonnet-5, AIMAX_VERIFY daemon) shows <code>cache_read</code> 4720 and 4889 on turns 2–3, fresh input 4 tokens per request, ~99.9% hit rate, $0.0105 total. Details in the spec.</td></tr>
 <tr><td>R3 frontend = daemon state</td><td class="done">done</td><td>Landed 2026-08-14 in six slices (S2 restore order · S4/S6/S7 rich-view state · S8/S11/S12 modes/identity/copy · S15/S16/A13 hygiene+cache · S1/S9 scroll · S5/S13/S14 frames). <code>desktop_restore_test.exs</code> is R10's last piece. Three refinements recorded in the spec, none blocking.</td></tr>
 <tr><td>R4 one chat surface</td><td class="done">done</td><td>—</td></tr>
 <tr><td>R5 one permission gate</td><td class="done">done</td><td><code>mcp-proxy-call</code> still dispatches in the session. It cannot do otherwise — the surface it serves is the Scheme tool registry, and a Scheme handler runs in the session by definition. Getting it off needs a deferred-reply RPC design.</td></tr>

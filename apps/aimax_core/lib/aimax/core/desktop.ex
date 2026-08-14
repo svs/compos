@@ -94,16 +94,14 @@ defmodule Aimax.Core.Desktop do
         {name, content, Buffer.point(name), savable_locals(name)}
       end
 
-    # v2: every frame's layout, in frame-MRU order (head = most recent)
-    frames =
-      for fid <- Editor.frame_list() do
-        render = Editor.render_state(fid)
+    # v2: every frame's layout, in frame-MRU order (head = most recent).
+    # desktop_view is read-only (S15): saving must not run the render
+    # walk, which writes viewport tops back into the tree.
+    views = for fid <- Editor.frame_list(), do: {fid, Editor.desktop_view(fid)}
 
-        %{
-          id: fid,
-          tree: serialize(render.tree),
-          active_buffer: active_buffer(render.tree, render.active)
-        }
+    frames =
+      for {fid, view} <- views do
+        %{id: fid, tree: serialize(view.tree), active_buffer: view.active_buffer}
       end
 
     desktop = %{
@@ -111,7 +109,7 @@ defmodule Aimax.Core.Desktop do
       buffers: buffers,
       scratch: scratch,
       frames: frames,
-      faces: Editor.render_state().faces
+      faces: views |> List.first({nil, %{faces: %{}}}) |> elem(1) |> Map.get(:faces)
     }
 
     file = path()
@@ -148,14 +146,6 @@ defmodule Aimax.Core.Desktop do
     do: Enum.all?(v, fn {k, val} -> serializable?(k) and serializable?(val) end)
 
   defp serializable?(_), do: true
-
-  defp active_buffer(tree, active_id), do: find_buffer(tree, active_id)
-
-  defp find_buffer(%{type: :leaf, id: id, buffer: b}, id), do: b
-  defp find_buffer(%{type: :leaf}, _id), do: nil
-
-  defp find_buffer(%{type: :split, children: c}, id),
-    do: Enum.find_value(c, &find_buffer(&1, id))
 
   # --- restore ---------------------------------------------------------------
 

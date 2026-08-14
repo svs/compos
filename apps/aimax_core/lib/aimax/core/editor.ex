@@ -57,6 +57,13 @@ defmodule Aimax.Core.Editor do
   def global_keys, do: GenServer.call(__MODULE__, :global_keys)
   def render_state(fid \\ nil), do: GenServer.call(__MODULE__, {:render_state, fid(fid)})
 
+  @doc """
+  Read-only view for desktop save (S15): the frame's tree with each
+  leaf's top and effective per-window point, plus faces — none of
+  render_state's write-back.
+  """
+  def desktop_view(fid \\ nil), do: GenServer.call(__MODULE__, {:desktop_view, fid(fid)})
+
   # frames
   @doc "Attach a client: nil -> fresh frame; known id -> reattach; unknown id -> create with it."
   def attach_frame(id), do: GenServer.call(__MODULE__, {:attach_frame, id})
@@ -465,6 +472,18 @@ defmodule Aimax.Core.Editor do
       end
 
     {:reply, reply, state}
+  end
+
+  def handle_call({:desktop_view, fid}, _from, state) do
+    f = frame(state, fid)
+
+    active =
+      case find_leaf(f.tree, f.active) do
+        %{buffer: b} -> b
+        _ -> nil
+      end
+
+    {:reply, %{tree: dtree(f.tree), active_buffer: active, faces: state.faces}, state}
   end
 
   def handle_call({:local_remap, buffer, from, to}, _from, state) do
@@ -1130,6 +1149,19 @@ defmodule Aimax.Core.Editor do
   defp keymap_key(" *minibuf" <> _), do: @minibuf
   defp keymap_key(name), do: name
 
+  # the desktop's read-only tree: structure, tops, per-window points
+  defp dtree(%{type: :leaf, id: id, buffer: b} = leaf),
+    do: %{type: :leaf, buffer: b, top: Map.get(leaf, :top, 0), point: safe_win_point(b, id)}
+
+  defp dtree(%{type: :split, dir: dir, children: [a, b]} = s),
+    do: %{type: :split, dir: dir, ratio: Map.get(s, :ratio, 0.5), children: [dtree(a), dtree(b)]}
+
+  defp safe_win_point(buffer, win_id) do
+    if Buffer.exists?(buffer), do: Buffer.win_point(buffer, win_id), else: 0
+  catch
+    :exit, _ -> 0
+  end
+
   # (re)fill the backing buffer and park point at the end
   defp reset_minibuf_buffer(name, input) do
     unless Buffer.exists?(name), do: Aimax.Core.create_buffer(name)
@@ -1175,8 +1207,10 @@ defmodule Aimax.Core.Editor do
   defp which_key(_state, %{pending: []}), do: nil
 
   defp which_key(state, f) do
-    buffer = find_leaf(f.tree, f.active).buffer
-    local = Map.get(state.local_keymaps, buffer, %{})
+    # while a prompt is active the minibuffer's map is the one in force,
+    # and it is stored under the normalized key (S16)
+    buffer = if f.minibuffer, do: minibuf_of(f), else: find_leaf(f.tree, f.active).buffer
+    local = Map.get(state.local_keymaps, keymap_key(buffer), %{})
 
     [local, state.keymap]
     |> Enum.flat_map(&Map.to_list/1)

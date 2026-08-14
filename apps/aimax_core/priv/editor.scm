@@ -214,6 +214,9 @@
 (define (list-mode-init! buf name)
   (let ((opts (list-mode-opts name)))
     (buffer-set-local! buf 'list-mode name)
+    ;; derived content (S15): the refresh below re-renders it from
+    ;; rows-fn, so the desktop saves mode + locals, not the rows
+    (buffer-set-local! buf 'transient #t)
     (for-each (lambda (k) (local-set-key* buf (car k) (car (cdr k))))
               (or (plist-get opts 'keys) '()))
     (for-each (lambda (r) (local-remap*! buf (car r) (car (cdr r))))

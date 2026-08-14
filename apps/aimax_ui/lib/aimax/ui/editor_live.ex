@@ -253,21 +253,39 @@ defmodule Aimax.Ui.EditorLive do
     {tree, line_cache} = decorate(state.tree, socket.assigns.line_cache, state.faces)
     state = %{state | tree: tree}
 
+    # cache entries for windows that left the tree die with them (S15)
+    ids = state.tree |> leaf_ids() |> MapSet.new()
+
+    line_cache =
+      Map.filter(line_cache, fn
+        {{_kind, id}, _} -> MapSet.member?(ids, id)
+        {id, _} -> MapSet.member?(ids, id)
+      end)
+
     subscribed =
       if connected?(socket) do
         visible = state.tree |> visible_buffers() |> MapSet.new()
+
+        # a buffer that left the window set stops feeding this client (S15)
+        socket.assigns.subscribed
+        |> MapSet.difference(visible)
+        |> Enum.each(&Events.unsubscribe/1)
 
         visible
         |> MapSet.difference(socket.assigns.subscribed)
         |> Enum.each(&Events.subscribe/1)
 
-        MapSet.union(socket.assigns.subscribed, visible)
+        visible
       else
         socket.assigns.subscribed
       end
 
     assign(socket, state: state, subscribed: subscribed, line_cache: line_cache)
   end
+
+  defp leaf_ids(%{type: :leaf, id: id}), do: [id]
+  defp leaf_ids(%{type: :split, children: children}), do: Enum.flat_map(children, &leaf_ids/1)
+  defp leaf_ids(_), do: []
 
   # two-level cache: the raw line split is keyed by buffer VERSION only, so
   # cursor motion never re-splits the buffer; span decoration (cursor/region/
@@ -297,23 +315,44 @@ defmodule Aimax.Ui.EditorLive do
   # typed DOM — serif prose, tool cards, permission buttons. The buffer
   # text stays canonical; this is a pure view over byte ranges.
   defp decorate(%{type: :leaf, render_mode: "agent", agent: %{} = ag} = leaf, cache, _faces) do
-    key = {leaf.buffer, leaf.version, :agent, :erlang.phash2(ag.open_cards)}
-
-    blocks =
+    # per-BLOCK cache (A13): a streaming append re-renders the one block
+    # that grew, not the whole transcript. A block's key is its raw entry,
+    # the bytes it covers, and its open flag.
+    old =
       case cache[{:agent, leaf.id}] do
-        {^key, blocks} ->
-          blocks
-
-        _ ->
-          ag.blocks
-          |> Enum.reverse()
-          |> Enum.map(&ag_block(&1, leaf.text, ag.open_cards))
-          |> Enum.reject(&is_nil/1)
+        map when is_map(map) -> map
+        _ -> %{}
       end
 
+    {rendered, block_cache} =
+      ag.blocks
+      |> Enum.reverse()
+      |> Enum.with_index()
+      |> Enum.map_reduce(%{}, fn {b, i}, acc ->
+        key = :erlang.phash2({b, block_slice(b, leaf.text), block_open?(b, ag.open_cards)})
+
+        view =
+          case old[i] do
+            {^key, view} -> view
+            _ -> ag_block(b, leaf.text, ag.open_cards)
+          end
+
+        {view, Map.put(acc, i, {key, view})}
+      end)
+
+    blocks = Enum.reject(rendered, &is_nil/1)
+
     {Map.merge(leaf, %{lines: [], ag_blocks: blocks, ag_input: ag_input(leaf, ag)}),
-     Map.put(cache, {:agent, leaf.id}, {key, blocks})}
+     Map.put(cache, {:agent, leaf.id}, block_cache)}
   end
+
+  defp block_slice([s, e | _], text) when is_integer(s) and is_integer(e),
+    do: safe_slice(text, s, e)
+
+  defp block_slice(_, _), do: nil
+
+  defp block_open?([_s, _e, "tool", id | _], open_cards), do: id in open_cards
+  defp block_open?(_, _), do: false
 
   # rich diff: the buffer text IS the unified diff, so the cards are parsed
   # out of the same bytes the plain view shows. Only the controlled state —

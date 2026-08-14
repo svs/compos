@@ -188,43 +188,80 @@ rewrites (+3664/−1054 over 47 files); the code-browser worktree
 rewrites replay expensively over additions. The worktree merged the same
 day (<code>59fb925</code>), which lands SVS-193 and unblocks R3.</p>
 
-<h3>Review note for the next session (left 2026-08-15)</h3>
+<h3>Review note: audit the whole AI-native refactor (left 2026-08-15)</h3>
 <div class="box">
-<p>The 2026-08-14 session closed R2, R8 and R9 in eleven commits
-(<code>98fb401..d13ad83</code>). The suites are green and each change got a
-headless smoke test on the live daemon. Four spots deserve a real-browser
-review — they changed click or restore behaviour that headless checks
-cannot fully see:</p>
-<ul>
-<li><strong>C-x b from a browser page</strong> (<code>1194323</code>). chrome's
-  <code>switch-to-buffer</code> copy became the <code>switch-buffer-source</code>
-  seam. Verify from a page: tabs in the list, RET on a tab does not raise the
-  editor, RET on a visible buffer goes to its window. The from-page flag is
-  captured at prompt open — check a slow confirm still picks the right
-  branch.</li>
-<li><strong>The modeline-info click</strong> (<code>98fb401</code>). One
-  <code>ui_cmd</code> event; the whitelist moved to Scheme's
-  <code>ui-command!</code>. The click on a chat's modeline now really runs
-  <code>agent-switch</code> — it was dead before. Click one and confirm the
-  connector prompt opens.</li>
-<li><strong>Dired restore</strong> (<code>bb6227f</code>). Dired buffers are
-  now <code>transient</code>: the desktop saves locals, not content, and the
-  mode setup re-renders from <code>'dired-dir</code>. Restart with a dired
-  buffer open (marks + a filter set) and confirm all three survive. Also
-  open a REMOTE directory — the remote path was not smoke-tested.</li>
-<li><strong>notmuch in anger</strong> (<code>e3f2434</code>). The index and
-  mailboxes ride <code>define-list-mode!</code>. Read real mail for a few
-  minutes: tag with <code>a</code>/<code>d</code> and confirm point lands on
-  the next thread, check the auto-preview follows n/p, check the hello
-  counts.</li>
-</ul>
-<p>Two cross-session facts: commit <code>e162b97</code> (the other session's
-"q kills the listing") swept in this session's unstaged
-<code>list-refresh!</code> reorder — intentional content, odd home. And
-<code>packages/code.scm</code> was half-written on disk during the run; it
-failed to load on every boot and caused one transient mcp-hub test failure.
-If it still fails to load, that session's work is unfinished — do not "fix"
-it blind.</p>
+<p>R1–R10 are all marked done. Nobody has reviewed the refactor as a
+WHOLE — each item was verified as it landed, by the session that wrote
+it. Your job: check each item's <em>claim</em> against the <em>code</em>,
+not against the spec's word for it. The spec
+(<code>AI-NATIVE-SPEC.md</code>) carries a dated status note per item;
+treat every note as a hypothesis. The pre-merge sweep of 2026-08-13
+worked this way and found a dead <code>connector-api?</code> and four
+stale bullets — expect that class again. Use subagents; keep your
+context for the verdicts.</p>
+
+<table>
+<tr><th>item</th><th>the claim</th><th>how to attack it</th></tr>
+<tr><td>R1 record</td><td>One conversation of record; the transcript is
+  derived, never the source.</td><td>Grep for any writer that edits
+  transcript text directly instead of the record.
+  <code>chat_record_test</code> pins the prefix — check it compares the
+  full request body, not a substring.</td></tr>
+<tr><td>R2 cache</td><td>Stable prefix, frozen tool set, priced ledger.
+  Empirical numbers recorded 2026-08-14.</td><td>Find a prefix
+  invalidator the tests miss: anything volatile interpolated into the
+  system prompt or tool specs (timestamps, unsorted plists, per-frame
+  state). The three-turn numbers only prove the happy path.</td></tr>
+<tr><td>R3 restore</td><td>The frontend is a function of daemon state;
+  everything survives a reload.</td><td>Restart with a full desktop:
+  org folds, a rich chat, dired with marks and a filter, scroll
+  positions, two browser tabs (frames). Then RESET a chat and confirm
+  the three locals lists still partition every chat local — new locals
+  land in a list or they are the bug class growing a head.</td></tr>
+<tr><td>R4 one surface</td><td>Only the group chat exists.</td>
+  <td>Grep for resurrected <code>*chat*</code>/<code>*llm:</code>
+  paths; check every entry point (C-c c, C-c q, M-|, agents) lands in
+  the one surface.</td></tr>
+<tr><td>R5 one gate</td><td>Same policy at all three chokepoints;
+  ask fails closed on the proxy.</td><td><code>permission_test</code>
+  "one gate" — then look for a FOURTH chokepoint added since (new tool
+  loops, new socket methods). Known open edge:
+  <code>mcp-proxy-call</code> dispatches in the session
+  (<code>docs/mcp-proxy.html</code>); confirm nothing new grew the same
+  shape.</td></tr>
+<tr><td>R6 seam</td><td>Connectors declare capabilities; policy reads
+  <code>connector-can?</code>, never the connector name.</td>
+  <td>Grep for name checks (<code>equal? c "codex"</code>-shaped) that
+  bypass the capability table.</td></tr>
+<tr><td>R7 apropos</td><td>A cold agent finds everything in one
+  round-trip; 276 primitives carry docs.</td><td>Connect cold over the
+  socket and resolve three tasks you pick yourself — the test's task is
+  the one everyone tuned for.</td></tr>
+<tr><td>R8 lists</td><td>All five lists ride
+  <code>define-list-mode!</code>; callbacks take the buffer
+  first.</td><td>The 2026-08-14 ports were smoke-tested headlessly
+  only. In a real browser: C-x b from a page (tabs, no-raise), dired
+  restore with marks+filter, a remote dired, real mail (tag-advance,
+  auto-preview, hello counts), and a chat modeline click
+  (<code>agent-switch</code> — dead wiring before, live now).</td></tr>
+<tr><td>R9 dups</td><td>Every catalogued dup closed or carved
+  out.</td><td>Re-run the dup hunt fresh: duplicate defines, copied
+  ladders, second implementations. New code since 2026-08-13 (code
+  browser, q-kills-listing) was never audited against the
+  catalogue.</td></tr>
+<tr><td>R10 tests</td><td>Each item's tests hold its line.</td>
+  <td>Look for vacuous waits (the <code>eventually</code>-matches-
+  fixture-name class, already found once) and for claims with no test
+  at all — R5's fail-closed proxy path, R8's restore.</td></tr>
+</table>
+
+<p>Cross-session facts a reviewer will trip on: <code>e162b97</code>
+("q kills the listing") swept in an unrelated unstaged
+<code>list-refresh!</code> reorder from this session — intentional
+content, odd home. <code>packages/code.scm</code> may still be
+half-written on disk (fails to load at boot) — that is the code-browser
+session's in-progress work; do not fix it blind. Write your findings
+into the spec as dated notes, the way every other correction landed.</p>
 </div>
 
 <h3>One thing still open</h3>

@@ -131,6 +131,11 @@
 
 (define-list-mode! "ibuffer-mode"
   (list
+    'doc (string-append
+           "The buffer list as a dired: one line per buffer in most-recently-used "
+           "order, with its modified flag, size and mode. Narrow it with the "
+           "filters, flag buffers with `d`, then kill the flagged ones with `x`. "
+           "Moving the highlight previews the buffer in the other window.")
     'buffer *ibuffer-buffer*
     'rows ibuffer-visible
     'render ibuffer-line

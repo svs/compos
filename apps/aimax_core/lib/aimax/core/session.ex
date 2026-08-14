@@ -316,6 +316,8 @@ defmodule Aimax.Core.Session do
         "(define-command NAME [DOC] FN) — register an M-x command; DOC shows in M-x.",
       "command-names" => "(command-names) — return every M-x command name.",
       "global-keys" => "(global-keys) — return ((KEYS COMMAND) ...) for every global key binding.",
+      "local-keys" =>
+        "(local-keys BUF) — return ((KEYS COMMAND) ...) for BUF's own key bindings.",
       "command-fn" => "(command-fn NAME) — return the command's closure, or #f.",
       "command-doc" =>
         "(command-doc NAME) — return the command's doc string; empty when it has none.",
@@ -457,6 +459,10 @@ defmodule Aimax.Core.Session do
       # ((KEYS COMMAND) ...) for every global binding
       "global-keys" => fn [] ->
         for {seq, cmd} <- Editor.global_keys(), do: [seq, cmd]
+      end,
+      # ((KEYS COMMAND) ...) for one buffer's own bindings
+      "local-keys" => fn [buf] ->
+        for {seq, cmd} <- Editor.local_keys(buf), do: [seq, cmd]
       end,
       "command-fn" => fn [name] ->
         case :ets.lookup(Aimax.Core.SchemeAPI.commands_table(), command_name(name)) do

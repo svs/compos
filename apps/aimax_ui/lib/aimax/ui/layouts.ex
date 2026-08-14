@@ -701,6 +701,27 @@ defmodule Aimax.Ui.Layouts do
                 };
                 window.addEventListener("wheel", this.wheelH, { passive: false });
 
+                // client-scrolled buffers mirror their position into the
+                // daemon (S1): scroll doesn't bubble, so capture it, and
+                // debounce per window. On mount, a pinned window gets its
+                // saved offset back.
+                this.cscrollTimers = new Map();
+                this.cscrollH = (e) => {
+                  const el = e.target;
+                  if (!(el instanceof Element) || !el.matches(".buf.client-scroll")) return;
+                  const winEl = el.closest(".window[data-win-id]");
+                  if (!winEl) return;
+                  const win = parseInt(winEl.dataset.winId, 10);
+                  clearTimeout(this.cscrollTimers.get(win));
+                  this.cscrollTimers.set(win, setTimeout(() => {
+                    this.pushEvent("cscroll", { win, top: Math.round(el.scrollTop) });
+                  }, 250));
+                };
+                window.addEventListener("scroll", this.cscrollH, true);
+                document.querySelectorAll(".buf.client-scroll[data-manual='true']").forEach((el) => {
+                  el.scrollTop = parseInt(el.dataset.ctop || "0", 10);
+                });
+
                 // hollow, non-blinking cursor when the OS window is unfocused
                 this.focusH = () => document.body.classList.remove("unfocused");
                 this.blurH = () => document.body.classList.add("unfocused");
@@ -725,6 +746,10 @@ defmodule Aimax.Ui.Layouts do
                 document.querySelectorAll(".buf.client-scroll .line.hl-line").forEach((el) => {
                   const container = el.closest(".buf.client-scroll");
                   if (!container) return;
+                  // a pinned window (manual scroll, S1/S9) is the reader's:
+                  // don't yank it to point. A keypress clears the pin and
+                  // following resumes.
+                  if (container.dataset.manual === "true") return;
                   const eb = el.getBoundingClientRect();
                   const cb = container.getBoundingClientRect();
                   if (eb.top < cb.top || eb.bottom > cb.bottom) {
@@ -736,6 +761,7 @@ defmodule Aimax.Ui.Layouts do
                 window.removeEventListener("keydown", this.handler);
                 window.removeEventListener("resize", this.resizeH);
                 window.removeEventListener("wheel", this.wheelH);
+                window.removeEventListener("scroll", this.cscrollH, true);
                 window.removeEventListener("focus", this.focusH);
                 window.removeEventListener("blur", this.blurH);
                 window.removeEventListener("paste", this.pasteH);

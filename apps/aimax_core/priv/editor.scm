@@ -96,6 +96,7 @@
 ;;;   header  () -> the header line, no trailing newline
 ;;;   keys    ((KEY COMMAND) ...)
 ;;;   remap   ((FROM-COMMAND TO-COMMAND) ...)
+;;;   doc     what the list is for — "?" shows it above the key table
 
 (define *list-modes* '())
 
@@ -217,6 +218,9 @@
     ;; derived content (S15): the refresh below re-renders it from
     ;; rows-fn, so the desktop saves mode + locals, not the rows
     (buffer-set-local! buf 'transient #t)
+    ;; every list is read-only, so "?" can be help in all of them — bound
+    ;; before the mode's own keys, which may claim it for something else
+    (local-set-key* buf "?" "describe-mode")
     (for-each (lambda (k) (local-set-key* buf (car k) (car (cdr k))))
               (or (plist-get opts 'keys) '()))
     (for-each (lambda (r) (local-remap*! buf (car r) (car (cdr r))))
@@ -228,6 +232,9 @@
   (set! *list-modes*
     (cons (list name opts)
           (remove (lambda (e) (equal? (car e) name)) *list-modes*)))
+  ;; the list says what it is once, here — describe-mode reads it back
+  (let ((d (plist-get opts 'doc)))
+    (when d (mode-doc! name d)))
   ;; a real mode: a restored list buffer gets its keys and its read-only
   ;; flag back from here, not from whatever command first opened it
   (define-mode name (lambda () (list-mode-init! (current-buffer) name)))
@@ -422,6 +429,19 @@
   ;; every mode is an M-x command, like Emacs
   (define-command name (lambda () (set-mode! name))))
 
+;; What a mode is for, in the mode's own words. describe-mode prints it
+;; above the key table. A mode without one still gets its keys.
+(define *mode-docs* '())
+
+(define (mode-doc! name doc)
+  (set! *mode-docs*
+    (cons (list name doc)
+          (remove (lambda (e) (equal? (car e) name)) *mode-docs*))))
+
+(define (mode-doc name)
+  (let ((e (assoc name *mode-docs*)))
+    (and e (car (cdr e)))))
+
 (define (set-mode! name)
   (buffer-set-local! (current-buffer) 'mode-name name)
   (let ((m (assoc name *mode-setups*)))
@@ -606,13 +626,18 @@
     (".md" "markdown") (".markdown" "markdown") (".org" "markdown")
     (".txt" "markdown")))
 
+;; A generated buffer has no extension to read a renderer from, so it says
+;; which renderer it wants in a buffer-local. Help docs are the case: the
+;; text is markdown, the buffer is "*Help*", and C-c C-v must still toggle
+;; between the source and the rendered page.
 (define (preview-renderer-for name)
-  (let loop ((rs *preview-renderers*))
-    (if (null? rs)
-        #f
-        (if (string-suffix? (car (car rs)) name)
-            (cadr (car rs))
-            (loop (cdr rs))))))
+  (or (buffer-local name 'preview-renderer)
+      (let loop ((rs *preview-renderers*))
+        (if (null? rs)
+            #f
+            (if (string-suffix? (car (car rs)) name)
+                (cadr (car rs))
+                (loop (cdr rs)))))))
 
 ;; revert-buffer: re-read the file from disk (discards buffer edits).
 ;; Kill + re-visit so modes, hooks and fontification re-apply cleanly.

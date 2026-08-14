@@ -1427,6 +1427,11 @@
 
 (define-list-mode! "chats-mode"
   (list
+    'doc (string-append
+           "Every chat and agent thread in one list: its runtime, its state and "
+           "its cost. `RET` opens a thread, `s` steers the running one, `y` and "
+           "`n` answer a permission request, `k` kills a runtime and `x` archives "
+           "the chat.")
     'buffer *agents-buffer*
     'rows agents-sorted
     'render agents-line

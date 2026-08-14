@@ -7,7 +7,10 @@ defmodule Aimax.DesktopRestoreTest do
 
   use ExUnit.Case
 
-  alias Aimax.Core.{Buffer, Desktop, Editor, Session}
+  alias Aimax.Core.{Buffer, Desktop, Editor, KeyDispatch, Session}
+
+  defp leaves(%{type: :leaf} = leaf), do: [leaf]
+  defp leaves(%{type: :split, children: children}), do: Enum.flat_map(children, &leaves/1)
 
   defp eval!(src) do
     {:ok, printed} = Session.eval(src)
@@ -56,6 +59,53 @@ defmodule Aimax.DesktopRestoreTest do
     assert :ok = Desktop.restore_now()
     assert Buffer.exists?(name)
     assert Buffer.get_local(name, "seen") == "marker"
+  end
+
+  # S1: a manual scroll is daemon state — it survives save/restore,
+  # pinned where the reader left it.
+  test "a pinned scroll survives restore" do
+    name = "*scrolled-#{System.unique_integer([:positive])}*"
+    on_exit(fn -> Aimax.Core.kill_buffer(name) end)
+    Aimax.Core.create_buffer(name)
+    Buffer.append(name, String.duplicate("line\n", 200))
+    Editor.set_window_buffer(name)
+
+    active = Editor.snapshot().active
+    Editor.scroll_window(active, 10)
+    assert %{manual: true, top: 10} = Editor.render_state().tree |> leaves() |> hd()
+
+    assert :ok = Desktop.save_now()
+    Editor.set_window_buffer("*scratch*")
+    Aimax.Core.kill_buffer(name)
+    assert eventually(fn -> not Buffer.exists?(name) end)
+    assert :ok = Desktop.restore_now()
+
+    leaf = Editor.render_state().tree |> leaves() |> Enum.find(&(&1.buffer == name))
+    assert %{manual: true, top: 10} = leaf
+  end
+
+  # S9: a key ends the manual override in the window that received it —
+  # not in the other window, whose reading position is not the typist's
+  test "a key unpins only the window it landed in" do
+    name = "*pin-#{System.unique_integer([:positive])}*"
+    on_exit(fn -> Aimax.Core.kill_buffer(name) end)
+    Aimax.Core.create_buffer(name)
+    Buffer.append(name, String.duplicate("line\n", 200))
+    Editor.set_window_buffer(name)
+
+    KeyDispatch.handle_key("C-x")
+    KeyDispatch.handle_key("2")
+    active = Editor.snapshot().active
+    other = Editor.render_state().tree |> leaves() |> Enum.find(&(&1.id != active))
+    Editor.scroll_window(other.id, 10)
+
+    KeyDispatch.handle_key("C-f")
+
+    assert %{manual: true} =
+             Editor.render_state().tree |> leaves() |> Enum.find(&(&1.id == other.id))
+
+    KeyDispatch.handle_key("C-x")
+    KeyDispatch.handle_key("1")
   end
 
   # S8: `buffer-set-local! 'mode-name X` without `define-mode X` is a

@@ -122,6 +122,16 @@ defmodule Aimax.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
+  # a client-scrolled window reporting its pixel offset (S1) — a passive
+  # mirror into the leaf, so refresh and restart give the place back
+  def handle_event("cscroll", %{"win" => win, "top" => top}, socket) when is_integer(top) do
+    with id when is_integer(id) <- safe_int(win) do
+      Aimax.Core.Editor.set_client_top(id, top, socket.assigns.frame)
+    end
+
+    {:noreply, socket}
+  end
+
   def handle_event("viewport", %{"rows" => rows}, socket) when is_integer(rows) do
     Aimax.Core.Editor.set_total_rows(rows, socket.assigns.frame)
     {:noreply, socket |> drain() |> refresh()}
@@ -346,14 +356,6 @@ defmodule Aimax.Ui.EditorLive do
      Map.put(cache, {:agent, leaf.id}, block_cache)}
   end
 
-  defp block_slice([s, e | _], text) when is_integer(s) and is_integer(e),
-    do: safe_slice(text, s, e)
-
-  defp block_slice(_, _), do: nil
-
-  defp block_open?([_s, _e, "tool", id | _], open_cards), do: id in open_cards
-  defp block_open?(_, _), do: false
-
   # rich diff: the buffer text IS the unified diff, so the cards are parsed
   # out of the same bytes the plain view shows. Only the controlled state —
   # which cards are open, git's status letters — rides the payload.
@@ -441,6 +443,14 @@ defmodule Aimax.Ui.EditorLive do
     leaf = Map.put(leaf, :client_scroll?, client_scroll?)
     {Map.put(leaf, :lines, lines), Map.put(cache, leaf.id, {raw_key, static})}
   end
+
+  defp block_slice([s, e | _], text) when is_integer(s) and is_integer(e),
+    do: safe_slice(text, s, e)
+
+  defp block_slice(_, _), do: nil
+
+  defp block_open?([_s, _e, "tool", id | _], open_cards), do: id in open_cards
+  defp block_open?(_, _), do: false
 
   # static per-version work: line split + font-lock spans + ts-only segs.
   # Overlapping captures resolve last-wins (tree-sitter highlight semantics).
@@ -700,7 +710,12 @@ defmodule Aimax.Ui.EditorLive do
       <%= if @node.render_mode in ["html", "markdown"] do %>
         <iframe class="html-preview" sandbox="" srcdoc={@node.preview} title={@node.buffer}></iframe>
       <% else %>
-      <div class={"buf #{if @node.client_scroll?, do: "client-scroll"}"} style={@node.style}>
+      <div
+        class={"buf #{if @node.client_scroll?, do: "client-scroll"}"}
+        style={@node.style}
+        data-ctop={@node.ctop}
+        data-manual={to_string(@node.manual)}
+      >
         <div
           :for={ln <- @lines}
           id={"ln-#{@node.id}-#{ln.num}"}

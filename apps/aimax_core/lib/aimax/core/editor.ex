@@ -55,6 +55,9 @@ defmodule Aimax.Core.Editor do
 
   @doc "Every global binding as {key-sequence, command-name}."
   def global_keys, do: GenServer.call(__MODULE__, :global_keys)
+
+  @doc "One buffer's local bindings as {key-sequence, command-name}."
+  def local_keys(buffer), do: GenServer.call(__MODULE__, {:local_keys, buffer})
   def render_state(fid \\ nil), do: GenServer.call(__MODULE__, {:render_state, fid(fid)})
 
   @doc """
@@ -226,6 +229,10 @@ defmodule Aimax.Core.Editor do
     do: GenServer.call(__MODULE__, {:scroll_active, delta_lines, fid(fid)})
 
   def scroll_window(id, delta_lines), do: GenServer.call(__MODULE__, {:scroll_window, id, delta_lines})
+
+  @doc "Mirror a client-scrolled window's pixel offset into its leaf (S1)."
+  def set_client_top(id, px, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_client_top, id, px, fid(fid)})
 
   # mouse: place point at (logical line, char col) in a window's buffer;
   # or set a region from a drag's anchor/focus positions
@@ -620,8 +627,33 @@ defmodule Aimax.Core.Editor do
   end
 
   def handle_call({:user_acted, fid}, _from, state) do
+    # a key ends the manual-scroll override in the window that received
+    # it — a reading position in another window is not the typist's to
+    # lose (S9)
     f = frame(state, fid)
-    {:reply, :ok, put_frame(state, %{f | tree: clear_manual(f.tree)})}
+
+    tree =
+      case find_leaf(f.tree, f.active) do
+        %{} = leaf -> replace_leaf(f.tree, f.active, %{leaf | manual: false})
+        _ -> f.tree
+      end
+
+    {:reply, :ok, put_frame(state, %{f | tree: tree})}
+  end
+
+  def handle_call({:set_client_top, id, px, fid}, _from, state) do
+    # a client-scrolled window's position, mirrored (S1). Passive: no
+    # re-render broadcast — the browser already shows what it reports.
+    f = frame(state, fid)
+
+    case find_leaf(f.tree, id) do
+      %{} = leaf ->
+        leaf = leaf |> Map.put(:ctop, px) |> Map.put(:manual, true)
+        {:reply, :ok, put_frame(state, %{f | tree: replace_leaf(f.tree, id, leaf)})}
+
+      _ ->
+        {:reply, :ok, state}
+    end
   end
 
   def handle_call({:window_rows, fid}, _from, state) do
@@ -850,6 +882,17 @@ defmodule Aimax.Core.Editor do
   # keys, and 249 bindings existed with nothing that could look one up
   def handle_call(:global_keys, _from, state) do
     {:reply, Enum.map(state.keymap, fn {seq, cmd} -> {Enum.join(seq, " "), cmd} end), state}
+  end
+
+  # one buffer's own bindings, as {"RET", "ibuffer-visit"} — describe-mode
+  # reads the keymap the buffer really has, not a copy in the mode's source
+  def handle_call({:local_keys, buffer}, _from, state) do
+    keys =
+      state.local_keymaps
+      |> Map.get(keymap_key(buffer), %{})
+      |> Enum.map(fn {seq, cmd} -> {Enum.join(seq, " "), cmd} end)
+
+    {:reply, keys, state}
   end
 
   def handle_call({:key_for_command, command}, _from, state) do
@@ -1149,9 +1192,17 @@ defmodule Aimax.Core.Editor do
   defp keymap_key(" *minibuf" <> _), do: @minibuf
   defp keymap_key(name), do: name
 
-  # the desktop's read-only tree: structure, tops, per-window points
-  defp dtree(%{type: :leaf, id: id, buffer: b} = leaf),
-    do: %{type: :leaf, buffer: b, top: Map.get(leaf, :top, 0), point: safe_win_point(b, id)}
+  # the desktop's read-only tree: structure, tops, points, scroll state
+  defp dtree(%{type: :leaf, id: id, buffer: b} = leaf) do
+    %{
+      type: :leaf,
+      buffer: b,
+      top: Map.get(leaf, :top, 0),
+      point: safe_win_point(b, id),
+      manual: Map.get(leaf, :manual, false),
+      ctop: Map.get(leaf, :ctop, 0)
+    }
+  end
 
   defp dtree(%{type: :split, dir: dir, children: [a, b]} = s),
     do: %{type: :split, dir: dir, ratio: Map.get(s, :ratio, 0.5), children: [dtree(a), dtree(b)]}
@@ -1276,6 +1327,13 @@ defmodule Aimax.Core.Editor do
   defp build_tree({:leaf, buffer, top, point}, n) do
     {leaf, n} = build_tree({:leaf, buffer, top}, n)
     {Map.put(leaf, :init_point, point), n}
+  end
+
+  # 6-tuple adds the scroll override and the client-scroll offset (S1):
+  # a manually scrolled window restores pinned where the reader left it
+  defp build_tree({:leaf, buffer, top, point, manual, ctop}, n) do
+    {leaf, n} = build_tree({:leaf, buffer, top, point}, n)
+    {%{leaf | manual: manual == true} |> Map.put(:ctop, ctop || 0), n}
   end
 
   defp build_tree({:split, dir, a, b}, n), do: build_tree({:split, dir, 0.5, a, b}, n)
@@ -1439,6 +1497,11 @@ defmodule Aimax.Core.Editor do
       blocks: blocks_leaf(locals),
       preview_authored: Map.get(locals, "preview-authored") == true,
       top: top,
+      # the payload says what the daemon knows about scroll (S1): manual
+      # pins the windowed top; ctop is a client-scrolled window's pixel
+      # offset, applied by the client on mount
+      manual: leaf.manual,
+      ctop: Map.get(leaf, :ctop, 0),
       rows: rows,
       total_lines: total_lines,
       line_numbers: Map.get(locals, "line-numbers") != "off",
@@ -1519,10 +1582,6 @@ defmodule Aimax.Core.Editor do
     {length(starts) - MapSet.size(hidden_lines), visible_cl, hidden_lines}
   end
 
-  defp clear_manual(%{type: :leaf} = leaf), do: %{leaf | manual: false}
-
-  defp clear_manual(%{type: :split} = split),
-    do: %{split | children: Enum.map(split.children, &clear_manual/1)}
 
   defp rows_for(%{type: :leaf, id: id}, id, rows), do: rows
   defp rows_for(%{type: :leaf}, _id, _rows), do: nil

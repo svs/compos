@@ -350,6 +350,11 @@
 
 (define-list-mode! "mcp-hub-mode"
   (list
+    'doc (string-append
+           "The MCP servers this editor knows: their state, their tool count and "
+           "their transport. `RET` shows one server whole. `s`, `k` and `r` start, "
+           "stop and restart one server; the capital keys do the same to all of "
+           "them.")
     'buffer *mcp-hub-buffer*
     'rows mcp-hub-names
     'render (lambda (name) (mcp-hub-line (mcp-hub-row name)))

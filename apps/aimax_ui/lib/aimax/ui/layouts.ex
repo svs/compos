@@ -467,19 +467,35 @@ defmodule Aimax.Ui.Layouts do
 
           const PAGE_BOOT = document.querySelector("meta[name='boot-id']").getAttribute("content");
           const Hooks = {
-            // transcript follows output unless the reader scrolled up
+            // transcript follows output unless the reader scrolled up.
+            // The flag and position mirror into daemon state (runtime
+            // locals), so a refresh keeps the reader's place and a
+            // daemon restart resets to following.
             AgentScroll: {
               mounted() {
                 this.scroller = this.el.querySelector(".ag-scroll");
-                this.stick = true;
+                this.stick = this.el.dataset.stick !== "false";
+                this.report = null;
                 this.scroller.addEventListener("scroll", () => {
                   const s = this.scroller;
                   this.stick = s.scrollHeight - s.scrollTop - s.clientHeight < 40;
+                  clearTimeout(this.report);
+                  this.report = setTimeout(() => {
+                    this.pushEvent("ag_stick", {
+                      buf: this.el.dataset.buf,
+                      stick: this.stick,
+                      top: Math.round(s.scrollTop)
+                    });
+                  }, 250);
                 });
-                this.scroller.scrollTop = this.scroller.scrollHeight;
+                if (this.stick) this.scroller.scrollTop = this.scroller.scrollHeight;
+                else this.scroller.scrollTop = parseInt(this.el.dataset.scrollTop || "0", 10);
               },
               updated() {
                 if (this.stick) this.scroller.scrollTop = this.scroller.scrollHeight;
+              },
+              destroyed() {
+                clearTimeout(this.report);
               }
             },
             // point moves in the buffer, so the mark moves in the block

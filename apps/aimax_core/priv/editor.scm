@@ -2163,6 +2163,7 @@
 ;; behind for the migration to read again)
 (define chat-conversation-locals
   '(chat-wire-turns chat-turns agent-blocks agent-overlays agent-folds
+    agent-open-cards
     chat-tool-specs chat-cost chat-last-usage chat-usage-total
     agent-saved-mark agent-marker-bytes))
 
@@ -2173,7 +2174,8 @@
     agent-cancelling agent-seed-context agent-tool-bodies
     agent-turn-text agent-turn-any chat-compacting
     agent-models agent-mode agent-modes chat-mcp-dirty
-    chat-history-pos chat-history-draft))
+    chat-history-pos chat-history-draft
+    agent-unstick agent-scroll-top))
 
 (define (chat-clear-locals! buf keys)
   (for-each (lambda (k) (buffer-set-local! buf k #f)) keys))

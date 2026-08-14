@@ -1364,9 +1364,17 @@ defmodule Aimax.Core.Editor do
     # logical (folds show numbering gaps, like Emacs). The no-fold case is
     # O(log n) rope lookups from the snapshot; folds still scan.
     {total_lines, cl, hidden_lines} =
-      case snap.hidden do
-        [] -> {snap.total_lines, snap.cursor_line, MapSet.new()}
-        hidden -> visible_geometry(text, point, hidden)
+      cond do
+        # the rich transcript renders blocks, not lines — fold geometry
+        # is the plain view's cost, not this one's (S16)
+        Map.get(locals, "render-mode") == "agent" ->
+          {snap.total_lines, snap.cursor_line, MapSet.new()}
+
+        snap.hidden == [] ->
+          {snap.total_lines, snap.cursor_line, MapSet.new()}
+
+        true ->
+          visible_geometry(text, point, snap.hidden)
       end
 
     # Clamped to the last SCREENFUL, not the last line. Scrolling had no upper
@@ -1449,7 +1457,15 @@ defmodule Aimax.Core.Editor do
       # had to agree with Scheme about what a chat's layout is.
       input_start: mark + marker_bytes,
       queued: Map.get(locals, "agent-queued") || [],
-      slug: Map.get(locals, "agent-slug")
+      slug: Map.get(locals, "agent-slug"),
+      # controlled card state (S6): the ids whose tool cards show open
+      open_cards: Map.get(locals, "agent-open-cards") || [],
+      # transcript follow flag + reader position (S7) — runtime locals,
+      # so a page refresh keeps the reader's place and a restart resets
+      # to following. Stored INVERTED (agent-unstick): a cleared local is
+      # #f, and cleared must mean "follow".
+      stick: Map.get(locals, "agent-unstick") != true,
+      scroll_top: Map.get(locals, "agent-scroll-top") || 0
     }
   end
 

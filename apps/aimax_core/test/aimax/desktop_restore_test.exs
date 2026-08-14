@@ -58,6 +58,39 @@ defmodule Aimax.DesktopRestoreTest do
     assert Buffer.get_local(name, "seen") == "marker"
   end
 
+  # S4/S6: a tool card has ONE open-state — the 'agent-open-cards chat
+  # local. It drives the rich view's <details>, the plain view's fold,
+  # and it survives restore.
+  test "a tool card's open state drives both views and survives restore" do
+    name = "*card-#{System.unique_integer([:positive])}*"
+    on_exit(fn -> Aimax.Core.kill_buffer(name) end)
+
+    eval!("""
+    (begin (switch-to-buffer! "#{name}")
+           (buffer-append! "#{name}" "> run tool\\nbody line one\\nbody line two\\n")
+           (buffer-set-local! "#{name}" 'agent-tool-bodies (list (list "t1" 11)))
+           (agent-add-fold! "#{name}" 11 39)
+           (agent-card-set-open! "#{name}" "t1" #t))
+    """)
+
+    assert eval!(~s{(agent-card-open? "#{name}" "t1")}) == "#t"
+    # an open card means no hidden range in the plain view
+    assert eval!(~s{(buffer-hidden "#{name}")}) == "()"
+
+    assert :ok = Desktop.save_now()
+    Editor.set_window_buffer("*scratch*")
+    Aimax.Core.kill_buffer(name)
+    assert eventually(fn -> not Buffer.exists?(name) end)
+    assert :ok = Desktop.restore_now()
+
+    assert eval!(~s{(agent-card-open? "#{name}" "t1")}) == "#t"
+
+    # TAB's fold and the card list stay one state: toggling closes both
+    eval!(~s{(agent-card-toggle! "#{name}" "t1")})
+    assert eval!(~s{(agent-card-open? "#{name}" "t1")}) == "#f"
+    assert eval!(~s{(buffer-hidden "#{name}")}) != "()"
+  end
+
   # S2 for file buffers: set-mode! re-runs unconditionally after the
   # locals return, so org's setup re-derives hidden ranges from the
   # restored 'org-folds local — the folds you left are the folds you get.

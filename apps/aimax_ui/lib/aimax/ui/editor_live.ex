@@ -78,6 +78,36 @@ defmodule Aimax.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
+  # a tool card's summary: toggle its one open-state (S6) — the chat
+  # local drives this view, the plain view's fold, and save/restore
+  def handle_event("agent_card", %{"win" => win, "id" => id}, socket) do
+    with {wid, ""} <- Integer.parse(to_string(win)) do
+      Input.run(socket.assigns.frame, fn ->
+        Aimax.Core.Editor.set_active(wid)
+
+        Aimax.Core.Session.call_named("agent-card-toggle!", [
+          Aimax.Core.Editor.current_buffer(),
+          id
+        ])
+      end)
+    end
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
+  # the transcript follow flag and reader position (S7): runtime locals,
+  # so a refresh keeps the reader's place and a restart resets to follow
+  def handle_event("ag_stick", %{"buf" => buf, "stick" => stick, "top" => top}, socket)
+      when is_boolean(stick) and is_integer(top) do
+    if Aimax.Core.Buffer.exists?(buf) do
+      # inverted on purpose: the cleared (#f) local must mean "follow"
+      Aimax.Core.Buffer.set_local(buf, "agent-unstick", not stick)
+      Aimax.Core.Buffer.set_local(buf, "agent-scroll-top", top)
+    end
+
+    {:noreply, socket}
+  end
+
   # clicking a block that carries a click id. The id is the mode's own
   # word; the view hands it back and knows nothing else. diff-mode
   # registered the handler with block-on-click!.
@@ -258,12 +288,18 @@ defmodule Aimax.Ui.EditorLive do
   # typed DOM — serif prose, tool cards, permission buttons. The buffer
   # text stays canonical; this is a pure view over byte ranges.
   defp decorate(%{type: :leaf, render_mode: "agent", agent: %{} = ag} = leaf, cache, _faces) do
-    key = {leaf.buffer, leaf.version, :agent}
+    key = {leaf.buffer, leaf.version, :agent, :erlang.phash2(ag.open_cards)}
 
     blocks =
       case cache[{:agent, leaf.id}] do
-        {^key, blocks} -> blocks
-        _ -> ag.blocks |> Enum.reverse() |> Enum.map(&ag_block(&1, leaf.text)) |> Enum.reject(&is_nil/1)
+        {^key, blocks} ->
+          blocks
+
+        _ ->
+          ag.blocks
+          |> Enum.reverse()
+          |> Enum.map(&ag_block(&1, leaf.text, ag.open_cards))
+          |> Enum.reject(&is_nil/1)
       end
 
     {Map.merge(leaf, %{lines: [], ag_blocks: blocks, ag_input: ag_input(leaf, ag)}),
@@ -538,7 +574,14 @@ defmodule Aimax.Ui.EditorLive do
         </div>
       <% else %>
       <%= if @node.render_mode == "agent" and Map.has_key?(@node, :ag_blocks) do %>
-        <div class="agent-view" id={"agent-#{@node.id}"} phx-hook="AgentScroll">
+        <div
+          class="agent-view"
+          id={"agent-#{@node.id}"}
+          phx-hook="AgentScroll"
+          data-buf={@node.buffer}
+          data-stick={to_string(@node.agent.stick)}
+          data-scroll-top={@node.agent.scroll_top}
+        >
           <div class="ag-scroll">
             <%= for b <- @node.ag_blocks do %>
               <%= case b.kind do %>
@@ -549,8 +592,13 @@ defmodule Aimax.Ui.EditorLive do
                 <% :thought -> %>
                   <details class="ag-thought"><summary>thought</summary><div class="ag-thought-text">{b.text}</div></details>
                 <% :tool -> %>
-                  <details class="ag-tool" open={b.status == "running"}>
-                    <summary>
+                  <details class="ag-tool" open={b.open}>
+                    <summary
+                      phx-click="agent_card"
+                      phx-value-win={@node.id}
+                      phx-value-id={b.id}
+                      onclick="event.preventDefault()"
+                    >
                       <span class={"ag-dot #{b.status}"}></span><span class="ag-verb">{b.verb}</span>
                       <span class="ag-title">{b.title}</span>
                       <span class="ag-tstatus">{b.status}</span>
@@ -740,7 +788,7 @@ defmodule Aimax.Ui.EditorLive do
   # kills the whole render (Earmark, HEEx).
   defp safe_slice(text, s, e), do: Text.slice(text, s, e)
 
-  defp ag_block([s, e, "user" | meta], text) do
+  defp ag_block([s, e, "user" | meta], text, _open) do
     text_of =
       case meta do
         [msg | _] when is_binary(msg) -> msg
@@ -750,7 +798,7 @@ defmodule Aimax.Ui.EditorLive do
     %{kind: :user, text: text_of}
   end
 
-  defp ag_block([s, e, "prose" | _], text) do
+  defp ag_block([s, e, "prose" | _], text, _open) do
     md = safe_slice(text, s, e)
 
     html =
@@ -762,32 +810,33 @@ defmodule Aimax.Ui.EditorLive do
     %{kind: :prose, html: wrap_tables(html)}
   end
 
-  defp ag_block([s, e, "thought" | _], text),
+  defp ag_block([s, e, "thought" | _], text, _open),
     do: %{kind: :thought, text: String.trim(safe_slice(text, s, e))}
 
-  defp ag_block([_s, e, "tool", id, title, kind, status, body_start | _], text) do
+  defp ag_block([_s, e, "tool", id, title, kind, status, body_start | _], text, open_cards) do
     %{
       kind: :tool,
       id: id,
       title: title,
       verb: kind,
       status: status,
+      open: id in open_cards,
       body: String.trim_trailing(safe_slice(text, body_start, e))
     }
   end
 
-  defp ag_block([s, e, "plan" | _], text),
+  defp ag_block([s, e, "plan" | _], text, _open),
     do: %{kind: :plan, text: String.trim(safe_slice(text, s, e))}
 
-  defp ag_block([_s, _e, "permission", title | _], _text),
+  defp ag_block([_s, _e, "permission", title | _], _text, _open),
     do: %{kind: :permission, title: title}
 
-  defp ag_block([_s, _e, "waiting" | _], _text), do: %{kind: :waiting}
+  defp ag_block([_s, _e, "waiting" | _], _text, _open), do: %{kind: :waiting}
 
-  defp ag_block([s, e, "meta" | _], text),
+  defp ag_block([s, e, "meta" | _], text, _open),
     do: %{kind: :meta, text: String.trim(safe_slice(text, s, e))}
 
-  defp ag_block(_, _), do: nil
+  defp ag_block(_, _, _), do: nil
 
   # The one renderer for block trees. Structure only: tags, classes, segs,
   # click ids and the point mark all come from the mode. The mark: a block

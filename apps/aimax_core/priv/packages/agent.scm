@@ -64,24 +64,65 @@
     (cons (list s e #f) (or (buffer-local buf 'agent-folds) '())))
   (agent-apply-folds! buf))
 
+;;; ONE open-state per tool card (S4/S6): 'agent-open-cards holds the ids
+;;; whose cards show open in the rich view; the matching plain-view fold
+;;; tracks it. Scheme adds the id when a tool starts and removes it when
+;;; the tool completes; a click or TAB toggles it, and the choice
+;;; survives save/restore with the other conversation locals.
+
+(define (agent-open-cards buf) (or (buffer-local buf 'agent-open-cards) '()))
+
+(define (agent-card-open? buf id) (and (member id (agent-open-cards buf)) #t))
+
+(define (agent-card-set-open! buf id open?)
+  (let ((cards (agent-open-cards buf)))
+    (buffer-set-local! buf 'agent-open-cards
+      (if open?
+          (if (member id cards) cards (cons id cards))
+          (filter (lambda (c) (not (equal? c id))) cards))))
+  ;; the plain view's fold over the tool body follows, when one exists
+  (let ((entry (assoc id (or (buffer-local buf 'agent-tool-bodies) '()))))
+    (when entry
+      (let ((s (car (cdr entry))))
+        (buffer-set-local! buf 'agent-folds
+          (map (lambda (f)
+                 (if (= (car f) s) (list (car f) (car (cdr f)) open?) f))
+               (or (buffer-local buf 'agent-folds) '())))
+        (agent-apply-folds! buf)))))
+
+(define (agent-card-toggle! buf id)
+  (agent-card-set-open! buf id (not (agent-card-open? buf id))))
+
+;; the tool id whose body fold starts at byte S, or #f
+(define (agent-card-at-fold buf s)
+  (let loop ((es (or (buffer-local buf 'agent-tool-bodies) '())))
+    (cond ((null? es) #f)
+          ((= (car (cdr (car es))) s) (car (car es)))
+          (else (loop (cdr es))))))
+
 (define-command "agent-toggle-fold" "Toggle the transcript fold at or around point"
   (lambda ()
-    (let ((buf (current-buffer)) (p (point)))
-      (let loop ((fs (or (buffer-local buf 'agent-folds) '())) (acc '()) (hit #f))
-        (cond ((null? fs)
-               (if hit
-                   (begin (buffer-set-local! buf 'agent-folds (reverse acc))
-                          (agent-apply-folds! buf))
-                   (message "no fold here")))
-              ;; hit when point is on the header line just above, or inside
-              ((and (not hit)
-                    (>= p (- (car (car fs)) 120))
-                    (< p (car (cdr (car fs)))))
-               (let ((f (car fs)))
-                 (loop (cdr fs)
-                       (cons (list (car f) (car (cdr f)) (not (car (cdr (cdr f))))) acc)
-                       #t)))
-              (else (loop (cdr fs) (cons (car fs) acc) hit)))))))
+    (let* ((buf (current-buffer))
+           (p (point))
+           ;; the fold point is on: header line just above, or inside
+           (hit (let loop ((fs (or (buffer-local buf 'agent-folds) '())))
+                  (cond ((null? fs) #f)
+                        ((and (>= p (- (car (car fs)) 120))
+                              (< p (car (cdr (car fs)))))
+                         (car fs))
+                        (else (loop (cdr fs))))))
+           (id (and hit (agent-card-at-fold buf (car hit)))))
+      (cond ((not hit) (message "no fold here"))
+            ;; a tool body: the card open-state owns both views
+            (id (agent-card-toggle! buf id))
+            (else
+             (buffer-set-local! buf 'agent-folds
+               (map (lambda (f)
+                      (if (= (car f) (car hit))
+                          (list (car f) (car (cdr f)) (not (car (cdr (cdr f)))))
+                          f))
+                    (buffer-local buf 'agent-folds)))
+             (agent-apply-folds! buf))))))
 
 ;;; --- block model --------------------------------------------------------------
 ;;; 'agent-blocks: newest-first list of (start end kind meta...) over byte
@@ -304,6 +345,8 @@
        (buffer-set-local! buf 'agent-tool-bodies
          (cons (list (plist-get e 'id) (agent-mark slug))
                (or (buffer-local buf 'agent-tool-bodies) '())))
+       ;; a running card shows open; completion closes it again
+       (agent-card-set-open! buf (plist-get e 'id) #t)
        ;; the arguments open the body, ahead of the result, so an opened
        ;; card shows the whole call and not just what came back
        (let ((args (agent-tool-input-text e)))
@@ -319,7 +362,8 @@
            (let ((entry (assoc (plist-get e 'id)
                                (or (buffer-local buf 'agent-tool-bodies) '()))))
              (when (and entry (> (agent-mark slug) (car (cdr entry))))
-               (agent-add-fold! buf (car (cdr entry)) (agent-mark slug)))))))
+               (agent-add-fold! buf (car (cdr entry)) (agent-mark slug))))
+           (agent-card-set-open! buf (plist-get e 'id) #f))))
 
       ((equal? type 'plan)
        (let ((start (agent-render! slug

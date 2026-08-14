@@ -55,6 +55,14 @@ defmodule Aimax.Core.Session do
   def call_fn(closure, args, fid \\ nil),
     do: GenServer.call(__MODULE__, {:call_fn, closure, args, fid(fid)}, 30_000)
 
+  @doc """
+  Apply a named global function to ARGS. ARGS pass as values, never through
+  source text — the safe call for Elixir callers holding strings (paths,
+  buffer names) that must not be interpolated into Scheme.
+  """
+  def call_named(fun, args, fid \\ nil) when is_binary(fun),
+    do: GenServer.call(__MODULE__, {:call_named, fun, args, fid(fid)}, 30_000)
+
   defp fid(nil), do: Frame.current()
   defp fid(fid), do: fid
 
@@ -155,6 +163,19 @@ defmodule Aimax.Core.Session do
 
   def handle_call({:call_fn, closure, args, fid}, _from, state) do
     case safe(fn -> with_fid(fid, fn -> Scheme.call(state.interp, closure, args) end) end) do
+      {:ok, val, interp} -> {:reply, {:ok, val}, put_interp(state, interp, val)}
+      {:error, msg} -> {:reply, {:error, msg}, state}
+    end
+  end
+
+  def handle_call({:call_named, fun, args, fid}, _from, state) do
+    case safe(fn ->
+           with_fid(fid, fn ->
+             # the name is a code-supplied constant; only ARGS are data
+             {:ok, closure, interp} = Scheme.eval_string(state.interp, fun)
+             Scheme.call(interp, closure, args)
+           end)
+         end) do
       {:ok, val, interp} -> {:reply, {:ok, val}, put_interp(state, interp, val)}
       {:error, msg} -> {:reply, {:error, msg}, state}
     end

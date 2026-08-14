@@ -425,6 +425,12 @@
     (if m ((cadr m))))
   (run-hooks (string->symbol (string-append name "-hook"))))
 
+;; desktop restore's entry: set BUF's mode with BUF current, so the setup
+;; fn rebuilds presentation from the locals restore already laid down
+(define (desktop-apply-mode! buf mode)
+  (switch-to-buffer! buf)
+  (set-mode! mode))
+
 ;;; --- minor modes --------------------------------------------------------------
 ;;; A minor mode = its name in the buffer-local 'minor-modes list + an
 ;;; idempotent setup fn taking the buffer. Desktop restore re-runs the

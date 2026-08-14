@@ -172,11 +172,10 @@ defmodule Aimax.Core.Desktop do
             {_, point, locals} -> {point, locals}
           end
 
-        Session.eval(~s{(visit "#{bpath}")})
+        Session.call_named("visit", [bpath])
         # visit can decline (unreachable remote host) — skip, don't crash boot
         if Buffer.exists?(bpath) do
-          Buffer.goto(bpath, point)
-          restore_locals(bpath, locals)
+          apply_saved_state(bpath, point, locals)
         end
       end
 
@@ -233,34 +232,25 @@ defmodule Aimax.Core.Desktop do
     if size > 0, do: Buffer.delete_range(name, 0, size, source: :editor)
     if text != "", do: Buffer.append(name, text, source: :editor)
 
+    apply_saved_state(name, point, locals)
+  end
+
+  # ONE restore path for saved buffer state (S2, dup #27): the locals go
+  # down first, THEN set-mode! runs unconditionally — every mode's setup
+  # fn rebuilds presentation (local keys, overlays, folds) from the locals
+  # it finds on the buffer. Minor modes rebuild the same way. Point goes
+  # last: a setup fn is free to move it.
+  defp apply_saved_state(name, point, locals) do
     Enum.each(locals, fn {k, v} -> Buffer.set_local(name, k, v) end)
 
     if mode = locals["mode-name"] do
-      Session.eval(~s{(begin (switch-to-buffer! "#{name}") (set-mode! "#{mode}"))})
+      Session.call_named("desktop-apply-mode!", [name, mode])
     end
 
     if locals["minor-modes"] not in [nil, []] do
-      Session.eval(~s{(restore-minor-modes! "#{name}")})
+      Session.call_named("restore-minor-modes!", [name])
     end
 
     Buffer.goto(name, point)
-  end
-
-  # visit already ran auto-mode; if the saved mode differs (user set it by
-  # hand) re-run it through set-mode! so its setup fn and hooks apply, then
-  # write the saved locals back verbatim
-  defp restore_locals(bpath, locals) do
-    saved_mode = locals["mode-name"]
-
-    if saved_mode && saved_mode != Buffer.get_local(bpath, "mode-name") do
-      Session.eval(~s{(set-mode! "#{saved_mode}")})
-    end
-
-    Enum.each(locals, fn {k, v} -> Buffer.set_local(bpath, k, v) end)
-
-    # minor modes rebuild their presentation from the locals just restored
-    if locals["minor-modes"] not in [nil, []] do
-      Session.eval(~s{(restore-minor-modes! "#{bpath}")})
-    end
   end
 end

@@ -2588,7 +2588,11 @@
         (append (list 'buffer buf 'mark mark)
                 (agent-resolve-config
                   (append
-                    (or opts '())
+                    ;; isolation (packages/worktrees.scm): an isolated
+                    ;; thread gets its own worktree as cwd
+                    (if (boundp (quote agent-worktree-opts))
+                        (agent-worktree-opts buf slug opts)
+                        (or opts '()))
                     (list 'connector connector
                           'presets (if (boundp (quote chat-presets-of))
                                        (chat-presets-of buf)

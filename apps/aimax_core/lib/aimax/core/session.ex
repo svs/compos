@@ -330,6 +330,8 @@ defmodule Aimax.Core.Session do
         "(llm-tools PROMPT SYSTEM SPECS DISPATCHER CB [USAGE-CB]) — async tool loop; CB gets text.",
       "browser-call" =>
         "(browser-call OP ARGS CB) — send OP to the browser; CB gets a reply plist.",
+      "browser-call-sync" =>
+        "(browser-call-sync OP ARGS [MS]) — send OP and wait for the reply plist (default 2s, max 5s).",
       "browser-serve!" =>
         "(browser-serve! HANDLER) — set the handler for browser requests: (HANDLER OP ARGS).",
       "browser-connected?" =>
@@ -557,6 +559,27 @@ defmodule Aimax.Core.Session do
         end)
 
         :void
+      end,
+      # The same call, waited on. A tool the model calls has to RETURN what the
+      # page said: a callback answers later, and by then the model's turn is
+      # over. The wait is safe because the reply runs in the bridge's own task
+      # and never re-enters this process — it only sends a message here. It
+      # does hold the interpreter, so the ceiling is low and the default lower.
+      "browser-call-sync" => fn args ->
+        [op, a | rest] = args
+        ms = rest |> List.first() |> browser_wait_ms()
+        me = self()
+        ref = make_ref()
+
+        Aimax.Core.Browser.call(s(op), browser_args(a), fn reply ->
+          send(me, {:browser_sync, ref, reply})
+        end)
+
+        receive do
+          {:browser_sync, ^ref, reply} -> browser_reply(reply)
+        after
+          ms -> [{:sym, "ok"}, false, {:sym, "error"}, "the browser did not answer in time"]
+        end
       end,
       # Inbound: HANDLER answers what the browser asks — (HANDLER OP ARGS).
       # M-x in a tab is this: the extension asks "commands", chrome.scm says
@@ -1345,6 +1368,11 @@ defmodule Aimax.Core.Session do
   # Scheme plist -> JSON object for the extension. #f becomes null here,
   # because to the extension an omitted argument is absent, not false.
   defp browser_args(args), do: Aimax.Core.Plist.to_json(args, :null)
+
+  # the interpreter waits here, so the ceiling is 5s and the default 2s: a page
+  # that is slower than that is a page the caller should ask about again
+  defp browser_wait_ms(ms) when is_integer(ms) and ms > 0, do: min(ms, 5_000)
+  defp browser_wait_ms(_), do: 2_000
 
   defp browser_reply({:ok, result}) when is_map(result),
     do: [{:sym, "ok"}, true | Aimax.Core.LLM.json_to_scheme(result)]

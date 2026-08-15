@@ -45,9 +45,11 @@ defmodule Aimax.LLMToolsTest do
       assert eval!(~s{(llm-tool-call "no-such" '())}) == ~s{"no such tool: no-such"}
     end
 
-    test "the built-in toolbox is exactly the five-tool surface" do
+    test "the built-in toolbox is exactly the six-tool surface" do
       specs = eval!("(map car (llm-tool-specs))")
-      for t <- ~w(eval-scheme apropos apropos-categories describe-function act) do
+      # five for the editor itself, and spotify — a device in the browser, not
+      # a part of the editor, so eval-scheme cannot stand in for it
+      for t <- ~w(eval-scheme apropos apropos-categories describe-function act spotify) do
         assert specs =~ t
       end
 
@@ -55,7 +57,7 @@ defmodule Aimax.LLMToolsTest do
       count =
         eval!(~s{(length (filter (lambda (t) (not (string-prefix? "zz-" (symbol->string (car t))))) *llm-tools*))})
 
-      assert count == "5"
+      assert count == "6"
     end
 
     test "eval-scheme errors suggest the real name with its signature" do

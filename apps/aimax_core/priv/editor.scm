@@ -3097,14 +3097,23 @@
 (define (chat-record-tokens buf)
   (quotient (fold (lambda (acc t) (+ acc (chat-turn-bytes t))) 0 (chat-record buf)) 4))
 
+;; A turn the kept window can open on: a message the user wrote. The
+;; results of a tool round carry the "user" role too, and a window that
+;; opened on one of those cut the round in half — the results stayed, and
+;; the call that made them went into the summary. The provider rejects
+;; that request: "no tool call found for function call output".
+(define (chat-user-message-turn? t)
+  (and (equal? (plist-get t 'role) "user")
+       (not (equal? (chat-turn-display t) ""))))
+
 ;; how many of the newest turns to keep: at least chat-compact-keep, then
-;; on to the next user turn, so the kept window opens the way a
+;; on to the next user message, so the kept window opens the way a
 ;; conversation does rather than mid-exchange
 (define (chat-compact-keep-count all)
   (let loop ((ts all) (n 0))
     (cond ((null? ts) n)
           ((and (>= n chat-compact-keep)
-                (equal? (plist-get (car ts) 'role) "user"))
+                (chat-user-message-turn? (car ts)))
            (+ n 1))
           (else (loop (cdr ts) (+ n 1))))))
 
@@ -3179,6 +3188,86 @@
         (map (lambda (t) (list 'role (car t) 'blocks (list (list "text" (car (cdr t))))))
              old))
       (buffer-set-local! buf 'chat-turns #f))))
+
+;;; --- healing the record ----------------------------------------------------------
+;;; A tool call and its result are one unit on the wire. The provider
+;;; rejects a result whose call it cannot see, and it rejects a call whose
+;;; result never came. The record can lose one half: compaction can cut
+;;; between the two turns, an aborted turn stops after the call, and an
+;;; old .chat file can carry either shape.
+;;;
+;;; One 400 then wedges the whole chat, because every later turn replays
+;;; the same broken prefix. So the record heals itself before each send,
+;;; and M-x chat-heal is the manual door. Healing drops blocks; it never
+;;; invents a result the tool did not return.
+
+;; every tool-result id in the record
+(define (chat-result-ids turns)
+  (fold (lambda (acc t)
+          (fold (lambda (acc b)
+                  (if (equal? (car b) "tool-result") (cons (car (cdr b)) acc) acc))
+                acc
+                (or (plist-get t 'blocks) '())))
+        '() turns))
+
+;; a turn with new blocks, keeping its role and its wire text
+(define (chat-turn-with-blocks t blocks)
+  (append (list 'role (plist-get t 'role) 'blocks blocks)
+          (let ((w (plist-get t 'wire)))
+            (if (and (string? w) (not (equal? w ""))) (list 'wire w) '()))))
+
+;; One pass, oldest first. `seen` grows with every tool-use we keep, so a
+;; tool-result survives only when its call is still in the record before
+;; it. `results` holds every result id, so a tool-use with no result goes.
+;; Returns (TURNS DROPPED) with TURNS oldest first.
+(define (chat-heal-turns turns results)
+  (let loop ((ts turns) (seen '()) (acc '()) (dropped 0))
+    (if (null? ts)
+        (list (reverse acc) dropped)
+        (let ((t (car ts)))
+          (let bloop ((bs (or (plist-get t 'blocks) '()))
+                      (seen seen)
+                      (kept '())
+                      (dropped dropped))
+            (if (null? bs)
+                (loop (cdr ts) seen
+                      (if (null? kept) acc (cons (chat-turn-with-blocks t (reverse kept)) acc))
+                      dropped)
+                (let* ((b (car bs))
+                       (kind (car b))
+                       (id (if (null? (cdr b)) #f (car (cdr b)))))
+                  (cond ((equal? kind "tool-use")
+                         (if (member id results)
+                             (bloop (cdr bs) (cons id seen) (cons b kept) dropped)
+                             (bloop (cdr bs) seen kept (+ dropped 1))))
+                        ((equal? kind "tool-result")
+                         (if (member id seen)
+                             (bloop (cdr bs) seen (cons b kept) dropped)
+                             (bloop (cdr bs) seen kept (+ dropped 1))))
+                        (else (bloop (cdr bs) seen (cons b kept) dropped))))))))))
+
+;; repair the record in place. Returns the number of blocks it dropped,
+;; and writes nothing when the record is already whole — an untouched
+;; local keeps the buffer clean of a no-op change.
+(define (chat-heal! buf)
+  (let* ((turns (reverse (chat-record buf)))
+         (r (chat-heal-turns turns (chat-result-ids turns)))
+         (dropped (car (cdr r))))
+    (when (> dropped 0)
+      (buffer-set-local! buf 'chat-wire-turns (reverse (car r))))
+    dropped))
+
+(define-command "chat-heal" "Repair this chat's record: drop tool calls and results that lost their other half"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (not (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
+          (message "not a chat buffer")
+          (let ((n (chat-heal! buf)))
+            (message (if (= n 0)
+                         "this chat's record is whole"
+                         (string-append "healed this chat: dropped "
+                                        (number->string n) " orphaned tool "
+                                        (if (= n 1) "block" "blocks")))))))))
 
 (define (chat-clear-waiting! buf)
   (let ((w (buffer-local buf 'chat-waiting)))
@@ -3306,7 +3395,11 @@
 ;; dedup hack it used to need is gone with it.
 (define (chat-thread-context slug display)
   (let* ((buf (agent-buf slug))
+         (healed (chat-heal! buf))
          (tools? (and (boundp (quote chat-use-tools)) chat-use-tools)))
+    (unless (= healed 0)
+      (message (string-append "healed this chat: dropped " (number->string healed)
+                              " orphaned tool " (if (= healed 1) "block" "blocks"))))
     (list 'turns (reverse (chat-record buf))
           'system (if tools?
                       (string-append *llm-system* "\n\n" (chat-mcp-note buf)

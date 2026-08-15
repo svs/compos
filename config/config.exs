@@ -20,12 +20,17 @@ config :aimax_ui, Aimax.Ui.Endpoint,
   pubsub_server: Aimax.Ui.PubSub,
   live_view: [signing_salt: "aimax-lv-salt"]
 
+# the origin previewed apps run in — a different port is a different origin,
+# which is the whole point: an app's JavaScript can never read the editor
+config :aimax_ui, app_port: 4005
+
 config :phoenix, :json_library, Jason
 
 # AIMAX_VERIFY=1 mix run --no-halt: an isolated daemon (own port, home,
 # socket) for verifying changes from a worktree while the real one runs
 if config_env() == :dev and System.get_env("AIMAX_VERIFY") do
   config :aimax_ui, Aimax.Ui.Endpoint, http: [ip: {127, 0, 0, 1}, port: 4104]
+  config :aimax_ui, app_port: 4105
 
   config :aimax_core,
     home: "/tmp/aimax-verify-home",
@@ -52,6 +57,10 @@ if config_env() == :test do
   config :aimax_ui, Aimax.Ui.Endpoint,
     http: [ip: {127, 0, 0, 1}, port: 4046],
     server: false
+
+  # no listening socket in tests: concurrent worktrees would fight for the
+  # port, and the router answers a Plug.Test conn without one
+  config :aimax_ui, app_port: nil
 end
 
 # Sample configuration:

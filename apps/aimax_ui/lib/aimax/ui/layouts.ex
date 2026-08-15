@@ -203,6 +203,8 @@ defmodule Aimax.Ui.Layouts do
             background: var(--window-inactive-bg, #f4f0e6);
           }
           .window.active .html-preview { background: var(--window-bg, #fdfcf8); }
+          /* an app paints its own background — the editor supplies none */
+          .app-preview { flex: 1; width: 100%; border: 0; background: #fff; }
           .region { background: var(--region-bg, #e7e9f1); }
           /* native drag-selection matches the editor region it becomes */
           ::selection { background: var(--region-bg, #e7e9f1); }
@@ -581,6 +583,45 @@ defmodule Aimax.Ui.Layouts do
                 }, true);
               }
             },
+            // An app is in another origin, so contentDocument is closed to
+            // us. Everything travels as messages, and the app's half of the
+            // wire is the bridge script the app server injects.
+            AppFrame: {
+              mounted() {
+                this.onMsg = (e) => {
+                  if (e.source !== this.el.contentWindow) return;
+                  const m = e.data;
+                  if (!m || !m.aimax) return;
+                  if (m.aimax === "scroll") {
+                    clearTimeout(this.timer);
+                    this.timer = setTimeout(() => {
+                      this.pushEvent("cscroll", {
+                        win: parseInt(this.el.dataset.win, 10),
+                        top: Math.round(m.top)
+                      });
+                    }, 250);
+                  } else if (m.aimax === "release") {
+                    // C-g inside the app gives the keyboard back to the editor
+                    const sink = document.getElementById("kb-sink");
+                    if (sink) sink.focus();
+                  }
+                };
+                window.addEventListener("message", this.onMsg);
+                this.onLoad = () => this.apply();
+                this.el.addEventListener("load", this.onLoad);
+              },
+              updated() { this.apply(); },
+              destroyed() {
+                window.removeEventListener("message", this.onMsg);
+                this.el.removeEventListener("load", this.onLoad);
+                clearTimeout(this.timer);
+              },
+              apply() {
+                const top = parseInt(this.el.dataset.ctop || "0", 10);
+                const w = this.el.contentWindow;
+                if (w) w.postMessage({ aimax: "scroll", top: top }, "*");
+              }
+            },
             // transcript follows output unless the reader scrolled up.
             // The flag and position mirror into daemon state (runtime
             // locals), so a refresh keeps the reader's place and a
@@ -858,6 +899,16 @@ defmodule Aimax.Ui.Layouts do
 
                 this.blurH = () => {
                   const el = document.activeElement;
+                  // an app window is the one iframe that KEEPS the keyboard:
+                  // its text fields and its keys are the point of it. C-g in
+                  // the app posts "release" and the sink takes focus back.
+                  if (el && el.classList && el.classList.contains("app-preview")) {
+                    const appWin = el.closest(".window[data-win-id]");
+                    if (appWin) {
+                      this.pushEvent("mouse", { win: parseInt(appWin.dataset.winId, 10) });
+                    }
+                    return;
+                  }
                   if (el && el.tagName === "IFRAME") {
                     // after the browser settles the focus, not during: a
                     // focus() inside the blur that announces the move is

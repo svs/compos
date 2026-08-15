@@ -604,10 +604,10 @@ defmodule Aimax.Core.Editor do
     end
   end
 
-  # the two render modes the client draws in an iframe
+  # the three render modes the client draws in an iframe
   defp preview?(buffer) do
     try do
-      Buffer.locals(buffer)["render-mode"] in ["html", "markdown"]
+      Buffer.locals(buffer)["render-mode"] in ["html", "markdown", "app"]
     catch
       :exit, _ -> false
     end
@@ -1562,6 +1562,9 @@ defmodule Aimax.Core.Editor do
       agent: agent_leaf(locals, text),
       blocks: blocks_leaf(locals),
       preview_authored: Map.get(locals, "preview-authored") == true,
+      # an app reloads when this number changes, and only then: a keystroke
+      # must not restart the app you are typing at
+      app_gen: Map.get(locals, "app-generation") || 0,
       top: top,
       # the payload says what the daemon knows about scroll (S1): manual
       # pins the windowed top; ctop is a client-scrolled window's pixel

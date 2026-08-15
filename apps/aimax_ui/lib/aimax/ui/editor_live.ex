@@ -12,6 +12,7 @@ defmodule Aimax.Ui.EditorLive do
 
   alias Aimax.Core.{Events, Input}
   alias Aimax.Scheme.Text
+  alias Aimax.Ui.AppServer
 
   @impl true
   def mount(_params, _session, socket) do
@@ -316,6 +317,12 @@ defmodule Aimax.Ui.EditorLive do
 
     {Map.merge(leaf, %{lines: [], preview: html}),
      Map.put(cache, {:preview, leaf.id}, {key, html})}
+  end
+
+  # an app is not rendered here at all: the app origin serves it, and the
+  # window holds only the frame that points at it
+  defp decorate(%{type: :leaf, render_mode: "app"} = leaf, cache, _faces) do
+    {Map.merge(leaf, %{lines: [], app_url: AppServer.app_url(leaf.buffer, leaf.app_gen)}), cache}
   end
 
   # rich agent transcript: blocks (from agent.scm's block model) become
@@ -717,6 +724,25 @@ defmodule Aimax.Ui.EditorLive do
           </div>
         </div>
       <% else %>
+      <%= if @node.render_mode == "app" and Map.has_key?(@node, :app_url) do %>
+        <%!-- An app runs its own scripts, so it must not share the editor's
+             origin: it is served from 127.0.0.1:4005, and the parent is
+             localhost:4004. allow-same-origin here grants the app its OWN
+             origin, which buys it storage and relative URLs; the browser
+             still refuses it every reach into this page. src, not srcdoc,
+             for the same reason — a srcdoc document inherits us. --%>
+        <iframe
+          class="app-preview"
+          id={"app-#{@node.id}-#{:erlang.phash2(@node.app_url)}"}
+          phx-hook="AppFrame"
+          data-win={@node.id}
+          data-ctop={@node.ctop}
+          sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
+          src={@node.app_url}
+          title={@node.buffer}
+        >
+        </iframe>
+      <% else %>
       <%= if @node.render_mode in ["html", "markdown"] do %>
         <%!-- allow-same-origin, and nothing else. The parent must reach
              the frame's document to scroll it from a key; without it the
@@ -755,6 +781,7 @@ defmodule Aimax.Ui.EditorLive do
             ><span class="cap-label">{c.label}</span><span class="cap-kind">{c.hint}</span></span></span></span>
         </div>
       </div>
+      <% end %>
       <% end %>
       <% end %>
       <% end %>

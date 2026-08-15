@@ -445,7 +445,7 @@
 ;; `M->` all do in a preview what they do everywhere else.
 (define (preview-buffer? buf)
   (let ((rm (buffer-local buf 'render-mode)))
-    (or (equal? rm "markdown") (equal? rm "html"))))
+    (or (equal? rm "markdown") (equal? rm "html") (equal? rm "app"))))
 
 ;; #t when it scrolled, so a command can fall through to the point motion
 (define (preview-scroll! lines)
@@ -1035,6 +1035,55 @@
                 (buffer-set-local! (current-buffer) 'render-mode r)
                 (message (string-append "Preview on (" r ") — C-c C-v toggles")))
               (message "No preview renderer for this buffer"))))))
+
+;;; --- apps --------------------------------------------------------------
+;;; preview-mode renders a page the way eww does: themed, and inert. An app
+;;; needs the opposite. It keeps the colours the author wrote, it runs its
+;;; own JavaScript, it keeps its own storage, and it loads the files beside
+;;; it. So an app window draws a frame on the app origin — a different port,
+;;; which the browser reads as a different origin — and that origin serves
+;;; this buffer's live text plus the directory its file lives in.
+;;;
+;;; The two are separate commands on purpose. A downloaded .html that you
+;;; open to read must not run anything; `C-c C-v` reads it, `C-c C-a` runs
+;;; it, and the difference is a key you press.
+
+(define (app-buffer? buf) (equal? (buffer-local buf 'render-mode) "app"))
+
+;; the client reloads an app when this number changes, and at no other time:
+;; a keystroke must not restart the app you are typing at
+(define (app-reload! buf)
+  (buffer-set-local! buf 'app-generation
+                     (+ 1 (or (buffer-local buf 'app-generation) 0))))
+
+(define (app-buffers)
+  (let loop ((bs (buffer-list)) (acc '()))
+    (cond ((null? bs) (reverse acc))
+          ((app-buffer? (car bs)) (loop (cdr bs) (cons (car bs) acc)))
+          (else (loop (cdr bs) acc)))))
+
+(define-command "app-preview" "Run the current buffer as an HTML app"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (app-buffer? buf)
+          (begin
+            (buffer-set-local! buf 'render-mode #f)
+            (message "App off"))
+          (begin
+            (app-reload! buf)
+            (buffer-set-local! buf 'render-mode "app")
+            (message "App on — C-g gives the keyboard back, C-c C-a stops it"))))))
+
+(define-command "app-reload" "Reload every running app"
+  (lambda ()
+    (let ((bs (app-buffers)))
+      (for-each app-reload! bs)
+      (message (string-append "Reloaded " (number->string (length bs)) " app(s)")))))
+
+;; a save is the reload signal: you save the buffer, the app runs the new
+;; code. The app server reads buffers, not files, so an unsaved edit in a
+;; sibling file shows on the next reload too.
+(add-hook! 'after-save-hook (lambda () (for-each app-reload! (app-buffers))))
 
 (define-mode "elixir-mode" (ts-mode "elixir"))
 (define-mode "json-mode" (ts-mode "json"))
@@ -3640,6 +3689,8 @@
 (global-set-key "M-g M-g" "goto-line")
 (global-set-key "M-m" "back-to-indentation")
 (global-set-key "C-c C-v" "preview-mode")
+(global-set-key "C-c C-a" "app-preview")
+(global-set-key "C-c C-r" "app-reload")
 (global-set-key "C-`" "popup-toggle")
 (global-set-key "C-M-`" "popup-bufferize")
 (global-set-key "C-M-v" "scroll-other-window")

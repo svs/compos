@@ -72,13 +72,15 @@ defmodule Aimax.Core.LLMDb do
   model is unpriced.
 
   A usage map that carries its own "cost" wins. That is req_llm's figure,
-  priced against its model database, and it is the accurate one: only the
-  provider adapter knows whether `input_tokens` already includes the
-  cached tokens. OpenAI's does, Anthropic's does not — so the fallback
-  below bills every cached OpenAI token twice.
+  priced against its model database from the provider's raw numbers.
 
   The fallback stays for the models req_llm prices at nothing: a model
   missing from its database, or a lane that reports usage without a cost.
+  It prices `input_tokens` at the input rate and the cached tokens at the
+  cache rate, which is right because `LLM.usage_strings/2` normalizes
+  every provider to one shape first: `input_tokens` means FRESH input.
+  Before that, an OpenAI request billed each cached token twice — once
+  inside the input count, once at the cache rate.
   """
   def cost(_model, %{"cost" => c}) when is_number(c), do: c
 

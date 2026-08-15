@@ -296,7 +296,7 @@ defmodule Aimax.Core.LLM do
               end)
 
             case ReqLLM.StreamResponse.to_response(%{sr | stream: tee}) do
-              {:ok, resp} -> {:ok, Map.put(from_req_response(resp), "streamed", true)}
+              {:ok, resp} -> {:ok, Map.put(from_req_response(resp, spec), "streamed", true)}
               {:error, e} -> {:error, err_msg(e)}
             end
 
@@ -305,7 +305,7 @@ defmodule Aimax.Core.LLM do
         end
       else
         case with_retry(fn -> ReqLLM.generate_text(spec, ctx, opts) end) do
-          {:ok, resp} -> {:ok, from_req_response(resp)}
+          {:ok, resp} -> {:ok, from_req_response(resp, spec)}
           {:error, e} -> {:error, err_msg(e)}
         end
       end
@@ -512,7 +512,7 @@ defmodule Aimax.Core.LLM do
   defp to_req_msg(%{role: "assistant", content: text}), do: [ReqLLM.Context.assistant(text)]
 
   # ReqLLM.Response -> the loop's Anthropic shape
-  defp from_req_response(resp) do
+  defp from_req_response(resp, spec) do
     text = ReqLLM.Response.text(resp) || ""
     calls = ReqLLM.Response.tool_calls(resp) || []
 
@@ -534,7 +534,7 @@ defmodule Aimax.Core.LLM do
     %{
       "stop_reason" => stop_reason(resp, calls),
       "content" => blocks,
-      "usage" => usage_strings(ReqLLM.Response.usage(resp))
+      "usage" => usage_strings(ReqLLM.Response.usage(resp), spec)
     }
   end
 
@@ -552,23 +552,44 @@ defmodule Aimax.Core.LLM do
 
   # req_llm usage (atom keys) -> the ledger's Anthropic field names.
   #
+  # Two usage shapes arrive here. Anthropic reports input_tokens WITHOUT
+  # the cached tokens. OpenAI, and every provider that copies its shape,
+  # reports them INSIDE input_tokens. A ledger that mixes the two cannot
+  # state a cache hit rate: the editor read 47% where the true figure was
+  # 92%, because the cached tokens sat in both terms of the fraction.
+  #
+  # So "input_tokens" means FRESH input on every lane, normalized here —
+  # the one place that still knows which provider answered.
+  #
   # 'total_cost rides along because req_llm already priced this request
-  # against its own model database, and it knows something we cannot see
-  # from the token counts alone: whether the provider's input_tokens
-  # ALREADY INCLUDES the cached tokens. OpenAI's does, Anthropic's does
-  # not. Pricing the raw counts ourselves billed every cached OpenAI token
-  # twice — once at the input rate, once at the cache rate.
-  defp usage_strings(usage) when is_map(usage) do
+  # against its own model database, from the provider's raw numbers. It
+  # remains the accurate figure; the fallback in LLMDb prices these
+  # normalized counts, and now it agrees.
+  @doc """
+  req_llm usage + a model spec -> the ledger's field names, with
+  `"input_tokens"` normalized to fresh input. Public because it is the
+  seam the ledger's arithmetic depends on, and the `:llm_chat_fun` test
+  stub bypasses the wire that calls it.
+  """
+  def usage_strings(usage, spec) when is_map(usage) do
+    input = Map.get(usage, :input_tokens, 0)
+    cached = Map.get(usage, :cached_tokens, 0)
+
     %{
-      "input_tokens" => Map.get(usage, :input_tokens, 0),
+      "input_tokens" => if(cached_inside_input?(spec), do: max(input - cached, 0), else: input),
       "output_tokens" => Map.get(usage, :output_tokens, 0),
-      "cache_read_input_tokens" => Map.get(usage, :cached_tokens, 0),
+      "cache_read_input_tokens" => cached,
       "cache_creation_input_tokens" => Map.get(usage, :cache_creation_tokens, 0)
     }
     |> maybe_put("cost", numeric(Map.get(usage, :total_cost)))
   end
 
-  defp usage_strings(_), do: %{}
+  def usage_strings(_, _), do: %{}
+
+  # Anthropic's own API is the exception: it counts cached tokens beside
+  # the input, not inside it. openrouter speaks the OpenAI usage shape
+  # whatever model sits behind it.
+  defp cached_inside_input?(spec), do: provider_of(spec) != "anthropic"
 
   defp numeric(n) when is_number(n), do: n
   defp numeric(_), do: nil
@@ -593,7 +614,7 @@ defmodule Aimax.Core.LLM do
     with :ok <- ensure_key(spec) do
       case with_retry(fn -> ReqLLM.generate_text(spec, prompt, req_opts(spec, [])) end) do
         {:ok, resp} ->
-          Aimax.Core.LLMDb.record(model(), usage_strings(ReqLLM.Response.usage(resp)))
+          Aimax.Core.LLMDb.record(model(), usage_strings(ReqLLM.Response.usage(resp), spec))
           {:ok, ReqLLM.Response.text(resp) || ""}
 
         {:error, e} ->

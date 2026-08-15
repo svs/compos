@@ -162,14 +162,21 @@
 
 (define (list-clear-marks! buf) (buffer-set-local! buf 'list-marks '()))
 
+;; unmark by the stored KEY — the execute loop holds keys, not entries,
+;; and list-mark! would run the mode's 'key fn on one
+(define (list-unmark-key! buf k)
+  (buffer-set-local! buf 'list-marks
+    (filter (lambda (m) (not (equal? (car m) k))) (list-marks buf))))
+
 ;;; --- flag, then execute ------------------------------------------------------
 ;;; The dired paradigm, in the mechanism. A list declares what its flags DO:
 ;;;
 ;;;   'flags ((KEY CHAR VERB ACTION CONFIRM?) ...)
 ;;;
 ;;; KEY flags the entry at point with CHAR. `x` runs every flagged entry
-;;; through (ACTION LIST-BUFFER ENTRY), which answers #t when it acted and
-;;; #f when it found nothing to do, and reports "VERB N NOUN". CONFIRM?
+;;; through (ACTION LIST-BUFFER KEY) — the entry's 'key identity, which IS
+;;; the entry for a list without a 'key fn. The action answers #t when it
+;;; acted and #f when it found nothing to do; `x` reports "VERB N NOUN". CONFIRM?
 ;;; asks first. The mechanism supplies the rest: `m` marks, `u` unmarks,
 ;;; `U` drops every mark, and the mark column goes in front of every row.
 ;;;
@@ -266,7 +273,7 @@
                (action (nth 3 spec))
                (n (let inner ((es (car (cdr (car ps)))) (k 0))
                     (cond ((null? es) k)
-                          (else (list-mark! buf (car es) #f)
+                          (else (list-unmark-key! buf (car es))
                                 (inner (cdr es)
                                        (if (action buf (car es)) (+ k 1) k)))))))
           (loop (cdr ps)

@@ -455,16 +455,24 @@
 
 ;; Compaction: the head of a long record becomes one summary and the
 ;; recent turns stay verbatim. You ask for it — M-x chat-compact — and the
-;; threshold below only decides when the editor SUGGESTS it.
+;; two knobs below only decide when the editor SUGGESTS it.
 ;;
-;; It fired by itself, at 60000 tokens, until the prompt cache started
-;; working. A cached prefix costs a tenth of a fresh one, so resending a
-;; long chat is cheap while a compaction pays for the summary AND rewrites
-;; the cache. The default is 200000 now: the point where a long chat
-;; approaches a model's price tier, not the point where it is merely long.
-;; The mechanism is in editor.scm (chat-can-compact?, chat-compact!).
-(defcustom 'chat-compact-threshold 200000
-  "Suggest compacting a chat once its record passes this many estimated tokens. 0 stays quiet."
+;; It fired by itself, at a flat 60000 tokens, until the prompt cache
+;; started working. A cached prefix costs a tenth of a fresh one, so
+;; resending a long chat is cheap while a compaction pays for the summary
+;; AND rewrites the cache. What remains is the model's input limit: past
+;; it every request fails, and no cache rate helps.
+;;
+;; So the suggestion follows the model. A flat count cannot be right
+;; across models whose limits differ by more than ten times: 200000
+;; tokens is a fifth of one model's window and twice another's.
+;; The mechanism is in editor.scm (chat-compact-limit, chat-compact!).
+(defcustom 'chat-compact-percent 70
+  "Suggest compacting a chat once its record passes this percent of the model's input limit. 0 stays quiet."
+  'group 'chat 'type 'integer)
+
+(defcustom 'chat-compact-threshold 0
+  "Suggest compacting at this flat token count, whatever the model allows. 0 uses chat-compact-percent."
   'group 'chat 'type 'integer)
 
 (defcustom 'chat-compact-keep 8

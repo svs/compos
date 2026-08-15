@@ -3088,8 +3088,9 @@
 ;;;
 ;;; The reason that remains is the model's input limit: past it every
 ;;; request fails, and no cache rate helps. That is a wall to see coming,
-;;; not a threshold to cross silently. So chat-compact-threshold now says
-;;; when the editor SUGGESTS compaction; the user decides.
+;;; not a threshold to cross silently. So the editor SUGGESTS compaction,
+;;; at a share of what this chat's own model accepts (chat-compact-limit),
+;;; and the user decides.
 ;;;
 ;;; It is never silent. The transcript shows a line where the head went,
 ;;; and the summary is a turn like any other: it saves, restores, and
@@ -3154,11 +3155,28 @@
        (let ((all (chat-record buf)))
          (> (length all) (chat-compact-keep-count all)))))
 
+;; the model this chat sends to — its own, or the editor's default
+(define (chat-model buf)
+  (or (buffer-local buf 'agent-model) (llm-model)))
+
+;; The record size at which the editor mentions compaction, or #f when it
+;; stays quiet. A flat count set by the user wins. Otherwise it is a share
+;; of what THIS chat's model accepts, because that limit is the only hard
+;; one: a model whose catalog entry we cannot read gets no suggestion,
+;; which is honest — we do not know where its wall is.
+(define (chat-compact-limit buf)
+  (cond ((> chat-compact-threshold 0) chat-compact-threshold)
+        ((<= chat-compact-percent 0) #f)
+        (else
+         (let ((limit (llm-context-limit (chat-model buf))))
+           (and limit (quotient (* limit chat-compact-percent) 100))))))
+
 ;; big enough that the editor mentions it — a suggestion, not a trigger
 (define (chat-should-compact? buf)
-  (and (> chat-compact-threshold 0)
-       (> (chat-record-tokens buf) chat-compact-threshold)
-       (chat-can-compact? buf)))
+  (let ((limit (chat-compact-limit buf)))
+    (and limit
+         (> (chat-record-tokens buf) limit)
+         (chat-can-compact? buf))))
 
 ;; The summary call is async, and the record can grow while it is in
 ;; flight. So the head is identified by COUNT at request time and replaced

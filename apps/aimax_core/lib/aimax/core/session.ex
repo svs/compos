@@ -399,6 +399,8 @@ defmodule Aimax.Core.Session do
       "set-modeline-extra!" =>
         "(set-modeline-extra! TEXT) — set the extra text that the modeline shows.",
       "llm-model" => "(llm-model) — return the active LLM model id.",
+      "llm-context-limit" =>
+        "(llm-context-limit MODEL) — input tokens the model accepts, or #f when unknown.",
       "eval-string" => "(eval-string SRC) — evaluate SRC as Scheme; return the last value.",
       "with-edit-author" => "(with-edit-author AUTHOR THUNK) — run THUNK; buffer edits it makes are attributed to the string AUTHOR.",
       "eval-string-safe" =>
@@ -918,6 +920,7 @@ defmodule Aimax.Core.Session do
         :void
       end,
       "llm-model" => fn [] -> Aimax.Core.LLM.model() end,
+      "llm-context-limit" => fn [m] -> Aimax.Core.LLMDb.context_limit(to_string(m)) || false end,
       "eval-string" => fn [src], store -> eval_src.(src, store) end,
       # (with-edit-author AUTHOR THUNK) — every buffer mutation THUNK makes
       # is attributed to AUTHOR (see buffer-authors). The try/after restore

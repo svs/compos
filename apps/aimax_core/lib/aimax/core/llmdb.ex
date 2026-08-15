@@ -68,6 +68,37 @@ defmodule Aimax.Core.LLMDb do
   end
 
   @doc """
+  How many input tokens the model accepts, from the catalog, or nil.
+
+  `limit.input` where the catalog states one, else `limit.context`. The
+  two differ: a model can hold 1,050,000 tokens of context and accept
+  922,000 of them as input, and it is the input figure a conversation
+  runs into.
+
+  Compaction reads this. A flat token threshold cannot be right across
+  models whose limits differ by more than ten times.
+  """
+  def context_limit(model) do
+    model =
+      model
+      |> String.replace_prefix("openrouter:", "")
+      |> String.replace_prefix("openai:", "")
+      |> String.replace_prefix("anthropic:", "")
+
+    db = :persistent_term.get(:aimax_llmdb, %{})
+
+    Enum.find_value(["anthropic", "openai", "openrouter"] ++ Map.keys(db), fn p ->
+      with %{"models" => models} <- db[p],
+           %{"limit" => limit} <- models[model] || models[Path.basename(model)],
+           n when is_integer(n) and n > 0 <- limit["input"] || limit["context"] do
+        n
+      else
+        _ -> nil
+      end
+    end)
+  end
+
+  @doc """
   Dollars for a usage map (Anthropic or OpenAI field names), nil when the
   model is unpriced.
 

@@ -30,6 +30,7 @@ defmodule Aimax.Scheme do
     (if (null? lst) #f
         (if (equal? key (car (car lst))) (car lst) (assoc key (cdr lst)))))
   (define (cadr l) (car (cdr l)))
+  (define (cddr l) (cdr (cdr l)))
   (define (caddr l) (car (cdr (cdr l))))
   (define (split-lines s) (string-split s "\\n"))
   (define (assq key lst) (assoc key lst))

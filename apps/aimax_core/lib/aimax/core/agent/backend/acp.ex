@@ -439,8 +439,8 @@ defmodule Aimax.Core.Agent.Backend.ACP do
   end
 
   # mcp_servers config (Scheme plists via mcp-acp-servers) -> ACP session/new
-  # shape. Env values starting with "@" are key references resolved here —
-  # the same convention as MCP client specs, so config files carry no secrets.
+  # shape. Env, header and url values arrive literal: mcp-acp-server already
+  # resolved every "@VAR" key reference through packages/keys.scm.
   defp acp_servers(servers, slug) when is_list(servers),
     do: Enum.map(servers, &acp_server(&1, slug))
 
@@ -479,9 +479,6 @@ defmodule Aimax.Core.Agent.Backend.ACP do
   end
 
   defp acp_pairs(pairs) do
-    for [k, v] <- pairs || [], do: %{"name" => to_string(k), "value" => resolve_key(v)}
+    for [k, v] <- pairs || [], do: %{"name" => to_string(k), "value" => to_string(v)}
   end
-
-  defp resolve_key("@" <> var), do: Aimax.Core.Keys.get(var) || ""
-  defp resolve_key(v), do: to_string(v)
 end

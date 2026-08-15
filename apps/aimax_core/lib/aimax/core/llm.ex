@@ -13,8 +13,9 @@ defmodule Aimax.Core.LLM do
   exactly as before.
 
   Model routing (`model/0` strings): `"openai:<m>"` / `"openrouter:<m>"`
-  route to those providers; a bare id is Anthropic. Keys come from
-  `Aimax.Core.Keys` (env -> ~/.aimax/<var>-key -> doppler).
+  route to those providers; a bare id is Anthropic. A provider key comes
+  from Scheme: this module asks `key-get` for a name, and
+  packages/keys.scm decides which source answers.
 
   Tool use (gptel-style, native): `complete_tools/6` runs the tool_use loop.
   Tool definitions and handlers live in the Scheme registry
@@ -378,14 +379,24 @@ defmodule Aimax.Core.LLM do
         :ok
 
       {var, key} ->
-        case Aimax.Core.Keys.get(var) do
-          k when k in [nil, ""] ->
-            {:error, "no #{var} (env, ~/.aimax/#{String.downcase(var)}, or doppler)"}
+        case key_for(var) do
+          nil ->
+            {:error, "no #{var} — see the key chain in packages/keys.scm"}
 
           k ->
             ReqLLM.put_key(key, k)
             :ok
         end
+    end
+  end
+
+  # Where a key comes from is policy, so Scheme answers (packages/keys.scm).
+  # ensure_key/1 runs in the request Task or in an agent backend, never in
+  # the session process — a call from the session would deadlock.
+  defp key_for(var) do
+    case Session.call_named("key-get", [var]) do
+      {:ok, k} when is_binary(k) and k != "" -> k
+      _ -> nil
     end
   end
 

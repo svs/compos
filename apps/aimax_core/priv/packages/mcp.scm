@@ -9,8 +9,12 @@
 ;;; (mcp-register! 'name SPEC) declares a server without connecting:
 ;;;   stdio: (list 'command "npx" 'args (list "-y" "pkg") 'env (list 'K "v"))
 ;;;   http:  (list 'url "https://host/mcp" 'headers (list 'authorization "..."))
-;;; Env/header values starting with "@" resolve as key lookups
-;;; ("@GOOGLE_API_KEY" -> env, ~/.aimax/google-key, doppler).
+;;; A "@VAR" in 'env, 'headers or 'url is a key reference, resolved by
+;;; packages/keys.scm here in Scheme, just before the spec leaves for
+;;; Elixir. The connection layer sees only literal values: it never learns
+;;; what a secret is or where this machine keeps one. A value that is only
+;;; PART secret takes a list of parts:
+;;;   'headers (list 'Authorization (list "Bearer " "@ATS_ASH_TOKEN"))
 ;;;
 ;;; (define-preset! 'name DESC SERVERS) names a collection; M-x
 ;;; chat-load-preset enables it in a chat. The choice lives in the chat's
@@ -29,6 +33,32 @@
 (define (mcp-connected? name)
   (member (symbol->string name) (map car (mcp-connections))))
 
+;; a spec with its "@VAR" references replaced by the keys they name. The
+;; registry keeps the references, so a secret lives in the registry for no
+;; longer than one connect. This is the ONE place a spec resolves —
+;; resolving twice would re-read a secret whose own text starts with "@".
+;;
+;; 'url resolves too: some servers take the key as a query parameter
+;; (mcp.exa.ai/mcp?exaApiKey=…) and refusing to resolve there only moved
+;; the secret back into the config file. A url that carries a key must
+;; never print — mcp-url-shown cuts the query string off every display.
+(define (mcp-resolve-spec spec)
+  (if (or (null? spec) (null? (cdr spec)))
+      '()
+      (let ((k (car spec)) (v (cadr spec)))
+        (cons k
+              (cons (cond ((or (equal? k 'env) (equal? k 'headers))
+                           (key-resolve-plist v))
+                          ((equal? k 'url) (key-resolve v))
+                          (else v))
+                    (mcp-resolve-spec (cddr spec)))))))
+
+;; a url without its query string. Every line that shows a url goes on a
+;; screen or into a chat buffer, and a key can ride in the query.
+(define (mcp-url-shown u)
+  (let ((i (string-index u "?")))
+    (if i (string-append (substring-bytes u 0 i) "?…") u)))
+
 ;; connect a registered server unless it already is — safe to call every send
 (define (mcp-ensure! name)
   (let ((e (assoc name *mcp-registry*)))
@@ -37,7 +67,8 @@
           ((mcp-connected? name) #t)
           (else
             (message (string-append "mcp: connecting " (symbol->string name) "…"))
-            (mcp-connect! (symbol->string name) (car (cdr e)))))))
+            (mcp-connect! (symbol->string name)
+                          (mcp-resolve-spec (car (cdr e))))))))
 
 ;;; --- presets -----------------------------------------------------------------
 
@@ -305,9 +336,10 @@
 ;;; --- ACP: agents get the same servers -----------------------------------------
 ;;; A registered server translates to an ACP session/new mcpServers entry,
 ;;; stdio and http alike; the caller (an agent thread's config, a chat's
-;;; presets) decides which servers each agent session sees. "@VAR" values
-;;; in env and headers resolve Elixir-side at spawn — config files stay
-;;; secret-free.
+;;; presets) decides which servers each agent session sees. mcp-acp-server
+;;; resolves the whole spec once, so the adapter gets literal values and
+;;; config files stay secret-free. The surface line shows the url the user
+;;; wrote, cut at the query string: a key can ride there.
 
 ;; the editor itself as an MCP server: the define-tool! registry bridged
 ;; over the daemon socket, so external agents read and edit live buffers
@@ -315,7 +347,8 @@
   (list 'command "elixir" 'args (list (priv-path "aimax-mcp-proxy.exs"))))
 
 ;; a plist of string values -> ((NAME VALUE) ...). ACP asks for env and
-;; headers in this shape, and the two differ only in name.
+;; headers in this shape, and the two differ only in name. The values are
+;; literal already: mcp-acp-server resolves the whole spec once.
 (define (mcp-acp-pairs plist)
   (let loop ((es (or plist '())) (acc '()))
     (if (null? es)
@@ -328,7 +361,7 @@
 ;; 'command nor 'url is no server, and mcp-acp-servers drops it.
 (define (mcp-acp-server name)
   (let* ((e (assoc name *mcp-registry*))
-         (spec (and e (car (cdr e)))))
+         (spec (and e (mcp-resolve-spec (car (cdr e))))))
     (cond ((not spec) #f)
           ((plist-get spec 'command)
            (list 'name (symbol->string name)
@@ -358,7 +391,7 @@
   (string-append
     "  " (plist-get s 'name)
     (if (plist-get s 'url)
-        (string-append "   http    " (plist-get s 'url))
+        (string-append "   http    " (mcp-url-shown (plist-get s 'url)))
         (string-append "   stdio   " (plist-get s 'command) " "
                        (string-join (or (plist-get s 'args) '()) " ")))
     "\n"))

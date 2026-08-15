@@ -83,6 +83,7 @@ defmodule Aimax.Core.SchemeAPI do
       "file-directory?" => "(file-directory? PATH) — return #t if PATH is a directory.",
       "read-file" => "(read-file PATH) — return the file's contents, or #f if unreadable.",
       "shell-command->string" => "(shell-command->string CMD [DIR]) — run CMD in a shell; return its output with stderr merged.",
+      "getenv" => "(getenv NAME) — return the environment variable NAME, or #f if it is unset or empty.",
       "json-parse" => "(json-parse STR) — parse JSON; objects become plists with symbol keys; #f on failure.",
       "json-encode" => "(json-encode V) — encode a Scheme value as a JSON string; a plist becomes an object.",
       "write-file!" => "(write-file! PATH TEXT) — write TEXT to PATH, create parent directories; return #t.",
@@ -350,6 +351,14 @@ defmodule Aimax.Core.SchemeAPI do
         case File.read(Path.expand(p)) do
           {:ok, text} -> text
           {:error, _} -> false
+        end
+      end,
+      # (getenv NAME) — an unset OR empty variable is #f: a caller asking for
+      # a key wants the next source in the chain, not the empty string
+      "getenv" => fn [name] ->
+        case System.get_env(name) do
+          v when v in [nil, ""] -> false
+          v -> v
         end
       end,
       # (shell-command->string CMD [DIR]) — sync, stderr folded in, "" on spawn failure

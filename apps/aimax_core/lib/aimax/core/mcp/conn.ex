@@ -3,8 +3,7 @@ defmodule Aimax.Core.MCP.Conn do
   One MCP server connection. Transports:
 
     stdio — %{"command" => c, "args" => [...], "env" => %{...}}: subprocess
-    via Port, newline-delimited JSON-RPC. Env values starting with "@" are
-    key references resolved through Aimax.Core.Keys ("@GOOGLE_API_KEY").
+    via Port, newline-delimited JSON-RPC.
 
     http — %{"url" => u, "headers" => [...]}: streamable HTTP; each request
     is a POST (run in a Task so a slow fetch never blocks status queries),
@@ -20,6 +19,11 @@ defmodule Aimax.Core.MCP.Conn do
   connection. They are cold data (the hub's detail view), so they stay in
   this process rather than in the persistent_term the tool loop reads.
 
+  Env and header values arrive literal. A spec written with "@VAR" key
+  references resolves in Scheme (packages/keys.scm, called from
+  packages/mcp.scm) before it reaches this process: where a secret lives
+  is policy, and this module holds none.
+
   Requests in flight live in `pending` (id -> from | internal tag); a died
   subprocess fails them all instead of leaving callers hanging. Every frame
   in either direction, plus lifecycle notes, lands in a bounded `log` —
@@ -30,7 +34,7 @@ defmodule Aimax.Core.MCP.Conn do
   use GenServer, restart: :temporary
   require Logger
 
-  alias Aimax.Core.{Keys, MCP, Session}
+  alias Aimax.Core.{MCP, Session}
 
   @protocol "2025-06-18"
   @call_timeout 120_000
@@ -437,7 +441,6 @@ defmodule Aimax.Core.MCP.Conn do
   defp log_text(msg) when is_binary(msg), do: String.slice(msg, 0, @log_line)
   defp log_text(msg), do: msg |> Jason.encode!() |> String.slice(0, @log_line)
 
-  defp resolve_value("@" <> var), do: Keys.get(var) || ""
   defp resolve_value(v), do: to_string(v)
 
   # mark failed, tell the user, and stop on the next message — callable from

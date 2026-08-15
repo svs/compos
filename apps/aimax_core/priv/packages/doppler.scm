@@ -68,16 +68,27 @@
         (string-append "no secrets (or no such project/config: " project "/" config ")")
         (string-join (map symbol->string names) "\n"))))
 
-;; the one call that returns an actual secret value — separate from
-;; doppler-secret-names on purpose, so a value only appears in the
-;; transcript when someone asks for that exact name
-(define (doppler-secret-get project config name)
+;; the one call that returns an actual secret value, or #f when the
+;; project, the config, or the name does not exist. The CLI writes its
+;; errors to stderr and dp--run folds those in, so a failure arrives as
+;; text and not as a status — read it back out. packages/keys.scm calls
+;; this as the last link of the key chain.
+(define (doppler-secret-value project config name)
   (let ((out (string-trim
                (dp--run (string-append "secrets get " (dp--quote name)
                                        " --project " (dp--quote project)
                                        " --config " (dp--quote config)
                                        " --plain")))))
-    (if (equal? out "") (string-append "no such secret: " name) out)))
+    (if (or (equal? out "") (string-contains? out "Doppler Error"))
+        #f
+        out)))
+
+;; the same lookup for the model — separate from doppler-secret-names on
+;; purpose, so a value only appears in the transcript when someone asks
+;; for that exact name
+(define (doppler-secret-get project config name)
+  (or (doppler-secret-value project config name)
+      (string-append "no such secret: " name)))
 
 ;; the raw CLI, for whatever the wrappers above don't cover — same
 ;; shell-out nm--run/notmuch use in notmuch.scm

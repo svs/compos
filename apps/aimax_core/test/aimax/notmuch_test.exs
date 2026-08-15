@@ -174,6 +174,21 @@ defmodule Aimax.NotmuchTest do
     assert eval!(~s{(editor-context-preamble "*some-chat*")}) == ~s{""}
   end
 
+  test "the provider reads the list buffer's own point, not the current buffer's" do
+    eval!(~s{(run-command "notmuch-inbox")})
+
+    # agent-send's path: the CURRENT buffer is the chat, and its point
+    # sits past the end of the small list buffer. line-index-at must
+    # slice *notmuch* with *notmuch*'s point, or substring-bytes throws.
+    eval!(~s{(buffer-create "*big-chat*")})
+    eval!(~s{(buffer-append! "*big-chat*" (string-repeat "x" 100000))})
+    eval!(~s{(switch-to-buffer! "*big-chat*")})
+    eval!(~s{(end-of-buffer!)})
+
+    ctx = eval!(~s{(buffer-context "*notmuch*")})
+    assert ctx =~ "thread:0001"
+  end
+
   test "reply is a message-mode buffer: headers, separator, quote, point at body", %{dir: dir} do
     eval!(~s{(run-command "notmuch-inbox")})
     press("RET")

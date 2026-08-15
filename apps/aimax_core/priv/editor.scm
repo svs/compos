@@ -124,9 +124,11 @@
   (let ((f (list-opt buf 'header)))
     (if f (f buf) "")))
 
-;; the 0-based index of the entry line point is on, or #f above the entries
+;; the 0-based index of the entry line BUF's point is on, or #f above the
+;; entries. BUF's own point, not (point): a context provider asks about a
+;; list buffer while another buffer is current.
 (define (line-index-at buf header-lines)
-  (let* ((before (substring-bytes (buffer-text buf) 0 (point)))
+  (let* ((before (substring-bytes (buffer-text buf) 0 (buffer-point buf)))
          (ln (- (length (string-split before "\n")) 1 header-lines)))
     (and (>= ln 0) ln)))
 

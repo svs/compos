@@ -12,8 +12,8 @@ defmodule Aimax.Core.Candidates do
   its input, file prompts pass the segment after the last "/", the popup
   passes the typed prefix.
 
-  `match_hint` widens the filter to the annotation beside the candidate, so a
-  buffer prompt finds a buffer by its mode. The prompt asks for it; the
+  `match_hint` widens the filter to the kind the annotation begins with, so a
+  prompt finds a buffer or a file by its mode. The prompt asks for it; the
   default stays off, because a doc-string annotation matches almost anything.
   """
 
@@ -70,7 +70,7 @@ defmodule Aimax.Core.Candidates do
   end
 
   # the annotation joins the match text only when the prompt asked for it;
-  # rank still reads the label alone, so a hint match sorts last
+  # rank still reads the label alone, so a kind match sorts last
   defp hint_of(%{match_hint: true}, %{hint: hint}), do: hint
   defp hint_of(_list, _item), do: ""
 
@@ -114,9 +114,9 @@ defmodule Aimax.Core.Candidates do
   Orderless + flex, case-insensitive: space-separated terms each match as
   substrings in any order; a single term also matches as a subsequence.
 
-  HINT is the annotation the term may match instead of the label, as a
-  substring only — a subsequence of a long annotation matches everything.
-  A prompt that does not widen the filter passes "".
+  HINT is the annotation, and a term also matches the KIND it starts with —
+  `elixir-mode`, `chat-mode`, `Dired`. A prompt that does not widen the
+  filter passes "".
   """
   def matches?(label, query, hint \\ "")
 
@@ -124,17 +124,29 @@ defmodule Aimax.Core.Candidates do
 
   def matches?(label, query, hint) do
     dl = String.downcase(label)
-    dh = String.downcase(hint)
+    kind = kind(hint)
 
     case String.split(query, " ", trim: true) do
       [] -> true
-      [single] -> subsequence?(dl, String.downcase(single)) or contains?(dh, single)
-      terms -> Enum.all?(terms, &(String.contains?(dl, String.downcase(&1)) or contains?(dh, &1)))
+      [single] -> subsequence?(dl, String.downcase(single)) or kind?(kind, single)
+      terms -> Enum.all?(terms, &(String.contains?(dl, String.downcase(&1)) or kind?(kind, &1)))
     end
   end
 
-  defp contains?("", _term), do: false
-  defp contains?(dhint, term), do: String.contains?(dhint, String.downcase(term))
+  # The FIRST annotation field, which every annotator writes as the kind of
+  # the thing: the mode a buffer is in, the mode a file would open in. The
+  # later fields are a size and a date, and a term must not match those — a
+  # filename beginning "a" would find every file dated in August.
+  defp kind(""), do: ""
+
+  defp kind(hint) do
+    hint |> String.split("  ", parts: 2) |> hd() |> String.trim() |> String.downcase()
+  end
+
+  # from the start of the kind, never inside it: "chat" finds the chats, and
+  # "mo" still means the name alone, though every mode name ends in "-mode"
+  defp kind?("", _term), do: false
+  defp kind?(kind, term), do: String.starts_with?(kind, String.downcase(term))
 
   defp subsequence?(_label, ""), do: true
 

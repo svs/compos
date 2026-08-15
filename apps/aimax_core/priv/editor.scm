@@ -1594,6 +1594,8 @@
 
 ;; ONE file prompt (dup #17): minibuffer with filename completion, rooted
 ;; at default-directory. K receives the confirmed text exactly as typed.
+;; match-hint: the annotation names the mode the file opens in, so "dired"
+;; narrows the listing to the directories and "elixir" to the .ex files.
 (define (read-file-name prompt k)
   (let ((dd (default-directory)))
     (set! *file-nav-dir* dd)
@@ -1601,6 +1603,7 @@
       (list (list 'complete file-complete)
             (list 'change file-nav-change)
             (list 'initial dd)
+            (list 'match-hint #t)
             (list 'confirm k)))))
 
 ;;; --- remote files (/ssh:host:/path — TRAMP-lite) ---------------------------

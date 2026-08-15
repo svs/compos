@@ -22,6 +22,11 @@ defmodule Aimax.EditorTest do
 
   defp echo, do: Editor.snapshot().echo
 
+  # DEL back over whatever the prompt holds, the way a user retypes
+  defp clear_minibuffer do
+    press(List.duplicate("DEL", String.length(Editor.snapshot().minibuffer.input)))
+  end
+
   setup do
     {:ok, buf: fresh_buffer()}
   end
@@ -1885,6 +1890,33 @@ defmodule Aimax.EditorTest do
     File.rm_rf!(root)
   end
 
+  test "C-x C-f matches the mode a file would open in" do
+    root = Path.join(System.tmp_dir!(), "aimax-fmode-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(Path.join(root, "sub"))
+    File.write!(Path.join(root, "one.exs"), "x")
+    File.write!(Path.join(root, "two.txt"), "y")
+
+    press(["C-x", "C-f"])
+    type(root <> "/")
+
+    # the directory is the only Dired candidate, and "dired" alone finds it
+    type("dired")
+    assert Enum.map(Editor.render_state().minibuffer.candidates, & &1.label) == ["sub/"]
+
+    # a size and a date are annotation too, and a term must never match them:
+    # "aug" is a month, not a file
+    clear_minibuffer()
+    type(root <> "/aug")
+    assert Editor.render_state().minibuffer.candidates == []
+
+    clear_minibuffer()
+    type(root <> "/elixir")
+    press(["RET"])
+    assert Editor.current_buffer() == Path.join(root, "one.exs")
+
+    File.rm_rf!(root)
+  end
+
   test "switch-to-buffer via C-x b", %{buf: buf} do
     other = "other-#{System.unique_integer([:positive])}"
     Aimax.Core.create_buffer(other)
@@ -1920,8 +1952,15 @@ defmodule Aimax.EditorTest do
     assert prose in labels
     refute plain in labels
 
+    # only from the START of the mode: every mode name ends in "-mode", so a
+    # term matching inside one would match every buffer there is
+    clear_minibuffer()
+    type("mode")
+    refute prose in Enum.map(Editor.render_state().minibuffer.candidates, & &1.label)
+
     # orderless across both: one term matches the mode, the other the name
-    type(" swm-prose")
+    clear_minibuffer()
+    type("text-mode swm-prose")
     press(["RET"])
     assert Editor.current_buffer() == prose
 

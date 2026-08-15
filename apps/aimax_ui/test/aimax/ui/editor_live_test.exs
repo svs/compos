@@ -72,6 +72,50 @@ defmodule Aimax.Ui.EditorLiveTest do
     refute html =~ "xy"
   end
 
+  # An overlay range is bytes. A range that ends inside a multi-byte
+  # character used to cut the segment mid-character, and Jason killed the
+  # socket on the reply: the window went blank and no client could
+  # reconnect. The segments now snap to character boundaries.
+  test "an overlay that ends inside a multi-byte character still renders",
+       %{conn: conn} do
+    {:ok, view, _} = live(conn, "/")
+    buf = Aimax.Core.Editor.current_buffer()
+    Aimax.Core.Buffer.append(buf, "    —     — a command", source: {:agent, "test"})
+
+    # the em dash occupies bytes 4..6; end the overlay on byte 5, inside it
+    {:ok, _} =
+      Aimax.Core.Session.eval(
+        ~s{(overlay-set! "#{buf}" 'zz-utf8 (list (list 0 5 "region")))}
+      )
+
+    html = render(view)
+    assert html =~ "a command"
+    assert String.valid?(html)
+  end
+
+  # Every dired test read the buffer text, so all of them passed while the
+  # window showed nothing. The buffer kept 'render-mode "blocks" from the
+  # mode before it, and a leaf that says "blocks" draws cards, not lines.
+  # This test reads the window, which is where the listing went missing.
+  test "a dired window renders its listing, stale render-mode or not", %{conn: conn} do
+    root = Path.join(System.tmp_dir!(), "ui-dired-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(root)
+    File.write!(Path.join(root, "gamma.txt"), "G")
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    {:ok, view, _} = live(conn, "/")
+    {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
+    assert render(view) =~ "gamma.txt"
+
+    # the local a previous mode left behind must not empty the window
+    {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-set-local! "#{root}" 'render-mode "blocks")})
+    html = render(view)
+    assert html =~ "gamma.txt"
+    # the card view draws one div per window; the stylesheet names the
+    # class too, so match the div's id rather than the class
+    refute html =~ ~s(id="blocks-)
+  end
+
   test "rpc/agent edits to a visible buffer appear live", %{conn: conn} do
     {:ok, view, _} = live(conn, "/")
     render(view)

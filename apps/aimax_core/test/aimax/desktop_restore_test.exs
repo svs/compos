@@ -186,4 +186,43 @@ defmodule Aimax.DesktopRestoreTest do
     assert Buffer.exists?(path)
     assert eval!(~s{(buffer-hidden "#{path}")}) == hidden
   end
+
+  # savehist. Which commands you use is daemon state like any other, but a
+  # global was the one kind the desktop dropped — so every restart threw
+  # the minibuffer history away and M-x fell back to alphabetical.
+  test "minibuffer history survives save and restore" do
+    eval!(~s{(set! *minibuffer-history* (list (list 'M-x (list "delete-other-windows"))))})
+    assert :ok = Desktop.save_now()
+
+    # a restart starts from the stdlib's empty default
+    eval!("(set! *minibuffer-history* '())")
+    assert :ok = Desktop.restore_now()
+    assert eval!("*minibuffer-history*") =~ "delete-other-windows"
+
+    # and the prompt leads with it again
+    KeyDispatch.handle_key("M-x")
+    assert [%{label: "delete-other-windows"} | _] = Editor.render_state().minibuffer.candidates
+    KeyDispatch.handle_key("C-g")
+  end
+
+  # the mechanism, not the one variable: a global rides along by naming
+  # itself, and one that does not is still dropped
+  test "a global that names itself survives; one that does not is dropped" do
+    eval!("""
+    (define *dr-kept* "boot")
+    (define *dr-dropped* "boot")
+    (persist-global! 'dr-kept
+      (lambda () *dr-kept*)
+      (lambda (v) (set! *dr-kept* v)))
+    """)
+
+    eval!(~s{(begin (set! *dr-kept* "used") (set! *dr-dropped* "used"))})
+    assert :ok = Desktop.save_now()
+
+    eval!(~s{(begin (set! *dr-kept* "boot") (set! *dr-dropped* "boot"))})
+    assert :ok = Desktop.restore_now()
+
+    assert eval!("*dr-kept*") == ~s{"used"}
+    assert eval!("*dr-dropped*") == ~s{"boot"}
+  end
 end

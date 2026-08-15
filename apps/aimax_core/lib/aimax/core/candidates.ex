@@ -64,9 +64,17 @@ defmodule Aimax.Core.Candidates do
     %{list | filtered: filtered}
   end
 
-  @doc "Widest label in the full set, in characters (0 when empty)."
+  # One 268-character chat buffer name set the name column for all 110
+  # candidates and pushed every annotation off the right of the panel. A
+  # name past this width truncates instead; the annotation always shows.
+  @max_label_width 64
+
+  @doc "Widest label in the full set, in characters (0 when empty), capped."
   def label_width(list) do
-    list.items |> Enum.map(&String.length(&1.label)) |> Enum.max(fn -> 0 end)
+    list.items
+    |> Enum.map(&String.length(&1.label))
+    |> Enum.max(fn -> 0 end)
+    |> min(@max_label_width)
   end
 
   def selected(list) do

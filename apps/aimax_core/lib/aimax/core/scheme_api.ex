@@ -40,6 +40,8 @@ defmodule Aimax.Core.SchemeAPI do
       "buffer-append!" => "(buffer-append! BUF TEXT) — append TEXT to the buffer's end; ignores read-only.",
       "buffer-insert!" => "(buffer-insert! BUF POS TEXT) — insert TEXT at byte POS; ignores read-only.",
       "buffer-delete-range!" => "(buffer-delete-range! BUF POS LEN) — delete LEN bytes at byte POS; ignores read-only.",
+      "buffer-authors" => "(buffer-authors BUF) — return (START END AUTHOR) attribution spans for the current text.",
+      "buffer-edit-log" => "(buffer-edit-log BUF) — return (VERSION AUTHOR POS INS DEL) edit records, newest first.",
       "overlay-set!" => "(overlay-set! BUF TAG RANGES) — replace TAG's overlays with (START END FACE) byte ranges.",
       "overlay-clear!" => "(overlay-clear! BUF TAG) — remove TAG's overlays; the tag 'all removes every overlay.",
       "buffer-overlays" => "(buffer-overlays BUF) — return all overlays as (START END FACE) byte ranges.",
@@ -130,6 +132,8 @@ defmodule Aimax.Core.SchemeAPI do
       "ts-nav" => "(ts-nav OP) — tree-sitter motion 'forward|'backward|'up|'down; return a byte pos or #f.",
       "ts-node" =>
         "(ts-node KIND START END OP) — the node KIND covers the range (\"\" for the smallest); return its 'at|'parent|'child|'next|'prev|'top as (KIND START END), or #f.",
+      "ts-children" =>
+        "(ts-children KIND START END) — the named children of that node as ((KIND START END) ...); the range 0..SIZE names the whole file.",
       "ts-query" => "(ts-query QUERY) — run a tree-sitter query; return (CAPTURE START END) byte ranges.",
       "ts-langs" => "(ts-langs) — return the names of the loaded tree-sitter languages.",
       "buffer-search" => "(buffer-search Q FROM) — search forward from byte FROM; return (START END) or #f.",
@@ -207,6 +211,12 @@ defmodule Aimax.Core.SchemeAPI do
       "buffer-delete-range!" => fn [name, pos, len] ->
         :ok = Buffer.delete_range(name, pos, len, source: :editor)
         :void
+      end,
+      "buffer-authors" => fn [name] ->
+        for {s, e, a} <- Buffer.authors(name), do: [s, e, a]
+      end,
+      "buffer-edit-log" => fn [name] ->
+        for {v, a, pos, ins, del} <- Buffer.edit_log(name), do: [v, a || false, pos, ins, del]
       end,
       # overlays: (overlay-set! buf 'org (list (list s e "org-todo") ...))
       # replaces the tag's whole range set — the fontification model is
@@ -545,19 +555,19 @@ defmodule Aimax.Core.SchemeAPI do
       # it stands on instead of from the deepest node under point
       "ts-node" => fn [kind, start, stop, op] ->
         buf = Editor.current_buffer()
+        kind = if is_binary(kind), do: kind, else: ""
 
-        case Buffer.get_local(buf, "ts-lang") do
-          nil ->
-            false
-
-          lang ->
-            kind = if is_binary(kind), do: kind, else: ""
-
-            case Aimax.Core.TS.ts_node(lang, Buffer.text(buf), kind, start, stop, plain(op)) do
-              nil -> false
-              {kind, s, e} -> [kind, s, e]
-            end
+        case Buffer.ts_node(buf, kind, start, stop, plain(op)) do
+          nil -> false
+          {kind, s, e} -> [kind, s, e]
         end
+      end,
+      "ts-children" => fn [kind, start, stop] ->
+        kind = if is_binary(kind), do: kind, else: ""
+
+        Editor.current_buffer()
+        |> Buffer.ts_children(kind, start, stop)
+        |> Enum.map(fn {k, s, e} -> [k, s, e] end)
       end,
       "ts-query" => fn [query] ->
         buf = Editor.current_buffer()

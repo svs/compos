@@ -39,4 +39,21 @@ defmodule Aimax.MinibufferHistoryTest do
     assert [%{label: "delete-other-windows"}, %{label: "transpose-chars"} | _] = mb.candidates
     press(["C-g"])
   end
+
+  # A mode command takes the mode's name verbatim, and a plain sort is
+  # ASCII — so "Dired" sat above every lowercase command at the top of the
+  # list, ahead of anything the reader had actually used.
+  test "commands sort by name, not by case" do
+    names = Aimax.Core.Session.command_names()
+
+    assert names == Enum.sort_by(names, &String.downcase/1)
+    assert "Dired" in names
+
+    # and the prompt shows that order: with no history, the first candidate
+    # is a real "a" command, not the one mode whose name is capitalised
+    press(["M-x"])
+    mb = Editor.render_state().minibuffer
+    refute hd(mb.candidates).label == "Dired"
+    press(["C-g"])
+  end
 end

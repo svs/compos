@@ -219,7 +219,8 @@ defmodule Aimax.Core.Agent.Backend.ACP do
           "cwd" => Map.get(state.config, "cwd", File.cwd!()),
           "mcpServers" =>
             acp_servers(
-              Map.get(state.config, "mcp-servers") || Map.get(state.config, "mcp_servers") || []
+              Map.get(state.config, "mcp-servers") || Map.get(state.config, "mcp_servers") || [],
+              Map.get(state.config, "slug")
             )
         }
 
@@ -440,9 +441,10 @@ defmodule Aimax.Core.Agent.Backend.ACP do
   # mcp_servers config (Scheme plists via mcp-acp-servers) -> ACP session/new
   # shape. Env values starting with "@" are key references resolved here —
   # the same convention as MCP client specs, so config files carry no secrets.
-  defp acp_servers(servers) when is_list(servers), do: Enum.map(servers, &acp_server/1)
+  defp acp_servers(servers, slug) when is_list(servers),
+    do: Enum.map(servers, &acp_server(&1, slug))
 
-  defp acp_server(flat) when is_list(flat) do
+  defp acp_server(flat, slug) when is_list(flat) do
     m = flat |> Enum.chunk_every(2) |> Map.new(fn [k, v] -> {to_string(k), v} end)
 
     if m["url"] do
@@ -459,12 +461,22 @@ defmodule Aimax.Core.Agent.Backend.ACP do
         "name" => m["name"],
         "command" => m["command"],
         "args" => m["args"] || [],
-        "env" => acp_pairs(m["env"])
+        # every stdio server learns which thread spawned it — the aimax
+        # proxy sends it back as the edit author (buffer-authors)
+        "env" => acp_pairs(m["env"]) ++ slug_env(m["env"], slug)
       }
     end
   end
 
-  defp acp_server(other), do: other
+  defp acp_server(other, _slug), do: other
+
+  defp slug_env(_pairs, nil), do: []
+
+  defp slug_env(pairs, slug) do
+    if Enum.any?(pairs || [], fn [k, _] -> to_string(k) == "AIMAX_AGENT" end),
+      do: [],
+      else: [%{"name" => "AIMAX_AGENT", "value" => to_string(slug)}]
+  end
 
   defp acp_pairs(pairs) do
     for [k, v] <- pairs || [], do: %{"name" => to_string(k), "value" => resolve_key(v)}

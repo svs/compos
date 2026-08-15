@@ -21,6 +21,80 @@ defmodule Aimax.MarginaliaProjectTest do
   end
 
   describe "marginalia" do
+    test "annotate pairs names with their category's annotator" do
+      {:ok, _} = Session.eval(~s{(marginalia! 'mp-one (lambda (n) (string-append "<" n ">")))})
+
+      assert {:ok, ~s{(("a" "<a>") ("bb" "<bb>"))}} =
+               Session.eval(~s{(annotate 'mp-one (list "a" "bb"))})
+
+      # a category nobody annotates hands its candidates back untouched
+      assert {:ok, ~s{("x" "y")}} = Session.eval(~s{(annotate 'mp-nobody (list "x" "y"))})
+    end
+
+    test "several fields become columns, padded across the whole set" do
+      {:ok, _} = Session.eval(~s{(marginalia! 'mp-cols (lambda (n) (list n "z")))})
+
+      # "a" pads to the width of "bbb", so the second field starts in the
+      # same place on both rows
+      assert {:ok, ~s{(("a" "a    z") ("bbb" "bbb  z"))}} =
+               Session.eval(~s{(annotate 'mp-cols (list "a" "bbb"))})
+    end
+
+    test "a row whose last fields say nothing ends early" do
+      {:ok, _} =
+        Session.eval("""
+        (marginalia! 'mp-trim
+          (lambda (n) (if (equal? n "a") (list "" "") (list "x" "yy"))))
+        """)
+
+      assert {:ok, ~s{(("a" "") ("b" "x  yy"))}} =
+               Session.eval(~s{(annotate 'mp-trim (list "a" "b"))})
+    end
+
+    test "marginalia! registers an annotator and replaces one" do
+      {:ok, _} = Session.eval(~s{(marginalia! 'mp-cat (lambda (n) (string-append "<" n ">")))})
+      assert {:ok, ~s{(("q" "<q>"))}} = Session.eval(~s{(annotate 'mp-cat (list "q"))})
+
+      # one annotator per category: the second registration wins
+      {:ok, _} = Session.eval(~s{(marginalia! 'mp-cat (lambda (n) "second"))})
+      assert {:ok, ~s{(("q" "second"))}} = Session.eval(~s{(annotate 'mp-cat (list "q"))})
+    end
+
+    test "find-file candidates carry mode, size and date" do
+      root = Path.join(System.tmp_dir!(), "mp-marg-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join(root, "sub"))
+      File.write!(Path.join(root, "a.exs"), "12345")
+      File.write!(Path.join(root, "Makefile"), "x")
+      on_exit(fn -> File.rm_rf!(root) end)
+
+      {:ok, _} = Session.eval(~s{(dired-open "#{root}")})
+      press(["C-x", "C-f"])
+
+      hints =
+        Editor.render_state().minibuffer.candidates
+        |> Map.new(&{&1.label, &1.hint})
+
+      # the mode a name would open in, then its size, then its date
+      assert hints["a.exs"] =~ ~r/^elixir-mode +5  [A-Z][a-z]{2} +\d+ \d{2}:\d{2}$/
+      assert hints["sub/"] =~ ~r/^Dired /
+      # nothing in auto-mode-alist claims it, and Fundamental is still a mode
+      assert hints["Makefile"] =~ ~r/^Fundamental /
+
+      # the columns are one width for the whole set, so the date lands at
+      # the same offset on every row however wide the mode and size are
+      offsets =
+        hints
+        |> Map.values()
+        |> Enum.map(fn h ->
+          [{i, _}] = Regex.run(~r/[A-Z][a-z]{2} +\d+ \d{2}:\d{2}$/, h, return: :index)
+          i
+        end)
+        |> Enum.uniq()
+
+      assert length(offsets) == 1
+      press(["C-g"])
+    end
+
     test "define-command stores a docstring, command-doc reads it back" do
       {:ok, _} =
         Session.eval(~s{(define-command "mp-frob" "Frob the marginalia test" (lambda () #t))})
@@ -40,7 +114,8 @@ defmodule Aimax.MarginaliaProjectTest do
       assert cand.hint =~ "C-n"
       press(["C-g"])
 
-      # a doc-only command (no binding) shows just its doc
+      # a doc-only command keeps the binding column, blank — that is what
+      # makes every doc in the list start in the same place
       {:ok, _} =
         Session.eval(~s{(define-command "mp-docful" "Do the docful thing" (lambda () #t))})
 
@@ -48,7 +123,7 @@ defmodule Aimax.MarginaliaProjectTest do
       type("mp-docful")
       mb = Editor.render_state().minibuffer
       cand = Enum.find(mb.candidates, &(&1.label == "mp-docful"))
-      assert cand.hint == "Do the docful thing"
+      assert cand.hint =~ ~r/^ +Do the docful thing$/
       press(["C-g"])
     end
   end

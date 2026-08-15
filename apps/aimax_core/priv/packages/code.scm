@@ -45,12 +45,22 @@
   (buffer-set-local! buf 'code-backend
     (if (and (buffer-local buf 'ts-lang) (ts-node "" 0 0 'at)) "ts" "indent")))
 
+;; Desktop restore re-arms the mode for a buffer that is not on screen,
+;; and the node questions read the CURRENT buffer, so the backend cannot
+;; be chosen then. The first motion is on screen by definition: choose it
+;; there instead of browsing a source file by indentation for the rest of
+;; the session.
+(define (code--backend buf)
+  (or (buffer-local buf 'code-backend)
+      (begin (code--pick-backend! buf)
+             (buffer-local buf 'code-backend))))
+
 ;; ONE node question, answered by the backend the mode picked. KIND names
 ;; which node the caller stands on, because nested nodes can cover the
 ;; same bytes; "" asks for the smallest node at the range.
 ;; OP is 'at, 'parent, 'child, 'next, 'prev or 'top.
 (define (code--ask buf kind s e op)
-  (if (equal? (buffer-local buf 'code-backend) "ts")
+  (if (equal? (code--backend buf) "ts")
       (ts-node kind s e op)
       (code--indent-ask buf s e op)))
 
@@ -107,6 +117,9 @@
                   (let ((nx (code--ask-node buf cur 'next)))
                     (if nx (loop nx (+ steps 1)) first))))))))
 
+(define (code--holds? n pos)
+  (and (<= (code--start n) pos) (>= (code--end n) pos)))
+
 ;; The node the reader stands on. Point at the node start means the stored
 ;; node still holds; any other point means the reader moved another way,
 ;; so the node comes from point again.
@@ -155,44 +168,73 @@
   (let ((nl (string-index (code--text buf n) "\n")))
     (and nl (list (+ (code--start n) nl) (code--end n)))))
 
+;; The first node at or above N that HAS a body. A reader on a one-line
+;; form means "fold what holds this", the way hs-toggle-hiding does; the
+;; answer "nothing to fold here" is true of the node and useless to the
+;; reader.
+(define (code--foldable buf n)
+  (let loop ((cur n) (depth 0))
+    (cond ((not cur) #f)
+          ((> depth 20) #f)
+          ((code--body buf cur) cur)
+          (else (loop (code--ask-node buf cur 'parent) (+ depth 1))))))
+
 (define (code--toggle-fold!)
   (let* ((buf (current-buffer))
-         (n (code--node buf))
+         (n (and (code--node buf) (code--foldable buf (code--node buf))))
          (r (and n (code--body buf n))))
     (if (not r)
         (message "code-browse: nothing to fold here")
         (begin
+          ;; stand on what folded: point inside a hidden range is a point
+          ;; the reader cannot see
+          (code--goto! buf n)
           (fold-toggle! buf 'code r)
           (buffer-set-local! buf 'code-folds (fold-get buf 'code))))))
 
-;; Every node under the root, in buffer order.
+;; One level in ONE call. The fold pass reads whole levels, and a file
+;; with 300 top-level forms costs 300 round trips the other way.
 (define (code--children buf n)
-  (let loop ((c (code--ask-node buf n 'child)) (acc '()))
-    (if (not c)
-        (reverse acc)
-        (loop (code--ask-node buf c 'next) (cons c acc)))))
+  (if (equal? (buffer-local buf 'code-backend) "ts")
+      (ts-children (code--kind n) (code--start n) (code--end n))
+      (code--indent-children buf n)))
 
+;; the children of the root: the range that covers the file names it
 (define (code--top-nodes buf)
-  (let ((first (code--ask buf "" 0 0 'top)))
-    (if (not first)
-        '()
-        (let loop ((n first) (acc (list first)))
-          (let ((nx (code--ask-node buf n 'next)))
-            (if nx (loop nx (cons nx acc)) (reverse acc)))))))
+  (if (equal? (buffer-local buf 'code-backend) "ts")
+      (ts-children "" 0 (string-byte-length (buffer-text buf)))
+      (code--indent-children buf (list "block" 0 (string-byte-length (buffer-text buf))))))
+
+;; a node that covers most of the file is the file, not a part of it
+(define (code--wraps-file? buf n)
+  (> (- (code--end n) (code--start n))
+     (quotient (* (string-byte-length (buffer-text buf)) 4) 5)))
 
 ;; What to fold: the top-level nodes, unless one node wraps the whole file
 ;; — an Elixir defmodule does — and then the nodes inside it. The rule
 ;; needs no language table: it asks how much of the file a node covers.
+;; This is also the level a reader lands on, so the two agree by
+;; construction: what folds is what j and k walk.
 (define (code--fold-nodes buf)
-  (let ((size (string-byte-length (buffer-text buf))))
-    (let loop ((nodes (code--top-nodes buf)) (depth 0))
-      (if (and (= (length nodes) 1)
-               (< depth 3)
-               (> (- (code--end (car nodes)) (code--start (car nodes)))
-                  (quotient (* size 4) 5)))
-          (let ((inner (code--descend buf (car nodes))))
-            (if inner (loop (code--children buf inner) (+ depth 1)) nodes))
-          nodes))))
+  (let loop ((nodes (code--top-nodes buf)) (depth 0))
+    (if (and (= (length nodes) 1)
+             (< depth 3)
+             (code--wraps-file? buf (car nodes)))
+        (let ((inner (code--descend buf (car nodes))))
+          (if inner (loop (code--children buf inner) (+ depth 1)) nodes))
+        nodes)))
+
+;; the node of that level POINT sits in, or the first one
+(define (code--level-node buf pos)
+  (let ((nodes (code--fold-nodes buf)))
+    (cond ((null? nodes) #f)
+          (else
+            (let loop ((ns nodes))
+              (cond ((null? ns) (car nodes))
+                    ((and (<= (code--start (car ns)) pos)
+                          (>= (code--end (car ns)) pos))
+                     (car ns))
+                    (else (loop (cdr ns)))))))))
 
 (define (code--buffer-lines buf)
   (length (string-split (buffer-text buf) "\n")))
@@ -235,96 +277,107 @@
 (define (code--line-end l) (cadr l))
 (define (code--line-indent l) (caddr l))
 
-;; the index of the line that holds POS
-(define (code--line-at lines pos)
-  (let loop ((i 0) (hit 0))
-    (if (>= i (length lines))
-        hit
-        (loop (+ i 1) (if (<= (code--line-start (nth i lines)) pos) i hit)))))
+;; The line that holds POS, the lines BEFORE it nearest-first, and the
+;; lines after it — in one pass. A list indexed by number costs a walk per
+;; index, and a 3600-line file then costs a walk per line.
+(define (code--split-at lines pos)
+  (let loop ((ls lines) (before '()) (cur #f))
+    (cond ((null? ls) (list cur before '()))
+          ((<= (code--line-start (car ls)) pos)
+           (loop (cdr ls) (if cur (cons cur before) before) (car ls)))
+          (else (list cur before ls)))))
 
-;; the first line at or before I that is not blank
-(define (code--solid-line lines i)
-  (let loop ((j i))
-    (cond ((< j 0) #f)
-          ((code--line-indent (nth j lines)) j)
-          (else (loop (- j 1))))))
+(define (code--first-solid ls)
+  (cond ((null? ls) #f)
+        ((code--line-indent (car ls)) (car ls))
+        (else (code--first-solid (cdr ls)))))
 
-;; a block: the line I, plus every line below it that is blank or deeper
-(define (code--block lines i)
-  (let ((base (code--line-indent (nth i lines))))
-    (let loop ((j (+ i 1)) (last i))
-      (if (>= j (length lines))
-          (list "block" (code--line-start (nth i lines)) (code--line-end (nth last lines)))
-          (let ((ind (code--line-indent (nth j lines))))
-            (cond ((not ind) (loop (+ j 1) last))          ; blank: keep looking
-                  ((> ind base) (loop (+ j 1) j))
-                  (else (list "block"
-                              (code--line-start (nth i lines))
-                              (code--line-end (nth last lines))))))))))
+;; the lines after L
+(define (code--after lines l)
+  (cond ((null? lines) '())
+        ((= (code--line-start (car lines)) (code--line-start l)) (cdr lines))
+        (else (code--after (cdr lines) l))))
 
-;; the next line index that satisfies OK?, walking STEP, stopping when
-;; STOP? says the block ended
-(define (code--scan lines i step ok? stop?)
-  (let loop ((j (+ i step)))
-    (cond ((or (< j 0) (>= j (length lines))) #f)
-          ((not (code--line-indent (nth j lines))) (loop (+ j step)))
-          ((ok? (code--line-indent (nth j lines))) j)
-          ((stop? (code--line-indent (nth j lines))) #f)
-          (else (loop (+ j step))))))
+;; a block: the line L, plus every line below it that is blank or deeper
+(define (code--block-of l after)
+  (let ((base (code--line-indent l)))
+    (let loop ((ls after) (end (code--line-end l)))
+      (cond ((null? ls) (list "block" (code--line-start l) end))
+            ((not (code--line-indent (car ls))) (loop (cdr ls) end))
+            ((> (code--line-indent (car ls)) base)
+             (loop (cdr ls) (code--line-end (car ls))))
+            (else (list "block" (code--line-start l) end))))))
+
+;; the first line of LS (ordered by distance from the reader) that OK?
+;; accepts, giving up when STOP? says the block ended
+(define (code--scan ls ok? stop?)
+  (cond ((null? ls) #f)
+        ((not (code--line-indent (car ls))) (code--scan (cdr ls) ok? stop?))
+        ((ok? (code--line-indent (car ls))) (car ls))
+        ((stop? (code--line-indent (car ls))) #f)
+        (else (code--scan (cdr ls) ok? stop?))))
+
+(define (code--never ind) #f)
 
 (define (code--indent-ask buf s e op)
   (let* ((lines (code--lines buf))
-         (i0 (code--line-at lines s))
-         (i (code--solid-line lines i0)))
-    (if (not i)
+         (split (code--split-at lines s))
+         (here (car split))
+         (before (cadr split))
+         (after (caddr split))
+         ;; point sits on a blank line often — between two definitions —
+         ;; and that is not a reason to answer nothing
+         (cur (if (and here (code--line-indent here))
+                  here
+                  (or (code--first-solid before) (code--first-solid after)))))
+    (if (not cur)
         #f
-        (let ((base (code--line-indent (nth i lines))))
-          (let ((j (cond ((equal? op 'at) i)
-                         ((equal? op 'top)
-                          (code--scan lines (+ i 1) -1
-                                      (lambda (ind) (= ind 0))
-                                      (lambda (ind) #f)))
-                         ((equal? op 'parent)
-                          (code--scan lines i -1
-                                      (lambda (ind) (< ind base))
-                                      (lambda (ind) #f)))
-                         ((equal? op 'child)
-                          (code--scan lines i 1
-                                      (lambda (ind) (> ind base))
-                                      (lambda (ind) (<= ind base))))
-                         ((equal? op 'next)
-                          (code--scan lines i 1
-                                      (lambda (ind) (= ind base))
-                                      (lambda (ind) (< ind base))))
-                         ((equal? op 'prev)
-                          (code--scan lines i -1
-                                      (lambda (ind) (= ind base))
-                                      (lambda (ind) (< ind base))))
-                         (else #f))))
-            (and j (code--block lines j)))))))
+        (let* ((base (code--line-indent cur))
+               (target
+                 (cond ((equal? op 'at) cur)
+                       ((equal? op 'top)
+                        (if (= base 0)
+                            cur
+                            (code--scan before (lambda (i) (= i 0)) code--never)))
+                       ((equal? op 'parent)
+                        (code--scan before (lambda (i) (< i base)) code--never))
+                       ((equal? op 'child)
+                        (code--scan after (lambda (i) (> i base))
+                                    (lambda (i) (<= i base))))
+                       ((equal? op 'next)
+                        (code--scan after (lambda (i) (= i base))
+                                    (lambda (i) (< i base))))
+                       ((equal? op 'prev)
+                        (code--scan before (lambda (i) (= i base))
+                                    (lambda (i) (< i base))))
+                       (else #f))))
+          (and target (code--block-of target (code--after lines target)))))))
+
+;; One level of an indented block: the lines inside N at the shallowest
+;; indent it holds. The fold pass asks for a whole level at once.
+(define (code--indent-children buf n)
+  (let* ((lines (code--lines buf))
+         (inside (filter (lambda (l)
+                           (and (code--line-indent l)
+                                (> (code--line-start l) (code--start n))
+                                (<= (code--line-end l) (code--end n))))
+                         lines)))
+    (if (null? inside)
+        '()
+        (let ((base (fold (lambda (acc l)
+                            (let ((i (code--line-indent l)))
+                              (if (or (not acc) (< i acc)) i acc)))
+                          #f inside)))
+          (map (lambda (l) (code--block-of l (code--after lines l)))
+               (filter (lambda (l) (= (code--line-indent l) base)) inside))))))
 
 ;;; --- go to definition ----------------------------------------------------------
 ;;; The seam for LSP. With a language server attached, lsp-definition
 ;;; answers. Without one, the same file answers: the first line that
 ;;; defines the symbol under point.
 
-(define (code--symbol-at)
-  (let* ((text (buffer-text (current-buffer)))
-         (p (point))
-         (word? (lambda (c)
-                  (or (string-index "abcdefghijklmnopqrstuvwxyz" c)
-                      (string-index "ABCDEFGHIJKLMNOPQRSTUVWXYZ" c)
-                      (string-index "0123456789_?!-" c))))
-         (size (string-byte-length text)))
-    (let ((s (let loop ((i p))
-               (if (and (> i 0) (word? (substring-bytes text (- i 1) i)))
-                   (loop (- i 1))
-                   i)))
-          (e (let loop ((i p))
-               (if (and (< i size) (word? (substring-bytes text i (+ i 1))))
-                   (loop (+ i 1))
-                   i))))
-      (and (> e s) (substring-bytes text s e)))))
+;; the code alphabet: no `*` or `/`, so `M-.` reads `foo` out of `foo/2`
+(define (code--symbol-at) (symbol-at-point))
 
 ;; A definition line names the symbol after a defining word. The list is
 ;; short on purpose: it covers the languages the editor parses today.
@@ -418,9 +471,15 @@
     (when here (code--pick-backend! buf))
     (cond (folds (fold-set! buf 'code folds))
           (here (code--fold-defaults! buf)))
-    (cond (stored (code--show! buf stored))
+    (cond ((and stored (code--holds? stored (point))) (code--show! buf stored))
           (here
-            (let ((n (code--enclosing buf (point))))
+            ;; land on the level that folds, not on the module that holds
+            ;; it: a reader who must press l twice to reach a definition
+            ;; reads two keys before reading any code
+            (let* ((n (code--enclosing buf (point)))
+                   (n (if (and n (code--wraps-file? buf n))
+                          (or (code--level-node buf (point)) n)
+                          n)))
               (if n
                   (code--goto! buf n)
                   (buffer-set-local! buf 'modeline-info "browse"))))
@@ -448,11 +507,34 @@
 
 (register-minor-mode! "code-browse-mode" code--setup! code--teardown!)
 
+;; A surface that already answers single keys must keep them. The diff
+;; buffer reads n and TAB, dired reads d and m, the chat reads RET — and
+;; this mode would take h j k l TAB RET q from all of them, in a buffer
+;; that survives a restart. code-browse reads FILES; the rest already
+;; have a reader. The shape follows evil--eligible? (evil.scm).
+(define code--special-modes
+  '("chat-mode" "dired-mode" "notmuch-mode" "diff-mode" "ibuffer-mode"
+    "mcp-hub-mode" "agent-mode" "tabulated-list-mode"))
+
+(define (code--eligible? buf)
+  (and (not (string-prefix? " " buf))
+       (not (process-running? buf))
+       (or (buffer-path buf) (equal? buf "*scratch*"))
+       (not (member (or (buffer-local buf 'mode-name) "") code--special-modes))))
+
 (define-command "code-browse" "Toggle structural browsing in this buffer"
   (lambda ()
-    (if (toggle-minor-mode! "code-browse-mode")
-        (message "code-browse: h parent · l child · j/k siblings · TAB fold · RET exit")
-        (message "code-browse off"))))
+    (let ((buf (current-buffer)))
+      (cond
+        ((minor-mode-on? buf "code-browse-mode")
+         (disable-minor-mode! buf "code-browse-mode")
+         (message "code-browse off"))
+        ((not (code--eligible? buf))
+         (message "code-browse: this buffer has its own keys"))
+        (else
+          (enable-minor-mode! buf "code-browse-mode")
+          (message
+            "code-browse: h parent · l child · j/k siblings · TAB fold · RET exit"))))))
 
 (define-command "code-browse-exit" "Leave code-browse in this buffer"
   (lambda ()

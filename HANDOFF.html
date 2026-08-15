@@ -147,9 +147,13 @@ failed prompts idle the thread instead of wedging :running · agent-rename
 full-window (no popup) · restored buffers rebuild modeline/keys from locals ·
 <strong>*chats* fleet buffer</strong> (<kbd>C-c a l</kbd>, <code>chat-list</code>, popup):
 dired-style list of <em>every</em> chat — agent threads with live status,
-needs-attention first, API companions as plain rows — RET visit / s steer (revives
-dead threads) / y·n answer permission inline / k kill / x archive (works on any
-chat) / + new / g refresh, live-refreshed from the agent event handler · modeline-extra segment (new <code>set-modeline-extra!</code>
+needs-attention first, API companions as plain rows — RET visit / m mark / s steer
+(attaches a runtime first, so a restored chat steers) / y·n answer permission inline
+/ k flag the runtime / d flag the chat / x run the flags / u·U unmark / + new /
+g refresh, live-refreshed from the agent event handler. Marks, flags and execute
+are <code>define-list-mode!</code>'s (<code>'flags</code>, <code>'noun</code>,
+<code>'markable?</code>); dired, ibuffer and chats all declare them and keep no
+marking code of their own. A verb with no mark acts on the line at point · modeline-extra segment (new <code>set-modeline-extra!</code>
 primitive) shows "! a2 a5" for threads needing attention, <kbd>C-c a a</kbd> jumps
 to the first · Session wraps Scheme eval in <code>catch :exit</code> so a primitive
 hitting a dead GenServer fails the eval instead of crash-looping the editor.</p>

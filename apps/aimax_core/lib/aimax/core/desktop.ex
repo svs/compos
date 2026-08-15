@@ -109,7 +109,8 @@ defmodule Aimax.Core.Desktop do
       buffers: buffers,
       scratch: scratch,
       frames: frames,
-      faces: views |> List.first({nil, %{faces: %{}}}) |> elem(1) |> Map.get(:faces)
+      faces: views |> List.first({nil, %{faces: %{}}}) |> elem(1) |> Map.get(:faces),
+      globals: scheme_globals()
     }
 
     file = path()
@@ -149,6 +150,18 @@ defmodule Aimax.Core.Desktop do
 
   defp serializable?(_), do: true
 
+  # Scheme state that must outlive a restart. The desktop carries the
+  # values and reads none of them: priv/editor.scm says which globals ride
+  # along (persist-global!) and hands them over as one list. Filtered the
+  # same way locals are — a global holding a pid or a fun is dropped, not
+  # written.
+  defp scheme_globals do
+    case Session.call_named("desktop-globals", []) do
+      {:ok, globals} when is_list(globals) -> Enum.filter(globals, &serializable?/1)
+      _ -> []
+    end
+  end
+
   # --- restore ---------------------------------------------------------------
 
   defp do_restore do
@@ -179,6 +192,14 @@ defmodule Aimax.Core.Desktop do
 
       for {face, attrs} <- desktop[:faces] || %{} do
         Editor.set_face(face, attrs)
+      end
+
+      # Scheme globals last: nothing else in the restore reads them, and
+      # they must land on top of whatever the stdlib set at load time
+      case desktop[:globals] do
+        nil -> :ok
+        [] -> :ok
+        globals -> Session.call_named("desktop-globals!", [globals])
       end
 
       Session.message("Desktop restored")
@@ -221,8 +242,9 @@ defmodule Aimax.Core.Desktop do
     unless Buffer.exists?(name), do: Aimax.Core.create_buffer(name)
 
     size = Buffer.byte_size(name)
-    if size > 0, do: Buffer.delete_range(name, 0, size, source: :editor)
-    if text != "", do: Buffer.append(name, text, source: :editor)
+    # :none — a restore is not an edit; the content stays unattributed
+    if size > 0, do: Buffer.delete_range(name, 0, size, source: :editor, author: :none)
+    if text != "", do: Buffer.append(name, text, source: :editor, author: :none)
 
     apply_saved_state(name, point, locals)
   end

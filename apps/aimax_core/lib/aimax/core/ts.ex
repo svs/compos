@@ -43,4 +43,12 @@ defmodule Aimax.Core.TS do
 
   @doc "Parse (incrementally if possible) and return highlight spans."
   def ts_state_highlight(_res, _text), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc "ts_node against the held tree — a walk, not a parse."
+  def ts_state_node(_res, _text, _kind, _start, _stop, _op),
+    do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc "Every named child of one node: [{kind, start, stop}]."
+  def ts_state_children(_res, _text, _kind, _start, _stop),
+    do: :erlang.nif_error(:nif_not_loaded)
 end

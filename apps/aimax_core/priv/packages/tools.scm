@@ -400,7 +400,9 @@
 ;; from an agent we are not rendering, with no chat to raise it in. So
 ;; `ask` is a refusal here, with a sentence saying how to get it done.
 ;; That is the fail-closed rule, applied where it bites.
-(define (mcp-proxy-call name args-b64)
+;; author: the proxy sends its thread's slug (AIMAX_AGENT), so edits an
+;; external agent makes through this bridge land in buffer-authors
+(define (mcp-proxy-call name args-b64 &optional author)
   (base64-encode
     (let* ((args-json (base64-decode args-b64))
            (raw (string-append name " " args-json))
@@ -409,7 +411,10 @@
                         'allow)))
       (cond
         ((member verdict '(allow allow-always))
-         (mcp-proxy-dispatch name args-json))
+         (if author
+             (with-edit-author author
+               (lambda () (mcp-proxy-dispatch name args-json)))
+             (mcp-proxy-dispatch name args-json)))
         (else
           (string-append
             "refused: aimax's permission policy did not allow this ("

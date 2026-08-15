@@ -589,38 +589,85 @@ defmodule Aimax.AgentTest do
     _ = agent1
   end
 
-  test "k in *agents* notes the stop in the transcript; x releases windows before killing" do
+  test "k flags and x kills the runtime; d flags and x releases windows before archiving" do
     {slug, buf, _agent} = boot("")
 
     # show the thread in the main window, then open the fleet popup
     focus(buf)
     {:ok, _} = Session.eval(~s[(run-command "chat-list")])
     focus("*chats*")
+    goto_chat_row(buf)
 
-    # the list holds every chat — put point on THIS thread's row
-    rows = Buffer.get_local("*chats*", "list-entries")
-    row = Enum.find_index(rows, &(&1 == buf))
-    assert row, "thread #{buf} not listed in #{inspect(rows)}"
-    {:ok, _} = Session.eval("(beginning-of-buffer!)")
-    for _ <- 0..row, do: {:ok, _} = Session.eval("(next-line!)")
-
+    # k only flags — the runtime stays up until x runs the flags
     press(["k"])
+    assert Buffer.text("*chats*") =~ "K"
+    assert Agent.list() != []
+
+    press(["x"])
     assert eventually(fn -> Buffer.text(buf) =~ "[agent stopped]" end)
     assert eventually(fn -> Agent.list() == [] end)
     assert Buffer.text("*chats*") =~ "x #{slug}"
+    # the flag is gone with the runtime it killed
+    refute Buffer.get_local("*chats*", "list-marks") |> Enum.any?()
 
     # the refresh re-sorted (dead ranks last) — find the row again
-    rows = Buffer.get_local("*chats*", "list-entries")
-    row = Enum.find_index(rows, &(&1 == buf))
-    assert row, "thread #{buf} not listed in #{inspect(rows)}"
-    {:ok, _} = Session.eval("(beginning-of-buffer!)")
-    for _ <- 0..row, do: {:ok, _} = Session.eval("(next-line!)")
+    goto_chat_row(buf)
 
+    press(["d"])
     press(["x"])
     assert eventually(fn -> not Buffer.exists?(buf) end)
     # no window points at the killed buffer (no empty-ghost resurrection)
     windows = Editor.list_windows()
     refute Enum.any?(windows, fn {_id, b} -> b == buf end)
+  end
+
+  test "m marks; a verb acts on every marked chat, not the line at point" do
+    {_slug1, buf1, _a1} = boot("")
+
+    # a second thread, the way every two-agent test here boots one
+    {:ok, _} = Session.eval(~s{(execute* "" '(permission-mode ask))})
+    assert_receive {:transport_open, agent2}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(agent2, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{}})
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+    inject(agent2, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "sess-2"}})
+    buf2 = "*chat:a2*"
+    assert eventually(fn -> Buffer.exists?(buf2) end)
+
+    {:ok, _} = Session.eval(~s[(run-command "chat-list")])
+    focus("*chats*")
+
+    # mark both, then stand on neither: the flags still find them
+    goto_chat_row(buf1)
+    press(["m"])
+    goto_chat_row(buf2)
+    press(["m"])
+    assert length(Buffer.get_local("*chats*", "list-marks")) == 2
+
+    # U drops every mark
+    press(["U"])
+    assert Buffer.get_local("*chats*", "list-marks") == []
+
+    # flag both for the kill, then run the flags in one go
+    goto_chat_row(buf1)
+    press(["k"])
+    goto_chat_row(buf2)
+    press(["k"])
+    press(["x"])
+
+    assert eventually(fn -> Agent.list() == [] end)
+    assert Buffer.text(buf1) =~ "[agent stopped]"
+    assert Buffer.text(buf2) =~ "[agent stopped]"
+  end
+
+  # put point on BUF's row in the *chats* list
+  defp goto_chat_row(buf) do
+    rows = Buffer.get_local("*chats*", "list-entries")
+    row = Enum.find_index(rows, &(&1 == buf))
+    assert row, "chat #{buf} not listed in #{inspect(rows)}"
+    {:ok, _} = Session.eval("(beginning-of-buffer!)")
+    for _ <- 0..row, do: {:ok, _} = Session.eval("(next-line!)")
+    :ok
   end
 
   # The renderer slices the input region from 'agent-saved-mark. An append

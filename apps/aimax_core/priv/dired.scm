@@ -9,7 +9,7 @@
 ;;;
 ;;; Keys (buffer-local):
 ;;;   n/p move · RET visit · ^ up · g revert
-;;;   m mark · u unmark · d flag for deletion · x execute flags
+;;;   m mark · u unmark · U unmark all · d flag for deletion · x execute
 ;;;   + mkdir
 ;;;   / n name-regex · / e extension · / t type (dir/file/link/exec)
 ;;;   / . hide dotfiles · / p pop filter · / / clear filters
@@ -23,8 +23,7 @@
 (define (dired-line buf dir e)
   (let ((st (file-stat (string-append dir "/" e))))
     (string-append
-      (list-mark-of buf e) " "
-      (car st) "  "
+      " " (car st) "  "
       (string-pad-left (cadr st) 8) "  "
       (caddr st) " "
       e)))
@@ -141,15 +140,21 @@
               (if dir (cons ".." (dired-visible buf dir)) '())))
     'render (lambda (buf e)
               (if (equal? e "..")
-                  "  .."
+                  " .."
                   (dired-line buf (dired-dir buf) e)))
+    ;; delete asks first — the one flag in the editor that cannot be undone
+    'flags (list (list "d" "D" "delete"
+                       (lambda (buf e)
+                         (delete-file! (string-append (dired-dir buf) "/" e))
+                         #t)
+                       #t))
+    'noun "file"
+    'markable? (lambda (buf e) (not (equal? e "..")))
     'header (lambda (buf)
               (string-append (or (dired-dir buf) "") ":"
                              (list-filters-label buf)))
     'keys '(("RET" "dired-visit") ("g" "dired-revert") ("^" "dired-up")
             ("n" "dired-next") ("p" "dired-prev")
-            ("m" "dired-mark") ("u" "dired-unmark")
-            ("d" "dired-flag-delete") ("x" "dired-do-flagged-delete")
             ("+" "dired-mkdir") ("q" "quit-window")
             ("/ n" "dired-filter-name") ("/ m" "dired-filter-mode")
             ("/ e" "dired-filter-ext") ("/ t" "dired-filter-type")
@@ -227,46 +232,8 @@
     (list-refresh! (current-buffer))
     (message "Reverted")))
 
-(define (dired-mark-and-advance ch)
-  (let ((buf (current-buffer))
-        (e (dired-entry)))
-    (if (and e (not (equal? e "..")))
-        (begin
-          (list-mark! buf e ch)
-          (list-refresh! buf)
-          (next-line!)
-          (beginning-of-line!))
-        (message "No file on this line"))))
-
-(define-command "dired-mark" "Mark the file at point and move to the next line"
-  (lambda () (dired-mark-and-advance "*")))
-(define-command "dired-unmark" "Unmark the file at point and move to the next line"
-  (lambda () (dired-mark-and-advance #f)))
-(define-command "dired-flag-delete" "Flag the file at point for deletion"
-  (lambda () (dired-mark-and-advance "D")))
-
-(define-command "dired-do-flagged-delete" "Delete the files flagged for deletion"
-  (lambda ()
-    (let ((buf (current-buffer)))
-      (let ((flagged (list-marked buf "D")))
-        (if (null? flagged)
-            (message "No files flagged for deletion")
-            (minibuffer-read
-              (string-append "Delete " (number->string (length flagged))
-                             " file(s) [" (string-join flagged " ") "]? ")
-              (list "yes" "no")
-              (lambda (ans)
-                (if (equal? ans "yes")
-                    (begin
-                      (for-each
-                        (lambda (name)
-                          (delete-file! (string-append (dired-dir buf) "/" name))
-                          (list-mark! buf name #f))
-                        flagged)
-                      (list-refresh! buf)
-                      (message (string-append "Deleted "
-                                              (number->string (length flagged)) " file(s)")))
-                    (message "Cancelled")))))))))
+;; m, u, U, d and x are list-mode's: dired declares the delete flag in its
+;; mode above and keeps no marking code of its own
 
 (define-command "dired-mkdir" "Prompt for a name and create a directory here"
   (lambda ()

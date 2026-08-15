@@ -47,5 +47,8 @@
 ;; but the NIF just returns no spans
 (define-mode "scheme-mode" (ts-mode "scheme"))
 
+(mode-doc! "scheme-mode"
+  "Scheme: the language the editor is written in. `C-M-f` and `C-M-b` step over forms, and `M-g i` lists the definitions. Run `M-x ts-install-grammar scheme` to get the colours.")
+
 (category! 'syntax)
 (public! 'ts-install-grammar! "(ts-install-grammar! NAME URL) — async grammar install")

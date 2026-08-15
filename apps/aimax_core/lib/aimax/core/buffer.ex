@@ -13,6 +13,17 @@ defmodule Aimax.Core.Buffer do
   Point is a byte offset; motion ops are grapheme-aware. TODO: goal column
   for line motion, marks, text properties.
 
+  Authorship: every mutation carries an author — an explicit `author:` opt,
+  the caller-process `:aimax_edit_author` value, or a name derived from the
+  source (`"user"`, `"editor"`, `"process"`, `"agent:SLUG"`). `authors` holds
+  the live attribution spans `{start, end, author}` for the current text;
+  spans split, shift, and merge through edits, and undo restores them with
+  the rope. `edit_log` is a capped, newest-first journal of the mutations
+  (`{version, author, pos, inserted, deleted}`) — it also records what
+  deletions removed, which the spans cannot. `author: :none` adjusts the
+  spans but stamps nothing (desktop restore is not an edit). Both live in
+  memory only: a daemon restart clears attribution.
+
   Per-window points (Emacs window-point): `win_points` holds a point/mark/goal
   per window id for every window displaying this buffer EXCEPT the one
   swapped in (the selected window of the last-active frame — the Editor
@@ -30,6 +41,7 @@ defmodule Aimax.Core.Buffer do
 
   @registry Aimax.Core.BufferRegistry
   @undo_limit 500
+  @edit_log_limit 500
 
   defstruct name: nil,
             rope: nil,
@@ -51,7 +63,10 @@ defmodule Aimax.Core.Buffer do
             overlay_gen: 0,
             hidden: %{},
             ts: nil,
-            win_points: %{}
+            win_points: %{},
+            authors: [],
+            edit_log: [],
+            edit_log_len: 0
 
   # --- client ----------------------------------------------------------------
 
@@ -117,9 +132,11 @@ defmodule Aimax.Core.Buffer do
     do: GenServer.call(via(name), {:search, q, from, dir})
 
   @doc "Insert at point, advancing point."
-  def insert(name, text, opts \\ []), do: GenServer.call(via(name), {:insert, text, source(opts)})
+  def insert(name, text, opts \\ []),
+    do: GenServer.call(via(name), {:insert, text, source(opts), author(opts)})
 
-  def append(name, text, opts \\ []), do: GenServer.call(via(name), {:append, text, source(opts)})
+  def append(name, text, opts \\ []),
+    do: GenServer.call(via(name), {:append, text, source(opts), author(opts)})
 
   # `:locals` writes buffer-locals in the SAME message as the insert. A
   # local that names a byte position (the agent's saved mark) must move
@@ -129,18 +146,25 @@ defmodule Aimax.Core.Buffer do
     do:
       GenServer.call(
         via(name),
-        {:insert_at, pos, text, source(opts), Keyword.get(opts, :locals, %{})}
+        {:insert_at, pos, text, source(opts), author(opts), Keyword.get(opts, :locals, %{})}
       )
 
   def delete_range(name, pos, len, opts \\ []),
-    do: GenServer.call(via(name), {:delete_range, pos, len, source(opts)})
+    do: GenServer.call(via(name), {:delete_range, pos, len, source(opts), author(opts)})
 
   @doc "Delete n chars forward from point (negative = backward). Returns deleted text."
   def delete_char(name, n \\ 1, opts \\ []),
-    do: GenServer.call(via(name), {:delete_char, n, source(opts)})
+    do: GenServer.call(via(name), {:delete_char, n, source(opts), author(opts)})
 
   @doc "Delete point..end-of-line (or the newline if at eol). Returns killed text."
-  def kill_line(name, opts \\ []), do: GenServer.call(via(name), {:kill_line, source(opts)})
+  def kill_line(name, opts \\ []),
+    do: GenServer.call(via(name), {:kill_line, source(opts), author(opts)})
+
+  @doc "Attribution spans for the current text: [{start, end, author}], sorted."
+  def authors(name), do: GenServer.call(via(name), :authors)
+
+  @doc "The mutation journal, newest first: [{version, author, pos, ins, del}]."
+  def edit_log(name), do: GenServer.call(via(name), :edit_log)
 
   @doc "1-based logical line -> {start_byte, line_text sans newline}, clamped."
   def line_at(name, line), do: GenServer.call(via(name), {:line_at, line})
@@ -185,6 +209,18 @@ defmodule Aimax.Core.Buffer do
   def ts_highlight(name), do: GenServer.call(via(name), :ts_highlight, 30_000)
 
   @doc """
+  A node and its neighbours, from the same incremental tree the highlighter
+  uses. nil when the buffer has no ts-lang. Structural motion asks this
+  once per keypress, so it must never reparse from scratch.
+  """
+  def ts_node(name, kind, start, stop, op),
+    do: GenServer.call(via(name), {:ts_node, kind, start, stop, op}, 30_000)
+
+  @doc "Every named child of one node, from the same tree ([] without ts-lang)."
+  def ts_children(name, kind, start, stop),
+    do: GenServer.call(via(name), {:ts_children, kind, start, stop}, 30_000)
+
+  @doc """
   Break the undo chain (Emacs: any command other than undo does this).
   After a break, undo reverses the previous undos — that IS redo.
   """
@@ -198,6 +234,11 @@ defmodule Aimax.Core.Buffer do
   def mark_saved(name), do: GenServer.call(via(name), :mark_saved)
 
   defp source(opts), do: Keyword.get(opts, :source, :user)
+
+  # read in the CALLER's process: `with-edit-author` scopes the Session's
+  # dictionary value, and every mutation the evaluated code makes picks it
+  # up here without threading an argument through the whole call chain
+  defp author(opts), do: Keyword.get(opts, :author, Process.get(:aimax_edit_author))
 
   # --- server ----------------------------------------------------------------
 
@@ -307,12 +348,12 @@ defmodule Aimax.Core.Buffer do
   # read-only blocks :user mutations only — programmatic sources (:editor,
   # :process, agents) are the inhibit-read-only path (dired regenerates its
   # own read-only buffer this way)
-  def handle_call({:insert, _, :user}, _f, %{read_only: true} = s), do: ro(s)
-  def handle_call({:append, _, :user}, _f, %{read_only: true} = s), do: ro(s)
-  def handle_call({:insert_at, _, _, :user, _locals}, _f, %{read_only: true} = s), do: ro(s)
-  def handle_call({:delete_range, _, _, :user}, _f, %{read_only: true} = s), do: ro(s)
-  def handle_call({:delete_char, _, :user}, _f, %{read_only: true} = s), do: ro(s)
-  def handle_call({:kill_line, :user}, _f, %{read_only: true} = s), do: ro(s)
+  def handle_call({:insert, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
+  def handle_call({:append, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
+  def handle_call({:insert_at, _, _, :user, _, _locals}, _f, %{read_only: true} = s), do: ro(s)
+  def handle_call({:delete_range, _, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
+  def handle_call({:delete_char, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
+  def handle_call({:kill_line, :user, _}, _f, %{read_only: true} = s), do: ro(s)
 
   def handle_call({:line_at, line}, _from, state) do
     rope = state.rope
@@ -361,27 +402,27 @@ defmodule Aimax.Core.Buffer do
     {:reply, result, state}
   end
 
-  def handle_call({:insert, text, src}, _from, state) do
+  def handle_call({:insert, text, src, author}, _from, state) do
     # do_insert's point adjustment already advances point past the insertion
-    {:reply, :ok, do_insert(state, state.point, text, src)}
+    {:reply, :ok, do_insert(state, state.point, text, src, author)}
   end
 
-  def handle_call({:append, text, src}, _from, state) do
-    {:reply, :ok, do_insert(state, Rope.byte_size(state.rope), text, src)}
+  def handle_call({:append, text, src, author}, _from, state) do
+    {:reply, :ok, do_insert(state, Rope.byte_size(state.rope), text, src, author)}
   end
 
-  def handle_call({:insert_at, pos, text, src, locals}, _from, state) do
+  def handle_call({:insert_at, pos, text, src, author, locals}, _from, state) do
     # locals first: do_insert broadcasts, and the frame it paints must
     # already see them
     state = %{state | locals: Map.merge(state.locals, locals)}
-    {:reply, :ok, do_insert(state, pos, text, src)}
+    {:reply, :ok, do_insert(state, pos, text, src, author)}
   end
 
-  def handle_call({:delete_range, pos, len, src}, _from, state) do
-    {:reply, :ok, do_delete(state, pos, len, src)}
+  def handle_call({:delete_range, pos, len, src, author}, _from, state) do
+    {:reply, :ok, do_delete(state, pos, len, src, author)}
   end
 
-  def handle_call({:delete_char, n, src}, _from, state) do
+  def handle_call({:delete_char, n, src, author}, _from, state) do
     {text, state} = fetch_text(state)
 
     {pos, len} =
@@ -393,11 +434,11 @@ defmodule Aimax.Core.Buffer do
       end
 
     deleted = binary_part(text, pos, len)
-    state = do_delete(state, pos, len, src)
+    state = do_delete(state, pos, len, src, author)
     {:reply, {:ok, deleted}, %{state | point: pos}}
   end
 
-  def handle_call({:kill_line, src}, _from, state) do
+  def handle_call({:kill_line, src, author}, _from, state) do
     {text, state} = fetch_text(state)
     {_bol, eol} = Text.line_bounds(text, state.point)
     len = if state.point == eol and eol < Kernel.byte_size(text), do: 1, else: eol - state.point
@@ -406,9 +447,12 @@ defmodule Aimax.Core.Buffer do
       {:reply, {:ok, ""}, state}
     else
       killed = binary_part(text, state.point, len)
-      {:reply, {:ok, killed}, do_delete(state, state.point, len, src)}
+      {:reply, {:ok, killed}, do_delete(state, state.point, len, src, author)}
     end
   end
+
+  def handle_call(:authors, _from, state), do: {:reply, state.authors, state}
+  def handle_call(:edit_log, _from, state), do: {:reply, state.edit_log, state}
 
   def handle_call({:motion, motion}, _from, state) do
     {text, state} = fetch_text(state)
@@ -446,8 +490,8 @@ defmodule Aimax.Core.Buffer do
       nil ->
         {:reply, {:error, :no_undo}, state}
 
-      {rope, point, mark} ->
-        state = push_history(state, {state.rope, state.point, state.mark})
+      {rope, point, mark, authors} ->
+        state = push_history(state, {state.rope, state.point, state.mark, state.authors})
 
         state = %{
           state
@@ -455,6 +499,7 @@ defmodule Aimax.Core.Buffer do
             bin: nil,
             point: point,
             mark: mark,
+            authors: authors,
             version: state.version + 1,
             # +1 for the push above, +1 to step past the restored state
             undo_next: state.undo_next + 2,
@@ -463,6 +508,9 @@ defmodule Aimax.Core.Buffer do
             insert_run: 0
         }
 
+        # zero lengths: the journal marks the discontinuity, the restored
+        # spans carry the attribution
+        state = log_edit(state, "undo", 0, 0, 0)
         state = ts_invalidate(state)
         broadcast(state, 0, "", 0, :undo)
         {:reply, :ok, state}
@@ -552,6 +600,22 @@ defmodule Aimax.Core.Buffer do
     {:reply, spans, %{state | ts: %{ts | spans: spans}}}
   end
 
+  def handle_call({:ts_node, _kind, _s, _e, _op}, _from, %{ts: nil} = state),
+    do: {:reply, nil, state}
+
+  def handle_call({:ts_node, kind, s, e, op}, _from, %{ts: ts} = state) do
+    {text, state} = fetch_text(state)
+    {:reply, TS.ts_state_node(ts.res, text, kind, s, e, op), state}
+  end
+
+  def handle_call({:ts_children, _kind, _s, _e}, _from, %{ts: nil} = state),
+    do: {:reply, [], state}
+
+  def handle_call({:ts_children, kind, s, e}, _from, %{ts: ts} = state) do
+    {text, state} = fetch_text(state)
+    {:reply, TS.ts_state_children(ts.res, text, kind, s, e), state}
+  end
+
   def handle_call(:break_undo_chain, _from, state),
     do: {:reply, :ok, %{state | undo_next: 0}}
 
@@ -572,17 +636,21 @@ defmodule Aimax.Core.Buffer do
 
   # --- mutation helpers ------------------------------------------------------
 
-  defp do_insert(state, pos, text, src) do
+  defp do_insert(state, pos, text, src, author) do
+    len = Kernel.byte_size(text)
+    author = resolve_author(author, src)
     state = maybe_snapshot_insert(state, pos, text, src)
     old_rope = state.rope
     state = %{state | rope: Rope.insert(state.rope, pos, text), bin: nil, version: state.version + 1}
-    state = ts_track(state, old_rope, pos, pos, pos + Kernel.byte_size(text))
-    state = adjust_point_insert(state, pos, Kernel.byte_size(text))
-    state = adjust_ranges(state, &adjust_insert(&1, pos, Kernel.byte_size(text)))
+    state = ts_track(state, old_rope, pos, pos, pos + len)
+    state = adjust_point_insert(state, pos, len)
+    state = adjust_ranges(state, &adjust_insert(&1, pos, len))
+    state = %{state | authors: stamp_insert(state.authors, pos, len, author)}
+    state = log_edit(state, author, pos, len, 0)
     state = %{
       state
       | goal_col: nil,
-        last_insert_end: pos + Kernel.byte_size(text),
+        last_insert_end: pos + len,
         undo_next: 0
     }
 
@@ -606,13 +674,16 @@ defmodule Aimax.Core.Buffer do
   defp maybe_snapshot_insert(state, _pos, _text, _src),
     do: %{snapshot(state) | insert_run: 0}
 
-  defp do_delete(state, pos, len, src) do
+  defp do_delete(state, pos, len, src, author) do
+    author = resolve_author(author, src)
     state = snapshot(state)
     old_rope = state.rope
     state = %{state | rope: Rope.delete(state.rope, pos, len), bin: nil, version: state.version + 1}
     state = ts_track(state, old_rope, pos, pos + len, pos)
     state = adjust_point_delete(state, pos, len)
     state = adjust_ranges(state, &adjust_delete(&1, pos, len))
+    state = %{state | authors: stamp_delete(state.authors, pos, len)}
+    state = log_edit(state, author, pos, 0, len)
     state = %{state | goal_col: nil, last_insert_end: nil, insert_run: 0, undo_next: 0}
     broadcast(state, pos, "", len, src)
     state
@@ -621,7 +692,7 @@ defmodule Aimax.Core.Buffer do
   # trim lazily at 2x the cap: amortizes the O(limit) Enum.take so a burst of
   # keystrokes doesn't rebuild a 500-cons list on every edit
   defp snapshot(state),
-    do: push_history(state, {state.rope, state.point, state.mark})
+    do: push_history(state, {state.rope, state.point, state.mark, state.authors})
 
   defp push_history(state, entry) do
     history = [entry | state.history]
@@ -630,6 +701,57 @@ defmodule Aimax.Core.Buffer do
     if len > @undo_limit * 2,
       do: %{state | history: Enum.take(history, @undo_limit), history_len: @undo_limit},
       else: %{state | history: history, history_len: len}
+  end
+
+  # --- authorship ------------------------------------------------------------
+
+  # nil author: fall back to a name derived from the source; :none stamps
+  # nothing (the spans still shift through the edit)
+  defp resolve_author(:none, _src), do: nil
+  defp resolve_author(nil, :user), do: "user"
+  defp resolve_author(nil, :editor), do: "editor"
+  defp resolve_author(nil, :process), do: "process"
+  defp resolve_author(nil, {:agent, slug}), do: "agent:" <> slug
+  defp resolve_author(nil, src), do: inspect(src)
+  defp resolve_author(author, _src), do: to_string(author)
+
+  # a span that contains the insertion point splits — the inserted text
+  # must not inherit the surrounding span's author
+  defp stamp_insert(authors, pos, len, author) do
+    spans =
+      Enum.flat_map(authors, fn {s, e, a} ->
+        cond do
+          e <= pos -> [{s, e, a}]
+          s >= pos -> [{s + len, e + len, a}]
+          true -> [{s, pos, a}, {pos + len, e + len, a}]
+        end
+      end)
+
+    spans = if author, do: [{pos, pos + len, author} | spans], else: spans
+    spans |> Enum.sort() |> merge_spans()
+  end
+
+  defp stamp_delete(authors, pos, len) do
+    authors
+    |> Enum.map(fn {s, e, a} -> {adjust_delete(s, pos, len), adjust_delete(e, pos, len), a} end)
+    |> Enum.reject(fn {s, e, _} -> s >= e end)
+    |> merge_spans()
+  end
+
+  defp merge_spans([{s1, e1, a}, {s2, e2, a} | rest]) when e1 == s2,
+    do: merge_spans([{s1, e2, a} | rest])
+
+  defp merge_spans([span | rest]), do: [span | merge_spans(rest)]
+  defp merge_spans([]), do: []
+
+  # same lazy 2x trim as the undo history
+  defp log_edit(state, author, pos, ins, del) do
+    log = [{state.version, author, pos, ins, del} | state.edit_log]
+    len = state.edit_log_len + 1
+
+    if len > @edit_log_limit * 2,
+      do: %{state | edit_log: Enum.take(log, @edit_log_limit), edit_log_len: @edit_log_limit},
+      else: %{state | edit_log: log, edit_log_len: len}
   end
 
   defp adjust_point_insert(state, pos, len) do

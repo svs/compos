@@ -609,6 +609,9 @@
   "Font size for org-mode buffer text (any CSS size)."
   'group 'org 'type 'string 'set org--apply-fonts!)
 
+(mode-doc! "org-mode"
+  "An outline you can fold, reorder and mark done. `TAB` folds a headline and `S-TAB` folds the file. `C-c C-t` changes the TODO state. `M-RET` adds a headline, and `M-<left>` and `M-<right>` change its level.")
+
 (define-mode "org-mode"
   (lambda ()
     (org-install-keys)

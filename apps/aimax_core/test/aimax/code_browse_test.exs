@@ -148,6 +148,22 @@ defmodule Aimax.CodeBrowseTest do
     assert Buffer.hidden(buf, "code") == []
   end
 
+  test "TAB on a one-line node folds what holds it" do
+    buf = fresh_buffer(@elixir, "elixir")
+    # the body line of alpha: a node with no body of its own
+    Buffer.goto(buf, offset_of(@elixir, "x + 1"))
+    browse!(buf)
+    Buffer.goto(buf, offset_of(@elixir, "x + 1"))
+
+    press(["TAB"])
+    [{s, e}] = Buffer.hidden(buf, "code")
+    # it folded a block that holds the line, not nothing
+    assert s < offset_of(@elixir, "x + 1")
+    assert e >= offset_of(@elixir, "x + 1")
+    # and point is outside the hidden range, on the head line
+    assert Buffer.point(buf) <= s
+  end
+
   test "RET leaves the mode: editable again, no tint, no folds" do
     buf = fresh_buffer(@elixir, "elixir")
     Buffer.goto(buf, offset_of(@elixir, "  def alpha"))
@@ -231,6 +247,36 @@ defmodule Aimax.CodeBrowseTest do
     assert Buffer.read_only?(buf)
 
     press(["RET"])
+  end
+
+  # --- eligibility ---------------------------------------------------------------
+
+  test "a buffer with its own single keys keeps them" do
+    # the shape of a diff buffer: no file path, its own n/TAB/RET
+    name = "*fake-diff-#{System.unique_integer([:positive])}*"
+    Editor.set_window_buffer(name)
+    :ok = Buffer.append(name, "@@ -1,2 +1,2 @@\n-a\n+b\n", source: :editor)
+    Buffer.set_local(name, "mode-name", "diff-mode")
+    eval!(~s{(local-set-key* "#{name}" "n" "diff-next-hunk")})
+
+    eval!(~s{(run-command "code-browse")})
+
+    assert Buffer.get_local(name, "minor-modes") in [nil, false, []]
+    assert {"n", "diff-next-hunk"} in Enum.map(Editor.local_keys(name), fn {k, c} -> {k, c} end)
+    refute Buffer.read_only?(name)
+  end
+
+  test "a restored node that does not hold point gives way to point" do
+    buf = fresh_buffer(@elixir, "elixir")
+    Buffer.goto(buf, offset_of(@elixir, "  def alpha"))
+    browse!(buf)
+    # what a restart leaves: the old node in the local, point elsewhere
+    Buffer.goto(buf, offset_of(@elixir, "def beta"))
+    eval!(~s{(restore-minor-modes! "#{buf}")})
+
+    {_, start, stop} = browse_node(buf)
+    assert start <= offset_of(@elixir, "def beta")
+    assert stop >= offset_of(@elixir, "def beta")
   end
 
   # --- go to definition --------------------------------------------------------

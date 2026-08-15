@@ -629,6 +629,7 @@ defmodule Aimax.Ui.EditorLive do
     <div
       id={"win-#{@node.id}"}
       class={"window #{if @active?, do: "active", else: "inactive"} #{if !@node.line_numbers, do: "no-nums"} #{@node.window_class}"}
+      style={@node.window_style}
       data-win-id={@node.id}
       data-path={@path}
       data-read-only={to_string(@read_only)}
@@ -717,7 +718,20 @@ defmodule Aimax.Ui.EditorLive do
         </div>
       <% else %>
       <%= if @node.render_mode in ["html", "markdown"] do %>
-        <iframe class="html-preview" sandbox="" srcdoc={@node.preview} title={@node.buffer}></iframe>
+        <%!-- allow-same-origin, and nothing else. The parent must reach
+             the frame's document to scroll it from a key; without it the
+             page only answers the mouse. No allow-scripts, so the
+             previewed document still runs nothing. --%>
+        <iframe
+          class="html-preview"
+          id={"prev-#{@node.id}"}
+          phx-hook="PreviewScroll"
+          data-win={@node.id}
+          data-ctop={@node.ctop}
+          sandbox="allow-same-origin"
+          srcdoc={@node.preview}
+          title={@node.buffer}
+        ></iframe>
       <% else %>
       <div
         class={"buf #{if @node.client_scroll?, do: "client-scroll"}"}
@@ -820,7 +834,14 @@ defmodule Aimax.Ui.EditorLive do
       Enum.flat_map(ts_ranges, fn {s, e, _, _} -> [rel.(s), rel.(e)] end) ++
         Enum.flat_map(overlays, fn {s, e, _} -> [rel.(s), rel.(e)] end)
 
+    # snap every cut down to a character boundary. A tree-sitter range or
+    # an overlay can end inside a multi-byte character; the binary_part
+    # below then builds a segment that is not valid UTF-8, and Jason kills
+    # the LiveView socket when it encodes the reply. The window goes blank
+    # and the client cannot reconnect. Snapping keeps the segments tiling
+    # the line exactly, because floor_utf8 holds 0 and plen fixed.
     ([0, plen] ++ cuts)
+    |> Enum.map(&Text.floor_utf8(part, &1))
     |> Enum.uniq()
     |> Enum.sort()
     |> Enum.chunk_every(2, 1, :discard)
@@ -1087,21 +1108,42 @@ defmodule Aimax.Ui.EditorLive do
       end)
 
     # every registered face is also a span class (.f-NAME) so Scheme can
-    # define new faces and put them on overlay ranges with zero CSS edits
+    # define new faces and put them on overlay ranges with zero CSS edits.
+    #
+    # A face writes ONLY the attributes it declares. Writing them all put
+    # `color:inherit` on a face that names no foreground, and a span
+    # carries both classes — so a background-only overlay (the browse
+    # scope tint) erased the syntax color under it. Emacs reads an
+    # unspecified attribute as "leave it alone"; so does this.
     classes =
       faces
       |> Enum.filter(fn {face, _} -> face =~ ~r/^[a-zA-Z0-9_-]+$/ end)
-      |> Enum.map_join("", fn {face, _attrs} ->
-        ".f-#{face}{color:var(--#{face}-fg,inherit);" <>
-          "background:var(--#{face}-bg,transparent);" <>
-          "font-weight:var(--#{face}-weight,inherit);" <>
-          "font-style:var(--#{face}-style,inherit);" <>
-          "font-family:var(--#{face}-family,inherit);" <>
-          "font-size:var(--#{face}-size,inherit);" <>
-          "text-decoration:var(--#{face}-decoration,none);}"
+      |> Enum.map_join("", fn {face, attrs} ->
+        body =
+          attrs
+          |> Enum.map(fn {k, _} -> face_prop(face, to_string(k)) end)
+          |> Enum.reject(&is_nil/1)
+          |> Enum.join("")
+
+        if body == "", do: "", else: ".f-#{face}{#{body}}"
       end)
 
     ":root{#{vars}}#{classes}"
+  end
+
+  # one face attribute -> one CSS declaration, reading the face's own var.
+  # An attribute with no CSS meaning (writing-mode's 'measure) stays a var.
+  defp face_prop(face, attr) do
+    case attr do
+      "fg" -> "color:var(--#{face}-fg);"
+      "bg" -> "background:var(--#{face}-bg);"
+      "weight" -> "font-weight:var(--#{face}-weight);"
+      "style" -> "font-style:var(--#{face}-style);"
+      "family" -> "font-family:var(--#{face}-family);"
+      "size" -> "font-size:var(--#{face}-size);"
+      "decoration" -> "text-decoration:var(--#{face}-decoration);"
+      _ -> nil
+    end
   end
 
 end

@@ -38,8 +38,13 @@ defmodule Aimax.Ui.Layouts do
           /* window chrome is themable: a 'chrome face maps to these vars
              (gap, radius, border, shadow, anim) — zero values reproduce the
              flat flush look */
+          /* position: relative so a floating popup measures itself
+             against the whole frame. Against its own split instead, a
+             popup opened from a window in the middle of the layout would
+             float in the middle of the layout — the frame edge is the
+             only anchor that puts it in the same place every time. */
           .windows {
-            flex: 1; display: flex; min-height: 0;
+            flex: 1; display: flex; position: relative; min-height: 0;
             background: var(--default-bg, #d5cdb9);
             padding: var(--chrome-gap, 0);
           }
@@ -52,6 +57,46 @@ defmodule Aimax.Ui.Layouts do
             transition: flex-grow var(--chrome-anim, 140ms) ease-out;
           }
           .split-child > * { flex: 1; min-width: 0; min-height: 0; }
+          /* A popup floats, and ONLY visibly: it stays an ordinary window
+             in the tree, so every window command still reaches it. Taking
+             its split out of the flow is what makes it float — the window
+             it covers keeps its full height underneath, instead of being
+             squeezed into what is left. `C-M-`` drops the class and the
+             popup settles back into the layout. */
+          /* the popup's split keeps no space in the flow... */
+          .split-child:has(> .window.popup) {
+            flex: 0 0 0 !important; overflow: visible; transition: none;
+          }
+          /* ...its sibling takes the whole split, or the popup would
+             float over a strip of nothing. The daemon writes each child's
+             share inline, and inline styles only yield to !important. */
+          .split:has(> .split-child > .window.popup)
+            > .split-child:not(:has(> .window.popup)) {
+            flex-grow: 1 !important;
+          }
+          /* ...and the popup floats against the FRAME, on the side its
+             display rule chose. The rule's share arrives as --popup-size
+             on this element, because a custom property set on a child
+             never reaches its parent. */
+          .window.popup {
+            position: absolute; z-index: 20;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.30);
+            border: var(--chrome-border, none);
+            border-radius: var(--chrome-radius, 0);
+            animation: popup-rise var(--chrome-anim, 140ms) ease-out;
+          }
+          .window.popup-right, .window.popup-left {
+            top: 0; bottom: 0;
+            width: var(--popup-size, 38%); min-width: min(380px, 100%);
+          }
+          .window.popup-right { right: 0; }
+          .window.popup-left { left: 0; }
+          .window.popup-top, .window.popup-bottom {
+            left: 0; right: 0; height: var(--popup-size, 38%);
+          }
+          .window.popup-top { top: 0; }
+          .window.popup-bottom { bottom: 0; }
+          @keyframes popup-rise { from { opacity: 0; } to { opacity: 1; } }
           @keyframes win-in { from { opacity: 0; transform: scale(0.985); } to { opacity: 1; transform: none; } }
           .window {
             display: flex; flex-direction: column;
@@ -368,7 +413,14 @@ defmodule Aimax.Ui.Layouts do
           .mb-cands {
             max-height: 40dvh; overflow-y: auto;
             display: grid;
-            grid-template-columns: var(--mb-label-w, max-content) minmax(0, auto);
+            /* The column used to BE --mb-label-w. A row is a subgrid item
+               with 14px of side padding, and that padding comes out of the
+               tracks — so the column ran narrower than the width the core
+               asked for, and the longest name ran into its annotation.
+               max-content sizes the column to the labels themselves,
+               padding included, and the floor below keeps the column from
+               reflowing as narrowing shortens the longest visible name. */
+            grid-template-columns: max-content minmax(0, auto);
             justify-content: start;
           }
           .mb-cand {
@@ -383,10 +435,21 @@ defmodule Aimax.Ui.Layouts do
             border-left-color: var(--accent-fg, #26356b);
           }
           .mb-cand.selected .mb-label { color: var(--accent-fg, #26356b); font-weight: 600; }
-          .mb-label { white-space: nowrap; }
+          /* the floor: the widest label in the WHOLE set, from the core.
+             The ceiling matches the cap the core applies to that width —
+             one very long name must not push the annotations off the
+             panel, so past it a name truncates instead. */
+          .mb-label {
+            white-space: nowrap;
+            min-width: var(--mb-label-w, 0); max-width: 64ch;
+            overflow: hidden; text-overflow: ellipsis;
+          }
           .mb-hint {
             color: var(--dim-fg, #8a857a); font-size: 11px;
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            /* an annotation is COLUMNS, padded with spaces by the
+               annotator — nowrap collapses a run of spaces to one and the
+               columns fell apart. pre keeps them and still does not wrap. */
+            white-space: pre; overflow: hidden; text-overflow: ellipsis;
           }
           .mb-input-row {
             display: flex; align-items: baseline;
@@ -467,6 +530,57 @@ defmodule Aimax.Ui.Layouts do
 
           const PAGE_BOOT = document.querySelector("meta[name='boot-id']").getAttribute("content");
           const Hooks = {
+            // A preview draws inside an iframe, so the keyboard cannot
+            // reach it the way it reaches a line window: the daemon moves
+            // the window's pixel offset and this hook applies it. The
+            // wheel still works on its own, so report where the reader
+            // left the page — the offset survives a refresh and a restart
+            // the same way a line window's does.
+            PreviewScroll: {
+              mounted() {
+                this.onLoad = () => this.attach();
+                this.el.addEventListener("load", this.onLoad);
+                this.attach();
+              },
+              updated() { this.apply(); },
+              destroyed() {
+                this.el.removeEventListener("load", this.onLoad);
+                clearTimeout(this.timer);
+              },
+              // same-origin, but the document is absent until it loads
+              doc() {
+                try { return this.el.contentDocument; } catch (e) { return null; }
+              },
+              scroller() {
+                const d = this.doc();
+                return d && d.scrollingElement;
+              },
+              apply() {
+                const s = this.scroller();
+                if (!s) return;
+                const want = parseInt(this.el.dataset.ctop || "0", 10);
+                // a 2px slack stops the applied value from fighting the
+                // wheel report that follows it
+                if (Math.abs(s.scrollTop - want) > 2) s.scrollTop = want;
+              },
+              attach() {
+                const d = this.doc();
+                if (!d || this.wired === d) return;
+                this.wired = d;
+                this.apply();
+                d.addEventListener("scroll", () => {
+                  clearTimeout(this.timer);
+                  this.timer = setTimeout(() => {
+                    const s = this.scroller();
+                    if (!s) return;
+                    this.pushEvent("cscroll", {
+                      win: parseInt(this.el.dataset.win, 10),
+                      top: Math.round(s.scrollTop)
+                    });
+                  }, 250);
+                }, true);
+              }
+            },
             // transcript follows output unless the reader scrolled up.
             // The flag and position mirror into daemon state (runtime
             // locals), so a refresh keeps the reader's place and a
@@ -725,7 +839,45 @@ defmodule Aimax.Ui.Layouts do
 
                 // hollow, non-blinking cursor when the OS window is unfocused
                 this.focusH = () => document.body.classList.remove("unfocused");
-                this.blurH = () => document.body.classList.add("unfocused");
+                // the keyboard sink: one focusable element that is never a
+                // preview. A click in a preview moves focus INTO its iframe,
+                // and the keydown listener is on THIS window — from then on
+                // every key goes to the sandboxed document instead: no
+                // minibuffer, no motion, an editor that looks dead. blur()
+                // on the iframe does NOT bring the focus home (the parent's
+                // activeElement reads "BODY" while the browser still sends
+                // the keys to the child), and neither does body.focus().
+                // Focusing a real element of ours does.
+                this.sink = document.createElement("div");
+                this.sink.id = "kb-sink";
+                this.sink.tabIndex = -1;
+                this.sink.setAttribute("aria-hidden", "true");
+                this.sink.style.cssText =
+                  "position:fixed;left:0;top:0;width:1px;height:1px;outline:none";
+                document.body.appendChild(this.sink);
+
+                this.blurH = () => {
+                  const el = document.activeElement;
+                  if (el && el.tagName === "IFRAME") {
+                    // after the browser settles the focus, not during: a
+                    // focus() inside the blur that announces the move is
+                    // overwritten by the move itself
+                    setTimeout(() => {
+                      el.blur();
+                      this.sink.focus();
+                    }, 0);
+                    // ...and select the window the reader clicked, the same
+                    // thing a click on a line does. Events inside an iframe
+                    // never reach our mouseup handler, so this is the only
+                    // notice we get that the click happened.
+                    const winEl = el.closest(".window[data-win-id]");
+                    if (winEl) {
+                      this.pushEvent("mouse", { win: parseInt(winEl.dataset.winId, 10) });
+                    }
+                    return;
+                  }
+                  document.body.classList.add("unfocused");
+                };
                 window.addEventListener("focus", this.focusH);
                 window.addEventListener("blur", this.blurH);
                 if (!document.hasFocus()) document.body.classList.add("unfocused");
@@ -767,6 +919,7 @@ defmodule Aimax.Ui.Layouts do
                 window.removeEventListener("blur", this.blurH);
                 window.removeEventListener("paste", this.pasteH);
                 window.removeEventListener("mouseup", this.mouseH);
+                if (this.sink) this.sink.remove();
               }
             }
           };

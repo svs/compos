@@ -108,6 +108,15 @@
     (git--upgrade-locals! (current-buffer))
     (set-mode! "diff-show")))
 
+;; Both are compatibility shims, not modes you use. A desktop file written
+;; before the diff-backend split names them and carries the old `git-*`
+;; locals. The shim rewrites those locals and hands the buffer over. The
+;; `git-diff` COMMAND goes straight to diff-mode and never comes here.
+(mode-doc! "git-diff"
+  "An old name for `diff-mode`. The mode rewrites the locals of a buffer saved before the diff backends, then changes to `diff-mode`.")
+(mode-doc! "git-show"
+  "An old name for `diff-show`. The mode rewrites the locals of a buffer saved before the diff backends, then changes to `diff-show`.")
+
 ;; The directory the diff is about. The current buffer's directory when it
 ;; sits in a repository; otherwise the most recent buffer that does — C-x g
 ;; from a chat or *scratch* means "the project I am working in", not the

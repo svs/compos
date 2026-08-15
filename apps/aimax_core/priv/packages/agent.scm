@@ -1328,10 +1328,21 @@
 
 (define (agents-current-buf) (list-current *agents-buffer*))
 
-;; the slug on the current line, #f on an API-chat row
+;; the slug on the current line, #f when the chat has no runtime
 (define (agents-current-slug)
   (let ((b (agents-current-buf)))
     (and b (buffer-local b 'agent-slug))))
+
+;; the chats a verb acts on — list-mode's own marked-or-current rule, with
+;; killed buffers dropped: a mark outlives the chat that carried it
+(define (agents-targets)
+  (filter (lambda (b) (buffer-exists? b)) (list-targets *agents-buffer*)))
+
+;; how a verb reports what it did to N chats at once
+(define (agents-report verb bs)
+  (message (if (= (length bs) 1)
+               (string-append verb " " (car bs))
+               (string-append verb " " (number->string (length bs)) " chats"))))
 
 (define (agents-visit-current)
   (let ((b (agents-current-buf)))
@@ -1352,29 +1363,49 @@
 (define-command "agents-visit" "Visit the thread on the current line"
   (lambda () (agents-visit-current)))
 
-(define-command "agents-steer" "Send a steering message to the thread at point"
+;; a live runtime for BUF: a restored chat has a transcript and no runtime,
+;; and every verb here needs one. This is the same attach the chat buffer
+;; itself does when you type in it, so steering from the list revives a
+;; chat exactly like visiting it and pressing RET does.
+(define (agents-live-slug buf)
+  (let ((slug (or (buffer-local buf 'agent-slug) (chat-ensure-runtime! buf))))
+    (if (equal? (agent-status slug) 'dead) (agent-revive! slug) slug)))
+
+(define-command "agents-steer" "Send a steering message to the marked chats"
   (lambda ()
-    (let ((slug (agents-current-slug)))
-      (if (not slug)
-          (message "not an agent-backed chat")
-          (minibuffer-read (string-append "Steer " slug ": ") '()
+    (let ((bs (agents-targets)))
+      (if (null? bs)
+          (message "no chat here")
+          (minibuffer-read
+            (if (= (length bs) 1)
+                (string-append "Steer " (car bs) ": ")
+                (string-append "Steer " (number->string (length bs)) " chats: "))
+            '()
             (lambda (msg)
               (unless (equal? msg "")
-                (when (equal? (agent-status slug) 'dead) (agent-revive! slug))
-                (agent-send-msg! slug msg)
-                (agents-refresh!))))))))
+                (for-each (lambda (b) (agent-send-msg! (agents-live-slug b) msg)) bs)
+                (agents-refresh!)
+                (agents-report "steered" bs))))))))
 
-(define-command "agents-allow" "Allow the pending permission for the thread at point"
-  (lambda ()
-    (let ((slug (agents-current-slug)))
-      (when slug (agent-answer-permission! slug "allow_once" "allow")
-                 (agents-refresh!)))))
+;; y and n answer every marked chat that waits on a permission; a chat with
+;; no runtime has no question pending, so it is skipped, not attached
+(define (agents-answer! exact prefix verb)
+  (let ((bs (filter (lambda (b) (buffer-local b 'agent-slug)) (agents-targets))))
+    (if (null? bs)
+        (message "no chat with a runtime here")
+        (begin
+          (for-each (lambda (b)
+                      (agent-answer-permission! (buffer-local b 'agent-slug)
+                                                exact prefix))
+                    bs)
+          (agents-refresh!)
+          (agents-report verb bs)))))
 
-(define-command "agents-deny" "Deny the pending permission for the thread at point"
-  (lambda ()
-    (let ((slug (agents-current-slug)))
-      (when slug (agent-answer-permission! slug "reject_once" "reject")
-                 (agents-refresh!)))))
+(define-command "agents-allow" "Allow the pending permission for the marked chats"
+  (lambda () (agents-answer! "allow_once" "allow" "allowed")))
+
+(define-command "agents-deny" "Deny the pending permission for the marked chats"
+  (lambda () (agents-answer! "reject_once" "reject" "denied")))
 
 ;; mark the transcript BEFORE the runtime dies (the mark primitive needs it
 ;; alive) so windows showing the thread refresh honestly
@@ -1399,30 +1430,24 @@
           (window-set-buffer! (car w) repl)))
       (window-list-all))))
 
-(define-command "agents-kill" "Kill the thread at point, keeping its transcript"
-  (lambda ()
-    (let ((slug (agents-current-slug)))
-      (if (not slug)
-          (message "not an agent-backed chat (x drops the buffer)")
-          (begin
-            (agent-note-stopped! slug)
-            (agent-kill! slug)
-            (agents-refresh!)
-            (message (string-append slug " killed (transcript kept)")))))))
+;; kill the runtime, keep the transcript. #f when the chat has no runtime:
+;; the caller counts what really happened instead of reporting a kill that
+;; killed nothing.
+(define (agents-kill-runtime! b)
+  (let ((slug (buffer-local b 'agent-slug)))
+    (and slug
+         (begin (agent-note-stopped! slug)
+                (agent-kill! slug)
+                #t))))
 
-;; archive: runtime (if any) + buffer both go (desktop stops restoring it)
-(define-command "agents-archive" "Kill the chat at point and drop its buffer"
-  (lambda ()
-    (let ((b (agents-current-buf)))
-      (when b
-        (let ((here (active-window))
-              (slug (buffer-local b 'agent-slug)))
-          (when slug (agent-kill! slug))
-          (agent-release-windows! b)
-          (buffer-kill! b)
-          (when (window-exists? here) (select-window! here))
-          (agents-refresh!)
-          (message (string-append b " archived")))))))
+;; archive: runtime (if any) + buffer both go (desktop stops restoring it).
+;; Killing a displayed chat moves windows around, so come back to the list.
+(define (agents-archive! b)
+  (let ((here (active-window)))
+    (agents-kill-runtime! b)
+    (agent-release-windows! b)
+    (buffer-kill! b)
+    (when (window-exists? here) (select-window! here))))
 
 (define-command "agents-refresh" "Refresh the chat list"
   (lambda () (agents-refresh!)))
@@ -1431,17 +1456,31 @@
   (list
     'doc (string-append
            "Every chat and agent thread in one list: its runtime, its state and "
-           "its cost. `RET` opens a thread, `s` steers the running one, `y` and "
-           "`n` answer a permission request, `k` kills a runtime and `x` archives "
-           "the chat.")
+           "its cost. It marks and executes like ibuffer. `m` marks a chat, `u` "
+           "unmarks it and `U` drops every mark; `s` steers, `y` and `n` answer "
+           "a permission request for the marked chats, or for the chat at point "
+           "when nothing is marked. `k` flags a runtime to kill, `d` flags a "
+           "whole chat to archive, and `x` runs the flags. `RET` opens the chat "
+           "at point.")
     'buffer *agents-buffer*
     'rows (lambda (buf) (agents-sorted))
     'render (lambda (buf row) (agents-line row))
+    ;; two flags, both destructive, neither irreversible: k stops a runtime
+    ;; and keeps the transcript, d drops the chat as well
+    'flags (list (list "k" "K" "kill runtime"
+                       (lambda (buf b)
+                         (and (buffer-exists? b) (agents-kill-runtime! b))))
+                 (list "d" "D" "archive"
+                       (lambda (buf b)
+                         (and (buffer-exists? b)
+                              (begin (agents-archive! b) #t)))))
+    'noun "chat"
     'header (lambda (buf)
-              (string-append ";; chats — RET visit · s steer · y/n permission · "
-                             "k kill · x archive · + new · g refresh"))
+              (string-append ";; chats — RET visit · m mark · s steer · "
+                             "y/n permission · k flag kill · d flag archive · "
+                             "x execute · u/U unmark · + new · g refresh"))
     'keys '(("RET" "agents-visit") ("s" "agents-steer") ("y" "agents-allow")
-            ("n" "agents-deny") ("k" "agents-kill") ("x" "agents-archive")
+            ("n" "agents-deny")
             ("g" "agents-refresh") ("+" "agent-open") ("q" "quit-window"))
     ;; line movement remaps to move-and-preview (n is taken: deny)
     'remap '(("next-line" "agents-next") ("previous-line" "agents-prev"))))

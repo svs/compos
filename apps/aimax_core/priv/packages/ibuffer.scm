@@ -3,7 +3,8 @@
 ;;; C-x C-b (or M-x ibuffer) pops *ibuffer*: one line per buffer, MRU
 ;;; order — modified flag, size, mode, name. Same narrowing language as
 ;;; dired: / m major mode · / n name regex · / p pop · / / clear.
-;;; d flags for killing, x executes, u unmarks, RET visits, g refreshes.
+;;; m marks, d flags for killing, x executes, u and U unmark, RET
+;;; visits, g refreshes.
 ;;; Internals (space-prefixed) stay hidden.
 
 (define *ibuffer-buffer* "*ibuffer*")
@@ -28,9 +29,9 @@
                          (else #f)))))
           (buffer-list-mru)))
 
+;; the mark column comes from list-mode; this line starts at the modified flag
 (define (ibuffer-line b)
   (string-append
-    (list-mark-of *ibuffer-buffer* b)
     (if (buffer-modified? b) "*" " ") " "
     (string-pad-left (number->string (buffer-size b)) 8) "  "
     (string-pad-right (or (buffer-local b 'mode-name) "-") 18)
@@ -87,26 +88,6 @@
 (define-command "ibuffer-prev" "Move up and preview in the home window"
   (lambda () (previous-line!) (ibuffer-preview!)))
 
-(define-command "ibuffer-flag" "Flag this buffer for killing"
-  (lambda ()
-    (let ((b (ibuffer-current)))
-      (when b (list-mark! *ibuffer-buffer* b "D") (ibuffer-refresh!) (next-line!)))))
-
-(define-command "ibuffer-unmark" "Unmark this buffer"
-  (lambda ()
-    (let ((b (ibuffer-current)))
-      (when b (list-mark! *ibuffer-buffer* b #f) (ibuffer-refresh!) (next-line!)))))
-
-(define-command "ibuffer-do-kill" "Kill every buffer flagged with D"
-  (lambda ()
-    (let ((doomed (list-marked *ibuffer-buffer* "D")))
-      (for-each (lambda (b)
-                  (when (buffer-exists? b) (buffer-kill! b))
-                  (list-mark! *ibuffer-buffer* b #f))
-                doomed)
-      (ibuffer-refresh!)
-      (message (string-append "killed " (number->string (length doomed)) " buffers")))))
-
 (define-command "ibuffer-filter-mode" "Narrow to buffers in one major mode"
   (lambda ()
     (minibuffer-read "Mode: "
@@ -135,17 +116,22 @@
            "The buffer list as a dired: one line per buffer in most-recently-used "
            "order, with its modified flag, size and mode. Narrow it with the "
            "filters, flag buffers with `d`, then kill the flagged ones with `x`. "
+           "`m` marks, `u` unmarks and `U` drops every mark. "
            "Moving the highlight previews the buffer in the other window.")
     'buffer *ibuffer-buffer*
     'rows (lambda (buf) (ibuffer-visible))
     'render (lambda (buf b) (ibuffer-line b))
+    ;; the flag says what it does; list-mode supplies m/u/U/x and the column
+    'flags (list (list "d" "D" "kill"
+                       (lambda (buf b)
+                         (and (buffer-exists? b) (begin (buffer-kill! b) #t)))))
+    'noun "buffer"
     'header (lambda (buf)
               (string-append
-                ";; buffers — RET visit · d flag · x kill flagged · "
+                ";; buffers — RET visit · m mark · d flag · x kill flagged · "
                 "/ m mode · / n name · g refresh"
                 (list-filters-label buf)))
-    'keys '(("RET" "ibuffer-visit") ("g" "ibuffer-refresh") ("d" "ibuffer-flag")
-            ("u" "ibuffer-unmark") ("x" "ibuffer-do-kill") ("q" "quit-window")
+    'keys '(("RET" "ibuffer-visit") ("g" "ibuffer-refresh") ("q" "quit-window")
             ("n" "ibuffer-next") ("p" "ibuffer-prev")
             ("/ m" "ibuffer-filter-mode") ("/ n" "ibuffer-filter-name")
             ("/ p" "ibuffer-filter-pop") ("/ /" "ibuffer-filter-clear"))

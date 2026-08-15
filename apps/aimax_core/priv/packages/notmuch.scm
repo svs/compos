@@ -726,6 +726,9 @@ when a message has no text/plain part." 'group 'notmuch)
           ((nm--parts-html (nm--get (car ms) 'body)) #t)
           (else (loop (cdr ms))))))
 
+(mode-doc! "notmuch-show-mode"
+  "One mail thread, read. `a` archives it and `r` starts a reply. `v` changes between the HTML and the plain text. `q` goes back to the search.")
+
 (define-mode "notmuch-show-mode"
   (lambda ()
     (let ((buf (current-buffer)))
@@ -830,6 +833,9 @@ when a message has no text/plain part." 'group 'notmuch)
   (lambda ()
     (local-set-key "C-c C-c" "mail-send")
     (local-set-key "C-c C-k" "mail-abort")))
+
+(mode-doc! "mail-compose-mode"
+  "A message you are writing. The headers sit above the separator line and the body below it. `C-c C-c` sends the message, and `C-c C-k` abandons it.")
 
 ;; message-mode layout: headers, the separator, an empty line for the
 ;; reply (point lands there), attribution, the original quoted as text

@@ -793,6 +793,9 @@
       (diff--refold! buf)
       (diff--reblock! buf))))
 
+(mode-doc! "diff-show"
+  "One commit, already written. Every card starts open. `n` and `p` step over hunks, and `RET` opens the file at that line. Nothing refreshes, because a commit does not change.")
+
 ;;; --- folding ------------------------------------------------------------------
 
 (define-command "diff-toggle-fold" "Fold or unfold the hunk at point, else the file"
@@ -914,6 +917,9 @@
       (when (and (buffer-local buf 'diff-watch) (buffer-local buf 'diff-root))
         (watch-path! (buffer-local buf 'diff-root)))
       (diff-refresh buf))))
+
+(mode-doc! "diff-mode"
+  "The changes you have not committed, as cards. `n` and `p` step over hunks, `N` and `P` over files. `TAB` folds a card and `RET` opens the file at that line. `g` re-reads the diff, and `w` follows the tree.")
 
 ;;; --- the stylesheet -----------------------------------------------------------
 ;;; The mode ships its own CSS; the client renders structure and knows none

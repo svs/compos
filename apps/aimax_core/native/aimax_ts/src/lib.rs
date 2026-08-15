@@ -125,17 +125,91 @@ fn ts_node(
 ) -> Option<(String, usize, usize)> {
     let lang = language(&lang_name)?;
     let tree = parse(lang, &text)?;
+    node_op(tree.root_node(), text.len(), &kind, start, end, &op)
+}
+
+/// The same question against the parser resource's held tree — one walk,
+/// no parse, so a reader who presses a key 20 times pays for one parse.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn ts_state_node(
+    res: ResourceArc<TsRes>,
+    text: String,
+    kind: String,
+    start: usize,
+    end: usize,
+    op: String,
+) -> Option<(String, usize, usize)> {
+    let mut guard = res.0.lock().unwrap();
+    let st = &mut *guard;
+    st.tree = st.parser.parse(&text, st.tree.as_ref());
+    let tree = st.tree.as_ref()?;
+    node_op(tree.root_node(), text.len(), &kind, start, end, op.as_str())
+}
+
+/// Every named child of one node, in buffer order. The fold pass wants a
+/// whole level at once: asking child-then-next-then-next costs one call
+/// per node, and a file has hundreds.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn ts_state_children(
+    res: ResourceArc<TsRes>,
+    text: String,
+    kind: String,
+    start: usize,
+    end: usize,
+) -> Vec<(String, usize, usize)> {
+    let mut guard = res.0.lock().unwrap();
+    let st = &mut *guard;
+    st.tree = st.parser.parse(&text, st.tree.as_ref());
+    let Some(tree) = st.tree.as_ref() else {
+        return Vec::new();
+    };
     let root = tree.root_node();
     let start = start.min(text.len());
     let end = end.clamp(start, text.len());
-    let smallest = root.named_descendant_for_byte_range(start, end)?;
+    let Some(smallest) = root.named_descendant_for_byte_range(start, end) else {
+        return Vec::new();
+    };
     let node = if kind.is_empty() {
         smallest
     } else {
         same_range_kind(smallest, &kind).unwrap_or(smallest)
     };
 
-    let target = match op.as_str() {
+    let mut walker = node.walk();
+    node.named_children(&mut walker)
+        .map(|c: Node| (c.kind().to_string(), c.start_byte(), c.end_byte()))
+        .collect()
+}
+
+fn node_op(
+    root: Node,
+    len: usize,
+    kind: &str,
+    start: usize,
+    end: usize,
+    op: &str,
+) -> Option<(String, usize, usize)> {
+    let start = start.min(len);
+    let end = end.clamp(start, len);
+    let smallest = root.named_descendant_for_byte_range(start, end)?;
+    let node = if kind.is_empty() {
+        smallest
+    } else {
+        same_range_kind(smallest, kind).unwrap_or(smallest)
+    };
+
+    let target = match op {
+        // Point can fall where no named node covers it — a comment the
+        // grammar drops, the blank line between two forms — and the
+        // smallest node covering it is then the file itself. The reader
+        // means the form at or after that point, never the whole file.
+        "at" if node.id() == root.id() => {
+            let mut walker = root.walk();
+            let mut children = root.named_children(&mut walker);
+            children
+                .find(|c: &Node| c.end_byte() > start)
+                .or_else(|| root.named_child(root.named_child_count().saturating_sub(1)))
+        }
         "at" => Some(node),
         // an anonymous parent carries no structure a reader can name
         "parent" => named_parent(node),
@@ -154,6 +228,12 @@ fn ts_node(
         }
         _ => None,
     }?;
+
+    // the root is the file, not a place to stand: a caller that asks for
+    // the parent of a top-level form gets nothing, and keeps what it has
+    if target.id() == root.id() {
+        return None;
+    }
 
     Some((
         target.kind().to_string(),
@@ -302,7 +382,10 @@ fn ts_langs() -> Vec<String> {
 
 struct TsState {
     parser: Parser,
-    query: Query,
+    // None when the grammar has no usable highlight query. The tree is
+    // still worth holding: structural motion reads it, and a grammar with
+    // no colors still has structure.
+    query: Option<Query>,
     tree: Option<tree_sitter::Tree>,
 }
 
@@ -316,10 +399,9 @@ impl rustler::Resource for TsRes {}
 #[rustler::nif]
 fn ts_state_new(lang_name: String) -> Option<ResourceArc<TsRes>> {
     let lang = language(&lang_name)?;
-    let hq = highlights_query(&lang_name)?;
     let mut parser = Parser::new();
     parser.set_language(&lang).ok()?;
-    let query = Query::new(&lang, &hq).ok()?;
+    let query = highlights_query(&lang_name).and_then(|hq| Query::new(&lang, &hq).ok());
     Some(ResourceArc::new(TsRes(Mutex::new(TsState {
         parser,
         query,
@@ -375,9 +457,12 @@ fn ts_state_highlight(res: ResourceArc<TsRes>, text: String) -> Vec<(usize, usiz
     let Some(tree) = st.tree.as_ref() else {
         return out;
     };
-    let names = st.query.capture_names();
+    let Some(query) = st.query.as_ref() else {
+        return out;
+    };
+    let names = query.capture_names();
     let mut cursor = QueryCursor::new();
-    let mut captures = cursor.captures(&st.query, tree.root_node(), text.as_bytes());
+    let mut captures = cursor.captures(query, tree.root_node(), text.as_bytes());
     while let Some((m, ix)) = captures.next() {
         let cap = m.captures[*ix];
         let scope = names[cap.index as usize]

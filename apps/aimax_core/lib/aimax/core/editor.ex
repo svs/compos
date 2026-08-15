@@ -43,6 +43,11 @@ defmodule Aimax.Core.Editor do
   # a space prefix keeps it out of the buffer lists, as " *minibuf*" is.
   @readonly_map " *read-only*"
 
+  # A preview draws no lines, so a scroll in lines becomes a scroll in
+  # pixels. This is the client's prose line-height, and it only has to be
+  # close: the reader judges a page scroll by eye, not by the row count.
+  @preview_line_px 22
+
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   # readers
@@ -582,9 +587,29 @@ defmodule Aimax.Core.Editor do
 
       f ->
         leaf = find_leaf(f.tree, id)
-        top = max(leaf.top + delta, 0)
-        tree = replace_leaf(f.tree, id, %{leaf | top: top, manual: true})
-        changed(:ok, put_frame(state, %{f | tree: tree}), f.id)
+
+        # A preview window has no lines to move over: the client draws it
+        # as one rendered document. Move its pixel offset instead, and the
+        # browser scrolls the frame. The caller still speaks in lines, so
+        # `C-v` and `M-<down>` mean the same thing in every window.
+        leaf =
+          if preview?(leaf.buffer) do
+            top = max(Map.get(leaf, :ctop, 0) + delta * @preview_line_px, 0)
+            leaf |> Map.put(:ctop, top) |> Map.put(:manual, true)
+          else
+            %{leaf | top: max(leaf.top + delta, 0), manual: true}
+          end
+
+        changed(:ok, put_frame(state, %{f | tree: replace_leaf(f.tree, id, leaf)}), f.id)
+    end
+  end
+
+  # the two render modes the client draws in an iframe
+  defp preview?(buffer) do
+    try do
+      Buffer.locals(buffer)["render-mode"] in ["html", "markdown"]
+    catch
+      :exit, _ -> false
     end
   end
 
@@ -1533,7 +1558,7 @@ defmodule Aimax.Core.Editor do
       line: snap.line,
       col: snap.col,
       style: Map.get(locals, "style"),
-      render_mode: Map.get(locals, "render-mode"),
+      render_mode: render_mode(locals),
       agent: agent_leaf(locals, text),
       blocks: blocks_leaf(locals),
       preview_authored: Map.get(locals, "preview-authored") == true,
@@ -1547,7 +1572,11 @@ defmodule Aimax.Core.Editor do
       total_lines: total_lines,
       line_numbers: Map.get(locals, "line-numbers") != "off",
       # extra CSS class on the window div (writing-mode centering etc.)
-      window_class: Map.get(locals, "window-class") || nil
+      window_class: Map.get(locals, "window-class") || nil,
+      # inline style on the window itself. A popup hands its share of the
+      # frame over this way: the stylesheet cannot read a number out of a
+      # display rule, but it can read a custom property.
+      window_style: Map.get(locals, "window-style") || nil
     }
 
     {%{leaf | top: top}, rendered}
@@ -1603,6 +1632,20 @@ defmodule Aimax.Core.Editor do
     do: Map.get(locals, "render-blocks") || []
 
   defp blocks_leaf(_), do: nil
+
+  # A mode that takes a buffer over inherits the locals of the mode before
+  # it, and `render-mode` says which view draws the window. "blocks" with
+  # no blocks drew an empty card list over a buffer full of text: dired on
+  # a directory that once held a diff went blank, with no error anywhere.
+  # No blocks means nothing to draw, so the window shows its text.
+  defp render_mode(%{"render-mode" => "blocks"} = locals) do
+    case Map.get(locals, "render-blocks") do
+      [_ | _] -> "blocks"
+      _ -> nil
+    end
+  end
+
+  defp render_mode(locals), do: Map.get(locals, "render-mode")
 
   defp visible_geometry(text, point, hidden) do
     len = byte_size(text)

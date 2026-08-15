@@ -271,6 +271,9 @@
 
 (define-mode "mcp-detail-mode" (lambda () (mcp-hub-detail-setup! (current-buffer))))
 
+(mode-doc! "mcp-detail-mode"
+  "What one MCP server serves: its tools, its resources and its prompts. `g` re-reads them from the server, and `l` shows the wire log.")
+
 (define (mcp-hub-show-detail name)
   (if (not (mcp-server-detail name))
       (message (string-append name " has never been started — s starts it"))
@@ -323,6 +326,9 @@
     (when name (mcp-hub-render-log! buf name))))
 
 (define-mode "mcp-log-mode" (lambda () (mcp-hub-log-setup! (current-buffer))))
+
+(mode-doc! "mcp-log-mode"
+  "The JSON-RPC frames between the editor and one MCP server, oldest first. `g` re-reads them. The server's error output is not here — it goes to `~/.aimax/daemon.log`.")
 
 (define (mcp-hub-show-log name)
   (let ((buf (string-append "*mcp-log: " name "*")))

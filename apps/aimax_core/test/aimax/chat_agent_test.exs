@@ -98,7 +98,12 @@ defmodule Aimax.ChatAgentTest do
 
     # "@" env refs resolved at the boundary, not stored anywhere
     zz = Enum.find(servers, &(&1["name"] == "zzsrv"))
-    assert zz["env"] == [%{"name" => "K", "value" => "sekrit"}]
+    assert %{"name" => "K", "value" => "sekrit"} in zz["env"]
+
+    # every stdio server learns which thread spawned it — the aimax proxy
+    # sends it back as the edit author
+    assert %{"name" => "AIMAX_AGENT", "value" => slug} in zz["env"]
+    assert %{"name" => "AIMAX_AGENT", "value" => slug} in aimax["env"]
 
     # the thread is bound to the chat buffer, not a *agent:* buffer
     assert eval!("(agent-buf \"#{slug}\")") == ~s{"*zz-uchat*"}

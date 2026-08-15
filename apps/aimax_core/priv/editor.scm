@@ -160,6 +160,145 @@
 
 (define (list-clear-marks! buf) (buffer-set-local! buf 'list-marks '()))
 
+;;; --- flag, then execute ------------------------------------------------------
+;;; The dired paradigm, in the mechanism. A list declares what its flags DO:
+;;;
+;;;   'flags ((KEY CHAR VERB ACTION CONFIRM?) ...)
+;;;
+;;; KEY flags the entry at point with CHAR. `x` runs every flagged entry
+;;; through (ACTION LIST-BUFFER ENTRY), which answers #t when it acted and
+;;; #f when it found nothing to do, and reports "VERB N NOUN". CONFIRM?
+;;; asks first. The mechanism supplies the rest: `m` marks, `u` unmarks,
+;;; `U` drops every mark, and the mark column goes in front of every row.
+;;;
+;;; Three lists had written their own copy of this and the copies had
+;;; drifted: one asked before it acted, one moved point after marking, one
+;;; killed a runtime the moment you pressed the key. A list now says only
+;;; what its flags mean.
+
+(define *list-mark-char* "*")
+
+(define (list-flags buf) (or (list-opt buf 'flags) '()))
+
+;; a list may refuse to mark some rows (dired: "..")
+(define (list-markable? buf e)
+  (let ((f (list-opt buf 'markable?)))
+    (if f (f buf e) #t)))
+
+(define (list-mark-at-point! ch)
+  (let* ((buf (current-buffer))
+         (e (list-current buf)))
+    (if (not (and e (list-markable? buf e)))
+        (message "no entry on this line")
+        (begin (list-mark! buf e ch)
+               (list-refresh! buf)
+               (next-line!)
+               (beginning-of-line!)))))
+
+;; the entries a verb acts on: every marked entry, or the line at point.
+;; This is what makes one key work on one chat and on twelve.
+(define (list-targets buf)
+  (let ((m (list-marked buf *list-mark-char*)))
+    (if (pair? m)
+        m
+        (let ((e (list-current buf))) (if e (list e) '())))))
+
+(define-command "list-mark" "Mark the entry at point"
+  (lambda () (list-mark-at-point! *list-mark-char*)))
+
+(define-command "list-unmark" "Unmark the entry at point"
+  (lambda () (list-mark-at-point! #f)))
+
+(define-command "list-unmark-all" "Drop every mark and flag in this list"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (list-clear-marks! buf)
+      (list-refresh! buf))))
+
+;; a keymap binds a command NAME, so each flag char needs a command of its
+;; own. The body is the same in every list, so one command per char serves
+;; all of them.
+(define (list-flag-command ch)
+  (let ((name (string-append "list-flag-" ch)))
+    (define-command name (string-append "Flag the entry at point with " ch)
+      (lambda () (list-mark-at-point! ch)))
+    name))
+
+;; every flag that has something flagged, in the order the list declared
+(define (list-execute-plan buf)
+  (filter (lambda (p) (pair? (car (cdr p))))
+          (map (lambda (f) (list f (list-marked buf (car (cdr f)))))
+               (list-flags buf))))
+
+;; what one row IS, for the prompts: "delete 2 files" reads like a question
+;; a person asks. A list that declares no noun gets "row".
+(define (list-noun buf n)
+  (let ((w (or (list-opt buf 'noun) "row")))
+    (if (= n 1) w (string-append w "s"))))
+
+(define (list-plan-label buf plan)
+  (string-join (map (lambda (p)
+                      (let ((n (length (car (cdr p)))))
+                        (string-append (nth 2 (car p)) " "
+                                       (number->string n) " "
+                                       (list-noun buf n))))
+                    plan)
+               " · "))
+
+(define (list-plan-asks? plan)
+  (let loop ((ps plan))
+    (cond ((null? ps) #f)
+          ((and (> (length (car (car ps))) 4) (nth 4 (car (car ps)))) #t)
+          (else (loop (cdr ps))))))
+
+;; Clear the flag BEFORE the action runs: an action may kill the entry, and
+;; a mark on a row that no longer exists outlives every refresh. The report
+;; counts what the actions DID — an action answers #f when it found nothing
+;; to do, so "kill runtime 0 chats" is a sentence this can say.
+(define (list-plan-run! buf plan)
+  (let loop ((ps plan) (parts '()))
+    (if (null? ps)
+        (begin (list-refresh! buf)
+               (message (string-join (reverse parts) " · ")))
+        (let* ((spec (car (car ps)))
+               (action (nth 3 spec))
+               (n (let inner ((es (car (cdr (car ps)))) (k 0))
+                    (cond ((null? es) k)
+                          (else (list-mark! buf (car es) #f)
+                                (inner (cdr es)
+                                       (if (action buf (car es)) (+ k 1) k)))))))
+          (loop (cdr ps)
+                (cons (string-append (nth 2 spec) " " (number->string n) " "
+                                     (list-noun buf n))
+                      parts))))))
+
+(define-command "list-execute" "Run the flags in this list"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (plan (list-execute-plan buf)))
+      (cond ((null? plan) (message "nothing flagged"))
+            ((list-plan-asks? plan)
+             (minibuffer-read (string-append (list-plan-label buf plan) "? ")
+                              (list "yes" "no")
+                              (lambda (ans)
+                                (if (equal? ans "yes")
+                                    (list-plan-run! buf plan)
+                                    (message "Cancelled")))))
+            (else (list-plan-run! buf plan))))))
+
+;; the marking keys, for a list that declares flags. They go in before the
+;; list's own keys, so a list can still claim any of them for something else.
+(define (list-install-mark-keys! buf opts)
+  (let ((fs (or (plist-get opts 'flags) '())))
+    (unless (null? fs)
+      (local-set-key* buf "m" "list-mark")
+      (local-set-key* buf "u" "list-unmark")
+      (local-set-key* buf "U" "list-unmark-all")
+      (local-set-key* buf "x" "list-execute")
+      (for-each (lambda (f)
+                  (local-set-key* buf (car f) (list-flag-command (car (cdr f)))))
+                fs))))
+
 ;;; filters — a stack of (LABEL ARG), newest first
 
 (define (list-filters buf) (or (buffer-local buf 'list-filters) '()))
@@ -207,7 +346,12 @@
         (let loop ((es rows) (off (buffer-size buf)) (ovs '()))
           (if (null? es)
               (when ovf (overlay-set! buf 'list (reverse ovs)))
-              (let ((line (render buf (car es))))
+              ;; a list with flags gets its mark column from here: three
+              ;; renders were each prepending their own
+              (let ((line (string-append (if (null? (list-flags buf))
+                                             ""
+                                             (list-mark-of buf (car es)))
+                                         (render buf (car es)))))
                 (buffer-append! buf (string-append line "\n"))
                 (loop (cdr es)
                       (+ off (string-byte-length line) 1)
@@ -224,9 +368,16 @@
     ;; derived content (S15): the refresh below re-renders it from
     ;; rows-fn, so the desktop saves mode + locals, not the rows
     (buffer-set-local! buf 'transient #t)
+    ;; a list buffer's text IS its view. A buffer keeps the locals of the
+    ;; mode before it, so dired on a directory that once held a diff kept
+    ;; 'render-mode "blocks" and the window drew no rows at all.
+    (buffer-set-local! buf 'render-mode #f)
     ;; every list is read-only, so "?" can be help in all of them — bound
     ;; before the mode's own keys, which may claim it for something else
     (local-set-key* buf "?" "describe-mode")
+    ;; m/u/U/x and the flag keys, for a list that declares flags — also
+    ;; before the mode's own keys, for the same reason
+    (list-install-mark-keys! buf opts)
     (for-each (lambda (k) (local-set-key* buf (car k) (car (cdr k))))
               (or (plist-get opts 'keys) '()))
     (for-each (lambda (r) (local-remap*! buf (car r) (car (cdr r))))
@@ -278,16 +429,32 @@
   (lambda () (forward-char!)))
 (define-command "backward-char" "Move point one character backward"
   (lambda () (backward-char!)))
-(define-command "next-line" "Move point down one line" (lambda () (next-line!)))
-(define-command "previous-line" "Move point up one line" (lambda () (previous-line!)))
+;; A preview window draws one rendered document, so point means nothing
+;; the reader can see in it: the ordinary motion keys would move point and
+;; the page would sit still. Scroll the page instead. Every key that moves
+;; through a buffer asks here first, so `<down>`, `C-v`, `<next>` and
+;; `M->` all do in a preview what they do everywhere else.
+(define (preview-buffer? buf)
+  (let ((rm (buffer-local buf 'render-mode)))
+    (or (equal? rm "markdown") (equal? rm "html"))))
+
+;; #t when it scrolled, so a command can fall through to the point motion
+(define (preview-scroll! lines)
+  (and (preview-buffer? (current-buffer))
+       (begin (scroll-window! (active-window) lines) #t)))
+
+(define-command "next-line" "Move point down one line"
+  (lambda () (or (preview-scroll! 3) (next-line!))))
+(define-command "previous-line" "Move point up one line"
+  (lambda () (or (preview-scroll! -3) (previous-line!))))
 (define-command "beginning-of-line" "Move point to the beginning of the line"
   (lambda () (beginning-of-line!)))
 (define-command "end-of-line" "Move point to the end of the line"
   (lambda () (end-of-line!)))
 (define-command "beginning-of-buffer" "Move point to the beginning of the buffer"
-  (lambda () (beginning-of-buffer!)))
+  (lambda () (or (preview-scroll! -1000000) (beginning-of-buffer!))))
 (define-command "end-of-buffer" "Move point to the end of the buffer"
-  (lambda () (end-of-buffer!)))
+  (lambda () (or (preview-scroll! 1000000) (end-of-buffer!))))
 
 (define-command "newline" "Insert a newline at point" (lambda () (insert! "\n")))
 (define-command "delete-backward-char" "Delete the character before point"
@@ -424,6 +591,99 @@
   (lambda (root)
     (for-each (lambda (fn) (fn root)) *fs-change-hooks*)))
 
+;;; --- marginalia ---------------------------------------------------------------
+;;; What a candidate MEANS, beside the candidate. A prompt names the
+;;; CATEGORY its candidates belong to; an annotator turns one candidate
+;;; into the text next to it. The prompt does not know the annotation and
+;;; the annotator does not know the prompt, so a package can annotate a
+;;; category it did not write, and every prompt over that category gains
+;;; the annotation at once.
+;;;
+;;;   (marginalia! 'file (lambda (name) (or (auto-mode-for name) "")))
+;;;   (annotate 'file (list-dir dir))   ->   ((NAME HINT) ...)
+;;;
+;;; Three prompts each built their own (LABEL HINT) pairs inline, so a new
+;;; prompt over the same things showed nothing. They all call `annotate`
+;;; now. The core matches, ranks and confirms on the LABEL alone, so an
+;;; annotation changes what you read and never what you get.
+;;;
+;;; An annotator answers with one string, or with a LIST of fields:
+;;;
+;;;   (marginalia! 'file (lambda (n) (list (mode n) (size n) (date n))))
+;;;
+;;; `annotate` measures each field over the whole candidate set and pads
+;;; it, so field N lines up with field N on every other row and the
+;;; annotation reads as a table. A field that wants its text on the right
+;;; (a size) pads itself — the mechanism only makes the columns.
+
+(define *marginalia* '())    ; ((CATEGORY FN) ...)
+
+(define (marginalia! category fn)
+  (set! *marginalia*
+    (cons (list category fn)
+          (remove (lambda (e) (equal? (car e) category)) *marginalia*))))
+
+(define (marginalia-for category)
+  (let ((e (assoc category *marginalia*)))
+    (and e (car (cdr e)))))
+
+;; one candidate's fields — a single string is a list of one
+(define (marginalia-row f n)
+  (let ((v (f n)))
+    (cond ((string? v) (list v))
+          ((pair? v) v)
+          (else '()))))
+
+;; the width of every column, over the whole set. A row with fewer fields
+;; than the widest keeps the columns it does not reach.
+(define (marginalia-widths rows)
+  (fold (lambda (ws r)
+          (let loop ((fs r) (old ws) (out '()))
+            (if (null? fs)
+                (append (reverse out) old)
+                (loop (cdr fs)
+                      (if (null? old) '() (cdr old))
+                      (cons (max (string-length (car fs))
+                                 (if (null? old) 0 (car old)))
+                            out)))))
+        '() rows))
+
+;; a row whose last fields say nothing ends early — padding a column that
+;; is empty to the end only makes an annotation out of blanks
+(define (marginalia-trim fields)
+  (let loop ((fs (reverse fields)))
+    (cond ((null? fs) '())
+          ((equal? (car fs) "") (loop (cdr fs)))
+          (else (reverse fs)))))
+
+;; the fields as the one string the core carries. The last field goes in
+;; unpadded: trailing blanks would only pad the end of the line.
+(define (marginalia-join fields widths)
+  (let loop ((fs fields) (ws widths) (out ""))
+    (if (null? fs)
+        out
+        (let ((txt (if (null? (cdr fs))
+                       (car fs)
+                       (string-pad-right (car fs) (if (null? ws) 0 (car ws))))))
+          (loop (cdr fs)
+                (if (null? ws) '() (cdr ws))
+                (if (equal? out "") txt (string-append out "  " txt)))))))
+
+;; a category with no annotator hands its candidates back as plain labels
+(define (annotate category names)
+  (let ((f (marginalia-for category)))
+    (if (not f)
+        names
+        (let* ((rows (map (lambda (n) (marginalia-row f n)) names))
+               (ws (marginalia-widths rows)))
+          (let loop ((ns names) (rs rows) (out '()))
+            (if (null? ns)
+                (reverse out)
+                (loop (cdr ns) (cdr rs)
+                      (cons (list (car ns)
+                                  (marginalia-join (marginalia-trim (car rs)) ws))
+                            out))))))))
+
 ;;; --- modes ------------------------------------------------------------------
 ;;; A major mode = mode-name buffer-local + a setup fn (local keys, vars).
 ;;; The registry, auto-mode-alist, everything: userland.
@@ -459,6 +719,39 @@
 (define (desktop-apply-mode! buf mode)
   (switch-to-buffer! buf)
   (set-mode! mode))
+
+;;; --- globals that outlive a restart (savehist) ---------------------------------
+;;; The desktop saves buffers, windows and buffer-locals. A global was
+;;; simply lost: the minibuffer history is a global, so every restart
+;;; threw away which commands you use and M-x fell back to alphabetical.
+;;;
+;;; A variable joins by naming itself once. GET answers with the value to
+;;; write; PUT receives it back after a restore. Only the VALUE travels,
+;;; so the two closures stay here — a closure in the desktop file restores
+;;; as a dangling frame and cannot be called.
+;;;
+;;;   (persist-global! 'my-thing (lambda () *my-thing*)
+;;;                              (lambda (v) (set! *my-thing* v)))
+
+(define *desktop-globals* '())   ; ((KEY GET PUT) ...)
+
+(define (persist-global! key get put)
+  (set! *desktop-globals*
+    (cons (list key get put)
+          (remove (lambda (e) (equal? (car e) key)) *desktop-globals*))))
+
+;; what the desktop writes
+(define (desktop-globals)
+  (map (lambda (e) (list (car e) ((cadr e)))) *desktop-globals*))
+
+;; what the desktop hands back. A key nobody claims any more is dropped,
+;; so a desktop file written by an older editor still boots.
+(define (desktop-globals! saved)
+  (for-each
+    (lambda (e)
+      (let ((hit (assoc (car e) saved)))
+        (when hit ((car (cdr (cdr e))) (cadr hit)))))
+    *desktop-globals*))
 
 ;;; --- minor modes --------------------------------------------------------------
 ;;; A minor mode = its name in the buffer-local 'minor-modes list + an
@@ -524,8 +817,66 @@
   (let ((m (auto-mode-for path)))
     (when m (set-mode! m))))
 
+;; The directory the file candidates come from. A candidate is a bare
+;; name, so the annotator cannot stat it on its own; the file prompt sets
+;; this as it lists, through file-candidates below.
+(define *marginalia-file-dir* "")
+
+;; what a file name means in a prompt: the mode it would OPEN in, then its
+;; size and its date, the same three dired shows. list-dir marks a
+;; directory with a trailing "/", and a directory opens in Dired. A name
+;; no entry above claims opens in Fundamental, which is a mode like any
+;; other — so the column stays full and says something true. The size pads
+;; itself: a size reads right-aligned, and only the field knows that.
+(marginalia! 'file
+  (lambda (name)
+    (let ((st (file-stat (string-append *marginalia-file-dir* name))))
+      (list (if (string-suffix? "/" name)
+                "Dired"
+                (or (auto-mode-for name) "Fundamental"))
+            (string-pad-left (car (cdr st)) 6)
+            (car (cdr (cdr st)))))))
+
 (define-mode "text-mode" (lambda () #t))
 (define-mode "scheme-mode" (lambda () #t))   ; scheme grammar pending
+
+(mode-doc! "text-mode"
+  "Plain prose: `.md` and `.txt`. The mode adds no keys. `C-c C-v` renders the file, because the renderer reads the extension.")
+
+;;; --- the name at point --------------------------------------------------------
+;;; Two callers read the name under the cursor and they disagree about the
+;;; alphabet, on purpose. `M-.` must not read `foo/2` or `a+b` as one
+;;; name, so it stops at the code alphabet. Help also reads Scheme globals
+;;; like `*mode-docs*`, so it adds `*`. One scanner, two alphabets.
+
+(define *symbol-chars* "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_?!-")
+
+;; Scan out from point over CHARS and return the name, or #f. Point sits
+;; before the character it is on, so a point just after the last character
+;; of a name still reads that name — the left scan finds it and the right
+;; scan stops at once, the way Emacs answers.
+;;
+;; The scan reads one byte at a time, and substring-bytes floors both ends
+;; to a character boundary. So a one-byte slice of a multi-byte character
+;; comes back empty, and an empty slice is not a name character — the scan
+;; stops there, which is the correct answer. The guard also matters
+;; because string-index rejects an empty pattern.
+(define (symbol-at-point-in chars)
+  (let* ((text (buffer-text (current-buffer)))
+         (size (string-byte-length text))
+         (p (point))
+         (word? (lambda (c) (and (not (equal? c "")) (string-index chars c)))))
+    (let ((s (let loop ((i p))
+               (if (and (> i 0) (word? (substring-bytes text (- i 1) i)))
+                   (loop (- i 1))
+                   i)))
+          (e (let loop ((i p))
+               (if (and (< i size) (word? (substring-bytes text i (+ i 1))))
+                   (loop (+ i 1))
+                   i))))
+      (and (> e s) (substring-bytes text s e)))))
+
+(define (symbol-at-point) (symbol-at-point-in *symbol-chars*))
 
 ;;; --- context providers --------------------------------------------------------
 ;;; A mode can explain what the user is looking at: (register-context-provider!
@@ -623,6 +974,9 @@
 
 (define-mode "html-mode" (lambda () #t))
 
+(mode-doc! "html-mode"
+  "An HTML file. The mode adds no keys and no grammar. `C-c C-v` shows the rendered page, because the renderer reads the extension.")
+
 ;; preview-mode: render the buffer instead of showing its source.
 ;; Renderer picked by *preview-renderers* (extension -> renderer); the
 ;; frontend knows "html" and "markdown". Add your own:
@@ -676,6 +1030,17 @@
 (define-mode "elixir-mode" (ts-mode "elixir"))
 (define-mode "json-mode" (ts-mode "json"))
 (define-mode "rust-mode" (ts-mode "rust"))
+
+;; A language mode sets one buffer-local: `ts-lang`. That local starts the
+;; incremental parser, and the parser supplies the colours, the sexp
+;; motion and imenu. The mode adds no keys of its own — the global keys do
+;; the work, and they need the parser to answer.
+(mode-doc! "elixir-mode"
+  "Elixir, parsed. You get the colours, `C-M-f` and `C-M-b` over forms, and `M-g i` for the definitions in the file.")
+(mode-doc! "json-mode"
+  "JSON, parsed. You get the colours, and `C-M-f` and `C-M-b` step over whole objects and arrays.")
+(mode-doc! "rust-mode"
+  "Rust, parsed. You get the colours, `C-M-f` and `C-M-b` over forms, and `M-g i` for the definitions in the file.")
 
 ;;; --- sexp / structural navigation (tree-sitter) ------------------------------
 
@@ -844,10 +1209,14 @@
         (begin (mover) (loop (+ i 1))))))
 
 (define-command "scroll-up-command" "Scroll text upward nearly a full screen"
-  (lambda () (move-lines (- (window-rows) 2) next-line!)))
+  (lambda ()
+    (or (preview-scroll! (- (window-rows) 2))
+        (move-lines (- (window-rows) 2) next-line!))))
 
 (define-command "scroll-down-command" "Scroll text downward nearly a full screen"
-  (lambda () (move-lines (- (window-rows) 2) previous-line!)))
+  (lambda ()
+    (or (preview-scroll! (- 2 (window-rows)))
+        (move-lines (- (window-rows) 2) previous-line!))))
 
 (define-command "recenter-top-bottom" "Recenter point in the window"
   (lambda () (recenter!)))
@@ -1113,6 +1482,13 @@
               (substring input (+ idx 1) (string-length input)))
         (list "" input))))
 
+;; A candidate is a bare name and the annotator stats a path, so the
+;; listing says which directory it listed. Every file prompt goes through
+;; here, and nothing else has to know the annotator needs it.
+(define (file-candidates dir names)
+  (set! *marginalia-file-dir* dir)
+  (annotate 'file names))
+
 ;; (file-complete input selected) -> (list new-input candidates)
 ;; selected: a candidate the user arrowed onto — inserted into the path,
 ;; directories auto-descend and list their contents.
@@ -1123,8 +1499,8 @@
       (let ((parts (path-split (normalize-file-input input0))))
         (let ((ni (string-append (car parts) selected)))
           (if (string-suffix? "/" selected)
-              (list ni (list-dir ni))
-              (list ni (list selected)))))
+              (list ni (file-candidates ni (list-dir ni)))
+              (list ni (file-candidates (car parts) (list selected))))))
       (let ((input (normalize-file-input input0)))
         (let ((parts (path-split input)))
           (let ((dir (car parts))
@@ -1132,14 +1508,14 @@
             (let ((entries (list-dir dir)))
               (let ((matches (filter (lambda (e) (string-prefix? base e)) entries)))
                 (if (null? matches)
-                    (list input entries)
+                    (list input (file-candidates dir entries))
                     (let ((ni (string-append dir (common-prefix matches))))
                       (if (and (null? (cdr matches))
                                (string-suffix? "/" (car matches)))
                           ;; unique directory: descend and list (stop there —
                           ;; don't chain-complete into a lone file)
-                          (list ni (list-dir ni))
-                          (list ni matches)))))))))))
+                          (list ni (file-candidates ni (list-dir ni)))
+                          (list ni (file-candidates dir matches))))))))))))
 
 ;; live listing while typing (vertico-style) — but only re-list when the
 ;; DIRECTORY part changes; basename narrowing is the core's display filter.
@@ -1152,14 +1528,14 @@
         #t
         (begin
           (set! *file-nav-dir* dir)
-          (minibuffer-set-candidates! (list-dir dir))))))
+          (minibuffer-set-candidates! (file-candidates dir (list-dir dir)))))))
 
 ;; ONE file prompt (dup #17): minibuffer with filename completion, rooted
 ;; at default-directory. K receives the confirmed text exactly as typed.
 (define (read-file-name prompt k)
   (let ((dd (default-directory)))
     (set! *file-nav-dir* dd)
-    (minibuffer-read* prompt (list-dir dd)
+    (minibuffer-read* prompt (file-candidates dd (list-dir dd))
       (list (list 'complete file-complete)
             (list 'change file-nav-change)
             (list 'initial dd)
@@ -1291,12 +1667,20 @@
 (define-command "find-file" "Visit a file, prompting with filename completion"
   (lambda () (read-file-name "Find file: " visit)))
 
-;; ONE candidate shape for every buffer prompt (dup #6): name + path
-;; annotation, MRU-ordered. Internals (space-prefixed) stay hidden, as
-;; ibuffer hides them.
+;; what a buffer name means in a prompt: its mode, then the file it is
+;; visiting. A buffer with no mode and no file annotates to two blanks,
+;; which is the truth about it.
+(marginalia! 'buffer
+  (lambda (b)
+    (list (or (buffer-local b 'mode-name) "Fundamental")
+          (or (buffer-path b) ""))))
+
+;; ONE candidate shape for every buffer prompt (dup #6): the name, the
+;; marginalia annotator supplies the rest, MRU-ordered. Internals
+;; (space-prefixed) stay hidden, as ibuffer hides them.
 (define (buffer-candidates-all)
-  (map (lambda (b) (list b (or (buffer-path b) "")))
-       (filter (lambda (b) (not (string-prefix? " " b))) (buffer-list-mru))))
+  (annotate 'buffer
+    (filter (lambda (b) (not (string-prefix? " " b))) (buffer-list-mru))))
 
 ;; current excluded: first candidate = the buffer you just left, so
 ;; C-x b RET toggles between two buffers (Emacs buffer ring)
@@ -1353,24 +1737,56 @@
             (message (string-append "Killed " target))))))))
 
 ;;; --- display-buffer & popups (popper) ----------------------------------------
-;;; *display-buffer-alist*: (pattern action) rules; pattern is a substring
-;;; match on the buffer name; actions: 'same | 'popup (bottom side window).
-;;; The popup window is popper-style: one at a time, C-` toggles it.
+;;; *display-buffer-alist* says WHERE a buffer goes. It is Emacs' alist of
+;;; the same name, in the shape this editor needs: a list of
+;;;
+;;;   (PATTERN ACTION PARAMS)
+;;;
+;;; read in order, first match wins. PATTERN is a substring of the buffer
+;;; name. ACTION is one of
+;;;
+;;;   'same    show it in the selected window
+;;;   'popup   a side window: one per frame, reused, and it floats
+;;;
+;;; PARAMS is a plist, and every key has a default, so a rule says only
+;;; what it wants to change:
+;;;
+;;;   'side   'right | 'left | 'top | 'bottom     default 'right
+;;;   'size   the share of the frame it takes     default 0.38
+;;;
+;;; A popup floats over the frame — see popup-float! for what that means
+;;; and what it deliberately does not change. `C-\`` toggles it and
+;;; `C-M-\`` settles it into the layout, on the side it already floats on.
+
+(define *display-buffer-defaults* (list 'side 'right 'size 0.38))
 
 (define *display-buffer-alist*
-  '(("*shell*" popup) ("*messages*" popup) ("*llm*" popup)))
+  (list (list "*shell*" 'popup '())
+        (list "*messages*" 'popup '())
+        (list "*llm*" 'popup '())))
 
-(define (add-display-rule! pattern action)
+;; PARAMS is optional, so every rule written before the params existed
+;; still reads the same and takes the defaults
+(define (add-display-rule! pattern action &optional params)
   (set! *display-buffer-alist*
-    (cons (list pattern action) *display-buffer-alist*)))
+    (cons (list pattern action (if params params '()))
+          *display-buffer-alist*)))
 
-(define (display-action-for name)
+(define (display-rule-for name)
   (let loop ((rules *display-buffer-alist*))
-    (if (null? rules)
-        'same
-        (if (string-contains? name (car (car rules)))
-            (cadr (car rules))
-            (loop (cdr rules))))))
+    (cond ((null? rules) (list name 'same '()))
+          ((string-contains? name (car (car rules))) (car rules))
+          (else (loop (cdr rules))))))
+
+(define (display-action-for name) (cadr (display-rule-for name)))
+
+;; a rule's own value, else the default for that key
+(define (display-param name key)
+  (let* ((rule (display-rule-for name))
+         (rest (cdr (cdr rule)))
+         (params (if (null? rest) '() (car rest)))
+         (v (plist-get params key)))
+    (if v v (plist-get *display-buffer-defaults* key))))
 
 ;; frame-local policy state: values keyed by the selected frame — each
 ;; browser gets its own popup, its own ibuffer home window. Pruned when a
@@ -1397,8 +1813,26 @@
     (set! *frame-locals*
       (filter (lambda (e) (member (car e) live)) *frame-locals*))))
 
-(define (popup-window) (frame-local 'popup-window))
-(define (popup-buffer) (frame-local 'popup-buffer))
+;; The window that floats. The frame local lives in memory and dies with
+;; the daemon, but the floating class is a buffer-local and comes back
+;; with the desktop — so a restored popup is still a popup, and `C-\`` and
+;; `C-M-\`` still reach it. Read the class when the local has nothing
+;; live to say.
+(define (popup--by-class)
+  (let loop ((ws (window-list)))
+    (cond ((null? ws) #f)
+          ((equal? (buffer-local (cadr (car ws)) 'window-class) "popup")
+           (car (car ws)))
+          (else (loop (cdr ws))))))
+
+(define (popup-window)
+  (let ((w (frame-local 'popup-window)))
+    (if (and w (window-exists? w)) w (popup--by-class))))
+
+(define (popup-buffer)
+  (or (frame-local 'popup-buffer)
+      (let ((w (popup--by-class)))
+        (and w (cadr (assoc w (window-list)))))))
 
 (define (window-exists? id)
   (assoc id (window-list)))
@@ -1410,17 +1844,45 @@
        (window-exists? (popup-window))
        (not (null? (cdr (window-list))))))
 
+;; A popup FLOATS, and only visibly: it stays an ordinary window in the
+;; tree, so every window command still reaches it. The class takes its
+;; split out of the flow, so the window it covers keeps the whole frame
+;; underneath. SIDE is the edge it floats against, or #f to stop
+;; floating — `C-M-\`` passes #f and the popup becomes an ordinary split,
+;; which is popper's toggle-type under popper's key.
+(define (popup-float! name side &optional size)
+  (buffer-set-local! name 'window-class
+    (and side (string-append "popup popup-" (symbol->string side))))
+  ;; the share is a number, and CSS cannot read a Scheme list — hand it
+  ;; over as a custom property the stylesheet already reads
+  (buffer-set-local! name 'window-style
+    (and side size
+         (string-append "--popup-size:" (number->string (* 100 size)) "%"))))
+
+;; split-window! always puts the new window SECOND, so a side window on
+;; the left or the top takes the ratio directly and then swaps into
+;; place. window-swap! follows the buffer, so the active window is the
+;; side window either way.
+(define (popup--split-for side size)
+  (let ((first? (or (equal? side 'left) (equal? side 'top))))
+    (split-window! (if (or (equal? side 'top) (equal? side 'bottom)) 'v 'h)
+                   (if first? size (- 1 size)))
+    (other-window!)
+    (if first? (window-swap! (if (equal? side 'left) 'left 'up)))))
+
 (define (popup-show name)
-  (set-frame-local! 'popup-buffer name)
-  (if (popup-open?)
-      (begin
-        (select-window! (popup-window))
-        (switch-to-buffer! name))
-      (begin
-        (split-window! 'v 0.7)          ; bottom ~30% side window
-        (other-window!)
-        (set-frame-local! 'popup-window (active-window))
-        (switch-to-buffer! name))))
+  (let ((side (display-param name 'side))
+        (size (display-param name 'size)))
+    (set-frame-local! 'popup-buffer name)
+    (popup-float! name side size)
+    (if (popup-open?)
+        (begin
+          (select-window! (popup-window))
+          (switch-to-buffer! name))
+        (begin
+          (popup--split-for side size)
+          (set-frame-local! 'popup-window (active-window))
+          (switch-to-buffer! name)))))
 
 (define (display-buffer name)
   (if (equal? (display-action-for name) 'popup)
@@ -1453,15 +1915,30 @@
             (select-window! me)
             w)))))
 
-(define-command "popup-toggle" "Toggle the bottom popup window"
+(define-command "popup-toggle" "Toggle the floating popup window"
   (lambda ()
     (if (popup-open?)
         (begin
           (delete-window-id! (popup-window))
-          (set-frame-local! 'popup-window #f))
+          (set-frame-local! 'popup-window #f)
+          ;; the buffer stops floating the moment it stops being the
+          ;; popup, or it would float again in an ordinary window
+          (if (popup-buffer) (popup-float! (popup-buffer) #f)))
         (if (popup-buffer)
             (popup-show (popup-buffer))
             (message "No popup buffer yet")))))
+
+;; popper-toggle-type: the popup you want to keep stops floating and
+;; becomes an ordinary window, in the place it already occupies.
+(define-command "popup-bufferize"
+  "Turn the floating popup into an ordinary window"
+  (lambda ()
+    (if (not (popup-open?))
+        (message "No popup window")
+        (let ((buf (current-buffer)))
+          (popup-float! buf #f)
+          (set-frame-local! 'popup-window #f)
+          (message (string-append buf " is an ordinary window now"))))))
 
 ;; q in special buffers: close the popup, or kill this buffer and go back.
 ;; Every buffer that binds q is a listing you can make again — dired,
@@ -1471,10 +1948,13 @@
 ;; most recent buffer that is not on screen in the window.
 (define-command "quit-window" "Close the popup, or kill this buffer and go back"
   (lambda ()
-    (if (and (popup-open?) (equal? (active-window) (popup-window)))
+    (cond
+      ((and (popup-open?) (equal? (active-window) (popup-window)))
         (begin
+          (popup-float! (current-buffer) #f)
           (delete-window-id! (popup-window))
-          (set-frame-local! 'popup-window #f))
+          (set-frame-local! 'popup-window #f)))
+      (else
         (let ((cur (current-buffer)))
           ;; a file with edits you did not save is not a listing: say so and
           ;; stay. A listing reports itself as modified — it has no path.
@@ -1483,7 +1963,7 @@
               (begin
                 ;; a live process (tail, shell) dies with its buffer
                 (if (process-running? cur) (process-kill! cur))
-                (buffer-kill! cur)))))))
+                (buffer-kill! cur))))))))
 
 ;; q quits every buffer you cannot type in. The read-only keymap sits
 ;; between the buffer's own map and the global one, so a mode that wants q
@@ -1655,6 +2135,9 @@
       (local-set-key "q" "collect-quit")
       (buffer-set-read-only! buf #t))))
 
+(mode-doc! "collect-mode"
+  "The prompt's candidates, as a buffer you can move around in. Moving previews the candidate in the other window. `RET` confirms it in the prompt you came from.")
+
 ;; Emacs' C-x C-q. The way out of a read-only buffer, and the reason a mode
 ;; may open files read-only without trapping the reader.
 (define-command "read-only-mode" "Toggle whether this buffer refuses edits"
@@ -1686,16 +2169,25 @@
 (define-command "view-messages" "Display the *messages* buffer"
   (lambda () (display-buffer "*messages*")))
 
+;; DELTA in lines, positive forward. A preview window has no lines, so
+;; scroll-window! turns the count into pixels for it — the caller says
+;; "a screen" and every kind of window understands.
+(define (scroll-other-window-by! delta)
+  (let ((wins (window-list)))
+    (if (null? (cdr wins))
+        (message "No other window")
+        (let loop ((ws wins))
+          (if (equal? (car (car ws)) (active-window))
+              (let ((next (if (null? (cdr ws)) (car wins) (car (cdr ws)))))
+                (scroll-window! (car next) delta))
+              (loop (cdr ws)))))))
+
 (define-command "scroll-other-window" "Scroll the next window up nearly a full screen"
-  (lambda ()
-    (let ((wins (window-list)))
-      (if (null? (cdr wins))
-          (message "No other window")
-          (let loop ((ws wins))
-            (if (equal? (car (car ws)) (active-window))
-                (let ((next (if (null? (cdr ws)) (car wins) (car (cdr ws)))))
-                  (scroll-window! (car next) (- (window-rows) 2)))
-                (loop (cdr ws))))))))
+  (lambda () (scroll-other-window-by! (- (window-rows) 2))))
+
+(define-command "scroll-other-window-down"
+  "Scroll the next window down nearly a full screen"
+  (lambda () (scroll-other-window-by! (- 2 (window-rows)))))
 
 ;;; --- shell (comint) --------------------------------------------------------
 ;;; RET in a process buffer sends the current line to the process (deleting
@@ -1717,6 +2209,9 @@
     (let ((buf (current-buffer)))
       (unless (process-running? buf)
         (start-process! buf *shell-command*)))))
+
+(mode-doc! "shell-mode"
+  "A shell under the editor. `RET` sends the text after the process mark to the shell. A restart keeps the transcript and starts a new shell.")
 
 (define-command "shell" "Run an inferior shell in the *shell* buffer"
   (lambda ()
@@ -1764,6 +2259,9 @@
         (local-set-key "q" "quit-window")
         (when (and path (not (process-running? buf)))
           (start-process! buf (tail-command path)))))))
+
+(mode-doc! "tail-mode"
+  "A file that follows itself, local or over `ssh`. New lines append at the end. The buffer is read-only, and `q` closes it.")
 
 (define (tail-open path)
   (if (and (remote-path? path) (not (remote-parse path)))
@@ -1832,6 +2330,9 @@
 ;; carries the block model ('agent-saved-mark) is a rich companion surface:
 ;; it opts into the same native renderer as agent threads, RET sends, and
 ;; a stale "⋯ thinking" from before a restart is swept away.
+(mode-doc! "chat-mode"
+  "A conversation with a model. `RET` sends what you typed and `S-RET` starts a new line. `C-g` stops the answer. `C-c C-k` clears the conversation but keeps the model.")
+
 (define-mode "chat-mode"
   (lambda ()
     (let ((buf (current-buffer)))
@@ -2774,10 +3275,22 @@
 ;;; truth (the record), the per-send system preamble (group pull-context
 ;;; can never go stale), and the chat's tool surface (registry + presets).
 
-;; the tool dispatcher the direct lane hands the loop — a named global so
-;; the closure's environment is the global frame (never GC'd while it
-;; rides inside the backend's turn task)
-(define (chat-tool-dispatch name args) (llm-tool-call name args))
+;; the tool dispatcher the direct lane hands the loop — per slug, so every
+;; buffer edit a tool call makes is attributed to the thread (see
+;; buffer-authors). Each closure is kept in this global alist because the
+;; backend's turn task holds it OUTSIDE the store: a frame only reachable
+;; from Elixir is one the interpreter's GC collects mid-turn.
+(define *chat-dispatchers* '())
+
+(define (chat-tool-dispatch slug)
+  (let ((e (assoc slug *chat-dispatchers*)))
+    (if e
+        (car (cdr e))
+        (let ((d (lambda (name args)
+                   (with-edit-author (string-append "agent:" slug)
+                     (lambda () (llm-tool-call name args))))))
+          (set! *chat-dispatchers* (cons (list slug d) *chat-dispatchers*))
+          d))))
 
 ;; the mcp package loads after this file, and a user can unload it. The
 ;; note names the servers THIS chat holds, never the whole registry.
@@ -2800,7 +3313,7 @@
                                      (chat-preamble buf))
                       (chat-preamble buf))
           'tools (if tools? (chat-tools buf) '())
-          'dispatcher chat-tool-dispatch)))
+          'dispatcher (chat-tool-dispatch slug))))
 
 (agent-context-fn! (lambda (slug display) (chat-thread-context slug display)))
 
@@ -3083,7 +3596,7 @@
 
 ;; C-c q : ask from anywhere. In a grouped buffer (its chat included) the
 ;; prompt becomes a turn in the group's one chat; ungrouped, it goes to
-;; the global *chat* bottom popup — follow-ups with C-c RET, C-` dismisses.
+;; the global *chat* popup — follow-ups with C-c RET, C-` dismisses.
 (add-display-rule! "*chat*" 'popup)
 (add-display-rule! "*llm:" 'popup)
 (add-display-rule! "*llm-costs*" 'popup)
@@ -3177,6 +3690,13 @@
 (define *minibuffer-history* '())   ; ((key (item ...)) ...), most recent first
 (define *minibuffer-history-max* 50)
 
+;; savehist: which commands, themes and searches you use is worth more
+;; than one session. Every keyed history rides in this one variable, so
+;; M-x, apropos, project, ripgrep and the theme prompt all persist here.
+(persist-global! 'minibuffer-history
+  (lambda () *minibuffer-history*)
+  (lambda (v) (set! *minibuffer-history* v)))
+
 (define (history-items key)
   (let ((e (assoc key *minibuffer-history*)))
     (if e (cadr e) '())))
@@ -3201,20 +3721,19 @@
 
 ;;; --- M-x and eval ----------------------------------------------------------
 
-;; marginalia: each candidate carries its keybinding and docstring
+;; what a command name means in a prompt: how to reach it, and what it
+;; does. Two fields, so the docs line up under each other whether or not
+;; the command above them has a binding.
 (define (command-annotation c)
-  (let ((key (key-for-command c))
-        (doc (command-doc c)))
-    (cond ((equal? key "") doc)
-          ((equal? doc "") key)
-          (else (string-append key " · " doc)))))
+  (list (key-for-command c) (command-doc c)))
+
+(marginalia! 'command command-annotation)
 
 (define-command "execute-extended-command"
   "Run a command by name, with its keybinding and doc alongside"
   (lambda ()
     (minibuffer-read "M-x "
-      (map (lambda (c) (list c (command-annotation c)))
-           (history-order 'M-x (command-names)))
+      (annotate 'command (history-order 'M-x (command-names)))
       (lambda (cmd)
         (history-push! 'M-x cmd)
         (run-command cmd)))))
@@ -3493,7 +4012,13 @@
 (global-set-key "M-m" "back-to-indentation")
 (global-set-key "C-c C-v" "preview-mode")
 (global-set-key "C-`" "popup-toggle")
+(global-set-key "C-M-`" "popup-bufferize")
 (global-set-key "C-M-v" "scroll-other-window")
+;; the other window, without leaving this one — the reference page beside
+;; the work is the case this exists for. org-mode keeps M-<up>/M-<down>
+;; for its subtrees: a buffer-local key wins over a global one.
+(global-set-key "M-<down>" "scroll-other-window")
+(global-set-key "M-<up>" "scroll-other-window-down")
 (global-set-key "C-v" "scroll-up-command")
 (global-set-key "M-v" "scroll-down-command")
 (global-set-key "<next>" "scroll-up-command")
@@ -3559,6 +4084,9 @@
 (public! 'buffer-append! "(buffer-append! NAME TEXT) — append; the usual way to add text")
 (public! 'buffer-insert! "(buffer-insert! NAME BYTE-POS TEXT)")
 (public! 'buffer-delete-range! "(buffer-delete-range! NAME BYTE-POS BYTE-LEN)")
+(public! 'buffer-authors "(buffer-authors NAME) -> (START END AUTHOR) spans: who wrote each byte range")
+(public! 'buffer-edit-log "(buffer-edit-log NAME) -> (VERSION AUTHOR POS INS DEL) records, newest first")
+(public! 'with-edit-author "(with-edit-author AUTHOR THUNK) — attribute THUNK's buffer edits to AUTHOR")
 (public! 'buffer-path "(buffer-path NAME) -> file path or #f")
 (public! 'buffer-modified? "(buffer-modified? NAME) -> unsaved changes?")
 (public! 'buffer-local "(buffer-local NAME KEY) -> buffer-local value or #f")
@@ -3585,6 +4113,8 @@
 (public! 'set-mark! "(set-mark! BYTE-POS or #f)")
 (public! 'buffer-substring "(buffer-substring START END) of the current buffer")
 (public! 'line-text "Text of the current line")
+(public! 'symbol-at-point "(symbol-at-point) — the name around point, or #f")
+(public! 'symbol-at-point-in "(symbol-at-point-in CHARS) — the name around point over the alphabet CHARS, or #f")
 (public! 'end-of-buffer! "Move point to the end")
 (public! 'beginning-of-buffer! "Move point to the start")
 
@@ -3601,7 +4131,8 @@
 (public! 'other-window! "Select the next window")
 (public! 'display-buffer "(display-buffer NAME) — honors display rules (popups)")
 (public! 'display-buffer-other-window! "(display-buffer-other-window! NAME) — show NAME without leaving this window; picks the window at display time (reuse → other → split)")
-(public! 'add-display-rule! "(add-display-rule! SUBSTRING 'popup|'same)")
+(public! 'add-display-rule!
+  "(add-display-rule! SUBSTRING 'popup|'same) — popup floats over the right of the frame; one per frame, reused")
 
 (category! 'interaction)
 (public! 'message "(message TEXT) — echo area")
@@ -3621,6 +4152,8 @@
 (public! 'local-remap! "(local-remap! FROM-COMMAND TO-COMMAND) — Emacs [remap]: every key bound to FROM runs TO in this buffer (arrows, C-n/C-p, user bindings alike)")
 (public! 'local-remap*! "(local-remap*! BUF FROM-COMMAND TO-COMMAND) — remap in an explicit buffer")
 (public! 'define-mode "(define-mode NAME SETUP) — major mode; SETUP must rebuild from locals")
+(public! 'marginalia! "(marginalia! CATEGORY FN) — FN turns one candidate of CATEGORY ('file 'buffer 'command) into the text beside it; replaces the annotator for that category")
+(public! 'annotate "(annotate CATEGORY NAMES) — NAMES as (LABEL HINT) candidates, through CATEGORY's annotator; NAMES unchanged when nothing registered one")
 (public! 'set-mode! "(set-mode! NAME) on the current buffer")
 (public! 'add-hook! "(add-hook! 'name-hook FN)")
 (public! 'overlay-set! "(overlay-set! NAME TAG ((START END FACE) ...)) — replaces TAG's ranges")

@@ -81,11 +81,14 @@ defmodule Aimax.Core.Session do
     :ok
   end
 
+  # Sorted by the downcased name: a plain sort is ASCII, and a mode command
+  # takes the mode's name verbatim, so "Dired" sat above every lowercase
+  # command at the top of M-x instead of among the d's.
   def command_names do
     Aimax.Core.SchemeAPI.commands_table()
     |> :ets.tab2list()
     |> Enum.map(&elem(&1, 0))
-    |> Enum.sort()
+    |> Enum.sort_by(&String.downcase/1)
   end
 
   # --- server ----------------------------------------------------------------
@@ -397,6 +400,7 @@ defmodule Aimax.Core.Session do
         "(set-modeline-extra! TEXT) — set the extra text that the modeline shows.",
       "llm-model" => "(llm-model) — return the active LLM model id.",
       "eval-string" => "(eval-string SRC) — evaluate SRC as Scheme; return the last value.",
+      "with-edit-author" => "(with-edit-author AUTHOR THUNK) — run THUNK; buffer edits it makes are attributed to the string AUTHOR.",
       "eval-string-safe" =>
         "(eval-string-safe SRC) — evaluate SRC; return (ok VAL) or (error MSG).",
       "symbol-value" => "(symbol-value 'NAME) — return the global value of the symbol.",
@@ -915,6 +919,24 @@ defmodule Aimax.Core.Session do
       end,
       "llm-model" => fn [] -> Aimax.Core.LLM.model() end,
       "eval-string" => fn [src], store -> eval_src.(src, store) end,
+      # (with-edit-author AUTHOR THUNK) — every buffer mutation THUNK makes
+      # is attributed to AUTHOR (see buffer-authors). The try/after restore
+      # is the point: a raising handler must not leave the author stuck on
+      # the session, misattributing every later keystroke.
+      "with-edit-author" => fn [author, thunk], store ->
+        prev = Process.get(:aimax_edit_author)
+        if author == false,
+          do: Process.delete(:aimax_edit_author),
+          else: Process.put(:aimax_edit_author, to_string(author))
+
+        try do
+          Aimax.Scheme.Eval.apply_fn(thunk, [], store)
+        after
+          if prev,
+            do: Process.put(:aimax_edit_author, prev),
+            else: Process.delete(:aimax_edit_author)
+        end
+      end,
       # (eval-string-safe SRC) -> (ok VAL) | (error MSG) — the catch this
       # dialect lacks; the eval-scheme tool's did-you-mean feedback needs to
       # observe the error instead of aborting the whole handler

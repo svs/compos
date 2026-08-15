@@ -43,7 +43,7 @@ defmodule AimaxProxy do
       %{"method" => "tools/call", "id" => id, "params" => %{"name" => name, "arguments" => args}} ->
         args_b64 = %{} |> Map.merge(args || %{}) |> :json.encode() |> IO.iodata_to_binary() |> Base.encode64()
 
-        case rpc_eval(~s{(mcp-proxy-call "#{name}" "#{args_b64}")}) do
+        case rpc_eval(~s{(mcp-proxy-call "#{name}" "#{args_b64}"#{author_arg()})}) do
           {:ok, b64} ->
             reply(id, %{content: [%{type: "text", text: b64 |> unprint() |> Base.decode64!()}]})
 
@@ -65,6 +65,17 @@ defmodule AimaxProxy do
   # eval returns the printed value; for a base64 payload that is just the
   # string in quotes — strip them
   defp unprint(printed), do: String.trim(printed, "\"")
+
+  # AIMAX_AGENT (set by the ACP backend at spawn) names the thread this
+  # proxy serves; it rides into mcp-proxy-call so buffer edits carry it.
+  # Slugs are machine-generated, but strip quote-breaking bytes anyway —
+  # this string lands inside an eval form.
+  defp author_arg do
+    case System.get_env("AIMAX_AGENT") do
+      nil -> ""
+      slug -> ~s{ "agent:#{String.replace(slug, ~r/["\\\n]/, "")}"}
+    end
+  end
 
   defp rpc_eval(code) do
     req =

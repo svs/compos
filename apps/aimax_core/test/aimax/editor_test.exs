@@ -464,7 +464,7 @@ defmodule Aimax.EditorTest do
 
       # x executes the flagged deletion after confirmation
       press(["x"])
-      assert Editor.render_state().minibuffer.prompt =~ "Delete 1 file(s)"
+      assert Editor.render_state().minibuffer.prompt =~ "delete 1 file"
       type("yes")
       press(["RET"])
       refute File.exists?(Path.join(root, "alpha.txt"))
@@ -513,6 +513,25 @@ defmodule Aimax.EditorTest do
       assert filters =~ "dot"
       {:ok, _} = Aimax.Core.Session.eval(~s{(begin (switch-to-buffer! "#{root}") (set-mode! "Dired"))})
       refute Buffer.text(root) =~ ".hidden"
+      assert Buffer.text(root) =~ "alpha.txt"
+    end
+
+    # The listing was in the buffer and the window was blank: the buffer
+    # kept 'render-mode "blocks" from the mode before it, and the client
+    # draws blocks for a leaf that says "blocks". Both ends refuse now —
+    # the list mode drops the local, and a leaf with no blocks says nil.
+    test "a stale render-mode does not blank the listing", %{root: root} do
+      {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
+      {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-set-local! "#{root}" 'render-mode "blocks")})
+
+      # the core stops calling it blocks the moment there are no blocks
+      leaf = find_active_leaf(Editor.render_state().tree, Editor.snapshot().active)
+      assert leaf.buffer == root
+      assert leaf.render_mode == nil
+
+      # and re-entering the mode drops the local outright
+      {:ok, _} = Aimax.Core.Session.eval(~s{(set-mode! "Dired")})
+      {:ok, "#f"} = Aimax.Core.Session.eval(~s{(buffer-local "#{root}" 'render-mode)})
       assert Buffer.text(root) =~ "alpha.txt"
     end
 
@@ -1213,16 +1232,20 @@ defmodule Aimax.EditorTest do
   end
 
   describe "display-buffer & popper" do
-    test "M-x shell opens as a bottom popup; C-` toggles; q quits", %{buf: buf} do
+    test "M-x shell opens as a right side popup; C-` toggles; q quits", %{buf: buf} do
       press(["M-x"])
       type("shell")
       press(["RET"])
       assert eventually(fn -> Aimax.Core.Proc.running?("*shell*") end)
 
-      # popup: two windows, bottom one active showing *shell*, ~30% rows
+      # the default display rule: a right side window taking 0.38 of the
+      # frame, floating — the class and the share reach the client here
       state = Editor.render_state()
-      assert %{type: :split, dir: :v, ratio: 0.7} = state.tree
+      assert %{type: :split, dir: :h, ratio: ratio} = state.tree
+      assert_in_delta ratio, 0.62, 0.001
       assert Editor.current_buffer() == "*shell*"
+      assert {:ok, ~s{"popup popup-right"}} =
+               Aimax.Core.Session.eval(~s{(buffer-local "*shell*" 'window-class)})
 
       # C-` closes the popup, back to a single window on our buffer
       press(["C-`"])

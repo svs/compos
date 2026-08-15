@@ -764,12 +764,25 @@ defmodule Aimax.Core.Editor do
     f = frame(state, fid)
 
     mb =
-      %{on_confirm: nil, on_complete: nil, on_change: nil, on_cancel: nil, input: ""}
+      %{
+        on_confirm: nil,
+        on_complete: nil,
+        on_change: nil,
+        on_cancel: nil,
+        input: "",
+        match_hint: false
+      }
       |> Map.merge(handlers)
       |> Map.put(:prompt, prompt)
 
     reset_minibuf_buffer(minibuf_of(f), mb.input)
-    mb = Map.put(mb, :list, Candidates.new(candidates, query: mb_query(mb)))
+
+    mb =
+      Map.put(
+        mb,
+        :list,
+        Candidates.new(candidates, query: mb_query(mb), match_hint: mb.match_hint)
+      )
     changed(:ok, put_frame(state, %{f | minibuffer: mb}), f.id)
   end
 

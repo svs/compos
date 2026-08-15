@@ -11,11 +11,15 @@ defmodule Aimax.Core.Candidates do
   `query` is whatever the surface decides to match on — the minibuffer passes
   its input, file prompts pass the segment after the last "/", the popup
   passes the typed prefix.
+
+  `match_hint` widens the filter to the annotation beside the candidate, so a
+  buffer prompt finds a buffer by its mode. The prompt asks for it; the
+  default stays off, because a doc-string annotation matches almost anything.
   """
 
   @window 8
 
-  defstruct items: [], query: "", sel: 0, touched: false, filtered: []
+  defstruct items: [], query: "", sel: 0, touched: false, filtered: [], match_hint: false
 
   @doc "Build from raw candidates: strings or [label, hint] pairs."
   def new(candidates, opts \\ []) do
@@ -23,7 +27,8 @@ defmodule Aimax.Core.Candidates do
       items: normalize(candidates),
       query: Keyword.get(opts, :query, ""),
       sel: 0,
-      touched: false
+      touched: false,
+      match_hint: Keyword.get(opts, :match_hint, false) == true
     })
   end
 
@@ -58,11 +63,16 @@ defmodule Aimax.Core.Candidates do
   defp refilter(list) do
     filtered =
       list.items
-      |> Enum.filter(&matches?(&1.label, list.query))
+      |> Enum.filter(&matches?(&1.label, list.query, hint_of(list, &1)))
       |> Enum.sort_by(&rank(&1.label, list.query))
 
     %{list | filtered: filtered}
   end
+
+  # the annotation joins the match text only when the prompt asked for it;
+  # rank still reads the label alone, so a hint match sorts last
+  defp hint_of(%{match_hint: true}, %{hint: hint}), do: hint
+  defp hint_of(_list, _item), do: ""
 
   # One 268-character chat buffer name set the name column for all 110
   # candidates and pushed every annotation off the right of the panel. A
@@ -103,18 +113,28 @@ defmodule Aimax.Core.Candidates do
   @doc """
   Orderless + flex, case-insensitive: space-separated terms each match as
   substrings in any order; a single term also matches as a subsequence.
-  """
-  def matches?(_label, ""), do: true
 
-  def matches?(label, query) do
+  HINT is the annotation the term may match instead of the label, as a
+  substring only — a subsequence of a long annotation matches everything.
+  A prompt that does not widen the filter passes "".
+  """
+  def matches?(label, query, hint \\ "")
+
+  def matches?(_label, "", _hint), do: true
+
+  def matches?(label, query, hint) do
     dl = String.downcase(label)
+    dh = String.downcase(hint)
 
     case String.split(query, " ", trim: true) do
       [] -> true
-      [single] -> subsequence?(dl, String.downcase(single))
-      terms -> Enum.all?(terms, &String.contains?(dl, String.downcase(&1)))
+      [single] -> subsequence?(dl, String.downcase(single)) or contains?(dh, single)
+      terms -> Enum.all?(terms, &(String.contains?(dl, String.downcase(&1)) or contains?(dh, &1)))
     end
   end
+
+  defp contains?("", _term), do: false
+  defp contains?(dhint, term), do: String.contains?(dhint, String.downcase(term))
 
   defp subsequence?(_label, ""), do: true
 

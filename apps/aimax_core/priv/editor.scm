@@ -534,7 +534,10 @@
 ;; highlight move, ON-CONFIRM with the choice, ON-CANCEL on C-g (restore
 ;; whatever the preview displaced there). All three run against the
 ;; invoking buffer, not the minibuffer's — see with-invoking-buffer.
-(define (minibuffer-read-preview prompt cands on-select on-confirm on-cancel)
+;; MATCH-HINT, when true, also matches what you type against the
+;; marginalia beside each candidate.
+(define (minibuffer-read-preview prompt cands on-select on-confirm on-cancel
+                                 &optional match-hint)
   (set! *mb-select-fn* (lambda (sel) (with-invoking-buffer (lambda () (on-select sel)))))
   (minibuffer-read* prompt cands
     (list (list 'confirm (lambda (v)
@@ -543,7 +546,8 @@
           (list 'cancel  (lambda ()
                             (set! *mb-select-fn* #f)
                             (with-invoking-buffer on-cancel)))
-          (list 'change  (lambda (input) (mb-select-notify!))))))
+          (list 'change  (lambda (input) (mb-select-notify!)))
+          (list 'match-hint (if match-hint #t #f)))))
 
 (let ((mb (minibuffer-buffer)))
   (local-set-key* mb "RET" "minibuffer-confirm")
@@ -1779,7 +1783,10 @@
             (unless (pick picked)
               (switch-to-buffer! picked))))
         ;; C-g: put back what you were looking at
-        (lambda () (when (buffer-exists? here) (window-preview-buffer! here)))))))
+        (lambda () (when (buffer-exists? here) (window-preview-buffer! here)))
+        ;; you also know a buffer by its mode: "org" finds the org buffers,
+        ;; and the mode is the first thing the marginalia says
+        #t))))
 
 (define-command "kill-buffer" "Kill a buffer, defaulting to the current one"
   (lambda ()
@@ -3822,7 +3829,7 @@
 (public! 'message "(message TEXT) — echo area")
 (public! 'minibuffer-read "(minibuffer-read PROMPT CANDIDATES HANDLER) — async; HANDLER gets the choice")
 (public! 'read-file-name "(read-file-name PROMPT K) — prompt with filename completion from default-directory; K gets the typed path")
-(public! 'minibuffer-read-preview "(minibuffer-read-preview PROMPT CANDIDATES ON-SELECT ON-CONFIRM ON-CANCEL) — consult-style: ON-SELECT fires with the highlighted candidate as selection moves")
+(public! 'minibuffer-read-preview "(minibuffer-read-preview PROMPT CANDIDATES ON-SELECT ON-CONFIRM ON-CANCEL &optional MATCH-HINT) — consult-style: ON-SELECT fires with the highlighted candidate as selection moves; MATCH-HINT also matches the input against the marginalia")
 (public! 'window-preview-buffer! "(window-preview-buffer! NAME) — show NAME in the active window without touching the MRU ring")
 
 (category! 'commands)

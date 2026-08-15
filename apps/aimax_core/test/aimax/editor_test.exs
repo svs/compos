@@ -1900,6 +1900,38 @@ defmodule Aimax.EditorTest do
     assert Editor.current_buffer() == buf
   end
 
+  test "C-x b matches the mode in the marginalia, not the name alone", %{buf: buf} do
+    n = System.unique_integer([:positive])
+    plain = "swm-plain-#{n}"
+    prose = "swm-prose-#{n}"
+    Aimax.Core.create_buffer(plain)
+    Aimax.Core.create_buffer(prose)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (switch-to-buffer! "#{prose}") (set-mode! "text-mode")
+             (switch-to-buffer! "#{buf}"))
+      """)
+
+    # the mode is the annotation, and typing it finds the buffer
+    press(["C-x", "b"])
+    type("text-mode")
+    labels = Enum.map(Editor.render_state().minibuffer.candidates, & &1.label)
+    assert prose in labels
+    refute plain in labels
+
+    # orderless across both: one term matches the mode, the other the name
+    type(" swm-prose")
+    press(["RET"])
+    assert Editor.current_buffer() == prose
+
+    # a name still matches a name — the annotation only adds candidates
+    press(["C-x", "b"])
+    type(plain)
+    press(["RET"])
+    assert Editor.current_buffer() == plain
+  end
+
   test "M-: eval-expression echoes result" do
     press(["M-:"])
     type("(+ 20 22)")

@@ -22,6 +22,7 @@ fn language(name: &str) -> Option<Language> {
         "elixir" => Some(tree_sitter_elixir::LANGUAGE.into()),
         "json" => Some(tree_sitter_json::LANGUAGE.into()),
         "rust" => Some(tree_sitter_rust::LANGUAGE.into()),
+        "html" => Some(tree_sitter_html::LANGUAGE.into()),
         _ => dynamic().lock().unwrap().get(name).map(|(l, _)| l.clone()),
     }
 }
@@ -31,6 +32,7 @@ fn highlights_query(name: &str) -> Option<String> {
         "elixir" => Some(tree_sitter_elixir::HIGHLIGHTS_QUERY.to_string()),
         "json" => Some(tree_sitter_json::HIGHLIGHTS_QUERY.to_string()),
         "rust" => Some(tree_sitter_rust::HIGHLIGHTS_QUERY.to_string()),
+        "html" => Some(tree_sitter_html::HIGHLIGHTS_QUERY.to_string()),
         _ => dynamic().lock().unwrap().get(name).map(|(_, q)| q.clone()),
     }
 }
@@ -372,7 +374,8 @@ fn ts_query_nif(lang_name: String, text: String, query_src: String) -> Vec<(Stri
 
 #[rustler::nif]
 fn ts_langs() -> Vec<String> {
-    let mut langs: Vec<String> = vec!["elixir".into(), "json".into(), "rust".into()];
+    let mut langs: Vec<String> =
+        vec!["elixir".into(), "json".into(), "rust".into(), "html".into()];
     langs.extend(dynamic().lock().unwrap().keys().cloned());
     langs.sort();
     langs

@@ -1,7 +1,7 @@
 defmodule Aimax.Core.TreeSitter do
   @moduledoc """
   Runtime grammar management — the compiled-in grammars (elixir, json,
-  rust) plus any the user installs from the app.
+  rust, html) plus any the user installs from the app.
 
   `install/2` is Emacs's treesit-install-language-grammar: clone the
   grammar repo shallow, `cc -shared` its generated parser (and scanner.c

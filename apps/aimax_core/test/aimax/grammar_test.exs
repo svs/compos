@@ -45,6 +45,24 @@ defmodule Aimax.GrammarTest do
     assert {:ok, ~s{"scheme"}} = Session.eval(~s{(buffer-local "*zz-scm*" 'ts-lang)})
   end
 
+  test "html-mode wires ts-lang, and the html grammar is compiled in" do
+    on_exit(fn -> Aimax.Core.kill_buffer("*zz-html*") end)
+
+    {:ok, _} =
+      Session.eval(~s{(begin (buffer-create "*zz-html*")
+                             (switch-to-buffer! "*zz-html*")
+                             (set-mode! "html-mode"))})
+
+    assert {:ok, ~s{"html"}} = Session.eval(~s{(buffer-local "*zz-html*" 'ts-lang)})
+
+    spans = TS.ts_highlight("html", ~s|<body class="x"><!-- c --></body>|)
+    scopes = spans |> Enum.map(&elem(&1, 2)) |> Enum.uniq() |> Enum.sort()
+    assert "tag" in scopes
+    assert "attribute" in scopes
+    assert "string" in scopes
+    assert "comment" in scopes
+  end
+
   test "the install command surface is registered" do
     {:ok, out} = Session.eval("(ts-known-url \"scheme\")")
     assert out =~ "6cdh/tree-sitter-scheme"

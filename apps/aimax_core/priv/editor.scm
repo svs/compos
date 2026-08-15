@@ -981,10 +981,10 @@
 (define (ts-mode lang)
   (lambda () (buffer-set-local! (current-buffer) 'ts-lang lang)))
 
-(define-mode "html-mode" (lambda () #t))
+(define-mode "html-mode" (ts-mode "html"))
 
 (mode-doc! "html-mode"
-  "An HTML file. The mode adds no keys and no grammar. `C-c C-v` shows the rendered page, because the renderer reads the extension.")
+  "HTML, parsed. You get the colours, and `C-M-f` and `C-M-b` step over whole elements. `C-c C-v` shows the rendered page, because the renderer reads the extension. `C-c C-a` runs the page as an app: its own scripts, its own storage, and the files beside it. A save reloads it, and `C-g` gives the keyboard back.")
 
 ;; preview-mode: render the buffer instead of showing its source.
 ;; Renderer picked by *preview-renderers* (extension -> renderer); the

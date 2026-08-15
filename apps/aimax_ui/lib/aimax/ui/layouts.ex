@@ -347,6 +347,7 @@ defmodule Aimax.Ui.Layouts do
           .ts-variable { color: var(--ts-variable-fg, inherit); }
           .ts-property { color: var(--ts-property-fg, #57534a); }
           .ts-attribute { color: var(--ts-attribute-fg, #7a5a1a); }
+          .ts-tag { color: var(--ts-tag-fg, #26356b); font-weight: 600; }
           .ts-operator { color: var(--ts-operator-fg, #a09a8b); }
           .ts-punctuation { color: var(--ts-punctuation-fg, #a09a8b); }
           .ts-escape { color: var(--ts-escape-fg, #7a5a1a); }

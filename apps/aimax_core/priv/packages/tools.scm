@@ -453,13 +453,18 @@
 
 (set-llm-cache-ttl! llm-cache-ttl)
 
-;; Compaction: a conversation that never ends resends all of itself every
-;; turn, so cost grows with the square of its length. Past the threshold
-;; the head becomes one summary and the recent turns stay verbatim. The
-;; mechanism is in editor.scm (chat-should-compact?, chat-compact!); these
-;; are the knobs.
-(defcustom 'chat-compact-threshold 60000
-  "Compact a chat once its record passes this many estimated tokens. 0 disables it."
+;; Compaction: the head of a long record becomes one summary and the
+;; recent turns stay verbatim. You ask for it — M-x chat-compact — and the
+;; threshold below only decides when the editor SUGGESTS it.
+;;
+;; It fired by itself, at 60000 tokens, until the prompt cache started
+;; working. A cached prefix costs a tenth of a fresh one, so resending a
+;; long chat is cheap while a compaction pays for the summary AND rewrites
+;; the cache. The default is 200000 now: the point where a long chat
+;; approaches a model's price tier, not the point where it is merely long.
+;; The mechanism is in editor.scm (chat-can-compact?, chat-compact!).
+(defcustom 'chat-compact-threshold 200000
+  "Suggest compacting a chat once its record passes this many estimated tokens. 0 stays quiet."
   'group 'chat 'type 'integer)
 
 (defcustom 'chat-compact-keep 8

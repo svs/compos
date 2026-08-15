@@ -445,12 +445,19 @@
        (buffer-set-local! buf 'agent-turn-text #f)
        (buffer-set-local! buf 'agent-turn-any #f)
        (agent-block-drop-kind! buf "permission")
-       ;; between turns is the only safe moment to rewrite the record: the
-       ;; head a compaction drops is the head a running request already
-       ;; sent
-       (when (and (boundp (quote chat-should-compact?)) (chat-should-compact? buf))
-         (chat-compact! buf slug))
-       (message (string-append "agent " slug ": done")))
+       ;; The record used to compact itself here. It does not any more: a
+       ;; cached prefix is a tenth the price of a fresh one, so resending
+       ;; a long chat is cheap and a compaction is not. The threshold now
+       ;; SAYS the chat is large, and M-x chat-compact is the user's to
+       ;; run — between turns, which is still the only safe moment to
+       ;; rewrite the record.
+       (message
+         (string-append "agent " slug ": done"
+           (if (and (boundp (quote chat-should-compact?)) (chat-should-compact? buf))
+               (string-append " — this chat is about "
+                              (number->string (quotient (chat-record-tokens buf) 1000))
+                              "k tokens: M-x chat-compact")
+               ""))))
 
       ((equal? type 'error)
        (let ((start (agent-render! slug

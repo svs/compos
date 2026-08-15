@@ -3075,10 +3075,21 @@
 
 ;;; --- compaction ------------------------------------------------------------------
 ;;; A conversation that never ends grows without bound, and every turn
-;;; resends all of it: cost grows with the square of the conversation.
-;;; Above a threshold the head of the record becomes one summary and the
+;;; resends all of it. The head of the record becomes one summary and the
 ;;; recent turns stay verbatim — the recent turns are what the model is
 ;;; working on, and they are also what the cache holds.
+;;;
+;;; You ask for it: M-x chat-compact. It ran by itself until the prompt
+;;; cache started working, and then the arithmetic changed. A cached
+;;; prefix costs a tenth of a fresh one, so resending a long chat is
+;;; cheap, while a compaction pays for the summary AND rewrites the cache.
+;;; Below roughly twenty more turns it does not pay for itself, and it
+;;; spends real conversation to save a tenth of a cent.
+;;;
+;;; The reason that remains is the model's input limit: past it every
+;;; request fails, and no cache rate helps. That is a wall to see coming,
+;;; not a threshold to cross silently. So chat-compact-threshold now says
+;;; when the editor SUGGESTS compaction; the user decides.
 ;;;
 ;;; It is never silent. The transcript shows a line where the head went,
 ;;; and the summary is a turn like any other: it saves, restores, and
@@ -3136,12 +3147,18 @@
                   txt "\n\n"))))
         "" turns))
 
-(define (chat-should-compact? buf)
-  (and (> chat-compact-threshold 0)
-       (not (buffer-local buf 'chat-compacting))
-       (> (chat-record-tokens buf) chat-compact-threshold)
+;; is there a head to summarize at all? A chat shorter than its own keep
+;; window has nothing to compact, and neither has one already compacting.
+(define (chat-can-compact? buf)
+  (and (not (buffer-local buf 'chat-compacting))
        (let ((all (chat-record buf)))
          (> (length all) (chat-compact-keep-count all)))))
+
+;; big enough that the editor mentions it — a suggestion, not a trigger
+(define (chat-should-compact? buf)
+  (and (> chat-compact-threshold 0)
+       (> (chat-record-tokens buf) chat-compact-threshold)
+       (chat-can-compact? buf)))
 
 ;; The summary call is async, and the record can grow while it is in
 ;; flight. So the head is identified by COUNT at request time and replaced
@@ -3173,13 +3190,37 @@
                               (string-append
                                 "[Earlier in this conversation, compacted to notes:]\n\n"
                                 summary)))))))
-      ;; say so where the reader can see it
-      (let ((start (agent-render! slug
-                     (string-append "\n[compacted " (number->string n)
-                                    " earlier turns into a summary]\n")
-                     "agent-meta")))
-        (agent-block-push! buf start (agent-mark slug) "meta" '()))
+      ;; say so where the reader can see it. A restored chat can have a
+      ;; record and no runtime, and agent-render! is keyed by slug: with
+      ;; no slug there is no transcript to write the line into, and the
+      ;; echo area carries the whole news.
+      (when slug
+        (let ((start (agent-render! slug
+                       (string-append "\n[compacted " (number->string n)
+                                      " earlier turns into a summary]\n")
+                       "agent-meta")))
+          (agent-block-push! buf start (agent-mark slug) "meta" '())))
       (message (string-append "compacted " (number->string n) " turns")))))
+
+(define-command "chat-compact" "Summarize this chat's older turns, keeping the recent ones"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (cond ((not (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
+             (message "not a chat buffer"))
+            ((buffer-local buf 'chat-compacting)
+             (message "a compaction is already in flight"))
+            ((not (chat-can-compact? buf))
+             (message (string-append "nothing to compact: this chat is "
+                                     (number->string (length (chat-record buf)))
+                                     " turns, and it keeps the last "
+                                     (number->string
+                                       (chat-compact-keep-count (chat-record buf))))))
+            (else
+             (let* ((all (chat-record buf))
+                    (n (- (length all) (chat-compact-keep-count all))))
+               (chat-compact! buf (buffer-local buf 'agent-slug))
+               (message (string-append "compacting " (number->string n)
+                                       " earlier turns…"))))))))
 
 ;; a chat saved before the record existed carries (role text) pairs — read
 ;; them once, as text turns, and drop the old local

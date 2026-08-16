@@ -587,6 +587,28 @@ defmodule Aimax.Ui.Layouts do
                 if (!d || this.wired === d) return;
                 this.wired = d;
                 this.apply();
+                // a markdown preview shows point and takes edits, so a
+                // click must move point. The caret API names the clicked
+                // text node; the daemon finds that text in the source.
+                if (this.el.dataset.rm === "markdown") {
+                  d.addEventListener("mousedown", (e) => {
+                    const c = d.caretRangeFromPoint
+                      ? d.caretRangeFromPoint(e.clientX, e.clientY)
+                      : d.caretPositionFromPoint && d.caretPositionFromPoint(e.clientX, e.clientY);
+                    if (!c) return;
+                    const node = c.startContainer || c.offsetNode;
+                    if (!node || node.nodeType !== 3) return;
+                    const off = c.startOffset !== undefined ? c.startOffset : c.offset;
+                    const t = node.textContent;
+                    this.pushEvent("preview_goto", {
+                      win: parseInt(this.el.dataset.win, 10),
+                      before: t.slice(0, off),
+                      after: t.slice(off),
+                      wb: (t.slice(0, off).match(/[\w-]*$/) || [""])[0],
+                      wa: (t.slice(off).match(/^[\w-]*/) || [""])[0]
+                    });
+                  }, true);
+                }
                 d.addEventListener("scroll", () => {
                   clearTimeout(this.timer);
                   this.timer = setTimeout(() => {

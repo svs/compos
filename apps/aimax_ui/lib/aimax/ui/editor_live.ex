@@ -176,6 +176,24 @@ defmodule Aimax.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
+  # a click inside a markdown preview's iframe: the hook sends the clicked
+  # text node split at the caret, and Scheme finds the spot in the source
+  def handle_event("preview_goto", %{"win" => win} = p, socket) do
+    with id when is_integer(id) <- safe_int(win) do
+      Input.run(socket.assigns.frame, fn ->
+        Aimax.Core.Session.call_named("preview-goto!", [
+          id,
+          p["before"] || "",
+          p["after"] || "",
+          p["wb"] || "",
+          p["wa"] || ""
+        ])
+      end)
+    end
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
   # drag: the native selection, mirrored into mark + point
   def handle_event("mouse_sel", %{"win" => win, "al" => al, "ac" => ac, "fl" => fl, "fc" => fc}, socket)
       when is_integer(al) and is_integer(ac) and is_integer(fl) and is_integer(fc) do
@@ -759,6 +777,7 @@ defmodule Aimax.Ui.EditorLive do
           data-win={@node.id}
           data-ctop={@node.ctop}
           data-pt={@node.point}
+          data-rm={@node.render_mode}
           sandbox="allow-same-origin"
           srcdoc={@node.preview}
           title={@node.buffer}

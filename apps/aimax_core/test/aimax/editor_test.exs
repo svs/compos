@@ -2113,6 +2113,36 @@ defmodule Aimax.MinibufferEditingTest do
     File.rm!(path)
   end
 
+  # the click mapping: the clicked text node split at the caret finds its
+  # spot in the source; smartened text falls back to the plain word run
+  test "a preview click moves point to the clicked text" do
+    path = Path.join(System.tmp_dir!(), "aimax-prevclick-#{System.unique_integer([:positive])}.md")
+    File.write!(path, "# Title\n\nThe cursor should be visible.\n")
+
+    press(["C-x", "C-f"])
+    type(path)
+    press(["RET"])
+    press(["C-c", "C-v"])
+
+    win = Editor.render_state() |> Map.get(:tree) |> Map.get(:id)
+
+    {:ok, _} =
+      Aimax.Core.Session.call_named("preview-goto!", [win, "The cursor sh", "ould be", "sh", "ould"])
+
+    assert Buffer.point(path) == 22
+
+    # the renderer smartened the text: the exact node misses, the word run hits
+    Buffer.goto(path, 0)
+
+    {:ok, _} =
+      Aimax.Core.Session.call_named("preview-goto!", [win, "“cursor” sh", "ould", "sh", "ould"])
+
+    assert Buffer.point(path) == 22
+
+    press(["C-x", "1"])
+    File.rm!(path)
+  end
+
   test "motion keys still scroll an html preview" do
     path = Path.join(System.tmp_dir!(), "aimax-prevhtml-#{System.unique_integer([:positive])}.html")
     File.write!(path, "<h1>hi</h1>\n<p>body</p>\n")

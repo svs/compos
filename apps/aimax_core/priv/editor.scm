@@ -465,6 +465,28 @@
 (define-command "end-of-buffer" "Move point to the end of the buffer"
   (lambda () (or (preview-scroll! 1000000) (end-of-buffer!))))
 
+;; A click in a rendered markdown page. The client sends the clicked text
+;; node split at the caret, plus the word run around the caret. Rendered
+;; text and source differ (markup is stripped, punctuation is smartened),
+;; so try the exact node first and the plain word run second; the first
+;; hit in the source wins. string-index rejects an empty pattern, so
+;; empty needles answer #f.
+(define (preview--hit text before after)
+  (let ((needle (string-append before after)))
+    (if (equal? needle "")
+        #f
+        (let ((i (string-index text needle)))
+          (if i (+ i (string-byte-length before)) #f)))))
+
+(define (preview-goto! win before after wb wa)
+  (mouse-select-window! win)
+  (let* ((text (buffer-text (current-buffer)))
+         (hit (or (preview--hit text before after)
+                  (preview--hit text wb wa))))
+    (when hit (goto-char! hit))))
+(public! 'preview-goto!
+  "(preview-goto! WIN BEFORE AFTER WB WA) — put point where a preview click landed")
+
 (define-command "newline" "Insert a newline at point" (lambda () (insert! "\n")))
 (define-command "delete-backward-char" "Delete the character before point"
   (lambda () (delete-char! -1)))

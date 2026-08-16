@@ -2033,6 +2033,64 @@ defmodule Aimax.EditorTest do
       )
   end
 
+  test "winner: a destroyed layout is one undo away; redo returns" do
+    n = System.unique_integer([:positive])
+    b = "wn-#{n}"
+    Aimax.Core.create_buffer(b)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (set-frame-local! 'current-group #f)
+             (set-frame-local! 'winner-ring #f)
+             (set-frame-local! 'winner-pos #f)
+             (delete-other-windows!)
+             (switch-to-buffer! "#{b}")
+             (split-window! 'h 0.5))
+      """)
+
+    assert length(Editor.list_windows()) == 2
+
+    # C-x 1 destroys the split; winner-undo brings it back
+    press(["C-x", "1"])
+    assert length(Editor.list_windows()) == 1
+    press(["C-c", "<left>"])
+    assert length(Editor.list_windows()) == 2
+
+    # redo walks forward to the single window again
+    press(["C-c", "<right>"])
+    assert length(Editor.list_windows()) == 1
+    {:ok, _} = Aimax.Core.Session.eval("(delete-other-windows!)")
+  end
+
+  test "winner: a group switch is one undo away" do
+    n = System.unique_integer([:positive])
+    m = "wg-a-#{n}"
+    home = "wg-home-#{n}"
+    for x <- [m, home], do: Aimax.Core.create_buffer(x)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (set-frame-local! 'current-group #f)
+             (set-frame-local! 'winner-ring #f)
+             (set-frame-local! 'winner-pos #f)
+             (buffer-set-local! "#{m}" 'group "wggrp-#{n}")
+             (delete-other-windows!)
+             (switch-to-buffer! "#{home}")
+             (switch-to-group! "wggrp-#{n}"))
+      """)
+
+    assert Editor.current_buffer() == m
+
+    # undo: back to the arrangement before the switch
+    press(["C-c", "<left>"])
+    assert Editor.current_buffer() == home
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(
+        "(begin (set-frame-local! 'current-group #f) (delete-other-windows!))"
+      )
+  end
+
   test "C-RET on a project buffer materializes the project as a group" do
     n = System.unique_integer([:positive])
     root = Path.join(System.tmp_dir!(), "pg-#{n}")

@@ -94,6 +94,22 @@ the Elixir buffers, and a project name finds that project's buffers.</p>
 exactly one group, the pool narrows to that group's buffers, with the group's
 card on top. <kbd>C-g</kbd> quits and restores what the preview displaced.</p>
 
+<h2>Layout undo: winner</h2>
+
+<p>Any layout change is one keystroke from undone. Every arrangement about to
+be destroyed — by <kbd>C-x 1</kbd>, a split, a popup, a context switch — goes
+onto a per-frame ring.</p>
+
+<table>
+<tr><th>key</th><th>action</th></tr>
+<tr><td><kbd>C-c <b>←</b></kbd></td><td>winner-undo: walk back to the previous arrangement</td></tr>
+<tr><td><kbd>C-c <b>→</b></kbd></td><td>winner-redo: walk forward again</td></tr>
+</table>
+
+<p>A group switch records one entry — the arrangement you left — not the
+steps that build the next one. So a mistaken <kbd>C-RET</kbd> costs exactly
+one <kbd>C-c ←</kbd>.</p>
+
 <p class="note">The prompt renders as a centered palette. Every prompt with
 candidates does — M-x, find-file, the switcher. A line input keeps the bottom
 bar. <kbd>Cmd-k</kbd> opens M-x.</p>

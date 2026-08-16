@@ -3358,6 +3358,10 @@
         (when w (select-window! w))))))
 
 (define (switch-to-group! g)
+  ;; one winner entry per switch: the arrangement you leave, not the
+  ;; intermediate steps of building the next one
+  (winner-save!)
+  (set! *winner-inhibit* #t)
   (let ((from (frame-group)))
     (when (and from (not (equal? from g)))
       (group-layout-save-if-shown! from)))
@@ -3373,6 +3377,7 @@
             (group-default-layout! g)
             (group-layout-save! g)))
         (group-default-layout! g)))
+  (set! *winner-inhibit* #f)
   (windows-shown-catchup!)
   (message (string-append "switched to group " (group-label g))))
 
@@ -3389,6 +3394,75 @@
               (let ((b (car (cdr w))))
                 (for-each (lambda (fn) (fn b)) *buffer-shown-hooks*)))
             (window-list)))
+
+;;; --- winner: layout undo ------------------------------------------------------
+;;; Every arrangement about to be destroyed goes onto a per-frame ring;
+;;; C-c <left> walks back through them, C-c <right> walks forward. The
+;;; wrapped window mutators and the group switch push; the walk itself
+;;; does not, so undo cannot pollute its own history.
+
+(define *winner-depth* 12)
+
+;; a compound operation (a group switch builds its layout in steps)
+;; saves ONCE and inhibits the wrapped mutators' pushes underneath
+(define *winner-inhibit* #f)
+
+(define (winner-save!)
+  (unless *winner-inhibit*
+    (let ((ring (or (frame-local 'winner-ring) '()))
+          (now (window-tree)))
+      (unless (and (pair? ring) (equal? (car ring) now))
+        (set-frame-local! 'winner-ring (take-n (cons now ring) *winner-depth*)))
+      (set-frame-local! 'winner-pos #f))))
+
+(define (winner--restore idx)
+  (let ((ring (or (frame-local 'winner-ring) '())))
+    (if (or (< idx 0) (>= idx (length ring)))
+        (message (if (< idx 0) "at the latest layout" "no earlier layout"))
+        (begin
+          (set-frame-local! 'winner-pos idx)
+          (window-tree-set! (nth idx ring))
+          (message (string-append "layout "
+                     (number->string (+ idx 1)) "/"
+                     (number->string (length ring))))))))
+
+(define-command "winner-undo" "Restore the previous window layout"
+  (lambda ()
+    (set! *winner-inhibit* #f)
+    (let ((pos (frame-local 'winner-pos)))
+      (if pos
+          (winner--restore (+ pos 1))
+          ;; entering the walk: the CURRENT arrangement joins the ring
+          ;; first, so redo can come all the way back
+          (begin
+            (winner-save!)
+            (winner--restore 1))))))
+
+(define-command "winner-redo" "Walk forward to a later window layout"
+  (lambda ()
+    (let ((pos (frame-local 'winner-pos)))
+      (if (and pos (> pos 0))
+          (winner--restore (- pos 1))
+          (message "at the latest layout")))))
+
+;; the window mutators the keyboard reaches (C-x 1/2/3/0, popups) push
+;; the arrangement they are about to destroy
+(define builtin-delete-other-windows! delete-other-windows!)
+(define (delete-other-windows!)
+  (winner-save!)
+  (builtin-delete-other-windows!))
+
+(define builtin-split-window! split-window!)
+(define (split-window! dir &optional ratio)
+  (winner-save!)
+  (if ratio
+      (builtin-split-window! dir ratio)
+      (builtin-split-window! dir)))
+
+(define builtin-delete-window! delete-window!)
+(define (delete-window!)
+  (winner-save!)
+  (builtin-delete-window!))
 
 ;; the group the FRAME stands in. Switching sets it; a detour through
 ;; an ungrouped buffer (scratch, help) does not lose it. The buffer's
@@ -3847,6 +3921,9 @@
 (global-set-key "C-x G" "groups")
 ;; Cmd-k is the command palette, in the browser's own chord
 (global-set-key "s-k" "execute-extended-command")
+;; winner: any layout change is one keystroke from undone
+(global-set-key "C-c <left>" "winner-undo")
+(global-set-key "C-c <right>" "winner-redo")
 (global-set-key "C-c RET" "chat-companion-ask")
 
 ;;; --- minibuffer history (vertico-style: last-used first) --------------------

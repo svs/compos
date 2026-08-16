@@ -3698,39 +3698,6 @@
               (let ((m (group-meta g)))
                 (if m (list (list "about" m)) '())))))))))
 
-(define (dashboard--groups-card my-g)
-  (let ((gs (group-names)))
-    (component 'ui/card
-      (list 'title (string-append "all groups — " (number->string (length gs)))
-            'open? #t
-        'body (list
-          (component 'ui/kv
-            (list 'pairs
-              (map (lambda (g)
-                     (list (string-append (if (equal? g my-g) "▶ " "")
-                                          (group-label g))
-                           (string-append
-                             (number->string (length (group-buffers g))) " buffers · "
-                             (group-noise g)
-                             (let ((m (group-meta g)))
-                               (if m (string-append " · " m) "")))))
-                   gs))))))))
-
-(define (dashboard--frame-card)
-  (component 'ui/card
-    (list 'title "frame" 'open? #t
-      'body (list
-        (component 'ui/kv
-          (list 'pairs
-            (list (list "group" (let ((g (frame-local 'current-group)))
-                                  (if g (group-label g) "none")))
-                  (list "windows" (number->string (length (window-list))))
-                  (list "frames" (number->string (length (frame-list))))
-                  (list "layouts"
-                        (string-append
-                          (number->string (length (or (frame-local 'winner-ring) '())))
-                          " remembered")))))))))
-
 (define (dashboard-refresh!)
   (let ((buf (or (buffer-local *dashboard-buffer* 'dashboard-for)
                  (current-buffer))))
@@ -3738,9 +3705,7 @@
       (append
         (list (dashboard--buffer-card buf))
         (let ((g (buffer-group buf)))
-          (if g (list (dashboard--group-card g)) '()))
-        (list (dashboard--groups-card (buffer-group buf))
-              (dashboard--frame-card))))))
+          (if g (list (dashboard--group-card g)) '()))))))
 
 (define-command "modeline-dashboard-refresh" "Refresh the dashboard"
   (lambda () (dashboard-refresh!)))

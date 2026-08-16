@@ -1049,7 +1049,9 @@ defmodule Aimax.EditorTest do
     Aimax.Core.kill_buffer(path)
   end
 
-  test "desktop: non-file buffers (chat) survive restore with content, mode, and keys", %{buf: buf} do
+  test "desktop: non-file buffers (chat) survive restore with content, mode, and keys", %{
+    buf: buf
+  } do
     companion = "*chat:#{buf}*"
     on_exit(fn -> Aimax.Core.kill_buffer(companion) end)
 
@@ -2103,8 +2105,8 @@ defmodule Aimax.EditorTest do
     text = inspect(blocks, limit: :infinity, printable_limit: :infinity)
     assert text =~ b
     assert text =~ "dashgrp-#{n}"
-    assert text =~ "all groups"
-    assert text =~ "frame"
+    assert text =~ "companion"
+    refute text =~ "all groups"
 
     # the same key toggles it away
     press(["C-x", "?"])

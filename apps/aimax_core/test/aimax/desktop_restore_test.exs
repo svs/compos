@@ -225,4 +225,56 @@ defmodule Aimax.DesktopRestoreTest do
     assert eval!("*dr-kept*") == ~s{"used"}
     assert eval!("*dr-dropped*") == ~s{"boot"}
   end
+
+  # unsaved edits are state: a modified file buffer's text rides the
+  # desktop and lays back over what visit read from disk
+  test "unsaved edits in a file buffer survive restore" do
+    path = Path.join(System.tmp_dir!(), "dr-unsaved-#{System.unique_integer([:positive])}.md")
+    File.write!(path, "on disk\n")
+    eval!(~s{(visit "#{path}")})
+    Buffer.append(path, "unsaved tail", source: :editor)
+    assert Buffer.modified?(path)
+
+    assert :ok = Desktop.save_now()
+    eval!(~s{(buffer-kill! "#{path}")})
+    assert :ok = Desktop.restore_now()
+
+    assert Buffer.text(path) =~ "unsaved tail"
+    assert Buffer.modified?(path)
+    File.rm(path)
+  end
+
+  # the other half of the same rule: a save that landed before the restart
+  # means the texts match, nothing is replaced, and the buffer stays clean
+  test "a clean file buffer restores clean" do
+    path = Path.join(System.tmp_dir!(), "dr-clean-#{System.unique_integer([:positive])}.md")
+    File.write!(path, "saved text\n")
+    eval!(~s{(visit "#{path}")})
+    refute Buffer.modified?(path)
+
+    assert :ok = Desktop.save_now()
+    eval!(~s{(buffer-kill! "#{path}")})
+    assert :ok = Desktop.restore_now()
+
+    assert Buffer.text(path) == "saved text\n"
+    refute Buffer.modified?(path)
+    File.rm(path)
+  end
+
+  # a deleted file is not a deleted buffer: the snapshot text is the only
+  # copy of that work, so the buffer comes back anyway
+  test "unsaved edits survive even when the file vanished" do
+    path = Path.join(System.tmp_dir!(), "dr-gone-#{System.unique_integer([:positive])}.md")
+    File.write!(path, "doomed\n")
+    eval!(~s{(visit "#{path}")})
+    Buffer.append(path, "last words", source: :editor)
+
+    assert :ok = Desktop.save_now()
+    eval!(~s{(buffer-kill! "#{path}")})
+    File.rm!(path)
+    assert :ok = Desktop.restore_now()
+
+    assert Buffer.exists?(path)
+    assert Buffer.text(path) =~ "last words"
+  end
 end

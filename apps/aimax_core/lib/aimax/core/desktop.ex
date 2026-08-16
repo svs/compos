@@ -1,9 +1,9 @@
 defmodule Aimax.Core.Desktop do
   @moduledoc """
   Desktop save/restore (Emacs desktop-mode): the editor survives daemon
-  restarts. Persists file-backed buffers (path + point), the window tree,
-  and faces (theme) to `~/.aimax/desktop.etf` — debounced on editor events,
-  flushed on shutdown, restored at boot.
+  restarts. Persists file-backed buffers (path + point + unsaved text when
+  modified), the window tree, and faces (theme) to `~/.aimax/desktop.etf` —
+  debounced on editor events, flushed on shutdown, restored at boot.
 
   Restore reopens files through Scheme `(visit ...)` so modes and
   find-file-hook apply, then rebuilds the window tree and points.
@@ -75,7 +75,11 @@ defmodule Aimax.Core.Desktop do
           Buffer.exists?(name),
           bpath = Buffer.path(name),
           bpath != nil do
-        {bpath, Buffer.point(name), savable_locals(name)}
+        # unsaved edits are state, and the rule is that state survives: a
+        # modified buffer's text rides along. A clean buffer saves nil and
+        # restores from disk through visit, same as before.
+        text = if Buffer.modified?(name), do: Buffer.text(name), else: nil
+        {bpath, Buffer.point(name), savable_locals(name), text}
       end
 
     # the rule: EVERYTHING survives a reload. Non-file buffers (chat, agent
@@ -170,17 +174,36 @@ defmodule Aimax.Core.Desktop do
       # reopen through visit so modes + hooks apply, then lay the saved
       # buffer-locals back on top so toggled state (preview, line numbers,
       # a hand-picked mode) survives too
-      for entry <- buffers, bpath = elem(entry, 0), restorable?(bpath) do
-        {point, locals} =
+      for entry <- buffers, bpath = elem(entry, 0) do
+        {point, locals, text} =
           case entry do
-            {_, point} -> {point, %{}}
-            {_, point, locals} -> {point, locals}
+            {_, point} -> {point, %{}, nil}
+            {_, point, locals} -> {point, locals, nil}
+            {_, point, locals, text} -> {point, locals, text}
           end
 
-        Session.call_named("visit", [bpath])
-        # visit can decline (unreachable remote host) — skip, don't crash boot
-        if Buffer.exists?(bpath) do
-          apply_saved_state(bpath, point, locals)
+        # a vanished file with saved unsaved edits still restores: the
+        # snapshot text is the only copy of that work
+        if restorable?(bpath) or is_binary(text) do
+          Session.call_named("visit", [bpath])
+          # visit can decline (unreachable remote host) — skip, don't crash boot
+          if Buffer.exists?(bpath) do
+            # unsaved edits lay over what visit read. When a save landed
+            # before the restart the texts match, nothing is replaced, and
+            # the buffer stays clean. When the file moved on disk AND the
+            # snapshot holds edits, the snapshot wins — it is the copy the
+            # user watched leave their fingers.
+            if is_binary(text) and text != Buffer.text(bpath) do
+              size = Buffer.byte_size(bpath)
+
+              if size > 0,
+                do: Buffer.delete_range(bpath, 0, size, source: :editor, author: :none)
+
+              if text != "", do: Buffer.append(bpath, text, source: :editor, author: :none)
+            end
+
+            apply_saved_state(bpath, point, locals)
+          end
         end
       end
 

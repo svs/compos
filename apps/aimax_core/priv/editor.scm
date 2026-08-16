@@ -3648,6 +3648,130 @@
 (define-command "groups-refresh" "Refresh the groups board"
   (lambda () (list-refresh! *groups-buffer*)))
 
+;;; --- the modeline dashboard -----------------------------------------------------
+;;; modeline-expand toggles a popup that says everything about HERE: the
+;;; buffer, its modes, its group, every group, the frame. The modeline
+;;; is the summary; this is the expansion. Clicking the modeline's name
+;;; opens it too.
+
+(define *dashboard-buffer* "*dashboard*")
+(add-display-rule! "*dashboard*" 'popup (list 'side 'bottom 'size 0.5))
+
+(define (dashboard--buffer-card buf)
+  (let ((mode (or (buffer-local buf 'mode-name) "fundamental-mode"))
+        (minors (or (buffer-local buf 'minor-modes) '()))
+        (g (buffer-group buf))
+        (proj (buffer-project-label buf))
+        (p (buffer-path buf)))
+    (component 'ui/card
+      (list 'title (buffer-short-label buf) 'open? #t
+        'body (list
+          (component 'ui/kv
+            (list 'pairs
+              (append
+                (list (list "buffer" buf) (list "mode" mode))
+                (if (pair? minors)
+                    (list (list "minor" (string-join minors " · ")))
+                    '())
+                (if g (list (list "group" (group-label g))) '())
+                (if (equal? proj "") '() (list (list "project" proj)))
+                (if p (list (list "file" p)) '())
+                (list (list "size"
+                            (string-append (number->string (buffer-size buf)) " bytes"))
+                      (list "state"
+                            (string-append
+                              (if (buffer-modified? buf) "modified" "saved")
+                              (if (buffer-read-only? buf) " · read-only" ""))))))))))))
+
+(define (dashboard--group-card g)
+  (component 'ui/card
+    (list 'title (string-append "group: " (group-label g)) 'open? #t
+      'body (list
+        (component 'ui/kv
+          (list 'pairs
+            (append
+              (list (list "members"
+                          (string-join (map buffer-short-label (group-buffers-mru g))
+                                       " · "))
+                    (list "companion" (group-noise g))
+                    (list "layout" (if (group-layout g) "saved" "default")))
+              (let ((m (group-meta g)))
+                (if m (list (list "about" m)) '())))))))))
+
+(define (dashboard--groups-card my-g)
+  (let ((gs (group-names)))
+    (component 'ui/card
+      (list 'title (string-append "all groups — " (number->string (length gs)))
+            'open? #t
+        'body (list
+          (component 'ui/kv
+            (list 'pairs
+              (map (lambda (g)
+                     (list (string-append (if (equal? g my-g) "▶ " "")
+                                          (group-label g))
+                           (string-append
+                             (number->string (length (group-buffers g))) " buffers · "
+                             (group-noise g)
+                             (let ((m (group-meta g)))
+                               (if m (string-append " · " m) "")))))
+                   gs))))))))
+
+(define (dashboard--frame-card)
+  (component 'ui/card
+    (list 'title "frame" 'open? #t
+      'body (list
+        (component 'ui/kv
+          (list 'pairs
+            (list (list "group" (let ((g (frame-local 'current-group)))
+                                  (if g (group-label g) "none")))
+                  (list "windows" (number->string (length (window-list))))
+                  (list "frames" (number->string (length (frame-list))))
+                  (list "layouts"
+                        (string-append
+                          (number->string (length (or (frame-local 'winner-ring) '())))
+                          " remembered")))))))))
+
+(define (dashboard-refresh!)
+  (let ((buf (or (buffer-local *dashboard-buffer* 'dashboard-for)
+                 (current-buffer))))
+    (buffer-set-local! *dashboard-buffer* 'render-blocks
+      (append
+        (list (dashboard--buffer-card buf))
+        (let ((g (buffer-group buf)))
+          (if g (list (dashboard--group-card g)) '()))
+        (list (dashboard--groups-card (buffer-group buf))
+              (dashboard--frame-card))))))
+
+(define-command "modeline-dashboard-refresh" "Refresh the dashboard"
+  (lambda () (dashboard-refresh!)))
+
+(define-mode "dashboard-mode"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (buffer-set-read-only! buf #t)
+      (buffer-set-local! buf 'transient #t)
+      (buffer-set-local! buf 'desktop-skip-locals '(render-blocks))
+      (buffer-set-local! buf 'render-mode "blocks")
+      (local-set-key "q" "popup-toggle")
+      (local-set-key "g" "modeline-dashboard-refresh")
+      (dashboard-refresh!))))
+
+(mode-doc! "dashboard-mode"
+  "The modeline, expanded: the buffer, its modes, its group, every group, and the frame. `g` refreshes and `q` closes.")
+
+(define-command "modeline-expand"
+  "Toggle the dashboard popup: everything about here"
+  (lambda ()
+    (if (and (popup-open?)
+             (equal? (popup-buffer) *dashboard-buffer*)
+             (window-showing *dashboard-buffer*))
+        (run-command "popup-toggle")
+        (let ((here (current-buffer)))
+          (buffer-create *dashboard-buffer*)
+          (buffer-set-local! *dashboard-buffer* 'dashboard-for here)
+          (display-buffer *dashboard-buffer*)
+          (set-mode! "dashboard-mode")))))
+
 (define-command "groups" "The groups board: switch, describe, set noise"
   (lambda () (list-mode-show! "groups-mode")))
 
@@ -3958,6 +4082,8 @@
 ;; winner: any layout change is one keystroke from undone
 (global-set-key "C-c <left>" "winner-undo")
 (global-set-key "C-c <right>" "winner-redo")
+;; the modeline, expanded — also a click on the modeline's name
+(global-set-key "C-x ?" "modeline-expand")
 (global-set-key "C-c RET" "chat-companion-ask")
 
 ;;; --- minibuffer history (vertico-style: last-used first) --------------------
@@ -4232,6 +4358,8 @@
 (define (ui-command! cmd buf)
   (cond ((and (string? cmd) (string-prefix? "agent-" cmd))
          (run-command cmd))
+        ;; the modeline's name is the dashboard's click target
+        ((equal? cmd "modeline-expand") (run-command cmd))
         ((string? buf)
          (let ((c (buffer-local buf 'modeline-info-command)))
            (when (string? c) (run-command c))))

@@ -2083,6 +2083,39 @@ defmodule Aimax.EditorTest do
       )
   end
 
+  test "modeline-expand toggles the dashboard popup with the buffer's facts" do
+    n = System.unique_integer([:positive])
+    b = "dash-#{n}"
+    Aimax.Core.create_buffer(b)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (set-frame-local! 'current-group #f)
+             (delete-other-windows!)
+             (switch-to-buffer! "#{b}")
+             (buffer-set-local! "#{b}" 'group "dashgrp-#{n}"))
+      """)
+
+    press(["C-x", "?"])
+    assert Editor.current_buffer() == "*dashboard*"
+
+    blocks = Aimax.Core.Buffer.get_local("*dashboard*", "render-blocks")
+    text = inspect(blocks, limit: :infinity, printable_limit: :infinity)
+    assert text =~ b
+    assert text =~ "dashgrp-#{n}"
+    assert text =~ "all groups"
+    assert text =~ "frame"
+
+    # the same key toggles it away
+    press(["C-x", "?"])
+    refute Enum.any?(Editor.list_windows(), fn {_id, x} -> x == "*dashboard*" end)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(
+        "(begin (set-frame-local! 'current-group #f) (delete-other-windows!))"
+      )
+  end
+
   test "winner: a destroyed layout is one undo away; redo returns" do
     n = System.unique_integer([:positive])
     b = "wn-#{n}"

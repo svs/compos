@@ -953,7 +953,14 @@ defmodule Aimax.Ui.EditorLive do
       <% end %>
       <div class="modeline">
         <span class={"ml-dot #{if @node.modified, do: "modified"}"}></span>
-        <span class="name">{@node.buffer}</span>
+        <span
+          class="name"
+          style="cursor:pointer"
+          title="expand (C-x ?)"
+          phx-click="ui_cmd"
+          phx-value-win={@node.id}
+          phx-value-cmd="modeline-expand"
+        >{@node.buffer}</span>
         <span :if={@node.group} class="ml-group">⊞ {@node.group}</span>
         <span class="ml-mode">{@node.mode}</span>
         <span :if={@node.render_mode in ["html", "markdown"]} class="ml-mode">preview</span>

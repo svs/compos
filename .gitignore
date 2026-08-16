@@ -23,3 +23,4 @@ erl_crash.dump
 # rust nif build artifacts
 apps/aimax_core/native/aimax_ts/target/
 desktop/src-tauri/target/
+burrito_out/

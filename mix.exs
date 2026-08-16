@@ -20,7 +20,13 @@ defmodule Aimax.MixProject do
           aimax_ui: :permanent,
           aimax_rpc: :permanent
         ],
-        include_executables_for: [:unix]
+        include_executables_for: [:unix],
+        steps: [:assemble, &Burrito.wrap/1],
+        burrito: [
+          targets: [
+            macos_arm: [os: :darwin, cpu: :aarch64]
+          ]
+        ]
       ]
     ]
   end
@@ -31,6 +37,9 @@ defmodule Aimax.MixProject do
   #
   # Run "mix help deps" for examples and options.
   defp deps do
-    []
+    [
+      # single-binary packaging; needs zig + xz on the build machine
+      {:burrito, "~> 1.5.0", runtime: false}
+    ]
   end
 end

@@ -509,6 +509,12 @@
 
 (define-command "minibuffer-confirm" "Accept the selected minibuffer candidate"
   (lambda () (minibuffer-confirm!)))
+;; C-RET: the same confirm, flagged as a CONTEXT switch — the prompt
+;; that cares (the buffer switcher) reads and resets the flag
+(define *mb-confirm-context* #f)
+(define-command "minibuffer-confirm-context"
+  "Accept the selected candidate as a context (group) switch"
+  (lambda () (set! *mb-confirm-context* #t) (minibuffer-confirm!)))
 (define-command "minibuffer-confirm-input" "Accept the minibuffer input exactly as typed"
   (lambda () (minibuffer-confirm-input!)))
 (define-command "minibuffer-cancel" "Cancel the minibuffer prompt"
@@ -595,6 +601,7 @@
 (let ((mb (minibuffer-buffer)))
   (local-set-key* mb "RET" "minibuffer-confirm")
   (local-set-key* mb "M-RET" "minibuffer-confirm-input")
+  (local-set-key* mb "C-RET" "minibuffer-confirm-context")
   (local-set-key* mb "C-g" "minibuffer-cancel")
   (local-set-key* mb "TAB" "minibuffer-complete")
   (local-set-key* mb "C-n" "minibuffer-next-candidate")
@@ -1792,6 +1799,9 @@
 ;; without the package every buffer is projectless.
 (define buffer-project-label (lambda (b) ""))
 
+;; ...and as the ROOT, for context switching (a project is also a group)
+(define buffer-project-root (lambda (b) ""))
+
 ;; what a buffer name means in a prompt: its mode, its group, its
 ;; project, then the file it is visiting. The group and project columns
 ;; show which buffers belong together, and the prompt matches on them
@@ -1881,9 +1891,33 @@
           (filter (lambda (b) (not (string-prefix? " " b)))
                   (group-buffers-mru g)))))
 
+;; C-RET: the picked buffer's CONTEXT comes up — its group, or its
+;; project materialized as one. A project is also a group: the first
+;; context switch tags the project's open buffers and founds it.
+(define (buffer-context-switch! b)
+  (let ((focus (lambda ()
+                 (let ((w (window-showing b)))
+                   (if w (select-window! w) (switch-to-buffer! b)))))
+        (bg (buffer-group b)))
+    (cond
+      (bg (switch-to-group! bg) (focus))
+      (else
+        (let ((root (buffer-project-root b)))
+          (if (equal? root "")
+              (switch-to-buffer! b)
+              (begin
+                (for-each (lambda (x)
+                            (when (and (not (buffer-group x))
+                                       (equal? (buffer-project-root x) root))
+                              (buffer-set-local! x 'group root)))
+                          (buffer-list))
+                (switch-to-group! root)
+                (focus))))))))
+
 (define-command "switch-to-buffer"
-  "Switch to a buffer or a group; groups restore their window layout"
+  "Switch to a buffer; C-RET enters the buffer's group instead"
   (lambda ()
+    (set! *mb-confirm-context* #f)
     (let* ((here (or (window-buffer (active-window)) (current-buffer)))
            (my-group (or (frame-local 'current-group) (buffer-group here)))
            ;; opening the switcher snapshots this group's arrangement:
@@ -1916,22 +1950,21 @@
         (lambda (b) (when (buffer-exists? b) (window-preview-buffer! b)))
         (lambda (name)
           (let* ((picked (if (equal? name "") fallback name))
+                 (explicit (let ((x *mb-confirm-context*))
+                             (set! *mb-confirm-context* #f)
+                             x))
                  (g (container-of picked)))
             (cond (g (switch-to-group! g))
                   ((pick picked) #t)
                   ((buffer-exists? picked)
-                   ;; a buffer from ANOTHER group means entering that
-                   ;; group: its layout comes up with point in the
-                   ;; buffer. The frame's own group switches in place.
-                   (let ((bg (buffer-group picked)))
-                     (if (and bg (not (equal? bg my-group)))
-                         (begin
-                           (switch-to-group! bg)
-                           (let ((w (window-showing picked)))
-                             (if w (select-window! w) (switch-to-buffer! picked))))
-                         (begin
-                           (switch-to-buffer! picked)
-                           (windows-shown-catchup!)))))
+                   ;; RET is a BUFFER switch: one window changes and
+                   ;; nothing else moves. The context switch — layout
+                   ;; and all — is C-RET's job, and only C-RET's.
+                   (if explicit
+                       (buffer-context-switch! picked)
+                       (begin
+                         (switch-to-buffer! picked)
+                         (windows-shown-catchup!))))
                   (else
                    ;; nothing matches: RET founds a group named PICKED
                    ;; from the current windows

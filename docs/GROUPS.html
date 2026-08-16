@@ -67,24 +67,27 @@ group changes only when you switch groups.</p>
 <h2>The switcher: C-x b</h2>
 
 <div class="rule">
-<strong>History first.</strong> The pool is the recency stream: the buffer you
-just left is the default, so <kbd>RET</kbd> toggles like the Emacs buffer
-ring. Groups have no rows of their own — every buffer row IS a group row.
+<strong>Two gestures, never mixed.</strong> <kbd>RET</kbd> switches a BUFFER:
+one window changes, nothing else moves. <kbd>C-RET</kbd> switches a CONTEXT:
+the picked buffer's group comes up, layout and all. The same rule Emacs keeps
+between <code>C-x b</code> and tab-bar / perspective switching.
 </div>
+
+<p>The pool is the recency stream — history first: the buffer you just left
+is the default, so <kbd>RET</kbd> toggles like the Emacs buffer ring. Groups
+have no rows of their own; every buffer row IS a group row.</p>
 
 <p>Each row shows four columns: the mode, the group, the project, and the
 file. What you type matches the buffer name and the first three columns. So
 <code>mail</code> finds the mail group's buffers, <code>elixir</code> finds
 the Elixir buffers, and a project name finds that project's buffers.</p>
 
-<p><strong>Picking a buffer decides by group:</strong></p>
-
 <table>
-<tr><th>you pick</th><th>what happens</th></tr>
-<tr><td>a buffer of your current group</td><td>it switches in this window — plain</td></tr>
-<tr><td>a buffer of another group</td><td>you ENTER that group: its layout comes up, point in the picked buffer</td></tr>
-<tr><td>an ungrouped buffer</td><td>it switches in this window; the frame keeps its group</td></tr>
-<tr><td>a name that matches nothing</td><td><kbd>RET</kbd> founds a group with that name from the current windows</td></tr>
+<tr><th>you press</th><th>what happens</th></tr>
+<tr><td><kbd>RET</kbd></td><td>the buffer switches in this window — always, any group. The frame keeps its context.</td></tr>
+<tr><td><kbd>C-RET</kbd></td><td>you enter the buffer's context: its group's layout comes up with point in the buffer</td></tr>
+<tr><td><kbd>C-RET</kbd> on a project file with no group</td><td>the project BECOMES a group — its open buffers join, named by the root — and you enter it</td></tr>
+<tr><td><kbd>RET</kbd> on a name that matches nothing</td><td>founds a group with that name from the current windows</td></tr>
 </table>
 
 <p><kbd>TAB</kbd> locks the switcher to a group: with an input that names

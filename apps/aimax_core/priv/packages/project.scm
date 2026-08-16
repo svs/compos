@@ -42,8 +42,10 @@
             (cons (list dir root) *project-root-cache*))
           root))))
 
-;; fill the editor's seam: a buffer's project column is the name of the
-;; git root above its file; a pathless buffer stays projectless
+;; fill the editor's seams: a buffer's project column is the name of
+;; the git root above its file; the root itself feeds the context
+;; switch (a project is also a group). A pathless buffer stays
+;; projectless.
 (set! buffer-project-label
   (lambda (b)
     (let ((p (buffer-path b)))
@@ -51,6 +53,11 @@
           (let ((root (project-root-cached (parent-dir p))))
             (if root (project-name root) ""))
           ""))))
+
+(set! buffer-project-root
+  (lambda (b)
+    (let ((p (buffer-path b)))
+      (or (and p (project-root-cached (parent-dir p))) ""))))
 
 ;; tracked + untracked-but-not-ignored, like projectile
 (define (project-files root)

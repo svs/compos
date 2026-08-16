@@ -1999,31 +1999,76 @@ defmodule Aimax.EditorTest do
     refute "[ctgrp-#{n}]" in labels
     assert mb.prompt =~ "default #{m2}"
 
-    # RET on a buffer of another group ENTERS the group: its layout
-    # comes up (both members) with point in the picked buffer
+    # RET is a BUFFER switch: one window changes, nothing else moves,
+    # and the frame's group does not change
     press(["RET"])
     assert Editor.current_buffer() == m2
+    assert length(Editor.list_windows()) == 1
+    assert Aimax.Core.Session.eval("(frame-local 'current-group)") == {:ok, "#f"}
+
+    # C-RET is the CONTEXT switch: the group's layout comes up with
+    # point in the picked buffer, and the frame enters the group.
+    # (Drop the snapshot the switcher just took, so the default
+    # arrangement is what comes up.)
+    press(["C-x", "b"])
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(~s{(buffer-set-local! (group-chat "ctgrp-#{n}") 'group-layout #f)})
+
+    type(m1)
+    press(["C-RET"])
+    assert Editor.current_buffer() == m1
 
     shown =
       Editor.list_windows() |> Enum.map(fn {_id, b} -> b end) |> Enum.sort()
 
     assert shown == Enum.sort([m1, m2])
 
-    # the frame now stands in the group; a scratch detour keeps it
     assert Aimax.Core.Session.eval("(frame-local 'current-group)") ==
              {:ok, ~s{"ctgrp-#{n}"}}
 
     {:ok, _} =
       Aimax.Core.Session.eval(
-        ~s{(begin (switch-to-buffer! "*scratch*") (frame-group))}
+        "(begin (set-frame-local! 'current-group #f) (delete-other-windows!))"
       )
-      |> then(fn {:ok, out} ->
-        assert out == ~s{"ctgrp-#{n}"}
-        {:ok, out}
-      end)
+  end
+
+  test "C-RET on a project buffer materializes the project as a group" do
+    n = System.unique_integer([:positive])
+    root = Path.join(System.tmp_dir!(), "pg-#{n}")
+    File.mkdir_p!(Path.join(root, ".git"))
+    f1 = Path.join(root, "one.txt")
+    f2 = Path.join(root, "two.txt")
+    File.write!(f1, "one")
+    File.write!(f2, "two")
+    on_exit(fn -> File.rm_rf!(root) end)
 
     {:ok, _} =
-      Aimax.Core.Session.eval("(begin (set-frame-local! 'current-group #f) (delete-other-windows!))")
+      Aimax.Core.Session.eval("""
+      (begin (set-frame-local! 'current-group #f)
+             (delete-other-windows!)
+             (visit "#{f1}")
+             (visit "#{f2}")
+             (switch-to-buffer! "*scratch*"))
+      """)
+
+    press(["C-x", "b"])
+    type("one.txt")
+    press(["C-RET"])
+
+    # the project's open buffers joined a group named by the root, and
+    # the context came up arranged
+    assert Aimax.Core.Session.eval(~s{(buffer-group "#{f1}")}) == {:ok, ~s{"#{root}"}}
+    assert Aimax.Core.Session.eval(~s{(buffer-group "#{f2}")}) == {:ok, ~s{"#{root}"}}
+    assert Editor.current_buffer() == f1
+
+    shown = Editor.list_windows() |> Enum.map(fn {_id, b} -> b end) |> Enum.sort()
+    assert shown == Enum.sort([f1, f2])
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(
+        "(begin (set-frame-local! 'current-group #f) (delete-other-windows!))"
+      )
   end
 
   test "TAB locks the switcher to the one group the input names" do

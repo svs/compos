@@ -52,6 +52,9 @@ class Conn {
     ws.onopen = () => {
       clearInterval(this.heart);
       this.heart = setInterval(() => this.post({ op: "ping" }), HEARTBEAT_MS);
+      // a fresh daemon knows nothing about our windows; tell it at once, so
+      // the first tab it opens already lands beside the frame that asked
+      announceAll().catch(() => {});
     };
 
     ws.onmessage = (ev) => this.onFrame(ev.data);
@@ -193,6 +196,19 @@ async function tell(tabId, msg, tries = 8) {
 
 // --- ops the daemon can call ----------------------------------------------
 
+// The daemon's idea of a window can outlive the window: a frame keeps the
+// binding until something replaces it. Ask before we use it, and fall back to
+// Chrome's own choice rather than failing the call.
+async function windowExists(windowId) {
+  if (typeof windowId !== "number") return false;
+  try {
+    await chrome.windows.get(windowId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const OPS = {
   async tabs() {
     const tabs = await chrome.tabs.query({});
@@ -269,9 +285,15 @@ const OPS = {
     return { released: true };
   },
 
-  async open({ url, active }) {
-    const t = await chrome.tabs.create({ url, active: active !== false });
-    return { tab: t.id };
+  // A tab belongs beside the thing that asked for it. The daemon names the
+  // browser window — the one its frame is displayed in — and the tab opens
+  // there, not in whichever window Chrome last focused. Without this, a chat
+  // on the left screen answers by opening a tab on the right one.
+  async open({ url, active, window }) {
+    const create = { url, active: active !== false };
+    if (await windowExists(window)) create.windowId = window;
+    const t = await chrome.tabs.create(create);
+    return { tab: t.id, window: t.windowId };
   },
 
   async activate({ tab }) {
@@ -307,6 +329,41 @@ function editorFor(windowId) {
   return editors.get(windowId) || null;
 }
 
+// The daemon needs the same binding, and for a different reason: it decides
+// WHERE a tab it opens should go. A frame that has never sent a key from a
+// page has no window on the daemon side, so the answer to "open this link"
+// used to land in whichever window Chrome focused last. Tell it at register
+// time instead, and again whenever a daemon connects.
+function announce(windowId, frame) {
+  if (!frame) return;
+  for (const c of conns.values()) {
+    if (c.up) c.ask("register", { frame, window: windowId }).catch(() => {});
+  }
+}
+
+// MV3 discards the worker after 30s and `editors` goes with it. The pages
+// themselves still know which frame they are, so ask them: every ai-max tab
+// answers a frame probe. This runs when a daemon connects, which is also when
+// the binding matters again.
+async function rediscoverEditors() {
+  const tabs = await chrome.tabs.query({ url: ["http://localhost/*", "http://127.0.0.1/*"] });
+  await Promise.all(
+    tabs.map(async (t) => {
+      try {
+        const r = await chrome.tabs.sendMessage(t.id, { cmd: "frame" });
+        if (r?.frame) editors.set(t.windowId, { tabId: t.id, frame: r.frame });
+      } catch {
+        /* not an ai-max page, or no content script in it */
+      }
+    })
+  );
+}
+
+async function announceAll() {
+  await rediscoverEditors();
+  for (const [windowId, ed] of editors) announce(windowId, ed.frame);
+}
+
 // a tab closing or navigating away takes its window's binding with it
 chrome.tabs.onRemoved.addListener((tabId) => {
   for (const [win, ed] of editors) if (ed.tabId === tabId) editors.delete(win);
@@ -318,6 +375,7 @@ chrome.tabs.onAttached.addListener((tabId, { newWindowId }) => {
     if (ed.tabId === tabId) {
       editors.delete(win);
       editors.set(newWindowId, ed);
+      announce(newWindowId, ed.frame);
     }
   }
 });
@@ -340,7 +398,11 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
 
     // an ai-max page telling us which frame it is
     if (msg.cmd === "register") {
+      const was = editors.get(windowId);
       editors.set(windowId, { tabId: tab, frame: msg.frame });
+      // the page re-registers on every visibility change; only a new binding
+      // is worth a round trip to the daemon
+      if (!was || was.frame !== msg.frame || was.tabId !== tab) announce(windowId, msg.frame);
       return { registered: msg.frame };
     }
 

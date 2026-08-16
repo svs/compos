@@ -56,6 +56,10 @@ defmodule Aimax.ChromeTest do
       for b <- ["*chrome-test*", "*ran-it*", "*tabs*", "*picked-beta*"] do
         Session.eval(~s[(when (buffer-exists? "#{b}") (buffer-kill! "#{b}"))])
       end
+
+      # the frame's browser window is session state too: left set, it sends
+      # the next test's tabs into a window that does not exist
+      Session.eval("(set-frame-local! 'chrome-window #f)")
     end)
 
     :ok
@@ -353,6 +357,58 @@ defmodule Aimax.ChromeTest do
       request(21, "mb-key", %{"spec" => "C-g"})
       assert_receive {:frame, %{"id" => 21, "ok" => true, "result" => r}}, 2000
       refute r["raise"]
+    end
+  end
+
+  # One frame, one browser window. The daemon has to know which window a frame
+  # is displayed in, or a tab it opens lands wherever Chrome looked last — a
+  # chat on the left screen answering on the right one.
+  describe "one frame, one browser window" do
+    defp this_frame, do: eval!("(selected-frame)") |> String.trim("\"")
+
+    test "the editor page's registration binds its frame to its window" do
+      stub_socket()
+
+      request(30, "register", %{"frame" => this_frame(), "window" => 91})
+      assert_receive {:frame, %{"id" => 30, "ok" => true}}, 2000
+
+      assert eval!("(chrome-window)") == "91"
+    end
+
+    test "a key pressed in a page binds the window too" do
+      stub_socket()
+
+      request(31, "mb-state", %{"frame" => this_frame(), "window" => 92, "tab" => 7})
+      assert_receive {:frame, %{"id" => 31, "ok" => true}}, 2000
+
+      assert eval!("(chrome-window)") == "92"
+    end
+
+    test "a tab opens in the frame's own window" do
+      stub_socket()
+      eval!("(set-frame-local! 'chrome-window 91)")
+
+      eval!(~s[(tab-open "https://example.com/")])
+      assert_receive {:frame, %{"op" => "open", "url" => "https://example.com/", "window" => 91}}
+    end
+
+    test "an explicit window wins over the frame's" do
+      stub_socket()
+      eval!("(set-frame-local! 'chrome-window 91)")
+
+      eval!(~s[(tab-open "https://example.com/" 92)])
+      assert_receive {:frame, %{"op" => "open", "window" => 92}}
+    end
+
+    # no binding is not an error: Chrome picks the window it focused last,
+    # which is what every earlier version did
+    test "an unbound frame names no window at all" do
+      stub_socket()
+      eval!("(set-frame-local! 'chrome-window #f)")
+
+      eval!(~s[(tab-open "https://example.com/")])
+      assert_receive {:frame, %{"op" => "open"} = f}
+      refute Map.has_key?(f, "window")
     end
   end
 

@@ -27,6 +27,19 @@ daemon is a second frame, which is rarely what you meant).
 **Alt+Shift+A** jumps to this window's ai-max directly. Rebind it at
 `chrome://extensions/shortcuts`.
 
+## One window, one ai-max
+
+Each ai-max page tells the extension which frame it is, and the extension tells
+the daemon which browser window that frame sits in. The binding decides where
+things happen:
+
+- `C-x b` in a page offers the tabs of **that** window, beside the buffers.
+- A tab the editor opens lands in the frame's own window. A chat on the left
+  screen answers there, not in whichever window Chrome focused last.
+- **Alt+Shift+A** and a confirmed prompt raise that window's ai-max tab.
+
+Drag the ai-max tab to another window and the binding follows it.
+
 No `/etc/hosts` entry and no port-80 listener: a hosts file maps a name to an
 address, not a port, and Chrome treats a bare word as a search anyway.
 
@@ -58,6 +71,8 @@ not only ones it opened — that's the point of an ambient layer.
 (tab-read 42 (lambda (r) (buffer-append! "*scratch*" (chrome--get r 'text))))
 (tab-type 42 "typed for real")          ; trusted input, via CDP
 (tab-click 42 120 340)
+(tab-open "https://example.com/")       ; in this frame's browser window
+(tab-open "https://example.com/" 3)     ; or in window 3
 ```
 
 `M-x list-tabs` and `M-x switch-to-tab` are built on the same verbs.

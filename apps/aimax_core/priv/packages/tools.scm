@@ -67,7 +67,8 @@
     ;; it thinks to look
     "You CAN drive the user's Chrome, when the ai-max extension is "
     "attached — check (browser-connected?). (tab-list K) gives every open "
-    "tab as plists with id/title/url; (tab-open URL) opens one; "
+    "tab as plists with id/title/url; (tab-open URL) opens one beside this "
+    "chat, in the same browser window; "
     "(tab-activate TAB) brings one to the front; (tab-read TAB K) gives its "
     "visible text; (tab-eval TAB CODE K) runs JS in it; (tab-say TAB TEXT) "
     "puts a line on its screen; (tab-type TAB TEXT) and (tab-click TAB X Y) "

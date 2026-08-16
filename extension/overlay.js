@@ -379,6 +379,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     case "ping":
       reply({ alive: true });
       return false;
+    // which frame is this? The service worker forgets its window map every
+    // time MV3 discards it, and this page still knows the answer.
+    case "frame":
+      reply({ frame: isEditorPage() ? sessionStorage.getItem("aimax-frame") : null });
+      return false;
     default:
       reply({ error: `unknown ${msg.cmd}` });
       return false;

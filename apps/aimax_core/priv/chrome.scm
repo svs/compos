@@ -90,8 +90,14 @@
           ((equal? (car (chrome--tab-candidate (car ts))) label) (car ts))
           (else (loop (cdr ts))))))
 
+;; The browser window this frame is displayed in, as the extension last said.
+;; A frame learns it two ways: the editor page registers when it loads, and
+;; every key pressed in a page in that window carries it. #f means the
+;; extension has not told us yet — then Chrome chooses.
+(define (chrome-window) (frame-local 'chrome-window))
+
 (define (chrome--here-tabs tabs)
-  (let ((w (frame-local 'chrome-window)))
+  (let ((w (chrome-window)))
     (if w
         (filter (lambda (t) (equal? (chrome--get t 'window) w)) tabs)
         tabs)))
@@ -290,6 +296,9 @@
   (when (or (equal? op "chord") (equal? op "run"))
     (chrome--refresh-tabs))
   (cond ((equal? op "attached") (chrome--refresh-tabs) (list 'ok #t))
+        ;; the editor's own page, naming the browser window it sits in. The
+        ;; prologue above stores it; this frame now knows where its tabs go.
+        ((equal? op "register") (list 'ok #t))
         ((equal? op "run") (chrome--run (chrome--get args 'name)))
         ((equal? op "chord") (chrome--chord (or (chrome--get args 'keys) '())))
         ((equal? op "mb-key") (chrome--mb-key (chrome--get args 'spec)))
@@ -360,7 +369,15 @@
 (define (tab-click tab x y)
   (chrome-call "click" (list 'tab (chrome--tab-id tab) 'x x 'y y) chrome-ignore))
 
-(define (tab-open url) (chrome-call "open" (list 'url url) chrome-ignore))
+;; A tab opens beside the frame that asked for it. A chat on one screen must
+;; not answer by opening a tab on another: the frame knows its browser window,
+;; so the open op names it. WINDOW overrides that for the rare cross-window
+;; case; with neither, Chrome picks the window it focused last.
+(define (tab-open url &optional window)
+  (let ((w (or window (chrome-window))))
+    (chrome-call "open"
+      (if w (list 'url url 'window w) (list 'url url))
+      chrome-ignore)))
 (define (tab-activate tab) (chrome-call "activate" (list 'tab (chrome--tab-id tab)) chrome-ignore))
 (define (tab-close tab) (chrome-call "close" (list 'tab (chrome--tab-id tab)) chrome-ignore))
 (define (tab-release tab) (chrome-call "release" (list 'tab (chrome--tab-id tab)) chrome-ignore))
@@ -405,8 +422,14 @@
 (public! 'tab-say "(tab-say TAB TEXT) — put a line on that tab's screen")
 (public! 'tab-type "(tab-type TAB TEXT) — type into the tab for real (trusted input, via CDP)")
 (public! 'tab-click "(tab-click TAB X Y) — a real click at viewport coordinates")
-(public! 'tab-open "(tab-open URL) — open a new tab")
+(public! 'tab-open "(tab-open URL &optional WINDOW) — open a new tab, in this frame's browser window unless WINDOW says otherwise")
 (public! 'tab-activate "(tab-activate TAB) — bring a tab to the front")
 (public! 'tab-close "(tab-close TAB) — close a tab")
 (public! 'tab-cdp "(tab-cdp TAB METHOD PARAMS K) — raw Chrome DevTools Protocol")
 (public! 'browser-connected? "(browser-connected?) — is the ai-max Chrome extension attached?")
+
+;; the rest of this section predates the metadata declarations and takes the
+;; reviewed backfill; a new name stamps itself
+(domain! 'chrome)
+(effects! '(read))
+(public! 'chrome-window "(chrome-window) — the browser window this frame is displayed in, or #f")

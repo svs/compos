@@ -3,7 +3,7 @@
 Written 2026-08-12 from five parallel audits: duplication, reload purity,
 agent economics, apropos discovery, and a read of `~/src/codescope`.
 This file is the record of what the audits found and the plan that answers it.
-Read `CLAUDE.md` and `ARCHITECTURE.md` first. The one rule stands:
+Read `../CLAUDE.md` and `ARCHITECTURE.md` first. The one rule stands:
 **Elixir supplies mechanism. Scheme decides policy.**
 
 The goal: an AI-native Emacs with high graphical rendering and modern

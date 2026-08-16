@@ -597,8 +597,8 @@ initialize still advertises `fs: false` and fs/* frames still answer
 mid-conversation silently does nothing until some later reconnect.
 Silent no-ops read as broken features.
 
-**Where**: `priv/packages/mcp.scm` (chat-load-preset /
-chat-unload-preset); reconnect machinery in agent.scm.
+**Where**: `priv/packages/mcp.scm` (`llm-set-preset` /
+`llm-unset-preset`); reconnect machinery in agent.scm.
 
 **Steps**: on preset change in a chat whose backend is a live ACP
 session: set `'chat-mcp-dirty`, message the user, and offer

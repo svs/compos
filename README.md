@@ -1,85 +1,156 @@
 # ai-max.el
 
-**Scheme is the brain. The BEAM is the muscle.**
+Emacs rebuilt on the BEAM.
 
-The [aimax](../aimax) Work OS vision, rebuilt on Elixir/OTP: a programmable
-workspace where AI agents are first-class citizens — buffers as processes,
-Scheme as the extension language, everything driveable over RPC.
+## Why?
+Emacs is amazing! But it is old. The lack of graphics support make it arcane to use. It is not possible to get smooth and elegant LLM interaction in Emacs. The concurrency story is also pretty bad. Single threaded elisp freezes the frontend randomly. Emacs needs a  
 
-Why BEAM: everything aimax's Rust core fought for by hand (snapshot-actor,
-action queues, never-block-the-main-thread, thread-per-PTY-reader) is the
-BEAM's native model. Buffers are GenServers, agents are supervised processes,
-a blocking tool call cannot freeze the UI, and client-server is the default —
-the core is a headless daemon; every frontend (LiveView desktop shell,
-browser, TUI, MCP agent, `nc`) is just another client.
+## The one rule
+
+**Elixir supplies mechanism. Scheme decides policy.**
+
+Elixir owns the work that loops over bytes: ropes, tree-sitter, sockets,
+PTYs, schedulers, the LLM transport. Scheme owns everything a person calls
+"the editor": commands, keymaps, modes, hooks, themes, dired, org-mode,
+chat, mail. That is 17,000 lines of Scheme in
+`apps/aimax_core/priv/*.scm`, and 321 commands. You redefine any of them
+while the editor runs.
+
+Before we add Elixir code, we ask one question: can this be Scheme plus one
+small primitive? The answer is usually yes.
+
+## Why the BEAM
+
+One GenServer holds each buffer. Agents are supervised processes. A blocking
+tool call cannot freeze redisplay, because it blocks its own process and
+nothing else. The core is a headless daemon, so every frontend is a client:
+the browser, the desktop shell, `nc`, or an agent over JSON-RPC.
+
+Every buffer mutation broadcasts a change event with **provenance** —
+`:user`, `:editor`, `:process`, or `{:agent, id}`. Provenance is
+load-bearing. Read-only buffers block `:user` edits only, and the reactor
+ignores agent-sourced edits, so agents do not trigger themselves.
+
+## What works
+
+**Editing** — rope buffers, Emacs undo with amalgamation and
+redo-after-break, mark and region, kill ring, isearch, completion in the
+minibuffer and in the buffer, and per-window points that markers keep
+correct across edits.
+
+**Frames and windows** — tiling splits with ratio geometry. Each attached
+browser gets its own frame, its own window tree, and its own minibuffer.
+Clients reattach by frame id across page reloads and daemon restarts.
+
+**Persistence** — everything survives a restart. `~/.aimax/desktop.etf`
+holds buffers, window trees, points, and faces. File buffers reopen from
+disk. Chat and agent buffers restore their content and their local state.
+
+**Tree-sitter** — a Rustler NIF gives font-lock, structural navigation, and
+queries. `M-x ts-install-grammar` fetches a grammar from inside the editor.
+
+**AI** — chat is the one conversation surface. It runs two lanes: a direct
+lane over `req_llm` with native tool use, and an ACP lane that drives an
+external agent CLI. Permission prompts become minibuffer gates. Tool calls
+render as components in the buffer. `M-|` pipes a region through a model.
+
+**Applications, all in userland Scheme** — org-mode, notmuch mail, git and
+diff-mode, project, per-agent git worktrees, an MCP client and server hub, a
+GraphQL client, a Spotify remote, a writing workspace, a code browser, dired,
+ibuffer, help, and Emacs-style customization.
+
+**Packaging** — `mix release` builds a daemon. `bin/aimax` starts it.
+`AIMAX_APP_PORT` sets the port.
 
 ## Layout
 
-    apps/aimax_scheme   the extension language: a Scheme whose values are BEAM terms
-    apps/aimax_core     buffers (rope + change events), reactor (reactive rules),
-                        session (the interp wired to editor primitives), tree-sitter (stub)
-    apps/aimax_rpc      JSON-RPC 2.0 over Unix socket — "eval is the API"
-
-## Try it
-
-    mix deps.get && mix test        # 75 tests
-    mix run --no-halt               # core + rpc (~/.aimax/sock) + window (http://localhost:4004)
-    open -na "Google Chrome" --args --app=http://localhost:4004   # app-mode window
-
-In the window: type, `C-x 2/3/o/1/0` tiling splits, `C-x C-f` find-file,
-`C-x C-s` save, `C-x b` buffers, `C-k`/`C-y` kill/yank, `C-/` undo,
-`M-x` commands, `M-:` eval Scheme. All of it defined in
-`apps/aimax_core/priv/editor.scm` — redefine live via `M-:` or RPC.
-
-    echo '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(begin (buffer-create \"*x*\") (buffer-append! \"*x*\" \"hi\") (buffer-text \"*x*\"))"}}' | nc -U ~/.aimax/sock
-
-From Scheme (via RPC, `Session.eval/1`, or eventually `M-:`): `buffer-create`,
-`buffer-append!`, `buffer-text`, `find-file`, `eval-region`, `eval-buffer`,
-`(message ...)` → `*messages*` (the echo area is a *view* of that buffer).
-
-Reactive rules (the orchestrator trigger primitive, Elixir API for now):
-
-```elixir
-Aimax.Core.Reactor.on_change("*prod-log*", {:contains, "ERROR"},
-  fn changes -> spawn_triage_agent(changes) end,
-  debounce: 500)
+```
+apps/aimax_scheme   the extension language: values are BEAM terms
+apps/aimax_core     buffers, editor state, primitives, NIFs, procs, LLM
+  priv/*.scm        the editor itself
+  native/aimax_ts   tree-sitter Rustler NIF
+apps/aimax_ui       Phoenix LiveView frontend (a client — no editor logic)
+apps/aimax_rpc      JSON-RPC over ~/.aimax/sock ("eval is the API")
 ```
 
-Rules ignore agent-sourced edits by default (provenance-based loop prevention);
-`{:ts_query, ...}` matchers arrive with the tree-sitter NIF.
+Your config loads from `~/.aimax/ai-config.scm`, then `~/.aimax/init.scm`.
+Both are optional.
 
-## Design commitments (from ../aimax/docs + this port's decisions)
+## Run it
 
-1. **Tree-sitter is the sensor** — buffers are syntax trees; zero-leak context
-   (send the function, not the file); ts-query filters at ingestion.
-2. **Scheme is the brain** — dired must be writable in userland Scheme.
-   Symbols are `{:sym, "name"}`, never atoms.
-3. **RPC-first** — the socket predates the UI; headless is the default, MCP is
-   a thin layer over the same core; human-gates before destructive agent tools.
-4. **Display list, not grid** — frontends render `{text, face}` spans plus
-   embedded components (checkbox, chart, button). Excellent formatting via
-   HTML/CSS (Phoenix LiveView + desktop shell); grid frontends degrade
-   gracefully.
+```sh
+mix deps.get && mix test
+mix run --no-halt
+open -na "Google Chrome" --args --app=http://localhost:4004
+```
 
-## Roadmap
+The daemon reads `priv/*.scm` at boot, so a restart reloads them. Browser
+clients reload themselves through a boot-id check.
 
-- [x] Scheme kernel (reader, TCO evaluator, closures/set!, prelude, host interop)
-- [x] Buffers, change events with provenance, debounced reactor, session, RPC eval
-- [ ] Tree-sitter Rustler NIF (`Aimax.Core.TreeSitter` has the plan) + `{:ts_query, ...}` matchers
-- [ ] `watch-file` / tail ingestion + filter chains
-- [ ] Scheme surface: `define-command`, keymaps, hooks, `on-buffer-change`, fs primitives (dired bar)
-- [ ] Agent runtime: `define-agent`, streaming LLM client, `->`/`parallel`/`human-gate` flows
-- [ ] MCP server over the RPC core; ACP client for external agents
-- [ ] LiveView frontend: display-list redisplay, minibuffer, echo area, geometry queries
-- [ ] Undo (persistent ropes make this cheap), marks, text properties
+In the window: `C-x 2/3/o/1/0` splits windows, `C-x C-f` finds a file,
+`C-x C-s` saves, `C-x b` switches buffers, `C-k` and `C-y` kill and yank,
+`C-/` undoes, `M-x` runs a command, and `M-:` evaluates Scheme.
 
-## Known limitations (deliberate, tracked)
+## Drive it from outside
 
-- **Env frames are never GC'd** — every closure call adds a frame to the
-  interpreter's store; long-lived sessions grow. Fix: reachability sweep or
-  ETS-backed envs. Fine for now, wrong forever.
-- Rope has no rebalancing or line index yet; byte offsets only.
-- No macros (`define-syntax`), no continuations — decide before the Scheme
-  surface grows users.
-- RPC is newline-delimited: multi-line payloads must be JSON-encoded (fine),
-  and there's no auth (localhost socket only until there is).
+`eval` is the whole API. One round-trip runs any multi-step action:
+
+```sh
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(buffer-list)"}}' \
+  | nc -U ~/.aimax/sock
+```
+
+A **buffer link** is one string that names a buffer. `C-c l` copies the link
+for the current buffer and line. Open the same name under `/raw/` to read the
+text:
+
+```sh
+curl -s http://localhost:4004/raw            # every buffer name, one per line
+curl -s http://localhost:4004/raw/%2Ftmp%2Fnotes.md
+```
+
+## Extend it
+
+A command is a Scheme definition. Evaluate this with `M-:` and the editor
+has it — no restart, no compile step:
+
+```scheme
+(domain! 'text)
+(effects! '(write))
+
+(define-command "insert-buffer-name" "Insert the name of this buffer"
+  (lambda () (insert! (current-buffer))))
+
+(global-set-key "C-c n" "insert-buffer-name")
+```
+
+Every public definition carries catalog metadata — a `domain!` and an
+`effects!` scope. `M-x apropos` searches that catalog, so an agent can ask
+what the editor can do, and what each answer will touch.
+
+## Design commitments
+
+1. **Tree-sitter is the sensor.** Buffers are syntax trees. Send the
+   function, not the file.
+2. **Scheme is the brain.** If an app could plausibly be written in Scheme,
+   it is. Symbols are `{:sym, "name"}`, never atoms — user code must not
+   grow the atom table.
+3. **RPC first.** The socket predates the UI. Headless is the default, and
+   MCP is a thin layer over the same core.
+4. **Display list, not grid.** Frontends render `{text, face}` spans plus
+   embedded components. A grid frontend degrades gracefully.
+5. **Everything survives a reload.** A new buffer kind must keep this true.
+
+## Known limitations
+
+- **Env frames are never collected.** Every closure call adds a frame to the
+  interpreter store, so long sessions grow. The fix is a reachability sweep
+  or ETS-backed envs.
+- The rope has no rebalancing.
+- The Scheme has no `define-syntax` and no continuations.
+- RPC is newline-delimited and has no auth. Keep it on the local socket.
+
+## Documentation
+
+`docs/` holds the architecture, the roadmap, the component contract, and the
+current handoff. Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) first.

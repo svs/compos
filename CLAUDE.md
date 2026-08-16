@@ -1,7 +1,7 @@
 # ai-max.el — working instructions
 
 Emacs rebuilt on the BEAM, scripted in Scheme, rendered by Phoenix LiveView.
-Read `ARCHITECTURE.md` once before making changes. `HANDOFF.html` has the
+Read `docs/ARCHITECTURE.md` once before making changes. `docs/HANDOFF.html` has the
 current state, queue, and landmines (open it in the editor: `C-x C-f`, then
 `C-c C-v` to preview).
 
@@ -71,6 +71,27 @@ The line rides in the query string because a fragment never reaches the
 daemon. Build a link for any buffer with `(buffer-link NAME)`.
 
 ## House style
+
+### Scheme catalog metadata
+
+Every LLM that writes Scheme must stamp its public definitions. Set one
+`domain!` and one `effects!` scope before `define-command`, `define-mode`,
+`public!`, `defcustom`, `defrecipe!`, or `defcomponent` forms.
+
+Before writing or editing a Scheme package, query `apropos` for the existing
+API and components. Before choosing or defining UI, read `docs/COMPONENTS.md`.
+Reuse a catalogued component when it fits.
+
+```scheme
+(domain! 'files)
+(effects! '(read))
+```
+
+Use one level: `pure`, `read`, `write`, or `destroy`. Add `external`,
+`execute`, or `spend` when they apply. Do not use `read` as a fallback.
+Use `unknown` when the source does not prove an effect. Use `catalog-meta!`
+for a single override in a mixed section. Package and namespace come from the
+loader; call `namespace!` only when the public vocabulary differs.
 
 - Write to **ASD-STE100 (Simplified Technical English)**. The rules that
   matter here:

@@ -35,4 +35,27 @@ defmodule Aimax.Ui.PreviewCursorTest do
     html = EditorLive.preview_doc("html", "<p>hi</p>", 2, @faces, false)
     refute html =~ @pt
   end
+
+  test "point at file top keeps the heading a heading" do
+    html = EditorLive.preview_doc("markdown", "# Title\n\nbody\n", 0, @faces, false)
+    assert html =~ "<h1>"
+    assert html =~ "#{@pt}Title"
+  end
+
+  test "point inside the heading marker snaps past it" do
+    html = EditorLive.preview_doc("markdown", "# Title\n", 1, @faces, false)
+    assert html =~ "<h1>"
+  end
+
+  test "point inside a list marker keeps the list" do
+    html = EditorLive.preview_doc("markdown", "- one\n- two\n", 7, @faces, false)
+    assert html =~ "<ul>"
+    assert html =~ "#{@pt}two"
+  end
+
+  test "point on a fence line hides the cursor instead of breaking the fence" do
+    html = EditorLive.preview_doc("markdown", "```\ncode\n```\n", 1, @faces, false)
+    refute html =~ @pt
+    assert html =~ "<code"
+  end
 end

@@ -1064,9 +1064,39 @@ defmodule Aimax.Ui.EditorLive do
     p = point |> max(0) |> min(byte_size(text))
 
     marked =
-      binary_part(text, 0, p) <> @pt_sentinel <> binary_part(text, p, byte_size(text) - p)
+      case cursor_spot(text, p) do
+        nil ->
+          text
+
+        at ->
+          binary_part(text, 0, at) <> @pt_sentinel <> binary_part(text, at, byte_size(text) - at)
+      end
 
     preview_html("markdown", marked, faces, authored)
+  end
+
+  # Point often sits inside a line's BLOCK marker — byte 0 of "# Title" is
+  # where a freshly opened file rests — and a sentinel inside the marker
+  # un-headings the line. Snap the cursor to the marker's end. On a fence
+  # line, show no cursor at all: a broken fence re-renders the whole
+  # document below it.
+  defp cursor_spot(text, p) do
+    ls =
+      case :binary.matches(binary_part(text, 0, p), "\n") do
+        [] -> 0
+        ms -> ms |> List.last() |> elem(0) |> Kernel.+(1)
+      end
+
+    line = text |> binary_part(ls, byte_size(text) - ls) |> String.split("\n", parts: 2) |> hd()
+
+    if line |> String.trim_leading() |> String.starts_with?("```") do
+      nil
+    else
+      case Regex.run(~r/^(?:\s{0,3}(?:\#{1,6}|[-*+]|\d+\.|>)\s+)+/, line, return: :index) do
+        [{0, len}] when p < ls + len -> ls + len
+        _ -> p
+      end
+    end
   end
 
   def preview_doc(rm, text, _point, faces, authored), do: preview_html(rm, text, faces, authored)

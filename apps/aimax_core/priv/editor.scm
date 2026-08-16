@@ -3655,7 +3655,16 @@
 ;;; opens it too.
 
 (define *dashboard-buffer* "*dashboard*")
-(add-display-rule! "*dashboard*" 'popup (list 'side 'bottom 'size 0.5))
+(add-display-rule! "*dashboard*" 'popup (list 'side 'bottom 'size 0.3))
+
+;; the popup is wide and the cards are small: cap the content, sit the
+;; two cards side by side, and keep the kv key column tight
+(define-style! 'dashboard "
+.dash-wrap { display: flex; gap: 14px; align-items: flex-start;
+             max-width: 1020px; padding: 6px 8px; }
+.dash-wrap .c-card { flex: 1 1 0; min-width: 0; margin: 0; }
+.dash-wrap .c-kv-row { grid-template-columns: 11ch 1fr; }
+")
 
 (define (dashboard--buffer-card buf)
   (let ((mode (or (buffer-local buf 'mode-name) "fundamental-mode"))
@@ -3702,10 +3711,13 @@
   (let ((buf (or (buffer-local *dashboard-buffer* 'dashboard-for)
                  (current-buffer))))
     (buffer-set-local! *dashboard-buffer* 'render-blocks
-      (append
-        (list (dashboard--buffer-card buf))
-        (let ((g (buffer-group buf)))
-          (if g (list (dashboard--group-card g)) '()))))))
+      (list
+        (list 'tag "div" 'class "dash-wrap"
+              'children
+              (append
+                (list (dashboard--buffer-card buf))
+                (let ((g (buffer-group buf)))
+                  (if g (list (dashboard--group-card g)) '()))))))))
 
 (define-command "modeline-dashboard-refresh" "Refresh the dashboard"
   (lambda () (dashboard-refresh!)))

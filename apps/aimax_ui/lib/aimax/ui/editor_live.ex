@@ -1180,11 +1180,18 @@ defmodule Aimax.Ui.EditorLive do
     table{border-collapse:collapse;font-size:14px}th,td{border:1px solid #{border};padding:5px 9px}
     th{background:#{inset};text-align:left}
     img{max-width:100%}hr{border:0;border-top:1px solid #{border};margin:22px 0}
-    .tweet{margin:12px 0;padding:12px 16px;border:1px solid #{border};border-radius:8px;
+    .tweet{margin:12px 0;padding:12px 16px;border:1px solid #{border};border-radius:10px;
            max-width:32em;background:#{inset};font-size:14.5px}
     .tweet blockquote{margin:0;padding:0;border:0;color:#{fg}}
     .tweet blockquote p{margin:0 0 8px}
     .tweet-pending{color:#{dim}}
+    .tw-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+    .tw-avatar{width:38px;height:38px;border-radius:50%}
+    .tw-name{font-weight:600;display:block;line-height:1.2}
+    .tw-handle{color:#{dim};text-decoration:none;font-size:13px}
+    .tw-text{margin:0 0 10px}
+    .tweet .tw-media{width:100%;border-radius:8px;margin:2px 0 8px}
+    .tw-date{color:#{dim};font-size:13px;text-decoration:none}
     .pt{display:inline-block;width:2px;height:1.05em;margin:0 -1px;vertical-align:-0.18em;
         background:#{accent};animation:ptb 1.1s step-end infinite}
     @keyframes ptb{0%,49%{opacity:1}50%,100%{opacity:0}}
@@ -1199,7 +1206,9 @@ defmodule Aimax.Ui.EditorLive do
   # link. The point sentinel can sit inside the pasted URL; the compare
   # ignores it and the embed re-emits it as a sibling.
   @image_exts ~w(.png .jpg .jpeg .gif .webp .svg .avif .bmp)
-  @tweet_re ~r{\Ahttps?://(?:mobile\.)?(?:twitter|x)\.com/[^/]+/status(?:es)?/\d+\z}
+  # the share sheet appends ?s=20 and friends; a query or fragment after
+  # the status id still names the same tweet
+  @tweet_re ~r{\Ahttps?://(?:mobile\.)?(?:twitter|x)\.com/[^/]+/status(?:es)?/\d+(?:[?#]\S*)?\z}
 
   defp embed_urls(nodes) when is_list(nodes), do: Enum.flat_map(nodes, &embed_node/1)
 

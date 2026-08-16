@@ -58,6 +58,19 @@ defmodule Aimax.Ui.PreviewEmbedTest do
     assert html =~ ~s(<a href="https://x.com/pending_user/status/990")
   end
 
+  test "a share-sheet query string still makes a tweet card" do
+    html =
+      EditorLive.preview_doc(
+        "markdown",
+        "https://x.com/paulfinneyx/status/2087738406403215769?s=20\n",
+        0,
+        @faces,
+        false
+      )
+
+    assert html =~ ~s(<div class="tweet)
+  end
+
   test "a cached tweet URL renders the card verbatim" do
     url = "https://twitter.com/jack/status/20"
     Oembed.put(url, {:ok, ~s(<blockquote class="twitter-tweet"><p>just setting up</p></blockquote>)})
@@ -77,6 +90,43 @@ defmodule Aimax.Ui.PreviewEmbedTest do
 
     refute html =~ ~s(<div class="tweet)
     assert html =~ ~s(<a href="#{url}")
+  end
+
+  @tweet_json %{
+    "text" => "@_svs_ can confirm 🤝 https://t.co/8jmza5XQRS",
+    "display_text_range" => [7, 21],
+    "created_at" => "2026-08-13T03:09:59.000Z",
+    "user" => %{
+      "name" => "Paul <Finney>",
+      "screen_name" => "paulfinneyx",
+      "profile_image_url_https" => "https://pbs.twimg.com/profile_images/x_normal.jpg"
+    },
+    "mediaDetails" => [
+      %{"type" => "photo", "media_url_https" => "https://pbs.twimg.com/media/HPk.jpg"}
+    ]
+  }
+
+  test "the built card carries the tweet image" do
+    html = Oembed.build_card(@tweet_json, "https://x.com/paulfinneyx/status/2087738406403215769")
+
+    assert html =~ ~s(<img class="tw-media" src="https://pbs.twimg.com/media/HPk.jpg")
+    assert html =~ "Aug 13, 2026"
+  end
+
+  test "the card hides reply mentions and the media link" do
+    html = Oembed.build_card(@tweet_json, "https://x.com/p/status/1")
+
+    assert html =~ ~s(<p class="tw-text">can confirm 🤝</p>)
+    refute html =~ "t.co"
+  end
+
+  test "the card escapes author text" do
+    html = Oembed.build_card(@tweet_json, "https://x.com/p/status/1")
+    assert html =~ "Paul &lt;Finney&gt;"
+  end
+
+  test "the syndication token matches the reference value" do
+    assert Oembed.token(2_087_738_406_403_215_769) == "526tnfr7p4fhfer"
   end
 
   test "the generation counter moves when a result lands" do

@@ -408,6 +408,35 @@ defmodule Aimax.Ui.Layouts do
             border-top: 2px solid var(--accent-fg, #26356b);
             animation: rise 110ms ease-out;
           }
+          /* palette style: the prompt floats centered over the windows,
+             input on top, candidates below — the buffer switcher asks
+             for this shape. The echo bar keeps the bottom row, so the
+             window tree does not reflow while the palette is open. */
+          .mb-panel.palette {
+            position: fixed; left: 50%; top: 14dvh;
+            transform: translateX(-50%);
+            width: min(760px, 92vw);
+            max-height: 62dvh;
+            display: flex; flex-direction: column;
+            border: 1px solid var(--border, #e2dbc9);
+            border-top: 2px solid var(--accent-fg, #26356b);
+            border-radius: 10px;
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+            overflow: hidden;
+            z-index: 40;
+            animation: palette-pop 90ms ease-out;
+          }
+          .mb-panel.palette .mb-input-row {
+            order: -1;
+            border-top: none;
+            border-bottom: 1px solid var(--border, #e2dbc9);
+          }
+          .mb-panel.palette .mb-label-row { order: -2; }
+          .mb-panel.palette .mb-cands { max-height: none; flex: 1; }
+          @keyframes palette-pop {
+            from { opacity: 0; transform: translateX(-50%) scale(0.98); }
+            to   { opacity: 1; transform: translateX(-50%) scale(1); }
+          }
           .mb-label-row {
             padding: 6px 14px 5px;
             font-family: var(--font-mono); font-size: 10px;

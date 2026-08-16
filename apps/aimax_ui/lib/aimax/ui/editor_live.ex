@@ -615,7 +615,7 @@ defmodule Aimax.Ui.EditorLive do
         </div>
       </div>
       <%= if @state.minibuffer do %>
-        <div class="mb-panel">
+        <div class={"mb-panel #{if Map.get(@state.minibuffer, :style) == "palette", do: "palette"}"}>
           <div class="mb-label-row">
             {String.trim_trailing(@state.minibuffer.prompt, ": ")} · TAB completes · RET accepts · C-n/C-p selects · C-c C-o collects · C-g quits
           </div>
@@ -634,6 +634,10 @@ defmodule Aimax.Ui.EditorLive do
             <span class="mb-spacer"></span>
             <span class="mb-count">{count_text(@state.minibuffer)}</span>
           </div>
+        </div>
+        <div :if={Map.get(@state.minibuffer, :style) == "palette"} class="echo-bar">
+          <span class="echo">{@state.echo}</span>
+          <span class="mb-spacer"></span>
         </div>
       <% else %>
         <div class="echo-bar">

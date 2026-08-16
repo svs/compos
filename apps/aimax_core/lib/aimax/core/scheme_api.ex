@@ -701,6 +701,8 @@ defmodule Aimax.Core.SchemeAPI do
             case plain(k) do
               "initial" -> {:input, v}
               "match-hint" -> {:match_hint, v}
+              # "palette" renders the prompt as a centered panel
+              "style" -> {:style, v}
               key -> {String.to_existing_atom("on_" <> key), v}
             end
           end)

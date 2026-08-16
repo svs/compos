@@ -2004,6 +2004,16 @@ defmodule Aimax.EditorTest do
     assert Editor.current_buffer() == mate
   end
 
+  test "C-x b opens as a centered palette" do
+    press(["C-x", "b"])
+    assert Editor.render_state().minibuffer.style == "palette"
+    press(["C-g"])
+    # other prompts keep the bottom panel
+    press(["M-x"])
+    assert Editor.render_state().minibuffer.style in [nil, false]
+    press(["C-g"])
+  end
+
   test "C-x b ranks same-project buffers above the rest" do
     n = System.unique_integer([:positive])
     root = Path.join(System.tmp_dir!(), "proj-#{n}")

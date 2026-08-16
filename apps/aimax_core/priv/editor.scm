@@ -558,8 +558,9 @@
 ;; invoking buffer, not the minibuffer's — see with-invoking-buffer.
 ;; MATCH-HINT also matches what you type against the marginalia beside
 ;; each candidate: #t means the first field, an integer N the first N.
+;; STYLE picks the presentation: "palette" renders a centered panel.
 (define (minibuffer-read-preview prompt cands on-select on-confirm on-cancel
-                                 &optional match-hint)
+                                 &optional match-hint style)
   (set! *mb-select-fn* (lambda (sel) (with-invoking-buffer (lambda () (on-select sel)))))
   (minibuffer-read* prompt cands
     (list (list 'confirm (lambda (v)
@@ -569,7 +570,8 @@
                             (set! *mb-select-fn* #f)
                             (with-invoking-buffer on-cancel)))
           (list 'change  (lambda (input) (mb-select-notify!)))
-          (list 'match-hint (if match-hint match-hint #f)))))
+          (list 'match-hint (if match-hint match-hint #f))
+          (list 'style (if style style #f)))))
 
 (let ((mb (minibuffer-buffer)))
   (local-set-key* mb "RET" "minibuffer-confirm")
@@ -1838,7 +1840,10 @@
         (lambda () (when (buffer-exists? here) (window-preview-buffer! here)))
         ;; you also know a buffer by its mode, its group, or its project:
         ;; the first three marginalia fields all match what you type
-        3))))
+        3
+        ;; the switcher is the power organiser: it opens as a centered
+        ;; palette, not the bottom minibuffer line
+        "palette"))))
 
 (define-command "kill-buffer" "Kill a buffer, defaulting to the current one"
   (lambda ()

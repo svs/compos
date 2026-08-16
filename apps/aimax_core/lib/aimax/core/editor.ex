@@ -770,7 +770,8 @@ defmodule Aimax.Core.Editor do
         on_change: nil,
         on_cancel: nil,
         input: "",
-        match_hint: false
+        match_hint: false,
+        style: nil
       }
       |> Map.merge(handlers)
       |> Map.put(:prompt, prompt)
@@ -1320,7 +1321,10 @@ defmodule Aimax.Core.Editor do
       label_width: Candidates.label_width(mb.list),
       sel: mb.list.sel,
       total: Candidates.total(mb.list),
-      completing: mb.on_complete not in [nil, false]
+      completing: mb.on_complete not in [nil, false],
+      # presentation, chosen by the prompt: nil = bottom panel,
+      # "palette" = centered panel
+      style: Map.get(mb, :style)
     }
   end
 

@@ -3650,74 +3650,225 @@
 
 ;;; --- the modeline dashboard -----------------------------------------------------
 ;;; modeline-expand toggles a popup that says everything about HERE: the
-;;; buffer, its modes, its group, every group, the frame. The modeline
-;;; is the summary; this is the expansion. Clicking the modeline's name
-;;; opens it too.
+;;; buffer, its modes, its group — and the LLM ledger with a spend
+;;; sparkline. The modeline is the summary; this is the expansion.
+;;; Clicking the modeline's name opens it too.
 
 (define *dashboard-buffer* "*dashboard*")
-(add-display-rule! "*dashboard*" 'popup (list 'side 'bottom 'size 0.3))
+(add-display-rule! "*dashboard*" 'popup (list 'side 'bottom 'size 0.34))
 
-;; the popup is wide and the cards are small: cap the content, sit the
-;; two cards side by side, and keep the kv key column tight
 (define-style! 'dashboard "
-.dash-wrap { display: flex; gap: 14px; align-items: flex-start;
-             max-width: 1020px; padding: 6px 8px; }
-.dash-wrap .c-card { flex: 1 1 0; min-width: 0; margin: 0; }
-.dash-wrap .c-kv-row { grid-template-columns: 11ch 1fr; }
+.dash { font-family: var(--font-sans); padding: 2px 6px 8px; }
+.dash-head { display: flex; align-items: flex-end; gap: 16px;
+             padding: 10px 16px 12px; border-bottom: 1px solid var(--border, #e2dbc9); }
+.dash-name { font-family: var(--font-serif); font-size: 24px; letter-spacing: -0.4px; }
+.dash-file { font-family: var(--font-mono); font-size: 11px; color: var(--dim-fg, #8a857a);
+             padding-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-headmain { min-width: 0; }
+.dash-sp { flex: 1; }
+.dash-pills { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.dash-pill { padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border, #cbc4b1);
+             color: var(--dim-fg, #57534a); font-family: var(--font-mono); font-size: 10.5px;
+             white-space: nowrap; }
+.dash-pill.warn { border-color: var(--diff-hunk-fg, #7a5a1a); color: var(--diff-hunk-fg, #7a5a1a); }
+.dash-pill.good { border-color: var(--diff-add-fg, #2e6b45); color: var(--diff-add-fg, #2e6b45); }
+.dash-grid { display: grid; grid-template-columns: 1fr 1fr 1.1fr 1.1fr; }
+.dash-cell { padding: 12px 18px 14px; display: flex; flex-direction: column; gap: 8px;
+             border-right: 1px solid var(--border, #e2dbc9); min-width: 0; }
+.dash-cell:last-child { border-right: none; }
+.dash-title { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.18em;
+              text-transform: uppercase; color: var(--dim-fg, #8a857a); }
+.dash-big { font-family: var(--font-mono); font-size: 13px; font-weight: 600;
+            color: var(--accent-fg, #26356b); }
+.dash-row { display: flex; align-items: baseline; gap: 8px;
+            font-family: var(--font-mono); font-size: 11.5px; }
+.dash-k { color: var(--dim-fg, #8a857a); flex: 0 0 auto; }
+.dash-row .dash-sp { border-bottom: 1px dotted var(--border, #cfc8b6);
+                     transform: translateY(-3px); }
+.dash-v { color: var(--default-fg, #1b1a17); text-align: right; min-width: 0;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-v.dim { color: var(--dim-fg, #b3ac9c); }
+.dash-v.good { color: var(--diff-add-fg, #2e6b45); }
+.dash-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.dash-chip { padding: 2px 8px; border-radius: 6px; background: var(--window-bg, #fdfcf8);
+             border: 1px solid var(--border, #e2dbc9); font-family: var(--font-mono);
+             font-size: 10.5px; color: var(--dim-fg, #57534a); }
+.dash-spark { display: flex; align-items: flex-end; gap: 2px; height: 44px; }
+.dash-bar { flex: 1; border-radius: 1px; background: var(--accent-fg, #26356b);
+            min-width: 3px; }
+.dash-bar.hot { background: var(--diff-hunk-fg, #7a5a1a); }
+.dash-bar.h1 { height: 4px; } .dash-bar.h2 { height: 9px; } .dash-bar.h3 { height: 14px; }
+.dash-bar.h4 { height: 19px; } .dash-bar.h5 { height: 24px; } .dash-bar.h6 { height: 29px; }
+.dash-bar.h7 { height: 34px; } .dash-bar.h8 { height: 39px; } .dash-bar.h9 { height: 44px; }
 ")
 
-(define (dashboard--buffer-card buf)
-  (let ((mode (or (buffer-local buf 'mode-name) "fundamental-mode"))
-        (minors (or (buffer-local buf 'minor-modes) '()))
-        (g (buffer-group buf))
-        (proj (buffer-project-label buf))
-        (p (buffer-path buf)))
-    (component 'ui/card
-      (list 'title (buffer-short-label buf) 'open? #t
-        'body (list
-          (component 'ui/kv
-            (list 'pairs
-              (append
-                (list (list "buffer" buf) (list "mode" mode))
-                (if (pair? minors)
-                    (list (list "minor" (string-join minors " · ")))
-                    '())
-                (if g (list (list "group" (group-label g))) '())
-                (if (equal? proj "") '() (list (list "project" proj)))
-                (if p (list (list "file" p)) '())
-                (list (list "size"
-                            (string-append (number->string (buffer-size buf)) " bytes"))
-                      (list "state"
-                            (string-append
-                              (if (buffer-modified? buf) "modified" "saved")
-                              (if (buffer-read-only? buf) " · read-only" ""))))))))))))
+(define (dash--row k v &optional cls)
+  (list 'tag "div" 'class "dash-row"
+        'segs (list (list "dash-k" k) (list "dash-sp" "")
+                    (list (string-append "dash-v" (if cls (string-append " " cls) "")) v))))
 
-(define (dashboard--group-card g)
-  (component 'ui/card
-    (list 'title (string-append "group: " (group-label g)) 'open? #t
-      'body (list
-        (component 'ui/kv
-          (list 'pairs
-            (append
-              (list (list "members"
-                          (string-join (map buffer-short-label (group-buffers-mru g))
-                                       " · "))
-                    (list "companion" (group-noise g))
-                    (list "layout" (if (group-layout g) "saved" "default")))
-              (let ((m (group-meta g)))
-                (if m (list (list "about" m)) '())))))))))
+(define (dash--chip m) (list 'tag "span" 'class "dash-chip" 'text m))
+
+(define (dash--pill text cls)
+  (list 'tag "span" 'class (string-append "dash-pill" (if cls (string-append " " cls) ""))
+        'text text))
+
+(define (dash--section title children)
+  (list 'tag "div" 'class "dash-cell"
+        'children (cons (list 'tag "div" 'class "dash-title" 'text title) children)))
+
+(define (dash--head buf)
+  (list 'tag "div" 'class "dash-head"
+        'children
+        (list
+          (list 'tag "div" 'class "dash-headmain"
+                'children
+                (append
+                  (list (list 'tag "div" 'class "dash-name" 'text (buffer-short-label buf)))
+                  (let ((p (buffer-path buf)))
+                    (if p (list (list 'tag "div" 'class "dash-file" 'text p)) '()))))
+          (list 'tag "span" 'class "dash-sp" 'text "")
+          (list 'tag "div" 'class "dash-pills"
+                'children
+                (append
+                  (list (dash--pill (if (buffer-modified? buf) "modified" "saved")
+                                    (if (buffer-modified? buf) "warn" "good")))
+                  (if (buffer-read-only? buf) (list (dash--pill "read-only" #f)) '())
+                  (list (dash--pill
+                          (string-append (number->string (buffer-size buf)) " B") #f)))))))
+
+(define (dash--position buf)
+  (dash--section "position"
+    (list (dash--row "point" (number->string (buffer-point buf)))
+          (dash--row "size" (string-append (number->string (buffer-size buf)) " bytes"))
+          (dash--row "through"
+                     (let ((s (buffer-size buf)))
+                       (if (= s 0) "0%"
+                           (string-append
+                             (number->string
+                               (quotient (* 100 (buffer-point buf)) s)) "%"))))
+          (dash--row "state" (if (buffer-modified? buf) "modified" "saved")
+                     (if (buffer-modified? buf) #f "good")))))
+
+(define (dash--modes buf)
+  (let ((minors (or (buffer-local buf 'minor-modes) '())))
+    (dash--section "modes"
+      (append
+        (list (list 'tag "div" 'class "dash-big"
+                    'text (or (buffer-local buf 'mode-name) "fundamental-mode")))
+        (if (pair? minors)
+            (list (list 'tag "div" 'class "dash-chips"
+                        'children (map dash--chip minors)))
+            '())
+        (list (dash--row "read-only" (if (buffer-read-only? buf) "yes" "no")
+                         (if (buffer-read-only? buf) #f "dim")))))))
+
+(define (dash--group buf)
+  (let ((g (buffer-group buf)))
+    (if (not g)
+        (dash--section "group"
+          (list (dash--row "group" "none" "dim")
+                (dash--row "join" "C-c g" "dim")))
+        (dash--section "group"
+          (append
+            (list (list 'tag "div" 'class "dash-big" 'text (group-label g)))
+            (list (dash--row "members"
+                             (string-join (map buffer-short-label
+                                               (take-n (group-buffers-mru g) 3)) " · "))
+                  (dash--row "companion" (group-noise g))
+                  (dash--row "layout" (if (group-layout g) "saved" "default")))
+            (let ((m (group-meta g)))
+              (if m (list (dash--row "about" m)) '())))))))
+
+;; the ledger, folded two ways: cost per day (the sparkline) and the
+;; model that took the most of it
+(define (dash--day-costs rows)
+  (let loop ((rs rows) (acc '()))
+    (if (null? rs)
+        acc
+        (let* ((r (car rs))
+               (day (plist-get r 'day))
+               (cost (or (plist-get r 'cost) 0))
+               (hit (assoc day acc)))
+          (loop (cdr rs)
+                (if hit
+                    (cons (list day (+ (cadr hit) cost))
+                          (remove (lambda (e) (equal? (car e) day)) acc))
+                    (cons (list day cost) acc)))))))
+
+;; a share of the biggest day maps to one of nine bar heights — a
+;; cond ladder, because this dialect has no floor
+(define (dash--lvl share)
+  (cond ((> share 0.875) 9) ((> share 0.75) 8) ((> share 0.625) 7)
+        ((> share 0.5) 6) ((> share 0.375) 5) ((> share 0.25) 4)
+        ((> share 0.125) 3) ((> share 0.05) 2) (else 1)))
+
+(define (dash--spark days)
+  (let* ((mx (fold (lambda (m d) (if (> (cadr d) m) (cadr d) m)) 0 days))
+         (mxi (if (> mx 0) mx 1)))
+    (list 'tag "div" 'class "dash-spark"
+          'children
+          (map (lambda (d)
+                 (let ((lvl (dash--lvl (/ (cadr d) mxi)))
+                       (hot (>= (cadr d) mx)))
+                   (list 'tag "span"
+                         'class (string-append "dash-bar h" (number->string lvl)
+                                               (if hot " hot" "")))))
+               days))))
+
+(define (dash--llm)
+  (let* ((rows (llm-cost-report))
+         (days (sort-by-car (dash--day-costs rows)))
+         (last14 (last-n days 14))
+         (total (fold (lambda (a d) (+ a (cadr d))) 0 days))
+         (today (if (pair? days) (car (reverse days)) #f)))
+    (dash--section "llm spend"
+      (append
+        (if (pair? last14) (list (dash--spark last14)) '())
+        (list (dash--row "today" (if today (format-usd (cadr today)) "$0") #f)
+              (dash--row "total" (format-usd total))
+              (dash--row "days" (number->string (length days)) "dim")
+              (dash--row "ledger" "M-x llm-costs" "dim"))))))
+
+;; an ISO day as one integer (20260816): the dialect has no string<?
+(define (dash--day-int d)
+  (or (string->number (string-join (string-split d "-") "")) 0))
+
+(define (sort-by-car xs)
+  (let loop ((rest xs) (out '()))
+    (if (null? rest)
+        out
+        (loop (cdr rest)
+              (let ins ((ys out))
+                (cond ((null? ys) (list (car rest)))
+                      ((< (dash--day-int (car (car rest)))
+                          (dash--day-int (car (car ys))))
+                       (cons (car rest) ys))
+                      (else (cons (car ys) (ins (cdr ys))))))))))
+
+(define (last-n xs n)
+  (let ((k (length xs)))
+    (if (<= k n) xs (list-tail-n xs (- k n)))))
+
+(define (list-tail-n xs n)
+  (if (= n 0) xs (list-tail-n (cdr xs) (- n 1))))
 
 (define (dashboard-refresh!)
-  (let ((buf (or (buffer-local *dashboard-buffer* 'dashboard-for)
-                 (current-buffer))))
+  (let* ((for0 (buffer-local *dashboard-buffer* 'dashboard-for))
+         ;; the buffer it described can die under it (a killed chat):
+         ;; fall back rather than crash the refresh
+         (buf (if (and for0 (buffer-exists? for0)) for0 (current-buffer))))
     (buffer-set-local! *dashboard-buffer* 'render-blocks
       (list
-        (list 'tag "div" 'class "dash-wrap"
+        (list 'tag "div" 'class "dash"
               'children
-              (append
-                (list (dashboard--buffer-card buf))
-                (let ((g (buffer-group buf)))
-                  (if g (list (dashboard--group-card g)) '()))))))))
+              (list (dash--head buf)
+                    (list 'tag "div" 'class "dash-grid"
+                          'children
+                          (list (dash--position buf)
+                                (dash--modes buf)
+                                (dash--group buf)
+                                (dash--llm)))))))))
 
 (define-command "modeline-dashboard-refresh" "Refresh the dashboard"
   (lambda () (dashboard-refresh!)))
@@ -3734,7 +3885,7 @@
       (dashboard-refresh!))))
 
 (mode-doc! "dashboard-mode"
-  "The modeline, expanded: the buffer, its modes, its group, every group, and the frame. `g` refreshes and `q` closes.")
+  "The modeline, expanded: the buffer, its modes, its group, and the LLM ledger with a spend sparkline. `g` refreshes and `q` closes.")
 
 (define-command "modeline-expand"
   "Toggle the dashboard popup: everything about here"
@@ -3742,8 +3893,14 @@
     (if (and (popup-open?)
              (equal? (popup-buffer) *dashboard-buffer*)
              (window-showing *dashboard-buffer*))
-        (run-command "popup-toggle")
+        (begin
+          (run-command "popup-toggle")
+          ;; land back exactly where the dashboard was invoked from —
+          ;; closing must not move you
+          (let ((w (frame-local 'dashboard-return)))
+            (when (and w (window-exists? w)) (select-window! w))))
         (let ((here (current-buffer)))
+          (set-frame-local! 'dashboard-return (active-window))
           (buffer-create *dashboard-buffer*)
           (buffer-set-local! *dashboard-buffer* 'dashboard-for here)
           (display-buffer *dashboard-buffer*)

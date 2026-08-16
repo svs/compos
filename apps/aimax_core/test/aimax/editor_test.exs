@@ -2108,14 +2108,39 @@ defmodule Aimax.EditorTest do
     assert text =~ "companion"
     refute text =~ "all groups"
 
-    # the same key toggles it away
+    # the same key toggles it away — landing back exactly where the
+    # dashboard was invoked from, with the window's point as it was
+    # when the dashboard opened (per-window points, Emacs semantics)
     press(["C-x", "?"])
     refute Enum.any?(Editor.list_windows(), fn {_id, x} -> x == "*dashboard*" end)
+    assert Editor.current_buffer() == b
 
     {:ok, _} =
       Aimax.Core.Session.eval(
         "(begin (set-frame-local! 'current-group #f) (delete-other-windows!))"
       )
+  end
+
+  test "the dashboard round-trip keeps window, buffer, and point" do
+    n = System.unique_integer([:positive])
+    b = "pt-#{n}"
+    Aimax.Core.create_buffer(b)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (set-frame-local! 'current-group #f)
+             (delete-other-windows!)
+             (switch-to-buffer! "#{b}")
+             (buffer-append! "#{b}" "0123456789")
+             (goto-char! 7))
+      """)
+
+    press(["C-x", "?"])
+    assert Editor.current_buffer() == "*dashboard*"
+    press(["C-x", "?"])
+    assert Editor.current_buffer() == b
+    assert Aimax.Core.Session.eval("(point)") == {:ok, "7"}
+    {:ok, _} = Aimax.Core.Session.eval("(delete-other-windows!)")
   end
 
   test "winner: a destroyed layout is one undo away; redo returns" do

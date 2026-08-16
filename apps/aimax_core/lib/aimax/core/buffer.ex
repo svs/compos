@@ -626,8 +626,15 @@ defmodule Aimax.Core.Buffer do
   def handle_call(:break_undo_chain, _from, state),
     do: {:reply, :ok, %{state | undo_next: 0}}
 
-  def handle_call(:mark_saved, _from, state),
-    do: {:reply, :ok, %{state | saved_version: state.version}}
+  # a save is not an edit, but the modified flag every view shows just
+  # changed — repaint through the same phantom-change channel set_local
+  # uses (:locals triggers no reactor rules)
+  def handle_call(:mark_saved, _from, state) do
+    state = %{state | saved_version: state.version}
+    Events.broadcast_editor(:locals)
+    broadcast(state, state.point, "", 0, :locals)
+    {:reply, :ok, state}
+  end
 
   def handle_call({:save, override}, _from, state) do
     case override || state.path do

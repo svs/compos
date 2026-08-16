@@ -122,13 +122,15 @@ defmodule Aimax.Core.Candidates do
   def total(list), do: length(filtered(list))
 
   @doc "Rows for display: an 8-row window around the selection, marked."
-  def rows(list) do
+  # the visible slice: 8 rows for the bottom bar, more when the caller
+  # has the height for it (the palette passes ~24)
+  def rows(list, window \\ @window) do
     all = filtered(list)
     sel = min(list.sel, max(length(all) - 1, 0))
-    offset = max(0, sel - (@window - 1))
+    offset = max(0, sel - (window - 1))
 
     all
-    |> Enum.slice(offset, @window)
+    |> Enum.slice(offset, window)
     |> Enum.with_index(offset)
     |> Enum.map(fn {c, i} -> Map.put(c, :selected, i == sel and all != []) end)
   end

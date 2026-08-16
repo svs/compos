@@ -1370,6 +1370,8 @@ defmodule Aimax.Core.Editor do
 
   defp render_minibuffer(mb, name) do
     prompt_sel = prompt_preselected?(mb)
+    # the palette is tall: show three times the bottom bar's slice
+    window = if Map.get(mb, :style) == "palette", do: 24, else: 8
 
     %{
       prompt: mb.prompt,

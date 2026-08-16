@@ -3638,6 +3638,53 @@
     (let ((g (frame-group)))
       (if g (group-kill! g) (message "Not in a group")))))
 
+;; rename a context: every member retags, and the durable state
+;; follows. The chat buffer keeps its NAME (there is no buffer
+;; rename); membership is by role, so a live chat stays the group's.
+;; An unshown chat is found by name, so its identity is copied onto
+;; the new name's chat instead.
+(define (group-rename! old new)
+  (cond
+    ((equal? (string-trim new) "") (message "Group needs a name"))
+    ((pair? (group-buffers new))
+     (message (string-append "Group " new " already exists")))
+    ((null? (group-buffers old))
+     (message (string-append "No group " old)))
+    (else
+      (let ((holder (group-holder old)))
+        (for-each (lambda (b) (buffer-set-local! b 'group new))
+                  (group-buffers old))
+        (when (and holder (not (chat-buffer? holder)))
+          (let ((meta (buffer-local holder 'group-meta))
+                (layout (buffer-local holder 'group-layout))
+                (noise (buffer-local holder 'group-noise)))
+            (buffer-set-local! holder 'group #f)
+            (let ((chat (group-chat new)))
+              (when meta (buffer-set-local! chat 'group-meta meta))
+              (when layout (buffer-set-local! chat 'group-layout layout))
+              (when noise (buffer-set-local! chat 'group-noise noise)))))
+        (when (equal? (frame-local 'current-group) old)
+          (set-frame-local! 'current-group new))
+        (message (string-append "renamed group " (group-label old) " to " new))))))
+
+(define-command "group-rename" "Rename the current group"
+  (lambda ()
+    (let ((g (frame-group)))
+      (if (not g)
+          (message "Not in a group")
+          (minibuffer-read (string-append "Rename " (group-label g) " to: ") '()
+            (lambda (new) (group-rename! g (string-trim new))))))))
+
+(define-command "group-rename-at-point" "Rename the group at point"
+  (lambda ()
+    (let ((g (groups--current)))
+      (when g
+        (minibuffer-read (string-append "Rename " (group-label g) " to: ") '()
+          (lambda (new)
+            (group-rename! g (string-trim new))
+            (when (buffer-exists? *groups-buffer*)
+              (list-refresh! *groups-buffer*))))))))
+
 (define-command "group-kill-at-point" "Kill every buffer of the group at point"
   (lambda ()
     (let ((g (groups--current)))
@@ -3934,9 +3981,10 @@
     'noun "group"
     'header (lambda (buf)
               (string-append
-                ";; groups — RET switch · d describe (LLM) · n noise · "
-                "x dissolve · K kill buffers · g refresh · q quit"))
-    'keys '(("RET" "group-switch") ("d" "group-describe-at-point")
+                ";; groups — RET switch · r rename · d describe (LLM) · "
+                "n noise · x dissolve · K kill buffers · g refresh · q quit"))
+    'keys '(("RET" "group-switch") ("r" "group-rename-at-point")
+            ("d" "group-describe-at-point")
             ("n" "group-noise-cycle") ("x" "group-dissolve")
             ("K" "group-kill-at-point")
             ("g" "groups-refresh") ("q" "quit-window"))))

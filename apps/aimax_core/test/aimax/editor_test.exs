@@ -2431,6 +2431,31 @@ defmodule Aimax.EditorTest do
     assert Buffer.get_local(b, "probe-caught") == true
   end
 
+  test "group-rename retags members and carries the identity" do
+    n = System.unique_integer([:positive])
+    m1 = "rn-a-#{n}"
+    m2 = "rn-b-#{n}"
+    for x <- [m1, m2], do: Aimax.Core.create_buffer(x)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (set-frame-local! 'current-group "rngrp-#{n}")
+             (buffer-set-local! "#{m1}" 'group "rngrp-#{n}")
+             (buffer-set-local! "#{m2}" 'group "rngrp-#{n}")
+             (group-meta-set! "rngrp-#{n}" "the renamed group")
+             (group-rename! "rngrp-#{n}" "fresh-#{n}"))
+      """)
+
+    assert Aimax.Core.Session.eval(~s{(buffer-group "#{m1}")}) == {:ok, ~s{"fresh-#{n}"}}
+    assert Aimax.Core.Session.eval(~s{(buffer-group "#{m2}")}) == {:ok, ~s{"fresh-#{n}"}}
+    assert Aimax.Core.Session.eval(~s{(group-meta "fresh-#{n}")}) ==
+             {:ok, ~s{"the renamed group"}}
+
+    assert Aimax.Core.Session.eval("(frame-local 'current-group)") == {:ok, ~s{"fresh-#{n}"}}
+
+    {:ok, _} = Aimax.Core.Session.eval("(set-frame-local! 'current-group #f)")
+  end
+
   test "group-kill kills the members but keeps modified file buffers" do
     n = System.unique_integer([:positive])
     m1 = "gk-a-#{n}"

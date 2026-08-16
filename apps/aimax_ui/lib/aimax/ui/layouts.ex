@@ -370,6 +370,11 @@ defmodule Aimax.Ui.Layouts do
             color: var(--modeline-active-fg, #1b1a17);
             border-top: 2px solid var(--accent-fg, #26356b);
           }
+          .ml-caret {
+            font-family: var(--font-mono); font-size: 9px; cursor: pointer;
+            color: var(--accent-fg, #26356b); flex: 0 0 auto; opacity: 0.7;
+          }
+          .ml-caret:hover { opacity: 1; }
           .ml-dot {
             width: 6px; height: 6px; border-radius: 50%;
             background: var(--linenum-fg, #c3bcac); flex: 0 0 auto;

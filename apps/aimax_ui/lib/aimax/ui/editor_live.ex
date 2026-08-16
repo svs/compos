@@ -952,6 +952,13 @@ defmodule Aimax.Ui.EditorLive do
       <% end %>
       <% end %>
       <div class="modeline">
+        <span
+          class="ml-caret"
+          title="expand (C-x ?)"
+          phx-click="ui_cmd"
+          phx-value-win={@node.id}
+          phx-value-cmd="modeline-expand"
+        >▸</span>
         <span class={"ml-dot #{if @node.modified, do: "modified"}"}></span>
         <span
           class="name"
@@ -973,7 +980,7 @@ defmodule Aimax.Ui.EditorLive do
           phx-value-buf={@node.buffer}
         >{@node.modeline_info}</span>
         <span class="mb-spacer"></span>
-        <span class="ml-pos">{pct(@node)} · L{@line}:C{@col}</span>
+        <span class="ml-pos">{ml_bytes(@node.text)} · L{@line}:C{@col} · {pct(@node)}</span>
       </div>
     </div>
     """
@@ -1416,6 +1423,16 @@ defmodule Aimax.Ui.EditorLive do
 
       :error ->
         [{"a", [{"href", url}], [url], meta}]
+    end
+  end
+
+  defp ml_bytes(text) do
+    b = Kernel.byte_size(text)
+
+    cond do
+      b >= 1_048_576 -> "#{Float.round(b / 1_048_576, 1)} MB"
+      b >= 1024 -> "#{Float.round(b / 1024, 1)} kB"
+      true -> "#{b} B"
     end
   end
 

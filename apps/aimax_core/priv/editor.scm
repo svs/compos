@@ -3816,18 +3816,27 @@
                                                (if hot " hot" "")))))
                days))))
 
-(define (dash--llm)
+;; what HERE cost: the buffer's own chat, or its group's chat
+(define (dash--here-cost buf)
+  (or (buffer-local buf 'chat-cost)
+      (let ((g (buffer-group buf)))
+        (and g
+             (let ((h (group-holder g)))
+               (and h (buffer-local h 'chat-cost)))))))
+
+(define (dash--llm buf)
   (let* ((rows (llm-cost-report))
          (days (sort-by-car (dash--day-costs rows)))
          (last14 (last-n days 14))
          (total (fold (lambda (a d) (+ a (cadr d))) 0 days))
-         (today (if (pair? days) (car (reverse days)) #f)))
+         (today (if (pair? days) (car (reverse days)) #f))
+         (here (dash--here-cost buf)))
     (dash--section "llm spend"
       (append
         (if (pair? last14) (list (dash--spark last14)) '())
-        (list (dash--row "today" (if today (format-usd (cadr today)) "$0") #f)
-              (dash--row "total" (format-usd total))
-              (dash--row "days" (number->string (length days)) "dim")
+        (if here (list (dash--row "this chat" (format-usd here))) '())
+        (list (dash--row "today, all" (if today (format-usd (cadr today)) "$0") #f)
+              (dash--row "total, all" (format-usd total))
               (dash--row "ledger" "M-x llm-costs" "dim"))))))
 
 ;; an ISO day as one integer (20260816): the dialect has no string<?
@@ -3868,7 +3877,7 @@
                           (list (dash--position buf)
                                 (dash--modes buf)
                                 (dash--group buf)
-                                (dash--llm)))))))))
+                                (dash--llm buf)))))))))
 
 (define-command "modeline-dashboard-refresh" "Refresh the dashboard"
   (lambda () (dashboard-refresh!)))

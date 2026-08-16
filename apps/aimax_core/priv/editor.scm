@@ -574,19 +574,23 @@
 ;; MATCH-HINT also matches what you type against the marginalia beside
 ;; each candidate: #t means the first field, an integer N the first N.
 ;; STYLE picks the presentation; unset, the palette rule decides.
+;; COMPLETE, when given, runs on TAB with (INPUT SELECTED) and can
+;; answer (list NEW-INPUT CANDIDATES) to replace the pool.
 (define (minibuffer-read-preview prompt cands on-select on-confirm on-cancel
-                                 &optional match-hint style)
+                                 &optional match-hint style complete)
   (set! *mb-select-fn* (lambda (sel) (with-invoking-buffer (lambda () (on-select sel)))))
   (minibuffer-read* prompt cands
-    (list (list 'confirm (lambda (v)
-                            (set! *mb-select-fn* #f)
-                            (with-invoking-buffer (lambda () (on-confirm v)))))
-          (list 'cancel  (lambda ()
-                            (set! *mb-select-fn* #f)
-                            (with-invoking-buffer on-cancel)))
-          (list 'change  (lambda (input) (mb-select-notify!)))
-          (list 'match-hint (if match-hint match-hint #f))
-          (list 'style (prompt-style cands style)))))
+    (append
+      (list (list 'confirm (lambda (v)
+                              (set! *mb-select-fn* #f)
+                              (with-invoking-buffer (lambda () (on-confirm v)))))
+            (list 'cancel  (lambda ()
+                              (set! *mb-select-fn* #f)
+                              (with-invoking-buffer on-cancel)))
+            (list 'change  (lambda (input) (mb-select-notify!)))
+            (list 'match-hint (if match-hint match-hint #f))
+            (list 'style (prompt-style cands style)))
+      (if complete (list (list 'complete complete)) '()))))
 
 (let ((mb (minibuffer-buffer)))
   (local-set-key* mb "RET" "minibuffer-confirm")
@@ -1848,34 +1852,76 @@
 
 ;; RET with nothing typed takes the FIRST candidate, so the top of the
 ;; pool IS the default — the prompt must advertise exactly that.
+;; containers: every group answers as ONE candidate above the recency
+;; stream — the container first, its buffers after. The label is
+;; [name]; RET on it switches to the group and restores its layout.
+(define (group-container-label g) (string-append "[" (group-label g) "]"))
+
+(define (group-container-candidate g)
+  (list (group-container-label g)
+        (string-append "group  switch to group  "
+          (number->string (length (group-buffers g))) " buffers"
+          (let ((m (group-meta g))) (if m (string-append "  ·  " m) "")))))
+
+;; the pool locked to one group: its container row, then its buffers
+(define (group-locked-pool g)
+  (cons (group-container-candidate g)
+        (annotate 'buffer
+          (filter (lambda (b) (not (string-prefix? " " b)))
+                  (group-buffers-mru g)))))
+
 (define-command "switch-to-buffer"
-  "Switch to another buffer in the current window"
+  "Switch to a buffer or a group; groups restore their window layout"
   (lambda ()
     (let* ((here (or (window-buffer (active-window)) (current-buffer)))
+           (my-group (buffer-group here))
+           (groups (filter (lambda (g) (not (equal? g my-group))) (group-names)))
+           (container-of (lambda (label)
+                           (let loop ((gs groups))
+                             (cond ((null? gs) #f)
+                                   ((equal? (group-container-label (car gs)) label)
+                                    (car gs))
+                                   (else (loop (cdr gs)))))))
            (source (switch-buffer-source (buffer-candidates-all)))
            (pool (car source))
            (standing (car (cdr source)))
            (pick (car (cdr (cdr source))))
-           (all (filter (lambda (c) (not (equal? (car c) standing))) pool))
+           (bufs (filter (lambda (c) (not (equal? (car c) standing))) pool))
+           (all (append (map group-container-candidate groups) bufs))
            (fallback (if (null? all) here (car (car all)))))
       (minibuffer-read-preview
-        (string-append "Switch to buffer (default " fallback "): ")
+        (string-append "Switch to (default " fallback "): ")
         all
         ;; the invoking window live-previews the highlighted buffer; a
-        ;; candidate with no buffer (a tab) leaves the window alone
+        ;; container or a tab leaves the window alone
         (lambda (b) (when (buffer-exists? b) (window-preview-buffer! b)))
         (lambda (name)
-          (let ((picked (if (equal? name "") fallback name)))
-            (unless (pick picked)
-              (switch-to-buffer! picked))))
+          (let* ((picked (if (equal? name "") fallback name))
+                 (g (container-of picked)))
+            (cond (g (switch-to-group! g))
+                  ((pick picked) #t)
+                  (else (switch-to-buffer! picked)))))
         ;; C-g: put back what you were looking at
         (lambda () (when (buffer-exists? here) (window-preview-buffer! here)))
         ;; you also know a buffer by its mode, its group, or its project:
         ;; the first three marginalia fields all match what you type
         3
-        ;; the switcher is the power organiser: it opens as a centered
-        ;; palette, not the bottom minibuffer line
-        "palette"))))
+        #f
+        ;; this handler serves TAB and RET both (the complete contract):
+        ;; RET hands it the highlighted candidate — answer it back as the
+        ;; confirm value. TAB with no selection and an input that names
+        ;; exactly one group locks the pool to that group's buffers.
+        (lambda (input selected)
+          (cond
+            (selected (list selected all))
+            ((equal? input "") #f)
+            (else
+              (let ((hits (filter (lambda (x)
+                                    (string-contains? (group-label x) input))
+                                  groups)))
+                (if (and (pair? hits) (null? (cdr hits)))
+                    (list "" (group-locked-pool (car hits)))
+                    #f)))))))))
 
 (define-command "kill-buffer" "Kill a buffer, defaulting to the current one"
   (lambda ()
@@ -2902,7 +2948,7 @@
 ;; 'render-mode is the chat's chosen VIEW ("agent" rich, "plain" text) —
 ;; a choice about the chat, so identity (S11)
 (define chat-identity-locals
-  '(group group-meta agent-connector agent-model chat-presets
+  '(group group-meta group-layout agent-connector agent-model chat-presets
     chat-permission-mode render-mode default-directory))
 
 ;; what was SAID — survives restart and save; reset clears it
@@ -3195,18 +3241,44 @@
 ;; a group's metadata lives on its chat buffer: the chat is the group's
 ;; durable surface, so 'group-meta rides chat-identity-locals and
 ;; survives reset, restart, and save
+;; the buffer that holds a group's durable state ('group-meta,
+;; 'group-layout): its chat. A chat made by group-chat but never shown
+;; has no mode yet, so fall back to the chat buffer by name.
+(define (group-holder g)
+  (let ((chats (filter chat-buffer? (group-buffers-mru g))))
+    (if (pair? chats)
+        (car chats)
+        (let ((buf (group-chat-name g)))
+          (and (buffer-exists? buf) buf)))))
+
 (define (group-meta g)
-  (let* ((chats (filter chat-buffer? (group-buffers-mru g)))
-         ;; a chat made by group-chat but never shown has no mode yet:
-         ;; fall back to the group's chat buffer by name
-         (holder (if (pair? chats)
-                     (car chats)
-                     (let ((buf (group-chat-name g)))
-                       (and (buffer-exists? buf) buf)))))
-    (and holder (buffer-local holder 'group-meta))))
+  (let ((h (group-holder g))) (and h (buffer-local h 'group-meta))))
 
 (define (group-meta-set! g text)
   (buffer-set-local! (group-chat g) 'group-meta text))
+
+;; a group's window arrangement rides its chat too, as one opaque
+;; window-tree value: capture on leave, restore on switch
+(define (group-layout g)
+  (let ((h (group-holder g))) (and h (buffer-local h 'group-layout))))
+
+(define (group-layout-save! g)
+  (buffer-set-local! (group-chat g) 'group-layout (window-tree)))
+
+;; switch the frame to a group: save the layout you leave, then bring
+;; the group's saved layout back exactly as you left it. A group with
+;; no saved layout opens its most recent member full-frame.
+(define (switch-to-group! g)
+  (let ((from (buffer-group (current-buffer))))
+    (when (and from (not (equal? from g)))
+      (group-layout-save! from)))
+  (let ((saved (group-layout g)))
+    (if saved
+        (window-tree-set! saved)
+        (let ((members (group-buffers-mru g)))
+          (delete-other-windows!)
+          (switch-to-buffer! (if (pair? members) (car members) (group-chat g))))))
+  (message (string-append "switched to group " (group-label g))))
 
 ;; C-c d from a grouped buffer: the LLM reads the member list and
 ;; writes one sentence of metadata for the group

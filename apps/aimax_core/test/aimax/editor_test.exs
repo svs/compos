@@ -1221,14 +1221,15 @@ defmodule Aimax.EditorTest do
     Editor.set_window_buffer(b)
     Editor.set_window_buffer(c)
 
-    # default is the buffer we just left: b
+    # containers may hold the default now; the ring is reachable by name
     press(["C-x", "b"])
-    assert Editor.render_state().minibuffer.prompt =~ "default #{b}"
+    type(b)
     press(["RET"])
     assert Editor.current_buffer() == b
 
-    # toggle back
-    press(["C-x", "b", "RET"])
+    press(["C-x", "b"])
+    type(c)
+    press(["RET"])
     assert Editor.current_buffer() == c
 
     # killing current lands on MRU (b), not *scratch*
@@ -1971,37 +1972,84 @@ defmodule Aimax.EditorTest do
     assert Editor.current_buffer() == plain
   end
 
-  test "C-x b leads with the current buffer's group members", %{buf: a} do
+  test "C-x b answers a group as one container; RET switches to it" do
     n = System.unique_integer([:positive])
-    mate = "grp-mate-#{n}"
-    loner = "grp-loner-#{n}"
-    Aimax.Core.create_buffer(mate)
-    Aimax.Core.create_buffer(loner)
+    m1 = "ct-a-#{n}"
+    m2 = "ct-b-#{n}"
+    home = "ct-home-#{n}"
+    for b <- [m1, m2, home], do: Aimax.Core.create_buffer(b)
 
     {:ok, _} =
       Aimax.Core.Session.eval("""
-      (begin (switch-to-buffer! "#{mate}")
-             (switch-to-buffer! "#{loner}")
-             (switch-to-buffer! "#{a}")
-             (buffer-set-local! "#{a}" 'group "zqxw")
-             (buffer-set-local! "#{mate}" 'group "zqxw"))
+      (begin (switch-to-buffer! "#{m1}")
+             (switch-to-buffer! "#{m2}")
+             (buffer-set-local! "#{m1}" 'group "ctgrp-#{n}")
+             (buffer-set-local! "#{m2}" 'group "ctgrp-#{n}")
+             (switch-to-buffer! "#{home}"))
       """)
 
-    # loner is more recent in MRU, but the group mate leads and is the default
+    # the container is the first candidate and the default
     press(["C-x", "b"])
     mb = Editor.render_state().minibuffer
-    assert mb.prompt =~ "default #{mate}"
     labels = Enum.map(mb.candidates, & &1.label)
-    assert Enum.find_index(labels, &(&1 == mate)) < Enum.find_index(labels, &(&1 == loner))
+    assert hd(labels) == "[ctgrp-#{n}]"
+    assert mb.prompt =~ "default [ctgrp-#{n}]"
 
-    # the group name is a marginalia column, so typing it finds the members
-    type("zqxw")
-    labels = Enum.map(Editor.render_state().minibuffer.candidates, & &1.label)
-    assert mate in labels
-    refute loner in labels
-
+    # RET on the container switches to the group's most recent member
     press(["RET"])
-    assert Editor.current_buffer() == mate
+    assert Editor.current_buffer() == m2
+  end
+
+  test "TAB locks the switcher to the one group the input names" do
+    n = System.unique_integer([:positive])
+    m1 = "lk-a-#{n}"
+    m2 = "lk-b-#{n}"
+    out = "lk-out-#{n}"
+    for b <- [m1, m2, out], do: Aimax.Core.create_buffer(b)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (switch-to-buffer! "#{m1}")
+             (switch-to-buffer! "#{m2}")
+             (buffer-set-local! "#{m1}" 'group "lkgrp-#{n}")
+             (buffer-set-local! "#{m2}" 'group "lkgrp-#{n}")
+             (switch-to-buffer! "#{out}"))
+      """)
+
+    press(["C-x", "b"])
+    type("lkgrp-#{n}")
+    press(["TAB"])
+
+    mb = Editor.render_state().minibuffer
+    assert mb.input == ""
+    labels = Enum.map(mb.candidates, & &1.label)
+    assert "[lkgrp-#{n}]" in labels
+    assert m1 in labels
+    assert m2 in labels
+    refute out in labels
+    press(["C-g"])
+  end
+
+  test "a group's layout survives leave and restore" do
+    n = System.unique_integer([:positive])
+    m = "ly-a-#{n}"
+    Aimax.Core.create_buffer(m)
+
+    {:ok, out} =
+      Aimax.Core.Session.eval("""
+      (begin (delete-other-windows!)
+             (switch-to-buffer! "#{m}")
+             (buffer-set-local! "#{m}" 'group "lygrp-#{n}")
+             (split-window! 'h 0.5)
+             (group-layout-save! "lygrp-#{n}")
+             (delete-other-windows!)
+             (let ((one (length (window-list))))
+               (window-tree-set! (group-layout "lygrp-#{n}"))
+               (list one (length (window-list)))))
+      """)
+
+    assert out == "(1 2)"
+    {:ok, _} = Aimax.Core.Session.eval("(delete-other-windows!)")
   end
 
   test "prompts with candidates open as a centered palette; line inputs do not" do
@@ -2057,7 +2105,7 @@ defmodule Aimax.EditorTest do
     assert out == "#t"
   end
 
-  test "C-x b ranks same-project buffers above the rest" do
+  test "the project column narrows C-x b to the project's buffers" do
     n = System.unique_integer([:positive])
     root = Path.join(System.tmp_dir!(), "proj-#{n}")
     File.mkdir_p!(Path.join(root, ".git"))
@@ -2076,14 +2124,14 @@ defmodule Aimax.EditorTest do
              (visit "#{f1}"))
       """)
 
-    # the loose buffer is more recent in MRU, but the project mate leads
+    # the project name is a marginalia column: typing it finds the
+    # project's buffers and not the loose one
     press(["C-x", "b"])
-    mb = Editor.render_state().minibuffer
-    assert mb.prompt =~ "default #{f2}"
-    labels = Enum.map(mb.candidates, & &1.label)
-    assert Enum.find_index(labels, &(&1 == f2)) < Enum.find_index(labels, &(&1 == loose))
-    press(["RET"])
-    assert Editor.current_buffer() == f2
+    type("proj-#{n}")
+    labels = Enum.map(Editor.render_state().minibuffer.candidates, & &1.label)
+    assert f2 in labels
+    refute loose in labels
+    press(["C-g"])
   end
 
   test "M-: eval-expression echoes result" do

@@ -311,7 +311,7 @@ defmodule Aimax.ChromeTest do
 
       Session.eval(~s[(run-command "switch-to-buffer")])
       # a prompt opened rather than the command dying on the missing browser
-      assert eval!(~s[(chrome--get (minibuffer-state) 'prompt)]) =~ "Switch to buffer (default"
+      assert eval!(~s[(chrome--get (minibuffer-state) 'prompt)]) =~ "Switch to (default"
       Session.eval("(minibuffer-cancel!)")
     end
 

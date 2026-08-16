@@ -150,6 +150,8 @@ defmodule Aimax.Core.SchemeAPI do
       "delete-window!" => "(delete-window!) — delete the active window; return #t on success.",
       "delete-window-id!" => "(delete-window-id! WIN) — delete window WIN; return #t on success.",
       "window-list" => "(window-list) — return (WIN BUFFER) pairs for the selected frame's windows.",
+      "window-tree" => "(window-tree) — return the frame's window layout as an opaque value for window-tree-set!.",
+      "window-tree-set!" => "(window-tree-set! LAYOUT) — replace the frame's windows with a layout from window-tree.",
       "window-rects" => "(window-rects) — return (WIN BUFFER X Y W H) rows with fractional rectangles.",
       "select-window!" => "(select-window! WIN) — make WIN and its frame active; return #t on success.",
       "active-window" => "(active-window) — return the active window's id.",
@@ -651,6 +653,19 @@ defmodule Aimax.Core.SchemeAPI do
       "delete-window!" => fn [] -> Editor.delete_window() == :ok end,
       "delete-window-id!" => fn [id] -> Editor.delete_window_by_id(id) == :ok end,
       "window-list" => fn [] -> Enum.map(Editor.list_windows(), fn {id, b} -> [id, b] end) end,
+      # the layout round-trips as one opaque value: Scheme stores it in a
+      # buffer-local and hands it back; only Elixir reads its insides.
+      # The tree travels as the same tuple spec the desktop file uses,
+      # which is what restore_tree accepts.
+      "window-tree" => fn [] ->
+        v = Editor.desktop_view()
+        %{tree: tree_spec(v.tree), active: v.active_buffer}
+      end,
+      "window-tree-set!" => fn [%{tree: tree, active: active}]
+                               when elem(tree, 0) in [:leaf, :split] ->
+        Editor.restore_tree(tree, active)
+        :void
+      end,
       "window-rects" => fn [] -> Editor.window_rects() end,
       "select-window!" => fn [id] -> Editor.set_active(id) == :ok end,
       "active-window" => fn [] -> Editor.active_window() end,
@@ -1150,6 +1165,15 @@ defmodule Aimax.Core.SchemeAPI do
 
   defp plain({:sym, s}), do: s
   defp plain(v), do: v
+
+  # the desktop's tuple spec for a window tree — what restore_tree accepts
+  defp tree_spec(%{type: :leaf, buffer: b} = leaf) do
+    {:leaf, b, Map.get(leaf, :top, 0), Map.get(leaf, :point, 0), Map.get(leaf, :manual, false),
+     Map.get(leaf, :ctop, 0)}
+  end
+
+  defp tree_spec(%{type: :split, dir: dir, children: [a, b]} = s),
+    do: {:split, dir, Map.get(s, :ratio, 0.5), tree_spec(a), tree_spec(b)}
 
   # (fold-get BUF 'all) reads the union, the same word overlay-clear! uses
   defp fold_tag(tag), do: if(plain(tag) == "all", do: :all, else: plain(tag))

@@ -122,6 +122,21 @@ defmodule Aimax.Core.Editor do
   @doc "Echo a message in every frame (async sources: agents, timers)."
   def set_echo_all(msg), do: GenServer.call(__MODULE__, {:set_echo_all, msg})
 
+  @doc """
+  Put TEXT on the OS clipboard of one frame's client.
+
+  A browser page writes the clipboard only from its own process, so a
+  command cannot write it directly. The command leaves the text here; the
+  frame's client takes it on the next render and writes it. Nothing else
+  reads this slot, and a frame with no client drops the text at the next
+  write.
+  """
+  def put_clipboard(text, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:put_clipboard, text, fid(fid)})
+
+  @doc "Take FRAME's pending clipboard text, or nil. The take clears it."
+  def take_clipboard(fid), do: GenServer.call(__MODULE__, {:take_clipboard, fid(fid)})
+
   # one global always-visible segment in the echo bar (agent attention etc.)
   def set_modeline_extra(s), do: GenServer.call(__MODULE__, {:set_modeline_extra, s})
 
@@ -300,7 +315,9 @@ defmodule Aimax.Core.Editor do
        remaps: %{},
        last_command: "",
        undo_exempt: MapSet.new(["undo"]),
-       mru: [@scratch]
+       mru: [@scratch],
+       # frame id => text a command wants on that client's OS clipboard
+       clips: %{}
      }}
   end
 
@@ -747,6 +764,19 @@ defmodule Aimax.Core.Editor do
     if f.echo == msg,
       do: {:reply, :ok, state},
       else: changed(:ok, put_frame(state, %{f | echo: msg}), f.id)
+  end
+
+  # the client renders on the frame-change broadcast and takes the text there
+  def handle_call({:put_clipboard, text, fid}, _from, state) do
+    f = frame(state, fid)
+    changed(:ok, %{state | clips: Map.put(state.clips, f.id, text)}, f.id)
+  end
+
+  def handle_call({:take_clipboard, fid}, _from, state) do
+    case Map.pop(state.clips, fid) do
+      {nil, _} -> {:reply, nil, state}
+      {text, clips} -> {:reply, text, %{state | clips: clips}}
+    end
   end
 
   def handle_call({:set_echo_all, msg}, _from, state) do

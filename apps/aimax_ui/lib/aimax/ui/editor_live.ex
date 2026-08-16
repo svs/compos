@@ -15,7 +15,7 @@ defmodule Aimax.Ui.EditorLive do
   alias Aimax.Ui.AppServer
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(params, _session, socket) do
     # each browser TAB is a frame (S5): the client sends its remembered
     # frame id (sessionStorage, per tab) in the connect params; unknown
     # ids are honored so the frame survives a wiped desktop.etf, absent
@@ -25,6 +25,15 @@ defmodule Aimax.Ui.EditorLive do
       requested = get_connect_params(socket)["frame"]
       {:ok, fid} = Aimax.Core.Editor.attach_frame(requested)
       Events.subscribe_frame(fid)
+
+      # a buffer link (/b/NAME?line=N) shows that buffer in this frame.
+      # What "show" means — an open buffer, a file to visit, a line to go
+      # to — is Scheme's open-buffer-link!, not this view's.
+      if buffer = params["buffer"] do
+        Input.run(fid, fn ->
+          Aimax.Core.Session.call_named("open-buffer-link!", [buffer, line_param(params)])
+        end)
+      end
 
       socket =
         assign(socket,
@@ -306,7 +315,20 @@ defmodule Aimax.Ui.EditorLive do
         socket.assigns.subscribed
       end
 
-    assign(socket, state: state, subscribed: subscribed, line_cache: line_cache)
+    socket = assign(socket, state: state, subscribed: subscribed, line_cache: line_cache)
+
+    # a command left text for this client's OS clipboard (copy-buffer-link)
+    case fid && Aimax.Core.Editor.take_clipboard(fid) do
+      text when is_binary(text) -> push_event(socket, "clipboard", %{text: text})
+      _ -> socket
+    end
+  end
+
+  defp line_param(params) do
+    case Integer.parse(to_string(params["line"] || "")) do
+      {n, ""} when n > 0 -> n
+      _ -> false
+    end
   end
 
   defp leaf_ids(%{type: :leaf, id: id}), do: [id]

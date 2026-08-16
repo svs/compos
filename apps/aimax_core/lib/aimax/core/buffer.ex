@@ -169,6 +169,9 @@ defmodule Aimax.Core.Buffer do
   @doc "1-based logical line -> {start_byte, line_text sans newline}, clamped."
   def line_at(name, line), do: GenServer.call(via(name), {:line_at, line})
 
+  @doc "The 1-based line byte offset POS is on (Emacs line-number-at-pos)."
+  def line_of(name, pos), do: GenServer.call(via(name), {:line_of, pos})
+
   def forward_char(name), do: GenServer.call(via(name), {:motion, :forward})
   def backward_char(name), do: GenServer.call(via(name), {:motion, :backward})
   def next_line(name), do: GenServer.call(via(name), {:motion, :next_line})
@@ -354,6 +357,10 @@ defmodule Aimax.Core.Buffer do
   def handle_call({:delete_range, _, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
   def handle_call({:delete_char, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
   def handle_call({:kill_line, :user, _}, _f, %{read_only: true} = s), do: ro(s)
+
+  def handle_call({:line_of, pos}, _from, state) do
+    {:reply, Rope.byte_to_line(state.rope, clamp(pos, state)) + 1, state}
+  end
 
   def handle_call({:line_at, line}, _from, state) do
     rope = state.rope

@@ -16,6 +16,11 @@ defmodule Aimax.Ui.Application do
       :crypto.strong_rand_bytes(18) |> Base.url_encode64(padding: false)
     )
 
+    # the address this editor answers on. Scheme reads it through
+    # (editor-url) to write a buffer link; aimax_core must not depend on
+    # this app, so the value travels as a term, not as a call.
+    :persistent_term.put(:aimax_editor_url, "http://localhost:#{http_port()}")
+
     children =
       [
         {Phoenix.PubSub, name: Aimax.Ui.PubSub},
@@ -24,6 +29,12 @@ defmodule Aimax.Ui.Application do
       ] ++ app_server()
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Aimax.Ui.Supervisor)
+  end
+
+  defp http_port do
+    Application.get_env(:aimax_ui, Aimax.Ui.Endpoint, [])
+    |> Keyword.get(:http, [])
+    |> Keyword.get(:port, 4004)
   end
 
   # A second origin, on loopback, that serves previewed apps and nothing

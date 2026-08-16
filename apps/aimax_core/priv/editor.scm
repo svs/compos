@@ -3726,6 +3726,52 @@
         (kill-top)
         (begin (kill-push! text) text))))
 
+;;; --- buffer links ----------------------------------------------------------
+;;; A link is one string that points at a buffer, and two readers follow it.
+;;; A person opens BASE/b/NAME and this editor shows the buffer at the line.
+;;; A terminal or an agent reads BASE/raw/NAME and gets the text. The name is
+;;; one percent-encoded segment, so a file buffer keeps the slashes in its
+;;; path. The line rides in the query string, because a fragment never
+;;; reaches this daemon.
+
+(domain! 'buffers)
+(effects! '(read))
+
+(define (buffer-link &optional buf line)
+  (let ((name (or buf (current-buffer)))
+        (n (or line (if buf #f (line-number-at-pos (point))))))
+    (string-append (editor-url) "/b/" (url-encode name)
+                   (if n (string-append "?line=" (number->string n)) ""))))
+
+(define (buffer-raw-link &optional buf)
+  (string-append (editor-url) "/raw/" (url-encode (or buf (current-buffer)))))
+
+(effects! '(write))
+
+(define-command "copy-buffer-link"
+  "Copy a link to this buffer and line to the clipboard"
+  (lambda ()
+    (let ((link (buffer-link)))
+      ;; the kill ring too: a client with no clipboard permission still
+      ;; pastes it with C-y
+      (kill-push! link)
+      (clipboard-put! link)
+      (message link))))
+
+;; What a link means when a browser opens it. An open buffer wins, because
+;; the link names a buffer. A name that is also a file path opens that file
+;; — a link outlives the buffer it came from.
+(define (open-buffer-link! name line)
+  (cond ((buffer-exists? name) (switch-to-buffer! name))
+        ((file-exists? name) (visit name))
+        (else (message (string-append "Dead link: no buffer " name))))
+  (when (and line (buffer-exists? name))
+    (goto-char! (line-start-position line))
+    (recenter!)))
+
+(domain! 'unknown)
+(effects! '(unknown))
+
 ;;; --- default keymap --------------------------------------------------------
 
 (global-set-key "C-f" "forward-char")
@@ -3763,6 +3809,7 @@
 (global-set-key "M-g g" "goto-line")
 (global-set-key "M-g M-g" "goto-line")
 (global-set-key "M-m" "back-to-indentation")
+(global-set-key "C-c l" "copy-buffer-link")
 (global-set-key "C-c C-v" "preview-mode")
 (global-set-key "C-c C-a" "app-preview")
 (global-set-key "C-c C-r" "app-reload")
@@ -3849,6 +3896,12 @@
 (public! 'current-buffer "Name of the buffer point is in")
 (public! 'switch-to-buffer! "(switch-to-buffer! NAME) — show in the active window")
 (public! 'visit "(visit PATH) — open a file (Emacs find-file); /ssh:HOST:/PATH opens over ssh")
+(effects! '(read))
+(public! 'buffer-link "(buffer-link [NAME] [LINE]) -> a URL that opens the buffer here; no NAME means this buffer at point")
+(public! 'buffer-raw-link "(buffer-raw-link [NAME]) -> a URL that serves the buffer text as plain text")
+(effects! '(write))
+(public! 'open-buffer-link! "(open-buffer-link! NAME LINE) — show the buffer a link names; LINE may be #f")
+(effects! '(unknown))
 (public! 'tail-open "(tail-open PATH) — follow a file with tail -F, local or /ssh: remote")
 (public! 'sh-quote "(sh-quote S) — S as one safe single-quoted word for a shell command")
 (public! 'buffer-save! "Save the current buffer to its file")

@@ -46,6 +46,30 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(buffer
   | nc -U ~/.aimax/sock
 ```
 
+## Buffer links
+
+A buffer link is one string that names a buffer. `C-c l` (M-x
+`copy-buffer-link`) copies the link for the current buffer and line:
+
+```
+http://localhost:4004/b/%2FUsers%2Fsvs%2Fsrc%2Fai-max.el%2FREADME.md?line=42
+```
+
+The name is one percent-encoded path segment, so a file buffer keeps the
+slashes in its path.
+
+**When the user pastes a link, read the buffer it names.** Open the same
+name under `/raw/` and you get the text:
+
+```sh
+curl -s http://localhost:4004/raw/%2FUsers%2Fsvs%2Fsrc%2Fai-max.el%2FREADME.md
+curl -s http://localhost:4004/raw            # every buffer name, one per line
+```
+
+A person who opens the `/b/` link gets the editor, at that buffer and line.
+The line rides in the query string because a fragment never reaches the
+daemon. Build a link for any buffer with `(buffer-link NAME)`.
+
 ## House style
 
 - Write to **ASD-STE100 (Simplified Technical English)**. The rules that

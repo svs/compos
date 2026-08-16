@@ -79,6 +79,8 @@ defmodule Aimax.Core.SchemeAPI do
       "list-dir" => "(list-dir DIR) — return sorted entry names; directories carry a trailing slash.",
       "expand-path" => "(expand-path PATH) — expand PATH to an absolute path.",
       "file-stat" => "(file-stat PATH) — return (PERMS SIZE DATE) strings in dired style.",
+      "url-encode" => "(url-encode S) — percent-encode S as one URL path segment.",
+      "url-decode" => "(url-decode S) — decode a percent-encoded URL segment.",
       "file-exists?" => "(file-exists? PATH) — return #t if PATH exists.",
       "file-directory?" => "(file-directory? PATH) — return #t if PATH is a directory.",
       "read-file" => "(read-file PATH) — return the file's contents, or #f if unreadable.",
@@ -110,6 +112,7 @@ defmodule Aimax.Core.SchemeAPI do
       "beginning-of-buffer!" => "(beginning-of-buffer!) — move point to byte 0; return the new point.",
       "end-of-buffer!" => "(end-of-buffer!) — move point to the buffer's end; return the new point.",
       "line-start-position" => "(line-start-position LINE) — return the start byte offset of 1-based LINE.",
+      "line-number-at-pos" => "(line-number-at-pos POS) — return the 1-based line byte offset POS is on.",
       "insert!" => "(insert! TEXT) — insert TEXT at point; errors if the buffer is read-only.",
       "delete-char!" => "(delete-char! N) — delete N characters at point, backward if negative; return the text.",
       "kill-line!" => "(kill-line!) — delete from point to the line end, or the newline; return the text.",
@@ -121,6 +124,9 @@ defmodule Aimax.Core.SchemeAPI do
       "kill-top" => "(kill-top) — return the newest kill-ring entry, or \"\" when empty.",
       "kill-nth" => "(kill-nth I) — return kill-ring entry I (0 is newest), or \"\" when absent.",
       "kill-ring-size" => "(kill-ring-size) — return the number of kill-ring entries.",
+      "clipboard-put!" =>
+        "(clipboard-put! TEXT) — put TEXT on the OS clipboard of this frame's client.",
+      "editor-url" => "(editor-url) — return the base URL this editor serves, e.g. http://localhost:4004.",
       "buffer-set-local!" => "(buffer-set-local! BUF KEY VALUE) — set a buffer-local variable.",
       "buffer-local" => "(buffer-local BUF KEY) — return a buffer-local variable's value, or #f if unset.",
       "set-mark!" => "(set-mark! POS) — set the mark at byte POS; #f clears the mark.",
@@ -344,6 +350,9 @@ defmodule Aimax.Core.SchemeAPI do
           {:error, _} -> 0
         end
       end,
+      # one segment, so a file buffer's slashes survive the round trip
+      "url-encode" => fn [s] -> URI.encode(s, &URI.char_unreserved?/1) end,
+      "url-decode" => fn [s] -> URI.decode(s) end,
       "file-exists?" => fn [p] -> File.exists?(Path.expand(p)) end,
       "file-directory?" => fn [p] -> File.dir?(Path.expand(p)) end,
       # (read-file PATH) -> contents, or #f if unreadable
@@ -450,6 +459,9 @@ defmodule Aimax.Core.SchemeAPI do
         {start, _text} = Buffer.line_at(Editor.current_buffer(), trunc(line))
         start
       end,
+      "line-number-at-pos" => fn [pos] ->
+        Buffer.line_of(Editor.current_buffer(), trunc(pos))
+      end,
 
       # editing (user-sourced: respects read-only)
       "insert!" => fn [text] ->
@@ -498,6 +510,14 @@ defmodule Aimax.Core.SchemeAPI do
       "kill-top" => fn [] -> Editor.kill_top() end,
       "kill-nth" => fn [i] -> Editor.kill_nth(i) end,
       "kill-ring-size" => fn [] -> Editor.kill_size() end,
+      "clipboard-put!" => fn [text] ->
+        Editor.put_clipboard(text)
+        :void
+      end,
+
+      # the LiveView app puts its own base URL at boot; a headless daemon
+      # (tests, RPC with no web app) still answers with the default
+      "editor-url" => fn [] -> :persistent_term.get(:aimax_editor_url, "http://localhost:4004") end,
 
       # buffer-local variables
       "buffer-set-local!" => fn [buf, k, v] ->

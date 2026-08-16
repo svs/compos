@@ -507,26 +507,66 @@ defmodule Aimax.Ui.EditorLive do
     # every render, and elem/2 is O(1) where Enum.slice on a list is
     # O(top) — this is the buffer's full line count, walked once here,
     # cached by {buffer, version, ts_lang, overlay_gen} until the next edit
-    leaf.text
-    |> String.split("\n")
-    |> Enum.map_reduce(0, fn part, start -> {{part, start}, start + byte_size(part) + 1} end)
-    |> elem(0)
-    |> Enum.with_index(1)
-    |> Enum.map(fn {{part, start}, num} ->
-      le = start + byte_size(part)
-      line_ts = Enum.filter(spans, fn {s, e, _, _} -> s < le and e > start end)
-      line_ov = Enum.filter(ovs, fn {s, e, _} -> s < le and e > start end)
+    lines =
+      leaf.text
+      |> String.split("\n")
+      |> Enum.map_reduce(0, fn part, start -> {{part, start}, start + byte_size(part) + 1} end)
+      |> elem(0)
+      |> Enum.with_index(1)
 
+    ts_per_line = stab(spans, lines, fn {s, _, _, _} -> s end, fn {_, e, _, _} -> e end)
+    ov_per_line = stab(ovs, lines, fn {s, _, _} -> s end, fn {_, e, _} -> e end)
+
+    [lines, ts_per_line, ov_per_line]
+    |> Enum.zip_with(fn [{{part, start}, num}, line_ts, line_ov] ->
       %{
         part: part,
         start: start,
         num: num,
         ts: line_ts,
         ov: line_ov,
-        segs: seg_build(part, start, line_ts, line_ov)
+        segs: line_segs(part, start, line_ts, line_ov)
       }
     end)
     |> List.to_tuple()
+  end
+
+  # Emacs stops font-locking a line once the work outgrows the reading, and
+  # so do we. seg_build compares every range against every cut, so a line
+  # carrying thousands of ranges costs the square of them. One 3.8 MB line
+  # of minified JSON pinned a LiveView on a core for good: the window never
+  # painted, the process mailbox filled, and the editor read as frozen in
+  # the browser while the daemon burned nine cores. Past these bounds the
+  # line renders as plain text.
+  @max_styled_line 20_000
+  @max_line_ranges 400
+
+  defp line_segs(part, start, line_ts, line_ov) do
+    if byte_size(part) > @max_styled_line or
+         length(line_ts) + length(line_ov) > @max_line_ranges do
+      [{part, ""}]
+    else
+      seg_build(part, start, line_ts, line_ov)
+    end
+  end
+
+  # The ranges that touch each line, in one walk. Both the ranges and the
+  # lines are in increasing start order, so a range enters when a line
+  # reaches it and leaves when a line starts after it ends. Filtering the
+  # whole range list per line was O(lines × ranges): a 5000-line file with
+  # 20000 spans spent 100 million comparisons on every version.
+  defp stab(items, lines, s_at, e_at) do
+    sorted = Enum.sort_by(items, s_at)
+
+    {per_line, _} =
+      Enum.map_reduce(lines, {sorted, []}, fn {{part, start}, _num}, {pending, active} ->
+        le = start + byte_size(part)
+        {reached, pending} = Enum.split_while(pending, fn it -> s_at.(it) < le end)
+        active = Enum.filter(active ++ reached, fn it -> e_at.(it) > start end)
+        {active, {pending, active}}
+      end)
+
+    per_line
   end
 
   defp visible_buffers(%{type: :leaf, buffer: b}), do: [b]
@@ -866,7 +906,10 @@ defmodule Aimax.Ui.EditorLive do
             ]
             |> Enum.reject(&is_nil/1)
 
-          segs = seg_build(line.part, line.start, line.ts, line.ov ++ overlays)
+          # through line_segs, not seg_build: the cursor's own line takes the
+          # same long-line guard as every other one, and on a one-line buffer
+          # this is the only line there is
+          segs = line_segs(line.part, line.start, line.ts, line.ov ++ overlays)
 
           # cursor sitting on this line's newline (or at EOF on the last line)
           if point >= line.start and point == le,

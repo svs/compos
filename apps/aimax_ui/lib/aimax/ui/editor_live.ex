@@ -813,7 +813,24 @@ defmodule Aimax.Ui.EditorLive do
           <span>{pct(@node)}</span>
           <span :if={@node.modified} class="dash-live-mod">modified</span>
         </div>
-        <.blk :for={b <- Enum.map(@node.dash, &block_view/1)} b={b} line={0} win={@node.id} />
+        <%= case @node.dash do %>
+          <% [head | cards] -> %>
+            <.blk b={block_view(head)} line={0} win={@node.id} />
+            <div class="dash-grid">
+              <div class="dash-cell">
+                <div class="dash-title">modes</div>
+                <div class="dash-big">{@node.mode}</div>
+                <div :if={@node.minor_modes != []} class="dash-chips">
+                  <span :for={m <- @node.minor_modes} class="dash-chip">{m}</span>
+                </div>
+                <div class="dash-row">
+                  <span class="dash-k">read-only</span><span class="dash-sp"></span><span class="dash-v">{if @node.read_only, do: "yes", else: "no"}</span>
+                </div>
+              </div>
+              <.blk :for={b <- Enum.map(cards, &block_view/1)} b={b} line={0} win={@node.id} />
+            </div>
+          <% _ -> %>
+        <% end %>
       </div>
       <%= if @node.render_mode == "blocks" and Map.has_key?(@node, :blk) do %>
         <div class="blocks-view" id={"blocks-#{@node.id}"} phx-hook="BlockScroll">

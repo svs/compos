@@ -1867,12 +1867,13 @@
 ;; [name]; RET on it switches to the group and restores its layout.
 (define (group-container-label g) (string-append "[" (group-label g) "]"))
 
-;; a buffer's short name for a chip: the last path segment; a *special*
-;; buffer keeps its name
+;; a buffer's short name for a chip: the last path segment. A starred
+;; name wrapping a path (*writing:/long/path.md*) shortens the same
+;; way and keeps its closing star, so the chip still reads as special.
 (define (buffer-short-label b)
-  (if (string-prefix? "*" b)
-      b
-      (car (reverse (string-split b "/")))))
+  (if (string-contains? b "/")
+      (car (reverse (string-split b "/")))
+      b))
 
 ;; a container renders as its own row shape: kind "container", the
 ;; group's members as chips, the metadata as the annotation
@@ -3737,19 +3738,6 @@
                   (list (dash--pill
                           (string-append (number->string (buffer-size buf)) " B") #f)))))))
 
-(define (dash--modes buf)
-  (let ((minors (or (buffer-local buf 'minor-modes) '())))
-    (dash--section "modes"
-      (append
-        (list (list 'tag "div" 'class "dash-big"
-                    'text (or (buffer-local buf 'mode-name) "fundamental-mode")))
-        (if (pair? minors)
-            (list (list 'tag "div" 'class "dash-chips"
-                        'children (map dash--chip minors)))
-            '())
-        (list (dash--row "read-only" (if (buffer-read-only? buf) "yes" "no")
-                         (if (buffer-read-only? buf) #f "dim")))))))
-
 (define (dash--group buf)
   (let ((g (buffer-group buf)))
     (if (not g)
@@ -3759,9 +3747,12 @@
         (dash--section "group"
           (append
             (list (list 'tag "div" 'class "dash-big" 'text (group-label g)))
-            (list (dash--row "members"
-                             (string-join (map buffer-short-label
-                                               (take-n (group-buffers-mru g) 3)) " · "))
+            ;; every member shows, as wrapping chips — one truncating
+            ;; row hid the companion chat behind an ellipsis
+            (list (list 'tag "div" 'class "dash-chips"
+                        'children
+                        (map (lambda (m) (dash--chip (buffer-short-label m)))
+                             (group-buffers-mru g)))
                   (dash--row "companion" (group-noise g))
                   (dash--row "layout" (if (group-layout g) "saved" "default")))
             (let ((m (group-meta g)))
@@ -3884,18 +3875,22 @@
     (unless (member key cur)
       (buffer-set-local! buf 'desktop-skip-locals (cons key cur)))))
 
+;; the panel PULLS like the bar: everything per-buffer (position,
+;; modes, read-only) renders in the view from live state. Only the
+;; cross-buffer cards ship as blocks: the group's detail and the
+;; ledger. post-command! keeps those honest.
 (define (dashboard-blocks buf)
-  (list
-    (list 'tag "div" 'class "dash"
-          'children
-          (list (dash--head buf)
-                ;; position is NOT a card: the panel's live strip shows
-                ;; it straight from the window, current on every keystroke
-                (list 'tag "div" 'class "dash-grid"
-                      'children
-                      (list (dash--modes buf)
-                            (dash--group buf)
-                            (dash--llm buf)))))))
+  (list (dash--head buf)
+        (dash--group buf)
+        (dash--llm buf)))
+
+(define (dash--fingerprint buf)
+  (list (buffer-local buf 'mode-name)
+        (buffer-local buf 'minor-modes)
+        (buffer-group buf)
+        (buffer-local buf 'agent-model)
+        (buffer-local buf 'agent-connector)
+        (buffer-local buf 'llm-model)))
 
 (define-command "modeline-expand"
   "Toggle this buffer's expanded modeline panel"
@@ -3908,8 +3903,20 @@
           (begin
             (desktop-skip! buf 'modeline-expanded)
             (desktop-skip! buf 'modeline-dash-blocks)
+            (desktop-skip! buf 'modeline-dash-fp)
+            (buffer-set-local! buf 'modeline-dash-fp (dash--fingerprint buf))
             (buffer-set-local! buf 'modeline-dash-blocks (dashboard-blocks buf))
             (buffer-set-local! buf 'modeline-expanded #t))))))
+
+;; after every command: an expanded panel that no longer matches its
+;; buffer rebuilds itself — modes, group, model all change under it
+(define (post-command!)
+  (let ((buf (current-buffer)))
+    (when (buffer-local buf 'modeline-expanded)
+      (let ((fp (dash--fingerprint buf)))
+        (unless (equal? fp (buffer-local buf 'modeline-dash-fp))
+          (buffer-set-local! buf 'modeline-dash-fp fp)
+          (buffer-set-local! buf 'modeline-dash-blocks (dashboard-blocks buf)))))))
 
 (define-command "groups" "The groups board: switch, describe, set noise"
   (lambda () (list-mode-show! "groups-mode")))

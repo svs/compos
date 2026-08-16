@@ -1646,6 +1646,7 @@ defmodule Aimax.Core.Editor do
       visual_line_mode: Map.get(locals, "visual-line-mode") == true,
       agent: agent_leaf(locals, text),
       blocks: blocks_leaf(locals),
+      minor_modes: Map.get(locals, "minor-modes") || [],
       # the expanded modeline: a block tree pinned above the text,
       # rendered only while the buffer-local says so
       dash:

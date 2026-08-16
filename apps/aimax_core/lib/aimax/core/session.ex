@@ -146,7 +146,28 @@ defmodule Aimax.Core.Session do
         {:reply, {:error, "undefined command"}, state}
 
       [{^name, closure, _doc}] ->
-        case safe(fn -> with_fid(fid, fn -> Scheme.call(state.interp, closure, []) end) end) do
+        case safe(fn ->
+               with_fid(fid, fn ->
+                 {:ok, val, interp} = Scheme.call(state.interp, closure, [])
+
+                 # the post-command hook: policy reacts to what the command
+                 # changed — the expanded modeline re-reads its buffer. A
+                 # hook error must never fail the command that ran.
+                 try do
+                   case Scheme.eval_string(
+                          interp,
+                          "(when (boundp 'post-command!) (post-command!))"
+                        ) do
+                     {:ok, _hv, interp2} -> {:ok, val, interp2}
+                     _ -> {:ok, val, interp}
+                   end
+                 rescue
+                   _ -> {:ok, val, interp}
+                 catch
+                   _, _ -> {:ok, val, interp}
+                 end
+               end)
+             end) do
           {:ok, val, interp} -> {:reply, :ok, put_interp(state, interp, val)}
           {:error, msg} -> {:reply, {:error, msg}, state}
         end

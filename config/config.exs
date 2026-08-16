@@ -61,6 +61,9 @@ if config_env() == :test do
   # no listening socket in tests: concurrent worktrees would fight for the
   # port, and the router answers a Plug.Test conn without one
   config :aimax_ui, app_port: nil
+
+  # no oembed fetches from tests: a cache miss stays :pending
+  config :aimax_ui, oembed_fetch: false
 end
 
 # Sample configuration:

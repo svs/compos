@@ -329,7 +329,12 @@ defmodule Aimax.Ui.EditorLive do
   defp decorate(%{type: :leaf, render_mode: rm} = leaf, cache, faces)
        when rm in ["html", "markdown"] do
     pt = if rm == "markdown", do: leaf.point, else: 0
-    key = {leaf.buffer, leaf.version, rm, leaf.preview_authored, :erlang.phash2(faces), pt}
+
+    # the oembed generation moves when a tweet fetch lands, so the cached
+    # placeholder misses and the card renders
+    key =
+      {leaf.buffer, leaf.version, rm, leaf.preview_authored, :erlang.phash2(faces), pt,
+       Aimax.Ui.Oembed.generation()}
 
     html =
       case cache[{:preview, leaf.id}] do
@@ -1148,11 +1153,13 @@ defmodule Aimax.Ui.EditorLive do
   defp preview_html("markdown", text, faces, _authored) do
     body =
       text
-      |> Earmark.as_html(compact_output: false)
+      |> Earmark.as_ast(compact_output: false)
       |> case do
-        {:ok, html, _} -> html
-        {:error, html, _} -> html
+        {:ok, ast, _} -> ast
+        {:error, ast, _} -> ast
       end
+      |> embed_urls()
+      |> Earmark.Transform.transform(compact_output: false)
       |> String.replace(@pt_sentinel, ~s(<span class="pt"></span>))
 
     %{bg: bg, fg: fg, accent: accent, dim: dim, border: border, inset: inset} =
@@ -1173,11 +1180,87 @@ defmodule Aimax.Ui.EditorLive do
     table{border-collapse:collapse;font-size:14px}th,td{border:1px solid #{border};padding:5px 9px}
     th{background:#{inset};text-align:left}
     img{max-width:100%}hr{border:0;border-top:1px solid #{border};margin:22px 0}
+    .tweet{margin:12px 0;padding:12px 16px;border:1px solid #{border};border-radius:8px;
+           max-width:32em;background:#{inset};font-size:14.5px}
+    .tweet blockquote{margin:0;padding:0;border:0;color:#{fg}}
+    .tweet blockquote p{margin:0 0 8px}
+    .tweet-pending{color:#{dim}}
     .pt{display:inline-block;width:2px;height:1.05em;margin:0 -1px;vertical-align:-0.18em;
         background:#{accent};animation:ptb 1.1s step-end infinite}
     @keyframes ptb{0%,49%{opacity:1}50%,100%{opacity:0}}
     </style></head><body>#{body}</body></html>
     """
+  end
+
+  # A bare URL in the source becomes a link whose text is the URL
+  # (Earmark pure links). The preview upgrades two kinds: an image URL
+  # becomes an inline image, a tweet URL becomes a tweet card. A written
+  # link — [text](url) — has text different from the href and stays a
+  # link. The point sentinel can sit inside the pasted URL; the compare
+  # ignores it and the embed re-emits it as a sibling.
+  @image_exts ~w(.png .jpg .jpeg .gif .webp .svg .avif .bmp)
+  @tweet_re ~r{\Ahttps?://(?:mobile\.)?(?:twitter|x)\.com/[^/]+/status(?:es)?/\d+\z}
+
+  defp embed_urls(nodes) when is_list(nodes), do: Enum.flat_map(nodes, &embed_node/1)
+
+  defp embed_node({"a", atts, [text], meta} = node) when is_binary(text) do
+    url = String.replace(text, @pt_sentinel, "")
+
+    # the href carries the sentinel percent-encoded; the text carries it raw
+    href =
+      case List.keyfind(atts, "href", 0) do
+        {_, h} ->
+          h
+          |> String.replace(@pt_sentinel, "")
+          |> String.replace(URI.encode(@pt_sentinel), "")
+
+        nil ->
+          nil
+      end
+
+    tail = if text == url, do: [], else: [@pt_sentinel]
+
+    cond do
+      href != url -> [node]
+      image_url?(url) -> [{"img", [{"src", url}, {"alt", ""}], [], meta} | tail]
+      tweet_url?(url) -> tweet_card(url, meta) ++ tail
+      true -> [node]
+    end
+  end
+
+  defp embed_node({tag, atts, children, meta}) when is_list(children),
+    do: [{tag, atts, embed_urls(children), meta}]
+
+  defp embed_node(other), do: [other]
+
+  defp image_url?(url) do
+    case URI.parse(url) do
+      %URI{scheme: s, path: p} when s in ["http", "https"] and is_binary(p) ->
+        (p |> Path.extname() |> String.downcase()) in @image_exts
+
+      _ ->
+        false
+    end
+  end
+
+  defp tweet_url?(url), do: Regex.match?(@tweet_re, url)
+
+  defp tweet_card(url, meta) do
+    case Aimax.Ui.Oembed.card(url) do
+      {:ok, html} ->
+        # the card html renders verbatim; Oembed strips script tags, and
+        # the iframe sandbox runs no scripts either way
+        [{"div", [{"class", "tweet"}], [html], Map.put(meta, :verbatim, true)}]
+
+      :pending ->
+        [
+          {"div", [{"class", "tweet tweet-pending"}],
+           ["Loading tweet — ", {"a", [{"href", url}], [url], meta}], meta}
+        ]
+
+      :error ->
+        [{"a", [{"href", url}], [url], meta}]
+    end
   end
 
   defp pct(%{top: 0, rows: rows, total_lines: total}) when total <= rows, do: "All"

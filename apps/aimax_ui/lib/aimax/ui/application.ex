@@ -19,6 +19,7 @@ defmodule Aimax.Ui.Application do
     children =
       [
         {Phoenix.PubSub, name: Aimax.Ui.PubSub},
+        Aimax.Ui.Oembed,
         Aimax.Ui.Endpoint
       ] ++ app_server()
 

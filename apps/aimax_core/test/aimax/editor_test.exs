@@ -2493,10 +2493,12 @@ defmodule Aimax.EditorTest do
     refute Buffer.exists?(m1)
     refute Buffer.exists?(m2)
     assert Buffer.exists?(f)
-    {:ok, _} = Aimax.Core.Session.eval(~s{(begin (buffer-mark-saved! "#{f}") (buffer-kill! "#{f}") #t)})
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(~s{(begin (buffer-mark-saved! "#{f}") (buffer-kill! "#{f}") #t)})
   end
 
-  test "a poisoned layout snapshot heals to the default arrangement" do
+  test "the layout restores as saved — no second-guessing" do
     n = System.unique_integer([:positive])
     m = "hl-a-#{n}"
     Aimax.Core.create_buffer(m)

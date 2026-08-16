@@ -3568,16 +3568,16 @@
       (lambda (w)
         (let ((b (car (cdr w))))
           (when (and (string-prefix? "/" b)
-                     (= (buffer-size b) 0)
-                     (not (buffer-modified? b))
                      (file-exists? b)
                      (not (file-directory? b)))
-            (select-window! (car w))
-            (buffer-kill! b)
-            (visit b)
-            ;; the shell lost its locals with its life: membership
-            ;; comes back with the content
-            (buffer-set-local! b 'group g))))
+            ;; a member killed since the snapshot came back as an
+            ;; empty shell: re-read its file, and its membership with it
+            (when (and (= (buffer-size b) 0)
+                       (not (buffer-modified? b)))
+              (select-window! (car w))
+              (buffer-kill! b)
+              (visit b)
+              (buffer-set-local! b 'group g)))))
       (window-list))
     (when (window-exists? back) (select-window! back))))
 
@@ -3610,14 +3610,12 @@
           ;; below sees a group with nothing on screen
           (group-restore-files! g)
           ;; an old snapshot may have memorialized a transient surface
-          ;; (the board, a listing) that is not a member: drop it
-          (group-restore-prune! g)
-          ;; a snapshot that shows none of the group is not the group's
-          ;; layout (a stale capture from before the on-screen guard):
-          ;; heal it — build the default and re-save over the bad one
-          (unless (group-on-screen? g)
-            (group-default-layout! g)
-            (group-layout-save! g)))
+          ;; (the board, a listing) that is not a member: drop it.
+          ;; Beyond that the layout restores AS SAVED — it is the
+          ;; group's own record, and second-guessing it against
+          ;; membership tags kept stomping real arrangements. The
+          ;; capture rule (only from inside) keeps new snapshots sane.
+          (group-restore-prune! g))
         (group-default-layout! g)))
   (set! *winner-inhibit* #f)
   ;; the switch itself is a history entry: the group joins the one MRU

@@ -2120,6 +2120,91 @@ defmodule Aimax.EditorTest do
     press(["q"])
   end
 
+  test "the ring toggles: C-x b RET goes back, and back again" do
+    n = System.unique_integer([:positive])
+    a = "rg-a-#{n}"
+    b = "rg-b-#{n}"
+    for x <- [a, b], do: Aimax.Core.create_buffer(x)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (set-frame-local! 'current-group #f)
+             (delete-other-windows!)
+             (switch-to-buffer! "#{a}")
+             (switch-to-buffer! "#{b}"))
+      """)
+
+    press(["C-x", "b"])
+    assert Editor.render_state().minibuffer.prompt =~ "default #{a}"
+    press(["RET"])
+    assert Editor.current_buffer() == a
+
+    press(["C-x", "b"])
+    assert Editor.render_state().minibuffer.prompt =~ "default #{b}"
+    press(["RET"])
+    assert Editor.current_buffer() == b
+  end
+
+  test "C-x o records the focused window's buffer in the ring" do
+    n = System.unique_integer([:positive])
+    left = "wo-a-#{n}"
+    right = "wo-b-#{n}"
+    for x <- [left, right], do: Aimax.Core.create_buffer(x)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (set-frame-local! 'current-group #f)
+             (delete-other-windows!)
+             (switch-to-buffer! "#{left}")
+             (split-window! 'h 0.5)
+             (other-window!)
+             (switch-to-buffer! "#{right}")
+             (other-window!))
+      """)
+
+    # focusing left last: left leads the ring
+    assert {:ok, mru} = Aimax.Core.Session.eval("(buffer-list-mru)")
+    assert mru =~ ~r/\A\("#{left}" "#{right}"/
+
+    # C-x o focuses right: right leads now
+    press(["C-x", "o"])
+    assert {:ok, mru} = Aimax.Core.Session.eval("(buffer-list-mru)")
+    assert mru =~ ~r/\A\("#{right}" "#{left}"/
+    {:ok, _} = Aimax.Core.Session.eval("(delete-other-windows!)")
+  end
+
+  test "a group switch records the landed buffers in the ring" do
+    n = System.unique_integer([:positive])
+    m1 = "gr-a-#{n}"
+    m2 = "gr-b-#{n}"
+    home = "gr-home-#{n}"
+    for x <- [m1, m2, home], do: Aimax.Core.create_buffer(x)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (set-frame-local! 'current-group #f)
+             (delete-other-windows!)
+             (switch-to-buffer! "#{m1}")
+             (switch-to-buffer! "#{m2}")
+             (buffer-set-local! "#{m1}" 'group "grgrp-#{n}")
+             (buffer-set-local! "#{m2}" 'group "grgrp-#{n}")
+             (switch-to-buffer! "#{home}")
+             (switch-to-group! "grgrp-#{n}")
+             #t)
+      """)
+
+    # the landed buffer leads history; the other shown member is next;
+    # home — where we came from — right after
+    assert {:ok, mru} = Aimax.Core.Session.eval("(buffer-list-mru)")
+    heads = mru |> String.trim_leading("(") |> String.split(" ") |> Enum.take(3)
+    assert Enum.at(heads, 0) == ~s{"#{m2}"}
+    assert ~s{"#{m1}"} in heads
+    assert ~s{"#{home}"} in heads
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("(begin (set-frame-local! 'current-group #f) (delete-other-windows!))")
+  end
+
   test "a stale off-screen buffer catches up when the switcher shows it" do
     n = System.unique_integer([:positive])
     b = "st-#{n}"

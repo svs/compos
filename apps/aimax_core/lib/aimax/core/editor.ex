@@ -1076,8 +1076,15 @@ defmodule Aimax.Core.Editor do
   # (ibuffer buffer-locals, agent closures) with no frame attached
   def handle_call({:set_active, id}, _from, state) do
     case find_window_frame(state, id) do
-      nil -> {:reply, {:error, :no_window}, state}
-      f -> changed(:ok, state |> put_frame(%{f | active: id}) |> bump_frame(f.id) |> resync_swap(), f.id)
+      nil ->
+        {:reply, {:error, :no_window}, state}
+
+      f ->
+        # selecting a window makes its buffer the most recent (Emacs
+        # buffer-list order) — without this, a focus change is invisible
+        # to C-x b history
+        state = bump_mru(state, find_leaf(f.tree, id).buffer)
+        changed(:ok, state |> put_frame(%{f | active: id}) |> bump_frame(f.id) |> resync_swap(), f.id)
     end
   end
 
@@ -1119,9 +1126,12 @@ defmodule Aimax.Core.Editor do
     f = frame(state, fid)
     ids = leaf_ids(f.tree)
     idx = Enum.find_index(ids, &(&1 == f.active)) || 0
+    next = Enum.at(ids, rem(idx + 1, length(ids)))
+    state = bump_mru(state, find_leaf(f.tree, next).buffer)
+
     changed(
       :ok,
-      state |> put_frame(%{f | active: Enum.at(ids, rem(idx + 1, length(ids)))}) |> resync_swap(),
+      state |> put_frame(%{f | active: next}) |> resync_swap(),
       f.id
     )
   end
@@ -1169,6 +1179,13 @@ defmodule Aimax.Core.Editor do
         if buffer == active_buffer, do: id
       end) || first_leaf(tree).id
 
+    # what the restored tree shows IS the recent history now: the active
+    # buffer leads, the other windows follow. Without this a group
+    # switch left no trace in C-x b.
+    shown = tree |> leaf_ids_buffers() |> Enum.map(&elem(&1, 1)) |> Enum.uniq()
+    active_buf = find_leaf(tree, active).buffer
+    state = Enum.reduce(Enum.reverse(shown -- [active_buf]) ++ [active_buf], state, &bump_mru(&2, &1))
+
     changed(
       :ok,
       resync_swap(put_frame(%{state | next_win: next_win}, %{f | tree: tree, active: active})),
@@ -1198,6 +1215,9 @@ defmodule Aimax.Core.Editor do
   defp frame(state, fid), do: state.frames[fid] || state.frames[hd(state.frame_mru)]
 
   defp put_frame(state, f), do: %{state | frames: Map.put(state.frames, f.id, f)}
+
+  defp bump_mru(state, buffer),
+    do: %{state | mru: Enum.take([buffer | List.delete(state.mru, buffer)], 50)}
 
   defp bump_frame(state, fid),
     do: %{state | frame_mru: [fid | List.delete(state.frame_mru, fid)]}

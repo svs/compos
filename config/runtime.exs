@@ -9,16 +9,39 @@ import Config
 # Setting AIMAX_HOME alone is enough: the socket and desktop file follow it,
 # so two daemons can't fight over ~/.aimax/sock.
 #
-# The same knobs also read from $AIMAX_HOME/daemon.conf, one `key = value`
-# per line, `#` comments. An environment variable wins over the file.
+# The same knobs also read from a config file, one `key = value` per line,
+# `#` comments. An environment variable wins over the file.
 #
+#   home = ~/.aimax-work
 #   port = 4004
 #   app_port = 4005
 #   name = work
 #   secret_key_base = ...
+#
+# AIMAX_CONF names the file: `AIMAX_CONF=/etc/aimax.conf bin/aimax daemon`.
+# Without AIMAX_CONF the daemon reads $AIMAX_HOME/daemon.conf. The file can
+# set `home`; AIMAX_HOME wins over it.
 
 if config_env() != :test do
-  home = System.get_env("AIMAX_HOME")
+  parse_conf = fn text ->
+    for line <- String.split(text, "\n"),
+        line = String.trim(line),
+        line != "" and not String.starts_with?(line, "#"),
+        [k, v] <- [String.split(line, "=", parts: 2)],
+        into: %{} do
+      {String.trim(k), String.trim(v)}
+    end
+  end
+
+  conf =
+    if conf_path = System.get_env("AIMAX_CONF") do
+      case File.read(Path.expand(conf_path)) do
+        {:ok, text} -> parse_conf.(text)
+        {:error, reason} -> raise "cannot read AIMAX_CONF=#{conf_path}: #{reason}"
+      end
+    end
+
+  home = System.get_env("AIMAX_HOME") || (conf && conf["home"])
 
   if home do
     home = Path.expand(home)
@@ -29,21 +52,13 @@ if config_env() != :test do
   home_dir = if home, do: Path.expand(home), else: Path.expand("~/.aimax")
 
   conf =
-    case File.read(Path.join(home_dir, "daemon.conf")) do
-      {:ok, text} ->
-        for line <- String.split(text, "\n"),
-            line = String.trim(line),
-            line != "" and not String.starts_with?(line, "#"),
-            [k, v] <- [String.split(line, "=", parts: 2)],
-            into: %{} do
-          {String.trim(k), String.trim(v)}
-        end
+    conf ||
+      case File.read(Path.join(home_dir, "daemon.conf")) do
+        {:ok, text} -> parse_conf.(text)
+        _ -> %{}
+      end
 
-      _ ->
-        %{}
-    end
-
-  # an environment variable wins over daemon.conf
+  # an environment variable wins over the conf file
   get = fn env_key, conf_key -> System.get_env(env_key) || conf[conf_key] end
 
   if port = get.("AIMAX_PORT", "port") do

@@ -863,10 +863,19 @@
               (buffer-set-local! buf 'diff-watch #t)
               (message "watch on"))))))
 
+;; a stale diff catches up the moment the switcher shows it again
+(on-buffer-shown!
+  (lambda (b)
+    (when (and (buffer-local b 'diff-stale)
+               (buffer-local b 'diff-watch))
+      (buffer-set-local! b 'diff-stale #f)
+      (diff-refresh b))))
+
 ;; One handler for every diff buffer. Only the buffers ON SCREEN
 ;; refresh: re-rendering a background diff on every file change held
 ;; the session for seconds at a time. A hidden buffer marks itself
-;; stale; the next fs change while visible, or `g`, catches it up.
+;; stale; showing it again, the next fs change while visible, or `g`
+;; catches it up.
 (on-fs-change!
   (lambda (root)
     (for-each

@@ -2120,6 +2120,35 @@ defmodule Aimax.EditorTest do
     press(["q"])
   end
 
+  test "a stale off-screen buffer catches up when the switcher shows it" do
+    n = System.unique_integer([:positive])
+    b = "st-#{n}"
+    Aimax.Core.create_buffer(b)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (set-frame-local! 'current-group #f)
+             (delete-other-windows!)
+             (buffer-set-local! "#{b}" 'probe-stale #t)
+             (switch-to-buffer! "*scratch*"))
+      """)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (on-buffer-shown!
+        (lambda (buf)
+          (when (buffer-local buf 'probe-stale)
+            (buffer-set-local! buf 'probe-stale #f)
+            (buffer-set-local! buf 'probe-caught #t))))
+      """)
+
+    press(["C-x", "b"])
+    type(b)
+    press(["RET"])
+    assert Editor.current_buffer() == b
+    assert Buffer.get_local(b, "probe-caught") == true
+  end
+
   test "group-kill kills the members but keeps modified file buffers" do
     n = System.unique_integer([:positive])
     m1 = "gk-a-#{n}"

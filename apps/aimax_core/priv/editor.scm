@@ -1929,7 +1929,9 @@
                            (switch-to-group! bg)
                            (let ((w (window-showing picked)))
                              (if w (select-window! w) (switch-to-buffer! picked))))
-                         (switch-to-buffer! picked))))
+                         (begin
+                           (switch-to-buffer! picked)
+                           (windows-shown-catchup!)))))
                   (else
                    ;; nothing matches: RET founds a group named PICKED
                    ;; from the current windows
@@ -3338,7 +3340,22 @@
             (group-default-layout! g)
             (group-layout-save! g)))
         (group-default-layout! g)))
+  (windows-shown-catchup!)
   (message (string-append "switched to group " (group-label g))))
+
+;; a mode whose buffer went stale OFF screen registers a catch-up
+;; here; the switcher runs it for every window it just (re)filled.
+;; diff-mode uses it: hidden diffs skip the expensive re-render and
+;; catch up the moment they show.
+(define *buffer-shown-hooks* '())
+(define (on-buffer-shown! fn)
+  (set! *buffer-shown-hooks* (cons fn *buffer-shown-hooks*)))
+
+(define (windows-shown-catchup!)
+  (for-each (lambda (w)
+              (let ((b (car (cdr w))))
+                (for-each (lambda (fn) (fn b)) *buffer-shown-hooks*)))
+            (window-list)))
 
 ;; the group the FRAME stands in. Switching sets it; a detour through
 ;; an ungrouped buffer (scratch, help) does not lose it. The buffer's

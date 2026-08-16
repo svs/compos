@@ -1885,10 +1885,10 @@
   "Switch to a buffer or a group; groups restore their window layout"
   (lambda ()
     (let* ((here (or (window-buffer (active-window)) (current-buffer)))
-           (my-group (buffer-group here))
+           (my-group (or (frame-local 'current-group) (buffer-group here)))
            ;; opening the switcher snapshots this group's arrangement:
            ;; wherever you go next, the way back is exact
-           (_ (when my-group (group-layout-save! my-group)))
+           (_ (group-layout-save-if-shown! my-group))
            (groups (filter (lambda (g) (not (equal? g my-group))) (group-names)))
            (container-of (lambda (label)
                            (let loop ((gs groups))
@@ -1901,7 +1901,14 @@
            (standing (car (cdr source)))
            (pick (car (cdr (cdr source))))
            (bufs (filter (lambda (c) (not (equal? (car c) standing))) pool))
-           (all (append (map group-container-candidate groups) bufs))
+           ;; history first: the buffer you just left is the default, so
+           ;; RET toggles like the Emacs buffer ring. The containers ride
+           ;; directly under it, then the rest of the recency stream.
+           (all (if (pair? bufs)
+                    (cons (car bufs)
+                          (append (map group-container-candidate groups)
+                                  (cdr bufs)))
+                    (map group-container-candidate groups)))
            (fallback (if (null? all) here (car (car all)))))
       (minibuffer-read-preview
         (string-append "Switch to (default " fallback "): ")
@@ -1915,11 +1922,11 @@
             (cond (g (switch-to-group! g))
                   ((pick picked) #t)
                   ((buffer-exists? picked)
-                   ;; RET on a buffer from ANOTHER group brings that
-                   ;; group's layout up with point in the buffer; the
-                   ;; rest switch in place
+                   ;; a buffer from ANOTHER group means entering that
+                   ;; group: its layout comes up with point in the
+                   ;; buffer. The frame's own group switches in place.
                    (let ((bg (buffer-group picked)))
-                     (if (and bg (not (equal? bg my-group)) (group-layout bg))
+                     (if (and bg (not (equal? bg my-group)))
                          (begin
                            (switch-to-group! bg)
                            (let ((w (window-showing picked)))
@@ -3318,14 +3325,35 @@
         (when w (select-window! w))))))
 
 (define (switch-to-group! g)
-  (let ((from (buffer-group (current-buffer))))
+  (let ((from (frame-group)))
     (when (and from (not (equal? from g)))
-      (group-layout-save! from)))
+      (group-layout-save-if-shown! from)))
+  (set-frame-local! 'current-group g)
   (let ((saved (group-layout g)))
     (if saved
         (window-tree-set! saved)
         (group-default-layout! g)))
   (message (string-append "switched to group " (group-label g))))
+
+;; the group the FRAME stands in. Switching sets it; a detour through
+;; an ungrouped buffer (scratch, help) does not lose it. The buffer's
+;; own group is the fallback for a frame that never switched.
+(define (frame-group)
+  (or (frame-local 'current-group)
+      (buffer-group (current-buffer))))
+
+;; a layout snapshot is only true when the group is on screen: saving
+;; a scratch detour AS the group's arrangement would overwrite the
+;; real one
+(define (group-on-screen? g)
+  (let loop ((ws (window-list)))
+    (cond ((null? ws) #f)
+          ((equal? (buffer-group (car (cdr (car ws)))) g) #t)
+          (else (loop (cdr ws))))))
+
+(define (group-layout-save-if-shown! g)
+  (when (and g (group-on-screen? g))
+    (group-layout-save! g)))
 
 ;; found a group from what is on screen: every window's buffer joins,
 ;; the layout is saved, and the group chat holds the durable state
@@ -3336,6 +3364,7 @@
                   (buffer-set-local! b 'group name))))
             (window-list))
   (group-layout-save! name)
+  (set-frame-local! 'current-group name)
   (message (string-append "founded group " name " from "
              (number->string (length (window-list))) " windows")))
 

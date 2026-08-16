@@ -1972,7 +1972,7 @@ defmodule Aimax.EditorTest do
     assert Editor.current_buffer() == plain
   end
 
-  test "C-x b answers a group as one container; RET switches to it" do
+  test "C-x b is history first: previous buffer defaults, containers ride under it" do
     n = System.unique_integer([:positive])
     m1 = "ct-a-#{n}"
     m2 = "ct-b-#{n}"
@@ -1981,22 +1981,26 @@ defmodule Aimax.EditorTest do
 
     {:ok, _} =
       Aimax.Core.Session.eval("""
-      (begin (switch-to-buffer! "#{m1}")
+      (begin (set-frame-local! 'current-group #f)
+             (delete-other-windows!)
+             (switch-to-buffer! "#{m1}")
              (switch-to-buffer! "#{m2}")
              (buffer-set-local! "#{m1}" 'group "ctgrp-#{n}")
              (buffer-set-local! "#{m2}" 'group "ctgrp-#{n}")
              (switch-to-buffer! "#{home}"))
       """)
 
-    # the container is the first candidate and the default
+    # history first: the previous buffer is the default; the group's
+    # container is the row under it
     press(["C-x", "b"])
     mb = Editor.render_state().minibuffer
     labels = Enum.map(mb.candidates, & &1.label)
-    assert hd(labels) == "[ctgrp-#{n}]"
-    assert mb.prompt =~ "default [ctgrp-#{n}]"
+    assert hd(labels) == m2
+    assert Enum.at(labels, 1) == "[ctgrp-#{n}]"
+    assert mb.prompt =~ "default #{m2}"
 
-    # RET on the container arrives ARRANGED: the two most recent
-    # members side by side, point in the most recent
+    # RET on a buffer of another group ENTERS the group: its layout
+    # comes up (both members) with point in the picked buffer
     press(["RET"])
     assert Editor.current_buffer() == m2
 
@@ -2004,7 +2008,22 @@ defmodule Aimax.EditorTest do
       Editor.list_windows() |> Enum.map(fn {_id, b} -> b end) |> Enum.sort()
 
     assert shown == Enum.sort([m1, m2])
-    {:ok, _} = Aimax.Core.Session.eval("(delete-other-windows!)")
+
+    # the frame now stands in the group; a scratch detour keeps it
+    assert Aimax.Core.Session.eval("(frame-local 'current-group)") ==
+             {:ok, ~s{"ctgrp-#{n}"}}
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(
+        ~s{(begin (switch-to-buffer! "*scratch*") (frame-group))}
+      )
+      |> then(fn {:ok, out} ->
+        assert out == ~s{"ctgrp-#{n}"}
+        {:ok, out}
+      end)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("(begin (set-frame-local! 'current-group #f) (delete-other-windows!))")
   end
 
   test "TAB locks the switcher to the one group the input names" do

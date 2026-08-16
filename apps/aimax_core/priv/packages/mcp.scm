@@ -17,9 +17,9 @@
 ;;;   'headers (list 'Authorization (list "Bearer " "@ATS_ASH_TOKEN"))
 ;;;
 ;;; (define-preset! 'name DESC SERVERS) names a collection; M-x
-;;; chat-load-preset enables it in a chat. The choice lives in the chat's
-;;; 'chat-presets buffer-local, so it persists across restarts with the
-;;; chat itself; servers reconnect lazily on the next send. M-x
+;;; llm-set-preset enables it for an LLM session. The choice currently lives
+;;; in the persisted 'chat-presets buffer-local, so it persists with the
+;;; session itself; servers reconnect lazily on the next send. M-x
 ;;; chat-tool-surface shows which servers the chat's agent holds.
 
 (define *mcp-registry* '())
@@ -93,21 +93,43 @@
                 acc (preset-servers p)))
         '() (chat-presets-of buf)))
 
+;; `aimax` is a preset like every other surface, but its direct-lane tools
+;; already live in this process.  ACP receives the MCP proxy server; the API
+;; lane mounts the same registry natively and sends only the remaining
+;; servers through the MCP client.
+(define (chat-remote-servers buf)
+  (remove (lambda (s) (equal? s 'aimax)) (chat-active-servers buf)))
+
+(define (chat-aimax-tools? buf)
+  (and (member 'aimax (chat-active-servers buf)) #t))
+
 ;; the hook chat-llm-rich pulls at send time: specs are read fresh from
 ;; Elixir, so tools appear the moment a connecting server becomes ready
 (define (chat-extra-tool-specs buf)
-  (let ((servers (chat-active-servers buf)))
-    (if (null? servers)
-        '()
-        (begin
-          (for-each mcp-ensure! servers)
-          (mcp-tool-specs (map symbol->string servers))))))
+  (let ((servers (chat-remote-servers buf)))
+    (append
+      (if (and (chat-aimax-tools? buf) (boundp (quote llm-tool-specs)))
+          (llm-tool-specs)
+          '())
+      (if (null? servers)
+          '()
+          (begin
+            (for-each mcp-ensure! servers)
+            (mcp-tool-specs (map symbol->string servers)))))))
 
-;; which chat does a preset command act on? the current buffer if it is a
-;; chat, else the current buffer's group chat
-(define (chat-preset-target)
+(define (chat-tool-system buf)
+  (let* ((aimax? (chat-aimax-tools? buf))
+         (note (mcp-system-note (chat-remote-servers buf))))
+    (cond ((and aimax? (not (equal? note "")))
+           (string-append *llm-system* "\n\n" note))
+          (aimax? *llm-system*)
+          (else note))))
+
+;; Which LLM surface does a preset command act on? llm-mode owns this
+;; configuration; chat-mode is one UI over it, not the namespace owner.
+(define (llm-preset-target)
   (let ((cur (current-buffer)))
-    (cond ((chat-buffer? cur) cur)
+    (cond ((or (chat-buffer? cur) (minor-mode-on? cur "llm-mode")) cur)
           ((buffer-group cur) (group-chat (buffer-group cur)))
           (else #f))))
 
@@ -153,12 +175,12 @@
   (when (buffer-local buf 'chat-mcp-dirty)
     (chat-reattach-for-presets! buf)))
 
-(define-command "chat-load-preset" "Enable a tool preset (MCP servers) in this chat"
+(define-command "llm-set-preset" "Enable a tool preset (MCP servers) for this LLM session"
   (lambda ()
-    (let ((buf (chat-preset-target)))
+    (let ((buf (llm-preset-target)))
       (if (not buf)
-          (message "No chat here — open one with M-x chat first")
-          (minibuffer-read "Load preset: "
+          (message "No LLM session here — enable llm-mode first")
+          (minibuffer-read "Set LLM preset: "
             (map (lambda (e) (list (symbol->string (car e))
                                    (custom--plist-get (car (cdr e)) 'description)))
                  *chat-presets*)
@@ -171,9 +193,9 @@
                   (for-each mcp-ensure! (preset-servers p))
                   (chat-presets-changed! buf (string-append "Preset " name " on"))))))))))
 
-(define-command "chat-unload-preset" "Disable a tool preset in this chat"
+(define-command "llm-unset-preset" "Disable a tool preset for this LLM session"
   (lambda ()
-    (let ((buf (chat-preset-target)))
+    (let ((buf (llm-preset-target)))
       (if (or (not buf) (null? (chat-presets-of buf)))
           (message "No presets loaded here")
           (minibuffer-read "Unload preset: "
@@ -346,6 +368,8 @@
 (mcp-register! 'aimax
   (list 'command "elixir" 'args (list (priv-path "aimax-mcp-proxy.exs"))))
 
+(define-preset! 'aimax "Live ai-max editor tools" '(aimax))
+
 ;; a plist of string values -> ((NAME VALUE) ...). ACP asks for env and
 ;; headers in this shape, and the two differ only in name. The values are
 ;; literal already: mcp-acp-server resolves the whole spec once.
@@ -398,7 +422,7 @@
 
 (define-command "chat-tool-surface" "Show the MCP servers this chat's agent holds"
   (lambda ()
-    (let ((chat (chat-preset-target)))
+    (let ((chat (llm-preset-target)))
       (if (not chat)
           (message "No chat here — open one with M-x chat first")
           (let ((out "*chat tools*")
@@ -428,12 +452,11 @@
             (buffer-set-read-only! out #t)
             (display-buffer out))))))
 
-;; presets -> an agent session's server list: editor tools always, the
-;; presets' servers on top
+;; presets -> an agent session's entire server list. `aimax` is not special:
+;; callers mount it by selecting the aimax preset.
 (define (presets-acp-servers presets)
   (mcp-acp-servers
-    (cons 'aimax
-          (fold (lambda (acc p)
-                  (fold (lambda (a s) (if (member s a) a (cons s a)))
-                        acc (preset-servers p)))
-                '() presets))))
+    (fold (lambda (acc p)
+            (fold (lambda (a s) (if (member s a) a (cons s a)))
+                  acc (preset-servers p)))
+          '() presets)))

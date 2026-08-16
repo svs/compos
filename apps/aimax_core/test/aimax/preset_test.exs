@@ -84,24 +84,28 @@ defmodule Aimax.PresetTest do
   test "loading a preset on a live ACP chat reattaches; the conversation survives" do
     {slug, buf, agent, first_new} = boot()
 
-    # the fresh session has only the editor's own tool proxy
-    assert servers(first_new) == ["aimax"]
+    # no preset means no tools
+    assert servers(first_new) == []
 
     # give the chat a real conversation to carry across the reconnect
     {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "what is the weather")])
     assert_receive {:frame, %{"method" => "session/prompt", "id" => pid}}, 1_000
 
-    send(agent, {:acp_data, Jason.encode!(%{
-      "jsonrpc" => "2.0",
-      "method" => "session/update",
-      "params" => %{
-        "sessionId" => "sess-1",
-        "update" => %{
-          "sessionUpdate" => "agent_message_chunk",
-          "content" => %{"type" => "text", "text" => "I have no weather tool."}
-        }
-      }
-    }) <> "\n"})
+    send(
+      agent,
+      {:acp_data,
+       Jason.encode!(%{
+         "jsonrpc" => "2.0",
+         "method" => "session/update",
+         "params" => %{
+           "sessionId" => "sess-1",
+           "update" => %{
+             "sessionUpdate" => "agent_message_chunk",
+             "content" => %{"type" => "text", "text" => "I have no weather tool."}
+           }
+         }
+       }) <> "\n"}
+    )
 
     inject(agent, %{"jsonrpc" => "2.0", "id" => pid, "result" => %{"stopReason" => "end_turn"}})
     assert eventually(fn -> Buffer.text(buf) =~ "no weather tool" end)
@@ -109,7 +113,7 @@ defmodule Aimax.PresetTest do
     # load the preset from the real command, and decline the offer to
     # reconnect right now — the change must still not be lost
     {:ok, _} = Session.eval(~s[(switch-to-buffer! "#{buf}")])
-    {:ok, _} = Session.eval(~s[(run-command "chat-load-preset")])
+    {:ok, _} = Session.eval(~s[(run-command "llm-set-preset")])
     type("zz-pack")
     press(["RET"])
     assert eventually(fn -> Editor.snapshot().minibuffer != nil end)
@@ -130,8 +134,7 @@ defmodule Aimax.PresetTest do
     inject(agent2, %{"jsonrpc" => "2.0", "id" => iid2, "result" => %{}})
 
     assert_receive {:frame, %{"method" => "session/new", "id" => nid2, "params" => np2}}, 1_000
-    assert "zz-weather" in servers(np2)
-    assert "aimax" in servers(np2)
+    assert servers(np2) == ["zz-weather"]
 
     inject(agent2, %{"jsonrpc" => "2.0", "id" => nid2, "result" => %{"sessionId" => "sess-2"}})
 
@@ -151,7 +154,7 @@ defmodule Aimax.PresetTest do
     {_slug, buf, _agent, _} = boot()
 
     {:ok, _} = Session.eval(~s[(switch-to-buffer! "#{buf}")])
-    {:ok, _} = Session.eval(~s[(run-command "chat-load-preset")])
+    {:ok, _} = Session.eval(~s[(run-command "llm-set-preset")])
     type("zz-pack")
     press(["RET"])
     assert eventually(fn -> Editor.snapshot().minibuffer != nil end)
@@ -170,7 +173,7 @@ defmodule Aimax.PresetTest do
 
     # unloading takes it away again
     {:ok, _} = Session.eval(~s[(switch-to-buffer! "#{buf}")])
-    {:ok, _} = Session.eval(~s[(run-command "chat-unload-preset")])
+    {:ok, _} = Session.eval(~s[(run-command "llm-unset-preset")])
     type("zz-pack")
     press(["RET"])
     assert eventually(fn -> Editor.snapshot().minibuffer != nil end)
@@ -182,7 +185,7 @@ defmodule Aimax.PresetTest do
     inject(agent3, %{"jsonrpc" => "2.0", "id" => iid3, "result" => %{}})
     assert_receive {:frame, %{"method" => "session/new", "params" => np3}}, 1_000
 
-    assert servers(np3) == ["aimax"]
+    assert servers(np3) == []
     assert Buffer.get_local(buf, "chat-presets") == []
   end
 
@@ -273,7 +276,9 @@ defmodule Aimax.PresetTest do
     assert_receive {:frame, %{"method" => "session/new", "params" => np}}, 1_000
 
     buf = Enum.find(Aimax.Core.list_buffers(), &(Buffer.get_local(&1, "agent-slug") == "a1"))
-    {:ok, _} = Session.eval(~s[(begin (switch-to-buffer! "#{buf}") (run-command "chat-tool-surface"))])
+
+    {:ok, _} =
+      Session.eval(~s[(begin (switch-to-buffer! "#{buf}") (run-command "chat-tool-surface"))])
 
     text = Buffer.text("*chat tools*")
     on_exit(fn -> Aimax.Core.kill_buffer("*chat tools*") end)
@@ -290,7 +295,7 @@ defmodule Aimax.PresetTest do
     buf = "*chat:a1*"
 
     {:ok, _} = Session.eval(~s[(switch-to-buffer! "#{buf}")])
-    {:ok, _} = Session.eval(~s[(run-command "chat-load-preset")])
+    {:ok, _} = Session.eval(~s[(run-command "llm-set-preset")])
     type("zz-pack")
     press(["RET"])
 
@@ -301,10 +306,62 @@ defmodule Aimax.PresetTest do
     refute_received {:transport_open, _}
   end
 
+  test "llm-set-preset targets an ordinary llm-mode buffer" do
+    buf = "zz-llm-preset-#{System.unique_integer([:positive])}"
+    on_exit(fn -> if Buffer.exists?(buf), do: Aimax.Core.kill_buffer(buf) end)
+
+    parent = self()
+
+    Application.put_env(:aimax_core, :llm_chat_fun, fn req ->
+      send(parent, {:llm_mode_request, req})
+
+      {:ok,
+       %{
+         "stop_reason" => "end_turn",
+         "content" => [%{"type" => "text", "text" => "preset-aware reply"}]
+       }}
+    end)
+
+    on_exit(fn -> Application.delete_env(:aimax_core, :llm_chat_fun) end)
+
+    {:ok, _} =
+      Session.eval(
+        ~s[(begin (buffer-create "#{buf}") (switch-to-buffer! "#{buf}") (run-command "llm-mode"))]
+      )
+
+    {:ok, _} = Session.eval(~s[(run-command "llm-set-preset")])
+    type("zz-pack")
+    press(["RET"])
+
+    assert Buffer.get_local(buf, "chat-presets") == [sym: "zz-pack"]
+
+    # The editor toolbox is mounted explicitly, through its own preset.
+    {:ok, _} = Session.eval(~s[(run-command "llm-set-preset")])
+    type("aimax")
+    press(["RET"])
+
+    assert Buffer.get_local(buf, "chat-presets") == [sym: "aimax", sym: "zz-pack"]
+
+    {:ok, _} =
+      Session.eval(
+        ~s[(begin (buffer-set-local! "#{buf}" 'llm-model "openai:zz-writer") (insert! "draft") (run-command "llm-send-buffer"))]
+      )
+
+    assert_receive {:llm_mode_request, req}, 1_000
+    assert req.model == "openai:zz-writer"
+    assert Enum.any?(req.tools, &(&1.name == "eval-scheme"))
+    assert req.system =~ "zz-weather"
+    assert eventually(fn -> Buffer.text(buf) =~ "preset-aware reply" end)
+  end
+
   defp eventually(fun, tries \\ 40) do
     cond do
-      fun.() -> true
-      tries == 0 -> false
+      fun.() ->
+        true
+
+      tries == 0 ->
+        false
+
       true ->
         Process.sleep(50)
         eventually(fun, tries - 1)

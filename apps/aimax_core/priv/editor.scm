@@ -1953,7 +1953,7 @@
   (lambda ()
     (set! *mb-confirm-context* #f)
     (let* ((here (or (window-buffer (active-window)) (current-buffer)))
-           (my-group (or (frame-local 'current-group) (buffer-group here)))
+           (my-group (or (buffer-group here) (frame-local 'current-group)))
            ;; opening the switcher snapshots this group's arrangement:
            ;; wherever you go next, the way back is exact
            (_ (group-layout-save-if-shown! my-group))
@@ -1996,6 +1996,12 @@
                        (buffer-context-switch! picked)
                        (begin
                          (switch-to-buffer! picked)
+                         ;; a plain switch moves no windows, but the
+                         ;; frame's STANDING follows where you are —
+                         ;; leaving must snapshot the group you were
+                         ;; really in
+                         (let ((bg (buffer-group picked)))
+                           (when bg (set-frame-local! 'current-group bg)))
                          (windows-shown-catchup!))))
                   (else
                    ;; nothing matches: RET founds a group named PICKED
@@ -3395,6 +3401,28 @@
       (let ((w (window-showing main)))
         (when w (select-window! w))))))
 
+;; a restored window whose buffer is an empty, unmodified, pathlike
+;; shell — and whose file exists — re-reads from disk. The layout
+;; recreated the NAME; the content lives in the file.
+(define (group-restore-files! g)
+  (let ((back (active-window)))
+    (for-each
+      (lambda (w)
+        (let ((b (car (cdr w))))
+          (when (and (string-prefix? "/" b)
+                     (= (buffer-size b) 0)
+                     (not (buffer-modified? b))
+                     (file-exists? b)
+                     (not (file-directory? b)))
+            (select-window! (car w))
+            (buffer-kill! b)
+            (visit b)
+            ;; the shell lost its locals with its life: membership
+            ;; comes back with the content
+            (buffer-set-local! b 'group g))))
+      (window-list))
+    (when (window-exists? back) (select-window! back))))
+
 (define (switch-to-group! g)
   ;; one winner entry per switch: the arrangement you leave, not the
   ;; intermediate steps of building the next one
@@ -3408,6 +3436,11 @@
     (if saved
         (begin
           (window-tree-set! saved)
+          ;; a layout stores NAMES: a member killed since the snapshot
+          ;; comes back as an empty shell with no locals — re-read its
+          ;; file and restore its membership FIRST, or the validation
+          ;; below sees a group with nothing on screen
+          (group-restore-files! g)
           ;; a snapshot that shows none of the group is not the group's
           ;; layout (a stale capture from before the on-screen guard):
           ;; heal it — build the default and re-save over the bad one
@@ -3509,8 +3542,13 @@
 ;; an ungrouped buffer (scratch, help) does not lose it. The buffer's
 ;; own group is the fallback for a frame that never switched.
 (define (frame-group)
-  (or (frame-local 'current-group)
-      (buffer-group (current-buffer))))
+  ;; the buffer you are IN is the truth when it has a group; the
+  ;; frame-local covers detours through ungrouped buffers. The old
+  ;; precedence went stale: drifting into a group by plain switches
+  ;; left the frame naming some earlier group, so leaving snapshotted
+  ;; the wrong one and "the last arrangement" was never saved.
+  (or (buffer-group (current-buffer))
+      (frame-local 'current-group)))
 
 ;; a layout snapshot is only true when the group is on screen: saving
 ;; a scratch detour AS the group's arrangement would overwrite the

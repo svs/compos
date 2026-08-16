@@ -1,12 +1,19 @@
-;;; writing.scm — writing-mode: distraction-free prose, olivetti-style.
+;;; writing.scm — one writing workspace over ordinary buffers.
 ;;;
-;;; A minor mode (composes with org-mode etc.): centered measure, serif
-;;; prose face, line numbers off, hl-line off, quiet modeline showing a
-;;; live word count + reading time. Everything it changes is saved on
-;;; enable and restored on disable; all of it survives a daemon reload
-;;; via 'minor-modes + restore-minor-modes!.
+;;; The document stays the source of truth. writing-mode turns on its editable
+;;; Markdown preview with visual-line wrapping, loads the writing configuration
+;;; into buffer-locals, and joins the document to a normal buffer group. The
+;;; group supplies the optional companion chat. The editor-wide `C-c s` opens
+;;; the document's ordinary scratch buffer.
+;;;
+;;; The minor mode still supplies the quiet prose presentation and live word
+;;; count. Everything it changes is saved on enable and restored on disable.
+;;; The minor-mode local and the workspace locals survive a daemon reload.
 ;;;
 ;;; M-x writing-mode toggles. Knobs live in the 'writing customize group.
+
+(domain! 'writing)
+(effects! '(write))
 
 (defgroup 'writing "Distraction-free writing.")
 
@@ -37,6 +44,80 @@
 (defcustom 'writing-wpm 220
   "Reading speed (words per minute) behind the modeline's read-time."
   'group 'writing 'type 'number 'set writing--refresh!)
+
+(defcustom 'writing-model ""
+  "Model for writing commands. Empty means the editor's default model."
+  'group 'writing 'type 'string 'set writing--refresh!)
+
+(defcustom 'writing-presets '()
+  "Tool presets enabled whenever writing-mode is active. Set a symbol list such as '(aimax web) in ~/.aimax/ai-config.scm."
+  'group 'writing 'type 'list 'set writing--refresh!)
+
+(defcustom 'writing-instructions
+  (string-append
+    "Help the user write clear prose. Preserve their voice and intent. "
+    "Discuss choices before a large rewrite. Return only requested prose "
+    "when the user asks for finished text.")
+  "Standing instructions for completion, rewrite, and writing chat commands."
+  'group 'writing 'type 'string 'set writing--refresh!)
+
+;;; --- workspace ---------------------------------------------------------------
+
+(define (writing--configured-presets buf)
+  ;; Rebuild from the pre-writing value on every refresh.  That makes removing
+  ;; a preset from writing-presets take effect immediately instead of leaving
+  ;; behind the value installed by the previous refresh.
+  (let ((base (or (writing--saved buf 'chat-presets) '())))
+    (append writing-presets
+            (filter (lambda (preset) (not (member preset writing-presets)))
+                    base))))
+
+(define (writing--workspace! buf)
+  (let ((group (group-ensure! buf)))
+    (buffer-set-local! buf 'group group)
+    (buffer-set-local! buf 'writing-model writing-model)
+    (buffer-set-local! buf 'chat-presets (writing--configured-presets buf))
+    (buffer-set-local! buf 'writing-instructions writing-instructions)
+    group))
+
+(define (writing--select! mover)
+  (unless (mark) (set-mark! (point)))
+  (mover))
+
+(define-command "writing-select-backward" "Extend the region one character left"
+  (lambda () (writing--select! backward-char!)))
+
+(define-command "writing-select-forward" "Extend the region one character right"
+  (lambda () (writing--select! forward-char!)))
+
+(define-command "writing-select-backward-word" "Extend the region one word left"
+  (lambda () (writing--select! backward-word!)))
+
+(define-command "writing-select-forward-word" "Extend the region one word right"
+  (lambda () (writing--select! forward-word!)))
+
+(define-command "writing-select-up" "Extend the region one visual line up"
+  (lambda () (writing--select! previous-line!)))
+
+(define-command "writing-select-down" "Extend the region one visual line down"
+  (lambda () (writing--select! next-line!)))
+
+(define-command "writing-select-line-start" "Extend the region to the start of the line"
+  (lambda () (writing--select! beginning-of-line!)))
+
+(define-command "writing-select-line-end" "Extend the region to the end of the line"
+  (lambda () (writing--select! end-of-line!)))
+
+(define-command "writing-select-buffer-start" "Extend the region to the start of the buffer"
+  (lambda () (writing--select! beginning-of-buffer!)))
+
+(define-command "writing-select-buffer-end" "Extend the region to the end of the buffer"
+  (lambda () (writing--select! end-of-buffer!)))
+
+(define-command "writing-select-all" "Select the entire buffer"
+  (lambda ()
+    (set-mark! 0)
+    (end-of-buffer!)))
 
 ;;; --- word count ---------------------------------------------------------------
 
@@ -86,7 +167,26 @@
     (buffer-set-local! buf 'writing-saved
       (list (list 'face-remap (or (buffer-local buf 'face-remap) '()))
             (list 'style (or (buffer-local buf 'style) #f))
-            (list 'line-numbers (or (buffer-local buf 'line-numbers) #f)))))
+            (list 'line-numbers (or (buffer-local buf 'line-numbers) #f))
+            (list 'render-mode (or (buffer-local buf 'render-mode) #f))
+            (list 'preview-renderer (or (buffer-local buf 'preview-renderer) #f))
+            (list 'visual-line-mode (or (buffer-local buf 'visual-line-mode) #f))
+            (list 'group (or (buffer-local buf 'group) #f))
+            (list 'writing-model (or (buffer-local buf 'writing-model) #f))
+            (list 'chat-presets (or (buffer-local buf 'chat-presets) #f))
+            (list 'llm-mode-on (minor-mode-on? buf "llm-mode"))
+            (list 'writing-instructions
+                  (or (buffer-local buf 'writing-instructions) #f)))))
+  (writing--workspace! buf)
+  ;; Writing mode supplies the prose workspace; llm-mode owns in-buffer
+  ;; prompting and the presentation of generated response ranges.
+  (enable-minor-mode! buf "llm-mode")
+  ;; The preview is the writing surface. Markdown remains the buffer text,
+  ;; so every ordinary edit, save, undo, and future narrowing command keeps
+  ;; its normal editor semantics.
+  (buffer-set-local! buf 'preview-renderer "markdown")
+  (buffer-set-local! buf 'render-mode "markdown")
+  (buffer-set-local! buf 'visual-line-mode #t)
   (face-remap-in! buf 'default
     (list 'family writing-font-family
           'size writing-font-size
@@ -96,6 +196,32 @@
   (face-remap-in! buf 'writing (list 'measure writing-measure))
   (buffer-set-local! buf 'line-numbers "off")
   (buffer-set-local! buf 'window-class "writing")
+  (local-set-key* buf "S-<left>" "writing-select-backward")
+  (local-set-key* buf "S-<right>" "writing-select-forward")
+  (local-set-key* buf "S-<up>" "writing-select-up")
+  (local-set-key* buf "S-<down>" "writing-select-down")
+  (local-set-key* buf "M-<left>" "backward-word")
+  (local-set-key* buf "M-<right>" "forward-word")
+  (local-set-key* buf "M-S-<left>" "writing-select-backward-word")
+  (local-set-key* buf "M-S-<right>" "writing-select-forward-word")
+  ;; Platform-native prose movement. In Markdown preview the browser refines
+  ;; line boundaries to the visual row; the Scheme commands are the logical
+  ;; fallback used by the plain scratch buffer.
+  (local-set-key* buf "s-<left>" "beginning-of-line")
+  (local-set-key* buf "s-<right>" "end-of-line")
+  (local-set-key* buf "s-<up>" "beginning-of-buffer")
+  (local-set-key* buf "s-<down>" "end-of-buffer")
+  (local-set-key* buf "s-S-<left>" "writing-select-line-start")
+  (local-set-key* buf "s-S-<right>" "writing-select-line-end")
+  (local-set-key* buf "s-S-<up>" "writing-select-buffer-start")
+  (local-set-key* buf "s-S-<down>" "writing-select-buffer-end")
+  (local-set-key* buf "S-<home>" "writing-select-line-start")
+  (local-set-key* buf "S-<end>" "writing-select-line-end")
+  (local-set-key* buf "C-S-<left>" "writing-select-backward-word")
+  (local-set-key* buf "C-S-<right>" "writing-select-forward-word")
+  (local-set-key* buf "C-S-<home>" "writing-select-buffer-start")
+  (local-set-key* buf "C-S-<end>" "writing-select-buffer-end")
+  (local-set-key* buf "s-a" "writing-select-all")
   (writing--ensure-hook! buf)
   (writing--update-count! buf))
 
@@ -104,8 +230,41 @@
   (buffer-set-local! buf 'face-remap (or (writing--saved buf 'face-remap) '()))
   (buffer-set-local! buf 'style (writing--saved buf 'style))
   (buffer-set-local! buf 'line-numbers (writing--saved buf 'line-numbers))
+  (buffer-set-local! buf 'render-mode (writing--saved buf 'render-mode))
+  (buffer-set-local! buf 'preview-renderer (writing--saved buf 'preview-renderer))
+  (buffer-set-local! buf 'visual-line-mode (writing--saved buf 'visual-line-mode))
+  (buffer-set-local! buf 'group (writing--saved buf 'group))
+  (buffer-set-local! buf 'writing-model (writing--saved buf 'writing-model))
+  (buffer-set-local! buf 'chat-presets (writing--saved buf 'chat-presets))
+  (buffer-set-local! buf 'writing-instructions
+    (writing--saved buf 'writing-instructions))
   (buffer-set-local! buf 'window-class #f)
   (buffer-set-local! buf 'modeline-info #f)
+  (local-unset-key* buf "S-<left>")
+  (local-unset-key* buf "S-<right>")
+  (local-unset-key* buf "S-<up>")
+  (local-unset-key* buf "S-<down>")
+  (local-unset-key* buf "M-<left>")
+  (local-unset-key* buf "M-<right>")
+  (local-unset-key* buf "M-S-<left>")
+  (local-unset-key* buf "M-S-<right>")
+  (local-unset-key* buf "s-<left>")
+  (local-unset-key* buf "s-<right>")
+  (local-unset-key* buf "s-<up>")
+  (local-unset-key* buf "s-<down>")
+  (local-unset-key* buf "s-S-<left>")
+  (local-unset-key* buf "s-S-<right>")
+  (local-unset-key* buf "s-S-<up>")
+  (local-unset-key* buf "s-S-<down>")
+  (local-unset-key* buf "S-<home>")
+  (local-unset-key* buf "S-<end>")
+  (local-unset-key* buf "C-S-<left>")
+  (local-unset-key* buf "C-S-<right>")
+  (local-unset-key* buf "C-S-<home>")
+  (local-unset-key* buf "C-S-<end>")
+  (local-unset-key* buf "s-a")
+  (unless (writing--saved buf 'llm-mode-on)
+    (disable-minor-mode! buf "llm-mode"))
   (buffer-set-local! buf 'writing-saved #f))
 
 (register-minor-mode! "writing-mode" writing--apply! writing--teardown!)
@@ -116,6 +275,11 @@
         (message "Writing mode enabled")
         (message "Writing mode disabled"))))
 
+(mode-doc! "writing-mode"
+  "An editable Markdown writing workspace. `C-c s` toggles its scratch buffer, and `C-c w` opens the optional companion chat.")
+
+(effects! '(read))
+
 (define-command "count-words" "Display the number of words in the buffer"
   (lambda ()
     (message (string-append "Buffer has "
@@ -123,7 +287,6 @@
                             " words"))))
 
 (category! 'writing)
-;; the rest of this file is writing-- internals; the surface is its two
-;; M-x commands, which apropos searches with their docstrings
+;; the rest of this file is writing-- internals; the surface is its commands,
+;; which apropos searches with their docstrings
 (public! 'count-words "(count-words BUF) — how many words a buffer holds")
-

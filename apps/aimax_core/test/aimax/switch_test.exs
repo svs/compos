@@ -146,7 +146,7 @@ defmodule Aimax.SwitchTest do
 
     # presets came along: the new session gets their servers
     names = Enum.map(np["mcpServers"] || [], & &1["name"])
-    assert "zz-sw" in names and "aimax" in names
+    assert names == ["zz-sw"]
 
     # the conversation carried over: the first prompt seeds it
     focus(buf)
@@ -247,14 +247,19 @@ defmodule Aimax.SwitchTest do
 
     # the transcript is one continuous conversation
     {:ok, roles} = Session.eval(~s{(map car (reverse (chat-turns "#{buf}")))})
+
     assert roles ==
              ~s{("user" "assistant" "user" "assistant" "user" "assistant" "user" "assistant")}
   end
 
   defp eventually(fun, tries \\ 40) do
     cond do
-      fun.() -> true
-      tries == 0 -> false
+      fun.() ->
+        true
+
+      tries == 0 ->
+        false
+
       true ->
         Process.sleep(50)
         eventually(fun, tries - 1)

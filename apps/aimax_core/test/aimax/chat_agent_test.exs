@@ -39,8 +39,12 @@ defmodule Aimax.ChatAgentTest do
 
   defp wait_until(fun, tries \\ 200) do
     cond do
-      fun.() -> :ok
-      tries == 0 -> flunk("condition never became true")
+      fun.() ->
+        :ok
+
+      tries == 0 ->
+        flunk("condition never became true")
+
       true ->
         Process.sleep(20)
         wait_until(fun, tries - 1)
@@ -88,22 +92,15 @@ defmodule Aimax.ChatAgentTest do
     %{"params" => %{"mcpServers" => servers}} = handshake(agent)
 
     names = Enum.map(servers, & &1["name"])
-    assert "aimax" in names
+    refute "aimax" in names
     assert "zzsrv" in names
-
-    aimax = Enum.find(servers, &(&1["name"] == "aimax"))
-    assert aimax["command"] == "elixir"
-    assert [path] = aimax["args"]
-    assert String.ends_with?(path, "aimax-mcp-proxy.exs")
 
     # "@" env refs resolved at the boundary, not stored anywhere
     zz = Enum.find(servers, &(&1["name"] == "zzsrv"))
     assert %{"name" => "K", "value" => "sekrit"} in zz["env"]
 
-    # every stdio server learns which thread spawned it — the aimax proxy
-    # sends it back as the edit author
+    # every selected stdio server learns which thread spawned it
     assert %{"name" => "AIMAX_AGENT", "value" => slug} in zz["env"]
-    assert %{"name" => "AIMAX_AGENT", "value" => slug} in aimax["env"]
 
     # the thread is bound to the chat buffer, not a *agent:* buffer
     assert eval!("(agent-buf \"#{slug}\")") == ~s{"*zz-uchat*"}
@@ -129,7 +126,10 @@ defmodule Aimax.ChatAgentTest do
       method: "session/update",
       params: %{
         sessionId: "s1",
-        update: %{sessionUpdate: "agent_message_chunk", content: %{type: "text", text: "sub-powered reply"}}
+        update: %{
+          sessionUpdate: "agent_message_chunk",
+          content: %{type: "text", text: "sub-powered reply"}
+        }
       }
     })
 

@@ -527,12 +527,28 @@ defmodule Aimax.Core.Session do
 
         :void
       end,
+      "llm-with-model" => fn [prompt, model, callback] ->
+        key = {:llm, make_ref()}
+        :ets.insert(@escaped, {key, callback})
+
+        Aimax.Core.LLM.complete(prompt, to_string(model), fn text ->
+          try do
+            apply_callback(callback, [text])
+          after
+            :ets.delete(@escaped, key)
+          end
+        end)
+
+        :void
+      end,
       # gptel-style native tool use: specs/dispatcher come from the Scheme
       # registry (packages/tools.scm) — the loop lives in LLM.complete_tools.
       # An optional sixth arg is a usage callback: it gets a plist of summed
-      # token counts + cost before the text callback fires.
+      # token counts + cost before the text callback fires.  A seventh arg
+      # pins the model for buffer-local callers such as llm-mode.
       "llm-tools" => fn [prompt, system, specs, dispatcher, callback | rest] ->
         usage_cb = List.first(rest)
+        requested_model = Enum.at(rest, 1)
         key = {:llm_tools, make_ref()}
         :ets.insert(@escaped, {key, [dispatcher, callback, usage_cb]})
 
@@ -552,7 +568,8 @@ defmodule Aimax.Core.Session do
               :ets.delete(@escaped, key)
             end
           end,
-          on_usage: on_usage
+          on_usage: on_usage,
+          model: requested_model && to_string(requested_model)
         )
 
         :void

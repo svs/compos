@@ -13,7 +13,7 @@ defmodule Aimax.Core.KeyDispatch do
 
   alias Aimax.Core.{Buffer, Editor, Frame, Session}
 
-  @named ~w(RET DEL TAB SPC ESC <left> <right> <up> <down> <home> <end>)
+  @named ~w(RET DEL TAB SPC ESC <delete> <left> <right> <up> <down> <home> <end>)
 
   @doc """
   Dispatch a key for a frame: stamps the frame context so every Editor and

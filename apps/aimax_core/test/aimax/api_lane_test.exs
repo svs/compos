@@ -81,7 +81,9 @@ defmodule Aimax.ApiLaneTest do
       end
     end)
 
-    {:ok, _} = Session.eval(~s{(execute* "what is 20+22" '(connector "api"))})
+    {:ok, _} =
+      Session.eval(~s{(execute* "what is 20+22" '(connector "api" presets (aimax)))})
+
     buf = "*chat:a1*"
 
     assert eventually(fn -> Buffer.text(buf) =~ "All set." end)
@@ -244,8 +246,12 @@ defmodule Aimax.ApiLaneTest do
 
   defp eventually(fun, tries \\ 40) do
     cond do
-      fun.() -> true
-      tries == 0 -> false
+      fun.() ->
+        true
+
+      tries == 0 ->
+        false
+
       true ->
         Process.sleep(50)
         eventually(fun, tries - 1)

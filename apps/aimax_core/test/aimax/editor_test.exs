@@ -2006,7 +2006,9 @@ defmodule Aimax.EditorTest do
     press(["RET"])
     assert Editor.current_buffer() == m2
     assert length(Editor.list_windows()) == 1
-    assert Aimax.Core.Session.eval("(frame-local 'current-group)") == {:ok, "#f"}
+    # a plain switch moves no windows, but the standing follows
+    assert Aimax.Core.Session.eval("(frame-local 'current-group)") ==
+             {:ok, ~s{"ctgrp-#{n}"}}
 
     # C-RET is the CONTEXT switch: the group's layout comes up with
     # point in the picked buffer, and the frame enters the group.
@@ -2515,7 +2517,39 @@ defmodule Aimax.EditorTest do
     assert out == ~s{(#t "#{m}")}
 
     {:ok, _} =
-      Aimax.Core.Session.eval("(begin (set-frame-local! 'current-group #f) (delete-other-windows!))")
+      Aimax.Core.Session.eval(
+        "(begin (set-frame-local! 'current-group #f) (delete-other-windows!))"
+      )
+  end
+
+  test "a killed file member comes back with content, not an empty shell" do
+    n = System.unique_integer([:positive])
+    f = Path.join(System.tmp_dir!(), "gs-#{n}.txt")
+    File.write!(f, "the real content")
+    on_exit(fn -> File.rm(f) end)
+    home = "gs-home-#{n}"
+    Aimax.Core.create_buffer(home)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (set-frame-local! 'current-group #f)
+             (delete-other-windows!)
+             (visit "#{f}")
+             (buffer-set-local! "#{f}" 'group "gsgrp-#{n}")
+             (group-layout-save! "gsgrp-#{n}")
+             (switch-to-buffer! "#{home}")
+             (buffer-kill! "#{f}")
+             (switch-to-group! "gsgrp-#{n}")
+             #t)
+      """)
+
+    assert Editor.current_buffer() == f
+    assert Aimax.Core.Buffer.text(f) == "the real content"
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(
+        ~s{(begin (buffer-kill! "#{f}") (set-frame-local! 'current-group #f) (delete-other-windows!))}
+      )
   end
 
   test "a group's layout survives leave and restore" do

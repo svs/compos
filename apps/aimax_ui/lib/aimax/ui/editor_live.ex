@@ -304,15 +304,19 @@ defmodule Aimax.Ui.EditorLive do
   end
 
   # preview buffers skip the line machinery entirely; the theme is baked into
-  # the srcdoc (the sandboxed iframe can't see the parent's CSS vars)
+  # the srcdoc (the sandboxed iframe can't see the parent's CSS vars).
+  # markdown keys on point too: the preview is editable, so the reader must
+  # see where the next keystroke lands. html does not — an authored
+  # document gets no marker injected into it.
   defp decorate(%{type: :leaf, render_mode: rm} = leaf, cache, faces)
        when rm in ["html", "markdown"] do
-    key = {leaf.buffer, leaf.version, rm, leaf.preview_authored, :erlang.phash2(faces)}
+    pt = if rm == "markdown", do: leaf.point, else: 0
+    key = {leaf.buffer, leaf.version, rm, leaf.preview_authored, :erlang.phash2(faces), pt}
 
     html =
       case cache[{:preview, leaf.id}] do
         {^key, html} -> html
-        _ -> preview_html(rm, leaf.text, faces, leaf.preview_authored)
+        _ -> preview_doc(rm, leaf.text, pt, faces, leaf.preview_authored)
       end
 
     {Map.merge(leaf, %{lines: [], preview: html}),
@@ -754,6 +758,7 @@ defmodule Aimax.Ui.EditorLive do
           phx-hook="PreviewScroll"
           data-win={@node.id}
           data-ctop={@node.ctop}
+          data-pt={@node.point}
           sandbox="allow-same-origin"
           srcdoc={@node.preview}
           title={@node.buffer}
@@ -790,6 +795,7 @@ defmodule Aimax.Ui.EditorLive do
         <span class="name">{@node.buffer}</span>
         <span :if={@node.group} class="ml-group">⊞ {@node.group}</span>
         <span class="ml-mode">{@node.mode}</span>
+        <span :if={@node.render_mode in ["html", "markdown"]} class="ml-mode">preview</span>
         <span
           :if={@node.modeline_info}
           class="ml-mode"
@@ -1046,6 +1052,25 @@ defmodule Aimax.Ui.EditorLive do
     %{queued: queued, pre: pre, cur: cur, post: post}
   end
 
+  # The cursor in a markdown preview: a private-use sentinel goes into the
+  # source at POINT, rides through Earmark as plain text, and comes out as
+  # the .pt span. If point sits inside markdown syntax the one construct
+  # can render off for a moment; the sandbox runs no scripts, so a mangled
+  # span is a display blemish and nothing more.
+  @pt_sentinel "\uE000"
+
+  @doc false
+  def preview_doc("markdown", text, point, faces, authored) do
+    p = point |> max(0) |> min(byte_size(text))
+
+    marked =
+      binary_part(text, 0, p) <> @pt_sentinel <> binary_part(text, p, byte_size(text) - p)
+
+    preview_html("markdown", marked, faces, authored)
+  end
+
+  def preview_doc(rm, text, _point, faces, authored), do: preview_html(rm, text, faces, authored)
+
   defp preview_html("html", text, _faces, true), do: text
 
   # shr-style theming (Emacs eww): authored LAYOUT and typography survive,
@@ -1073,10 +1098,13 @@ defmodule Aimax.Ui.EditorLive do
 
   defp preview_html("markdown", text, faces, _authored) do
     body =
-      case Earmark.as_html(text, compact_output: false) do
+      text
+      |> Earmark.as_html(compact_output: false)
+      |> case do
         {:ok, html, _} -> html
         {:error, html, _} -> html
       end
+      |> String.replace(@pt_sentinel, ~s(<span class="pt"></span>))
 
     %{bg: bg, fg: fg, accent: accent, dim: dim, border: border, inset: inset} =
       preview_palette(faces)
@@ -1096,6 +1124,9 @@ defmodule Aimax.Ui.EditorLive do
     table{border-collapse:collapse;font-size:14px}th,td{border:1px solid #{border};padding:5px 9px}
     th{background:#{inset};text-align:left}
     img{max-width:100%}hr{border:0;border-top:1px solid #{border};margin:22px 0}
+    .pt{display:inline-block;width:2px;height:1.05em;margin:0 -1px;vertical-align:-0.18em;
+        background:#{accent};animation:ptb 1.1s step-end infinite}
+    @keyframes ptb{0%,49%{opacity:1}50%,100%{opacity:0}}
     </style></head><body>#{body}</body></html>
     """
   end

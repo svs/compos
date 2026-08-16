@@ -541,6 +541,9 @@ defmodule Aimax.Ui.Layouts do
             // the same way a line window's does.
             PreviewScroll: {
               mounted() {
+                // seed lastPt so a restored offset wins on mount: the
+                // cursor pulls the view only when point MOVES after that
+                this.lastPt = this.el.dataset.pt;
                 this.onLoad = () => this.attach();
                 this.el.addEventListener("load", this.onLoad);
                 this.attach();
@@ -565,6 +568,19 @@ defmodule Aimax.Ui.Layouts do
                 // a 2px slack stops the applied value from fighting the
                 // wheel report that follows it
                 if (Math.abs(s.scrollTop - want) > 2) s.scrollTop = want;
+                this.follow();
+              },
+              // an edit in a markdown preview lands at point, and the
+              // rendered page shows point as the .pt span. When point
+              // moved, bring the span into view; a wheel scroll or a
+              // restored offset stays where the reader put it.
+              follow() {
+                const pt = this.el.dataset.pt;
+                if (pt === undefined || pt === this.lastPt) return;
+                this.lastPt = pt;
+                const d = this.doc();
+                const el = d && d.querySelector(".pt");
+                if (el) el.scrollIntoView({ block: "nearest" });
               },
               attach() {
                 const d = this.doc();

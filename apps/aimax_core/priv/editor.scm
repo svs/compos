@@ -556,9 +556,24 @@
 ;; highlight move, ON-CONFIRM with the choice, ON-CANCEL on C-g (restore
 ;; whatever the preview displaced there). All three run against the
 ;; invoking buffer, not the minibuffer's — see with-invoking-buffer.
+;; one interaction model: a prompt WITH candidates opens as the
+;; centered palette; a prompt with no candidates is a line input and
+;; keeps the bottom bar. Every wrapper below applies this rule.
+(define (prompt-style cands style)
+  (if style style (if (pair? cands) "palette" #f)))
+
+;; the builtin reads (prompt cands confirm) or (prompt cands complete
+;; confirm); this wrapper keeps both shapes and adds the palette rule
+(define (minibuffer-read prompt cands a &optional b)
+  (minibuffer-read* prompt cands
+    (append
+      (list (list 'confirm (if b b a)))
+      (if b (list (list 'complete a)) '())
+      (list (list 'style (prompt-style cands #f))))))
+
 ;; MATCH-HINT also matches what you type against the marginalia beside
 ;; each candidate: #t means the first field, an integer N the first N.
-;; STYLE picks the presentation: "palette" renders a centered panel.
+;; STYLE picks the presentation; unset, the palette rule decides.
 (define (minibuffer-read-preview prompt cands on-select on-confirm on-cancel
                                  &optional match-hint style)
   (set! *mb-select-fn* (lambda (sel) (with-invoking-buffer (lambda () (on-select sel)))))
@@ -571,7 +586,7 @@
                             (with-invoking-buffer on-cancel)))
           (list 'change  (lambda (input) (mb-select-notify!)))
           (list 'match-hint (if match-hint match-hint #f))
-          (list 'style (if style style #f)))))
+          (list 'style (prompt-style cands style)))))
 
 (let ((mb (minibuffer-buffer)))
   (local-set-key* mb "RET" "minibuffer-confirm")
@@ -1623,12 +1638,14 @@
 (define (read-file-name prompt k)
   (let ((dd (default-directory)))
     (set! *file-nav-dir* dd)
-    (minibuffer-read* prompt (file-candidates dd (list-dir dd))
-      (list (list 'complete file-complete)
-            (list 'change file-nav-change)
-            (list 'initial dd)
-            (list 'match-hint #t)
-            (list 'confirm k)))))
+    (let ((cands (file-candidates dd (list-dir dd))))
+      (minibuffer-read* prompt cands
+        (list (list 'complete file-complete)
+              (list 'change file-nav-change)
+              (list 'initial dd)
+              (list 'match-hint #t)
+              (list 'style (prompt-style cands #f))
+              (list 'confirm k))))))
 
 ;;; --- remote files (/ssh:host:/path — TRAMP-lite) ---------------------------
 ;;; Transport is two primitives (remote-read / remote-write; ssh underneath,
@@ -1753,8 +1770,18 @@
         (auto-mode path)
         (run-hooks 'find-file-hook)))))
 
+;; files open in the current group: visit PATH, then join GROUP — but a
+;; buffer that already belongs somewhere stays where it is. Raw (visit)
+;; keeps no group policy, so desktop restore stays clean.
+(define (visit-in-group path g)
+  (visit path)
+  (when (and g (not (buffer-group (current-buffer))))
+    (buffer-set-local! (current-buffer) 'group g)))
+
 (define-command "find-file" "Visit a file, prompting with filename completion"
-  (lambda () (read-file-name "Find file: " visit)))
+  (lambda ()
+    (let ((g (buffer-group (current-buffer))))
+      (read-file-name "Find file: " (lambda (p) (visit-in-group p g))))))
 
 ;; the project a buffer belongs to, as a short name for the prompt.
 ;; project.scm supplies the real answer through this seam (dup #6);
@@ -1770,7 +1797,12 @@
     (list (or (buffer-local b 'mode-name) "Fundamental")
           (group-label (buffer-group b))
           (buffer-project-label b)
-          (or (buffer-path b) ""))))
+          ;; a chat has no file: its last column is the group's
+          ;; metadata, so the group says what it is for
+          (or (buffer-path b)
+              (and (chat-buffer? b) (buffer-group b)
+                   (group-meta (buffer-group b)))
+              ""))))
 
 ;; ONE candidate shape for every buffer prompt (dup #6): the name, the
 ;; marginalia annotator supplies the rest. Everything related to the
@@ -2870,8 +2902,8 @@
 ;; 'render-mode is the chat's chosen VIEW ("agent" rich, "plain" text) —
 ;; a choice about the chat, so identity (S11)
 (define chat-identity-locals
-  '(group agent-connector agent-model chat-presets chat-permission-mode
-    render-mode default-directory))
+  '(group group-meta agent-connector agent-model chat-presets
+    chat-permission-mode render-mode default-directory))
 
 ;; what was SAID — survives restart and save; reset clears it
 ;; ('chat-turns is the pre-record shape: chat-record-migrate! reads it once
@@ -3160,6 +3192,41 @@
       (car (reverse (string-split g "/")))
       ""))
 
+;; a group's metadata lives on its chat buffer: the chat is the group's
+;; durable surface, so 'group-meta rides chat-identity-locals and
+;; survives reset, restart, and save
+(define (group-meta g)
+  (let* ((chats (filter chat-buffer? (group-buffers-mru g)))
+         ;; a chat made by group-chat but never shown has no mode yet:
+         ;; fall back to the group's chat buffer by name
+         (holder (if (pair? chats)
+                     (car chats)
+                     (let ((buf (group-chat-name g)))
+                       (and (buffer-exists? buf) buf)))))
+    (and holder (buffer-local holder 'group-meta))))
+
+(define (group-meta-set! g text)
+  (buffer-set-local! (group-chat g) 'group-meta text))
+
+;; C-c d from a grouped buffer: the LLM reads the member list and
+;; writes one sentence of metadata for the group
+(define-command "group-describe"
+  "Ask the LLM to write this group's description"
+  (lambda ()
+    (let ((g (buffer-group (current-buffer))))
+      (if (not g)
+          (message "Not in a group")
+          (begin
+            (message "LLM writing group description...")
+            (llm (string-append
+                   "These buffers form one working group in an editor.\n"
+                   "Write one sentence that says what the group is for.\n"
+                   "Return ONLY the sentence.\n\n"
+                   (string-join (group-buffers-mru g) "\n"))
+                 (lambda (text)
+                   (group-meta-set! g (string-trim text))
+                   (message (string-append g ": " (string-trim text))))))))))
+
 (define (group-buffers g)
   (filter (lambda (b) (equal? (buffer-group b) g)) (buffer-list)))
 
@@ -3296,7 +3363,9 @@
     (let ((g (buffer-group (current-buffer))))
       (if g
           (message (string-append g ": "
-                     (string-join (group-buffers-mru g) " · ")))
+                     (string-join (group-buffers-mru g) " · ")
+                     (let ((m (group-meta g)))
+                       (if m (string-append " — " m) ""))))
           (message "Not in a group")))))
 
 ;; make an existing conversation a group's chat: pick a buffer, join its
@@ -3433,6 +3502,7 @@
 (global-set-key "C-c q" "llm-ask")
 (global-set-key "C-c w" "chat-companion")
 (global-set-key "C-c g" "group-add")
+(global-set-key "C-c d" "group-describe")
 (global-set-key "C-c RET" "chat-companion-ask")
 
 ;;; --- minibuffer history (vertico-style: last-used first) --------------------

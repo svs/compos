@@ -174,13 +174,14 @@
 
 (define (project-find-file-in root)
   (project-remember! root)
-  (minibuffer-read (string-append "Find file in " (project-name root) ": ")
-    (project-file-candidates root)
-    (lambda (f)
-      (if (equal? f ".")
-          (dired-open root)
-          ;; visit shows an open buffer as it is — same call for both
-          (visit (string-append root "/" f))))))
+  (let ((g (buffer-group (current-buffer))))
+    (minibuffer-read (string-append "Find file in " (project-name root) ": ")
+      (project-file-candidates root)
+      (lambda (f)
+        (if (equal? f ".")
+            (dired-open root)
+            ;; the file opens in the current group, like find-file
+            (visit-in-group (string-append root "/" f) g))))))
 
 (define-command "project-find-file"
   "Find a file in the current project (git-aware, ignores ignored)"

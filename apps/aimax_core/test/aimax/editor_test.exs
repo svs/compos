@@ -2004,14 +2004,57 @@ defmodule Aimax.EditorTest do
     assert Editor.current_buffer() == mate
   end
 
-  test "C-x b opens as a centered palette" do
+  test "prompts with candidates open as a centered palette; line inputs do not" do
     press(["C-x", "b"])
     assert Editor.render_state().minibuffer.style == "palette"
     press(["C-g"])
-    # other prompts keep the bottom panel
+    # M-x completes over commands, so it is a palette too
     press(["M-x"])
+    assert Editor.render_state().minibuffer.style == "palette"
+    press(["C-g"])
+    # eval-expression has no candidates: it keeps the bottom bar
+    press(["M-:"])
     assert Editor.render_state().minibuffer.style in [nil, false]
     press(["C-g"])
+  end
+
+  test "find-file opens the file into the current group" do
+    n = System.unique_integer([:positive])
+    f = Path.join(System.tmp_dir!(), "gf-#{n}.txt")
+    File.write!(f, "hello")
+    on_exit(fn -> File.rm(f) end)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (buffer-create "gf-home-#{n}")
+             (switch-to-buffer! "gf-home-#{n}")
+             (buffer-set-local! "gf-home-#{n}" 'group "gf-grp-#{n}")
+             (visit-in-group "#{f}" (buffer-group (current-buffer))))
+      """)
+
+    assert Aimax.Core.Session.eval(~s{(buffer-group "#{f}")}) == {:ok, ~s{"gf-grp-#{n}"}}
+  end
+
+  test "group metadata lives on the group chat and survives identity" do
+    n = System.unique_integer([:positive])
+    b = "gm-#{n}"
+    Aimax.Core.create_buffer(b)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (switch-to-buffer! "#{b}")
+             (buffer-set-local! "#{b}" 'group "gm-grp-#{n}")
+             (group-meta-set! "gm-grp-#{n}" "the demo group"))
+      """)
+
+    assert {:ok, ~s{"the demo group"}} =
+             Aimax.Core.Session.eval(~s{(group-meta "gm-grp-#{n}")})
+
+    # the standing rule: a chat local belongs to exactly one list
+    assert {:ok, out} =
+             Aimax.Core.Session.eval(~s{(if (member 'group-meta chat-identity-locals) #t #f)})
+
+    assert out == "#t"
   end
 
   test "C-x b ranks same-project buffers above the rest" do

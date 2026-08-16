@@ -99,7 +99,39 @@ defmodule Aimax.HelpTest do
                     (apropos-page "zz-apr"))})
 
     text = Buffer.text("*Help*")
-    assert text =~ "| command | `zz-apr` | `M-x` | First line. Second \\| line. |"
+    assert text =~
+             "| command | `zz-apr` | `M-x` | user | unknown | First line. Second \\| line. |"
+  end
+
+  test "the component gallery renders every registered example" do
+    eval!(~s{(run-command "component-gallery")})
+
+    assert {:ok, ~s{"blocks"}} =
+             Session.eval(~s{(buffer-local "*Components*" 'render-mode)})
+
+    blocks = eval!(~s{(buffer-local "*Components*" 'render-blocks)})
+    assert blocks =~ "ui/card"
+    assert blocks =~ "c-badge"
+    refute blocks =~ "error"
+  end
+
+  test "M-? names the buffer's group beside its modes" do
+    n = System.unique_integer([:positive])
+    b = "*hg-#{n}*"
+
+    eval!("""
+    (begin (buffer-create "#{b}")
+           (switch-to-buffer! "#{b}")
+           (buffer-set-local! "#{b}" 'group "hg-grp-#{n}")
+           (group-meta-set! "hg-grp-#{n}" "where the help test lives"))
+    """)
+
+    press("M-?")
+    text = Buffer.text("*Help*")
+    assert text =~ "Group: `hg-grp-#{n}`"
+    assert text =~ "where the help test lives"
+    press("q")
+    eval!(~s{(begin (buffer-kill! "#{b}") (buffer-kill! "*chat:hg-grp-#{n}*") #t)})
   end
 
   test "M-? describes the command named at point, with the key that runs it" do

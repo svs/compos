@@ -85,6 +85,18 @@
   (let ((ms (or (buffer-local buf 'minor-modes) '())))
     (if (null? ms) "" (string-append "\nMinor modes: `" (string-join ms "` · `") "`\n"))))
 
+;; the buffer's group, with what the group knows about itself
+(define (help--group-line buf)
+  (let ((g (buffer-group buf)))
+    (if (not g)
+        ""
+        (string-append
+          "\nGroup: `" (group-label g) "` — "
+          (number->string (length (group-buffers g))) " buffers, companion "
+          (group-noise g)
+          (let ((m (group-meta g))) (if m (string-append ". " m) "."))
+          "\n"))))
+
 (define (help--mode-markdown buf mode)
   (let ((doc (mode-doc mode)))
     (string-append
@@ -258,6 +270,7 @@
       (if (buffer-read-only? buf) " Read-only." "")
       "\n"
       (help--minor-modes buf)
+      (help--group-line buf)
       "\n"
       (help--at-point-section name)
       (if doc (string-append "## " mode "\n\n" doc "\n\n") "")

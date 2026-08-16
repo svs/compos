@@ -641,13 +641,42 @@ defmodule Aimax.Ui.EditorLive do
           <div class="mb-label-row">
             {String.trim_trailing(@state.minibuffer.prompt, ": ")} · TAB completes · RET accepts · C-n/C-p selects · C-c C-o collects · C-g quits
           </div>
-          <div class="mb-cands" style={"--mb-label-w: #{@state.minibuffer.label_width}ch"}>
+          <div class="mb-body">
+            <div class="mb-cands" style={"--mb-label-w: #{@state.minibuffer.label_width}ch"}>
+              <%= for c <- @state.minibuffer.candidates do %>
+                <%= if Map.get(c, :kind) == "container" do %>
+                  <div class={"mb-container #{if c.selected, do: "selected"}"}>
+                    <div class="mb-container-head">
+                      <span class="mb-container-dot"></span>
+                      <span class="mb-container-name">{c.label}</span>
+                      <span class="mb-container-action">switch to group</span>
+                      <span class="mb-container-meta">{c.hint}</span>
+                    </div>
+                    <div :if={Map.get(c, :chips, []) != []} class="mb-chips">
+                      <span class="mb-chips-key">buffers</span>
+                      <span :for={w <- Map.get(c, :chips, [])} class="mb-chip">{w}</span>
+                    </div>
+                  </div>
+                <% else %>
+                  <div class={"mb-cand #{if c.selected, do: "selected"}"}>
+                    <span class="mb-label">{c.label}</span>
+                    <span class="mb-hint">{c.hint}</span>
+                  </div>
+                <% end %>
+              <% end %>
+            </div>
             <div
-              :for={c <- @state.minibuffer.candidates}
-              class={"mb-cand #{if c.selected, do: "selected"}"}
+              :if={Map.get(@state.minibuffer, :style) == "palette" && mb_preview(@state.minibuffer)}
+              class="mb-preview"
             >
-              <span class="mb-label">{c.label}</span>
-              <span class="mb-hint">{c.hint}</span>
+              <%= with p <- mb_preview(@state.minibuffer) do %>
+                <div class="mb-preview-title">{p.title}</div>
+                <div :for={{k, v} <- p.facts} class="mb-preview-fact">
+                  <span class="mb-preview-k">{k}</span>
+                  <span class="mb-preview-v">{v}</span>
+                </div>
+                <div class="mb-preview-note">{p.note}</div>
+              <% end %>
             </div>
           </div>
           <div class={"mb-input-row #{if Map.get(@state.minibuffer, :prompt_sel), do: "selected"}"}>
@@ -694,6 +723,48 @@ defmodule Aimax.Ui.EditorLive do
       total > 0 -> "#{sel + 1}/#{total}"
       completing -> "TAB completes"
       true -> "no match"
+    end
+  end
+
+  # the palette's right-hand panel: facts about the highlighted row,
+  # read from the candidate's own columns — no extra state
+  defp mb_preview(mb) do
+    case Enum.find(mb.candidates, &Map.get(&1, :selected)) do
+      nil ->
+        nil
+
+      %{kind: "container"} = c ->
+        chips = Map.get(c, :chips, [])
+
+        %{
+          title: c.label,
+          facts:
+            [{"kind", "group"}, {"holds", c.hint |> String.split("·") |> hd() |> String.trim()}] ++
+              if(chips == [], do: [], else: [{"members", Enum.join(chips, " · ")}]),
+          note: "RET restores this group's layout exactly as you left it."
+        }
+
+      c ->
+        fields = String.split(c.hint, ~r/\s{2,}/, trim: true)
+        {paths, kinds} = Enum.split_with(fields, &String.starts_with?(&1, "/"))
+
+        title =
+          if String.starts_with?(c.label, "*"), do: c.label, else: Path.basename(c.label)
+
+        %{
+          title: title,
+          facts:
+            [{"mode", List.first(kinds) || "Fundamental"}] ++
+              case Enum.drop(kinds, 1) do
+                [] -> []
+                rest -> [{"context", Enum.join(rest, " · ")}]
+              end ++
+              case paths do
+                [] -> []
+                [p | _] -> [{"path", p}]
+              end,
+          note: "RET switches; a buffer from another group brings that layout with it."
+        }
     end
   end
 

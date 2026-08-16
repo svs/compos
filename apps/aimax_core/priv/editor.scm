@@ -1857,11 +1857,22 @@
 ;; [name]; RET on it switches to the group and restores its layout.
 (define (group-container-label g) (string-append "[" (group-label g) "]"))
 
+;; a buffer's short name for a chip: the last path segment; a *special*
+;; buffer keeps its name
+(define (buffer-short-label b)
+  (if (string-prefix? "*" b)
+      b
+      (car (reverse (string-split b "/")))))
+
+;; a container renders as its own row shape: kind "container", the
+;; group's members as chips, the metadata as the annotation
 (define (group-container-candidate g)
   (list (group-container-label g)
-        (string-append "group  switch to group  "
+        (string-append "group  "
           (number->string (length (group-buffers g))) " buffers"
-          (let ((m (group-meta g))) (if m (string-append "  ·  " m) "")))))
+          (let ((m (group-meta g))) (if m (string-append "  ·  " m) "")))
+        "container"
+        (map buffer-short-label (take-n (group-buffers-mru g) 4))))
 
 ;; the pool locked to one group: its container row, then its buffers
 (define (group-locked-pool g)
@@ -1900,7 +1911,21 @@
                  (g (container-of picked)))
             (cond (g (switch-to-group! g))
                   ((pick picked) #t)
-                  (else (switch-to-buffer! picked)))))
+                  ((buffer-exists? picked)
+                   ;; RET on a buffer from ANOTHER group brings that
+                   ;; group's layout up with point in the buffer; the
+                   ;; rest switch in place
+                   (let ((bg (buffer-group picked)))
+                     (if (and bg (not (equal? bg my-group)) (group-layout bg))
+                         (begin
+                           (switch-to-group! bg)
+                           (let ((w (window-showing picked)))
+                             (if w (select-window! w) (switch-to-buffer! picked))))
+                         (switch-to-buffer! picked))))
+                  (else
+                   ;; nothing matches: RET founds a group named PICKED
+                   ;; from the current windows
+                   (group-found-from-windows! picked)))))
         ;; C-g: put back what you were looking at
         (lambda () (when (buffer-exists? here) (window-preview-buffer! here)))
         ;; you also know a buffer by its mode, its group, or its project:
@@ -2948,8 +2973,8 @@
 ;; 'render-mode is the chat's chosen VIEW ("agent" rich, "plain" text) —
 ;; a choice about the chat, so identity (S11)
 (define chat-identity-locals
-  '(group group-meta group-layout agent-connector agent-model chat-presets
-    chat-permission-mode render-mode default-directory))
+  '(group group-meta group-layout group-noise agent-connector agent-model
+    chat-presets chat-permission-mode render-mode default-directory))
 
 ;; what was SAID — survives restart and save; reset clears it
 ;; ('chat-turns is the pre-record shape: chat-record-migrate! reads it once
@@ -3280,24 +3305,127 @@
           (switch-to-buffer! (if (pair? members) (car members) (group-chat g))))))
   (message (string-append "switched to group " (group-label g))))
 
-;; C-c d from a grouped buffer: the LLM reads the member list and
-;; writes one sentence of metadata for the group
+;; found a group from what is on screen: every window's buffer joins,
+;; the layout is saved, and the group chat holds the durable state
+(define (group-found-from-windows! name)
+  (for-each (lambda (w)
+              (let ((b (car (cdr w))))
+                (when (and b (not (string-prefix? " " b)))
+                  (buffer-set-local! b 'group name))))
+            (window-list))
+  (group-layout-save! name)
+  (message (string-append "founded group " name " from "
+             (number->string (length (window-list))) " windows")))
+
+;; the LLM reads the member list and writes one sentence of metadata
+(define (group-describe! g)
+  (message "LLM writing group description...")
+  (llm (string-append
+         "These buffers form one working group in an editor.\n"
+         "Write one sentence that says what the group is for.\n"
+         "Return ONLY the sentence.\n\n"
+         (string-join (group-buffers-mru g) "\n"))
+       (lambda (text)
+         (group-meta-set! g (string-trim text))
+         (when (buffer-exists? *groups-buffer*)
+           (list-refresh! *groups-buffer*))
+         (message (string-append (group-label g) ": " (string-trim text))))))
+
+;; C-c d from a grouped buffer
 (define-command "group-describe"
   "Ask the LLM to write this group's description"
   (lambda ()
     (let ((g (buffer-group (current-buffer))))
-      (if (not g)
-          (message "Not in a group")
-          (begin
-            (message "LLM writing group description...")
-            (llm (string-append
-                   "These buffers form one working group in an editor.\n"
-                   "Write one sentence that says what the group is for.\n"
-                   "Return ONLY the sentence.\n\n"
-                   (string-join (group-buffers-mru g) "\n"))
-                 (lambda (text)
-                   (group-meta-set! g (string-trim text))
-                   (message (string-append g ": " (string-trim text))))))))))
+      (if g (group-describe! g) (message "Not in a group")))))
+
+;;; --- the groups board: C-x G --------------------------------------------------
+;;; The Cmd-k design's second panel as a list: one row per group —
+;;; members, companion noise, metadata. RET switches (layout and all),
+;;; d asks the LLM to describe, n cycles noise, x dissolves.
+
+(define *groups-buffer* "*groups*")
+
+;; companion noise policy, an identity local on the group chat:
+;; "off" (no companion window), "quiet" (notify on finish), "loud"
+;; (lives in a window). Display rules read it; the board sets it.
+(define (group-noise g)
+  (let ((h (group-holder g)))
+    (or (and h (buffer-local h 'group-noise)) "quiet")))
+
+(define (group-noise-set! g v)
+  (buffer-set-local! (group-chat g) 'group-noise v))
+
+(define (group-line buf g)
+  (let ((members (group-buffers-mru g))
+        (m (group-meta g)))
+    (string-append
+      (string-pad-right (group-label g) 22)
+      (string-pad-right (string-append (number->string (length members)) " buffers") 12)
+      (string-pad-right (group-noise g) 8)
+      (string-join (map buffer-short-label (take-n members 4)) " · ")
+      (if m (string-append "  —  " m) ""))))
+
+(define (groups--current)
+  (let ((g (list-current (current-buffer))))
+    (or g (begin (message "no group on this line") #f))))
+
+(define-command "group-switch" "Switch to the group at point"
+  (lambda ()
+    (let ((g (groups--current)))
+      (when g (switch-to-group! g)))))
+
+(define-command "group-describe-at-point" "LLM-describe the group at point"
+  (lambda ()
+    (let ((g (groups--current)))
+      (when g (group-describe! g)))))
+
+(define-command "group-noise-cycle" "Cycle the group's companion noise"
+  (lambda ()
+    (let ((g (groups--current)))
+      (when g
+        (let* ((cur (group-noise g))
+               (next (cond ((equal? cur "off") "quiet")
+                           ((equal? cur "quiet") "loud")
+                           (else "off"))))
+          (group-noise-set! g next)
+          (list-refresh! (current-buffer))
+          (message (string-append (group-label g) " companion: " next)))))))
+
+(define-command "group-dissolve" "Remove the group tag from every member"
+  (lambda ()
+    (let ((g (groups--current)))
+      (when g
+        (for-each (lambda (b)
+                    (buffer-set-local! b 'group #f)
+                    (buffer-set-local! b 'companion-of #f))
+                  (group-buffers g))
+        (list-refresh! (current-buffer))
+        (message (string-append "dissolved group " (group-label g)))))))
+
+(define-command "groups-refresh" "Refresh the groups board"
+  (lambda () (list-refresh! *groups-buffer*)))
+
+(define-command "groups" "The groups board: switch, describe, set noise"
+  (lambda () (list-mode-show! "groups-mode")))
+
+(define-list-mode! "groups-mode"
+  (list
+    'doc (string-append
+           "Every buffer group: members, companion noise, metadata. "
+           "RET switches to the group and restores its layout; d writes "
+           "its description with the LLM; n cycles noise; x dissolves.")
+    'buffer *groups-buffer*
+    'rows (lambda (buf) (group-names))
+    'render (lambda (buf g) (group-line buf g))
+    'key (lambda (buf g) g)
+    'noun "group"
+    'header (lambda (buf)
+              (string-append
+                ";; groups — RET switch · d describe (LLM) · n noise · "
+                "x dissolve · g refresh · q quit"))
+    'keys '(("RET" "group-switch") ("d" "group-describe-at-point")
+            ("n" "group-noise-cycle") ("x" "group-dissolve")
+            ("g" "groups-refresh") ("q" "quit-window"))))
 
 (define (group-buffers g)
   (filter (lambda (b) (equal? (buffer-group b) g)) (buffer-list)))
@@ -3575,6 +3703,9 @@
 (global-set-key "C-c w" "chat-companion")
 (global-set-key "C-c g" "group-add")
 (global-set-key "C-c d" "group-describe")
+(global-set-key "C-x G" "groups")
+;; Cmd-k is the command palette, in the browser's own chord
+(global-set-key "s-k" "execute-extended-command")
 (global-set-key "C-c RET" "chat-companion-ask")
 
 ;;; --- minibuffer history (vertico-style: last-used first) --------------------

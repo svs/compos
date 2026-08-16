@@ -433,6 +433,71 @@ defmodule Aimax.Ui.Layouts do
           }
           .mb-panel.palette .mb-label-row { order: -2; }
           .mb-panel.palette .mb-cands { max-height: none; flex: 1; }
+          /* the palette body: candidates left, the facts panel right */
+          .mb-body { display: flex; min-height: 0; }
+          .mb-body .mb-cands { flex: 1; min-width: 0; }
+          .mb-preview {
+            flex: 0 0 236px;
+            border-left: 1px solid var(--border, #e2dbc9);
+            background: var(--default-bg, #efeadf);
+            padding: 11px 14px 12px;
+            display: flex; flex-direction: column; gap: 7px;
+            font-family: var(--font-mono); font-size: 11px;
+          }
+          .mb-preview-title {
+            font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+            color: var(--dim-fg, #8a857a); margin-bottom: 3px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+          }
+          .mb-preview-fact { display: flex; gap: 8px; align-items: baseline; }
+          .mb-preview-k { flex: 0 0 52px; color: var(--dim-fg, #8a857a); }
+          .mb-preview-v { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+          .mb-preview-note {
+            margin-top: auto; padding-top: 8px;
+            color: var(--dim-fg, #8a857a); font-size: 10.5px; line-height: 1.5;
+          }
+          /* a container: one group as one row, its members as chips */
+          .mb-container {
+            grid-column: 1 / -1;
+            margin: 2px 8px 3px;
+            border: 1px solid var(--border, #e2dbc9); border-radius: 10px;
+            background: var(--default-bg, #efeadf);
+            overflow: hidden;
+          }
+          .mb-container.selected {
+            border-color: var(--accent-fg, #26356b);
+            background: var(--select-bg, #e7e9f1);
+          }
+          .mb-container-head {
+            display: flex; align-items: baseline; gap: 10px;
+            padding: 7px 12px; font-family: var(--font-mono);
+          }
+          .mb-container-dot {
+            width: 7px; height: 7px; border-radius: 2px; align-self: center;
+            background: var(--accent-fg, #26356b); flex: 0 0 auto;
+          }
+          .mb-container-name { font-size: 13.5px; font-weight: 600; flex: 0 0 auto; }
+          .mb-container.selected .mb-container-name { color: var(--accent-fg, #26356b); }
+          .mb-container-action {
+            font-size: 10.5px; color: var(--accent-fg, #26356b); flex: 0 0 auto;
+          }
+          .mb-container-meta {
+            flex: 1; min-width: 0; font-size: 10.5px; color: var(--dim-fg, #8a857a);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+          }
+          .mb-chips {
+            display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+            padding: 0 12px 8px 29px; font-family: var(--font-mono);
+          }
+          .mb-chips-key {
+            font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase;
+            color: var(--dim-fg, #8a857a);
+          }
+          .mb-chip {
+            font-size: 10.5px; padding: 1px 8px; border-radius: 20px;
+            border: 1px solid var(--border, #e2dbc9);
+            background: var(--window-bg, #fdfcf8);
+          }
           @keyframes palette-pop {
             from { opacity: 0; transform: translateX(-50%) scale(0.98); }
             to   { opacity: 1; transform: translateX(-50%) scale(1); }
@@ -546,8 +611,9 @@ defmodule Aimax.Ui.Layouts do
           }
 
           // cmd combos belong to the browser (cmd-c/v/q, and cmd-v's native
-          // paste event) — except the arrows, claimed for window motion
-          const CMD_KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
+          // paste event) — except the arrows, claimed for window motion,
+          // and cmd-k, claimed for the command palette
+          const CMD_KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "k"];
 
           function keySpec(e) {
             if (["Control", "Meta", "Alt", "Shift"].includes(e.key)) return null;

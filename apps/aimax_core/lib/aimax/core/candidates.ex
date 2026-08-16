@@ -41,9 +41,27 @@ defmodule Aimax.Core.Candidates do
 
   def normalize(candidates) do
     Enum.map(candidates, fn
-      [label, hint] when is_binary(label) -> %{label: label, hint: to_string(hint)}
-      %{label: _} = c -> c
-      label when is_binary(label) -> %{label: label, hint: ""}
+      [label, hint] when is_binary(label) ->
+        %{label: label, hint: to_string(hint)}
+
+      # a KIND marks a row that renders as its own shape ("container");
+      # CHIPS are small labels the row carries (a group's members)
+      [label, hint, kind] when is_binary(label) ->
+        %{label: label, hint: to_string(hint), kind: to_string(kind)}
+
+      [label, hint, kind, chips] when is_binary(label) and is_list(chips) ->
+        %{
+          label: label,
+          hint: to_string(hint),
+          kind: to_string(kind),
+          chips: Enum.map(chips, &to_string/1)
+        }
+
+      %{label: _} = c ->
+        c
+
+      label when is_binary(label) ->
+        %{label: label, hint: ""}
     end)
   end
 

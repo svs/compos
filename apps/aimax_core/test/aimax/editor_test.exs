@@ -2030,6 +2030,65 @@ defmodule Aimax.EditorTest do
     press(["C-g"])
   end
 
+  test "a container row carries its kind and member chips" do
+    n = System.unique_integer([:positive])
+    m1 = "cc-a-#{n}"
+    home = "cc-home-#{n}"
+    for b <- [m1, home], do: Aimax.Core.create_buffer(b)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (switch-to-buffer! "#{m1}")
+             (buffer-set-local! "#{m1}" 'group "ccgrp-#{n}")
+             (switch-to-buffer! "#{home}"))
+      """)
+
+    press(["C-x", "b"])
+    c = Enum.find(Editor.render_state().minibuffer.candidates, &(&1.label == "[ccgrp-#{n}]"))
+    assert c
+    assert c.kind == "container"
+    assert m1 in c.chips
+    press(["C-g"])
+  end
+
+  test "RET on a name that matches nothing founds a group from the windows", %{buf: buf} do
+    n = System.unique_integer([:positive])
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(~s{(begin (delete-other-windows!) (switch-to-buffer! "#{buf}"))})
+
+    press(["C-x", "b"])
+    type("zzqxw-#{n}")
+    press(["RET"])
+    assert Aimax.Core.Session.eval(~s{(buffer-group "#{buf}")}) == {:ok, ~s{"zzqxw-#{n}"}}
+    {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-set-local! "#{buf}" 'group #f)})
+  end
+
+  test "the groups board lists a group; noise cycles and persists" do
+    n = System.unique_integer([:positive])
+    b = "gb-#{n}"
+    Aimax.Core.create_buffer(b)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (buffer-set-local! "#{b}" 'group "gbgrp-#{n}")
+             (run-command "groups"))
+      """)
+
+    assert Editor.current_buffer() == "*groups*"
+    assert Buffer.text("*groups*") =~ "gbgrp-#{n}"
+
+    assert Aimax.Core.Session.eval(~s{(group-noise "gbgrp-#{n}")}) == {:ok, ~s{"quiet"}}
+    {:ok, _} = Aimax.Core.Session.eval(~s{(group-noise-set! "gbgrp-#{n}" "loud")})
+    assert Aimax.Core.Session.eval(~s{(group-noise "gbgrp-#{n}")}) == {:ok, ~s{"loud"}}
+
+    assert {:ok, out} =
+             Aimax.Core.Session.eval(~s{(if (member 'group-noise chat-identity-locals) #t #f)})
+
+    assert out == "#t"
+    press(["q"])
+  end
+
   test "a group's layout survives leave and restore" do
     n = System.unique_integer([:positive])
     m = "ly-a-#{n}"
@@ -2168,6 +2227,8 @@ defmodule Aimax.EditorTest do
 
     test "windows can show different buffers", %{buf: buf} do
       other = "win-#{System.unique_integer([:positive])}"
+      # C-x b RET on a NEW name founds a group now; an existing buffer switches
+      Aimax.Core.create_buffer(other)
       press(["C-x", "3"])
       press(["C-x", "o"])
       press(["C-x", "b"])

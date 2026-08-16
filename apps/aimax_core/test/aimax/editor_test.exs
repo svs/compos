@@ -1971,6 +1971,68 @@ defmodule Aimax.EditorTest do
     assert Editor.current_buffer() == plain
   end
 
+  test "C-x b leads with the current buffer's group members", %{buf: a} do
+    n = System.unique_integer([:positive])
+    mate = "grp-mate-#{n}"
+    loner = "grp-loner-#{n}"
+    Aimax.Core.create_buffer(mate)
+    Aimax.Core.create_buffer(loner)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (switch-to-buffer! "#{mate}")
+             (switch-to-buffer! "#{loner}")
+             (switch-to-buffer! "#{a}")
+             (buffer-set-local! "#{a}" 'group "zqxw")
+             (buffer-set-local! "#{mate}" 'group "zqxw"))
+      """)
+
+    # loner is more recent in MRU, but the group mate leads and is the default
+    press(["C-x", "b"])
+    mb = Editor.render_state().minibuffer
+    assert mb.prompt =~ "default #{mate}"
+    labels = Enum.map(mb.candidates, & &1.label)
+    assert Enum.find_index(labels, &(&1 == mate)) < Enum.find_index(labels, &(&1 == loner))
+
+    # the group name is a marginalia column, so typing it finds the members
+    type("zqxw")
+    labels = Enum.map(Editor.render_state().minibuffer.candidates, & &1.label)
+    assert mate in labels
+    refute loner in labels
+
+    press(["RET"])
+    assert Editor.current_buffer() == mate
+  end
+
+  test "C-x b ranks same-project buffers above the rest" do
+    n = System.unique_integer([:positive])
+    root = Path.join(System.tmp_dir!(), "proj-#{n}")
+    File.mkdir_p!(Path.join(root, ".git"))
+    f1 = Path.join(root, "one.txt")
+    f2 = Path.join(root, "two.txt")
+    File.write!(f1, "one")
+    File.write!(f2, "two")
+    on_exit(fn -> File.rm_rf!(root) end)
+    loose = "loose-#{n}"
+    Aimax.Core.create_buffer(loose)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (visit "#{f2}")
+             (switch-to-buffer! "#{loose}")
+             (visit "#{f1}"))
+      """)
+
+    # the loose buffer is more recent in MRU, but the project mate leads
+    press(["C-x", "b"])
+    mb = Editor.render_state().minibuffer
+    assert mb.prompt =~ "default #{f2}"
+    labels = Enum.map(mb.candidates, & &1.label)
+    assert Enum.find_index(labels, &(&1 == f2)) < Enum.find_index(labels, &(&1 == loose))
+    press(["RET"])
+    assert Editor.current_buffer() == f2
+  end
+
   test "M-: eval-expression echoes result" do
     press(["M-:"])
     type("(+ 20 22)")

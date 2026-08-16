@@ -556,8 +556,8 @@
 ;; highlight move, ON-CONFIRM with the choice, ON-CANCEL on C-g (restore
 ;; whatever the preview displaced there). All three run against the
 ;; invoking buffer, not the minibuffer's — see with-invoking-buffer.
-;; MATCH-HINT, when true, also matches what you type against the
-;; marginalia beside each candidate.
+;; MATCH-HINT also matches what you type against the marginalia beside
+;; each candidate: #t means the first field, an integer N the first N.
 (define (minibuffer-read-preview prompt cands on-select on-confirm on-cancel
                                  &optional match-hint)
   (set! *mb-select-fn* (lambda (sel) (with-invoking-buffer (lambda () (on-select sel)))))
@@ -569,7 +569,7 @@
                             (set! *mb-select-fn* #f)
                             (with-invoking-buffer on-cancel)))
           (list 'change  (lambda (input) (mb-select-notify!)))
-          (list 'match-hint (if match-hint #t #f)))))
+          (list 'match-hint (if match-hint match-hint #f)))))
 
 (let ((mb (minibuffer-buffer)))
   (local-set-key* mb "RET" "minibuffer-confirm")
@@ -1754,20 +1754,47 @@
 (define-command "find-file" "Visit a file, prompting with filename completion"
   (lambda () (read-file-name "Find file: " visit)))
 
-;; what a buffer name means in a prompt: its mode, then the file it is
-;; visiting. A buffer with no mode and no file annotates to two blanks,
-;; which is the truth about it.
+;; the project a buffer belongs to, as a short name for the prompt.
+;; project.scm supplies the real answer through this seam (dup #6);
+;; without the package every buffer is projectless.
+(define buffer-project-label (lambda (b) ""))
+
+;; what a buffer name means in a prompt: its mode, its group, its
+;; project, then the file it is visiting. The group and project columns
+;; show which buffers belong together, and the prompt matches on them
+;; (match-hint), so a group or project name finds every member.
 (marginalia! 'buffer
   (lambda (b)
     (list (or (buffer-local b 'mode-name) "Fundamental")
+          (group-label (buffer-group b))
+          (buffer-project-label b)
           (or (buffer-path b) ""))))
 
 ;; ONE candidate shape for every buffer prompt (dup #6): the name, the
-;; marginalia annotator supplies the rest, MRU-ordered. Internals
-;; (space-prefixed) stay hidden, as ibuffer hides them.
+;; marginalia annotator supplies the rest. Everything related to the
+;; current buffer leads the pool: its group members first (the chat
+;; rides with its documents), then the buffers in the same project.
+;; The other buffers follow in MRU order. Internals (space-prefixed)
+;; stay hidden, as ibuffer hides them.
 (define (buffer-candidates-all)
-  (annotate 'buffer
-    (filter (lambda (b) (not (string-prefix? " " b))) (buffer-list-mru))))
+  (let* ((visible (filter (lambda (b) (not (string-prefix? " " b)))
+                          (buffer-list-mru)))
+         (cur (current-buffer))
+         (g (buffer-group cur))
+         (mates (if g
+                    (filter (lambda (b) (member b visible))
+                            (group-buffers-mru g))
+                    '()))
+         (proj (buffer-project-label cur))
+         (kin (if (equal? proj "")
+                  '()
+                  (filter (lambda (b) (and (not (member b mates))
+                                           (equal? (buffer-project-label b) proj)))
+                          visible))))
+    (annotate 'buffer
+      (append mates kin
+              (remove (lambda (b) (or (member b mates) (member b kin)))
+                      visible)))))
 
 ;; current excluded: first candidate = the buffer you just left, so
 ;; C-x b RET toggles between two buffers (Emacs buffer ring)
@@ -1809,9 +1836,9 @@
               (switch-to-buffer! picked))))
         ;; C-g: put back what you were looking at
         (lambda () (when (buffer-exists? here) (window-preview-buffer! here)))
-        ;; you also know a buffer by its mode: "org" finds the org buffers,
-        ;; and the mode is the first thing the marginalia says
-        #t))))
+        ;; you also know a buffer by its mode, its group, or its project:
+        ;; the first three marginalia fields all match what you type
+        3))))
 
 (define-command "kill-buffer" "Kill a buffer, defaulting to the current one"
   (lambda ()
@@ -3120,6 +3147,13 @@
   (or (buffer-local b 'group)
       ;; legacy: a pre-group companion pointer doubles as a group tag
       (buffer-local b 'companion-of)))
+
+;; the group column in a buffer prompt. A group founded by a file
+;; buffer carries the full path as its name; show the last segment.
+(define (group-label g)
+  (if g
+      (car (reverse (string-split g "/")))
+      ""))
 
 (define (group-buffers g)
   (filter (lambda (b) (equal? (buffer-group b) g)) (buffer-list)))

@@ -28,6 +28,30 @@
   (let ((i (string-rindex root "/")))
     (if i (substring root (+ i 1) (string-length root)) root)))
 
+;; the buffer switcher asks for every buffer's project on each prompt
+;; open. The .git walk runs once per directory; the cache holds the
+;; answer, #f included.
+(define *project-root-cache* '())
+
+(define (project-root-cached dir)
+  (let ((hit (assoc dir *project-root-cache*)))
+    (if hit
+        (car (cdr hit))
+        (let ((root (project-root-from dir)))
+          (set! *project-root-cache*
+            (cons (list dir root) *project-root-cache*))
+          root))))
+
+;; fill the editor's seam: a buffer's project column is the name of the
+;; git root above its file; a pathless buffer stays projectless
+(set! buffer-project-label
+  (lambda (b)
+    (let ((p (buffer-path b)))
+      (if p
+          (let ((root (project-root-cached (parent-dir p))))
+            (if root (project-name root) ""))
+          ""))))
+
 ;; tracked + untracked-but-not-ignored, like projectile
 (define (project-files root)
   (filter (lambda (f) (not (equal? f "")))
@@ -172,12 +196,19 @@
     (let ((projects (known-projects)))
       (if (null? projects)
           (message "No known projects yet — visit a file in one first")
-          (minibuffer-read "Switch to project: "
-            (map (lambda (p) (list p (project-name p)))
-                 (history-order 'project projects))
-            (lambda (p)
-              (history-push! 'project p)
-              (project-find-file-in p)))))))
+          ;; the current project leads: the first option in a switch
+          ;; prompt is the place you are in
+          (let* ((cur (project-current))
+                 (ordered (history-order 'project projects))
+                 (ordered (if (and cur (member cur ordered))
+                              (cons cur (remove (lambda (p) (equal? p cur))
+                                                ordered))
+                              ordered)))
+            (minibuffer-read "Switch to project: "
+              (map (lambda (p) (list p (project-name p))) ordered)
+              (lambda (p)
+                (history-push! 'project p)
+                (project-find-file-in p))))))))
 
 (define-command "project-dired"
   "Open dired at the current project's root"

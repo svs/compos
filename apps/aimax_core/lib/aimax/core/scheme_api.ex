@@ -693,13 +693,14 @@ defmodule Aimax.Core.SchemeAPI do
       # full form: handlers is an alist of (list 'confirm f) (list 'change f)
       # (list 'complete f) (list 'cancel f) (list 'initial "text")
       # (list 'match-hint #t) — the last one widens the filter to the
-      # annotation, so a prompt matches what a candidate MEANS
+      # annotation, so a prompt matches what a candidate MEANS. #t means
+      # the first field; an integer N means the first N fields.
       "minibuffer-read*" => fn [prompt, candidates, handlers] ->
         map =
           Map.new(handlers, fn [k, v] ->
             case plain(k) do
               "initial" -> {:input, v}
-              "match-hint" -> {:match_hint, v == true}
+              "match-hint" -> {:match_hint, v}
               key -> {String.to_existing_atom("on_" <> key), v}
             end
           end)

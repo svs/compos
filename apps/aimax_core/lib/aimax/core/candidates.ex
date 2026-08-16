@@ -12,14 +12,17 @@ defmodule Aimax.Core.Candidates do
   its input, file prompts pass the segment after the last "/", the popup
   passes the typed prefix.
 
-  `match_hint` widens the filter to the kind the annotation begins with, so a
-  prompt finds a buffer or a file by its mode. The prompt asks for it; the
-  default stays off, because a doc-string annotation matches almost anything.
+  `match_hint` widens the filter to the KINDS the annotation begins with, so
+  a prompt finds a buffer or a file by its mode. It is a field count: `true`
+  means 1 (the first field), an integer N means the first N fields — the
+  buffer prompt passes 3 so mode, group and project all match. The prompt
+  asks for it; the default stays off, because a doc-string annotation
+  matches almost anything, and a size or date field must never match.
   """
 
   @window 8
 
-  defstruct items: [], query: "", sel: 0, touched: false, filtered: [], match_hint: false
+  defstruct items: [], query: "", sel: 0, touched: false, filtered: [], match_hint: 0
 
   @doc "Build from raw candidates: strings or [label, hint] pairs."
   def new(candidates, opts \\ []) do
@@ -28,9 +31,13 @@ defmodule Aimax.Core.Candidates do
       query: Keyword.get(opts, :query, ""),
       sel: 0,
       touched: false,
-      match_hint: Keyword.get(opts, :match_hint, false) == true
+      match_hint: hint_fields(Keyword.get(opts, :match_hint, false))
     })
   end
+
+  defp hint_fields(true), do: 1
+  defp hint_fields(n) when is_integer(n) and n > 0, do: n
+  defp hint_fields(_), do: 0
 
   def normalize(candidates) do
     Enum.map(candidates, fn
@@ -71,8 +78,8 @@ defmodule Aimax.Core.Candidates do
 
   # the annotation joins the match text only when the prompt asked for it;
   # rank still reads the label alone, so a kind match sorts last
-  defp hint_of(%{match_hint: true}, %{hint: hint}), do: hint
-  defp hint_of(_list, _item), do: ""
+  defp hint_of(%{match_hint: n}, %{hint: hint}) when n > 0, do: kinds(hint, n)
+  defp hint_of(_list, _item), do: []
 
   # One 268-character chat buffer name set the name column for all 110
   # candidates and pushed every annotation off the right of the panel. A
@@ -114,39 +121,43 @@ defmodule Aimax.Core.Candidates do
   Orderless + flex, case-insensitive: space-separated terms each match as
   substrings in any order; a single term also matches as a subsequence.
 
-  HINT is the annotation, and a term also matches the KIND it starts with —
-  `elixir-mode`, `chat-mode`, `Dired`. A prompt that does not widen the
-  filter passes "".
+  KINDS are the annotation fields a term may also match from the start —
+  `elixir-mode`, `chat-mode`, a group, a project. A prompt that does not
+  widen the filter passes [].
   """
-  def matches?(label, query, hint \\ "")
+  def matches?(label, query, kinds \\ [])
 
-  def matches?(_label, "", _hint), do: true
+  def matches?(_label, "", _kinds), do: true
 
-  def matches?(label, query, hint) do
+  def matches?(label, query, kinds) do
     dl = String.downcase(label)
-    kind = kind(hint)
+    ks = List.wrap(kinds)
 
     case String.split(query, " ", trim: true) do
       [] -> true
-      [single] -> subsequence?(dl, String.downcase(single)) or kind?(kind, single)
-      terms -> Enum.all?(terms, &(String.contains?(dl, String.downcase(&1)) or kind?(kind, &1)))
+      [single] -> subsequence?(dl, String.downcase(single)) or kind?(ks, single)
+      terms -> Enum.all?(terms, &(String.contains?(dl, String.downcase(&1)) or kind?(ks, &1)))
     end
   end
 
-  # The FIRST annotation field, which every annotator writes as the kind of
-  # the thing: the mode a buffer is in, the mode a file would open in. The
-  # later fields are a size and a date, and a term must not match those — a
-  # filename beginning "a" would find every file dated in August.
-  defp kind(""), do: ""
-
-  defp kind(hint) do
-    hint |> String.split("  ", parts: 2) |> hd() |> String.trim() |> String.downcase()
+  # The first N annotation fields, which the annotator writes as the kinds
+  # of the thing: the mode a buffer is in, its group, its project. Padding
+  # builds the columns, so 2+ spaces separate the fields. The later fields
+  # are a size and a date, and a term must not match those — a filename
+  # beginning "a" would find every file dated in August.
+  defp kinds(hint, n) do
+    hint
+    |> String.split(~r/\s{2,}/, trim: true)
+    |> Enum.take(n)
+    |> Enum.map(&String.downcase/1)
   end
 
-  # from the start of the kind, never inside it: "chat" finds the chats, and
+  # from the start of a kind, never inside it: "chat" finds the chats, and
   # "mo" still means the name alone, though every mode name ends in "-mode"
-  defp kind?("", _term), do: false
-  defp kind?(kind, term), do: String.starts_with?(kind, String.downcase(term))
+  defp kind?(kinds, term) do
+    t = String.downcase(term)
+    Enum.any?(kinds, &String.starts_with?(&1, t))
+  end
 
   defp subsequence?(_label, ""), do: true
 

@@ -836,7 +836,7 @@ defmodule Aimax.AgentTest do
   end
 
   test "session/new carries our mcpServers and _meta; the adapter loads no user config" do
-    {:ok, _} = Session.eval(~s[(execute "")])
+    {:ok, _} = Session.eval(~s[(execute* "" '(presets (aimax)))])
     assert_receive {:transport_open, agent}, 1_000
     assert_receive {:frame, %{"method" => "initialize", "id" => iid, "params" => ip}}, 1_000
 
@@ -849,10 +849,10 @@ defmodule Aimax.AgentTest do
 
     assert_receive {:frame, %{"method" => "session/new", "id" => nid, "params" => np}}, 1_000
 
-    # aimax's own tool proxy is handed over as an MCP server...
+    # The explicit aimax preset mounts the editor proxy.
     assert Enum.any?(np["mcpServers"] || [], &(&1["name"] == "aimax"))
 
-    # ...and the two keys that make aimax the only source. settingSources
+    # The two keys still make this explicit list the only source. settingSources
     # [] drops the user's settings files; strictMcpConfig true drops the
     # user's own MCP registry in ~/.claude.json, which no setting source
     # covers and which otherwise merges into every session.

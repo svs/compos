@@ -616,7 +616,7 @@ defmodule Aimax.Ui.Layouts do
         <script src="/lv/phoenix_live_view.min.js"></script>
         <script>
           const NAMED = {
-            "Enter": "RET", "Backspace": "DEL", "Tab": "TAB", " ": "SPC",
+            "Enter": "RET", "Backspace": "DEL", "Delete": "<delete>", "Tab": "TAB", " ": "SPC",
             "Escape": "ESC", "ArrowLeft": "<left>", "ArrowRight": "<right>",
             "ArrowUp": "<up>", "ArrowDown": "<down>", "Home": "<home>", "End": "<end>",
             "PageUp": "<prior>", "PageDown": "<next>"

@@ -1063,10 +1063,10 @@
 ;; the anthropic env pair. Connectors that offer neither stay untouched.
 (define (agent-resolve-config opts)
   (let ((conf (agent-resolve-config* opts)))
-    ;; ACP threads get MCP servers: the editor's own tools (aimax proxy)
-    ;; plus whatever presets the caller names — the caller controls the
-    ;; agent's tool surface, exactly as with API chats. The direct lane
-    ;; needs none: its tool surface is read fresh at every send.
+    ;; ACP threads get exactly the servers their presets name. The editor's
+    ;; own tools are the `aimax` preset, not an implicit exception. The
+    ;; direct lane needs no server config: it reads the same preset surface
+    ;; fresh at every send.
     (if (or (equal? (plist-get conf 'backend) "req-llm")
             (plist-get conf 'mcp-servers)
             (not (boundp (quote presets-acp-servers))))

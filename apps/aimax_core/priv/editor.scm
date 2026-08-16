@@ -480,18 +480,49 @@
 
 (define (preview-goto! win before after wb wa)
   (mouse-select-window! win)
+  (set-mark! #f)
   (let* ((text (buffer-text (current-buffer)))
          (hit (or (preview--hit text before after)
                   (preview--hit text wb wa))))
     (when hit (goto-char! hit))))
 (public! 'preview-goto!
-  "(preview-goto! WIN BEFORE AFTER WB WA) — put point where a preview click landed")
+  "(preview-goto! WIN BEFORE AFTER WB WA) — put point where a preview click landed"
+  'interaction)
+
+(define (preview-select! win before after wb wa)
+  (let ((anchor (or (mark) (point))))
+    (preview-goto! win before after wb wa)
+    (set-mark! anchor)))
+(public! 'preview-select!
+  "(preview-select! WIN BEFORE AFTER WB WA) — extend the region to a rendered position"
+  'interaction)
+
+;; Render-only widgets know their exact source ranges. Unlike preview-goto!,
+;; these do not need to reverse-map rendered prose into Markdown.
+(define (preview-goto-pos! win pos extend)
+  (mouse-select-window! win)
+  (when extend (unless (mark) (set-mark! (point))))
+  (unless extend (set-mark! #f))
+  (goto-char! (max 0 (min pos (buffer-size (current-buffer))))))
+(public! 'preview-goto-pos!
+  "(preview-goto-pos! WIN POS EXTEND) — move to an exact preview source position"
+  'interaction)
 
 (define-command "newline" "Insert a newline at point" (lambda () (insert! "\n")))
+(define (delete-active-region!)
+  (if (and (mark) (< (region-beginning) (region-end)))
+      (begin
+        (delete-region!)
+        (set-mark! #f)
+        #t)
+      #f))
+
 (define-command "delete-backward-char" "Delete the character before point"
-  (lambda () (delete-char! -1)))
+  (lambda ()
+    (unless (delete-active-region!) (delete-char! -1))))
 (define-command "delete-char" "Delete the character after point"
-  (lambda () (delete-char! 1)))
+  (lambda ()
+    (unless (delete-active-region!) (delete-char! 1))))
 
 (define-command "kill-line" "Kill text from point to end of line"
   (lambda ()
@@ -2630,6 +2661,133 @@
 
 (global-set-key "M-|" "llm-pipe-region")
 
+;; gptel's most Emacs-shaped operation: the buffer is both the prompt and
+;; the transcript.  M-o sends an immutable snapshot of the whole document,
+;; then puts the answer where point was when it was sent.  The overlay makes
+;; authorship visible without writing chat markers into the document itself.
+(define *llm-mode-hooks* '())
+
+(define (llm-mode--paint! buf)
+  (overlay-set! buf 'llm-mode-responses
+    (map (lambda (range)
+           (list (car range) (cadr range) 'llm-response))
+         (or (buffer-local buf 'llm-responses) '()))))
+
+(define (llm-mode--sync-ranges! buf)
+  ;; Overlays follow edits in the rope. Mirror their adjusted positions into
+  ;; a serializable local so desktop restore can repaint the response blocks.
+  (when (minor-mode-on? buf "llm-mode")
+    (let ((tracked
+            (filter (lambda (ov) (equal? (caddr ov) "llm-response"))
+                    (buffer-overlays buf))))
+      ;; Mode/desktop restoration has a short interval where locals are back
+      ;; but derived overlays are not. An unrelated setup edit during that
+      ;; interval must not erase the only durable copy of the ranges.
+      (when (or (pair? tracked)
+                (not (buffer-local buf 'llm-responses))
+                (null? (buffer-local buf 'llm-responses)))
+        (buffer-set-local! buf 'llm-responses
+          (map (lambda (ov) (list (car ov) (cadr ov))) tracked))))))
+
+(define (llm-mode--ensure-hook! buf)
+  (unless (assoc buf *llm-mode-hooks*)
+    (set! *llm-mode-hooks*
+      (cons (list buf
+                  (on-change! buf
+                    (lambda (pos inserted deleted source)
+                      (llm-mode--sync-ranges! buf))))
+            *llm-mode-hooks*))))
+
+(define (llm-mode--remove-hook! buf)
+  (let ((hit (assoc buf *llm-mode-hooks*)))
+    (when hit
+      (remove-on-change! (cadr hit))
+      (set! *llm-mode-hooks*
+        (remove (lambda (entry) (equal? (car entry) buf))
+                *llm-mode-hooks*)))))
+
+(define (llm-mode--apply! buf)
+  (local-set-key* buf "M-o" "llm-send-buffer")
+  (local-set-key* buf "C-c m" "llm-set-model")
+  (llm-mode--paint! buf)
+  (llm-mode--ensure-hook! buf))
+
+(define (llm-mode--teardown! buf)
+  (llm-mode--remove-hook! buf)
+  (overlay-clear! buf 'llm-mode-responses)
+  (local-unset-key* buf "M-o")
+  (local-unset-key* buf "C-c m"))
+
+(register-minor-mode! "llm-mode" llm-mode--apply! llm-mode--teardown!)
+
+(define-command "llm-mode" "Toggle in-buffer LLM interaction and response formatting"
+  (lambda ()
+    (if (toggle-minor-mode! "llm-mode")
+        (message "LLM mode enabled")
+        (message "LLM mode disabled"))))
+
+(mode-doc! "llm-mode"
+  "In-buffer LLM interaction. `M-o` sends the document and inserts the response at point with a distinct response face; `C-c m` chooses its model.")
+
+(define (buffer-llm-model buf)
+  (or (buffer-local buf 'llm-model) (llm-model)))
+
+(define-command "llm-set-model" "Choose the model for M-o in this buffer"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (minibuffer-read
+        (string-append "Model for this buffer (now " (buffer-llm-model buf) "): ")
+        *llm-models*
+        (lambda (model)
+          (unless (equal? (string-trim model) "")
+            (buffer-set-local! buf 'llm-model model)
+            (message (string-append "M-o · " model))))))))
+
+;; Every M-o request takes the same path. Presets supply the complete tool
+;; surface; with none selected, llm-tools simply makes one text-only round.
+;; `aimax` is itself a preset and contributes the native editor registry.
+;; mcp.scm loads after this file, so the surface is resolved at send time.
+(define (llm-mode--complete buf context model handler)
+  (let ((specs (if (boundp (quote chat-extra-tool-specs))
+                   (chat-extra-tool-specs buf)
+                   '()))
+        (system (if (boundp (quote chat-tool-system))
+                    (chat-tool-system buf)
+                    "")))
+    (llm-tools context system specs llm-tool-call handler #f model)))
+
+(define-command "llm-send-buffer" "Send this document to the LLM and insert its reply below point"
+  (lambda ()
+    (let ((buf (current-buffer))
+          (at (point))
+          (context (buffer-text (current-buffer)))
+          (model (buffer-llm-model (current-buffer))))
+      ;; Like gptel-send, the first invocation turns on the buffer-local
+      ;; interaction mode. writing-mode enables it eagerly.
+      (unless (minor-mode-on? buf "llm-mode")
+        (enable-minor-mode! buf "llm-mode"))
+      (message (string-append "LLM thinking · " model))
+      (llm-mode--complete buf context model
+        (lambda (result)
+          (if (not (buffer-exists? buf))
+              (message "LLM reply discarded — its buffer was killed")
+              (let* ((prefix "\n\n")
+                     (suffix "\n")
+                     (start (+ at (string-byte-length prefix)))
+                     (end (+ start (string-byte-length result))))
+                (with-edit-author "assistant"
+                  (lambda ()
+                    (buffer-insert! buf at
+                      (string-append prefix result suffix))))
+                (buffer-set-local! buf 'llm-responses
+                  (append (or (buffer-local buf 'llm-responses) '())
+                          (list (list start end))))
+                (llm-mode--paint! buf)
+                (message "LLM response inserted"))))))))
+
+(global-set-key "M-o" "llm-send-buffer")
+(global-set-key "C-c m" "llm-set-model")
+
 ;;; --- chat buffer (gptel-style) -------------------------------------------------
 ;;; *chat* is an ordinary editable buffer. Type after the "### You" marker,
 ;;; press C-c RET, and the whole buffer becomes the conversation context.
@@ -4694,6 +4852,7 @@
 
 (global-set-key "RET" "newline-or-send")
 (global-set-key "DEL" "delete-backward-char")
+(global-set-key "<delete>" "delete-char")
 (global-set-key "C-d" "delete-char")
 (global-set-key "C-k" "kill-line")
 (global-set-key "C-y" "yank")
@@ -4872,6 +5031,7 @@
 
 (category! 'chat)
 (public! 'llm "(llm PROMPT HANDLER) — async completion; HANDLER gets the text")
+(public! 'llm-with-model "(llm-with-model PROMPT MODEL HANDLER) — async completion with an explicit model")
 (public! 'llm-model "Current model id")
 (public! 'set-llm-model! "(set-llm-model! ID) — provider prefix routes: openai:/openrouter:/bare=anthropic")
 (public! 'buffer-group "(buffer-group NAME) -> the buffer's group tag or #f")

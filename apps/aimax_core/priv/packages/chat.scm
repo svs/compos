@@ -368,7 +368,7 @@
 ;;; the user's choice to spend — the modeline says when the two differ.
 
 (define (chat-live-tool-specs buf)
-  (append (llm-tool-specs) (chat-extra-specs buf)))
+  (chat-extra-specs buf))
 
 (define (chat-tools buf)
   (or (buffer-local buf 'chat-tool-specs)
@@ -475,8 +475,13 @@
                               " orphaned tool " (if (= healed 1) "block" "blocks"))))
     (list 'turns (reverse (chat-record buf))
           'system (if tools?
-                      (string-append *llm-system* "\n\n" (chat-mcp-note buf)
-                                     (chat-preamble buf))
+                      (let ((tool-system
+                              (if (boundp (quote chat-tool-system))
+                                  (chat-tool-system buf)
+                                  "")))
+                        (if (equal? tool-system "")
+                            (chat-preamble buf)
+                            (string-append tool-system "\n\n" (chat-preamble buf))))
                       (chat-preamble buf))
           'tools (if tools? (chat-tools buf) '())
           'dispatcher (chat-tool-dispatch slug))))

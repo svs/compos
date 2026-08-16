@@ -415,8 +415,10 @@ defmodule Aimax.Ui.Layouts do
           .mb-panel.palette {
             position: fixed; left: 50%; top: 14dvh;
             transform: translateX(-50%);
-            width: min(760px, 92vw);
-            max-height: 62dvh;
+            /* FIXED geometry: the box never changes size while you type —
+               fewer candidates leave empty rows, never a smaller panel */
+            width: min(1100px, 96vw);
+            height: 62dvh;
             display: flex; flex-direction: column;
             border: 1px solid var(--border, #e2dbc9);
             border-top: 2px solid var(--accent-fg, #26356b);
@@ -430,19 +432,30 @@ defmodule Aimax.Ui.Layouts do
             order: -1;
             border-top: none;
             border-bottom: 1px solid var(--border, #e2dbc9);
+            flex: 0 0 auto;
           }
-          .mb-panel.palette .mb-label-row { order: -2; }
-          .mb-panel.palette .mb-cands { max-height: none; flex: 1; }
+          .mb-panel.palette .mb-label-row { order: -2; flex: 0 0 auto; }
+          .mb-panel.palette .mb-cands {
+            max-height: none; flex: 1;
+            /* rows keep their natural height — no stretching to fill */
+            align-content: start;
+          }
+          /* the name is the point: give it the room, ellipsize later */
+          .mb-panel.palette .mb-cand { font-size: 13.5px; }
+          .mb-panel.palette .mb-label { max-width: 80ch; }
           /* the palette body: candidates left, the facts panel right */
-          .mb-body { display: flex; min-height: 0; }
+          .mb-body { display: flex; flex: 1; min-height: 0; }
           .mb-body .mb-cands { flex: 1; min-width: 0; }
           .mb-preview {
-            flex: 0 0 236px;
+            flex: 0 0 172px;
+            /* min-width:auto would let the long title win over the
+               basis and swallow half the palette */
+            min-width: 0; overflow: hidden;
             border-left: 1px solid var(--border, #e2dbc9);
             background: var(--default-bg, #efeadf);
-            padding: 11px 14px 12px;
-            display: flex; flex-direction: column; gap: 7px;
-            font-family: var(--font-mono); font-size: 11px;
+            padding: 11px 12px 12px;
+            display: flex; flex-direction: column; gap: 6px;
+            font-family: var(--font-mono); font-size: 10.5px;
           }
           .mb-preview-title {
             font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
@@ -450,7 +463,7 @@ defmodule Aimax.Ui.Layouts do
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
           }
           .mb-preview-fact { display: flex; gap: 8px; align-items: baseline; }
-          .mb-preview-k { flex: 0 0 52px; color: var(--dim-fg, #8a857a); }
+          .mb-preview-k { flex: 0 0 44px; color: var(--dim-fg, #8a857a); }
           .mb-preview-v { flex: 1; min-width: 0; overflow-wrap: anywhere; }
           .mb-preview-note {
             margin-top: auto; padding-top: 8px;

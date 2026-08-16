@@ -2223,6 +2223,19 @@ defmodule Aimax.EditorTest do
       )
   end
 
+  test "TAB completes the single remaining candidate" do
+    n = System.unique_integer([:positive])
+    b = "tabone-#{n}"
+    Aimax.Core.create_buffer(b)
+
+    press(["C-x", "b"])
+    type("tabone-#{n}")
+    press(["TAB"])
+    assert Editor.render_state().minibuffer.input == b
+    press(["RET"])
+    assert Editor.current_buffer() == b
+  end
+
   test "TAB locks the switcher to the one group the input names" do
     n = System.unique_integer([:positive])
     m1 = "lk-a-#{n}"

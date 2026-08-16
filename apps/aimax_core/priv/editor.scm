@@ -2012,16 +2012,22 @@
         ;; confirm value. TAB with no selection and an input that names
         ;; exactly one group locks the pool to that group's buffers.
         (lambda (input selected)
-          (cond
-            (selected (list selected all))
-            ((equal? input "") #f)
-            (else
-              (let ((hits (filter (lambda (x)
-                                    (string-contains? (group-label x) input))
-                                  groups)))
-                (if (and (pair? hits) (null? (cdr hits)))
-                    (list "" (group-locked-pool (car hits)))
-                    #f)))))))))
+          (let ((lock (and (not (equal? input ""))
+                           (let ((hits (filter (lambda (x)
+                                                 (string-contains? (group-label x)
+                                                                   input))
+                                               groups)))
+                             (and (pair? hits) (null? (cdr hits)) (car hits))))))
+            (cond
+              (selected (list selected all))
+              ;; an input that names ONE group locks to it — the more
+              ;; deliberate act wins over plain completion
+              (lock (list "" (group-locked-pool lock)))
+              ;; one candidate left: TAB takes it (Emacs completion)
+              ((let ((st (minibuffer-state)))
+                 (and st (= 1 (plist-get st 'total)) (minibuffer-selected)))
+               (list (minibuffer-selected) all))
+              (else #f))))))))
 
 (define-command "kill-buffer" "Kill a buffer, defaulting to the current one"
   (lambda ()
@@ -3992,11 +3998,20 @@
 (define (group-buffers g)
   (filter (lambda (b) (equal? (buffer-group b) g)) (buffer-list)))
 
-;; members in MRU order; buffers never visited this session trail behind
+;; members in MRU order; buffers never visited this session trail
+;; behind. A group is a SET: the list dedupes by name, whatever the
+;; sources produce.
+(define (dedupe-names xs)
+  (let loop ((xs xs) (seen '()) (out '()))
+    (cond ((null? xs) (reverse out))
+          ((member (car xs) seen) (loop (cdr xs) seen out))
+          (else (loop (cdr xs) (cons (car xs) seen) (cons (car xs) out))))))
+
 (define (group-buffers-mru g)
   (let ((mru (filter (lambda (b) (equal? (buffer-group b) g))
                      (buffer-list-mru))))
-    (append mru (remove (lambda (b) (member b mru)) (group-buffers g)))))
+    (dedupe-names
+      (append mru (remove (lambda (b) (member b mru)) (group-buffers g))))))
 
 (define (group-names)
   (fold (lambda (acc b)
@@ -4109,11 +4124,14 @@
     (let ((buf (current-buffer)))
       (minibuffer-read "Group: " (group-names)
         (lambda (g)
-          (if (equal? (string-trim g) "")
-              (message "Group needs a name")
-              (begin
-                (buffer-set-local! buf 'group g)
-                (message (string-append buf " joined group " g)))))))))
+          (cond
+            ((equal? (string-trim g) "") (message "Group needs a name"))
+            ;; a group is a set — joining twice is a no-op that says so
+            ((equal? (buffer-group buf) g)
+             (message (string-append buf " is already in " (group-label g))))
+            (else
+              (buffer-set-local! buf 'group g)
+              (message (string-append buf " joined group " g)))))))))
 
 (define-command "group-remove" "Remove the current buffer from its group"
   (lambda ()

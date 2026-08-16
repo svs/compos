@@ -109,11 +109,12 @@ defmodule Aimax.Ui.AgentViewTest do
     {:ok, view, html} = live(conn, "/")
 
     assert html =~ "api · test-model"
-    assert count(html, ~s(<span class="name">*agent: ml-test*)) == 1
+    # the name span carries click attributes now (modeline-expand)
+    assert count(html, ~s(>*agent: ml-test*</span>)) == 1
 
-    view |> element(~s(span[phx-click="ui_cmd"])) |> render_click()
+    view |> element(~s(span[phx-click="ui_cmd"][phx-value-buf])) |> render_click()
     # the command ran: the buffer now shows in two windows
-    assert count(render(view), ~s(<span class="name">*agent: ml-test*)) == 2
+    assert count(render(view), ~s(>*agent: ml-test*</span>)) == 2
   end
 
   # block offsets go stale when text before them is edited; a boundary that

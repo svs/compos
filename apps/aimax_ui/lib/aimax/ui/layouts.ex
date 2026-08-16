@@ -426,7 +426,9 @@ defmodule Aimax.Ui.Layouts do
             box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
             overflow: hidden;
             z-index: 40;
-            animation: palette-pop 90ms ease-out;
+            /* NO entry animation: a patched node's animation can stall
+               at its first frame and leave the palette painted at
+               opacity 0 — an open, working, invisible prompt */
           }
           .mb-panel.palette .mb-input-row {
             order: -1;
@@ -511,10 +513,7 @@ defmodule Aimax.Ui.Layouts do
             border: 1px solid var(--border, #e2dbc9);
             background: var(--window-bg, #fdfcf8);
           }
-          @keyframes palette-pop {
-            from { opacity: 0; transform: translateX(-50%) scale(0.98); }
-            to   { opacity: 1; transform: translateX(-50%) scale(1); }
-          }
+
           .mb-label-row {
             padding: 6px 14px 5px;
             font-family: var(--font-mono); font-size: 10px;

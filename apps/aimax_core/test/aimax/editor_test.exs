@@ -2120,6 +2120,55 @@ defmodule Aimax.EditorTest do
     press(["q"])
   end
 
+  test "group-kill kills the members but keeps modified file buffers" do
+    n = System.unique_integer([:positive])
+    m1 = "gk-a-#{n}"
+    m2 = "gk-b-#{n}"
+    f = Path.join(System.tmp_dir!(), "gk-f-#{n}.txt")
+    File.write!(f, "saved")
+    on_exit(fn -> File.rm(f) end)
+
+    for b <- [m1, m2], do: Aimax.Core.create_buffer(b)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (visit "#{f}")
+             (buffer-insert! "#{f}" 0 "unsaved ")
+             (for-each (lambda (b) (buffer-set-local! b 'group "gkgrp-#{n}"))
+                       (list "#{m1}" "#{m2}" "#{f}"))
+             (group-kill! "gkgrp-#{n}"))
+      """)
+
+    refute Buffer.exists?(m1)
+    refute Buffer.exists?(m2)
+    assert Buffer.exists?(f)
+    {:ok, _} = Aimax.Core.Session.eval(~s{(begin (buffer-mark-saved! "#{f}") (buffer-kill! "#{f}") #t)})
+  end
+
+  test "a poisoned layout snapshot heals to the default arrangement" do
+    n = System.unique_integer([:positive])
+    m = "hl-a-#{n}"
+    Aimax.Core.create_buffer(m)
+
+    {:ok, out} =
+      Aimax.Core.Session.eval("""
+      (begin (set-frame-local! 'current-group #f)
+             (buffer-set-local! "#{m}" 'group "hlgrp-#{n}")
+             ;; poison: capture a layout showing only scratch, store it
+             ;; as the group's own
+             (delete-other-windows!)
+             (switch-to-buffer! "*scratch*")
+             (buffer-set-local! (group-chat "hlgrp-#{n}") 'group-layout (window-tree))
+             (switch-to-group! "hlgrp-#{n}")
+             (list (group-on-screen? "hlgrp-#{n}") (current-buffer)))
+      """)
+
+    assert out == ~s{(#t "#{m}")}
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("(begin (set-frame-local! 'current-group #f) (delete-other-windows!))")
+  end
+
   test "a group's layout survives leave and restore" do
     n = System.unique_integer([:positive])
     m = "ly-a-#{n}"

@@ -863,15 +863,21 @@
               (buffer-set-local! buf 'diff-watch #t)
               (message "watch on"))))))
 
-;; One handler for every diff buffer. It stays small: it refreshes the
-;; buffers that watch this root and does nothing else.
+;; One handler for every diff buffer. Only the buffers ON SCREEN
+;; refresh: re-rendering a background diff on every file change held
+;; the session for seconds at a time. A hidden buffer marks itself
+;; stale; the next fs change while visible, or `g`, catches it up.
 (on-fs-change!
   (lambda (root)
     (for-each
       (lambda (b)
         (when (and (equal? (buffer-local b 'diff-root) root)
                    (buffer-local b 'diff-watch))
-          (diff-refresh b)))
+          (if (window-showing b)
+              (begin
+                (buffer-set-local! b 'diff-stale #f)
+                (diff-refresh b))
+              (buffer-set-local! b 'diff-stale #t))))
       (buffer-list))))
 
 ;;; --- the plain view -----------------------------------------------------------

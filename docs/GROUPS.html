@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Groups and switching</title>
+<style>
+  :root {
+    --paper: #fdfcf8; --ink: #1b1a17; --soft: #57534a; --faint: #8a857a;
+    --indigo: #26356b; --wash: #e7e9f1; --rule: #e2dbc9; --inset: #f4f0e6;
+  }
+  body {
+    margin: 0 auto; max-width: 46em; padding: 40px 24px 80px;
+    background: var(--paper); color: var(--ink);
+    font: 16px/1.6 Spectral, Georgia, serif;
+  }
+  h1 { font-size: 30px; letter-spacing: -0.4px; margin: 0 0 4px; }
+  h2 { font-size: 21px; margin: 34px 0 8px; border-bottom: 1px solid var(--rule); padding-bottom: 4px; }
+  h3 { font-size: 17px; color: var(--indigo); margin: 22px 0 6px; }
+  p { margin: 10px 0; }
+  .lede { color: var(--soft); font-size: 17px; }
+  code, kbd {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: 13.5px; background: var(--inset); padding: 1px 5px; border-radius: 3px;
+  }
+  kbd { border: 1px solid var(--rule); background: var(--paper); }
+  table { border-collapse: collapse; margin: 12px 0; font-size: 15px; width: 100%; }
+  th, td { border: 1px solid var(--rule); padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--inset); font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 13px; }
+  td:first-child { white-space: nowrap; }
+  .rule { background: var(--wash); border-left: 3px solid var(--indigo); padding: 10px 14px; margin: 14px 0; }
+  .note { color: var(--faint); font-size: 14.5px; }
+</style>
+</head>
+<body>
+
+<h1>Groups and switching</h1>
+<p class="lede">Context management is one of the main goals of ai-max. A group
+is one working context: the buffers that belong together, their window
+arrangement, their chat, and their metadata. The buffer switcher moves you
+between contexts.</p>
+
+<h2>The model</h2>
+
+<p>A group is nothing but a shared buffer-local: every member carries
+<code>'group "name"</code>. Membership is stored nowhere else. A killed buffer
+leaves the set; <code>(group-buffers g)</code> derives the set on demand.</p>
+
+<p>The group's durable state lives on its chat buffer
+(<code>*chat:NAME*</code>), as identity locals:</p>
+
+<table>
+<tr><th>local</th><th>holds</th></tr>
+<tr><td><code>'group-meta</code></td><td>one sentence of metadata — what the group is for</td></tr>
+<tr><td><code>'group-layout</code></td><td>the saved window arrangement, as one opaque value</td></tr>
+<tr><td><code>'group-noise</code></td><td>the companion policy: <code>off</code>, <code>quiet</code>, or <code>loud</code></td></tr>
+</table>
+
+<p>Identity locals survive reset, restart, and save. The desktop file keeps
+them; a daemon restart brings every group back whole.</p>
+
+<p>The <strong>frame</strong> remembers which group you stand in
+(<code>'current-group</code>, a frame-local). A detour through an ungrouped
+buffer — <code>*scratch*</code>, help — does not lose the context. The frame
+group changes only when you switch groups.</p>
+
+<h2>The switcher: C-x b</h2>
+
+<div class="rule">
+<strong>History first.</strong> The pool is the recency stream: the buffer you
+just left is the default, so <kbd>RET</kbd> toggles like the Emacs buffer
+ring. Groups have no rows of their own — every buffer row IS a group row.
+</div>
+
+<p>Each row shows four columns: the mode, the group, the project, and the
+file. What you type matches the buffer name and the first three columns. So
+<code>mail</code> finds the mail group's buffers, <code>elixir</code> finds
+the Elixir buffers, and a project name finds that project's buffers.</p>
+
+<p><strong>Picking a buffer decides by group:</strong></p>
+
+<table>
+<tr><th>you pick</th><th>what happens</th></tr>
+<tr><td>a buffer of your current group</td><td>it switches in this window — plain</td></tr>
+<tr><td>a buffer of another group</td><td>you ENTER that group: its layout comes up, point in the picked buffer</td></tr>
+<tr><td>an ungrouped buffer</td><td>it switches in this window; the frame keeps its group</td></tr>
+<tr><td>a name that matches nothing</td><td><kbd>RET</kbd> founds a group with that name from the current windows</td></tr>
+</table>
+
+<p><kbd>TAB</kbd> locks the switcher to a group: with an input that names
+exactly one group, the pool narrows to that group's buffers, with the group's
+card on top. <kbd>C-g</kbd> quits and restores what the preview displaced.</p>
+
+<p class="note">The prompt renders as a centered palette. Every prompt with
+candidates does — M-x, find-file, the switcher. A line input keeps the bottom
+bar. <kbd>Cmd-k</kbd> opens M-x.</p>
+
+<h2>Layouts: captured and restored</h2>
+
+<p>A group carries its window arrangement. The snapshot is the frame's window
+tree — splits, ratios, buffers, scroll, point — stored as one value on the
+group chat.</p>
+
+<p><strong>When a snapshot is taken:</strong></p>
+<ul>
+<li>when you open the switcher from inside a group;</li>
+<li>when you switch away from a group.</li>
+</ul>
+
+<p>A snapshot is taken only while the group is on screen. A full-frame scratch
+detour does not overwrite the real arrangement. A stale snapshot that shows
+none of the group heals itself: the switch builds the default arrangement and
+saves it over the bad one.</p>
+
+<p><strong>When a group has no snapshot</strong>, it still arrives arranged:
+the most recent work buffer on the left, and on the right the group chat
+(noise <code>loud</code>) or the next work buffer. One member alone fills the
+frame.</p>
+
+<h2>The groups board: C-x G</h2>
+
+<p>One row per group: name, member count, noise, the most recent members, and
+the metadata.</p>
+
+<table>
+<tr><th>key</th><th>action</th></tr>
+<tr><td><kbd>RET</kbd></td><td>switch to the group (layout and all)</td></tr>
+<tr><td><kbd>d</kbd></td><td>ask the LLM to write the group's one-line description</td></tr>
+<tr><td><kbd>n</kbd></td><td>cycle companion noise: off → quiet → loud</td></tr>
+<tr><td><kbd>x</kbd></td><td>dissolve: remove the tag from every member; the buffers live on</td></tr>
+<tr><td><kbd>K</kbd></td><td>kill: every member buffer dies; a modified file buffer is kept</td></tr>
+<tr><td><kbd>g</kbd></td><td>refresh</td></tr>
+</table>
+
+<h2>Working inside a group</h2>
+
+<table>
+<tr><th>key</th><th>action</th></tr>
+<tr><td><kbd>C-c w</kbd></td><td>toggle between a work buffer and the group chat</td></tr>
+<tr><td><kbd>C-c g</kbd></td><td>join (or found) a named group</td></tr>
+<tr><td><kbd>C-c q</kbd></td><td>ask the group chat without leaving the buffer</td></tr>
+<tr><td><kbd>C-c d</kbd></td><td>LLM-describe the current group</td></tr>
+<tr><td><kbd>C-x C-f</kbd></td><td>find-file opens the file INTO the current group</td></tr>
+<tr><td><code>M-x group-kill</code></td><td>kill the current group's buffers (modified files kept)</td></tr>
+<tr><td><code>M-x group-remove</code></td><td>pop the current buffer out of its group</td></tr>
+</table>
+
+<p>Files you open from inside a group join it. Pop a buffer out with
+<code>group-remove</code>, or move it with <code>C-c g</code>.</p>
+
+<h2>Companion noise</h2>
+
+<p>Each group sets how loud its chat companion is. The setting persists with
+the group.</p>
+
+<table>
+<tr><th>level</th><th>meaning</th></tr>
+<tr><td><code>off</code></td><td>no companion window in the default layout</td></tr>
+<tr><td><code>quiet</code></td><td>the default — companion works out of view</td></tr>
+<tr><td><code>loud</code></td><td>the chat keeps its own column in the default layout</td></tr>
+</table>
+
+<h2>Persistence</h2>
+
+<p>Everything survives a daemon restart. File buffers reopen from disk and
+their <code>'group</code> tag is laid back on top. Non-file buffers restore
+with content. The group's chat carries the metadata, the layout, and the
+noise policy through <code>desktop.etf</code>. Derived state — a diff's
+rendered blocks — is declared with <code>'desktop-skip-locals</code> and
+rebuilt from its source instead of saved.</p>
+
+<p class="note">Internals: the groups section of
+<code>apps/aimax_core/priv/editor.scm</code>. The layout primitives are
+<code>window-tree</code> / <code>window-tree-set!</code>. The switcher is
+<code>switch-to-buffer</code> in the same file.</p>
+
+</body>
+</html>

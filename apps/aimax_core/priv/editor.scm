@@ -3329,7 +3329,14 @@
   (set-frame-local! 'current-group g)
   (let ((saved (group-layout g)))
     (if saved
-        (window-tree-set! saved)
+        (begin
+          (window-tree-set! saved)
+          ;; a snapshot that shows none of the group is not the group's
+          ;; layout (a stale capture from before the on-screen guard):
+          ;; heal it — build the default and re-save over the bad one
+          (unless (group-on-screen? g)
+            (group-default-layout! g)
+            (group-layout-save! g)))
         (group-default-layout! g)))
   (message (string-append "switched to group " (group-label g))))
 
@@ -3451,6 +3458,35 @@
         (list-refresh! (current-buffer))
         (message (string-append "dissolved group " (group-label g)))))))
 
+;; kill a whole context: every member buffer dies, except a modified
+;; file buffer — unsaved work never dies silently
+(define (group-kill! g)
+  (let* ((members (group-buffers g))
+         (kept (filter (lambda (b) (and (buffer-path b) (buffer-modified? b)))
+                       members)))
+    (for-each (lambda (b) (unless (member b kept) (buffer-kill! b)))
+              members)
+    (when (equal? (frame-local 'current-group) g)
+      (set-frame-local! 'current-group #f))
+    (message (string-append "killed group " (group-label g)
+               (if (pair? kept)
+                   (string-append " — kept " (number->string (length kept))
+                                  " modified")
+                   "")))))
+
+(define-command "group-kill" "Kill every buffer in the current group"
+  (lambda ()
+    (let ((g (frame-group)))
+      (if g (group-kill! g) (message "Not in a group")))))
+
+(define-command "group-kill-at-point" "Kill every buffer of the group at point"
+  (lambda ()
+    (let ((g (groups--current)))
+      (when g
+        (group-kill! g)
+        (when (buffer-exists? *groups-buffer*)
+          (list-refresh! *groups-buffer*))))))
+
 (define-command "groups-refresh" "Refresh the groups board"
   (lambda () (list-refresh! *groups-buffer*)))
 
@@ -3471,9 +3507,10 @@
     'header (lambda (buf)
               (string-append
                 ";; groups — RET switch · d describe (LLM) · n noise · "
-                "x dissolve · g refresh · q quit"))
+                "x dissolve · K kill buffers · g refresh · q quit"))
     'keys '(("RET" "group-switch") ("d" "group-describe-at-point")
             ("n" "group-noise-cycle") ("x" "group-dissolve")
+            ("K" "group-kill-at-point")
             ("g" "groups-refresh") ("q" "quit-window"))))
 
 (define (group-buffers g)
@@ -3494,7 +3531,12 @@
 (define (chat-buffer? b)
   (equal? (buffer-local b 'mode-name) "chat-mode"))
 
-(define (group-docs g) (remove chat-buffer? (group-buffers-mru g)))
+;; the group's chat counts by NAME as well as by mode: a chat made by
+;; group-chat but never shown has no mode yet, and it is still not a
+;; work buffer
+(define (group-docs g)
+  (remove (lambda (b) (or (chat-buffer? b) (equal? b (group-chat-name g))))
+          (group-buffers-mru g)))
 
 ;;; --- asking about windows -------------------------------------------------------
 ;;; (window-list) is ((id buffer) ...) and five places walked it by hand,

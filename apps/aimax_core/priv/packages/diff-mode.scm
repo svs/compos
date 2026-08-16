@@ -908,8 +908,10 @@
       (diff--install-keys!)
       (buffer-set-read-only! buf #t)
       ;; the text regenerates from the backend, so the desktop saves the
-      ;; locals and not the content
+      ;; locals and not the content — and not the drawn projection either:
+      ;; diff-refresh below rebuilds render-blocks from git on restore
       (buffer-set-local! buf 'transient #t)
+      (buffer-set-local! buf 'desktop-skip-locals '(render-blocks))
       (buffer-set-local! buf 'render-mode "blocks")
       ;; Restore lands here with the locals and no text. Re-arm the watch
       ;; and re-read; the open cards survive because diff--apply! only opens

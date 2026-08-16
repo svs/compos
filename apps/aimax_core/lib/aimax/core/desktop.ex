@@ -138,10 +138,26 @@ defmodule Aimax.Core.Desktop do
     do: {:split, dir, Map.get(split, :ratio, 0.5), serialize(a), serialize(b)}
 
   # everything Scheme put on the buffer, minus values that can't survive
-  # a daemon restart (closures, pids, refs)
+  # a daemon restart (closures, pids, refs), minus the locals the mode
+  # DECLARES as derived: 'desktop-skip-locals names locals the setup fn
+  # rebuilds from its source (a parsed diff's render-blocks), so saving
+  # them only duplicates the database they project.
   defp savable_locals(name) do
-    name |> Buffer.locals() |> Map.filter(fn {_k, v} -> serializable?(v) end)
+    locals = Buffer.locals(name)
+
+    skip =
+      case Map.get(locals, "desktop-skip-locals") do
+        l when is_list(l) -> Enum.map(l, &local_key/1)
+        _ -> []
+      end
+
+    locals
+    |> Map.drop(skip)
+    |> Map.filter(fn {_k, v} -> serializable?(v) end)
   end
+
+  defp local_key({:sym, s}), do: s
+  defp local_key(s), do: to_string(s)
 
   defp serializable?(v) when is_function(v) or is_pid(v) or is_reference(v) or is_port(v),
     do: false

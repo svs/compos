@@ -61,6 +61,30 @@ defmodule Aimax.DesktopRestoreTest do
     assert Buffer.get_local(name, "seen") == "marker"
   end
 
+  # a mode can declare a local as DERIVED: the desktop then skips it, and
+  # the setup fn rebuilds it from its source — a diff's render-blocks
+  test "desktop-skip-locals keeps a derived local out of the savefile" do
+    name = "*skip-#{System.unique_integer([:positive])}*"
+    on_exit(fn -> Aimax.Core.kill_buffer(name) end)
+
+    eval!("""
+    (begin (switch-to-buffer! "#{name}")
+           (buffer-set-local! (current-buffer) 'keep "small")
+           (buffer-set-local! (current-buffer) 'heavy "HUGE DERIVED STATE")
+           (buffer-set-local! (current-buffer) 'desktop-skip-locals '(heavy)))
+    """)
+
+    assert :ok = Desktop.save_now()
+    Editor.set_window_buffer("*scratch*")
+    Aimax.Core.kill_buffer(name)
+    assert eventually(fn -> not Buffer.exists?(name) end)
+
+    assert :ok = Desktop.restore_now()
+    assert Buffer.exists?(name)
+    assert Buffer.get_local(name, "keep") == "small"
+    assert Buffer.get_local(name, "heavy") in [nil, false]
+  end
+
   # S1: a manual scroll is daemon state — it survives save/restore,
   # pinned where the reader left it.
   test "a pinned scroll survives restore" do

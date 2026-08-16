@@ -14,6 +14,8 @@
   (set! *recipes*
     (append (remove (lambda (r) (equal? (car r) title)) *recipes*)
             (list (list title expr))))
+  (catalog-register! 'recipe title title
+    'use expr)
   title)
 
 (define (recipes) *recipes*)
@@ -21,7 +23,10 @@
 ;; recipes are searched FIRST: a task-level hit beats four name-level ones
 (define (recipe-search query)
   (let ((words (apropos--words query)))
-    (map (lambda (r) (list 'kind "recipe" 'task (car r) 'run (cadr r)))
+    (map (lambda (r)
+           (apropos--enrich
+             (list 'kind "recipe" 'task (car r) 'name (car r) 'run (cadr r))
+             "recipe"))
          (filter (lambda (r) (apropos--hit? (string-append (car r) " " (cadr r)) words))
                  *recipes*))))
 

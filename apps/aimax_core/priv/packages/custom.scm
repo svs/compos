@@ -41,6 +41,11 @@
   (let ((saved (assoc name *custom-set-vars*)))
     (cond (saved (set-symbol-value! name (cadr saved)))
           ((not (boundp name)) (set-symbol-value! name default))))
+  (catalog-register! 'setting name doc
+    'domain (or (custom--plist-get opts 'group) 'customize)
+    'effects '(write)
+    'default default
+    'use (string-append "(customize-save! '" (symbol->string name) " VALUE)"))
   name)
 
 ;;; --- describe / apropos: data for humans and agents alike --------------------

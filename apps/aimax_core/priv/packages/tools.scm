@@ -54,14 +54,24 @@
     "(insert! TEXT) at point in the current buffer; (message TEXT) echoes; "
     "(run-command \"name\") runs any M-x command. File buffers are named by "
     "full path. Discovery is ONE call: apropos searches the public API, "
-    "the M-x commands, the keybindings and the settings by WORDS — "
-    "(apropos \"split window\"), not a regex — and returns signatures. "
-    "apropos-categories shows the shape of the surface first. Everything "
+    "M-x commands, keybindings, settings, recipes, modes and UI components "
+    "by WORDS — (apropos \"split window\"), not a regex. Filter with kind, "
+    "package, namespace, domain, or effect. Effects are pure/read/write/"
+    "destroy/spend/execute/external: prefer pure/read while investigating "
+    "and inspect consequential calls before using them. apropos-categories "
+    "shows the shape of the surface first. Everything "
     "outside the public API is private implementation detail; reach for it "
     "with scope \"all\" plus describe-function only when nothing public "
     "fits. Before writing code with a name you are not sure exists, check "
     "it with apropos, and read any function's real source with "
     "describe-function. "
+    "When you WRITE Scheme, stamp every public section with (domain! 'NAME) "
+    "and (effects! '(LEVEL MODIFIERS...)). LEVEL is pure, read, write, "
+    "destroy, or unknown; modifiers are external, execute, and spend. Never "
+    "use read as a guess. The loader stamps package and namespace. Before "
+    "writing a Scheme package, query apropos for existing APIs and components. "
+    "Before choosing or defining UI, read docs/COMPONENTS.md and reuse a catalogued "
+    "component when it fits. "
     ;; without this the assistant tells people it has no browser, while
     ;; sitting on a wire to one — apropos would find these, but only if
     ;; it thinks to look
@@ -236,27 +246,108 @@
   (and (apropos--hit? (string-append (car e) " " (nth 1 e) " " (nth 2 e) " "
                                      (symbol->string (nth 3 e)))
                       words)
-       (list 'kind "function" 'name (car e) 'sig (nth 2 e)
-             'doc (nth 1 e) 'category (symbol->string (nth 3 e)))))
+       (apropos--enrich
+         (list 'kind "function" 'name (car e) 'sig (nth 2 e)
+               'doc (nth 1 e) 'domain (symbol->string (nth 3 e))
+               'category (symbol->string (nth 3 e))))))
 
 (define (apropos--command n words)
   (let ((doc (command-doc n)))
     (and (apropos--hit? (string-append n " " doc) words)
-         (list 'kind "command" 'name n 'doc doc
-               'key (let ((k (key-for-command n))) (if (equal? k "") #f k))))))
+         (apropos--enrich
+           (list 'kind "command" 'name n 'doc doc
+                 'key (let ((k (key-for-command n))) (if (equal? k "") #f k)))))))
 
 (define (apropos--key row words)
   (and (apropos--hit? (string-append (car row) " " (nth 1 row)) words)
-       (list 'kind "key" 'name (car row) 'runs (nth 1 row))))
+       (let ((cmd (catalog-entry 'command (nth 1 row))))
+         (append (list 'kind "key" 'name (car row) 'runs (nth 1 row)
+                       'domain "keys" 'effects
+                       (if cmd (catalog--get cmd 'effects) '("read")))
+                 (if cmd
+                     (list 'package (catalog--get cmd 'package)
+                           'namespace (catalog--get cmd 'namespace))
+                     '())))))
 
 (define (apropos--var v words)
   (let* ((rec (cadr v))
          (name (symbol->string (car v)))
          (doc (or (custom--plist-get rec 'doc) "")))
     (and (apropos--hit? (string-append name " " doc) words)
-         (list 'kind "variable" 'name name 'doc doc))))
+         (apropos--enrich (list 'kind "variable" 'name name 'doc doc)
+                          "setting"))))
 
 (define (apropos--compact xs) (filter (lambda (x) x) xs))
+
+(define (apropos--enrich hit &optional catalog-kind)
+  (let* ((kind (or catalog-kind (plist-get hit 'kind)))
+         (name (or (and (equal? kind "component") (plist-get hit 'qualified-name))
+                   (plist-get hit 'name) (plist-get hit 'task)))
+         (e (and name (catalog-entry (string->symbol kind) name))))
+    (if (not e)
+        hit
+        (append hit
+          (list 'qualified-name (catalog--get e 'qualified-name)
+                'package (catalog--get e 'package)
+                'namespace (catalog--get e 'namespace)
+                'domain (catalog--get e 'domain)
+                'effects (catalog--get e 'effects)
+                'use (catalog--get e 'use))))))
+
+(define (apropos--catalog-entry e words)
+  (let ((kind (catalog--get e 'kind)))
+    (and (member kind '("component" "mode"))
+         (apropos--hit?
+           (string-append (catalog--get e 'name) " "
+                          (catalog--get e 'qualified-name) " "
+                          (catalog--get e 'doc) " "
+                          (catalog--get e 'package) " "
+                          (catalog--get e 'namespace) " "
+                          (catalog--get e 'domain) " "
+                          (value->string (or (catalog--get e 'props) '())) " "
+                          (value->string (or (catalog--get e 'example) '())))
+           words)
+         e)))
+
+(define (apropos--filter filters key)
+  (or (plist-get filters key)
+      (and (equal? key 'domain) (plist-get filters 'category))))
+
+(define (apropos--filter-match? hit filters)
+  (let ((kind (apropos--filter filters 'kind))
+        (package (apropos--filter filters 'package))
+        (namespace (apropos--filter filters 'namespace))
+        (domain (apropos--filter filters 'domain))
+        (effect (apropos--filter filters 'effect)))
+    (and (or (not kind) (equal? (plist-get hit 'kind) (catalog--string kind)))
+         (or (not package) (equal? (plist-get hit 'package) (catalog--string package)))
+         (or (not namespace) (equal? (plist-get hit 'namespace) (catalog--string namespace)))
+         (or (not domain) (equal? (plist-get hit 'domain) (catalog--string domain)))
+         (or (not effect) (member (catalog--string effect) (or (plist-get hit 'effects) '()))))))
+
+;; Small deterministic ranking, without embeddings or another model call:
+;; an exact name is an answer, a recipe is a ready composition, and a name
+;; prefix is generally more useful than a mention buried in prose.
+(define (apropos--rank hits query)
+  (let* ((q (string-downcase (string-trim query)))
+         (name-of (lambda (h)
+                    (string-downcase
+                      (or (plist-get h 'qualified-name)
+                          (plist-get h 'name) (plist-get h 'task) ""))))
+         (short-of (lambda (h)
+                     (string-downcase (or (plist-get h 'name) (plist-get h 'task) ""))))
+         (exact? (lambda (h) (or (equal? q (name-of h)) (equal? q (short-of h)))))
+         (recipe? (lambda (h) (equal? (plist-get h 'kind) "recipe")))
+         (prefix? (lambda (h)
+                    (or (string-prefix? q (name-of h))
+                        (string-prefix? q (short-of h)))))
+         (exact (filter exact? hits))
+         (recipes (filter (lambda (h) (and (not (exact? h)) (recipe? h))) hits))
+         (prefixes (filter (lambda (h)
+                            (and (not (exact? h)) (not (recipe? h)) (prefix? h))) hits))
+         (rest (filter (lambda (h)
+                         (and (not (exact? h)) (not (recipe? h)) (not (prefix? h)))) hits)))
+    (if (equal? q "") hits (append exact recipes prefixes rest))))
 
 ;; an internal entry carries its doc when the primitive has one; a bare
 ;; userland define stays a bare name — describe-function has its source
@@ -267,31 +358,34 @@
 ;; QUERY is words, not a regex: "split window", "open a file", "chat cost".
 ;; Recipes come first: a task-level hit beats four name-level ones, and it
 ;; is the answer the caller actually wanted.
-(define (apropos query)
+(define (apropos query &rest filters)
   (let* ((words (apropos--words query))
          (hits (append
                  (if (boundp (quote recipe-search)) (recipe-search query) '())
                  (apropos--compact (map (lambda (e) (apropos--fn e words)) (public-api)))
                  (apropos--compact (map (lambda (n) (apropos--command n words)) (command-names)))
                  (apropos--compact (map (lambda (r) (apropos--key r words)) (global-keys)))
-                 (apropos--compact (map (lambda (v) (apropos--var v words)) *custom-vars*)))))
-    (if (or (pair? hits) (null? words))
-        hits
+                 (apropos--compact (map (lambda (v) (apropos--var v words)) *custom-vars*))
+                 (apropos--compact (map (lambda (e) (apropos--catalog-entry e words))
+                                        (catalog)))))
+         (filtered (filter (lambda (h) (apropos--filter-match? h filters)) hits)))
+    (if (or (pair? filtered) (null? words) (pair? filters))
+        (apropos--rank filtered query)
         ;; nothing matched: the query is probably a near-miss on a name
         (map (lambda (e)
-               (list 'kind "function" 'name (car e) 'sig (nth 2 e) 'doc (nth 1 e)
-                     'category (symbol->string (nth 3 e)) 'note "closest name"))
+               (apropos--enrich
+                 (list 'kind "function" 'name (car e) 'sig (nth 2 e) 'doc (nth 1 e)
+                       'domain (symbol->string (nth 3 e))
+                       'category (symbol->string (nth 3 e)) 'note "closest name")))
              (tool--suggest (string-trim query))))))
 
 ;; everything in one category — the shape of the API, not a search of it
 (define (apropos-category name)
-  (map (lambda (e)
-         (list 'kind "function" 'name (car e) 'sig (nth 2 e) 'doc (nth 1 e)))
-       (filter (lambda (e) (equal? (nth 3 e) name)) (public-api))))
+  (apropos "" 'domain name))
 
 (category! 'discovery)
 (public! 'apropos
-  "(apropos \"words\") — search the whole editor by words: public functions, M-x commands, keybindings and settings. Start here.")
+  "(apropos \"words\" ['kind K 'package P 'namespace N 'domain D 'effect E]) — search the whole catalog and optionally filter it. Start here.")
 (public! 'apropos-category
   "(apropos-category 'windows) — every public function in one category")
 (public! 'public-categories "(public-categories) — the category names")
@@ -304,32 +398,71 @@
     "\"split window\" finds the window splitters and \"chat cost\" finds "
     "the cost commands. This is the supported surface and the place to "
     "start. Nothing matched? You get the closest names instead. Pass "
-    "category to list one area whole, or scope \"all\" to include "
+    "kind/package/namespace/domain/effect narrow the catalog. Pass "
+    "category as a compatibility alias for domain, or scope \"all\" to include "
     "the internal primitives, one-line docs only, which may change "
     "without notice.")
   (list (list 'query "string" "words, e.g. \"open a file\" or \"buffer text\"")
-        (list 'category "string" "list this category whole instead of searching" 'optional)
+        (list 'kind "string" "function, command, key, variable, recipe, mode, or component" 'optional)
+        (list 'package "string" "owning load unit" 'optional)
+        (list 'namespace "string" "stable public vocabulary" 'optional)
+        (list 'domain "string" "subject area, e.g. windows or buffers" 'optional)
+        (list 'effect "string" "pure, read, write, destroy, spend, execute, or external" 'optional)
+        (list 'category "string" "deprecated alias for domain" 'optional)
         (list 'scope "string" "\"public\" (default) or \"all\"" 'optional))
   (lambda (args)
     (let ((q (or (custom--plist-get args 'query) ""))
           (cat (custom--plist-get args 'category))
+          (kind (custom--plist-get args 'kind))
+          (package (custom--plist-get args 'package))
+          (namespace (custom--plist-get args 'namespace))
+          (domain (custom--plist-get args 'domain))
+          (effect (custom--plist-get args 'effect))
           (scope (or (custom--plist-get args 'scope) "public")))
-      (value->string
-        (cond
-          (cat (apropos-category (string->symbol cat)))
-          ((equal? scope "all")
-           (let ((words (apropos--words q)))
-             (list 'public (apropos q)
-                   'globals (apropos--compact
-                              (map (lambda (n)
-                                     (apropos--internal n (primitive-doc n) words))
-                                   (global-names))))))
-          (else (apropos q)))))))
+      (let ((filters
+              (append (if kind (list 'kind kind) '())
+                      (if package (list 'package package) '())
+                      (if namespace (list 'namespace namespace) '())
+                      (if (or domain cat) (list 'domain (or domain cat)) '())
+                      (if effect (list 'effect effect) '()))))
+        (value->string
+          (if (equal? scope "all")
+              (let ((words (apropos--words q)))
+                (list 'public (apply apropos (cons q filters))
+                      'globals (apropos--compact
+                                 (map (lambda (n)
+                                        (apropos--internal n (primitive-doc n) words))
+                                      (global-names)))))
+              (apply apropos (cons q filters))))))))
 
 (define-tool! 'apropos-categories
-  "List the editor API's categories. Cheapest way to see the shape of the surface before searching it."
+  "List the catalog facets: kinds, packages, namespaces, domains, and effects. Cheapest way to see the shape of the surface before searching it."
   '()
-  (lambda (args) (value->string (public-categories))))
+  (lambda (args)
+    (value->string
+      (list 'kinds (catalog-facet 'kind)
+            'packages (catalog-facet 'package)
+            'namespaces (catalog-facet 'namespace)
+            'domains (catalog-facet 'domain)
+            'effects (catalog-facet 'effects)))))
+
+(define (catalog--add-unique value acc)
+  (if (member value acc) acc (append acc (list value))))
+
+(define (catalog-facet key)
+  (fold (lambda (acc e)
+          (let ((v (plist-get e key)))
+            (if (not v)
+                acc
+                (if (equal? key 'effects)
+                    (fold (lambda (a x) (catalog--add-unique x a)) acc v)
+                    (catalog--add-unique v acc)))))
+        '() (catalog)))
+
+(category! 'discovery)
+(public! 'catalog "(catalog) — every public catalog entry with package, namespace, domain and effects")
+(public! 'catalog-entry "(catalog-entry KIND NAME) — one catalog entry, or #f")
+(public! 'catalog-facet "(catalog-facet KEY) — distinct catalog values for kind, package, namespace, domain or effects")
 
 ;;; --- hello: the cold start ------------------------------------------------------
 ;;; An agent that connects to the socket used to learn nothing: it got a
@@ -345,8 +478,9 @@
     "Everything the GUI can do, you can do: eval is the whole API.\n\n"
     "DISCOVERY — one call:\n"
     "  (apropos \"words\")        search functions, commands, keys and "
-    "settings by WORDS, not regex. Returns signatures.\n"
-    "  (apropos-category 'NAME) list one area whole.\n"
+    "settings, recipes, modes and components by WORDS, not regex.\n"
+    "  (apropos \"\" 'domain 'windows) lists one subject area.\n"
+    "  Add 'effect 'read/write/destroy/spend to choose safely.\n"
     "  (describe-function 'NAME) read the real source.\n\n"
     "Categories: " (string-join (map symbol->string (public-categories)) ", ") "\n\n"
     "NOTE: this is ai-max's own small Scheme, NOT Emacs Lisp. Names like "

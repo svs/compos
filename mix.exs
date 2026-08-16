@@ -6,7 +6,22 @@ defmodule Aimax.MixProject do
       apps_path: "apps",
       version: "0.1.0",
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      releases: releases()
+    ]
+  end
+
+  defp releases do
+    [
+      aimax: [
+        applications: [
+          aimax_scheme: :permanent,
+          aimax_core: :permanent,
+          aimax_ui: :permanent,
+          aimax_rpc: :permanent
+        ],
+        include_executables_for: [:unix]
+      ]
     ]
   end
 

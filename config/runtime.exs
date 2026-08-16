@@ -22,6 +22,11 @@ if config_env() != :test do
     config :aimax_ui, Aimax.Ui.Endpoint, http: [ip: {127, 0, 0, 1}, port: String.to_integer(port)]
   end
 
+  # the preview-app origin; a second daemon must move this port too
+  if app_port = System.get_env("AIMAX_APP_PORT") do
+    config :aimax_ui, app_port: String.to_integer(app_port)
+  end
+
   # explicit overrides win over the ones derived from home
   if sock = System.get_env("AIMAX_SOCK"), do: config(:aimax_rpc, socket_path: Path.expand(sock))
 

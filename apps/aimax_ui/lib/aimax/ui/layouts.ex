@@ -11,6 +11,10 @@ defmodule Aimax.Ui.Layouts do
         <meta name="csrf-token" content={Phoenix.Controller.get_csrf_token()} />
         <meta name="boot-id" content={:persistent_term.get(:aimax_boot_id, "dev")} />
         <title>ai-max.el</title>
+        <link rel="manifest" href="/manifest.webmanifest" />
+        <link rel="icon" type="image/png" href="/icons/aimax-192.png" />
+        <link rel="apple-touch-icon" href="/icons/aimax-192.png" />
+        <meta name="theme-color" content="#e6e0d2" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
           href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap"

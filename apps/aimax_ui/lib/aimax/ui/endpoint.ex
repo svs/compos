@@ -28,6 +28,9 @@ defmodule Aimax.Ui.Endpoint do
   plug Plug.Static, at: "/phx", from: {:phoenix, "priv/static"}
   plug Plug.Static, at: "/lv", from: {:phoenix_live_view, "priv/static"}
 
+  # the PWA manifest and icons — Chrome installs the editor as its own app
+  plug Plug.Static, at: "/", from: :aimax_ui, only: ~w(manifest.webmanifest icons)
+
   plug Plug.Session, @session_options
   plug Aimax.Ui.Router
 

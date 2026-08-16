@@ -2033,6 +2033,56 @@ defmodule Aimax.EditorTest do
       )
   end
 
+  test "a group you switched to is a history row; its name finds it and its members" do
+    n = System.unique_integer([:positive])
+    m1 = "hs-a-#{n}"
+    m2 = "hs-b-#{n}"
+    home = "hs-home-#{n}"
+    for x <- [m1, m2, home], do: Aimax.Core.create_buffer(x)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (set-frame-local! 'current-group #f)
+             (delete-other-windows!)
+             (switch-to-buffer! "#{m1}")
+             (switch-to-buffer! "#{m2}")
+             (buffer-set-local! "#{m1}" 'group "hsgrp-#{n}")
+             (buffer-set-local! "#{m2}" 'group "hsgrp-#{n}")
+             (switch-to-group! "hsgrp-#{n}")
+             (switch-to-buffer! "#{home}")
+             ;; leave the context: the frame stands nowhere now, so the
+             ;; group is history like anything else
+             (set-frame-local! 'current-group #f))
+      """)
+
+    # the switch is itself a history entry: the group's card leads the
+    # stream, above the members its restore bumped
+    press(["C-x", "b"])
+    labels = Enum.map(Editor.render_state().minibuffer.candidates, & &1.label)
+    assert hd(labels) == "[hsgrp-#{n}]"
+
+    # searching the group's name finds the card AND the members
+    type("hsgrp-#{n}")
+    labels = Enum.map(Editor.render_state().minibuffer.candidates, & &1.label)
+    assert "[hsgrp-#{n}]" in labels
+    assert m1 in labels
+    assert m2 in labels
+    press(["C-g"])
+
+    # RET on the card returns to the group
+    press(["C-x", "b"])
+    press(["RET"])
+    assert Aimax.Core.Session.eval("(frame-local 'current-group)") ==
+             {:ok, ~s{"hsgrp-#{n}"}}
+
+    assert Editor.current_buffer() in [m1, m2]
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(
+        "(begin (set-frame-local! 'current-group #f) (delete-other-windows!))"
+      )
+  end
+
   test "winner: a destroyed layout is one undo away; redo returns" do
     n = System.unique_integer([:positive])
     b = "wn-#{n}"

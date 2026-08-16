@@ -177,6 +177,8 @@ defmodule Aimax.Core.Editor do
 
   @doc "Buffers in most-recently-displayed order (Emacs buffer list)."
   def buffer_mru, do: GenServer.call(__MODULE__, :buffer_mru)
+  def mru_all, do: GenServer.call(__MODULE__, :mru_all)
+  def mru_note_group(g), do: GenServer.call(__MODULE__, {:mru_note_group, g})
 
   # Emacs last-command (yank-pop and friends dispatch on it)
   def set_last_command(name), do: GenServer.call(__MODULE__, {:set_last_command, name})
@@ -891,12 +893,27 @@ defmodule Aimax.Core.Editor do
   end
 
   def handle_call(:buffer_mru, _from, state) do
-    live = Enum.filter(state.mru, &Buffer.exists?/1)
+    live = Enum.filter(state.mru, fn b -> is_binary(b) and Buffer.exists?(b) end)
     rest = Aimax.Core.list_buffers() -- live
 
     # space-prefixed buffers are internal (the minibuf), hidden like Emacs
     {:reply, Enum.reject(live ++ Enum.sort(rest), &String.starts_with?(&1, " ")), state}
   end
+
+  # the WHOLE history, group marks included: a group switch is an entry
+  # like any buffer visit, so one stream ranks every place you went
+  def handle_call(:mru_all, _from, state) do
+    rows =
+      Enum.flat_map(state.mru, fn
+        {:group, g} -> [["group", g]]
+        b when is_binary(b) -> if Buffer.exists?(b), do: [["buffer", b]], else: []
+      end)
+
+    {:reply, rows, state}
+  end
+
+  def handle_call({:mru_note_group, g}, _from, state),
+    do: changed(:ok, bump_mru(state, {:group, g}))
 
   def handle_call({:set_last_command, name}, _from, state),
     do: {:reply, :ok, %{state | last_command: name}}

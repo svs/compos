@@ -1904,7 +1904,11 @@
       (else
         (let ((root (buffer-project-root b)))
           (if (equal? root "")
-              (switch-to-buffer! b)
+              (begin
+                ;; no context to enter — say so instead of a silent
+                ;; plain switch that reads as "C-RET did nothing"
+                (switch-to-buffer! b)
+                (message (string-append b " has no group and no project — plain switch")))
               (begin
                 (for-each (lambda (x)
                             (when (and (not (buffer-group x))
@@ -1913,6 +1917,35 @@
                           (buffer-list))
                 (switch-to-group! root)
                 (focus))))))))
+
+;; ONE history: buffers and groups woven by recency. A group switch
+;; was itself an entry (mru-note-group!), so its card sits exactly
+;; where history puts it — above the members its restore bumped. The
+;; group's card and its buffers all match the group's name, so one
+;; search shows the context and its contents together.
+(define (switch-history-pool my-group)
+  (let* ((bufs (filter (lambda (b) (not (string-prefix? " " b)))
+                       (buffer-list-mru)))
+         (annotated (annotate 'buffer bufs)))
+    (let loop ((rows (mru-list)) (out '()))
+      (if (null? rows)
+          ;; buffers never woven (unvisited, or visited but filtered)
+          ;; trail behind in their annotated order
+          (let ((woven (reverse out)))
+            (append woven
+                    (filter (lambda (c) (not (member c woven))) annotated)))
+          (let* ((r (car rows))
+                 (kind (car r))
+                 (name (car (cdr r))))
+            (cond
+              ((and (equal? kind "group")
+                    (not (equal? name my-group))
+                    (pair? (group-buffers name)))
+               (loop (cdr rows) (cons (group-container-candidate name) out)))
+              ((equal? kind "buffer")
+               (let ((c (assoc name annotated)))
+                 (loop (cdr rows) (if c (cons c out) out))))
+              (else (loop (cdr rows) out))))))))
 
 (define-command "switch-to-buffer"
   "Switch to a buffer; C-RET enters the buffer's group instead"
@@ -1930,16 +1963,14 @@
                                    ((equal? (group-container-label (car gs)) label)
                                     (car gs))
                                    (else (loop (cdr gs)))))))
-           (source (switch-buffer-source (buffer-candidates-all)))
+           (source (switch-buffer-source (switch-history-pool my-group)))
            (pool (car source))
            (standing (car (cdr source)))
            (pick (car (cdr (cdr source))))
-           ;; pure history: the buffer you just left is the default, so
-           ;; RET toggles like the Emacs buffer ring. Groups need no rows
-           ;; of their own — every buffer row IS a group row: the group
-           ;; column matches what you type, and picking a buffer outside
-           ;; the current group switches to its group. TAB still locks
-           ;; to a group; C-x G lists them.
+           ;; history first: the pool is the one MRU stream — buffers
+           ;; and group cards woven by recency. RET on a buffer row
+           ;; switches the buffer; RET on a group card switches the
+           ;; context. TAB still locks; C-x G still lists.
            (all (filter (lambda (c) (not (equal? (car c) standing))) pool))
            (fallback (if (null? all) here (car (car all)))))
       (minibuffer-read-preview
@@ -3378,6 +3409,9 @@
             (group-layout-save! g)))
         (group-default-layout! g)))
   (set! *winner-inhibit* #f)
+  ;; the switch itself is a history entry: the group joins the one MRU
+  ;; stream, above the member buffers the restore just bumped
+  (mru-note-group! g)
   (windows-shown-catchup!)
   (message (string-append "switched to group " (group-label g))))
 

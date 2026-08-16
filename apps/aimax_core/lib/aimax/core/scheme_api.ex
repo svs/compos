@@ -32,6 +32,8 @@ defmodule Aimax.Core.SchemeAPI do
       "buffer-create" => "(buffer-create NAME) — create an empty buffer NAME and return NAME.",
       "buffer-list" => "(buffer-list) — return the names of all buffers.",
       "buffer-list-mru" => "(buffer-list-mru) — return buffer names in most-recently-used order, without internal buffers.",
+      "mru-list" => "(mru-list) — return (\"buffer\" NAME) and (\"group\" NAME) rows: the whole history in recency order.",
+      "mru-note-group!" => "(mru-note-group! NAME) — record a group switch as a history entry.",
       "buffer-exists?" => "(buffer-exists? NAME) — return #t if the buffer NAME exists.",
       "buffer-text" => "(buffer-text BUF) — return the buffer's whole text as a string.",
       "buffer-size" => "(buffer-size BUF) — return the buffer's size in bytes.",
@@ -202,6 +204,13 @@ defmodule Aimax.Core.SchemeAPI do
       end,
       "buffer-list" => fn [] -> Core.list_buffers() end,
       "buffer-list-mru" => fn [] -> Editor.buffer_mru() end,
+      # the whole history: ("buffer" NAME) and ("group" NAME) rows in
+      # recency order — a group switch is an entry like a buffer visit
+      "mru-list" => fn [] -> Editor.mru_all() end,
+      "mru-note-group!" => fn [g] ->
+        Editor.mru_note_group(g)
+        :void
+      end,
       "buffer-exists?" => fn [name] -> Buffer.exists?(name) end,
       "buffer-text" => fn [name] -> Buffer.text(name) end,
       "buffer-size" => fn [name] -> Buffer.byte_size(name) end,

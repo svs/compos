@@ -85,7 +85,7 @@ defmodule Aimax.HelpTest do
 
     text = Buffer.text("*Help*")
     assert text =~ "# apropos `split window`"
-    assert text =~ "| kind | name | call it | what it does |"
+    assert text =~ "| kind | name | call it | owner | effects | what it does |"
     assert text =~ "| function | `split-window!` |"
     assert {:ok, ~s{"help-mode"}} = Session.eval(~s{(buffer-local "*Help*" 'mode-name)})
 
@@ -175,7 +175,7 @@ defmodule Aimax.HelpTest do
     text = Buffer.text("*Help*")
 
     assert text =~ "## `window` — the closest matches"
-    assert text =~ "| kind | name | call it | what it does |"
+    assert text =~ "| kind | name | call it | owner | effects | what it does |"
   end
 
   test "M-? over prose says nothing about it and describes the buffer instead" do

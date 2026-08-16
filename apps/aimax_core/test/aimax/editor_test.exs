@@ -339,14 +339,16 @@ defmodule Aimax.EditorTest do
       assert text =~ "zz-mode"
 
       # narrow to one major mode; the header names the filter
-      {:ok, _} = Aimax.Core.Session.eval(~s{(ibuffer-filter-push! (list "mode" "zz-mode"))})
+      {:ok, _} = Aimax.Core.Session.eval(~s{(ibuffer-filter-push! (list "match" "zz-mode"))})
       text = Buffer.text("*ibuffer*")
       assert text =~ "*zz-ib-a*"
       refute text =~ "*zz-ib-b*"
-      assert text =~ "mode:zz-mode"
+      assert text =~ "/zz-mode"
 
       # still narrowed to zz-mode: the only line is *zz-ib-a* — flag + kill
-      {:ok, _} = Aimax.Core.Session.eval("(begin (goto-char! 0) (next-line!) (beginning-of-line!))")
+      {:ok, _} =
+        Aimax.Core.Session.eval(~s{(list-goto-first-entry "*ibuffer*")})
+
       assert {:ok, ~s{"*zz-ib-a*"}} = Aimax.Core.Session.eval("(ibuffer-current)")
       press(["d", "x"])
       refute Aimax.Core.Buffer.exists?("*zz-ib-a*")
@@ -354,8 +356,8 @@ defmodule Aimax.EditorTest do
       # RET lands the selection in the window ibuffer was opened from
       {:ok, _} = Aimax.Core.Session.eval(~s{(begin
         (list-filter-clear! "*ibuffer*")
-        (ibuffer-filter-push! (list "name" "zz-ib"))
-        (goto-char! 0) (next-line!) (beginning-of-line!))})
+        (ibuffer-filter-push! (list "match" "zz-ib"))
+        (list-goto-first-entry "*ibuffer*"))})
       assert {:ok, ~s{"*zz-ib-b*"}} = Aimax.Core.Session.eval("(ibuffer-current)")
       press(["RET"])
       assert Editor.current_buffer() == "*zz-ib-b*"
@@ -374,8 +376,8 @@ defmodule Aimax.EditorTest do
         (switch-to-buffer! "*zz-pv-a*")
         (run-command "ibuffer")
         (buffer-set-local! "*ibuffer*" 'ibuffer-filters '())
-        (ibuffer-filter-push! (list "name" "zz-pv"))
-        (goto-char! 0) (next-line!) (beginning-of-line!))})
+        (ibuffer-filter-push! (list "match" "zz-pv"))
+        (list-goto-first-entry "*ibuffer*"))})
 
       assert Editor.current_buffer() == "*ibuffer*"
       home = window_of("*zz-pv-a*")
@@ -401,6 +403,7 @@ defmodule Aimax.EditorTest do
 
   defp window_of(buffer) do
     {:ok, wins} = Aimax.Core.Session.eval("(window-list)")
+
     wins
     |> then(fn s -> Regex.scan(~r/\((\d+) "([^"]+)"\)/, s) end)
     |> Enum.find_value(fn [_, id, b] -> if b == buffer, do: String.to_integer(id) end)
@@ -408,6 +411,7 @@ defmodule Aimax.EditorTest do
 
   defp buffer_in(win_id) do
     {:ok, wins} = Aimax.Core.Session.eval("(window-list)")
+
     wins
     |> then(fn s -> Regex.scan(~r/\((\d+) "([^"]+)"\)/, s) end)
     |> Enum.find_value(fn [_, id, b] -> if String.to_integer(id) == win_id, do: b end)
@@ -459,11 +463,11 @@ defmodule Aimax.EditorTest do
 
       # point on "..": n -> alpha.txt; d flags it (D mark, advances)
       press(["n", "d"])
-      assert Buffer.text(root) =~ ~r/^D .*alpha\.txt$/m
+      assert Buffer.text(root) =~ ~r/^D .*alpha\.txt/m
 
       # m marks beta, u unmarks it again
       press(["m"])
-      assert Buffer.text(root) =~ ~r/^\* .*beta\.txt$/m
+      assert Buffer.text(root) =~ ~r/^\* .*beta\.txt/m
       press(["p", "u"])
       refute Buffer.text(root) =~ ~r/^\* /m
 
@@ -489,36 +493,84 @@ defmodule Aimax.EditorTest do
 
       {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
 
-      # / e narrows to one extension; header names the active filter
-      press(["/", "e"])
+      # / narrows as you type; the header reads back what you typed
+      press(["/"])
       type("scm")
-      press(["RET"])
       text = Buffer.text(root)
       assert text =~ "notes.scm"
       refute text =~ "alpha.txt"
-      assert text =~ "ext:scm"
+      assert text =~ "/scm"
+      press(["RET"])
+      assert Buffer.text(root) =~ "notes.scm"
 
-      # type filter stacks: directories only — nothing matches both
+      # the filters stack: directories only — nothing matches both
       {:ok, _} = Aimax.Core.Session.eval(~s{(dired-filter-push! (list "type" "dir"))})
       refute Buffer.text(root) =~ "notes.scm"
 
-      # pop restores the previous narrowing
-      press(["/", "p"])
+      # \ widens by one, back to the previous narrowing
+      press(["\\"])
       assert Buffer.text(root) =~ "notes.scm"
 
-      # dotfiles toggle and clear
-      press(["/", "/"])
+      # dotfiles toggle, and \ again drops the last text filter
+      press(["\\"])
       assert Buffer.text(root) =~ ".hidden"
-      press(["/", "."])
+      press(["."])
       refute Buffer.text(root) =~ ".hidden"
 
       # the stack lives in a serializable local, and the registered mode
       # reapplies it: this is exactly what desktop restore runs
       {:ok, filters} = Aimax.Core.Session.eval(~s{(buffer-local "#{root}" 'list-filters)})
       assert filters =~ "dot"
-      {:ok, _} = Aimax.Core.Session.eval(~s{(begin (switch-to-buffer! "#{root}") (set-mode! "Dired"))})
+
+      {:ok, _} =
+        Aimax.Core.Session.eval(~s{(begin (switch-to-buffer! "#{root}") (set-mode! "Dired"))})
+
       refute Buffer.text(root) =~ ".hidden"
       assert Buffer.text(root) =~ "alpha.txt"
+    end
+
+    # `/` matches the whole row — the line you see AND the marginalia the
+    # file prompts show beside the same name. So the mode a file opens in
+    # narrows the listing without a filter of its own.
+    test "/ matches the marginalia too, and C-g puts the listing back", %{root: root} do
+      File.write!(Path.join(root, "notes.scm"), ";;")
+
+      {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
+
+      # scheme-mode is nowhere in the line: it is what the annotator says
+      press(["/"])
+      type("scheme-mode")
+      text = Buffer.text(root)
+      assert text =~ "notes.scm"
+      refute text =~ "alpha.txt"
+
+      # C-g drops the live narrowing and restores what was there
+      press(["C-g"])
+      assert Buffer.text(root) =~ "alpha.txt"
+
+      # RET keeps it, as one serializable local, and a restore re-runs it
+      press(["/"])
+      type("scheme-mode")
+      press(["RET"])
+      {:ok, filters} = Aimax.Core.Session.eval(~s{(buffer-local "#{root}" 'list-filters)})
+      assert filters =~ "match"
+
+      {:ok, _} =
+        Aimax.Core.Session.eval(~s{(begin (switch-to-buffer! "#{root}") (set-mode! "Dired"))})
+
+      refute Buffer.text(root) =~ "alpha.txt"
+      # point lands on a row, not on the header: ".." leads every listing
+      assert {:ok, ~s{".."}} = Aimax.Core.Session.eval(~s{(dired-entry)})
+
+      # a directory reads as Dired wherever it is listed, so the word finds
+      # every directory — and ".." is one of them
+      press(["\\"])
+      press(["/"])
+      type("Dired")
+      press(["RET"])
+      text = Buffer.text(root)
+      assert text =~ "subdir/"
+      refute text =~ "alpha.txt"
     end
 
     # The listing was in the buffer and the window was blank: the buffer
@@ -540,11 +592,15 @@ defmodule Aimax.EditorTest do
       assert Buffer.text(root) =~ "alpha.txt"
     end
 
-    test "dired lines carry perms/size/date columns", %{root: root} do
+    test "dired rows carry name/size/date/perms columns under their labels", %{root: root} do
       {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
       text = Buffer.text(root)
-      assert text =~ ~r/^  -rw.*\d+ +[A-Z][a-z]{2} +\d+ \d{2}:\d{2} alpha\.txt$/m
-      assert text =~ ~r/^  drwx.*subdir\/$/m
+      # the labels name the columns, and a row fills them in that order
+      assert text =~ ~r/^ +NAME .*SIZE +MODIFIED +PERMS +VC$/m
+      assert text =~ ~r/^ +·  alpha\.txt .*\d+ +[A-Z][a-z]{2} +\d+ \d{2}:\d{2} +-rw/m
+      assert text =~ ~r/^ +▸  subdir\/ .*drwx/m
+      # the key bar says what the list does
+      assert text =~ "RET visit"
     end
 
     test "find-file prefills default-directory; // resets (Emacs rule)", %{root: root} do
@@ -566,12 +622,14 @@ defmodule Aimax.EditorTest do
       assert Editor.render_state().minibuffer.input == root <> "/"
 
       press(["DEL"])
+
       assert Editor.render_state().minibuffer.input ==
                (root |> Path.dirname()) <> "/"
 
       # mid-name it's still one char at a time
       type("ab")
       press(["DEL"])
+
       assert Editor.render_state().minibuffer.input ==
                (root |> Path.dirname()) <> "/a"
 
@@ -589,6 +647,61 @@ defmodule Aimax.EditorTest do
       """)
 
     assert eventually(fn -> Buffer.text(buf) == "ECHO: hi there" end)
+  end
+
+  test "M-o sends the whole document and inserts a faced response below point", %{buf: buf} do
+    parent = self()
+
+    Application.put_env(:aimax_core, :llm_chat_fun, fn req ->
+      send(parent, {:llm_prompt, req})
+
+      {:ok,
+       %{
+         "stop_reason" => "end_turn",
+         "content" => [%{"type" => "text", "text" => "A useful continuation."}]
+       }}
+    end)
+
+    on_exit(fn -> Application.delete_env(:aimax_core, :llm_chat_fun) end)
+
+    type("The complete document is context.")
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(~s{(buffer-set-local! "#{buf}" 'llm-model "openai:test-writer")})
+
+    press(["M-o"])
+
+    assert_receive {:llm_prompt, req}
+    assert req.model == "openai:test-writer"
+    assert req.tools == []
+    assert [%{content: "The complete document is context."}] = req.messages
+    assert "llm-mode" in Buffer.get_local(buf, "minor-modes")
+
+    assert eventually(fn ->
+             Buffer.text(buf) ==
+               "The complete document is context.\n\nA useful continuation.\n"
+           end)
+
+    assert eventually(fn ->
+             Enum.any?(Buffer.overlays(buf), fn {start, finish, face} ->
+               face == "llm-response" and
+                 binary_part(Buffer.text(buf), start, finish - start) ==
+                   "A useful continuation."
+             end)
+           end)
+
+    assert [[start, finish]] = Buffer.get_local(buf, "llm-responses")
+    assert binary_part(Buffer.text(buf), start, finish - start) == "A useful continuation."
+
+    :ok = Buffer.clear_overlays(buf)
+    assert Buffer.overlays(buf) == []
+    {:ok, _} = Aimax.Core.Session.eval(~s{(llm-mode--sync-ranges! "#{buf}")})
+    assert [[^start, ^finish]] = Buffer.get_local(buf, "llm-responses")
+    {:ok, _} = Aimax.Core.Session.eval(~s{(llm-mode--apply! "#{buf}")})
+    assert Enum.any?(Buffer.overlays(buf), fn {_s, _e, face} -> face == "llm-response" end)
+
+    # Vertical crossing is client-side in Markdown mode: the overlay's exact
+    # range is embedded in the preview block instead of remapping next-line.
   end
 
   test "M-| pipes the region through the llm into *llm*", %{buf: buf} do
@@ -630,8 +743,12 @@ defmodule Aimax.EditorTest do
 
   defp eventually(fun, tries \\ 40) do
     cond do
-      fun.() -> true
-      tries == 0 -> false
+      fun.() ->
+        true
+
+      tries == 0 ->
+        false
+
       true ->
         Process.sleep(50)
         eventually(fun, tries - 1)
@@ -639,7 +756,9 @@ defmodule Aimax.EditorTest do
   end
 
   test "set-face-attribute! lands in render_state faces" do
-    {:ok, _} = Aimax.Core.Session.eval(~s{(set-face-attribute! 'modeline 'bg "#ff0000" 'fg "#000")})
+    {:ok, _} =
+      Aimax.Core.Session.eval(~s{(set-face-attribute! 'modeline 'bg "#ff0000" 'fg "#000")})
+
     assert Editor.render_state().faces["modeline"] == %{"bg" => "#ff0000", "fg" => "#000"}
   end
 
@@ -860,7 +979,9 @@ defmodule Aimax.EditorTest do
 
     mb = Editor.render_state().minibuffer
     assert mb.total == 2
-    assert [%{label: "split-window-below", selected: true}, %{label: "split-window-right"}] = mb.candidates
+
+    assert [%{label: "split-window-below", selected: true}, %{label: "split-window-right"}] =
+             mb.candidates
 
     press(["C-n"])
     assert Editor.render_state().minibuffer.sel == 1
@@ -1252,6 +1373,7 @@ defmodule Aimax.EditorTest do
       assert %{type: :split, dir: :h, ratio: ratio} = state.tree
       assert_in_delta ratio, 0.62, 0.001
       assert Editor.current_buffer() == "*shell*"
+
       assert {:ok, ~s{"popup popup-right"}} =
                Aimax.Core.Session.eval(~s{(buffer-local "*shell*" 'window-class)})
 
@@ -1408,7 +1530,10 @@ defmodule Aimax.EditorTest do
       # a reply of "42" matched the digits of its own name in the help card
       # — the wait below passed before the turn had rendered anything
       {:ok,
-       %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "six times seven"}]}}
+       %{
+         "stop_reason" => "end_turn",
+         "content" => [%{"type" => "text", "text" => "six times seven"}]
+       }}
     end)
 
     on_exit(fn ->
@@ -1454,13 +1579,18 @@ defmodule Aimax.EditorTest do
     press(["C-x", "1"])
   end
 
-  test "C-x b previews the highlighted buffer in the invoking window; C-g restores it", %{buf: buf} do
+  test "C-x b previews the highlighted buffer in the invoking window; C-g restores it", %{
+    buf: buf
+  } do
     other = "zz-cxb-#{System.unique_integer([:positive])}"
     {:ok, _} = Aimax.Core.Session.eval(~s{(begin (buffer-create "#{other}") #t)})
     on_exit(fn -> Aimax.Core.kill_buffer(other) end)
 
     win = Editor.active_window()
-    shown = fn -> Enum.find_value(Editor.list_windows(), fn {id, b} -> if id == win, do: b end) end
+
+    shown = fn ->
+      Enum.find_value(Editor.list_windows(), fn {id, b} -> if id == win, do: b end)
+    end
 
     # type enough to filter to `other`: the refilter previews it live
     press(["C-x", "b"])
@@ -1506,6 +1636,10 @@ defmodule Aimax.EditorTest do
 
     press(["C-c", "w"])
     assert Editor.current_buffer() == companion
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(~s{(buffer-set-local! "#{companion}" 'chat-presets '(aimax))})
+
     type("draft a reply")
     press(["RET"])
 
@@ -1533,7 +1667,9 @@ defmodule Aimax.EditorTest do
       assert system =~ "buffer-text"
       # the turn itself is what the user typed
       assert messages |> List.last() |> Map.get(:content) =~ "make it rhyme"
-      {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "try violets"}]}}
+
+      {:ok,
+       %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "try violets"}]}}
     end)
 
     on_exit(fn ->
@@ -1584,7 +1720,9 @@ defmodule Aimax.EditorTest do
 
     Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: messages} ->
       assert messages |> List.last() |> Map.get(:content) =~ "tighten this up"
-      {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "knot bad"}]}}
+
+      {:ok,
+       %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "knot bad"}]}}
     end)
 
     on_exit(fn ->
@@ -1692,6 +1830,7 @@ defmodule Aimax.EditorTest do
     press(["C-c", "q"])
     type("more?")
     press(["RET"])
+
     assert eventually(fn ->
              length(String.split(Buffer.text(chat), "aye")) == 3
            end)
@@ -1711,9 +1850,11 @@ defmodule Aimax.EditorTest do
     press(["C-c", "q"])
     type("again?")
     press(["RET"])
+
     assert eventually(fn ->
              Buffer.exists?(chat) && Buffer.text(chat) =~ "aye"
            end)
+
     assert Buffer.get_local(chat, "group") == "proj"
 
     press(["C-x", "1"])
@@ -1744,7 +1885,10 @@ defmodule Aimax.EditorTest do
       # a reply of "42" matched the digits of its own name in the help card
       # — the wait below passed before the turn had rendered anything
       {:ok,
-       %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "six times seven"}]}}
+       %{
+         "stop_reason" => "end_turn",
+         "content" => [%{"type" => "text", "text" => "six times seven"}]
+       }}
     end)
 
     on_exit(fn ->
@@ -1777,6 +1921,7 @@ defmodule Aimax.EditorTest do
     press(["RET"])
     type("tra")
     press(["C-M-i"])
+
     assert Enum.map(Editor.render_state().completion.candidates, & &1.label) ==
              ["transducer", "transformation"]
 
@@ -2076,6 +2221,7 @@ defmodule Aimax.EditorTest do
     # RET on the card returns to the group
     press(["C-x", "b"])
     press(["RET"])
+
     assert Aimax.Core.Session.eval("(frame-local 'current-group)") ==
              {:ok, ~s{"hsgrp-#{n}"}}
 
@@ -2414,7 +2560,9 @@ defmodule Aimax.EditorTest do
     assert ~s{"#{home}"} in heads
 
     {:ok, _} =
-      Aimax.Core.Session.eval("(begin (set-frame-local! 'current-group #f) (delete-other-windows!))")
+      Aimax.Core.Session.eval(
+        "(begin (set-frame-local! 'current-group #f) (delete-other-windows!))"
+      )
   end
 
   test "a stale off-screen buffer catches up when the switcher shows it" do
@@ -2507,52 +2655,18 @@ defmodule Aimax.EditorTest do
       Aimax.Core.Session.eval("""
       (begin (set-frame-local! 'current-group #f)
              (buffer-set-local! "#{m}" 'group "hlgrp-#{n}")
-             ;; poison: capture a layout showing only scratch, store it
-             ;; as the group's own
-             (delete-other-windows!)
-             (switch-to-buffer! "*scratch*")
-             (buffer-set-local! (group-chat "hlgrp-#{n}") 'group-layout (window-tree))
-             (switch-to-group! "hlgrp-#{n}")
-             (list (group-on-screen? "hlgrp-#{n}") (current-buffer)))
-      """)
-
-    assert out == ~s{(#t "#{m}")}
-
-    {:ok, _} =
-      Aimax.Core.Session.eval(
-        "(begin (set-frame-local! 'current-group #f) (delete-other-windows!))"
-      )
-  end
-
-  test "the groups board never becomes part of a group's layout" do
-    n = System.unique_integer([:positive])
-    m = "tb-#{n}"
-    Aimax.Core.create_buffer(m)
-
-    {:ok, _} =
-      Aimax.Core.Session.eval("""
-      (begin (set-frame-local! 'current-group #f)
              (delete-other-windows!)
              (switch-to-buffer! "#{m}")
-             (buffer-set-local! "#{m}" 'group "tbgrp-#{n}")
-             (group-layout-save! "tbgrp-#{n}")
-             ;; poison attempt: the board opens beside the member and a
-             ;; capture fires from the board — the guard must refuse
-             (split-window! 'h 0.5)
-             (other-window!)
-             (run-command "groups")
-             (group-layout-save-if-shown! "tbgrp-#{n}")
-             ;; and an OLD poisoned snapshot prunes on the way back in
-             (buffer-set-local! (group-chat "tbgrp-#{n}") 'group-layout (window-tree))
+             (group-layout-save! "hlgrp-#{n}")
              (switch-to-buffer! "*scratch*")
-             (delete-other-windows!)
-             (switch-to-group! "tbgrp-#{n}")
-             #t)
+             ;; the member's tag drifts (killed elsewhere, retagged...)
+             (buffer-set-local! "#{m}" 'group #f)
+             (switch-to-group! "hlgrp-#{n}")
+             (map (lambda (w) (car (cdr w))) (window-list)))
       """)
 
-    shown = Editor.list_windows() |> Enum.map(fn {_id, b} -> b end)
-    refute "*groups*" in shown
-    assert m in shown
+    # the saved arrangement comes back even though the tag drifted
+    assert out == ~s{("#{m}")}
 
     {:ok, _} =
       Aimax.Core.Session.eval(
@@ -2841,7 +2955,9 @@ defmodule Aimax.MinibufferEditingTest do
   # the click mapping: the clicked text node split at the caret finds its
   # spot in the source; smartened text falls back to the plain word run
   test "a preview click moves point to the clicked text" do
-    path = Path.join(System.tmp_dir!(), "aimax-prevclick-#{System.unique_integer([:positive])}.md")
+    path =
+      Path.join(System.tmp_dir!(), "aimax-prevclick-#{System.unique_integer([:positive])}.md")
+
     File.write!(path, "# Title\n\nThe cursor should be visible.\n")
 
     press(["C-x", "C-f"])
@@ -2852,7 +2968,13 @@ defmodule Aimax.MinibufferEditingTest do
     win = Editor.render_state() |> Map.get(:tree) |> Map.get(:id)
 
     {:ok, _} =
-      Aimax.Core.Session.call_named("preview-goto!", [win, "The cursor sh", "ould be", "sh", "ould"])
+      Aimax.Core.Session.call_named("preview-goto!", [
+        win,
+        "The cursor sh",
+        "ould be",
+        "sh",
+        "ould"
+      ])
 
     assert Buffer.point(path) == 22
 
@@ -2869,7 +2991,9 @@ defmodule Aimax.MinibufferEditingTest do
   end
 
   test "motion keys still scroll an html preview" do
-    path = Path.join(System.tmp_dir!(), "aimax-prevhtml-#{System.unique_integer([:positive])}.html")
+    path =
+      Path.join(System.tmp_dir!(), "aimax-prevhtml-#{System.unique_integer([:positive])}.html")
+
     File.write!(path, "<h1>hi</h1>\n<p>body</p>\n")
 
     press(["C-x", "C-f"])

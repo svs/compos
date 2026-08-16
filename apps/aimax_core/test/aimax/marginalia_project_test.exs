@@ -95,6 +95,37 @@ defmodule Aimax.MarginaliaProjectTest do
       press(["C-g"])
     end
 
+    # One annotator serves the prompt and the list: C-x b matches what you
+    # type against the marginalia, and ibuffer narrows by the same text.
+    test "ibuffer / narrows by the annotation C-x b shows" do
+      on_exit(fn ->
+        for b <- ["*mp-ga*", "*mp-gb*", "*ibuffer*"], do: Aimax.Core.kill_buffer(b)
+      end)
+
+      {:ok, _} =
+        Session.eval(~s{(begin
+          (buffer-create "*mp-ga*")
+          (buffer-create "*mp-gb*")
+          (buffer-set-local! "*mp-ga*" 'group "work/dishwasher")
+          (run-command "ibuffer")
+          (list-filter-push! "*ibuffer*" (list "match" "mp-g")))})
+
+      assert Aimax.Core.Buffer.text("*ibuffer*") =~ "*mp-gb*"
+
+      # the group is nowhere in the line: it is what the annotator says
+      press(["/"])
+      type("dishwasher")
+      text = Aimax.Core.Buffer.text("*ibuffer*")
+      assert text =~ "*mp-ga*"
+      refute text =~ "*mp-gb*"
+      assert text =~ "/dishwasher"
+
+      # RET keeps the narrowing and leaves point on a row that survived
+      press(["RET"])
+      assert Aimax.Core.Buffer.text("*ibuffer*") =~ "*mp-ga*"
+      assert {:ok, ~s{"*mp-ga*"}} = Session.eval("(ibuffer-current)")
+    end
+
     test "define-command stores a docstring, command-doc reads it back" do
       {:ok, _} =
         Session.eval(~s{(define-command "mp-frob" "Frob the marginalia test" (lambda () #t))})

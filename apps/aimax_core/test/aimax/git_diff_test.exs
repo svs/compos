@@ -175,7 +175,7 @@ defmodule Aimax.GitDiffTest do
     blocks = Buffer.get_local(buf, "render-blocks")
     assert is_list(blocks) and blocks != []
     first = pl(hd(blocks))
-    assert first.class == "diff-section"
+    assert first.class == "c-section diff-section"
     assert first.text =~ "Unstaged changes"
 
     Editor.set_window_buffer(buf)

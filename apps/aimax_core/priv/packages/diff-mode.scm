@@ -357,7 +357,7 @@
     (append
       (if (equal? msg "") '() (list (list 'tag "pre" 'class "diff-message" 'text msg)))
       (if (and (null? layout) (null? commits))
-          (list (list 'tag "div" 'class "diff-empty" 'text "nothing to show"))
+          (list (component 'ui/empty '(text "nothing to show" class "diff-empty")))
           '())
       (diff--section-blocks buf layout)
       (diff--commit-blocks commits))))
@@ -385,10 +385,10 @@
           (let* ((c (car cs))
                  (s (diff--get c 'section))
                  (acc (if (and (not (equal? s sec)) (not (equal? s "")))
-                          (cons (list 'tag "div" 'class "diff-section"
-                                      'text (string-append s " ("
-                                              (number->string (diff--count-section layout s))
-                                              ")"))
+                          (cons (component 'ui/section
+                                  (list 'title s
+                                        'count (diff--count-section layout s)
+                                        'class "diff-section"))
                                 acc)
                           acc)))
             (loop (cdr cs) s (cons (diff--card-block c open closed) acc)))))))

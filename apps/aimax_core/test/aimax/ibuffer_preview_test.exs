@@ -36,8 +36,8 @@ defmodule Aimax.IbufferPreviewTest do
       (switch-to-buffer! "*zz-ka*")
       (run-command "ibuffer")
       (buffer-set-local! "*ibuffer*" 'ibuffer-filters '())
-      (ibuffer-filter-push! (list "name" "zz-k"))
-      (goto-char! 0) (next-line!) (beginning-of-line!))})
+      (ibuffer-filter-push! (list "match" "zz-k"))
+      (list-goto-first-entry "*ibuffer*"))})
 
     home =
       Enum.find_value(windows(), fn {id, b} -> if b == "*zz-ka*", do: id end)
@@ -54,7 +54,7 @@ defmodule Aimax.IbufferPreviewTest do
     refute home_buf == "*ibuffer*", "kill duplicated the ibuffer window"
 
     # n from the top entry previews the second remaining buffer at home
-    {:ok, _} = Aimax.Core.Session.eval("(begin (goto-char! 0) (next-line!) (beginning-of-line!))")
+    {:ok, _} = Aimax.Core.Session.eval(~s{(list-goto-first-entry "*ibuffer*")})
     press(["n"])
     home_buf2 = Enum.find_value(windows(), fn {id, b} -> if id == home, do: b end)
     assert home_buf2 =~ "zz-k", "preview did not land in home window"
@@ -69,8 +69,8 @@ defmodule Aimax.IbufferPreviewTest do
       (run-command "ibuffer")
       (run-command "ibuffer")
       (buffer-set-local! "*ibuffer*" 'ibuffer-filters '())
-      (ibuffer-filter-push! (list "name" "zz-k"))
-      (goto-char! 0) (next-line!) (beginning-of-line!))})
+      (ibuffer-filter-push! (list "match" "zz-k"))
+      (list-goto-first-entry "*ibuffer*"))})
 
     assert Editor.current_buffer() == "*ibuffer*"
 

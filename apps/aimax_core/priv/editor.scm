@@ -3,6 +3,147 @@
 ;;; The Elixir core knows nothing about what keys mean or what commands do.
 ;;; Everything here is userland: redefine any of it from init.scm or M-:.
 
+;;; --- package context and the shared catalog ---------------------------------
+;;; Scheme's callable globals deliberately stay flat.  These two stamps are
+;;; metadata: the loader changes them while evaluating a file so every public
+;;; thing can say who owns it and which vocabulary it belongs to.
+
+(define *loading-package* 'editor)
+(define *loading-namespace* 'core)
+(define *loading-origin* 'bundled)
+(define *catalog-domain* 'unknown)
+(define *catalog-effects* '(unknown))
+
+(define (package! name &optional namespace)
+  (set! *loading-package* name)
+  (set! *loading-namespace* (or namespace name))
+  (set! *catalog-domain* 'unknown)
+  (set! *catalog-effects* '(unknown))
+  name)
+
+(define (namespace! name) (set! *loading-namespace* name))
+(define (origin! name) (set! *loading-origin* name))
+(define (domain! name) (set! *catalog-domain* name))
+(define (effects! effects) (set! *catalog-effects* effects))
+
+;; Catalog entries are plists.  KIND says how to use an entry; PACKAGE says
+;; who may replace it on reload; NAMESPACE is its stable display vocabulary;
+;; DOMAIN is the subject area; EFFECTS say what invoking it may do.
+(define *catalog* '())
+
+(define (catalog--get pl key)
+  (cond ((null? pl) #f)
+        ((null? (cdr pl)) #f)
+        ((equal? (car pl) key) (cadr pl))
+        (else (catalog--get (cdr (cdr pl)) key))))
+
+(define (catalog--put pl key value)
+  (append (list key value)
+          (let loop ((xs pl))
+            (cond ((null? xs) '())
+                  ((null? (cdr xs)) '())
+                  ((equal? (car xs) key) (loop (cdr (cdr xs))))
+                  (else (cons (car xs) (cons (cadr xs) (loop (cdr (cdr xs))))))))))
+
+(define (catalog--string x)
+  (cond ((string? x) x)
+        ((symbol? x) (symbol->string x))
+        (else (value->string x))))
+
+(define (catalog-register! kind name doc &rest meta)
+  (let* ((n (catalog--string name))
+         (k (catalog--string kind))
+         (ns (or (catalog--get meta 'namespace) *loading-namespace*))
+         (pkg (or (catalog--get meta 'package) *loading-package*))
+         (qualified (or (catalog--get meta 'qualified-name)
+                        (string-append (catalog--string ns) "/" n)))
+         (raw-domain (or (catalog--get meta 'domain) *catalog-domain*))
+         (declared-effects (catalog--get meta 'effects))
+         (raw-effects (or declared-effects *catalog-effects*))
+         (bundled? (equal? *loading-origin* 'bundled))
+         (luna (if bundled? (catalog-backfill-entry k qualified) #f))
+         (luna-domain (and luna (catalog--get luna 'domain)))
+         (luna-effects (and luna (catalog--get luna 'effects)))
+         (domain (if (and (equal? raw-domain 'unknown) luna-domain)
+                     luna-domain raw-domain))
+         (effects (if (and (member 'unknown raw-effects) luna-effects)
+                      luna-effects raw-effects))
+         (declared? (and (not (equal? raw-domain 'unknown))
+                         (not (member 'unknown raw-effects))))
+         (source (cond (declared? "declared")
+                       (luna "luna")
+                       (else "unknown")))
+         (entry (append
+                  (list 'kind k 'name n
+                        'qualified-name qualified 'package (catalog--string pkg)
+                        'namespace (catalog--string ns)
+                        'origin (catalog--string *loading-origin*)
+                        'domain (catalog--string domain)
+                        'effects (map catalog--string effects)
+                        'metadata-source source
+                        'metadata-confidence (and luna (catalog--get luna 'confidence))
+                        'metadata-model (and luna (catalog--get luna 'model))
+                        'doc doc)
+                  meta)))
+    (set! *catalog*
+      (cons entry
+            (remove (lambda (e)
+                      (and (equal? (catalog--get e 'kind) (catalog--string kind))
+                           (if (equal? (catalog--string kind) "component")
+                               (equal? (catalog--get e 'qualified-name) qualified)
+                               (equal? (catalog--get e 'name) n))))
+                    *catalog*)))
+    entry))
+
+(define (catalog) (reverse *catalog*))
+
+(define (catalog-entry kind name)
+  (let ((k (catalog--string kind)) (n (catalog--string name)))
+    (let loop ((es *catalog*))
+    (cond ((null? es) #f)
+          ((and (equal? (catalog--get (car es) 'kind) k)
+                (if (and (equal? k "component") (string-contains? n "/"))
+                    (equal? (catalog--get (car es) 'qualified-name) n)
+                    (equal? (catalog--get (car es) 'name) n)))
+           (car es))
+          (else (loop (cdr es)))))))
+
+(define (catalog--merge entry meta)
+  (if (or (null? meta) (null? (cdr meta)))
+      entry
+      (catalog--merge (catalog--put entry (car meta) (cadr meta))
+                      (cdr (cdr meta)))))
+
+;; Explicit metadata wins over inference. Packages use this for consequential
+;; operations whose effect cannot be read reliably from an old docstring.
+(define (catalog-meta! kind name &rest meta)
+  (let ((old (catalog-entry kind name)))
+    (if (not old)
+        #f
+        (let ((updated (catalog--merge old meta)))
+          (set! *catalog*
+            (cons updated
+                  (remove (lambda (e)
+                            (and (equal? (catalog--get e 'kind) (catalog--get old 'kind))
+                                 (equal? (catalog--get e 'qualified-name)
+                                         (catalog--get old 'qualified-name))))
+                          *catalog*)))
+          updated))))
+
+;; Commands are an Elixir registry underneath, but this wrapper gives every
+;; declaration the same package/domain/effect metadata as Scheme APIs.
+(define define-command--raw define-command)
+(define (define-command name &rest args)
+  (let* ((documented? (= (length args) 2))
+         (doc (if documented? (car args) ""))
+         (fn (if documented? (cadr args) (car args))))
+    (if documented?
+        (define-command--raw name doc fn)
+        (define-command--raw name fn))
+    (catalog-register! 'command name doc
+      'use (string-append "(run-command \"" name "\")"))
+    name))
+
 ;;; --- public API registry -----------------------------------------------------
 ;;; The supported surface, curated: name + one-line doc. Everything else in
 ;;; the global namespace is implementation detail — callable, but private by
@@ -24,9 +165,11 @@
 ;;; one — declared once per section instead of once per entry. An agent
 ;;; asking "what can I do with windows" wants the category, not a regex.
 
-(define *public-category* 'misc)
+(define *public-category* 'unknown)
 
-(define (category! name) (set! *public-category* name))
+(define (category! name)
+  (set! *public-category* name)
+  (domain! name))
 
 ;; the balanced leading form of DOC, and the rest with its dash removed
 (define (public--split doc)
@@ -58,7 +201,9 @@
          (text (car (cdr parts))))
     (set! *public-api*
       (cons (list n text sig (or category *public-category*))
-            (remove (lambda (e) (equal? (car e) n)) *public-api*)))))
+            (remove (lambda (e) (equal? (car e) n)) *public-api*)))
+    (catalog-register! 'function n text
+      'domain (or category *public-category*) 'signature sig 'use sig)))
 
 (define (public-api) (reverse *public-api*))
 
@@ -102,6 +247,10 @@
 ;;;   keys    ((KEY COMMAND) ...)
 ;;;   remap   ((FROM-COMMAND TO-COMMAND) ...)
 ;;;   doc     what the list is for — "?" shows it above the key table
+;;;   category  the marginalia category the entries belong to, so `/`
+;;;             matches the annotation too — see list-match?
+;;;   match   (buf entry input) -> #t to keep. What `/` means here.
+;;;   filter  (buf entry filter) -> #t to keep. The mode's own filter kinds.
 
 (define *list-modes* '())
 
@@ -117,12 +266,10 @@
 ;; how many lines of header sit above the first entry — a header may be
 ;; several lines, and every one of the five had hardcoded its own count
 (define (list-header-lines buf)
-  (let ((h (list-header-text buf)))
-    (length (string-split h "\n"))))
+  (length (list-head-lines buf)))
 
 (define (list-header-text buf)
-  (let ((f (list-opt buf 'header)))
-    (if f (f buf) "")))
+  (string-join (map car (list-head-lines buf)) "\n"))
 
 ;; the 0-based index of the entry line BUF's point is on, or #f above the
 ;; entries. BUF's own point, not (point): a context provider asks about a
@@ -140,7 +287,7 @@
 
 ;; the entry on the current line, or #f
 (define (list-current buf)
-  (let ((i (line-index-at buf (list-header-lines buf)))
+  (let ((i (list-index buf))
         (es (list-entries buf)))
     (and i (< i (length es)) (nth i es))))
 
@@ -194,15 +341,21 @@
   (let ((f (list-opt buf 'markable?)))
     (if f (f buf e) #t)))
 
+;; a mark needs a column to show in. A list with flags has always had
+;; one; a list with columns gets one too, because marking is what every
+;; one of them does.
+(define (list-marks-column? buf)
+  (or (pair? (list-flags buf)) (list-table? buf)))
+
 (define (list-mark-at-point! ch)
   (let* ((buf (current-buffer))
-         (e (list-current buf)))
+         (e (list-current buf))
+         (i (list-index buf)))
     (if (not (and e (list-markable? buf e)))
         (message "no entry on this line")
         (begin (list-mark! buf e ch)
                (list-refresh! buf)
-               (next-line!)
-               (beginning-of-line!)))))
+               (list-goto-index! buf (+ (or i 0) 1))))))
 
 ;; the entries a verb acts on: every marked entry, or the line at point.
 ;; This is what makes one key work on one chat and on twelve.
@@ -223,6 +376,25 @@
     (let ((buf (current-buffer)))
       (list-clear-marks! buf)
       (list-refresh! buf))))
+
+;; `*` marks the whole list — the rows you narrowed to, because a filter
+;; and a mark say the same thing: these ones
+(domain! 'interaction)
+(effects! '(write))
+
+(define-command "list-mark-all" "Mark every row this list shows"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (i (list-index buf)))
+      (for-each (lambda (e)
+                  (when (list-markable? buf e)
+                    (list-mark! buf e *list-mark-char*)))
+                (list-entries buf))
+      (list-refresh! buf)
+      (when i (list-goto-index! buf i)))))
+
+(domain! 'unknown)
+(effects! '(unknown))
 
 ;; a keymap binds a command NAME, so each flag char needs a command of its
 ;; own. The body is the same in every list, so one command per char serves
@@ -295,14 +467,18 @@
                                     (message "Cancelled")))))
             (else (list-plan-run! buf plan))))))
 
-;; the marking keys, for a list that declares flags. They go in before the
-;; list's own keys, so a list can still claim any of them for something else.
+;; the marking keys. Every list that shows a mark column marks the same
+;; way — `m`, `u`, `U` and `*` — and a list that declares flags also gets
+;; the flag chars and `x`. They go in before the list's own keys, so a
+;; list can still claim any of them for something else.
 (define (list-install-mark-keys! buf opts)
   (let ((fs (or (plist-get opts 'flags) '())))
-    (unless (null? fs)
+    (when (or (pair? fs) (plist-get opts 'columns))
       (local-set-key* buf "m" "list-mark")
       (local-set-key* buf "u" "list-unmark")
       (local-set-key* buf "U" "list-unmark-all")
+      (local-set-key* buf "*" "list-mark-all"))
+    (unless (null? fs)
       (local-set-key* buf "x" "list-execute")
       (for-each (lambda (f)
                   (local-set-key* buf (car f) (list-flag-command (car (cdr f)))))
@@ -325,48 +501,483 @@
   (buffer-set-local! buf 'list-filters '())
   (list-refresh! buf))
 
+;; what you typed reads back as you typed it; a kind the mode invented
+;; says its name
 (define (list-filters-label buf)
-  (let ((fs (list-filters buf)))
+  (if (null? (list-filters buf))
+      ""
+      (string-append "   ·  " (list-filters-text buf))))
+
+;;; --- `/` narrows --------------------------------------------------------------
+;;; One filter, for every list. You press `/` and type; the list narrows
+;;; on every keystroke to the rows that match. RET keeps the narrowing,
+;;; C-g drops it, `/` again narrows the narrowing — the filters stack, and
+;;; the stack persists with the buffer. `\` widens by one.
+;;;
+;;; A row matches on everything you can SEE: its line, and the marginalia
+;;; the prompts show beside the same thing (the mode names the category).
+;;; So dired finds `elixir-mode` and ibuffer finds a group, and neither
+;;; needs a filter of its own. The zoo this replaces — one command and one
+;;; chord per field, name, extension, type, mode — asked you to say which
+;;; field before you said what you wanted.
+;;;
+;;; A mode that knows better declares 'match (buf entry input) -> #t.
+
+(define (list-annotation-fields buf e)
+  (let* ((cat (list-opt buf 'category))
+         (f (and cat (marginalia-for cat))))
+    (if f (map string-trim (marginalia-row f e)) '())))
+
+(define (list-annotation buf e)
+  (string-join (list-annotation-fields buf e) " "))
+
+;; the whole row as text: the line you see, and what it means. A table
+;; row matches on its columns, because its columns are what it shows.
+(define (list-row-text buf e)
+  (string-append (car (list-row-line buf e)) " " (list-annotation buf e)))
+
+(define (list-match? buf e input)
+  (let ((m (list-opt buf 'match)))
+    (if m (m buf e input) (re-match? input (list-row-text buf e)))))
+
+;; every list gets the "match" kind; the mode's own 'filter fn reads the
+;; kinds it invented. A list with neither keeps every row.
+(define (list-filter-match? buf e f)
+  (if (equal? (car f) "match")
+      (list-match? buf e (car (cdr f)))
+      (let ((m (list-opt buf 'filter)))
+        (if m (m buf e f) #t))))
+
+;; the rows that survive the stack — the loop each list wrote by hand
+(define (list-keep buf entries)
+  (filter (lambda (e)
+            (let loop ((fs (list-filters buf)))
+              (cond ((null? fs) #t)
+                    ((list-filter-match? buf e (car fs)) (loop (cdr fs)))
+                    (else #f))))
+          entries))
+
+;;; --- the view: a title, columns, rows, a key bar ------------------------------
+;;; Every list draws the same shape. A mode says what its columns are and
+;;; what one row puts in them; the mechanism pads the cells, colours them,
+;;; writes the column labels, shows the narrowing you typed and prints the
+;;; key bar. Three lists had each written their own padding and their own
+;;; header string, and the three had drifted apart.
+;;;
+;;;   'title    (buf) -> string             what this list shows
+;;;   'meta     (buf) -> string             the counts under the title
+;;;   'total    (buf) -> number             rows before the filters, for the chip
+;;;   'columns  (buf) -> ((LABEL WIDTH ALIGN) ...)
+;;;                      WIDTH #f means the rest of the line.
+;;;                      ALIGN is 'left or 'right.
+;;;   'cells    (buf entry) -> (CELL ...)   CELL is a string, or (TEXT FACE)
+;;;   'footer   (buf) -> ((KEY WORD) ...)   the key bar under the rows
+;;;   'preview  (buf entry)                 what moving the highlight shows
+;;;
+;;; A mode that declares 'columns gets the mark column, the m/u/U/* keys
+;;; and the clamped n/p for free. A mode that declares 'header and 'render
+;;; keeps the plain lines it always had.
+
+(define *list-gap* "  ")
+
+;; the window the list is in, in characters. The client measures its own
+;; font and reports it; a list nobody is showing lays out for the active
+;; window, and one nobody has measured gets the default. The last column
+;; keeps one character clear of the edge, so nothing wraps.
+(define (list-view-width buf)
+  (max 40 (- (buffer-cols buf) 1)))
+
+;; the column that declares no width takes whatever the others leave, so
+;; the table fills the window instead of stopping short of it
+(define (list-fit-columns cols w)
+  (let* ((fixed (fold (lambda (acc c) (+ acc 2 (or (list-col-width c) 0))) 2 cols))
+         (rest (max 8 (- w fixed))))
+    (map (lambda (c)
+           (if (list-col-width c)
+               c
+               (list (car c) rest (list-col-align c))))
+         cols)))
+
+(define (list-columns buf)
+  (let ((f (list-opt buf 'columns)))
+    (if f (list-fit-columns (f buf) (list-view-width buf)) '())))
+
+(define (list-table? buf) (pair? (list-columns buf)))
+
+;; a mode answers with a string, or does not answer at all
+(define (list-say buf key)
+  (let ((f (list-opt buf key)))
+    (if f (or (f buf) "") "")))
+
+(define (list-cell-text c) (if (pair? c) (car c) c))
+(define (list-cell-face c) (if (pair? c) (car (cdr c)) #f))
+
+;; a name too long for its column loses its MIDDLE: the head says what
+;; the thing is and the tail says which one, and a path or a suffix lives
+;; in the tail. The columns after it stay where the labels say they are.
+(define (list-fit s w)
+  (cond ((not w) s)
+        ((<= (string-length s) w) s)
+        ((<= w 3) (substring s 0 w))
+        (else
+          (let* ((keep (- w 1))
+                 (head (quotient (+ keep 1) 2))
+                 (tail (- keep head))
+                 (n (string-length s)))
+            (string-append (substring s 0 head) "…" (substring s (- n tail) n))))))
+
+;; the padding of the last column is only blank space at the end of a line
+(define (string-trim-right s)
+  (let loop ((n (string-length s)))
+    (if (and (> n 0) (equal? (substring s (- n 1) n) " "))
+        (loop (- n 1))
+        (substring s 0 n))))
+
+(define (list-pad s w align)
+  (cond ((not w) s)
+        ((equal? align 'right) (string-pad-left s w))
+        (else (string-pad-right s w))))
+
+(define (list-col-width c) (car (cdr c)))
+(define (list-col-align c) (if (> (length c) 2) (nth 2 c) 'left))
+
+;; how wide the table is: the rule and the right-hand chip measure
+;; themselves against it, so nothing has to ask the window
+;; one row of cells as text plus the faces on it. A span is (OFFSET
+;; LENGTH FACE) inside the line, in bytes, so the writer below is the
+;; only place that counts absolute offsets.
+(define (list-lay-out cells cols)
+  (let loop ((cs cells) (ks cols) (text "") (spans '()))
+    (if (or (null? cs) (null? ks))
+        (list text (reverse spans))
+        (let* ((k (car ks))
+               (fitted (list-fit (list-cell-text (car cs)) (list-col-width k)))
+               (padded (if (null? (cdr ks))
+                           fitted
+                           (list-pad fitted (list-col-width k) (list-col-align k))))
+               (face (list-cell-face (car cs)))
+               (start (string-byte-length text)))
+          (loop (cdr cs) (cdr ks)
+                (string-append text padded
+                               (if (null? (cdr ks)) "" *list-gap*))
+                (if face
+                    (cons (list start (string-byte-length fitted) face) spans)
+                    spans))))))
+
+(define (list-shift-spans spans n)
+  (map (lambda (s) (list (+ (car s) n) (car (cdr s)) (nth 2 s))) spans))
+
+(define (list-rule-line w) (list (string-repeat "─" w) (list (list 0 (* 3 w) "faint"))))
+
+;; the narrowing, on the right of the title: what you typed and how many
+;; rows it left. It shows only while the list is narrowed.
+;; how many things this list is showing. A row you cannot mark is not a
+;; thing the list holds — dired's ".." is a way out of the directory.
+(define (list-count buf)
+  (length (filter (lambda (e) (list-markable? buf e)) (list-entries buf))))
+
+(define (list-chip buf)
+  (let* ((fs (list-filters buf))
+         (n (list-count buf))
+         (tf (list-opt buf 'total))
+         (total (if tf (tf buf) n)))
     (if (null? fs)
         ""
-        (fold (lambda (acc f) (string-append acc "  " (car f) ":" (car (cdr f))))
-              "   ·" (reverse fs)))))
+        (string-append (list-filters-text buf) "   "
+                       (number->string n) " of " (number->string total)))))
+
+;; what you typed reads back as you typed it; a kind the mode invented
+;; says its name
+(define (list-filters-text buf)
+  (string-join (map (lambda (f)
+                      (if (equal? (car f) "match")
+                          (string-append "/" (car (cdr f)))
+                          (string-append (car f) ":" (car (cdr f)))))
+                    (reverse (list-filters buf)))
+               " "))
+
+(define (list-title-line buf w)
+  (let* ((title (list-say buf 'title))
+         (chip (list-chip buf)))
+    (if (equal? chip "")
+        (list title '())
+        (let* ((gap (max 1 (- w (string-length title) (string-length chip))))
+               (text (string-append title (string-repeat " " gap) chip)))
+          (list text
+                (list (list (- (string-byte-length text) (string-byte-length chip))
+                            (string-byte-length chip) "accent")))))))
+
+(define (list-label-line buf cols)
+  (let* ((labels (map (lambda (c) (list (string-upcase (car c)) "faint")) cols))
+         (laid (list-lay-out labels cols)))
+    (list (string-trim-right (string-append "  " (car laid)))
+          (list-shift-spans (car (cdr laid)) 2))))
+
+(define (list-table-head buf)
+  (let* ((cols (list-columns buf))
+         (w (list-view-width buf))
+         (meta (list-say buf 'meta)))
+    (append (list (list-title-line buf w))
+            (if (equal? meta "")
+                '()
+                (list (list meta (list (list 0 (string-byte-length meta) "dim")))))
+            (list (list-rule-line w))
+            (list (list-label-line buf cols)))))
+
+;; the header as lines. A mode's own 'header is text it wrote itself, so
+;; its lines carry no faces.
+(define (list-head-lines buf)
+  (let ((f (list-opt buf 'header)))
+    (cond (f (map (lambda (l) (list l '())) (string-split (f buf) "\n")))
+          ((list-table? buf) (list-table-head buf))
+          (else (list (list "" '()))))))
+
+;; the key bar: what this list does, in the words the mode chose
+(define (list-key-bar buf keys)
+  (let loop ((ks keys) (text " ") (spans '()))
+    (if (null? ks)
+        (list text (reverse spans))
+        (let* ((key (car (car ks)))
+               (word (car (cdr (car ks))))
+               (at (string-byte-length text))
+               (piece (string-append key " " word)))
+          (loop (cdr ks)
+                (string-append text piece (if (null? (cdr ks)) "" " · "))
+                (cons (list (+ at (string-byte-length key) 1)
+                            (string-byte-length word) "dim")
+                      (cons (list at (string-byte-length key) "accent") spans)))))))
+
+(define (list-foot-lines buf)
+  (let* ((f (list-opt buf 'footer))
+         (keys (if f (f buf) '())))
+    (if (null? keys)
+        '()
+        (list (list-rule-line (list-view-width buf))
+              (list-key-bar buf keys)))))
+
+;; one entry as one line. The mark column belongs to the mechanism: three
+;; renders were each prepending their own.
+(define (list-row-line buf e)
+  (let ((mark (if (list-marks-column? buf) (list-mark-of buf e) "")))
+    (if (list-table? buf)
+        (let* ((laid (list-lay-out ((list-opt buf 'cells) buf e) (list-columns buf)))
+               (head (string-append mark " "))
+               (n (string-byte-length head)))
+          (list (string-trim-right (string-append head (car laid)))
+                (append (if (equal? mark " ")
+                            '()
+                            (list (list 0 (string-byte-length mark) "alert")))
+                        (list-shift-spans (car (cdr laid)) n))))
+        (list (string-append mark ((list-opt buf 'render) buf e)) '()))))
+
+;; the whole view, top to bottom
+(define (list-view-lines buf rows)
+  (append (list-head-lines buf)
+          (map (lambda (e) (list-row-line buf e)) rows)
+          (list-foot-lines buf)))
+
+;; write the lines, answer their overlays, and leave every row's byte
+;; offset on the buffer — motion and the mode's own overlays then read
+;; the same numbers the text has
+(define (list-write! buf lines first-row n-rows)
+  (let loop ((ls lines) (i 0) (off 0) (ovs '()) (offsets '()))
+    (if (null? ls)
+        (begin (buffer-set-local! buf 'list-offsets (reverse offsets))
+               (buffer-set-local! buf 'list-head-count first-row)
+               (reverse ovs))
+        (let ((text (car (car ls)))
+              (spans (car (cdr (car ls)))))
+          (buffer-append! buf (string-append text "\n"))
+          (loop (cdr ls) (+ i 1)
+                (+ off (string-byte-length text) 1)
+                (fold (lambda (acc s)
+                        (cons (list (+ off (car s))
+                                    (+ off (car s) (car (cdr s)))
+                                    (nth 2 s))
+                              acc))
+                      ovs spans)
+                (if (and (>= i first-row) (< i (+ first-row n-rows)))
+                    (cons off offsets)
+                    offsets))))))
+
+;;; --- where point is, in rows ---------------------------------------------------
+
+(define (list-offsets buf) (or (buffer-local buf 'list-offsets) '()))
+
+;; the header count comes off the buffer, not out of a fresh header: the
+;; header names the row count, and asking it to count rows that a refresh
+;; is halfway through replacing reads the rows that went
+(define (list-index buf)
+  (line-index-at buf (or (buffer-local buf 'list-head-count)
+                         (list-header-lines buf))))
+
+(define (list-goto-index! buf i)
+  (let ((offs (list-offsets buf)))
+    (when (and (>= i 0) (< i (length offs)))
+      (let ((p (nth i offs)))
+        (if (equal? (current-buffer) buf) (goto-char! p) (buffer-goto! buf p))))))
+
+;; the row point sits on, clamped into the rows: below the last one is
+;; the key bar, and a list where point can leave the rows has no row at
+;; point to act on
+(define (list-clamped-index buf)
+  (let ((n (length (list-entries buf)))
+        (i (list-index buf)))
+    (cond ((= n 0) #f)
+          ((not i) 0)
+          ((>= i n) (- n 1))
+          (else i))))
+
+;; the client re-measures its windows after every patch. When one of them
+;; changes width, every table in the editor lays itself out again — this
+;; is the window-configuration change hook, and a list is what listens.
+(define (window-config-changed!)
+  (for-each list-post-command! (buffer-list)))
+
+;; a table lays out in characters, so a window that changed width means a
+;; re-render. After a command is the other moment the width can have moved.
+(define (list-post-command! buf)
+  (when (and (list-mode-of buf) (list-table? buf))
+    (let ((w (list-view-width buf)))
+      (unless (equal? w (buffer-local buf 'list-width))
+        (buffer-set-local! buf 'list-width w)
+        (list-refresh! buf)))))
+
+(define (list-preview! buf)
+  (let ((f (list-opt buf 'preview))
+        (e (list-current buf)))
+    (when (and f e) (f buf e))))
+
+(define (list-move! step)
+  (let* ((buf (current-buffer))
+         (i (list-clamped-index buf))
+         (n (length (list-entries buf))))
+    (when i
+      (list-goto-index! buf (max 0 (min (- n 1) (+ i step))))
+      (list-preview! buf))))
+
+(domain! 'interaction)
+(effects! '(read))
+
+(define-command "list-next" "Move to the next row of this list"
+  (lambda () (list-move! 1)))
+
+(define-command "list-prev" "Move to the previous row of this list"
+  (lambda () (list-move! -1)))
+
+(domain! 'unknown)
+(effects! '(unknown))
+
+;; the first entry's byte offset — the header may be several lines
+(define (list-first-entry-pos buf)
+  (+ (string-byte-length (list-header-text buf)) 1))
+
+;; a narrow makes the old line meaningless: land on the first row. The
+;; filter prompt calls this while the minibuffer is current, so it moves
+;; the list's own point rather than the current buffer's.
+(define (list-goto-first-entry buf)
+  (if (pair? (list-offsets buf))
+      (list-goto-index! buf 0)
+      (let ((p (min (list-first-entry-pos buf) (buffer-size buf))))
+        (if (equal? (current-buffer) buf)
+            (goto-char! p)
+            (buffer-goto! buf p)))))
+
+(define (list-set-filters! buf fs)
+  (buffer-set-local! buf 'list-filters fs)
+  (list-refresh! buf)
+  (list-goto-first-entry buf))
+
+(domain! 'interaction)
+(effects! '(write))
+
+;; The narrowing is live, so what you see IS the filter: BEFORE is the
+;; stack you came in with, and every keystroke replaces the top of it.
+;; C-g puts BEFORE back, which is why the command holds it.
+(define-command "list-filter"
+  "Narrow this list to the rows that match what you type"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (before (list-filters buf))
+           (narrow (lambda (q)
+                     (list-set-filters! buf
+                       (if (equal? q "") before (cons (list "match" q) before))))))
+      (minibuffer-read* "Filter: " '()
+        (list (list 'change narrow)
+              (list 'confirm narrow)
+              (list 'cancel (lambda () (list-set-filters! buf before))))))))
+
+(define-command "list-filter-pop" "Drop the most recent filter on this list"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (null? (list-filters buf))
+          (message "no filter")
+          (begin (list-filter-pop! buf)
+                 (list-goto-first-entry buf))))))
+
+(define-command "list-filter-clear" "Drop every filter on this list"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (list-filter-clear! buf)
+      (list-goto-first-entry buf))))
+
+(domain! 'unknown)
+(effects! '(unknown))
 
 ;;; the refresh every one of them wrote by hand
 
+;; a row may want colour, and colour is byte ranges — so the list tells
+;; the row where its line landed rather than making the caller keep its
+;; own running offset
+(define (list-row-overlays buf rows)
+  (let ((ovf (list-opt buf 'overlays)))
+    (if (not ovf)
+        '()
+        (let loop ((es rows) (offs (list-offsets buf)) (out '()))
+          (if (or (null? es) (null? offs))
+              (reverse out)
+              (loop (cdr es) (cdr offs)
+                    (append (reverse (ovf buf (car es) (car offs))) out)))))))
+
+;; where a row went: a refresh may reorder the rows, and the reader stays
+;; on the row rather than on its number
+(define (list-index-of buf rows key)
+  (let loop ((es rows) (i 0))
+    (cond ((null? es) #f)
+          ((equal? (list-key buf (car es)) key) i)
+          (else (loop (cdr es) (+ i 1))))))
+
 (define (list-refresh! buf)
   (when (buffer-exists? buf)
-    (let* ((rows ((list-opt buf 'rows) buf))
-           (render (list-opt buf 'render))
-           ;; a rewrite dumps point to 0 — keep the reader's place
+    ;; a rewrite dumps point to 0 — keep the reader's place. The place is
+    ;; the ROW the reader is on, not the byte and not the number: a
+    ;; reflowed table moves every byte, and a most-recently-used list
+    ;; reorders the rows under the cursor.
+    (let* ((here (list-current buf))
+           (was (list-index buf))
+           (rows ((list-opt buf 'rows) buf))
            (cur? (equal? (current-buffer) buf))
            (p (if cur? (point) 0))
            (ro (buffer-read-only? buf)))
       ;; our own rewrite is not a user edit, and the buffer is read-only
       (buffer-set-read-only! buf #f)
       (buffer-delete-range! buf 0 (buffer-size buf))
-      ;; entries first: the header may state the row count
+      ;; entries first: the header states the row count
       (buffer-set-local! buf 'list-entries rows)
-      (buffer-append! buf (string-append (list-header-text buf) "\n"))
-      ;; a row may want colour, and colour is byte ranges — so the list
-      ;; tells the row where its line landed rather than making the caller
-      ;; keep its own running offset
-      (let ((ovf (list-opt buf 'overlays)))
-        (let loop ((es rows) (off (buffer-size buf)) (ovs '()))
-          (if (null? es)
-              (when ovf (overlay-set! buf 'list (reverse ovs)))
-              ;; a list with flags gets its mark column from here: three
-              ;; renders were each prepending their own
-              (let ((line (string-append (if (null? (list-flags buf))
-                                             ""
-                                             (list-mark-of buf (car es)))
-                                         (render buf (car es)))))
-                (buffer-append! buf (string-append line "\n"))
-                (loop (cdr es)
-                      (+ off (string-byte-length line) 1)
-                      (if ovf (append (reverse (ovf buf (car es) off)) ovs) ovs))))))
+      (let ((base (list-write! buf (list-view-lines buf rows)
+                               (list-header-lines buf) (length rows))))
+        (overlay-set! buf 'list (append base (list-row-overlays buf rows))))
       (buffer-set-read-only! buf ro)
-      (when cur? (goto-char! (min p (buffer-size buf)))))))
+      (when (list-table? buf)
+        (buffer-set-local! buf 'list-width (list-view-width buf)))
+      (when cur?
+        (let ((i (and here (list-index-of buf rows (list-key buf here)))))
+          (cond ((and i (pair? rows)) (list-goto-index! buf i))
+                ;; the rows may have shrunk under point — the key bar is
+                ;; not a row
+                ((and was (pair? rows))
+                 (list-goto-index! buf (min was (- (length rows) 1))))
+                (else (goto-char! (min p (buffer-size buf))))))))))
 
 ;; Everything a list buffer needs to BE one, applied to an explicit
 ;; buffer. The mode setup calls it with (current-buffer); opening a list
@@ -803,7 +1414,9 @@
 (define (define-mode name setup)
   (set! *mode-setups* (cons (list name setup) *mode-setups*))
   ;; every mode is an M-x command, like Emacs
-  (define-command name (lambda () (set-mode! name))))
+  (define-command name (lambda () (set-mode! name)))
+  (catalog-register! 'mode name "Major mode"
+    'use (string-append "(run-command \"" name "\")")))
 
 ;; What a mode is for, in the mode's own words. describe-mode prints it
 ;; above the key table. A mode without one still gets its keys.
@@ -812,7 +1425,16 @@
 (define (mode-doc! name doc)
   (set! *mode-docs*
     (cons (list name doc)
-          (remove (lambda (e) (equal? (car e) name)) *mode-docs*))))
+          (remove (lambda (e) (equal? (car e) name)) *mode-docs*)))
+  (let ((e (catalog-entry 'mode name)))
+    (if e
+        (catalog-register! 'mode name doc
+          'package (string->symbol (catalog--get e 'package))
+          'namespace (string->symbol (catalog--get e 'namespace))
+          'domain (string->symbol (catalog--get e 'domain))
+          'effects (map string->symbol (catalog--get e 'effects))
+          'use (string-append "(run-command \"" name "\")"))
+        (catalog-register! 'mode name doc))))
 
 (define (mode-doc name)
   (let ((e (assoc name *mode-docs*)))
@@ -933,15 +1555,17 @@
 (define *marginalia-file-dir* "")
 
 ;; what a file name means in a prompt: the mode it would OPEN in, then its
-;; size and its date, the same three dired shows. list-dir marks a
-;; directory with a trailing "/", and a directory opens in Dired. A name
-;; no entry above claims opens in Fundamental, which is a mode like any
-;; other — so the column stays full and says something true. The size pads
-;; itself: a size reads right-aligned, and only the field knows that.
+;; size and its date, the same three dired shows. A directory opens in
+;; Dired, and the stat says which entries are directories — a listing
+;; marks them with a trailing "/", dired's ".." carries no mark, and both
+;; read the same. A name no entry above claims opens in Fundamental, which
+;; is a mode like any other — so the column stays full and says something
+;; true. The size pads itself: a size reads right-aligned, and only the
+;; field knows that.
 (marginalia! 'file
   (lambda (name)
     (let ((st (file-stat (string-append *marginalia-file-dir* name))))
-      (list (if (string-suffix? "/" name)
+      (list (if (string-prefix? "d" (car st))
                 "Dired"
                 (or (auto-mode-for name) "Fundamental"))
             (string-pad-left (car (cdr st)) 6)
@@ -1866,30 +2490,13 @@
               ""))))
 
 ;; ONE candidate shape for every buffer prompt (dup #6): the name, the
-;; marginalia annotator supplies the rest. Everything related to the
-;; current buffer leads the pool: its group members first (the chat
-;; rides with its documents), then the buffers in the same project.
-;; The other buffers follow in MRU order. Internals (space-prefixed)
-;; stay hidden, as ibuffer hides them.
+;; marginalia annotator supplies the rest, MRU-ordered — the recency
+;; stream, whatever context each buffer lives in. Containers (groups)
+;; ride ABOVE this stream in the switcher; see switch-to-buffer.
+;; Internals (space-prefixed) stay hidden, as ibuffer hides them.
 (define (buffer-candidates-all)
-  (let* ((visible (filter (lambda (b) (not (string-prefix? " " b)))
-                          (buffer-list-mru)))
-         (cur (current-buffer))
-         (g (buffer-group cur))
-         (mates (if g
-                    (filter (lambda (b) (member b visible))
-                            (group-buffers-mru g))
-                    '()))
-         (proj (buffer-project-label cur))
-         (kin (if (equal? proj "")
-                  '()
-                  (filter (lambda (b) (and (not (member b mates))
-                                           (equal? (buffer-project-label b) proj)))
-                          visible))))
-    (annotate 'buffer
-      (append mates kin
-              (remove (lambda (b) (or (member b mates) (member b kin)))
-                      visible)))))
+  (annotate 'buffer
+    (filter (lambda (b) (not (string-prefix? " " b))) (buffer-list-mru))))
 
 ;; current excluded: first candidate = the buffer you just left, so
 ;; C-x b RET toggles between two buffers (Emacs buffer ring)
@@ -3813,6 +4420,38 @@
       (string-join (map buffer-short-label (take-n members 4)) " · ")
       (if m (string-append "  —  " m) ""))))
 
+;; a group with a modified member has unsaved work in it
+(define (group-dirty? g)
+  (pair? (filter buffer-modified? (group-buffers g))))
+
+(define (group-noise-face n)
+  (cond ((equal? n "loud") "warn")
+        ((equal? n "off") "faint")
+        (else "dim")))
+
+;; the members read as the group's contents, then what the group is for
+(define (group-cells buf g)
+  (let ((members (group-buffers-mru g)))
+    (list (if (group-dirty? g) (list "●" "warn") "")
+          (list (group-label g) "accent")
+          (list (number->string (length members)) "dim")
+          (list (group-noise g) (group-noise-face (group-noise g)))
+          (list (string-append
+                  (string-join (map buffer-short-label (take-n members 3)) " · ")
+                  (let ((m (group-meta g)))
+                    (if m (string-append "  —  " m) "")))
+                "faint"))))
+
+(define (groups-meta buf)
+  (let* ((rows (list-entries buf))
+         (n (length rows))
+         (bufs (fold (lambda (acc g) (+ acc (length (group-buffers g)))) 0 rows))
+         (dirty (length (filter group-dirty? rows))))
+    (string-append (number->string n) (if (= n 1) " group" " groups")
+                   " · " (number->string bufs) " buffers"
+                   " · " (number->string dirty) " modified"
+                   " · most recent first")))
+
 (define (groups--current)
   (let ((g (list-current (current-buffer))))
     (or g (begin (message "no group on this line") #f))))
@@ -3822,33 +4461,41 @@
     (let ((g (groups--current)))
       (when g (switch-to-group! g)))))
 
-(define-command "group-describe-at-point" "LLM-describe the group at point"
-  (lambda ()
-    (let ((g (groups--current)))
-      (when g (group-describe! g)))))
+;; a verb here acts on every marked group, or on the row at point when
+;; nothing is marked — the rule every list follows. The marks go when the
+;; verb has run, because a mark on a group that no longer exists outlives
+;; every refresh.
+(define (groups--act! word verb)
+  (let* ((buf (current-buffer))
+         (targets (list-targets buf)))
+    (if (null? targets)
+        (message "no group on this line")
+        (begin (for-each verb targets)
+               (for-each (lambda (g) (list-unmark-key! buf g)) targets)
+               (list-refresh! buf)
+               (message (string-append word " " (number->string (length targets))
+                                       " " (list-noun buf (length targets))))))))
 
-(define-command "group-noise-cycle" "Cycle the group's companion noise"
+(define-command "group-describe-at-point" "LLM-describe the marked groups"
+  (lambda () (groups--act! "describing" group-describe!)))
+
+(define-command "group-noise-cycle" "Cycle the companion noise of the marked groups"
   (lambda ()
-    (let ((g (groups--current)))
-      (when g
-        (let* ((cur (group-noise g))
-               (next (cond ((equal? cur "off") "quiet")
-                           ((equal? cur "quiet") "loud")
-                           (else "off"))))
-          (group-noise-set! g next)
-          (list-refresh! (current-buffer))
-          (message (string-append (group-label g) " companion: " next)))))))
+    (groups--act! "cycled"
+      (lambda (g)
+        (let ((cur (group-noise g)))
+          (group-noise-set! g (cond ((equal? cur "off") "quiet")
+                                    ((equal? cur "quiet") "loud")
+                                    (else "off"))))))))
 
 (define-command "group-dissolve" "Remove the group tag from every member"
   (lambda ()
-    (let ((g (groups--current)))
-      (when g
+    (groups--act! "dissolved"
+      (lambda (g)
         (for-each (lambda (b)
                     (buffer-set-local! b 'group #f)
                     (buffer-set-local! b 'companion-of #f))
-                  (group-buffers g))
-        (list-refresh! (current-buffer))
-        (message (string-append "dissolved group " (group-label g)))))))
+                  (group-buffers g))))))
 
 ;; kill a whole context: every member buffer dies, except a modified
 ;; file buffer — unsaved work never dies silently
@@ -3918,13 +4565,8 @@
             (when (buffer-exists? *groups-buffer*)
               (list-refresh! *groups-buffer*))))))))
 
-(define-command "group-kill-at-point" "Kill every buffer of the group at point"
-  (lambda ()
-    (let ((g (groups--current)))
-      (when g
-        (group-kill! g)
-        (when (buffer-exists? *groups-buffer*)
-          (list-refresh! *groups-buffer*))))))
+(define-command "group-kill-at-point" "Kill every buffer of the marked groups"
+  (lambda () (groups--act! "killed" group-kill!)))
 
 (define-command "groups-refresh" "Refresh the groups board"
   (lambda () (list-refresh! *groups-buffer*)))
@@ -3935,8 +4577,6 @@
 ;;; sparkline. The modeline is the summary; this is the expansion.
 ;;; Clicking the modeline's name opens it too.
 
-(define *dashboard-buffer* "*dashboard*")
-(add-display-rule! "*dashboard*" 'popup (list 'side 'bottom 'size 0.34))
 
 (define-style! 'dashboard "
 .dash { font-family: var(--font-sans); padding: 2px 6px 8px; }
@@ -3953,7 +4593,7 @@
              white-space: nowrap; }
 .dash-pill.warn { border-color: var(--diff-hunk-fg, #7a5a1a); color: var(--diff-hunk-fg, #7a5a1a); }
 .dash-pill.good { border-color: var(--diff-add-fg, #2e6b45); color: var(--diff-add-fg, #2e6b45); }
-.dash-grid { display: grid; grid-template-columns: 1fr 1fr 1.1fr 1.1fr; }
+.dash-grid { display: grid; grid-template-columns: 1fr 1.1fr 1.1fr; }
 .dash-cell { padding: 12px 18px 14px; display: flex; flex-direction: column; gap: 8px;
              border-right: 1px solid var(--border, #e2dbc9); min-width: 0; }
 .dash-cell:last-child { border-right: none; }
@@ -4192,6 +4832,7 @@
 ;; buffer rebuilds itself — modes, group, model all change under it
 (define (post-command!)
   (let ((buf (current-buffer)))
+    (list-post-command! buf)
     (when (buffer-local buf 'modeline-expanded)
       (let ((fp (dash--fingerprint buf)))
         (unless (equal? fp (buffer-local buf 'modeline-dash-fp))
@@ -4204,18 +4845,32 @@
 (define-list-mode! "groups-mode"
   (list
     'doc (string-append
-           "Every buffer group: members, companion noise, metadata. "
-           "RET switches to the group and restores its layout; d writes "
-           "its description with the LLM; n cycles noise; x dissolves.")
+           "Every buffer group as a table: members, companion noise, "
+           "metadata. RET switches to the group and restores its layout; "
+           "d writes its description with the LLM; n cycles noise; "
+           "x dissolves; K kills the members. `m` marks a group, `*` marks "
+           "every one, and the verbs act on the marked groups — or on the "
+           "row at point when nothing is marked. `/` narrows as you type "
+           "and `\\` widens by one.")
     'buffer *groups-buffer*
-    'rows (lambda (buf) (group-names))
-    'render (lambda (buf g) (group-line buf g))
+    'rows (lambda (buf) (list-keep buf (group-names)))
+    'columns (lambda (buf)
+               (list (list "" 1)
+                     (list "group" 24)
+                     (list "buffers" 7 'right)
+                     (list "noise" 6)
+                     (list "members" #f)))
+    'cells group-cells
+    'title (lambda (buf) "Groups")
+    'meta groups-meta
+    'total (lambda (buf) (length (group-names)))
+    'footer (lambda (buf)
+              '(("RET" "switch") ("m" "mark") ("*" "all") ("r" "rename")
+                ("d" "describe") ("n" "noise") ("x" "dissolve")
+                ("K" "kill buffers") ("/" "filter") ("g" "refresh")
+                ("q" "quit")))
     'key (lambda (buf g) g)
     'noun "group"
-    'header (lambda (buf)
-              (string-append
-                ";; groups — RET switch · r rename · d describe (LLM) · "
-                "n noise · x dissolve · K kill buffers · g refresh · q quit"))
     'keys '(("RET" "group-switch") ("r" "group-rename-at-point")
             ("d" "group-describe-at-point")
             ("n" "group-noise-cycle") ("x" "group-dissolve")
@@ -4515,6 +5170,7 @@
 (global-set-key "C-c w" "chat-companion")
 (global-set-key "C-c g" "group-add")
 (global-set-key "C-c d" "group-describe")
+
 (global-set-key "C-x G" "groups")
 ;; Cmd-k is the command palette, in the browser's own chord
 (global-set-key "s-k" "execute-extended-command")
@@ -4807,7 +5463,11 @@
 ;; system clipboard: paste lands on the kill ring too (Emacs interprogram-paste)
 (define (clipboard-paste! text)
   (kill-push! text)
-  (insert! text))
+  ;; System paste follows the ordinary editor rule: replace the active
+  ;; region, then leave point active rather than continuing selection mode.
+  (when (mark) (delete-region!))
+  (insert! text)
+  (set-mark! #f))
 
 ;; Cmd-C with no native selection (S12, dup #26): the region when one
 ;; exists — pushed to the kill ring, Emacs interprogram-cut — else the
@@ -5044,6 +5704,10 @@
 
 (category! 'commands)
 (public! 'define-command "(define-command NAME [DOC] THUNK) — register an M-x command; DOC shows in M-x")
+(public! 'domain! "(domain! 'NAME) — stamp following catalog declarations with their subject area")
+(public! 'effects! "(effects! '(LEVEL MODIFIERS...)) — stamp following declarations; LEVEL is pure/read/write/destroy/unknown")
+(public! 'namespace! "(namespace! 'NAME) — set the public vocabulary for following declarations")
+(public! 'catalog-meta! "(catalog-meta! KIND NAME 'domain D 'effects '(E ...)) — override catalog discovery metadata")
 (public! 'run-command "(run-command NAME) — invoke any M-x command")
 (public! 'command-names "All M-x command names")
 (public! 'command-doc "(command-doc NAME) -> the command's docstring (\"\" if none)")

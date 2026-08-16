@@ -9,95 +9,214 @@
 ;;;
 ;;; Keys (buffer-local):
 ;;;   n/p move · RET visit · ^ up · g revert
-;;;   m mark · u unmark · U unmark all · d flag for deletion · x execute
-;;;   + mkdir
-;;;   / n name-regex · / e extension · / t type (dir/file/link/exec)
-;;;   / . hide dotfiles · / p pop filter · / / clear filters
+;;;   m mark · u unmark · U unmark all · * mark all
+;;;   d flag for deletion · x execute · + mkdir
+;;;   / narrow (type; it matches the line and the mode beside it)
+;;;   \ widen by one · . hide dotfiles
 ;;;
-;;; Line format:  <mark> <perms>  <size>  <date>  <name>
+;;; Columns:  <mark> <kind> <name> <bar> <size> <modified> <perms> <vc>
 
 ;; the buffer-local is the durable copy: locals ride desktop.etf, so a
 ;; restored dired knows its directory before its mode setup re-renders
 (define (dired-dir buf) (buffer-local buf 'dired-dir))
 
-(define (dired-line buf dir e)
-  (let ((st (file-stat (string-append dir "/" e))))
-    (string-append
-      " " (car st) "  "
-      (string-pad-left (cadr st) 8) "  "
-      (caddr st) " "
-      e)))
+(define (dired-directory? e) (string-suffix? "/" e))
 
-;;; --- filters (dired-filter style) ---------------------------------------------
-;;; The stack and its label are list-mode's ('list-filters, per buffer,
-;;; persists with the desktop); only the matching language is dired's:
-;;;   ("name" REGEX) ("ext" EXT) ("type" dir|file|link|exec)
-;;;   ("dot" "on") ("mode" MAJOR-MODE)
+(define (dired-stat buf e)
+  (file-stat (string-append (dired-dir buf) "/" e)))
+
+;;; --- sizes --------------------------------------------------------------------
+;;; file-stat formats a size for reading ("12.4k"); the bar and the total
+;;; need the number it formatted, so they read it back.
+
+(define (dired-num s)
+  (let ((v (string->number s)))
+    (if (number? v) v 0)))
+
+(define (dired-scale s)
+  (cond ((string-suffix? "M" s) 1048576)
+        ((string-suffix? "k" s) 1024)
+        (else 1)))
+
+(define (dired-bytes s)
+  (let* ((k (dired-scale s))
+         (n (if (= k 1) s (substring s 0 (- (string-length s) 1))))
+         (parts (string-split n "."))
+         (tenths (if (null? (cdr parts)) 0 (dired-num (car (cdr parts))))))
+    (+ (* (dired-num (car parts)) k) (quotient (* tenths k) 10))))
+
+(define (dired-human b)
+  (cond ((>= b 1048576) (string-append (number->string (quotient b 1048576)) " MB"))
+        ((>= b 1024) (string-append (number->string (quotient b 1024)) " kB"))
+        (else (string-append (number->string b) " B"))))
+
+;; how big this file is against the biggest one here. The bar is five
+;; cells, and a file that has any bytes at all fills one of them.
+(define (dired-bar b top)
+  (let loop ((i 1) (n 0))
+    (if (> i 5)
+        (string-append (string-repeat "█" n) (string-repeat "░" (- 5 n)))
+        (loop (+ i 1) (if (and (> b 0) (>= (* b 5) (* top i))) i n)))))
+
+(define (dired-top-size buf)
+  (or (buffer-local buf 'dired-top) 1))
+
+;;; --- what git says ------------------------------------------------------------
+;;; One `git status` when the listing opens, kept on the buffer. A refresh
+;;; redraws from the map: `/` narrows on every keystroke, and a git call
+;;; per keystroke is a git call per keystroke.
+
+(define (dired-vc-label code)
+  (cond ((equal? code "??") "untracked")
+        ((string-prefix? " " code) "modified")
+        (else "staged")))
+
+;; the entry this path belongs to: git answers with paths under the
+;; directory, and a directory row says what its contents did
+(define (dired-vc-entry path)
+  (let ((i (string-index path "/")))
+    (if i (substring path 0 (+ i 1)) path)))
+
+(define (dired-vc-parse out)
+  (fold (lambda (acc line)
+          (if (< (string-length line) 4)
+              acc
+              (let* ((code (substring line 0 2))
+                     (path (string-trim (substring line 3 (string-length line))))
+                     (e (dired-vc-entry path)))
+                (if (assoc e acc)
+                    acc
+                    (cons (list e (dired-vc-label code)) acc)))))
+        '() (string-split out "\n")))
+
+(define (dired-vc-scan! buf dir)
+  (let ((out (shell-command->string
+               "git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git status --porcelain ." dir)))
+    (buffer-set-local! buf 'dired-vc (dired-vc-parse out))
+    (buffer-set-local! buf 'dired-repo?
+      (equal? "true" (string-trim
+                       (shell-command->string
+                         "git rev-parse --is-inside-work-tree 2>/dev/null" dir))))
+    (buffer-set-local! buf 'dired-branch
+      (string-trim (shell-command->string "git branch --show-current 2>/dev/null" dir)))
+    (buffer-set-local! buf 'dired-free
+      (string-trim (shell-command->string "df -h . | tail -1 | awk '{print $4}'" dir)))))
+
+(define (dired-vc buf e)
+  (let ((m (assoc e (or (buffer-local buf 'dired-vc) '()))))
+    (cond (m (car (cdr m)))
+          ((buffer-local buf 'dired-repo?) "tracked")
+          (else ""))))
+
+(define (dired-vc-face label)
+  (cond ((equal? label "untracked") "alert")
+        ((equal? label "modified") "warn")
+        ((equal? label "staged") "ok")
+        (else "faint")))
+
+;;; --- the row ------------------------------------------------------------------
+
+(define (dired-cells buf e)
+  (if (equal? e "..")
+      (list (list "▲" "accent") (list ".." "accent") "" "" "" "" "")
+      (let* ((st (dired-stat buf e))
+             (dir? (dired-directory? e))
+             (b (dired-bytes (cadr st)))
+             (vc (dired-vc buf e)))
+        (list (if dir? (list "▸" "accent") (list "·" "faint"))
+              (list e (if dir? "accent" #f))
+              (if dir? "" (list (dired-bar b (dired-top-size buf)) "faint"))
+              (if dir? (list "—" "faint") (list (cadr st) "dim"))
+              (list (caddr st) "dim")
+              (list (car st) "faint")
+              (list vc (dired-vc-face vc))))))
+
+;;; --- filters ------------------------------------------------------------------
+;;; `/` narrows and `\` widens, and both are list-mode's: the stack, the
+;;; label and the matching all live there, and `/` already reads the
+;;; perms, the size, the date, the name and the mode. Dired adds the two
+;;; kinds that text cannot say:
+;;;   ("dot" "on")                     hide the dotfiles
+;;;   ("type" dir|file|link|exec)      what the entry IS
+;;; A person reaches the first with `.`; an agent pushes either one.
 
 (define (dired-filter-match? dir e f)
   (let ((kind (car f)) (arg (car (cdr f))))
-    (cond ((equal? kind "name") (re-match? arg e))
-          ((equal? kind "ext") (string-suffix? (string-append "." arg) e))
-          ((equal? kind "dot") (not (string-prefix? "." e)))
+    (cond ((equal? kind "dot") (not (string-prefix? "." e)))
           ((equal? kind "type")
            (let ((perms (car (file-stat (string-append dir "/" e)))))
              (cond ((equal? arg "dir") (string-prefix? "d" perms))
                    ((equal? arg "link") (string-prefix? "l" perms))
                    ((equal? arg "exec") (if (string-index perms "x") #t #f))
                    (else (string-prefix? "-" perms)))))
-          ;; major mode the file would open in (auto-mode-alist); directories
-          ;; stay visible so the tree remains navigable while narrowed
-          ((equal? kind "mode")
-           (or (string-suffix? "/" e)
-               (equal? (auto-mode-for e) arg)))
           (else #t))))
 
+;; the file annotator stats a bare name, so it must know which directory
+;; this listing came from — the contract every file listing keeps
 (define (dired-visible buf dir)
-  (let ((fs (list-filters buf)))
-    (filter (lambda (e)
-              (let loop ((l fs))
-                (cond ((null? l) #t)
-                      ((dired-filter-match? dir e (car l)) (loop (cdr l)))
-                      (else #f))))
-            (list-dir dir))))
+  (set! *marginalia-file-dir* (string-append dir "/"))
+  (list-keep buf (list-dir dir)))
+
+;; the whole directory, before the filters: the biggest file sets the
+;; scale of the size bars, and the header counts what the narrowing hid
+(define (dired-measure! buf dir)
+  (let ((all (list-dir dir)))
+    (buffer-set-local! buf 'dired-total (length all))
+    (buffer-set-local! buf 'dired-top
+      (fold (lambda (top e)
+              (if (dired-directory? e)
+                  top
+                  (max top (dired-bytes (cadr (dired-stat buf e))))))
+            1 all))
+    (buffer-set-local! buf 'dired-used
+      (fold (lambda (sum e)
+              (if (dired-directory? e)
+                  sum
+                  (+ sum (dired-bytes (cadr (dired-stat buf e))))))
+            0 all))))
+
+;; git, df and the sizes answer once, when the listing opens or reverts.
+;; A refresh redraws from what they left: `/` narrows on every keystroke,
+;; and a scan per keystroke is a scan per keystroke. A restored dired
+;; scans on its first refresh, because its locals came back empty.
+(define (dired-scan-once! buf dir)
+  (unless (buffer-local buf 'dired-vc)
+    (dired-vc-scan! buf dir)
+    (dired-measure! buf dir)))
+
+(define (dired-rescan! buf)
+  (buffer-set-local! buf 'dired-vc #f))
+
+;; the title reads like a path a person says: home is "~"
+(define (abbreviate-home p)
+  (let ((home (expand-path "~")))
+    (if (string-prefix? home p)
+        (string-append "~" (substring p (string-length home) (string-length p)))
+        p)))
+
+(define (dired-title buf)
+  (string-append (abbreviate-home (or (dired-dir buf) "")) "/"))
+
+;; ".." is a way out of the directory, not a thing in it
+(define (dired-meta buf)
+  (let* ((n (list-count buf))
+         (branch (buffer-local buf 'dired-branch))
+         (free (buffer-local buf 'dired-free)))
+    (string-join
+      (append
+        (list (string-append (number->string n) " "
+                             (if (= n 1) "item" "items"))
+              (string-append (dired-human (or (buffer-local buf 'dired-used) 0)) " used"))
+        (if (and free (not (equal? free ""))) (list (string-append free " free")) '())
+        (if (and branch (not (equal? branch ""))) (list (string-append "⎇ " branch)) '()))
+      " · ")))
 
 (define (dired-filter-push! f)
   (list-filter-push! (current-buffer) f)
   (dired-goto-first-entry))
 
-(define-command "dired-filter-name" "Narrow dired to names matching a regex"
-  (lambda ()
-    (minibuffer-read "Filter names (regex): " '()
-      (lambda (pat) (unless (equal? pat "") (dired-filter-push! (list "name" pat)))))))
-
-(define-command "dired-filter-ext" "Narrow dired to one extension"
-  (lambda ()
-    (minibuffer-read "Filter extension: " '()
-      (lambda (e) (unless (equal? e "") (dired-filter-push! (list "ext" e)))))))
-
-(define (dired-mode-candidates)
-  (let loop ((es *auto-mode-alist*) (acc '()))
-    (if (null? es)
-        (reverse acc)
-        (loop (cdr es)
-              (let ((m (car (cdr (car es)))))
-                (if (member m acc) acc (cons m acc)))))))
-
-(define-command "dired-filter-mode" "Narrow dired to files opening in one major mode"
-  (lambda ()
-    (minibuffer-read "Filter by mode: "
-      (dired-mode-candidates)
-      (lambda (m) (unless (equal? m "") (dired-filter-push! (list "mode" m)))))))
-
-(define-command "dired-filter-type" "Narrow dired by entry type (file mode)"
-  (lambda ()
-    (minibuffer-read "Type: "
-      (list (list "dir" "directories only")
-            (list "file" "regular files only")
-            (list "link" "symlinks only")
-            (list "exec" "anything executable"))
-      (lambda (t) (unless (equal? t "") (dired-filter-push! (list "type" t)))))))
-
+;; the one filter you toggle rather than type: a dotfile is hidden by
+;; being a dotfile, and no text you type says "not this kind of name"
 (define-command "dired-filter-dotfiles" "Toggle hiding dotfiles"
   (lambda ()
     (let* ((buf (current-buffer))
@@ -111,37 +230,47 @@
             (dired-goto-first-entry))
           (dired-filter-push! (list "dot" "on"))))))
 
-(define-command "dired-filter-pop" "Drop the most recent dired filter"
-  (lambda ()
-    (list-filter-pop! (current-buffer))
-    (dired-goto-first-entry)))
-
-(define-command "dired-filter-clear" "Drop every dired filter"
-  (lambda ()
-    (list-filter-clear! (current-buffer))
-    (dired-goto-first-entry)))
-
 (define (dired-goto-first-entry)
-  (goto-char! 0)
-  (next-line!)
-  (beginning-of-line!))
+  (list-goto-first-entry (current-buffer)))
 
 ;; ".." is entry zero, so RET on it works through the same list-current
 ;; path as every real row; marks skip it
 (define-list-mode! "Dired"
   (list
     'doc (string-append
-           "One directory as a list: mark files with `m`, flag them with `d`, "
-           "delete the flagged ones with `x`. `RET` visits, `^` goes up. "
-           "Narrow the listing with the `/` filters; the filters persist "
-           "with the buffer.")
+           "One directory as a table: name, size, modified, perms and what "
+           "git says. Mark files with `m` and the whole listing with `*`; "
+           "flag them with `d` and delete the flagged ones with `x`. `RET` "
+           "visits, `^` goes up. `/` narrows as you type — it matches the "
+           "perms, the size, the date, the name and the mode the file would "
+           "open in. `\\` widens by one and `.` hides the dotfiles. The "
+           "filters persist with the buffer.")
+    ;; a file name is a file name: `/` matches the same annotation
+    ;; C-x C-f shows beside one
+    'category 'file
+    'filter (lambda (buf e f) (dired-filter-match? (dired-dir buf) e f))
     'rows (lambda (buf)
             (let ((dir (dired-dir buf)))
-              (if dir (cons ".." (dired-visible buf dir)) '())))
-    'render (lambda (buf e)
-              (if (equal? e "..")
-                  " .."
-                  (dired-line buf (dired-dir buf) e)))
+              (if (not dir)
+                  '()
+                  (begin (dired-scan-once! buf dir)
+                         (cons ".." (dired-visible buf dir))))))
+    'columns (lambda (buf)
+               (list (list "" 1)
+                     (list "name" #f)
+                     (list "" 5)
+                     (list "size" 7 'right)
+                     (list "modified" 12)
+                     (list "perms" 10)
+                     (list "vc" 9)))
+    'cells dired-cells
+    'title dired-title
+    'meta dired-meta
+    'total (lambda (buf) (or (buffer-local buf 'dired-total) 0))
+    'footer (lambda (buf)
+              '(("RET" "visit") ("m" "mark") ("*" "all") ("d" "flag")
+                ("x" "delete") ("/" "filter") ("." "dotfiles")
+                ("^" "up") ("g" "revert") ("q" "quit")))
     ;; delete asks first — the one flag in the editor that cannot be undone
     'flags (list (list "d" "D" "delete"
                        (lambda (buf e)
@@ -150,17 +279,9 @@
                        #t))
     'noun "file"
     'markable? (lambda (buf e) (not (equal? e "..")))
-    'header (lambda (buf)
-              (string-append (or (dired-dir buf) "") ":"
-                             (list-filters-label buf)))
     'keys '(("RET" "dired-visit") ("g" "dired-revert") ("^" "dired-up")
-            ("n" "dired-next") ("p" "dired-prev")
             ("+" "dired-mkdir") ("q" "quit-window")
-            ("/ n" "dired-filter-name") ("/ m" "dired-filter-mode")
-            ("/ e" "dired-filter-ext") ("/ t" "dired-filter-type")
-            ("/ ." "dired-filter-dotfiles") ("/ p" "dired-filter-pop")
-            ("/ /" "dired-filter-clear"))
-    'remap '(("next-line" "dired-next") ("previous-line" "dired-prev"))))
+            ("." "dired-filter-dotfiles"))))
 
 (define (dired-open dir0)
   (let ((dir (expand-path dir0)))
@@ -168,6 +289,8 @@
       (buffer-create buf)
       ;; the dir local first: the mode setup's refresh reads it
       (buffer-set-local! buf 'dired-dir dir)
+      ;; re-opening a directory re-reads what git and the sizes say
+      (dired-rescan! buf)
       (switch-to-buffer! buf)
       (set-mode! "Dired")
       (dired-goto-first-entry)
@@ -209,11 +332,13 @@
     (read-file-name "Dired (directory): "
       (lambda (d) (dired-open (normalize-file-input d))))))
 
+;; movement is list-mode's — these names stay for the bindings and the
+;; tests that call them
 (define-command "dired-next" "Move down to the next line in the Dired buffer"
-  (lambda () (next-line!) (beginning-of-line!)))
+  (lambda () (list-move! 1)))
 
 (define-command "dired-prev" "Move up to the previous line in the Dired buffer"
-  (lambda () (previous-line!) (beginning-of-line!)))
+  (lambda () (list-move! -1)))
 
 (define-command "dired-visit" "Visit the file or directory named on this line"
   (lambda ()
@@ -229,6 +354,7 @@
 
 (define-command "dired-revert" "Re-read the directory and refresh the listing"
   (lambda ()
+    (dired-rescan! (current-buffer))
     (list-refresh! (current-buffer))
     (message "Reverted")))
 

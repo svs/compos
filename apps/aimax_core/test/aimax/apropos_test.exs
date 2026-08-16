@@ -18,6 +18,92 @@ defmodule Aimax.AproposTest do
   end
 
   describe "the catalog" do
+    test "entries carry package, namespace, domain and effects" do
+      entry = eval!(~s{(catalog-entry 'function "buffer-text")})
+
+      assert entry =~ ~s{package "editor"}
+      assert entry =~ ~s{namespace "core"}
+      assert entry =~ ~s{domain "buffers"}
+      assert entry =~ ~s{effects ("read")}
+
+      assert eval!(~s{(catalog-entry 'function "buffer-append!")}) =~ ~s{effects ("write")}
+      assert eval!(~s{(catalog-entry 'function "buffer-kill!")}) =~ ~s{effects ("destroy")}
+    end
+
+    test "load units stamp their registrations" do
+      assert eval!(~s{(catalog-entry 'function "apropos-page")}) =~ ~s{package "help"}
+
+      assert eval!(~s{(catalog-entry 'setting "permission-timeout-ms")}) =~
+               ~s{package "agent"}
+    end
+
+    test "the bundled backfill leaves no unknown metadata" do
+      assert {:ok, "()"} =
+               Session.eval("""
+               (filter (lambda (e)
+                         (and (equal? (plist-get e 'origin) "bundled")
+                              (or (equal? (plist-get e 'domain) "unknown")
+                                  (member "unknown" (plist-get e 'effects)))))
+                       (catalog))
+               """)
+    end
+
+    test "new bundled declarations cannot silently expand the Luna backfill" do
+      # A new Scheme declaration must stamp itself. Change this frozen count
+      # only after regenerating and reviewing the Luna artifact.
+      assert eval!("""
+             (length (filter (lambda (e)
+                               (equal? (plist-get e 'metadata-source) "luna"))
+                             (catalog)))
+             """) == "653"
+
+      assert Aimax.Core.CatalogBackfill.count() == 713
+    end
+
+    test "new Scheme must stamp metadata instead of receiving a safe guess" do
+      eval!("""
+      (package! 'my-extension 'my-extension)
+      (define-command "zz-unstamped" "Reads a harmless value" (lambda () #t))
+      (package! 'user 'user)
+      """)
+
+      unstamped = eval!(~s{(catalog-entry 'command "zz-unstamped")})
+      assert unstamped =~ ~s{package "my-extension"}
+      assert unstamped =~ ~s{origin "user"}
+      assert unstamped =~ ~s{domain "unknown"}
+      assert unstamped =~ ~s{effects ("unknown")}
+      assert unstamped =~ ~s{metadata-source "unknown"}
+
+      eval!("""
+      (domain! 'files)
+      (effects! '(destroy external))
+      (define-command "zz-stamped" "Delete a remote test file" (lambda () #t))
+      (domain! 'unknown)
+      (effects! '(unknown))
+      """)
+
+      stamped = eval!(~s{(catalog-entry 'command "zz-stamped")})
+      assert stamped =~ ~s{domain "files"}
+      assert stamped =~ ~s{effects ("destroy" "external")}
+      assert stamped =~ ~s{metadata-source "declared"}
+    end
+
+    test "Luna-classified consequential entries carry metadata" do
+      assert eval!(~s{(catalog-entry 'function "llm")}) =~
+               ~s{effects ("read" "external" "execute" "spend")}
+
+      assert eval!(~s{(catalog-entry 'command "eval-buffer")}) =~
+               ~s{effects ("write" "execute")}
+
+      assert eval!(~s{(catalog-entry 'command "notmuch-trash")}) =~
+               ~s{effects ("destroy")}
+
+      llm = eval!(~s{(catalog-entry 'function "llm")})
+      assert llm =~ ~s{metadata-source "luna"}
+      assert llm =~ ~s{metadata-model "openai:gpt-5.6-luna"}
+      assert llm =~ ~s{metadata-confidence 0.98}
+    end
+
     test "every public entry carries a signature and a category" do
       # (name doc sig category) — the sig is parsed out of the doc, so an
       # entry written the house way needs no extra work to be discoverable
@@ -87,6 +173,29 @@ defmodule Aimax.AproposTest do
       hits = eval!(~s{(apropos "buffer-tekst")})
       assert hits =~ "buffer-text"
       assert hits =~ "closest name"
+    end
+
+    test "kind, package, namespace, domain and effect filters compose" do
+      hits = eval!(~s{(apropos "card" 'kind 'component 'namespace 'ui 'effect 'pure)})
+      assert hits =~ "ui/card"
+      refute hits =~ "diff-card"
+
+      assert eval!(~s{(apropos "" 'package 'help 'kind 'function)}) =~ "apropos-page"
+      assert eval!(~s{(apropos "" 'domain 'windows 'effect 'read)}) =~ "window"
+      assert eval!(~s{(apropos "" 'effect 'destroy)}) =~ "buffer-kill!"
+    end
+
+    test "components use the main catalog and expose a runnable contract" do
+      hit = eval!(~s{(car (apropos-components "bordered container"))})
+      assert hit =~ ~s{kind "component"}
+      assert hit =~ ~s{qualified-name "ui/card"}
+      assert hit =~ "props"
+      assert hit =~ "example"
+      assert hit =~ ~s{effects ("pure")}
+
+      rendered = eval!(~s{(component 'ui/badge '(text "ready" class "success"))})
+      assert rendered =~ "c-badge success"
+      assert rendered =~ "ready"
     end
   end
 

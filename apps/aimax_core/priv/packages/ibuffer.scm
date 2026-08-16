@@ -1,41 +1,58 @@
 ;;; ibuffer.scm --- the buffer list as a dired: filter, mark, act.
 ;;;
-;;; C-x C-b (or M-x ibuffer) pops *ibuffer*: one line per buffer, MRU
-;;; order — modified flag, size, mode, name. Same narrowing language as
-;;; dired: / m major mode · / n name regex · / p pop · / / clear.
-;;; m marks, d flags for killing, x executes, u and U unmark, RET
-;;; visits, g refreshes.
+;;; C-x C-b (or M-x ibuffer) pops *ibuffer*: one row per buffer, MRU
+;;; order — modified flag, name, size, mode, group, and whether it has a
+;;; file. Same table and same narrowing as dired, because both are lists:
+;;; `/` narrows as you type and `\` widens. A row matches on its columns
+;;; and on the annotation C-x b shows beside the same buffer.
+;;; m marks, `*` marks every row, d flags for killing, x executes, u and
+;;; U unmark, RET visits, g refreshes.
 ;;; Internals (space-prefixed) stay hidden.
 
 (define *ibuffer-buffer* "*ibuffer*")
 (add-display-rule! *ibuffer-buffer* 'popup)
 
-(define (ibuffer-filter-match? b f)
-  (let ((kind (car f)) (arg (car (cdr f))))
-    (cond ((equal? kind "mode")
-           (equal? (or (buffer-local b 'mode-name) "") arg))
-          ((equal? kind "name") (re-match? arg b))
-          (else #t))))
-
 ;; the rows: every buffer that is not this list, not an internal, and not
 ;; filtered out
 (define (ibuffer-visible)
-  (filter (lambda (b)
-            (and (not (equal? b *ibuffer-buffer*))
-                 (not (string-prefix? " " b))
-                 (let loop ((fs (list-filters *ibuffer-buffer*)))
-                   (cond ((null? fs) #t)
-                         ((ibuffer-filter-match? b (car fs)) (loop (cdr fs)))
-                         (else #f)))))
-          (buffer-list-mru)))
+  (list-keep *ibuffer-buffer*
+    (filter (lambda (b)
+              (and (not (equal? b *ibuffer-buffer*))
+                   (not (string-prefix? " " b))))
+            (buffer-list-mru))))
 
-;; the mark column comes from list-mode; this line starts at the modified flag
-(define (ibuffer-line b)
-  (string-append
-    (if (buffer-modified? b) "*" " ") " "
-    (string-pad-left (number->string (buffer-size b)) 8) "  "
-    (string-pad-right (or (buffer-local b 'mode-name) "-") 18)
-    b))
+;; every buffer, before the filters — the header counts what a narrowing hid
+(define (ibuffer-total)
+  (length (filter (lambda (b)
+                    (and (not (equal? b *ibuffer-buffer*))
+                         (not (string-prefix? " " b))))
+                  (buffer-list-mru))))
+
+(define (ibuffer-human n)
+  (cond ((>= n 1048576) (string-append (number->string (quotient n 1048576)) "M"))
+        ((>= n 1024) (string-append (number->string (quotient n 1024)) "k"))
+        (else (number->string n))))
+
+;; the columns say the same things the annotation beside a buffer name
+;; says, because `/` narrows on both
+(define (ibuffer-cells buf b)
+  (list (if (buffer-modified? b) (list "●" "warn") "")
+        ;; a name in stars is a buffer the editor made, not a file
+        (list b (if (string-prefix? "*" b) "accent" #f))
+        (list (ibuffer-human (buffer-size b)) "dim")
+        (list (or (buffer-local b 'mode-name) "Fundamental") "faint")
+        (list (group-label (buffer-group b)) "accent")
+        ;; the name already says which file; this column says whether
+        ;; there is one
+        (list (if (buffer-path b) "✓" "") "ok")))
+
+(define (ibuffer-meta buf)
+  (let* ((rows (list-entries buf))
+         (n (length rows))
+         (dirty (length (filter buffer-modified? rows))))
+    (string-append (number->string n) (if (= n 1) " buffer" " buffers")
+                   " · " (number->string dirty) " modified"
+                   " · most recent first")))
 
 (define (ibuffer-refresh!) (list-refresh! *ibuffer-buffer*))
 (define (ibuffer-current) (list-current *ibuffer-buffer*))
@@ -57,9 +74,8 @@
         (if w (select-window! w) (switch-to-buffer! *ibuffer-buffer*)))
       (set-mode! "ibuffer-mode")
       (ibuffer-refresh!)
-      (goto-char! 0)
-      (next-line!)
-      (beginning-of-line!))))
+      ;; the header is several lines: the list knows where its rows start
+      (list-goto-first-entry *ibuffer-buffer*))))
 
 (define-command "ibuffer-visit" "Show the selected buffer in another window and go there"
   (lambda ()
@@ -76,68 +92,59 @@
   (lambda () (ibuffer-refresh!)))
 
 ;; the other window follows the highlight (the occur/consult pattern):
-;; moving in the list previews without leaving it
+;; moving in the list previews without leaving it. list-mode moves and
+;; calls the mode's 'preview; these names stay for the tests that call them.
 (define (ibuffer-preview!)
   (let ((b (ibuffer-current)))
     (when (and b (buffer-exists? b))
       (display-buffer-other-window! b))))
 
 (define-command "ibuffer-next" "Move down and preview in the home window"
-  (lambda () (next-line!) (ibuffer-preview!)))
+  (lambda () (list-move! 1)))
 
 (define-command "ibuffer-prev" "Move up and preview in the home window"
-  (lambda () (previous-line!) (ibuffer-preview!)))
-
-(define-command "ibuffer-filter-mode" "Narrow to buffers in one major mode"
-  (lambda ()
-    (minibuffer-read "Mode: "
-      (let loop ((bs (buffer-list)) (acc '()))
-        (if (null? bs)
-            (reverse acc)
-            (loop (cdr bs)
-                  (let ((m (buffer-local (car bs) 'mode-name)))
-                    (if (and m (not (member m acc))) (cons m acc) acc)))))
-      (lambda (m) (unless (equal? m "") (ibuffer-filter-push! (list "mode" m)))))))
-
-(define-command "ibuffer-filter-name" "Narrow to buffer names matching a regex"
-  (lambda ()
-    (minibuffer-read "Filter names (regex): " '()
-      (lambda (pat) (unless (equal? pat "") (ibuffer-filter-push! (list "name" pat)))))))
-
-(define-command "ibuffer-filter-pop" "Drop the most recent filter"
-  (lambda () (list-filter-pop! *ibuffer-buffer*)))
-
-(define-command "ibuffer-filter-clear" "Drop every filter"
-  (lambda () (list-filter-clear! *ibuffer-buffer*)))
+  (lambda () (list-move! -1)))
 
 (define-list-mode! "ibuffer-mode"
   (list
     'doc (string-append
-           "The buffer list as a dired: one line per buffer in most-recently-used "
-           "order, with its modified flag, size and mode. Narrow it with the "
-           "filters, flag buffers with `d`, then kill the flagged ones with `x`. "
-           "`m` marks, `u` unmarks and `U` drops every mark. "
+           "The buffer list as a dired: one row per buffer in most-recently-used "
+           "order, with its modified flag, size, mode, group and file. `/` "
+           "narrows as you type — it matches the row and the annotation C-x b "
+           "shows, so a group or a project name finds every member — and `\\` "
+           "widens by one. Flag buffers with `d`, then kill the flagged ones "
+           "with `x`. `m` marks, `*` marks every row, `u` unmarks and `U` "
+           "drops every mark. "
            "Moving the highlight previews the buffer in the other window.")
     'buffer *ibuffer-buffer*
+    ;; a buffer name is a buffer name: `/` matches the same annotation
+    ;; C-x b shows beside one
+    'category 'buffer
     'rows (lambda (buf) (ibuffer-visible))
-    'render (lambda (buf b) (ibuffer-line b))
-    ;; the flag says what it does; list-mode supplies m/u/U/x and the column
+    'columns (lambda (buf)
+               (list (list "" 1)
+                     (list "buffer" #f)
+                     (list "size" 7 'right)
+                     (list "mode" 16)
+                     (list "group" 18)
+                     (list "file" 4)))
+    'cells ibuffer-cells
+    'title (lambda (buf) "Buffers")
+    'meta ibuffer-meta
+    'total (lambda (buf) (ibuffer-total))
+    'footer (lambda (buf)
+              '(("RET" "visit") ("m" "mark") ("*" "all") ("d" "flag")
+                ("x" "kill") ("/" "filter") ("\\" "widen")
+                ("g" "refresh") ("q" "quit")))
+    ;; the flag says what it does; list-mode supplies m/u/U/*/x and the column
     'flags (list (list "d" "D" "kill"
                        (lambda (buf b)
                          (and (buffer-exists? b) (begin (buffer-kill! b) #t)))))
     'noun "buffer"
-    'header (lambda (buf)
-              (string-append
-                ";; buffers — RET visit · m mark · d flag · x kill flagged · "
-                "/ m mode · / n name · g refresh"
-                (list-filters-label buf)))
-    'keys '(("RET" "ibuffer-visit") ("g" "ibuffer-refresh") ("q" "quit-window")
-            ("n" "ibuffer-next") ("p" "ibuffer-prev")
-            ("/ m" "ibuffer-filter-mode") ("/ n" "ibuffer-filter-name")
-            ("/ p" "ibuffer-filter-pop") ("/ /" "ibuffer-filter-clear"))
-    ;; the standard: line movement REMAPS, so arrows, C-n/C-p, and any
-    ;; user binding of next-line all move-and-preview identically
-    'remap '(("next-line" "ibuffer-next") ("previous-line" "ibuffer-prev"))))
+    ;; the other window follows the highlight: list-mode moves, this shows
+    'preview (lambda (buf b)
+               (when (buffer-exists? b) (display-buffer-other-window! b)))
+    'keys '(("RET" "ibuffer-visit") ("g" "ibuffer-refresh") ("q" "quit-window"))))
 
 (global-set-key "C-x C-b" "ibuffer")
 

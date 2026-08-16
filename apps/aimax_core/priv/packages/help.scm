@@ -175,6 +175,11 @@
        (list "key" (plist-get h 'name) (plist-get h 'runs)
              (command-doc (plist-get h 'runs))))
       ((equal? kind "variable") (list "setting" (plist-get h 'name) "" doc))
+      ((equal? kind "component")
+       (list "component" (plist-get h 'qualified-name)
+             (or (plist-get h 'use) "") doc))
+      ((equal? kind "mode")
+       (list "mode" (plist-get h 'name) (or (plist-get h 'use) "") doc))
       ;; a query that matched nothing comes back as the closest names
       (else (list (if (plist-get h 'note) "closest" "function")
                   (plist-get h 'name) (or (plist-get h 'sig) "") doc)))))
@@ -184,19 +189,23 @@
 
 (define (help--apropos-table hits)
   (string-append
-    "| kind | name | call it | what it does |\n| --- | --- | --- | --- |\n"
+    "| kind | name | call it | owner | effects | what it does |\n"
+    "| --- | --- | --- | --- | --- | --- |\n"
     (string-join
       (map (lambda (h)
              (let ((r (help--apropos-row h)))
                (string-append "| " (nth 0 r) " | " (help--code (nth 1 r))
                               " | " (help--code (nth 2 r))
+                              " | " (help--cell (or (plist-get h 'package) "core"))
+                              " | " (help--cell
+                                       (string-join (or (plist-get h 'effects) '()) ", "))
                               " | " (help--cell (nth 3 r)) " |")))
            hits)
       "\n")
     "\n"))
 
-(define (apropos-page query)
-  (let ((hits (apropos query)))
+(define (apropos-page query &optional filters)
+  (let ((hits (apply apropos (cons query (or filters '())))))
     (help-doc! (string-append "apropos " query)
       (string-append
         "# apropos `" query "`\n\n"

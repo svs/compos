@@ -199,32 +199,45 @@ defmodule Aimax.Core.Desktop do
           end
 
         # a vanished file with saved unsaved edits still restores: the
-        # snapshot text is the only copy of that work
-        if restorable?(bpath) or is_binary(text) do
-          Session.call_named("visit", [bpath])
-          # visit can decline (unreachable remote host) — skip, don't crash boot
-          if Buffer.exists?(bpath) do
-            # unsaved edits lay over what visit read. When a save landed
-            # before the restart the texts match, nothing is replaced, and
-            # the buffer stays clean. When the file moved on disk AND the
-            # snapshot holds edits, the snapshot wins — it is the copy the
-            # user watched leave their fingers.
-            if is_binary(text) and text != Buffer.text(bpath) do
-              size = Buffer.byte_size(bpath)
+        # snapshot text is the only copy of that work. One buffer that
+        # dies mid-restore must not abort the loop: every buffer after it
+        # in the file — every chat — would be lost, and the next save
+        # would write the crippled state over the desktop.
+        try do
+          if restorable?(bpath) or is_binary(text) do
+            Session.call_named("visit", [bpath])
+            # visit can decline (unreachable remote host) — skip, don't crash boot
+            if Buffer.exists?(bpath) do
+              # unsaved edits lay over what visit read. When a save landed
+              # before the restart the texts match, nothing is replaced, and
+              # the buffer stays clean. When the file moved on disk AND the
+              # snapshot holds edits, the snapshot wins — it is the copy the
+              # user watched leave their fingers.
+              if is_binary(text) and text != Buffer.text(bpath) do
+                size = Buffer.byte_size(bpath)
 
-              if size > 0,
-                do: Buffer.delete_range(bpath, 0, size, source: :editor, author: :none)
+                if size > 0,
+                  do: Buffer.delete_range(bpath, 0, size, source: :editor, author: :none)
 
-              if text != "", do: Buffer.append(bpath, text, source: :editor, author: :none)
+                if text != "", do: Buffer.append(bpath, text, source: :editor, author: :none)
+              end
+
+              apply_saved_state(bpath, point, locals)
             end
-
-            apply_saved_state(bpath, point, locals)
           end
+        catch
+          kind, reason ->
+            Logger.warning("desktop: skipped #{bpath}: #{inspect(kind)} #{inspect(reason)}")
         end
       end
 
       for {name, text, point, locals} <- desktop[:scratch] || [] do
-        restore_scratch(name, text, point, locals)
+        try do
+          restore_scratch(name, text, point, locals)
+        catch
+          kind, reason ->
+            Logger.warning("desktop: skipped #{name}: #{inspect(kind)} #{inspect(reason)}")
+        end
       end
 
       restore_frames(desktop)

@@ -1995,9 +1995,16 @@ defmodule Aimax.EditorTest do
     assert hd(labels) == "[ctgrp-#{n}]"
     assert mb.prompt =~ "default [ctgrp-#{n}]"
 
-    # RET on the container switches to the group's most recent member
+    # RET on the container arrives ARRANGED: the two most recent
+    # members side by side, point in the most recent
     press(["RET"])
     assert Editor.current_buffer() == m2
+
+    shown =
+      Editor.list_windows() |> Enum.map(fn {_id, b} -> b end) |> Enum.sort()
+
+    assert shown == Enum.sort([m1, m2])
+    {:ok, _} = Aimax.Core.Session.eval("(delete-other-windows!)")
   end
 
   test "TAB locks the switcher to the one group the input names" do

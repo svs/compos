@@ -1886,6 +1886,9 @@
   (lambda ()
     (let* ((here (or (window-buffer (active-window)) (current-buffer)))
            (my-group (buffer-group here))
+           ;; opening the switcher snapshots this group's arrangement:
+           ;; wherever you go next, the way back is exact
+           (_ (when my-group (group-layout-save! my-group)))
            (groups (filter (lambda (g) (not (equal? g my-group))) (group-names)))
            (container-of (lambda (label)
                            (let loop ((gs groups))
@@ -3293,6 +3296,27 @@
 ;; switch the frame to a group: save the layout you leave, then bring
 ;; the group's saved layout back exactly as you left it. A group with
 ;; no saved layout opens its most recent member full-frame.
+;; a group that never saved a layout still ARRIVES arranged: the most
+;; recent work buffer on the left, and on the right the group chat
+;; (companion noise "loud") or the next work buffer. One member alone
+;; fills the frame.
+(define (group-default-layout! g)
+  (let* ((docs (group-docs g))
+         (main (if (pair? docs) (car docs) (group-chat g)))
+         (loud (equal? (group-noise g) "loud"))
+         (side (cond ((and loud (pair? docs)) (group-chat g))
+                     ((and (pair? docs) (pair? (cdr docs))) (car (cdr docs)))
+                     (else #f))))
+    (delete-other-windows!)
+    (switch-to-buffer! main)
+    (when side
+      (split-window! 'h 0.6)
+      (other-window!)
+      (switch-to-buffer! side)
+      (when loud (set-mode! "chat-mode"))
+      (let ((w (window-showing main)))
+        (when w (select-window! w))))))
+
 (define (switch-to-group! g)
   (let ((from (buffer-group (current-buffer))))
     (when (and from (not (equal? from g)))
@@ -3300,9 +3324,7 @@
   (let ((saved (group-layout g)))
     (if saved
         (window-tree-set! saved)
-        (let ((members (group-buffers-mru g)))
-          (delete-other-windows!)
-          (switch-to-buffer! (if (pair? members) (car members) (group-chat g))))))
+        (group-default-layout! g)))
   (message (string-append "switched to group " (group-label g))))
 
 ;; found a group from what is on screen: every window's buffer joins,

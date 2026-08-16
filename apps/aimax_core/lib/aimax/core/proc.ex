@@ -58,6 +58,10 @@ defmodule Aimax.Core.Proc do
 
   @impl true
   def init(opts) do
+    # trap exits so terminate/2 runs and can kill the OS process; a closed
+    # port only closes stdin, which `script` and its child ignore — each
+    # undead pair holds a pty, and the machine has ~511
+    Process.flag(:trap_exit, true)
     buffer = Keyword.fetch!(opts, :buffer)
     cmd = Keyword.fetch!(opts, :cmd)
     Aimax.Core.create_buffer(buffer)
@@ -94,6 +98,18 @@ defmodule Aimax.Core.Proc do
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
     Buffer.append(state.buffer, "\n[process exited: #{status}]\n", source: :process)
     {:stop, :normal, state}
+  end
+
+  # port EXIT after exit_status — nothing left to do
+  def handle_info({:EXIT, port, _reason}, %{port: port} = state), do: {:noreply, state}
+
+  @impl true
+  def terminate(_reason, state) do
+    with {:os_pid, os_pid} <- Port.info(state.port, :os_pid) do
+      System.cmd("/bin/kill", ["-TERM", Integer.to_string(os_pid)])
+    end
+
+    :ok
   end
 
   # CSI/OSC sequences and stray carriage returns from the pty.

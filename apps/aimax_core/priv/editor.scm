@@ -438,14 +438,14 @@
   (lambda () (forward-char!)))
 (define-command "backward-char" "Move point one character backward"
   (lambda () (backward-char!)))
-;; A preview window draws one rendered document, so point means nothing
-;; the reader can see in it: the ordinary motion keys would move point and
-;; the page would sit still. Scroll the page instead. Every key that moves
-;; through a buffer asks here first, so `<down>`, `C-v`, `<next>` and
-;; `M->` all do in a preview what they do everywhere else.
+;; An html or app window draws a document with no visible point, so the
+;; ordinary motion keys would move point and the page would sit still.
+;; Scroll the page instead. A markdown preview is different: it shows
+;; point as a cursor and takes edits, so motion keys move point there
+;; and the view follows the cursor on its own.
 (define (preview-buffer? buf)
   (let ((rm (buffer-local buf 'render-mode)))
-    (or (equal? rm "markdown") (equal? rm "html") (equal? rm "app"))))
+    (or (equal? rm "html") (equal? rm "app"))))
 
 ;; #t when it scrolled, so a command can fall through to the point motion
 (define (preview-scroll! lines)

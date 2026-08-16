@@ -2085,4 +2085,49 @@ defmodule Aimax.MinibufferEditingTest do
     assert Editor.current_buffer() == win
     assert Buffer.text(Editor.minibuf_name()) == ""
   end
+
+  # a markdown preview shows point and takes edits, so motion keys move
+  # point; an html preview has no visible point, so they scroll instead
+  test "motion keys move point in a markdown preview" do
+    path = Path.join(System.tmp_dir!(), "aimax-prevmove-#{System.unique_integer([:positive])}.md")
+    File.write!(path, "# Title\n\nbody\n")
+
+    press(["C-x", "C-f"])
+    type(path)
+    press(["RET"])
+    press(["C-c", "C-v"])
+    assert Buffer.get_local(path, "render-mode") == "markdown"
+
+    Buffer.goto(path, 0)
+    press(["C-n"])
+    assert Buffer.point(path) > 0
+    Buffer.goto(path, 0)
+    press(["<down>"])
+    assert Buffer.point(path) > 0
+    press(["<right>"])
+    p = Buffer.point(path)
+    press(["<left>"])
+    assert Buffer.point(path) == p - 1
+
+    press(["C-x", "1"])
+    File.rm!(path)
+  end
+
+  test "motion keys still scroll an html preview" do
+    path = Path.join(System.tmp_dir!(), "aimax-prevhtml-#{System.unique_integer([:positive])}.html")
+    File.write!(path, "<h1>hi</h1>\n<p>body</p>\n")
+
+    press(["C-x", "C-f"])
+    type(path)
+    press(["RET"])
+    press(["C-c", "C-v"])
+    assert Buffer.get_local(path, "render-mode") == "html"
+
+    Buffer.goto(path, 0)
+    press(["C-n"])
+    assert Buffer.point(path) == 0
+
+    press(["C-x", "1"])
+    File.rm!(path)
+  end
 end

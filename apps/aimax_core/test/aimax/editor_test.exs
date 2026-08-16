@@ -2085,7 +2085,7 @@ defmodule Aimax.EditorTest do
       )
   end
 
-  test "modeline-expand toggles the dashboard popup with the buffer's facts" do
+  test "modeline-expand attaches the panel to the buffer itself" do
     n = System.unique_integer([:positive])
     b = "dash-#{n}"
     Aimax.Core.create_buffer(b)
@@ -2095,51 +2095,35 @@ defmodule Aimax.EditorTest do
       (begin (set-frame-local! 'current-group #f)
              (delete-other-windows!)
              (switch-to-buffer! "#{b}")
+             (buffer-append! "#{b}" "0123456789")
+             (goto-char! 7)
              (buffer-set-local! "#{b}" 'group "dashgrp-#{n}"))
       """)
 
-    press(["C-x", "?"])
-    assert Editor.current_buffer() == "*dashboard*"
-
-    blocks = Aimax.Core.Buffer.get_local("*dashboard*", "render-blocks")
-    text = inspect(blocks, limit: :infinity, printable_limit: :infinity)
-    assert text =~ b
-    assert text =~ "dashgrp-#{n}"
-    assert text =~ "companion"
-    refute text =~ "all groups"
-
-    # the same key toggles it away — landing back exactly where the
-    # dashboard was invoked from, with the window's point as it was
-    # when the dashboard opened (per-window points, Emacs semantics)
-    press(["C-x", "?"])
-    refute Enum.any?(Editor.list_windows(), fn {_id, x} -> x == "*dashboard*" end)
-    assert Editor.current_buffer() == b
-
-    {:ok, _} =
-      Aimax.Core.Session.eval(
-        "(begin (set-frame-local! 'current-group #f) (delete-other-windows!))"
-      )
-  end
-
-  test "the dashboard round-trip keeps window, buffer, and point" do
-    n = System.unique_integer([:positive])
-    b = "pt-#{n}"
-    Aimax.Core.create_buffer(b)
-
-    {:ok, _} =
-      Aimax.Core.Session.eval("""
-      (begin (set-frame-local! 'current-group #f)
-             (delete-other-windows!)
-             (switch-to-buffer! "#{b}")
-             (buffer-append! "#{b}" "0123456789")
-             (goto-char! 7))
-      """)
-
-    press(["C-x", "?"])
-    assert Editor.current_buffer() == "*dashboard*"
+    # expanding changes NOTHING about where you are: same buffer, same
+    # point — the panel is an attachment, not a place
     press(["C-x", "?"])
     assert Editor.current_buffer() == b
     assert Aimax.Core.Session.eval("(point)") == {:ok, "7"}
+    assert Aimax.Core.Buffer.get_local(b, "modeline-expanded") == true
+
+    blocks =
+      inspect(Aimax.Core.Buffer.get_local(b, "modeline-dash-blocks"),
+        limit: :infinity,
+        printable_limit: :infinity
+      )
+
+    assert blocks =~ "dashgrp-#{n}"
+    assert blocks =~ "companion"
+    assert blocks =~ "lane"
+    refute blocks =~ "all groups"
+
+    # the same key detaches it; the buffer never noticed
+    press(["C-x", "?"])
+    assert Aimax.Core.Buffer.get_local(b, "modeline-expanded") in [nil, false]
+    assert Editor.current_buffer() == b
+    assert Aimax.Core.Session.eval("(point)") == {:ok, "7"}
+
     {:ok, _} = Aimax.Core.Session.eval("(delete-other-windows!)")
   end
 

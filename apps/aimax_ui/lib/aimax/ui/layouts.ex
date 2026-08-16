@@ -370,6 +370,18 @@ defmodule Aimax.Ui.Layouts do
             color: var(--modeline-active-fg, #1b1a17);
             border-top: 2px solid var(--accent-fg, #26356b);
           }
+          .dash-live {
+            display: flex; gap: 16px; padding: 6px 16px;
+            font-family: var(--font-mono); font-size: 10.5px;
+            color: var(--dim-fg, #8a857a);
+            border-bottom: 1px solid var(--border, #e2dbc9);
+          }
+          .dash-live-mod { color: var(--warn-fg, #7a5a1a); }
+          .dash-top {
+            flex: 0 0 auto; max-height: 46%; overflow-y: auto;
+            background: var(--window-inactive-bg, #f4f0e6);
+            border-bottom: 1px solid var(--border, #e2dbc9);
+          }
           .ml-caret {
             font-family: var(--font-mono); font-size: 9px; cursor: pointer;
             color: var(--accent-fg, #26356b); flex: 0 0 auto; opacity: 0.7;

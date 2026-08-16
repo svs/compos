@@ -3737,19 +3737,6 @@
                   (list (dash--pill
                           (string-append (number->string (buffer-size buf)) " B") #f)))))))
 
-(define (dash--position buf)
-  (dash--section "position"
-    (list (dash--row "point" (number->string (buffer-point buf)))
-          (dash--row "size" (string-append (number->string (buffer-size buf)) " bytes"))
-          (dash--row "through"
-                     (let ((s (buffer-size buf)))
-                       (if (= s 0) "0%"
-                           (string-append
-                             (number->string
-                               (quotient (* 100 (buffer-point buf)) s)) "%"))))
-          (dash--row "state" (if (buffer-modified? buf) "modified" "saved")
-                     (if (buffer-modified? buf) #f "good")))))
-
 (define (dash--modes buf)
   (let ((minors (or (buffer-local buf 'minor-modes) '())))
     (dash--section "modes"
@@ -3824,6 +3811,29 @@
              (let ((h (group-holder g)))
                (and h (buffer-local h 'chat-cost)))))))
 
+;; the model HERE would talk to, and through which lane: a chat's own
+;; agent-model, a writing buffer's llm-model, else the global default.
+;; The lane is acp when a connector is attached, api otherwise.
+(define (dash--model buf)
+  (or (buffer-local buf 'agent-model)
+      (buffer-local buf 'llm-model)
+      (llm-model)))
+
+(define (dash--lane buf)
+  (let ((c (buffer-local buf 'agent-connector)))
+    (if (and c (not (equal? c "api")))
+        (string-append "acp · " c)
+        "api")))
+
+;; the tool presets in force here: the buffer's own, or its group chat's
+(define (dash--presets buf)
+  (let ((p (or (buffer-local buf 'chat-presets)
+               (let ((g (buffer-group buf)))
+                 (and g (let ((h (group-holder g)))
+                          (and h (buffer-local h 'chat-presets))))))))
+    (and (pair? p)
+         (string-join (map (lambda (x) (value->string x)) p) " · "))))
+
 (define (dash--llm buf)
   (let* ((rows (llm-cost-report))
          (days (sort-by-car (dash--day-costs rows)))
@@ -3831,8 +3841,12 @@
          (total (fold (lambda (a d) (+ a (cadr d))) 0 days))
          (today (if (pair? days) (car (reverse days)) #f))
          (here (dash--here-cost buf)))
-    (dash--section "llm spend"
+    (dash--section "llm"
       (append
+        (list (list 'tag "div" 'class "dash-big" 'text (dash--model buf))
+              (dash--row "lane" (dash--lane buf)))
+        (let ((ps (dash--presets buf)))
+          (if ps (list (dash--row "presets" ps)) '()))
         (if (pair? last14) (list (dash--spark last14)) '())
         (if here (list (dash--row "this chat" (format-usd here))) '())
         (list (dash--row "today, all" (if today (format-usd (cadr today)) "$0") #f)
@@ -3862,58 +3876,40 @@
 (define (list-tail-n xs n)
   (if (= n 0) xs (list-tail-n (cdr xs) (- n 1))))
 
-(define (dashboard-refresh!)
-  (let* ((for0 (buffer-local *dashboard-buffer* 'dashboard-for))
-         ;; the buffer it described can die under it (a killed chat):
-         ;; fall back rather than crash the refresh
-         (buf (if (and for0 (buffer-exists? for0)) for0 (current-buffer))))
-    (buffer-set-local! *dashboard-buffer* 'render-blocks
-      (list
-        (list 'tag "div" 'class "dash"
-              'children
-              (list (dash--head buf)
-                    (list 'tag "div" 'class "dash-grid"
-                          'children
-                          (list (dash--position buf)
-                                (dash--modes buf)
-                                (dash--group buf)
-                                (dash--llm buf)))))))))
+;; the expansion is a panel INSIDE the buffer's window, pinned above
+;; the text — the buffer stays editable beneath it. The state is one
+;; buffer-local; the blocks are derived and never saved.
+(define (desktop-skip! buf key)
+  (let ((cur (or (buffer-local buf 'desktop-skip-locals) '())))
+    (unless (member key cur)
+      (buffer-set-local! buf 'desktop-skip-locals (cons key cur)))))
 
-(define-command "modeline-dashboard-refresh" "Refresh the dashboard"
-  (lambda () (dashboard-refresh!)))
-
-(define-mode "dashboard-mode"
-  (lambda ()
-    (let ((buf (current-buffer)))
-      (buffer-set-read-only! buf #t)
-      (buffer-set-local! buf 'transient #t)
-      (buffer-set-local! buf 'desktop-skip-locals '(render-blocks))
-      (buffer-set-local! buf 'render-mode "blocks")
-      (local-set-key "q" "popup-toggle")
-      (local-set-key "g" "modeline-dashboard-refresh")
-      (dashboard-refresh!))))
-
-(mode-doc! "dashboard-mode"
-  "The modeline, expanded: the buffer, its modes, its group, and the LLM ledger with a spend sparkline. `g` refreshes and `q` closes.")
+(define (dashboard-blocks buf)
+  (list
+    (list 'tag "div" 'class "dash"
+          'children
+          (list (dash--head buf)
+                ;; position is NOT a card: the panel's live strip shows
+                ;; it straight from the window, current on every keystroke
+                (list 'tag "div" 'class "dash-grid"
+                      'children
+                      (list (dash--modes buf)
+                            (dash--group buf)
+                            (dash--llm buf)))))))
 
 (define-command "modeline-expand"
-  "Toggle the dashboard popup: everything about here"
+  "Toggle this buffer's expanded modeline panel"
   (lambda ()
-    (if (and (popup-open?)
-             (equal? (popup-buffer) *dashboard-buffer*)
-             (window-showing *dashboard-buffer*))
-        (begin
-          (run-command "popup-toggle")
-          ;; land back exactly where the dashboard was invoked from —
-          ;; closing must not move you
-          (let ((w (frame-local 'dashboard-return)))
-            (when (and w (window-exists? w)) (select-window! w))))
-        (let ((here (current-buffer)))
-          (set-frame-local! 'dashboard-return (active-window))
-          (buffer-create *dashboard-buffer*)
-          (buffer-set-local! *dashboard-buffer* 'dashboard-for here)
-          (display-buffer *dashboard-buffer*)
-          (set-mode! "dashboard-mode")))))
+    (let ((buf (current-buffer)))
+      (if (buffer-local buf 'modeline-expanded)
+          (begin
+            (buffer-set-local! buf 'modeline-expanded #f)
+            (buffer-set-local! buf 'modeline-dash-blocks #f))
+          (begin
+            (desktop-skip! buf 'modeline-expanded)
+            (desktop-skip! buf 'modeline-dash-blocks)
+            (buffer-set-local! buf 'modeline-dash-blocks (dashboard-blocks buf))
+            (buffer-set-local! buf 'modeline-expanded #t))))))
 
 (define-command "groups" "The groups board: switch, describe, set noise"
   (lambda () (list-mode-show! "groups-mode")))

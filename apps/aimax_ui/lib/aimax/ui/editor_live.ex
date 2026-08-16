@@ -805,6 +805,16 @@ defmodule Aimax.Ui.EditorLive do
       data-path={@path}
       data-read-only={to_string(@read_only)}
     >
+      <div :if={@node.dash} class="dash-top">
+        <div class="dash-live">
+          <span>L{@line}:C{@col}</span>
+          <span>point {@node.point}</span>
+          <span>{ml_bytes(@node.text)}</span>
+          <span>{pct(@node)}</span>
+          <span :if={@node.modified} class="dash-live-mod">modified</span>
+        </div>
+        <.blk :for={b <- Enum.map(@node.dash, &block_view/1)} b={b} line={0} win={@node.id} />
+      </div>
       <%= if @node.render_mode == "blocks" and Map.has_key?(@node, :blk) do %>
         <div class="blocks-view" id={"blocks-#{@node.id}"} phx-hook="BlockScroll">
           <div class="blocks-scroll">
@@ -968,8 +978,7 @@ defmodule Aimax.Ui.EditorLive do
           phx-value-win={@node.id}
           phx-value-cmd="modeline-expand"
         >{@node.buffer}</span>
-        <span :if={@node.group} class="ml-group">⊞ {@node.group}</span>
-        <span class="ml-mode">{@node.mode}</span>
+        <span class="ml-mode">{@node.mode}<%= if ml_group(@node) do %> · {ml_group(@node)}<% end %><%= if @node.modified do %> · modified<% end %></span>
         <span :if={@node.render_mode in ["html", "markdown"]} class="ml-mode">preview</span>
         <span
           :if={@node.modeline_info}
@@ -1425,6 +1434,16 @@ defmodule Aimax.Ui.EditorLive do
         [{"a", [{"href", url}], [url], meta}]
     end
   end
+
+  # the group segment, shortened — and dropped entirely when the group
+  # is just the buffer's own name (a self-founded group), which printed
+  # the filename twice
+  defp ml_group(%{group: g, buffer: b}) when is_binary(g) do
+    label = Path.basename(g)
+    if label == Path.basename(b), do: nil, else: label
+  end
+
+  defp ml_group(_), do: nil
 
   defp ml_bytes(text) do
     b = Kernel.byte_size(text)

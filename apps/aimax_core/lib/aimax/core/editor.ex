@@ -1643,8 +1643,16 @@ defmodule Aimax.Core.Editor do
       col: snap.col,
       style: Map.get(locals, "style"),
       render_mode: render_mode(locals),
+      visual_line_mode: Map.get(locals, "visual-line-mode") == true,
       agent: agent_leaf(locals, text),
       blocks: blocks_leaf(locals),
+      # the expanded modeline: a block tree pinned above the text,
+      # rendered only while the buffer-local says so
+      dash:
+        if(Map.get(locals, "modeline-expanded") == true,
+          do: Map.get(locals, "modeline-dash-blocks") || [],
+          else: nil
+        ),
       preview_authored: Map.get(locals, "preview-authored") == true,
       # an app reloads when this number changes, and only then: a keystroke
       # must not restart the app you are typing at

@@ -1990,13 +1990,13 @@ defmodule Aimax.EditorTest do
              (switch-to-buffer! "#{home}"))
       """)
 
-    # history first: the previous buffer is the default; the group's
-    # container is the row under it
+    # pure history: the previous buffer is the default; groups have no
+    # rows of their own — the buffer rows carry the group
     press(["C-x", "b"])
     mb = Editor.render_state().minibuffer
     labels = Enum.map(mb.candidates, & &1.label)
     assert hd(labels) == m2
-    assert Enum.at(labels, 1) == "[ctgrp-#{n}]"
+    refute "[ctgrp-#{n}]" in labels
     assert mb.prompt =~ "default #{m2}"
 
     # RET on a buffer of another group ENTERS the group: its layout
@@ -2056,7 +2056,7 @@ defmodule Aimax.EditorTest do
     press(["C-g"])
   end
 
-  test "a container row carries its kind and member chips" do
+  test "the TAB-locked pool leads with a container row carrying kind and chips" do
     n = System.unique_integer([:positive])
     m1 = "cc-a-#{n}"
     home = "cc-home-#{n}"
@@ -2064,12 +2064,17 @@ defmodule Aimax.EditorTest do
 
     {:ok, _} =
       Aimax.Core.Session.eval("""
-      (begin (switch-to-buffer! "#{m1}")
+      (begin (set-frame-local! 'current-group #f)
+             (switch-to-buffer! "#{m1}")
              (buffer-set-local! "#{m1}" 'group "ccgrp-#{n}")
              (switch-to-buffer! "#{home}"))
       """)
 
     press(["C-x", "b"])
+    # the open pool is pure history: no container rows
+    refute Enum.any?(Editor.render_state().minibuffer.candidates, &(&1.label =~ "[ccgrp"))
+    type("ccgrp-#{n}")
+    press(["TAB"])
     c = Enum.find(Editor.render_state().minibuffer.candidates, &(&1.label == "[ccgrp-#{n}]"))
     assert c
     assert c.kind == "container"

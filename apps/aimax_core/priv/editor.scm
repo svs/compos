@@ -1900,15 +1900,13 @@
            (pool (car source))
            (standing (car (cdr source)))
            (pick (car (cdr (cdr source))))
-           (bufs (filter (lambda (c) (not (equal? (car c) standing))) pool))
-           ;; history first: the buffer you just left is the default, so
-           ;; RET toggles like the Emacs buffer ring. The containers ride
-           ;; directly under it, then the rest of the recency stream.
-           (all (if (pair? bufs)
-                    (cons (car bufs)
-                          (append (map group-container-candidate groups)
-                                  (cdr bufs)))
-                    (map group-container-candidate groups)))
+           ;; pure history: the buffer you just left is the default, so
+           ;; RET toggles like the Emacs buffer ring. Groups need no rows
+           ;; of their own — every buffer row IS a group row: the group
+           ;; column matches what you type, and picking a buffer outside
+           ;; the current group switches to its group. TAB still locks
+           ;; to a group; C-x G lists them.
+           (all (filter (lambda (c) (not (equal? (car c) standing))) pool))
            (fallback (if (null? all) here (car (car all)))))
       (minibuffer-read-preview
         (string-append "Switch to (default " fallback "): ")

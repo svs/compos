@@ -3581,6 +3581,16 @@
       (window-list))
     (when (window-exists? back) (select-window! back))))
 
+(define (group-restore-prune! g)
+  (for-each
+    (lambda (w)
+      (let ((b (car (cdr w))))
+        (when (and (buffer-local b 'transient)
+                   (not (equal? (buffer-group b) g))
+                   (> (length (window-list)) 1))
+          (delete-window-id! (car w)))))
+    (window-list)))
+
 (define (switch-to-group! g)
   ;; one winner entry per switch: the arrangement you leave, not the
   ;; intermediate steps of building the next one
@@ -3599,6 +3609,9 @@
           ;; file and restore its membership FIRST, or the validation
           ;; below sees a group with nothing on screen
           (group-restore-files! g)
+          ;; an old snapshot may have memorialized a transient surface
+          ;; (the board, a listing) that is not a member: drop it
+          (group-restore-prune! g)
           ;; a snapshot that shows none of the group is not the group's
           ;; layout (a stale capture from before the on-screen guard):
           ;; heal it — build the default and re-save over the bad one
@@ -3717,8 +3730,12 @@
           ((equal? (buffer-group (car (cdr (car ws)))) g) #t)
           (else (loop (cdr ws))))))
 
+;; a group's layout is captured only from INSIDE the group: the
+;; buffer you act from is a member. What happens on any other surface
+;; — the board, a listing, a detour — never rewrites it, so the last
+;; arrangement made IN the group is the one that comes back.
 (define (group-layout-save-if-shown! g)
-  (when (and g (group-on-screen? g))
+  (when (and g (equal? (buffer-group (current-buffer)) g))
     (group-layout-save! g)))
 
 ;; found a group from what is on screen: every window's buffer joins,

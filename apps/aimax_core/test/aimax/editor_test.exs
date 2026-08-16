@@ -2522,6 +2522,42 @@ defmodule Aimax.EditorTest do
       )
   end
 
+  test "the groups board never becomes part of a group's layout" do
+    n = System.unique_integer([:positive])
+    m = "tb-#{n}"
+    Aimax.Core.create_buffer(m)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (set-frame-local! 'current-group #f)
+             (delete-other-windows!)
+             (switch-to-buffer! "#{m}")
+             (buffer-set-local! "#{m}" 'group "tbgrp-#{n}")
+             (group-layout-save! "tbgrp-#{n}")
+             ;; poison attempt: the board opens beside the member and a
+             ;; capture fires from the board — the guard must refuse
+             (split-window! 'h 0.5)
+             (other-window!)
+             (run-command "groups")
+             (group-layout-save-if-shown! "tbgrp-#{n}")
+             ;; and an OLD poisoned snapshot prunes on the way back in
+             (buffer-set-local! (group-chat "tbgrp-#{n}") 'group-layout (window-tree))
+             (switch-to-buffer! "*scratch*")
+             (delete-other-windows!)
+             (switch-to-group! "tbgrp-#{n}")
+             #t)
+      """)
+
+    shown = Editor.list_windows() |> Enum.map(fn {_id, b} -> b end)
+    refute "*groups*" in shown
+    assert m in shown
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(
+        "(begin (set-frame-local! 'current-group #f) (delete-other-windows!))"
+      )
+  end
+
   test "a killed file member comes back with content, not an empty shell" do
     n = System.unique_integer([:positive])
     f = Path.join(System.tmp_dir!(), "gs-#{n}.txt")

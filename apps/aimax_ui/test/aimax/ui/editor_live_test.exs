@@ -36,6 +36,22 @@ defmodule Aimax.Ui.EditorLiveTest do
     assert html =~ "L1:C5"
   end
 
+  test "markdown preview updates a stable iframe without navigating srcdoc", %{conn: conn} do
+    buf = Aimax.Core.Editor.current_buffer()
+    Aimax.Core.Buffer.append(buf, "# Stable preview\n", source: :editor)
+    {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-set-local! "#{buf}" 'render-mode "markdown")})
+
+    {:ok, view, _} = live(conn, "/")
+    html = render(view)
+
+    assert html =~ ~s(id="prev-)
+    assert html =~ ~s(data-doc=")
+    refute html =~ "srcdoc="
+
+    [_, encoded] = Regex.run(~r/data-doc="([^"]+)"/, html)
+    assert Base.decode64!(encoded) =~ "Stable preview"
+  end
+
   test "minibuffer shows on M-x with selectable candidates", %{conn: conn} do
     {:ok, view, _} = live(conn, "/")
     html = keys(view, ["M-x"])

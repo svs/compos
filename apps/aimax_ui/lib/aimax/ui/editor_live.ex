@@ -154,6 +154,25 @@ defmodule Aimax.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
+  # per-window column counts: the table views lay out in characters, so
+  # the client measures its own font and says how many fit
+  def handle_event("win_cols", %{"cols" => cols}, socket) when is_map(cols) do
+    parsed =
+      for {id, n} <- cols, is_integer(n), id_int = safe_int(id), into: %{}, do: {id_int, n}
+
+    if Aimax.Core.Editor.set_window_cols(parsed, socket.assigns.frame) do
+      # a window that changed width is a window configuration change: the
+      # editor says so, and Scheme decides what has to be drawn again
+      Aimax.Core.Session.eval(
+        "(when (boundp 'window-config-changed!) (window-config-changed!))"
+      )
+
+      {:noreply, socket |> drain() |> refresh()}
+    else
+      {:noreply, socket}
+    end
+  end
+
   # wheel scrolls the hovered window when the client identified one,
   # falling back to this frame's active window
   def handle_event("scroll", %{"lines" => lines} = params, socket) when is_integer(lines) do
@@ -170,7 +189,7 @@ defmodule Aimax.Ui.EditorLive do
   def handle_event("mouse", %{"win" => win} = params, socket) do
     with id when is_integer(id) <- safe_int(win) do
       Input.run(socket.assigns.frame, fn ->
-        Aimax.Core.Session.eval("(mouse-select-window! #{id})")
+        Aimax.Core.Session.eval("(begin (mouse-select-window! #{id}) (set-mark! #f))")
 
         case params do
           %{"line" => line, "col" => col} when is_integer(line) and is_integer(col) ->
@@ -190,7 +209,9 @@ defmodule Aimax.Ui.EditorLive do
   def handle_event("preview_goto", %{"win" => win} = p, socket) do
     with id when is_integer(id) <- safe_int(win) do
       Input.run(socket.assigns.frame, fn ->
-        Aimax.Core.Session.call_named("preview-goto!", [
+        command = if p["extend"] == true, do: "preview-select!", else: "preview-goto!"
+
+        Aimax.Core.Session.call_named(command, [
           id,
           p["before"] || "",
           p["after"] || "",
@@ -203,8 +224,23 @@ defmodule Aimax.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
+  def handle_event("preview_goto_pos", %{"win" => win, "pos" => pos} = p, socket)
+      when is_integer(pos) do
+    with id when is_integer(id) <- safe_int(win) do
+      Input.run(socket.assigns.frame, fn ->
+        Aimax.Core.Session.call_named("preview-goto-pos!", [id, pos, p["extend"] == true])
+      end)
+    end
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
   # drag: the native selection, mirrored into mark + point
-  def handle_event("mouse_sel", %{"win" => win, "al" => al, "ac" => ac, "fl" => fl, "fc" => fc}, socket)
+  def handle_event(
+        "mouse_sel",
+        %{"win" => win, "al" => al, "ac" => ac, "fl" => fl, "fc" => fc},
+        socket
+      )
       when is_integer(al) and is_integer(ac) and is_integer(fl) and is_integer(fc) do
     with id when is_integer(id) <- safe_int(win) do
       Input.run(socket.assigns.frame, fn ->
@@ -351,17 +387,18 @@ defmodule Aimax.Ui.EditorLive do
   defp decorate(%{type: :leaf, render_mode: rm} = leaf, cache, faces)
        when rm in ["html", "markdown"] do
     pt = if rm == "markdown", do: leaf.point, else: 0
+    mark = if rm == "markdown", do: leaf.mark, else: nil
 
     # the oembed generation moves when a tweet fetch lands, so the cached
     # placeholder misses and the card renders
     key =
-      {leaf.buffer, leaf.version, rm, leaf.preview_authored, :erlang.phash2(faces), pt,
-       Aimax.Ui.Oembed.generation()}
+      {leaf.buffer, leaf.version, rm, leaf.preview_authored, :erlang.phash2(faces), pt, mark,
+       :erlang.phash2(leaf.overlays), Aimax.Ui.Oembed.generation()}
 
     html =
       case cache[{:preview, leaf.id}] do
         {^key, html} -> html
-        _ -> preview_doc(rm, leaf.text, pt, faces, leaf.preview_authored)
+        _ -> preview_doc(rm, leaf.text, pt, mark, faces, leaf.preview_authored, leaf.overlays)
       end
 
     {Map.merge(leaf, %{lines: [], preview: html}),
@@ -947,8 +984,9 @@ defmodule Aimax.Ui.EditorLive do
           data-ctop={@node.ctop}
           data-pt={@node.point}
           data-rm={@node.render_mode}
+          data-visual-lines={to_string(@node.visual_line_mode)}
+          data-doc={Base.encode64(@node.preview)}
           sandbox="allow-same-origin"
-          srcdoc={@node.preview}
           title={@node.buffer}
         ></iframe>
       <% else %>
@@ -985,7 +1023,7 @@ defmodule Aimax.Ui.EditorLive do
           phx-click="ui_cmd"
           phx-value-win={@node.id}
           phx-value-cmd="modeline-expand"
-        >▸</span>
+        >{if @node.dash, do: "▾", else: "▸"}</span>
         <span class={"ml-dot #{if @node.modified, do: "modified"}"}></span>
         <span
           class="name"
@@ -1242,7 +1280,9 @@ defmodule Aimax.Ui.EditorLive do
 
     {pre, cur, post} =
       if leaf.point >= live_start do
-        rel = (leaf.point - live_start) |> min(byte_size(live)) |> then(&Text.floor_utf8(live, &1))
+        rel =
+          (leaf.point - live_start) |> min(byte_size(live)) |> then(&Text.floor_utf8(live, &1))
+
         rest = binary_part(live, rel, byte_size(live) - rel)
 
         case String.next_grapheme(rest) do
@@ -1262,21 +1302,71 @@ defmodule Aimax.Ui.EditorLive do
   # can render off for a moment; the sandbox runs no scripts, so a mangled
   # span is a display blemish and nothing more.
   @pt_sentinel "\uE000"
+  @llm_start "\uE002"
+  @llm_end "\uE003"
+  @llm_meta_end "\uE004"
 
   @doc false
-  def preview_doc("markdown", text, point, faces, authored) do
+  def preview_doc(rm, text, point, faces, authored),
+    do: preview_doc(rm, text, point, nil, faces, authored, [])
+
+  def preview_doc(rm, text, point, mark, faces, authored),
+    do: preview_doc(rm, text, point, mark, faces, authored, [])
+
+  def preview_doc("markdown", text, point, mark, faces, authored, overlays) do
     p = point |> max(0) |> min(byte_size(text))
+    m = if is_integer(mark), do: mark |> max(0) |> min(byte_size(text)), else: nil
 
-    marked =
-      case cursor_spot(text, p) do
-        nil ->
-          text
-
-        at ->
-          binary_part(text, 0, at) <> @pt_sentinel <> binary_part(text, at, byte_size(text) - at)
-      end
+    marked = mark_preview_positions(text, p, m, overlays)
 
     preview_html("markdown", marked, faces, authored)
+  end
+
+  def preview_doc(rm, text, _point, _mark, faces, authored, _overlays),
+    do: preview_html(rm, text, faces, authored)
+
+  defp mark_preview_positions(text, point, mark, overlays) do
+    positions =
+      [{cursor_spot(text, point), @pt_sentinel}, {mark && cursor_spot(text, mark), "\uE001"}] ++
+        preview_overlay_positions(text, overlays)
+
+    positions =
+      positions
+      |> Enum.reject(fn {at, _} -> is_nil(at) end)
+      |> Enum.sort_by(fn {at, _} -> -at end)
+
+    Enum.reduce(positions, text, fn {at, sentinel}, acc ->
+      binary_part(acc, 0, at) <> sentinel <> binary_part(acc, at, byte_size(acc) - at)
+    end)
+  end
+
+  # Preview formatting belongs to llm-mode, not to the Markdown document.
+  # Render its response overlay through a temporary blockquote so Earmark can
+  # still parse headings, lists, and emphasis inside the answer. The private
+  # sentinels let us distinguish this from a blockquote the author typed.
+  defp preview_overlay_positions(text, overlays) do
+    Enum.flat_map(overlays || [], fn
+      {start, finish, face}
+      when is_integer(start) and is_integer(finish) and face in ["llm-response", :llm_response] ->
+        start = start |> max(0) |> min(byte_size(text))
+        finish = finish |> max(start) |> min(byte_size(text))
+
+        continuation_prefixes =
+          text
+          |> binary_part(start, finish - start)
+          |> :binary.matches("\n")
+          |> Enum.map(fn {offset, _length} -> {start + offset + 1, "> "} end)
+
+        metadata = "#{start}:#{finish}"
+
+        [
+          {start, "> " <> @llm_start <> metadata <> @llm_meta_end},
+          {finish, @llm_end} | continuation_prefixes
+        ]
+
+      _ ->
+        []
+    end)
   end
 
   # Point often sits inside a line's BLOCK marker — byte 0 of "# Title" is
@@ -1302,8 +1392,6 @@ defmodule Aimax.Ui.EditorLive do
       end
     end
   end
-
-  def preview_doc(rm, text, _point, faces, authored), do: preview_html(rm, text, faces, authored)
 
   defp preview_html("html", text, _faces, true), do: text
 
@@ -1338,17 +1426,19 @@ defmodule Aimax.Ui.EditorLive do
         {:ok, ast, _} -> ast
         {:error, ast, _} -> ast
       end
+      |> tag_llm_responses()
       |> embed_urls()
       |> Earmark.Transform.transform(compact_output: false)
       |> String.replace(@pt_sentinel, ~s(<span class="pt"></span>))
+      |> String.replace("\uE001", ~s(<span class="mk"></span>))
 
     %{bg: bg, fg: fg, accent: accent, dim: dim, border: border, inset: inset} =
       preview_palette(faces)
 
     """
     <!DOCTYPE html><html><head><meta charset="utf-8"><style>
-    body{margin:0;padding:26px 34px 60px;max-width:62em;
-         font:16px/1.65 Spectral,Georgia,serif;color:#{fg};background:#{bg}}
+    body{margin:0;padding:26px 34px 60px;max-width:62em;overflow-wrap:break-word;
+         word-break:normal;font:16px/1.65 Spectral,Georgia,serif;color:#{fg};background:#{bg}}
     h1,h2,h3,h4{font-family:Spectral,Georgia,serif;line-height:1.25;margin:26px 0 8px}
     h1{font-size:28px}h2{font-size:22px;border-bottom:1px solid #{border};padding-bottom:4px}
     h3{font-size:18px;color:#{accent}}
@@ -1357,6 +1447,10 @@ defmodule Aimax.Ui.EditorLive do
     pre{background:#{inset};padding:10px 12px;border-left:3px solid #{accent};overflow-x:auto}
     pre code{background:none;padding:0}
     a{color:#{accent}}blockquote{margin:12px 0;padding:2px 14px;border-left:3px solid #{border};color:#{dim}}
+    blockquote.llm-response{margin:18px 0;padding:12px 16px;border:1px solid #{border};
+         border-left:4px solid #{accent};border-radius:7px;background:#{inset};color:#{fg};user-select:text}
+    blockquote.llm-response>:first-child{margin-top:0}
+    blockquote.llm-response>:last-child{margin-bottom:0}
     table{border-collapse:collapse;font-size:14px}th,td{border:1px solid #{border};padding:5px 9px}
     th{background:#{inset};text-align:left}
     img{max-width:100%}hr{border:0;border-top:1px solid #{border};margin:22px 0}
@@ -1374,10 +1468,63 @@ defmodule Aimax.Ui.EditorLive do
     .tw-date{color:#{dim};font-size:13px;text-decoration:none}
     .pt{display:inline-block;width:2px;height:1.05em;margin:0 -1px;vertical-align:-0.18em;
         background:#{accent};animation:ptb 1.1s step-end infinite}
+    .mk{display:inline-block;width:0;height:0}
     @keyframes ptb{0%,49%{opacity:1}50%,100%{opacity:0}}
     </style></head><body>#{body}</body></html>
     """
   end
+
+  defp tag_llm_responses(nodes) when is_list(nodes), do: Enum.map(nodes, &tag_llm_response/1)
+
+  defp tag_llm_response({"blockquote", attrs, children, meta}) do
+    case llm_range(children) do
+      {start, finish} ->
+        response_attrs = [
+          {"class", "llm-response"},
+          {"data-start", Integer.to_string(start)},
+          {"data-end", Integer.to_string(finish)}
+        ]
+
+        {"blockquote", response_attrs ++ attrs, strip_llm_markers(children), meta}
+
+      nil ->
+        {"blockquote", attrs, tag_llm_responses(children), meta}
+    end
+  end
+
+  defp tag_llm_response({tag, attrs, children, meta}) when is_list(children),
+    do: {tag, attrs, tag_llm_responses(children), meta}
+
+  defp tag_llm_response(other), do: other
+
+  defp llm_range(nodes) do
+    case Regex.run(
+           ~r/#{@llm_start}(\d+):(\d+)#{@llm_meta_end}/u,
+           llm_marker_text(nodes),
+           capture: :all_but_first
+         ) do
+      [start, finish] -> {String.to_integer(start), String.to_integer(finish)}
+      _ -> nil
+    end
+  end
+
+  defp llm_marker_text(nodes) when is_list(nodes), do: Enum.map_join(nodes, &llm_marker_text/1)
+  defp llm_marker_text(text) when is_binary(text), do: text
+  defp llm_marker_text({_tag, _attrs, children, _meta}), do: llm_marker_text(children)
+  defp llm_marker_text(_), do: ""
+
+  defp strip_llm_markers(nodes) when is_list(nodes), do: Enum.map(nodes, &strip_llm_markers/1)
+
+  defp strip_llm_markers(text) when is_binary(text),
+    do:
+      text
+      |> String.replace(~r/#{@llm_start}\d+:\d+#{@llm_meta_end}/u, "")
+      |> String.replace(@llm_end, "")
+
+  defp strip_llm_markers({tag, attrs, children, meta}),
+    do: {tag, attrs, strip_llm_markers(children), meta}
+
+  defp strip_llm_markers(other), do: other
 
   # A bare URL in the source becomes a link whose text is the URL
   # (Earmark pure links). The preview upgrades two kinds: an image URL
@@ -1544,5 +1691,4 @@ defmodule Aimax.Ui.EditorLive do
       _ -> nil
     end
   end
-
 end

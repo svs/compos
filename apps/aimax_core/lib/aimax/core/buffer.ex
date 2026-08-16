@@ -644,7 +644,10 @@ defmodule Aimax.Core.Buffer do
       path ->
         {text, state} = fetch_text(state)
         File.write!(path, text)
-        {:reply, {:ok, path}, %{state | path: path, saved_version: state.version}}
+        state = %{state | path: path, saved_version: state.version}
+        Events.broadcast_editor(:locals)
+        broadcast(state, state.point, "", 0, :locals)
+        {:reply, {:ok, path}, state}
     end
   end
 

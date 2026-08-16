@@ -21,6 +21,12 @@ defmodule Aimax.Ui.PreviewCursorTest do
     assert html =~ @pt
   end
 
+  test "an active region renders point and mark anchors" do
+    html = EditorLive.preview_doc("markdown", "hello world", 2, 8, @faces, false)
+    assert html =~ @pt
+    assert html =~ ~s(<span class="mk"></span>)
+  end
+
   test "point past end of buffer clamps instead of crashing" do
     html = EditorLive.preview_doc("markdown", "abc", 99, @faces, false)
     assert html =~ @pt
@@ -57,5 +63,30 @@ defmodule Aimax.Ui.PreviewCursorTest do
     html = EditorLive.preview_doc("markdown", "```\ncode\n```\n", 1, @faces, false)
     refute html =~ @pt
     assert html =~ "<code"
+  end
+
+  test "llm-mode response overlays render as their own formatted blocks" do
+    text = "Prompt\n\nAn **answer** here.\nWith another line.\n"
+    start = byte_size("Prompt\n\n")
+    finish = byte_size(text) - 1
+
+    html =
+      EditorLive.preview_doc(
+        "markdown",
+        text,
+        byte_size("Prompt"),
+        nil,
+        @faces,
+        false,
+        [{start, finish, "llm-response"}]
+      )
+
+    assert html =~ ~s(<blockquote class="llm-response")
+    assert html =~ ~s(data-start="#{start}")
+    assert html =~ ~s(data-end="#{finish}")
+    assert html =~ "<strong>answer</strong>"
+    assert html =~ "With another line."
+    refute html =~ "\uE002"
+    refute html =~ "\uE003"
   end
 end

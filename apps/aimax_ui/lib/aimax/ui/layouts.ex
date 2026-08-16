@@ -182,13 +182,11 @@ defmodule Aimax.Ui.Layouts do
           }
           .window.active .cursor { animation: blink 1.1s steps(1) infinite; }
           .window.inactive .cursor {
-            background: transparent; color: inherit; animation: none;
-            outline: 1px solid var(--linenum-fg, #b3ac9c);
+            visibility: hidden; animation: none;
           }
-          /* OS window unfocused: hollow, no blink (Emacs frame behavior) */
+          /* A cursor means keyboard focus. No focused frame, no cursor. */
           body.unfocused .cursor {
-            background: transparent !important; color: inherit !important; animation: none !important;
-            outline: 1px solid var(--linenum-fg, #b3ac9c);
+            visibility: hidden !important; animation: none !important;
           }
           .no-nums .linenum { display: none; }
           /* --- writing-mode: centered measure, quiet chrome ---------------- */
@@ -642,7 +640,7 @@ defmodule Aimax.Ui.Layouts do
           // cmd combos belong to the browser (cmd-c/v/q, and cmd-v's native
           // paste event) — except the arrows, claimed for window motion,
           // and cmd-k, claimed for the command palette
-          const CMD_KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "k"];
+          const CMD_KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "a", "k"];
 
           function keySpec(e) {
             if (["Control", "Meta", "Alt", "Shift"].includes(e.key)) return null;
@@ -672,11 +670,22 @@ defmodule Aimax.Ui.Layouts do
                 // seed lastPt so a restored offset wins on mount: the
                 // cursor pulls the view only when point MOVES after that
                 this.lastPt = this.el.dataset.pt;
-                this.onLoad = () => this.attach();
+                this.lastDoc = null;
+                this.onLoad = () => {
+                  this.lastDoc = null;
+                  this.syncDoc();
+                  this.attach();
+                };
                 this.el.addEventListener("load", this.onLoad);
+                this.syncDoc();
                 this.attach();
               },
-              updated() { this.apply(); },
+              updated() {
+                this.syncDoc();
+                this.attach();
+                this.apply();
+                this.selectRegion();
+              },
               destroyed() {
                 this.el.removeEventListener("load", this.onLoad);
                 clearTimeout(this.timer);
@@ -684,6 +693,25 @@ defmodule Aimax.Ui.Layouts do
               // same-origin, but the document is absent until it loads
               doc() {
                 try { return this.el.contentDocument; } catch (e) { return null; }
+              },
+              // Assigning iframe.srcdoc navigates the frame, even when its
+              // LiveView id is stable. Markdown includes the point marker,
+              // so that used to reload and visibly blank the writing surface
+              // on every cursor move. Ship the document as inert base64 and
+              // replace the existing document tree synchronously instead.
+              syncDoc() {
+                const encoded = this.el.dataset.doc || "";
+                if (encoded === this.lastDoc) return;
+                const d = this.doc();
+                if (!d) return;
+                let html;
+                try {
+                  const bytes = Uint8Array.from(atob(encoded), c => c.charCodeAt(0));
+                  html = new TextDecoder().decode(bytes);
+                } catch (_) { return; }
+                const next = new DOMParser().parseFromString(html, "text/html");
+                d.documentElement.innerHTML = next.documentElement.innerHTML;
+                this.lastDoc = encoded;
               },
               scroller() {
                 const d = this.doc();
@@ -709,17 +737,50 @@ defmodule Aimax.Ui.Layouts do
                 const d = this.doc();
                 const el = d && d.querySelector(".pt");
                 if (el) el.scrollIntoView({ block: "nearest" });
+                this.selectRegion();
+              },
+              selectRegion() {
+                const d = this.doc();
+                const pt = d && d.querySelector(".pt");
+                const mk = d && d.querySelector(".mk");
+                if (!pt || !mk) return;
+                const range = d.createRange();
+                const markFirst = !!(mk.compareDocumentPosition(pt) & Node.DOCUMENT_POSITION_FOLLOWING);
+                if (markFirst) {
+                  range.setStartAfter(mk);
+                  range.setEndBefore(pt);
+                } else {
+                  range.setStartAfter(pt);
+                  range.setEndBefore(mk);
+                }
+                const selection = d.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(range);
               },
               attach() {
                 const d = this.doc();
-                if (!d || this.wired === d) return;
-                this.wired = d;
+                if (!d) return;
+                const pt = d.querySelector(".pt");
+                if (pt) {
+                  const active = this.el.closest(".window")?.classList.contains("active");
+                  pt.style.visibility = document.hasFocus() && active ? "visible" : "hidden";
+                }
                 this.apply();
+                this.selectRegion();
+                // syncDoc keeps the same Document object, so document-level
+                // listeners survive its tree replacement and must not stack.
+                if (this.wired === d) return;
+                this.wired = d;
                 // a markdown preview shows point and takes edits, so a
                 // click must move point. The caret API names the clicked
                 // text node; the daemon finds that text in the source.
                 if (this.el.dataset.rm === "markdown") {
                   d.addEventListener("mousedown", (e) => {
+                    // A generated response is atomic to the editor cursor,
+                    // but its prose remains ordinary browser-selectable text.
+                    // Do not patch the iframe on mousedown or a drag would
+                    // lose its native selection halfway through.
+                    if (e.target.closest && e.target.closest(".llm-response")) return;
                     const c = d.caretRangeFromPoint
                       ? d.caretRangeFromPoint(e.clientX, e.clientY)
                       : d.caretPositionFromPoint && d.caretPositionFromPoint(e.clientX, e.clientY);
@@ -847,13 +908,157 @@ defmodule Aimax.Ui.Layouts do
               }
             },
             Keys: {
-              mounted() {
-                // remounted against a restarted server: this page's CSS/JS is
-                // stale relative to the markup — hard reload
+              // a page from an older daemon boot is stale: its JS and CSS
+              // no longer match the server. A restart REJOINS the socket
+              // without re-mounting hooks, so the check must run on every
+              // path — mount, rejoin, and each patch (the patch writes the
+              // new boot id into data-boot).
+              bootCheck() {
                 if (this.el.dataset.boot && this.el.dataset.boot !== PAGE_BOOT) {
                   window.location.reload();
-                  return;
+                  return true;
                 }
+                return false;
+              },
+              reconnected() { this.bootCheck(); },
+              updated() {
+                if (this.bootCheck()) return;
+                // A server patch acknowledges the last visual move. Keyup
+                // may land inside the iframe, so it cannot be the only reset.
+                this.visualLinePending = false;
+                if (this.syncCursorFocus) this.syncCursorFocus();
+              },
+              mounted() {
+                if (this.bootCheck()) return;
+                this.visualLinePending = false;
+                this.syncCursorFocus = () => {
+                  const focused = document.hasFocus() && !document.body.classList.contains("unfocused");
+                  document.querySelectorAll(".window iframe[data-rm='markdown']").forEach((frame) => {
+                    let d;
+                    try { d = frame.contentDocument; } catch (_) { return; }
+                    const pt = d && d.querySelector(".pt");
+                    if (pt) {
+                      const active = frame.closest(".window")?.classList.contains("active");
+                      pt.style.visibility = focused && active ? "visible" : "hidden";
+                    }
+                  });
+                };
+                // visual-line-mode belongs to the buffer, but only the
+                // browser knows where proportional rendered prose wraps.
+                // Resolve the screen line here, then send the same semantic
+                // preview position a mouse click sends; Scheme remains the
+                // owner of the resulting point move.
+                this.visualLineMove = (dir, extend) => {
+                  if (document.querySelector(".mb-panel")) return false;
+                  const frame = document.querySelector(
+                    ".window.active iframe[data-rm='markdown'][data-visual-lines='true']"
+                  );
+                  if (!frame) return false;
+                  let d;
+                  try { d = frame.contentDocument; } catch (_) { return false; }
+                  const pt = d && d.querySelector(".pt");
+                  if (!pt) return false;
+                  // A browser key-repeat can outrun the LiveView patch that
+                  // moves .pt. Sending several moves from the same stale
+                  // caret makes vertical motion feel sticky, then jump.
+                  if (this.visualLinePending) return true;
+                  const r = pt.getBoundingClientRect();
+                  const parent = pt.parentElement || d.body;
+                  const css = d.defaultView.getComputedStyle(parent);
+                  const line = parseFloat(css.lineHeight) ||
+                    (parseFloat(css.fontSize) || 16) * 1.2;
+                  const x = this.visualLineGoalX == null ? r.left : this.visualLineGoalX;
+                  this.visualLineGoalX = x;
+                  const caretAt = (y) => d.caretRangeFromPoint
+                    ? d.caretRangeFromPoint(x, y)
+                    : d.caretPositionFromPoint && d.caretPositionFromPoint(x, y);
+                  // Margins between Markdown blocks are not caret positions.
+                  // Walk a little farther in the requested direction until
+                  // the browser gives us text on the neighboring screen line.
+                  for (let step = line; step <= line * 3; step += Math.max(2, line / 4)) {
+                    const c = caretAt(r.top + dir * step);
+                    if (!c) continue;
+                    const node = c.startContainer || c.offsetNode;
+                    if (!node || node.nodeType !== 3) continue;
+                    const response = node.parentElement && node.parentElement.closest(".llm-response");
+                    if (response) {
+                      const start = parseInt(response.dataset.start, 10);
+                      const end = parseInt(response.dataset.end, 10);
+                      if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+                      this.visualLinePending = true;
+                      this.pushEvent("preview_goto_pos", {
+                        win: parseInt(frame.dataset.win, 10),
+                        pos: dir > 0 ? end + 1 : Math.max(0, start - 1),
+                        extend: extend
+                      });
+                      return true;
+                    }
+                    const off = c.startOffset !== undefined ? c.startOffset : c.offset;
+                    const t = node.textContent;
+                    this.visualLinePending = true;
+                    this.pushEvent("preview_goto", {
+                      win: parseInt(frame.dataset.win, 10),
+                      before: t.slice(0, off),
+                      after: t.slice(off),
+                      wb: (t.slice(0, off).match(/[\w-]*$/) || [""])[0],
+                      wa: (t.slice(off).match(/^[\w-]*/) || [""])[0],
+                      extend: extend
+                    });
+                    return true;
+                  }
+                  return false;
+                };
+                // Home/End and Cmd-Left/Right mean the edge of the rendered
+                // row in a writing preview, not the source Markdown line.
+                // Scan inward from the viewport edge at the cursor's y until
+                // the browser supplies a caret on this visual row.
+                this.visualLineEdge = (dir, extend) => {
+                  if (document.querySelector(".mb-panel")) return false;
+                  const frame = document.querySelector(
+                    ".window.active iframe[data-rm='markdown'][data-visual-lines='true']"
+                  );
+                  if (!frame) return false;
+                  let d;
+                  try { d = frame.contentDocument; } catch (_) { return false; }
+                  const pt = d && d.querySelector(".pt");
+                  if (!pt || this.visualLinePending) return !!pt;
+                  const r = pt.getBoundingClientRect();
+                  const parent = pt.parentElement || d.body;
+                  const css = d.defaultView.getComputedStyle(parent);
+                  const line = parseFloat(css.lineHeight) ||
+                    (parseFloat(css.fontSize) || 16) * 1.2;
+                  const y = r.top + Math.max(1, Math.min(r.height / 2, line / 2));
+                  const width = d.documentElement.clientWidth;
+                  const caretAt = (x) => d.caretRangeFromPoint
+                    ? d.caretRangeFromPoint(x, y)
+                    : d.caretPositionFromPoint && d.caretPositionFromPoint(x, y);
+                  for (let x = dir < 0 ? 0 : width - 1;
+                       dir < 0 ? x < width : x >= 0;
+                       x += dir < 0 ? 3 : -3) {
+                    const c = caretAt(x);
+                    if (!c) continue;
+                    const node = c.startContainer || c.offsetNode;
+                    if (!node || node.nodeType !== 3) continue;
+                    const off = c.startOffset !== undefined ? c.startOffset : c.offset;
+                    const probe = d.createRange();
+                    probe.setStart(node, off);
+                    probe.collapse(true);
+                    const cr = probe.getBoundingClientRect();
+                    if (Math.abs(cr.top - r.top) > line * 0.65) continue;
+                    const t = node.textContent;
+                    this.visualLinePending = true;
+                    this.pushEvent("preview_goto", {
+                      win: parseInt(frame.dataset.win, 10),
+                      before: t.slice(0, off),
+                      after: t.slice(off),
+                      wb: (t.slice(0, off).match(/[\w-]*$/) || [""])[0],
+                      wa: (t.slice(off).match(/^[\w-]*/) || [""])[0],
+                      extend: extend
+                    });
+                    return true;
+                  }
+                  return false;
+                };
                 this.handler = (e) => {
                   // Cmd-C with no native selection: copy the editor region
                   // (with one, the browser's own copy handles it)
@@ -866,9 +1071,28 @@ defmodule Aimax.Ui.Layouts do
                   const spec = keySpec(e);
                   if (spec === null) return;
                   e.preventDefault();
+                  const edgeDir = ["<home>", "S-<home>", "s-<left>", "s-S-<left>"].includes(spec)
+                    ? -1
+                    : ["<end>", "S-<end>", "s-<right>", "s-S-<right>"].includes(spec)
+                      ? 1 : 0;
+                  const edgeExtend = spec === "S-<home>" || spec === "S-<end>" ||
+                    spec === "s-S-<left>" || spec === "s-S-<right>";
+                  if (edgeDir !== 0 && this.visualLineEdge(edgeDir, edgeExtend)) return;
+                  const visualDir = spec === "<down>" || spec === "C-n" ? 1
+                    : spec === "<up>" || spec === "C-p" ? -1
+                    : spec === "S-<down>" ? 1 : spec === "S-<up>" ? -1 : 0;
+                  const visualExtend = spec === "S-<down>" || spec === "S-<up>";
+                  if (visualDir !== 0 && this.visualLineMove(visualDir, visualExtend)) return;
+                  this.visualLineGoalX = null;
                   this.pushEvent("key", { k: spec });
                 };
                 window.addEventListener("keydown", this.handler);
+                this.keyupH = (e) => {
+                  if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+                    this.visualLinePending = false;
+                  }
+                };
+                window.addEventListener("keyup", this.keyupH);
 
                 // system clipboard: Cmd-V fires a native paste event (cmd
                 // keys pass through keySpec untouched)
@@ -944,6 +1168,7 @@ defmodule Aimax.Ui.Layouts do
                 // exact per-window rows (line height varies per buffer)
                 this.lineHeight = 22;
                 this.lastWinRows = "";
+                this.lastWinCols = "";
                 this.sendViewport = () => {
                   const line = document.querySelector(".line");
                   if (line) this.lineHeight = line.getBoundingClientRect().height || 22;
@@ -953,17 +1178,41 @@ defmodule Aimax.Ui.Layouts do
                 };
                 this.sendWinRows = () => {
                   const rows = {};
+                  const cols = {};
                   document.querySelectorAll(".window[data-win-id]").forEach((win) => {
                     const buf = win.querySelector(".buf");
                     if (!buf) return; // preview windows have no line grid
                     const ln = buf.querySelector(".line");
                     const h = ln ? ln.getBoundingClientRect().height : this.lineHeight;
                     if (h > 0) rows[win.dataset.winId] = Math.max(3, Math.floor(buf.clientHeight / h));
+                    // how many characters fit on one line: the probe wears
+                    // the line's own font, and the gutter is not text
+                    const content = ln && ln.querySelector(".line-content");
+                    if (content) {
+                      const probe = document.createElement("span");
+                      probe.textContent = "0".repeat(80);
+                      probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre";
+                      content.appendChild(probe);
+                      const cw = probe.getBoundingClientRect().width / 80;
+                      probe.remove();
+                      // .line-content is the flex child that holds the text:
+                      // its box is the width the text actually has, after the
+                      // gutter, the gap and the line padding
+                      const avail = content.getBoundingClientRect().width;
+                      if (cw > 0 && avail > 0) {
+                        cols[win.dataset.winId] = Math.max(20, Math.floor(avail / cw));
+                      }
+                    }
                   });
                   const key = JSON.stringify(rows);
                   if (key !== this.lastWinRows && Object.keys(rows).length > 0) {
                     this.lastWinRows = key;
                     this.pushEvent("win_rows", { rows });
+                  }
+                  const ckey = JSON.stringify(cols);
+                  if (ckey !== this.lastWinCols && Object.keys(cols).length > 0) {
+                    this.lastWinCols = ckey;
+                    this.pushEvent("win_cols", { cols });
                   }
                 };
                 requestAnimationFrame(this.sendViewport);
@@ -1045,8 +1294,10 @@ defmodule Aimax.Ui.Layouts do
                   el.scrollTop = parseInt(el.dataset.ctop || "0", 10);
                 });
 
-                // hollow, non-blinking cursor when the OS window is unfocused
-                this.focusH = () => document.body.classList.remove("unfocused");
+                this.focusH = () => {
+                  document.body.classList.remove("unfocused");
+                  this.syncCursorFocus();
+                };
                 // the keyboard sink: one focusable element that is never a
                 // preview. A click in a preview moves focus INTO its iframe,
                 // and the keydown listener is on THIS window — from then on
@@ -1095,12 +1346,18 @@ defmodule Aimax.Ui.Layouts do
                     return;
                   }
                   document.body.classList.add("unfocused");
+                  this.visualLinePending = false;
+                  this.syncCursorFocus();
                 };
                 window.addEventListener("focus", this.focusH);
                 window.addEventListener("blur", this.blurH);
                 if (!document.hasFocus()) document.body.classList.add("unfocused");
+                this.syncCursorFocus();
               },
               updated() {
+                if (this.bootCheck()) return;
+                this.visualLinePending = false;
+                this.syncCursorFocus();
                 // re-measure after every patch: splits, buffer switches and
                 // per-buffer styles all change how many rows fit where
                 clearTimeout(this._wrt);
@@ -1130,6 +1387,7 @@ defmodule Aimax.Ui.Layouts do
               },
               destroyed() {
                 window.removeEventListener("keydown", this.handler);
+                window.removeEventListener("keyup", this.keyupH);
                 window.removeEventListener("resize", this.resizeH);
                 window.removeEventListener("wheel", this.wheelH);
                 window.removeEventListener("scroll", this.cscrollH, true);

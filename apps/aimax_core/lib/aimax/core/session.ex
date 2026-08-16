@@ -43,6 +43,10 @@ defmodule Aimax.Core.Session do
   @doc "Evaluate Scheme source. Returns {:ok, printed_value} | {:error, msg}."
   def eval(src, fid \\ nil), do: GenServer.call(__MODULE__, {:eval, src, fid(fid)}, 30_000)
 
+  @doc "Reload Scheme files atomically into the live interpreter."
+  def reload_files(paths) when is_list(paths),
+    do: GenServer.call(__MODULE__, {:reload_files, paths}, 30_000)
+
   @doc "Run a named command (Scheme closure from the commands table)."
   def run_command(name, fid \\ nil),
     do: GenServer.call(__MODULE__, {:run_command, name, fid(fid)}, 30_000)
@@ -137,6 +141,28 @@ defmodule Aimax.Core.Session do
     case safe(fn -> with_fid(fid, fn -> Scheme.eval_string(state.interp, src) end) end) do
       {:ok, val, interp} -> {:reply, {:ok, Scheme.print(val)}, put_interp(state, interp, val)}
       {:error, msg} -> {:reply, {:error, msg}, state}
+    end
+  end
+
+  def handle_call({:reload_files, paths}, _from, state) do
+    result =
+      Enum.reduce_while(paths, {:ok, state.interp}, fn path, {:ok, interp} ->
+        expanded = Path.expand(path)
+
+        with {:ok, src} <- File.read(expanded),
+             {:ok, _value, next} <- Scheme.eval_string(interp, src) do
+          {:cont, {:ok, next}}
+        else
+          {:error, reason} -> {:halt, {:error, "#{expanded}: #{inspect(reason)}"}}
+        end
+      end)
+
+    case result do
+      {:ok, interp} ->
+        {:reply, {:ok, length(paths)}, put_interp(state, interp, paths)}
+
+      {:error, message} ->
+        {:reply, {:error, message}, state}
     end
   end
 
@@ -238,7 +264,8 @@ defmodule Aimax.Core.Session do
 
   defp load_stdlib!(interp) do
     interp =
-      Enum.reduce(["editor.scm", "dired.scm", "themes.scm", "chrome.scm"], interp, fn file, interp ->
+      Enum.reduce(["editor.scm", "dired.scm", "themes.scm", "chrome.scm"], interp, fn file,
+                                                                                      interp ->
         path = Application.app_dir(:aimax_core, "priv/#{file}")
 
         case Scheme.eval_string(interp, File.read!(path)) do
@@ -264,12 +291,15 @@ defmodule Aimax.Core.Session do
       |> Application.app_dir("priv/packages")
       |> Path.join("*.scm")
       |> Path.wildcard()
-      # load order: custom.scm (defcustom) before tools.scm (define-tool!)
-      # before everything else — packages register into those registries at
-      # load time; the rest load alphabetically
+      # load order: custom.scm (defcustom), then tools.scm (define-tool!),
+      # then recipes.scm (defrecipe!) and components.scm (defcomponent) —
+      # packages call these forms at load time, so the form must exist
+      # first; the rest load alphabetically
       |> Enum.sort_by(
-        &{Enum.find_index(["custom.scm", "tools.scm"], fn n -> n == Path.basename(&1) end) ||
-           99, &1}
+        &{Enum.find_index(
+           ["custom.scm", "tools.scm", "recipes.scm", "components.scm"],
+           fn n -> n == Path.basename(&1) end
+         ) || 99, &1}
       )
 
     # user packages (~/.aimax/packages/*.scm, e.g. installed from github via
@@ -339,7 +369,8 @@ defmodule Aimax.Core.Session do
       "define-command" =>
         "(define-command NAME [DOC] FN) — register an M-x command; DOC shows in M-x.",
       "command-names" => "(command-names) — return every M-x command name.",
-      "global-keys" => "(global-keys) — return ((KEYS COMMAND) ...) for every global key binding.",
+      "global-keys" =>
+        "(global-keys) — return ((KEYS COMMAND) ...) for every global key binding.",
       "local-keys" =>
         "(local-keys BUF) — return ((KEYS COMMAND) ...) for BUF's own key bindings.",
       "command-fn" => "(command-fn NAME) — return the command's closure, or #f.",
@@ -425,11 +456,13 @@ defmodule Aimax.Core.Session do
       "llm-context-limit" =>
         "(llm-context-limit MODEL) — input tokens the model accepts, or #f when unknown.",
       "eval-string" => "(eval-string SRC) — evaluate SRC as Scheme; return the last value.",
-      "with-edit-author" => "(with-edit-author AUTHOR THUNK) — run THUNK; buffer edits it makes are attributed to the string AUTHOR.",
+      "with-edit-author" =>
+        "(with-edit-author AUTHOR THUNK) — run THUNK; buffer edits it makes are attributed to the string AUTHOR.",
       "eval-string-safe" =>
         "(eval-string-safe SRC) — evaluate SRC; return (ok VAL) or (error MSG).",
       "symbol-value" => "(symbol-value 'NAME) — return the global value of the symbol.",
-      "set-symbol-value!" => "(set-symbol-value! 'NAME VAL) — set the global value of the symbol.",
+      "set-symbol-value!" =>
+        "(set-symbol-value! 'NAME VAL) — set the global value of the symbol.",
       "boundp" => "(boundp 'NAME) — return #t when the symbol has a global binding.",
       "global-names" => "(global-names) — return every globally bound name, sorted.",
       "load" => "(load PATH) — evaluate a Scheme file in the live session.",
@@ -687,7 +720,10 @@ defmodule Aimax.Core.Session do
               {:sym, "tools"},
               d.tools,
               {:sym, "resources"},
-              for(r <- d.resources, do: [r["name"] || "", r["uri"] || "", r["description"] || ""]),
+              for(
+                r <- d.resources,
+                do: [r["name"] || "", r["uri"] || "", r["description"] || ""]
+              ),
               {:sym, "prompts"},
               for(p <- d.prompts, do: [p["name"] || "", p["description"] || ""])
             ]
@@ -796,24 +832,48 @@ defmodule Aimax.Core.Session do
       end,
       "llm-price" => fn [model] ->
         case Aimax.Core.LLMDb.price(s(model)) do
-          nil -> false
-          p -> [{:sym, "input"}, p.input, {:sym, "output"}, p.output,
-                {:sym, "cache-read"}, p.cache_read, {:sym, "cache-write"}, p.cache_write]
+          nil ->
+            false
+
+          p ->
+            [
+              {:sym, "input"},
+              p.input,
+              {:sym, "output"},
+              p.output,
+              {:sym, "cache-read"},
+              p.cache_read,
+              {:sym, "cache-write"},
+              p.cache_write
+            ]
         end
       end,
       "llm-cost-report" => fn [] ->
         for row <- Aimax.Core.LLMDb.report() do
-          [{:sym, "day"}, row.day, {:sym, "model"}, row.model,
-           {:sym, "requests"}, row.requests, {:sym, "input"}, row.input,
-           {:sym, "output"}, row.output,
-           {:sym, "cache-read"}, row.cache_read, {:sym, "cache-write"}, row.cache_write,
-           # as whole percent: Scheme has no float formatting worth the name
-           {:sym, "hit-rate"},
-           (case Aimax.Core.LLMDb.hit_rate(row) do
+          [
+            {:sym, "day"},
+            row.day,
+            {:sym, "model"},
+            row.model,
+            {:sym, "requests"},
+            row.requests,
+            {:sym, "input"},
+            row.input,
+            {:sym, "output"},
+            row.output,
+            {:sym, "cache-read"},
+            row.cache_read,
+            {:sym, "cache-write"},
+            row.cache_write,
+            # as whole percent: Scheme has no float formatting worth the name
+            {:sym, "hit-rate"},
+            case Aimax.Core.LLMDb.hit_rate(row) do
               nil -> false
               r -> round(r * 100)
-            end),
-           {:sym, "cost"}, row.cost * 1.0]
+            end,
+            {:sym, "cost"},
+            row.cost * 1.0
+          ]
         end
       end,
       "set-llm-model!" => fn [m] ->
@@ -989,6 +1049,7 @@ defmodule Aimax.Core.Session do
       # the session, misattributing every later keystroke.
       "with-edit-author" => fn [author, thunk], store ->
         prev = Process.get(:aimax_edit_author)
+
         if author == false,
           do: Process.delete(:aimax_edit_author),
           else: Process.put(:aimax_edit_author, to_string(author))
@@ -1275,7 +1336,7 @@ defmodule Aimax.Core.Session do
         input = Buffer.text(Editor.minibuf_name())
         trimmed = String.replace(input, ~r{[^/]+/$}, "")
 
-        if mb && mb.on_complete not in [nil, false] and trimmed != input and
+        if (mb && mb.on_complete not in [nil, false]) and trimmed != input and
              String.ends_with?(input, "/") do
           Editor.minibuffer_set_input(trimmed)
         else
@@ -1425,12 +1486,20 @@ defmodule Aimax.Core.Session do
   """
   defdelegate scheme_to_json(value), to: Aimax.Core.Plist, as: :to_json
 
-
   defp usage_to_plist(usage) do
     t = Aimax.Core.LLMDb.tokens(usage)
 
-    [{:sym, "input"}, t.input, {:sym, "output"}, t.output,
-     {:sym, "cache-read"}, t.cache_read, {:sym, "cache-write"}, t.cache_write,
-     {:sym, "cost"}, usage["cost"] || false]
+    [
+      {:sym, "input"},
+      t.input,
+      {:sym, "output"},
+      t.output,
+      {:sym, "cache-read"},
+      t.cache_read,
+      {:sym, "cache-write"},
+      t.cache_write,
+      {:sym, "cost"},
+      usage["cost"] || false
+    ]
   end
 end

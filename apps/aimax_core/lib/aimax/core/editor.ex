@@ -38,6 +38,8 @@ defmodule Aimax.Core.Editor do
 
   @scratch "*scratch*"
   @main_frame "f-main"
+  # what a window is worth in columns before the client has measured one
+  @default_cols 100
 
   # the keymap every read-only buffer inherits. No buffer holds this name:
   # a space prefix keeps it out of the buffer lists, as " *minibuf*" is.
@@ -255,6 +257,10 @@ defmodule Aimax.Core.Editor do
   def set_window_rows(map, fid \\ nil),
     do: GenServer.call(__MODULE__, {:set_window_rows, map, fid(fid)})
 
+  @doc "Per-window measured columns (%{win_id => cols}); true when the measurement changed."
+  def set_window_cols(map, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_window_cols, map, fid(fid)})
+
   def scroll_active(delta_lines, fid \\ nil),
     do: GenServer.call(__MODULE__, {:scroll_active, delta_lines, fid(fid)})
 
@@ -275,6 +281,14 @@ defmodule Aimax.Core.Editor do
   # ring, Emacs kill-ring-save) or, without one, the kill-ring top
   def user_acted(fid \\ nil), do: GenServer.call(__MODULE__, {:user_acted, fid(fid)})
   def window_rows(fid \\ nil), do: GenServer.call(__MODULE__, {:window_rows, fid(fid)})
+
+  @doc "Columns of WIN, or of the active window when WIN is nil."
+  def window_cols(win \\ nil, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:window_cols, win, fid(fid)})
+
+  @doc "Columns of a window showing BUF, in any frame — else the active window's."
+  def buffer_cols(buf, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:buffer_cols, buf, fid(fid)})
   def recenter(fid \\ nil), do: GenServer.call(__MODULE__, {:recenter, fid(fid)})
 
   # explicit nil beats an unset pdict; the server resolves nil -> last active
@@ -297,7 +311,8 @@ defmodule Aimax.Core.Editor do
       echo: "",
       completion: nil,
       total_rows: 40,
-      win_rows: %{}
+      win_rows: %{},
+      win_cols: %{}
     }
 
     {:ok,
@@ -345,7 +360,8 @@ defmodule Aimax.Core.Editor do
           echo: "",
           completion: nil,
           total_rows: 40,
-          win_rows: %{}
+          win_rows: %{},
+          win_cols: %{}
         }
 
         state = %{state | frames: Map.put(state.frames, id, frame), next_win: state.next_win + 1}
@@ -589,6 +605,38 @@ defmodule Aimax.Core.Editor do
     if f.win_rows == map,
       do: {:reply, :ok, state},
       else: changed(:ok, put_frame(state, %{f | win_rows: map}), f.id)
+  end
+
+  # the width the client measured, for anything that lays out in columns.
+  # It moves no window, so it never broadcasts; it answers whether the
+  # measurement CHANGED, and the caller tells Scheme so the tables can
+  # lay themselves out again.
+  def handle_call({:set_window_cols, map, fid}, _from, state) when is_map(map) do
+    f = frame(state, fid)
+
+    if Map.get(f, :win_cols, %{}) == map,
+      do: {:reply, false, state},
+      else: {:reply, true, put_frame(state, Map.put(f, :win_cols, map))}
+  end
+
+  # a list lays itself out for the window it is IN, whichever frame that
+  # is: the frame running the command is not always the frame showing the
+  # buffer
+  def handle_call({:buffer_cols, buf, fid}, _from, state) do
+    f = frame(state, fid)
+
+    cols =
+      frame_buffer_cols(f, buf) ||
+        Enum.find_value(Map.values(state.frames), &frame_buffer_cols(&1, buf)) ||
+        Map.get(Map.get(f, :win_cols, %{}), f.active, @default_cols)
+
+    {:reply, cols, state}
+  end
+
+  def handle_call({:window_cols, win, fid}, _from, state) do
+    f = frame(state, fid)
+    cols = Map.get(f, :win_cols, %{})
+    {:reply, Map.get(cols, win || f.active, @default_cols), state}
   end
 
   def handle_call({:scroll_active, delta, fid}, _from, state) do
@@ -1382,8 +1430,8 @@ defmodule Aimax.Core.Editor do
       prompt_sel: prompt_sel,
       candidates:
         if(prompt_sel,
-          do: Enum.map(Candidates.rows(mb.list), &%{&1 | selected: false}),
-          else: Candidates.rows(mb.list)
+          do: Enum.map(Candidates.rows(mb.list, window), &%{&1 | selected: false}),
+          else: Candidates.rows(mb.list, window)
         ),
       # widest label of the WHOLE set, not the visible window — the names
       # column keeps one width for the session instead of reflowing per key
@@ -1430,6 +1478,16 @@ defmodule Aimax.Core.Editor do
     {start, line_text} = Buffer.line_at(buf, line)
     start + byte_size(String.slice(line_text, 0, max(col, 0)))
   end
+
+  defp frame_buffer_cols(f, buf) do
+    cols = Map.get(f, :win_cols, %{})
+    Enum.find_value(wins_showing(f.tree, buf), &Map.get(cols, &1))
+  end
+
+  defp wins_showing(%{type: :leaf, id: id, buffer: b}, buf), do: if(b == buf, do: [id], else: [])
+
+  defp wins_showing(%{type: :split, children: cs}, buf),
+    do: Enum.flat_map(cs, &wins_showing(&1, buf))
 
   defp find_leaf(%{type: :leaf} = leaf, id), do: if(leaf.id == id, do: leaf, else: nil)
 

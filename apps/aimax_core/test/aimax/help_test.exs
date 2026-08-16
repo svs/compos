@@ -131,6 +131,15 @@ defmodule Aimax.HelpTest do
     assert text =~ "Group: `hg-grp-#{n}`"
     assert text =~ "where the help test lives"
     press("q")
+
+    # a minor mode is a section with its doc, not a bare name
+    eval!(~s{(begin (switch-to-buffer! "#{b}")
+                    (buffer-set-local! "#{b}" 'minor-modes '("llm-mode")))})
+    press("M-?")
+    text = Buffer.text("*Help*")
+    assert text =~ "## llm-mode (minor)"
+    assert text =~ "In-buffer LLM interaction"
+    press("q")
     eval!(~s{(begin (buffer-kill! "#{b}") (buffer-kill! "*chat:hg-grp-#{n}*") #t)})
   end
 

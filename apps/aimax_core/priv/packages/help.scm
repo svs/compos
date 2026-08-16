@@ -85,6 +85,22 @@
   (let ((ms (or (buffer-local buf 'minor-modes) '())))
     (if (null? ms) "" (string-append "\nMinor modes: `" (string-join ms "` · `") "`\n"))))
 
+;; each minor mode gets its say, the way the major mode does — the
+;; name-only list answered "which" but never "so what"
+(define (help--minor-sections buf)
+  (let ((ms (or (buffer-local buf 'minor-modes) '())))
+    (if (null? ms)
+        ""
+        (string-join
+          (map (lambda (m)
+                 (string-append
+                   "## " m " (minor)\n\n"
+                   (or (mode-doc m)
+                       "No description. Its keys are in the table below.")
+                   "\n\n"))
+               ms)
+          ""))))
+
 ;; the buffer's group, with what the group knows about itself
 (define (help--group-line buf)
   (let ((g (buffer-group buf)))
@@ -107,6 +123,7 @@
       "\n"
       (help--minor-modes buf)
       "\n"
+      (help--minor-sections buf)
       (help--key-table "Keys in this buffer" (local-keys buf)
                        "This buffer adds no keys of its own.")
       "\n---\n\n"
@@ -274,6 +291,7 @@
       "\n"
       (help--at-point-section name)
       (if doc (string-append "## " mode "\n\n" doc "\n\n") "")
+      (help--minor-sections buf)
       (help--key-table "Keys in this buffer" (local-keys buf)
                        "This buffer adds no keys of its own.")
       "\n---\n\n"

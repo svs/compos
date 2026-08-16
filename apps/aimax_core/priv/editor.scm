@@ -384,15 +384,31 @@
     ;; every list is read-only, so "?" can be help in all of them — bound
     ;; before the mode's own keys, which may claim it for something else
     (local-set-key* buf "?" "describe-mode")
-    ;; m/u/U/x and the flag keys, for a list that declares flags — also
-    ;; before the mode's own keys, for the same reason
+    ;; m/u/U/* and the flag keys — also before the mode's own keys, for
+    ;; the same reason
     (list-install-mark-keys! buf opts)
+    ;; a table moves the same way in every list: n and p walk the rows and
+    ;; stop at the ends, and the line-motion keys REMAP, so the arrows and
+    ;; C-n/C-p walk them too
+    (when (plist-get opts 'columns)
+      (local-set-key* buf "n" "list-next")
+      (local-set-key* buf "p" "list-prev")
+      (local-remap*! buf "next-line" "list-next")
+      (local-remap*! buf "previous-line" "list-prev"))
+    ;; every list narrows the same way — `/` to type, `\` to widen. Both
+    ;; go in before the mode's own keys, which may claim them for
+    ;; something else.
+    (local-set-key* buf "/" "list-filter")
+    (local-set-key* buf "\\" "list-filter-pop")
     (for-each (lambda (k) (local-set-key* buf (car k) (car (cdr k))))
               (or (plist-get opts 'keys) '()))
     (for-each (lambda (r) (local-remap*! buf (car r) (car (cdr r))))
               (or (plist-get opts 'remap) '()))
     (buffer-set-read-only! buf #t)
-    (list-refresh! buf)))
+    (list-refresh! buf)
+    ;; the rewrite leaves the buffer's point after the key bar — a list
+    ;; opens with point on the first row
+    (list-goto-index! buf 0)))
 
 (define (define-list-mode! name opts)
   (set! *list-modes*

@@ -255,14 +255,15 @@
                  (custom--plist-get args 'level))))
 
 ;;; --- keys ---------------------------------------------------------------------
-;;; `C-c s` is the player's prefix, next to `C-c a` for the agents.
+;;; `C-c S` is the player's prefix. Lowercase `C-c s` belongs to the
+;;; editor-wide scratch buffer command.
 
-(global-set-key "C-c s s" "spotify-play-pause")
-(global-set-key "C-c s n" "spotify-next")
-(global-set-key "C-c s p" "spotify-previous")
-(global-set-key "C-c s i" "spotify-now-playing")
-(global-set-key "C-c s l" "spotify-like")
-(global-set-key "C-c s /" "spotify-search")
-(global-set-key "C-c s g" "spotify")
-(global-set-key "C-c s <up>" "spotify-volume-up")
-(global-set-key "C-c s <down>" "spotify-volume-down")
+(global-set-key "C-c S s" "spotify-play-pause")
+(global-set-key "C-c S n" "spotify-next")
+(global-set-key "C-c S p" "spotify-previous")
+(global-set-key "C-c S i" "spotify-now-playing")
+(global-set-key "C-c S l" "spotify-like")
+(global-set-key "C-c S /" "spotify-search")
+(global-set-key "C-c S g" "spotify")
+(global-set-key "C-c S <up>" "spotify-volume-up")
+(global-set-key "C-c S <down>" "spotify-volume-down")

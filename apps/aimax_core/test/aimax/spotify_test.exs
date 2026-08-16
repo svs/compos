@@ -67,9 +67,9 @@ defmodule Aimax.SpotifyTest do
     :ok
   end
 
-  test "C-c s s finds the player tab and presses its play button" do
+  test "C-c S s finds the player tab and presses its play button" do
     stub_socket()
-    press(["C-c", "s", "s"])
+    press(["C-c", "S", "s"])
 
     assert_receive {:frame, %{"op" => "tabs", "id" => id}}
     answer_tabs(id)

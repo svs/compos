@@ -29,12 +29,30 @@ defmodule Aimax.Core.LLM do
   @max_tool_rounds 25
 
   @doc "Synchronous request — for callers managing their own tasks."
-  def request(prompt), do: request_fun().(prompt)
+  def request(prompt), do: run_request(prompt, model())
 
-  def complete(prompt, callback) when is_function(callback, 1) do
+  @doc "Run FUN with a process-local provider key, without requiring a Scheme session."
+  def with_provider_key(var, key, fun)
+      when is_binary(var) and is_binary(key) and is_function(fun, 0) do
+    slot = {__MODULE__, :provider_key, var}
+    previous = Process.get(slot)
+    Process.put(slot, key)
+
+    try do
+      fun.()
+    after
+      if previous, do: Process.put(slot, previous), else: Process.delete(slot)
+    end
+  end
+
+  def complete(prompt, callback) when is_function(callback, 1),
+    do: complete(prompt, model(), callback)
+
+  def complete(prompt, requested_model, callback)
+      when is_binary(requested_model) and is_function(callback, 1) do
     {:ok, _} =
       Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
-        case request_fun().(prompt) do
+        case run_request(prompt, requested_model) do
           {:ok, text} -> callback.(text)
           {:error, msg} -> Session.message("llm error: #{msg}")
         end
@@ -43,8 +61,14 @@ defmodule Aimax.Core.LLM do
     :ok
   end
 
-  defp request_fun do
-    Application.get_env(:aimax_core, :llm_request_fun, &default_request/1)
+  # Tests and user integrations historically supplied a one-argument seam.
+  # A two-argument seam can additionally observe/honor the buffer-local model.
+  defp run_request(prompt, requested_model) do
+    case Application.get_env(:aimax_core, :llm_request_fun) do
+      nil -> default_request(prompt, requested_model)
+      fun when is_function(fun, 1) -> fun.(prompt)
+      fun when is_function(fun, 2) -> fun.(prompt, requested_model)
+    end
   end
 
   @doc """
@@ -196,7 +220,10 @@ defmodule Aimax.Core.LLM do
 
   # sum token counts across the loop's rounds
   defp add_usage(acc, %{"usage" => usage}) when is_map(usage),
-    do: Map.merge(acc, usage, fn _k, a, b -> if is_number(a) and is_number(b), do: a + b, else: b end)
+    do:
+      Map.merge(acc, usage, fn _k, a, b ->
+        if is_number(a) and is_number(b), do: a + b, else: b
+      end)
 
   defp add_usage(acc, _), do: acc
 
@@ -287,9 +314,14 @@ defmodule Aimax.Core.LLM do
             tee =
               Stream.map(sr.stream, fn chunk ->
                 case chunk.type do
-                  :content -> if chunk.text not in [nil, ""], do: req.on_chunk.(chunk.text)
-                  :thinking -> if req[:on_thinking] && chunk.text, do: req.on_thinking.(chunk.text)
-                  _ -> :ok
+                  :content ->
+                    if chunk.text not in [nil, ""], do: req.on_chunk.(chunk.text)
+
+                  :thinking ->
+                    if req[:on_thinking] && chunk.text, do: req.on_thinking.(chunk.text)
+
+                  _ ->
+                    :ok
                 end
 
                 chunk
@@ -394,9 +426,15 @@ defmodule Aimax.Core.LLM do
   # ensure_key/1 runs in the request Task or in an agent backend, never in
   # the session process — a call from the session would deadlock.
   defp key_for(var) do
-    case Session.call_named("key-get", [var]) do
-      {:ok, k} when is_binary(k) and k != "" -> k
-      _ -> nil
+    case Process.get({__MODULE__, :provider_key, var}) do
+      k when is_binary(k) and k != "" ->
+        k
+
+      _ ->
+        case Session.call_named("key-get", [var]) do
+          {:ok, k} when is_binary(k) and k != "" -> k
+          _ -> nil
+        end
     end
   end
 
@@ -608,13 +646,16 @@ defmodule Aimax.Core.LLM do
   end
 
   # the plain one-shot completion (the (llm ...) primitive)
-  defp default_request(prompt) do
-    spec = req_model_spec(model())
+  defp default_request(prompt, requested_model) do
+    spec = req_model_spec(requested_model)
 
     with :ok <- ensure_key(spec) do
       case with_retry(fn -> ReqLLM.generate_text(spec, prompt, req_opts(spec, [])) end) do
         {:ok, resp} ->
-          Aimax.Core.LLMDb.record(model(), usage_strings(ReqLLM.Response.usage(resp), spec))
+          Aimax.Core.LLMDb.record(
+            requested_model,
+            usage_strings(ReqLLM.Response.usage(resp), spec)
+          )
           {:ok, ReqLLM.Response.text(resp) || ""}
 
         {:error, e} ->

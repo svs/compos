@@ -50,8 +50,11 @@ defmodule Aimax.CacheEconomicsTest do
 
   defp reply(text, usage \\ %{"input_tokens" => 5, "output_tokens" => 2}) do
     {:ok,
-     %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => text}],
-       "usage" => usage}}
+     %{
+       "stop_reason" => "end_turn",
+       "content" => [%{"type" => "text", "text" => text}],
+       "usage" => usage
+     }}
   end
 
   defp api_chat(name) do
@@ -163,6 +166,7 @@ defmodule Aimax.CacheEconomicsTest do
     stub_chat(fn req -> send(me, {:req, req}) && reply("ok") end)
 
     buf = api_chat("tools")
+    eval!(~s[(buffer-set-local! "#{buf}" 'chat-presets '(aimax))])
     focus(buf)
     type("hello")
     press(["RET"])
@@ -212,6 +216,7 @@ defmodule Aimax.CacheEconomicsTest do
       if Enum.any?(req.messages, &is_list(&1.content)) do
         # round 2: hold the turn open so it can be cancelled mid-flight
         send(me, {:holding, self()})
+
         receive do
           :release -> :ok
         after
@@ -224,11 +229,18 @@ defmodule Aimax.CacheEconomicsTest do
          %{
            "stop_reason" => "tool_use",
            "content" => [
-             %{"type" => "tool_use", "id" => "t1", "name" => "eval-scheme",
-               "input" => %{"code" => "(+ 1 1)"}}
+             %{
+               "type" => "tool_use",
+               "id" => "t1",
+               "name" => "eval-scheme",
+               "input" => %{"code" => "(+ 1 1)"}
+             }
            ],
-           "usage" => %{"input_tokens" => 400, "output_tokens" => 20,
-                        "cache_read_input_tokens" => 900}
+           "usage" => %{
+             "input_tokens" => 400,
+             "output_tokens" => 20,
+             "cache_read_input_tokens" => 900
+           }
          }}
       end
     end)
@@ -249,7 +261,10 @@ defmodule Aimax.CacheEconomicsTest do
 
     # the round that DID complete is billed: cancelling is not a refund
     assert eventually(fn -> File.exists?(ledger) end)
-    row = ledger |> File.read!() |> String.split("\n", trim: true) |> List.last() |> Jason.decode!()
+
+    row =
+      ledger |> File.read!() |> String.split("\n", trim: true) |> List.last() |> Jason.decode!()
+
     assert row["input"] == 400
     assert row["cache_read"] == 900
     # ...and the row names the chat that spent it
@@ -345,7 +360,9 @@ defmodule Aimax.CacheEconomicsTest do
     System.put_env("ANTHROPIC_API_KEY", "sk-test")
 
     on_exit(fn ->
-      if prev, do: System.put_env("ANTHROPIC_API_KEY", prev), else: System.delete_env("ANTHROPIC_API_KEY")
+      if prev,
+        do: System.put_env("ANTHROPIC_API_KEY", prev),
+        else: System.delete_env("ANTHROPIC_API_KEY")
     end)
 
     assert {:ok, text} = Aimax.Core.LLM.request("are you there")
@@ -373,8 +390,12 @@ defmodule Aimax.CacheEconomicsTest do
 
   defp eventually(fun, tries \\ 40) do
     cond do
-      fun.() -> true
-      tries == 0 -> false
+      fun.() ->
+        true
+
+      tries == 0 ->
+        false
+
       true ->
         Process.sleep(50)
         eventually(fun, tries - 1)

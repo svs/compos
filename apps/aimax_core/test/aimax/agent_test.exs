@@ -345,7 +345,8 @@ defmodule Aimax.AgentTest do
     focus(buf)
     press(["C-RET"])
 
-    assert_receive {:frame, %{"method" => "session/cancel", "params" => %{"sessionId" => "sess-1"}}},
+    assert_receive {:frame,
+                    %{"method" => "session/cancel", "params" => %{"sessionId" => "sess-1"}}},
                    1_000
 
     _ = agent
@@ -360,7 +361,8 @@ defmodule Aimax.AgentTest do
     assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
     inject(agent, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{}})
 
-    assert_receive {:frame, %{"method" => "session/new", "params" => %{"cwd" => "/tmp/conn-home"}}},
+    assert_receive {:frame,
+                    %{"method" => "session/new", "params" => %{"cwd" => "/tmp/conn-home"}}},
                    1_000
 
     assert {:ok, ~s["test-conn"]} =
@@ -422,6 +424,7 @@ defmodule Aimax.AgentTest do
     # mode setup rebuilt presentation from the persisted locals (live overlays
     # drift as appends land at their edges — the locals hold authored ranges)
     assert Buffer.hidden(buf) == hidden
+
     assert Buffer.overlays(buf) |> Enum.map(&Tuple.to_list/1) ==
              Buffer.get_local(buf, "agent-overlays")
 
@@ -742,9 +745,7 @@ defmodule Aimax.AgentTest do
     # the walk reads the conversation of record — there is no second copy
     # of the messages
     assert {:ok, ~s{(("user" "second message") ("user" "first message"))}} =
-             Session.eval(
-               ~s{(filter (lambda (t) (equal? (car t) "user")) (chat-turns "#{buf}"))}
-             )
+             Session.eval(~s{(filter (lambda (t) (equal? (car t) "user")) (chat-turns "#{buf}"))})
   end
 
   # A chat restored from a .chat file gets its turns back. Walking must
@@ -794,7 +795,10 @@ defmodule Aimax.AgentTest do
     refute Buffer.get_local(buf, "agent-slug")
 
     press(["<up>"])
-    assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: what I asked before") end)
+
+    assert eventually(fn ->
+             String.ends_with?(Buffer.text(buf), ">>> you: what I asked before")
+           end)
 
     press(["<down>"])
     assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: ") end)
@@ -889,7 +893,11 @@ defmodule Aimax.AgentTest do
     assert_receive {:frame, %{"method" => "session/set_mode", "params" => sp}}, 1_000
     assert sp == %{"sessionId" => "sess-md", "modeId" => "plan"}
 
-    update(agent, "sess-md", %{"sessionUpdate" => "current_mode_update", "currentModeId" => "plan"})
+    update(agent, "sess-md", %{
+      "sessionUpdate" => "current_mode_update",
+      "currentModeId" => "plan"
+    })
+
     assert eventually(fn -> Buffer.get_local(buf, "agent-mode") == "plan" end)
     assert eventually(fn -> Buffer.get_local(buf, "modeline-info") =~ "plan" end)
   end
@@ -924,8 +932,12 @@ defmodule Aimax.AgentTest do
 
   defp eventually(fun, tries \\ 40) do
     cond do
-      fun.() -> true
-      tries == 0 -> false
+      fun.() ->
+        true
+
+      tries == 0 ->
+        false
+
       true ->
         Process.sleep(50)
         eventually(fun, tries - 1)

@@ -7,7 +7,7 @@ defmodule Aimax.Rpc.Server do
       echo '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(+ 1 2)"}}' \\
         | nc -U ~/.aimax/sock
 
-  Methods: `eval` (params.code), `ping`.
+  Methods: `eval` (params.code), `reload` (params.paths), `shutdown`, `ping`.
 
   Frames: eval runs against the **last-active frame** (the one that saw
   input most recently). Window primitives act there; target another frame
@@ -110,6 +110,29 @@ defmodule Aimax.Rpc.Server do
 
       {:error, msg} ->
         error_resp(req["id"], -32000, msg)
+    end
+  end
+
+  defp handle_request(%{"method" => "reload", "params" => %{"paths" => paths}} = req)
+       when is_list(paths) do
+    case Session.reload_files(paths) do
+      {:ok, count} -> %{jsonrpc: "2.0", id: req["id"], result: %{"reloaded" => count}}
+      {:error, msg} -> error_resp(req["id"], -32000, msg)
+    end
+  end
+
+  defp handle_request(%{"method" => "shutdown"} = req) do
+    case Aimax.Core.Desktop.save_now() do
+      :ok ->
+        Task.start(fn ->
+          Process.sleep(100)
+          System.stop(0)
+        end)
+
+        %{jsonrpc: "2.0", id: req["id"], result: "stopping"}
+
+      :error ->
+        error_resp(req["id"], -32000, "desktop save failed; refusing to stop")
     end
   end
 

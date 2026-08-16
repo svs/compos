@@ -73,9 +73,11 @@ the picked buffer's group comes up, layout and all. The same rule Emacs keeps
 between <code>C-x b</code> and tab-bar / perspective switching.
 </div>
 
-<p>The pool is the recency stream — history first: the buffer you just left
-is the default, so <kbd>RET</kbd> toggles like the Emacs buffer ring. Groups
-have no rows of their own; every buffer row IS a group row.</p>
+<p>The pool is ONE history: buffers and groups woven by recency. A group
+switch is itself a history entry, so a group's card sits exactly where you
+last went to it — above the members it brought up. The buffer you just left
+is the default, so <kbd>RET</kbd> toggles like the Emacs buffer ring.
+Searching a group's name finds the card and its members together.</p>
 
 <p>Each row shows four columns: the mode, the group, the project, and the
 file. What you type matches the buffer name and the first three columns. So

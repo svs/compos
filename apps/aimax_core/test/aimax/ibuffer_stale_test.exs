@@ -167,8 +167,8 @@ defmodule Aimax.IbufferStaleTest do
 
     assert Buffer.exists?("*zz-sb*"), "C-x b did not wake the dormant buffer"
     assert Editor.current_buffer() == "*zz-sb*"
-    refute Buffer.text("*messages*") =~ "founded group"
     assert eval!(~s{(buffer-group "*zz-sb*")}) == "#f"
+    refute eval!(~s{(group-names)}) =~ "zz-sb", "RET founded a group instead of switching"
   end
 
   test "a row for a buffer killed elsewhere leaves the list on the next command" do

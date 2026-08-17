@@ -223,6 +223,36 @@ defmodule Aimax.AgentTest do
                    1_000
 
     inject(backend, %{
+      "id" => 92,
+      "method" => "mcpServer/elicitation/request",
+      "params" => %{
+        "serverName" => "aimax",
+        "threadId" => "thread-1",
+        "turnId" => "turn-1",
+        "mode" => "form",
+        "message" => "Use aimax/apropos",
+        "requestedSchema" => %{"type" => "object", "properties" => %{}}
+      }
+    })
+
+    assert_receive {:backend_event, mcp_permission}, 1_000
+    assert Backend.event_type(mcp_permission) == "permission"
+    assert Backend.plist_get(mcp_permission, "rpc-id") == 92
+    assert Backend.plist_get(mcp_permission, "title") == "Use aimax/apropos"
+    assert Backend.plist_get(mcp_permission, "kind") == "mcp"
+
+    assert :ok =
+             Aimax.Core.Agent.Backend.CodexAppServer.respond_permission(
+               backend,
+               92,
+               "allow_always"
+             )
+
+    assert_receive {:frame,
+                    %{"id" => 92, "result" => %{"action" => "accept", "content" => nil}}},
+                   1_000
+
+    inject(backend, %{
       "method" => "turn/completed",
       "params" => %{
         "threadId" => "thread-1",

@@ -264,7 +264,8 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
     if method in [
          "item/commandExecution/requestApproval",
          "item/fileChange/requestApproval",
-         "item/permissions/requestApproval"
+         "item/permissions/requestApproval",
+         "mcpServer/elicitation/request"
        ] do
       state = %{state | pending_server: Map.put(state.pending_server, id, {method, params})}
       emit_permission(state, id, method, params)
@@ -556,6 +557,9 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
         "item/fileChange/requestApproval" ->
           {Map.get(params, "reason") || "Edit files", "edit"}
 
+        "mcpServer/elicitation/request" ->
+          {Map.get(params, "message") || "Use #{Map.get(params, "serverName", "MCP")} tool", "mcp"}
+
         _ ->
           {Map.get(params, "reason") || "Grant additional permissions", "permissions"}
       end
@@ -598,6 +602,21 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
 
     scope = if option_id == "allow_always", do: "session", else: "turn"
     {:ok, %{"permissions" => permissions, "scope" => scope}}
+  end
+
+  # Codex funnels MCP tool confirmation through elicitation rather than the
+  # command/file approval methods.  It is still governed by aimax's one
+  # permission policy; accepted form elicitations need no user-supplied fields
+  # for a tool call, only the protocol action.
+  defp permission_result({"mcpServer/elicitation/request", _params}, option_id) do
+    action =
+      case option_id do
+        option when option in ["allow_once", "allow_always"] -> "accept"
+        "reject_once" -> "decline"
+        _ -> "cancel"
+      end
+
+    {:ok, %{"action" => action, "content" => nil}}
   end
 
   defp permission_result(_, _), do: :unknown

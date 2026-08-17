@@ -492,6 +492,21 @@
   (buffer-set-local! buf 'list-filters (cons f (list-filters buf)))
   (list-refresh! buf))
 
+;; The query is ONE filter, not a stack of them: the text you type IS
+;; the narrowing, so deleting it widens and emptying it removes it.
+;; A mode's own filter (dired's dotfiles) is a different kind and keeps
+;; its place in the stack.
+(define (list-query buf)
+  (let ((f (assoc "match" (list-filters buf))))
+    (if f (car (cdr f)) "")))
+
+(define (list-set-query! buf q)
+  (let ((rest (filter (lambda (f) (not (equal? (car f) "match")))
+                      (list-filters buf))))
+    (buffer-set-local! buf 'list-filters
+      (if (equal? q "") rest (cons (list "match" q) rest)))
+    (list-refresh! buf)))
+
 (define (list-filter-pop! buf)
   (let ((fs (list-filters buf)))
     (unless (null? fs) (buffer-set-local! buf 'list-filters (cdr fs)))
@@ -891,21 +906,26 @@
 (domain! 'interaction)
 (effects! '(write))
 
-;; The narrowing is live, so what you see IS the filter: BEFORE is the
-;; stack you came in with, and every keystroke replaces the top of it.
-;; C-g puts BEFORE back, which is why the command holds it.
+;; The narrowing is live, and the input IS it. The prompt opens holding
+;; the query the list already has, so `/` edits the narrowing instead of
+;; stacking a second one on top of it. Every keystroke narrows, every
+;; DEL widens, and an empty input means no query at all — that is how
+;; you remove one. C-g puts back the query you came in with.
 (define-command "list-filter"
   "Narrow this list to the rows that match what you type"
   (lambda ()
     (let* ((buf (current-buffer))
-           (before (list-filters buf))
+           (before (list-query buf))
            (narrow (lambda (q)
-                     (list-set-filters! buf
-                       (if (equal? q "") before (cons (list "match" q) before))))))
+                     (list-set-query! buf q)
+                     (list-goto-first-entry buf))))
       (minibuffer-read* "Filter: " '()
         (list (list 'change narrow)
               (list 'confirm narrow)
-              (list 'cancel (lambda () (list-set-filters! buf before))))))))
+              (list 'cancel (lambda () (narrow before)))
+              (list 'style "filter")))
+      ;; the prompt starts where the list is: editing beats retyping
+      (unless (equal? before "") (minibuffer-input! before)))))
 
 (define-command "list-filter-pop" "Drop the most recent filter on this list"
   (lambda ()
@@ -1251,9 +1271,12 @@
                 (cond ((string-suffix? "y" input) ((answer yes)))
                       ((string-suffix? "n" input) ((answer no)))
                       (else (minibuffer-input! "")))))
-            (list 'confirm (lambda (v) (no)))
+            ;; RET is not an answer: a question takes y or n and nothing
+            ;; else, so RET asks it again. C-g is the way out, and it
+            ;; means no.
+            (list 'confirm (lambda (v) (y-or-n prompt yes no)))
             (list 'cancel no)
-            (list 'style #f)))))
+            (list 'style "question")))))
 
 ;; MATCH-HINT also matches what you type against the marginalia beside
 ;; each candidate: #t means the first field, an integer N the first N.

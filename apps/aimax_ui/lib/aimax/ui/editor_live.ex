@@ -676,7 +676,7 @@ defmodule Aimax.Ui.EditorLive do
       <%= if @state.minibuffer do %>
         <div class={"mb-panel #{if Map.get(@state.minibuffer, :style) == "palette", do: "palette"}"}>
           <div class="mb-label-row">
-            {String.trim_trailing(@state.minibuffer.prompt, ": ")} · TAB completes · RET accepts · C-n/C-p selects · C-c C-o collects · C-g quits
+            {label_row(@state.minibuffer)}
           </div>
           <div class="mb-body">
             <div class="mb-cands" style={"--mb-label-w: #{@state.minibuffer.label_width}ch"}>
@@ -752,6 +752,26 @@ defmodule Aimax.Ui.EditorLive do
   end
 
   defp mb_split(mb), do: {mb.input, " ", ""}
+
+  # A question is not a completion prompt. It takes one key, so it says
+  # which keys answer it, and it counts nothing.
+  defp label_row(%{style: "question"} = mb),
+    do: "#{String.trim_trailing(mb.prompt, " ")} · y answers yes · n answers no · C-g quits"
+
+  # a filter narrows the list behind it; the list itself shows the count,
+  # so the prompt says what the keys do and nothing more
+  defp label_row(%{style: "filter"} = mb),
+    do:
+      "#{String.trim_trailing(mb.prompt, ": ")} · type to narrow · DEL widens · " <>
+        "empty removes it · RET keeps it · C-g drops it"
+
+  defp label_row(mb),
+    do:
+      "#{String.trim_trailing(mb.prompt, ": ")} · TAB completes · RET accepts · " <>
+        "C-n/C-p selects · C-c C-o collects · C-g quits"
+
+  defp count_text(%{style: "question"}), do: ""
+  defp count_text(%{style: "filter"}), do: ""
 
   defp count_text(%{total: total, sel: sel, completing: completing} = mb) do
     cond do

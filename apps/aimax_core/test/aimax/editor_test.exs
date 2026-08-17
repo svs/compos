@@ -573,6 +573,39 @@ defmodule Aimax.EditorTest do
       refute text =~ "alpha.txt"
     end
 
+    # The query is ONE filter and the input IS it: `/` reopens holding
+    # what the list already shows, and emptying the input removes it.
+    # Before this, every `/` stacked another layer and nothing you typed
+    # could take one off.
+    test "/ edits the live query, and an empty input removes it", %{root: root} do
+      File.write!(Path.join(root, "notes.scm"), ";;")
+
+      {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
+
+      press(["/"])
+      type("scm")
+      press(["RET"])
+      assert {:ok, ~s{"scm"}} = Aimax.Core.Session.eval(~s{(list-query "#{root}")})
+
+      # the prompt opens on the query it already has
+      press(["/"])
+      assert Editor.render_state().minibuffer.input == "scm"
+
+      # editing replaces the query — it does not stack a second one
+      press(["DEL"])
+      type("h")
+      {:ok, filters} = Aimax.Core.Session.eval(~s{(buffer-local "#{root}" 'list-filters)})
+      assert filters == ~s{(("match" "sch"))}
+
+      # emptying the input removes the filter outright
+      press(["DEL", "DEL", "DEL"])
+      assert {:ok, "()"} = Aimax.Core.Session.eval(~s{(buffer-local "#{root}" 'list-filters)})
+      assert Buffer.text(root) =~ "alpha.txt"
+
+      press(["RET"])
+      assert {:ok, ~s{""}} = Aimax.Core.Session.eval(~s{(list-query "#{root}")})
+    end
+
     # The listing was in the buffer and the window was blank: the buffer
     # kept 'render-mode "blocks" from the mode before it, and the client
     # draws blocks for a leaf that says "blocks". Both ends refuse now —

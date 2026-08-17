@@ -2254,6 +2254,63 @@ defmodule Aimax.EditorTest do
       )
   end
 
+  test "a board that covers a group's pane cannot lose its layout" do
+    n = System.unique_integer([:positive])
+    m1 = "cv-a-#{n}"
+    m2 = "cv-b-#{n}"
+    other = "cv-c-#{n}"
+    board = "cv-board-#{n}"
+    a = "cvgrp-#{n}"
+    b = "cvother-#{n}"
+    for x <- [m1, m2, other], do: Aimax.Core.create_buffer(x)
+
+    # group A stands in two windows, and it has never saved a layout
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (set-frame-local! 'current-group #f)
+             (buffer-set-local! "#{m1}" 'group "#{a}")
+             (buffer-set-local! "#{m2}" 'group "#{a}")
+             (buffer-set-local! "#{other}" 'group "#{b}")
+             (group-chat "#{a}")
+             (group-chat "#{b}")
+             (buffer-set-local! (group-chat "#{a}") 'group-layout #f)
+             (delete-other-windows!)
+             (switch-to-buffer! "#{m1}")
+             (split-window! 'h 0.5)
+             (other-window!)
+             (switch-to-buffer! "#{m2}")
+             (set-frame-local! 'current-group "#{a}"))
+      """)
+
+    assert Aimax.Core.Session.eval(~s{(group-layout "#{a}")}) == {:ok, "#f"}
+
+    # a board takes a pane — every listing reaches a window through
+    # display-buffer — and the arrangement it covers goes on record
+    # before it does
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin (buffer-create "#{board}")
+             (buffer-set-local! "#{board}" 'transient #t)
+             (display-buffer "#{board}"))
+      """)
+
+    assert board in (Editor.list_windows() |> Enum.map(fn {_id, x} -> x end))
+    refute Aimax.Core.Session.eval(~s{(group-layout "#{a}")}) == {:ok, "#f"}
+
+    # leave from the board — the buffer you act from is not a member, so
+    # nothing else can capture the layout — then come back
+    {:ok, _} = Aimax.Core.Session.eval(~s{(switch-to-group! "#{b}")})
+    {:ok, _} = Aimax.Core.Session.eval(~s{(switch-to-group! "#{a}")})
+
+    shown = Editor.list_windows() |> Enum.map(fn {_id, x} -> x end) |> Enum.sort()
+    assert shown == Enum.sort([m1, m2])
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(
+        "(begin (set-frame-local! 'current-group #f) (delete-other-windows!))"
+      )
+  end
+
   test "a group you switched to is a history row; its name finds it and its members" do
     n = System.unique_integer([:positive])
     m1 = "hs-a-#{n}"

@@ -2903,6 +2903,12 @@
           (switch-to-buffer! name)))))
 
 (define (display-buffer name)
+  ;; a board, a listing, any surface from outside the group takes its
+  ;; pane through here. Record the group's arrangement BEFORE the
+  ;; cover, or a switch made FROM the board has no way back — the
+  ;; capture rule below only fires from a member buffer, and the board
+  ;; is not one.
+  (group-layout-save-before-cover! name)
   (if (equal? (display-action-for name) 'popup)
       (popup-show name)
       (switch-to-buffer! name)))
@@ -4404,6 +4410,33 @@
 (define (group-layout-save-if-shown! g)
   (when (and g (equal? (buffer-group (current-buffer)) g))
     (group-layout-save! g)))
+
+;; a group is UNCOVERED when no window shows a transient surface from
+;; outside it — a board, a listing. Its own members are transient too
+;; (a mail view, a dired listing), and they are part of the group's
+;; arrangement, not a cover on it.
+(define (group-uncovered? g)
+  (let loop ((ws (window-list)))
+    (cond ((null? ws) #t)
+          ((let ((b (car (cdr (car ws)))))
+             (and (buffer-local b 'transient)
+                  (not (equal? (buffer-group b) g))))
+           #f)
+          (else (loop (cdr ws))))))
+
+;; NAME is about to take a pane. When it comes from outside the group
+;; on screen, the arrangement it covers goes on record first. Only an
+;; uncovered arrangement counts: a second board must not overwrite the
+;; snapshot the first one earned. A group with no holder yet gets no
+;; snapshot — displaying a buffer must not create a chat.
+(define (group-layout-save-before-cover! name)
+  (let ((g (frame-group)))
+    (when (and g
+               (not (equal? (buffer-group name) g))
+               (group-holder g)
+               (group-on-screen? g)
+               (group-uncovered? g))
+      (group-layout-save! g))))
 
 ;; found a group from what is on screen: every window's buffer joins,
 ;; the layout is saved, and the group chat holds the durable state

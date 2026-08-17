@@ -1463,6 +1463,30 @@ defmodule Aimax.EditorTest do
       {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-kill! "#{other}")})
     end
 
+    # The frame local dies with the daemon; the floating class comes back
+    # with the desktop. So a restored popup must be found by its class,
+    # or displaying its buffer splits the frame a SECOND time and the
+    # layout grows a pane every time you open the list.
+    test "a popup with no frame local is still the popup, not a new split", %{buf: buf} do
+      {:ok, _} = Aimax.Core.Session.eval(~s{(display-buffer "*messages*")})
+      assert %{type: :split} = Editor.render_state().tree
+      {:ok, w} = Aimax.Core.Session.eval("(active-window)")
+
+      # this is what a restore leaves behind: the class, and no local
+      {:ok, _} = Aimax.Core.Session.eval("(set-frame-local! 'popup-window #f)")
+      assert {:ok, ^w} = Aimax.Core.Session.eval("(popup-window)")
+      assert {:ok, "#t"} = Aimax.Core.Session.eval("(popup-open?)")
+
+      # displaying it again reuses that window instead of splitting
+      {:ok, _} = Aimax.Core.Session.eval(~s{(display-buffer "*messages*")})
+      assert %{type: :split, children: [%{type: :leaf}, %{type: :leaf}]} =
+               Editor.render_state().tree
+
+      press(["C-`"])
+      assert %{type: :leaf} = Editor.render_state().tree
+      assert Editor.current_buffer() == buf
+    end
+
     # popper's toggle from outside the popup dismisses it and leaves your
     # focus where it is — you never went in, so there is nothing to return
     test "C-` from another window closes the popup without moving focus", %{buf: buf} do

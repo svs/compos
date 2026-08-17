@@ -2857,11 +2857,18 @@
 ;; with the desktop — so a restored popup is still a popup, and `C-\`` and
 ;; `C-M-\`` still reach it. Read the class when the local has nothing
 ;; live to say.
+;; the class carries the side too — "popup popup-right" — so read it as
+;; the prefix it is. Read for equality, this never matched, the frame
+;; local was the only answer, and a restored popup split the frame a
+;; second time every time you opened it.
+(define (popup--class? buf)
+  (let ((c (buffer-local buf 'window-class)))
+    (and c (string-prefix? "popup" c))))
+
 (define (popup--by-class)
   (let loop ((ws (window-list)))
     (cond ((null? ws) #f)
-          ((equal? (buffer-local (cadr (car ws)) 'window-class) "popup")
-           (car (car ws)))
+          ((popup--class? (cadr (car ws))) (car (car ws)))
           (else (loop (cdr ws))))))
 
 (define (popup-window)
@@ -2922,13 +2929,17 @@
 ;; buffer stops floating, the window goes, and you come back. You come
 ;; back only if you were IN the popup — `C-\`` from another window
 ;; dismisses it and leaves your focus alone.
+;; The window is read ONCE. popup-window can answer from the class, and
+;; the first step clears the class — read again after it, the answer is
+;; #f and the window never goes.
 (define (popup-close!)
-  (let ((mine? (equal? (active-window) (popup-window)))
-        (buf (window-buffer (popup-window))))
+  (let* ((w (popup-window))
+         (mine? (equal? (active-window) w))
+         (buf (and w (window-buffer w))))
     ;; the buffer stops floating the moment it stops being the popup, or
     ;; it would float again in an ordinary window
     (when buf (popup-float! buf #f))
-    (delete-window-id! (popup-window))
+    (when w (delete-window-id! w))
     (set-frame-local! 'popup-window #f)
     (if mine? (popup-return!) (popup-forget!))))
 

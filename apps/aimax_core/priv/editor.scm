@@ -2811,6 +2811,55 @@
        (window-exists? (popup-window))
        (not (null? (cdr (window-list))))))
 
+;; Where the popup came from. A popup is a visit, not a move: when it
+;; closes you are back in the window you left, in the buffer it showed,
+;; at the point you left. The record is (WINDOW BUFFER POINT), and the
+;; frame keeps one — a popup shows one buffer at a time.
+;;
+;; Read the buffer from the window, never from (current-buffer): a popup
+;; can open from inside a prompt, and (current-buffer) answers with the
+;; minibuffer while one is open.
+;;
+;; The record lives in memory and dies with the daemon. A popup restored
+;; from the desktop has nothing to go back to, so its close only closes.
+(define (popup-remember!)
+  (let ((w (active-window)))
+    ;; a popup that shows the next popup does not move you: the window
+    ;; you came from is still the one the first popup remembered
+    (when (not (equal? w (popup-window)))
+      (set-frame-local! 'popup-return
+        (list w (window-buffer w) (buffer-point (window-buffer w)))))))
+
+(define (popup-forget!) (set-frame-local! 'popup-return #f))
+
+;; Go back. The window can be gone (you split or closed it from inside
+;; the popup) and the buffer can be dead (ibuffer killed it) — each step
+;; asks before it acts, and a step that cannot run leaves the rest alone.
+(define (popup-return!)
+  (let ((r (frame-local 'popup-return)))
+    (popup-forget!)
+    (when (and r (window-exists? (car r)))
+      (select-window! (car r))
+      (let ((buf (cadr r)))
+        (when (and buf (buffer-exists? buf))
+          (when (not (equal? (window-buffer (car r)) buf))
+            (switch-to-buffer! buf))
+          (goto-char! (caddr r)))))))
+
+;; Closing the popup is three things, every time and in this order: the
+;; buffer stops floating, the window goes, and you come back. You come
+;; back only if you were IN the popup — `C-\`` from another window
+;; dismisses it and leaves your focus alone.
+(define (popup-close!)
+  (let ((mine? (equal? (active-window) (popup-window)))
+        (buf (window-buffer (popup-window))))
+    ;; the buffer stops floating the moment it stops being the popup, or
+    ;; it would float again in an ordinary window
+    (when buf (popup-float! buf #f))
+    (delete-window-id! (popup-window))
+    (set-frame-local! 'popup-window #f)
+    (if mine? (popup-return!) (popup-forget!))))
+
 ;; A popup FLOATS, and only visibly: it stays an ordinary window in the
 ;; tree, so every window command still reaches it. The class takes its
 ;; split out of the flow, so the window it covers keeps the whole frame
@@ -2840,6 +2889,8 @@
 (define (popup-show name)
   (let ((side (display-param name 'side))
         (size (display-param name 'size)))
+    ;; before the focus moves: this is the place you come back to
+    (popup-remember!)
     (set-frame-local! 'popup-buffer name)
     (popup-float! name side size)
     (if (popup-open?)
@@ -2885,12 +2936,7 @@
 (define-command "popup-toggle" "Toggle the floating popup window"
   (lambda ()
     (if (popup-open?)
-        (begin
-          (delete-window-id! (popup-window))
-          (set-frame-local! 'popup-window #f)
-          ;; the buffer stops floating the moment it stops being the
-          ;; popup, or it would float again in an ordinary window
-          (if (popup-buffer) (popup-float! (popup-buffer) #f)))
+        (popup-close!)
         (if (popup-buffer)
             (popup-show (popup-buffer))
             (message "No popup buffer yet")))))
@@ -2905,6 +2951,8 @@
         (let ((buf (current-buffer)))
           (popup-float! buf #f)
           (set-frame-local! 'popup-window #f)
+          ;; it is a window now, not a visit — there is nothing to go back from
+          (popup-forget!)
           (message (string-append buf " is an ordinary window now"))))))
 
 ;; q in special buffers: close the popup, or kill this buffer and go back.
@@ -2917,10 +2965,7 @@
   (lambda ()
     (cond
       ((and (popup-open?) (equal? (active-window) (popup-window)))
-        (begin
-          (popup-float! (current-buffer) #f)
-          (delete-window-id! (popup-window))
-          (set-frame-local! 'popup-window #f)))
+        (popup-close!))
       (else
         (let ((cur (current-buffer)))
           ;; a file with edits you did not save is not a listing: say so and
@@ -5313,10 +5358,24 @@
   (lambda () (split-window! 'v)))
 (define-command "split-window-right" "Split the window in two, side by side"
   (lambda () (split-window! 'h)))
+;; `C-x 0` in the popup closes the popup: same window, same close, so the
+;; same return. Winner still records the arrangement — popup-close! calls
+;; delete-window-id!, which winner does not save, so save it here.
 (define-command "delete-window" "Delete the selected window"
-  (lambda () (if (not (delete-window!)) (message "Attempt to delete sole window"))))
+  (lambda ()
+    (if (and (popup-open?) (equal? (active-window) (popup-window)))
+        (begin (winner-save!) (popup-close!))
+        (if (not (delete-window!)) (message "Attempt to delete sole window")))))
+;; `C-x 1` from anywhere makes one window, and the popup is not one of
+;; them: it stops being a popup rather than leaving a return nobody can use
 (define-command "delete-other-windows" "Make the selected window the only one"
-  (lambda () (delete-other-windows!)))
+  (lambda ()
+    (when (popup-open?)
+      (let ((buf (window-buffer (popup-window))))
+        (when buf (popup-float! buf #f)))
+      (set-frame-local! 'popup-window #f)
+      (popup-forget!))
+    (delete-other-windows!)))
 
 ;; frames: one per attached browser. Deleting the selected frame while its
 ;; browser is still connected resets it to a fresh single window (the client

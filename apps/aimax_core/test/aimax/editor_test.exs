@@ -1394,6 +1394,78 @@ defmodule Aimax.EditorTest do
       Aimax.Core.Proc.kill("*shell*")
     end
 
+    # A popup is a visit, not a move: closing it puts you back in the
+    # window you left, in the buffer it showed, at the point you left.
+    test "a popup returns the window, the buffer and point", %{buf: buf} do
+      other = "test-other-#{System.unique_integer([:positive])}"
+      {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-create "#{other}")})
+      Buffer.insert(other, "one\ntwo\nthree\n")
+
+      # two windows: the popup must come back to the RIGHT one, and the
+      # right one is not the first in the tree
+      press(["C-x", "3"])
+      press(["C-x", "o"])
+      {:ok, _} = Aimax.Core.Session.eval(~s{(switch-to-buffer! "#{other}")})
+      Buffer.goto(other, 4)
+      {:ok, from} = Aimax.Core.Session.eval("(active-window)")
+
+      {:ok, _} = Aimax.Core.Session.eval(~s{(display-buffer "*messages*")})
+      assert Editor.current_buffer() == "*messages*"
+
+      # something displaces the window we came from while the popup is up
+      # (an ibuffer preview does exactly this)
+      {:ok, _} =
+        Aimax.Core.Session.eval(
+          ~s{(let ((me (active-window))) (select-window! #{from})
+                  (switch-to-buffer! "#{buf}") (select-window! me))}
+        )
+
+      Aimax.Core.Session.run_command("quit-window")
+
+      assert {:ok, ^from} = Aimax.Core.Session.eval("(active-window)")
+      assert Editor.current_buffer() == other
+      assert Buffer.point(other) == 4
+
+      Editor.delete_other_windows()
+      {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-kill! "#{other}")})
+    end
+
+    # popper's toggle from outside the popup dismisses it and leaves your
+    # focus where it is — you never went in, so there is nothing to return
+    test "C-` from another window closes the popup without moving focus", %{buf: buf} do
+      press(["C-x", "3"])
+      {:ok, from} = Aimax.Core.Session.eval("(active-window)")
+
+      {:ok, _} = Aimax.Core.Session.eval(~s{(display-buffer "*messages*")})
+      {:ok, _} = Aimax.Core.Session.eval("(select-window! #{from})")
+      assert Editor.current_buffer() == buf
+
+      press(["C-`"])
+      assert {:ok, ^from} = Aimax.Core.Session.eval("(active-window)")
+      assert Editor.current_buffer() == buf
+      Editor.delete_other_windows()
+    end
+
+    # C-x 0 in the popup closes the popup: same window, same return
+    test "C-x 0 inside a popup returns where the popup came from", %{buf: buf} do
+      press(["C-x", "3"])
+      press(["C-x", "o"])
+      {:ok, from} = Aimax.Core.Session.eval("(active-window)")
+
+      {:ok, _} = Aimax.Core.Session.eval(~s{(display-buffer "*messages*")})
+      assert Editor.current_buffer() == "*messages*"
+
+      press(["C-x", "0"])
+      assert {:ok, ^from} = Aimax.Core.Session.eval("(active-window)")
+      assert Editor.current_buffer() == buf
+
+      # and it stopped floating, or it would float in an ordinary window
+      assert {:ok, "#f"} =
+               Aimax.Core.Session.eval(~s{(buffer-local "*messages*" 'window-class)})
+
+      Editor.delete_other_windows()
+    end
+
     test "dired q quits back to the previous buffer", %{buf: buf} do
       root = Path.join(System.tmp_dir!(), "aimax-q-#{System.unique_integer([:positive])}")
       File.mkdir_p!(root)

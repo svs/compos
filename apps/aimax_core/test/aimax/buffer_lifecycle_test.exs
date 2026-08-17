@@ -1,0 +1,139 @@
+defmodule Aimax.BufferLifecycleTest do
+  use ExUnit.Case, async: false
+
+  alias Aimax.Core.{Buffer, BufferStore, Editor}
+
+  defp unique(label), do: "*#{label}-#{System.unique_integer([:positive])}*"
+
+  defp eventually(fun, tries \\ 100) do
+    cond do
+      fun.() ->
+        true
+
+      tries == 0 ->
+        false
+
+      true ->
+        Process.sleep(10)
+        eventually(fun, tries - 1)
+    end
+  end
+
+  defp evict(name) do
+    :ok = Buffer.checkpoint_now(name)
+    [{pid, _}] = Registry.lookup(Aimax.Core.BufferRegistry, name)
+    :ok = DynamicSupervisor.terminate_child(Aimax.Core.BufferSupervisor, pid)
+  end
+
+  test "a buffer owns its checkpoint; reads stay dormant and selection wakes literal state" do
+    name = unique("checkpoint")
+    {:ok, ^name} = Aimax.Core.create_buffer(name)
+    Buffer.append(name, "literal transcript", source: :editor)
+    Buffer.goto(name, 7)
+    Buffer.set_local(name, "mode-name", "Fundamental")
+    id = Buffer.eviction_info(name).id
+
+    evict(name)
+    assert eventually(fn -> not Buffer.exists?(name) end)
+    assert BufferStore.known?(name)
+
+    assert Buffer.text(name) == "literal transcript"
+    assert Buffer.point(name) == 7
+    refute Buffer.exists?(name)
+
+    Editor.set_window_buffer(name)
+    assert Buffer.exists?(name)
+    assert Buffer.eviction_info(name).id == id
+    Editor.set_window_buffer("*scratch*")
+    Aimax.Core.kill_buffer(name)
+  end
+
+  test "rename moves the file and carries stable buffer identity, windows, and history" do
+    root = Path.join(System.tmp_dir!(), "aimax-rename-#{System.unique_integer([:positive])}")
+    source = Path.join(root, "old.txt")
+    destination = Path.join(root, "nested/new.txt")
+    File.mkdir_p!(root)
+    File.write!(source, "hello")
+    {:ok, ^source} = Aimax.Core.open_file(source)
+    Editor.set_window_buffer(source)
+    id = Buffer.eviction_info(source).id
+
+    assert {:ok, ^destination} = Aimax.Core.rename_file(source, destination)
+    refute File.exists?(source)
+    assert File.read!(destination) == "hello"
+    refute Buffer.exists?(source)
+    assert Buffer.exists?(destination)
+    assert Buffer.path(destination) == destination
+    assert Buffer.eviction_info(destination).id == id
+    assert Editor.current_buffer() == destination
+    assert destination in Editor.buffer_mru()
+
+    Editor.set_window_buffer("*scratch*")
+    Aimax.Core.kill_buffer(destination)
+    File.rm_rf!(root)
+  end
+
+  test "idle buffers leave memory but remain in history and wake on selection" do
+    old = Application.get_env(:aimax_core, :buffer_idle_timeout_ms)
+    Application.put_env(:aimax_core, :buffer_idle_timeout_ms, 30)
+
+    on_exit(fn ->
+      Application.put_env(:aimax_core, :buffer_idle_timeout_ms, old || 24 * 60 * 60 * 1_000)
+    end)
+
+    name = unique("idle")
+    {:ok, ^name} = Aimax.Core.create_buffer(name)
+    Buffer.append(name, "sleeping", source: :editor)
+    Buffer.touch(name)
+
+    assert eventually(fn -> not Buffer.exists?(name) end)
+    assert name in Editor.buffer_mru()
+    refute Buffer.exists?(name)
+
+    Editor.set_window_buffer(name)
+    assert Buffer.exists?(name)
+    assert Buffer.text(name) == "sleeping"
+
+    Editor.set_window_buffer("*scratch*")
+    Aimax.Core.kill_buffer(name)
+  end
+
+  test "intentional kill removes the durable checkpoint and history entry" do
+    name = unique("kill")
+    {:ok, ^name} = Aimax.Core.create_buffer(name)
+    Buffer.append(name, "gone", source: :editor)
+    :ok = Buffer.checkpoint_now(name)
+    assert BufferStore.known?(name)
+
+    :ok = Aimax.Core.kill_buffer(name)
+    refute BufferStore.known?(name)
+    refute name in Editor.buffer_mru()
+  end
+
+  test "renaming a dormant file updates its catalog without retaining a process" do
+    root =
+      Path.join(System.tmp_dir!(), "aimax-dormant-rename-#{System.unique_integer([:positive])}")
+
+    source = Path.join(root, "before.txt")
+    destination = Path.join(root, "after.txt")
+    File.mkdir_p!(root)
+    File.write!(source, "dormant")
+    {:ok, ^source} = Aimax.Core.open_file(source)
+    id = Buffer.eviction_info(source).id
+    evict(source)
+    assert eventually(fn -> not Buffer.exists?(source) end)
+
+    assert {:ok, ^destination} = Aimax.Core.rename_file(source, destination)
+    assert eventually(fn -> not Buffer.exists?(destination) end)
+    refute BufferStore.known?(source)
+    assert BufferStore.known?(destination)
+
+    assert Buffer.text(destination) == "dormant"
+    refute Buffer.exists?(destination)
+    Editor.set_window_buffer(destination)
+    assert Buffer.eviction_info(destination).id == id
+    Editor.set_window_buffer("*scratch*")
+    Aimax.Core.kill_buffer(destination)
+    File.rm_rf!(root)
+  end
+end

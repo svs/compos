@@ -458,6 +458,8 @@ defmodule Aimax.Core.Session do
       "eval-string" => "(eval-string SRC) — evaluate SRC as Scheme; return the last value.",
       "with-edit-author" =>
         "(with-edit-author AUTHOR THUNK) — run THUNK; buffer edits it makes are attributed to the string AUTHOR.",
+      "with-current-buffer" =>
+        "(with-current-buffer BUF THUNK) — run THUNK with BUF current without displaying it or changing any window.",
       "eval-string-safe" =>
         "(eval-string-safe SRC) — evaluate SRC; return (ok VAL) or (error MSG).",
       "symbol-value" => "(symbol-value 'NAME) — return the global value of the symbol.",
@@ -470,7 +472,7 @@ defmodule Aimax.Core.Session do
         "(eval-region BUF START END) — evaluate the text between byte offsets START and END.",
       "eval-buffer" => "(eval-buffer BUF) — evaluate the whole buffer as Scheme.",
       "on-change!" =>
-        "(on-change! BUF CB) — call (CB POS INSERTED DELETED-LEN SOURCE) on changes; return an id.",
+        "(on-change! BUF CB ['eager]) — call (CB POS INSERTED DELETED-LEN SOURCE) on changes; fires only while BUF is visible or in the current buffer's group, unless 'eager; return an id.",
       "remove-on-change!" => "(remove-on-change! ID) — remove a change handler by its id.",
       "with-window-buffer" =>
         "(with-window-buffer THUNK) — run THUNK with the window's buffer current, not the prompt.",
@@ -1062,6 +1064,21 @@ defmodule Aimax.Core.Session do
             else: Process.delete(:aimax_edit_author)
         end
       end,
+      # Emacs' logical current-buffer binding, deliberately separate from
+      # window display. Tool evaluation uses this so visit/switch operations
+      # can establish the buffer commands act on without hijacking the user's
+      # selected window.
+      "with-current-buffer" => fn [buffer, thunk], store ->
+        buffer = to_string(buffer)
+
+        unless Aimax.Core.Buffer.exists?(buffer) do
+          raise Aimax.Scheme.Eval.Error, message: "no such buffer: #{buffer}"
+        end
+
+        Aimax.Core.Frame.with_buffer(buffer, fn ->
+          Aimax.Scheme.Eval.apply_fn(thunk, [], store)
+        end)
+      end,
       # (eval-string-safe SRC) -> (ok VAL) | (error MSG) — the catch this
       # dialect lacks; the eval-scheme tool's did-you-mean feedback needs to
       # observe the error instead of aborting the whole handler
@@ -1134,14 +1151,19 @@ defmodule Aimax.Core.Session do
       # :editor-source primitives and be idempotent, or they loop.
       # The Reactor handler runs in a Task, so calling back into this
       # GenServer just queues behind the triggering eval.
-      "on-change!" => fn [buf, callback] ->
+      # Visibility: the rule fires only while BUF is on screen or in the
+      # current buffer's group; other changes park and fire once when the
+      # buffer comes back into scope. (on-change! BUF FN 'eager) opts out
+      # for work whose output leaves the buffer.
+      "on-change!" => fn [buf, callback | rest] ->
         {:ok, id} =
           Aimax.Core.Reactor.on_change(
             buf,
             :any,
             fn changes -> apply_callback(callback, change_args(changes)) end,
             debounce: 30,
-            sources: :all
+            sources: :all,
+            eager: Enum.any?(rest, &match?({:sym, "eager"}, &1))
           )
 
         # the Reactor holds the callback inside an opaque fun — root it for

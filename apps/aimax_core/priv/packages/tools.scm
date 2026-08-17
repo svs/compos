@@ -44,12 +44,14 @@
     "(customize-save! 'name value), then confirm briefly what you "
     "changed. IMPORTANT: the "
     "language is ai-max's own small Scheme, NOT Emacs Lisp — elisp names "
-    "like get-buffer, set-buffer, goto-char, point-max, insert, "
-    "save-excursion, with-current-buffer do not exist. Core API: "
+    "like get-buffer, set-buffer, goto-char, point-max, insert and "
+    "save-excursion do not exist. Core API: "
     "(buffer-list) names; (buffer-text NAME); (buffer-append! NAME TEXT) "
     "append to any buffer — the usual way to add text; (buffer-create NAME); "
     "(buffer-replace! NAME OLD NEW) exact unique replacement in a live "
-    "buffer; (visit PATH) opens a file; (switch-to-buffer! NAME); "
+    "buffer; (find-file PATH) loads a file without displaying it; "
+    "(switch-to-buffer! NAME) changes only the tool's internal current "
+    "buffer; (with-current-buffer NAME THUNK) scopes that internal switch; "
     "(current-buffer); "
     "(insert! TEXT) at point in the current buffer; (message TEXT) echoes; "
     "(run-command \"name\") runs any M-x command. File buffers are named by "
@@ -195,7 +197,11 @@
   (list (list 'code "string" "Scheme source to evaluate"))
   (lambda (args)
     (let* ((code (custom--plist-get args 'code))
-           (r (eval-string-safe code)))
+           ;; A tool has a logical current buffer, never a claim on the
+           ;; user's selected window. Inside this binding switch-to-buffer!
+           ;; retargets subsequent point-relative operations without display.
+           (r (with-current-buffer (current-buffer)
+                (lambda () (eval-string-safe code)))))
       (if (equal? (car r) 'ok)
           (value->string (cadr r))
           (string-append "error: " (cadr r) (tool--error-hint (cadr r) code))))))

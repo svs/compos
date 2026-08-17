@@ -266,10 +266,20 @@
   (let* ((buf (agent-buf slug))
          (w (buffer-local buf 'agent-waiting)))
     (when w
-      (buffer-delete-range! buf (car w) (- (car (cdr w)) (car w)))
+      (let* ((start (car w))
+             (end (car (cdr w)))
+             (size (buffer-size buf)))
+        ;; An obsolete range is harmless runtime metadata. It must never
+        ;; take the chat buffer process down or delete text that replaced the
+        ;; waiting line while events crossed.
+        (when (and (>= start 0) (>= end start) (<= end size)
+                   (equal? (substring-bytes (buffer-text buf) start end)
+                           "⋯ thinking\n"))
+          (buffer-delete-range! buf start (- end start))))
       (agent-block-drop-kind! buf "waiting")
       (buffer-set-local! buf 'agent-waiting #f)
-      (buffer-set-local! buf 'agent-saved-mark (agent-mark slug)))))
+      (buffer-set-local! buf 'agent-saved-mark
+        (min (agent-mark slug) (buffer-size buf))))))
 
 ;; event kinds that count as the turn having produced something visible —
 ;; a turn-end after none of them is a silent turn

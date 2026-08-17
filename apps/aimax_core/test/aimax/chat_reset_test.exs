@@ -21,11 +21,28 @@ defmodule Aimax.ChatResetTest do
 
   use ExUnit.Case
 
-  alias Aimax.Core.Session
+  alias Aimax.Core.{Buffer, Session}
 
   defp eval!(src) do
     {:ok, printed} = Session.eval(src)
     printed
+  end
+
+  test "a stale legacy waiting range is discarded without touching the chat" do
+    name = "*chat:stale-waiting*"
+    on_exit(fn -> if Buffer.exists?(name), do: Aimax.Core.kill_buffer(name) end)
+
+    eval!(~s[(begin
+      (buffer-create "#{name}")
+      (buffer-append! "#{name}" "conversation survives")
+      (buffer-set-local! "#{name}" 'agent-saved-mark (buffer-size "#{name}"))
+      (buffer-set-local! "#{name}" 'chat-waiting '(46161 46169))
+      (buffer-set-local! "#{name}" 'agent-blocks '((46161 46169 "waiting")))
+      (chat-clear-waiting! "#{name}"))])
+
+    assert Buffer.exists?(name)
+    assert Buffer.text(name) == "conversation survives"
+    assert Buffer.get_local(name, "chat-waiting") in [nil, false]
   end
 
   test "a rich group chat resets to its meta card, keeping the group" do

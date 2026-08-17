@@ -24,6 +24,10 @@ config :aimax_ui, Aimax.Ui.Endpoint,
 # which is the whole point: an app's JavaScript can never read the editor
 config :aimax_ui, app_port: 4005
 
+# Dormant buffers remain durable and in history; only their live processes
+# are released. Zero disables idle eviction.
+config :aimax_core, buffer_idle_timeout_ms: 24 * 60 * 60 * 1_000
+
 config :phoenix, :json_library, Jason
 
 # AIMAX_VERIFY=1 mix run --no-halt: an isolated daemon (own port, home,
@@ -52,6 +56,7 @@ if config_env() == :test do
     desktop_autorestore: false,
     # no models.dev fetches from tests
     llmdb_auto: false
+
   config :logger, level: :warning
 
   config :aimax_ui, Aimax.Ui.Endpoint,

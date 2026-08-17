@@ -54,7 +54,10 @@ defmodule Aimax.Core.Editor do
 
   # readers
   def snapshot(fid \\ nil), do: GenServer.call(__MODULE__, {:snapshot, fid(fid)})
-  def current_buffer(fid \\ nil), do: GenServer.call(__MODULE__, {:current_buffer, fid(fid)})
+  def current_buffer(fid \\ nil) do
+    Aimax.Core.Frame.buffer_context() ||
+      GenServer.call(__MODULE__, {:current_buffer, fid(fid)})
+  end
   def lookup_key(seq, fid \\ nil), do: GenServer.call(__MODULE__, {:lookup_key, seq, fid(fid)})
 
   @doc """
@@ -241,6 +244,15 @@ defmodule Aimax.Core.Editor do
   @doc "A buffer is dying: swap every window showing it (any frame) onto a live one."
   def release_buffer(buffer), do: GenServer.call(__MODULE__, {:release_buffer, buffer})
 
+  @doc """
+  What is on screen: `%{visible: buffers-in-any-window, current: each
+  frame's active-window buffer}`. The Reactor gates background work on it.
+  """
+  def visible_buffers, do: GenServer.call(__MODULE__, :visible_buffers)
+
+  @doc "Carry windows, keymaps, and MRU state across a buffer rename."
+  def rename_buffer(old, new), do: GenServer.call(__MODULE__, {:rename_buffer, old, new})
+
   def set_window_buffer(buffer, fid \\ nil),
     do: GenServer.call(__MODULE__, {:set_window_buffer, buffer, fid(fid)})
 
@@ -332,7 +344,7 @@ defmodule Aimax.Core.Editor do
        remaps: %{},
        last_command: "",
        undo_exempt: MapSet.new(["undo"]),
-       mru: [@scratch],
+       mru: Enum.uniq([@scratch | Aimax.Core.BufferStore.history()]),
        # frame id => text a command wants on that client's OS clipboard
        clips: %{}
      }}
@@ -439,7 +451,8 @@ defmodule Aimax.Core.Editor do
         {:reply, {:error, :no_window}, state}
 
       f ->
-        unless Aimax.Core.Buffer.exists?(buffer), do: Aimax.Core.create_buffer(buffer)
+        Aimax.Core.ensure_buffer(buffer)
+        Buffer.touch(buffer)
         leaf = find_leaf(f.tree, win_id)
         tree = replace_leaf(f.tree, win_id, %{leaf | buffer: buffer, top: 0, manual: false})
         mru = Enum.take([buffer | List.delete(state.mru, buffer)], 50)
@@ -701,6 +714,26 @@ defmodule Aimax.Core.Editor do
     end
   end
 
+  def handle_call(:visible_buffers, _from, state) do
+    visible =
+      state.frames
+      |> Enum.flat_map(fn {_id, f} -> visible_buffers(f.tree) end)
+      |> Enum.uniq()
+
+    current =
+      state.frames
+      |> Enum.map(fn {_id, f} ->
+        case find_leaf(f.tree, f.active) do
+          %{buffer: b} -> b
+          _ -> nil
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    {:reply, %{visible: visible, current: current}, state}
+  end
+
   # swap every window off BUFFER (it is being killed) onto the most
   # recent live buffer — windows must never point at the dead
   def handle_call({:release_buffer, buffer}, _from, state) do
@@ -722,6 +755,19 @@ defmodule Aimax.Core.Editor do
       end)
 
     changed(:ok, %{state | frames: frames, mru: List.delete(state.mru, buffer)})
+  end
+
+  def handle_call({:rename_buffer, old, new}, _from, state) do
+    frames = Map.new(state.frames, fn {id, f} -> {id, %{f | tree: swap_buffer(f.tree, old, new)}} end)
+
+    keymaps =
+      state.local_keymaps
+      |> Map.put(new, Map.get(state.local_keymaps, old, %{}))
+      |> Map.delete(old)
+
+    remaps = state.remaps |> Map.put(new, Map.get(state.remaps, old, %{})) |> Map.delete(old)
+    mru = state.mru |> Enum.map(&if(&1 == old, do: new, else: &1)) |> Enum.uniq()
+    changed(:ok, %{state | frames: frames, local_keymaps: keymaps, remaps: remaps, mru: mru})
   end
 
   def handle_call({:mouse_region, id, al, ac, fl, fc}, _from, state) do
@@ -941,8 +987,9 @@ defmodule Aimax.Core.Editor do
   end
 
   def handle_call(:buffer_mru, _from, state) do
-    live = Enum.filter(state.mru, fn b -> is_binary(b) and Buffer.exists?(b) end)
-    rest = Aimax.Core.list_buffers() -- live
+    known = MapSet.new(Aimax.Core.buffer_names())
+    live = Enum.filter(state.mru, fn b -> is_binary(b) and MapSet.member?(known, b) end)
+    rest = Aimax.Core.buffer_names() -- live
 
     # space-prefixed buffers are internal (the minibuf), hidden like Emacs
     {:reply, Enum.reject(live ++ Enum.sort(rest), &String.starts_with?(&1, " ")), state}
@@ -954,7 +1001,7 @@ defmodule Aimax.Core.Editor do
     rows =
       Enum.flat_map(state.mru, fn
         {:group, g} -> [["group", g]]
-        b when is_binary(b) -> if Buffer.exists?(b), do: [["buffer", b]], else: []
+        b when is_binary(b) -> if b in Aimax.Core.buffer_names(), do: [["buffer", b]], else: []
       end)
 
     {:reply, rows, state}
@@ -1202,7 +1249,8 @@ defmodule Aimax.Core.Editor do
   end
 
   def handle_call({:set_window_buffer, buffer, fid}, _from, state) do
-    unless Aimax.Core.Buffer.exists?(buffer), do: Aimax.Core.create_buffer(buffer)
+    Aimax.Core.ensure_buffer(buffer)
+    Buffer.touch(buffer)
     f = frame(state, fid)
     leaf = find_leaf(f.tree, f.active)
     tree = replace_leaf(f.tree, f.active, %{leaf | buffer: buffer, top: 0, manual: false})
@@ -1211,7 +1259,9 @@ defmodule Aimax.Core.Editor do
   end
 
   def handle_call({:preview_buffer, buffer, fid}, _from, state) do
-    if Aimax.Core.Buffer.exists?(buffer) do
+    if Aimax.Core.Buffer.exists?(buffer) or Aimax.Core.BufferStore.known?(buffer) do
+      Aimax.Core.ensure_buffer(buffer)
+      Buffer.touch(buffer)
       f = frame(state, fid)
       leaf = find_leaf(f.tree, f.active)
       tree = replace_leaf(f.tree, f.active, %{leaf | buffer: buffer, top: 0, manual: false})
@@ -1232,7 +1282,8 @@ defmodule Aimax.Core.Editor do
     {tree, next_win} = build_tree(spec, state.next_win)
 
     Enum.each(leaf_ids_buffers(tree), fn {_id, buffer} ->
-      unless Aimax.Core.Buffer.exists?(buffer), do: Aimax.Core.create_buffer(buffer)
+      Aimax.Core.ensure_buffer(buffer)
+      Buffer.touch(buffer)
     end)
 
     # lay saved per-window points down; the active window's swaps into the
@@ -1281,8 +1332,11 @@ defmodule Aimax.Core.Editor do
 
   defp put_frame(state, f), do: %{state | frames: Map.put(state.frames, f.id, f)}
 
-  defp bump_mru(state, buffer),
-    do: %{state | mru: Enum.take([buffer | List.delete(state.mru, buffer)], 50)}
+  defp bump_mru(state, buffer) do
+    if is_binary(buffer), do: Aimax.Core.BufferStore.touch(buffer)
+    if is_binary(buffer) and Buffer.exists?(buffer), do: Buffer.touch(buffer)
+    %{state | mru: Enum.take([buffer | List.delete(state.mru, buffer)], 500)}
+  end
 
   defp bump_frame(state, fid),
     do: %{state | frame_mru: [fid | List.delete(state.frame_mru, fid)]}

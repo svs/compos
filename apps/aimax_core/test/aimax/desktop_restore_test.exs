@@ -19,10 +19,25 @@ defmodule Aimax.DesktopRestoreTest do
 
   defp eventually(fun, tries \\ 50) do
     cond do
-      fun.() -> true
-      tries == 0 -> false
-      true -> (Process.sleep(20); eventually(fun, tries - 1))
+      fun.() ->
+        true
+
+      tries == 0 ->
+        false
+
+      true ->
+        Process.sleep(20)
+        eventually(fun, tries - 1)
     end
+  end
+
+  # A restart/idle eviction keeps the buffer's checkpoint. `kill-buffer` is
+  # intentionally different now: it deletes that durable identity.
+  defp evict(name) do
+    :ok = Buffer.checkpoint_now(name)
+    [{pid, _}] = Registry.lookup(Aimax.Core.BufferRegistry, name)
+    :ok = DynamicSupervisor.terminate_child(Aimax.Core.BufferSupervisor, pid)
+    assert eventually(fn -> not Buffer.exists?(name) end)
   end
 
   setup do
@@ -53,8 +68,7 @@ defmodule Aimax.DesktopRestoreTest do
 
     assert :ok = Desktop.save_now()
     Editor.set_window_buffer("*scratch*")
-    Aimax.Core.kill_buffer(name)
-    assert eventually(fn -> not Buffer.exists?(name) end)
+    evict(name)
 
     assert :ok = Desktop.restore_now()
     assert Buffer.exists?(name)
@@ -76,8 +90,7 @@ defmodule Aimax.DesktopRestoreTest do
 
     assert :ok = Desktop.save_now()
     Editor.set_window_buffer("*scratch*")
-    Aimax.Core.kill_buffer(name)
-    assert eventually(fn -> not Buffer.exists?(name) end)
+    evict(name)
 
     assert :ok = Desktop.restore_now()
     assert Buffer.exists?(name)
@@ -100,8 +113,7 @@ defmodule Aimax.DesktopRestoreTest do
 
     assert :ok = Desktop.save_now()
     Editor.set_window_buffer("*scratch*")
-    Aimax.Core.kill_buffer(name)
-    assert eventually(fn -> not Buffer.exists?(name) end)
+    evict(name)
     assert :ok = Desktop.restore_now()
 
     leaf = Editor.render_state().tree |> leaves() |> Enum.find(&(&1.buffer == name))
@@ -174,7 +186,7 @@ defmodule Aimax.DesktopRestoreTest do
 
     assert :ok = Desktop.save_now()
     Editor.set_window_buffer("*scratch*")
-    Aimax.Core.kill_buffer(name)
+    evict(name)
     assert eventually(fn -> not Buffer.exists?(name) end)
     assert :ok = Desktop.restore_now()
 
@@ -203,7 +215,7 @@ defmodule Aimax.DesktopRestoreTest do
 
     assert :ok = Desktop.save_now()
     Editor.set_window_buffer("*scratch*")
-    Aimax.Core.kill_buffer(path)
+    evict(path)
     assert eventually(fn -> not Buffer.exists?(path) end)
 
     assert :ok = Desktop.restore_now()
@@ -254,13 +266,19 @@ defmodule Aimax.DesktopRestoreTest do
   # desktop and lays back over what visit read from disk
   test "unsaved edits in a file buffer survive restore" do
     path = Path.join(System.tmp_dir!(), "dr-unsaved-#{System.unique_integer([:positive])}.md")
+
+    on_exit(fn ->
+      Editor.set_window_buffer("*scratch*")
+      Aimax.Core.kill_buffer(path)
+    end)
+
     File.write!(path, "on disk\n")
     eval!(~s{(visit "#{path}")})
     Buffer.append(path, "unsaved tail", source: :editor)
     assert Buffer.modified?(path)
 
     assert :ok = Desktop.save_now()
-    eval!(~s{(buffer-kill! "#{path}")})
+    evict(path)
     assert :ok = Desktop.restore_now()
 
     assert Buffer.text(path) =~ "unsaved tail"
@@ -272,12 +290,18 @@ defmodule Aimax.DesktopRestoreTest do
   # means the texts match, nothing is replaced, and the buffer stays clean
   test "a clean file buffer restores clean" do
     path = Path.join(System.tmp_dir!(), "dr-clean-#{System.unique_integer([:positive])}.md")
+
+    on_exit(fn ->
+      Editor.set_window_buffer("*scratch*")
+      Aimax.Core.kill_buffer(path)
+    end)
+
     File.write!(path, "saved text\n")
     eval!(~s{(visit "#{path}")})
     refute Buffer.modified?(path)
 
     assert :ok = Desktop.save_now()
-    eval!(~s{(buffer-kill! "#{path}")})
+    evict(path)
     assert :ok = Desktop.restore_now()
 
     assert Buffer.text(path) == "saved text\n"
@@ -289,12 +313,18 @@ defmodule Aimax.DesktopRestoreTest do
   # copy of that work, so the buffer comes back anyway
   test "unsaved edits survive even when the file vanished" do
     path = Path.join(System.tmp_dir!(), "dr-gone-#{System.unique_integer([:positive])}.md")
+
+    on_exit(fn ->
+      Editor.set_window_buffer("*scratch*")
+      Aimax.Core.kill_buffer(path)
+    end)
+
     File.write!(path, "doomed\n")
     eval!(~s{(visit "#{path}")})
     Buffer.append(path, "last words", source: :editor)
 
     assert :ok = Desktop.save_now()
-    eval!(~s{(buffer-kill! "#{path}")})
+    evict(path)
     File.rm!(path)
     assert :ok = Desktop.restore_now()
 

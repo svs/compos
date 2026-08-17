@@ -345,9 +345,19 @@
 (define (chat-clear-waiting! buf)
   (let ((w (buffer-local buf 'chat-waiting)))
     (when w
-      (buffer-delete-range! buf (car w) (- (car (cdr w)) (car w)))
-      (buffer-set-local! buf 'agent-saved-mark
-        (- (chat-mark buf) (- (car (cdr w)) (car w))))
+      (let* ((start (car w))
+             (end (car (cdr w)))
+             (size (buffer-size buf))
+             ;; Positions are runtime state and may be stale after edits or
+             ;; an interrupted legacy turn. Delete only the exact chrome we
+             ;; put there; never trust the range enough to delete prose.
+             (valid? (and (>= start 0) (>= end start) (<= end size)
+                          (equal? (substring-bytes (buffer-text buf) start end)
+                                  "⋯ thinking\n"))))
+        (when valid?
+          (buffer-delete-range! buf start (- end start))
+          (buffer-set-local! buf 'agent-saved-mark
+            (- (chat-mark buf) (- end start)))))
       (chat-blocks-drop! buf "waiting")
       (buffer-set-local! buf 'chat-waiting #f))))
 
@@ -370,30 +380,50 @@
 (define (chat-live-tool-specs buf)
   (chat-extra-specs buf))
 
+;;; An EMPTY surface is not a freeze. A preset's MCP server answers
+;;; nothing while it still handshakes, and the first send can arrive in
+;;; that window. Freezing that answer gave the chat no tools for the rest
+;;; of its life, silently — the model then says it cannot search the web,
+;;; and every later turn agrees with it. An empty list is also nothing to
+;;; protect: there is no tool prefix in the cache to lose. So the chat
+;;; keeps asking until the surface has at least one tool, and freezes
+;;; that. ('() is truthy in this dialect, so the test is `pair?`.)
+
 (define (chat-tools buf)
-  (or (buffer-local buf 'chat-tool-specs)
-      (let ((specs (chat-live-tool-specs buf)))
-        (buffer-set-local! buf 'chat-tool-specs specs)
-        specs)))
+  (let ((frozen (buffer-local buf 'chat-tool-specs)))
+    (if (pair? frozen)
+        frozen
+        (let ((specs (chat-live-tool-specs buf)))
+          (when (pair? specs)
+            (buffer-set-local! buf 'chat-tool-specs specs))
+          specs))))
 
 (define (chat-tool-names specs) (map car specs))
 
 ;; has the editor's tool surface moved since this chat froze its own?
 (define (chat-tools-stale? buf)
   (let ((frozen (buffer-local buf 'chat-tool-specs)))
-    (and frozen
+    (and (pair? frozen)
          (not (equal? (chat-tool-names frozen)
                       (chat-tool-names (chat-live-tool-specs buf))))
          #t)))
+
+;; Adopt the live surface without UI. Preset commands use this too: choosing
+;; a different surface is already an explicit choice to invalidate the prompt
+;; cache, so leaving an API chat on its old frozen list makes the command a
+;; silent no-op until the user discovers C-c t.
+(define (chat-adopt-live-tools! buf)
+  (let ((specs (chat-live-tool-specs buf)))
+    (buffer-set-local! buf 'chat-tool-specs specs)
+    (when (boundp (quote agent-update-modeline!)) (agent-update-modeline! buf))
+    (length specs)))
 
 (define-command "chat-refresh-tools" "Adopt the editor's current tool list in this chat"
   (lambda ()
     (let ((buf (current-buffer)))
       (if (not (buffer-local buf 'agent-saved-mark))
           (message "not a chat buffer")
-          (let ((n (length (chat-live-tool-specs buf))))
-            (buffer-set-local! buf 'chat-tool-specs (chat-live-tool-specs buf))
-            (when (boundp (quote agent-update-modeline!)) (agent-update-modeline! buf))
+          (let ((n (chat-adopt-live-tools! buf)))
             (message (string-append "tools refreshed: " (number->string n)
                                     " — the next turn rewrites the prompt cache")))))))
 

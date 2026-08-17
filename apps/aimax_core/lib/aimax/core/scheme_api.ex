@@ -200,6 +200,7 @@ defmodule Aimax.Core.SchemeAPI do
       "window-preview-buffer!" => "(window-preview-buffer! BUF) — show BUF in the active window without MRU changes.",
       "minibuffer-set-candidates!" => "(minibuffer-set-candidates! CANDIDATES) — replace the minibuffer's candidate list.",
       "delete-file!" => "(delete-file! PATH) — delete a file or empty directory; return #t or error.",
+      "rename-file!" => "(rename-file! SOURCE DESTINATION) — move a file or directory and carry an open buffer with it.",
       "make-directory!" => "(make-directory! PATH) — create the directory and its parents; return #t."
     }
   end
@@ -718,7 +719,13 @@ defmodule Aimax.Core.SchemeAPI do
         :void
       end,
       "switch-to-buffer!" => fn [name] ->
-        Editor.set_window_buffer(name)
+        if Aimax.Core.Frame.buffer_context() do
+          unless Buffer.exists?(name), do: Core.create_buffer(name)
+          Aimax.Core.Frame.put_buffer(name)
+        else
+          Editor.set_window_buffer(name)
+        end
+
         name
       end,
 
@@ -897,6 +904,14 @@ defmodule Aimax.Core.SchemeAPI do
           :ok -> true
           {:error, reason} ->
             raise Aimax.Scheme.Eval.Error, message: "delete failed: #{reason} (#{path})"
+        end
+      end,
+      "rename-file!" => fn [source, destination] ->
+        case Aimax.Core.rename_file(source, destination) do
+          {:ok, path} -> path
+          {:error, reason} ->
+            raise Aimax.Scheme.Eval.Error,
+              message: "rename failed: #{reason} (#{Path.expand(source)} -> #{Path.expand(destination)})"
         end
       end,
       "make-directory!" => fn [p] ->
@@ -1264,4 +1279,3 @@ defmodule Aimax.Core.SchemeAPI do
     end
   end
 end
-

@@ -40,4 +40,16 @@ defmodule Aimax.WindowHealTest do
     assert is_pid(Process.whereis(Aimax.Core.Editor))
     Editor.set_window_buffer("*scratch*")
   end
+
+  test "an invalid programmatic delete cannot crash its buffer" do
+    name = "heal-delete-#{System.unique_integer([:positive])}"
+    {:ok, _} = Aimax.Core.create_buffer(name)
+    Buffer.append(name, "still here", source: :editor)
+
+    assert {:error, :out_of_bounds} = Buffer.delete_range(name, 10, 8, source: :editor)
+    assert Buffer.exists?(name)
+    assert Buffer.text(name) == "still here"
+
+    Aimax.Core.kill_buffer(name)
+  end
 end

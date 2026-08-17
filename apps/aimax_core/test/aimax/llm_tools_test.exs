@@ -3,7 +3,7 @@ defmodule Aimax.LLMToolsTest do
 
   use ExUnit.Case
 
-  alias Aimax.Core.Session
+  alias Aimax.Core.{Buffer, Editor, Session}
 
   defp eval!(src) do
     {:ok, printed} = Session.eval(src)
@@ -141,6 +141,27 @@ defmodule Aimax.LLMToolsTest do
   end
 
   describe "buffer editing through eval-scheme" do
+    test "the tool switches its logical buffer without changing the user's window" do
+      on_exit(fn ->
+        Aimax.Core.kill_buffer("*zz-tool-here*")
+        Aimax.Core.kill_buffer("*zz-tool-target*")
+      end)
+
+      eval!(~s{(buffer-create "*zz-tool-here*")})
+      eval!(~s{(buffer-create "*zz-tool-target*")})
+      eval!(~s{(define zz-tool-target-name "*zz-tool-target*")})
+      eval!(~s{(switch-to-buffer! "*zz-tool-here*")})
+
+      out =
+        eval!(
+          ~s{(llm-tool-call "eval-scheme" (list 'code "(begin (switch-to-buffer! zz-tool-target-name) (buffer-set-local! (current-buffer) 'zz-tool-touched #t) (current-buffer))"))}
+        )
+
+      assert out =~ "*zz-tool-target*"
+      assert Buffer.get_local("*zz-tool-target*", "zz-tool-touched") == true
+      assert Editor.current_buffer() == "*zz-tool-here*"
+    end
+
     test "the tool reads live buffer text" do
       on_exit(fn -> Aimax.Core.kill_buffer("*zz-doc*") end)
       eval!(~s{(buffer-create "*zz-doc*")})

@@ -10,7 +10,7 @@
 ;;; Keys (buffer-local):
 ;;;   n/p move · RET visit · ^ up · g revert
 ;;;   m mark · u unmark · U unmark all · * mark all
-;;;   d flag for deletion · x execute · + mkdir
+;;;   d flag for deletion · x execute · R rename/move · + mkdir
 ;;;   / narrow (type; it matches the line and the mode beside it)
 ;;;   \ widen by one · . hide dotfiles
 ;;;
@@ -240,7 +240,8 @@
     'doc (string-append
            "One directory as a table: name, size, modified, perms and what "
            "git says. Mark files with `m` and the whole listing with `*`; "
-           "flag them with `d` and delete the flagged ones with `x`. `RET` "
+           "`x` deletes what you marked, and `d` flags a file for the same "
+           "`x`. `RET` "
            "visits, `^` goes up. `/` narrows as you type — it matches the "
            "perms, the size, the date, the name and the mode the file would "
            "open in. `\\` widens by one and `.` hides the dotfiles. The "
@@ -269,7 +270,7 @@
     'total (lambda (buf) (or (buffer-local buf 'dired-total) 0))
     'footer (lambda (buf)
               '(("RET" "visit") ("m" "mark") ("*" "all") ("d" "flag")
-                ("x" "delete") ("/" "filter") ("." "dotfiles")
+                ("x" "delete") ("R" "rename") ("/" "filter") ("." "dotfiles")
                 ("^" "up") ("g" "revert") ("q" "quit")))
     ;; delete asks first — the one flag in the editor that cannot be undone
     'flags (list (list "d" "D" "delete"
@@ -280,7 +281,7 @@
     'noun "file"
     'markable? (lambda (buf e) (not (equal? e "..")))
     'keys '(("RET" "dired-visit") ("g" "dired-revert") ("^" "dired-up")
-            ("+" "dired-mkdir") ("q" "quit-window")
+            ("+" "dired-mkdir") ("R" "dired-rename") ("q" "quit-window")
             ("." "dired-filter-dotfiles"))))
 
 (define (dired-open dir0)
@@ -357,6 +358,21 @@
     (dired-rescan! (current-buffer))
     (list-refresh! (current-buffer))
     (message "Reverted")))
+
+(define-command "dired-rename" "Rename or move the file at point"
+  (lambda ()
+    (let ((source (dired-path-at-point))
+          (buf (current-buffer)))
+      (if (not source)
+          (message "No file on this line")
+          (read-file-name "Rename to: "
+            (lambda (destination)
+              (let ((target (expand-path (normalize-file-input destination))))
+                (rename-file! source target)
+                (with-current-buffer buf
+                  (dired-rescan! buf)
+                  (list-refresh! buf))
+                (message (string-append "Renamed to " target)))))))))
 
 ;; m, u, U, d and x are list-mode's: dired declares the delete flag in its
 ;; mode above and keeps no marking code of its own

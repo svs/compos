@@ -1,12 +1,8 @@
 defmodule Aimax.Core.Desktop do
   @moduledoc """
-  Desktop save/restore (Emacs desktop-mode): the editor survives daemon
-  restarts. Persists file-backed buffers (path + point + unsaved text when
-  modified), the window tree, and faces (theme) to `~/.aimax/desktop.etf` —
-  debounced on editor events, flushed on shutdown, restored at boot.
-
-  Restore reopens files through Scheme `(visit ...)` so modes and
-  find-file-hook apply, then rebuilds the window tree and points.
+  Desktop save/restore owns presentation only: frames, window trees, faces,
+  and declared Scheme globals. Buffer processes checkpoint and restore their
+  own state independently.
   """
 
   use GenServer
@@ -19,7 +15,8 @@ defmodule Aimax.Core.Desktop do
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
-  def path, do: Application.get_env(:aimax_core, :desktop_path, Path.expand("~/.aimax/desktop.etf"))
+  def path,
+    do: Application.get_env(:aimax_core, :desktop_path, Path.expand("~/.aimax/desktop.etf"))
 
   @doc "Synchronous snapshot to disk (also used by tests)."
   def save_now, do: GenServer.call(__MODULE__, :save)
@@ -70,33 +67,9 @@ defmodule Aimax.Core.Desktop do
   # --- snapshot --------------------------------------------------------------
 
   defp do_save do
-    buffers =
-      for name <- Aimax.Core.list_buffers(),
-          Buffer.exists?(name),
-          bpath = Buffer.path(name),
-          bpath != nil do
-        # unsaved edits are state, and the rule is that state survives: a
-        # modified buffer's text rides along. A clean buffer saves nil and
-        # restores from disk through visit, same as before.
-        text = if Buffer.modified?(name), do: Buffer.text(name), else: nil
-        {bpath, Buffer.point(name), savable_locals(name), text}
-      end
-
-    # the rule: EVERYTHING survives a reload. Non-file buffers (chat, agent
-    # threads, scratch, shells) have no file to reopen — their content is the
-    # only source of truth, so it's saved along with point and locals.
-    # Space-prefixed names are internal (Emacs convention: " *minibuf*").
-    # Buffers with a truthy 'transient local (mail views, listings) hold
-    # derived state their mode setup re-renders from locals — name, point,
-    # and locals are saved so windows and modes restore, content is not.
-    scratch =
-      for name <- Aimax.Core.list_buffers(),
-          Buffer.exists?(name),
-          Buffer.path(name) == nil,
-          not String.starts_with?(name, " ") do
-        content = if Buffer.get_local(name, "transient"), do: "", else: Buffer.text(name)
-        {name, content, Buffer.point(name), savable_locals(name)}
-      end
+    # Synchronize presentation with the buffers' independently-owned durable
+    # state. The desktop does not read or embed that state.
+    Aimax.Core.checkpoint_all()
 
     # v2: every frame's layout, in frame-MRU order (head = most recent).
     # desktop_view is read-only (S15): saving must not run the render
@@ -109,17 +82,14 @@ defmodule Aimax.Core.Desktop do
       end
 
     desktop = %{
-      version: 2,
-      buffers: buffers,
-      scratch: scratch,
+      version: 3,
       frames: frames,
       faces: views |> List.first({nil, %{faces: %{}}}) |> elem(1) |> Map.get(:faces),
       globals: scheme_globals()
     }
 
     file = path()
-    File.mkdir_p!(Path.dirname(file))
-    File.write!(file, :erlang.term_to_binary(desktop))
+    Aimax.Core.BufferStore.atomic_write(file, :erlang.term_to_binary(desktop))
     :ok
   rescue
     e ->
@@ -136,28 +106,6 @@ defmodule Aimax.Core.Desktop do
 
   defp serialize(%{type: :split, dir: dir, children: [a, b]} = split),
     do: {:split, dir, Map.get(split, :ratio, 0.5), serialize(a), serialize(b)}
-
-  # everything Scheme put on the buffer, minus values that can't survive
-  # a daemon restart (closures, pids, refs), minus the locals the mode
-  # DECLARES as derived: 'desktop-skip-locals names locals the setup fn
-  # rebuilds from its source (a parsed diff's render-blocks), so saving
-  # them only duplicates the database they project.
-  defp savable_locals(name) do
-    locals = Buffer.locals(name)
-
-    skip =
-      case Map.get(locals, "desktop-skip-locals") do
-        l when is_list(l) -> Enum.map(l, &local_key/1)
-        _ -> []
-      end
-
-    locals
-    |> Map.drop(skip)
-    |> Map.filter(fn {_k, v} -> serializable?(v) end)
-  end
-
-  defp local_key({:sym, s}), do: s
-  defp local_key(s), do: to_string(s)
 
   defp serializable?(v) when is_function(v) or is_pid(v) or is_reference(v) or is_port(v),
     do: false
@@ -186,7 +134,9 @@ defmodule Aimax.Core.Desktop do
 
   defp do_restore do
     with {:ok, bin} <- File.read(path()),
-         %{buffers: buffers} = desktop <- :erlang.binary_to_term(bin) do
+         %{} = desktop <- :erlang.binary_to_term(bin) do
+      # v1/v2 migration only. Version 3 never stores buffer state here.
+      buffers = desktop[:buffers] || []
       # reopen through visit so modes + hooks apply, then lay the saved
       # buffer-locals back on top so toggled state (preview, line numbers,
       # a hand-picked mode) survives too
@@ -241,6 +191,14 @@ defmodule Aimax.Core.Desktop do
       end
 
       restore_frames(desktop)
+
+      # Waking installs literal buffer state. Runtime-only mode machinery is
+      # rebuilt only after the Editor call has returned, avoiding a
+      # Session -> Editor deadlock during tree construction.
+      Editor.list_windows_all()
+      |> Enum.map(fn {_win, name, _frame} -> name end)
+      |> Enum.uniq()
+      |> Enum.each(&Aimax.Core.restore_runtime/1)
 
       for {face, attrs} <- desktop[:faces] || %{} do
         Editor.set_face(face, attrs)

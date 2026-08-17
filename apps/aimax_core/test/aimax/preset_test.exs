@@ -81,6 +81,25 @@ defmodule Aimax.PresetTest do
 
   defp servers(params), do: Enum.map(params["mcpServers"] || [], & &1["name"])
 
+  test "loading a preset refreshes an API chat's frozen tool surface" do
+    {:ok, _} = Session.eval(~s[(execute* "" '(connector "api"))])
+    buf = "*chat:a1*"
+
+    # The first tool-free turn froze an empty surface. A later preset change
+    # must take effect immediately; requiring a second, undiscoverable refresh
+    # made llm-mode look as though its tools did not work.
+    {:ok, _} = Session.eval(~s[(buffer-set-local! "#{buf}" 'chat-tool-specs '())])
+    {:ok, _} = Session.eval(~s[(switch-to-buffer! "#{buf}")])
+    {:ok, _} = Session.eval(~s[(run-command "llm-set-preset")])
+    type("aimax")
+    press(["RET"])
+
+    assert Buffer.get_local(buf, "chat-presets") == [sym: "aimax"]
+    assert "eval-scheme" in
+             (Buffer.get_local(buf, "chat-tool-specs") |> Enum.map(&List.first/1))
+    refute Buffer.get_local(buf, "modeline-info") =~ "tools stale"
+  end
+
   test "loading a preset on a live ACP chat reattaches; the conversation survives" do
     {slug, buf, agent, first_new} = boot()
 
@@ -352,6 +371,29 @@ defmodule Aimax.PresetTest do
     assert Enum.any?(req.tools, &(&1.name == "eval-scheme"))
     assert req.system =~ "zz-weather"
     assert eventually(fn -> Buffer.text(buf) =~ "preset-aware reply" end)
+  end
+
+  test "an empty tool surface is never frozen: the chat asks again" do
+    {:ok, _} = Session.eval(~s{(execute* "" '(connector "api"))})
+    buf = "*chat:a1*"
+
+    # A preset server that still handshakes serves nothing. The first send
+    # must not freeze that answer — a frozen empty list gave the chat no
+    # tools for the rest of its life, and the model then says it cannot
+    # search the web.
+    {:ok, _} = Session.eval(~s[(chat-tools "#{buf}")])
+    assert Buffer.get_local(buf, "chat-tool-specs") in [nil, false, []]
+    refute Buffer.get_local(buf, "modeline-info") =~ "tools stale"
+
+    # tools appear; the next send takes them and freezes THEM
+    {:ok, _} = Session.eval(~s[(switch-to-buffer! "#{buf}")])
+    {:ok, _} = Session.eval(~s[(run-command "llm-set-preset")])
+    type("aimax")
+    press(["RET"])
+
+    {:ok, _} = Session.eval(~s[(chat-tools "#{buf}")])
+    names = Buffer.get_local(buf, "chat-tool-specs") |> Enum.map(&List.first/1)
+    assert "eval-scheme" in names
   end
 
   defp eventually(fun, tries \\ 40) do

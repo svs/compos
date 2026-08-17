@@ -17,6 +17,7 @@ import Config
 #   app_port = 4005
 #   name = work
 #   secret_key_base = ...
+#   buffer_idle_hours = 24
 #
 # AIMAX_CONF names the file: `AIMAX_CONF=/etc/aimax.conf bin/aimax daemon`.
 # Without AIMAX_CONF the daemon reads $AIMAX_HOME/daemon.conf. The file can
@@ -75,6 +76,11 @@ if config_env() != :test do
 
   if desktop = get.("AIMAX_DESKTOP", "desktop"),
     do: config(:aimax_core, desktop_path: Path.expand(desktop))
+
+  if hours = get.("AIMAX_BUFFER_IDLE_HOURS", "buffer_idle_hours") do
+    {hours, ""} = Float.parse(hours)
+    config :aimax_core, buffer_idle_timeout_ms: round(hours * 60 * 60 * 1_000)
+  end
 
   # the session-cookie key. In prod a per-install key is generated once and
   # kept in $home/secret_key_base (mode 0600); dev keeps the fixed key from

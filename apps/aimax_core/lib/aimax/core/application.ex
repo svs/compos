@@ -16,6 +16,7 @@ defmodule Aimax.Core.Application do
       {DynamicSupervisor, name: Aimax.Core.AgentSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: Aimax.Core.MCPSupervisor, strategy: :one_for_one},
       {Task.Supervisor, name: Aimax.Core.TaskSupervisor},
+      Aimax.Core.BufferStore,
       Aimax.Core.Reactor,
       Aimax.Core.Watch,
       Aimax.Core.Editor,

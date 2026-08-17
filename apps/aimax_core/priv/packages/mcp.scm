@@ -159,7 +159,15 @@
                     (message (string-append what " — reconnected with the new tools")))
                   (message (string-append
                              what " — takes effect on the next send"))))))
-        (message (string-append what " for " buf)))))
+        (begin
+          ;; Direct API chats freeze their tool specs for prompt-cache
+          ;; stability. Selecting a preset is the user's explicit request to
+          ;; change that surface, so make it effective on the very next turn.
+          ;; Plain llm-mode buffers have no frozen list and already read live.
+          (when (and (boundp (quote chat-adopt-live-tools!))
+                     (buffer-local buf 'chat-tool-specs))
+            (chat-adopt-live-tools! buf))
+          (message (string-append what " for " buf))))))
 
 ;; kill + attach the same connector/model: a fresh session with the new
 ;; server list, seeded from the transcript so the conversation continues

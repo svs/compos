@@ -35,6 +35,13 @@ defmodule Aimax.AgentTest do
   defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
   defp type(str), do: str |> String.graphemes() |> press()
 
+  defp evict(name) do
+    :ok = Buffer.checkpoint_now(name)
+    [{pid, _}] = Registry.lookup(Aimax.Core.BufferRegistry, name)
+    :ok = DynamicSupervisor.terminate_child(Aimax.Core.BufferSupervisor, pid)
+    assert eventually(fn -> not Buffer.exists?(name) end)
+  end
+
   setup do
     :persistent_term.put(:agent_test_pid, self())
     Application.put_env(:aimax_core, :acp_transport, Aimax.AgentTest.FakeTransport)
@@ -413,8 +420,7 @@ defmodule Aimax.AgentTest do
 
     # a daemon restart: the agent process and the buffer are both gone
     Agent.kill(slug)
-    Aimax.Core.kill_buffer(buf)
-    assert eventually(fn -> not Buffer.exists?(buf) end)
+    evict(buf)
 
     assert :ok = Aimax.Core.Desktop.restore_now()
 

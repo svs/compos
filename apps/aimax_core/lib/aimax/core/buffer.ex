@@ -37,11 +37,12 @@ defmodule Aimax.Core.Buffer do
   # (a restart would resurrect it empty anyway; better to stay dead loudly)
   use GenServer, restart: :temporary
 
-  alias Aimax.Core.{Events, Rope, Text, TS}
+  alias Aimax.Core.{BufferStore, Events, Rope, Text, TS}
 
   @registry Aimax.Core.BufferRegistry
   @undo_limit 500
   @edit_log_limit 500
+  @checkpoint_debounce 1_500
 
   defstruct name: nil,
             rope: nil,
@@ -66,38 +67,68 @@ defmodule Aimax.Core.Buffer do
             win_points: %{},
             authors: [],
             edit_log: [],
-            edit_log_len: 0
+            edit_log_len: 0,
+            id: nil,
+            checkpoint_timer: nil,
+            idle_timer: nil,
+            discard: false,
+            persistent: true,
+            idle_gen: 0
 
   # --- client ----------------------------------------------------------------
 
   def start_link(opts) do
     name = Keyword.fetch!(opts, :name)
-    GenServer.start_link(__MODULE__, opts, name: via(name))
+    GenServer.start_link(__MODULE__, opts, name: registry_name(name))
   end
 
-  def via(name), do: {:via, Registry, {@registry, name}}
+  defp registry_name(name), do: {:via, Registry, {@registry, name}}
+
+  def via(name) do
+    if not exists?(name) and BufferStore.known?(name), do: Aimax.Core.ensure_buffer(name)
+    registry_name(name)
+  end
 
   def exists?(name), do: Registry.lookup(@registry, name) != []
 
-  def text(name), do: GenServer.call(via(name), :text)
-  def byte_size(name), do: GenServer.call(via(name), :byte_size)
-  def version(name), do: GenServer.call(via(name), :version)
-  def path(name), do: GenServer.call(via(name), :path)
-  def modified?(name), do: GenServer.call(via(name), :modified?)
-  def point(name), do: GenServer.call(via(name), :point)
+  def text(name), do: dormant_read(name, :text, :text)
+  def byte_size(name), do: Kernel.byte_size(dormant_read(name, :text, :text))
+  def version(name), do: dormant_read(name, :buffer_version, :version)
+  def path(name), do: dormant_read(name, :path, :path)
+  def modified?(name), do: dormant_read(name, :modified, :modified?)
+  def point(name), do: dormant_read(name, :point, :point)
+  def touch(name), do: GenServer.cast(via(name), :touch)
+  def checkpoint_now(name), do: GenServer.call(via(name), :checkpoint_now, 30_000)
+  def eviction_info(name), do: GenServer.call(via(name), :eviction_info)
+
+  def prepare_evict(name, generation),
+    do: GenServer.call(via(name), {:prepare_evict, generation}, 30_000)
+
+  def discard(name), do: GenServer.call(via(name), :discard)
+
+  def rename(name, new_name, new_path),
+    do: GenServer.call(via(name), {:rename, new_name, new_path})
 
   def goto(name, pos), do: GenServer.call(via(name), {:goto, pos})
 
-  def mark(name), do: GenServer.call(via(name), :mark)
+  def mark(name), do: dormant_read(name, :mark, :mark)
   def set_mark(name, pos), do: GenServer.call(via(name), {:set_mark, pos})
 
-  def read_only?(name), do: GenServer.call(via(name), :read_only?)
+  def read_only?(name), do: dormant_read(name, :read_only, :read_only?)
   def set_read_only(name, bool), do: GenServer.call(via(name), {:set_read_only, bool})
 
   # buffer-local variables (mode name, mode state, anything Scheme wants)
   def set_local(name, key, val), do: GenServer.call(via(name), {:set_local, key, val})
-  def get_local(name, key), do: GenServer.call(via(name), {:get_local, key})
-  def locals(name), do: GenServer.call(via(name), :locals)
+
+  def get_local(name, key) do
+    if exists?(name),
+      do: GenServer.call(registry_name(name), {:get_local, key}),
+      else: dormant(name).locals[key]
+  end
+
+  def locals(name) do
+    if exists?(name), do: GenServer.call(registry_name(name), :locals), else: dormant(name).locals
+  end
 
   # overlays: per-tag face ranges (fontification). Byte positions auto-adjust
   # on edits (like mark); modes replace their whole tag set on recompute.
@@ -243,46 +274,112 @@ defmodule Aimax.Core.Buffer do
   # up here without threading an argument through the whole call chain
   defp author(opts), do: Keyword.get(opts, :author, Process.get(:aimax_edit_author))
 
+  defp dormant_read(name, key, message) do
+    if exists?(name),
+      do: GenServer.call(registry_name(name), message),
+      else: Map.get(dormant(name), key)
+  end
+
+  defp dormant(name) do
+    case BufferStore.load(name) do
+      %{} = checkpoint -> checkpoint
+      nil -> GenServer.call(registry_name(name), :text)
+    end
+  end
+
   # --- server ----------------------------------------------------------------
 
   @impl true
   def init(opts) do
-    text =
-      case Keyword.get(opts, :path) do
-        nil -> Keyword.get(opts, :text, "")
-        path -> if File.exists?(path), do: File.read!(path), else: ""
+    name = Keyword.fetch!(opts, :name)
+    checkpoint = read_checkpoint(Keyword.get(opts, :checkpoint))
+
+    state =
+      if checkpoint do
+        restored_state(checkpoint)
+      else
+        path = Keyword.get(opts, :path)
+
+        text =
+          if path,
+            do: if(File.exists?(path), do: File.read!(path), else: ""),
+            else: Keyword.get(opts, :text, "")
+
+        %__MODULE__{name: name, id: new_id(), rope: Rope.new(text), path: path}
       end
 
-    {:ok,
-     %__MODULE__{
-       name: Keyword.fetch!(opts, :name),
-       rope: Rope.new(text),
-       path: Keyword.get(opts, :path)
-     }}
+    state = %{state | persistent: not String.starts_with?(name, " ")}
+    {:ok, state |> schedule_checkpoint() |> reset_idle_timer()}
   end
+
+  @impl true
+  def handle_cast(:touch, state), do: {:noreply, touch_state(state)}
+
+  @impl true
+  def handle_info(:checkpoint, state),
+    do: {:noreply, %{write_checkpoint(state) | checkpoint_timer: nil}}
+
+  def handle_info({:idle_timeout, generation}, state) do
+    BufferStore.idle_expired(state.name, state.id, generation)
+    {:noreply, %{state | idle_timer: nil}}
+  end
+
+  def handle_info(_, state), do: {:noreply, state}
+
+  @impl true
+  def terminate(_reason, %{discard: true}), do: :ok
+  def terminate(_reason, state), do: write_checkpoint(state)
 
   @impl true
   def handle_call(:text, _from, state) do
     {text, state} = fetch_text(state)
     {:reply, text, state}
   end
+
   def handle_call(:byte_size, _from, state), do: {:reply, Rope.byte_size(state.rope), state}
   def handle_call(:version, _from, state), do: {:reply, state.version, state}
   def handle_call(:path, _from, state), do: {:reply, state.path, state}
   def handle_call(:point, _from, state), do: {:reply, state.point, state}
+  def handle_call(:checkpoint_now, _from, state), do: {:reply, :ok, write_checkpoint(state)}
+
+  def handle_call(:eviction_info, _from, state),
+    do: {:reply, %{id: state.id, idle_gen: state.idle_gen, locals: state.locals}, state}
+
+  def handle_call({:prepare_evict, generation}, _from, state) do
+    if state.idle_gen == generation,
+      do: {:reply, true, write_checkpoint(state)},
+      else: {:reply, false, state}
+  end
+
+  def handle_call(:discard, _from, state), do: {:reply, :ok, %{state | discard: true}}
+
+  def handle_call({:rename, new_name, new_path}, _from, state) do
+    case Registry.register(@registry, new_name, state.id) do
+      {:ok, _} ->
+        Registry.unregister(@registry, state.name)
+        old = state.name
+        state = %{state | name: new_name, path: new_path} |> checkpoint_later() |> touch_state()
+        state = write_checkpoint(state)
+        BufferStore.renamed(old, metadata(state))
+        {:reply, :ok, state}
+
+      {:error, {:already_registered, _}} ->
+        {:reply, {:error, :already_exists}, state}
+    end
+  end
 
   def handle_call(:modified?, _from, state),
     do: {:reply, state.version != state.saved_version, state}
 
   def handle_call({:goto, pos}, _from, state),
-    do: {:reply, :ok, %{state | point: clamp(pos, state)}}
+    do: {:reply, :ok, state |> Map.put(:point, clamp(pos, state)) |> checkpoint_later()}
 
   def handle_call(:mark, _from, state), do: {:reply, state.mark, state}
 
   def handle_call(:read_only?, _from, state), do: {:reply, state.read_only, state}
 
   def handle_call({:set_read_only, bool}, _from, state),
-    do: {:reply, :ok, %{state | read_only: bool}}
+    do: {:reply, :ok, state |> Map.put(:read_only, bool) |> checkpoint_later()}
 
   def handle_call({:set_local, key, val}, _from, state) do
     state = %{state | locals: Map.put(state.locals, key, val)}
@@ -295,7 +392,7 @@ defmodule Aimax.Core.Buffer do
     # whitelist, so the phantom change triggers no rules.
     Events.broadcast_editor(:locals)
     broadcast(state, state.point, "", 0, :locals)
-    {:reply, :ok, state}
+    {:reply, :ok, checkpoint_later(state)}
   end
 
   def handle_call({:get_local, key}, _from, state),
@@ -332,10 +429,16 @@ defmodule Aimax.Core.Buffer do
   # an empty range list drops the tag: an owner with nothing folded costs
   # nothing to union
   def handle_call({:set_hidden, tag, []}, _from, state),
-    do: {:reply, :ok, %{state | hidden: Map.delete(state.hidden, tag)}}
+    do:
+      {:reply, :ok,
+       state |> Map.put(:hidden, Map.delete(state.hidden, tag)) |> checkpoint_later()}
 
   def handle_call({:set_hidden, tag, ranges}, _from, state),
-    do: {:reply, :ok, %{state | hidden: Map.put(state.hidden, tag, Enum.sort(ranges))}}
+    do:
+      {:reply, :ok,
+       state
+       |> Map.put(:hidden, Map.put(state.hidden, tag, Enum.sort(ranges)))
+       |> checkpoint_later()}
 
   def handle_call({:hidden, :all}, _from, state), do: {:reply, hidden_union(state), state}
 
@@ -343,10 +446,12 @@ defmodule Aimax.Core.Buffer do
     do: {:reply, Map.get(state.hidden, tag, []), state}
 
   def handle_call({:clear_hidden, :all}, _from, state),
-    do: {:reply, :ok, %{state | hidden: %{}}}
+    do: {:reply, :ok, state |> Map.put(:hidden, %{}) |> checkpoint_later()}
 
   def handle_call({:clear_hidden, tag}, _from, state),
-    do: {:reply, :ok, %{state | hidden: Map.delete(state.hidden, tag)}}
+    do:
+      {:reply, :ok,
+       state |> Map.put(:hidden, Map.delete(state.hidden, tag)) |> checkpoint_later()}
 
   # read-only blocks :user mutations only — programmatic sources (:editor,
   # :process, agents) are the inhibit-read-only path (dired regenerates its
@@ -371,10 +476,11 @@ defmodule Aimax.Core.Buffer do
     {:reply, {s, rope |> Rope.slice(s, e - s) |> String.trim_trailing("\n")}, state}
   end
 
-  def handle_call({:set_mark, nil}, _from, state), do: {:reply, :ok, %{state | mark: nil}}
+  def handle_call({:set_mark, nil}, _from, state),
+    do: {:reply, :ok, state |> Map.put(:mark, nil) |> checkpoint_later()}
 
   def handle_call({:set_mark, pos}, _from, state),
-    do: {:reply, :ok, %{state | mark: clamp(pos, state)}}
+    do: {:reply, :ok, state |> Map.put(:mark, clamp(pos, state)) |> checkpoint_later()}
 
   def handle_call({:search, q, from, dir}, _from, state) do
     {text, state} = fetch_text(state)
@@ -411,22 +517,39 @@ defmodule Aimax.Core.Buffer do
 
   def handle_call({:insert, text, src, author}, _from, state) do
     # do_insert's point adjustment already advances point past the insertion
-    {:reply, :ok, do_insert(state, state.point, text, src, author)}
+    {:reply, :ok,
+     state |> do_insert(state.point, text, src, author) |> touch_state() |> checkpoint_later()}
   end
 
   def handle_call({:append, text, src, author}, _from, state) do
-    {:reply, :ok, do_insert(state, Rope.byte_size(state.rope), text, src, author)}
+    {:reply, :ok,
+     state
+     |> do_insert(Rope.byte_size(state.rope), text, src, author)
+     |> touch_state()
+     |> checkpoint_later()}
   end
 
   def handle_call({:insert_at, pos, text, src, author, locals}, _from, state) do
     # locals first: do_insert broadcasts, and the frame it paints must
     # already see them
     state = %{state | locals: Map.merge(state.locals, locals)}
-    {:reply, :ok, do_insert(state, pos, text, src, author)}
+
+    {:reply, :ok,
+     state |> do_insert(pos, text, src, author) |> touch_state() |> checkpoint_later()}
   end
 
   def handle_call({:delete_range, pos, len, src, author}, _from, state) do
-    {:reply, :ok, do_delete(state, pos, len, src, author)}
+    size = Rope.byte_size(state.rope)
+
+    if pos < 0 or len < 0 or pos + len > size do
+      # Invalid editor metadata must fail the operation, not the buffer
+      # process. A crashed buffer disappears from desktop persistence and a
+      # stale window can otherwise resurrect its name as an empty shell.
+      {:reply, {:error, :out_of_bounds}, state}
+    else
+      {:reply, :ok,
+       state |> do_delete(pos, len, src, author) |> touch_state() |> checkpoint_later()}
+    end
   end
 
   def handle_call({:delete_char, n, src, author}, _from, state) do
@@ -442,7 +565,7 @@ defmodule Aimax.Core.Buffer do
 
     deleted = binary_part(text, pos, len)
     state = do_delete(state, pos, len, src, author)
-    {:reply, {:ok, deleted}, %{state | point: pos}}
+    {:reply, {:ok, deleted}, state |> Map.put(:point, pos) |> touch_state() |> checkpoint_later()}
   end
 
   def handle_call({:kill_line, src, author}, _from, state) do
@@ -454,7 +577,9 @@ defmodule Aimax.Core.Buffer do
       {:reply, {:ok, ""}, state}
     else
       killed = binary_part(text, state.point, len)
-      {:reply, {:ok, killed}, do_delete(state, state.point, len, src, author)}
+
+      {:reply, {:ok, killed},
+       state |> do_delete(state.point, len, src, author) |> touch_state() |> checkpoint_later()}
     end
   end
 
@@ -485,7 +610,7 @@ defmodule Aimax.Core.Buffer do
         do: skip_hidden(motion, text, point, state.goal_col, hidden, state.point),
         else: point
 
-    {:reply, point, %{state | point: point}}
+    {:reply, point, state |> Map.put(:point, point) |> checkpoint_later()}
   end
 
   # Emacs undo: the pre-undo state is pushed onto the same history, so undos
@@ -520,7 +645,7 @@ defmodule Aimax.Core.Buffer do
         state = log_edit(state, "undo", 0, 0, 0)
         state = ts_invalidate(state)
         broadcast(state, 0, "", 0, :undo)
-        {:reply, :ok, state}
+        {:reply, :ok, checkpoint_later(state)}
     end
   end
 
@@ -633,7 +758,7 @@ defmodule Aimax.Core.Buffer do
     state = %{state | saved_version: state.version}
     Events.broadcast_editor(:locals)
     broadcast(state, state.point, "", 0, :locals)
-    {:reply, :ok, state}
+    {:reply, :ok, checkpoint_later(state)}
   end
 
   def handle_call({:save, override}, _from, state) do
@@ -643,13 +768,141 @@ defmodule Aimax.Core.Buffer do
 
       path ->
         {text, state} = fetch_text(state)
-        File.write!(path, text)
+        BufferStore.atomic_write(path, text)
         state = %{state | path: path, saved_version: state.version}
         Events.broadcast_editor(:locals)
         broadcast(state, state.point, "", 0, :locals)
-        {:reply, {:ok, path}, state}
+        {:reply, {:ok, path}, state |> touch_state() |> checkpoint_later()}
     end
   end
+
+  defp new_id, do: Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
+
+  defp read_checkpoint(nil), do: nil
+
+  defp read_checkpoint(path) do
+    with {:ok, bin} <- File.read(path),
+         %{version: 1} = cp <- :erlang.binary_to_term(bin),
+         do: cp,
+         else: (_ -> nil)
+  rescue
+    _ -> nil
+  end
+
+  defp restored_state(cp) do
+    version = cp[:buffer_version] || 0
+    saved_version = if cp[:modified], do: max(version - 1, 0), else: version
+
+    %__MODULE__{
+      name: cp.name,
+      id: cp.id,
+      rope: Rope.new(cp[:text] || ""),
+      path: cp[:path],
+      point: min(cp[:point] || 0, Kernel.byte_size(cp[:text] || "")),
+      mark: cp[:mark],
+      read_only: cp[:read_only] || false,
+      locals: cp[:locals] || %{},
+      hidden: cp[:hidden] || %{},
+      version: version,
+      saved_version: saved_version
+    }
+  end
+
+  defp checkpoint(state) do
+    {text, _} = fetch_text(state)
+
+    %{
+      version: 1,
+      id: state.id,
+      name: state.name,
+      path: state.path,
+      text: text,
+      point: state.point,
+      mark: state.mark,
+      read_only: state.read_only,
+      locals: serializable_locals(state.locals),
+      hidden: state.hidden,
+      buffer_version: state.version,
+      modified: state.version != state.saved_version
+    }
+  end
+
+  defp metadata(state),
+    do: %{
+      id: state.id,
+      name: state.name,
+      path: state.path,
+      checkpoint: BufferStore.checkpoint_path(state.id)
+    }
+
+  defp write_checkpoint(%{discard: true} = state), do: state
+  defp write_checkpoint(%{persistent: false} = state), do: state
+
+  defp write_checkpoint(state) do
+    BufferStore.atomic_write(
+      BufferStore.checkpoint_path(state.id),
+      :erlang.term_to_binary(checkpoint(state))
+    )
+
+    BufferStore.note(metadata(state))
+    state
+  rescue
+    _ -> state
+  end
+
+  defp checkpoint_later(%{persistent: false} = state), do: state
+
+  defp checkpoint_later(%{checkpoint_timer: nil} = state),
+    do: %{state | checkpoint_timer: Process.send_after(self(), :checkpoint, @checkpoint_debounce)}
+
+  defp checkpoint_later(state), do: state
+
+  defp schedule_checkpoint(state), do: checkpoint_later(state)
+
+  defp touch_state(state) do
+    if state.persistent, do: BufferStore.touch(state.name)
+    reset_idle_timer(state)
+  end
+
+  defp reset_idle_timer(state) do
+    if state.idle_timer, do: Process.cancel_timer(state.idle_timer)
+    timeout = Application.get_env(:aimax_core, :buffer_idle_timeout_ms, 24 * 60 * 60 * 1_000)
+    generation = state.idle_gen + 1
+
+    %{
+      state
+      | idle_gen: generation,
+        idle_timer:
+          if(timeout > 0,
+            do: Process.send_after(self(), {:idle_timeout, generation}, timeout),
+            else: nil
+          )
+    }
+  end
+
+  defp serializable_locals(locals) do
+    skip =
+      case locals["desktop-skip-locals"] do
+        list when is_list(list) -> Enum.map(list, &local_key/1)
+        _ -> []
+      end
+
+    locals |> Map.drop(skip) |> Map.filter(fn {_k, v} -> serializable?(v) end)
+  end
+
+  defp local_key({:sym, key}), do: key
+  defp local_key(key), do: to_string(key)
+
+  defp serializable?(v) when is_function(v) or is_pid(v) or is_reference(v) or is_port(v),
+    do: false
+
+  defp serializable?(v) when is_list(v), do: Enum.all?(v, &serializable?/1)
+  defp serializable?(v) when is_tuple(v), do: v |> Tuple.to_list() |> Enum.all?(&serializable?/1)
+
+  defp serializable?(v) when is_map(v),
+    do: Enum.all?(v, fn {k, val} -> serializable?(k) and serializable?(val) end)
+
+  defp serializable?(_), do: true
 
   # --- mutation helpers ------------------------------------------------------
 
@@ -658,12 +911,20 @@ defmodule Aimax.Core.Buffer do
     author = resolve_author(author, src)
     state = maybe_snapshot_insert(state, pos, text, src)
     old_rope = state.rope
-    state = %{state | rope: Rope.insert(state.rope, pos, text), bin: nil, version: state.version + 1}
+
+    state = %{
+      state
+      | rope: Rope.insert(state.rope, pos, text),
+        bin: nil,
+        version: state.version + 1
+    }
+
     state = ts_track(state, old_rope, pos, pos, pos + len)
     state = adjust_point_insert(state, pos, len)
     state = adjust_ranges(state, &adjust_insert(&1, pos, len))
     state = %{state | authors: stamp_insert(state.authors, pos, len, author)}
     state = log_edit(state, author, pos, len, 0)
+
     state = %{
       state
       | goal_col: nil,
@@ -695,7 +956,14 @@ defmodule Aimax.Core.Buffer do
     author = resolve_author(author, src)
     state = snapshot(state)
     old_rope = state.rope
-    state = %{state | rope: Rope.delete(state.rope, pos, len), bin: nil, version: state.version + 1}
+
+    state = %{
+      state
+      | rope: Rope.delete(state.rope, pos, len),
+        bin: nil,
+        version: state.version + 1
+    }
+
     state = ts_track(state, old_rope, pos, pos + len, pos)
     state = adjust_point_delete(state, pos, len)
     state = adjust_ranges(state, &adjust_delete(&1, pos, len))

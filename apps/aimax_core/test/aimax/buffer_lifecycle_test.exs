@@ -1,7 +1,7 @@
 defmodule Aimax.BufferLifecycleTest do
   use ExUnit.Case, async: false
 
-  alias Aimax.Core.{Buffer, BufferStore, Editor}
+  alias Aimax.Core.{Buffer, BufferStore, Editor, Session}
 
   defp unique(label), do: "*#{label}-#{System.unique_integer([:positive])}*"
 
@@ -135,5 +135,31 @@ defmodule Aimax.BufferLifecycleTest do
     Editor.set_window_buffer("*scratch*")
     Aimax.Core.kill_buffer(destination)
     File.rm_rf!(root)
+  end
+
+  test "binary files open read-only and survive save and checkpoint byte-for-byte" do
+    path = Path.join(System.tmp_dir!(), "aimax-binary-#{System.unique_integer([:positive])}.etf")
+    bytes = <<0, 255, 131, 116, 1, 2, 128>>
+    File.write!(path, bytes)
+
+    assert {:ok, _} = Session.eval(~s{(visit "#{path}")})
+    assert Editor.current_buffer() == path
+    assert String.valid?(Buffer.text(path))
+    assert Buffer.read_only?(path)
+    assert Buffer.get_local(path, "binary-file") == true
+    assert {:ok, ^path} = Buffer.save(path)
+    assert File.read!(path) == bytes
+
+    evict(path)
+    assert eventually(fn -> not Buffer.exists?(path) end)
+    Editor.set_window_buffer(path)
+    assert Buffer.read_only?(path)
+    assert Buffer.get_local(path, "binary-file") == true
+    assert {:ok, ^path} = Buffer.save(path)
+    assert File.read!(path) == bytes
+
+    Editor.set_window_buffer("*scratch*")
+    Aimax.Core.kill_buffer(path)
+    File.rm!(path)
   end
 end

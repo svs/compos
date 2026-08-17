@@ -73,7 +73,8 @@ defmodule Aimax.Core.Buffer do
             idle_timer: nil,
             discard: false,
             persistent: true,
-            idle_gen: 0
+            idle_gen: 0,
+            encoding: :utf8
 
   # --- client ----------------------------------------------------------------
 
@@ -300,12 +301,26 @@ defmodule Aimax.Core.Buffer do
       else
         path = Keyword.get(opts, :path)
 
-        text =
-          if path,
-            do: if(File.exists?(path), do: File.read!(path), else: ""),
-            else: Keyword.get(opts, :text, "")
+        {text, encoding} =
+          if path do
+            path
+            |> then(fn path -> if File.exists?(path), do: File.read!(path), else: "" end)
+            |> decode_file_bytes()
+          else
+            {Keyword.get(opts, :text, ""), :utf8}
+          end
 
-        %__MODULE__{name: name, id: new_id(), rope: Rope.new(text), path: path}
+        binary_file? = encoding != :utf8
+
+        %__MODULE__{
+          name: name,
+          id: new_id(),
+          rope: Rope.new(text),
+          path: path,
+          encoding: encoding,
+          read_only: binary_file?,
+          locals: if(binary_file?, do: %{"binary-file" => true}, else: %{})
+        }
       end
 
     state = %{state | persistent: not String.starts_with?(name, " ")}
@@ -768,7 +783,7 @@ defmodule Aimax.Core.Buffer do
 
       path ->
         {text, state} = fetch_text(state)
-        BufferStore.atomic_write(path, text)
+        BufferStore.atomic_write(path, encode_file_text(text, state.encoding))
         state = %{state | path: path, saved_version: state.version}
         Events.broadcast_editor(:locals)
         broadcast(state, state.point, "", 0, :locals)
@@ -801,6 +816,7 @@ defmodule Aimax.Core.Buffer do
       point: min(cp[:point] || 0, Kernel.byte_size(cp[:text] || "")),
       mark: cp[:mark],
       read_only: cp[:read_only] || false,
+      encoding: cp[:encoding] || :utf8,
       locals: cp[:locals] || %{},
       hidden: cp[:hidden] || %{},
       version: version,
@@ -820,6 +836,7 @@ defmodule Aimax.Core.Buffer do
       point: state.point,
       mark: state.mark,
       read_only: state.read_only,
+      encoding: state.encoding,
       locals: serializable_locals(state.locals),
       hidden: state.hidden,
       buffer_version: state.version,
@@ -858,6 +875,25 @@ defmodule Aimax.Core.Buffer do
   defp checkpoint_later(state), do: state
 
   defp schedule_checkpoint(state), do: checkpoint_later(state)
+
+  # The rope stores UTF-8. Map arbitrary file bytes through Latin-1 so every
+  # byte has a reversible representation, and keep such buffers read-only to
+  # prevent ordinary text edits from silently changing a binary file.
+  defp decode_file_bytes(bytes) do
+    if String.valid?(bytes),
+      do: {bytes, :utf8},
+      else: {:unicode.characters_to_binary(bytes, :latin1, :utf8), :latin1}
+  end
+
+  defp encode_file_text(text, :utf8), do: text
+
+  defp encode_file_text(text, :latin1) do
+    case :unicode.characters_to_binary(text, :utf8, :latin1) do
+      bytes when is_binary(bytes) -> bytes
+      {:error, _, _} -> raise ArgumentError, "binary buffer contains characters outside Latin-1"
+      {:incomplete, _, _} -> raise ArgumentError, "binary buffer contains incomplete UTF-8"
+    end
+  end
 
   defp touch_state(state) do
     if state.persistent, do: BufferStore.touch(state.name)

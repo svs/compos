@@ -492,7 +492,7 @@
 
       (else #f))))
 
-(agent-on-event!
+(llm-session-on-event!
   (lambda (slug events)
     ;; batches race buffer kills — a dead thread's events just drop
     (when (buffer-exists? (agent-buf slug))
@@ -541,20 +541,49 @@
             ((re-match? (car ps) t) (car ps))
             (else (loop (cdr ps)))))))
 
+;;; --- per-agent permission profiles (the seam permission packages fill) -----
+;;; A thread may carry a permission profile: a plist stored as a chat-identity
+;;; local, so it survives restart and save. No profile means allow-all — the
+;;; default. The one field today is 'deny-patterns: extra verb-shaped regexes
+;;; denied for THIS agent, on top of the shared list. Permission packages will
+;;; define the richer schema (effect allow/deny, per-domain).
+
+(define (agent-permission-profile slug)
+  (let ((buf (agent-buf slug)))
+    (and buf (buffer-exists? buf) (buffer-local buf 'agent-permission-profile))))
+
+(define (set-agent-permission-profile! slug profile)
+  (let ((buf (agent-buf slug)))
+    (when (and buf (buffer-exists? buf))
+      (buffer-set-local! buf 'agent-permission-profile profile)))
+  profile)
+
+;; -> the matching pattern, or #f
+(define (profile-denies? profile text)
+  (and profile
+       (let ((t (string-downcase text)))
+         (let loop ((ps (or (plist-get profile 'deny-patterns) '())))
+           (cond ((null? ps) #f)
+                 ((re-match? (car ps) t) (car ps))
+                 (else (loop (cdr ps))))))))
+
 ;; The one policy. Override wholesale in ~/.aimax/init.scm:
 ;;   (set! *permission-policy* (lambda (buf title kind raw) 'allow))
 ;; -> 'allow | 'allow-always | 'ask | 'reject
 (define *permission-policy*
   (lambda (buf title kind raw)
-    (cond ((permission-denied-verb?
-             (string-append (or title "") " " (or kind "") " " (or raw "")))
-           'ask)
-          ((equal? (chat-permission-mode buf) 'ask) 'ask)
-          (else 'allow-always))))
+    (let* ((text (string-append (or title "") " " (or kind "") " " (or raw "")))
+           (profile (and buf (buffer-exists? buf)
+                         (buffer-local buf 'agent-permission-profile))))
+      (cond ((equal? kind "execute") 'reject)  ; no shell — aimax is the only sandbox
+            ((permission-denied-verb? text) 'ask)
+            ((profile-denies? profile text) 'reject)
+            ((equal? (chat-permission-mode buf) 'ask) 'ask)
+            (else 'allow-always)))))
 
 ;; the direct lane's gate (Backend.ReqLLM calls this before every tool):
 ;; collapse to the three verdicts Elixir understands
-(agent-permission-fn!
+(llm-session-permission-fn!
   (lambda (slug name kind raw)
     (let* ((buf (agent-buf slug))
            (v (*permission-policy* buf name kind raw)))
@@ -599,7 +628,7 @@
                       (agent--pick-mode buf *permission-ask-modes*))
                      (else #f))))
     (when (and want (not (equal? want cur)))
-      (when (agent-set-mode! slug want)
+      (when (llm-session-set-mode! slug want)
         (buffer-set-local! buf 'agent-mode want)))))
 
 ;; the agent's OWN mode list (claude-code: default/acceptEdits/plan/
@@ -618,7 +647,7 @@
                 (map (lambda (m) (list (car m) (or (nth 2 m) ""))) modes)
                 (lambda (m)
                   (unless (equal? (string-trim m) "")
-                    (if (agent-set-mode! slug m)
+                    (if (llm-session-set-mode! slug m)
                         (begin (buffer-set-local! buf 'agent-mode m)
                                (agent-update-modeline! buf)
                                (message (string-append "agent mode: " m)))
@@ -730,7 +759,7 @@
 ;; whose whole point is a new mcpServers list.
 (define (agent-reconnect! slug cname model)
   (let ((buf (agent-buf slug)))
-    (agent-kill! slug)
+    (llm-session-close! slug)
     (buffer-set-local! buf 'agent-connector cname)
     (buffer-set-local! buf 'agent-model (if (equal? model "") #f model))
     (agent-update-modeline! buf)
@@ -805,14 +834,14 @@
                          "\n[fresh session — the conversation above was replayed into it]\n"
                          "agent-meta")))
             (agent-block-push! buf start (agent-mark slug) "meta" '()))
-          (agent-prompt! slug
+          (llm-session-send! slug
             (string-append
               "Context: this continues an earlier conversation from the"
               " user's editor (possibly with a different model). The"
               " conversation so far:\n\n" (agent-seed-transcript buf)
               "\n\nContinue naturally from there. New message:\n" msg)
             raw))
-        (agent-prompt! slug msg raw))))
+        (llm-session-send! slug msg raw))))
 
 (define-command "agent-send" "Send the input to the agent, reviving it if dead"
   (lambda ()
@@ -956,7 +985,7 @@
                (message "agent restarted (hard reset)"))
               (else
                (buffer-set-local! buf 'agent-cancelling #t)
-               (agent-cancel! slug)
+               (llm-session-cancel! slug)
                (message "cancel requested — C-RET again forces a restart")))))))
 
 ;; The plain half of that ladder, on the key Emacs aborts with. C-g stops
@@ -969,7 +998,7 @@
            (slug (agent-slug-of buf)))
       (if (and slug (member (agent-status slug) '(running starting needs_attention)))
           (begin
-            (agent-cancel! slug)
+            (llm-session-cancel! slug)
             ;; both waiting markers: a thread renders its own ('agent-waiting),
             ;; a chat that never attached a runtime renders 'chat-waiting
             (agent-clear-waiting! slug)
@@ -1030,18 +1059,34 @@
   '(cmd "/Users/svs/.asdf/installs/nodejs/24.0.2/bin/node /Users/svs/src/claude-code-acp/dist/index.js"
     meta (claudeCode (options (settingSources () strictMcpConfig #t)))
     models ("claude-sonnet-5" "claude-opus-5" "claude-haiku-4-5-20251001")))
-;; codex rides a ChatGPT subscription (auth from `codex login`). Models are
-;; what the bundled codex core recognizes; the thread's model is passed as a
-;; config override on the adapter's command line ('model-flag).
-(define-connector! "codex"
-  '(cmd "codex-acp" model-flag "-c model="
+;; Codex rides a ChatGPT subscription (auth from `codex login`). The primary
+;; connector speaks App Server directly. The old Codex ACP bridge remains a
+;; hidden compatibility connector for saved chats, but is deprecated and is
+;; no longer offered for new chats.
+(define *codex-app-server-connector*
+  '(backend "codex-app-server" cmd "codex app-server"
+    models ("gpt-5.6-sol" "gpt-5.6-terra" "gpt-5.6-luna" "gpt-5.5"
+            "gpt-5.4" "gpt-5.4-mini" "gpt-5.3-codex-spark")))
+(define-connector! "codex-app-server" *codex-app-server-connector*)
+;; Existing .chat headers and user config named this connector "codex".
+;; Keep that identity working, but do not show a duplicate picker row.
+(define-connector! "codex" (append '(hidden #t) *codex-app-server-connector*))
+(define-connector! "codex-acp"
+  '(hidden #t deprecated "use codex-app-server"
+    cmd "codex-acp" model-flag "-c model="
     models ("gpt-5.6-luna" "gpt-5.5" "gpt-5.5-pro" "gpt-5.4" "gpt-5.4-mini" "gpt-5.3-codex")))
 ;; the direct-API lane: in-process req_llm turns — streaming, tools, cost
 ;; tracking, no subprocess. "api" is just another connector, and it
 ;; declares its models like any other — as a thunk, because the set is
 ;; *llm-models*, which a user can set! at any time.
 (define-connector! "api"
-  (list 'backend "req-llm" 'models (lambda () *llm-models*)))
+  (list 'backend "req-llm"
+        ;; User choices stay first as favorites; ReqLLM contributes every
+        ;; chat model whose provider is actually configured on this machine.
+        'models (lambda ()
+                  (fold (lambda (acc m)
+                          (if (member m acc) acc (append acc (list m))))
+                        *llm-models* (llm-available-models)))))
 
 ;; What a connector's backend CAN DO, asked of the backend itself. Every
 ;; question that used to be "is this the api lane?" is one of these now: a
@@ -1137,8 +1182,10 @@
          (m (or (plist-get conf 'model)
                 (and (member (llm-model) (connector-models cname)) (llm-model)))))
     (cond ((not m) conf)
-          ((equal? (plist-get conf 'backend) "req-llm")
-           ;; in-process: the model is config, not wiring
+          ((or (equal? (plist-get conf 'backend) "req-llm")
+               (equal? (plist-get conf 'backend) "codex-app-server"))
+           ;; direct and native lanes carry the model in protocol config,
+           ;; not adapter command-line wiring
            (append (list 'model m) conf))
           ((plist-get conf 'model-flag)
            ;; value must be quoted TOML — codex ignores the bare form
@@ -1152,7 +1199,21 @@
 
 (define (connector-names)
   (let loop ((cs *agent-connectors*) (acc '()))
-    (if (null? cs) (reverse acc) (loop (cdr cs) (cons (car (car cs)) acc)))))
+    (if (null? cs)
+        (reverse acc)
+        (loop (cdr cs)
+              (if (plist-get (car (cdr (car cs))) 'hidden)
+                  acc
+                  (cons (car (car cs)) acc))))))
+
+(define (connector-description name)
+  (let ((backend (or (plist-get (connector-config name) 'backend) "acp")))
+    (cond ((equal? backend "req-llm")
+           "direct API — metered, cached, cheap lane")
+          ((equal? backend "codex-app-server")
+           "Codex App Server — ChatGPT subscription")
+          (else
+           "ACP agent — subscription or external adapter"))))
 
 ;; the model a resolved config lands on: explicit 'model, else the
 ;; ANTHROPIC_MODEL env pair, else #f (adapter's own default)
@@ -1179,6 +1240,8 @@
     (buffer-set-local! buf 'modeline-info
       (string-append c
         (if (and m (not (equal? m ""))) (string-append " · " m) "")
+        (let ((effort (buffer-local buf 'agent-effort)))
+          (if effort (string-append " · " effort) ""))
         (if cost (string-append " · " (format-usd cost)) "")
         ;; what will and won't stop to ask — never leave this ambiguous
         " · " (symbol->string (chat-permission-mode buf))
@@ -1262,7 +1325,7 @@
       (set-mode! "chat-mode")
       (end-of-buffer!))
     (unless (equal? prompt "")
-      (agent-prompt! slug prompt))
+      (llm-session-send! slug prompt))
     slug))
 
 (define-command "agent-open" "Prompt for a task and spawn a new agent thread"
@@ -1459,7 +1522,7 @@
   (let ((slug (buffer-local b 'agent-slug)))
     (and slug
          (begin (agent-note-stopped! slug)
-                (agent-kill! slug)
+                (llm-session-close! slug)
                 #t))))
 
 ;; archive: runtime (if any) + buffer both go (desktop stops restoring it).

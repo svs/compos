@@ -31,6 +31,7 @@ defmodule Aimax.AgentTest do
   use ExUnit.Case
 
   alias Aimax.Core.{Agent, Buffer, Editor, KeyDispatch, Session}
+  alias Aimax.Core.Agent.Backend
 
   defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
   defp type(str), do: str |> String.graphemes() |> press()
@@ -74,6 +75,157 @@ defmodule Aimax.AgentTest do
       "method" => "session/update",
       "params" => %{"sessionId" => sid, "update" => update}
     })
+  end
+
+  test "native Codex App Server handshake, stream, approval, and completion normalize to backend events" do
+    {:ok, backend} =
+      Aimax.Core.Agent.Backend.CodexAppServer.start(
+        %{
+          "cmd" => "fake",
+          "cwd" => File.cwd!(),
+          "model" => "gpt-5.5",
+          "effort" => "high",
+          "meta" => [{:sym, "systemPrompt"}, [{:sym, "append"}, "Use Aimax."]],
+          "mcp-servers" => [
+            [
+              "name",
+              "aimax",
+              "command",
+              "aimax-mcp-proxy",
+              "args",
+              ["--stdio"],
+              "env",
+              [["AIMAX_AGENT", "a1"]]
+            ]
+          ]
+        },
+        self()
+      )
+
+    on_exit(fn -> Aimax.Core.Agent.Backend.CodexAppServer.close(backend) end)
+
+    assert_receive {:transport_open, ^backend}, 1_000
+    assert_receive {:transport_cmd, "fake"}, 1_000
+
+    assert_receive {:frame, %{"method" => "initialize", "id" => init_id} = init}, 1_000
+    refute Map.has_key?(init, "jsonrpc")
+    assert get_in(init, ["params", "clientInfo", "name"]) == "aimax"
+
+    inject(backend, %{"id" => init_id, "result" => %{}})
+    assert_receive {:frame, %{"method" => "initialized"}}, 1_000
+    assert_receive {:frame, %{"method" => "model/list", "id" => models_id}}, 1_000
+    assert_receive {:backend_event, ready}, 1_000
+    assert Backend.event_type(ready) == "ready"
+
+    inject(backend, %{
+      "id" => models_id,
+      "result" => %{
+        "data" => [
+          %{
+            "model" => "gpt-5.5",
+            "displayName" => "GPT-5.5",
+            "hidden" => false,
+            "supportedReasoningEfforts" => [
+              %{"reasoningEffort" => "low"},
+              %{"reasoningEffort" => "medium"},
+              %{"reasoningEffort" => "high"},
+              %{"reasoningEffort" => "xhigh"}
+            ],
+            "defaultReasoningEffort" => "medium"
+          }
+        ]
+      }
+    })
+
+    assert_receive {:backend_event, model_event}, 1_000
+    assert Backend.event_type(model_event) == "model-state"
+    assert Backend.plist_get(model_event, "current") == "gpt-5.5"
+
+    assert Backend.plist_get(model_event, "available") == [
+             ["gpt-5.5", "GPT-5.5", ["low", "medium", "high", "xhigh"], "medium"]
+           ]
+
+    assert :ok =
+             Aimax.Core.Agent.Backend.CodexAppServer.prompt(backend, "hello", %{
+               system: "Chat system context."
+             })
+
+    assert_receive {:frame,
+                    %{"method" => "thread/start", "id" => thread_id, "params" => thread_params}},
+                   1_000
+
+    assert thread_params["ephemeral"]
+    assert thread_params["model"] == "gpt-5.5"
+    assert thread_params["developerInstructions"] =~ "Use Aimax."
+    assert thread_params["developerInstructions"] =~ "Chat system context."
+    assert thread_params["developerInstructions"] =~ ~s{exact runtime model ID is "gpt-5.5"}
+
+    assert get_in(thread_params, ["config", "mcp_servers", "aimax"]) == %{
+             "command" => "aimax-mcp-proxy",
+             "args" => ["--stdio"],
+             "env" => %{"AIMAX_AGENT" => "a1"}
+           }
+
+    inject(backend, %{
+      "id" => thread_id,
+      "result" => %{"thread" => %{"id" => "thread-1"}, "model" => "gpt-5.5"}
+    })
+
+    assert_receive {:backend_event, _second_model_event}, 1_000
+
+    assert_receive {:frame, %{"method" => "turn/start", "id" => turn_request, "params" => turn}},
+                   1_000
+
+    assert turn["threadId"] == "thread-1"
+    assert turn["input"] == [%{"type" => "text", "text" => "hello"}]
+    assert turn["effort"] == "high"
+    inject(backend, %{"id" => turn_request, "result" => %{"turn" => %{"id" => "turn-1"}}})
+
+    inject(backend, %{
+      "method" => "item/agentMessage/delta",
+      "params" => %{"itemId" => "msg-1", "delta" => "Hi"}
+    })
+
+    assert_receive {:backend_event, chunk}, 1_000
+    assert Backend.event_type(chunk) == "chunk"
+    assert Backend.plist_get(chunk, "text") == "Hi"
+
+    inject(backend, %{
+      "id" => 91,
+      "method" => "item/commandExecution/requestApproval",
+      "params" => %{"itemId" => "cmd-1", "command" => "git status"}
+    })
+
+    assert_receive {:backend_event, permission}, 1_000
+    assert Backend.event_type(permission) == "permission"
+    assert Backend.plist_get(permission, "rpc-id") == 91
+
+    assert :ok =
+             Aimax.Core.Agent.Backend.CodexAppServer.respond_permission(
+               backend,
+               91,
+               "allow_always"
+             )
+
+    assert_receive {:frame, %{"id" => 91, "result" => %{"decision" => "acceptForSession"}}},
+                   1_000
+
+    inject(backend, %{
+      "method" => "turn/completed",
+      "params" => %{
+        "threadId" => "thread-1",
+        "turn" => %{"id" => "turn-1", "status" => "completed"}
+      }
+    })
+
+    assert_receive {:backend_event, turn_end}, 1_000
+    assert Backend.event_type(turn_end) == "turn-end"
+
+    assert :ok = Aimax.Core.Agent.Backend.CodexAppServer.prompt(backend, "second", %{})
+
+    assert_receive {:frame, %{"method" => "turn/start", "params" => second_turn}}, 1_000
+    assert second_turn["input"] == [%{"type" => "text", "text" => "second"}]
+    assert second_turn["effort"] == "high"
   end
 
   # boot a thread through (execute ...) and complete the ACP handshake.
@@ -214,10 +366,31 @@ defmodule Aimax.AgentTest do
            end)
   end
 
-  test "codex-style connectors wire the model through the command line" do
-    {:ok, cmd} =
+  test "Codex App Server is visible; deprecated Codex names remain hidden compatibility connectors" do
+    assert {:ok, visible} = Session.eval(~s[(connector-names)])
+    assert visible =~ "codex-app-server"
+    refute visible =~ "codex-acp"
+    refute visible =~ ~s["codex"]
+
+    assert {:ok, ~s["Codex App Server — ChatGPT subscription"]} =
+             Session.eval(~s[(connector-description "codex-app-server")])
+
+    {:ok, native_backend} =
+      Session.eval(
+        ~s[(plist-get (agent-resolve-config '(connector "codex" model "gpt-5.5")) 'backend)]
+      )
+
+    {:ok, native_cmd} =
       Session.eval(
         ~s[(plist-get (agent-resolve-config '(connector "codex" model "gpt-5.5")) 'cmd)]
+      )
+
+    assert native_backend == ~s["codex-app-server"]
+    assert native_cmd == ~s["codex app-server"]
+
+    {:ok, cmd} =
+      Session.eval(
+        ~s[(plist-get (agent-resolve-config '(connector "codex-acp" model "gpt-5.5")) 'cmd)]
       )
 
     assert cmd == ~s["codex-acp -c model=\\"gpt-5.5\\""]
@@ -225,7 +398,7 @@ defmodule Aimax.AgentTest do
     # and the FLAGGED cmd is what actually reaches the transport — duplicate
     # plist keys must resolve first-wins on the elixir side too
     {:ok, _} =
-      Session.eval(~s{(execute* "" '(connector "codex" model "gpt-5.5" cmd "fake"))})
+      Session.eval(~s{(execute* "" '(connector "codex-acp" model "gpt-5.5" cmd "fake"))})
 
     assert_receive {:transport_open, _}, 1_000
     assert_receive {:transport_cmd, spawned}, 1_000
@@ -326,7 +499,7 @@ defmodule Aimax.AgentTest do
       "method" => "session/request_permission",
       "params" => %{
         "sessionId" => "sess-1",
-        "toolCall" => %{"title" => "Bash", "kind" => "execute"},
+        "toolCall" => %{"title" => "Edit files", "kind" => "edit"},
         "options" => [
           %{"optionId" => "o-once", "name" => "Allow", "kind" => "allow_once"},
           %{"optionId" => "o-always", "name" => "Always", "kind" => "allow_always"},
@@ -341,6 +514,32 @@ defmodule Aimax.AgentTest do
 
     assert_receive {:frame, %{"id" => 88, "result" => %{"outcome" => outcome}}}, 1_000
     assert outcome == %{"outcome" => "selected", "optionId" => "o-always"}
+  end
+
+  test "command execution is rejected — aimax is the only sandbox" do
+    {slug, _buf, agent} = boot("")
+
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "go")])
+    assert_receive {:frame, %{"method" => "session/prompt"}}, 1_000
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => 89,
+      "method" => "session/request_permission",
+      "params" => %{
+        "sessionId" => "sess-1",
+        "toolCall" => %{"title" => "Bash", "kind" => "execute"},
+        "options" => [
+          %{"optionId" => "o-once", "name" => "Allow", "kind" => "allow_once"},
+          %{"optionId" => "o-always", "name" => "Always", "kind" => "allow_always"},
+          %{"optionId" => "o-no", "name" => "Reject", "kind" => "reject_once"}
+        ]
+      }
+    })
+
+    # auto-rejected even in ask mode — no banner, no needs_attention
+    assert_receive {:frame, %{"id" => 89, "result" => %{"outcome" => outcome}}}, 1_000
+    assert outcome == %{"outcome" => "selected", "optionId" => "o-no"}
   end
 
   test "C-RET cancels the running turn" do
@@ -490,9 +689,9 @@ defmodule Aimax.AgentTest do
   test "api connector: in-process thread, turns accumulate, no subprocess" do
     rounds = :ets.new(:api_rounds, [:public])
 
-    Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: messages} ->
+    Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: messages} = req ->
       n = :ets.info(rounds, :size) + 1
-      :ets.insert(rounds, {n, messages})
+      :ets.insert(rounds, {n, messages, req[:reasoning_effort]})
 
       {:ok,
        %{
@@ -504,7 +703,9 @@ defmodule Aimax.AgentTest do
 
     on_exit(fn -> Application.delete_env(:aimax_core, :llm_chat_fun) end)
 
-    {:ok, _} = Session.eval(~s{(execute* "what is 6*7" '(connector "api"))})
+    {:ok, _} =
+      Session.eval(~s{(execute* "what is 6*7" '(connector "api" effort "high"))})
+
     buf = "*chat:a1*"
 
     # no ACP handshake — no transport was opened
@@ -520,7 +721,8 @@ defmodule Aimax.AgentTest do
 
     # the second request replays the whole conversation from the record —
     # no private history in the runtime
-    [{_, msgs} | _] = rounds |> :ets.tab2list() |> Enum.sort(:desc)
+    [{_, msgs, effort} | _] = rounds |> :ets.tab2list() |> Enum.sort(:desc)
+    assert effort == :high
     flat = Enum.map_join(msgs, "\n", fn m -> inspect(m.content) end)
     assert flat =~ "what is 6*7"
     assert flat =~ "reply-1"
@@ -843,6 +1045,24 @@ defmodule Aimax.AgentTest do
 
     assert eventually(fn -> Buffer.text(buf) =~ "[agent exited]" end)
     assert eventually(fn -> match?(%{status: :dead}, Agent.info(slug)) end)
+  end
+
+  test "a backend process crash leaves the session alive for queued rendering and revival" do
+    {slug, buf, backend} = boot("")
+
+    Process.exit(backend, :boom)
+
+    assert eventually(fn -> match?(%{status: :dead}, Agent.info(slug)) end)
+    assert is_integer(Agent.append_at_mark(slug, "late event\n"))
+    assert Buffer.text(buf) =~ "late event"
+  end
+
+  test "a late render after its target was killed does not kill the session" do
+    {slug, buf, _backend} = boot("")
+
+    assert :ok = Aimax.Core.kill_buffer(buf)
+    assert Agent.append_at_mark(slug, "too late\n") == {:error, :no_buffer}
+    assert Agent.running?(slug)
   end
 
   test "session/new carries our mcpServers and _meta; the adapter loads no user config" do

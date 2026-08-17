@@ -78,8 +78,12 @@ defmodule Aimax.CoreTest do
       me = self()
 
       {:ok, _id} =
-        Reactor.on_change(name, {:contains, "ERROR"}, fn changes -> send(me, {:fired, changes}) end,
-          debounce: 30
+        Reactor.on_change(
+          name,
+          {:contains, "ERROR"},
+          fn changes -> send(me, {:fired, changes}) end,
+          debounce: 30,
+          eager: true
         )
 
       Buffer.append(name, "INFO fine\n")
@@ -96,7 +100,8 @@ defmodule Aimax.CoreTest do
       {:ok, _} = Core.create_buffer(name)
       me = self()
 
-      {:ok, _} = Reactor.on_change(name, :any, fn changes -> send(me, {:fired, changes}) end)
+      {:ok, _} =
+        Reactor.on_change(name, :any, fn changes -> send(me, {:fired, changes}) end, eager: true)
 
       Buffer.append(name, "agent output", source: {:agent, "x"})
       refute_receive {:fired, _}, 100
@@ -104,6 +109,43 @@ defmodule Aimax.CoreTest do
       Buffer.append(name, "human edit")
       assert_receive {:fired, [%{inserted: "human edit"}]}, 500
     end
+
+    test "a rule follows immutable buffer identity through rename and wake" do
+      old = uniq("reactor-old")
+      new = uniq("reactor-new")
+      {:ok, _} = Core.create_buffer(old)
+      ref = Buffer.ref(old)
+      me = self()
+
+      {:ok, rule} =
+        Reactor.on_change(old, :any, fn changes -> send(me, {:fired, changes}) end, eager: true)
+
+      assert {:ok, ^new} = Core.rename_buffer(ref, new)
+      Buffer.append(ref, "renamed")
+      assert_receive {:fired, [%{inserted: "renamed"}]}, 500
+
+      :ok = Buffer.checkpoint_now(ref)
+      [{pid, _}] = Registry.lookup(Aimax.Core.BufferRegistry, new)
+      :ok = DynamicSupervisor.terminate_child(Aimax.Core.BufferSupervisor, pid)
+      assert eventually(fn -> not Buffer.exists?(ref) end)
+
+      Buffer.append(ref, " and awake")
+      assert_receive {:fired, [%{inserted: " and awake"}]}, 500
+
+      Reactor.remove(rule)
+      Core.kill_buffer(ref)
+    end
+  end
+
+  test "a stale name reads as absent instead of exiting through :noproc" do
+    name = uniq("stale-local")
+    {:ok, _} = Core.create_buffer(name)
+    :ok = Core.kill_buffer(name)
+
+    assert Buffer.get_local(name, "anything") == nil
+    assert Buffer.locals(name) == %{}
+    assert Buffer.text(name) == nil
+    assert Buffer.ref(name) == nil
   end
 
   describe "Session (Scheme wired to buffers)" do
@@ -142,6 +184,18 @@ defmodule Aimax.CoreTest do
       assert {:error, msg} = Session.eval("(undefined-fn 1)")
       assert msg =~ "unbound"
       assert {:ok, "3"} = Session.eval("(+ 1 2)")
+    end
+  end
+
+  defp eventually(fun, tries \\ 50)
+  defp eventually(fun, 0), do: fun.()
+
+  defp eventually(fun, tries) do
+    if fun.() do
+      true
+    else
+      Process.sleep(10)
+      eventually(fun, tries - 1)
     end
   end
 end

@@ -516,13 +516,13 @@
           'tools (if tools? (chat-tools buf) '())
           'dispatcher (chat-tool-dispatch slug))))
 
-(agent-context-fn! (lambda (slug display) (chat-thread-context slug display)))
+(llm-session-context-fn! (lambda (slug display) (chat-thread-context slug display)))
 
 ;; ...and the other half of that seam: the turn task appends to the record
 ;; every message it puts on the wire, synchronously, in the order it sends
 ;; them. Reading and writing from one process is what makes the replayed
 ;; prefix byte-identical.
-(agent-record-fn!
+(llm-session-record-fn!
   (lambda (slug role blocks wire)
     (let ((buf (agent-buf slug)))
       (when (buffer-exists? buf)
@@ -541,9 +541,11 @@
 ;;; (chat auto-titling died with the bare *chat* surface: a group chat is
 ;;; named for its group, and there is only one chat interface)
 
-;; Models offered by C-c m / M-x chat-set-model. Override in your
-;; ~/.aimax/ai-config.scm:  (set! *llm-models* (list "openai:gpt-5.6-luna" ...))
-;; Provider prefix routes the request (llm.ex): openai:/openrouter:/bare=anthropic.
+;; Models offered by C-c m / M-x chat-set-model — the seed "favorites" list.
+;; ReqLLM's credential-aware inventory (llm-available-models) fills the rest,
+;; so a provider with its key set appears here with no code change. Override
+;; the favorites in ~/.aimax/ai-config.scm:
+;;   (set! *llm-models* (list "openai:gpt-5.6-luna" "deepseek:deepseek-chat" ...))
 (define *llm-models*
   (list "openai:gpt-5.6-luna"
         "openrouter:anthropic/claude-sonnet-5"
@@ -567,7 +569,7 @@
                                    (llm-model)
                                    "connector default"))
                            "): ")
-            (or (buffer-local buf 'agent-models) (connector-models cname))
+            (chat-model-options buf cname)
             (lambda (m)
               (unless (equal? (string-trim m) "")
                 (if slug

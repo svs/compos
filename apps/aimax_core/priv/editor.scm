@@ -285,9 +285,13 @@
   (let ((f (list-opt buf 'key)))
     (if f (f buf e) e)))
 
-;; the entry on the current line, or #f
+;; The entry on the current line, or #f when the list has no rows. Point
+;; can sit off the rows — a click lands on the header or the key bar, and
+;; a mouse click runs no command — so the row at point is the NEAREST
+;; row. Every verb reads this one answer, so RET, `k` and a mark all act
+;; on the row the highlight then rests on (post-command! moves it there).
 (define (list-current buf)
-  (let ((i (list-index buf))
+  (let ((i (list-clamped-index buf))
         (es (list-entries buf)))
     (and i (< i (length es)) (nth i es))))
 
@@ -483,7 +487,7 @@
   (lambda ()
     (let* ((buf (current-buffer))
            (plan (list-execute-plan buf)))
-      (cond ((null? plan) (message "nothing flagged"))
+      (cond ((null? plan) (message "nothing marked"))
             ((list-plan-asks? plan)
              (minibuffer-read (string-append (list-plan-label buf plan) "? ")
                               (list "yes" "no")
@@ -875,14 +879,44 @@
 (define (window-config-changed!)
   (for-each list-post-command! (buffer-list)))
 
+;; Point never rests in the chrome. A header line and a key bar are not
+;; rows, and a verb acts on the row at point — so a click on the key bar
+;; made `k` say "killed 0 buffers" and RET say "no buffer here", again
+;; and again, because nothing moved point back. The nearest row takes
+;; point, and the reader SEES what the next key acts on.
+(define (list-snap-point! buf)
+  (let ((n (length (list-entries buf))))
+    (when (> n 0)
+      (let ((i (list-index buf)))
+        (cond ((not i) (list-goto-index! buf 0))
+              ((>= i n) (list-goto-index! buf (- n 1))))))))
+
+;; Some lists show state that other commands change: ibuffer shows the
+;; buffers, and C-x k kills one from anywhere. Such a mode gives a
+;; 'stamp fn — a cheap value that moves when the rows move. The list
+;; compares the stamp after every command and re-renders when it
+;; differs, so a verb never acts on a row that is gone.
+(define (list-stamp! buf)
+  (let ((f (list-opt buf 'stamp)))
+    (when f (buffer-set-local! buf 'list-stamp (f buf)))))
+
+(define (list-restamp! buf)
+  (let ((f (list-opt buf 'stamp)))
+    (when f
+      (unless (equal? (f buf) (buffer-local buf 'list-stamp))
+        (list-refresh! buf)))))
+
 ;; a table lays out in characters, so a window that changed width means a
 ;; re-render. After a command is the other moment the width can have moved.
 (define (list-post-command! buf)
-  (when (and (list-mode-of buf) (list-table? buf))
-    (let ((w (list-view-width buf)))
-      (unless (equal? w (buffer-local buf 'list-width))
-        (buffer-set-local! buf 'list-width w)
-        (list-refresh! buf)))))
+  (when (list-mode-of buf)
+    (when (list-table? buf)
+      (let ((w (list-view-width buf)))
+        (unless (equal? w (buffer-local buf 'list-width))
+          (buffer-set-local! buf 'list-width w)
+          (list-refresh! buf))))
+    (list-restamp! buf)
+    (list-snap-point! buf)))
 
 (define (list-preview! buf)
   (let ((f (list-opt buf 'preview))
@@ -1003,7 +1037,9 @@
            (was (list-index buf))
            (rows ((list-opt buf 'rows) buf))
            (cur? (equal? (current-buffer) buf))
-           (p (if cur? (point) 0))
+           ;; the buffer's own point: a refresh runs while another buffer
+           ;; is current (a hook, a prompt), and that list keeps its place
+           (p (buffer-point buf))
            (ro (buffer-read-only? buf)))
       ;; our own rewrite is not a user edit, and the buffer is read-only
       (buffer-set-read-only! buf #f)
@@ -1016,14 +1052,17 @@
       (buffer-set-read-only! buf ro)
       (when (list-table? buf)
         (buffer-set-local! buf 'list-width (list-view-width buf)))
-      (when cur?
-        (let ((i (and here (list-index-of buf rows (list-key buf here)))))
-          (cond ((and i (pair? rows)) (list-goto-index! buf i))
-                ;; the rows may have shrunk under point — the key bar is
-                ;; not a row
-                ((and was (pair? rows))
-                 (list-goto-index! buf (min was (- (length rows) 1))))
-                (else (goto-char! (min p (buffer-size buf))))))))))
+      ;; the rows are now the rows this render shows: the stamp says so
+      (list-stamp! buf)
+      (let ((i (and here (list-index-of buf rows (list-key buf here)))))
+        (cond ((and i (pair? rows)) (list-goto-index! buf i))
+              ;; the rows may have shrunk under point — the key bar is
+              ;; not a row
+              ((and was (pair? rows))
+               (list-goto-index! buf (min was (- (length rows) 1))))
+              (else
+               (let ((q (min p (buffer-size buf))))
+                 (if cur? (goto-char! q) (buffer-goto! buf q)))))))))
 
 ;; Everything a list buffer needs to BE one, applied to an explicit
 ;; buffer. The mode setup calls it with (current-buffer); opening a list
@@ -1034,6 +1073,8 @@
     ;; derived content (S15): the refresh below re-renders it from
     ;; rows-fn, so the desktop saves mode + locals, not the rows
     (buffer-set-local! buf 'transient #t)
+    ;; the stamp names the rows of one render — a restart draws new ones
+    (desktop-skip! buf 'list-stamp)
     ;; a list buffer's text IS its view. A buffer keeps the locals of the
     ;; mode before it, so dired on a directory that once held a diff kept
     ;; 'render-mode "blocks" and the window drew no rows at all.
@@ -3522,6 +3563,7 @@
 (define (llm-mode--apply! buf)
   (local-set-key* buf "M-o" "llm-send-buffer")
   (local-set-key* buf "C-c m" "llm-set-model")
+  (local-set-key* buf "C-c b" "llm-configure")
   (llm-mode--paint! buf)
   (llm-mode--ensure-hook! buf))
 
@@ -3529,7 +3571,8 @@
   (llm-mode--remove-hook! buf)
   (overlay-clear! buf 'llm-mode-responses)
   (local-unset-key* buf "M-o")
-  (local-unset-key* buf "C-c m"))
+  (local-unset-key* buf "C-c m")
+  (local-unset-key* buf "C-c b"))
 
 ;; the change rule behind M-o's response ranges is registered under the name
 ;; the buffer had. A renamed chat needs the rule again, under the new one.
@@ -3548,7 +3591,10 @@
         (message "LLM mode disabled"))))
 
 (mode-doc! "llm-mode"
-  "In-buffer LLM interaction. `M-o` sends the document and inserts the response at point with a distinct response face; `C-c m` chooses its model.")
+  "In-buffer LLM interaction. `M-o` sends the document and inserts the response at point with a distinct response face; `C-c b` chooses backend, model, and effort.")
+
+(define (buffer-llm-connector buf)
+  (or (buffer-local buf 'llm-connector) "api"))
 
 (define (buffer-llm-model buf)
   (or (buffer-local buf 'llm-model) (llm-model)))
@@ -3609,20 +3655,98 @@
 (define (chat-code-companion? docs)
   (not (equal? (chat-code-note docs) "")))
 
-;; Every M-o request takes the same path. Presets supply the complete tool
-;; surface; with none selected, llm-tools simply makes one text-only round.
-;; `aimax` is itself a preset and contributes the native editor registry.
-;; mcp.scm loads after this file, so the surface is resolved at send time.
+;; Inline/document requests are ephemeral LLM sessions. They use the same
+;; session facade, connector resolution, ReqLLM backend, normalized event
+;; stream and tool loop as chat; only their presentation differs. The chat
+;; renderer consumes events into blocks, while this adapter collects chunks
+;; and hands one completed string to the insertion callback below.
+(define *llm-inline-next* 0)
+(define *llm-inline-sends* '())
+
+(define (llm-inline-next-id)
+  (set! *llm-inline-next* (+ *llm-inline-next* 1))
+  (string-append "inline-" (number->string *llm-inline-next*)))
+
+(define (llm-inline-put! entry)
+  (let ((id (car entry)))
+    (set! *llm-inline-sends*
+      (cons entry
+            (remove (lambda (e) (equal? (car e) id)) *llm-inline-sends*)))))
+
+(define (llm-inline-add-chunk! id text)
+  (let ((e (assoc id *llm-inline-sends*)))
+    (when e
+      ;; (id buffer completion accumulated error)
+      (llm-inline-put!
+        (list id (car (cdr e)) (car (cdr (cdr e)))
+              (string-append (car (cdr (cdr (cdr e)))) text)
+              (car (cdr (cdr (cdr (cdr e))))))))))
+
+(define (llm-inline-error! id text)
+  (let ((e (assoc id *llm-inline-sends*)))
+    (when e
+      (llm-inline-put!
+        (list id (car (cdr e)) (car (cdr (cdr e)))
+              (car (cdr (cdr (cdr e)))) text)))))
+
+(define (llm-inline-finish! id)
+  (let ((e (assoc id *llm-inline-sends*)))
+    (when e
+      ;; Remove and close before invoking user presentation code: completion
+      ;; may start another send, and an error in it must not leak a runtime.
+      (set! *llm-inline-sends*
+        (remove (lambda (x) (equal? (car x) id)) *llm-inline-sends*))
+      (llm-session-close! id)
+      (let ((result (car (cdr (cdr (cdr e)))))
+            (error (car (cdr (cdr (cdr (cdr e))))))
+            (completion (car (cdr (cdr e)))))
+        (if error
+            (message (string-append "LLM failed · " error))
+            (completion result))))))
+
+(define (llm-inline-events! id events)
+  (for-each
+    (lambda (event)
+      (let ((type (plist-get event 'type)))
+        (cond ((equal? type 'chunk)
+               (llm-inline-add-chunk! id (or (plist-get event 'text) "")))
+              ((equal? type 'error)
+               (llm-inline-error! id (or (plist-get event 'text) "request failed")))
+              ((equal? type 'turn-end)
+               (llm-inline-finish! id)))))
+    events))
+
+;; Presets supply the complete tool surface; with none selected, the shared
+;; ReqLLM backend makes one text-only round. `aimax` contributes the native
+;; editor registry. mcp.scm loads later, so the surface resolves at send time.
 (define (llm-mode--complete buf context model handler)
-  (let ((specs (if (boundp (quote chat-extra-tool-specs))
-                   (chat-extra-tool-specs buf)
-                   '()))
-        (system (string-append
-                  (if (boundp (quote chat-tool-system))
-                      (chat-tool-system buf)
-                      "")
-                  (llm-mode--group-note buf))))
-    (llm-tools context system specs llm-tool-call handler #f model)))
+  (let* ((id (llm-inline-next-id))
+         (connector (buffer-llm-connector buf))
+         (effort (buffer-local buf 'llm-effort))
+         (specs (if (boundp (quote chat-extra-tool-specs))
+                    (chat-extra-tool-specs buf)
+                    '()))
+         (system (string-append
+                   (if (boundp (quote chat-tool-system))
+                       (chat-tool-system buf)
+                       "")
+                   (llm-mode--group-note buf)))
+         (config (agent-resolve-config
+                   (append
+                     (list 'connector connector 'model model
+                           'buffer buf 'mark (point))
+                     (if effort (list 'effort effort) '())))))
+    (llm-inline-put! (list id buf handler "" #f))
+    (llm-session-open! id config
+      (lambda (_id _display)
+        (list 'turns '() 'system system 'tools specs
+              'dispatcher llm-tool-call))
+      (lambda (_id events) (llm-inline-events! id events))
+      (lambda (_id _role _blocks _wire) #t)
+      ;; Inline M-o historically executed its selected tools directly; chat
+      ;; sessions continue to use the shared permission policy and UI.
+      (lambda (_id _name _kind _raw) 'allow))
+    (llm-session-send! id context context)))
 
 (define-command "llm-send-buffer" "Send this document to the LLM and insert its reply below point"
   (lambda ()
@@ -3659,6 +3783,7 @@
 
 (global-set-key "M-o" "llm-send-buffer")
 (global-set-key "C-c m" "llm-set-model")
+(global-set-key "C-c b" "llm-configure")
 
 ;;; --- chat buffer (gptel-style) -------------------------------------------------
 ;;; *chat* is an ordinary editable buffer. Type after the "### You" marker,
@@ -3680,7 +3805,7 @@
     (let ((buf (current-buffer)))
       (local-set-key "C-c m" "chat-set-model")
       (local-set-key "C-c $" "chat-cost")
-      (local-set-key "C-c b" "chat-set-backend")
+      (local-set-key "C-c b" "llm-configure")
       (local-set-key "C-c C-k" "chat-reset")
       ;; On desktop restore EVERY runtime local is a lie: the process it
       ;; described died with the daemon. Clear the whole class — not just
@@ -3874,7 +3999,7 @@
       (buffer-set-local! buf 'agent-saved-mark mark)
       (agent-install-keys! buf)
       (agent-update-modeline! buf)
-      (agent-start! slug
+      (llm-session-open! slug
         (append (list 'buffer buf 'mark mark)
                 (agent-resolve-config
                   (append
@@ -3887,6 +4012,8 @@
                           'presets (if (boundp (quote chat-presets-of))
                                        (chat-presets-of buf)
                                        '()))
+                    (let ((effort (buffer-local buf 'agent-effort)))
+                      (if effort (list 'effort effort) '()))
                     (if (and model (not (equal? model "")))
                         (list 'model model)
                         '())))))
@@ -3949,6 +4076,8 @@
     (value->string (or (buffer-local buf 'agent-connector) "api"))
     (let ((m (buffer-local buf 'agent-model)))
       (if m (string-append " model " (value->string m)) ""))
+    (let ((effort (buffer-local buf 'agent-effort)))
+      (if effort (string-append " effort " (value->string effort)) ""))
     (let ((ps (buffer-local buf 'chat-presets)))
       (if (pair? ps) (string-append " presets " (value->string ps)) ""))
     " permission-mode "
@@ -4036,7 +4165,7 @@
         (lambda (pair)
           (let ((v (plist-get header (car pair))))
             (when v (buffer-set-local! buf (cadr pair) v))))
-        '((connector agent-connector) (model agent-model)
+        '((connector agent-connector) (model agent-model) (effort agent-effort)
           (presets chat-presets) (permission-mode chat-permission-mode)))
       (let* ((end (or (chat-file-record-at text) (string-byte-length text)))
              (recorded (chat-file-record text))
@@ -4096,8 +4225,9 @@
 ;; 'render-mode is the chat's chosen VIEW ("agent" rich, "plain" text) —
 ;; a choice about the chat, so identity (S11)
 (define chat-identity-locals
-  '(group group-meta group-layout group-noise agent-connector agent-model
-    chat-presets chat-permission-mode render-mode default-directory))
+  '(group group-meta group-layout group-noise agent-connector agent-model agent-effort
+    chat-presets chat-permission-mode render-mode default-directory
+    agent-permission-profile))
 
 ;; what was SAID — survives restart and save; reset clears it
 ;; ('chat-turns is the pre-record shape: chat-record-migrate! reads it once
@@ -4152,9 +4282,9 @@
             ;; permission answered after its blocks are gone is the
             ;; blind-banner race; killing the thread resolves it cancelled.
             (let ((slug (buffer-local buf 'agent-slug)))
-              (when (and slug (boundp (quote agent-kill!)))
+              (when (and slug (boundp (quote llm-session-close!)))
                 (unless (equal? (agent-status slug) 'dead)
-                  (agent-kill! slug))))
+                  (llm-session-close! slug))))
             (overlay-clear! buf "all")
             ;; every tag: a reset empties the buffer, so no owner's ranges
             ;; still mean anything
@@ -4220,18 +4350,24 @@
   (or (buffer-local buf 'agent-slug) (chat-attach! buf)))
 
 ;; the one switch. connector #f keeps the current one; model "" means the
-;; connector's own default.
-(define (chat-switch! buf connector model)
+;; connector's own default. An omitted effort preserves it on the same lane;
+;; "default" asks the backend to use the selected model's default.
+(define (chat-switch! buf connector model &optional effort)
   (let* ((slug (buffer-local buf 'agent-slug))
          (cur (or (buffer-local buf 'agent-connector) *default-connector*))
          (cname (or connector cur))
          (same-lane? (equal? cname cur)))
     (cond
       ;; in place: nothing restarts, so nothing can be lost
-      ((and same-lane? (not (equal? model ""))
-            (chat-model-takeable? buf slug model)
-            (agent-set-model! slug model))
-       (buffer-set-local! buf 'agent-model model)
+      ((and same-lane? slug (not (equal? (agent-status slug) 'dead))
+            (or (equal? model "")
+                (and (chat-model-takeable? buf slug model)
+                     (llm-session-set-model! slug model)))
+            (or (not effort) (llm-session-set-effort! slug effort)))
+       (unless (equal? model "") (buffer-set-local! buf 'agent-model model))
+       (when effort
+         (buffer-set-local! buf 'agent-effort
+           (if (equal? effort "default") #f effort)))
        (agent-update-modeline! buf)
        'in-place)
       (else
@@ -4241,7 +4377,11 @@
         (unless same-lane?
           (buffer-set-local! buf 'agent-models #f)
           (buffer-set-local! buf 'agent-modes #f)
-          (buffer-set-local! buf 'agent-mode #f))
+          (buffer-set-local! buf 'agent-mode #f)
+          (buffer-set-local! buf 'agent-effort #f))
+        (when effort
+          (buffer-set-local! buf 'agent-effort
+            (if (equal? effort "default") #f effort)))
         (buffer-set-local! buf 'chat-mcp-dirty #f)
         ;; the restart itself is agent-reconnect!'s job — the same one
         ;; C-RET and a preset change use. Reimplementing it here is how
@@ -4254,22 +4394,94 @@
               (chat-attach! buf)))
         'reattached))))
 
-(define-command "chat-set-backend" "Power this chat by the API or an agent connector"
-  (lambda ()
-    (let ((buf (current-buffer)))
-      (if (not (equal? (buffer-local buf 'mode-name) "chat-mode"))
-          (message "not a chat buffer")
-          (minibuffer-read "Backend: "
-            (map (lambda (c)
-                   (list c (if (connector-can? c 'stateless)
-                               "direct API — metered, cached, cheap lane"
-                               "ACP agent — rides your subscription")))
-                 (connector-names))
-            (lambda (choice)
-              (unless (equal? choice "")
-                (chat-switch! buf choice "")
-                (message (string-append "chat backend: " choice
-                                        " — the conversation carries over")))))))))
+(define (chat-llm-apply! buf connector model effort)
+  (chat-switch! buf connector (if (equal? model "default") "" model) effort)
+  (message
+    (string-append "chat LLM: " connector
+      (if (equal? model "default") "" (string-append " · " model))
+      (if (equal? effort "default") "" (string-append " · " effort))
+      " — the conversation carries over")))
+
+;; One configuration surface for every LLM frontend. Chat buffers apply the
+;; choice to their durable session; ordinary buffers persist it as llm-mode
+;; locals, and the next ephemeral inline session resolves the same connector.
+(define (llm-config-apply! buf connector model effort)
+  (if (equal? (buffer-local buf 'mode-name) "chat-mode")
+      (chat-llm-apply! buf connector model effort)
+      (begin
+        (buffer-set-local! buf 'llm-connector connector)
+        (buffer-set-local! buf 'llm-model
+          (if (equal? model "default") #f model))
+        (buffer-set-local! buf 'llm-effort
+          (if (equal? effort "default") #f effort))
+        (unless (minor-mode-on? buf "llm-mode")
+          (enable-minor-mode! buf "llm-mode"))
+        (message
+          (string-append "LLM: " connector
+            (if (equal? model "default") "" (string-append " · " model))
+            (if (equal? effort "default") "" (string-append " · " effort)))))))
+
+;; Transient uses these catalog helpers to show the live model choices.
+(define (chat-live-model-entry buf connector model)
+  (and (equal? connector (buffer-local buf 'agent-connector))
+       (let loop ((entries (or (buffer-local buf 'agent-models) '())))
+         (cond ((null? entries) #f)
+               ((and (pair? (car entries))
+                     (equal? (car (car entries)) model))
+                (car entries))
+               (else (loop (cdr entries)))))))
+
+;; A live backend model/list wins. Its compact entry is
+;; (id display-name effort-values default-effort). Before that arrives (or
+;; while choosing another connector), use the same normalized LLMDB catalog
+;; that req_llm uses. Unknown is deliberately empty: never offer a
+;; connector-wide superset that the selected model may reject.
+(define (chat-model-effort-info buf connector model)
+  (let* ((actual (if (equal? model "default")
+                     (or (and (equal? connector (buffer-local buf 'agent-connector))
+                              (buffer-local buf 'agent-model))
+                         (and (connector-can? connector 'stateless) (llm-model)))
+                     model))
+         (live (and actual (chat-live-model-entry buf connector actual))))
+    (if live
+        (list (if (pair? (cddr live)) (caddr live) '())
+              (if (pair? (cdr (cdr (cdr live))))
+                  (car (cdr (cdr (cdr live)))) ""))
+        (let* ((r (and actual (llm-model-reasoning actual)))
+               (effort (and r (plist-get r 'effort))))
+          (list (or (and effort (plist-get effort 'values)) '())
+                (or (and effort (plist-get effort 'default)) ""))))))
+
+(define (chat-model-options buf connector)
+  (let ((live (and (equal? connector (buffer-local buf 'agent-connector))
+                   (buffer-local buf 'agent-models))))
+    (if (pair? live)
+        (map (lambda (entry) (list (car entry) (cadr entry))) live)
+        (map (lambda (m) (list m "")) (connector-models connector)))))
+
+(define (llm-config-read! prompt candidates confirm cancel)
+  (minibuffer-read* prompt candidates
+    (list (list 'confirm confirm)
+          (list 'cancel cancel)
+          (list 'style "palette"))))
+
+;; Candidate palettes select their first row. Put CURRENT there and label it
+;; explicitly; unlike pre-filling the minibuffer, this keeps every alternative
+;; visible while still showing which value is active.
+(define (llm-config-current-first candidates current)
+  (let ((selected
+          (map (lambda (c)
+                 (list (car c)
+                       (string-append "current"
+                         (if (equal? (cadr c) "") ""
+                             (string-append " · " (cadr c))))))
+               (filter (lambda (c) (equal? (car c) current)) candidates)))
+        (others (filter (lambda (c) (not (equal? (car c) current))) candidates)))
+    (append selected others)))
+
+;; Compatibility command for saved bindings and existing callers.
+(define-command "chat-set-backend" "Choose this chat's LLM backend, model, and effort"
+  (lambda () (run-command "llm-configure")))
 
 ;;; --- rich chat transcript (the agent thread design) ---------------------------
 ;;; A companion chat maintains the exact locals the native agent renderer
@@ -4878,7 +5090,7 @@
              white-space: nowrap; }
 .dash-pill.warn { border-color: var(--diff-hunk-fg, #7a5a1a); color: var(--diff-hunk-fg, #7a5a1a); }
 .dash-pill.good { border-color: var(--diff-add-fg, #2e6b45); color: var(--diff-add-fg, #2e6b45); }
-.dash-grid { display: grid; grid-template-columns: 1fr 1.1fr 1.1fr; }
+.dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
 .dash-cell { padding: 12px 18px 14px; display: flex; flex-direction: column; gap: 8px;
              border-right: 1px solid var(--border, #e2dbc9); min-width: 0; }
 .dash-cell:last-child { border-right: none; }
@@ -4895,6 +5107,7 @@
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dash-v.dim { color: var(--dim-fg, #b3ac9c); }
 .dash-v.good { color: var(--diff-add-fg, #2e6b45); }
+.dash-v.warn { color: var(--diff-hunk-fg, #7a5a1a); }
 .dash-chips { display: flex; flex-wrap: wrap; gap: 5px; }
 .dash-chip { padding: 2px 8px; border-radius: 6px; background: var(--window-bg, #fdfcf8);
              border: 1px solid var(--border, #e2dbc9); font-family: var(--font-mono);
@@ -4999,13 +5212,20 @@
                                                (if hot " hot" "")))))
                days))))
 
+;; The chat that speaks for HERE: this buffer when it is one, else its
+;; group's chat. The cost, the presets and the tool surface all live on
+;; that buffer, so every card asks this one question.
+(define (dash--here-chat buf)
+  (if (chat-buffer? buf)
+      buf
+      (let ((g (buffer-group buf)))
+        (and g (group-holder g)))))
+
 ;; what HERE cost: the buffer's own chat, or its group's chat
 (define (dash--here-cost buf)
   (or (buffer-local buf 'chat-cost)
-      (let ((g (buffer-group buf)))
-        (and g
-             (let ((h (group-holder g)))
-               (and h (buffer-local h 'chat-cost)))))))
+      (let ((c (dash--here-chat buf)))
+        (and c (buffer-local c 'chat-cost)))))
 
 ;; the model HERE would talk to, and through which lane: a chat's own
 ;; agent-model, a writing buffer's llm-model, else the global default.
@@ -5024,11 +5244,94 @@
 ;; the tool presets in force here: the buffer's own, or its group chat's
 (define (dash--presets buf)
   (let ((p (or (buffer-local buf 'chat-presets)
-               (let ((g (buffer-group buf)))
-                 (and g (let ((h (group-holder g)))
-                          (and h (buffer-local h 'chat-presets))))))))
+               (let ((c (dash--here-chat buf)))
+                 (and c (buffer-local c 'chat-presets))))))
     (and (pair? p)
          (string-join (map (lambda (x) (value->string x)) p) " · "))))
+
+;;; The tools HERE can call. A chat freezes its tool list at its first
+;;; send, so the frozen list is what the model sees; before that, the
+;;; live surface is what the next send will freeze. The card names the
+;;; state, so a stale list is visible where the chat is, not only in the
+;;; modeline.
+;;;
+;;; This asks the live surface, which starts a preset's MCP servers. The
+;;; panel builds only when it opens and when its fingerprint moves, so
+;;; the question costs the same as the modeline already costs per turn.
+
+(define (dash--tool-state chat)
+  (cond ((pair? (buffer-local chat 'chat-tool-specs))
+         (list (if (and (boundp (quote chat-tools-stale?))
+                        (chat-tools-stale? chat))
+                   "stale"
+                   "frozen")
+               (buffer-local chat 'chat-tool-specs)))
+        ((boundp (quote chat-live-tool-specs))
+         (list "live" (chat-live-tool-specs chat)))
+        (else (list "none" '()))))
+
+;; A preset whose server is not ready serves no tools yet. Name those
+;; servers: "0 tools" with a preset set is otherwise unexplainable.
+(define (dash--pending-servers chat)
+  (if (not (and (boundp (quote chat-active-servers))
+                (boundp (quote mcp-server-detail))))
+      '()
+      (let ((remote (filter (lambda (s) (not (equal? s 'aimax)))
+                            (chat-active-servers chat))))
+        (map (lambda (s) (value->string s))
+             (filter (lambda (s)
+                       (let ((d (mcp-server-detail (value->string s))))
+                         (not (and (pair? d)
+                                   (equal? (plist-get d 'status) "ready")))))
+                     remote)))))
+
+;; twenty names, then a count: a server with fifty tools must not push
+;; the ledger off the panel
+(define (dash--tool-chips names)
+  (let ((n (length names)))
+    (list 'tag "div" 'class "dash-chips"
+          'children
+          (append
+            (map dash--chip (if (> n 20) (take-n names 20) names))
+            (if (> n 20)
+                (list (dash--chip (string-append "+" (number->string (- n 20))
+                                                 " more")))
+                '())))))
+
+(define (dash--tools buf)
+  (let ((chat (dash--here-chat buf)))
+    (if (not chat)
+        (dash--section "tools"
+          (list (dash--row "chat" "none" "dim")
+                (dash--row "open" "C-c c" "dim")))
+        (let* ((st (dash--tool-state chat))
+               (state (car st))
+               (names (map car (car (cdr st))))
+               (n (length names))
+               (ps (dash--presets buf)))
+          (dash--section "tools"
+            (append
+              (list (list 'tag "div" 'class "dash-big"
+                          'text (string-append (number->string n)
+                                               (if (= n 1) " tool" " tools")))
+                    (dash--row "presets" (or ps "none") (if ps #f "dim"))
+                    (dash--row "list" state
+                               (cond ((equal? state "stale") "warn")
+                                     ((equal? state "frozen") "good")
+                                     (else "dim"))))
+              (if (equal? state "stale")
+                  (list (dash--row "adopt" "C-c t"))
+                  '())
+              ;; a server that is not ready serves nothing, and the count
+              ;; above says so without saying why. Name it at any count:
+              ;; a surface missing one server still looks complete.
+              (let ((pending (dash--pending-servers chat)))
+                (if (pair? pending)
+                    (list (dash--row "waiting on"
+                                     (string-join pending " · ") "warn"))
+                    '()))
+              (if (pair? names) (list (dash--tool-chips names)) '())
+              (list (dash--row "servers" "M-x mcp-hub" "dim"))))))))
 
 (define (dash--llm buf)
   (let* ((rows (llm-cost-report))
@@ -5041,8 +5344,6 @@
       (append
         (list (list 'tag "div" 'class "dash-big" 'text (dash--model buf))
               (dash--row "lane" (dash--lane buf)))
-        (let ((ps (dash--presets buf)))
-          (if ps (list (dash--row "presets" ps)) '()))
         (if (pair? last14) (list (dash--spark last14)) '())
         (if here (list (dash--row "this chat" (format-usd here))) '())
         (list (dash--row "today, all" (if today (format-usd (cadr today)) "$0") #f)
@@ -5087,15 +5388,23 @@
 (define (dashboard-blocks buf)
   (list (dash--head buf)
         (dash--group buf)
+        (dash--tools buf)
         (dash--llm buf)))
 
+;; The fingerprint reads locals only — never the live tool surface. It
+;; runs after every command, and asking the surface there would start
+;; MCP servers on a cursor move. The frozen list and the presets are the
+;; state that moves the tools card, and both are locals.
 (define (dash--fingerprint buf)
-  (list (buffer-local buf 'mode-name)
-        (buffer-local buf 'minor-modes)
-        (buffer-group buf)
-        (buffer-local buf 'agent-model)
-        (buffer-local buf 'agent-connector)
-        (buffer-local buf 'llm-model)))
+  (let ((chat (dash--here-chat buf)))
+    (list (buffer-local buf 'mode-name)
+          (buffer-local buf 'minor-modes)
+          (buffer-group buf)
+          (buffer-local buf 'agent-model)
+          (buffer-local buf 'agent-connector)
+          (buffer-local buf 'llm-model)
+          (and chat (buffer-local chat 'chat-presets))
+          (and chat (map car (or (buffer-local chat 'chat-tool-specs) '()))))))
 
 (define-command "modeline-expand"
   "Toggle this buffer's expanded modeline panel"
@@ -5118,6 +5427,11 @@
 (define (post-command!)
   (let ((buf (current-buffer)))
     (list-post-command! buf)
+    ;; a list on screen shows what is, not what was: the command may have
+    ;; killed a buffer the list beside it still names
+    (for-each (lambda (w)
+                (unless (equal? (cadr w) buf) (list-post-command! (cadr w))))
+              (window-list))
     (when (buffer-local buf 'modeline-expanded)
       (let ((fp (dash--fingerprint buf)))
         (unless (equal? fp (buffer-local buf 'modeline-dash-fp))
@@ -5823,6 +6137,25 @@
 (domain! 'unknown)
 (effects! '(unknown))
 
+;;; --- daemon control ----------------------------------------------------------
+
+(domain! 'system)
+(effects! '(destroy execute))
+
+;; A restart saves the desktop first, so every buffer and window comes back.
+;; The command asks once, then hands off: the daemon respawns itself and the
+;; browser reloads on the new boot-id.
+(define-command "restart-daemon" "Save the desktop and restart the daemon"
+  (lambda ()
+    (y-or-n "Restart the daemon?"
+      (lambda ()
+        (if (daemon-restart!)
+            (message "Restarting…")
+            (message "Restart refused"))))))
+
+(domain! 'unknown)
+(effects! '(unknown))
+
 ;;; --- default keymap --------------------------------------------------------
 
 (global-set-key "C-f" "forward-char")
@@ -6031,7 +6364,7 @@
 (public! 'llm "(llm PROMPT HANDLER) — async completion; HANDLER gets the text")
 (public! 'llm-with-model "(llm-with-model PROMPT MODEL HANDLER) — async completion with an explicit model")
 (public! 'llm-model "Current model id")
-(public! 'set-llm-model! "(set-llm-model! ID) — provider prefix routes: openai:/openrouter:/bare=anthropic")
+(public! 'set-llm-model! "(set-llm-model! ID) — a \"provider:model\" prefix routes to that provider; a bare id is Anthropic")
 (public! 'buffer-group "(buffer-group NAME) -> the buffer's group tag or #f")
 (public! 'group-buffers "(group-buffers G) -> names of the buffers tagged 'group G")
 (public! 'group-chat "(group-chat G) — find or create G's chat buffer; returns its name")

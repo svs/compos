@@ -81,6 +81,7 @@ defmodule Aimax.ChatFileTest do
       (chat-task-init! "*chat:save-me*" "t")
       (buffer-set-local! (current-buffer) 'agent-connector "codex")
       (buffer-set-local! (current-buffer) 'agent-model "gpt-5.5")
+      (buffer-set-local! (current-buffer) 'agent-effort "high")
       (buffer-set-local! (current-buffer) 'chat-presets '(dev))
       (buffer-set-local! (current-buffer) 'chat-permission-mode 'ask)
       (chat-turn-push! (current-buffer) "user" "what shipped?")
@@ -97,6 +98,7 @@ defmodule Aimax.ChatFileTest do
     assert saved =~ ~s{#+chat: (connector "codex" model "gpt-5.5"}
     assert saved =~ "presets (dev)"
     assert saved =~ "permission-mode ask"
+    assert saved =~ "effort \"high\""
     # ...above the ordinary portable transcript
     assert saved =~ "### You\nwhat shipped?"
     assert saved =~ "### Assistant\nthe mail client"
@@ -113,6 +115,7 @@ defmodule Aimax.ChatFileTest do
     # identity is back
     assert Buffer.get_local(buf, "agent-connector") == "codex"
     assert Buffer.get_local(buf, "agent-model") == "gpt-5.5"
+    assert Buffer.get_local(buf, "agent-effort") == "high"
     assert Buffer.get_local(buf, "chat-presets") == [sym: "dev"]
     assert Buffer.get_local(buf, "chat-permission-mode") == {:sym, "ask"}
 
@@ -135,7 +138,7 @@ defmodule Aimax.ChatFileTest do
     path = Path.join(dir, "resume.chat")
 
     File.write!(path, """
-    #+chat: (connector "codex" model "gpt-5.5" permission-mode approve)
+    #+chat: (connector "codex-acp" model "gpt-5.5" permission-mode approve)
 
     ### You
     remember the plan?

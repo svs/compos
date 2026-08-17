@@ -31,54 +31,91 @@ defmodule Aimax.Core.SchemeAPI do
     %{
       "buffer-create" => "(buffer-create NAME) — create an empty buffer NAME and return NAME.",
       "buffer-list" => "(buffer-list) — return the names of all buffers.",
-      "buffer-list-mru" => "(buffer-list-mru) — return buffer names in most-recently-used order, without internal buffers.",
-      "mru-list" => "(mru-list) — return (\"buffer\" NAME) and (\"group\" NAME) rows: the whole history in recency order.",
+      "buffer-list-mru" =>
+        "(buffer-list-mru) — return buffer names in most-recently-used order, without internal buffers.",
+      "mru-list" =>
+        "(mru-list) — return (\"buffer\" NAME) and (\"group\" NAME) rows: the whole history in recency order.",
       "mru-note-group!" => "(mru-note-group! NAME) — record a group switch as a history entry.",
       "buffer-exists?" => "(buffer-exists? NAME) — return #t if the buffer NAME exists.",
+      "buffer-known?" =>
+        "(buffer-known? NAME) — return #t if the buffer NAME is live OR dormant in the store; a dormant buffer wakes when you visit or edit it.",
       "buffer-text" => "(buffer-text BUF) — return the buffer's whole text as a string.",
       "buffer-size" => "(buffer-size BUF) — return the buffer's size in bytes.",
-      "buffer-modified?" => "(buffer-modified? BUF) — return #t if the buffer changed after its last save.",
+      "buffer-modified?" =>
+        "(buffer-modified? BUF) — return #t if the buffer changed after its last save.",
       "buffer-path" => "(buffer-path BUF) — return the buffer's file path, or #f if it has none.",
-      "buffer-append!" => "(buffer-append! BUF TEXT) — append TEXT to the buffer's end; ignores read-only.",
-      "buffer-insert!" => "(buffer-insert! BUF POS TEXT) — insert TEXT at byte POS; ignores read-only.",
-      "buffer-delete-range!" => "(buffer-delete-range! BUF POS LEN) — delete LEN bytes at byte POS; ignores read-only.",
-      "buffer-authors" => "(buffer-authors BUF) — return (START END AUTHOR) attribution spans for the current text.",
-      "buffer-edit-log" => "(buffer-edit-log BUF) — return (VERSION AUTHOR POS INS DEL) edit records, newest first.",
-      "overlay-set!" => "(overlay-set! BUF TAG RANGES) — replace TAG's overlays with (START END FACE) byte ranges.",
-      "overlay-clear!" => "(overlay-clear! BUF TAG) — remove TAG's overlays; the tag 'all removes every overlay.",
-      "buffer-overlays" => "(buffer-overlays BUF) — return all overlays as (START END FACE) byte ranges.",
-      "buffer-set-hidden!" => "(buffer-set-hidden! BUF RANGES) — hide (fold) the given (START END) byte ranges.",
-      "fold-set!" => "(fold-set! BUF TAG RANGES) — replace TAG's hidden (START END) byte ranges; the display hides the union of all tags.",
-      "fold-get" => "(fold-get BUF [TAG]) — return TAG's hidden ranges; no TAG, or 'all, returns the union.",
-      "fold-clear!" => "(fold-clear! BUF [TAG]) — drop TAG's folds; no TAG, or 'all, drops every tag's.",
+      "buffer-append!" =>
+        "(buffer-append! BUF TEXT) — append TEXT to the buffer's end; ignores read-only.",
+      "buffer-insert!" =>
+        "(buffer-insert! BUF POS TEXT) — insert TEXT at byte POS; ignores read-only.",
+      "buffer-delete-range!" =>
+        "(buffer-delete-range! BUF POS LEN) — delete LEN bytes at byte POS; ignores read-only.",
+      "buffer-authors" =>
+        "(buffer-authors BUF) — return (START END AUTHOR) attribution spans for the current text.",
+      "buffer-edit-log" =>
+        "(buffer-edit-log BUF) — return (VERSION AUTHOR POS INS DEL) edit records, newest first.",
+      "overlay-set!" =>
+        "(overlay-set! BUF TAG RANGES) — replace TAG's overlays with (START END FACE) byte ranges.",
+      "overlay-clear!" =>
+        "(overlay-clear! BUF TAG) — remove TAG's overlays; the tag 'all removes every overlay.",
+      "buffer-overlays" =>
+        "(buffer-overlays BUF) — return all overlays as (START END FACE) byte ranges.",
+      "buffer-set-hidden!" =>
+        "(buffer-set-hidden! BUF RANGES) — hide (fold) the given (START END) byte ranges.",
+      "fold-set!" =>
+        "(fold-set! BUF TAG RANGES) — replace TAG's hidden (START END) byte ranges; the display hides the union of all tags.",
+      "fold-get" =>
+        "(fold-get BUF [TAG]) — return TAG's hidden ranges; no TAG, or 'all, returns the union.",
+      "fold-clear!" =>
+        "(fold-clear! BUF [TAG]) — drop TAG's folds; no TAG, or 'all, drops every tag's.",
       "buffer-goto!" => "(buffer-goto! BUF POS) — move the named buffer's point to byte POS.",
-      "file-mtime" => "(file-mtime PATH) — return the file's mtime in posix seconds, or 0 if it is gone.",
-      "git-root" => "(git-root DIR [CB]) — return the absolute work-tree root of DIR, or (error MSG).",
-      "git-prefix" => "(git-prefix DIR [CB]) — return DIR's path inside its work tree with a trailing slash, or \"\" at the root.",
-      "git-status" => "(git-status DIR [PATHSPEC] [CB]) — return (path P orig-path P2 index X worktree Y) plists; a pathspec scopes the read.",
-      "git-diff" => "(git-diff DIR [OPTS] [CB]) — return parsed file plists; OPTS is (base REF path P staged BOOL).",
-      "git-log" => "(git-log DIR N [PATHSPEC] [CB]) — return the last N commits as (sha short-sha author date subject) plists.",
+      "file-mtime" =>
+        "(file-mtime PATH) — return the file's mtime in posix seconds, or 0 if it is gone.",
+      "git-root" =>
+        "(git-root DIR [CB]) — return the absolute work-tree root of DIR, or (error MSG).",
+      "git-prefix" =>
+        "(git-prefix DIR [CB]) — return DIR's path inside its work tree with a trailing slash, or \"\" at the root.",
+      "git-status" =>
+        "(git-status DIR [PATHSPEC] [CB]) — return (path P orig-path P2 index X worktree Y) plists; a pathspec scopes the read.",
+      "git-diff" =>
+        "(git-diff DIR [OPTS] [CB]) — return parsed file plists; OPTS is (base REF path P staged BOOL).",
+      "git-log" =>
+        "(git-log DIR N [PATHSPEC] [CB]) — return the last N commits as (sha short-sha author date subject) plists.",
       "git-show" => "(git-show DIR REF [CB]) — return the raw text of one commit.",
-      "diff-parse" => "(diff-parse TEXT) — parse unified-diff TEXT into the same file plists git-diff returns.",
-      "diff-word-range" => "(diff-word-range OLD NEW) — return ((OS OE) (NS NE)) byte ranges of the differing span, or #f.",
-      "watch-path!" => "(watch-path! DIR) — watch DIR for changes, refcounted; return the watched root or (error MSG).",
-      "unwatch-path!" => "(unwatch-path! DIR) — drop one watch reference; the subscription stops at zero.",
+      "diff-parse" =>
+        "(diff-parse TEXT) — parse unified-diff TEXT into the same file plists git-diff returns.",
+      "diff-word-range" =>
+        "(diff-word-range OLD NEW) — return ((OS OE) (NS NE)) byte ranges of the differing span, or #f.",
+      "watch-path!" =>
+        "(watch-path! DIR) — watch DIR for changes, refcounted; return the watched root or (error MSG).",
+      "unwatch-path!" =>
+        "(unwatch-path! DIR) — drop one watch reference; the subscription stops at zero.",
       "watched-paths" => "(watched-paths) — return the watched roots.",
-      "fs-on-change!" => "(fs-on-change! FN) — register the ONE handler that gets a root when a watched tree changes.",
-      "block-on-click!" => "(block-on-click! FN) — register the ONE handler that gets (BUF ID) when a block with a click id is clicked.",
-      "define-style!" => "(define-style! NAME CSS) — register a stylesheet the page renders; modes ship their own CSS with this.",
-      "buffer-hidden" => "(buffer-hidden BUF) — return the hidden (folded) byte ranges as (START END) pairs.",
-      "buffer-set-read-only!" => "(buffer-set-read-only! BUF BOOL) — set the buffer's read-only flag.",
+      "fs-on-change!" =>
+        "(fs-on-change! FN) — register the ONE handler that gets a root when a watched tree changes.",
+      "block-on-click!" =>
+        "(block-on-click! FN) — register the ONE handler that gets (BUF ID) when a block with a click id is clicked.",
+      "define-style!" =>
+        "(define-style! NAME CSS) — register a stylesheet the page renders; modes ship their own CSS with this.",
+      "buffer-hidden" =>
+        "(buffer-hidden BUF) — return the hidden (folded) byte ranges as (START END) pairs.",
+      "buffer-set-read-only!" =>
+        "(buffer-set-read-only! BUF BOOL) — set the buffer's read-only flag.",
       "buffer-read-only?" => "(buffer-read-only? BUF) — return #t if the buffer is read-only.",
       "buffer-kill!" => "(buffer-kill! BUF) — kill the buffer and release its windows.",
       "ssh-command" => "(ssh-command) — return the configured ssh command string.",
-      "remote-read" => "(remote-read HOST PATH) — read a remote file; return text, 'directory, 'absent, or (error MSG).",
-      "remote-list-dir" => "(remote-list-dir HOST DIR) — list a remote directory; return entries or (error MSG).",
+      "remote-read" =>
+        "(remote-read HOST PATH) — read a remote file; return text, 'directory, 'absent, or (error MSG).",
+      "remote-list-dir" =>
+        "(remote-list-dir HOST DIR) — list a remote directory; return entries or (error MSG).",
       "remote-sh" => "(remote-sh HOST CMD) — run CMD on HOST over ssh; return #t or (error MSG).",
-      "remote-write" => "(remote-write HOST PATH TEXT) — write TEXT to a remote file; return #t or (error MSG).",
+      "remote-write" =>
+        "(remote-write HOST PATH TEXT) — write TEXT to a remote file; return #t or (error MSG).",
       "buffer-mark-saved!" => "(buffer-mark-saved! BUF) — clear the buffer's modified flag.",
-      "find-file" => "(find-file PATH) — open the file PATH in a buffer and return the buffer name.",
-      "list-dir" => "(list-dir DIR) — return sorted entry names; directories carry a trailing slash.",
+      "find-file" =>
+        "(find-file PATH) — open the file PATH in a buffer and return the buffer name.",
+      "list-dir" =>
+        "(list-dir DIR) — return sorted entry names; directories carry a trailing slash.",
       "expand-path" => "(expand-path PATH) — expand PATH to an absolute path.",
       "file-stat" => "(file-stat PATH) — return (PERMS SIZE DATE) strings in dired style.",
       "url-encode" => "(url-encode S) — percent-encode S as one URL path segment.",
@@ -86,101 +123,157 @@ defmodule Aimax.Core.SchemeAPI do
       "file-exists?" => "(file-exists? PATH) — return #t if PATH exists.",
       "file-directory?" => "(file-directory? PATH) — return #t if PATH is a directory.",
       "read-file" => "(read-file PATH) — return the file's contents, or #f if unreadable.",
-      "shell-command->string" => "(shell-command->string CMD [DIR]) — run CMD in a shell; return its output with stderr merged.",
-      "getenv" => "(getenv NAME) — return the environment variable NAME, or #f if it is unset or empty.",
-      "json-parse" => "(json-parse STR) — parse JSON; objects become plists with symbol keys; #f on failure.",
-      "json-encode" => "(json-encode V) — encode a Scheme value as a JSON string; a plist becomes an object.",
+      "shell-command->string" =>
+        "(shell-command->string CMD [DIR]) — run CMD in a shell; return its output with stderr merged.",
+      "getenv" =>
+        "(getenv NAME) — return the environment variable NAME, or #f if it is unset or empty.",
+      "json-parse" =>
+        "(json-parse STR) — parse JSON; objects become plists with symbol keys; #f on failure.",
+      "json-encode" =>
+        "(json-encode V) — encode a Scheme value as a JSON string; a plist becomes an object.",
       "catalog-backfill-entry" =>
         "(catalog-backfill-entry KIND QUALIFIED-NAME) — the frozen backfill metadata for a bundled declaration, as a plist, or #f.",
-      "write-file!" => "(write-file! PATH TEXT) — write TEXT to PATH, create parent directories; return #t.",
-      "start-process!" => "(start-process! BUF CMD) — start a shell process attached to BUF; return #t on success.",
-      "process-send!" => "(process-send! BUF TEXT) — send TEXT to the buffer's process; return #t on success.",
+      "write-file!" =>
+        "(write-file! PATH TEXT) — write TEXT to PATH, create parent directories; return #t.",
+      "start-process!" =>
+        "(start-process! BUF CMD) — start a shell process attached to BUF; return #t on success.",
+      "process-send!" =>
+        "(process-send! BUF TEXT) — send TEXT to the buffer's process; return #t on success.",
       "process-running?" => "(process-running? BUF) — return #t if the buffer's process runs.",
-      "process-mark" => "(process-mark BUF) — return the byte position just after the last process output.",
-      "buffer-substring" => "(buffer-substring START END) — return the current buffer's text between byte START and END.",
+      "process-mark" =>
+        "(process-mark BUF) — return the byte position just after the last process output.",
+      "buffer-substring" =>
+        "(buffer-substring START END) — return the current buffer's text between byte START and END.",
       "process-kill!" => "(process-kill! BUF) — kill the buffer's process.",
       "line-text" => "(line-text) — return the current line's text, without the newline.",
       "current-buffer" => "(current-buffer) — return the name of the current buffer.",
       "point" => "(point) — return point in the current buffer as a byte offset.",
       "buffer-point" => "(buffer-point BUF) — return the buffer's point as a byte offset.",
       "aimax-home" => "(aimax-home) — return the aimax home directory path (~/.aimax).",
+      "daemon-restart!" =>
+        "(daemon-restart!) — save the desktop, restart the daemon, and reload Scheme; return #t.",
       "goto-char!" => "(goto-char! POS) — move point to byte POS; return POS.",
-      "forward-char!" => "(forward-char!) — move point one character forward; return the new point.",
-      "backward-char!" => "(backward-char!) — move point one character backward; return the new point.",
-      "forward-word!" => "(forward-word!) — move point to the end of the next word; return the new point.",
-      "backward-word!" => "(backward-word!) — move point to the start of the previous word; return the new point.",
-      "next-line!" => "(next-line!) — move point one line down, keep the goal column; return the new point.",
-      "previous-line!" => "(previous-line!) — move point one line up, keep the goal column; return the new point.",
-      "beginning-of-line!" => "(beginning-of-line!) — move point to the line start; return the new point.",
+      "forward-char!" =>
+        "(forward-char!) — move point one character forward; return the new point.",
+      "backward-char!" =>
+        "(backward-char!) — move point one character backward; return the new point.",
+      "forward-word!" =>
+        "(forward-word!) — move point to the end of the next word; return the new point.",
+      "backward-word!" =>
+        "(backward-word!) — move point to the start of the previous word; return the new point.",
+      "next-line!" =>
+        "(next-line!) — move point one line down, keep the goal column; return the new point.",
+      "previous-line!" =>
+        "(previous-line!) — move point one line up, keep the goal column; return the new point.",
+      "beginning-of-line!" =>
+        "(beginning-of-line!) — move point to the line start; return the new point.",
       "end-of-line!" => "(end-of-line!) — move point to the line end; return the new point.",
-      "beginning-of-buffer!" => "(beginning-of-buffer!) — move point to byte 0; return the new point.",
-      "end-of-buffer!" => "(end-of-buffer!) — move point to the buffer's end; return the new point.",
-      "line-start-position" => "(line-start-position LINE) — return the start byte offset of 1-based LINE.",
-      "line-number-at-pos" => "(line-number-at-pos POS) — return the 1-based line byte offset POS is on.",
+      "beginning-of-buffer!" =>
+        "(beginning-of-buffer!) — move point to byte 0; return the new point.",
+      "end-of-buffer!" =>
+        "(end-of-buffer!) — move point to the buffer's end; return the new point.",
+      "line-start-position" =>
+        "(line-start-position LINE) — return the start byte offset of 1-based LINE.",
+      "line-number-at-pos" =>
+        "(line-number-at-pos POS) — return the 1-based line byte offset POS is on.",
       "insert!" => "(insert! TEXT) — insert TEXT at point; errors if the buffer is read-only.",
-      "delete-char!" => "(delete-char! N) — delete N characters at point, backward if negative; return the text.",
-      "kill-line!" => "(kill-line!) — delete from point to the line end, or the newline; return the text.",
+      "delete-char!" =>
+        "(delete-char! N) — delete N characters at point, backward if negative; return the text.",
+      "kill-line!" =>
+        "(kill-line!) — delete from point to the line end, or the newline; return the text.",
       "undo!" => "(undo!) — undo one step in the current buffer; return #t on success.",
-      "break-undo-chain!" => "(break-undo-chain!) — start a new undo group in the current buffer.",
-      "undo-exempt!" => "(undo-exempt! COMMAND) — exempt COMMAND from the automatic undo-chain break.",
-      "buffer-save!" => "(buffer-save!) — save the current buffer to its path; return the path or #f.",
+      "break-undo-chain!" =>
+        "(break-undo-chain!) — start a new undo group in the current buffer.",
+      "undo-exempt!" =>
+        "(undo-exempt! COMMAND) — exempt COMMAND from the automatic undo-chain break.",
+      "buffer-save!" =>
+        "(buffer-save!) — save the current buffer to its path; return the path or #f.",
       "kill-push!" => "(kill-push! TEXT) — push TEXT onto the kill ring.",
       "kill-top" => "(kill-top) — return the newest kill-ring entry, or \"\" when empty.",
       "kill-nth" => "(kill-nth I) — return kill-ring entry I (0 is newest), or \"\" when absent.",
       "kill-ring-size" => "(kill-ring-size) — return the number of kill-ring entries.",
       "clipboard-put!" =>
         "(clipboard-put! TEXT) — put TEXT on the OS clipboard of this frame's client.",
-      "editor-url" => "(editor-url) — return the base URL this editor serves, e.g. http://localhost:4004.",
+      "editor-url" =>
+        "(editor-url) — return the base URL this editor serves, e.g. http://localhost:4004.",
       "buffer-set-local!" => "(buffer-set-local! BUF KEY VALUE) — set a buffer-local variable.",
-      "buffer-local" => "(buffer-local BUF KEY) — return a buffer-local variable's value, or #f if unset.",
+      "buffer-local" =>
+        "(buffer-local BUF KEY) — return a buffer-local variable's value, or #f if unset.",
       "set-mark!" => "(set-mark! POS) — set the mark at byte POS; #f clears the mark.",
       "mark" => "(mark) — return the mark's byte offset, or #f if no mark is set.",
-      "region-beginning" => "(region-beginning) — return the smaller of point and mark as a byte offset.",
+      "region-beginning" =>
+        "(region-beginning) — return the smaller of point and mark as a byte offset.",
       "region-end" => "(region-end) — return the larger of point and mark as a byte offset.",
       "region-text" => "(region-text) — return the text between point and mark.",
       "delete-region!" => "(delete-region!) — delete the text between point and mark.",
-      "exchange-point-and-mark!" => "(exchange-point-and-mark!) — swap point and mark; return #f if no mark is set.",
-      "ts-nav" => "(ts-nav OP) — tree-sitter motion 'forward|'backward|'up|'down; return a byte pos or #f.",
+      "exchange-point-and-mark!" =>
+        "(exchange-point-and-mark!) — swap point and mark; return #f if no mark is set.",
+      "ts-nav" =>
+        "(ts-nav OP) — tree-sitter motion 'forward|'backward|'up|'down; return a byte pos or #f.",
       "ts-node" =>
         "(ts-node KIND START END OP) — the node KIND covers the range (\"\" for the smallest); return its 'at|'parent|'child|'next|'prev|'top as (KIND START END), or #f.",
       "ts-children" =>
         "(ts-children KIND START END) — the named children of that node as ((KIND START END) ...); the range 0..SIZE names the whole file.",
-      "ts-query" => "(ts-query QUERY) — run a tree-sitter query; return (CAPTURE START END) byte ranges.",
+      "ts-query" =>
+        "(ts-query QUERY) — run a tree-sitter query; return (CAPTURE START END) byte ranges.",
       "ts-langs" => "(ts-langs) — return the names of the loaded tree-sitter languages.",
       "ts-highlight-string" =>
         "(ts-highlight-string LANG TEXT) — highlight TEXT as LANG; return (START END SCOPE) byte ranges, () for an unknown language.",
-      "buffer-search" => "(buffer-search Q FROM) — search forward from byte FROM; return (START END) or #f.",
-      "buffer-search-backward" => "(buffer-search-backward Q FROM) — search backward from byte FROM; return (START END) or #f.",
-      "set-face-attribute!" => "(set-face-attribute! FACE KEY VALUE ...) — set the face's attributes from key-value pairs.",
-      "split-window!" => "(split-window! DIR [RATIO]) — split the active window 'h or 'v at RATIO (default 0.5).",
+      "buffer-search" =>
+        "(buffer-search Q FROM) — search forward from byte FROM; return (START END) or #f.",
+      "buffer-search-backward" =>
+        "(buffer-search-backward Q FROM) — search backward from byte FROM; return (START END) or #f.",
+      "set-face-attribute!" =>
+        "(set-face-attribute! FACE KEY VALUE ...) — set the face's attributes from key-value pairs.",
+      "split-window!" =>
+        "(split-window! DIR [RATIO]) — split the active window 'h or 'v at RATIO (default 0.5).",
       "delete-window!" => "(delete-window!) — delete the active window; return #t on success.",
       "delete-window-id!" => "(delete-window-id! WIN) — delete window WIN; return #t on success.",
-      "window-list" => "(window-list) — return (WIN BUFFER) pairs for the selected frame's windows.",
-      "window-tree" => "(window-tree) — return the frame's window layout as an opaque value for window-tree-set!.",
-      "window-tree-set!" => "(window-tree-set! LAYOUT) — replace the frame's windows with a layout from window-tree.",
-      "window-rects" => "(window-rects) — return (WIN BUFFER X Y W H) rows with fractional rectangles.",
-      "select-window!" => "(select-window! WIN) — make WIN and its frame active; return #t on success.",
+      "window-list" =>
+        "(window-list) — return (WIN BUFFER) pairs for the selected frame's windows.",
+      "window-tree" =>
+        "(window-tree) — return the frame's window layout as an opaque value for window-tree-set!.",
+      "window-tree-set!" =>
+        "(window-tree-set! LAYOUT) — replace the frame's windows with a layout from window-tree.",
+      "window-rects" =>
+        "(window-rects) — return (WIN BUFFER X Y W H) rows with fractional rectangles.",
+      "select-window!" =>
+        "(select-window! WIN) — make WIN and its frame active; return #t on success.",
       "active-window" => "(active-window) — return the active window's id.",
-      "scroll-window!" => "(scroll-window! WIN LINES) — scroll window WIN by LINES; return #t on success.",
-      "delete-other-windows!" => "(delete-other-windows!) — delete every window in the frame except the active one.",
+      "scroll-window!" =>
+        "(scroll-window! WIN LINES) — scroll window WIN by LINES; return #t on success.",
+      "delete-other-windows!" =>
+        "(delete-other-windows!) — delete every window in the frame except the active one.",
       "other-window!" => "(other-window!) — select the next window in the frame.",
-      "switch-to-buffer!" => "(switch-to-buffer! BUF) — show BUF in the active window; return BUF.",
+      "switch-to-buffer!" =>
+        "(switch-to-buffer! BUF) — show BUF in the active window; return BUF.",
       "frame-list" => "(frame-list) — return frame ids in most-recently-used order.",
       "selected-frame" => "(selected-frame) — return the current frame's id.",
       "select-frame!" => "(select-frame! FRAME) — make FRAME current; return #t on success.",
       "make-frame!" => "(make-frame!) — create a frame and return its id.",
-      "window-list-all" => "(window-list-all) — return (WIN BUFFER FRAME) rows for every window in every frame.",
-      "window-set-buffer!" => "(window-set-buffer! WIN BUF) — show BUF in window WIN without selection; return #t.",
+      "window-list-all" =>
+        "(window-list-all) — return (WIN BUFFER FRAME) rows for every window in every frame.",
+      "window-set-buffer!" =>
+        "(window-set-buffer! WIN BUF) — show BUF in window WIN without selection; return #t.",
       "frame-of-window" => "(frame-of-window WIN) — return the id of the window's frame, or #f.",
-      "minibuffer-read" => "(minibuffer-read PROMPT CANDIDATES [ON-COMPLETE] ON-CONFIRM) — activate the minibuffer.",
-      "minibuffer-read*" => "(minibuffer-read* PROMPT CANDIDATES HANDLERS) — activate the minibuffer with a handler alist.",
-      "global-set-key" => "(global-set-key SEQ COMMAND) — bind the key sequence SEQ to COMMAND globally.",
-      "local-set-key" => "(local-set-key SEQ COMMAND) — bind SEQ to COMMAND in the current buffer.",
+      "minibuffer-read" =>
+        "(minibuffer-read PROMPT CANDIDATES [ON-COMPLETE] ON-CONFIRM) — activate the minibuffer.",
+      "minibuffer-read*" =>
+        "(minibuffer-read* PROMPT CANDIDATES HANDLERS) — activate the minibuffer with a handler alist.",
+      "global-set-key" =>
+        "(global-set-key SEQ COMMAND) — bind the key sequence SEQ to COMMAND globally.",
+      "local-set-key" =>
+        "(local-set-key SEQ COMMAND) — bind SEQ to COMMAND in the current buffer.",
       "local-set-key*" => "(local-set-key* BUF SEQ COMMAND) — bind SEQ to COMMAND in buffer BUF.",
       "local-unset-key*" => "(local-unset-key* BUF SEQ) — drop BUF's own binding for SEQ.",
-      "local-remap!" => "(local-remap! FROM TO) — in the current buffer, every key bound to FROM runs TO.",
-      "local-remap*!" => "(local-remap*! BUF FROM TO) — in buffer BUF, every key bound to FROM runs TO.",
-      "key-for-command" => "(key-for-command COMMAND) — return the tersest key sequence bound to COMMAND, or \"\".",
+      "transient-show!" =>
+        "(transient-show! MENU) — show this frame's Transient modal; #f clears it.",
+      "local-remap!" =>
+        "(local-remap! FROM TO) — in the current buffer, every key bound to FROM runs TO.",
+      "local-remap*!" =>
+        "(local-remap*! BUF FROM TO) — in buffer BUF, every key bound to FROM runs TO.",
+      "key-for-command" =>
+        "(key-for-command COMMAND) — return the tersest key sequence bound to COMMAND, or \"\".",
       "last-command" => "(last-command) — return the name of the last command that ran.",
       "window-rows" => "(window-rows) — return the number of text rows in the active window.",
       "window-cols" =>
@@ -188,22 +281,31 @@ defmodule Aimax.Core.SchemeAPI do
       "buffer-cols" =>
         "(buffer-cols BUF) — return the text columns of a window showing BUF, else the active window's.",
       "recenter!" => "(recenter!) — center the active window on the cursor line.",
-      "completion-show!" => "(completion-show! START END CANDIDATES) — show the completion popup for byte START.",
+      "completion-show!" =>
+        "(completion-show! START END CANDIDATES) — show the completion popup for byte START.",
       "completion-dismiss!" => "(completion-dismiss!) — dismiss the completion popup.",
       "completion-move!" => "(completion-move! DELTA) — move the popup selection by DELTA rows.",
       "completion-accept!" =>
         "(completion-accept!) — close the popup; return (START LABEL) of the selection, or #f.",
-      "buffer-words" => "(buffer-words PREFIX) — return the buffer's words with PREFIX, sorted, without PREFIX itself.",
+      "buffer-words" =>
+        "(buffer-words PREFIX) — return the buffer's words with PREFIX, sorted, without PREFIX itself.",
       "count-words" => "(count-words BUF) — return the buffer's whitespace-separated word count.",
-      "minibuffer-selected" => "(minibuffer-selected) — return the highlighted minibuffer candidate.",
-      "set-mb-redirect!" => "(set-mb-redirect! BOOL) — toggle redirection of current-buffer to the minibuffer's text.",
-      "window-preview-buffer!" => "(window-preview-buffer! BUF) — show BUF in the active window without MRU changes.",
-      "minibuffer-set-candidates!" => "(minibuffer-set-candidates! CANDIDATES) — replace the minibuffer's candidate list.",
-      "delete-file!" => "(delete-file! PATH) — delete a file or empty directory; return #t or error.",
+      "minibuffer-selected" =>
+        "(minibuffer-selected) — return the highlighted minibuffer candidate.",
+      "set-mb-redirect!" =>
+        "(set-mb-redirect! BOOL) — toggle redirection of current-buffer to the minibuffer's text.",
+      "window-preview-buffer!" =>
+        "(window-preview-buffer! BUF) — show BUF in the active window without MRU changes.",
+      "minibuffer-set-candidates!" =>
+        "(minibuffer-set-candidates! CANDIDATES) — replace the minibuffer's candidate list.",
+      "delete-file!" =>
+        "(delete-file! PATH) — delete a file or empty directory; return #t or error.",
       "buffer-rename!" =>
         "(buffer-rename! OLD NEW) — rename a buffer in place, keeping its text, point, locals and undo; return NEW, or #f if the name is taken. Policy lives in rename-buffer!.",
-      "rename-file!" => "(rename-file! SOURCE DESTINATION) — move a file or directory and carry an open buffer with it.",
-      "make-directory!" => "(make-directory! PATH) — create the directory and its parents; return #t."
+      "rename-file!" =>
+        "(rename-file! SOURCE DESTINATION) — move a file or directory and carry an open buffer with it.",
+      "make-directory!" =>
+        "(make-directory! PATH) — create the directory and its parents; return #t."
     }
   end
 
@@ -223,6 +325,12 @@ defmodule Aimax.Core.SchemeAPI do
         :void
       end,
       "buffer-exists?" => fn [name] -> Buffer.exists?(name) end,
+      # the buffer list names dormant buffers too: they hold a checkpoint
+      # and no process. A verb asks this, not exists?, or it refuses to act
+      # on the rows it shows.
+      "buffer-known?" => fn [name] ->
+        Buffer.exists?(name) or Aimax.Core.BufferStore.known?(name)
+      end,
       "buffer-text" => fn [name] -> Buffer.text(name) end,
       "buffer-size" => fn [name] -> Buffer.byte_size(name) end,
       "buffer-modified?" => fn [name] -> Buffer.modified?(name) end,
@@ -251,7 +359,13 @@ defmodule Aimax.Core.SchemeAPI do
       # replaces the tag's whole range set — the fontification model is
       # "mode recomputes"; positions auto-adjust between recomputes
       "overlay-set!" => fn [name, tag, ranges] ->
-        :ok = Buffer.set_overlays(name, plain(tag), Enum.map(ranges, fn [s, e, f] -> {s, e, plain(f)} end))
+        :ok =
+          Buffer.set_overlays(
+            name,
+            plain(tag),
+            Enum.map(ranges, fn [s, e, f] -> {s, e, plain(f)} end)
+          )
+
         :void
       end,
       "overlay-clear!" => fn [name, tag] ->
@@ -392,10 +506,11 @@ defmodule Aimax.Core.SchemeAPI do
           v -> v
         end
       end,
-      # (shell-command->string CMD [DIR]) — sync, stderr folded in, "" on spawn failure
+      # (shell-command->string CMD [DIR]) — sync, stderr folded in, "" on spawn failure.
+      # Agents get no shell — aimax is the sandbox; see agent_sourced?/0.
       "shell-command->string" => fn
-        [cmd] -> shell_to_string(cmd, File.cwd!())
-        [cmd, dir] -> shell_to_string(cmd, Path.expand(dir))
+        [cmd] -> if agent_sourced?(), do: false, else: shell_to_string(cmd, File.cwd!())
+        [cmd, dir] -> if agent_sourced?(), do: false, else: shell_to_string(cmd, Path.expand(dir))
       end,
       # (json-parse STR) — objects become flat plists with symbol keys,
       # null becomes #f; #f on parse failure
@@ -424,12 +539,16 @@ defmodule Aimax.Core.SchemeAPI do
         File.write!(path, text)
         true
       end,
-      # processes (comint)
+      # processes (comint) — agents get no shell either, same gate
       "start-process!" => fn [buffer, cmd] ->
-        case Aimax.Core.Proc.start(buffer, cmd) do
-          {:ok, _} -> true
-          {:error, {:already_started, _}} -> true
-          _ -> false
+        if agent_sourced?() do
+          false
+        else
+          case Aimax.Core.Proc.start(buffer, cmd) do
+            {:ok, _} -> true
+            {:error, {:already_started, _}} -> true
+            _ -> false
+          end
         end
       end,
       "process-send!" => fn [buffer, text] ->
@@ -463,6 +582,24 @@ defmodule Aimax.Core.SchemeAPI do
       "buffer-point" => fn [name] -> Buffer.point(name) end,
       # ~/.aimax in real life, a tmp dir in tests — config and user packages
       "aimax-home" => fn [] -> Aimax.Core.home() end,
+      # restart the whole daemon. Agents never get this: it is the sandbox's
+      # own restart, not a tool an agent may invoke.
+      "daemon-restart!" => fn [] ->
+        if agent_sourced?() do
+          false
+        else
+          case Aimax.Core.Daemon.restart() do
+            :ok ->
+              true
+
+            {:error, :desktop_save_failed} ->
+              raise Aimax.Scheme.Eval.Error, message: "desktop save failed; refusing to restart"
+
+            {:error, {:spawn_failed, _code, out}} ->
+              raise Aimax.Scheme.Eval.Error, message: "could not respawn the daemon: #{inspect(out)}"
+          end
+        end
+      end,
       "goto-char!" => fn [pos] ->
         Buffer.goto(Editor.current_buffer(), pos)
         pos
@@ -548,7 +685,9 @@ defmodule Aimax.Core.SchemeAPI do
 
       # the LiveView app puts its own base URL at boot; a headless daemon
       # (tests, RPC with no web app) still answers with the default
-      "editor-url" => fn [] -> :persistent_term.get(:aimax_editor_url, "http://localhost:4004") end,
+      "editor-url" => fn [] ->
+        :persistent_term.get(:aimax_editor_url, "http://localhost:4004")
+      end,
 
       # buffer-local variables
       "buffer-set-local!" => fn [buf, k, v] ->
@@ -816,6 +955,36 @@ defmodule Aimax.Core.SchemeAPI do
         Editor.bind_key(String.split(seq, " "), command)
         :void
       end,
+      "transient-show!" => fn
+        [false] ->
+          Editor.set_transient(nil)
+          :void
+
+        [[title, groups]] ->
+          menu = %{
+            title: title,
+            groups:
+              Enum.map(groups, fn [heading, rows] ->
+                %{
+                  title: heading,
+                  items:
+                    Enum.map(rows, fn [key, description, value, kind, behavior, selected] ->
+                      %{
+                        key: key,
+                        description: description,
+                        value: value,
+                        kind: plain(kind),
+                        behavior: plain(behavior),
+                        selected: selected
+                      }
+                    end)
+                }
+              end)
+          }
+
+          Editor.set_transient(menu)
+          :void
+      end,
       "local-set-key" => fn [seq, command] ->
         Editor.local_bind_key(Editor.current_buffer(), String.split(seq, " "), command)
         :void
@@ -924,7 +1093,9 @@ defmodule Aimax.Core.SchemeAPI do
         result = if File.dir?(path), do: File.rmdir(path), else: File.rm(path)
 
         case result do
-          :ok -> true
+          :ok ->
+            true
+
           {:error, reason} ->
             raise Aimax.Scheme.Eval.Error, message: "delete failed: #{reason} (#{path})"
         end
@@ -939,10 +1110,13 @@ defmodule Aimax.Core.SchemeAPI do
       end,
       "rename-file!" => fn [source, destination] ->
         case Aimax.Core.rename_file(source, destination) do
-          {:ok, path} -> path
+          {:ok, path} ->
+            path
+
           {:error, reason} ->
             raise Aimax.Scheme.Eval.Error,
-              message: "rename failed: #{reason} (#{Path.expand(source)} -> #{Path.expand(destination)})"
+              message:
+                "rename failed: #{reason} (#{Path.expand(source)} -> #{Path.expand(destination)})"
         end
       end,
       "make-directory!" => fn [p] ->
@@ -981,18 +1155,27 @@ defmodule Aimax.Core.SchemeAPI do
       "diff-parse" => fn [text] ->
         for f <- Aimax.Core.Git.parse(text) do
           [
-            {:sym, "file-a"}, f.file_a || false,
-            {:sym, "file-b"}, f.file_b || false,
-            {:sym, "binary?"}, f.binary?,
+            {:sym, "file-a"},
+            f.file_a || false,
+            {:sym, "file-b"},
+            f.file_b || false,
+            {:sym, "binary?"},
+            f.binary?,
             {:sym, "hunks"},
             for h <- f.hunks do
               [
-                {:sym, "header"}, h.header,
-                {:sym, "old-start"}, h.old_start,
-                {:sym, "old-count"}, h.old_count,
-                {:sym, "new-start"}, h.new_start,
-                {:sym, "new-count"}, h.new_count,
-                {:sym, "lines"}, for({tag, t} <- h.lines, do: [{:sym, Atom.to_string(tag)}, t])
+                {:sym, "header"},
+                h.header,
+                {:sym, "old-start"},
+                h.old_start,
+                {:sym, "old-count"},
+                h.old_count,
+                {:sym, "new-start"},
+                h.new_start,
+                {:sym, "new-count"},
+                h.new_count,
+                {:sym, "lines"},
+                for({tag, t} <- h.lines, do: [{:sym, Atom.to_string(tag)}, t])
               ]
             end
           ]
@@ -1003,8 +1186,12 @@ defmodule Aimax.Core.SchemeAPI do
       end,
       "git-status" => fn [dir | rest] ->
         {path, rest} = opt_path(rest)
-        git_dispatch(rest, fn -> Git.status(dir, path) end,
-          &Enum.map(&1, fn e -> status_plist(e) end))
+
+        git_dispatch(
+          rest,
+          fn -> Git.status(dir, path) end,
+          &Enum.map(&1, fn e -> status_plist(e) end)
+        )
       end,
       # (git-diff DIR) | (git-diff DIR OPTS) | (git-diff DIR OPTS CALLBACK)
       "git-diff" => fn
@@ -1023,8 +1210,12 @@ defmodule Aimax.Core.SchemeAPI do
       end,
       "git-log" => fn [dir, n | rest] ->
         {path, rest} = opt_path(rest)
-        git_dispatch(rest, fn -> Git.log(dir, n, path) end,
-          &Enum.map(&1, fn c -> log_plist(c) end))
+
+        git_dispatch(
+          rest,
+          fn -> Git.log(dir, n, path) end,
+          &Enum.map(&1, fn c -> log_plist(c) end)
+        )
       end,
       "git-show" => fn [dir, ref | rest] ->
         git_dispatch(rest, fn -> Git.show(dir, plain(ref)) end, & &1)
@@ -1084,7 +1275,12 @@ defmodule Aimax.Core.SchemeAPI do
   # what most edited lines are, and it never lies about the ends.
   defp word_range(old, new) do
     p = common_prefix_len(old, new)
-    s = common_suffix_len(binary_part(old, p, byte_size(old) - p), binary_part(new, p, byte_size(new) - p))
+
+    s =
+      common_suffix_len(
+        binary_part(old, p, byte_size(old) - p),
+        binary_part(new, p, byte_size(new) - p)
+      )
 
     omid = byte_size(old) - p - s
     nmid = byte_size(new) - p - s
@@ -1269,6 +1465,12 @@ defmodule Aimax.Core.SchemeAPI do
   # (fold-get BUF 'all) reads the union, the same word overlay-clear! uses
   defp fold_tag(tag), do: if(plain(tag) == "all", do: :all, else: plain(tag))
 
+  # shell execution is gated: evaluation attributed to an agent gets no
+  # shell — aimax is the sandbox. The "agent:" author is stamped by
+  # chat-tool-dispatch (direct lane) and mcp-proxy-call (the aimax MCP
+  # proxy) around every agent tool call, so both paths carry it here.
+  defp agent_sourced?, do: match?("agent:" <> _, Process.get(:aimax_edit_author))
+
   defp shell_to_string(cmd, dir) do
     {out, _status} = System.cmd("/bin/sh", ["-c", cmd], cd: dir, stderr_to_stdout: true)
     out
@@ -1282,7 +1484,9 @@ defmodule Aimax.Core.SchemeAPI do
     bits =
       [0o400, 0o200, 0o100, 0o040, 0o020, 0o010, 0o004, 0o002, 0o001]
       |> Enum.zip(~w(r w x r w x r w x))
-      |> Enum.map_join(fn {bit, ch} -> if Bitwise.band(stat.mode, bit) != 0, do: ch, else: "-" end)
+      |> Enum.map_join(fn {bit, ch} ->
+        if Bitwise.band(stat.mode, bit) != 0, do: ch, else: "-"
+      end)
 
     type <> bits
   end

@@ -264,19 +264,22 @@ defmodule Aimax.Core.Session do
 
   defp load_stdlib!(interp) do
     interp =
-      Enum.reduce(["editor.scm", "dired.scm", "themes.scm", "chrome.scm"], interp, fn file,
-                                                                                      interp ->
-        path = Application.app_dir(:aimax_core, "priv/#{file}")
+      Enum.reduce(
+        ["editor.scm", "transient.scm", "dired.scm", "themes.scm", "chrome.scm"],
+        interp,
+        fn file, interp ->
+          path = Application.app_dir(:aimax_core, "priv/#{file}")
 
-        case Scheme.eval_string(interp, File.read!(path)) do
-          {:ok, _, interp} ->
-            interp
+          case Scheme.eval_string(interp, File.read!(path)) do
+            {:ok, _, interp} ->
+              interp
 
-          {:error, msg} ->
-            # the stdlib must load — a broken stdlib is a broken editor
-            raise "#{file} failed to load: #{msg}"
+            {:error, msg} ->
+              # the stdlib must load — a broken stdlib is a broken editor
+              raise "#{file} failed to load: #{msg}"
+          end
         end
-      end)
+      )
 
     interp |> load_packages() |> load_init()
   end
@@ -321,6 +324,17 @@ defmodule Aimax.Core.Session do
           interp
       end
     end)
+  end
+
+  # (load "foo.scm") from init.scm/ai-config.scm resolves relative to the
+  # config home, not the daemon's working directory — the config files are
+  # the reader's frame of reference. "~/..." and absolute paths pass through.
+  defp expand_load_path(path) do
+    cond do
+      String.starts_with?(path, "~") -> Path.expand(path)
+      Path.type(path) == :absolute -> Path.expand(path)
+      true -> Path.join(Aimax.Core.home(), path) |> Path.expand()
+    end
   end
 
   # user config: <home>/ai-config.scm, init.scm, then custom.scm (saved
@@ -423,6 +437,30 @@ defmodule Aimax.Core.Session do
         "(backend-capabilities NAME) — return the backend's capability symbols.",
       "llm-max-tokens" =>
         "(llm-max-tokens MODEL) — return the model's maximum output tokens, or #f.",
+      "llm-model-reasoning" =>
+        "(llm-model-reasoning MODEL) — return normalized reasoning controls from the shared model catalog, or #f.",
+      "llm-available-models" =>
+        "(llm-available-models) — return ReqLLM's credential-aware chat model inventory.",
+      "llm-session-open!" =>
+        "(llm-session-open! ID CONFIG [CONTEXT EVENTS RECORD PERMISSION]) — open a backend-neutral LLM session.",
+      "llm-session-send!" =>
+        "(llm-session-send! ID TEXT [DISPLAY]) — send or queue a message on an LLM session.",
+      "llm-session-cancel!" => "(llm-session-cancel! ID) — cancel an LLM session's current turn.",
+      "llm-session-close!" => "(llm-session-close! ID) — close an LLM session.",
+      "llm-session-set-model!" =>
+        "(llm-session-set-model! ID MODEL) — switch a live LLM session's model when supported.",
+      "llm-session-set-effort!" =>
+        "(llm-session-set-effort! ID EFFORT) — set reasoning effort for subsequent turns when supported.",
+      "llm-session-set-mode!" =>
+        "(llm-session-set-mode! ID MODE) — switch a live LLM session's permission mode when supported.",
+      "llm-session-on-event!" =>
+        "(llm-session-on-event! HANDLER) — set the default normalized-event handler for LLM sessions.",
+      "llm-session-context-fn!" =>
+        "(llm-session-context-fn! HANDLER) — set the default turn-context provider for LLM sessions.",
+      "llm-session-record-fn!" =>
+        "(llm-session-record-fn! HANDLER) — set the default conversation-record writer for LLM sessions.",
+      "llm-session-permission-fn!" =>
+        "(llm-session-permission-fn! HANDLER) — set the default tool permission policy for LLM sessions.",
       "agent-start!" => "(agent-start! SLUG CONFIG) — start an agent thread from a config plist.",
       "agent-prompt!" =>
         "(agent-prompt! SLUG TEXT [DISPLAY]) — send a prompt; return 'sent or 'queued.",
@@ -896,12 +934,113 @@ defmodule Aimax.Core.Session do
       "llm-max-tokens" => fn [model] ->
         Aimax.Core.LLMDb.max_tokens(s(model)) || false
       end,
+      "llm-model-reasoning" => fn [model] ->
+        case Aimax.Core.ModelCatalog.reasoning(s(model)) do
+          nil -> false
+          controls -> Aimax.Core.LLM.json_to_scheme(controls)
+        end
+      end,
+      # ReqLLM's credential-aware inventory sees only the environment. Aimax's
+      # key chain (env -> ~/.aimax/<name>-key -> Doppler) is Scheme, so seed
+      # ReqLLM's credential table from it first — a key in the file or Doppler
+      # then counts as configured and the model shows in the picker. Runs in
+      # the Session, so eval_src reaches the chain with no round-trip.
+      "llm-available-models" => fn [], store ->
+        store =
+          Enum.reduce(ReqLLM.Providers.list(), store, fn provider, store ->
+            var = ReqLLM.Keys.env_var_name(provider)
+            {key, store} = eval_src.("(key-get \"#{var}\")", store)
+
+            if is_binary(key) and key != "" do
+              ReqLLM.put_key(ReqLLM.Keys.config_key(provider), key)
+            end
+
+            store
+          end)
+
+        {Aimax.Core.ModelCatalog.available_models(), store}
+      end,
+
+      # --- backend-neutral LLM sessions -------------------------------------
+      # A frontend may install callbacks scoped to this session. Omitted
+      # callbacks fall back to the chat globals below, preserving existing
+      # agent integrations while inline/document frontends use the same
+      # lifecycle and backend adapters.
+      "llm-session-open!" => fn [id, config | rest] ->
+        keys = [:context, :handler, :record, :permission]
+
+        callbacks =
+          keys
+          |> Enum.zip(rest)
+          |> Map.new(fn {key, callback} -> {key, callback} end)
+
+        case Aimax.Core.LLMSession.open(s(id), plist_to_map(config), callbacks) do
+          {:ok, _pid} -> s(id)
+          {:error, {:already_started, _}} -> raise_scheme("LLM session already running: #{s(id)}")
+          {:error, reason} -> raise_scheme("llm-session-open!: #{inspect(reason)}")
+        end
+      end,
+      "llm-session-send!" => fn [id, text | rest] ->
+        display =
+          case rest do
+            [d] when is_binary(d) -> d
+            _ -> nil
+          end
+
+        case Aimax.Core.LLMSession.send(s(id), to_string(text), display) do
+          :sent -> {:sym, "sent"}
+          :queued -> {:sym, "queued"}
+          {:error, r} -> raise_scheme("llm-session-send!: #{inspect(r)}")
+        end
+      end,
+      "llm-session-cancel!" => fn [id] ->
+        Aimax.Core.LLMSession.cancel(s(id))
+        :void
+      end,
+      "llm-session-close!" => fn [id] ->
+        Aimax.Core.LLMSession.close(s(id))
+        :void
+      end,
+      "llm-session-set-model!" => fn [id, model] ->
+        case Aimax.Core.LLMSession.set_model(s(id), s(model)) do
+          :ok -> true
+          {:error, _} -> false
+        end
+      end,
+      "llm-session-set-effort!" => fn [id, effort] ->
+        case Aimax.Core.LLMSession.set_effort(s(id), s(effort)) do
+          :ok -> true
+          {:error, _} -> false
+        end
+      end,
+      "llm-session-set-mode!" => fn [id, mode] ->
+        case Aimax.Core.LLMSession.set_mode(s(id), s(mode)) do
+          :ok -> true
+          {:error, _} -> false
+        end
+      end,
+      "llm-session-on-event!" => fn [handler] ->
+        :ets.insert(@escaped, {{:agent_handler}, handler})
+        :void
+      end,
+      "llm-session-context-fn!" => fn [handler] ->
+        :ets.insert(@escaped, {{:agent_context}, handler})
+        :void
+      end,
+      "llm-session-record-fn!" => fn [handler] ->
+        :ets.insert(@escaped, {{:agent_record}, handler})
+        :void
+      end,
+      "llm-session-permission-fn!" => fn [handler] ->
+        :ets.insert(@escaped, {{:agent_permission}, handler})
+        :void
+      end,
 
       # --- agent threads (ACP runtime, see Aimax.Core.Agent) -----------------
       # config/info/events cross the boundary as flat plists: (key val ...)
       # with symbol keys — this Scheme has no dotted pairs.
       "agent-start!" => fn [slug, config] ->
-        case Aimax.Core.Agent.start(to_string(slug), plist_to_map(config)) do
+        case Aimax.Core.LLMSession.open(to_string(slug), plist_to_map(config)) do
           {:ok, _pid} -> to_string(slug)
           {:error, {:already_started, _}} -> raise_scheme("agent already running: #{s(slug)}")
           {:error, reason} -> raise_scheme("agent-start!: #{inspect(reason)}")
@@ -916,14 +1055,14 @@ defmodule Aimax.Core.Session do
             _ -> nil
           end
 
-        case Aimax.Core.Agent.prompt(s(slug), to_string(text), display) do
+        case Aimax.Core.LLMSession.send(s(slug), to_string(text), display) do
           :sent -> {:sym, "sent"}
           :queued -> {:sym, "queued"}
           {:error, r} -> raise_scheme("agent-prompt!: #{inspect(r)}")
         end
       end,
       "agent-cancel!" => fn [slug] ->
-        Aimax.Core.Agent.cancel(s(slug))
+        Aimax.Core.LLMSession.cancel(s(slug))
         :void
       end,
       "agent-permission-respond!" => fn [slug, rpc_id, option_id] ->
@@ -948,12 +1087,12 @@ defmodule Aimax.Core.Session do
       end,
       "agent-list" => fn [] -> Aimax.Core.Agent.list() end,
       "agent-kill!" => fn [slug] ->
-        Aimax.Core.Agent.kill(s(slug))
+        Aimax.Core.LLMSession.close(s(slug))
         :void
       end,
       # live model switch on the running session (ACP session/set_model)
       "agent-set-model!" => fn [slug, model] ->
-        case Aimax.Core.Agent.set_model(s(slug), s(model)) do
+        case Aimax.Core.LLMSession.set_model(s(slug), s(model)) do
           :ok -> true
           {:error, _} -> false
         end
@@ -961,7 +1100,7 @@ defmodule Aimax.Core.Session do
       # live permission-mode switch (ACP session/set_mode); #f when the
       # backend doesn't do modes — the caller then answers requests itself
       "agent-set-mode!" => fn [slug, mode] ->
-        case Aimax.Core.Agent.set_mode(s(slug), s(mode)) do
+        case Aimax.Core.LLMSession.set_mode(s(slug), s(mode)) do
           :ok -> true
           {:error, _} -> false
         end
@@ -1126,9 +1265,11 @@ defmodule Aimax.Core.Session do
       "primitive-docs" => fn [] ->
         primitive_docs() |> Enum.sort() |> Enum.map(fn {n, d} -> [n, d] end)
       end,
-      # load-library: evaluate a Scheme file in the live session
+      # load-library: evaluate a Scheme file in the live session. A relative
+      # path resolves against the config home, so init.scm can source
+      # (load "providers.scm") without knowing where the daemon was started.
       "load" => fn [path], store ->
-        expanded = Path.expand(path)
+        expanded = expand_load_path(path)
 
         case File.read(expanded) do
           {:ok, src} ->

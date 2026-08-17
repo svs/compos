@@ -7,7 +7,7 @@ defmodule Aimax.ChatRenameTest do
 
   use ExUnit.Case
 
-  alias Aimax.Core.{Buffer, Editor, KeyDispatch, Session}
+  alias Aimax.Core.{Agent, Buffer, Editor, KeyDispatch, Session}
 
   defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
 
@@ -37,8 +37,17 @@ defmodule Aimax.ChatRenameTest do
 
   describe "the cadence" do
     test "renames on the first turn, then every third one" do
-      for {turn, expected} <- [{0, "#f"}, {1, "#t"}, {2, "#f"}, {3, "#f"}, {4, "#t"},
-                               {5, "#f"}, {6, "#f"}, {7, "#t"}, {10, "#t"}] do
+      for {turn, expected} <- [
+            {0, "#f"},
+            {1, "#t"},
+            {2, "#f"},
+            {3, "#f"},
+            {4, "#t"},
+            {5, "#f"},
+            {6, "#f"},
+            {7, "#t"},
+            {10, "#t"}
+          ] do
         assert eval!(~s{(chat-rename-turn? #{turn})}) == expected, "turn #{turn}"
       end
     end
@@ -110,6 +119,35 @@ defmodule Aimax.ChatRenameTest do
       assert Buffer.text("*zz-named-keep*") == "one\ntwo\n"
     end
 
+    test "a live LLM session follows an auto-renamed chat into its second turn" do
+      old = buffer("*zz-live-chat*", "conversation\n")
+      slug = "rename-#{System.unique_integer([:positive])}"
+      ref = Buffer.ref(old)
+      id = Buffer.id(ref)
+
+      {:ok, _agent} =
+        Agent.start(slug, %{
+          "backend" => "stub",
+          "buffer" => old,
+          "mark" => Buffer.byte_size(old),
+          "script" => []
+        })
+
+      on_exit(fn -> Agent.kill(slug) end)
+
+      assert eval!(~s{(rename-buffer! "#{old}" "*zz-named-live-chat*")}) ==
+               ~s{"*zz-named-live-chat*"}
+
+      # The session owns the immutable ref. No rename notification/rebinding
+      # is involved: the same handle resolves to the renamed buffer object.
+      assert Buffer.id("*zz-named-live-chat*") == id
+      assert Buffer.name(ref) == "*zz-named-live-chat*"
+      assert eval!(~s{(agent-append! "#{slug}" "second turn\n")}) =~ ~r/^\d+$/
+      assert Buffer.text("*zz-named-live-chat*") =~ "second turn"
+      assert Agent.info(slug).buffer == "*zz-named-live-chat*"
+      assert Agent.info(slug).buffer_id == id
+    end
+
     test "a name that is taken is refused, and the buffer keeps the one it has" do
       buf = buffer("*zz-collide*", "x")
       buffer("*zz-named-collide*", "y")
@@ -174,7 +212,10 @@ defmodule Aimax.ChatRenameTest do
   describe "the call" do
     test "one call to the naming model per naming turn, and the reply is the name" do
       buf = buffer("*zz-call*", "")
-      eval!(~s{(chat-record-push! "#{buf}" "user" (list (list "text" "fix the preset merge")) #f)})
+
+      eval!(
+        ~s{(chat-record-push! "#{buf}" "user" (list (list "text" "fix the preset merge")) #f)}
+      )
 
       # stand in for the model: capture the call, answer with a title
       eval!("""

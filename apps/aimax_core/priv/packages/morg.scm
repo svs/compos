@@ -226,7 +226,6 @@
 (set-face-attribute! 'morg-code 'fg "#3d6b4f")
 (set-face-attribute! 'morg-bold 'weight "700")
 (set-face-attribute! 'morg-italic 'style "italic")
-(set-face-attribute! 'morg-link 'fg "#26356b" 'decoration "underline")
 (set-face-attribute! 'morg-result 'fg "#8a857a")
 
 ;; markdown info string -> loaded tree-sitter language, or #f
@@ -267,7 +266,7 @@
               (re-find* "\\*\\*[^*\n]+\\*\\*" line))
          (map (lambda (r) (append (abs r) '("morg-italic")))
               (re-find* "\\b_[^_\n]+_\\b" line))
-         (map (lambda (r) (append (abs r) '("morg-link")))
+         (map (lambda (r) (append (abs r) '("link")))
               (re-find* "\\[[^\\]\n]+\\]\\([^)\n]+\\)" line)))))))
 
 (define (morg-refontify! buf)

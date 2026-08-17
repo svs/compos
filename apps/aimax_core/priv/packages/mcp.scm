@@ -125,8 +125,8 @@
           (aimax? *llm-system*)
           (else note))))
 
-;; Which LLM surface does a preset command act on? llm-mode owns this
-;; configuration; chat-mode is one UI over it, not the namespace owner.
+;; Which LLM surface does a preset command act on? The shared LLM session
+;; layer owns this configuration; chat-mode and inline llm-mode are its UIs.
 (define (llm-preset-target)
   (let ((cur (current-buffer)))
     (cond ((or (chat-buffer? cur) (minor-mode-on? cur "llm-mode")) cur)

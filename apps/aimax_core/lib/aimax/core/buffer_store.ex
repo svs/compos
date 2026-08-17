@@ -22,7 +22,9 @@ defmodule Aimax.Core.BufferStore do
   def checkpoint_path(id), do: Path.join(dir(), id <> ".etf")
 
   def lookup(name), do: GenServer.call(__MODULE__, {:lookup, name})
+  def lookup_id(id), do: GenServer.call(__MODULE__, {:lookup_id, id})
   def load(name), do: GenServer.call(__MODULE__, {:load, name})
+  def load_id(id), do: GenServer.call(__MODULE__, {:load_id, id})
   def known?(name), do: GenServer.call(__MODULE__, {:known?, name})
   def names, do: GenServer.call(__MODULE__, :names)
   def history, do: GenServer.call(__MODULE__, :history)
@@ -46,15 +48,32 @@ defmodule Aimax.Core.BufferStore do
       end
       |> Enum.filter(&Map.has_key?(disk, &1))
 
-    {:ok, %{entries: disk, history: history ++ (Map.keys(disk) -- history)}}
+    {:ok,
+     %{
+       entries: disk,
+       ids: Map.new(disk, fn {_name, meta} -> {meta.id, meta} end),
+       history: history ++ (Map.keys(disk) -- history)
+     }}
   end
 
   @impl true
   def handle_call({:lookup, name}, _from, state), do: {:reply, state.entries[name], state}
 
+  def handle_call({:lookup_id, id}, _from, state), do: {:reply, state.ids[id], state}
+
   def handle_call({:load, name}, _from, state) do
     value =
       case state.entries[name] do
+        %{checkpoint: path} -> read_term(path)
+        _ -> nil
+      end
+
+    {:reply, value, state}
+  end
+
+  def handle_call({:load_id, id}, _from, state) do
+    value =
+      case state.ids[id] do
         %{checkpoint: path} -> read_term(path)
         _ -> nil
       end
@@ -69,7 +88,12 @@ defmodule Aimax.Core.BufferStore do
   def handle_call(:history, _from, state), do: {:reply, state.history, state}
 
   def handle_call({:note, meta}, _from, state) do
-    state = %{state | entries: Map.put(state.entries, meta.name, meta)}
+    state = %{
+      state
+      | entries: Map.put(state.entries, meta.name, meta),
+        ids: Map.put(state.ids, meta.id, meta)
+    }
+
     persist_catalog(state)
     {:reply, :ok, state}
   end
@@ -83,6 +107,11 @@ defmodule Aimax.Core.BufferStore do
     state = %{
       state
       | entries: Map.delete(state.entries, name),
+        ids:
+          case state.entries[name] do
+            %{id: id} -> Map.delete(state.ids, id)
+            _ -> state.ids
+          end,
         history: List.delete(state.history, name)
     }
 
@@ -93,7 +122,14 @@ defmodule Aimax.Core.BufferStore do
   def handle_call({:renamed, old, meta}, _from, state) do
     entries = state.entries |> Map.delete(old) |> Map.put(meta.name, meta)
     history = Enum.map(state.history, &if(&1 == old, do: meta.name, else: &1))
-    state = %{state | entries: entries, history: Enum.uniq(history)}
+
+    state = %{
+      state
+      | entries: entries,
+        ids: Map.put(state.ids, meta.id, meta),
+        history: Enum.uniq(history)
+    }
+
     persist_catalog(state)
     {:reply, :ok, state}
   end

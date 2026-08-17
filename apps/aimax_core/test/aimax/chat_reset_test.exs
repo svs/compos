@@ -248,12 +248,22 @@ defmodule Aimax.ChatResetTest do
     assert Aimax.Core.Editor.lookup_key(["RET"]) == {:command, "agent-send"}
 
     eval!(~s{(run-command "chat-set-backend")})
+    Aimax.Core.KeyDispatch.handle_key("b")
     Enum.each(String.graphemes("api"), &Aimax.Core.KeyDispatch.handle_key/1)
     Aimax.Core.KeyDispatch.handle_key("RET")
+    Aimax.Core.KeyDispatch.handle_key("m")
+    Enum.each(String.graphemes("openai:gpt-5.6-luna"), &Aimax.Core.KeyDispatch.handle_key/1)
+    Aimax.Core.KeyDispatch.handle_key("RET")
+    Aimax.Core.KeyDispatch.handle_key("e")
+    Enum.each(String.graphemes("high"), &Aimax.Core.KeyDispatch.handle_key/1)
+    Aimax.Core.KeyDispatch.handle_key("RET")
+    Aimax.Core.KeyDispatch.handle_key("C-g")
 
     # the api lane is a connector like any other: same slug machinery,
     # same keys — the ec8cba3 bug class is structurally gone
     assert eval!(~s{(buffer-local (current-buffer) 'agent-connector)}) == ~s{"api"}
+    assert eval!(~s{(buffer-local (current-buffer) 'agent-model)}) == ~s{"openai:gpt-5.6-luna"}
+    assert eval!(~s{(buffer-local (current-buffer) 'agent-effort)}) == ~s{"high"}
     assert eval!(~s{(buffer-local (current-buffer) 'agent-slug)}) != "#f"
     assert Aimax.Core.Editor.lookup_key(["RET"]) == {:command, "agent-send"}
   end

@@ -309,6 +309,77 @@ defmodule Aimax.LLMToolsTest do
 
       assert LLM.req_model_spec("openrouter:anthropic/claude-sonnet-5") ==
                "openrouter:anthropic/claude-sonnet-5"
+
+      assert LLM.req_model_spec("deepseek:deepseek-chat") == "deepseek:deepseek-chat"
+    end
+
+    test "deepseek routes to api.deepseek.com with its own key, not openrouter's" do
+      me = self()
+
+      Application.put_env(:aimax_core, :llm_req_opts,
+        req_http_options: [
+          plug: fn conn ->
+            send(me, {:wire, conn.host, Plug.Conn.get_req_header(conn, "authorization")})
+
+            conn
+            |> Plug.Conn.put_resp_content_type("application/json")
+            |> Plug.Conn.resp(
+              200,
+              Jason.encode!(%{
+                "id" => "chatcmpl-1",
+                "object" => "chat.completion",
+                "model" => "deepseek-chat",
+                "choices" => [
+                  %{
+                    "index" => 0,
+                    "message" => %{"role" => "assistant", "content" => "hi from deepseek"},
+                    "finish_reason" => "stop"
+                  }
+                ],
+                "usage" => %{"prompt_tokens" => 3, "completion_tokens" => 3, "total_tokens" => 6}
+              })
+            )
+          end
+        ]
+      )
+
+      prev = System.get_env("DEEPSEEK_API_KEY")
+      System.put_env("DEEPSEEK_API_KEY", "sk-deepseek")
+      Session.eval(~s{(key-forget! "DEEPSEEK_API_KEY")})
+
+      on_exit(fn ->
+        Application.delete_env(:aimax_core, :llm_req_opts)
+
+        if prev,
+          do: System.put_env("DEEPSEEK_API_KEY", prev),
+          else: System.delete_env("DEEPSEEK_API_KEY")
+      end)
+
+      LLM.complete("hi", "deepseek:deepseek-chat", fn text -> send(me, {:reply, text}) end)
+
+      assert_receive {:wire, host, auth}, 3_000
+      assert host == "api.deepseek.com"
+      assert auth == ["Bearer sk-deepseek"]
+
+      assert_receive {:reply, "hi from deepseek"}, 3_000
+    end
+
+    test "a key in the file chain makes the provider's models appear in the picker" do
+      home = Aimax.Core.home()
+      File.write!(Path.join(home, "deepseek-key"), "sk-from-file\n")
+      Session.eval(~s{(key-forget! "DEEPSEEK_API_KEY")})
+
+      on_exit(fn ->
+        File.rm(Path.join(home, "deepseek-key"))
+        Session.eval(~s{(key-forget! "DEEPSEEK_API_KEY")})
+        Application.delete_env(:req_llm, :deepseek_api_key)
+      end)
+
+      # ReqLLM's inventory is env-gated; the key lives in the FILE chain, so
+      # the picker would miss it unless the chain seeds ReqLLM's credentials.
+      models = eval!(~s{(llm-available-models)})
+      assert models =~ "deepseek:deepseek-v4-pro"
+      assert models =~ "deepseek:deepseek-v4-flash"
     end
 
     test "the built request carries the tool registry, the system prompt, and cache breakpoints" do

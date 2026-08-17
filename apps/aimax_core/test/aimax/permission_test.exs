@@ -88,6 +88,33 @@ defmodule Aimax.PermissionTest do
                "ask"
     end
 
+    test "a per-agent profile denies its own patterns; no profile is allow-all" do
+      buf = "*zz-profile*"
+      eval!(~s{(buffer-create "#{buf}")})
+      on_exit(fn -> Aimax.Core.kill_buffer(buf) end)
+
+      # no profile: the shared deny-list holds, everything else allows
+      assert eval!(~s{(*permission-policy* "#{buf}" "eval-scheme" "tool" "(graphql-run ...)")}) ==
+               "allow-always"
+
+      # a profile with one extra deny pattern rejects exactly that verb
+      eval!(
+        ~s{(buffer-set-local! "#{buf}" 'agent-permission-profile '(deny-patterns ("graphql")))}
+      )
+
+      assert eval!(~s{(*permission-policy* "#{buf}" "eval-scheme" "tool" "(graphql-run ...)")}) ==
+               "reject"
+
+      # ...and leaves everything else alone
+      assert eval!(~s{(*permission-policy* "#{buf}" "eval-scheme" "tool" "(+ 1 1)")}) ==
+               "allow-always"
+
+      # the pure seam permission packages call: #f profile is allow-all
+      assert eval!(~s{(profile-denies? #f "anything")}) == "#f"
+      assert eval!(~s{(profile-denies? '(deny-patterns ("git push")) "git push origin")}) !=
+               "#f"
+    end
+
     test "the MCP proxy refuses deny-listed payloads even when the agent stopped asking" do
       args = Base.encode64(Jason.encode!(%{"code" => ~s{(mail-send "bob" "hi")}}))
 
@@ -123,7 +150,7 @@ defmodule Aimax.PermissionTest do
         (execute* "go" '(backend "stub" script
           ((#{calls}
             (type chunk text "twenty done"))
-           ((type permission rpc-id 99 title "Send mail to the team" kind "execute"
+           ((type permission rpc-id 99 title "Send mail to the team" kind "external"
                   options (("ok" "Allow" "allow_once")))))))
         """)
 

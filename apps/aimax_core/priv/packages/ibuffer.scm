@@ -80,7 +80,11 @@
 (define-command "ibuffer-visit" "Show the selected buffer in another window and go there"
   (lambda ()
     (let ((b (ibuffer-current)))
-      (if (and b (buffer-exists? b))
+      ;; a dormant buffer is a buffer: it holds a checkpoint and no
+      ;; process, and it wakes when this window shows it. Asking
+      ;; buffer-exists? here made RET answer "no buffer here" on every
+      ;; row the editor had put to sleep.
+      (if (and b (buffer-known? b))
           (let ((w (display-buffer-other-window! b)))
             (run-command "quit-window")
             (when (and w (window-exists? w))
@@ -96,7 +100,7 @@
 ;; calls the mode's 'preview; these names stay for the tests that call them.
 (define (ibuffer-preview!)
   (let ((b (ibuffer-current)))
-    (when (and b (buffer-exists? b))
+    (when (and b (buffer-known? b))
       (display-buffer-other-window! b))))
 
 ;; `k` kills NOW — the marked buffers, or the row at point. `d`+`x` stays
@@ -111,15 +115,22 @@
       (when (buffer-exists? "*scratch*")
         (display-buffer-other-window! "*scratch*"))
       (for-each (lambda (b)
-                  (when (buffer-exists? b)
+                  ;; dormant or live, the row names a buffer this editor
+                  ;; keeps — buffer-kill! drops the checkpoint either way
+                  (when (buffer-known? b)
                     (list-unmark-key! buf b)
                     (if (process-running? b) (process-kill! b))
                     (buffer-kill! b)
                     (set! n (+ n 1))))
                 targets)
       (list-refresh! buf)
-      (message (string-append "killed " (number->string n) " "
-                              (list-noun buf n))))))
+      ;; a row can name a buffer that something else killed. Say that,
+      ;; rather than report a kill of nothing — the refresh above drops
+      ;; the row the reader was looking at.
+      (message (if (and (= n 0) (pair? targets))
+                   "already gone"
+                   (string-append "killed " (number->string n) " "
+                                  (list-noun buf n)))))))
 
 ;; `G` groups a SET. C-c g joins the buffer you are in; here the marked
 ;; buffers join one group in one act. The prompt offers the groups that
@@ -146,7 +157,7 @@
   "Put the marked buffers in a group, or take them out of one"
   (lambda ()
     (let* ((buf (current-buffer))
-           (targets (filter buffer-exists? (list-targets buf)))
+           (targets (filter buffer-known? (list-targets buf)))
            (n (length targets)))
       (if (null? targets)
           (message "no buffer here")
@@ -183,6 +194,11 @@
     ;; C-x b shows beside one
     'category 'buffer
     'rows (lambda (buf) (ibuffer-visible))
+    ;; C-x k kills a buffer from anywhere, and a chat or a shell can end
+    ;; on its own. The stamp counts the buffers — one cheap call, and a
+    ;; count does not move when the MRU order does, so previewing with n
+    ;; and p never reorders the rows under the reader.
+    'stamp (lambda (buf) (length (buffer-list-mru)))
     'columns (lambda (buf)
                (list (list "" 1)
                      (list "buffer" #f)
@@ -201,11 +217,11 @@
     ;; the flag says what it does; list-mode supplies m/u/U/*/x and the column
     'flags (list (list "d" "D" "kill"
                        (lambda (buf b)
-                         (and (buffer-exists? b) (begin (buffer-kill! b) #t)))))
+                         (and (buffer-known? b) (begin (buffer-kill! b) #t)))))
     'noun "buffer"
     ;; the other window follows the highlight: list-mode moves, this shows
     'preview (lambda (buf b)
-               (when (buffer-exists? b) (display-buffer-other-window! b)))
+               (when (buffer-known? b) (display-buffer-other-window! b)))
     'keys '(("RET" "ibuffer-visit") ("k" "ibuffer-kill")
             ("G" "ibuffer-group")
             ("g" "ibuffer-refresh") ("q" "quit-window"))))

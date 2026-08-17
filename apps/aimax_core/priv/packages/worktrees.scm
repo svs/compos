@@ -272,7 +272,7 @@
   "When true, a new ACP thread runs in its own git worktree."
   'group 'chat 'type 'boolean)
 
-;; chat-attach-agent! calls this (boundp-guarded) before agent-start!.
+;; chat-attach-agent! calls this (boundp-guarded) before llm-session-open!.
 ;; 'isolated in OPTS wins; the defcustom sets the default. A thread that
 ;; already carries a cwd, or a buffer outside any repository, is left
 ;; alone. Reattach reuses the slug's existing worktree.

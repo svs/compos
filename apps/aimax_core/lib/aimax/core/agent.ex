@@ -8,9 +8,10 @@ defmodule Aimax.Core.Agent do
   keybindings, presets, the *agents* list) is Scheme in
   `priv/packages/agent.scm`.
 
-  Events are delivered to Scheme in ordered batches through one global handler
-  (`agent-on-event!`), via `Session.apply_callback` from a Task — never
-  synchronously from this process, so Session -> Agent calls can't deadlock.
+  Events are delivered to Scheme in ordered batches through the owning
+  `LLMSession` callback (or the default registered by chat), via
+  `Session.apply_callback` from a Task — never synchronously from this process,
+  so Session -> Agent calls can't deadlock.
   Adjacent text chunks coalesce per batch; a batch in flight buffers the next.
 
   The output mark: agent text inserts at `mark`, always before the steering
@@ -58,6 +59,9 @@ defmodule Aimax.Core.Agent do
 
   @doc "Ask the backend to switch the session's model in place."
   def set_model(slug, model_id), do: call(slug, {:set_model, model_id})
+
+  @doc "Set the reasoning effort used by subsequent turns."
+  def set_effort(slug, effort), do: call(slug, {:set_effort, effort})
 
   @doc """
   Switch the session's permission mode. `{:error, :unsupported}` when the
@@ -131,12 +135,18 @@ defmodule Aimax.Core.Agent do
 
   @impl true
   def init(opts) do
+    # Backends are linked per session. A subprocess/protocol crash must mark
+    # the lane dead, not take this owner down with it: queued render callbacks
+    # still call append_at_mark, and the next send can revive a dead lane.
+    Process.flag(:trap_exit, true)
+
     slug = Keyword.fetch!(opts, :slug)
     config = Keyword.fetch!(opts, :config)
     buffer = Map.get(config, "buffer", "*agent: #{slug}*")
 
     Aimax.Core.create_buffer(buffer)
-    Events.subscribe(buffer)
+    buffer_ref = Buffer.ref(buffer)
+    Events.subscribe(buffer_ref)
 
     backend = Backend.module(config)
     {:ok, handle} = backend.start(Map.put(config, "slug", slug), self())
@@ -144,7 +154,7 @@ defmodule Aimax.Core.Agent do
     {:ok,
      %{
        slug: slug,
-       buffer: buffer,
+       buffer_ref: buffer_ref,
        config: config,
        backend: backend,
        handle: handle,
@@ -180,6 +190,14 @@ defmodule Aimax.Core.Agent do
 
   def handle_call({:set_model, model_id}, _from, state),
     do: {:reply, state.backend.set_model(state.handle, model_id), state}
+
+  def handle_call({:set_effort, effort}, _from, state) do
+    if :reasoning_effort in state.backend.capabilities() do
+      {:reply, state.backend.set_effort(state.handle, effort), state}
+    else
+      {:reply, {:error, :unsupported}, state}
+    end
+  end
 
   def handle_call({:set_mode, mode_id}, _from, state) do
     if :session_modes in state.backend.capabilities() do
@@ -262,12 +280,18 @@ defmodule Aimax.Core.Agent do
     # advance in the same breath. Set from Scheme afterwards, it lagged by
     # one frame, and the input row rendered the new transcript text and
     # the ">>> you: " marker with it — the flash while a reply prints.
-    Buffer.insert_at(state.buffer, state.mark, text,
-      source: {:agent, state.slug},
-      locals: %{"agent-saved-mark" => mark}
-    )
+    try do
+      Buffer.insert_at(state.buffer_ref, state.mark, text,
+        source: {:agent, state.slug},
+        locals: %{"agent-saved-mark" => mark}
+      )
 
-    {:reply, mark, %{state | mark: mark}}
+      {:reply, mark, %{state | mark: mark}}
+    catch
+      # Rendering is downstream of the backend. Killing the target buffer
+      # must discard a late chunk, not kill the session process with :noproc.
+      :exit, _ -> {:reply, {:error, :no_buffer}, state}
+    end
   end
 
   def handle_call(:mark, _from, state), do: {:reply, state.mark, state}
@@ -276,13 +300,17 @@ defmodule Aimax.Core.Agent do
     {:reply,
      %{
        slug: state.slug,
-       buffer: state.buffer,
+       buffer: Buffer.name(state.buffer_ref),
+       buffer_id: Buffer.id(state.buffer_ref),
        status: state.status,
        queued: length(state.prompt_queue),
        permission:
          case state.pending_permission do
-           %{rpc_id: id, title: title, options: opts} -> %{rpc_id: id, title: title, options: opts}
-           nil -> nil
+           %{rpc_id: id, title: title, options: opts} ->
+             %{rpc_id: id, title: title, options: opts}
+
+           nil ->
+             nil
          end
      }, state}
   end
@@ -292,6 +320,23 @@ defmodule Aimax.Core.Agent do
   @impl true
   def handle_info({:backend_event, event}, state),
     do: {:noreply, apply_backend_event(state, event)}
+
+  def handle_info({:EXIT, handle, reason}, %{handle: handle} = state) do
+    state =
+      state
+      |> then(fn s ->
+        if reason in [:normal, :shutdown],
+          do: s,
+          else:
+            enqueue(
+              s,
+              Backend.plist(type: :error, text: "backend exited: #{Backend.error_text(reason)}")
+            )
+      end)
+      |> apply_backend_event(Backend.plist(type: :dead, exit: Backend.error_text(reason)))
+
+    {:noreply, state}
+  end
 
   # the context for a turn that is still the current one
   def handle_info({:context, epoch, text, display, result}, %{epoch: epoch} = state) do
@@ -316,7 +361,7 @@ defmodule Aimax.Core.Agent do
 
   # keep the output mark ahead of user edits above it; our own inserts via
   # append_at_mark already moved it
-  def handle_info({:buffer_change, buf, change}, %{buffer: buf} = state) do
+  def handle_info({:buffer_change, ref, change}, %{buffer_ref: ref} = state) do
     state =
       if change.source == {:agent, state.slug} do
         state
@@ -334,9 +379,7 @@ defmodule Aimax.Core.Agent do
       %{rpc_id: ^id, title: title} ->
         state =
           state
-          |> enqueue(
-            Backend.plist(type: :"permission-timeout", title: title)
-          )
+          |> enqueue(Backend.plist(type: :"permission-timeout", title: title))
           |> resolve_permission(nil)
 
         {:noreply, state}
@@ -504,12 +547,19 @@ defmodule Aimax.Core.Agent do
   defp maybe_deliver(%{in_flight: true} = state), do: state
 
   defp maybe_deliver(state) do
-    case :ets.lookup(@escaped, {:agent_handler}) do
-      [] ->
+    handler =
+      Aimax.Core.LLMSession.callback(state.slug, :handler) ||
+        case :ets.lookup(@escaped, {:agent_handler}) do
+          [{_, callback}] -> callback
+          [] -> nil
+        end
+
+    case handler do
+      nil ->
         # no handler registered (yet) — hold events until one appears
         state
 
-      [{_, handler}] ->
+      handler ->
         batch = coalesce(state.events)
         slug = state.slug
         me = self()

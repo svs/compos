@@ -33,11 +33,14 @@ defmodule Aimax.Core.KeyDispatch do
   end
 
   def handle_key(key) do
-    %{minibuffer: mb, pending: pending, completion: completion} = Editor.snapshot()
+    snapshot = Editor.snapshot()
+    %{minibuffer: mb, pending: pending, completion: completion} = snapshot
+    transient = Map.get(snapshot, :transient)
 
     cond do
       mb -> minibuffer_key(key, mb, pending)
       completion -> completion_key(key, pending)
+      transient -> transient_key(key, pending)
       true -> buffer_key(key, pending)
     end
 
@@ -107,6 +110,28 @@ defmodule Aimax.Core.KeyDispatch do
   end
 
   # --- buffer routing --------------------------------------------------------
+
+  # Scheme owns the active Transient keymap and resolves the sequence. The
+  # core only maintains the pending chord and invokes the returned command.
+  defp transient_key(key, pending) do
+    Editor.user_acted()
+    Editor.set_echo("")
+    seq = pending ++ [key]
+
+    case Session.call_named("transient-dispatch-key", [seq]) do
+      {:ok, ["command", name]} ->
+        Editor.set_pending([])
+        run(name)
+
+      {:ok, ["prefix"]} ->
+        Editor.set_pending(seq)
+        Editor.set_echo(Enum.join(seq, " ") <> "-")
+
+      _ ->
+        Editor.set_pending([])
+        Editor.set_echo(Enum.join(seq, " ") <> " is not a transient suffix")
+    end
+  end
 
   defp buffer_key(key, pending) do
     # a key ends any manual-scroll override: the view follows point again

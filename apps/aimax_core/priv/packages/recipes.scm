@@ -109,7 +109,7 @@
 (defrecipe! "what has this chat cost"
   "(run-command \"chat-cost\")")
 (defrecipe! "send a message to a running agent"
-  "(agent-prompt! \"a1\" \"the message\")")
+  "(llm-session-send! \"a1\" \"the message\")")
 
 ;;; --- appearance ---------------------------------------------------------------
 

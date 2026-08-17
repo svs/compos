@@ -1,0 +1,566 @@
+;;; transient.scm --- temporary command menus, after Emacs Transient.
+;;;
+;;; A transient keeps the source buffer selected. The command palette shows
+;;; its menu, and a frame-local Scheme keymap owns input until exit.
+
+(package! 'transient 'transient)
+(domain! 'interaction)
+(effects! '(write))
+
+(define *transient-prefixes* '())
+(define *transient-defaults* '())
+(define *transient-history* '())
+(define transient-default-level 4)
+(define transient-history-limit 20)
+
+(define (transient--put pl key value)
+  (append (list key value)
+    (let loop ((xs pl))
+      (cond ((null? xs) '())
+            ((null? (cdr xs)) '())
+            ((equal? (car xs) key) (loop (cdr (cdr xs))))
+            (else (cons (car xs) (cons (cadr xs) (loop (cdr (cdr xs))))))))))
+
+(define (transient--alist-put al key value)
+  (cons (list key value)
+    (filter (lambda (e) (not (equal? (car e) key))) al)))
+
+(define (transient--alist-get al key fallback)
+  (let ((e (assoc key al))) (if e (cadr e) fallback)))
+
+(define (transient-prefix name) (assoc name *transient-prefixes*))
+
+(define (transient-suffix key description command &rest properties)
+  (append (list 'kind 'suffix 'key key 'description description 'command command)
+          properties))
+
+(define (transient-infix key description command value-fn &rest properties)
+  (append (list 'kind 'infix 'key key 'description description
+                'command command 'value-fn value-fn 'transient 'stay)
+          properties))
+
+(define (transient-switch key description argument &rest properties)
+  (append (list 'kind 'switch 'key key 'description description
+                'argument argument 'transient 'stay)
+          properties))
+
+(define (transient-choice key description argument choices &rest properties)
+  (append (list 'kind 'choice 'key key 'description description
+                'argument argument 'choices choices 'transient 'stay)
+          properties))
+
+(define (transient--item-wrapper prefix item)
+  (string-append "transient:" prefix ":" (plist-get item 'key)))
+
+(define (transient--install-item prefix item)
+  (let ((name (transient--item-wrapper prefix item))
+        (kind (plist-get item 'kind)))
+    (define-command--raw name
+      (lambda ()
+        (if (or (equal? kind 'switch) (equal? kind 'choice))
+            (transient--invoke-value prefix item)
+            (transient--invoke-command prefix item))))
+    (transient--put item 'wrapper name)))
+
+(define (transient--prefix-put prefix)
+  (set! *transient-prefixes*
+    (cons prefix
+      (filter (lambda (e) (not (equal? (car e) (car prefix))))
+              *transient-prefixes*))))
+
+(define (transient-define-prefix name doc groups &rest options)
+  (transient--prefix-put (list name doc groups options))
+  (define-command name doc
+    (lambda () (transient-setup name (current-buffer))))
+  name)
+
+(define (transient--active) (frame-local 'transient-active))
+(define (transient--set-active! state) (set-frame-local! 'transient-active state))
+
+(define (transient-scope)
+  (let ((state (transient--active))) (and state (plist-get state 'scope))))
+
+(define (transient-value argument)
+  (let ((state (transient--active)))
+    (and state
+         (transient--alist-get (plist-get state 'values) argument #f))))
+
+(define (transient--set-value! argument value)
+  (let* ((state (transient--active))
+         (values (transient--alist-put (plist-get state 'values) argument value)))
+    (transient--set-active! (transient--put state 'values values))))
+
+(define (transient--raw-groups prefix state)
+  (let ((groups (caddr prefix)))
+    (if (procedure? groups) (groups (plist-get state 'scope)) groups)))
+
+(define (transient--groups prefix state)
+  (map (lambda (group)
+         (cons (car group)
+           (map (lambda (item) (transient--install-item (car prefix) item))
+                (cdr group))))
+       (transient--raw-groups prefix state)))
+
+(define (transient--item-visible? item state)
+  (let ((level (or (plist-get item 'level) 4))
+        (pred (plist-get item 'if)))
+    (and (<= level (or (plist-get state 'level) transient-default-level))
+         (or (not pred) (pred (plist-get state 'scope))))))
+
+(define (transient--visible-groups prefix state)
+  (map (lambda (group)
+         (cons (car group)
+           (filter (lambda (item) (transient--item-visible? item state))
+                   (cdr group))))
+       (transient--groups prefix state)))
+
+(define (transient--visible-items groups)
+  (let loop ((gs groups) (out '()))
+    (if (null? gs)
+        (reverse out)
+        (loop (cdr gs) (append (reverse (cdr (car gs))) out)))))
+
+(define (transient--item-default item)
+  (let ((kind (plist-get item 'kind)))
+    (cond ((equal? kind 'switch) (or (plist-get item 'default) #f))
+          ((equal? kind 'choice)
+           (or (plist-get item 'default)
+               (let ((choices (plist-get item 'choices)))
+                 (and (pair? choices)
+                      (if (pair? (car choices)) (car (car choices)) (car choices))))))
+          (else #f))))
+
+(define (transient--initial-values prefix groups)
+  (let ((saved (assoc (car prefix) *transient-defaults*)))
+    (if saved
+        (cadr saved)
+        (let loop ((items (transient--visible-items groups)) (values '()))
+          (if (null? items)
+              values
+              (let* ((item (car items))
+                     (argument (plist-get item 'argument)))
+                (loop (cdr items)
+                  (if argument
+                      (transient--alist-put values argument
+                        (transient--item-default item))
+                      values))))))))
+
+(define (transient--close-menu!)
+  (set-frame-local! 'transient-keymap #f)
+  (transient-show! #f))
+
+(define (transient--choice-pair choice)
+  (if (pair? choice) choice (list choice choice)))
+
+(define (transient--choice-next choices value)
+  (if (null? choices)
+      #f
+      (let loop ((rest choices))
+        (cond ((null? rest) (car (transient--choice-pair (car choices))))
+              ((equal? (car (transient--choice-pair (car rest))) value)
+               (if (pair? (cdr rest))
+                   (car (transient--choice-pair (cadr rest)))
+                   (car (transient--choice-pair (car choices)))))
+              (else (loop (cdr rest)))))))
+
+(define (transient--item-value item)
+  (let ((kind (plist-get item 'kind)))
+    (cond ((equal? kind 'switch)
+           (if (transient-value (plist-get item 'argument)) "on" "off"))
+          ((equal? kind 'choice)
+           (let* ((value (transient-value (plist-get item 'argument)))
+                  (choice (assoc value (map transient--choice-pair
+                                            (plist-get item 'choices)))))
+             (if choice (cadr choice) (value->string value))))
+          ((equal? kind 'infix)
+           (let ((fn (plist-get item 'value-fn)))
+             (let ((value (fn (transient-scope))))
+               (if (string? value) value (value->string value)))))
+          (else ""))))
+
+(define (transient--bindings groups)
+  (append
+    (map (lambda (item) (list (plist-get item 'key) (plist-get item 'wrapper)))
+         (transient--visible-items groups))
+    (list (list "C-g" "transient-quit-one")
+          (list "C-q" "transient-quit-all")
+          (list "ESC ESC ESC" "transient-quit-all")
+          (list "C-z" "transient-suspend")
+          (list "?" "transient-toggle-help")
+          (list "C-h" "transient-toggle-help")
+          (list "<up>" "transient-previous")
+          (list "<down>" "transient-next")
+          (list "RET" "transient-invoke-selected")
+          (list "M-RET" "transient-invoke-selected")
+          (list "C-M-p" "transient-history-prev")
+          (list "C-M-n" "transient-history-next")
+          (list "C-x s" "transient-set")
+          (list "C-x C-s" "transient-save")
+          (list "C-x C-k" "transient-reset"))))
+
+(define (transient-dispatch-key sequence)
+  (let* ((key (string-join sequence " "))
+         (bindings (or (frame-local 'transient-keymap) '()))
+         (exact (assoc key bindings))
+         (prefix (string-append key " ")))
+    (cond (exact (list "command" (cadr exact)))
+          ((let loop ((xs bindings))
+             (and (pair? xs)
+                  (or (string-prefix? prefix (car (car xs)))
+                      (loop (cdr xs)))))
+           (list "prefix"))
+          (else (list "none")))))
+
+(define (transient--menu-groups groups state)
+  (let ((selected (or (plist-get state 'selected) 0))
+        (index 0)
+        (help? (plist-get state 'help)))
+    (map
+      (lambda (group)
+        (list (car group)
+          (map
+            (lambda (item)
+              (let ((selected? (= index selected)))
+                (set! index (+ index 1))
+                (list (plist-get item 'key)
+                      (if help?
+                          (let ((command (plist-get item 'command)))
+                            (if (string? command) (command-doc command)
+                                (plist-get item 'description)))
+                          (plist-get item 'description))
+                      (transient--item-value item)
+                      (plist-get item 'kind)
+                      (or (plist-get item 'transient) 'exit)
+                      selected?)))
+            (cdr group))))
+      groups)))
+
+(define (transient--render!)
+  (let* ((state (transient--active))
+         (prefix (and state (transient-prefix (plist-get state 'prefix)))))
+    (when prefix
+      (let* ((groups (transient--visible-groups prefix state))
+             (items (transient--visible-items groups))
+             (selected (min (or (plist-get state 'selected) 0)
+                            (max 0 (- (length items) 1))))
+             (state (transient--put state 'selected selected)))
+        (transient--set-active! state)
+        (set-frame-local! 'transient-keymap (transient--bindings groups))
+        (transient-show!
+          (list (cadr prefix) (transient--menu-groups groups state)))))))
+
+(define (transient-setup name &optional scope)
+  (let ((prefix (transient-prefix name)))
+    (if (not prefix)
+        (message (string-append "No such transient: " name))
+        (let* ((parent (transient--active))
+               (seed (list 'prefix name 'scope (or scope (current-buffer))
+                           'values '() 'stack (if parent (cons parent (plist-get parent 'stack)) '())
+                           'selected 0 'history-index -1 'level transient-default-level
+                           'help #f))
+               (groups (transient--visible-groups prefix seed))
+               (state (transient--put seed 'values
+                        (transient--initial-values prefix groups))))
+          (transient--set-active! state)
+          (transient--render!)))))
+
+(define (transient--remember! state)
+  (let* ((name (plist-get state 'prefix))
+         (values (plist-get state 'values))
+         (old (transient--alist-get *transient-history* name '()))
+         (history (take-n (cons values (remove (lambda (v) (equal? v values)) old))
+                          transient-history-limit)))
+    (set! *transient-history* (transient--alist-put *transient-history* name history))))
+
+(define (transient--export! state)
+  (set-frame-local! 'transient-current-prefix (plist-get state 'prefix))
+  (set-frame-local! 'transient-current-values (plist-get state 'values)))
+
+(define (transient--exit! state)
+  (transient--remember! state)
+  (transient--export! state)
+  (transient--close-menu!)
+  (transient--set-active! #f))
+
+(define (transient--call command)
+  (cond ((string? command) (run-command command))
+        ((procedure? command) (command))
+        (else #f)))
+
+(define (transient--invoke-command prefix item)
+  (let ((state (transient--active)))
+    (when (and state (equal? prefix (plist-get state 'prefix)))
+      (let ((command (plist-get item 'command)))
+        (cond
+          ((and (string? command) (transient-prefix command))
+           (transient-setup command (plist-get state 'scope)))
+          ((equal? (plist-get item 'transient) 'stay)
+           (transient--export! state)
+           (transient--call command)
+           (when (transient--active) (transient--render!)))
+          (else
+           (transient--exit! state)
+           (transient--call command)))))))
+
+(define (transient--invoke-value prefix item)
+  (let ((state (transient--active)))
+    (when (and state (equal? prefix (plist-get state 'prefix)))
+      (let* ((kind (plist-get item 'kind))
+             (argument (plist-get item 'argument))
+             (old (transient-value argument))
+             (value (if (equal? kind 'switch)
+                        (not old)
+                        (transient--choice-next (plist-get item 'choices) old))))
+        (transient--set-value! argument value)
+        (transient--render!)))))
+
+(define (transient-args &optional prefix-name)
+  (let* ((state (transient--active))
+         (name (or prefix-name
+                   (and state (plist-get state 'prefix))
+                   (frame-local 'transient-current-prefix)))
+         (values (if state (plist-get state 'values)
+                     (or (frame-local 'transient-current-values) '())))
+         (prefix (transient-prefix name)))
+    (if (not prefix) '()
+        (let loop ((items (transient--visible-items
+                            (transient--groups prefix
+                              (or state (list 'scope #f 'values values 'level 7)))))
+                   (out '()))
+          (if (null? items)
+              (reverse out)
+              (let* ((item (car items))
+                     (kind (plist-get item 'kind))
+                     (argument (plist-get item 'argument))
+                     (value (and argument (transient--alist-get values argument #f))))
+                (cond
+                  ((and (equal? kind 'switch) value)
+                   (loop (cdr items) (cons argument out)))
+                  ((and (equal? kind 'choice) value)
+                   (loop (cdr items) (cons (string-append argument (value->string value)) out)))
+                  (else (loop (cdr items) out)))))))))
+
+(define-command "transient-quit-one" "Exit this transient and return to its parent"
+  (lambda ()
+    (let* ((state (transient--active))
+           (stack (and state (plist-get state 'stack))))
+      (if (and stack (pair? stack))
+          (begin (transient--set-active! (car stack)) (transient--render!))
+          (when state
+            (transient--close-menu!)
+            (transient--set-active! #f)
+            (message "Quit"))))))
+
+(define-command "transient-quit-all" "Exit this transient and every parent"
+  (lambda ()
+    (when (transient--active)
+      (transient--close-menu!)
+      (transient--set-active! #f)
+      (message "Quit"))))
+
+(define-command "transient-suspend" "Suspend this transient for later resumption"
+  (lambda ()
+    (let ((state (transient--active)))
+      (when state
+        (set-frame-local! 'transient-suspended state)
+        (transient--close-menu!)
+        (transient--set-active! #f)
+        (message "Transient suspended; use M-x transient-resume")))))
+
+(define-command "transient-resume" "Resume the transient suspended in this frame"
+  (lambda ()
+    (let ((state (frame-local 'transient-suspended)))
+      (if (not state)
+          (message "No suspended transient")
+          (begin
+            (set-frame-local! 'transient-suspended #f)
+            (transient--set-active! state)
+            (transient--render!))))))
+
+(define-command "transient-toggle-help" "Toggle suffix command documentation"
+  (lambda ()
+    (let ((state (transient--active)))
+      (when state
+        (transient--set-active! (transient--put state 'help (not (plist-get state 'help))))
+        (transient--render!)))))
+
+(define (transient--move-selection delta)
+  (let* ((state (transient--active))
+         (prefix (and state (transient-prefix (plist-get state 'prefix))))
+         (count (if prefix
+                    (length (transient--visible-items
+                              (transient--visible-groups prefix state))) 0)))
+    (when (> count 0)
+      (transient--set-active!
+        (transient--put state 'selected
+          (modulo (+ (or (plist-get state 'selected) 0) delta count) count)))
+      (transient--render!))))
+
+(define-command "transient-next" "Select the next suffix in the menu"
+  (lambda () (transient--move-selection 1)))
+(define-command "transient-previous" "Select the previous suffix in the menu"
+  (lambda () (transient--move-selection -1)))
+
+(define-command "transient-invoke-selected" "Invoke the selected menu suffix"
+  (lambda ()
+    (let* ((state (transient--active))
+           (prefix (and state (transient-prefix (plist-get state 'prefix))))
+           (items (if prefix
+                      (transient--visible-items (transient--visible-groups prefix state)) '()))
+           (index (or (and state (plist-get state 'selected)) 0)))
+      (when (< index (length items))
+        (run-command (plist-get (nth index items) 'wrapper))))))
+
+(define (transient--history-use! delta)
+  (let* ((state (transient--active))
+         (name (and state (plist-get state 'prefix)))
+         (history (transient--alist-get *transient-history* name '()))
+         (index (and state (or (plist-get state 'history-index) -1)))
+         (next (+ index delta)))
+    (if (or (not state) (< next 0) (>= next (length history)))
+        (message "No more transient history")
+        (begin
+          (transient--set-active!
+            (transient--put
+              (transient--put state 'history-index next)
+              'values (nth next history)))
+          (transient--render!)))))
+
+(define-command "transient-history-prev" "Use the previous infix value set"
+  (lambda () (transient--history-use! 1)))
+(define-command "transient-history-next" "Use the next infix value set"
+  (lambda () (transient--history-use! -1)))
+
+(define-command "transient-set" "Use this infix value set as the session default"
+  (lambda ()
+    (let ((state (transient--active)))
+      (when state
+        (set! *transient-defaults*
+          (transient--alist-put *transient-defaults*
+            (plist-get state 'prefix) (plist-get state 'values)))
+        (message "Set transient values")))))
+
+;;; --- the editor's LLM configuration menu ----------------------------------
+
+(define (llm-config--chat? buf)
+  (equal? (buffer-local buf 'mode-name) "chat-mode"))
+
+(define (llm-config--connector buf)
+  (or (buffer-local buf (if (llm-config--chat? buf) 'agent-connector 'llm-connector))
+      (if (llm-config--chat? buf) *default-connector* "api")))
+
+(define (llm-config--model buf)
+  (or (buffer-local buf (if (llm-config--chat? buf) 'agent-model 'llm-model))
+      "default"))
+
+(define (llm-config--effort buf)
+  (or (buffer-local buf (if (llm-config--chat? buf) 'agent-effort 'llm-effort))
+      "default"))
+
+(define (llm-config--refresh!)
+  (when (transient--active) (transient--render!)))
+
+(define-command "llm-config-pick-backend" "Choose the LLM backend"
+  (lambda ()
+    (let* ((buf (transient-scope))
+           (current (llm-config--connector buf)))
+      (llm-config-read! "Backend: "
+        (llm-config-current-first
+          (map (lambda (c) (list c (connector-description c))) (connector-names))
+          current)
+        (lambda (choice)
+          (unless (equal? choice "")
+            (llm-config-apply! buf choice "default" "default")
+            (llm-config--refresh!)))
+        (lambda () #f)))))
+
+(define-command "llm-config-pick-model" "Choose the LLM model"
+  (lambda ()
+    (let* ((buf (transient-scope))
+           (connector (llm-config--connector buf))
+           (current (llm-config--model buf)))
+      (llm-config-read! "Model: "
+        (llm-config-current-first
+          (cons (list "default" "connector default")
+                (chat-model-options buf connector))
+          current)
+        (lambda (model)
+          (unless (equal? model "")
+            (llm-config-apply! buf connector model "default")
+            (llm-config--refresh!)))
+        (lambda () #f)))))
+
+(define-command "llm-config-pick-effort" "Choose the LLM reasoning effort"
+  (lambda ()
+    (let* ((buf (transient-scope))
+           (connector (llm-config--connector buf))
+           (model (llm-config--model buf))
+           (current (llm-config--effort buf))
+           (info (chat-model-effort-info buf connector model))
+           (efforts (car info))
+           (default (cadr info)))
+      (llm-config-read! "Effort: "
+        (llm-config-current-first
+          (cons (list "default"
+                      (if (equal? default "") "model default"
+                          (string-append "model default: " default)))
+                (map (lambda (e) (list e "reasoning effort")) efforts))
+          current)
+        (lambda (effort)
+          (unless (equal? effort "")
+            (llm-config-apply! buf connector model effort)
+            (llm-config--refresh!)))
+        (lambda () #f)))))
+
+(transient-define-prefix "llm-configure"
+  "Configure this buffer's language model"
+  (lambda (buf)
+    (list
+      (list "Arguments"
+        (transient-infix "b" "Backend" "llm-config-pick-backend"
+          (lambda (scope) (llm-config--connector scope)))
+        (transient-infix "m" "Model" "llm-config-pick-model"
+          (lambda (scope) (llm-config--model scope)))
+        (transient-infix "e" "Effort" "llm-config-pick-effort"
+          (lambda (scope) (llm-config--effort scope)))))))
+
+(define (transient--values-file)
+  (string-append (aimax-home) "/transient-values.scm"))
+
+(define-command "transient-save" "Save this infix value set for future sessions"
+  (lambda ()
+    (run-command "transient-set")
+    (write-file! (transient--values-file)
+      (string-append "(set! *transient-defaults* '"
+                     (value->string *transient-defaults*) ")\n"))
+    (message "Saved transient values")))
+
+(define-command "transient-reset" "Reset this transient's infix values"
+  (lambda ()
+    (let* ((state (transient--active))
+           (name (and state (plist-get state 'prefix)))
+           (prefix (and name (transient-prefix name))))
+      (when state
+        (set! *transient-defaults*
+          (filter (lambda (e) (not (equal? (car e) name))) *transient-defaults*))
+        (transient--set-active!
+          (transient--put state 'values
+            (transient--initial-values prefix (transient--visible-groups prefix state))))
+        (transient--render!)))))
+
+(when (file-exists? (transient--values-file))
+  (load (transient--values-file)))
+
+(public! 'transient-define-prefix
+  "(transient-define-prefix NAME DOC GROUPS [OPTIONS]) — define a temporary grouped command menu")
+(public! 'transient-suffix
+  "(transient-suffix KEY DESCRIPTION COMMAND [PROPERTIES]) — define a menu command")
+(public! 'transient-infix
+  "(transient-infix KEY DESCRIPTION COMMAND VALUE-FN [PROPERTIES]) — define a custom infix command")
+(public! 'transient-switch
+  "(transient-switch KEY DESCRIPTION ARGUMENT [PROPERTIES]) — define a boolean infix argument")
+(public! 'transient-choice
+  "(transient-choice KEY DESCRIPTION ARGUMENT CHOICES [PROPERTIES]) — define a cycling infix argument")
+(public! 'transient-setup "(transient-setup NAME [SCOPE]) — activate a transient in this frame")
+(public! 'transient-args "(transient-args [NAME]) — return the active or most recently exported arguments")
+(public! 'transient-value "(transient-value ARGUMENT) — return one active infix value")

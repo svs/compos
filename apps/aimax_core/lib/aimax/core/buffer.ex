@@ -44,6 +44,12 @@ defmodule Aimax.Core.Buffer do
   @edit_log_limit 500
   @checkpoint_debounce 1_500
 
+  defmodule Ref do
+    @moduledoc "Immutable buffer identity. Names are mutable lookup aliases."
+    @enforce_keys [:id]
+    defstruct [:id]
+  end
+
   defstruct name: nil,
             rope: nil,
             bin: nil,
@@ -83,13 +89,54 @@ defmodule Aimax.Core.Buffer do
     GenServer.start_link(__MODULE__, opts, name: registry_name(name))
   end
 
+  defp registry_name(%Ref{id: id}), do: {:via, Registry, {@registry, {:id, id}}}
   defp registry_name(name), do: {:via, Registry, {@registry, name}}
+
+  @doc "Return the immutable identity handle for a live or dormant buffer."
+  def ref(%Ref{} = ref), do: ref
+
+  def ref(name) when is_binary(name) do
+    case id(name) do
+      nil -> nil
+      id -> %Ref{id: id}
+    end
+  end
+
+  @doc "Return a buffer's immutable persisted id."
+  def id(%Ref{id: id}), do: id
+  def id(name), do: dormant_read(name, :id, :id)
+
+  @doc "Resolve a buffer handle to its current mutable name."
+  def name(%Ref{id: id} = ref) do
+    if exists?(ref) do
+      GenServer.call(registry_name(ref), :name)
+    else
+      case BufferStore.lookup_id(id) do
+        %{name: name} -> name
+        nil -> nil
+      end
+    end
+  end
+
+  def name(name) when is_binary(name), do: name
+
+  def via(%Ref{id: id} = ref) do
+    if not exists?(ref) do
+      case BufferStore.lookup_id(id) do
+        %{name: name} -> Aimax.Core.ensure_buffer(name)
+        nil -> :ok
+      end
+    end
+
+    registry_name(ref)
+  end
 
   def via(name) do
     if not exists?(name) and BufferStore.known?(name), do: Aimax.Core.ensure_buffer(name)
     registry_name(name)
   end
 
+  def exists?(%Ref{id: id}), do: Registry.lookup(@registry, {:id, id}) != []
   def exists?(name), do: Registry.lookup(@registry, name) != []
 
   def text(name), do: dormant_read(name, :text, :text)
@@ -124,11 +171,13 @@ defmodule Aimax.Core.Buffer do
   def get_local(name, key) do
     if exists?(name),
       do: GenServer.call(registry_name(name), {:get_local, key}),
-      else: dormant(name).locals[key]
+      else: name |> dormant() |> Map.get(:locals, %{}) |> Map.get(key)
   end
 
   def locals(name) do
-    if exists?(name), do: GenServer.call(registry_name(name), :locals), else: dormant(name).locals
+    if exists?(name),
+      do: GenServer.call(registry_name(name), :locals),
+      else: name |> dormant() |> Map.get(:locals, %{})
   end
 
   # overlays: per-tag face ranges (fontification). Byte positions auto-adjust
@@ -276,15 +325,28 @@ defmodule Aimax.Core.Buffer do
   defp author(opts), do: Keyword.get(opts, :author, Process.get(:aimax_edit_author))
 
   defp dormant_read(name, key, message) do
-    if exists?(name),
-      do: GenServer.call(registry_name(name), message),
-      else: Map.get(dormant(name), key)
+    try do
+      if exists?(name),
+        do: GenServer.call(registry_name(name), message),
+        else: Map.get(dormant(name), key)
+    catch
+      # A buffer can die after exists?/1 and before the call. Fall back to
+      # its checkpoint; a truly stale name/ref reads as absent, never :noproc.
+      :exit, _ -> Map.get(dormant(name), key)
+    end
+  end
+
+  defp dormant(%Ref{id: id}) do
+    case BufferStore.load_id(id) do
+      %{} = checkpoint -> checkpoint
+      nil -> %{}
+    end
   end
 
   defp dormant(name) do
     case BufferStore.load(name) do
       %{} = checkpoint -> checkpoint
-      nil -> GenServer.call(registry_name(name), :text)
+      nil -> %{}
     end
   end
 
@@ -324,6 +386,7 @@ defmodule Aimax.Core.Buffer do
       end
 
     state = %{state | persistent: not String.starts_with?(name, " ")}
+    {:ok, _} = Registry.register(@registry, {:id, state.id}, state.name)
     {:ok, state |> schedule_checkpoint() |> reset_idle_timer()}
   end
 
@@ -350,6 +413,9 @@ defmodule Aimax.Core.Buffer do
     {text, state} = fetch_text(state)
     {:reply, text, state}
   end
+
+  def handle_call(:id, _from, state), do: {:reply, state.id, state}
+  def handle_call(:name, _from, state), do: {:reply, state.name, state}
 
   def handle_call(:byte_size, _from, state), do: {:reply, Rope.byte_size(state.rope), state}
   def handle_call(:version, _from, state), do: {:reply, state.version, state}
@@ -1145,13 +1211,18 @@ defmodule Aimax.Core.Buffer do
   end
 
   defp broadcast(state, pos, inserted, deleted, src) do
-    Events.broadcast(state.name, %{
+    change = %{
       version: state.version,
       pos: pos,
       inserted: inserted,
       deleted: deleted,
       source: src
-    })
+    }
+
+    # Stable-object subscribers follow the immutable ref across rename.
+    # Name subscribers remain as a compatibility surface for UI code.
+    Events.broadcast(%Ref{id: state.id}, change)
+    Events.broadcast(state.name, change)
   end
 
   defp ro(state), do: {:reply, {:error, :read_only}, state}

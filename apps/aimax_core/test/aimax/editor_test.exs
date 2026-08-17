@@ -22,6 +22,13 @@ defmodule Aimax.EditorTest do
 
   defp echo, do: Editor.snapshot().echo
 
+  defp evict(name) do
+    :ok = Buffer.checkpoint_now(name)
+    [{pid, _}] = Registry.lookup(Aimax.Core.BufferRegistry, name)
+    :ok = DynamicSupervisor.terminate_child(Aimax.Core.BufferSupervisor, pid)
+    assert eventually(fn -> not Buffer.exists?(name) end)
+  end
+
   # DEL back over whatever the prompt holds, the way a user retypes
   defp clear_minibuffer do
     press(List.duplicate("DEL", String.length(Editor.snapshot().minibuffer.input)))
@@ -774,6 +781,12 @@ defmodule Aimax.EditorTest do
                "The complete document is context.\n\nA useful continuation.\n"
            end)
 
+    # Inline mode is presentation over the same session runtime as chat,
+    # but its ephemeral session is gone as soon as the normalized turn ends.
+    assert eventually(fn ->
+             Enum.all?(Aimax.Core.Agent.list(), &(!String.starts_with?(&1, "inline-")))
+           end)
+
     assert eventually(fn ->
              Enum.any?(Buffer.overlays(buf), fn {start, finish, face} ->
                face == "llm-response" and
@@ -794,6 +807,35 @@ defmodule Aimax.EditorTest do
 
     # Vertical crossing is client-side in Markdown mode: the overlay's exact
     # range is embedded in the preview block instead of remapping next-line.
+  end
+
+  test "C-c b opens one shared backend/model/effort menu in chat and llm modes", %{buf: buf} do
+    {:ok, _} = Aimax.Core.Session.eval(~s{(enable-minor-mode! "#{buf}" "llm-mode")})
+    assert {"C-c b", "llm-configure"} in Editor.local_keys(buf)
+
+    {:ok, _} = Aimax.Core.Session.eval(~s{(set-mode! "chat-mode")})
+    {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-set-local! "#{buf}" 'agent-connector "api")})
+    assert {"C-c b", "llm-configure"} in Editor.local_keys(buf)
+
+    press(["C-c", "b"])
+    assert Editor.current_buffer() == buf
+    menu = Editor.render_state().transient
+    assert menu.title == "Configure this buffer's language model"
+    assert Enum.map(hd(menu.groups).items, & &1.description) == ["Backend", "Model", "Effort"]
+
+    # The command modal uses its normal interaction: RET invokes the selected row.
+    press(["RET"])
+    backend_menu = Editor.render_state().minibuffer
+    assert backend_menu.prompt == "Backend: "
+    assert %{label: "api", hint: "current" <> _, selected: true} = hd(backend_menu.candidates)
+    assert Enum.any?(backend_menu.candidates, &(&1.label == "codex-app-server"))
+
+    # C-g closes the infix prompt and leaves the transient active.
+    press(["C-g"])
+    assert Editor.render_state().minibuffer == nil
+    assert Editor.render_state().transient != nil
+    press(["C-g"])
+    assert Editor.render_state().transient == nil
   end
 
   test "M-| pipes the region through the llm into *llm*", %{buf: buf} do
@@ -1179,8 +1221,7 @@ defmodule Aimax.EditorTest do
     # wreck the state: single window on scratch, kill the file buffer
     press(["C-x", "1"])
     Editor.set_window_buffer("*scratch*")
-    Aimax.Core.kill_buffer(path)
-    assert eventually(fn -> not Buffer.exists?(path) end)
+    evict(path)
 
     assert :ok = Aimax.Core.Desktop.restore_now()
 
@@ -1211,8 +1252,7 @@ defmodule Aimax.EditorTest do
     assert :ok = Aimax.Core.Desktop.save_now()
 
     Editor.set_window_buffer("*scratch*")
-    Aimax.Core.kill_buffer(path)
-    assert eventually(fn -> not Buffer.exists?(path) end)
+    evict(path)
 
     assert :ok = Aimax.Core.Desktop.restore_now()
 
@@ -1278,8 +1318,7 @@ defmodule Aimax.EditorTest do
     assert :ok = Aimax.Core.Desktop.save_now()
 
     Editor.set_window_buffer("*scratch*")
-    Aimax.Core.kill_buffer(companion)
-    assert eventually(fn -> not Buffer.exists?(companion) end)
+    evict(companion)
 
     assert :ok = Aimax.Core.Desktop.restore_now()
 
@@ -1507,10 +1546,8 @@ defmodule Aimax.EditorTest do
       # something displaces the window we came from while the popup is up
       # (an ibuffer preview does exactly this)
       {:ok, _} =
-        Aimax.Core.Session.eval(
-          ~s{(let ((me (active-window))) (select-window! #{from})
-                  (switch-to-buffer! "#{buf}") (select-window! me))}
-        )
+        Aimax.Core.Session.eval(~s{(let ((me (active-window))) (select-window! #{from})
+                  (switch-to-buffer! "#{buf}") (select-window! me))})
 
       Aimax.Core.Session.run_command("quit-window")
 
@@ -1538,6 +1575,7 @@ defmodule Aimax.EditorTest do
 
       # displaying it again reuses that window instead of splitting
       {:ok, _} = Aimax.Core.Session.eval(~s{(display-buffer "*messages*")})
+
       assert %{type: :split, children: [%{type: :leaf}, %{type: :leaf}]} =
                Editor.render_state().tree
 
@@ -2856,6 +2894,7 @@ defmodule Aimax.EditorTest do
 
     assert Aimax.Core.Session.eval(~s{(buffer-group "#{m1}")}) == {:ok, ~s{"fresh-#{n}"}}
     assert Aimax.Core.Session.eval(~s{(buffer-group "#{m2}")}) == {:ok, ~s{"fresh-#{n}"}}
+
     assert Aimax.Core.Session.eval(~s{(group-meta "fresh-#{n}")}) ==
              {:ok, ~s{"the renamed group"}}
 

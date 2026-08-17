@@ -33,11 +33,13 @@ defmodule Aimax.Core.Agent.Backend do
   @callback cancel(handle :: term) :: :ok
   @callback close(handle :: term) :: :ok
   @callback set_model(handle :: term, model_id :: String.t()) :: :ok | {:error, term}
+  @callback set_effort(handle :: term, effort :: String.t()) :: :ok | {:error, term}
   @callback respond_permission(handle :: term, id :: term, option :: String.t() | nil) :: :ok
   @callback capabilities() :: [
               :models
               | :streaming
               | :session_modes
+              | :reasoning_effort
               # no server-side session: the whole conversation of record is
               # replayed on every turn. Three things follow, and Scheme reads
               # this rather than asking which connector it is — a new lane
@@ -58,23 +60,32 @@ defmodule Aimax.Core.Agent.Backend do
   """
   @callback set_mode(handle :: term, mode_id :: String.t()) :: :ok | {:error, term}
 
-  @optional_callbacks set_mode: 2
+  @optional_callbacks set_mode: 2, set_effort: 2
 
   @escaped :aimax_escaped_closures
 
   @doc """
-  The context one turn runs against, from Scheme's `agent-context-fn!`.
+  The context one turn runs against. Inline frontends register a callback
+  scoped to their LLM session; chats use the default registered through
+  `llm-session-context-fn!`.
 
   Called by the Agent, in a task, at turn start. The closure stays rooted
   in ETS because it escapes into long-lived processes, but ONE caller
   looks it up: a backend is handed its context, it does not fetch it.
   """
   def context(slug, display) do
-    case :ets.lookup(@escaped, {:agent_context}) do
-      [] ->
-        {:error, "no agent-context-fn! registered"}
+    fun =
+      Aimax.Core.LLMSession.callback(slug, :context) ||
+        case :ets.lookup(@escaped, {:agent_context}) do
+          [{_, callback}] -> callback
+          [] -> nil
+        end
 
-      [{_, fun}] ->
+    case fun do
+      nil ->
+        {:error, "no llm-session-context-fn! registered"}
+
+      fun ->
         case Aimax.Core.Session.call_fn(fun, [slug, display]) do
           {:ok, plist} ->
             {:ok,
@@ -99,6 +110,7 @@ defmodule Aimax.Core.Agent.Backend do
     case Map.get(config, "backend", "acp") do
       "stub" -> __MODULE__.Stub
       "req-llm" -> __MODULE__.ReqLLM
+      "codex-app-server" -> __MODULE__.CodexAppServer
       _ -> __MODULE__.ACP
     end
   end
@@ -119,7 +131,10 @@ defmodule Aimax.Core.Agent.Backend do
   def error_text(:normal), do: "the turn ended early"
   def error_text(:timeout), do: "the turn timed out"
   def error_text(reason) when is_binary(reason), do: reason
-  def error_text(reason) when is_atom(reason), do: reason |> to_string() |> String.replace("_", " ")
+
+  def error_text(reason) when is_atom(reason),
+    do: reason |> to_string() |> String.replace("_", " ")
+
   def error_text(reason), do: inspect(reason, limit: 5, printable_limit: 200)
 
   # --- event plist helpers (shared by Agent and every backend) ---------------

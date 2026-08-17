@@ -1,7 +1,7 @@
 defmodule Aimax.BufferLifecycleTest do
   use ExUnit.Case, async: false
 
-  alias Aimax.Core.{Buffer, BufferStore, Editor, Session}
+  alias Aimax.Core.{Buffer, BufferStore, Editor, Events, Session}
 
   defp unique(label), do: "*#{label}-#{System.unique_integer([:positive])}*"
 
@@ -46,6 +46,41 @@ defmodule Aimax.BufferLifecycleTest do
     assert Buffer.eviction_info(name).id == id
     Editor.set_window_buffer("*scratch*")
     Aimax.Core.kill_buffer(name)
+  end
+
+  test "an immutable buffer ref survives rename, eviction, and wake" do
+    old = unique("ref-old")
+    new = unique("ref-new")
+    {:ok, ^old} = Aimax.Core.create_buffer(old, text: "stable")
+    ref = Buffer.ref(old)
+    id = Buffer.id(ref)
+
+    assert {:ok, ^new} = Aimax.Core.rename_buffer(ref, new)
+    refute Buffer.exists?(old)
+    assert Buffer.exists?(ref)
+    assert Buffer.name(ref) == new
+    assert Buffer.text(ref) == "stable"
+    assert Buffer.id(new) == id
+
+    Events.subscribe(ref)
+    Buffer.append(new, "!", source: :editor)
+    assert_receive {:buffer_change, ^ref, %{inserted: "!"}}
+
+    evict(new)
+    assert eventually(fn -> not Buffer.exists?(new) end)
+    refute Buffer.exists?(ref)
+    assert Buffer.name(ref) == new
+    assert Buffer.text(ref) == "stable!"
+    refute Buffer.exists?(ref)
+
+    Buffer.append(ref, " object", source: :editor)
+    assert Buffer.exists?(ref)
+    assert Buffer.name(ref) == new
+    assert Buffer.text(new) == "stable! object"
+
+    assert :ok = Aimax.Core.kill_buffer(ref)
+    refute Buffer.exists?(ref)
+    assert Buffer.name(ref) == nil
   end
 
   test "waking completes mode setup internally before returning" do

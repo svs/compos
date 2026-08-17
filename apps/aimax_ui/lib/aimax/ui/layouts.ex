@@ -253,6 +253,19 @@ defmodule Aimax.Ui.Layouts do
           .ag-prose pre code { background: none; padding: 0; }
           .ag-prose p { margin: 6px 0; }
           .ag-prose ul, .ag-prose ol { margin: 6px 0 6px 1.4em; }
+          /* A link takes the theme's link face. The browser default paints
+             it #0000EE and marks a visited link purple, which no theme can
+             read. The underline stays, because a link says it is a link,
+             but it is thin, offset from the descenders, and fainter than
+             the text until the pointer is on it. */
+          .ag-prose a, .ag-prose a:visited {
+            color: var(--link-fg, var(--accent-fg, #7aa2f7));
+            text-decoration: underline;
+            text-decoration-thickness: 1px;
+            text-underline-offset: 2px;
+            text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+          }
+          .ag-prose a:hover { text-decoration-color: currentColor; }
           /* The wrapper scrolls, the table does not (see wrap_tables/1).
              The table takes the pane width and wraps its cells while that
              still fits. When even the longest word no longer fits, the
@@ -460,6 +473,33 @@ defmodule Aimax.Ui.Layouts do
           /* the name is the point: give it the room, ellipsize later */
           .mb-panel.palette .mb-cand { font-size: 13.5px; }
           .mb-panel.palette .mb-label { max-width: 80ch; }
+          .mb-panel.palette.transient-panel { height: auto; max-height: 62dvh; }
+          .transient-title {
+            padding: 13px 16px 11px; border-bottom: 1px solid var(--border, #e2dbc9);
+            font-size: 14px; font-weight: 650; color: var(--accent-fg, #26356b);
+          }
+          .transient-groups {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 18px 28px; padding: 16px; overflow: auto;
+          }
+          .transient-group-title {
+            margin-bottom: 7px; font-size: 10px; letter-spacing: .13em;
+            text-transform: uppercase; color: var(--dim-fg, #8a857a);
+          }
+          .transient-item {
+            display: grid; grid-template-columns: 7ch minmax(0, 1fr) auto;
+            gap: 10px; align-items: baseline; min-height: 26px; padding: 4px 7px;
+            border-radius: 5px; font-family: var(--font-mono); font-size: 12.5px;
+          }
+          .transient-item.selected { background: var(--select-bg, #e7e9f1); }
+          .transient-key { color: var(--accent-fg, #26356b); font-weight: 650; }
+          .transient-item.stay .transient-key { color: var(--ok-fg, #2e6b45); }
+          .transient-description { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+          .transient-value { color: var(--dim-fg, #8a857a); white-space: nowrap; }
+          .transient-help {
+            padding: 9px 16px 10px; border-top: 1px solid var(--border, #e2dbc9);
+            color: var(--dim-fg, #8a857a); font-family: var(--font-mono); font-size: 10.5px;
+          }
           /* the palette body: candidates left, the facts panel right */
           .mb-body { display: flex; flex: 1; min-height: 0; }
           .mb-body .mb-cands { flex: 1; min-width: 0; }

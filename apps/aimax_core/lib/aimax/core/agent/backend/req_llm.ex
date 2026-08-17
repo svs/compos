@@ -11,7 +11,7 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
 
   The turn task both READS and WRITES that record, in one order: it reads
   it, appends the user message it is about to send, and reports every
-  further message the tool loop appends (`agent-record-fn!`). So the next
+  further message the tool loop appends (`llm-session-record-fn!`). So the next
   turn replays byte-for-byte what this one sent — tool calls and tool
   results included — and the provider's prompt cache hits. Nothing is
   reconstructed from rendered text, and no event batch can race the read.
@@ -57,11 +57,14 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
   def set_model(pid, model_id), do: GenServer.call(pid, {:set_model, model_id})
 
   @impl Backend
+  def set_effort(pid, effort), do: GenServer.call(pid, {:set_effort, effort})
+
+  @impl Backend
   def respond_permission(pid, rpc_id, option_id),
     do: GenServer.call(pid, {:respond_permission, rpc_id, option_id})
 
   @impl Backend
-  def capabilities, do: [:models, :streaming, :stateless, :metered]
+  def capabilities, do: [:models, :streaming, :reasoning_effort, :stateless, :metered]
 
   # --- server -----------------------------------------------------------------
 
@@ -74,6 +77,7 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
        owner: owner,
        slug: Map.get(config, "slug"),
        model: Map.get(config, "model"),
+       effort: normalize_effort(Map.get(config, "effort")),
        task: nil,
        # the model this turn is actually running, captured when it starts:
        # C-c m mid-turn used to move state.model, and the finished turn was
@@ -100,7 +104,7 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
 
     task =
       Task.Supervisor.async_nolink(Aimax.Core.TaskSupervisor, fn ->
-        run_turn(me, slug, model, text, context)
+        run_turn(me, slug, model, state.effort, text, context)
       end)
 
     {:reply, :ok, %{state | task: task, turn_model: model, turn_usage: %{}}}
@@ -117,6 +121,9 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
 
   def handle_call({:set_model, model_id}, _from, state),
     do: {:reply, :ok, %{state | model: model_id}}
+
+  def handle_call({:set_effort, effort}, _from, state),
+    do: {:reply, :ok, %{state | effort: normalize_effort(effort)}}
 
   # The thread owns the pending slot for BOTH lanes now, so nothing here
   # is waiting on an answer and there is nothing to resolve. Kept because
@@ -197,47 +204,64 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
 
   # --- the turn (runs in a supervised task) -----------------------------------
 
-  defp run_turn(backend, slug, model, text, ctx) do
+  defp run_turn(backend, slug, model, effort, text, ctx) do
     ev = fn kvs -> GenServer.cast(backend, {:turn_event, kvs}) end
     display = Map.get(ctx, :display, text)
     messages = Enum.map(ctx.turns, &turn_to_message/1)
 
-        # the user turn joins the record before the wire carries it. The
-        # blocks hold what the transcript shows; `wire` holds what was
-        # actually sent, which carries the editor context preamble the
-        # user never typed.
-        record(slug, "user", [["text", display]], if(text == display, do: false, else: text))
+    # the user turn joins the record before the wire carries it. The
+    # blocks hold what the transcript shows; `wire` holds what was
+    # actually sent, which carries the editor context preamble the
+    # user never typed.
+    record(slug, "user", [["text", display]], if(text == display, do: false, else: text))
 
-        LLM.run_tool_loop(
-          messages ++ [%{role: "user", content: text}],
-          ctx.system,
-          ctx.tools,
-          ctx.dispatcher,
-          model: model,
-          on_record: fn role, blocks -> record(slug, role, blocks_to_record(blocks), false) end,
-          on_round_usage: fn usage -> GenServer.cast(backend, {:turn_usage, usage}) end,
-          on_chunk: fn t -> ev.(type: :chunk, text: t) end,
-          on_thinking: fn t -> ev.(type: :thought, text: t) end,
-          # aimax owns permissions on BOTH lanes: the same Scheme policy
-          # that answers ACP's requests gates every direct-lane tool call
-          gate: fn name, input -> gate(ev, slug, name, input) end,
-          # the call and the result, raw. What a card SAYS — its title, how
-          # much of a result it shows — is presentation, and presentation
-          # is Scheme's (packages/agent.scm).
-          on_tool: fn id, name, input ->
-            ev.(
-              type: :"tool-call",
-              id: id,
-              name: name,
-              input: Jason.encode!(input || %{}),
-              kind: "tool",
-              status: "pending"
-            )
-          end,
-          on_tool_done: fn id, result ->
-            ev.(type: :"tool-update", id: id, status: "completed", output: to_string(result))
-          end
+    LLM.run_tool_loop(
+      messages ++ [%{role: "user", content: text}],
+      ctx.system,
+      ctx.tools,
+      ctx.dispatcher,
+      model: model,
+      reasoning_effort: effort,
+      on_record: fn role, blocks -> record(slug, role, blocks_to_record(blocks), false) end,
+      on_round_usage: fn usage -> GenServer.cast(backend, {:turn_usage, usage}) end,
+      on_chunk: fn t -> ev.(type: :chunk, text: t) end,
+      on_thinking: fn t -> ev.(type: :thought, text: t) end,
+      # aimax owns permissions on BOTH lanes: the same Scheme policy
+      # that answers ACP's requests gates every direct-lane tool call
+      gate: fn name, input -> gate(ev, slug, name, input) end,
+      # the call and the result, raw. What a card SAYS — its title, how
+      # much of a result it shows — is presentation, and presentation
+      # is Scheme's (packages/agent.scm).
+      on_tool: fn id, name, input ->
+        ev.(
+          type: :"tool-call",
+          id: id,
+          name: name,
+          input: Jason.encode!(input || %{}),
+          kind: "tool",
+          status: "pending"
         )
+      end,
+      on_tool_done: fn id, result ->
+        ev.(type: :"tool-update", id: id, status: "completed", output: to_string(result))
+      end
+    )
+  end
+
+  defp normalize_effort(effort) when effort in [nil, "", "default"], do: nil
+  defp normalize_effort({:sym, effort}), do: normalize_effort(effort)
+
+  defp normalize_effort(effort) when is_binary(effort) do
+    case effort do
+      "none" -> :none
+      "minimal" -> :minimal
+      "low" -> :low
+      "medium" -> :medium
+      "high" -> :high
+      "xhigh" -> :xhigh
+      "max" -> :max
+      _ -> nil
+    end
   end
 
   # The permission gate: ask Scheme's policy, and only when it says "ask"
@@ -280,11 +304,18 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
   end
 
   defp permission_verdict(slug, name, input) do
-    case :ets.lookup(@escaped, {:agent_permission}) do
-      [] ->
+    fun =
+      Aimax.Core.LLMSession.callback(slug, :permission) ||
+        case :ets.lookup(@escaped, {:agent_permission}) do
+          [{_, callback}] -> callback
+          [] -> nil
+        end
+
+    case fun do
+      nil ->
         :allow
 
-      [{_, fun}] ->
+      fun ->
         raw = name <> " " <> inspect(input)
 
         case Session.call_fn(fun, [slug, name, "tool", raw]) do
@@ -361,10 +392,16 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
 
   # append one turn to the chat's record, synchronously, from the turn task
   defp record(slug, role, blocks, wire) do
-    case :ets.lookup(@escaped, {:agent_record}) do
-      [] -> :ok
-      [{_, fun}] -> Session.call_fn(fun, [slug, role, blocks, wire])
+    fun =
+      Aimax.Core.LLMSession.callback(slug, :record) ||
+        case :ets.lookup(@escaped, {:agent_record}) do
+          [{_, callback}] -> callback
+          [] -> nil
+        end
+
+    case fun do
+      nil -> :ok
+      fun -> Session.call_fn(fun, [slug, role, blocks, wire])
     end
   end
-
 end

@@ -17,6 +17,14 @@ defmodule Aimax.LLMDbTest do
       "models" => %{
         "deepseek/deepseek-chat" => %{"cost" => %{"input" => 0.2, "output" => 0.4}}
       }
+    },
+    "deepseek" => %{
+      "models" => %{
+        "deepseek-chat" => %{
+          "cost" => %{"input" => 0.27, "output" => 1.1},
+          "limit" => %{"input" => 64_000, "output" => 8_000}
+        }
+      }
     }
   }
 
@@ -30,7 +38,13 @@ defmodule Aimax.LLMDbTest do
   test "price finds models across providers, stripping routing prefixes" do
     assert %{input: 3.0, output: 15.0} = LLMDb.price("claude-sonnet-5")
     assert %{input: 0.2} = LLMDb.price("openrouter:deepseek/deepseek-chat")
+    assert %{input: 0.27, output: 1.1} = LLMDb.price("deepseek:deepseek-chat")
     assert LLMDb.price("no-such-model") == nil
+  end
+
+  test "the deepseek prefix strips to the first-party catalog" do
+    assert LLMDb.max_tokens("deepseek:deepseek-chat") == 8_000
+    assert LLMDb.context_limit("deepseek:deepseek-chat") == 64_000
   end
 
   test "cost sums all four token buckets per million" do

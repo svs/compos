@@ -54,10 +54,12 @@ defmodule Aimax.Core.Editor do
 
   # readers
   def snapshot(fid \\ nil), do: GenServer.call(__MODULE__, {:snapshot, fid(fid)})
+
   def current_buffer(fid \\ nil) do
     Aimax.Core.Frame.buffer_context() ||
       GenServer.call(__MODULE__, {:current_buffer, fid(fid)})
   end
+
   def lookup_key(seq, fid \\ nil), do: GenServer.call(__MODULE__, {:lookup_key, seq, fid(fid)})
 
   @doc """
@@ -128,6 +130,10 @@ defmodule Aimax.Core.Editor do
   def set_pending(seq, fid \\ nil), do: GenServer.call(__MODULE__, {:set_pending, seq, fid(fid)})
   def set_echo(msg, fid \\ nil), do: GenServer.call(__MODULE__, {:set_echo, msg, fid(fid)})
 
+  @doc "Set the calling frame's rendered Transient menu, or clear it with nil."
+  def set_transient(menu, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_transient, menu, fid(fid)})
+
   @doc "Echo a message in every frame (async sources: agents, timers)."
   def set_echo_all(msg), do: GenServer.call(__MODULE__, {:set_echo_all, msg})
 
@@ -176,7 +182,8 @@ defmodule Aimax.Core.Editor do
   def minibuffer_close(fid \\ nil), do: GenServer.call(__MODULE__, {:mb_close, fid(fid)})
 
   @doc "Re-read input from the minibuf buffer. :unchanged | {:changed, input}."
-  def minibuffer_sync_input(fid \\ nil), do: GenServer.call(__MODULE__, {:mb_sync_input, fid(fid)})
+  def minibuffer_sync_input(fid \\ nil),
+    do: GenServer.call(__MODULE__, {:mb_sync_input, fid(fid)})
 
   @doc "While false, current_buffer ignores an active minibuffer (handler escape hatch)."
   def set_mb_redirect(bool, fid \\ nil),
@@ -206,12 +213,15 @@ defmodule Aimax.Core.Editor do
     do: GenServer.call(__MODULE__, {:completion_move, delta, fid(fid)})
 
   @doc "Narrow the open popup by prefix typed since it opened."
-  def completion_query(q, fid \\ nil), do: GenServer.call(__MODULE__, {:completion_query, q, fid(fid)})
+  def completion_query(q, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:completion_query, q, fid(fid)})
 
   @doc "Accept the selection: returns {start, label} and clears, or nil."
-  def completion_accept(fid \\ nil), do: GenServer.call(__MODULE__, {:completion_accept, fid(fid)})
+  def completion_accept(fid \\ nil),
+    do: GenServer.call(__MODULE__, {:completion_accept, fid(fid)})
 
-  def completion_dismiss(fid \\ nil), do: GenServer.call(__MODULE__, {:completion_dismiss, fid(fid)})
+  def completion_dismiss(fid \\ nil),
+    do: GenServer.call(__MODULE__, {:completion_dismiss, fid(fid)})
 
   # kill ring
   def kill_push(text), do: GenServer.call(__MODULE__, {:kill_push, text})
@@ -238,7 +248,10 @@ defmodule Aimax.Core.Editor do
   @doc "Selecting a window selects its frame (Emacs: windows live on frames)."
   def set_active(id), do: GenServer.call(__MODULE__, {:set_active, id})
   def active_window(fid \\ nil), do: GenServer.call(__MODULE__, {:active_window, fid(fid)})
-  def delete_other_windows(fid \\ nil), do: GenServer.call(__MODULE__, {:delete_other_windows, fid(fid)})
+
+  def delete_other_windows(fid \\ nil),
+    do: GenServer.call(__MODULE__, {:delete_other_windows, fid(fid)})
+
   def other_window(fid \\ nil), do: GenServer.call(__MODULE__, {:other_window, fid(fid)})
 
   @doc "Show BUFFER in the active window WITHOUT touching the MRU ring — candidate preview must not reorder the buffer history."
@@ -299,7 +312,8 @@ defmodule Aimax.Core.Editor do
   def scroll_active(delta_lines, fid \\ nil),
     do: GenServer.call(__MODULE__, {:scroll_active, delta_lines, fid(fid)})
 
-  def scroll_window(id, delta_lines), do: GenServer.call(__MODULE__, {:scroll_window, id, delta_lines})
+  def scroll_window(id, delta_lines),
+    do: GenServer.call(__MODULE__, {:scroll_window, id, delta_lines})
 
   @doc "Mirror a client-scrolled window's pixel offset into its leaf (S1)."
   def set_client_top(id, px, fid \\ nil),
@@ -324,6 +338,7 @@ defmodule Aimax.Core.Editor do
   @doc "Columns of a window showing BUF, in any frame — else the active window's."
   def buffer_cols(buf, fid \\ nil),
     do: GenServer.call(__MODULE__, {:buffer_cols, buf, fid(fid)})
+
   def recenter(fid \\ nil), do: GenServer.call(__MODULE__, {:recenter, fid(fid)})
 
   # explicit nil beats an unset pdict; the server resolves nil -> last active
@@ -341,6 +356,7 @@ defmodule Aimax.Core.Editor do
       tree: %{type: :leaf, id: 1, buffer: @scratch, top: 0, manual: false},
       active: 1,
       pending: [],
+      transient: nil,
       minibuffer: nil,
       mb_redirect: true,
       echo: "",
@@ -390,6 +406,7 @@ defmodule Aimax.Core.Editor do
           tree: %{type: :leaf, id: state.next_win, buffer: buffer, top: 0, manual: false},
           active: state.next_win,
           pending: [],
+          transient: nil,
           minibuffer: nil,
           mb_redirect: true,
           echo: "",
@@ -420,7 +437,10 @@ defmodule Aimax.Core.Editor do
         # async: kill_buffer heals windows through Editor.release_buffer,
         # which must not be called from inside this server (self-call)
         mb_buf = minibuf_of(f)
-        Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn -> Aimax.Core.kill_buffer(mb_buf) end)
+
+        Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
+          Aimax.Core.kill_buffer(mb_buf)
+        end)
 
         Enum.each(leaf_ids_buffers(f.tree), fn {win, buf} ->
           if Buffer.exists?(buf), do: wp_safely(fn -> Buffer.drop_win_point(buf, win) end)
@@ -487,7 +507,7 @@ defmodule Aimax.Core.Editor do
 
   def handle_call({:snapshot, fid}, _from, state) do
     f = frame(state, fid)
-    snap = Map.take(f, [:pending, :minibuffer, :echo, :active, :completion])
+    snap = Map.take(f, [:pending, :minibuffer, :echo, :active, :completion, :transient])
     # expose the selection flag KeyDispatch needs without leaking the list
     snap =
       case snap.minibuffer do
@@ -619,6 +639,7 @@ defmodule Aimax.Core.Editor do
        active: f.active,
        pending: f.pending,
        minibuffer: f.minibuffer && render_minibuffer(f.minibuffer, minibuf_of(f)),
+       transient: Map.get(f, :transient),
        which_key: which_key(state, f),
        completion: f.completion && render_completion(f.completion),
        echo: f.echo,
@@ -781,7 +802,8 @@ defmodule Aimax.Core.Editor do
   end
 
   def handle_call({:rename_buffer, old, new}, _from, state) do
-    frames = Map.new(state.frames, fn {id, f} -> {id, %{f | tree: swap_buffer(f.tree, old, new)}} end)
+    frames =
+      Map.new(state.frames, fn {id, f} -> {id, %{f | tree: swap_buffer(f.tree, old, new)}} end)
 
     keymaps =
       state.local_keymaps
@@ -877,6 +899,15 @@ defmodule Aimax.Core.Editor do
       else: changed(:ok, put_frame(state, %{f | pending: seq}), f.id)
   end
 
+  def handle_call({:set_transient, menu, fid}, _from, state) do
+    f = frame(state, fid)
+    menu = if menu in [nil, false], do: nil, else: menu
+
+    if Map.get(f, :transient) == menu,
+      do: {:reply, :ok, state},
+      else: changed(:ok, put_frame(state, Map.merge(f, %{transient: menu, pending: []})), f.id)
+  end
+
   def handle_call({:set_echo, msg, fid}, _from, state) do
     f = frame(state, fid)
 
@@ -933,6 +964,7 @@ defmodule Aimax.Core.Editor do
         :list,
         Candidates.new(candidates, query: mb_query(mb), match_hint: mb.match_hint)
       )
+
     changed(:ok, put_frame(state, %{f | minibuffer: mb}), f.id)
   end
 
@@ -957,7 +989,11 @@ defmodule Aimax.Core.Editor do
         if input == mb.input,
           do: {:reply, :unchanged, state},
           else:
-            changed({:changed, input}, put_frame(state, %{f | minibuffer: put_mb_input(mb, input)}), f.id)
+            changed(
+              {:changed, input},
+              put_frame(state, %{f | minibuffer: put_mb_input(mb, input)}),
+              f.id
+            )
 
       _ ->
         {:reply, :unchanged, state}
@@ -981,7 +1017,12 @@ defmodule Aimax.Core.Editor do
         # the prompt holds the selection (a directory input): the first move
         # down takes it to the first candidate, it does not skip one
         delta = if prompt_preselected?(mb) and delta > 0, do: delta - 1, else: delta
-        changed(:ok, put_frame(state, %{f | minibuffer: %{mb | list: Candidates.move(mb.list, delta)}}), f.id)
+
+        changed(
+          :ok,
+          put_frame(state, %{f | minibuffer: %{mb | list: Candidates.move(mb.list, delta)}}),
+          f.id
+        )
 
       _ ->
         {:reply, {:error, :inactive}, state}
@@ -1063,7 +1104,11 @@ defmodule Aimax.Core.Editor do
   def handle_call({:completion_move, delta, fid}, _from, state) do
     case frame(state, fid) do
       %{completion: %{} = c} = f ->
-        changed(:ok, put_frame(state, %{f | completion: %{c | list: Candidates.move(c.list, delta)}}), f.id)
+        changed(
+          :ok,
+          put_frame(state, %{f | completion: %{c | list: Candidates.move(c.list, delta)}}),
+          f.id
+        )
 
       _ ->
         {:reply, :ok, state}
@@ -1190,6 +1235,7 @@ defmodule Aimax.Core.Editor do
 
             if Buffer.exists?(leaf.buffer),
               do: wp_safely(fn -> Buffer.drop_win_point(leaf.buffer, id) end)
+
             active = if f.active == id, do: first_leaf(tree).id, else: f.active
 
             changed(
@@ -1219,7 +1265,12 @@ defmodule Aimax.Core.Editor do
         # buffer-list order) — without this, a focus change is invisible
         # to C-x b history
         state = bump_mru(state, find_leaf(f.tree, id).buffer)
-        changed(:ok, state |> put_frame(%{f | active: id}) |> bump_frame(f.id) |> resync_swap(), f.id)
+
+        changed(
+          :ok,
+          state |> put_frame(%{f | active: id}) |> bump_frame(f.id) |> resync_swap(),
+          f.id
+        )
     end
   end
 
@@ -1323,7 +1374,9 @@ defmodule Aimax.Core.Editor do
     # switch left no trace in C-x b.
     shown = tree |> leaf_ids_buffers() |> Enum.map(&elem(&1, 1)) |> Enum.uniq()
     active_buf = find_leaf(tree, active).buffer
-    state = Enum.reduce(Enum.reverse(shown -- [active_buf]) ++ [active_buf], state, &bump_mru(&2, &1))
+
+    state =
+      Enum.reduce(Enum.reverse(shown -- [active_buf]) ++ [active_buf], state, &bump_mru(&2, &1))
 
     changed(
       :ok,
@@ -1410,7 +1463,8 @@ defmodule Aimax.Core.Editor do
     end)
   end
 
-  defp valid_frame_id?(id), do: is_binary(id) and String.starts_with?(id, "f-") and byte_size(id) <= 24
+  defp valid_frame_id?(id),
+    do: is_binary(id) and String.starts_with?(id, "f-") and byte_size(id) <= 24
 
   defp gen_frame_id,
     do: "f-" <> Base.encode32(:crypto.strong_rand_bytes(4), case: :lower, padding: false)
@@ -1542,7 +1596,9 @@ defmodule Aimax.Core.Editor do
     [local, state.keymap]
     |> Enum.flat_map(&Map.to_list/1)
     |> Enum.filter(fn {seq, _} -> List.starts_with?(seq, f.pending) and seq != f.pending end)
-    |> Enum.map(fn {seq, cmd} -> %{key: Enum.join(Enum.drop(seq, length(f.pending)), " "), command: cmd} end)
+    |> Enum.map(fn {seq, cmd} ->
+      %{key: Enum.join(Enum.drop(seq, length(f.pending)), " "), command: cmd}
+    end)
     |> Enum.uniq_by(& &1.key)
     |> Enum.sort_by(& &1.key)
   end
@@ -1706,8 +1762,7 @@ defmodule Aimax.Core.Editor do
     {a2, ra} = render_walk(a, rows_a, win_rows)
     {b2, rb} = render_walk(b, rows_b, win_rows)
 
-    {%{split | children: [a2, b2]},
-     %{type: :split, dir: dir, ratio: ratio, children: [ra, rb]}}
+    {%{split | children: [a2, b2]}, %{type: :split, dir: dir, ratio: ratio, children: [ra, rb]}}
   end
 
   defp render_walk(%{type: :leaf, id: id, buffer: buffer} = leaf, rows, win_rows) do
@@ -1898,7 +1953,6 @@ defmodule Aimax.Core.Editor do
 
     {length(starts) - MapSet.size(hidden_lines), visible_cl, hidden_lines}
   end
-
 
   defp rows_for(%{type: :leaf, id: id}, id, rows), do: rows
   defp rows_for(%{type: :leaf}, _id, _rows), do: nil

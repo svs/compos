@@ -130,4 +130,16 @@ defmodule Aimax.AuthorTest do
     assert {:ok, log} = Session.eval(~s{(buffer-edit-log "#{b}")})
     assert log =~ ~s{"agent:c1" 0 3 0}
   end
+
+  test "agents get no shell: shell-command->string refuses under an agent author" do
+    # the user's shell works
+    assert {:ok, out} = Session.eval(~s{(shell-command->string "echo hi")})
+    assert out =~ "hi"
+
+    # an agent-sourced evaluation is refused — aimax is the only sandbox
+    assert {:ok, "#f"} =
+             Session.eval(~s{
+               (with-edit-author "agent:a1"
+                 (lambda () (shell-command->string "echo hi")))})
+  end
 end

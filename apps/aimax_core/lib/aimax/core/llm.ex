@@ -12,10 +12,10 @@ defmodule Aimax.Core.LLM do
   `:llm_request_fun` / `:llm_chat_fun` app-env seams stub the wire for tests
   exactly as before.
 
-  Model routing (`model/0` strings): `"openai:<m>"` / `"openrouter:<m>"`
-  route to those providers; a bare id is Anthropic. A provider key comes
-  from Scheme: this module asks `key-get` for a name, and
-  packages/keys.scm decides which source answers.
+  Model routing (`model/0` strings): `"openai:<m>"` / `"openrouter:<m>"` /
+  `"deepseek:<m>"` route to those providers; a bare id is Anthropic. A
+  provider key comes from Scheme: this module asks `key-get` for a name,
+  and packages/keys.scm decides which source answers.
 
   Tool use (gptel-style, native): `complete_tools/6` runs the tool_use loop.
   Tool definitions and handlers live in the Scheme registry
@@ -136,6 +136,7 @@ defmodule Aimax.Core.LLM do
       |> maybe_put(:on_chunk, opts[:on_chunk])
       |> maybe_put(:on_thinking, opts[:on_thinking])
       |> maybe_put(:model, opts[:model])
+      |> maybe_put(:reasoning_effort, opts[:reasoning_effort])
 
     case chat_fun().(req) do
       {:ok, %{"stop_reason" => "tool_use", "content" => blocks} = resp} ->
@@ -302,44 +303,47 @@ defmodule Aimax.Core.LLM do
     model = req[:model] || model()
     spec = req_model_spec(model)
 
-    with :ok <- ensure_key(spec) do
-      ctx = to_req_context(messages, system)
-      opts = req_opts(spec, tools)
+    ctx = to_req_context(messages, system)
+    opts = key_opts(spec) ++ req_opts(spec, tools)
 
-      if req[:on_chunk] do
-        # only the call that STARTS the stream retries: once a delta has
-        # reached the renderer, a second attempt would print the reply twice
-        case with_retry(fn -> ReqLLM.stream_text(spec, ctx, opts) end) do
-          {:ok, sr} ->
-            tee =
-              Stream.map(sr.stream, fn chunk ->
-                case chunk.type do
-                  :content ->
-                    if chunk.text not in [nil, ""], do: req.on_chunk.(chunk.text)
+    opts =
+      if req[:reasoning_effort],
+        do: Keyword.put(opts, :reasoning_effort, req.reasoning_effort),
+        else: opts
 
-                  :thinking ->
-                    if req[:on_thinking] && chunk.text, do: req.on_thinking.(chunk.text)
+    if req[:on_chunk] do
+      # only the call that STARTS the stream retries: once a delta has
+      # reached the renderer, a second attempt would print the reply twice
+      case with_retry(fn -> ReqLLM.stream_text(spec, ctx, opts) end) do
+        {:ok, sr} ->
+          tee =
+            Stream.map(sr.stream, fn chunk ->
+              case chunk.type do
+                :content ->
+                  if chunk.text not in [nil, ""], do: req.on_chunk.(chunk.text)
 
-                  _ ->
-                    :ok
-                end
+                :thinking ->
+                  if req[:on_thinking] && chunk.text, do: req.on_thinking.(chunk.text)
 
-                chunk
-              end)
+                _ ->
+                  :ok
+              end
 
-            case ReqLLM.StreamResponse.to_response(%{sr | stream: tee}) do
-              {:ok, resp} -> {:ok, Map.put(from_req_response(resp, spec), "streamed", true)}
-              {:error, e} -> {:error, err_msg(e)}
-            end
+              chunk
+            end)
 
-          {:error, e} ->
-            {:error, err_msg(e)}
-        end
-      else
-        case with_retry(fn -> ReqLLM.generate_text(spec, ctx, opts) end) do
-          {:ok, resp} -> {:ok, from_req_response(resp, spec)}
-          {:error, e} -> {:error, err_msg(e)}
-        end
+          case ReqLLM.StreamResponse.to_response(%{sr | stream: tee}) do
+            {:ok, resp} -> {:ok, Map.put(from_req_response(resp, spec), "streamed", true)}
+            {:error, e} -> {:error, err_msg(e)}
+          end
+
+        {:error, e} ->
+          {:error, err_msg(e)}
+      end
+    else
+      case with_retry(fn -> ReqLLM.generate_text(spec, ctx, opts) end) do
+        {:ok, resp} -> {:ok, from_req_response(resp, spec)}
+        {:error, e} -> {:error, err_msg(e)}
       end
     end
   end
@@ -389,41 +393,32 @@ defmodule Aimax.Core.LLM do
     base + :rand.uniform(max(div(base, 2), 1))
   end
 
-  # Provider routing by model name:
-  #   "openrouter:<model>" | "openai:<model>" -> that provider
-  #   anything else                           -> Anthropic
+  # Provider routing by model name: "provider:<model>" passes through to that
+  # provider; a bare id is Anthropic. The provider set is not enumerated here
+  # — req_llm owns the providers, Scheme owns the keys.
   def req_model_spec(model) do
     if String.contains?(model, ":"), do: model, else: "anthropic:" <> model
   end
 
   defp provider_of(spec), do: spec |> String.split(":", parts: 2) |> hd()
 
-  @provider_keys %{
-    "anthropic" => {"ANTHROPIC_API_KEY", :anthropic_api_key},
-    "openai" => {"OPENAI_API_KEY", :openai_api_key},
-    "openrouter" => {"OPENROUTER_API_KEY", :openrouter_api_key}
-  }
+  # Resolve a provider's key from the Scheme chain and hand it to req_llm as
+  # a per-request :api_key option. The key NAME is the convention
+  # UP(PROVIDER)_API_KEY — the same convention req_llm itself reads from the
+  # environment, so the two agree. No provider table lives in Elixir: a new
+  # provider needs only its key in the chain (env / ~/.aimax/<name>-key /
+  # Doppler) and its model in the Scheme menu.
+  defp key_opts(spec) do
+    var = String.upcase(provider_of(spec)) <> "_API_KEY"
 
-  defp ensure_key(spec) do
-    case @provider_keys[provider_of(spec)] do
-      nil ->
-        # an exotic provider spec: let req_llm's own key config handle it
-        :ok
-
-      {var, key} ->
-        case key_for(var) do
-          nil ->
-            {:error, "no #{var} — see the key chain in packages/keys.scm"}
-
-          k ->
-            ReqLLM.put_key(key, k)
-            :ok
-        end
+    case key_for(var) do
+      k when is_binary(k) and k != "" -> [api_key: k]
+      _ -> []
     end
   end
 
   # Where a key comes from is policy, so Scheme answers (packages/keys.scm).
-  # ensure_key/1 runs in the request Task or in an agent backend, never in
+  # key_opts/1 runs in the request Task or in an agent backend, never in
   # the session process — a call from the session would deadlock.
   defp key_for(var) do
     case Process.get({__MODULE__, :provider_key, var}) do
@@ -648,19 +643,19 @@ defmodule Aimax.Core.LLM do
   # the plain one-shot completion (the (llm ...) primitive)
   defp default_request(prompt, requested_model) do
     spec = req_model_spec(requested_model)
+    opts = key_opts(spec) ++ req_opts(spec, [])
 
-    with :ok <- ensure_key(spec) do
-      case with_retry(fn -> ReqLLM.generate_text(spec, prompt, req_opts(spec, [])) end) do
-        {:ok, resp} ->
-          Aimax.Core.LLMDb.record(
-            requested_model,
-            usage_strings(ReqLLM.Response.usage(resp), spec)
-          )
-          {:ok, ReqLLM.Response.text(resp) || ""}
+    case with_retry(fn -> ReqLLM.generate_text(spec, prompt, opts) end) do
+      {:ok, resp} ->
+        Aimax.Core.LLMDb.record(
+          requested_model,
+          usage_strings(ReqLLM.Response.usage(resp), spec)
+        )
 
-        {:error, e} ->
-          {:error, err_msg(e)}
-      end
+        {:ok, ReqLLM.Response.text(resp) || ""}
+
+      {:error, e} ->
+        {:error, err_msg(e)}
     end
   end
 end

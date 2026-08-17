@@ -69,7 +69,10 @@ defmodule Aimax.Core do
 
   def list_buffers do
     Registry.select(@registry, [{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
-    |> Enum.flat_map(fn {name, pid} -> if Process.alive?(pid), do: [name], else: [] end)
+    |> Enum.flat_map(fn
+      {name, pid} when is_binary(name) -> if Process.alive?(pid), do: [name], else: []
+      _ -> []
+    end)
   end
 
   def buffer_names, do: Enum.uniq(BufferStore.history() ++ list_buffers() ++ BufferStore.names())
@@ -84,6 +87,13 @@ defmodule Aimax.Core do
     end)
 
     :ok
+  end
+
+  def kill_buffer(%Buffer.Ref{} = ref) do
+    case Buffer.name(ref) do
+      nil -> {:error, :not_found}
+      name -> kill_buffer(name)
+    end
   end
 
   def kill_buffer(name) do
@@ -111,7 +121,14 @@ defmodule Aimax.Core do
   itself and what the new name says (`rename-buffer!`); this is the
   mechanism. A file buffer keeps its path — the file on disk does not move.
   """
-  def rename_buffer(old, new) do
+  def rename_buffer(%Buffer.Ref{} = ref, new) do
+    case Buffer.name(ref) do
+      nil -> {:error, :no_buffer}
+      old -> rename_buffer(old, new)
+    end
+  end
+
+  def rename_buffer(old, new) when is_binary(old) and is_binary(new) do
     cond do
       old == new ->
         {:error, :same_name}

@@ -23,7 +23,7 @@ defmodule Aimax.Core.LLMDb do
 
   @doc "Pricing for a model id: %{input:, output:, cache_read:, cache_write:} $/1M tokens, or nil."
   def price(model) do
-    model = model |> String.replace_prefix("openrouter:", "") |> String.replace_prefix("openai:", "")
+    model = strip_provider(model)
     db = :persistent_term.get(:aimax_llmdb, %{})
 
     # prefer first-party providers; openrouter ids are "vendor/model"
@@ -52,8 +52,7 @@ defmodule Aimax.Core.LLMDb do
   then has to show, rather than pretending the model finished.
   """
   def max_tokens(model) do
-    model = model |> String.replace_prefix("openrouter:", "") |> String.replace_prefix("openai:", "")
-    model = model |> String.replace_prefix("anthropic:", "")
+    model = strip_provider(model)
     db = :persistent_term.get(:aimax_llmdb, %{})
 
     Enum.find_value(["anthropic", "openai", "openrouter"] ++ Map.keys(db), fn p ->
@@ -79,12 +78,7 @@ defmodule Aimax.Core.LLMDb do
   models whose limits differ by more than ten times.
   """
   def context_limit(model) do
-    model =
-      model
-      |> String.replace_prefix("openrouter:", "")
-      |> String.replace_prefix("openai:", "")
-      |> String.replace_prefix("anthropic:", "")
-
+    model = strip_provider(model)
     db = :persistent_term.get(:aimax_llmdb, %{})
 
     Enum.find_value(["anthropic", "openai", "openrouter"] ++ Map.keys(db), fn p ->
@@ -210,6 +204,11 @@ defmodule Aimax.Core.LLMDb do
   end
 
   def refresh, do: GenServer.cast(__MODULE__, :refresh)
+
+  # Drop the routing prefix: "deepseek:deepseek-chat" -> "deepseek-chat",
+  # "openrouter:vendor/model" -> "vendor/model", a bare id passes through.
+  # Generic on purpose — no provider table is maintained here.
+  defp strip_provider(model), do: model |> String.split(":", parts: 2) |> List.last()
 
   # --- server ---------------------------------------------------------------
 

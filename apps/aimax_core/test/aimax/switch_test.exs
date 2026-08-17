@@ -137,8 +137,10 @@ defmodule Aimax.SwitchTest do
     # --- hop 2: to codex ------------------------------------------------
     focus(buf)
     {:ok, _} = Session.eval(~s[(run-command "chat-set-backend")])
+    press(["b"])
     type("codex")
     press(["RET"])
+    press(["C-g"])
 
     assert_receive {:transport_open, codex, cmd}, 1_000
     assert cmd =~ "codex-acp"
@@ -163,8 +165,10 @@ defmodule Aimax.SwitchTest do
     # --- hop 3: to claude-code -----------------------------------------
     focus(buf)
     {:ok, _} = Session.eval(~s[(run-command "chat-set-backend")])
+    press(["b"])
     type("claude-code")
     press(["RET"])
+    press(["C-g"])
 
     assert_receive {:transport_open, cc, cmd2}, 1_000
     assert cmd2 =~ "claude-code-acp"
@@ -203,8 +207,10 @@ defmodule Aimax.SwitchTest do
     # --- hop 4: back to the api lane ------------------------------------
     focus(buf)
     {:ok, _} = Session.eval(~s[(run-command "chat-set-backend")])
+    press(["b"])
     type("api")
     press(["RET"])
+    press(["C-g"])
 
     me = self()
 

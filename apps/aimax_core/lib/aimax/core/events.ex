@@ -2,10 +2,14 @@ defmodule Aimax.Core.Events do
   @moduledoc """
   Buffer change events over a duplicate-key Registry (no external deps).
 
+  Long-lived owners subscribe with `%Aimax.Core.Buffer.Ref{}` so a rename
+  cannot invalidate their topic. Name topics remain as a compatibility alias
+  for Scheme/UI code whose ownership is intentionally name-oriented.
+
   Subscribers receive:
 
-      {:buffer_change, buffer_name, %{version: v, pos: p, inserted: text,
-                                      deleted: byte_len, source: :user | {:agent, id} | ...}}
+      {:buffer_change, buffer_ref_or_name, %{version: v, pos: p, inserted: text,
+                                             deleted: byte_len, source: :user | {:agent, id} | ...}}
   """
 
   @registry Aimax.Core.EventRegistry

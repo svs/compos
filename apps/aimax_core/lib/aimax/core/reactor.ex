@@ -29,7 +29,7 @@ defmodule Aimax.Core.Reactor do
 
   use GenServer
 
-  alias Aimax.Core.{Editor, Events}
+  alias Aimax.Core.{Buffer, Editor, Events}
 
   defstruct rules: %{}, next_id: 1
 
@@ -60,11 +60,12 @@ defmodule Aimax.Core.Reactor do
 
   @impl true
   def handle_call({:on_change, buffer, matcher, handler, opts}, _from, state) do
-    Events.subscribe(buffer)
+    buffer_ref = Buffer.ref(buffer)
+    Events.subscribe(buffer_ref)
 
     rule = %{
       id: state.next_id,
-      buffer: buffer,
+      buffer_ref: buffer_ref,
       matcher: matcher,
       handler: handler,
       debounce: Keyword.get(opts, :debounce, 0),
@@ -102,7 +103,7 @@ defmodule Aimax.Core.Reactor do
         {:noreply, state}
 
       rule ->
-        if rule.eager or in_scope?(rule.buffer, screen()) do
+        if rule.eager or in_scope?(rule.buffer_ref, screen()) do
           changes = Enum.reverse(rule.pending)
           handler = rule.handler
           Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn -> handler.(changes) end)
@@ -130,7 +131,7 @@ defmodule Aimax.Core.Reactor do
 
         rules =
           Enum.reduce(parked, state.rules, fn {id, rule}, rules ->
-            if in_scope?(rule.buffer, screen) do
+            if in_scope?(rule.buffer_ref, screen) do
               Map.put(rules, id, %{
                 rule
                 | timer: Process.send_after(self(), {:fire, id}, 0)
@@ -145,7 +146,7 @@ defmodule Aimax.Core.Reactor do
   end
 
   defp maybe_accumulate(rule, buffer, change) do
-    if rule.buffer == buffer and source_ok?(rule, change) and matches?(rule.matcher, change) do
+    if rule.buffer_ref == buffer and source_ok?(rule, change) and matches?(rule.matcher, change) do
       rule = %{rule | pending: [change | rule.pending]}
 
       if rule.timer do
@@ -179,9 +180,9 @@ defmodule Aimax.Core.Reactor do
   # in scope: on screen, or in the same group as a current buffer
   defp in_scope?(_b, :all), do: true
 
-  defp in_scope?(b, %{visible: visible, current: current}) do
-    b in visible or
-      case group_of(b) do
+  defp in_scope?(ref, %{visible: visible, current: current}) do
+    Buffer.name(ref) in visible or
+      case group_of(ref) do
         nil -> false
         g -> g in Enum.map(current, &group_of/1)
       end

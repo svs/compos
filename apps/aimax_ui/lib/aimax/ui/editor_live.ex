@@ -163,9 +163,7 @@ defmodule Aimax.Ui.EditorLive do
     if Aimax.Core.Editor.set_window_cols(parsed, socket.assigns.frame) do
       # a window that changed width is a window configuration change: the
       # editor says so, and Scheme decides what has to be drawn again
-      Aimax.Core.Session.eval(
-        "(when (boundp 'window-config-changed!) (window-config-changed!))"
-      )
+      Aimax.Core.Session.eval("(when (boundp 'window-config-changed!) (window-config-changed!))")
 
       {:noreply, socket |> drain() |> refresh()}
     else
@@ -663,7 +661,7 @@ defmodule Aimax.Ui.EditorLive do
       <div class="windows">
         <.tree node={@state.tree} active={@state.active} completion={@state.completion} />
       </div>
-      <div :if={@state.which_key && @state.minibuffer == nil} class="which-key">
+      <div :if={@state.which_key && @state.minibuffer == nil && @state.transient == nil} class="which-key">
         <div class="wk-title">{Enum.join(@state.pending, " ")} —  {length(@state.which_key)} bindings</div>
         <div class="wk-grid">
           <div :for={w <- @state.which_key} class="wk-item">
@@ -728,12 +726,36 @@ defmodule Aimax.Ui.EditorLive do
           <span class="mb-spacer"></span>
         </div>
       <% else %>
-        <div class="echo-bar">
-          <span class="echo">{@state.echo}</span>
-          <span class="mb-spacer"></span>
-          <span :if={@state.modeline_extra != ""} class="ml-extra">{@state.modeline_extra}</span>
-          <span class="echo-hint" :if={@state.echo == ""}>C-x C-f · C-x b · C-x d · C-c a n agent · M-x · C-g</span>
-        </div>
+        <%= if @state.transient do %>
+          <div class="mb-panel palette transient-panel">
+            <div class="transient-title">{@state.transient.title}</div>
+            <div class="transient-groups">
+              <section :for={group <- @state.transient.groups} class="transient-group">
+                <div class="transient-group-title">{group.title}</div>
+                <div
+                  :for={item <- group.items}
+                  class={"transient-item #{if item.selected, do: "selected"} #{item.behavior}"}
+                >
+                  <span class="transient-key">{item.key}</span>
+                  <span class="transient-description">{item.description}</span>
+                  <span :if={item.value != ""} class="transient-value">{item.value}</span>
+                </div>
+              </section>
+            </div>
+            <div class="transient-help">RET invoke · C-g quit · C-q quit all · C-z suspend · ↑/↓ select · ? help</div>
+          </div>
+          <div class="echo-bar">
+            <span class="echo">{@state.echo}</span>
+            <span class="mb-spacer"></span>
+          </div>
+        <% else %>
+          <div class="echo-bar">
+            <span class="echo">{@state.echo}</span>
+            <span class="mb-spacer"></span>
+            <span :if={@state.modeline_extra != ""} class="ml-extra">{@state.modeline_extra}</span>
+            <span class="echo-hint" :if={@state.echo == ""}>C-x C-f · C-x b · C-x d · C-c a n agent · M-x · C-g</span>
+          </div>
+        <% end %>
       <% end %>
     </div>
     """
@@ -1425,7 +1447,7 @@ defmodule Aimax.Ui.EditorLive do
     <style>
     body{background:#{p.bg} !important;color:#{p.fg} !important}
     *,*::before,*::after{background-color:transparent !important;color:inherit !important;border-color:#{p.border} !important}
-    a{color:#{p.accent} !important}
+    a,a:visited{color:#{p.link} !important}
     code,pre,kbd{background-color:#{p.inset} !important}
     blockquote{color:#{p.dim} !important}
     th{background-color:#{p.inset} !important}
@@ -1452,7 +1474,7 @@ defmodule Aimax.Ui.EditorLive do
       |> String.replace(@pt_sentinel, ~s(<span class="pt"></span>))
       |> String.replace("\uE001", ~s(<span class="mk"></span>))
 
-    %{bg: bg, fg: fg, accent: accent, dim: dim, border: border, inset: inset} =
+    %{bg: bg, fg: fg, accent: accent, link: link, dim: dim, border: border, inset: inset} =
       preview_palette(faces)
 
     """
@@ -1466,7 +1488,9 @@ defmodule Aimax.Ui.EditorLive do
     code{background:#{inset};padding:1px 4px;border-radius:2px}
     pre{background:#{inset};padding:10px 12px;border-left:3px solid #{accent};overflow-x:auto}
     pre code{background:none;padding:0}
-    a{color:#{accent}}blockquote{margin:12px 0;padding:2px 14px;border-left:3px solid #{border};color:#{dim}}
+    a,a:visited{color:#{link};text-decoration-thickness:1px;text-underline-offset:2px;
+      text-decoration-color:color-mix(in srgb,currentColor 45%,transparent)}
+    a:hover{text-decoration-color:currentColor}blockquote{margin:12px 0;padding:2px 14px;border-left:3px solid #{border};color:#{dim}}
     blockquote.llm-response{margin:18px 0;padding:12px 16px;border:1px solid #{border};
          border-left:4px solid #{accent};border-radius:7px;background:#{inset};color:#{fg};user-select:text}
     blockquote.llm-response>:first-child{margin-top:0}
@@ -1661,6 +1685,7 @@ defmodule Aimax.Ui.EditorLive do
       bg: face(faces, "window", "bg", "#fdfcf8"),
       fg: face(faces, "default", "fg", "#1b1a17"),
       accent: face(faces, "accent", "fg", "#26356b"),
+      link: face(faces, "link", "fg", face(faces, "accent", "fg", "#26356b")),
       dim: face(faces, "dim", "fg", "#8a857a"),
       border: face(faces, "border", "bg", "#cbc4b1"),
       inset: face(faces, "window-inactive", "bg", "#f4f0e6")

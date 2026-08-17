@@ -102,6 +102,45 @@ defmodule Aimax.Core do
     end
   end
 
+  @doc """
+  Rename a buffer in place, keeping its process and everything in it.
+
+  The buffer keeps its text, point, mark, locals, overlays, undo history and
+  attribution, because nothing moves: the process re-registers under the new
+  name and rewrites its checkpoint. Scheme decides WHEN a buffer renames
+  itself and what the new name says (`rename-buffer!`); this is the
+  mechanism. A file buffer keeps its path — the file on disk does not move.
+  """
+  def rename_buffer(old, new) do
+    cond do
+      old == new ->
+        {:error, :same_name}
+
+      new == "" ->
+        {:error, :empty_name}
+
+      Buffer.exists?(new) or BufferStore.known?(new) ->
+        {:error, :already_exists}
+
+      not (Buffer.exists?(old) or BufferStore.known?(old)) ->
+        {:error, :no_buffer}
+
+      true ->
+        {:ok, ^old} = ensure_buffer(old)
+
+        case Buffer.rename(old, new, Buffer.path(old)) do
+          :ok ->
+            if Process.whereis(Aimax.Core.Editor),
+              do: Aimax.Core.Editor.rename_buffer(old, new)
+
+            {:ok, new}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
+  end
+
   @doc "Rename or move a file and carry its buffer identity and history with it."
   def rename_file(source, destination) do
     source = Path.expand(source)

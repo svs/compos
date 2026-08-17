@@ -203,7 +203,9 @@
 (define (code--top-nodes buf)
   (if (equal? (buffer-local buf 'code-backend) "ts")
       (ts-children "" 0 (string-byte-length (buffer-text buf)))
-      (code--indent-children buf (list "block" 0 (string-byte-length (buffer-text buf))))))
+      ;; "file", not "block": this pseudo node has no header line, and
+      ;; code--indent-children reads that from the kind
+      (code--indent-children buf (list "file" 0 (string-byte-length (buffer-text buf))))))
 
 ;; a node that covers most of the file is the file, not a part of it
 (define (code--wraps-file? buf n)
@@ -357,9 +359,16 @@
 ;; indent it holds. The fold pass asks for a whole level at once.
 (define (code--indent-children buf n)
   (let* ((lines (code--lines buf))
+         ;; A block's own first line is its header, not a child of it. The
+         ;; FILE has no header line, so there its first line is a child like
+         ;; any other — without this the first definition of a file with no
+         ;; grammar is invisible to the outline and never folds.
+         (file? (equal? (code--kind n) "file"))
          (inside (filter (lambda (l)
                            (and (code--line-indent l)
-                                (> (code--line-start l) (code--start n))
+                                (if file?
+                                    (>= (code--line-start l) (code--start n))
+                                    (> (code--line-start l) (code--start n)))
                                 (<= (code--line-end l) (code--end n))))
                          lines)))
     (if (null? inside)
@@ -543,3 +552,274 @@
 
 (public! 'code-browse "Toggle structural browsing of the current buffer")
 (public! 'code-goto-definition "Go to the definition of the symbol at point")
+
+;;; --- structure for an agent ---------------------------------------------------
+;;; The same node backend the reader browses with, as four functions an
+;;; agent calls through eval-scheme. A definition is addressed by the LINE
+;;; it starts on, so nothing here needs a byte offset or an exact-string
+;;; match: read the outline, pick a line, read or replace that definition.
+;;; Tree-sitter answers where a grammar parses the buffer; indentation
+;;; answers everywhere else, so every file has an outline.
+;;;
+;;; The node questions read the CURRENT buffer, so every entry point here
+;;; scopes itself with with-current-buffer.
+
+(category! 'syntax)
+(domain! 'code)
+(effects! '(read))
+
+;; a definition's first line, trimmed — what the outline shows and what an
+;; agent matches on when it looks for a name
+(define (code--head buf n)
+  (let* ((text (code--text buf n))
+         (nl (string-index text "\n")))
+    (string-trim (if nl (substring-bytes text 0 nl) text))))
+
+(define (code--outline-rows buf)
+  (map (lambda (n)
+         (list (line-number-at-pos (code--start n))
+               (code--kind n)
+               (code--head buf n)))
+       (code--fold-nodes buf)))
+
+;; Every entry point runs through here. The node questions read the CURRENT
+;; buffer, and code--top-nodes reads the chosen backend from a local — so the
+;; backend must be picked while this buffer IS current, or a file with a
+;; grammar gets browsed by indentation.
+(define (code--structurally buf k)
+  (if (not (buffer-exists? buf))
+      (string-append "no such buffer: " buf)
+      (with-current-buffer buf
+        (lambda ()
+          (code--backend buf)
+          (k)))))
+
+(define (code-outline buf)
+  (code--structurally buf (lambda () (code--outline-rows buf))))
+
+;; the outline rows whose first line contains TEXT — "select the definition
+;; called X" without a language table for what a definition looks like
+(define (code-find buf text)
+  (let ((rows (code-outline buf)))
+    (if (string? rows)
+        rows
+        (filter (lambda (r) (if (string-index (caddr r) text) #t #f)) rows))))
+
+;; the definition that holds LINE. The fold level is the level a reader
+;; lands on, so an agent and a reader address the same things.
+(define (code--at-line buf line)
+  (let* ((pos (line-start-position line))
+         (hit (let loop ((ns (code--fold-nodes buf)))
+                (cond ((null? ns) #f)
+                      ((and (<= (code--start (car ns)) pos)
+                            (>= (code--end (car ns)) pos))
+                       (car ns))
+                      (else (loop (cdr ns)))))))
+    (or hit (code--enclosing buf pos))))
+
+(define (code--with-node buf line k)
+  (code--structurally buf
+        (lambda ()
+          (let ((lines (code--buffer-lines buf)))
+            ;; line-start-position clamps, so an out-of-range line would
+            ;; quietly edit the last definition in the file
+            (cond
+              ((or (< line 1) (> line lines))
+               (string-append "line " (number->string line)
+                              " is outside the buffer — it has "
+                              (number->string lines) " lines"))
+              (else
+                (let ((n (code--at-line buf line)))
+                  (if n
+                      (k n)
+                      (string-append "no definition holds line "
+                                     (number->string line)
+                                     " — call (code-outline BUF) for the lines that do")))))))))
+
+(define (code-read buf line)
+  (code--with-node buf line (lambda (n) (code--text buf n))))
+
+(effects! '(write))
+
+(define (code-replace! buf line new)
+  (code--with-node buf line
+    (lambda (n)
+      (let ((start (code--start n))
+            (kind (code--kind n)))
+        ;; delete then insert at the same offset: one definition swapped
+        ;; for another, with no exact-string match to get wrong
+        (buffer-delete-range! buf start (- (code--end n) start))
+        (buffer-insert! buf start new)
+        (string-append "replaced the " kind " at line " (number->string line))))))
+
+(effects! '(read))
+(public! 'code-outline
+  "(code-outline BUF) — every definition as (LINE KIND FIRST-LINE)")
+(public! 'code-find
+  "(code-find BUF TEXT) — the outline rows whose first line contains TEXT")
+(public! 'code-read
+  "(code-read BUF LINE) — the exact text of the definition that holds LINE")
+(effects! '(write))
+(public! 'code-replace!
+  "(code-replace! BUF LINE NEW) — replace the whole definition that holds LINE")
+
+;;; --- code-mode: the coding workspace -----------------------------------------
+;;; code-browse READS a source file. code-mode WRITES one, with an agent.
+;;; The mode joins the buffer to a group, loads the coding presets into the
+;;; chat's tool surface, and turns on llm-mode. `C-c s` opens the buffer's
+;;; scratch, which inherits the same model and presets: the user chats in the
+;;; scratch, and the agent edits the source buffer with the editor's own
+;;; tools. `C-c c` opens the group chat over the same surface.
+;;;
+;;; Everything the mode changes is saved on enable and restored on disable.
+;;; The minor-mode local and the workspace locals survive a daemon reload,
+;;; and the setup fn re-runs on restore.
+;;;
+;;; M-x code-mode toggles. Knobs live in the 'code customize group.
+
+(domain! 'code)
+(effects! '(write))
+
+(defgroup 'code "Coding with an agent.")
+
+;; re-apply to every live code-mode buffer so a customize change takes hold
+(define (code-mode--refresh! _v)
+  (for-each
+    (lambda (buf)
+      (when (minor-mode-on? buf "code-mode") (code-mode--apply! buf)))
+    (buffer-list)))
+
+(defcustom 'code-presets '(aimax)
+  "Tool presets loaded whenever code-mode is active. `aimax` is the editor's own tool registry, which is what lets the agent read and write buffers. Set a symbol list such as '(aimax web) in ~/.aimax/ai-config.scm."
+  'group 'code 'type 'list 'set code-mode--refresh!)
+
+(defcustom 'code-model ""
+  "Model for a code-mode buffer and its scratch chat. Empty means the editor's default model."
+  'group 'code 'type 'string 'set code-mode--refresh!)
+
+(defcustom 'code-instructions
+  (string-append
+    "You are working on code in this editor. Read the structure of a file "
+    "first: (code-outline \"BUF\") gives one row per definition as "
+    "(LINE KIND FIRST-LINE). (code-find \"BUF\" \"text\") gives the rows "
+    "whose first line contains that text. Then read exactly one definition "
+    "with (code-read \"BUF\" LINE), and replace exactly one with "
+    "(code-replace! \"BUF\" LINE NEW). Use those four for whole "
+    "definitions — they address code by structure, so no string has to "
+    "match. Tree-sitter answers where the buffer has a grammar, and "
+    "indentation answers everywhere else, so read the result back after a "
+    "replace. For a smaller change use (buffer-replace! \"BUF\" OLD NEW), "
+    "(buffer-replace-all! \"BUF\" OLD NEW), "
+    "(buffer-insert-before! \"BUF\" ANCHOR TEXT), "
+    "(buffer-insert-after! \"BUF\" ANCHOR TEXT) or "
+    "(buffer-delete-text! \"BUF\" TEXT). Each of these takes text you have "
+    "read, never a byte offset, and each one reports what it did. Every "
+    "edit lands in the live buffer, never in the file — the user saves. "
+    "Make the smallest edit that does the job, and keep the file's style.")
+  "Standing instructions for a chat that works on a code-mode buffer. Empty means no code instructions."
+  'group 'code 'type 'string 'set code-mode--refresh!)
+
+;; The one seam the prompts read. editor.scm asks it from BOTH paths that
+;; build a system prompt — M-o in a buffer and the chat lane — so a chat
+;; about this code gets the same instructions whichever surface it rides.
+;; DOCS is the group's buffers; a group with no code-mode buffer says
+;; nothing, and the prompt is unchanged for every other kind of work.
+(define (code-mode-instructions docs)
+  (if (and (not (equal? code-instructions ""))
+           (pair? (filter (lambda (b) (minor-mode-on? b "code-mode")) docs)))
+      code-instructions
+      ""))
+
+(define (code-mode--saved buf key)
+  (let ((hit (assoc key (or (buffer-local buf 'code-mode-saved) '()))))
+    (and hit (cadr hit))))
+
+(define (code-mode--presets buf)
+  ;; Rebuild from the pre-code-mode value on every refresh. Removing a preset
+  ;; from code-presets then takes effect at once, instead of leaving behind
+  ;; the value the previous refresh installed.
+  (let ((base (or (code-mode--saved buf 'chat-presets) '())))
+    (append code-presets
+            (filter (lambda (preset) (not (member preset code-presets))) base))))
+
+;; A code change touches more than one file, so the group is the PROJECT
+;; when the buffer has one: the chat then names every project buffer, and
+;; `C-x p s` opens the same conversation for the whole project. A file
+;; outside a project founds a group of its own, the way writing-mode does.
+;; A group the user chose already wins — this only fills an empty one.
+(define (code-mode--group buf)
+  (or (buffer-group buf)
+      (let ((root (buffer-project-root buf)))
+        (if (equal? root "")
+            (group-ensure! buf)
+            (begin (buffer-set-local! buf 'group root) root)))))
+
+(define (code-mode--label buf)
+  (let ((presets (or (buffer-local buf 'chat-presets) '())))
+    (if (null? presets)
+        "code"
+        (string-append "code · "
+                       (string-join (map symbol->string presets) " ")))))
+
+(define (code-mode--apply! buf)
+  ;; remember what we clobber, once — the saved alist persists, and the
+  ;; restore path re-runs this fn, which must not re-save code-mode's own
+  ;; values over the user's
+  (unless (buffer-local buf 'code-mode-saved)
+    (buffer-set-local! buf 'code-mode-saved
+      (list (list 'group (or (buffer-local buf 'group) #f))
+            (list 'chat-presets (or (buffer-local buf 'chat-presets) #f))
+            (list 'llm-model (or (buffer-local buf 'llm-model) #f))
+            (list 'modeline-info (or (buffer-local buf 'modeline-info) #f))
+            (list 'llm-mode-on (minor-mode-on? buf "llm-mode")))))
+  ;; the group is the agent's surface: it names these buffers in the chat's
+  ;; system prompt, and `C-c g` adds any file the change touches from outside
+  (buffer-set-local! buf 'group (code-mode--group buf))
+  (buffer-set-local! buf 'chat-presets (code-mode--presets buf))
+  ;; an empty setting means the editor's default, so clearing it must give the
+  ;; buffer its own model back — the same rebuild-from-base rule as the presets
+  (buffer-set-local! buf 'llm-model
+    (if (equal? code-model "")
+        (code-mode--saved buf 'llm-model)
+        code-model))
+  ;; "loads the presets" means the servers they name connect now, not on the
+  ;; first question. The aimax tools are native to this process, so
+  ;; chat-remote-servers leaves them out; mcp.scm loads after this file.
+  (when (and (boundp (quote chat-remote-servers)) (boundp (quote mcp-ensure!)))
+    (for-each mcp-ensure! (chat-remote-servers buf)))
+  ;; llm-mode owns in-buffer prompting: M-o here sends the source file, and
+  ;; M-o in the scratch sends the conversation.
+  (enable-minor-mode! buf "llm-mode")
+  ;; A scratch that is already open inherited the presets this buffer held
+  ;; BEFORE the mode, so push the new ones to it.
+  (when (boundp (quote scratch-refresh-llm!))
+    (scratch-refresh-llm! buf))
+  (buffer-set-local! buf 'modeline-info (code-mode--label buf)))
+
+(define (code-mode--teardown! buf)
+  (buffer-set-local! buf 'group (code-mode--saved buf 'group))
+  (buffer-set-local! buf 'chat-presets (code-mode--saved buf 'chat-presets))
+  (buffer-set-local! buf 'llm-model (code-mode--saved buf 'llm-model))
+  (buffer-set-local! buf 'modeline-info (code-mode--saved buf 'modeline-info))
+  (unless (code-mode--saved buf 'llm-mode-on)
+    (disable-minor-mode! buf "llm-mode"))
+  (when (boundp (quote scratch-refresh-llm!))
+    (scratch-refresh-llm! buf))
+  (buffer-set-local! buf 'code-mode-saved #f))
+
+(register-minor-mode! "code-mode" code-mode--apply! code-mode--teardown!)
+
+(define-command "code-mode" "Toggle the agent coding workspace in this buffer"
+  (lambda ()
+    (if (toggle-minor-mode! "code-mode")
+        (message (string-append (code-mode--label (current-buffer))
+                                " · C-c s scratch · M-o sends it"))
+        (message "Code mode disabled"))))
+
+(mode-doc! "code-mode"
+  "An agent coding workspace. The buffer joins a group and loads the coding presets. `C-c s` opens its scratch chat, `M-o` sends that chat, and the agent edits the buffer with the editor's own tools. `C-c c` opens the group chat instead.")
+
+(public! 'code-mode "Toggle the agent coding workspace in the current buffer")
+(effects! '(pure))
+(public! 'code-mode-instructions
+  "(code-mode-instructions DOCS) — the code instructions a prompt adds for those buffers")

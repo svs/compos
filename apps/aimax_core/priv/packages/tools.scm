@@ -499,28 +499,97 @@
 (public! 'hello "(hello) — what this editor is and how to find anything in it")
 
 
+(domain! 'buffers)
+(effects! '(write))
+
 ;; the edit primitive the old edit-doc tool wrapped — now a public function
 ;; reached through eval-scheme. Edits the live buffer, never the file.
 (define (buffer-replace! b old new)
+  (let ((pos (buffer--one-hit b old "old text")))
+    (if (string? pos)
+        pos
+        (begin
+          (buffer-delete-range! b pos (string-byte-length old))
+          (buffer-insert! b pos new)
+          "edited"))))
+
+;;; --- the rest of edit-file semantics ------------------------------------------
+;;; buffer-replace! is the one-hit edit. These four are the operations an
+;;; agent otherwise fakes with byte arithmetic: replace every occurrence,
+;;; insert relative to an anchor, and delete text. Every one of them
+;;; addresses the buffer by TEXT the agent has read, never by offset, and
+;;; every one reports what it did in a sentence the model can act on.
+
+;; the byte offset of the one occurrence of NEEDLE, or an error string.
+;; The three sentences below are the whole reason these helpers exist: a
+;; model that gets "occurs 3 times" fixes its own call on the next round.
+(define (buffer--one-hit b needle what)
+  (cond ((not (buffer-exists? b)) (string-append "no such buffer: " b))
+        ((equal? needle "") (string-append "error: " what " must be non-empty"))
+        (else
+          (let ((hits (- (length (string-split (buffer-text b) needle)) 1)))
+            (cond ((equal? hits 0)
+                   (string-append "error: " what
+                                  " not found — read the buffer and copy it exactly"))
+                  ((> hits 1)
+                   (string-append "error: " what " occurs "
+                                  (number->string hits)
+                                  " times — include surrounding text to make it unique"))
+                  (else (string-index (buffer-text b) needle)))))))
+
+(define (buffer-replace-all! b old new)
   (cond ((not (buffer-exists? b)) (string-append "no such buffer: " b))
         ((equal? old "") "error: old must be non-empty")
         (else
-          (let ((hits (- (length (string-split (buffer-text b) old)) 1)))
-            (cond ((equal? hits 0)
-                   "error: old text not found — read the buffer and copy it exactly")
-                  ((> hits 1)
-                   (string-append "error: old text occurs "
-                                  (number->string hits)
-                                  " times — include surrounding text to make it unique"))
-                  (else
-                    (let ((pos (string-index (buffer-text b) old)))
-                      (buffer-delete-range! b pos (string-byte-length old))
-                      (buffer-insert! b pos new)
-                      "edited")))))))
+          (let* ((text (buffer-text b))
+                 (hits (- (length (string-split text old)) 1)))
+            (if (= hits 0)
+                "error: old text not found — read the buffer and copy it exactly"
+                (begin
+                  ;; one delete and one insert, whatever the number of hits:
+                  ;; the change hooks see one pass instead of one per
+                  ;; occurrence. It is the shape buffer-replace! has, so it
+                  ;; takes the same two undos to put back.
+                  (buffer-delete-range! b 0 (string-byte-length text))
+                  (buffer-insert! b 0 (string-join (string-split text old) new))
+                  (string-append "replaced " (number->string hits)
+                                 (if (= hits 1) " occurrence" " occurrences"))))))))
+
+(define (buffer-insert-before! b anchor text)
+  (let ((pos (buffer--one-hit b anchor "anchor")))
+    (if (string? pos)
+        pos
+        (begin (buffer-insert! b pos text) "inserted"))))
+
+(define (buffer-insert-after! b anchor text)
+  (let ((pos (buffer--one-hit b anchor "anchor")))
+    (if (string? pos)
+        pos
+        (begin (buffer-insert! b (+ pos (string-byte-length anchor)) text)
+               "inserted"))))
+
+(define (buffer-delete-text! b old)
+  (let ((pos (buffer--one-hit b old "text")))
+    (if (string? pos)
+        pos
+        (begin (buffer-delete-range! b pos (string-byte-length old)) "deleted"))))
 
 (category! 'editing)
 (public! 'buffer-replace!
   "(buffer-replace! NAME OLD NEW) — replace exact, unique OLD with NEW in a live buffer")
+(public! 'buffer-replace-all!
+  "(buffer-replace-all! NAME OLD NEW) — replace every occurrence of OLD; reports the count")
+(public! 'buffer-insert-before!
+  "(buffer-insert-before! NAME ANCHOR TEXT) — insert TEXT in front of exact, unique ANCHOR")
+(public! 'buffer-insert-after!
+  "(buffer-insert-after! NAME ANCHOR TEXT) — insert TEXT after exact, unique ANCHOR")
+(public! 'buffer-delete-text!
+  "(buffer-delete-text! NAME TEXT) — delete exact, unique TEXT from a live buffer")
+
+;; the sections below this one predate the stamps and take their metadata
+;; from the frozen classification: leave them the way they were found
+(domain! 'unknown)
+(effects! '(unknown))
 
 ;;; --- the MCP proxy surface ----------------------------------------------------
 ;;; External ACP agents get this same registry over MCP: the bundled

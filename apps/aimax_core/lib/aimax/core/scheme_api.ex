@@ -200,6 +200,8 @@ defmodule Aimax.Core.SchemeAPI do
       "window-preview-buffer!" => "(window-preview-buffer! BUF) — show BUF in the active window without MRU changes.",
       "minibuffer-set-candidates!" => "(minibuffer-set-candidates! CANDIDATES) — replace the minibuffer's candidate list.",
       "delete-file!" => "(delete-file! PATH) — delete a file or empty directory; return #t or error.",
+      "buffer-rename!" =>
+        "(buffer-rename! OLD NEW) — rename a buffer in place, keeping its text, point, locals and undo; return NEW, or #f if the name is taken. Policy lives in rename-buffer!.",
       "rename-file!" => "(rename-file! SOURCE DESTINATION) — move a file or directory and carry an open buffer with it.",
       "make-directory!" => "(make-directory! PATH) — create the directory and its parents; return #t."
     }
@@ -925,6 +927,14 @@ defmodule Aimax.Core.SchemeAPI do
           :ok -> true
           {:error, reason} ->
             raise Aimax.Scheme.Eval.Error, message: "delete failed: #{reason} (#{path})"
+        end
+      end,
+      # the buffer keeps its process, so nothing in it moves. A name that is
+      # taken (live or in history) answers false: the caller picks another.
+      "buffer-rename!" => fn [old, new] ->
+        case Aimax.Core.rename_buffer(old, new) do
+          {:ok, name} -> name
+          {:error, _reason} -> false
         end
       end,
       "rename-file!" => fn [source, destination] ->

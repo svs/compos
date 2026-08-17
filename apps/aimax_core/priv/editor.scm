@@ -1607,6 +1607,26 @@
         (when mode (set-mode! mode)))
       (restore-minor-modes! buf))))
 
+;;; --- renaming a buffer ---------------------------------------------------------
+;;; buffer-rename! is the mechanism: the buffer keeps its process, so text,
+;;; point, locals, overlays and undo all survive. What does NOT survive is
+;;; state OTHER things key by the old name — a change hook, a pointer from
+;;; another buffer. Each owner fixes its own, here.
+
+(define *buffer-renamed-hooks* '())
+
+(define (on-buffer-renamed! fn)
+  (set! *buffer-renamed-hooks* (cons fn *buffer-renamed-hooks*))
+  #t)
+
+;; the rename the editor uses: mechanism, then every owner of name-keyed
+;; state. Returns the new name, or #f when the name is taken.
+(define (rename-buffer! old new)
+  (let ((done (buffer-rename! old new)))
+    (when done
+      (for-each (lambda (fn) (fn old new)) *buffer-renamed-hooks*))
+    done))
+
 ;; The primitive changes the window and wakes the process; Scheme owns the
 ;; mode closures, so it also completes runtime restoration in this same
 ;; interpreter turn. A caller never sees the buffer between those two steps.
@@ -3511,6 +3531,14 @@
   (local-unset-key* buf "M-o")
   (local-unset-key* buf "C-c m"))
 
+;; the change rule behind M-o's response ranges is registered under the name
+;; the buffer had. A renamed chat needs the rule again, under the new one.
+(on-buffer-renamed!
+  (lambda (old new)
+    (when (assoc old *llm-mode-hooks*)
+      (llm-mode--remove-hook! old)
+      (when (minor-mode-on? new "llm-mode") (llm-mode--ensure-hook! new)))))
+
 (register-minor-mode! "llm-mode" llm-mode--apply! llm-mode--teardown!)
 
 (define-command "llm-mode" "Toggle in-buffer LLM interaction and response formatting"
@@ -3536,6 +3564,51 @@
             (buffer-set-local! buf 'llm-model model)
             (message (string-append "M-o · " model))))))))
 
+;; Which buffers is an M-o question about? A grouped buffer answers: a
+;; writing document, a code-mode source file, or the scratch beside either.
+;; The tools then read and edit those buffers by name, instead of guessing
+;; from (buffer-list). The names are sorted, so the note changes only when
+;; the membership changes — a plain buffer switch must not rewrite the
+;; cached prefix (see chat-preamble-body).
+(define (llm-mode--group-note buf)
+  (let* ((g (buffer-group buf))
+         ;; group-buffers reads the LIVE buffer list, and this walks the
+         ;; members. group-docs takes the MRU path, which still names
+         ;; buffers the user killed — one of those kills the send.
+         (docs (if g
+                   (remove (lambda (b)
+                             (or (chat-buffer? b) (equal? b (group-chat-name g))))
+                           (group-buffers g))
+                   '())))
+    (if (null? docs)
+        ""
+        (string-append
+          "\n\nThe user works in the editor buffer group \"" g "\":\n"
+          (fold (lambda (acc d)
+                  (string-append acc "- \"" d "\""
+                    (let ((m (buffer-local d 'mode-name)))
+                      (if m (string-append " (" m ")") ""))
+                    "\n"))
+                "" (sort docs))
+          *chat-edit-protocol*
+          (chat-code-note docs)))))
+
+;; A group that holds a code-mode buffer adds that mode's own instructions.
+;; The mode owns the words (code-instructions, packages/code.scm); the two
+;; prompt paths ask for them here so both surfaces say the same thing. The
+;; package loads after this file, so a build without it changes nothing.
+(define (chat-code-note docs)
+  (if (boundp (quote code-mode-instructions))
+      (let ((note (code-mode-instructions docs)))
+        (if (equal? note "") "" (string-append "\n\n" note)))
+      ""))
+
+;; ...and the voice that goes with them: a chat over one code-mode buffer is
+;; not a writing companion, and telling it to match the document's voice
+;; asks a coding session to imitate prose.
+(define (chat-code-companion? docs)
+  (not (equal? (chat-code-note docs) "")))
+
 ;; Every M-o request takes the same path. Presets supply the complete tool
 ;; surface; with none selected, llm-tools simply makes one text-only round.
 ;; `aimax` is itself a preset and contributes the native editor registry.
@@ -3544,9 +3617,11 @@
   (let ((specs (if (boundp (quote chat-extra-tool-specs))
                    (chat-extra-tool-specs buf)
                    '()))
-        (system (if (boundp (quote chat-tool-system))
-                    (chat-tool-system buf)
-                    "")))
+        (system (string-append
+                  (if (boundp (quote chat-tool-system))
+                      (chat-tool-system buf)
+                      "")
+                  (llm-mode--group-note buf))))
     (llm-tools context system specs llm-tool-call handler #f model)))
 
 (define-command "llm-send-buffer" "Send this document to the LLM and insert its reply below point"
@@ -3576,6 +3651,10 @@
                   (append (or (buffer-local buf 'llm-responses) '())
                           (list (list start end))))
                 (llm-mode--paint! buf)
+                ;; a scratch chat has one more turn to read: it may name
+                ;; itself now, on the same cadence the chat lane uses
+                (when (boundp (quote chat-rename-from-content!))
+                  (chat-rename-from-content! buf))
                 (message "LLM response inserted"))))))))
 
 (global-set-key "M-o" "llm-send-buffer")
@@ -3711,13 +3790,18 @@
          "You are the assistant in an editor chat buffer. The transcript "
          "follows; reply to the last user turn only, in markdown.\n\n"))
       ((null? (cdr docs))
-       ;; one document: the writing-companion voice
-       (let ((doc (car docs)))
+       ;; one document: the writing-companion voice, or the coding one
+       (let* ((doc (car docs))
+              (code? (chat-code-companion? docs)))
          (string-append
-           "You are the user's writing companion in a side chat. They are "
-           "writing in the editor buffer named \"" doc "\". "
+           (if code?
+               "You are the user's coding companion in a side chat. They are "
+               "You are the user's writing companion in a side chat. They are ")
+           (if code? "working in " "writing in ")
+           "the editor buffer named \"" doc "\". "
            *chat-edit-protocol*
-           " Match the document's voice."
+           (if code? "" " Match the document's voice.")
+           (chat-code-note docs)
            "\n\nThe chat transcript follows; reply to the last user turn "
            "only, in markdown.\n\n")))
       (else
@@ -3736,6 +3820,7 @@
                    "\n"))
                "" (sort docs))
          *chat-edit-protocol*
+         (chat-code-note docs)
          "\n\nThe chat transcript follows; reply to the last user turn "
          "only, in markdown.\n\n"))))
 
@@ -4022,6 +4107,9 @@
   '(chat-wire-turns chat-turns agent-blocks agent-overlays agent-folds
     agent-open-cards
     chat-tool-specs chat-cost chat-last-usage chat-usage-total
+    ;; the turn this chat last named itself on: a reset starts a new
+    ;; conversation, which must name itself again from its first turn
+    chat-renamed-at
     agent-saved-mark agent-marker-bytes))
 
 ;; PROCESS state — mirrors a live runtime, so it is always stale after a

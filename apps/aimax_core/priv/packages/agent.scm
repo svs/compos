@@ -455,6 +455,11 @@
        (buffer-set-local! buf 'agent-turn-text #f)
        (buffer-set-local! buf 'agent-turn-any #f)
        (agent-block-drop-kind! buf "permission")
+       ;; the conversation has one more turn to read, so it may now name
+       ;; itself (chat.scm decides whether this turn is one of the naming
+       ;; turns; the package loads after this one)
+       (when (boundp (quote chat-rename-from-content!))
+         (chat-rename-from-content! buf))
        ;; The record used to compact itself here. It does not any more: a
        ;; cached prefix is a tenth the price of a fresh one, so resending
        ;; a long chat is cheap and a compaction is not. The threshold now

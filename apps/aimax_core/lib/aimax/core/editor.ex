@@ -22,7 +22,7 @@ defmodule Aimax.Core.Editor do
 
   use GenServer
 
-  alias Aimax.Core.{Buffer, Candidates, Events, Frame}
+  alias Aimax.Core.{Buffer, BufferStore, Candidates, Events, Frame}
 
   # every frame has its own minibuffer backing buffer, " *minibuf-<fid>*"
   # (Emacs-style: prompt input IS a buffer, so point motion, kill/yank, undo
@@ -103,8 +103,12 @@ defmodule Aimax.Core.Editor do
   def list_windows_all, do: GenServer.call(__MODULE__, :list_windows_all)
 
   @doc "Set any window's buffer, any frame, without selecting it."
-  def window_set_buffer(win_id, buffer),
-    do: GenServer.call(__MODULE__, {:window_set_buffer, win_id, buffer})
+  def window_set_buffer(win_id, buffer) do
+    restoring = dormant?(buffer)
+    result = GenServer.call(__MODULE__, {:window_set_buffer, win_id, buffer})
+    restore_if_woken(buffer, restoring)
+    result
+  end
 
   # keymap
   def bind_key(seq, command), do: GenServer.call(__MODULE__, {:bind_key, seq, command})
@@ -238,8 +242,12 @@ defmodule Aimax.Core.Editor do
   def other_window(fid \\ nil), do: GenServer.call(__MODULE__, {:other_window, fid(fid)})
 
   @doc "Show BUFFER in the active window WITHOUT touching the MRU ring — candidate preview must not reorder the buffer history."
-  def preview_buffer(buffer, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:preview_buffer, buffer, fid(fid)})
+  def preview_buffer(buffer, fid \\ nil) do
+    restoring = dormant?(buffer)
+    result = GenServer.call(__MODULE__, {:preview_buffer, buffer, fid(fid)})
+    restore_if_woken(buffer, restoring)
+    result
+  end
 
   @doc "A buffer is dying: swap every window showing it (any frame) onto a live one."
   def release_buffer(buffer), do: GenServer.call(__MODULE__, {:release_buffer, buffer})
@@ -253,8 +261,23 @@ defmodule Aimax.Core.Editor do
   @doc "Carry windows, keymaps, and MRU state across a buffer rename."
   def rename_buffer(old, new), do: GenServer.call(__MODULE__, {:rename_buffer, old, new})
 
-  def set_window_buffer(buffer, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:set_window_buffer, buffer, fid(fid)})
+  def set_window_buffer(buffer, fid \\ nil) do
+    restoring = dormant?(buffer)
+    result = GenServer.call(__MODULE__, {:set_window_buffer, buffer, fid(fid)})
+    restore_if_woken(buffer, restoring)
+    result
+  end
+
+  defp dormant?(buffer), do: not Buffer.exists?(buffer) and BufferStore.known?(buffer)
+
+  defp restore_if_woken(buffer, true) do
+    # Scheme owns its interpreter inside Session and completes this in its
+    # switch-to-buffer! wrapper. Calling Session from itself would deadlock.
+    if Buffer.exists?(buffer) and self() != Process.whereis(Aimax.Core.Session),
+      do: Aimax.Core.restore_runtime(buffer)
+  end
+
+  defp restore_if_woken(_buffer, false), do: :ok
 
   @doc "Replace a frame's window tree from a {:leaf, name} | {:split, dir, a, b} spec."
   def restore_tree(spec, active_buffer, fid \\ nil),

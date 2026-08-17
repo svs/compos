@@ -48,6 +48,49 @@ defmodule Aimax.BufferLifecycleTest do
     Aimax.Core.kill_buffer(name)
   end
 
+  test "waking completes mode setup internally before returning" do
+    name = unique("mode-wake")
+    mode = "wake-mode-#{System.unique_integer([:positive])}"
+    {:ok, ^name} = Aimax.Core.create_buffer(name)
+
+    assert {:ok, _} =
+             Session.eval(~s{
+               (begin
+                 (define-mode "#{mode}"
+                   (lambda ()
+                     (buffer-set-local! (current-buffer) 'wake-count
+                       (+ 1 (or (buffer-local (current-buffer) 'wake-count) 0)))))
+                 (with-current-buffer "#{name}" (lambda () (set-mode! "#{mode}"))))
+             })
+
+    assert Buffer.get_local(name, "wake-count") == 1
+    Editor.set_window_buffer("*scratch*")
+    evict(name)
+    assert eventually(fn -> not Buffer.exists?(name) end)
+
+    # A non-displaying buffer operation wakes and restores synchronously.
+    Buffer.set_local(name, "poke", true)
+    assert Buffer.get_local(name, "wake-count") == 2
+    assert Editor.current_buffer() == "*scratch*"
+
+    evict(name)
+    assert eventually(fn -> not Buffer.exists?(name) end)
+
+    # An Editor-originated wake restores after the server call, also before
+    # its public API returns.
+    Editor.set_window_buffer(name)
+    assert Buffer.get_local(name, "wake-count") == 3
+
+    Editor.set_window_buffer("*scratch*")
+    evict(name)
+    assert eventually(fn -> not Buffer.exists?(name) end)
+    assert {:ok, _} = Session.eval(~s{(switch-to-buffer! "#{name}")})
+    assert Buffer.get_local(name, "wake-count") == 4
+
+    Editor.set_window_buffer("*scratch*")
+    Aimax.Core.kill_buffer(name)
+  end
+
   test "rename moves the file and carries stable buffer identity, windows, and history" do
     root = Path.join(System.tmp_dir!(), "aimax-rename-#{System.unique_integer([:positive])}")
     source = Path.join(root, "old.txt")

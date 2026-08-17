@@ -728,6 +728,27 @@ defmodule Aimax.Core.SchemeAPI do
 
         name
       end,
+      # editor.scm wraps this raw primitive so a dormant buffer's mode setup
+      # completes in the current interpreter before switch-to-buffer! returns.
+      "window-switch-buffer!" => fn [name] ->
+        previous = Process.get(:aimax_inline_runtime_restore)
+        Process.put(:aimax_inline_runtime_restore, true)
+
+        try do
+          if Aimax.Core.Frame.buffer_context() do
+            unless Buffer.exists?(name), do: Core.create_buffer(name)
+            Aimax.Core.Frame.put_buffer(name)
+          else
+            Editor.set_window_buffer(name)
+          end
+        after
+          if previous,
+            do: Process.put(:aimax_inline_runtime_restore, previous),
+            else: Process.delete(:aimax_inline_runtime_restore)
+        end
+
+        name
+      end,
 
       # frames: one per attached client; window primitives above act on the
       # selected frame implicitly. delete-frame! lives in Session (it must

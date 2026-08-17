@@ -19,7 +19,23 @@ defmodule Aimax.Core do
 
       case DynamicSupervisor.start_child(@buffer_sup, {Buffer, Keyword.put(opts, :name, name)}) do
         {:ok, _pid} ->
-          if restored && Process.whereis(Aimax.Core.Session), do: restore_runtime_later(name)
+          # An Editor handler cannot call Session: mode setup can install
+          # local keys by calling back into Editor. Its public caller finishes
+          # restoration after the Editor call returns. Every other wake is
+          # synchronous, so nobody observes a half-restored buffer.
+          if restored && Process.whereis(Aimax.Core.Session) do
+            cond do
+              self() == Process.whereis(Aimax.Core.Editor) ->
+                :ok
+
+              self() == Process.whereis(Aimax.Core.Session) ->
+                unless Process.get(:aimax_inline_runtime_restore), do: restore_runtime_later(name)
+
+              true ->
+                restore_runtime(name)
+            end
+          end
+
           {:ok, name}
 
         {:error, {:already_started, _}} ->
@@ -32,18 +48,11 @@ defmodule Aimax.Core do
   end
 
   defp restore_runtime_later(name) do
-    Task.start(fn -> restore_runtime(name) end)
+    Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn -> restore_runtime(name) end)
   end
 
   def restore_runtime(name) do
-    locals = Buffer.locals(name)
-
-    if mode = locals["mode-name"],
-      do: Aimax.Core.Session.call_named("desktop-apply-mode!", [name, mode])
-
-    if locals["minor-modes"] not in [nil, []],
-      do: Aimax.Core.Session.call_named("restore-minor-modes!", [name])
-
+    Aimax.Core.Session.call_named("restore-buffer-runtime!", [name])
     :ok
   end
 

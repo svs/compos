@@ -1469,8 +1469,7 @@
 ;; desktop restore's entry: set BUF's mode with BUF current, so the setup
 ;; fn rebuilds presentation from the locals restore already laid down
 (define (desktop-apply-mode! buf mode)
-  (switch-to-buffer! buf)
-  (set-mode! mode))
+  (with-current-buffer buf (lambda () (set-mode! mode))))
 
 ;;; --- globals that outlive a restart (savehist) ---------------------------------
 ;;; The desktop saves buffers, windows and buffer-locals. A global was
@@ -1548,6 +1547,25 @@
       (let ((m (assoc name *minor-mode-setups*)))
         (if m ((cadr m) buf))))
     (or (buffer-local buf 'minor-modes) '())))
+
+;; A dormant buffer wakes with literal persisted locals but none of the
+;; runtime machinery those locals describe. Re-run both setup layers with a
+;; logical current buffer: restoration must not display or select BUF.
+(define (restore-buffer-runtime! buf)
+  (with-current-buffer buf
+    (lambda ()
+      (let ((mode (buffer-local buf 'mode-name)))
+        (when mode (set-mode! mode)))
+      (restore-minor-modes! buf))))
+
+;; The primitive changes the window and wakes the process; Scheme owns the
+;; mode closures, so it also completes runtime restoration in this same
+;; interpreter turn. A caller never sees the buffer between those two steps.
+(define (switch-to-buffer! buf)
+  (let ((restoring (not (buffer-exists? buf))))
+    (window-switch-buffer! buf)
+    (when restoring (restore-buffer-runtime! buf))
+    buf))
 
 (define *auto-mode-alist*
   '((".scm" "scheme-mode") (".el" "scheme-mode")

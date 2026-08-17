@@ -298,6 +298,9 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
       "item/reasoning/summaryTextDelta" ->
         emit(state, type: :thought, text: Map.get(params, "delta", ""))
 
+      "item/reasoning/textDelta" ->
+        emit(state, type: :thought, text: Map.get(params, "delta", ""))
+
       "item/started" ->
         item_started(state, Map.get(params, "item", %{}))
 

@@ -41,7 +41,12 @@ defmodule AimaxProxy do
         end
 
       %{"method" => "tools/call", "id" => id, "params" => %{"name" => name, "arguments" => args}} ->
-        args_b64 = %{} |> Map.merge(args || %{}) |> :json.encode() |> IO.iodata_to_binary() |> Base.encode64()
+        args_b64 =
+          %{}
+          |> Map.merge(args || %{})
+          |> json_encode()
+          |> IO.iodata_to_binary()
+          |> Base.encode64()
 
         case rpc_eval(~s{(mcp-proxy-call "#{name}" "#{args_b64}"#{author_arg()})}) do
           {:ok, b64} ->
@@ -80,7 +85,7 @@ defmodule AimaxProxy do
   defp rpc_eval(code) do
     req =
       %{jsonrpc: "2.0", id: 1, method: "eval", params: %{code: code}}
-      |> :json.encode()
+      |> json_encode()
       |> IO.iodata_to_binary()
 
     with {:ok, s} <-
@@ -102,12 +107,23 @@ defmodule AimaxProxy do
     end
   end
 
+  # OTP's default :json encoder emits Elixir-style `\x{...}` escapes for
+  # non-ASCII binaries. They are not JSON: strict clients (including Codex)
+  # discard the tools/list frame and wait until startup times out. Escape all
+  # binaries with JSON's portable `\uXXXX` form instead.
+  defp json_encode(value) do
+    :json.encode(value, fn
+      binary, _encode when is_binary(binary) -> :json.encode_binary_escape_all(binary)
+      other, encode -> :json.encode_value(other, encode)
+    end)
+  end
+
   defp reply(id, result), do: send_msg(%{jsonrpc: "2.0", id: id, result: result})
 
   defp reply_error(id, msg),
     do: send_msg(%{jsonrpc: "2.0", id: id, error: %{code: -32000, message: msg}})
 
-  defp send_msg(msg), do: msg |> :json.encode() |> IO.iodata_to_binary() |> IO.puts()
+  defp send_msg(msg), do: msg |> json_encode() |> IO.iodata_to_binary() |> IO.puts()
 end
 
 AimaxProxy.loop()

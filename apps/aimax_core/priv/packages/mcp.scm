@@ -85,7 +85,12 @@
     (if e (custom--plist-get (car (cdr e)) 'servers) '())))
 
 (define (chat-presets-of buf)
-  (or (buffer-local buf 'chat-presets) '()))
+  ;; The editor bridge is infrastructure, not an optional integration.  Every
+  ;; LLM surface receives eval-scheme/apropos/act even when an old restored
+  ;; chat has no preset local (or explicitly stored the empty list).  Other
+  ;; presets remain buffer-local and user-selectable.
+  (let ((presets (or (buffer-local buf 'chat-presets) '())))
+    (if (member 'aimax presets) presets (cons 'aimax presets))))
 
 (define (chat-active-servers buf)
   (fold (lambda (acc p)
@@ -93,10 +98,9 @@
                 acc (preset-servers p)))
         '() (chat-presets-of buf)))
 
-;; `aimax` is a preset like every other surface, but its direct-lane tools
-;; already live in this process.  ACP receives the MCP proxy server; the API
-;; lane mounts the same registry natively and sends only the remaining
-;; servers through the MCP client.
+;; The intrinsic `aimax` surface already lives in this process. ACP receives
+;; its MCP proxy; the API lane mounts the same registry natively and sends
+;; only the remaining, optional servers through the MCP client.
 (define (chat-remote-servers buf)
   (remove (lambda (s) (equal? s 'aimax)) (chat-active-servers buf)))
 
@@ -338,8 +342,13 @@
         (string-append
           "MCP servers registered in this editor: " (string-join names ", ")
           ". A name in that list is a server, not a host — never ssh to one, "
-          "and never run a shell command to reach one. Tools named "
-          "mcp__SERVER__TOOL are already yours to call directly. A server "
+          "and never run a shell command to reach one. For ai-max editor, "
+          "mail, and browser work, always use the aimax MCP tools rather "
+          "than a shell or host CLI; shell execution is intentionally "
+          "disabled in this environment. Tools named mcp__SERVER__TOOL are "
+          "already yours to call directly. Start editor discovery with the "
+          "aimax apropos tool, and use its eval-scheme tool for the Scheme "
+          "expressions it returns. A server "
           "whose tools you do not hold is three eval-scheme calls away, and "
           "nothing else in the editor API knows anything about it: "
           "(mcp-find \"words|more words\") searches every server's tools by "
@@ -466,8 +475,8 @@
             (buffer-set-read-only! out #t)
             (display-buffer out))))))
 
-;; presets -> an agent session's entire server list. `aimax` is not special:
-;; callers mount it by selecting the aimax preset.
+;; presets -> an agent session's entire server list. Callers pass
+;; chat-presets-of, which guarantees the intrinsic aimax editor bridge.
 (define (presets-acp-servers presets)
   (mcp-acp-servers
     (fold (lambda (acc p)

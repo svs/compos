@@ -194,6 +194,15 @@ defmodule Aimax.AgentTest do
     assert Backend.plist_get(chunk, "text") == "Hi"
 
     inject(backend, %{
+      "method" => "item/reasoning/textDelta",
+      "params" => %{"itemId" => "reason-1", "delta" => "Checking the live editor."}
+    })
+
+    assert_receive {:backend_event, thought}, 1_000
+    assert Backend.event_type(thought) == "thought"
+    assert Backend.plist_get(thought, "text") == "Checking the live editor."
+
+    inject(backend, %{
       "id" => 91,
       "method" => "item/commandExecution/requestApproval",
       "params" => %{"itemId" => "cmd-1", "command" => "git status"}
@@ -744,15 +753,32 @@ defmodule Aimax.AgentTest do
     rounds = :ets.new(:api_rounds, [:public])
 
     Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: messages} = req ->
-      n = :ets.info(rounds, :size) + 1
-      :ets.insert(rounds, {n, messages, req[:reasoning_effort]})
+      naming? =
+        Enum.any?(messages, fn
+          %{content: content} when is_binary(content) ->
+            content =~ "Name this editor conversation"
 
-      {:ok,
-       %{
-         "stop_reason" => "end_turn",
-         "content" => [%{"type" => "text", "text" => "reply-#{n}"}],
-         "usage" => %{"input_tokens" => 10, "output_tokens" => 5}
-       }}
+          _ ->
+            false
+        end)
+
+      if naming? do
+        {:ok,
+         %{
+           "stop_reason" => "end_turn",
+           "content" => [%{"type" => "text", "text" => "math chat"}]
+         }}
+      else
+        n = :ets.info(rounds, :size) + 1
+        :ets.insert(rounds, {n, messages, req[:reasoning_effort]})
+
+        {:ok,
+         %{
+           "stop_reason" => "end_turn",
+           "content" => [%{"type" => "text", "text" => "reply-#{n}"}],
+           "usage" => %{"input_tokens" => 10, "output_tokens" => 5}
+         }}
+      end
     end)
 
     on_exit(fn -> Application.delete_env(:aimax_core, :llm_chat_fun) end)
@@ -760,18 +786,23 @@ defmodule Aimax.AgentTest do
     {:ok, _} =
       Session.eval(~s{(execute* "what is 6*7" '(connector "api" effort "high"))})
 
-    buf = "*chat:a1*"
+    initial_buf = "*chat:a1*"
 
     # no ACP handshake — no transport was opened
     refute_receive {:transport_open, _}, 200
-    assert eventually(fn -> Buffer.text(buf) =~ "reply-1" end)
+    assert eventually(fn -> Buffer.text(Agent.info("a1").buffer) =~ "reply-1" end)
     assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
 
+    # The ordinary chat naming hook may rename *chat:a1* from its first
+    # response; continue through the session's authoritative buffer name.
+    buf = Agent.info("a1").buffer
+    assert buf != initial_buf
+    assert Buffer.exists?(buf)
     focus(buf)
     type("and 8*8")
     press(["RET"])
 
-    assert eventually(fn -> Buffer.text(buf) =~ "reply-2" end)
+    assert eventually(fn -> Buffer.text(Agent.info("a1").buffer) =~ "reply-2" end)
 
     # the second request replays the whole conversation from the record —
     # no private history in the runtime
@@ -783,7 +814,8 @@ defmodule Aimax.AgentTest do
     assert flat =~ "and 8*8"
 
     # the modeline names the running backend and its model
-    assert {:ok, ml} = Session.eval(~s[(buffer-local "*chat:a1*" 'modeline-info)])
+    final_buf = Agent.info("a1").buffer
+    assert {:ok, ml} = Session.eval(~s[(buffer-local "#{final_buf}" 'modeline-info)])
     assert ml =~ "api"
   end
 

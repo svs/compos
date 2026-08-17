@@ -22,9 +22,10 @@ end
 
 defmodule Aimax.PresetTest do
   @moduledoc """
-  W6: presets are the single source of truth for a chat's tools. An ACP
-  session fixes mcpServers at session/new, so a preset change under a live
-  agent must reattach — never silently do nothing.
+  W6: optional presets are the single source of truth for a chat's extra
+  tools; the core aimax editor bridge is intrinsic. An ACP session fixes
+  mcpServers at session/new, so a preset change under a live agent must
+  reattach — never silently do nothing.
   """
 
   use ExUnit.Case
@@ -94,7 +95,9 @@ defmodule Aimax.PresetTest do
     type("aimax")
     press(["RET"])
 
-    assert Buffer.get_local(buf, "chat-presets") == [sym: "aimax"]
+    # aimax is intrinsic, so selecting it need not materialize a redundant
+    # buffer-local preset entry.
+    assert Buffer.get_local(buf, "chat-presets") in [nil, false, []]
     assert "eval-scheme" in (Buffer.get_local(buf, "chat-tool-specs") |> Enum.map(&List.first/1))
     refute Buffer.get_local(buf, "modeline-info") =~ "tools stale"
   end
@@ -203,8 +206,8 @@ defmodule Aimax.PresetTest do
   test "loading a preset on a live ACP chat reattaches; the conversation survives" do
     {slug, buf, agent, first_new} = boot()
 
-    # no preset means no tools
-    assert servers(first_new) == []
+    # No optional preset still carries the intrinsic live-editor bridge.
+    assert servers(first_new) == ["aimax"]
 
     # give the chat a real conversation to carry across the reconnect
     {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "what is the weather")])
@@ -239,7 +242,7 @@ defmodule Aimax.PresetTest do
     type("no")
     press(["RET"])
 
-    assert Buffer.get_local(buf, "chat-presets") == [sym: "zz-pack"]
+    assert Buffer.get_local(buf, "chat-presets") == [sym: "zz-pack", sym: "aimax"]
     assert Buffer.get_local(buf, "chat-mcp-dirty") == true
 
     # ...the next send reattaches with the new server list
@@ -253,7 +256,7 @@ defmodule Aimax.PresetTest do
     inject(agent2, %{"jsonrpc" => "2.0", "id" => iid2, "result" => %{}})
 
     assert_receive {:frame, %{"method" => "session/new", "id" => nid2, "params" => np2}}, 1_000
-    assert servers(np2) == ["zz-weather"]
+    assert Enum.sort(servers(np2)) == ["aimax", "zz-weather"]
 
     inject(agent2, %{"jsonrpc" => "2.0", "id" => nid2, "result" => %{"sessionId" => "sess-2"}})
 
@@ -304,8 +307,8 @@ defmodule Aimax.PresetTest do
     inject(agent3, %{"jsonrpc" => "2.0", "id" => iid3, "result" => %{}})
     assert_receive {:frame, %{"method" => "session/new", "params" => np3}}, 1_000
 
-    assert servers(np3) == []
-    assert Buffer.get_local(buf, "chat-presets") == []
+    assert servers(np3) == ["aimax"]
+    assert Buffer.get_local(buf, "chat-presets") == [sym: "aimax"]
   end
 
   test "an http server reaches the agent too, with its headers resolved" do
@@ -420,7 +423,7 @@ defmodule Aimax.PresetTest do
 
     # no reconnect prompt at all — nothing to reconnect
     refute Editor.snapshot().minibuffer
-    assert Buffer.get_local(buf, "chat-presets") == [sym: "zz-pack"]
+    assert Buffer.get_local(buf, "chat-presets") == [sym: "zz-pack", sym: "aimax"]
     assert Buffer.get_local(buf, "chat-mcp-dirty") in [false, nil]
     refute_received {:transport_open, _}
   end
@@ -452,14 +455,14 @@ defmodule Aimax.PresetTest do
     type("zz-pack")
     press(["RET"])
 
-    assert Buffer.get_local(buf, "chat-presets") == [sym: "zz-pack"]
+    assert Buffer.get_local(buf, "chat-presets") == [sym: "zz-pack", sym: "aimax"]
 
     # The editor toolbox is mounted explicitly, through its own preset.
     {:ok, _} = Session.eval(~s[(run-command "llm-set-preset")])
     type("aimax")
     press(["RET"])
 
-    assert Buffer.get_local(buf, "chat-presets") == [sym: "aimax", sym: "zz-pack"]
+    assert Buffer.get_local(buf, "chat-presets") == [sym: "zz-pack", sym: "aimax"]
 
     {:ok, _} =
       Session.eval(
@@ -473,27 +476,37 @@ defmodule Aimax.PresetTest do
     assert eventually(fn -> Buffer.text(buf) =~ "preset-aware reply" end)
   end
 
-  test "an empty tool surface is never frozen: the chat asks again" do
+  test "the aimax editor bridge is intrinsic even for an empty restored chat" do
+    buf = "zz-intrinsic-aimax-#{System.unique_integer([:positive])}"
+    on_exit(fn -> if Buffer.exists?(buf), do: Aimax.Core.kill_buffer(buf) end)
+
+    {:ok, presets} =
+      Session.eval(
+        ~s[(begin (buffer-create "#{buf}") (buffer-set-local! "#{buf}" 'chat-presets '()) (chat-presets-of "#{buf}"))]
+      )
+
+    assert presets == "(aimax)"
+
+    {:ok, servers} =
+      Session.eval(
+        ~s[(presets-acp-servers (chat-presets-of "#{buf}"))]
+      )
+
+    assert servers =~ ~s{"aimax"}
+    assert servers =~ "aimax-mcp-proxy.exs"
+  end
+
+  test "the intrinsic editor surface freezes without any optional preset" do
     {:ok, _} = Session.eval(~s{(execute* "" '(connector "api"))})
     buf = "*chat:a1*"
 
-    # A preset server that still handshakes serves nothing. The first send
-    # must not freeze that answer — a frozen empty list gave the chat no
-    # tools for the rest of its life, and the model then says it cannot
-    # search the web.
-    {:ok, _} = Session.eval(~s[(chat-tools "#{buf}")])
-    assert Buffer.get_local(buf, "chat-tool-specs") in [nil, false, []]
-    refute Buffer.get_local(buf, "modeline-info") =~ "tools stale"
-
-    # tools appear; the next send takes them and freezes THEM
-    {:ok, _} = Session.eval(~s[(switch-to-buffer! "#{buf}")])
-    {:ok, _} = Session.eval(~s[(run-command "llm-set-preset")])
-    type("aimax")
-    press(["RET"])
-
+    # Even an old chat whose local preset list is empty starts with the live
+    # Scheme editor toolbox; it can never freeze a tool-less first turn.
     {:ok, _} = Session.eval(~s[(chat-tools "#{buf}")])
     names = Buffer.get_local(buf, "chat-tool-specs") |> Enum.map(&List.first/1)
     assert "eval-scheme" in names
+    assert "apropos" in names
+    refute Buffer.get_local(buf, "modeline-info") =~ "tools stale"
   end
 
   defp eventually(fun, tries \\ 40) do

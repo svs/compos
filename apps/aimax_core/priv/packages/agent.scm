@@ -1310,9 +1310,9 @@
       (when pm (buffer-set-local! buf 'chat-permission-mode pm)))
     ;; ...and its presets, which must land in the buffer-local, not only in
     ;; this one call's config. 'chat-presets is the single source of truth
-    ;; for a chat's tools: agent-revive! and the desktop restore both read
-    ;; it. A spawn that skips it starts with the right servers and loses
-    ;; them at the first revive.
+    ;; for a chat's optional tools (the aimax bridge is intrinsic):
+    ;; agent-revive! and desktop restore both read it. A spawn that skips it
+    ;; starts with the right extra servers and loses them at first revive.
     (let ((ps (plist-get opts 'presets)))
       (when ps (buffer-set-local! buf 'chat-presets ps)))
     (chat-task-init! buf slug)

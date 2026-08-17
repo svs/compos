@@ -209,6 +209,12 @@ defmodule Aimax.AproposTest do
       # the categories, so it can ask for an area rather than guess
       assert hello =~ "buffers"
       assert hello =~ "windows"
+      # Discovery has a stopping rule: known recipes run directly and an
+      # unfamiliar operation gets one search, not a synonym loop.
+      assert hello =~ "WORKFLOW — search once, then act"
+      assert hello =~ "do not rediscover them"
+      assert hello =~ "Never repeat an equivalent search"
+      assert hello =~ "read the affected state back"
     end
 
     test "the done-when: one hello, one apropos, the right expression" do

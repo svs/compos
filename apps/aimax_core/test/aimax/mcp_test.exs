@@ -236,6 +236,8 @@ defmodule Aimax.MCPTest do
       assert note =~ "zznote"
       assert note =~ "never ssh"
       assert note =~ "mcp-call!"
+      assert note =~ "unfamiliar operation"
+      assert note =~ "do not repeat an equivalent search"
 
       # a chat that holds no servers is told about none: advertising one
       # its tool gate does not hold sends the agent looking for a host

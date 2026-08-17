@@ -296,8 +296,11 @@
 
 ;;; --- change hook -------------------------------------------------------------
 
+;; "locals" is the phantom change a buffer-set-local! broadcasts. This
+;; handler writes 'morg-folds itself, so reacting to the phantom is a
+;; feedback loop. Folds and overlays depend on the text only.
 (define (morg-after-change buf pos inserted deleted source)
-  (when (buffer-exists? buf)
+  (when (and (buffer-exists? buf) (not (equal? source "locals")))
     ;; re-anchor folds through the edit, then validation prunes the dead
     (let ((delta (- (string-byte-length inserted) deleted)))
       (unless (= delta 0)

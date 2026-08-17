@@ -212,7 +212,7 @@ defmodule Aimax.EditorTest do
     assert Editor.current_buffer() == path
 
     leaf = find_active_leaf(Editor.render_state().tree, Editor.snapshot().active)
-    assert leaf.mode == "text-mode"
+    assert leaf.mode == "morg-mode"
 
     press(["C-x", "C-s"])
     assert Buffer.text("*messages*") =~ "saved-hook-ran"

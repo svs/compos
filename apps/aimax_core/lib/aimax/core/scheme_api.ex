@@ -147,6 +147,8 @@ defmodule Aimax.Core.SchemeAPI do
         "(ts-children KIND START END) — the named children of that node as ((KIND START END) ...); the range 0..SIZE names the whole file.",
       "ts-query" => "(ts-query QUERY) — run a tree-sitter query; return (CAPTURE START END) byte ranges.",
       "ts-langs" => "(ts-langs) — return the names of the loaded tree-sitter languages.",
+      "ts-highlight-string" =>
+        "(ts-highlight-string LANG TEXT) — highlight TEXT as LANG; return (START END SCOPE) byte ranges, () for an unknown language.",
       "buffer-search" => "(buffer-search Q FROM) — search forward from byte FROM; return (START END) or #f.",
       "buffer-search-backward" => "(buffer-search-backward Q FROM) — search backward from byte FROM; return (START END) or #f.",
       "set-face-attribute!" => "(set-face-attribute! FACE KEY VALUE ...) — set the face's attributes from key-value pairs.",
@@ -638,6 +640,17 @@ defmodule Aimax.Core.SchemeAPI do
         end
       end,
       "ts-langs" => fn [] -> Aimax.Core.TS.ts_langs() end,
+      # one-shot highlight of detached text (embedded code blocks in
+      # prose modes); the buffer's own language never enters into it
+      "ts-highlight-string" => fn [lang, text] ->
+        if is_binary(lang) and is_binary(text) do
+          lang
+          |> Aimax.Core.TS.ts_highlight(text)
+          |> Enum.map(fn {s, e, scope} -> [s, e, scope] end)
+        else
+          []
+        end
+      end,
 
       # search: returns (start end) byte range or #f
       "buffer-search" => fn [q, from] ->

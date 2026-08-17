@@ -1534,7 +1534,8 @@
     (".ex" "elixir-mode") (".exs" "elixir-mode")
     (".json" "json-mode") (".rs" "rust-mode")
     (".html" "html-mode") (".htm" "html-mode")
-    (".md" "text-mode") (".txt" "text-mode") (".org" "org-mode")
+    (".md" "morg-mode") (".markdown" "morg-mode")
+    (".txt" "text-mode") (".org" "org-mode")
     (".chat" "chat-mode")))
 
 ;; the mode a file name would open in, without switching anything —
@@ -1575,7 +1576,7 @@
 (define-mode "scheme-mode" (lambda () #t))   ; scheme grammar pending
 
 (mode-doc! "text-mode"
-  "Plain prose: `.md` and `.txt`. The mode adds no keys. `C-c C-v` renders the file, because the renderer reads the extension.")
+  "Plain prose: `.txt`. The mode adds no keys. `C-c C-v` renders the file, because the renderer reads the extension.")
 
 ;;; --- the name at point --------------------------------------------------------
 ;;; Two callers read the name under the cursor and they disagree about the

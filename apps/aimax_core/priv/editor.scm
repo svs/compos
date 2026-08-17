@@ -357,10 +357,17 @@
                (list-refresh! buf)
                (list-goto-index! buf (+ (or i 0) 1))))))
 
+;; a mark is only as real as the row it sits on. Marks persist with the
+;; buffer (durable lifecycle), so after a restart they can name rows the
+;; list no longer shows — a verb must act on what the reader SEES.
+(define (list-live-marked buf ch)
+  (let ((keys (map (lambda (e) (list-key buf e)) (list-entries buf))))
+    (filter (lambda (k) (member k keys)) (list-marked buf ch))))
+
 ;; the entries a verb acts on: every marked entry, or the line at point.
 ;; This is what makes one key work on one chat and on twelve.
 (define (list-targets buf)
-  (let ((m (list-marked buf *list-mark-char*)))
+  (let ((m (list-live-marked buf *list-mark-char*)))
     (if (pair? m)
         m
         (let ((e (list-current buf))) (if e (list e) '())))))
@@ -382,14 +389,24 @@
 (domain! 'interaction)
 (effects! '(write))
 
-(define-command "list-mark-all" "Mark every row this list shows"
+(define-command "list-mark-all" "Mark every row this list shows; again unmarks them"
   (lambda ()
     (let* ((buf (current-buffer))
-           (i (list-index buf)))
+           (i (list-index buf))
+           (markable (filter (lambda (e) (list-markable? buf e))
+                             (list-entries buf)))
+           ;; a second `*` reads as "never mind": every shown row already
+           ;; marked means unmark them all
+           (all-marked?
+             (and (pair? markable)
+                  (let loop ((es markable))
+                    (cond ((null? es) #t)
+                          ((equal? (list-mark-of buf (car es)) *list-mark-char*)
+                           (loop (cdr es)))
+                          (else #f))))))
       (for-each (lambda (e)
-                  (when (list-markable? buf e)
-                    (list-mark! buf e *list-mark-char*)))
-                (list-entries buf))
+                  (list-mark! buf e (if all-marked? #f *list-mark-char*)))
+                markable)
       (list-refresh! buf)
       (when i (list-goto-index! buf i)))))
 
@@ -405,11 +422,20 @@
       (lambda () (list-mark-at-point! ch)))
     name))
 
-;; every flag that has something flagged, in the order the list declared
+;; Every flag that has something flagged, in the order the list declared
+;; — and the marked rows go with the FIRST flag. `*` and `m` say WHICH
+;; rows; the flag says WHAT to do. A list with one flag needs no second
+;; key for it: mark the rows and press `x`. A flagged row keeps its own
+;; flag, because a row carries one mark and the two sets cannot overlap.
 (define (list-execute-plan buf)
-  (filter (lambda (p) (pair? (car (cdr p))))
-          (map (lambda (f) (list f (list-marked buf (car (cdr f)))))
-               (list-flags buf))))
+  (let loop ((fs (list-flags buf))
+             (marked (list-live-marked buf *list-mark-char*))
+             (out '()))
+    (if (null? fs)
+        (reverse out)
+        (let ((rows (append (list-live-marked buf (car (cdr (car fs)))) marked)))
+          (loop (cdr fs) '()
+                (if (null? rows) out (cons (list (car fs) rows) out)))))))
 
 ;; what one row IS, for the prompts: "delete 2 files" reads like a question
 ;; a person asks. A list that declares no noun gets "row".
@@ -3062,6 +3088,15 @@
           (if (and (buffer-path cur) (buffer-modified? cur))
               (message "Buffer is modified — save it, or C-x k to kill it")
               (begin
+                ;; put the window on a LIVE buffer before the kill. The
+                ;; kill-side fallback can land on a dormant checkpoint
+                ;; that has no process, and the next write is a noproc.
+                (let loop ((bs (buffer-list-mru)))
+                  (cond ((null? bs) #t)
+                        ((and (not (equal? (car bs) cur))
+                              (buffer-exists? (car bs)))
+                         (switch-to-buffer! (car bs)))
+                        (else (loop (cdr bs)))))
                 ;; a live process (tail, shell) dies with its buffer
                 (if (process-running? cur) (process-kill! cur))
                 (buffer-kill! cur))))))))

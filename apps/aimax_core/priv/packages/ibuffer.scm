@@ -99,6 +99,67 @@
     (when (and b (buffer-exists? b))
       (display-buffer-other-window! b))))
 
+;; `k` kills NOW — the marked buffers, or the row at point. `d`+`x` stays
+;; for the flag-then-execute habit; `k` is the direct verb. The other
+;; window moves to *scratch* first so no dying buffer is on screen while
+;; dormancy wake-on-write is still open.
+(define-command "ibuffer-kill" "Kill the marked buffers, or the one at point"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (targets (list-targets buf))
+           (n 0))
+      (when (buffer-exists? "*scratch*")
+        (display-buffer-other-window! "*scratch*"))
+      (for-each (lambda (b)
+                  (when (buffer-exists? b)
+                    (list-unmark-key! buf b)
+                    (if (process-running? b) (process-kill! b))
+                    (buffer-kill! b)
+                    (set! n (+ n 1))))
+                targets)
+      (list-refresh! buf)
+      (message (string-append "killed " (number->string n) " "
+                              (list-noun buf n))))))
+
+;; `G` groups a SET. C-c g joins the buffer you are in; here the marked
+;; buffers join one group in one act. The prompt offers the groups that
+;; exist, a name it does not know founds that group — the same rule C-c
+;; g follows — and "(none)" takes them out of theirs. "(none)" leads the
+;; list, so RET on an empty prompt removes rather than joins a group you
+;; did not name.
+(define *ibuffer-no-group* "(none)")
+
+(define (ibuffer-group! buf targets g)
+  (let ((n (length targets))
+        (out? (equal? g *ibuffer-no-group*)))
+    (for-each (lambda (b)
+                (buffer-set-local! b 'group (if out? #f g))
+                (when out? (buffer-set-local! b 'companion-of #f))
+                (list-unmark-key! buf b))
+              targets)
+    (list-refresh! buf)
+    (message (string-append (number->string n) " " (list-noun buf n)
+                            (if out? " left their group"
+                                (string-append " joined " g))))))
+
+(define-command "ibuffer-group"
+  "Put the marked buffers in a group, or take them out of one"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (targets (filter buffer-exists? (list-targets buf)))
+           (n (length targets)))
+      (if (null? targets)
+          (message "no buffer here")
+          (minibuffer-read
+            (string-append "Group for " (number->string n) " "
+                           (list-noun buf n) ": ")
+            (cons (list *ibuffer-no-group* "remove from the group")
+                  (group-names))
+            (lambda (input)
+              (let ((g (string-trim input)))
+                (ibuffer-group! buf targets
+                  (if (equal? g "") *ibuffer-no-group* g)))))))))
+
 (define-command "ibuffer-next" "Move down and preview in the home window"
   (lambda () (list-move! 1)))
 
@@ -112,9 +173,10 @@
            "order, with its modified flag, size, mode, group and file. `/` "
            "narrows as you type — it matches the row and the annotation C-x b "
            "shows, so a group or a project name finds every member — and `\\` "
-           "widens by one. Flag buffers with `d`, then kill the flagged ones "
-           "with `x`. `m` marks, `*` marks every row, `u` unmarks and `U` "
-           "drops every mark. "
+           "widens by one. `m` marks a buffer, `*` marks every row, `u` "
+           "unmarks and `U` drops every mark; `k` kills the marked "
+           "buffers, or the row at point, and `G` puts them in a group. "
+           "`d` flags for `x` to run. "
            "Moving the highlight previews the buffer in the other window.")
     'buffer *ibuffer-buffer*
     ;; a buffer name is a buffer name: `/` matches the same annotation
@@ -133,9 +195,9 @@
     'meta ibuffer-meta
     'total (lambda (buf) (ibuffer-total))
     'footer (lambda (buf)
-              '(("RET" "visit") ("m" "mark") ("*" "all") ("d" "flag")
-                ("x" "kill") ("/" "filter") ("\\" "widen")
-                ("g" "refresh") ("q" "quit")))
+              '(("RET" "visit") ("m" "mark") ("*" "all") ("k" "kill")
+                ("G" "group") ("d" "flag") ("x" "execute") ("/" "filter")
+                ("\\" "widen") ("g" "refresh") ("q" "quit")))
     ;; the flag says what it does; list-mode supplies m/u/U/*/x and the column
     'flags (list (list "d" "D" "kill"
                        (lambda (buf b)
@@ -144,9 +206,12 @@
     ;; the other window follows the highlight: list-mode moves, this shows
     'preview (lambda (buf b)
                (when (buffer-exists? b) (display-buffer-other-window! b)))
-    'keys '(("RET" "ibuffer-visit") ("g" "ibuffer-refresh") ("q" "quit-window"))))
+    'keys '(("RET" "ibuffer-visit") ("k" "ibuffer-kill")
+            ("G" "ibuffer-group")
+            ("g" "ibuffer-refresh") ("q" "quit-window"))))
 
 (global-set-key "C-x C-b" "ibuffer")
 
 (category! 'buffers)
+(catalog-meta! 'command "ibuffer-group" 'domain 'buffers 'effects '(write))
 (public! 'ibuffer-refresh! "(ibuffer-refresh!) — rebuild the *ibuffer* listing")

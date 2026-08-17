@@ -363,6 +363,65 @@ defmodule Aimax.EditorTest do
       assert Editor.current_buffer() == "*zz-ib-b*"
     end
 
+    test "* marks every row and x runs the list's flag on them" do
+      on_exit(fn ->
+        for b <- ["*zz-xm-a*", "*zz-xm-b*", "*ibuffer*"], do: Aimax.Core.kill_buffer(b)
+        Editor.delete_other_windows()
+      end)
+
+      {:ok, _} = Aimax.Core.Session.eval(~s{(begin
+        (buffer-create "*zz-xm-a*")
+        (buffer-create "*zz-xm-b*")
+        (run-command "ibuffer")
+        (ibuffer-filter-push! (list "match" "zz-xm")))})
+
+      # `*` says which rows; the flag says what to do, so `x` needs no `d`
+      press(["*"])
+      assert Buffer.text("*ibuffer*") =~ ~r/^\* .*\*zz-xm-a\*/m
+      press(["x"])
+      refute Aimax.Core.Buffer.exists?("*zz-xm-a*")
+      refute Aimax.Core.Buffer.exists?("*zz-xm-b*")
+    end
+
+    # C-c g joins the buffer you are in; `G` in ibuffer groups a SET. The
+    # group column reads it back, and an empty answer takes them out.
+    test "G puts the marked buffers in a group, and an empty answer removes it" do
+      on_exit(fn ->
+        for b <- ["*zz-gr-a*", "*zz-gr-b*", "*ibuffer*"], do: Aimax.Core.kill_buffer(b)
+        Editor.delete_other_windows()
+      end)
+
+      {:ok, _} = Aimax.Core.Session.eval(~s{(begin
+        (buffer-create "*zz-gr-a*")
+        (buffer-create "*zz-gr-b*"))})
+
+      press(["C-x", "C-b"])
+      {:ok, _} = Aimax.Core.Session.eval(~s{(ibuffer-filter-push! (list "match" "zz-gr"))})
+
+      press(["*", "G"])
+      assert Editor.render_state().minibuffer.prompt =~ "Group for 2 buffers"
+      type("zz-crew")
+      press(["RET"])
+
+      assert {:ok, ~s{"zz-crew"}} =
+               Aimax.Core.Session.eval(~s{(buffer-local "*zz-gr-a*" 'group)})
+
+      assert {:ok, ~s{"zz-crew"}} =
+               Aimax.Core.Session.eval(~s{(buffer-local "*zz-gr-b*" 'group)})
+
+      # the act ends the marks, and the group column says so
+      assert Buffer.text("*ibuffer*") =~ "zz-crew"
+      refute Buffer.text("*ibuffer*") =~ ~r/^\* /m
+
+      # "(none)" leads the prompt, so RET on an empty answer removes
+      press(["*", "G"])
+      assert Editor.render_state().minibuffer.candidates |> hd() |> Map.get(:label) == "(none)"
+      press(["RET"])
+
+      assert {:ok, "#f"} = Aimax.Core.Session.eval(~s{(buffer-local "*zz-gr-a*" 'group)})
+      assert {:ok, "#f"} = Aimax.Core.Session.eval(~s{(buffer-local "*zz-gr-b*" 'group)})
+    end
+
     test "n/p preview the highlighted buffer in the home window" do
       on_exit(fn ->
         for b <- ["*zz-pv-a*", "*zz-pv-b*", "*ibuffer*"], do: Aimax.Core.kill_buffer(b)

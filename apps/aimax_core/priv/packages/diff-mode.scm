@@ -877,13 +877,12 @@
     (diff--refold! buf)
     (diff--reblock! buf)))
 
-;; the click primitive is generic and holds ONE handler for the editor; a
-;; registry arrives with the second blocks mode. The id is ours, so ignore
-;; clicks in buffers that are not diffs.
-(block-on-click!
+;; the click registry (components.scm) fans the one click primitive out to
+;; every blocks mode. The id is ours only in a diff buffer.
+(on-block-click! 'diff
   (lambda (buf id)
-    (when (buffer-local buf 'diff-backend)
-      (diff-toggle-card! buf id))))
+    (and (buffer-local buf 'diff-backend)
+         (begin (diff-toggle-card! buf id) #t))))
 
 ;;; --- watching -----------------------------------------------------------------
 

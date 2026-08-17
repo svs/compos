@@ -156,21 +156,27 @@
 (defcomponent 'ui/card
   "A bordered container with an optional heading and body."
   '((title string optional) (open? boolean optional) (click any optional)
-    (body blocks optional) (class string optional))
+    (badge string optional) (body blocks optional) (class string optional)
+    (lines list optional) (mark string optional))
   '(title "A card" open? #t body ((tag "div" text "hello")))
   (lambda (p)
-    (list 'tag "div"
-          'class (string-append "c-card " (component--get p 'class ""))
-          'children
-          (append
-            (if (component--has? p 'title)
-                (list (component 'ui/fold-head
-                        (append (list 'title (component--get p 'title)
-                                      'open? (component--get p 'open? #t))
-                                (if (component--has? p 'click)
-                                    (list 'click (component--get p 'click)) '()))))
-                '())
-            (if (component--get p 'open? #t) (component--get p 'body '()) '())))))
+    (append
+      (list 'tag "div"
+            'class (string-append "c-card " (component--get p 'class ""))
+            'children
+            (append
+              (if (component--has? p 'title)
+                  (list (component 'ui/fold-head
+                          (append (list 'title (component--get p 'title)
+                                        'open? (component--get p 'open? #t))
+                                  (if (component--has? p 'click)
+                                      (list 'click (component--get p 'click)) '())
+                                  (if (component--has? p 'badge)
+                                      (list 'badge (component--get p 'badge)) '()))))
+                  '())
+              (if (component--get p 'open? #t) (component--get p 'body '()) '())))
+      (if (component--has? p 'lines) (list 'lines (component--get p 'lines)) '())
+      (if (component--has? p 'mark) (list 'mark (component--get p 'mark)) '()))))
 
 (defcomponent 'ui/kv
   "Key/value pairs for compact detail and audit views."
@@ -231,6 +237,27 @@
         (history-push! 'apropos-components query)
         (apropos-page query (list 'kind 'component))))))
 
+;;; --- click routing -----------------------------------------------------------
+;;; The primitive (block-on-click!) holds ONE handler for the whole editor.
+;;; This registry fans it out: each blocks mode registers a named handler,
+;;; and a handler returns #t when the click was its own.  Registration by
+;;; name replaces the old handler, so a package reload does not stack
+;;; duplicates.
+
+(define *block-click-handlers* '()) ; ((name fn) ...)
+
+(define (on-block-click! name fn)
+  (set! *block-click-handlers*
+    (cons (list name fn)
+          (remove (lambda (e) (equal? (car e) name)) *block-click-handlers*))))
+
+(block-on-click!
+  (lambda (buf id)
+    (let loop ((hs *block-click-handlers*))
+      (cond ((null? hs) #f)
+            (((cadr (car hs)) buf id) #t)
+            (else (loop (cdr hs)))))))
+
 (define-style! 'components "
 .c-section { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--dim-fg); padding: 12px 2px 6px; border-bottom: 1px solid var(--border-bg); }
 .c-card { margin: 0 0 10px; border: 1px solid var(--border-bg); border-radius: 7px; overflow: hidden; }
@@ -249,3 +276,4 @@
 (public! 'component "(component NAME PROPS) — instantiate a registered UI component")
 (public! 'describe-component "(describe-component NAME) — show a component's props, example and owner")
 (public! 'apropos-components "(apropos-components QUERY [FILTERS...]) — the main apropos filtered to UI components")
+(public! 'on-block-click! "(on-block-click! NAME FN) — register a blocks mode's click handler; FN gets (BUF ID) and returns #t when the click was its own")

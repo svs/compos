@@ -203,9 +203,25 @@ defmodule Aimax.ProjectSearchTest do
       mb = Editor.render_state().minibuffer
       assert mb.prompt =~ "(y or n)"
       assert mb.input == ""
+      # a question is not a completion prompt: the UI reads the style
+      assert mb.style == "question"
 
       press("n")
       assert eval!("(buffer-list)") =~ "#{root}/lib/a.txt"
+    end
+
+    test "RET is not an answer: it asks again", %{root: root} do
+      eval!(~s{(visit "#{root}/lib/a.txt")})
+
+      eval!(~s{(run-command "project-kill-all")})
+      before = Editor.render_state().minibuffer.prompt
+      press("RET")
+
+      assert Editor.render_state().minibuffer.prompt == before
+      assert eval!("(buffer-list)") =~ "#{root}/lib/a.txt"
+
+      press("n")
+      refute Editor.render_state().minibuffer
     end
 
     test "a modified file asks to save, and y writes it before the kill", %{root: root} do

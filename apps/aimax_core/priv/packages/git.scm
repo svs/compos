@@ -133,22 +133,55 @@
                    (and (string? r) r)))
                 (else (loop (cdr bs) (- left 1))))))))
 
+(domain! 'git)
+(effects! '(read))
+
+;; the buffer is named for the SCOPE, so a subdirectory diff and a
+;; whole-repository diff are two buffers, not one fighting itself
+(define (git--open! root prefix)
+  (let ((buf (git--buf-name (git--scope-label root prefix))))
+    (buffer-create buf)
+    (buffer-set-local! buf 'diff-backend "git")
+    (buffer-set-local! buf 'diff-root root)
+    (buffer-set-local! buf 'diff-scope (if (string? prefix) prefix ""))
+    (switch-to-buffer! buf)
+    (set-mode! "diff-mode")))
+
 (define-command "git-diff" "Show the diff for the directory you are in"
   (lambda ()
     (let* ((dir (git--context-dir))
-           (root (git-root dir))
-           (prefix (git-prefix dir)))
+           (root (git-root dir)))
       (if (not (string? root))
           (message "not a git repository")
-          ;; the buffer is named for the SCOPE, so a subdirectory diff and a
-          ;; whole-repository diff are two buffers, not one fighting itself
-          (let ((buf (git--buf-name (git--scope-label root prefix))))
-            (buffer-create buf)
-            (buffer-set-local! buf 'diff-backend "git")
-            (buffer-set-local! buf 'diff-root root)
-            (buffer-set-local! buf 'diff-scope (if (string? prefix) prefix ""))
-            (switch-to-buffer! buf)
-            (set-mode! "diff-mode"))))))
+          (git--open! root (git-prefix dir))))))
+
+;; `M-x diff-mode`, the file-precise entry. define-mode makes every mode an
+;; M-x command; the generated diff-mode command set the mode on the current
+;; buffer, found no 'diff-backend local, and did nothing. This override
+;; supplies the policy: a diff buffer refreshes in place; a file buffer
+;; opens the diff for that one file; every other buffer opens the diff for
+;; its directory. `C-x g` (git-diff) keeps the directory scope. The scope
+;; comes from git-prefix, not string arithmetic on the root: git resolves
+;; symlinks in the root, the buffer path keeps them.
+(define (git--basename p)
+  (let ((i (string-rindex p "/")))
+    (if i (substring p (+ i 1) (string-length p)) p)))
+
+(define-command "diff-mode" "Toggle the source-control diff for this file or directory"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (buffer-local buf 'diff-backend)
+          ;; from inside a diff the same command toggles back
+          (run-command "quit-window")
+          (let* ((path (buffer-path buf))
+                 (dir (buffer-directory buf))
+                 (root (git-root dir)))
+            (if (not (string? root))
+                (message "not a git repository")
+                (git--open! root
+                  (if (string? path)
+                      (string-append (git-prefix dir) (git--basename path))
+                      (git-prefix dir)))))))))
 
 (define (git--scope-label root prefix)
   (if (or (not (string? prefix)) (equal? prefix ""))

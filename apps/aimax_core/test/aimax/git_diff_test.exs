@@ -442,6 +442,54 @@ defmodule Aimax.GitDiffTest do
     assert Buffer.get_local(buf, "diff-root") == ctx.root
   end
 
+  test "M-x diff-mode in a file buffer diffs only that file", ctx do
+    # a.txt is modified by the setup; change b.txt too, to prove the scope
+    File.write!(Path.join(ctx.dir, "b.txt"), "b changed\n")
+
+    {:ok, _} = Session.eval(~s[(visit "#{ctx.dir}/a.txt")])
+    {:ok, _} = Session.eval(~s[(run-command "diff-mode")])
+
+    buf = "*git: #{ctx.root}/a.txt*"
+    on_exit(fn -> if Buffer.exists?(buf), do: Aimax.Core.kill_buffer(buf) end)
+
+    assert wait_for(fn -> Buffer.exists?(buf) and Buffer.text(buf) =~ "@@" end)
+
+    text = Buffer.text(buf)
+    assert text =~ "diff --git a/a.txt"
+    refute text =~ "diff --git a/b.txt"
+    refute text =~ "new.txt"
+
+    assert Buffer.get_local(buf, "diff-scope") == "a.txt"
+    assert Buffer.get_local(buf, "diff-root") == ctx.root
+
+    # the same command from inside the diff toggles back
+    Editor.set_window_buffer(buf)
+    {:ok, _} = Session.eval(~s[(run-command "diff-mode")])
+    assert wait_for(fn -> Editor.current_buffer() != buf end)
+  end
+
+  test "M-x diff-mode in a dired buffer diffs that subtree", ctx do
+    File.mkdir_p!(Path.join(ctx.dir, "sub"))
+    File.write!(Path.join(ctx.dir, "sub/inner.txt"), "one\n")
+    git!(ctx.dir, ["add", "-A"])
+    git!(ctx.dir, commit_args("add sub"))
+    File.write!(Path.join(ctx.dir, "sub/inner.txt"), "two\n")
+
+    {:ok, _} = Session.eval(~s[(visit "#{ctx.dir}/sub")])
+    {:ok, _} = Session.eval(~s[(run-command "diff-mode")])
+
+    buf = "*git: #{ctx.root}/sub*"
+    on_exit(fn -> if Buffer.exists?(buf), do: Aimax.Core.kill_buffer(buf) end)
+
+    assert wait_for(fn -> Buffer.exists?(buf) and Buffer.text(buf) =~ "@@" end)
+
+    text = Buffer.text(buf)
+    assert text =~ "sub/inner.txt"
+    refute text =~ "diff --git a/a.txt"
+
+    assert Buffer.get_local(buf, "diff-scope") == "sub/"
+  end
+
   test "cards come newest first", ctx do
     # a.txt is already modified by the setup; touch b.txt after it
     Process.sleep(1100)

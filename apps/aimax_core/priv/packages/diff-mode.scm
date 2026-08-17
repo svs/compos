@@ -183,7 +183,17 @@
 ;;;   (key K section S file NAME status ST start L end E f FILEPLIST
 ;;;    hunks ((n N line L end E header H old-start OS new-start NS lines LS) ...))
 
+;; The layout is a pure function of the text, and the text has exactly two
+;; writers: diff--apply! and diff-show!. Both clear 'diff-layout-cache, so
+;; every other caller — blocks, folds, n/p motion, RET — reads the parse
+;; once per text, not once per keypress.
 (define (diff-layout buf)
+  (or (buffer-local buf 'diff-layout-cache)
+      (let ((l (diff--layout-parse buf)))
+        (buffer-set-local! buf 'diff-layout-cache l)
+        l)))
+
+(define (diff--layout-parse buf)
   (let* ((text (buffer-text buf))
          (overrides (or (buffer-local buf 'diff-overrides) '())))
     (let loop ((ls (split-lines text)) (n 1) (sec "")
@@ -376,14 +386,35 @@
 (define (diff--count-section layout sec)
   (length (filter (lambda (c) (equal? (diff--get c 'section) sec)) layout)))
 
+;; A reblock rebuilds only the cards whose inputs changed. The signature
+;; is everything a card's block reads: open state, its own closed hunks,
+;; and its text range. A fold toggle therefore rebuilds ONE card; the
+;; other cards reuse their block from 'diff-card-cache. diff--apply!
+;; clears the cache, because new text invalidates every range.
+(define (diff--card-sig c open closed)
+  (let ((key (diff--get c 'key)))
+    (list (and (member key open) #t)
+          (filter (lambda (hk) (string-prefix? (string-append key "|") hk)) closed)
+          (diff--get c 'start)
+          (diff--get c 'end))))
+
 (define (diff--section-blocks buf layout)
   (let ((open (or (buffer-local buf 'diff-open-cards) '()))
-        (closed (or (buffer-local buf 'diff-closed-hunks) '())))
-    (let loop ((cs layout) (sec #f) (acc '()))
+        (closed (or (buffer-local buf 'diff-closed-hunks) '()))
+        (cache (or (buffer-local buf 'diff-card-cache) '())))
+    (let loop ((cs layout) (sec #f) (acc '()) (nc '()))
       (if (null? cs)
-          (reverse acc)
+          (begin
+            (buffer-set-local! buf 'diff-card-cache (reverse nc))
+            (reverse acc))
           (let* ((c (car cs))
                  (s (diff--get c 'section))
+                 (key (diff--get c 'key))
+                 (sig (diff--card-sig c open closed))
+                 (hit (assoc key cache))
+                 (blk (if (and hit (equal? (cadr hit) sig))
+                          (caddr hit)
+                          (diff--card-block c open closed)))
                  (acc (if (and (not (equal? s sec)) (not (equal? s "")))
                           (cons (component 'ui/section
                                   (list 'title s
@@ -391,7 +422,7 @@
                                         'class "diff-section"))
                                 acc)
                           acc)))
-            (loop (cdr cs) s (cons (diff--card-block c open closed) acc)))))))
+            (loop (cdr cs) s (cons blk acc) (cons (list key sig blk) nc)))))))
 
 (define (diff--card-block c open closed)
   (let* ((key (diff--get c 'key))
@@ -522,6 +553,10 @@
       (buffer-set-local! buf 'diff-sections (map car sections))
       (buffer-set-local! buf 'diff-commits (cadr built))
       (buffer-set-local! buf 'diff-overrides (diff--overrides sections))
+      ;; new text moves every card's range: no cached block or layout
+      ;; survives it
+      (buffer-set-local! buf 'diff-card-cache '())
+      (buffer-set-local! buf 'diff-layout-cache #f)
       (buffer-delete-range! buf 0 (buffer-size buf))
       (buffer-append! buf (car built))
       ;; Controlled state: a card the reader closed stays closed across a
@@ -770,6 +805,8 @@
   (buffer-create name)
   (buffer-set-read-only! name #f)
   (buffer-delete-range! name 0 (buffer-size name))
+  (buffer-set-local! name 'diff-layout-cache #f)
+  (buffer-set-local! name 'diff-card-cache '())
   (buffer-append! name (if (string? text) text "could not read that revision\n"))
   (display-buffer name)
   (switch-to-buffer! name)
@@ -785,6 +822,8 @@
       (diff--install-keys!)
       (buffer-set-read-only! buf #t)
       (buffer-set-local! buf 'transient #t)
+      (buffer-set-local! buf 'desktop-skip-locals
+        '(render-blocks diff-card-cache diff-layout-cache))
       (buffer-set-local! buf 'render-mode "blocks")
       (buffer-set-local! buf 'diff-commits '())
       (buffer-set-local! buf 'diff-open-cards
@@ -926,7 +965,8 @@
       ;; locals and not the content — and not the drawn projection either:
       ;; diff-refresh below rebuilds render-blocks from git on restore
       (buffer-set-local! buf 'transient #t)
-      (buffer-set-local! buf 'desktop-skip-locals '(render-blocks))
+      (buffer-set-local! buf 'desktop-skip-locals
+        '(render-blocks diff-card-cache diff-layout-cache))
       (buffer-set-local! buf 'render-mode "blocks")
       ;; Restore lands here with the locals and no text. Re-arm the watch
       ;; and re-read; the open cards survive because diff--apply! only opens

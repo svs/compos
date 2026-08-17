@@ -20,12 +20,6 @@
 
 (defgroup 'keys "Secrets: the key chain (environment, files, Doppler).")
 
-(defcustom 'key-doppler-project "personal"
-  "The Doppler project the key chain reads." 'group 'keys)
-
-(defcustom 'key-doppler-config "dev"
-  "The Doppler config the key chain reads." 'group 'keys)
-
 ;;; --- the sources --------------------------------------------------------------
 
 (define *key-cache* '())
@@ -43,11 +37,12 @@
         (key--non-empty (string-trim (or (read-file path) "")))
         #f)))
 
-;; doppler.scm is a package like this one, and a broken package must not
-;; take the chain down with it
+;; doppler.scm supplies (doppler-key-value VAR) when it loads; the chain
+;; consults it only when bound, so a missing doppler package never breaks
+;; key lookup. Its project/config live there, not here.
 (define (key--from-doppler var)
-  (if (boundp 'doppler-secret-value)
-      (doppler-secret-value key-doppler-project key-doppler-config var)
+  (if (boundp 'doppler-key-value)
+      (doppler-key-value var)
       #f))
 
 ;;; --- the chain ----------------------------------------------------------------
@@ -63,6 +58,26 @@
                      #f)))
           (set! *key-cache* (cons (list var v) *key-cache*))
           v))))
+
+;; Explicit provider -> key VALUE, set by user config (ai-config.scm). This
+;; is the whole mapping: there is no provider -> secret-name convention, so a
+;; provider with an odd secret name (GEMINI_API_KEY_EMACS) is a config line,
+;; never a guess. Mirrors secrets.el: load into a global, register the
+;; mapping, and the value — never the secret name — is what travels.
+(define *llm-keys* '()) ; (("deepseek" "sk-...") ...)
+
+(define (register-llm-key! provider value)
+  (let ((p (if (symbol? provider) (symbol->string provider) provider)))
+    (set! *llm-keys*
+      (cons (list p value)
+            (remove (lambda (e) (equal? (car e) p)) *llm-keys*)))
+    value))
+
+;; A provider id -> the resolved key VALUE, or #f when unregistered. Elixir
+;; asks this by provider and passes the value on.
+(define (llm-key provider)
+  (let ((e (assoc provider *llm-keys*)))
+    (if e (cadr e) #f)))
 
 ;; drop VAR from the cache, so the next key-get walks the chain again
 (define (key-forget! var)
@@ -110,3 +125,7 @@
   "(key-forget! VAR) — drop VAR from the key cache; the next lookup reads Doppler again")
 (public! 'key-cached-names
   "(key-cached-names) — the variable names the key chain answered for this session, values never")
+(public! 'llm-key
+  "(llm-key PROVIDER) — the resolved key VALUE for a provider id, or #f when unregistered; pass this to the LLM config")
+(public! 'register-llm-key!
+  "(register-llm-key! PROVIDER VALUE) — set the explicit key VALUE for a provider")

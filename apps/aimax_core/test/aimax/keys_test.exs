@@ -130,4 +130,12 @@ defmodule Aimax.KeysTest do
     assert out =~ "@ZZ_KEYS_TEST"
     refute out =~ "sekrit"
   end
+
+  test "a key is explicit: registered providers answer, unregistered are #f" do
+    # unregistered -> #f: there is no provider -> secret-name convention
+    assert eval!(~s{(llm-key "zz-provider")}) == "#f"
+
+    eval!(~s{(register-llm-key! 'zz-provider "explicit-value")})
+    assert eval!(~s{(llm-key "zz-provider")}) == ~s("explicit-value")
+  end
 end

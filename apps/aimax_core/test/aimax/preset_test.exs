@@ -95,9 +95,109 @@ defmodule Aimax.PresetTest do
     press(["RET"])
 
     assert Buffer.get_local(buf, "chat-presets") == [sym: "aimax"]
-    assert "eval-scheme" in
-             (Buffer.get_local(buf, "chat-tool-specs") |> Enum.map(&List.first/1))
+    assert "eval-scheme" in (Buffer.get_local(buf, "chat-tool-specs") |> Enum.map(&List.first/1))
     refute Buffer.get_local(buf, "modeline-info") =~ "tools stale"
+  end
+
+  test "ACP-backed llm-mode mounts the buffer presets as MCP servers" do
+    buf = "llm-acp-presets-#{System.unique_integer([:positive])}"
+    on_exit(fn -> if Buffer.exists?(buf), do: Aimax.Core.kill_buffer(buf) end)
+
+    {:ok, _} =
+      Session.eval(~s[(begin
+        (buffer-create "#{buf}")
+        (switch-to-buffer! "#{buf}")
+        (buffer-set-local! "#{buf}" 'llm-connector "codex-app-server")
+        (buffer-set-local! "#{buf}" 'llm-model "gpt-5.6-terra")
+        (buffer-set-local! "#{buf}" 'chat-presets '(aimax))
+        (insert! "read the companion")
+        (run-command "llm-send-buffer"))])
+
+    assert_receive {:transport_open, agent}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(agent, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{}})
+
+    assert_receive {:frame,
+                    %{
+                      "method" => "thread/start",
+                      "id" => thread_request,
+                      "params" => %{"config" => %{"mcp_servers" => mcp_servers}}
+                    } = thread_frame},
+                   1_000
+
+    assert Map.has_key?(mcp_servers, "aimax")
+    assert thread_frame["params"]["ephemeral"] == false
+
+    inject(agent, %{
+      "id" => thread_request,
+      "result" => %{"thread" => %{"id" => "writing-thread"}, "model" => "gpt-5.6-terra"}
+    })
+
+    assert_receive {:frame, %{"method" => "turn/start", "id" => turn_request, "params" => turn}},
+                   1_000
+
+    assert turn["threadId"] == "writing-thread"
+    assert turn["input"] == [%{"type" => "text", "text" => "read the companion"}]
+    inject(agent, %{"id" => turn_request, "result" => %{"turn" => %{"id" => "turn-1"}}})
+
+    inject(agent, %{
+      "method" => "item/agentMessage/delta",
+      "params" => %{"itemId" => "msg-1", "delta" => "First answer"}
+    })
+
+    inject(agent, %{
+      "method" => "turn/completed",
+      "params" => %{
+        "threadId" => "writing-thread",
+        "turn" => %{"id" => "turn-1", "status" => "completed"}
+      }
+    })
+
+    assert eventually(fn -> Buffer.text(buf) =~ "First answer" end)
+    assert Buffer.get_local(buf, "llm-thread-id") == "writing-thread"
+    session_id = Buffer.get_local(buf, "llm-session-id")
+    assert eventually(fn -> Agent.info(session_id).status == :idle end)
+    refute Buffer.get_local(buf, "llm-session-dirty")
+
+    :ok = Buffer.append(buf, "\nwhat about the ending?", source: :editor)
+    Buffer.goto(buf, Buffer.byte_size(buf))
+    refute Buffer.get_local(buf, "llm-session-dirty")
+    assert session_id in Agent.list()
+    {:ok, _} = Session.eval(~s[(run-command "llm-send-buffer")])
+
+    # No second transport or thread/start: this is another turn on the same
+    # Codex thread, carrying only text written below the previous response.
+    refute_receive {:transport_open, _}, 100
+    assert_receive {:frame, %{"method" => "turn/start", "params" => second_turn}}, 1_000
+    assert second_turn["threadId"] == "writing-thread"
+    assert second_turn["input"] == [%{"type" => "text", "text" => "\n\nwhat about the ending?"}]
+
+    assert :ok = Aimax.Core.kill_buffer(buf)
+    assert eventually(fn -> session_id not in Agent.list() end)
+  end
+
+  test "a legacy llm transcript seeds its first native thread in full" do
+    buf = "llm-legacy-seed-#{System.unique_integer([:positive])}"
+    on_exit(fn -> if Buffer.exists?(buf), do: Aimax.Core.kill_buffer(buf) end)
+
+    {:ok, _} =
+      Session.eval(~s[(begin
+        (buffer-create "#{buf}")
+        (buffer-append! "#{buf}" "q\n\nanswer\nnext")
+        (buffer-set-local! "#{buf}" 'llm-connector "codex-app-server")
+        (buffer-set-local! "#{buf}" 'llm-responses '((3 9)))
+        (buffer-set-local! "#{buf}" 'test-wire
+          (llm-mode--wire-text "#{buf}" (buffer-text "#{buf}"))))])
+
+    assert Buffer.get_local(buf, "test-wire") == "q\n\nanswer\nnext"
+
+    {:ok, _} =
+      Session.eval(~s[(begin
+        (buffer-set-local! "#{buf}" 'llm-thread-id "saved-thread")
+        (buffer-set-local! "#{buf}" 'test-wire
+          (llm-mode--wire-text "#{buf}" (buffer-text "#{buf}"))))])
+
+    assert Buffer.get_local(buf, "test-wire") == "\nnext"
   end
 
   test "loading a preset on a live ACP chat reattaches; the conversation survives" do
@@ -345,7 +445,7 @@ defmodule Aimax.PresetTest do
 
     {:ok, _} =
       Session.eval(
-        ~s[(begin (buffer-create "#{buf}") (switch-to-buffer! "#{buf}") (run-command "llm-mode"))]
+        ~s[(begin (buffer-create "#{buf}") (switch-to-buffer! "#{buf}") (buffer-set-local! "#{buf}" 'llm-connector "api") (run-command "llm-mode"))]
       )
 
     {:ok, _} = Session.eval(~s[(run-command "llm-set-preset")])

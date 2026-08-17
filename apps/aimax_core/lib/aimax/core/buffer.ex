@@ -139,8 +139,11 @@ defmodule Aimax.Core.Buffer do
   def exists?(%Ref{id: id}), do: Registry.lookup(@registry, {:id, id}) != []
   def exists?(name), do: Registry.lookup(@registry, name) != []
 
-  def text(name), do: dormant_read(name, :text, :text)
-  def byte_size(name), do: Kernel.byte_size(dormant_read(name, :text, :text))
+  # A name with neither a process nor a checkpoint reads as empty, not as
+  # nil: a list renders a row for every name the catalog holds, and one
+  # buffer that died mid-render used to raise out of the whole render.
+  def text(name), do: dormant_read(name, :text, :text) || ""
+  def byte_size(name), do: Kernel.byte_size(text(name))
   def version(name), do: dormant_read(name, :buffer_version, :version)
   def path(name), do: dormant_read(name, :path, :path)
   def modified?(name), do: dormant_read(name, :modified, :modified?)

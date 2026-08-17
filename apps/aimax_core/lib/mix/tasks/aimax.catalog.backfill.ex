@@ -63,7 +63,7 @@ defmodule Mix.Tasks.Aimax.Catalog.Backfill do
       {:error, reason} -> Mix.raise("could not start req_llm: #{inspect(reason)}")
     end
 
-    {key_var, key} = provider_key!(socket, model)
+    {provider, key} = provider_key!(socket, model)
     previous_model = LLM.model()
     LLM.set_model(model)
 
@@ -74,7 +74,7 @@ defmodule Mix.Tasks.Aimax.Catalog.Backfill do
         |> Enum.with_index(1)
         |> Enum.flat_map(fn {batch, number} ->
           Mix.shell().info("Luna batch #{number}: #{length(batch)} entries")
-          LLM.with_provider_key(key_var, key, fn -> classify_batch!(batch) end)
+          LLM.with_provider_key(provider, key, fn -> classify_batch!(batch) end)
         end)
       after
         LLM.set_model(previous_model)
@@ -174,16 +174,11 @@ defmodule Mix.Tasks.Aimax.Catalog.Backfill do
   end
 
   defp provider_key!(socket, model) do
-    var =
-      case String.split(model, ":", parts: 2) |> hd() do
-        "openai" -> "OPENAI_API_KEY"
-        "openrouter" -> "OPENROUTER_API_KEY"
-        _ -> "ANTHROPIC_API_KEY"
-      end
+    provider = String.split(model, ":", parts: 2) |> hd()
 
-    key = rpc_value!(socket, "(or (key-get \"#{var}\") \"\")")
-    if key == "", do: Mix.raise("live ai-max has no #{var}")
-    {var, key}
+    key = rpc_value!(socket, "(or (llm-key \"#{provider}\") \"\")")
+    if key == "", do: Mix.raise("live ai-max has no key for #{provider}")
+    {provider, key}
   end
 
   defp classify_batch!(batch, attempt \\ 1, correction \\ nil) do

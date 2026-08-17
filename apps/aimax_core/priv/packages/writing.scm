@@ -50,7 +50,7 @@
   'group 'writing 'type 'string 'set writing--refresh!)
 
 (defcustom 'writing-presets '()
-  "Tool presets enabled whenever writing-mode is active. Set a symbol list such as '(aimax web) in ~/.aimax/ai-config.scm."
+  "Additional tool presets for the writing scratch. The required `aimax` preset is always enabled. Set a symbol list such as '(web) in ~/.aimax/ai-config.scm."
   'group 'writing 'type 'list 'set writing--refresh!)
 
 (defcustom 'writing-instructions
@@ -66,19 +66,44 @@
 (define (writing--configured-presets buf)
   ;; Rebuild from the pre-writing value on every refresh.  That makes removing
   ;; a preset from writing-presets take effect immediately instead of leaving
-  ;; behind the value installed by the previous refresh.
-  (let ((base (or (writing--saved buf 'chat-presets) '())))
-    (append writing-presets
-            (filter (lambda (preset) (not (member preset writing-presets)))
-                    base))))
+  ;; behind the value installed by the previous refresh. `aimax` is the
+  ;; scratch's bridge to its grouped document, so it is intrinsic rather than
+  ;; a default that customization can accidentally remove.
+  (let* ((required '(aimax))
+         (requested
+           (append required
+                   (filter (lambda (preset) (not (member preset required)))
+                           writing-presets)))
+         (base (or (writing--saved buf 'chat-presets) '())))
+    (append requested
+            (filter (lambda (preset) (not (member preset requested))) base))))
 
 (define (writing--workspace! buf)
   (let ((group (group-ensure! buf)))
     (buffer-set-local! buf 'group group)
     (buffer-set-local! buf 'writing-model writing-model)
-    (buffer-set-local! buf 'chat-presets (writing--configured-presets buf))
     (buffer-set-local! buf 'writing-instructions writing-instructions)
     group))
+
+(define (writing--configure-scratch! buf scratch)
+  ;; The document is the finished surface; the scratch is the LLM session.
+  ;; Keep all session knobs where M-o actually runs.
+  (let* ((model (if (equal? writing-model "")
+                    (buffer-local buf 'llm-model)
+                    writing-model))
+         (presets (writing--configured-presets buf))
+         (changed (or (not (equal? model (buffer-local scratch 'llm-model)))
+                      (not (equal? presets
+                                   (buffer-local scratch 'chat-presets))))))
+    (when (and changed (boundp (quote llm-mode-reset-runtime!)))
+      ;; Model and MCP changes take effect by resuming the same native Codex
+      ;; thread through a fresh local runtime.
+      (llm-mode-reset-runtime! scratch #t))
+    (buffer-set-local! scratch 'llm-model model)
+    (buffer-set-local! scratch 'chat-presets presets))
+  (buffer-set-local! scratch 'writing-instructions writing-instructions)
+  (unless (minor-mode-on? scratch "llm-mode")
+    (enable-minor-mode! scratch "llm-mode")))
 
 (define (writing--select! mover)
   (unless (mark) (set-mark! (point)))
@@ -178,9 +203,9 @@
             (list 'writing-instructions
                   (or (buffer-local buf 'writing-instructions) #f)))))
   (writing--workspace! buf)
-  ;; Writing mode supplies the prose workspace; llm-mode owns in-buffer
-  ;; prompting and the presentation of generated response ranges.
-  (enable-minor-mode! buf "llm-mode")
+  ;; The finished document is not a transcript. Preserve a pre-existing LLM
+  ;; mode so disabling Writing Mode can restore it, but keep it off here.
+  (disable-minor-mode! buf "llm-mode")
   ;; The preview is the writing surface. Markdown remains the buffer text,
   ;; so every ordinary edit, save, undo, and future narrowing command keeps
   ;; its normal editor semantics.
@@ -223,7 +248,17 @@
   (local-set-key* buf "C-S-<end>" "writing-select-buffer-end")
   (local-set-key* buf "s-a" "writing-select-all")
   (writing--ensure-hook! buf)
-  (writing--update-count! buf))
+  (writing--update-count! buf)
+  ;; A writing workspace is the rendered document plus its ordinary scratch.
+  ;; Only the selected document establishes layout: customize refreshes of a
+  ;; background writing buffer must not replace an unrelated window.
+  (if (equal? buf (current-buffer))
+      (writing--configure-scratch! buf (scratch-open-beside! buf))
+      ;; Customize refreshes still update an existing background scratch
+      ;; without touching the current window layout.
+      (let ((scratch (buffer-local buf 'scratch-buffer)))
+        (when (and scratch (buffer-exists? scratch))
+          (writing--configure-scratch! buf scratch)))))
 
 (define (writing--teardown! buf)
   (writing--remove-hook! buf)
@@ -263,8 +298,9 @@
   (local-unset-key* buf "C-S-<home>")
   (local-unset-key* buf "C-S-<end>")
   (local-unset-key* buf "s-a")
-  (unless (writing--saved buf 'llm-mode-on)
-    (disable-minor-mode! buf "llm-mode"))
+  (if (writing--saved buf 'llm-mode-on)
+      (enable-minor-mode! buf "llm-mode")
+      (disable-minor-mode! buf "llm-mode"))
   (buffer-set-local! buf 'writing-saved #f))
 
 (register-minor-mode! "writing-mode" writing--apply! writing--teardown!)
@@ -276,7 +312,7 @@
         (message "Writing mode disabled"))))
 
 (mode-doc! "writing-mode"
-  "An editable Markdown writing workspace. `C-c s` toggles its scratch buffer, and `C-c w` opens the optional companion chat.")
+  "An editable Markdown writing workspace. The preview document has no LLM mode; its grouped plain scratch owns M-o, model, and tool presets. `C-c s` moves between them, and `C-c w` opens the optional companion chat.")
 
 (effects! '(read))
 

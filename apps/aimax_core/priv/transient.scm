@@ -447,7 +447,7 @@
 
 (define (llm-config--connector buf)
   (or (buffer-local buf (if (llm-config--chat? buf) 'agent-connector 'llm-connector))
-      (if (llm-config--chat? buf) *default-connector* "api")))
+      (if (llm-config--chat? buf) *default-connector* "codex-app-server")))
 
 (define (llm-config--model buf)
   (or (buffer-local buf (if (llm-config--chat? buf) 'agent-model 'llm-model))

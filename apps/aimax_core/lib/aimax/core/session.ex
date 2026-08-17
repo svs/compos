@@ -948,8 +948,7 @@ defmodule Aimax.Core.Session do
       "llm-available-models" => fn [], store ->
         store =
           Enum.reduce(ReqLLM.Providers.list(), store, fn provider, store ->
-            var = ReqLLM.Keys.env_var_name(provider)
-            {key, store} = eval_src.("(key-get \"#{var}\")", store)
+            {key, store} = eval_src.("(llm-key \"#{provider}\")", store)
 
             if is_binary(key) and key != "" do
               ReqLLM.put_key(ReqLLM.Keys.config_key(provider), key)

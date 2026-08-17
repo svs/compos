@@ -112,7 +112,7 @@
     (let* ((buf (current-buffer))
            (targets (list-targets buf))
            (n 0))
-      (when (buffer-exists? "*scratch*")
+      (when (buffer-known? "*scratch*")
         (display-buffer-other-window! "*scratch*"))
       (for-each (lambda (b)
                   ;; dormant or live, the row names a buffer this editor

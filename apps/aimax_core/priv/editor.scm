@@ -537,6 +537,12 @@
       (if (equal? q "") rest (cons (list "match" q) rest)))
     (list-refresh! buf)))
 
+;; drop the typed query and keep the mode's own kinds (dired's dotfiles).
+;; No refresh: the caller is opening the list and draws it next.
+(define (list-clear-query! buf)
+  (buffer-set-local! buf 'list-filters
+    (filter (lambda (f) (not (equal? (car f) "match"))) (list-filters buf))))
+
 (define (list-filter-pop! buf)
   (let ((fs (list-filters buf)))
     (unless (null? fs) (buffer-set-local! buf 'list-filters (cdr fs)))
@@ -748,9 +754,12 @@
         (list title '())
         (let* ((gap (max 1 (- w (string-length title) (string-length chip))))
                (text (string-append title (string-repeat " " gap) chip)))
+          ;; the chip shows only while the list is narrowed, and it wears
+          ;; the same colour as the note under it: one colour says "you
+          ;; are not seeing everything"
           (list text
                 (list (list (- (string-byte-length text) (string-byte-length chip))
-                            (string-byte-length chip) "accent")))))))
+                            (string-byte-length chip) "warn")))))))
 
 (define (list-label-line buf cols)
   (let* ((labels (map (lambda (c) (list (string-upcase (car c)) "faint")) cols))
@@ -758,14 +767,35 @@
     (list (string-trim-right (string-append "  " (car laid)))
           (list-shift-spans (car (cdr laid)) 2))))
 
+;; A narrowed list looks exactly like a short list, and the mode's own
+;; meta counts the rows it can see — "2 buffers" when the editor holds
+;; fourteen. So the narrowing says itself here, in the sentence under the
+;; title, and it says how to leave.
+(define (list-meta-line buf)
+  (let* ((meta (list-say buf 'meta))
+         (note (if (null? (list-filters buf))
+                   ""
+                   (string-append "narrowed to " (list-filters-text buf)
+                                  " — \\ widens")))
+         (text (cond ((equal? note "") meta)
+                     ((equal? meta "") note)
+                     (else (string-append meta "   ·   " note)))))
+    (list text
+          (append (if (equal? meta "")
+                      '()
+                      (list (list 0 (string-byte-length meta) "dim")))
+                  (if (equal? note "")
+                      '()
+                      (list (list (- (string-byte-length text)
+                                     (string-byte-length note))
+                                  (string-byte-length note) "warn")))))))
+
 (define (list-table-head buf)
   (let* ((cols (list-columns buf))
          (w (list-view-width buf))
-         (meta (list-say buf 'meta)))
+         (meta (list-meta-line buf)))
     (append (list (list-title-line buf w))
-            (if (equal? meta "")
-                '()
-                (list (list meta (list (list 0 (string-byte-length meta) "dim")))))
+            (if (equal? (car meta) "") '() (list meta))
             (list (list-rule-line w))
             (list (list-label-line buf cols)))))
 
@@ -1075,6 +1105,11 @@
     (buffer-set-local! buf 'transient #t)
     ;; the stamp names the rows of one render — a restart draws new ones
     (desktop-skip! buf 'list-stamp)
+    ;; A list opens WIDE. The typed narrowing answers a question you asked
+    ;; THIS time; a local persists, so C-x C-b days later opened on a
+    ;; three-row list narrowed by a word you no longer remember typing.
+    ;; The mode's own kinds (dired's dotfiles) are a setting, and stay.
+    (list-clear-query! buf)
     ;; a list buffer's text IS its view. A buffer keeps the locals of the
     ;; mode before it, so dired on a directory that once held a diff kept
     ;; 'render-mode "blocks" and the window drew no rows at all.
@@ -2802,7 +2837,10 @@
                  (g (container-of picked)))
             (cond (g (switch-to-group! g))
                   ((pick picked) #t)
-                  ((buffer-exists? picked)
+                  ;; known?, not exists?: the pool is buffer-list-mru,
+                  ;; and most of that list is dormant. exists? here sent
+                  ;; every dormant pick to the found-a-group branch.
+                  ((buffer-known? picked)
                    ;; RET is a BUFFER switch: one window changes and
                    ;; nothing else moves. The context switch — layout
                    ;; and all — is C-RET's job, and only C-RET's.
@@ -3516,9 +3554,11 @@
 (global-set-key "M-|" "llm-pipe-region")
 
 ;; gptel's most Emacs-shaped operation: the buffer is both the prompt and
-;; the transcript.  M-o sends an immutable snapshot of the whole document,
-;; then puts the answer where point was when it was sent.  The overlay makes
-;; authorship visible without writing chat markers into the document itself.
+;; the transcript. M-o puts the answer where point was when it was sent. A
+;; stateful backend gets one durable session per buffer and only the new tail;
+;; the stateless API lane still receives the immutable whole-buffer snapshot.
+;; The overlay makes authorship visible without writing chat markers into the
+;; document itself.
 (define *llm-mode-hooks* '())
 
 (define (llm-mode--paint! buf)
@@ -3549,7 +3589,19 @@
       (cons (list buf
                   (on-change! buf
                     (lambda (pos inserted deleted source)
-                      (llm-mode--sync-ranges! buf))))
+                      (llm-mode--sync-ranges! buf)
+                      ;; Text after the last answer is the next user turn.
+                      ;; Editing anything earlier rewrites conversation
+                      ;; history, so the next send deliberately starts a new
+                      ;; native thread from the edited whole buffer.
+                      (let ((end (llm-mode--last-response-end buf)))
+                        (when (and end
+                                   ;; Responses and mode-managed rewrites use
+                                   ;; the named-buffer :editor primitives;
+                                   ;; interactive typing/paste/undo do not.
+                                   (not (equal? source "editor"))
+                                   (< pos end))
+                          (buffer-set-local! buf 'llm-session-dirty #t))))))
             *llm-mode-hooks*))))
 
 (define (llm-mode--remove-hook! buf)
@@ -3568,6 +3620,7 @@
   (llm-mode--ensure-hook! buf))
 
 (define (llm-mode--teardown! buf)
+  (llm-mode-reset-runtime! buf #f)
   (llm-mode--remove-hook! buf)
   (overlay-clear! buf 'llm-mode-responses)
   (local-unset-key* buf "M-o")
@@ -3580,7 +3633,11 @@
   (lambda (old new)
     (when (assoc old *llm-mode-hooks*)
       (llm-mode--remove-hook! old)
-      (when (minor-mode-on? new "llm-mode") (llm-mode--ensure-hook! new)))))
+      (when (minor-mode-on? new "llm-mode")
+        (llm-mode--ensure-hook! new)
+        ;; Session callbacks close over the buffer name. Reattach them under
+        ;; the new name while preserving the native Codex thread itself.
+        (llm-mode-reset-runtime! new #t)))))
 
 (register-minor-mode! "llm-mode" llm-mode--apply! llm-mode--teardown!)
 
@@ -3594,10 +3651,45 @@
   "In-buffer LLM interaction. `M-o` sends the document and inserts the response at point with a distinct response face; `C-c b` chooses backend, model, and effort.")
 
 (define (buffer-llm-connector buf)
-  (or (buffer-local buf 'llm-connector) "api"))
+  ;; Inline sessions are durable agent conversations by default, matching
+  ;; Codex's editor integrations: one native thread stays attached to the
+  ;; buffer and M-o sends only the next turn.  The direct API lane remains an
+  ;; explicit choice in C-c b for users who want a stateless replay.
+  (or (buffer-local buf 'llm-connector) "codex-app-server"))
 
 (define (buffer-llm-model buf)
   (or (buffer-local buf 'llm-model) (llm-model)))
+
+;; Runtime ids are buffer identities, not turn identities. The local survives
+;; desktop restore and buffer rename; the persisted counter prevents a new
+;; buffer from colliding with an old renamed one.
+(define *llm-inline-next* 0)
+
+(persist-global! 'llm-inline-next
+  (lambda () *llm-inline-next*)
+  (lambda (v) (set! *llm-inline-next* v)))
+
+(define (llm-mode--session-id buf)
+  (or (buffer-local buf 'llm-session-id)
+      (begin
+        (set! *llm-inline-next* (+ *llm-inline-next* 1))
+        (let ((id (string-append "inline-" (number->string *llm-inline-next*))))
+          (buffer-set-local! buf 'llm-session-id id)
+          id))))
+
+(define (llm-mode--runtime-live? buf)
+  (let ((id (buffer-local buf 'llm-session-id)))
+    (and id (member id (agent-list)) (not (equal? (agent-status id) 'dead)) #t)))
+
+;; KEEP-THREAD preserves Codex's durable thread identity while dropping only
+;; this editor process. A changed history or connector passes #f and starts a
+;; genuinely new conversation on the next send.
+(define (llm-mode-reset-runtime! buf keep-thread)
+  (let ((id (buffer-local buf 'llm-session-id)))
+    (when (and id (member id (agent-list))) (llm-session-close! id)))
+  (unless keep-thread (buffer-set-local! buf 'llm-thread-id #f))
+  (buffer-set-local! buf 'llm-session-dirty #f)
+  #t)
 
 (define-command "llm-set-model" "Choose the model for M-o in this buffer"
   (lambda ()
@@ -3608,6 +3700,9 @@
         (lambda (model)
           (unless (equal? (string-trim model) "")
             (buffer-set-local! buf 'llm-model model)
+            ;; Codex fixes model identity in the thread instructions. Resume
+            ;; the same thread through a fresh runtime with the new override.
+            (llm-mode-reset-runtime! buf #t)
             (message (string-append "M-o · " model))))))))
 
 ;; Which buffers is an M-o question about? A grouped buffer answers: a
@@ -3655,17 +3750,11 @@
 (define (chat-code-companion? docs)
   (not (equal? (chat-code-note docs) "")))
 
-;; Inline/document requests are ephemeral LLM sessions. They use the same
-;; session facade, connector resolution, ReqLLM backend, normalized event
-;; stream and tool loop as chat; only their presentation differs. The chat
-;; renderer consumes events into blocks, while this adapter collects chunks
-;; and hands one completed string to the insertion callback below.
-(define *llm-inline-next* 0)
+;; Inline/document requests use the same session facade, connector resolution,
+;; normalized event stream and tool loop as chat; only their presentation
+;; differs. One entry exists while the buffer's durable session is running a
+;; turn; completion removes the entry, not the session.
 (define *llm-inline-sends* '())
-
-(define (llm-inline-next-id)
-  (set! *llm-inline-next* (+ *llm-inline-next* 1))
-  (string-append "inline-" (number->string *llm-inline-next*)))
 
 (define (llm-inline-put! entry)
   (let ((id (car entry)))
@@ -3692,11 +3781,10 @@
 (define (llm-inline-finish! id)
   (let ((e (assoc id *llm-inline-sends*)))
     (when e
-      ;; Remove and close before invoking user presentation code: completion
-      ;; may start another send, and an error in it must not leak a runtime.
+      ;; Remove before invoking user presentation code: completion may start
+      ;; another turn on this same session.
       (set! *llm-inline-sends*
         (remove (lambda (x) (equal? (car x) id)) *llm-inline-sends*))
-      (llm-session-close! id)
       (let ((result (car (cdr (cdr (cdr e)))))
             (error (car (cdr (cdr (cdr (cdr e))))))
             (completion (car (cdr (cdr e)))))
@@ -3710,43 +3798,85 @@
       (let ((type (plist-get event 'type)))
         (cond ((equal? type 'chunk)
                (llm-inline-add-chunk! id (or (plist-get event 'text) "")))
+              ((equal? type 'thread-id)
+               (let ((e (assoc id *llm-inline-sends*)))
+                 (when e
+                   (buffer-set-local! (cadr e) 'llm-thread-id
+                     (plist-get event 'id)))))
               ((equal? type 'error)
                (llm-inline-error! id (or (plist-get event 'text) "request failed")))
               ((equal? type 'turn-end)
                (llm-inline-finish! id)))))
     events))
 
-;; Presets supply the complete tool surface; with none selected, the shared
-;; ReqLLM backend makes one text-only round. `aimax` contributes the native
-;; editor registry. mcp.scm loads later, so the surface resolves at send time.
-(define (llm-mode--complete buf context model handler)
-  (let* ((id (llm-inline-next-id))
+;; Presets supply the complete tool surface. The runtime opens lazily on the
+;; first send, stays attached to BUF, and (for Codex) records a native thread
+;; id that a restored buffer resumes.
+(define (llm-mode--complete buf wire display model handler)
+  (let* ((id (llm-mode--session-id buf))
          (connector (buffer-llm-connector buf))
          (effort (buffer-local buf 'llm-effort))
-         (specs (if (boundp (quote chat-extra-tool-specs))
-                    (chat-extra-tool-specs buf)
-                    '()))
-         (system (string-append
-                   (if (boundp (quote chat-tool-system))
-                       (chat-tool-system buf)
-                       "")
-                   (llm-mode--group-note buf)))
          (config (agent-resolve-config
                    (append
                      (list 'connector connector 'model model
-                           'buffer buf 'mark (point))
+                           'buffer buf 'mark (point)
+                           ;; ReqLLM consumes SPECS above directly. ACP
+                           ;; sessions instead mount the MCP servers named by
+                           ;; these same presets at session/new, exactly as a
+                           ;; chat buffer does. Without this, an ACP-backed
+                           ;; llm-mode buffer advertises the companion by name
+                           ;; but has no editor tool with which to read it.
+                           'presets (if (boundp (quote chat-presets-of))
+                                        (chat-presets-of buf)
+                                        '())
+                           'persist-thread #t)
+                     (let ((thread (buffer-local buf 'llm-thread-id)))
+                       (if thread (list 'thread-id thread) '()))
                      (if effort (list 'effort effort) '())))))
+    (when (and (member id (agent-list)) (equal? (agent-status id) 'dead))
+      (llm-session-close! id))
     (llm-inline-put! (list id buf handler "" #f))
-    (llm-session-open! id config
-      (lambda (_id _display)
-        (list 'turns '() 'system system 'tools specs
-              'dispatcher llm-tool-call))
-      (lambda (_id events) (llm-inline-events! id events))
-      (lambda (_id _role _blocks _wire) #t)
-      ;; Inline M-o historically executed its selected tools directly; chat
-      ;; sessions continue to use the shared permission policy and UI.
-      (lambda (_id _name _kind _raw) 'allow))
-    (llm-session-send! id context context)))
+    (unless (llm-mode--runtime-live? buf)
+      (llm-session-open! id config
+        (lambda (_id _display)
+          (list 'turns '()
+                'system (string-append
+                          (if (boundp (quote chat-tool-system))
+                              (chat-tool-system buf)
+                              "")
+                          (llm-mode--group-note buf))
+                'tools (if (boundp (quote chat-extra-tool-specs))
+                           (chat-extra-tool-specs buf)
+                           '())
+                'dispatcher llm-tool-call))
+        (lambda (_id events) (llm-inline-events! id events))
+        (lambda (_id _role _blocks _wire) #t)
+        ;; Inline M-o historically executed its selected tools directly; chat
+        ;; sessions continue to use the shared permission policy and UI.
+        (lambda (_id _name _kind _raw) 'allow)))
+    (llm-session-send! id wire display)))
+
+(define (llm-mode--last-response-end buf)
+  (let loop ((ranges (or (buffer-local buf 'llm-responses) '())) (end #f))
+    (if (null? ranges) end (loop (cdr ranges) (cadr (car ranges))))))
+
+(define (llm-mode--stateful? buf)
+  (not (connector-can? (buffer-llm-connector buf) 'stateless)))
+
+(define (llm-mode--wire-text buf snapshot)
+  (let ((end (llm-mode--last-response-end buf)))
+    (if (and (llm-mode--stateful? buf)
+             end
+             ;; A legacy/restored transcript without a native thread has
+             ;; nothing server-side to continue. Seed its first thread with
+             ;; the whole buffer; only a live or resumable session gets a
+             ;; delta turn.
+             (or (llm-mode--runtime-live? buf)
+                 (buffer-local buf 'llm-thread-id))
+             (not (buffer-local buf 'llm-session-dirty)))
+        (let ((tail (substring-bytes snapshot end (string-byte-length snapshot))))
+          (if (equal? (string-trim tail) "") "" tail))
+        snapshot)))
 
 (define-command "llm-send-buffer" "Send this document to the LLM and insert its reply below point"
   (lambda ()
@@ -3758,28 +3888,47 @@
       ;; interaction mode. writing-mode enables it eagerly.
       (unless (minor-mode-on? buf "llm-mode")
         (enable-minor-mode! buf "llm-mode"))
-      (message (string-append "LLM thinking · " model))
-      (llm-mode--complete buf context model
-        (lambda (result)
-          (if (not (buffer-exists? buf))
-              (message "LLM reply discarded — its buffer was killed")
-              (let* ((prefix "\n\n")
-                     (suffix "\n")
-                     (start (+ at (string-byte-length prefix)))
-                     (end (+ start (string-byte-length result))))
-                (with-edit-author "assistant"
-                  (lambda ()
-                    (buffer-insert! buf at
-                      (string-append prefix result suffix))))
-                (buffer-set-local! buf 'llm-responses
-                  (append (or (buffer-local buf 'llm-responses) '())
-                          (list (list start end))))
-                (llm-mode--paint! buf)
-                ;; a scratch chat has one more turn to read: it may name
-                ;; itself now, on the same cadence the chat lane uses
-                (when (boundp (quote chat-rename-from-content!))
-                  (chat-rename-from-content! buf))
-                (message "LLM response inserted"))))))))
+      ;; A rewritten earlier turn cannot be reconciled with a native thread.
+      ;; Close it and send the edited whole transcript as a new conversation.
+      (let ((resync (buffer-local buf 'llm-session-dirty)))
+        (when resync (llm-mode-reset-runtime! buf #f))
+        (let ((wire (if resync context (llm-mode--wire-text buf context))))
+          (cond
+            ((and (llm-mode--runtime-live? buf)
+                  (not (equal? (agent-status (llm-mode--session-id buf)) 'idle)))
+             (message "LLM is still working"))
+            ((and (llm-mode--stateful? buf) (equal? wire ""))
+             (message "Nothing new to send"))
+            (else
+              (message (string-append "LLM thinking · " model))
+              (llm-mode--complete buf wire context model
+                (lambda (result)
+                  (if (not (buffer-exists? buf))
+                      (message "LLM reply discarded — its buffer was killed")
+                      (let* ((prefix "\n\n")
+                             (suffix "\n")
+                             (start (+ at (string-byte-length prefix)))
+                             (end (+ start (string-byte-length result))))
+                        (buffer-set-local! buf 'llm-inserting-response #t)
+                        (with-edit-author "assistant"
+                          (lambda ()
+                            (buffer-insert! buf at
+                              (string-append prefix result suffix))))
+                        (buffer-set-local! buf 'llm-inserting-response #f)
+                        (buffer-set-local! buf 'llm-responses
+                          (append (or (buffer-local buf 'llm-responses) '())
+                                  (list (list start end))))
+                        (llm-mode--paint! buf)
+                        ;; a scratch chat has one more turn to read: it may
+                        ;; name itself on the same cadence as the chat lane
+                        (when (boundp (quote chat-rename-from-content!))
+                          (chat-rename-from-content! buf))
+                        ;; Inserting into the middle means the untouched
+                        ;; suffix was already in the sent snapshot. Resync
+                        ;; rather than mistaking it for a new user turn.
+                        (buffer-set-local! buf 'llm-session-dirty
+                          (< at (string-byte-length context)))
+                        (message "LLM response inserted"))))))))))))
 
 (global-set-key "M-o" "llm-send-buffer")
 (global-set-key "C-c m" "llm-set-model")
@@ -4404,11 +4553,16 @@
 
 ;; One configuration surface for every LLM frontend. Chat buffers apply the
 ;; choice to their durable session; ordinary buffers persist it as llm-mode
-;; locals, and the next ephemeral inline session resolves the same connector.
+;; locals, and their next turn resumes or starts the matching session.
 (define (llm-config-apply! buf connector model effort)
   (if (equal? (buffer-local buf 'mode-name) "chat-mode")
       (chat-llm-apply! buf connector model effort)
       (begin
+        (let ((same-connector
+                (equal? connector (buffer-llm-connector buf))))
+          ;; A model/effort change can resume the same Codex thread with new
+          ;; overrides. A connector change cannot carry a foreign thread id.
+          (llm-mode-reset-runtime! buf same-connector))
         (buffer-set-local! buf 'llm-connector connector)
         (buffer-set-local! buf 'llm-model
           (if (equal? model "default") #f model))
@@ -6127,7 +6281,7 @@
 ;; the link names a buffer. A name that is also a file path opens that file
 ;; — a link outlives the buffer it came from.
 (define (open-buffer-link! name line)
-  (cond ((buffer-exists? name) (switch-to-buffer! name))
+  (cond ((buffer-known? name) (switch-to-buffer! name))
         ((file-exists? name) (visit name))
         (else (message (string-append "Dead link: no buffer " name))))
   (when (and line (buffer-exists? name))
@@ -6264,6 +6418,8 @@
 (public! 'buffer-list "All buffer names")
 (public! 'buffer-list-mru "Buffer names, most recently used first")
 (public! 'buffer-exists? "(buffer-exists? NAME) -> bool")
+(public! 'buffer-known? "(buffer-known? NAME) -> bool: live OR dormant. A list shows dormant buffers, so a verb asks this one")
+(catalog-meta! 'function "buffer-known?" 'domain 'buffers 'effects '(read))
 (public! 'buffer-text "(buffer-text NAME) -> the buffer's full text")
 (public! 'buffer-size "(buffer-size NAME) -> size in bytes")
 (public! 'buffer-create "(buffer-create NAME) — create if missing")

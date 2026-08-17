@@ -614,23 +614,25 @@ defmodule Aimax.EditorTest do
       press(["C-g"])
       assert Buffer.text(root) =~ "alpha.txt"
 
-      # RET keeps it, as one serializable local, and a restore re-runs it
+      # RET keeps it while the listing lives, as one serializable local
       press(["/"])
       type("scheme-mode")
       press(["RET"])
       {:ok, filters} = Aimax.Core.Session.eval(~s{(buffer-local "#{root}" 'list-filters)})
       assert filters =~ "match"
+      refute Buffer.text(root) =~ "alpha.txt"
 
+      # opening the listing again starts WIDE: the query answered a question
+      # you asked that time, and a list you open must show what it holds
       {:ok, _} =
         Aimax.Core.Session.eval(~s{(begin (switch-to-buffer! "#{root}") (set-mode! "Dired"))})
 
-      refute Buffer.text(root) =~ "alpha.txt"
+      assert Buffer.text(root) =~ "alpha.txt"
       # point lands on a row, not on the header: ".." leads every listing
       assert {:ok, ~s{".."}} = Aimax.Core.Session.eval(~s{(dired-entry)})
 
       # a directory reads as Dired wherever it is listed, so the word finds
       # every directory — and ".." is one of them
-      press(["\\"])
       press(["/"])
       type("Dired")
       press(["RET"])
@@ -781,11 +783,11 @@ defmodule Aimax.EditorTest do
                "The complete document is context.\n\nA useful continuation.\n"
            end)
 
-    # Inline mode is presentation over the same session runtime as chat,
-    # but its ephemeral session is gone as soon as the normalized turn ends.
-    assert eventually(fn ->
-             Enum.all?(Aimax.Core.Agent.list(), &(!String.starts_with?(&1, "inline-")))
-           end)
+    # llm-mode owns one session for the buffer. A completed turn leaves it
+    # idle for the next M-o; disabling the mode detaches that runtime.
+    session_id = Buffer.get_local(buf, "llm-session-id")
+    assert String.starts_with?(session_id, "inline-")
+    assert eventually(fn -> Aimax.Core.Agent.info(session_id).status == :idle end)
 
     assert eventually(fn ->
              Enum.any?(Buffer.overlays(buf), fn {start, finish, face} ->
@@ -804,6 +806,9 @@ defmodule Aimax.EditorTest do
     assert [[^start, ^finish]] = Buffer.get_local(buf, "llm-responses")
     {:ok, _} = Aimax.Core.Session.eval(~s{(llm-mode--apply! "#{buf}")})
     assert Enum.any?(Buffer.overlays(buf), fn {_s, _e, face} -> face == "llm-response" end)
+
+    {:ok, _} = Aimax.Core.Session.eval(~s{(disable-minor-mode! "#{buf}" "llm-mode")})
+    refute session_id in Aimax.Core.Agent.list()
 
     # Vertical crossing is client-side in Markdown mode: the overlay's exact
     # range is embedded in the preview block instead of remapping next-line.

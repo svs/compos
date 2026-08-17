@@ -68,13 +68,14 @@ defmodule Aimax.WritingTest do
     type("writing-mode")
     press(["RET"])
 
-    assert Enum.sort(Buffer.get_local(buf, "minor-modes")) == ["llm-mode", "writing-mode"]
+    assert Buffer.get_local(buf, "minor-modes") == ["writing-mode"]
     assert Buffer.get_local(buf, "line-numbers") == "off"
     assert Buffer.get_local(buf, "window-class") == "writing"
     assert Buffer.get_local(buf, "render-mode") == "markdown"
     assert Buffer.get_local(buf, "preview-renderer") == "markdown"
     assert Buffer.get_local(buf, "visual-line-mode") == true
-    assert Editor.render_state().tree.visual_line_mode == true
+    writing_leaf = Enum.find(Editor.render_state().tree.children, &(&1.buffer == buf))
+    assert writing_leaf.visual_line_mode == true
     assert Buffer.get_local(buf, "group") == buf
     style = Buffer.get_local(buf, "style")
     assert style =~ "--default-family:Spectral, Georgia, serif;"
@@ -188,7 +189,7 @@ defmodule Aimax.WritingTest do
     refute Buffer.get_local(buf, "writing-saved")
   end
 
-  test "C-c s uses the editor-wide plain scratch buffer" do
+  test "enabling writing mode opens its grouped plain scratch beside the preview" do
     buf =
       fresh_buffer(
         "wr-scratch-#{System.unique_integer([:positive])}.md",
@@ -202,43 +203,53 @@ defmodule Aimax.WritingTest do
     end)
 
     eval!(~s{(run-command "writing-mode")})
-    press(["C-c", "s"])
 
-    assert Editor.current_buffer() == scratch
+    assert Editor.current_buffer() == buf
     assert length(Editor.list_windows()) == 2
     assert Enum.any?(Editor.list_windows(), fn {_id, name} -> name == buf end)
+    assert Enum.any?(Editor.list_windows(), fn {_id, name} -> name == scratch end)
     assert Buffer.text(scratch) == "# Scratch — #{Path.basename(buf)}\n\n"
     assert Buffer.get_local(buf, "scratch-buffer") == scratch
     assert Buffer.get_local(scratch, "scratch-owner") == buf
+    assert Buffer.get_local(buf, "group") == buf
     assert Buffer.get_local(scratch, "group") == buf
     assert Buffer.get_local(scratch, "mode-name") == "text-mode"
     refute Buffer.get_local(scratch, "render-mode")
     refute Buffer.get_local(scratch, "preview-renderer")
     refute Buffer.get_local(scratch, "visual-line-mode")
     assert Buffer.get_local(scratch, "minor-modes") == ["llm-mode"]
+    assert Buffer.get_local(scratch, "chat-presets") == [sym: "aimax"]
+    assert eval!(~s{(buffer-llm-connector "#{scratch}")}) == ~s("codex-app-server")
+    refute "llm-mode" in Buffer.get_local(buf, "minor-modes")
+
+    # C-c s is navigation once Writing Mode has established the workspace.
+    press(["C-c", "s"])
+    assert Editor.current_buffer() == scratch
+    assert length(Editor.list_windows()) == 2
 
     press(["C-c", "s"])
     assert Editor.current_buffer() == buf
     assert length(Editor.list_windows()) == 2
-
-    # Already shown: focus the existing scratch window, do not split again.
-    press(["C-c", "s"])
-    assert Editor.current_buffer() == scratch
-    assert length(Editor.list_windows()) == 2
   end
 
-  test "writing configuration stays on the writing document" do
+  test "writing LLM configuration lands on the scratch only" do
     buf = fresh_buffer("wr-config-#{System.unique_integer([:positive])}.md", "Draft.\n")
+    scratch = "*scratch:#{buf}*"
     on_exit(fn -> eval!(~s{(customize-set! 'writing-model "")}) end)
 
     eval!(~s{(customize-set! 'writing-model "openai:test-writer")})
     eval!(~s{(run-command "writing-mode")})
     assert Buffer.get_local(buf, "writing-model") == "openai:test-writer"
     assert Buffer.get_local(buf, "writing-instructions") =~ "Preserve their voice"
+    refute "llm-mode" in Buffer.get_local(buf, "minor-modes")
+    assert Buffer.get_local(scratch, "llm-model") == "openai:test-writer"
+    assert Buffer.get_local(scratch, "writing-instructions") =~ "Preserve their voice"
+    assert Buffer.get_local(scratch, "minor-modes") == ["llm-mode"]
   end
 
   test "writing presets are always applied and existing presets are restored" do
     buf = fresh_buffer("wr-presets-#{System.unique_integer([:positive])}.md", "Draft.\n")
+    scratch = "*scratch:#{buf}*"
 
     on_exit(fn -> eval!("(set! writing-presets '())") end)
 
@@ -246,12 +257,17 @@ defmodule Aimax.WritingTest do
     eval!("(set! writing-presets '(aimax web))")
     eval!(~s{(run-command "writing-mode")})
 
-    assert Buffer.get_local(buf, "chat-presets") == [sym: "aimax", sym: "web", sym: "project"]
+    assert Buffer.get_local(scratch, "chat-presets") == [sym: "aimax", sym: "web", sym: "project"]
 
     # A live customization is rebuilt from the original document value, so a
     # preset removed from the writing setting does not linger.
     eval!("(customize-set! 'writing-presets '(research))")
-    assert Buffer.get_local(buf, "chat-presets") == [sym: "research", sym: "project", sym: "aimax"]
+
+    assert Buffer.get_local(scratch, "chat-presets") == [
+             sym: "aimax",
+             sym: "research",
+             sym: "project"
+           ]
 
     eval!(~s{(run-command "writing-mode")})
     assert Buffer.get_local(buf, "chat-presets") == [sym: "project", sym: "aimax"]

@@ -102,6 +102,18 @@ defmodule Aimax.Core do
         # windows must never point at the dead: a later interaction with
         # a killed buffer crashes the Editor (taking the keymap with it)
         if Process.whereis(Aimax.Core.Editor), do: Aimax.Core.Editor.release_buffer(name)
+
+        # llm-mode sessions intentionally outlive turns, but never their
+        # owning buffer. Close through LLMSession so its callback closures
+        # leave ETS together with the runtime.
+        case Buffer.get_local(name, "llm-session-id") do
+          id when is_binary(id) ->
+            if Aimax.Core.LLMSession.running?(id), do: Aimax.Core.LLMSession.close(id)
+
+          _ ->
+            :ok
+        end
+
         :ok = Buffer.discard(name)
         result = DynamicSupervisor.terminate_child(@buffer_sup, pid)
         BufferStore.forget(name)

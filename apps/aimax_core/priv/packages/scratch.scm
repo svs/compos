@@ -84,6 +84,22 @@
         (select-window! shown)
         (select-window! (display-buffer-other-window! buffer)))))
 
+;; Establish the ordinary two-buffer workspace without taking focus from the
+;; owner. Modes call this when the scratch is part of their initial layout;
+;; the interactive toggle selects the returned buffer afterwards.
+(define (scratch-open-beside! owner)
+  (let* ((scratch (scratch--for owner))
+         (back (active-window)))
+    (scratch--prepare! owner scratch)
+    (let ((target (display-buffer-other-window! scratch)))
+      ;; set-mode! is current-buffer based, so initialize a new scratch in its
+      ;; own window and immediately return to the document.
+      (unless (buffer-local scratch 'mode-name)
+        (select-window! target)
+        (set-mode! "text-mode")
+        (select-window! back)))
+    scratch))
+
 (define-command "scratch-buffer"
   "Toggle between this buffer and its plain scratch buffer"
   (lambda ()
@@ -93,10 +109,8 @@
           (if (buffer-exists? owner)
               (scratch--focus! owner)
               (message "This scratch buffer's owner no longer exists"))
-          (let ((scratch (scratch--for here)))
-            (scratch--prepare! here scratch)
+          (let ((scratch (scratch-open-beside! here)))
             (scratch--focus! scratch)
-            (unless (buffer-local scratch 'mode-name) (set-mode! "text-mode"))
             (end-of-buffer!))))))
 
 (global-set-key "C-c s" "scratch-buffer")

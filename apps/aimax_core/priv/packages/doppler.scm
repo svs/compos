@@ -16,6 +16,14 @@
 (defcustom 'doppler-program "doppler"
   "The doppler executable." 'group 'doppler)
 
+;; The key chain's Doppler source: which project/config the chain reads.
+;; keys.scm asks for a key by name and never knows Doppler is behind it.
+(defcustom 'key-doppler-project "personal"
+  "The Doppler project the key chain reads." 'group 'doppler)
+
+(defcustom 'key-doppler-config "dev"
+  "The Doppler config the key chain reads." 'group 'doppler)
+
 ;;; --- CLI plumbing -------------------------------------------------------------
 
 (define (dp--quote s)
@@ -82,6 +90,10 @@
     (if (or (equal? out "") (string-contains? out "Doppler Error"))
         #f
         out)))
+
+;; the one hook keys.scm calls: (doppler-key-value VAR) -> value | #f
+(define (doppler-key-value var)
+  (doppler-secret-value key-doppler-project key-doppler-config var))
 
 ;; the same lookup for the model — separate from doppler-secret-names on
 ;; purpose, so a value only appears in the transcript when someone asks

@@ -1,18 +1,20 @@
 defmodule Aimax.IbufferStaleTest do
   @moduledoc """
-  A list acts on the rows that exist, and point rests on a row.
+  A list acts on the rows it shows, and point rests on a row.
 
-  Two ways `k` said "killed 0 buffers" and RET said "no buffer here":
-  point sat in the chrome (a click lands on the key bar, and a click runs
-  no command), and a row named a buffer that C-x k killed from somewhere
-  else.
+  Three ways `k` said "killed 0 buffers" and RET said "no buffer here":
+  the row named a DORMANT buffer (a checkpoint and no process, which the
+  list shows and `buffer-exists?` denies), point sat in the chrome (a
+  click lands on the key bar, and a click runs no command), and a row
+  named a buffer that C-x k killed from somewhere else.
   """
 
   use ExUnit.Case
 
-  alias Aimax.Core.{Buffer, Editor, KeyDispatch, Session}
+  alias Aimax.Core.{Buffer, BufferStore, Editor, KeyDispatch, Session}
 
   defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+  defp type(str), do: str |> String.graphemes() |> press()
 
   defp eval!(code) do
     {:ok, out} = Session.eval(code)
@@ -47,6 +49,33 @@ defmodule Aimax.IbufferStaleTest do
     :ok
   end
 
+  test "ibuffer opens wide: the typed narrowing does not outlive the list" do
+    open_ibuffer()
+    assert eval!(~s{(list-query "*ibuffer*")}) == ~s{"zz-s"}
+
+    # the narrowing says itself while it holds: the count and the way out
+    text = Buffer.text("*ibuffer*")
+    assert text =~ "of ", "the header does not count what the narrowing hid"
+    assert text =~ "narrowed to /zz-s"
+    assert text =~ "\\ widens"
+
+    press(["q"])
+    {:ok, _} = Session.eval(~s{(run-command "ibuffer")})
+
+    assert eval!(~s{(list-query "*ibuffer*")}) == ~s{""}
+    refute Buffer.text("*ibuffer*") =~ "narrowed to"
+  end
+
+  test "a mode's own filter kind survives the open a typed query does not" do
+    open_ibuffer()
+    {:ok, _} = Session.eval(~s{(ibuffer-filter-push! (list "dot" "on"))})
+
+    {:ok, _} = Session.eval(~s{(run-command "ibuffer")})
+
+    assert eval!(~s{(list-query "*ibuffer*")}) == ~s{""}
+    assert eval!(~s{(list-filters "*ibuffer*")}) == ~s{(("dot" "on"))}
+  end
+
   test "a verb acts on the nearest row when point sits in the chrome" do
     open_ibuffer()
 
@@ -66,6 +95,80 @@ defmodule Aimax.IbufferStaleTest do
     i = eval!(~s{(list-index "*ibuffer*")})
     assert i != "#f"
     assert String.to_integer(i) < after_kill
+  end
+
+  # the editor puts an idle buffer to sleep: the checkpoint stays, the
+  # process goes. The list still names it, so every verb must act on it.
+  defp evict(name) do
+    :ok = Buffer.checkpoint_now(name)
+    [{pid, _}] = Registry.lookup(Aimax.Core.BufferRegistry, name)
+    :ok = DynamicSupervisor.terminate_child(Aimax.Core.BufferSupervisor, pid)
+    # the registry clears after the process goes
+    assert eventually(fn -> not Buffer.exists?(name) end)
+    assert BufferStore.known?(name)
+  end
+
+  defp eventually(fun, tries \\ 100) do
+    cond do
+      fun.() -> true
+      tries == 0 -> false
+      true -> Process.sleep(10) && eventually(fun, tries - 1)
+    end
+  end
+
+  test "k kills the dormant buffer the row names" do
+    open_ibuffer()
+    evict("*zz-sc*")
+
+    {:ok, _} = Session.eval(~s{(list-goto-index! "*ibuffer*" 0)})
+
+    # walk to the dormant row: it is a row like any other
+    {:ok, rows} = Session.eval(~s{(list-entries "*ibuffer*")})
+    assert rows =~ "zz-sc", "the dormant buffer left the list"
+
+    {:ok, _} =
+      Session.eval(~s{(list-goto-index! "*ibuffer*" (list-index-of "*ibuffer*" (list-entries "*ibuffer*") "*zz-sc*"))})
+
+    assert eval!(~s{(ibuffer-current)}) == ~s{"*zz-sc*"}
+    press(["k"])
+
+    refute BufferStore.known?("*zz-sc*"), "k left the dormant buffer in the store"
+    refute eval!(~s{(list-entries "*ibuffer*")}) =~ "zz-sc"
+    assert Buffer.text("*messages*") =~ "killed 1 buffer"
+  end
+
+  test "RET wakes the dormant buffer the row names" do
+    open_ibuffer()
+    evict("*zz-sb*")
+
+    {:ok, _} =
+      Session.eval(~s{(list-goto-index! "*ibuffer*" (list-index-of "*ibuffer*" (list-entries "*ibuffer*") "*zz-sb*"))})
+
+    assert eval!(~s{(ibuffer-current)}) == ~s{"*zz-sb*"}
+    press(["RET"])
+
+    assert Buffer.exists?("*zz-sb*"), "RET did not wake the dormant buffer"
+    assert Editor.current_buffer() == "*zz-sb*"
+    refute Buffer.text("*messages*") =~ "no buffer here"
+  end
+
+  # C-x b offers buffer-list-mru, and most of that list is dormant. The
+  # confirm branch asked buffer-exists?, so RET on a dormant candidate
+  # fell through to "nothing matches" and founded a group named after the
+  # file you asked for.
+  test "C-x b RET wakes the dormant buffer it offers, and founds no group" do
+    open_ibuffer()
+    press(["q"])
+    evict("*zz-sb*")
+
+    press(["C-x", "b"])
+    type("zz-sb")
+    press(["RET"])
+
+    assert Buffer.exists?("*zz-sb*"), "C-x b did not wake the dormant buffer"
+    assert Editor.current_buffer() == "*zz-sb*"
+    refute Buffer.text("*messages*") =~ "founded group"
+    assert eval!(~s{(buffer-group "*zz-sb*")}) == "#f"
   end
 
   test "a row for a buffer killed elsewhere leaves the list on the next command" do

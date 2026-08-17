@@ -313,6 +313,15 @@ defmodule Aimax.LLMToolsTest do
       assert LLM.req_model_spec("deepseek:deepseek-chat") == "deepseek:deepseek-chat"
     end
 
+    test "an unregistered provider fails with a clear no-key error" do
+      Session.eval(~s{(set! *llm-keys* '())})
+      on_exit(fn -> Session.eval(~s{(set! *llm-keys* '())}) end)
+
+      # no explicit registration -> error, not a silent env fallback
+      assert {:error, msg} = LLM.request("hi")
+      assert msg =~ "no api key provided"
+    end
+
     test "deepseek routes to api.deepseek.com with its own key, not openrouter's" do
       me = self()
 
@@ -343,16 +352,12 @@ defmodule Aimax.LLMToolsTest do
         ]
       )
 
-      prev = System.get_env("DEEPSEEK_API_KEY")
-      System.put_env("DEEPSEEK_API_KEY", "sk-deepseek")
-      Session.eval(~s{(key-forget! "DEEPSEEK_API_KEY")})
+      # explicit: use this key for this provider (no env-name convention)
+      Session.eval(~s{(register-llm-key! 'deepseek "sk-deepseek")})
 
       on_exit(fn ->
         Application.delete_env(:aimax_core, :llm_req_opts)
-
-        if prev,
-          do: System.put_env("DEEPSEEK_API_KEY", prev),
-          else: System.delete_env("DEEPSEEK_API_KEY")
+        Session.eval(~s{(set! *llm-keys* '())})
       end)
 
       LLM.complete("hi", "deepseek:deepseek-chat", fn text -> send(me, {:reply, text}) end)
@@ -364,19 +369,14 @@ defmodule Aimax.LLMToolsTest do
       assert_receive {:reply, "hi from deepseek"}, 3_000
     end
 
-    test "a key in the file chain makes the provider's models appear in the picker" do
-      home = Aimax.Core.home()
-      File.write!(Path.join(home, "deepseek-key"), "sk-from-file\n")
-      Session.eval(~s{(key-forget! "DEEPSEEK_API_KEY")})
+    test "an explicitly registered key makes the provider's models appear in the picker" do
+      Session.eval(~s{(register-llm-key! 'deepseek "sk-explicit")})
 
       on_exit(fn ->
-        File.rm(Path.join(home, "deepseek-key"))
-        Session.eval(~s{(key-forget! "DEEPSEEK_API_KEY")})
+        Session.eval(~s{(set! *llm-keys* '())})
         Application.delete_env(:req_llm, :deepseek_api_key)
       end)
 
-      # ReqLLM's inventory is env-gated; the key lives in the FILE chain, so
-      # the picker would miss it unless the chain seeds ReqLLM's credentials.
       models = eval!(~s{(llm-available-models)})
       assert models =~ "deepseek:deepseek-v4-pro"
       assert models =~ "deepseek:deepseek-v4-flash"

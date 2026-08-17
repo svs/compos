@@ -32,9 +32,9 @@ defmodule Aimax.Core.LLM do
   def request(prompt), do: run_request(prompt, model())
 
   @doc "Run FUN with a process-local provider key, without requiring a Scheme session."
-  def with_provider_key(var, key, fun)
-      when is_binary(var) and is_binary(key) and is_function(fun, 0) do
-    slot = {__MODULE__, :provider_key, var}
+  def with_provider_key(provider, key, fun)
+      when is_binary(provider) and is_binary(key) and is_function(fun, 0) do
+    slot = {__MODULE__, :provider_key, provider}
     previous = Process.get(slot)
     Process.put(slot, key)
 
@@ -303,47 +303,49 @@ defmodule Aimax.Core.LLM do
     model = req[:model] || model()
     spec = req_model_spec(model)
 
-    ctx = to_req_context(messages, system)
-    opts = key_opts(spec) ++ req_opts(spec, tools)
+    with {:ok, key_opts_list} <- key_opts(spec) do
+      ctx = to_req_context(messages, system)
+      opts = key_opts_list ++ req_opts(spec, tools)
 
-    opts =
-      if req[:reasoning_effort],
-        do: Keyword.put(opts, :reasoning_effort, req.reasoning_effort),
-        else: opts
+      opts =
+        if req[:reasoning_effort],
+          do: Keyword.put(opts, :reasoning_effort, req.reasoning_effort),
+          else: opts
 
-    if req[:on_chunk] do
-      # only the call that STARTS the stream retries: once a delta has
-      # reached the renderer, a second attempt would print the reply twice
-      case with_retry(fn -> ReqLLM.stream_text(spec, ctx, opts) end) do
-        {:ok, sr} ->
-          tee =
-            Stream.map(sr.stream, fn chunk ->
-              case chunk.type do
-                :content ->
-                  if chunk.text not in [nil, ""], do: req.on_chunk.(chunk.text)
+      if req[:on_chunk] do
+        # only the call that STARTS the stream retries: once a delta has
+        # reached the renderer, a second attempt would print the reply twice
+        case with_retry(fn -> ReqLLM.stream_text(spec, ctx, opts) end) do
+          {:ok, sr} ->
+            tee =
+              Stream.map(sr.stream, fn chunk ->
+                case chunk.type do
+                  :content ->
+                    if chunk.text not in [nil, ""], do: req.on_chunk.(chunk.text)
 
-                :thinking ->
-                  if req[:on_thinking] && chunk.text, do: req.on_thinking.(chunk.text)
+                  :thinking ->
+                    if req[:on_thinking] && chunk.text, do: req.on_thinking.(chunk.text)
 
-                _ ->
-                  :ok
-              end
+                  _ ->
+                    :ok
+                end
 
-              chunk
-            end)
+                chunk
+              end)
 
-          case ReqLLM.StreamResponse.to_response(%{sr | stream: tee}) do
-            {:ok, resp} -> {:ok, Map.put(from_req_response(resp, spec), "streamed", true)}
-            {:error, e} -> {:error, err_msg(e)}
-          end
+            case ReqLLM.StreamResponse.to_response(%{sr | stream: tee}) do
+              {:ok, resp} -> {:ok, Map.put(from_req_response(resp, spec), "streamed", true)}
+              {:error, e} -> {:error, err_msg(e)}
+            end
 
-        {:error, e} ->
-          {:error, err_msg(e)}
-      end
-    else
-      case with_retry(fn -> ReqLLM.generate_text(spec, ctx, opts) end) do
-        {:ok, resp} -> {:ok, from_req_response(resp, spec)}
-        {:error, e} -> {:error, err_msg(e)}
+          {:error, e} ->
+            {:error, err_msg(e)}
+        end
+      else
+        case with_retry(fn -> ReqLLM.generate_text(spec, ctx, opts) end) do
+          {:ok, resp} -> {:ok, from_req_response(resp, spec)}
+          {:error, e} -> {:error, err_msg(e)}
+        end
       end
     end
   end
@@ -402,34 +404,26 @@ defmodule Aimax.Core.LLM do
 
   defp provider_of(spec), do: spec |> String.split(":", parts: 2) |> hd()
 
-  # Resolve a provider's key from the Scheme chain and hand it to req_llm as
-  # a per-request :api_key option. The key NAME is the convention
-  # UP(PROVIDER)_API_KEY — the same convention req_llm itself reads from the
-  # environment, so the two agree. No provider table lives in Elixir: a new
-  # provider needs only its key in the chain (env / ~/.aimax/<name>-key /
-  # Doppler) and its model in the Scheme menu.
+  # Hand the resolved key VALUE to req_llm as a per-request :api_key option.
+  # Elixir asks Scheme for the value BY PROVIDER ((llm-key "deepseek")); the
+  # provider -> key association is explicit Scheme config, so there is no
+  # provider -> secret-name convention anywhere in Elixir. A process-dict
+  # override (the catalog backfill task's with_provider_key) still wins,
+  # keyed by provider — and because it short-circuits, that task needs no
+  # running Session. No key anywhere is an error, not a silent env fallback.
   defp key_opts(spec) do
-    var = String.upcase(provider_of(spec)) <> "_API_KEY"
+    provider = provider_of(spec)
 
-    case key_for(var) do
-      k when is_binary(k) and k != "" -> [api_key: k]
-      _ -> []
-    end
-  end
-
-  # Where a key comes from is policy, so Scheme answers (packages/keys.scm).
-  # key_opts/1 runs in the request Task or in an agent backend, never in
-  # the session process — a call from the session would deadlock.
-  defp key_for(var) do
-    case Process.get({__MODULE__, :provider_key, var}) do
-      k when is_binary(k) and k != "" ->
-        k
-
-      _ ->
-        case Session.call_named("key-get", [var]) do
+    key =
+      Process.get({__MODULE__, :provider_key, provider}) ||
+        case Session.call_named("llm-key", [provider]) do
           {:ok, k} when is_binary(k) and k != "" -> k
           _ -> nil
         end
+
+    case key do
+      k when is_binary(k) and k != "" -> {:ok, [api_key: k]}
+      _ -> {:error, "no api key provided for #{provider}"}
     end
   end
 
@@ -643,19 +637,22 @@ defmodule Aimax.Core.LLM do
   # the plain one-shot completion (the (llm ...) primitive)
   defp default_request(prompt, requested_model) do
     spec = req_model_spec(requested_model)
-    opts = key_opts(spec) ++ req_opts(spec, [])
 
-    case with_retry(fn -> ReqLLM.generate_text(spec, prompt, opts) end) do
-      {:ok, resp} ->
-        Aimax.Core.LLMDb.record(
-          requested_model,
-          usage_strings(ReqLLM.Response.usage(resp), spec)
-        )
+    with {:ok, key_opts_list} <- key_opts(spec) do
+      opts = key_opts_list ++ req_opts(spec, [])
 
-        {:ok, ReqLLM.Response.text(resp) || ""}
+      case with_retry(fn -> ReqLLM.generate_text(spec, prompt, opts) end) do
+        {:ok, resp} ->
+          Aimax.Core.LLMDb.record(
+            requested_model,
+            usage_strings(ReqLLM.Response.usage(resp), spec)
+          )
 
-      {:error, e} ->
-        {:error, err_msg(e)}
+          {:ok, ReqLLM.Response.text(resp) || ""}
+
+        {:error, e} ->
+          {:error, err_msg(e)}
+      end
     end
   end
 end

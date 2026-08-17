@@ -171,6 +171,9 @@ defmodule Aimax.AgentTest do
       "result" => %{"thread" => %{"id" => "thread-1"}, "model" => "gpt-5.5"}
     })
 
+    assert_receive {:backend_event, thread_event}, 1_000
+    assert Backend.event_type(thread_event) == "thread-id"
+    assert Backend.plist_get(thread_event, "id") == "thread-1"
     assert_receive {:backend_event, _second_model_event}, 1_000
 
     assert_receive {:frame, %{"method" => "turn/start", "id" => turn_request, "params" => turn}},
@@ -226,6 +229,57 @@ defmodule Aimax.AgentTest do
     assert_receive {:frame, %{"method" => "turn/start", "params" => second_turn}}, 1_000
     assert second_turn["input"] == [%{"type" => "text", "text" => "second"}]
     assert second_turn["effort"] == "high"
+  end
+
+  test "native Codex resumes a persisted llm-mode thread" do
+    {:ok, backend} =
+      Aimax.Core.Agent.Backend.CodexAppServer.start(
+        %{
+          "cmd" => "fake",
+          "cwd" => File.cwd!(),
+          "model" => "gpt-5.6-terra",
+          "thread-id" => "thread-saved",
+          "persist-thread" => true
+        },
+        self()
+      )
+
+    on_exit(fn -> Aimax.Core.Agent.Backend.CodexAppServer.close(backend) end)
+
+    assert_receive {:transport_open, ^backend}, 1_000
+    assert_receive {:transport_cmd, "fake"}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => init_id}}, 1_000
+    inject(backend, %{"id" => init_id, "result" => %{}})
+    assert_receive {:frame, %{"method" => "initialized"}}, 1_000
+    assert_receive {:frame, %{"method" => "model/list"}}, 1_000
+    assert_receive {:backend_event, ready}, 1_000
+    assert Backend.event_type(ready) == "ready"
+
+    assert :ok =
+             Aimax.Core.Agent.Backend.CodexAppServer.prompt(backend, "next turn", %{
+               system: "Live editor context"
+             })
+
+    assert_receive {:frame,
+                    %{"method" => "thread/resume", "id" => resume_id, "params" => params}},
+                   1_000
+
+    assert params["threadId"] == "thread-saved"
+    assert params["model"] == "gpt-5.6-terra"
+    assert params["developerInstructions"] =~ "Live editor context"
+    refute Map.has_key?(params, "ephemeral")
+
+    inject(backend, %{
+      "id" => resume_id,
+      "result" => %{"thread" => %{"id" => "thread-saved"}, "model" => "gpt-5.6-terra"}
+    })
+
+    assert_receive {:backend_event, thread_event}, 1_000
+    assert Backend.event_type(thread_event) == "thread-id"
+    assert_receive {:backend_event, _model_event}, 1_000
+    assert_receive {:frame, %{"method" => "turn/start", "params" => turn}}, 1_000
+    assert turn["threadId"] == "thread-saved"
+    assert turn["input"] == [%{"type" => "text", "text" => "next turn"}]
   end
 
   # boot a thread through (execute ...) and complete the ACP handshake.

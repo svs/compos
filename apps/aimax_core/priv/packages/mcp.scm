@@ -167,6 +167,12 @@
           (when (and (boundp (quote chat-adopt-live-tools!))
                      (buffer-local buf 'chat-tool-specs))
             (chat-adopt-live-tools! buf))
+          ;; A stateful llm-mode runtime mounted its MCP servers when the
+          ;; native thread attached. Drop only the process; the next M-o
+          ;; resumes the same Codex thread with the changed preset surface.
+          (when (and (minor-mode-on? buf "llm-mode")
+                     (boundp (quote llm-mode-reset-runtime!)))
+            (llm-mode-reset-runtime! buf #t))
           (message (string-append what " for " buf))))))
 
 ;; kill + attach the same connector/model: a fresh session with the new

@@ -77,9 +77,18 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
 
   @impl GenServer
   def handle_call({:prompt, text, context}, _from, %{thread_id: nil} = state) do
+    {method, params} =
+      case string_value(Map.get(state.config, "thread-id") || Map.get(state.config, "thread_id")) do
+        nil ->
+          {"thread/start", thread_start_params(state.config, state.model, context)}
+
+        thread_id ->
+          {"thread/resume", thread_resume_params(state.config, state.model, context, thread_id)}
+      end
+
     state =
       state
-      |> request("thread/start", thread_start_params(state.config, state.model, context))
+      |> request(method, params)
       |> Map.put(:pending_prompt, {text, context})
 
     {:reply, :ok, state}
@@ -218,9 +227,14 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
         models = Enum.reject(models, &Map.get(&1, "hidden", false))
         %{state | models: models} |> emit_model_state()
 
-      {"thread/start", %{"result" => %{"thread" => %{"id" => tid}} = result}} ->
+      {method, %{"result" => %{"thread" => %{"id" => tid}} = result}}
+      when method in ["thread/start", "thread/resume"] ->
         model = string_value(Map.get(result, "model")) || state.model
-        state = %{state | thread_id: tid, model: model} |> emit_model_state()
+
+        state =
+          %{state | thread_id: tid, model: model}
+          |> emit(type: :"thread-id", id: tid)
+          |> emit_model_state()
 
         case state.pending_prompt do
           {text, _context} -> state |> Map.put(:pending_prompt, nil) |> start_turn(text)
@@ -320,10 +334,21 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
   defp thread_start_params(config, model, context) do
     %{
       "cwd" => Map.get(config, "cwd", File.cwd!()),
-      # Aimax owns persistence and transcript recovery. The native thread is
-      # stateful for its process lifetime but should not create a second,
-      # hidden copy in Codex's own history.
-      "ephemeral" => true
+      # Chats still own their transcript and use an ephemeral Codex thread.
+      # llm-mode opts into a native persisted thread so its ordinary buffer
+      # can resume the same conversation after an editor restart.
+      "ephemeral" => not truthy?(Map.get(config, "persist-thread"))
+    }
+    |> put_if("model", model)
+    |> put_if("approvalPolicy", approval_policy(Map.get(config, "permission-mode")))
+    |> put_if("developerInstructions", developer_instructions(config, model, context))
+    |> put_if("config", codex_config(config))
+  end
+
+  defp thread_resume_params(config, model, context, thread_id) do
+    %{
+      "threadId" => thread_id,
+      "cwd" => Map.get(config, "cwd", File.cwd!())
     }
     |> put_if("model", model)
     |> put_if("approvalPolicy", approval_policy(Map.get(config, "permission-mode")))
@@ -413,6 +438,8 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
     result = Map.new(pairs, fn [key, value] -> {to_string(key), to_string(value)} end)
     if map_size(result) == 0, do: nil, else: result
   end
+
+  defp truthy?(value), do: value in [true, "true", true, {:sym, "true"}]
 
   defp emit_model_state(state) do
     available =

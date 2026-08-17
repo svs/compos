@@ -137,6 +137,20 @@ defmodule Aimax.ProjectSearchTest do
       File.rm_rf!(other)
     end
 
+    test "a file outside the project stays out of project-buffers", %{root: root} do
+      other = Path.join(System.tmp_dir!(), "ps-out-#{System.unique_integer([:positive])}.txt")
+      File.write!(other, "x")
+      eval!(~s{(visit "#{other}")})
+      eval!(~s{(visit "#{root}/lib/a.txt")})
+
+      bufs = eval!(~s{(project-buffers "#{root}")})
+      assert bufs =~ "#{root}/lib/a.txt"
+      refute bufs =~ other
+
+      Aimax.Core.kill_buffer(other)
+      File.rm_rf!(other)
+    end
+
     test "\".\" opens the root in dired", %{root: root} do
       eval!(~s{(project-find-file-in "#{root}")})
       mb = Editor.render_state().minibuffer
@@ -146,6 +160,118 @@ defmodule Aimax.ProjectSearchTest do
       press("RET")
       assert eval!("(current-buffer)") == ~s{"#{root}"}
       assert eval!(~s{(buffer-local (current-buffer) 'mode-name)}) == ~s{"Dired"}
+    end
+  end
+
+  describe "project-kill-all" do
+    test "the prompt counts the buffers and y kills them", %{root: root} do
+      eval!(~s{(visit "#{root}/lib/a.txt")})
+      eval!(~s{(visit "#{root}/lib/b.txt")})
+      eval!(~s{(dired-open "#{root}")})
+      eval!(~s{(visit "#{root}/top.txt")})
+
+      # the dired listing of the root counts too: its directory is the root
+      assert eval!(~s{(project-buffers "#{root}")}) =~ root
+
+      eval!(~s{(run-command "project-kill-all")})
+      mb = Editor.render_state().minibuffer
+      assert mb.prompt == "Kill 4 buffers in #{Path.basename(root)}? (y or n) "
+      # a question offers no candidates
+      assert mb.candidates == []
+
+      press("y")
+      refute Editor.render_state().minibuffer
+      refute eval!("(buffer-list)") =~ root
+    end
+
+    test "n keeps every buffer", %{root: root} do
+      eval!(~s{(visit "#{root}/lib/a.txt")})
+
+      eval!(~s{(run-command "project-kill-all")})
+      press("n")
+
+      refute Editor.render_state().minibuffer
+      assert eval!("(buffer-list)") =~ "#{root}/lib/a.txt"
+    end
+
+    test "any other key leaves the question standing", %{root: root} do
+      eval!(~s{(visit "#{root}/lib/a.txt")})
+
+      eval!(~s{(run-command "project-kill-all")})
+      press(["x", "q"])
+
+      mb = Editor.render_state().minibuffer
+      assert mb.prompt =~ "(y or n)"
+      assert mb.input == ""
+
+      press("n")
+      assert eval!("(buffer-list)") =~ "#{root}/lib/a.txt"
+    end
+
+    test "a modified file asks to save, and y writes it before the kill", %{root: root} do
+      eval!(~s{(visit "#{root}/lib/a.txt")})
+      eval!(~s{(insert! "dirty ")})
+
+      eval!(~s{(run-command "project-kill-all")})
+      press("y")
+
+      # the kill question is answered; the save question stands
+      assert Editor.render_state().minibuffer.prompt ==
+               "Save #{root}/lib/a.txt? (y or n) "
+
+      press("y")
+      refute Editor.render_state().minibuffer
+      assert File.read!(Path.join(root, "lib/a.txt")) =~ "dirty one"
+      refute eval!("(buffer-list)") =~ "#{root}/lib/a.txt"
+    end
+
+    test "a modified file you do not save stays open", %{root: root} do
+      eval!(~s{(visit "#{root}/lib/b.txt")})
+      eval!(~s{(visit "#{root}/lib/a.txt")})
+      eval!(~s{(insert! "dirty ")})
+
+      eval!(~s{(run-command "project-kill-all")})
+      press(["y", "n"])
+
+      refute Editor.render_state().minibuffer
+      bufs = eval!("(buffer-list)")
+      assert bufs =~ "#{root}/lib/a.txt"
+      refute bufs =~ "#{root}/lib/b.txt"
+      # the file on disk keeps what it had
+      refute File.read!(Path.join(root, "lib/a.txt")) =~ "dirty"
+    end
+
+    test "every modified file gets its own question", %{root: root} do
+      eval!(~s{(visit "#{root}/lib/a.txt")})
+      eval!(~s{(insert! "one ")})
+      eval!(~s{(visit "#{root}/lib/b.txt")})
+      eval!(~s{(insert! "two ")})
+
+      eval!(~s{(run-command "project-kill-all")})
+      press("y")
+      assert Editor.render_state().minibuffer.prompt =~ "Save "
+      press("n")
+      assert Editor.render_state().minibuffer.prompt =~ "Save "
+      press("n")
+
+      refute Editor.render_state().minibuffer
+      bufs = eval!("(buffer-list)")
+      assert bufs =~ "#{root}/lib/a.txt"
+      assert bufs =~ "#{root}/lib/b.txt"
+    end
+
+    test "outside a project the command kills nothing" do
+      eval!(~s{(begin (buffer-create "*zz-ps*") (switch-to-buffer! "*zz-ps*"))})
+      eval!(~s{(buffer-set-local! "*zz-ps*" 'default-directory "#{System.tmp_dir!()}/")})
+
+      eval!(~s{(run-command "project-kill-all")})
+      refute Editor.render_state().minibuffer
+      assert eval!("(buffer-list)") =~ "*zz-ps*"
+    end
+
+    test "the command is registered and C-x p k runs it" do
+      assert eval!(~s{(command-doc "project-kill-all")}) =~ "Kill every buffer"
+      assert eval!(~s{(key-for-command "project-kill-all")}) == ~s{"C-x p k"}
     end
   end
 end

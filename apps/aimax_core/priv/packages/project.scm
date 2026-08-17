@@ -241,12 +241,86 @@
                   (begin (history-push! 'ripgrep pattern)
                          (project-ripgrep-in root pattern)))))))))
 
+;;; --- kill a project ----------------------------------------------------------
+;;; A project is also a set of buffers: every buffer whose directory sits
+;;; inside the root. That includes a file buffer, a dired listing of a
+;;; project directory, and a shell or a chat born there. project-kill-all
+;;; ends the whole context in one act. Unsaved work never dies silently:
+;;; each modified file asks "Save it?" first, and a file you do not save
+;;; stays open. A live process dies with its buffer, as it does in
+;;; group-kill. Every question takes one key.
+
+(define (project-buffer? root b)
+  (equal? root (project-root-cached (strip-trailing-slash (buffer-directory b)))))
+
+;; internals (space-prefixed) are not yours to kill, so they never count
+(define (project-buffers root)
+  (filter (lambda (b) (and (not (string-prefix? " " b)) (project-buffer? root b)))
+          (buffer-list)))
+
+(define (project-dirty-buffers root)
+  (filter (lambda (b) (and (buffer-path b) (buffer-modified? b)))
+          (project-buffers root)))
+
+;; One question per modified file, asked in turn: y saves it, n leaves it
+;; alone and the buffer joins KEPT. The questions are a chain, not a
+;; loop — a prompt answers later, so each answer asks the next one and
+;; the last one calls K with the buffers that stay.
+(define (project--ask-save dirty kept k)
+  (if (null? dirty)
+      (k kept)
+      (let ((b (car dirty)))
+        (y-or-n (string-append "Save " b "?")
+          (lambda ()
+            (save-buffer-named! b)
+            (project--ask-save (cdr dirty) kept k))
+          (lambda ()
+            (project--ask-save (cdr dirty) (cons b kept) k))))))
+
+(define (project--kill! members kept root)
+  (let ((doomed (filter (lambda (b) (not (member b kept))) members)))
+    (for-each (lambda (b)
+                (if (process-running? b) (process-kill! b))
+                (buffer-kill! b))
+              doomed)
+    (message (string-append "Killed " (number->string (length doomed))
+                            " buffers in " (project-name root)
+                            (if (pair? kept)
+                                (string-append " — kept " (number->string (length kept))
+                                               " unsaved")
+                                "")))))
+
+(define (project-kill-buffers! root)
+  (let ((members (project-buffers root)))
+    (project--ask-save (project-dirty-buffers root) '()
+      (lambda (kept) (project--kill! members kept root)))))
+
+(define-command "project-kill-all"
+  "Kill every buffer in the current project, asking about unsaved files"
+  (lambda ()
+    (let ((root (project-current)))
+      (if (not root)
+          (message "Not in a project (no .git above)")
+          (let ((members (project-buffers root)))
+            (if (null? members)
+                (message (string-append "No buffers in " (project-name root)))
+                ;; a kill this wide asks first
+                (y-or-n (string-append "Kill " (number->string (length members))
+                                       " buffers in " (project-name root) "?")
+                  (lambda () (project-kill-buffers! root))
+                  (lambda () (message "Cancelled")))))))))
+
 (global-set-key "C-x p f" "project-find-file")
 (global-set-key "C-x p p" "project-switch-project")
 (global-set-key "C-x p d" "project-dired")
 (global-set-key "C-x p g" "project-ripgrep")
+(global-set-key "C-x p k" "project-kill-all")
 
 (category! 'project)
+(catalog-meta! 'command "project-kill-all" 'domain 'project 'effects '(destroy))
+(public! 'project-buffers
+  "(project-buffers ROOT) -> names of every buffer whose directory is inside ROOT")
+(catalog-meta! 'function "project-buffers" 'domain 'project 'effects '(read))
 (public! 'project-current "Root of the current project, #f when outside one")
 (public! 'project-files "(project-files ROOT) -> project file paths, git-aware")
 (public! 'project-open-files

@@ -1235,6 +1235,26 @@
       (if b (list (list 'complete a)) '())
       (list (list 'style (prompt-style cands #f))))))
 
+;; y-or-n-p: a question that takes ONE key. "y" runs YES, "n" and C-g
+;; run NO, and any other key clears the input, so the question stands
+;; until it gets an answer. A question is not a completion prompt: it
+;; offers no candidates, so it stays on the bottom bar and it never
+;; grows a palette of two words.
+(define (y-or-n prompt yes &optional no)
+  (let* ((no (if no no (lambda () #f)))
+         ;; the prompt closes BEFORE the answer runs: an answer may ask
+         ;; the next question, and two prompts cannot share the bar
+         (answer (lambda (k) (lambda () (minibuffer-detach!) (k)))))
+    (minibuffer-read* (string-append prompt " (y or n) ") '()
+      (list (list 'change
+              (lambda (input)
+                (cond ((string-suffix? "y" input) ((answer yes)))
+                      ((string-suffix? "n" input) ((answer no)))
+                      (else (minibuffer-input! "")))))
+            (list 'confirm (lambda (v) (no)))
+            (list 'cancel no)
+            (list 'style #f)))))
+
 ;; MATCH-HINT also matches what you type against the marginalia beside
 ;; each candidate: #t means the first field, an integer N the first N.
 ;; STYLE picks the presentation; unset, the palette rule decides.
@@ -2248,6 +2268,17 @@
                     (buffer-kill! old)
                     (run-hooks 'after-save-hook)
                     (message (string-append "Wrote " p))))))))))
+
+;; Save a buffer that is not the current one. save-buffer acts on the
+;; current buffer, and it must: the remote, chat and no-file branches all
+;; read it. So the save borrows the window and gives it back. A caller
+;; that saves a whole set — save-some-buffers, project-kill-all — needs
+;; exactly this and nothing more.
+(define (save-buffer-named! b)
+  (let ((here (current-buffer)))
+    (switch-to-buffer! b)
+    (run-command "save-buffer")
+    (when (buffer-exists? here) (switch-to-buffer! here))))
 
 ;; Filename completion — pure Scheme over list-dir/string primitives.
 ;; A completion fn maps input -> (list new-input candidates).
@@ -5751,6 +5782,8 @@
 (public! 'tail-open "(tail-open PATH) — follow a file with tail -F, local or /ssh: remote")
 (public! 'sh-quote "(sh-quote S) — S as one safe single-quoted word for a shell command")
 (public! 'buffer-save! "Save the current buffer to its file")
+(public! 'save-buffer-named! "(save-buffer-named! NAME) — save another buffer; the window goes back where it was")
+(catalog-meta! 'function "save-buffer-named!" 'domain 'files 'effects '(write))
 
 (category! 'editing)
 (public! 'point "Point as a byte offset")
@@ -5791,6 +5824,8 @@
 (category! 'interaction)
 (public! 'message "(message TEXT) — echo area")
 (public! 'minibuffer-read "(minibuffer-read PROMPT CANDIDATES HANDLER) — async; HANDLER gets the choice")
+(public! 'y-or-n "(y-or-n PROMPT YES &optional NO) — a one-key question; y runs YES, n and C-g run NO")
+(catalog-meta! 'function "y-or-n" 'domain 'interaction 'effects '(read))
 (public! 'read-file-name "(read-file-name PROMPT K) — prompt with filename completion from default-directory; K gets the typed path")
 (public! 'minibuffer-read-preview "(minibuffer-read-preview PROMPT CANDIDATES ON-SELECT ON-CONFIRM ON-CANCEL &optional MATCH-HINT) — consult-style: ON-SELECT fires with the highlighted candidate as selection moves; MATCH-HINT also matches the input against the marginalia")
 (public! 'window-preview-buffer! "(window-preview-buffer! NAME) — show NAME in the active window without touching the MRU ring")

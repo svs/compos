@@ -2,8 +2,8 @@ defmodule Aimax.ProjectSearchTest do
   @moduledoc """
   project-ripgrep: one rg run, the matches are candidates, the highlighted
   one previews in the invoking window and RET jumps to it.
-  project-find-file: the root comes first, then the project's open buffers,
-  then the git file list, and the directory you type into lists itself.
+  project-find-file: the root comes first, then directories and files. The
+  directory you enter lists itself and its children.
   """
 
   use ExUnit.Case
@@ -123,10 +123,11 @@ defmodule Aimax.ProjectSearchTest do
   end
 
   describe "project-find-file candidates" do
-    test "the root comes first, then open buffers, then the rest", %{root: root} do
+    test "the root comes first, then directories, open files, and the rest", %{root: root} do
       eval!(~s{(visit "#{root}/lib/b.txt")})
 
       cands = eval!(~s{(project-file-candidates "#{root}")})
+      assert cands =~ ~s{("lib/" "dired")}
       assert cands =~ ~s{("lib/b.txt" "open")}
       assert cands =~ ~s{("lib/a.txt" "")}
 
@@ -134,6 +135,7 @@ defmodule Aimax.ProjectSearchTest do
       assert String.starts_with?(cands, ~s{(("./" "dired")})
 
       idx = fn text -> :binary.match(cands, text) |> elem(0) end
+      assert idx.(~s{("lib/" "dired")}) < idx.(~s{("lib/b.txt" "open")})
       assert idx.(~s{("lib/b.txt" "open")}) < idx.(~s{("lib/a.txt" "")})
 
       # an open file is listed once — as the open one
@@ -172,10 +174,18 @@ defmodule Aimax.ProjectSearchTest do
       eval!(~s{(project-find-file-in "#{root}")})
       assert Editor.render_state().minibuffer
 
-      press(["l", "i", "b", "/"])
-      state = eval!("(minibuffer-state)")
-      assert state =~ ~s{(label "lib/" hint "dired")}
-      assert state =~ ~s{"lib/a.txt"}
+      press(["l", "i", "b"])
+
+      assert [
+               %{label: "lib/", selected: true},
+               %{label: "lib/a.txt"},
+               %{label: "lib/b.txt"}
+             ] = Editor.render_state().minibuffer.candidates
+
+      press(["TAB"])
+      mb = Editor.render_state().minibuffer
+      assert mb.input == "lib/"
+      assert Enum.map(mb.candidates, & &1.label) == ["lib/", "lib/a.txt", "lib/b.txt"]
 
       press(["C-g"])
     end
@@ -228,9 +238,10 @@ defmodule Aimax.ProjectSearchTest do
     test "a saved project root with a trailing slash opens inside that project", %{root: root} do
       eval!(~s{(project-find-file-in "#{root}/")})
 
-      # "./" starts selected. Move to lib/a.txt and accept it. The old path
-      # join produced ROOT//lib/a.txt, whose double slash means /lib/a.txt.
-      press(["C-n", "RET"])
+      # The old path join produced ROOT//lib/a.txt. Its double slash means
+      # /lib/a.txt, so type a specific file to test the canonical root.
+      press(String.graphemes("lib/a.txt"))
+      press(["RET"])
 
       assert eval!("(current-buffer)") == ~s{"#{root}/lib/a.txt"}
     end

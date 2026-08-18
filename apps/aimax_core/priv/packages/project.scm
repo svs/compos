@@ -161,11 +161,10 @@
 
 ;;; --- commands ----------------------------------------------------------------
 
-;; The prompt after "which project" is "which file", and the answer is
-;; usually a file you already have open. So the candidates lead with this
-;; project's open buffers, MRU first, then "." for the root in dired, then
-;; every other file git knows. A buffer outside git's list (an ignored
-;; file, a new file) still shows: it is open, so it is a real answer.
+;; The prompt after "which project" is "which file". It also offers every
+;; parent directory from the project file list. Directories lead the files,
+;; so a partial path can select and enter a directory. A buffer outside git's
+;; list still shows because an open buffer is a real answer.
 (define (project--relative root path)
   (let ((prefix (string-append root "/")))
     (and (string-prefix? prefix path)
@@ -177,13 +176,30 @@
                  (let ((p (buffer-path b))) (and p (project--relative root p))))
                (buffer-list-mru))))
 
-;; The directory leads: RET on a prompt you did not type into opens the
-;; project root in dired, the way C-x d does. Then the buffers you have
-;; open, then every other file git knows.
+;; Return each parent directory in a file path. The trailing slash lets TAB
+;; enter the directory and lets RET open it in dired.
+(define (project--file-directories file)
+  (let loop ((parts (string-split file "/")) (prefix "") (out '()))
+    (if (or (null? parts) (null? (cdr parts)))
+        (reverse out)
+        (let ((dir (string-append prefix (car parts) "/")))
+          (loop (cdr parts) dir (cons dir out))))))
+
+(define (project--directories files)
+  (let loop ((files files) (out '()))
+    (if (null? files)
+        (sort (dedupe-names out))
+        (loop (cdr files) (append (project--file-directories (car files)) out)))))
+
+;; The root leads, then every directory, then open files in MRU order, then
+;; every other file. RET on an untouched prompt opens the project root.
 (define (project-file-candidates root)
   (let* ((open (project-open-files root))
-         (rest (filter (lambda (f) (not (member f open))) (project-files root))))
+         (files (project-files root))
+         (dirs (project--directories (append open files)))
+         (rest (filter (lambda (f) (not (member f open))) files)))
     (append (list (list "./" "dired"))
+            (map (lambda (d) (list d "dired")) dirs)
             (map (lambda (f) (list f "open")) open)
             (map (lambda (f) (list f "")) rest))))
 
@@ -205,7 +221,10 @@
       (let ((disk (project--disk-entries root dir)))
         (append (list (list dir "dired"))
                 disk
-                (filter (lambda (c) (not (assoc (car c) disk))) base)))))
+                (filter (lambda (c)
+                          (and (not (equal? (car c) dir))
+                               (not (assoc (car c) disk))))
+                        base)))))
 
 ;; Re-list only when the DIRECTORY part changes. A keystroke inside one
 ;; directory is the display filter's work, and re-listing a big directory

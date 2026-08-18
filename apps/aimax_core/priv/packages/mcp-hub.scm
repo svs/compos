@@ -269,6 +269,8 @@
     (local-set-key* buf "q" "quit-window")
     (when name (mcp-hub-render-detail! buf name))))
 
+(mode-icon! "mcp-detail-mode" "🔌")
+
 (define-mode "mcp-detail-mode" (lambda () (mcp-hub-detail-setup! (current-buffer))))
 
 (mode-doc! "mcp-detail-mode"
@@ -325,6 +327,8 @@
     (local-set-key* buf "q" "quit-window")
     (when name (mcp-hub-render-log! buf name))))
 
+(mode-icon! "mcp-log-mode" "📜")
+
 (define-mode "mcp-log-mode" (lambda () (mcp-hub-log-setup! (current-buffer))))
 
 (mode-doc! "mcp-log-mode"
@@ -353,6 +357,8 @@
       (when name (mcp-hub-show-log name)))))
 
 ;;; --- the hub -------------------------------------------------------------------
+
+(mode-icon! "mcp-hub-mode" "🔌")
 
 (define-list-mode! "mcp-hub-mode"
   (list

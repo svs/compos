@@ -462,6 +462,8 @@
 (mode-doc! "morg-mode"
   "Markdown with org habits. `TAB` folds a heading or a code block, and `S-TAB` folds the file. `C-c C-c` runs the code block at point; the output goes to a result block under it. `C-c C-v` renders the page.")
 
+(mode-icon! "morg-mode" "📝")
+
 (define-mode "morg-mode"
   (lambda ()
     (enable-minor-mode! (current-buffer) "visual-line-mode")

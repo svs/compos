@@ -816,6 +816,8 @@
 
 ;; a revision that is already written: no refresh, no watching, every card
 ;; open
+(mode-icon! "diff-show" "🔀")
+
 (define-mode "diff-show"
   (lambda ()
     (let ((buf (current-buffer)))
@@ -954,6 +956,8 @@
 
 (define-command "diff-revert" "Re-read the diff from its backend"
   (lambda () (diff-refresh (current-buffer))))
+
+(mode-icon! "diff-mode" "🔀")
 
 (define-mode "diff-mode"
   (lambda ()

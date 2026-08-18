@@ -612,6 +612,8 @@
 (mode-doc! "org-mode"
   "An outline you can fold, reorder and mark done. `TAB` folds a headline and `S-TAB` folds the file. `C-c C-t` changes the TODO state. `M-RET` adds a headline, and `M-<left>` and `M-<right>` change its level.")
 
+(mode-icon! "org-mode" "📓")
+
 (define-mode "org-mode"
   (lambda ()
     (org-install-keys)

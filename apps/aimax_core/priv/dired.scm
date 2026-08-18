@@ -118,12 +118,14 @@
 
 (define (dired-cells buf e)
   (if (equal? e "..")
-      (list (list "▲" "accent") (list ".." "accent") "" "" "" "" "")
+      (list (list (mode-icon "Dired") "accent") (list ".." "accent") "" "" "" "" "")
       (let* ((st (dired-stat buf e))
              (dir? (dired-directory? e))
              (b (dired-bytes (cadr st)))
              (vc (dired-vc buf e)))
-        (list (if dir? (list "▸" "accent") (list "·" "faint"))
+        ;; the icon says what the row opens in: a directory wears Dired's,
+        ;; a file wears its own mode's
+        (list (if dir? (list (mode-icon "Dired") "accent") (list (file-icon e) "faint"))
               (list e (if dir? "accent" #f))
               (if dir? "" (list (dired-bar b (dired-top-size buf)) "faint"))
               (if dir? (list "—" "faint") (list (cadr st) "dim"))
@@ -259,7 +261,11 @@
                   (begin (dired-scan-once! buf dir)
                          (cons ".." (dired-visible buf dir))))))
     'columns (lambda (buf)
-               (list (list "" 1)
+               ;; the icon column's label is one WIDE space: an icon draws two
+               ;; cells where the padding counts one character, and the wide
+               ;; label spends the same two — so the header keeps its place
+               ;; over the rows.
+               (list (list "　" 2)
                      (list "name" #f)
                      (list "" 5)
                      (list "size" 7 'right)

@@ -379,11 +379,15 @@
 (domain! 'sentry)
 (effects! '(write external))
 
+(mode-icon! "sentry-detail-mode" "🚨")
+
 (define-mode "sentry-detail-mode"
   (lambda () (sentry--detail-setup! (current-buffer))))
 
 (mode-doc! "sentry-detail-mode"
   "A safe summary for one Sentry issue. `e` lists events. `g` refreshes the summary.")
+
+(mode-icon! "sentry-events-mode" "🚨")
 
 (define-mode "sentry-events-mode"
   (lambda () (sentry--events-setup! (current-buffer))))
@@ -424,6 +428,8 @@
   (lambda ()
     (let ((issue-id (buffer-local (current-buffer) 'sentry-issue-id)))
       (when issue-id (sentry--render-events! (current-buffer) issue-id)))))
+
+(mode-icon! "sentry-mode" "🚨")
 
 (define-list-mode! "sentry-mode"
   (list

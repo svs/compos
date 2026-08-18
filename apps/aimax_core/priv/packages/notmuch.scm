@@ -163,6 +163,8 @@ when a message has no text/plain part." 'group 'notmuch)
 (define (nm--index-at buf) (line-index-at buf 1))
 (define (nm--thread-at buf) (list-current buf))
 
+(mode-icon! "notmuch-mode" "📧")
+
 (define-list-mode! "notmuch-mode"
   (list
     'doc (string-append
@@ -273,6 +275,8 @@ when a message has no text/plain part." 'group 'notmuch)
           (list c-end l-end "nm-tags"))))
 
 (define (nm--hello-at buf) (list-current buf))
+
+(mode-icon! "notmuch-hello-mode" "📧")
 
 (define-list-mode! "notmuch-hello-mode"
   (list
@@ -729,6 +733,8 @@ when a message has no text/plain part." 'group 'notmuch)
 (mode-doc! "notmuch-show-mode"
   "One mail thread, read. `a` archives it and `r` starts a reply. `v` changes between the HTML and the plain text. `q` goes back to the search.")
 
+(mode-icon! "notmuch-show-mode" "📧")
+
 (define-mode "notmuch-show-mode"
   (lambda ()
     (let ((buf (current-buffer)))
@@ -828,6 +834,8 @@ when a message has no text/plain part." 'group 'notmuch)
             (else found)))))
 
 ;;; --- compose / reply ------------------------------------------------------------
+
+(mode-icon! "mail-compose-mode" "📮")
 
 (define-mode "mail-compose-mode"
   (lambda ()

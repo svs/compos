@@ -1619,6 +1619,54 @@
   (let ((e (assoc name *mode-docs*)))
     (and e (car (cdr e)))))
 
+;;; --- mode icons ---------------------------------------------------------------
+;;; One glyph names a mode, and every list that shows a mode shows it:
+;;; dired, ibuffer, the buffer prompt and the file prompt. A mode declares
+;;; its own icon; a mode that declares none reads as a plain document. Each
+;;; icon is one wide glyph, and each row wears exactly one — so a column of
+;;; icons stays a column.
+
+(define *mode-icons* '())
+(define *default-mode-icon* "📄")
+
+(define (mode-icon! name icon)
+  (set! *mode-icons*
+    (cons (list name icon)
+          (remove (lambda (e) (equal? (car e) name)) *mode-icons*))))
+
+(define (mode-icon name)
+  (let ((e (and name (assoc name *mode-icons*))))
+    (if e (car (cdr e)) *default-mode-icon*)))
+
+;; the icon a buffer wears is its mode's
+(define (buffer-icon b)
+  (mode-icon (buffer-local b 'mode-name)))
+
+;; the icon a file NAME wears is the icon of the mode it would open in. A
+;; directory opens in Dired, and a listing marks one with a trailing "/".
+(define (file-icon name)
+  (if (string-suffix? "/" name)
+      (mode-icon "Dired")
+      (mode-icon (auto-mode-for name))))
+
+;; a mode name with its icon in front, for a column that shows the mode
+(define (mode-label name)
+  (string-append (mode-icon name) " " (or name "Fundamental")))
+
+;; the modes this file defines. A package stamps its own icons.
+(mode-icon! "Dired" "📁")
+(mode-icon! "text-mode" "📄")
+(mode-icon! "scheme-mode" "🔣")
+(mode-icon! "elixir-mode" "💧")
+(mode-icon! "json-mode" "🧾")
+(mode-icon! "rust-mode" "🦀")
+(mode-icon! "html-mode" "🌐")
+(mode-icon! "chat-mode" "💬")
+(mode-icon! "shell-mode" "💻")
+(mode-icon! "tail-mode" "📜")
+(mode-icon! "collect-mode" "🧺")
+(mode-icon! "groups-mode" "📚")
+
 (define (set-mode! name)
   (buffer-set-local! (current-buffer) 'mode-name name)
   (let ((m (assoc name *mode-setups*)))
@@ -1821,7 +1869,8 @@
 (marginalia! 'file
   (lambda (name)
     (let ((st (file-stat (string-append *marginalia-file-dir* name))))
-      (list (if (string-prefix? "d" (car st))
+      (list (if (string-prefix? "d" (car st)) (mode-icon "Dired") (file-icon name))
+            (if (string-prefix? "d" (car st))
                 "Dired"
                 (or (auto-mode-for name) "Fundamental"))
             (string-pad-left (car (cdr st)) 6)
@@ -2592,7 +2641,9 @@
         (list (list 'complete file-complete)
               (list 'change file-nav-change)
               (list 'initial dd)
-              (list 'match-hint #t)
+              ;; the icon leads the annotation, so the mode is the second
+              ;; field: both must be in reach for "dired" to find a directory
+              (list 'match-hint 2)
               (list 'style (prompt-style cands #f))
               (list 'confirm k))))))
 
@@ -2746,7 +2797,8 @@
 ;; (match-hint), so a group or project name finds every member.
 (marginalia! 'buffer
   (lambda (b)
-    (list (or (buffer-local b 'mode-name) "Fundamental")
+    (list (buffer-icon b)
+          (or (buffer-local b 'mode-name) "Fundamental")
           (group-label (buffer-group b))
           (buffer-project-label b)
           ;; a chat has no file: its last column is the group's
@@ -2961,8 +3013,9 @@
           (when (buffer-exists? here) (window-preview-buffer! here))
           (sleep-woken! #f))
         ;; you also know a buffer by its mode, its group, or its project:
-        ;; the first three marginalia fields all match what you type
-        3
+        ;; those three fields all match what you type. The icon leads them,
+        ;; so the count is four.
+        4
         #f
         ;; this handler serves TAB and RET both (the complete contract):
         ;; RET hands it the highlighted candidate — answer it back as the
@@ -6831,6 +6884,16 @@
 (public! 'marginalia! "(marginalia! CATEGORY FN) — FN turns one candidate of CATEGORY ('file 'buffer 'command) into the text beside it; replaces the annotator for that category")
 (public! 'annotate "(annotate CATEGORY NAMES) — NAMES as (LABEL HINT) candidates, through CATEGORY's annotator; NAMES unchanged when nothing registered one")
 (public! 'set-mode! "(set-mode! NAME) on the current buffer")
+(public! 'mode-icon! "(mode-icon! MODE ICON) — the one wide glyph that names MODE in every list")
+(public! 'mode-icon "(mode-icon MODE) — MODE's icon, or the plain document icon")
+(public! 'mode-label "(mode-label MODE) — MODE's icon and name, for a column that shows the mode")
+(public! 'buffer-icon "(buffer-icon NAME) — the icon of the mode NAME is in")
+(public! 'file-icon "(file-icon NAME) — the icon of the mode the file NAME would open in; a name ending in / is a directory")
+(catalog-meta! 'function "mode-icon!" 'domain 'interaction 'effects '(write))
+(catalog-meta! 'function "mode-icon" 'domain 'interaction 'effects '(pure))
+(catalog-meta! 'function "mode-label" 'domain 'interaction 'effects '(pure))
+(catalog-meta! 'function "buffer-icon" 'domain 'interaction 'effects '(read))
+(catalog-meta! 'function "file-icon" 'domain 'interaction 'effects '(pure))
 (public! 'add-hook! "(add-hook! 'name-hook FN)")
 (public! 'overlay-set! "(overlay-set! NAME TAG ((START END FACE) ...)) — replaces TAG's ranges")
 (public! 'overlay-clear! "(overlay-clear! NAME TAG)")

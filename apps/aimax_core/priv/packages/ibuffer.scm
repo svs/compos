@@ -40,7 +40,8 @@
         ;; a name in stars is a buffer the editor made, not a file
         (list b (if (string-prefix? "*" b) "accent" #f))
         (list (ibuffer-human (buffer-size b)) "dim")
-        (list (or (buffer-local b 'mode-name) "Fundamental") "faint")
+        ;; the mode wears its icon here too, so a chat reads as a chat
+        (list (mode-label (buffer-local b 'mode-name)) "faint")
         (list (group-label (buffer-group b)) "accent")
         ;; the name already says which file; this column says whether
         ;; there is one
@@ -177,6 +178,8 @@
 (define-command "ibuffer-prev" "Move up and preview in the home window"
   (lambda () (list-move! -1)))
 
+(mode-icon! "ibuffer-mode" "📋")
+
 (define-list-mode! "ibuffer-mode"
   (list
     'doc (string-append
@@ -203,7 +206,9 @@
                (list (list "" 1)
                      (list "buffer" #f)
                      (list "size" 7 'right)
-                     (list "mode" 16)
+                     ;; the label leads with one WIDE space, which spends the
+                     ;; two cells the icon draws — the columns stay in line
+                     (list "　mode" 18)
                      (list "group" 18)
                      (list "file" 4)))
     'cells ibuffer-cells

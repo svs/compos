@@ -499,6 +499,8 @@
   (local-set-key "q" "quit-window")
   (local-set-key "C-c C-v" "agenda-toggle-view"))
 
+(mode-icon! "morg-agenda-mode" "📅")
+
 (define-mode "morg-agenda-mode"
   (lambda ()
     (let ((buf (current-buffer)))

@@ -236,6 +236,8 @@
 (define-command "worktrees-refresh" "Refresh the worktree list"
   (lambda () (list-refresh! *worktrees-buffer*)))
 
+(mode-icon! "worktrees-mode" "🌲")
+
 (define-list-mode! "worktrees-mode"
   (list
     'doc (string-append

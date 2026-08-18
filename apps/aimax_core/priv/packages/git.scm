@@ -98,10 +98,14 @@
     (when (buffer-local buf 'git-watch)
       (buffer-set-local! buf 'diff-watch #t))))
 
+(mode-icon! "git-diff" "🌿")
+
 (define-mode "git-diff"
   (lambda ()
     (git--upgrade-locals! (current-buffer))
     (set-mode! "diff-mode")))
+
+(mode-icon! "git-show" "🌿")
 
 (define-mode "git-show"
   (lambda ()

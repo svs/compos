@@ -1589,12 +1589,17 @@
   (buffer-set-local! (current-buffer) 'mode-name name)
   (let ((m (assoc name *mode-setups*)))
     (if m ((cadr m))))
-  (run-hooks (string->symbol (string-append name "-hook"))))
+  (run-hooks (string->symbol (string-append name "-hook")))
+  ;; the mode is on: if it declares a layout, the engine arranges the frame
+  (layout-enter! (current-buffer)))
 
 ;; desktop restore's entry: set BUF's mode with BUF current, so the setup
-;; fn rebuilds presentation from the locals restore already laid down
+;; fn rebuilds presentation from the locals restore already laid down.
+;; The desktop restores its own saved windows, so the layout engine stands
+;; down for the whole call.
 (define (desktop-apply-mode! buf mode)
-  (with-current-buffer buf (lambda () (set-mode! mode))))
+  (with-layout-suppressed
+    (lambda () (with-current-buffer buf (lambda () (set-mode! mode))))))
 
 ;;; --- globals that outlive a restart (savehist) ---------------------------------
 ;;; The desktop saves buffers, windows and buffer-locals. A global was
@@ -1651,7 +1656,9 @@
     (unless (member name cur)
       (buffer-set-local! buf 'minor-modes (cons name cur))))
   (let ((m (assoc name *minor-mode-setups*)))
-    (if m ((cadr m) buf))))
+    (if m ((cadr m) buf)))
+  ;; the setup fn named the buffers its layout wants; now place them
+  (layout-enter! buf))
 
 (define (disable-minor-mode! buf name)
   (buffer-set-local! buf 'minor-modes
@@ -1677,11 +1684,13 @@
 ;; runtime machinery those locals describe. Re-run both setup layers with a
 ;; logical current buffer: restoration must not display or select BUF.
 (define (restore-buffer-runtime! buf)
-  (with-current-buffer buf
+  (with-layout-suppressed
     (lambda ()
-      (let ((mode (buffer-local buf 'mode-name)))
-        (when mode (set-mode! mode)))
-      (restore-minor-modes! buf))))
+      (with-current-buffer buf
+        (lambda ()
+          (let ((mode (buffer-local buf 'mode-name)))
+            (when mode (set-mode! mode)))
+          (restore-minor-modes! buf))))))
 
 ;;; --- renaming a buffer ---------------------------------------------------------
 ;;; buffer-rename! is the mechanism: the buffer keeps its process, so text,
@@ -3146,6 +3155,125 @@
           (let ((w (active-window)))
             (select-window! me)
             w)))))
+
+;;; --- mode layouts -------------------------------------------------------------
+;;; A display rule says where ONE buffer goes. A mode that owns the frame needs
+;;; more: writing mode is a document and its scratch, side by side, and nothing
+;;; else. The mode declares that arrangement as data, and this engine puts the
+;;; windows there:
+;;;
+;;;   (define-mode-layout! "writing-mode" '(h 0.62 self scratch-buffer))
+;;;
+;;; The spec is (DIR RATIO PANE PANE ...), or one PANE alone for a full frame.
+;;; DIR is 'h (side by side) or 'v (one above the other). RATIO is the share the
+;;; first pane takes. A PANE names a buffer in one of three ways:
+;;;
+;;;   self       the buffer the mode is on
+;;;   SYMBOL     the buffer named by that buffer-local of the anchor
+;;;   "NAME"     that buffer, by name
+;;;
+;;; The engine drops a pane whose buffer does not exist, so a document with no
+;;; scratch yet fills the frame alone. It arranges the frame when a mode turns
+;;; on in the selected window, and stays out of the way everywhere else: the
+;;; desktop rebuilds its own saved windows, a background buffer never replaces
+;;; the windows in front of somebody, and the ordinary split and delete commands
+;;; still work while the mode is on.
+
+(define *mode-layouts* '())        ; ((mode spec) ...)
+
+(define (define-mode-layout! mode spec)
+  (set! *mode-layouts*
+    (cons (list mode spec)
+          (remove (lambda (e) (equal? (car e) mode)) *mode-layouts*)))
+  mode)
+
+(define (mode-layout mode)
+  (let ((e (assoc mode *mode-layouts*)))
+    (and e (cadr e))))
+
+;; the layout BUF declares. A minor mode answers before the major mode: it is
+;; the more specific statement about the same buffer.
+(define (buffer-layout buf)
+  (let loop ((names (append (or (buffer-local buf 'minor-modes) '())
+                            (let ((m (buffer-local buf 'mode-name)))
+                              (if m (list m) '())))))
+    (if (null? names)
+        #f
+        (let ((spec (mode-layout (car names))))
+          (if spec spec (loop (cdr names)))))))
+
+(define (layout--pane anchor pane)
+  (cond ((equal? pane 'self) anchor)
+        ((string? pane) (and (buffer-known? pane) pane))
+        ((symbol? pane)
+         (let ((v (buffer-local anchor pane)))
+           (and (string? v) (buffer-known? v) v)))
+        (else #f)))
+
+;; the buffers the spec names, in order, without repeats
+(define (layout--panes anchor spec)
+  (let loop ((rest (if (pair? spec) (cdr (cdr spec)) (list spec))) (acc '()))
+    (if (null? rest)
+        (reverse acc)
+        (let ((b (layout--pane anchor (car rest))))
+          (loop (cdr rest) (if (and b (not (member b acc))) (cons b acc) acc))))))
+
+(define (layout--dir spec) (if (pair? spec) (car spec) 'h))
+(define (layout--ratio spec) (if (pair? spec) (cadr spec) 0.5))
+
+;; The engine runs one arrangement at a time. switch-to-buffer! wakes a dormant
+;; buffer, which re-runs its mode setups; without this flag that wake would ask
+;; for another layout in the middle of this one.
+(define *layout-busy* #f)
+
+;; Run THUNK with the engine standing down. Desktop restore uses this: it
+;; rebuilds the exact windows it saved, and a mode setup that runs inside it
+;; must not arrange the frame a second way.
+(define (with-layout-suppressed thunk)
+  (let ((was *layout-busy*))
+    (set! *layout-busy* #t)
+    (let ((r (thunk)))
+      (set! *layout-busy* was)
+      r)))
+
+;; Put the frame where SPEC says. The anchor keeps focus: a mode that arranges
+;; the frame must not move the user out of the buffer they are in.
+(define (apply-layout! anchor spec)
+  (let ((panes (layout--panes anchor spec)))
+    (when (and (pair? panes) (not *layout-busy*))
+      (set! *layout-busy* #t)
+      (delete-other-windows!)
+      (switch-to-buffer! (car panes))
+      (for-each
+        (lambda (b)
+          (split-window! (layout--dir spec) (layout--ratio spec))
+          (other-window!)
+          (switch-to-buffer! b))
+        (cdr panes))
+      (let ((w (window-showing anchor)))
+        (when w (select-window! w)))
+      (set! *layout-busy* #f))
+    panes))
+
+;; The engine's entry point: a mode turned on in BUF. Arrange the frame only
+;; when BUF is the buffer the user is looking at.
+(define (layout-enter! buf)
+  (let ((spec (buffer-layout buf)))
+    (if (and spec
+             (not *layout-busy*)
+             (equal? (window-buffer (active-window)) buf))
+        (apply-layout! buf spec)
+        #f)))
+
+(define-command "reset-layout" "Arrange the frame the way this buffer's mode asks"
+  (lambda ()
+    (let ((spec (buffer-layout (current-buffer))))
+      (if spec
+          ;; also the way back from an arrangement that failed part way: the
+          ;; flag never outlives the command the user runs to fix the frame
+          (begin (set! *layout-busy* #f)
+                 (apply-layout! (current-buffer) spec))
+          (message "This buffer's modes declare no layout")))))
 
 (define-command "popup-toggle" "Toggle the floating popup window"
   (lambda ()
@@ -6553,3 +6681,10 @@
 (public! 'fold-toggle! "(fold-toggle! BUF TAG RANGE) — add or remove one (START END) in TAG; for owners whose state is the range list itself")
 
 (message "editor.scm loaded")
+(public! 'define-mode-layout!
+  "(define-mode-layout! MODE '(h|v RATIO PANE ...)) — the frame arrangement that mode asks for; a PANE is 'self, a buffer-local name, or a buffer name")
+(public! 'apply-layout! "(apply-layout! ANCHOR SPEC) — arrange the frame by SPEC, ANCHOR keeping focus")
+(public! 'buffer-layout "(buffer-layout NAME) — the layout NAME's modes declare, or #f")
+(public! 'with-layout-suppressed "(with-layout-suppressed THUNK) — run THUNK without the layout engine arranging the frame")
+(catalog-meta! 'command "reset-layout" 'domain 'windows 'effects '(write))
+(catalog-meta! 'function "define-mode-layout!" 'domain 'windows 'effects '(write))

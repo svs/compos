@@ -250,15 +250,13 @@
   (writing--ensure-hook! buf)
   (writing--update-count! buf)
   ;; A writing workspace is the rendered document plus its ordinary scratch.
-  ;; Only the selected document establishes layout: customize refreshes of a
-  ;; background writing buffer must not replace an unrelated window.
-  (if (equal? buf (current-buffer))
-      (writing--configure-scratch! buf (scratch-open-beside! buf))
-      ;; Customize refreshes still update an existing background scratch
-      ;; without touching the current window layout.
-      (let ((scratch (buffer-local buf 'scratch-buffer)))
-        (when (and scratch (buffer-exists? scratch))
-          (writing--configure-scratch! buf scratch)))))
+  ;; This fn only names the scratch and configures its session; the layout
+  ;; engine reads the declaration below and puts both in windows.
+  (writing--configure-scratch! buf (scratch-ensure! buf)))
+
+;; The writing frame is the document and its scratch, and nothing else. A
+;; third window is other work: the engine collapses it when the mode goes on.
+(define-mode-layout! "writing-mode" '(h 0.62 self scratch-buffer))
 
 (define (writing--teardown! buf)
   (writing--remove-hook! buf)

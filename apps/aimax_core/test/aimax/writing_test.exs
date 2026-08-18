@@ -232,6 +232,40 @@ defmodule Aimax.WritingTest do
     assert length(Editor.list_windows()) == 2
   end
 
+  test "writing mode reduces a three-window frame to the document and its scratch" do
+    buf =
+      fresh_buffer(
+        "wr-layout-#{System.unique_integer([:positive])}.md",
+        "# Draft\n\nMain text.\n"
+      )
+
+    scratch = "*scratch:#{buf}*"
+    other = "wr-other-#{System.unique_integer([:positive])}"
+
+    on_exit(fn ->
+      Enum.each([scratch, other], fn b -> if Buffer.exists?(b), do: Aimax.Core.kill_buffer(b) end)
+    end)
+
+    # three windows: the document, and two windows of other work
+    eval!(~s{(split-window! 'h 0.5)})
+    eval!(~s{(split-window! 'v 0.5)})
+    eval!(~s{(other-window!)})
+    eval!(~s{(switch-to-buffer! "#{other}")})
+    eval!(~s{(select-window! (window-showing "#{buf}"))})
+    assert length(Editor.list_windows()) == 3
+
+    eval!(~s{(run-command "writing-mode")})
+
+    windows = Editor.list_windows()
+    assert length(windows) == 2
+    assert Enum.map(windows, fn {_id, name} -> name end) == [buf, scratch]
+    assert Editor.current_buffer() == buf
+  end
+
+  test "a mode's layout declaration is what the engine applies" do
+    assert eval!(~s{(mode-layout "writing-mode")}) == "(h 0.62 self scratch-buffer)"
+  end
+
   test "writing LLM configuration lands on the scratch only" do
     buf = fresh_buffer("wr-config-#{System.unique_integer([:positive])}.md", "Draft.\n")
     scratch = "*scratch:#{buf}*"

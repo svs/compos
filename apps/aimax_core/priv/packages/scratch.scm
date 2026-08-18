@@ -60,6 +60,10 @@
       (buffer-create scratch)
       (buffer-append! scratch
         (string-append "# Scratch — " (scratch--label owner) "\n\n")))
+    ;; set-mode! is current-buffer based, and a mode belongs to the buffer,
+    ;; not to a window: give a new scratch its mode without displaying it.
+    (unless (buffer-local scratch 'mode-name)
+      (with-current-buffer scratch (lambda () (set-mode! "text-mode"))))
     (let ((already-managed
             (and existed
                  (equal? (buffer-local scratch 'scratch-owner) owner))))
@@ -88,16 +92,15 @@
 ;; owner. Modes call this when the scratch is part of their initial layout;
 ;; the interactive toggle selects the returned buffer afterwards.
 (define (scratch-open-beside! owner)
-  (let* ((scratch (scratch--for owner))
-         (back (active-window)))
+  (let ((scratch (scratch-ensure! owner)))
+    (display-buffer-other-window! scratch)
+    scratch))
+
+;; OWNER's scratch, ready but not displayed. A mode that declares a layout
+;; names the scratch in it; the layout engine is what shows it.
+(define (scratch-ensure! owner)
+  (let ((scratch (scratch--for owner)))
     (scratch--prepare! owner scratch)
-    (let ((target (display-buffer-other-window! scratch)))
-      ;; set-mode! is current-buffer based, so initialize a new scratch in its
-      ;; own window and immediately return to the document.
-      (unless (buffer-local scratch 'mode-name)
-        (select-window! target)
-        (set-mode! "text-mode")
-        (select-window! back)))
     scratch))
 
 (define-command "scratch-buffer"
@@ -215,6 +218,8 @@
       (buffer-list))))
 
 (category! 'buffers)
+(public! 'scratch-ensure!
+  "(scratch-ensure! OWNER) — OWNER's scratch buffer, prepared but not displayed")
 (public! 'scratch-refresh-llm!
   "(scratch-refresh-llm! OWNER) — push OWNER's model and presets to its open scratch buffer")
 (effects! '(pure))

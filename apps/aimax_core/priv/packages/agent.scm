@@ -172,6 +172,28 @@
             ((equal? (car (cdr (cdr (car bs)))) kind) (loop (cdr bs) acc))
             (else (loop (cdr bs) (cons (car bs) acc)))))))
 
+;; A cancelled backend may never send final updates for its open tools.
+;; Finish every card in one buffer operation, then close their rich view.
+(define (agent-finalize-running-tools! buf status)
+  (let ((ids
+          (map (lambda (b) (nth 3 b))
+               (filter (lambda (b)
+                         (and (equal? (nth 2 b) "tool")
+                              (equal? (nth 6 b) "running")))
+                       (agent-blocks buf)))))
+    (unless (null? ids)
+      (buffer-set-local! buf 'agent-blocks
+        (map (lambda (b)
+               (if (and (equal? (nth 2 b) "tool")
+                        (member (nth 3 b) ids))
+                   (list (nth 0 b) (nth 1 b) "tool" (nth 3 b)
+                         (nth 4 b) (nth 5 b) status (nth 7 b))
+                   b))
+             (agent-blocks buf)))
+      (buffer-set-local! buf 'agent-open-cards
+        (filter (lambda (id) (not (member id ids)))
+                (agent-open-cards buf))))))
+
 ;;; --- tool cards ---------------------------------------------------------------
 ;;; What a card SAYS is presentation, so it is decided here. The backend
 ;;; sends the call and the result; an adapter that has only a title sends
@@ -199,14 +221,17 @@
 
 ;; most tools have one argument that matters; show that rather than a blob
 (define (agent-tool-primary args)
-  (or (plist-get args 'code) (plist-get args 'query)
-      (plist-get args 'path) (plist-get args 'name)))
+  (cond ((string? args) args)
+        ((pair? args)
+         (or (plist-get args 'code) (plist-get args 'query)
+             (plist-get args 'path) (plist-get args 'name)))
+        (else #f)))
 
 (define (agent-tool-args e)
   (let ((json (plist-get e 'input)))
     (and (string? json) (json-parse json))))
 
-;; "name · the first line of what it was called with"
+;; "name: the first line of what it was called with"
 (define (agent-tool-title e)
   (let ((name (plist-get e 'name))
         (args (agent-tool-args e)))
@@ -214,7 +239,7 @@
         (or (plist-get e 'title) "tool")     ; an adapter's own title
         (let ((v (and args (agent-tool-primary args))))
           (if (and v (string? v) (not (equal? (string-trim v) "")))
-              (string-append name " · "
+              (string-append name ": "
                 (agent-clip (string-trim (agent-first-line v)) agent-tool-title-limit))
               name)))))
 
@@ -361,15 +386,20 @@
        ;; the arguments open the body, ahead of the result, so an opened
        ;; card shows the whole call and not just what came back
        (let ((args (agent-tool-input-text e)))
-         (unless (equal? args "") (agent-render! slug args #f))))
+         (unless (equal? args "")
+           (agent-render! slug args #f)
+           (agent-block-close-tool! buf (plist-get e 'id)
+             (agent-mark slug) "running"))))
 
       ((equal? type 'tool-update)
        (let ((text (agent-tool-update-text e)))
          (unless (equal? text "")
            (agent-render! slug text #f))
-         (when (equal? (plist-get e 'status) "completed")
+         (when (or (equal? (plist-get e 'status) "completed")
+                   (equal? (plist-get e 'status) "failed"))
            (agent-block-close-tool! buf (plist-get e 'id)
-             (agent-mark slug) "done")
+             (agent-mark slug)
+             (if (equal? (plist-get e 'status) "failed") "failed" "done"))
            (let ((entry (assoc (plist-get e 'id)
                                (or (buffer-local buf 'agent-tool-bodies) '()))))
              (when (and entry (> (agent-mark slug) (car (cdr entry))))
@@ -433,6 +463,11 @@
       ((equal? type 'turn-end)
        (buffer-set-local! buf 'chat-turn-active #f)
        (buffer-set-local! buf 'agent-cancelling #f)
+       (agent-finalize-running-tools! buf
+         (if (member (plist-get e 'stop-reason)
+                     '("cancelled" "canceled" "aborted"))
+             "cancelled"
+             "done"))
        (let ((text (buffer-local buf 'agent-turn-text)))
          (cond
            ((and text (not (equal? (string-trim text) "")))
@@ -478,6 +513,7 @@
 
       ((equal? type 'error)
        (buffer-set-local! buf 'chat-turn-active #f)
+       (agent-finalize-running-tools! buf "failed")
        (let ((start (agent-render! slug
                       (string-append "\n[error: " (plist-get e 'text) "]\n")
                       "agent-meta")))
@@ -485,6 +521,7 @@
 
       ((equal? type 'dead)
        (buffer-set-local! buf 'chat-turn-active #f)
+       (agent-finalize-running-tools! buf "failed")
        (agent-block-drop-kind! buf "permission")
        (let ((start (agent-render! slug "\n[agent exited]\n" "agent-meta")))
          (agent-block-push! buf start (agent-mark slug) "meta" '())))
@@ -1029,6 +1066,8 @@
                (message "agent restarted (hard reset)"))
               (else
                (buffer-set-local! buf 'agent-cancelling #t)
+               (agent-finalize-running-tools! buf "cancelled")
+               (chat-clear-queued! buf)
                (llm-session-cancel! slug)
                (message "cancel requested — C-RET again forces a restart")))))))
 
@@ -1042,6 +1081,8 @@
            (slug (agent-slug-of buf)))
       (if (and slug (member (agent-status slug) '(running starting needs_attention)))
           (begin
+            (agent-finalize-running-tools! buf "cancelled")
+            (chat-clear-queued! buf)
             (llm-session-cancel! slug)
             ;; both waiting markers: a thread renders its own ('agent-waiting),
             ;; a chat that never attached a runtime renders 'chat-waiting

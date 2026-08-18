@@ -164,6 +164,7 @@ defmodule Aimax.Core.Agent do
        mark: Map.get(config, "mark", Buffer.byte_size(buffer)),
        events: [],
        in_flight: false,
+       context_pending: false,
        prompt_queue: [],
        pending_permission: nil,
        # which turn a context fetch belongs to (see send_prompt)
@@ -208,8 +209,32 @@ defmodule Aimax.Core.Agent do
   end
 
   def handle_call(:cancel, _from, state) do
-    if state.status in [:running, :needs_attention],
-      do: state.backend.cancel(state.handle)
+    # Abort means the whole pending run list. A terminal backend event may
+    # still arrive for the active turn, but it must not start queued work.
+    # Advancing the epoch also discards a context fetch for a cancelled turn.
+    context_pending = state.context_pending
+
+    state = %{
+      state
+      | prompt_queue: [],
+        epoch: state.epoch + 1,
+        context_pending: false
+    }
+
+    state =
+      cond do
+        context_pending ->
+          state
+          |> enqueue(Backend.plist(type: :"turn-end", "stop-reason": "cancelled"))
+          |> set_status(:idle)
+
+        state.status in [:running, :needs_attention] ->
+          state.backend.cancel(state.handle)
+          state
+
+        true ->
+          state
+      end
 
     {:reply, :ok, state}
   end
@@ -340,6 +365,8 @@ defmodule Aimax.Core.Agent do
 
   # the context for a turn that is still the current one
   def handle_info({:context, epoch, text, display, result}, %{epoch: epoch} = state) do
+    state = %{state | context_pending: false}
+
     case result do
       {:ok, context} ->
         state.backend.prompt(state.handle, text, Map.put(context, :display, display))
@@ -521,7 +548,7 @@ defmodule Aimax.Core.Agent do
       send(me, {:context, epoch, text, display, Backend.context(slug, display)})
     end)
 
-    %{state | epoch: epoch}
+    %{state | epoch: epoch, context_pending: true}
   end
 
   defp pop_prompt_queue(%{prompt_queue: [{next, display} | rest], status: :idle} = state),

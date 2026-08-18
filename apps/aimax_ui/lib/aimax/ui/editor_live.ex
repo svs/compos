@@ -950,16 +950,22 @@ defmodule Aimax.Ui.EditorLive do
                 <% :thought -> %>
                   <details class="ag-thought"><summary>thought</summary><div class="ag-thought-text">{b.text}</div></details>
                 <% :tool -> %>
-                  <details class="ag-tool" open={b.open}>
+                  <details class={"ag-tool #{b.status}"} open={b.open}>
                     <summary
                       phx-click="agent_card"
                       phx-value-win={@node.id}
                       phx-value-id={b.id}
+                      aria-label={"#{b.verb} #{b.title}, #{b.status}. Toggle call details"}
                       onclick="event.preventDefault()"
                     >
-                      <span class={"ag-dot #{b.status}"}></span><span class="ag-verb">{b.verb}</span>
-                      <span class="ag-title">{b.title}</span>
-                      <span class="ag-tstatus">{b.status}</span>
+                      <span class="ag-chevron" aria-hidden="true">›</span>
+                      <span class={"ag-dot #{b.status}"}></span>
+                      <span class="ag-verb ag-kind">{b.verb}</span>
+                      <span class="ag-summary-copy">
+                        <span class="ag-title" title={b.title}>{b.title}</span>
+                        <span :if={!b.open && b.preview != ""} class="ag-preview">{b.preview}</span>
+                      </span>
+                      <span class={"ag-tstatus #{b.status}"}>{b.status}</span>
                     </summary>
                     <pre :if={b.body != ""} class="ag-body">{b.body}</pre>
                   </details>
@@ -1238,6 +1244,12 @@ defmodule Aimax.Ui.EditorLive do
     do: %{kind: :thought, text: String.trim(safe_slice(text, s, e))}
 
   defp ag_block([_s, e, "tool", id, title, kind, status, body_start | _], text, open_cards) do
+    body =
+      text
+      |> safe_slice(body_start, e)
+      |> String.trim_trailing()
+      |> tool_display_body()
+
     %{
       kind: :tool,
       id: id,
@@ -1245,7 +1257,8 @@ defmodule Aimax.Ui.EditorLive do
       verb: kind,
       status: status,
       open: id in open_cards,
-      body: String.trim_trailing(safe_slice(text, body_start, e))
+      body: body,
+      preview: tool_preview(body)
     }
   end
 
@@ -1261,6 +1274,67 @@ defmodule Aimax.Ui.EditorLive do
     do: %{kind: :meta, text: String.trim(safe_slice(text, s, e))}
 
   defp ag_block(_, _, _), do: nil
+
+  # A folded call still says what it returned. New calls separate input and
+  # output with a blank line. Older calls contain only their result.
+  defp tool_preview(body) do
+    candidate =
+      case String.split(String.trim(body), ~r/\n\s*\n/, parts: 2) do
+        [_input, output] when output != "" -> output
+        [detail | _] -> detail
+        _ -> ""
+      end
+
+    candidate
+    |> tool_result_text()
+    |> String.split("\n", parts: 2)
+    |> List.first()
+    |> to_string()
+    |> String.replace(~r/\s+/, " ")
+    |> String.slice(0, 140)
+  end
+
+  # Keep the canonical transcript unchanged. The rich view unwraps only the
+  # final MCP result envelope and leaves the tool input before it intact.
+  defp tool_display_body(body) do
+    parts = String.split(body, "\n\n")
+    result = List.last(parts) || ""
+    readable = tool_result_text(result)
+
+    if readable == result do
+      body
+    else
+      parts
+      |> List.replace_at(-1, readable)
+      |> Enum.join("\n\n")
+    end
+  end
+
+  defp tool_result_text(text) do
+    case Jason.decode(String.trim(text)) do
+      {:ok, %{"content" => content} = result} when is_list(content) ->
+        case Enum.find_value(content, fn
+               %{"text" => value} when is_binary(value) and value != "" -> value
+               _ -> nil
+             end) do
+          nil -> Jason.encode!(result, pretty: true)
+          value -> pretty_json(value)
+        end
+
+      {:ok, value} ->
+        Jason.encode!(value, pretty: true)
+
+      _ ->
+        text
+    end
+  end
+
+  defp pretty_json(text) do
+    case Jason.decode(String.trim(text)) do
+      {:ok, value} -> Jason.encode!(value, pretty: true)
+      _ -> text
+    end
+  end
 
   # The one renderer for block trees. Structure only: tags, classes, segs,
   # click ids and the point mark all come from the mode. The mark: a block

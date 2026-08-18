@@ -377,7 +377,8 @@ defmodule Aimax.AgentTest do
       "toolCallId" => "tc1",
       "title" => "Read foo.ex",
       "kind" => "read",
-      "status" => "pending"
+      "status" => "pending",
+      "rawInput" => %{"path" => "foo.ex"}
     })
 
     update(agent, "sess-1", %{
@@ -400,10 +401,11 @@ defmodule Aimax.AgentTest do
 
     text = Buffer.text(buf)
     hello = :binary.match(text, "Hello world.") |> elem(0)
-    tool = :binary.match(text, "▸ read · Read foo.ex") |> elem(0)
+    tool = :binary.match(text, "▸ read · Read foo.ex: foo.ex") |> elem(0)
     body = :binary.match(text, "defmodule Foo") |> elem(0)
     done = :binary.match(text, "Done.") |> elem(0)
     assert hello < tool and tool < body and body < done
+    assert text =~ "foo.ex\n\ndefmodule Foo"
 
     # tool body hidden; marker still at the very end
     assert [{s, e} | _] = Buffer.hidden(buf)
@@ -417,10 +419,11 @@ defmodule Aimax.AgentTest do
     assert "user" in kinds and "prose" in kinds and "tool" in kinds
     refute "waiting" in kinds
 
-    [_, _, "tool", "tc1", "Read foo.ex", "read", "done", body_start] =
+    [_, _, "tool", "tc1", "Read foo.ex: foo.ex", "read", "done", body_start] =
       Enum.find(blocks, fn [_, _, k | _] -> k == "tool" end)
 
-    assert binary_part(text, body_start, 13) == "defmodule Foo"
+    input_and_result = "foo.ex\n\ndefmodule Foo"
+    assert binary_part(text, body_start, byte_size(input_and_result)) == input_and_result
     assert Buffer.get_local(buf, "render-mode") == "agent"
   end
 
@@ -649,6 +652,60 @@ defmodule Aimax.AgentTest do
                    1_000
 
     _ = agent
+  end
+
+  test "C-g cancels every queued turn and finalizes running tool cards" do
+    {slug, buf, agent} = boot("")
+
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "long task")])
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => prompt_id}}, 1_000
+
+    update(agent, "sess-1", %{
+      "sessionUpdate" => "tool_call",
+      "toolCallId" => "tc-abort",
+      "title" => "aimax/eval-scheme",
+      "kind" => "execute",
+      "status" => "in_progress",
+      "rawInput" => %{"code" => "(long-running-call)"}
+    })
+
+    assert eventually(fn ->
+             Enum.any?(Buffer.get_local(buf, "agent-blocks"), fn
+               [_, _, "tool", "tc-abort", _, _, "running", _] -> true
+               _ -> false
+             end)
+           end)
+
+    focus(buf)
+    type("do not run this next")
+    press(["RET"])
+    assert eventually(fn -> Agent.info(slug).queued == 1 end)
+
+    press(["C-g"])
+
+    assert_receive {:frame,
+                    %{"method" => "session/cancel", "params" => %{"sessionId" => "sess-1"}}},
+                   1_000
+
+    assert eventually(fn ->
+             Enum.any?(Buffer.get_local(buf, "agent-blocks"), fn
+               [_, _, "tool", "tc-abort", _, _, "cancelled", _] -> true
+               _ -> false
+             end)
+           end)
+
+    refute "tc-abort" in (Buffer.get_local(buf, "agent-open-cards") || [])
+    assert Buffer.get_local(buf, "agent-queued") == []
+    refute Buffer.text(buf) =~ "do not run this next"
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => prompt_id,
+      "result" => %{"stopReason" => "cancelled"}
+    })
+
+    assert eventually(fn -> match?(%{status: :idle, queued: 0}, Agent.info(slug)) end)
+    refute_receive {:frame, %{"method" => "session/prompt"}}, 200
   end
 
   test "connectors: named config resolves into the session; per-call opts win" do

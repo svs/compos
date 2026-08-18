@@ -38,7 +38,11 @@ defmodule Aimax.Ui.AgentViewTest do
     t_start = Buffer.byte_size(buf)
     Buffer.append(buf, "\n▸ run · M-x profile\n", source: :editor)
     b_start = Buffer.byte_size(buf)
-    Buffer.append(buf, "p95 9.4ms\n", source: :editor)
+
+    result =
+      ~s({"_meta":null,"content":[{"text":"p95 9.4ms","type":"text"}],"structuredContent":null})
+
+    Buffer.append(buf, result <> "\n", source: :editor)
     mark = Buffer.byte_size(buf)
     Buffer.append(buf, "\n>>> you: ", source: :editor)
     Buffer.append(buf, "half-typed", source: :editor)
@@ -56,7 +60,7 @@ defmodule Aimax.Ui.AgentViewTest do
     ])
 
     Editor.set_window_buffer(buf)
-    {:ok, _view, html} = live(conn, "/")
+    {:ok, view, html} = live(conn, "/")
 
     assert html =~ "agent-view"
     assert html =~ "ag-user"
@@ -65,13 +69,52 @@ defmodule Aimax.Ui.AgentViewTest do
     assert html =~ "<strong>0.6ms</strong>"
     # tool card with verb, title, status; body present
     assert html =~ "ag-verb"
+    assert html =~ "ag-chevron"
+    assert html =~ "ag-tool done"
+    assert html =~ "ag-shimmer"
+    assert html =~ "run M-x profile, done. Toggle call details"
     assert html =~ "M-x profile"
-    assert html =~ "p95 9.4ms"
+    refute html =~ "structuredContent"
+    assert has_element?(view, ".ag-preview", "p95 9.4ms")
+    refute has_element?(view, "details.ag-tool[open]")
+
+    view |> element(~s(summary[phx-click="agent_card"])) |> render_click()
+    assert has_element?(view, "details.ag-tool[open] pre.ag-body", "p95 9.4ms")
+    refute has_element?(view, "details.ag-tool[open] pre.ag-body", result)
+    refute has_element?(view, ".ag-preview")
     # input row carries the typed tail; the hint yields its space while typing
     assert html =~ "half-typed"
     refute html =~ "RET sends"
     # no raw marker rendered in rich mode
     refute html =~ ">>> you: profile"
+  end
+
+  test "agent tool cards pretty-print JSON without changing transcript bytes", %{conn: conn} do
+    buf = "*agent: json-view-test*"
+    {:ok, _} = Aimax.Core.create_buffer(buf)
+
+    Buffer.append(buf, "\n▸ read · inspect result\n", source: :editor)
+    body_start = Buffer.byte_size(buf)
+    raw = ~s({"count":2,"items":["a","b"]})
+    Buffer.append(buf, raw <> "\n", source: :editor)
+    mark = Buffer.byte_size(buf)
+    Buffer.append(buf, "\n>>> you: ", source: :editor)
+
+    Buffer.set_local(buf, "render-mode", "agent")
+    Buffer.set_local(buf, "agent-saved-mark", mark)
+    Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
+    Buffer.set_local(buf, "agent-open-cards", ["json-1"])
+
+    Buffer.set_local(buf, "agent-blocks", [
+      [0, mark, "tool", "json-1", "inspect result", "read", "done", body_start]
+    ])
+
+    Editor.set_window_buffer(buf)
+    {:ok, _view, html} = live(conn, "/")
+
+    assert html =~ "\n  &quot;"
+    refute html =~ ~s({&quot;count&quot;:2)
+    assert Buffer.text(buf) =~ raw
   end
 
   test "permission block renders buttons that dispatch agent commands", %{conn: conn} do

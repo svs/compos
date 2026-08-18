@@ -275,7 +275,10 @@ defmodule Aimax.Core.Agent.Backend.ACP do
 
       {_, %{"error" => err}} ->
         state =
-          emit(state, type: :error, text: "#{method}: #{Map.get(err, "message") || Backend.error_text(err)}")
+          emit(state,
+            type: :error,
+            text: "#{method}: #{Map.get(err, "message") || Backend.error_text(err)}"
+          )
 
         # a failed prompt still ends the turn — a thread must never wedge
         # in :running with no reply coming
@@ -359,6 +362,11 @@ defmodule Aimax.Core.Agent.Backend.ACP do
         emit(state,
           type: :"tool-call",
           id: Map.get(update, "toolCallId", ""),
+          # ACP supplies structured rawInput for exactly this purpose. Keep
+          # transport conversion here; Scheme decides which argument names
+          # and values make a useful card title.
+          name: present_text(Map.get(update, "title")),
+          input: json_text(Map.get(update, "rawInput")),
           title: Map.get(update, "title", ""),
           kind: Map.get(update, "kind", ""),
           status: Map.get(update, "status", "pending")
@@ -391,6 +399,18 @@ defmodule Aimax.Core.Agent.Backend.ACP do
   end
 
   defp handle_update(state, _), do: state
+
+  defp present_text(value) when is_binary(value) and value != "", do: value
+  defp present_text(_), do: nil
+
+  defp json_text(nil), do: nil
+
+  defp json_text(value) do
+    case Jason.encode(value) do
+      {:ok, json} -> json
+      _ -> inspect(value)
+    end
+  end
 
   defp content_text(%{"type" => "text", "text" => t}), do: t
   defp content_text(_), do: ""

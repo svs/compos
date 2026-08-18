@@ -288,24 +288,71 @@ defmodule Aimax.Ui.Layouts do
           /* a header names the column: it never reads better wrapped */
           .ag-prose th { font-weight: 600; white-space: nowrap; }
           .ag-tool, .ag-thought {
-            margin: 8px 0; border: 1px solid var(--agent-card-border, rgba(0,0,0,0.10));
-            border-radius: 8px; font-family: var(--font-mono); font-size: 12px;
+            margin: 5px 0; border: 1px solid var(--agent-card-border, rgba(0,0,0,0.10));
+            border-radius: 7px; font-family: var(--font-mono); font-size: 12px;
+            background: color-mix(in srgb, var(--window-bg, #fdfcf8) 96%, var(--agent-tool-fg, #26356b));
           }
           .ag-tool summary, .ag-thought summary {
-            display: flex; align-items: center; gap: 8px; padding: 6px 10px;
-            cursor: pointer; list-style: none; user-select: none;
+            display: flex; align-items: center; gap: 7px; min-height: 32px;
+            padding: 4px 9px 4px 7px; cursor: pointer; list-style: none; user-select: none;
           }
           .ag-tool summary::-webkit-details-marker { display: none; }
+          .ag-tool.running summary { position: relative; overflow: hidden; }
+          .ag-tool.running summary::after {
+            content: ""; position: absolute; inset: 0; pointer-events: none;
+            background: linear-gradient(
+              105deg,
+              transparent 20%,
+              color-mix(in srgb, var(--agent-tool-fg, #26356b) 13%, transparent) 46%,
+              transparent 72%
+            );
+            transform: translateX(-120%); animation: ag-shimmer 1.8s ease-in-out infinite;
+          }
+          .ag-tool[open] {
+            margin: 8px 0;
+            border-color: color-mix(in srgb, var(--agent-tool-fg, #26356b) 35%, transparent);
+          }
+          .ag-chevron {
+            width: 11px; flex: 0 0 11px; color: var(--agent-meta-fg, #8a8577);
+            font-family: var(--font-sans); font-size: 17px; line-height: 1;
+            transform: rotate(0deg); transition: transform 100ms ease;
+          }
+          .ag-tool[open] .ag-chevron { transform: rotate(90deg); }
           .ag-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--agent-meta-fg, #999); }
           .ag-dot.running { background: var(--warn-fg, #e0af68); animation: ag-pulse 1.2s ease-in-out infinite; }
           .ag-dot.done { background: var(--string-fg, #4a7a4a); }
-          .ag-verb { color: var(--agent-tool-fg, #26356b); font-weight: 600; }
-          .ag-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-          .ag-tstatus { color: var(--agent-meta-fg, #8a8577); font-size: 10px; }
+          .ag-dot.failed { background: var(--error-fg, #a8342a); }
+          .ag-kind {
+            padding: 1px 5px; border-radius: 4px; color: var(--agent-tool-fg, #26356b);
+            background: color-mix(in srgb, var(--agent-tool-fg, #26356b) 10%, transparent);
+            font-family: var(--font-sans); font-size: 9px; font-weight: 700;
+            letter-spacing: 0.05em; text-transform: uppercase;
+          }
+          .ag-summary-copy {
+            display: flex; flex: 1; min-width: 0; flex-direction: column;
+            justify-content: center; gap: 1px;
+          }
+          .ag-title {
+            display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap; color: var(--window-fg, inherit); font-size: 11.5px;
+          }
+          .ag-preview {
+            display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap; color: var(--agent-meta-fg, #8a8577);
+            font-family: var(--font-mono); font-size: 10px; line-height: 1.25;
+          }
+          .ag-preview::before { content: "↳ "; color: var(--agent-tool-fg, #26356b); }
+          .ag-tstatus {
+            color: var(--agent-meta-fg, #8a8577); font-family: var(--font-sans);
+            font-size: 9.5px; letter-spacing: 0.02em;
+          }
+          .ag-tstatus.done::before { content: "✓ "; color: var(--string-fg, #4a7a4a); }
+          .ag-tstatus.failed { color: var(--error-fg, #a8342a); }
           .ag-body {
             border-top: 1px solid var(--agent-card-border, rgba(0,0,0,0.08));
-            padding: 8px 10px; overflow-x: auto; max-height: 260px; overflow-y: auto;
+            margin: 0; padding: 10px 12px; overflow-x: auto; max-height: 320px; overflow-y: auto;
             white-space: pre-wrap; overflow-wrap: anywhere; color: var(--agent-thought-fg, #6a675e);
+            background: color-mix(in srgb, var(--agent-code-bg, rgba(0,0,0,0.06)) 60%, transparent);
           }
           .ag-thought summary { color: var(--agent-thought-fg, #8a8577); font-size: 10.5px; }
           .ag-thought-text { padding: 6px 10px; white-space: pre-wrap; color: var(--agent-thought-fg, #8a8577); }
@@ -336,6 +383,10 @@ defmodule Aimax.Ui.Layouts do
           .ag-wait {
             font-family: var(--font-mono); font-size: 12px; margin: 8px 0;
             color: var(--agent-thought-fg, #8a8577); animation: ag-pulse 1.4s ease-in-out infinite;
+          }
+          @keyframes ag-shimmer {
+            0%, 18% { transform: translateX(-120%); }
+            82%, 100% { transform: translateX(120%); }
           }
           .ag-meta { font-family: var(--font-mono); font-size: 11.5px; color: var(--agent-meta-fg, #8a8577); margin: 6px 0; }
           @keyframes ag-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }

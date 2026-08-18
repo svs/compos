@@ -5092,6 +5092,13 @@
       (buffer-delete-range! buf (chat-input-start buf) (car q))
       (buffer-set-local! buf 'agent-queued (cdr q)))))
 
+;; Abort discards every queued turn, including its muted input text.
+(define (chat-clear-queued! buf)
+  (let ((bytes (chat-queued-bytes buf)))
+    (when (> bytes 0)
+      (buffer-delete-range! buf (chat-input-start buf) bytes))
+    (buffer-set-local! buf 'agent-queued '())))
+
 ;;; --- the conversation of record ------------------------------------------------
 ;;; ...moved to packages/chat.scm: the record, compaction, healing, the
 ;;; tool surface, the usage ledger, and the direct lane's turn context.

@@ -92,7 +92,9 @@ defmodule Aimax.ChatAgentTest do
     %{"params" => %{"mcpServers" => servers}} = handshake(agent)
 
     names = Enum.map(servers, & &1["name"])
-    refute "aimax" in names
+    # the editor bridge is intrinsic: every agent session carries it, and the
+    # caller's own presets ride beside it
+    assert "aimax" in names
     assert "zzsrv" in names
 
     # "@" env refs resolved at the boundary, not stored anywhere
@@ -161,6 +163,44 @@ defmodule Aimax.ChatAgentTest do
                     (agent-update-modeline! "#{buf}"))})
 
     assert eval!(~s{(buffer-local "#{buf}" 'modeline-info)}) =~ "claude-opus-5"
+  end
+
+  test "a failed inline turn says why and clears its pending send" do
+    buf = "*zz-inline-fail*"
+    eval!(~s{(buffer-create "#{buf}")})
+    on_exit(fn -> Aimax.Core.kill_buffer(buf) end)
+
+    # one pending send, the shape llm-mode--complete records
+    eval!(~s{(llm-inline-put! (list "inline-zz" "#{buf}" (lambda (text) text) "" #f))})
+
+    # the backend consumes turn-failed itself, so an error event is the last
+    # thing this buffer ever hears about the turn
+    eval!(~s{(llm-inline-events! "inline-zz" (list (list 'type 'error 'text "model refused")))})
+
+    assert eval!(~s{(assoc "inline-zz" *llm-inline-sends*)}) == "#f"
+    assert eval!(~s{(buffer-text "*messages*")}) =~ "LLM failed · model refused"
+  end
+
+  test "an inline send answers the permission its own tool call raises" do
+    # Codex asks before every MCP tool call. A chat draws a block and waits;
+    # an inline send has no such surface and must answer for itself.
+    event =
+      ~s{(list 'type 'permission 'rpc-id 92 'title "Use aimax/apropos" 'kind "mcp" 'options } <>
+        ~s{(list (list "allow_once" "Allow" "allow_once") } <>
+        ~s{(list "allow_always" "Always" "allow_always")))}
+
+    assert eval!(~s{(llm-inline--allow-option #{event})}) == ~s("allow_always")
+
+    # only "allow_once" on offer: still yes, never a silent wait
+    once = ~s{(list 'type 'permission 'rpc-id 92 'options (list (list "allow_once" "Allow" "allow_once")))}
+    assert eval!(~s{(llm-inline--allow-option #{once})}) == ~s("allow_once")
+
+    # nothing on offer at all still resolves to a yes rather than #f
+    assert eval!(~s{(llm-inline--allow-option (list 'type 'permission))}) == ~s("allow_once")
+
+    # an ask with no rpc id is not answerable, and must not raise
+    assert eval!(~s{(begin (llm-inline-allow! "inline-zz-none" (list 'type 'permission)) 'ok)}) ==
+             "ok"
   end
 
   test "the proxy surface serves the registry and calls tools, base64 both ways" do

@@ -389,9 +389,13 @@
 ;;; wrote, cut at the query string: a key can ride there.
 
 ;; the editor itself as an MCP server: the define-tool! registry bridged
-;; over the daemon socket, so external agents read and edit live buffers
+;; over the daemon socket, so external agents read and edit live buffers.
+;; The socket is named, not defaulted: a second daemon (AIMAX_HOME) listens
+;; on its own path, and its agents must reach IT, not the default one.
 (mcp-register! 'aimax
-  (list 'command "elixir" 'args (list (priv-path "aimax-mcp-proxy.exs"))))
+  (list 'command "elixir"
+        'args (list (priv-path "aimax-mcp-proxy.exs"))
+        'env (list 'AIMAX_SOCK (aimax-socket-path))))
 
 (define-preset! 'aimax "Live ai-max editor tools" '(aimax))
 

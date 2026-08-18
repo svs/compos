@@ -3776,14 +3776,57 @@
         (message "LLM mode disabled"))))
 
 (mode-doc! "llm-mode"
-  "In-buffer LLM interaction. `M-o` sends the document and inserts the response at point with a distinct response face; `C-c b` chooses backend, model, and effort.")
+  "In-buffer LLM interaction. `M-o` sends the document and inserts the response at point with a distinct response face; `C-c b` chooses backend, model, effort, and tool presets.")
+
+;; Inline sessions are durable agent conversations by default, matching
+;; Codex's editor integrations: one native thread stays attached to the
+;; buffer and M-o sends only the next turn.  The direct API lane remains an
+;; explicit choice in C-c b for users who want a stateless replay.
+(define *llm-mode-connector* "codex-app-server")
+
+;; One model wears two names: the API lane spells it "openai:gpt-5.6-luna" and
+;; a subscription connector spells the same model "gpt-5.6-luna".
+(define (llm--model-bare m)
+  (let ((parts (string-split m ":")))
+    (if (> (length parts) 1) (car (cdr parts)) #f)))
+
+;; The name CNAME lists for this model, or #f when that connector does not
+;; have the model at all.
+(define (connector-model-id cname m)
+  (let ((models (if (boundp (quote connector-models)) (connector-models cname) '())))
+    (cond ((not m) #f)
+          ((member m models) m)
+          (else (let ((bare (llm--model-bare m)))
+                  (and bare (member bare models) bare))))))
+
+;; the connector that has this model, or #f. Hidden connectors are
+;; compatibility names for saved chats; a new session never picks one. The
+;; metered lane answers last: it serves nearly every model, and a
+;; subscription connector that has the model is the cheaper lane.
+(define (llm--connector-owning m)
+  (let* ((names (if (boundp (quote connector-names)) (connector-names) '()))
+         (ordered
+           (append (filter (lambda (c) (not (connector-can? c 'metered))) names)
+                   (filter (lambda (c) (connector-can? c 'metered)) names))))
+    (let loop ((cs ordered))
+      (cond ((null? cs) #f)
+            ((connector-model-id (car cs) m) (car cs))
+            (else (loop (cdr cs)))))))
+
+;; The model names the lane. A model the default connector does not have must
+;; reach the connector that does: Codex answers a model id it does not know
+;; with a 400 on the first send, so a buffer holding an API model id — the
+;; editor's own default model is one — got no answer and no reason for it.
+(define (llm-connector-for-model m)
+  (cond ((not (boundp (quote connector-models))) *llm-mode-connector*)
+        ((not m) *llm-mode-connector*)
+        ((connector-model-id *llm-mode-connector* m) *llm-mode-connector*)
+        ((llm--connector-owning m))
+        (else "api")))
 
 (define (buffer-llm-connector buf)
-  ;; Inline sessions are durable agent conversations by default, matching
-  ;; Codex's editor integrations: one native thread stays attached to the
-  ;; buffer and M-o sends only the next turn.  The direct API lane remains an
-  ;; explicit choice in C-c b for users who want a stateless replay.
-  (or (buffer-local buf 'llm-connector) "codex-app-server"))
+  (or (buffer-local buf 'llm-connector)
+      (llm-connector-for-model (buffer-llm-model buf))))
 
 (define (buffer-llm-model buf)
   (or (buffer-local buf 'llm-model) (llm-model)))
@@ -3932,10 +3975,36 @@
                    (buffer-set-local! (cadr e) 'llm-thread-id
                      (plist-get event 'id)))))
               ((equal? type 'error)
-               (llm-inline-error! id (or (plist-get event 'text) "request failed")))
+               ;; A failed turn ends in turn-failed, which the status machine
+               ;; consumes: no turn-end ever reaches this buffer. Finish the
+               ;; send here, or the reason stays invisible and the entry
+               ;; leaks. Finishing removes the entry, so a turn-end that does
+               ;; arrive after an error is a no-op.
+               (llm-inline-error! id (or (plist-get event 'text) "request failed"))
+               (llm-inline-finish! id))
+              ;; Codex asks before every MCP tool call (an elicitation
+              ;; becomes this event). A chat draws a permission block and
+              ;; waits for the user; an inline send has no such surface, so
+              ;; an unanswered ask parked the session in needs_attention and
+              ;; the turn died there — the tools looked absent. Inline sends
+              ;; already declare their policy as allow, so answer here.
+              ((equal? type 'permission)
+               (llm-inline-allow! id event))
               ((equal? type 'turn-end)
                (llm-inline-finish! id)))))
     events))
+
+;; the option that says yes for the rest of the session, else the plain yes
+(define (llm-inline--allow-option event)
+  (let loop ((os (or (plist-get event 'options) '())) (once #f))
+    (cond ((null? os) (or once "allow_once"))
+          ((equal? (car (car os)) "allow_always") "allow_always")
+          (else (loop (cdr os) (or once (car (car os))))))))
+
+(define (llm-inline-allow! id event)
+  (let ((rpc (plist-get event 'rpc-id)))
+    (when rpc
+      (agent-permission-respond! id rpc (llm-inline--allow-option event)))))
 
 ;; Presets supply the complete tool surface. The runtime opens lazily on the
 ;; first send, stays attached to BUF, and (for Codex) records a native thread
@@ -3943,6 +4012,9 @@
 (define (llm-mode--complete buf wire display model handler)
   (let* ((id (llm-mode--session-id buf))
          (connector (buffer-llm-connector buf))
+         ;; the name this connector knows the model by: the API lane says
+         ;; "openai:gpt-5.6-luna" and Codex says "gpt-5.6-luna"
+         (model (or (connector-model-id connector model) model))
          (effort (buffer-local buf 'llm-effort))
          (config (agent-resolve-config
                    (append

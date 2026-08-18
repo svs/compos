@@ -219,7 +219,9 @@ defmodule Aimax.WritingTest do
     refute Buffer.get_local(scratch, "visual-line-mode")
     assert Buffer.get_local(scratch, "minor-modes") == ["llm-mode"]
     assert Buffer.get_local(scratch, "chat-presets") == [sym: "aimax"]
-    assert eval!(~s{(buffer-llm-connector "#{scratch}")}) == ~s("codex-app-server")
+    # the model names the lane: the editor's default model is a Claude model,
+    # and the connector that has it is the one the session opens on
+    assert eval!(~s{(buffer-llm-connector "#{scratch}")}) == ~s("claude-code")
     refute "llm-mode" in Buffer.get_local(buf, "minor-modes")
 
     # C-c s is navigation once Writing Mode has established the workspace.
@@ -260,6 +262,30 @@ defmodule Aimax.WritingTest do
     assert length(windows) == 2
     assert Enum.map(windows, fn {_id, name} -> name end) == [buf, scratch]
     assert Editor.current_buffer() == buf
+  end
+
+  test "an inline session runs on the connector that has its model" do
+    buf = fresh_buffer("wr-lane-#{System.unique_integer([:positive])}.md", "Draft.\n")
+    scratch = "*scratch:#{buf}*"
+
+    on_exit(fn ->
+      eval!(~s{(customize-set! 'writing-model "")})
+      if Buffer.exists?(scratch), do: Aimax.Core.kill_buffer(scratch)
+    end)
+
+    # an API-lane model id names the same model Codex spells without the
+    # provider prefix: the session opens on Codex, under the name Codex knows
+    eval!(~s{(customize-set! 'writing-model "openai:gpt-5.6-luna")})
+    eval!(~s{(run-command "writing-mode")})
+
+    assert eval!(~s{(buffer-llm-connector "#{scratch}")}) == ~s("codex-app-server")
+
+    assert eval!(~s{(connector-model-id "codex-app-server" "openai:gpt-5.6-luna")}) ==
+             ~s("gpt-5.6-luna")
+
+    # a model no connector has still reaches the metered lane rather than
+    # failing at the first send
+    assert eval!(~s{(llm-connector-for-model "made-up:model")}) == ~s("api")
   end
 
   test "a mode's layout declaration is what the engine applies" do

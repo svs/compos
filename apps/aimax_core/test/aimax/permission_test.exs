@@ -115,6 +115,28 @@ defmodule Aimax.PermissionTest do
                "#f"
     end
 
+    test "modes can grant a named command through the shared policy" do
+      allowed = "*zz-command-allowed*"
+      other = "*zz-command-other*"
+      eval!(~s{(begin (buffer-create "#{allowed}") (buffer-create "#{other}"))})
+
+      on_exit(fn ->
+        Aimax.Core.kill_buffer(allowed)
+        Aimax.Core.kill_buffer(other)
+      end)
+
+      eval!(
+        ~s{(allow-command-when! "zz-reload"
+              (lambda (buf) (equal? buf "#{allowed}")))}
+      )
+
+      assert eval!(~s{(*permission-policy* "#{allowed}" "zz-reload" "command" "")}) ==
+               "allow-always"
+
+      assert eval!(~s{(*permission-policy* "#{other}" "zz-reload" "command" "")}) ==
+               "ask"
+    end
+
     test "the MCP proxy refuses deny-listed payloads even when the agent stopped asking" do
       args = Base.encode64(Jason.encode!(%{"code" => ~s{(mail-send "bob" "hi")}}))
 

@@ -4242,9 +4242,24 @@
 (mode-doc! "chat-mode"
   "A conversation with a model. `RET` sends what you typed and `S-RET` starts a new line. `C-g` stops the answer. `C-c C-k` clears the conversation but keeps the model.")
 
+(define *chat-restart-message*
+  "Continue the work interrupted by the editor restart. Recheck the current workspace state before acting.")
+
+(define (chat-recover-interrupted! buf)
+  (when (and (buffer-exists? buf)
+             (buffer-local buf 'chat-turn-active)
+             (not (chat-live-runtime? buf)))
+    (if (boundp (quote agent-send-msg!))
+        (let ((slug (chat-attach! buf)))
+          (agent-send-msg! slug *chat-restart-message*)
+          (message (string-append "agent " slug ": continuing after restart")))
+        (debounce! (string-append "chat-recover:" buf) 100
+                   chat-recover-interrupted! buf))))
+
 (define-mode "chat-mode"
   (lambda ()
-    (let ((buf (current-buffer)))
+    (let ((buf (current-buffer))
+          (interrupted? (buffer-local (current-buffer) 'chat-turn-active)))
       (local-set-key "C-c m" "chat-set-model")
       (local-set-key "C-c $" "chat-cost")
       (local-set-key "C-c b" "llm-configure")
@@ -4256,6 +4271,9 @@
       ;; same setup fn also runs via set-mode! on LIVE chats, where the
       ;; slug is the only handle on a running thread.
       (chat-sweep-runtime-locals! buf)
+      (when (and interrupted? (not (chat-live-runtime? buf)))
+        (debounce! (string-append "chat-recover:" buf) 100
+                   chat-recover-interrupted! buf))
       ;; a chat saved before the conversation of record existed carries the
       ;; old (role text) pairs — read them once, here, so a restored chat
       ;; has a record like any other
@@ -4678,6 +4696,7 @@
 (define chat-conversation-locals
   '(chat-wire-turns chat-turns agent-blocks agent-overlays agent-folds
     agent-open-cards
+    chat-turn-active
     chat-tool-specs chat-cost chat-last-usage chat-usage-total
     ;; the turn this chat last named itself on: a reset starts a new
     ;; conversation, which must name itself again from its first turn
@@ -6589,16 +6608,21 @@
 (domain! 'system)
 (effects! '(destroy execute))
 
-;; A restart saves the desktop first, so every buffer and window comes back.
-;; The command asks once, then hands off: the daemon respawns itself and the
-;; browser reloads on the new boot-id.
+(define (restart-daemon-now!)
+  (if (daemon-restart!)
+      (message "Restarting…")
+      (message "Restart refused")))
+
 (define-command "restart-daemon" "Save the desktop and restart the daemon"
   (lambda ()
-    (y-or-n "Restart the daemon?"
-      (lambda ()
-        (if (daemon-restart!)
-            (message "Restarting…")
-            (message "Restart refused"))))))
+    (let ((tool-buf (and (boundp (quote *llm-tool-buffer*))
+                         *llm-tool-buffer*)))
+      (if tool-buf
+          (if (member (*permission-policy* tool-buf "restart-daemon" "command" "")
+                      '(allow allow-always))
+              (restart-daemon-now!)
+              (error "restart-daemon requires user permission"))
+          (y-or-n "Restart the daemon?" restart-daemon-now!)))))
 
 (domain! 'unknown)
 (effects! '(unknown))

@@ -152,4 +152,41 @@ defmodule Aimax.Ui.EditorLiveTest do
     # event-driven re-render
     assert render(view) =~ "pushed from outside"
   end
+
+  test "a completed rich chat accepts the next input through the UI", %{conn: conn} do
+    before = MapSet.new(Aimax.Core.Agent.list())
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (execute* "first" '(backend "stub" script
+        (((type tool-call id "tc1" title "Large completed edit" kind "edit" status "pending")
+          (type tool-update id "tc1" status "completed" text "#{String.duplicate("changed line", 2_000)}"))
+         ((type chunk text "Accepted next input.")))))
+      """)
+
+    [slug] = MapSet.difference(MapSet.new(Aimax.Core.Agent.list()), before) |> MapSet.to_list()
+    on_exit(fn -> Aimax.Core.Agent.kill(slug) end)
+
+    assert eventually(fn -> Aimax.Core.Agent.info(slug).status == :idle end)
+    buf = Aimax.Core.Agent.info(slug).buffer
+
+    {:ok, view, _} = live(conn, "/b/" <> URI.encode_www_form(buf))
+    keys(view, String.graphemes("done?") ++ ["RET"])
+
+    assert eventually(fn -> render(view) =~ "Accepted next input." end)
+  end
+
+  defp eventually(fun, tries \\ 60) do
+    cond do
+      fun.() ->
+        true
+
+      tries == 0 ->
+        false
+
+      true ->
+        Process.sleep(25)
+        eventually(fun, tries - 1)
+    end
+  end
 end

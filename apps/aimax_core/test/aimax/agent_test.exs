@@ -733,6 +733,47 @@ defmodule Aimax.AgentTest do
     assert_receive {:transport_open, _fresh}, 1_000
   end
 
+  test "desktop restore reconnects and continues a turn interrupted by restart" do
+    {slug, buf, agent} = boot("")
+
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "finish the repair")])
+    assert_receive {:frame, %{"method" => "session/prompt"}}, 1_000
+    assert eventually(fn -> Buffer.text(buf) =~ ">>> you: finish the repair" end)
+    assert Buffer.get_local(buf, "chat-turn-active")
+
+    update(agent, "sess-1", %{
+      "sessionUpdate" => "agent_message_chunk",
+      "content" => %{"type" => "text", "text" => "I started the repair.\n"}
+    })
+
+    assert eventually(fn -> Buffer.text(buf) =~ "I started the repair." end)
+    assert :ok = Aimax.Core.Desktop.save_now()
+
+    Agent.kill(slug)
+    evict(buf)
+    assert :ok = Aimax.Core.Desktop.restore_now()
+
+    # No key press: chat-mode sees the durable in-flight flag and reconnects.
+    assert_receive {:transport_open, fresh}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(fresh, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{"protocolVersion" => 1}})
+
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+    inject(fresh, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "sess-2"}})
+
+    assert_receive {:frame,
+                    %{"method" => "session/prompt", "id" => prompt_id, "params" => prompt}},
+                   1_000
+
+    [%{"text" => wire}] = prompt["prompt"]
+    assert wire =~ "finish the repair"
+    assert wire =~ "Continue the work interrupted by the editor restart"
+    assert Buffer.text(buf) =~ "fresh session"
+
+    inject(fresh, %{"jsonrpc" => "2.0", "id" => prompt_id, "result" => %{"stopReason" => "end_turn"}})
+    assert eventually(fn -> Buffer.get_local(buf, "chat-turn-active") == false end)
+  end
+
   test "RET on a dead thread revives it on its connector and sends" do
     {slug, buf, agent} = boot("")
     Agent.kill(slug)

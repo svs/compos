@@ -61,6 +61,15 @@ defmodule Aimax.CodeModeTest do
     assert Buffer.get_local(buf, "modeline-info") == "code · aimax"
   end
 
+  test "the shared policy lets a code workspace chat restart the daemon" do
+    buf = fresh_buffer("cm-restart-#{System.unique_integer([:positive])}.ex", "code\n")
+    eval!(~s{(run-command "code-mode")})
+    chat = eval!(~s{(group-chat "#{buf}")}) |> String.trim("\"")
+
+    assert eval!(~s{(*permission-policy* "#{chat}" "restart-daemon" "command" "")}) ==
+             "allow-always"
+  end
+
   test "the coding presets ride over the buffer's own, and a removed one does not linger" do
     buf = fresh_buffer("cm-presets-#{System.unique_integer([:positive])}.ex", "code\n")
 

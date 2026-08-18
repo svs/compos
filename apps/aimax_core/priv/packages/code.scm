@@ -742,6 +742,19 @@
     (append code-presets
             (filter (lambda (preset) (not (member preset code-presets))) base))))
 
+(define (code-mode--workspace-buffers buf)
+  (let ((g (buffer-group buf)))
+    (if g (group-buffers g) (list buf))))
+
+(define (code-mode--workspace? buf)
+  (and buf
+       (buffer-exists? buf)
+       (pair? (filter (lambda (b) (minor-mode-on? b "code-mode"))
+                      (code-mode--workspace-buffers buf)))))
+
+;; A code workspace can reload Scheme and continue its interrupted turn.
+(allow-command-when! "restart-daemon" code-mode--workspace?)
+
 ;; A code change touches more than one file, so the group is the PROJECT
 ;; when the buffer has one: the chat then names every project buffer, and
 ;; `C-x p s` opens the same conversation for the whole project. A file

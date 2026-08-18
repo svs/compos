@@ -316,6 +316,7 @@
        (agent-update-modeline! buf))
 
       ((equal? type 'user-msg)
+       (buffer-set-local! buf 'chat-turn-active #t)
        (chat-pop-queued! buf)
        ;; the conversation of record is the truth on EVERY backend: the api
        ;; lane replays it per request, ACP seeds a fresh session from it,
@@ -430,6 +431,7 @@
                'cost (plist-get e 'cost))))
 
       ((equal? type 'turn-end)
+       (buffer-set-local! buf 'chat-turn-active #f)
        (buffer-set-local! buf 'agent-cancelling #f)
        (let ((text (buffer-local buf 'agent-turn-text)))
          (cond
@@ -475,12 +477,14 @@
                ""))))
 
       ((equal? type 'error)
+       (buffer-set-local! buf 'chat-turn-active #f)
        (let ((start (agent-render! slug
                       (string-append "\n[error: " (plist-get e 'text) "]\n")
                       "agent-meta")))
          (agent-block-push! buf start (agent-mark slug) "meta" '())))
 
       ((equal? type 'dead)
+       (buffer-set-local! buf 'chat-turn-active #f)
        (agent-block-drop-kind! buf "permission")
        (let ((start (agent-render! slug "\n[agent exited]\n" "agent-meta")))
          (agent-block-push! buf start (agent-mark slug) "meta" '())))
@@ -567,6 +571,22 @@
                  ((re-match? (car ps) t) (car ps))
                  (else (loop (cdr ps))))))))
 
+;; Modes grant named commands through the same policy as tools. A rule sees
+;; the chat buffer and returns true only for the workspace it owns.
+(define *command-permission-rules* '())
+
+(define (allow-command-when! name predicate)
+  (set! *command-permission-rules*
+    (cons (list name predicate) *command-permission-rules*))
+  name)
+
+(define (command-permitted? buf name)
+  (let loop ((rules *command-permission-rules*))
+    (cond ((null? rules) #f)
+          ((and (equal? name (car (car rules)))
+                ((cadr (car rules)) buf)) #t)
+          (else (loop (cdr rules))))))
+
 ;; The one policy. Override wholesale in ~/.aimax/init.scm:
 ;;   (set! *permission-policy* (lambda (buf title kind raw) 'allow))
 ;; -> 'allow | 'allow-always | 'ask | 'reject
@@ -578,8 +598,15 @@
       (cond ((equal? kind "execute") 'reject)  ; no shell — aimax is the only sandbox
             ((permission-denied-verb? text) 'ask)
             ((profile-denies? profile text) 'reject)
+            ((and (equal? kind "command")
+                  (command-permitted? buf title)) 'allow-always)
+            ((equal? kind "command") 'ask)
             ((equal? (chat-permission-mode buf) 'ask) 'ask)
             (else 'allow-always)))))
+
+(public! 'allow-command-when!
+  "(allow-command-when! NAME PREDICATE) — register a permission predicate that can allow one M-x command for a chat buffer")
+(catalog-meta! 'function "allow-command-when!" 'domain 'permissions 'effects '(write))
 
 ;; the direct lane's gate (Backend.ReqLLM calls this before every tool):
 ;; collapse to the three verdicts Elixir understands

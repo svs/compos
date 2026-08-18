@@ -13,6 +13,11 @@
 
 (define *llm-tools* '())
 
+;; Non-#f only while an LLM tool evaluates Scheme. Browser policy uses this
+;; dynamic seam to restrict agents without breaking the user's browser-aware
+;; editor commands.
+(define *llm-tool-buffer* #f)
+
 (define (define-tool! name description params handler)
   (set! *llm-tools*
     (cons (list name (list 'description description 'params params 'handler handler))
@@ -207,11 +212,17 @@
   (list (list 'code "string" "Scheme source to evaluate"))
   (lambda (args)
     (let* ((code (custom--plist-get args 'code))
+           (previous-tool-buffer *llm-tool-buffer*)
            ;; A tool has a logical current buffer, never a claim on the
            ;; user's selected window. Inside this binding switch-to-buffer!
            ;; retargets subsequent point-relative operations without display.
-           (r (with-current-buffer (current-buffer)
-                (lambda () (eval-string-safe code)))))
+           (r (begin
+                (set! *llm-tool-buffer* (current-buffer))
+                (let ((result
+                        (with-current-buffer (current-buffer)
+                          (lambda () (eval-string-safe code)))))
+                  (set! *llm-tool-buffer* previous-tool-buffer)
+                  result))))
       (if (equal? (car r) 'ok)
           (value->string (cadr r))
           (string-append "error: " (cadr r) (tool--error-hint (cadr r) code))))))

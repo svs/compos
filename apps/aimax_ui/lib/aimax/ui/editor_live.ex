@@ -413,35 +413,44 @@ defmodule Aimax.Ui.EditorLive do
   # typed DOM — serif prose, tool cards, permission buttons. The buffer
   # text stays canonical; this is a pure view over byte ranges.
   defp decorate(%{type: :leaf, render_mode: "agent", agent: %{} = ag} = leaf, cache, _faces) do
-    # per-BLOCK cache (A13): a streaming append re-renders the one block
-    # that grew, not the whole transcript. A block's key is its raw entry,
-    # the bytes it covers, and its open flag.
+    # Input edits do not change the transcript mark or block model. Reuse the
+    # complete block tree so typing and RET do not scan large tool results.
     old =
       case cache[{:agent, leaf.id}] do
-        map when is_map(map) -> map
-        _ -> %{}
+        %{block_cache: block_cache} = entry -> {entry, block_cache}
+        _ -> {%{}, %{}}
       end
 
-    {rendered, block_cache} =
-      ag.blocks
-      |> Enum.reverse()
-      |> Enum.with_index()
-      |> Enum.map_reduce(%{}, fn {b, i}, acc ->
-        key = :erlang.phash2({b, block_slice(b, leaf.text), block_open?(b, ag.open_cards)})
+    {old_entry, old_blocks} = old
+    signature = {ag.blocks, ag.open_cards, ag.mark}
 
-        view =
-          case old[i] do
-            {^key, view} -> view
-            _ -> ag_block(b, leaf.text, ag.open_cards)
-          end
+    {blocks, block_cache} =
+      if old_entry[:signature] == signature do
+        {old_entry.blocks, old_blocks}
+      else
+        {rendered, block_cache} =
+          ag.blocks
+          |> Enum.reverse()
+          |> Enum.with_index()
+          |> Enum.map_reduce(%{}, fn {b, i}, acc ->
+            key = agent_block_cache_key(b, ag)
 
-        {view, Map.put(acc, i, {key, view})}
-      end)
+            view =
+              case old_blocks[i] do
+                {^key, view} -> view
+                _ -> ag_block(b, leaf.text, ag.open_cards)
+              end
 
-    blocks = Enum.reject(rendered, &is_nil/1)
+            {view, Map.put(acc, i, {key, view})}
+          end)
+
+        {Enum.reject(rendered, &is_nil/1), block_cache}
+      end
+
+    entry = %{signature: signature, blocks: blocks, block_cache: block_cache}
 
     {Map.merge(leaf, %{lines: [], ag_blocks: blocks, ag_input: ag_input(leaf, ag)}),
-     Map.put(cache, {:agent, leaf.id}, block_cache)}
+     Map.put(cache, {:agent, leaf.id}, entry)}
   end
 
   # rich diff: the buffer text IS the unified diff, so the cards are parsed
@@ -532,13 +541,17 @@ defmodule Aimax.Ui.EditorLive do
     {Map.put(leaf, :lines, lines), Map.put(cache, leaf.id, {raw_key, static})}
   end
 
-  defp block_slice([s, e | _], text) when is_integer(s) and is_integer(e),
-    do: safe_slice(text, s, e)
-
-  defp block_slice(_, _), do: nil
-
   defp block_open?([_s, _e, "tool", id | _], open_cards), do: id in open_cards
   defp block_open?(_, _), do: false
+
+  # A completed block is immutable in the rich chat model. Its range and
+  # metadata identify its rendered value. A running tool can add body text
+  # before its range closes, so the transcript mark also keys that block.
+  defp agent_block_cache_key([_s, _e, "tool", _id, _title, _kind, "running" | _] = block, ag),
+    do: {block, block_open?(block, ag.open_cards), ag.mark}
+
+  defp agent_block_cache_key(block, ag),
+    do: {block, block_open?(block, ag.open_cards)}
 
   # static per-version work: line split + font-lock spans + ts-only segs.
   # Overlapping captures resolve last-wins (tree-sitter highlight semantics).

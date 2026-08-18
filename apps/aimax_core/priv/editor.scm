@@ -1623,9 +1623,9 @@
 ;;; One glyph names a mode, and every list that shows a mode shows it:
 ;;; dired, ibuffer, the buffer prompt and the file prompt. A mode declares
 ;;; its own icon; a mode that declares none reads as a plain document. An
-;;; icon is ONE character from the Nerd Font the client loads beside its
-;;; own monospace face — never an emoji, which draws two cells and colours
-;;; a column that must stay quiet.
+;;; icon is ONE character: a Nerd Font glyph, or a plain Unicode character
+;;; where one says it better — λ names a Scheme file. Never an emoji, which
+;;; draws two cells and colours a column that must stay quiet.
 
 (define *mode-icons* '())
 (define *default-mode-icon* "")
@@ -1657,7 +1657,7 @@
 ;; the modes this file defines. A package stamps its own icons.
 (mode-icon! "Dired" "")
 (mode-icon! "text-mode" "")
-(mode-icon! "scheme-mode" "")
+(mode-icon! "scheme-mode" "λ")
 (mode-icon! "elixir-mode" "")
 (mode-icon! "json-mode" "")
 (mode-icon! "rust-mode" "")

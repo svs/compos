@@ -843,6 +843,23 @@
             raw))
         (llm-session-send! slug msg raw))))
 
+;; Programmatic callers need the same restart-safe path as RET in a chat.
+;; `llm-session-send!` is deliberately a low-level live-runtime primitive;
+;; exposing this Scheme wrapper avoids teaching external drivers how to
+;; reconstruct chat identity, connector configuration, and transcript seeding.
+(define (agent-continue! thread text)
+  (let ((buf (if (buffer-exists? thread) thread (agent-buf thread))))
+    (if (not (and buf (buffer-exists? buf)))
+        (error "agent-continue!: unknown chat" thread)
+        (let ((slug (or (agent-slug-of buf) (chat-ensure-runtime! buf))))
+          (when (equal? (agent-status slug) 'dead)
+            (agent-revive! slug))
+          (agent-send-msg! slug text)))))
+
+(category! 'chat)
+(public! 'agent-continue!
+  "(agent-continue! THREAD TEXT) — send to a durable chat buffer or live slug, reviving and replaying it after restart")
+
 (define-command "agent-send" "Send the input to the agent, reviving it if dead"
   (lambda ()
     (let* ((buf (current-buffer))
@@ -1293,9 +1310,10 @@
 
 ;; (execute "task")                         — spawn a task chat on the default connector
 ;; (execute* "task" '(connector "codex"))   — pick a connector / pin a model
+;; (execute* "task" '(directory "/repo/"))  — choose the task's working directory
 (category! 'chat)
 (public! 'execute "(execute \"task\") — spawn a task chat on an ACP backend; returns its slug")
-(public! 'execute* "(execute* \"task\" '(connector \"codex\" model \"...\")) — spawn with config")
+(public! 'execute* "(execute* \"task\" '(connector \"codex\" model \"...\" directory \"/repo/\")) — spawn with config")
 
 (define (execute prompt) (execute* prompt '()))
 
@@ -1304,6 +1322,11 @@
          (buf (string-append "*chat:" slug "*")))
     (buffer-create buf)
     (buffer-set-local! buf 'agent-slug slug)
+    ;; Callers over RPC have no meaningful selected file buffer to inherit
+    ;; from. An explicit directory is ordinary chat identity policy and wins
+    ;; over buffer-create's interactive inheritance.
+    (let ((dir (plist-get opts 'directory)))
+      (when dir (buffer-set-local! buf 'default-directory dir)))
     ;; a spawned chat may declare its permission posture up front — the
     ;; first turn can start before anyone could press C-c p
     (let ((pm (plist-get opts 'permission-mode)))

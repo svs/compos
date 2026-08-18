@@ -118,6 +118,9 @@ defmodule Aimax.LLMToolsTest do
       assert eval!("*llm-system*") =~ "NOT Emacs Lisp"
       assert eval!("*llm-system*") =~ "buffer-append!"
       assert eval!("*llm-system*") =~ "public"
+      assert eval!("*llm-system*") =~ "project-search-matches"
+      assert eval!("*llm-system*") =~ "read-file-numbered"
+      assert eval!("*llm-system*") =~ "git-root (default-directory)"
     end
 
     test "describe-function returns real source for userland fns and commands" do

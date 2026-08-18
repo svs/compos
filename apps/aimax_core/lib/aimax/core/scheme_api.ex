@@ -150,6 +150,8 @@ defmodule Aimax.Core.SchemeAPI do
       "point" => "(point) — return point in the current buffer as a byte offset.",
       "buffer-point" => "(buffer-point BUF) — return the buffer's point as a byte offset.",
       "aimax-home" => "(aimax-home) — return the aimax home directory path (~/.aimax).",
+      "aimax-socket-path" =>
+        "(aimax-socket-path) — return the path of this daemon's JSON-RPC socket.",
       "daemon-restart!" =>
         "(daemon-restart!) — save the desktop, restart the daemon, and reload Scheme; return #t.",
       "goto-char!" => "(goto-char! POS) — move point to byte POS; return POS.",
@@ -506,11 +508,11 @@ defmodule Aimax.Core.SchemeAPI do
           v -> v
         end
       end,
-      # (shell-command->string CMD [DIR]) — sync, stderr folded in, "" on spawn failure.
-      # Agents get no shell — aimax is the sandbox; see agent_sourced?/0.
+      # This is mechanism, including for agent-attributed evals. Scheme's
+      # permission policy is an overridable convenience, not an OS sandbox.
       "shell-command->string" => fn
-        [cmd] -> if agent_sourced?(), do: false, else: shell_to_string(cmd, File.cwd!())
-        [cmd, dir] -> if agent_sourced?(), do: false, else: shell_to_string(cmd, Path.expand(dir))
+        [cmd] -> shell_to_string(cmd, File.cwd!())
+        [cmd, dir] -> shell_to_string(cmd, Path.expand(dir))
       end,
       # (json-parse STR) — objects become flat plists with symbol keys,
       # null becomes #f; #f on parse failure
@@ -539,16 +541,11 @@ defmodule Aimax.Core.SchemeAPI do
         File.write!(path, text)
         true
       end,
-      # processes (comint) — agents get no shell either, same gate
       "start-process!" => fn [buffer, cmd] ->
-        if agent_sourced?() do
-          false
-        else
-          case Aimax.Core.Proc.start(buffer, cmd) do
-            {:ok, _} -> true
-            {:error, {:already_started, _}} -> true
-            _ -> false
-          end
+        case Aimax.Core.Proc.start(buffer, cmd) do
+          {:ok, _} -> true
+          {:error, {:already_started, _}} -> true
+          _ -> false
         end
       end,
       "process-send!" => fn [buffer, text] ->
@@ -582,22 +579,24 @@ defmodule Aimax.Core.SchemeAPI do
       "buffer-point" => fn [name] -> Buffer.point(name) end,
       # ~/.aimax in real life, a tmp dir in tests — config and user packages
       "aimax-home" => fn [] -> Aimax.Core.home() end,
-      # restart the whole daemon. Agents never get this: it is the sandbox's
-      # own restart, not a tool an agent may invoke.
+      # The socket THIS daemon listens on. A second daemon (AIMAX_HOME, or the
+      # verify config) listens elsewhere, and anything it spawns must come back
+      # to it rather than to the default path.
+      "aimax-socket-path" => fn [] ->
+        Application.get_env(:aimax_rpc, :socket_path, Path.join(Aimax.Core.home(), "sock"))
+        |> Path.expand()
+      end,
       "daemon-restart!" => fn [] ->
-        if agent_sourced?() do
-          false
-        else
-          case Aimax.Core.Daemon.restart() do
-            :ok ->
-              true
+        case Aimax.Core.Daemon.restart() do
+          :ok ->
+            true
 
-            {:error, :desktop_save_failed} ->
-              raise Aimax.Scheme.Eval.Error, message: "desktop save failed; refusing to restart"
+          {:error, :desktop_save_failed} ->
+            raise Aimax.Scheme.Eval.Error, message: "desktop save failed; refusing to restart"
 
-            {:error, {:spawn_failed, _code, out}} ->
-              raise Aimax.Scheme.Eval.Error, message: "could not respawn the daemon: #{inspect(out)}"
-          end
+          {:error, {:spawn_failed, _code, out}} ->
+            raise Aimax.Scheme.Eval.Error,
+              message: "could not respawn the daemon: #{inspect(out)}"
         end
       end,
       "goto-char!" => fn [pos] ->
@@ -1464,12 +1463,6 @@ defmodule Aimax.Core.SchemeAPI do
 
   # (fold-get BUF 'all) reads the union, the same word overlay-clear! uses
   defp fold_tag(tag), do: if(plain(tag) == "all", do: :all, else: plain(tag))
-
-  # shell execution is gated: evaluation attributed to an agent gets no
-  # shell — aimax is the sandbox. The "agent:" author is stamped by
-  # chat-tool-dispatch (direct lane) and mcp-proxy-call (the aimax MCP
-  # proxy) around every agent tool call, so both paths carry it here.
-  defp agent_sourced?, do: match?("agent:" <> _, Process.get(:aimax_edit_author))
 
   defp shell_to_string(cmd, dir) do
     {out, _status} = System.cmd("/bin/sh", ["-c", cmd], cd: dir, stderr_to_stdout: true)

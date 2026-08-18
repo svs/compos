@@ -8,6 +8,14 @@ If it loops over bytes, parses, talks to an OS or a network — Elixir primitive
 If it decides what a key means, what a command does, how a buffer is presented —
 Scheme, in `priv/*.scm` or your `~/.aimax/*.scm`.
 
+Policy is a convenience, not a security boundary. ai-max runs for a user who
+already controls the machine; that user, their init file, and their agents can
+invoke the mechanisms Scheme exposes, including processes and the shell. The
+permission policy supplies useful defaults, prompts, and auditability, but it
+is deliberately replaceable Scheme and must not be duplicated as hard-coded
+principal checks in core. OS accounts, containers, and service credentials are
+the security boundary when one is required.
+
 Everything below follows from that.
 
 ## Layers

@@ -67,6 +67,16 @@
     "fits. Before writing code with a name you are not sure exists, check "
     "it with apropos, and read any function's real source with "
     "describe-function. "
+    "For repository work, do not open an interactive shell or recursively "
+    "dump the tree. Start with (default-directory), then use "
+    "(git-root (default-directory)), (project-files ROOT), "
+    "(project-search-matches ROOT PATTERN), and "
+    "(read-file-numbered PATH). These return bounded evidence directly; "
+    "the numbered reader is the source of truth for line citations. "
+    "Run a focused external check directly with "
+    "(shell-command->string CMD (default-directory)); it returns stdout and "
+    "stderr together. Use an interactive shell buffer only when the task "
+    "actually requires an ongoing process. "
     "When you WRITE Scheme, stamp every public section with (domain! 'NAME) "
     "and (effects! '(LEVEL MODIFIERS...)). LEVEL is pure, read, write, "
     "destroy, or unknown; modifiers are external, execute, and spend. Never "
@@ -499,6 +509,15 @@
     "search after a usable hit.\n"
     "  4. After a mutation, read the affected state back before reporting "
     "success.\n\n"
+    "REPOSITORY READS — exact evidence, no guessing:\n"
+    "  (default-directory)                     current task workspace.\n"
+    "  (git-root (default-directory))          repository root for that workspace.\n"
+    "  (project-files ROOT)                    tracked and unignored files.\n"
+    "  (project-search-matches ROOT PATTERN)   structured PATH/LINE matches.\n"
+    "  (read-file-numbered PATH)               source text with citation lines.\n\n"
+    "FOCUSED EXTERNAL CHECKS:\n"
+    "  (shell-command->string CMD (default-directory))\n"
+    "                                              run once; stdout+stderr returned.\n\n"
     "Categories: " (string-join (map symbol->string (public-categories)) ", ") "\n\n"
     "NOTE: this is ai-max's own small Scheme, NOT Emacs Lisp. Names like "
     "get-buffer, goto-char, save-excursion and with-current-buffer do not "
@@ -509,6 +528,24 @@
 
 (category! 'discovery)
 (public! 'hello "(hello) — what this editor is and how to find anything in it")
+
+;; Source citations are a common agent read, and byte offsets or guessed line
+;; counts are the wrong policy. Keep numbering in Scheme over the ordinary
+;; read-file mechanism so every caller gets stable, inspectable text.
+(define (line-numbered-text source)
+  (let loop ((lines (string-split source "\n")) (n 1) (out '()))
+    (if (null? lines)
+        (string-join (reverse out) "\n")
+        (loop (cdr lines) (+ n 1)
+              (cons (string-append (number->string n) "\t" (car lines)) out)))))
+
+(define (read-file-numbered path)
+  (let ((source (read-file path)))
+    (if source (line-numbered-text source) #f)))
+
+(public! 'read-file-numbered
+  "(read-file-numbered PATH) — read source text files with stable line numbers for exact citations")
+(catalog-meta! 'function "read-file-numbered" 'domain 'discovery 'effects '(read))
 
 
 (domain! 'buffers)

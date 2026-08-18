@@ -19,6 +19,12 @@ while the editor runs.
 Before we add Elixir code, we ask one question: can this be Scheme plus one
 small primitive? The answer is usually yes.
 
+Policy is a convenience, not an OS security boundary. The user, their init
+file, and their agents can invoke the mechanisms exposed to Scheme, including
+processes and the shell. Permission prompts are useful, replaceable Scheme
+guardrails; core does not hard-code a weaker mechanism surface for agents.
+Use OS accounts, containers, and scoped credentials when isolation is needed.
+
 ## Why the BEAM
 
 One GenServer holds each buffer. Agents are supervised processes. A blocking

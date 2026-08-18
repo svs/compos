@@ -104,6 +104,11 @@
                root)))
     (filter (lambda (m) m) (map rg--parse (string-split out "\n")))))
 
+;; The interactive command below adds preview and selection policy. Agents and
+;; other Scheme callers often need the same search as plain structured data.
+(define (project-search-matches root pattern)
+  (rg--matches root pattern))
+
 ;; preview borrows the window, the jump takes it. Both load the file once,
 ;; so a previewed match costs the same read as an opened one. The mode is
 ;; set AFTER the window shows the buffer: set-mode! acts on the current
@@ -323,6 +328,9 @@
 (catalog-meta! 'function "project-buffers" 'domain 'project 'effects '(read))
 (public! 'project-current "Root of the current project, #f when outside one")
 (public! 'project-files "(project-files ROOT) -> project file paths, git-aware")
+(public! 'project-search-matches
+  "(project-search-matches ROOT PATTERN) -> search project text files as (PATH:LINE PATH LINE TEXT) matches")
+(catalog-meta! 'function "project-search-matches" 'domain 'project 'effects '(read execute))
 (public! 'project-open-files
   "(project-open-files ROOT) -> paths of ROOT's open buffers, relative, MRU first")
 (public! 'known-projects "Project roots the editor has seen")

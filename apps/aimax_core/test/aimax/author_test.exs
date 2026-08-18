@@ -131,15 +131,24 @@ defmodule Aimax.AuthorTest do
     assert log =~ ~s{"agent:c1" 0 3 0}
   end
 
-  test "agents get no shell: shell-command->string refuses under an agent author" do
-    # the user's shell works
+  test "agent attribution does not remove Scheme mechanisms" do
     assert {:ok, out} = Session.eval(~s{(shell-command->string "echo hi")})
     assert out =~ "hi"
 
-    # an agent-sourced evaluation is refused — aimax is the only sandbox
-    assert {:ok, "#f"} =
+    assert {:ok, agent_out} =
              Session.eval(~s{
                (with-edit-author "agent:a1"
                  (lambda () (shell-command->string "echo hi")))})
+
+    assert agent_out =~ "hi"
+  end
+
+  test "Scheme can produce line-numbered source without a core primitive" do
+    path = Path.join(System.tmp_dir!(), "aimax-numbered-#{System.unique_integer([:positive])}")
+    File.write!(path, "alpha\nbeta\n")
+    on_exit(fn -> File.rm(path) end)
+
+    assert {:ok, out} = Session.eval(~s{(read-file-numbered "#{path}")})
+    assert out =~ ~S{1\talpha\n2\tbeta}
   end
 end

@@ -71,6 +71,16 @@ defmodule Aimax.ProjectSearchTest do
   end
 
   describe "project-ripgrep" do
+    test "agent policy can consume project search as structured data", %{root: root} do
+      assert {:ok, matches} =
+               Session.eval(~s{
+                 (with-edit-author "agent:orientation"
+                   (lambda () (project-search-matches "#{root}" "needle")))})
+
+      assert matches =~ ~s{"lib/a.txt:2" "lib/a.txt" 2 "needle here"}
+      assert matches =~ ~s{"lib/b.txt:3" "lib/b.txt" 3 "needle again"}
+    end
+
     test "RET on the first match opens that file at that line", %{root: root} do
       eval!(~s{(project-ripgrep-in "#{root}" "needle")})
 

@@ -395,6 +395,8 @@
 (define (dired-marks buf) (list-marks buf))
 
 (category! 'files)
+(public! 'default-directory
+  "(default-directory) — current buffer's absolute working directory, including task chats")
 (public! 'dired-open "(dired-open PATH) — open PATH in a Dired buffer; returns the buffer name")
 (public! 'dired-dir "(dired-dir BUF) — the directory a Dired buffer is showing")
 (public! 'dired-visible "(dired-visible BUF DIR) — the entries a Dired buffer is showing, after its filters")

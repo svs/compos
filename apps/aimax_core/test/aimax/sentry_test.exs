@@ -20,7 +20,13 @@ defmodule Aimax.SentryTest do
     Editor.set_pending([])
 
     on_exit(fn ->
-      for buffer <- ["*Sentry issues*", "*Sentry issue: 42*"], do: Aimax.Core.kill_buffer(buffer)
+      for buffer <- [
+            "*Sentry issues*",
+            "*Sentry issue: 42*",
+            "*Sentry issue: 43*",
+            "*chat:sentry*"
+          ],
+          do: Aimax.Core.kill_buffer(buffer)
     end)
 
     :ok
@@ -99,18 +105,23 @@ defmodule Aimax.SentryTest do
     assert command =~ ~s{effects ("write" "external")}
   end
 
-  test "RET opens a safe detail buffer through the real key path" do
+  test "RET opens distinct grouped detail buffers through the real key path" do
     eval!(~S"""
     (set! *sentry-transport*
       (lambda (url)
         (cond
           ((string-contains? url "/issues/42/")
            "{\"id\":\"42\",\"shortId\":\"ATS-42\",\"title\":\"failure for jane@example.com\",\"status\":\"unresolved\",\"metadata\":{\"secret\":\"hidden\"}}\n200")
+          ((string-contains? url "/issues/43/")
+           "{\"id\":\"43\",\"shortId\":\"ATS-43\",\"title\":\"another failure\",\"status\":\"unresolved\"}\n200")
           (else
-           "[{\"id\":\"42\",\"shortId\":\"ATS-42\",\"title\":\"failure for jane@example.com\",\"level\":\"error\",\"count\":\"3\",\"lastSeen\":\"2026-08-18T10:00:00Z\"}]\n200"))))
+           "[{\"id\":\"42\",\"shortId\":\"ATS-42\",\"title\":\"failure for jane@example.com\",\"level\":\"error\",\"count\":\"3\",\"lastSeen\":\"2026-08-18T10:00:00Z\"},{\"id\":\"43\",\"shortId\":\"ATS-43\",\"title\":\"another failure\",\"level\":\"error\",\"count\":\"1\",\"lastSeen\":\"2026-08-18T11:00:00Z\"}]\n200"))))
     """)
 
     eval!(~S|(run-command "sentry")|)
+    assert eval!(~S|(buffer-group "*Sentry issues*")|) == ~s{"sentry"}
+    assert eval!(~S|(buffer-group (group-chat "sentry"))|) == ~s{"sentry"}
+
     eval!(~S|(switch-to-buffer! "*Sentry issues*")|)
     eval!(~S|(list-goto-first-entry "*Sentry issues*")|)
     KeyDispatch.handle_key("RET")
@@ -121,5 +132,23 @@ defmodule Aimax.SentryTest do
     assert text =~ "[redacted-email]"
     assert text =~ "omits user data"
     refute text =~ "hidden"
+    assert eval!(~S|(buffer-group "*Sentry issue: 42*")|) == ~s{"sentry"}
+
+    eval!(~S|(switch-to-buffer! "*Sentry issues*")|)
+    KeyDispatch.handle_key("n")
+    KeyDispatch.handle_key("RET")
+
+    assert Buffer.exists?("*Sentry issue: 43*")
+    assert Buffer.text("*Sentry issue: 43*") =~ "ATS-43"
+    assert eval!(~S|(buffer-group "*Sentry issue: 43*")|) == ~s{"sentry"}
+
+    eval!(
+      ~S|(set! *sentry-transport* (lambda (url) "{\"id\":\"42\",\"shortId\":\"ATS-42\",\"title\":\"downloaded twice\"}\n200"))|
+    )
+    eval!(~S|(switch-to-buffer! "*Sentry issues*")|)
+    KeyDispatch.handle_key("p")
+    KeyDispatch.handle_key("RET")
+
+    assert Buffer.text("*Sentry issue: 42*") == text
   end
 end

@@ -267,16 +267,32 @@
 ;;; --- safe views ---------------------------------------------------------------
 
 (define *sentry-buffer* "*Sentry issues*")
+(define *sentry-group* "sentry")
 
-(define (sentry--issue-line issue)
+;; The list founds one stable workspace. Its companion chat and every child
+;; view use the same tag, including when mode setup runs after desktop restore.
+(define (sentry--join-group! buf)
+  (buffer-set-local! buf 'group *sentry-group*)
+  buf)
+
+(define (sentry--issue-cells buf issue)
+  (let ((level (sentry--get issue 'level)))
+    (list
+      (list (sentry--get issue 'shortId) "accent")
+      (list level (cond ((equal? level "error") "alert")
+                        ((equal? level "warning") "warn")
+                        (else "dim")))
+      (list (sentry--get issue 'count) "dim")
+      (list (sentry--get issue 'lastSeen) "dim")
+      (sentry--redact (sentry--get issue 'title)))))
+
+(define (sentry--issue-meta buf)
   (string-append
-    (string-pad-right (sentry--truncate (sentry--get issue 'shortId) 13) 13) "  "
-    (string-pad-right (sentry--truncate (sentry--get issue 'level) 8) 8) "  "
-    (string-pad-left (sentry--truncate (sentry--get issue 'count) 7) 7) "  "
-    (string-pad-right (sentry--truncate (sentry--get issue 'lastSeen) 20) 20) "  "
-    (sentry--truncate (sentry--redact (sentry--get issue 'title)) 78)))
+    (number->string (length (list-entries buf))) " unresolved · "
+    sentry-org "/" sentry-project " · " sentry-environment " · " sentry-time-range))
 
 (define (sentry--issue-rows buf)
+  (sentry--join-group! buf)
   (let ((reply (sentry-list-issues)))
     (if (sentry--error? reply)
         (begin (message (sentry--error-message reply)) '())
@@ -319,11 +335,13 @@
                          "\nThis view omits user data, payloads, breadcrumbs, and stack traces.\n")))))
 
 (define (sentry--detail-setup! buf)
+  (sentry--join-group! buf)
   (local-set-key* buf "g" "sentry-detail-refresh")
   (local-set-key* buf "e" "sentry-events")
   (local-set-key* buf "q" "quit-window")
   (let ((issue-id (buffer-local buf 'sentry-issue-id)))
-    (when issue-id (sentry--render-detail! buf issue-id))))
+    (when (and issue-id (= (buffer-size buf) 0))
+      (sentry--render-detail! buf issue-id))))
 
 (define (sentry--event-line event)
   (string-append
@@ -350,6 +368,7 @@
                          "\nThis view omits event messages, user data, payloads, breadcrumbs, and stacks.\n")))))
 
 (define (sentry--events-setup! buf)
+  (sentry--join-group! buf)
   (local-set-key* buf "g" "sentry-events-refresh")
   (local-set-key* buf "q" "quit-window")
   (let ((issue-id (buffer-local buf 'sentry-issue-id)))
@@ -413,12 +432,18 @@
            "RET opens a safe summary. `g` refreshes the list.")
     'buffer *sentry-buffer*
     'rows sentry--issue-rows
-    'render (lambda (buf issue) (sentry--issue-line issue))
+    'columns (lambda (buf)
+               (list (list "issue" 13) (list "level" 8)
+                     (list "events" 7 'right) (list "last seen" 20)
+                     (list "title" #f)))
+    'cells sentry--issue-cells
+    'title (lambda (buf) "Sentry issues")
+    'meta sentry--issue-meta
+    'total (lambda (buf) (length (list-entries buf)))
+    'no-marks #t
+    'footer (lambda (buf)
+              '(("RET" "detail") ("/" "filter") ("g" "refresh") ("q" "quit")))
     'key (lambda (buf issue) (sentry--get issue 'id))
-    'header (lambda (buf)
-              (string-append "Sentry · " sentry-org "/" sentry-project " · "
-                             sentry-environment " · " sentry-time-range
-                             " · RET detail · g refresh"))
     'keys '(("RET" "sentry-open") ("g" "sentry-refresh") ("q" "quit-window"))))
 
 (define-command "sentry" "List unresolved production issues from Sentry"

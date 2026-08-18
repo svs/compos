@@ -2831,13 +2831,32 @@
            ;; switches the buffer; RET on a group card switches the
            ;; context. TAB still locks; C-x G still lists.
            (all (filter (lambda (c) (not (equal? (car c) standing))) pool))
-           (fallback (if (null? all) here (car (car all)))))
+           (fallback (if (null? all) here (car (car all))))
+           ;; buffers the preview wakes. The prompt's close puts every one
+           ;; nobody picked back to sleep — scrolling the list must not
+           ;; leave forty live processes behind (the consult contract).
+           (woken '())
+           (sleep-woken! (lambda (keep)
+                           (for-each (lambda (b)
+                                       (unless (equal? b keep)
+                                         (buffer-sleep! b)))
+                                     woken)
+                           (set! woken '()))))
       (minibuffer-read-preview
         (string-append "Switch to (default " fallback "): ")
         all
         ;; the invoking window live-previews the highlighted buffer; a
-        ;; container or a tab leaves the window alone
-        (lambda (b) (when (buffer-exists? b) (window-preview-buffer! b)))
+        ;; container or a tab leaves the window alone. known?, not exists?:
+        ;; most of the pool is dormant — the primitive wakes a sleeper, and
+        ;; the mode setup must follow here, because switch-to-buffer! later
+        ;; sees the buffer live and skips its own restore
+        (lambda (b)
+          (when (buffer-known? b)
+            (let ((sleeping (not (buffer-exists? b))))
+              (window-preview-buffer! b)
+              (when (and sleeping (buffer-exists? b))
+                (restore-buffer-runtime! b)
+                (set! woken (cons b woken))))))
         (lambda (name)
           (let* ((picked (if (equal? name "") fallback name))
                  (explicit (let ((x *mb-confirm-context*))
@@ -2866,10 +2885,18 @@
                          (windows-shown-catchup!))))
                   (else
                    ;; nothing matches: RET founds a group named PICKED
-                   ;; from the current windows
-                   (group-found-from-windows! picked)))))
-        ;; C-g: put back what you were looking at
-        (lambda () (when (buffer-exists? here) (window-preview-buffer! here)))
+                   ;; from the current windows. The preview may still
+                   ;; occupy the invoking window — put back what stood
+                   ;; there, so the group forms from the real windows.
+                   (when (buffer-exists? here) (window-preview-buffer! here))
+                   (group-found-from-windows! picked)))
+            ;; the pick is on screen now; the sleep guard keeps awake
+            ;; anything a group restore also put on screen
+            (sleep-woken! picked)))
+        ;; C-g: put back what you were looking at; sleep the rest
+        (lambda ()
+          (when (buffer-exists? here) (window-preview-buffer! here))
+          (sleep-woken! #f))
         ;; you also know a buffer by its mode, its group, or its project:
         ;; the first three marginalia fields all match what you type
         3
@@ -6620,6 +6647,8 @@
 (public! 'buffer-exists? "(buffer-exists? NAME) -> bool")
 (public! 'buffer-known? "(buffer-known? NAME) -> bool: live OR dormant. A list shows dormant buffers, so a verb asks this one")
 (catalog-meta! 'function "buffer-known?" 'domain 'buffers 'effects '(read))
+(public! 'buffer-sleep! "(buffer-sleep! NAME) — checkpoint NAME and stop its process; the buffer stays known. #f when NAME is on screen, busy, or pinned")
+(catalog-meta! 'function "buffer-sleep!" 'domain 'buffers 'effects '(write))
 (public! 'buffer-text "(buffer-text NAME) -> the buffer's full text")
 (public! 'buffer-size "(buffer-size NAME) -> size in bytes")
 (public! 'buffer-create "(buffer-create NAME) — create if missing")

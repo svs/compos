@@ -298,6 +298,8 @@ defmodule Aimax.Core.SchemeAPI do
         "(set-mb-redirect! BOOL) — toggle redirection of current-buffer to the minibuffer's text.",
       "window-preview-buffer!" =>
         "(window-preview-buffer! BUF) — show BUF in the active window without MRU changes.",
+      "buffer-sleep!" =>
+        "(buffer-sleep! NAME) — checkpoint NAME and stop its process; the buffer stays known. #f when NAME is on screen, busy, or pinned.",
       "minibuffer-set-candidates!" =>
         "(minibuffer-set-candidates! CANDIDATES) — replace the minibuffer's candidate list.",
       "delete-file!" =>
@@ -1079,6 +1081,11 @@ defmodule Aimax.Core.SchemeAPI do
       # candidate preview must not reorder the buffer ring
       "window-preview-buffer!" => fn [name] ->
         Editor.preview_buffer(name) == :ok
+      end,
+      # the way back to dormancy: preview wakes candidates, the prompt's
+      # close puts the ones nobody picked back to sleep
+      "buffer-sleep!" => fn [name] ->
+        Aimax.Core.sleep_buffer(name) == :ok
       end,
       "minibuffer-set-candidates!" => fn [candidates] ->
         Editor.minibuffer_set_candidates(candidates)

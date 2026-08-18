@@ -125,6 +125,43 @@ defmodule Aimax.Core do
   end
 
   @doc """
+  Put a live buffer back to dormancy: checkpoint it, stop its process, keep
+  it known. The inverse of `ensure_buffer/1`. Refuses a buffer that is on
+  screen, runs a process or agent, or is pinned — the same guards idle
+  eviction applies in `BufferStore.safe_to_evict?/3`.
+  """
+  def sleep_buffer(name) do
+    case Registry.lookup(@registry, name) do
+      [{pid, _}] ->
+        displayed =
+          if Process.whereis(Aimax.Core.Editor),
+            do:
+              Enum.any?(Aimax.Core.Editor.list_windows_all(), fn {_win, b, _frame} ->
+                b == name
+              end),
+            else: false
+
+        info = Buffer.eviction_info(name)
+        agent = info.locals["agent-slug"] || info.locals["chat-agent"]
+
+        cond do
+          displayed -> {:error, :displayed}
+          Aimax.Core.Proc.running?(name) -> {:error, :busy}
+          is_binary(agent) and Aimax.Core.Agent.running?(agent) -> {:error, :busy}
+          info.locals["buffer-pinned"] not in [nil, false] -> {:error, :pinned}
+          true ->
+            :ok = Buffer.checkpoint_now(name)
+            DynamicSupervisor.terminate_child(@buffer_sup, pid)
+        end
+
+      [] ->
+        if BufferStore.known?(name), do: :ok, else: {:error, :not_found}
+    end
+  catch
+    :exit, _ -> {:error, :not_found}
+  end
+
+  @doc """
   Rename a buffer in place, keeping its process and everything in it.
 
   The buffer keeps its text, point, mark, locals, overlays, undo history and

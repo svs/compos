@@ -2,8 +2,8 @@ defmodule Aimax.ProjectSearchTest do
   @moduledoc """
   project-ripgrep: one rg run, the matches are candidates, the highlighted
   one previews in the invoking window and RET jumps to it.
-  project-find-file: the project's open buffers come first, then ".", then
-  the git file list.
+  project-find-file: the root comes first, then the project's open buffers,
+  then the git file list, and the directory you type into lists itself.
   """
 
   use ExUnit.Case
@@ -123,17 +123,70 @@ defmodule Aimax.ProjectSearchTest do
   end
 
   describe "project-find-file candidates" do
-    test "open buffers come first, then the root, then the rest", %{root: root} do
+    test "the root comes first, then open buffers, then the rest", %{root: root} do
       eval!(~s{(visit "#{root}/lib/b.txt")})
 
       cands = eval!(~s{(project-file-candidates "#{root}")})
       assert cands =~ ~s{("lib/b.txt" "open")}
-      assert cands =~ ~s{("." "dired")}
       assert cands =~ ~s{("lib/a.txt" "")}
+
+      # the directory leads the prompt: RET opens the root in dired
+      assert String.starts_with?(cands, ~s{(("./" "dired")})
+
+      idx = fn text -> :binary.match(cands, text) |> elem(0) end
+      assert idx.(~s{("lib/b.txt" "open")}) < idx.(~s{("lib/a.txt" "")})
 
       # an open file is listed once — as the open one
       assert eval!(~s{(project-open-files "#{root}")}) == ~s{("lib/b.txt")}
       refute cands =~ ~s{("lib/b.txt" "")}
+    end
+
+    test "both spellings of the root open dired" do
+      assert eval!(~s{(project-dired-input? ".")}) == "#t"
+      assert eval!(~s{(project-dired-input? "./")}) == "#t"
+      assert eval!(~s{(project-dired-input? "lib/a.txt")}) == "#f"
+    end
+
+    test "the directory you type into lists itself and its own files", %{root: root} do
+      File.write!(Path.join(root, "lib/ignored.log"), "x")
+      File.write!(Path.join(root, ".gitignore"), "*.log\n")
+
+      base = ~s{(project-file-candidates "#{root}")}
+      pool = eval!(~s{(project--pool "#{root}" #{base} "lib/")})
+
+      # the typed directory leads, so RET opens it in dired
+      assert String.starts_with?(pool, ~s{(("lib/" "dired")})
+      # git ignores the .log file; the disk still offers it
+      assert pool =~ ~s{("lib/ignored.log" "")}
+      # a file git knows is listed once, by the disk pass
+      assert pool =~ ~s{("lib/a.txt" "")}
+      refute pool =~ ~s{("lib/a.txt" "") ("lib/a.txt" "")}
+    end
+
+    test "an empty directory part keeps git's own list", %{root: root} do
+      base = ~s{(project-file-candidates "#{root}")}
+      assert eval!(~s{(project--pool "#{root}" #{base} "")}) == eval!(base)
+    end
+
+    test "the prompt lists the directory as you type into it", %{root: root} do
+      eval!(~s{(project-find-file-in "#{root}")})
+      assert Editor.render_state().minibuffer
+
+      press(["l", "i", "b", "/"])
+      state = eval!("(minibuffer-state)")
+      assert state =~ ~s{(label "lib/" hint "dired")}
+      assert state =~ ~s{"lib/a.txt"}
+
+      press(["C-g"])
+    end
+
+    test "a file git does not know still opens", %{root: root} do
+      eval!(~s{(project-find-file-in "#{root}")})
+      press(String.graphemes("lib/brand-new.txt"))
+      press(["RET"])
+
+      assert window_buffer() == ~s{"#{root}/lib/brand-new.txt"}
+      Aimax.Core.kill_buffer("#{root}/lib/brand-new.txt")
     end
 
     test "a file outside the project does not become a candidate", %{root: root} do
@@ -161,15 +214,25 @@ defmodule Aimax.ProjectSearchTest do
       File.rm_rf!(other)
     end
 
-    test "\".\" opens the root in dired", %{root: root} do
+    test "the root row opens the root in dired", %{root: root} do
       eval!(~s{(project-find-file-in "#{root}")})
       mb = Editor.render_state().minibuffer
-      assert Enum.find(mb.candidates, &(&1.label == "."))
+      assert Enum.find(mb.candidates, &(&1.label == "./"))
 
-      # no buffer is open from this project, so "." is the first candidate
+      # the directory leads the prompt, so RET opens it
       press("RET")
       assert eval!("(current-buffer)") == ~s{"#{root}"}
       assert eval!(~s{(buffer-local (current-buffer) 'mode-name)}) == ~s{"Dired"}
+    end
+
+    test "a saved project root with a trailing slash opens inside that project", %{root: root} do
+      eval!(~s{(project-find-file-in "#{root}/")})
+
+      # "./" starts selected. Move to lib/a.txt and accept it. The old path
+      # join produced ROOT//lib/a.txt, whose double slash means /lib/a.txt.
+      press(["C-n", "RET"])
+
+      assert eval!("(current-buffer)") == ~s{"#{root}/lib/a.txt"}
     end
   end
 

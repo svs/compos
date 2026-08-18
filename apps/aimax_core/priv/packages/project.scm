@@ -177,23 +177,68 @@
                  (let ((p (buffer-path b))) (and p (project--relative root p))))
                (buffer-list-mru))))
 
+;; The directory leads: RET on a prompt you did not type into opens the
+;; project root in dired, the way C-x d does. Then the buffers you have
+;; open, then every other file git knows.
 (define (project-file-candidates root)
   (let* ((open (project-open-files root))
          (rest (filter (lambda (f) (not (member f open))) (project-files root))))
-    (append (map (lambda (f) (list f "open")) open)
-            (list (list "." "dired"))
+    (append (list (list "./" "dired"))
+            (map (lambda (f) (list f "open")) open)
             (map (lambda (f) (list f "")) rest))))
 
+(define (project-dired-input? f) (or (equal? f ".") (equal? f "./")))
+
+;; git ls-files does not list an ignored file, and it cannot list a file
+;; that does not exist yet. Both are real answers to "which file", so the
+;; prompt reads the disk as well: the directory you type into leads, its
+;; own entries follow, and git's list keeps the rest. Every label stays
+;; project-relative, so what you type still matches the whole path.
+(define (project--disk-entries root dir)
+  (map (lambda (e)
+         (list (string-append dir e) (if (string-suffix? "/" e) "dired" "")))
+       (list-dir (string-append root "/" dir))))
+
+(define (project--pool root base dir)
+  (if (equal? dir "")
+      base
+      (let ((disk (project--disk-entries root dir)))
+        (append (list (list dir "dired"))
+                disk
+                (filter (lambda (c) (not (assoc (car c) disk))) base)))))
+
+;; Re-list only when the DIRECTORY part changes. A keystroke inside one
+;; directory is the display filter's work, and re-listing a big directory
+;; on every keystroke stats thousands of files. The memo lives in the
+;; closure, so two prompts never share it.
+(define (project--nav root base)
+  (let ((listed ""))
+    (lambda (input)
+      (let ((dir (car (path-split (normalize-file-input input)))))
+        (if (equal? dir listed)
+            #t
+            (begin
+              (set! listed dir)
+              (minibuffer-set-candidates! (project--pool root base dir))))))))
+
 (define (project-find-file-in root)
-  (project-remember! root)
-  (let ((g (buffer-group (current-buffer))))
-    (minibuffer-read (string-append "Find file in " (project-name root) ": ")
-      (project-file-candidates root)
-      (lambda (f)
-        (if (equal? f ".")
-            (dired-open root)
-            ;; the file opens in the current group, like find-file
-            (visit-in-group (string-append root "/" f) g))))))
+  ;; Known-project data predates canonical roots and can carry ROOT/. Strip
+  ;; it once before the root enters candidates or callback closures. This
+  ;; also guarantees that joining a relative candidate produces one slash.
+  (let ((root (strip-trailing-slash root)))
+    (project-remember! root)
+    (let ((g (buffer-group (current-buffer)))
+          (base (project-file-candidates root)))
+      (minibuffer-read* (string-append "Find file in " (project-name root) ": ")
+        base
+        (list (list 'change (project--nav root base))
+              (list 'style "palette")
+              (list 'confirm
+                (lambda (f)
+                  (if (project-dired-input? f)
+                      (dired-open root)
+                      ;; the file opens in the current group, like find-file
+                      (visit-in-group (string-append root "/" f) g)))))))))
 
 (define-command "project-find-file"
   "Find a file in the current project (git-aware, ignores ignored)"

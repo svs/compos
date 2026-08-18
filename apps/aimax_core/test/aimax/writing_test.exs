@@ -61,6 +61,27 @@ defmodule Aimax.WritingTest do
     :ok
   end
 
+  test "M-x visual-line-mode toggles visual-row motion for any buffer" do
+    buf = fresh_buffer("vl-mx-#{System.unique_integer([:positive])}", "one long line\n")
+
+    press(["M-x"])
+    type("visual-line-mode")
+    press(["RET"])
+
+    assert Buffer.get_local(buf, "visual-line-mode") == true
+    assert "visual-line-mode" in Buffer.get_local(buf, "minor-modes")
+    tree = Editor.render_state().tree
+    leaf = if tree.type == :leaf, do: tree, else: Enum.find(tree.children, &(&1.buffer == buf))
+    assert leaf.visual_line_mode == true
+
+    press(["M-x"])
+    type("visual-line-mode")
+    press(["RET"])
+
+    refute Buffer.get_local(buf, "visual-line-mode")
+    refute "visual-line-mode" in Buffer.get_local(buf, "minor-modes")
+  end
+
   test "M-x writing-mode enables the centered prose look" do
     buf = fresh_buffer("wr-mx-#{System.unique_integer([:positive])}", "one two three\n")
 

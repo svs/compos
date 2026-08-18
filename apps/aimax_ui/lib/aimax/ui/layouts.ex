@@ -990,6 +990,57 @@ defmodule Aimax.Ui.Layouts do
                 // owner of the resulting point move.
                 this.visualLineMove = (dir, extend) => {
                   if (document.querySelector(".mb-panel")) return false;
+                  // A browser key-repeat can outrun the LiveView patch that
+                  // moves the cursor. Do not send another move from stale DOM.
+                  if (this.visualLinePending) return true;
+
+                  // A raw line window already knows how to map a browser caret
+                  // to its logical line and character offset. Use that same
+                  // geometry for wrapped visual rows.
+                  const raw = document.querySelector(
+                    ".window.active .buf[data-visual-lines='true']"
+                  );
+                  if (raw) {
+                    const cursor = raw.querySelector(".cursor");
+                    if (!cursor || extend) return false;
+                    const r = cursor.getBoundingClientRect();
+                    const content = cursor.closest(".line-content") || cursor.parentElement;
+                    const css = getComputedStyle(content);
+                    const line = parseFloat(css.lineHeight) ||
+                      (parseFloat(css.fontSize) || 16) * 1.2;
+                    const x = this.visualLineGoalX == null ? r.left : this.visualLineGoalX;
+                    this.visualLineGoalX = x;
+                    const y =
+                      r.top + Math.max(1, Math.min(r.height / 2, line / 2)) + dir * line;
+                    const box = raw.getBoundingClientRect();
+                    const caretAt = (px) => document.caretPositionFromPoint
+                      ? document.caretPositionFromPoint(px, y)
+                      : document.caretRangeFromPoint && document.caretRangeFromPoint(px, y);
+                    let pos = null;
+                    for (let dx = 0; !pos && dx <= box.width; dx += 4) {
+                      const xs = dx === 0 ? [x] : [x - dx, x + dx];
+                      for (const px of xs) {
+                        if (px < box.left || px > box.right) continue;
+                        const c = caretAt(px);
+                        if (!c) continue;
+                        const node = c.offsetNode || c.startContainer;
+                        const off = c.offset !== undefined ? c.offset : c.startOffset;
+                        pos = posIn(node, off);
+                        if (pos) break;
+                      }
+                    }
+                    if (!pos) return false;
+                    const winEl = raw.closest(".window[data-win-id]");
+                    if (!winEl) return false;
+                    this.visualLinePending = true;
+                    this.pushEvent("mouse", {
+                      win: parseInt(winEl.dataset.winId, 10),
+                      line: pos.line,
+                      col: pos.col
+                    });
+                    return true;
+                  }
+
                   const frame = document.querySelector(
                     ".window.active iframe[data-rm='markdown'][data-visual-lines='true']"
                   );
@@ -998,10 +1049,6 @@ defmodule Aimax.Ui.Layouts do
                   try { d = frame.contentDocument; } catch (_) { return false; }
                   const pt = d && d.querySelector(".pt");
                   if (!pt) return false;
-                  // A browser key-repeat can outrun the LiveView patch that
-                  // moves .pt. Sending several moves from the same stale
-                  // caret makes vertical motion feel sticky, then jump.
-                  if (this.visualLinePending) return true;
                   const r = pt.getBoundingClientRect();
                   const parent = pt.parentElement || d.body;
                   const css = d.defaultView.getComputedStyle(parent);
@@ -1015,8 +1062,12 @@ defmodule Aimax.Ui.Layouts do
                   // Margins between Markdown blocks are not caret positions.
                   // Walk a little farther in the requested direction until
                   // the browser gives us text on the neighboring screen line.
+                  const rowMid =
+                    r.top + Math.max(1, Math.min(r.height / 2, line / 2));
                   for (let step = line; step <= line * 3; step += Math.max(2, line / 4)) {
-                    const c = caretAt(r.top + dir * step);
+                    // Probe the middle of the target row. Its top edge can
+                    // resolve to the previous row or to an element container.
+                    const c = caretAt(rowMid + dir * step);
                     if (!c) continue;
                     const node = c.startContainer || c.offsetNode;
                     if (!node || node.nodeType !== 3) continue;
@@ -1128,7 +1179,8 @@ defmodule Aimax.Ui.Layouts do
                 };
                 window.addEventListener("keydown", this.handler);
                 this.keyupH = (e) => {
-                  if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+                  if (e.key === "ArrowUp" || e.key === "ArrowDown" ||
+                      (e.ctrlKey && (e.key === "n" || e.key === "p"))) {
                     this.visualLinePending = false;
                   }
                 };

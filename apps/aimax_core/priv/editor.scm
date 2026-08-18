@@ -1726,6 +1726,35 @@
             (when mode (set-mode! mode)))
           (restore-minor-modes! buf))))))
 
+;;; Visual lines are a buffer capability, independent of the major mode.
+;;; The client measures rendered rows; this minor mode owns the durable flag.
+
+(domain! 'interaction)
+(effects! '(write))
+
+(define (visual-line-mode--apply! buf)
+  (buffer-set-local! buf 'visual-line-mode #t))
+
+(define (visual-line-mode--teardown! buf)
+  (buffer-set-local! buf 'visual-line-mode #f))
+
+(register-minor-mode!
+  "visual-line-mode"
+  visual-line-mode--apply!
+  visual-line-mode--teardown!)
+
+(define-command "visual-line-mode" "Toggle visual-row motion in the current buffer"
+  (lambda ()
+    (if (toggle-minor-mode! "visual-line-mode")
+        (message "Visual line mode enabled")
+        (message "Visual line mode disabled"))))
+
+(mode-doc! "visual-line-mode"
+  "Wrap long logical lines and make vertical motion follow rendered rows.")
+
+(domain! 'unknown)
+(effects! '(unknown))
+
 ;;; --- renaming a buffer ---------------------------------------------------------
 ;;; buffer-rename! is the mechanism: the buffer keeps its process, so text,
 ;;; point, locals, overlays and undo all survive. What does NOT survive is

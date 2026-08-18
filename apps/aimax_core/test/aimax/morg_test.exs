@@ -6,6 +6,7 @@ defmodule Aimax.MorgTest do
   alias Aimax.Core.{Buffer, Editor, KeyDispatch, Session}
 
   defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+  defp type(text), do: text |> String.graphemes() |> press()
 
   defp morg_buffer(text) do
     name = "morg-#{System.unique_integer([:positive])}.md"
@@ -26,6 +27,13 @@ defmodule Aimax.MorgTest do
   test ".md files open in morg-mode" do
     {:ok, printed} = Session.eval(~s{(auto-mode-for "notes.md")})
     assert printed == ~s{"morg-mode"}
+  end
+
+  test "morg-mode enables core visual-line mode" do
+    buf = morg_buffer(fixture())
+
+    assert Buffer.get_local(buf, "visual-line-mode") == true
+    assert "visual-line-mode" in Buffer.get_local(buf, "minor-modes")
   end
 
   test "morg-mode fontifies headings with the org level faces" do
@@ -58,6 +66,45 @@ defmodule Aimax.MorgTest do
 
     press("S-TAB")
     assert Buffer.hidden(buf) == []
+  end
+
+  test "M-x morg-outline folds every heading body" do
+    buf = morg_buffer(fixture())
+    :ok = Buffer.goto(buf, 9)
+    press("TAB")
+    :ok = Buffer.goto(buf, 5)
+
+    press("M-x")
+    type("morg-outline")
+    press("RET")
+
+    assert Buffer.get_local(buf, "morg-folds") == [0, 9, 24]
+    assert Buffer.hidden(buf) == [{3, 8}, {17, 23}, {27, 33}]
+    assert Buffer.point(buf) == 0
+
+    press("M-x")
+    type("morg-outline")
+    press("RET")
+
+    assert Buffer.get_local(buf, "morg-folds") == [0, 9, 24]
+  end
+
+  test "TAB toggles one heading without leaving outline mode" do
+    buf = morg_buffer(fixture())
+
+    press("M-x")
+    type("morg-outline")
+    press("RET")
+
+    :ok = Buffer.goto(buf, 9)
+    press("TAB")
+
+    assert Buffer.get_local(buf, "morg-outline") == true
+    assert Buffer.get_local(buf, "morg-folds") == [0, 24]
+    assert Buffer.hidden(buf) == [{3, 8}, {27, 33}]
+
+    press("TAB")
+    assert Buffer.hidden(buf) == [{3, 8}, {17, 23}, {27, 33}]
   end
 
   test "TAB on a fence folds the code block" do

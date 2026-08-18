@@ -162,34 +162,60 @@
   (let ((f (buffer-local buf 'morg-folds)))
     (if f f '())))
 
+(define (morg-outline? buf)
+  (equal? (buffer-local buf 'morg-outline) #t))
+
+;; End of this heading's own body. A child heading starts a new visible line.
+(define (morg-heading-body-end scan buf hstart)
+  (let loop ((es scan))
+    (cond ((null? es) (buffer-size buf))
+          ((<= (car (car es)) hstart) (loop (cdr es)))
+          ((equal? (morg-kind (car es)) 'heading) (- (car (car es)) 1))
+          (else (loop (cdr es))))))
+
 (define (morg-apply-folds! buf)
   (let* ((scan (morg-scan buf))
+         (outline? (morg-outline? buf))
          (valid (filter
                   (lambda (h)
                     (let ((e (morg-entry-at scan h)))
                       (and e (= (car e) h)
                            (or (equal? (morg-kind e) 'heading)
                                (equal? (morg-kind e) 'open)))))
-                  (morg-folds buf))))
+                  (morg-folds buf)))
+         (ranges
+           (map
+             (lambda (h)
+               (let* ((e (morg-entry-at scan h))
+                      (eol (+ h (string-byte-length (cadr e)))))
+                 (cond
+                   ((and outline? (equal? (morg-kind e) 'heading))
+                    (list eol (morg-heading-body-end scan buf h)))
+                   ((equal? (morg-kind e) 'heading)
+                    (list eol (morg-subtree-end scan buf h (morg-info e))))
+                   (else
+                    (list eol (morg-block-close-end scan buf h))))))
+             valid)))
     (buffer-set-local! buf 'morg-folds valid)
     (fold-set! buf 'morg
-      (map
-        (lambda (h)
-          (let* ((e (morg-entry-at scan h))
-                 (eol (+ h (string-byte-length (cadr e)))))
-            (if (equal? (morg-kind e) 'heading)
-                (list eol (morg-subtree-end scan buf h (morg-info e)))
-                (list eol (morg-block-close-end scan buf h)))))
-        valid))))
+      (filter (lambda (r) (< (car r) (cadr r))) ranges))))
 
 (define (morg-set-folds! buf folds)
+  (buffer-set-local! buf 'morg-outline #f)
   (buffer-set-local! buf 'morg-folds folds)
   (morg-apply-folds! buf))
 
 (define (morg-toggle-fold buf h)
-  (if (member h (morg-folds buf))
-      (morg-set-folds! buf (filter (lambda (x) (not (equal? x h))) (morg-folds buf)))
-      (morg-set-folds! buf (cons h (morg-folds buf)))))
+  (let ((folds
+          (if (member h (morg-folds buf))
+              (filter (lambda (x) (not (equal? x h))) (morg-folds buf))
+              (cons h (morg-folds buf)))))
+    (if (morg-outline? buf)
+        (begin
+          ;; Keep body-only geometry while one heading changes visibility.
+          (buffer-set-local! buf 'morg-folds folds)
+          (morg-apply-folds! buf))
+        (morg-set-folds! buf folds))))
 
 (define-command "morg-cycle" "Fold the heading or the code block at point, else indent"
   (lambda ()
@@ -204,6 +230,20 @@
       (if anchor
           (morg-toggle-fold buf anchor)
           (run-command "indent-for-tab")))))
+
+(define-command "morg-outline" "Hide body text and keep every heading visible"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (scan (morg-scan buf))
+           (headings
+             (map car (filter (lambda (e) (equal? (morg-kind e) 'heading)) scan))))
+      (buffer-set-local! buf 'morg-folds headings)
+      (buffer-set-local! buf 'morg-outline #t)
+      (morg-apply-folds! buf)
+      ;; Point may be in a now-hidden body. Surface it on its heading.
+      (let ((h (morg-enclosing-heading scan (point))))
+        (when h (goto-char! (car h))))
+      (message "OUTLINE"))))
 
 (define-command "morg-global-cycle" "Cycle global visibility: overview or show all"
   (lambda ()
@@ -424,6 +464,7 @@
 
 (define-mode "morg-mode"
   (lambda ()
+    (enable-minor-mode! (current-buffer) "visual-line-mode")
     (morg-install-keys)
     (morg-ensure-hook! (current-buffer))
     ;; Hidden ranges die with the daemon; the 'morg-folds local survives.

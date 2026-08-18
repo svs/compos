@@ -29,6 +29,18 @@ defmodule Aimax.Ui.EditorLiveTest do
     assert html =~ "ui-test-"
   end
 
+  test "a raw buffer publishes visual-line mode to the client", %{conn: conn} do
+    buf = Aimax.Core.Editor.current_buffer()
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(~s{(buffer-set-local! "#{buf}" 'visual-line-mode #t)})
+
+    {:ok, _view, html} = live(conn, "/")
+
+    assert html =~ ~s(data-visual-lines="true")
+    assert html =~ ~s(class="buf)
+  end
+
   test "typing renders into the buffer", %{conn: conn} do
     {:ok, view, _} = live(conn, "/")
     html = type(view, "hello")

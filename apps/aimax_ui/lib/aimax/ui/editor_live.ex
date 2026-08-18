@@ -1037,6 +1037,7 @@ defmodule Aimax.Ui.EditorLive do
         style={@node.style}
         data-ctop={@node.ctop}
         data-manual={to_string(@node.manual)}
+        data-visual-lines={to_string(@node.visual_line_mode)}
       >
         <div
           :for={ln <- @lines}

@@ -210,7 +210,7 @@
                                               (list "example" (value->string example))))))))))))
         '() (reverse *components*)))
 
-(mode-icon! "component-gallery-mode" "🎨")
+(mode-icon! "component-gallery-mode" "")
 
 (define-mode "component-gallery-mode"
   (lambda ()

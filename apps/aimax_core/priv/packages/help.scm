@@ -52,7 +52,7 @@
 
 ;; A real mode, so a restored *Help* comes back rendered and read-only
 ;; instead of showing its own markdown source.
-(mode-icon! "help-mode" "❓")
+(mode-icon! "help-mode" "")
 
 (define-mode "help-mode"
   (lambda ()

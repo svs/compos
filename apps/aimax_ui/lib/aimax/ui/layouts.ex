@@ -24,7 +24,12 @@ defmodule Aimax.Ui.Layouts do
           /* default palette = the Modern Emacs design's "paper" tokens;
              themes override via CSS custom properties from Scheme */
           :root {
-            --font-mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+            /* Plex draws the text; the Nerd Font draws the mode icons, which
+               live in the private-use area Plex leaves empty. Both are
+               monospace, so one icon still spends one cell. */
+            --font-mono: 'IBM Plex Mono', 'Symbols Nerd Font Mono',
+                         'JetBrainsMonoNL Nerd Font Mono', 'JetBrainsMono Nerd Font Mono',
+                         'Hack Nerd Font Mono', ui-monospace, Menlo, monospace;
             --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
             --font-serif: Spectral, Georgia, serif;
           }

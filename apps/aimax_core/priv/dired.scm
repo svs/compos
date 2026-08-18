@@ -261,11 +261,7 @@
                   (begin (dired-scan-once! buf dir)
                          (cons ".." (dired-visible buf dir))))))
     'columns (lambda (buf)
-               ;; the icon column's label is one WIDE space: an icon draws two
-               ;; cells where the padding counts one character, and the wide
-               ;; label spends the same two — so the header keeps its place
-               ;; over the rows.
-               (list (list "　" 2)
+               (list (list "" 1)
                      (list "name" #f)
                      (list "" 5)
                      (list "size" 7 'right)

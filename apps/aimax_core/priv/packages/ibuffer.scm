@@ -37,11 +37,12 @@
 ;; says, because `/` narrows on both
 (define (ibuffer-cells buf b)
   (list (if (buffer-modified? b) (list "●" "warn") "")
+        ;; the icon reads before the name: the mode is what the buffer IS
+        (list (buffer-icon b) "faint")
         ;; a name in stars is a buffer the editor made, not a file
         (list b (if (string-prefix? "*" b) "accent" #f))
         (list (ibuffer-human (buffer-size b)) "dim")
-        ;; the mode wears its icon here too, so a chat reads as a chat
-        (list (mode-label (buffer-local b 'mode-name)) "faint")
+        (list (or (buffer-local b 'mode-name) "Fundamental") "faint")
         (list (group-label (buffer-group b)) "accent")
         ;; the name already says which file; this column says whether
         ;; there is one
@@ -178,7 +179,7 @@
 (define-command "ibuffer-prev" "Move up and preview in the home window"
   (lambda () (list-move! -1)))
 
-(mode-icon! "ibuffer-mode" "📋")
+(mode-icon! "ibuffer-mode" "")
 
 (define-list-mode! "ibuffer-mode"
   (list
@@ -204,11 +205,10 @@
     'stamp (lambda (buf) (length (buffer-list-mru)))
     'columns (lambda (buf)
                (list (list "" 1)
+                     (list "" 1)
                      (list "buffer" #f)
                      (list "size" 7 'right)
-                     ;; the label leads with one WIDE space, which spends the
-                     ;; two cells the icon draws — the columns stay in line
-                     (list "　mode" 18)
+                     (list "mode" 16)
                      (list "group" 18)
                      (list "file" 4)))
     'cells ibuffer-cells

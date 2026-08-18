@@ -754,8 +754,8 @@ defmodule Aimax.EditorTest do
       # the labels name the columns, and a row fills them in that order
       assert text =~ ~r/NAME .*SIZE +MODIFIED +PERMS +VC$/m
       # the icon leads the row: a file wears its mode's, a directory Dired's
-      assert text =~ ~r/📄 +alpha\.txt .*\d+ +[A-Z][a-z]{2} +\d+ \d{2}:\d{2} +-rw/m
-      assert text =~ ~r/📁 +subdir\//m
+      assert text =~ ~r/ +alpha\.txt .*\d+ +[A-Z][a-z]{2} +\d+ \d{2}:\d{2} +-rw/m
+      assert text =~ ~r/ +subdir\//m
       # the key bar says what the list does
       assert text =~ "RET visit"
     end

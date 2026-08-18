@@ -1587,7 +1587,7 @@
 (define-command "agents-refresh" "Refresh the chat list"
   (lambda () (agents-refresh!)))
 
-(mode-icon! "chats-mode" "💬")
+(mode-icon! "chats-mode" "")
 
 (define-list-mode! "chats-mode"
   (list

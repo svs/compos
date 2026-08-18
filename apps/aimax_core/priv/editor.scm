@@ -1622,12 +1622,13 @@
 ;;; --- mode icons ---------------------------------------------------------------
 ;;; One glyph names a mode, and every list that shows a mode shows it:
 ;;; dired, ibuffer, the buffer prompt and the file prompt. A mode declares
-;;; its own icon; a mode that declares none reads as a plain document. Each
-;;; icon is one wide glyph, and each row wears exactly one — so a column of
-;;; icons stays a column.
+;;; its own icon; a mode that declares none reads as a plain document. An
+;;; icon is ONE character from the Nerd Font the client loads beside its
+;;; own monospace face — never an emoji, which draws two cells and colours
+;;; a column that must stay quiet.
 
 (define *mode-icons* '())
-(define *default-mode-icon* "📄")
+(define *default-mode-icon* "")
 
 (define (mode-icon! name icon)
   (set! *mode-icons*
@@ -1654,18 +1655,18 @@
   (string-append (mode-icon name) " " (or name "Fundamental")))
 
 ;; the modes this file defines. A package stamps its own icons.
-(mode-icon! "Dired" "📁")
-(mode-icon! "text-mode" "📄")
-(mode-icon! "scheme-mode" "🔣")
-(mode-icon! "elixir-mode" "💧")
-(mode-icon! "json-mode" "🧾")
-(mode-icon! "rust-mode" "🦀")
-(mode-icon! "html-mode" "🌐")
-(mode-icon! "chat-mode" "💬")
-(mode-icon! "shell-mode" "💻")
-(mode-icon! "tail-mode" "📜")
-(mode-icon! "collect-mode" "🧺")
-(mode-icon! "groups-mode" "📚")
+(mode-icon! "Dired" "")
+(mode-icon! "text-mode" "")
+(mode-icon! "scheme-mode" "")
+(mode-icon! "elixir-mode" "")
+(mode-icon! "json-mode" "")
+(mode-icon! "rust-mode" "")
+(mode-icon! "html-mode" "")
+(mode-icon! "chat-mode" "")
+(mode-icon! "shell-mode" "")
+(mode-icon! "tail-mode" "")
+(mode-icon! "collect-mode" "")
+(mode-icon! "groups-mode" "")
 
 (define (set-mode! name)
   (buffer-set-local! (current-buffer) 'mode-name name)

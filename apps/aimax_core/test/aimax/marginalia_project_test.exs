@@ -75,10 +75,10 @@ defmodule Aimax.MarginaliaProjectTest do
         |> Map.new(&{&1.label, &1.hint})
 
       # the icon, the mode a name would open in, then its size, then its date
-      assert hints["a.exs"] =~ ~r/^💧 +elixir-mode +5  [A-Z][a-z]{2} +\d+ \d{2}:\d{2}$/
-      assert hints["sub/"] =~ ~r/^📁 +Dired /
+      assert hints["a.exs"] =~ ~r/^ +elixir-mode +5  [A-Z][a-z]{2} +\d+ \d{2}:\d{2}$/
+      assert hints["sub/"] =~ ~r/^ +Dired /
       # nothing in auto-mode-alist claims it, and Fundamental is still a mode
-      assert hints["Makefile"] =~ ~r/^📄 +Fundamental /
+      assert hints["Makefile"] =~ ~r/^ +Fundamental /
 
       # the columns are one width for the whole set, so the date lands at
       # the same offset on every row however wide the mode and size are

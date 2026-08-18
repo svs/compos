@@ -673,25 +673,81 @@
 ;; author: the proxy sends its thread's slug (AIMAX_AGENT), so edits an
 ;; external agent makes through this bridge land in buffer-authors
 (define (mcp-proxy-call name args-b64 &optional author)
-  (base64-encode
-    (let* ((args-json (base64-decode args-b64))
-           (raw (string-append name " " args-json))
-           (verdict (if (boundp (quote *permission-policy*))
-                        (*permission-policy* #f name "tool" raw)
-                        'allow)))
-      (cond
-        ((member verdict '(allow allow-always))
-         (if author
-             (with-edit-author author
-               (lambda () (mcp-proxy-dispatch name args-json)))
-             (mcp-proxy-dispatch name args-json)))
-        (else
+  (let* ((args-json (base64-decode args-b64))
+         (raw (string-append name " " args-json))
+         (verdict (if (boundp (quote *permission-policy*))
+                      (*permission-policy* #f name "tool" raw)
+                      'allow)))
+    (cond
+      ((member verdict '(allow allow-always))
+       ;; The async lane. An eval-scheme payload whose whole program is
+       ;; one shell command must not hold the Session for its runtime —
+       ;; this is the exact payload behind every logged Session timeout.
+       ;; eval-defer! keeps the caller's reply slot, the command runs in
+       ;; a Task, and eval-resolve! answers with the output when the
+       ;; command ends. Keys, saves and other evals run meanwhile.
+       (let* ((parts (and (equal? name "eval-scheme")
+                          (mcp-proxy--shell-code args-json)))
+              (token (and parts (eval-defer!))))
+         (if token
+             (let ((resolve (lambda (out)
+                              (eval-resolve! token
+                                (base64-encode (value->string out))))))
+               (if (cadr parts)
+                   (shell-command->string (car parts) (cadr parts) resolve)
+                   (shell-command->string (car parts) resolve))
+               'pending)
+             (base64-encode (mcp-proxy--sync name args-json author)))))
+      (else
+        (base64-encode
           (string-append
             "refused: aimax's permission policy did not allow this ("
             (or (and (boundp (quote permission-denied-verb?))
                      (permission-denied-verb? raw))
                 (symbol->string verdict))
             "). Ask the user to run it, or to approve it in the chat."))))))
+
+;; the inline path, with the agent's edits attributed to its thread
+(define (mcp-proxy--sync name args-json author)
+  (if author
+      (let* ((slug (and (string-prefix? "agent:" author)
+                        (substring author 6 (string-length author))))
+             (buf (and slug (agent-buf slug))))
+        (if (and buf (buffer-exists? buf))
+            (with-current-buffer buf
+              (lambda ()
+                (with-edit-author author
+                  (lambda () (mcp-proxy-dispatch name args-json)))))
+            (with-edit-author author
+              (lambda () (mcp-proxy-dispatch name args-json)))))
+      (mcp-proxy-dispatch name args-json)))
+
+;; (mcp-proxy--shell-code ARGS-JSON) -> (CMD DIR|#f) | #f
+;; #f unless the payload's code is one (shell-command->string ...) form
+;; with a literal CMD. DIR can be a literal string, the exact form
+;; (default-directory), or absent.
+(define (mcp-proxy--shell-code args-json)
+  (let ((args (json-parse args-json)))
+    (and args
+         (let ((code (custom--plist-get args 'code)))
+           (and (string? code) (mcp-proxy--shell-parts code))))))
+
+(define (mcp-proxy--shell-parts code)
+  (let* ((forms (scheme-read code))
+         (form (and (pair? forms) (null? (cdr forms)) (car forms))))
+    (and (pair? form)
+         (equal? (car form) 'shell-command->string)
+         (pair? (cdr form))
+         (string? (cadr form))
+         (let ((rest (cddr form)))
+           (cond
+             ((null? rest) (list (cadr form) #f))
+             ((and (pair? rest) (null? (cdr rest)) (string? (car rest)))
+              (list (cadr form) (car rest)))
+             ((and (pair? rest) (null? (cdr rest))
+                   (equal? (car rest) '(default-directory)))
+              (list (cadr form) (default-directory)))
+             (else #f))))))
 
 ;; This surface serves mcp-proxy-tools-json — the Scheme registry — so
 ;; every name it dispatches is a Scheme handler, and a Scheme handler runs

@@ -94,7 +94,7 @@ defmodule AimaxProxy do
              5_000
            ),
          :ok <- :gen_tcp.send(s, req <> "\n"),
-         {:ok, resp} <- :gen_tcp.recv(s, 0, 120_000) do
+         {:ok, resp} <- :gen_tcp.recv(s, 0, 600_000) do
       :gen_tcp.close(s)
 
       case :json.decode(resp) do

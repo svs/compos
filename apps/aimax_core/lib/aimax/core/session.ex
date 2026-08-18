@@ -41,7 +41,8 @@ defmodule Aimax.Core.Session do
   # nil falls back to the last-active frame
 
   @doc "Evaluate Scheme source. Returns {:ok, printed_value} | {:error, msg}."
-  def eval(src, fid \\ nil), do: GenServer.call(__MODULE__, {:eval, src, fid(fid)}, 30_000)
+  def eval(src, fid \\ nil, timeout \\ 30_000),
+    do: GenServer.call(__MODULE__, {:eval, src, fid(fid)}, timeout)
 
   @doc "Reload Scheme files atomically into the live interpreter."
   def reload_files(paths) when is_list(paths),
@@ -137,10 +138,32 @@ defmodule Aimax.Core.Session do
   defp with_fid(fid, fun), do: Frame.with_frame(fid, fun)
 
   @impl true
-  def handle_call({:eval, src, fid}, _from, state) do
-    case safe(fn -> with_fid(fid, fn -> Scheme.eval_string(state.interp, src) end) end) do
-      {:ok, val, interp} -> {:reply, {:ok, Scheme.print(val)}, put_interp(state, interp, val)}
-      {:error, msg} -> {:reply, {:error, msg}, state}
+  def handle_call({:eval, src, fid}, from, state) do
+    # eval-defer! reads this: an eval that hands its work to a Task keeps
+    # the caller's reply slot and answers through eval-resolve! later
+    Process.put(:eval_reply_to, from)
+
+    result = safe(fn -> with_fid(fid, fn -> Scheme.eval_string(state.interp, src) end) end)
+
+    Process.delete(:eval_reply_to)
+    deferred = Process.get(:eval_deferred)
+    Process.delete(:eval_deferred)
+
+    case {result, deferred} do
+      {{:ok, val, interp}, nil} ->
+        {:reply, {:ok, Scheme.print(val)}, put_interp(state, interp, val)}
+
+      # the reply now belongs to eval-resolve!; the store update stays here
+      {{:ok, val, interp}, _token} ->
+        {:noreply, put_interp(state, interp, val)}
+
+      {{:error, msg}, nil} ->
+        {:reply, {:error, msg}, state}
+
+      # a deferred eval that then failed still owes the caller an answer
+      {{:error, msg}, token} ->
+        :ets.delete(@escaped, {:eval_pending, token})
+        {:reply, {:error, msg}, state}
     end
   end
 
@@ -494,6 +517,10 @@ defmodule Aimax.Core.Session do
       "llm-context-limit" =>
         "(llm-context-limit MODEL) — input tokens the model accepts, or #f when unknown.",
       "eval-string" => "(eval-string SRC) — evaluate SRC as Scheme; return the last value.",
+      "eval-defer!" =>
+        "(eval-defer!) — claim the current eval's reply; return a token for eval-resolve!, or #f outside an eval.",
+      "eval-resolve!" =>
+        "(eval-resolve! TOKEN VALUE) — answer the deferred eval named by TOKEN with VALUE.",
       "with-edit-author" =>
         "(with-edit-author AUTHOR THUNK) — run THUNK; buffer edits it makes are attributed to the string AUTHOR.",
       "with-current-buffer" =>
@@ -1183,6 +1210,34 @@ defmodule Aimax.Core.Session do
       "llm-model" => fn [] -> Aimax.Core.LLM.model() end,
       "llm-context-limit" => fn [m] -> Aimax.Core.LLMDb.context_limit(to_string(m)) || false end,
       "eval-string" => fn [src], store -> eval_src.(src, store) end,
+      # The deferred-reply lane. An eval that hands slow work to a Task
+      # claims its caller's reply slot with eval-defer! and answers through
+      # eval-resolve! when the Task's callback delivers the value. The
+      # caller blocks in its own process; the Session moves on at once.
+      "eval-defer!" => fn [] ->
+        case Process.get(:eval_reply_to) do
+          nil ->
+            false
+
+          from ->
+            token = make_ref()
+            :ets.insert(@escaped, {{:eval_pending, token}, from})
+            Process.put(:eval_deferred, token)
+            token
+        end
+      end,
+      "eval-resolve!" => fn [token, value] ->
+        case :ets.lookup(@escaped, {:eval_pending, token}) do
+          [{key, from}] ->
+            :ets.delete(@escaped, key)
+            GenServer.reply(from, {:ok, Scheme.print(value)})
+            :void
+
+          # already resolved, or the caller gave up — nobody to answer
+          [] ->
+            :void
+        end
+      end,
       # (with-edit-author AUTHOR THUNK) — every buffer mutation THUNK makes
       # is attributed to AUTHOR (see buffer-authors). The try/after restore
       # is the point: a raising handler must not leave the author stuck on

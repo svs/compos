@@ -85,8 +85,11 @@ defmodule Aimax.Rpc.Server do
     end
   end
 
+  # 600s: a deferred eval (eval-defer!) answers when its Task ends — the
+  # Session replies to fast evals in milliseconds either way, and only
+  # this conn's process waits
   defp handle_request(%{"method" => "eval", "params" => %{"code" => code}} = req) do
-    case Session.eval(code) do
+    case Session.eval(code, nil, 600_000) do
       {:ok, printed} ->
         %{jsonrpc: "2.0", id: req["id"], result: printed}
 

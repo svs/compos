@@ -105,12 +105,13 @@ defmodule Aimax.Core.SchemeAPI do
       "buffer-kill!" => "(buffer-kill! BUF) — kill the buffer and release its windows.",
       "ssh-command" => "(ssh-command) — return the configured ssh command string.",
       "remote-read" =>
-        "(remote-read HOST PATH) — read a remote file; return text, 'directory, 'absent, or (error MSG).",
+        "(remote-read HOST PATH [CALLBACK]) — read a remote file; return text, 'directory, 'absent, or (error MSG). With CALLBACK, run in a Task and hand it the value.",
       "remote-list-dir" =>
-        "(remote-list-dir HOST DIR) — list a remote directory; return entries or (error MSG).",
-      "remote-sh" => "(remote-sh HOST CMD) — run CMD on HOST over ssh; return #t or (error MSG).",
+        "(remote-list-dir HOST DIR [CALLBACK]) — list a remote directory; return entries or (error MSG). With CALLBACK, run in a Task and hand it the value.",
+      "remote-sh" =>
+        "(remote-sh HOST CMD [CALLBACK]) — run CMD on HOST over ssh; return #t or (error MSG). With CALLBACK, run in a Task and hand it the value.",
       "remote-write" =>
-        "(remote-write HOST PATH TEXT) — write TEXT to a remote file; return #t or (error MSG).",
+        "(remote-write HOST PATH TEXT [CALLBACK]) — write TEXT to a remote file; return #t or (error MSG). With CALLBACK, run in a Task and hand it the value.",
       "buffer-mark-saved!" => "(buffer-mark-saved! BUF) — clear the buffer's modified flag.",
       "find-file" =>
         "(find-file PATH) — open the file PATH in a buffer and return the buffer name.",
@@ -124,7 +125,9 @@ defmodule Aimax.Core.SchemeAPI do
       "file-directory?" => "(file-directory? PATH) — return #t if PATH is a directory.",
       "read-file" => "(read-file PATH) — return the file's contents, or #f if unreadable.",
       "shell-command->string" =>
-        "(shell-command->string CMD [DIR]) — run CMD in a shell; return its output with stderr merged.",
+        "(shell-command->string CMD [DIR] [CALLBACK]) — run CMD in a shell; stderr merges into the output. With CALLBACK, run in a Task and return :void at once; CALLBACK gets the output. Without CALLBACK, block up to the shell time limit, then kill CMD and return what it wrote.",
+      "scheme-read" =>
+        "(scheme-read STR) — read STR as Scheme data; return the list of top-level forms, or #f when STR does not parse.",
       "getenv" =>
         "(getenv NAME) — return the environment variable NAME, or #f if it is unset or empty.",
       "json-parse" =>
@@ -419,30 +422,58 @@ defmodule Aimax.Core.SchemeAPI do
       # remote files: ssh transport only — /ssh: path syntax, remote buffers,
       # and save interception are Scheme (priv/editor.scm)
       "ssh-command" => fn [] -> Aimax.Core.Remote.ssh() end,
-      "remote-read" => fn [host, path] ->
-        case Aimax.Core.Remote.read(host, path) do
-          {:ok, text} -> text
-          :directory -> {:sym, "directory"}
-          :absent -> {:sym, "absent"}
-          {:error, msg} -> [{:sym, "error"}, msg]
+      "remote-read" => fn [host, path | rest] ->
+        work = fn ->
+          case Aimax.Core.Remote.read(host, path) do
+            {:ok, text} -> text
+            :directory -> {:sym, "directory"}
+            :absent -> {:sym, "absent"}
+            {:error, msg} -> [{:sym, "error"}, msg]
+          end
+        end
+
+        case rest do
+          [] -> work.()
+          [callback] -> async_dispatch(callback, work)
         end
       end,
-      "remote-list-dir" => fn [host, dir] ->
-        case Aimax.Core.Remote.list_dir(host, dir) do
-          {:ok, entries} -> entries
-          {:error, msg} -> [{:sym, "error"}, msg]
+      "remote-list-dir" => fn [host, dir | rest] ->
+        work = fn ->
+          case Aimax.Core.Remote.list_dir(host, dir) do
+            {:ok, entries} -> entries
+            {:error, msg} -> [{:sym, "error"}, msg]
+          end
+        end
+
+        case rest do
+          [] -> work.()
+          [callback] -> async_dispatch(callback, work)
         end
       end,
-      "remote-sh" => fn [host, cmd] ->
-        case Aimax.Core.Remote.sh(host, cmd) do
-          :ok -> true
-          {:error, msg} -> [{:sym, "error"}, msg]
+      "remote-sh" => fn [host, cmd | rest] ->
+        work = fn ->
+          case Aimax.Core.Remote.sh(host, cmd) do
+            :ok -> true
+            {:error, msg} -> [{:sym, "error"}, msg]
+          end
+        end
+
+        case rest do
+          [] -> work.()
+          [callback] -> async_dispatch(callback, work)
         end
       end,
-      "remote-write" => fn [host, path, text] ->
-        case Aimax.Core.Remote.write(host, path, text) do
-          :ok -> true
-          {:error, msg} -> [{:sym, "error"}, msg]
+      "remote-write" => fn [host, path, text | rest] ->
+        work = fn ->
+          case Aimax.Core.Remote.write(host, path, text) do
+            :ok -> true
+            {:error, msg} -> [{:sym, "error"}, msg]
+          end
+        end
+
+        case rest do
+          [] -> work.()
+          [callback] -> async_dispatch(callback, work)
         end
       end,
       "buffer-mark-saved!" => fn [name] ->
@@ -513,8 +544,29 @@ defmodule Aimax.Core.SchemeAPI do
       # This is mechanism, including for agent-attributed evals. Scheme's
       # permission policy is an overridable convenience, not an OS sandbox.
       "shell-command->string" => fn
-        [cmd] -> shell_to_string(cmd, File.cwd!())
-        [cmd, dir] -> shell_to_string(cmd, Path.expand(dir))
+        [cmd] ->
+          shell_to_string(cmd, File.cwd!())
+
+        [cmd, dir_or_cb | rest] ->
+          {dir, callback} =
+            case {dir_or_cb, rest} do
+              {cb, []} when not is_binary(cb) -> {File.cwd!(), cb}
+              {dir, []} -> {Path.expand(dir), nil}
+              {dir, [cb]} -> {Path.expand(dir), cb}
+            end
+
+          if callback do
+            async_dispatch(callback, fn -> shell_to_string(cmd, dir, shell_async_limit()) end)
+          else
+            shell_to_string(cmd, dir)
+          end
+      end,
+      "scheme-read" => fn [src] ->
+        try do
+          Aimax.Scheme.Reader.read_all(src)
+        rescue
+          _ -> false
+        end
       end,
       # (json-parse STR) — objects become flat plists with symbol keys,
       # null becomes #f; #f on parse failure
@@ -1332,12 +1384,18 @@ defmodule Aimax.Core.SchemeAPI do
 
   defp git_dispatch([], work, shape), do: git_value(work.(), shape)
 
-  defp git_dispatch([callback | _], work, shape) do
-    key = {:git_call, make_ref()}
+  defp git_dispatch([callback | _], work, shape),
+    do: async_dispatch(callback, fn -> git_value(work.(), shape) end)
+
+  # run WORK in a Task and hand its value to CALLBACK through the Session —
+  # the single writer of the interpreter store. The closure stays rooted in
+  # @escaped until the callback fires, which protects it from the GC.
+  defp async_dispatch(callback, work) do
+    key = {:async_call, make_ref()}
     rooted? = root_closure(key, callback)
 
     Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
-      value = git_value(work.(), shape)
+      value = work.()
 
       try do
         Aimax.Core.Session.apply_callback(callback, [value])
@@ -1471,12 +1529,69 @@ defmodule Aimax.Core.SchemeAPI do
   # (fold-get BUF 'all) reads the union, the same word overlay-clear! uses
   defp fold_tag(tag), do: if(plain(tag) == "all", do: :all, else: plain(tag))
 
-  defp shell_to_string(cmd, dir) do
-    {out, _status} = System.cmd("/bin/sh", ["-c", cmd], cd: dir, stderr_to_stdout: true)
-    out
+  # System.cmd has no time limit, so a hung command would hold the caller —
+  # and in the inline form the caller is the Session — forever. Run through
+  # a port, kill the OS process at the limit, and return what it wrote.
+  defp shell_to_string(cmd, dir, limit \\ nil) do
+    limit = limit || shell_inline_limit()
+
+    port =
+      Port.open({:spawn_executable, "/bin/sh"}, [
+        :binary,
+        :exit_status,
+        :stderr_to_stdout,
+        args: ["-c", cmd],
+        cd: dir
+      ])
+
+    deadline = System.monotonic_time(:millisecond) + limit
+    collect_port(port, deadline, [])
   rescue
     _ -> ""
   end
+
+  defp collect_port(port, deadline, acc) do
+    left = deadline - System.monotonic_time(:millisecond)
+
+    receive do
+      {^port, {:data, chunk}} ->
+        collect_port(port, deadline, [acc | chunk])
+
+      {^port, {:exit_status, _}} ->
+        IO.iodata_to_binary(acc)
+    after
+      max(left, 0) ->
+        kill_port(port)
+        IO.iodata_to_binary(acc)
+    end
+  end
+
+  defp kill_port(port) do
+    case Port.info(port, :os_pid) do
+      {:os_pid, pid} -> System.cmd("kill", ["-9", Integer.to_string(pid)])
+      _ -> :ok
+    end
+
+    Port.close(port)
+    flush_port(port)
+  catch
+    _, _ -> flush_port(port)
+  end
+
+  # a port message left in the mailbox would reach handle_info and crash
+  # the Session — drain every message the closed port already sent
+  defp flush_port(port) do
+    receive do
+      {^port, _} -> flush_port(port)
+    after
+      0 -> :ok
+    end
+  end
+
+  defp shell_inline_limit, do: Application.get_env(:aimax_core, :shell_timeout_ms, 15_000)
+
+  defp shell_async_limit,
+    do: Application.get_env(:aimax_core, :shell_async_timeout_ms, 600_000)
 
   defp format_mode(stat) do
     type = if stat.type == :directory, do: "d", else: "-"

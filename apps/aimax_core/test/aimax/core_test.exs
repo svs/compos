@@ -148,6 +148,14 @@ defmodule Aimax.CoreTest do
     assert Buffer.ref(name) == nil
   end
 
+  test "killing every buffer leaves a live scratch buffer" do
+    Enum.each(Core.list_buffers(), &Core.kill_buffer/1)
+
+    assert Buffer.exists?("*scratch*")
+    assert Aimax.Core.Editor.current_buffer() == "*scratch*"
+    assert :ok = Buffer.append("*scratch*", "still live")
+  end
+
   describe "Session (Scheme wired to buffers)" do
     test "scheme can create and edit buffers" do
       name = uniq("scm")

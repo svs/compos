@@ -5,6 +5,7 @@ defmodule Aimax.Core do
 
   @registry Aimax.Core.BufferRegistry
   @buffer_sup Aimax.Core.BufferSupervisor
+  @scratch "*scratch*"
 
   @doc "The aimax home dir (config, keys, desktop). Tests point :home at a tmp dir."
   def home, do: Application.get_env(:aimax_core, :home) || Path.expand("~/.aimax")
@@ -99,29 +100,54 @@ defmodule Aimax.Core do
   def kill_buffer(name) do
     case Registry.lookup(@registry, name) do
       [{pid, _}] ->
-        # windows must never point at the dead: a later interaction with
-        # a killed buffer crashes the Editor (taking the keymap with it)
-        if Process.whereis(Aimax.Core.Editor), do: Aimax.Core.Editor.release_buffer(name)
+        # An editor always has somewhere live to land. In particular, a
+        # bulk kill may remove *scratch* early and then remove the final
+        # remaining buffer. release_buffer/1 used to fall back to the dead
+        # scratch name in that case, so the next key reached a :noproc.
+        # Keep the sole scratch process when it is itself last; otherwise
+        # recreate scratch before releasing the last non-scratch buffer.
+        last_live? = not Enum.any?(list_buffers(), &(&1 != name))
 
-        # llm-mode sessions intentionally outlive turns, but never their
-        # owning buffer. Close through LLMSession so its callback closures
-        # leave ETS together with the runtime.
-        case Buffer.get_local(name, "llm-session-id") do
-          id when is_binary(id) ->
-            if Aimax.Core.LLMSession.running?(id), do: Aimax.Core.LLMSession.close(id)
-
-          _ ->
+        cond do
+          last_live? and name == @scratch ->
             :ok
-        end
 
-        :ok = Buffer.discard(name)
-        result = DynamicSupervisor.terminate_child(@buffer_sup, pid)
-        BufferStore.forget(name)
-        result
+          last_live? ->
+            case ensure_buffer(@scratch) do
+              {:ok, @scratch} -> do_kill_buffer(name, pid)
+              {:error, :already_exists} -> do_kill_buffer(name, pid)
+              error -> error
+            end
+
+          true ->
+            do_kill_buffer(name, pid)
+        end
 
       [] ->
         if BufferStore.known?(name), do: BufferStore.forget(name), else: {:error, :not_found}
     end
+  end
+
+  defp do_kill_buffer(name, pid) do
+    # windows must never point at the dead: a later interaction with
+    # a killed buffer crashes the Editor (taking the keymap with it)
+    if Process.whereis(Aimax.Core.Editor), do: Aimax.Core.Editor.release_buffer(name)
+
+    # llm-mode sessions intentionally outlive turns, but never their
+    # owning buffer. Close through LLMSession so its callback closures
+    # leave ETS together with the runtime.
+    case Buffer.get_local(name, "llm-session-id") do
+      id when is_binary(id) ->
+        if Aimax.Core.LLMSession.running?(id), do: Aimax.Core.LLMSession.close(id)
+
+      _ ->
+        :ok
+    end
+
+    :ok = Buffer.discard(name)
+    result = DynamicSupervisor.terminate_child(@buffer_sup, pid)
+    BufferStore.forget(name)
+    result
   end
 
   @doc """

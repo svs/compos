@@ -674,6 +674,61 @@ defmodule Aimax.EditorTest do
       assert {:ok, ~s{""}} = Aimax.Core.Session.eval(~s{(list-query "#{root}")})
     end
 
+    # You type, and then you select. The filter prompt offers no candidates
+    # of its own, so its arrows move the rows of the listing behind it, and
+    # RET closes the prompt on the row you chose. Before this, <down> did
+    # nothing and every narrowing left you on the first match.
+    test "the arrows move the listing while the filter prompt is open", %{root: root} do
+      File.write!(Path.join(root, "notes.scm"), ";;")
+      File.write!(Path.join(root, "notes2.scm"), ";;")
+
+      {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
+
+      press(["/"])
+      type("notes")
+      row = fn -> Aimax.Core.Session.eval(~s{(list-current "#{root}")}) end
+      # a narrowing lands on the first row, and ".." leads every listing
+      assert {:ok, ~s{".."}} = row.()
+
+      press(["<down>"])
+      assert {:ok, ~s{"notes.scm"}} = row.()
+
+      press(["<down>"])
+      assert {:ok, ~s{"notes2.scm"}} = row.()
+
+      press(["<up>"])
+      assert {:ok, ~s{"notes.scm"}} = row.()
+
+      # C-n and C-p move the same rows
+      press(["C-n"])
+      assert {:ok, ~s{"notes2.scm"}} = row.()
+      press(["C-p"])
+      assert {:ok, ~s{"notes.scm"}} = row.()
+
+      # RET keeps the narrowing AND the row the arrows chose
+      press(["RET"])
+      refute Editor.render_state().minibuffer
+      assert {:ok, ~s{"notes.scm"}} = Aimax.Core.Session.eval(~s{(dired-entry)})
+      assert {:ok, ~s{"notes"}} = Aimax.Core.Session.eval(~s{(list-query "#{root}")})
+    end
+
+    # A prompt that HAS candidates keeps its own arrows: the fallback above
+    # must never steal them from a palette.
+    test "a candidate prompt keeps its own arrows", %{root: root} do
+      {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
+      press(["/"])
+      press(["C-g"])
+
+      {:ok, _} =
+        Aimax.Core.Session.eval(
+          ~s{(minibuffer-read "Pick: " (list (list "one" "") (list "two" "")) (lambda (v) v))}
+        )
+
+      press(["<down>"])
+      assert {:ok, ~s{"two"}} = Aimax.Core.Session.eval("(minibuffer-selected)")
+      press(["C-g"])
+    end
+
     # The listing was in the buffer and the window was blank: the buffer
     # kept 'render-mode "blocks" from the mode before it, and the client
     # draws blocks for a leaf that says "blocks". Both ends refuse now —

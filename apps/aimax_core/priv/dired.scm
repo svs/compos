@@ -244,8 +244,10 @@
            "`x`. `RET` "
            "visits, `^` goes up. `/` narrows as you type — it matches the "
            "perms, the size, the date, the name and the mode the file would "
-           "open in. `\\` widens by one and `.` hides the dotfiles. The "
-           "filters persist with the buffer.")
+           "open in. The arrows move the rows while you type, and `RET` "
+           "keeps the narrowing and the row you chose. `\\` widens by one "
+           "and `.` hides the dotfiles. The filters persist with the "
+           "buffer.")
     ;; a file name is a file name: `/` matches the same annotation
     ;; C-x C-f shows beside one
     'category 'file

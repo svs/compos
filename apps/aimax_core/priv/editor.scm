@@ -561,9 +561,11 @@
 
 ;;; --- `/` narrows --------------------------------------------------------------
 ;;; One filter, for every list. You press `/` and type; the list narrows
-;;; on every keystroke to the rows that match. RET keeps the narrowing,
-;;; C-g drops it, `/` again narrows the narrowing — the filters stack, and
-;;; the stack persists with the buffer. `\` widens by one.
+;;; on every keystroke to the rows that match. The arrows move the rows
+;;; while you type, so you type and then you select. RET keeps the
+;;; narrowing and the row you chose, C-g drops the narrowing, `/` again
+;;; narrows the narrowing — the filters stack, and the stack persists with
+;;; the buffer. `\` widens by one.
 ;;;
 ;;; A row matches on everything you can SEE: its line, and the marginalia
 ;;; the prompts show beside the same thing (the mode names the category).
@@ -953,13 +955,16 @@
         (e (list-current buf)))
     (when (and f e) (f buf e))))
 
-(define (list-move! step)
-  (let* ((buf (current-buffer))
-         (i (list-clamped-index buf))
-         (n (length (list-entries buf))))
+;; the mover may not be in the list: the filter prompt is the current
+;; buffer while its arrows move the rows of the list behind it
+(define (list-move-in! buf step)
+  (let ((i (list-clamped-index buf))
+        (n (length (list-entries buf))))
     (when i
       (list-goto-index! buf (max 0 (min (- n 1) (+ i step))))
       (list-preview! buf))))
+
+(define (list-move! step) (list-move-in! (current-buffer) step))
 
 (domain! 'interaction)
 (effects! '(read))
@@ -996,6 +1001,25 @@
 (domain! 'interaction)
 (effects! '(write))
 
+;;; The filter prompt has no candidates of its own: the ROWS are the
+;;; candidates, and they live in the list behind the prompt. So the
+;;; arrows move the highlight in that list while you type, and RET closes
+;;; the prompt on the row you chose. You type, and then you select.
+(define *mb-list-buffer* #f)
+(define *list-filter-prompt* "Filter: ")
+
+;; #t means the arrows moved a list. #f means no list stands behind this
+;; prompt, so the minibuffer keeps its own arrows. The prompt line is the
+;; proof: a prompt can also close behind Scheme's back, and a stale list
+;; must never steal the arrows from the next palette.
+(define (mb-list-move! step)
+  (let ((buf *mb-list-buffer*)
+        (mb (minibuffer-state)))
+    (if (and buf mb (buffer-exists? buf)
+             (equal? (plist-get mb 'prompt) *list-filter-prompt*))
+        (begin (with-invoking-buffer (lambda () (list-move-in! buf step))) #t)
+        #f)))
+
 ;; The narrowing is live, and the input IS it. The prompt opens holding
 ;; the query the list already has, so `/` edits the narrowing instead of
 ;; stacking a second one on top of it. Every keystroke narrows, every
@@ -1008,11 +1032,19 @@
            (before (list-query buf))
            (narrow (lambda (q)
                      (list-set-query! buf q)
-                     (list-goto-first-entry buf))))
-      (minibuffer-read* "Filter: " '()
+                     (list-goto-first-entry buf)))
+           (done (lambda () (set! *mb-list-buffer* #f))))
+      (set! *mb-list-buffer* buf)
+      (minibuffer-read* *list-filter-prompt* '()
         (list (list 'change narrow)
-              (list 'confirm narrow)
-              (list 'cancel (lambda () (narrow before)))
+              ;; RET keeps the narrowing AND the row: the arrows moved the
+              ;; highlight to the row you want, so confirm must not send it
+              ;; back to the first one. A query the change handler did not
+              ;; apply yet still narrows here.
+              (list 'confirm (lambda (q)
+                               (done)
+                               (if (equal? q (list-query buf)) #t (narrow q))))
+              (list 'cancel (lambda () (done) (narrow before)))
               (list 'style "filter")))
       ;; the prompt starts where the list is: editing beats retyping
       (unless (equal? before "") (minibuffer-input! before)))))
@@ -1302,9 +1334,11 @@
 (define-command "minibuffer-complete" "Complete the minibuffer input"
   (lambda () (minibuffer-complete!)))
 (define-command "minibuffer-next-candidate" "Select the next minibuffer candidate"
-  (lambda () (minibuffer-next!) (mb-select-notify!)))
+  (lambda ()
+    (if (mb-list-move! 1) #t (begin (minibuffer-next!) (mb-select-notify!)))))
 (define-command "minibuffer-previous-candidate" "Select the previous minibuffer candidate"
-  (lambda () (minibuffer-prev!) (mb-select-notify!)))
+  (lambda ()
+    (if (mb-list-move! -1) #t (begin (minibuffer-prev!) (mb-select-notify!)))))
 (define-command "minibuffer-delete-backward" "Delete the character before point"
   (lambda () (minibuffer-del!)))
 
@@ -3502,6 +3536,9 @@
           (message "No prompt to collect")
           (let ((select *mb-select-fn*))
             (set! *mb-select-fn* #f)
+            ;; the prompt is gone, so the list behind it no longer owns the
+            ;; minibuffer's arrows
+            (set! *mb-list-buffer* #f)
             (set! *collect-select* select)
             (set! *collect-confirm* (cadr (assoc 'confirm d)))
             (set! *collect-cancel* (cadr (assoc 'cancel d)))

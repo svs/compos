@@ -55,7 +55,7 @@ class BenchTest(unittest.TestCase):
 
     def test_catalog_is_stable_and_filterable(self):
         tasks = self.catalog["tasks"]
-        self.assertEqual(14, len(tasks))
+        self.assertEqual(15, len(tasks))
         self.assertEqual(3, sum(task["cadence"] == "daily" for task in tasks))
         self.assertEqual(2, sum(task["area"] == "control" for task in tasks))
 

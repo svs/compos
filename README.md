@@ -2,8 +2,30 @@
 
 Emacs rebuilt on the BEAM.
 
-## Why?
-Emacs is amazing! But it is old. The lack of graphics support make it arcane to use. It is not possible to get smooth and elegant LLM interaction in Emacs. The concurrency story is also pretty bad. Single threaded elisp freezes the frontend randomly. Emacs needs a  
+## Philosophy
+
+Emacs has the right model for an agent harness. Buffers hold durable
+application state. Windows compose views. Named commands give people and
+agents one semantic action surface. Modes add contextual behavior, and the
+Lisp runtime keeps the whole environment open to inspection and change.
+
+The missing pieces are modern rendering and concurrency. ai-max.el uses the
+browser as a renderer without adopting the browser's closed application model.
+The main window can show a rich application while chat remains beside it. The
+agent manipulates the same buffers, windows, and commands that the person uses.
+Elixir and OTP keep model streams, tools, terminals, and background work from
+blocking the interface.
+
+This approach also explains why we do not need a large plugin lifecycle
+framework. JavaScript frameworks such as Cordis must reconstruct dynamic
+composition above a module graph. Lisp starts with symbols, late binding, live
+evaluation, and inspectable state. OTP owns the external resources that still
+need explicit lifetimes.
+
+Read the longer arguments:
+
+- [The New Browser Was Emacs All Along](docs/EMACS-AS-AGENT-HARNESS.md)
+- [Cordis, Lisp, and What JavaScript Has to Rebuild](docs/CORDIS-VS-EMACS.md)
 
 ## The one rule
 
@@ -92,6 +114,16 @@ open -na "Google Chrome" --args --app=http://localhost:4004
 
 The daemon reads `priv/*.scm` at boot, so a restart reloads them. Browser
 clients reload themselves through a boot-id check.
+
+Each daemon records its name and URL in `~/.aimax/daemons.json`. Run another
+daemon with a different home and port, then use `C-x d` to switch the current
+browser tab. Set `AIMAX_DAEMON_REGISTRY` when the daemons must share another
+registry path.
+
+```sh
+AIMAX_HOME=~/.aimax-feature AIMAX_PORT=4014 AIMAX_APP_PORT=4015 \
+  AIMAX_NAME=feature mix run --no-halt
+```
 
 In the window: `C-x 2/3/o/1/0` splits windows, `C-x C-f` finds a file,
 `C-x C-s` saves, `C-x b` switches buffers, `C-k` and `C-y` kill and yank,

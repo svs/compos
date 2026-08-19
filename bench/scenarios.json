@@ -1,5 +1,5 @@
 {
-  "version": 8,
+  "version": 9,
   "title": "Would we live in ai-max all day?",
   "question": "Does ai-max make real work noticeably better than using an editor, terminal, browser, and chat separately?",
   "tasks": [
@@ -121,6 +121,16 @@
       "prompt": "Add a small missing workflow as user-level Scheme, evaluate it into the live editor, discover it through the catalog, and use it without restarting.",
       "setup": ["Choose behavior that needs no new host mechanism.", "Begin with no command implementing the behavior."],
       "success": ["The extension is policy-only Scheme.", "It becomes usable and discoverable immediately.", "Failure during evaluation does not poison the live session."],
+      "gates": ["trust", "continuity", "leverage"]
+    },
+    {
+      "id": "native-ui-verification",
+      "title": "Verify an editor UI entirely inside ai-max",
+      "area": "extension",
+      "cadence": "weekly",
+      "prompt": "Improve an existing Scheme mode or list view, then verify the result entirely through ai-max. Use the live catalog, ordinary buffers, render state, and the real key dispatcher. Do not launch or control Chrome, another browser, or an external browser automation stack.",
+      "setup": ["Choose an existing selectable or interactive view with one small missing behavior.", "Keep the ai-max editor and its public JSON-RPC boundary available; provide no browser-control tool."],
+      "success": ["The implementation remains in Scheme unless a new host mechanism is thoroughly justified.", "Opening, navigation, the primary action, refresh, and relevant restore behavior are verified through ai-max.", "The agent inspects ai-max buffer, overlay, component, or render state instead of external browser state.", "No browser process or browser automation capability is used."],
       "gates": ["trust", "continuity", "leverage"]
     },
     {

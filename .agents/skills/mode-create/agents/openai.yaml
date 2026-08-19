@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mode Create"
+  short_description: "Build ai-max modes from catalogued UI parts"
+  default_prompt: "Use $mode-create to design and implement an ai-max mode."

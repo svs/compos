@@ -1,6 +1,10 @@
 # Documentation
 
 - [Architecture](ARCHITECTURE.md) — system boundary and design rules.
+- [The New Browser Was Emacs All Along](EMACS-AS-AGENT-HARNESS.md) — why the
+  Emacs model fits agent harnesses and rich rendered applications.
+- [Cordis, Lisp, and JavaScript](CORDIS-VS-EMACS.md) — why Lisp runtimes need
+  less plugin lifecycle machinery.
 - [Handoff](HANDOFF.html) — current implementation guide.
 - [Roadmap](ROADMAP.md) — editor build order.
 - [AI-native plan](AI-NATIVE-SPEC.md) — discovery and code-browser work.

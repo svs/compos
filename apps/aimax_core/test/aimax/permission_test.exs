@@ -88,6 +88,35 @@ defmodule Aimax.PermissionTest do
                "ask"
     end
 
+    test "a tool's declared side effects decide before the chat mode does" do
+      buf = "*zz-effects*"
+      eval!(~s{(buffer-create "#{buf}")})
+
+      eval!("""
+      (define-tool! 'zz-shred "test: irreversible" '()
+        (lambda (args) "gone") '(destroy))
+      """)
+
+      on_exit(fn ->
+        Aimax.Core.kill_buffer(buf)
+        Session.eval("(set! *llm-tools* (remove (lambda (t) (equal? (car t) 'zz-shred)) *llm-tools*))")
+      end)
+
+      # read-only tools never ask, even in ask mode
+      eval!(~s{(buffer-set-local! "#{buf}" 'chat-permission-mode 'ask)})
+      assert eval!(~s{(*permission-policy* "#{buf}" "apropos" "tool" "apropos args")}) ==
+               "allow-always"
+
+      # destroy-effect tools ask, even in approve mode
+      eval!(~s{(buffer-set-local! "#{buf}" 'chat-permission-mode 'approve)})
+      assert eval!(~s{(*permission-policy* "#{buf}" "zz-shred" "tool" "zz-shred args")}) ==
+               "ask"
+
+      # a tool the catalog does not know falls through to the mode
+      assert eval!(~s{(*permission-policy* "#{buf}" "zz-unknown" "tool" "zz-unknown args")}) ==
+               "allow-always"
+    end
+
     test "a per-agent profile denies its own patterns; no profile is allow-all" do
       buf = "*zz-profile*"
       eval!(~s{(buffer-create "#{buf}")})

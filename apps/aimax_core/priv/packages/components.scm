@@ -138,6 +138,24 @@
             (if (component--has? p 'lines) (list 'lines (component--get p 'lines)) '())
             (if (component--has? p 'mark) (list 'mark (component--get p 'mark)) '()))))
 
+(defcomponent 'ui/actions
+  "A row of clickable actions with optional keyboard hints."
+  '((actions list required) (class string optional))
+  '(actions (("refresh" "Refresh" "g") ("add" "Add" "+")))
+  (lambda (p)
+    (list 'tag "div"
+          'class (string-append "c-actions " (component--get p 'class ""))
+          'children
+          (map (lambda (action)
+                 (list 'tag "div" 'class "c-action" 'click (car action)
+                       'segs
+                       (append
+                         (if (> (length action) 2)
+                             (list (list "c-action-key" (nth 2 action)))
+                             '())
+                         (list (list "c-action-label" (cadr action))))))
+               (component--get p 'actions '())))))
+
 (defcomponent 'ui/fold-head
   "A clickable heading with a disclosure caret."
   '((title string required) (open? boolean required) (click any optional)
@@ -267,6 +285,11 @@
 .c-caret, .c-dim, .c-kv-key { color: var(--dim-fg); }
 .c-row { padding: 4px 10px; font-family: var(--font-mono); }
 .c-row.current { background: var(--hl-line-bg); }
+.c-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 12px; }
+.c-action { display: inline-flex; gap: 6px; align-items: center; padding: 4px 8px; border: 1px solid var(--border-bg); border-radius: 5px; cursor: pointer; font-family: var(--font-mono); font-size: 11px; }
+.c-action:hover { background: var(--hl-line-bg); border-color: var(--dim-fg); }
+.c-action-key { color: var(--accent-fg); font-weight: 600; }
+.c-action-label { color: var(--fg); }
 .c-empty { padding: 12px; color: var(--dim-fg); font-family: var(--font-mono); }
 .c-badge { display: inline-block; border-radius: 999px; padding: 1px 7px; background: var(--hl-line-bg); font-size: 10px; }
 .c-kv { padding: 7px 10px; font-family: var(--font-mono); font-size: 11px; }

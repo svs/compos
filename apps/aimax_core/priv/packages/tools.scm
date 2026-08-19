@@ -18,10 +18,17 @@
 ;; editor commands.
 (define *llm-tool-buffer* #f)
 
-(define (define-tool! name description params handler)
+;; EFFECTS is the tool's side-effect declaration for the permission
+;; policy: a list with one level (pure, read, write, destroy) plus
+;; modifiers (external, execute, spend). The catalog entry carries it,
+;; and *permission-policy* reads it from there.
+(define (define-tool! name description params handler &optional effects)
   (set! *llm-tools*
     (cons (list name (list 'description description 'params params 'handler handler))
           (remove (lambda (t) (equal? (car t) name)) *llm-tools*)))
+  (if effects
+      (catalog-register! 'tool name description 'effects effects)
+      (catalog-register! 'tool name description))
   name)
 
 (define (llm-tool-specs)
@@ -130,7 +137,8 @@
       (if a
           ((cadr a) id)
           (string-append "no such action; " (symbol->string type) " has: "
-                         (string-join (map car (actions-for type)) ", "))))))
+                         (string-join (map car (actions-for type)) ", ")))))
+  '(write external))
 
 ;;; --- the built-in toolbox ----------------------------------------------------
 ;;; One tool is viable only because failure is instructive: a model that
@@ -157,7 +165,8 @@
                                'items (list 'type "string")))
           'required (list "question" "answers")))
   (lambda (args)
-    "error: ask must run through an agent thread"))
+    "error: ask must run through an agent thread")
+  '(pure))
 
 (define (tool--edit-distance a b)
   (let ((la (string-length a)) (lb (string-length b)))
@@ -247,7 +256,9 @@
                   result))))
       (if (equal? (car r) 'ok)
           (value->string (cadr r))
-          (string-append "error: " (cadr r) (tool--error-hint (cadr r) code))))))
+          (string-append "error: " (cadr r) (tool--error-hint (cadr r) code)))))
+  ;; arbitrary code: the payload decides what it does, the policy scans it
+  '(write execute))
 
 ;; Emacs-grade introspection: most of the editor is userland Scheme, and
 ;; closures carry their AST — so a function's real source is one call away.
@@ -266,7 +277,8 @@
   "Read a function's actual implementation. Userland functions and M-x commands return their full Scheme source (most of the editor — dired, org, chat, modes — is userland); builtins are Elixir and return only a marker. Use it to understand how something works before changing it."
   (list (list 'name "string" "Function or command name, e.g. chat-send or face-remap!"))
   (lambda (args)
-    (describe-function (string->symbol (custom--plist-get args 'name)))))
+    (describe-function (string->symbol (custom--plist-get args 'name))))
+  '(read))
 
 ;;; --- apropos: one search over everything ---------------------------------------
 ;;; The first question an agent asks is "what can I call". Four registries
@@ -482,7 +494,8 @@
                                  (map (lambda (n)
                                         (apropos--internal n (primitive-doc n) words))
                                       (global-names)))))
-              (apply apropos (cons q filters))))))))
+              (apply apropos (cons q filters)))))))
+  '(read))
 
 (define-tool! 'apropos-categories
   "List the catalog facets: kinds, packages, namespaces, domains, and effects. Cheapest way to see the shape of the surface before searching it."
@@ -493,7 +506,8 @@
             'packages (catalog-facet 'package)
             'namespaces (catalog-facet 'namespace)
             'domains (catalog-facet 'domain)
-            'effects (catalog-facet 'effects)))))
+            'effects (catalog-facet 'effects))))
+  '(read))
 
 (define (catalog--add-unique value acc)
   (if (member value acc) acc (append acc (list value))))

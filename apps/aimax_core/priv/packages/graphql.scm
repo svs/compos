@@ -595,18 +595,24 @@
 
 (effects! '(read external))
 (defrecipe! "run a graphql query"
-  "(graphql 'NAME \"query { me { name } }\")")
+  "(graphql (string->symbol {{endpoint}}) {{query}})"
+  (list (list 'endpoint "Endpoint: ") (list 'query "GraphQL query: ")))
 (defrecipe! "search a graphql schema"
-  "(graphql-apropos 'NAME \"words to find\")")
+  "(graphql-apropos (string->symbol {{endpoint}}) {{query}})"
+  (list (list 'endpoint "Endpoint: ") (list 'query "Schema search: ")))
 (defrecipe! "see one graphql type"
-  "(graphql-describe 'NAME \"TypeName\")")
+  "(graphql-describe (string->symbol {{endpoint}}) {{type}})"
+  (list (list 'endpoint "Endpoint: ") (list 'type "Type: ")))
 (defrecipe! "see where graphql queries start"
-  "(graphql-roots 'NAME)")
+  "(graphql-roots (string->symbol {{endpoint}}))"
+  (list (list 'endpoint "Endpoint: ")))
 
 (effects! '(write))
 (defrecipe! "name a graphql endpoint"
-  "(graphql-register! 'NAME \"https://host/graphql\" 'headers (list 'Authorization (list \"Bearer \" \"@TOKEN_VAR\")))")
+  "(graphql-register! (string->symbol {{name}}) {{url}})"
+  (list (list 'name "Endpoint name: ") (list 'url "GraphQL URL: ")))
 
 (effects! '(write external))
 (defrecipe! "show a graphql answer in a buffer"
-  "(graphql-run 'NAME \"query { me { name } }\")")
+  "(graphql-run (string->symbol {{endpoint}}) {{query}})"
+  (list (list 'endpoint "Endpoint: ") (list 'query "GraphQL query: ")))

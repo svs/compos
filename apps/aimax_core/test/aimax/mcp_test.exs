@@ -161,6 +161,37 @@ defmodule Aimax.MCPTest do
                              (chat-extra-tool-specs "*zz-mcp-chat*"))}) == "()"
     end
 
+    test "chat-tool-list groups the model's tools under the server that serves them" do
+      on_exit(fn ->
+        Aimax.Core.kill_buffer("*zz-list-chat*")
+        Aimax.Core.kill_buffer("*chat tools*")
+      end)
+
+      # the frozen list IS what the model sees, so the report reads it
+      eval!(~s{(define-preset! 'zzlistpack "list pack" '(zzlist))})
+      eval!(~s{(buffer-create "*zz-list-chat*")})
+      eval!(~s{(buffer-set-local! "*zz-list-chat*" 'mode-name "chat-mode")})
+      eval!(~s{(buffer-set-local! "*zz-list-chat*" 'chat-presets '(zzlistpack))})
+
+      eval!("""
+      (buffer-set-local! "*zz-list-chat*" 'chat-tool-specs
+        '(("eval-scheme" "Run Scheme in the editor." ())
+          ("mcp__zzlist__echo" "Echo back v.\nA second line nobody needs here." "{}")))
+      """)
+
+      eval!(~s[(begin (switch-to-buffer! "*zz-list-chat*") (run-command "chat-tool-list"))])
+      text = Aimax.Core.Buffer.text("*chat tools*")
+
+      # the header answers "what does this chat hold, and can the model see it?"
+      assert text =~ "presets: aimax, zzlistpack"
+      assert text =~ "2 tools · "
+
+      # every tool sits under the server that serves it, on one line
+      assert text =~ ~r/\naimax\n  eval-scheme +Run Scheme in the editor\./
+      assert text =~ ~r/\nzzlist\n  mcp__zzlist__echo +Echo back v\.\n/
+      refute text =~ "A second line"
+    end
+
     test "an http server translates to an ACP entry; a spec with neither is dropped" do
       eval!(~s{(mcp-register! 'zzhttp '(type "http" url "https://zz.test/mcp"
                                        headers (Authorization "Bearer zz")))})

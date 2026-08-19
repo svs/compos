@@ -163,8 +163,11 @@
                    (car (transient--choice-pair (car choices)))))
               (else (loop (cdr rest)))))))
 
+;; An infix always carries a value-fn. A suffix may carry one too: a row
+;; that opens a view still says what the view holds.
 (define (transient--item-value item)
-  (let ((kind (plist-get item 'kind)))
+  (let ((kind (plist-get item 'kind))
+        (fn (plist-get item 'value-fn)))
     (cond ((equal? kind 'switch)
            (if (transient-value (plist-get item 'argument)) "on" "off"))
           ((equal? kind 'choice)
@@ -172,10 +175,9 @@
                   (choice (assoc value (map transient--choice-pair
                                             (plist-get item 'choices)))))
              (if choice (cadr choice) (value->string value))))
-          ((equal? kind 'infix)
-           (let ((fn (plist-get item 'value-fn)))
-             (let ((value (fn (transient-scope))))
-               (if (string? value) value (value->string value)))))
+          (fn
+           (let ((value (fn (transient-scope))))
+             (if (string? value) value (value->string value))))
           (else ""))))
 
 (define (transient--bindings groups)
@@ -460,6 +462,74 @@
 (define (llm-config--refresh!)
   (when (transient--active) (transient--render!)))
 
+;;; Presets are the tool selection: a preset names MCP servers, and the
+;;; servers serve the tools. So the menu picks presets and reports what
+;;; they serve; it never offers a tool list of its own.
+
+;; The buffer whose LLM session the presets belong to. A chat or an
+;; llm-mode buffer is its own session; a grouped work buffer shares its
+;; group chat's session. This never CREATES a chat: the menu redraws on
+;; every keystroke.
+(define (llm-config--session buf)
+  (cond ((or (chat-buffer? buf) (minor-mode-on? buf "llm-mode")) buf)
+        ((buffer-group buf)
+         (let ((chats (filter chat-buffer?
+                              (group-buffers-mru (buffer-group buf)))))
+           (if (pair? chats) (car chats) buf)))
+        (else buf)))
+
+(define (llm-config--presets buf)
+  (if (boundp (quote chat-presets-of)) (chat-presets-of buf) '()))
+
+(define (llm-config--presets-label buf)
+  (let ((ps (llm-config--presets (llm-config--session buf))))
+    (if (null? ps) "none" (string-join (map symbol->string ps) " "))))
+
+;; how many tools one server serves right now, or #f while it connects
+(define (llm-config--server-tools server)
+  (if (equal? server 'aimax)
+      (if (boundp (quote llm-tool-specs)) (length (llm-tool-specs)) 0)
+      (let ((d (mcp-server-detail (symbol->string server))))
+        (and (pair? d)
+             (equal? (plist-get d 'status) "ready")
+             (length (or (plist-get d 'tools) '()))))))
+
+;; What the presets serve, counted WITHOUT connecting anything: the menu
+;; redraws on every keystroke and a connect belongs to a send. A chat
+;; freezes its tool list at its first send, so say when the number is the
+;; frozen one — that list, not the live surface, is what the model sees.
+(define (llm-config--tools-label buf)
+  (let* ((session (llm-config--session buf))
+         (frozen (buffer-local session 'chat-tool-specs)))
+    (cond
+      ((pair? frozen)
+       (string-append (number->string (length frozen)) " tools · frozen"))
+      ((not (boundp (quote chat-active-servers))) "none")
+      (else
+        (let loop ((servers (chat-active-servers session)) (n 0) (pending 0))
+          (if (null? servers)
+              (string-append (number->string n) " tools"
+                (if (> pending 0)
+                    (string-append " · " (number->string pending) " connecting")
+                    ""))
+              (let ((count (llm-config--server-tools (car servers))))
+                (if count
+                    (loop (cdr servers) (+ n count) pending)
+                    (loop (cdr servers) n (+ pending 1))))))))))
+
+(define-command "llm-config-pick-preset" "Turn a tool preset on or off"
+  (lambda ()
+    (let ((buf (llm-config--session (transient-scope))))
+      (if (not (boundp (quote chat-preset-candidates)))
+          (message "No MCP presets — packages/mcp.scm is not loaded")
+          (llm-config-read! "Preset: "
+            (chat-preset-candidates buf)
+            (lambda (name)
+              (unless (equal? name "")
+                (chat-preset-toggle! buf (string->symbol name))
+                (llm-config--refresh!)))
+            (lambda () #f))))))
+
 (define-command "llm-config-pick-backend" "Choose the LLM backend"
   (lambda ()
     (let* ((buf (transient-scope))
@@ -522,7 +592,11 @@
         (transient-infix "m" "Model" "llm-config-pick-model"
           (lambda (scope) (llm-config--model scope)))
         (transient-infix "e" "Effort" "llm-config-pick-effort"
-          (lambda (scope) (llm-config--effort scope)))))))
+          (lambda (scope) (llm-config--effort scope)))
+        (transient-infix "p" "Presets" "llm-config-pick-preset"
+          (lambda (scope) (llm-config--presets-label scope)))
+        (transient-suffix "t" "Tools" "chat-tool-list"
+          'value-fn (lambda (scope) (llm-config--tools-label scope)))))))
 
 (define (transient--values-file)
   (string-append (aimax-home) "/transient-values.scm"))

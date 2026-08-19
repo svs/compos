@@ -643,6 +643,25 @@
                 ((cadr (car rules)) buf)) #t)
           (else (loop (cdr rules))))))
 
+;; A catalogued tool's declared side effects, or #f when the catalog
+;; does not know the tool (bridged MCP tools from other servers).
+(define (permission-tool-effects title)
+  (let ((e (and title (catalog-entry 'tool title))))
+    (and e (plist-get e 'effects))))
+
+;; The side-effect category decides before the chat mode does:
+;;   destroy or spend        -> ask, in every mode — irreversible acts
+;;   only pure/read          -> allow, even in ask mode — reading is free
+;;   anything else / unknown -> #f, fall through to the chat mode
+(define (permission-effects-verdict title kind)
+  (and (equal? kind "tool")
+       (let ((fx (permission-tool-effects title)))
+         (and fx
+              (cond ((or (member "destroy" fx) (member "spend" fx)) 'ask)
+                    ((null? (remove (lambda (f) (member f '("pure" "read"))) fx))
+                     'allow-always)
+                    (else #f))))))
+
 ;; The one policy. Override wholesale in ~/.aimax/init.scm:
 ;;   (set! *permission-policy* (lambda (buf title kind raw) 'allow))
 ;; -> 'allow | 'allow-always | 'ask | 'reject
@@ -657,6 +676,7 @@
             ((and (equal? kind "command")
                   (command-permitted? buf title)) 'allow-always)
             ((equal? kind "command") 'ask)
+            ((permission-effects-verdict title kind))
             ((equal? (chat-permission-mode buf) 'ask) 'ask)
             (else 'allow-always)))))
 

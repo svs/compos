@@ -153,4 +153,60 @@ defmodule Aimax.TransientTest do
       Editor.select_frame("f-main")
     end
   end
+
+  test "the LLM menu turns tool presets on and off and counts what they serve" do
+    buf = "*zz-transient-chat*"
+    on_exit(fn -> Aimax.Core.kill_buffer(buf) end)
+
+    eval!("""
+    (buffer-create "#{buf}")
+    (buffer-set-local! "#{buf}" 'mode-name "chat-mode")
+    (buffer-set-local! "#{buf}" 'chat-presets '())
+    (define-preset! 'zztransient "a test preset" '())
+    """)
+
+    Editor.set_window_buffer(buf)
+    Session.run_command("llm-configure")
+
+    # the editor bridge is always on, so it is always in the value
+    assert row("Presets").value == "aimax"
+    assert row("Tools").value =~ ~r/^\d+ tools$/
+
+    press("p")
+    assert Editor.render_state().minibuffer.prompt == "Preset: "
+
+    assert %{hint: "○ a test preset"} =
+             Enum.find(Editor.render_state().minibuffer.candidates,
+               &(&1.label == "zztransient"))
+
+    type("zztransient")
+    press("RET")
+
+    # the preset lands on the session and the menu stays open, changed
+    assert Buffer.get_local(buf, "chat-presets") == [sym: "zztransient", sym: "aimax"]
+    assert row("Presets").value == "zztransient aimax"
+
+    # the same key turns it back off
+    press("p")
+    type("zztransient")
+    press("RET")
+    assert Buffer.get_local(buf, "chat-presets") == [sym: "aimax"]
+    assert row("Presets").value == "aimax"
+
+    # aimax is the editor bridge: it never turns off
+    press("p")
+    type("aimax")
+    press("RET")
+    assert Editor.snapshot().echo =~ "stays on"
+    assert row("Presets").value == "aimax"
+
+    press("C-q")
+  end
+
+  # one row of the active transient, by its description
+  defp row(description) do
+    Editor.render_state().transient.groups
+    |> Enum.flat_map(& &1.items)
+    |> Enum.find(&(&1.description == description))
+  end
 end

@@ -252,7 +252,8 @@
   (lambda (args)
     (spotify--do (or (custom--plist-get args 'action) "now-playing")
                  (custom--plist-get args 'query)
-                 (custom--plist-get args 'level))))
+                 (custom--plist-get args 'level)))
+  '(write external))
 
 ;;; --- keys ---------------------------------------------------------------------
 ;;; `C-c S` is the player's prefix. Lowercase `C-c s` belongs to the

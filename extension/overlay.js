@@ -345,6 +345,15 @@ async function onKey(e) {
     return;
   }
 
+  // Cmd-k is the intent-oriented palette. Unlike M-x it searches command
+  // docs and task recipes, but the daemon still owns the prompt and matcher.
+  if (e.metaKey && !e.ctrlKey && !e.altKey && e.code === "KeyK") {
+    e.preventDefault();
+    e.stopPropagation();
+    await runCommand("command-palette");
+    return;
+  }
+
   // C-x starts a chord and waits for the next key
   if (e.ctrlKey && !e.altKey && !e.metaKey && e.code === "KeyX") {
     e.preventDefault();

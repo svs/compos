@@ -113,8 +113,9 @@ defmodule Aimax.PresetTest do
         (buffer-set-local! "#{buf}" 'llm-connector "codex-app-server")
         (buffer-set-local! "#{buf}" 'llm-model "gpt-5.6-terra")
         (buffer-set-local! "#{buf}" 'chat-presets '(aimax))
-        (insert! "read the companion")
-        (run-command "llm-send-buffer"))])
+        (insert! "read the companion"))])
+
+    press("M-o")
 
     assert_receive {:transport_open, agent}, 1_000
     assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
@@ -148,6 +149,43 @@ defmodule Aimax.PresetTest do
       "params" => %{"itemId" => "msg-1", "delta" => "First answer"}
     })
 
+    # llm-mode writes each chunk before the turn completes. A later tool can
+    # stall without hiding prose that the model already produced.
+    assert eventually(fn -> Buffer.text(buf) =~ "First answer" end)
+    refute Buffer.text(buf) =~ "First answer\n"
+
+    # The aimax MCP bridge asks this boolean question before eval-scheme.
+    # Inline mode has no prompt UI, so it must answer from its allow policy.
+    inject(agent, %{
+      "id" => 92,
+      "method" => "mcpServer/elicitation/request",
+      "params" => %{
+        "message" => "Allow the aimax MCP server to run tool eval-scheme?",
+        "requestedSchema" => %{
+          "type" => "object",
+          "properties" => %{"approved" => %{"type" => "boolean"}}
+        }
+      }
+    })
+
+    assert_receive {:frame,
+                    %{
+                      "id" => 92,
+                      "result" => %{
+                        "action" => "accept",
+                        "content" => %{"approved" => true}
+                      }
+                    }},
+                   1_000
+
+    inject(agent, %{
+      "method" => "item/agentMessage/delta",
+      "params" => %{"itemId" => "msg-1", "delta" => " continues"}
+    })
+
+    assert eventually(fn -> Buffer.text(buf) =~ "First answer continues" end)
+    assert length(Buffer.get_local(buf, "llm-responses")) == 1
+
     inject(agent, %{
       "method" => "turn/completed",
       "params" => %{
@@ -156,7 +194,7 @@ defmodule Aimax.PresetTest do
       }
     })
 
-    assert eventually(fn -> Buffer.text(buf) =~ "First answer" end)
+    assert eventually(fn -> Buffer.text(buf) =~ "First answer continues\n" end)
     assert Buffer.get_local(buf, "llm-thread-id") == "writing-thread"
     session_id = Buffer.get_local(buf, "llm-session-id")
     assert eventually(fn -> Agent.info(session_id).status == :idle end)
@@ -402,8 +440,8 @@ defmodule Aimax.PresetTest do
     {:ok, _} =
       Session.eval(~s[(begin (switch-to-buffer! "#{buf}") (run-command "chat-tool-surface"))])
 
-    text = Buffer.text("*chat tools*")
-    on_exit(fn -> Aimax.Core.kill_buffer("*chat tools*") end)
+    text = Buffer.text("*chat servers*")
+    on_exit(fn -> Aimax.Core.kill_buffer("*chat servers*") end)
 
     # the report names exactly the servers that went over the wire
     for s <- np["mcpServers"], do: assert(text =~ s["name"])

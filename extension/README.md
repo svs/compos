@@ -3,9 +3,10 @@
 ai-max's keys and commands in every tab, and a wire so the editor can drive any
 of them.
 
-- <kbd>M-x</kbd> in any page opens the command palette. The list is the
-  editor's real command table, and the command runs in the daemon — a page is
-  an input device, the editor still does the work.
+- <kbd>M-x</kbd> in any page completes over the editor's real command table.
+  <kbd>Cmd-K</kbd> opens intent search over command docs and task recipes. The
+  chosen action runs in the daemon — a page is an input device, the editor
+  still does the work.
 - <kbd>C-x</kbd> starts a chord; the whole sequence goes through the same key
   dispatcher the GUI uses.
 - From Scheme, any tab is addressable: run JS in it, read it, put a line on its

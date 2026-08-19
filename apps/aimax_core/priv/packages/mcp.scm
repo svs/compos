@@ -20,7 +20,8 @@
 ;;; llm-set-preset enables it for an LLM session. The choice currently lives
 ;;; in the persisted 'chat-presets buffer-local, so it persists with the
 ;;; session itself; servers reconnect lazily on the next send. M-x
-;;; chat-tool-surface shows which servers the chat's agent holds.
+;;; chat-tool-list shows the tools the chat's model holds, and
+;;; chat-tool-surface the servers behind them.
 
 (define *mcp-registry* '())
 
@@ -193,23 +194,57 @@
   (when (buffer-local buf 'chat-mcp-dirty)
     (chat-reattach-for-presets! buf)))
 
+;;; One preset switch for every UI. The M-x commands and the C-c b menu
+;;; change the same buffer-local, start the same servers, and report the
+;;; change the same way. A second copy of this logic is how one UI keeps a
+;;; live agent and the other silently does not.
+
+;; Every registered preset, each marked with its state in THIS session.
+;; The glyphs are the MCP hub's: ● is on, ○ is off.
+(define (chat-preset-candidates buf)
+  (let ((loaded (chat-presets-of buf)))
+    (map (lambda (e)
+           (let ((name (car e)))
+             (list (symbol->string name)
+                   (string-append (if (member name loaded) "● " "○ ")
+                                  (custom--plist-get (car (cdr e)) 'description)))))
+         *chat-presets*)))
+
+(define (chat-preset-on! buf name)
+  (unless (member name (chat-presets-of buf))
+    (buffer-set-local! buf 'chat-presets (cons name (chat-presets-of buf))))
+  (for-each mcp-ensure! (preset-servers name))
+  (chat-presets-changed! buf (string-append "Preset " (symbol->string name) " on"))
+  (when (boundp (quote workspace-llm-defaults-note!))
+    (workspace-llm-defaults-note! buf)))
+
+;; The editor bridge is infrastructure: chat-presets-of adds `aimax` back
+;; to every surface. Removing it would report a change that does not
+;; happen, so say why instead.
+(define (chat-preset-off! buf name)
+  (if (equal? name 'aimax)
+      (message "The aimax preset is the editor bridge — it stays on")
+      (begin
+        (buffer-set-local! buf 'chat-presets
+          (remove (lambda (p) (equal? p name)) (chat-presets-of buf)))
+        (chat-presets-changed! buf (string-append "Preset " (symbol->string name) " off"))
+        (when (boundp (quote workspace-llm-defaults-note!))
+          (workspace-llm-defaults-note! buf)))))
+
+(define (chat-preset-toggle! buf name)
+  (if (member name (chat-presets-of buf))
+      (chat-preset-off! buf name)
+      (chat-preset-on! buf name)))
+
 (define-command "llm-set-preset" "Enable a tool preset (MCP servers) for this LLM session"
   (lambda ()
     (let ((buf (llm-preset-target)))
       (if (not buf)
           (message "No LLM session here — enable llm-mode first")
-          (minibuffer-read "Set LLM preset: "
-            (map (lambda (e) (list (symbol->string (car e))
-                                   (custom--plist-get (car (cdr e)) 'description)))
-                 *chat-presets*)
+          (minibuffer-read "Set LLM preset: " (chat-preset-candidates buf)
             (lambda (name)
               (unless (equal? name "")
-                (let ((p (string->symbol name)))
-                  (unless (member p (chat-presets-of buf))
-                    (buffer-set-local! buf 'chat-presets
-                                       (cons p (chat-presets-of buf))))
-                  (for-each mcp-ensure! (preset-servers p))
-                  (chat-presets-changed! buf (string-append "Preset " name " on"))))))))))
+                (chat-preset-on! buf (string->symbol name)))))))))
 
 (define-command "llm-unset-preset" "Disable a tool preset for this LLM session"
   (lambda ()
@@ -220,10 +255,7 @@
             (map (lambda (p) (list (symbol->string p) "loaded")) (chat-presets-of buf))
             (lambda (name)
               (unless (equal? name "")
-                (buffer-set-local! buf 'chat-presets
-                  (remove (lambda (p) (equal? p (string->symbol name)))
-                          (chat-presets-of buf)))
-                (chat-presets-changed! buf (string-append "Preset " name " off")))))))))
+                (chat-preset-off! buf (string->symbol name)))))))))
 
 ;;; --- calling a tool -----------------------------------------------------------
 ;;; The chat tool loop calls MCP tools on its own, off this process. Every
@@ -370,6 +402,8 @@
 (public! 'mcp-register! "(mcp-register! 'name SPEC) — declare an MCP server (stdio or http)")
 (public! 'mcp-ensure! "(mcp-ensure! 'name) — connect a registered MCP server if needed")
 (public! 'define-preset! "(define-preset! 'name DESC SERVERS) — name a loadable tool collection")
+(public! 'chat-preset-candidates "(chat-preset-candidates BUF) — every preset as (NAME \"●|○ DESC\")")
+(public! 'chat-preset-toggle! "(chat-preset-toggle! BUF 'name) — turn one preset on or off for a session")
 (public! 'mcp-connections "(mcp-connections) — (name status tool-count) per live MCP connection")
 (public! 'mcp-call! "(mcp-call! 'name TOOL ARGS [CB]) — call one tool; ARGS is JSON text or a plist")
 (public! 'mcp-tools "(mcp-tools 'name) — (TOOL DESCRIPTION) per tool an MCP server serves")
@@ -449,12 +483,79 @@
                        (string-join (or (plist-get s 'args) '()) " ")))
     "\n"))
 
+;;; --- what the model holds -----------------------------------------------------
+;;; Two questions, two buffers. *chat tools* lists the TOOLS the model can
+;;; call, which is what a preset is for. *chat servers* lists the server
+;;; configuration aimax sent to an ACP agent, which is what to read when a
+;;; tool is missing.
+
+;; mcp__SERVER__tool names its server; every other name is the editor's own
+(define (chat-tool-server name)
+  (if (string-prefix? "mcp__" name)
+      (let ((parts (string-split name "__")))
+        (if (pair? (cdr parts)) (car (cdr parts)) "mcp"))
+      "aimax"))
+
+;; the servers in force, in the order their tools arrive
+(define (chat-tool-servers specs)
+  (fold (lambda (acc s)
+          (let ((server (chat-tool-server (car s))))
+            (if (member server acc) acc (append acc (list server)))))
+        '() specs))
+
+;; one line of a description: a tool card that wraps to twenty lines hides
+;; the next tool
+(define (chat-tool-summary text)
+  (let* ((first (car (string-split (or text "") "\n")))
+         (n (string-length first)))
+    (if (> n 96) (string-append (substring first 0 95) "…") first)))
+
+(define (chat-tool-line spec)
+  (string-append "  " (string-pad-right (car spec) 34) "  "
+                 (chat-tool-summary (car (cdr spec))) "\n"))
+
+(define-command "chat-tool-list" "List the tools this chat's model holds"
+  (lambda ()
+    (let ((chat (llm-preset-target)))
+      (if (not chat)
+          (message "No LLM session here — open one with M-x chat first")
+          (let* ((out "*chat tools*")
+                 (frozen (buffer-local chat 'chat-tool-specs))
+                 (specs (if (pair? frozen) frozen (chat-live-tool-specs chat)))
+                 (state (cond ((not (pair? frozen)) "live — the next send freezes this list")
+                              ((chat-tools-stale? chat) "stale — C-c t adopts the live list")
+                              (else "frozen at the first send"))))
+            (buffer-create out)
+            (buffer-set-read-only! out #f)
+            (buffer-delete-range! out 0 (buffer-size out))
+            (buffer-append! out
+              (string-append
+                chat "\n"
+                "presets: "
+                (let ((ps (chat-presets-of chat)))
+                  (if (null? ps) "none" (string-join (map symbol->string ps) ", ")))
+                "\n"
+                (number->string (length specs)) " tools · " state "\n"))
+            (for-each
+              (lambda (server)
+                (buffer-append! out (string-append "\n" server "\n"))
+                (for-each
+                  (lambda (spec)
+                    (when (equal? (chat-tool-server (car spec)) server)
+                      (buffer-append! out (chat-tool-line spec))))
+                  specs))
+              (chat-tool-servers specs))
+            (when (null? specs)
+              (buffer-append! out "\nNo tools yet. Turn a preset on with C-c b.\n"))
+            (buffer-set-read-only! out #t)
+            (display-buffer out))))))
+
 (define-command "chat-tool-surface" "Show the MCP servers this chat's agent holds"
   (lambda ()
     (let ((chat (llm-preset-target)))
       (if (not chat)
           (message "No chat here — open one with M-x chat first")
-          (let ((out "*chat tools*")
+          (let ((out "*chat servers*")
                 (servers (presets-acp-servers (chat-presets-of chat))))
             (buffer-create out)
             (buffer-set-read-only! out #f)

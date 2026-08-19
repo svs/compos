@@ -149,6 +149,17 @@ defmodule Aimax.Core.Agent do
 
   # --- server -----------------------------------------------------------------
 
+  @doc """
+  The Scheme lane this agent's callbacks run in. Fixed at agent start
+  from the chat buffer's group.
+  """
+  def lane(slug) do
+    case :ets.lookup(@escaped, {:agent_lane, slug}) do
+      [{_, key}] -> key
+      [] -> {:agent, slug}
+    end
+  end
+
   @impl true
   def init(opts) do
     # Backends are linked per session. A subprocess/protocol crash must mark
@@ -163,6 +174,10 @@ defmodule Aimax.Core.Agent do
     Aimax.Core.create_buffer(buffer)
     buffer_ref = Buffer.ref(buffer)
     Events.subscribe(buffer_ref)
+
+    # the agent's Scheme (renderer, policy and record fns) runs in this
+    # lane: serial with itself and its group, concurrent with the UI
+    :ets.insert(@escaped, {{:agent_lane, slug}, Aimax.Core.Lane.for_buffer(buffer)})
 
     backend = Backend.module(config)
     {:ok, handle} = backend.start(Map.put(config, "slug", slug), self())
@@ -758,7 +773,9 @@ defmodule Aimax.Core.Agent do
 
         Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
           try do
-            Session.apply_callback(handler, [slug, batch])
+            # the agent's own lane: rendering serializes with this agent's
+            # other Scheme and never queues a keystroke behind it
+            Session.apply_callback(handler, [slug, batch], nil, lane(slug))
           after
             GenServer.cast(me, :batch_done)
           end

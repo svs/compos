@@ -153,6 +153,8 @@ defmodule Aimax.Core.SchemeAPI do
       "point" => "(point) — return point in the current buffer as a byte offset.",
       "buffer-point" => "(buffer-point BUF) — return the buffer's point as a byte offset.",
       "aimax-home" => "(aimax-home) — return the aimax home directory path (~/.aimax).",
+      "aimax-config-dir" =>
+        "(aimax-config-dir) — where user config reads from (AIMAX_CONFIG, else the home).",
       "aimax-socket-path" =>
         "(aimax-socket-path) — return the path of this daemon's JSON-RPC socket.",
       "daemon-restart!" =>
@@ -647,6 +649,7 @@ defmodule Aimax.Core.SchemeAPI do
       "buffer-point" => fn [name] -> Buffer.point(name) end,
       # ~/.aimax in real life, a tmp dir in tests — config and user packages
       "aimax-home" => fn [] -> Aimax.Core.home() end,
+      "aimax-config-dir" => fn [] -> Aimax.Core.config_dir() end,
       # The socket THIS daemon listens on. A second daemon (AIMAX_HOME, or the
       # verify config) listens elsewhere, and anything it spawns must come back
       # to it rather than to the default path.

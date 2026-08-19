@@ -25,7 +25,7 @@
 
 (define (theme-names) (map car *themes*))
 
-(define (theme-file) (string-append (aimax-home) "/theme.scm"))
+(define (theme-file) (string-append (aimax-config-dir) "/theme.scm"))
 
 ;; the chosen theme survives daemon restarts as policy, not raw faces:
 ;; the NAME is written to <home>/theme.scm and re-derived at boot, so

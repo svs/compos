@@ -242,12 +242,19 @@ defmodule Aimax.SchemeTortureTest do
       assert {:error, _} = Scheme.eval_string(Scheme.new(), "(cdr '())")
     end
 
-    test "interpreter unchanged after failed eval" do
+    test "failed eval: the local tier rolls back, the shared tier persists" do
       interp = Scheme.new()
       {:ok, _, interp} = Scheme.eval_string(interp, "(define safe 1)")
-      {:error, _} = Scheme.eval_string(interp, "(begin (define tainted 2) (boom))")
-      # failed eval discarded wholesale — no partial state
-      assert {:error, _} = Scheme.eval_string(interp, "tainted")
+
+      # unflushed (local-tier) global: the failing eval's store is discarded
+      {:error, _} = Scheme.eval_string(interp, "(begin (define t1 2) (boom))")
+      assert {:error, _} = Scheme.eval_string(interp, "t1")
+
+      # flushed (shared-tier) global: a define writes through at once and
+      # stays, as in Emacs — the editor session runs in this regime
+      interp = Scheme.flush(interp)
+      {:error, _} = Scheme.eval_string(interp, "(begin (define t2 2) (boom))")
+      assert {:ok, 2, _} = Scheme.eval_string(interp, "t2")
       assert {:ok, 1, _} = Scheme.eval_string(interp, "safe")
     end
   end

@@ -15,6 +15,11 @@ defmodule Aimax.Core.Application do
       {DynamicSupervisor, name: Aimax.Core.ProcSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: Aimax.Core.AgentSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: Aimax.Core.MCPSupervisor, strategy: :one_for_one},
+      # Scheme execution lanes: serial workers, one per group/agent/conn,
+      # started lazily — must be up before Session so callbacks fired
+      # during the stdlib load have somewhere to run
+      {Registry, keys: :unique, name: Aimax.Core.LaneRegistry},
+      {DynamicSupervisor, name: Aimax.Core.LaneSupervisor, strategy: :one_for_one},
       {Task.Supervisor, name: Aimax.Core.TaskSupervisor},
       Aimax.Core.BufferStore,
       Aimax.Core.Reactor,

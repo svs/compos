@@ -132,11 +132,17 @@ defmodule Aimax.Scheme.Eval do
   # Elixir exception: raw exceptions crash the hosting GenServer (the whole
   # editor Session died to a (string-prefix? s #f) once) — Error is caught
   # by the usual error paths instead.
-  def apply_fn({:builtin, name, fun}, args, store) when is_function(fun, 1),
-    do: {builtin_apply(name, fn -> fun.(args) end), store}
+  def apply_fn({:builtin, name, fun}, args, store) when is_function(fun, 1) do
+    # a closure handed to a primitive escapes Scheme (command tables,
+    # hooks, buffer locals): the selective flush must publish its frames
+    Env.note_escape(args)
+    {builtin_apply(name, fn -> fun.(args) end), store}
+  end
 
-  def apply_fn({:builtin, name, fun}, args, store) when is_function(fun, 2),
-    do: builtin_apply(name, fn -> fun.(args, store) end)
+  def apply_fn({:builtin, name, fun}, args, store) when is_function(fun, 2) do
+    Env.note_escape(args)
+    builtin_apply(name, fn -> fun.(args, store) end)
+  end
 
   defp builtin_apply(name, thunk) do
     thunk.()

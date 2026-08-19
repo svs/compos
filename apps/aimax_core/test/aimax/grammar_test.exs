@@ -27,6 +27,7 @@ defmodule Aimax.GrammarTest do
     # file:// clone of a repo lacking src/parser.c
     {_, 0} = System.cmd("git", ["init", "-q", tmp])
     {_, 0} = System.cmd("git", ["-C", tmp, "add", "-A"])
+
     {_, 0} = System.cmd("git", ["-C", tmp, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "x"])
 
     assert TreeSitter.install("zz-fake", "file://#{tmp}") =~ "error: no src/parser.c"
@@ -66,6 +67,8 @@ defmodule Aimax.GrammarTest do
   test "the install command surface is registered" do
     {:ok, out} = Session.eval("(ts-known-url \"scheme\")")
     assert out =~ "6cdh/tree-sitter-scheme"
+    {:ok, markdown} = Session.eval("(ts-known-url \"markdown\")")
+    assert markdown =~ "tree-sitter-grammars/tree-sitter-markdown"
     {:ok, langs} = Session.eval("(ts-langs)")
     assert langs =~ "elixir"
   end

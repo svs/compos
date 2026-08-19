@@ -36,9 +36,41 @@ defmodule Aimax.MorgTest do
     assert "visual-line-mode" in Buffer.get_local(buf, "minor-modes")
   end
 
+  test "markdown-mode is separate and keeps the Earmark preview" do
+    buf = morg_buffer("# title\n\nbody\n")
+
+    {:ok, _} = Session.eval(~s{(set-mode! "markdown-mode")})
+
+    assert Buffer.get_local(buf, "mode-name") == "markdown-mode"
+    assert Buffer.get_local(buf, "preview-renderer") == "markdown"
+    assert Buffer.get_local(buf, "ts-lang") == "markdown"
+    refute Enum.any?(Buffer.overlays(buf), fn {_, _, face} -> face =~ "org-level" end)
+
+    press(["C-c", "C-v"])
+    assert Buffer.get_local(buf, "render-mode") == "markdown"
+  end
+
+  test "switching from morg to markdown removes Morg behavior" do
+    buf = morg_buffer(fixture())
+    :ok = Buffer.goto(buf, 0)
+    press("TAB")
+    assert Buffer.hidden(buf) != []
+
+    {:ok, _} = Session.eval(~s{(set-mode! "markdown-mode")})
+
+    assert Buffer.hidden(buf) == []
+    refute Enum.any?(Editor.local_keys(buf), fn {_key, command} ->
+             command in ["morg-cycle", "morg-global-cycle", "morg-execute-block"]
+           end)
+
+    :ok = Buffer.insert_at(buf, 0, "x", source: :user)
+    refute Enum.any?(Buffer.overlays(buf), fn {_, _, face} -> face =~ "org-level" end)
+  end
+
   test "morg-mode fontifies headings with the org level faces" do
     buf = morg_buffer(fixture())
     assert Buffer.get_local(buf, "mode-name") == "morg-mode"
+    assert Buffer.get_local(buf, "ts-lang") == "markdown"
 
     ovs = Buffer.overlays(buf)
     assert {0, 3, "org-level-1"} in ovs

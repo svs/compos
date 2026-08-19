@@ -4,8 +4,9 @@ defmodule Aimax.Core.TreeSitter do
   rust, html) plus any the user installs from the app.
 
   `install/2` is Emacs's treesit-install-language-grammar: clone the
-  grammar repo shallow, `cc -shared` its generated parser (and scanner.c
-  when present) into `~/.aimax/grammars/<name>.<dylib|so>`, copy
+  grammar repo shallow, find its named grammar, and use `cc -shared` on
+  its generated parser (and scanner.c when present). Store the library
+  in `~/.aimax/grammars/<name>.<dylib|so>`, copy
   `queries/highlights.scm` alongside, then dlopen it into the NIF's
   registry (`TS.ts_load_grammar/3`). Installed grammars reload at boot
   (`load_installed/0`, a Task in the supervision tree), so a grammar is a
@@ -82,7 +83,7 @@ defmodule Aimax.Core.TreeSitter do
   end
 
   defp compile(name, src) do
-    csrc = Path.join(src, "src")
+    csrc = Path.join(grammar_root(name, src), "src")
     parser = Path.join(csrc, "parser.c")
     scanner = Path.join(csrc, "scanner.c")
     out = Path.join(grammars_dir(), name <> lib_ext())
@@ -106,7 +107,7 @@ defmodule Aimax.Core.TreeSitter do
   end
 
   defp copy_highlights(name, src) do
-    q = Path.join([src, "queries", "highlights.scm"])
+    q = Path.join([grammar_root(name, src), "queries", "highlights.scm"])
 
     if File.exists?(q) do
       File.cp!(q, Path.join(grammars_dir(), name <> "-highlights.scm"))
@@ -114,5 +115,12 @@ defmodule Aimax.Core.TreeSitter do
     else
       "error: repo has no queries/highlights.scm"
     end
+  end
+
+  # Most repositories contain one grammar at the root. Some repositories,
+  # such as Markdown, contain named grammar directories in one checkout.
+  defp grammar_root(name, src) do
+    [src, Path.join(src, "tree-sitter-#{name}"), Path.join(src, name)]
+    |> Enum.find(src, &File.exists?(Path.join([&1, "src", "parser.c"])))
   end
 end

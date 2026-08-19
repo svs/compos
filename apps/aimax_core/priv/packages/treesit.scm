@@ -14,6 +14,7 @@
     ("bash" "https://github.com/tree-sitter/tree-sitter-bash")
     ("ruby" "https://github.com/tree-sitter/tree-sitter-ruby")
     ("go" "https://github.com/tree-sitter/tree-sitter-go")
+    ("markdown" "https://github.com/tree-sitter-grammars/tree-sitter-markdown")
     ("c" "https://github.com/tree-sitter/tree-sitter-c")))
 
 (define (ts-known-url name)

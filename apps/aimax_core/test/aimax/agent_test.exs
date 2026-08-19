@@ -290,6 +290,77 @@ defmodule Aimax.AgentTest do
     assert second_turn["effort"] == "high"
   end
 
+  test "native Codex MCP tool approval elicitation rides the permission channel" do
+    {:ok, backend} =
+      Aimax.Core.Agent.Backend.CodexAppServer.start(
+        %{"cmd" => "fake", "cwd" => File.cwd!(), "model" => "gpt-5.5"},
+        self()
+      )
+
+    on_exit(fn -> Aimax.Core.Agent.Backend.CodexAppServer.close(backend) end)
+    assert_receive {:transport_open, ^backend}, 1_000
+
+    approval = fn id ->
+      inject(backend, %{
+        "id" => id,
+        "method" => "mcpServer/elicitation/request",
+        "params" => %{
+          "serverName" => "aimax",
+          "threadId" => "thread-1",
+          "turnId" => "turn-1",
+          "mode" => "form",
+          "message" => "Allow the aimax MCP server to run tool \"eval-scheme\"?",
+          "requestedSchema" => %{"type" => "object", "properties" => %{}},
+          "_meta" => %{
+            "codex_approval_kind" => "mcp_tool_call",
+            "persist" => ["session", "always"],
+            "tool_params" => %{"code" => "(buffer-list)"}
+          }
+        }
+      })
+    end
+
+    # a permission event, not a question: the policy decides like on
+    # every other lane, and the raw carries the payload for the deny scan
+    approval.(93)
+    assert_receive {:backend_event, permission}, 1_000
+    assert Backend.event_type(permission) == "permission"
+    assert Backend.plist_get(permission, "rpc-id") == 93
+    assert Backend.plist_get(permission, "title") == "eval-scheme"
+    assert Backend.plist_get(permission, "kind") == "tool"
+    assert Backend.plist_get(permission, "raw") =~ "(buffer-list)"
+
+    # allow-always becomes a durable session grant: codex stops asking
+    assert :ok =
+             Aimax.Core.Agent.Backend.CodexAppServer.respond_permission(
+               backend,
+               93,
+               "allow_always"
+             )
+
+    assert_receive {:frame,
+                    %{
+                      "id" => 93,
+                      "result" => %{
+                        "action" => "accept",
+                        "_meta" => %{"persist" => "session"}
+                      }
+                    }},
+                   1_000
+
+    approval.(94)
+    assert_receive {:backend_event, _permission2}, 1_000
+
+    assert :ok =
+             Aimax.Core.Agent.Backend.CodexAppServer.respond_permission(
+               backend,
+               94,
+               "reject_once"
+             )
+
+    assert_receive {:frame, %{"id" => 94, "result" => %{"action" => "decline"}}}, 1_000
+  end
+
   test "native Codex resumes a persisted llm-mode thread" do
     {:ok, backend} =
       Aimax.Core.Agent.Backend.CodexAppServer.start(

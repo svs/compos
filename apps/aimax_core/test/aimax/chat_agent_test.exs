@@ -185,7 +185,9 @@ defmodule Aimax.ChatAgentTest do
     on_exit(fn -> Aimax.Core.kill_buffer(buf) end)
 
     # one pending send, the shape llm-mode--complete records
-    eval!(~s{(llm-inline-put! (list "inline-zz" "#{buf}" (lambda (text) text) "" #f))})
+    eval!(
+      ~s{(llm-inline-put! (list "inline-zz" "#{buf}" (lambda (text error) text) "" #f (lambda (text) text)))}
+    )
 
     # the backend consumes turn-failed itself, so an error event is the last
     # thing this buffer ever hears about the turn

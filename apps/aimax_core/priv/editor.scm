@@ -3956,12 +3956,16 @@
                       ;; Editing anything earlier rewrites conversation
                       ;; history, so the next send deliberately starts a new
                       ;; native thread from the edited whole buffer.
-                      (let ((end (llm-mode--last-response-end buf)))
+                      (let ((end (llm-mode--last-response-end buf))
+                            (inline (buffer-local buf 'llm-session-id)))
                         (when (and end
                                    ;; Responses and mode-managed rewrites use
                                    ;; the named-buffer :editor primitives;
-                                   ;; interactive typing/paste/undo do not.
+                                   ;; streamed replies use this buffer's agent.
                                    (not (equal? source "editor"))
+                                   (not (and inline
+                                             (equal? source
+                                               (string-append "agent:" inline))))
                                    (< pos end))
                           (buffer-set-local! buf 'llm-session-dirty #t))))))
             *llm-mode-hooks*))))
@@ -4010,7 +4014,7 @@
         (message "LLM mode disabled"))))
 
 (mode-doc! "llm-mode"
-  "In-buffer LLM interaction. `M-o` sends the document and inserts the response at point with a distinct response face; `C-c b` chooses backend, model, effort, and tool presets.")
+  "In-buffer LLM interaction. `M-o` sends the document and streams the response at point with a distinct response face; `C-c b` chooses backend, model, effort, and tool presets.")
 
 ;; Inline sessions are durable agent conversations by default, matching
 ;; Codex's editor integrations: one native thread stays attached to the
@@ -4169,12 +4173,16 @@
 
 (define (llm-inline-add-chunk! id text)
   (let ((e (assoc id *llm-inline-sends*)))
-    (when e
-      ;; (id buffer completion accumulated error)
+    (when (and e (not (equal? text "")))
+      ;; (id buffer completion accumulated error chunk-handler)
       (llm-inline-put!
         (list id (car (cdr e)) (car (cdr (cdr e)))
               (string-append (car (cdr (cdr (cdr e)))) text)
-              (car (cdr (cdr (cdr (cdr e))))))))))
+              (car (cdr (cdr (cdr (cdr e)))))
+              (car (cdr (cdr (cdr (cdr (cdr e))))))))
+      ;; The response belongs in its document as it arrives. Waiting for
+      ;; turn-end hid useful prose when a later tool call stalled or failed.
+      ((car (cdr (cdr (cdr (cdr (cdr e)))))) text))))
 
 (define (llm-inline-error! id text)
   (let ((e (assoc id *llm-inline-sends*)))
@@ -4193,9 +4201,10 @@
       (let ((result (car (cdr (cdr (cdr e)))))
             (error (car (cdr (cdr (cdr (cdr e))))))
             (completion (car (cdr (cdr e)))))
-        (if error
-            (message (string-append "LLM failed · " error))
-            (completion result))))))
+        ;; Completion closes a streamed range. It also keeps a partial reply
+        ;; readable when the backend reports an error after one or more chunks.
+        (completion result error)
+        (when error (message (string-append "LLM failed · " error)))))))
 
 (define (llm-inline-events! id events)
   (for-each
@@ -4224,6 +4233,11 @@
               ;; already declare their policy as allow, so answer here.
               ((equal? type 'permission)
                (llm-inline-allow! id event))
+              ;; Codex represents an MCP server's own approval prompt as an
+              ;; elicitation question. Inline mode has no question surface,
+              ;; and its declared tool policy is already allow.
+              ((equal? type 'question)
+               (llm-inline-answer! id event))
               ((equal? type 'turn-end)
                (llm-inline-finish! id)))))
     events))
@@ -4240,10 +4254,19 @@
     (when rpc
       (agent-permission-respond! id rpc (llm-inline--allow-option event)))))
 
+(define (llm-inline-answer! id event)
+  (let ((qid (plist-get event 'id))
+        (answers (or (plist-get event 'answers) '())))
+    (when qid
+      ;; An enum question chooses its first allowed answer. A question with
+      ;; no choices is the boolean approval emitted by the aimax MCP bridge.
+      (agent-question-respond! id qid
+        (if (pair? answers) (car answers) "true")))))
+
 ;; Presets supply the complete tool surface. The runtime opens lazily on the
 ;; first send, stays attached to BUF, and (for Codex) records a native thread
 ;; id that a restored buffer resumes.
-(define (llm-mode--complete buf wire display model handler)
+(define (llm-mode--complete buf wire display model handler chunk-handler)
   (let* ((id (llm-mode--session-id buf))
          (connector (buffer-llm-connector buf))
          ;; the name this connector knows the model by: the API lane says
@@ -4269,7 +4292,7 @@
                      (if effort (list 'effort effort) '())))))
     (when (and (member id (agent-list)) (equal? (agent-status id) 'dead))
       (llm-session-close! id))
-    (llm-inline-put! (list id buf handler "" #f))
+    (llm-inline-put! (list id buf handler "" #f chunk-handler))
     (unless (llm-mode--runtime-live? buf)
       (llm-session-open! id config
         (lambda (_id _display)
@@ -4294,6 +4317,21 @@
   (let loop ((ranges (or (buffer-local buf 'llm-responses) '())) (end #f))
     (if (null? ranges) end (loop (cdr ranges) (cadr (car ranges))))))
 
+;; Record the newest response while it streams. Existing response ranges stay
+;; intact, and their overlays continue to follow edits elsewhere in the buffer.
+(define (llm-mode--stream-range! buf start end replace-last)
+  (let* ((ranges (or (buffer-local buf 'llm-responses) '()))
+         (before (if (and replace-last (pair? ranges))
+                     (reverse (cdr (reverse ranges)))
+                     ranges)))
+    (buffer-set-local! buf 'llm-responses
+      (append before (list (list start end))))
+    (llm-mode--paint! buf)))
+
+(define (llm-mode--last-response-start buf)
+  (let ((ranges (or (buffer-local buf 'llm-responses) '())))
+    (and (pair? ranges) (car (car (reverse ranges))))))
+
 (define (llm-mode--stateful? buf)
   (not (connector-can? (buffer-llm-connector buf) 'stateless)))
 
@@ -4312,7 +4350,7 @@
           (if (equal? (string-trim tail) "") "" tail))
         snapshot)))
 
-(define-command "llm-send-buffer" "Send this document to the LLM and insert its reply below point"
+(define-command "llm-send-buffer" "Send this document to the LLM and stream its reply below point"
   (lambda ()
     (let ((buf (current-buffer))
           (at (point))
@@ -4335,38 +4373,56 @@
              (message "Nothing new to send"))
             (else
               (message (string-append "LLM thinking · " model))
-              (llm-mode--complete buf wire context model
-                (lambda (result)
-                  (if (not (buffer-exists? buf))
-                      (message "LLM reply discarded — its buffer was killed")
-                      (let* ((prefix "\n\n")
-                             (suffix "\n")
-                             (start (+ at (string-byte-length prefix)))
-                             (end (+ start (string-byte-length result))))
-                        (buffer-set-local! buf 'llm-inserting-response #t)
-                        (with-edit-author "assistant"
-                          (lambda ()
-                            (buffer-insert! buf at
-                              (string-append prefix result suffix))))
-                        (buffer-set-local! buf 'llm-inserting-response #f)
-                        (buffer-set-local! buf 'llm-responses
-                          (append (or (buffer-local buf 'llm-responses) '())
-                                  (list (list start end))))
-                        (llm-mode--paint! buf)
-                        ;; a scratch chat has one more turn to read: it may
-                        ;; name itself on the same cadence as the chat lane
-                        (when (boundp (quote chat-rename-from-content!))
-                          (chat-rename-from-content! buf))
-                        ;; Inserting into the middle means the untouched
-                        ;; suffix was already in the sent snapshot. Resync
-                        ;; rather than mistaking it for a new user turn.
-                        (buffer-set-local! buf 'llm-session-dirty
-                          (< at (string-byte-length context)))
-                        (message "LLM response inserted"))))))))))))
+              (let ((streamed #f))
+                (llm-mode--complete buf wire context model
+                  (lambda (result error)
+                    (if (not (buffer-exists? buf))
+                        (message "LLM reply discarded — its buffer was killed")
+                        (let ((id (llm-mode--session-id buf)))
+                          ;; A non-streaming backend can still return one final
+                          ;; result. The normal path only appends the newline.
+                          (when (and (not streamed) (not (equal? result "")))
+                            (let* ((end (agent-append! id
+                                          (string-append "\n\n" result)))
+                                   (start (- end
+                                             (string-byte-length result))))
+                              (llm-mode--stream-range! buf start end #f)
+                              (set! streamed #t)))
+                          (when streamed
+                            (when (not error)
+                              ;; The streaming path has not written its final
+                              ;; line break yet. Keep it outside the response.
+                              (let* ((start (llm-mode--last-response-start buf))
+                                     (end (- (agent-append! id "\n") 1)))
+                                (llm-mode--stream-range! buf start end #t)))
+                            ;; A scratch chat has one more turn to read: it may
+                            ;; name itself on the same cadence as the chat lane.
+                            (when (boundp (quote chat-rename-from-content!))
+                              (chat-rename-from-content! buf))
+                            ;; The untouched suffix was part of the sent
+                            ;; snapshot when insertion happened in the middle.
+                            (buffer-set-local! buf 'llm-session-dirty
+                              (< at (string-byte-length context))))
+                          (when (not error) (message "LLM response inserted")))))
+                  (lambda (chunk)
+                    (when (buffer-exists? buf)
+                      (let* ((id (llm-mode--session-id buf))
+                             (first (not streamed))
+                             (end (agent-append! id
+                                    (if first (string-append "\n\n" chunk) chunk)))
+                             (start (if first
+                                        (- end (string-byte-length chunk))
+                                        (llm-mode--last-response-start buf))))
+                        (llm-mode--stream-range! buf start end (not first))
+                        (set! streamed #t)))))))))))))
 
 (global-set-key "M-o" "llm-send-buffer")
 (global-set-key "C-c m" "llm-set-model")
 (global-set-key "C-c b" "llm-configure")
+(catalog-meta! 'command "llm-send-buffer"
+  'domain "llm" 'effects '("write" "external" "spend"))
+(catalog-meta! 'command "llm-mode" 'domain "llm" 'effects '("write"))
+(catalog-meta! 'mode "llm-mode" 'domain "llm" 'effects '("write"))
 
 ;;; --- chat buffer (gptel-style) -------------------------------------------------
 ;;; *chat* is an ordinary editable buffer. Type after the "### You" marker,

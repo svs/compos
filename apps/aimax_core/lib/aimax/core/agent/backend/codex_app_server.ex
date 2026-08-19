@@ -291,7 +291,17 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
 
       "mcpServer/elicitation/request" ->
         state = %{state | pending_server: Map.put(state.pending_server, id, {method, params})}
-        emit_question(state, id, params)
+
+        # Codex asks approval for an MCP tool call as a form elicitation
+        # tagged in _meta. That is an approval, not a question: route it
+        # through the shared permission policy so a preset-mounted tool
+        # runs without a banner. A genuine elicitation (form input the
+        # MCP server itself wants) stays a question.
+        if mcp_tool_approval?(params) do
+          emit_mcp_tool_permission(state, id, params)
+        else
+          emit_question(state, id, params)
+        end
 
       _ ->
         respond_error(state, id, -32601, "method not supported: #{method}")
@@ -599,6 +609,47 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
     )
   end
 
+  defp mcp_tool_approval?(params),
+    do: get_in(params, ["_meta", "codex_approval_kind"]) == "mcp_tool_call"
+
+  # The permission event carries the bare tool name as the title — the
+  # same name the direct lane and the MCP proxy hand the policy — and
+  # the tool arguments in raw, so the deny-verb scan sees the payload.
+  defp emit_mcp_tool_permission(state, id, params) do
+    meta = Map.get(params, "_meta") || %{}
+    message = Map.get(params, "message") || "MCP tool call"
+
+    tool =
+      Map.get(meta, "tool_name") || Map.get(meta, "tool_title") ||
+        tool_from_message(message) || message
+
+    raw =
+      case Map.get(meta, "tool_params") do
+        nil -> message
+        tool_params -> message <> " " <> json_text(tool_params)
+      end
+
+    emit(state,
+      type: :permission,
+      "rpc-id": id,
+      title: tool,
+      kind: "tool",
+      raw: raw,
+      options: [
+        ["allow_once", "Allow", "allow_once"],
+        ["allow_always", "Always", "allow_always"],
+        ["reject_once", "Deny", "reject_once"]
+      ]
+    )
+  end
+
+  defp tool_from_message(message) do
+    case Regex.run(~r/run tool "([^"]+)"/, message) do
+      [_, tool] -> tool
+      _ -> nil
+    end
+  end
+
   defp emit_question(state, id, params) do
     emit(state,
       type: :question,
@@ -653,22 +704,66 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
     {:ok, %{"permissions" => permissions, "scope" => scope}}
   end
 
+  # The MCP tool approval elicitation. An accept whose _meta names a
+  # persistence scope becomes a durable grant: "session" tells Codex to
+  # stop asking about this tool for the rest of the thread.
+  defp permission_result({"mcpServer/elicitation/request", params}, option_id) do
+    persists = params |> get_in(["_meta", "persist"]) |> List.wrap()
+
+    case option_id do
+      "allow_once" ->
+        {:ok, %{"action" => "accept", "content" => %{}}}
+
+      "allow_always" ->
+        if "session" in persists do
+          {:ok, %{"action" => "accept", "content" => %{}, "_meta" => %{"persist" => "session"}}}
+        else
+          {:ok, %{"action" => "accept", "content" => %{}}}
+        end
+
+      "reject_once" ->
+        {:ok, %{"action" => "decline", "content" => nil}}
+
+      _ ->
+        {:ok, %{"action" => "cancel", "content" => nil}}
+    end
+  end
+
   defp permission_result(_, _), do: :unknown
 
   defp question_result({"mcpServer/elicitation/request", _params}, nil),
     do: {:ok, %{"action" => "cancel", "content" => nil}}
 
   defp question_result({"mcpServer/elicitation/request", params}, answer) do
-    field =
+    {field, schema} =
       case elicitation_field(params) do
-        {name, _schema} -> name
-        nil -> "answer"
+        {name, schema} -> {name, schema}
+        nil -> {"answer", %{}}
       end
 
-    {:ok, %{"action" => "accept", "content" => %{field => to_string(answer)}}}
+    {:ok, %{"action" => "accept", "content" => %{field => elicitation_value(schema, answer)}}}
   end
 
   defp question_result(_, _), do: :unknown
+
+  defp elicitation_value(%{"type" => "boolean"}, answer),
+    do: String.downcase(to_string(answer)) in ["true", "yes", "allow", "approved"]
+
+  defp elicitation_value(%{"type" => "integer"}, answer) do
+    case Integer.parse(to_string(answer)) do
+      {value, ""} -> value
+      _ -> to_string(answer)
+    end
+  end
+
+  defp elicitation_value(%{"type" => "number"}, answer) do
+    case Float.parse(to_string(answer)) do
+      {value, ""} -> value
+      _ -> to_string(answer)
+    end
+  end
+
+  defp elicitation_value(_schema, answer), do: to_string(answer)
 
   defp turn_error(turn) do
     case Map.get(turn, "error") do

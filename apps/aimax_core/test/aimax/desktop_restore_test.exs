@@ -331,4 +331,54 @@ defmodule Aimax.DesktopRestoreTest do
     assert Buffer.exists?(path)
     assert Buffer.text(path) =~ "last words"
   end
+
+  # The Session evaluates one form at a time. A slow form parked every
+  # caller behind it, and the save died on the timeout, so nothing reached
+  # the disk until the daemon restarted.
+  test "a busy Session does not stop the save" do
+    assert :ok = Desktop.save_now()
+    before = File.read!(Desktop.path())
+
+    busy =
+      Task.async(fn ->
+        Session.eval(~s{(shell-command->string "sleep 4")})
+      end)
+
+    # give the Session time to pick the slow form up
+    Process.sleep(200)
+
+    assert :ok = Desktop.save_now()
+    assert Process.alive?(Process.whereis(Desktop))
+
+    after_save = File.read!(Desktop.path())
+    assert :erlang.binary_to_term(after_save)[:version] == 3
+
+    # the previous globals ride along instead of being dropped
+    assert :erlang.binary_to_term(after_save)[:globals] ==
+             :erlang.binary_to_term(before)[:globals]
+
+    Task.await(busy, 15_000)
+  end
+
+  # Each buffer owns its checkpoint and writes it on its own debounce. A
+  # forced checkpoint of a buffer that did not change writes no file.
+  test "a clean buffer rewrites no checkpoint" do
+    name = "*dr-clean-#{System.unique_integer([:positive])}*"
+    on_exit(fn -> Aimax.Core.kill_buffer(name) end)
+
+    {:ok, _} = Aimax.Core.create_buffer(name)
+    Buffer.append(name, "one edit", source: :editor)
+    :ok = Buffer.checkpoint_now(name)
+
+    file = Aimax.Core.BufferStore.checkpoint_path(Buffer.id(name))
+    stamp = File.stat!(file, time: :posix).mtime
+    Process.sleep(1_100)
+
+    :ok = Buffer.checkpoint_now(name)
+    assert File.stat!(file, time: :posix).mtime == stamp
+
+    Buffer.append(name, " and another", source: :editor)
+    :ok = Buffer.checkpoint_now(name)
+    assert File.stat!(file, time: :posix).mtime > stamp
+  end
 end

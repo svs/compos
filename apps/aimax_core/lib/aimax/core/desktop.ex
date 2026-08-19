@@ -13,6 +13,12 @@ defmodule Aimax.Core.Desktop do
 
   @debounce 1_500
 
+  # The desktop must never wait on the Session for long. The Session runs one
+  # form at a time, so a slow shell command or agent turn parks every caller
+  # behind it. The globals are small and change rarely, so a save that cannot
+  # read them writes the last values it read.
+  @globals_timeout 2_000
+
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   def path,
@@ -31,12 +37,13 @@ defmodule Aimax.Core.Desktop do
     Process.flag(:trap_exit, true)
     Events.subscribe_editor()
     if Application.get_env(:aimax_core, :desktop_autorestore, true), do: send(self(), :restore)
-    {:ok, %{timer: nil}}
+    {:ok, %{timer: nil, globals: []}}
   end
 
   @impl true
   def handle_call(:save, _from, state) do
-    {:reply, do_save(), state}
+    {result, state} = do_save(state)
+    {:reply, result, state}
   end
 
   def handle_call(:restore, _from, state) do
@@ -50,7 +57,7 @@ defmodule Aimax.Core.Desktop do
   end
 
   def handle_info(:flush, state) do
-    do_save()
+    {_result, state} = do_save(state)
     {:noreply, %{state | timer: nil}}
   end
 
@@ -59,18 +66,22 @@ defmodule Aimax.Core.Desktop do
     {:noreply, state}
   end
 
+  def handle_info({:seed_globals, globals}, state),
+    do: {:noreply, %{state | globals: globals}}
+
   def handle_info(_other, state), do: {:noreply, state}
 
   @impl true
-  def terminate(_reason, _state), do: do_save()
+  def terminate(_reason, state) do
+    do_save(state)
+    :ok
+  end
 
   # --- snapshot --------------------------------------------------------------
 
-  defp do_save do
-    # Synchronize presentation with the buffers' independently-owned durable
-    # state. The desktop does not read or embed that state.
-    Aimax.Core.checkpoint_all()
-
+  # Presentation only. Each buffer owns its durable state and writes its own
+  # checkpoint on a debounce after a change, so the desktop sweeps nothing.
+  defp do_save(state) do
     # v2: every frame's layout, in frame-MRU order (head = most recent).
     # desktop_view is read-only (S15): saving must not run the render
     # walk, which writes viewport tops back into the tree.
@@ -81,20 +92,22 @@ defmodule Aimax.Core.Desktop do
         %{id: fid, tree: serialize(view.tree), active_buffer: view.active_buffer}
       end
 
+    globals = scheme_globals(state.globals)
+
     desktop = %{
       version: 3,
       frames: frames,
       faces: views |> List.first({nil, %{faces: %{}}}) |> elem(1) |> Map.get(:faces),
-      globals: scheme_globals()
+      globals: globals
     }
 
     file = path()
     Aimax.Core.BufferStore.atomic_write(file, :erlang.term_to_binary(desktop))
-    :ok
+    {:ok, %{state | globals: globals}}
   rescue
     e ->
       Logger.warning("desktop save failed: #{Exception.message(e)}")
-      :error
+      {:error, state}
   end
 
   # the leaf carries the per-window point and scroll state — saved so
@@ -123,11 +136,15 @@ defmodule Aimax.Core.Desktop do
   # along (persist-global!) and hands them over as one list. Filtered the
   # same way locals are — a global holding a pid or a fun is dropped, not
   # written.
-  defp scheme_globals do
-    case Session.call_named("desktop-globals", []) do
+  defp scheme_globals(last) do
+    case Session.call_named("desktop-globals", [], nil, @globals_timeout) do
       {:ok, globals} when is_list(globals) -> Enum.filter(globals, &serializable?/1)
-      _ -> []
+      _ -> last
     end
+  catch
+    :exit, _ ->
+      Logger.warning("desktop: Session busy, saved the previous globals")
+      last
   end
 
   # --- restore ---------------------------------------------------------------
@@ -211,6 +228,10 @@ defmodule Aimax.Core.Desktop do
         [] -> :ok
         globals -> Session.call_named("desktop-globals!", [globals])
       end
+
+      # Seed the cache: a save that runs before the Session is free again
+      # writes these back, not an empty list.
+      send(self(), {:seed_globals, desktop[:globals] || []})
 
       Session.message("Desktop restored")
       :ok

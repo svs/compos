@@ -79,6 +79,7 @@ defmodule Aimax.Core.Buffer do
             idle_timer: nil,
             discard: false,
             persistent: true,
+            dirty: true,
             idle_gen: 0,
             encoding: :utf8
 
@@ -924,6 +925,11 @@ defmodule Aimax.Core.Buffer do
   defp write_checkpoint(%{discard: true} = state), do: state
   defp write_checkpoint(%{persistent: false} = state), do: state
 
+  # Nothing changed since the last write, so the file on disk is current.
+  # A forced checkpoint of a clean buffer costs one comparison, not one
+  # serialization of the whole text.
+  defp write_checkpoint(%{dirty: false} = state), do: state
+
   defp write_checkpoint(state) do
     BufferStore.atomic_write(
       BufferStore.checkpoint_path(state.id),
@@ -931,17 +937,23 @@ defmodule Aimax.Core.Buffer do
     )
 
     BufferStore.note(metadata(state))
-    state
+    %{state | dirty: false}
   rescue
     _ -> state
   end
 
+  # Every state mutation marks the buffer dirty here, so the flag is the
+  # answer to "did anything change since the last write?".
   defp checkpoint_later(%{persistent: false} = state), do: state
 
   defp checkpoint_later(%{checkpoint_timer: nil} = state),
-    do: %{state | checkpoint_timer: Process.send_after(self(), :checkpoint, @checkpoint_debounce)}
+    do: %{
+      state
+      | dirty: true,
+        checkpoint_timer: Process.send_after(self(), :checkpoint, @checkpoint_debounce)
+    }
 
-  defp checkpoint_later(state), do: state
+  defp checkpoint_later(state), do: %{state | dirty: true}
 
   defp schedule_checkpoint(state), do: checkpoint_later(state)
 

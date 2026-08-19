@@ -520,7 +520,7 @@
 
 (define (list-filter-push! buf f)
   (buffer-set-local! buf 'list-filters (cons f (list-filters buf)))
-  (list-redraw! buf))
+  (list-refresh! buf))
 
 ;; The query is ONE filter, not a stack of them: the text you type IS
 ;; the narrowing, so deleting it widens and emptying it removes it.
@@ -535,7 +535,7 @@
                       (list-filters buf))))
     (buffer-set-local! buf 'list-filters
       (if (equal? q "") rest (cons (list "match" q) rest)))
-    (list-redraw! buf)))
+    (list-refresh! buf)))
 
 ;; drop the typed query and keep the mode's own kinds (dired's dotfiles).
 ;; No refresh: the caller is opening the list and draws it next.
@@ -546,11 +546,11 @@
 (define (list-filter-pop! buf)
   (let ((fs (list-filters buf)))
     (unless (null? fs) (buffer-set-local! buf 'list-filters (cdr fs)))
-    (list-redraw! buf)))
+    (list-refresh! buf)))
 
 (define (list-filter-clear! buf)
   (buffer-set-local! buf 'list-filters '())
-  (list-redraw! buf))
+  (list-refresh! buf))
 
 ;; what you typed reads back as you typed it; a kind the mode invented
 ;; says its name
@@ -610,21 +610,6 @@
                     (else #f))))
           entries))
 
-;; A list that declares 'local-filter fetches its source once and runs
-;; the filters on the cache: a keystroke in `/` must not call the source
-;; again. A plain list computes its rows on every draw.
-(define (list-source-entries buf)
-  (or (buffer-local buf 'list-source-entries) '()))
-
-(define (list-render-rows! buf fetch)
-  (if (list-opt buf 'local-filter)
-      (begin
-        (when (or fetch (not (buffer-local buf 'list-source-entries)))
-          (buffer-set-local! buf 'list-source-entries
-                             ((list-opt buf 'rows) buf)))
-        (list-keep buf (list-source-entries buf)))
-      ((list-opt buf 'rows) buf)))
-
 ;;; --- the view: a title, columns, rows, a key bar ------------------------------
 ;;; Every list draws the same shape. A mode says what its columns are and
 ;;; what one row puts in them; the mechanism pads the cells, colours them,
@@ -666,20 +651,9 @@
                (list (car c) rest (list-col-align c))))
          cols)))
 
-;; The mode's 'columns fn runs once per draw: every later call in the
-;; same draw reads the cache. The cache keys on the width, so a resize
-;; recomputes. A draw clears the cache first.
 (define (list-columns buf)
   (let ((f (list-opt buf 'columns)))
-    (if f
-        (let ((w (list-view-width buf))
-              (cache (buffer-local buf 'list-columns-cache)))
-          (if (and (pair? cache) (equal? (car cache) w))
-              (cadr cache)
-              (let ((cols (list-fit-columns (f buf) w)))
-                (buffer-set-local! buf 'list-columns-cache (list w cols))
-                cols)))
-        '())))
+    (if f (list-fit-columns (f buf) (list-view-width buf)) '())))
 
 (define (list-table? buf) (pair? (list-columns buf)))
 
@@ -1115,16 +1089,15 @@
           ((equal? (list-key buf (car es)) key) i)
           (else (loop (cdr es) (+ i 1))))))
 
-(define (list-render! buf fetch)
+(define (list-refresh! buf)
   (when (buffer-exists? buf)
-    (buffer-set-local! buf 'list-columns-cache #f)
     ;; a rewrite dumps point to 0 — keep the reader's place. The place is
     ;; the ROW the reader is on, not the byte and not the number: a
     ;; reflowed table moves every byte, and a most-recently-used list
     ;; reorders the rows under the cursor.
     (let* ((here (list-current buf))
            (was (list-index buf))
-           (rows (list-render-rows! buf fetch))
+           (rows ((list-opt buf 'rows) buf))
            (cur? (equal? (current-buffer) buf))
            ;; the buffer's own point: a refresh runs while another buffer
            ;; is current (a hook, a prompt), and that list keeps its place
@@ -1152,11 +1125,6 @@
               (else
                (let ((q (min p (buffer-size buf))))
                  (if cur? (goto-char! q) (buffer-goto! buf q)))))))))
-
-;; `g` and every source change fetch again; a filter keystroke only
-;; redraws, and a 'local-filter list then reuses its cached source.
-(define (list-refresh! buf) (list-render! buf #t))
-(define (list-redraw! buf) (list-render! buf #f))
 
 ;; Everything a list buffer needs to BE one, applied to an explicit
 ;; buffer. The mode setup calls it with (current-buffer); opening a list
@@ -1278,87 +1246,36 @@
 (define-command "end-of-buffer" "Move point to the end of the buffer"
   (lambda () (or (preview-scroll! 1000000) (end-of-buffer!))))
 
-(define (preview--positions text needle)
-  (let loop ((from 0) (acc (list)))
-    (let ((i (string-index text needle from)))
-      (if i
-          (loop (+ i 1) (cons i acc))
-          (reverse acc)))))
-
-;; The nearest position strictly on DIR's side of FROM. DIR is 1 for a key
-;; that moves down, -1 for a key that moves up.
-(define (preview--toward positions from dir)
-  (let ((side (filter (lambda (p) (if (> dir 0) (> p from) (< p from)))
-                      positions)))
-    (cond ((null? side) #f)
-          ((> dir 0) (car side))
-          (else (car (reverse side))))))
-
-;; The position nearest FROM, on either side.
-(define (preview--nearest positions from)
-  (let loop ((ps positions) (best #f))
-    (cond ((null? ps) best)
-          ((or (not best) (< (abs (- (car ps) from)) (abs (- best from))))
-           (loop (cdr ps) (car ps)))
-          (else (loop (cdr ps) best)))))
-
-(define (preview--nth lst n)
-  (cond ((null? lst) #f)
-        ((<= n 0) (car lst))
-        (else (preview--nth (cdr lst) (- n 1)))))
-
-;; One rendered fragment names many source positions. A two-character code
-;; span such as `-b` sits in the file ten times, so the first hit is almost
-;; never the one the reader points at: the cursor jumps to the top of the
-;; file, and the next key matches the same first hit again. The cursor then
-;; stops moving.
-;;
-;; So the client also counts, on the page, how many times the fragment
-;; comes before the one it means (NTH), and names the direction the key
-;; moves (DIR: 1 down, -1 up, 0 for a click). Take the NTH source hit.
-;; Rendered text and source text differ, so that count can miss; when it
-;; misses, or when DIR says the cursor must move and the NTH hit does not
-;; move it, take the nearest hit on DIR's side. A down key then always
-;; moves down.
-;;
-;; string-index rejects an empty pattern, so an empty needle answers #f.
-(define (preview--hit text before after nth dir from)
+;; A click in a rendered markdown page. The client sends the clicked text
+;; node split at the caret, plus the word run around the caret. Rendered
+;; text and source differ (markup is stripped, punctuation is smartened),
+;; so try the exact node first and the plain word run second; the first
+;; hit in the source wins. string-index rejects an empty pattern, so
+;; empty needles answer #f.
+(define (preview--hit text before after)
   (let ((needle (string-append before after)))
     (if (equal? needle "")
         #f
-        (let* ((starts (preview--positions text needle))
-               (b (string-byte-length before))
-               (hits (map (lambda (i) (+ i b)) starts))
-               (want (preview--nth hits nth))
-               (ok (and want (or (= dir 0) (if (> dir 0) (> want from) (< want from))))))
-          (cond (ok want)
-                ((= dir 0) (preview--nearest hits from))
-                (else (or (preview--toward hits from dir)
-                          (preview--nearest hits from))))))))
+        (let ((i (string-index text needle)))
+          (if i (+ i (string-byte-length before)) #f)))))
 
-;; A click or a visual-line key in a rendered markdown page. The client
-;; sends the text node split at the caret, plus the word run around the
-;; caret. Rendered text and source differ (markup is stripped, punctuation
-;; is smartened), so try the exact node first and the plain word run
-;; second; NTH counts the node, WN counts the word run.
-(define (preview-goto! win before after wb wa nth wn dir)
+(define (preview-goto! win before after wb wa)
   (mouse-select-window! win)
   (set-mark! #f)
   (let* ((text (buffer-text (current-buffer)))
-         (from (point))
-         (hit (or (preview--hit text before after nth dir from)
-                  (preview--hit text wb wa wn dir from))))
+         (hit (or (preview--hit text before after)
+                  (preview--hit text wb wa))))
     (when hit (goto-char! hit))))
 (public! 'preview-goto!
-  "(preview-goto! WIN BEFORE AFTER WB WA NTH WN DIR) — put point where a preview click or visual-line key landed"
+  "(preview-goto! WIN BEFORE AFTER WB WA) — put point where a preview click landed"
   'interaction)
 
-(define (preview-select! win before after wb wa nth wn dir)
+(define (preview-select! win before after wb wa)
   (let ((anchor (or (mark) (point))))
-    (preview-goto! win before after wb wa nth wn dir)
+    (preview-goto! win before after wb wa)
     (set-mark! anchor)))
 (public! 'preview-select!
-  "(preview-select! WIN BEFORE AFTER WB WA NTH WN DIR) — extend the region to a rendered position"
+  "(preview-select! WIN BEFORE AFTER WB WA) — extend the region to a rendered position"
   'interaction)
 
 ;; Render-only widgets know their exact source ranges. Unlike preview-goto!,
@@ -2139,16 +2056,21 @@
 
 (define-command "preview-mode" "Toggle rendered preview of the current buffer"
   (lambda ()
-    (if (buffer-local (current-buffer) 'render-mode)
-        (begin
-          (buffer-set-local! (current-buffer) 'render-mode #f)
-          (message "Preview off"))
-        (let ((r (preview-renderer-for (current-buffer))))
-          (if r
-              (begin
-                (buffer-set-local! (current-buffer) 'render-mode r)
-                (message (string-append "Preview on (" r ") — C-c C-v toggles")))
-              (message "No preview renderer for this buffer"))))))
+    (if (equal? (buffer-local (current-buffer) 'mode-name) "chat-mode")
+        ;; a chat's rendered view is the rich transcript, not a markdown
+        ;; preview. A markdown render-mode here lost the chat UI with no
+        ;; way back — the chat's own toggle owns this buffer-local.
+        (run-command "chat-toggle-view")
+        (if (buffer-local (current-buffer) 'render-mode)
+            (begin
+              (buffer-set-local! (current-buffer) 'render-mode #f)
+              (message "Preview off"))
+            (let ((r (preview-renderer-for (current-buffer))))
+              (if r
+                  (begin
+                    (buffer-set-local! (current-buffer) 'render-mode r)
+                    (message (string-append "Preview on (" r ") — C-c C-v toggles")))
+                  (message "No preview renderer for this buffer")))))))
 
 ;;; --- apps --------------------------------------------------------------
 ;;; preview-mode renders a page the way eww does: themed, and inert. An app
@@ -4233,11 +4155,6 @@
               ;; already declare their policy as allow, so answer here.
               ((equal? type 'permission)
                (llm-inline-allow! id event))
-              ;; Codex represents an MCP server's own approval prompt as an
-              ;; elicitation question. Inline mode has no question surface,
-              ;; and its declared tool policy is already allow.
-              ((equal? type 'question)
-               (llm-inline-answer! id event))
               ((equal? type 'turn-end)
                (llm-inline-finish! id)))))
     events))
@@ -4253,15 +4170,6 @@
   (let ((rpc (plist-get event 'rpc-id)))
     (when rpc
       (agent-permission-respond! id rpc (llm-inline--allow-option event)))))
-
-(define (llm-inline-answer! id event)
-  (let ((qid (plist-get event 'id))
-        (answers (or (plist-get event 'answers) '())))
-    (when qid
-      ;; An enum question chooses its first allowed answer. A question with
-      ;; no choices is the boolean approval emitted by the aimax MCP bridge.
-      (agent-question-respond! id qid
-        (if (pair? answers) (car answers) "true")))))
 
 ;; Presets supply the complete tool surface. The runtime opens lazily on the
 ;; first send, stays attached to BUF, and (for Codex) records a native thread
@@ -4888,8 +4796,7 @@
     chat-presets chat-permission-mode render-mode default-directory
     agent-permission-profile window-class header-line
     workspace-id workspace-name workspace-root workspace-project-root
-    workspace-backend workspace-daemon workspace-llm-defaults
-    workspace-isolation-choice))
+    workspace-backend workspace-daemon workspace-llm-defaults))
 
 ;; what was SAID — survives restart and save; reset clears it
 ;; ('chat-turns is the pre-record shape: chat-record-migrate! reads it once
@@ -6295,15 +6202,24 @@
               (buffer-set-local! buf 'group g)
               (message (string-append buf " joined group " g)))))))))
 
-(define-command "group-remove" "Remove the current buffer from its group"
+(define-command "group-remove" "Remove a buffer from a named group"
   (lambda ()
-    (let* ((buf (current-buffer)) (g (buffer-group buf)))
-      (if g
-          (begin
-            (buffer-set-local! buf 'group #f)
-            (buffer-set-local! buf 'companion-of #f)
-            (message (string-append buf " left group " g)))
-          (message "Not in a group")))))
+    (let ((buf (current-buffer))
+          (current (buffer-group (current-buffer))))
+      (if (not current)
+          (message "Not in a group")
+          (minibuffer-read-preview
+            (string-append "Remove from group " current " (default " buf "): " )
+            (map (lambda (b) (list b (if (equal? b buf) "current buffer" "")))
+                 (group-buffers-mru current))
+            (lambda (_b) #t)
+            (lambda (picked)
+              (let ((target (if (equal? picked "") buf picked)))
+                (when (member target (group-buffers current))
+                  (buffer-set-local! target 'group #f)
+                  (buffer-set-local! target 'companion-of #f)
+                  (message (string-append target " removed from group " current)))))
+            (lambda () #t))))))
 
 (define-command "group-list" "List the current buffer's group members"
   (lambda ()

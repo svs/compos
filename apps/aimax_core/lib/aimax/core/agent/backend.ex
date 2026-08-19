@@ -87,7 +87,7 @@ defmodule Aimax.Core.Agent.Backend do
         {:error, "no llm-session-context-fn! registered"}
 
       fun ->
-        case Aimax.Core.Session.call_fn(fun, [slug, display]) do
+        case Aimax.Core.Session.call_fn(fun, [slug, display], nil, "context #{slug}") do
           {:ok, plist} ->
             {:ok,
              %{

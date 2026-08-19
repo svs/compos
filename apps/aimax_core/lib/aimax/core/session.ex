@@ -56,9 +56,10 @@ defmodule Aimax.Core.Session do
   def apply_callback(closure, args, fid \\ nil),
     do: GenServer.call(__MODULE__, {:apply, closure, args, fid(fid)}, 30_000)
 
-  @doc "Apply a Scheme closure and return its value (e.g. a completion fn)."
-  def call_fn(closure, args, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:call_fn, closure, args, fid(fid)}, 30_000)
+  @doc "Apply a Scheme closure and return its value (e.g. a completion fn).
+  LABEL names the lane in the slow-op log; the closure itself has no name."
+  def call_fn(closure, args, fid \\ nil, label \\ ""),
+    do: GenServer.call(__MODULE__, {:call_fn, closure, args, fid(fid), label}, 30_000)
 
   @doc """
   Apply a named global function to ARGS. ARGS pass as values, never through
@@ -267,8 +268,8 @@ defmodule Aimax.Core.Session do
     end
   end
 
-  def handle_call({:call_fn, closure, args, fid}, _from, state) do
-    case timed("call-fn", "", fn ->
+  def handle_call({:call_fn, closure, args, fid, label}, _from, state) do
+    case timed("call-fn", label, fn ->
            safe(fn -> with_fid(fid, fn -> Scheme.call(state.interp, closure, args) end) end)
          end) do
       {:ok, val, interp} -> {:reply, {:ok, val}, put_interp(state, interp, val)}

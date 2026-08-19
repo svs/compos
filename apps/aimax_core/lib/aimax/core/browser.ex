@@ -68,7 +68,7 @@ defmodule Aimax.Core.Browser do
     # one has them, which reads as the feature being broken.
     if state.handler do
       handler = state.handler
-      run(fn -> Session.call_fn(handler, ["attached", []], nil) end)
+      run(fn -> Session.call_fn(handler, ["attached", []], nil, "browser attached") end)
     end
 
     {:noreply, state}
@@ -144,7 +144,7 @@ defmodule Aimax.Core.Browser do
 
     run(fn ->
       reply =
-        case Session.call_fn(handler, [op, Aimax.Core.LLM.json_to_scheme(args)], fid) do
+        case Session.call_fn(handler, [op, Aimax.Core.LLM.json_to_scheme(args)], fid, "browser #{op}") do
           {:ok, value} ->
             result = Session.scheme_to_json(value)
             Logger.info("browser -> #{op} ok #{brief(result)}")

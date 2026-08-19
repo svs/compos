@@ -3,6 +3,8 @@ defmodule Aimax.Core do
 
   alias Aimax.Core.{Buffer, BufferStore}
 
+  require Logger
+
   @registry Aimax.Core.BufferRegistry
   @buffer_sup Aimax.Core.BufferSupervisor
   @scratch "*scratch*"
@@ -13,38 +15,46 @@ defmodule Aimax.Core do
   def create_buffer(name, opts \\ []) do
     restored = BufferStore.lookup(name)
 
-    if restored && not File.exists?(restored.checkpoint) do
-      {:error, :checkpoint_missing}
-    else
-      opts = if restored, do: Keyword.put_new(opts, :checkpoint, restored.checkpoint), else: opts
-
-      case DynamicSupervisor.start_child(@buffer_sup, {Buffer, Keyword.put(opts, :name, name)}) do
-        {:ok, _pid} ->
-          # An Editor handler cannot call Session: mode setup can install
-          # local keys by calling back into Editor. Its public caller finishes
-          # restoration after the Editor call returns. Every other wake is
-          # synchronous, so nobody observes a half-restored buffer.
-          if restored && Process.whereis(Aimax.Core.Session) do
-            cond do
-              self() == Process.whereis(Aimax.Core.Editor) ->
-                :ok
-
-              self() == Process.whereis(Aimax.Core.Session) ->
-                unless Process.get(:aimax_inline_runtime_restore), do: restore_runtime_later(name)
-
-              true ->
-                restore_runtime(name)
-            end
-          end
-
-          {:ok, name}
-
-        {:error, {:already_started, _}} ->
-          {:error, :already_exists}
-
-        other ->
-          other
+    # A catalog row can outlive its checkpoint file. The content is gone,
+    # and a name that errors forever wedges every later create. Forget the
+    # stale row and start fresh.
+    restored =
+      if restored && not File.exists?(restored.checkpoint) do
+        Logger.warning("buffer #{name}: checkpoint file missing, starting fresh")
+        BufferStore.forget(name)
+        nil
+      else
+        restored
       end
+
+    opts = if restored, do: Keyword.put_new(opts, :checkpoint, restored.checkpoint), else: opts
+
+    case DynamicSupervisor.start_child(@buffer_sup, {Buffer, Keyword.put(opts, :name, name)}) do
+      {:ok, _pid} ->
+        # An Editor handler cannot call Session: mode setup can install
+        # local keys by calling back into Editor. Its public caller finishes
+        # restoration after the Editor call returns. Every other wake is
+        # synchronous, so nobody observes a half-restored buffer.
+        if restored && Process.whereis(Aimax.Core.Session) do
+          cond do
+            self() == Process.whereis(Aimax.Core.Editor) ->
+              :ok
+
+            self() == Process.whereis(Aimax.Core.Session) ->
+              unless Process.get(:aimax_inline_runtime_restore), do: restore_runtime_later(name)
+
+            true ->
+              restore_runtime(name)
+          end
+        end
+
+        {:ok, name}
+
+      {:error, {:already_started, _}} ->
+        {:error, :already_exists}
+
+      other ->
+        other
     end
   end
 

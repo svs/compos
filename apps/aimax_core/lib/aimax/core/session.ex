@@ -79,6 +79,10 @@ defmodule Aimax.Core.Session do
   def eval_buffer(buffer), do: buffer |> Buffer.text() |> eval()
 
   def message(text) do
+    # A buffer sweep can kill *messages*. Recreate it here, so every
+    # later (message ...) works instead of an exit through :noproc.
+    unless Buffer.exists?(@messages), do: Aimax.Core.create_buffer(@messages)
+
     Buffer.append(@messages, text <> "\n", source: :editor)
     # Emacs: echo in the frame that triggered; with no frame context (agent
     # events, timers) every frame gets it — *messages* is shared either way

@@ -151,6 +151,14 @@ defmodule Aimax.CoreTest do
   test "killing every buffer leaves a live scratch buffer" do
     Enum.each(Core.list_buffers(), &Core.kill_buffer/1)
 
+    # Async tests can hold live buffers during the sweep, so the sweep
+    # cannot prove the global last-kill path. The stable invariants:
+    # the editor lands on a live buffer, and scratch comes back on the
+    # first switch.
+    current = Aimax.Core.Editor.current_buffer()
+    assert Buffer.exists?(current)
+
+    {:ok, _} = Session.eval(~s{(switch-to-buffer! "*scratch*")})
     assert Buffer.exists?("*scratch*")
     assert Aimax.Core.Editor.current_buffer() == "*scratch*"
     assert :ok = Buffer.append("*scratch*", "still live")

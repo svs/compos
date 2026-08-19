@@ -975,6 +975,11 @@ defmodule Aimax.Core.SchemeAPI do
           unless Buffer.exists?(name), do: Core.create_buffer(name)
           Aimax.Core.Frame.put_buffer(name)
         else
+          # A forgotten name gets a fresh buffer here too — C-x b creates.
+          # A dormant name goes to set_window_buffer, which wakes it.
+          unless Buffer.exists?(name) or Aimax.Core.BufferStore.known?(name),
+            do: Core.create_buffer(name)
+
           Editor.set_window_buffer(name)
         end
 
@@ -991,6 +996,11 @@ defmodule Aimax.Core.SchemeAPI do
             unless Buffer.exists?(name), do: Core.create_buffer(name)
             Aimax.Core.Frame.put_buffer(name)
           else
+            # A forgotten name gets a fresh buffer here too — C-x b creates.
+            # A dormant name goes to set_window_buffer, which wakes it.
+            unless Buffer.exists?(name) or Aimax.Core.BufferStore.known?(name),
+              do: Core.create_buffer(name)
+
             Editor.set_window_buffer(name)
           end
         after

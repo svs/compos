@@ -408,7 +408,7 @@ defmodule Aimax.Core.Editor do
 
       nil ->
         id = if valid_frame_id?(id), do: id, else: gen_frame_id()
-        buffer = List.first(Enum.filter(state.mru, &Buffer.exists?/1)) || @scratch
+        buffer = List.first(Enum.filter(state.mru, &Buffer.exists?/1)) || live_scratch()
 
         frame = %{
           id: id,
@@ -799,9 +799,9 @@ defmodule Aimax.Core.Editor do
       Enum.find(state.mru, fn b ->
         b != buffer and b not in visible and Buffer.exists?(b)
       end) ||
-        Enum.find(state.mru, @scratch, fn b ->
+        Enum.find(state.mru, fn b ->
           b != buffer and Buffer.exists?(b)
-        end)
+        end) || live_scratch()
 
     frames =
       Map.new(state.frames, fn {id, f} ->
@@ -1654,6 +1654,14 @@ defmodule Aimax.Core.Editor do
 
   defp find_leaf(%{type: :split, children: children}, id),
     do: Enum.find_value(children, &find_leaf(&1, id))
+
+  # A window must land on a live buffer. When every candidate is dead,
+  # recreate *scratch* — a window that shows a dead name turns the next
+  # keypress into a :noproc crash.
+  defp live_scratch do
+    unless Buffer.exists?(@scratch), do: Aimax.Core.create_buffer(@scratch)
+    @scratch
+  end
 
   defp visible_buffers(%{type: :leaf, buffer: b}), do: [b]
 

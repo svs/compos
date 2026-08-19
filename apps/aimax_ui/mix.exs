@@ -17,7 +17,8 @@ defmodule Aimax.Ui.MixProject do
 
   def application do
     [
-      extra_applications: [:logger],
+      # os_mon feeds the dashboard's OS page: CPU, memory, and disk
+      extra_applications: [:logger, :os_mon],
       mod: {Aimax.Ui.Application, []}
     ]
   end
@@ -29,6 +30,9 @@ defmodule Aimax.Ui.MixProject do
       {:req, "~> 0.5"},
       {:phoenix, "~> 1.8"},
       {:phoenix_live_view, "~> 1.1"},
+      {:phoenix_live_dashboard, "~> 0.8"},
+      {:telemetry_metrics, "~> 1.1"},
+      {:telemetry_poller, "~> 1.3"},
       {:bandit, "~> 1.5"},
       {:jason, "~> 1.4"},
       {:lazy_html, ">= 0.1.0", only: :test}

@@ -23,6 +23,7 @@ defmodule Aimax.Ui.Application do
 
     children =
       [
+        Aimax.Ui.Telemetry,
         {Phoenix.PubSub, name: Aimax.Ui.PubSub},
         Aimax.Ui.Oembed,
         Aimax.Ui.Endpoint

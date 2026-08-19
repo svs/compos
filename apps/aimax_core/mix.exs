@@ -28,6 +28,7 @@ defmodule Aimax.Core.MixProject do
     [
       {:aimax_scheme, in_umbrella: true},
       {:req, "~> 0.5"},
+      {:telemetry, "~> 1.0"},
       {:req_llm, "~> 1.19"},
       {:jason, "~> 1.4"},
       # the wire seam: Req's plug adapter lets tests inspect the exact

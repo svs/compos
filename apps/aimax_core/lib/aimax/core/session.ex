@@ -131,6 +131,24 @@ defmodule Aimax.Core.Session do
     :exit, reason -> {:error, "exit: #{inspect(reason)}"}
   end
 
+  # This process is the editor's single writer, so one slow op is one
+  # freeze. Every op reports its duration as telemetry; the dashboard
+  # charts it. A slow op also writes its name to the log.
+  @slow_ms 250
+
+  defp timed(op, detail, fun) do
+    t0 = System.monotonic_time(:millisecond)
+    result = fun.()
+    ms = System.monotonic_time(:millisecond) - t0
+    :telemetry.execute([:aimax, :session, :op], %{duration: ms}, %{op: op})
+
+    if ms > @slow_ms do
+      Logger.warning("session: slow op #{op} #{ms}ms #{detail}")
+    end
+
+    result
+  end
+
   # the caller's frame context, stamped into THIS process for the duration
   # of the Scheme execution — primitives resolve their frame from it. nil
   # clears (a stale pdict from the previous command must not leak forward).
@@ -147,7 +165,10 @@ defmodule Aimax.Core.Session do
     # the caller's reply slot and answers through eval-resolve! later
     Process.put(:eval_reply_to, from)
 
-    result = safe(fn -> with_fid(fid, fn -> Scheme.eval_string(state.interp, src) end) end)
+    result =
+      timed("eval", String.slice(src, 0, 80), fn ->
+        safe(fn -> with_fid(fid, fn -> Scheme.eval_string(state.interp, src) end) end)
+      end)
 
     Process.delete(:eval_reply_to)
     deferred = Process.get(:eval_deferred)
@@ -199,30 +220,32 @@ defmodule Aimax.Core.Session do
         {:reply, {:error, "undefined command"}, state}
 
       [{^name, closure, _doc}] ->
-        case safe(fn ->
-               with_fid(fid, fn ->
-                 case Scheme.call(state.interp, closure, []) do
-                   {:ok, val, interp} ->
-                     # the post-command hook: policy reacts to what the command
-                     # changed — the expanded modeline re-reads its buffer. A
-                     # hook error must never fail the command that ran.
-                     try do
-                       case Scheme.eval_string(
-                              interp,
-                              "(when (boundp 'post-command!) (post-command!))"
-                            ) do
-                         {:ok, _hv, interp2} -> {:ok, val, interp2}
+        case timed("command", name, fn ->
+               safe(fn ->
+                 with_fid(fid, fn ->
+                   case Scheme.call(state.interp, closure, []) do
+                     {:ok, val, interp} ->
+                       # the post-command hook: policy reacts to what the command
+                       # changed — the expanded modeline re-reads its buffer. A
+                       # hook error must never fail the command that ran.
+                       try do
+                         case Scheme.eval_string(
+                                interp,
+                                "(when (boundp 'post-command!) (post-command!))"
+                              ) do
+                           {:ok, _hv, interp2} -> {:ok, val, interp2}
+                           _ -> {:ok, val, interp}
+                         end
+                       rescue
                          _ -> {:ok, val, interp}
+                       catch
+                         _, _ -> {:ok, val, interp}
                        end
-                     rescue
-                       _ -> {:ok, val, interp}
-                     catch
-                       _, _ -> {:ok, val, interp}
-                     end
 
-                   {:error, msg} ->
-                     {:error, msg}
-                 end
+                     {:error, msg} ->
+                       {:error, msg}
+                   end
+                 end)
                end)
              end) do
           {:ok, val, interp} -> {:reply, :ok, put_interp(state, interp, val)}
@@ -232,7 +255,9 @@ defmodule Aimax.Core.Session do
   end
 
   def handle_call({:apply, closure, args, fid}, _from, state) do
-    case safe(fn -> with_fid(fid, fn -> Scheme.call(state.interp, closure, args) end) end) do
+    case timed("apply", "", fn ->
+           safe(fn -> with_fid(fid, fn -> Scheme.call(state.interp, closure, args) end) end)
+         end) do
       {:ok, val, interp} ->
         {:reply, :ok, put_interp(state, interp, val)}
 
@@ -243,18 +268,22 @@ defmodule Aimax.Core.Session do
   end
 
   def handle_call({:call_fn, closure, args, fid}, _from, state) do
-    case safe(fn -> with_fid(fid, fn -> Scheme.call(state.interp, closure, args) end) end) do
+    case timed("call-fn", "", fn ->
+           safe(fn -> with_fid(fid, fn -> Scheme.call(state.interp, closure, args) end) end)
+         end) do
       {:ok, val, interp} -> {:reply, {:ok, val}, put_interp(state, interp, val)}
       {:error, msg} -> {:reply, {:error, msg}, state}
     end
   end
 
   def handle_call({:call_named, fun, args, fid}, _from, state) do
-    case safe(fn ->
-           with_fid(fid, fn ->
-             # the name is a code-supplied constant; only ARGS are data
-             {:ok, closure, interp} = Scheme.eval_string(state.interp, fun)
-             Scheme.call(interp, closure, args)
+    case timed("call-named", fun, fn ->
+           safe(fn ->
+             with_fid(fid, fn ->
+               # the name is a code-supplied constant; only ARGS are data
+               {:ok, closure, interp} = Scheme.eval_string(state.interp, fun)
+               Scheme.call(interp, closure, args)
+             end)
            end)
          end) do
       {:ok, val, interp} -> {:reply, {:ok, val}, put_interp(state, interp, val)}

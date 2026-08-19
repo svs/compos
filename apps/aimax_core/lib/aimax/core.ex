@@ -72,7 +72,16 @@ defmodule Aimax.Core do
   end
 
   def restore_runtime(name) do
-    Aimax.Core.Session.call_named("restore-buffer-runtime!", [name])
+    # the buffer's own lane, with room for an agent revival: a 20s chat
+    # restore on :ui froze every keystroke behind it
+    Aimax.Core.Session.call_named(
+      "restore-buffer-runtime!",
+      [name],
+      nil,
+      120_000,
+      Aimax.Core.Lane.for_buffer(name)
+    )
+
     :ok
   end
 

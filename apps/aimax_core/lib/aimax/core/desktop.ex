@@ -288,12 +288,16 @@ defmodule Aimax.Core.Desktop do
   defp apply_saved_state(name, point, locals) do
     Enum.each(locals, fn {k, v} -> Buffer.set_local(name, k, v) end)
 
+    # the buffer's own lane: a slow mode setup (an agent chat reviving
+    # its backend) must never queue keystrokes behind the restore
+    lane = Aimax.Core.Lane.for_buffer(name)
+
     if mode = locals["mode-name"] do
-      Session.call_named("desktop-apply-mode!", [name, mode])
+      Session.call_named("desktop-apply-mode!", [name, mode], nil, 120_000, lane)
     end
 
     if locals["minor-modes"] not in [nil, []] do
-      Session.call_named("restore-minor-modes!", [name])
+      Session.call_named("restore-minor-modes!", [name], nil, 120_000, lane)
     end
 
     Buffer.goto(name, point)

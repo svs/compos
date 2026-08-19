@@ -11,16 +11,40 @@ defmodule Aimax.Core.Daemon do
 
   @doc "Save the desktop, respawn the daemon, and stop this VM. Returns :ok or an error tuple."
   def restart do
-    case Aimax.Core.Desktop.save_now() do
-      :ok ->
-        with :ok <- respawn() do
-          schedule_stop()
-          :ok
-        end
-
-      :error ->
-        {:error, :desktop_save_failed}
+    # Compile BEFORE the handover, while this daemon still serves. The
+    # respawn then boots in seconds instead of minutes, and a tree that
+    # does not compile refuses the restart instead of leaving no daemon.
+    with :ok <- precompile(),
+         :ok <- save_desktop(),
+         :ok <- respawn() do
+      schedule_stop()
+      :ok
     end
+  end
+
+  defp save_desktop do
+    case Aimax.Core.Desktop.save_now() do
+      :ok -> :ok
+      :error -> {:error, :desktop_save_failed}
+    end
+  end
+
+  defp precompile do
+    {out, code} =
+      System.cmd("mix", ["compile"],
+        cd: File.cwd!(),
+        stderr_to_stdout: true,
+        env: [{"MIX_ENV", to_string(Mix.env())}]
+      )
+
+    if code == 0 do
+      :ok
+    else
+      {:error, {:compile_failed, String.slice(out, -2000, 2000) || out}}
+    end
+  rescue
+    # no mix on PATH (a release build): the respawn does not compile either
+    _ -> :ok
   end
 
   @doc "Start or reuse a daemon whose code and cwd come from a workspace."

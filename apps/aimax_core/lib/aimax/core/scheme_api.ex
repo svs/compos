@@ -668,6 +668,10 @@ defmodule Aimax.Core.SchemeAPI do
           {:error, {:spawn_failed, _code, out}} ->
             raise Aimax.Scheme.Eval.Error,
               message: "could not respawn the daemon: #{inspect(out)}"
+
+          {:error, {:compile_failed, out}} ->
+            raise Aimax.Scheme.Eval.Error,
+              message: "the tree does not compile; staying up: #{out}"
         end
       end,
       "daemon-provision-workspace!" => fn [workspace, name] ->

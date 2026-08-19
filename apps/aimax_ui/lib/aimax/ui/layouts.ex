@@ -829,6 +829,67 @@ defmodule Aimax.Ui.Layouts do
             return spec;
           }
 
+          // The column a visual-line move keeps while it walks rows, and the
+          // row it last aimed at. A click sets a new column, and the click
+          // arrives in the preview hook, so the two hooks share one holder.
+          //
+          // The row matters because the cursor marker does not always draw
+          // on the row it belongs to: a point right after a line break in
+          // the source draws at the END of the previous rendered row, where
+          // the browser collapses the break. Reading the next row from the
+          // marker would then read the same row twice and the cursor would
+          // stop moving. So remember the row this move aimed at, in page
+          // coordinates, and step from there.
+          const visualGoal = { x: null, y: null };
+
+          // the row a preview move works from: the marker's own row, unless
+          // the row we aimed at last time says the marker drew somewhere else
+          function visualBaseRow(d, rect, line) {
+            const mid = rect.top + Math.max(1, Math.min(rect.height / 2, line / 2));
+            if (visualGoal.y == null) return mid;
+            const top = (d.scrollingElement || d.documentElement).scrollTop;
+            const remembered = visualGoal.y - top;
+            return Math.abs(remembered - mid) > line * 0.65 ? remembered : mid;
+          }
+
+          function rememberRow(d, y) {
+            visualGoal.y = y + (d.scrollingElement || d.documentElement).scrollTop;
+          }
+
+          // One rendered fragment names many source positions: the code span
+          // `-b` sits in the file ten times. So say which one this is —
+          // count the same text on the page before this occurrence — and
+          // let Scheme pick that occurrence in the source.
+          function previewSpot(d, node, off, dir) {
+            const t = node.textContent;
+            const before = t.slice(0, off);
+            const after = t.slice(off);
+            const wb = (before.match(/[\w-]*$/) || [""])[0];
+            const wa = (after.match(/^[\w-]*/) || [""])[0];
+            let page = "";
+            try {
+              const r = d.createRange();
+              r.setStart(d.body, 0);
+              r.setEnd(node, off);
+              page = r.toString();
+            } catch (_) { page = ""; }
+            // the occurrence starts one BEFORE-length back from the caret
+            const count = (needle, back) => {
+              if (!needle) return 0;
+              const upto = page.length - back;
+              let n = 0;
+              for (let i = page.indexOf(needle); i >= 0 && i < upto;
+                   i = page.indexOf(needle, i + 1)) n++;
+              return n;
+            };
+            return {
+              before: before, after: after, wb: wb, wa: wa,
+              nth: count(before + after, before.length),
+              wn: count(wb + wa, wb.length),
+              dir: dir
+            };
+          }
+
           const PAGE_BOOT = document.querySelector("meta[name='boot-id']").getAttribute("content");
           const Hooks = {
             // A preview draws inside an iframe, so the keyboard cannot
@@ -960,14 +1021,11 @@ defmodule Aimax.Ui.Layouts do
                     const node = c.startContainer || c.offsetNode;
                     if (!node || node.nodeType !== 3) return;
                     const off = c.startOffset !== undefined ? c.startOffset : c.offset;
-                    const t = node.textContent;
-                    this.pushEvent("preview_goto", {
-                      win: parseInt(this.el.dataset.win, 10),
-                      before: t.slice(0, off),
-                      after: t.slice(off),
-                      wb: (t.slice(0, off).match(/[\w-]*$/) || [""])[0],
-                      wa: (t.slice(off).match(/^[\w-]*/) || [""])[0]
-                    });
+                    visualGoal.x = null;
+                    visualGoal.y = null;
+                    this.pushEvent("preview_goto", Object.assign(
+                      { win: parseInt(this.el.dataset.win, 10) },
+                      previewSpot(d, node, off, 0)));
                   }, true);
                 }
                 d.addEventListener("scroll", () => {
@@ -1141,8 +1199,8 @@ defmodule Aimax.Ui.Layouts do
                     const css = getComputedStyle(content);
                     const line = parseFloat(css.lineHeight) ||
                       (parseFloat(css.fontSize) || 16) * 1.2;
-                    const x = this.visualLineGoalX == null ? r.left : this.visualLineGoalX;
-                    this.visualLineGoalX = x;
+                    const x = visualGoal.x == null ? r.left : visualGoal.x;
+                    visualGoal.x = x;
                     const y =
                       r.top + Math.max(1, Math.min(r.height / 2, line / 2)) + dir * line;
                     const box = raw.getBoundingClientRect();
@@ -1187,16 +1245,15 @@ defmodule Aimax.Ui.Layouts do
                   const css = d.defaultView.getComputedStyle(parent);
                   const line = parseFloat(css.lineHeight) ||
                     (parseFloat(css.fontSize) || 16) * 1.2;
-                  const x = this.visualLineGoalX == null ? r.left : this.visualLineGoalX;
-                  this.visualLineGoalX = x;
+                  const x = visualGoal.x == null ? r.left : visualGoal.x;
+                  visualGoal.x = x;
                   const caretAt = (y) => d.caretRangeFromPoint
                     ? d.caretRangeFromPoint(x, y)
                     : d.caretPositionFromPoint && d.caretPositionFromPoint(x, y);
                   // Margins between Markdown blocks are not caret positions.
                   // Walk a little farther in the requested direction until
                   // the browser gives us text on the neighboring screen line.
-                  const rowMid =
-                    r.top + Math.max(1, Math.min(r.height / 2, line / 2));
+                  const rowMid = visualBaseRow(d, r, line);
                   for (let step = line; step <= line * 3; step += Math.max(2, line / 4)) {
                     // Probe the middle of the target row. Its top edge can
                     // resolve to the previous row or to an element container.
@@ -1218,16 +1275,11 @@ defmodule Aimax.Ui.Layouts do
                       return true;
                     }
                     const off = c.startOffset !== undefined ? c.startOffset : c.offset;
-                    const t = node.textContent;
                     this.visualLinePending = true;
-                    this.pushEvent("preview_goto", {
-                      win: parseInt(frame.dataset.win, 10),
-                      before: t.slice(0, off),
-                      after: t.slice(off),
-                      wb: (t.slice(0, off).match(/[\w-]*$/) || [""])[0],
-                      wa: (t.slice(off).match(/^[\w-]*/) || [""])[0],
-                      extend: extend
-                    });
+                    rememberRow(d, rowMid + dir * step);
+                    this.pushEvent("preview_goto", Object.assign(
+                      { win: parseInt(frame.dataset.win, 10), extend: extend },
+                      previewSpot(d, node, off, dir)));
                     return true;
                   }
                   return false;
@@ -1251,7 +1303,7 @@ defmodule Aimax.Ui.Layouts do
                   const css = d.defaultView.getComputedStyle(parent);
                   const line = parseFloat(css.lineHeight) ||
                     (parseFloat(css.fontSize) || 16) * 1.2;
-                  const y = r.top + Math.max(1, Math.min(r.height / 2, line / 2));
+                  const y = visualBaseRow(d, r, line);
                   const width = d.documentElement.clientWidth;
                   const caretAt = (x) => d.caretRangeFromPoint
                     ? d.caretRangeFromPoint(x, y)
@@ -1269,16 +1321,12 @@ defmodule Aimax.Ui.Layouts do
                     probe.collapse(true);
                     const cr = probe.getBoundingClientRect();
                     if (Math.abs(cr.top - r.top) > line * 0.65) continue;
-                    const t = node.textContent;
                     this.visualLinePending = true;
-                    this.pushEvent("preview_goto", {
-                      win: parseInt(frame.dataset.win, 10),
-                      before: t.slice(0, off),
-                      after: t.slice(off),
-                      wb: (t.slice(0, off).match(/[\w-]*$/) || [""])[0],
-                      wa: (t.slice(off).match(/^[\w-]*/) || [""])[0],
-                      extend: extend
-                    });
+                    // the edge of the row this cursor already sits on, so
+                    // the move names no direction
+                    this.pushEvent("preview_goto", Object.assign(
+                      { win: parseInt(frame.dataset.win, 10), extend: extend },
+                      previewSpot(d, node, off, 0)));
                     return true;
                   }
                   return false;
@@ -1307,7 +1355,8 @@ defmodule Aimax.Ui.Layouts do
                     : spec === "S-<down>" ? 1 : spec === "S-<up>" ? -1 : 0;
                   const visualExtend = spec === "S-<down>" || spec === "S-<up>";
                   if (visualDir !== 0 && this.visualLineMove(visualDir, visualExtend)) return;
-                  this.visualLineGoalX = null;
+                  visualGoal.x = null;
+                  visualGoal.y = null;
                   this.pushEvent("key", { k: spec });
                 };
                 window.addEventListener("keydown", this.handler);

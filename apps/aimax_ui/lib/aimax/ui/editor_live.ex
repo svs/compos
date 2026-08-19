@@ -224,8 +224,10 @@ defmodule Aimax.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
-  # a click inside a markdown preview's iframe: the hook sends the clicked
-  # text node split at the caret, and Scheme finds the spot in the source
+  # a click or a visual-line key inside a markdown preview's iframe: the
+  # hook sends the text node split at the caret, how many times that text
+  # comes before it on the page, and which way the key moves. Scheme finds
+  # the spot in the source.
   def handle_event("preview_goto", %{"win" => win} = p, socket) do
     with id when is_integer(id) <- safe_int(win) do
       Input.run(socket.assigns.frame, fn ->
@@ -236,13 +238,22 @@ defmodule Aimax.Ui.EditorLive do
           p["before"] || "",
           p["after"] || "",
           p["wb"] || "",
-          p["wa"] || ""
+          p["wa"] || "",
+          count_arg(p["nth"]),
+          count_arg(p["wn"]),
+          dir_arg(p["dir"])
         ])
       end)
     end
 
     {:noreply, socket |> drain() |> refresh()}
   end
+
+  defp count_arg(n) when is_integer(n) and n >= 0, do: n
+  defp count_arg(_), do: 0
+
+  defp dir_arg(d) when d in [-1, 0, 1], do: d
+  defp dir_arg(_), do: 0
 
   def handle_event("preview_goto_pos", %{"win" => win, "pos" => pos} = p, socket)
       when is_integer(pos) do

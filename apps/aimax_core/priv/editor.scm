@@ -1278,36 +1278,87 @@
 (define-command "end-of-buffer" "Move point to the end of the buffer"
   (lambda () (or (preview-scroll! 1000000) (end-of-buffer!))))
 
-;; A click in a rendered markdown page. The client sends the clicked text
-;; node split at the caret, plus the word run around the caret. Rendered
-;; text and source differ (markup is stripped, punctuation is smartened),
-;; so try the exact node first and the plain word run second; the first
-;; hit in the source wins. string-index rejects an empty pattern, so
-;; empty needles answer #f.
-(define (preview--hit text before after)
+(define (preview--positions text needle)
+  (let loop ((from 0) (acc (list)))
+    (let ((i (string-index text needle from)))
+      (if i
+          (loop (+ i 1) (cons i acc))
+          (reverse acc)))))
+
+;; The nearest position strictly on DIR's side of FROM. DIR is 1 for a key
+;; that moves down, -1 for a key that moves up.
+(define (preview--toward positions from dir)
+  (let ((side (filter (lambda (p) (if (> dir 0) (> p from) (< p from)))
+                      positions)))
+    (cond ((null? side) #f)
+          ((> dir 0) (car side))
+          (else (car (reverse side))))))
+
+;; The position nearest FROM, on either side.
+(define (preview--nearest positions from)
+  (let loop ((ps positions) (best #f))
+    (cond ((null? ps) best)
+          ((or (not best) (< (abs (- (car ps) from)) (abs (- best from))))
+           (loop (cdr ps) (car ps)))
+          (else (loop (cdr ps) best)))))
+
+(define (preview--nth lst n)
+  (cond ((null? lst) #f)
+        ((<= n 0) (car lst))
+        (else (preview--nth (cdr lst) (- n 1)))))
+
+;; One rendered fragment names many source positions. A two-character code
+;; span such as `-b` sits in the file ten times, so the first hit is almost
+;; never the one the reader points at: the cursor jumps to the top of the
+;; file, and the next key matches the same first hit again. The cursor then
+;; stops moving.
+;;
+;; So the client also counts, on the page, how many times the fragment
+;; comes before the one it means (NTH), and names the direction the key
+;; moves (DIR: 1 down, -1 up, 0 for a click). Take the NTH source hit.
+;; Rendered text and source text differ, so that count can miss; when it
+;; misses, or when DIR says the cursor must move and the NTH hit does not
+;; move it, take the nearest hit on DIR's side. A down key then always
+;; moves down.
+;;
+;; string-index rejects an empty pattern, so an empty needle answers #f.
+(define (preview--hit text before after nth dir from)
   (let ((needle (string-append before after)))
     (if (equal? needle "")
         #f
-        (let ((i (string-index text needle)))
-          (if i (+ i (string-byte-length before)) #f)))))
+        (let* ((starts (preview--positions text needle))
+               (b (string-byte-length before))
+               (hits (map (lambda (i) (+ i b)) starts))
+               (want (preview--nth hits nth))
+               (ok (and want (or (= dir 0) (if (> dir 0) (> want from) (< want from))))))
+          (cond (ok want)
+                ((= dir 0) (preview--nearest hits from))
+                (else (or (preview--toward hits from dir)
+                          (preview--nearest hits from))))))))
 
-(define (preview-goto! win before after wb wa)
+;; A click or a visual-line key in a rendered markdown page. The client
+;; sends the text node split at the caret, plus the word run around the
+;; caret. Rendered text and source differ (markup is stripped, punctuation
+;; is smartened), so try the exact node first and the plain word run
+;; second; NTH counts the node, WN counts the word run.
+(define (preview-goto! win before after wb wa nth wn dir)
   (mouse-select-window! win)
   (set-mark! #f)
   (let* ((text (buffer-text (current-buffer)))
-         (hit (or (preview--hit text before after)
-                  (preview--hit text wb wa))))
+         (from (point))
+         (hit (or (preview--hit text before after nth dir from)
+                  (preview--hit text wb wa wn dir from))))
     (when hit (goto-char! hit))))
 (public! 'preview-goto!
-  "(preview-goto! WIN BEFORE AFTER WB WA) — put point where a preview click landed"
+  "(preview-goto! WIN BEFORE AFTER WB WA NTH WN DIR) — put point where a preview click or visual-line key landed"
   'interaction)
 
-(define (preview-select! win before after wb wa)
+(define (preview-select! win before after wb wa nth wn dir)
   (let ((anchor (or (mark) (point))))
-    (preview-goto! win before after wb wa)
+    (preview-goto! win before after wb wa nth wn dir)
     (set-mark! anchor)))
 (public! 'preview-select!
-  "(preview-select! WIN BEFORE AFTER WB WA) — extend the region to a rendered position"
+  "(preview-select! WIN BEFORE AFTER WB WA NTH WN DIR) — extend the region to a rendered position"
   'interaction)
 
 ;; Render-only widgets know their exact source ranges. Unlike preview-goto!,

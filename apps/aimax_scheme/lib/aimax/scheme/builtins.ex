@@ -98,11 +98,23 @@ defmodule Aimax.Scheme.Builtins do
             end)
         end
       end,
-      "string-index" => fn [s, sub] ->
-        case :binary.match(s, sub) do
-          :nomatch -> false
-          {pos, _len} -> pos
-        end
+      "string-index" => fn
+        [s, sub] ->
+          case :binary.match(s, sub) do
+            :nomatch -> false
+            {pos, _len} -> pos
+          end
+
+        # a caller that walks every occurrence needs to resume after the
+        # last one, so it says where to start
+        [s, sub, from] when from >= 0 and from <= byte_size(s) ->
+          case :binary.match(s, sub, scope: {from, byte_size(s) - from}) do
+            :nomatch -> false
+            {pos, _len} -> pos
+          end
+
+        [_s, _sub, _from] ->
+          false
       end,
       "string-upcase" => fn [s] -> String.upcase(s) end,
       "string-downcase" => fn [s] -> String.downcase(s) end,
@@ -254,7 +266,8 @@ defmodule Aimax.Scheme.Builtins do
       "string-suffix?" => "(string-suffix? SUF S) — return true if S ends with SUF.",
       "string-rindex" => "(string-rindex S SUB) — return the byte offset of the last SUB in S, or false.",
       "common-prefix" => "(common-prefix STRINGS) — return the longest common prefix of the list of strings.",
-      "string-index" => "(string-index S SUB) — return the byte offset of the first SUB in S, or false.",
+      "string-index" =>
+        "(string-index S SUB [START]) — return the byte offset of the first SUB in S at or after START, or false.",
       "string-upcase" => "(string-upcase S) — return S converted to upper case.",
       "string-downcase" => "(string-downcase S) — return S converted to lower case.",
       "string-trim" => "(string-trim S) — return S without leading and trailing whitespace.",

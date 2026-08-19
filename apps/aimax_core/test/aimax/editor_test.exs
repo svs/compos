@@ -755,7 +755,7 @@ defmodule Aimax.EditorTest do
       assert text =~ ~r/NAME .*SIZE +MODIFIED +PERMS +VC$/m
       # the icon leads the row: a file wears its mode's, a directory Dired's
       assert text =~ ~r/ +alpha\.txt .*\d+ +[A-Z][a-z]{2} +\d+ \d{2}:\d{2} +-rw/m
-      assert text =~ ~r/ +subdir\//m
+      assert text =~ ~r/ +subdir\/ .*drwx/m
       # the key bar says what the list does
       assert text =~ "RET visit"
     end
@@ -882,7 +882,8 @@ defmodule Aimax.EditorTest do
     assert Editor.current_buffer() == buf
     menu = Editor.render_state().transient
     assert menu.title == "Configure this buffer's language model"
-    assert Enum.map(hd(menu.groups).items, & &1.description) == ["Backend", "Model", "Effort"]
+    assert Enum.map(hd(menu.groups).items, & &1.description) ==
+             ["Backend", "Model", "Effort", "Presets", "Tools"]
 
     # The command modal uses its normal interaction: RET invokes the selected row.
     press(["RET"])
@@ -983,6 +984,14 @@ defmodule Aimax.EditorTest do
     # command ran: no error echo
     refute echo() =~ "undefined"
     assert Buffer.point(buf) == 0
+  end
+
+  test "M-x reports an invalid typed command without leaking an internal match error" do
+    press(["M-x"])
+    Editor.minibuffer_set_input("rest\\")
+    press(["RET"])
+
+    assert echo() == "minibuffer-confirm: undefined command: rest\\"
   end
 
   test "find-file TAB filename completion completes and descends directories" do
@@ -3318,7 +3327,10 @@ defmodule Aimax.MinibufferEditingTest do
         "The cursor sh",
         "ould be",
         "sh",
-        "ould"
+        "ould",
+        0,
+        0,
+        0
       ])
 
     assert Buffer.point(path) == 22
@@ -3327,9 +3339,55 @@ defmodule Aimax.MinibufferEditingTest do
     Buffer.goto(path, 0)
 
     {:ok, _} =
-      Aimax.Core.Session.call_named("preview-goto!", [win, "“cursor” sh", "ould", "sh", "ould"])
+      Aimax.Core.Session.call_named("preview-goto!", [
+        win,
+        "“cursor” sh",
+        "ould",
+        "sh",
+        "ould",
+        0,
+        0,
+        0
+      ])
 
     assert Buffer.point(path) == 22
+
+    press(["C-x", "1"])
+    File.rm!(path)
+  end
+
+  # `-b` sits in the file three times. The client says which one it points
+  # at, and a down key must never land above the cursor: the old code took
+  # the first hit every time, so the cursor stopped moving.
+  test "a repeated preview fragment lands on the occurrence the page points at" do
+    path =
+      Path.join(System.tmp_dir!(), "aimax-prevnth-#{System.unique_integer([:positive])}.md")
+
+    File.write!(path, "one `-b` here\n\ntwo `-b` here\n\nthree `-b` here\n")
+
+    press(["C-x", "C-f"])
+    type(path)
+    press(["RET"])
+    press(["C-c", "C-v"])
+
+    win = Editor.render_state() |> Map.get(:tree) |> Map.get(:id)
+    text = Buffer.text(path)
+    [first, second, third] = for {i, _} <- :binary.matches(text, "-b"), do: i + 1
+
+    goto = fn nth, dir ->
+      {:ok, _} = Aimax.Core.Session.call_named("preview-goto!", [win, "-", "b", "-", "b", nth, nth, dir])
+      Buffer.point(path)
+    end
+
+    Buffer.goto(path, 0)
+    assert goto.(1, 1) == second
+    assert goto.(2, 1) == third
+
+    # a count the page can not supply still moves the cursor the way the
+    # key says, instead of pinning it to the first hit
+    Buffer.goto(path, second)
+    assert goto.(0, 1) == third
+    assert goto.(0, -1) == first
 
     press(["C-x", "1"])
     File.rm!(path)

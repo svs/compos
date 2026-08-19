@@ -35,6 +35,7 @@ defmodule Aimax.Core.Agent.Backend do
   @callback set_model(handle :: term, model_id :: String.t()) :: :ok | {:error, term}
   @callback set_effort(handle :: term, effort :: String.t()) :: :ok | {:error, term}
   @callback respond_permission(handle :: term, id :: term, option :: String.t() | nil) :: :ok
+  @callback respond_question(handle :: term, id :: term, answer :: String.t() | nil) :: :ok
   @callback capabilities() :: [
               :models
               | :streaming
@@ -60,7 +61,7 @@ defmodule Aimax.Core.Agent.Backend do
   """
   @callback set_mode(handle :: term, mode_id :: String.t()) :: :ok | {:error, term}
 
-  @optional_callbacks set_mode: 2, set_effort: 2
+  @optional_callbacks set_mode: 2, set_effort: 2, respond_question: 3
 
   @escaped :aimax_escaped_closures
 

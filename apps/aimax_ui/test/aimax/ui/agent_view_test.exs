@@ -139,6 +139,31 @@ defmodule Aimax.Ui.AgentViewTest do
     assert render(view) =~ "no pending permission"
   end
 
+  test "question block renders every answer independently from permission", %{conn: conn} do
+    buf = "*agent: question-test*"
+    {:ok, _} = Aimax.Core.create_buffer(buf)
+    Buffer.append(buf, "\n── question: Open a workspace? ──\n>>> you: ", source: :editor)
+
+    Buffer.set_local(buf, "render-mode", "agent")
+    Buffer.set_local(buf, "agent-slug", "question-test")
+    Buffer.set_local(buf, "agent-saved-mark", 39)
+    Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
+
+    Buffer.set_local(buf, "agent-blocks", [
+      [0, 39, "question", 42, "question-test", "Open a workspace?", ["Yes", "No", "Diff first"]]
+    ])
+
+    Editor.set_window_buffer(buf)
+    {:ok, view, html} = live(conn, "/")
+
+    assert html =~ "Open a workspace?"
+    assert has_element?(view, ~s(button[phx-click="agent_answer"]), "Yes")
+    assert has_element?(view, ~s(button[phx-click="agent_answer"]), "No")
+    assert has_element?(view, ~s(button[phx-click="agent_answer"]), "Diff first")
+    assert html =~ "type another reply below"
+    refute html =~ "Always"
+  end
+
   # the other branch of the one ui_cmd gate: the modeline-info segment
   # sends its buffer, and ui-command! runs that buffer's own command local
   test "modeline-info click runs the buffer's modeline-info-command", %{conn: conn} do

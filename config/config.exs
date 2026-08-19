@@ -27,6 +27,7 @@ config :aimax_ui, app_port: 4005
 # Dormant buffers remain durable and in history; only their live processes
 # are released. Zero disables idle eviction.
 config :aimax_core, buffer_idle_timeout_ms: 24 * 60 * 60 * 1_000
+config :aimax_core, daemon_registry_path: Path.expand("~/.aimax/daemons.json")
 
 config :phoenix, :json_library, Jason
 
@@ -53,6 +54,7 @@ if config_env() == :test do
   config :aimax_core,
     home: "/tmp/aimax-test-home-#{suffix}",
     desktop_path: "/tmp/aimax-desktop-test-#{suffix}.etf",
+    daemon_registry_path: "/tmp/aimax-daemons-test-#{suffix}.json",
     desktop_autorestore: false,
     # no models.dev fetches from tests
     llmdb_auto: false

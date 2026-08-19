@@ -2789,6 +2789,9 @@
 ;; without the package every buffer is projectless.
 (define buffer-project-label (lambda (b) ""))
 
+;; Optional workspace packages add one concise identity column to C-x b.
+(define buffer-workspace-label (lambda (b) ""))
+
 ;; ...and as the ROOT, for context switching (a project is also a group)
 (define buffer-project-root (lambda (b) ""))
 
@@ -2802,6 +2805,7 @@
           (or (buffer-local b 'mode-name) "Fundamental")
           (group-label (buffer-group b))
           (buffer-project-label b)
+          (buffer-workspace-label b)
           ;; a chat has no file: its last column is the group's
           ;; metadata, so the group says what it is for
           (or (buffer-path b)
@@ -4299,6 +4303,8 @@
 (define *chat-restart-message*
   "Continue the work interrupted by the editor restart. Recheck the current workspace state before acting.")
 
+;; Code-mode can grant a chat permission to continue after a daemon restart.
+;; Other chats restore their transcript but do not start external work.
 (define (chat-recover-interrupted! buf)
   (when (and (buffer-exists? buf)
              (buffer-local buf 'chat-turn-active)
@@ -4552,7 +4558,7 @@
   (chat-surface-init! buf (string-append "chat · " label)
     (string-append
       "RET sends · C-g aborts · C-RET interrupts · TAB folds tool output · "
-      "C-c b backend · C-c m model\n")))
+      "C-c b LLM and tools · C-c m model\n")))
 
 ;; a chat saved as a file IS a revivable conversation: the transcript
 ;; format is ### You / ### Assistant (whole buffer = context) and .chat
@@ -4741,7 +4747,9 @@
 (define chat-identity-locals
   '(group group-meta group-layout group-noise agent-connector agent-model agent-effort
     chat-presets chat-permission-mode render-mode default-directory
-    agent-permission-profile))
+    agent-permission-profile window-class header-line
+    workspace-id workspace-name workspace-root workspace-project-root
+    workspace-backend workspace-daemon workspace-llm-defaults))
 
 ;; what was SAID — survives restart and save; reset clears it
 ;; ('chat-turns is the pre-record shape: chat-record-migrate! reads it once
@@ -4939,7 +4947,9 @@
         (message
           (string-append "LLM: " connector
             (if (equal? model "default") "" (string-append " · " model))
-            (if (equal? effort "default") "" (string-append " · " effort)))))))
+            (if (equal? effort "default") "" (string-append " · " effort))))))
+  (when (boundp (quote workspace-llm-defaults-note!))
+    (workspace-llm-defaults-note! buf)))
 
 ;; Transient uses these catalog helpers to show the live model choices.
 (define (chat-live-model-entry buf connector model)
@@ -6094,6 +6104,10 @@
             (buffer-create buf)
             (group-chat-init! buf g))
           (buffer-set-local! buf 'group g)
+          ;; Optional packages may attach durable group identity (for
+          ;; example, a worktree workspace) to the newly created chat.
+          (when (boundp (quote workspace-chat-inherit!))
+            (workspace-chat-inherit! buf g))
           buf))))
 
 ;; ensure the two-pane layout (work left, group chat right) and select the
@@ -6298,8 +6312,8 @@
 (global-set-key "C-c d" "group-describe")
 
 (global-set-key "C-x G" "groups")
-;; Cmd-k is the command palette, in the browser's own chord
-(global-set-key "s-k" "execute-extended-command")
+;; Cmd-k is intent search; M-x remains literal command-name completion.
+(global-set-key "s-k" "command-palette")
 ;; winner: any layout change is one keystroke from undone
 (global-set-key "C-c <left>" "winner-undo")
 (global-set-key "C-c <right>" "winner-redo")
@@ -6362,6 +6376,113 @@
       (lambda (cmd)
         (history-push! 'M-x cmd)
         (run-command cmd)))))
+
+;;; Cmd-k answers "how do I do this?" while M-x answers "what is the
+;;; command called?". Apropos supplies task-language matches from command
+;;; docs and recipes; the palette projects that broad catalog down to things
+;;; a reader can act on here.
+(define (command-palette--candidate hit)
+  (let ((kind (plist-get hit 'kind))
+        (name (or (plist-get hit 'name) (plist-get hit 'task))))
+    (cond
+      ((equal? kind "command")
+       (list name
+             (string-append "command  "
+                            (let ((key (plist-get hit 'key))) (if key key ""))
+                            "  " (or (plist-get hit 'doc) ""))))
+      ((equal? kind "recipe")
+       (let ((inputs (or (plist-get hit 'inputs) '())))
+         (list name
+               (if (null? inputs)
+                   "recipe  runs immediately"
+                   (string-append "recipe  asks for "
+                                  (number->string (length inputs))
+                                  (if (= (length inputs) 1) " input" " inputs"))))))
+      (else #f))))
+
+(define (command-palette-candidates query)
+  (if (equal? (string-trim query) "")
+      ;; The resting palette is familiar and cheap: the same MRU command
+      ;; table as M-x. Apropos takes over as soon as the user states intent.
+      (annotate 'command (history-order 'M-x (command-names)))
+      (filter (lambda (candidate) candidate)
+              (map command-palette--candidate (apropos query)))))
+
+(define *command-palette-debounce-ms* 80)
+
+(define (command-palette--refresh input)
+  ;; A timer can outlive the prompt that scheduled it. Never put Cmd-k's
+  ;; results into a later prompt, and never let an old query replace a newer
+  ;; one after the user has kept typing.
+  (let ((state (minibuffer-state)))
+    (when (and state
+               (equal? (plist-get state 'prompt) "Command: ")
+               (equal? (plist-get state 'input) input))
+      (minibuffer-set-candidates! (command-palette-candidates input)))))
+
+(define (command-palette--render-recipe expr bindings)
+  ;; Every input becomes a printed Scheme string, not source. Quotes,
+  ;; backslashes and newlines are escaped by value->string before the token is
+  ;; replaced, so a path or prompt value cannot turn into executable code.
+  (if (null? bindings)
+      expr
+      (let* ((binding (car bindings))
+             (token (string-append "{{" (symbol->string (car binding)) "}}"))
+             (rendered (string-join (string-split expr token)
+                                    (value->string (cadr binding)))))
+        (command-palette--render-recipe rendered (cdr bindings)))))
+
+(define (command-palette--eval-recipe recipe bindings)
+  (let ((result
+          (eval-string-safe
+            (command-palette--render-recipe (cadr recipe) bindings))))
+    (if (equal? (car result) 'ok)
+        (message (value->string (cadr result)))
+        (message (string-append "Recipe error: " (cadr result))))))
+
+(define (command-palette--collect-recipe recipe inputs bindings)
+  (if (null? inputs)
+      (command-palette--eval-recipe recipe bindings)
+      (let ((input (car inputs)))
+        (minibuffer-read (cadr input) '()
+          (lambda (value)
+            (command-palette--collect-recipe
+              recipe (cdr inputs) (append bindings (list (list (car input) value)))))))))
+
+(define (command-palette--run-recipe recipe)
+  (command-palette--collect-recipe recipe (caddr recipe) '()))
+
+(define (command-palette--run choice)
+  (cond
+    ((command-fn choice)
+     (history-push! 'M-x choice)
+     (run-command choice))
+    ((and (boundp (quote *recipes*)) (assoc choice *recipes*))
+     (command-palette--run-recipe (assoc choice *recipes*)))
+    (else (message (string-append "No command or recipe named " choice)))))
+
+(domain! 'interaction)
+(effects! '(write execute))
+
+(define-command "command-palette"
+  "Find an action by intent across command docs and recipes"
+  (lambda ()
+    (minibuffer-read* "Command: " (command-palette-candidates "")
+      (list (list 'confirm command-palette--run)
+            (list 'change
+              (lambda (input)
+                (debounce!
+                  (string-append "command-palette:" (selected-frame))
+                  *command-palette-debounce-ms*
+                  command-palette--refresh
+                  input)))
+            ;; Apropos already matched and ranked these results. In
+            ;; particular, a doc match need not contain INPUT in its label.
+            (list 'filter #f)
+            (list 'style "palette")))))
+
+(domain! 'unknown)
+(effects! '(unknown))
 
 (define-command "eval-expression" "Evaluate a Scheme expression from the minibuffer"
   (lambda ()
@@ -6669,6 +6790,9 @@
 (domain! 'system)
 (effects! '(destroy execute))
 
+;; A restart saves the desktop first, so every buffer and window comes back.
+;; Interactive use asks once. An agent tool uses the shared permission policy:
+;; modes can grant this command with allow-command-when!.
 (define (restart-daemon-now!)
   (if (daemon-restart!)
       (message "Restarting…")
@@ -6676,13 +6800,15 @@
 
 (define-command "restart-daemon" "Save the desktop and restart the daemon"
   (lambda ()
-    (let ((tool-buf (and (boundp (quote *llm-tool-buffer*))
-                         *llm-tool-buffer*)))
+    (let ((tool-buf (and (boundp (quote *llm-tool-buffer*)) *llm-tool-buffer*)))
       (if tool-buf
-          (if (member (*permission-policy* tool-buf "restart-daemon" "command" "")
-                      '(allow allow-always))
-              (restart-daemon-now!)
-              (error "restart-daemon requires user permission"))
+          (let ((verdict
+                  (if (boundp (quote *permission-policy*))
+                      (*permission-policy* tool-buf "restart-daemon" "command" "")
+                      'ask)))
+            (if (member verdict '(allow allow-always))
+                (restart-daemon-now!)
+                (error "restart-daemon requires user permission")))
           (y-or-n "Restart the daemon?" restart-daemon-now!)))))
 
 (domain! 'unknown)
@@ -6864,12 +6990,21 @@
 (public! 'display-buffer-other-window! "(display-buffer-other-window! NAME) — show NAME without leaving this window; picks the window at display time (reuse → other → split)")
 (public! 'add-display-rule!
   "(add-display-rule! SUBSTRING 'popup|'same) — popup floats over the right of the frame; one per frame, reused")
+(public! 'define-mode-layout!
+  "(define-mode-layout! MODE '(h|v RATIO PANE ...)) — the frame arrangement that mode asks for; a PANE is 'self, a buffer-local name, or a buffer name")
+(public! 'apply-layout! "(apply-layout! ANCHOR SPEC) — arrange the frame by SPEC, ANCHOR keeping focus")
+(public! 'buffer-layout "(buffer-layout NAME) — the layout NAME's modes declare, or #f")
+(public! 'with-layout-suppressed "(with-layout-suppressed THUNK) — run THUNK without the layout engine arranging the frame")
 
 (category! 'interaction)
 (public! 'message "(message TEXT) — echo area")
 (public! 'minibuffer-read "(minibuffer-read PROMPT CANDIDATES HANDLER) — async; HANDLER gets the choice")
+(public! 'debounce! "(debounce! KEY MS CALLBACK ARG) — after MS idle, call CALLBACK with ARG; rescheduling KEY cancels the older callback")
+(catalog-meta! 'function "debounce!" 'domain 'interaction 'effects '(write execute))
 (public! 'y-or-n "(y-or-n PROMPT YES &optional NO) — a one-key question; y runs YES, n and C-g run NO")
 (catalog-meta! 'function "y-or-n" 'domain 'interaction 'effects '(read))
+(catalog-meta! 'command "reset-layout" 'domain 'windows 'effects '(write))
+(catalog-meta! 'function "define-mode-layout!" 'domain 'windows 'effects '(write))
 (public! 'read-file-name "(read-file-name PROMPT K) — prompt with filename completion from default-directory; K gets the typed path")
 (public! 'minibuffer-read-preview "(minibuffer-read-preview PROMPT CANDIDATES ON-SELECT ON-CONFIRM ON-CANCEL &optional MATCH-HINT) — consult-style: ON-SELECT fires with the highlighted candidate as selection moves; MATCH-HINT also matches the input against the marginalia")
 (public! 'window-preview-buffer! "(window-preview-buffer! NAME) — show NAME in the active window without touching the MRU ring")
@@ -6943,10 +7078,3 @@
 (public! 'fold-toggle! "(fold-toggle! BUF TAG RANGE) — add or remove one (START END) in TAG; for owners whose state is the range list itself")
 
 (message "editor.scm loaded")
-(public! 'define-mode-layout!
-  "(define-mode-layout! MODE '(h|v RATIO PANE ...)) — the frame arrangement that mode asks for; a PANE is 'self, a buffer-local name, or a buffer name")
-(public! 'apply-layout! "(apply-layout! ANCHOR SPEC) — arrange the frame by SPEC, ANCHOR keeping focus")
-(public! 'buffer-layout "(buffer-layout NAME) — the layout NAME's modes declare, or #f")
-(public! 'with-layout-suppressed "(with-layout-suppressed THUNK) — run THUNK without the layout engine arranging the frame")
-(catalog-meta! 'command "reset-layout" 'domain 'windows 'effects '(write))
-(catalog-meta! 'function "define-mode-layout!" 'domain 'windows 'effects '(write))

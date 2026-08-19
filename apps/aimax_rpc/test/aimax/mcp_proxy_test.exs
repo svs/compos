@@ -10,6 +10,19 @@ defmodule Aimax.McpProxyTest do
   @script Path.join(Application.app_dir(:aimax_core, "priv"), "aimax-mcp-proxy.exs")
 
   test "initialize, tools/list, and a live tools/call against the registry" do
+    slug = "proxy-ask-#{System.unique_integer([:positive])}"
+
+    {:ok, _} =
+      Aimax.Core.Agent.start(slug, %{
+        "backend" => "stub",
+        "buffer" => "*agent: #{slug}*"
+      })
+
+    on_exit(fn ->
+      Aimax.Core.Agent.kill(slug)
+      Aimax.Core.kill_buffer("*agent: #{slug}*")
+    end)
+
     Aimax.Core.create_buffer("*proxy-doc*")
     on_exit(fn -> Aimax.Core.kill_buffer("*proxy-doc*") end)
     {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-append! "*proxy-doc*" "hello from aimax")})
@@ -19,15 +32,25 @@ defmodule Aimax.McpProxyTest do
         :binary,
         :exit_status,
         args: [@script],
-        env: [{~c"AIMAX_SOCK", String.to_charlist(Aimax.Rpc.Server.default_socket_path())}]
+        env: [
+          {~c"AIMAX_SOCK", String.to_charlist(Aimax.Rpc.Server.default_socket_path())},
+          {~c"AIMAX_AGENT", String.to_charlist(slug)}
+        ]
       ])
 
-    send_msg(port, %{jsonrpc: "2.0", id: 1, method: "initialize", params: %{protocolVersion: "2025-06-18"}})
+    send_msg(port, %{
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: %{protocolVersion: "2025-06-18"}
+    })
+
     assert %{"id" => 1, "result" => %{"serverInfo" => %{"name" => "aimax"}}} = recv(port)
 
     send_msg(port, %{jsonrpc: "2.0", id: 2, method: "tools/list", params: %{}})
     assert %{"id" => 2, "result" => %{"tools" => tools}} = recv(port)
     assert "eval-scheme" in Enum.map(tools, & &1["name"])
+    assert "ask" in Enum.map(tools, & &1["name"])
 
     send_msg(port, %{
       jsonrpc: "2.0",
@@ -40,7 +63,56 @@ defmodule Aimax.McpProxyTest do
     assert %{"id" => 3, "result" => %{"content" => [%{"text" => ~s{"hello from aimax"}}]}} =
              recv(port)
 
+    # A response can exceed one socket read. The proxy must assemble the
+    # newline-delimited frame instead of decoding the first received chunk.
+    large = String.duplicate("large response line\n", 2_000)
+    Aimax.Core.create_buffer("*proxy-large*", text: large)
+    on_exit(fn -> Aimax.Core.kill_buffer("*proxy-large*") end)
+
+    send_msg(port, %{
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: %{name: "eval-scheme", arguments: %{code: ~s{(buffer-text "*proxy-large*")}}}
+    })
+
+    assert %{"id" => 4, "result" => %{"content" => [%{"text" => returned}]}} = recv(port)
+    assert returned == Jason.encode!(large)
+
+    send_msg(port, %{
+      jsonrpc: "2.0",
+      id: 5,
+      method: "tools/call",
+      params: %{
+        name: "ask",
+        arguments: %{
+          question: "Create a workspace?",
+          answers: ["Yes", "No", "Show diff", "Explain"]
+        }
+      }
+    })
+
+    assert eventually(fn ->
+             match?(
+               %{question: %{question: "Create a workspace?", answers: [_, _, _, _]}},
+               Aimax.Core.Agent.info(slug)
+             )
+           end)
+
+    %{question: %{id: question_id}} = Aimax.Core.Agent.info(slug)
+    assert :ok = Aimax.Core.Agent.respond_question(slug, question_id, "Show diff")
+
+    assert %{"id" => 5, "result" => %{"content" => [%{"text" => "Show diff"}]}} = recv(port)
+
     Port.close(port)
+  end
+
+  defp eventually(fun, tries \\ 40) do
+    cond do
+      fun.() -> true
+      tries == 0 -> false
+      true -> Process.sleep(25) && eventually(fun, tries - 1)
+    end
   end
 
   defp send_msg(port, msg), do: Port.command(port, Jason.encode!(msg) <> "\n")

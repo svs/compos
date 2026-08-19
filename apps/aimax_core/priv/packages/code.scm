@@ -715,7 +715,15 @@
     "(buffer-delete-text! \"BUF\" TEXT). Each of these takes text you have "
     "read, never a byte offset, and each one reports what it did. Every "
     "edit lands in the live buffer, never in the file — the user saves. "
-    "Make the smallest edit that does the job, and keep the file's style.")
+    "Make the smallest edit that does the job, and keep the file's style. "
+    "Keep file and shell changes under (default-directory). A workspace-id "
+    "means worktree-init isolated this task from the primary checkout. "
+    "Code-mode creates the task worktree before the agent starts. "
+    "The browser category is denied in code-mode by default. Verify editor "
+    "UI through ai-max buffers, overlays, render state, components, and the "
+    "real key dispatcher. Do not use Chrome or tab-* calls. If every "
+    "editor-native approach fails and browser access is essential, explain "
+    "why and ask the user to enable M-x browser-mode. Do not ask before then.")
   "Standing instructions for a chat that works on a code-mode buffer. Empty means no code instructions."
   'group 'code 'type 'string 'set code-mode--refresh!)
 
@@ -742,6 +750,9 @@
     (append code-presets
             (filter (lambda (preset) (not (member preset code-presets))) base))))
 
+;; Browser access is an explicit user escalation for a coding workspace. The
+;; agent can ask for it after editor-native checks fail, but cannot use it first.
+;; This is a convenience guardrail, and the user can override the Scheme hook.
 (define (code-mode--workspace-buffers buf)
   (let ((g (buffer-group buf)))
     (if g (group-buffers g) (list buf))))
@@ -752,8 +763,32 @@
        (pair? (filter (lambda (b) (minor-mode-on? b "code-mode"))
                       (code-mode--workspace-buffers buf)))))
 
-;; A code workspace can reload Scheme and continue its interrupted turn.
+;; A code workspace can reload Scheme and then continue its interrupted turn.
 (allow-command-when! "restart-daemon" code-mode--workspace?)
+
+(define (code-mode--browser-enabled? buf)
+  (pair? (filter (lambda (b) (minor-mode-on? b "browser-mode"))
+                 (code-mode--workspace-buffers buf))))
+
+(set! *browser-tool-policy*
+  (lambda (buf)
+    (if (and (code-mode--workspace? buf)
+             (not (code-mode--browser-enabled? buf)))
+        'deny
+        'allow)))
+
+(define (browser-mode--apply! buf) #t)
+(define (browser-mode--teardown! buf) #t)
+(register-minor-mode! "browser-mode" browser-mode--apply! browser-mode--teardown!)
+
+(define-command "browser-mode" "Toggle agent browser access for this workspace"
+  (lambda ()
+    (if (toggle-minor-mode! "browser-mode")
+        (message "Browser mode enabled for this workspace")
+        (message "Browser mode disabled for this workspace"))))
+
+(mode-doc! "browser-mode"
+  "An explicit last-resort browser grant for a code-mode workspace. Code agents must exhaust ai-max-native verification before asking for it.")
 
 ;; A code change touches more than one file, so the group is the PROJECT
 ;; when the buffer has one: the chat then names every project buffer, and
@@ -768,11 +803,16 @@
             (begin (buffer-set-local! buf 'group root) root)))))
 
 (define (code-mode--label buf)
-  (let ((presets (or (buffer-local buf 'chat-presets) '())))
-    (if (null? presets)
-        "code"
-        (string-append "code · "
-                       (string-join (map symbol->string presets) " ")))))
+  (let ((presets (or (buffer-local buf 'chat-presets) '()))
+        (workspace (or (buffer-local buf 'workspace-name)
+                       (buffer-local buf 'workspace-id))))
+    (string-append
+      "code"
+      (if workspace (string-append " · " workspace) "")
+      (if (null? presets)
+          ""
+          (string-append " · "
+                         (string-join (map symbol->string presets) " "))))))
 
 (define (code-mode--apply! buf)
   ;; remember what we clobber, once — the saved alist persists, and the
@@ -807,7 +847,9 @@
   ;; BEFORE the mode, so push the new ones to it.
   (when (boundp (quote scratch-refresh-llm!))
     (scratch-refresh-llm! buf))
-  (buffer-set-local! buf 'modeline-info (code-mode--label buf)))
+  (buffer-set-local! buf 'modeline-info (code-mode--label buf))
+  (when (boundp (quote workspace-llm-defaults-note!))
+    (workspace-llm-defaults-note! buf)))
 
 (define (code-mode--teardown! buf)
   (buffer-set-local! buf 'group (code-mode--saved buf 'group))
@@ -824,13 +866,20 @@
 
 (define-command "code-mode" "Toggle the agent coding workspace in this buffer"
   (lambda ()
-    (if (toggle-minor-mode! "code-mode")
-        (message (string-append (code-mode--label (current-buffer))
-                                " · C-c s scratch · M-o sends it"))
-        (message "Code mode disabled"))))
+    (let ((buf (current-buffer)))
+      (if (minor-mode-on? buf "code-mode")
+          (begin
+            (disable-minor-mode! buf "code-mode")
+            (message "Code mode disabled"))
+          (let ((target (if (boundp (quote worktree-init-buffer!))
+                            (worktree-init-buffer! buf)
+                            buf)))
+            (enable-minor-mode! target "code-mode")
+            (message (string-append (code-mode--label target)
+                                    " · C-c s scratch · M-o sends it")))))))
 
 (mode-doc! "code-mode"
-  "An agent coding workspace. The buffer joins a group and loads the coding presets. `C-c s` opens its scratch chat, `M-o` sends that chat, and the agent edits the buffer with the editor's own tools. `C-c c` opens the group chat instead.")
+  "The agent coding surface. Enabling it creates or enters an isolated task worktree before the agent starts.")
 
 (public! 'code-mode "Toggle the agent coding workspace in the current buffer")
 (effects! '(pure))

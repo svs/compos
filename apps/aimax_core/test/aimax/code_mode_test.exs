@@ -33,7 +33,9 @@ defmodule Aimax.CodeModeTest do
         (for-each
           (lambda (b)
             (when (minor-mode-on? b "code-mode")
-              (disable-minor-mode! b "code-mode")))
+              (disable-minor-mode! b "code-mode"))
+            (when (minor-mode-on? b "browser-mode")
+              (disable-minor-mode! b "browser-mode")))
           (buffer-list))
         """)
 
@@ -137,6 +139,8 @@ defmodule Aimax.CodeModeTest do
     assert preamble =~ "(code-outline \\\"BUF\\\")"
     assert preamble =~ "(code-replace! \\\"BUF\\\" LINE NEW)"
     assert preamble =~ "(buffer-insert-after! \\\"BUF\\\" ANCHOR TEXT)"
+    assert preamble =~ "browser category is denied in code-mode by default"
+    assert preamble =~ "ask the user to enable M-x browser-mode"
     refute preamble =~ "Match the document's voice"
 
     # and M-o, on the same words
@@ -149,25 +153,121 @@ defmodule Aimax.CodeModeTest do
     refute eval!(~s{(llm-mode--group-note "#{buf}")}) =~ "code-outline"
   end
 
-  test "a code-mode file in a project joins the project's group" do
-    root = Path.join(System.tmp_dir!(), "cm-proj-#{System.unique_integer([:positive])}")
-    File.mkdir_p!(Path.join(root, ".git"))
+  test "code-mode denies browser tools until the user enables browser-mode" do
+    buf = fresh_buffer("cm-browser-#{System.unique_integer([:positive])}.ex", "code\n")
+
+    eval!(~s{(run-command "code-mode")})
+
+    denied =
+      eval!(~s"""
+      (with-current-buffer "#{buf}"
+        (lambda ()
+          (llm-tool-call "eval-scheme"
+            (list 'code "(tab-list (lambda (tabs) tabs))"))))
+      """)
+
+    assert denied =~ "browser category denied in code-mode"
+
+    eval!(~s{(run-command "browser-mode")})
+    assert eval!(~s{(code-mode--browser-enabled? "#{buf}")}) == "#t"
+  end
+
+  test "code-mode transparently assigns this frame one worktree, group, and chat" do
+    root = Path.join(System.tmp_dir!(), "cm-proj-#{System.os_time(:nanosecond)}")
+    File.rm_rf!(root)
+    File.rm_rf!("#{root}-worktrees")
+    File.mkdir_p!(root)
+
+    {root, 0} = System.cmd("pwd", ["-P"], cd: root)
+    root = String.trim(root)
+
+    {_, 0} = System.cmd("git", ["init", "-q", "-b", "main", "."], cd: root)
     path = Path.join(root, "one.ex")
     File.write!(path, "defmodule One do\nend\n")
+    {_, 0} = System.cmd("git", ["add", "."], cd: root)
+
+    {_, 0} =
+      System.cmd(
+        "git",
+        ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "one"],
+        cd: root
+      )
 
     on_exit(fn ->
-      if Buffer.exists?(path), do: Aimax.Core.kill_buffer(path)
+      Aimax.Core.list_buffers()
+      |> Enum.filter(
+        &(String.starts_with?(&1, root) or String.contains?(&1, "#{root}-worktrees"))
+      )
+      |> Enum.each(&Aimax.Core.kill_buffer/1)
+
+      Aimax.Core.list_buffers()
+      |> Enum.filter(&String.starts_with?(&1, "*chat:#{root}"))
+      |> Enum.each(&Aimax.Core.kill_buffer/1)
+
       File.rm_rf!(root)
+      File.rm_rf!("#{root}-worktrees")
     end)
 
     eval!(~s{(find-file "#{path}")})
     eval!(~s{(switch-to-buffer! "#{path}")})
-    buf = Editor.current_buffer()
-    eval!(~s{(run-command "code-mode")})
 
-    # a change touches more than one file, so the group is the checkout
-    assert Buffer.get_local(buf, "group") == eval!(~s{(buffer-project-root "#{buf}")})
-                                             |> String.trim(~s{"})
+    # One command enters the coding surface. Worktree setup stays transparent.
+    press(["M-x"])
+    type("code-mode")
+    press(["RET"])
+
+    task_file = Editor.current_buffer()
+    workspace = Buffer.get_local(task_file, "workspace-root")
+    daemon_url = eval!("(editor-url)") |> String.trim("\"")
+
+    assert workspace == "#{root}-worktrees/a1"
+    assert task_file == "#{workspace}/one.ex"
+    assert Buffer.get_local(task_file, "workspace-project-root") == root
+    assert Buffer.get_local(task_file, "workspace-id") == "a1"
+    assert Buffer.get_local(task_file, "workspace-daemon") == daemon_url
+    assert Buffer.get_local(task_file, "group") == workspace
+    assert Buffer.get_local(task_file, "modeline-info") == "code · a1 · aimax"
+
+    # The ordinary editor tool changes the task buffer. Saving cannot touch
+    # the primary checkout because the displayed buffer is the worktree copy.
+    eval!(~s{(buffer-replace! "#{task_file}" "One" "TaskOne")})
+    press(["C-x", "C-s"])
+    assert File.read!(path) == "defmodule One do\nend\n"
+    assert File.read!(task_file) == "defmodule TaskOne do\nend\n"
+    assert Buffer.get_local(path, "group") == nil
+
+    press(["C-c", "c"])
+    chat = Editor.current_buffer()
+
+    assert chat == "*chat:#{workspace}*"
+    assert Buffer.get_local(chat, "group") == workspace
+    assert Buffer.get_local(chat, "workspace-root") == workspace
+    assert Buffer.get_local(chat, "workspace-project-root") == root
+    assert Buffer.get_local(chat, "workspace-id") == "a1"
+    assert Buffer.get_local(chat, "workspace-daemon") == daemon_url
+
+    cwd = eval!(~s{(plist-get (agent-worktree-opts "#{chat}" "a1" '()) 'cwd)})
+    assert cwd == ~s{"#{workspace}"}
+    assert eval!(~s{(group-chat "#{workspace}")}) == ~s{"#{chat}"}
+
+    # The project is the parent, not the group. A second coding task gets a
+    # sibling workspace with its own group and chat.
+    eval!(~s{(switch-to-buffer! "#{path}")})
+    press(["M-x"])
+    type("workspace-init")
+    press(["RET"])
+
+    second_file = Editor.current_buffer()
+    second_workspace = Buffer.get_local(second_file, "workspace-root")
+    assert second_workspace == "#{root}-worktrees/a2"
+    assert Buffer.get_local(second_file, "group") == second_workspace
+
+    press(["C-c", "c"])
+    second_chat = Editor.current_buffer()
+    assert second_chat == "*chat:#{second_workspace}*"
+    assert second_chat != chat
+    assert Buffer.exists?(chat)
+    assert eval!(~s{(length (worktree-list "#{root}"))}) == "3"
   end
 
   test "a scratch that is already open picks up the presets when code-mode turns on" do

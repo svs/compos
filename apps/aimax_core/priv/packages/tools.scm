@@ -137,6 +137,28 @@
 ;;; guesses `buffer-insert` gets back the nearest real names with their
 ;;; signatures instead of six blind retries.
 
+(domain! 'chat)
+(effects! '(read))
+
+;; Agent backends intercept this tool before Scheme dispatch. The fallback
+;; explains a bad call path instead of pretending that a question was shown.
+(define-tool! 'ask
+  (string-append
+    "Ask the user one branching question and wait for the answer. Use this "
+    "when their choice changes what you will do. answers can contain any "
+    "number of concise labels. The user can also type a different answer.")
+  (json-encode
+    (list 'type "object"
+          'properties
+          (list 'question (list 'type "string"
+                                'description "The question shown in the chat")
+                'answers (list 'type "array"
+                               'description "Any number of answer labels"
+                               'items (list 'type "string")))
+          'required (list "question" "answers")))
+  (lambda (args)
+    "error: ask must run through an agent thread"))
+
 (define (tool--edit-distance a b)
   (let ((la (string-length a)) (lb (string-length b)))
     (let loop ((i 0) (row (iota (+ lb 1))))

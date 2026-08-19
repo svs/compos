@@ -4,7 +4,8 @@ import Config
 # personal, a scratch instance — each with its own port, home, socket, and
 # desktop file. The Chrome extension finds them all (see extension/sw.js).
 #
-#   AIMAX_HOME=~/.aimax-work AIMAX_PORT=4005 AIMAX_NAME=work mix run --no-halt
+#   AIMAX_HOME=~/.aimax-work AIMAX_PORT=4014 AIMAX_APP_PORT=4015 \
+#     AIMAX_NAME=work mix run --no-halt
 #
 # Setting AIMAX_HOME alone is enough: the socket and desktop file follow it,
 # so two daemons can't fight over ~/.aimax/sock.
@@ -16,6 +17,7 @@ import Config
 #   port = 4004
 #   app_port = 4005
 #   name = work
+#   registry = ~/.aimax/daemons.json
 #   secret_key_base = ...
 #   buffer_idle_hours = 24
 #
@@ -61,6 +63,14 @@ if config_env() != :test do
 
   # an environment variable wins over the conf file
   get = fn env_key, conf_key -> System.get_env(env_key) || conf[conf_key] end
+
+  if registry = get.("AIMAX_DAEMON_REGISTRY", "registry") do
+    config :aimax_core, daemon_registry_path: Path.expand(registry)
+  end
+
+  if workspace = get.("AIMAX_WORKSPACE_ROOT", "workspace") do
+    config :aimax_core, workspace_root: Path.expand(workspace)
+  end
 
   if port = get.("AIMAX_PORT", "port") do
     config :aimax_ui, Aimax.Ui.Endpoint, http: [ip: {127, 0, 0, 1}, port: String.to_integer(port)]

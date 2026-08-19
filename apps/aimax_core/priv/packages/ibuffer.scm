@@ -12,20 +12,32 @@
 (define *ibuffer-buffer* "*ibuffer*")
 (add-display-rule! *ibuffer-buffer* 'popup)
 
+(define (ibuffer-workspace-buffer? b)
+  (let* ((root (and (boundp (quote daemon-workspace-root))
+                    (daemon-workspace-root)))
+         (path (or (buffer-path b)
+                   (and (string-prefix? "/" b) b))))
+    (or (not (string? root))
+        (not path)
+        (equal? path root)
+        (string-prefix? (string-append root "/") path))))
+
 ;; the rows: every buffer that is not this list, not an internal, and not
 ;; filtered out
 (define (ibuffer-visible)
   (list-keep *ibuffer-buffer*
     (filter (lambda (b)
               (and (not (equal? b *ibuffer-buffer*))
-                   (not (string-prefix? " " b))))
+                   (not (string-prefix? " " b))
+                   (ibuffer-workspace-buffer? b)))
             (buffer-list-mru))))
 
 ;; every buffer, before the filters — the header counts what a narrowing hid
 (define (ibuffer-total)
   (length (filter (lambda (b)
                     (and (not (equal? b *ibuffer-buffer*))
-                         (not (string-prefix? " " b))))
+                         (not (string-prefix? " " b))
+                         (ibuffer-workspace-buffer? b)))
                   (buffer-list-mru))))
 
 (define (ibuffer-human n)

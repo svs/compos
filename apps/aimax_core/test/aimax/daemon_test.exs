@@ -13,17 +13,21 @@ defmodule Aimax.DaemonTest do
   test "the respawn script relaunches mix run from the root into the home log" do
     script = Daemon.respawn_script("/src/ai-max.el", "/home/user/.aimax", "12345")
 
-    assert script =~ "setsid sh -c"
+    assert script =~ "nohup /bin/sh -c"
+    refute script =~ "setsid"
     assert script =~ "kill -0 12345"
-    assert script =~ "cd '/src/ai-max.el'"
+    assert script =~ "/src/ai-max.el"
+    assert script =~ "AIMAX_HOME="
+    assert script =~ "/home/user/.aimax"
     assert script =~ "mix run --no-halt"
-    assert script =~ ">> '/home/user/.aimax/daemon.log' 2>&1"
+    assert script =~ "/home/user/.aimax/daemon.log"
+    assert script =~ "2>&1"
   end
 
-  test "the respawn script quotes a root path with spaces" do
-    script = Daemon.respawn_script("/src/my repo", "/tmp/home", "7")
+  test "the respawn script is valid shell with quoted paths" do
+    script = Daemon.respawn_script("/src/my repo", "/tmp/user's home", "7")
 
-    assert script =~ "cd '/src/my repo'"
+    assert {"", 0} = System.cmd("/bin/sh", ["-n", "-c", script], stderr_to_stdout: true)
   end
 
   test "restart-daemon is a registered command with a doc" do
@@ -34,5 +38,20 @@ defmodule Aimax.DaemonTest do
   test "the daemon-restart! primitive carries a doc" do
     assert {:ok, doc} = Session.eval(~s{(primitive-doc "daemon-restart!")})
     assert doc =~ "restart the daemon"
+  end
+
+  test "the workspace primitive returns the daemon built from that checkout" do
+    Application.put_env(:aimax_core, :workspace_daemon_provisioner, fn workspace, name ->
+      assert workspace == "/tmp/feature"
+      assert name == "a1"
+      {:ok, %{url: "http://localhost:4204", home: "/tmp/a1-home", port: 4204}}
+    end)
+
+    on_exit(fn -> Application.delete_env(:aimax_core, :workspace_daemon_provisioner) end)
+
+    assert {:ok, result} =
+             Session.eval(~s{(daemon-provision-workspace! "/tmp/feature" "a1")})
+
+    assert result == ~s{("http://localhost:4204" "/tmp/a1-home" 4204)}
   end
 end

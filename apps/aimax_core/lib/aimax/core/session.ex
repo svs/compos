@@ -65,8 +65,8 @@ defmodule Aimax.Core.Session do
   source text — the safe call for Elixir callers holding strings (paths,
   buffer names) that must not be interpolated into Scheme.
   """
-  def call_named(fun, args, fid \\ nil) when is_binary(fun),
-    do: GenServer.call(__MODULE__, {:call_named, fun, args, fid(fid)}, 30_000)
+  def call_named(fun, args, fid \\ nil, timeout \\ 30_000) when is_binary(fun),
+    do: GenServer.call(__MODULE__, {:call_named, fun, args, fid(fid)}, timeout)
 
   defp fid(nil), do: Frame.current()
   defp fid(fid), do: fid
@@ -197,23 +197,27 @@ defmodule Aimax.Core.Session do
       [{^name, closure, _doc}] ->
         case safe(fn ->
                with_fid(fid, fn ->
-                 {:ok, val, interp} = Scheme.call(state.interp, closure, [])
+                 case Scheme.call(state.interp, closure, []) do
+                   {:ok, val, interp} ->
+                     # the post-command hook: policy reacts to what the command
+                     # changed — the expanded modeline re-reads its buffer. A
+                     # hook error must never fail the command that ran.
+                     try do
+                       case Scheme.eval_string(
+                              interp,
+                              "(when (boundp 'post-command!) (post-command!))"
+                            ) do
+                         {:ok, _hv, interp2} -> {:ok, val, interp2}
+                         _ -> {:ok, val, interp}
+                       end
+                     rescue
+                       _ -> {:ok, val, interp}
+                     catch
+                       _, _ -> {:ok, val, interp}
+                     end
 
-                 # the post-command hook: policy reacts to what the command
-                 # changed — the expanded modeline re-reads its buffer. A
-                 # hook error must never fail the command that ran.
-                 try do
-                   case Scheme.eval_string(
-                          interp,
-                          "(when (boundp 'post-command!) (post-command!))"
-                        ) do
-                     {:ok, _hv, interp2} -> {:ok, val, interp2}
-                     _ -> {:ok, val, interp}
-                   end
-                 rescue
-                   _ -> {:ok, val, interp}
-                 catch
-                   _, _ -> {:ok, val, interp}
+                   {:error, msg} ->
+                     {:error, msg}
                  end
                end)
              end) do
@@ -251,6 +255,26 @@ defmodule Aimax.Core.Session do
          end) do
       {:ok, val, interp} -> {:reply, {:ok, val}, put_interp(state, interp, val)}
       {:error, msg} -> {:reply, {:error, msg}, state}
+    end
+  end
+
+  @impl true
+  def handle_info({:scheme_debounce, key, generation}, state) do
+    case :ets.lookup(@escaped, key) do
+      [{^key, {^generation, _timer, callback, arg, fid}}] ->
+        :ets.delete(@escaped, key)
+
+        case safe(fn -> with_fid(fid, fn -> Scheme.call(state.interp, callback, [arg]) end) end) do
+          {:ok, val, interp} ->
+            {:noreply, put_interp(state, interp, val)}
+
+          {:error, msg} ->
+            message("error: " <> msg)
+            {:noreply, state}
+        end
+
+      _ ->
+        {:noreply, state}
     end
   end
 
@@ -490,6 +514,8 @@ defmodule Aimax.Core.Session do
       "agent-cancel!" => "(agent-cancel! SLUG) — cancel the agent's current turn.",
       "agent-permission-respond!" =>
         "(agent-permission-respond! SLUG RPC-ID OPTION-ID) — answer a pending permission request.",
+      "agent-question-respond!" =>
+        "(agent-question-respond! SLUG ID ANSWER) — answer a pending branching question.",
       "agent-append!" =>
         "(agent-append! SLUG TEXT) — insert TEXT at the agent's mark; return the new byte offset.",
       "agent-mark" => "(agent-mark SLUG) — return the agent's output mark as a byte offset.",
@@ -500,7 +526,7 @@ defmodule Aimax.Core.Session do
       "agent-set-mode!" =>
         "(agent-set-mode! SLUG MODE) — switch the permission mode; #f when unsupported.",
       "agent-info" =>
-        "(agent-info SLUG) — return a plist: slug, buffer, status, queued, permission; or #f.",
+        "(agent-info SLUG) — return a plist: slug, buffer, status, queued, permission, question; or #f.",
       "agent-on-event!" =>
         "(agent-on-event! HANDLER) — set the global agent event handler: (HANDLER SLUG EVENTS).",
       "agent-context-fn!" =>
@@ -546,6 +572,10 @@ defmodule Aimax.Core.Session do
       "minibuffer-buffer" => "(minibuffer-buffer) — return the minibuffer's buffer name.",
       "minibuffer-state" => "(minibuffer-state) — return the active prompt as a plist, or #f.",
       "minibuffer-input!" => "(minibuffer-input! INPUT) — set the minibuffer input text.",
+      "minibuffer-change!" =>
+        "(minibuffer-change! INPUT) — set minibuffer input and run its live change handler.",
+      "debounce!" =>
+        "(debounce! KEY MS CALLBACK ARG) — after MS idle, call CALLBACK with ARG; a newer call with KEY cancels the old one.",
       "minibuffer-confirm!" =>
         "(minibuffer-confirm!) — close the prompt; run its confirm handler with the value.",
       "minibuffer-confirm-input!" =>
@@ -1084,6 +1114,7 @@ defmodule Aimax.Core.Session do
         case Aimax.Core.LLMSession.send(s(slug), to_string(text), display) do
           :sent -> {:sym, "sent"}
           :queued -> {:sym, "queued"}
+          :answered -> {:sym, "answered"}
           {:error, r} -> raise_scheme("agent-prompt!: #{inspect(r)}")
         end
       end,
@@ -1097,6 +1128,12 @@ defmodule Aimax.Core.Session do
         case Aimax.Core.Agent.respond_permission(s(slug), rpc_id, option) do
           :ok -> :void
           {:error, r} -> raise_scheme("agent-permission-respond!: #{inspect(r)}")
+        end
+      end,
+      "agent-question-respond!" => fn [slug, question_id, answer] ->
+        case Aimax.Core.Agent.respond_question(s(slug), question_id, to_string(answer)) do
+          :ok -> :void
+          {:error, r} -> raise_scheme("agent-question-respond!: #{inspect(r)}")
         end
       end,
       "agent-append!" => fn [slug, text] ->
@@ -1154,6 +1191,22 @@ defmodule Aimax.Core.Session do
                   ]
               end
 
+            question =
+              case info.question do
+                nil ->
+                  false
+
+                q ->
+                  [
+                    {:sym, "id"},
+                    q.id,
+                    {:sym, "question"},
+                    q.question,
+                    {:sym, "answers"},
+                    q.answers
+                  ]
+              end
+
             [
               {:sym, "slug"},
               info.slug,
@@ -1164,7 +1217,9 @@ defmodule Aimax.Core.Session do
               {:sym, "queued"},
               info.queued,
               {:sym, "permission"},
-              perm
+              perm,
+              {:sym, "question"},
+              question
             ]
         end
       end,
@@ -1442,6 +1497,41 @@ defmodule Aimax.Core.Session do
       end,
       "minibuffer-input!" => fn [input] ->
         Editor.minibuffer_set_input(s(input))
+        :void
+      end,
+      # Browser prompts do not pass through KeyDispatch, whose normal edit
+      # path fires on_change. Keep the store-aware callback here so a dynamic
+      # candidate provider behaves identically on both input surfaces.
+      "minibuffer-change!" => fn [input], store ->
+        input = s(input)
+        Editor.minibuffer_set_input(input)
+
+        case Editor.snapshot().minibuffer do
+          %{on_change: oc} when oc not in [nil, false] ->
+            {_, store} = Aimax.Scheme.Eval.apply_fn(oc, [input], store)
+            {:void, store}
+
+          _ ->
+            {:void, store}
+        end
+      end,
+      # A small, general Scheme-side debounce. The callback stays rooted in
+      # @escaped until its timer fires; the generation check makes a cancelled
+      # timer harmless even if its message was already in this mailbox.
+      "debounce!" => fn [key, ms, callback, arg] ->
+        key = {:debounce, s(key)}
+
+        case :ets.lookup(@escaped, key) do
+          [{^key, {_generation, timer, _callback, _arg, _fid}}] ->
+            Process.cancel_timer(timer)
+
+          _ ->
+            :ok
+        end
+
+        generation = make_ref()
+        timer = Process.send_after(self(), {:scheme_debounce, key, generation}, trunc(ms))
+        :ets.insert(@escaped, {key, {generation, timer, callback, arg, Frame.current()}})
         :void
       end,
       "minibuffer-confirm!" => fn [], store ->

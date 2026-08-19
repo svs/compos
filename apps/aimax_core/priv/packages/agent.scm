@@ -12,6 +12,7 @@
 (set-face-attribute! 'agent-tool 'fg "#7aa2f7")
 (set-face-attribute! 'agent-thought 'fg "#787c99")
 (set-face-attribute! 'agent-permission 'fg "#e0af68")
+(set-face-attribute! 'agent-question 'fg "#7aa2f7")
 (set-face-attribute! 'agent-meta 'fg "#787c99")
 (set-face-attribute! 'agent-queued 'fg "#565a6e")
 
@@ -308,7 +309,7 @@
 
 ;; event kinds that count as the turn having produced something visible —
 ;; a turn-end after none of them is a silent turn
-(define *agent-output-kinds* '(chunk thought tool-call tool-update plan error))
+(define *agent-output-kinds* '(chunk thought tool-call tool-update plan question error))
 
 (define (agent-handle-event slug e)
   (let ((buf (agent-buf slug))
@@ -419,6 +420,19 @@
                       "agent-meta")))
          (agent-block-push! buf start (agent-mark slug) "plan" '())))
 
+      ((equal? type 'question)
+       (let* ((question (plist-get e 'question))
+              (answers (or (plist-get e 'answers) '()))
+              (start (agent-render! slug
+                       (string-append "\n── question: " question " ──\n")
+                       "agent-question")))
+         (agent-block-push! buf start (agent-mark slug) "question"
+           (list (plist-get e 'id) slug question answers)))
+       (message (string-append "agent " slug " asks: " (plist-get e 'question))))
+
+      ((equal? type 'question-answer)
+       (agent-block-drop-kind! buf "question"))
+
       ;; the policy decides, not the backend: approvals are invisible
       ;; (the tool just runs), denials and asks are recorded
       ((equal? type 'permission)
@@ -492,6 +506,7 @@
        (buffer-set-local! buf 'agent-turn-text #f)
        (buffer-set-local! buf 'agent-turn-any #f)
        (agent-block-drop-kind! buf "permission")
+       (agent-block-drop-kind! buf "question")
        ;; the conversation has one more turn to read, so it may now name
        ;; itself (chat.scm decides whether this turn is one of the naming
        ;; turns; the package loads after this one)
@@ -509,7 +524,9 @@
                (string-append " — this chat is about "
                               (number->string (quotient (chat-record-tokens buf) 1000))
                               "k tokens: M-x chat-compact")
-               ""))))
+               "")))
+       (when (boundp (quote workspace-finish-reminder!))
+         (workspace-finish-reminder! buf slug)))
 
       ((equal? type 'error)
        (buffer-set-local! buf 'chat-turn-active #f)
@@ -523,13 +540,15 @@
        (buffer-set-local! buf 'chat-turn-active #f)
        (agent-finalize-running-tools! buf "failed")
        (agent-block-drop-kind! buf "permission")
+       (agent-block-drop-kind! buf "question")
        (let ((start (agent-render! slug "\n[agent exited]\n" "agent-meta")))
          (agent-block-push! buf start (agent-mark slug) "meta" '())))
 
       ((equal? type 'status)
-       ;; answered/cancelled permission -> its banner leaves the rich view
+       ;; answered/cancelled attention requests leave the rich view
        (unless (equal? (plist-get e 'status) 'needs_attention)
-         (agent-block-drop-kind! buf "permission")))
+         (agent-block-drop-kind! buf "permission")
+         (agent-block-drop-kind! buf "question")))
 
       (else #f))))
 
@@ -725,6 +744,8 @@
                        ((equal? m 'auto) 'ask)
                        (else 'approve))))
       (buffer-set-local! buf 'chat-permission-mode next)
+      (when (boundp (quote workspace-llm-defaults-note!))
+        (workspace-llm-defaults-note! buf))
       ;; a live agent hears about it immediately, not at the next reconnect
       (let ((slug (buffer-local buf 'agent-slug)))
         (when (and slug (not (equal? (agent-status slug) 'dead)))
@@ -779,6 +800,16 @@
 (define-command "agent-permission-deny" "Deny the pending permission request"
   (lambda () (agent-answer-permission! (agent-slug-of (current-buffer))
                                        "reject_once" "reject")))
+
+;; Branching questions are not permission requests. Their answer goes back
+;; to the model as the result of its `ask` tool call.
+(define (agent-answer-question! slug id answer)
+  (agent-question-respond! slug id answer))
+
+(category! 'chat)
+(effects! '(write))
+(public! 'agent-answer-question!
+  "(agent-answer-question! SLUG ID ANSWER) — answer the agent's pending branching question")
 
 ;;; --- steering -----------------------------------------------------------------
 
@@ -840,7 +871,9 @@
                 (connector-models cname)
                 (lambda (model)
                   ;; one switch function for every path (editor.scm)
-                  (chat-switch! buf cname model)))))))))
+                  (chat-switch! buf cname model)
+                  (when (boundp (quote workspace-llm-defaults-note!))
+                    (workspace-llm-defaults-note! buf))))))))))
 
 ;; a revived/switched thread runs a FRESH provider session (different
 ;; provider = different session ids; resume can't cross). Seed its first
@@ -863,7 +896,7 @@
               acc
               (let ((b (car bs)))
                 (loop (cdr bs)
-                      (if (member (caddr b) (list "meta" "waiting" "permission"))
+                      (if (member (caddr b) (list "meta" "waiting" "permission" "question"))
                           acc
                           (string-append acc
                             (substring-bytes text (car b)
@@ -948,16 +981,19 @@
                      ;; the message itself lands in the record when its
                      ;; turn starts; only the walk position resets here
                      (chat-history-reset! buf)
-                     (if (equal? (agent-send-msg! slug input) 'queued)
-                         ;; mid-turn: the text stays put, muted, until its turn
-                         (begin
-                           (chat-mark-queued! buf)
-                           (end-of-buffer!)
-                           (message "queued — runs when this turn ends"))
-                         (begin
-                           (chat-clear-input! buf)
-                           (end-of-buffer!)
-                           (message "sent")))))))))))
+                     (let ((result (agent-send-msg! slug input)))
+                       (if (equal? result 'queued)
+                           ;; mid-turn: the text stays put, muted, until its turn
+                           (begin
+                             (chat-mark-queued! buf)
+                             (end-of-buffer!)
+                             (message "queued — runs when this turn ends"))
+                           (begin
+                             (chat-clear-input! buf)
+                             (end-of-buffer!)
+                             (message (if (equal? result 'answered)
+                                          "answered"
+                                          "sent")))))))))))))
 
 ;;; --- input history --------------------------------------------------------------
 ;;; Up and down walk the messages you sent, the way a shell walks its
@@ -1498,6 +1534,27 @@
           (string-append "+" (number->string (plist-get info 'queued)) " queued")
           ""))))
 
+(define (agents-cells buf b)
+  (let* ((slug (buffer-local b 'agent-slug))
+         (status (chat-row-status b))
+         (info (and slug (agent-info slug)))
+         (face (cond ((equal? status 'needs_attention) "alert")
+                     ((or (equal? status 'running) (equal? status 'starting)) "accent")
+                     (else "dim"))))
+    (list (list (agent-status-glyph status) face)
+          (list b "accent")
+          (list (or slug "chat") "dim")
+          (list (or (buffer-local b 'modeline-info) "") "faint")
+          (list (symbol->string status) face)
+          (list (if (and info (> (plist-get info 'queued) 0))
+                    (string-append "+" (number->string (plist-get info 'queued)))
+                    "")
+                "warn"))))
+
+(define (agents-meta buf)
+  (string-append (number->string (length (list-entries buf)))
+                 " chats · attention first"))
+
 (define (agents-refresh!)
   (when (buffer-exists? *agents-buffer*)
     (list-refresh! *agents-buffer*)))
@@ -1642,7 +1699,19 @@
            "at point.")
     'buffer *agents-buffer*
     'rows (lambda (buf) (agents-sorted))
-    'render (lambda (buf row) (agents-line row))
+    'columns (lambda (buf)
+               (list (list "" 1) (list "chat" #f) (list "slug" 12)
+                     (list "model" 26) (list "status" 17)
+                     (list "queue" 6 'right)))
+    'cells agents-cells
+    'title (lambda (buf) "Chats")
+    'meta agents-meta
+    'total (lambda (buf) (length (list-entries buf)))
+    'footer (lambda (buf)
+              '(("RET" "visit") ("m" "mark") ("s" "steer")
+                ("y/n" "permission") ("k" "kill") ("d" "archive")
+                ("x" "execute") ("+" "new") ("/" "filter")
+                ("g" "refresh") ("q" "quit")))
     ;; two flags, both destructive, neither irreversible: k stops a runtime
     ;; and keeps the transcript, d drops the chat as well
     'flags (list (list "k" "K" "kill runtime"
@@ -1653,10 +1722,6 @@
                          (and (buffer-exists? b)
                               (begin (agents-archive! b) #t)))))
     'noun "chat"
-    'header (lambda (buf)
-              (string-append ";; chats — RET visit · m mark · s steer · "
-                             "y/n permission · k flag kill · d flag archive · "
-                             "x execute · u/U unmark · + new · g refresh"))
     'keys '(("RET" "agents-visit") ("s" "agents-steer") ("y" "agents-allow")
             ("n" "agents-deny")
             ("g" "agents-refresh") ("+" "agent-open") ("q" "quit-window"))

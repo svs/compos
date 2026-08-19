@@ -582,7 +582,9 @@
                     (begin
                       (buffer-set-local! buf 'agent-model m)
                       (agent-update-modeline! buf)
-                      (message (string-append cname " · " m)))))))))))
+                      (message (string-append cname " · " m))))
+                (when (boundp (quote workspace-llm-defaults-note!))
+                  (workspace-llm-defaults-note! buf)))))))))
 
 ;; send the region to the chat buffer as context, then open it
 (define-command "chat-send-region" "Add the region to the chat buffer as context"
@@ -694,6 +696,8 @@
       (let ((name (chat-rename-unique clean)))
         (when (and name (buffer-exists? buf) (not (equal? name buf)))
           (when (rename-buffer! buf name)
+            (when (boundp (quote workspace-name-from-chat!))
+              (workspace-name-from-chat! name clean))
             (message (string-append "chat named: " name))))))))
 
 (effects! '(spend external))

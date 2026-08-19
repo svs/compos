@@ -230,26 +230,46 @@ defmodule Aimax.AgentTest do
         "threadId" => "thread-1",
         "turnId" => "turn-1",
         "mode" => "form",
-        "message" => "Use aimax/apropos",
-        "requestedSchema" => %{"type" => "object", "properties" => %{}}
+        "message" => "How should I inspect this change?",
+        "requestedSchema" => %{
+          "type" => "object",
+          "properties" => %{
+            "answer" => %{
+              "type" => "string",
+              "enum" => ["Diff first", "Run tests", "Open files", "Continue"]
+            }
+          }
+        }
       }
     })
 
-    assert_receive {:backend_event, mcp_permission}, 1_000
-    assert Backend.event_type(mcp_permission) == "permission"
-    assert Backend.plist_get(mcp_permission, "rpc-id") == 92
-    assert Backend.plist_get(mcp_permission, "title") == "Use aimax/apropos"
-    assert Backend.plist_get(mcp_permission, "kind") == "mcp"
+    assert_receive {:backend_event, question}, 1_000
+    assert Backend.event_type(question) == "question"
+    assert Backend.plist_get(question, "id") == 92
+    assert Backend.plist_get(question, "question") == "How should I inspect this change?"
+
+    assert Backend.plist_get(question, "answers") == [
+             "Diff first",
+             "Run tests",
+             "Open files",
+             "Continue"
+           ]
 
     assert :ok =
-             Aimax.Core.Agent.Backend.CodexAppServer.respond_permission(
+             Aimax.Core.Agent.Backend.CodexAppServer.respond_question(
                backend,
                92,
-               "allow_always"
+               "Diff first"
              )
 
     assert_receive {:frame,
-                    %{"id" => 92, "result" => %{"action" => "accept", "content" => nil}}},
+                    %{
+                      "id" => 92,
+                      "result" => %{
+                        "action" => "accept",
+                        "content" => %{"answer" => "Diff first"}
+                      }
+                    }},
                    1_000
 
     inject(backend, %{
@@ -612,6 +632,59 @@ defmodule Aimax.AgentTest do
     assert outcome == %{"outcome" => "selected", "optionId" => "o-always"}
   end
 
+  test "ask is separate from permission and accepts any choice or typed answer" do
+    {slug, buf, agent} = boot("")
+
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "plan the change")])
+    assert_receive {:frame, %{"method" => "session/prompt"}}, 1_000
+
+    task =
+      Task.async(fn ->
+        Agent.ask_user(slug, "Open a new workspace?", ["Yes", "No", "Show diff first"])
+      end)
+
+    assert eventually(fn ->
+             match?(
+               %{
+                 status: :needs_attention,
+                 question: %{
+                   question: "Open a new workspace?",
+                   answers: ["Yes", "No", "Show diff first"]
+                 }
+               },
+               Agent.info(slug)
+             )
+           end)
+
+    assert eventually(fn ->
+             Enum.any?(Buffer.get_local(buf, "agent-blocks") || [], fn
+               [_, _, "question", _, ^slug, "Open a new workspace?", answers] ->
+                 answers == ["Yes", "No", "Show diff first"]
+
+               _ ->
+                 false
+             end)
+           end)
+
+    # RET while a question is pending answers the tool. It does not queue a
+    # second user turn, and it does not use permission options.
+    focus(buf)
+    type("Use the existing checkout")
+    press(["RET"])
+
+    assert Task.await(task, 1_000) == {:ok, "Use the existing checkout"}
+    assert %{status: :running, queued: 0, permission: nil, question: nil} = Agent.info(slug)
+
+    assert eventually(fn ->
+             not Enum.any?(Buffer.get_local(buf, "agent-blocks") || [], fn
+               [_, _, "question" | _] -> true
+               _ -> false
+             end)
+           end)
+
+    _ = agent
+  end
+
   test "command execution is rejected — aimax is the only sandbox" do
     {slug, _buf, agent} = boot("")
 
@@ -827,7 +900,12 @@ defmodule Aimax.AgentTest do
     assert wire =~ "Continue the work interrupted by the editor restart"
     assert Buffer.text(buf) =~ "fresh session"
 
-    inject(fresh, %{"jsonrpc" => "2.0", "id" => prompt_id, "result" => %{"stopReason" => "end_turn"}})
+    inject(fresh, %{
+      "jsonrpc" => "2.0",
+      "id" => prompt_id,
+      "result" => %{"stopReason" => "end_turn"}
+    })
+
     assert eventually(fn -> Buffer.get_local(buf, "chat-turn-active") == false end)
   end
 
@@ -997,13 +1075,12 @@ defmodule Aimax.AgentTest do
 
     {:ok, _} = Session.eval(~s[(run-command "chat-list")])
     text = Buffer.text("*chats*")
-    [_header, first_line | _] = String.split(text, "\n")
-    assert first_line =~ "a2"
-    assert first_line =~ "needs_attention"
+    assert text =~ "a2"
+    assert text =~ "needs_attention"
 
-    # point lands after the header refresh; move to the first entry and answer
+    # point lands on the first table entry; answer through the real key path
     focus("*chats*")
-    {:ok, _} = Session.eval("(begin (beginning-of-buffer!) (next-line!))")
+    {:ok, _} = Session.eval(~s[(list-goto-first-entry "*chats*")])
     press(["y"])
 
     assert_receive {:frame, %{"id" => 91, "result" => %{"outcome" => outcome}}}, 1_000
@@ -1015,7 +1092,7 @@ defmodule Aimax.AgentTest do
   end
 
   test "k flags and x kills the runtime; d flags and x releases windows before archiving" do
-    {slug, buf, _agent} = boot("")
+    {_slug, buf, _agent} = boot("")
 
     # show the thread in the main window, then open the fleet popup
     focus(buf)
@@ -1031,7 +1108,7 @@ defmodule Aimax.AgentTest do
     press(["x"])
     assert eventually(fn -> Buffer.text(buf) =~ "[agent stopped]" end)
     assert eventually(fn -> Agent.list() == [] end)
-    assert Buffer.text("*chats*") =~ "x #{slug}"
+    assert Buffer.text("*chats*") =~ "x  #{buf}"
     # the flag is gone with the runtime it killed
     refute Buffer.get_local("*chats*", "list-marks") |> Enum.any?()
 
@@ -1090,8 +1167,8 @@ defmodule Aimax.AgentTest do
     rows = Buffer.get_local("*chats*", "list-entries")
     row = Enum.find_index(rows, &(&1 == buf))
     assert row, "chat #{buf} not listed in #{inspect(rows)}"
-    {:ok, _} = Session.eval("(beginning-of-buffer!)")
-    for _ <- 0..row, do: {:ok, _} = Session.eval("(next-line!)")
+    {:ok, _} = Session.eval(~s[(list-goto-first-entry "*chats*")])
+    press(List.duplicate("C-n", row))
     :ok
   end
 

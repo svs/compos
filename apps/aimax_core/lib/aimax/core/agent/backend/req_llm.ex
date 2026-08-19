@@ -226,6 +226,7 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
       on_round_usage: fn usage -> GenServer.cast(backend, {:turn_usage, usage}) end,
       on_chunk: fn t -> ev.(type: :chunk, text: t) end,
       on_thinking: fn t -> ev.(type: :thought, text: t) end,
+      tool_handler: fn name, input -> intrinsic_tool(slug, name, input) end,
       # aimax owns permissions on BOTH lanes: the same Scheme policy
       # that answers ACP's requests gates every direct-lane tool call
       gate: fn name, input -> gate(ev, slug, name, input) end,
@@ -272,6 +273,14 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
   # A missing policy fn means no gate: a bare (llm-tools ...) call has
   # never had one, and must not start wedging.
   defp gate(ev, slug, name, input) do
+    if name == "ask" do
+      :allow
+    else
+      gated_tool(ev, slug, name, input)
+    end
+  end
+
+  defp gated_tool(ev, slug, name, input) do
     case permission_verdict(slug, name, input) do
       :allow ->
         :allow
@@ -302,6 +311,25 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
       ev.(type: :error, text: "the permission gate crashed — denying: #{why}")
       {:deny, "the permission gate crashed; denied"}
   end
+
+  defp intrinsic_tool(slug, "ask", %{"question" => question} = input)
+       when is_binary(question) do
+    answers =
+      case Map.get(input, "answers", []) do
+        values when is_list(values) -> Enum.map(values, &to_string/1)
+        _ -> []
+      end
+
+    case Aimax.Core.Agent.ask_user(slug, question, answers) do
+      {:ok, answer} -> {:ok, answer}
+      {:error, reason} -> {:error, Backend.error_text(reason)}
+    end
+  end
+
+  defp intrinsic_tool(_slug, "ask", _input),
+    do: {:error, "ask requires a question and an answers array"}
+
+  defp intrinsic_tool(_slug, _name, _input), do: :dispatch
 
   defp permission_verdict(slug, name, input) do
     fun =

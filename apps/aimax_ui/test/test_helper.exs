@@ -7,3 +7,7 @@ case Application.get_env(:aimax_core, :home) do
 end
 
 ExUnit.start()
+
+# UI agent fixtures must not create worktrees of the repository under test.
+{:ok, _} =
+  Aimax.Core.Session.eval("(customize-set! 'agent-worktree-isolation #f)")

@@ -269,10 +269,14 @@
         ((equal? spec "C-p") (minibuffer-prev!) (chrome--with-mb '()))
         ((equal? spec "<down>") (minibuffer-next!) (chrome--with-mb '()))
         ((equal? spec "<up>") (minibuffer-prev!) (chrome--with-mb '()))
-        ((equal? spec "DEL") (minibuffer-del!) (chrome--with-mb '()))
+        ((equal? spec "DEL")
+         (minibuffer-del!)
+         (minibuffer-change! (chrome--get (minibuffer-state) 'input))
+         (chrome--with-mb '()))
         ;; anything one character wide is text
         ((= (string-length spec) 1)
-         (minibuffer-input! (string-append (chrome--get (minibuffer-state) 'input) spec))
+         (minibuffer-change!
+           (string-append (chrome--get (minibuffer-state) 'input) spec))
          (chrome--with-mb '()))
         (else (chrome--with-mb '()))))
 
@@ -327,6 +331,18 @@
 ;; and the fire-and-forget verbs pass this one
 (define (chrome-ignore reply) #t)
 
+;; Agent access is policy, not browser mechanism. Packages may replace this
+;; Scheme hook. It is consulted only while eval-scheme is running, so ordinary
+;; editor commands such as C-x b keep their browser integration.
+(define *browser-tool-policy* (lambda (buf) 'allow))
+
+(define (chrome--tool-buffer)
+  (and (boundp (quote *llm-tool-buffer*)) *llm-tool-buffer*))
+
+(define (chrome--tool-allowed?)
+  (let ((buf (chrome--tool-buffer)))
+    (or (not buf) (equal? (*browser-tool-policy* buf) 'allow))))
+
 ;; Take either a tab id or a whole tab plist. The assistant reaches these
 ;; through apropos's one-line docs, and "TAB" reads like the thing
 ;; tab-list just handed it — passing the plist made the extension fail with
@@ -336,9 +352,12 @@
   (if (number? t) t (chrome--get t 'id)))
 
 (define (chrome-call op args k)
-  (browser-call op args
-    (lambda (reply)
-      (if (chrome--report reply) (k reply) #f))))
+  (if (chrome--tool-allowed?)
+      (browser-call op args
+        (lambda (reply)
+          (if (chrome--report reply) (k reply) #f)))
+      (error
+        "browser category denied in code-mode; use ai-max state, or ask the user to enable M-x browser-mode as a last resort")))
 
 (define (tab-list k)
   (chrome-call "tabs" '() (lambda (r) (k (chrome--get r 'tabs)))))

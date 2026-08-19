@@ -142,6 +142,27 @@ defmodule Aimax.Rpc.Server do
   defp handle_request(%{"method" => "ping"} = req),
     do: %{jsonrpc: "2.0", id: req["id"], result: "pong"}
 
+  # `ask` is intentionally not an eval. The connection task can wait for the
+  # user while the Scheme Session remains free to process keys and redraws.
+  defp handle_request(
+         %{
+           "method" => "agent/ask",
+           "params" => %{"slug" => slug, "question" => question} = params
+         } = req
+       )
+       when is_binary(slug) and is_binary(question) do
+    answers =
+      case params["answers"] do
+        values when is_list(values) -> Enum.map(values, &to_string/1)
+        _ -> []
+      end
+
+    case Aimax.Core.Agent.ask_user(slug, question, answers) do
+      {:ok, answer} -> %{jsonrpc: "2.0", id: req["id"], result: answer}
+      {:error, reason} -> error_resp(req["id"], -32000, "ask failed: #{inspect(reason)}")
+    end
+  end
+
   defp handle_request(req), do: error_resp(req["id"], -32601, "method not found")
 
   defp error_resp(id, code, message),

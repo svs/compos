@@ -4,3 +4,8 @@
 File.rm_rf!(Path.join(Application.get_env(:aimax_core, :home), "buffers"))
 
 ExUnit.start()
+
+# Most agent tests exercise chat behavior against this repository checkout.
+# Disable automatic checkout creation unless a test covers worktree policy.
+{:ok, _} =
+  Aimax.Core.Session.eval("(customize-set! 'agent-worktree-isolation #f)")

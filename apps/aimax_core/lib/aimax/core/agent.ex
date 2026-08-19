@@ -79,6 +79,20 @@ defmodule Aimax.Core.Agent do
     do: call(slug, {:respond_permission, rpc_id, option_id})
 
   @doc """
+  Ask the user a branching question and block the calling tool until the
+  user answers. This channel is independent from tool permissions.
+
+  `answers` is any-length list of labels. The user can also type a free-form
+  answer in the chat input.
+  """
+  def ask_user(slug, question, answers \\ []) when is_binary(question) and is_list(answers),
+    do: call(slug, {:ask_user, question, answers}, :infinity)
+
+  @doc "Answer a pending branching question. Stale answers are no-ops."
+  def respond_question(slug, question_id, answer),
+    do: call(slug, {:respond_question, question_id, answer})
+
+  @doc """
   Ask this thread for a verdict on a tool call, and block until it comes.
 
   ONE gate. A backend that runs turns itself (the direct lane) calls this
@@ -167,6 +181,7 @@ defmodule Aimax.Core.Agent do
        context_pending: false,
        prompt_queue: [],
        pending_permission: nil,
+       pending_question: nil,
        # which turn a context fetch belongs to (see send_prompt)
        epoch: 0,
        # ids for the requests WE raise; an adapter's own requests arrive
@@ -177,15 +192,13 @@ defmodule Aimax.Core.Agent do
 
   @impl true
   def handle_call({:prompt, text, display}, _from, state) do
-    case state.status do
-      :idle ->
-        {:reply, :sent, send_prompt(state, text, display)}
+    case state.pending_question do
+      %{id: id} ->
+        answer = display || text
+        {:reply, :answered, resolve_question(state, id, answer)}
 
-      s when s in [:starting, :running, :needs_attention] ->
-        {:reply, :queued, %{state | prompt_queue: state.prompt_queue ++ [{text, display}]}}
-
-      :dead ->
-        {:reply, {:error, :dead}, state}
+      nil ->
+        prompt_call(text, display, state)
     end
   end
 
@@ -222,6 +235,11 @@ defmodule Aimax.Core.Agent do
     }
 
     state =
+      if state.pending_question,
+        do: resolve_question(state, state.pending_question.id, nil),
+        else: state
+
+    state =
       cond do
         context_pending ->
           state
@@ -248,7 +266,7 @@ defmodule Aimax.Core.Agent do
     options = [
       ["allow", "Allow", "allow_once"],
       ["always", "Always", "allow_always"],
-      ["deny", "Reject", "reject_once"]
+      ["deny", "Deny", "reject_once"]
     ]
 
     pending = %{
@@ -284,6 +302,45 @@ defmodule Aimax.Core.Agent do
       %{rpc_id: ^rpc_id} -> {:reply, :ok, resolve_permission(state, option_id)}
       _ -> {:reply, :ok, state}
     end
+  end
+
+  # A question is a tool call, not a permission request. It has its own
+  # pending slot and returns the selected label (or typed answer) to the
+  # blocked tool task.
+  def handle_call({:ask_user, question, answers}, from, state) do
+    cond do
+      state.pending_question ->
+        {:reply, {:error, :question_already_pending}, state}
+
+      true ->
+        id = state.next_rpc_id
+        answers = answers |> Enum.map(&to_string/1) |> Enum.reject(&(&1 == ""))
+
+        pending = %{
+          id: id,
+          question: question,
+          answers: answers,
+          from: from
+        }
+
+        state =
+          %{state | next_rpc_id: id + 1, pending_question: pending}
+          |> set_status(:needs_attention)
+          |> enqueue(
+            Backend.plist(
+              type: :question,
+              id: id,
+              question: question,
+              answers: answers
+            )
+          )
+
+        {:noreply, state}
+    end
+  end
+
+  def handle_call({:respond_question, question_id, answer}, _from, state) do
+    {:reply, :ok, resolve_question(state, question_id, answer)}
   end
 
   def handle_call({:permission_deadline, ms}, _from, state) do
@@ -336,8 +393,29 @@ defmodule Aimax.Core.Agent do
 
            nil ->
              nil
+         end,
+       question:
+         case state.pending_question do
+           %{id: id, question: question, answers: answers} ->
+             %{id: id, question: question, answers: answers}
+
+           nil ->
+             nil
          end
      }, state}
+  end
+
+  defp prompt_call(text, display, state) do
+    case state.status do
+      :idle ->
+        {:reply, :sent, send_prompt(state, text, display)}
+
+      s when s in [:starting, :running, :needs_attention] ->
+        {:reply, :queued, %{state | prompt_queue: state.prompt_queue ++ [{text, display}]}}
+
+      :dead ->
+        {:reply, {:error, :dead}, state}
+    end
   end
 
   # --- backend events ----------------------------------------------------------
@@ -429,6 +507,7 @@ defmodule Aimax.Core.Agent do
     # a killed thread must never leave anyone blocked on an answer: not an
     # adapter waiting on the wire, and not a turn task waiting on us
     if state.pending_permission, do: resolve_permission(state, nil)
+    if state.pending_question, do: resolve_question(state, state.pending_question.id, nil)
 
     state.backend.close(state.handle)
     :ok
@@ -448,7 +527,40 @@ defmodule Aimax.Core.Agent do
 
     state
     |> Map.put(:pending_permission, nil)
-    |> set_status(:running)
+    |> attention_resolved_status()
+  end
+
+  defp resolve_question(%{pending_question: %{id: id} = pending} = state, id, answer) do
+    answer = if is_nil(answer), do: nil, else: to_string(answer)
+
+    case pending.from do
+      nil ->
+        if function_exported?(state.backend, :respond_question, 3) do
+          state.backend.respond_question(state.handle, id, answer)
+        end
+
+      from ->
+        GenServer.reply(from, if(answer, do: {:ok, answer}, else: {:error, :cancelled}))
+    end
+
+    state
+    |> Map.put(:pending_question, nil)
+    |> enqueue(
+      Backend.plist(
+        type: :"question-answer",
+        id: id,
+        answer: answer || "cancelled"
+      )
+    )
+    |> attention_resolved_status()
+  end
+
+  defp resolve_question(state, _id, _answer), do: state
+
+  defp attention_resolved_status(state) do
+    if state.pending_permission || state.pending_question,
+      do: set_status(state, :needs_attention),
+      else: set_status(state, :running)
   end
 
   # The option's KIND is the vocabulary, not its id: an adapter names its
@@ -480,6 +592,9 @@ defmodule Aimax.Core.Agent do
         # the wire died) resolves it cancelled — never a stuck banner
         state
         |> then(fn s -> if s.pending_permission, do: resolve_permission(s, nil), else: s end)
+        |> then(fn s ->
+          if s.pending_question, do: resolve_question(s, s.pending_question.id, nil), else: s
+        end)
         |> enqueue(event)
         |> set_status(:idle)
         |> pop_prompt_queue()
@@ -498,6 +613,18 @@ defmodule Aimax.Core.Agent do
         }
 
         %{state | pending_permission: pending}
+        |> set_status(:needs_attention)
+        |> enqueue(event)
+
+      "question" ->
+        pending = %{
+          id: Backend.plist_get(event, "id"),
+          question: Backend.plist_get(event, "question"),
+          answers: Backend.plist_get(event, "answers") || [],
+          from: nil
+        }
+
+        %{state | pending_question: pending}
         |> set_status(:needs_attention)
         |> enqueue(event)
 

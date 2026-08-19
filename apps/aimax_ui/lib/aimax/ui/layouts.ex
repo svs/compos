@@ -44,6 +44,29 @@ defmodule Aimax.Ui.Layouts do
             -webkit-font-smoothing: antialiased;
           }
           .editor-root { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+          .workspace-bar {
+            flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+            min-height: 38px; padding: 7px 14px;
+            border-bottom: 2px solid color-mix(in srgb, var(--error-fg, #d13b32) 72%, #111);
+            background:
+              linear-gradient(90deg,
+                color-mix(in srgb, var(--error-fg, #d13b32) 22%, #171312),
+                #171312 62%);
+            color: #fff8ee; font: 600 11px/1.25 var(--font-mono);
+            letter-spacing: 0.015em;
+            box-shadow: 0 4px 18px color-mix(in srgb, var(--error-fg, #d13b32) 24%, transparent);
+            z-index: 40;
+          }
+          .workspace-bar-kind, .workspace-bar-port {
+            padding: 4px 8px; border-radius: 999px;
+            background: var(--error-fg, #d13b32); color: white;
+            font-weight: 750; letter-spacing: 0.08em;
+          }
+          .workspace-bar-root {
+            min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            color: #f1d8c8;
+          }
+          .workspace-bar-help { margin-left: auto; white-space: nowrap; color: #cdbfb6; }
           /* window chrome is themable: a 'chrome face maps to these vars
              (gap, radius, border, shadow, anim) — zero values reproduce the
              flat flush look */
@@ -118,6 +141,40 @@ defmodule Aimax.Ui.Layouts do
             animation: win-in var(--chrome-anim, 140ms) ease-out;
           }
           .window.active { background: var(--window-bg, #fdfcf8); }
+          .window.workspace-pending {
+            position: relative;
+            box-shadow:
+              inset 0 0 0 2px var(--error-fg, #d13b32),
+              inset 0 0 22px color-mix(in srgb, var(--error-fg, #d13b32) 18%, transparent),
+              0 0 18px color-mix(in srgb, var(--error-fg, #d13b32) 24%, transparent);
+          }
+          .window.workspace-pending::before {
+            content: "UNMERGED WORKTREE";
+            position: absolute; z-index: 18; top: 8px; right: 10px;
+            padding: 4px 10px;
+            border: 1px solid color-mix(in srgb, var(--error-fg, #d13b32) 72%, white);
+            border-radius: 999px;
+            background: var(--error-fg, #d13b32);
+            color: white;
+            font: 700 10px/1.2 var(--font-mono);
+            letter-spacing: 0.09em;
+            box-shadow: 0 3px 14px color-mix(in srgb, var(--error-fg, #d13b32) 42%, transparent);
+            pointer-events: none;
+          }
+          .buffer-header {
+            flex: 0 0 auto;
+            padding: 7px 14px;
+            border-bottom: 1px solid var(--border, #cbc4b1);
+            background: var(--modeline-active-bg, #e7e9f1);
+            color: var(--modeline-active-fg, #1b1a17);
+            font: 650 11px/1.3 var(--font-mono);
+            letter-spacing: 0.015em;
+          }
+          .window.workspace-pending .buffer-header {
+            border-bottom-color: color-mix(in srgb, var(--error-fg, #d13b32) 68%, transparent);
+            background: color-mix(in srgb, var(--error-fg, #d13b32) 12%, var(--window-bg, #fdfcf8));
+            color: var(--error-fg, #a8342a);
+          }
           .buf {
             flex: 1;
             overflow: hidden; /* the server owns scrolling (viewport windowing) */
@@ -367,6 +424,25 @@ defmodule Aimax.Ui.Layouts do
             padding: 8px 12px; font-family: var(--font-mono); font-size: 12px;
           }
           .ag-perm-title { flex: 1; color: var(--agent-permission-fg, #a8741a); }
+          .ag-question {
+            margin: 10px 0; padding: 11px 12px;
+            border: 1px solid var(--agent-tool-fg, #26356b); border-radius: 8px;
+            background: color-mix(in srgb, var(--agent-tool-fg, #26356b) 6%, transparent);
+            font-family: var(--font-mono);
+          }
+          .ag-question-title { color: var(--agent-tool-fg, #26356b); font-weight: 650; }
+          .ag-question-answers { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+          .ag-question .ag-btn.answer {
+            border-color: color-mix(in srgb, var(--agent-tool-fg, #26356b) 55%, transparent);
+            color: var(--agent-tool-fg, #26356b);
+          }
+          .ag-question .ag-btn.answer:hover {
+            background: var(--agent-tool-fg, #26356b);
+            color: var(--window-bg, #fdfcf8);
+          }
+          .ag-question-hint {
+            margin-top: 9px; color: var(--agent-meta-fg, #8a8577); font-size: 10px;
+          }
           .ag-btn {
             font-family: var(--font-mono); font-size: 11px; padding: 3px 12px;
             border-radius: 6px; border: 1px solid var(--agent-card-border, rgba(0,0,0,0.2));
@@ -1026,6 +1102,7 @@ defmodule Aimax.Ui.Layouts do
               },
               mounted() {
                 if (this.bootCheck()) return;
+                this.handleEvent("navigate", ({url}) => window.location.assign(url));
                 this.visualLinePending = false;
                 this.syncCursorFocus = () => {
                   const focused = document.hasFocus() && !document.body.classList.contains("unfocused");

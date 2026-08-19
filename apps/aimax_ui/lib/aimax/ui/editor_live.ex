@@ -35,6 +35,12 @@ defmodule Aimax.Ui.EditorLive do
         end)
       end
 
+      if params["daemon-switch"] == "1" do
+        Input.run(fid, fn ->
+          Aimax.Core.Session.eval("(when (boundp 'daemon-arrived!) (daemon-arrived!))")
+        end)
+      end
+
       socket =
         assign(socket,
           frame: fid,
@@ -96,6 +102,22 @@ defmodule Aimax.Ui.EditorLive do
           Aimax.Core.Editor.current_buffer(),
           id
         ])
+      end)
+    end
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
+  def handle_event(
+        "agent_answer",
+        %{"win" => win, "slug" => slug, "question" => question_id, "answer" => answer},
+        socket
+      ) do
+    with {wid, ""} <- Integer.parse(to_string(win)),
+         {qid, ""} <- Integer.parse(to_string(question_id)) do
+      Input.run(socket.assigns.frame, fn ->
+        Aimax.Core.Editor.set_active(wid)
+        Aimax.Core.Session.call_named("agent-answer-question!", [slug, qid, answer])
       end)
     end
 
@@ -352,8 +374,14 @@ defmodule Aimax.Ui.EditorLive do
     socket = assign(socket, state: state, subscribed: subscribed, line_cache: line_cache)
 
     # a command left text for this client's OS clipboard (copy-buffer-link)
-    case fid && Aimax.Core.Editor.take_clipboard(fid) do
-      text when is_binary(text) -> push_event(socket, "clipboard", %{text: text})
+    socket =
+      case fid && Aimax.Core.Editor.take_clipboard(fid) do
+        text when is_binary(text) -> push_event(socket, "clipboard", %{text: text})
+        _ -> socket
+      end
+
+    case fid && Aimax.Core.Editor.take_navigation(fid) do
+      url when is_binary(url) -> push_event(socket, "navigate", %{url: url})
       _ -> socket
     end
   end
@@ -671,6 +699,18 @@ defmodule Aimax.Ui.EditorLive do
     <div id="editor" class="editor-root" phx-hook="Keys" data-boot={@boot_id} data-frame={@frame}>
       <style :if={@state.faces != %{}}><%= Phoenix.HTML.raw(face_css(@state.faces)) %></style>
     <style :if={@state.styles != %{}}><%= Phoenix.HTML.raw(Enum.join(Map.values(@state.styles), "\n")) %></style>
+      <div :if={@state.workspace} class="workspace-bar">
+        <span class="workspace-bar-kind">WORKTREE</span>
+        <strong :if={@state.workspace.project && @state.workspace.name}>
+          {@state.workspace.project} / {@state.workspace.name}
+        </strong>
+        <strong :if={!(@state.workspace.project && @state.workspace.name)}>
+          {@state.workspace.daemon}
+        </strong>
+        <span class="workspace-bar-port">PORT {workspace_port(@state.workspace.url)}</span>
+        <span class="workspace-bar-root">{@state.workspace.root}</span>
+        <span class="workspace-bar-help">C-x w new tab · C-x d switch daemon</span>
+      </div>
       <div class="windows">
         <.tree node={@state.tree} active={@state.active} completion={@state.completion} />
       </div>
@@ -772,6 +812,13 @@ defmodule Aimax.Ui.EditorLive do
       <% end %>
     </div>
     """
+  end
+
+  defp workspace_port(url) do
+    case URI.parse(url) do
+      %URI{port: port} when is_integer(port) -> port
+      _ -> "?"
+    end
   end
 
   # cursor sits at the minibuffer's point (it's a real buffer): split the
@@ -897,6 +944,7 @@ defmodule Aimax.Ui.EditorLive do
       data-path={@path}
       data-read-only={to_string(@read_only)}
     >
+      <div :if={@node.header_line} class="buffer-header">{@node.header_line}</div>
       <div :if={@node.dash} class="dash-top">
         <div class="dash-live">
           <span>L{@line}:C{@col}</span>
@@ -992,6 +1040,22 @@ defmodule Aimax.Ui.EditorLive do
                       phx-value-win={@node.id}
                       phx-value-cmd="agent-permission-deny"
                     >Deny</button>
+                  </div>
+                <% :question -> %>
+                  <div class="ag-question">
+                    <div class="ag-question-title">{b.question}</div>
+                    <div class="ag-question-answers">
+                      <button
+                        :for={answer <- b.answers}
+                        class="ag-btn answer"
+                        phx-click="agent_answer"
+                        phx-value-win={@node.id}
+                        phx-value-slug={b.slug}
+                        phx-value-question={b.id}
+                        phx-value-answer={answer}
+                      >{answer}</button>
+                    </div>
+                    <div class="ag-question-hint">Choose an answer or type another reply below.</div>
                   </div>
                 <% :waiting -> %>
                   <div class="ag-wait">⋯ thinking</div>
@@ -1267,6 +1331,9 @@ defmodule Aimax.Ui.EditorLive do
 
   defp ag_block([_s, _e, "permission", title | _], _text, _open),
     do: %{kind: :permission, title: title}
+
+  defp ag_block([_s, _e, "question", id, slug, question, answers | _], _text, _open),
+    do: %{kind: :question, id: id, slug: slug, question: question, answers: answers || []}
 
   defp ag_block([_s, _e, "waiting" | _], _text, _open), do: %{kind: :waiting}
 

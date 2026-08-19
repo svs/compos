@@ -35,8 +35,10 @@ defmodule Aimax.Ui.BufferLinkTest do
     "http://localhost:#{port}"
   end
 
-  test "C-c l copies a link to this buffer and line", %{conn: conn} do
-    buf = fresh_buffer("alpha\nbravo\ncharlie\n")
+  test "C-c l copies an unescaped link to this buffer and line", %{conn: conn} do
+    buf = "/tmp/link #{System.unique_integer([:positive])}.txt"
+    Editor.set_window_buffer(buf)
+    :ok = Buffer.append(buf, "alpha\nbravo\ncharlie\n", source: :editor)
     {:ok, view, _html} = live(conn, "/")
 
     keys(view, ["M-<", "C-n"])

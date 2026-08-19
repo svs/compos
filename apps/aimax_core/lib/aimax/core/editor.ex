@@ -152,6 +152,13 @@ defmodule Aimax.Core.Editor do
   @doc "Take FRAME's pending clipboard text, or nil. The take clears it."
   def take_clipboard(fid), do: GenServer.call(__MODULE__, {:take_clipboard, fid(fid)})
 
+  @doc "Ask one frame's browser client to navigate to URL."
+  def navigate(url, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:navigate, url, fid(fid)})
+
+  @doc "Take FRAME's pending navigation URL, or nil. The take clears it."
+  def take_navigation(fid), do: GenServer.call(__MODULE__, {:take_navigation, fid(fid)})
+
   # one global always-visible segment in the echo bar (agent attention etc.)
   def set_modeline_extra(s), do: GenServer.call(__MODULE__, {:set_modeline_extra, s})
 
@@ -385,7 +392,9 @@ defmodule Aimax.Core.Editor do
        undo_exempt: MapSet.new(["undo"]),
        mru: Enum.uniq([@scratch | Aimax.Core.BufferStore.history()]),
        # frame id => text a command wants on that client's OS clipboard
-       clips: %{}
+       clips: %{},
+       # frame id => URL for same-tab navigation on the next client render
+       navigations: %{}
      }}
   end
 
@@ -643,6 +652,7 @@ defmodule Aimax.Core.Editor do
        which_key: which_key(state, f),
        completion: f.completion && render_completion(f.completion),
        echo: f.echo,
+       workspace: workspace_context(),
        modeline_extra: state.modeline_extra,
        faces: state.faces,
        styles: state.styles
@@ -929,6 +939,18 @@ defmodule Aimax.Core.Editor do
     end
   end
 
+  def handle_call({:navigate, url, fid}, _from, state) do
+    f = frame(state, fid)
+    changed(:ok, %{state | navigations: Map.put(state.navigations, f.id, url)}, f.id)
+  end
+
+  def handle_call({:take_navigation, fid}, _from, state) do
+    case Map.pop(state.navigations, fid) do
+      {nil, _} -> {:reply, nil, state}
+      {url, navigations} -> {:reply, url, %{state | navigations: navigations}}
+    end
+  end
+
   def handle_call({:set_echo_all, msg}, _from, state) do
     frames = Map.new(state.frames, fn {id, f} -> {id, %{f | echo: msg}} end)
     changed(:ok, %{state | frames: frames})
@@ -950,6 +972,7 @@ defmodule Aimax.Core.Editor do
         on_change: nil,
         on_cancel: nil,
         input: "",
+        filter: true,
         match_hint: false,
         style: nil
       }
@@ -1473,6 +1496,11 @@ defmodule Aimax.Core.Editor do
 
   # what the minibuffer matches on: the whole input, except hierarchical
   # (on_complete) prompts, which match the segment after the last "/"
+  # A dynamic provider can return an already-ranked result set whose labels
+  # need not contain the query (the command palette finds commands by docs and
+  # recipes). Ordinary prompts keep the shared candidate matcher.
+  defp mb_query(%{filter: false}), do: ""
+
   defp mb_query(%{on_complete: oc, input: input}) when oc not in [nil, false],
     do: input |> String.split("/") |> List.last()
 
@@ -1824,6 +1852,9 @@ defmodule Aimax.Core.Editor do
       mode: Map.get(locals, "mode-name") || "Fundamental",
       # free-form per-buffer modeline segment (agent connector, etc.)
       modeline_info: Map.get(locals, "modeline-info"),
+      # persistent buffer-owned context above the content. Scheme supplies
+      # the text; the client only renders this generic header mechanism.
+      header_line: Map.get(locals, "header-line"),
       # buffer-group tag — chat setup migrates the legacy companion-of
       # pointer to this local, so the payload reads only the raw local
       group: Map.get(locals, "group"),
@@ -1952,6 +1983,22 @@ defmodule Aimax.Core.Editor do
       Enum.count(0..(logical_cl - 1)//1, &(not MapSet.member?(hidden_lines, &1)))
 
     {length(starts) - MapSet.size(hidden_lines), visible_cl, hidden_lines}
+  end
+
+  defp workspace_context do
+    case Application.get_env(:aimax_core, :workspace_root) do
+      root when is_binary(root) ->
+        %{
+          root: root,
+          daemon: Application.get_env(:aimax_core, :name, "aimax"),
+          project: Application.get_env(:aimax_core, :workspace_project),
+          name: Application.get_env(:aimax_core, :workspace_name),
+          url: :persistent_term.get(:aimax_editor_url, "http://localhost:4004")
+        }
+
+      _ ->
+        nil
+    end
   end
 
   defp rows_for(%{type: :leaf, id: id}, id, rows), do: rows

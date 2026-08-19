@@ -29,6 +29,58 @@ defmodule Aimax.Ui.EditorLiveTest do
     assert html =~ "ui-test-"
   end
 
+  test "a worktree buffer renders its persistent header and attention frame", %{conn: conn} do
+    buf = Aimax.Core.Editor.current_buffer()
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(
+        ~s{(begin (buffer-set-local! "#{buf}" 'header-line "WORKTREE a1 · UNMERGED") (buffer-set-local! "#{buf}" 'window-class "workspace-pending"))}
+      )
+
+    {:ok, _view, html} = live(conn, "/")
+
+    assert html =~ "buffer-header"
+    assert html =~ "WORKTREE a1 · UNMERGED"
+    assert html =~ "workspace-pending"
+  end
+
+  test "a workspace daemon renders one frame-wide worktree bar", %{conn: conn} do
+    old_root = Application.get_env(:aimax_core, :workspace_root)
+    old_name = Application.get_env(:aimax_core, :name)
+    old_project = Application.get_env(:aimax_core, :workspace_project)
+    old_workspace_name = Application.get_env(:aimax_core, :workspace_name)
+    Application.put_env(:aimax_core, :workspace_root, "/tmp/ai-max-worktrees/a1")
+    Application.put_env(:aimax_core, :name, "worktree-a1")
+    Application.put_env(:aimax_core, :workspace_project, "ai-max")
+    Application.put_env(:aimax_core, :workspace_name, "workspace prompts")
+
+    on_exit(fn ->
+      if old_root,
+        do: Application.put_env(:aimax_core, :workspace_root, old_root),
+        else: Application.delete_env(:aimax_core, :workspace_root)
+
+      if old_name,
+        do: Application.put_env(:aimax_core, :name, old_name),
+        else: Application.delete_env(:aimax_core, :name)
+
+      if old_project,
+        do: Application.put_env(:aimax_core, :workspace_project, old_project),
+        else: Application.delete_env(:aimax_core, :workspace_project)
+
+      if old_workspace_name,
+        do: Application.put_env(:aimax_core, :workspace_name, old_workspace_name),
+        else: Application.delete_env(:aimax_core, :workspace_name)
+    end)
+
+    {:ok, _view, html} = live(conn, "/")
+
+    assert html =~ "workspace-bar"
+    assert html =~ "WORKTREE"
+    assert html =~ "ai-max / workspace prompts"
+    assert html =~ "PORT 4046"
+    assert html =~ "/tmp/ai-max-worktrees/a1"
+  end
+
   test "a raw buffer publishes visual-line mode to the client", %{conn: conn} do
     buf = Aimax.Core.Editor.current_buffer()
 
@@ -112,9 +164,7 @@ defmodule Aimax.Ui.EditorLiveTest do
 
     # the em dash occupies bytes 4..6; end the overlay on byte 5, inside it
     {:ok, _} =
-      Aimax.Core.Session.eval(
-        ~s{(overlay-set! "#{buf}" 'zz-utf8 (list (list 0 5 "region")))}
-      )
+      Aimax.Core.Session.eval(~s{(overlay-set! "#{buf}" 'zz-utf8 (list (list 0 5 "region")))})
 
     html = render(view)
     assert html =~ "a command"

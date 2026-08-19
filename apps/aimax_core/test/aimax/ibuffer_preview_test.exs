@@ -9,6 +9,7 @@ defmodule Aimax.IbufferPreviewTest do
 
   defp windows do
     {:ok, wins} = Aimax.Core.Session.eval("(window-list)")
+
     Regex.scan(~r/\((\d+) "([^"]+)"\)/, wins)
     |> Enum.map(fn [_, id, b] -> {String.to_integer(id), b} end)
   end
@@ -79,5 +80,37 @@ defmodule Aimax.IbufferPreviewTest do
     assert other, "no non-ibuffer window: #{inspect(windows())}"
     {_, shown} = other
     assert shown =~ "zz-k", "preview did not land anywhere useful"
+  end
+
+  test "a workspace daemon hides file buffers from other checkouts" do
+    root = Path.join(System.tmp_dir!(), "ibuffer-workspace-#{System.unique_integer([:positive])}")
+    other = Path.join(System.tmp_dir!(), "ibuffer-other-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(root)
+    File.mkdir_p!(other)
+    inside = Path.join(root, "inside.txt")
+    outside = Path.join(other, "outside.txt")
+    File.write!(inside, "inside\n")
+    File.write!(outside, "outside\n")
+    old_root = Application.get_env(:aimax_core, :workspace_root)
+    Application.put_env(:aimax_core, :workspace_root, root)
+
+    on_exit(fn ->
+      if old_root,
+        do: Application.put_env(:aimax_core, :workspace_root, old_root),
+        else: Application.delete_env(:aimax_core, :workspace_root)
+
+      Aimax.Core.kill_buffer(inside)
+      Aimax.Core.kill_buffer(outside)
+      File.rm_rf!(root)
+      File.rm_rf!(other)
+    end)
+
+    {:ok, rows} =
+      Aimax.Core.Session.eval(
+        ~s{(begin (visit "#{outside}") (visit "#{inside}") (run-command "ibuffer") (list-entries "*ibuffer*"))}
+      )
+
+    assert rows =~ inside
+    refute rows =~ outside
   end
 end

@@ -115,6 +115,8 @@ defmodule Aimax.Core.LLM do
   went on the wire. `:on_round_usage` receives the running usage total
   after each round, so a turn that never returns can still be billed.
   `:model` overrides `model/0`.
+  `:tool_handler` can intercept an intrinsic tool and return `{:ok, text}` or
+  `{:error, text}`. It returns `:dispatch` for the normal Scheme/MCP path.
   """
   def run_tool_loop(messages, system, specs, dispatcher, opts \\ []) do
     tools = Enum.map(specs, &tool_json/1)
@@ -148,8 +150,15 @@ defmodule Aimax.Core.LLM do
 
             {result, error?} =
               case gate_call(opts[:gate], b["name"], b["input"]) do
-                :allow -> run_tool(dispatcher, b["name"], b["input"])
-                {:deny, why} -> {"permission denied: #{why}", true}
+                :allow ->
+                  case intrinsic_tool(opts[:tool_handler], b["name"], b["input"]) do
+                    :dispatch -> run_tool(dispatcher, b["name"], b["input"])
+                    {:ok, text} -> {to_string(text), false}
+                    {:error, text} -> {"error: #{text}", true}
+                  end
+
+                {:deny, why} ->
+                  {"permission denied: #{why}", true}
               end
 
             if opts[:on_tool_done], do: opts[:on_tool_done].(b["id"], result)
@@ -196,6 +205,9 @@ defmodule Aimax.Core.LLM do
   # no gate configured (a bare (llm-tools ...) call) runs as before
   defp gate_call(nil, _name, _input), do: :allow
   defp gate_call(gate, name, input), do: gate.(name, input)
+
+  defp intrinsic_tool(nil, _name, _input), do: :dispatch
+  defp intrinsic_tool(handler, name, input), do: handler.(name, input)
 
   # An empty content list is not a message any provider accepts, so it is
   # not a record entry either.

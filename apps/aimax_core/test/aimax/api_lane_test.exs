@@ -105,7 +105,7 @@ defmodule Aimax.ApiLaneTest do
     # the card says what it DID without being opened: the tool's name and
     # the first line of the argument that matters. Formatting is Scheme's
     # (packages/agent.scm) — the backend sends the call and the result raw.
-    assert text =~ "▸ tool · eval-scheme · (+ 20 22)"
+    assert text =~ "▸ tool · eval-scheme: (+ 20 22)"
 
     # an adapter that has only a title keeps its title
     assert {:ok, ~s{"Read foo.ex"}} =
@@ -173,6 +173,9 @@ defmodule Aimax.ApiLaneTest do
 
     {:ok, _} = Session.eval(~s{(execute* "" '(connector "api"))})
     buf = "*chat:a1*"
+    # This test controls the task turn. The independent small-model chat
+    # namer must not consume its {:sent, ...} synchronization message.
+    Buffer.set_local(buf, "chat-renamed-at", 1)
     focus(buf)
 
     type("first message")
@@ -201,6 +204,70 @@ defmodule Aimax.ApiLaneTest do
     focus(buf)
     press(["C-RET"])
     assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
+  end
+
+  test "ask blocks the tool loop, returns an arbitrary user answer, and resumes" do
+    me = self()
+
+    stub_chat(fn req ->
+      result? =
+        Enum.any?(req.messages, fn message ->
+          is_list(message.content) and
+            Enum.any?(message.content, &(Map.get(&1, :type) == "tool_result"))
+        end)
+
+      if result? do
+        send(me, {:ask_resumed, req.messages})
+
+        {:ok,
+         %{
+           "stop_reason" => "end_turn",
+           "content" => [%{"type" => "text", "text" => "I will stay here."}],
+           "usage" => %{"input_tokens" => 2, "output_tokens" => 1}
+         }}
+      else
+        ask = Enum.find(req.tools, &(&1.name == "ask"))
+        send(me, {:ask_schema, ask.input_schema})
+
+        {:ok,
+         %{
+           "stop_reason" => "tool_use",
+           "content" => [
+             %{
+               "type" => "tool_use",
+               "id" => "ask_1",
+               "name" => "ask",
+               "input" => %{
+                 "question" => "Open a workspace?",
+                 "answers" => ["Yes", "No", "Diff first", "Explain"]
+               }
+             }
+           ],
+           "usage" => %{"input_tokens" => 1, "output_tokens" => 1}
+         }}
+      end
+    end)
+
+    {:ok, _} = Session.eval(~s{(execute* "plan this feature" '(connector "api"))})
+
+    assert_receive {:ask_schema, schema}, 2_000
+    assert get_in(schema, ["properties", "answers", "type"]) == "array"
+    assert get_in(schema, ["properties", "answers", "items", "type"]) == "string"
+
+    assert eventually(fn ->
+             match?(
+               %{status: :needs_attention, question: %{answers: [_, _, _, _]}},
+               Agent.info("a1")
+             )
+           end)
+
+    %{question: %{id: id}} = Agent.info("a1")
+    assert :ok = Agent.respond_question("a1", id, "No")
+
+    assert_receive {:ask_resumed, messages}, 2_000
+    assert inspect(messages) =~ "No"
+    assert eventually(fn -> Buffer.text("*chat:a1*") =~ "I will stay here." end)
+    assert eventually(fn -> match?(%{status: :idle, question: nil}, Agent.info("a1")) end)
   end
 
   test "C-g aborts the turn in flight, and quits the usual way when idle" do

@@ -165,6 +165,20 @@ defmodule Aimax.ChatAgentTest do
     assert eval!(~s{(buffer-local "#{buf}" 'modeline-info)}) =~ "claude-opus-5"
   end
 
+  test "execute* gives a spawned chat an explicit working directory" do
+    directory = "/tmp/aimax-explicit-workspace/"
+    slug =
+      String.trim(
+        eval!(~s{(execute* "" '(connector "api" directory "#{directory}"))}),
+        "\""
+      )
+
+    buf = "*chat:#{slug}*"
+    on_exit(fn -> Aimax.Core.kill_buffer(buf) end)
+
+    assert eval!(~s{(buffer-local "#{buf}" 'default-directory)}) == ~s{"#{directory}"}
+  end
+
   test "a failed inline turn says why and clears its pending send" do
     buf = "*zz-inline-fail*"
     eval!(~s{(buffer-create "#{buf}")})

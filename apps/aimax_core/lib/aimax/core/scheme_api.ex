@@ -157,6 +157,8 @@ defmodule Aimax.Core.SchemeAPI do
         "(aimax-socket-path) — return the path of this daemon's JSON-RPC socket.",
       "daemon-restart!" =>
         "(daemon-restart!) — save the desktop, restart the daemon, and reload Scheme; return #t.",
+      "daemon-provision-workspace!" =>
+        "(daemon-provision-workspace! PATH NAME) — start or reuse a daemon from PATH; return (URL HOME PORT).",
       "goto-char!" => "(goto-char! POS) — move point to byte POS; return POS.",
       "forward-char!" =>
         "(forward-char!) — move point one character forward; return the new point.",
@@ -201,6 +203,16 @@ defmodule Aimax.Core.SchemeAPI do
         "(clipboard-put! TEXT) — put TEXT on the OS clipboard of this frame's client.",
       "editor-url" =>
         "(editor-url) — return the base URL this editor serves, e.g. http://localhost:4004.",
+      "daemon-name" => "(daemon-name) — return this daemon's configured name.",
+      "daemon-source-root" =>
+        "(daemon-source-root) — return the checkout that supplies this daemon's code.",
+      "daemon-workspace-root" =>
+        "(daemon-workspace-root) — return this daemon's workspace root, or #f.",
+      "daemon-set-workspace-label!" =>
+        "(daemon-set-workspace-label! PROJECT NAME) — set this daemon's frame-wide workspace label.",
+      "daemon-registry-path" =>
+        "(daemon-registry-path) — return the shared daemon registry file path.",
+      "navigate-url!" => "(navigate-url! URL) — navigate this frame's browser tab to URL.",
       "buffer-set-local!" => "(buffer-set-local! BUF KEY VALUE) — set a buffer-local variable.",
       "buffer-local" =>
         "(buffer-local BUF KEY) — return a buffer-local variable's value, or #f if unset.",
@@ -221,6 +233,8 @@ defmodule Aimax.Core.SchemeAPI do
         "(ts-children KIND START END) — the named children of that node as ((KIND START END) ...); the range 0..SIZE names the whole file.",
       "ts-query" =>
         "(ts-query QUERY) — run a tree-sitter query; return (CAPTURE START END) byte ranges.",
+      "ts-query-string" =>
+        "(ts-query-string LANG TEXT QUERY) — run a tree-sitter query on detached text; return (CAPTURE START END) byte ranges.",
       "ts-langs" => "(ts-langs) — return the names of the loaded tree-sitter languages.",
       "ts-highlight-string" =>
         "(ts-highlight-string LANG TEXT) — highlight TEXT as LANG; return (START END SCOPE) byte ranges, () for an unknown language.",
@@ -653,6 +667,16 @@ defmodule Aimax.Core.SchemeAPI do
               message: "could not respawn the daemon: #{inspect(out)}"
         end
       end,
+      "daemon-provision-workspace!" => fn [workspace, name] ->
+        case Aimax.Core.Daemon.provision_workspace(workspace, name) do
+          {:ok, %{url: url, home: home, port: port}} ->
+            [url, home, port]
+
+          {:error, reason} ->
+            raise Aimax.Scheme.Eval.Error,
+              message: "workspace daemon failed: #{inspect(reason)}"
+        end
+      end,
       "goto-char!" => fn [pos] ->
         Buffer.goto(Editor.current_buffer(), pos)
         pos
@@ -740,6 +764,28 @@ defmodule Aimax.Core.SchemeAPI do
       # (tests, RPC with no web app) still answers with the default
       "editor-url" => fn [] ->
         :persistent_term.get(:aimax_editor_url, "http://localhost:4004")
+      end,
+      "daemon-name" => fn [] -> Application.get_env(:aimax_core, :name, "aimax") end,
+      "daemon-source-root" => fn [] -> File.cwd!() end,
+      "daemon-workspace-root" => fn [] ->
+        Application.get_env(:aimax_core, :workspace_root, false)
+      end,
+      "daemon-set-workspace-label!" => fn [project, name] ->
+        Application.put_env(:aimax_core, :workspace_project, to_string(project))
+        Application.put_env(:aimax_core, :workspace_name, to_string(name))
+        Aimax.Core.Events.broadcast_editor(:workspace_label)
+        :void
+      end,
+      "daemon-registry-path" => fn [] ->
+        Application.get_env(
+          :aimax_core,
+          :daemon_registry_path,
+          Path.expand("~/.aimax/daemons.json")
+        )
+      end,
+      "navigate-url!" => fn [url] ->
+        Editor.navigate(url)
+        :void
       end,
 
       # buffer-local variables
@@ -832,6 +878,18 @@ defmodule Aimax.Core.SchemeAPI do
             lang
             |> Aimax.Core.TS.ts_query_nif(Buffer.text(buf), query)
             |> Enum.map(fn {cap, s, e} -> [cap, s, e] end)
+        end
+      end,
+      # Detached text has no buffer parser state. Search commands use this
+      # mechanism for a file or an explicit language without changing a
+      # buffer's mode or its incremental parser.
+      "ts-query-string" => fn [lang, text, query] ->
+        if is_binary(lang) and is_binary(text) and is_binary(query) do
+          lang
+          |> Aimax.Core.TS.ts_query_nif(text, query)
+          |> Enum.map(fn {cap, s, e} -> [cap, s, e] end)
+        else
+          []
         end
       end,
       "ts-langs" => fn [] -> Aimax.Core.TS.ts_langs() end,
@@ -994,6 +1052,8 @@ defmodule Aimax.Core.SchemeAPI do
           Map.new(handlers, fn [k, v] ->
             case plain(k) do
               "initial" -> {:input, v}
+              # A dynamic provider has already filtered/ranked its results.
+              "filter" -> {:filter, v}
               "match-hint" -> {:match_hint, v}
               # "palette" renders the prompt as a centered panel
               "style" -> {:style, v}

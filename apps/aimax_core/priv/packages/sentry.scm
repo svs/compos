@@ -474,5 +474,4 @@
   "M-x sentry — list unresolved production issues and open safe summaries")
 
 (defrecipe! "inspect unresolved production errors"
-  "(sentry)"
-  '())
+  "(sentry)")

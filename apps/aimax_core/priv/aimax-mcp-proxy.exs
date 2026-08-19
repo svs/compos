@@ -15,8 +15,12 @@ defmodule AimaxProxy do
 
   def loop do
     case IO.gets("") do
-      :eof -> :ok
-      {:error, _} -> :ok
+      :eof ->
+        :ok
+
+      {:error, _} ->
+        :ok
+
       line ->
         line |> String.trim() |> handle()
         loop()
@@ -36,21 +40,17 @@ defmodule AimaxProxy do
 
       %{"method" => "tools/list", "id" => id} ->
         case rpc_eval("(mcp-proxy-tools-json)") do
-          {:ok, b64} -> reply(id, %{tools: b64 |> unprint() |> Base.decode64!() |> :json.decode()})
-          {:error, msg} -> reply_error(id, msg)
+          {:ok, b64} ->
+            reply(id, %{tools: b64 |> unprint() |> Base.decode64!() |> :json.decode()})
+
+          {:error, msg} ->
+            reply_error(id, msg)
         end
 
       %{"method" => "tools/call", "id" => id, "params" => %{"name" => name, "arguments" => args}} ->
-        args_b64 =
-          %{}
-          |> Map.merge(args || %{})
-          |> json_encode()
-          |> IO.iodata_to_binary()
-          |> Base.encode64()
-
-        case rpc_eval(~s{(mcp-proxy-call "#{name}" "#{args_b64}"#{author_arg()})}) do
-          {:ok, b64} ->
-            reply(id, %{content: [%{type: "text", text: b64 |> unprint() |> Base.decode64!()}]})
+        case call_tool(name, args || %{}) do
+          {:ok, text} ->
+            reply(id, %{content: [%{type: "text", text: text}]})
 
           {:error, msg} ->
             reply(id, %{content: [%{type: "text", text: "error: #{msg}"}], isError: true})
@@ -76,34 +76,105 @@ defmodule AimaxProxy do
   # Slugs are machine-generated, but strip quote-breaking bytes anyway —
   # this string lands inside an eval form.
   defp author_arg do
-    case System.get_env("AIMAX_AGENT") do
+    case agent_slug() do
       nil -> ""
-      slug -> ~s{ "agent:#{String.replace(slug, ~r/["\\\n]/, "")}"}
+      slug -> ~s{ "agent:#{slug}"}
+    end
+  end
+
+  defp agent_slug do
+    case System.get_env("AIMAX_AGENT") do
+      nil -> nil
+      slug -> String.replace(slug, ~r/["\\\n]/, "")
+    end
+  end
+
+  defp call_tool("ask", %{"question" => question} = args) when is_binary(question) do
+    case agent_slug() do
+      nil ->
+        {:error, "ask requires an agent chat"}
+
+      slug ->
+        answers =
+          if is_list(args["answers"]), do: Enum.map(args["answers"], &to_string/1), else: []
+
+        rpc_request("agent/ask", %{slug: slug, question: question, answers: answers}, :infinity)
+    end
+  end
+
+  defp call_tool("ask", _args), do: {:error, "ask requires a question and an answers array"}
+
+  defp call_tool(name, args) do
+    args_b64 =
+      %{}
+      |> Map.merge(args)
+      |> json_encode()
+      |> IO.iodata_to_binary()
+      |> Base.encode64()
+
+    case rpc_eval(~s{(mcp-proxy-call "#{name}" "#{args_b64}"#{author_arg()})}) do
+      {:ok, b64} -> {:ok, b64 |> unprint() |> Base.decode64!()}
+      error -> error
     end
   end
 
   defp rpc_eval(code) do
+    rpc_request("eval", %{code: code}, 600_000)
+  end
+
+  defp rpc_request(method, params, timeout) do
     req =
-      %{jsonrpc: "2.0", id: 1, method: "eval", params: %{code: code}}
+      %{jsonrpc: "2.0", id: 1, method: method, params: params}
       |> json_encode()
       |> IO.iodata_to_binary()
 
     with {:ok, s} <-
-           :gen_tcp.connect({:local, String.to_charlist(sock())}, 0,
-             [:binary, active: false, packet: :line],
+           :gen_tcp.connect(
+             {:local, String.to_charlist(sock())},
+             0,
+             [:binary, active: false, packet: :raw],
              5_000
-           ),
-         :ok <- :gen_tcp.send(s, req <> "\n"),
-         {:ok, resp} <- :gen_tcp.recv(s, 0, 600_000) do
-      :gen_tcp.close(s)
+           ) do
+      try do
+        with :ok <- :gen_tcp.send(s, req <> "\n"),
+             {:ok, resp} <- recv_line(s, "", timeout) do
+          decode_rpc_response(resp)
+        else
+          err -> {:error, "aimax rpc unreachable: #{inspect(err)}"}
+        end
+      after
+        :gen_tcp.close(s)
+      end
+    else
+      err -> {:error, "aimax rpc unreachable: #{inspect(err)}"}
+    end
+  end
 
+  # Unix-domain sockets are streams. One recv can return only part of a large
+  # JSON-RPC response, even though the protocol uses one newline-delimited
+  # frame. Accumulate bytes until that delimiter instead of decoding a chunk.
+  defp recv_line(socket, acc, timeout) do
+    case :binary.match(acc, "\n") do
+      {at, 1} ->
+        {:ok, binary_part(acc, 0, at)}
+
+      :nomatch ->
+        case :gen_tcp.recv(socket, 0, timeout) do
+          {:ok, chunk} -> recv_line(socket, acc <> chunk, timeout)
+          error -> error
+        end
+    end
+  end
+
+  defp decode_rpc_response(resp) do
+    try do
       case :json.decode(resp) do
         %{"result" => r} -> {:ok, r}
         %{"error" => e} -> {:error, e["message"] || "rpc error"}
         _ -> {:error, "bad rpc response"}
       end
-    else
-      err -> {:error, "aimax rpc unreachable: #{inspect(err)}"}
+    rescue
+      error -> {:error, "bad rpc response: #{Exception.message(error)}"}
     end
   end
 

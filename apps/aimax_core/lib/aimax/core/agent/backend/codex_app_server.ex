@@ -41,6 +41,10 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
     do: GenServer.call(pid, {:respond_permission, rpc_id, option_id})
 
   @impl Backend
+  def respond_question(pid, rpc_id, answer),
+    do: GenServer.call(pid, {:respond_question, rpc_id, answer})
+
+  @impl Backend
   def capabilities, do: [:models, :streaming, :reasoning_effort]
 
   @impl GenServer
@@ -122,6 +126,19 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
       case permission_result(request_info, option_id) do
         {:ok, result} -> respond(state, rpc_id, result)
         :unknown -> respond_error(state, rpc_id, -32601, "unsupported approval request")
+      end
+
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:respond_question, rpc_id, answer}, _from, state) do
+    {request_info, pending} = Map.pop(state.pending_server, rpc_id)
+    state = %{state | pending_server: pending}
+
+    state =
+      case question_result(request_info, answer) do
+        {:ok, result} -> respond(state, rpc_id, result)
+        :unknown -> respond_error(state, rpc_id, -32601, "unsupported question request")
       end
 
     {:reply, :ok, state}
@@ -257,20 +274,27 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
     end
   end
 
-  # Requests initiated by Codex (approvals and, eventually, dynamic tools).
+  # Requests initiated by Codex. Approval and elicitation are deliberately
+  # separate interaction channels: only approvals inherit permission policy.
   defp handle_frame(state, %{"id" => id, "method" => method} = frame) do
     params = Map.get(frame, "params", %{})
 
-    if method in [
-         "item/commandExecution/requestApproval",
-         "item/fileChange/requestApproval",
-         "item/permissions/requestApproval",
-         "mcpServer/elicitation/request"
-       ] do
-      state = %{state | pending_server: Map.put(state.pending_server, id, {method, params})}
-      emit_permission(state, id, method, params)
-    else
-      respond_error(state, id, -32601, "method not supported: #{method}")
+    case method do
+      method
+      when method in [
+             "item/commandExecution/requestApproval",
+             "item/fileChange/requestApproval",
+             "item/permissions/requestApproval"
+           ] ->
+        state = %{state | pending_server: Map.put(state.pending_server, id, {method, params})}
+        emit_permission(state, id, method, params)
+
+      "mcpServer/elicitation/request" ->
+        state = %{state | pending_server: Map.put(state.pending_server, id, {method, params})}
+        emit_question(state, id, params)
+
+      _ ->
+        respond_error(state, id, -32601, "method not supported: #{method}")
     end
   end
 
@@ -557,9 +581,6 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
         "item/fileChange/requestApproval" ->
           {Map.get(params, "reason") || "Edit files", "edit"}
 
-        "mcpServer/elicitation/request" ->
-          {Map.get(params, "message") || "Use #{Map.get(params, "serverName", "MCP")} tool", "mcp"}
-
         _ ->
           {Map.get(params, "reason") || "Grant additional permissions", "permissions"}
       end
@@ -573,9 +594,37 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
       options: [
         ["allow_once", "Allow", "allow_once"],
         ["allow_always", "Always", "allow_always"],
-        ["reject_once", "Reject", "reject_once"]
+        ["reject_once", "Deny", "reject_once"]
       ]
     )
+  end
+
+  defp emit_question(state, id, params) do
+    emit(state,
+      type: :question,
+      id: id,
+      question: Map.get(params, "message") || "Choose an answer",
+      answers: elicitation_answers(params),
+      raw: json_text(params)
+    )
+  end
+
+  defp elicitation_answers(params) do
+    case elicitation_field(params) do
+      {_field, %{"enum" => answers}} when is_list(answers) -> Enum.map(answers, &to_string/1)
+      _ -> []
+    end
+  end
+
+  defp elicitation_field(params) do
+    case get_in(params, ["requestedSchema", "properties"]) do
+      properties when is_map(properties) ->
+        Enum.find(properties, fn {_field, spec} -> is_list(Map.get(spec, "enum")) end) ||
+          List.first(Map.to_list(properties))
+
+      _ ->
+        nil
+    end
   end
 
   defp permission_result({method, _params}, option_id)
@@ -604,22 +653,22 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
     {:ok, %{"permissions" => permissions, "scope" => scope}}
   end
 
-  # Codex funnels MCP tool confirmation through elicitation rather than the
-  # command/file approval methods.  It is still governed by aimax's one
-  # permission policy; accepted form elicitations need no user-supplied fields
-  # for a tool call, only the protocol action.
-  defp permission_result({"mcpServer/elicitation/request", _params}, option_id) do
-    action =
-      case option_id do
-        option when option in ["allow_once", "allow_always"] -> "accept"
-        "reject_once" -> "decline"
-        _ -> "cancel"
+  defp permission_result(_, _), do: :unknown
+
+  defp question_result({"mcpServer/elicitation/request", _params}, nil),
+    do: {:ok, %{"action" => "cancel", "content" => nil}}
+
+  defp question_result({"mcpServer/elicitation/request", params}, answer) do
+    field =
+      case elicitation_field(params) do
+        {name, _schema} -> name
+        nil -> "answer"
       end
 
-    {:ok, %{"action" => action, "content" => nil}}
+    {:ok, %{"action" => "accept", "content" => %{field => to_string(answer)}}}
   end
 
-  defp permission_result(_, _), do: :unknown
+  defp question_result(_, _), do: :unknown
 
   defp turn_error(turn) do
     case Map.get(turn, "error") do

@@ -1,6 +1,10 @@
-# ai-max.el
+# koel
 
 Emacs rebuilt on the BEAM.
+
+Koel is a headless editor daemon in Elixir, scripted in Scheme, rendered
+by the browser. The code keeps its working name: the apps, the env vars,
+and `~/.aimax` all say `aimax`.
 
 ## Philosophy
 
@@ -9,7 +13,7 @@ application state. Windows compose views. Named commands give people and
 agents one semantic action surface. Modes add contextual behavior, and the
 Lisp runtime keeps the whole environment open to inspection and change.
 
-The missing pieces are modern rendering and concurrency. ai-max.el uses the
+The missing pieces are modern rendering and concurrency. Koel uses the
 browser as a renderer without adopting the browser's closed application model.
 The main window can show a rich application while chat remains beside it. The
 agent manipulates the same buffers, windows, and commands that the person uses.

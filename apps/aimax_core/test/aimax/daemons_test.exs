@@ -76,6 +76,66 @@ defmodule Aimax.DaemonsTest do
              "https://dev.example.test?daemon-switch=1"
   end
 
+  test "a stopped worktree daemon starts before the tab switches" do
+    workspace =
+      Path.join(System.tmp_dir!(), "daemon-switch-#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(Path.join(workspace, "apps/aimax_core"))
+    File.write!(Path.join(workspace, "mix.exs"), "# test checkout\n")
+    test = self()
+
+    Application.put_env(:aimax_core, :workspace_daemon_provisioner, fn path, name ->
+      send(test, {:daemon_started, path, name})
+      {:ok, %{url: "http://localhost:4212", home: "/tmp/a1-home", port: 4212}}
+    end)
+
+    on_exit(fn ->
+      Application.delete_env(:aimax_core, :workspace_daemon_provisioner)
+      File.rm_rf!(workspace)
+    end)
+
+    eval!(
+      ~s{(daemon-assign-workspace! "worktree-a1" "http://localhost:4204" "/tmp/a1-home" "#{workspace}")}
+    )
+
+    press(["C-x", "d"])
+    press("n")
+    press("RET")
+
+    assert_receive {:daemon_started, ^workspace, "a1"}
+
+    assert Editor.take_navigation("f-main") ==
+             "http://localhost:4212?daemon-switch=1"
+  end
+
+  test "a worktree switch stays put when its daemon cannot start" do
+    workspace =
+      Path.join(System.tmp_dir!(), "daemon-failed-#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(Path.join(workspace, "apps/aimax_core"))
+    File.write!(Path.join(workspace, "mix.exs"), "# test checkout\n")
+
+    Application.put_env(:aimax_core, :workspace_daemon_provisioner, fn _path, _name ->
+      {:error, :boot_failed}
+    end)
+
+    on_exit(fn ->
+      Application.delete_env(:aimax_core, :workspace_daemon_provisioner)
+      File.rm_rf!(workspace)
+    end)
+
+    eval!(
+      ~s{(daemon-assign-workspace! "worktree-broken" "http://localhost:4298" "/tmp/broken-home" "#{workspace}")}
+    )
+
+    press(["C-x", "d"])
+    press("n")
+    press("RET")
+
+    assert Editor.take_navigation("f-main") == nil
+    assert Editor.snapshot().echo =~ "workspace daemon failed"
+  end
+
   test "one workspace cannot belong to two registered daemons" do
     workspace = "/tmp/daemon-owned-#{System.unique_integer([:positive])}"
     daemon_url = eval!("(editor-url)") |> String.trim("\"")
@@ -148,5 +208,37 @@ defmodule Aimax.DaemonsTest do
     press("RET")
 
     assert_receive {:browser_frame, %{"op" => "open", "url" => "http://localhost:4208"}}
+  end
+
+  test "C-x w starts a stopped worktree daemon before opening its tab" do
+    stub_browser()
+
+    workspace =
+      Path.join(System.tmp_dir!(), "workspace-start-#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(Path.join(workspace, "apps/aimax_core"))
+    File.write!(Path.join(workspace, "mix.exs"), "# test checkout\n")
+    test = self()
+
+    Application.put_env(:aimax_core, :workspace_daemon_provisioner, fn path, name ->
+      send(test, {:daemon_started, path, name})
+      {:ok, %{url: "http://localhost:4214", home: "/tmp/a2-home", port: 4214}}
+    end)
+
+    on_exit(fn ->
+      Application.delete_env(:aimax_core, :workspace_daemon_provisioner)
+      File.rm_rf!(workspace)
+    end)
+
+    eval!(
+      ~s{(daemon-assign-workspace! "worktree-a2" "http://localhost:4208" "/tmp/a2-home" "#{workspace}")}
+    )
+
+    press(["C-x", "w"])
+    eval!(~s{(list-goto-first-entry "*workspaces*")})
+    press("RET")
+
+    assert_receive {:daemon_started, ^workspace, "a2"}
+    assert_receive {:browser_frame, %{"op" => "open", "url" => "http://localhost:4214"}}
   end
 end

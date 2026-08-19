@@ -172,7 +172,7 @@ defmodule Aimax.CodeModeTest do
     assert eval!(~s{(code-mode--browser-enabled? "#{buf}")}) == "#t"
   end
 
-  test "code-mode transparently assigns this frame one worktree, group, and chat" do
+  test "code-mode asks before it assigns this frame a worktree, group, and chat" do
     root = Path.join(System.tmp_dir!(), "cm-proj-#{System.os_time(:nanosecond)}")
     File.rm_rf!(root)
     File.rm_rf!("#{root}-worktrees")
@@ -211,10 +211,28 @@ defmodule Aimax.CodeModeTest do
     eval!(~s{(find-file "#{path}")})
     eval!(~s{(switch-to-buffer! "#{path}")})
 
-    # One command enters the coding surface. Worktree setup stays transparent.
+    # The current checkout is the safe default until the user chooses a
+    # separate worktree through the real one-key prompt.
     press(["M-x"])
     type("code-mode")
     press(["RET"])
+
+    assert Editor.snapshot().minibuffer.prompt == "Create a new worktree for code mode? (y or n) "
+    refute File.dir?("#{root}-worktrees/a1")
+    press("n")
+
+    assert Editor.current_buffer() == path
+    assert Buffer.get_local(path, "workspace-isolation-choice") == "current"
+    assert Buffer.get_local(path, "group") == root
+    refute File.dir?("#{root}-worktrees/a1")
+    assert eval!(~s{(plist-get (agent-worktree-opts "#{path}" "a1" '()) 'cwd)}) == "#f"
+
+    eval!(~s{(run-command "code-mode")})
+    press(["M-x"])
+    type("code-mode")
+    press(["RET"])
+    assert Editor.snapshot().minibuffer.prompt == "Create a new worktree for code mode? (y or n) "
+    press("y")
 
     task_file = Editor.current_buffer()
     workspace = Buffer.get_local(task_file, "workspace-root")
@@ -234,7 +252,7 @@ defmodule Aimax.CodeModeTest do
     press(["C-x", "C-s"])
     assert File.read!(path) == "defmodule One do\nend\n"
     assert File.read!(task_file) == "defmodule TaskOne do\nend\n"
-    assert Buffer.get_local(path, "group") == nil
+    assert Buffer.get_local(path, "group") in [nil, false]
 
     press(["C-c", "c"])
     chat = Editor.current_buffer()

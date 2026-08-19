@@ -172,6 +172,43 @@
       (daemon-set-workspace-label! project name))
     name))
 
+(define (daemon--aimax-workspace? workspace)
+  (and (string? workspace)
+       (file-directory? workspace)
+       (file-exists? (string-append workspace "/mix.exs"))
+       (file-directory? (string-append workspace "/apps/aimax_core"))))
+
+(define (daemon--workspace-id entry)
+  (let ((name (or (plist-get entry 'name) "workspace")))
+    (if (string-prefix? "worktree-" name)
+        (substring name 9 (string-length name))
+        name)))
+
+;; A registry entry is durable, but its process is not. Start a local
+;; worktree daemon and wait for its port before a browser leaves this daemon.
+(define (daemon-ensure-workspace! workspace)
+  (let ((owner (daemon-workspace-owner workspace)))
+    (cond
+      ((not owner) #f)
+      ((equal? (plist-get owner 'url) (editor-url)) (editor-url))
+      ((daemon--aimax-workspace? workspace)
+       (let* ((project (plist-get owner 'workspace-project))
+              (name (plist-get owner 'workspace-name))
+              (info (daemon-provision-workspace!
+                      workspace (daemon--workspace-id owner)))
+              (url (car info))
+              (home (cadr info)))
+         (daemon-assign-workspace! (plist-get owner 'name) url home workspace)
+         (when (and project name)
+           (daemon-name-workspace! workspace project name))
+         url))
+      (else (plist-get owner 'url)))))
+
+(define (daemon--ensure-entry! entry)
+  (let ((workspace (plist-get entry 'workspace)))
+    (or (and workspace (daemon-ensure-workspace! workspace))
+        (plist-get entry 'url))))
+
 (define (daemon--rows buf)
   (let* ((url (editor-url))
          (entries (daemon-registry-entries))
@@ -255,7 +292,7 @@
       (when entry
         (if (equal? (plist-get entry 'url) (editor-url))
             (message "this tab already uses that daemon")
-            (let ((url (plist-get entry 'url)))
+            (let ((url (daemon--ensure-entry! entry)))
               (navigate-url!
                 (string-append url
                   (if (string-contains? url "?") "&" "?")
@@ -273,8 +310,10 @@
   (lambda ()
     (let ((row (list-current (current-buffer))))
       (if row
-          (begin
-            (tab-open (plist-get row 'url))
+          (let ((url (or (daemon-ensure-workspace!
+                           (plist-get row 'workspace))
+                         (plist-get row 'url))))
+            (tab-open url)
             (message (string-append "opened workspace "
                                     (or (plist-get row 'project) "") " / "
                                     (or (plist-get row 'name) "")
@@ -367,6 +406,8 @@
   "(daemon-assign-workspace! NAME URL LOCATION WORKSPACE) — assign a workspace to a specific daemon")
 (public! 'daemon-name-workspace!
   "(daemon-name-workspace! WORKSPACE PROJECT NAME) — set the human project and workspace names")
+(public! 'daemon-ensure-workspace!
+  "(daemon-ensure-workspace! WORKSPACE) — start its local daemon and wait until it accepts connections")
 (public! 'daemon-arrived!
   "(daemon-arrived!) — announce this daemon and the frame's restored workspace")
 (public! 'daemons "M-x daemons or C-x d — switch this tab to another daemon")

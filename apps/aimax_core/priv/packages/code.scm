@@ -864,6 +864,19 @@
 
 (register-minor-mode! "code-mode" code-mode--apply! code-mode--teardown!)
 
+(define (code-mode--enable! buf use-worktree)
+  (buffer-set-local! buf 'workspace-isolation-choice
+    (if use-worktree "worktree" "current"))
+  (let ((target (if (and use-worktree
+                         (boundp (quote worktree-init-buffer!)))
+                    (worktree-init-buffer! buf)
+                    buf)))
+    (buffer-set-local! target 'workspace-isolation-choice
+      (if use-worktree "worktree" "current"))
+    (enable-minor-mode! target "code-mode")
+    (message (string-append (code-mode--label target)
+                            " · C-c s scratch · M-o sends it"))))
+
 (define-command "code-mode" "Toggle the agent coding workspace in this buffer"
   (lambda ()
     (let ((buf (current-buffer)))
@@ -871,15 +884,15 @@
           (begin
             (disable-minor-mode! buf "code-mode")
             (message "Code mode disabled"))
-          (let ((target (if (boundp (quote worktree-init-buffer!))
-                            (worktree-init-buffer! buf)
-                            buf)))
-            (enable-minor-mode! target "code-mode")
-            (message (string-append (code-mode--label target)
-                                    " · C-c s scratch · M-o sends it")))))))
+          (if (and (boundp (quote worktree-init-needs-new?))
+                   (worktree-init-needs-new? buf))
+              (y-or-n "Create a new worktree for code mode?"
+                (lambda () (code-mode--enable! buf #t))
+                (lambda () (code-mode--enable! buf #f)))
+              (code-mode--enable! buf #t))))))
 
 (mode-doc! "code-mode"
-  "The agent coding surface. Enabling it creates or enters an isolated task worktree before the agent starts.")
+  "The agent coding surface. Enabling it asks before it creates a task worktree. Existing worktrees open directly.")
 
 (public! 'code-mode "Toggle the agent coding workspace in the current buffer")
 (effects! '(pure))

@@ -42,6 +42,8 @@
 (define (scratch--inherit-llm! owner scratch)
   (buffer-set-local! scratch 'llm-model (buffer-local owner 'llm-model))
   (buffer-set-local! scratch 'chat-presets (buffer-local owner 'chat-presets))
+  (buffer-set-local! scratch 'workspace-isolation-choice
+    (buffer-local owner 'workspace-isolation-choice))
   (when (minor-mode-on? owner "llm-mode")
     (unless (minor-mode-on? scratch "llm-mode")
       (enable-minor-mode! scratch "llm-mode"))))

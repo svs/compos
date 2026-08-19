@@ -147,13 +147,23 @@
 (define (known-projects)
   (let ((text (read-file *projects-file*)))
     (if text
-        (filter (lambda (l) (not (equal? l ""))) (string-split text "\n"))
+        ;; A project has one canonical identity. Older project files can
+        ;; contain both ROOT and ROOT/; keep one row in the picker. A
+        ;; trailing slash is also dangerous at use time: joining ROOT/ and
+        ;; FILE creates ROOT//FILE, which normalize-file-input correctly
+        ;; reads as Emacs' "discard everything before //" syntax.
+        (dedupe-names
+          (map strip-trailing-slash
+               (filter (lambda (l) (not (equal? l "")))
+                       (string-split text "\n"))))
         '())))
 
 (define (project-remember! root)
-  (if (and root (not (member root (known-projects))))
-      (write-file! *projects-file*
-        (string-append (string-join (cons root (known-projects)) "\n") "\n"))))
+  (when root
+    (let ((root (strip-trailing-slash root)))
+      (if (not (member root (known-projects)))
+          (write-file! *projects-file*
+            (string-append (string-join (cons root (known-projects)) "\n") "\n"))))))
 
 ;; every visited file teaches the editor its project
 (add-hook! 'find-file-hook

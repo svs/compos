@@ -772,6 +772,14 @@
          (leaf (worktree--leaf (buffer-path source))))
     (string-append workspace "/" prefix leaf)))
 
+;; Code mode can enter an existing linked worktree without a decision. It asks
+;; only when entering from the primary checkout would create a new worktree.
+(define (worktree-init-needs-new? buf)
+  (let* ((path (buffer-path buf))
+         (checkout (and path (git-root (buffer-directory buf)))))
+    (and (string? checkout)
+         (equal? checkout (or (worktree--primary checkout) checkout)))))
+
 (define (worktree--runs-aimax? root)
   (and (file-exists? (string-append root "/mix.exs"))
        (file-directory? (string-append root "/apps/aimax_core"))))
@@ -804,7 +812,9 @@
         (daemon-release-workspace! root)
         (worktree--provision-daemon! buf id root))
       (owner
-        (let ((url (plist-get owner 'url)))
+        (let ((url (if (boundp (quote daemon-ensure-workspace!))
+                       (daemon-ensure-workspace! root)
+                       (plist-get owner 'url))))
           (unless (equal? url (editor-url))
             (worktree--navigate-to-owner! url buf))
           url))
@@ -821,6 +831,7 @@
     (buffer-set-local! buf 'workspace-root root)
     (buffer-set-local! buf 'workspace-project-root project-root)
     (buffer-set-local! buf 'workspace-backend "git-worktree")
+    (buffer-set-local! buf 'workspace-isolation-choice "worktree")
     (buffer-set-local! buf 'workspace-daemon owner)
     (buffer-set-local! buf 'default-directory root)
     (let* ((entry (and (boundp (quote daemon-workspace-owner))
@@ -920,8 +931,8 @@
           (workspace--apply-llm-defaults! chat defaults))))
     chat))
 
-(defcustom 'agent-worktree-isolation #t
-  "When true, every new agent inside a Git checkout runs in its own worktree."
+(defcustom 'agent-worktree-isolation #f
+  "When true, a new agent creates a worktree unless the buffer chose the current checkout."
   'group 'chat 'type 'boolean)
 
 ;; chat-attach-agent! calls this (boundp-guarded) before llm-session-open!.
@@ -935,27 +946,40 @@
         ((null? (cdr opts)) #f)
         (else (worktree--opt-present? (cdr (cdr opts)) key))))
 
+(define (workspace--isolation-choice buf)
+  (or (buffer-local buf 'workspace-isolation-choice)
+      (let ((g (buffer-group buf)))
+        (and g
+             (let loop ((members (group-buffers g)))
+               (cond ((null? members) #f)
+                     ((buffer-local (car members) 'workspace-isolation-choice)
+                      (buffer-local (car members) 'workspace-isolation-choice))
+                     (else (loop (cdr members)))))))))
+
 (define (agent-worktree-opts buf slug opts)
   (let ((opts (or opts '())))
     (let ((workspace (buffer-local buf 'workspace-root))
-          (isolated? (if (worktree--opt-present? opts 'isolated)
-                         (plist-get opts 'isolated)
-                         agent-worktree-isolation)))
-      (cond ((plist-get opts 'cwd) opts)
-            (workspace (append (list 'cwd workspace) opts))
-            ((not isolated?) opts)
-            (else
-              (let ((root (git-root (buffer-directory buf))))
-                (if (not (string? root))
-                    opts
-                    (let ((dir (worktree-create root slug)))
-                      (if (string? dir)
-                          (begin
-                            (workspace--stamp! buf slug dir root)
-                            (append (list 'cwd dir) opts))
-                          (begin
-                            (message (string-append "worktree failed: " (cadr dir)))
-                            opts))))))))))
+          (choice (workspace--isolation-choice buf)))
+      (let ((isolated? (if (worktree--opt-present? opts 'isolated)
+                           (plist-get opts 'isolated)
+                           (if choice
+                               (equal? choice "worktree")
+                               agent-worktree-isolation))))
+        (cond ((plist-get opts 'cwd) opts)
+              (workspace (append (list 'cwd workspace) opts))
+              ((not isolated?) opts)
+              (else
+                (let ((root (git-root (buffer-directory buf))))
+                  (if (not (string? root))
+                      opts
+                      (let ((dir (worktree-create root slug)))
+                        (if (string? dir)
+                            (begin
+                              (workspace--stamp! buf slug dir root)
+                              (append (list 'cwd dir) opts))
+                            (begin
+                              (message (string-append "worktree failed: " (cadr dir)))
+                              opts)))))))))))
 
 (category! 'chat)
 (public! 'workspace-manage
@@ -966,6 +990,8 @@
 (effects! '(write external))
 (public! 'worktree-init-buffer!
   "(worktree-init-buffer! BUF) — enter or create BUF's isolated coding workspace")
+(public! 'worktree-init-needs-new?
+  "(worktree-init-needs-new? BUF) — true when workspace initialization would create a worktree")
 (public! 'workspace-finish-reminder!
   "(workspace-finish-reminder! BUF SLUG) — announce diff, rebase, land, and cancel after a turn")
 (public! 'workspace-name-from-chat!

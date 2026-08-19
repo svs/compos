@@ -4888,7 +4888,8 @@
     chat-presets chat-permission-mode render-mode default-directory
     agent-permission-profile window-class header-line
     workspace-id workspace-name workspace-root workspace-project-root
-    workspace-backend workspace-daemon workspace-llm-defaults))
+    workspace-backend workspace-daemon workspace-llm-defaults
+    workspace-isolation-choice))
 
 ;; what was SAID — survives restart and save; reset clears it
 ;; ('chat-turns is the pre-record shape: chat-record-migrate! reads it once

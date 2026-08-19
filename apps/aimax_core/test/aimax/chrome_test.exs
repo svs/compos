@@ -10,7 +10,7 @@ defmodule Aimax.ChromeTest do
 
   use ExUnit.Case
 
-  alias Aimax.Core.{Browser, Buffer, Session}
+  alias Aimax.Core.{Browser, Buffer, Editor, Session}
 
   defp eval!(src) do
     {:ok, printed} = Session.eval(src)
@@ -409,6 +409,50 @@ defmodule Aimax.ChromeTest do
       eval!(~s[(tab-open "https://example.com/")])
       assert_receive {:frame, %{"op" => "open"} = f}
       refute Map.has_key?(f, "window")
+    end
+  end
+
+  describe "refresh-frames" do
+    test "sweeps every frame no browser tab answers for, keeps the rest" do
+      stub_socket()
+
+      here = this_frame()
+      {:ok, shown} = Editor.attach_frame(nil)
+      {:ok, dead1} = Editor.attach_frame(nil)
+      {:ok, dead2} = Editor.attach_frame(nil)
+      on_exit(fn -> Enum.each([shown], &Editor.delete_frame/1) end)
+
+      # attach_frame bumps the frame MRU, so pin the command's own frame
+      assert :ok = Session.run_command("refresh-frames", here)
+
+      assert_receive {:frame, %{"op" => "frames", "id" => id}}, 2000
+
+      Browser.incoming(
+        Jason.encode!(%{
+          "id" => id,
+          "ok" => true,
+          "result" => %{"frames" => [%{"window" => 91, "tab" => 7, "frame" => shown}]}
+        })
+      )
+
+      assert eventually(fn ->
+               frames = Editor.frame_list()
+               dead1 not in frames and dead2 not in frames
+             end)
+
+      frames = Editor.frame_list()
+      assert here in frames
+      assert shown in frames
+    end
+  end
+
+  defp eventually(fun, tries \\ 40) do
+    cond do
+      fun.() -> true
+      tries == 0 -> false
+      true ->
+        Process.sleep(50)
+        eventually(fun, tries - 1)
     end
   end
 

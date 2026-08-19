@@ -405,6 +405,12 @@
 (define (tab-cdp tab method params k)
   (chrome-call "cdp" (list 'tab (chrome--tab-id tab) 'method method 'params params) k))
 
+;; K gets one plist per ai-max tab the browser holds: window, tab, frame.
+;; The extension probes every localhost tab, so a background editor tab
+;; still reports its frame.
+(define (browser-frames k)
+  (chrome-call "frames" '() (lambda (r) (k (chrome--get r 'frames)))))
+
 ;;; --- commands ----------------------------------------------------------------
 
 ;; every surface names a tab the same way (dup #7): the label from
@@ -423,6 +429,34 @@
             tabs)
           (display-buffer buf)
           (message (string-append (number->string (length tabs)) " tabs")))))))
+
+;; Frames are only ever deleted by hand, so closed tabs pile them up and
+;; the desktop restores the pile. The sweep keeps every frame a browser
+;; tab answers for, plus the frame this command runs in. A client without
+;; the extension is not seen — do not sweep while one is open.
+(domain! 'chrome)
+(effects! '(read))
+
+(public! 'browser-frames
+  "(browser-frames K) — K gets one plist per ai-max browser tab: window, tab, frame")
+
+(effects! '(destroy))
+
+(define-command "refresh-frames" "Delete frames no browser tab shows"
+  (lambda ()
+    (let ((here (selected-frame)))
+      (browser-frames
+        (lambda (bound)
+          (let* ((live (cons here (map (lambda (e) (chrome--get e 'frame)) bound)))
+                 (dead (filter (lambda (f) (not (member f live))) (frame-list))))
+            (for-each (lambda (f) (delete-frame! f)) dead)
+            (message (string-append "frames: dropped "
+                                    (number->string (length dead))
+                                    ", kept "
+                                    (number->string (length (frame-list)))))))))))
+
+(domain! 'unknown)
+(effects! '(unknown))
 
 (define-command "switch-to-tab" "Pick a browser tab and bring it to the front"
   (lambda ()

@@ -210,6 +210,27 @@ async function windowExists(windowId) {
 }
 
 const OPS = {
+  // Every ai-max tab answers a frame probe with its frame id. The daemon
+  // sweeps frames with M-x refresh-frames: a frame no tab answers for is
+  // dead. Probe ALL localhost tabs, not the editors map — that map keeps
+  // one binding per window, and a background ai-max tab still holds a
+  // live frame.
+  async frames() {
+    const tabs = await chrome.tabs.query({ url: ["http://localhost/*", "http://127.0.0.1/*"] });
+    const out = [];
+    await Promise.all(
+      tabs.map(async (t) => {
+        try {
+          const r = await chrome.tabs.sendMessage(t.id, { cmd: "frame" });
+          if (r?.frame) out.push({ window: t.windowId, tab: t.id, frame: r.frame });
+        } catch {
+          /* not an ai-max page, or no content script in it */
+        }
+      })
+    );
+    return { frames: out };
+  },
+
   async tabs() {
     const tabs = await chrome.tabs.query({});
     return {

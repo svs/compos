@@ -678,13 +678,18 @@
          (t (string-trim t)))
     (if (> (string-length t) 60) (string-trim (substring t 0 60)) t)))
 
-;; the same title twice is two chats about one subject: number the later one
-(define (chat-rename-unique base)
+;; The same title twice is two chats about one subject: number the later
+;; one. BUF's own name is not a collision — the namer often answers with
+;; the title the chat already has, and that must stay a no-op. Without
+;; this check the chat renames itself to " 2", the old name heals back
+;; as an empty buffer, and the next naming turn flips it again.
+(define (chat-rename-unique buf base)
   (let loop ((n 1))
     (let ((name (if (= n 1)
                     (string-append "*" base "*")
                     (string-append "*" base " " (number->string n) "*"))))
       (cond ((> n 20) #f)
+            ((equal? name buf) name)
             ((buffer-exists? name) (loop (+ n 1)))
             (else name)))))
 
@@ -693,7 +698,7 @@
 (define (chat-rename-apply! buf title)
   (let ((clean (chat-rename-clean title)))
     (unless (equal? clean "")
-      (let ((name (chat-rename-unique clean)))
+      (let ((name (chat-rename-unique buf clean)))
         (when (and name (buffer-exists? buf) (not (equal? name buf)))
           (when (rename-buffer! buf name)
             (when (boundp (quote workspace-name-from-chat!))

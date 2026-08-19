@@ -80,8 +80,14 @@ defmodule Aimax.ChatRenameTest do
 
     test "two chats about one subject get numbered" do
       buffer("*taken subject*", "")
-      assert eval!(~s{(chat-rename-unique "taken subject")}) == ~s{"*taken subject 2*"}
-      assert eval!(~s{(chat-rename-unique "free subject")}) == ~s{"*free subject*"}
+      assert eval!(~s{(chat-rename-unique "*me*" "taken subject")}) == ~s{"*taken subject 2*"}
+      assert eval!(~s{(chat-rename-unique "*me*" "free subject")}) == ~s{"*free subject*"}
+    end
+
+    test "a chat's own name is not a collision: the same title stays a no-op" do
+      buffer("*same subject*", "")
+      assert eval!(~s{(chat-rename-unique "*same subject*" "same subject")}) ==
+               ~s{"*same subject*"}
     end
 
     test "a chat in a file keeps the name of its file" do

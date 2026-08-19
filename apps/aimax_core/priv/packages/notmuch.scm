@@ -157,10 +157,24 @@ when a message has no text/plain part." 'group 'notmuch)
                                     (else "nm-subject")))
           (list s-end t-end "nm-tags"))))
 
+(define (nm--search-cells buf th)
+  (let ((tags (nm--th-tags th)))
+    (list (list (nm--th-date th) "nm-date")
+          (list (nm--th-authors th) "nm-author")
+          (list (nm--th-subject th)
+                (cond ((member "m" tags) "nm-marked")
+                      ((member "unread" tags) "nm-unread")
+                      (else "nm-subject")))
+          (list (string-join tags " ") "nm-tags"))))
+
+(define (nm--search-meta buf)
+  (string-append (number->string (length (list-entries buf)))
+                 " threads · " (nm--query-of buf)))
+
 ;; the list machinery owns the refresh, the row lookup and the header
 ;; offset (R8); these names stay for the commands and tests that call them
 (define (nm--refresh! buf) (list-refresh! buf))
-(define (nm--index-at buf) (line-index-at buf 1))
+(define (nm--index-at buf) (list-index buf))
 (define (nm--thread-at buf) (list-current buf))
 
 (mode-icon! "notmuch-mode" "")
@@ -173,11 +187,19 @@ when a message has no text/plain part." 'group 'notmuch)
            "on every marked thread. `s` starts a new search; `q` goes back "
            "to the mailboxes.")
     'rows nm--search-rows
-    'render (lambda (buf th) (nm--search-line th))
-    'overlays nm--search-overlays
-    'header (lambda (buf)
-              (string-append "notmuch: " (nm--query-of buf)
-                             " (" (number->string (length (list-entries buf))) ")"))
+    'columns (lambda (buf)
+               (list (list "date" 13) (list "author" 24)
+                     (list "subject" #f) (list "tags" 20)))
+    'cells nm--search-cells
+    'title (lambda (buf) "Mail")
+    'meta nm--search-meta
+    'total (lambda (buf) (length (list-entries buf)))
+    'no-marks #t
+    'footer (lambda (buf)
+              '(("RET" "open") ("SPC" "preview") ("m" "mark")
+                ("a" "archive") ("d" "trash") ("t" "tag")
+                ("s" "search") ("/" "filter") ("g" "refresh")
+                ("q" "mailboxes")))
     'keys '(("n" "notmuch-next") ("p" "notmuch-prev")
             ("RET" "notmuch-open-thread") ("SPC" "notmuch-preview")
             ("M-<" "notmuch-first-thread") ("M->" "notmuch-last-thread")
@@ -202,7 +224,7 @@ when a message has no text/plain part." 'group 'notmuch)
     (buffer-set-local! buf 'notmuch-query query)
     (switch-to-buffer! buf)
     (set-mode! "notmuch-mode")
-    (goto-char! 0) (next-line!) (beginning-of-line!)))
+    (list-goto-first-entry buf)))
 
 (define-command "notmuch-inbox" "Open the mail index on the default query"
   (lambda () (nm--open-index! notmuch-default-query)))
@@ -274,6 +296,12 @@ when a message has no text/plain part." 'group 'notmuch)
           (list n-end c-end "nm-date")
           (list c-end l-end "nm-tags"))))
 
+(define (nm--hello-cells buf row)
+  (list (list (car row) (if (> (list-ref row 3) 0) "nm-unread" "nm-author"))
+        (list (number->string (list-ref row 3)) "nm-date")
+        (list (number->string (list-ref row 2)) "nm-date")
+        (list (cadr row) "nm-tags")))
+
 (define (nm--hello-at buf) (list-current buf))
 
 (mode-icon! "notmuch-hello-mode" "")
@@ -286,9 +314,19 @@ when a message has no text/plain part." 'group 'notmuch)
            "search.")
     'buffer *notmuch-hello-buffer*
     'rows nm--hello-rows
-    'render (lambda (buf row) (nm--hello-line row))
-    'overlays nm--hello-overlays
-    'header (lambda (buf) "mailboxes")
+    'columns (lambda (buf)
+               (list (list "mailbox" 16) (list "unread" 7 'right)
+                     (list "total" 7 'right) (list "query" #f)))
+    'cells nm--hello-cells
+    'title (lambda (buf) "Mailboxes")
+    'meta (lambda (buf)
+            (string-append (number->string (length (list-entries buf))) " saved searches"))
+    'total (lambda (buf) (length (list-source-entries buf)))
+    'no-marks #t
+    'local-filter #t
+    'footer (lambda (buf)
+              '(("RET" "open") ("s" "search") ("/" "filter")
+                ("g" "refresh") ("q" "quit")))
     'keys '(("n" "next-line") ("p" "previous-line")
             ("RET" "notmuch-hello-open") ("g" "notmuch-hello-refresh")
             ("j" "notmuch-jump") ("s" "notmuch-search")
@@ -300,7 +338,7 @@ when a message has no text/plain part." 'group 'notmuch)
       (unless (buffer-exists? buf) (buffer-create buf))
       (switch-to-buffer! buf)
       (set-mode! "notmuch-hello-mode")
-      (goto-char! 0) (next-line!) (beginning-of-line!))))
+      (list-goto-first-entry buf))))
 
 (define-command "notmuch-hello-open" "Open the saved search at point"
   (lambda ()
@@ -1108,4 +1146,3 @@ when a message has no text/plain part." 'group 'notmuch)
   "(mail-tag! THREAD-ID CHANGES) — apply space-separated +tag/-tag changes to a thread; returns how many messages it actually matched (a real count, not a blind \"done\") — 0 means the thread id was wrong")
 (public! 'notmuch
   "(notmuch ARGS) — the raw notmuch CLI, ARGS is everything after `notmuch` as one string, e.g. \"tag -inbox -- from:luma.com\" or \"count -- tag:inbox from:luma.com\"; prefer this for bulk ops by query (archive/tag many at once) and for verifying a change actually happened, instead of enumerating thread ids one at a time")
-

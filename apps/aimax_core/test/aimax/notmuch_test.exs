@@ -115,7 +115,8 @@ defmodule Aimax.NotmuchTest do
     assert eval!("(current-buffer)") == ~s{"*notmuch*"}
 
     text = eval!(~s{(buffer-text "*notmuch*")})
-    assert text =~ "notmuch: tag:inbox (2)"
+    assert text =~ "Mail"
+    assert text =~ "2 threads · tag:inbox"
     assert text =~ "Hello world"
     assert text =~ "Quarterly report"
     assert text =~ "Alice"
@@ -321,8 +322,9 @@ defmodule Aimax.NotmuchTest do
     assert eval!("(current-buffer)") == ~s{"*mail*"}
     assert eval!(~s{(buffer-text "*mail*")}) =~ "Hi there, this is the body."
 
-    eval!(~s{(begin (switch-to-buffer! "*notmuch*") (goto-char! 0)
-                    (next-line!) (next-line!) (beginning-of-line!))})
+    eval!(~s{(begin (switch-to-buffer! "*notmuch*")
+                    (list-goto-first-entry "*notmuch*"))})
+    press("n")
     press("RET")
     assert eval!(~s{(buffer-text "*mail*")}) =~ "Quarterly report"
     refute eval!(~s{(buffer-text "*mail*")}) =~ "Hi there"
@@ -375,7 +377,7 @@ defmodule Aimax.NotmuchTest do
     eval!(~s{(run-command "notmuch")})
     assert eval!("(current-buffer)") == ~s{"*mailboxes*"}
     text = eval!(~s{(buffer-text "*mailboxes*")})
-    assert text =~ "mailboxes"
+    assert text =~ "Mailboxes"
     assert text =~ "inbox"
     assert text =~ "5"
     assert calls(dir) =~ "count --batch"

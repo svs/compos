@@ -101,6 +101,19 @@
       (mcp-hub-count (list-ref row 5))
       (string-join (mcp-hub-presets (car row)) " "))))
 
+(define (mcp-hub-cells buf name)
+  (let* ((row (mcp-hub-row name))
+         (status (cadr row))
+         (face (mcp-hub-status-face status)))
+    (list (list (mcp-hub-glyph status) face)
+          (list name "mcp-name")
+          (list (list-ref row 3) "dim")
+          (list status face)
+          (list (if (caddr row) (number->string (caddr row)) "—") "dim")
+          (list (if (list-ref row 4) (number->string (list-ref row 4)) "—") "dim")
+          (list (if (list-ref row 5) (number->string (list-ref row 5)) "—") "dim")
+          (list (string-join (mcp-hub-presets name) " ") "faint"))))
+
 (define (mcp-hub-header)
   (string-append
     ";; mcp servers — s start · k stop · r restart · S/K/R all · "
@@ -369,9 +382,21 @@
            "them.")
     'buffer *mcp-hub-buffer*
     'rows (lambda (buf) (mcp-hub-names))
-    'render (lambda (buf name) (mcp-hub-line (mcp-hub-row name)))
-    'header (lambda (buf) (mcp-hub-header))
-    'overlays (lambda (buf name off) (mcp-hub-overlays name off))
+    'columns (lambda (buf)
+               (list (list "" 1) (list "server" 16) (list "type" 5)
+                     (list "status" 10) (list "tools" 6 'right)
+                     (list "res" 6 'right) (list "prom" 6 'right)
+                     (list "presets" #f)))
+    'cells mcp-hub-cells
+    'title (lambda (buf) "MCP servers")
+    'meta (lambda (buf)
+            (string-append (number->string (length (list-entries buf))) " servers"))
+    'total (lambda (buf) (length (list-source-entries buf)))
+    'no-marks #t
+    'local-filter #t
+    'footer (lambda (buf)
+              '(("RET" "detail") ("s" "start") ("k" "stop") ("r" "restart")
+                ("l" "log") ("/" "filter") ("g" "refresh") ("q" "quit")))
     'keys '(("RET" "mcp-hub-detail") ("d" "mcp-hub-detail") ("s" "mcp-hub-start")
             ("k" "mcp-hub-stop") ("r" "mcp-hub-restart") ("S" "mcp-hub-start-all")
             ("K" "mcp-hub-stop-all") ("R" "mcp-hub-restart-all")

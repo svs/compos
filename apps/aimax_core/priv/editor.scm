@@ -520,7 +520,7 @@
 
 (define (list-filter-push! buf f)
   (buffer-set-local! buf 'list-filters (cons f (list-filters buf)))
-  (list-refresh! buf))
+  (list-redraw! buf))
 
 ;; The query is ONE filter, not a stack of them: the text you type IS
 ;; the narrowing, so deleting it widens and emptying it removes it.
@@ -535,7 +535,7 @@
                       (list-filters buf))))
     (buffer-set-local! buf 'list-filters
       (if (equal? q "") rest (cons (list "match" q) rest)))
-    (list-refresh! buf)))
+    (list-redraw! buf)))
 
 ;; drop the typed query and keep the mode's own kinds (dired's dotfiles).
 ;; No refresh: the caller is opening the list and draws it next.
@@ -546,11 +546,11 @@
 (define (list-filter-pop! buf)
   (let ((fs (list-filters buf)))
     (unless (null? fs) (buffer-set-local! buf 'list-filters (cdr fs)))
-    (list-refresh! buf)))
+    (list-redraw! buf)))
 
 (define (list-filter-clear! buf)
   (buffer-set-local! buf 'list-filters '())
-  (list-refresh! buf))
+  (list-redraw! buf))
 
 ;; what you typed reads back as you typed it; a kind the mode invented
 ;; says its name
@@ -610,6 +610,21 @@
                     (else #f))))
           entries))
 
+;; A list that declares 'local-filter fetches its source once and runs
+;; the filters on the cache: a keystroke in `/` must not call the source
+;; again. A plain list computes its rows on every draw.
+(define (list-source-entries buf)
+  (or (buffer-local buf 'list-source-entries) '()))
+
+(define (list-render-rows! buf fetch)
+  (if (list-opt buf 'local-filter)
+      (begin
+        (when (or fetch (not (buffer-local buf 'list-source-entries)))
+          (buffer-set-local! buf 'list-source-entries
+                             ((list-opt buf 'rows) buf)))
+        (list-keep buf (list-source-entries buf)))
+      ((list-opt buf 'rows) buf)))
+
 ;;; --- the view: a title, columns, rows, a key bar ------------------------------
 ;;; Every list draws the same shape. A mode says what its columns are and
 ;;; what one row puts in them; the mechanism pads the cells, colours them,
@@ -651,9 +666,20 @@
                (list (car c) rest (list-col-align c))))
          cols)))
 
+;; The mode's 'columns fn runs once per draw: every later call in the
+;; same draw reads the cache. The cache keys on the width, so a resize
+;; recomputes. A draw clears the cache first.
 (define (list-columns buf)
   (let ((f (list-opt buf 'columns)))
-    (if f (list-fit-columns (f buf) (list-view-width buf)) '())))
+    (if f
+        (let ((w (list-view-width buf))
+              (cache (buffer-local buf 'list-columns-cache)))
+          (if (and (pair? cache) (equal? (car cache) w))
+              (cadr cache)
+              (let ((cols (list-fit-columns (f buf) w)))
+                (buffer-set-local! buf 'list-columns-cache (list w cols))
+                cols)))
+        '())))
 
 (define (list-table? buf) (pair? (list-columns buf)))
 
@@ -1089,15 +1115,16 @@
           ((equal? (list-key buf (car es)) key) i)
           (else (loop (cdr es) (+ i 1))))))
 
-(define (list-refresh! buf)
+(define (list-render! buf fetch)
   (when (buffer-exists? buf)
+    (buffer-set-local! buf 'list-columns-cache #f)
     ;; a rewrite dumps point to 0 — keep the reader's place. The place is
     ;; the ROW the reader is on, not the byte and not the number: a
     ;; reflowed table moves every byte, and a most-recently-used list
     ;; reorders the rows under the cursor.
     (let* ((here (list-current buf))
            (was (list-index buf))
-           (rows ((list-opt buf 'rows) buf))
+           (rows (list-render-rows! buf fetch))
            (cur? (equal? (current-buffer) buf))
            ;; the buffer's own point: a refresh runs while another buffer
            ;; is current (a hook, a prompt), and that list keeps its place
@@ -1125,6 +1152,11 @@
               (else
                (let ((q (min p (buffer-size buf))))
                  (if cur? (goto-char! q) (buffer-goto! buf q)))))))))
+
+;; `g` and every source change fetch again; a filter keystroke only
+;; redraws, and a 'local-filter list then reuses its cached source.
+(define (list-refresh! buf) (list-render! buf #t))
+(define (list-redraw! buf) (list-render! buf #f))
 
 ;; Everything a list buffer needs to BE one, applied to an explicit
 ;; buffer. The mode setup calls it with (current-buffer); opening a list

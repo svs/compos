@@ -118,7 +118,7 @@ defmodule Aimax.MCPHubTest do
       open_hub_on_zzhub()
 
       text = eval!(~s{(buffer-text "*mcp-hub*")})
-      assert text =~ "NAME"
+      assert text =~ "SERVER"
       assert text =~ "aimax"
       assert text =~ "zzhub"
       assert text =~ "stopped"

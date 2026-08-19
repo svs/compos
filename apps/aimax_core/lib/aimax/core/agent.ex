@@ -12,7 +12,8 @@ defmodule Aimax.Core.Agent do
   `LLMSession` callback (or the default registered by chat), via
   `Session.apply_callback` from a Task — never synchronously from this process,
   so Session -> Agent calls can't deadlock.
-  Adjacent text chunks coalesce per batch; a batch in flight buffers the next.
+  Adjacent text chunks coalesce in a short frame-sized batch. A batch in flight
+  buffers the next. This keeps token streaming from monopolizing Scheme input.
 
   The output mark: agent text inserts at `mark`, always before the steering
   prompt marker at buffer end. `append_at_mark/2` is called by Scheme (the
@@ -26,6 +27,7 @@ defmodule Aimax.Core.Agent do
 
   @registry Aimax.Core.AgentRegistry
   @escaped :aimax_escaped_closures
+  @chunk_batch_ms 25
 
   # --- api --------------------------------------------------------------------
 
@@ -178,6 +180,7 @@ defmodule Aimax.Core.Agent do
        mark: Map.get(config, "mark", Buffer.byte_size(buffer)),
        events: [],
        in_flight: false,
+       delivery_timer: nil,
        context_pending: false,
        prompt_queue: [],
        pending_permission: nil,
@@ -494,12 +497,18 @@ defmodule Aimax.Core.Agent do
     end
   end
 
+  def handle_info({:deliver_events, token}, %{delivery_timer: {_timer, token}} = state) do
+    {:noreply, state |> Map.put(:delivery_timer, nil) |> maybe_deliver()}
+  end
+
+  def handle_info({:deliver_events, _stale}, state), do: {:noreply, state}
+
   def handle_info(_msg, state), do: {:noreply, state}
 
   @impl true
   def handle_cast(:batch_done, state) do
     state = %{state | in_flight: false}
-    {:noreply, maybe_deliver(state)}
+    {:noreply, deliver_or_schedule(state)}
   end
 
   @impl true
@@ -694,7 +703,36 @@ defmodule Aimax.Core.Agent do
   # --- event queue -> scheme ---------------------------------------------------
 
   defp enqueue(state, event) do
-    maybe_deliver(%{state | events: state.events ++ [event]})
+    state
+    |> Map.update!(:events, &(&1 ++ [event]))
+    |> deliver_or_schedule()
+  end
+
+  defp deliver_or_schedule(%{events: []} = state), do: state
+  defp deliver_or_schedule(%{in_flight: true} = state), do: state
+
+  defp deliver_or_schedule(state) do
+    if Enum.all?(state.events, &(Backend.event_type(&1) == "chunk")) do
+      schedule_delivery(state)
+    else
+      state |> cancel_delivery() |> maybe_deliver()
+    end
+  end
+
+  defp schedule_delivery(%{delivery_timer: nil} = state) do
+    token = make_ref()
+    timer = Process.send_after(self(), {:deliver_events, token}, @chunk_batch_ms)
+    %{state | delivery_timer: {timer, token}}
+  end
+
+  defp schedule_delivery(state), do: state
+
+  defp cancel_delivery(%{delivery_timer: nil} = state), do: state
+
+  defp cancel_delivery(state) do
+    {timer, _token} = state.delivery_timer
+    Process.cancel_timer(timer)
+    %{state | delivery_timer: nil}
   end
 
   defp maybe_deliver(%{events: []} = state), do: state

@@ -256,7 +256,9 @@ defmodule Aimax.Core.LLM do
   defp run_tool(dispatcher, name, input) do
     Session.message("tool: #{name} #{inspect(input)}")
 
-    case Session.call_fn(dispatcher, [name, json_to_scheme(input)], nil, "tool #{name}") do
+    # the tool loop's own lane: a slow Scheme tool holds this loop, not
+    # the UI — self() is the loop task, so each loop serializes alone
+    case Session.call_fn(dispatcher, [name, json_to_scheme(input)], nil, {:llm, self()}, "tool #{name}") do
       {:ok, v} when is_binary(v) -> {v, false}
       {:ok, v} -> {Aimax.Scheme.Printer.print(v), false}
       {:error, msg} -> {"error: #{msg}", true}

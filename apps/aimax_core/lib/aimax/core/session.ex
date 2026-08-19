@@ -1,8 +1,11 @@
 defmodule Aimax.Core.Session do
   @moduledoc """
-  An editor session: the process that owns the Scheme interpreter wired to the
-  editor primitives. User/agent Scheme executes here — `M-:`, eval-region,
-  RPC `eval`, init.scm, and every named command (they're all Scheme closures).
+  An editor session: loads the Scheme interpreter wired to the editor
+  primitives, then hands out its handle. Scheme does NOT execute in this
+  process: every entry point routes into an `Aimax.Core.Lane` — `:ui` for
+  keystrokes and callbacks, a group/agent/conn lane for background work —
+  so one long eval never delays a keystroke. This process keeps the slow
+  serial duties: boot loading, file reload, and the periodic frame GC.
 
   Commands live in a public ETS table `{name, closure}` — registered by
   `(define-command ...)`, executed via `run_command/1` (from KeyDispatch) or
@@ -16,7 +19,7 @@ defmodule Aimax.Core.Session do
 
   require Logger
 
-  alias Aimax.Core.{Buffer, Editor, Frame}
+  alias Aimax.Core.{Buffer, Editor, Frame, Lane}
   alias Aimax.Scheme
 
   @messages "*messages*"
@@ -26,8 +29,15 @@ defmodule Aimax.Core.Session do
   @escaped :aimax_escaped_closures
 
   # sweep when the frame count doubles since the last sweep (with a floor so
-  # small sessions never bother)
+  # small sessions never bother); checked on a timer — evals no longer pass
+  # through this process, so it cannot count them
   @gc_floor 5_000
+  @gc_interval 30_000
+
+  # the interpreter handle: constant after init (the store is a shared ETS
+  # table), so lane workers read it from persistent_term instead of asking
+  # this process
+  @pt {__MODULE__, :interp}
 
   # how long a waiting mcp-call! waits. The RPC layer gives an eval 30s, so
   # the call must give up first and say so.
@@ -40,34 +50,67 @@ defmodule Aimax.Core.Session do
   # stamped per-call from the fid the caller (Input, LiveView, RPC) passed —
   # nil falls back to the last-active frame
 
-  @doc "Evaluate Scheme source. Returns {:ok, printed_value} | {:error, msg}."
-  def eval(src, fid \\ nil, timeout \\ 30_000),
-    do: GenServer.call(__MODULE__, {:eval, src, fid(fid)}, timeout)
+  @doc """
+  Evaluate Scheme source. Returns {:ok, printed_value} | {:error, msg}.
+  LANE names the serial lane the eval runs in; nil is the `:ui` lane. A
+  long eval holds only its own lane — keystrokes ride `:ui` and never
+  queue behind agent or RPC work.
+  """
+  def eval(src, fid \\ nil, timeout \\ 30_000, lane \\ nil) do
+    fid = fid(fid)
+    Lane.run(lane || :ui, fn from -> exec_eval(src, fid, from) end, timeout, "eval")
+  end
+
+  @doc "The live interpreter handle (constant after init)."
+  def interp do
+    :persistent_term.get(@pt)
+  rescue
+    # boot: the stdlib is still loading. A call queues behind init — the
+    # same wait every caller used to get from the Session mailbox.
+    ArgumentError -> GenServer.call(__MODULE__, :await_boot, 60_000)
+  end
 
   @doc "Reload Scheme files atomically into the live interpreter."
   def reload_files(paths) when is_list(paths),
     do: GenServer.call(__MODULE__, {:reload_files, paths}, 30_000)
 
   @doc "Run a named command (Scheme closure from the commands table)."
-  def run_command(name, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:run_command, name, fid(fid)}, 30_000)
+  def run_command(name, fid \\ nil, lane \\ nil) do
+    fid = fid(fid)
+    Lane.run(lane || :ui, fn _from -> exec_run_command(name, fid) end, 30_000, "command #{name}")
+  end
 
   @doc "Apply a Scheme closure (e.g. a minibuffer confirm callback)."
-  def apply_callback(closure, args, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:apply, closure, args, fid(fid)}, 30_000)
+  def apply_callback(closure, args, fid \\ nil, lane \\ nil) do
+    fid = fid(fid)
+    Lane.run(lane || :ui, fn _from -> exec_apply(closure, args, fid) end, 30_000, "apply")
+  end
 
-  @doc "Apply a Scheme closure and return its value (e.g. a completion fn).
-  LABEL names the lane in the slow-op log; the closure itself has no name."
-  def call_fn(closure, args, fid \\ nil, label \\ ""),
-    do: GenServer.call(__MODULE__, {:call_fn, closure, args, fid(fid), label}, 30_000)
+  @doc """
+  Apply a Scheme closure and return its value (e.g. a completion fn).
+  LABEL names the job in the lane's slow-job log; the closure itself has
+  no name.
+  """
+  def call_fn(closure, args, fid \\ nil, lane \\ nil, label \\ "") do
+    fid = fid(fid)
+
+    Lane.run(
+      lane || :ui,
+      fn _from -> exec_call_fn(closure, args, fid) end,
+      30_000,
+      String.trim("call-fn #{label}")
+    )
+  end
 
   @doc """
   Apply a named global function to ARGS. ARGS pass as values, never through
   source text — the safe call for Elixir callers holding strings (paths,
   buffer names) that must not be interpolated into Scheme.
   """
-  def call_named(fun, args, fid \\ nil, timeout \\ 30_000) when is_binary(fun),
-    do: GenServer.call(__MODULE__, {:call_named, fun, args, fid(fid)}, timeout)
+  def call_named(fun, args, fid \\ nil, timeout \\ 30_000, lane \\ nil) when is_binary(fun) do
+    fid = fid(fid)
+    Lane.run(lane || :ui, fn _from -> exec_call_named(fun, args, fid) end, timeout, "call #{fun}")
+  end
 
   defp fid(nil), do: Frame.current()
   defp fid(fid), do: fid
@@ -81,7 +124,8 @@ defmodule Aimax.Core.Session do
 
   def message(text) do
     # A buffer sweep can kill *messages*. Recreate it here, so every
-    # later (message ...) works instead of an exit through :noproc.
+    # later (message ...) works instead of an exit through :noproc —
+    # in a lane, that exit would kill the whole worker.
     unless Buffer.exists?(@messages), do: Aimax.Core.create_buffer(@messages)
 
     Buffer.append(@messages, text <> "\n", source: :editor)
@@ -114,10 +158,15 @@ defmodule Aimax.Core.Session do
     interp = load_stdlib!(interp)
 
     # loading leaves a pile of dead frames behind — sweep once so the
-    # doubling threshold starts from a live baseline
+    # doubling threshold starts from a live baseline, then publish the
+    # survivors to the shared tier: lanes resolve every rooted closure
     interp = Scheme.gc(interp, external_roots())
+    interp = Scheme.flush(interp)
 
-    {:ok, %{interp: interp, last_live: map_size(interp.store.frames)}}
+    :persistent_term.put(@pt, interp)
+    Process.send_after(self(), :gc_tick, @gc_interval)
+
+    {:ok, %{last_live: Scheme.frame_count(interp)}}
   end
 
   # a primitive calling a dead GenServer (buffer killed while a callback was
@@ -132,23 +181,8 @@ defmodule Aimax.Core.Session do
     :exit, reason -> {:error, "exit: #{inspect(reason)}"}
   end
 
-  # This process is the editor's single writer, so one slow op is one
-  # freeze. Every op reports its duration as telemetry; the dashboard
-  # charts it. A slow op also writes its name to the log.
-  @slow_ms 250
-
-  defp timed(op, detail, fun) do
-    t0 = System.monotonic_time(:millisecond)
-    result = fun.()
-    ms = System.monotonic_time(:millisecond) - t0
-    :telemetry.execute([:aimax, :session, :op], %{duration: ms}, %{op: op})
-
-    if ms > @slow_ms do
-      Logger.warning("session: slow op #{op} #{ms}ms #{detail}")
-    end
-
-    result
-  end
+  # per-job timing lives in the Lane worker now: every job reports
+  # duration telemetry and slow jobs go to the log with lane and label
 
   # the caller's frame context, stamped into THIS process for the duration
   # of the Scheme execution — primitives resolve their frame from it. nil
@@ -160,15 +194,22 @@ defmodule Aimax.Core.Session do
 
   defp with_fid(fid, fun), do: Frame.with_frame(fid, fun)
 
-  @impl true
-  def handle_call({:eval, src, fid}, from, state) do
+  # --- lane executors ---------------------------------------------------------
+  # These run in lane worker processes (or inline on lane re-entry), never in
+  # this GenServer: a long eval holds only its own lane. Each one registers
+  # with the store (Scheme.with_eval) so a sweep never runs under it.
+
+  @doc false
+  def exec_eval(src, fid, from) do
+    interp = interp()
+
     # eval-defer! reads this: an eval that hands its work to a Task keeps
     # the caller's reply slot and answers through eval-resolve! later
-    Process.put(:eval_reply_to, from)
+    if from, do: Process.put(:eval_reply_to, from)
 
     result =
-      timed("eval", String.slice(src, 0, 80), fn ->
-        safe(fn -> with_fid(fid, fn -> Scheme.eval_string(state.interp, src) end) end)
+      Scheme.exec(interp, fn interp ->
+        safe(fn -> with_fid(fid, fn -> Scheme.eval_string(interp, src) end) end)
       end)
 
     Process.delete(:eval_reply_to)
@@ -176,119 +217,158 @@ defmodule Aimax.Core.Session do
     Process.delete(:eval_deferred)
 
     case {result, deferred} do
-      {{:ok, val, interp}, nil} ->
-        {:reply, {:ok, Scheme.print(val)}, put_interp(state, interp, val)}
+      {{:ok, val, _interp}, nil} ->
+        root_result(val)
+        {:reply, {:ok, Scheme.print(val)}}
 
-      # the reply now belongs to eval-resolve!; the store update stays here
-      {{:ok, val, interp}, _token} ->
-        {:noreply, put_interp(state, interp, val)}
+      # the reply now belongs to eval-resolve!
+      {{:ok, val, _interp}, _token} ->
+        root_result(val)
+        :noreply
 
       {{:error, msg}, nil} ->
-        {:reply, {:error, msg}, state}
+        {:reply, {:error, msg}}
 
       # a deferred eval that then failed still owes the caller an answer
       {{:error, msg}, token} ->
         :ets.delete(@escaped, {:eval_pending, token})
-        {:reply, {:error, msg}, state}
+        {:reply, {:error, msg}}
     end
   end
 
-  def handle_call({:reload_files, paths}, _from, state) do
-    result =
-      Enum.reduce_while(paths, {:ok, state.interp}, fn path, {:ok, interp} ->
-        expanded = Path.expand(path)
-
-        with {:ok, src} <- File.read(expanded),
-             {:ok, _value, next} <- Scheme.eval_string(interp, src) do
-          {:cont, {:ok, next}}
-        else
-          {:error, reason} -> {:halt, {:error, "#{expanded}: #{inspect(reason)}"}}
-        end
-      end)
-
-    case result do
-      {:ok, interp} ->
-        {:reply, {:ok, length(paths)}, put_interp(state, interp, paths)}
-
-      {:error, message} ->
-        {:reply, {:error, message}, state}
-    end
-  end
-
-  def handle_call({:run_command, name, fid}, _from, state) do
+  @doc false
+  def exec_run_command(name, fid) do
     case :ets.lookup(Aimax.Core.SchemeAPI.commands_table(), name) do
       [] ->
-        {:reply, {:error, "undefined command"}, state}
+        {:reply, {:error, "undefined command"}}
 
       [{^name, closure, _doc}] ->
-        case timed("command", name, fn ->
-               safe(fn ->
-                 with_fid(fid, fn ->
-                   case Scheme.call(state.interp, closure, []) do
-                     {:ok, val, interp} ->
-                       # the post-command hook: policy reacts to what the command
-                       # changed — the expanded modeline re-reads its buffer. A
-                       # hook error must never fail the command that ran.
-                       try do
-                         case Scheme.eval_string(
-                                interp,
-                                "(when (boundp 'post-command!) (post-command!))"
-                              ) do
-                           {:ok, _hv, interp2} -> {:ok, val, interp2}
-                           _ -> {:ok, val, interp}
-                         end
-                       rescue
-                         _ -> {:ok, val, interp}
-                       catch
-                         _, _ -> {:ok, val, interp}
-                       end
+        interp = interp()
 
-                     {:error, msg} ->
-                       {:error, msg}
-                   end
-                 end)
-               end)
-             end) do
-          {:ok, val, interp} -> {:reply, :ok, put_interp(state, interp, val)}
-          {:error, msg} -> {:reply, {:error, msg}, state}
+        result =
+          Scheme.exec(interp, fn interp ->
+            safe(fn ->
+              with_fid(fid, fn ->
+                case Scheme.call(interp, closure, []) do
+                  {:ok, val, interp} ->
+                    # the post-command hook: policy reacts to what the command
+                    # changed — the expanded modeline re-reads its buffer. A
+                    # hook error must never fail the command that ran.
+                    try do
+                      case Scheme.eval_string(
+                             interp,
+                             "(when (boundp 'post-command!) (post-command!))"
+                           ) do
+                        {:ok, _hv, interp2} -> {:ok, val, interp2}
+                        _ -> {:ok, val, interp}
+                      end
+                    rescue
+                      _ -> {:ok, val, interp}
+                    catch
+                      _, _ -> {:ok, val, interp}
+                    end
+
+                  {:error, msg} ->
+                    {:error, msg}
+                end
+              end)
+            end)
+          end)
+
+        case result do
+          {:ok, val, _interp} ->
+            root_result(val)
+            {:reply, :ok}
+
+          {:error, msg} ->
+            {:reply, {:error, msg}}
         end
     end
   end
 
-  def handle_call({:apply, closure, args, fid}, _from, state) do
-    case timed("apply", "", fn ->
-           safe(fn -> with_fid(fid, fn -> Scheme.call(state.interp, closure, args) end) end)
+  @doc false
+  def exec_apply(closure, args, fid) do
+    case Scheme.exec(interp(), fn interp ->
+           safe(fn -> with_fid(fid, fn -> Scheme.call(interp, closure, args) end) end)
          end) do
-      {:ok, val, interp} ->
-        {:reply, :ok, put_interp(state, interp, val)}
+      {:ok, val, _interp} ->
+        root_result(val)
+        {:reply, :ok}
 
       {:error, msg} ->
         message("error: " <> msg)
-        {:reply, {:error, msg}, state}
+        {:reply, {:error, msg}}
     end
   end
 
-  def handle_call({:call_fn, closure, args, fid, label}, _from, state) do
-    case timed("call-fn", label, fn ->
-           safe(fn -> with_fid(fid, fn -> Scheme.call(state.interp, closure, args) end) end)
+  @doc false
+  def exec_call_fn(closure, args, fid) do
+    case Scheme.exec(interp(), fn interp ->
+           safe(fn -> with_fid(fid, fn -> Scheme.call(interp, closure, args) end) end)
          end) do
-      {:ok, val, interp} -> {:reply, {:ok, val}, put_interp(state, interp, val)}
-      {:error, msg} -> {:reply, {:error, msg}, state}
+      {:ok, val, _interp} ->
+        root_result(val)
+        {:reply, {:ok, val}}
+
+      {:error, msg} ->
+        {:reply, {:error, msg}}
     end
   end
 
-  def handle_call({:call_named, fun, args, fid}, _from, state) do
-    case timed("call-named", fun, fn ->
+  @doc false
+  def exec_call_named(fun, args, fid) do
+    case Scheme.exec(interp(), fn interp ->
            safe(fn ->
              with_fid(fid, fn ->
                # the name is a code-supplied constant; only ARGS are data
-               {:ok, closure, interp} = Scheme.eval_string(state.interp, fun)
+               {:ok, closure, interp} = Scheme.eval_string(interp, fun)
                Scheme.call(interp, closure, args)
              end)
            end)
          end) do
-      {:ok, val, interp} -> {:reply, {:ok, val}, put_interp(state, interp, val)}
-      {:error, msg} -> {:reply, {:error, msg}, state}
+      {:ok, val, _interp} ->
+        root_result(val)
+        {:reply, {:ok, val}}
+
+      {:error, msg} ->
+        {:reply, {:error, msg}}
+    end
+  end
+
+  # a returned value can carry closures whose frames nothing roots yet —
+  # hold the last 32 compound results in the escaped table (a GC root)
+  # until they land somewhere rooted or age out of the ring
+  defp root_result(val) when is_list(val) or is_map(val) or is_tuple(val) do
+    idx = :ets.update_counter(@escaped, :recent_idx, {2, 1, 31, 0}, {:recent_idx, -1})
+    :ets.insert(@escaped, {{:recent, idx}, val})
+    :ok
+  end
+
+  defp root_result(_val), do: :ok
+
+  @impl true
+  def handle_call(:await_boot, _from, state) do
+    {:reply, :persistent_term.get(@pt), state}
+  end
+
+  def handle_call({:reload_files, paths}, _from, state) do
+    result =
+      Scheme.exec(interp(), fn interp ->
+        Enum.reduce_while(paths, {:ok, nil, interp}, fn path, {:ok, _, interp} ->
+          expanded = Path.expand(path)
+
+          with {:ok, src} <- File.read(expanded),
+               {:ok, _value, next} <- Scheme.eval_string(interp, src) do
+            {:cont, {:ok, nil, next}}
+          else
+            {:error, reason} -> {:halt, {:error, "#{expanded}: #{inspect(reason)}"}}
+          end
+        end)
+      end)
+
+    case result do
+      {:ok, _, _interp} -> {:reply, {:ok, length(paths)}, state}
+      {:error, message} -> {:reply, {:error, message}, state}
     end
   end
 
@@ -297,32 +377,36 @@ defmodule Aimax.Core.Session do
     case :ets.lookup(@escaped, key) do
       [{^key, {^generation, _timer, callback, arg, fid}}] ->
         :ets.delete(@escaped, key)
-
-        case safe(fn -> with_fid(fid, fn -> Scheme.call(state.interp, callback, [arg]) end) end) do
-          {:ok, val, interp} ->
-            {:noreply, put_interp(state, interp, val)}
-
-          {:error, msg} ->
-            message("error: " <> msg)
-            {:noreply, state}
-        end
+        Lane.cast(:ui, fn _from -> exec_apply(callback, [arg], fid) end, "debounce")
 
       _ ->
-        {:noreply, state}
+        :ok
     end
+
+    {:noreply, state}
   end
 
   # --- frame GC --------------------------------------------------------------
+  # Periodic: evals run in lanes now, so growth is checked on a timer. The
+  # sweep skips itself when any eval is in flight (Env.begin_gc) — a busy
+  # editor just sweeps on a later tick.
 
-  defp put_interp(state, interp, result) do
-    state = %{state | interp: interp}
+  def handle_info(:gc_tick, state) do
+    interp = interp()
+    count = Scheme.frame_count(interp)
 
-    if map_size(interp.store.frames) > max(state.last_live * 2, @gc_floor) do
-      interp = Scheme.gc(interp, [result | external_roots()])
-      %{state | interp: interp, last_live: map_size(interp.store.frames)}
-    else
-      state
-    end
+    state =
+      if count > max(state.last_live * 2, @gc_floor) do
+        Scheme.gc(interp, external_roots())
+        after_count = Scheme.frame_count(interp)
+        # a busy store skips the sweep: keep the baseline so we retry
+        if after_count < count, do: %{state | last_live: after_count}, else: state
+      else
+        state
+      end
+
+    Process.send_after(self(), :gc_tick, @gc_interval)
+    {:noreply, state}
   end
 
   # every place a live closure can be held outside the store: the commands
@@ -414,7 +498,7 @@ defmodule Aimax.Core.Session do
     cond do
       String.starts_with?(path, "~") -> Path.expand(path)
       Path.type(path) == :absolute -> Path.expand(path)
-      true -> Path.join(Aimax.Core.home(), path) |> Path.expand()
+      true -> Path.join(Aimax.Core.config_dir(), path) |> Path.expand()
     end
   end
 
@@ -424,7 +508,7 @@ defmodule Aimax.Core.Session do
   # :home to a tmp dir so the user's real init.scm stays out of them.
   defp load_init(interp) do
     Enum.reduce(["ai-config.scm", "init.scm", "custom.scm"], interp, fn file, interp ->
-      path = Path.join(Aimax.Core.home(), file)
+      path = Path.join(Aimax.Core.config_dir(), file)
 
       with true <- File.exists?(path),
            {:ok, _, interp2} <- Scheme.eval_string(interp, File.read!(path)) do
@@ -1564,7 +1648,14 @@ defmodule Aimax.Core.Session do
         end
 
         generation = make_ref()
-        timer = Process.send_after(self(), {:scheme_debounce, key, generation}, trunc(ms))
+        # the primitive runs in a lane worker; the timer must land on the
+        # Session, whose handle_info routes the callback back into a lane
+        timer =
+          Process.send_after(
+            Process.whereis(__MODULE__),
+            {:scheme_debounce, key, generation},
+            trunc(ms)
+          )
         :ets.insert(@escaped, {key, {generation, timer, callback, arg, Frame.current()}})
         :void
       end,

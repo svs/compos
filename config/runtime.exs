@@ -52,6 +52,12 @@ if config_env() != :test do
     config :aimax_rpc, socket_path: Path.join(home, "sock")
   end
 
+  # config apart from state: a test daemon points AIMAX_CONFIG at the real
+  # ~/.aimax and keeps desktop/buffers/socket in its own AIMAX_HOME
+  if config_dir = System.get_env("AIMAX_CONFIG") do
+    config :aimax_core, config_dir: Path.expand(config_dir)
+  end
+
   home_dir = if home, do: Path.expand(home), else: Path.expand("~/.aimax")
 
   conf =

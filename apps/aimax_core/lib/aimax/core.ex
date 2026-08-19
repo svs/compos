@@ -12,6 +12,15 @@ defmodule Aimax.Core do
   @doc "The aimax home dir (config, keys, desktop). Tests point :home at a tmp dir."
   def home, do: Application.get_env(:aimax_core, :home) || Path.expand("~/.aimax")
 
+  @doc """
+  Where user config reads from: ai-config.scm, init.scm, custom.scm,
+  theme.scm, secrets, key files. Defaults to `home/0`; AIMAX_CONFIG
+  points a scratch daemon at the real config while its state (desktop,
+  buffers, socket) stays in its own home.
+  """
+  def config_dir,
+    do: Application.get_env(:aimax_core, :config_dir) || home()
+
   def create_buffer(name, opts \\ []) do
     restored = BufferStore.lookup(name)
 

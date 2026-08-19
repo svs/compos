@@ -346,7 +346,13 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
       fun ->
         raw = name <> " " <> inspect(input)
 
-        case Session.call_fn(fun, [slug, name, "tool", raw], nil, "permission #{name}") do
+        case Session.call_fn(
+               fun,
+               [slug, name, "tool", raw],
+               nil,
+               Aimax.Core.Agent.lane(slug),
+               "permission #{name}"
+             ) do
           {:ok, {:sym, "ask"}} -> {:ask, raw}
           {:ok, {:sym, "reject"}} -> :reject
           {:ok, _} -> :allow
@@ -429,7 +435,14 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
 
     case fun do
       nil -> :ok
-      fun -> Session.call_fn(fun, [slug, role, blocks, wire], nil, "record #{slug} #{role}")
+      fun ->
+        Session.call_fn(
+          fun,
+          [slug, role, blocks, wire],
+          nil,
+          Aimax.Core.Agent.lane(slug),
+          "record #{slug} #{role}"
+        )
     end
   end
 end

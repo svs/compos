@@ -32,7 +32,7 @@
   (if (or (not s) (equal? s "")) #f s))
 
 (define (key--from-file var)
-  (let ((path (string-append (aimax-home) "/" (key--file-name var) "-key")))
+  (let ((path (string-append (aimax-config-dir) "/" (key--file-name var) "-key")))
     (if (file-exists? path)
         (key--non-empty (string-trim (or (read-file path) "")))
         #f)))

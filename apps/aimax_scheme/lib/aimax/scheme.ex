@@ -2,8 +2,10 @@ defmodule Aimax.Scheme do
   @moduledoc """
   The ai-max.el extension language: a small Scheme whose values are BEAM terms.
 
-  An interpreter is an immutable Elixir struct — hold it in any process,
-  thread it through calls. Host applications extend it by injecting
+  An interpreter is a small Elixir struct — a handle on a shared ETS
+  environment store plus the global frame ref. Hold it in any process;
+  many processes can evaluate against the same interpreter at once, and
+  the BEAM preempts them, so one slow eval never blocks another. Host applications extend it by injecting
   primitives (plain Elixir funs) at construction or later.
 
       interp = Aimax.Scheme.new(primitives: %{"shout" => fn [s] -> String.upcase(s) end})
@@ -51,6 +53,8 @@ defmodule Aimax.Scheme do
     {global, store} = Env.new_frame(Env.new(), nil, builtins)
     interp = %__MODULE__{store: store, global: global}
     {:ok, _, interp} = eval_string(interp, @prelude)
+    # the global frame stays in the local tier: the host loads its whole
+    # stdlib at old single-process speed, then publishes once (flush/1)
     interp
   end
 
@@ -66,7 +70,8 @@ defmodule Aimax.Scheme do
 
   @doc """
   Evaluate all forms in a string. Returns `{:ok, last_value, interp}` or
-  `{:error, message}` (interpreter unchanged on error).
+  `{:error, message}`. Definitions made before the failing form persist —
+  the store is shared and mutable, as in Emacs.
   """
   def eval_string(%__MODULE__{} = interp, src) do
     forms = Reader.read_all(src)
@@ -103,6 +108,37 @@ defmodule Aimax.Scheme do
   captured environments alive. Everything else is dropped.
   """
   defdelegate gc(interp, roots), to: Aimax.Scheme.GC, as: :sweep
+
+  @doc "The number of live environment frames in the store."
+  def frame_count(%__MODULE__{store: store}), do: Env.frame_count(store)
+
+  @doc """
+  Run FUN as one top-level eval. The run is registered in flight (no
+  sweep runs under it), and on success the eval's local frames flush to
+  the shared tier — still inside the in-flight section, so escaped
+  closures are resolvable from any process before a sweep can run. FUN
+  gets the interpreter and returns `{:ok, value, interp}` or
+  `{:error, message}`; an error drops the eval's local frames.
+
+  Every entry point that evaluates Scheme must go through this.
+  """
+  def exec(%__MODULE__{store: store} = interp, fun) do
+    Env.with_eval(store, fn ->
+      case fun.(interp) do
+        # selective: only frames that escaped (result, primitive args,
+        # shared writes) publish — the rest are dead let/call frames
+        {:ok, val, %__MODULE__{} = interp2} -> {:ok, val, flush(interp2, [val])}
+        other -> other
+      end
+    end)
+  end
+
+  @doc "Publish the whole local frame tier to the shared table (boot)."
+  def flush(%__MODULE__{store: store} = interp), do: %{interp | store: Env.flush(store)}
+
+  @doc "Publish only the local frames reachable from ROOTS or the escape log."
+  def flush(%__MODULE__{store: store} = interp, roots),
+    do: %{interp | store: Env.flush(store, roots)}
 
   defdelegate print(value), to: Printer
 end

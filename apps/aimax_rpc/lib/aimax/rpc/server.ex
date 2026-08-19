@@ -85,11 +85,12 @@ defmodule Aimax.Rpc.Server do
     end
   end
 
-  # 600s: a deferred eval (eval-defer!) answers when its Task ends — the
-  # Session replies to fast evals in milliseconds either way, and only
-  # this conn's process waits
+  # 600s: a deferred eval (eval-defer!) answers when its Task ends, and only
+  # this conn's process waits. The eval runs in this connection's own lane:
+  # an agent's long eval must never queue a keystroke behind it, and two
+  # connections must not queue behind each other.
   defp handle_request(%{"method" => "eval", "params" => %{"code" => code}} = req) do
-    case Session.eval(code, nil, 600_000) do
+    case Session.eval(code, nil, 600_000, {:rpc, self()}) do
       {:ok, printed} ->
         %{jsonrpc: "2.0", id: req["id"], result: printed}
 

@@ -112,7 +112,7 @@
 
 ;;; --- the custom file ---------------------------------------------------------
 
-(define (custom-file) (string-append (aimax-home) "/custom.scm"))
+(define (custom-file) (string-append (aimax-config-dir) "/custom.scm"))
 
 (define (custom--entry e)
   (string-append "  '(" (symbol->string (car e)) " " (value->string (cadr e)) ")"))

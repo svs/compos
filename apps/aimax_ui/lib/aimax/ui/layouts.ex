@@ -89,47 +89,29 @@ defmodule Aimax.Ui.Layouts do
             transition: flex-grow var(--chrome-anim, 140ms) ease-out;
           }
           .split-child > * { flex: 1; min-width: 0; min-height: 0; }
-          /* A popup floats, and ONLY visibly: it stays an ordinary window
-             in the tree, so every window command still reaches it. Taking
-             its split out of the flow is what makes it float — the window
-             it covers keeps its full height underneath, instead of being
-             squeezed into what is left. `C-M-`` drops the class and the
-             popup settles back into the layout. */
-          /* the popup's split keeps no space in the flow... */
-          .split-child:has(> .window.popup) {
+          /* THE modal floats, and ONLY visibly: it stays an ordinary
+             window in the tree, so every window command still reaches
+             it. Taking its split out of the flow is what makes it float
+             — the window it covers keeps its full height underneath. */
+          .split-child:has(> .window.popup-center) {
             flex: 0 0 0 !important; overflow: visible; transition: none;
           }
-          /* ...its sibling takes the whole split, or the popup would
-             float over a strip of nothing. The daemon writes each child's
-             share inline, and inline styles only yield to !important. */
-          .split:has(> .split-child > .window.popup)
-            > .split-child:not(:has(> .window.popup)) {
+          /* Tiling only: a side popup is an ordinary split — its share
+             comes from the split ratio like every window's. ONE surface
+             floats: the centered modal. Its sibling takes the whole
+             split, or the modal would float over a strip of nothing.
+             The daemon writes each child's share inline, and inline
+             styles only yield to !important. */
+          .split:has(> .split-child > .window.popup-center)
+            > .split-child:not(:has(> .window.popup-center)) {
             flex-grow: 1 !important;
           }
-          /* ...and the popup floats against the FRAME, on the side its
-             display rule chose. The rule's share arrives as --popup-size
-             on this element, because a custom property set on a child
-             never reaches its parent. */
-          .window.popup {
+          .window.popup-center {
             position: absolute; z-index: 20;
             box-shadow: 0 0 30px rgba(0, 0, 0, 0.30);
             border: var(--chrome-border, none);
             border-radius: var(--chrome-radius, 0);
             animation: popup-rise var(--chrome-anim, 140ms) ease-out;
-          }
-          .window.popup-right, .window.popup-left {
-            top: 0; bottom: 0;
-            width: var(--popup-size, 38%); min-width: min(380px, 100%);
-          }
-          .window.popup-right { right: 0; }
-          .window.popup-left { left: 0; }
-          .window.popup-top, .window.popup-bottom {
-            left: 0; right: 0; height: var(--popup-size, 38%);
-          }
-          .window.popup-top { top: 0; }
-          .window.popup-bottom { bottom: 0; }
-          /* a centered modal — the switcher; the palette's geometry */
-          .window.popup-center {
             top: 50%; left: 50%; transform: translate(-50%, -50%);
             width: var(--popup-size, 56%); max-width: 1100px;
             min-width: min(520px, 100%);

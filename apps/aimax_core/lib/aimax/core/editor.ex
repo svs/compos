@@ -1885,6 +1885,8 @@ defmodule Aimax.Core.Editor do
       # persistent buffer-owned context above the content. Scheme supplies
       # the text; the client only renders this generic header mechanism.
       header_line: Map.get(locals, "header-line"),
+      # the same mechanism under the content — a list's key bar pins here
+      footer_line: Map.get(locals, "footer-line"),
       # buffer-group tag — chat setup migrates the legacy companion-of
       # pointer to this local, so the payload reads only the raw local
       group: Map.get(locals, "group"),

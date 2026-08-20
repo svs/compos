@@ -1088,6 +1088,7 @@ defmodule Aimax.Ui.EditorLive do
       <% end %>
       <% end %>
       <% end %>
+      <div :if={@node.footer_line} class="buffer-footer">{@node.footer_line}</div>
       <div class="modeline">
         <span
           class="ml-caret"

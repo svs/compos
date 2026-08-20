@@ -3,8 +3,8 @@
 ;;; A modal list buffer with its own keymap. Typing narrows — the filter
 ;;; is the default act, as in every list. Control chords act on rows:
 ;;; RET visits, C-RET enters the row's context, C-SPC marks, C-k kills,
-;;; C-t sets the group, C-g shows groups and projects, TAB locks to a
-;;; group, ESC quits. DEL widens the narrowing by one character.
+;;; C-t sets the group, C-o shows groups and projects, TAB locks to a
+;;; group, C-g and ESC quit. DEL widens the narrowing by one character.
 ;;;
 ;;; The rows are the C-x b pool: buffers and group cards woven by
 ;;; recency, plus whatever the switch-buffer-source seam adds (chrome
@@ -66,11 +66,50 @@
                              (not (equal? (car c) *switch-buffer*))))
             pool)))
 
-;; one group's members, most recent first — the locked view TAB opens
+;; the locked view: ONE group, whole. The card leads as the default —
+;; RET there keeps the group as it stands, or opens dired on a project
+;; root. The open buffers follow, then the project's files, so the
+;; second step of C-x G reaches a file the group never opened.
+(define (switch-locked-root g)
+  (if (file-directory? g)
+      g
+      (let loop ((bs (group-buffers-mru g)))
+        (cond ((null? bs) #f)
+              ((let ((r (buffer-project-root (car bs))))
+                 (and (string? r) (not (equal? r "")) r)))
+              (else (loop (cdr bs)))))))
+
+(define (switch-locked-card g)
+  (list (group-container-label g)
+        (if (file-directory? g)
+            "the project root — RET opens dired"
+            "the group as it stands")
+        "container" '()))
+
+(define (switch-file-row? e)
+  (and (> (length e) 2) (equal? (nth 2 e) "file")))
+
+(define (switch-file-path e) (string-append (nth 3 e) "/" (car e)))
+
+;; the root's files that no member has open — a file row carries its
+;; root, so RET can build the absolute path back
+(define (switch-locked-file-rows g)
+  (let ((root (switch-locked-root g)))
+    (if (not root)
+        '()
+        (let ((open (group-buffers-mru g)))
+          (map (lambda (f) (list f "" "file" root))
+               (filter (lambda (f)
+                         (not (member (string-append root "/" f) open)))
+                       (project-files root)))))))
+
 (define (switch-locked-rows g)
-  (annotate 'buffer
-    (filter (lambda (b) (not (string-prefix? " " b)))
-            (group-buffers-mru g))))
+  (append
+    (list (switch-locked-card g))
+    (annotate 'buffer
+      (filter (lambda (b) (not (string-prefix? " " b)))
+              (group-buffers-mru g)))
+    (switch-locked-file-rows g)))
 
 (define (switch-rows buf)
   (let ((view (or (buffer-local buf 'switch-view) 'buffers)))
@@ -84,8 +123,11 @@
 (define (switch-ann e)
   (if (and (> (length e) 1) (string? (nth 1 e))) (nth 1 e) ""))
 
+;; a container's 4th element is its member chips; a file row's is its
+;; root — only a list answers as chips
 (define (switch-chips e)
-  (if (> (length e) 3) (nth 3 e) '()))
+  (let ((c (and (> (length e) 3) (nth 3 e))))
+    (if (pair? c) c '())))
 
 (define (switch-cells buf e)
   (let ((name (car e))
@@ -99,6 +141,8 @@
                          (string-append ann "  ·  " (string-join chips "  "))
                          ann))
                    "dim")))
+      ((switch-file-row? e)
+       (list "" (list name #f) (list "file" "dim")))
       ((buffer-known? name)
        (list (if (and (buffer-exists? name) (buffer-modified? name))
                  (list "●" "warn") "")
@@ -120,7 +164,8 @@
            (string-append (number->string n) " contexts · RET switches"))
           ((pair? view)
            (string-append "in " (group-label (nth 1 view))
-                          " · " (number->string n) " buffers"))
+                          " · the card, then its buffers, then its files"
+                          " · RET on the card keeps the group"))
           (else (string-append (number->string n)
                                " candidates · most recent first · type to narrow")))))
 
@@ -225,8 +270,15 @@
     (switch-open! (list 'locked g))))
 
 (define (switch-pick! buf e context?)
-  (let ((name (car e)))
+  (let ((name (car e))
+        (view (buffer-local buf 'switch-view)))
     (cond
+      ;; the locked view's own card is the DEFAULT: RET keeps the group
+      ;; as it stands, or opens dired on a project root
+      ((and (switch-container? e) (pair? view) (equal? (car view) 'locked))
+       (let ((g (nth 1 view)))
+         (switch-close! buf #f)
+         (when (file-directory? g) (dired-open g))))
       ((switch-container? e)
        (let ((target (switch-card-target name)))
          (switch-close! buf #f)
@@ -234,6 +286,12 @@
              (switch-to-group! (nth 1 target))
              (switch-found-project! (nth 1 target)))
          (switch-then-pick! buf (nth 1 target))))
+      ;; a project file nobody has open: visit it — it joins the group
+      ((switch-file-row? e)
+       (let ((path (switch-file-path e))
+             (g (and (pair? view) (nth 1 view))))
+         (switch-close! buf #f)
+         (visit-in-group path g)))
       ((buffer-known? name)
        (switch-close! buf name)
        (if context?
@@ -346,8 +404,8 @@
 
 (effects! '(read))
 
-;; C-g flips between the buffers and the contexts. Quitting is ESC: in
-;; this one buffer the filter, not the quit, is what C-g's reflex serves.
+;; C-o flips between the buffers and the contexts. C-g keeps its one
+;; meaning: the modal disappears.
 (define-command "switch-toggle-groups" "Show groups and projects; again shows buffers"
   (lambda ()
     (let* ((buf (current-buffer))
@@ -356,7 +414,7 @@
       (list-set-query! buf "")
       (list-refresh! buf)
       (list-goto-first-entry buf)
-      (message (if groups? "buffers" "groups — RET switches, C-g goes back")))))
+      (message (if groups? "buffers" "groups — RET switches, C-o goes back")))))
 
 ;; TAB locks to one group's buffers: the highlighted card's, or the
 ;; highlighted buffer's own
@@ -376,7 +434,7 @@
             (list-set-query! buf "")
             (list-refresh! buf)
             (list-goto-first-entry buf)
-            (message (string-append "in " (group-label g) " — C-g widens")))))))
+            (message (string-append "in " (group-label g) " — C-o widens")))))))
 
 (define-command "switch-quit" "Close the switcher and put back what you were seeing"
   (lambda ()
@@ -408,9 +466,16 @@
           (list "C-SPC" "switch-mark")
           (list "C-k" "switch-kill")
           (list "C-t" "switch-group")
-          (list "C-g" "switch-toggle-groups")
+          (list "C-o" "switch-toggle-groups")
           (list "TAB" "switch-lock")
+          (list "C-g" "switch-quit")
           (list "ESC" "switch-quit"))))
+
+;; the key bar pins to the bottom of the modal, out of the rows
+(define *switch-footer*
+  (string-append "type to narrow · DEL widen · RET switch · C-RET context · "
+                 "C-SPC mark · C-k kill · C-t group · C-o groups · "
+                 "TAB lock · C-g quit"))
 
 (mode-icon! "switch-mode" "")
 
@@ -423,8 +488,10 @@
            "in the window you came from. RET visits the row; with no match, "
            "RET founds a group named what you typed. C-RET enters the "
            "row's group or project. C-SPC marks; C-k kills the marked "
-           "buffers or the row at point; C-t puts them in a group. C-g "
-           "shows groups and projects; TAB locks to one group; ESC quits.")
+           "buffers or the row at point; C-t puts them in a group. C-o "
+           "shows groups and projects; TAB locks to one group — the card "
+           "leads as the default, its buffers and its project files "
+           "follow. C-g and ESC quit.")
     'buffer *switch-buffer*
     'rows switch-rows
     'key (lambda (buf e) (car e))
@@ -447,10 +514,6 @@
     'markable? (lambda (buf e)
                  (and (not (switch-container? e)) (buffer-known? (car e))))
     'noun "buffer"
-    'footer (lambda (buf)
-              '(("RET" "switch") ("C-RET" "context") ("C-SPC" "mark")
-                ("C-k" "kill") ("C-t" "group") ("C-g" "groups")
-                ("TAB" "lock") ("DEL" "widen") ("ESC" "quit")))
     'preview switch-preview!
     'keys *switch-keys*))
 
@@ -463,6 +526,7 @@
       (desktop-skip! buf 'switch-home-window)
       (desktop-skip! buf 'switch-woken)
       (buffer-set-local! buf 'switch-woken '())
+      (buffer-set-local! buf 'footer-line *switch-footer*)
       (list-mode-init! buf "switch-mode"))))
 
 ;;; --- opening ---------------------------------------------------------------------
@@ -501,8 +565,8 @@
 (define-command "ibuffer" "The buffer switcher (the old ibuffer, merged into it)"
   (lambda () (switch-open! 'buffers)))
 
-;; C-x G: pick a context, then pick a buffer in it
-(define-command "switch-groups" "Switch group or project, then pick a buffer in it"
+;; C-x G: pick a context, then pick a buffer or file in it
+(define-command "switch-groups" "Switch group or project, then pick a buffer or file in it"
   (lambda ()
     (switch-open! 'groups)
     (buffer-set-local! *switch-buffer* 'switch-then-pick #t)))

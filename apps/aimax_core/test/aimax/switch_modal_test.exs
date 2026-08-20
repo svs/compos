@@ -171,7 +171,23 @@ defmodule Aimax.SwitchModalTest do
     press(["ESC"])
   end
 
-  test "C-g shows groups; RET on a card switches to that group" do
+  test "C-g closes the modal — the quit key keeps its one meaning" do
+    home = open_switcher()
+
+    press(["C-g"])
+    assert home_shows(home) == "*zz-mc*"
+    refute Enum.any?(windows(), fn {_, b} -> b == @switch end), "C-g left the popup open"
+  end
+
+  test "the key bar rides the footer line, not the rows" do
+    open_switcher()
+
+    assert eval!(~s{(buffer-local "#{@switch}" 'footer-line)}) =~ "C-o groups"
+    refute Buffer.text(@switch) =~ "RET switch"
+    press(["ESC"])
+  end
+
+  test "C-o shows groups; RET on a card switches to that group" do
     {:ok, _} =
       Session.eval(~s{(begin
         (buffer-create "*zz-ma*")
@@ -179,7 +195,7 @@ defmodule Aimax.SwitchModalTest do
         #t)})
 
     open_switcher()
-    press(["C-g"])
+    press(["C-o"])
 
     entries = eval!(~s{(map car (list-entries "#{@switch}"))})
     assert entries =~ "[zzg-card]", "the groups view has no card for the group"
@@ -215,6 +231,35 @@ defmodule Aimax.SwitchModalTest do
     assert entries =~ "zz-m"
 
     press(["ESC"])
+  end
+
+  test "a project-rooted group offers its files, and the card defaults to dired" do
+    root = Path.join(System.tmp_dir!(), "switch-proj-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(root)
+    {_, 0} = System.cmd("git", ["init", "-q"], cd: root)
+    File.write!(Path.join(root, "notes.txt"), "hello\n")
+
+    on_exit(fn ->
+      Aimax.Core.kill_buffer(Path.join(root, "notes.txt"))
+      Aimax.Core.kill_buffer(root)
+      File.rm_rf!(root)
+    end)
+
+    {:ok, _} = Session.eval(~s{(switch-open! (list 'locked "#{root}"))})
+    entries = eval!(~s{(map car (list-entries "#{@switch}"))})
+    assert entries =~ "notes.txt"
+
+    # the card leads as the default; RET on it opens dired at the root
+    {:ok, _} = Session.eval(~s{(list-goto-first-entry "#{@switch}")})
+    press(["RET"])
+    assert Editor.current_buffer() == root
+
+    # a file row visits the file, and the file joins the group
+    {:ok, _} = Session.eval(~s{(switch-open! (list 'locked "#{root}"))})
+    type("notes")
+    press(["RET"])
+    assert Editor.current_buffer() == Path.join(root, "notes.txt")
+    assert eval!(~s{(buffer-group "#{root}/notes.txt")}) == ~s{"#{root}"}
   end
 
   test "the chrome chord table serves the minibuffer prompt, not the modal buffer" do

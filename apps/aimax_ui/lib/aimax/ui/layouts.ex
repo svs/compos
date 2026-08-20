@@ -177,6 +177,16 @@ defmodule Aimax.Ui.Layouts do
             font: 650 11px/1.3 var(--font-mono);
             letter-spacing: 0.015em;
           }
+          .buffer-footer {
+            flex: 0 0 auto;
+            padding: 6px 14px;
+            border-top: 1px solid var(--border, #cbc4b1);
+            background: var(--modeline-inactive-bg, var(--window-inactive-bg, #f4f0e6));
+            color: var(--dim-fg, #6b6a66);
+            font: 550 11px/1.3 var(--font-mono);
+            letter-spacing: 0.015em;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+          }
           .window.workspace-pending .buffer-header {
             border-bottom-color: color-mix(in srgb, var(--error-fg, #d13b32) 68%, transparent);
             background: color-mix(in srgb, var(--error-fg, #d13b32) 12%, var(--window-bg, #fdfcf8));

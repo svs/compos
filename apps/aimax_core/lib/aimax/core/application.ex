@@ -11,10 +11,12 @@ defmodule Aimax.Core.Application do
       {Registry, keys: :unique, name: Aimax.Core.ProcRegistry},
       {Registry, keys: :unique, name: Aimax.Core.AgentRegistry},
       {Registry, keys: :unique, name: Aimax.Core.MCPRegistry},
+      {Registry, keys: :unique, name: Aimax.Core.LSPRegistry},
       {DynamicSupervisor, name: Aimax.Core.BufferSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: Aimax.Core.ProcSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: Aimax.Core.AgentSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: Aimax.Core.MCPSupervisor, strategy: :one_for_one},
+      {DynamicSupervisor, name: Aimax.Core.LSPSupervisor, strategy: :one_for_one},
       # Scheme execution lanes: serial workers, one per group/agent/conn,
       # started lazily — must be up before Session so callbacks fired
       # during the stdlib load have somewhere to run

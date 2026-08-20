@@ -6259,7 +6259,10 @@
       (let ((fp (dash--fingerprint buf)))
         (unless (equal? fp (buffer-local buf 'modeline-dash-fp))
           (buffer-set-local! buf 'modeline-dash-fp fp)
-          (buffer-set-local! buf 'modeline-dash-blocks (dashboard-blocks buf)))))))
+          (buffer-set-local! buf 'modeline-dash-blocks (dashboard-blocks buf)))))
+    ;; the extension seam: packages react to the command that just ran
+    ;; (paredit paints the matching delimiter here)
+    (run-hooks 'post-command-hook)))
 
 (define-command "groups" "The groups board: switch, describe, set noise"
   (lambda () (list-mode-show! "groups-mode")))
@@ -7116,6 +7119,12 @@
 (global-set-key "<down>" "next-line")
 (global-set-key "<home>" "beginning-of-line")
 (global-set-key "<end>" "end-of-line")
+;; word motion on the arrow chords, the Emacs default; a mode map may
+;; take C-<right>/C-<left> for itself (paredit slurps with them)
+(global-set-key "C-<right>" "forward-word")
+(global-set-key "C-<left>" "backward-word")
+(global-set-key "M-<right>" "forward-word")
+(global-set-key "M-<left>" "backward-word")
 
 (global-set-key "RET" "newline-or-send")
 (global-set-key "DEL" "delete-backward-char")

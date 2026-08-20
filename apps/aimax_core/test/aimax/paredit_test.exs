@@ -425,6 +425,40 @@ defmodule Aimax.PareditTest do
     assert echo() =~ "No structural navigation"
   end
 
+  # --- word motion and show-paren --------------------------------------------
+
+  test "the arrow chords move by word; paredit keeps C-arrows, M-arrows pass through" do
+    buf = fresh_buffer("foo bar\n", plain: true)
+    press(["C-<right>"])
+    assert Buffer.point(buf) == 3
+    press(["M-<right>"])
+    assert Buffer.point(buf) == 7
+
+    buf2 = fresh_buffer("(foo bar)\n")
+    Buffer.goto(buf2, 1)
+    press(["M-<right>"])
+    assert Buffer.point(buf2) == 4
+  end
+
+  test "point beside a delimiter lights the pair; elsewhere it goes dark" do
+    buf = fresh_buffer("(ab)x\n")
+
+    press(["<right>", "<right>", "<right>", "<right>"])
+    assert Buffer.point(buf) == 4
+    assert eval!(~s{(buffer-overlays "#{buf}")}) =~ ~S{(0 1 "paren-match")}
+    assert eval!(~s{(buffer-overlays "#{buf}")}) =~ ~S{(3 4 "paren-match")}
+
+    press(["<right>"])
+    refute eval!(~s{(buffer-overlays "#{buf}")}) =~ "paren-match"
+  end
+
+  test "a delimiter inside a string does not light" do
+    buf = fresh_buffer(~S{"a)" b} <> "\n")
+    Buffer.goto(buf, 2)
+    press(["<right>"])
+    refute eval!(~s{(buffer-overlays "#{buf}")}) =~ "paren-match"
+  end
+
   # --- enablement ------------------------------------------------------------
 
   test "scheme-mode enables paredit by default; the defcustom turns it off" do

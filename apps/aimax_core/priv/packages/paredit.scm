@@ -661,8 +661,8 @@
     ("C-M-d" "paredit-down" "down-list")
     ("C-M-k" "paredit-kill-sexp" #f)
     ("C-M-SPC" "paredit-mark-sexp" #f)
-    ("C-<right>" "paredit-slurp-forward" #f)
-    ("C-<left>" "paredit-barf-forward" #f)
+    ("C-<right>" "paredit-slurp-forward" "forward-word")
+    ("C-<left>" "paredit-barf-forward" "backward-word")
     ("M-s" "paredit-splice" #f)
     ("M-r" "paredit-raise" #f)
     ("M-(" "paredit-wrap-round" #f)))
@@ -686,7 +686,42 @@
                       (string-append "paredit--key-" (car entry))))
     *paredit-keys*))
 
-(define (paredit--teardown! buf) #f)
+(define (paredit--teardown! buf)
+  (overlay-clear! buf 'paren))
+
+;;; --- show-paren --------------------------------------------------------------
+;;; After every command: point beside a delimiter lights the pair.
+
+(define (paredit--paren-pair text p)
+  (let ((prev (par--ch text (- p 1)))
+        (next (par--ch text p)))
+    (cond
+      ((and prev (par--closer? prev) (not (par--char-lit-at? text (- p 1))))
+       (let ((os (par--openers (par--ctx text (- p 1)))))
+         (if (null? os) #f (list (car os) (- p 1)))))
+      ((and next (par--opener? next) (not (par--char-lit-at? text p)))
+       (let ((e (par--list-end text p)))
+         (if e (list p (- e 1)) #f)))
+      (else #f))))
+
+(define (paredit--show-paren!)
+  (let ((buf (current-buffer)))
+    (when (minor-mode-on? buf "paredit-mode")
+      (let* ((text (buffer-text buf))
+             (p (point))
+             (pair (and (equal? (par--mode (par--ctx text p)) 'code)
+                        (paredit--paren-pair text p))))
+        (if pair
+            (overlay-set! buf 'paren
+              (list (list (car pair) (+ (car pair) 1) "paren-match")
+                    (list (cadr pair) (+ (cadr pair) 1) "paren-match")))
+            (overlay-clear! buf 'paren))))))
+
+(add-hook! 'post-command-hook paredit--show-paren!)
+
+(define-style! 'paredit "
+.f-paren-match{background:color-mix(in srgb, var(--accent-fg,#4a6a8a) 32%, transparent);border-radius:2px}
+")
 
 (register-minor-mode! "paredit-mode" paredit--setup! paredit--teardown!)
 

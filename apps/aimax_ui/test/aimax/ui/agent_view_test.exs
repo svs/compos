@@ -89,6 +89,45 @@ defmodule Aimax.Ui.AgentViewTest do
     refute html =~ ">>> you: profile"
   end
 
+  # the transcript lives in its own LiveComponent so a keystroke diffs to a
+  # skip placeholder — typing must leave the blocks intact and reach the input
+  test "typing updates the input row and keeps the transcript blocks", %{conn: conn} do
+    buf = "*agent: type-test*"
+    {:ok, _} = Aimax.Core.create_buffer(buf)
+
+    Buffer.append(buf, "hello\n", source: :editor)
+    t_start = Buffer.byte_size(buf)
+    Buffer.append(buf, "\n▸ run · M-x probe\n", source: :editor)
+    b_start = Buffer.byte_size(buf)
+    Buffer.append(buf, "result line\n", source: :editor)
+    mark = Buffer.byte_size(buf)
+    Buffer.append(buf, "\n>>> you: dra", source: :editor)
+
+    Buffer.set_local(buf, "render-mode", "agent")
+    Buffer.set_local(buf, "agent-slug", "type-test")
+    Buffer.set_local(buf, "agent-saved-mark", mark)
+    Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
+
+    Buffer.set_local(buf, "agent-blocks", [
+      [t_start, mark, "tool", "t1", "M-x probe", "run", "done", b_start]
+    ])
+
+    Editor.set_window_buffer(buf)
+    {:ok, view, html} = live(conn, "/")
+    assert html =~ "ag-tool done"
+    assert html =~ "dra"
+
+    render_hook(view, "key", %{"k" => "M->"})
+    render_hook(view, "key", %{"k" => "f"})
+    html = render_hook(view, "key", %{"k" => "t"})
+
+    # the char landed in the input row, and the transcript component kept
+    # its blocks through the input-only renders
+    assert html =~ "draft"
+    assert html =~ "ag-tool done"
+    assert html =~ "M-x probe"
+  end
+
   test "agent tool cards pretty-print JSON without changing transcript bytes", %{conn: conn} do
     buf = "*agent: json-view-test*"
     {:ok, _} = Aimax.Core.create_buffer(buf)

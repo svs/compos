@@ -557,6 +557,8 @@ defmodule Aimax.Core.Session do
         "(command-doc NAME) — return the command's doc string; empty when it has none.",
       "run-command" => "(run-command NAME) — run the named command; error when it is undefined.",
       "llm" => "(llm PROMPT CALLBACK) — start an async completion; CALLBACK gets the reply text.",
+      "llm-with-model" =>
+        "(llm-with-model PROMPT MODEL CALLBACK) — async completion on MODEL; CALLBACK gets the reply text.",
       "llm-tools" =>
         "(llm-tools PROMPT SYSTEM SPECS DISPATCHER CB [USAGE-CB]) — async tool loop; CB gets text.",
       "browser-call" =>
@@ -1471,8 +1473,7 @@ defmodule Aimax.Core.Session do
       # every globally bound name (builtins + userland defines) — the
       # discovery surface for agents writing eval-scheme code
       "global-names" => fn [], store ->
-        {vars, _parent} = Map.fetch!(store.frames, global)
-        {vars |> Map.keys() |> Enum.sort(), store}
+        {Aimax.Scheme.Env.frame_names(store, global) |> Enum.sort(), store}
       end,
       # the doc sweep's surface: apropos scope "all" and describe-function
       # read these instead of showing a bare name. A userland alias of a

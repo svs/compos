@@ -268,6 +268,8 @@ defmodule Aimax.Core.SchemeAPI do
       "other-window!" => "(other-window!) — select the next window in the frame.",
       "switch-to-buffer!" =>
         "(switch-to-buffer! BUF) — show BUF in the active window; return BUF.",
+      "window-switch-buffer!" =>
+        "(window-switch-buffer! BUF) — raw switch that restores a dormant BUF inline; return BUF.",
       "frame-list" => "(frame-list) — return frame ids in most-recently-used order.",
       "selected-frame" => "(selected-frame) — return the current frame's id.",
       "select-frame!" => "(select-frame! FRAME) — make FRAME current; return #t on success.",

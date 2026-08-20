@@ -268,6 +268,16 @@ defmodule Aimax.Scheme.Env do
 
   def closure_refs(_other, acc), do: acc
 
+  @doc "Every name bound directly in one frame, both tiers, deduplicated."
+  def frame_names(%__MODULE__{tid: tid, local: local}, ref) do
+    shared = :ets.select(tid, [{{{:var, ref, :"$1"}, :_}, [], [:"$1"]}])
+
+    case local do
+      %{^ref => {vars, _parent}} -> Enum.uniq(Map.keys(vars) ++ shared)
+      _ -> shared
+    end
+  end
+
   @doc "The number of live frames, both tiers."
   def frame_count(%__MODULE__{tid: tid, local: local}) do
     :ets.select_count(tid, [{{{:frame, :_}, :_}, [], [true]}]) + map_size(local)

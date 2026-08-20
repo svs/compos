@@ -322,6 +322,38 @@ defmodule Aimax.AnnotateTest do
              "In repo"
   end
 
+  test "a margin card click hands the focus back to the document" do
+    id = reader_note()
+    eval!(~s[(enable-minor-mode! "#{@buf}" "annotate-mode")])
+    on_exit(fn -> if Buffer.exists?("*margin*"), do: Aimax.Core.kill_buffer("*margin*") end)
+
+    # the margin refuses typing from its first frame, not only after restore
+    assert eval!(~s[(buffer-read-only? "*margin*")]) == "#t"
+
+    # the client focuses the clicked window before the handler runs —
+    # reproduce that, then click the card
+    eval!(~s[(unless (window-showing "*margin*")
+               (display-buffer-other-window! "*margin*"))])
+    eval!(~s[(select-window! (window-showing "*margin*"))])
+    assert eval_s!(~s[(window-buffer (active-window))]) == "*margin*"
+
+    Aimax.Core.SchemeAPI.block_click("*margin*", "ann:pick:#{id}")
+
+    assert eventually(fn ->
+             eval_s!(~s[(window-buffer (active-window))]) == @buf
+           end)
+  end
+
+  defp eventually(fun, tries \\ 40) do
+    cond do
+      fun.() -> true
+      tries == 0 -> false
+      true ->
+        Process.sleep(50)
+        eventually(fun, tries - 1)
+    end
+  end
+
   test "the check source reports tree-sitter ERROR nodes" do
     langs = eval!("(ts-langs)")
 

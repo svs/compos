@@ -856,11 +856,18 @@
              (equal? (buffer-local *ann-margin* 'ann-source) src))
     (annotate--margin-render! *ann-margin*)))
 
+;; ONE init for the margin, fresh or restored: cards are a view, so the
+;; buffer refuses typing from its first frame, not only after a restore
+(define (annotate--margin-init! buf)
+  (buffer-set-read-only! buf #t)
+  (local-set-key* buf "C-c C-v" "annotate-store-visit")
+  (annotate--margin-render! buf))
+
 (define (annotate--margin-ensure! src)
   (buffer-create *ann-margin*)
   (buffer-set-local! *ann-margin* 'ann-source src)
   (buffer-set-local! *ann-margin* 'mode-name "annotate-margin-mode")
-  (annotate--margin-render! *ann-margin*))
+  (annotate--margin-init! *ann-margin*))
 
 ;; the margin buffer's own mode — it exists so a desktop restore can
 ;; rebuild the cards. Invoked by hand on any other buffer it only
@@ -869,23 +876,26 @@
   (lambda ()
     (let ((buf (current-buffer)))
       (if (buffer-local buf 'ann-source)
-          (begin
-            (buffer-set-read-only! buf #t)
-            (local-set-key* buf "C-c C-v" "annotate-store-visit")
-            (annotate--margin-render! buf))
+          (annotate--margin-init! buf)
           (message "annotate-margin-mode is the margin's internal mode — C-c ! m (annotate-margin) toggles the margin")))))
 
 ;; annotate-mode owns a frame arrangement: the document and its margin
 (define-mode-layout! "annotate-mode" '(h 0.7 self "*margin*"))
 
-;; the margin's clicks: ann:VERB:ID on cards and action chips
+;; The margin's clicks: ann:VERB:ID on cards and action chips. The click
+;; itself made the margin the active window, and the margin is read-only —
+;; so every verb first hands the focus back to the document. Without this
+;; the next keystroke hits the margin and the editor answers "Buffer is
+;; read-only", which reads as annotate-mode freezing the document.
 (define (annotate--click! src verb a)
-  (cond ((equal? verb "pick") (annotate--goto! src a #f))
-        ((equal? verb "resolve") (annotate--toggle-resolve! src a))
-        ((equal? verb "fix") (annotate--do-fix! src a))
-        ((equal? verb "suggest") (annotate--suggest! src a))
-        ((equal? verb "dismiss") (annotate--do-dismiss! src a))
-        ((equal? verb "reply") (annotate--read-reply src a))))
+  (let ((win (window-showing src)))
+    (when win (select-window! win))
+    (cond ((equal? verb "pick") (annotate--goto! src a (and win #t)))
+          ((equal? verb "resolve") (annotate--toggle-resolve! src a))
+          ((equal? verb "fix") (annotate--do-fix! src a))
+          ((equal? verb "suggest") (annotate--suggest! src a))
+          ((equal? verb "dismiss") (annotate--do-dismiss! src a))
+          ((equal? verb "reply") (annotate--read-reply src a)))))
 
 (on-block-click! "annotate"
   (lambda (mbuf id)

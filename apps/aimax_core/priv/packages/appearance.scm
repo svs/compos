@@ -37,6 +37,57 @@
       (customize-set! 'preview-font-size (if mono? "16.5px" "14.5px"))
       (message (if mono? "rendered pages: serif" "rendered pages: monospace")))))
 
+;;; --- text scale (Emacs C-x C-+, on the Cmd chords) ----------------------------
+;;; Per-buffer: the default face's size walks a ladder through the same
+;;; face remap writing-mode uses, so line height and wrapping follow.
+;;; The remap MERGES — a buffer's own family and line-height stay.
+
+(define *text-scale-sizes*
+  '("9px" "10px" "11px" "12px" "13px" "15px" "17px" "20px" "23px" "27px" "31px"))
+(define *text-scale-base* 4)
+
+(define (text-scale--without-size kvs)
+  (let loop ((ks kvs) (out '()))
+    (cond ((null? ks) (reverse out))
+          ((equal? (car ks) 'size) (loop (cdr (cdr ks)) out))
+          (else (loop (cdr (cdr ks))
+                      (cons (car (cdr ks)) (cons (car ks) out)))))))
+
+(define (text-scale-apply! buf n0)
+  (let* ((i (max 0 (min (- (length *text-scale-sizes*) 1)
+                        (+ *text-scale-base* n0))))
+         (n (- i *text-scale-base*))
+         (old (let ((e (assoc 'default (or (buffer-local buf 'face-remap) '()))))
+                (if e (car (cdr e)) '())))
+         (rest (text-scale--without-size old)))
+    (buffer-set-local! buf 'text-scale n)
+    (face-remap-in! buf 'default
+      (if (= n 0)
+          rest
+          (append rest (list 'size (nth i *text-scale-sizes*)))))
+    (message (if (= n 0)
+                 "text scale reset"
+                 (string-append "text scale "
+                                (if (> n 0) "+" "") (number->string n))))))
+
+(define (text-scale-step! d)
+  (let ((buf (current-buffer)))
+    (text-scale-apply! buf (+ (or (buffer-local buf 'text-scale) 0) d))))
+
+(define-command "text-scale-increase" "Make this buffer's text larger"
+  (lambda () (text-scale-step! 1)))
+(define-command "text-scale-decrease" "Make this buffer's text smaller"
+  (lambda () (text-scale-step! -1)))
+(define-command "text-scale-reset" "Give this buffer the normal text size"
+  (lambda () (text-scale-apply! (current-buffer) 0)))
+
+(global-set-key "s-+" "text-scale-increase")
+(global-set-key "s-=" "text-scale-increase")
+(global-set-key "s--" "text-scale-decrease")
+(global-set-key "s-0" "text-scale-reset")
+
 (category! 'ui)
 (public! 'preview-font-toggle
   "(run-command \"preview-font-toggle\") — flip rendered pages between serif and monospace")
+(public! 'text-scale-apply!
+  "(text-scale-apply! BUF N) — set BUF's text scale to step N; 0 is normal")

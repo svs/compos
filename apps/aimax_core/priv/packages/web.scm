@@ -145,19 +145,39 @@
   (and (> (string-length l) 3)
        (equal? "" (string-join (string-split l "-") ""))))
 
-;; a label-less link renders as nothing — an image, an icon anchor —
-;; and it must go BEFORE the blank collapse, or every dropped image
-;; leaves its run of empty lines behind
-(define (web--drop-empty-links s)
-  (let loop ((pos 0) (out ""))
-    (let ((hit (re-find "!?\\[\\]\\([^)]*\\)" s pos)))
+;; a label-less link renders as nothing — an image, an icon anchor.
+;; An IMAGE stays, as a link the reader can follow into the browser;
+;; the rest goes, before the blank collapse leaves their empty lines
+;; behind. A link-wrapped image is one image, not two.
+(define (web--image-url? u)
+  (or (string-contains? u ".png") (string-contains? u ".jpg")
+      (string-contains? u ".jpeg") (string-contains? u ".gif")
+      (string-contains? u ".webp") (string-contains? u ".avif")
+      (string-contains? u "/image/")))
+
+(define *web--empty-link-pattern* "!?\\[\\]\\(([^)\\s]*)\\)")
+
+(define (web--fix-empty-links s)
+  (let loop ((pos 0) (out "") (last-img #f))
+    (let ((hit (re-find *web--empty-link-pattern* s pos)))
       (if (not hit)
           (string-append out (substring-bytes s pos (string-byte-length s)))
-          (loop (car (cdr hit))
-                (string-append out (substring-bytes s pos (car hit))))))))
+          (let* ((ms (car hit))
+                 (me (car (cdr hit)))
+                 (gs (re-groups *web--empty-link-pattern* s ms))
+                 (ur (car (cdr gs)))
+                 (url (substring-bytes s (car ur) (car (cdr ur))))
+                 (between (string-trim (substring-bytes s pos ms)))
+                 (head (string-append out (substring-bytes s pos ms)))
+                 (img? (web--image-url? url)))
+            (cond
+              ;; the inner image of a wrapped pair: the wrapper said it
+              ((and img? last-img (equal? between "")) (loop me head #t))
+              (img? (loop me (string-append head "[image](" url ")") #t))
+              (else (loop me head (and last-img (equal? between ""))))))))))
 
 (define (web--tidy md)
-  (let loop ((ls (string-split (web--unescape (web--drop-empty-links md)) "\n"))
+  (let loop ((ls (string-split (web--unescape (web--fix-empty-links md)) "\n"))
              (out '()) (blanks 0))
     (if (null? ls)
         (string-join (reverse out) "\n")
@@ -311,11 +331,14 @@
   (lambda ()
     (let* ((buf (current-buffer))
            (l (web--link-at buf (point))))
-      (if l
-          (web--goto-url! buf
-            (web--resolve (car (cdr (cdr l))) (or (buffer-local buf 'browse-url) ""))
-            #t)
-          (message "no link here")))))
+      (if (not l)
+          (message "no link here")
+          (let ((url (web--resolve (car (cdr (cdr l)))
+                                   (or (buffer-local buf 'browse-url) ""))))
+            ;; an image is not text: the browser renders it
+            (if (web--image-url? url)
+                (tab-open url)
+                (web--goto-url! buf url #t)))))))
 
 (define-command "browse-next-link" "Move point to the next link"
   (lambda ()
@@ -377,12 +400,26 @@
   (local-set-key* buf "l" "browse-back")
   (local-set-key* buf "g" "browse-refresh")
   (local-set-key* buf "o" "browse-open-external")
+  ;; the preview chord: "show me the rendered thing" — the browser
+  (local-set-key* buf "C-c C-v" "browse-open-external")
   (local-set-key* buf "q" "quit-window"))
 
 (define-mode "browse-mode"
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-read-only! buf #t)
+      ;; the reading look is the WRITING look: one centered measure for
+      ;; prose everywhere — writing-mode owns the class and the setting
+      (buffer-set-local! buf 'window-class "writing")
+      (buffer-set-local! buf 'line-numbers "off")
+      (buffer-set-local! buf 'visual-line-mode #t)
+      (when (boundp 'writing-measure)
+        (face-remap-in! buf 'writing (list 'measure writing-measure)))
+      (when (boundp 'writing-font-family)
+        (face-remap-in! buf 'default
+          (list 'family writing-font-family
+                'size writing-font-size
+                'line-height writing-line-height)))
       (web--install-keys! buf)
       (web--apply-link-faces! buf)
       (web--declare-cache! buf)

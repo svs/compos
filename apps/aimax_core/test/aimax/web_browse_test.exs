@@ -54,6 +54,10 @@ defmodule Aimax.WebBrowseTest do
     refute text =~ "(docs/intro.html"
     assert eval!(~S|(buffer-local "*browse*" 'render-mode)|) == "#f"
 
+    # the reading look: centered writing measure, no line numbers
+    assert eval!(~S|(buffer-local "*browse*" 'window-class)|) == ~S["writing"]
+    assert eval!(~S|(buffer-local "*browse*" 'line-numbers)|) == ~S["off"]
+
     links = eval!(~S|(buffer-local "*browse*" 'web-links)|)
     assert links =~ "/second.html"
     assert links =~ "docs/intro.html"
@@ -137,5 +141,13 @@ defmodule Aimax.WebBrowseTest do
   test "the tidy pass drops heading marks and rules, and unescapes pandoc" do
     assert eval!(~S{(web--tidy "## A title\n\n----\n\nsee \\| this \\[here\\]\n")}) ==
              "\"A title\\n\\nsee | this [here]\\n\""
+  end
+
+  test "an image stays as a link; a wrapped pair is one image; icons go" do
+    out = eval!(~S{(web--tidy "[](https://c.test/a.jpeg)\n![](https://c.test/a-big.jpeg)\n\n[](https://c.test/icon-anchor)\n\ntext\n")})
+
+    assert out =~ "[image](https://c.test/a.jpeg)"
+    refute out =~ "a-big", "the wrapped pair rendered as two images"
+    refute out =~ "icon-anchor"
   end
 end

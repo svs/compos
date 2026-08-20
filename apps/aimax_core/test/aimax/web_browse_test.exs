@@ -35,6 +35,8 @@ defmodule Aimax.WebBrowseTest do
 
     on_exit(fn ->
       Aimax.Core.kill_buffer("*browse*")
+      # every rendered page writes the visited file in the test home
+      {:ok, _} = Session.eval(~S|(write-file! *web-visited-file* "")|)
       Editor.minibuffer_close()
     end)
 
@@ -64,12 +66,14 @@ defmodule Aimax.WebBrowseTest do
     press("RET")
 
     assert Buffer.text("*browse*") =~ "Second page"
+
     assert eval!(~S|(buffer-local "*browse*" 'browse-url)|) ==
              ~S["https://site.test/second.html"]
 
     # l returns to the front page
     press("l")
     assert Buffer.text("*browse*") =~ "Front page"
+
     assert eval!(~S|(buffer-local "*browse*" 'browse-url)|) ==
              ~S["https://site.test/index.html"]
   end
@@ -110,5 +114,41 @@ defmodule Aimax.WebBrowseTest do
     eval!(~S|(buffer-set-local! "*browse*" 'cache-time (- (current-time) 999999))|)
     eval!(~S|(with-current-buffer "*browse*" (lambda () (set-mode! "browse-mode")))|)
     assert eval!("*zz-web-fetches*") == "2"
+  end
+
+  test "a rendered page joins the visited list, and the prompt completes over it" do
+    eval!(~S|(browse "https://site.test/index.html")|)
+
+    visited = eval!("(web--visited)")
+    assert visited =~ "https://site.test/index.html"
+    assert visited =~ "Front page"
+
+    # the prompt offers it, title beside the URL
+    eval!(~S|(run-command "browse")|)
+    mb = Editor.render_state().minibuffer
+    assert mb.prompt == "URL: "
+    labels = Enum.map(mb.candidates, & &1.label)
+    assert "https://site.test/index.html" in labels
+    press("C-g")
+  end
+
+  test "C-x C-v shows the original page as authored; again the reader view" do
+    eval!(~S"""
+    (set! *web-fetch-html*
+      (lambda (url k) (k "<html><body><b>RAW ORIGINAL</b></body></html>")))
+    """)
+
+    eval!(~S|(browse "https://site.test/index.html")|)
+    eval!(~S|(switch-to-buffer! "*browse*")|)
+
+    press(["C-x", "C-v"])
+    assert Buffer.text("*browse*") =~ "RAW ORIGINAL"
+    assert eval!(~S|(buffer-local "*browse*" 'render-mode)|) == ~S["html"]
+    assert eval!(~S|(buffer-local "*browse*" 'preview-authored)|) == "#t"
+
+    # again: the reader view re-renders from the saved markdown, no fetch
+    press(["C-x", "C-v"])
+    assert Buffer.text("*browse*") =~ "Front page"
+    assert eval!(~S|(buffer-local "*browse*" 'render-mode)|) == "#f"
   end
 end

@@ -21,15 +21,92 @@
 (define (web--shell-quote text)
   (string-append "'" (string-join (string-split text "'") "'\\''") "'"))
 
+;; a table-layout page (Hacker News), with the table tags flattened —
+;; pandoc's markdown writer cannot express nested tables and answers
+;; only a "[TABLE]" placeholder for the whole page
+(define (web--flat-pipeline url k)
+  (shell-command->string
+    (string-append
+      "curl -sL --max-time 20 " (web--shell-quote url)
+      " | perl -pe 's{</?(?:table|tbody|thead|tr|td|th)\\b[^>]*>}{ }gi'"
+      " | pandoc -f html-native_divs-native_spans -t gfm-raw_html")
+    (lambda (out) (k (if (equal? (string-trim out) "") #f out)))))
+
 ;; URL -> markdown, in a Task. Tests replace this seam.
 (define (web--pipeline url k)
   (shell-command->string
     (string-append
       "curl -sL --max-time 20 " (web--shell-quote url)
       " | pandoc -f html-native_divs-native_spans -t gfm-raw_html")
-    (lambda (out) (k (if (equal? (string-trim out) "") #f out)))))
+    (lambda (out)
+      (cond ((equal? (string-trim out) "") (k #f))
+            ((string-contains? out "[TABLE]") (web--flat-pipeline url k))
+            (else (k out))))))
 
 (define *web-fetch* web--pipeline)
+
+;; URL -> the raw html, for the original view. Tests replace this too.
+(define (web--html-pipeline url k)
+  (shell-command->string
+    (string-append "curl -sL --max-time 20 " (web--shell-quote url))
+    (lambda (out) (k (if (equal? (string-trim out) "") #f out)))))
+
+(define *web-fetch-html* web--html-pipeline)
+
+;;; --- visited sites --------------------------------------------------------------
+;;; Every rendered page remembers itself: one "URL TITLE" line, newest
+;;; first. The browse prompt completes over them, and the title matches
+;;; what you type.
+
+(define *web-visited-file* (string-append (aimax-home) "/web-visited"))
+(define *web-visited-max* 200)
+
+(define (web--visited)
+  (let ((text (read-file *web-visited-file*)))
+    (if (string? text)
+        (filter pair?
+          (map (lambda (line)
+                 (let ((l (string-trim line)))
+                   (if (equal? l "")
+                       #f
+                       (let ((sp (string-index l " ")))
+                         (if sp
+                             (list (substring-bytes l 0 sp)
+                                   (substring-bytes l (+ sp 1)
+                                                    (string-byte-length l)))
+                             (list l ""))))))
+               (string-split text "\n")))
+        '())))
+
+(define (web--remember-visit! url title)
+  (let ((all (take-n (cons (list url title)
+                           (filter (lambda (e) (not (equal? (car e) url)))
+                                   (web--visited)))
+                     *web-visited-max*)))
+    (write-file! *web-visited-file*
+      (string-append
+        (string-join (map (lambda (e)
+                            (string-trim
+                              (string-append (car e) " " (car (cdr e)))))
+                          all)
+                     "\n")
+        "\n"))))
+
+;; the page's title: its first heading, else its first line of text
+(define (web--title md)
+  (let loop ((ls (string-split md "\n")) (first #f))
+    (cond ((null? ls) (or first ""))
+          ((string-prefix? "# " (car ls))
+           (string-trim
+             (substring-bytes (car ls) 2 (string-byte-length (car ls)))))
+          (else
+            (let ((t (string-trim (car ls))))
+              (loop (cdr ls)
+                    (or first
+                        (and (not (equal? t ""))
+                             (if (> (string-length t) 80)
+                                 (substring t 0 80)
+                                 t)))))))))
 
 ;;; --- markdown -> text + links ---------------------------------------------------
 
@@ -99,9 +176,15 @@
     (buffer-insert! buf 0 text)
     (buffer-set-read-only! buf #t)
     (buffer-set-local! buf 'web-links links)
+    ;; a render is the READER view; the original toggle reads this back
+    (buffer-set-local! buf 'web-md md)
+    (buffer-set-local! buf 'render-mode #f)
     (web--apply-link-faces! buf)
     (buffer-goto! buf 0)
-    (web--update-modeline! buf)))
+    (web--update-modeline! buf)
+    ;; the page is real now: it joins the visited list, title and all
+    (let ((url (buffer-local buf 'browse-url)))
+      (when url (web--remember-visit! url (web--title md))))))
 
 ;; overlays are runtime: the mode setup rebuilds them from 'web-links
 (define (web--apply-link-faces! buf)
@@ -126,7 +209,9 @@
       (buffer-set-local! buf 'browse-history
         (cons here (or (buffer-local buf 'browse-history) '())))))
   (buffer-set-local! buf 'browse-url url)
-  ;; a new page: the old stamp must not satisfy the TTL
+  ;; a new page: the old stamp must not satisfy the TTL, and the old
+  ;; page's original html means nothing here
+  (buffer-set-local! buf 'web-html #f)
   (buffer-set-local! buf 'cache-time #f)
   (web--update-modeline! buf)
   (message (string-append "fetching " url " …"))
@@ -197,6 +282,48 @@
       (message "fetching…")
       (cache-refresh! buf))))
 
+;; the ORIGINAL page: the raw html, rendered as authored. Reading is
+;; still all it does — scripts never run; a page that needs them wants
+;; `o` and the real browser.
+(define (web--show-original! buf html)
+  (buffer-set-read-only! buf #f)
+  (buffer-delete-range! buf 0 (buffer-size buf))
+  (buffer-insert! buf 0 html)
+  (buffer-set-read-only! buf #t)
+  (overlay-set! buf 'web '())
+  (buffer-set-local! buf 'web-links '())
+  (buffer-set-local! buf 'web-html html)
+  (buffer-set-local! buf 'preview-authored #t)
+  (buffer-set-local! buf 'render-mode "html")
+  (buffer-goto! buf 0))
+
+(define-command "browse-toggle-original"
+  "Show the original page; again shows the reader view"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (cond
+        ((equal? (buffer-local buf 'render-mode) "html")
+         ;; back to the reader: the saved markdown re-renders, no fetch
+         (let ((md (buffer-local buf 'web-md)))
+           (if md
+               (web--render! buf md)
+               (begin (buffer-set-local! buf 'render-mode #f)
+                      (buffer-set-local! buf 'cache-time #f)
+                      (cache-refresh! buf)))))
+        (else
+          (let ((html (buffer-local buf 'web-html))
+                (url (buffer-local buf 'browse-url)))
+            (cond
+              ((string? html) (web--show-original! buf html))
+              ((not url) (message "no page yet"))
+              (else
+                (message (string-append "fetching original " url " …"))
+                (*web-fetch-html* url
+                  (lambda (html)
+                    (if (and html (buffer-known? buf))
+                        (web--show-original! buf html)
+                        (message "original fetch failed"))))))))))))
+
 (define-command "browse-open-external" "Open this page in the real browser"
   (lambda ()
     (let ((url (buffer-local (current-buffer) 'browse-url)))
@@ -210,12 +337,16 @@
   (local-set-key* buf "l" "browse-back")
   (local-set-key* buf "g" "browse-refresh")
   (local-set-key* buf "o" "browse-open-external")
+  (local-set-key* buf "C-x C-v" "browse-toggle-original")
   (local-set-key* buf "q" "quit-window"))
 
 (define-mode "browse-mode"
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-read-only! buf #t)
+      ;; both derive from the URL: a restart refetches, not restores
+      (desktop-skip! buf 'web-md)
+      (desktop-skip! buf 'web-html)
       (web--install-keys! buf)
       (web--apply-link-faces! buf)
       (web--declare-cache! buf)
@@ -225,8 +356,9 @@
 
 (mode-doc! "browse-mode"
   "A web page as readable text. RET follows the link at point, TAB and
-n/p walk the links, l goes back, g refetches, o opens the page in the
-real browser, and C-s searches to any link.")
+n/p walk the links, l goes back, g refetches, C-x C-v shows the
+original page and again the reader view, o opens the page in the real
+browser, and C-s searches to any link.")
 
 ;; the one entry point: normalize, enter the mode, fetch
 (define (browse url)
@@ -242,12 +374,16 @@ real browser, and C-s searches to any link.")
         (web--goto-url! *web-buffer* full #t)))
     *web-buffer*))
 
+;; the prompt completes over the visited sites, and a title matches
+;; what you type; a fresh URL still goes through as typed
 (define-command "browse" "Open a web page as readable text in a buffer"
   (lambda ()
-    (minibuffer-read "URL: " '()
-      (lambda (url)
-        (unless (equal? (string-trim url) "")
-          (browse (string-trim url)))))))
+    (minibuffer-read* "URL: " (web--visited)
+      (list (list 'match-hint 1)
+            (list 'confirm
+                  (lambda (url)
+                    (unless (equal? (string-trim url) "")
+                      (browse (string-trim url)))))))))
 
 ;;; --- catalog ------------------------------------------------------------------
 

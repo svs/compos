@@ -146,7 +146,7 @@ defmodule Aimax.WebBrowseTest do
   test "an image stays as a link; a wrapped pair is one image; icons go" do
     out = eval!(~S{(web--tidy "[](https://c.test/a.jpeg)\n![](https://c.test/a-big.jpeg)\n\n[](https://c.test/icon-anchor)\n\ntext\n")})
 
-    assert out =~ "[image](https://c.test/a.jpeg)"
+    assert out =~ "[https://c.test/a.jpeg](https://c.test/a.jpeg)"
     refute out =~ "a-big", "the wrapped pair rendered as two images"
     refute out =~ "icon-anchor"
   end

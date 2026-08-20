@@ -86,6 +86,12 @@
 (global-set-key "s--" "text-scale-decrease")
 (global-set-key "s-0" "text-scale-reset")
 
+;; the Ctrl shapes of the same chords: Ctrl-Shift-+ and Ctrl-Shift--
+;; arrive as C-+ and C-_, because shift rides the character. Undo
+;; keeps C-/ and C-x u; C-_ joins the scale.
+(global-set-key "C-+" "text-scale-increase")
+(global-set-key "C-_" "text-scale-decrease")
+
 (category! 'ui)
 (public! 'preview-font-toggle
   "(run-command \"preview-font-toggle\") — flip rendered pages between serif and monospace")

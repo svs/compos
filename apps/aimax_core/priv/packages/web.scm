@@ -173,7 +173,9 @@
             (cond
               ;; the inner image of a wrapped pair: the wrapper said it
               ((and img? last-img (equal? between "")) (loop me head #t))
-              (img? (loop me (string-append head "[image](" url ")") #t))
+              ;; the URL is the label: the buffer text stays the truth,
+              ;; and the img-embed face renders the picture over it
+              (img? (loop me (string-append head "[" url "](" url ")") #t))
               (else (loop me head (and last-img (equal? between ""))))))))))
 
 (define (web--tidy md)
@@ -270,10 +272,16 @@
     (let ((url (buffer-local buf 'browse-url)))
       (when url (web--remember-visit! url (web--title md))))))
 
-;; overlays are runtime: the mode setup rebuilds them from 'web-links
+;; overlays are runtime: the mode setup rebuilds them from 'web-links.
+;; An image link wears img-embed — the client renders the picture in
+;; the line, and the text underneath stays the URL.
 (define (web--apply-link-faces! buf)
   (overlay-set! buf 'web
-    (map (lambda (l) (list (car l) (car (cdr l)) "web-link"))
+    (map (lambda (l)
+           (list (car l) (car (cdr l))
+                 (if (web--image-url? (car (cdr (cdr l))))
+                     "img-embed"
+                     "web-link")))
          (or (buffer-local buf 'web-links) '()))))
 
 (define (web--declare-cache! buf)

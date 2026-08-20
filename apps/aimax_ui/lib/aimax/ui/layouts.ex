@@ -250,6 +250,11 @@ defmodule Aimax.Ui.Layouts do
             visibility: hidden !important; animation: none !important;
           }
           .no-nums .linenum { display: none; }
+          /* an img-embed seg: the picture, in the text's place */
+          .line img.img-embed {
+            display: block; max-width: min(100%, 640px); height: auto;
+            border-radius: 4px; margin: 6px 0;
+          }
           /* --- writing-mode: centered measure, quiet chrome ---------------- */
           .window.writing .buf { padding-top: clamp(20px, 6vh, 90px); }
           .window.writing .line {

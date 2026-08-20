@@ -1074,7 +1074,7 @@ defmodule Aimax.Ui.EditorLive do
           class={"line #{if ln.current, do: "hl-line"}"}
         >
           <span class="linenum">{ln.num}</span>
-          <span class="line-content"><span :for={{txt, cls} <- ln.segs} class={cls}>{txt}</span><span
+          <span class="line-content"><.seg :for={{txt, cls} <- ln.segs} txt={txt} cls={cls} /><span
               :if={@active? && @completion && ln.current}
               class="cap-pop"
               style={"left: #{pop_col(@node.text, ln.start, @completion.start)}ch"}
@@ -1173,6 +1173,20 @@ defmodule Aimax.Ui.EditorLive do
 
   # cut the line at every range boundary; each segment takes the last-wins
   # ts class plus any active overlay classes
+  # a seg whose overlay face says img-embed IS an image: the buffer text
+  # stays the URL (the buffer is truth), the client draws the picture
+  attr :txt, :string, required: true
+  attr :cls, :string, required: true
+
+  defp seg(%{cls: cls, txt: txt} = assigns)
+       when is_binary(cls) and is_binary(txt) do
+    if cls =~ "img-embed" and String.starts_with?(txt, "http") do
+      ~H|<img src={@txt} class="img-embed" loading="lazy" />|
+    else
+      ~H|<span class={@cls}>{@txt}</span>|
+    end
+  end
+
   defp seg_build(part, ls, ts_ranges, overlays) do
     plen = byte_size(part)
     le = ls + plen

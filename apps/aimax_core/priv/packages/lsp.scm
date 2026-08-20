@@ -480,11 +480,14 @@
         ((symbol? (car c)) (or (plist-get c 'value) #f))
         (else (lsp--hover-text (car c)))))
 
-;; the echo area holds one line: the first non-empty line of the hover
+;; the echo area holds one line: the first line of the hover that is
+;; not blank and not a markdown code fence
 (define (lsp--first-line s)
   (let loop ((ls (string-split s "\n")))
     (cond ((null? ls) "")
-          ((equal? (string-trim (car ls)) "") (loop (cdr ls)))
+          ((or (equal? (string-trim (car ls)) "")
+               (string-prefix? "```" (string-trim (car ls))))
+           (loop (cdr ls)))
           (else (string-trim (car ls))))))
 
 (define-command "lsp-hover" "Echo the type or documentation at point"

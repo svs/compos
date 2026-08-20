@@ -73,4 +73,38 @@ defmodule Aimax.ListPerformanceTest do
     assert eval!("*zz-list-fetches*") == "2"
     assert String.to_integer(eval!("*zz-list-columns*")) == initial_columns + 3
   end
+
+  test "a wake redraws cached rows; only an explicit open or g refetches" do
+    eval!(~S"""
+    (begin
+      (define *zz-wake-fetches* 0)
+      (domain! 'ui)
+      (effects! '(write))
+      (define-list-mode! "zz-list-wake-mode"
+        (list
+          'buffer "*zz-list-performance*"
+          'rows (lambda (buf)
+                  (set! *zz-wake-fetches* (+ *zz-wake-fetches* 1))
+                  '("alpha" "beta"))
+          'columns (lambda (buf) (list (list "name" #f)))
+          'cells (lambda (buf row) (list row))
+          'title (lambda (buf) "Wake")
+          'no-marks #t))
+      (list-mode-show! "zz-list-wake-mode"))
+    """)
+
+    # first open: exactly one fetch
+    assert eval!("*zz-wake-fetches*") == "1"
+    assert Buffer.text("*zz-list-performance*") =~ "alpha"
+
+    # a wake re-runs the mode setup (this is what the buffer switcher's
+    # preview and desktop restore do) — cached rows redraw, no fetch
+    eval!(~S{(with-current-buffer "*zz-list-performance*" (lambda () (set-mode! "zz-list-wake-mode")))})
+    assert eval!("*zz-wake-fetches*") == "1"
+    assert Buffer.text("*zz-list-performance*") =~ "alpha"
+
+    # an explicit re-open asks for current rows
+    eval!(~S{(list-mode-show! "zz-list-wake-mode")})
+    assert eval!("*zz-wake-fetches*") == "2"
+  end
 end

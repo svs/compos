@@ -619,11 +619,19 @@
 (define (list-render-rows! buf fetch)
   (if (list-opt buf 'local-filter)
       (begin
-        (when (or fetch (not (buffer-local buf 'list-source-entries)))
+        (when (or (equal? fetch #t)
+                  (not (buffer-local buf 'list-source-entries)))
           (buffer-set-local! buf 'list-source-entries
                              ((list-opt buf 'rows) buf)))
         (list-keep buf (list-source-entries buf)))
-      ((list-opt buf 'rows) buf)))
+      ;; 'cached is the wake path: the rows already in 'list-entries ARE
+      ;; the view, and calling the source again would pay its cost (the
+      ;; network, for sentry) inside a switcher preview. A filter redraw
+      ;; still passes #f and reaches the source, which reads the query.
+      (if (and (equal? fetch 'cached)
+               (pair? (buffer-local buf 'list-entries)))
+          (list-entries buf)
+          ((list-opt buf 'rows) buf))))
 
 ;;; --- the view: a title, columns, rows, a key bar ------------------------------
 ;;; Every list draws the same shape. A mode says what its columns are and
@@ -1202,7 +1210,12 @@
     (for-each (lambda (r) (local-remap*! buf (car r) (car (cdr r))))
               (or (plist-get opts 'remap) '()))
     (buffer-set-read-only! buf #t)
-    (list-refresh! buf)
+    ;; A wake must not pay the source fetch: the buffer switcher previews
+    ;; dormant buffers by re-running this setup, and a list whose rows come
+    ;; from the network (sentry) froze the UI for the round trip — then
+    ;; went back to sleep. 'cached renders the rows already in the buffer
+    ;; and reaches the source only when there are none; `g` refetches.
+    (list-render! buf 'cached)
     ;; the rewrite leaves the buffer's point after the key bar — a list
     ;; opens with point on the first row
     (list-goto-index! buf 0)))
@@ -1223,9 +1236,16 @@
 (define (list-mode-show! name)
   (let ((buf (plist-get (list-mode-opts name) 'buffer)))
     (buffer-create buf)
-    ;; mode-name so a desktop restore re-runs the setup above
-    (buffer-set-local! buf 'mode-name name)
-    (list-mode-init! buf name)
+    ;; an explicit open asks for current rows; a wake does not. The init
+    ;; below redraws cached entries when there are any, so fetch here in
+    ;; that case — the one place the user chose to look.
+    (let ((cached? (pair? (buffer-local buf 'list-entries))))
+      ;; mode-name so a desktop restore re-runs the setup above
+      (buffer-set-local! buf 'mode-name name)
+      (list-mode-init! buf name)
+      (when cached?
+        (list-refresh! buf)
+        (list-goto-index! buf 0)))
     (display-buffer buf)
     buf))
 

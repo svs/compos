@@ -1588,12 +1588,17 @@ defmodule Aimax.Ui.EditorLive do
     %{bg: bg, fg: fg, accent: accent, link: link, dim: dim, border: border, inset: inset} =
       preview_palette(faces)
 
+    # typography is policy: the 'preview face carries it (appearance.scm
+    # defcustoms; themes and init.scm may set it like any face)
+    family = face(faces, "preview", "family", "Spectral,Georgia,serif")
+    size = face(faces, "preview", "size", "16.5px")
+
     """
     <!DOCTYPE html><html><head><meta charset="utf-8"><style>
     body{margin:0 auto;padding:30px 34px 70px;max-width:44em;overflow-wrap:break-word;
-         word-break:normal;font:16.5px/1.7 Spectral,Georgia,serif;color:#{fg};background:#{bg}}
+         word-break:normal;font:#{size}/1.7 #{family};color:#{fg};background:#{bg}}
     p{margin:0 0 1em}
-    h1,h2,h3,h4{font-family:Spectral,Georgia,serif;line-height:1.25;margin:1.4em 0 0.4em}
+    h1,h2,h3,h4{font-family:#{family};line-height:1.25;margin:1.4em 0 0.4em}
     body>h1:first-child{margin-top:0}
     h1{font-size:29px}h2{font-size:22px;border-bottom:1px solid #{border};padding-bottom:4px}
     h3{font-size:18px;color:#{accent}}

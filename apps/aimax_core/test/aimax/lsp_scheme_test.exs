@@ -7,7 +7,7 @@ defmodule Aimax.LSPSchemeTest do
 
   use ExUnit.Case
 
-  alias Aimax.Core.{Buffer, Editor, LSP, Session}
+  alias Aimax.Core.{Buffer, Editor, KeyDispatch, LSP, Session}
 
   @fixture Path.expand("../support/fake_lsp_server.exs", __DIR__)
 
@@ -15,6 +15,8 @@ defmodule Aimax.LSPSchemeTest do
     {:ok, printed} = Session.eval(src)
     printed
   end
+
+  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
 
   defp wait_until(fun, tries \\ 300) do
     cond do
@@ -111,6 +113,49 @@ defmodule Aimax.LSPSchemeTest do
     visit!(sc2)
     assert eval!(~s{(minor-mode-on? "#{sc2.path}" "lsp-mode")}) == "#f"
     eval!("(set! lsp-auto-start #t)")
+  end
+
+  defp await_ready!(sc) do
+    wait_until(fn -> eval!(~s{(lsp-connections)}) =~ ~s{("#{sc.id}" "ready"} end)
+  end
+
+  test "M-. jumps through the seam and M-, returns" do
+    sc = scene!("e", "def TARGET here\nuse TARGET\n")
+    visit!(sc)
+    await_ready!(sc)
+
+    Buffer.goto(sc.path, 20)
+    press(["M-."])
+    wait_until(fn -> Buffer.point(sc.path) == 4 end)
+
+    press(["M-,"])
+    wait_until(fn -> Buffer.point(sc.path) == 20 end)
+  end
+
+  test "lsp-references fills the bottom-sheet list" do
+    sc = scene!("f", "def TARGET here\nuse TARGET\n")
+    visit!(sc)
+    await_ready!(sc)
+
+    Buffer.goto(sc.path, 4)
+    eval!(~s{(run-command "lsp-references")})
+
+    wait_until(fn ->
+      Buffer.exists?("*references*") and eval!(~s{(buffer-text "*references*")}) =~ "main.lspt"
+    end)
+
+    text = eval!(~s{(buffer-text "*references*")})
+    assert text =~ "1"
+    assert text =~ "2"
+  end
+
+  test "lsp-hover echoes the first line" do
+    sc = scene!("g", "word TARGET\n")
+    visit!(sc)
+    await_ready!(sc)
+
+    eval!(~s{(run-command "lsp-hover")})
+    wait_until(fn -> Editor.snapshot().echo =~ "hover:word" end)
   end
 
   test "teardown closes the doc and clears the paint" do

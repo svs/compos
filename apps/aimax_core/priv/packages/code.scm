@@ -424,7 +424,11 @@
   (let ((sym (code--symbol-at)))
     (cond
       ((not sym) (message "No symbol at point"))
-      ((boundp 'lsp-definition) (lsp-definition sym))
+      ;; only a buffer with an attached server asks LSP; the fallback
+      ;; below keeps answering everywhere else
+      ((and (boundp 'lsp-definition)
+            (buffer-local (current-buffer) 'lsp-server))
+       (lsp-definition sym))
       (else
         (let* ((buf (current-buffer))
                (hit (let loop ((ls (code--lines buf)))

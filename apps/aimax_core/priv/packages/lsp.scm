@@ -297,6 +297,198 @@
 (define-command "lsp-diagnostics-list" "Show diagnostics as a list"
   (lambda () (list-mode-show! "lsp-diagnostics-mode")))
 
+;;; --- navigation: definition, references, hover -------------------------------
+
+(define *lsp-marker-stack* '())   ; ((buffer point) ...), newest first
+
+(define (lsp--cap lst n)
+  (if (or (null? lst) (= n 0))
+      '()
+      (cons (car lst) (lsp--cap (cdr lst) (- n 1)))))
+
+(define (lsp--push-marker!)
+  (set! *lsp-marker-stack*
+    (lsp--cap (cons (list (current-buffer) (point)) *lsp-marker-stack*) 32)))
+
+(define-command "lsp-pop-marker" "Return to where the last jump started"
+  (lambda ()
+    (if (null? *lsp-marker-stack*)
+        (message "No marker to pop")
+        (let ((m (car *lsp-marker-stack*)))
+          (set! *lsp-marker-stack* (cdr *lsp-marker-stack*))
+          (if (buffer-known? (car m))
+              (begin (switch-to-buffer! (car m)) (goto-char! (cadr m)))
+              (message "That buffer is gone"))))))
+
+;; Location | Location[] | LocationLink[] -> a list of location plists
+(define (lsp--locs result)
+  (cond ((not result) '())
+        ((null? result) '())
+        ((symbol? (car result)) (list result))
+        (else result)))
+
+(define (lsp--loc-uri loc)
+  (or (plist-get loc 'uri) (plist-get loc 'targetUri)))
+
+(define (lsp--loc-path loc)
+  (let ((u (lsp--loc-uri loc)))
+    (and u (string-prefix? "file://" u)
+         (substring u 7 (string-length u)))))
+
+(define (lsp--loc-range loc)
+  (or (plist-get loc 'targetSelectionRange)
+      (plist-get loc 'range)
+      (plist-get loc 'targetRange)))
+
+(define (lsp--loc-line loc)
+  (let ((r (lsp--loc-range loc)))
+    (if r (+ 1 (or (plist-get (or (plist-get r 'start) '()) 'line) 0)) 1)))
+
+;; Show a location: an open buffer jumps by byte offset; a file on disk
+;; opens by path and line (the rg--show pattern).
+(define (lsp--show-loc! loc select?)
+  (let ((buf (plist-get loc 'buffer))
+        (start (plist-get loc 'startByte))
+        (path (lsp--loc-path loc)))
+    (cond ((and buf start (buffer-exists? buf))
+           (if select? (switch-to-buffer! buf) (window-preview-buffer! buf))
+           (buffer-goto! buf start)
+           (when select? (goto-char! start)))
+          (path
+           (if select?
+               (visit path)
+               (window-preview-buffer! (find-file path)))
+           (goto-char! (line-start-position (lsp--loc-line loc))))
+          (else (message "lsp: location without a place")))))
+
+(define (lsp--loc-label loc)
+  (string-append
+    (buffer-short-label (or (plist-get loc 'buffer) (lsp--loc-path loc) "?"))
+    ":" (number->string (lsp--loc-line loc))))
+
+(define (lsp--pick-loc! prompt locs)
+  (let ((by-label (map (lambda (l) (list (lsp--loc-label l) l)) locs)))
+    (minibuffer-read-preview prompt
+      (map (lambda (e) (list (car e) "")) by-label)
+      (lambda (label)
+        (let ((hit (assoc label by-label)))
+          (when hit (lsp--show-loc! (cadr hit) #f))))
+      (lambda (label)
+        (let ((hit (assoc label by-label)))
+          (when hit (lsp--show-loc! (cadr hit) #t))))
+      (lambda () #f))))
+
+;; Bound the moment this file loads: code.scm's M-. seam calls it when a
+;; server is attached (SYM is echoed, the position does the asking).
+(define (lsp-definition sym)
+  (let* ((buf (current-buffer))
+         (id (buffer-local buf 'lsp-server)))
+    (if (not id)
+        (message "No language server here")
+        (lsp-buffer-request id "textDocument/definition" buf (point)
+          (lambda (ok result)
+            (let ((locs (if ok (lsp--locs result) '())))
+              (cond ((not ok) (message (string-append "lsp: " result)))
+                    ((null? locs)
+                     (message (string-append "No definition of " sym)))
+                    ((null? (cdr locs))
+                     (lsp--push-marker!)
+                     (lsp--show-loc! (car locs) #t))
+                    (else
+                     (lsp--push-marker!)
+                     (lsp--pick-loc! "Definition: " locs)))))))))
+
+;;; references
+
+(define *lsp-refs* '())          ; the last references result
+(define *lsp-ref-buffer* "*references*")
+
+(define (lsp--ref-rows list-buf) *lsp-refs*)
+
+(define-list-mode! "lsp-references-mode"
+  (list
+    'doc "Places that reference the symbol the last lsp-references asked about."
+    'buffer *lsp-ref-buffer*
+    'rows lsp--ref-rows
+    'key (lambda (buf loc) (lsp--loc-label loc))
+    'columns (lambda (buf) (list (list "where" 40) (list "line" 5 'right)))
+    'cells (lambda (buf loc)
+             (list (buffer-short-label
+                     (or (plist-get loc 'buffer) (lsp--loc-path loc) "?"))
+                   (number->string (lsp--loc-line loc))))
+    'title (lambda (buf) "References")
+    'noun "reference"
+    'preview (lambda (buf loc) (lsp--show-loc! loc #f))
+    'keys '(("RET" "lsp-ref-visit")
+            ("q" "quit-window"))))
+
+(add-display-rule! *lsp-ref-buffer* 'popup '(side bottom size 0.32))
+
+(define-command "lsp-ref-visit" "Visit the reference on this row"
+  (lambda ()
+    (let ((loc (list-current (current-buffer))))
+      (when loc (lsp--push-marker!) (lsp--show-loc! loc #t)))))
+
+(define-command "lsp-references" "List the references to the symbol at point"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (id (buffer-local buf 'lsp-server)))
+      (if (not id)
+          (message "No language server here")
+          (lsp-buffer-request id "textDocument/references" buf (point)
+            (list 'context (list 'includeDeclaration #t))
+            (lambda (ok result)
+              (let ((locs (if ok (lsp--locs result) '())))
+                (cond ((not ok) (message (string-append "lsp: " result)))
+                      ((null? locs) (message "No references"))
+                      (else
+                       (set! *lsp-refs* locs)
+                       (list-mode-show! "lsp-references-mode"))))))))))
+
+;;; hover
+
+(define (lsp--hover-text c)
+  (cond ((not c) #f)
+        ((string? c) c)
+        ((null? c) #f)
+        ((symbol? (car c)) (or (plist-get c 'value) #f))
+        (else (lsp--hover-text (car c)))))
+
+;; the echo area holds one line: the first non-empty line of the hover
+(define (lsp--first-line s)
+  (let loop ((ls (string-split s "\n")))
+    (cond ((null? ls) "")
+          ((equal? (string-trim (car ls)) "") (loop (cdr ls)))
+          (else (string-trim (car ls))))))
+
+(define-command "lsp-hover" "Echo the type or documentation at point"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (id (buffer-local buf 'lsp-server)))
+      (if (not id)
+          (message "No language server here")
+          (lsp-buffer-request id "textDocument/hover" buf (point)
+            (lambda (ok result)
+              (let ((text (and ok result
+                               (lsp--hover-text (plist-get result 'contents)))))
+                (if (and text (not (equal? text "")))
+                    (message (lsp--first-line text))
+                    (message "No documentation here")))))))))
+
+;;; save notification
+
+(add-hook! 'after-save-hook
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (id (buffer-local buf 'lsp-server)))
+      (when (and id (minor-mode-on? buf "lsp-mode") (lsp--connection? id))
+        (lsp-notify! id "textDocument/didSave"
+          (list 'textDocument
+                (list 'uri (string-append "file://" buf))))))))
+
+(global-set-key "M-." "code-goto-definition")
+(global-set-key "M-," "lsp-pop-marker")
+
 ;;; --- configuration and default servers ---------------------------------------
 
 (defgroup 'lsp "Language server client.")

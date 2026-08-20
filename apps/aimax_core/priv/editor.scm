@@ -4507,6 +4507,19 @@
           (buffer-set-local! buf 'render-mode "agent"))
         (buffer-set-local! buf 'agent-marker-bytes
           (string-byte-length *chat-input-marker*))
+        ;; self-heal a mangled marker: edits from before the DEL guard
+        ;; existed could eat marker bytes, and the display clamp hid the
+        ;; damage. A tail that does not start with the marker is rewritten
+        ;; (any draft in a corrupt input region is not recoverable).
+        (let* ((size (buffer-size buf))
+               (m (min (chat-mark buf) size))
+               (mb (string-byte-length *chat-input-marker*))
+               (tail-end (min size (+ m mb))))
+          (unless (equal? (substring-bytes (buffer-text buf) m tail-end)
+                          *chat-input-marker*)
+            (buffer-delete-range! buf m (- size m))
+            (buffer-append! buf *chat-input-marker*)
+            (buffer-set-local! buf 'agent-saved-mark m)))
         ;; Rebuild presentation from the CONVERSATION locals — overlays and
         ;; folds come back, and chrome belonging to a runtime that didn't
         ;; survive the restart is dropped. None of this depends on there

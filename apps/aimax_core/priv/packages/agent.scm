@@ -1592,7 +1592,35 @@
             (loop (+ n 1))
             slug)))))
 
+;; The marker between the transcript and the input is not editable text.
+;; Backspace on an empty input used to eat marker bytes one by one; the
+;; display clamp then hid the damage, and later typed text landed in the
+;; invisible gap. Refuse a delete that would touch the marker.
+(define (chat-marker-guard? buf p)
+  (and (buffer-local buf 'agent-saved-mark)
+       (> p (chat-mark buf))
+       (<= p (chat-input-start buf))))
+
+(effects! '(write))
+
+(define-command "chat-delete-backward" "Delete backward, but never into the input marker"
+  (lambda ()
+    (if (chat-marker-guard? (current-buffer) (point))
+        (message "beginning of input")
+        (unless (delete-active-region!) (delete-char! -1)))))
+
+(define-command "chat-delete-forward" "Delete forward, but never the input marker"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (and (buffer-local buf 'agent-saved-mark)
+               (>= (point) (chat-mark buf))
+               (< (point) (chat-input-start buf)))
+          (message "this is the input marker")
+          (unless (delete-active-region!) (delete-char! 1))))))
+
 (define (agent-install-keys! buf)
+  (local-set-key* buf "DEL" "chat-delete-backward")
+  (local-set-key* buf "C-d" "chat-delete-forward")
   (local-set-key* buf "RET" "agent-send")
   (local-set-key* buf "C-RET" "agent-interrupt-send")
   (local-set-key* buf "C-g" "chat-abort")

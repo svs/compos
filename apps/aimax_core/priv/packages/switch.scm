@@ -30,23 +30,31 @@
   (filter (lambda (g) (not (equal? g (buffer-local buf 'switch-group))))
           (group-names)))
 
-;; project roots that are not groups yet — a switch founds their group
+;; every project the editor knows that is not a group yet: the
+;; remembered list (project.scm learns one from every visited file),
+;; plus any root an open buffer implies. A switch founds its group.
 (define (switch-project-roots)
-  (let loop ((bs (buffer-list)) (out '()))
-    (if (null? bs)
-        (reverse out)
-        (let ((root (buffer-project-root (car bs))))
-          (loop (cdr bs)
-                (if (and (string? root)
-                         (not (equal? root ""))
-                         (not (member root (group-names)))
-                         (not (member root out)))
-                    (cons root out)
-                    out))))))
+  (let ((gs (group-names)))
+    (let loop ((cs (append (if (boundp 'known-projects) (known-projects) '())
+                           (map buffer-project-root (buffer-list))))
+               (out '()))
+      (if (null? cs)
+          (reverse out)
+          (let ((root (car cs)))
+            (loop (cdr cs)
+                  (if (and (string? root)
+                           (not (equal? root ""))
+                           (not (member root gs))
+                           (not (member root out)))
+                      (cons root out)
+                      out)))))))
 
+;; a project card wears the short name; the path rides in the
+;; annotation, and the 5th element carries the root for the pick
 (define (switch-project-candidate root)
-  (list (string-append "[" root "]") "project — RET founds its group"
-        "container" '()))
+  (list (string-append "[" (group-label root) "]")
+        (string-append "project · " root)
+        "container" '() root))
 
 ;; the groups view: every other group's card, then the projects
 (define (switch-group-rows buf)
@@ -152,10 +160,17 @@
       (else (list "" (list name "accent") (list ann "dim"))))))
 
 ;; a row matches on everything it says, untruncated — the name, the
-;; annotation, and a card's member chips
+;; annotation, and a card's member chips. Orderless: every
+;; space-separated term must match somewhere, in any order, so
+;; "text-mode notes" and "notes text-mode" find the same row.
 (define (switch-match? buf e input)
-  (re-match? input
-    (string-join (cons (car e) (cons (switch-ann e) (switch-chips e))) " ")))
+  (let ((text (string-join
+                (cons (car e) (cons (switch-ann e) (switch-chips e))) " ")))
+    (let loop ((ts (filter (lambda (t) (not (equal? t "")))
+                           (string-split input " "))))
+      (cond ((null? ts) #t)
+            ((re-match? (car ts) text) (loop (cdr ts)))
+            (else #f)))))
 
 (define (switch-meta buf)
   (let* ((view (or (buffer-local buf 'switch-view) 'buffers))
@@ -263,12 +278,6 @@
             (buffer-list))
   (switch-to-group! root))
 
-;; the C-x G contract: after the group comes up, ask which buffer in it
-(define (switch-then-pick! buf g)
-  (when (and (buffer-known? buf) (buffer-local buf 'switch-then-pick))
-    (buffer-set-local! buf 'switch-then-pick #f)
-    (switch-open! (list 'locked g))))
-
 (define (switch-pick! buf e context?)
   (let ((name (car e))
         (view (buffer-local buf 'switch-view)))
@@ -280,12 +289,19 @@
          (switch-close! buf #f)
          (when (file-directory? g) (dired-open g))))
       ((switch-container? e)
-       (let ((target (switch-card-target name)))
+       (let ((target (if (> (length e) 4)
+                         (list 'project (nth 4 e))
+                         (switch-card-target name)))
+             (groups-view? (equal? view 'groups)))
          (switch-close! buf #f)
          (if (equal? (car target) 'group)
              (switch-to-group! (nth 1 target))
              (switch-found-project! (nth 1 target)))
-         (switch-then-pick! buf (nth 1 target))))
+         ;; a pick from the GROUPS view continues to the second step:
+         ;; the group's buffers and its files, the card leading as the
+         ;; default. A card in the recency stream stays a plain switch.
+         (when groups-view?
+           (switch-open! (list 'locked (nth 1 target))))))
       ;; a project file nobody has open: visit it — it joins the group
       ((switch-file-row? e)
        (let ((path (switch-file-path e))
@@ -464,6 +480,8 @@
           (list "RET" "switch-visit")
           (list "C-RET" "switch-visit-context")
           (list "C-SPC" "switch-mark")
+          ;; select all: every row the narrowing shows; again unmarks
+          (list "C-a" "list-mark-all")
           (list "C-k" "switch-kill")
           (list "C-t" "switch-group")
           (list "C-o" "switch-toggle-groups")
@@ -474,7 +492,7 @@
 ;; the key bar pins to the bottom of the modal, out of the rows
 (define *switch-footer*
   (string-append "type to narrow · DEL widen · RET switch · C-RET context · "
-                 "C-SPC mark · C-k kill · C-t group · C-o groups · "
+                 "C-SPC mark · C-a all · C-k kill · C-t group · C-o groups · "
                  "TAB lock · C-g quit"))
 
 (mode-icon! "switch-mode" "")
@@ -487,7 +505,8 @@
            "in most-recently-used order, and the highlight previews its row "
            "in the window you came from. RET visits the row; with no match, "
            "RET founds a group named what you typed. C-RET enters the "
-           "row's group or project. C-SPC marks; C-k kills the marked "
+           "row's group or project. C-SPC marks; C-a marks every shown "
+           "row, and again unmarks them; C-k kills the marked "
            "buffers or the row at point; C-t puts them in a group. C-o "
            "shows groups and projects; TAB locks to one group — the card "
            "leads as the default, its buffers and its project files "
@@ -567,9 +586,7 @@
 
 ;; C-x G: pick a context, then pick a buffer or file in it
 (define-command "switch-groups" "Switch group or project, then pick a buffer or file in it"
-  (lambda ()
-    (switch-open! 'groups)
-    (buffer-set-local! *switch-buffer* 'switch-then-pick #t)))
+  (lambda () (switch-open! 'groups)))
 
 (global-set-key "C-x C-b" "switch-to-buffer")
 (global-set-key "C-x G" "switch-groups")

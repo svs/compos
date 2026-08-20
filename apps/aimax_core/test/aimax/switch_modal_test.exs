@@ -14,7 +14,10 @@ defmodule Aimax.SwitchModalTest do
   @switch "*switch*"
 
   defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp type(str), do: str |> String.graphemes() |> press()
+
+  # the client sends a space as "SPC" — the graphemes must too
+  defp type(str),
+    do: str |> String.graphemes() |> Enum.map(&if(&1 == " ", do: "SPC", else: &1)) |> press()
 
   defp eval!(code) do
     {:ok, out} = Session.eval(code)
@@ -104,6 +107,25 @@ defmodule Aimax.SwitchModalTest do
     press(["ESC"])
   end
 
+  test "the narrowing is orderless over the marginalia" do
+    {:ok, _} =
+      Session.eval(~s{(begin
+        (buffer-create "*zz-ma*")
+        (buffer-set-local! "*zz-ma*" 'mode-name "zz-textish")
+        #t)})
+
+    open_switcher()
+
+    # one term matches the mode annotation, the other the name — any order
+    type("zz-textish zz-ma")
+    assert eval!(~s{(map car (list-entries "#{@switch}"))}) == ~s{("*zz-ma*")}
+
+    press(List.duplicate("DEL", 16))
+    type("ma zz-textish")
+    assert eval!(~s{(map car (list-entries "#{@switch}"))}) == ~s{("*zz-ma*")}
+    press(["ESC"])
+  end
+
   test "moving the highlight previews into the home window; ESC puts it back" do
     home = open_switcher()
 
@@ -127,12 +149,16 @@ defmodule Aimax.SwitchModalTest do
   end
 
   test "RET with no match founds a group named the narrowing" do
+    name = "zz-found-#{System.unique_integer([:positive])}"
     open_switcher()
 
-    type("zz-nothing-matches-this")
+    # the founding makes the group's chat buffer; a rerun must not meet it
+    on_exit(fn -> Aimax.Core.kill_buffer("*chat:#{name}*") end)
+
+    type(name)
     press(["RET"])
 
-    assert eval!("(group-names)") =~ "zz-nothing-matches-this"
+    assert eval!("(group-names)") =~ name
 
     {:ok, _} =
       Session.eval(~s{(begin
@@ -148,13 +174,14 @@ defmodule Aimax.SwitchModalTest do
     refute eval!(~s{(buffer-known? "*zz-ma*")}) == "#t"
     assert Buffer.text("*messages*") =~ "killed 1 buffer"
 
-    # C-SPC marks two rows, C-k kills them both
+    # C-a marks every shown row, C-k kills them as a set
     press(["DEL", "DEL", "DEL", "DEL", "DEL", "DEL"])
     type("zz-m")
-    press(["C-SPC", "C-SPC"])
+    press(["C-a"])
     press(["C-k"])
     assert Buffer.text("*messages*") =~ "killed 2 buffers"
     refute eval!(~s{(buffer-known? "*zz-mb*")}) == "#t"
+    refute eval!(~s{(buffer-known? "*zz-md*")}) == "#t"
   end
 
   test "C-t puts the marked buffers in a group" do
@@ -187,7 +214,7 @@ defmodule Aimax.SwitchModalTest do
     press(["ESC"])
   end
 
-  test "C-o shows groups; RET on a card switches to that group" do
+  test "C-o shows groups; RET switches the group and continues to its rows" do
     {:ok, _} =
       Session.eval(~s{(begin
         (buffer-create "*zz-ma*")
@@ -203,7 +230,14 @@ defmodule Aimax.SwitchModalTest do
     type("zzg-card")
     press(["RET"])
 
+    # the group came up, and the second step is open: card first, rows after
     assert eval!("(frame-local 'current-group)") == ~s{"zzg-card"}
+    assert Editor.current_buffer() == @switch
+    assert eval!(~s{(buffer-local "#{@switch}" 'switch-view)}) == ~s{(locked "zzg-card")}
+    assert eval!(~s{(map car (list-entries "#{@switch}"))}) =~ "zz-ma"
+
+    # RET on the card (the default) keeps the group and closes
+    press(["RET"])
     refute Enum.any?(windows(), fn {_, b} -> b == @switch end)
   end
 
@@ -243,7 +277,20 @@ defmodule Aimax.SwitchModalTest do
       Aimax.Core.kill_buffer(Path.join(root, "notes.txt"))
       Aimax.Core.kill_buffer(root)
       File.rm_rf!(root)
+
+      # the remembered project must not outlive the test in the test home
+      {:ok, _} =
+        Session.eval(~s{(write-file! *projects-file*
+          (string-append
+            (string-join (remove (lambda (r) (equal? r "#{root}")) (known-projects)) "\n")
+            "\n"))})
     end)
+
+    # a remembered project shows in the groups view without any open buffer
+    {:ok, _} = Session.eval(~s{(project-remember! "#{root}")})
+    {:ok, _} = Session.eval(~s{(switch-open! 'groups)})
+    assert eval!(~s{(map car (list-entries "#{@switch}"))}) =~ "[#{Path.basename(root)}]"
+    press(["ESC"])
 
     {:ok, _} = Session.eval(~s{(switch-open! (list 'locked "#{root}"))})
     entries = eval!(~s{(map car (list-entries "#{@switch}"))})

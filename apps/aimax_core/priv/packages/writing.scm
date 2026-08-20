@@ -1,28 +1,26 @@
-;;; writing.scm — one writing workspace over ordinary buffers.
+;;; writing.scm — prose composition plus an explicit writing workspace.
 ;;;
-;;; The document stays the source of truth. writing-mode turns on its editable
-;;; Markdown preview with visual-line wrapping, loads the writing configuration
-;;; into buffer-locals, and joins the document to a normal buffer group. The
-;;; group supplies the optional companion chat. The editor-wide `C-c s` opens
-;;; the document's ordinary scratch buffer.
+;;; writing-mode is buffer-local and layout-neutral: it supplies typography,
+;;; wrapping, margins, prose movement, and word count. writing-layout owns the
+;;; companion scratch, group, panes, and LLM configuration. `C-c s` remains the
+;;; generic editor scratch command.
 ;;;
-;;; The minor mode still supplies the quiet prose presentation and live word
-;;; count. Everything it changes is saved on enable and restored on disable.
-;;; The minor-mode local and the workspace locals survive a daemon reload.
-;;;
-;;; M-x writing-mode toggles. Knobs live in the 'writing customize group.
+;;; M-x writing-mode toggles composition. M-x writing-layout opens the
+;;; companion workspace. `write` composes both. Knobs live in 'writing.
 
 (domain! 'writing)
 (effects! '(write))
 
 (defgroup 'writing "Distraction-free writing.")
 
-;; re-apply to every live writing buffer so customize changes repaint
+;; Re-apply presentation and layout separately: neither one implies the other.
 (define (writing--refresh! _v)
   (for-each
     (lambda (buf)
-      (if (minor-mode-on? buf "writing-mode")
-          (writing--apply! buf)))
+      (when (minor-mode-on? buf "writing-mode")
+        (writing--apply! buf))
+      (when (minor-mode-on? buf "writing-layout")
+        (writing--layout-apply! buf)))
     (buffer-list)))
 
 (defcustom 'writing-measure "62ch"
@@ -104,6 +102,8 @@
   (buffer-set-local! scratch 'writing-instructions writing-instructions)
   (unless (minor-mode-on? scratch "llm-mode")
     (enable-minor-mode! scratch "llm-mode")))
+
+
 
 (define (writing--select! mover)
   (unless (mark) (set-mark! (point)))
@@ -195,22 +195,18 @@
             (list 'line-numbers (or (buffer-local buf 'line-numbers) #f))
             (list 'render-mode (or (buffer-local buf 'render-mode) #f))
             (list 'preview-renderer (or (buffer-local buf 'preview-renderer) #f))
-            (list 'visual-line-mode (or (buffer-local buf 'visual-line-mode) #f))
-            (list 'group (or (buffer-local buf 'group) #f))
-            (list 'writing-model (or (buffer-local buf 'writing-model) #f))
-            (list 'chat-presets (or (buffer-local buf 'chat-presets) #f))
-            (list 'llm-mode-on (minor-mode-on? buf "llm-mode"))
-            (list 'writing-instructions
-                  (or (buffer-local buf 'writing-instructions) #f)))))
-  (writing--workspace! buf)
-  ;; The finished document is not a transcript. Preserve a pre-existing LLM
-  ;; mode so disabling Writing Mode can restore it, but keep it off here.
-  (disable-minor-mode! buf "llm-mode")
+            (list 'visual-line-mode (or (buffer-local buf 'visual-line-mode) #f)))))
+  ;; writing-mode changes the current buffer's presentation only. It never
+  ;; creates a group, scratch, LLM session, or window layout.
   ;; The preview is the writing surface. Markdown remains the buffer text,
   ;; so every ordinary edit, save, undo, and future narrowing command keeps
   ;; its normal editor semantics.
-  (buffer-set-local! buf 'preview-renderer "markdown")
-  (buffer-set-local! buf 'render-mode "markdown")
+  ;; a chat buffer's render-mode is the chat UI itself ("agent") — the
+  ;; markdown preview here erased it on every minor-mode restore. Writing
+  ;; typography still applies; the render switch stays the chat's own.
+  (unless (equal? (buffer-local buf 'mode-name) "chat-mode")
+    (buffer-set-local! buf 'preview-renderer "markdown")
+    (buffer-set-local! buf 'render-mode "markdown"))
   (buffer-set-local! buf 'visual-line-mode #t)
   (face-remap-in! buf 'default
     (list 'family writing-font-family
@@ -248,15 +244,7 @@
   (local-set-key* buf "C-S-<end>" "writing-select-buffer-end")
   (local-set-key* buf "s-a" "writing-select-all")
   (writing--ensure-hook! buf)
-  (writing--update-count! buf)
-  ;; A writing workspace is the rendered document plus its ordinary scratch.
-  ;; This fn only names the scratch and configures its session; the layout
-  ;; engine reads the declaration below and puts both in windows.
-  (writing--configure-scratch! buf (scratch-ensure! buf)))
-
-;; The writing frame is the document and its scratch, and nothing else. A
-;; third window is other work: the engine collapses it when the mode goes on.
-(define-mode-layout! "writing-mode" '(h 0.62 self scratch-buffer))
+  (writing--update-count! buf))
 
 (define (writing--teardown! buf)
   (writing--remove-hook! buf)
@@ -266,11 +254,6 @@
   (buffer-set-local! buf 'render-mode (writing--saved buf 'render-mode))
   (buffer-set-local! buf 'preview-renderer (writing--saved buf 'preview-renderer))
   (buffer-set-local! buf 'visual-line-mode (writing--saved buf 'visual-line-mode))
-  (buffer-set-local! buf 'group (writing--saved buf 'group))
-  (buffer-set-local! buf 'writing-model (writing--saved buf 'writing-model))
-  (buffer-set-local! buf 'chat-presets (writing--saved buf 'chat-presets))
-  (buffer-set-local! buf 'writing-instructions
-    (writing--saved buf 'writing-instructions))
   (buffer-set-local! buf 'window-class #f)
   (buffer-set-local! buf 'modeline-info #f)
   (local-unset-key* buf "S-<left>")
@@ -296,12 +279,39 @@
   (local-unset-key* buf "C-S-<home>")
   (local-unset-key* buf "C-S-<end>")
   (local-unset-key* buf "s-a")
-  (if (writing--saved buf 'llm-mode-on)
-      (enable-minor-mode! buf "llm-mode")
-      (disable-minor-mode! buf "llm-mode"))
   (buffer-set-local! buf 'writing-saved #f))
 
 (register-minor-mode! "writing-mode" writing--apply! writing--teardown!)
+
+;;; --- writing-layout ---------------------------------------------------------
+;;; `write` presents the document, its writing scratch, and the group chat
+;;; as three panes: left, middle, and right.
+
+(define (writing--layout-apply! buf)
+  (let* ((group (writing--workspace! buf))
+         (scratch (scratch-ensure! buf))
+         (chat (group-chat group)))
+    (buffer-set-local! buf 'writing-chat-buffer chat)
+    (unless (equal? (buffer-local chat 'mode-name) "chat-mode")
+      (with-current-buffer chat (lambda () (set-mode! "chat-mode"))))
+    (writing--configure-scratch! buf scratch)))
+
+(register-minor-mode! "writing-layout" writing--layout-apply!
+  (lambda (buf) #t))
+
+(define-mode-layout! "writing-layout" '(h 0.34 self scratch-buffer writing-chat-buffer))
+
+(define-command "writing-layout" "Open the writing workspace layout"
+  (lambda ()
+    (unless (minor-mode-on? (current-buffer) "writing-layout")
+      (enable-minor-mode! (current-buffer) "writing-layout"))
+    (reset-layout)))
+
+(define-command "write" "Enter the writing workspace"
+  (lambda ()
+    (unless (minor-mode-on? (current-buffer) "writing-mode")
+      (enable-minor-mode! (current-buffer) "writing-mode"))
+    (run-command "writing-layout")))
 
 (define-command "writing-mode" "Toggle writing mode in the current buffer"
   (lambda ()
@@ -310,7 +320,14 @@
         (message "Writing mode disabled"))))
 
 (mode-doc! "writing-mode"
-  "An editable Markdown writing workspace. The preview document has no LLM mode; its grouped plain scratch owns M-o, model, and tool presets. `C-c s` moves between them, and `C-c w` opens the optional companion chat.")
+  "Layout-neutral prose presentation: typography, wrapping, margins, prose movement, and word count.")
+
+(catalog-meta! 'mode "writing-mode" 'domain 'writing 'effects '(write))
+(mode-doc! "writing-layout"
+  "The explicit writing workspace: group, companion scratch, panes, and LLM configuration.")
+
+(catalog-meta! 'command "writing-layout" 'domain 'windows 'effects '(write))
+(catalog-meta! 'command "write" 'domain 'writing 'effects '(write))
 
 (effects! '(read))
 

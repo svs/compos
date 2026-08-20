@@ -159,6 +159,12 @@ defmodule Aimax.SentryTest do
     KeyDispatch.handle_key("p")
     KeyDispatch.handle_key("RET")
 
+    # RET on the same row serves the cache inside the TTL
+    refute Buffer.text("*Sentry issue: 42*") =~ "downloaded twice"
+
+    # `g` in the detail is the explicit refetch
+    eval!(~S|(switch-to-buffer! "*Sentry issue: 42*")|)
+    KeyDispatch.handle_key("g")
     assert Buffer.text("*Sentry issue: 42*") =~ "downloaded twice"
   end
 

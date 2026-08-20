@@ -23,7 +23,9 @@ defmodule Aimax.SentryListCacheTest do
       (set! *sentry-transport*
         (lambda (url)
           (set! *zz-sentry-fetches* (+ *zz-sentry-fetches* 1))
-          "[{\"id\":\"42\",\"shortId\":\"ATS-42\",\"title\":\"boom\",\"level\":\"error\",\"count\":\"3\",\"lastSeen\":\"2026-08-20T10:00:00Z\",\"permalink\":\"https://sentry.io/i/42\"}]\n200"))
+          (if (string-contains? url "/issues/42/")
+              "{\"id\":\"42\",\"shortId\":\"ATS-42\",\"title\":\"boom\",\"status\":\"unresolved\"}\n200"
+              "[{\"id\":\"42\",\"shortId\":\"ATS-42\",\"title\":\"boom\",\"level\":\"error\",\"count\":\"3\",\"lastSeen\":\"2026-08-20T10:00:00Z\",\"permalink\":\"https://sentry.io/i/42\"}]\n200")))
       (set! *sentry-async-transport*
         (lambda (url k) (k (*sentry-transport* url)))))
     """)
@@ -35,6 +37,7 @@ defmodule Aimax.SentryListCacheTest do
     on_exit(fn ->
       Editor.minibuffer_close()
       Aimax.Core.kill_buffer("*Sentry issues*")
+      Aimax.Core.kill_buffer("*Sentry issue: 42*")
       Aimax.Core.kill_buffer("*chat:sentry*")
     end)
 
@@ -62,6 +65,14 @@ defmodule Aimax.SentryListCacheTest do
 
     KeyDispatch.handle_key("g")
     assert fetches() == "2"
+
+    # RET fetches the detail once; RET again serves the cache
+    KeyDispatch.handle_key("RET")
+    assert fetches() == "3"
+    assert Buffer.text("*Sentry issue: 42*") =~ "ATS-42"
+
+    KeyDispatch.handle_key("RET")
+    assert fetches() == "3"
   end
 
   test "a window-configuration change re-lays only the lists on screen" do

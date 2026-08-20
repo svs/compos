@@ -303,14 +303,14 @@
       (sentry--request (sentry--issues-url query environment time-range count))
       count)))
 
+(define (sentry--issue-url issue-id)
+  (sentry--url
+    (sentry--org-path
+      (string-append "issues/" (url-encode (sentry--text issue-id)) "/"))
+    '()))
+
 (define (sentry-issue-detail issue-id)
-  (let ((reply
-          (sentry--request
-            (sentry--url
-              (sentry--org-path
-                (string-append "issues/" (url-encode (sentry--text issue-id)) "/"))
-              '()))))
-    (if (sentry--error? reply) reply reply)))
+  (sentry--request (sentry--issue-url issue-id)))
 
 (define (sentry-issue-events issue-id &optional environment time-range limit)
   (let* ((count (sentry--limit limit))
@@ -529,22 +529,36 @@
 (define (sentry--detail-buffer issue-id)
   (string-append "*Sentry issue: " (sentry--text issue-id) "*"))
 
-(define (sentry--render-detail! buf issue-id)
-  (let ((issue (sentry-issue-detail issue-id)))
-    (if (sentry--error? issue)
-        (begin
-          (buffer-set-local! buf 'render-mode "text")
-          (buffer-set-local! buf 'render-blocks '())
-          (sentry--replace-buffer!
-            buf (string-append (sentry--error-message issue) "\n")))
-        (begin
-          (sentry--replace-buffer! buf (sentry--issue-text issue))
-          (buffer-set-local! buf 'sentry-detail-issue issue)
-          (buffer-set-local! buf 'render-mode "blocks")
-          (buffer-set-local! buf 'render-blocks
-            (sentry--issue-blocks
-              issue
-              (and (buffer-local buf 'sentry-raw-open?) #t)))))))
+;; render one fetched issue (or one error) into the detail buffer
+(define (sentry--apply-detail! buf issue)
+  (if (sentry--error? issue)
+      (begin
+        (buffer-set-local! buf 'render-mode "text")
+        (buffer-set-local! buf 'render-blocks '())
+        (sentry--replace-buffer!
+          buf (string-append (sentry--error-message issue) "\n")))
+      (begin
+        (sentry--replace-buffer! buf (sentry--issue-text issue))
+        (buffer-set-local! buf 'sentry-detail-issue issue)
+        (buffer-set-local! buf 'render-mode "blocks")
+        (buffer-set-local! buf 'render-blocks
+          (sentry--issue-blocks
+            issue
+            (and (buffer-local buf 'sentry-raw-open?) #t))))))
+
+;; the cache fetch: the issue lands off the UI lane. An error renders in
+;; the buffer, and (k #f) leaves the cache unstamped so a wake retries.
+(define (sentry--fetch-detail buf k)
+  (let ((issue-id (buffer-local buf 'sentry-issue-id)))
+    (if (not issue-id)
+        (k #f)
+        (*sentry-async-transport*
+          (sentry--issue-url issue-id)
+          (lambda (wire)
+            (let ((reply (sentry--parse-reply wire)))
+              (if (sentry--error? reply)
+                  (begin (sentry--apply-detail! buf reply) (k #f))
+                  (k reply))))))))
 
 (define (sentry--detail-setup! buf)
   (sentry--join-group! buf)
@@ -556,12 +570,19 @@
   (local-set-key* buf "g" "sentry-detail-refresh")
   (local-set-key* buf "e" "sentry-events")
   (local-set-key* buf "q" "quit-window")
-  ;; fetch only when the buffer has nothing to show: this setup also
-  ;; runs on every wake (buffer switcher preview, desktop restore), and
-  ;; an unconditional fetch froze the UI for the network round trip
+  ;; the issue comes through the buffer cache: a wake draws what the
+  ;; buffer holds and fetches only past the TTL. An empty buffer, or one
+  ;; whose blocks source did not survive a restart, fetches now — off
+  ;; the lane, so no wake freezes the UI for the network round trip.
   (let ((issue-id (buffer-local buf 'sentry-issue-id)))
-    (when (and issue-id (= (buffer-size buf) 0))
-      (sentry--render-detail! buf issue-id))))
+    (when issue-id
+      (cache-declare! buf sentry--fetch-detail
+        (lambda (b issue) (sentry--apply-detail! b issue))
+        sentry-cache-ttl)
+      (if (or (= (buffer-size buf) 0)
+              (not (buffer-local buf 'sentry-detail-issue)))
+          (cache-refresh! buf)
+          (cache-wake! buf)))))
 
 (define (sentry--event-line event)
   (string-append
@@ -630,7 +651,7 @@
           (message (string-append "Resolved Sentry issue " issue-id))
           (when (buffer-exists? *sentry-buffer*)
             (cache-refresh! *sentry-buffer*))
-          (sentry--render-detail! buf issue-id)))))
+          (cache-refresh! buf)))))
 
 (define (sentry--confirm-resolve! buf)
   (let* ((issue-id (buffer-local buf 'sentry-issue-id))
@@ -652,7 +673,7 @@
     (buffer-set-local! buf 'sentry-issue-id issue-id)
     (if (equal? (buffer-local buf 'mode-name) "sentry-detail-mode")
         (when (= (buffer-size buf) 0)
-          (sentry--render-detail! buf issue-id))
+          (cache-refresh! buf))
         (with-current-buffer buf
           (lambda () (set-mode! "sentry-detail-mode"))))
     buf))
@@ -804,8 +825,11 @@
           (with-current-buffer
             buf
             (lambda ()
+              ;; an open detail is a cache wake, not a fetch: RET on the
+              ;; same row again serves what the buffer holds until the
+              ;; TTL passes; `g` in the detail is the explicit refetch
               (if (equal? (buffer-local buf 'mode-name) "sentry-detail-mode")
-                  (sentry--render-detail! buf issue-id)
+                  (cache-wake! buf)
                   (set-mode! "sentry-detail-mode")))))))))
 
 (define-command "sentry-refresh" "Refresh the Sentry issue list"
@@ -814,7 +838,7 @@
 (define-command "sentry-detail-refresh" "Refresh this Sentry issue detail"
   (lambda ()
     (let ((issue-id (buffer-local (current-buffer) 'sentry-issue-id)))
-      (when issue-id (sentry--render-detail! (current-buffer) issue-id)))))
+      (when issue-id (cache-refresh! (current-buffer))))))
 
 (define-command "sentry-events" "List safe event identifiers for this Sentry issue"
   (lambda ()

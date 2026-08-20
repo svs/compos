@@ -66,3 +66,61 @@
 (category! 'packages)
 (public! 'package-install! "(package-install! SPEC) — fetch a .scm (github user/repo[/path] or url) into <aimax-home>/packages and load it")
 (public! 'package-list "Names of installed user packages")
+
+;;; --- reloading one file into the live session --------------------------------
+;;; The dev loop for a Scheme change was a full daemon restart. (load PATH)
+;;; already evaluates a file in the session; this adds the policy: save the
+;;; buffer first, stamp the package context from the file name, and say what
+;;; happened. Registrations replace by name, so a reload does not stack
+;;; duplicates. An Elixir change still needs a daemon restart.
+
+(domain! 'packages)
+(effects! '(write execute))
+
+(define (reload-file path)
+  (let* ((file (car (reverse (string-split path "/"))))
+         (name (car (string-split file ".scm"))))
+    (package! (string->symbol name))
+    (load path)
+    (message (string-append "reloaded " file))
+    path))
+
+(public! 'reload-file
+  "(reload-file PATH) — evaluate a Scheme file in the live session, stamping its package context from the file name")
+
+;; every reloadable file as (NAME PATH): the stdlib, the bundled
+;; packages, and the user packages — the completion the prompt offers
+(define (reload--files)
+  (let ((scm (lambda (dir)
+               (map (lambda (f)
+                      (list (car (string-split f ".scm"))
+                            (string-append dir "/" f)))
+                    (filter (lambda (f) (string-suffix? ".scm" f))
+                            (if (file-exists? dir) (list-dir dir) '()))))))
+    (append (scm (aimax-priv-dir))
+            (scm (string-append (aimax-priv-dir) "/packages"))
+            (scm (package-dir)))))
+
+(define-command "reload-file" "Reload a Scheme package into the live session"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (here (let ((p (buffer-path buf)))
+                   (and p (string-suffix? ".scm" p) p)))
+           (files (reload--files)))
+      (minibuffer-read
+        (if here "Reload package (RET = this file): " "Reload package: ")
+        (map car files)
+        (lambda (name)
+          (let* ((n (string-trim name))
+                 (e (assoc n files))
+                 (path (cond ((and (equal? n "") here) here)
+                             (e (cadr e))
+                             ((and (string-suffix? ".scm" n) (file-exists? n)) n)
+                             (else #f))))
+            (if (not path)
+                (message (string-append "no package " n))
+                (begin
+                  ;; reloading the file being edited saves it first
+                  (when (and (equal? path here) (buffer-modified? buf))
+                    (run-command "save-buffer"))
+                  (reload-file path)))))))))

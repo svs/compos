@@ -50,6 +50,8 @@ defmodule Aimax.Core.SchemeAPI do
         "(buffer-insert! BUF POS TEXT) — insert TEXT at byte POS; ignores read-only.",
       "buffer-delete-range!" =>
         "(buffer-delete-range! BUF POS LEN) — delete LEN bytes at byte POS; ignores read-only.",
+      "buffer-replace-range!" =>
+        "(buffer-replace-range! BUF POS LEN TEXT) — replace LEN bytes at byte POS with TEXT as one undo step; ignores read-only.",
       "buffer-authors" =>
         "(buffer-authors BUF) — return (START END AUTHOR) attribution spans for the current text.",
       "buffer-edit-log" =>
@@ -374,6 +376,10 @@ defmodule Aimax.Core.SchemeAPI do
       end,
       "buffer-delete-range!" => fn [name, pos, len] ->
         :ok = Buffer.delete_range(name, pos, len, source: :editor)
+        :void
+      end,
+      "buffer-replace-range!" => fn [name, pos, len, text] ->
+        :ok = Buffer.replace_range(name, pos, len, text, source: :editor)
         :void
       end,
       "buffer-authors" => fn [name] ->

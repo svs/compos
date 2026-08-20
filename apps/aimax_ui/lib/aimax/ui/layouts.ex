@@ -815,8 +815,8 @@ defmodule Aimax.Ui.Layouts do
 
           // cmd combos belong to the browser (cmd-c/v/q, and cmd-v's native
           // paste event) — except the arrows, claimed for window motion,
-          // and cmd-k, claimed for the command palette
-          const CMD_KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "a", "k"];
+          // and cmd-p, claimed for the command palette
+          const CMD_KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "a", "p"];
 
           function keySpec(e) {
             if (["Control", "Meta", "Alt", "Shift"].includes(e.key)) return null;

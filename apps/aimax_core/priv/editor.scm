@@ -6443,8 +6443,8 @@
 (global-set-key "C-c d" "group-describe")
 
 (global-set-key "C-x G" "groups")
-;; Cmd-k is intent search; M-x remains literal command-name completion.
-(global-set-key "s-k" "command-palette")
+;; Cmd-p is intent search; M-x remains literal command-name completion.
+(global-set-key "s-p" "command-palette")
 ;; winner: any layout change is one keystroke from undone
 (global-set-key "C-c <left>" "winner-undo")
 (global-set-key "C-c <right>" "winner-redo")
@@ -6508,7 +6508,7 @@
         (history-push! 'M-x cmd)
         (run-command cmd)))))
 
-;;; Cmd-k answers "how do I do this?" while M-x answers "what is the
+;;; Cmd-p answers "how do I do this?" while M-x answers "what is the
 ;;; command called?". Apropos supplies task-language matches from command
 ;;; docs and recipes; the palette projects that broad catalog down to things
 ;;; a reader can act on here.
@@ -6542,7 +6542,7 @@
 (define *command-palette-debounce-ms* 80)
 
 (define (command-palette--refresh input)
-  ;; A timer can outlive the prompt that scheduled it. Never put Cmd-k's
+  ;; A timer can outlive the prompt that scheduled it. Never put Cmd-p's
   ;; results into a later prompt, and never let an old query replace a newer
   ;; one after the user has kept typing.
   (let ((state (minibuffer-state)))

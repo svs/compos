@@ -4,7 +4,7 @@ ai-max's keys and commands in every tab, and a wire so the editor can drive any
 of them.
 
 - <kbd>M-x</kbd> in any page completes over the editor's real command table.
-  <kbd>Cmd-K</kbd> opens intent search over command docs and task recipes. The
+  <kbd>Cmd-P</kbd> opens intent search over command docs and task recipes. The
   chosen action runs in the daemon — a page is an input device, the editor
   still does the work.
 - <kbd>C-x</kbd> starts a chord; the whole sequence goes through the same key

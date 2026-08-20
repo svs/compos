@@ -2049,15 +2049,19 @@ defmodule Aimax.Core.Session do
   end
 
   # A GC-rooted result callback. It fires from the conn process, so the
-  # Scheme apply always moves to a task, on the connection's own lane.
-  defp lsp_cb(callback, key) do
+  # Scheme apply always moves to a task. The apply runs on the :ui lane
+  # on purpose: the exec that created the callback runs there too, and
+  # lane order guarantees its frames flush before the callback needs
+  # them — a fast server on another lane would apply a closure whose
+  # environment is not published yet.
+  defp lsp_cb(callback, _key) do
     refkey = {:lsp_call, make_ref()}
     :ets.insert(@escaped, {refkey, callback})
 
     fn result ->
       Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
         try do
-          apply_callback(callback, lsp_callback_args(result), nil, {:lsp, key})
+          apply_callback(callback, lsp_callback_args(result))
         after
           :ets.delete(@escaped, refkey)
         end

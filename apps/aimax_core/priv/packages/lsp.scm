@@ -75,12 +75,19 @@
           (lsp-ensure! (car parts) (cadr parts))))
       (when (lsp--connection? id)
         (lsp-open! id buf))
+      (desktop-skip! buf 'capf-sources)
+      (let ((cur (or (buffer-local buf 'capf-sources) '())))
+        (unless (member lsp--capf cur)
+          (buffer-set-local! buf 'capf-sources (cons lsp--capf cur))))
       (lsp--modeline! buf))))
 
 (define (lsp--teardown! buf)
   (let ((id (buffer-local buf 'lsp-server)))
     (when (and id (lsp--connection? id))
       (lsp-close! id buf)))
+  (buffer-set-local! buf 'capf-sources
+    (remove (lambda (f) (equal? f lsp--capf))
+            (or (buffer-local buf 'capf-sources) '())))
   (overlay-clear! buf 'lsp)
   (buffer-set-local! buf 'lsp-diagnostics #f)
   (buffer-set-local! buf 'lsp-server #f)
@@ -137,6 +144,15 @@
       (when (buffer-exists? *lsp-diag-buffer*)
         (list-refresh! *lsp-diag-buffer*)))))
 
+;; lsp-on-event! is a single slot; this package owns it and fans out.
+;; Add a listener with (on-lsp-event! NAME FN) — same name replaces.
+(define *lsp-event-handlers* '())
+
+(define (on-lsp-event! name fn)
+  (set! *lsp-event-handlers*
+    (cons (list name fn)
+          (remove (lambda (e) (equal? (car e) name)) *lsp-event-handlers*))))
+
 (lsp-on-event!
   (lambda (id method params)
     (cond ((equal? method "textDocument/publishDiagnostics")
@@ -145,7 +161,11 @@
            (lsp--status! id (plist-get params 'status)))
           ((equal? method "window/showMessage")
            (message (string-append "lsp: " (or (plist-get params 'message) ""))))
-          (else #f))))
+          (else #f))
+    (for-each (lambda (e) ((cadr e) id method params)) *lsp-event-handlers*)))
+
+(public! 'on-lsp-event!
+  "(on-lsp-event! NAME FN) — add a named listener for (ID METHOD PARAMS) server events")
 
 (define-style! 'lsp "
 .f-lsp-error{text-decoration:underline wavy var(--alert-fg,#a83a2b);text-decoration-skip-ink:none}
@@ -474,6 +494,40 @@
                 (if (and text (not (equal? text "")))
                     (message (lsp--first-line text))
                     (message "No documentation here")))))))))
+
+;;; --- completion --------------------------------------------------------------
+;;; The capf source answers #f and asks the server; the reply raises the
+;;; popup itself (completion-show! is callable from a callback). Until
+;;; it lands, the next source — dabbrev — fills the popup.
+
+(define (lsp--completion-items result)
+  (let ((items (cond ((not result) '())
+                     ((null? result) '())
+                     ((symbol? (car result)) (or (plist-get result 'items) '()))
+                     (else result))))
+    (lsp--cap
+      (map cadr
+           (sort (map (lambda (it)
+                        (list (or (plist-get it 'sortText) (plist-get it 'label) "")
+                              (list (or (plist-get it 'label) "")
+                                    (or (plist-get it 'detail) "lsp"))))
+                      items)))
+      80)))
+
+(define (lsp--capf)
+  (let* ((buf (current-buffer))
+         (id (buffer-local buf 'lsp-server)))
+    (if (or (not id) (not (lsp--connection? id)))
+        #f
+        (let* ((e (point))
+               (s (let ((s (backward-word!))) (goto-char! e) (min s e))))
+          (lsp-buffer-request id "textDocument/completion" buf e
+            (lambda (ok result)
+              (when (and ok (equal? (current-buffer) buf) (>= (point) s))
+                (let ((cands (lsp--completion-items result)))
+                  (unless (null? cands)
+                    (completion-show! s (point) cands))))))
+          #f))))
 
 ;;; save notification
 

@@ -158,6 +158,26 @@ defmodule Aimax.LSPSchemeTest do
     wait_until(fn -> Editor.snapshot().echo =~ "hover:word" end)
   end
 
+  test "completion pops server items the buffer's own words cannot supply" do
+    sc = scene!("h", "alpha beta\n")
+    visit!(sc)
+    await_ready!(sc)
+
+    Buffer.goto(sc.path, byte_size("alpha beta\n"))
+    press(["a", "l"])
+    press(["C-M-i"])
+
+    wait_until(fn ->
+      case Editor.render_state().completion do
+        nil -> false
+        comp -> "beta" in Enum.map(comp.candidates, & &1.label)
+      end
+    end)
+
+    press(["C-g"])
+    assert Editor.snapshot().completion == nil
+  end
+
   test "teardown closes the doc and clears the paint" do
     sc = scene!("d", "z WARNME\n")
     visit!(sc)

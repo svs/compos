@@ -102,6 +102,38 @@ defmodule Aimax.BackendStubTest do
     refute_received :transport_opened
   end
 
+  test "prose after a completed tool stays outside its fold; the waiting overlay dies with its line" do
+    {:ok, _} =
+      Session.eval("""
+      (execute* "go" '(backend "stub" script
+        (((type user-msg text "go")
+          (type tool-call id "tc1" title "Read foo.ex" kind "read" status "pending")
+          (type tool-update id "tc1" status "completed" text "defmodule Foo\\n")
+          (type chunk text "The answer is 42.\\n")))))
+      """)
+
+    buf = "*chat:a1*"
+    assert eventually(fn -> Buffer.text(buf) =~ "The answer is 42." end)
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
+
+    text = Buffer.text(buf)
+    body = :binary.match(text, "defmodule Foo") |> elem(0)
+    answer = :binary.match(text, "The answer is 42.") |> elem(0)
+
+    # the tool body folds away; the reply that streamed at the fold's end
+    # boundary stays visible
+    hidden = Buffer.hidden(buf)
+    assert Enum.any?(hidden, fn {s, e} -> s <= body and body < e end)
+    refute Enum.any?(hidden, fn {s, e} -> s <= answer and answer < e end)
+
+    # the waiting line left the text AND the overlay local: a stale entry
+    # re-applies its face over whatever text replaced the line
+    refute text =~ "⋯ thinking"
+
+    ovs = Buffer.get_local(buf, "agent-overlays") || []
+    refute Enum.any?(ovs, fn [s, e | _] -> s <= answer and answer < e end)
+  end
+
   defp eventually(fun, tries \\ 40) do
     cond do
       fun.() -> true

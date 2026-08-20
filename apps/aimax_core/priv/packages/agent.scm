@@ -375,7 +375,10 @@
         (when (and (>= start 0) (>= end start) (<= end size)
                    (equal? (substring-bytes (buffer-text buf) start end)
                            "⋯ thinking\n"))
-          (buffer-delete-range! buf start (- end start))))
+          ;; excise, not a bare delete: the line's own overlay must leave
+          ;; 'agent-overlays, or the next overlay-set! re-applies its face
+          ;; over the text that replaces the line
+          (agent-excise-range! buf start end)))
       (agent-block-drop-kind! buf "waiting")
       (buffer-set-local! buf 'agent-waiting #f)
       (buffer-set-local! buf 'agent-saved-mark

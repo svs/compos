@@ -237,6 +237,10 @@ defmodule Aimax.Core.Buffer do
   def delete_range(name, pos, len, opts \\ []),
     do: GenServer.call(via(name), {:delete_range, pos, len, source(opts), author(opts)})
 
+  @doc "Replace LEN bytes at POS with TEXT as one undo step."
+  def replace_range(name, pos, len, text, opts \\ []),
+    do: GenServer.call(via(name), {:replace_range, pos, len, text, source(opts), author(opts)})
+
   @doc "Delete n chars forward from point (negative = backward). Returns deleted text."
   def delete_char(name, n \\ 1, opts \\ []),
     do: GenServer.call(via(name), {:delete_char, n, source(opts), author(opts)})
@@ -545,6 +549,7 @@ defmodule Aimax.Core.Buffer do
   def handle_call({:append, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
   def handle_call({:insert_at, _, _, :user, _, _locals}, _f, %{read_only: true} = s), do: ro(s)
   def handle_call({:delete_range, _, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
+  def handle_call({:replace_range, _, _, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
   def handle_call({:delete_char, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
   def handle_call({:kill_line, :user, _}, _f, %{read_only: true} = s), do: ro(s)
 
@@ -634,6 +639,22 @@ defmodule Aimax.Core.Buffer do
     else
       {:reply, :ok,
        state |> do_delete(pos, len, src, author) |> touch_state() |> checkpoint_later()}
+    end
+  end
+
+  def handle_call({:replace_range, pos, len, text, src, author}, _from, state) do
+    size = Rope.byte_size(state.rope)
+
+    if pos < 0 or len < 0 or pos + len > size do
+      {:reply, {:error, :out_of_bounds}, state}
+    else
+      # one snapshot for the pair: the whole replacement is one undo step
+      state = snapshot(state)
+      state = if len > 0, do: do_delete(state, pos, len, src, author, false), else: state
+      state = if text != "", do: do_insert(state, pos, text, src, author, false), else: state
+      # never a self-insert run: the next typed char starts its own undo step
+      state = %{state | insert_run: 0}
+      {:reply, :ok, state |> touch_state() |> checkpoint_later()}
     end
   end
 
@@ -1023,10 +1044,11 @@ defmodule Aimax.Core.Buffer do
 
   # --- mutation helpers ------------------------------------------------------
 
-  defp do_insert(state, pos, text, src, author) do
+  # snap?: false only inside :replace_range, which snapshots once for the pair
+  defp do_insert(state, pos, text, src, author, snap? \\ true) do
     len = Kernel.byte_size(text)
     author = resolve_author(author, src)
-    state = maybe_snapshot_insert(state, pos, text, src)
+    state = if snap?, do: maybe_snapshot_insert(state, pos, text, src), else: state
     old_rope = state.rope
 
     state = %{
@@ -1038,7 +1060,9 @@ defmodule Aimax.Core.Buffer do
 
     state = ts_track(state, old_rope, pos, pos, pos + len)
     state = adjust_point_insert(state, pos, len)
-    state = adjust_ranges(state, &adjust_insert(&1, pos, len))
+
+    state =
+      adjust_ranges(state, &adjust_insert(&1, pos, len), &adjust_insert_stay(&1, pos, len))
     state = %{state | authors: stamp_insert(state.authors, pos, len, author)}
     state = log_edit(state, author, pos, len, 0)
 
@@ -1069,9 +1093,9 @@ defmodule Aimax.Core.Buffer do
   defp maybe_snapshot_insert(state, _pos, _text, _src),
     do: %{snapshot(state) | insert_run: 0}
 
-  defp do_delete(state, pos, len, src, author) do
+  defp do_delete(state, pos, len, src, author, snap? \\ true) do
     author = resolve_author(author, src)
-    state = snapshot(state)
+    state = if snap?, do: snapshot(state), else: state
     old_rope = state.rope
 
     state = %{
@@ -1083,7 +1107,7 @@ defmodule Aimax.Core.Buffer do
 
     state = ts_track(state, old_rope, pos, pos + len, pos)
     state = adjust_point_delete(state, pos, len)
-    state = adjust_ranges(state, &adjust_delete(&1, pos, len))
+    state = adjust_ranges(state, &adjust_delete(&1, pos, len), &adjust_delete(&1, pos, len))
     state = %{state | authors: stamp_delete(state.authors, pos, len)}
     state = log_edit(state, author, pos, 0, len)
     state = %{state | goal_col: nil, last_insert_end: nil, insert_run: 0, undo_next: 0}
@@ -1181,13 +1205,16 @@ defmodule Aimax.Core.Buffer do
   end
 
   # shift overlay + hidden range endpoints through an edit; collapsed
-  # ranges (start >= end after a delete) are dropped
-  defp adjust_ranges(state, f) do
+  # ranges (start >= end after a delete) are dropped. Starts and ends
+  # adjust differently on insert: text inserted exactly at an end stays
+  # outside the range (Emacs rear-advance nil) — a closed fold must not
+  # swallow text appended at its boundary.
+  defp adjust_ranges(state, fs, fe) do
     overlays =
       Map.new(state.overlays, fn {tag, ranges} ->
         {tag,
          ranges
-         |> Enum.map(fn {s, e, face} -> {f.(s), f.(e), face} end)
+         |> Enum.map(fn {s, e, face} -> {fs.(s), fe.(e), face} end)
          |> Enum.reject(fn {s, e, _} -> s >= e end)}
       end)
 
@@ -1197,7 +1224,7 @@ defmodule Aimax.Core.Buffer do
       |> Enum.map(fn {tag, ranges} ->
         {tag,
          ranges
-         |> Enum.map(fn {s, e} -> {f.(s), f.(e)} end)
+         |> Enum.map(fn {s, e} -> {fs.(s), fe.(e)} end)
          |> Enum.reject(fn {s, e} -> s >= e end)}
       end)
       |> Enum.reject(fn {_tag, ranges} -> ranges == [] end)

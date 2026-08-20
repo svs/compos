@@ -66,6 +66,22 @@ defmodule Aimax.OverlayTest do
     assert Buffer.hidden(b) == [{4, 8}]
   end
 
+  test "text inserted exactly at a range end stays outside it" do
+    b = new_buf("head\nbody\n")
+    :ok = Buffer.set_hidden(b, [{5, 10}])
+    :ok = Buffer.set_overlays(b, "t", [{5, 10, "f"}])
+
+    # append at the end boundary: a closed fold must not swallow it
+    :ok = Buffer.insert_at(b, 10, "reply\n")
+    assert Buffer.hidden(b) == [{5, 10}]
+    assert Buffer.overlays(b) == [{5, 10, "f"}]
+
+    # insert at the start boundary: the range shifts, the text stays outside
+    :ok = Buffer.insert_at(b, 5, "x")
+    assert Buffer.hidden(b) == [{6, 11}]
+    assert Buffer.overlays(b) == [{6, 11, "f"}]
+  end
+
   test "scheme primitives round-trip" do
     b = new_buf("hello world")
 

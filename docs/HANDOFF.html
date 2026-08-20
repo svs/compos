@@ -121,6 +121,22 @@ the chat tool loop calls a tool with
 the handshake, and returns the text. It runs in a task, never in the
 session process; pass a <code>(lambda (ok text) ...)</code> callback and it
 returns at once ·
+<strong>LSP</strong> (2026-08-20: <code>Aimax.Core.LSP.Conn</code> speaks
+Content-Length JSON-RPC per {server, project-root}; sync, position
+encoding, and byte-offset conversion live in Elixir; everything else is
+<code>packages/lsp.scm</code>): diagnostics as wavy underlines + modeline
+counts + a <code>*diagnostics*</code> bottom sheet, <kbd>M-.</kbd>
+definition through the code.scm seam with an <kbd>M-,</kbd> marker stack,
+references list, hover echo, async capf completion. Registered servers:
+elixir-ls (verified on this repo), typescript-language-server, ruby-lsp,
+scheme-langserver. Register more with <code>(lsp-register! NAME SPEC)</code>;
+events fan out through <code>(on-lsp-event! NAME FN)</code>. Restart
+self-heals: lsp-mode setup re-runs <code>lsp-ensure!</code> ·
+<strong>paredit</strong> (2026-08-20, <code>packages/paredit.scm</code>,
+on by default in scheme-mode): a pure-Scheme byte-offset scanner; pair
+insertion, balanced DEL/C-d/C-k, slurp/barf (<kbd>C-→</kbd>/<kbd>C-←</kbd>),
+splice <kbd>M-s</kbd>, raise <kbd>M-r</kbd>, wrap <kbd>M-(</kbd>; every
+structural edit is one undo step via <code>buffer-replace-range!</code> ·
 org-mode (outline folding,
 fontification, structure editing, TODO cycling, promote/demote — 100% Scheme,
 <code>priv/packages/org.scm</code>) · LLM (multi-provider, doppler keys, <kbd>M-|</kbd>

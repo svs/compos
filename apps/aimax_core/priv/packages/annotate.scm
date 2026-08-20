@@ -944,12 +944,27 @@
 
 (global-set-key "C-c ! a" "annotate-add")
 
+(mode-doc! "annotate-mode"
+  (string-append
+    "Margin notes on this document. `C-c ! a` adds a note on the region "
+    "or the line. `M-n` / `M-p` walk the notes. `C-c ! m` toggles the "
+    "margin, `C-c ! l` lists the notes. A note anchors to its matched "
+    "text and follows it through edits."))
+
+(mode-doc! "annotate-margin-mode"
+  (string-append
+    "The annotation cards beside the document. Click a card to go to "
+    "its note in the document. The chips resolve, fix, or dismiss the "
+    "note. `C-c C-v` visits the annotations file."))
+
 ;;; --- annotate-mode: the minor mode on the source buffer ---------------------
 
 (register-minor-mode! "annotate-mode"
   (lambda (buf)
     (local-set-key* buf "M-n" "annotate-next")
     (local-set-key* buf "M-p" "annotate-prev")
+    ;; also global — bound here so describe-mode's key table shows it
+    (local-set-key* buf "C-c ! a" "annotate-add")
     (local-set-key* buf "C-c ! l" "annotate-list")
     (local-set-key* buf "C-c ! m" "annotate-margin")
     (annotate--store-load! buf)
@@ -960,6 +975,7 @@
   (lambda (buf)
     (local-unset-key* buf "M-n")
     (local-unset-key* buf "M-p")
+    (local-unset-key* buf "C-c ! a")
     (local-unset-key* buf "C-c ! l")
     (local-unset-key* buf "C-c ! m")
     (overlay-clear! buf 'annotate)

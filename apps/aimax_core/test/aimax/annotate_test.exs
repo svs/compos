@@ -354,6 +354,17 @@ defmodule Aimax.AnnotateTest do
     end
   end
 
+  test "the mode help names annotate-add and its key" do
+    eval!(~s[(enable-minor-mode! "#{@buf}" "annotate-mode")])
+    eval!(~s[(run-command "describe-mode")])
+    on_exit(fn -> if Buffer.exists?("*Help*"), do: Aimax.Core.kill_buffer("*Help*") end)
+
+    help = Buffer.text("*Help*")
+    assert help =~ "C-c ! a"
+    assert help =~ "annotate-add"
+    assert help =~ "Margin notes"
+  end
+
   test "the check source reports tree-sitter ERROR nodes" do
     langs = eval!("(ts-langs)")
 

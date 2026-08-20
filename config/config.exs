@@ -46,8 +46,12 @@ end
 
 if config_env() == :test do
   # per-checkout suffix: concurrent test runs from different worktrees must
-  # not share sockets or fixture files, or evals land in the other VM
-  suffix = Integer.to_string(:erlang.phash2(Path.expand(".")), 36)
+  # not share sockets or fixture files, or evals land in the other VM.
+  # MIX_TEST_PARTITION joins the suffix, so each partition of
+  # `mix test --partitions N` gets its own home, socket, and desktop file.
+  suffix =
+    Integer.to_string(:erlang.phash2(Path.expand(".")), 36) <>
+      (System.get_env("MIX_TEST_PARTITION") || "")
 
   config :aimax_rpc, socket_path: "/tmp/aimax-rpc-test-#{suffix}.sock"
 

@@ -132,15 +132,22 @@ defmodule Aimax.Scheme.Eval do
   # Elixir exception: raw exceptions crash the hosting GenServer (the whole
   # editor Session died to a (string-prefix? s #f) once) — Error is caught
   # by the usual error paths instead.
+  # The core builtins are pure value functions: none of them can store a
+  # closure into Elixir state, so an argument cannot escape through them.
+  # The flush covers the eval result and the shared-tier writes. Without
+  # this exemption every (car es) over a large list rescans the whole
+  # tail, and a catalog walk turns quadratic.
+  @non_retaining Aimax.Scheme.Builtins.all() |> Map.keys() |> MapSet.new()
+
   def apply_fn({:builtin, name, fun}, args, store) when is_function(fun, 1) do
-    # a closure handed to a primitive escapes Scheme (command tables,
+    # a closure handed to a host primitive escapes Scheme (command tables,
     # hooks, buffer locals): the selective flush must publish its frames
-    Env.note_escape(args)
+    unless MapSet.member?(@non_retaining, name), do: Env.note_escape(args)
     {builtin_apply(name, fn -> fun.(args) end), store}
   end
 
   def apply_fn({:builtin, name, fun}, args, store) when is_function(fun, 2) do
-    Env.note_escape(args)
+    unless MapSet.member?(@non_retaining, name), do: Env.note_escape(args)
     builtin_apply(name, fn -> fun.(args, store) end)
   end
 

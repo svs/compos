@@ -17,7 +17,8 @@ sockets, PTYs, parsers, schedulers, and raw buffer mechanics.
 ## Dev loop
 
 ```sh
-mix test                                    # all four apps must stay green
+bin/test-fast                               # the suite in 4 partitions; all four apps must stay green
+mix test                                    # one lane — use it when one readable log matters
 pkill -f "mix run"; sleep 1
 (mix run --no-halt >> ~/.aimax/daemon.log 2>&1 &); sleep 6
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4004/

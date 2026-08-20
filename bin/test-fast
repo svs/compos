@@ -1,0 +1,24 @@
+#!/bin/sh
+# Run the test suite split across N BEAM instances (default 4).
+# Each partition gets its own test home, socket, and desktop file
+# (config.exs keys the paths on MIX_TEST_PARTITION), so the globally
+# stateful editor tests run serially inside a partition and the
+# partitions run in parallel.
+set -u
+N="${1:-4}"
+
+MIX_ENV=test mix compile || exit 1
+
+pids=""
+i=1
+while [ "$i" -le "$N" ]; do
+  MIX_TEST_PARTITION="$i" mix test --partitions "$N" --color &
+  pids="$pids $!"
+  i=$((i + 1))
+done
+
+fail=0
+for pid in $pids; do
+  wait "$pid" || fail=1
+done
+exit "$fail"

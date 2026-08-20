@@ -73,10 +73,12 @@ defmodule Aimax.LSPSchemeTest do
     assert eval!(~s{(minor-mode-on? "#{sc.path}" "lsp-mode")}) == "#t"
     assert eval!(~s{(buffer-local "#{sc.path}" 'lsp-server)}) == ~s{"#{sc.id}"}
 
-    wait_until(fn -> eval!(~s{(buffer-local "#{sc.path}" 'lsp-diagnostics)}) != "#f" end)
-
-    assert eval!(~s{(buffer-overlays "#{sc.path}")}) == ~S{((2 8 "lsp-warning"))}
-    assert eval!(~s{(buffer-local "#{sc.path}" 'modeline-info)}) == ~s{"#{sc.name} ⚠1"}
+    # the handler sets the local, paints, then writes the modeline — wait
+    # on each in pipeline order; a poll can land between the steps
+    wait_until(fn -> eval!(~s{(buffer-overlays "#{sc.path}")}) == ~S{((2 8 "lsp-warning"))} end)
+    wait_until(fn ->
+      eval!(~s{(buffer-local "#{sc.path}" 'modeline-info)}) == ~s{"#{sc.name} ⚠1"}
+    end)
 
     eval!(~s{(run-command "lsp-next-diagnostic")})
     assert Buffer.point(sc.path) == 2

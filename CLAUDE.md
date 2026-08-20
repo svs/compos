@@ -16,6 +16,9 @@ sockets, PTYs, parsers, schedulers, and raw buffer mechanics.
 
 ## Dev loop
 
+Before an implementation or fix, load `.agents/skills/code-change/SKILL.md`.
+That skill defines the durable completion gate for repository changes.
+
 ```sh
 bin/test-fast                               # the suite in 4 partitions; all four apps must stay green
 mix test                                    # one lane — use it when one readable log matters

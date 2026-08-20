@@ -48,6 +48,21 @@
 ;; but the NIF just returns no spans
 (define-mode "scheme-mode" (ts-mode "scheme"))
 
+;; ruby and javascript ride the same dynamic-grammar path; without the
+;; grammar the mode still works (and an LSP server still attaches)
+(define-mode "ruby-mode" (ts-mode "ruby"))
+(define-mode "js-mode" (ts-mode "javascript"))
+
+(mode-doc! "ruby-mode"
+  "Ruby. Run `M-x ts-install-grammar ruby` to get the colours.")
+(mode-doc! "js-mode"
+  "JavaScript. Run `M-x ts-install-grammar javascript` to get the colours.")
+
+(set! *auto-mode-alist*
+  (append *auto-mode-alist*
+          '((".rb" "ruby-mode")
+            (".js" "js-mode") (".mjs" "js-mode") (".jsx" "js-mode"))))
+
 (mode-doc! "scheme-mode"
   "Scheme: the language the editor is written in. `C-M-f` and `C-M-b` step over forms, and `M-g i` lists the definitions. Run `M-x ts-install-grammar scheme` to get the colours.")
 

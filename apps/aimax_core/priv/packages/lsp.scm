@@ -1,0 +1,327 @@
+;;; lsp.scm --- language servers: registry, lsp-mode, diagnostics.
+;;;
+;;; Policy over the Aimax.Core.LSP mechanism. A server registers per
+;;; mode; a mode hook attaches file buffers in a project to one server
+;;; per (server, project-root). Diagnostics paint as underline overlays,
+;;; count in the modeline, and list in a bottom sheet.
+;;;
+;;; The Elixir side owns transport, document sync, and position
+;;; encoding: every diagnostic and location arrives with startByte and
+;;; endByte already computed for open buffers.
+
+(package! 'lsp)
+(category! 'code)
+(domain! 'code)
+(effects! '(write external execute))
+
+;;; --- registry ----------------------------------------------------------------
+
+(define *lsp-registry* '())      ; ((name spec) ...); spec plist has 'modes
+(define *lsp-hooked-modes* '())  ; modes that already carry the attach hook
+(define *lsp-attempted* '())     ; ids tried once — a dead server is not respawned per keystroke
+
+(define (lsp--id name root) (string-append name "@" root))
+
+(define (lsp--id-name id) (car (string-split id "@")))
+
+(define (lsp-register! name spec)
+  (set! *lsp-registry*
+    (cons (list name spec)
+          (remove (lambda (e) (equal? (car e) name)) *lsp-registry*)))
+  (for-each
+    (lambda (mode)
+      (unless (member mode *lsp-hooked-modes*)
+        (set! *lsp-hooked-modes* (cons mode *lsp-hooked-modes*))
+        (add-hook! (string->symbol (string-append mode "-hook")) lsp--maybe-attach!)))
+    (or (plist-get spec 'modes) '()))
+  name)
+
+(define (lsp-server-for-mode mode)
+  (let loop ((es *lsp-registry*))
+    (cond ((null? es) #f)
+          ((member mode (or (plist-get (cadr (car es)) 'modes) '())) (car es))
+          (else (loop (cdr es))))))
+
+;; Start NAME for ROOT once. The connection reports its own failure;
+;; this only stops a retry storm.
+(define (lsp-ensure! name root)
+  (let ((id (lsp--id name root)))
+    (unless (member id *lsp-attempted*)
+      (set! *lsp-attempted* (cons id *lsp-attempted*))
+      (let ((e (assoc name *lsp-registry*)))
+        (when e (lsp-start! name root (cadr e)))))
+    id))
+
+(define (lsp--connection? id) (assoc id (lsp-connections)))
+
+;;; --- attach ------------------------------------------------------------------
+
+(define (lsp--maybe-attach!)
+  (let ((buf (current-buffer)))
+    (when (and lsp-auto-start (buffer-path buf))
+      (let ((entry (lsp-server-for-mode (buffer-local buf 'mode-name)))
+            (root (buffer-project-root buf)))
+        (when (and entry root (not (equal? root "")))
+          (buffer-set-local! buf 'lsp-server (lsp-ensure! (car entry) root))
+          (enable-minor-mode! buf "lsp-mode"))))))
+
+(define (lsp--setup! buf)
+  (desktop-skip! buf 'lsp-diagnostics)
+  (let ((id (buffer-local buf 'lsp-server)))
+    (when id
+      ;; after a restart the server is gone: start it again from the id
+      (let ((parts (string-split id "@")))
+        (when (= (length parts) 2)
+          (lsp-ensure! (car parts) (cadr parts))))
+      (when (lsp--connection? id)
+        (lsp-open! id buf))
+      (lsp--modeline! buf))))
+
+(define (lsp--teardown! buf)
+  (let ((id (buffer-local buf 'lsp-server)))
+    (when (and id (lsp--connection? id))
+      (lsp-close! id buf)))
+  (overlay-clear! buf 'lsp)
+  (buffer-set-local! buf 'lsp-diagnostics #f)
+  (buffer-set-local! buf 'lsp-server #f)
+  (buffer-set-local! buf 'modeline-info #f))
+
+(register-minor-mode! "lsp-mode" lsp--setup! lsp--teardown!)
+
+(define-command "lsp-mode" "Toggle the language server for this buffer"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (minor-mode-on? buf "lsp-mode")
+          (begin (disable-minor-mode! buf "lsp-mode") (message "lsp-mode disabled"))
+          (let ((entry (lsp-server-for-mode (buffer-local buf 'mode-name)))
+                (root (buffer-project-root buf)))
+            (cond ((not entry) (message "No language server registered for this mode"))
+                  ((equal? root "") (message "No project root for this buffer"))
+                  (else
+                   (buffer-set-local! buf 'lsp-server (lsp-ensure! (car entry) root))
+                   (enable-minor-mode! buf "lsp-mode")
+                   (message "lsp-mode enabled"))))))))
+
+;;; --- events ------------------------------------------------------------------
+
+(define (lsp--status! id status)
+  (for-each
+    (lambda (buf)
+      (when (equal? (buffer-local buf 'lsp-server) id)
+        (if (equal? status "ready")
+            (when (minor-mode-on? buf "lsp-mode")
+              (lsp-open! id buf)
+              (lsp--modeline! buf))
+            (lsp--modeline! buf))))
+    (buffer-list)))
+
+(define *lsp-severity-faces*
+  '((1 "lsp-error") (2 "lsp-warning") (3 "lsp-info") (4 "lsp-hint")))
+
+(define (lsp--face sev)
+  (let ((e (assoc (or sev 1) *lsp-severity-faces*)))
+    (if e (cadr e) "lsp-info")))
+
+(define (lsp--diagnostics! id params)
+  (let ((buf (plist-get params 'buffer))
+        (diags (or (plist-get params 'diagnostics) '())))
+    (when (and buf (buffer-exists? buf))
+      (buffer-set-local! buf 'lsp-diagnostics diags)
+      (overlay-set! buf 'lsp
+        (map (lambda (d)
+               (list (or (plist-get d 'startByte) 0)
+                     (or (plist-get d 'endByte) 0)
+                     (lsp--face (plist-get d 'severity))))
+             diags))
+      (lsp--modeline! buf)
+      (when (buffer-exists? *lsp-diag-buffer*)
+        (list-refresh! *lsp-diag-buffer*)))))
+
+(lsp-on-event!
+  (lambda (id method params)
+    (cond ((equal? method "textDocument/publishDiagnostics")
+           (lsp--diagnostics! id params))
+          ((equal? method "aimax/status")
+           (lsp--status! id (plist-get params 'status)))
+          ((equal? method "window/showMessage")
+           (message (string-append "lsp: " (or (plist-get params 'message) ""))))
+          (else #f))))
+
+(define-style! 'lsp "
+.f-lsp-error{text-decoration:underline wavy var(--alert-fg,#a83a2b);text-decoration-skip-ink:none}
+.f-lsp-warning{text-decoration:underline wavy var(--warn-fg,#7a5a1a);text-decoration-skip-ink:none}
+.f-lsp-info{text-decoration:underline dotted var(--accent-fg,#4a6a8a)}
+.f-lsp-hint{text-decoration:underline dotted var(--faint-fg,#8a8a86)}
+")
+
+;;; --- modeline ----------------------------------------------------------------
+
+(define (lsp--counts buf)
+  (let loop ((ds (or (buffer-local buf 'lsp-diagnostics) '())) (e 0) (w 0))
+    (if (null? ds)
+        (list e w)
+        (let ((sev (or (plist-get (car ds) 'severity) 1)))
+          (loop (cdr ds)
+                (if (= sev 1) (+ e 1) e)
+                (if (= sev 2) (+ w 1) w))))))
+
+(define (lsp--modeline! buf)
+  (let* ((id (buffer-local buf 'lsp-server))
+         (c (lsp--counts buf)))
+    (when id
+      (buffer-set-local! buf 'modeline-info
+        (string-append (lsp--id-name id)
+          (if (> (car c) 0) (string-append " ✗" (number->string (car c))) "")
+          (if (> (cadr c) 0) (string-append " ⚠" (number->string (cadr c))) "")))
+      (buffer-set-local! buf 'modeline-info-command "lsp-diagnostics-list"))))
+
+;;; --- diagnostics at point, next/prev -----------------------------------------
+
+;; (sort LST) has no comparator: sort (START DIAG) pairs by term order
+(define (lsp--diags-sorted buf)
+  (map cadr
+       (sort (map (lambda (d) (list (or (plist-get d 'startByte) 0) d))
+                  (or (buffer-local buf 'lsp-diagnostics) '())))))
+
+(define (lsp--sev-name sev)
+  (cond ((equal? sev 1) "error")
+        ((equal? sev 2) "warning")
+        ((equal? sev 3) "info")
+        (else "hint")))
+
+(define (lsp--echo-diag d)
+  (message (string-append
+             "lsp · " (lsp--sev-name (or (plist-get d 'severity) 1))
+             " — " (or (plist-get d 'message) ""))))
+
+(define-command "lsp-next-diagnostic" "Move to the next diagnostic"
+  (lambda ()
+    (let* ((buf (current-buffer)) (p (point))
+           (hit (let loop ((ds (lsp--diags-sorted buf)))
+                  (cond ((null? ds) #f)
+                        ((> (or (plist-get (car ds) 'startByte) 0) p) (car ds))
+                        (else (loop (cdr ds)))))))
+      (if hit
+          (begin (goto-char! (plist-get hit 'startByte)) (lsp--echo-diag hit))
+          (message "No next diagnostic")))))
+
+(define-command "lsp-prev-diagnostic" "Move to the previous diagnostic"
+  (lambda ()
+    (let* ((buf (current-buffer)) (p (point))
+           (hit (let loop ((ds (lsp--diags-sorted buf)) (last #f))
+                  (cond ((null? ds) last)
+                        ((< (or (plist-get (car ds) 'startByte) 0) p)
+                         (loop (cdr ds) (car ds)))
+                        (else last)))))
+      (if hit
+          (begin (goto-char! (plist-get hit 'startByte)) (lsp--echo-diag hit))
+          (message "No previous diagnostic")))))
+
+(define-command "lsp-show-diagnostic" "Echo the diagnostic at point"
+  (lambda ()
+    (let* ((buf (current-buffer)) (p (point))
+           (hit (let loop ((ds (or (buffer-local buf 'lsp-diagnostics) '())))
+                  (cond ((null? ds) #f)
+                        ((and (<= (or (plist-get (car ds) 'startByte) 0) p)
+                              (<= p (or (plist-get (car ds) 'endByte) 0)))
+                         (car ds))
+                        (else (loop (cdr ds)))))))
+      (if hit (lsp--echo-diag hit) (message "No diagnostic at point")))))
+
+;;; --- the diagnostics list ----------------------------------------------------
+
+(define *lsp-diag-buffer* "*diagnostics*")
+
+(define (lsp--diag-line buf d)
+  (let ((start (or (plist-get d 'startByte) 0)))
+    (length (string-split (substring-bytes (buffer-text buf) 0
+                                           (min start (buffer-size buf)))
+                          "\n"))))
+
+(define (lsp--diag-rows list-buf)
+  (apply append
+    (map (lambda (buf)
+           (map (lambda (d)
+                  (list 'buf buf
+                        'line (lsp--diag-line buf d)
+                        'sev (or (plist-get d 'severity) 1)
+                        'msg (or (plist-get d 'message) "")
+                        'start (or (plist-get d 'startByte) 0)))
+                (or (buffer-local buf 'lsp-diagnostics) '())))
+         (filter (lambda (b) (buffer-local b 'lsp-diagnostics)) (buffer-list)))))
+
+(define (lsp--diag-visit e select?)
+  (let ((buf (plist-get e 'buf)))
+    (when (buffer-exists? buf)
+      (if select?
+          (switch-to-buffer! buf)
+          (window-preview-buffer! buf))
+      (buffer-goto! buf (plist-get e 'start)))))
+
+(define-list-mode! "lsp-diagnostics-mode"
+  (list
+    'doc "Every open buffer's language-server diagnostics."
+    'buffer *lsp-diag-buffer*
+    'rows lsp--diag-rows
+    'key (lambda (buf e)
+           (string-append (plist-get e 'buf) ":"
+                          (number->string (plist-get e 'start)) ":"
+                          (plist-get e 'msg)))
+    'columns (lambda (buf)
+               (list (list "sev" 7)
+                     (list "buffer" 28)
+                     (list "line" 5 'right)
+                     (list "message" #f)))
+    'cells (lambda (buf e)
+             (list (lsp--sev-name (plist-get e 'sev))
+                   (buffer-short-label (plist-get e 'buf))
+                   (number->string (plist-get e 'line))
+                   (plist-get e 'msg)))
+    'title (lambda (buf) "Diagnostics")
+    'noun "diagnostic"
+    'preview (lambda (buf e) (lsp--diag-visit e #f))
+    'keys '(("RET" "lsp-diag-visit")
+            ("g" "lsp-diag-refresh")
+            ("q" "quit-window"))))
+
+(add-display-rule! *lsp-diag-buffer* 'popup '(side bottom size 0.32))
+
+(define-command "lsp-diag-visit" "Visit the diagnostic on this row"
+  (lambda ()
+    (let ((e (list-current (current-buffer))))
+      (when e (lsp--diag-visit e #t)))))
+
+(define-command "lsp-diag-refresh" "Refresh the diagnostics list"
+  (lambda () (list-refresh! *lsp-diag-buffer*)))
+
+(define-command "lsp-diagnostics-list" "Show diagnostics as a list"
+  (lambda () (list-mode-show! "lsp-diagnostics-mode")))
+
+;;; --- configuration and default servers ---------------------------------------
+
+(defgroup 'lsp "Language server client.")
+
+(defcustom 'lsp-auto-start #t
+  "Start a language server when a visited file's mode has one."
+  'group 'lsp 'type 'boolean)
+
+(lsp-register! "elixir-ls"
+  (list 'command "elixir-ls" 'language "elixir" 'modes (list "elixir-mode")))
+
+(lsp-register! "typescript-language-server"
+  (list 'command "typescript-language-server" 'args (list "--stdio")
+        'language "javascript" 'modes (list "js-mode")))
+
+(lsp-register! "ruby-lsp"
+  (list 'command "ruby-lsp" 'language "ruby" 'modes (list "ruby-mode")))
+
+;; scheme-langserver speaks r6rs; it reads .scm but knows none of the
+;; aimax vocabulary. The durable scheme story is a built-in provider
+;; over the catalog (v2).
+(lsp-register! "scheme-langserver"
+  (list 'command "scheme-langserver" 'language "scheme" 'modes (list "scheme-mode")))
+
+(public! 'lsp-register!
+  "(lsp-register! NAME SPEC) — register a language server; SPEC has 'command 'args 'env 'language 'modes 'settings")
+(public! 'lsp-ensure!
+  "(lsp-ensure! NAME ROOT) — start the registered server for ROOT once; return the connection id")

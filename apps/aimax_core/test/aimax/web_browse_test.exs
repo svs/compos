@@ -43,14 +43,14 @@ defmodule Aimax.WebBrowseTest do
     :ok
   end
 
-  test "a page renders labels, hides targets, and records the link ranges" do
+  test "a page is a rendered markdown preview with the link ranges recorded" do
     eval!(~S|(browse "https://site.test/index.html")|)
 
+    # the buffer holds the page's markdown; the preview renders it
     text = Buffer.text("*browse*")
     assert text =~ "Front page"
     assert text =~ "second page"
-    refute text =~ "](/second.html"
-    refute text =~ "(docs/intro.html"
+    assert eval!(~S|(buffer-local "*browse*" 'render-mode)|) == ~S["markdown"]
 
     links = eval!(~S|(buffer-local "*browse*" 'web-links)|)
     assert links =~ "/second.html"
@@ -132,7 +132,7 @@ defmodule Aimax.WebBrowseTest do
     press("C-g")
   end
 
-  test "C-x C-v shows the original page as authored; again the reader view" do
+  test "C-c C-v shows the original page as authored; again the reader view" do
     eval!(~S"""
     (set! *web-fetch-html*
       (lambda (url k) (k "<html><body><b>RAW ORIGINAL</b></body></html>")))
@@ -141,14 +141,14 @@ defmodule Aimax.WebBrowseTest do
     eval!(~S|(browse "https://site.test/index.html")|)
     eval!(~S|(switch-to-buffer! "*browse*")|)
 
-    press(["C-x", "C-v"])
+    press(["C-c", "C-v"])
     assert Buffer.text("*browse*") =~ "RAW ORIGINAL"
     assert eval!(~S|(buffer-local "*browse*" 'render-mode)|) == ~S["html"]
     assert eval!(~S|(buffer-local "*browse*" 'preview-authored)|) == "#t"
 
     # again: the reader view re-renders from the saved markdown, no fetch
-    press(["C-x", "C-v"])
+    press(["C-c", "C-v"])
     assert Buffer.text("*browse*") =~ "Front page"
-    assert eval!(~S|(buffer-local "*browse*" 'render-mode)|) == "#f"
+    assert eval!(~S|(buffer-local "*browse*" 'render-mode)|) == ~S["markdown"]
   end
 end

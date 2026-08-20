@@ -108,18 +108,19 @@
                                  (substring t 0 80)
                                  t)))))))))
 
-;;; --- markdown -> text + links ---------------------------------------------------
+;;; --- the links in the markdown ---------------------------------------------------
 
-;; [label](url) and ![label](url) become the label; the output byte range
-;; and the target collect in LINKS. Anchors (#...) stay plain text.
+;; each [label](url) and ![label](url) in the SOURCE: the whole match's
+;; byte range and the target collect in LINKS. The markdown itself stays
+;; in the buffer — the preview renders it — so the ranges are source
+;; ranges, and TAB and RET read them. Anchors (#...) do not collect.
 (define *web--link-pattern* "!?\\[([^]]*)\\]\\(([^)\\s]*)\\)")
 
-(define (web--parse md)
-  (let loop ((pos 0) (out "") (links '()))
+(define (web--links md)
+  (let loop ((pos 0) (links '()))
     (let ((hit (re-find *web--link-pattern* md pos)))
       (if (not hit)
-          (list (string-append out (substring-bytes md pos (string-byte-length md)))
-                (reverse links))
+          (reverse links)
           (let* ((ms (car hit))
                  (me (car (cdr hit)))
                  ;; pair 0 is the whole match; the label and target follow
@@ -127,15 +128,11 @@
                  (lr (car (cdr gs)))
                  (ur (car (cdr (cdr gs))))
                  (label (substring-bytes md (car lr) (car (cdr lr))))
-                 (url (substring-bytes md (car ur) (car (cdr ur))))
-                 (head (string-append out (substring-bytes md pos ms)))
-                 (start (string-byte-length head))
-                 (end (+ start (string-byte-length label))))
+                 (url (substring-bytes md (car ur) (car (cdr ur)))))
             (loop me
-                  (string-append head label)
                   (if (or (equal? label "") (string-prefix? "#" url))
                       links
-                      (cons (list start end url) links))))))))
+                      (cons (list ms me url) links))))))))
 
 ;; a link target against the page it came from: absolute stays, //host
 ;; takes the scheme, /path takes the origin, anything else appends to the
@@ -167,24 +164,25 @@
       (let ((age (cache-age-label buf)))
         (if age (string-append " · " age) "")))))
 
+;; the reader IS the markdown preview: the buffer holds the page's
+;; markdown, the client renders it — headings, emphasis, links — and
+;; the link ranges underneath serve TAB and RET
 (define (web--render! buf md)
-  (let* ((parsed (web--parse md))
-         (text (car parsed))
-         (links (car (cdr parsed))))
-    (buffer-set-read-only! buf #f)
-    (buffer-delete-range! buf 0 (buffer-size buf))
-    (buffer-insert! buf 0 text)
-    (buffer-set-read-only! buf #t)
-    (buffer-set-local! buf 'web-links links)
-    ;; a render is the READER view; the original toggle reads this back
-    (buffer-set-local! buf 'web-md md)
-    (buffer-set-local! buf 'render-mode #f)
-    (web--apply-link-faces! buf)
-    (buffer-goto! buf 0)
-    (web--update-modeline! buf)
-    ;; the page is real now: it joins the visited list, title and all
-    (let ((url (buffer-local buf 'browse-url)))
-      (when url (web--remember-visit! url (web--title md))))))
+  (buffer-set-read-only! buf #f)
+  (buffer-delete-range! buf 0 (buffer-size buf))
+  (buffer-insert! buf 0 md)
+  (buffer-set-read-only! buf #t)
+  (buffer-set-local! buf 'web-links (web--links md))
+  ;; the original toggle reads the markdown back without a fetch
+  (buffer-set-local! buf 'web-md md)
+  (buffer-set-local! buf 'preview-authored #f)
+  (buffer-set-local! buf 'render-mode "markdown")
+  (web--apply-link-faces! buf)
+  (buffer-goto! buf 0)
+  (web--update-modeline! buf)
+  ;; the page is real now: it joins the visited list, title and all
+  (let ((url (buffer-local buf 'browse-url)))
+    (when url (web--remember-visit! url (web--title md)))))
 
 ;; overlays are runtime: the mode setup rebuilds them from 'web-links
 (define (web--apply-link-faces! buf)
@@ -337,7 +335,8 @@
   (local-set-key* buf "l" "browse-back")
   (local-set-key* buf "g" "browse-refresh")
   (local-set-key* buf "o" "browse-open-external")
-  (local-set-key* buf "C-x C-v" "browse-toggle-original")
+  ;; the editor's preview-toggle chord: here it flips reader/original
+  (local-set-key* buf "C-c C-v" "browse-toggle-original")
   (local-set-key* buf "q" "quit-window"))
 
 (define-mode "browse-mode"
@@ -355,10 +354,10 @@
       (cache-wake! buf))))
 
 (mode-doc! "browse-mode"
-  "A web page as readable text. RET follows the link at point, TAB and
-n/p walk the links, l goes back, g refetches, C-x C-v shows the
-original page and again the reader view, o opens the page in the real
-browser, and C-s searches to any link.")
+  "A web page, rendered. RET follows the link at point, TAB and n/p
+walk the links, l goes back, g refetches, C-c C-v shows the original
+page and again the reader view, o opens the page in the real browser,
+and C-s searches to any link.")
 
 ;; the one entry point: normalize, enter the mode, fetch
 (define (browse url)

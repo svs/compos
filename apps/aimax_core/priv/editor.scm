@@ -6972,6 +6972,9 @@
 (global-set-key "C-_" "undo")
 (global-set-key "C-x u" "undo")
 (global-set-key "C-g" "keyboard-quit")
+;; ESC is Meta (dispatch translates unbound ESC k to M-k); a doubled ESC
+;; quits, the Emacs way
+(global-set-key "ESC ESC" "keyboard-quit")
 
 (global-set-key "M-f" "forward-word")
 (global-set-key "M-b" "backward-word")

@@ -151,7 +151,7 @@ defmodule Aimax.Core.KeyDispatch do
   defp resolve_and_run(key, pending, undefined) do
     seq = pending ++ [key]
 
-    case Editor.lookup_key(seq) do
+    case lookup_esc_meta(seq) do
       {:command, name} ->
         Editor.set_pending([])
         # the prefix echo ("C-c-") must not outlive the sequence: the
@@ -173,6 +173,41 @@ defmodule Aimax.Core.KeyDispatch do
           true -> undefined.(seq)
         end
     end
+  end
+
+  # ESC is Meta when nothing binds it directly (Emacs: ESC x runs M-x,
+  # ESC C-f runs C-M-f). A map that binds ESC itself — evil, the
+  # completion popup — wins, because the plain sequence resolves first.
+  defp lookup_esc_meta(seq) do
+    case Editor.lookup_key(seq) do
+      :none ->
+        case Enum.reverse(seq) do
+          ["ESC" | _] ->
+            :prefix
+
+          [last, "ESC" | rev] ->
+            Editor.lookup_key(Enum.reverse(rev) ++ [add_meta(last)])
+
+          _ ->
+            :none
+        end
+
+      hit ->
+        hit
+    end
+  end
+
+  # modifier order in a key spec: s- C- M- BASE (the client builds them so)
+  defp add_meta(key) do
+    {sup, rest} = split_mod(key, "s-")
+    {ctl, rest} = split_mod(rest, "C-")
+    if String.starts_with?(rest, "M-"), do: key, else: sup <> ctl <> "M-" <> rest
+  end
+
+  defp split_mod(key, mod) do
+    if String.starts_with?(key, mod),
+      do: {mod, binary_part(key, byte_size(mod), byte_size(key) - byte_size(mod))},
+      else: {"", key}
   end
 
   # text typed since the popup opened is the popup's query (orderless narrowing)

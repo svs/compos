@@ -696,6 +696,19 @@
         (message "paredit-mode enabled")
         (message "paredit-mode disabled"))))
 
+;;; --- enablement --------------------------------------------------------------
+
+(defgroup 'paredit "Structural s-expression editing.")
+
+(defcustom 'paredit-in-scheme-mode #t
+  "Enable paredit-mode in scheme-mode buffers."
+  'group 'paredit 'type 'boolean)
+
+(add-hook! 'scheme-mode-hook
+  (lambda ()
+    (when paredit-in-scheme-mode
+      (enable-minor-mode! (current-buffer) "paredit-mode"))))
+
 (public! 'par-scan-forward
   "(par-scan-forward TEXT POS) — byte end of the datum at or after POS, or #f")
 (public! 'par-scan-backward

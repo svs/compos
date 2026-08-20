@@ -425,6 +425,24 @@ defmodule Aimax.PareditTest do
     assert echo() =~ "No structural navigation"
   end
 
+  # --- enablement ------------------------------------------------------------
+
+  test "scheme-mode enables paredit by default; the defcustom turns it off" do
+    buf = fresh_buffer("", plain: true)
+    eval!(~s{(with-current-buffer "#{buf}" (lambda () (set-mode! "scheme-mode")))})
+    assert eval!(~s{(minor-mode-on? "#{buf}" "paredit-mode")}) == "#t"
+    press(["("])
+    assert Buffer.text(buf) == "()"
+
+    eval!("(set! paredit-in-scheme-mode #f)")
+
+    buf2 = fresh_buffer("", plain: true)
+    eval!(~s{(with-current-buffer "#{buf2}" (lambda () (set-mode! "scheme-mode")))})
+    assert eval!(~s{(minor-mode-on? "#{buf2}" "paredit-mode")}) == "#f"
+
+    eval!("(set! paredit-in-scheme-mode #t)")
+  end
+
   test "the keys pass through only when another paredit buffer installed them" do
     # the dispatcher commands are global; a plain buffer only reaches
     # them when its own keymap binds them, so this asserts the local map

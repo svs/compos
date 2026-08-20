@@ -219,8 +219,10 @@
 
 ;; Chords a page should not send through raw dispatch, because returning from
 ;; outside wants different semantics than moving around inside.
+;; a page draws prompts, not editor windows: C-x b from a page runs the
+;; minibuffer switcher, not the modal one the editor's C-x b opens
 (define *chrome-chord-commands*
-  '(("C-x b" "switch-to-buffer")))
+  '(("C-x b" "switch-to-buffer-prompt")))
 
 (define (chrome--chord-command keys)
   (let ((entry (assoc (string-join keys " ") *chrome-chord-commands*)))

@@ -113,7 +113,9 @@ defmodule Aimax.ChromeTest do
         Jason.encode!(%{id: id, ok: true, result: %{"title" => "Inbox", "url" => "https://x/"}})
       )
 
-      wait_for(fn -> Buffer.exists?("*chrome-test*") and Buffer.text("*chrome-test*") =~ "Inbox" end)
+      wait_for(fn ->
+        Buffer.exists?("*chrome-test*") and Buffer.text("*chrome-test*") =~ "Inbox"
+      end)
     end
 
     test "with no extension the caller is told, rather than hanging" do
@@ -305,11 +307,11 @@ defmodule Aimax.ChromeTest do
       assert eval!(~s[(key-for-command "switch-to-buffer")]) == ~s("C-x b")
     end
 
-    test "with no extension attached it is still just the buffer list" do
+    test "with no extension attached the prompt is still just the buffer list" do
       Browser.detach(self())
       refute Browser.connected?()
 
-      Session.eval(~s[(run-command "switch-to-buffer")])
+      Session.eval(~s[(run-command "switch-to-buffer-prompt")])
       # a prompt opened rather than the command dying on the missing browser
       assert eval!(~s[(chrome--get (minibuffer-state) 'prompt)]) =~ "Switch to (default"
       Session.eval("(minibuffer-cancel!)")
@@ -340,8 +342,8 @@ defmodule Aimax.ChromeTest do
       assert eval!(~s[(map car (chrome--order #{bufs} #{tabs}))]) == ~s{("*a*" "*b*" "🌐 News")}
     end
 
-    test "C-x b from a page routes to the returning command, not raw dispatch" do
-      assert eval!(~s[(chrome--chord-command '("C-x" "b"))]) == ~s("switch-to-buffer")
+    test "C-x b from a page routes to the returning prompt, not raw dispatch" do
+      assert eval!(~s[(chrome--chord-command '("C-x" "b"))]) == ~s("switch-to-buffer-prompt")
       # anything without its own browser meaning still goes through the keymap
       assert eval!(~s[(chrome--chord-command '("C-x" "o"))]) == "#f"
     end
@@ -448,8 +450,12 @@ defmodule Aimax.ChromeTest do
 
   defp eventually(fun, tries \\ 40) do
     cond do
-      fun.() -> true
-      tries == 0 -> false
+      fun.() ->
+        true
+
+      tries == 0 ->
+        false
+
       true ->
         Process.sleep(50)
         eventually(fun, tries - 1)
@@ -465,7 +471,10 @@ defmodule Aimax.ChromeTest do
     end
 
     test "nesting and scheme's falsehood survive the trip" do
-      assert Session.scheme_to_json([{:sym, "xs"}, [[{:sym, "n"}, 1]]]) == %{"xs" => [%{"n" => 1}]}
+      assert Session.scheme_to_json([{:sym, "xs"}, [[{:sym, "n"}, 1]]]) == %{
+               "xs" => [%{"n" => 1}]
+             }
+
       assert Session.scheme_to_json(false) == false
     end
   end

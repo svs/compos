@@ -207,6 +207,11 @@ defmodule Aimax.Core.Editor do
   def set_last_command(name), do: GenServer.call(__MODULE__, {:set_last_command, name})
   def last_command, do: GenServer.call(__MODULE__, :last_command)
 
+  # the key sequence whose keymap lookup ran the current command — one
+  # command bound to many keys (the switcher's type-to-narrow) reads it
+  def set_last_keys(seq), do: GenServer.call(__MODULE__, {:set_last_keys, seq})
+  def last_keys, do: GenServer.call(__MODULE__, :last_keys)
+
   # commands that manage their own undo boundaries (Scheme registers them;
   # KeyDispatch skips its automatic break for these — "undo" is one from birth)
   def add_undo_exempt(name), do: GenServer.call(__MODULE__, {:add_undo_exempt, name})
@@ -261,10 +266,14 @@ defmodule Aimax.Core.Editor do
 
   def other_window(fid \\ nil), do: GenServer.call(__MODULE__, {:other_window, fid(fid)})
 
-  @doc "Show BUFFER in the active window WITHOUT touching the MRU ring — candidate preview must not reorder the buffer history."
-  def preview_buffer(buffer, fid \\ nil) do
+  @doc """
+  Show BUFFER in the active window WITHOUT touching the MRU ring — candidate
+  preview must not reorder the buffer history. WIN previews into that window
+  instead (the modal switcher previews into its home window, not its own).
+  """
+  def preview_buffer(buffer, fid \\ nil, win \\ nil) do
     restoring = dormant?(buffer)
-    result = GenServer.call(__MODULE__, {:preview_buffer, buffer, fid(fid)})
+    result = GenServer.call(__MODULE__, {:preview_buffer, buffer, fid(fid), win})
     restore_if_woken(buffer, restoring)
     result
   end
@@ -389,6 +398,7 @@ defmodule Aimax.Core.Editor do
        local_keymaps: %{},
        remaps: %{},
        last_command: "",
+       last_keys: [],
        undo_exempt: MapSet.new(["undo"]),
        mru: Enum.uniq([@scratch | Aimax.Core.BufferStore.history()]),
        # frame id => text a command wants on that client's OS clipboard
@@ -1102,6 +1112,11 @@ defmodule Aimax.Core.Editor do
 
   def handle_call(:last_command, _from, state), do: {:reply, state.last_command, state}
 
+  def handle_call({:set_last_keys, seq}, _from, state),
+    do: {:reply, :ok, %{state | last_keys: seq}}
+
+  def handle_call(:last_keys, _from, state), do: {:reply, state.last_keys, state}
+
   def handle_call({:add_undo_exempt, name}, _from, state),
     do: {:reply, :ok, %{state | undo_exempt: MapSet.put(state.undo_exempt, name)}}
 
@@ -1355,14 +1370,21 @@ defmodule Aimax.Core.Editor do
     changed(:ok, resync_swap(put_frame(%{state | mru: mru}, %{f | tree: tree})), f.id)
   end
 
-  def handle_call({:preview_buffer, buffer, fid}, _from, state) do
+  def handle_call({:preview_buffer, buffer, fid, win}, _from, state) do
     if Aimax.Core.Buffer.exists?(buffer) or Aimax.Core.BufferStore.known?(buffer) do
-      Aimax.Core.ensure_buffer(buffer)
-      Buffer.touch(buffer)
       f = frame(state, fid)
-      leaf = find_leaf(f.tree, f.active)
-      tree = replace_leaf(f.tree, f.active, %{leaf | buffer: buffer, top: 0, manual: false})
-      changed(:ok, put_frame(state, %{f | tree: tree}))
+      target = win || f.active
+
+      case find_leaf(f.tree, target) do
+        nil ->
+          {:reply, {:error, :no_window}, state}
+
+        leaf ->
+          Aimax.Core.ensure_buffer(buffer)
+          Buffer.touch(buffer)
+          tree = replace_leaf(f.tree, target, %{leaf | buffer: buffer, top: 0, manual: false})
+          changed(:ok, put_frame(state, %{f | tree: tree}))
+      end
     else
       {:reply, {:error, :no_buffer}, state}
     end

@@ -302,6 +302,8 @@ defmodule Aimax.Core.SchemeAPI do
       "key-for-command" =>
         "(key-for-command COMMAND) — return the tersest key sequence bound to COMMAND, or \"\".",
       "last-command" => "(last-command) — return the name of the last command that ran.",
+      "last-keys" =>
+        "(last-keys) — return the key sequence whose keymap lookup ran the current command.",
       "window-rows" => "(window-rows) — return the number of text rows in the active window.",
       "window-cols" =>
         "(window-cols [WIN]) — return the number of text columns in WIN, or in the active window.",
@@ -322,7 +324,7 @@ defmodule Aimax.Core.SchemeAPI do
       "set-mb-redirect!" =>
         "(set-mb-redirect! BOOL) — toggle redirection of current-buffer to the minibuffer's text.",
       "window-preview-buffer!" =>
-        "(window-preview-buffer! BUF) — show BUF in the active window without MRU changes.",
+        "(window-preview-buffer! BUF [WIN]) — show BUF in WIN (default: the active window) without MRU changes.",
       "buffer-sleep!" =>
         "(buffer-sleep! NAME) — checkpoint NAME and stop its process; the buffer stays known. #f when NAME is on screen, busy, or pinned.",
       "minibuffer-set-candidates!" =>
@@ -1164,6 +1166,7 @@ defmodule Aimax.Core.SchemeAPI do
         :void
       end,
       "last-command" => fn [] -> Editor.last_command() end,
+      "last-keys" => fn [] -> Editor.last_keys() end,
       "window-rows" => fn [] -> Editor.window_rows() end,
       # the client measures its own font and reports it; a window nobody
       # measured is worth the default
@@ -1222,10 +1225,12 @@ defmodule Aimax.Core.SchemeAPI do
         Editor.set_mb_redirect(bool)
         :void
       end,
-      # show a buffer in the active window without MRU bookkeeping —
-      # candidate preview must not reorder the buffer ring
-      "window-preview-buffer!" => fn [name] ->
-        Editor.preview_buffer(name) == :ok
+      # show a buffer in a window without MRU bookkeeping — candidate
+      # preview must not reorder the buffer ring. The optional WIN is the
+      # modal switcher's home window; default is the active window.
+      "window-preview-buffer!" => fn
+        [name] -> Editor.preview_buffer(name) == :ok
+        [name, win] -> Editor.preview_buffer(name, nil, win) == :ok
       end,
       # the way back to dormancy: preview wakes candidates, the prompt's
       # close puts the ones nobody picked back to sleep

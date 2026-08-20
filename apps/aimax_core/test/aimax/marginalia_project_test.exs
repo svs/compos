@@ -95,11 +95,11 @@ defmodule Aimax.MarginaliaProjectTest do
       press(["C-g"])
     end
 
-    # One annotator serves the prompt and the list: C-x b matches what you
-    # type against the marginalia, and ibuffer narrows by the same text.
-    test "ibuffer / narrows by the annotation C-x b shows" do
+    # One annotator serves the prompt and the switcher: the modal list
+    # narrows by the same marginalia text the prompt matches.
+    test "the switcher narrows by the annotation the marginalia supplies" do
       on_exit(fn ->
-        for b <- ["*mp-ga*", "*mp-gb*", "*ibuffer*"], do: Aimax.Core.kill_buffer(b)
+        for b <- ["*mp-ga*", "*mp-gb*", "*switch*"], do: Aimax.Core.kill_buffer(b)
       end)
 
       {:ok, _} =
@@ -107,23 +107,18 @@ defmodule Aimax.MarginaliaProjectTest do
           (buffer-create "*mp-ga*")
           (buffer-create "*mp-gb*")
           (buffer-set-local! "*mp-ga*" 'group "work/dishwasher")
-          (run-command "ibuffer")
-          (list-filter-push! "*ibuffer*" (list "match" "mp-g")))})
+          (run-command "ibuffer"))})
 
-      assert Aimax.Core.Buffer.text("*ibuffer*") =~ "*mp-gb*"
+      assert Aimax.Core.Buffer.text("*switch*") =~ "*mp-gb*"
 
-      # the group is nowhere in the line: it is what the annotator says
-      press(["/"])
+      # the group is nowhere in the name: it is what the annotator says
       type("dishwasher")
-      text = Aimax.Core.Buffer.text("*ibuffer*")
+      text = Aimax.Core.Buffer.text("*switch*")
       assert text =~ "*mp-ga*"
       refute text =~ "*mp-gb*"
       assert text =~ "/dishwasher"
-
-      # RET keeps the narrowing and leaves point on a row that survived
-      press(["RET"])
-      assert Aimax.Core.Buffer.text("*ibuffer*") =~ "*mp-ga*"
-      assert {:ok, ~s{"*mp-ga*"}} = Session.eval("(ibuffer-current)")
+      assert {:ok, ~s{"*mp-ga*"}} = Session.eval(~s{(car (list-current "*switch*"))})
+      press(["ESC"])
     end
 
     test "define-command stores a docstring, command-doc reads it back" do

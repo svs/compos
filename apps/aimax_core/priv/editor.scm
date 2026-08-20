@@ -3156,8 +3156,11 @@
                  (loop (cdr rows) (if c (cons c out) out))))
               (else (loop (cdr rows) out))))))))
 
-(define-command "switch-to-buffer"
-  "Switch to a buffer; C-RET enters the buffer's group instead"
+;; The minibuffer switcher. The editor's C-x b opens the modal switcher
+;; (switch.scm); this prompt serves the surfaces that can only draw a
+;; minibuffer — a browser page under the chrome extension.
+(define-command "switch-to-buffer-prompt"
+  "Switch to a buffer from a prompt; C-RET enters the buffer's group instead"
   (lambda ()
     (set! *mb-confirm-context* #f)
     (let* ((here (or (window-buffer (active-window)) (current-buffer)))

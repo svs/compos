@@ -30,6 +30,12 @@ defmodule Aimax.EditorTest do
   end
 
   # DEL back over whatever the prompt holds, the way a user retypes
+  # the minibuffer switcher survives for the surfaces that can only draw a
+  # prompt (a browser page); these tests drive it directly
+  defp open_switch_prompt do
+    {:ok, _} = Aimax.Core.Session.eval(~s[(run-command "switch-to-buffer-prompt")])
+  end
+
   defp clear_minibuffer do
     press(List.duplicate("DEL", String.length(Editor.snapshot().minibuffer.input)))
   end
@@ -326,10 +332,10 @@ defmodule Aimax.EditorTest do
     assert Buffer.text(other) == "z"
   end
 
-  describe "ibuffer" do
-    test "lists, filters by mode, flags and kills" do
+  describe "the modal switcher" do
+    test "lists with the buffer annotation, narrows by mode, C-k kills, RET visits" do
       on_exit(fn ->
-        for b <- ["*zz-ib-a*", "*zz-ib-b*", "*ibuffer*"], do: Aimax.Core.kill_buffer(b)
+        for b <- ["*zz-ib-a*", "*zz-ib-b*", "*switch*"], do: Aimax.Core.kill_buffer(b)
         Editor.delete_other_windows()
       end)
 
@@ -339,62 +345,42 @@ defmodule Aimax.EditorTest do
         (buffer-create "*zz-ib-b*")
         (run-command "ibuffer"))})
 
-      assert Editor.current_buffer() == "*ibuffer*"
-      assert Buffer.read_only?("*ibuffer*")
-      text = Buffer.text("*ibuffer*")
+      assert Editor.current_buffer() == "*switch*"
+      assert Buffer.read_only?("*switch*")
+      text = Buffer.text("*switch*")
       assert text =~ "*zz-ib-a*"
       assert text =~ "zz-mode"
 
-      # narrow to one major mode; the header names the filter
-      {:ok, _} = Aimax.Core.Session.eval(~s{(ibuffer-filter-push! (list "match" "zz-mode"))})
-      text = Buffer.text("*ibuffer*")
+      # typing IS the filter: the mode name narrows, the chip names it
+      type("zz-mode")
+      text = Buffer.text("*switch*")
       assert text =~ "*zz-ib-a*"
       refute text =~ "*zz-ib-b*"
       assert text =~ "/zz-mode"
 
-      # still narrowed to zz-mode: the only line is *zz-ib-a* — flag + kill
-      {:ok, _} =
-        Aimax.Core.Session.eval(~s{(list-goto-first-entry "*ibuffer*")})
+      # the only row is *zz-ib-a* — C-k kills it now, no flag needed
+      assert {:ok, ~s{"*zz-ib-a*"}} =
+               Aimax.Core.Session.eval(~s{(car (list-current "*switch*"))})
 
-      assert {:ok, ~s{"*zz-ib-a*"}} = Aimax.Core.Session.eval("(ibuffer-current)")
-      press(["d", "x"])
+      press(["C-k"])
       refute Aimax.Core.Buffer.exists?("*zz-ib-a*")
 
-      # RET lands the selection in the window ibuffer was opened from
-      {:ok, _} = Aimax.Core.Session.eval(~s{(begin
-        (list-filter-clear! "*ibuffer*")
-        (ibuffer-filter-push! (list "match" "zz-ib"))
-        (list-goto-first-entry "*ibuffer*"))})
-      assert {:ok, ~s{"*zz-ib-b*"}} = Aimax.Core.Session.eval("(ibuffer-current)")
+      # RET lands the selection in the window the switcher was opened from
+      press(List.duplicate("DEL", 7))
+      type("zz-ib")
+
+      assert {:ok, ~s{"*zz-ib-b*"}} =
+               Aimax.Core.Session.eval(~s{(car (list-current "*switch*"))})
+
       press(["RET"])
       assert Editor.current_buffer() == "*zz-ib-b*"
     end
 
-    test "* marks every row and x runs the list's flag on them" do
+    # C-c g joins the buffer you are in; C-t in the switcher groups a SET.
+    # The annotation reads it back, and an empty answer takes them out.
+    test "C-t puts the marked buffers in a group, and an empty answer removes it" do
       on_exit(fn ->
-        for b <- ["*zz-xm-a*", "*zz-xm-b*", "*ibuffer*"], do: Aimax.Core.kill_buffer(b)
-        Editor.delete_other_windows()
-      end)
-
-      {:ok, _} = Aimax.Core.Session.eval(~s{(begin
-        (buffer-create "*zz-xm-a*")
-        (buffer-create "*zz-xm-b*")
-        (run-command "ibuffer")
-        (ibuffer-filter-push! (list "match" "zz-xm")))})
-
-      # `*` says which rows; the flag says what to do, so `x` needs no `d`
-      press(["*"])
-      assert Buffer.text("*ibuffer*") =~ ~r/^\* .*\*zz-xm-a\*/m
-      press(["x"])
-      refute Aimax.Core.Buffer.exists?("*zz-xm-a*")
-      refute Aimax.Core.Buffer.exists?("*zz-xm-b*")
-    end
-
-    # C-c g joins the buffer you are in; `G` in ibuffer groups a SET. The
-    # group column reads it back, and an empty answer takes them out.
-    test "G puts the marked buffers in a group, and an empty answer removes it" do
-      on_exit(fn ->
-        for b <- ["*zz-gr-a*", "*zz-gr-b*", "*ibuffer*"], do: Aimax.Core.kill_buffer(b)
+        for b <- ["*zz-gr-a*", "*zz-gr-b*", "*switch*"], do: Aimax.Core.kill_buffer(b)
         Editor.delete_other_windows()
       end)
 
@@ -403,9 +389,9 @@ defmodule Aimax.EditorTest do
         (buffer-create "*zz-gr-b*"))})
 
       press(["C-x", "C-b"])
-      {:ok, _} = Aimax.Core.Session.eval(~s{(ibuffer-filter-push! (list "match" "zz-gr"))})
+      type("zz-gr")
 
-      press(["*", "G"])
+      press(["C-SPC", "C-SPC", "C-t"])
       assert Editor.render_state().minibuffer.prompt =~ "Group for 2 buffers"
       type("zz-crew")
       press(["RET"])
@@ -416,53 +402,56 @@ defmodule Aimax.EditorTest do
       assert {:ok, ~s{"zz-crew"}} =
                Aimax.Core.Session.eval(~s{(buffer-local "*zz-gr-b*" 'group)})
 
-      # the act ends the marks, and the group column says so
-      assert Buffer.text("*ibuffer*") =~ "zz-crew"
-      refute Buffer.text("*ibuffer*") =~ ~r/^\* /m
+      # the act ends the marks, and the annotation says the group
+      assert Buffer.text("*switch*") =~ "zz-crew"
+      refute Buffer.text("*switch*") =~ ~r/^\* /m
 
       # "(none)" leads the prompt, so RET on an empty answer removes
-      press(["*", "G"])
+      {:ok, _} = Aimax.Core.Session.eval(~s{(list-goto-first-entry "*switch*")})
+      press(["C-SPC", "C-SPC", "C-t"])
       assert Editor.render_state().minibuffer.candidates |> hd() |> Map.get(:label) == "(none)"
       press(["RET"])
 
       assert {:ok, "#f"} = Aimax.Core.Session.eval(~s{(buffer-local "*zz-gr-a*" 'group)})
       assert {:ok, "#f"} = Aimax.Core.Session.eval(~s{(buffer-local "*zz-gr-b*" 'group)})
+      press(["ESC"])
     end
 
-    test "n/p preview the highlighted buffer in the home window" do
+    test "typing and the arrows preview the highlighted buffer in the home window" do
       on_exit(fn ->
-        for b <- ["*zz-pv-a*", "*zz-pv-b*", "*ibuffer*"], do: Aimax.Core.kill_buffer(b)
+        for b <- ["*zz-pv-a*", "*zz-pv-b*", "*switch*"], do: Aimax.Core.kill_buffer(b)
         Editor.delete_other_windows()
       end)
 
       {:ok, _} = Aimax.Core.Session.eval(~s{(begin
-        (buffer-create "*zz-pv-a*")
         (buffer-create "*zz-pv-b*")
+        (buffer-create "*zz-pv-a*")
         (delete-other-windows!)
         (switch-to-buffer! "*zz-pv-a*")
-        (run-command "ibuffer")
-        (buffer-set-local! "*ibuffer*" 'ibuffer-filters '())
-        (ibuffer-filter-push! (list "match" "zz-pv"))
-        (list-goto-first-entry "*ibuffer*"))})
+        #t)})
 
-      assert Editor.current_buffer() == "*ibuffer*"
       home = window_of("*zz-pv-a*")
       assert home
+      press(["C-x", "b"])
+      assert Editor.current_buffer() == "*switch*"
+      type("zz-pv")
 
-      # first entry is highlighted; n moves to the second and previews it
-      press(["n"])
-      assert {:ok, ~s{"*zz-pv-b*"}} = Aimax.Core.Session.eval("(ibuffer-current)")
+      # *zz-pv-a* is standing, so the one row left is *zz-pv-b*, and the
+      # narrowing previewed it into the home window already
+      assert {:ok, ~s{"*zz-pv-b*"}} =
+               Aimax.Core.Session.eval(~s{(car (list-current "*switch*"))})
+
       assert buffer_in(home) == "*zz-pv-b*"
       # point stays in the list
-      assert Editor.current_buffer() == "*ibuffer*"
+      assert Editor.current_buffer() == "*switch*"
 
-      press(["p"])
-      assert buffer_in(home) == "*zz-pv-a*"
-
-      # arrows are the gesture people actually use — same preview
+      # the arrows walk the rows; the preview follows the highlight
       press(["<down>"])
-      assert buffer_in(home) == "*zz-pv-b*"
+      assert Editor.current_buffer() == "*switch*"
       press(["<up>"])
+      assert buffer_in(home) == "*zz-pv-b*"
+
+      press(["ESC"])
       assert buffer_in(home) == "*zz-pv-a*"
     end
   end
@@ -882,6 +871,7 @@ defmodule Aimax.EditorTest do
     assert Editor.current_buffer() == buf
     menu = Editor.render_state().transient
     assert menu.title == "Configure this buffer's language model"
+
     assert Enum.map(hd(menu.groups).items, & &1.description) ==
              ["Backend", "Model", "Effort", "Presets", "Tools"]
 
@@ -1889,7 +1879,7 @@ defmodule Aimax.EditorTest do
     end
 
     # type enough to filter to `other`: the refilter previews it live
-    press(["C-x", "b"])
+    open_switch_prompt()
     assert Editor.snapshot().minibuffer
     type("zz-cxb")
     assert Aimax.Core.Session.eval("(minibuffer-selected)") == {:ok, ~s{"#{other}"}}
@@ -1903,7 +1893,7 @@ defmodule Aimax.EditorTest do
     refute first == ~s{"#{other}"}
 
     # RET actually switches
-    press(["C-x", "b"])
+    open_switch_prompt()
     type("zz-cxb")
     press(["RET"])
     assert shown.() == other
@@ -2390,7 +2380,7 @@ defmodule Aimax.EditorTest do
       """)
 
     # the mode is the annotation, and typing it finds the buffer
-    press(["C-x", "b"])
+    open_switch_prompt()
     type("text-mode")
     labels = Enum.map(Editor.render_state().minibuffer.candidates, & &1.label)
     assert prose in labels
@@ -2409,7 +2399,7 @@ defmodule Aimax.EditorTest do
     assert Editor.current_buffer() == prose
 
     # a name still matches a name — the annotation only adds candidates
-    press(["C-x", "b"])
+    open_switch_prompt()
     type(plain)
     press(["RET"])
     assert Editor.current_buffer() == plain
@@ -2435,7 +2425,7 @@ defmodule Aimax.EditorTest do
 
     # pure history: the previous buffer is the default; groups have no
     # rows of their own — the buffer rows carry the group
-    press(["C-x", "b"])
+    open_switch_prompt()
     mb = Editor.render_state().minibuffer
     labels = Enum.map(mb.candidates, & &1.label)
     assert hd(labels) == m2
@@ -2455,7 +2445,7 @@ defmodule Aimax.EditorTest do
     # point in the picked buffer, and the frame enters the group.
     # (Drop the snapshot the switcher just took, so the default
     # arrangement is what comes up.)
-    press(["C-x", "b"])
+    open_switch_prompt()
 
     {:ok, _} =
       Aimax.Core.Session.eval(~s{(buffer-set-local! (group-chat "ctgrp-#{n}") 'group-layout #f)})
@@ -2559,7 +2549,7 @@ defmodule Aimax.EditorTest do
 
     # the switch is itself a history entry: the group's card leads the
     # stream, above the members its restore bumped
-    press(["C-x", "b"])
+    open_switch_prompt()
     labels = Enum.map(Editor.render_state().minibuffer.candidates, & &1.label)
     assert hd(labels) == "[hsgrp-#{n}]"
 
@@ -2572,7 +2562,7 @@ defmodule Aimax.EditorTest do
     press(["C-g"])
 
     # RET on the card returns to the group
-    press(["C-x", "b"])
+    open_switch_prompt()
     press(["RET"])
 
     assert Aimax.Core.Session.eval("(frame-local 'current-group)") ==
@@ -2729,7 +2719,7 @@ defmodule Aimax.EditorTest do
     b = "tabone-#{n}"
     Aimax.Core.create_buffer(b)
 
-    press(["C-x", "b"])
+    open_switch_prompt()
     type("tabone-#{n}")
     press(["TAB"])
     assert Editor.render_state().minibuffer.input == b
@@ -2753,7 +2743,7 @@ defmodule Aimax.EditorTest do
              (switch-to-buffer! "#{out}"))
       """)
 
-    press(["C-x", "b"])
+    open_switch_prompt()
     type("lkgrp-#{n}")
     press(["TAB"])
 
@@ -2781,7 +2771,7 @@ defmodule Aimax.EditorTest do
              (switch-to-buffer! "#{home}"))
       """)
 
-    press(["C-x", "b"])
+    open_switch_prompt()
     # the open pool is pure history: no container rows
     refute Enum.any?(Editor.render_state().minibuffer.candidates, &(&1.label =~ "[ccgrp"))
     type("ccgrp-#{n}")
@@ -2845,12 +2835,12 @@ defmodule Aimax.EditorTest do
              (switch-to-buffer! "#{b}"))
       """)
 
-    press(["C-x", "b"])
+    open_switch_prompt()
     assert Editor.render_state().minibuffer.prompt =~ "default #{a}"
     press(["RET"])
     assert Editor.current_buffer() == a
 
-    press(["C-x", "b"])
+    open_switch_prompt()
     assert Editor.render_state().minibuffer.prompt =~ "default #{b}"
     press(["RET"])
     assert Editor.current_buffer() == b
@@ -3081,7 +3071,7 @@ defmodule Aimax.EditorTest do
   end
 
   test "prompts with candidates open as a centered palette; line inputs do not" do
-    press(["C-x", "b"])
+    open_switch_prompt()
     assert Editor.render_state().minibuffer.style == "palette"
     press(["C-g"])
     # M-x completes over commands, so it is a palette too
@@ -3154,7 +3144,7 @@ defmodule Aimax.EditorTest do
 
     # the project name is a marginalia column: typing it finds the
     # project's buffers and not the loose one
-    press(["C-x", "b"])
+    open_switch_prompt()
     type("proj-#{n}")
     labels = Enum.map(Editor.render_state().minibuffer.candidates, & &1.label)
     assert f2 in labels
@@ -3375,7 +3365,9 @@ defmodule Aimax.MinibufferEditingTest do
     [first, second, third] = for {i, _} <- :binary.matches(text, "-b"), do: i + 1
 
     goto = fn nth, dir ->
-      {:ok, _} = Aimax.Core.Session.call_named("preview-goto!", [win, "-", "b", "-", "b", nth, nth, dir])
+      {:ok, _} =
+        Aimax.Core.Session.call_named("preview-goto!", [win, "-", "b", "-", "b", nth, nth, dir])
+
       Buffer.point(path)
     end
 

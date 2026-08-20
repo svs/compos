@@ -154,6 +154,9 @@ defmodule Aimax.Core.KeyDispatch do
     case lookup_esc_meta(seq) do
       {:command, name} ->
         Editor.set_pending([])
+        # the sequence that ran the command: one command bound to many
+        # keys (the switcher's type-to-narrow) reads it back
+        Editor.set_last_keys(seq)
         # the prefix echo ("C-c-") must not outlive the sequence: the
         # command can close the prompt, and the echo bar comes back into
         # view still showing it

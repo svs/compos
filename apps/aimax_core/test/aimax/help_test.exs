@@ -19,28 +19,30 @@ defmodule Aimax.HelpTest do
     Editor.delete_other_windows()
 
     on_exit(fn ->
-      for b <- ["*Help*", "*ibuffer*", "*zz-help*"], do: Aimax.Core.kill_buffer(b)
+      for b <- ["*Help*", "*switch*", "*zz-help*"], do: Aimax.Core.kill_buffer(b)
       Editor.delete_other_windows()
     end)
 
     :ok
   end
 
-  test "? in ibuffer opens the mode's page, rendered and read-only" do
+  # `?` narrows in the switcher — every printable is the filter — so the
+  # mode's page opens through C-h m there
+  test "C-h m in the switcher opens the mode's page, rendered and read-only" do
     eval!(~s{(begin (buffer-create "*zz-help*") (switch-to-buffer! "*zz-help*")
                     (run-command "ibuffer"))})
 
-    press("?")
+    press(["C-h", "m"])
 
     assert Buffer.exists?("*Help*")
     text = Buffer.text("*Help*")
 
     # the page is markdown: a title, the mode's own words, a key table
-    assert text =~ "# ibuffer-mode"
-    assert text =~ "The buffer list as a dired"
+    assert text =~ "# switch-mode"
+    assert text =~ "The buffer switcher"
     assert text =~ "| key | command | what it does |"
-    assert text =~ "| `RET` | ibuffer-visit |"
-    assert text =~ "Show the selected buffer in another window"
+    assert text =~ "| `RET` | switch-visit |"
+    assert text =~ "Visit the selected row"
 
     # and it opens as a page, not as a buffer to edit
     assert {:ok, ~s{"markdown"}} = Session.eval(~s{(buffer-local "*Help*" 'render-mode)})
@@ -70,9 +72,13 @@ defmodule Aimax.HelpTest do
 
     assert text =~ "## This buffer"
     assert text =~ "## Everywhere"
-    assert text =~ "| `C-x C-b` | ibuffer |"
+    assert text =~ "| `C-x C-b` | switch-to-buffer |"
 
-    [local, global] = [:binary.match(text, "## This buffer"), :binary.match(text, "## Everywhere")]
+    [local, global] = [
+      :binary.match(text, "## This buffer"),
+      :binary.match(text, "## Everywhere")
+    ]
+
     assert elem(local, 0) < elem(global, 0)
   end
 
@@ -99,6 +105,7 @@ defmodule Aimax.HelpTest do
                     (apropos-page "zz-apr"))})
 
     text = Buffer.text("*Help*")
+
     assert text =~
              "| command | `zz-apr` | `M-x` | user | unknown | First line. Second \\| line. |"
   end
@@ -199,8 +206,8 @@ defmodule Aimax.HelpTest do
     text = Buffer.text("*Help*")
 
     assert text =~ "# Here"
-    assert text =~ "## ibuffer-mode"
-    assert text =~ "| `RET` | ibuffer-visit |"
+    assert text =~ "## switch-mode"
+    assert text =~ "| `RET` | switch-visit |"
     assert {:ok, ~s{"help-mode"}} = Session.eval(~s{(buffer-local "*Help*" 'mode-name)})
   end
 
@@ -211,7 +218,7 @@ defmodule Aimax.HelpTest do
     press("M-?")
     press("M-?")
 
-    assert Buffer.text("*Help*") =~ "## ibuffer-mode"
+    assert Buffer.text("*Help*") =~ "## switch-mode"
     refute Buffer.text("*Help*") =~ "in `help-mode`"
   end
 

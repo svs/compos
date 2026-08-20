@@ -542,7 +542,7 @@
 ;; that survives a restart. code-browse reads FILES; the rest already
 ;; have a reader. The shape follows evil--eligible? (evil.scm).
 (define code--special-modes
-  '("chat-mode" "dired-mode" "notmuch-mode" "diff-mode" "ibuffer-mode"
+  '("chat-mode" "dired-mode" "notmuch-mode" "diff-mode" "switch-mode"
     "mcp-hub-mode" "agent-mode" "tabulated-list-mode"))
 
 (define (code--eligible? buf)

@@ -5572,7 +5572,7 @@
       (if g (group-describe! g) (message "Not in a group")))))
 
 ;;; --- the groups board: C-x G --------------------------------------------------
-;;; The Cmd-k design's second panel as a list: one row per group —
+;;; The command-palette design's second panel as a list: one row per group —
 ;;; members, companion noise, metadata. RET switches (layout and all),
 ;;; d asks the LLM to describe, n cycles noise, x dissolves.
 

@@ -27,7 +27,7 @@ defmodule Aimax.CommandPaletteTest do
     :ok
   end
 
-  test "M-x stays command-name completion while Cmd-k searches command docs" do
+  test "M-x stays command-name completion while Cmd-p searches command docs" do
     {:ok, _} =
       Session.eval(
         ~s{(define-command "zz-palette-doc" "Polish the purple submarine" (lambda () #t))}
@@ -38,7 +38,7 @@ defmodule Aimax.CommandPaletteTest do
     refute Enum.any?(Editor.render_state().minibuffer.candidates, &(&1.label == "zz-palette-doc"))
     press("C-g")
 
-    press("s-k")
+    press("s-p")
     resting_total = Editor.render_state().minibuffer.total
     type("purple submarine")
 
@@ -52,8 +52,8 @@ defmodule Aimax.CommandPaletteTest do
     end)
   end
 
-  test "Cmd-k finds recipes and asks for their declared inputs" do
-    press("s-k")
+  test "Cmd-p finds recipes and asks for their declared inputs" do
+    press("s-p")
     type("open file split")
 
     wait_for(fn ->
@@ -79,7 +79,7 @@ defmodule Aimax.CommandPaletteTest do
         ~s{(define-command "zz-palette-run" "Launch the copper narwhal" (lambda () (buffer-create "*palette-ran*")))}
       )
 
-    press("s-k")
+    press("s-p")
     type("copper narwhal")
 
     wait_for(fn ->
@@ -164,7 +164,7 @@ defmodule Aimax.CommandPaletteTest do
   end
 
   test "a pending palette refresh cannot overwrite a later prompt" do
-    press("s-k")
+    press("s-p")
     type("open file split")
     press("C-g")
     press("M-x")

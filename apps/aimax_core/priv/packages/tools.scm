@@ -85,6 +85,16 @@
     "(project-search-matches ROOT PATTERN), and "
     "(read-file-numbered PATH). These return bounded evidence directly; "
     "the numbered reader is the source of truth for line citations. "
+    "For source code, read the structure before the text. "
+    "(code-outline BUF) lists every definition as (LINE KIND NAME DOC), "
+    "where DOC is the docstring or the first line; "
+    "(code-find BUF TEXT) filters those rows; (code-read BUF LINE) returns "
+    "the one definition that holds LINE; (code-replace! BUF LINE NEW) "
+    "swaps it. Below a definition, (code-sexp BUF ANCHOR) returns the "
+    "smallest expression that spans that unique text, and "
+    "(code-sexp-replace! BUF ANCHOR NEW) replaces it; an optional LEVELS "
+    "argument widens the selection by parents. Do not call buffer-text on "
+    "a whole source file when the outline answers the question. "
     "Run a focused external check directly with "
     "(shell-command->string CMD (default-directory)); it returns stdout and "
     "stderr together. Use an interactive shell buffer only when the task "
@@ -355,16 +365,22 @@
                 'effects (catalog--get e 'effects)
                 'use (catalog--get e 'use))))))
 
+;; catalog-meta! accepts a symbol for domain and friends, so read every
+;; field through catalog--string before appending it into the haystack
+(define (apropos--catalog-field e key)
+  (let ((v (catalog--get e key)))
+    (if v (catalog--string v) "")))
+
 (define (apropos--catalog-entry e words)
   (let ((kind (catalog--get e 'kind)))
     (and (member kind '("component" "mode"))
          (apropos--hit?
-           (string-append (catalog--get e 'name) " "
-                          (catalog--get e 'qualified-name) " "
-                          (catalog--get e 'doc) " "
-                          (catalog--get e 'package) " "
-                          (catalog--get e 'namespace) " "
-                          (catalog--get e 'domain) " "
+           (string-append (apropos--catalog-field e 'name) " "
+                          (apropos--catalog-field e 'qualified-name) " "
+                          (apropos--catalog-field e 'doc) " "
+                          (apropos--catalog-field e 'package) " "
+                          (apropos--catalog-field e 'namespace) " "
+                          (apropos--catalog-field e 'domain) " "
                           (value->string (or (catalog--get e 'props) '())) " "
                           (value->string (or (catalog--get e 'example) '())))
            words)
@@ -562,6 +578,14 @@
     "  (project-files ROOT)                    tracked and unignored files.\n"
     "  (project-search-matches ROOT PATTERN)   structured PATH/LINE matches.\n"
     "  (read-file-numbered PATH)               source text with citation lines.\n\n"
+    "STRUCTURAL CODE — outline first, then one definition:\n"
+    "  (code-outline BUF)                      every definition as (LINE KIND NAME DOC).\n"
+    "  (code-find BUF TEXT)                    the rows whose name or doc contains TEXT.\n"
+    "  (code-read BUF LINE)                    the one definition that holds LINE.\n"
+    "  (code-replace! BUF LINE NEW)            swap that whole definition.\n"
+    "  (code-sexp BUF ANCHOR [LEVELS])         the smallest expression around unique ANCHOR text.\n"
+    "  (code-sexp-replace! BUF ANCHOR NEW [LEVELS]) replace that expression.\n"
+    "  Do not read a whole source buffer when the outline answers.\n\n"
     "FOCUSED EXTERNAL CHECKS:\n"
     "  (shell-command->string CMD (default-directory))\n"
     "                                              run once; stdout+stderr returned.\n\n"

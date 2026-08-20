@@ -42,6 +42,13 @@
 ;; Asking per keypress would reparse the file to learn what does not
 ;; change while the reader reads.
 (define (code--pick-backend! buf)
+  ;; A buffer loaded headlessly — (find-file) with no display — has no
+  ;; mode and so no ts-lang. Apply the mode its file name says, the same
+  ;; mode a visit applies, or a file with a grammar parses by indentation.
+  (when (and (not (buffer-local buf 'ts-lang))
+             (not (buffer-local buf 'mode-name))
+             (buffer-path buf))
+    (auto-mode (buffer-path buf)))
   (buffer-set-local! buf 'code-backend
     (if (and (buffer-local buf 'ts-lang) (ts-node "" 0 0 'at)) "ts" "indent")))
 
@@ -50,10 +57,19 @@
 ;; be chosen then. The first motion is on screen by definition: choose it
 ;; there instead of browsing a source file by indentation for the rest of
 ;; the session.
+;;
+;; An "indent" verdict on a file buffer that never got its mode is not a
+;; decision — it is a restored checkpoint or a headless load from before
+;; the mode ran. Re-pick, so the grammar gets its chance.
 (define (code--backend buf)
-  (or (buffer-local buf 'code-backend)
-      (begin (code--pick-backend! buf)
-             (buffer-local buf 'code-backend))))
+  (let ((cached (buffer-local buf 'code-backend)))
+    (if (or (not cached)
+            (and (equal? cached "indent")
+                 (not (buffer-local buf 'mode-name))
+                 (buffer-path buf)))
+        (begin (code--pick-backend! buf)
+               (buffer-local buf 'code-backend))
+        cached)))
 
 ;; ONE node question, answered by the backend the mode picked. KIND names
 ;; which node the caller stands on, because nested nodes can cover the
@@ -568,19 +584,130 @@
 (domain! 'code)
 (effects! '(read))
 
-;; a definition's first line, trimmed — what the outline shows and what an
-;; agent matches on when it looks for a name
+;; a definition's first line, trimmed — the name and doc fall back to it
 (define (code--head buf n)
   (let* ((text (code--text buf n))
          (nl (string-index text "\n")))
     (string-trim (if nl (substring-bytes text 0 nl) text))))
 
+;; The words a first line spends before it says the name. A keyword list,
+;; not a language table: strip leading punctuation, drop these, and the
+;; next token is the name.
+(define code--name-keywords
+  '("define-command" "define-mode" "define-tool!" "define-record" "define"
+    "defmodule" "defmacrop" "defmacro" "defprotocol" "defimpl" "defcustom"
+    "defgroup" "defrecipe!" "defcomponent" "defp" "def" "defn-" "defn"
+    "class" "interface" "trait" "struct" "enum" "impl" "type" "module"
+    "function" "func" "fn" "sub" "proc" "method" "object"
+    "public" "private" "protected" "static" "async" "export" "extern"
+    "pub" "const" "let" "var" "final" "abstract" "override" "inline"
+    "test" "describe" "it"))
+
+(define (code--group-text line g i)
+  (substring-bytes line (car (nth i g)) (cadr (nth i g))))
+
+;; the identifier a definition's first line declares — "two" from
+;; "def two(x) do", "morg-lines" from "(define (morg-lines buf)"
+(define (code--name head)
+  (let ((h (re-groups "^#{1,6}[ \\t]+(.+)$" head 0)))
+    (if h
+        ;; a markdown heading's name is the heading text
+        (string-trim (code--group-text head h 1))
+        (let loop ((line head) (steps 0))
+          (let ((q (re-groups "^\"([^\"]+)\"" line 0)))
+            (if q
+                ;; a quoted name — (define-command "code-browse" …
+                (code--group-text line q 1)
+                (let ((g (re-groups
+                           "^[('\\[{#@ \\t]*([^ \\t()'\"\\[\\]{},:;=<]+)[ \\t]*(.*)$"
+                           line 0)))
+                  (cond ((not g) (string-trim head))
+                        (else
+                          (let ((tok (code--group-text line g 1))
+                                (rest (code--group-text line g 2)))
+                            (if (and (< steps 6)
+                                     (member tok code--name-keywords))
+                                (loop (string-trim rest) (+ steps 1))
+                                tok)))))))))))
+
+;;; --- the doc column ------------------------------------------------------------
+;;; A definition's doc is the comment block right above it, an @doc above
+;;; it, or the doc string just inside it. With none of those, the doc
+;;; column repeats the first line, so a row always says something.
+
+(define (code--line-at lines count i)
+  (and (>= i 0) (< i count) (list-ref lines i)))
+
+;; "text" from a comment line — ";; text", "# text", "// text", "-- text"
+(define (code--comment-doc line)
+  (let ((g (re-groups "^[ \\t]*(;+|#+|//+|--+)[ \\t]?(.*)$" line 0)))
+    (and g (string-trim (code--group-text line g 2)))))
+
+;; "text" from a one-line attribute doc — @doc "text"
+(define (code--attr-doc line)
+  (let ((g (re-groups "^[ \\t]*@(module)?doc[ \\t]+\"([^\"]*)\"[ \\t]*$" line 0)))
+    (and g (code--group-text line g 2))))
+
+;; a contiguous comment block reads top-down: its first line is the summary
+(define (code--comment-block-top lines count idx)
+  (let loop ((i idx) (top #f))
+    (let ((d (let ((l (code--line-at lines count i)))
+               (and l (code--comment-doc l)))))
+      (if d (loop (- i 1) d) top))))
+
+;; the line right under an @doc \"\"\" opener, found by walking up from
+;; the closing \"\"\" that sits directly above the definition
+(define (code--heredoc-doc lines count idx)
+  (let loop ((i idx) (below #f) (steps 0))
+    (let ((l (code--line-at lines count i)))
+      (cond ((or (not l) (> steps 20)) #f)
+            ((re-match? "^[ \\t]*@(module)?doc[ \\t]+\"\"\"" l)
+             (and below (string-trim below)))
+            (else (loop (- i 1) l (+ steps 1)))))))
+
+;; IDX is the 0-based line right above the definition
+(define (code--doc-above lines count idx)
+  (let ((l (code--line-at lines count idx)))
+    (and l
+         (or (and (code--comment-doc l)
+                  (code--comment-block-top lines count idx))
+             (code--attr-doc l)
+             (and (re-match? "^[ \\t]*\"\"\"[ \\t]*$" l)
+                  (code--heredoc-doc lines count (- idx 1)))))))
+
+;; the doc string just inside the node — python style
+(define (code--doc-inside buf n)
+  (let loop ((ls (cdr (string-split (code--text buf n) "\n"))))
+    (cond ((null? ls) #f)
+          ((equal? (string-trim (car ls)) "") (loop (cdr ls)))
+          (else
+            (let ((g (re-groups "^[ \\t]*(\"\"\"|''')[ \\t]*(.*)$" (car ls) 0)))
+              (and g
+                   (let ((rest (string-trim (code--group-text (car ls) g 2))))
+                     (cond ((equal? rest "")
+                            (and (pair? (cdr ls)) (string-trim (cadr ls))))
+                           ;; strip a closing quote on a one-line doc
+                           ((re-groups "^(.+)(\"\"\"|''')$" rest 0)
+                            (let ((c (re-groups "^(.+)(\"\"\"|''')$" rest 0)))
+                              (string-trim (code--group-text rest c 1))))
+                           (else rest)))))))))
+
 (define (code--outline-rows buf)
-  (map (lambda (n)
-         (list (line-number-at-pos (code--start n))
-               (code--kind n)
-               (code--head buf n)))
-       (code--fold-nodes buf)))
+  (let* ((lines (string-split (buffer-text buf) "\n"))
+         (count (length lines)))
+    (map (lambda (n)
+           (let ((line (line-number-at-pos (code--start n)))
+                 (head (code--head buf n)))
+             (list line
+                   (code--kind n)
+                   (code--name head)
+                   (or (code--doc-above lines count (- line 2))
+                       (code--doc-inside buf n)
+                       head))))
+         ;; a comment is context for a definition, not a definition: it
+         ;; feeds the doc column and stays out of the outline
+         (filter (lambda (n) (not (string-index (code--kind n) "comment")))
+                 (code--fold-nodes buf)))))
 
 ;; Every entry point runs through here. The node questions read the CURRENT
 ;; buffer, and code--top-nodes reads the chosen backend from a local — so the
@@ -597,13 +724,16 @@
 (define (code-outline buf)
   (code--structurally buf (lambda () (code--outline-rows buf))))
 
-;; the outline rows whose first line contains TEXT — "select the definition
+;; the outline rows whose name or doc contains TEXT — "select the definition
 ;; called X" without a language table for what a definition looks like
 (define (code-find buf text)
   (let ((rows (code-outline buf)))
     (if (string? rows)
         rows
-        (filter (lambda (r) (if (string-index (caddr r) text) #t #f)) rows))))
+        (filter (lambda (r)
+                  (if (string-index (string-append (nth 2 r) " " (nth 3 r)) text)
+                      #t #f))
+                rows))))
 
 ;; the definition that holds LINE. The fold level is the level a reader
 ;; lands on, so an agent and a reader address the same things.
@@ -652,16 +782,62 @@
         (buffer-insert! buf start new)
         (string-append "replaced the " kind " at line " (number->string line))))))
 
+;;; --- sexp selection: the smallest expression around a text anchor -------------
+;;; The definition API addresses whole definitions. These two address any
+;;; expression, the way a lisper marks a sexp: name a unique piece of its
+;;; text, and the tree names the expression that spans it. LEVELS parents
+;;; widen the selection, like pressing expand-region again.
+
+(effects! '(read))
+
+;; the smallest node that spans the one occurrence of ANCHOR, widened by
+;; LEVELS parents. A string result is the error to show the caller.
+(define (code--sexp-node buf anchor levels)
+  (let ((pos (buffer--one-hit buf anchor "anchor")))
+    (if (string? pos)
+        pos
+        (let ((n (code--ask buf "" pos (+ pos (string-byte-length anchor)) 'at)))
+          (if (not n)
+              "error: no expression spans the anchor"
+              (let loop ((n n) (k (or levels 0)))
+                (if (<= k 0)
+                    n
+                    (let ((up (code--ask-node buf n 'parent)))
+                      (if up (loop up (- k 1)) n)))))))))
+
+(define (code-sexp buf anchor &optional levels)
+  (code--structurally buf
+    (lambda ()
+      (let ((n (code--sexp-node buf anchor levels)))
+        (if (string? n) n (code--text buf n))))))
+
+(effects! '(write))
+
+(define (code-sexp-replace! buf anchor new &optional levels)
+  (code--structurally buf
+    (lambda ()
+      (let ((n (code--sexp-node buf anchor levels)))
+        (if (string? n)
+            n
+            (let ((start (code--start n)))
+              (buffer-delete-range! buf start (- (code--end n) start))
+              (buffer-insert! buf start new)
+              (string-append "replaced the " (code--kind n))))))))
+
 (effects! '(read))
 (public! 'code-outline
-  "(code-outline BUF) — every definition as (LINE KIND FIRST-LINE)")
+  "(code-outline BUF) — every definition as (LINE KIND NAME DOC); DOC is the docstring or the first line")
 (public! 'code-find
-  "(code-find BUF TEXT) — the outline rows whose first line contains TEXT")
+  "(code-find BUF TEXT) — the outline rows whose name or doc contains TEXT")
 (public! 'code-read
   "(code-read BUF LINE) — the exact text of the definition that holds LINE")
+(public! 'code-sexp
+  "(code-sexp BUF ANCHOR [LEVELS]) — the smallest expression that spans the unique ANCHOR text; LEVELS parents widen it")
 (effects! '(write))
 (public! 'code-replace!
   "(code-replace! BUF LINE NEW) — replace the whole definition that holds LINE")
+(public! 'code-sexp-replace!
+  "(code-sexp-replace! BUF ANCHOR NEW [LEVELS]) — replace the smallest expression that spans the unique ANCHOR text")
 
 ;;; --- code-mode: the coding workspace -----------------------------------------
 ;;; code-browse READS a source file. code-mode WRITES one, with an agent.
@@ -701,14 +877,19 @@
   (string-append
     "You are working on code in this editor. Read the structure of a file "
     "first: (code-outline \"BUF\") gives one row per definition as "
-    "(LINE KIND FIRST-LINE). (code-find \"BUF\" \"text\") gives the rows "
-    "whose first line contains that text. Then read exactly one definition "
+    "(LINE KIND NAME DOC) — DOC is the docstring, or the first line when "
+    "there is none. (code-find \"BUF\" \"text\") gives the rows "
+    "whose name or doc contains that text. Then read exactly one definition "
     "with (code-read \"BUF\" LINE), and replace exactly one with "
     "(code-replace! \"BUF\" LINE NEW). Use those four for whole "
     "definitions — they address code by structure, so no string has to "
     "match. Tree-sitter answers where the buffer has a grammar, and "
     "indentation answers everywhere else, so read the result back after a "
-    "replace. For a smaller change use (buffer-replace! \"BUF\" OLD NEW), "
+    "replace. Below a definition, select and edit by expression: "
+    "(code-sexp \"BUF\" \"anchor\") returns the smallest expression that "
+    "spans that unique text, an optional LEVELS argument widens it by "
+    "parents, and (code-sexp-replace! \"BUF\" \"anchor\" NEW) replaces it. "
+    "For a smaller change use (buffer-replace! \"BUF\" OLD NEW), "
     "(buffer-replace-all! \"BUF\" OLD NEW), "
     "(buffer-insert-before! \"BUF\" ANCHOR TEXT), "
     "(buffer-insert-after! \"BUF\" ANCHOR TEXT) or "

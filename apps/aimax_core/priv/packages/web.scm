@@ -37,7 +37,9 @@
 (define (web--convert-html url html k)
   (let ((f (string-append (aimax-home) "/browse-fetch.html"))
         (u (web--shell-quote url))
-        (p " | pandoc -f html-native_divs-native_spans -t gfm-raw_html"))
+        ;; no hard wrap: a paragraph is ONE line, and the window wraps
+        ;; it at its own width like any buffer text
+        (p " | pandoc --wrap=none -f html-native_divs-native_spans -t gfm-raw_html"))
     (write-file! f html)
     (shell-command->string
       (string-append
@@ -143,8 +145,20 @@
   (and (> (string-length l) 3)
        (equal? "" (string-join (string-split l "-") ""))))
 
+;; a label-less link renders as nothing — an image, an icon anchor —
+;; and it must go BEFORE the blank collapse, or every dropped image
+;; leaves its run of empty lines behind
+(define (web--drop-empty-links s)
+  (let loop ((pos 0) (out ""))
+    (let ((hit (re-find "!?\\[\\]\\([^)]*\\)" s pos)))
+      (if (not hit)
+          (string-append out (substring-bytes s pos (string-byte-length s)))
+          (loop (car (cdr hit))
+                (string-append out (substring-bytes s pos (car hit))))))))
+
 (define (web--tidy md)
-  (let loop ((ls (string-split (web--unescape md) "\n")) (out '()) (blanks 0))
+  (let loop ((ls (string-split (web--unescape (web--drop-empty-links md)) "\n"))
+             (out '()) (blanks 0))
     (if (null? ls)
         (string-join (reverse out) "\n")
         (let* ((l (car ls))

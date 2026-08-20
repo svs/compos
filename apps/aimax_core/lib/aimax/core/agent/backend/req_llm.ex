@@ -224,6 +224,15 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
       reasoning_effort: effort,
       on_record: fn role, blocks -> record(slug, role, blocks_to_record(blocks), false) end,
       on_round_usage: fn usage -> GenServer.cast(backend, {:turn_usage, usage}) end,
+      # steering: text the user typed while this turn ran joins the wire
+      # at the next round. The raw typed text goes — the display and the
+      # record then agree, and the turn already carries its editor context.
+      steer: fn ->
+        case Aimax.Core.Agent.take_steering(slug) do
+          msgs when is_list(msgs) -> for {text, display} <- msgs, do: display || text
+          _ -> []
+        end
+      end,
       on_chunk: fn t -> ev.(type: :chunk, text: t) end,
       on_thinking: fn t -> ev.(type: :thought, text: t) end,
       tool_handler: fn name, input -> intrinsic_tool(slug, name, input) end,

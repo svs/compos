@@ -56,6 +56,16 @@ defmodule Aimax.Core.Agent do
   """
   def prompt(slug, text, display \\ nil), do: call(slug, {:prompt, text, display})
 
+  @doc """
+  Drain queued prompts into the RUNNING turn — steering. The direct lane's
+  turn task calls this between tool rounds. Each drained message echoes as
+  a `user-msg` event at that moment, so the transcript shows it where the
+  model actually reads it. Returns `[{text, display}]`; `[]` when idle or
+  nothing is queued. Backends that cannot take mid-turn input never call
+  this, and their queue pops at turn-end as before.
+  """
+  def take_steering(slug), do: call(slug, :take_steering)
+
   @doc "Cancel the current turn."
   def cancel(slug), do: call(slug, :cancel)
 
@@ -238,6 +248,18 @@ defmodule Aimax.Core.Agent do
       {:reply, {:error, :unsupported}, state}
     end
   end
+
+  def handle_call(:take_steering, _from, %{prompt_queue: [_ | _] = queue, status: s} = state)
+      when s in [:running, :needs_attention] do
+    state =
+      Enum.reduce(queue, state, fn {text, display}, acc ->
+        enqueue(acc, Backend.plist(type: :"user-msg", text: display || text))
+      end)
+
+    {:reply, queue, %{state | prompt_queue: []}}
+  end
+
+  def handle_call(:take_steering, _from, state), do: {:reply, [], state}
 
   def handle_call(:cancel, _from, state) do
     # Abort means the whole pending run list. A terminal backend event may

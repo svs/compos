@@ -117,6 +117,9 @@ defmodule Aimax.Core.LLM do
   `:model` overrides `model/0`.
   `:tool_handler` can intercept an intrinsic tool and return `{:ok, text}` or
   `{:error, text}`. It returns `:dispatch` for the normal Scheme/MCP path.
+  `:steer` is a zero-arg fn the loop calls after each tool round; the user
+  text it returns joins the tool-result message, so the model reads a
+  mid-turn message at its next round and the wire keeps alternating roles.
   """
   def run_tool_loop(messages, system, specs, dispatcher, opts \\ []) do
     tools = Enum.map(specs, &tool_json/1)
@@ -166,6 +169,11 @@ defmodule Aimax.Core.LLM do
             %{type: "tool_result", tool_use_id: b["id"], content: result, is_error: error?}
           end
 
+        # text steered in mid-turn rides the same user message as the tool
+        # results, after them — and the record below keeps the merged turn,
+        # so the replay matches this wire byte-for-byte
+        results = results ++ steered_blocks(opts[:steer])
+
         # a tool round appends two messages. Both go into the record, in
         # this order: the model re-reads its own call beside its result.
         record(opts, "assistant", blocks)
@@ -201,6 +209,14 @@ defmodule Aimax.Core.LLM do
 
   defp maybe_put(map, _k, nil), do: map
   defp maybe_put(map, k, v), do: Map.put(map, k, v)
+
+  defp steered_blocks(nil), do: []
+
+  defp steered_blocks(steer) when is_function(steer, 0) do
+    for text <- steer.(), is_binary(text), text != "" do
+      %{"type" => "text", "text" => text}
+    end
+  end
 
   # no gate configured (a bare (llm-tools ...) call) runs as before
   defp gate_call(nil, _name, _input), do: :allow

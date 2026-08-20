@@ -1032,11 +1032,18 @@
                      (chat-history-reset! buf)
                      (let ((result (agent-send-msg! slug input)))
                        (if (equal? result 'queued)
-                           ;; mid-turn: the text stays put, muted, until its turn
+                           ;; mid-turn: the text stays put, muted, until its
+                           ;; turn. The direct lane steers it into the running
+                           ;; turn at the next tool round; other backends run
+                           ;; it when the turn ends.
                            (begin
                              (chat-mark-queued! buf)
                              (end-of-buffer!)
-                             (message "queued — runs when this turn ends"))
+                             (message
+                               (if (and (boundp (quote chat-stateless?))
+                                        (chat-stateless? buf))
+                                   "queued — the agent reads it at its next step"
+                                   "queued — runs when this turn ends")))
                            (begin
                              (chat-clear-input! buf)
                              (end-of-buffer!)

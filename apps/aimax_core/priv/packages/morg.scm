@@ -466,7 +466,8 @@
 
 (define-mode "morg-mode"
   (lambda ()
-    (enable-minor-mode! (current-buffer) "visual-line-mode")
+    ;; Morg includes prose presentation, but not workspace layout.
+    (enable-minor-mode! (current-buffer) "writing-mode")
     (morg-install-keys)
     (morg-ensure-hook! (current-buffer))
     ;; Hidden ranges die with the daemon; the 'morg-folds local survives.

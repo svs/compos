@@ -29,11 +29,11 @@ defmodule Aimax.MorgTest do
     assert printed == ~s{"morg-mode"}
   end
 
-  test "morg-mode enables core visual-line mode" do
+  test "morg-mode enables writing-mode, which keeps visual lines on" do
     buf = morg_buffer(fixture())
 
     assert Buffer.get_local(buf, "visual-line-mode") == true
-    assert "visual-line-mode" in Buffer.get_local(buf, "minor-modes")
+    assert "writing-mode" in Buffer.get_local(buf, "minor-modes")
   end
 
   test "markdown-mode is separate and keeps the Earmark preview" do

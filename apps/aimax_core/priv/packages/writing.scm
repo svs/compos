@@ -201,12 +201,8 @@
   ;; The preview is the writing surface. Markdown remains the buffer text,
   ;; so every ordinary edit, save, undo, and future narrowing command keeps
   ;; its normal editor semantics.
-  ;; a chat buffer's render-mode is the chat UI itself ("agent") — the
-  ;; markdown preview here erased it on every minor-mode restore. Writing
-  ;; typography still applies; the render switch stays the chat's own.
-  (unless (equal? (buffer-local buf 'mode-name) "chat-mode")
-    (buffer-set-local! buf 'preview-renderer "markdown")
-    (buffer-set-local! buf 'render-mode "markdown"))
+  (buffer-set-local! buf 'preview-renderer "markdown")
+  (buffer-set-local! buf 'render-mode "markdown")
   (buffer-set-local! buf 'visual-line-mode #t)
   (face-remap-in! buf 'default
     (list 'family writing-font-family
@@ -305,13 +301,21 @@
   (lambda ()
     (unless (minor-mode-on? (current-buffer) "writing-layout")
       (enable-minor-mode! (current-buffer) "writing-layout"))
-    (reset-layout)))
+    (run-command "reset-layout")))
 
 (define-command "write" "Enter the writing workspace"
   (lambda ()
-    (unless (minor-mode-on? (current-buffer) "writing-mode")
-      (enable-minor-mode! (current-buffer) "writing-mode"))
-    (run-command "writing-layout")))
+    ;; When invoked from the companion chat, return to its group's document.
+    (let* ((here (current-buffer))
+           (g (buffer-local here 'group))
+           (docs (if (and g (equal? (buffer-local here 'mode-name) "chat-mode"))
+                     (group-docs g)
+                     '()))
+           (doc (if (pair? docs) (car docs) here)))
+      (switch-to-buffer! doc)
+      (unless (minor-mode-on? doc "writing-mode")
+        (enable-minor-mode! doc "writing-mode"))
+      (run-command "writing-layout"))))
 
 (define-command "writing-mode" "Toggle writing mode in the current buffer"
   (lambda ()

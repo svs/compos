@@ -281,6 +281,15 @@
 ;;; the waiting line: rendered after each user turn, deleted on the turn's
 ;;; first output. It is the last text before the marker, so deleting it never
 ;;; shifts a fold; the runtime re-adjusts its mark automatically.
+;;; What the runtime is doing right now, for the human: a chat with no
+;;; visible motion reads as dead. Events set one word; the modeline
+;;; shows it. Runtime state: stale after a restart, cleared with the rest.
+(define (chat-activity! buf label)
+  (when (and buf (buffer-exists? buf))
+    (unless (equal? (buffer-local buf 'chat-activity) label)
+      (buffer-set-local! buf 'chat-activity label)
+      (agent-update-modeline! buf))))
+
 (define (agent-show-waiting! slug)
   (let* ((buf (agent-buf slug))
          (text "⋯ thinking\n")
@@ -355,7 +364,8 @@
                       "agent-you")))
          (agent-block-push! buf start (agent-mark slug) "user"
            (list (plist-get e 'text))))
-       (agent-show-waiting! slug))
+       (agent-show-waiting! slug)
+       (chat-activity! buf "waiting…"))
 
       ((equal? type 'chunk)
        ;; the assistant's prose accumulates across the turn; turn-end
@@ -364,13 +374,16 @@
          (string-append (or (buffer-local buf 'agent-turn-text) "")
                         (plist-get e 'text)))
        (let ((start (agent-render! slug (plist-get e 'text) #f)))
-         (agent-block-extend-or-push! buf start (agent-mark slug) "prose")))
+         (agent-block-extend-or-push! buf start (agent-mark slug) "prose"))
+       (chat-activity! buf "streaming"))
 
       ((equal? type 'thought)
        (let ((start (agent-render! slug (plist-get e 'text) "agent-thought")))
-         (agent-block-extend-or-push! buf start (agent-mark slug) "thought")))
+         (agent-block-extend-or-push! buf start (agent-mark slug) "thought"))
+       (chat-activity! buf "thinking…"))
 
       ((equal? type 'tool-call)
+       (chat-activity! buf (string-append "tool · " (agent-tool-title e)))
        (let ((title (agent-tool-title e)))
          (let ((start (agent-render! slug
                         (string-append "\n▸ " (plist-get e 'kind) " · " title "\n")
@@ -421,6 +434,7 @@
          (agent-block-push! buf start (agent-mark slug) "plan" '())))
 
       ((equal? type 'question)
+       (chat-activity! buf "waiting for you")
        (let* ((question (plist-get e 'question))
               (answers (or (plist-get e 'answers) '()))
               (start (agent-render! slug
@@ -436,6 +450,7 @@
       ;; the policy decides, not the backend: approvals are invisible
       ;; (the tool just runs), denials and asks are recorded
       ((equal? type 'permission)
+       (chat-activity! buf "waiting for you")
        (let* ((title (plist-get e 'title))
               (kind (or (plist-get e 'kind) ""))
               (verdict (*permission-policy* buf title kind (or (plist-get e 'raw) ""))))
@@ -475,6 +490,7 @@
                'cost (plist-get e 'cost))))
 
       ((equal? type 'turn-end)
+       (chat-activity! buf #f)
        (buffer-set-local! buf 'chat-turn-active #f)
        (buffer-set-local! buf 'agent-cancelling #f)
        (agent-finalize-running-tools! buf
@@ -529,6 +545,7 @@
          (workspace-finish-reminder! buf slug)))
 
       ((equal? type 'error)
+       (chat-activity! buf #f)
        (buffer-set-local! buf 'chat-turn-active #f)
        (agent-finalize-running-tools! buf "failed")
        (let ((start (agent-render! slug
@@ -537,6 +554,7 @@
          (agent-block-push! buf start (agent-mark slug) "meta" '())))
 
       ((equal? type 'dead)
+       (chat-activity! buf "disconnected")
        (buffer-set-local! buf 'chat-turn-active #f)
        (agent-finalize-running-tools! buf "failed")
        (agent-block-drop-kind! buf "permission")
@@ -980,6 +998,11 @@
 (define-command "agent-send" "Send the input to the agent, reviving it if dead"
   (lambda ()
     (let* ((buf (current-buffer))
+           ;; say something the moment RET lands: the first send spawns a
+           ;; backend and mounts MCP servers, seconds with nothing moving
+           (feedback (when (equal? (buffer-local buf 'mode-name) "chat-mode")
+                       (chat-activity! buf
+                         (if (agent-slug-of buf) "sending…" "starting agent…"))))
            ;; a chat without a runtime gets one on first send, on its own
            ;; connector; RET is agent-send on EVERY chat
            (slug (or (agent-slug-of buf)
@@ -1379,7 +1402,10 @@
          (m (or pinned (and (connector-can? c 'stateless) (llm-model))))
          (cost (and (connector-can? c 'metered) (buffer-local buf 'chat-cost))))
     (buffer-set-local! buf 'modeline-info
-      (string-append c
+      (string-append
+        (let ((act (buffer-local buf 'chat-activity)))
+          (if act (string-append act " · ") ""))
+        c
         (if (and m (not (equal? m ""))) (string-append " · " m) "")
         (let ((effort (buffer-local buf 'agent-effort)))
           (if effort (string-append " · " effort) ""))

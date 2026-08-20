@@ -4913,7 +4913,7 @@
 ;; PROCESS state — mirrors a live runtime, so it is always stale after a
 ;; restart and meaningless after a reset: both clear it wholesale
 (define chat-runtime-locals
-  '(agent-slug agent-queued agent-waiting chat-waiting
+  '(agent-slug agent-queued agent-waiting chat-waiting chat-activity
     agent-cancelling agent-seed-context agent-tool-bodies
     agent-turn-text agent-turn-any chat-compacting
     agent-models agent-mode agent-modes chat-mcp-dirty

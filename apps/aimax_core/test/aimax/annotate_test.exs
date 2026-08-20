@@ -210,6 +210,41 @@ defmodule Aimax.AnnotateTest do
     assert eval!(~s[(annotate--margin-blocks "*margin*")]) =~ "Second this."
   end
 
+  test "the suggestion prompt carries the span, the context, and the ask" do
+    llm_warning()
+
+    prompt =
+      eval_s!("""
+      (let* ((a (car (buffer-annotations "#{@buf}")))
+             (text (buffer-text "#{@buf}"))
+             (at (annotate--locate text (annotate--line-bounds text) a)))
+        (annotate--suggest-prompt "#{@buf}" a at))
+      """)
+
+    assert prompt =~ "delta"
+    assert prompt =~ "gamma delta"
+    assert prompt =~ "Overstated claim"
+    assert prompt =~ "ONLY the replacement text"
+  end
+
+  test "a suggestion reply becomes the fix and y applies it" do
+    id = llm_warning()
+    eval!(~s{(annotate--suggest-apply! "#{@buf}" "#{id}" "delta" "  epsilon  ")})
+
+    assert eval_s!(~s[(plist-get (annotate--find "#{@buf}" "#{id}") 'fix-new)]) ==
+             "epsilon"
+
+    eval!(~s[(run-command "annotate-list")])
+    press("y")
+    assert Buffer.text(@buf) =~ "gamma epsilon"
+  end
+
+  test "an empty suggestion reply changes nothing" do
+    id = llm_warning()
+    eval!(~s{(annotate--suggest-apply! "#{@buf}" "#{id}" "delta" "   ")})
+    assert eval!(~s[(plist-get (annotate--find "#{@buf}" "#{id}") 'fix-new)]) == "#f"
+  end
+
   test "the check source reports tree-sitter ERROR nodes" do
     langs = eval!("(ts-langs)")
 

@@ -486,6 +486,63 @@
                                         (annotate--get a 'who "")
                                         " · L" (number->string (caddr at))))))))))
 
+;;; --- agent suggestions: an LLM proposes the fix ------------------------------
+
+;; pure: the prompt for one annotation, from the located span and its
+;; surrounding lines
+(define (annotate--suggest-prompt source a at)
+  (let* ((text (buffer-text source))
+         (bounds (annotate--line-bounds text))
+         (line (caddr at))
+         (lo (max 1 (- line 3)))
+         (hi (min (length bounds) (+ line 3)))
+         (ctx (substring-bytes text
+                               (car (nth (- lo 1) bounds))
+                               (cadr (nth (- hi 1) bounds))))
+         (span (substring-bytes text (car at) (cadr at))))
+    (string-append
+      "You resolve one review annotation in a text buffer.\n\n"
+      "Context, lines " (number->string lo) "-" (number->string hi) ":\n"
+      ctx "\n\n"
+      "Annotated span on line " (number->string line) ":\n" span "\n\n"
+      "Annotation (" (annotate--label a) " · "
+      (annotate--get a 'severity "") "): "
+      (annotate--get a 'title "")
+      (let ((b (annotate--get a 'body "")))
+        (if (equal? b "") "" (string-append " — " b)))
+      "\n\nReply with ONLY the replacement text for the annotated span. "
+      "No quotes, no markup, no explanation.")))
+
+;; the reply becomes the annotation's suggested fix; `y` applies it
+(define (annotate--suggest-apply! source id span reply)
+  (let ((fix (string-trim reply)))
+    (if (or (equal? fix "") (not (annotate--find source id)))
+        (message "The agent returned no suggestion")
+        (begin
+          (annotate--update! source id 'fix-old span)
+          (annotate--update! source id 'fix-new fix)
+          (annotate--touch! source)
+          (message (string-append "Suggestion ready on " id " — y applies"))))))
+
+(effects! '(write external spend))
+
+(define (annotate--suggest! source a)
+  (let* ((text (buffer-text source))
+         (at (annotate--locate text (annotate--line-bounds text) a)))
+    (if (not at)
+        (message "Cannot locate this annotation in the buffer")
+        (let ((id (annotate--get a 'id ""))
+              (span (substring-bytes text (car at) (cadr at))))
+          (message (string-append "Asking for a suggestion on " id " ..."))
+          (llm (annotate--suggest-prompt source a at)
+               (lambda (reply)
+                 (annotate--suggest-apply! source id span reply)))))))
+
+(define-command "annotate-suggest" "Ask an agent to suggest a fix for this row"
+  (lambda () (annotate--row-verb annotate--suggest!)))
+
+(effects! '(write))
+
 (define (annotate--read-reply source a)
   (minibuffer-read
     (string-append "Reply to " (annotate--get a 'who "") ": ") '()
@@ -559,13 +616,14 @@
                    0)))
     'footer (lambda (buf)
               '(("RET" "visit") ("r" "resolve") ("y" "apply fix")
-                ("R" "reply") ("d" "dismiss")
+                ("s" "suggest") ("R" "reply") ("d" "dismiss")
                 ("<left>/<right>" "tab") ("q" "quit")))
     'noun "annotation"
     'preview (lambda (buf a) (annotate--show buf a #f))
     'keys '(("RET" "annotate-visit")
             ("r" "annotate-resolve")
             ("y" "annotate-apply-fix")
+            ("s" "annotate-suggest")
             ("R" "annotate-reply")
             ("d" "annotate-dismiss")
             ("f" "annotate-tab-next")
@@ -669,7 +727,8 @@
                               (if fix
                                   (list (list (string-append "ann:fix:" id)
                                               "apply fix" "y"))
-                                  '())
+                                  (list (list (string-append "ann:suggest:" id)
+                                              "suggest" "s")))
                               (list (list (string-append "ann:reply:" id)
                                           "reply" "R")
                                     (list (string-append "ann:dismiss:" id)
@@ -729,6 +788,7 @@
   (cond ((equal? verb "pick") (annotate--goto! src a #f))
         ((equal? verb "resolve") (annotate--toggle-resolve! src a))
         ((equal? verb "fix") (annotate--do-fix! src a))
+        ((equal? verb "suggest") (annotate--suggest! src a))
         ((equal? verb "dismiss") (annotate--do-dismiss! src a))
         ((equal? verb "reply") (annotate--read-reply src a))))
 

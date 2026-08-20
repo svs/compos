@@ -29,6 +29,10 @@ defmodule Aimax.SentryListVerbsTest do
            "[{\"id\":\"42\",\"shortId\":\"ATS-42\",\"title\":\"boom\",\"level\":\"error\",\"count\":\"3\",\"lastSeen\":\"2026-08-20T10:00:00Z\",\"permalink\":\"https://sentry.io/i/42\"},{\"id\":\"43\",\"shortId\":\"ATS-43\",\"title\":\"crash\",\"level\":\"error\",\"count\":\"1\",\"lastSeen\":\"2026-08-20T11:00:00Z\",\"permalink\":\"https://sentry.io/i/43\"}]\n200"))))
     """)
 
+    # the list fetches through the async seam; a synchronous delegate
+    # keeps the per-URL transport stub above authoritative
+    eval!("(set! *sentry-async-transport* (lambda (url k) (k (*sentry-transport* url))))")
+
     Editor.minibuffer_close()
     Editor.set_pending([])
     Editor.delete_other_windows()

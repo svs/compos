@@ -17,6 +17,9 @@ defmodule Aimax.SentryTest do
   setup do
     eval!("(set! *sentry-transport* sentry--curl)")
     eval!("(set! *sentry-write-transport* sentry--curl-write)")
+    # the list fetches through the async seam; a synchronous delegate
+    # keeps each test's per-URL transport stub authoritative
+    eval!("(set! *sentry-async-transport* (lambda (url k) (k (*sentry-transport* url))))")
     Editor.minibuffer_close()
     Editor.set_pending([])
 

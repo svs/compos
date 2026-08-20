@@ -36,6 +36,10 @@
 (defcustom 'sentry-timeout 30
   "Seconds to wait for one Sentry request." 'group 'sentry)
 
+(defcustom 'sentry-cache-ttl 120
+  "Seconds the issue list serves its cached rows before a wake refetches."
+  'group 'sentry)
+
 (defcustom 'sentry-curl-program "curl"
   "The curl executable for Sentry requests." 'group 'sentry)
 
@@ -179,6 +183,25 @@
 (define *sentry-transport* sentry--curl)
 (define *sentry-write-transport* sentry--curl-write)
 
+;; The async transport: K gets the wire when curl answers, and the
+;; calling lane moves on. The issue list fetches through this seam — a
+;; synchronous request would hold the UI lane for the network round
+;; trip. Tests replace this seam with a synchronous stub.
+(define (sentry--curl-async url k)
+  (let ((token (sentry--token)))
+    (if (not token)
+        (k "SENTRY_AUTH_TOKEN is not configured\n000")
+        (let ((path (sentry--tmp-path)))
+          (write-file! path (sentry--curl-config url token))
+          (shell-command->string
+            (string-append sentry-curl-program " --config "
+                           (sentry--shell-quote path))
+            (lambda (out)
+              (delete-file! path)
+              (k out)))))))
+
+(define *sentry-async-transport* sentry--curl-async)
+
 (define (sentry--split-status output)
   (let* ((lines (string-split output "\n"))
          (last (car (reverse lines)))
@@ -201,9 +224,8 @@
 
 ;; Parse every result into JSON or one stable error plist. Do not include an
 ;; HTTP response body in an error because it can hold deployment details.
-(define (sentry--request url)
-  (let* ((wire (*sentry-transport* url))
-         (parts (sentry--split-status wire))
+(define (sentry--parse-reply wire)
+  (let* ((parts (sentry--split-status wire))
          (status (car parts))
          (body (cadr parts)))
     (cond ((= status 0)
@@ -216,6 +238,9 @@
               (if (equal? reply #f)
                   (sentry--error "Sentry returned invalid JSON")
                   reply))))))
+
+(define (sentry--request url)
+  (sentry--parse-reply (*sentry-transport* url)))
 
 (define (sentry--request-write url payload)
   (let* ((wire (*sentry-write-transport* url (json-encode payload)))
@@ -259,19 +284,24 @@
         'platform (sentry--get event 'platform)
         'culprit (sentry--redact (sentry--get event 'culprit))))
 
+(define (sentry--issues-url query environment time-range count)
+  (sentry--url
+    (sentry--project-path "issues/")
+    (list (list "environment" (or environment sentry-environment))
+          (list "statsPeriod" (or time-range sentry-time-range))
+          (list "query" (or query sentry-query))
+          (list "per_page" count))))
+
+(define (sentry--parse-issues reply count)
+  (if (sentry--error? reply)
+      reply
+      (map sentry--safe-issue (sentry--take reply count))))
+
 (define (sentry-list-issues &optional query environment time-range limit)
-  (let* ((count (sentry--limit limit))
-         (reply
-           (sentry--request
-             (sentry--url
-               (sentry--project-path "issues/")
-               (list (list "environment" (or environment sentry-environment))
-                     (list "statsPeriod" (or time-range sentry-time-range))
-                     (list "query" (or query sentry-query))
-                     (list "per_page" count))))))
-    (if (sentry--error? reply)
-        reply
-        (map sentry--safe-issue (sentry--take reply count)))))
+  (let ((count (sentry--limit limit)))
+    (sentry--parse-issues
+      (sentry--request (sentry--issues-url query environment time-range count))
+      count)))
 
 (define (sentry-issue-detail issue-id)
   (let ((reply
@@ -343,12 +373,24 @@
     (number->string (length (list-entries buf))) " unresolved · "
     sentry-org "/" sentry-project " · " sentry-environment " · " sentry-time-range))
 
+;; The cache fetch: the rows land off the UI lane, and K gets them when
+;; the request answers. (k #f) keeps the rows the buffer already shows.
+(define (sentry--fetch-issues buf k)
+  (sentry--join-group! buf)
+  (let ((count (sentry--limit #f)))
+    (*sentry-async-transport*
+      (sentry--issues-url #f #f #f count)
+      (lambda (wire)
+        (let ((reply (sentry--parse-issues (sentry--parse-reply wire) count)))
+          (if (sentry--error? reply)
+              (begin (message (sentry--error-message reply)) (k #f))
+              (k reply)))))))
+
+;; the cache IS the source of truth: 'rows serves what the last fetch
+;; put in the buffer, and never reaches the network
 (define (sentry--issue-rows buf)
   (sentry--join-group! buf)
-  (let ((reply (sentry-list-issues)))
-    (if (sentry--error? reply)
-        (begin (message (sentry--error-message reply)) '())
-        reply)))
+  (list-entries buf))
 
 (define (sentry--safe-field label value)
   (let ((text (sentry--redact value)))
@@ -587,7 +629,7 @@
         (begin
           (message (string-append "Resolved Sentry issue " issue-id))
           (when (buffer-exists? *sentry-buffer*)
-            (list-refresh! *sentry-buffer*))
+            (cache-refresh! *sentry-buffer*))
           (sentry--render-detail! buf issue-id)))))
 
 (define (sentry--confirm-resolve! buf)
@@ -681,7 +723,7 @@
                         (begin (message (sentry--error-message reply))
                                (loop (cdr is) done))
                         (loop (cdr is) (+ done 1))))))
-            (list-refresh! *sentry-buffer*)))))))
+            (cache-refresh! *sentry-buffer*)))))))
 
 (on-block-click! 'sentry
   (lambda (buf id)
@@ -767,7 +809,7 @@
                   (set-mode! "sentry-detail-mode")))))))))
 
 (define-command "sentry-refresh" "Refresh the Sentry issue list"
-  (lambda () (list-refresh! *sentry-buffer*)))
+  (lambda () (cache-refresh! *sentry-buffer*)))
 
 (define-command "sentry-detail-refresh" "Refresh this Sentry issue detail"
   (lambda ()
@@ -800,6 +842,8 @@
            "row at point — ask the agent, open in Sentry, resolve.")
     'buffer *sentry-buffer*
     'rows sentry--issue-rows
+    'cache-fetch sentry--fetch-issues
+    'cache-ttl sentry-cache-ttl
     'columns (lambda (buf)
                (list (list "issue" 13) (list "level" 8)
                      (list "events" 7 'right) (list "last seen" 20)

@@ -247,14 +247,31 @@
 ;;; working copy: every change writes the file, and enabling the mode
 ;;; on a fresh visit reads it.
 
-(define (annotate--store-file buf)
+(define (annotate--encode rel)
+  (string-join (string-split rel "/") "%2F"))
+
+(define (annotate--home-store-file buf)
   (and (string-prefix? "/" buf)
        (string-append
          (aimax-home) "/annotations/"
-         (string-join (string-split
-                        (substring-bytes buf 1 (string-byte-length buf)) "/")
-                      "%2F")
+         (annotate--encode (substring-bytes buf 1 (string-byte-length buf)))
          ".scm")))
+
+;; a file inside a project keeps its annotations IN the project, so they
+;; travel with the repo — commits, worktrees, and pulls carry them. A
+;; file outside any project uses the home store.
+(define (annotate--store-file buf)
+  (and (string-prefix? "/" buf)
+       (let ((root (and (boundp 'project-root-cached)
+                        (project-root-cached (parent-dir buf)))))
+         (if root
+             (string-append
+               root "/.aimax/annotations/"
+               (annotate--encode
+                 (substring-bytes buf (+ (string-byte-length root) 1)
+                                  (string-byte-length buf)))
+               ".scm")
+             (annotate--home-store-file buf)))))
 
 (define (annotate-store-file buf) (annotate--store-file buf))
 
@@ -269,7 +286,12 @@
     (if (number? n) n 0)))
 
 (define (annotate--store-load! buf)
-  (let ((path (annotate--store-file buf)))
+  ;; a store saved before the project move still loads; the next save
+  ;; writes the project location
+  (let* ((primary (annotate--store-file buf))
+         (path (if (and primary (file-exists? primary))
+                   primary
+                   (annotate--home-store-file buf))))
     (when (and path (file-exists? path) (null? (buffer-annotations buf)))
       ;; scheme-read returns the list of top-level forms; the file holds
       ;; ONE form, the annotation list
@@ -286,8 +308,10 @@
 (add-hook! 'find-file-hook
   (lambda ()
     (let* ((buf (current-buffer))
-           (path (annotate--store-file buf)))
-      (when (and path (file-exists? path)
+           (path (annotate--store-file buf))
+           (legacy (annotate--home-store-file buf)))
+      (when (and (or (and path (file-exists? path))
+                     (and legacy (file-exists? legacy)))
                  (not (minor-mode-on? buf "annotate-mode")))
         (enable-minor-mode! buf "annotate-mode")))))
 

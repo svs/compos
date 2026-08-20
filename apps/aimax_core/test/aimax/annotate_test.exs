@@ -297,6 +297,31 @@ defmodule Aimax.AnnotateTest do
     assert eval!(~s[(annotate-store-file "#{@buf}")]) == "#f"
   end
 
+  test "a file inside a project stores its annotations in the project" do
+    root = Path.join(System.tmp_dir!(), "annotate-repo-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(Path.join(root, ".git"))
+    File.mkdir_p!(Path.join(root, "src"))
+    fbuf = Path.join(root, "src/x.txt")
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    eval!("""
+    (begin
+      (buffer-create "#{fbuf}")
+      (buffer-insert! "#{fbuf}" 0 "alpha beta\\n"))
+    """)
+
+    on_exit(fn -> if Buffer.exists?(fbuf), do: Aimax.Core.kill_buffer(fbuf) end)
+
+    assert eval_s!(~s[(annotate-store-file "#{fbuf}")]) ==
+             Path.join(root, ".aimax/annotations/src%2Fx.txt.scm")
+
+    eval_s!(~s{(annotate! "#{fbuf}" (quote (source "reader" severity "note"
+              line 1 match "beta" title "In repo" who "you" when "now")))})
+
+    assert File.read!(Path.join(root, ".aimax/annotations/src%2Fx.txt.scm")) =~
+             "In repo"
+  end
+
   test "the check source reports tree-sitter ERROR nodes" do
     langs = eval!("(ts-langs)")
 

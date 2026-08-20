@@ -357,6 +357,22 @@ defmodule Aimax.PareditTest do
     assert Buffer.point(buf2) == 3
   end
 
+  test "the canonical chords slurp and barf: C-) C-( C-} C-{" do
+    buf = fresh_buffer("(foo) bar\n")
+    Buffer.goto(buf, 4)
+    press(["C-)"])
+    assert Buffer.text(buf) == "(foo bar)\n"
+    press(["C-}"])
+    assert Buffer.text(buf) == "(foo) bar\n"
+
+    buf2 = fresh_buffer("a (b)\n")
+    Buffer.goto(buf2, 3)
+    press(["C-("])
+    assert Buffer.text(buf2) == "(a b)\n"
+    press(["C-{"])
+    assert Buffer.text(buf2) == "a (b)\n"
+  end
+
   test "splice removes the enclosing delimiters" do
     buf = fresh_buffer("(a (b c) d)\n")
     Buffer.goto(buf, 5)

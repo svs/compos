@@ -661,6 +661,12 @@
     ("C-M-d" "paredit-down" "down-list")
     ("C-M-k" "paredit-kill-sexp" #f)
     ("C-M-SPC" "paredit-mark-sexp" #f)
+    ;; the canonical paredit chords; macOS keeps Ctrl-arrows for Mission
+    ;; Control, so the arrow forms below reach only a remapped OS
+    ("C-)" "paredit-slurp-forward" #f)
+    ("C-(" "paredit-slurp-backward" #f)
+    ("C-}" "paredit-barf-forward" #f)
+    ("C-{" "paredit-barf-backward" #f)
     ("C-<right>" "paredit-slurp-forward" "forward-word")
     ("C-<left>" "paredit-barf-forward" "backward-word")
     ("M-s" "paredit-splice" #f)

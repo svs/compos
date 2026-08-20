@@ -754,11 +754,14 @@ defmodule Aimax.Core.Agent do
   defp maybe_deliver(%{in_flight: true} = state), do: state
 
   defp maybe_deliver(state) do
+    # the escaped table dies with the Session during a restart; an agent
+    # draining backend events in that window must not crash over it — a
+    # crashed agent leaves its session record orphaned
     handler =
       Aimax.Core.LLMSession.callback(state.slug, :handler) ||
-        case :ets.lookup(@escaped, {:agent_handler}) do
+        case :ets.whereis(@escaped) != :undefined && :ets.lookup(@escaped, {:agent_handler}) do
           [{_, callback}] -> callback
-          [] -> nil
+          _ -> nil
         end
 
     case handler do

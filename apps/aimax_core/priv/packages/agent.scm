@@ -882,7 +882,13 @@
 ;; a restored (or crashed) thread is a live transcript with a dead runtime.
 ;; The slug-keyed door onto the one attach function (editor.scm): a fresh
 ;; agent on its own connector, seeded with what was said.
-(define (agent-revive! slug) (chat-attach! (agent-buf slug)))
+;; A crashed agent can leave its session record behind: the record says
+;; "running", the process is gone, and open refuses with "already
+;; running" — the chat is dead with no way back. Close the orphan first.
+(define (agent-revive! slug)
+  (unless (member slug (agent-list))
+    (llm-session-close! slug))
+  (chat-attach! (agent-buf slug)))
 
 ;; the low-level reattach: kill + start again on this connector/model.
 ;; Fresh session — the transcript stays, server-side context doesn't.

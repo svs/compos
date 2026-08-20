@@ -13,7 +13,8 @@
 ;;; the switcher puts every buffer nobody picked back to sleep.
 
 (define *switch-buffer* "*switch*")
-(add-display-rule! *switch-buffer* 'popup)
+;; a modal in the center of the screen — the palette's geometry, as a window
+(add-display-rule! *switch-buffer* 'popup (list 'side 'center 'size 0.5))
 
 ;; the seam's pick fn from the last rows fetch — a closure, so it lives
 ;; here and not in a buffer-local

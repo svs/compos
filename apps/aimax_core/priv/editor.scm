@@ -3305,7 +3305,8 @@
 ;;; PARAMS is a plist, and every key has a default, so a rule says only
 ;;; what it wants to change:
 ;;;
-;;;   'side   'right | 'left | 'top | 'bottom     default 'right
+;;;   'side   'right | 'left | 'top | 'bottom | 'center   default 'right
+;;;           'center floats a fixed modal in the middle of the frame
 ;;;   'size   the share of the frame it takes     default 0.38
 ;;;
 ;;; A popup floats over the frame — see popup-float! for what that means

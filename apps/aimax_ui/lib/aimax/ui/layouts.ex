@@ -128,6 +128,13 @@ defmodule Aimax.Ui.Layouts do
           }
           .window.popup-top { top: 0; }
           .window.popup-bottom { bottom: 0; }
+          /* a centered modal — the switcher; the palette's geometry */
+          .window.popup-center {
+            top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: var(--popup-size, 56%); max-width: 1100px;
+            min-width: min(520px, 100%);
+            height: 62%;
+          }
           @keyframes popup-rise { from { opacity: 0; } to { opacity: 1; } }
           @keyframes win-in { from { opacity: 0; transform: scale(0.985); } to { opacity: 1; transform: none; } }
           .window {

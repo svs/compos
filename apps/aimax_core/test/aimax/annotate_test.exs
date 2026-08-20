@@ -171,6 +171,45 @@ defmodule Aimax.AnnotateTest do
     assert eval!(~s[(length (buffer-annotations "#{@buf}"))]) == "2"
   end
 
+  test "annotate-mode builds the margin cards" do
+    id = llm_warning()
+    reader_note()
+    eval!(~s[(enable-minor-mode! "#{@buf}" "annotate-mode")])
+
+    assert Buffer.exists?("*margin*")
+    blocks = eval!(~s[(annotate--margin-blocks "*margin*")])
+    assert blocks =~ "margin · 2 annotations"
+    assert blocks =~ "Overstated claim"
+    assert blocks =~ "Keep, verbatim"
+    # the selected card opens: body and action chips appear
+    eval!(~s[(buffer-set-local! "#{@buf}" 'ann-selected "#{id}")])
+    blocks = eval!(~s[(annotate--margin-blocks "*margin*")])
+    assert blocks =~ "ann-card open"
+    assert blocks =~ "ann:resolve:#{id}"
+  end
+
+  test "a margin click runs the verb" do
+    id = llm_warning()
+    eval!(~s[(enable-minor-mode! "#{@buf}" "annotate-mode")])
+    eval!(~s[(annotate--click! "#{@buf}" "resolve" (annotate--find "#{@buf}" "#{id}"))])
+
+    assert eval_s!(~s[(plist-get (annotate--find "#{@buf}" "#{id}") 'state)]) ==
+             "resolved"
+  end
+
+  test "a reply joins the annotation's thread and the margin shows it" do
+    id = llm_warning()
+    eval!(~s[(enable-minor-mode! "#{@buf}" "annotate-mode")])
+    eval!(~s[(buffer-set-local! "#{@buf}" 'ann-selected "#{id}")])
+    eval!(~s[(annotate-reply! "#{@buf}" "#{id}" "Second this.")])
+
+    assert eval!(
+             ~s[(length (plist-get (annotate--find "#{@buf}" "#{id}") 'thread))]
+           ) == "1"
+
+    assert eval!(~s[(annotate--margin-blocks "*margin*")]) =~ "Second this."
+  end
+
   test "the check source reports tree-sitter ERROR nodes" do
     langs = eval!("(ts-langs)")
 

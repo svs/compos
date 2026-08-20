@@ -153,6 +153,33 @@
 .f-ann-llm{text-decoration:underline dotted var(--accent-fg,#26356b);text-decoration-skip-ink:none}
 .f-ann-reader{background:color-mix(in srgb,var(--ok-fg,#2e6b45) 14%,transparent);border-radius:2px}
 .f-ann-selected{box-shadow:0 0 0 1.5px var(--accent-fg,#26356b);border-radius:2px}
+.ann-mhead{display:flex;justify-content:space-between;gap:8px;font-family:var(--font-mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--dim-fg);padding:8px 2px 6px}
+.ann-card{border:1px solid var(--border-bg);border-radius:9px;padding:8px 10px 9px;margin:0 0 8px;cursor:pointer}
+.ann-card.open{border-color:var(--accent-fg,#26356b);background:var(--hl-line-bg)}
+.ann-card.resolved{opacity:.55}
+.ann-chead{display:flex;align-items:center;gap:7px;padding-bottom:5px;font-family:var(--font-mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;font-weight:600}
+.ann-dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:0 0 auto}
+.ann-acc-accent{color:var(--accent-fg,#26356b)}
+.ann-acc-ok{color:var(--ok-fg,#2e6b45)}
+.ann-acc-alert{color:var(--alert-fg,#a83a2b)}
+.ann-acc-warn{color:var(--warn-fg,#7a5a1a)}
+.ann-spacer{flex:1}
+.ann-cmeta{color:var(--dim-fg);letter-spacing:0;font-weight:400}
+.ann-ctitle{font-size:12.5px;font-weight:600}
+.ann-cwho{font-family:var(--font-mono);font-size:10.5px;color:var(--dim-fg);padding-top:3px}
+.ann-cbody{font-size:13px;line-height:1.55;padding-top:5px}
+.ann-snip{font-size:12.5px;color:var(--dim-fg);padding-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ann-quote{border-left:2px solid var(--border-bg);padding:2px 0 2px 8px;font-family:var(--font-mono);font-size:11px;color:var(--dim-fg);margin-top:6px}
+.ann-fix{border:1px solid var(--border-bg);border-radius:7px;overflow:hidden;margin-top:6px}
+.ann-fix-head{display:flex;justify-content:space-between;gap:8px;padding:3px 8px;border-bottom:1px solid var(--border-bg);font-family:var(--font-mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim-fg)}
+.ann-fix-key{color:var(--accent-fg,#26356b)}
+.ann-fix-del{display:flex;gap:6px;padding:2px 8px;background:color-mix(in srgb,var(--alert-fg,#a83a2b) 9%,transparent);font-family:var(--font-mono);font-size:11px}
+.ann-fix-add{display:flex;gap:6px;padding:2px 8px;background:color-mix(in srgb,var(--ok-fg,#2e6b45) 10%,transparent);font-family:var(--font-mono);font-size:11px}
+.ann-fix-sign-del{color:var(--alert-fg,#a83a2b);font-weight:600}
+.ann-fix-sign-add{color:var(--ok-fg,#2e6b45);font-weight:600}
+.ann-th{border-top:1px solid var(--border-bg);margin-top:7px;padding-top:7px}
+.ann-th-who{font-family:var(--font-mono);font-size:10px;color:var(--dim-fg)}
+.ann-th-text{font-size:12.5px}
 ")
 
 ;;; --- public data API -------------------------------------------------------
@@ -167,7 +194,8 @@
 
 (define (annotate--touch! buf)
   (annotate--paint! buf)
-  (annotate--list-refresh buf))
+  (annotate--list-refresh buf)
+  (annotate--margin-refresh buf))
 
 (define (annotate! buf spec)
   (let* ((n (+ 1 (or (buffer-local buf 'ann-next-id) 0)))
@@ -196,6 +224,20 @@
   "(buffer-annotations BUF) — the buffer's annotation plists")
 (public! 'annotate-visible
   "(annotate-visible BUF) — annotations a view shows: not dismissed, sorted by line then severity")
+
+;; an annotation can carry annotations: 'thread is a list of reply
+;; plists (who when text), and a reply is the same shape again
+(define (annotate-reply! buf id text)
+  (let ((a (annotate--find buf id)))
+    (when a
+      (annotate--update! buf id 'thread
+        (append (or (plist-get a 'thread) '())
+                (list (list 'who "you" 'when "now" 'text text))))
+      (annotate--touch! buf)
+      (message (string-append "Reply added to " id)))))
+
+(public! 'annotate-reply!
+  "(annotate-reply! BUF ID TEXT) — append one reply plist to the annotation's thread")
 
 ;;; --- the check source: tree-sitter ERROR nodes ----------------------------
 
@@ -283,6 +325,7 @@
           (goto-char! (car at))
           (buffer-goto! buf (car at)))
       (annotate--paint! buf)
+      (annotate--margin-refresh buf)
       (annotate--echo a))))
 
 (define (annotate--step d)
@@ -403,60 +446,68 @@
            (a (list-current lb)))
       (when a (annotate--show lb a #t)))))
 
+;; the verbs, shared by the list keys and the margin's action chips
+(define (annotate--toggle-resolve! source a)
+  (let* ((id (annotate--get a 'id ""))
+         (resolved (equal? (annotate--get a 'state "open") "resolved")))
+    (annotate--update! source id 'state (if resolved "open" "resolved"))
+    (annotate--touch! source)
+    (message (string-append (if resolved "Reopened " "Resolved ")
+                            id " — " (annotate--get a 'title "")))))
+
+(define (annotate--do-dismiss! source a)
+  (let ((id (annotate--get a 'id "")))
+    (buffer-set-local! source 'ann-dismissed
+      (cons id (annotate--dismissed source)))
+    (desktop-skip! source 'ann-dismissed)
+    (annotate--touch! source)
+    (message (string-append "Dismissed " id " · this session only"))))
+
+(define (annotate--do-fix! source a)
+  (let ((old (annotate--get a 'fix-old ""))
+        (new (annotate--get a 'fix-new "")))
+    (if (equal? new "")
+        (message "No suggested fix on this annotation")
+        (let* ((text (buffer-text source))
+               (bounds (annotate--line-bounds text))
+               (probe (annotate--put a 'match old))
+               (at (annotate--locate text bounds probe)))
+          (if (not at)
+              (message "Fix no longer applies — text has changed")
+              (begin
+                (buffer-delete-range! source (car at)
+                                      (- (cadr at) (car at)))
+                (buffer-insert! source (car at) new)
+                (annotate--update! source (annotate--get a 'id "") 'match new)
+                (annotate--update! source (annotate--get a 'id "")
+                                   'state "resolved")
+                (annotate--touch! source)
+                (message (string-append "Applied fix from "
+                                        (annotate--get a 'who "")
+                                        " · L" (number->string (caddr at))))))))))
+
+(define (annotate--read-reply source a)
+  (minibuffer-read
+    (string-append "Reply to " (annotate--get a 'who "") ": ") '()
+    (lambda (text)
+      (unless (equal? (string-trim text) "")
+        (annotate-reply! source (annotate--get a 'id "") text)))))
+
+(define (annotate--row-verb f)
+  (let ((pair (annotate--current-pair)))
+    (when pair (f (car pair) (cadr pair)))))
+
 (define-command "annotate-resolve" "Resolve or reopen the annotation on this row"
-  (lambda ()
-    (let ((pair (annotate--current-pair)))
-      (when pair
-        (let* ((source (car pair))
-               (a (cadr pair))
-               (id (annotate--get a 'id ""))
-               (resolved (equal? (annotate--get a 'state "open") "resolved")))
-          (annotate--update! source id 'state (if resolved "open" "resolved"))
-          (annotate--touch! source)
-          (message (string-append (if resolved "Reopened " "Resolved ")
-                                  id " — " (annotate--get a 'title ""))))))))
+  (lambda () (annotate--row-verb annotate--toggle-resolve!)))
 
 (define-command "annotate-dismiss" "Dismiss the annotation on this row (this session)"
-  (lambda ()
-    (let ((pair (annotate--current-pair)))
-      (when pair
-        (let* ((source (car pair))
-               (a (cadr pair))
-               (id (annotate--get a 'id "")))
-          (buffer-set-local! source 'ann-dismissed
-            (cons id (annotate--dismissed source)))
-          (desktop-skip! source 'ann-dismissed)
-          (annotate--touch! source)
-          (message (string-append "Dismissed " id " · this session only")))))))
+  (lambda () (annotate--row-verb annotate--do-dismiss!)))
 
 (define-command "annotate-apply-fix" "Apply the suggested fix on this row"
-  (lambda ()
-    (let ((pair (annotate--current-pair)))
-      (when pair
-        (let* ((source (car pair))
-               (a (cadr pair))
-               (old (annotate--get a 'fix-old ""))
-               (new (annotate--get a 'fix-new "")))
-          (if (equal? new "")
-              (message "No suggested fix on this annotation")
-              (let* ((text (buffer-text source))
-                     (bounds (annotate--line-bounds text))
-                     (probe (annotate--put a 'match old))
-                     (at (annotate--locate text bounds probe)))
-                (if (not at)
-                    (message "Fix no longer applies — text has changed")
-                    (begin
-                      (buffer-delete-range! source (car at)
-                                            (- (cadr at) (car at)))
-                      (buffer-insert! source (car at) new)
-                      (annotate--update! source (annotate--get a 'id "")
-                                         'match new)
-                      (annotate--update! source (annotate--get a 'id "")
-                                         'state "resolved")
-                      (annotate--touch! source)
-                      (message (string-append "Applied fix from "
-                                              (annotate--get a 'who "")
-                                              " · L" (number->string (caddr at)))))))))))))
+  (lambda () (annotate--row-verb annotate--do-fix!)))
+
+(define-command "annotate-reply" "Reply to the annotation on this row"
+  (lambda () (annotate--row-verb annotate--read-reply)))
 
 (define (annotate--set-tab! d)
   (let* ((lb (current-buffer))
@@ -508,12 +559,14 @@
                    0)))
     'footer (lambda (buf)
               '(("RET" "visit") ("r" "resolve") ("y" "apply fix")
-                ("d" "dismiss") ("<left>/<right>" "tab") ("q" "quit")))
+                ("R" "reply") ("d" "dismiss")
+                ("<left>/<right>" "tab") ("q" "quit")))
     'noun "annotation"
     'preview (lambda (buf a) (annotate--show buf a #f))
     'keys '(("RET" "annotate-visit")
             ("r" "annotate-resolve")
             ("y" "annotate-apply-fix")
+            ("R" "annotate-reply")
             ("d" "annotate-dismiss")
             ("f" "annotate-tab-next")
             ("<right>" "annotate-tab-next")
@@ -533,6 +586,199 @@
       (buffer-set-local! *ann-buffer* 'ann-source source)
       (list-mode-show! "annotations-mode"))))
 
+;;; --- the margin: annotation cards beside the document ------------------------
+;;; A blocks buffer, the diff-mode pattern. One card per visible
+;;; annotation; the selected card is open and shows the body, the
+;;; suggested fix, the thread, and the action chips.
+
+(define *ann-margin* "*margin*")
+
+(define (annotate--accent a)
+  (let ((source (annotate--get a 'source "")))
+    (cond ((equal? source "llm") "ann-acc-accent")
+          ((equal? source "reader") "ann-acc-ok")
+          ((equal? (annotate--get a 'severity "") "error") "ann-acc-alert")
+          (else "ann-acc-warn"))))
+
+(define (annotate--card src a n open?)
+  (let* ((acc (annotate--accent a))
+         (resolved (equal? (annotate--get a 'state "open") "resolved"))
+         (id (annotate--get a 'id ""))
+         (fix (not (equal? (annotate--get a 'fix-new "") "")))
+         (thread (or (plist-get a 'thread) '())))
+    (list 'tag "div"
+          'class (string-append "ann-card" (if open? " open" "")
+                                (if resolved " resolved" ""))
+          'click (string-append "ann:pick:" id)
+          'children
+          (append
+            (list (list 'tag "div" 'class (string-append "ann-chead " acc)
+                        'children
+                        (list (list 'tag "span" 'class "ann-dot")
+                              (list 'tag "span" 'class "ann-clabel"
+                                    'text (string-append
+                                            (number->string n) " · "
+                                            (annotate--label a) " "
+                                            (annotate--get a 'severity "")))
+                              (list 'tag "span" 'class "ann-spacer")
+                              (list 'tag "span" 'class "ann-cmeta"
+                                    'text (if resolved "resolved" ""))
+                              (list 'tag "span" 'class "ann-cmeta"
+                                    'text (string-append
+                                            "L" (number->string
+                                                  (annotate--get a 'line 1)))))))
+            (list (list 'tag "div" 'class "ann-ctitle"
+                        'text (annotate--get a 'title "")))
+            (list (list 'tag "div" 'class "ann-cwho"
+                        'text (string-append (annotate--get a 'who "") " · "
+                                             (annotate--get a 'when ""))))
+            (if open?
+                (append
+                  (list (list 'tag "div" 'class "ann-cbody"
+                              'text (annotate--get a 'body "")))
+                  (if (equal? (annotate--get a 'quote "") "")
+                      '()
+                      (list (list 'tag "div" 'class "ann-quote"
+                                  'text (annotate--get a 'quote ""))))
+                  (if fix
+                      (list (list 'tag "div" 'class "ann-fix" 'children
+                              (list (list 'tag "div" 'class "ann-fix-head"
+                                          'segs (list (list "" "suggested fix")
+                                                      (list "ann-fix-key" "y applies")))
+                                    (list 'tag "div" 'class "ann-fix-del"
+                                          'segs (list (list "ann-fix-sign-del" "-")
+                                                      (list "" (annotate--get a 'fix-old ""))))
+                                    (list 'tag "div" 'class "ann-fix-add"
+                                          'segs (list (list "ann-fix-sign-add" "+")
+                                                      (list "" (annotate--get a 'fix-new "")))))))
+                      '())
+                  (map (lambda (r)
+                         (list 'tag "div" 'class "ann-th" 'children
+                               (list (list 'tag "div" 'class "ann-th-who"
+                                           'text (string-append
+                                                   (annotate--get r 'who "") " · "
+                                                   (annotate--get r 'when "")))
+                                     (list 'tag "div" 'class "ann-th-text"
+                                           'text (annotate--get r 'text "")))))
+                       thread)
+                  (list (component 'ui/actions
+                          (list 'actions
+                            (append
+                              (list (list (string-append "ann:resolve:" id)
+                                          (if resolved "reopen" "resolve") "r"))
+                              (if fix
+                                  (list (list (string-append "ann:fix:" id)
+                                              "apply fix" "y"))
+                                  '())
+                              (list (list (string-append "ann:reply:" id)
+                                          "reply" "R")
+                                    (list (string-append "ann:dismiss:" id)
+                                          "dismiss" "d")))))))
+                (list (list 'tag "div" 'class "ann-snip"
+                            'text (annotate--get a 'body ""))))))))
+
+(define (annotate--margin-blocks mbuf)
+  (let* ((src (buffer-local mbuf 'ann-source))
+         (vis (if (and src (buffer-exists? src)) (annotate-visible src) '()))
+         (sel (and src (buffer-local src 'ann-selected))))
+    (append
+      (list (list 'tag "div" 'class "ann-mhead"
+                  'segs (list (list "" (string-append
+                                         "margin · "
+                                         (number->string (length vis))
+                                         (if (= (length vis) 1)
+                                             " annotation" " annotations")))
+                              (list "ann-mkeys" "M-n / M-p"))))
+      (if (null? vis)
+          (list (component 'ui/empty '(text "no annotations")))
+          (let loop ((as vis) (n 1) (out '()))
+            (if (null? as)
+                (reverse out)
+                (loop (cdr as) (+ n 1)
+                      (cons (annotate--card src (car as) n
+                              (equal? sel (annotate--get (car as) 'id "")))
+                            out))))))))
+
+(define (annotate--margin-render! mbuf)
+  (when (buffer-exists? mbuf)
+    (buffer-set-local! mbuf 'render-blocks (annotate--margin-blocks mbuf))
+    (buffer-set-local! mbuf 'render-mode "blocks")))
+
+(define (annotate--margin-refresh src)
+  (when (and (buffer-exists? *ann-margin*)
+             (equal? (buffer-local *ann-margin* 'ann-source) src))
+    (annotate--margin-render! *ann-margin*)))
+
+(define (annotate--margin-ensure! src)
+  (buffer-create *ann-margin*)
+  (buffer-set-local! *ann-margin* 'ann-source src)
+  (buffer-set-local! *ann-margin* 'mode-name "annotate-margin-mode")
+  (annotate--margin-render! *ann-margin*))
+
+(define-mode "annotate-margin-mode"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (buffer-set-read-only! buf #t)
+      (annotate--margin-render! buf))))
+
+;; annotate-mode owns a frame arrangement: the document and its margin
+(define-mode-layout! "annotate-mode" '(h 0.7 self "*margin*"))
+
+;; the margin's clicks: ann:VERB:ID on cards and action chips
+(define (annotate--click! src verb a)
+  (cond ((equal? verb "pick") (annotate--goto! src a #f))
+        ((equal? verb "resolve") (annotate--toggle-resolve! src a))
+        ((equal? verb "fix") (annotate--do-fix! src a))
+        ((equal? verb "dismiss") (annotate--do-dismiss! src a))
+        ((equal? verb "reply") (annotate--read-reply src a))))
+
+(on-block-click! "annotate"
+  (lambda (mbuf id)
+    (and (string? id)
+         (string-prefix? "ann:" id)
+         (let* ((rest (substring-bytes id 4 (string-byte-length id)))
+                (colon (annotate--index rest ":"))
+                (verb (and colon (substring-bytes rest 0 colon)))
+                (aid (and colon (substring-bytes rest (+ colon 1)
+                                                 (string-byte-length rest))))
+                (src (buffer-local mbuf 'ann-source)))
+           (when (and verb src (buffer-exists? src))
+             (let ((a (annotate--find src aid)))
+               (when a (annotate--click! src verb a))))
+           #t))))
+
+(define-command "annotate-margin" "Toggle the annotation margin"
+  (lambda ()
+    (let ((buf (current-buffer))
+          (win (window-showing *ann-margin*)))
+      (if win
+          (delete-window-id! win)
+          (begin
+            (annotate--margin-ensure! buf)
+            (display-buffer-other-window! *ann-margin*))))))
+
+;;; --- adding an annotation by hand --------------------------------------------
+
+(define-command "annotate-add" "Annotate the region or this line"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (match (if (and (mark) (< (region-beginning) (region-end)))
+                      (substring-bytes (buffer-text buf)
+                                       (region-beginning) (region-end))
+                      ""))
+           (line (line-number-at-pos (point))))
+      (minibuffer-read "Annotation: " '()
+        (lambda (text)
+          (unless (equal? (string-trim text) "")
+            (unless (minor-mode-on? buf "annotate-mode")
+              (enable-minor-mode! buf "annotate-mode"))
+            (annotate! buf (list 'source "reader" 'severity "note"
+                                 'line line 'match match
+                                 'title text 'who "you" 'when "now"))
+            (message (string-append "Annotated L" (number->string line)))))))))
+
+(global-set-key "C-c ! a" "annotate-add")
+
 ;;; --- annotate-mode: the minor mode on the source buffer ---------------------
 
 (register-minor-mode! "annotate-mode"
@@ -540,13 +786,16 @@
     (local-set-key* buf "M-n" "annotate-next")
     (local-set-key* buf "M-p" "annotate-prev")
     (local-set-key* buf "C-c ! l" "annotate-list")
+    (local-set-key* buf "C-c ! m" "annotate-margin")
     (annotate--ensure-hook! buf)
     (annotate--check! buf)
+    (annotate--margin-ensure! buf)
     (annotate--paint! buf))
   (lambda (buf)
     (local-unset-key* buf "M-n")
     (local-unset-key* buf "M-p")
     (local-unset-key* buf "C-c ! l")
+    (local-unset-key* buf "C-c ! m")
     (overlay-clear! buf 'annotate)))
 
 (define-command "annotate-mode" "Toggle annotations in this buffer"

@@ -178,24 +178,10 @@
     "error: ask must run through an agent thread")
   '(pure))
 
+;; the builtin: an interpreted distance held the caller's lane for
+;; seconds while a suggestion ranked the whole public api
 (define (tool--edit-distance a b)
-  (let ((la (string-length a)) (lb (string-length b)))
-    (let loop ((i 0) (row (iota (+ lb 1))))
-      (if (= i la)
-          (list-ref row lb)
-          (loop (+ i 1)
-                (let inner ((j 1) (diag (car row)) (acc (list (+ i 1))))
-                  (if (> j lb)
-                      (reverse acc)
-                      (let ((cost (if (equal? (substring a i (+ i 1))
-                                              (substring b (- j 1) j))
-                                      0 1)))
-                        (inner (+ j 1)
-                               (list-ref row j)
-                               (cons (min (+ (car acc) 1)
-                                          (+ (list-ref row j) 1)
-                                          (+ diag cost))
-                                     acc))))))))))
+  (string-edit-distance a b))
 
 ;; nearest public-api entries: edit distance <= 2 first, shared prefix after
 (define (tool--suggest name)

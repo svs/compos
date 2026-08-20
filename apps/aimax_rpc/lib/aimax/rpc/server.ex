@@ -179,8 +179,15 @@ defmodule Aimax.Rpc.Server do
 
   defp unquote_printed(printed), do: printed
 
+  # the suggestion runs in this connection's lane, as the eval did — a
+  # slow suggestion must never queue a keystroke behind it
   defp suggest("unbound variable: " <> name = msg) do
-    case Session.eval(~s{(tool--format-suggestions (tool--suggest "#{name}"))}) do
+    case Session.eval(
+           ~s{(tool--format-suggestions (tool--suggest "#{name}"))},
+           nil,
+           30_000,
+           {:rpc, self()}
+         ) do
       {:ok, printed} ->
         case unquote_printed(printed) do
           "" -> msg

@@ -50,6 +50,14 @@ defmodule Aimax.SchemeTest do
     assert run("'foo") == {:sym, "foo"}
   end
 
+  test "string-edit-distance is the Levenshtein distance" do
+    assert run(~s{(string-edit-distance "kitten" "sitting")}) == 3
+    assert run(~s{(string-edit-distance "" "abc")}) == 3
+    assert run(~s{(string-edit-distance "abc" "")}) == 3
+    assert run(~s{(string-edit-distance "same" "same")}) == 0
+    assert run(~s{(string-edit-distance "forward-line!" "forward-line")}) == 1
+  end
+
   test "quote, let, and/or" do
     assert run("'(1 2 3)") == [1, 2, 3]
     assert run("(let ((a 1) (b 2)) (+ a b))") == 3

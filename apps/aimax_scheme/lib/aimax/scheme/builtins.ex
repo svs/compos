@@ -77,6 +77,29 @@ defmodule Aimax.Scheme.Builtins do
       "string-contains?" => fn [s, sub] -> String.contains?(s, sub) end,
       "string-prefix?" => fn [pre, s] -> String.starts_with?(s, pre) end,
       "string-suffix?" => fn [suf, s] -> String.ends_with?(s, suf) end,
+      # Levenshtein distance. The did-you-mean suggestions rank every
+      # public-api name per unbound error; an interpreted inner loop held
+      # the UI lane for seconds, so the distance is a builtin.
+      "string-edit-distance" => fn [a, b] ->
+        bl = String.to_charlist(b)
+
+        a
+        |> String.to_charlist()
+        |> Enum.reduce(Enum.to_list(0..length(bl)), fn ca, prev_row ->
+          first = hd(prev_row) + 1
+
+          {row_rev, _diag} =
+            bl
+            |> Enum.zip(tl(prev_row))
+            |> Enum.reduce({[first], hd(prev_row)}, fn {cb, above}, {acc, diag} ->
+              cost = if ca == cb, do: 0, else: 1
+              {[min(min(hd(acc) + 1, above + 1), diag + cost) | acc], above}
+            end)
+
+          Enum.reverse(row_rev)
+        end)
+        |> List.last()
+      end,
       "string-rindex" => fn [s, sub] ->
         case :binary.matches(s, sub) do
           [] -> false
@@ -263,6 +286,8 @@ defmodule Aimax.Scheme.Builtins do
       "string-length" => "(string-length S) — return the count of characters in S, not bytes.",
       "string-contains?" => "(string-contains? S SUB) — return true if S contains SUB.",
       "string-prefix?" => "(string-prefix? PRE S) — return true if S starts with PRE.",
+      "string-edit-distance" =>
+        "(string-edit-distance A B) — the Levenshtein distance between two strings.",
       "string-suffix?" => "(string-suffix? SUF S) — return true if S ends with SUF.",
       "string-rindex" => "(string-rindex S SUB) — return the byte offset of the last SUB in S, or false.",
       "common-prefix" => "(common-prefix STRINGS) — return the longest common prefix of the list of strings.",

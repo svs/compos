@@ -21,27 +21,30 @@
 (define (web--shell-quote text)
   (string-append "'" (string-join (string-split text "'") "'\\''") "'"))
 
-;; a table-layout page (Hacker News), with the table tags flattened —
-;; pandoc's markdown writer cannot express nested tables and answers
-;; only a "[TABLE]" placeholder for the whole page
-(define (web--flat-pipeline url k)
-  (shell-command->string
-    (string-append
-      "curl -sL --max-time 20 " (web--shell-quote url)
-      " | perl -pe 's{</?(?:table|tbody|thead|tr|td|th)\\b[^>]*>}{ }gi'"
-      " | pandoc -f html-native_divs-native_spans -t gfm-raw_html")
-    (lambda (out) (k (if (equal? (string-trim out) "") #f out)))))
-
 ;; URL -> markdown, in a Task. Tests replace this seam.
+;;
+;; One fetch, three readings of it, in order:
+;;   1. the ARTICLE — `readable` (Mozilla's readability) extracts it,
+;;      which drops the page furniture: nav, subscribe boxes, like
+;;      counts, audio players. Absent or empty (a page that is not an
+;;      article, or the tool is not installed), then
+;;   2. the WHOLE page through pandoc, and
+;;   3. when pandoc answers only a "[TABLE]" placeholder (a nested
+;;      table layout — Hacker News), the page again with the table
+;;      tags flattened, so it reads as lines with its links intact.
 (define (web--pipeline url k)
-  (shell-command->string
-    (string-append
-      "curl -sL --max-time 20 " (web--shell-quote url)
-      " | pandoc -f html-native_divs-native_spans -t gfm-raw_html")
-    (lambda (out)
-      (cond ((equal? (string-trim out) "") (k #f))
-            ((string-contains? out "[TABLE]") (web--flat-pipeline url k))
-            (else (k out))))))
+  (let ((u (web--shell-quote url))
+        (p " | pandoc -f html-native_divs-native_spans -t gfm-raw_html"))
+    (shell-command->string
+      (string-append
+        "t=$(mktemp); curl -sL --max-time 20 " u " -o \"$t\"; "
+        "out=$(readable --base " u " \"$t\" 2>/dev/null" p "); "
+        "if [ \"${#out}\" -lt 200 ]; then out=$(cat \"$t\"" p "); fi; "
+        "case \"$out\" in *'[TABLE]'*) "
+        "out=$(perl -pe 's{</?(?:table|tbody|thead|tr|td|th)\\b[^>]*>}{ }gi'"
+        " < \"$t\"" p ");; esac; "
+        "rm -f \"$t\"; printf %s \"$out\"")
+      (lambda (out) (k (if (equal? (string-trim out) "") #f out))))))
 
 (define *web-fetch* web--pipeline)
 

@@ -68,6 +68,11 @@
 
 (define (register-llm-key! provider value)
   (let ((p (if (symbol? provider) (symbol->string provider) provider)))
+    ;; a key that resolved to nothing is a boot-time failure the user
+    ;; otherwise meets as "no api key" at send time — say it now
+    (when (or (equal? value #f) (equal? value ""))
+      (message (string-append "llm key for " p
+                              " resolved empty — check doppler, then M-x reload-file on ai-config.scm")))
     (set! *llm-keys*
       (cons (list p value)
             (remove (lambda (e) (equal? (car e) p)) *llm-keys*)))

@@ -275,10 +275,17 @@
 
 (define (annotate-store-file buf) (annotate--store-file buf))
 
+;; the file keeps what people and agents said — reader and llm
+;; annotations. Checker diagnostics are live state: the checker
+;; recomputes them, so the store never carries them.
 (define (annotate--store-save! buf)
   (let ((path (annotate--store-file buf)))
     (when path
-      (write-file! path (value->string (buffer-annotations buf))))))
+      (write-file! path
+        (value->string
+          (filter (lambda (a)
+                    (not (equal? (annotate--get a 'source "") "check")))
+                  (buffer-annotations buf)))))))
 
 (define (annotate--id-number id)
   (let ((n (string->number

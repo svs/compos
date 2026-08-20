@@ -297,6 +297,32 @@ defmodule Aimax.AnnotateTest do
     assert eval!(~s[(annotate-store-file "#{@buf}")]) == "#f"
   end
 
+  test "the store keeps reader and llm annotations, never checker ones" do
+    fbuf = "/annotate-store-test/checked.txt"
+
+    eval!("""
+    (begin
+      (buffer-create "#{fbuf}")
+      (buffer-insert! "#{fbuf}" 0 "alpha beta\\n"))
+    """)
+
+    on_exit(fn ->
+      {:ok, path} = Session.eval(~s[(annotate-store-file "#{fbuf}")])
+      File.rm(String.trim(path, "\""))
+      if Buffer.exists?(fbuf), do: Aimax.Core.kill_buffer(fbuf)
+    end)
+
+    eval_s!(~s{(annotate! "#{fbuf}" (quote (source "check" severity "error"
+              line 1 match "alpha" title "Diag" who "ts" when "live")))})
+
+    eval_s!(~s{(annotate! "#{fbuf}" (quote (source "llm" severity "note"
+              line 1 match "beta" title "Kept" who "claude" when "now")))})
+
+    stored = File.read!(eval_s!(~s[(annotate-store-file "#{fbuf}")]))
+    assert stored =~ "Kept"
+    refute stored =~ "Diag"
+  end
+
   test "a file inside a project stores its annotations in the project" do
     root = Path.join(System.tmp_dir!(), "annotate-repo-#{System.unique_integer([:positive])}")
     File.mkdir_p!(Path.join(root, ".git"))

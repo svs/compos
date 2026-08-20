@@ -31,6 +31,16 @@
 ;; DOMAIN is the subject area; EFFECTS say what invoking it may do.
 (define *catalog* '())
 
+;; One key string per live entry, for the registration fast path. The
+;; `member` builtin runs in Elixir, so a fresh load asks "seen before?"
+;; without an interpreted scan; only a re-registration pays the rebuild.
+;; Load-time registration was O(n^2) in interpreted frames without this —
+;; the whole 15s boot.
+(define *catalog-keys* '())
+
+(define (catalog--key k n qualified)
+  (string-append k ":" (if (equal? k "component") qualified n)))
+
 (define (catalog--get pl key)
   (cond ((null? pl) #f)
         ((null? (cdr pl)) #f)
@@ -85,14 +95,19 @@
                         'metadata-model (and luna (catalog--get luna 'model))
                         'doc doc)
                   meta)))
-    (set! *catalog*
-      (cons entry
-            (remove (lambda (e)
-                      (and (equal? (catalog--get e 'kind) (catalog--string kind))
-                           (if (equal? (catalog--string kind) "component")
-                               (equal? (catalog--get e 'qualified-name) qualified)
-                               (equal? (catalog--get e 'name) n))))
-                    *catalog*)))
+    (let ((key (catalog--key k n qualified)))
+      (if (member key *catalog-keys*)
+          (set! *catalog*
+            (cons entry
+                  (remove (lambda (e)
+                            (and (equal? (catalog--get e 'kind) k)
+                                 (if (equal? k "component")
+                                     (equal? (catalog--get e 'qualified-name) qualified)
+                                     (equal? (catalog--get e 'name) n))))
+                          *catalog*)))
+          (begin
+            (set! *catalog* (cons entry *catalog*))
+            (set! *catalog-keys* (cons key *catalog-keys*)))))
     entry))
 
 (define (catalog) (reverse *catalog*))
@@ -152,6 +167,7 @@
 ;;; Declare yours next to its definition: (public! 'my-fn "what it does").
 
 (define *public-api* '())
+(define *public-keys* '())   ; the fast path, as for *catalog-keys*
 
 ;;; Every entry is (NAME DOC SIG CATEGORY).
 ;;;
@@ -200,8 +216,13 @@
          (sig (or (car parts) (string-append "(" n ")")))
          (text (car (cdr parts))))
     (set! *public-api*
-      (cons (list n text sig (or category *public-category*))
-            (remove (lambda (e) (equal? (car e) n)) *public-api*)))
+      (if (member n *public-keys*)
+          (cons (list n text sig (or category *public-category*))
+                (remove (lambda (e) (equal? (car e) n)) *public-api*))
+          (begin
+            (set! *public-keys* (cons n *public-keys*))
+            (cons (list n text sig (or category *public-category*))
+                  *public-api*))))
     (catalog-register! 'function n text
       'domain (or category *public-category*) 'signature sig 'use sig)))
 
@@ -357,8 +378,10 @@
          (i (list-index buf)))
     (if (not (and e (list-markable? buf e)))
         (message "no entry on this line")
+        ;; a mark changes no row — redraw what the list has; a refresh
+        ;; would call the source (the network, for sentry) per keypress
         (begin (list-mark! buf e ch)
-               (list-refresh! buf)
+               (list-redraw! buf)
                (list-goto-index! buf (+ (or i 0) 1))))))
 
 ;; a mark is only as real as the row it sits on. Marks persist with the
@@ -388,7 +411,7 @@
   (lambda ()
     (let ((buf (current-buffer)))
       (list-clear-marks! buf)
-      (list-refresh! buf))))
+      (list-redraw! buf))))
 
 ;; `*` marks the whole list — the rows you narrowed to, because a filter
 ;; and a mark say the same thing: these ones
@@ -413,7 +436,7 @@
       (for-each (lambda (e)
                   (list-mark! buf e (if all-marked? #f *list-mark-char*)))
                 markable)
-      (list-refresh! buf)
+      (list-redraw! buf)
       (when i (list-goto-index! buf i)))))
 
 (domain! 'unknown)
@@ -951,10 +974,13 @@
           (else i))))
 
 ;; the client re-measures its windows after every patch. When one of them
-;; changes width, every table in the editor lays itself out again — this
-;; is the window-configuration change hook, and a list is what listens.
+;; changes width, the tables ON SCREEN lay themselves out again — this is
+;; the window-configuration change hook, and a visible list is what
+;; listens. A hidden list has no width of its own (it would lay out for
+;; the active window), and the width check in list-post-command! re-lays
+;; it the moment a window shows it.
 (define (window-config-changed!)
-  (for-each list-post-command! (buffer-list)))
+  (for-each (lambda (w) (list-post-command! (cadr w))) (window-list)))
 
 ;; Point never rests in the chrome. A header line and a key bar are not
 ;; rows, and a verb acts on the row at point — so a click on the key bar
@@ -984,14 +1010,17 @@
         (list-refresh! buf)))))
 
 ;; a table lays out in characters, so a window that changed width means a
-;; re-render. After a command is the other moment the width can have moved.
+;; re-render — of the rows the list already has. A resize never needs new
+;; data, so it must not call the source (the network, for sentry); only
+;; `g` and the mode's own verbs fetch. After a command is the other
+;; moment the width can have moved.
 (define (list-post-command! buf)
   (when (list-mode-of buf)
     (when (list-table? buf)
       (let ((w (list-view-width buf)))
         (unless (equal? w (buffer-local buf 'list-width))
           (buffer-set-local! buf 'list-width w)
-          (list-refresh! buf))))
+          (list-render! buf 'cached))))
     (list-restamp! buf)
     (list-snap-point! buf)))
 

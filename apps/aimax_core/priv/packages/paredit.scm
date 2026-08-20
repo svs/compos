@@ -467,6 +467,53 @@
                      (forward-char!)))
                 (else (delete-char! 1)))))))))
 
+;;; --- balanced kill-line ------------------------------------------------------
+
+;; At the end of a line, C-k kills the newline.
+(define (paredit--kill-eol! p eol n)
+  (if (and (= p eol) (< eol n))
+      (kill-region-1 p (+ p 1))
+      #f))
+
+(define-command "paredit-kill" "Kill to the end of the line, balanced"
+  (lambda ()
+    (paredit--with-text
+      (lambda (buf text p)
+        (let* ((n (string-byte-length text))
+               (nl (string-index text "\n" p))
+               (eol (if nl nl n))
+               (st (par--ctx text p)))
+          (cond
+            ((equal? (par--mode st) 'string)
+             ;; kill the string body, never its closing quote
+             (let ((limit (min (- (par--string-end text p) 1) eol)))
+               (if (> limit p)
+                   (kill-region-1 p limit)
+                   (paredit--kill-eol! p eol n))))
+            ((not (equal? (par--mode st) 'code))
+             (run-command "kill-line"))
+            (else
+             ;; whole datums that start before eol, then stop
+             (let loop ((i p) (last p))
+               (if (>= i eol)
+                   (if (> last p)
+                       (kill-region-1 p last)
+                       (paredit--kill-eol! p eol n))
+                   (let ((c (par--ch text i)))
+                     (cond
+                       ((or (equal? c " ") (equal? c "\t")) (loop (+ i 1) last))
+                       ((par--closer? c)
+                        (if (> last p) (kill-region-1 p last) #f))
+                       ((equal? c ";") (kill-region-1 p eol))
+                       ((and (equal? c "#") (equal? (par--ch text (+ i 1)) "|"))
+                        (let ((e (par--block-comment-end text i)))
+                          (loop e e)))
+                       (else
+                        (let ((e (par-scan-forward text i)))
+                          (if e
+                              (loop e e)
+                              (if (> last p) (kill-region-1 p last) #f)))))))))))))))
+
 ;;; --- the mode ----------------------------------------------------------------
 ;;; Keys stay bound when the mode is off (there is no unbind primitive).
 ;;; Each key runs a dispatcher that falls through to the default
@@ -483,6 +530,7 @@
     ("DEL" "paredit-backward-delete" "delete-backward-char")
     ("<delete>" "paredit-forward-delete" "delete-char")
     ("C-d" "paredit-forward-delete" "delete-char")
+    ("C-k" "paredit-kill" "kill-line")
     ("C-M-f" "paredit-forward" "forward-sexp")
     ("C-M-b" "paredit-backward" "backward-sexp")
     ("C-M-u" "paredit-backward-up" "backward-up-list")

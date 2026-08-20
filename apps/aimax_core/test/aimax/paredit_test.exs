@@ -277,6 +277,49 @@ defmodule Aimax.PareditTest do
     assert Buffer.text(buf) == "()\n"
   end
 
+  # --- balanced kill-line ----------------------------------------------------
+
+  test "C-k kills to the end of line but never a closer" do
+    buf = fresh_buffer("(a b) c\n")
+    Buffer.goto(buf, 1)
+    press(["C-k"])
+    assert Buffer.text(buf) == "() c\n"
+    assert eval!("(kill-top)") == ~S{"a b"}
+  end
+
+  test "C-k reaches past eol to finish a datum that starts before it" do
+    buf = fresh_buffer("(a (b\n c) d)\n")
+    Buffer.goto(buf, 1)
+    press(["C-k"])
+    assert Buffer.text(buf) == "( d)\n"
+  end
+
+  test "C-k in a string stops at the closing quote" do
+    buf = fresh_buffer("\"ab cd\" x\n")
+    Buffer.goto(buf, 1)
+    press(["C-k"])
+    assert Buffer.text(buf) == "\"\" x\n"
+  end
+
+  test "C-k at eol kills the newline; before a lone closer it kills nothing" do
+    buf = fresh_buffer("a\nb\n")
+    Buffer.goto(buf, 1)
+    press(["C-k"])
+    assert Buffer.text(buf) == "ab\n"
+
+    buf2 = fresh_buffer("(a)\n")
+    Buffer.goto(buf2, 2)
+    press(["C-k"])
+    assert Buffer.text(buf2) == "(a)\n"
+  end
+
+  test "C-k kills a trailing comment with the datums" do
+    buf = fresh_buffer("(a b ;x\n)\n")
+    Buffer.goto(buf, 1)
+    press(["C-k"])
+    assert Buffer.text(buf) == "(\n)\n"
+  end
+
   # --- passthrough -----------------------------------------------------------
 
   test "without paredit-mode the keys keep their default behavior" do

@@ -173,6 +173,68 @@
             ((equal? (car (cdr (cdr (car bs)))) kind) (loop (cdr bs) acc))
             (else (loop (cdr bs) (cons (car bs) acc)))))))
 
+;; Deletion is the exception in this transcript: appends land at the mark,
+;; so stored offsets never shift — a deletion must repair every stored
+;; range in the same call. Blocks, overlays and folds inside [START,END)
+;; drop; ranges after it move left; the waiting range and the saved mark
+;; follow.
+(define (agent-excise-range! buf start end)
+  (let ((len (- end start)))
+    (when (> len 0)
+      (buffer-delete-range! buf start len)
+      (buffer-set-local! buf 'agent-blocks
+        (agent--excise-blocks (agent-blocks buf) start end))
+      (let ((ovs (agent--excise-ranges
+                   (or (buffer-local buf 'agent-overlays) '()) start end)))
+        (buffer-set-local! buf 'agent-overlays ovs)
+        (overlay-set! buf 'agent ovs))
+      (buffer-set-local! buf 'agent-folds
+        (agent--excise-ranges (or (buffer-local buf 'agent-folds) '()) start end))
+      (agent-apply-folds! buf)
+      (let ((w (buffer-local buf 'agent-waiting)))
+        (when w
+          (cond ((>= (car w) end)
+                 (buffer-set-local! buf 'agent-waiting
+                   (list (- (car w) len) (- (nth 1 w) len))))
+                ((and (>= (car w) start) (<= (nth 1 w) end))
+                 (buffer-set-local! buf 'agent-waiting #f)))))
+      (let ((m (buffer-local buf 'agent-saved-mark)))
+        (when m
+          (cond ((>= m end) (buffer-set-local! buf 'agent-saved-mark (- m len)))
+                ((> m start) (buffer-set-local! buf 'agent-saved-mark start))))))))
+
+;; map one offset out of the excised hole
+(define (agent--excise-pos p start end len)
+  (cond ((<= p start) p)
+        ((>= p end) (- p len))
+        (else start)))
+
+;; ranges inside [START,END) drop; ranges after it shift left; ranges
+;; that span the hole shrink. Elements past (S E ...) ride along.
+(define (agent--excise-ranges ranges start end)
+  (let ((len (- end start)))
+    (let loop ((rs ranges) (acc '()))
+      (if (null? rs)
+          (reverse acc)
+          (let* ((r (car rs))
+                 (s (agent--excise-pos (nth 0 r) start end len))
+                 (e (agent--excise-pos (nth 1 r) start end len)))
+            (loop (cdr rs)
+                  (if (>= s e)
+                      acc
+                      (cons (cons s (cons e (cdr (cdr r)))) acc))))))))
+
+;; blocks also carry a tool body offset at position 7 — it moves too
+(define (agent--excise-blocks blocks start end)
+  (let ((len (- end start)))
+    (map (lambda (b)
+           (if (and (equal? (nth 2 b) "tool") (number? (nth 7 b)))
+               (list (nth 0 b) (nth 1 b) "tool" (nth 3 b) (nth 4 b)
+                     (nth 5 b) (nth 6 b)
+                     (agent--excise-pos (nth 7 b) start end len))
+               b))
+         (agent--excise-ranges blocks start end))))
+
 ;; A cancelled backend may never send final updates for its open tools.
 ;; Finish every card in one buffer operation, then close their rich view.
 (define (agent-finalize-running-tools! buf status)
@@ -291,11 +353,14 @@
       (agent-update-modeline! buf))))
 
 (define (agent-show-waiting! slug)
-  (let* ((buf (agent-buf slug))
-         (text "⋯ thinking\n")
-         (start (agent-render! slug text "agent-thought")))
-    (buffer-set-local! buf 'agent-waiting
-      (list start (+ start (string-byte-length text))))))
+  (let ((buf (agent-buf slug)))
+    ;; idempotent: a queued echo re-shows it, and the turn start shows it
+    ;; again — one line, not two
+    (unless (buffer-local buf 'agent-waiting)
+      (let* ((text "⋯ thinking\n")
+             (start (agent-render! slug text "agent-thought")))
+        (buffer-set-local! buf 'agent-waiting
+          (list start (+ start (string-byte-length text))))))))
 
 (define (agent-clear-waiting! slug)
   (let* ((buf (agent-buf slug))
@@ -316,13 +381,70 @@
       (buffer-set-local! buf 'agent-saved-mark
         (min (agent-mark slug) (buffer-size buf))))))
 
+;;; --- queued messages ------------------------------------------------------------
+;;; RET mid-turn moves the message up into the transcript at once, muted,
+;;; and the input clears so the next message can be typed. The muted line
+;;; becomes the normal user line when the model reads the text — at the
+;;; next tool round on the direct lane, at turn start elsewhere. An abort
+;;; excises the lines whose text was never read.
+
+(define (agent-echo-queued! slug text)
+  (let* ((buf (agent-buf slug))
+         (waiting? (buffer-local buf 'agent-waiting)))
+    ;; the waiting line stays the last text before the marker
+    (when waiting? (agent-clear-waiting! slug))
+    (let ((start (agent-render! slug
+                   (string-append "\n>>> you: " text "\n\n")
+                   "agent-queued")))
+      (agent-block-push! buf start (agent-mark slug) "queued" (list text)))
+    (when waiting? (agent-show-waiting! slug))))
+
+;; Abort discards every queued message: its muted line leaves the
+;; transcript. The blocks list is newest first, so excision runs top-down
+;; and earlier offsets stay valid.
+(define (agent-discard-queued-renders! buf)
+  (for-each (lambda (b) (agent-excise-range! buf (nth 0 b) (nth 1 b)))
+            (filter (lambda (b) (equal? (nth 2 b) "queued"))
+                    (agent-blocks buf))))
+
+;; excise every queued line; return their texts, oldest first, so the
+;; caller can render its own output and re-echo them below it
+(define (agent-lift-queued! buf)
+  (let ((qs (filter (lambda (b) (equal? (nth 2 b) "queued"))
+                    (agent-blocks buf))))
+    (for-each (lambda (b) (agent-excise-range! buf (nth 0 b) (nth 1 b))) qs)
+    (map (lambda (b) (nth 3 b)) (reverse qs))))
+
+;; After a restart the queue is gone but the muted lines survive in the
+;; transcript. The text returns to the input, oldest first, ahead of any
+;; draft — the same place it was before RET. Runs with BUF current.
+(define (agent-unqueue-renders-to-input! buf)
+  (let ((qs (filter (lambda (b) (equal? (nth 2 b) "queued")) (agent-blocks buf))))
+    (unless (null? qs)
+      (let ((texts (map (lambda (b) (nth 3 b)) (reverse qs)))
+            (draft (chat-input-text buf)))
+        (for-each (lambda (b) (agent-excise-range! buf (nth 0 b) (nth 1 b))) qs)
+        (chat-replace-input! buf
+          (fold (lambda (acc t)
+                  (if (equal? acc "") t (string-append acc "\n" t)))
+                ""
+                (if (equal? (string-trim draft) "")
+                    texts
+                    (append texts (list draft)))))))))
+
 ;; event kinds that count as the turn having produced something visible —
 ;; a turn-end after none of them is a silent turn
 (define *agent-output-kinds* '(chunk thought tool-call tool-update plan question error))
 
 (define (agent-handle-event slug e)
-  (let ((buf (agent-buf slug))
-        (type (plist-get e 'type)))
+  (let* ((buf (agent-buf slug))
+         (type (plist-get e 'type))
+         ;; queued lines stay the last thing above the input: an event
+         ;; that renders lifts them out of the way first and re-echoes
+         ;; them below its own output (the for-each at the end)
+         (lifted (if (member type '(status model-state mode-state usage user-msg))
+                     '()
+                     (agent-lift-queued! buf))))
     ;; any sign of life ends the waiting state
     (unless (or (equal? type 'user-msg) (equal? type 'status))
       (agent-clear-waiting! slug))
@@ -352,18 +474,25 @@
 
       ((equal? type 'user-msg)
        (buffer-set-local! buf 'chat-turn-active #t)
-       (chat-pop-queued! buf)
        ;; the conversation of record is the truth on EVERY backend: the api
        ;; lane replays it per request, ACP seeds a fresh session from it,
        ;; and both flatten it to .chat files. The api lane's turn task
        ;; already recorded this turn from the wire — chat-record-event!
        ;; knows, and does not record it twice.
        (chat-record-event! buf "user" (list (list "text" (plist-get e 'text))))
-       (let ((start (agent-render! slug
-                      (string-append "\n>>> you: " (plist-get e 'text) "\n\n")
-                      "agent-you")))
-         (agent-block-push! buf start (agent-mark slug) "user"
-           (list (plist-get e 'text))))
+       ;; a message echoed at RET (queued mid-turn) becomes the normal
+       ;; user line now that the model reads it; any younger queued
+       ;; lines re-echo below it, still muted
+       (let* ((texts (agent-lift-queued! buf))
+              (txt (plist-get e 'text))
+              (rest (if (and (not (null? texts)) (equal? (car texts) txt))
+                        (cdr texts)
+                        texts)))
+         (let ((start (agent-render! slug
+                        (string-append "\n>>> you: " txt "\n\n")
+                        "agent-you")))
+           (agent-block-push! buf start (agent-mark slug) "user" (list txt)))
+         (for-each (lambda (t) (agent-echo-queued! slug t)) rest))
        (agent-show-waiting! slug)
        (chat-activity! buf "waiting…"))
 
@@ -568,7 +697,8 @@
          (agent-block-drop-kind! buf "permission")
          (agent-block-drop-kind! buf "question")))
 
-      (else #f))))
+      (else #f))
+    (for-each (lambda (t) (agent-echo-queued! slug t)) lifted)))
 
 (llm-session-on-event!
   (lambda (slug events)
@@ -940,7 +1070,7 @@
               acc
               (let ((b (car bs)))
                 (loop (cdr bs)
-                      (if (member (caddr b) (list "meta" "waiting" "permission" "question"))
+                      (if (member (caddr b) (list "meta" "waiting" "permission" "question" "queued"))
                           acc
                           (string-append acc
                             (substring-bytes text (car b)
@@ -1032,12 +1162,14 @@
                      (chat-history-reset! buf)
                      (let ((result (agent-send-msg! slug input)))
                        (if (equal? result 'queued)
-                           ;; mid-turn: the text stays put, muted, until its
-                           ;; turn. The direct lane steers it into the running
-                           ;; turn at the next tool round; other backends run
-                           ;; it when the turn ends.
+                           ;; mid-turn: the message moves up into the
+                           ;; transcript at once, muted, and the input clears
+                           ;; for the next one. The direct lane steers it into
+                           ;; the running turn at the next tool round; other
+                           ;; backends run it when the turn ends.
                            (begin
-                             (chat-mark-queued! buf)
+                             (agent-echo-queued! slug input)
+                             (chat-clear-input! buf)
                              (end-of-buffer!)
                              (message
                                (if (and (boundp (quote chat-stateless?))
@@ -1159,7 +1291,7 @@
               (else
                (buffer-set-local! buf 'agent-cancelling #t)
                (agent-finalize-running-tools! buf "cancelled")
-               (chat-clear-queued! buf)
+               (agent-discard-queued-renders! buf)
                (llm-session-cancel! slug)
                (message "cancel requested — C-RET again forces a restart")))))))
 
@@ -1174,7 +1306,7 @@
       (if (and slug (member (agent-status slug) '(running starting needs_attention)))
           (begin
             (agent-finalize-running-tools! buf "cancelled")
-            (chat-clear-queued! buf)
+            (agent-discard-queued-renders! buf)
             (llm-session-cancel! slug)
             ;; both waiting markers: a thread renders its own ('agent-waiting),
             ;; a chat that never attached a runtime renders 'chat-waiting

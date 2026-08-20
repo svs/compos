@@ -4515,6 +4515,11 @@
         (when (boundp (quote agent-block-drop-kind!))
           (agent-block-drop-kind! buf "permission")
           (agent-block-drop-kind! buf "waiting")
+          ;; a queued message the dead runtime never read returns to the
+          ;; input; a LIVE runtime still holds its queue, so its muted
+          ;; lines stay
+          (unless (chat-live-runtime? buf)
+            (agent-unqueue-renders-to-input! buf))
           (let ((ovs (buffer-local buf 'agent-overlays)))
             (when ovs (overlay-set! buf 'agent ovs)))
           (agent-apply-folds! buf))
@@ -4561,8 +4566,15 @@
 ;; *llm-system* and the mcp note.)
 (define *chat-edit-protocol*
   (string-append
-    "Never guess a buffer's contents: read it with eval-scheme "
-    "(buffer-text \"NAME\") before commenting, and change it with "
+    "Never guess a buffer's contents. For a source buffer, read the "
+    "structure first with eval-scheme: (code-outline \"NAME\") lists every "
+    "definition as (LINE KIND NAME DOC), (code-read \"NAME\" LINE) returns "
+    "the one definition that holds LINE, and (code-replace! \"NAME\" LINE "
+    "NEW) swaps it. (code-sexp \"NAME\" ANCHOR) selects the smallest "
+    "expression around unique ANCHOR text; (code-sexp-replace! \"NAME\" "
+    "ANCHOR NEW) replaces it. Do not call (buffer-text) on a whole source "
+    "buffer when the outline answers. Read a prose buffer with "
+    "(buffer-text \"NAME\"), and change any buffer with "
     "(buffer-replace! \"NAME\" OLD NEW) — exact unique old string -> new; "
     "it edits the live buffer, never the file. Make the smallest edit "
     "that does the job."))
@@ -4912,6 +4924,9 @@
 
 ;; PROCESS state — mirrors a live runtime, so it is always stale after a
 ;; restart and meaningless after a reset: both clear it wholesale
+;; ('agent-queued is retired — queued messages live in the transcript as
+;; "queued" blocks now — but stays listed so old sessions' stale values
+;; are still swept)
 (define chat-runtime-locals
   '(agent-slug agent-queued agent-waiting chat-waiting chat-activity
     agent-cancelling agent-seed-context agent-tool-bodies
@@ -5004,7 +5019,6 @@
          (mark (or (buffer-local buf 'agent-saved-mark) (chat-legacy-mark buf)))
          (said (string-trim (agent-seed-transcript buf))))
     (buffer-set-local! buf 'agent-saved-mark mark)
-    (buffer-set-local! buf 'agent-queued '())
     ;; a fresh ACP session starts empty and has to be seeded; the api lane
     ;; replays the record on every request anyway
     (buffer-set-local! buf 'agent-seed-context
@@ -5190,32 +5204,28 @@
     start))
 
 ;;; --- the input region ------------------------------------------------------------
-;;; Layout: [transcript … mark][marker][queued, muted][live input]
+;;; Layout: [transcript … mark][marker][live input]
 ;;;
 ;;; ONE function says where it starts. "Where does the input begin" used to
 ;;; be computed five ways — twice in Scheme off the runtime mark, once off
 ;;; the buffer-local, once in the payload builder, once in the renderer —
-;;; and only one of them knew about both 'agent-marker-bytes and the queued
-;;; prefix. Every reader takes it from here now, and the payload ships the
-;;; same number to the client.
+;;; and only one of them knew about 'agent-marker-bytes. Every reader takes
+;;; it from here now, and the payload ships the same number to the client.
 ;;;
 ;;; It reads buffer-locals, never a runtime: a restored chat has no thread
 ;;; until its first send, and up-arrow has to work before then.
 
-;; messages steered mid-turn stay in the input region, muted, until their
-;; turn starts — 'agent-queued holds their raw byte lengths, oldest first
-(define (chat-queued-bytes buf)
-  (fold (lambda (acc n) (+ acc n)) 0 (or (buffer-local buf 'agent-queued) '())))
-
-;; just past the marker: where the queued prefix begins
+;; just past the marker: where the live input begins. A message queued
+;; mid-turn does not live here — RET echoes it into the transcript as a
+;; muted "queued" block (agent-echo-queued!), and the input clears.
 (define (chat-input-start buf)
   (+ (chat-mark buf)
      (or (buffer-local buf 'agent-marker-bytes)
          (string-byte-length *chat-input-marker*))))
 
-;; (START END) of the LIVE input — what RET sends, past anything queued
+;; (START END) of the LIVE input — what RET sends
 (define (chat-input-region buf)
-  (list (+ (chat-input-start buf) (chat-queued-bytes buf)) (buffer-size buf)))
+  (list (chat-input-start buf) (buffer-size buf)))
 
 (define (chat-input-text buf)
   (let ((r (chat-input-region buf)))
@@ -5229,30 +5239,6 @@
   (chat-clear-input! buf)
   (end-of-buffer!)
   (unless (equal? text "") (insert! text)))
-
-;; mute the live tail instead of clearing it: its turn has not started
-(define (chat-mark-queued! buf)
-  (let* ((r (chat-input-region buf))
-         (start (car r))
-         (end (car (cdr r))))
-    (buffer-set-local! buf 'agent-queued
-      (append (or (buffer-local buf 'agent-queued) '()) (list (- end start))))
-    (agent-add-overlay! buf start end "agent-queued")))
-
-;; its turn started: the muted text leaves the input region (the rendered
-;; >>> you: line replaces it)
-(define (chat-pop-queued! buf)
-  (let ((q (or (buffer-local buf 'agent-queued) '())))
-    (unless (null? q)
-      (buffer-delete-range! buf (chat-input-start buf) (car q))
-      (buffer-set-local! buf 'agent-queued (cdr q)))))
-
-;; Abort discards every queued turn, including its muted input text.
-(define (chat-clear-queued! buf)
-  (let ((bytes (chat-queued-bytes buf)))
-    (when (> bytes 0)
-      (buffer-delete-range! buf (chat-input-start buf) bytes))
-    (buffer-set-local! buf 'agent-queued '())))
 
 ;;; --- the conversation of record ------------------------------------------------
 ;;; ...moved to packages/chat.scm: the record, compaction, healing, the

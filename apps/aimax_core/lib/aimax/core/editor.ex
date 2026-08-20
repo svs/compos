@@ -1933,7 +1933,6 @@ defmodule Aimax.Core.Editor do
       # add these two together itself, which made it a fourth place that
       # had to agree with Scheme about what a chat's layout is.
       input_start: mark + marker_bytes,
-      queued: Map.get(locals, "agent-queued") || [],
       slug: Map.get(locals, "agent-slug"),
       # controlled card state (S6): the ids whose tool cards show open
       open_cards: Map.get(locals, "agent-open-cards") || [],

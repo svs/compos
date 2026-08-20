@@ -1004,6 +1004,8 @@ defmodule Aimax.Ui.EditorLive do
               <%= case b.kind do %>
                 <% :user -> %>
                   <div class="ag-user"><span class="ag-label">YOU</span><div class="ag-user-text">{b.text}</div></div>
+                <% :queued -> %>
+                  <div class="ag-user ag-queued"><span class="ag-label">YOU</span><div class="ag-user-text">{b.text}</div></div>
                 <% :prose -> %>
                   <div class="ag-prose">{Phoenix.HTML.raw(b.html)}</div>
                 <% :thought -> %>
@@ -1077,12 +1079,12 @@ defmodule Aimax.Ui.EditorLive do
           </div>
           <div class="ag-inputrow">
             <span class="ag-label">YOU</span>
-            <span class="ag-input"><span class="ag-queued">{@node.ag_input.queued}</span>{@node.ag_input.pre}<span
+            <span class="ag-input">{@node.ag_input.pre}<span
                 :if={@node.ag_input.cur != ""}
                 class="cursor"
               >{@node.ag_input.cur}</span>{@node.ag_input.post}</span>
             <span
-              :if={@node.ag_input.pre == "" and @node.ag_input.post == "" and @node.ag_input.queued == ""}
+              :if={@node.ag_input.pre == "" and @node.ag_input.post == ""}
               class="ag-hint"
             >RET sends · C-RET interrupts</span>
           </div>
@@ -1303,6 +1305,17 @@ defmodule Aimax.Ui.EditorLive do
     %{kind: :user, text: text_of}
   end
 
+  # a message queued mid-turn: the user line, muted until the model reads it
+  defp ag_block([s, e, "queued" | meta], text, _open) do
+    text_of =
+      case meta do
+        [msg | _] when is_binary(msg) -> msg
+        _ -> text |> safe_slice(s, e) |> String.trim() |> String.replace_prefix(">>> you: ", "")
+      end
+
+    %{kind: :queued, text: text_of}
+  end
+
   defp ag_block([s, e, "prose" | _], text, _open) do
     md = safe_slice(text, s, e)
 
@@ -1478,12 +1491,9 @@ defmodule Aimax.Ui.EditorLive do
     |> String.replace("</table>", "</table></div>")
   end
 
-  # the input region: [queued (muted)][live text][cursor when point is home]
+  # the input region: [live text][cursor when point is home]
   defp ag_input(leaf, ag) do
-    start = ag.input_start
-    queued_len = ag.queued |> Enum.filter(&is_integer/1) |> Enum.sum()
-    queued = safe_slice(leaf.text, start, start + queued_len)
-    live_start = start + queued_len
+    live_start = ag.input_start
     live = safe_slice(leaf.text, live_start, byte_size(leaf.text))
 
     {pre, cur, post} =
@@ -1501,7 +1511,7 @@ defmodule Aimax.Ui.EditorLive do
         {live, "", ""}
       end
 
-    %{queued: queued, pre: pre, cur: cur, post: post}
+    %{pre: pre, cur: cur, post: post}
   end
 
   # The cursor in a markdown preview: a private-use sentinel goes into the

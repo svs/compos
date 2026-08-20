@@ -839,7 +839,12 @@ defmodule Aimax.AgentTest do
            end)
 
     refute "tc-abort" in (Buffer.get_local(buf, "agent-open-cards") || [])
-    assert Buffer.get_local(buf, "agent-queued") == []
+
+    refute Enum.any?(Buffer.get_local(buf, "agent-blocks") || [], fn
+             [_, _, "queued" | _] -> true
+             _ -> false
+           end)
+
     refute Buffer.text(buf) =~ "do not run this next"
 
     inject(agent, %{

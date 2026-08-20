@@ -995,9 +995,13 @@ defmodule Aimax.Ui.Layouts do
               },
               selectRegion() {
                 const d = this.doc();
+                const w = this.el.contentWindow;
                 const pt = d && d.querySelector(".pt");
                 const mk = d && d.querySelector(".mk");
-                if (!pt || !mk) return;
+                if (!pt || !mk) {
+                  if (w && w.CSS && w.CSS.highlights) w.CSS.highlights.delete("region");
+                  return;
+                }
                 const range = d.createRange();
                 const markFirst = !!(mk.compareDocumentPosition(pt) & Node.DOCUMENT_POSITION_FOLLOWING);
                 if (markFirst) {
@@ -1007,9 +1011,17 @@ defmodule Aimax.Ui.Layouts do
                   range.setStartAfter(pt);
                   range.setEndBefore(mk);
                 }
-                const selection = d.getSelection();
-                selection.removeAllRanges();
-                selection.addRange(range);
+                // the iframe never has keyboard focus, and Chrome does not
+                // paint a selection in an unfocused document — an isearch
+                // match was invisible until RET. The highlight API paints
+                // regardless of focus; the selection stays as the fallback.
+                if (w && w.CSS && w.CSS.highlights && w.Highlight) {
+                  w.CSS.highlights.set("region", new w.Highlight(range));
+                } else {
+                  const selection = d.getSelection();
+                  selection.removeAllRanges();
+                  selection.addRange(range);
+                }
               },
               attach() {
                 const d = this.doc();

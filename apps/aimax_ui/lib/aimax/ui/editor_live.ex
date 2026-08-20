@@ -1561,6 +1561,7 @@ defmodule Aimax.Ui.EditorLive do
     code,pre,kbd{background-color:#{p.inset} !important}
     blockquote{color:#{p.dim} !important}
     th{background-color:#{p.inset} !important}
+    ::highlight(region){background-color:color-mix(in srgb,#{p.link} 32%,transparent) !important}
     </style>
     """
 
@@ -1589,10 +1590,12 @@ defmodule Aimax.Ui.EditorLive do
 
     """
     <!DOCTYPE html><html><head><meta charset="utf-8"><style>
-    body{margin:0;padding:26px 34px 60px;max-width:62em;overflow-wrap:break-word;
-         word-break:normal;font:16px/1.65 Spectral,Georgia,serif;color:#{fg};background:#{bg}}
-    h1,h2,h3,h4{font-family:Spectral,Georgia,serif;line-height:1.25;margin:26px 0 8px}
-    h1{font-size:28px}h2{font-size:22px;border-bottom:1px solid #{border};padding-bottom:4px}
+    body{margin:0 auto;padding:30px 34px 70px;max-width:44em;overflow-wrap:break-word;
+         word-break:normal;font:16.5px/1.7 Spectral,Georgia,serif;color:#{fg};background:#{bg}}
+    p{margin:0 0 1em}
+    h1,h2,h3,h4{font-family:Spectral,Georgia,serif;line-height:1.25;margin:1.4em 0 0.4em}
+    body>h1:first-child{margin-top:0}
+    h1{font-size:29px}h2{font-size:22px;border-bottom:1px solid #{border};padding-bottom:4px}
     h3{font-size:18px;color:#{accent}}
     code,pre{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:13.5px}
     code{background:#{inset};padding:1px 4px;border-radius:2px}
@@ -1600,14 +1603,18 @@ defmodule Aimax.Ui.EditorLive do
     pre code{background:none;padding:0}
     a,a:visited{color:#{link};text-decoration-thickness:1px;text-underline-offset:2px;
       text-decoration-color:color-mix(in srgb,currentColor 45%,transparent)}
-    a:hover{text-decoration-color:currentColor}blockquote{margin:12px 0;padding:2px 14px;border-left:3px solid #{border};color:#{dim}}
+    a:hover{text-decoration-color:currentColor}
+    a:empty{display:none}
+    blockquote{margin:12px 0;padding:2px 14px;border-left:3px solid #{border};color:#{dim}}
     blockquote.llm-response{margin:18px 0;padding:12px 16px;border:1px solid #{border};
          border-left:4px solid #{accent};border-radius:7px;background:#{inset};color:#{fg};user-select:text}
     blockquote.llm-response>:first-child{margin-top:0}
     blockquote.llm-response>:last-child{margin-bottom:0}
-    table{border-collapse:collapse;font-size:14px}th,td{border:1px solid #{border};padding:5px 9px}
+    table{border-collapse:collapse;font-size:14px;display:block;overflow-x:auto;max-width:100%}
+    th,td{border:1px solid #{border};padding:5px 9px}
     th{background:#{inset};text-align:left}
-    img{max-width:100%}hr{border:0;border-top:1px solid #{border};margin:22px 0}
+    img{max-width:100%;height:auto;border-radius:3px}
+    hr{border:0;border-top:1px solid #{border};margin:22px 0}
     .tweet{margin:12px 0;padding:12px 16px;border:1px solid #{border};border-radius:10px;
            max-width:32em;background:#{inset};font-size:14.5px}
     .tweet blockquote{margin:0;padding:0;border:0;color:#{fg}}
@@ -1620,6 +1627,7 @@ defmodule Aimax.Ui.EditorLive do
     .tw-text{margin:0 0 10px}
     .tweet .tw-media{width:100%;border-radius:8px;margin:2px 0 8px}
     .tw-date{color:#{dim};font-size:13px;text-decoration:none}
+    ::highlight(region){background:color-mix(in srgb,#{accent} 32%,transparent)}
     .pt{display:inline-block;width:2px;height:1.05em;margin:0 -1px;vertical-align:-0.18em;
         background:#{accent};animation:ptb 1.1s step-end infinite}
     .mk{display:inline-block;width:0;height:0}

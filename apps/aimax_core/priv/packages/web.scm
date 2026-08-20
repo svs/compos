@@ -21,30 +21,42 @@
 (define (web--shell-quote text)
   (string-append "'" (string-join (string-split text "'") "'\\''") "'"))
 
-;; URL -> markdown, in a Task. Tests replace this seam.
-;;
-;; One fetch, three readings of it, in order:
+;; the fetched html, converted three ways in order from one file:
 ;;   1. the ARTICLE — `readable` (Mozilla's readability) extracts it,
 ;;      which drops the page furniture: nav, subscribe boxes, like
 ;;      counts, audio players. Absent or empty (a page that is not an
 ;;      article, or the tool is not installed), then
 ;;   2. the WHOLE page through pandoc, and
 ;;   3. when pandoc answers only a "[TABLE]" placeholder (a nested
-;;      table layout — Hacker News), the page again with the table
-;;      tags flattened, so it reads as lines with its links intact.
-(define (web--pipeline url k)
-  (let ((u (web--shell-quote url))
+;;      table layout), the page again with the table tags flattened,
+;;      so it reads as lines with its links intact.
+(define (web--convert-html url html k)
+  (let ((f (string-append (aimax-home) "/browse-fetch.html"))
+        (u (web--shell-quote url))
         (p " | pandoc -f html-native_divs-native_spans -t gfm-raw_html"))
+    (write-file! f html)
     (shell-command->string
       (string-append
-        "t=$(mktemp); curl -sL --max-time 20 " u " -o \"$t\"; "
-        "out=$(readable --base " u " \"$t\" 2>/dev/null" p "); "
-        "if [ \"${#out}\" -lt 200 ]; then out=$(cat \"$t\"" p "); fi; "
+        "out=$(readable --base " u " " (web--shell-quote f) " 2>/dev/null" p "); "
+        "if [ \"${#out}\" -lt 200 ]; then out=$(cat " (web--shell-quote f) p "); fi; "
         "case \"$out\" in *'[TABLE]'*) "
         "out=$(perl -pe 's{</?(?:table|tbody|thead|tr|td|th)\\b[^>]*>}{ }gi'"
-        " < \"$t\"" p ");; esac; "
-        "rm -f \"$t\"; printf %s \"$out\"")
+        " < " (web--shell-quote f) p ");; esac; "
+        "printf %s \"$out\"")
       (lambda (out) (k (if (equal? (string-trim out) "") #f out))))))
+
+;; URL -> markdown, in a Task. Tests replace this seam. ONE download:
+;; the raw html lands on the buffer for the original view and the
+;; browse-after-load hooks, and the conversion reads the same bytes.
+(define (web--pipeline url k)
+  (*web-fetch-html* url
+    (lambda (html)
+      (if (not html)
+          (k #f)
+          (begin
+            (when (buffer-known? *web-buffer*)
+              (buffer-set-local! *web-buffer* 'web-html html))
+            (web--convert-html url html k))))))
 
 (define *web-fetch* web--pipeline)
 
@@ -276,12 +288,28 @@
             (buffer-set-local! buf 'browse-history (cdr h))
             (web--goto-url! buf (car h) #f))))))
 
-(define-command "browse-refresh" "Fetch this page again"
+;; g asks WHERE: this page leads as the default, so a plain RET
+;; refetches it — and the visited sites complete, so g also goes
+;; elsewhere without leaving the buffer
+(define-command "browse-refresh" "Fetch a page: this one again, or another"
   (lambda ()
-    (let ((buf (current-buffer)))
-      (buffer-set-local! buf 'cache-time #f)
-      (message "fetching…")
-      (cache-refresh! buf))))
+    (let* ((buf (current-buffer))
+           (cur (buffer-local buf 'browse-url)))
+      (if (not cur)
+          (run-command "browse")
+          (minibuffer-read* "Go to (default this page): "
+            (cons (list cur "this page — refetch")
+                  (filter (lambda (e) (not (equal? (car e) cur)))
+                          (web--visited)))
+            (list (list 'match-hint 1)
+                  (list 'confirm
+                        (lambda (url)
+                          (let ((u (string-trim url)))
+                            (cond ((or (equal? u "") (equal? u cur))
+                                   (buffer-set-local! buf 'cache-time #f)
+                                   (message "fetching…")
+                                   (cache-refresh! buf))
+                                  (else (browse u))))))))))))
 
 ;; the ORIGINAL page: the raw html, rendered as authored. Reading is
 ;; still all it does — scripts never run; a page that needs them wants
@@ -358,9 +386,10 @@
 
 (mode-doc! "browse-mode"
   "A web page, rendered. RET follows the link at point, TAB and n/p
-walk the links, l goes back, g refetches, C-c C-v shows the original
-page and again the reader view, o opens the page in the real browser,
-and C-s searches to any link.")
+walk the links, l goes back, g asks where to go — RET refetches this
+page, a visited site or a fresh URL goes there — C-c C-v shows the
+original page and again the reader view, o opens the page in the real
+browser, and C-s searches to any link.")
 
 ;; the one entry point: normalize, enter the mode, fetch
 (define (browse url)

@@ -585,6 +585,23 @@ defmodule Aimax.Core.Session do
         "(mcp-await-ready SERVER [MS]) — wait until the server is ready; return #t or #f.",
       "mcp-tool-call" =>
         "(mcp-tool-call SERVER TOOL ARGS [TIMEOUT|CB]) — call one tool; without CB, wait for text.",
+      "lsp-start!" =>
+        "(lsp-start! NAME ROOT SPEC) — start a language server for a project root.",
+      "lsp-stop!" =>
+        "(lsp-stop! ID) — stop the connection \"name@root\" with the shutdown handshake.",
+      "lsp-connections" => "(lsp-connections) — return (id status name root) per connection.",
+      "lsp-server-detail" =>
+        "(lsp-server-detail ID) — return a status plist, or #f when never started.",
+      "lsp-log" => "(lsp-log ID) — return ((time dir text) ...) JSON-RPC frames, oldest first.",
+      "lsp-on-event!" =>
+        "(lsp-on-event! HANDLER) — set the handler that gets (ID METHOD PARAMS) on server events.",
+      "lsp-open!" => "(lsp-open! ID BUF) — open BUF on the server and keep it in sync.",
+      "lsp-close!" => "(lsp-close! ID BUF) — close BUF on the server.",
+      "lsp-notify!" => "(lsp-notify! ID METHOD PARAMS) — send a notification to the server.",
+      "lsp-request" =>
+        "(lsp-request ID METHOD PARAMS CB) — send a request; CB gets (OK RESULT).",
+      "lsp-buffer-request" =>
+        "(lsp-buffer-request ID METHOD BUF BYTE-POS [EXTRA] CB) — request at a buffer position; CB gets (OK RESULT).",
       "tool-specs-json" =>
         "(tool-specs-json SPECS) — return the specs as MCP tools/list JSON text.",
       "priv-path" =>
@@ -1013,6 +1030,123 @@ defmodule Aimax.Core.Session do
               :ets.delete(@escaped, key)
             end
           end)
+
+          :void
+      end,
+      # --- LSP client (Aimax.Core.LSP; policy in packages/lsp.scm) ----------
+      "lsp-start!" => fn [name, root, spec] ->
+        case Aimax.Core.LSP.start(s(name), s(root), lsp_spec(spec)) do
+          {:ok, _} -> :void
+          {:error, msg} -> raise_scheme("lsp-start!: #{inspect(msg)}")
+        end
+      end,
+      "lsp-stop!" => fn [id] ->
+        case Aimax.Core.LSP.parse_id(s(id)) do
+          {name, root} -> Aimax.Core.LSP.stop(name, root)
+          _ -> :ok
+        end
+
+        :void
+      end,
+      "lsp-connections" => fn [] ->
+        for c <- Aimax.Core.LSP.connections(), do: [c.id, to_string(c.status), c.name, c.root]
+      end,
+      "lsp-server-detail" => fn [id] ->
+        with {name, root} <- Aimax.Core.LSP.parse_id(s(id)),
+             d when d != nil <- Aimax.Core.LSP.detail(name, root) do
+          [
+            {:sym, "status"},
+            to_string(d.status),
+            {:sym, "reason"},
+            Map.get(d, :reason, ""),
+            {:sym, "encoding"},
+            to_string(Map.get(d, :encoding, "")),
+            {:sym, "server-name"},
+            Map.get(d, :server_info, %{})["name"] || "",
+            {:sym, "docs"},
+            Map.get(d, :docs, [])
+          ]
+        else
+          _ -> false
+        end
+      end,
+      "lsp-on-event!" => fn [handler] ->
+        :ets.insert(@escaped, {{:lsp_handler}, handler})
+        :void
+      end,
+      "lsp-log" => fn [id] ->
+        case Aimax.Core.LSP.parse_id(s(id)) do
+          {name, root} ->
+            for e <- Aimax.Core.LSP.log(name, root) do
+              [
+                e.at
+                |> :calendar.system_time_to_local_time(:millisecond)
+                |> NaiveDateTime.from_erl!()
+                |> Calendar.strftime("%H:%M:%S"),
+                to_string(e.dir),
+                e.text
+              ]
+            end
+
+          _ ->
+            []
+        end
+      end,
+      "lsp-open!" => fn [id, buf] ->
+        {pid, _key} = lsp_conn!(id)
+        Aimax.Core.LSP.Conn.open_doc(pid, s(buf))
+        :void
+      end,
+      "lsp-close!" => fn [id, buf] ->
+        case Aimax.Core.LSP.parse_id(s(id)) do
+          {name, root} ->
+            case Aimax.Core.LSP.whereis(name, root) do
+              nil -> :ok
+              pid -> Aimax.Core.LSP.Conn.close_doc(pid, s(buf))
+            end
+
+          _ ->
+            :ok
+        end
+
+        :void
+      end,
+      "lsp-notify!" => fn [id, method, params] ->
+        {pid, _key} = lsp_conn!(id)
+        Aimax.Core.LSP.Conn.notify(pid, s(method), scheme_to_json(params))
+        :void
+      end,
+      "lsp-request" => fn [id, method, params, callback] ->
+        {pid, key} = lsp_conn!(id)
+        Aimax.Core.LSP.Conn.request(pid, s(method), scheme_to_json(params), lsp_cb(callback, key))
+        :void
+      end,
+      "lsp-buffer-request" => fn
+        [id, method, buf, pos, callback] ->
+          {pid, key} = lsp_conn!(id)
+
+          Aimax.Core.LSP.Conn.buffer_request(
+            pid,
+            s(method),
+            s(buf),
+            pos,
+            %{},
+            lsp_cb(callback, key)
+          )
+
+          :void
+
+        [id, method, buf, pos, extra, callback] ->
+          {pid, key} = lsp_conn!(id)
+
+          Aimax.Core.LSP.Conn.buffer_request(
+            pid,
+            s(method),
+            s(buf),
+            pos,
+            scheme_to_json(extra),
+            lsp_cb(callback, key)
+          )
 
           :void
       end,
@@ -1885,6 +2019,55 @@ defmodule Aimax.Core.Session do
   defp mcp_callback_args({:error, msg}), do: [false, to_string(msg)]
 
   # MCP spec plist: 'env and 'headers values are themselves plists -> maps
+  # spec plist -> the map LSP.Conn reads: env becomes a map; settings and
+  # init-options become JSON-ready values (they cross the wire verbatim)
+  defp lsp_spec(plist) do
+    plist
+    |> plist_to_map()
+    |> Map.new(fn
+      {"env", v} when is_list(v) ->
+        {"env", v |> Enum.chunk_every(2) |> Map.new(fn [a, b] -> {to_string(a), b} end)}
+
+      {"settings", v} ->
+        {"settings", Aimax.Core.Plist.to_json(v)}
+
+      {"init-options", v} ->
+        {"init_options", Aimax.Core.Plist.to_json(v)}
+
+      kv ->
+        kv
+    end)
+  end
+
+  defp lsp_conn!(id) do
+    with {name, root} <- Aimax.Core.LSP.parse_id(s(id)),
+         pid when pid != nil <- Aimax.Core.LSP.whereis(name, root) do
+      {pid, {name, root}}
+    else
+      _ -> raise_scheme("lsp: no connection #{s(id)}")
+    end
+  end
+
+  # A GC-rooted result callback. It fires from the conn process, so the
+  # Scheme apply always moves to a task, on the connection's own lane.
+  defp lsp_cb(callback, key) do
+    refkey = {:lsp_call, make_ref()}
+    :ets.insert(@escaped, {refkey, callback})
+
+    fn result ->
+      Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
+        try do
+          apply_callback(callback, lsp_callback_args(result), nil, {:lsp, key})
+        after
+          :ets.delete(@escaped, refkey)
+        end
+      end)
+    end
+  end
+
+  defp lsp_callback_args({:ok, result}), do: [true, Aimax.Core.LLM.json_to_scheme(result)]
+  defp lsp_callback_args({:error, msg}), do: [false, to_string(msg)]
+
   defp mcp_spec(plist) do
     plist
     |> plist_to_map()

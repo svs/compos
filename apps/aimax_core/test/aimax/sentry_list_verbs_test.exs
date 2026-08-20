@@ -119,6 +119,28 @@ defmodule Aimax.SentryListVerbsTest do
     assert Buffer.text("*Sentry issue: 43*") =~ "ATS-43"
   end
 
+  test "resolving the shown row advances its detail to the next row" do
+    eval!(~S"""
+    (set! *sentry-write-transport* (lambda (url payload) "\n200"))
+    """)
+
+    eval!(~S|(run-command "sentry")|)
+    eval!(~S|(switch-to-buffer! "*Sentry issues*")|)
+    eval!(~S|(list-goto-first-entry "*Sentry issues*")|)
+
+    # RET shows ATS-42's detail in the other window; focus stays in the list
+    press("RET")
+    assert eval!("(map cadr (window-list))") =~ "*Sentry issue: 42*"
+
+    press("R")
+    press("y")
+
+    # the highlight lands on ATS-43 and the detail window follows it;
+    # the resolved issue's detail buffer is gone
+    assert eval!("(map cadr (window-list))") =~ "*Sentry issue: 43*"
+    assert eval!(~S|(buffer-exists? "*Sentry issue: 42*")|) == "#f"
+  end
+
   test "with nothing marked the verbs act on the row at point" do
     eval!(~S"""
     (begin

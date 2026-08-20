@@ -726,6 +726,28 @@
                   (when url (*sentry-open-url* url))))
               (list-targets *sentry-buffer*))))
 
+;; After a resolve the list drops the row, but a window can keep showing
+;; a dead issue's detail. That window advances to the row the highlight
+;; lands on, and the stale detail buffers die.
+(define (sentry--advance-details! resolved-ids)
+  (let* ((stale (map sentry--detail-buffer resolved-ids))
+         (shown (filter (lambda (w) (member (cadr w) stale)) (window-list)))
+         (rest (filter (lambda (e)
+                         (not (member (sentry--text (sentry--get e 'id))
+                                      resolved-ids)))
+                       (list-entries *sentry-buffer*)))
+         (i (or (list-index *sentry-buffer*) 0))
+         (next (and (pair? rest)
+                    (nth (min i (- (length rest) 1)) rest))))
+    (when (and (pair? shown) next)
+      (display-buffer-other-window!
+        (sentry--ensure-detail! (sentry--get next 'id))))
+    (for-each (lambda (b)
+                (when (and (buffer-exists? b)
+                           (not (member b (map cadr (window-list)))))
+                  (buffer-kill! b)))
+              stale)))
+
 (define-command "sentry-list-resolve"
   "Resolve the marked issues, or the one at point, after confirmation"
   (lambda ()
@@ -734,16 +756,18 @@
         (y-or-n
           (string-append "Resolve " (sentry--short-ids issues) " in Sentry?")
           (lambda ()
-            (let loop ((is issues) (done 0))
+            (let loop ((is issues) (done 0) (ok '()))
               (if (null? is)
-                  (message (string-append "Resolved " (number->string done)
-                                          " Sentry issue(s)"))
-                  (let ((reply (sentry-resolve-issue
-                                 (sentry--text (sentry--get (car is) 'id)))))
+                  (begin
+                    (message (string-append "Resolved " (number->string done)
+                                            " Sentry issue(s)"))
+                    (sentry--advance-details! (reverse ok)))
+                  (let* ((id (sentry--text (sentry--get (car is) 'id)))
+                         (reply (sentry-resolve-issue id)))
                     (if (sentry--error? reply)
                         (begin (message (sentry--error-message reply))
-                               (loop (cdr is) done))
-                        (loop (cdr is) (+ done 1))))))
+                               (loop (cdr is) done ok))
+                        (loop (cdr is) (+ done 1) (cons id ok))))))
             (cache-refresh! *sentry-buffer*)))))))
 
 (on-block-click! 'sentry

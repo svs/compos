@@ -19,7 +19,18 @@
 
 (set-face-attribute! 'web-link 'fg "#7aa2f7")
 
-(define *web-buffer* "*browse*")
+;; browser TABS: one buffer per page, every one in the "browse" group.
+;; The switcher finds them by mode — typing "browse" narrows to them.
+(define (web--buffer? b)
+  (equal? (buffer-local b 'mode-name) "browse-mode"))
+
+(define (web--buffer-for url)
+  (let loop ((bs (buffer-list-mru)))
+    (cond ((null? bs) #f)
+          ((and (web--buffer? (car bs))
+                (equal? (buffer-local (car bs) 'browse-url) url))
+           (car bs))
+          (else (loop (cdr bs))))))
 (define *web-cache-ttl* 600)
 
 (define (web--shell-quote text)
@@ -52,21 +63,38 @@
       (lambda (out) (k (if (equal? (string-trim out) "") #f out))))))
 
 ;; URL -> markdown, in a Task. Tests replace this seam. ONE download;
-;; the conversion reads the same bytes from a file.
+;; the conversion reads the same bytes from a file. Holding a session
+;; copy of the page, the fetch revalidates instead: a 304 costs only
+;; headers, and the copy serves again with a fresh stamp.
+;; the cache fetch sets *web--revalidate* when it holds a copy to fall
+;; back on: the fetch then sends the ETag, and a 304 costs headers only
+(define *web--revalidate* #f)
+
 (define (web--pipeline url k)
   (*web-fetch-html* url
     (lambda (html)
-      (if (not html)
-          (k #f)
-          (web--convert-html url html k)))))
+      (if html (web--convert-html url html k) (k #f)))
+    *web--revalidate*))
 
 (define *web-fetch* web--pipeline)
 
-;; URL -> the raw html, for the original view. Tests replace this too.
-(define (web--html-pipeline url k)
-  (shell-command->string
-    (string-append "curl -sL --max-time 20 " (web--shell-quote url))
-    (lambda (out) (k (if (equal? (string-trim out) "") #f out)))))
+;; URL -> the raw html. Tests replace this seam. REVALIDATE? sends the
+;; page's saved ETag (curl --etag-compare): an unchanged page answers
+;; 304 with no body — headers only — and the caller serves its copy.
+(define (web--html-pipeline url k &optional revalidate?)
+  (let ((u (web--shell-quote url))
+        (dir (web--shell-quote (string-append (aimax-home) "/web-etags"))))
+    (shell-command->string
+      (string-append
+        "mkdir -p " dir "; "
+        "e=" dir "/$(printf %s " u " | cksum | cut -d' ' -f1); "
+        "t=$(mktemp); "
+        "curl -sL --max-time 20 --etag-save \"$e.new\" "
+        (if revalidate? "--etag-compare \"$e\" " "")
+        u " -o \"$t\"; "
+        "if [ -s \"$t\" ]; then mv -f \"$e.new\" \"$e\"; cat \"$t\"; fi; "
+        "rm -f \"$t\" \"$e.new\"")
+      (lambda (out) (k (if (equal? (string-trim out) "") #f out))))))
 
 (define *web-fetch-html* web--html-pipeline)
 
@@ -286,14 +314,46 @@
 
 (define (web--declare-cache! buf)
   (cache-declare! buf
-    ;; the mode can wake before its first URL — nothing to fetch yet
+    ;; the mode can wake before its first URL — nothing to fetch yet.
+    ;; Holding a session copy, the fetch revalidates; a 304 — or a
+    ;; failed network — serves the copy we hold.
     (lambda (b k)
-      (let ((url (buffer-local b 'browse-url)))
-        (if url (*web-fetch* url k) (k #f))))
-    (lambda (b md) (web--render! b md))
+      (let* ((url (buffer-local b 'browse-url))
+             (hit (and url (web--page-cached b url))))
+        (if (not url)
+            (k #f)
+            (begin
+              (set! *web--revalidate* (and hit #t))
+              (*web-fetch* url
+                (lambda (md)
+                  (cond (md (k md))
+                        (hit (k (nth 1 hit)))
+                        (else (k #f)))))))))
+    ;; a fetch completion is the one moment a page enters the session
+    ;; cache — serving from it must not refresh its age
+    (lambda (b md)
+      (web--page-remember! b (buffer-local b 'browse-url) md)
+      (web--render! b md))
     *web-cache-ttl*))
 
 ;;; --- navigation -----------------------------------------------------------------
+
+;;; every page read this session keeps its markdown: back, forward and
+;;; a jump to a visited URL serve instantly, like a browser's cache.
+;;; `g` on the page refetches for real. The store is session-only —
+;;; the desktop skips it, and a restart reads fresh.
+
+(define *web-page-cache-max* 20)
+
+(define (web--page-remember! buf url md)
+  (buffer-set-local! buf 'browse-pages
+    (take-n (cons (list url md (current-time))
+                  (filter (lambda (e) (not (equal? (car e) url)))
+                          (or (buffer-local buf 'browse-pages) '())))
+            *web-page-cache-max*)))
+
+(define (web--page-cached buf url)
+  (assoc url (or (buffer-local buf 'browse-pages) '())))
 
 (define (web--goto-url! buf url push?)
   (let ((here (buffer-local buf 'browse-url)))
@@ -303,11 +363,19 @@
       ;; a new page starts a new future: forward clears, like a browser
       (buffer-set-local! buf 'browse-forward '())))
   (buffer-set-local! buf 'browse-url url)
-  ;; a new page: the old stamp must not satisfy the TTL
-  (buffer-set-local! buf 'cache-time #f)
-  (web--update-modeline! buf)
-  (message (string-append "fetching " url " …"))
-  (cache-refresh! buf))
+  (let ((hit (web--page-cached buf url)))
+    (if hit
+        (begin
+          ;; the page's own age drives the TTL: a wake still refreshes
+          ;; one that has grown old
+          (buffer-set-local! buf 'cache-time (nth 2 hit))
+          (web--render! buf (nth 1 hit)))
+        (begin
+          ;; a new page: the old stamp must not satisfy the TTL
+          (buffer-set-local! buf 'cache-time #f)
+          (web--update-modeline! buf)
+          (message (string-append "fetching " url " …"))
+          (cache-refresh! buf)))))
 
 (define (web--link-at buf p)
   (let loop ((ls (or (buffer-local buf 'web-links) '())))
@@ -436,6 +504,9 @@
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-read-only! buf #t)
+      ;; the session page cache is heavy and derives from the URL: a
+      ;; restart refetches, the desktop must not carry it
+      (desktop-skip! buf 'browse-pages)
       ;; the reading look is the WRITING look: one centered measure for
       ;; prose everywhere — writing-mode owns the class and the setting
       (buffer-set-local! buf 'window-class "writing")
@@ -463,18 +534,39 @@ this page, a visited site or a fresh URL goes there — o opens the
 page in the real browser, and C-s searches to any link.")
 
 ;; the one entry point: normalize, enter the mode, fetch
+;; a tab's name: the host, and the page's last path segment
+(define (web--slug url)
+  (let* ((tail (car (reverse (string-split url "://"))))
+         (parts (filter (lambda (p) (not (equal? p "")))
+                        (string-split tail "/")))
+         (host (if (pair? parts) (car parts) tail)))
+    (if (> (length parts) 1)
+        (string-append host "/" (car (reverse parts)))
+        host)))
+
+;; browser-tab semantics: inside a browse buffer the URL navigates IN
+;; PLACE; outside, the page's own tab comes up — the one that already
+;; shows it, or a fresh one, joined to the "browse" group
 (define (browse url)
   (let ((full (if (string-contains? url "://")
                   url
                   (string-append "https://" url))))
-    (buffer-create *web-buffer*)
-    (display-buffer *web-buffer*)
-    (with-current-buffer *web-buffer*
-      (lambda ()
-        (unless (equal? (buffer-local *web-buffer* 'mode-name) "browse-mode")
-          (set-mode! "browse-mode"))
-        (web--goto-url! *web-buffer* full #t)))
-    *web-buffer*))
+    (cond
+      ((web--buffer? (current-buffer))
+       (web--goto-url! (current-buffer) full #t)
+       (current-buffer))
+      ((web--buffer-for full)
+       (let ((b (web--buffer-for full)))
+         (switch-to-buffer! b)
+         b))
+      (else
+        (let ((name (string-append "*browse:" (web--slug full) "*")))
+          (buffer-create name)
+          (buffer-set-local! name 'group "browse")
+          (switch-to-buffer! name)
+          (set-mode! "browse-mode")
+          (web--goto-url! name full #t)
+          name)))))
 
 ;; the prompt completes over the visited sites, and a title matches
 ;; what you type; a fresh URL still goes through as typed
@@ -491,4 +583,4 @@ page in the real browser, and C-s searches to any link.")
 
 (category! 'web)
 (public! 'browse
-  "(browse URL) — fetch URL and render it as readable text in *browse*; links follow with RET")
+  "(browse URL) — read URL as text in its own tab buffer (*browse:host/page*); in a browse buffer it navigates in place")

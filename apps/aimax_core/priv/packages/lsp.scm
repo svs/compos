@@ -187,10 +187,16 @@
 
 (define (lsp--modeline! buf)
   (let* ((id (buffer-local buf 'lsp-server))
+         (row (and id (assoc id (lsp-connections))))
          (c (lsp--counts buf)))
     (when id
       (buffer-set-local! buf 'modeline-info
         (string-append (lsp--id-name id)
+          ;; elixir-ls compiles for a while after the handshake: an
+          ;; ellipsis says the server is not answering yet
+          (cond ((not row) " off")
+                ((equal? (cadr row) "ready") "")
+                (else "…"))
           (if (> (car c) 0) (string-append " ✗" (number->string (car c))) "")
           (if (> (cadr c) 0) (string-append " ⚠" (number->string (cadr c))) "")))
       (buffer-set-local! buf 'modeline-info-command "lsp-diagnostics-list"))))
@@ -542,6 +548,17 @@
 
 (global-set-key "M-." "code-goto-definition")
 (global-set-key "M-," "lsp-pop-marker")
+
+;;; --- status ------------------------------------------------------------------
+
+(define-command "lsp-status" "Echo every language-server connection"
+  (lambda ()
+    (let ((cs (lsp-connections)))
+      (if (null? cs)
+          (message "lsp: no connections")
+          (message (string-join
+                     (map (lambda (c) (string-append (car c) " " (cadr c))) cs)
+                     " · "))))))
 
 ;;; --- configuration and default servers ---------------------------------------
 

@@ -38,6 +38,7 @@ defmodule Aimax.DopplerTest do
     eval!(~s{(set! doppler-program "#{script}")})
     eval!(~s{(set! key-doppler-project "personal")})
     eval!(~s{(set! key-doppler-config "dev")})
+    eval!(~s{(doppler-forget!)})
     Editor.minibuffer_close()
     Editor.set_pending([])
 
@@ -92,6 +93,23 @@ defmodule Aimax.DopplerTest do
     assert Editor.take_clipboard("f-main") == "super-secret"
     assert File.read!(calls) =~ "secrets get ANTHROPIC_API_KEY"
     refute eval!(~s{(buffer-text "*doppler*")}) =~ "super-secret"
+  end
+
+  test "a secret value is one doppler process per session", %{calls: calls} do
+    assert eval!(~s{(doppler-secret-value "personal" "dev" "SENTRY_AUTH_TOKEN")}) ==
+             ~s{"super-secret"}
+
+    fetched = length(String.split(File.read!(calls), "\n", trim: true))
+
+    # the second read serves the cache: no new doppler process
+    assert eval!(~s{(doppler-secret-value "personal" "dev" "SENTRY_AUTH_TOKEN")}) ==
+             ~s{"super-secret"}
+    assert length(String.split(File.read!(calls), "\n", trim: true)) == fetched
+
+    # a write drops its entry, so the next read fetches again
+    eval!(~s{(doppler-secret-set! "personal" "dev" "SENTRY_AUTH_TOKEN" "rotated")})
+    eval!(~s{(doppler-secret-value "personal" "dev" "SENTRY_AUTH_TOKEN")})
+    assert File.read!(calls) |> String.split("\n", trim: true) |> Enum.count(&(&1 =~ "secrets get")) == 2
   end
 
   test "mouse rows select and action controls run the keyboard commands", %{calls: calls} do

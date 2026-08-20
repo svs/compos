@@ -101,15 +101,37 @@
 ;; errors to stderr and dp--run folds those in, so a failure arrives as
 ;; text and not as a status — read it back out. packages/keys.scm calls
 ;; this as the last link of the key chain.
+;; One doppler process per secret for the whole session — the policy
+;; key-get documents for the chain, applied at the source so every
+;; consumer gets it (sentry resolves its token per request, and the CLI
+;; cost ~500ms on the UI lane per fetch). Misses cache too. A write
+;; drops its own entry; doppler-forget! drops them all.
+(define *dp-value-cache* '())
+
+(define (dp--cache-key project config name)
+  (string-append project "/" config "/" name))
+
+(define (dp--cache-drop! project config name)
+  (let ((key (dp--cache-key project config name)))
+    (set! *dp-value-cache*
+      (remove (lambda (e) (equal? (car e) key)) *dp-value-cache*))))
+
+(define (doppler-forget!)
+  (set! *dp-value-cache* '()))
+
 (define (doppler-secret-value project config name)
-  (let ((out (string-trim
-               (dp--run (string-append "secrets get " (dp--quote name)
-                                       " --project " (dp--quote project)
-                                       " --config " (dp--quote config)
-                                       " --plain")))))
-    (if (or (equal? out "") (dp--error? out))
-        #f
-        out)))
+  (let* ((key (dp--cache-key project config name))
+         (hit (assoc key *dp-value-cache*)))
+    (if hit
+        (cadr hit)
+        (let* ((out (string-trim
+                      (dp--run (string-append "secrets get " (dp--quote name)
+                                              " --project " (dp--quote project)
+                                              " --config " (dp--quote config)
+                                              " --plain"))))
+               (v (if (or (equal? out "") (dp--error? out)) #f out)))
+          (set! *dp-value-cache* (cons (list key v) *dp-value-cache*))
+          v))))
 
 ;; the one hook keys.scm calls: (doppler-key-value VAR) -> value | #f
 (define (doppler-key-value var)
@@ -140,6 +162,7 @@
     (if (not (equal? (string-trim out) ""))
         (begin (message (string-trim out)) #f)
         (begin
+          (dp--cache-drop! project config name)
           (when (boundp 'key-forget!) (key-forget! name))
           #t))))
 
@@ -153,6 +176,7 @@
     (if (not (equal? (string-trim out) ""))
         (begin (message (string-trim out)) #f)
         (begin
+          (dp--cache-drop! project config name)
           (when (boundp 'key-forget!) (key-forget! name))
           #t))))
 

@@ -478,4 +478,17 @@ defmodule Aimax.NotmuchTest do
     assert out =~ "0002"
     assert out =~ "+important"
   end
+  test "structured filters can be removed without parsing query text", %{dir: _} do
+    eval!(~s{(run-command "notmuch-inbox")})
+    eval!(~s{(buffer-set-local! "*notmuch*" 'notmuch-query-base "tag:inbox and from:alice")})
+    eval!(~s{(buffer-set-local! "*notmuch*" 'notmuch-query-filters '())})
+    press("/")
+    type("subject:report")
+    press("RET")
+    assert eval!(~s{(buffer-local "*notmuch*" 'notmuch-query)}) ==
+             ~s{"( tag:inbox and from:alice ) and subject:report"}
+    eval!(~s{(run-command "notmuch-unfilter-last")})
+    assert eval!(~s{(buffer-local "*notmuch*" 'notmuch-query)}) ==
+             ~s{"tag:inbox and from:alice"}
+  end
 end

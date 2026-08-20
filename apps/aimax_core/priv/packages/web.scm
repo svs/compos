@@ -299,11 +299,11 @@
   (let ((here (buffer-local buf 'browse-url)))
     (when (and push? here (not (equal? here url)))
       (buffer-set-local! buf 'browse-history
-        (cons here (or (buffer-local buf 'browse-history) '())))))
+        (cons here (or (buffer-local buf 'browse-history) '())))
+      ;; a new page starts a new future: forward clears, like a browser
+      (buffer-set-local! buf 'browse-forward '())))
   (buffer-set-local! buf 'browse-url url)
-  ;; a new page: the old stamp must not satisfy the TTL, and the old
-  ;; page's original html means nothing here
-  (buffer-set-local! buf 'web-html #f)
+  ;; a new page: the old stamp must not satisfy the TTL
   (buffer-set-local! buf 'cache-time #f)
   (web--update-modeline! buf)
   (message (string-append "fetching " url " …"))
@@ -360,15 +360,33 @@
            (l (web--link-before buf (point))))
       (if l (goto-char! (car l)) (message "no earlier links")))))
 
-(define-command "browse-back" "Return to the previous page"
+(define-command "browse-back" "Go back to the previous page"
   (lambda ()
     (let* ((buf (current-buffer))
-           (h (or (buffer-local buf 'browse-history) '())))
+           (h (or (buffer-local buf 'browse-history) '()))
+           (here (buffer-local buf 'browse-url)))
       (if (null? h)
           (message "no earlier page")
           (begin
+            (when here
+              (buffer-set-local! buf 'browse-forward
+                (cons here (or (buffer-local buf 'browse-forward) '()))))
             (buffer-set-local! buf 'browse-history (cdr h))
             (web--goto-url! buf (car h) #f))))))
+
+(define-command "browse-forward" "Go forward to the page you came back from"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (f (or (buffer-local buf 'browse-forward) '()))
+           (here (buffer-local buf 'browse-url)))
+      (if (null? f)
+          (message "no later page")
+          (begin
+            (when here
+              (buffer-set-local! buf 'browse-history
+                (cons here (or (buffer-local buf 'browse-history) '()))))
+            (buffer-set-local! buf 'browse-forward (cdr f))
+            (web--goto-url! buf (car f) #f))))))
 
 ;; g asks WHERE: this page leads as the default, so a plain RET
 ;; refetches it — and the visited sites complete, so g also goes
@@ -406,6 +424,8 @@
   (local-set-key* buf "n" "browse-next-link")
   (local-set-key* buf "p" "browse-prev-link")
   (local-set-key* buf "l" "browse-back")
+  (local-set-key* buf "M-<left>" "browse-back")
+  (local-set-key* buf "M-<right>" "browse-forward")
   (local-set-key* buf "g" "browse-refresh")
   (local-set-key* buf "o" "browse-open-external")
   ;; the preview chord: "show me the rendered thing" — the browser
@@ -437,10 +457,10 @@
 
 (mode-doc! "browse-mode"
   "A web page as readable text — the article, extracted. RET follows
-the link at point, TAB and n/p walk the links, l goes back, g asks
-where to go — RET refetches this page, a visited site or a fresh URL
-goes there — o opens the page in the real browser, and C-s searches
-to any link.")
+the link at point, TAB and n/p walk the links, M-<left> and l go
+back, M-<right> goes forward, g asks where to go — RET refetches
+this page, a visited site or a fresh URL goes there — o opens the
+page in the real browser, and C-s searches to any link.")
 
 ;; the one entry point: normalize, enter the mode, fetch
 (define (browse url)

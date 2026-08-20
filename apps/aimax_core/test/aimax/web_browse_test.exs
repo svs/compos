@@ -76,12 +76,23 @@ defmodule Aimax.WebBrowseTest do
     assert eval!(~S|(buffer-local "*browse*" 'browse-url)|) ==
              ~S["https://site.test/second.html"]
 
-    # l returns to the front page
-    press("l")
+    # M-<left> returns to the front page; M-<right> goes forward again
+    press("M-<left>")
     assert Buffer.text("*browse*") =~ "Front page"
 
     assert eval!(~S|(buffer-local "*browse*" 'browse-url)|) ==
              ~S["https://site.test/index.html"]
+
+    press("M-<right>")
+    assert Buffer.text("*browse*") =~ "Second page"
+
+    assert eval!(~S|(buffer-local "*browse*" 'browse-url)|) ==
+             ~S["https://site.test/second.html"]
+
+    # a fresh navigation clears the future
+    press("M-<left>")
+    eval!(~S|(browse "https://site.test/docs/intro.html")|)
+    assert eval!(~S|(buffer-local "*browse*" 'browse-forward)|) == "()"
   end
 
   test "relative links resolve against the page directory and the origin" do

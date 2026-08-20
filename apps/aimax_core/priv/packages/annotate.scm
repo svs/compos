@@ -193,6 +193,7 @@
       (list-refresh! lb))))
 
 (define (annotate--touch! buf)
+  (annotate--store-save! buf)
   (annotate--paint! buf)
   (annotate--list-refresh buf)
   (annotate--margin-refresh buf))
@@ -238,6 +239,69 @@
 
 (public! 'annotate-reply!
   "(annotate-reply! BUF ID TEXT) — append one reply plist to the annotation's thread")
+
+;;; --- the store: annotations are a file on disk --------------------------------
+;;; One file per source file, under <aimax-home>/annotations/. The file
+;;; is a printed list of annotation plists — readable, greppable, and
+;;; writable by an agent outside the editor. The buffer-local is the
+;;; working copy: every change writes the file, and enabling the mode
+;;; on a fresh visit reads it.
+
+(define (annotate--store-file buf)
+  (and (string-prefix? "/" buf)
+       (string-append
+         (aimax-home) "/annotations/"
+         (string-join (string-split
+                        (substring-bytes buf 1 (string-byte-length buf)) "/")
+                      "%2F")
+         ".scm")))
+
+(define (annotate-store-file buf) (annotate--store-file buf))
+
+(define (annotate--store-save! buf)
+  (let ((path (annotate--store-file buf)))
+    (when path
+      (write-file! path (value->string (buffer-annotations buf))))))
+
+(define (annotate--id-number id)
+  (let ((n (string->number
+             (substring-bytes id 1 (string-byte-length id)))))
+    (if (number? n) n 0)))
+
+(define (annotate--store-load! buf)
+  (let ((path (annotate--store-file buf)))
+    (when (and path (file-exists? path) (null? (buffer-annotations buf)))
+      ;; scheme-read returns the list of top-level forms; the file holds
+      ;; ONE form, the annotation list
+      (let* ((forms (scheme-read (or (read-file path) "()")))
+             (v (if (pair? forms) (car forms) '())))
+        (when (pair? v)
+          (buffer-set-local! buf 'annotations v)
+          (buffer-set-local! buf 'ann-next-id
+            (fold (lambda (acc a)
+                    (max acc (annotate--id-number (annotate--get a 'id "a0"))))
+                  0 v)))))))
+
+;; a file that carries annotations opens with them showing
+(add-hook! 'find-file-hook
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (path (annotate--store-file buf)))
+      (when (and path (file-exists? path)
+                 (not (minor-mode-on? buf "annotate-mode")))
+        (enable-minor-mode! buf "annotate-mode")))))
+
+(define-command "annotate-store-visit" "Visit this buffer's annotations file"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (src (or (buffer-local buf 'ann-source) buf))
+           (path (annotate--store-file src)))
+      (if path
+          (visit path)
+          (message "No annotations file — this buffer is not a file on disk")))))
+
+(public! 'annotate-store-file
+  "(annotate-store-file BUF) — the on-disk annotations file for a file buffer, or #f")
 
 ;;; --- the check source: tree-sitter ERROR nodes ----------------------------
 
@@ -774,11 +838,18 @@
   (buffer-set-local! *ann-margin* 'mode-name "annotate-margin-mode")
   (annotate--margin-render! *ann-margin*))
 
+;; the margin buffer's own mode — it exists so a desktop restore can
+;; rebuild the cards. Invoked by hand on any other buffer it only
+;; points at the real switch.
 (define-mode "annotate-margin-mode"
   (lambda ()
     (let ((buf (current-buffer)))
-      (buffer-set-read-only! buf #t)
-      (annotate--margin-render! buf))))
+      (if (buffer-local buf 'ann-source)
+          (begin
+            (buffer-set-read-only! buf #t)
+            (local-set-key* buf "C-c C-v" "annotate-store-visit")
+            (annotate--margin-render! buf))
+          (message "annotate-margin-mode is the margin's internal mode — C-c ! m (annotate-margin) toggles the margin")))))
 
 ;; annotate-mode owns a frame arrangement: the document and its margin
 (define-mode-layout! "annotate-mode" '(h 0.7 self "*margin*"))
@@ -847,6 +918,7 @@
     (local-set-key* buf "M-p" "annotate-prev")
     (local-set-key* buf "C-c ! l" "annotate-list")
     (local-set-key* buf "C-c ! m" "annotate-margin")
+    (annotate--store-load! buf)
     (annotate--ensure-hook! buf)
     (annotate--check! buf)
     (annotate--margin-ensure! buf)
@@ -856,7 +928,13 @@
     (local-unset-key* buf "M-p")
     (local-unset-key* buf "C-c ! l")
     (local-unset-key* buf "C-c ! m")
-    (overlay-clear! buf 'annotate)))
+    (overlay-clear! buf 'annotate)
+    ;; the margin belongs to the mode: turning the mode off takes the
+    ;; margin window with it
+    (when (and (buffer-exists? *ann-margin*)
+               (equal? (buffer-local *ann-margin* 'ann-source) buf))
+      (let ((win (window-showing *ann-margin*)))
+        (when win (delete-window-id! win))))))
 
 (define-command "annotate-mode" "Toggle annotations in this buffer"
   (lambda ()

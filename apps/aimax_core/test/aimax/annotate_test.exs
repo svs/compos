@@ -245,6 +245,58 @@ defmodule Aimax.AnnotateTest do
     assert eval!(~s[(plist-get (annotate--find "#{@buf}" "#{id}") 'fix-new)]) == "#f"
   end
 
+  test "annotate-margin-mode by hand redirects instead of hijacking the buffer" do
+    eval!(~s[(run-command "annotate-margin-mode")])
+    assert Buffer.get_local(@buf, "render-mode") == nil
+  end
+
+  test "turning annotate-mode off closes the margin window" do
+    llm_warning()
+    eval!(~s[(enable-minor-mode! "#{@buf}" "annotate-mode")])
+    eval!(~s[(display-buffer-other-window! "*margin*")])
+    eval!(~s[(disable-minor-mode! "#{@buf}" "annotate-mode")])
+    assert eval!(~s[(window-showing "*margin*")]) == "#f"
+  end
+
+  test "annotations of a file buffer live in a file and load back" do
+    fbuf = "/annotate-store-test/notes.txt"
+
+    eval!("""
+    (begin
+      (buffer-create "#{fbuf}")
+      (buffer-insert! "#{fbuf}" 0 "alpha beta\\ngamma delta\\n"))
+    """)
+
+    on_exit(fn ->
+      {:ok, path} = Session.eval(~s[(annotate-store-file "#{fbuf}")])
+      File.rm(String.trim(path, "\""))
+      if Buffer.exists?(fbuf), do: Aimax.Core.kill_buffer(fbuf)
+    end)
+
+    eval_s!(~s{(annotate! "#{fbuf}" (quote (source "reader" severity "note"
+              line 2 match "delta" title "Stored" who "you" when "now")))})
+
+    path = eval_s!(~s[(annotate-store-file "#{fbuf}")])
+    assert File.exists?(path)
+    assert File.read!(path) =~ "Stored"
+
+    # a fresh buffer with no locals reads the file back on mode enable
+    eval!(~s[(buffer-set-local! "#{fbuf}" 'annotations (list))])
+    eval!(~s[(enable-minor-mode! "#{fbuf}" "annotate-mode")])
+    assert eval!(~s[(length (buffer-annotations "#{fbuf}"))]) == "1"
+
+    # ids keep counting past the stored ones
+    id =
+      eval_s!(~s{(annotate! "#{fbuf}" (quote (source "reader" severity "note"
+                line 1 match "beta" title "Second" who "you" when "now")))})
+
+    assert id == "a2"
+  end
+
+  test "a non-file buffer has no store" do
+    assert eval!(~s[(annotate-store-file "#{@buf}")]) == "#f"
+  end
+
   test "the check source reports tree-sitter ERROR nodes" do
     langs = eval!("(ts-langs)")
 

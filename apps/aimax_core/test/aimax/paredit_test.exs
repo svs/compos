@@ -320,6 +320,96 @@ defmodule Aimax.PareditTest do
     assert Buffer.text(buf) == "(\n)\n"
   end
 
+  # --- structure -------------------------------------------------------------
+
+  test "slurp forward pulls the next datum in; one undo restores" do
+    buf = fresh_buffer("(foo) bar\n")
+    Buffer.goto(buf, 4)
+    press(["C-<right>"])
+    assert Buffer.text(buf) == "(foo bar)\n"
+    assert Buffer.point(buf) == 4
+
+    Buffer.undo(buf)
+    assert Buffer.text(buf) == "(foo) bar\n"
+  end
+
+  test "barf forward pushes the last datum out; one undo restores" do
+    buf = fresh_buffer("(foo bar)\n")
+    Buffer.goto(buf, 8)
+    press(["C-<left>"])
+    assert Buffer.text(buf) == "(foo) bar\n"
+    assert Buffer.point(buf) == 4
+
+    Buffer.undo(buf)
+    assert Buffer.text(buf) == "(foo bar)\n"
+  end
+
+  test "slurp and barf backward mirror" do
+    buf = fresh_buffer("a (b)\n")
+    Buffer.goto(buf, 3)
+    eval!(~s{(run-command "paredit-slurp-backward")})
+    assert Buffer.text(buf) == "(a b)\n"
+
+    buf2 = fresh_buffer("(a b)\n")
+    Buffer.goto(buf2, 3)
+    eval!(~s{(run-command "paredit-barf-backward")})
+    assert Buffer.text(buf2) == "a (b)\n"
+    assert Buffer.point(buf2) == 3
+  end
+
+  test "splice removes the enclosing delimiters" do
+    buf = fresh_buffer("(a (b c) d)\n")
+    Buffer.goto(buf, 5)
+    press(["M-s"])
+    assert Buffer.text(buf) == "(a b c d)\n"
+    assert Buffer.point(buf) == 4
+  end
+
+  test "raise replaces the list with the datum at point" do
+    buf = fresh_buffer("(a (b c) d)\n")
+    Buffer.goto(buf, 4)
+    press(["M-r"])
+    assert Buffer.text(buf) == "(a b d)\n"
+    assert Buffer.point(buf) == 3
+  end
+
+  test "wrap puts the next datum in a fresh pair" do
+    buf = fresh_buffer("foo bar\n")
+    press(["M-("])
+    assert Buffer.text(buf) == "(foo) bar\n"
+    assert Buffer.point(buf) == 1
+  end
+
+  test "structure ops touch nothing without a target" do
+    buf = fresh_buffer("x\n")
+    Buffer.goto(buf, 1)
+    press(["C-<right>"])
+    assert Buffer.text(buf) == "x\n"
+    assert echo() =~ "No enclosing list"
+
+    buf2 = fresh_buffer("(a) \n")
+    Buffer.goto(buf2, 1)
+    press(["C-<right>"])
+    assert Buffer.text(buf2) == "(a) \n"
+    assert echo() =~ "Nothing to slurp"
+  end
+
+  test "structure ops refuse a read-only buffer" do
+    buf = fresh_buffer("(a) b\n")
+    :ok = Buffer.set_read_only(buf, true)
+    Buffer.goto(buf, 1)
+    press(["C-<right>"])
+    assert Buffer.text(buf) == "(a) b\n"
+    assert echo() =~ "read-only"
+  end
+
+  test "slurp keeps byte offsets straight around multibyte text" do
+    buf = fresh_buffer("(é) x\n")
+    Buffer.goto(buf, 1)
+    press(["C-<right>"])
+    assert Buffer.text(buf) == "(é x)\n"
+  end
+
   # --- passthrough -----------------------------------------------------------
 
   test "without paredit-mode the keys keep their default behavior" do

@@ -514,6 +514,130 @@
                               (loop e e)
                               (if (> last p) (kill-region-1 p last) #f)))))))))))))))
 
+;;; --- structure: slurp, barf, splice, raise, wrap -----------------------------
+;;; Each edit is one buffer-replace-range! call, so one undo step.
+;;; buffer-replace-range! ignores the read-only flag, so guard it here.
+
+(define (paredit--structural fn)
+  (paredit--with-text
+    (lambda (buf text p)
+      (if (buffer-read-only? buf)
+          (message "Buffer is read-only")
+          (fn buf text p)))))
+
+(define-command "paredit-slurp-forward" "Pull the next expression into this list"
+  (lambda ()
+    (paredit--structural
+      (lambda (buf text p)
+        (let ((c (par-close text p)))
+          (if (not c)
+              (message "No enclosing list")
+              (let ((e (par-scan-forward text (+ c 1))))
+                (if (not e)
+                    (message "Nothing to slurp")
+                    (begin
+                      (buffer-replace-range! buf c (- e c)
+                        (string-append (substring-bytes text (+ c 1) e)
+                                       (par--ch text c)))
+                      (goto-char! p))))))))))
+
+(define-command "paredit-barf-forward" "Push the last expression out of this list"
+  (lambda ()
+    (paredit--structural
+      (lambda (buf text p)
+        (let ((o (par-up text p)))
+          (if (not o)
+              (message "No enclosing list")
+              (let ((e (par--list-end text o)))
+                (if (not e)
+                    (message "Unclosed list")
+                    (let* ((c (- e 1))
+                           (starts (par--starts-before text (+ o 1) c)))
+                      (if (null? starts)
+                          (message "Nothing to barf")
+                          (let ((prev-e (if (null? (cdr starts))
+                                            (+ o 1)
+                                            (par-scan-forward text (cadr starts)))))
+                            (buffer-replace-range! buf prev-e (- (+ c 1) prev-e)
+                              (string-append (par--ch text c)
+                                             (substring-bytes text prev-e c)))
+                            (goto-char! (min p prev-e)))))))))))))
+
+(define-command "paredit-slurp-backward" "Pull the previous expression into this list"
+  (lambda ()
+    (paredit--structural
+      (lambda (buf text p)
+        (let ((o (par-up text p)))
+          (if (not o)
+              (message "No enclosing list")
+              (let ((s (par-scan-backward text o)))
+                (if (not s)
+                    (message "Nothing to slurp")
+                    (buffer-replace-range! buf s (- (+ o 1) s)
+                      (string-append (par--ch text o)
+                                     (substring-bytes text s o)))))))))))
+
+(define-command "paredit-barf-backward" "Push the first expression out of this list"
+  (lambda ()
+    (paredit--structural
+      (lambda (buf text p)
+        (let ((o (par-up text p)))
+          (if (not o)
+              (message "No enclosing list")
+              (let ((s1 (par--skip text (+ o 1))))
+                (if (or (>= s1 (string-byte-length text))
+                        (par--closer? (par--ch text s1)))
+                    (message "Nothing to barf")
+                    (let* ((e1 (par-scan-forward text s1))
+                           (s2 (par--skip text e1)))
+                      (buffer-replace-range! buf o (- s2 o)
+                        (string-append (substring-bytes text (+ o 1) e1) " ("))
+                      (goto-char! (max (+ e1 1)
+                                       (+ p (- (+ e1 1) s2)))))))))))))
+
+(define-command "paredit-splice" "Remove the enclosing pair of delimiters"
+  (lambda ()
+    (paredit--structural
+      (lambda (buf text p)
+        (let ((o (par-up text p)))
+          (if (not o)
+              (message "No enclosing list")
+              (let ((e (par--list-end text o)))
+                (if (not e)
+                    (message "Unclosed list")
+                    (begin
+                      (buffer-replace-range! buf o (- e o)
+                        (substring-bytes text (+ o 1) (- e 1)))
+                      (goto-char! (- p 1)))))))))))
+
+(define-command "paredit-raise" "Replace the enclosing list with this expression"
+  (lambda ()
+    (paredit--structural
+      (lambda (buf text p)
+        (let ((o (par-up text p)))
+          (if (not o)
+              (message "No enclosing list")
+              (let ((e (par--list-end text o))
+                    (de (par-scan-forward text p)))
+                (if (or (not e) (not de))
+                    (message "Nothing to raise")
+                    (let ((ds (par-scan-backward text de)))
+                      (buffer-replace-range! buf o (- e o)
+                        (substring-bytes text ds de))
+                      (goto-char! o))))))))))
+
+(define-command "paredit-wrap-round" "Wrap the next expression in a pair"
+  (lambda ()
+    (paredit--structural
+      (lambda (buf text p)
+        (let ((e (par-scan-forward text p)))
+          (if (not e)
+              (message "Nothing to wrap")
+              (let ((s (par--skip text p)))
+                (buffer-replace-range! buf s (- e s)
+                  (string-append "(" (substring-bytes text s e) ")"))
+                (goto-char! (+ s 1)))))))))
+
 ;;; --- the mode ----------------------------------------------------------------
 ;;; Keys stay bound when the mode is off (there is no unbind primitive).
 ;;; Each key runs a dispatcher that falls through to the default
@@ -536,7 +660,12 @@
     ("C-M-u" "paredit-backward-up" "backward-up-list")
     ("C-M-d" "paredit-down" "down-list")
     ("C-M-k" "paredit-kill-sexp" #f)
-    ("C-M-SPC" "paredit-mark-sexp" #f)))
+    ("C-M-SPC" "paredit-mark-sexp" #f)
+    ("C-<right>" "paredit-slurp-forward" #f)
+    ("C-<left>" "paredit-barf-forward" #f)
+    ("M-s" "paredit-splice" #f)
+    ("M-r" "paredit-raise" #f)
+    ("M-(" "paredit-wrap-round" #f)))
 
 (for-each
   (lambda (entry)

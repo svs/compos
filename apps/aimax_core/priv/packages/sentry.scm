@@ -397,14 +397,7 @@
     (if (equal? text "") "" (string-append label ": " text "\n"))))
 
 (define (sentry--pretty-json value)
-  (let ((text (shell-command->string
-                (string-append "printf %s "
-                               (sentry--shell-quote (json-encode value))
-                               " | jq .")
-                (default-directory))))
-    (if (equal? (string-trim text) "")
-        (json-encode value)
-        text)))
+  (json-encode value #t))
 
 (define (sentry--html-escape text)
   (let* ((value (sentry--text text))
@@ -845,6 +838,11 @@
                (buf (sentry--detail-buffer issue-id)))
           (buffer-create buf)
           (buffer-set-local! buf 'sentry-issue-id issue-id)
+          ;; the row already knows the issue: a first open draws it now,
+          ;; and the full fetch replaces it when it lands. An empty
+          ;; window for the network round trip reads as a hang.
+          (when (= (buffer-size buf) 0)
+            (sentry--apply-detail! buf issue))
           (display-buffer-other-window! buf)
           (with-current-buffer
             buf

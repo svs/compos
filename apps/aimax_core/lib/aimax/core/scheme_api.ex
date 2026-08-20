@@ -135,7 +135,7 @@ defmodule Aimax.Core.SchemeAPI do
       "json-parse" =>
         "(json-parse STR) — parse JSON; objects become plists with symbol keys; #f on failure.",
       "json-encode" =>
-        "(json-encode V) — encode a Scheme value as a JSON string; a plist becomes an object.",
+        "(json-encode V [PRETTY]) — encode a Scheme value as a JSON string; a plist becomes an object. A truthy PRETTY indents the output.",
       "catalog-backfill-entry" =>
         "(catalog-backfill-entry KIND QUALIFIED-NAME) — the frozen backfill metadata for a bundled declaration, as a plist, or #f.",
       "write-file!" =>
@@ -611,10 +611,15 @@ defmodule Aimax.Core.SchemeAPI do
           entry -> Aimax.Core.LLM.json_to_scheme(entry)
         end
       end,
-      # (json-encode V) — the inverse: a plist becomes an object, any other
-      # list an array. Escaping is the encoder's job, so a value survives a
-      # round trip through a file that the printer's own escapes do not.
-      "json-encode" => fn [v] -> Jason.encode!(Aimax.Core.Session.scheme_to_json(v)) end,
+      # (json-encode V [PRETTY]) — the inverse: a plist becomes an object,
+      # any other list an array. Escaping is the encoder's job, so a value
+      # survives a round trip through a file that the printer's own escapes
+      # do not. A truthy PRETTY indents the output.
+      "json-encode" => fn
+        [v] -> Jason.encode!(Aimax.Core.Session.scheme_to_json(v))
+        [v, false] -> Jason.encode!(Aimax.Core.Session.scheme_to_json(v))
+        [v, _pretty] -> Jason.encode!(Aimax.Core.Session.scheme_to_json(v), pretty: true)
+      end,
       "write-file!" => fn [p, text] ->
         path = Path.expand(p)
         File.mkdir_p!(Path.dirname(path))

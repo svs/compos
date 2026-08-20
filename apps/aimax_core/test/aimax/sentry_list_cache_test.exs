@@ -75,6 +75,19 @@ defmodule Aimax.SentryListCacheTest do
     assert fetches() == "3"
   end
 
+  test "the first detail draw comes from the row, before the fetch answers" do
+    eval!(~S|(run-command "sentry")|)
+    eval!(~S|(switch-to-buffer! "*Sentry issues*")|)
+    eval!(~S|(list-goto-first-entry "*Sentry issues*")|)
+
+    # a fetch that never answers: what draws is what the row knew
+    eval!("(set! *sentry-async-transport* (lambda (url k) #f))")
+    KeyDispatch.handle_key("RET")
+
+    assert Buffer.text("*Sentry issue: 42*") =~ "ATS-42"
+    assert Buffer.text("*Sentry issue: 42*") =~ "boom"
+  end
+
   test "a window-configuration change re-lays only the lists on screen" do
     eval!(~S|(run-command "sentry")|)
     eval!(~S|(switch-to-buffer! "*scratch*")|)

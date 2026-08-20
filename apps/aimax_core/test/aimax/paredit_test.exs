@@ -135,6 +135,148 @@ defmodule Aimax.PareditTest do
     assert Buffer.point(buf) == 3
   end
 
+  # --- pair insertion --------------------------------------------------------
+
+  test "typing a form end-to-end keeps the text balanced" do
+    buf = fresh_buffer("")
+
+    press(["(", "f", "o", "o", ")"])
+    assert Buffer.text(buf) == "(foo)"
+    assert Buffer.point(buf) == 5
+  end
+
+  test "( after an atom inserts a separating space" do
+    buf = fresh_buffer("ab\n")
+
+    Buffer.goto(buf, 2)
+    press(["("])
+    assert Buffer.text(buf) == "ab ()\n"
+    assert Buffer.point(buf) == 4
+  end
+
+  test ") with no enclosing list inserts nothing" do
+    buf = fresh_buffer("x\n")
+
+    Buffer.goto(buf, 1)
+    press([")"])
+    assert Buffer.text(buf) == "x\n"
+    assert echo() =~ "No enclosing list"
+  end
+
+  test ") removes blank space before the closer" do
+    buf = fresh_buffer("(a  )\n")
+
+    Buffer.goto(buf, 2)
+    press([")"])
+    assert Buffer.text(buf) == "(a)\n"
+    assert Buffer.point(buf) == 3
+  end
+
+  test ") does not pull the closer into a line comment" do
+    buf = fresh_buffer("(a ;x\n)\n")
+
+    Buffer.goto(buf, 2)
+    press([")"])
+    assert Buffer.text(buf) == "(a ;x\n)\n"
+    assert Buffer.point(buf) == 7
+  end
+
+  test "double quote pairs, escapes inside, and exits at the closer" do
+    buf = fresh_buffer("")
+
+    press(["\""])
+    assert Buffer.text(buf) == "\"\""
+    assert Buffer.point(buf) == 1
+
+    press(["\""])
+    assert Buffer.text(buf) == "\"\""
+    assert Buffer.point(buf) == 2
+
+    # inside a string a quote arrives escaped
+    buf2 = fresh_buffer("\"ab\"\n")
+    Buffer.goto(buf2, 2)
+    press(["\""])
+    assert Buffer.text(buf2) == "\"a\\\"b\"\n"
+  end
+
+  test "( inside a string or comment self-inserts" do
+    buf = fresh_buffer("\"a\" ;c\n")
+
+    Buffer.goto(buf, 2)
+    press(["("])
+    assert Buffer.text(buf) == "\"a(\" ;c\n"
+
+    Buffer.goto(buf, 7)
+    press(["("])
+    assert Buffer.text(buf) == "\"a(\" ;c(\n"
+  end
+
+  # --- balanced deletion -----------------------------------------------------
+
+  test "DEL deletes an empty pair whole and refuses to break a full one" do
+    buf = fresh_buffer("()\n")
+    Buffer.goto(buf, 2)
+    press(["DEL"])
+    assert Buffer.text(buf) == "\n"
+
+    buf2 = fresh_buffer("(a)\n")
+    Buffer.goto(buf2, 3)
+    press(["DEL"])
+    assert Buffer.text(buf2) == "(a)\n"
+    assert Buffer.point(buf2) == 2
+
+    Buffer.goto(buf2, 1)
+    press(["DEL"])
+    assert Buffer.text(buf2) == "(a)\n"
+    assert Buffer.point(buf2) == 0
+  end
+
+  test "DEL between a pair deletes both delimiters" do
+    buf = fresh_buffer("()\n")
+    Buffer.goto(buf, 1)
+    press(["DEL"])
+    assert Buffer.text(buf) == "\n"
+
+    buf2 = fresh_buffer("\"\"\n")
+    Buffer.goto(buf2, 1)
+    press(["DEL"])
+    assert Buffer.text(buf2) == "\n"
+  end
+
+  test "DEL inside a string deletes text but guards the opening quote" do
+    buf = fresh_buffer("\"ab\"\n")
+
+    Buffer.goto(buf, 2)
+    press(["DEL"])
+    assert Buffer.text(buf) == "\"b\"\n"
+
+    press(["DEL"])
+    assert Buffer.text(buf) == "\"b\"\n"
+    assert Buffer.point(buf) == 0
+  end
+
+  test "C-d mirrors: empty pair goes whole, a full one is entered" do
+    buf = fresh_buffer("()\n")
+    press(["C-d"])
+    assert Buffer.text(buf) == "\n"
+
+    buf2 = fresh_buffer("(a)\n")
+    press(["C-d"])
+    assert Buffer.text(buf2) == "(a)\n"
+    assert Buffer.point(buf2) == 1
+    press(["C-d"])
+    assert Buffer.text(buf2) == "()\n"
+  end
+
+  test "one DEL is one undo step for a pair" do
+    buf = fresh_buffer("()\n")
+    Buffer.goto(buf, 2)
+    press(["DEL"])
+    assert Buffer.text(buf) == "\n"
+    Buffer.undo(buf)
+    assert Buffer.text(buf) == "()\n"
+  end
+
   # --- passthrough -----------------------------------------------------------
 
   test "without paredit-mode the keys keep their default behavior" do

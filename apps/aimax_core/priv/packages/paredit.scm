@@ -314,6 +314,159 @@
               (kill-region-1 p e)
               (message "No expression here")))))))
 
+;;; --- pair insertion ----------------------------------------------------------
+
+(define (par--atom-char? c)
+  (and c
+       (not (par--ws? c)) (not (par--opener? c)) (not (par--closer? c))
+       (not (equal? c "\"")) (not (equal? c ";"))))
+
+;; True when the byte at I is the X of a #\X character literal.
+(define (par--char-lit-at? text i)
+  (and (equal? (par--ch text (- i 1)) "\\")
+       (equal? (par--ch text (- i 2)) "#")))
+
+;; Insert OPEN CLOSE at P with a separating space on each side that
+;; touches another datum. Leave point between the pair.
+(define (paredit--pair! text p open close)
+  (let* ((prev (par--ch text (- p 1)))
+         (next (par--ch text p))
+         (pre (if (and prev
+                       (not (par--prefix? prev))
+                       (not (equal? prev "#"))
+                       (or (par--atom-char? prev)
+                           (par--closer? prev)
+                           (equal? prev "\"")))
+                  " " ""))
+         (post (if (and next
+                        (or (par--atom-char? next)
+                            (par--opener? next)
+                            (equal? next "\"")))
+                   " " "")))
+    (insert! (string-append pre open close post))
+    (goto-char! (+ p (string-byte-length pre) 1))))
+
+(define (paredit--open! open close)
+  (paredit--with-text
+    (lambda (buf text p)
+      (if (equal? (par--mode (par--ctx text p)) 'code)
+          (paredit--pair! text p open close)
+          (insert! open)))))
+
+(define-command "paredit-open-round" "Insert a balanced ( ) pair"
+  (lambda () (paredit--open! "(" ")")))
+(define-command "paredit-open-square" "Insert a balanced [ ] pair"
+  (lambda () (paredit--open! "[" "]")))
+
+;; Never insert an unbalanced closer: move past the enclosing closer,
+;; and remove blank space that sits against it.
+(define (paredit--close! closer)
+  (paredit--with-text
+    (lambda (buf text p)
+      (if (not (equal? (par--mode (par--ctx text p)) 'code))
+          (insert! closer)
+          (let ((c (par-close text p)))
+            (if (not c)
+                (message "No enclosing list")
+                (let loop ((w c))
+                  (if (and (> w p) (par--ws? (par--ch text (- w 1))))
+                      (loop (- w 1))
+                      ;; deleting the space must not pull the closer into
+                      ;; a line comment
+                      (if (and (< w c)
+                               (equal? (par--mode (par--ctx text w)) 'code))
+                          (begin (delete-between! w c) (goto-char! (+ w 1)))
+                          (goto-char! (+ c 1)))))))))))
+
+(define-command "paredit-close-round" "Move past the enclosing closer"
+  (lambda () (paredit--close! ")")))
+(define-command "paredit-close-square" "Move past the enclosing closer"
+  (lambda () (paredit--close! "]")))
+
+(define-command "paredit-doublequote" "Insert a balanced string quote"
+  (lambda ()
+    (paredit--with-text
+      (lambda (buf text p)
+        (let ((st (par--ctx text p)))
+          (cond ((equal? (par--mode st) 'string)
+                 ;; at the closing quote step out; inside, insert \"
+                 (if (equal? (par--ch text p) "\"")
+                     (forward-char!)
+                     (insert! "\\\"")))
+                ((not (equal? (par--mode st) 'code)) (insert! "\""))
+                (else (paredit--pair! text p "\"" "\""))))))))
+
+;;; --- balanced deletion -------------------------------------------------------
+
+(define-command "paredit-backward-delete" "Delete backward, keeping the text balanced"
+  (lambda ()
+    (paredit--with-text
+      (lambda (buf text p)
+        (if (= p 0)
+            #f
+            (let ((st (par--ctx text p))
+                  (prev (par--ch text (- p 1)))
+                  (next (par--ch text p)))
+              (cond
+                ((equal? (par--mode st) 'string)
+                 (if (and (equal? prev "\"") (equal? (par--extra st) (- p 1)))
+                     ;; just inside the opening quote
+                     (if (equal? next "\"")
+                         (delete-between! (- p 1) (+ p 1))
+                         (backward-char!))
+                     (delete-char! -1)))
+                ((not (equal? (par--mode st) 'code)) (delete-char! -1))
+                ((par--char-lit-at? text (- p 1)) (delete-char! -1))
+                ;; an empty pair behind point goes as one step
+                ((and (par--closer? prev)
+                      (par--opener? (par--ch text (- p 2)))
+                      (not (par--char-lit-at? text (- p 2))))
+                 (delete-between! (- p 2) p))
+                ((par--closer? prev) (backward-char!))
+                ((equal? prev "\"")
+                 (if (equal? (par--ch text (- p 2)) "\"")
+                     (delete-between! (- p 2) p)
+                     (backward-char!)))
+                ((par--opener? prev)
+                 (if (and next (par--closer? next))
+                     (delete-between! (- p 1) (+ p 1))
+                     (backward-char!)))
+                (else (delete-char! -1)))))))))
+
+(define-command "paredit-forward-delete" "Delete forward, keeping the text balanced"
+  (lambda ()
+    (paredit--with-text
+      (lambda (buf text p)
+        (if (>= p (string-byte-length text))
+            #f
+            (let ((st (par--ctx text p))
+                  (prev (par--ch text (- p 1)))
+                  (next (par--ch text p)))
+              (cond
+                ((equal? (par--mode st) 'string)
+                 (if (equal? next "\"")
+                     ;; before the closing quote: an empty string goes whole
+                     (if (equal? (par--extra st) (- p 1))
+                         (delete-between! (- p 1) (+ p 1))
+                         (forward-char!))
+                     (delete-char! 1)))
+                ((not (equal? (par--mode st) 'code)) (delete-char! 1))
+                ((par--char-lit-at? text p) (delete-char! 1))
+                ((par--opener? next)
+                 (if (par--closer? (par--ch text (+ p 1)))
+                     (delete-between! p (+ p 2))
+                     (forward-char!)))
+                ((par--closer? next)
+                 (if (and (par--opener? prev)
+                          (not (par--char-lit-at? text (- p 1))))
+                     (delete-between! (- p 1) (+ p 1))
+                     (forward-char!)))
+                ((equal? next "\"")
+                 (if (equal? (par--ch text (+ p 1)) "\"")
+                     (delete-between! p (+ p 2))
+                     (forward-char!)))
+                (else (delete-char! 1)))))))))
+
 ;;; --- the mode ----------------------------------------------------------------
 ;;; Keys stay bound when the mode is off (there is no unbind primitive).
 ;;; Each key runs a dispatcher that falls through to the default
@@ -322,7 +475,15 @@
 ;; (KEY COMMAND FALLBACK): FALLBACK is a command name, 'insert for
 ;; self-insert of KEY, or #f for a quiet no-op.
 (define *paredit-keys*
-  '(("C-M-f" "paredit-forward" "forward-sexp")
+  '(("(" "paredit-open-round" insert)
+    (")" "paredit-close-round" insert)
+    ("[" "paredit-open-square" insert)
+    ("]" "paredit-close-square" insert)
+    ("\"" "paredit-doublequote" insert)
+    ("DEL" "paredit-backward-delete" "delete-backward-char")
+    ("<delete>" "paredit-forward-delete" "delete-char")
+    ("C-d" "paredit-forward-delete" "delete-char")
+    ("C-M-f" "paredit-forward" "forward-sexp")
     ("C-M-b" "paredit-backward" "backward-sexp")
     ("C-M-u" "paredit-backward-up" "backward-up-list")
     ("C-M-d" "paredit-down" "down-list")

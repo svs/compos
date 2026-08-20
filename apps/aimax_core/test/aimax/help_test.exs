@@ -91,8 +91,8 @@ defmodule Aimax.HelpTest do
 
     text = Buffer.text("*Help*")
     assert text =~ "# apropos `split window`"
-    assert text =~ "| kind | name | call it | owner | effects | what it does |"
-    assert text =~ "| function | `split-window!` |"
+    assert text =~ "## Functions"
+    assert text =~ "- **`(split-window! 'h|'v [RATIO])`**"
     assert {:ok, ~s{"help-mode"}} = Session.eval(~s{(buffer-local "*Help*" 'mode-name)})
 
     # the M-x list carries it too — the command that finds commands was
@@ -100,14 +100,16 @@ defmodule Aimax.HelpTest do
     assert eval!(~s{(member "apropos" (command-names))}) != "#f"
   end
 
-  test "the apropos page names each hit's kind and keeps a docstring on one row" do
+  test "the apropos page groups hits by kind and keeps a docstring on one row" do
     eval!(~s{(begin (define-command "zz-apr" "First line.\nSecond | line." (lambda () #t))
                     (apropos-page "zz-apr"))})
 
     text = Buffer.text("*Help*")
 
-    assert text =~
-             "| command | `zz-apr` | `M-x` | user | unknown | First line. Second \\| line. |"
+    # the owner/effects trailer closes the row; the package that owns a
+    # runtime define depends on load order, so match only its shape
+    assert text =~ "## Commands"
+    assert text =~ "- **`zz-apr`** — First line. Second \\| line. *("
   end
 
   test "the component gallery renders every registered example" do
@@ -182,7 +184,7 @@ defmodule Aimax.HelpTest do
     text = Buffer.text("*Help*")
 
     assert text =~ "## `window` — the closest matches"
-    assert text =~ "| kind | name | call it | owner | effects | what it does |"
+    assert text =~ "### Functions"
   end
 
   test "M-? over prose says nothing about it and describes the buffer instead" do

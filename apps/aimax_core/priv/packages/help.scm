@@ -161,50 +161,103 @@
 ;;; --- apropos: the agent's search, for the reader -------------------------------
 ;;; apropos was Scheme only — a function and an LLM tool with no way in from
 ;;; the keyboard, so `M-x` listed every command except the one that finds
-;;; commands. The page shows the same rows the agent reads: recipes first,
-;;; then public functions, M-x commands, keybindings and settings.
+;;; commands. The page groups the same hits the agent reads into one section
+;;; per kind. Each hit is one line: the name, how to call it, what it does,
+;;; then the owner and effects in a quiet trailer.
 
+;; one hit -> (SECTION LEAD CALL DOC). SECTION heads the group. LEAD is
+;; the name the reader scans for. CALL is extra call syntax, "" when the
+;; section heading already says how to call the kind.
 (define (help--apropos-row h)
   (let ((kind (plist-get h 'kind))
         (doc (or (plist-get h 'doc) "")))
     (cond
       ((equal? kind "recipe")
-       (list "recipe" (plist-get h 'task) (plist-get h 'run) ""))
+       (list "Recipes" (plist-get h 'task) (plist-get h 'run) ""))
       ((equal? kind "command")
-       (list "command" (plist-get h 'name)
-             (let ((k (plist-get h 'key))) (if k k "M-x")) doc))
+       (list "Commands" (plist-get h 'name)
+             (or (plist-get h 'key) "") doc))
       ((equal? kind "key")
-       (list "key" (plist-get h 'name) (plist-get h 'runs)
+       (list "Keys" (plist-get h 'name) (plist-get h 'runs)
              (command-doc (plist-get h 'runs))))
-      ((equal? kind "variable") (list "setting" (plist-get h 'name) "" doc))
+      ((equal? kind "variable") (list "Settings" (plist-get h 'name) "" doc))
       ((equal? kind "component")
-       (list "component" (plist-get h 'qualified-name)
+       (list "Components" (plist-get h 'qualified-name)
              (or (plist-get h 'use) "") doc))
       ((equal? kind "mode")
-       (list "mode" (plist-get h 'name) (or (plist-get h 'use) "") doc))
+       (list "Modes" (plist-get h 'name) "" doc))
+      ((equal? kind "internal")
+       (list "Internal primitives" (plist-get h 'name) "" doc))
       ;; a query that matched nothing comes back as the closest names
-      (else (list (if (plist-get h 'note) "closest" "function")
-                  (plist-get h 'name) (or (plist-get h 'sig) "") doc)))))
+      (else (list (if (plist-get h 'note) "Closest names" "Functions")
+                  (or (plist-get h 'sig) (plist-get h 'name)) "" doc)))))
+
+;; a code span keeps its text verbatim — no table, so no pipe escapes
+(define (help--line s) (string-join (string-split s "\n") " "))
 
 (define (help--code s)
-  (if (equal? s "") "" (string-append "`" (help--cell s) "`")))
+  (if (equal? s "") "" (string-append "`" (help--line s) "`")))
 
-(define (help--apropos-table hits)
-  (string-append
-    "| kind | name | call it | owner | effects | what it does |\n"
-    "| --- | --- | --- | --- | --- | --- |\n"
+;; the owner and effects close the line — they qualify the hit, the
+;; reader does not scan for them
+(define (help--apropos-meta h)
+  (let ((owner (or (plist-get h 'package) "core"))
+        (fx (string-join (or (plist-get h 'effects) '()) ", ")))
+    (string-append " *(" (help--cell owner)
+                   (if (equal? fx "") "" (string-append " · " (help--cell fx)))
+                   ")*")))
+
+(define (help--apropos-item h)
+  (let* ((r (help--apropos-row h))
+         (call (nth 2 r))
+         (doc (nth 3 r)))
+    (string-append
+      "- **" (help--code (nth 1 r)) "**"
+      (if (equal? call "") "" (string-append " " (help--code call)))
+      (if (equal? doc "") "" (string-append " — " (help--cell doc)))
+      (help--apropos-meta h))))
+
+;; one line under a heading says how to call the kind, once, instead of a
+;; call column that repeats "M-x" down the page
+(define (help--apropos-hint section)
+  (cond ((equal? section "Commands")
+         "`M-x` runs a command by name. The key after a name also runs it.\n\n")
+        ((equal? section "Functions") "Call a function from Scheme.\n\n")
+        ((equal? section "Modes")
+         "`M-x` with the mode's name turns it on in this buffer.\n\n")
+        (else "")))
+
+;; ((SECTION HIT ...) ...) in the order each section first appears, so
+;; the section with the best-ranked hit stays on top
+(define (help--apropos-groups hits)
+  (let loop ((hs hits) (order '()) (by '()))
+    (if (null? hs)
+        (map (lambda (s) (cons s (reverse (cdr (assoc s by)))))
+             (reverse order))
+        (let* ((h (car hs))
+               (s (car (help--apropos-row h)))
+               (g (assoc s by)))
+          (loop (cdr hs)
+                (if g order (cons s order))
+                (if g
+                    (map (lambda (p)
+                           (if (equal? (car p) s) (cons s (cons h (cdr p))) p))
+                         by)
+                    (cons (list s h) by)))))))
+
+;; HEAD is the heading marker for the group titles — "##" on the apropos
+;; page, "###" when the hits sit under a page's own section
+(define (help--apropos-list hits &optional head)
+  (let ((head (or head "##")))
     (string-join
-      (map (lambda (h)
-             (let ((r (help--apropos-row h)))
-               (string-append "| " (nth 0 r) " | " (help--code (nth 1 r))
-                              " | " (help--code (nth 2 r))
-                              " | " (help--cell (or (plist-get h 'package) "core"))
-                              " | " (help--cell
-                                       (string-join (or (plist-get h 'effects) '()) ", "))
-                              " | " (help--cell (nth 3 r)) " |")))
-           hits)
-      "\n")
-    "\n"))
+      (map (lambda (g)
+             (string-append
+               head " " (car g) "\n\n"
+               (help--apropos-hint (car g))
+               (string-join (map help--apropos-item (cdr g)) "\n")
+               "\n"))
+           (help--apropos-groups hits))
+      "\n")))
 
 (define (apropos-page query &optional filters)
   (let ((hits (apply apropos (cons query (or filters '())))))
@@ -214,7 +267,7 @@
         (if (null? hits)
             "Nothing matched, and no name is close.\n"
             (string-append (number->string (length hits)) " hits.\n\n"
-                           (help--apropos-table hits)))
+                           (help--apropos-list hits)))
         "\n---\n\n"
         "`C-h b` lists every binding · `M-x` runs a command by name "
         "· `q` closes this page\n"))))
@@ -276,7 +329,7 @@
     (if (null? hits)
         ""
         (string-append "## `" name "` — the closest matches\n\n"
-                       (help--apropos-table hits) "\n"))))
+                       (help--apropos-list hits "###") "\n"))))
 
 ;; the name at point, described by whatever registry knows it
 (define (help--at-point-section name)

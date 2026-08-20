@@ -1,11 +1,11 @@
-;;; sentry.scm --- read production errors without leaving the editor.
+;;; sentry.scm --- inspect and manage production errors in the editor.
 ;;;
-;;; The package reads Sentry only. It does not resolve, assign, or delete
-;;; issues. The token comes from the environment or one named Doppler config.
+;;; The package reads Sentry issues and can resolve one after confirmation.
+;;; The token comes from the environment or one named Doppler config.
 ;;; curl reads it from a temporary config file, never from the command line.
 ;;;
-;;; M-x sentry opens unresolved production issues. RET shows a safe summary.
-;;; The summary and event list omit user data, payloads, breadcrumbs, and stacks.
+;;; M-x sentry opens unresolved production issues. RET shows a structured detail view.
+;;; The issue view keeps complete raw JSON behind a collapsed disclosure.
 
 (domain! 'sentry)
 (effects! '(write))
@@ -140,6 +140,17 @@
     "max-time = " (number->string sentry-timeout) "\n"
     "silent\nshow-error\nwrite-out = \"\\n%{http_code}\"\n"))
 
+(define (sentry--curl-write-config url token body)
+  (string-append
+    "url = \"" (sentry--config-escape url) "\"\n"
+    "request = \"PUT\"\n"
+    "header = \"Authorization: Bearer " (sentry--config-escape token) "\"\n"
+    "header = \"Accept: application/json\"\n"
+    "header = \"Content-Type: application/json\"\n"
+    "data = \"" (sentry--config-escape body) "\"\n"
+    "max-time = " (number->string sentry-timeout) "\n"
+    "silent\nshow-error\nwrite-out = \"\\n%{http_code}\"\n"))
+
 ;; Return curl output with its final HTTP status line. Tests replace this seam.
 (define (sentry--curl url)
   (let ((token (sentry--token)))
@@ -153,7 +164,20 @@
             (delete-file! path)
             out)))))
 
+(define (sentry--curl-write url body)
+  (let ((token (sentry--token)))
+    (if (not token)
+        "SENTRY_AUTH_TOKEN is not configured\n000"
+        (let ((path (sentry--tmp-path)))
+          (write-file! path (sentry--curl-write-config url token body))
+          (let ((out (shell-command->string
+                       (string-append sentry-curl-program " --config "
+                                      (sentry--shell-quote path)))))
+            (delete-file! path)
+            out)))))
+
 (define *sentry-transport* sentry--curl)
+(define *sentry-write-transport* sentry--curl-write)
 
 (define (sentry--split-status output)
   (let* ((lines (string-split output "\n"))
@@ -193,7 +217,25 @@
                   (sentry--error "Sentry returned invalid JSON")
                   reply))))))
 
-;;; --- read-only API ------------------------------------------------------------
+(define (sentry--request-write url payload)
+  (let* ((wire (*sentry-write-transport* url (json-encode payload)))
+         (parts (sentry--split-status wire))
+         (status (car parts))
+         (body (cadr parts)))
+    (cond ((= status 0)
+           (sentry--error (string-trim body)))
+          ((or (< status 200) (> status 299))
+           (sentry--error (string-append "Sentry returned HTTP "
+                                         (number->string status))))
+          ((equal? (string-trim body) "")
+           (list 'status "resolved"))
+          (else
+            (let ((reply (json-parse body)))
+              (if (equal? reply #f)
+                  (sentry--error "Sentry returned invalid JSON")
+                  reply))))))
+
+;;; --- API ----------------------------------------------------------------------
 
 ;; Reduce API objects at the boundary. Callers cannot accidentally print user
 ;; objects, request payloads, breadcrumbs, stack traces, or issue metadata.
@@ -238,7 +280,7 @@
               (sentry--org-path
                 (string-append "issues/" (url-encode (sentry--text issue-id)) "/"))
               '()))))
-    (if (sentry--error? reply) reply (sentry--safe-issue reply))))
+    (if (sentry--error? reply) reply reply)))
 
 (define (sentry-issue-events issue-id &optional environment time-range limit)
   (let* ((count (sentry--limit limit))
@@ -262,9 +304,19 @@
               (sentry--project-path
                 (string-append "events/" (url-encode (sentry--text event-id)) "/"))
               '()))))
-    (if (sentry--error? reply) reply (sentry--safe-event reply))))
+    (if (sentry--error? reply) reply reply)))
 
-;;; --- safe views ---------------------------------------------------------------
+(define (sentry-resolve-issue issue-id)
+  (sentry--request-write
+    (sentry--url
+      (sentry--org-path
+        (string-append "issues/"
+                       (url-encode (sentry--text issue-id))
+                       "/"))
+      '())
+    (list 'status "resolved")))
+
+;;; --- views --------------------------------------------------------------------
 
 (define *sentry-buffer* "*Sentry issues*")
 (define *sentry-group* "sentry")
@@ -302,18 +354,128 @@
   (let ((text (sentry--redact value)))
     (if (equal? text "") "" (string-append label ": " text "\n"))))
 
+(define (sentry--pretty-json value)
+  (let ((text (shell-command->string
+                (string-append "printf %s "
+                               (sentry--shell-quote (json-encode value))
+                               " | jq .")
+                (default-directory))))
+    (if (equal? (string-trim text) "")
+        (json-encode value)
+        text)))
+
+(define (sentry--html-escape text)
+  (let* ((value (sentry--text text))
+         (value (re-replace-all "&" value "&amp;"))
+         (value (re-replace-all "<" value "&lt;"))
+         (value (re-replace-all ">" value "&gt;")))
+    (re-replace-all "\"" value "&quot;")))
+
+(define (sentry--issue-title issue)
+  (let* ((title (string-trim (sentry--text (sentry--get issue 'title))))
+         (metadata (sentry--get issue 'metadata))
+         (kind (string-trim (sentry--text (sentry--get metadata 'type)))))
+    (cond ((not (equal? title "")) (sentry--redact title))
+          ((not (equal? kind "")) kind)
+          (else (sentry--text (sentry--get issue 'shortId))))))
+
+(define (sentry--summary-pairs issue)
+  (list
+    (list "Status" (sentry--text (sentry--get issue 'status)))
+    (list "Priority" (sentry--text (sentry--get issue 'priority)))
+    (list "Level" (sentry--text (sentry--get issue 'level)))
+    (list "Events" (sentry--text (sentry--get issue 'count)))
+    (list "Users" (sentry--text (sentry--get issue 'userCount)))
+    (list "First seen" (sentry--text (sentry--get issue 'firstSeen)))
+    (list "Last seen" (sentry--text (sentry--get issue 'lastSeen)))
+    (list "Platform" (sentry--text (sentry--get issue 'platform)))))
+
+(define (sentry--location-pairs issue)
+  (let ((metadata (sentry--get issue 'metadata)))
+    (list
+      (list "Culprit" (sentry--text (sentry--get issue 'culprit)))
+      (list "Exception" (sentry--text (sentry--get metadata 'type)))
+      (list "Function" (sentry--text (sentry--get metadata 'function)))
+      (list "File" (sentry--text (sentry--get metadata 'filename)))
+      (list "Issue URL" (sentry--text (sentry--get issue 'permalink))))))
+
+(define (sentry--tag-lines issue)
+  (map (lambda (tag)
+         (list 'tag "div" 'class "sentry-tag"
+               'segs (list
+                       (list "c-kv-key" (sentry--text (sentry--get tag 'name)))
+                       (list "c-kv-value"
+                             (string-append
+                               "  "
+                               (sentry--text (sentry--get tag 'totalValues))
+                               " values")))))
+       (or (sentry--get issue 'tags) '())))
+
+(define sentry--detail-actions
+  '(("sentry:ask" "Ask agent" "a")
+    ("sentry:open" "Open in Sentry" "o")
+    ("sentry:resolve" "Resolve" "R")
+    ("sentry:events" "Events" "e")
+    ("sentry:refresh" "Refresh" "g")))
+
+(define (sentry--issue-blocks issue raw-open?)
+  (let* ((metadata (sentry--get issue 'metadata))
+         (exception (sentry--text (sentry--get metadata 'value)))
+         (status (sentry--text (sentry--get issue 'status)))
+         (priority (sentry--text (sentry--get issue 'priority))))
+    (list
+      (component 'ui/section
+        (list 'title
+          (string-append
+            (sentry--text (sentry--get issue 'shortId))
+            " — "
+            (sentry--issue-title issue))))
+      (list 'tag "div" 'class "sentry-state"
+            'children
+            (list
+              (component 'ui/badge
+                (list 'text status
+                      'class (if (equal? status "resolved") "success" "warn")))
+              (component 'ui/badge
+                (list 'text priority
+                      'class (if (equal? priority "high") "alert" "warn")))))
+      (component 'ui/actions
+        (list 'actions sentry--detail-actions 'class "sentry-actions"))
+      (component 'ui/card
+        (list 'title "Error" 'open? #t
+              'badge (sentry--text (sentry--get metadata 'type))
+              'body
+              (list (list 'tag "pre" 'class "sentry-exception"
+                          'text (if (equal? exception "")
+                                    "No exception message was returned."
+                                    exception)))))
+      (component 'ui/card
+        (list 'title "Signal" 'open? #t
+              'body (list (component 'ui/kv
+                            (list 'pairs (sentry--summary-pairs issue))))))
+      (component 'ui/card
+        (list 'title "Where" 'open? #t
+              'body (list (component 'ui/kv
+                            (list 'pairs (sentry--location-pairs issue))))))
+      (component 'ui/card
+        (list 'title "Complete payload"
+              'badge (if raw-open? "open" "expand")
+              'open? raw-open?
+              'click "sentry:raw"
+              'body
+              (list (list 'tag "pre" 'class "sentry-raw"
+                          'text (sentry--pretty-json issue))))))))
+
 (define (sentry--issue-text issue)
-  (string-append
-    (sentry--safe-field "Issue" (sentry--get issue 'shortId))
-    (sentry--safe-field "Title" (sentry--get issue 'title))
-    (sentry--safe-field "Status" (sentry--get issue 'status))
-    (sentry--safe-field "Level" (sentry--get issue 'level))
-    (sentry--safe-field "Culprit" (sentry--get issue 'culprit))
-    (sentry--safe-field "Events" (sentry--get issue 'count))
-    (sentry--safe-field "Users" (sentry--get issue 'userCount))
-    (sentry--safe-field "First seen" (sentry--get issue 'firstSeen))
-    (sentry--safe-field "Last seen" (sentry--get issue 'lastSeen))
-    (sentry--safe-field "Sentry" (sentry--get issue 'permalink))))
+  (let* ((metadata (sentry--get issue 'metadata))
+         (exception (sentry--text (sentry--get metadata 'value))))
+    (string-append
+      (sentry--text (sentry--get issue 'shortId)) "  "
+      (sentry--issue-title issue) "\n\n"
+      "Exception\n"
+      (if (equal? exception "") "No exception message was returned." exception)
+      "\n\nRaw issue JSON\n"
+      (sentry--pretty-json issue))))
 
 (define (sentry--replace-buffer! buf text)
   (buffer-create buf)
@@ -327,18 +489,34 @@
 
 (define (sentry--render-detail! buf issue-id)
   (let ((issue (sentry-issue-detail issue-id)))
-    (sentry--replace-buffer!
-      buf
-      (if (sentry--error? issue)
-          (string-append (sentry--error-message issue) "\n")
-          (string-append (sentry--issue-text issue)
-                         "\nThis view omits user data, payloads, breadcrumbs, and stack traces.\n")))))
+    (if (sentry--error? issue)
+        (begin
+          (buffer-set-local! buf 'render-mode "text")
+          (buffer-set-local! buf 'render-blocks '())
+          (sentry--replace-buffer!
+            buf (string-append (sentry--error-message issue) "\n")))
+        (begin
+          (sentry--replace-buffer! buf (sentry--issue-text issue))
+          (buffer-set-local! buf 'sentry-detail-issue issue)
+          (buffer-set-local! buf 'render-mode "blocks")
+          (buffer-set-local! buf 'render-blocks
+            (sentry--issue-blocks
+              issue
+              (and (buffer-local buf 'sentry-raw-open?) #t)))))))
 
 (define (sentry--detail-setup! buf)
   (sentry--join-group! buf)
+  (desktop-skip! buf 'render-blocks)
+  (desktop-skip! buf 'sentry-detail-issue)
+  (local-set-key* buf "a" "sentry-ask-agent")
+  (local-set-key* buf "o" "sentry-open-web")
+  (local-set-key* buf "R" "sentry-resolve")
   (local-set-key* buf "g" "sentry-detail-refresh")
   (local-set-key* buf "e" "sentry-events")
   (local-set-key* buf "q" "quit-window")
+  ;; fetch only when the buffer has nothing to show: this setup also
+  ;; runs on every wake (buffer switcher preview, desktop restore), and
+  ;; an unconditional fetch froze the UI for the network round trip
   (let ((issue-id (buffer-local buf 'sentry-issue-id)))
     (when (and issue-id (= (buffer-size buf) 0))
       (sentry--render-detail! buf issue-id))))
@@ -364,15 +542,171 @@
       buf
       (if (sentry--error? events)
           (string-append (sentry--error-message events) "\n")
-          (string-append (sentry--events-text events)
-                         "\nThis view omits event messages, user data, payloads, breadcrumbs, and stacks.\n")))))
+          (sentry--events-text events)))))
 
 (define (sentry--events-setup! buf)
   (sentry--join-group! buf)
   (local-set-key* buf "g" "sentry-events-refresh")
   (local-set-key* buf "q" "quit-window")
+  ;; same wake rule as the detail view: no fetch when text is cached
   (let ((issue-id (buffer-local buf 'sentry-issue-id)))
-    (when issue-id (sentry--render-events! buf issue-id))))
+    (when (and issue-id (= (buffer-size buf) 0))
+      (sentry--render-events! buf issue-id))))
+
+(define *sentry-agent-send*
+  (lambda (chat prompt) (agent-continue! chat prompt)))
+
+(define *sentry-open-url*
+  (lambda (url) (tab-open url)))
+
+(define (sentry--agent-prompt buf issue)
+  (string-append
+    "Investigate Sentry issue "
+    (sentry--text (sentry--get issue 'shortId))
+    ". Read the complete issue in buffer "
+    buf
+    ". Find the cause, inspect the related source, and propose or implement a fix. "
+    "Do not resolve the Sentry issue until I ask."))
+
+(define (sentry--ask-agent! buf)
+  (let ((issue (buffer-local buf 'sentry-detail-issue)))
+    (when issue
+      (let ((chat (group-chat *sentry-group*)))
+        (*sentry-agent-send* chat (sentry--agent-prompt buf issue))
+        (group-chat-show! *sentry-group*)))))
+
+(define (sentry--open-in-sentry! buf)
+  (let* ((issue (buffer-local buf 'sentry-detail-issue))
+         (url (and issue (sentry--get issue 'permalink))))
+    (when url (*sentry-open-url* url))))
+
+(define (sentry--resolve-now! buf issue-id)
+  (let ((reply (sentry-resolve-issue issue-id)))
+    (if (sentry--error? reply)
+        (message (sentry--error-message reply))
+        (begin
+          (message (string-append "Resolved Sentry issue " issue-id))
+          (when (buffer-exists? *sentry-buffer*)
+            (list-refresh! *sentry-buffer*))
+          (sentry--render-detail! buf issue-id)))))
+
+(define (sentry--confirm-resolve! buf)
+  (let* ((issue-id (buffer-local buf 'sentry-issue-id))
+         (issue (buffer-local buf 'sentry-detail-issue))
+         (short-id (sentry--text (sentry--get issue 'shortId))))
+    (when issue-id
+      (y-or-n
+        (string-append "Resolve " short-id " in Sentry?")
+        (lambda () (sentry--resolve-now! buf issue-id))))))
+
+;;; --- the detail verbs, from the list --------------------------------------------
+;;; The same keys the issue workspace binds act on the list's marked rows,
+;;; or the row at point — one key works on one issue and on twelve.
+
+;; a rendered detail buffer for ISSUE-ID, without displaying it
+(define (sentry--ensure-detail! issue-id)
+  (let ((buf (sentry--detail-buffer issue-id)))
+    (buffer-create buf)
+    (buffer-set-local! buf 'sentry-issue-id issue-id)
+    (if (equal? (buffer-local buf 'mode-name) "sentry-detail-mode")
+        (when (= (buffer-size buf) 0)
+          (sentry--render-detail! buf issue-id))
+        (with-current-buffer buf
+          (lambda () (set-mode! "sentry-detail-mode"))))
+    buf))
+
+;; the short ids of ISSUES, joined for a message or a prompt
+(define (sentry--short-ids issues)
+  (string-join
+    (map (lambda (i) (sentry--text (sentry--get i 'shortId))) issues)
+    ", "))
+
+(define (sentry--agent-prompt-lines issues)
+  (let loop ((is issues) (acc '()))
+    (if (null? is)
+        (string-join (reverse acc) "\n")
+        (let ((i (car is)))
+          (loop (cdr is)
+                (cons (string-append
+                        "- " (sentry--text (sentry--get i 'shortId))
+                        " — read the complete issue in buffer "
+                        (sentry--detail-buffer (sentry--text (sentry--get i 'id))))
+                      acc))))))
+
+(define-command "sentry-list-ask-agent"
+  "Send the marked issues, or the one at point, to the Sentry group agent"
+  (lambda ()
+    (let ((issues (list-targets *sentry-buffer*)))
+      (unless (null? issues)
+        (for-each (lambda (i)
+                    (sentry--ensure-detail! (sentry--text (sentry--get i 'id))))
+                  issues)
+        (let ((chat (group-chat *sentry-group*)))
+          (*sentry-agent-send* chat
+            (if (null? (cdr issues))
+                (sentry--agent-prompt
+                  (sentry--detail-buffer (sentry--text (sentry--get (car issues) 'id)))
+                  (car issues))
+                (string-append
+                  "Investigate these Sentry issues:\n"
+                  (sentry--agent-prompt-lines issues)
+                  "\nFind the causes, inspect the related source, and propose"
+                  " or implement fixes. Do not resolve the Sentry issues"
+                  " until I ask.")))
+          (group-chat-show! *sentry-group*))))))
+
+(define-command "sentry-list-open-web"
+  "Open the marked issues, or the one at point, in Sentry"
+  (lambda ()
+    (for-each (lambda (i)
+                (let ((url (sentry--get i 'permalink)))
+                  (when url (*sentry-open-url* url))))
+              (list-targets *sentry-buffer*))))
+
+(define-command "sentry-list-resolve"
+  "Resolve the marked issues, or the one at point, after confirmation"
+  (lambda ()
+    (let ((issues (list-targets *sentry-buffer*)))
+      (unless (null? issues)
+        (y-or-n
+          (string-append "Resolve " (sentry--short-ids issues) " in Sentry?")
+          (lambda ()
+            (let loop ((is issues) (done 0))
+              (if (null? is)
+                  (message (string-append "Resolved " (number->string done)
+                                          " Sentry issue(s)"))
+                  (let ((reply (sentry-resolve-issue
+                                 (sentry--text (sentry--get (car is) 'id)))))
+                    (if (sentry--error? reply)
+                        (begin (message (sentry--error-message reply))
+                               (loop (cdr is) done))
+                        (loop (cdr is) (+ done 1))))))
+            (list-refresh! *sentry-buffer*)))))))
+
+(on-block-click! 'sentry
+  (lambda (buf id)
+    (and (buffer-local buf 'sentry-issue-id)
+         (cond
+           ((equal? id "sentry:raw")
+            (let* ((open? (and (buffer-local buf 'sentry-raw-open?) #t))
+                   (issue (buffer-local buf 'sentry-detail-issue)))
+              (buffer-set-local! buf 'sentry-raw-open? (not open?))
+              (when issue
+                (buffer-set-local! buf 'render-blocks
+                  (sentry--issue-blocks issue (not open?)))))
+            #t)
+           ((equal? id "sentry:ask")
+            (sentry--ask-agent! buf) #t)
+           ((equal? id "sentry:open")
+            (sentry--open-in-sentry! buf) #t)
+           ((equal? id "sentry:resolve")
+            (sentry--confirm-resolve! buf) #t)
+           ((equal? id "sentry:events")
+            (with-current-buffer buf (lambda () (run-command "sentry-events"))) #t)
+           ((equal? id "sentry:refresh")
+            (with-current-buffer buf
+              (lambda () (run-command "sentry-detail-refresh"))) #t)
+           (else #f)))))
 
 ;;; --- modes and commands -------------------------------------------------------
 
@@ -385,7 +719,28 @@
   (lambda () (sentry--detail-setup! (current-buffer))))
 
 (mode-doc! "sentry-detail-mode"
-  "A safe summary for one Sentry issue. `e` lists events. `g` refreshes the summary.")
+  "An actionable Sentry issue workspace. `a` asks the agent. `R` resolves after confirmation.")
+
+(register-context-provider! "sentry-detail-mode"
+  (lambda (buf)
+    (let* ((issue (buffer-local buf 'sentry-detail-issue))
+           (short-id (and issue (sentry--get issue 'shortId))))
+      (and short-id
+           (string-append
+             "Sentry issue "
+             (sentry--text short-id)
+             " is open in "
+             buf
+             ". Read that buffer for the complete payload.")))))
+
+(define-command "sentry-ask-agent" "Send this issue to the Sentry group agent"
+  (lambda () (sentry--ask-agent! (current-buffer))))
+
+(define-command "sentry-open-web" "Open this issue in Sentry"
+  (lambda () (sentry--open-in-sentry! (current-buffer))))
+
+(define-command "sentry-resolve" "Resolve this issue in Sentry after confirmation"
+  (lambda () (sentry--confirm-resolve! (current-buffer))))
 
 (mode-icon! "sentry-events-mode" "")
 
@@ -395,7 +750,7 @@
 (mode-doc! "sentry-events-mode"
   "Safe event identifiers for one Sentry issue. `g` refreshes the list.")
 
-(define-command "sentry-open" "Show a safe summary for the Sentry issue on this row"
+(define-command "sentry-open" "Show structured details for the Sentry issue on this row"
   (lambda ()
     (let ((issue (list-current *sentry-buffer*)))
       (when issue
@@ -404,12 +759,17 @@
           (buffer-create buf)
           (buffer-set-local! buf 'sentry-issue-id issue-id)
           (display-buffer-other-window! buf)
-          (with-current-buffer buf (lambda () (set-mode! "sentry-detail-mode"))))))))
+          (with-current-buffer
+            buf
+            (lambda ()
+              (if (equal? (buffer-local buf 'mode-name) "sentry-detail-mode")
+                  (sentry--render-detail! buf issue-id)
+                  (set-mode! "sentry-detail-mode")))))))))
 
 (define-command "sentry-refresh" "Refresh the Sentry issue list"
   (lambda () (list-refresh! *sentry-buffer*)))
 
-(define-command "sentry-detail-refresh" "Refresh this Sentry issue summary"
+(define-command "sentry-detail-refresh" "Refresh this Sentry issue detail"
   (lambda ()
     (let ((issue-id (buffer-local (current-buffer) 'sentry-issue-id)))
       (when issue-id (sentry--render-detail! (current-buffer) issue-id)))))
@@ -435,7 +795,9 @@
   (list
     'doc (string-append
            "Unresolved Sentry issues for the configured project and environment. "
-           "RET opens a safe summary. `g` refreshes the list.")
+           "RET opens structured issue details. `g` refreshes the list. "
+           "`m` marks rows; `a`, `o` and `R` act on the marked rows, or the "
+           "row at point — ask the agent, open in Sentry, resolve.")
     'buffer *sentry-buffer*
     'rows sentry--issue-rows
     'columns (lambda (buf)
@@ -446,11 +808,13 @@
     'title (lambda (buf) "Sentry issues")
     'meta sentry--issue-meta
     'total (lambda (buf) (length (list-entries buf)))
-    'no-marks #t
     'footer (lambda (buf)
-              '(("RET" "detail") ("/" "filter") ("g" "refresh") ("q" "quit")))
+              '(("RET" "detail") ("m" "mark") ("a" "agent") ("o" "web")
+                ("R" "resolve") ("/" "filter") ("g" "refresh") ("q" "quit")))
     'key (lambda (buf issue) (sentry--get issue 'id))
-    'keys '(("RET" "sentry-open") ("g" "sentry-refresh") ("q" "quit-window"))))
+    'keys '(("RET" "sentry-open") ("g" "sentry-refresh") ("q" "quit-window")
+            ("a" "sentry-list-ask-agent") ("o" "sentry-list-open-web")
+            ("R" "sentry-list-resolve"))))
 
 (define-command "sentry" "List unresolved production issues from Sentry"
   (lambda () (list-mode-show! "sentry-mode")))
@@ -470,8 +834,10 @@
   "(sentry-event-detail EVENT-ID) — read safe identifiers for one Sentry event")
 
 (effects! '(write external))
+(public! 'sentry-resolve-issue
+  "(sentry-resolve-issue ISSUE-ID) — resolve one Sentry issue")
 (public! 'sentry
-  "M-x sentry — list unresolved production issues and open safe summaries")
+  "M-x sentry — list unresolved production issues and open full formatted details")
 
 (defrecipe! "inspect unresolved production errors"
   "(sentry)")

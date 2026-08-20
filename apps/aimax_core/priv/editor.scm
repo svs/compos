@@ -369,11 +369,13 @@
     (filter (lambda (k) (member k keys)) (list-marked buf ch))))
 
 ;; the entries a verb acts on: every marked entry, or the line at point.
-;; This is what makes one key work on one chat and on twelve.
+;; This is what makes one key work on one chat and on twelve. ENTRIES,
+;; not keys, in both cases: a list whose rows are plists (sentry) marks
+;; by key but acts on the row itself.
 (define (list-targets buf)
   (let ((m (list-live-marked buf *list-mark-char*)))
     (if (pair? m)
-        m
+        (filter (lambda (e) (member (list-key buf e) m)) (list-entries buf))
         (let ((e (list-current buf))) (if e (list e) '())))))
 
 (define-command "list-mark" "Mark the entry at point"

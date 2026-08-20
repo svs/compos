@@ -16,6 +16,7 @@ defmodule Aimax.SentryTest do
 
   setup do
     eval!("(set! *sentry-transport* sentry--curl)")
+    eval!("(set! *sentry-write-transport* sentry--curl-write)")
     Editor.minibuffer_close()
     Editor.set_pending([])
 
@@ -24,6 +25,7 @@ defmodule Aimax.SentryTest do
             "*Sentry issues*",
             "*Sentry issue: 42*",
             "*Sentry issue: 43*",
+            "*Sentry issue: 99*",
             "*chat:sentry*"
           ],
           do: Aimax.Core.kill_buffer(buffer)
@@ -78,21 +80,24 @@ defmodule Aimax.SentryTest do
     refute reply =~ ~s{(id "3"}
   end
 
-  test "the safe issue summary redacts addresses and omits raw fields" do
+  test "the issue detail puts the exception first and keeps complete raw JSON" do
     text =
       eval!("""
       (sentry--issue-text
         (list 'shortId "ATS-1"
-              'title "failed for jane@example.com from 10.2.3.4"
+              'title ""
               'status "unresolved"
-              'metadata (list 'secret "do-not-print")
-              'user (list 'email "jane@example.com")))
+              'metadata
+              (list 'type "RuntimeError"
+                    'value "credits exhausted"
+                    'secret "visible-in-raw")))
       """)
 
-    assert text =~ "[redacted-email]"
-    assert text =~ "[redacted-ip]"
-    refute text =~ "do-not-print"
-    refute text =~ "metadata"
+    assert text =~ "ATS-1  RuntimeError"
+    assert text =~ "Exception\\ncredits exhausted"
+    assert text =~ "Raw issue JSON"
+    assert text =~ "visible-in-raw"
+    refute text =~ "<!doctype html>"
   end
 
   test "the public API declares its domain and effects" do
@@ -130,8 +135,10 @@ defmodule Aimax.SentryTest do
     text = Buffer.text("*Sentry issue: 42*")
     assert text =~ "ATS-42"
     assert text =~ "[redacted-email]"
-    assert text =~ "omits user data"
-    refute text =~ "hidden"
+    assert text =~ "Raw issue JSON"
+    assert text =~ "hidden"
+    refute text =~ "<!doctype html>"
+    assert eval!(~S|(buffer-local "*Sentry issue: 42*" 'render-mode)|) == ~s{"blocks"}
     assert eval!(~S|(buffer-group "*Sentry issue: 42*")|) == ~s{"sentry"}
 
     eval!(~S|(switch-to-buffer! "*Sentry issues*")|)
@@ -149,6 +156,70 @@ defmodule Aimax.SentryTest do
     KeyDispatch.handle_key("p")
     KeyDispatch.handle_key("RET")
 
-    assert Buffer.text("*Sentry issue: 42*") == text
+    assert Buffer.text("*Sentry issue: 42*") =~ "downloaded twice"
+  end
+
+  test "the detail action bar sends the issue to its group agent" do
+    eval!(~S"""
+    (begin
+      (define *sentry-test-agent-prompt* "")
+      (set! *sentry-agent-send*
+        (lambda (chat prompt)
+          (set! *sentry-test-agent-prompt* prompt)))
+      (set! *sentry-transport*
+        (lambda (url)
+          "{\"id\":\"99\",\"shortId\":\"ATS-99\",\"title\":\"worker failed\",\"status\":\"unresolved\",\"priority\":\"high\",\"permalink\":\"https://example.sentry.io/issues/99/\",\"metadata\":{\"type\":\"RuntimeError\",\"value\":\"boom\"}}\n200")))
+    """)
+
+    eval!(~S|(buffer-create "*Sentry issue: 99*")|)
+    eval!(~S|(buffer-set-local! "*Sentry issue: 99*" 'sentry-issue-id "99")|)
+    eval!(~S|(switch-to-buffer! "*Sentry issue: 99*")|)
+    eval!(~S|(set-mode! "sentry-detail-mode")|)
+    eval!(~S|(run-command "sentry-detail-refresh")|)
+
+    actions = eval!(~S|(value->string sentry--detail-actions)|)
+    assert actions =~ "Ask agent"
+    assert actions =~ "Open in Sentry"
+    assert actions =~ "Resolve"
+    assert eval!(~S|(buffer-local "*Sentry issue: 99*" 'render-mode)|) == ~s{"blocks"}
+
+    KeyDispatch.handle_key("a")
+
+    prompt = eval!("*sentry-test-agent-prompt*")
+    assert prompt =~ "ATS-99"
+    assert prompt =~ "*Sentry issue: 99*"
+    assert eval!(~S|(current-buffer)|) == ~s{"*chat:sentry*"}
+  end
+
+  test "resolve asks first and sends the Sentry update after y" do
+    eval!(~S"""
+    (begin
+      (define *sentry-test-write-url* "")
+      (define *sentry-test-write-body* "")
+      (set! *sentry-transport*
+        (lambda (url)
+          (if (string-contains? url "/issues/99/")
+              "{\"id\":\"99\",\"shortId\":\"ATS-99\",\"title\":\"worker failed\",\"status\":\"unresolved\",\"priority\":\"high\",\"permalink\":\"https://example.sentry.io/issues/99/\",\"metadata\":{\"type\":\"RuntimeError\",\"value\":\"boom\"}}\n200"
+              "[]\n200")))
+      (set! *sentry-write-transport*
+        (lambda (url body)
+          (set! *sentry-test-write-url* url)
+          (set! *sentry-test-write-body* body)
+          "{\"status\":\"resolved\"}\n200")))
+    """)
+
+    eval!(~S|(buffer-create "*Sentry issue: 99*")|)
+    eval!(~S|(buffer-set-local! "*Sentry issue: 99*" 'sentry-issue-id "99")|)
+    eval!(~S|(switch-to-buffer! "*Sentry issue: 99*")|)
+    eval!(~S|(set-mode! "sentry-detail-mode")|)
+
+    KeyDispatch.handle_key("R")
+    assert eval!("*sentry-test-write-url*") == ~s{""}
+
+    KeyDispatch.handle_key("y")
+
+    assert eval!("*sentry-test-write-url*") =~
+             "/api/0/organizations/svs-recruiting/issues/99/"
+    assert eval!("*sentry-test-write-body*") =~ "resolved"
   end
 end

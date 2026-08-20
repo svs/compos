@@ -650,6 +650,15 @@
 ;;;   'footer   (buf) -> ((KEY WORD) ...)   the key bar under the rows
 ;;;   'preview  (buf entry)                 what moving the highlight shows
 ;;;
+;;; A list whose rows come from a slow source (the network) declares the
+;;; source through the buffer cache instead of 'rows doing the fetch:
+;;;   'cache-fetch (buf k)                  fetch off the UI lane, call (k ROWS);
+;;;                                         (k #f) on failure keeps the old rows
+;;;   'cache-ttl   SECONDS                  wake refreshes only past this age;
+;;;                                         #f fetches only on explicit refresh
+;;; 'rows then serves (list-entries buf) — the cache IS the source of the
+;;; view — and the mode's `g` calls cache-refresh! instead of list-refresh!.
+;;;
 ;;; A mode that declares 'columns gets the mark column, the m/u/U/* keys
 ;;; and the clamped n/p for free. A mode that declares 'header and 'render
 ;;; keeps the plain lines it always had.
@@ -1166,6 +1175,77 @@
 (define (list-refresh! buf) (list-render! buf #t))
 (define (list-redraw! buf) (list-render! buf #f))
 
+;;; --- the buffer cache: content fetched from a slow source ---------------------
+;;; A buffer that shows external data (an HTTP API, a slow command) keeps
+;;; what it fetched — rendered text, list entries — and these helpers keep
+;;; the bookkeeping: when the data arrived, whether it is stale, and one
+;;; refresh in flight at a time. The fetch must leave the UI lane: FETCH
+;;; receives a continuation and calls it with the data when it has it, so
+;;; a shell fetch uses the callback form of shell-command->string and the
+;;; lane moves on. A wake draws the cache it has and refreshes only when
+;;; the declared TTL has passed.
+;;;
+;;;   'cache-time      seconds at the last successful render — persists,
+;;;                    so a restart knows the age of what it restored
+;;;   'cache-spec      (fetch FN render FN ttl SECONDS) — holds closures,
+;;;                    so the mode setup re-declares it on every wake
+;;;   'cache-inflight  one refresh at a time — runtime state
+
+(define (cache-declare! buf fetch render ttl)
+  (desktop-skip! buf 'cache-spec)
+  (desktop-skip! buf 'cache-inflight)
+  (buffer-set-local! buf 'cache-inflight #f)
+  (buffer-set-local! buf 'cache-spec
+    (list 'fetch fetch 'render render 'ttl ttl)))
+
+(define (cache-stamp! buf)
+  (buffer-set-local! buf 'cache-time (current-time)))
+
+;; seconds since the last successful render, or #f before the first
+(define (cache-age buf)
+  (let ((t (buffer-local buf 'cache-time)))
+    (and t (- (current-time) t))))
+
+;; #t when the buffer never rendered, or its TTL has passed. A declared
+;; TTL of #f means the data never goes stale by age: only an explicit
+;; cache-refresh! fetches again.
+(define (cache-stale? buf)
+  (let ((spec (buffer-local buf 'cache-spec)))
+    (and spec
+         (let ((age (cache-age buf))
+               (ttl (plist-get spec 'ttl)))
+           (cond ((not age) #t)
+                 ((not ttl) #f)
+                 (else (> age ttl)))))))
+
+;; "just now", "40s ago", "5m ago", "2h ago" — for a header or modeline
+(define (cache-age-label buf)
+  (let ((age (cache-age buf)))
+    (cond ((not age) #f)
+          ((< age 10) "just now")
+          ((< age 60) (string-append (number->string age) "s ago"))
+          ((< age 3600) (string-append (number->string (quotient age 60)) "m ago"))
+          (else (string-append (number->string (quotient age 3600)) "h ago")))))
+
+;; Fetch and re-render. The buffer shows what it has until the data
+;; lands; a fetch already in flight is not doubled. A #f from the fetch
+;; leaves the cache as it was — the stale rows beat an empty view.
+(define (cache-refresh! buf)
+  (let ((spec (buffer-local buf 'cache-spec)))
+    (when (and spec (not (buffer-local buf 'cache-inflight)))
+      (buffer-set-local! buf 'cache-inflight #t)
+      ((plist-get spec 'fetch) buf
+       (lambda (data)
+         (when (buffer-known? buf)
+           (buffer-set-local! buf 'cache-inflight #f)
+           (when data
+             ((plist-get spec 'render) buf data)
+             (cache-stamp! buf))))))))
+
+;; the wake rule: show the cache, and fetch only past the TTL
+(define (cache-wake! buf)
+  (when (cache-stale? buf) (cache-refresh! buf)))
+
 ;; Everything a list buffer needs to BE one, applied to an explicit
 ;; buffer. The mode setup calls it with (current-buffer); opening a list
 ;; calls it with the buffer it just made, so neither has to select first.
@@ -1218,7 +1298,18 @@
     (list-render! buf 'cached)
     ;; the rewrite leaves the buffer's point after the key bar — a list
     ;; opens with point on the first row
-    (list-goto-index! buf 0)))
+    (list-goto-index! buf 0)
+    ;; a list that declares an off-lane source refreshes through the
+    ;; buffer cache: the wake above drew what it had, and new rows land
+    ;; when the fetch answers. 'rows keeps serving the cached entries.
+    (let ((cf (plist-get opts 'cache-fetch)))
+      (when cf
+        (cache-declare! buf cf
+          (lambda (b rows)
+            (buffer-set-local! b 'list-entries rows)
+            (list-render! b 'cached))
+          (plist-get opts 'cache-ttl))
+        (cache-wake! buf)))))
 
 (define (define-list-mode! name opts)
   (set! *list-modes*
@@ -7207,6 +7298,17 @@
 (public! 'add-hook! "(add-hook! 'name-hook FN)")
 (public! 'overlay-set! "(overlay-set! NAME TAG ((START END FACE) ...)) — replaces TAG's ranges")
 (public! 'overlay-clear! "(overlay-clear! NAME TAG)")
+
+;; the buffer cache — external data drawn from what the buffer already
+;; holds; the fetch runs off the UI lane through a continuation
+(category! 'buffers)
+(public! 'cache-declare! "(cache-declare! BUF FETCH RENDER TTL) — FETCH is (buf k): do the work off the UI lane and call (k DATA), (k #f) on failure; RENDER is (buf data); TTL seconds, #f = manual refresh only")
+(public! 'cache-refresh! "(cache-refresh! BUF) — fetch and re-render; one flight at a time; the buffer shows what it has until the data lands")
+(public! 'cache-wake! "(cache-wake! BUF) — refresh only when the cache is stale; the wake rule for restored and previewed buffers")
+(public! 'cache-stale? "(cache-stale? BUF) — no stamp yet, or older than the declared TTL")
+(public! 'cache-age "(cache-age BUF) — seconds since the last successful render, or #f")
+(public! 'cache-age-label "(cache-age-label BUF) — \"just now\", \"40s ago\", \"5m ago\", for a header or modeline")
+(public! 'cache-stamp! "(cache-stamp! BUF) — mark the buffer's content as fetched now")
 
 (category! 'chat)
 (public! 'llm "(llm PROMPT HANDLER) — async completion; HANDLER gets the text")

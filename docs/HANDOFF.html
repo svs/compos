@@ -129,7 +129,12 @@ counts + a <code>*diagnostics*</code> bottom sheet, <kbd>M-.</kbd>
 definition through the code.scm seam with an <kbd>M-,</kbd> marker stack,
 references list, hover echo, async capf completion. Registered servers:
 elixir-ls (verified on this repo), typescript-language-server, ruby-lsp,
-scheme-langserver. Register more with <code>(lsp-register! NAME SPEC)</code>;
+scheme-langserver. For the editor's own dialect no external server
+qualifies: <code>packages/scheme-ide.scm</code> (2026-08-21) answers
+in-process — <kbd>M-.</kbd> across buffers + bundled source + ~/.aimax,
+<kbd>C-c C-d</kbd> one-line docs, completion over the primitives and the
+catalog, ERROR-node squiggles when the scheme grammar is installed.
+Register more servers with <code>(lsp-register! NAME SPEC)</code>;
 events fan out through <code>(on-lsp-event! NAME FN)</code>. Restart
 self-heals: lsp-mode setup re-runs <code>lsp-ensure!</code> ·
 <strong>paredit</strong> (2026-08-20, <code>packages/paredit.scm</code>,

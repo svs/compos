@@ -785,7 +785,7 @@ defmodule Aimax.Ui.EditorLive do
             <span class="mb-count">{count_text(@state.minibuffer)}</span>
           </div>
         </div>
-        <div :if={Map.get(@state.minibuffer, :style) == "palette"} class="echo-bar">
+        <div class="echo-bar">
           <span class="echo">{@state.echo}</span>
           <span class="mb-spacer"></span>
         </div>

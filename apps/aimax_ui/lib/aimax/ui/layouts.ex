@@ -561,25 +561,20 @@ defmodule Aimax.Ui.Layouts do
           .prompt { color: var(--accent-fg, #26356b); font-weight: 600; white-space: pre; flex-shrink: 0; }
           .mb-input { white-space: pre; flex-shrink: 0; font-family: var(--font-mono); }
           .mb-input .cursor { background: var(--cursor-bg, #26356b); }
-          /* vertico-style minibuffer: transient, keyboard-only */
+          /* vertico-style minibuffer: transient, keyboard-only.
+             EVERY prompt floats centered over the windows: a bottom bar
+             on a big monitor reads as ambient status, and a prompt that
+             owns the keyboard must read as a thing to answer or
+             dismiss. Input on top, candidates below. The echo bar keeps
+             the bottom row, so the window tree does not reflow while a
+             prompt is open. */
           .mb-panel {
-            flex-shrink: 0;
-            background: var(--window-bg, #fdfcf8);
-            border-top: 2px solid var(--accent-fg, #26356b);
-            animation: rise 110ms ease-out;
-          }
-          /* palette style: the prompt floats centered over the windows,
-             input on top, candidates below — the buffer switcher asks
-             for this shape. The echo bar keeps the bottom row, so the
-             window tree does not reflow while the palette is open. */
-          .mb-panel.palette {
-            position: fixed; left: 50%; top: 14dvh;
+            position: fixed; left: 50%; top: 22dvh;
             transform: translateX(-50%);
-            /* FIXED geometry: the box never changes size while you type —
-               fewer candidates leave empty rows, never a smaller panel */
-            width: min(1100px, 96vw);
-            height: 62dvh;
+            width: min(860px, 94vw);
             display: flex; flex-direction: column;
+            max-height: 56dvh;
+            background: var(--window-bg, #fdfcf8);
             border: 1px solid var(--border, #e2dbc9);
             border-top: 2px solid var(--accent-fg, #26356b);
             border-radius: 10px;
@@ -587,16 +582,25 @@ defmodule Aimax.Ui.Layouts do
             overflow: hidden;
             z-index: 40;
             /* NO entry animation: a patched node's animation can stall
-               at its first frame and leave the palette painted at
+               at its first frame and leave the panel painted at
                opacity 0 — an open, working, invisible prompt */
           }
-          .mb-panel.palette .mb-input-row {
+          .mb-panel .mb-input-row {
             order: -1;
             border-top: none;
             border-bottom: 1px solid var(--border, #e2dbc9);
             flex: 0 0 auto;
           }
-          .mb-panel.palette .mb-label-row { order: -2; flex: 0 0 auto; }
+          .mb-panel .mb-label-row { order: -2; flex: 0 0 auto; }
+          /* palette style: the buffer switcher's bigger, FIXED geometry —
+             the box never changes size while you type; fewer candidates
+             leave empty rows, never a smaller panel */
+          .mb-panel.palette {
+            top: 14dvh;
+            width: min(1100px, 96vw);
+            height: 62dvh;
+            max-height: none;
+          }
           .mb-panel.palette .mb-cands {
             max-height: none; flex: 1;
             /* rows keep their natural height — no stretching to fill */

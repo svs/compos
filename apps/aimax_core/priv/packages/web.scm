@@ -347,6 +347,10 @@
                 (string-append (substring-bytes clean 0 (+ slash 1)) url)
                 (string-append clean "/" url))))))
 
+;; the public name: other packages (feeds) resolve their links the
+;; same one way
+(define (url-resolve url base) (web--resolve url base))
+
 ;;; --- rendering ------------------------------------------------------------------
 
 ;; the modeline says WHICH reading this is: "article" when readability
@@ -760,3 +764,6 @@ C-s searches to any link.")
 
 (public! 'browse
   "(browse URL) — read URL as text in its own tab buffer (*browse:host/page*); in a browse buffer it navigates in place")
+
+(public! 'url-resolve
+  "(url-resolve URL BASE) — resolve a link target against the page it came from: absolute stays, //host takes the scheme, /path takes the origin, the rest appends to the page's directory")

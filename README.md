@@ -196,3 +196,8 @@ what the editor can do, and what each answer will touch.
 
 `docs/` holds the architecture, the roadmap, the component contract, and the
 current handoff. Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) first.
+
+## License
+
+Koel is free software under the GNU General Public License, version 3 or later.
+See [`LICENSE`](LICENSE).

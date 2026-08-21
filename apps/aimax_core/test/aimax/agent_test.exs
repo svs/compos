@@ -290,6 +290,61 @@ defmodule Aimax.AgentTest do
     assert second_turn["effort"] == "high"
   end
 
+  # the codex lane names MCP tools server/tool and carries their arguments
+  # on the item — both must reach the tool-call event, or the card titles
+  # with the bare tool name
+  test "native Codex MCP tool items carry name and arguments into backend events" do
+    {:ok, backend} =
+      Aimax.Core.Agent.Backend.CodexAppServer.start(
+        %{"cmd" => "fake", "cwd" => File.cwd!()},
+        self()
+      )
+
+    on_exit(fn -> Aimax.Core.Agent.Backend.CodexAppServer.close(backend) end)
+    assert_receive {:transport_open, ^backend}, 1_000
+
+    inject(backend, %{
+      "method" => "item/started",
+      "params" => %{
+        "item" => %{
+          "type" => "mcpToolCall",
+          "id" => "mcp-1",
+          "server" => "aimax",
+          "tool" => "eval-scheme",
+          "arguments" => %{"code" => "(buffer-list)"},
+          "status" => "inProgress"
+        }
+      }
+    })
+
+    assert_receive {:backend_event, call}, 1_000
+    assert Backend.event_type(call) == "tool-call"
+    assert Backend.plist_get(call, "name") == "aimax/eval-scheme"
+    assert Backend.plist_get(call, "input") == ~s|{"code":"(buffer-list)"}|
+    assert Backend.plist_get(call, "kind") == "mcp"
+
+    inject(backend, %{
+      "method" => "item/completed",
+      "params" => %{
+        "item" => %{
+          "type" => "mcpToolCall",
+          "id" => "mcp-1",
+          "server" => "aimax",
+          "tool" => "eval-scheme",
+          "arguments" => %{"code" => "(buffer-list)"},
+          "status" => "completed",
+          "result" => %{"content" => [%{"type" => "text", "text" => "()"}]}
+        }
+      }
+    })
+
+    assert_receive {:backend_event, update}, 1_000
+    assert Backend.event_type(update) == "tool-update"
+    assert Backend.plist_get(update, "name") == "aimax/eval-scheme"
+    assert Backend.plist_get(update, "input") == ~s|{"code":"(buffer-list)"}|
+    assert Backend.plist_get(update, "status") == "completed"
+  end
+
   test "native Codex MCP tool approval elicitation rides the permission channel" do
     {:ok, backend} =
       Aimax.Core.Agent.Backend.CodexAppServer.start(

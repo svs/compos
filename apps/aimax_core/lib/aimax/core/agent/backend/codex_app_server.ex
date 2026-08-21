@@ -502,6 +502,10 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
       type: :"tool-call",
       id: Map.get(item, "id", ""),
       title: item_title(item),
+      # MCP-style calls carry their arguments on the item; Scheme's
+      # agent-tool-title appends the argument that matters to the name
+      name: item_tool_name(item),
+      input: item_input(item),
       kind: item_kind(item),
       status: Map.get(item, "status", "pending")
     )
@@ -523,6 +527,10 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
       type: :"tool-update",
       id: Map.get(item, "id", ""),
       status: completed_status(item),
+      # arguments that were absent at item/started ride here, and
+      # agent-tool-refine! retitles the card from them
+      name: item_tool_name(item),
+      input: item_input(item),
       text: completed_text(item)
     )
   end
@@ -557,6 +565,27 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
   defp item_title(%{"type" => "imageView"} = item), do: "View #{Map.get(item, "path", "image")}"
   defp item_title(%{"type" => "collabAgentToolCall"} = item), do: Map.get(item, "tool", "agent")
   defp item_title(_), do: "tool"
+
+  # a bare tool name for the calls whose title IS the tool name; command
+  # and file items already title with their argument
+  defp item_tool_name(%{"type" => "mcpToolCall"} = item),
+    do: "#{Map.get(item, "server", "mcp")}/#{Map.get(item, "tool", "tool")}"
+
+  defp item_tool_name(%{"type" => type} = item)
+       when type in ["dynamicToolCall", "collabAgentToolCall"],
+       do: Map.get(item, "tool")
+
+  defp item_tool_name(_), do: nil
+
+  defp item_input(%{"type" => type} = item)
+       when type in ["mcpToolCall", "dynamicToolCall", "collabAgentToolCall"] do
+    case Map.get(item, "arguments") do
+      nil -> nil
+      args -> json_text(args)
+    end
+  end
+
+  defp item_input(_), do: nil
 
   defp item_kind(%{"type" => "commandExecution"}), do: "execute"
   defp item_kind(%{"type" => "fileChange"}), do: "edit"

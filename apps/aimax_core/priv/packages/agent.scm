@@ -166,6 +166,23 @@
                              (cdr bs)))))
             (else (loop (cdr bs) (cons (car bs) acc)))))))
 
+(define (agent--tool-block buf id)
+  (let loop ((bs (agent-blocks buf)))
+    (cond ((null? bs) #f)
+          ((and (equal? (nth 2 (car bs)) "tool")
+                (equal? (nth 3 (car bs)) id))
+           (car bs))
+          (else (loop (cdr bs))))))
+
+(define (agent-block-retitle! buf id title)
+  (buffer-set-local! buf 'agent-blocks
+    (map (lambda (b)
+           (if (and (equal? (nth 2 b) "tool") (equal? (nth 3 b) id))
+               (list (nth 0 b) (nth 1 b) "tool" id title
+                     (nth 5 b) (nth 6 b) (nth 7 b))
+               b))
+         (agent-blocks buf))))
+
 (define (agent-block-drop-kind! buf kind)
   (buffer-set-local! buf 'agent-blocks
     (let loop ((bs (agent-blocks buf)) (acc '()))
@@ -286,13 +303,39 @@
 (define (agent-clip s n)
   (if (> (string-byte-length s) n) (substring-bytes s 0 n) s))
 
-;; most tools have one argument that matters; show that rather than a blob
+;; most tools have one argument that matters; show that rather than a blob.
+;; An MCP tool names its arguments freely — after the known names, take the
+;; first string argument.
 (define (agent-tool-primary args)
   (cond ((string? args) args)
         ((pair? args)
          (or (plist-get args 'code) (plist-get args 'query)
-             (plist-get args 'path) (plist-get args 'name)))
+             (plist-get args 'path) (plist-get args 'name)
+             (plist-get args 'command) (plist-get args 'file_path)
+             (plist-get args 'url) (plist-get args 'pattern)
+             (plist-get args 'prompt)
+             (agent-tool--first-string args)))
         (else #f)))
+
+(define (agent-tool--first-string args)
+  (let loop ((ps args))
+    (cond ((null? ps) #f)
+          ((null? (cdr ps)) #f)
+          ((and (string? (nth 1 ps))
+                (not (equal? (string-trim (nth 1 ps)) "")))
+           (nth 1 ps))
+          (else (loop (cdr (cdr ps)))))))
+
+;; "mcp__aimax__apropos" hides the interesting part — show "aimax:apropos"
+(define (agent-tool-name-display name)
+  (if (string-prefix? "mcp__" name)
+      (let* ((rest (substring-bytes name 5 (string-byte-length name)))
+             (i (string-index rest "__")))
+        (if i
+            (string-append (substring-bytes rest 0 i) ":"
+                           (substring-bytes rest (+ i 2) (string-byte-length rest)))
+            name))
+      name))
 
 (define (agent-tool-args e)
   (let ((json (plist-get e 'input)))
@@ -304,11 +347,12 @@
         (args (agent-tool-args e)))
     (if (not name)
         (or (plist-get e 'title) "tool")     ; an adapter's own title
-        (let ((v (and args (agent-tool-primary args))))
+        (let ((v (and args (agent-tool-primary args)))
+              (shown (agent-tool-name-display name)))
           (if (and v (string? v) (not (equal? (string-trim v) "")))
-              (string-append name ": "
+              (string-append shown ": "
                 (agent-clip (string-trim (agent-first-line v)) agent-tool-title-limit))
-              name)))))
+              shown)))))
 
 (define (agent-tool-input-text e)
   (let* ((args (agent-tool-args e))
@@ -317,6 +361,35 @@
           ((null? args) "")
           ((and v (string? v)) (string-append (string-trim v) "\n\n"))
           (else (string-append (string-trim (plist-get e 'input)) "\n\n")))))
+
+;; claude-code streams a tool call's input: the tool_call lands with an
+;; empty rawInput, and a later tool_call_update carries the real one. When
+;; that update arrives, retitle the card and show the arguments. The body
+;; is empty exactly until something rendered into it — that is the
+;; once-guard against a second refinement.
+(define (agent-tool-refine! slug buf e)
+  (let ((input (plist-get e 'input)))
+    (when (and (string? input) (not (equal? input "")))
+      (let ((entry (agent--tool-block buf (plist-get e 'id))))
+        (when (and entry
+                   (number? (nth 7 entry))
+                   (<= (nth 1 entry) (nth 7 entry)))
+          (let ((title (agent-tool-title e))
+                (kind (nth 5 entry))
+                (args (agent-tool-input-text e)))
+            (unless (equal? title (nth 4 entry))
+              (agent-block-retitle! buf (plist-get e 'id) title)
+              (when (equal? (nth 6 entry) "running")
+                (chat-activity! buf (string-append "tool · " title))))
+            ;; the tool-call path saw no input, so code.scm could not see
+            ;; a code edit either — report the call again, now complete
+            (when (boundp (quote code-agent-note-tool!))
+              (code-agent-note-tool! buf title kind args))
+            (unless (equal? args "")
+              (agent-render! slug args #f)
+              (agent-block-close-tool! buf (plist-get e 'id)
+                (agent-mark slug)
+                (nth 6 entry)))))))))
 
 ;; a result can be enormous (buffer-text of a big file). The card shows a
 ;; readable slice; the model already got the whole thing.
@@ -625,6 +698,7 @@
              (agent-mark slug) "running"))))
 
       ((equal? type 'tool-update)
+       (agent-tool-refine! slug buf e)
        (let ((text (agent-tool-update-text e)))
          (unless (equal? text "")
            (agent-render! slug text #f))

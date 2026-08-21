@@ -1308,10 +1308,20 @@ defmodule Aimax.Ui.EditorLive do
       |> String.trim_trailing()
       |> tool_display_body()
 
+    # "name: arg" from agent-tool-title — the arg is the interesting part,
+    # so the card styles it apart from the tool name
+    {name, arg} =
+      case String.split(title, ": ", parts: 2) do
+        [n, a] -> {n, a}
+        _ -> {title, ""}
+      end
+
     %{
       kind: :tool,
       id: id,
       title: title,
+      name: name,
+      arg: arg,
       verb: kind,
       status: status,
       open: id in open_cards,

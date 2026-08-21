@@ -43,7 +43,10 @@ defmodule Aimax.Ui.AgentTranscript do
                 <span class={"ag-dot #{b.status}"}></span>
                 <span class="ag-verb ag-kind">{b.verb}</span>
                 <span class="ag-summary-copy">
-                  <span class="ag-title" title={b.title}>{b.title}</span>
+                  <span class="ag-title" title={b.title}><span class="ag-tool-name">{b.name}</span><span
+                      :if={b.arg != ""}
+                      class="ag-arg"
+                    >{b.arg}</span></span>
                   <span :if={!b.open && b.preview != ""} class="ag-preview">{b.preview}</span>
                 </span>
                 <span class={"ag-tstatus #{b.status}"}>{b.status}</span>

@@ -89,6 +89,42 @@ defmodule Aimax.Ui.AgentViewTest do
     refute html =~ ">>> you: profile"
   end
 
+  # "name: arg" titles split into a muted tool name and a highlighted
+  # argument; a bare title renders as one name span
+  test "tool card highlights the call argument apart from the tool name", %{conn: conn} do
+    buf = "*agent: arg-test*"
+    {:ok, _} = Aimax.Core.create_buffer(buf)
+
+    Buffer.append(buf, "\n▸ other · aimax:apropos\n", source: :editor)
+    b1 = Buffer.byte_size(buf)
+    Buffer.append(buf, "split window\n\nok\n", source: :editor)
+    t2 = Buffer.byte_size(buf)
+    Buffer.append(buf, "\n▸ other · ToolSearch\n", source: :editor)
+    b2 = Buffer.byte_size(buf)
+    mark = Buffer.byte_size(buf)
+    Buffer.append(buf, "\n>>> you: ", source: :editor)
+
+    Buffer.set_local(buf, "render-mode", "agent")
+    Buffer.set_local(buf, "agent-slug", "arg-test")
+    Buffer.set_local(buf, "agent-saved-mark", mark)
+    Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
+    Buffer.set_local(buf, "agent-queued", [])
+
+    Buffer.set_local(buf, "agent-blocks", [
+      [t2, mark, "tool", "t2", "ToolSearch", "other", "done", b2],
+      [0, t2, "tool", "t1", "aimax:apropos: split window", "other", "done", b1]
+    ])
+
+    Editor.set_window_buffer(buf)
+    {:ok, view, _html} = live(conn, "/")
+
+    assert has_element?(view, ".ag-title .ag-tool-name", "aimax:apropos")
+    assert has_element?(view, ".ag-title .ag-arg", "split window")
+    # a bare title keeps one span and gains no empty argument
+    assert has_element?(view, ".ag-title .ag-tool-name", "ToolSearch")
+    assert length(String.split(render(view), "ag-arg")) == 2
+  end
+
   # the transcript lives in its own LiveComponent so a keystroke diffs to a
   # skip placeholder — typing must leave the blocks intact and reach the input
   test "typing updates the input row and keeps the transcript blocks", %{conn: conn} do

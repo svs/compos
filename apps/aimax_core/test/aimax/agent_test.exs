@@ -518,6 +518,70 @@ defmodule Aimax.AgentTest do
     assert Buffer.get_local(buf, "render-mode") == "agent"
   end
 
+  # an MCP tool names its arguments freely — the title takes the first
+  # string argument when no known name matches, and shortens the mcp name
+  test "an unknown MCP argument still becomes the card title" do
+    assert {:ok, ~s("linear:list_issues: svs")} =
+             Session.eval(
+               ~s[(agent-tool-title (list (quote name) "mcp__linear__list_issues" (quote input) "{\\"limit\\": 5, \\"assignee\\": \\"svs\\"}"))]
+             )
+  end
+
+  # claude-code streams tool input: the tool_call arrives with an empty
+  # rawInput, and a later tool_call_update carries the real one. The card
+  # retitles from it, shows the arguments once, and a repeat refinement
+  # changes nothing.
+  test "a late rawInput retitles the tool card and shows the arguments once" do
+    {slug, buf, agent} = boot("")
+
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "go")])
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => pid}}, 1_000
+
+    update(agent, "sess-1", %{
+      "sessionUpdate" => "tool_call",
+      "toolCallId" => "tc9",
+      "title" => "mcp__aimax__apropos",
+      "kind" => "other",
+      "status" => "pending",
+      "rawInput" => %{}
+    })
+
+    refinement = %{
+      "sessionUpdate" => "tool_call_update",
+      "toolCallId" => "tc9",
+      "title" => "mcp__aimax__apropos",
+      "rawInput" => %{"query" => "split window"}
+    }
+
+    update(agent, "sess-1", refinement)
+    update(agent, "sess-1", refinement)
+
+    update(agent, "sess-1", %{
+      "sessionUpdate" => "tool_call_update",
+      "toolCallId" => "tc9",
+      "status" => "completed",
+      "content" => [
+        %{"type" => "content", "content" => %{"type" => "text", "text" => "()\n"}}
+      ]
+    })
+
+    inject(agent, %{"jsonrpc" => "2.0", "id" => pid, "result" => %{"stopReason" => "end_turn"}})
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
+
+    text = Buffer.text(buf)
+    # the call line kept its short display name; the arguments landed once
+    assert text =~ "▸ other · aimax:apropos"
+    assert text =~ "split window\n\n()"
+    assert length(String.split(text, "split window")) == 2
+
+    [_, _, "tool", "tc9", title, "other", "done", body_start] =
+      Buffer.get_local(buf, "agent-blocks")
+      |> Enum.find(fn [_, _, k | _] -> k == "tool" end)
+
+    assert title == "aimax:apropos: split window"
+    assert binary_part(text, body_start, byte_size("split window")) == "split window"
+  end
+
   test "typing at the marker + RET steers; queued while running; queue pops on turn end" do
     {slug, buf, agent} = boot("")
     focus(buf)

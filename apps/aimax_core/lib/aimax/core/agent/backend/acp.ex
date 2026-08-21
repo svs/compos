@@ -401,6 +401,15 @@ defmodule Aimax.Core.Agent.Backend.ACP do
           type: :"tool-update",
           id: Map.get(update, "toolCallId", ""),
           status: Map.get(update, "status", ""),
+          # claude-code streams tool input: the first tool_call carries an
+          # empty rawInput and this refining update carries the real one.
+          # Scheme retitles the card from it (agent-tool-refine!).
+          name: present_text(Map.get(update, "title")),
+          input:
+            case Map.fetch(update, "rawInput") do
+              {:ok, raw} -> json_text(raw)
+              :error -> nil
+            end,
           text: tool_content_text(Map.get(update, "content"))
         )
 

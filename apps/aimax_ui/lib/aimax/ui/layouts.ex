@@ -412,6 +412,12 @@ defmodule Aimax.Ui.Layouts do
             display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis;
             white-space: nowrap; color: var(--window-fg, inherit); font-size: 11.5px;
           }
+          /* the argument is the interesting part: the tool name steps back,
+             the argument carries the accent. A card with no argument keeps
+             its name in the normal color. */
+          .ag-tool-name { color: var(--agent-meta-fg, #8a8577); }
+          .ag-title .ag-tool-name:only-child { color: var(--window-fg, inherit); }
+          .ag-arg { margin-left: 7px; color: var(--agent-tool-fg, #26356b); font-weight: 600; }
           .ag-preview {
             display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis;
             white-space: nowrap; color: var(--agent-meta-fg, #8a8577);

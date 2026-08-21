@@ -573,6 +573,29 @@ defmodule Aimax.AgentTest do
     assert Buffer.get_local(buf, "render-mode") == "agent"
   end
 
+  # a tool call is transient status: it goes to the echo area and the
+  # activity row, not into the modeline
+  test "a tool call echoes in the echo area and stays out of the modeline" do
+    {slug, buf, agent} = boot("")
+
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "go")])
+    assert_receive {:frame, %{"method" => "session/prompt"}}, 1_000
+
+    update(agent, "sess-1", %{
+      "sessionUpdate" => "tool_call",
+      "toolCallId" => "tc-echo",
+      "title" => "Read foo.ex",
+      "kind" => "read",
+      "status" => "pending",
+      "rawInput" => %{"path" => "foo.ex"}
+    })
+
+    assert eventually(fn -> Editor.snapshot().echo == "tool · Read foo.ex: foo.ex" end)
+    assert Buffer.get_local(buf, "chat-activity") == "tool · Read foo.ex: foo.ex"
+    ml = Buffer.get_local(buf, "modeline-info")
+    refute ml && ml =~ "tool ·"
+  end
+
   # an MCP tool names its arguments freely — the title takes the first
   # string argument when no known name matches, and shortens the mcp name
   test "an unknown MCP argument still becomes the card title" do

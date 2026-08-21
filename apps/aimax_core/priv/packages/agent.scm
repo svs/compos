@@ -421,13 +421,16 @@
 ;;; first output. It is the last text before the marker, so deleting it never
 ;;; shifts a fold; the runtime re-adjusts its mark automatically.
 ;;; What the runtime is doing right now, for the human: a chat with no
-;;; visible motion reads as dead. Events set one word; the modeline
-;;; shows it. Runtime state: stale after a restart, cleared with the rest.
+;;; visible motion reads as dead. Events set one word; the activity row
+;;; shows it. A tool call also goes to the echo area, so a background
+;;; chat stays visible. Runtime state: stale after a restart, cleared
+;;; with the rest.
 (define (chat-activity! buf label)
   (when (and buf (buffer-exists? buf))
     (unless (equal? (buffer-local buf 'chat-activity) label)
       (buffer-set-local! buf 'chat-activity label)
-      (agent-update-modeline! buf))))
+      (when (and (string? label) (string-prefix? "tool · " label))
+        (message label)))))
 
 (define (agent-show-waiting! slug)
   (let ((buf (agent-buf slug)))
@@ -1758,8 +1761,6 @@
          (cost (and (connector-can? c 'metered) (buffer-local buf 'chat-cost))))
     (buffer-set-local! buf 'modeline-info
       (string-append
-        (let ((act (buffer-local buf 'chat-activity)))
-          (if act (string-append act " · ") ""))
         c
         (if (and m (not (equal? m ""))) (string-append " · " m) "")
         (let ((effort (buffer-local buf 'agent-effort)))

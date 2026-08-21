@@ -58,6 +58,9 @@
 (defrecipe! "show a buffer in the other window"
   "(display-buffer-other-window! {{buffer}})"
   (list (list 'buffer "Buffer: ")))
+(defrecipe! "other buffer"
+  "(run-command \"previous-buffer\")")
+
 (defrecipe! "what windows are open"
   "(window-list-all)")
 

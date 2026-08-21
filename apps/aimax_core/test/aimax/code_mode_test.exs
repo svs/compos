@@ -124,6 +124,15 @@ defmodule Aimax.CodeModeTest do
     assert eval!(~s{(llm-mode--group-note "#{lone}")}) == ~s{""}
   end
 
+  test "the side-chat prompt handles other buffer without a question" do
+    buf = fresh_buffer("cm-other-#{System.unique_integer([:positive])}.md", "text\n")
+    prompt = eval!(~s{(chat-preamble-body "#{buf}" (list "#{buf}"))})
+
+    assert prompt =~ ~S{When the user says \"other buffer\"}
+    assert prompt =~ ~S{(run-command \"previous-buffer\") immediately}
+    assert prompt =~ "Do not ask a question."
+  end
+
   test "the code instructions ride in both prompt paths, and only for code buffers" do
     buf = fresh_buffer("cm-instr-#{System.unique_integer([:positive])}.ex", "code\n")
 

@@ -73,6 +73,12 @@ defmodule Aimax.CommandPaletteTest do
     refute mb.input =~ "/abs/path"
   end
 
+  test "other buffer maps to the previous-buffer command" do
+    assert Session.eval(
+             ~S{(equal? (cadr (assoc "other buffer" *recipes*)) "(run-command \"previous-buffer\")")}
+           ) == {:ok, "#t"}
+  end
+
   test "choosing a command runs it and contributes to M-x history" do
     {:ok, _} =
       Session.eval(

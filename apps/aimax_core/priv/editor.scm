@@ -4716,7 +4716,8 @@
     "(buffer-text \"NAME\"), and change any buffer with "
     "(buffer-replace! \"NAME\" OLD NEW) — exact unique old string -> new; "
     "it edits the live buffer, never the file. Make the smallest edit "
-    "that does the job."))
+    "that does the job. When the user says \"other buffer\", run "
+    "(run-command \"previous-buffer\") immediately. Do not ask a question."))
 
 (define (chat-preamble buf)
   (let* ((g (buffer-group buf))

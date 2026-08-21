@@ -55,10 +55,11 @@
            (loop (cdr bs) (string-append acc (car (cdr (car bs))))))
           (else (loop (cdr bs) acc)))))
 
-;; the conversation as (role text) pairs, newest first — what every display
-;; surface reads: .chat files, the seed transcript, the input history.
-(define (chat-turns buf)
-  (let loop ((ts (chat-record buf)) (acc '()))
+;; the same view over any record: (role text) pairs in the record's own
+;; order. Replay reads parsed .chat records that never lived in a buffer,
+;; so this half takes the record itself.
+(define (chat-record-turns record)
+  (let loop ((ts record) (acc '()))
     (if (null? ts)
         (reverse acc)
         (let ((txt (chat-turn-display (car ts))))
@@ -66,6 +67,11 @@
                 (if (equal? txt "")
                     acc
                     (cons (list (plist-get (car ts) 'role) txt) acc)))))))
+
+;; the conversation as (role text) pairs, newest first — what every display
+;; surface reads: .chat files, the seed transcript, the input history.
+(define (chat-turns buf)
+  (chat-record-turns (chat-record buf)))
 
 ;; a turn that is only prose — every caller with text and no blocks
 (define (chat-turn-push! buf role text)
@@ -736,3 +742,174 @@
 (effects! '(pure))
 (public! 'chat-rename-turn?
   "(chat-rename-turn? N) — #t on the turns a chat renames itself (1, then every third)")
+
+;;; --- the chat log: every conversation, saved -------------------------------------
+;;; Every chat writes itself to <aimax-home>/chats/<id>.chat when a turn
+;;; ends. The file is the same .chat format that C-x C-s writes, so it
+;;; opens in the editor, revives, and feeds the acceptance replay below.
+;;; One conversation is one file: 'chat-log-id is a conversation local,
+;;; so a reset keeps the old file as an archive and the next turn starts
+;;; a new file. agent.scm calls chat-log-save! on turn-end and on error.
+
+(domain! 'chat)
+(effects! '(write))
+
+(define (chat-log-dir) (string-append (aimax-home) "/chats"))
+
+;; a group title becomes a file name: keep word characters, dot and dash
+(define (chat-log-name g)
+  (let loop ((s g))
+    (let ((r (re-replace "[^A-Za-z0-9._-]" s "-")))
+      (if (equal? r s) s (loop r)))))
+
+;; this conversation's id, assigned on first save. The time prefix sorts
+;; the directory by age; the suffix loop keeps two same-second chats with
+;; the same title in two files.
+(define (chat-log-id! buf)
+  (or (buffer-local buf 'chat-log-id)
+      (let ((base (string-append
+                    (number->string (current-time)) "-"
+                    (chat-log-name (or (buffer-group buf)
+                                       (buffer-local buf 'agent-slug)
+                                       "chat")))))
+        (let loop ((n 0))
+          (let ((id (if (= n 0)
+                        base
+                        (string-append base "-" (number->string n)))))
+            (if (file-exists? (string-append (chat-log-dir) "/" id ".chat"))
+                (loop (+ n 1))
+                (begin (buffer-set-local! buf 'chat-log-id id) id)))))))
+
+(public! 'chat-log-path
+  "(chat-log-path BUF) — the file this conversation logs itself to")
+(define (chat-log-path buf)
+  (string-append (chat-log-dir) "/" (chat-log-id! buf) ".chat"))
+
+(public! 'chat-log-save!
+  "(chat-log-save! BUF) — write this conversation to <aimax-home>/chats as a .chat file")
+(define (chat-log-save! buf)
+  (let ((text (chat-file-text buf)))
+    (when text
+      (write-file! (chat-log-path buf) text))))
+
+;;; --- replay: a saved chat drives the editor again --------------------------------
+;;; A .chat file becomes a scripted stub session: the user turns are the
+;;; prompts, and everything the assistant did after each prompt is one
+;;; stub turn — chunks, tool calls, tool results. The acceptance tests
+;;; send the prompts through the real key path and compare the surface
+;;; and the rebuilt record with the file. A chat that does not replay
+;;; names the affordance the editor is missing.
+
+(effects! '(pure))
+
+;; one recorded block -> stub events, newest first onto ACC
+(define (chat-replay-block-events b acc)
+  (let ((kind (car b)))
+    (cond
+      ((equal? kind "text")
+       (cons (list 'type 'chunk 'text (car (cdr b))) acc))
+      ;; ("tool-use" ID NAME INPUT-JSON) -> a running tool card
+      ((equal? kind "tool-use")
+       (cons (list 'type 'tool-call
+                   'id (car (cdr b))
+                   'name (car (cdr (cdr b)))
+                   'input (if (pair? (cdr (cdr (cdr b))))
+                              (or (car (cdr (cdr (cdr b)))) "")
+                              "")
+                   'kind "tool" 'status "pending")
+             acc))
+      ;; ("tool-result" ID OUTPUT ERROR?) -> the card completes
+      ((equal? kind "tool-result")
+       (cons (list 'type 'tool-update
+                   'id (car (cdr b))
+                   'status (if (and (pair? (cdr (cdr (cdr b))))
+                                    (car (cdr (cdr (cdr b)))))
+                               "failed" "completed")
+                   'output (if (pair? (cdr (cdr b)))
+                               (or (car (cdr (cdr b))) "")
+                               ""))
+             acc))
+      (else acc))))
+
+;; RECORD (oldest first) -> (prompts (P ...) script (EVENTS ...)), aligned:
+;; script turn N plays when prompt N is sent. Tool results ride user-role
+;; turns on the wire, so they land in the stub turn that is open, not in a
+;; new prompt. Assistant content before the first prompt (a seed
+;; transcript) does not replay.
+(define (chat-replay-plan record)
+  (let loop ((ts record) (prompts '()) (script '()) (cur '()) (open #f))
+    (if (null? ts)
+        (list 'prompts (reverse prompts)
+              'script (reverse (if open (cons (reverse cur) script) script)))
+        (let* ((t (car ts))
+               (role (plist-get t 'role))
+               (blocks (or (plist-get t 'blocks) '())))
+          (cond
+            ((equal? role "user")
+             (let ((cur1 (if open
+                             (fold (lambda (acc b)
+                                     (if (equal? (car b) "tool-result")
+                                         (chat-replay-block-events b acc)
+                                         acc))
+                                   cur blocks)
+                             cur))
+                   (text (chat-turn-display t)))
+               (if (equal? text "")
+                   (loop (cdr ts) prompts script cur1 open)
+                   (loop (cdr ts)
+                         (cons text prompts)
+                         (if open (cons (reverse cur1) script) script)
+                         '()
+                         #t))))
+            ((equal? role "assistant")
+             (loop (cdr ts) prompts script
+                   (if open
+                       (fold (lambda (acc b) (chat-replay-block-events b acc))
+                             cur blocks)
+                       cur)
+                   open))
+            (else (loop (cdr ts) prompts script cur open)))))))
+
+(effects! '(read))
+
+;; PATH -> the replay plan plus the expected conversation, or #f when the
+;; file does not read. A v1 file (or a hand-written one) has only the
+;; transcript: its turns replay as plain text turns.
+(define (chat-replay-file path)
+  (let ((text (read-file path)))
+    (and text
+         (let* ((nl (string-index text "\n"))
+                (line (if nl (substring-bytes text 0 nl) text))
+                (header (chat-parse-header line))
+                (recorded (chat-file-record text))
+                (record
+                  (or recorded
+                      (map (lambda (t)
+                             (list 'role (car t)
+                                   'blocks (list (list "text" (car (cdr t))))))
+                           (chat-parse-transcript
+                             (substring-bytes text (or nl 0)
+                               (or (chat-file-record-at text)
+                                   (string-byte-length text))))))))
+           (append (chat-replay-plan record)
+                   (list 'turns (chat-record-turns record)
+                         'header (or header '())))))))
+
+(effects! '(write))
+(public! 'chat-replay-start!
+  "(chat-replay-start! PATH) — replay a saved .chat on a scripted stub backend; sends the first prompt and returns (slug S prompts ALL turns EXPECTED)")
+
+(define (chat-replay-start! path)
+  (let ((plan (chat-replay-file path)))
+    (cond
+      ((not plan) (error "chat-replay: cannot read" path))
+      ((null? (plist-get plan 'prompts))
+       (error "chat-replay: no user turns in" path))
+      (else
+        (let* ((prompts (plist-get plan 'prompts))
+               (slug (execute* (car prompts)
+                       (list 'backend "stub"
+                             'script (plist-get plan 'script)))))
+          (list 'slug slug
+                'prompts prompts
+                'turns (plist-get plan 'turns)))))))

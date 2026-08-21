@@ -5035,6 +5035,10 @@
     ;; a one-shot note for the next send (a skill body a mode pushed):
     ;; undelivered it must survive a restart, and a reset drops it
     chat-note-once
+    ;; the file this conversation logs itself to under <aimax-home>/chats:
+    ;; a reset starts a new conversation, which gets a new file, and the
+    ;; old file stays as the archive
+    chat-log-id
     agent-saved-mark agent-marker-bytes))
 
 ;; PROCESS state — mirrors a live runtime, so it is always stale after a

@@ -684,7 +684,11 @@
        ;; code.scm listens: a pending coding-preset switch applies between
        ;; turns, so the restart cannot kill the turn that triggered it
        (when (boundp (quote code-agent-apply-pending!))
-         (code-agent-apply-pending! buf)))
+         (code-agent-apply-pending! buf))
+       ;; the chat log: every completed turn writes the conversation to
+       ;; <aimax-home>/chats (chat.scm loads after this file)
+       (when (boundp (quote chat-log-save!))
+         (chat-log-save! buf)))
 
       ((equal? type 'error)
        (chat-activity! buf #f)
@@ -693,7 +697,10 @@
        (let ((start (agent-render! slug
                       (string-append "\n[error: " (plist-get e 'text) "]\n")
                       "agent-meta")))
-         (agent-block-push! buf start (agent-mark slug) "meta" '())))
+         (agent-block-push! buf start (agent-mark slug) "meta" '()))
+       ;; the log keeps the turns that led to the error too
+       (when (boundp (quote chat-log-save!))
+         (chat-log-save! buf)))
 
       ((equal? type 'dead)
        (chat-activity! buf "disconnected")

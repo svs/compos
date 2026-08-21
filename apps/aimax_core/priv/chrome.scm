@@ -364,6 +364,19 @@
 (define (tab-list k)
   (chrome-call "tabs" '() (lambda (r) (k (chrome--get r 'tabs)))))
 
+;; the reader's fetch, THROUGH the browser: the user's cookies and
+;; Chrome's http cache ride along, so a page that knows them logged in
+;; reads logged in. K gets the html, or #f — no browser, or no page.
+;; browser-call directly: this is a user surface, not an agent tool,
+;; and its caller falls back to curl instead of erroring.
+(define (browser-fetch url k)
+  (if (browser-connected?)
+      (browser-call "fetch" (list 'url url)
+        (lambda (reply)
+          (k (let ((h (chrome--get reply 'html)))
+               (and (string? h) (not (equal? h "")) h)))))
+      (k #f)))
+
 (define (tab-eval tab code k)
   (chrome-call "eval" (list 'tab (chrome--tab-id tab) 'code code)
     (lambda (r) (k (chrome--get r 'value)))))
@@ -478,6 +491,7 @@
 (public! 'tab-type "(tab-type TAB TEXT) — type into the tab for real (trusted input, via CDP)")
 (public! 'tab-click "(tab-click TAB X Y) — a real click at viewport coordinates")
 (public! 'tab-open "(tab-open URL &optional WINDOW) — open a new tab, in this frame's browser window unless WINDOW says otherwise")
+(public! 'browser-fetch "(browser-fetch URL K) — fetch URL through the browser, cookies and cache included; K gets the html, or #f")
 (public! 'tab-activate "(tab-activate TAB) — bring a tab to the front")
 (public! 'tab-close "(tab-close TAB) — close a tab")
 (public! 'tab-cdp "(tab-cdp TAB METHOD PARAMS K) — raw Chrome DevTools Protocol")

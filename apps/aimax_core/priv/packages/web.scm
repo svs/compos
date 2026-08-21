@@ -81,7 +81,7 @@
 ;; URL -> the raw html. Tests replace this seam. REVALIDATE? sends the
 ;; page's saved ETag (curl --etag-compare): an unchanged page answers
 ;; 304 with no body — headers only — and the caller serves its copy.
-(define (web--html-pipeline url k &optional revalidate?)
+(define (web--curl-html url k revalidate?)
   (let ((u (web--shell-quote url))
         (dir (web--shell-quote (string-append (aimax-home) "/web-etags"))))
     (shell-command->string
@@ -95,6 +95,15 @@
         "if [ -s \"$t\" ]; then mv -f \"$e.new\" \"$e\"; cat \"$t\"; fi; "
         "rm -f \"$t\" \"$e.new\"")
       (lambda (out) (k (if (equal? (string-trim out) "") #f out))))))
+
+;; the browser first: logged in on a site there means logged in here,
+;; because the fetch rides the browser's own cookie jar (the extension's
+;; "fetch" op). Chrome's http cache makes its revalidation transparent.
+;; No browser, or no answer — curl, with the ETag discipline.
+(define (web--html-pipeline url k &optional revalidate?)
+  (browser-fetch url
+    (lambda (html)
+      (if html (k html) (web--curl-html url k revalidate?)))))
 
 (define *web-fetch-html* web--html-pipeline)
 

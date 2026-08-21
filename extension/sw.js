@@ -210,6 +210,20 @@ async function windowExists(windowId) {
 }
 
 const OPS = {
+  // The editor's reader fetches THROUGH the browser: the user's cookies
+  // and Chrome's HTTP cache ride along, so a page that knows them logged
+  // in reads logged in. The reply is the response body as text.
+  async fetch(msg) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 20000);
+    try {
+      const r = await fetch(msg.url, { credentials: "include", signal: ctl.signal });
+      return { status: r.status, html: await r.text() };
+    } finally {
+      clearTimeout(timer);
+    }
+  },
+
   // Every ai-max tab answers a frame probe with its frame id. The daemon
   // sweeps frames with M-x refresh-frames: a frame no tab answers for is
   // dead. Probe ALL localhost tabs, not the editors map — that map keeps

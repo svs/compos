@@ -959,6 +959,14 @@ defmodule Aimax.AgentTest do
     evict(buf)
     assert :ok = Aimax.Core.Desktop.restore_now()
 
+    # the dead runtime's spinner is swept from text and blocks, and its
+    # unrevealed prose joins the prose block
+    assert eventually(fn -> not (Buffer.text(buf) =~ "⋯ thinking") end)
+    refute "waiting" in block_kinds(buf)
+    assert "prose" in block_kinds(buf)
+    [ps, pe] = prose_range(buf)
+    assert binary_part(Buffer.text(buf), ps, pe - ps) == "I started the repair.\n"
+
     # No key press: chat-mode sees the durable in-flight flag and reconnects.
     assert_receive {:transport_open, fresh}, 1_000
     assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
@@ -1011,24 +1019,45 @@ defmodule Aimax.AgentTest do
     assert eventually(fn -> Buffer.text(buf) =~ ">>> you: are you alive\n" end)
   end
 
-  test "waiting line shows after send, clears on first output" do
+  test "waiting spinner is a block; prose reveals by paragraph; turn end flushes the tail" do
     {slug, buf, agent} = boot("")
 
     {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "go")])
     assert_receive {:frame, %{"method" => "session/prompt", "id" => pid}}, 1_000
     assert eventually(fn -> Buffer.text(buf) =~ "⋯ thinking" end)
+    # the rich view renders blocks only — the spinner must be one
+    assert "waiting" in block_kinds(buf)
 
     update(agent, "sess-1", %{
       "sessionUpdate" => "agent_message_chunk",
       "content" => %{"type" => "text", "text" => "On it."}
     })
 
+    # a partial paragraph stays pending: the text lands, the spinner stays
     assert eventually(fn -> Buffer.text(buf) =~ "On it." end)
+    assert Buffer.text(buf) =~ "⋯ thinking"
+    refute "prose" in block_kinds(buf)
+
+    update(agent, "sess-1", %{
+      "sessionUpdate" => "agent_message_chunk",
+      "content" => %{"type" => "text", "text" => " First.\n\nSecond "}
+    })
+
+    # the paragraph break reveals the first paragraph and clears the spinner
+    assert eventually(fn -> "prose" in block_kinds(buf) end)
     refute Buffer.text(buf) =~ "⋯ thinking"
+    refute "waiting" in block_kinds(buf)
+    [s, e] = prose_range(buf)
+    assert binary_part(Buffer.text(buf), s, e - s) == "On it. First.\n\n"
 
     inject(agent, %{"jsonrpc" => "2.0", "id" => pid, "result" => %{"stopReason" => "end_turn"}})
     assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
     refute Buffer.text(buf) =~ "⋯ thinking"
+
+    # turn end reveals the pending tail
+    [s2, e2] = prose_range(buf)
+    assert binary_part(Buffer.text(buf), s2, e2 - s2) == "On it. First.\n\nSecond "
+    assert Buffer.get_local(buf, "agent-prose-from") in [nil, false]
   end
 
   test "api connector: in-process thread, turns accumulate, no subprocess" do
@@ -1521,6 +1550,17 @@ defmodule Aimax.AgentTest do
     assert_receive {:frame, %{"method" => "session/set_mode", "params" => sp}}, 1_000
     assert sp["modeId"] == "dontAsk"
     assert eventually(fn -> Buffer.get_local("*chat:a1*", "agent-mode") == "dontAsk" end)
+  end
+
+  defp block_kinds(buf),
+    do: (Buffer.get_local(buf, "agent-blocks") || []) |> Enum.map(fn [_, _, k | _] -> k end)
+
+  defp prose_range(buf) do
+    [s, e | _] =
+      Buffer.get_local(buf, "agent-blocks")
+      |> Enum.find(fn [_, _, k | _] -> k == "prose" end)
+
+    [s, e]
   end
 
   defp eventually(fun, tries \\ 40) do

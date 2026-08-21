@@ -4648,12 +4648,17 @@
         ;; slug), so it is not gated on one.
         (when (boundp (quote agent-block-drop-kind!))
           (agent-block-drop-kind! buf "permission")
-          (agent-block-drop-kind! buf "waiting")
-          ;; a queued message the dead runtime never read returns to the
-          ;; input; a LIVE runtime still holds its queue, so its muted
-          ;; lines stay
+          ;; a LIVE runtime owns its waiting line, its queue, and its
+          ;; pending prose tail; a dead one leaves stale chrome to sweep
           (unless (chat-live-runtime? buf)
-            (agent-unqueue-renders-to-input! buf))
+            ;; the waiting line and its block leave together
+            (agent-sweep-waiting! buf)
+            ;; a queued message the dead runtime never read returns to
+            ;; the input
+            (agent-unqueue-renders-to-input! buf)
+            ;; prose the dead runtime streamed but never revealed joins
+            ;; the prose block
+            (agent-adopt-prose-tail! buf))
           (let ((ovs (buffer-local buf 'agent-overlays)))
             (when ovs (overlay-set! buf 'agent ovs)))
           (agent-apply-folds! buf))
@@ -5051,6 +5056,10 @@
   '(chat-wire-turns chat-turns agent-blocks agent-overlays agent-folds
     agent-open-cards
     chat-turn-active
+    ;; where the unrevealed prose tail starts: text the model said that
+    ;; the prose block does not cover yet — restore adopts it, reset
+    ;; clears it with the transcript
+    agent-prose-from
     chat-tool-specs chat-cost chat-last-usage chat-usage-total
     ;; the turn this chat last named itself on: a reset starts a new
     ;; conversation, which must name itself again from its first turn

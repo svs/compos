@@ -1980,12 +1980,13 @@ defmodule Aimax.EditorTest do
     press(["RET"])
     assert eventually(fn -> Buffer.text(companion) =~ "try violets" end)
 
-    # the transcript is block-modeled like an agent thread
-    kinds = Buffer.get_local(companion, "agent-blocks") |> Enum.map(&Enum.at(&1, 2))
-    assert "meta" in kinds
-    assert "user" in kinds
-    assert "prose" in kinds
-    refute "waiting" in kinds
+    # the transcript is block-modeled like an agent thread (the prose
+    # block reveals at turn end, after the streamed text lands)
+    kinds = fn -> Buffer.get_local(companion, "agent-blocks") |> Enum.map(&Enum.at(&1, 2)) end
+    assert eventually(fn -> "prose" in kinds.() end)
+    assert "meta" in kinds.()
+    assert "user" in kinds.()
+    refute "waiting" in kinds.()
 
     # companion chats keep their doc-derived name — no auto-title rename
     assert Buffer.exists?(companion)

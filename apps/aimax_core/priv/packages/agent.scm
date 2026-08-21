@@ -198,6 +198,10 @@
                    (list (- (car w) len) (- (nth 1 w) len))))
                 ((and (>= (car w) start) (<= (nth 1 w) end))
                  (buffer-set-local! buf 'agent-waiting #f)))))
+      (let ((p (buffer-local buf 'agent-prose-from)))
+        (when p
+          (cond ((>= p end) (buffer-set-local! buf 'agent-prose-from (- p len)))
+                ((> p start) (buffer-set-local! buf 'agent-prose-from start)))))
       (let ((m (buffer-local buf 'agent-saved-mark)))
         (when m
           (cond ((>= m end) (buffer-set-local! buf 'agent-saved-mark (- m len)))
@@ -358,9 +362,12 @@
     ;; again — one line, not two
     (unless (buffer-local buf 'agent-waiting)
       (let* ((text "⋯ thinking\n")
-             (start (agent-render! slug text "agent-thought")))
-        (buffer-set-local! buf 'agent-waiting
-          (list start (+ start (string-byte-length text))))))))
+             (start (agent-render! slug text "agent-thought"))
+             (end (+ start (string-byte-length text))))
+        (buffer-set-local! buf 'agent-waiting (list start end))
+        ;; the rich transcript renders blocks only — without this block
+        ;; the waiting line is invisible text in the buffer
+        (agent-block-push! buf start end "waiting" '())))))
 
 (define (agent-clear-waiting! slug)
   (let* ((buf (agent-buf slug))
@@ -384,6 +391,69 @@
       (buffer-set-local! buf 'agent-saved-mark
         (min (agent-mark slug) (buffer-size buf))))))
 
+;;; --- paragraph streaming --------------------------------------------------------
+;;; The backend streams small chunks, and each reveal repaints the
+;;; transcript. So a chunk writes its text into the buffer at once — the
+;;; text is the durable record — but the prose BLOCK, which is what the
+;;; rich view renders, grows one paragraph at a time. 'agent-prose-from
+;;; marks where the unrevealed tail starts. It is conversation state: a
+;;; restart adopts the tail into the prose block (chat-mode setup), and a
+;;; reset clears it with the transcript. The waiting line stays up until
+;;; the first paragraph reveals, so the pause reads as thinking.
+
+(defcustom 'chat-stream-paragraphs #t
+  "Reveal the reply one paragraph at a time. Set #f to reveal every chunk as it arrives."
+  'group 'chat 'type 'boolean)
+
+;; a chunk rendered at START begins the pending tail, unless one is open
+(define (agent-prose-note! buf start)
+  (unless (buffer-local buf 'agent-prose-from)
+    (buffer-set-local! buf 'agent-prose-from start)))
+
+;; Reveal the pending tail: up to its last paragraph break when PARTIAL?,
+;; all of it otherwise. Clearing the waiting line excises text before the
+;; tail, so KEEP is a length inside the tail and the offsets re-read after.
+(define (agent-flush-prose! slug partial?)
+  (let* ((buf (agent-buf slug))
+         (from0 (buffer-local buf 'agent-prose-from)))
+    (when from0
+      (let* ((tail (substring-bytes (buffer-text buf) from0 (agent-mark slug)))
+             (keep (if partial?
+                       (let ((brk (string-rindex tail "\n\n")))
+                         (if brk (+ brk 2) #f))
+                       (string-byte-length tail))))
+        (when (and keep (> keep 0))
+          (agent-clear-waiting! slug)
+          (let* ((from (buffer-local buf 'agent-prose-from))
+                 (cut (+ from keep)))
+            (agent-block-extend-or-push! buf from cut "prose")
+            (buffer-set-local! buf 'agent-prose-from
+              (if (< cut (agent-mark slug)) cut #f))))))))
+
+;; Restore: the runtime that drew the waiting line died, and its block
+;; still names the range — the line leaves the transcript text too.
+(define (agent-sweep-waiting! buf)
+  (for-each
+    (lambda (b)
+      (let ((start (nth 0 b)) (end (nth 1 b)))
+        (when (and (>= start 0) (>= end start) (<= end (buffer-size buf))
+                   (equal? (substring-bytes (buffer-text buf) start end)
+                           "⋯ thinking\n"))
+          (agent-excise-range! buf start end))))
+    (filter (lambda (b) (equal? (nth 2 b) "waiting")) (agent-blocks buf)))
+  (agent-block-drop-kind! buf "waiting"))
+
+;; Restore: prose the dead runtime streamed but never revealed joins the
+;; newest prose block, so the transcript shows everything it holds.
+(define (agent-adopt-prose-tail! buf)
+  (let ((from (buffer-local buf 'agent-prose-from)))
+    (when from
+      (let ((m (min (or (buffer-local buf 'agent-saved-mark) 0)
+                    (buffer-size buf))))
+        (when (< from m)
+          (agent-block-extend-or-push! buf from m "prose")))
+      (buffer-set-local! buf 'agent-prose-from #f))))
+
 ;;; --- queued messages ------------------------------------------------------------
 ;;; RET mid-turn moves the message up into the transcript at once, muted,
 ;;; and the input clears so the next message can be typed. The muted line
@@ -394,6 +464,9 @@
 (define (agent-echo-queued! slug text)
   (let* ((buf (agent-buf slug))
          (waiting? (buffer-local buf 'agent-waiting)))
+    ;; the muted line must not land inside the pending prose tail — the
+    ;; tail reveals first, so the prose block never swallows the echo
+    (agent-flush-prose! slug #f)
     ;; the waiting line stays the last text before the marker
     (when waiting? (agent-clear-waiting! slug))
     (let ((start (agent-render! slug
@@ -448,8 +521,13 @@
          (lifted (if (member type '(status model-state mode-state usage user-msg))
                      '()
                      (agent-lift-queued! buf))))
-    ;; any sign of life ends the waiting state
-    (unless (or (equal? type 'user-msg) (equal? type 'status))
+    ;; pending prose reveals before any other block lands, so the
+    ;; transcript keeps the model's own order
+    (unless (member type '(chunk status model-state mode-state usage))
+      (agent-flush-prose! slug #f))
+    ;; any sign of life ends the waiting state; a pending chunk keeps the
+    ;; waiting line until its first paragraph reveals
+    (unless (member type '(user-msg status chunk))
       (agent-clear-waiting! slug))
     (when (member type *agent-output-kinds*)
       (buffer-set-local! buf 'agent-turn-any #t))
@@ -505,8 +583,11 @@
        (buffer-set-local! buf 'agent-turn-text
          (string-append (or (buffer-local buf 'agent-turn-text) "")
                         (plist-get e 'text)))
+       ;; the text lands in the buffer at once; the prose block reveals
+       ;; it one paragraph at a time
        (let ((start (agent-render! slug (plist-get e 'text) #f)))
-         (agent-block-extend-or-push! buf start (agent-mark slug) "prose"))
+         (agent-prose-note! buf start))
+       (agent-flush-prose! slug chat-stream-paragraphs)
        (chat-activity! buf "streaming"))
 
       ((equal? type 'thought)

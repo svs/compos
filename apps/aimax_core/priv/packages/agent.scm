@@ -1491,6 +1491,18 @@
   '(hidden #t deprecated "use codex-app-server"
     cmd "codex-acp" model-flag "-c model="
     models ("gpt-5.6-luna" "gpt-5.5" "gpt-5.5-pro" "gpt-5.4" "gpt-5.4-mini" "gpt-5.3-codex")))
+;; OpenCode rides its own multi-provider auth (`opencode auth login`) and
+;; speaks ACP over stdio. The session reports the live model catalog and
+;; its build/plan modes through ACP session config options; the backend
+;; applies a pinned model the same way ('model-config), so the connector
+;; needs no env or command-line model wiring. The static list below is
+;; only the pre-session fallback for the picker.
+(define-connector! "opencode"
+  '(cmd "opencode acp"
+    model-config #t
+    models ("opencode/big-pickle" "opencode/claude-sonnet-5"
+            "opencode/claude-opus-5" "opencode/claude-haiku-4-5"
+            "opencode/gemini-3.1-pro")))
 ;; the direct-API lane: in-process req_llm turns — streaming, tools, cost
 ;; tracking, no subprocess. "api" is just another connector, and it
 ;; declares its models like any other — as a thunk, because the set is
@@ -1535,8 +1547,10 @@
 ;; per-call opts win over the connector. A thread's model ('model in conf,
 ;; defaulting to the editor's model when this connector offers it) reaches
 ;; the backend by whatever route the connector declares: 'model-flag appends
-;; it to the adapter command line (codex -c model=...), otherwise it rides
-;; the anthropic env pair. Connectors that offer neither stay untouched.
+;; it to the adapter command line (codex -c model=...), 'model-config lets
+;; the backend set it over ACP session config options (opencode), otherwise
+;; it rides the anthropic env pair. Connectors that offer none stay
+;; untouched.
 (define (agent-resolve-config opts)
   ;; a codex thread runs in a sanitized CODEX_HOME so the user's own
   ;; ~/.codex config and skills never reach it (skills.scm, which loads
@@ -1611,9 +1625,10 @@
                 (and (member (llm-model) (connector-models cname)) (llm-model)))))
     (cond ((not m) conf)
           ((or (equal? (plist-get conf 'backend) "req-llm")
-               (equal? (plist-get conf 'backend) "codex-app-server"))
-           ;; direct and native lanes carry the model in protocol config,
-           ;; not adapter command-line wiring
+               (equal? (plist-get conf 'backend) "codex-app-server")
+               (plist-get conf 'model-config))
+           ;; direct, native, and session-config lanes carry the model in
+           ;; protocol config, not adapter command-line wiring
            (append (list 'model m) conf))
           ((plist-get conf 'model-flag)
            ;; value must be quoted TOML — codex ignores the bare form
@@ -1636,7 +1651,9 @@
 
 (define (connector-description name)
   (let ((backend (or (plist-get (connector-config name) 'backend) "acp")))
-    (cond ((equal? backend "req-llm")
+    (cond ((equal? name "opencode")
+           "OpenCode — multi-provider ACP agent")
+          ((equal? backend "req-llm")
            "direct API — metered, cached, cheap lane")
           ((equal? backend "codex-app-server")
            "Codex App Server — ChatGPT subscription")

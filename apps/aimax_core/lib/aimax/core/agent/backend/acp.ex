@@ -64,7 +64,11 @@ defmodule Aimax.Core.Agent.Backend.ACP do
       partial: "",
       next_id: 1,
       pending_rpc: %{},
-      session_id: nil
+      session_id: nil,
+      # ACP session config options (opencode): which option ids the session
+      # exposes, and the model id it currently runs
+      config_option_ids: [],
+      config_model: nil
     }
 
     {:ok,
@@ -95,26 +99,36 @@ defmodule Aimax.Core.Agent.Backend.ACP do
   end
 
   def handle_call({:set_model, model_id}, _from, state) do
-    if state.session_id do
-      {:reply, :ok,
-       request(state, "session/set_model", %{
-         "sessionId" => state.session_id,
-         "modelId" => model_id
-       })}
-    else
-      {:reply, {:error, :no_session}, state}
+    cond do
+      is_nil(state.session_id) ->
+        {:reply, {:error, :no_session}, state}
+
+      "model" in state.config_option_ids ->
+        {:reply, :ok, set_config_option(state, "model", model_id)}
+
+      true ->
+        {:reply, :ok,
+         request(state, "session/set_model", %{
+           "sessionId" => state.session_id,
+           "modelId" => model_id
+         })}
     end
   end
 
   def handle_call({:set_mode, mode_id}, _from, state) do
-    if state.session_id do
-      {:reply, :ok,
-       request(state, "session/set_mode", %{
-         "sessionId" => state.session_id,
-         "modeId" => mode_id
-       })}
-    else
-      {:reply, {:error, :no_session}, state}
+    cond do
+      is_nil(state.session_id) ->
+        {:reply, {:error, :no_session}, state}
+
+      "mode" in state.config_option_ids ->
+        {:reply, :ok, set_config_option(state, "mode", mode_id)}
+
+      true ->
+        {:reply, :ok,
+         request(state, "session/set_mode", %{
+           "sessionId" => state.session_id,
+           "modeId" => mode_id
+         })}
     end
   end
 
@@ -262,6 +276,11 @@ defmodule Aimax.Core.Agent.Backend.ACP do
         # used to drop this: it is how `auto` stops the agent asking at all.
         state = emit_mode_state(state, Map.get(result, "modes"))
 
+        # a config-options agent (opencode) reports model and mode as
+        # session config options instead of the two keys above
+        state = ingest_config_options(state, Map.get(result, "configOptions"))
+        state = push_pinned_model(state)
+
         emit(state, type: :ready)
 
       {"session/set_model", %{"result" => _}} ->
@@ -269,6 +288,11 @@ defmodule Aimax.Core.Agent.Backend.ACP do
 
       {"session/set_mode", %{"result" => _}} ->
         state
+
+      # the response carries the COMPLETE option list — setting one option
+      # may change another (opencode grows an effort option per model)
+      {"session/set_config_option", %{"result" => result}} ->
+        ingest_config_options(state, Map.get(result, "configOptions"))
 
       {"session/prompt", %{"result" => result}} ->
         emit(state, type: :"turn-end", "stop-reason": Map.get(result, "stopReason", "end_turn"))
@@ -393,6 +417,9 @@ defmodule Aimax.Core.Agent.Backend.ACP do
       "current_mode_update" ->
         emit(state, type: :"mode-state", current: Map.get(update, "currentModeId", ""))
 
+      "config_option_update" ->
+        ingest_config_options(state, Map.get(update, "configOptions"))
+
       _ ->
         state
     end
@@ -446,6 +473,71 @@ defmodule Aimax.Core.Agent.Backend.ACP do
   end
 
   defp emit_mode_state(state, _), do: state
+
+  # --- session config options (ACP extension; opencode) -----------------------
+  # The "model" and "mode" options map onto the same model-state/mode-state
+  # events the two session/new keys produce, so everything above the seam —
+  # modeline, C-c m, permission-mode sync — works unchanged. Other option
+  # ids (opencode's per-model "effort") are ignored for now.
+
+  defp ingest_config_options(state, nil), do: state
+
+  defp ingest_config_options(state, options) when is_list(options) do
+    state = %{state | config_option_ids: Enum.map(options, & &1["id"])}
+
+    state =
+      case Enum.find(options, &(&1["id"] == "model")) do
+        %{"currentValue" => cur} = opt ->
+          %{state | config_model: cur}
+          |> emit(
+            type: :"model-state",
+            current: cur,
+            available:
+              for m <- Map.get(opt, "options", []) do
+                [Map.get(m, "value"), Map.get(m, "name", "")]
+              end
+          )
+
+        _ ->
+          state
+      end
+
+    case Enum.find(options, &(&1["id"] == "mode")) do
+      %{"currentValue" => cur} = opt ->
+        emit(state,
+          type: :"mode-state",
+          current: cur,
+          available:
+            for m <- Map.get(opt, "options", []) do
+              [Map.get(m, "value"), Map.get(m, "name", ""), Map.get(m, "description", "")]
+            end
+        )
+
+      _ ->
+        state
+    end
+  end
+
+  defp ingest_config_options(state, _), do: state
+
+  defp set_config_option(state, id, value) do
+    request(state, "session/set_config_option", %{
+      "sessionId" => state.session_id,
+      "configId" => id,
+      "value" => value
+    })
+  end
+
+  # a pinned model ('model in the resolved config) has no spawn-time route
+  # on this lane — the session starts on the agent's default, then we set
+  # the option before ready
+  defp push_pinned_model(state) do
+    model = Map.get(state.config, "model")
+
+    if is_binary(model) and "model" in state.config_option_ids and model != state.config_model,
+      do: set_config_option(state, "model", model),
+      else: state
+  end
 
   # connector 'meta plists -> JSON. Nested plists become objects, so a
   # connector can declare (meta (claudeCode (options (settingSources ())))).

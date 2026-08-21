@@ -631,6 +631,115 @@ defmodule Aimax.AgentTest do
     assert eventually(fn -> Buffer.get_local(buf, "agent-model") == "claude-sonnet-5" end)
   end
 
+  test "opencode connector: session config options drive model and mode state" do
+    assert {:ok, names} = Session.eval(~s[(connector-names)])
+    assert names =~ "opencode"
+
+    assert {:ok, ~s["OpenCode — multi-provider ACP agent"]} =
+             Session.eval(~s[(connector-description "opencode")])
+
+    # 'model-config: the model rides protocol config — no env pair, no cmd flag
+    {:ok, conf_cmd} =
+      Session.eval(
+        ~s[(plist-get (agent-resolve-config '(connector "opencode" model "opencode/claude-sonnet-5")) 'cmd)]
+      )
+
+    assert conf_cmd == ~s["opencode acp"]
+
+    {:ok, conf_env} =
+      Session.eval(
+        ~s[(plist-get (agent-resolve-config '(connector "opencode" model "opencode/claude-sonnet-5")) 'env)]
+      )
+
+    assert conf_env == "#f"
+
+    {:ok, _} =
+      Session.eval(
+        ~s{(execute* "" '(connector "opencode" model "opencode/claude-sonnet-5" cmd "fake"))}
+      )
+
+    assert_receive {:transport_open, agent}, 1_000
+    assert_receive {:transport_cmd, "fake"}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(agent, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{"protocolVersion" => 1}})
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+
+    model_option = fn current ->
+      %{
+        "id" => "model",
+        "name" => "Model",
+        "type" => "select",
+        "currentValue" => current,
+        "options" => [
+          %{"value" => "opencode/big-pickle", "name" => "Big Pickle"},
+          %{"value" => "opencode/claude-sonnet-5", "name" => "Claude Sonnet 5"},
+          %{"value" => "opencode/claude-opus-5", "name" => "Claude Opus 5"}
+        ]
+      }
+    end
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => nid,
+      "result" => %{
+        "sessionId" => "ses-oc",
+        "configOptions" => [
+          model_option.("opencode/big-pickle"),
+          %{
+            "id" => "mode",
+            "name" => "Session Mode",
+            "type" => "select",
+            "currentValue" => "build",
+            "options" => [
+              %{"value" => "build", "name" => "build", "description" => "Default agent."},
+              %{"value" => "plan", "name" => "plan", "description" => "Disallows edits."}
+            ]
+          }
+        ]
+      }
+    })
+
+    # the pinned model has no spawn-time route on this lane — the backend
+    # sets the option itself once the session reports it
+    assert_receive {:frame, %{"method" => "session/set_config_option", "id" => pin_id, "params" => pin}},
+                   1_000
+
+    assert pin == %{
+             "sessionId" => "ses-oc",
+             "configId" => "model",
+             "value" => "opencode/claude-sonnet-5"
+           }
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => pin_id,
+      "result" => %{"configOptions" => [model_option.("opencode/claude-sonnet-5")]}
+    })
+
+    buf = "*chat:a1*"
+    assert eventually(fn -> Buffer.get_local(buf, "agent-model") == "opencode/claude-sonnet-5" end)
+    assert eventually(fn -> Buffer.get_local(buf, "agent-mode") == "build" end)
+    assert [["build", "build", _], ["plan", "plan", _]] = Buffer.get_local(buf, "agent-modes")
+
+    # C-c m rides set_config_option on this lane, not session/set_model
+    focus(buf)
+    press(["C-c", "m"])
+    type("opencode/claude-opus-5")
+    press(["RET"])
+
+    assert_receive {:frame, %{"method" => "session/set_config_option", "params" => sp}}, 1_000
+    assert sp["configId"] == "model"
+    assert sp["value"] == "opencode/claude-opus-5"
+
+    # the agent's own report stays the truth
+    update(agent, "ses-oc", %{
+      "sessionUpdate" => "config_option_update",
+      "configOptions" => [model_option.("opencode/big-pickle")]
+    })
+
+    assert eventually(fn -> Buffer.get_local(buf, "agent-model") == "opencode/big-pickle" end)
+  end
+
   test "permission request: needs_attention, inline banner, C-c C-y answers allow option" do
     {slug, buf, agent} = boot("")
 

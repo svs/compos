@@ -416,6 +416,19 @@
                 (tab-open url)
                 (web--goto-url! buf url #t)))))))
 
+;; Cmd-RET, the browser reflex: the link at point opens as its own tab
+(define-command "browse-follow-new-tab" "Open the link at point in a new tab"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (l (web--link-at buf (point))))
+      (if (not l)
+          (message "no link here")
+          (let ((url (web--resolve (car (cdr (cdr l)))
+                                   (or (buffer-local buf 'browse-url) ""))))
+            (if (web--image-url? url)
+                (tab-open url)
+                (web--open-tab! url)))))))
+
 (define-command "browse-next-link" "Move point to the next link"
   (lambda ()
     (let* ((buf (current-buffer))
@@ -488,6 +501,7 @@
 
 (define (web--install-keys! buf)
   (local-set-key* buf "RET" "browse-follow")
+  (local-set-key* buf "s-RET" "browse-follow-new-tab")
   (local-set-key* buf "TAB" "browse-next-link")
   (local-set-key* buf "n" "browse-next-link")
   (local-set-key* buf "p" "browse-prev-link")
@@ -528,10 +542,11 @@
 
 (mode-doc! "browse-mode"
   "A web page as readable text — the article, extracted. RET follows
-the link at point, TAB and n/p walk the links, M-<left> and l go
-back, M-<right> goes forward, g asks where to go — RET refetches
-this page, a visited site or a fresh URL goes there — o opens the
-page in the real browser, and C-s searches to any link.")
+the link at point and s-RET opens it as its own tab, TAB and n/p
+walk the links, M-<left> and l go back, M-<right> goes forward, g
+asks where to go — RET refetches this page, a visited site or a
+fresh URL goes there — o opens the page in the real browser, and
+C-s searches to any link.")
 
 ;; the one entry point: normalize, enter the mode, fetch
 ;; a tab's name: the host, and the page's last path segment
@@ -547,26 +562,27 @@ page in the real browser, and C-s searches to any link.")
 ;; browser-tab semantics: inside a browse buffer the URL navigates IN
 ;; PLACE; outside, the page's own tab comes up — the one that already
 ;; shows it, or a fresh one, joined to the "browse" group
-(define (browse url)
-  (let ((full (if (string-contains? url "://")
-                  url
-                  (string-append "https://" url))))
-    (cond
-      ((web--buffer? (current-buffer))
-       (web--goto-url! (current-buffer) full #t)
-       (current-buffer))
-      ((web--buffer-for full)
-       (let ((b (web--buffer-for full)))
-         (switch-to-buffer! b)
-         b))
-      (else
-        (let ((name (string-append "*browse:" (web--slug full) "*")))
+;; the page's own tab: the one that already shows it, or a fresh one
+(define (web--open-tab! url)
+  (let ((existing (web--buffer-for url)))
+    (if existing
+        (begin (switch-to-buffer! existing) existing)
+        (let ((name (string-append "*browse:" (web--slug url) "*")))
           (buffer-create name)
           (buffer-set-local! name 'group "browse")
           (switch-to-buffer! name)
           (set-mode! "browse-mode")
-          (web--goto-url! name full #t)
-          name)))))
+          (web--goto-url! name url #t)
+          name))))
+
+(define (browse url)
+  (let ((full (if (string-contains? url "://")
+                  url
+                  (string-append "https://" url))))
+    (if (web--buffer? (current-buffer))
+        (begin (web--goto-url! (current-buffer) full #t)
+               (current-buffer))
+        (web--open-tab! full))))
 
 ;; the prompt completes over the visited sites, and a title matches
 ;; what you type; a fresh URL still goes through as typed

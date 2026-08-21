@@ -94,6 +94,22 @@ defmodule Aimax.WebBrowseTest do
     assert browse!("https://site.test/second.html") == a
   end
 
+  test "s-RET opens the link at point as its own tab; the page stays put" do
+    a = browse!("https://site.test/index.html")
+
+    press("TAB")
+    press("s-RET")
+
+    b = Editor.current_buffer()
+    assert b != a
+    assert b =~ "*browse:"
+    assert Buffer.text(b) =~ "Second page"
+    # the origin tab never moved
+    assert Buffer.text(a) =~ "Front page"
+    assert eval!(~s{(buffer-local "#{a}" 'browse-url)}) ==
+             ~S["https://site.test/index.html"]
+  end
+
   test "TAB walks to a link, RET follows it, M-arrows go back and forward" do
     buf = browse!("https://site.test/index.html")
 

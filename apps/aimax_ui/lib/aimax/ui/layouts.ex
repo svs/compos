@@ -823,7 +823,7 @@ defmodule Aimax.Ui.Layouts do
           // ...and the text-scale chords (cmd-+/-/0), claimed from the
           // browser's whole-page zoom: the scale belongs to ONE buffer
           const CMD_KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
-                            "a", "p", "+", "=", "-", "0"];
+                            "a", "p", "+", "=", "-", "0", "Enter"];
 
           function keySpec(e) {
             if (["Control", "Meta", "Alt", "Shift"].includes(e.key)) return null;

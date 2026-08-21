@@ -250,6 +250,38 @@ defmodule Aimax.Ui.EditorLiveTest do
     assert eventually(fn -> render(view) =~ "Accepted next input." end)
   end
 
+  test "the activity row shows work in progress and clears at turn end", %{conn: conn} do
+    before = MapSet.new(Aimax.Core.Agent.list())
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (execute* "first" '(backend "stub" script (((type chunk text "done.")))))
+      """)
+
+    [slug] = MapSet.difference(MapSet.new(Aimax.Core.Agent.list()), before) |> MapSet.to_list()
+    on_exit(fn -> Aimax.Core.Agent.kill(slug) end)
+
+    assert eventually(fn -> Aimax.Core.Agent.info(slug).status == :idle end)
+    buf = Aimax.Core.Agent.info(slug).buffer
+
+    {:ok, view, _} = live(conn, "/b/" <> URI.encode_www_form(buf))
+    refute render(view) =~ "ag-activity"
+
+    # the real event path sets the activity word; a chunk mid-turn says so
+    {:ok, _} =
+      Aimax.Core.Session.eval("(agent-handle-event \"#{slug}\" '(type chunk text \"more \"))")
+
+    assert eventually(fn -> render(view) =~ "streaming" end)
+    assert render(view) =~ "ag-activity"
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(
+        "(agent-handle-event \"#{slug}\" '(type turn-end stop-reason \"end_turn\"))"
+      )
+
+    assert eventually(fn -> not (render(view) =~ "ag-activity") end)
+  end
+
   defp eventually(fun, tries \\ 60) do
     cond do
       fun.() ->

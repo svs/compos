@@ -90,8 +90,6 @@ defmodule Aimax.Ui.AgentTranscript do
               </div>
               <div class="ag-question-hint">Choose an answer or type another reply below.</div>
             </div>
-          <% :waiting -> %>
-            <div class="ag-wait">⋯ thinking</div>
           <% :meta -> %>
             <div class="ag-meta">{b.text}</div>
         <% end %>

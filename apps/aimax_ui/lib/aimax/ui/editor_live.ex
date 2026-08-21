@@ -488,8 +488,12 @@ defmodule Aimax.Ui.EditorLive do
 
     entry = %{signature: signature, blocks: blocks, block_cache: block_cache}
 
-    {Map.merge(leaf, %{lines: [], ag_blocks: blocks, ag_input: ag_input(leaf, ag)}),
-     Map.put(cache, {:agent, leaf.id}, entry)}
+    {Map.merge(leaf, %{
+       lines: [],
+       ag_blocks: blocks,
+       ag_input: ag_input(leaf, ag),
+       ag_activity: Map.get(ag, :activity)
+     }), Map.put(cache, {:agent, leaf.id}, entry)}
   end
 
   # rich diff: the buffer text IS the unified diff, so the cards are parsed
@@ -1010,6 +1014,16 @@ defmodule Aimax.Ui.EditorLive do
             blocks={@node.ag_blocks}
             win={@node.id}
           />
+          <%!-- the turn pulse: the activity word agent.scm sets on every
+               event, alive until turn-end clears it. The transcript alone
+               cannot say working vs done once paragraphs stream. Outside
+               the component and the scroll area, so it never moves and
+               its churn never diffs the block list. "disconnected" is a
+               dead chat, not motion — the [agent exited] line says it. --%>
+          <div
+            :if={@node.ag_activity && @node.ag_activity != "disconnected"}
+            class="ag-wait ag-activity"
+          >⋯ {@node.ag_activity}</div>
           <div class="ag-inputrow">
             <span class="ag-label">YOU</span>
             <span class="ag-input">{@node.ag_input.pre}<span
@@ -1315,7 +1329,10 @@ defmodule Aimax.Ui.EditorLive do
   defp ag_block([_s, _e, "question", id, slug, question, answers | _], _text, _open),
     do: %{kind: :question, id: id, slug: slug, question: question, answers: answers || []}
 
-  defp ag_block([_s, _e, "waiting" | _], _text, _open), do: %{kind: :waiting}
+  # the waiting block anchors the "⋯ thinking" text for restore sweeps and
+  # the plain view; the rich view shows the activity row instead — both at
+  # once would pulse twice for one wait
+  defp ag_block([_s, _e, "waiting" | _], _text, _open), do: nil
 
   defp ag_block([s, e, "meta" | _], text, _open),
     do: %{kind: :meta, text: String.trim(safe_slice(text, s, e))}

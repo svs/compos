@@ -479,6 +479,9 @@ defmodule Aimax.Ui.Layouts do
             font-family: var(--font-mono); font-size: 12px; margin: 8px 0;
             color: var(--agent-thought-fg, #8a8577); animation: ag-pulse 1.4s ease-in-out infinite;
           }
+          /* the turn pulse under the transcript: outside .ag-scroll, so it
+             aligns with the input row, not the padded scroll area */
+          .ag-activity { margin: 2px 18px 4px; flex-shrink: 0; }
           @keyframes ag-shimmer {
             0%, 18% { transform: translateX(-120%); }
             82%, 100% { transform: translateX(120%); }

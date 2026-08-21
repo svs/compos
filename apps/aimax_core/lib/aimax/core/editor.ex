@@ -1965,7 +1965,10 @@ defmodule Aimax.Core.Editor do
       # to following. Stored INVERTED (agent-unstick): a cleared local is
       # #f, and cleared must mean "follow".
       stick: Map.get(locals, "agent-unstick") != true,
-      scroll_top: Map.get(locals, "agent-scroll-top") || 0
+      scroll_top: Map.get(locals, "agent-scroll-top") || 0,
+      # the activity word agent.scm sets on every event ("waiting…",
+      # "thinking…", "streaming", "tool · X"); nil when no turn runs
+      activity: Map.get(locals, "chat-activity")
     }
   end
 

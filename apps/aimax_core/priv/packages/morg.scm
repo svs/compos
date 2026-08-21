@@ -14,6 +14,7 @@
 ;;;
 ;;; Keys (buffer-local):
 ;;;   TAB fold cycle (heading subtree or code block) · S-TAB overview/show all
+;;;   C-c C-t cycle the heading's TODO state
 ;;;   C-c C-c run the code block at point
 
 (domain! 'writing)
@@ -261,6 +262,55 @@
             (morg-set-folds! buf '())
             (message "SHOW ALL"))))))
 
+;;; --- TODO --------------------------------------------------------------------
+
+;; Replace one whole line as one undo step. Keep point at its byte column
+;; when point is on that line.
+(define (morg-replace-line! buf start old new)
+  (unless (equal? old new)
+    (let ((p (buffer-point buf))
+          (old-len (string-byte-length old)))
+      (buffer-replace-range! buf start old-len new)
+      (when (and (>= p start) (<= p (+ start old-len)))
+        (buffer-goto! buf (min p (+ start (string-byte-length new))))))))
+
+;; Cycle the heading at POS through none, TODO, and DONE.
+;; Return the new state string, or #f when POS is not on a heading.
+(define (morg-toggle-todo-at! buf pos)
+  (let* ((e (morg-entry-at (morg-scan buf) pos)))
+    (if (not (and e (equal? (morg-kind e) 'heading)))
+        #f
+        (let* ((start (car e))
+               (line (cadr e))
+               (g (re-groups "^(#{1,6}[ \t]+)(TODO[ \t]+|DONE[ \t]+)?" line 0))
+               (pre (nth 1 g))
+               (kw (nth 2 g))
+               (head (substring-bytes line 0 (cadr pre)))
+               (rest (substring-bytes line (if kw (cadr kw) (cadr pre))
+                                      (string-byte-length line)))
+               (cur (if kw
+                        (substring-bytes line (car kw) (+ (car kw) 4))
+                        ""))
+               (next (cond ((equal? cur "") "TODO")
+                           ((equal? cur "TODO") "DONE")
+                           (else "NONE")))
+               (new (string-append head
+                      (cond ((equal? next "TODO") "TODO ")
+                            ((equal? next "DONE") "DONE ")
+                            (else ""))
+                      rest)))
+          (morg-replace-line! buf start line new)
+          (when (equal? (buffer-local buf 'mode-name) "morg-mode")
+            (morg-refontify! buf))
+          next))))
+
+(define-command "morg-todo" "Cycle the TODO state of the heading at point"
+  (lambda ()
+    (let ((state (morg-toggle-todo-at! (current-buffer) (point))))
+      (if state
+          (message (if (equal? state "NONE") "TODO state cleared" state))
+          (message "Point is not on a heading")))))
+
 ;;; --- fontification -----------------------------------------------------------
 
 (set-face-attribute! 'morg-code 'fg "#3d6b4f")
@@ -289,9 +339,22 @@
     (cond
       ((= len 0) '())
       ((equal? k 'heading)
-       (list (list start (+ start len)
-                   (string-append "org-level-"
-                     (number->string (+ 1 (modulo (- (morg-info e) 1) 4)))))))
+       (let* ((face (string-append "org-level-"
+                      (number->string (+ 1 (modulo (- (morg-info e) 1) 4)))))
+              (g (re-groups "^#{1,6}[ \t]+(TODO|DONE)[ \t]" line 0)))
+         (if (not g)
+             (list (list start (+ start len) face))
+             (let* ((r (nth 1 g))
+                    (ks (+ start (car r)))
+                    (ke (+ start (cadr r)))
+                    (todo (substring-bytes line (car r) (cadr r))))
+               (append
+                 (if (> ks start) (list (list start ks face)) '())
+                 (list (list ks ke (if (equal? todo "TODO")
+                                       "org-todo" "org-done")))
+                 (if (< ke (+ start len))
+                     (list (list ke (+ start len) face))
+                     '()))))))
       ((equal? k 'open) (list (list start (+ start len) "org-meta")))
       ((equal? k 'close) (list (list start (+ start len) "org-meta")))
       ((equal? k 'code)
@@ -443,6 +506,7 @@
 (define (morg-install-keys)
   (local-set-key "TAB" "morg-cycle")
   (local-set-key "S-TAB" "morg-global-cycle")
+  (local-set-key "C-c C-t" "morg-todo")
   (local-set-key "C-c C-c" "morg-execute-block"))
 
 ;; change-hook registry keyed by buffer NAME in global state (not a
@@ -460,7 +524,7 @@
             *morg-hooks*))))
 
 (mode-doc! "morg-mode"
-  "Markdown with org habits. `TAB` folds a heading or a code block, and `S-TAB` folds the file. `C-c C-c` runs the code block at point; the output goes to a result block under it. `C-c C-v` renders the page.")
+  "Markdown with org habits. `TAB` folds a heading or code block. `S-TAB` folds the file. `C-c C-t` cycles TODO states. `C-c C-c` runs the code block at point. `C-c C-v` renders the page.")
 
 (mode-icon! "morg-mode" "")
 

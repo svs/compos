@@ -1084,6 +1084,189 @@
 (public! 'code-mode-instructions
   "(code-mode-instructions DOCS) — the code instructions a prompt adds for those buffers")
 
+;;; --- code-agent-mode: the chat that writes code -------------------------------
+;;; code-mode starts from a source buffer. code-agent-mode starts from the
+;;; CHAT: agent.scm reports every tool call to code-agent-note-tool!, and
+;;; the first call that edits code turns the mode on. The mode pushes the
+;;; code-editing skill (priv/skills, packages/skills.scm) once onto the
+;;; next message, and moves the chat to the coding preset — a configurable
+;;; connector and model. A connector change restarts the session, so the
+;;; switch waits for the turn to end: the restart must not kill the turn
+;;; that triggered it.
+;;;
+;;; M-x code-agent-mode toggles it by hand. Knobs live in the 'code group.
+
+(domain! 'code)
+(effects! '(write))
+
+(defcustom 'code-agent-auto #t
+  "Turn on code-agent-mode when a chat's agent edits code. Set #f to keep every chat on its own connector."
+  'group 'code 'type 'boolean)
+
+(defcustom 'code-agent-connector "codex-app-server"
+  "Connector for a chat in code-agent-mode. Empty means the chat keeps its own connector."
+  'group 'code 'type 'string)
+
+(defcustom 'code-agent-model "gpt-5.6-sol"
+  "Model for a chat in code-agent-mode. Empty means the connector's default model."
+  'group 'code 'type 'string)
+
+;;; Which tool calls mean "this agent edits code"?
+;;;   - an ACP tool call of kind "edit" (a file edit by an ACP adapter)
+;;;   - a structural code edit through eval-scheme
+;;;   - a text edit whose payload names a live buffer with a tree-sitter
+;;;     grammar
+
+(define *code-agent-edit-calls*
+  '("code-replace!" "code-sexp-replace!"))
+
+(define *code-agent-text-edit-calls*
+  '("buffer-replace!" "buffer-replace-all!" "buffer-insert-before!"
+    "buffer-insert-after!" "buffer-delete-text!"))
+
+(define (code-agent--contains-any? text names)
+  (pair? (filter (lambda (n) (if (string-index text n) #t #f)) names)))
+
+;; the quoted strings in a tool payload are the candidate buffer names
+(define (code-agent--quoted-names input)
+  (map (lambda (r)
+         (substring-bytes input (+ (car r) 1) (- (cadr r) 1)))
+       (re-find* "\"[^\"\n]+\"" input)))
+
+(define (code-agent--code-buffer? name)
+  (and (buffer-exists? name)
+       (equal? (code--backend name) "ts")))
+
+(define (code-agent--edits-code? kind title input)
+  (or (equal? kind "edit")
+      (let ((text (string-append title " " input)))
+        (or (code-agent--contains-any? text *code-agent-edit-calls*)
+            (and (code-agent--contains-any? text *code-agent-text-edit-calls*)
+                 (pair? (filter code-agent--code-buffer?
+                                (code-agent--quoted-names input))))))))
+
+;; A code-mode workspace already sets its own model, and a writing
+;; workspace edits prose. Neither chat moves to the coding preset.
+(define (code-agent--eligible? buf)
+  (and code-agent-auto
+       (not (equal? code-agent-connector ""))
+       (not (minor-mode-on? buf "code-agent-mode"))
+       (not (code-mode--workspace? buf))
+       (null? (filter (lambda (b) (minor-mode-on? b "writing-mode"))
+                      (code-mode--workspace-buffers buf)))))
+
+;; is the chat already on the coding preset?
+(define (code-agent--on-target? buf)
+  (and (equal? (or (buffer-local buf 'agent-connector) "") code-agent-connector)
+       (or (equal? code-agent-model "")
+           (equal? (or (buffer-local buf 'agent-model) "") code-agent-model))))
+
+;; The switch itself. A live session goes through chat-switch! — the one
+;; switch function. A chat with no live runtime only changes its identity
+;; locals: the next send attaches on them, and a desktop restore must not
+;; spawn a backend.
+(define (code-agent--switch-now! buf)
+  (unless (or (equal? code-agent-connector "") (code-agent--on-target? buf))
+    (let ((slug (buffer-local buf 'agent-slug)))
+      (if (and slug (not (equal? (agent-status slug) 'dead)))
+          (chat-switch! buf code-agent-connector code-agent-model)
+          (begin
+            (buffer-set-local! buf 'agent-connector code-agent-connector)
+            (buffer-set-local! buf 'agent-model
+              (if (equal? code-agent-model "") #f code-agent-model))))
+      (message (string-append "code-agent: " code-agent-connector
+                              (if (equal? code-agent-model "")
+                                  ""
+                                  (string-append " · " code-agent-model)))))))
+
+;; Only the FIRST enable saves state and moves the chat. The setup re-runs
+;; on desktop restore, and a re-run must not undo a model the user chose
+;; while the mode was on.
+(define (code-agent--apply! buf)
+  (unless (buffer-local buf 'code-agent-saved)
+    (buffer-set-local! buf 'code-agent-saved
+      (list (list 'agent-connector (or (buffer-local buf 'agent-connector) #f))
+            (list 'agent-model (or (buffer-local buf 'agent-model) #f))
+            (list 'chat-presets (or (buffer-local buf 'chat-presets) #f))))
+    ;; the chat gains the coding tool presets, like a code-mode buffer does
+    (let* ((cur (or (buffer-local buf 'chat-presets) '()))
+           (merged (append code-presets
+                           (filter (lambda (p) (not (member p code-presets)))
+                                   cur))))
+      (unless (equal? merged cur)
+        (buffer-set-local! buf 'chat-presets merged)
+        (buffer-set-local! buf 'chat-mcp-dirty #t)))
+    ;; the coding instructions are the code-editing skill, pushed once
+    ;; onto the next message — never the system prompt (skills.scm loads
+    ;; after this file)
+    (when (boundp (quote skill))
+      (buffer-set-local! buf 'chat-note-once
+        (string-append "Working instructions — (skill \"code-editing\"):\n\n"
+                       (skill "code-editing"))))
+    (if (buffer-local buf 'chat-turn-active)
+        (buffer-set-local! buf 'code-agent-switch-pending #t)
+        (code-agent--switch-now! buf))))
+
+(define (code-agent--saved buf key)
+  (let ((hit (assoc key (or (buffer-local buf 'code-agent-saved) '()))))
+    (and hit (cadr hit))))
+
+(define (code-agent--teardown! buf)
+  (let ((conn (code-agent--saved buf 'agent-connector))
+        (model (code-agent--saved buf 'agent-model))
+        (presets (code-agent--saved buf 'chat-presets)))
+    (buffer-set-local! buf 'code-agent-switch-pending #f)
+    (buffer-set-local! buf 'code-agent-saved #f)
+    (buffer-set-local! buf 'chat-presets presets)
+    (let ((slug (buffer-local buf 'agent-slug)))
+      (if (and slug (not (equal? (agent-status slug) 'dead)))
+          (chat-switch! buf (or conn *default-connector*) (or model ""))
+          (begin
+            (buffer-set-local! buf 'agent-connector conn)
+            (buffer-set-local! buf 'agent-model model))))))
+
+(register-minor-mode! "code-agent-mode" code-agent--apply! code-agent--teardown!)
+
+;; agent.scm reports every tool call here (boundp-guarded: this package
+;; loads after it). The first call that edits code turns the mode on.
+(define (code-agent-note-tool! buf title kind input)
+  (when (and (code-agent--eligible? buf)
+             (code-agent--edits-code? kind title input))
+    (enable-minor-mode! buf "code-agent-mode")
+    (message (string-append
+               "This chat writes code — code-agent-mode is on. "
+               code-agent-connector
+               (if (equal? code-agent-model "")
+                   ""
+                   (string-append " · " code-agent-model))
+               " takes the next turn."))))
+
+;; agent.scm calls this at turn-end: a switch requested mid-turn applies
+;; between turns.
+(define (code-agent-apply-pending! buf)
+  (when (buffer-local buf 'code-agent-switch-pending)
+    (buffer-set-local! buf 'code-agent-switch-pending #f)
+    (code-agent--switch-now! buf)))
+
+(define-command "code-agent-mode" "Toggle the coding preset and prompts for this chat"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (not (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
+          (message "not a chat buffer")
+          (if (toggle-minor-mode! "code-agent-mode")
+              (message "code-agent-mode enabled")
+              (message "code-agent-mode disabled"))))))
+
+(mode-doc! "code-agent-mode"
+  "The coding chat surface. The mode turns on when the agent edits code. It pushes the code-editing skill and moves the chat to the coding preset.")
+
+(public! 'code-agent-mode
+  "Toggle the coding preset and prompts for the current chat")
+(public! 'code-agent-note-tool!
+  "(code-agent-note-tool! BUF TITLE KIND INPUT) — turn on code-agent-mode when a tool call edits code")
+(public! 'code-agent-apply-pending!
+  "(code-agent-apply-pending! BUF) — apply a coding-preset switch that waited for the turn to end")
+
 ;;; --- imenu: jump to a definition, on the outline contract ---------------------
 ;;; The index IS (code-outline BUF): tree-sitter where a grammar exists,
 ;;; indentation structure where none does, so every buffer has an index

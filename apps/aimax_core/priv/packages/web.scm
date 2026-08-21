@@ -18,6 +18,12 @@
 (effects! '(read external))
 
 (set-face-attribute! 'web-link 'fg "#7aa2f7")
+(set-face-attribute! 'web-meta
+  'fg "var(--dim-fg)"
+  'bg "var(--window-inactive-bg)"
+  'weight "600")
+(set-face-attribute! 'web-date 'fg "var(--dim-fg)" 'size "0.82em")
+(set-face-attribute! 'web-separator 'fg "transparent")
 
 ;; browser TABS: one buffer per page, every one in the "browse" group.
 ;; The switcher finds them by mode — typing "browse" narrows to them.
@@ -45,9 +51,36 @@
 ;;   3. when pandoc answers only a "[TABLE]" placeholder (a nested
 ;;      table layout), the page again with the table tags flattened,
 ;;      so it reads as lines with its links intact.
-(define (web--substack-feed? url)
-  (or (equal? url "https://substack.com")
-      (string-prefix? "https://substack.com/" url)))
+;; Preferred site parsers are XSLT files. Add one row and the matching
+;; stylesheet; the generic readable and page fallbacks remain automatic.
+(define *web--xslt-sites*
+  '(("https://substack.com" "substack.xsl" "feed")))
+
+(define (web--xslt-site url)
+  (let loop ((sites *web--xslt-sites*))
+    (if (null? sites)
+        #f
+        (let* ((site (car sites))
+               (base (car site)))
+          (if (or (equal? url base)
+                  (string-prefix? (string-append base "/") url))
+              site
+              (loop (cdr sites)))))))
+
+(define (web--xslt-command url html-file pandoc)
+  (let ((site (web--xslt-site url)))
+    (if (not site)
+        #f
+        (let ((stylesheet
+                (web--shell-quote
+                  (string-append
+                    (aimax-priv-dir)
+                    "/packages/web/parsers/"
+                    (car (cdr site))))))
+          (string-append
+            "m=" (car (cdr (cdr site))) "; out=$(xsltproc --html "
+            stylesheet " " (web--shell-quote html-file)
+            " 2>/dev/null" pandoc "); ")))))
 
 (define (web--convert-html url html k)
   (let ((f (string-append (aimax-home) "/browse-fetch.html"))
@@ -60,11 +93,7 @@
       (string-append
         ;; the first output line NAMES the reading that won — "feed",
         ;; "article", or "page" — and the modeline shows it
-        (if (web--substack-feed? url)
-            (string-append
-              "m=feed; out=$(xmllint --html --xpath "
-              "'//*[@role=\"article\" and (@aria-label=\"Note\" or @aria-label=\"Post\")]' "
-              (web--shell-quote f) " 2>/dev/null" p "); ")
+        (or (web--xslt-command url f p)
             (string-append
               "m=article; out=$(readable --base " u " " (web--shell-quote f)
               " 2>/dev/null" p "); "))
@@ -223,7 +252,7 @@
 (define *web--empty-link-pattern* "!?\\[\\]\\(([^)\\s]*)\\)")
 
 (define (web--fix-empty-links s)
-  (let loop ((pos 0) (out "") (last-img #f))
+  (let loop ((pos 0) (out "") (last-wrapper? #f))
     (let ((hit (re-find *web--empty-link-pattern* s pos)))
       (if (not hit)
           (string-append out (substring-bytes s pos (string-byte-length s)))
@@ -234,14 +263,21 @@
                  (url (substring-bytes s (car ur) (car (cdr ur))))
                  (between (string-trim (substring-bytes s pos ms)))
                  (head (string-append out (substring-bytes s pos ms)))
+                 (image-syntax? (equal? (substring-bytes s ms (+ ms 1)) "!"))
                  (img? (web--image-url? url)))
             (cond
-              ;; the inner image of a wrapped pair: the wrapper said it
-              ((and img? last-img (equal? between "")) (loop me head #t))
-              ;; the URL is the label: the buffer text stays the truth,
-              ;; and the img-embed face renders the picture over it
-              (img? (loop me (string-append head "[" url "](" url ")") #t))
-              (else (loop me head (and last-img (equal? between ""))))))))))
+              ;; Drop only an image nested in an empty link wrapper.
+              ;; Adjacent standalone images are separate content.
+              ((and img? last-wrapper? image-syntax? (equal? between ""))
+               (loop me head #f))
+              ;; The URL becomes the label. The img-embed face draws it.
+              (img?
+               (loop me
+                     (string-append head "[" url "](" url ")")
+                     (not image-syntax?)))
+              (else
+               (loop me head
+                     (and last-wrapper? (equal? between ""))))))))))
 
 (define (web--tidy md)
   (let loop ((ls (string-split (web--unescape (web--fix-empty-links md)) "\n"))
@@ -335,6 +371,8 @@
     (buffer-set-local! buf 'web-links links)
     (buffer-set-local! buf 'render-mode #f)
     (web--apply-link-faces! buf)
+    (web--apply-meta-faces! buf)
+    (web--apply-separator-faces! buf)
     (buffer-goto! buf 0)
     (web--update-modeline! buf)
     ;; the page is real now: it joins the visited list, title and all
@@ -342,16 +380,72 @@
       (when url (web--remember-visit! url (web--title md))))))
 
 ;; overlays are runtime: the mode setup rebuilds them from 'web-links.
-;; An image link wears img-embed — the client renders the picture in
-;; the line, and the text underneath stays the URL.
+;; Image links embed pictures. Short note links use the compact date face.
+(define (web--date-link? link)
+  (let ((start (car link))
+        (end (car (cdr link)))
+        (url (car (cdr (cdr link)))))
+    (and (string-contains? url "/note/")
+         (<= (- end start) 12))))
+
+(define (web--meta-offset line)
+  (let ((like (re-find "♥ " line 0))
+        (comment (re-find "💬 " line 0))
+        (restack (re-find "↻ " line 0)))
+    (cond (like (car like))
+          (comment (car comment))
+          (restack (car restack))
+          (else #f))))
 (define (web--apply-link-faces! buf)
   (overlay-set! buf 'web
     (map (lambda (l)
            (list (car l) (car (cdr l))
-                 (if (web--image-url? (car (cdr (cdr l))))
-                     "img-embed"
-                     "web-link")))
+                 (cond
+                   ((web--image-url? (car (cdr (cdr l)))) "img-embed")
+                   ((web--date-link? l) "web-date")
+                   (else "web-link"))))
          (or (buffer-local buf 'web-links) '()))))
+
+(define (web--meta-ranges text)
+  (let loop ((lines (string-split text "\n"))
+             (pos 0)
+             (ranges '()))
+    (if (null? lines)
+        (reverse ranges)
+        (let* ((line (car lines))
+               (len (string-byte-length line))
+               (next (+ pos len 1))
+               (offset (web--meta-offset line)))
+          (loop (cdr lines)
+                next
+                (if offset
+                    (cons (list (+ pos offset) (+ pos len) "web-meta") ranges)
+                    ranges))))))
+
+(define (web--apply-meta-faces! buf)
+  (overlay-set! buf 'web-meta
+    (web--meta-ranges (buffer-text buf))))
+
+(define *web--article-separator* "AIMAX-ARTICLE-SEPARATOR")
+
+(define (web--article-separator-ranges text)
+  (let loop ((lines (string-split text "\n"))
+             (pos 0)
+             (ranges '()))
+    (if (null? lines)
+        (reverse ranges)
+        (let* ((line (car lines))
+               (len (string-byte-length line))
+               (next (+ pos len 1)))
+          (loop (cdr lines)
+                next
+                (if (equal? line *web--article-separator*)
+                    (cons (list pos (+ pos len) "web-separator") ranges)
+                    ranges))))))
+
+(define (web--apply-separator-faces! buf)
+  (overlay-set! buf 'web-separator
+    (web--article-separator-ranges (buffer-text buf))))
 
 (define (web--declare-cache! buf)
   (cache-declare! buf
@@ -584,6 +678,8 @@
                 'line-height writing-line-height)))
       (web--install-keys! buf)
       (web--apply-link-faces! buf)
+      (web--apply-meta-faces! buf)
+      (web--apply-separator-faces! buf)
       (web--declare-cache! buf)
       (web--update-modeline! buf)
       ;; a restored page draws its saved text; only a stale one refetches
@@ -652,14 +748,15 @@ C-s searches to any link.")
 ;; next agent before they rebuild what was already decided
 (catalog-register! 'note 'custom-site-parser
   (string-append
-    "Substack now uses the first site-specific reader. "
-    "The parser selects semantic Note and Post article nodes before pandoc, "
-    "so the signed-in feed omits navigation, suggestions, and subscriptions. "
-    "Other sites still use readable, pandoc, and the table fallback. "
-    "A public parser registry does not exist yet.")
+    "Use XSLT for site-specific parsers; do not add a Scheme wrapper for a transform-only parser. "
+    "Put the stylesheet under web/parsers. "
+    "Add (BASE-URL STYLESHEET KIND) to *web--xslt-sites*; KIND becomes the modeline reading name. "
+    "web--xslt-command runs xsltproc --html before pandoc. "
+    "Preserve useful links, content images, and semantic text in transformed HTML. "
+    "Unregistered sites and short transform outputs continue through readable and page fallbacks.")
   'domain 'web
   'effects '(pure)
-  'use "browse https://substack.com; web--convert-html selects feed articles")
+  'use "create web/parsers/example.xsl; add (\"https://example.com\" \"example.xsl\" \"article\") to *web--xslt-sites*")
 
 (public! 'browse
   "(browse URL) — read URL as text in its own tab buffer (*browse:host/page*); in a browse buffer it navigates in place")

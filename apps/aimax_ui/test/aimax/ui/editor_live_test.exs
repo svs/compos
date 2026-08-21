@@ -171,6 +171,30 @@ defmodule Aimax.Ui.EditorLiveTest do
     assert String.valid?(html)
   end
 
+  test "an avatar image keeps its layout class and clean source", %{conn: conn} do
+    buf = Aimax.Core.Editor.current_buffer()
+    url = "https://images.example/avatar.jpeg"
+
+    Aimax.Core.Buffer.append(
+      buf,
+      url <> "#aimax-avatar Alice · Aug 3",
+      source: {:agent, "test"}
+    )
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(
+        ~s{(overlay-set! "#{buf}" 'zz-avatar (list (list 0 #{byte_size(url <> "#aimax-avatar")} "img-embed")))}
+      )
+
+    {:ok, view, _} = live(conn, "/")
+    html = render(view)
+    assert html =~ "img-avatar"
+    assert html =~ "align-items: flex-end"
+    assert html =~ ~s(src="#{url}")
+    refute html =~ "#aimax-avatar"
+    assert html =~ "Alice · Aug 3"
+  end
+
   # Every dired test read the buffer text, so all of them passed while the
   # window showed nothing. The buffer kept 'render-mode "blocks" from the
   # mode before it, and a leaf that says "blocks" draws cards, not lines.

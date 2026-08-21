@@ -19,7 +19,8 @@
 ;;;
 ;;; Keys (buffer-local):
 ;;;   n/p next/previous entry · RET visit the entry · TAB fold the day
-;;;   g refresh · q quit · C-c C-v the plain listing
+;;;   t or C-c C-t cycle TODO · g refresh · q quit
+;;;   C-c C-v the plain listing
 
 (domain! 'writing)
 (effects! '(read))
@@ -458,6 +459,24 @@
            (day (agenda--day-at buf (agenda--line-number buf (point)))))
       (if day (agenda--toggle-day! buf day) (message "no day here")))))
 
+(define-command "agenda-todo" "Cycle the TODO state of the entry at point"
+  (lambda ()
+    (let* ((agenda (current-buffer))
+           (hit (agenda--entry-at agenda
+                  (agenda--line-number agenda (point)))))
+      (if (not hit)
+          (message "no entry here")
+          (let ((file (cadr hit)) (pos (caddr hit)))
+            ;; Visit the file so unsaved task changes stay in its buffer.
+            (visit file)
+            (let ((state (morg-toggle-todo-at! file pos)))
+              (switch-to-buffer! agenda)
+              (agenda--render! agenda)
+              (if state
+                  (message (if (equal? state "NONE")
+                               "TODO state cleared" state))
+                  (message "entry is not on a heading"))))))))
+
 (define-command "agenda-refresh" "Re-read the agenda files"
   (lambda () (agenda--render! (current-buffer))))
 
@@ -495,6 +514,8 @@
   (local-remap! "previous-line" "agenda-prev")
   (local-set-key "TAB" "agenda-toggle-day")
   (local-set-key "RET" "agenda-visit")
+  (local-set-key "t" "agenda-todo")
+  (local-set-key "C-c C-t" "agenda-todo")
   (local-set-key "g" "agenda-refresh")
   (local-set-key "q" "quit-window")
   (local-set-key "C-c C-v" "agenda-toggle-view"))
@@ -515,7 +536,7 @@
       (agenda--render! buf))))
 
 (mode-doc! "morg-agenda-mode"
-  "The week from your morg files, as day cards. `n` and `p` step over entries, `TAB` folds a day, and `RET` opens the entry's file. `g` re-reads the files. `C-c C-v` shows the plain listing.")
+  "The week from your morg files, as day cards. `n` and `p` step over entries. `TAB` folds a day. `RET` opens an entry. `t` cycles its TODO state. `g` re-reads the files. `C-c C-v` shows the plain listing.")
 
 (define-command "morg-agenda" "Show the agenda: dated entries from your morg files"
   (lambda ()

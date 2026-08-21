@@ -5,6 +5,7 @@ This file is a live demo. Open it in the editor and press the keys.
 - `TAB` on a heading folds its subtree. `TAB` again opens it.
 - `TAB` on a fence (or inside a block) folds the code block.
 - `S-TAB` folds the whole file to an overview.
+- `C-c C-t` on a heading cycles no state, `TODO`, and `DONE`.
 - `C-c C-c` inside a code block runs it. The output lands in a
   `result` fence under the block. Run it again and the result is
   replaced, not appended.
@@ -21,7 +22,17 @@ survives a daemon restart, because it lives in a buffer-local.
 Subtrees nest the way org subtrees nest. A level-3 heading folds
 inside its level-2 parent.
 
-## 2. Run a shell block
+## 2. TODO states and the agenda
+
+Put point on this heading and press `C-c C-t`. `M-x morg-agenda` shows
+dated headings from `morg-agenda-files`. Press `t` on an agenda entry
+to cycle the same state.
+
+### TODO Review the Morg agenda <2026-08-21>
+
+The agenda uses timestamps in the text. It does not require a calendar UI.
+
+## 3. Run a shell block
 
 Point anywhere in the block, then `C-c C-c`:
 
@@ -30,7 +41,7 @@ date "+%Y-%m-%d %H:%M"
 uname -sm
 ```
 
-## 3. Run a scheme block
+## 4. Run a scheme block
 
 A scheme block does not go to a subprocess. The editor's own
 interpreter evaluates it, so it can talk to the editor:
@@ -41,7 +52,7 @@ interpreter evaluates it, so it can talk to the editor:
 
 The result below tells you how many buffers this daemon holds.
 
-## 4. Run an elixir block
+## 5. Run an elixir block
 
 ```elixir
 defmodule MorgDemo do
@@ -56,7 +67,7 @@ IO.puts(Enum.map_join(0..10, " ", &MorgDemo.fib/1))
 This block also shows the highlight: `defmodule`, `def`, and the
 string render with the same theme faces a real elixir buffer uses.
 
-## 5. Errors are results too
+## 6. Errors are results too
 
 Stderr folds into the result block, so a failing run explains itself:
 
@@ -64,7 +75,7 @@ Stderr folds into the result block, so a failing run explains itself:
 ls /no/such/directory
 ```
 
-## 6. What morg does not misread
+## 7. What morg does not misread
 
 Inline markup still works: `code`, **bold**, _italic_, and a
 [link](https://example.com). And a hash inside a fence is code, not
@@ -75,7 +86,7 @@ a heading — this block folds with its section:
 echo "the scan carries fence state through the walk"
 ```
 
-## 7. Result blocks
+## 8. Result blocks
 
 A `result` fence is inert. `C-c C-c` inside one refuses to run it.
 A result is replaced only when it sits directly under its source

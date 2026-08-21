@@ -516,6 +516,12 @@
 
       ((equal? type 'tool-call)
        (chat-activity! buf (string-append "tool · " (agent-tool-title e)))
+       ;; code.scm listens: the first tool call that edits code turns the
+       ;; chat into a coding session (code-agent-mode)
+       (when (boundp (quote code-agent-note-tool!))
+         (code-agent-note-tool! buf (agent-tool-title e)
+                                (or (plist-get e 'kind) "")
+                                (agent-tool-input-text e)))
        (let ((title (agent-tool-title e)))
          (let ((start (agent-render! slug
                         (string-append "\n▸ " (plist-get e 'kind) " · " title "\n")
@@ -674,7 +680,11 @@
                               "k tokens: M-x chat-compact")
                "")))
        (when (boundp (quote workspace-finish-reminder!))
-         (workspace-finish-reminder! buf slug)))
+         (workspace-finish-reminder! buf slug))
+       ;; code.scm listens: a pending coding-preset switch applies between
+       ;; turns, so the restart cannot kill the turn that triggered it
+       (when (boundp (quote code-agent-apply-pending!))
+         (code-agent-apply-pending! buf)))
 
       ((equal? type 'error)
        (chat-activity! buf #f)
@@ -1091,12 +1101,18 @@
 ;; what the transcript renders and what the record keeps as the turn
 (define (agent-send-msg! slug raw)
   (let* ((buf (agent-buf slug))
+         ;; a one-shot note — a skill body a mode pushed — rides the next
+         ;; message exactly once, then clears
+         (once (or (buffer-local buf 'chat-note-once) ""))
          ;; what the user is looking at in the other windows — "this" works
          ;; — and, with tools off, the group's live text. Both ride the
          ;; MESSAGE, never the system prompt: everything above this turn is
          ;; already cached, and an edit must not cost that cache.
-         (msg (string-append (chat-context-block buf)
-                             (editor-context-preamble buf) raw)))
+         (msg (string-append
+                (if (equal? once "") "" (string-append once "\n\n"))
+                (chat-context-block buf)
+                (editor-context-preamble buf) raw)))
+    (buffer-set-local! buf 'chat-note-once #f)
     (if (buffer-local buf 'agent-seed-context)
         (begin
           (buffer-set-local! buf 'agent-seed-context #f)
@@ -1434,7 +1450,14 @@
 ;; it to the adapter command line (codex -c model=...), otherwise it rides
 ;; the anthropic env pair. Connectors that offer neither stay untouched.
 (define (agent-resolve-config opts)
-  (let ((conf (agent-resolve-config* opts)))
+  (let* ((conf0 (agent-resolve-config* opts))
+         ;; a codex thread runs in a sanitized CODEX_HOME so the user's
+         ;; own ~/.codex config and skills never reach it (skills.scm,
+         ;; which loads after this file)
+         (conf (if (and (equal? (plist-get conf0 'backend) "codex-app-server")
+                        (boundp (quote codex-config-with-env)))
+                   (codex-config-with-env conf0)
+                   conf0)))
     ;; ACP threads get exactly the servers their presets name. The editor's
     ;; own tools are the `aimax` preset, not an implicit exception. The
     ;; direct lane needs no server config: it reads the same preset surface

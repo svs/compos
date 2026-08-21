@@ -124,11 +124,16 @@
 
 (define (chat-tool-system buf)
   (let* ((aimax? (chat-aimax-tools? buf))
-         (note (mcp-system-note (chat-remote-servers buf))))
-    (cond ((and aimax? (not (equal? note "")))
-           (string-append *llm-system* "\n\n" note))
-          (aimax? *llm-system*)
-          (else note))))
+         (note (mcp-system-note (chat-remote-servers buf)))
+         (base (cond ((and aimax? (not (equal? note "")))
+                      (string-append *llm-system* "\n\n" note))
+                     (aimax? *llm-system*)
+                     (else note)))
+         ;; the skill index (packages/skills.scm, loads after this file)
+         ;; rides here — the one system-prompt carrier every lane shares.
+         ;; Only a chat that holds eval-scheme can load a skill.
+         (sk (if (and aimax? (boundp (quote skills-note))) (skills-note) "")))
+    (if (equal? sk "") base (string-append base "\n\n" sk))))
 
 ;; Which LLM surface does a preset command act on? The shared LLM session
 ;; layer owns this configuration; chat-mode and inline llm-mode are its UIs.

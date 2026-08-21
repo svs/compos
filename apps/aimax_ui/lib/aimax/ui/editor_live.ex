@@ -1181,7 +1181,15 @@ defmodule Aimax.Ui.EditorLive do
   defp seg(%{cls: cls, txt: txt} = assigns)
        when is_binary(cls) and is_binary(txt) do
     if cls =~ "img-embed" and String.starts_with?(txt, "http") do
-      ~H|<img src={@txt} class="img-embed" loading="lazy" />|
+      avatar? = String.ends_with?(txt, "#aimax-avatar")
+
+      assigns =
+        assign(assigns,
+          src: if(avatar?, do: String.trim_trailing(txt, "#aimax-avatar"), else: txt),
+          image_class: if(avatar?, do: "img-embed img-avatar", else: "img-embed")
+        )
+
+      ~H|<img src={@src} class={@image_class} loading="lazy" />|
     else
       ~H|<span class={@cls}>{@txt}</span>|
     end

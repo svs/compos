@@ -34,8 +34,11 @@ defmodule Aimax.Core.Agent.Transport.Port do
           []
 
         env ->
-          # from scheme this is a list of (name value) pairs, not tuples
+          # from scheme this is a list of (name value) pairs, not tuples;
+          # a #f value deletes the inherited variable from the child
           Enum.map(env, fn
+            {k, false} -> {to_charlist(k), false}
+            [k, false] -> {to_charlist(k), false}
             {k, v} -> {to_charlist(k), to_charlist(v)}
             [k, v] -> {to_charlist(k), to_charlist(v)}
           end)

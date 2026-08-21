@@ -252,8 +252,23 @@ defmodule Aimax.Ui.Layouts do
           .no-nums .linenum { display: none; }
           /* an img-embed seg: the picture, in the text's place */
           .line img.img-embed {
-            display: block; max-width: min(100%, 640px); height: auto;
-            border-radius: 4px; margin: 6px 0;
+            display: inline-block; max-width: min(100%, 640px); height: auto;
+            border-radius: 4px; margin: 6px 8px 6px 0; vertical-align: middle;
+          }
+          .line-content:has(> img.img-avatar) {
+            display: inline-flex; align-items: flex-end;
+          }
+          .line img.img-avatar {
+            width: 36px; height: 36px; flex: 0 0 36px; object-fit: cover;
+            border-radius: 50%; margin: 0 8px 0 0; vertical-align: bottom;
+          }
+          .line-content:has(> .f-web-separator) {
+            display: flex; justify-content: center;
+          }
+          .line .f-web-separator {
+            display: block; width: 50%; height: 1px; margin: 16px 0;
+            color: transparent; font-size: 0;
+            background: linear-gradient(90deg, transparent, var(--dim-fg), transparent);
           }
           /* --- writing-mode: centered measure, quiet chrome ---------------- */
           .window.writing .buf { padding-top: clamp(20px, 6vh, 90px); }

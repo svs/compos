@@ -5015,6 +5015,7 @@
   '(group group-meta group-layout group-noise agent-connector agent-model agent-effort
     chat-presets chat-permission-mode render-mode default-directory
     agent-permission-profile window-class header-line
+    code-agent-saved
     workspace-id workspace-name workspace-root workspace-project-root
     workspace-backend workspace-daemon workspace-llm-defaults
     workspace-isolation-choice))
@@ -5031,6 +5032,9 @@
     ;; the turn this chat last named itself on: a reset starts a new
     ;; conversation, which must name itself again from its first turn
     chat-renamed-at
+    ;; a one-shot note for the next send (a skill body a mode pushed):
+    ;; undelivered it must survive a restart, and a reset drops it
+    chat-note-once
     agent-saved-mark agent-marker-bytes))
 
 ;; PROCESS state — mirrors a live runtime, so it is always stale after a
@@ -5044,7 +5048,8 @@
     agent-turn-text agent-turn-any chat-compacting
     agent-models agent-mode agent-modes chat-mcp-dirty
     chat-history-pos chat-history-draft
-    agent-unstick agent-scroll-top))
+    agent-unstick agent-scroll-top
+    code-agent-switch-pending))
 
 (define (chat-clear-locals! buf keys)
   (for-each (lambda (k) (buffer-set-local! buf k #f)) keys))

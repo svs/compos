@@ -77,6 +77,48 @@ defmodule Aimax.MorgTest do
     assert {9, 17, "org-level-2"} in ovs
   end
 
+  test "C-c C-t cycles TODO, DONE, and no state" do
+    buf = morg_buffer("# task\n")
+    :ok = Buffer.goto(buf, 0)
+
+    press(["C-c", "C-t"])
+    assert Buffer.text(buf) == "# TODO task\n"
+    assert {2, 6, "org-todo"} in Buffer.overlays(buf)
+
+    press(["C-c", "C-t"])
+    assert Buffer.text(buf) == "# DONE task\n"
+    assert {2, 6, "org-done"} in Buffer.overlays(buf)
+
+    press(["C-c", "C-t"])
+    assert Buffer.text(buf) == "# task\n"
+    refute Enum.any?(Buffer.overlays(buf), fn {_, _, face} ->
+             face in ["org-todo", "org-done"]
+           end)
+  end
+
+  test "C-c C-t does not change a body line" do
+    text = "# task\nbody\n"
+    buf = morg_buffer(text)
+    :ok = Buffer.goto(buf, 8)
+
+    press(["C-c", "C-t"])
+    assert Buffer.text(buf) == text
+  end
+
+  test "TODO cycling keeps a folded task folded and undoes in one step" do
+    buf = morg_buffer("# task\nbody\n")
+    :ok = Buffer.goto(buf, 0)
+    press("TAB")
+    assert Buffer.hidden(buf) == [{6, 12}]
+
+    press(["C-c", "C-t"])
+    assert Buffer.text(buf) == "# TODO task\nbody\n"
+    assert Buffer.hidden(buf) == [{11, 17}]
+
+    press("C-/")
+    assert Buffer.text(buf) == "# task\nbody\n"
+  end
+
   test "TAB folds and unfolds the heading subtree at point" do
     buf = morg_buffer(fixture())
     :ok = Buffer.goto(buf, 0)

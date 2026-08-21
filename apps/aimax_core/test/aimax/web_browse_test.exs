@@ -16,6 +16,26 @@ defmodule Aimax.WebBrowseTest do
 
   defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
 
+  defp wait_until(fun, timeout_ms) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+
+    Stream.repeatedly(fn ->
+      case fun.() do
+        false ->
+          if System.monotonic_time(:millisecond) > deadline do
+            flunk("condition not met within #{timeout_ms}ms")
+          end
+
+          Process.sleep(25)
+          false
+
+        value ->
+          value
+      end
+    end)
+    |> Enum.find(& &1)
+  end
+
   # browse returns the tab's buffer name
   defp browse!(url), do: eval!(~s{(browse "#{url}")}) |> String.trim("\"")
 
@@ -106,6 +126,7 @@ defmodule Aimax.WebBrowseTest do
     assert Buffer.text(b) =~ "Second page"
     # the origin tab never moved
     assert Buffer.text(a) =~ "Front page"
+
     assert eval!(~s{(buffer-local "#{a}" 'browse-url)}) ==
              ~S["https://site.test/index.html"]
   end
@@ -152,6 +173,7 @@ defmodule Aimax.WebBrowseTest do
     press("M-<right>")
     press("M-<left>")
     assert eval!("*zz-nav-fetches*") == "2", "back/forward refetched"
+
     assert eval!(~s{(buffer-local "#{buf}" 'browse-url)}) ==
              ~S["https://site.test/index.html"]
   end
@@ -231,10 +253,85 @@ defmodule Aimax.WebBrowseTest do
     press("C-g")
   end
 
-  test "apropos finds the custom-parser design note" do
+  test "Substack keeps feed articles and groups reaction counts" do
+    assert eval!(~S{(web--xslt-site "https://substack.com/inbox")}) =~ "substack.xsl"
+    assert eval!(~S{(web--xslt-site "https://example.com")}) == "#f"
+
+    eval!(~S"""
+    (begin
+      (define *zz-substack-md* #f)
+      (web--convert-html
+        "https://substack.com/"
+        "<html><body><nav>Home Subscriptions Chat Activity Explore Dashboard</nav><main><div role='article' aria-label='Note'><img src='https://substackcdn.com/image/fetch/avatar.jpeg' alt='Alice avatar'><a href='/@alice'>Alice</a><a href='/@alice/note/c-1' title='Aug 3, 2026, 9:00 PM'>Aug 3</a><p>This is the first useful feed note. It contains enough text to remain above the parser confidence threshold.</p><img src='https://substackcdn.com/image/fetch/content-image.png' alt='A useful diagram'><p>The second paragraph proves that the selected article body survives conversion with its links and prose intact.</p><p>The third paragraph keeps this fixture representative of a real Substack feed item.</p><a href='https://alice.example/p/clickable-post'><img src='https://substackcdn.com/image/fetch/article-card.png' alt=''><div><a href='https://alice.example'>Alice publication</a><div>Clickable article title</div></div></a><img src='https://substackcdn.com/image/fetch/w_20,h_20/publication.png' sizes='20px' alt='Alice publication'><div class='actions'><button aria-label='Like'><svg></svg><span>34</span></button><button aria-label='Comment'><svg></svg><span>2</span></button><button aria-label='Restack'><svg></svg><span>3</span></button><button aria-label='Share'><svg></svg></button></div></div><div role='article' aria-label='Note'><a href='/@bob'>Bob</a><a href='/@bob/note/c-2'>Aug 4</a><p>This is the second useful feed note. It verifies that one separator appears between two semantic articles.</p></div><section><h2>People to follow</h2><p>Suggested Person</p></section></main></body></html>"
+        (lambda (md) (set! *zz-substack-md* md))))
+    """)
+
+    md =
+      wait_until(
+        fn ->
+          case eval!("*zz-substack-md*") do
+            "#f" -> false
+            value -> value
+          end
+        end,
+        5_000
+      )
+
+    assert md =~
+             "![](https://substackcdn.com/image/fetch/avatar.jpeg#aimax-avatar) [Alice](/@alice) · [Aug 3](/@alice/note/c-1) ♥ 34 💬 2 ↻ 3"
+
+    refute md =~ "Aug 3, 2026"
+    assert eval!(~S{(web--date-link? (list 0 5 "/@alice/note/c-1"))}) == "#t"
+
+    assert md =~ "first useful feed note"
+    assert md =~ "second useful feed note"
+    assert md =~ "[Clickable article title](https://alice.example/p/clickable-post)"
+
+    assert md =~
+             ~S|\n\n![](https://substackcdn.com/image/fetch/w_20,h_20/publication.png#aimax-avatar) Alice publication\n\n|
+
+    assert md =~ "Alice publication"
+
+    assert eval!(~S{(web--parse *zz-substack-md*)}) =~
+             "https://alice.example/p/clickable-post"
+
+    assert length(Regex.scan(~r/AIMAX-ARTICLE-SEPARATOR/, md)) == 1
+
+    assert eval!(~S{(web--article-separator-ranges "a\nAIMAX-ARTICLE-SEPARATOR\nb")}) ==
+             ~S[((2 25 "web-separator"))]
+
+    assert md =~ "https://substackcdn.com/image/fetch/content-image.png"
+    assert md =~ "![](https://substackcdn.com/image/fetch/avatar.jpeg#aimax-avatar)"
+    refute md =~ "Alice avatar"
+    assert md =~ "♥ 34"
+    assert md =~ "💬 2"
+    assert md =~ "↻ 3"
+    refute md =~ "\n34\n"
+    refute md =~ "\n2\n"
+    refute md =~ "\n3\n"
+    refute md =~ "Home Subscriptions"
+    refute md =~ "People to follow"
+    refute md =~ "Suggested Person"
+  end
+
+  test "apropos documents XSLT custom site parsers" do
     hits = eval!(~S{(apropos "custom parser")})
-    assert hits =~ "custom-site-parser"
-    assert hits =~ "browse-parse-functions"
+    assert hits =~ "do not add a Scheme wrapper"
+    assert hits =~ "*web--xslt-sites*"
+    assert hits =~ "xsltproc --html"
+    assert hits =~ "example.xsl"
+  end
+
+  test "adjacent distinct images survive empty-link normalization" do
+    assert eval!(
+             ~S{(web--fix-empty-links "![](https://img.test/a.png)![](https://img.test/b.png)")}
+           ) ==
+             ~S|"[https://img.test/a.png](https://img.test/a.png)[https://img.test/b.png](https://img.test/b.png)"|
+
+    assert eval!(
+             ~S{(web--fix-empty-links "![](https://img.test/a.png)![](https://img.test/a.png)")}
+           ) ==
+             ~S|"[https://img.test/a.png](https://img.test/a.png)[https://img.test/a.png](https://img.test/a.png)"|
   end
 
   test "the tidy pass drops heading marks and rules, and unescapes pandoc" do

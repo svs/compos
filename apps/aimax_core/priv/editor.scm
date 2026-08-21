@@ -1486,13 +1486,10 @@
 (define (preview-goto! win before after wb wa nth wn dir)
   (mouse-select-window! win)
   (set-mark! #f)
-  ;; A one-character word run matches almost anywhere in the file, and a
-  ;; wrong hit throws point into a far paragraph. No move is better.
   (let* ((text (buffer-text (current-buffer)))
          (from (point))
          (hit (or (preview--hit text before after nth dir from)
-                  (and (>= (string-byte-length (string-append wb wa)) 2)
-                       (preview--hit text wb wa wn dir from)))))
+                  (preview--hit text wb wa wn dir from))))
     (when hit (goto-char! hit))))
 (public! 'preview-goto!
   "(preview-goto! WIN BEFORE AFTER WB WA NTH WN DIR) — put point where a preview click or visual-line key landed"

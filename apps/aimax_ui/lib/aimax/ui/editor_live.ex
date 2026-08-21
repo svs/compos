@@ -1623,13 +1623,17 @@ defmodule Aimax.Ui.EditorLive do
   end
 
   defp preview_html("markdown", text, faces, _authored) do
+    fence_labels = markdown_fence_labels(text)
+
     body =
       text
+      |> markdown_preview_source()
       |> Earmark.as_ast(compact_output: false)
       |> case do
         {:ok, ast, _} -> ast
         {:error, ast, _} -> ast
       end
+      |> label_code_blocks(fence_labels)
       |> tag_llm_responses()
       |> embed_urls()
       |> Earmark.Transform.transform(compact_output: false)
@@ -1657,6 +1661,14 @@ defmodule Aimax.Ui.EditorLive do
     code{background:#{inset};padding:1px 4px;border-radius:2px}
     pre{background:#{inset};padding:10px 12px;border-left:3px solid #{accent};overflow-x:auto}
     pre code{background:none;padding:0}
+    .code-block{margin:1em 0;border:1px solid #{border};border-radius:6px;overflow:hidden;background:#{inset}}
+    .code-block-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:6px 10px;
+      border-bottom:1px solid #{border};color:#{dim};font:12px/1.4 "IBM Plex Mono",ui-monospace,Menlo,monospace}
+    .code-lang{margin-right:auto;color:#{accent};font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+    .code-action{white-space:nowrap}
+    .code-action kbd{padding:1px 4px;border:1px solid #{border};border-radius:3px;color:#{fg};background:#{bg}}
+    .code-action code{padding:0;color:#{fg};background:none}
+    .code-block pre{margin:0;border:0;border-radius:0}
     a,a:visited{color:#{link};text-decoration-thickness:1px;text-underline-offset:2px;
       text-decoration-color:color-mix(in srgb,currentColor 45%,transparent)}
     a:hover{text-decoration-color:currentColor}
@@ -1690,6 +1702,93 @@ defmodule Aimax.Ui.EditorLive do
     @keyframes ptb{0%,49%{opacity:1}50%,100%{opacity:0}}
     </style></head><body>#{body}</body></html>
     """
+  end
+
+  # Morg adds Org-style header arguments after a fenced block's language.
+  # Earmark accepts one language token only. It otherwise renders the whole
+  # fence as inline code. Keep the arguments in the buffer, but hide them
+  # from the preview parser so the body remains a real code block.
+  defp markdown_preview_source(text) do
+    Regex.replace(
+      ~r/^([ \t]*```[ \t]*[A-Za-z0-9_+.-]+)[ \t]+(?=:[A-Za-z])[^\r\n]*$/m,
+      text,
+      "\\1"
+    )
+  end
+
+  defp markdown_fence_labels(text) do
+    Regex.scan(
+      ~r/^[ \t]*```[ \t]*([A-Za-z0-9_+.-]+)([^\r\n]*)$/m,
+      text,
+      capture: :all_but_first
+    )
+    |> Enum.map(fn [language, arguments] ->
+      tangle =
+        case Regex.run(~r/:tangle[ \t]+([^ \t]+)/i, arguments, capture: :all_but_first) do
+          [target] -> if(String.downcase(target) == "no", do: nil, else: target)
+          _ -> nil
+        end
+
+      %{language: language, morg?: Regex.match?(~r/(^|\s):[A-Za-z]/, arguments), tangle: tangle}
+    end)
+  end
+
+  defp label_code_blocks(nodes, labels) when is_list(nodes) do
+    {nodes, _labels} = Enum.map_reduce(nodes, labels, &label_code_block/2)
+    nodes
+  end
+
+  defp label_code_block(
+         {"pre", _, [{"code", code_attrs, _, _}], _} = pre,
+         [%{language: language} = label | labels]
+       ) do
+    case List.keyfind(code_attrs, "class", 0) do
+      {"class", ^language} -> {code_block(pre, label), labels}
+      _ -> {pre, [label | labels]}
+    end
+  end
+
+  defp label_code_block({tag, attrs, children, meta}, labels) when is_list(children) do
+    {children, labels} = Enum.map_reduce(children, labels, &label_code_block/2)
+    {{tag, attrs, children, meta}, labels}
+  end
+
+  defp label_code_block(other, labels), do: {other, labels}
+
+  defp code_block(pre, label) do
+    actions =
+      if label.morg? do
+        run =
+          if String.downcase(label.language) in ~w(scheme sh bash zsh shell python py elixir exs js javascript node ruby) do
+            [{"span", [{"class", "code-action"}], [{"kbd", [], ["C-c C-c"], %{}}, " run"], %{}}]
+          else
+            []
+          end
+
+        tangle =
+          if label.tangle do
+            [
+              {"span", [{"class", "code-action"}],
+               [
+                 {"kbd", [], ["C-c C-x"], %{}},
+                 " tangle → ",
+                 {"code", [], [label.tangle], %{}}
+               ], %{}}
+            ]
+          else
+            []
+          end
+
+        run ++ tangle
+      else
+        []
+      end
+
+    header =
+      {"div", [{"class", "code-block-head"}],
+       [{"span", [{"class", "code-lang"}], [label.language], %{}} | actions], %{}}
+
+    {"div", [{"class", "code-block"}], [header, pre], %{}}
   end
 
   defp tag_llm_responses(nodes) when is_list(nodes), do: Enum.map(nodes, &tag_llm_response/1)

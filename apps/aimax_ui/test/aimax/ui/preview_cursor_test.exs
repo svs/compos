@@ -65,6 +65,36 @@ defmodule Aimax.Ui.PreviewCursorTest do
     assert html =~ "<code"
   end
 
+  test "Morg header arguments keep a fenced block in the Markdown preview" do
+    text = """
+    ```scheme :tangle examples/group-noise.scm
+    (define (group-noise-next noise)
+      noise)
+    ```
+    """
+
+    html = EditorLive.preview_doc("markdown", text, 0, @faces, false)
+
+    assert html =~ ~s(<div class="code-block-head">)
+    assert html =~ ~r/<span class="code-lang">\s*scheme\s*<\/span>/
+    assert html =~ ~r/<kbd>\s*C-c C-c\s*<\/kbd>\s*run/
+
+    assert html =~
+             ~r/<kbd>\s*C-c C-x\s*<\/kbd>\s*tangle → <code>examples\/group-noise.scm<\/code>/
+
+    assert html =~ ~s(<pre><code class="scheme">)
+    assert html =~ "(define (group-noise-next noise)\n  noise)"
+    refute html =~ ~s(class="inline")
+  end
+
+  test "a plain fenced block names its language without Morg actions" do
+    html = EditorLive.preview_doc("markdown", "```elixir\n:ok\n```\n", 0, @faces, false)
+
+    assert html =~ ~r/<span class="code-lang">\s*elixir\s*<\/span>/
+    refute html =~ "C-c C-c"
+    refute html =~ "C-c C-x"
+  end
+
   test "llm-mode response overlays render as their own formatted blocks" do
     text = "Prompt\n\nAn **answer** here.\nWith another line.\n"
     start = byte_size("Prompt\n\n")

@@ -1,0 +1,1 @@
+((source "reader" severity "note" line 44 match "I want one view of groups and projects, a" title "one view of both? no. i want to know other groups and their buffers so i can pull them" who "you" when "now" id "a1" state "open"))

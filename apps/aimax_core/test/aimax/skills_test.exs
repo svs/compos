@@ -46,6 +46,11 @@ defmodule Aimax.SkillsTest do
     assert note =~ "Load a skill with eval-scheme"
   end
 
+  test "skills-note-without hides an active skill from the on-demand index" do
+    note = eval!(~s{(skills-note-without "code-editing")})
+    refute note =~ ~s{(skill \\"code-editing\\")}
+  end
+
   test "the chat system prompt carries the index for an aimax-tools chat" do
     buf = "*sk-chat-#{System.unique_integer([:positive])}*"
     eval!(~s{(buffer-create "#{buf}")})
@@ -77,6 +82,17 @@ defmodule Aimax.SkillsTest do
     eval!("(skills-scan!)")
     assert eval!("(skills)") =~ "zz-user-skill"
     assert eval!(~s{(skill "zz-user-skill")}) =~ "The user's own instructions."
+
+    File.write!(Path.join(dir, "SKILL.md"), """
+    ---
+    name: zz-user-skill
+    description: A user skill for the test.
+    ---
+
+    Changed on disk after the scan.
+    """)
+
+    assert eval!(~s{(skill "zz-user-skill")}) =~ "Changed on disk after the scan."
   end
 
   test "codex-config-with-env points codex at the sanitized home and scrubs keys" do

@@ -4826,7 +4826,7 @@
                     (if (boundp (quote agent-worktree-opts))
                         (agent-worktree-opts buf slug opts)
                         (or opts '()))
-                    (list 'connector connector
+                    (list 'connector connector 'buffer buf
                           'presets (if (boundp (quote chat-presets-of))
                                        (chat-presets-of buf)
                                        '()))

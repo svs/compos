@@ -1,6 +1,6 @@
 ---
 name: code-editing
-description: Edit source code in editor buffers with the structural code tools. Load before the first code edit.
+description: Edit source code in live ai-max buffers instead of the filesystem sandbox. Load before the first code edit.
 ---
 
 # Edit code in ai-max buffers

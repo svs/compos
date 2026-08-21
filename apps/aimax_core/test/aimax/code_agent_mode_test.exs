@@ -124,17 +124,40 @@ defmodule Aimax.CodeAgentModeTest do
     assert Buffer.get_local(chat, "agent-model") == "gpt-5.6-sol"
   end
 
-  test "enabling the mode pushes the code-editing skill onto the next message" do
+  test "enabling the mode puts one code-editing load instruction in each system prompt" do
     chat = fresh_chat("*cam-skill-#{System.unique_integer([:positive])}*")
 
     assert Buffer.get_local(chat, "chat-note-once") in [nil, false]
 
     eval!(~s{(enable-minor-mode! "#{chat}" "code-agent-mode")})
 
-    note = Buffer.get_local(chat, "chat-note-once")
-    assert note =~ ~s{(skill "code-editing")}
-    assert note =~ "code-outline"
-    assert note =~ "smallest edit"
+    first = eval!(~s{(chat-tool-system "#{chat}")}) |> Jason.decode!()
+    second = eval!(~s{(chat-tool-system "#{chat}")}) |> Jason.decode!()
+
+    assert first =~ "CODE-EDITING SKILL"
+    assert first =~ "instead of the filesystem sandbox"
+    assert first =~ "load it once"
+    assert first =~ ~s{(skill "code-editing")}
+    assert length(Regex.scan(~r/\(skill "code-editing"\)/, first)) == 1
+    assert second == first
+    assert Buffer.get_local(chat, "chat-note-once") in [nil, false]
+
+    acp =
+      eval!("""
+      (let* ((conf (agent-resolve-config
+                     (list 'connector "codex-app-server" 'buffer "#{chat}"
+                           'presets '(aimax))))
+             (meta (plist-get conf 'meta))
+             (system (plist-get meta 'systemPrompt)))
+        (plist-get system 'append))
+      """)
+      |> Jason.decode!()
+
+    assert acp =~ "CODE-EDITING SKILL"
+    assert acp =~ "instead of the filesystem sandbox"
+    assert acp =~ "load it once"
+    assert acp =~ ~s{(skill "code-editing")}
+    assert length(Regex.scan(~r/\(skill "code-editing"\)/, acp)) == 1
   end
 
   test "disabling the mode restores the connector, model, and presets" do
@@ -157,6 +180,7 @@ defmodule Aimax.CodeAgentModeTest do
     assert Buffer.get_local(chat, "agent-effort") == "high"
     assert Buffer.get_local(chat, "chat-presets") == [sym: "project"]
     assert Buffer.get_local(chat, "code-agent-saved") == false
+    refute eval!(~s{(chat-tool-system "#{chat}")}) =~ "CODE-EDITING SKILL"
   end
 
   test "restore re-runs setup without undoing a model the user chose meanwhile" do

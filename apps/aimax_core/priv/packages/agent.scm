@@ -1665,9 +1665,10 @@
         conf
         (agent-config-with-primer
           (agent-config-with-mcp-note
-            (append conf
-              (list 'mcp-servers
-                    (presets-acp-servers (or (plist-get conf 'presets) '())))))))))
+            (agent-config-with-code-note
+              (append conf
+                (list 'mcp-servers
+                      (presets-acp-servers (or (plist-get conf 'presets) '()))))))))))
 
 ;; ...and the sentence that says the other servers exist. An agent holds
 ;; the preset's tools and nothing else, so a server outside the preset is
@@ -1707,6 +1708,14 @@
     (if (equal? note "")
         conf
         (agent-config-append-system conf note))))
+
+;; An ACP session receives this standing note when code-agent-mode owns its chat.
+(define (agent-config-with-code-note conf)
+  (let ((buf (plist-get conf 'buffer)))
+    (if (and buf (boundp (quote code-agent-system-note)))
+        (let ((note (code-agent-system-note buf)))
+          (if (equal? note "") conf (agent-config-append-system conf note)))
+        conf)))
 
 (define (agent-resolve-config* opts)
   (let* ((cname (or (plist-get opts 'connector) *default-connector*))

@@ -586,7 +586,7 @@
 
 (category! 'syntax)
 (domain! 'code)
-(effects! '(read))
+(effects! '(pure))
 
 ;; a definition's first line, trimmed — the name and doc fall back to it
 (define (code--head buf n)
@@ -1087,12 +1087,10 @@
 ;;; --- code-agent-mode: the chat that writes code -------------------------------
 ;;; code-mode starts from a source buffer. code-agent-mode starts from the
 ;;; CHAT: agent.scm reports every tool call to code-agent-note-tool!, and
-;;; the first call that edits code turns the mode on. The mode pushes the
-;;; code-editing skill (priv/skills, packages/skills.scm) once onto the
-;;; next message, and moves the chat to the coding preset — a configurable
-;;; connector and model. A connector change restarts the session, so the
-;;; switch waits for the turn to end: the restart must not kill the turn
-;;; that triggered it.
+;;; the first call that edits code turns the mode on. The mode prompts the chat
+;;; to load code-editing once. It also moves the chat to the coding preset.
+;;; A connector change restarts the session. The switch waits until the turn
+;;; ends, so it does not kill work.
 ;;;
 ;;; M-x code-agent-mode toggles it by hand. Knobs live in the 'code group.
 
@@ -1209,16 +1207,25 @@
       (unless (equal? merged cur)
         (buffer-set-local! buf 'chat-presets merged)
         (buffer-set-local! buf 'chat-mcp-dirty #t)))
-    ;; the coding instructions are the code-editing skill, pushed once
-    ;; onto the next message — never the system prompt (skills.scm loads
-    ;; after this file)
-    (when (boundp (quote skill))
-      (buffer-set-local! buf 'chat-note-once
-        (string-append "Working instructions — (skill \"code-editing\"):\n\n"
-                       (skill "code-editing"))))
     (if (buffer-local buf 'chat-turn-active)
         (buffer-set-local! buf 'code-agent-switch-pending #t)
         (code-agent--switch-now! buf))))
+
+;; mcp.scm calls this at each turn start. skills.scm loads after this file.
+(define (code-agent-system-note buf)
+  (if (minor-mode-on? buf "code-agent-mode")
+      (string-append
+        "CODE-EDITING SKILL\n"
+        "Use it to edit live ai-max buffers instead of the filesystem sandbox.\n"
+        "Before the first code edit, load it once with eval-scheme: "
+        "(skill \"code-editing\").\n"
+        "If this conversation already contains that tool result, do not load it again.")
+      ""))
+
+(effects! '(read))
+(public! 'code-agent-system-note
+  "(code-agent-system-note BUF) — the standing code-editing instructions for a code-agent-mode chat")
+(effects! '(write))
 
 (define (code-agent--saved buf key)
   (let ((hit (assoc key (or (buffer-local buf 'code-agent-saved) '()))))
@@ -1274,7 +1281,7 @@
               (message "code-agent-mode disabled"))))))
 
 (mode-doc! "code-agent-mode"
-  "The coding chat surface. The mode turns on when the agent edits code. It pushes the code-editing skill and moves the chat to the coding preset.")
+  "The coding chat surface. The mode turns on when the agent edits code. It prompts one code-editing load and moves to the coding preset.")
 
 (public! 'code-agent-mode
   "Toggle the coding preset and prompts for the current chat")

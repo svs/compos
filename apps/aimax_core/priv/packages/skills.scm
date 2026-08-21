@@ -98,27 +98,47 @@
 ;; skills-note runs on the turn-start path, and per-call allocation there
 ;; loses the cross-lane flush race (see agent-resolve-config).
 (define *skills-note* "")
+(define *skills-notes-without* '())
 
 (define (skills-note) *skills-note*)
 
+(define (skills-note-format entries)
+  (if (null? entries)
+      ""
+      (string-append
+        "SKILLS — working instructions on demand:\n"
+        (string-join
+          (map (lambda (s)
+                 (string-append "  (skill \"" (car s) "\")  " (cadr s)))
+               (reverse entries))
+          "\n")
+        "\nLoad a skill with eval-scheme before you start its task.")))
+
 (define (skills-note-build!)
-  (set! *skills-note*
-    (if (null? *skills*)
-        ""
-        (string-append
-          "SKILLS — working instructions on demand:\n"
-          (string-join
-            (map (lambda (s)
-                   (string-append "  (skill \"" (car s) "\")  " (cadr s)))
-                 (reverse *skills*))
-            "\n")
-          "\nLoad a skill with eval-scheme before you start its task."))))
+  (set! *skills-note* (skills-note-format *skills*))
+  ;; Build contextual variants once. Turn-start reads must not allocate them.
+  (set! *skills-notes-without*
+    (map (lambda (excluded)
+           (list (car excluded)
+                 (skills-note-format
+                   (remove (lambda (s) (equal? (car s) (car excluded)))
+                           *skills*))))
+         *skills*)))
+
+(define (skills-note-without name)
+  (let* ((n (if (symbol? name) (symbol->string name) name))
+         (hit (assoc n *skills-notes-without*)))
+    (if hit
+        (cadr hit)
+        *skills-note*)))
 
 (skills-scan!)
 
 (public! 'skills "(skills) — every skill as (NAME DESCRIPTION)")
 (public! 'skill "(skill NAME) — the working instructions of one skill")
 (public! 'skills-note "(skills-note) — the one-line-per-skill index a system prompt carries")
+(public! 'skills-note-without
+  "(skills-note-without NAME) — the cached skill index without one active skill")
 (effects! '(write))
 (public! 'skills-scan!
   "(skills-scan!) — rescan priv/skills and ~/.aimax/skills into the catalog")

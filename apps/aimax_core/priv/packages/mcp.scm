@@ -132,8 +132,22 @@
          ;; the skill index (packages/skills.scm, loads after this file)
          ;; rides here — the one system-prompt carrier every lane shares.
          ;; Only a chat that holds eval-scheme can load a skill.
-         (sk (if (and aimax? (boundp (quote skills-note))) (skills-note) "")))
-    (if (equal? sk "") base (string-append base "\n\n" sk))))
+         (code-active?
+           (and aimax? (minor-mode-on? buf "code-agent-mode")))
+         (sk (if (and aimax? (boundp (quote skills-note)))
+                 (if (and code-active? (boundp (quote skills-note-without)))
+                     (skills-note-without "code-editing")
+                     (skills-note))
+                 ""))
+         (with-skills (if (equal? sk "") base (string-append base "\n\n" sk)))
+         ;; code-agent-mode keeps one on-demand load instruction in the prompt.
+         (code-note
+           (if code-active?
+               (code-agent-system-note buf)
+               "")))
+    (if (equal? code-note "")
+        with-skills
+        (string-append with-skills "\n\n" code-note))))
 
 ;; Which LLM surface does a preset command act on? The shared LLM session
 ;; layer owns this configuration; chat-mode and inline llm-mode are its UIs.

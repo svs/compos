@@ -604,14 +604,15 @@ C-s searches to any link.")
 (catalog-register! 'note 'custom-site-parser
   (string-append
     "Per-site custom web parsers (a Hacker News parser, a site-specific "
-    "reader) are a DESIGN, not code. The generic reader — readable, "
-    "pandoc, the table flatten — has read every site well so far, Hacker "
-    "News included. When a site truly needs one: add a defcustom "
-    "browse-parse-functions, a list of names with (hn) as the default; "
-    "each NAME calls browse-parse-NAME with (URL HTML) and answers "
-    "markdown, or #f to pass; web--pipeline tries the list before the "
-    "generic conversion. Users add their own from init.scm. Decided "
-    "2026-08-21: not built while the generic reader serves.")
+    "reader) do NOT exist — no parser is written, none is registered. "
+    "The generic reader — readable, pandoc, the table flatten — has read "
+    "every site well so far, Hacker News included. This note is the "
+    "agreed DESIGN for the day a site truly needs one: add a defcustom "
+    "browse-parse-functions, a list of names; each NAME calls "
+    "browse-parse-NAME with (URL HTML) and answers markdown, or #f to "
+    "pass; web--pipeline tries the list before the generic conversion. "
+    "Users add their own from init.scm. Decided 2026-08-21: not built "
+    "while the generic reader serves.")
   'domain 'web
   'effects '(pure)
   'use "a design note — the seam would live in packages/web.scm, in web--pipeline")

@@ -87,13 +87,7 @@ defmodule Aimax.Core.Agent.Backend do
         {:error, "no llm-session-context-fn! registered"}
 
       fun ->
-        case Aimax.Core.Session.call_fn(
-               fun,
-               [slug, display],
-               nil,
-               Aimax.Core.Agent.lane(slug),
-               "context #{slug}"
-             ) do
+        case call_context(fun, slug, display, 40) do
           {:ok, plist} ->
             {:ok,
              %{
@@ -106,6 +100,35 @@ defmodule Aimax.Core.Agent.Backend do
           {:error, msg} ->
             {:error, "the chat could not say what this turn should send: #{msg}"}
         end
+    end
+  end
+
+  # The context call is cross-lane: the eval that created a closure it
+  # touches may still be running, so its frames are not yet flushed to the
+  # shared store ("stale environment frame", env.ex). The ref heals when
+  # that eval exits — and reading the context is idempotent — so wait and
+  # retry instead of failing the turn.
+  defp call_context(fun, slug, display, retries) do
+    result =
+      Aimax.Core.Session.call_fn(
+        fun,
+        [slug, display],
+        nil,
+        Aimax.Core.Agent.lane(slug),
+        "context #{slug}"
+      )
+
+    case result do
+      {:error, msg} when retries > 0 ->
+        if is_binary(msg) and msg =~ "stale environment frame" do
+          Process.sleep(50)
+          call_context(fun, slug, display, retries - 1)
+        else
+          result
+        end
+
+      _ ->
+        result
     end
   end
 

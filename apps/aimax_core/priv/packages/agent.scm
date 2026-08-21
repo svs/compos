@@ -1450,12 +1450,17 @@
 ;; it to the adapter command line (codex -c model=...), otherwise it rides
 ;; the anthropic env pair. Connectors that offer neither stay untouched.
 (define (agent-resolve-config opts)
+  ;; a codex thread runs in a sanitized CODEX_HOME so the user's own
+  ;; ~/.codex config and skills never reach it (skills.scm, which loads
+  ;; after this file). The backend test walks the plist with the member
+  ;; builtin: this fn is on the turn-start path, where a plist-get call
+  ;; allocates a loop frame that loses the cross-lane flush race
+  ;; ("stale environment frame") — see env.ex.
   (let* ((conf0 (agent-resolve-config* opts))
-         ;; a codex thread runs in a sanitized CODEX_HOME so the user's
-         ;; own ~/.codex config and skills never reach it (skills.scm,
-         ;; which loads after this file)
-         (conf (if (and (equal? (plist-get conf0 'backend) "codex-app-server")
-                        (boundp (quote codex-config-with-env)))
+         (codex? (let ((tl (member (quote backend) conf0)))
+                   (and tl (pair? (cdr tl))
+                        (equal? (car (cdr tl)) "codex-app-server"))))
+         (conf (if (and codex? (boundp (quote codex-config-with-env)))
                    (codex-config-with-env conf0)
                    conf0)))
     ;; ACP threads get exactly the servers their presets name. The editor's

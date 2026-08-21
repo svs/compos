@@ -79,6 +79,7 @@
                          'domain 'chat 'effects '(pure)
                          'package 'skills 'namespace 'skills))
     *skills*)
+  (skills-note-build!)
   (length *skills*))
 
 (define (skills)
@@ -92,19 +93,26 @@
         (string-append "no such skill: " n "; available: "
                        (string-join (map car (reverse *skills*)) ", ")))))
 
-;; the index a system prompt carries: one line per skill, nothing more —
-;; the body loads on demand
-(define (skills-note)
-  (if (null? *skills*)
-      ""
-      (string-append
-        "SKILLS — working instructions on demand:\n"
-        (string-join
-          (map (lambda (s)
-                 (string-append "  (skill \"" (car s) "\")  " (cadr s)))
-               (reverse *skills*))
-          "\n")
-        "\nLoad a skill with eval-scheme before you start its task.")))
+;; The index a system prompt carries: one line per skill, nothing more —
+;; the body loads on demand. The string is built ONCE per scan:
+;; skills-note runs on the turn-start path, and per-call allocation there
+;; loses the cross-lane flush race (see agent-resolve-config).
+(define *skills-note* "")
+
+(define (skills-note) *skills-note*)
+
+(define (skills-note-build!)
+  (set! *skills-note*
+    (if (null? *skills*)
+        ""
+        (string-append
+          "SKILLS — working instructions on demand:\n"
+          (string-join
+            (map (lambda (s)
+                   (string-append "  (skill \"" (car s) "\")  " (cadr s)))
+                 (reverse *skills*))
+            "\n")
+          "\nLoad a skill with eval-scheme before you start its task."))))
 
 (skills-scan!)
 
@@ -137,18 +145,25 @@
 (define *codex-home-ready* #f)
 
 (define (codex-home-render-skills! home)
-  ;; the rendered set must EQUAL the catalog, so stale skills go first;
-  ;; the path is the editor's own rendered directory, nothing else
-  (shell-command->string
-    (string-append "rm -rf '" home "/skills' && mkdir -p '" home "/skills'")
-    (aimax-home))
-  (for-each
-    (lambda (s)
-      (let ((text (read-file (string-append (caddr s) "/SKILL.md"))))
-        (when text
-          (write-file! (string-append home "/skills/" (car s) "/SKILL.md")
-                       text))))
-    *skills*))
+  ;; the rendered set must EQUAL the catalog. A skill that left the
+  ;; catalog loses its SKILL.md here, so codex cannot load it again.
+  ;; No subprocess: this runs inside the session lane, and a shell call
+  ;; costs a second the send path does not have.
+  (let ((dir (string-append home "/skills")))
+    (when (file-exists? dir)
+      (for-each
+        (lambda (entry)
+          (when (and (string-suffix? "/" entry)
+                     (not (assoc (substring entry 0 (- (string-length entry) 1))
+                                 *skills*)))
+            (delete-file! (string-append dir "/" entry "SKILL.md"))))
+        (list-dir dir)))
+    (for-each
+      (lambda (s)
+        (let ((text (read-file (string-append (caddr s) "/SKILL.md"))))
+          (when text
+            (write-file! (string-append dir "/" (car s) "/SKILL.md") text))))
+      *skills*)))
 
 (define (codex-home-ensure!)
   (unless *codex-home-ready*

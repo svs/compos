@@ -60,7 +60,12 @@ defmodule Aimax.MorgTest do
 
     assert Buffer.hidden(buf) == []
     refute Enum.any?(Editor.local_keys(buf), fn {_key, command} ->
-             command in ["morg-cycle", "morg-global-cycle", "morg-execute-block"]
+             command in [
+               "morg-cycle",
+               "morg-global-cycle",
+               "morg-babel",
+               "morg-tangle"
+             ]
            end)
 
     :ok = Buffer.insert_at(buf, 0, "x", source: :user)
@@ -236,6 +241,48 @@ defmodule Aimax.MorgTest do
 
     press(["C-c", "C-c"])
     assert Buffer.text(buf) == "```sh\necho hi\n```\n```result\nhi\n```\n"
+  end
+
+  test "morg-babel and morg-tangle load as Morg package extensions" do
+    assert {:ok, commands} =
+             Session.eval(~s{(list (member "morg-babel" (command-names))
+                                   (member "morg-tangle" (command-names)))})
+
+    assert commands =~ "morg-babel"
+    assert commands =~ "morg-tangle"
+
+    assert {:ok, babel} = Session.eval(~s{(catalog-entry 'command "morg-babel")})
+    assert babel =~ ~s{package "morg-babel"}
+
+    assert {:ok, tangle} = Session.eval(~s{(catalog-entry 'command "morg-tangle")})
+    assert tangle =~ ~s{package "morg-tangle"}
+  end
+
+  test "C-c C-x tangles marked blocks relative to the Morg file" do
+    dir = Path.join(System.tmp_dir!(), "morg-tangle-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf(dir) end)
+
+    text = """
+    # Program
+    ```elixir :tangle lib/demo.ex
+    defmodule Demo do
+    ```
+    ```elixir :tangle lib/demo.ex
+    end
+    ```
+    ```sh :tangle no
+    echo skip
+    ```
+    """
+
+    buf = morg_buffer(text)
+    :ok = Buffer.set_local(buf, "default-directory", dir <> "/")
+
+    press(["C-c", "C-x"])
+
+    assert File.read!(Path.join(dir, "lib/demo.ex")) == "defmodule Demo do\nend\n"
+    refute File.exists?(Path.join(dir, "no"))
   end
 
   test "a second run replaces the result block" do

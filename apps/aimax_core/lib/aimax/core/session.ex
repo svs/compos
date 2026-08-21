@@ -449,14 +449,15 @@ defmodule Aimax.Core.Session do
     interp |> load_packages() |> load_init()
   end
 
-  # bundled packages: priv/packages/*.scm, loaded after the stdlib. Unlike
+  # bundled packages: priv/packages/**/*.scm, loaded after the stdlib. Unlike
   # the stdlib these are severable — org-mode lives here so it can be
   # extracted into a real package later, and a broken package logs loudly
   # instead of bricking boot.
   defp load_packages(interp) do
-    bundled =
-      :aimax_core
-      |> Application.app_dir("priv/packages")
+    package_dir = Application.app_dir(:aimax_core, "priv/packages")
+
+    top_level =
+      package_dir
       |> Path.join("*.scm")
       |> Path.wildcard()
       # load order: custom.scm (defcustom), then tools.scm (define-tool!),
@@ -469,6 +470,17 @@ defmodule Aimax.Core.Session do
            fn n -> n == Path.basename(&1) end
          ) || 99, &1}
       )
+
+    # A package can keep extensions in its own directory. Load these after
+    # every top-level package, so an extension can use its package's base API.
+    nested =
+      package_dir
+      |> Path.join("**/*.scm")
+      |> Path.wildcard()
+      |> Enum.reject(&(&1 in top_level))
+      |> Enum.sort()
+
+    bundled = top_level ++ nested
 
     # user packages (~/.aimax/packages/*.scm, e.g. installed from github via
     # package-install) load after the bundled set so they can build on it

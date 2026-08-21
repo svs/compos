@@ -1,10 +1,9 @@
-;;; morg.scm --- markdown with org habits: folding and executable blocks.
+;;; morg.scm --- markdown with org habits.
 ;;;
 ;;; morg-mode is a superset of the plain markdown experience. TAB folds a
 ;;; `#` heading's subtree or a fenced code block. S-TAB folds the whole
-;;; file. C-c C-c runs the fenced block at point, org-babel style: the
-;;; output lands in a ```result fence under the block, and the next run
-;;; replaces it. Fenced code renders with the theme's ts-* faces through
+;;; file. morg-babel runs fenced blocks. morg-tangle writes marked blocks
+;;; to source files. Fenced code renders with the theme's ts-* faces through
 ;;; (ts-highlight-string LANG TEXT) when the grammar is loaded.
 ;;;
 ;;; OFFSET RULE: every index that touches the buffer, an overlay, or a
@@ -15,8 +14,10 @@
 ;;; Keys (buffer-local):
 ;;;   TAB fold cycle (heading subtree or code block) · S-TAB overview/show all
 ;;;   C-c C-t cycle the heading's TODO state
-;;;   C-c C-c run the code block at point
+;;;   C-c C-c run the code block at point · C-c C-x tangle marked blocks
 
+(package! 'morg)
+(category! 'writing)
 (domain! 'writing)
 (effects! '(read))
 
@@ -412,93 +413,6 @@
     (morg-apply-folds! buf)
     (morg-refontify! buf)))
 
-;;; --- babel: run the block at point -------------------------------------------
-
-(effects! '(write execute))
-
-;; markdown info string -> the interpreter that runs the temp file
-(define *morg-runners*
-  '(("sh" "sh") ("bash" "bash") ("zsh" "zsh") ("shell" "sh")
-    ("python" "python3") ("py" "python3")
-    ("elixir" "elixir") ("exs" "elixir")
-    ("js" "node") ("javascript" "node") ("node" "node")
-    ("ruby" "ruby")))
-
-;; run BODY through RUNNER via a temp file. The quoted heredoc keeps the
-;; code byte-exact, and shell-command->string folds stderr into the
-;; result — an error message lands in the result block, like org-babel.
-(define (morg-run-shell runner body)
-  (shell-command->string
-    (string-append
-      "t=$(mktemp); cat >\"$t\" <<'MORG_EOF'\n"
-      body
-      (if (string-suffix? "\n" body) "" "\n")
-      "MORG_EOF\n"
-      runner " \"$t\"; rm -f \"$t\"")))
-
-;; -> output string, or #f when no runner exists for LANG. A scheme
-;; block evaluates in the editor's own interpreter.
-(define (morg-run lang body)
-  (if (equal? (string-downcase lang) "scheme")
-      (value->string (eval-string body))
-      (let ((r (assoc (string-downcase lang) *morg-runners*)))
-        (if r (morg-run-shell (cadr r) body) #f))))
-
-;; the ```result block after close-end (blank lines between allowed):
-;; -> (start close-end) or #f
-(define (morg-result-block scan buf close-end)
-  (let loop ((es scan))
-    (cond ((null? es) #f)
-          ((<= (car (car es)) close-end) (loop (cdr es)))
-          (else
-            (let* ((e (car es)) (k (morg-kind e)))
-              (cond ((and (equal? k 'text) (equal? (string-trim (cadr e)) ""))
-                     (loop (cdr es)))
-                    ((and (equal? k 'open) (equal? (morg-info e) "result"))
-                     (list (car e) (morg-block-close-end scan buf (car e))))
-                    (else #f)))))))
-
-(define (morg-insert-result! buf scan fstart out)
-  (let* ((close-end (morg-block-close-end scan buf fstart))
-         (existing (morg-result-block scan buf close-end))
-         (norm (if (or (equal? out "") (string-suffix? "\n" out))
-                   out
-                   (string-append out "\n")))
-         (res (string-append "```result\n" norm "```\n")))
-    (if existing
-        (let* ((rs (car existing))
-               ;; delete through the result block's trailing newline
-               (re (min (buffer-size buf) (+ (cadr existing) 1))))
-          (buffer-delete-range! buf rs (- re rs))
-          (buffer-insert! buf rs res))
-        (let* ((size (buffer-size buf))
-               (at (min (+ close-end 1) size)))
-          (buffer-insert! buf at
-            (string-append (if (>= close-end size) "\n" "") res))))))
-
-(define-command "morg-execute-block" "Run the code block at point; the output goes to a result block"
-  (lambda ()
-    (let* ((buf (current-buffer))
-           (scan (morg-scan buf))
-           (a (morg-block-open scan (point))))
-      (if (not a)
-          (message "Point is not in a code block")
-          (let* ((e (morg-entry-at scan a))
-                 (lang (morg-info e)))
-            (cond
-              ((equal? lang "result") (message "A result block does not run"))
-              ((equal? lang "") (message "The block names no language"))
-              (else
-                (let* ((body-r (morg-block-body scan buf a))
-                       (body (substring-bytes (buffer-text buf)
-                                              (car body-r) (cadr body-r)))
-                       (out (morg-run lang body)))
-                  (if (not out)
-                      (message (string-append "No runner for " lang))
-                      (begin
-                        (morg-insert-result! buf scan a out)
-                        (message (string-append "Executed " lang " block"))))))))))))
-
 ;;; --- the mode ----------------------------------------------------------------
 
 (effects! '(write))
@@ -507,7 +421,8 @@
   (local-set-key "TAB" "morg-cycle")
   (local-set-key "S-TAB" "morg-global-cycle")
   (local-set-key "C-c C-t" "morg-todo")
-  (local-set-key "C-c C-c" "morg-execute-block"))
+  (local-set-key "C-c C-c" "morg-babel")
+  (local-set-key "C-c C-x" "morg-tangle"))
 
 ;; change-hook registry keyed by buffer NAME in global state (not a
 ;; buffer-local): rules outlive buffer kill + recreate (revert-buffer),
@@ -524,7 +439,7 @@
             *morg-hooks*))))
 
 (mode-doc! "morg-mode"
-  "Markdown with org habits. `TAB` folds a heading or code block. `S-TAB` folds the file. `C-c C-t` cycles TODO states. `C-c C-c` runs the code block at point. `C-c C-v` renders the page.")
+  "Markdown with org habits. `TAB` folds a heading or code block. `C-c C-c` runs a block. `C-c C-x` tangles marked blocks. `C-c C-v` renders the page.")
 
 (mode-icon! "morg-mode" "")
 

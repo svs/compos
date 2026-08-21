@@ -9,6 +9,7 @@ This file is a live demo. Open it in the editor and press the keys.
 - `C-c C-c` inside a code block runs it. The output lands in a
   `result` fence under the block. Run it again and the result is
   replaced, not appended.
+- `C-c C-x` writes each block with `:tangle PATH` to its source file.
 - `C-c C-v` renders the page, as with any markdown buffer.
 
 ## 1. Folding
@@ -26,7 +27,8 @@ inside its level-2 parent.
 
 Put point on this heading and press `C-c C-t`. `M-x morg-agenda` shows
 dated headings from `morg-agenda-files`. Press `t` on an agenda entry
-to cycle the same state.
+to cycle the same state. Press `[` or `]` to move by one week. Press `.`
+to return to today.
 
 ### TODO Review the Morg agenda <2026-08-21>
 
@@ -94,4 +96,14 @@ block; this orphan just renders dim:
 
 ```result
 stale output, no source block above
+```
+
+## 9. Tangle source files
+
+Add `:tangle PATH` after the language. Relative paths start beside this
+Morg file. Blocks with the same path join in document order. Press
+`C-c C-x` or run `M-x morg-tangle` to write all marked blocks.
+
+```elixir :tangle demo/generated.exs
+IO.puts("This file came from Morg")
 ```

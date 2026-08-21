@@ -88,6 +88,23 @@ defmodule Aimax.SkillsTest do
     assert File.exists?(Path.join([home, "skills", "code-editing", "SKILL.md"]))
   end
 
+  test "the sweep keeps codex's own state dirs and still drops a stale skill" do
+    home = unquote_str(eval!("(codex-home)"))
+
+    # codex writes its built-in skills under .system — no SKILL.md at the
+    # top, so the sweep must skip it instead of raising enoent
+    sys = Path.join([home, "skills", ".system", "imagegen"])
+    File.mkdir_p!(sys)
+
+    stale = Path.join([home, "skills", "zz-stale"])
+    File.mkdir_p!(stale)
+    File.write!(Path.join(stale, "SKILL.md"), "gone soon")
+
+    assert eval!("(begin (codex-home-render-skills! (codex-home)) #t)") == "#t"
+    assert File.dir?(sys)
+    refute File.exists?(Path.join(stale, "SKILL.md"))
+  end
+
   test "agent-resolve-config gives every codex thread the sanitized env" do
     env = eval!(~s{(plist-get (agent-resolve-config '(connector "codex-app-server")) 'env)})
     assert env =~ "CODEX_HOME"

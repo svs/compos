@@ -156,7 +156,12 @@
           (when (and (string-suffix? "/" entry)
                      (not (assoc (substring entry 0 (- (string-length entry) 1))
                                  *skills*)))
-            (delete-file! (string-append dir "/" entry "SKILL.md"))))
+            ;; only a SKILL.md that exists: codex keeps its own state
+            ;; directories here (.system), and a raise on a missing file
+            ;; would fail every send to a codex thread
+            (let ((f (string-append dir "/" entry "SKILL.md")))
+              (when (file-exists? f)
+                (delete-file! f)))))
         (list-dir dir)))
     (for-each
       (lambda (s)

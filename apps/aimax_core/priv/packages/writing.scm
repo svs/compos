@@ -187,6 +187,21 @@
     (if hit (cadr hit) #f)))
 
 (define (writing--apply! buf)
+  ;; This fn is the one funnel for enable, refresh, and desktop restore.
+  ;; A chat renders its transcript, not a markdown preview (preview-mode
+  ;; has the same rule). A chat buffer refuses the mode: restore the
+  ;; locals that a past enable changed, then drop the mode from
+  ;; 'minor-modes so a stale desktop entry heals on the next restore.
+  (if (equal? (buffer-local buf 'mode-name) "chat-mode")
+      (begin
+        (when (buffer-local buf 'writing-saved)
+          (writing--teardown! buf))
+        (buffer-set-local! buf 'minor-modes
+          (remove (lambda (n) (equal? n "writing-mode"))
+                  (or (buffer-local buf 'minor-modes) '()))))
+      (writing--present! buf)))
+
+(define (writing--present! buf)
   ;; remember what we clobber, once — the saved alist persists, and the
   ;; restore path re-runs this fn, which must not re-save writing's own look
   (unless (buffer-local buf 'writing-saved)
@@ -308,21 +323,29 @@
   (lambda ()
     ;; When invoked from the companion chat, return to its group's document.
     (let* ((here (current-buffer))
+           (chat? (equal? (buffer-local here 'mode-name) "chat-mode"))
            (g (buffer-local here 'group))
-           (docs (if (and g (equal? (buffer-local here 'mode-name) "chat-mode"))
-                     (group-docs g)
-                     '()))
-           (doc (if (pair? docs) (car docs) here)))
-      (switch-to-buffer! doc)
-      (unless (minor-mode-on? doc "writing-mode")
-        (enable-minor-mode! doc "writing-mode"))
-      (run-command "writing-layout"))))
+           (docs (if (and g chat?) (group-docs g) '()))
+           ;; A chat is never the writing document. When the group has no
+           ;; document, stop instead of putting writing-mode on the chat.
+           (doc (cond ((pair? docs) (car docs))
+                      (chat? #f)
+                      (else here))))
+      (if doc
+          (begin
+            (switch-to-buffer! doc)
+            (unless (minor-mode-on? doc "writing-mode")
+              (enable-minor-mode! doc "writing-mode"))
+            (run-command "writing-layout"))
+          (message "This chat's group has no document")))))
 
 (define-command "writing-mode" "Toggle writing mode in the current buffer"
   (lambda ()
-    (if (toggle-minor-mode! "writing-mode")
-        (message "Writing mode enabled")
-        (message "Writing mode disabled"))))
+    (if (equal? (buffer-local (current-buffer) 'mode-name) "chat-mode")
+        (message "writing-mode does not apply to a chat buffer")
+        (if (toggle-minor-mode! "writing-mode")
+            (message "Writing mode enabled")
+            (message "Writing mode disabled")))))
 
 (mode-doc! "writing-mode"
   "Layout-neutral prose presentation: typography, wrapping, margins, prose movement, and word count.")

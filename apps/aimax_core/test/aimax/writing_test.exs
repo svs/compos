@@ -396,4 +396,50 @@ defmodule Aimax.WritingTest do
     assert Buffer.get_local(buf, "window-class") == "writing"
     assert Buffer.get_local(buf, "modeline-info") == "2 words · 1 min"
   end
+
+  test "a chat buffer refuses writing-mode and keeps its transcript view" do
+    buf = fresh_buffer("*wr-chat-#{System.unique_integer([:positive])}*", "")
+    eval!(~s{(with-current-buffer "#{buf}" (lambda () (set-mode! "chat-mode")))})
+    eval!(~s{(buffer-set-local! "#{buf}" 'render-mode "agent")})
+
+    press(["M-x"])
+    type("writing-mode")
+    press(["RET"])
+
+    refute "writing-mode" in (Buffer.get_local(buf, "minor-modes") || [])
+    assert Buffer.get_local(buf, "render-mode") == "agent"
+    assert Editor.snapshot().echo =~ "does not apply"
+  end
+
+  test "restore heals a chat that carries a stale writing-mode entry" do
+    buf = fresh_buffer("*wr-chat-stale-#{System.unique_integer([:positive])}*", "")
+    eval!(~s{(with-current-buffer "#{buf}" (lambda () (set-mode! "chat-mode")))})
+    eval!(~s{(buffer-set-local! "#{buf}" 'render-mode "agent")})
+
+    # a desktop written before the guard: writing-mode already applied
+    eval!(~s{(buffer-set-local! "#{buf}" 'minor-modes '("writing-mode"))})
+    eval!(~s{(buffer-set-local! "#{buf}" 'render-mode "markdown")})
+    eval!(~s{(buffer-set-local! "#{buf}" 'writing-saved
+               '((face-remap ()) (style #f) (line-numbers #f)
+                 (render-mode "agent") (preview-renderer #f)
+                 (visual-line-mode #f)))})
+
+    eval!(~s{(restore-minor-modes! "#{buf}")})
+
+    refute "writing-mode" in (Buffer.get_local(buf, "minor-modes") || [])
+    assert Buffer.get_local(buf, "render-mode") == "agent"
+    refute Buffer.get_local(buf, "writing-saved")
+  end
+
+  test "write from a chat without a group document stops with a message" do
+    buf = fresh_buffer("*wr-chat-nodoc-#{System.unique_integer([:positive])}*", "")
+    eval!(~s{(with-current-buffer "#{buf}" (lambda () (set-mode! "chat-mode")))})
+    eval!(~s{(buffer-set-local! "#{buf}" 'render-mode "agent")})
+
+    eval!(~s{(run-command "write")})
+
+    refute "writing-mode" in (Buffer.get_local(buf, "minor-modes") || [])
+    assert Buffer.get_local(buf, "render-mode") == "agent"
+    assert Editor.snapshot().echo =~ "no document"
+  end
 end

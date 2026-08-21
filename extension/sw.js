@@ -209,6 +209,20 @@ async function windowExists(windowId) {
   }
 }
 
+// the reader's own window: minimized, made once, reused — snapshots
+// load their tabs here so the user's tab strip never changes
+async function readerWindow() {
+  const stored = await chrome.storage.session.get("readerWin");
+  if (stored.readerWin && (await windowExists(stored.readerWin))) return stored.readerWin;
+  const w = await chrome.windows.create({
+    url: "about:blank",
+    state: "minimized",
+    focused: false,
+  });
+  await chrome.storage.session.set({ readerWin: w.id });
+  return w.id;
+}
+
 const OPS = {
   // The editor's reader fetches THROUGH the browser: the user's cookies
   // and Chrome's HTTP cache ride along, so a page that knows them logged
@@ -229,10 +243,14 @@ const OPS = {
   // and the rendered document comes back; the tab closes behind it.
   // The plain fetch op above misses per-site sessions (Substack keeps
   // one per publication subdomain, refreshed only in a real tab).
-  async snapshot({ url, window }) {
-    const create = { url, active: false };
-    if (await windowExists(window)) create.windowId = window;
-    const t = await chrome.tabs.create(create);
+  // The tab lives in the reader's own MINIMIZED window, so nothing
+  // shows in the user's tab strip.
+  async snapshot({ url }) {
+    const t = await chrome.tabs.create({
+      url,
+      active: false,
+      windowId: await readerWindow(),
+    });
     try {
       await new Promise((resolve) => {
         const done = () => {

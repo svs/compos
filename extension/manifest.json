@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ai-max",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "ai-max's keys and commands in every tab, and a wire so the editor can drive any of them.",
   "permissions": [
     "tabs",

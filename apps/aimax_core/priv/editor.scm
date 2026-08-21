@@ -6389,21 +6389,48 @@
         (when (window-exists? back)
           (select-window! back))))))
 
-;; C-c g : join (or found) a named group — read the code, the doc, and
-;; chat about them all in one place
-(define-command "group-add" "Join or found a named buffer group"
+;; the group a joining buffer gets by default: the group the frame
+;; stands in, else the most recent group in history. The buffer's own
+;; group is never the default — joining it is a no-op.
+(define (group-join-default buf)
+  (let ((own (buffer-group buf))
+        (fg (frame-local 'current-group)))
+    (if (and fg (not (equal? fg own)))
+        fg
+        (let loop ((rows (mru-list)))
+          (cond ((null? rows) #f)
+                ((and (equal? (car (car rows)) "group")
+                      (not (equal? (car (cdr (car rows))) own)))
+                 (car (cdr (car rows))))
+                (else (loop (cdr rows))))))))
+
+;; C-c g : join a group. RET takes the default — so a stray buffer
+;; moves into the group you last stood in with one press. A typed
+;; name joins that group, or founds it.
+(define-command "group-join" "Join a group; RET takes the last visited group; a new name founds one"
   (lambda ()
-    (let ((buf (current-buffer)))
-      (minibuffer-read "Group: " (group-names)
-        (lambda (g)
-          (cond
-            ((equal? (string-trim g) "") (message "Group needs a name"))
-            ;; a group is a set — joining twice is a no-op that says so
-            ((equal? (buffer-group buf) g)
-             (message (string-append buf " is already in " (group-label g))))
-            (else
-              (buffer-set-local! buf 'group g)
-              (message (string-append buf " joined group " g)))))))))
+    (let* ((buf (current-buffer))
+           (default (group-join-default buf))
+           (names (filter (lambda (g) (not (equal? g default))) (group-names))))
+      (minibuffer-read
+        (if default
+            (string-append "Join group (default " (group-label default) "): ")
+            "Join group: ")
+        (if default
+            (cons (list default "last visited") names)
+            names)
+        (lambda (input)
+          (let ((g (if (equal? (string-trim input) "")
+                       (or default "")
+                       input)))
+            (cond
+              ((equal? g "") (message "Group needs a name"))
+              ;; a group is a set — joining twice is a no-op that says so
+              ((equal? (buffer-group buf) g)
+               (message (string-append buf " is already in " (group-label g))))
+              (else
+                (buffer-set-local! buf 'group g)
+                (message (string-append buf " joined group " (group-label g)))))))))))
 
 (define-command "group-remove" "Remove the current buffer from its group"
   (lambda ()
@@ -6558,7 +6585,7 @@
 (global-set-key "C-c r" "chat-send-region")
 (global-set-key "C-c q" "llm-ask")
 (global-set-key "C-c w" "chat-companion")
-(global-set-key "C-c g" "group-add")
+(global-set-key "C-c g" "group-join")
 (global-set-key "C-c d" "group-describe")
 
 (global-set-key "C-x G" "groups")

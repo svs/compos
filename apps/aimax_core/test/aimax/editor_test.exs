@@ -2087,7 +2087,7 @@ defmodule Aimax.EditorTest do
 
     # C-c g founds the group from the code buffer, then the notes join it
     press(["C-c", "g"])
-    assert Editor.snapshot().minibuffer.prompt == "Group: "
+    assert Editor.snapshot().minibuffer.prompt =~ ~r/^Join group/
     type("proj")
     press(["RET"])
     assert Buffer.get_local(buf, "group") == "proj"
@@ -2144,6 +2144,41 @@ defmodule Aimax.EditorTest do
     assert Buffer.get_local(chat, "group") == "proj"
 
     press(["C-x", "1"])
+  end
+
+  test "C-c g defaults to the last visited group; RET pulls a stray buffer in", %{buf: buf} do
+    g = "grp-#{System.unique_integer([:positive])}"
+    stray = "stray-#{System.unique_integer([:positive])}"
+    other = "other-#{System.unique_integer([:positive])}"
+
+    on_exit(fn ->
+      for b <- ["*chat:#{g}*", stray, other], do: Aimax.Core.kill_buffer(b)
+    end)
+
+    # stand in a group, then drift to an ungrouped buffer
+    {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-set-local! "#{buf}" 'group "#{g}")})
+    {:ok, _} = Aimax.Core.Session.eval(~s{(switch-to-group! "#{g}")})
+    Editor.set_window_buffer(stray)
+
+    # the prompt names the default; a bare RET joins it
+    press(["C-c", "g"])
+    assert Editor.snapshot().minibuffer.prompt == "Join group (default #{g}): "
+    press(["RET"])
+    assert Buffer.get_local(stray, "group") == g
+
+    # a typed name wins over the default and founds a new group
+    new_g = "founded-#{System.unique_integer([:positive])}"
+    Editor.set_window_buffer(other)
+    press(["C-c", "g"])
+    type(new_g)
+    press(["RET"])
+    assert Buffer.get_local(other, "group") == new_g
+
+    # from inside the group itself there is no self-default
+    press(["C-c", "g"])
+    prompt = Editor.snapshot().minibuffer.prompt
+    refute prompt =~ new_g
+    press(["C-g"])
   end
 
   test "legacy companion-of pointers migrate to group tags on mode setup", %{buf: buf} do

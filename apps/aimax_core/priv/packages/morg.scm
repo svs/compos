@@ -102,6 +102,120 @@
                   (- (car e) 1)
                   (loop (cdr es))))))))
 
+;;; --- structural document API -------------------------------------------------
+;;; A sandboxed agent edits the live Markdown buffer through these functions.
+;;; LINE comes from markdown-outline. It avoids title matching and byte offsets.
+
+(effects! '(read))
+
+(define (markdown--title e)
+  (string-trim
+    (substring-bytes (cadr e) (morg-info e) (string-byte-length (cadr e)))))
+
+(define (markdown-outline buf)
+  (if (not (buffer-exists? buf))
+      (string-append "no such buffer: " buf)
+      (with-current-buffer buf
+        (lambda ()
+          (map (lambda (e)
+                 (list (line-number-at-pos (car e))
+                       (morg-info e)
+                       (markdown--title e)))
+               (filter (lambda (e) (equal? (morg-kind e) 'heading))
+                       (morg-scan buf)))))))
+
+(define (markdown-find buf text)
+  (let ((rows (markdown-outline buf)))
+    (if (string? rows)
+        rows
+        (filter (lambda (row) (if (string-index (caddr row) text) #t #f)) rows))))
+
+;; Unlike morg-subtree-end, this returns an exclusive edit boundary. It keeps
+;; the newline before the next peer section inside the selected section.
+(define (markdown--section-end scan buf heading)
+  (let ((start (car heading)) (level (morg-info heading)))
+    (let loop ((entries scan))
+      (cond ((null? entries) (buffer-size buf))
+            ((<= (car (car entries)) start) (loop (cdr entries)))
+            ((and (equal? (morg-kind (car entries)) 'heading)
+                  (<= (morg-info (car entries)) level))
+             (car (car entries)))
+            (else (loop (cdr entries)))))))
+
+(define (markdown--line-count buf)
+  (line-number-at-pos (buffer-size buf)))
+
+(define (markdown--with-section buf line fn)
+  (cond
+    ((not (buffer-exists? buf)) (string-append "no such buffer: " buf))
+    ((or (not (number? line)) (< line 1)) "line must be a positive number")
+    (else
+      (with-current-buffer buf
+        (lambda ()
+          (let ((count (markdown--line-count buf)))
+            (if (> line count)
+                (string-append "line " (number->string line)
+                               " is outside the buffer — it has "
+                               (number->string count) " lines")
+                (let* ((scan (morg-scan buf))
+                       (heading (morg-enclosing-heading scan
+                                  (line-start-position line))))
+                  (if (not heading)
+                      (string-append "no Markdown section holds line "
+                                     (number->string line)
+                                     " — call (markdown-outline BUF)")
+                      (fn heading (markdown--section-end scan buf heading)))))))))))
+
+(define (markdown-read buf line)
+  (markdown--with-section buf line
+    (lambda (heading end)
+      (substring-bytes (buffer-text buf) (car heading) end))))
+
+(effects! '(write))
+
+(define (markdown--terminated text end size)
+  (if (and (< end size) (not (equal? text ""))
+           (not (string-suffix? "\n" text)))
+      (string-append text "\n")
+      text))
+
+(define (markdown-replace! buf line new)
+  (markdown--with-section buf line
+    (lambda (heading end)
+      (let* ((start (car heading))
+             (replacement (markdown--terminated new end (buffer-size buf))))
+        (buffer-delete-range! buf start (- end start))
+        (buffer-insert! buf start replacement)
+        (string-append "replaced the Markdown section at line "
+                       (number->string line))))))
+
+(define (markdown-insert-after! buf line text)
+  (markdown--with-section buf line
+    (lambda (_heading end)
+      (let* ((source (buffer-text buf))
+             (prefix (if (and (> end 0)
+                              (not (equal? (substring-bytes source (- end 1) end)
+                                           "\n")))
+                         "\n" ""))
+             (suffix (if (or (equal? text "") (string-suffix? "\n" text))
+                         "" "\n")))
+        (buffer-insert! buf end (string-append prefix text suffix))
+        (string-append "inserted Markdown after the section at line "
+                       (number->string line))))))
+
+(effects! '(read))
+(public! 'markdown-outline
+  "(markdown-outline BUF) — every Markdown heading as (LINE LEVEL TITLE)")
+(public! 'markdown-find
+  "(markdown-find BUF TEXT) — heading rows whose title contains TEXT")
+(public! 'markdown-read
+  "(markdown-read BUF LINE) — the complete Markdown section that holds LINE")
+(effects! '(write))
+(public! 'markdown-replace!
+  "(markdown-replace! BUF LINE NEW) — replace the complete section that holds LINE")
+(public! 'markdown-insert-after!
+  "(markdown-insert-after! BUF LINE TEXT) — insert TEXT after the complete section that holds LINE")
+
 ;;; --- block geometry ----------------------------------------------------------
 
 ;; open-fence start of the block containing pos, or #f. A pos on the

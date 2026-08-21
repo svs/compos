@@ -55,7 +55,8 @@
   (string-append
     "Help the user write clear prose. Preserve their voice and intent. "
     "Discuss choices before a large rewrite. Return only requested prose "
-    "when the user asks for finished text.")
+    "when the user asks for finished text. Load the markdown-editing skill "
+    "before the first Markdown document edit.")
   "Standing instructions for completion, rewrite, and writing chat commands."
   'group 'writing 'type 'string 'set writing--refresh!)
 

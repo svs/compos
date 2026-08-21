@@ -329,7 +329,20 @@ const OPS = {
       },
       args: [code]
     });
-    if (res?.result?.error) throw new Error(res.result.error);
+    const err = res?.result?.error;
+    if (err && /Content Security Policy|unsafe-eval/.test(err)) {
+      // a strict-CSP page (the editor's own is one) refuses string eval;
+      // the debugger evaluates outside the page's policy entirely
+      const r = await cdp(tab, "Runtime.evaluate", {
+        expression: code,
+        returnByValue: true,
+      });
+      if (r.exceptionDetails) {
+        throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text || "eval failed");
+      }
+      return { value: r.result?.value ?? null };
+    }
+    if (err) throw new Error(err);
     return { value: res?.result?.value ?? null };
   },
 

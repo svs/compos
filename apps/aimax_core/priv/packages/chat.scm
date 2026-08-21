@@ -19,6 +19,11 @@
 ;;;; Desktop restore runs after every package loads, so a restored chat
 ;;;; finds these definitions in place.
 
+(package! 'chat)
+(category! 'chat)
+(domain! 'chat)
+(effects! '(read))
+
 ;;; --- the conversation of record ------------------------------------------------
 ;;; ONE list per chat, 'chat-wire-turns, newest first. It is what the model
 ;;; saw, not what the buffer shows. A turn is a plist:
@@ -756,6 +761,17 @@
 
 (define (chat-log-dir) (string-append (aimax-home) "/chats"))
 
+(define (chat-log-files)
+  (if (not (file-exists? (chat-log-dir)))
+      '()
+      (map (lambda (name) (string-append (chat-log-dir) "/" name))
+           (filter (lambda (name) (string-suffix? ".chat" name))
+                   (list-dir (chat-log-dir))))))
+
+(effects! '(read))
+(public! 'chat-log-files
+  "(chat-log-files) — every archived conversation as a .chat path")
+
 ;; a group title becomes a file name: keep word characters, dot and dash
 (define (chat-log-name g)
   (let loop ((s g))
@@ -893,7 +909,21 @@
                                    (string-byte-length text))))))))
            (append (chat-replay-plan record)
                    (list 'turns (chat-record-turns record)
+                         'record record
                          'header (or header '())))))))
+
+(define (chat-log-read path)
+  (let ((plan (chat-replay-file path)))
+    (and plan
+         (list 'path path
+               'header (plist-get plan 'header)
+               'prompts (plist-get plan 'prompts)
+               'turns (plist-get plan 'turns)
+               'record (plist-get plan 'record)))))
+
+(effects! '(read))
+(public! 'chat-log-read
+  "(chat-log-read PATH) — an archived chat as path, header, prompts, display turns, and full record")
 
 (effects! '(write))
 (public! 'chat-replay-start!

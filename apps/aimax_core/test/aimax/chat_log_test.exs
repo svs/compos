@@ -66,6 +66,20 @@ defmodule Aimax.ChatLogTest do
     # the log is a v2 .chat: the record reads back whole
     record = eval_str!(~s{(json-encode (chat-file-record (read-file "#{path}")))})
     assert [%{"role" => "user"} | _] = Jason.decode!(record)
+
+    files =
+      eval_str!(~s{(json-encode (chat-log-files))})
+      |> Jason.decode!()
+
+    assert path in files
+
+    archived =
+      eval_str!(~s{(json-encode (chat-log-read "#{path}"))})
+      |> Jason.decode!()
+
+    assert archived["path"] == path
+    assert archived["prompts"] == ["hi", "more"]
+    assert Enum.any?(archived["record"], &(&1["role"] == "assistant"))
   end
 
   test "reset keeps the file as an archive and clears the id" do

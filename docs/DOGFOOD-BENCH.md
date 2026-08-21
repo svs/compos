@@ -77,6 +77,28 @@ bench/aimax-bench show RUN_ID --transcript
 editor remains the place to inspect work, answer permissions, steer, undo, and
 continue manually.
 
+## Replay a saved chat
+
+Every completed conversation is archived under `<aimax-home>/chats/*.chat`.
+The public Scheme API lists and reads those portable records:
+
+```scheme
+(chat-log-files)
+(chat-log-read "/absolute/path.chat")
+```
+
+Send one archive through the editor's replay acceptance test:
+
+```sh
+AIMAX_CHAT=/absolute/path.chat mix test \
+  apps/aimax_core/test/aimax/chat_acceptance_test.exs
+```
+
+The replay drives recorded prompts through the real key dispatcher.
+It checks transcript fidelity, tool cards, folds, and the rebuilt record.
+It does not establish that the original result was correct or satisfactory.
+Corroborate the transcript with resulting buffers, files, and external state.
+
 For the bundled synthetic code scenarios, copy a fixture into a new disposable
 Git repository. The command refuses to overwrite an existing destination:
 

@@ -204,6 +204,72 @@ defmodule Aimax.AgendaTest do
     assert done[:class] =~ "agenda-row-done"
   end
 
+  test "brackets move by week and dot returns to today", %{dir: dir} do
+    File.write!(Path.join(dir, "weeks.md"), """
+    # TODO Previous #{stamp(-7)}
+    # TODO Current #{stamp(0)}
+    # TODO Next #{stamp(7)}
+    """)
+
+    buf = open_agenda(dir)
+    Editor.set_window_buffer(buf)
+    assert Buffer.text(buf) =~ "Current"
+    refute Buffer.text(buf) =~ "Previous"
+    refute Buffer.text(buf) =~ "Next"
+
+    press("]")
+    assert Buffer.get_local(buf, "agenda-start-offset") == 7
+    assert Buffer.text(buf) =~ "Next"
+    refute Buffer.text(buf) =~ "Current"
+
+    press("[")
+    assert Buffer.get_local(buf, "agenda-start-offset") == 0
+    assert Buffer.text(buf) =~ "Current"
+
+    press("[")
+    assert Buffer.get_local(buf, "agenda-start-offset") == -7
+    assert Buffer.text(buf) =~ "Previous"
+    refute Buffer.text(buf) =~ "Current"
+
+    press(".")
+    assert Buffer.get_local(buf, "agenda-start-offset") == 0
+    assert Buffer.text(buf) =~ "Current"
+  end
+
+  test "the selected week survives refresh and mode restore", %{dir: dir} do
+    File.write!(Path.join(dir, "next.md"), "# TODO Next week #{stamp(7)}\n")
+
+    buf = open_agenda(dir)
+    Editor.set_window_buffer(buf)
+    press("]")
+    assert Buffer.text(buf) =~ "Next week"
+
+    press("g")
+    assert Buffer.get_local(buf, "agenda-start-offset") == 7
+    assert Buffer.text(buf) =~ "Next week"
+
+    {:ok, _} = Session.eval(~s[(buffer-set-local! "#{buf}" 'render-blocks (list))])
+    {:ok, _} = Session.eval(~s[(set-mode! "morg-agenda-mode")])
+
+    assert Buffer.get_local(buf, "agenda-start-offset") == 7
+    assert Buffer.text(buf) =~ "Next week"
+  end
+
+  test "a previous week keeps overdue planning on its original day", %{dir: dir} do
+    File.write!(Path.join(dir, "past.md"), """
+    # TODO Historical deadline
+    DEADLINE: #{stamp(-7)}
+    """)
+
+    buf = open_agenda(dir)
+    Editor.set_window_buffer(buf)
+    assert Buffer.text(buf) =~ "7d late"
+
+    press("[")
+    assert Buffer.text(buf) =~ "Historical deadline"
+    refute Buffer.text(buf) =~ "late"
+  end
+
   test "TAB folds the day: the local, the card and the text agree", %{dir: dir} do
     File.write!(Path.join(dir, "work.md"), "# TODO One thing #{stamp(0)}\n")
 

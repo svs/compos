@@ -19,8 +19,7 @@
 ;;;
 ;;; Keys (buffer-local):
 ;;;   n/p next/previous entry · RET visit the entry · TAB fold the day
-;;;   t or C-c C-t cycle TODO · g refresh · q quit
-;;;   C-c C-v the plain listing
+;;;   g refresh · q quit · C-c C-v the plain listing
 
 (domain! 'writing)
 (effects! '(read))
@@ -217,6 +216,56 @@
         '() (list-dir dir)))
 
 ;;; --- the week ----------------------------------------------------------------
+
+(define (morg-todos--text-entries path text)
+  (let loop ((lines (split-lines text)) (pos 0) (in-fence #f) (entries '()))
+    (if (null? lines)
+        (reverse entries)
+        (let* ((line (car lines))
+               (next (+ pos (string-byte-length line) 1)))
+          (cond
+            ((and in-fence (morg-fence-close? line))
+             (loop (cdr lines) next #f entries))
+            (in-fence
+             (loop (cdr lines) next in-fence entries))
+            ((morg-fence-info line)
+             (loop (cdr lines) next (morg-fence-info line) entries))
+            ((re-match "^\#{1,6}[ \t]" line)
+             (let ((parts (agenda--heading-parts line)))
+               (loop
+                (cdr lines) next #f
+                (if (equal? (car parts) "TODO")
+                    (cons (list 'title (cadr parts)
+                                'tags (caddr parts)
+                                'file path
+                                'pos pos)
+                          entries)
+                    entries))))
+            (else
+             (loop (cdr lines) next #f entries)))))))
+
+(define (morg-todos--file-entries path)
+  (let ((text (if (buffer-exists? path)
+                  (buffer-text path)
+                  (read-file path))))
+    (if (string? text)
+        (morg-todos--text-entries path text)
+        '())))
+
+(define (morg-todos--rows buf)
+  (fold (lambda (entries path)
+          (append entries (morg-todos--file-entries path)))
+        '()
+        (agenda--files)))
+
+(define (morg-todos--key buf row)
+  (string-append (plist-get row 'file) ":"
+                 (number->string (plist-get row 'pos))))
+
+(define (morg-todos--cells buf row)
+  (list (plist-get row 'title)
+        (or (plist-get row 'tags) "")
+        (agenda--basename (plist-get row 'file))))
 
 (define (agenda--iota start n)
   (let loop ((i 0) (acc '()))
@@ -459,24 +508,6 @@
            (day (agenda--day-at buf (agenda--line-number buf (point)))))
       (if day (agenda--toggle-day! buf day) (message "no day here")))))
 
-(define-command "agenda-todo" "Cycle the TODO state of the entry at point"
-  (lambda ()
-    (let* ((agenda (current-buffer))
-           (hit (agenda--entry-at agenda
-                  (agenda--line-number agenda (point)))))
-      (if (not hit)
-          (message "no entry here")
-          (let ((file (cadr hit)) (pos (caddr hit)))
-            ;; Visit the file so unsaved task changes stay in its buffer.
-            (visit file)
-            (let ((state (morg-toggle-todo-at! file pos)))
-              (switch-to-buffer! agenda)
-              (agenda--render! agenda)
-              (if state
-                  (message (if (equal? state "NONE")
-                               "TODO state cleared" state))
-                  (message "entry is not on a heading"))))))))
-
 (define-command "agenda-refresh" "Re-read the agenda files"
   (lambda () (agenda--render! (current-buffer))))
 
@@ -514,8 +545,6 @@
   (local-remap! "previous-line" "agenda-prev")
   (local-set-key "TAB" "agenda-toggle-day")
   (local-set-key "RET" "agenda-visit")
-  (local-set-key "t" "agenda-todo")
-  (local-set-key "C-c C-t" "agenda-todo")
   (local-set-key "g" "agenda-refresh")
   (local-set-key "q" "quit-window")
   (local-set-key "C-c C-v" "agenda-toggle-view"))
@@ -536,13 +565,51 @@
       (agenda--render! buf))))
 
 (mode-doc! "morg-agenda-mode"
-  "The week from your morg files, as day cards. `n` and `p` step over entries. `TAB` folds a day. `RET` opens an entry. `t` cycles its TODO state. `g` re-reads the files. `C-c C-v` shows the plain listing.")
+  "The week from your morg files, as day cards. `n` and `p` step over entries, `TAB` folds a day, and `RET` opens the entry's file. `g` re-reads the files. `C-c C-v` shows the plain listing.")
 
 (define-command "morg-agenda" "Show the agenda: dated entries from your morg files"
   (lambda ()
     (buffer-create *agenda-buffer*)
     (switch-to-buffer! *agenda-buffer*)
     (set-mode! "morg-agenda-mode")))
+
+(domain! 'writing)
+(effects! '(read write))
+
+(define *morg-todos-buffer* "*Morg TODOs*")
+
+(define-command "morg-todos-visit" "Open the TODO at point"
+  (lambda ()
+    (let ((row (list-current *morg-todos-buffer*)))
+      (if row
+          (agenda--visit!
+           (list 0 (plist-get row 'file) (plist-get row 'pos)))
+          (message "No TODO at point")))))
+
+(define-command "morg-todos-refresh" "Re-read all Morg TODO files"
+  (lambda () (list-mode-show! "morg-todos-mode")))
+
+(define-list-mode! "morg-todos-mode"
+  (list
+    'buffer *morg-todos-buffer*
+    'columns (lambda (buf)
+               (list (list "TODO" #f)
+                     (list "TAGS" 18)
+                     (list "FILE" 24)))
+    'cells morg-todos--cells
+    'key morg-todos--key
+    'rows morg-todos--rows
+    'render (lambda (buf row) (plist-get row 'title))
+    'footer (lambda (buf)
+              '(("RET" "open") ("g" "refresh") ("q" "quit")))
+    'noun "TODO"
+    'keys '(("RET" "morg-todos-visit")
+            ("g" "morg-todos-refresh")
+            ("q" "quit-window"))
+    'doc "All unfinished TODO headings from morg-agenda-files."))
+
+(define-command "morg-todos" "Show all unfinished TODOs from your Morg files"
+  (lambda () (list-mode-show! "morg-todos-mode")))
 
 (global-set-key "C-c a" "morg-agenda")
 

@@ -778,10 +778,12 @@
        (buffer-set-local! buf 'chat-turn-active #f)
        (buffer-set-local! buf 'agent-cancelling #f)
        (agent-finalize-running-tools! buf
-         (if (member (plist-get e 'stop-reason)
-                     '("cancelled" "canceled" "aborted"))
-             "cancelled"
-             "done"))
+         (cond ((member (plist-get e 'stop-reason)
+                        '("cancelled" "canceled" "aborted"))
+                "cancelled")
+               ((member (plist-get e 'stop-reason) '("error" "failed"))
+                "failed")
+               (else "done")))
        (let ((text (buffer-local buf 'agent-turn-text)))
          (cond
            ((and text (not (equal? (string-trim text) "")))

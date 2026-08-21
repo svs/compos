@@ -636,15 +636,19 @@ defmodule Aimax.Core.Agent do
     end
   end
 
-  # the status machine reads the event stream; control events (ready,
-  # turn-failed) are consumed here and never reach Scheme
+  # The status machine reads the event stream. A failed backend turn still
+  # becomes a normal terminal event for Scheme. Without that event, the Agent
+  # goes idle while the chat keeps its active flag and waiting presentation.
   defp apply_backend_event(state, event) do
     case Backend.event_type(event) do
       "ready" ->
         state |> set_status(:idle) |> pop_prompt_queue()
 
       "turn-failed" ->
-        state |> set_status(:idle) |> pop_prompt_queue()
+        apply_backend_event(
+          state,
+          Backend.plist(type: :"turn-end", "stop-reason": "error")
+        )
 
       "turn-end" ->
         # a turn that ends with a request still open (the agent gave up,

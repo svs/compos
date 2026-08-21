@@ -1397,6 +1397,44 @@ defmodule Aimax.AgentTest do
     refute Buffer.text(buf) =~ "⋯ thinking"
   end
 
+  test "a bare turn-failed event clears the active chat state" do
+    {slug, buf, agent} = boot("")
+
+    {:ok, _} = Session.eval(~s[(agent-prompt! "#{slug}" "go")])
+    assert_receive {:frame, %{"method" => "session/prompt"}}, 1_000
+    assert eventually(fn -> Buffer.get_local(buf, "chat-turn-active") == true end)
+
+    update(agent, "sess-1", %{
+      "sessionUpdate" => "tool_call",
+      "toolCallId" => "tc-stuck",
+      "title" => "eval-scheme",
+      "kind" => "other",
+      "status" => "pending",
+      "rawInput" => %{"code" => "(+ 1 2)"}
+    })
+
+    assert eventually(fn ->
+             (Buffer.get_local(buf, "agent-blocks") || [])
+             |> Enum.any?(&match?([_, _, "tool", "tc-stuck", _, _, "running" | _], &1))
+           end)
+
+    assert "tc-stuck" in (Buffer.get_local(buf, "agent-open-cards") || [])
+
+    [{owner, _}] = Registry.lookup(Aimax.Core.AgentRegistry, slug)
+    send(owner, {:backend_event, Backend.plist(type: :"turn-failed")})
+
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
+    assert eventually(fn -> Buffer.get_local(buf, "chat-turn-active") == false end)
+
+    assert eventually(fn ->
+             (Buffer.get_local(buf, "agent-blocks") || [])
+             |> Enum.any?(&match?([_, _, "tool", "tc-stuck", _, _, "failed" | _], &1))
+           end)
+
+    assert Buffer.get_local(buf, "agent-open-cards") == []
+    refute Buffer.text(buf) =~ "⋯ thinking"
+  end
+
   test "*agents* fleet: sorted by attention, y answers the current line's thread" do
     # thread 1: running; thread 2: needs permission
     {_, _, agent1} = boot("")

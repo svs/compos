@@ -3415,6 +3415,54 @@ defmodule Aimax.MinibufferEditingTest do
     File.rm!(path)
   end
 
+  # a drag in a preview: mousedown places point, the release extends the
+  # region to the caret under the pointer. Cmd-C then reads the region
+  # through clipboard-copy and gets the dragged source text.
+  test "a preview drag leaves the dragged text as the region" do
+    path =
+      Path.join(System.tmp_dir!(), "aimax-prevdrag-#{System.unique_integer([:positive])}.md")
+
+    File.write!(path, "# Title\n\nThe cursor should be visible.\n")
+
+    press(["C-x", "C-f"])
+    type(path)
+    press(["RET"])
+    press(["C-c", "C-v"])
+
+    win = Editor.render_state() |> Map.get(:tree) |> Map.get(:id)
+
+    {:ok, _} =
+      Aimax.Core.Session.call_named("preview-goto!", [
+        win,
+        "The ",
+        "cursor should be visible.",
+        "",
+        "cursor",
+        0,
+        0,
+        0
+      ])
+
+    assert Buffer.point(path) == 13
+
+    {:ok, _} =
+      Aimax.Core.Session.call_named("preview-select!", [
+        win,
+        "The cursor should",
+        " be visible.",
+        "should",
+        "",
+        0,
+        0,
+        0
+      ])
+
+    assert {:ok, "cursor should"} = Aimax.Core.Session.call_named("clipboard-copy", [])
+
+    press(["C-x", "1"])
+    File.rm!(path)
+  end
+
   # `-b` sits in the file three times. The client says which one it points
   # at, and a down key must never land above the cursor: the old code took
   # the first hit every time, so the cursor stopped moving.

@@ -1061,9 +1061,47 @@ defmodule Aimax.Ui.Layouts do
                     const off = c.startOffset !== undefined ? c.startOffset : c.offset;
                     visualGoal.x = null;
                     visualGoal.y = null;
+                    this.dragFrom = { x: e.clientX, y: e.clientY };
                     this.pushEvent("preview_goto", Object.assign(
                       { win: parseInt(this.el.dataset.win, 10) },
                       previewSpot(d, node, off, 0)));
+                  }, true);
+                  // A drag cannot keep its native selection: the goto above
+                  // re-renders the document and the anchor node dies. So a
+                  // drag extends the editor region to the caret under the
+                  // pointer instead — the same mirror mouse_sel gives a line
+                  // window, which a preview's events never reach.
+                  const dragSpot = (e) => {
+                    if (!this.dragFrom) return null;
+                    if (Math.abs(e.clientX - this.dragFrom.x) < 4 &&
+                        Math.abs(e.clientY - this.dragFrom.y) < 4) return null;
+                    const c = d.caretRangeFromPoint
+                      ? d.caretRangeFromPoint(e.clientX, e.clientY)
+                      : d.caretPositionFromPoint && d.caretPositionFromPoint(e.clientX, e.clientY);
+                    if (!c) return null;
+                    const node = c.startContainer || c.offsetNode;
+                    if (!node || node.nodeType !== 3) return null;
+                    const off = c.startOffset !== undefined ? c.startOffset : c.offset;
+                    return previewSpot(d, node, off, 0);
+                  };
+                  const dragExtend = (spot) => {
+                    this.pushEvent("preview_goto", Object.assign(
+                      { win: parseInt(this.el.dataset.win, 10), extend: true }, spot));
+                  };
+                  d.addEventListener("mousemove", (e) => {
+                    if (!this.dragFrom || !(e.buttons & 1)) return;
+                    const now = Date.now();
+                    if (this.dragAt && now - this.dragAt < 100) return;
+                    const spot = dragSpot(e);
+                    if (!spot) return;
+                    this.dragAt = now;
+                    dragExtend(spot);
+                  }, true);
+                  d.addEventListener("mouseup", (e) => {
+                    const spot = dragSpot(e);
+                    this.dragFrom = null;
+                    this.dragAt = null;
+                    if (spot) dragExtend(spot);
                   }, true);
                 }
                 d.addEventListener("scroll", () => {
@@ -1369,13 +1407,27 @@ defmodule Aimax.Ui.Layouts do
                   }
                   return false;
                 };
+                // a selection can live inside a same-origin preview iframe
+                // (an .llm-response drag), where the focused parent's own
+                // copy never sees it
+                const previewSelection = () => {
+                  for (const f of document.querySelectorAll(".window iframe")) {
+                    try {
+                      const s = f.contentDocument && f.contentDocument.getSelection();
+                      if (s && !s.isCollapsed) return s.toString();
+                    } catch (_) { /* cross-origin app frame */ }
+                  }
+                  return "";
+                };
                 this.handler = (e) => {
                   // Cmd-C with no native selection: copy the editor region
                   // (with one, the browser's own copy handles it)
                   if (e.metaKey && !e.ctrlKey && !e.altKey && e.key === "c" &&
                       window.getSelection().isCollapsed) {
                     e.preventDefault();
-                    this.pushEvent("copy", {});
+                    const text = previewSelection();
+                    if (text) navigator.clipboard.writeText(text);
+                    else this.pushEvent("copy", {});
                     return;
                   }
                   const spec = keySpec(e);

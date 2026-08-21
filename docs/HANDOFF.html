@@ -161,8 +161,10 @@ native rich transcript render-mode "agent": indigo YOU turns, Earmark markdown,
 collapsible tool cards, plan blocks, permission banners (Allow/Always/Deny,
 kind-aware: allow_once/allow_always/reject_once, <kbd>C-c C-a</kbd> for always;
 denials leave a transcript record, approvals stay invisible per bb's study) ·
-pulsing "⋯ thinking" line · queued steering shown muted (agent-queued face) until
-its turn · <kbd>C-RET</kbd> hard-escalates (cancel → kill+reattach, transcript kept) ·
+pulsing "⋯ thinking" line · queued steering held in the 'chat-queued local and
+shown as muted rows above the input (not transcript text, so streaming never
+repaints them) until its turn; <kbd>C-c C-d</kbd> takes the newest back into the
+input · <kbd>C-RET</kbd> hard-escalates (cancel → kill+reattach, transcript kept) ·
 failed prompts idle the thread instead of wedging :running · agent-rename
 (<kbd>C-c C-r</kbd>) carries identity+transcript to a new slug · threads open
 full-window (no popup) · restored buffers rebuild modeline/keys from locals ·

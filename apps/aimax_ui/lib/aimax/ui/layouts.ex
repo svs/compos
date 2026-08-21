@@ -2,6 +2,8 @@ defmodule Aimax.Ui.Layouts do
   use Phoenix.Component
 
   def root(assigns) do
+    assigns = assign_new(assigns, :page_title, fn -> "ai-max.el" end)
+
     ~H"""
     <!DOCTYPE html>
     <html lang="en">
@@ -10,7 +12,7 @@ defmodule Aimax.Ui.Layouts do
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="csrf-token" content={Phoenix.Controller.get_csrf_token()} />
         <meta name="boot-id" content={:persistent_term.get(:aimax_boot_id, "dev")} />
-        <title>ai-max.el</title>
+        <title>{@page_title}</title>
         <link rel="manifest" href="/manifest.webmanifest" />
         <link rel="icon" type="image/png" href="/icons/aimax-192.png" />
         <link rel="apple-touch-icon" href="/icons/aimax-192.png" />

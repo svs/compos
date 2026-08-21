@@ -8,8 +8,7 @@ defmodule Aimax.Ui.Endpoint do
     same_site: "Lax"
   ]
 
-  socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [session: @session_options]]
+  socket("/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]])
 
   # The Chrome extension's wire. The extension dials from its service worker,
   # so Chrome stamps Origin: chrome-extension://<id> on the handshake. A web
@@ -19,20 +18,21 @@ defmodule Aimax.Ui.Endpoint do
   # alone does not stop it. path: "/" mounts it at /browser rather than
   # Phoenix's default /browser/websocket — the extension scans ports, so the
   # address it dials should be the one a person would write down.
-  socket "/browser", Aimax.Ui.BrowserSocket,
+  socket("/browser", Aimax.Ui.BrowserSocket,
     websocket: [check_origin: {__MODULE__, :browser_origin?, []}, path: "/"],
     longpoll: false
+  )
 
   # LiveView's browser JS is shipped prebuilt inside the hex packages —
   # serve it straight from deps; no node/esbuild toolchain.
-  plug Plug.Static, at: "/phx", from: {:phoenix, "priv/static"}
-  plug Plug.Static, at: "/lv", from: {:phoenix_live_view, "priv/static"}
+  plug(Plug.Static, at: "/phx", from: {:phoenix, "priv/static"})
+  plug(Plug.Static, at: "/lv", from: {:phoenix_live_view, "priv/static"})
 
   # the PWA manifest and icons — Chrome installs the editor as its own app
-  plug Plug.Static, at: "/", from: :aimax_ui, only: ~w(manifest.webmanifest icons)
+  plug(Plug.Static, at: "/", from: :aimax_ui, only: ~w(manifest.webmanifest icons images))
 
-  plug Plug.Session, @session_options
-  plug Aimax.Ui.Router
+  plug(Plug.Session, @session_options)
+  plug(Aimax.Ui.Router)
 
   @doc """
   Accept the browser bridge only from a Chrome extension origin.

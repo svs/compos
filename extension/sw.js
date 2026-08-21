@@ -224,6 +224,42 @@ const OPS = {
     }
   },
 
+  // The AUTHENTICATED read: a real background tab loads the page — the
+  // site's own session cookies, SSO redirects and scripts all run —
+  // and the rendered document comes back; the tab closes behind it.
+  // The plain fetch op above misses per-site sessions (Substack keeps
+  // one per publication subdomain, refreshed only in a real tab).
+  async snapshot({ url, window }) {
+    const create = { url, active: false };
+    if (await windowExists(window)) create.windowId = window;
+    const t = await chrome.tabs.create(create);
+    try {
+      await new Promise((resolve) => {
+        const done = () => {
+          clearTimeout(timer);
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        };
+        const timer = setTimeout(done, 25000);
+        const listener = (id, info) => {
+          if (id === t.id && info.status === "complete") done();
+        };
+        chrome.tabs.onUpdated.addListener(listener);
+      });
+      // a script-rendered page needs a beat after "complete"
+      await new Promise((r) => setTimeout(r, 1200));
+      const [res] = await chrome.scripting.executeScript({
+        target: { tabId: t.id },
+        func: () => document.documentElement.outerHTML,
+      });
+      return { html: (res && res.result) || "" };
+    } finally {
+      try {
+        await chrome.tabs.remove(t.id);
+      } catch {}
+    }
+  },
+
   // Every ai-max tab answers a frame probe with its frame id. The daemon
   // sweeps frames with M-x refresh-frames: a frame no tab answers for is
   // dead. Probe ALL localhost tabs, not the editors map — that map keeps

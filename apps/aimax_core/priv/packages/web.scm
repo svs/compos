@@ -96,12 +96,14 @@
         "rm -f \"$t\" \"$e.new\"")
       (lambda (out) (k (if (equal? (string-trim out) "") #f out))))))
 
-;; the browser first: logged in on a site there means logged in here,
-;; because the fetch rides the browser's own cookie jar (the extension's
-;; "fetch" op). Chrome's http cache makes its revalidation transparent.
-;; No browser, or no answer — curl, with the ETag discipline.
+;; the browser first: logged in on a site there means logged in here.
+;; A SNAPSHOT, not a plain fetch — a real background tab loads the
+;; page, so per-site sessions (Substack keeps one per publication
+;; subdomain), SSO redirects and scripts all run, and the reader gets
+;; the RENDERED document. No browser, or no answer — curl, with the
+;; ETag discipline.
 (define (web--html-pipeline url k &optional revalidate?)
-  (browser-fetch url
+  (browser-snapshot url
     (lambda (html)
       (if html (k html) (web--curl-html url k revalidate?)))))
 

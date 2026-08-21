@@ -377,6 +377,18 @@
                (and (string? h) (not (equal? h "")) h)))))
       (k #f)))
 
+;; the AUTHENTICATED read: a real background tab loads the page — the
+;; site's own sessions, SSO redirects and scripts run — and the
+;; RENDERED document comes back. Slower than browser-fetch; right when
+;; logged-in content matters. K gets the html, or #f.
+(define (browser-snapshot url k)
+  (if (browser-connected?)
+      (browser-call "snapshot" (list 'url url)
+        (lambda (reply)
+          (k (let ((h (chrome--get reply 'html)))
+               (and (string? h) (not (equal? h "")) h)))))
+      (k #f)))
+
 (define (tab-eval tab code k)
   (chrome-call "eval" (list 'tab (chrome--tab-id tab) 'code code)
     (lambda (r) (k (chrome--get r 'value)))))
@@ -492,6 +504,7 @@
 (public! 'tab-click "(tab-click TAB X Y) — a real click at viewport coordinates")
 (public! 'tab-open "(tab-open URL &optional WINDOW) — open a new tab, in this frame's browser window unless WINDOW says otherwise")
 (public! 'browser-fetch "(browser-fetch URL K) — fetch URL through the browser, cookies and cache included; K gets the html, or #f")
+(public! 'browser-snapshot "(browser-snapshot URL K) — load URL in a background tab and answer the RENDERED html; sessions and scripts run; K gets html or #f")
 (public! 'tab-activate "(tab-activate TAB) — bring a tab to the front")
 (public! 'tab-close "(tab-close TAB) — close a tab")
 (public! 'tab-cdp "(tab-cdp TAB METHOD PARAMS K) — raw Chrome DevTools Protocol")

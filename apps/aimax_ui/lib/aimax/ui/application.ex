@@ -48,9 +48,14 @@ defmodule Aimax.Ui.Application do
 
       port ->
         [
-          {Bandit,
-           plug: Aimax.Ui.AppServer, scheme: :http, ip: {127, 0, 0, 1}, port: port,
-           startup_log: false}
+          # the fixed id lets Aimax.Core.Daemon.restart_listener/1 find and
+          # bounce this child by name
+          Supervisor.child_spec(
+            {Bandit,
+             plug: Aimax.Ui.AppServer, scheme: :http, ip: {127, 0, 0, 1}, port: port,
+             startup_log: false},
+            id: :aimax_app_server
+          )
         ]
     end
   end

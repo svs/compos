@@ -7,7 +7,90 @@ defmodule Aimax.Core.Daemon do
   `mix aimax.restart` uses. The shell waits for this BEAM to exit, then
   relaunches. The new daemon never fights the old one for the port or the
   socket.
+
+  This module also names the daemon's listen sockets — the JSON-RPC unix
+  socket, the HTTP endpoint, and the app-preview server — so Scheme can
+  list and bounce one listener without a full daemon restart. The owning
+  supervisors live in other apps; this module reaches them by registered
+  name, never by a compile-time call.
   """
+
+  # listener name => {supervisor name, child id}. Every child is
+  # restartable in place: terminate_child then restart_child.
+  @listeners [
+    {"rpc", Aimax.Rpc.Supervisor, Aimax.Rpc.Server},
+    {"http", Aimax.Ui.Supervisor, Aimax.Ui.Endpoint},
+    {"app", Aimax.Ui.Supervisor, :aimax_app_server}
+  ]
+
+  @doc """
+  The daemon's listen sockets as `%{name, status, address}`.
+
+  Status is "up" when the supervised child runs, "off" when the listener is
+  not configured (the app server with `app_port: nil`, or an app that is not
+  started), and "down" when it should run but does not.
+  """
+  def listeners do
+    for {name, sup, id} <- @listeners do
+      %{name: name, status: listener_status(name, sup, id), address: listener_address(name)}
+    end
+  end
+
+  @doc "Stop and start one listen socket. Returns :ok or an error tuple."
+  def restart_listener(name) do
+    case List.keyfind(@listeners, name, 0) do
+      {^name, sup, id} ->
+        if is_pid(Process.whereis(sup)) do
+          Supervisor.terminate_child(sup, id)
+
+          case Supervisor.restart_child(sup, id) do
+            {:ok, _} -> :ok
+            {:ok, _, _} -> :ok
+            {:error, reason} -> {:error, reason}
+          end
+        else
+          {:error, :not_running}
+        end
+
+      nil ->
+        {:error, :unknown_listener}
+    end
+  end
+
+  defp listener_status("app", _sup, _id) do
+    if Application.get_env(:aimax_ui, :app_port) == nil,
+      do: "off",
+      else: listener_status(nil, Aimax.Ui.Supervisor, :aimax_app_server)
+  end
+
+  defp listener_status(_name, sup, id) do
+    with sup_pid when is_pid(sup_pid) <- Process.whereis(sup),
+         {_, pid, _, _} when is_pid(pid) <-
+           sup_pid |> Supervisor.which_children() |> List.keyfind(id, 0) do
+      "up"
+    else
+      nil -> if listener_configured?(sup), do: "down", else: "off"
+      _ -> "down"
+    end
+  end
+
+  # a supervisor that never started (its app is absent in this node) makes
+  # the listener "off", not "down" — nothing is broken
+  defp listener_configured?(sup), do: is_pid(Process.whereis(sup))
+
+  defp listener_address("rpc") do
+    Application.get_env(:aimax_rpc, :socket_path, Path.join(Aimax.Core.home(), "sock"))
+    |> Path.expand()
+  end
+
+  defp listener_address("http"), do: :persistent_term.get(:aimax_editor_url, "")
+
+  defp listener_address("app") do
+    case Application.get_env(:aimax_ui, :app_port) do
+      nil -> ""
+      port -> "http://127.0.0.1:#{port}"
+    end
+  end
 
   @doc "Save the desktop, respawn the daemon, and stop this VM. Returns :ok or an error tuple."
   def restart do

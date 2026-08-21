@@ -27,10 +27,53 @@ defmodule Aimax.Core.Proc do
 
   def start_link(opts) do
     name = Keyword.fetch!(opts, :buffer)
-    GenServer.start_link(__MODULE__, opts, name: {:via, Registry, {@registry, name}})
+    cmd = Keyword.fetch!(opts, :cmd)
+    # the command rides as the registry value: a restart needs it, and the
+    # GenServer state is not reachable once the process is gone
+    GenServer.start_link(__MODULE__, opts, name: {:via, Registry, {@registry, name, cmd}})
   end
 
   def running?(buffer_name), do: Registry.lookup(@registry, buffer_name) != []
+
+  @doc "Every running process buffer as {buffer_name, cmd}, sorted by name."
+  def list do
+    Registry.select(@registry, [{{:"$1", :_, :"$2"}, [], [{{:"$1", :"$2"}}]}])
+    |> Enum.sort()
+  end
+
+  @doc "Kill the buffer's process and run the same command again."
+  def restart(buffer_name) do
+    case Registry.lookup(@registry, buffer_name) do
+      [{pid, cmd}] ->
+        ref = Process.monitor(pid)
+        GenServer.stop(pid, :normal)
+
+        receive do
+          {:DOWN, ^ref, :process, _, _} -> :ok
+        after
+          5_000 -> :ok
+        end
+
+        # the registry drops the name a moment after the process dies;
+        # starting into a still-registered name returns already_started
+        await_unregistered(buffer_name, 100)
+        start(buffer_name, cmd)
+
+      [] ->
+        {:error, :no_process}
+    end
+  end
+
+  defp await_unregistered(_name, 0), do: :ok
+
+  defp await_unregistered(name, tries) do
+    if running?(name) do
+      Process.sleep(10)
+      await_unregistered(name, tries - 1)
+    else
+      :ok
+    end
+  end
 
   def send_text(buffer_name, text) do
     case Registry.lookup(@registry, buffer_name) do

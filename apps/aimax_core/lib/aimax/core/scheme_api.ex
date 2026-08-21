@@ -150,6 +150,10 @@ defmodule Aimax.Core.SchemeAPI do
       "buffer-substring" =>
         "(buffer-substring START END) — return the current buffer's text between byte START and END.",
       "process-kill!" => "(process-kill! BUF) — kill the buffer's process.",
+      "process-list" =>
+        "(process-list) — return ((BUF CMD) ...) for every running process buffer.",
+      "process-restart!" =>
+        "(process-restart! BUF) — kill the buffer's process and run its command again; return #t on success.",
       "line-text" => "(line-text) — return the current line's text, without the newline.",
       "current-buffer" => "(current-buffer) — return the name of the current buffer.",
       "point" => "(point) — return point in the current buffer as a byte offset.",
@@ -161,6 +165,10 @@ defmodule Aimax.Core.SchemeAPI do
         "(aimax-config-dir) — where user config reads from (AIMAX_CONFIG, else the home).",
       "aimax-socket-path" =>
         "(aimax-socket-path) — return the path of this daemon's JSON-RPC socket.",
+      "socket-listeners" =>
+        "(socket-listeners) — return ((NAME STATUS ADDRESS) ...) for the daemon's listen sockets.",
+      "listener-restart!" =>
+        "(listener-restart! NAME) — stop and start the named listen socket; return #t.",
       "daemon-restart!" =>
         "(daemon-restart!) — save the desktop, restart the daemon, and reload Scheme; return #t.",
       "daemon-provision-workspace!" =>
@@ -648,6 +656,15 @@ defmodule Aimax.Core.SchemeAPI do
         Aimax.Core.Proc.kill(buffer)
         :void
       end,
+      "process-list" => fn [] ->
+        for {name, cmd} <- Aimax.Core.Proc.list(), do: [name, cmd]
+      end,
+      "process-restart!" => fn [buffer] ->
+        case Aimax.Core.Proc.restart(buffer) do
+          {:ok, _} -> true
+          _ -> false
+        end
+      end,
       # current line's text (policy-free helper for comint & friends)
       "line-text" => fn [] ->
         buf = Editor.current_buffer()
@@ -674,6 +691,19 @@ defmodule Aimax.Core.SchemeAPI do
       "aimax-socket-path" => fn [] ->
         Application.get_env(:aimax_rpc, :socket_path, Path.join(Aimax.Core.home(), "sock"))
         |> Path.expand()
+      end,
+      "socket-listeners" => fn [] ->
+        for l <- Aimax.Core.Daemon.listeners(), do: [l.name, l.status, l.address]
+      end,
+      "listener-restart!" => fn [name] ->
+        case Aimax.Core.Daemon.restart_listener(name) do
+          :ok ->
+            true
+
+          {:error, reason} ->
+            raise Aimax.Scheme.Eval.Error,
+              message: "listener-restart!: #{name}: #{inspect(reason)}"
+        end
       end,
       "daemon-restart!" => fn [] ->
         case Aimax.Core.Daemon.restart() do

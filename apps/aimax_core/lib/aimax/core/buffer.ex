@@ -716,6 +716,11 @@ defmodule Aimax.Core.Buffer do
         do: skip_hidden(motion, text, point, state.goal_col, hidden, state.point),
         else: point
 
+    # An embedded image replaces its backing URL in the display. Treat that
+    # range as one cursor position too, so line/character motion cannot spend
+    # keypresses walking through invisible URL bytes.
+    point = snap_atomic_overlay(point, motion, state)
+
     {:reply, point, state |> Map.put(:point, point) |> checkpoint_later()}
   end
 
@@ -1377,6 +1382,26 @@ defmodule Aimax.Core.Buffer do
   defp apply_motion(:backward_word, text, pos, _) do
     pos = skip_back_while(text, pos, &(!word_byte?(&1)))
     skip_back_while(text, pos, &word_byte?/1)
+  end
+
+  defp snap_atomic_overlay(point, motion, state) do
+    range =
+      state.overlays
+      |> Map.values()
+      |> Enum.concat()
+      |> Enum.find(fn
+        {s, e, face} when is_binary(face) ->
+          String.contains?(face, "img-embed") and point > s and point < e
+
+        _ ->
+          false
+      end)
+
+    case {range, motion} do
+      {{s, _e, _face}, motion} when motion in [:backward, :backward_word, :prev_line] -> s
+      {{_s, e, _face}, motion} when motion in [:forward, :forward_word, :next_line] -> e
+      _ -> point
+    end
   end
 
   defp in_hidden?(p, hidden), do: Enum.any?(hidden, fn {s, e} -> p > s and p <= e end)

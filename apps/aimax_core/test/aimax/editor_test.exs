@@ -176,6 +176,26 @@ defmodule Aimax.EditorTest do
     assert Buffer.point(buf) == 11 + 8
   end
 
+  test "line motion treats embedded images as atomic", %{buf: buf} do
+    image = "https://images.example/avatar.jpg"
+    text = "abc\n" <> image <> "\nxyz"
+    type(text)
+
+    image_start = 4
+    image_end = image_start + byte_size(image)
+    Buffer.set_overlays(buf, :test, [{image_start, image_end, "img-embed"}])
+
+    Buffer.goto(buf, image_start)
+    assert Buffer.forward_char(buf) == image_end
+    assert Buffer.backward_char(buf) == image_start
+
+    Buffer.goto(buf, 2)
+    assert Buffer.next_line(buf) == image_end
+    assert Buffer.next_line(buf) == image_end + 1 + 2
+    assert Buffer.previous_line(buf) == image_start
+    assert Buffer.previous_line(buf) == 2
+  end
+
   test "yank-pop rotates the kill ring", %{buf: buf} do
     type("first")
     press(["C-a", "C-SPC", "C-e", "C-w"])

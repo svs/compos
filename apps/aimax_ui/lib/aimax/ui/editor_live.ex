@@ -1173,10 +1173,24 @@ defmodule Aimax.Ui.EditorLive do
 
       segs =
         if touched? do
+          # Images are atomic display objects. Point may sit inside the URL
+          # backing one, but the cursor must not split its scheme before the
+          # image component sees it.
+          image_at_point =
+            Enum.find(line.ov, fn
+              {s, e, cls} when is_binary(cls) ->
+                cls =~ "img-embed" and point >= s and point < e
+
+              _ ->
+                false
+            end)
+
           overlays =
             [
               if(rs != re, do: {rs, re, "region"}),
-              if(point < cursor_end, do: {point, cursor_end, "cursor"})
+              if(point < cursor_end and is_nil(image_at_point),
+                do: {point, cursor_end, "cursor"}
+              )
             ]
             |> Enum.reject(&is_nil/1)
 
@@ -1184,6 +1198,32 @@ defmodule Aimax.Ui.EditorLive do
           # same long-line guard as every other one, and on a one-line buffer
           # this is the only line there is
           segs = line_segs(line.part, line.start, line.ts, line.ov ++ overlays)
+
+          segs =
+            case image_at_point do
+              {s, e, _} ->
+                target = binary_part(text, s, e - s)
+
+                {before, from_image} =
+                  Enum.split_while(segs, fn
+                    {^target, cls} when is_binary(cls) -> not (cls =~ "img-embed")
+                    _ -> true
+                  end)
+
+                case from_image do
+                  [image | after_image] when point == s ->
+                    before ++ [{" ", "cursor"}, image | after_image]
+
+                  [image | after_image] ->
+                    before ++ [image, {" ", "cursor"} | after_image]
+
+                  [] ->
+                    segs
+                end
+
+              nil ->
+                segs
+            end
 
           # cursor sitting on this line's newline (or at EOF on the last line)
           if point >= line.start and point == le,
@@ -1201,8 +1241,8 @@ defmodule Aimax.Ui.EditorLive do
   # ts class plus any active overlay classes
   # a seg whose overlay face says img-embed IS an image: the buffer text
   # stays the URL (the buffer is truth), the client draws the picture
-  attr :txt, :string, required: true
-  attr :cls, :string, required: true
+  attr(:txt, :string, required: true)
+  attr(:cls, :string, required: true)
 
   defp seg(%{cls: cls, txt: txt} = assigns)
        when is_binary(cls) and is_binary(txt) do

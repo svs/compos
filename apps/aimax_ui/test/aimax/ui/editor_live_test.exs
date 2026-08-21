@@ -208,11 +208,14 @@ defmodule Aimax.Ui.EditorLiveTest do
         ~s{(overlay-set! "#{buf}" 'zz-avatar (list (list 0 #{byte_size(url <> "#aimax-avatar")} "img-embed")))}
       )
 
+    # Point at byte zero used to split the image URL into a cursor-wrapped
+    # "h" and visible "ttps://...", so the image component never ran.
+    {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-goto! "#{buf}" 0)})
+
     {:ok, view, _} = live(conn, "/")
     html = render(view)
-    assert html =~ "img-avatar"
+    assert html =~ ~s(<img src="#{url}" class="img-embed img-avatar")
     assert html =~ "align-items: flex-end"
-    assert html =~ ~s(src="#{url}")
     refute html =~ "#aimax-avatar"
     assert html =~ "Alice · Aug 3"
   end

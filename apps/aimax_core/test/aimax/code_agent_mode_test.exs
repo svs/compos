@@ -34,14 +34,16 @@ defmodule Aimax.CodeAgentModeTest do
       eval!("(customize-set! 'code-agent-auto #t)")
       eval!(~s{(customize-set! 'code-agent-connector "codex-app-server")})
       eval!(~s{(customize-set! 'code-agent-model "gpt-5.6-sol")})
+      eval!(~s{(customize-set! 'code-agent-effort "medium")})
     end)
 
     :ok
   end
 
-  test "the coding preset defaults to codex-app-server · gpt-5.6-sol" do
+  test "the coding preset defaults to codex-app-server · gpt-5.6-sol · medium" do
     assert eval!("code-agent-connector") == ~s{"codex-app-server"}
     assert eval!("code-agent-model") == ~s{"gpt-5.6-sol"}
+    assert eval!("code-agent-effort") == ~s{"medium"}
   end
 
   test "a structural code edit turns the mode on and pins the coding preset" do
@@ -53,6 +55,7 @@ defmodule Aimax.CodeAgentModeTest do
     # no live runtime: only the identity locals change; the next send attaches
     assert Buffer.get_local(chat, "agent-connector") == "codex-app-server"
     assert Buffer.get_local(chat, "agent-model") == "gpt-5.6-sol"
+    assert Buffer.get_local(chat, "agent-effort") == "medium"
   end
 
   test "an ACP edit-kind tool call triggers too" do
@@ -139,16 +142,19 @@ defmodule Aimax.CodeAgentModeTest do
 
     eval!(~s{(buffer-set-local! "#{chat}" 'agent-connector "api")})
     eval!(~s{(buffer-set-local! "#{chat}" 'agent-model "claude-sonnet-5")})
+    eval!(~s{(buffer-set-local! "#{chat}" 'agent-effort "high")})
     eval!(~s{(buffer-set-local! "#{chat}" 'chat-presets '(project))})
 
     eval!(~s{(enable-minor-mode! "#{chat}" "code-agent-mode")})
     assert Buffer.get_local(chat, "agent-connector") == "codex-app-server"
     assert Buffer.get_local(chat, "agent-model") == "gpt-5.6-sol"
+    assert Buffer.get_local(chat, "agent-effort") == "medium"
     assert Buffer.get_local(chat, "chat-presets") == [sym: "aimax", sym: "project"]
 
     eval!(~s{(disable-minor-mode! "#{chat}" "code-agent-mode")})
     assert Buffer.get_local(chat, "agent-connector") == "api"
     assert Buffer.get_local(chat, "agent-model") == "claude-sonnet-5"
+    assert Buffer.get_local(chat, "agent-effort") == "high"
     assert Buffer.get_local(chat, "chat-presets") == [sym: "project"]
     assert Buffer.get_local(chat, "code-agent-saved") == false
   end

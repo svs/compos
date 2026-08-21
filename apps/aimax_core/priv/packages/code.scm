@@ -1111,6 +1111,10 @@
   "Model for a chat in code-agent-mode. Empty means the connector's default model."
   'group 'code 'type 'string)
 
+(defcustom 'code-agent-effort "medium"
+  "Reasoning effort for a chat in code-agent-mode. Empty means the connector's default."
+  'group 'code 'type 'string)
+
 ;;; Which tool calls mean "this agent edits code"?
 ;;;   - an ACP tool call of kind "edit" (a file edit by an ACP adapter)
 ;;;   - a structural code edit through eval-scheme
@@ -1159,7 +1163,9 @@
 (define (code-agent--on-target? buf)
   (and (equal? (or (buffer-local buf 'agent-connector) "") code-agent-connector)
        (or (equal? code-agent-model "")
-           (equal? (or (buffer-local buf 'agent-model) "") code-agent-model))))
+           (equal? (or (buffer-local buf 'agent-model) "") code-agent-model))
+       (or (equal? code-agent-effort "")
+           (equal? (or (buffer-local buf 'agent-effort) "") code-agent-effort))))
 
 ;; The switch itself. A live session goes through chat-switch! — the one
 ;; switch function. A chat with no live runtime only changes its identity
@@ -1169,15 +1175,21 @@
   (unless (or (equal? code-agent-connector "") (code-agent--on-target? buf))
     (let ((slug (buffer-local buf 'agent-slug)))
       (if (and slug (not (equal? (agent-status slug) 'dead)))
-          (chat-switch! buf code-agent-connector code-agent-model)
+          (chat-switch! buf code-agent-connector code-agent-model
+                        (if (equal? code-agent-effort "") #f code-agent-effort))
           (begin
             (buffer-set-local! buf 'agent-connector code-agent-connector)
             (buffer-set-local! buf 'agent-model
-              (if (equal? code-agent-model "") #f code-agent-model))))
+              (if (equal? code-agent-model "") #f code-agent-model))
+            (unless (equal? code-agent-effort "")
+              (buffer-set-local! buf 'agent-effort code-agent-effort))))
       (message (string-append "code-agent: " code-agent-connector
                               (if (equal? code-agent-model "")
                                   ""
-                                  (string-append " · " code-agent-model)))))))
+                                  (string-append " · " code-agent-model))
+                              (if (equal? code-agent-effort "")
+                                  ""
+                                  (string-append " · " code-agent-effort)))))))
 
 ;; Only the FIRST enable saves state and moves the chat. The setup re-runs
 ;; on desktop restore, and a re-run must not undo a model the user chose
@@ -1187,6 +1199,7 @@
     (buffer-set-local! buf 'code-agent-saved
       (list (list 'agent-connector (or (buffer-local buf 'agent-connector) #f))
             (list 'agent-model (or (buffer-local buf 'agent-model) #f))
+            (list 'agent-effort (or (buffer-local buf 'agent-effort) #f))
             (list 'chat-presets (or (buffer-local buf 'chat-presets) #f))))
     ;; the chat gains the coding tool presets, like a code-mode buffer does
     (let* ((cur (or (buffer-local buf 'chat-presets) '()))
@@ -1214,16 +1227,19 @@
 (define (code-agent--teardown! buf)
   (let ((conn (code-agent--saved buf 'agent-connector))
         (model (code-agent--saved buf 'agent-model))
+        (effort (code-agent--saved buf 'agent-effort))
         (presets (code-agent--saved buf 'chat-presets)))
     (buffer-set-local! buf 'code-agent-switch-pending #f)
     (buffer-set-local! buf 'code-agent-saved #f)
     (buffer-set-local! buf 'chat-presets presets)
     (let ((slug (buffer-local buf 'agent-slug)))
       (if (and slug (not (equal? (agent-status slug) 'dead)))
-          (chat-switch! buf (or conn *default-connector*) (or model ""))
+          (chat-switch! buf (or conn *default-connector*) (or model "")
+                        (or effort "default"))
           (begin
             (buffer-set-local! buf 'agent-connector conn)
-            (buffer-set-local! buf 'agent-model model))))))
+            (buffer-set-local! buf 'agent-model model)
+            (buffer-set-local! buf 'agent-effort effort))))))
 
 (register-minor-mode! "code-agent-mode" code-agent--apply! code-agent--teardown!)
 

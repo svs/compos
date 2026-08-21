@@ -2584,56 +2584,8 @@
               (goto-char! (line-start-position n))
               (message "Not a number")))))))
 
-;;; --- imenu: jump to a definition, tree-sitter-driven ------------------------
-;;; One query per definition SHAPE a language's grammar uses. Every pattern
-;;; must anchor EVERY adjacent sibling with '.' — an unanchored capture
-;;; matches the pattern anywhere later in the list, not just next (bit us
-;;; once already: "+" inside a function body spuriously matched as a name).
-;;; Only the @name capture is read; @kw exists purely for the #eq? filter.
-
-(define *imenu-queries*
-  (list
-    (list "scheme"
-      "(list . (symbol) @kw . (symbol) @name (#eq? @kw \"define\"))
-       (list . (symbol) @kw . (list . (symbol) @name) (#eq? @kw \"define\"))
-       (list . (symbol) @kw . (string) @name (#eq? @kw \"define-command\"))")))
-
-;; (label start) pairs, buffer order. A string capture's quotes are part
-;; of its byte range (define-command names) — stripped for display.
-(define (imenu-candidates)
-  (let ((q (assoc (buffer-local (current-buffer) 'ts-lang) *imenu-queries*)))
-    (if (not q)
-        '()
-        (reverse
-          (fold (lambda (acc cap)
-                  (if (equal? (car cap) "name")
-                      (let* ((start (car (cdr cap))) (end (car (cdr (cdr cap))))
-                             (text (buffer-substring start end))
-                             (label (if (string-prefix? "\"" text)
-                                        (substring text 1 (- (string-length text) 1))
-                                        text)))
-                        (cons (list label start) acc))
-                      acc))
-                '() (ts-query (car (cdr q))))))))
-
-(define-command "imenu" "Jump to a definition in this buffer (tree-sitter)"
-  (lambda ()
-    (let ((cands (imenu-candidates)) (orig (point)))
-      (if (null? cands)
-          (message
-            (if (assoc (buffer-local (current-buffer) 'ts-lang) *imenu-queries*)
-                "no definitions found"
-                "imenu: no query defined for this buffer's language"))
-          (minibuffer-read-preview "Imenu: "
-            (map (lambda (c) (list (car c) "")) cands)
-            (lambda (label)
-              (let ((c (assoc label cands))) (when c (goto-char! (car (cdr c))))))
-            (lambda (label)
-              (let ((c (assoc label cands)))
-                (goto-char! (if c (car (cdr c)) orig))))
-            (lambda () (goto-char! orig)))))))
-
-(global-set-key "M-g i" "imenu")
+;;; imenu lives in packages/code.scm now, on the outline contract: the
+;;; index is (code-outline BUF), so it needs no per-language query table.
 
 ;;; --- mark & region ---------------------------------------------------------
 

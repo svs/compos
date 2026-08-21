@@ -1083,3 +1083,77 @@
 (effects! '(pure))
 (public! 'code-mode-instructions
   "(code-mode-instructions DOCS) — the code instructions a prompt adds for those buffers")
+
+;;; --- imenu: jump to a definition, on the outline contract ---------------------
+;;; The index IS (code-outline BUF): tree-sitter where a grammar exists,
+;;; indentation structure where none does, so every buffer has an index
+;;; and no per-language query table exists. A morg buffer indexes its
+;;; headings instead.
+
+(domain! 'code)
+(effects! '(read))
+
+;; -> (LINE KIND NAME DOC) rows, the outline contract
+(define (imenu-rows buf)
+  (if (and (boundp 'morg-scan)
+           (equal? (buffer-local buf 'mode-name) "morg-mode"))
+      (map (lambda (e)
+             (list (line-number-at-pos (car e)) "heading"
+                   (string-trim (cadr e)) ""))
+           (filter (lambda (e) (equal? (morg-kind e) 'heading))
+                   (morg-scan buf)))
+      (let ((rows (code-outline buf)))
+        (if (string? rows) '() rows))))
+
+(define (imenu--snip s)
+  (let ((s (string-trim s)))
+    (if (> (string-length s) 60)
+        (string-append (substring s 0 60) "…")
+        s)))
+
+;; -> (LABEL LINE HINT); a repeated name carries its line in the label,
+;; so every row stays reachable
+(define (imenu--candidates rows)
+  (let loop ((rs rows) (seen '()) (out '()))
+    (if (null? rs)
+        (reverse out)
+        (let* ((r (car rs))
+               (line (car r))
+               (kind (cadr r))
+               (name (caddr r))
+               (doc (car (cdr (cdr (cdr r)))))
+               (label (if (member name seen)
+                          (string-append name " (L" (number->string line) ")")
+                          name))
+               (hint (string-append
+                       kind " · L" (number->string line)
+                       (if (or (not doc) (equal? doc ""))
+                           ""
+                           (string-append " — " (imenu--snip doc))))))
+          (loop (cdr rs) (cons name seen)
+                (cons (list label line hint) out))))))
+
+(public! 'imenu-rows
+  "(imenu-rows BUF) — the imenu index as outline rows (LINE KIND NAME DOC)")
+
+(effects! '(write))
+
+(define-command "imenu" "Jump to a definition in this buffer"
+  (lambda ()
+    (let ((rows (imenu-rows (current-buffer)))
+          (orig (point)))
+      (if (null? rows)
+          (message "imenu: no definitions in this buffer")
+          (let ((cands (imenu--candidates rows)))
+            (minibuffer-read-preview "Imenu: "
+              (map (lambda (c) (list (car c) (caddr c))) cands)
+              (lambda (label)
+                (let ((c (assoc label cands)))
+                  (when c (goto-char! (line-start-position (cadr c))))))
+              (lambda (label)
+                (let ((c (assoc label cands)))
+                  (goto-char! (if c (line-start-position (cadr c)) orig))))
+              (lambda () (goto-char! orig))
+              #t))))))
+
+(global-set-key "M-g i" "imenu")

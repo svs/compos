@@ -45,6 +45,10 @@
 ;;   3. when pandoc answers only a "[TABLE]" placeholder (a nested
 ;;      table layout), the page again with the table tags flattened,
 ;;      so it reads as lines with its links intact.
+(define (web--substack-feed? url)
+  (or (equal? url "https://substack.com")
+      (string-prefix? "https://substack.com/" url)))
+
 (define (web--convert-html url html k)
   (let ((f (string-append (aimax-home) "/browse-fetch.html"))
         (u (web--shell-quote url))
@@ -54,13 +58,31 @@
     (write-file! f html)
     (shell-command->string
       (string-append
-        "out=$(readable --base " u " " (web--shell-quote f) " 2>/dev/null" p "); "
-        "if [ \"${#out}\" -lt 200 ]; then out=$(cat " (web--shell-quote f) p "); fi; "
-        "case \"$out\" in *'[TABLE]'*) "
+        ;; the first output line NAMES the reading that won — "feed",
+        ;; "article", or "page" — and the modeline shows it
+        (if (web--substack-feed? url)
+            (string-append
+              "m=feed; out=$(xmllint --html --xpath "
+              "'//*[@role=\"article\" and (@aria-label=\"Note\" or @aria-label=\"Post\")]' "
+              (web--shell-quote f) " 2>/dev/null" p "); ")
+            (string-append
+              "m=article; out=$(readable --base " u " " (web--shell-quote f)
+              " 2>/dev/null" p "); "))
+        "if [ \"${#out}\" -lt 200 ]; then m=article; out=$(readable --base " u " "
+        (web--shell-quote f) " 2>/dev/null" p "); fi; "
+        "if [ \"${#out}\" -lt 200 ]; then m=page; out=$(cat " (web--shell-quote f) p "); fi; "
+        "case \"$out\" in *'[TABLE]'*) m=page; "
         "out=$(perl -pe 's{</?(?:table|tbody|thead|tr|td|th)\\b[^>]*>}{ }gi'"
         " < " (web--shell-quote f) p ");; esac; "
-        "printf %s \"$out\"")
-      (lambda (out) (k (if (equal? (string-trim out) "") #f out))))))
+        "printf '%s\\n%s' \"$m\" \"$out\"")
+      (lambda (out)
+        (let ((nl (and (string? out) (string-index out "\n"))))
+          (cond
+            ((or (not nl) (equal? (string-trim out) "")) (k #f))
+            (else
+              (set! *web--last-kind* (substring-bytes out 0 nl))
+              (let ((md (substring-bytes out (+ nl 1) (string-byte-length out))))
+                (k (if (equal? (string-trim md) "") #f md))))))))))
 
 ;; URL -> markdown, in a Task. Tests replace this seam. ONE download;
 ;; the conversion reads the same bytes from a file. Holding a session
@@ -69,6 +91,10 @@
 ;; the cache fetch sets *web--revalidate* when it holds a copy to fall
 ;; back on: the fetch then sends the ETag, and a 304 costs headers only
 (define *web--revalidate* #f)
+
+;; which reading the last conversion produced: "article" or "page".
+;; A stubbed or served fetch leaves the default.
+(define *web--last-kind* "page")
 
 (define (web--pipeline url k)
   (*web-fetch-html* url
@@ -287,9 +313,13 @@
 
 ;;; --- rendering ------------------------------------------------------------------
 
+;; the modeline says WHICH reading this is: "article" when readability
+;; extracted one, "page" for the whole page, "feed" for a feed parse
 (define (web--update-modeline! buf)
   (buffer-set-local! buf 'modeline-info
     (string-append
+      (let ((kind (buffer-local buf 'browse-kind)))
+        (if kind (string-append kind " · ") ""))
       (or (buffer-local buf 'browse-url) "")
       (let ((age (cache-age-label buf)))
         (if age (string-append " · " age) "")))))
@@ -338,11 +368,13 @@
               (*web-fetch* url
                 (lambda (md)
                   (cond (md (k md))
-                        (hit (k (nth 1 hit)))
+                        (hit (set! *web--last-kind* (web--page-kind hit))
+                             (k (nth 1 hit)))
                         (else (k #f)))))))))
     ;; a fetch completion is the one moment a page enters the session
     ;; cache — serving from it must not refresh its age
     (lambda (b md)
+      (buffer-set-local! b 'browse-kind *web--last-kind*)
       (web--page-remember! b (buffer-local b 'browse-url) md)
       (web--render! b md))
     *web-cache-ttl*))
@@ -356,12 +388,17 @@
 
 (define *web-page-cache-max* 20)
 
+;; an entry keeps the reading's KIND too, so a served copy still says
+;; article or page in the modeline
 (define (web--page-remember! buf url md)
   (buffer-set-local! buf 'browse-pages
-    (take-n (cons (list url md (current-time))
+    (take-n (cons (list url md (current-time) *web--last-kind*)
                   (filter (lambda (e) (not (equal? (car e) url)))
                           (or (buffer-local buf 'browse-pages) '())))
             *web-page-cache-max*)))
+
+(define (web--page-kind hit)
+  (if (> (length hit) 3) (nth 3 hit) "page"))
 
 (define (web--page-cached buf url)
   (assoc url (or (buffer-local buf 'browse-pages) '())))
@@ -380,6 +417,7 @@
           ;; the page's own age drives the TTL: a wake still refreshes
           ;; one that has grown old
           (buffer-set-local! buf 'cache-time (nth 2 hit))
+          (buffer-set-local! buf 'browse-kind (web--page-kind hit))
           (web--render! buf (nth 1 hit)))
         (begin
           ;; a new page: the old stamp must not satisfy the TTL
@@ -614,19 +652,14 @@ C-s searches to any link.")
 ;; next agent before they rebuild what was already decided
 (catalog-register! 'note 'custom-site-parser
   (string-append
-    "Per-site custom web parsers (a Hacker News parser, a site-specific "
-    "reader) do NOT exist — no parser is written, none is registered. "
-    "The generic reader — readable, pandoc, the table flatten — has read "
-    "every site well so far, Hacker News included. This note is the "
-    "agreed DESIGN for the day a site truly needs one: add a defcustom "
-    "browse-parse-functions, a list of names; each NAME calls "
-    "browse-parse-NAME with (URL HTML) and answers markdown, or #f to "
-    "pass; web--pipeline tries the list before the generic conversion. "
-    "Users add their own from init.scm. Decided 2026-08-21: not built "
-    "while the generic reader serves.")
+    "Substack now uses the first site-specific reader. "
+    "The parser selects semantic Note and Post article nodes before pandoc, "
+    "so the signed-in feed omits navigation, suggestions, and subscriptions. "
+    "Other sites still use readable, pandoc, and the table fallback. "
+    "A public parser registry does not exist yet.")
   'domain 'web
   'effects '(pure)
-  'use "a design note — the seam would live in packages/web.scm, in web--pipeline")
+  'use "browse https://substack.com; web--convert-html selects feed articles")
 
 (public! 'browse
   "(browse URL) — read URL as text in its own tab buffer (*browse:host/page*); in a browse buffer it navigates in place")

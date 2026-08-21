@@ -598,5 +598,23 @@ C-s searches to any link.")
 ;;; --- catalog ------------------------------------------------------------------
 
 (category! 'web)
+
+;; a design note in the catalog: apropos "custom parser" answers the
+;; next agent before they rebuild what was already decided
+(catalog-register! 'note 'custom-site-parser
+  (string-append
+    "Per-site custom web parsers (a Hacker News parser, a site-specific "
+    "reader) are a DESIGN, not code. The generic reader — readable, "
+    "pandoc, the table flatten — has read every site well so far, Hacker "
+    "News included. When a site truly needs one: add a defcustom "
+    "browse-parse-functions, a list of names with (hn) as the default; "
+    "each NAME calls browse-parse-NAME with (URL HTML) and answers "
+    "markdown, or #f to pass; web--pipeline tries the list before the "
+    "generic conversion. Users add their own from init.scm. Decided "
+    "2026-08-21: not built while the generic reader serves.")
+  'domain 'web
+  'effects '(pure)
+  'use "a design note — the seam would live in packages/web.scm, in web--pipeline")
+
 (public! 'browse
   "(browse URL) — read URL as text in its own tab buffer (*browse:host/page*); in a browse buffer it navigates in place")

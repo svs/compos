@@ -357,9 +357,12 @@
   (let ((v (catalog--get e key)))
     (if v (catalog--string v) "")))
 
+;; a "note" is a design decision left in the catalog for the next
+;; agent: no code behind it, just the words that answer the search
+;; before someone rebuilds what was already decided
 (define (apropos--catalog-entry e words)
   (let ((kind (catalog--get e 'kind)))
-    (and (member kind '("component" "mode"))
+    (and (member kind '("component" "mode" "note"))
          (apropos--hit?
            (string-append (apropos--catalog-field e 'name) " "
                           (apropos--catalog-field e 'qualified-name) " "

@@ -231,6 +231,12 @@ defmodule Aimax.WebBrowseTest do
     press("C-g")
   end
 
+  test "apropos finds the custom-parser design note" do
+    hits = eval!(~S{(apropos "custom parser")})
+    assert hits =~ "custom-site-parser"
+    assert hits =~ "browse-parse-functions"
+  end
+
   test "the tidy pass drops heading marks and rules, and unescapes pandoc" do
     assert eval!(~S{(web--tidy "## A title\n\n----\n\nsee \\| this \\[here\\]\n")}) ==
              "\"A title\\n\\nsee | this [here]\\n\""

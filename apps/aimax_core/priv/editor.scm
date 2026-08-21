@@ -5070,6 +5070,11 @@
     ;; a one-shot note for the next send (a skill body a mode pushed):
     ;; undelivered it must survive a restart, and a reset drops it
     chat-note-once
+    ;; messages typed mid-turn that the model did not read yet, oldest
+    ;; first. The client renders them as muted rows above the input —
+    ;; they are not transcript text. Restore returns them to the input;
+    ;; a reset drops them with the conversation.
+    chat-queued
     ;; the file this conversation logs itself to under <aimax-home>/chats:
     ;; a reset starts a new conversation, which gets a new file, and the
     ;; old file stays as the archive
@@ -5078,9 +5083,9 @@
 
 ;; PROCESS state — mirrors a live runtime, so it is always stale after a
 ;; restart and meaningless after a reset: both clear it wholesale
-;; ('agent-queued is retired — queued messages live in the transcript as
-;; "queued" blocks now — but stays listed so old sessions' stale values
-;; are still swept)
+;; ('agent-queued is retired — queued messages live in the 'chat-queued
+;; conversation local now — but stays listed so old sessions' stale
+;; values are still swept)
 (define chat-runtime-locals
   '(agent-slug agent-queued agent-waiting chat-waiting chat-activity
     agent-cancelling agent-seed-context agent-tool-bodies
@@ -5371,8 +5376,8 @@
 ;;; until its first send, and up-arrow has to work before then.
 
 ;; just past the marker: where the live input begins. A message queued
-;; mid-turn does not live here — RET echoes it into the transcript as a
-;; muted "queued" block (agent-echo-queued!), and the input clears.
+;; mid-turn does not live here — RET moves it into the 'chat-queued
+;; local (agent-echo-queued!), and the input clears.
 (define (chat-input-start buf)
   (+ (chat-mark buf)
      (or (buffer-local buf 'agent-marker-bytes)

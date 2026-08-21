@@ -4,7 +4,8 @@
 ;;; at the >>> you: marker and RET (queued if the agent is mid-turn).
 ;;; C-g aborts the reply in flight; C-RET escalates to a hard reset. TAB
 ;;; folds/unfolds tool output. C-c C-y / C-c C-n answer permission
-;;; requests. The Elixir side (Aimax.Core.Agent) is mechanism only:
+;;; requests. C-c C-d takes the newest queued message back into the
+;;; input. The Elixir side (Aimax.Core.Agent) is mechanism only:
 ;;; subprocess, framing, event batches.
 
 ;;; --- faces --------------------------------------------------------------------
@@ -531,50 +532,48 @@
       (buffer-set-local! buf 'agent-prose-from #f))))
 
 ;;; --- queued messages ------------------------------------------------------------
-;;; RET mid-turn moves the message up into the transcript at once, muted,
-;;; and the input clears so the next message can be typed. The muted line
-;;; becomes the normal user line when the model reads the text — at the
-;;; next tool round on the direct lane, at turn start elsewhere. An abort
-;;; excises the lines whose text was never read.
+;;; RET mid-turn queues the message. The texts live in the 'chat-queued
+;;; local, oldest first, and the client renders them as muted rows
+;;; between the transcript and the input — they are not transcript text.
+;;; So a streamed event never moves them and the transcript never
+;;; repaints them (excise + re-insert per event was the flicker). The
+;;; text becomes the normal user line when the model reads it — at the
+;;; next tool round on the direct lane, at turn start elsewhere. An
+;;; abort discards the texts the model never read.
 
 (define (agent-echo-queued! slug text)
-  (let* ((buf (agent-buf slug))
-         (waiting? (buffer-local buf 'agent-waiting)))
-    ;; the muted line must not land inside the pending prose tail — the
-    ;; tail reveals first, so the prose block never swallows the echo
-    (agent-flush-prose! slug #f)
-    ;; the waiting line stays the last text before the marker
-    (when waiting? (agent-clear-waiting! slug))
-    (let ((start (agent-render! slug
-                   (string-append "\n>>> you: " text "\n\n")
-                   "agent-queued")))
-      (agent-block-push! buf start (agent-mark slug) "queued" (list text)))
-    (when waiting? (agent-show-waiting! slug))))
+  (let ((buf (agent-buf slug)))
+    (buffer-set-local! buf 'chat-queued
+      (append (or (buffer-local buf 'chat-queued) '()) (list text)))))
 
-;; Abort discards every queued message: its muted line leaves the
-;; transcript. The blocks list is newest first, so excision runs top-down
-;; and earlier offsets stay valid.
-(define (agent-discard-queued-renders! buf)
+;; the model read TEXT: its queued row leaves; younger texts stay queued
+(define (agent-pop-queued! buf text)
+  (let ((texts (or (buffer-local buf 'chat-queued) '())))
+    (when (and (not (null? texts)) (equal? (car texts) text))
+      (buffer-set-local! buf 'chat-queued
+        (if (null? (cdr texts)) #f (cdr texts))))))
+
+;; Abort discards every queued message the model never read. A legacy
+;; transcript (saved before 'chat-queued) still carries muted "queued"
+;; blocks in its text — excise those too. The blocks list is newest
+;; first, so excision runs top-down and earlier offsets stay valid.
+(define (agent-discard-queued! buf)
+  (buffer-set-local! buf 'chat-queued #f)
   (for-each (lambda (b) (agent-excise-range! buf (nth 0 b) (nth 1 b)))
             (filter (lambda (b) (equal? (nth 2 b) "queued"))
                     (agent-blocks buf))))
 
-;; excise every queued line; return their texts, oldest first, so the
-;; caller can render its own output and re-echo them below it
-(define (agent-lift-queued! buf)
-  (let ((qs (filter (lambda (b) (equal? (nth 2 b) "queued"))
-                    (agent-blocks buf))))
-    (for-each (lambda (b) (agent-excise-range! buf (nth 0 b) (nth 1 b))) qs)
-    (map (lambda (b) (nth 3 b)) (reverse qs))))
-
-;; After a restart the queue is gone but the muted lines survive in the
-;; transcript. The text returns to the input, oldest first, ahead of any
-;; draft — the same place it was before RET. Runs with BUF current.
+;; After a restart the queue is gone. The texts return to the input,
+;; oldest first, ahead of any draft — the same place they were before
+;; RET. A legacy transcript's muted "queued" blocks lift out of the text
+;; and join, oldest first. Runs with BUF current.
 (define (agent-unqueue-renders-to-input! buf)
-  (let ((qs (filter (lambda (b) (equal? (nth 2 b) "queued")) (agent-blocks buf))))
-    (unless (null? qs)
-      (let ((texts (map (lambda (b) (nth 3 b)) (reverse qs)))
-            (draft (chat-input-text buf)))
+  (let* ((qs (filter (lambda (b) (equal? (nth 2 b) "queued")) (agent-blocks buf)))
+         (texts (append (map (lambda (b) (nth 3 b)) (reverse qs))
+                        (or (buffer-local buf 'chat-queued) '()))))
+    (buffer-set-local! buf 'chat-queued #f)
+    (unless (null? texts)
+      (let ((draft (chat-input-text buf)))
         (for-each (lambda (b) (agent-excise-range! buf (nth 0 b) (nth 1 b))) qs)
         (chat-replace-input! buf
           (fold (lambda (acc t)
@@ -590,13 +589,7 @@
 
 (define (agent-handle-event slug e)
   (let* ((buf (agent-buf slug))
-         (type (plist-get e 'type))
-         ;; queued lines stay the last thing above the input: an event
-         ;; that renders lifts them out of the way first and re-echoes
-         ;; them below its own output (the for-each at the end)
-         (lifted (if (member type '(status model-state mode-state usage user-msg))
-                     '()
-                     (agent-lift-queued! buf))))
+         (type (plist-get e 'type)))
     ;; pending prose reveals before any other block lands, so the
     ;; transcript keeps the model's own order
     (unless (member type '(chunk status model-state mode-state usage))
@@ -637,19 +630,14 @@
        ;; already recorded this turn from the wire — chat-record-event!
        ;; knows, and does not record it twice.
        (chat-record-event! buf "user" (list (list "text" (plist-get e 'text))))
-       ;; a message echoed at RET (queued mid-turn) becomes the normal
-       ;; user line now that the model reads it; any younger queued
-       ;; lines re-echo below it, still muted
-       (let* ((texts (agent-lift-queued! buf))
-              (txt (plist-get e 'text))
-              (rest (if (and (not (null? texts)) (equal? (car texts) txt))
-                        (cdr texts)
-                        texts)))
+       ;; a message queued at RET becomes the normal user line now that
+       ;; the model reads it; younger texts stay queued, still muted
+       (let ((txt (plist-get e 'text)))
+         (agent-pop-queued! buf txt)
          (let ((start (agent-render! slug
                         (string-append "\n>>> you: " txt "\n\n")
                         "agent-you")))
-           (agent-block-push! buf start (agent-mark slug) "user" (list txt)))
-         (for-each (lambda (t) (agent-echo-queued! slug t)) rest))
+           (agent-block-push! buf start (agent-mark slug) "user" (list txt))))
        (agent-show-waiting! slug)
        (chat-activity! buf "waiting…"))
 
@@ -875,8 +863,7 @@
          (agent-block-drop-kind! buf "permission")
          (agent-block-drop-kind! buf "question")))
 
-      (else #f))
-    (for-each (lambda (t) (agent-echo-queued! slug t)) lifted)))
+      (else #f))))
 
 (llm-session-on-event!
   (lambda (slug events)
@@ -1475,7 +1462,7 @@
               (else
                (buffer-set-local! buf 'agent-cancelling #t)
                (agent-finalize-running-tools! buf "cancelled")
-               (agent-discard-queued-renders! buf)
+               (agent-discard-queued! buf)
                (llm-session-cancel! slug)
                (message "cancel requested — C-RET again forces a restart")))))))
 
@@ -1490,7 +1477,7 @@
       (if (and slug (member (agent-status slug) '(running starting needs_attention)))
           (begin
             (agent-finalize-running-tools! buf "cancelled")
-            (agent-discard-queued-renders! buf)
+            (agent-discard-queued! buf)
             (llm-session-cancel! slug)
             ;; both waiting markers: a thread renders its own ('agent-waiting),
             ;; a chat that never attached a runtime renders 'chat-waiting
@@ -1498,6 +1485,30 @@
             (chat-clear-waiting! buf)
             (message "aborted"))
           (run-command "keyboard-quit")))))
+
+;; The undo for a mid-turn RET: the newest queued message leaves the
+;; queue, and its text returns to the input ahead of any draft. The
+;; runtime forgets the message too, so the turn end does not run it.
+;; Press again to take back older messages.
+(define-command "chat-unqueue" "Remove the newest queued message and return it to the input"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (slug (agent-slug-of buf))
+           (texts (or (buffer-local buf 'chat-queued) '())))
+      (if (null? texts)
+          (message "no queued messages")
+          (let* ((rev (reverse texts))
+                 (text (car rev))
+                 (kept (reverse (cdr rev))))
+            (when (and slug (not (equal? (agent-status slug) 'dead)))
+              (agent-dequeue! slug text))
+            (buffer-set-local! buf 'chat-queued (if (null? kept) #f kept))
+            (let ((draft (chat-input-text buf)))
+              (chat-replace-input! buf
+                (if (equal? (string-trim draft) "")
+                    text
+                    (string-append text "\n" draft))))
+            (message "unqueued — the message is back in the input"))))))
 
 ;;; --- connectors ---------------------------------------------------------------
 ;;; A connector is a named config plist for a thread's backend: 'backend
@@ -1840,6 +1851,7 @@
   (local-set-key* buf "C-c C-n" "agent-permission-deny")
   (local-set-key* buf "C-c p" "chat-set-permission-mode")
   (local-set-key* buf "C-c t" "chat-refresh-tools")
+  (local-set-key* buf "C-c C-d" "chat-unqueue")
   (local-set-key* buf "C-c C-v" "chat-toggle-view"))
 
 ;; (execute "task")                         — spawn a task chat on the default connector

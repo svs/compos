@@ -291,7 +291,7 @@ defmodule Aimax.ChatResetTest do
     # what "clean" means, checked the same way for every case
     defp assert_clean(buf) do
       # conversation gone...
-      for k <- ~w(chat-wire-turns chat-turns agent-folds chat-cost chat-last-usage) do
+      for k <- ~w(chat-wire-turns chat-turns agent-folds chat-cost chat-last-usage chat-queued) do
         assert Aimax.Core.Buffer.get_local(buf, k) in [nil, false, []],
                "#{k} survived the reset: #{inspect(Aimax.Core.Buffer.get_local(buf, k))}"
       end
@@ -344,6 +344,7 @@ defmodule Aimax.ChatResetTest do
       eval!(~s[(begin
         (buffer-set-local! "#{b}" 'agent-slug "gone")
         (buffer-set-local! "#{b}" 'agent-queued '(12 34))
+        (buffer-set-local! "#{b}" 'chat-queued '("held one" "held two"))
         (buffer-set-local! "#{b}" 'agent-waiting '(1 2))
         (switch-to-buffer! "#{b}") (run-command "chat-reset") #t)])
 
@@ -387,6 +388,7 @@ defmodule Aimax.ChatResetTest do
                       (buffer-set-local! "#{r}" 'agent-slug "dead-slug")
                       (buffer-set-local! "#{r}" 'agent-connector "codex")
                       (buffer-set-local! "#{r}" 'agent-queued '(5))
+                      (buffer-set-local! "#{r}" 'chat-queued '("held for the dead runtime"))
                       (buffer-set-local! "#{r}" 'chat-wire-turns '((role "user" blocks (("text" "before the restart")))))
                       (set-mode! "chat-mode") #t)])
 
@@ -394,6 +396,9 @@ defmodule Aimax.ChatResetTest do
 
       assert Aimax.Core.Buffer.get_local(r, "agent-slug") in [nil, false]
       assert Aimax.Core.Buffer.get_local(r, "agent-queued") in [nil, false]
+      # a queued message the dead runtime never read returns to the input
+      assert Aimax.Core.Buffer.get_local(r, "chat-queued") in [nil, false]
+      assert eval!(~s{(chat-input-text "#{r}")}) == ~s{"held for the dead runtime"}
       # ...but what was SAID and who the chat IS both survive
       assert Aimax.Core.Buffer.get_local(r, "chat-wire-turns") != nil
       assert Aimax.Core.Buffer.get_local(r, "agent-connector") == "codex"

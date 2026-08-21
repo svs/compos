@@ -89,6 +89,33 @@ defmodule Aimax.Ui.AgentViewTest do
     refute html =~ ">>> you: profile"
   end
 
+  # queued messages are not transcript text: they ride the 'chat-queued
+  # local and render as muted rows between the transcript and the input
+  test "queued messages render as muted rows from the chat-queued local", %{conn: conn} do
+    buf = "*agent: queued-test*"
+    {:ok, _} = Aimax.Core.create_buffer(buf)
+
+    Buffer.append(buf, "hello\n", source: :editor)
+    mark = Buffer.byte_size(buf)
+    Buffer.append(buf, "\n>>> you: ", source: :editor)
+
+    Buffer.set_local(buf, "render-mode", "agent")
+    Buffer.set_local(buf, "agent-slug", "queued-test")
+    Buffer.set_local(buf, "agent-saved-mark", mark)
+    Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
+    Buffer.set_local(buf, "agent-blocks", [])
+    Buffer.set_local(buf, "chat-queued", ["wait for me", "and for me"])
+
+    Editor.set_window_buffer(buf)
+    {:ok, _view, html} = live(conn, "/")
+
+    assert html =~ "ag-queued-row"
+    assert html =~ "wait for me"
+    assert html =~ "and for me"
+    # the rows are not in the buffer text
+    refute Buffer.text(buf) =~ "wait for me"
+  end
+
   # "name: arg" titles split into a muted tool name and a highlighted
   # argument; a bare title renders as one name span
   test "tool card highlights the call argument apart from the tool name", %{conn: conn} do

@@ -23,12 +23,8 @@ defmodule Aimax.SteeringTest do
     {:ok, _} = Session.eval(~s[(begin (switch-to-buffer! "#{buf}") (end-of-buffer!))])
   end
 
-  defp queued_blocks(buf) do
-    Enum.filter(Buffer.get_local(buf, "agent-blocks") || [], fn
-      [_, _, "queued" | _] -> true
-      _ -> false
-    end)
-  end
+  # queued messages live in the 'chat-queued local, not in the transcript
+  defp queued_texts(buf), do: Buffer.get_local(buf, "chat-queued") || []
 
   defp paused_stub_chat(prompt) do
     slug =
@@ -104,29 +100,30 @@ defmodule Aimax.SteeringTest do
     type("steer me please")
     press(["RET"])
 
-    # the message left the input and sits in the transcript as a muted line
+    # the message left the input and sits in 'chat-queued, not in the
+    # transcript text — a streamed event must never repaint it
     assert eventually(fn -> Agent.info(slug).queued == 1 end)
-    assert Buffer.text(buf) =~ ">>> you: steer me please"
-    assert [[_, _, "queued", "steer me please"]] = queued_blocks(buf)
+    assert queued_texts(buf) == ["steer me please"]
+    refute Buffer.text(buf) =~ "steer me please"
     assert eval!(~s{(chat-input-text "#{buf}")}) == ~s{""}
 
     # the input is free: a second message queues behind the first
     type("and another thing")
     press(["RET"])
     assert eventually(fn -> Agent.info(slug).queued == 2 end)
-    assert length(queued_blocks(buf)) == 2
+    assert queued_texts(buf) == ["steer me please", "and another thing"]
     assert eval!(~s{(chat-input-text "#{buf}")}) == ~s{""}
 
-    # the turn ends; the queue pops in order and the muted lines become
-    # normal user lines — nothing stays queued
+    # the turn ends; the queue pops in order and the texts become normal
+    # user lines — nothing stays queued
     assert Agent.respond_permission(slug, 3, "opt-allow") == :ok
-    assert eventually(fn -> queued_blocks(buf) == [] end)
+    assert eventually(fn -> queued_texts(buf) == [] end)
     assert eventually(fn -> match?(%{status: :idle, queued: 0}, Agent.info(slug)) end)
     assert Buffer.text(buf) =~ ">>> you: steer me please"
     assert Buffer.text(buf) =~ ">>> you: and another thing"
   end
 
-  test "abort discards the queued message and its muted line" do
+  test "abort discards the queued message" do
     {slug, buf} = paused_stub_chat("go")
 
     assert eventually(fn -> match?(%{status: :needs_attention}, Agent.info(slug)) end)
@@ -135,12 +132,41 @@ defmodule Aimax.SteeringTest do
     type("never mind this")
     press(["RET"])
     assert eventually(fn -> Agent.info(slug).queued == 1 end)
-    assert Buffer.text(buf) =~ ">>> you: never mind this"
+    assert queued_texts(buf) == ["never mind this"]
 
     press(["C-g"])
 
-    assert eventually(fn -> queued_blocks(buf) == [] end)
+    assert eventually(fn -> queued_texts(buf) == [] end)
     refute Buffer.text(buf) =~ "never mind this"
+  end
+
+  test "chat-unqueue takes the newest queued message back into the input" do
+    {slug, buf} = paused_stub_chat("go")
+
+    assert eventually(fn -> match?(%{status: :needs_attention}, Agent.info(slug)) end)
+
+    focus(buf)
+    type("first steer")
+    press(["RET"])
+    type("second steer")
+    press(["RET"])
+    assert eventually(fn -> Agent.info(slug).queued == 2 end)
+
+    # C-c C-d: the newest message leaves the queue and returns to the input
+    press(["C-c", "C-d"])
+    assert eventually(fn -> Agent.info(slug).queued == 1 end)
+    assert queued_texts(buf) == ["first steer"]
+    assert eval!(~s{(chat-input-text "#{buf}")}) == ~s{"second steer"}
+
+    # again: the older message joins ahead of the draft
+    press(["C-c", "C-d"])
+    assert eventually(fn -> Agent.info(slug).queued == 0 end)
+    assert queued_texts(buf) == []
+    assert eval!(~s{(chat-input-text "#{buf}")}) == ~s{"first steer\\nsecond steer"}
+
+    # nothing queued: the command only says so
+    press(["C-c", "C-d"])
+    assert eval!(~s{(chat-input-text "#{buf}")}) == ~s{"first steer\\nsecond steer"}
   end
 
   test "the tool loop appends steered text to the tool-result message" do

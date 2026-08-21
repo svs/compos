@@ -505,6 +505,9 @@ defmodule Aimax.Ui.Layouts do
             white-space: pre-wrap; overflow-wrap: anywhere;
           }
           .ag-queued { color: var(--agent-queued-fg, #9a958a); }
+          /* queued rows under the transcript: outside .ag-scroll, so they
+             align with the input row, not the padded scroll area */
+          .ag-queued-row { margin: 2px 18px; flex-shrink: 0; }
           .ag-hint { font-family: var(--font-mono); font-size: 10px; color: var(--agent-meta-fg, #8a8577); flex-shrink: 0; }
           .ml-extra {
             font-family: var(--font-mono); font-size: 11px; padding: 0 8px;

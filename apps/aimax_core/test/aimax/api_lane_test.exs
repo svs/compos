@@ -183,21 +183,24 @@ defmodule Aimax.ApiLaneTest do
     assert_receive {:sent, first, task1}, 2_000
     assert first =~ "first message"
 
-    # a second send while running: queued, kept visible (muted), no request
+    # a second send while running: queued in 'chat-queued (a muted row in
+    # the client), no request, nothing in the transcript text
     focus(buf)
     type("second message")
     press(["RET"])
     refute_receive {:sent, _, _}, 200
     assert %{queued: 1} = Agent.info("a1")
-    assert Buffer.text(buf) =~ ": second message"
+    assert Buffer.get_local(buf, "chat-queued") == ["second message"]
+    refute Buffer.text(buf) =~ "second message"
 
     # release round 1 -> the queue pops by itself
     send(task1, :release)
     assert_receive {:sent, second, _task2}, 2_000
     assert second =~ "second message"
 
-    # its turn started: the muted copy left the input region
+    # its turn started: the queued row became the rendered user line
     assert eventually(fn -> Buffer.text(buf) =~ ">>> you: second message\n" end)
+    assert eventually(fn -> Buffer.get_local(buf, "chat-queued") in [nil, false, []] end)
 
     # C-RET cancels the running turn: the thread returns to idle without
     # waiting for the (still-blocked) wire

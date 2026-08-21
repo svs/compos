@@ -1968,7 +1968,10 @@ defmodule Aimax.Core.Editor do
       scroll_top: Map.get(locals, "agent-scroll-top") || 0,
       # the activity word agent.scm sets on every event ("waiting…",
       # "thinking…", "streaming", "tool · X"); nil when no turn runs
-      activity: Map.get(locals, "chat-activity")
+      activity: Map.get(locals, "chat-activity"),
+      # messages typed mid-turn that the model did not read yet — muted
+      # rows between the transcript and the input, not transcript text
+      queued: Map.get(locals, "chat-queued") || []
     }
   end
 

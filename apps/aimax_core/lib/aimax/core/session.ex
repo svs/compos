@@ -661,6 +661,8 @@ defmodule Aimax.Core.Session do
       "agent-prompt!" =>
         "(agent-prompt! SLUG TEXT [DISPLAY]) — send a prompt; return 'sent or 'queued.",
       "agent-cancel!" => "(agent-cancel! SLUG) — cancel the agent's current turn.",
+      "agent-dequeue!" =>
+        "(agent-dequeue! SLUG TEXT) — remove one queued prompt whose text is TEXT; return #t or #f.",
       "agent-permission-respond!" =>
         "(agent-permission-respond! SLUG RPC-ID OPTION-ID) — answer a pending permission request.",
       "agent-question-respond!" =>
@@ -1387,6 +1389,12 @@ defmodule Aimax.Core.Session do
       "agent-cancel!" => fn [slug] ->
         Aimax.Core.LLMSession.cancel(s(slug))
         :void
+      end,
+      "agent-dequeue!" => fn [slug, text] ->
+        case Aimax.Core.LLMSession.dequeue(s(slug), to_string(text)) do
+          :ok -> true
+          {:error, _} -> false
+        end
       end,
       "agent-permission-respond!" => fn [slug, rpc_id, option_id] ->
         option = if option_id in [false, :void], do: nil, else: s(option_id)

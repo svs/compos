@@ -673,21 +673,24 @@ defmodule Aimax.AgentTest do
     assert eventually(fn -> String.ends_with?(Buffer.text(buf), ">>> you: ") end)
     assert eventually(fn -> Buffer.text(buf) =~ ">>> you: first message\n" end)
 
-    # second message while running -> queued: stays visible (muted), no frame yet
+    # second message while running -> queued: it sits in 'chat-queued
+    # (the client renders it as a muted row), not in the transcript text
     focus(buf)
     type("second message")
     press(["RET"])
     refute_receive {:frame, %{"method" => "session/prompt"}}, 200
     assert %{queued: 1} = Agent.info(slug)
-    assert Buffer.text(buf) =~ ": second message"
+    assert Buffer.get_local(buf, "chat-queued") == ["second message"]
+    refute Buffer.text(buf) =~ "second message"
 
     inject(agent, %{"jsonrpc" => "2.0", "id" => pid, "result" => %{"stopReason" => "end_turn"}})
 
     assert_receive {:frame, %{"method" => "session/prompt", "params" => p2}}, 1_000
     assert [%{"text" => "second message"}] = p2["prompt"]
-    # its turn started: the muted copy left the input region, the rendered
-    # user line replaced it — exactly one occurrence remains
+    # its turn started: the queued row left, the rendered user line took
+    # its place — exactly one occurrence in the transcript
     assert eventually(fn -> Buffer.text(buf) =~ ">>> you: second message\n" end)
+    assert eventually(fn -> Buffer.get_local(buf, "chat-queued") in [nil, false, []] end)
 
     assert eventually(fn ->
              parts = String.split(Buffer.text(buf), "second message")
@@ -1091,11 +1094,7 @@ defmodule Aimax.AgentTest do
 
     refute "tc-abort" in (Buffer.get_local(buf, "agent-open-cards") || [])
 
-    refute Enum.any?(Buffer.get_local(buf, "agent-blocks") || [], fn
-             [_, _, "queued" | _] -> true
-             _ -> false
-           end)
-
+    assert Buffer.get_local(buf, "chat-queued") in [nil, false, []]
     refute Buffer.text(buf) =~ "do not run this next"
 
     inject(agent, %{

@@ -66,6 +66,12 @@ defmodule Aimax.Core.Agent do
   """
   def take_steering(slug), do: call(slug, :take_steering)
 
+  @doc """
+  Remove one queued prompt without running it. Matches the first queue
+  entry whose display text equals `text`. Returns :ok | {:error, :not_found}.
+  """
+  def dequeue(slug, text), do: call(slug, {:dequeue, text})
+
   @doc "Cancel the current turn."
   def cancel(slug), do: call(slug, :cancel)
 
@@ -260,6 +266,13 @@ defmodule Aimax.Core.Agent do
   end
 
   def handle_call(:take_steering, _from, state), do: {:reply, [], state}
+
+  def handle_call({:dequeue, text}, _from, state) do
+    case Enum.split_while(state.prompt_queue, fn {t, d} -> (d || t) != text end) do
+      {_, []} -> {:reply, {:error, :not_found}, state}
+      {before, [_ | rest]} -> {:reply, :ok, %{state | prompt_queue: before ++ rest}}
+    end
+  end
 
   def handle_call(:cancel, _from, state) do
     # Abort means the whole pending run list. A terminal backend event may

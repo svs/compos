@@ -494,7 +494,8 @@ defmodule Aimax.Ui.EditorLive do
        lines: [],
        ag_blocks: blocks,
        ag_input: ag_input(leaf, ag),
-       ag_activity: Map.get(ag, :activity)
+       ag_activity: Map.get(ag, :activity),
+       ag_queued: Map.get(ag, :queued) || []
      }), Map.put(cache, {:agent, leaf.id}, entry)}
   end
 
@@ -1016,6 +1017,15 @@ defmodule Aimax.Ui.EditorLive do
             blocks={@node.ag_blocks}
             win={@node.id}
           />
+          <%!-- messages queued mid-turn: muted rows from 'chat-queued,
+               not transcript text. Outside the component, so a streamed
+               event never moves them and their churn never diffs the
+               block list — excise + re-insert per event was the flicker.
+               C-c C-d takes the newest one back into the input. --%>
+          <div :for={q <- @node.ag_queued} class="ag-user ag-queued ag-queued-row">
+            <span class="ag-label">YOU</span>
+            <div class="ag-user-text">{q}</div>
+          </div>
           <%!-- the turn pulse: the activity word agent.scm sets on every
                event, alive until turn-end clears it. The transcript alone
                cannot say working vs done once paragraphs stream. Outside

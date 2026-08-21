@@ -29,6 +29,28 @@ defmodule Aimax.Ui.EditorLiveTest do
     assert html =~ "ui-test-"
   end
 
+  # Any click in a preview iframe moves focus into the iframe, and the blur
+  # relay answers with a win-only mouse event — for a right click too. A
+  # window selection is not a click on text, so it must keep the region.
+  test "a win-only mouse event keeps the region, a text click clears it", %{conn: conn} do
+    buf = Aimax.Core.Editor.current_buffer()
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(
+        ~s{(begin (switch-to-buffer! "#{buf}") (insert! "alpha beta") (set-mark! 2) (goto-char! 7))}
+      )
+
+    win = Aimax.Core.Editor.render_state() |> Map.get(:tree) |> Map.get(:id)
+    {:ok, view, _html} = live(conn, "/")
+
+    view |> element("#editor") |> render_hook("mouse", %{"win" => win})
+    assert {:ok, "2"} = Aimax.Core.Session.eval("(mark)")
+
+    view |> element("#editor") |> render_hook("mouse", %{"win" => win, "line" => 0, "col" => 1})
+    assert {:ok, cleared} = Aimax.Core.Session.eval("(mark)")
+    assert cleared in [false, "#f"]
+  end
+
   test "a worktree buffer renders its persistent header and attention frame", %{conn: conn} do
     buf = Aimax.Core.Editor.current_buffer()
 

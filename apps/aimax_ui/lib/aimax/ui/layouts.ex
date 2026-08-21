@@ -1055,7 +1055,18 @@ defmodule Aimax.Ui.Layouts do
                 // click must move point. The caret API names the clicked
                 // text node; the daemon finds that text in the source.
                 if (this.el.dataset.rm === "markdown") {
+                  // Text the renderer added — a code block's head, an embed
+                  // card — names no source position. A caret there matches
+                  // its short label text anywhere in the file, so it must
+                  // not move point.
+                  const chromeNode = (node) => {
+                    const el = node.parentElement;
+                    return el && el.closest && el.closest(".code-block-head, .tweet");
+                  };
                   d.addEventListener("mousedown", (e) => {
+                    // Only the left button moves point. A right click keeps
+                    // the region for the copy that follows it.
+                    if (e.button !== 0) return;
                     // A generated response is atomic to the editor cursor,
                     // but its prose remains ordinary browser-selectable text.
                     // Do not patch the iframe on mousedown or a drag would
@@ -1067,6 +1078,7 @@ defmodule Aimax.Ui.Layouts do
                     if (!c) return;
                     const node = c.startContainer || c.offsetNode;
                     if (!node || node.nodeType !== 3) return;
+                    if (chromeNode(node)) return;
                     const off = c.startOffset !== undefined ? c.startOffset : c.offset;
                     visualGoal.x = null;
                     visualGoal.y = null;
@@ -1090,6 +1102,7 @@ defmodule Aimax.Ui.Layouts do
                     if (!c) return null;
                     const node = c.startContainer || c.offsetNode;
                     if (!node || node.nodeType !== 3) return null;
+                    if (chromeNode(node)) return null;
                     const off = c.startOffset !== undefined ? c.startOffset : c.offset;
                     return previewSpot(d, node, off, 0);
                   };

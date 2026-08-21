@@ -3464,6 +3464,49 @@ defmodule Aimax.MinibufferEditingTest do
     File.rm!(path)
   end
 
+  # Text the renderer added (a code action label, a pretty-print newline)
+  # has no exact source match. The word-run fallback then holds one or two
+  # characters, and a one-character needle matches almost anywhere: a drag
+  # over a heading smeared the region across whole paragraphs. A miss must
+  # leave point where it is.
+  test "a preview miss with a one-character word run does not move point" do
+    path =
+      Path.join(System.tmp_dir!(), "aimax-prevmiss-#{System.unique_integer([:positive])}.md")
+
+    File.write!(path, "Alpha runs a little.\n\n## A heading\n\nBeta closes.\n")
+
+    press(["C-x", "C-f"])
+    type(path)
+    press(["RET"])
+    press(["C-c", "C-v"])
+
+    win = Editor.render_state() |> Map.get(:tree) |> Map.get(:id)
+
+    Buffer.goto(path, 5)
+
+    {:ok, _} =
+      Aimax.Core.Session.call_named("preview-goto!", [
+        win,
+        "\n",
+        "A heading with no source match",
+        "",
+        "A",
+        0,
+        0,
+        0
+      ])
+
+    assert Buffer.point(path) == 5
+
+    # a region already dragged out survives the failed extend
+    {:ok, _} = Aimax.Core.Session.call_named("preview-select!", [win, "runs a", " little", "a", "", 0, 0, 0])
+    {:ok, _} = Aimax.Core.Session.call_named("preview-select!", [win, "\n", "no source match", "", "A", 0, 0, 0])
+    assert {:ok, " runs a"} = Aimax.Core.Session.call_named("clipboard-copy", [])
+
+    press(["C-x", "1"])
+    File.rm!(path)
+  end
+
   # `-b` sits in the file three times. The client says which one it points
   # at, and a down key must never land above the cursor: the old code took
   # the first hit every time, so the cursor stopped moving.

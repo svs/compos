@@ -205,18 +205,20 @@ defmodule Aimax.Ui.EditorLive do
   end
 
   # mouse click: select the window (policy in scheme — a chat snaps point to
-  # its input region), then place point when the click hit a text line
+  # its input region), then place point when the click hit a text line.
+  # A win-only event is a window selection, not a click on text: the blur
+  # relay sends one for ANY click in a preview iframe, right clicks
+  # included, so it must keep the region.
   def handle_event("mouse", %{"win" => win} = params, socket) do
     with id when is_integer(id) <- safe_int(win) do
       Input.run(socket.assigns.frame, fn ->
-        Aimax.Core.Session.eval("(begin (mouse-select-window! #{id}) (set-mark! #f))")
-
         case params do
           %{"line" => line, "col" => col} when is_integer(line) and is_integer(col) ->
+            Aimax.Core.Session.eval("(begin (mouse-select-window! #{id}) (set-mark! #f))")
             Aimax.Core.Editor.mouse_goto(id, line, col)
 
           _ ->
-            :ok
+            Aimax.Core.Session.eval("(mouse-select-window! #{id})")
         end
       end)
     end

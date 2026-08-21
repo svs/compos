@@ -200,7 +200,7 @@ defmodule Aimax.Core.SchemeAPI do
       "undo-exempt!" =>
         "(undo-exempt! COMMAND) — exempt COMMAND from the automatic undo-chain break.",
       "buffer-save!" =>
-        "(buffer-save!) — save the current buffer to its path; return the path or #f.",
+        "(buffer-save! [PATH]) — save the current buffer to its path; return the path or #f. With PATH, save there and adopt PATH as the buffer's path.",
       "kill-push!" => "(kill-push! TEXT) — push TEXT onto the kill ring.",
       "kill-top" => "(kill-top) — return the newest kill-ring entry, or \"\" when empty.",
       "kill-nth" => "(kill-nth I) — return kill-ring entry I (0 is newest), or \"\" when absent.",
@@ -765,11 +765,16 @@ defmodule Aimax.Core.SchemeAPI do
         Editor.add_undo_exempt(name)
         :void
       end,
-      "buffer-save!" => fn [] ->
-        case Buffer.save(Editor.current_buffer()) do
-          {:ok, path} -> path
-          {:error, :no_path} -> false
-        end
+      "buffer-save!" => fn
+        [] ->
+          case Buffer.save(Editor.current_buffer()) do
+            {:ok, path} -> path
+            {:error, :no_path} -> false
+          end
+
+        [path] ->
+          {:ok, path} = Buffer.save(Editor.current_buffer(), path)
+          path
       end,
 
       # kill ring

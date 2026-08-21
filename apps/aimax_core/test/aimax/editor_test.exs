@@ -2329,6 +2329,40 @@ defmodule Aimax.EditorTest do
     File.rm!(path)
   end
 
+  test "C-x C-s adopts a pathless buffer whose name is a path, without a prompt" do
+    path = Path.join(System.tmp_dir!(), "aimax-adopt-#{System.unique_integer([:positive])}.txt")
+    Editor.set_window_buffer(path)
+    type("adopted")
+    press(["C-x", "C-s"])
+
+    assert Editor.snapshot().minibuffer == nil
+    assert File.read!(path) == "adopted"
+    assert echo() =~ "Wrote"
+    # the name became the buffer's path, and auto-mode applied
+    assert Buffer.path(path) == path
+    assert Buffer.get_local(path, "mode-name") == "text-mode"
+
+    type(" again")
+    press(["C-x", "C-s"])
+    assert File.read!(path) == "adopted again"
+    File.rm!(path)
+  end
+
+  test "C-x C-w prompts and the buffer becomes the written file", %{buf: buf} do
+    type("hello")
+    path = Path.join(System.tmp_dir!(), "aimax-w-#{System.unique_integer([:positive])}.txt")
+
+    press(["C-x", "C-w"])
+    assert Editor.render_state().minibuffer.prompt =~ "Write #{buf} to file:"
+    type(path)
+    press(["RET"])
+
+    assert File.read!(path) == "hello"
+    assert Editor.current_buffer() == path
+    refute Buffer.exists?(buf)
+    File.rm!(path)
+  end
+
   test "TAB into a directory, then RET opens dired (not the first entry)" do
     root = Path.join(System.tmp_dir!(), "aimax-dir-#{System.unique_integer([:positive])}")
     sub = Path.join(root, "onlysub")

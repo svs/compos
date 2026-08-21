@@ -2713,28 +2713,51 @@
 
 (define (save-local-buffer!)
     (let ((path (buffer-save!)))
-      (if path
+      (cond
+        (path
+         (run-hooks 'after-save-hook)
+         (message (string-append "Wrote " path)))
+        ;; the buffer name IS an absolute path: the file name is known,
+        ;; so save there and adopt the path — no prompt. C-x C-w is the
+        ;; gesture that picks a different file.
+        ((and (string-prefix? "/" (current-buffer))
+              (not (remote-path? (current-buffer))))
+         (let ((p (buffer-save! (current-buffer))))
+           (unless (buffer-local (current-buffer) 'mode-name)
+             (auto-mode p))
+           (run-hooks 'after-save-hook)
+           (message (string-append "Wrote " p))))
+        ;; no file name at all: C-x C-s falls through to write-file
+        (else (run-command "write-file")))))
+
+;; write-file makes the buffer BECOME the file buffer: visit reads the
+;; file back and auto-mode applies — a chat saved as .chat opens as a
+;; chat, forever after C-x C-s just saves.
+(define (write-buffer-to-file! old path0)
+  (unless (equal? (string-trim path0) "")
+    (let ((p (expand-path (normalize-file-input (string-trim path0)))))
+      (if (equal? p old)
+          ;; the buffer already carries this name: adopt, do not re-visit
           (begin
+            (buffer-save! p)
             (run-hooks 'after-save-hook)
-            (message (string-append "Wrote " path)))
-          ;; no file: prompt once and the buffer BECOMES the file buffer
-          ;; (visit reads it back; auto-mode applies — a chat saved as
-          ;; .chat opens as a chat, forever after C-x C-s just saves)
-          (let ((old (current-buffer)))
-            (minibuffer-read (string-append "Write " old " to file: ") '()
-              (lambda (path0)
-                (unless (equal? (string-trim path0) "")
-                  (let ((p (expand-path (string-trim path0)))
-                        (g (buffer-group old))
-                        (record (buffer-local old 'chat-wire-turns)))
-                    (write-file! p (or (chat-file-text old) (buffer-text old)))
-                    (visit p)
-                    (when g (buffer-set-local! (current-buffer) 'group g))
-                    (when record
-                      (buffer-set-local! (current-buffer) 'chat-wire-turns record))
-                    (buffer-kill! old)
-                    (run-hooks 'after-save-hook)
-                    (message (string-append "Wrote " p))))))))))
+            (message (string-append "Wrote " p)))
+          (let ((g (buffer-group old))
+                (record (buffer-local old 'chat-wire-turns)))
+            (write-file! p (or (chat-file-text old) (buffer-text old)))
+            (visit p)
+            (when g (buffer-set-local! (current-buffer) 'group g))
+            (when record
+              (buffer-set-local! (current-buffer) 'chat-wire-turns record))
+            (buffer-kill! old)
+            (run-hooks 'after-save-hook)
+            (message (string-append "Wrote " p)))))))
+
+(define-command "write-file" "Write the buffer to a file; the buffer becomes that file's buffer"
+  (lambda ()
+    (let ((old (current-buffer)))
+      (read-file-name (string-append "Write " old " to file: ")
+        (lambda (p) (write-buffer-to-file! old p))))))
 
 ;; Save a buffer that is not the current one. save-buffer acts on the
 ;; current buffer, and it must: the remote, chat and no-file branches all
@@ -7175,6 +7198,7 @@
 
 (global-set-key "C-x C-f" "find-file")
 (global-set-key "C-x C-s" "save-buffer")
+(global-set-key "C-x C-w" "write-file")
 (global-set-key "C-x b" "switch-to-buffer")
 (global-set-key "C-x k" "kill-buffer")
 
@@ -7241,9 +7265,10 @@
 (effects! '(unknown))
 (public! 'tail-open "(tail-open PATH) — follow a file with tail -F, local or /ssh: remote")
 (public! 'sh-quote "(sh-quote S) — S as one safe single-quoted word for a shell command")
-(public! 'buffer-save! "Save the current buffer to its file")
+(public! 'buffer-save! "(buffer-save! [PATH]) — save the current buffer to its path; with PATH, save there and adopt PATH")
 (public! 'save-buffer-named! "(save-buffer-named! NAME) — save another buffer; the window goes back where it was")
 (catalog-meta! 'function "save-buffer-named!" 'domain 'files 'effects '(write))
+(catalog-meta! 'command "write-file" 'domain 'files 'effects '(write))
 
 (category! 'editing)
 (public! 'point "Point as a byte offset")

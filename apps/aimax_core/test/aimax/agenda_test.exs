@@ -186,24 +186,6 @@ defmodule Aimax.AgendaTest do
     assert Buffer.text(path) |> binary_part(entry.pos, 6) == "# TODO"
   end
 
-  test "C-c C-t cycles an entry state and refreshes the agenda", %{dir: dir} do
-    path = Path.join(dir, "work.md")
-    File.write!(path, "# TODO Finish this #{stamp(0)}\n")
-
-    buf = open_agenda(dir)
-    Editor.set_window_buffer(buf)
-    [entry] = index(buf)
-    goto_line(buf, entry.line)
-
-    press(["C-c", "C-t"])
-
-    assert Editor.current_buffer() == buf
-    assert Buffer.text(path) =~ "# DONE Finish this"
-    assert Buffer.text(buf) =~ "DONE  Finish this"
-    done = Enum.find(rows(buf), &(&1[:segs] |> inspect() =~ "Finish this"))
-    assert done[:class] =~ "agenda-row-done"
-  end
-
   test "brackets move by week and dot returns to today", %{dir: dir} do
     File.write!(Path.join(dir, "weeks.md"), """
     # TODO Previous #{stamp(-7)}

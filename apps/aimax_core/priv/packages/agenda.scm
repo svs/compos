@@ -19,6 +19,7 @@
 ;;;
 ;;; Keys (buffer-local):
 ;;;   n/p next/previous entry · RET visit the entry · TAB fold the day
+;;;   [ / ] previous/next week · . back to today
 ;;;   g refresh · q quit · C-c C-v the plain listing
 
 (domain! 'writing)
@@ -291,21 +292,24 @@
                           e))
                   es))))
 
-;; -> ((z entry ...) ...), one element per shown day. A scheduled or
-;; deadline entry whose date passed and whose state is not DONE lands on
-;; today with 'late set to the day count.
-(define (agenda--week files today ndays)
+;; -> ((z entry ...) ...), one element per shown day, starting at START.
+;; When the view starts on today, a scheduled or deadline entry whose
+;; date passed and whose state is not DONE lands on today with 'late set
+;; to the day count. A shifted week shows every entry on its own day.
+(define (agenda--week files today start ndays)
   (let* ((all (fold (lambda (acc f) (append acc (agenda--file-entries f)))
                     '() files))
+         (collapse? (= start today))
          (shown
            (fold (lambda (acc e)
                    (let* ((z (plist-get e 'z))
-                          (late? (and (< z today)
+                          (late? (and collapse?
+                                      (< z today)
                                       (member (plist-get e 'kind)
                                               (list "scheduled" "deadline"))
                                       (not (equal? (plist-get e 'todo) "DONE")))))
                      (cond (late? (cons (append (list 'late (- today z)) e) acc))
-                           ((and (>= z today) (< z (+ today ndays)))
+                           ((and (>= z start) (< z (+ start ndays)))
                             (cons e acc))
                            (else acc))))
                  '() all)))
@@ -317,7 +321,7 @@
                                  (= day today)
                                  (= (plist-get e 'z) day)))
                            shown))))
-         (agenda--iota today ndays))))
+         (agenda--iota start ndays))))
 
 ;;; --- the view ----------------------------------------------------------------
 ;;; One pass builds four projections of the same week: the plain text, the
@@ -376,11 +380,15 @@
 
 (define (agenda--render! buf)
   (let* ((today (agenda--today-z))
+         ;; the week offset in days: [ and ] move it, . zeroes it. It is
+         ;; a plain local, so the selected week survives refresh and a
+         ;; desktop restore of the mode.
+         (start (+ today (or (buffer-local buf 'agenda-start-offset) 0)))
          (ndays (if (number? morg-agenda-days) morg-agenda-days 7))
          (files (agenda--files))
-         (week (agenda--week files today ndays))
+         (week (agenda--week files today start ndays))
          (closed (or (buffer-local buf 'agenda-closed-days) '()))
-         (header (string-append "Agenda — " (agenda--day-label today))))
+         (header (string-append "Agenda — " (agenda--day-label start))))
     (let loop ((days week)
                (text (string-append header "\n"))
                (line 2)
@@ -511,6 +519,25 @@
 (define-command "agenda-refresh" "Re-read the agenda files"
   (lambda () (agenda--render! (current-buffer))))
 
+(define (agenda--set-offset! buf off)
+  (buffer-set-local! buf 'agenda-start-offset off)
+  (agenda--render! buf))
+
+(define-command "agenda-week-next" "Show the next week"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (agenda--set-offset! buf
+        (+ (or (buffer-local buf 'agenda-start-offset) 0) 7)))))
+
+(define-command "agenda-week-prev" "Show the previous week"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (agenda--set-offset! buf
+        (- (or (buffer-local buf 'agenda-start-offset) 0) 7)))))
+
+(define-command "agenda-today" "Return the agenda to the week that starts today"
+  (lambda () (agenda--set-offset! (current-buffer) 0)))
+
 (define-command "agenda-toggle-view" "Toggle between the cards and the plain listing"
   (lambda ()
     (let* ((buf (current-buffer))
@@ -545,6 +572,9 @@
   (local-remap! "previous-line" "agenda-prev")
   (local-set-key "TAB" "agenda-toggle-day")
   (local-set-key "RET" "agenda-visit")
+  (local-set-key "[" "agenda-week-prev")
+  (local-set-key "]" "agenda-week-next")
+  (local-set-key "." "agenda-today")
   (local-set-key "g" "agenda-refresh")
   (local-set-key "q" "quit-window")
   (local-set-key "C-c C-v" "agenda-toggle-view"))
@@ -565,7 +595,7 @@
       (agenda--render! buf))))
 
 (mode-doc! "morg-agenda-mode"
-  "The week from your morg files, as day cards. `n` and `p` step over entries, `TAB` folds a day, and `RET` opens the entry's file. `g` re-reads the files. `C-c C-v` shows the plain listing.")
+  "The week from your morg files, as day cards. `n` and `p` step over entries, `TAB` folds a day, and `RET` opens the entry's file. `[` and `]` move by one week; `.` returns to today. `g` re-reads the files. `C-c C-v` shows the plain listing.")
 
 (define-command "morg-agenda" "Show the agenda: dated entries from your morg files"
   (lambda ()

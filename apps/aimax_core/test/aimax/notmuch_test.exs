@@ -370,31 +370,25 @@ defmodule Aimax.NotmuchTest do
   end
 
   test "a config-level three-pane scene: index | message | chat" do
-    # the scene lives in the user's init.scm — same code, defined here,
-    # proving the layout is buildable from config alone
-    eval!(~s{(define-command "test-mail-scene" "index | message | chat"
-      (lambda ()
-        (delete-other-windows!)
-        (nm--open-index! notmuch-default-query)
-        (split-window! 'h 0.32)
-        (let ((idx (active-window)))
-          (other-window!)
-          (split-window! 'h 0.55)
-          (other-window!)
-          (buffer-set-local! "*notmuch*" 'group "mail")
-          (switch-to-buffer! (group-chat "mail"))
-          (set-mode! "chat-mode")
-          (select-window! idx)
-          (nm--preview! (current-buffer)))))})
+    # the scene lives in the user's init.scm — same declaration, made here,
+    # proving the layout is buildable from config alone. It is DATA: the
+    # group, the arrangement, and the command that builds each pane. The
+    # old imperative builder interleaved its own splits with the index's
+    # auto-preview and landed the panes in whatever order won the race.
+    eval!(~s{(define-scene! "mail"
+                '(h 0.32 (ensure "*notmuch*" "notmuch-inbox")
+                         (ensure "*mail*" "notmuch-show-current")
+                         group-chat))})
 
-    eval!(~s{(run-command "test-mail-scene")})
+    eval!(~s{(scene-open! "mail")})
 
     assert eval!("(length (window-list))") == "3"
-    assert eval!("(current-buffer)") == ~s{"*notmuch*"}
-    bufs = eval!("(map cadr (window-list))")
-    assert bufs =~ "*notmuch*"
-    assert bufs =~ "*mail*"
-    assert bufs =~ "*chat:mail*"
+    assert eval!("(map cadr (window-list))") ==
+             ~s{("*notmuch*" "*mail*" "*chat:mail*")}
+
+    # the frame stands in the scene's group, so a pane's command opens
+    # into that group rather than wherever you came from
+    assert eval!(~s{(group-name (frame-local 'current-group))}) == ~s{"mail"}
 
     # the whole scene is one group: index and open message are its docs
     docs = eval!(~s{(group-docs "mail")})
@@ -405,6 +399,19 @@ defmodule Aimax.NotmuchTest do
     ctx = eval!(~s{(editor-context "*chat:mail*")})
     assert ctx =~ "selected in the mail list"
     assert ctx =~ "open email thread"
+
+    # the contract: run it again and nothing moves; kill any pane and the
+    # next run builds it back, in the same place
+    eval!(~s{(scene-open! "mail")})
+
+    assert eval!("(map cadr (window-list))") ==
+             ~s{("*notmuch*" "*mail*" "*chat:mail*")}
+
+    eval!(~s{(buffer-kill! "*mail*")})
+    eval!(~s{(scene-open! "mail")})
+
+    assert eval!("(map cadr (window-list))") ==
+             ~s{("*notmuch*" "*mail*" "*chat:mail*")}
   end
 
   test "notmuch starts at the mailboxes; RET opens, q returns", %{dir: dir} do

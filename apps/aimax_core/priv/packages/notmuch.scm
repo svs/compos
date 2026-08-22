@@ -423,10 +423,19 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (define-command "notmuch-quit" "Close mail: kill the view buffers, back to work"
   (lambda ()
-    (let ((others (filter (lambda (b)
-                            (and (not (member b (nm--view-buffers)))
-                                 (not (equal? (buffer-group b) "mail"))))
-                          (buffer-list-mru))))
+    ;; land on real work: not a mail view, and not a member of whatever
+    ;; group the mail scene lives in. That group is the index's own — the
+    ;; name is the user's to choose, and buffer-group answers with an id,
+    ;; so neither one can be compared against a literal here.
+    (let* ((mail-ids (if (buffer-exists? *notmuch-search-buffer*)
+                         (buffer-group-ids *notmuch-search-buffer*)
+                         '()))
+           (others (filter (lambda (b)
+                             (and (not (member b (nm--view-buffers)))
+                                  (not (fold (lambda (hit id)
+                                               (or hit (buffer-in-group? b id)))
+                                             #f mail-ids))))
+                           (buffer-list-mru))))
       (delete-other-windows!)
       (switch-to-buffer! (if (null? others) "*scratch*" (car others)))
       (for-each buffer-kill! (nm--view-buffers))
@@ -439,12 +448,29 @@ when a message has no text/plain part." 'group 'notmuch)
 
 ;;; --- preview: thread in the other window, focus stays --------------------------
 
+;; Render into the mail pane. A window already showing the mail view IS
+;; that pane — reuse it. other-window! only means "the mail pane" in a
+;; two-window frame; in a three-pane scene it can be the chat, and the
+;; preview would then evict the chat and leave the frame a window short.
+;; Only when no pane shows the mail view does this fall back to making
+;; one, and it always puts focus back where it started.
 (define (nm--in-other-window! thunk)
-  (let ((back (active-window)))
-    (when (null? (cdr (window-list))) (split-window! 'h 0.45))
-    (other-window!)
-    (thunk)
-    (select-window! back)))
+  (cond
+    ;; the layout engine is mid-build: it places every declared pane
+    ;; itself, so render the mail view and touch no windows at all. A
+    ;; split here lands between the engine's own splits and leaves the
+    ;; frame in neither arrangement.
+    ((layout-arranging?) (thunk))
+    (else
+      (let ((back (active-window))
+            (pane (window-showing *notmuch-show-buffer*)))
+        (if pane
+            (select-window! pane)
+            (begin
+              (when (null? (cdr (window-list))) (split-window! 'h 0.45))
+              (other-window!)))
+        (thunk)
+        (select-window! back)))))
 
 (define (nm--preview! buf)
   (let ((th (nm--thread-at buf)))
@@ -457,6 +483,29 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (define-command "notmuch-preview" "Preview the thread at point in the other window"
   (lambda () (nm--preview! (current-buffer))))
+
+;; The pane-builder form of the same thing. A scene declares its panes as
+;; (ensure "*mail*" "notmuch-show-current"), and an ensure command has one
+;; job: make that buffer exist. So it reads the index by name and never
+;; consults the current buffer, point, or the windows — none of which mean
+;; anything while a layout is being built.
+(define-command "notmuch-show-current"
+  "Make the mail pane, showing the index's current thread if there is one"
+  (lambda ()
+    (let ((th (and (buffer-exists? *notmuch-search-buffer*)
+                   (with-current-buffer *notmuch-search-buffer*
+                     (lambda () (nm--thread-at *notmuch-search-buffer*))))))
+      (if th
+          (nm--open-thread! (nm--th-id th) (nm--th-subject th))
+          ;; The index fetches its rows off this lane, so a freshly built
+          ;; index has none yet and there is no thread to open. The pane is
+          ;; part of the declared shape all the same: make it now and let
+          ;; the first move in the index fill it. An ensure command that
+          ;; only sometimes makes its buffer is not an ensure command.
+          (unless (buffer-exists? *notmuch-show-buffer*)
+            (buffer-create *notmuch-show-buffer*)
+            (buffer-set-local! *notmuch-show-buffer* 'transient #t)
+            (buffer-append! *notmuch-show-buffer* "No message selected.\n"))))))
 
 (define (nm--maybe-preview! buf)
   (when notmuch-auto-preview (nm--preview! buf)))
@@ -895,11 +944,14 @@ when a message has no text/plain part." 'group 'notmuch)
     (buffer-set-local! buf 'notmuch-thread thread-id)
     (buffer-set-local! buf 'notmuch-subject subject)
     (buffer-set-local! buf 'transient #t)
-    ;; a view inherits its index's group, so a grouped mail scene keeps
-    ;; the open message inside the group (group-docs, chat read-doc, ⊞)
-    (let ((g (and (buffer-exists? *notmuch-search-buffer*)
-                  (buffer-local *notmuch-search-buffer* 'group))))
-      (when g (buffer-set-local! buf 'group g)))
+    ;; a view inherits its index's groups, so a grouped mail scene keeps
+    ;; the open message inside the group (group-docs, chat read-doc, ⊞).
+    ;; Membership is 'group-ids and joining is buffer-add-group!: writing
+    ;; the legacy 'group local here left the view ungrouped, because the
+    ;; reader clears that local the moment a buffer has real memberships.
+    (when (buffer-exists? *notmuch-search-buffer*)
+      (for-each (lambda (id) (buffer-add-group! buf id))
+                (buffer-group-ids *notmuch-search-buffer*)))
     (switch-to-buffer! buf)
     (set-mode! "notmuch-show-mode")
     ;; reading marks read, like every mail client

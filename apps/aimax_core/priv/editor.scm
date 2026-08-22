@@ -295,14 +295,8 @@
 ;; the 0-based index of the entry line BUF's point is on, or #f above the
 ;; entries. BUF's own point, not (point): a context provider asks about a
 ;; list buffer while another buffer is current.
-;; The text and the point are two reads of one buffer, and another lane
-;; can refresh the list between them. A list that grew then answered with
-;; a point past the end of the text this call holds, and the read crashed.
-;; Point belongs to the text we have: clamp it into that text.
 (define (line-index-at buf header-lines)
-  (let* ((text (buffer-text buf))
-         (p (min (buffer-point buf) (string-byte-length text)))
-         (before (substring-bytes text 0 p))
+  (let* ((before (substring-bytes (buffer-text buf) 0 (buffer-point buf)))
          (ln (- (length (string-split before "\n")) 1 header-lines)))
     (and (>= ln 0) ln)))
 
@@ -394,18 +388,27 @@
 ;; buffer (durable lifecycle), so after a restart they can name rows the
 ;; list no longer shows — a verb must act on what the reader SEES.
 (define (list-live-marked buf ch)
-  (let ((keys (map (lambda (e) (list-key buf e)) (list-entries buf))))
+  ;; A local filter hides source rows; it does not delete them. Keep marks
+  ;; valid against the full source so narrowing can build one transaction.
+  (let* ((entries (if (list-opt buf 'local-filter)
+                      (list-source-entries buf)
+                      (list-entries buf)))
+         (keys (map (lambda (e) (list-key buf e)) entries)))
     (filter (lambda (k) (member k keys)) (list-marked buf ch))))
 
-;; the entries a verb acts on: every marked entry, or the line at point.
+(define (list-targets buf)
+  ;; Marked actions in a local-filter list use the full source. This lets
+  ;; the user mark one row, narrow to another, and act on both together.
+  (let* ((m (list-live-marked buf *list-mark-char*))
+         (entries (if (list-opt buf 'local-filter)
+                      (list-source-entries buf)
+                      (list-entries buf))))
+    (if (pair? m)
+        (filter (lambda (e) (member (list-key buf e) m)) entries)
+        (let ((e (list-current buf))) (if e (list e) '())))))
 ;; This is what makes one key work on one chat and on twelve. ENTRIES,
 ;; not keys, in both cases: a list whose rows are plists (sentry) marks
 ;; by key but acts on the row itself.
-(define (list-targets buf)
-  (let ((m (list-live-marked buf *list-mark-char*)))
-    (if (pair? m)
-        (filter (lambda (e) (member (list-key buf e) m)) (list-entries buf))
-        (let ((e (list-current buf))) (if e (list e) '())))))
 
 (define-command "list-mark" "Mark the entry at point"
   (lambda () (list-mark-at-point! *list-mark-char*)))
@@ -571,12 +574,8 @@
 ;; drop the typed query and keep the mode's own kinds (dired's dotfiles).
 ;; No refresh: the caller is opening the list and draws it next.
 (define (list-clear-query! buf)
-  (let* ((fs (list-filters buf))
-         (rest (filter (lambda (f) (not (equal? (car f) "match"))) fs)))
-    (buffer-set-local! buf 'list-filters rest)
-    ;; #t when a query was really there: the caller must then draw from
-    ;; the source, because the cached rows ARE the narrowed ones.
-    (not (equal? (length fs) (length rest)))))
+  (buffer-set-local! buf 'list-filters
+    (filter (lambda (f) (not (equal? (car f) "match"))) (list-filters buf))))
 
 (define (list-filter-pop! buf)
   (let ((fs (list-filters buf)))
@@ -1291,19 +1290,18 @@
 ;; buffer. The mode setup calls it with (current-buffer); opening a list
 ;; calls it with the buffer it just made, so neither has to select first.
 (define (list-mode-init! buf name)
-  (let* ((opts (list-mode-opts name))
-         ;; A list opens WIDE. The typed narrowing answers a question you
-         ;; asked THIS time; a local persists, so C-x C-b days later opened
-         ;; on a three-row list narrowed by a word you no longer remember
-         ;; typing. The mode's own kinds (dired's dotfiles) are a setting,
-         ;; and stay.
-         (widened? (list-clear-query! buf)))
+  (let ((opts (list-mode-opts name)))
     (buffer-set-local! buf 'list-mode name)
     ;; derived content (S15): the refresh below re-renders it from
     ;; rows-fn, so the desktop saves mode + locals, not the rows
     (buffer-set-local! buf 'transient #t)
     ;; the stamp names the rows of one render — a restart draws new ones
     (desktop-skip! buf 'list-stamp)
+    ;; A list opens WIDE. The typed narrowing answers a question you asked
+    ;; THIS time; a local persists, so C-x C-b days later opened on a
+    ;; three-row list narrowed by a word you no longer remember typing.
+    ;; The mode's own kinds (dired's dotfiles) are a setting, and stay.
+    (list-clear-query! buf)
     ;; a list buffer's text IS its view. A buffer keeps the locals of the
     ;; mode before it, so dired on a directory that once held a diff kept
     ;; 'render-mode "blocks" and the window drew no rows at all.
@@ -1337,10 +1335,7 @@
     ;; from the network (sentry) froze the UI for the round trip — then
     ;; went back to sleep. 'cached renders the rows already in the buffer
     ;; and reaches the source only when there are none; `g` refetches.
-    ;; A clear that dropped a query reaches the source instead: the cached
-    ;; rows are the narrowed ones, so reusing them would show the narrowing
-    ;; this open just removed.
-    (list-render! buf (if widened? #f 'cached))
+    (list-render! buf 'cached)
     ;; the rewrite leaves the buffer's point after the key bar — a list
     ;; opens with point on the first row
     (list-goto-index! buf 0)
@@ -1434,6 +1429,143 @@
 (define-command "end-of-buffer" "Move point to the end of the buffer"
   (lambda () (or (preview-scroll! 1000000) (end-of-buffer!))))
 
+(define (preview--positions text needle)
+  (let loop ((from 0) (acc (list)))
+    (let ((i (string-index text needle from)))
+      (if i
+          (loop (+ i 1) (cons i acc))
+          (reverse acc)))))
+
+;; The nearest position strictly on DIR's side of FROM. DIR is 1 for a key
+;; that moves down, -1 for a key that moves up.
+(define (preview--toward positions from dir)
+  (let ((side (filter (lambda (p) (if (> dir 0) (> p from) (< p from)))
+                      positions)))
+    (cond ((null? side) #f)
+          ((> dir 0) (car side))
+          (else (car (reverse side))))))
+
+;; The position nearest FROM, on either side.
+(define (preview--nearest positions from)
+  (let loop ((ps positions) (best #f))
+    (cond ((null? ps) best)
+          ((or (not best) (< (abs (- (car ps) from)) (abs (- best from))))
+           (loop (cdr ps) (car ps)))
+          (else (loop (cdr ps) best)))))
+
+(define (preview--nth lst n)
+  (cond ((null? lst) #f)
+        ((<= n 0) (car lst))
+        (else (preview--nth (cdr lst) (- n 1)))))
+
+;; One rendered fragment names many source positions. A two-character code
+;; span such as `-b` sits in the file ten times, so the first hit is almost
+;; never the one the reader points at: the cursor jumps to the top of the
+;; file, and the next key matches the same first hit again. The cursor then
+;; stops moving.
+;;
+;; So the client also counts, on the page, how many times the fragment
+;; comes before the one it means (NTH), and names the direction the key
+;; moves (DIR: 1 down, -1 up, 0 for a click). Take the NTH source hit.
+;; Rendered text and source text differ, so that count can miss; when it
+;; misses, or when DIR says the cursor must move and the NTH hit does not
+;; move it, take the nearest hit on DIR's side. A down key then always
+;; moves down.
+;;
+;; string-index rejects an empty pattern, so an empty needle answers #f.
+(define (preview--hit text before after nth dir from)
+  (let ((needle (string-append before after)))
+    (if (equal? needle "")
+        #f
+        (let* ((starts (preview--positions text needle))
+               (b (string-byte-length before))
+               (hits (map (lambda (i) (+ i b)) starts))
+               (want (preview--nth hits nth))
+               (ok (and want (or (= dir 0) (if (> dir 0) (> want from) (< want from))))))
+          (cond (ok want)
+                ((= dir 0) (preview--nearest hits from))
+                (else (or (preview--toward hits from dir)
+                          (preview--nearest hits from))))))))
+
+;; A click or a visual-line key in a rendered markdown page. The client
+;; sends the text node split at the caret, plus the word run around the
+;; caret. Rendered text and source differ (markup is stripped, punctuation
+;; is smartened), so try the exact node first and the plain word run
+;; second; NTH counts the node, WN counts the word run.
+(define (preview-goto! win before after wb wa nth wn dir)
+  (mouse-select-window! win)
+  (set-mark! #f)
+  (let* ((text (buffer-text (current-buffer)))
+         (from (point))
+         (hit (or (preview--hit text before after nth dir from)
+                  (preview--hit text wb wa wn dir from))))
+    (when hit (goto-char! hit))))
+(public! 'preview-goto!
+  "(preview-goto! WIN BEFORE AFTER WB WA NTH WN DIR) — put point where a preview click or visual-line key landed"
+  'interaction)
+
+(define (preview-select! win before after wb wa nth wn dir)
+  (let ((anchor (or (mark) (point))))
+    (preview-goto! win before after wb wa nth wn dir)
+    (set-mark! anchor)))
+(public! 'preview-select!
+  "(preview-select! WIN BEFORE AFTER WB WA NTH WN DIR) — extend the region to a rendered position"
+  'interaction)
+
+;; Render-only widgets know their exact source ranges. Unlike preview-goto!,
+;; these do not need to reverse-map rendered prose into Markdown.
+(define (preview-goto-pos! win pos extend)
+  (mouse-select-window! win)
+  (when extend (unless (mark) (set-mark! (point))))
+  (unless extend (set-mark! #f))
+  (goto-char! (max 0 (min pos (buffer-size (current-buffer))))))
+(public! 'preview-goto-pos!
+  "(preview-goto-pos! WIN POS EXTEND) — move to an exact preview source position"
+  'interaction)
+
+;; A click on a link in a rendered page. The client never follows the link
+;; itself — it sends the href here, and Scheme says what the link means.
+;; A link the editor owns reads "aimax:VERB/ARGUMENT": a package claims a
+;; verb with on-preview-link!, the way it claims a display rule. help.scm
+;; claims "def", which opens the source of a name. An ordinary URL opens
+;; in the reader.
+(define *preview-link-verbs* '())
+
+(define (on-preview-link! verb fn)
+  (set! *preview-link-verbs*
+    (cons (list verb fn)
+          (filter (lambda (e) (not (equal? (car e) verb))) *preview-link-verbs*))))
+
+;; "aimax:def/find-file" -> ("def" "find-file"). The argument keeps its own
+;; slashes, so a qualified name survives the split.
+(define (preview--link-parts href)
+  (let* ((body (string-join (cdr (string-split href ":")) ":"))
+         (parts (string-split body "/")))
+    (list (car parts) (string-join (cdr parts) "/"))))
+
+(define (preview-follow-link! win href)
+  (mouse-select-window! win)
+  (cond
+    ((string-prefix? "aimax:" href)
+     (let* ((parts (preview--link-parts href))
+            (hit (assoc (car parts) *preview-link-verbs*)))
+       (if hit
+           ((cadr hit) (cadr parts))
+           (message (string-append "No handler for " href)))))
+    ((and (or (string-prefix? "http://" href) (string-prefix? "https://" href))
+          (boundp 'browse))
+     (browse href))
+    (else (message href))))
+
+(public! 'on-preview-link!
+  "(on-preview-link! VERB FN) — claim the aimax:VERB/ARG links in a rendered page; FN gets ARG"
+  'interaction)
+(public! 'preview-follow-link!
+  "(preview-follow-link! WIN HREF) — follow a link a reader clicked in a rendered page"
+  'interaction)
+(catalog-meta! 'function "on-preview-link!" 'domain 'interaction 'effects '(write))
+(catalog-meta! 'function "preview-follow-link!" 'domain 'interaction 'effects '(write))
+
 (define-command "newline" "Insert a newline at point" (lambda () (insert! "\n")))
 (define (delete-active-region!)
   (if (and (mark) (< (region-beginning) (region-end)))
@@ -1466,12 +1598,22 @@
 
 (define-command "minibuffer-confirm" "Accept the selected minibuffer candidate"
   (lambda () (minibuffer-confirm!)))
-;; C-RET: the same confirm, flagged as a CONTEXT switch — the prompt
-;; that cares (the buffer switcher) reads and resets the flag
+;; RET takes the candidate. C-RET and S-RET take the same candidate with
+;; a different verb, and the prompt that cares (the buffer switcher)
+;; reads and resets the flag:
+;;   RET    go there, move nothing else
+;;   C-RET  enter the candidate's context, layout and all
+;;   S-RET  bring the candidate HERE, into the current context
 (define *mb-confirm-context* #f)
+(define *mb-confirm-adopt* #f)
 (define-command "minibuffer-confirm-context"
   "Accept the selected candidate as a context (group) switch"
   (lambda () (set! *mb-confirm-context* #t) (minibuffer-confirm!)))
+(define-command "minibuffer-confirm-adopt"
+  "Accept the selected candidate into the current context"
+  (lambda () (set! *mb-confirm-adopt* #t) (minibuffer-confirm!)))
+(catalog-meta! 'command "minibuffer-confirm-adopt"
+               'domain 'interaction 'effects '(write))
 (define-command "minibuffer-confirm-input" "Accept the minibuffer input exactly as typed"
   (lambda () (minibuffer-confirm-input!)))
 (define-command "minibuffer-cancel" "Cancel the minibuffer prompt"
@@ -1524,8 +1666,8 @@
 ;; one interaction model: a completion prompt is the BOTTOM bar, like
 ;; Emacs — the candidates sit above the input and the input sits on the
 ;; last row. Only a prompt that asks for "palette" by name floats: the
-;; command palette and the LLM config menus. Candidates alone never
-;; promote a prompt to the centered card.
+;; switcher, the command palette, and the LLM config menus. Candidates
+;; alone never promote a prompt to the centered card.
 (define (prompt-style cands style)
   style)
 
@@ -1586,16 +1728,17 @@
   (local-set-key* mb "RET" "minibuffer-confirm")
   (local-set-key* mb "M-RET" "minibuffer-confirm-input")
   (local-set-key* mb "C-RET" "minibuffer-confirm-context")
+  (local-set-key* mb "S-RET" "minibuffer-confirm-adopt")
   (local-set-key* mb "C-g" "minibuffer-cancel")
   (local-set-key* mb "TAB" "minibuffer-complete")
   (local-set-key* mb "C-n" "minibuffer-next-candidate")
   (local-set-key* mb "<down>" "minibuffer-next-candidate")
   (local-set-key* mb "C-p" "minibuffer-previous-candidate")
   (local-set-key* mb "<up>" "minibuffer-previous-candidate")
-  ;; the prompt continues as a buffer — see minibuffer-collect below
   ;; a search repeats from inside its own prompt
   (local-set-key* mb "C-s" "isearch-repeat-forward")
   (local-set-key* mb "C-r" "isearch-repeat-backward")
+  ;; the prompt continues as a buffer — see minibuffer-collect below
   (local-set-key* mb "C-c C-o" "minibuffer-collect")
   (local-set-key* mb "DEL" "minibuffer-delete-backward"))
 
@@ -1604,6 +1747,13 @@
 (define *hooks* '())
 
 (define (add-hook! hook fn) (set! *hooks* (cons (list hook fn) *hooks*)))
+
+;; a client attached a frame: the Elixir side built it fresh, so anything
+;; a frame CARRIES for display — the group it stands in, and whatever a
+;; package adds later — has to be pushed out again. The client calls this
+;; once per mount, inside that frame's input context.
+(define (frame-attached!)
+  (run-hooks 'frame-attach-hook))
 
 (define (run-hooks hook)
   (for-each (lambda (h) (if (equal? (car h) hook) ((cadr h)))) *hooks*))
@@ -1818,6 +1968,7 @@
 (mode-icon! "tail-mode" "")
 (mode-icon! "collect-mode" "")
 
+
 (define (set-mode! name)
   (buffer-set-local! (current-buffer) 'mode-name name)
   (let ((m (assoc name *mode-setups*)))
@@ -1989,14 +2140,6 @@
         (begin (disable-minor-mode! buf name) #f)
         (begin (enable-minor-mode! buf name) #t))))
 
-;; The modeline names the modes this buffer runs, and a click on a name
-;; toggles that mode. The modeline names the major mode; the expanded
-;; modeline names the minor modes. Every mode is an M-x command too, and
-;; the command toggles the same way.
-;;
-;; A minor mode with a command of its own name runs the command, because
-;; the command owns the rest of the policy. A major mode has no off switch
-;; of its own. To leave it gives the buffer back with no mode at all:
 ;; Fundamental, the state a buffer has before any mode claims it. Nothing
 ;; remembers the mode you left, as in Emacs. normal-mode reads the file
 ;; name again and the mode comes back. The echo area states each result.
@@ -2323,6 +2466,28 @@
 (mode-doc! "html-mode"
   "HTML, parsed. You get the colours, and `C-M-f` and `C-M-b` step over whole elements. `C-c C-v` shows the rendered page, because the renderer reads the extension. `C-c C-a` runs the page as an app: its own scripts, its own storage, and the files beside it. A save reloads it, and `C-g` gives the keyboard back.")
 
+;; preview-mode: render the buffer instead of showing its source.
+;; Renderer picked by *preview-renderers* (extension -> renderer); the
+;; frontend knows "html" and "markdown". Add your own:
+;;   (set! *preview-renderers* (cons '(".rst" "markdown") *preview-renderers*))
+(define *preview-renderers*
+  '((".html" "html") (".htm" "html") (".svg" "html")
+    (".md" "markdown") (".markdown" "markdown") (".org" "markdown")
+    (".txt" "markdown")))
+
+;; A generated buffer has no extension to read a renderer from, so it says
+;; which renderer it wants in a buffer-local. Help docs are the case: the
+;; text is markdown, the buffer is "*Help*", and C-c C-v must still toggle
+;; between the source and the rendered page.
+(define (preview-renderer-for name)
+  (or (buffer-local name 'preview-renderer)
+      (let loop ((rs *preview-renderers*))
+        (if (null? rs)
+            #f
+            (if (string-suffix? (car (car rs)) name)
+                (cadr (car rs))
+                (loop (cdr rs)))))))
+
 ;; revert-buffer: re-read the file from disk (discards buffer edits).
 ;; Kill + re-visit so modes, hooks and fontification re-apply cleanly.
 (define-command "revert-buffer" "Re-read the current buffer's file from disk"
@@ -2337,6 +2502,73 @@
             (visit path)
             (goto-char! (min p (buffer-size (current-buffer))))
             (message "Reverted"))))))
+
+(define-command "preview-mode" "Toggle rendered preview of the current buffer"
+  (lambda ()
+    (if (equal? (buffer-local (current-buffer) 'mode-name) "chat-mode")
+        ;; a chat's rendered view is the rich transcript, not a markdown
+        ;; preview. A markdown render-mode here lost the chat UI with no
+        ;; way back — the chat's own toggle owns this buffer-local.
+        (run-command "chat-toggle-view")
+        (if (buffer-local (current-buffer) 'render-mode)
+            (begin
+              (buffer-set-local! (current-buffer) 'render-mode #f)
+              (message "Preview off"))
+            (let ((r (preview-renderer-for (current-buffer))))
+              (if r
+                  (begin
+                    (buffer-set-local! (current-buffer) 'render-mode r)
+                    (message (string-append "Preview on (" r ") — C-c C-v toggles")))
+                  (message "No preview renderer for this buffer")))))))
+
+;;; --- apps --------------------------------------------------------------
+;;; preview-mode renders a page the way eww does: themed, and inert. An app
+;;; needs the opposite. It keeps the colours the author wrote, it runs its
+;;; own JavaScript, it keeps its own storage, and it loads the files beside
+;;; it. So an app window draws a frame on the app origin — a different port,
+;;; which the browser reads as a different origin — and that origin serves
+;;; this buffer's live text plus the directory its file lives in.
+;;;
+;;; The two are separate commands on purpose. A downloaded .html that you
+;;; open to read must not run anything; `C-c C-v` reads it, `C-c C-a` runs
+;;; it, and the difference is a key you press.
+
+(define (app-buffer? buf) (equal? (buffer-local buf 'render-mode) "app"))
+
+;; the client reloads an app when this number changes, and at no other time:
+;; a keystroke must not restart the app you are typing at
+(define (app-reload! buf)
+  (buffer-set-local! buf 'app-generation
+                     (+ 1 (or (buffer-local buf 'app-generation) 0))))
+
+(define (app-buffers)
+  (let loop ((bs (buffer-list)) (acc '()))
+    (cond ((null? bs) (reverse acc))
+          ((app-buffer? (car bs)) (loop (cdr bs) (cons (car bs) acc)))
+          (else (loop (cdr bs) acc)))))
+
+(define-command "app-preview" "Run the current buffer as an HTML app"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (app-buffer? buf)
+          (begin
+            (buffer-set-local! buf 'render-mode #f)
+            (message "App off"))
+          (begin
+            (app-reload! buf)
+            (buffer-set-local! buf 'render-mode "app")
+            (message "App on — C-g gives the keyboard back, C-c C-a stops it"))))))
+
+(define-command "app-reload" "Reload every running app"
+  (lambda ()
+    (let ((bs (app-buffers)))
+      (for-each app-reload! bs)
+      (message (string-append "Reloaded " (number->string (length bs)) " app(s)")))))
+
+;; a save is the reload signal: you save the buffer, the app runs the new
+;; code. The app server reads buffers, not files, so an unsaved edit in a
+;; sibling file shows on the next reload too.
+(add-hook! 'after-save-hook (lambda () (for-each app-reload! (app-buffers))))
 
 (define-mode "elixir-mode" (ts-mode "elixir"))
 (define-mode "json-mode" (ts-mode "json"))
@@ -3037,16 +3269,17 @@
         (auto-mode path)
         (run-hooks 'find-file-hook)))))
 
-;; Files open in the active group. Existing memberships remain valid, so a
-;; file already used elsewhere becomes a member of both groups. Raw (visit)
+;; files open in the current group: visit PATH, then join GROUP — but a
+;; buffer that already belongs somewhere stays where it is. Raw (visit)
 ;; keeps no group policy, so desktop restore stays clean.
 (define (visit-in-group path g)
   (visit path)
-  (when g (buffer-add-group! (current-buffer) g)))
+  (when (and g (group-resolve-id g))
+    (buffer-add-group! (current-buffer) g)))
 
 (define-command "find-file" "Visit a file, prompting with filename completion"
   (lambda ()
-    (let ((g (frame-group)))
+    (let ((g (buffer-group (current-buffer))))
       (read-file-name "Find file: " (lambda (p) (visit-in-group p g))))))
 
 ;; the project a buffer belongs to, as a short name for the prompt.
@@ -3068,7 +3301,7 @@
   (lambda (b)
     (list (buffer-icon b)
           (or (buffer-local b 'mode-name) "Fundamental")
-          (group-label (buffer-group b))
+          (buffer-group-summary b)
           (buffer-project-label b)
           (buffer-workspace-label b)
           ;; a chat has no file: its last column is the group's
@@ -3621,9 +3854,23 @@
         (let ((spec (mode-layout (car names))))
           (if spec spec (loop (cdr names)))))))
 
+;; A pane that may not exist yet: (ensure "NAME" "COMMAND") runs COMMAND
+;; when NAME is absent, then uses NAME. This is what lets a declared
+;; layout be the whole truth — kill a pane's buffer, ask for the layout
+;; again, and the command builds it back. A plain "NAME" pane still
+;; drops when it is missing, because a document with no scratch yet must
+;; fill the frame alone.
+(define (layout--ensure name maker)
+  (unless (buffer-known? name)
+    (when (string? maker) (run-command maker)))
+  (and (buffer-known? name) name))
+
 (define (layout--pane anchor pane)
   (cond ((equal? pane 'self) anchor)
         ((string? pane) (and (buffer-known? pane) pane))
+        ((and (pair? pane) (equal? (car pane) 'ensure))
+         (layout--ensure (car (cdr pane))
+                         (and (pair? (cdr (cdr pane))) (car (cdr (cdr pane))))))
         ((symbol? pane)
          (let ((v (buffer-local anchor pane)))
            (and (string? v) (buffer-known? v) v)))
@@ -3648,6 +3895,20 @@
 ;; Run THUNK with the engine standing down. Desktop restore uses this: it
 ;; rebuilds the exact windows it saved, and a mode setup that runs inside it
 ;; must not arrange the frame a second way.
+;; Is the engine arranging the frame right now? A package that moves
+;; windows of its own — a preview that opens beside its index, say — must
+;; ask this and stand down: the engine is mid-build, it will place every
+;; declared pane itself, and a split landing inside that build leaves the
+;; frame neither arrangement.
+(define (layout-arranging?) *layout-busy*)
+
+;; This Scheme has no unwind form, so a throw inside a build leaves the
+;; flag raised and every later arrangement returns early — the frame
+;; quietly stops obeying its layouts. A top-level, user-initiated build
+;; clears it first: nothing can legitimately be arranging the frame at
+;; the moment somebody asks for an arrangement.
+(define (layout-abort!) (set! *layout-busy* #f))
+
 (define (with-layout-suppressed thunk)
   (let ((was *layout-busy*))
     (set! *layout-busy* #t)
@@ -3658,21 +3919,28 @@
 ;; Put the frame where SPEC says. The anchor keeps focus: a mode that arranges
 ;; the frame must not move the user out of the buffer they are in.
 (define (apply-layout! anchor spec)
-  (let ((panes (layout--panes anchor spec)))
-    (when (and (pair? panes) (not *layout-busy*))
-      (set! *layout-busy* #t)
-      (delete-other-windows!)
-      (switch-to-buffer! (car panes))
-      (for-each
-        (lambda (b)
-          (split-window! (layout--dir spec) (layout--ratio spec))
-          (other-window!)
-          (switch-to-buffer! b))
-        (cdr panes))
-      (let ((w (window-showing anchor)))
-        (when w (select-window! w)))
-      (set! *layout-busy* #f))
-    panes))
+  (if *layout-busy*
+      (layout--panes anchor spec)
+      (begin
+        ;; the flag goes up BEFORE the panes resolve: an ensure pane runs a
+        ;; command, that command switches buffers and sets a mode, and a
+        ;; mode setup asks the engine for a layout of its own. One
+        ;; arrangement at a time, materialising included.
+        (set! *layout-busy* #t)
+        (let ((panes (layout--panes anchor spec)))
+          (when (pair? panes)
+            (delete-other-windows!)
+            (switch-to-buffer! (car panes))
+            (for-each
+              (lambda (b)
+                (split-window! (layout--dir spec) (layout--ratio spec))
+                (other-window!)
+                (switch-to-buffer! b))
+              (cdr panes))
+            (let ((w (window-showing anchor)))
+              (when w (select-window! w))))
+          (set! *layout-busy* #f)
+          panes))))
 
 ;; The engine's entry point: a mode turned on in BUF. Arrange the frame only
 ;; when BUF is the buffer the user is looking at.
@@ -3686,6 +3954,7 @@
 
 (define-command "reset-layout" "Arrange the frame the way this buffer's mode asks"
   (lambda ()
+    (layout-abort!)
     (let ((spec (buffer-layout (current-buffer))))
       (if spec
           ;; also the way back from an arrangement that failed part way: the
@@ -5104,7 +5373,7 @@
 ;; 'render-mode is the chat's chosen VIEW ("agent" rich, "plain" text) —
 ;; a choice about the chat, so identity (S11)
 (define chat-identity-locals
-  '(group groups group-state-holder group-meta group-layout group-noise
+  '(group group-id chat-id group-meta group-layout group-noise
     agent-connector agent-model agent-effort
     chat-presets chat-permission-mode render-mode default-directory
     agent-permission-profile window-class header-line
@@ -5132,11 +5401,6 @@
     ;; a one-shot note for the next send (a skill body a mode pushed):
     ;; undelivered it must survive a restart, and a reset drops it
     chat-note-once
-    ;; messages typed mid-turn that the model did not read yet, oldest
-    ;; first. The client renders them as muted rows above the input —
-    ;; they are not transcript text. Restore returns them to the input;
-    ;; a reset drops them with the conversation.
-    chat-queued
     ;; the file this conversation logs itself to under <aimax-home>/chats:
     ;; a reset starts a new conversation, which gets a new file, and the
     ;; old file stays as the archive
@@ -5467,6 +5731,8 @@
 ;;; tool surface, the usage ledger, and the direct lane's turn context.
 ;;; Policy about a conversation is not the editor's business.
 
+
+
 ;; a mode whose buffer went stale OFF screen registers a catch-up
 ;; here; the switcher runs it for every window it just (re)filled.
 ;; diff-mode uses it: hidden diffs skip the expensive re-render and
@@ -5594,9 +5860,6 @@
 .dash-chip { padding: 2px 8px; border-radius: 6px; background: var(--window-bg, #fdfcf8);
              border: 1px solid var(--border, #e2dbc9); font-family: var(--font-mono);
              font-size: 10.5px; color: var(--dim-fg, #57534a); }
-.dash-chip-on, .dash-toggle { cursor: pointer; }
-.dash-chip-on:hover, .dash-toggle:hover { border-color: var(--accent-fg, #26356b);
-                                          color: var(--accent-fg, #26356b); }
 .dash-spark { display: flex; align-items: flex-end; gap: 2px; height: 44px; }
 .dash-bar { flex: 1; border-radius: 1px; background: var(--accent-fg, #26356b);
             min-width: 3px; }
@@ -5704,7 +5967,7 @@
   (if (chat-buffer? buf)
       buf
       (let ((g (buffer-group buf)))
-        (and g (group-holder g)))))
+        (and g (group-primary-chat g)))))
 
 ;; what HERE cost: the buffer's own chat, or its group's chat
 (define (dash--here-cost buf)
@@ -6036,12 +6299,11 @@
               rows))
       (switch-to-buffer! buf))))
 
-;; Start another conversation in the active group. chat-reset remains the
-;; command that clears only the selected chat.
-(define-command "chat-new" "Start another chat in the active group"
+;; a fresh conversation on the same surface: open the group chat, wipe it
+(define-command "chat-new" "Start a fresh chat conversation"
   (lambda ()
-    (let ((g (or (frame-group) (group-ensure! (current-buffer)))))
-      (group-chat-new! g))))
+    (run-command "chat")
+    (run-command "chat-reset")))
 
 ;; C-c q from anywhere: the prompt becomes a turn in this buffer's group
 ;; chat (founding the group first if needed) — one chat interface, always
@@ -6053,6 +6315,9 @@
 (global-set-key "C-c r" "chat-send-region")
 (global-set-key "C-c q" "llm-ask")
 (global-set-key "C-c w" "chat-companion")
+
+
+
 
 ;; Cmd-p is intent search; M-x remains literal command-name completion.
 (global-set-key "s-p" "command-palette")
@@ -6451,9 +6716,8 @@
 
 ;; one gate for clicks that run a command (dup #24). A transcript button
 ;; sends a command name; the modeline-info segment sends its buffer. The
-;; whitelist lives here: a button runs agent-* commands only, a "mode:NAME"
-;; click toggles that mode, and a modeline click runs the buffer's own
-;; modeline-info-command.
+;; whitelist lives here: a button runs agent-* commands only, a modeline
+;; click runs the buffer's own modeline-info-command.
 (define (ui-command! cmd buf)
   (cond ((and (string? cmd) (string-prefix? "agent-" cmd))
          (run-command cmd))
@@ -6608,6 +6872,9 @@
 (global-set-key "M-g M-g" "goto-line")
 (global-set-key "M-m" "back-to-indentation")
 (global-set-key "C-c l" "copy-buffer-link")
+(global-set-key "C-c C-v" "preview-mode")
+(global-set-key "C-c C-a" "app-preview")
+(global-set-key "C-c C-r" "app-reload")
 (global-set-key "C-`" "popup-toggle")
 (global-set-key "C-M-`" "popup-bufferize")
 (global-set-key "C-M-v" "scroll-other-window")
@@ -6798,6 +7065,9 @@
 (catalog-meta! 'function "buffer-icon" 'domain 'interaction 'effects '(read))
 (catalog-meta! 'function "file-icon" 'domain 'interaction 'effects '(pure))
 (public! 'add-hook! "(add-hook! 'name-hook FN)")
+(public! 'layout-arranging? "(layout-arranging?) — #t while the layout engine is building the frame; a package that moves windows must stand down")
+(public! 'layout-abort! "(layout-abort!) — clear a layout build left in progress by a failure; a top-level build calls this first")
+(public! 'frame-attached! "(frame-attached!) — a client attached this frame; runs frame-attach-hook so per-frame display state is pushed again")
 (public! 'overlay-set! "(overlay-set! NAME TAG ((START END FACE) ...)) — replaces TAG's ranges")
 (public! 'overlay-clear! "(overlay-clear! NAME TAG)")
 
@@ -6817,6 +7087,9 @@
 (public! 'llm-with-model "(llm-with-model PROMPT MODEL HANDLER) — async completion with an explicit model")
 (public! 'llm-model "Current model id")
 (public! 'set-llm-model! "(set-llm-model! ID) — a \"provider:model\" prefix routes to that provider; a bare id is Anthropic")
+
+
+
 
 
 ;; git

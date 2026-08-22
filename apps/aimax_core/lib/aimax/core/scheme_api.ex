@@ -353,6 +353,8 @@ defmodule Aimax.Core.SchemeAPI do
         "(buffer-sleep! NAME) — checkpoint NAME and stop its process; the buffer stays known. #f when NAME is on screen, busy, or pinned.",
       "minibuffer-set-candidates!" =>
         "(minibuffer-set-candidates! CANDIDATES) — replace the minibuffer's candidate list.",
+      "set-frame-group-label!" =>
+        "(set-frame-group-label! NAME [FRAME]) — name the group a frame stands in, for the modeline; #f clears it. FRAME defaults to the selected one.",
       "delete-file!" =>
         "(delete-file! PATH) — delete a file or empty directory; return #t or error.",
       "buffer-rename!" =>
@@ -1361,6 +1363,19 @@ defmodule Aimax.Core.SchemeAPI do
       "minibuffer-set-candidates!" => fn [candidates] ->
         Editor.minibuffer_set_candidates(candidates)
         :void
+      end,
+      "set-frame-group-label!" => fn
+        [label] ->
+          Editor.set_frame_group_label(if(is_binary(label), do: label, else: nil))
+          :void
+
+        [label, fid] ->
+          Editor.set_frame_group_label(
+            if(is_binary(label), do: label, else: nil),
+            if(is_binary(fid), do: fid, else: nil)
+          )
+
+          :void
       end,
 
       # filesystem (dired's hands)

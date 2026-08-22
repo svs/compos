@@ -762,6 +762,22 @@ defmodule Aimax.Ui.Layouts do
             grid-template-columns: max-content minmax(0, auto);
             justify-content: start;
           }
+          /* a section heading inside the candidate list: it labels the rows
+             under it and never takes the selection */
+          .mb-sep {
+            grid-column: 1 / -1;
+            display: flex; align-items: center; gap: 9px;
+            padding: 9px 14px 4px;
+          }
+          .mb-sep-label {
+            font-family: var(--font-mono); font-size: 9.5px;
+            letter-spacing: 0.15em; text-transform: uppercase;
+            color: var(--dim-fg, #8a857a); white-space: nowrap;
+          }
+          .mb-sep::after {
+            content: ""; flex: 1; height: 1px;
+            background: var(--border, #e2dbc9);
+          }
           .mb-cand {
             display: grid; grid-template-columns: subgrid; grid-column: 1 / -1;
             align-items: baseline; column-gap: 12px;

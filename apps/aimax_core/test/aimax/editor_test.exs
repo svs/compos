@@ -22,6 +22,30 @@ defmodule Aimax.EditorTest do
 
   defp echo, do: Editor.snapshot().echo
 
+  # A group's name can change; its ID cannot. Run CODE that answers a
+  # group ID and return the raw ID, so a test can name the group by
+  # identity for the rest of its body.
+  defp group_id!(code) do
+    {:ok, quoted} = Aimax.Core.Session.eval(code)
+    id = String.trim(quoted, "\"")
+    assert String.starts_with?(id, "grp:"), "expected a group ID, got #{quoted}"
+    id
+  end
+
+  # The group a buffer belongs to, as an ID, or nil. The legacy 'group
+  # buffer-local no longer answers: a work buffer holds 'group-ids and a
+  # chat holds one 'group-id.
+  defp buffer_group(name) do
+    {:ok, quoted} = Aimax.Core.Session.eval(~s{(buffer-group "#{name}")})
+    if quoted == "#f", do: nil, else: String.trim(quoted, "\"")
+  end
+
+  # The display name a group ID currently carries.
+  defp group_name(id) do
+    {:ok, quoted} = Aimax.Core.Session.eval(~s{(group-name "#{id}")})
+    if quoted == "#f", do: nil, else: String.trim(quoted, "\"")
+  end
+
   defp evict(name) do
     :ok = Buffer.checkpoint_now(name)
     [{pid, _}] = Registry.lookup(Aimax.Core.BufferRegistry, name)
@@ -2087,8 +2111,8 @@ defmodule Aimax.EditorTest do
     assert Editor.current_buffer() == companion
     assert length(Editor.list_windows()) == 2
     # the group is the tag: doc and chat both carry it, nothing points anywhere
-    assert Buffer.get_local(buf, "group") == buf
-    assert Buffer.get_local(companion, "group") == buf
+    assert group_name(buffer_group(buf)) == buf
+    assert buffer_group(companion) == buffer_group(buf)
     assert Buffer.get_local(companion, "mode-name") == "chat-mode"
 
     # rich surface from birth: agent renderer + help meta card + input marker
@@ -2172,8 +2196,8 @@ defmodule Aimax.EditorTest do
     assert Editor.snapshot().minibuffer.prompt == "Companion for buffer: "
     press(["RET"])
 
-    assert Buffer.get_local(legacy, "group") == buf
-    assert Buffer.get_local(buf, "group") == buf
+    assert group_name(buffer_group(buf)) == buf
+    assert buffer_group(legacy) == buffer_group(buf)
     assert Editor.current_buffer() == legacy
 
     # C-c w from the doc refocuses the adopted chat
@@ -2211,14 +2235,14 @@ defmodule Aimax.EditorTest do
     assert Editor.snapshot().minibuffer.prompt =~ ~r/^Join group/
     type("proj")
     press(["RET"])
-    assert Buffer.get_local(buf, "group") == "proj"
+    assert group_name(buffer_group(buf)) == "proj"
 
     {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-create "#{notes}")})
     Editor.set_window_buffer(notes)
     press(["C-c", "g"])
     type("proj")
     press(["RET"])
-    assert Buffer.get_local(notes, "group") == "proj"
+    assert group_name(buffer_group(notes)) == "proj"
 
     # C-c q in a grouped buffer routes to the group chat, focus stays put
     point = Buffer.point(notes)
@@ -2228,7 +2252,7 @@ defmodule Aimax.EditorTest do
     press(["RET"])
 
     assert eventually(fn -> Buffer.text(chat) =~ "aye" end)
-    assert Buffer.get_local(chat, "group") == "proj"
+    assert group_name(buffer_group(chat)) == "proj"
     assert Editor.current_buffer() == notes
     assert Buffer.point(notes) == point
     assert length(Editor.list_windows()) == 2
@@ -2262,7 +2286,7 @@ defmodule Aimax.EditorTest do
              Buffer.exists?(chat) && Buffer.text(chat) =~ "aye"
            end)
 
-    assert Buffer.get_local(chat, "group") == "proj"
+    assert group_name(buffer_group(chat)) == "proj"
 
     press(["C-x", "1"])
   end
@@ -2285,7 +2309,7 @@ defmodule Aimax.EditorTest do
     press(["C-c", "g"])
     assert Editor.snapshot().minibuffer.prompt == "Join group (default #{g}): "
     press(["RET"])
-    assert Buffer.get_local(stray, "group") == g
+    assert group_name(buffer_group(stray)) == g
 
     # a typed name wins over the default and founds a new group
     new_g = "founded-#{System.unique_integer([:positive])}"
@@ -2293,7 +2317,7 @@ defmodule Aimax.EditorTest do
     press(["C-c", "g"])
     type(new_g)
     press(["RET"])
-    assert Buffer.get_local(other, "group") == new_g
+    assert group_name(buffer_group(other)) == new_g
 
     # from inside the group itself there is no self-default
     press(["C-c", "g"])
@@ -2313,8 +2337,8 @@ defmodule Aimax.EditorTest do
     {:ok, _} = Aimax.Core.Session.eval(~s{(set-mode! "chat-mode")})
 
     # both ends now carry the tag; the pointer is only read as a fallback
-    assert Buffer.get_local(chat, "group") == buf
-    assert Buffer.get_local(buf, "group") == buf
+    assert group_name(buffer_group(buf)) == buf
+    assert buffer_group(chat) == buffer_group(buf)
   end
 
   test "C-c q founds a group and asks its one chat from the minibuffer", %{buf: buf} do
@@ -2631,15 +2655,17 @@ defmodule Aimax.EditorTest do
     home = "ct-home-#{n}"
     for b <- [m1, m2, home], do: Aimax.Core.create_buffer(b)
 
-    {:ok, _} =
-      Aimax.Core.Session.eval("""
-      (begin (set-frame-local! 'current-group #f)
-             (delete-other-windows!)
-             (switch-to-buffer! "#{m1}")
-             (switch-to-buffer! "#{m2}")
-             (buffer-set-local! "#{m1}" 'group "ctgrp-#{n}")
-             (buffer-set-local! "#{m2}" 'group "ctgrp-#{n}")
-             (switch-to-buffer! "#{home}"))
+    id =
+      group_id!("""
+      (let ((id (group-record-create! "ctgrp-#{n}")))
+        (set-frame-local! 'current-group #f)
+        (delete-other-windows!)
+        (switch-to-buffer! "#{m1}")
+        (switch-to-buffer! "#{m2}")
+        (buffer-add-group! "#{m1}" id)
+        (buffer-add-group! "#{m2}" id)
+        (switch-to-buffer! "#{home}")
+        id)
       """)
 
     # pure history: the previous buffer is the default; groups have no
@@ -2657,8 +2683,7 @@ defmodule Aimax.EditorTest do
     assert Editor.current_buffer() == m2
     assert length(Editor.list_windows()) == 1
     # a plain switch moves no windows, but the standing follows
-    assert Aimax.Core.Session.eval("(frame-local 'current-group)") ==
-             {:ok, ~s{"ctgrp-#{n}"}}
+    assert Aimax.Core.Session.eval("(frame-local 'current-group)") == {:ok, ~s{"#{id}"}}
 
     # C-RET is the CONTEXT switch: the group's layout comes up with
     # point in the picked buffer, and the frame enters the group.
@@ -2667,7 +2692,7 @@ defmodule Aimax.EditorTest do
     open_switch_prompt()
 
     {:ok, _} =
-      Aimax.Core.Session.eval(~s{(buffer-set-local! (group-chat "ctgrp-#{n}") 'group-layout #f)})
+      Aimax.Core.Session.eval(~s{(buffer-set-local! (group-chat "#{id}") 'group-layout #f)})
 
     type(m1)
     press(["C-RET"])
@@ -2678,8 +2703,7 @@ defmodule Aimax.EditorTest do
 
     assert shown == Enum.sort([m1, m2])
 
-    assert Aimax.Core.Session.eval("(frame-local 'current-group)") ==
-             {:ok, ~s{"ctgrp-#{n}"}}
+    assert Aimax.Core.Session.eval("(frame-local 'current-group)") == {:ok, ~s{"#{id}"}}
 
     {:ok, _} =
       Aimax.Core.Session.eval(
@@ -2920,8 +2944,11 @@ defmodule Aimax.EditorTest do
 
     # the project's open buffers joined a group named by the root, and
     # the context came up arranged
-    assert Aimax.Core.Session.eval(~s{(buffer-group "#{f1}")}) == {:ok, ~s{"#{root}"}}
-    assert Aimax.Core.Session.eval(~s{(buffer-group "#{f2}")}) == {:ok, ~s{"#{root}"}}
+    # C-RET founds the group, so look up the ID the root name now holds;
+    # both files must carry that one identity
+    id = group_id!(~s{(group-resolve-id "#{root}")})
+    assert Aimax.Core.Session.eval(~s{(buffer-group "#{f1}")}) == {:ok, ~s{"#{id}"}}
+    assert Aimax.Core.Session.eval(~s{(buffer-group "#{f2}")}) == {:ok, ~s{"#{id}"}}
     assert Editor.current_buffer() == f1
 
     shown = Editor.list_windows() |> Enum.map(fn {_id, b} -> b end) |> Enum.sort()
@@ -3162,22 +3189,27 @@ defmodule Aimax.EditorTest do
     m2 = "rn-b-#{n}"
     for x <- [m1, m2], do: Aimax.Core.create_buffer(x)
 
-    {:ok, _} =
-      Aimax.Core.Session.eval("""
-      (begin (set-frame-local! 'current-group "rngrp-#{n}")
-             (buffer-set-local! "#{m1}" 'group "rngrp-#{n}")
-             (buffer-set-local! "#{m2}" 'group "rngrp-#{n}")
-             (group-meta-set! "rngrp-#{n}" "the renamed group")
-             (group-rename! "rngrp-#{n}" "fresh-#{n}"))
+    # Found the group once and hold its ID. The name is the one thing
+    # this test changes, so every later reference names the ID.
+    id =
+      group_id!("""
+      (let ((id (group-record-create! "rngrp-#{n}")))
+        (set-frame-local! 'current-group id)
+        (buffer-add-group! "#{m1}" id)
+        (buffer-add-group! "#{m2}" id)
+        (group-meta-set! id "the renamed group")
+        (group-rename! id "fresh-#{n}")
+        id)
       """)
 
-    assert Aimax.Core.Session.eval(~s{(buffer-group "#{m1}")}) == {:ok, ~s{"fresh-#{n}"}}
-    assert Aimax.Core.Session.eval(~s{(buffer-group "#{m2}")}) == {:ok, ~s{"fresh-#{n}"}}
+    # the rename moves the name; the ID and both memberships stay put
+    assert Aimax.Core.Session.eval(~s{(buffer-group "#{m1}")}) == {:ok, ~s{"#{id}"}}
+    assert Aimax.Core.Session.eval(~s{(buffer-group "#{m2}")}) == {:ok, ~s{"#{id}"}}
+    assert Aimax.Core.Session.eval("(frame-local 'current-group)") == {:ok, ~s{"#{id}"}}
 
-    assert Aimax.Core.Session.eval(~s{(group-meta "fresh-#{n}")}) ==
-             {:ok, ~s{"the renamed group"}}
-
-    assert Aimax.Core.Session.eval("(frame-local 'current-group)") == {:ok, ~s{"fresh-#{n}"}}
+    # only the display name and the metadata answer to the new name
+    assert Aimax.Core.Session.eval(~s{(group-name "#{id}")}) == {:ok, ~s{"fresh-#{n}"}}
+    assert Aimax.Core.Session.eval(~s{(group-meta "#{id}")}) == {:ok, ~s{"the renamed group"}}
 
     {:ok, _} = Aimax.Core.Session.eval("(set-frame-local! 'current-group #f)")
   end
@@ -3310,15 +3342,17 @@ defmodule Aimax.EditorTest do
     File.write!(f, "hello")
     on_exit(fn -> File.rm(f) end)
 
-    {:ok, _} =
-      Aimax.Core.Session.eval("""
-      (begin (buffer-create "gf-home-#{n}")
-             (switch-to-buffer! "gf-home-#{n}")
-             (buffer-set-local! "gf-home-#{n}" 'group "gf-grp-#{n}")
-             (visit-in-group "#{f}" (buffer-group (current-buffer))))
+    id =
+      group_id!("""
+      (let ((id (group-record-create! "gf-grp-#{n}")))
+        (buffer-create "gf-home-#{n}")
+        (switch-to-buffer! "gf-home-#{n}")
+        (buffer-add-group! "gf-home-#{n}" id)
+        (visit-in-group "#{f}" (buffer-group (current-buffer)))
+        id)
       """)
 
-    assert Aimax.Core.Session.eval(~s{(buffer-group "#{f}")}) == {:ok, ~s{"gf-grp-#{n}"}}
+    assert Aimax.Core.Session.eval(~s{(buffer-group "#{f}")}) == {:ok, ~s{"#{id}"}}
   end
 
   test "group metadata lives on the group chat and survives identity" do

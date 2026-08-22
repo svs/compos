@@ -26,6 +26,11 @@ defmodule Aimax.Ui.EditorLive do
       {:ok, fid} = Aimax.Core.Editor.attach_frame(requested)
       Events.subscribe_frame(fid)
 
+      # the frame is new to Elixir even when Scheme has known it all along
+      # (a reattach after a restart): let Scheme push back whatever this
+      # frame displays — the group it stands in, for one.
+      Input.run(fid, fn -> Aimax.Core.Session.call_named("frame-attached!", []) end)
+
       # a buffer link (/b/NAME?line=N) shows that buffer in this frame.
       # What "show" means — an open buffer, a file to visit, a line to go
       # to — is Scheme's open-buffer-link!, not this view's.
@@ -780,7 +785,10 @@ defmodule Aimax.Ui.EditorLive do
           <div class="mb-body">
             <div class="mb-cands" style={"--mb-label-w: #{@state.minibuffer.label_width}ch"}>
               <%= for c <- @state.minibuffer.candidates do %>
-                <%= if Map.get(c, :kind) == "container" do %>
+                <%= if Map.get(c, :kind) == "separator" do %>
+                  <div class="mb-sep"><span class="mb-sep-label">{c.label}</span></div>
+                <% else %>
+                  <%= if Map.get(c, :kind) == "container" do %>
                   <div class={"mb-container #{if c.selected, do: "selected"}"}>
                     <div class="mb-container-head">
                       <span class="mb-container-dot"></span>
@@ -798,6 +806,7 @@ defmodule Aimax.Ui.EditorLive do
                     <span class="mb-label">{c.label}</span>
                     <span class="mb-hint">{c.hint}</span>
                   </div>
+                  <% end %>
                 <% end %>
               <% end %>
             </div>

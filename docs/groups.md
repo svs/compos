@@ -1,5 +1,7 @@
 # Groups specification
 
+
+
 ## 1. Purpose
 Being able to quickly load and unload context is core to the power user experience. For this we have created Groups. Working inside a group is highly optimised for everyone - humans and agents.
 
@@ -1064,6 +1066,7 @@ Bindings MAY change after usability testing. The `group-*` command names, verbs,
 The switcher uses the shared centered candidate palette. Plain line input remains in the bottom bar.
 
 Presentation MUST NOT change switching semantics, transaction boundaries, or cancellation behavior. Command completion matches command names. Intent search MAY also match command documentation and task recipes.
+
 
 ## 19. Literate Scheme example
 

@@ -59,7 +59,7 @@ defmodule Aimax.ChatResetTest do
     assert text =~ "companion · resetg"
     refute text =~ "old transcript junk"
     assert eval!(~s{(chat-turns (current-buffer))}) == "()"
-    assert eval!(~s{(buffer-group (current-buffer))}) == ~s{"resetg"}
+    assert eval!(~s{(group-name (buffer-group (current-buffer)))}) == ~s{"resetg"}
     # rich again: a fresh mark exists and the input marker is in place
     assert eval!(~s{(if (buffer-local (current-buffer) 'agent-saved-mark) #t #f)}) == "#t"
     assert text =~ "you: "

@@ -1,7 +1,31 @@
 defmodule Aimax.GroupSwitchCommandTest do
   use ExUnit.Case
 
-  alias Aimax.Core.{Buffer, Editor, KeyDispatch, Session}
+  alias Aimax.Core.{Editor, KeyDispatch, Session}
+
+  defp eval!(code) do
+    case Session.eval(code) do
+      {:ok, result} -> result
+      other -> flunk("Scheme evaluation failed: #{inspect(other)}")
+    end
+  end
+
+  defp group_id(name) do
+    name
+    |> then(&eval!(~s{(group-record-create! "#{&1}")}))
+    |> Jason.decode!()
+  end
+
+  defp labels do
+    Editor.render_state().minibuffer.candidates |> Enum.map(& &1.label)
+  end
+
+  defp selected do
+    case Enum.find(Editor.render_state().minibuffer.candidates, & &1.selected) do
+      %{label: label} -> label
+      nil -> nil
+    end
+  end
 
   defp type(text) do
     text
@@ -10,468 +34,685 @@ defmodule Aimax.GroupSwitchCommandTest do
   end
 
   setup do
+    Editor.set_pending([])
+    Session.eval("(when (minibuffer-state) (minibuffer-cancel!))")
+
     n = System.unique_integer([:positive])
-    first = "group-switch-first-#{n}"
-    second = "group-switch-second-#{n}"
-    group = "group-switch-#{n}"
+    first = "groups-first-#{n}"
+    second = "groups-second-#{n}"
+    third = "groups-third-#{n}"
 
-    for buffer <- [first, second], do: Aimax.Core.create_buffer(buffer)
+    for buffer <- [first, second, third], do: Aimax.Core.create_buffer(buffer)
+
+    eval!("""
+    (begin
+      (set! *group-records* '())
+      (set! *group-next-id* 0)
+      (set-frame-local! 'current-group #f)
+      (set-frame-local! 'previous-group #f)
+      (delete-other-windows!)
+      (switch-to-buffer! "#{first}"))
+    """)
 
     on_exit(fn ->
-      for buffer <- [
-            first,
-            second,
-            "*chat:#{group}*",
-            "*chat:#{group}:2*",
-            "*chat:#{group}:3*",
-            "*chat:#{group}-added*"
-          ],
-          do: Aimax.Core.kill_buffer(buffer)
+      for buffer <- [first, second, third], do: Aimax.Core.kill_buffer(buffer)
 
-      {:ok, _} = Session.eval("(set-frame-local! 'current-group #f)")
-      Editor.delete_other_windows()
+      Session.eval("""
+      (begin
+        (set! *group-records* '())
+        (set! *group-next-id* 0)
+        (set-frame-local! 'current-group #f)
+        (set-frame-local! 'previous-group #f)
+        (delete-other-windows!))
+      """)
     end)
 
-    %{first: first, second: second, group: group}
+    %{first: first, second: second, third: third}
   end
 
-  test "C-c G restores the current buffer's group layout", context do
-    %{first: first, second: second, group: group} = context
+  test "rename keeps a stable group ID", %{first: buffer} do
+    id = group_id("stable")
+    eval!(~s{(buffer-add-group! "#{buffer}" "#{id}")})
 
-    {:ok, _} =
-      Session.eval("""
+    eval!(~s{(group-rename! "#{id}" "renamed")})
+
+    assert eval!(~s{(buffer-group "#{buffer}")}) == Jason.encode!(id)
+    assert eval!(~s{(group-name "#{id}")}) == ~s{"renamed"}
+  end
+
+  test "work buffers keep unique group ID sets", %{first: buffer} do
+    left = group_id("left")
+    right = group_id("right")
+
+    result =
+      eval!("""
       (begin
-        (buffer-set-local! "#{first}" 'group "#{group}")
-        (buffer-set-local! "#{second}" 'group "#{group}")
-        (delete-other-windows!)
-        (switch-to-buffer! "#{first}")
-        (split-window! 'h 0.5)
-        (other-window!)
-        (switch-to-buffer! "#{second}")
-        (group-layout-save! "#{group}")
-        (delete-other-windows!)
-        (switch-to-buffer! "#{first}"))
+        (buffer-add-group! "#{buffer}" "#{left}")
+        (buffer-add-group! "#{buffer}" "#{left}")
+        (buffer-add-group! "#{buffer}" "#{right}")
+        (buffer-remove-group! "#{buffer}" "#{left}")
+        (list (buffer-in-group? "#{buffer}" "#{left}")
+              (buffer-in-group? "#{buffer}" "#{right}")
+              (length (buffer-group-ids "#{buffer}"))))
       """)
 
-    KeyDispatch.handle_key("C-c")
-    KeyDispatch.handle_key("G")
-
-    shown = Editor.list_windows() |> Enum.map(fn {_id, buffer} -> buffer end) |> Enum.sort()
-
-    assert shown == Enum.sort([first, second])
-    assert Session.eval("(frame-local 'current-group)") == {:ok, ~s{"#{group}"}}
+    assert result == "(#f #t 1)"
   end
 
-  test "C-c G leaves an ungrouped buffer in place", context do
-    %{first: first} = context
+  test "legacy names migrate once to stable IDs", %{first: work} do
+    chat = "*chat:legacy*"
+    Aimax.Core.create_buffer(chat)
 
-    {:ok, _} = Session.eval(~s{(begin (delete-other-windows!) (switch-to-buffer! "#{first}"))})
+    on_exit(fn -> Aimax.Core.kill_buffer(chat) end)
 
-    KeyDispatch.handle_key("C-c")
-    KeyDispatch.handle_key("G")
+    result =
+      eval!("""
+      (begin
+        (buffer-set-local! "#{work}" 'group "legacy")
+        (buffer-set-local! "#{chat}" 'group "legacy")
+        (with-current-buffer "#{chat}" (lambda () (set-mode! "chat-mode")))
+        (let ((work-id (buffer-group "#{work}"))
+              (chat-id (chat-group-id "#{chat}")))
+          (list (equal? work-id chat-id)
+                (length (group-ids))
+                (length (buffer-group-ids "#{work}"))
+                (length (buffer-group-ids "#{chat}")))))
+      """)
 
+    assert result == "(#t 1 1 0)"
+  end
+
+  test "empty group records remain durable" do
+    id = group_id("empty")
+
+    assert eval!(~s{(group-name "#{id}")}) == ~s{"empty"}
+    assert eval!(~s{(length (group-buffers "#{id}"))}) == "0"
+    assert eval!("(if (assoc 'groups-v2 (desktop-globals)) #t #f)") == "#t"
+  end
+
+  test "new from visible preserves old memberships and the layout", %{
+    first: first,
+    second: second
+  } do
+    old = group_id("old")
+
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{old}")
+      (delete-other-windows!)
+      (switch-to-buffer! "#{first}")
+      (split-window! 'h 0.5)
+      (other-window!)
+      (switch-to-buffer! "#{second}")
+      (run-command "group-new-from-visible"))
+    """)
+
+    type("visible")
+    KeyDispatch.handle_key("RET")
+
+    id = eval!(~s{(group-resolve-id "visible")}) |> Jason.decode!()
+
+    assert eval!(~s{(buffer-in-group? "#{first}" "#{old}")}) == "#t"
+    assert eval!(~s{(buffer-in-group? "#{first}" "#{id}")}) == "#t"
+    assert eval!(~s{(buffer-in-group? "#{second}" "#{id}")}) == "#t"
+    assert eval!("(frame-local 'current-group)") == Jason.encode!(id)
+    assert eval!(~s{(equal? (group-layout "#{id}") (window-tree))}) == "#t"
+  end
+
+  test "cancelled group creation changes no group state", %{first: first} do
+    before = eval!("(window-tree)")
+
+    eval!(~s{(run-command "group-new-from-buffer")})
+    KeyDispatch.handle_key("C-g")
+
+    assert eval!("(group-ids)") == "()"
+    assert eval!("(frame-local 'current-group)") == "#f"
+    assert eval!(~s{(buffer-group-ids "#{first}")}) == "()"
+    assert eval!("(window-tree)") == before
+  end
+
+  test "pull adds the current group without switching context", %{
+    first: first,
+    second: second
+  } do
+    here = group_id("here")
+    there = group_id("there")
+
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{here}")
+      (buffer-add-group! "#{second}" "#{there}")
+      (set-frame-local! 'current-group "#{here}")
+      (switch-to-buffer! "#{first}")
+      (run-command "group-pull-buffer"))
+    """)
+
+    labels = Editor.render_state().minibuffer.candidates |> Enum.map(& &1.label)
+    assert second in labels
+
+    type(second)
+    KeyDispatch.handle_key("RET")
+
+    assert eval!(~s{(buffer-in-group? "#{second}" "#{here}")}) == "#t"
+    assert eval!(~s{(buffer-in-group? "#{second}" "#{there}")}) == "#t"
+    assert eval!("(frame-local 'current-group)") == Jason.encode!(here)
     assert Editor.current_buffer() == first
-    assert Buffer.text("*messages*") =~ "Not in a group"
   end
 
-  test "C-x C-g g selects the active group and restores its layout", context do
-    %{first: first, second: second, group: group} = context
-    source = "source-#{group}"
+  test "marked switcher buffers pull as one operation", %{
+    first: first,
+    second: second,
+    third: third
+  } do
+    here = group_id("here")
 
-    {:ok, _} =
-      Session.eval("""
-      (begin
-        (buffer-set-local! "#{first}" 'group "#{source}")
-        (buffer-set-local! "#{second}" 'group "#{group}")
-        (delete-other-windows!)
-        (switch-to-buffer! "#{second}")
-        (group-layout-save! "#{group}")
-        (switch-to-buffer! "#{first}")
-        (set-frame-local! 'current-group "#{source}"))
-      """)
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{here}")
+      (set-frame-local! 'current-group "#{here}")
+      (switch-to-buffer! "#{first}")
+      (run-command "ibuffer"))
+    """)
+
+    type(second)
+    KeyDispatch.handle_key("C-SPC")
+
+    for _ <- 1..String.length(second), do: KeyDispatch.handle_key("DEL")
+
+    type(third)
+    KeyDispatch.handle_key("C-SPC")
+    KeyDispatch.handle_key("C-c")
+    KeyDispatch.handle_key("l")
+
+    assert eval!(~s{(buffer-in-group? "#{second}" "#{here}")}) == "#t"
+    assert eval!(~s{(buffer-in-group? "#{third}" "#{here}")}) == "#t"
+    assert eval!("(frame-local 'current-group)") == Jason.encode!(here)
+    assert Editor.current_buffer() == "*switch*"
+
+    KeyDispatch.handle_key("ESC")
+    assert Editor.current_buffer() == first
+  end
+
+  test "push adds an existing destination without leaving the source", %{first: first} do
+    source = group_id("source")
+    destination = group_id("destination")
+
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{source}")
+      (set-frame-local! 'current-group "#{source}")
+      (switch-to-buffer! "#{first}")
+      (run-command "group-push-buffer"))
+    """)
+
+    labels = Editor.render_state().minibuffer.candidates |> Enum.map(& &1.label)
+    assert "New group" in labels
+    assert "destination" in labels
+
+    type("destination")
+    KeyDispatch.handle_key("RET")
+
+    assert eval!(~s{(buffer-in-group? "#{first}" "#{source}")}) == "#t"
+    assert eval!(~s{(buffer-in-group? "#{first}" "#{destination}")}) == "#t"
+    assert eval!("(frame-local 'current-group)") == Jason.encode!(source)
+    assert Editor.current_buffer() == first
+  end
+
+  test "push can create a destination without entering it", %{first: first} do
+    source = group_id("source")
+
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{source}")
+      (set-frame-local! 'current-group "#{source}")
+      (switch-to-buffer! "#{first}")
+      (run-command "group-push-buffer"))
+    """)
+
+    type("New group")
+    KeyDispatch.handle_key("RET")
+    type("created")
+    KeyDispatch.handle_key("RET")
+
+    created = eval!(~s{(group-resolve-id "created")}) |> Jason.decode!()
+
+    assert eval!(~s{(buffer-in-group? "#{first}" "#{created}")}) == "#t"
+    assert eval!("(frame-local 'current-group)") == Jason.encode!(source)
+  end
+
+  test "pop removes only the current group and replaces a visible buffer", %{
+    first: first,
+    second: second
+  } do
+    here = group_id("here")
+    shared = group_id("shared")
+
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{here}")
+      (buffer-add-group! "#{first}" "#{shared}")
+      (buffer-add-group! "#{second}" "#{here}")
+      (set-frame-local! 'current-group "#{here}")
+      (switch-to-buffer! "#{first}")
+      (run-command "group-pop"))
+    """)
+
+    assert eval!(~s{(buffer-in-group? "#{first}" "#{here}")}) == "#f"
+    assert eval!(~s{(buffer-in-group? "#{first}" "#{shared}")}) == "#t"
+    assert eval!("(frame-local 'current-group)") == Jason.encode!(here)
+    assert Editor.current_buffer() == second
+    assert eval!(~s{(buffer-exists? "#{first}")}) == "#t"
+  end
+
+  test "C-x b puts the group's own members first and still switches", %{
+    first: first,
+    second: second,
+    third: third
+  } do
+    id = group_id("current")
+
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{id}")
+      (buffer-add-group! "#{second}" "#{id}")
+      (set-frame-local! 'current-group "#{id}")
+      (switch-to-buffer! "#{first}"))
+    """)
 
     KeyDispatch.handle_key("C-x")
+    KeyDispatch.handle_key("b")
+
+    labels = Editor.render_state().minibuffer.candidates |> Enum.map(& &1.label)
+
+    # the member leads, under its heading; the stranger is present, below
+    assert Enum.find_index(labels, &(&1 == second)) <
+             Enum.find_index(labels, &(&1 == "other buffers"))
+
+    # a stranger may sit below the rendered window: filter to prove it is
+    # in the pool at all, then clear the filter again
+    type(third)
+    assert third in labels()
+    for _ <- 1..String.length(third), do: KeyDispatch.handle_key("DEL")
+
+    type(second)
+    KeyDispatch.handle_key("RET")
+
+    assert Editor.current_buffer() == second
+    assert eval!("(frame-local 'current-group)") == Jason.encode!(id)
+  end
+
+  test "C-x b lists every buffer, the group's own under a heading first", %{
+    first: first,
+    second: second,
+    third: third
+  } do
+    current_id = group_id("current")
+    foreign_id = group_id("foreign")
+
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{current_id}")
+      (buffer-add-group! "#{second}" "#{current_id}")
+      (buffer-add-group! "#{third}" "#{foreign_id}")
+      (set-frame-local! 'current-group "#{current_id}")
+      (switch-to-buffer! "#{first}"))
+    """)
+
+    KeyDispatch.handle_key("C-x")
+    KeyDispatch.handle_key("b")
+
+    labels = labels()
+
+    # nothing is hidden: both sections are there, the group's own first
+    assert "in this group" in labels
+    assert "other buffers" in labels
+    assert second in labels
+    refute first in labels
+
+    assert Enum.find_index(labels, &(&1 == "in this group")) <
+             Enum.find_index(labels, &(&1 == second))
+
+    assert Enum.find_index(labels, &(&1 == second)) <
+             Enum.find_index(labels, &(&1 == "other buffers"))
+
+    # the panel renders a WINDOW of rows, so a stranger can sit below the
+    # fold: filter to it rather than asserting on what happens to show
+    type(third)
+    assert third in labels()
+    assert Enum.find_index(labels(), &(&1 == "other buffers")) <
+             Enum.find_index(labels(), &(&1 == third))
+
     KeyDispatch.handle_key("C-g")
+  end
+
+  test "a heading takes no selection and no count", %{
+    first: first,
+    second: second,
+    third: third
+  } do
+    current_id = group_id("current")
+    foreign_id = group_id("foreign")
+
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{current_id}")
+      (buffer-add-group! "#{second}" "#{current_id}")
+      (buffer-add-group! "#{third}" "#{foreign_id}")
+      (set-frame-local! 'current-group "#{current_id}")
+      (switch-to-buffer! "#{first}"))
+    """)
+
+    KeyDispatch.handle_key("C-x")
+    KeyDispatch.handle_key("b")
+
+    # the first row selected is a real buffer, not the heading above it
+    assert selected() == second
+
+    # C-n steps OVER "other buffers": the row after the group's last member
+    # is a real buffer, never the heading between them
+    KeyDispatch.handle_key("C-n")
+    after_heading = selected()
+    assert after_heading != nil
+    refute after_heading in ["in this group", "other buffers"]
+
+    # and no number of steps can land on one
+    for _ <- 1..8, do: KeyDispatch.handle_key("C-n")
+    refute selected() in ["in this group", "other buffers"]
+
+    KeyDispatch.handle_key("C-g")
+  end
+
+  test "a heading drops when the filter empties its section", %{
+    first: first,
+    second: second,
+    third: third
+  } do
+    current_id = group_id("current")
+    foreign_id = group_id("foreign")
+
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{current_id}")
+      (buffer-add-group! "#{second}" "#{current_id}")
+      (buffer-add-group! "#{third}" "#{foreign_id}")
+      (set-frame-local! 'current-group "#{current_id}")
+      (switch-to-buffer! "#{first}"))
+    """)
+
+    KeyDispatch.handle_key("C-x")
+    KeyDispatch.handle_key("b")
+
+    # `third` lives only in the foreign group: filtering to it leaves the
+    # group's own section empty, so its heading goes with it
+    type(third)
+
+    labels = Editor.render_state().minibuffer.candidates |> Enum.map(& &1.label)
+    assert third in labels
+    refute "in this group" in labels
+    refute second in labels
+
+    KeyDispatch.handle_key("C-g")
+  end
+
+  test "S-RET pulls the buffer into the current group instead of following it", %{
+    first: first,
+    second: second,
+    third: third
+  } do
+    current_id = group_id("current")
+    foreign_id = group_id("foreign")
+
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{current_id}")
+      (buffer-add-group! "#{second}" "#{current_id}")
+      (buffer-add-group! "#{third}" "#{foreign_id}")
+      (set-frame-local! 'current-group "#{current_id}")
+      (switch-to-buffer! "#{first}"))
+    """)
+
+    KeyDispatch.handle_key("C-x")
+    KeyDispatch.handle_key("b")
+    type(third)
+    KeyDispatch.handle_key("S-RET")
+
+    # the buffer comes here; the context does not move to meet it
+    assert Editor.current_buffer() == third
+    assert eval!("(frame-local 'current-group)") == Jason.encode!(current_id)
+    assert eval!(~s[(buffer-in-group? "#{third}" "#{current_id}")]) == "#t"
+    # and it keeps the group it already had
+    assert eval!(~s[(buffer-in-group? "#{third}" "#{foreign_id}")]) == "#t"
+  end
+
+  test "C-RET follows the buffer into its group and restores that layout", %{
+    first: first,
+    second: second,
+    third: third
+  } do
+    current_id = group_id("current")
+    foreign_id = group_id("foreign")
+
+    # the foreign group remembers a layout that does NOT show `third`
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{current_id}")
+      (buffer-add-group! "#{second}" "#{foreign_id}")
+      (buffer-add-group! "#{third}" "#{foreign_id}")
+      (set-frame-local! 'current-group "#{foreign_id}")
+      (delete-other-windows!)
+      (switch-to-buffer! "#{second}")
+      (group-layout-save! "#{foreign_id}")
+      (set-frame-local! 'current-group "#{current_id}")
+      (delete-other-windows!)
+      (switch-to-buffer! "#{first}"))
+    """)
+
+    KeyDispatch.handle_key("C-x")
+    KeyDispatch.handle_key("b")
+    type(third)
+    KeyDispatch.handle_key("C-RET")
+
+    # the context follows the buffer, and the buffer is on screen even
+    # though the saved layout never showed it
+    assert eval!("(frame-local 'current-group)") == Jason.encode!(foreign_id)
+    assert Editor.current_buffer() == third
+    assert eval!(~s[(buffer-in-group? "#{third}" "#{current_id}")]) == "#f"
+  end
+
+  test "RET moves nothing but the window", %{first: first, second: second, third: third} do
+    current_id = group_id("current")
+    foreign_id = group_id("foreign")
+
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{current_id}")
+      (buffer-add-group! "#{second}" "#{current_id}")
+      (buffer-add-group! "#{third}" "#{foreign_id}")
+      (set-frame-local! 'current-group "#{current_id}")
+      (switch-to-buffer! "#{first}"))
+    """)
+
+    KeyDispatch.handle_key("C-x")
+    KeyDispatch.handle_key("b")
+    type(third)
+    KeyDispatch.handle_key("RET")
+
+    assert Editor.current_buffer() == third
+    assert eval!("(frame-local 'current-group)") == Jason.encode!(current_id)
+    assert eval!(~s[(buffer-in-group? "#{third}" "#{current_id}")]) == "#f"
+  end
+
+  test "a chat clears a group id whose record is gone", %{first: first} do
+    gone = group_id("gone")
+    chat = "*chat:dangling-#{System.unique_integer([:positive])}*"
+    Aimax.Core.create_buffer(chat)
+    on_exit(fn -> Aimax.Core.kill_buffer(chat) end)
+
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{gone}")
+      (buffer-set-local! "#{chat}" 'group-id "#{gone}")
+      (buffer-set-local! "#{chat}" 'mode-name "chat-mode"))
+    """)
+
+    assert eval!(~s[(chat-group-id "#{chat}")]) == Jason.encode!(gone)
+
+    # the record goes while the chat is not swept (asleep, or deleted
+    # straight from the board): the id it holds now names nothing
+    eval!(~s{(group-record-delete! "#{gone}")})
+
+    # reading it heals it, rather than handing back a dead id forever
+    assert eval!(~s[(chat-group-id "#{chat}")]) == "#f"
+    assert eval!(~s[(buffer-local "#{chat}" 'group-id)]) == "#f"
+    assert eval!(~s[(buffer-group-summary "#{chat}")]) == ~s{"ungrouped"}
+  end
+
+  test "C-x g changes context and restores the saved layout", %{
+    first: first,
+    second: second
+  } do
+    left = group_id("left")
+    right = group_id("right")
+
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{left}")
+      (buffer-add-group! "#{second}" "#{right}")
+      (set-frame-local! 'current-group "#{right}")
+      (switch-to-buffer! "#{second}")
+      (group-layout-save! "#{right}")
+      (set-frame-local! 'current-group "#{left}")
+      (switch-to-buffer! "#{first}"))
+    """)
+
+    KeyDispatch.handle_key("C-x")
     KeyDispatch.handle_key("g")
-
-    assert Editor.render_state().minibuffer.prompt == "Switch to group: "
-    assert Enum.any?(Editor.render_state().minibuffer.candidates, &(&1.label == group))
-
-    type(group)
+    type("right")
     KeyDispatch.handle_key("RET")
 
     assert Editor.current_buffer() == second
-    assert Session.eval("(frame-local 'current-group)") == {:ok, ~s{"#{group}"}}
+    assert eval!("(frame-local 'current-group)") == Jason.encode!(right)
+    assert eval!("(frame-local 'previous-group)") == Jason.encode!(left)
+    assert eval!(~s{(buffer-group "#{first}")}) == Jason.encode!(left)
   end
 
-  test "the groups board uses group-switch without exposing an internal command", context do
-    %{first: first, group: group} = context
-
-    {:ok, _} =
-      Session.eval("""
-      (begin
-        (buffer-set-local! "#{first}" 'group "#{group}")
-        (switch-to-buffer! "#{first}")
-        (group-layout-save! "#{group}")
-        (run-command "groups"))
-      """)
-
-    assert Session.eval(~s{(groups--current)}) == {:ok, ~s{"#{group}"}}
-    assert Session.eval(~s{(if (member "group-switch-at-point" (command-names)) #t #f)}) ==
-             {:ok, "#f"}
-
-    KeyDispatch.handle_key("RET")
-
-    assert Editor.current_buffer() == first
-    assert Session.eval("(frame-local 'current-group)") == {:ok, ~s{"#{group}"}}
-  end
-
-  test "C-c N founds a new group from every visible buffer", context do
-    %{first: first, second: second, group: group} = context
-
-    {:ok, _} =
-      Session.eval("""
-      (begin
-        (delete-other-windows!)
-        (switch-to-buffer! "#{first}")
-        (split-window! 'h 0.5)
-        (other-window!)
-        (switch-to-buffer! "#{second}"))
-      """)
-
-    KeyDispatch.handle_key("C-c")
-    KeyDispatch.handle_key("N")
-    type(group)
-    KeyDispatch.handle_key("RET")
-
-    assert Session.eval(~s{(buffer-group "#{first}")}) == {:ok, ~s{"#{group}"}}
-    assert Session.eval(~s{(buffer-group "#{second}")}) == {:ok, ~s{"#{group}"}}
-    assert Session.eval("(frame-local 'current-group)") == {:ok, ~s{"#{group}"}}
-    assert Session.eval(~s{(equal? (group-layout "#{group}") (window-tree))}) == {:ok, "#t"}
-  end
-
-  test "C-c N moves visible buffers to an existing group", context do
-    %{first: first, second: second, group: group} = context
-
-    {:ok, _} =
-      Session.eval("""
-      (begin
-        (buffer-set-local! "#{first}" 'group "source-#{group}")
-        (buffer-add-group! "#{first}" "extra-#{group}")
-        (buffer-set-local! "#{second}" 'group "#{group}")
-        (delete-other-windows!)
-        (switch-to-buffer! "#{first}"))
-      """)
-
-    KeyDispatch.handle_key("C-c")
-    KeyDispatch.handle_key("N")
-
-    assert Enum.any?(Editor.render_state().minibuffer.candidates, &(&1.label == group))
-
-    type(group)
-    KeyDispatch.handle_key("RET")
-
-    assert Session.eval(~s{(buffer-group "#{first}")}) == {:ok, ~s{"#{group}"}}
-    assert Session.eval(~s{(buffer-groups "#{first}")}) == {:ok, ~s{("#{group}")}}
-    assert Session.eval(~s{(buffer-group "#{second}")}) == {:ok, ~s{"#{group}"}}
-    assert Session.eval("(frame-local 'current-group)") == {:ok, ~s{"#{group}"}}
-    assert Session.eval(~s{(equal? (group-layout "#{group}") (window-tree))}) == {:ok, "#t"}
-    assert Buffer.text("*messages*") =~ "visible buffers to group #{group}"
-  end
-
-  test "C-c A adds an existing group without replacing membership or layout", context do
-    %{first: first, second: second, group: group} = context
-    source = "source-#{group}"
-
-    {:ok, _} =
-      Session.eval("""
-      (begin
-        (buffer-set-local! "#{first}" 'group "#{source}")
-        (buffer-set-local! "#{second}" 'group "#{group}")
-        (delete-other-windows!)
-        (switch-to-buffer! "#{second}")
-        (group-layout-save! "#{group}")
-        (switch-to-buffer! "#{first}")
-        (set-frame-local! 'current-group "#{source}"))
-      """)
-
-    {:ok, saved_layout} = Session.eval(~s{(group-layout "#{group}")})
-
-    KeyDispatch.handle_key("C-c")
-    KeyDispatch.handle_key("A")
-    type(group)
-    KeyDispatch.handle_key("RET")
-
-    assert Session.eval(~s{(buffer-group "#{first}")}) == {:ok, ~s{"#{source}"}}
-
-    assert Session.eval(~s{(buffer-groups "#{first}")}) ==
-             {:ok, ~s{("#{source}" "#{group}")}}
-
-    assert Session.eval(~s{(buffer-in-group? "#{first}" "#{group}")}) == {:ok, "#t"}
-
-    assert Session.eval(~s{(if (member "#{first}" (group-buffers "#{group}")) #t #f)}) ==
-             {:ok, "#t"}
-
-    assert Session.eval("(frame-local 'current-group)") == {:ok, ~s{"#{source}"}}
-    assert Session.eval(~s{(group-layout "#{group}")}) == {:ok, saved_layout}
-  end
-
-  test "group-add adds a selected group to only the current buffer", context do
-    %{first: first, second: second, group: group} = context
-    source = "source-#{group}"
-
-    {:ok, _} =
-      Session.eval("""
-      (begin
-        (buffer-set-local! "#{first}" 'group "#{source}")
-        (buffer-set-local! "#{second}" 'group "#{group}")
-        (delete-other-windows!)
-        (switch-to-buffer! "#{first}")
-        (run-command "group-add"))
-      """)
-
-    type(group)
-    KeyDispatch.handle_key("RET")
-
-    assert Session.eval(~s{(buffer-groups "#{first}")}) ==
-             {:ok, ~s{("#{source}" "#{group}")}}
-
-    assert Session.eval(~s{(buffer-groups "#{second}")}) == {:ok, ~s{("#{group}")}}
-  end
-
-  test "group-add founds a new additional membership", context do
-    %{first: first, group: group} = context
-    added = "#{group}-added"
-
-    {:ok, _} =
-      Session.eval("""
-      (begin
-        (buffer-set-local! "#{first}" 'group "#{group}")
-        (switch-to-buffer! "#{first}")
-        (run-command "group-add"))
-      """)
-
-    type(added)
-    KeyDispatch.handle_key("RET")
-
-    assert Session.eval(~s{(buffer-groups "#{first}")}) ==
-             {:ok, ~s{("#{group}" "#{added}")}}
-  end
-
-  test "group-move replaces every membership of only the current buffer", context do
-    %{first: first, second: second, group: group} = context
-    source = "source-#{group}"
-
-    {:ok, _} =
-      Session.eval("""
-      (begin
-        (buffer-set-local! "#{first}" 'group "#{source}")
-        (buffer-add-group! "#{first}" "extra-#{group}")
-        (buffer-set-local! "#{second}" 'group "#{group}")
-        (buffer-add-group! "#{second}" "stay-#{group}")
-        (delete-other-windows!)
-        (switch-to-buffer! "#{first}")
-        (run-command "group-move"))
-      """)
-
-    type(group)
-    KeyDispatch.handle_key("RET")
-
-    assert Session.eval(~s{(buffer-groups "#{first}")}) == {:ok, ~s{("#{group}")}}
-
-    assert Session.eval(~s{(buffer-groups "#{second}")}) ==
-             {:ok, ~s{("#{group}" "stay-#{group}")}}
-  end
-
-  test "C-x C-g exposes the group convenience map" do
-    KeyDispatch.handle_key("C-x")
-    KeyDispatch.handle_key("C-g")
-
-    bindings = Editor.render_state().which_key
-
-    assert %{key: "s", command: "switch-groups"} in bindings
-    assert %{key: "g", command: "group-switch"} in bindings
-    assert %{key: "f", command: "group-find-file"} in bindings
-    assert %{key: "a", command: "group-add"} in bindings
-    assert %{key: "m", command: "group-move"} in bindings
-    assert %{key: "A", command: "group-add-visible"} in bindings
-    assert %{key: "M", command: "group-move-visible"} in bindings
-    assert %{key: "l", command: "group-list"} in bindings
-
-    KeyDispatch.handle_key("C-g")
-  end
-
-  test "group-find-file adds the active secondary group to an existing file", context do
-    %{first: first, group: group} = context
-    primary = "primary-#{group}"
-    existing = "existing-#{group}"
-    path = Path.join(System.tmp_dir!(), "group-find-file-#{group}.txt")
-    File.write!(path, "group file\n")
+  test "a group can own many chats and one primary chat" do
+    id = group_id("chat-owner")
 
     on_exit(fn ->
-      Aimax.Core.kill_buffer(path)
-      File.rm(path)
+      Aimax.Core.kill_buffer("*chat:chat-owner*")
+      Aimax.Core.kill_buffer("*chat:chat-owner:2*")
     end)
 
-    {:ok, _} =
-      Session.eval("""
+    result =
+      eval!("""
+      (let* ((first (group-chat "#{id}"))
+             (second (group-chat-new! "#{id}")))
+        (list (not (equal? first second))
+              (equal? (chat-group-id first) "#{id}")
+              (equal? (chat-group-id second) "#{id}")
+              (equal? (group-primary-chat "#{id}") second)
+              (length (buffer-group-ids first))
+              (length (filter chat-buffer? (group-buffers "#{id}")))))
+      """)
+
+    assert result == "(#t #t #t #t 0 2)"
+  end
+
+  test "dissolve keeps buffers and their other memberships", %{first: first} do
+    dissolved = group_id("dissolved")
+    kept = group_id("kept")
+
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{dissolved}")
+      (buffer-add-group! "#{first}" "#{kept}")
+      (group-dissolve! "#{dissolved}"))
+    """)
+
+    assert eval!(~s{(buffer-exists? "#{first}")}) == "#t"
+    assert eval!(~s{(buffer-group-ids "#{first}")}) == ~s{("#{kept}")}
+    assert eval!(~s{(group-resolve-id "#{dissolved}")}) == "#f"
+  end
+
+  test "remembered layouts are keyed by frame", %{first: first} do
+    id = group_id("layout")
+
+    result =
+      eval!("""
       (begin
-        (buffer-set-local! "#{first}" 'group "#{primary}")
-        (buffer-add-group! "#{first}" "#{group}")
-        (find-file "#{path}")
-        (buffer-set-local! "#{path}" 'group "#{existing}")
+        (buffer-add-group! "#{first}" "#{id}")
         (switch-to-buffer! "#{first}")
-        (set-frame-local! 'current-group "#{group}"))
+        (group-layout-save! "#{id}")
+        (let ((saved (group-record-layout (group-record-by-id "#{id}"))))
+          (list (equal? (car saved) 'per-frame)
+                (equal? (car (car (cdr saved))) (selected-frame))
+                (equal? (group-layout "#{id}") (window-tree)))))
       """)
 
-    KeyDispatch.handle_key("C-x")
-    KeyDispatch.handle_key("C-g")
-    KeyDispatch.handle_key("f")
-    type(path)
-    KeyDispatch.handle_key("RET")
-
-    assert Editor.current_buffer() == path
-
-    assert Session.eval(~s{(buffer-groups "#{path}")}) ==
-             {:ok, ~s{("#{existing}" "#{group}")}}
+    assert result == "(#t #t #t)"
   end
 
-  test "C-c A founds an additional group without leaving the current group", context do
-    %{first: first, second: second, group: group} = context
-    added = "#{group}-added"
 
-    {:ok, _} =
-      Session.eval("""
+  test "frame group context restores stable IDs without runtime locals" do
+    current = group_id("frame-current")
+    previous = group_id("frame-previous")
+
+    restored =
+      eval!("""
       (begin
-        (buffer-set-local! "#{first}" 'group "#{group}")
-        (buffer-set-local! "#{second}" 'group "#{group}")
-        (delete-other-windows!)
-        (switch-to-buffer! "#{first}")
-        (split-window! 'h 0.5)
-        (other-window!)
-        (switch-to-buffer! "#{second}")
-        (set-frame-local! 'current-group "#{group}"))
+        (set-frame-local! 'current-group "#{current}")
+        (set-frame-local! 'previous-group "#{previous}")
+        (set-frame-local! 'winner-pos 7)
+        (let ((saved (group-frame-context-state)))
+          (set-frame-local! 'current-group #f)
+          (set-frame-local! 'previous-group #f)
+          (group-frame-context-restore! saved)
+          (list (frame-local 'current-group)
+                (frame-local 'previous-group)
+                (frame-local 'winner-pos))))
       """)
 
-    KeyDispatch.handle_key("C-c")
-    KeyDispatch.handle_key("A")
-    type(added)
-    KeyDispatch.handle_key("RET")
+    assert restored == ~s{("#{current}" "#{previous}" 7)}
 
-    assert Session.eval(~s{(buffer-groups "#{first}")}) ==
-             {:ok, ~s{("#{group}" "#{added}")}}
-
-    assert Session.eval(~s{(buffer-groups "#{second}")}) ==
-             {:ok, ~s{("#{group}" "#{added}")}}
-
-    assert Session.eval("(frame-local 'current-group)") == {:ok, ~s{"#{group}"}}
-    assert Session.eval(~s{(equal? (group-layout "#{added}") (window-tree))}) == {:ok, "#t"}
-
-    {:ok, _} = Session.eval(~s{(switch-to-group! "#{added}")})
-
-    assert Session.eval("(frame-local 'current-group)") == {:ok, ~s{"#{added}"}}
-
-    shown = Editor.list_windows() |> Enum.map(fn {_id, buffer} -> buffer end) |> Enum.sort()
-    assert shown == Enum.sort([first, second])
-  end
-
-  test "killing one group preserves buffers shared with another group", context do
-    %{first: first, second: second, group: group} = context
-    other = "other-#{group}"
-
-    {:ok, _} =
-      Session.eval("""
+    malformed =
+      eval!("""
       (begin
-        (buffer-set-local! "#{first}" 'group "#{group}")
-        (buffer-add-group! "#{first}" "#{other}")
-        (buffer-set-local! "#{second}" 'group "#{group}")
-        (group-kill! "#{group}"))
+        (group-frame-context-restore!
+          (list 'bad
+                (list (selected-frame)
+                      (list (list 'current-group)
+                            (list 'current-group 42)
+                            (list 'previous-group "#{previous}")))))
+        (list (frame-local 'current-group)
+              (frame-local 'previous-group)
+              (frame-local 'winner-pos)))
       """)
 
-    assert Session.eval(~s{(buffer-exists? "#{first}")}) == {:ok, "#t"}
-    assert Session.eval(~s{(buffer-groups "#{first}")}) == {:ok, ~s{("#{other}")}}
-    assert Session.eval(~s{(buffer-exists? "#{second}")}) == {:ok, "#f"}
-  end
+    assert malformed == ~s{(#f "#{previous}" 7)}
 
-  test "renaming a secondary group preserves the primary membership", context do
-    %{first: first, group: group} = context
-    renamed = "renamed-#{group}"
+    deleted = group_id("frame-deleted")
 
-    {:ok, _} =
-      Session.eval("""
+    cleared =
+      eval!("""
       (begin
-        (buffer-set-local! "#{first}" 'group "primary-#{group}")
-        (buffer-add-group! "#{first}" "#{group}")
-        (group-rename! "#{group}" "#{renamed}"))
+        (set-frame-local! 'current-group "#{deleted}")
+        (set-frame-local! 'previous-group "#{deleted}")
+        (group-record-delete! "#{deleted}")
+        (list (frame-local 'current-group)
+              (frame-local 'previous-group)
+              (frame-local 'winner-pos)))
       """)
 
-    assert Session.eval(~s{(buffer-groups "#{first}")}) ==
-             {:ok, ~s{("primary-#{group}" "#{renamed}")}}
+    assert cleared == "(#f #f 7)"
+
   end
 
-  test "chat reset preserves additional group memberships", context do
-    %{group: group} = context
-    added = "#{group}-added"
+  test "invalid noise normalizes to quiet" do
+    id = group_id("noise")
 
-    {:ok, _} =
-      Session.eval("""
-      (let ((chat (group-chat "#{group}")))
-        (buffer-add-group! chat "#{added}")
-        (switch-to-buffer! chat)
-        (set-mode! "chat-mode")
-        (run-command "chat-reset"))
-      """)
+    eval!(~s{(group-noise-set! "#{id}" "unknown")})
 
-    assert Session.eval(~s{(buffer-groups (group-chat "#{group}"))}) ==
-             {:ok, ~s{("#{group}" "#{added}")}}
-
-    assert Session.eval("(if (member 'groups chat-identity-locals) #t #f)") == {:ok, "#t"}
-  end
-
-  test "chat-new starts a second chat without replacing the first", context do
-    %{group: group} = context
-    first = "*chat:#{group}*"
-    second = "*chat:#{group}:2*"
-
-    {:ok, _} =
-      Session.eval("""
-      (begin
-        (switch-to-buffer! (group-chat "#{group}"))
-        (set-mode! "chat-mode")
-        (buffer-append! "#{first}" "first conversation stays")
-        (group-meta-set! "#{group}" "kept metadata")
-        (group-noise-set! "#{group}" "loud")
-        (run-command "chat-new"))
-      """)
-
-    assert Editor.current_buffer() == second
-    assert Buffer.text(first) =~ "first conversation stays"
-    refute Buffer.text(second) =~ "first conversation stays"
-    assert Session.eval(~s{(buffer-group "#{second}")}) == {:ok, ~s{"#{group}"}}
-    assert Session.eval(~s{(group-holder "#{group}")}) == {:ok, ~s{"#{first}"}}
-    assert Session.eval(~s{(group-meta "#{group}")}) == {:ok, ~s{"kept metadata"}}
-    assert Session.eval(~s{(group-noise "#{group}")}) == {:ok, ~s{"loud"}}
-  end
-
-  test "chat-reset clears only the current chat", context do
-    %{group: group} = context
-    first = "*chat:#{group}*"
-    second = "*chat:#{group}:2*"
-
-    {:ok, _} =
-      Session.eval("""
-      (begin
-        (switch-to-buffer! (group-chat "#{group}"))
-        (set-mode! "chat-mode")
-        (buffer-append! "#{first}" "keep this conversation")
-        (run-command "chat-new")
-        (buffer-append! "#{second}" "reset only this conversation")
-        (run-command "chat-reset"))
-      """)
-
-    assert Editor.current_buffer() == second
-    assert Buffer.text(first) =~ "keep this conversation"
-    refute Buffer.text(second) =~ "reset only this conversation"
-    assert Buffer.text(second) =~ "companion · #{group}"
+    assert eval!(~s{(group-noise "#{id}")}) == ~s{"quiet"}
   end
 end

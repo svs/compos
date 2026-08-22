@@ -80,27 +80,129 @@ defmodule Aimax.Core.Candidates do
   def put_query(list, query),
     do: refilter(%{list | query: query, sel: 0, touched: false})
 
-  @doc "Move the selection; marks the list as explicitly touched by the user."
+  @doc """
+  Move the selection; marks the list as explicitly touched by the user.
+
+  A separator is a label, not a choice: the selection steps over it, so
+  C-n never lands on "other buffers" and RET never confirms a heading.
+  """
   def move(list, delta) do
     n = length(list.filtered)
-    sel = if n == 0, do: 0, else: list.sel |> Kernel.+(delta) |> max(0) |> min(n - 1)
-    %{list | sel: sel, touched: true}
+
+    cond do
+      n == 0 ->
+        %{list | sel: 0, touched: true}
+
+      # delta 0 CLAIMS the selection without moving it: the prompt holds it
+      # while a directory is typed, and the first move down must land on the
+      # first candidate rather than skip past it (see :mb_move_sel)
+      delta == 0 ->
+        %{list | sel: nearest_selectable(list.filtered, list.sel), touched: true}
+
+      true ->
+        step = if delta < 0, do: -1, else: 1
+
+        sel =
+          Enum.reduce(1..abs(delta), list.sel, fn _, acc ->
+            step_selectable(list.filtered, acc, step)
+          end)
+
+        %{list | sel: sel, touched: true}
+    end
   end
+
+  # one step in STEP's direction, skipping any separators on the way. At
+  # the end of the list it stays where it was, exactly as the old clamp did.
+  defp step_selectable(filtered, from, step) do
+    n = length(filtered)
+
+    Enum.reduce_while(1..n, from, fn _, acc ->
+      next = acc + step
+
+      cond do
+        next < 0 or next >= n -> {:halt, from}
+        separator?(Enum.at(filtered, next)) -> {:cont, next}
+        true -> {:halt, next}
+      end
+    end)
+  end
+
+  @doc "A heading row: it shows, it never takes the selection."
+  def separator?(%{kind: "separator"}), do: true
+  def separator?(_), do: false
 
   @doc "Candidates surviving the query, best match first (memoized)."
   def filtered(list), do: list.filtered
 
   # filter + rank once, when items/query change — not on every read (a single
   # minibuffer render reads this several times)
-  defp refilter(%{query: ""} = list), do: %{list | filtered: list.items}
+  defp refilter(%{query: ""} = list), do: settle(%{list | filtered: prune(list.items)})
 
   defp refilter(list) do
+    # Rank INSIDE each section, never across them. Sections carry meaning —
+    # "in this group" before "other buffers" — and a global sort would put a
+    # foreign buffer above a member while the heading still claimed the
+    # opposite. A section whose rows all lose the filter drops its heading too.
     filtered =
       list.items
-      |> Enum.filter(&matches?(&1.label, list.query, hint_of(list, &1)))
-      |> Enum.sort_by(&rank(&1.label, list.query))
+      |> sections()
+      |> Enum.flat_map(fn {separator, rows} ->
+        kept =
+          rows
+          |> Enum.filter(&matches?(&1.label, list.query, hint_of(list, &1)))
+          |> Enum.sort_by(&rank(&1.label, list.query))
 
-    %{list | filtered: filtered}
+        case {separator, kept} do
+          {_, []} -> []
+          {nil, kept} -> kept
+          {separator, kept} -> [separator | kept]
+        end
+      end)
+
+    settle(%{list | filtered: filtered})
+  end
+
+  # a heading with nothing under it is a lie about an empty section
+  defp prune(items) do
+    items
+    |> sections()
+    |> Enum.flat_map(fn
+      {_separator, []} -> []
+      {nil, rows} -> rows
+      {separator, rows} -> [separator | rows]
+    end)
+  end
+
+  # the list as {separator | nil, rows}: a heading owns every row until the
+  # next heading. A list with no headings is one nil-headed section.
+  defp sections(items) do
+    items
+    |> Enum.reduce([{nil, []}], fn item, [{separator, rows} | rest] = acc ->
+      if separator?(item) do
+        [{item, []} | acc]
+      else
+        [{separator, [item | rows]} | rest]
+      end
+    end)
+    |> Enum.reverse()
+    |> Enum.map(fn {separator, rows} -> {separator, Enum.reverse(rows)} end)
+    |> Enum.reject(fn {separator, rows} -> separator == nil and rows == [] end)
+  end
+
+  # the selection must always sit on a real row: snap forward to the next
+  # one, and only backward when the query left nothing after it
+  defp settle(list) do
+    %{list | sel: nearest_selectable(list.filtered, list.sel)}
+  end
+
+  defp nearest_selectable([], _sel), do: 0
+
+  defp nearest_selectable(filtered, sel) do
+    n = length(filtered)
+    from = sel |> max(0) |> min(n - 1)
+
+    forward = Enum.find(from..(n - 1)//1, &(not separator?(Enum.at(filtered, &1))))
+    forward || Enum.find(from..0//-1, &(not separator?(Enum.at(filtered, &1)))) || 0
   end
 
   # the annotation joins the match text only when the prompt asked for it;
@@ -114,8 +216,10 @@ defmodule Aimax.Core.Candidates do
   @max_label_width 64
 
   @doc "Widest label in the full set, in characters (0 when empty), capped."
+  # a heading is not a name: it must not set the name column's width
   def label_width(list) do
     list.items
+    |> Enum.reject(&separator?/1)
     |> Enum.map(&String.length(&1.label))
     |> Enum.max(fn -> 0 end)
     |> min(@max_label_width)
@@ -123,12 +227,14 @@ defmodule Aimax.Core.Candidates do
 
   def selected(list) do
     case Enum.at(filtered(list), list.sel) do
+      %{kind: "separator"} -> nil
       %{label: label} -> label
       nil -> nil
     end
   end
 
-  def total(list), do: length(filtered(list))
+  # the count is a count of CHOICES: headings are not among them
+  def total(list), do: filtered(list) |> Enum.reject(&separator?/1) |> length()
 
   @doc "Rows for display: an 8-row window around the selection, marked."
   # the visible slice: 8 rows for the bottom bar, more when the caller

@@ -455,6 +455,9 @@ defmodule Aimax.Core.Session do
         interp,
         fn file, interp ->
           path = Application.app_dir(:aimax_core, "priv/#{file}")
+          # one file is one package here too: dired.scm carried transient's
+          # stamp before this, so every dired command was filed under it
+          interp = stamp_load_unit(interp, path, :bundled)
 
           case Scheme.eval_string(interp, File.read!(path)) do
             {:ok, _, interp} ->

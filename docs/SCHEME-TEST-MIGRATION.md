@@ -152,7 +152,10 @@ so treat anything inside 43-53 as unchanged, and investigate outside it.
 
 ## State at handoff
 
-Commit `6c26c88`. Suite: 45 failures, inside the 43-53 band. Scheme suite: 115 tests, one
+Commit `d19d4b0`. Suite: 40 failures in a clean worktree at HEAD, and
+the Scheme suite is green there. Measure in a worktree: another session
+edits this tree, and its uncommitted work adds failures that are not
+yours. Scheme suite: 115 tests, one
 red by design.
 
 In Scheme:

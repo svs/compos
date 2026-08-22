@@ -144,7 +144,9 @@ defmodule Aimax.CoreTest do
 
     assert Buffer.get_local(name, "anything") == nil
     assert Buffer.locals(name) == %{}
-    assert Buffer.text(name) == nil
+    # a name with neither a process nor a checkpoint reads as empty text, so
+    # one dead buffer cannot raise out of a whole list render (buffer.ex)
+    assert Buffer.text(name) == ""
     assert Buffer.ref(name) == nil
   end
 

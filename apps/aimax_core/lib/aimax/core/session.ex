@@ -446,7 +446,10 @@ defmodule Aimax.Core.Session do
         end
       )
 
-    interp |> load_packages() |> load_init()
+    # Everything defined after boot — the REPL, a chat's eval-scheme, a
+    # runtime define — is the user's, not ours. The Luna backfill applies to
+    # bundled entries only, so the origin has to say which is which.
+    interp |> load_packages() |> load_init() |> stamp_origin_user()
   end
 
   # bundled packages: priv/packages/**/*.scm, loaded after the stdlib. Unlike
@@ -491,7 +494,18 @@ defmodule Aimax.Core.Session do
       |> Path.wildcard()
       |> Enum.sort()
 
-    Enum.reduce(bundled ++ user, interp, fn path, interp ->
+    stamped = Enum.map(bundled, &{&1, :bundled}) ++ Enum.map(user, &{&1, :user})
+
+    Enum.reduce(stamped, interp, fn {path, origin}, interp ->
+      # The catalog stamp comes from the loader: one file is one package,
+      # named by its basename, and its metadata starts unknown. Without the
+      # stamp a file inherited the package of whichever file loaded before
+      # it, so the qualified name was wrong, the Luna backfill (keyed
+      # PACKAGE/NAME) missed, and the entry kept unknown metadata. A file
+      # whose public vocabulary differs still calls package! or namespace!
+      # itself, and wins — it runs after this.
+      interp = stamp_load_unit(interp, path, origin)
+
       case Scheme.eval_string(interp, File.read!(path)) do
         {:ok, _, interp2} ->
           interp2
@@ -501,6 +515,16 @@ defmodule Aimax.Core.Session do
           interp
       end
     end)
+  end
+
+  # The stamp is its own eval, so a package's own line numbers stay its own.
+  defp stamp_load_unit(interp, path, origin) do
+    code = "(origin! '#{origin}) (package! '#{Path.basename(path, ".scm")})"
+
+    case Scheme.eval_string(interp, code) do
+      {:ok, _, interp2} -> interp2
+      {:error, _} -> interp
+    end
   end
 
   # (load "foo.scm") from init.scm/ai-config.scm resolves relative to the
@@ -534,6 +558,13 @@ defmodule Aimax.Core.Session do
           interp
       end
     end)
+  end
+
+  defp stamp_origin_user(interp) do
+    case Scheme.eval_string(interp, "(origin! 'user)") do
+      {:ok, _, interp2} -> interp2
+      {:error, _} -> interp
+    end
   end
 
   # one merged map: the three registration modules' docs

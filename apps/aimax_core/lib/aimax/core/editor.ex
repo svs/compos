@@ -130,6 +130,14 @@ defmodule Aimax.Core.Editor do
   def set_pending(seq, fid \\ nil), do: GenServer.call(__MODULE__, {:set_pending, seq, fid(fid)})
   def set_echo(msg, fid \\ nil), do: GenServer.call(__MODULE__, {:set_echo, msg, fid(fid)})
 
+  @doc """
+  Arm a one-shot key capture: the next complete key sequence runs COMMAND
+  instead of its own binding, and `last_keys/0` reports the sequence. nil
+  disarms. Scheme owns what the capture means (describe-key reads it).
+  """
+  def set_key_capture(command, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_key_capture, command, fid(fid)})
+
   @doc "Set the calling frame's rendered Transient menu, or clear it with nil."
   def set_transient(menu, fid \\ nil),
     do: GenServer.call(__MODULE__, {:set_transient, menu, fid(fid)})
@@ -300,9 +308,12 @@ defmodule Aimax.Core.Editor do
   defp dormant?(buffer), do: not Buffer.exists?(buffer) and BufferStore.known?(buffer)
 
   defp restore_if_woken(buffer, true) do
-    # Scheme owns its interpreter inside Session and completes this in its
-    # switch-to-buffer! wrapper. Calling Session from itself would deadlock.
-    if Buffer.exists?(buffer) and self() != Process.whereis(Aimax.Core.Session),
+    # Scheme completes this in its switch-to-buffer! wrapper, and says so by
+    # setting :aimax_inline_runtime_restore in the calling process. Testing
+    # the Session pid instead stopped working when Scheme moved to lanes: an
+    # eval runs in a Lane worker, never in Session itself, so the guard was
+    # always true and every Scheme-driven wake restored the buffer twice.
+    if Buffer.exists?(buffer) and not Process.get(:aimax_inline_runtime_restore, false),
       do: Aimax.Core.restore_runtime(buffer)
   end
 
@@ -372,6 +383,7 @@ defmodule Aimax.Core.Editor do
       tree: %{type: :leaf, id: 1, buffer: @scratch, top: 0, manual: false},
       active: 1,
       pending: [],
+      key_capture: nil,
       transient: nil,
       minibuffer: nil,
       mb_redirect: true,
@@ -425,6 +437,7 @@ defmodule Aimax.Core.Editor do
           tree: %{type: :leaf, id: state.next_win, buffer: buffer, top: 0, manual: false},
           active: state.next_win,
           pending: [],
+          key_capture: nil,
           transient: nil,
           minibuffer: nil,
           mb_redirect: true,
@@ -526,7 +539,16 @@ defmodule Aimax.Core.Editor do
 
   def handle_call({:snapshot, fid}, _from, state) do
     f = frame(state, fid)
-    snap = Map.take(f, [:pending, :minibuffer, :echo, :active, :completion, :transient])
+    snap =
+      Map.take(f, [
+        :pending,
+        :minibuffer,
+        :echo,
+        :active,
+        :completion,
+        :transient,
+        :key_capture
+      ])
     # expose the selection flag KeyDispatch needs without leaking the list
     snap =
       case snap.minibuffer do
@@ -917,6 +939,14 @@ defmodule Aimax.Core.Editor do
     if f.pending == seq,
       do: {:reply, :ok, state},
       else: changed(:ok, put_frame(state, %{f | pending: seq}), f.id)
+  end
+
+  # No render depends on the capture flag, so it never marks the frame
+  # changed — an armed capture must not cost every client a repaint.
+  def handle_call({:set_key_capture, command, fid}, _from, state) do
+    f = frame(state, fid)
+    command = if command in [nil, false], do: nil, else: command
+    {:reply, :ok, put_frame(state, Map.put(f, :key_capture, command))}
   end
 
   def handle_call({:set_transient, menu, fid}, _from, state) do

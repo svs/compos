@@ -20,8 +20,10 @@ defmodule Aimax.SessionSafeTest do
   test "a dead-process exit inside a primitive also fails only the eval" do
     Session.eval(~s{(buffer-create "safe-victim")})
     assert {:ok, _} = Session.eval(~s{(buffer-kill! "safe-victim")})
-    # touching the killed buffer exits in the Buffer GenServer call
-    assert {:error, _} = Session.eval(~s{(buffer-text "safe-victim")})
+    # touching the killed buffer exits in the Buffer GenServer call.
+    # buffer-text reads a dormant name as "" now, so ask for the overlays:
+    # those still need the process.
+    assert {:error, _} = Session.eval(~s{(buffer-overlays "safe-victim")})
     assert {:ok, "3"} = Session.eval("(+ 1 2)")
   end
 end

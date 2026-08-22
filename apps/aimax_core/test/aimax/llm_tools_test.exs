@@ -45,11 +45,11 @@ defmodule Aimax.LLMToolsTest do
       assert eval!(~s{(llm-tool-call "no-such" '())}) == ~s{"no such tool: no-such"}
     end
 
-    test "the built-in toolbox is exactly the six-tool surface" do
+    test "the built-in toolbox is exactly the seven-tool surface" do
       specs = eval!("(map car (llm-tool-specs))")
-      # five for the editor itself, and spotify — a device in the browser, not
+      # six for the editor itself, and spotify — a device in the browser, not
       # a part of the editor, so eval-scheme cannot stand in for it
-      for t <- ~w(eval-scheme apropos apropos-categories describe-function act spotify) do
+      for t <- ~w(eval-scheme apropos apropos-categories describe-function act ask spotify) do
         assert specs =~ t
       end
 
@@ -57,7 +57,7 @@ defmodule Aimax.LLMToolsTest do
       count =
         eval!(~s{(length (filter (lambda (t) (not (string-prefix? "zz-" (symbol->string (car t))))) *llm-tools*))})
 
-      assert count == "6"
+      assert count == "7"
     end
 
     test "eval-scheme errors suggest the real name with its signature" do
@@ -413,12 +413,13 @@ defmodule Aimax.LLMToolsTest do
         ]
       )
 
-      prev = System.get_env("ANTHROPIC_API_KEY")
-      System.put_env("ANTHROPIC_API_KEY", "sk-test")
+      # keys.scm owns the chain: a provider with no registered key is an
+      # error, not a fallback to the environment
+      {:ok, _} = Session.eval(~s{(register-llm-key! 'anthropic "sk-test")})
 
       on_exit(fn ->
         Application.delete_env(:aimax_core, :llm_req_opts)
-        if prev, do: System.put_env("ANTHROPIC_API_KEY", prev), else: System.delete_env("ANTHROPIC_API_KEY")
+        Session.eval(~s{(set! *llm-keys* '())})
       end)
 
       eval!(~s{(llm-with-tools "hello" (lambda (t) (set-symbol-value! 'zz-wire t)))})
@@ -487,13 +488,12 @@ defmodule Aimax.LLMToolsTest do
         ]
       )
 
-      prev = System.get_env("ANTHROPIC_API_KEY")
-      System.put_env("ANTHROPIC_API_KEY", "sk-test")
+      {:ok, _} = Session.eval(~s{(register-llm-key! 'anthropic "sk-test")})
 
       on_exit(fn ->
         Application.delete_env(:aimax_core, :llm_req_opts)
         :persistent_term.erase(:aimax_llmdb)
-        if prev, do: System.put_env("ANTHROPIC_API_KEY", prev), else: System.delete_env("ANTHROPIC_API_KEY")
+        Session.eval(~s{(set! *llm-keys* '())})
       end)
 
       eval!(~s{(llm-with-tools "hello" (lambda (t) (set-symbol-value! 'zz-cost t)))})

@@ -223,6 +223,14 @@ defmodule Aimax.ChatRenameTest do
         ~s{(chat-record-push! "#{buf}" "user" (list (list "text" "fix the preset merge")) #f)}
       )
 
+      # the real one first: saving it after the stub saved the STUB, and
+      # on_exit then put the stub back for every later test in the run
+      eval!("(define zz-real-llm-tools llm-tools)")
+
+      on_exit(fn ->
+        {:ok, _} = Session.eval("(set! llm-tools zz-real-llm-tools)")
+      end)
+
       # stand in for the model: capture the call, answer with a title
       eval!("""
       (begin
@@ -232,12 +240,6 @@ defmodule Aimax.ChatRenameTest do
             (set! *zz-calls* (cons (list prompt model) *zz-calls*))
             (cb "fix the preset merge"))))
       """)
-
-      on_exit(fn ->
-        {:ok, _} = Session.eval("(set! llm-tools zz-real-llm-tools)")
-      end)
-
-      eval!("(define zz-real-llm-tools llm-tools)")
 
       eval!(~s{(chat-rename-from-content! "#{buf}")})
 

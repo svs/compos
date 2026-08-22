@@ -70,6 +70,19 @@ defmodule Aimax.Core.Session do
     ArgumentError -> GenServer.call(__MODULE__, :await_boot, 60_000)
   end
 
+  @doc """
+  Is the interpreter published? A caller that runs during boot must ask
+  this before it queues Scheme work. `Process.whereis(Session)` says yes
+  from the moment start_link registers the name, which is before init/1
+  loads the stdlib.
+  """
+  def ready? do
+    :persistent_term.get(@pt)
+    true
+  rescue
+    ArgumentError -> false
+  end
+
   @doc "Reload Scheme files atomically into the live interpreter."
   def reload_files(paths) when is_list(paths),
     do: GenServer.call(__MODULE__, {:reload_files, paths}, 30_000)

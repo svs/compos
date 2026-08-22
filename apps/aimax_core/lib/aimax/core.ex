@@ -44,7 +44,13 @@ defmodule Aimax.Core do
         # local keys by calling back into Editor. Its public caller finishes
         # restoration after the Editor call returns. Every other wake is
         # synchronous, so nobody observes a half-restored buffer.
-        if restored && Process.whereis(Aimax.Core.Session) do
+        # `Process.whereis(Session)` answered yes too early: GenServer
+        # registers the name before init/1 runs, so Session's own
+        # create_buffer("*messages*") asked its own init to restore a
+        # runtime. The lane worker then waited on :await_boot, Session was
+        # still inside init, and every boot paid a fixed 60s timeout. Ask
+        # whether the interpreter is ready, which is what this guard means.
+        if restored && Aimax.Core.Session.ready?() do
           cond do
             self() == Process.whereis(Aimax.Core.Editor) ->
               :ok

@@ -152,46 +152,76 @@ so treat anything inside 43-53 as unchanged, and investigate outside it.
 
 ## State at handoff
 
-Commit `ffe0f81`. Suite: ~47 failures (43-53 band). Scheme suite: 34
-tests, one red by design.
+Commit `6c26c88`. Suite: 45 failures, inside the 43-53 band. Scheme suite: 115 tests, one
+red by design.
 
-Already in Scheme:
+In Scheme:
 
 | file | tests |
 |---|---|
+| `apropos-test.scm` | 19 (moved) |
+| `graphql-test.scm` | 24 (moved) |
+| `code-structure-test.scm` | 13 (moved) |
+| `skills-test.scm` | 10 (moved) |
+| `code-agent-mode-test.scm` | 11 (moved) |
 | `groups-test.scm` | 9 |
+| `mode-icon-test.scm` | 8 (moved) |
 | `keymap-test.scm` | 7 |
-| `edit-semantics-test.scm` | 6 (moved from ExUnit) |
-| `code-agent-mode-test.scm` | 11 (moved from ExUnit) |
+| `edit-semantics-test.scm` | 6 (moved) |
+| `imenu-test.scm` | 4 (moved) |
+| `buffer-cache-test.scm` | 3 (moved) |
 | `canary-test.scm` | 1, always red |
+
+## What the last pass moved, and what it left
+
+81 tests moved. `graphql_test`, `imenu_test`, `buffer_cache_test` and
+`code_structure_test` are gone entirely. `apropos_test`, `skills_test` and
+`mode_icon_test` keep only what Scheme cannot hold.
+
+Three limits decided every split:
+
+- **Scheme cannot remove a directory.** It has `make-directory!`,
+  `write-file!` and `delete-file!`, but no `rmdir`. A test that builds a
+  fixture tree stays in ExUnit: two in `skills_test`, two in
+  `mode_icon_test`.
+- **Scheme cannot set an environment variable.** There is `getenv` and no
+  `setenv`. This is what holds `keys_test` where it is.
+- **A registration is one-way.** `define-command`, `define-list-mode!`,
+  `public!` and `catalog-register!` all write registries with no removal
+  call. Tests that register clear the Scheme half by hand
+  (`*catalog*`, `*catalog-keys*`, `*public-api*`, `*public-keys*`,
+  `*list-modes*`, `*mode-setups*`, `*mode-docs*`, `*mode-icons*`). The M-x
+  command table is Elixir, and a test command name stays until the next
+  restart. A removal primitive would close this.
 
 ## The queue
 
-Clean candidates — no `File.`, no `put_env`, no `KeyDispatch`, no
-`Editor.`:
-
-| file | tests | note |
+| file | tests | verdict |
 |---|---|---|
-| `graphql_test` | 24 | biggest win |
-| `apropos_test` | 23 | **has 2 known failures** — see below |
-| `usage_shape_test` | 8 | |
-| `overlay_test` | 6 | check for Elixir-side overlay APIs first |
-| `lsp_primitives_test` | 5 | |
-| `imenu_test` | 4 | |
-| `buffer_cache_test` | 3 | `cache-declare!` is Scheme policy |
-| `session_safe_test` | 2 | |
-| `buffer_replace_test` | 7 | **mechanism — do not move** |
+| `keys_test` | 14 | needs a `setenv` primitive first |
+| `mcp_test` | 16 | 4 movable; the rest drive a real subprocess |
+| `lsp_primitives_test` | 5 | drives a fake server and polls it — stays |
+| `overlay_test` | 6 | `Buffer.set_overlays/2` is mechanism — stays |
+| `usage_shape_test` | 8 | `LLM.usage_strings/2` is Elixir — stays |
+| `session_safe_test` | 2 | proves the Session survives a bad eval — stays |
+| `buffer_replace_test` | 7 | mechanism — stays |
 
-Then the larger ones that need per-test judgement because they mix
-policy with fixtures: `mcp_test` (16), `keys_test` (14),
-`code_structure_test` (13), `skills_test` (12), `mode_icon_test` (10).
-Roughly 130 tests genuinely want to move.
+`mcp_test` has four tests that need no subprocess: the ACP translation,
+the system note, the quiet failure on an unknown preset, and
+`chat-tool-list`. The rest connect to `test/support/fake_mcp_server.exs`
+and wait for the handshake, which Scheme has no way to poll.
 
-**`apropos_test` needs a decision before it moves.** Two of its tests
-fail today (the bundled-metadata and Luna-backfill catalog assertions).
-Moving them makes the Scheme suite red, which then hides any fresh Scheme
-failure behind a known one. Either fix those two first, or leave the file
-until last. Do not move them and let the suite go red.
+**A `setenv` primitive would unlock `keys_test`.** It is one primitive,
+and the whole key chain is Scheme policy behind it.
+
+## One thing to know about the live editor
+
+`M-x run-scheme-tests` runs against a daemon that hot-reloaded packages.
+The reload path stamps `origin "user"`, so the Luna backfill does not
+apply to a reloaded package, and its catalog entry can read different
+effects than a fresh boot gives. `notmuch-trash` shows this: `("write")`
+in a long-lived daemon, `("destroy")` on a fresh boot. CI boots fresh.
+Restart before trusting a catalog failure in the live editor.
 
 ## Also open, unrelated to this task
 

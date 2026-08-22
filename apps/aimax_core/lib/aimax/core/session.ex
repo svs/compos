@@ -166,7 +166,7 @@ defmodule Aimax.Core.Session do
     # A buffer sweep can kill *messages*. Recreate it here, so every
     # later (message ...) works instead of an exit through :noproc —
     # in a lane, that exit would kill the whole worker.
-    unless Buffer.exists?(@messages), do: Aimax.Core.create_buffer(@messages)
+    unless Buffer.exists?(@messages), do: Aimax.Core.create_buffer(@messages, persistent: false)
 
     Buffer.append(@messages, text <> "\n", source: :editor)
     # Emacs: echo in the frame that triggered; with no frame context (agent
@@ -191,7 +191,12 @@ defmodule Aimax.Core.Session do
   def init(_opts) do
     :ets.new(Aimax.Core.SchemeAPI.commands_table(), [:named_table, :public, :set])
     :ets.new(@escaped, [:named_table, :public, :set])
-    {:ok, _} = Aimax.Core.create_buffer(@messages)
+    # *messages* is this session's log, so it starts empty every boot. Drop
+    # the row and the checkpoint an older daemon left: without this, the
+    # catalog still names *messages*, create_buffer restores last session's
+    # text, and boot pays for a restore nobody wants.
+    Aimax.Core.BufferStore.forget(@messages)
+    {:ok, _} = Aimax.Core.create_buffer(@messages, persistent: false)
 
     interp = Scheme.new(primitives: Aimax.Core.SchemeAPI.primitives())
     interp = Scheme.register(interp, session_primitives(interp.global))

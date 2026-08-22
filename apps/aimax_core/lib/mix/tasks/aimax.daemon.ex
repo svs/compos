@@ -141,7 +141,10 @@ defmodule Mix.Tasks.Aimax.Restart do
         stderr_to_stdout: true
       )
 
-    case Aimax.Mix.Daemon.wait_until(home, true) do
+    # Coming up costs more than going down: the socket opens only after
+    # Session loads the whole Scheme corpus, and a user ai-config.scm can
+    # shell out on top of that. 10s called a working daemon dead.
+    case Aimax.Mix.Daemon.wait_until(home, true, 600) do
       :ok ->
         Mix.shell().info("ai-max restarted · #{home}")
 

@@ -117,21 +117,65 @@
       (remove (lambda (e) (equal? (car e) key)) *dp-value-cache*))))
 
 (define (doppler-forget!)
-  (set! *dp-value-cache* '()))
+  (set! *dp-value-cache* '())
+  (set! *dp-config-warmed* '()))
+
+;; One doppler process per CONFIG, not per secret. A user secrets.scm
+;; resolves its whole key set from one config at load time, and the cache
+;; starts empty on every boot, so ten names cost ten processes and about
+;; four seconds of the daemon's start. `secrets download` returns the whole
+;; config in one call for the same ~0.5s, so the first miss warms the rest.
+;;
+;; The trade: the cache then holds every secret in that config, not only the
+;; names someone asked for. Nothing prints them. dp--secret-names still asks
+;; --only-names, and doppler-secret-get still answers one name at a time.
+(define *dp-config-warmed* '())
+
+(define (dp--config-key project config)
+  (string-append project "/" config))
+
+(define (dp--warm-config! project config)
+  (let ((ck (dp--config-key project config)))
+    (unless (member ck *dp-config-warmed*)
+      ;; mark first: a config that errors must not be retried per name
+      (set! *dp-config-warmed* (cons ck *dp-config-warmed*))
+      (let ((out (dp--run (string-append "secrets download --no-file --format json"
+                                         " --project " (dp--quote project)
+                                         " --config " (dp--quote config)))))
+        (unless (dp--error? out)
+          (let ((data (json-parse out)))
+            (when (pair? data)
+              (for-each
+                (lambda (k)
+                  (let ((key (dp--cache-key project config (symbol->string k))))
+                    (unless (assoc key *dp-value-cache*)
+                      (set! *dp-value-cache*
+                        (cons (list key (plist-get data k)) *dp-value-cache*)))))
+                (dp--plist-keys data)))))))))
+
+(define (dp--fetch-one project config name)
+  (let ((out (string-trim
+               (dp--run (string-append "secrets get " (dp--quote name)
+                                       " --project " (dp--quote project)
+                                       " --config " (dp--quote config)
+                                       " --plain")))))
+    (if (or (equal? out "") (dp--error? out)) #f out)))
 
 (define (doppler-secret-value project config name)
-  (let* ((key (dp--cache-key project config name))
-         (hit (assoc key *dp-value-cache*)))
-    (if hit
-        (cadr hit)
-        (let* ((out (string-trim
-                      (dp--run (string-append "secrets get " (dp--quote name)
-                                              " --project " (dp--quote project)
-                                              " --config " (dp--quote config)
-                                              " --plain"))))
-               (v (if (or (equal? out "") (dp--error? out)) #f out)))
-          (set! *dp-value-cache* (cons (list key v) *dp-value-cache*))
-          v))))
+  (let ((key (dp--cache-key project config name)))
+    (let ((hit (assoc key *dp-value-cache*)))
+      (if hit
+          (cadr hit)
+          (begin
+            (dp--warm-config! project config)
+            (let ((hit (assoc key *dp-value-cache*)))
+              (if hit
+                  (cadr hit)
+                  ;; the config gave no such name: ask for it alone, so a
+                  ;; miss still caches and a later write still drops it
+                  (let ((v (dp--fetch-one project config name)))
+                    (set! *dp-value-cache* (cons (list key v) *dp-value-cache*))
+                    v))))))))
 
 ;; the one hook keys.scm calls: (doppler-key-value VAR) -> value | #f
 (define (doppler-key-value var)

@@ -12,8 +12,8 @@ not the default.
 |---|---|---|
 | One `priv/packages/*.scm` file | `mix aimax.reload apps/aimax_core/priv/packages/foo.scm` | under 1s |
 | Several Scheme files | `mix aimax.reload --all` | ~2s |
-| `priv/editor.scm` | `mix aimax.restart` | ~8s |
-| Any Elixir source | `mix aimax.restart` | ~8s |
+| `priv/editor.scm` | `mix aimax.restart` | ~4s |
+| Any Elixir source | `mix aimax.restart` | ~4s |
 
 `editor.scm` is core bootstrap policy, so `mix aimax.reload` refuses it by name
 (apps/aimax_core/lib/mix/tasks/aimax.daemon.ex:91). Restart instead.
@@ -53,7 +53,7 @@ in an open buffer, re-set the mode there, or restart.
 
 ## When the daemon does not come back
 
-The task waits 10s and then raises `daemon did not come back`. That message means
+The task waits 60s and then raises `daemon did not come back`. That message means
 the wait expired, not that the daemon failed. Check before you act:
 
 ```sh
@@ -72,7 +72,8 @@ daemon starts detached. Run `mix compile` first when you suspect one; it fails i
 
 ## What boot costs, and what makes it slow
 
-A healthy boot is about 2s of Elixir plus whatever the user's config spends.
+A healthy boot is about 3s: roughly 1.5s of mix overhead and compile check, 1.5s
+of application start, and whatever the user's config spends on top.
 Measure before you accept a slow one:
 
 ```sh
@@ -98,12 +99,19 @@ Two known costs live on the boot path:
 
 - **The Scheme corpus.** `Session.init/1` evaluates about 32k lines of Scheme
   synchronously (apps/aimax_core/lib/aimax/core/session.ex:457-548). There is no
-  cache and no mtime check. It costs ~1.5s and every boot pays it.
+  cache and no mtime check. It costs ~1.5s and every boot pays it. This is the
+  largest remaining item.
 - **User config shell-outs.** `load_init/1` (session.ex:575) evaluates
   `ai-config.scm` and `init.scm` from the config home. Top-level forms there can
-  spawn processes: `~/.aimax/secrets.scm` makes 10 serial `doppler-secret-value`
-  calls, each a blocking `shell-command->string` with a 15s limit. That is 4-7s
-  when Doppler responds and up to 150s when it does not, with no log output.
+  spawn processes, and each `shell-command->string` blocks for up to 15s. A
+  config that resolves ten secrets one at a time pays ten process spawns.
+  `doppler.scm` answers this by fetching a whole config in one call and caching
+  every name, so ten lookups cost one process. Any new package that shells out
+  at load time must do the same.
+
+The boot path has no timing of its own. If you suspect a new cost there, wrap
+`:timer.tc` around the `Enum.reduce` bodies in `load_stdlib!` (session.ex:462)
+and `load_packages` (session.ex:529) to get a per-file breakdown.
 
 Nothing else on the boot path does network I/O. MCP and LSP only register at
 load; `llm_db` refreshes under a Task; the desktop restore is async and runs

@@ -506,7 +506,11 @@ defmodule Aimax.Core.Buffer do
         }
       end
 
-    state = %{state | persistent: not String.starts_with?(name, " ")}
+    # A leading space is the Emacs convention for an internal buffer, and it
+    # is the default answer. A caller that owns a visible but throwaway
+    # buffer, like *messages*, says so with :persistent.
+    persistent? = Keyword.get(opts, :persistent, not String.starts_with?(name, " "))
+    state = %{state | persistent: persistent?}
     state = attach_provenance(state)
     {:ok, _} = Registry.register(@registry, {:id, state.id}, state.name)
     {:ok, state |> schedule_checkpoint() |> reset_idle_timer()}

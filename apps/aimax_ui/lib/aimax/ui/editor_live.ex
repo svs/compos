@@ -2213,13 +2213,19 @@ defmodule Aimax.Ui.EditorLive do
     end
   end
 
-  # the group segment, shortened — and dropped entirely when the group
-  # is just the buffer's own name (a self-founded group), which printed
-  # the filename twice
-  defp ml_group(%{group: g, buffer: b}) when is_binary(g) do
+  # the group segment: the frame's group by name, shortened — and dropped
+  # when it is just the buffer's own name (a self-founded group), which
+  # printed the filename twice. A group named after a path shows its last
+  # segment; a name like "*GROUPS*" has none and passes through whole.
+  # A window with no buffer carries false here, and Path.basename(false)
+  # raised inside the render, which killed the LiveView on every mount and
+  # left the whole editor blank. The modeline must survive an empty window.
+  defp ml_group(%{group: g, buffer: b}) when is_binary(g) and is_binary(b) do
     label = Path.basename(g)
     if label == Path.basename(b), do: nil, else: label
   end
+
+  defp ml_group(%{group: g}) when is_binary(g), do: Path.basename(g)
 
   defp ml_group(_), do: nil
 

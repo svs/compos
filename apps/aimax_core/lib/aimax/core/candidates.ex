@@ -40,7 +40,8 @@ defmodule Aimax.Core.Candidates do
   defp hint_fields(_), do: 0
 
   def normalize(candidates) do
-    Enum.map(candidates, fn
+    candidates
+    |> Enum.map(fn
       [label, hint] when is_binary(label) ->
         %{label: label, hint: to_string(hint)}
 
@@ -62,7 +63,15 @@ defmodule Aimax.Core.Candidates do
 
       label when is_binary(label) ->
         %{label: label, hint: ""}
+
+      # A row with no usable label is dropped, never raised on. This runs
+      # inside Editor.handle_call, so a raise here kills the Editor and
+      # takes the keymap with it. A window with no buffer used to offer
+      # [false, "current"] to kill-buffer and did exactly that.
+      _ ->
+        nil
     end)
+    |> Enum.reject(&is_nil/1)
   end
 
   def put_items(list, candidates),

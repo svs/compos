@@ -639,7 +639,11 @@
     'doc "All unfinished TODO headings from morg-agenda-files."))
 
 (define-command "morg-todos" "Show all unfinished TODOs from your Morg files"
-  (lambda () (list-mode-show! "morg-todos-mode")))
+  (lambda ()
+    (buffer-create *morg-todos-buffer*)
+    (switch-to-buffer! *morg-todos-buffer*)
+    (set-mode! "morg-todos-mode")
+    *morg-todos-buffer*))
 
 (global-set-key "C-c a" "morg-agenda")
 

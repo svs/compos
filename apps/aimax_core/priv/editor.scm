@@ -1428,103 +1428,6 @@
 (define-command "end-of-buffer" "Move point to the end of the buffer"
   (lambda () (or (preview-scroll! 1000000) (end-of-buffer!))))
 
-(define (preview--positions text needle)
-  (let loop ((from 0) (acc (list)))
-    (let ((i (string-index text needle from)))
-      (if i
-          (loop (+ i 1) (cons i acc))
-          (reverse acc)))))
-
-;; The nearest position strictly on DIR's side of FROM. DIR is 1 for a key
-;; that moves down, -1 for a key that moves up.
-(define (preview--toward positions from dir)
-  (let ((side (filter (lambda (p) (if (> dir 0) (> p from) (< p from)))
-                      positions)))
-    (cond ((null? side) #f)
-          ((> dir 0) (car side))
-          (else (car (reverse side))))))
-
-;; The position nearest FROM, on either side.
-(define (preview--nearest positions from)
-  (let loop ((ps positions) (best #f))
-    (cond ((null? ps) best)
-          ((or (not best) (< (abs (- (car ps) from)) (abs (- best from))))
-           (loop (cdr ps) (car ps)))
-          (else (loop (cdr ps) best)))))
-
-(define (preview--nth lst n)
-  (cond ((null? lst) #f)
-        ((<= n 0) (car lst))
-        (else (preview--nth (cdr lst) (- n 1)))))
-
-;; One rendered fragment names many source positions. A two-character code
-;; span such as `-b` sits in the file ten times, so the first hit is almost
-;; never the one the reader points at: the cursor jumps to the top of the
-;; file, and the next key matches the same first hit again. The cursor then
-;; stops moving.
-;;
-;; So the client also counts, on the page, how many times the fragment
-;; comes before the one it means (NTH), and names the direction the key
-;; moves (DIR: 1 down, -1 up, 0 for a click). Take the NTH source hit.
-;; Rendered text and source text differ, so that count can miss; when it
-;; misses, or when DIR says the cursor must move and the NTH hit does not
-;; move it, take the nearest hit on DIR's side. A down key then always
-;; moves down.
-;;
-;; string-index rejects an empty pattern, so an empty needle answers #f.
-(define (preview--hit text before after nth dir from)
-  (let ((needle (string-append before after)))
-    (if (equal? needle "")
-        #f
-        (let* ((starts (preview--positions text needle))
-               (b (string-byte-length before))
-               (hits (map (lambda (i) (+ i b)) starts))
-               (want (preview--nth hits nth))
-               (ok (and want (or (= dir 0) (if (> dir 0) (> want from) (< want from))))))
-          (cond (ok want)
-                ((= dir 0) (preview--nearest hits from))
-                (else (or (preview--toward hits from dir)
-                          (preview--nearest hits from))))))))
-
-;; A click or a visual-line key in a rendered markdown page. The client
-;; sends the text node split at the caret, plus the word run around the
-;; caret. Rendered text and source differ (markup is stripped, punctuation
-;; is smartened), so try the exact node first and the plain word run
-;; second; NTH counts the node, WN counts the word run.
-(define (preview-goto! win before after wb wa nth wn dir)
-  (mouse-select-window! win)
-  (set-mark! #f)
-  ;; A one-character word run matches almost anywhere in the file, and a
-  ;; wrong hit throws point into a far paragraph. No move is better.
-  (let* ((text (buffer-text (current-buffer)))
-         (from (point))
-         (hit (or (preview--hit text before after nth dir from)
-                  (and (>= (string-byte-length (string-append wb wa)) 2)
-                       (preview--hit text wb wa wn dir from)))))
-    (when hit (goto-char! hit))))
-(public! 'preview-goto!
-  "(preview-goto! WIN BEFORE AFTER WB WA NTH WN DIR) — put point where a preview click or visual-line key landed"
-  'interaction)
-
-(define (preview-select! win before after wb wa nth wn dir)
-  (let ((anchor (or (mark) (point))))
-    (preview-goto! win before after wb wa nth wn dir)
-    (set-mark! anchor)))
-(public! 'preview-select!
-  "(preview-select! WIN BEFORE AFTER WB WA NTH WN DIR) — extend the region to a rendered position"
-  'interaction)
-
-;; Render-only widgets know their exact source ranges. Unlike preview-goto!,
-;; these do not need to reverse-map rendered prose into Markdown.
-(define (preview-goto-pos! win pos extend)
-  (mouse-select-window! win)
-  (when extend (unless (mark) (set-mark! (point))))
-  (unless extend (set-mark! #f))
-  (goto-char! (max 0 (min pos (buffer-size (current-buffer))))))
-(public! 'preview-goto-pos!
-  "(preview-goto-pos! WIN POS EXTEND) — move to an exact preview source position"
-  'interaction)
-
 (define-command "newline" "Insert a newline at point" (lambda () (insert! "\n")))
 (define (delete-active-region!)
   (if (and (mark) (< (region-beginning) (region-end)))
@@ -1612,11 +1515,13 @@
 ;; highlight move, ON-CONFIRM with the choice, ON-CANCEL on C-g (restore
 ;; whatever the preview displaced there). All three run against the
 ;; invoking buffer, not the minibuffer's — see with-invoking-buffer.
-;; one interaction model: a prompt WITH candidates opens as the
-;; centered palette; a prompt with no candidates is a line input and
-;; keeps the bottom bar. Every wrapper below applies this rule.
+;; one interaction model: a completion prompt is the BOTTOM bar, like
+;; Emacs — the candidates sit above the input and the input sits on the
+;; last row. Only a prompt that asks for "palette" by name floats: the
+;; command palette and the LLM config menus. Candidates alone never
+;; promote a prompt to the centered card.
 (define (prompt-style cands style)
-  (if style style (if (pair? cands) "palette" #f)))
+  style)
 
 ;; the builtin reads (prompt cands confirm) or (prompt cands complete
 ;; confirm); this wrapper keeps both shapes and adds the palette rule
@@ -1682,6 +1587,9 @@
   (local-set-key* mb "C-p" "minibuffer-previous-candidate")
   (local-set-key* mb "<up>" "minibuffer-previous-candidate")
   ;; the prompt continues as a buffer — see minibuffer-collect below
+  ;; a search repeats from inside its own prompt
+  (local-set-key* mb "C-s" "isearch-repeat-forward")
+  (local-set-key* mb "C-r" "isearch-repeat-backward")
   (local-set-key* mb "C-c C-o" "minibuffer-collect")
   (local-set-key* mb "DEL" "minibuffer-delete-backward"))
 
@@ -1903,7 +1811,6 @@
 (mode-icon! "shell-mode" "")
 (mode-icon! "tail-mode" "")
 (mode-icon! "collect-mode" "")
-(mode-icon! "groups-mode" "")
 
 (define (set-mode! name)
   (buffer-set-local! (current-buffer) 'mode-name name)
@@ -2311,28 +2218,6 @@
 (mode-doc! "html-mode"
   "HTML, parsed. You get the colours, and `C-M-f` and `C-M-b` step over whole elements. `C-c C-v` shows the rendered page, because the renderer reads the extension. `C-c C-a` runs the page as an app: its own scripts, its own storage, and the files beside it. A save reloads it, and `C-g` gives the keyboard back.")
 
-;; preview-mode: render the buffer instead of showing its source.
-;; Renderer picked by *preview-renderers* (extension -> renderer); the
-;; frontend knows "html" and "markdown". Add your own:
-;;   (set! *preview-renderers* (cons '(".rst" "markdown") *preview-renderers*))
-(define *preview-renderers*
-  '((".html" "html") (".htm" "html") (".svg" "html")
-    (".md" "markdown") (".markdown" "markdown") (".org" "markdown")
-    (".txt" "markdown")))
-
-;; A generated buffer has no extension to read a renderer from, so it says
-;; which renderer it wants in a buffer-local. Help docs are the case: the
-;; text is markdown, the buffer is "*Help*", and C-c C-v must still toggle
-;; between the source and the rendered page.
-(define (preview-renderer-for name)
-  (or (buffer-local name 'preview-renderer)
-      (let loop ((rs *preview-renderers*))
-        (if (null? rs)
-            #f
-            (if (string-suffix? (car (car rs)) name)
-                (cadr (car rs))
-                (loop (cdr rs)))))))
-
 ;; revert-buffer: re-read the file from disk (discards buffer edits).
 ;; Kill + re-visit so modes, hooks and fontification re-apply cleanly.
 (define-command "revert-buffer" "Re-read the current buffer's file from disk"
@@ -2347,73 +2232,6 @@
             (visit path)
             (goto-char! (min p (buffer-size (current-buffer))))
             (message "Reverted"))))))
-
-(define-command "preview-mode" "Toggle rendered preview of the current buffer"
-  (lambda ()
-    (if (equal? (buffer-local (current-buffer) 'mode-name) "chat-mode")
-        ;; a chat's rendered view is the rich transcript, not a markdown
-        ;; preview. A markdown render-mode here lost the chat UI with no
-        ;; way back — the chat's own toggle owns this buffer-local.
-        (run-command "chat-toggle-view")
-        (if (buffer-local (current-buffer) 'render-mode)
-            (begin
-              (buffer-set-local! (current-buffer) 'render-mode #f)
-              (message "Preview off"))
-            (let ((r (preview-renderer-for (current-buffer))))
-              (if r
-                  (begin
-                    (buffer-set-local! (current-buffer) 'render-mode r)
-                    (message (string-append "Preview on (" r ") — C-c C-v toggles")))
-                  (message "No preview renderer for this buffer")))))))
-
-;;; --- apps --------------------------------------------------------------
-;;; preview-mode renders a page the way eww does: themed, and inert. An app
-;;; needs the opposite. It keeps the colours the author wrote, it runs its
-;;; own JavaScript, it keeps its own storage, and it loads the files beside
-;;; it. So an app window draws a frame on the app origin — a different port,
-;;; which the browser reads as a different origin — and that origin serves
-;;; this buffer's live text plus the directory its file lives in.
-;;;
-;;; The two are separate commands on purpose. A downloaded .html that you
-;;; open to read must not run anything; `C-c C-v` reads it, `C-c C-a` runs
-;;; it, and the difference is a key you press.
-
-(define (app-buffer? buf) (equal? (buffer-local buf 'render-mode) "app"))
-
-;; the client reloads an app when this number changes, and at no other time:
-;; a keystroke must not restart the app you are typing at
-(define (app-reload! buf)
-  (buffer-set-local! buf 'app-generation
-                     (+ 1 (or (buffer-local buf 'app-generation) 0))))
-
-(define (app-buffers)
-  (let loop ((bs (buffer-list)) (acc '()))
-    (cond ((null? bs) (reverse acc))
-          ((app-buffer? (car bs)) (loop (cdr bs) (cons (car bs) acc)))
-          (else (loop (cdr bs) acc)))))
-
-(define-command "app-preview" "Run the current buffer as an HTML app"
-  (lambda ()
-    (let ((buf (current-buffer)))
-      (if (app-buffer? buf)
-          (begin
-            (buffer-set-local! buf 'render-mode #f)
-            (message "App off"))
-          (begin
-            (app-reload! buf)
-            (buffer-set-local! buf 'render-mode "app")
-            (message "App on — C-g gives the keyboard back, C-c C-a stops it"))))))
-
-(define-command "app-reload" "Reload every running app"
-  (lambda ()
-    (let ((bs (app-buffers)))
-      (for-each app-reload! bs)
-      (message (string-append "Reloaded " (number->string (length bs)) " app(s)")))))
-
-;; a save is the reload signal: you save the buffer, the app runs the new
-;; code. The app server reads buffers, not files, so an unsaved edit in a
-;; sibling file shows on the next reload too.
-(add-hook! 'after-save-hook (lambda () (for-each app-reload! (app-buffers))))
 
 (define-mode "elixir-mode" (ts-mode "elixir"))
 (define-mode "json-mode" (ts-mode "json"))
@@ -2689,7 +2507,11 @@
 ;;; retry, and the incremental loop — capture the origin, re-search from
 ;;; it on every keystroke, restore it on cancel. The surface owns what a
 ;;; hit shows, what a miss says, and what RET keeps.
-;;; (C-s-repeat needs minibuffer keymaps: TODO.)
+;;;
+;;; One search runs at a time, so one variable holds it. The state says
+;;; where the next find starts, which way it runs, and how to draw a hit.
+;;; C-s and C-r in the minibuffer map move that start past the current
+;;; match — the prompt stays open, the way Emacs repeats a search.
 
 ;; (search-find q backward from) -> (start end) or #f
 (define (search-find q backward from)
@@ -2703,34 +2525,99 @@
         (when m (message "Search wrapped"))
         m)))
 
+;; the live search, or #f between searches
+(define *isearch* #f)
+;; the last string searched for. An empty C-s repeats it, as Emacs does.
+(define *isearch-last* "")
+
+(define (isearch--set! origin start backward show query match)
+  (set! *isearch*
+    (list 'origin origin 'start start 'backward backward
+          'show show 'query query 'match match)))
+
+(define (isearch--field key) (and *isearch* (plist-get *isearch* key)))
+
+;; one find, drawn by the surface. Call it inside with-window-buffer: the
+;; search reads the window's buffer, not the prompt.
+(define (isearch--step! q backward from wrap)
+  (let ((m (and (not (equal? q ""))
+                (if wrap
+                    (search-find-wrap q backward from)
+                    (search-find q backward from))))
+        (origin (isearch--field 'origin))
+        (show (isearch--field 'show)))
+    (isearch--set! origin from backward show q m)
+    (show m q origin)
+    m))
+
 ;; The loop. SHOW gets (match q origin) on every keystroke — match is #f
 ;; on a miss and on an empty query. ACCEPT gets (q origin) on RET.
 ;; CANCEL gets (origin) on C-g, after the point returns to it.
 (define (isearch-loop prompt backward show accept cancel)
   (let ((origin (point)))
+    (isearch--set! origin origin backward show "" #f)
     (minibuffer-read* prompt '()
       (list (list 'change
               (lambda (q)
+                (unless (equal? q "") (set! *isearch-last* q))
                 (with-window-buffer
                   (lambda ()
-                    (show (and (not (equal? q ""))
-                               (search-find q backward origin))
-                          q origin)))))
-            (list 'confirm (lambda (q) (accept q origin)))
+                    (isearch--step! q backward (isearch--field 'start) #f)))))
+            (list 'confirm (lambda (q)
+                             (set! *isearch* #f)
+                             (accept q origin)))
             (list 'cancel (lambda ()
+                            (set! *isearch* #f)
                             (goto-char! origin)
                             (cancel origin)))))))
+
+;; C-s again: find the match after this one. The repeat wraps at the end of
+;; the buffer, and it can turn the search around — C-r inside a forward
+;; search walks back through the same hits.
+(define (isearch--repeat! backward)
+  (when *isearch*
+    (with-window-buffer
+      (lambda ()
+        (let* ((typed (isearch--field 'query))
+               (q (if (equal? typed "") *isearch-last* typed))
+               (m (isearch--field 'match))
+               (turn (not (equal? backward (isearch--field 'backward))))
+               (from (cond ((not m) (if backward (buffer-size (current-buffer)) 0))
+                           ;; a turn reads THIS match again from the other side
+                           (turn (if backward (cadr m) (car m)))
+                           (backward (car m))
+                           (else (+ (car m) 1)))))
+          (if (equal? q "")
+              (message "No previous search")
+              (begin
+                ;; the prompt shows the string it repeats
+                (when (equal? typed "") (minibuffer-input! q))
+                ;; the surface says what a hit and a miss look like
+                (isearch--step! q backward from #t))))))))
+
+(define-command "isearch-repeat-forward" "During a search, move to the next match"
+  (lambda () (isearch--repeat! #f)))
+(define-command "isearch-repeat-backward"
+  "During a search, move to the previous match"
+  (lambda () (isearch--repeat! #t)))
+
+(catalog-meta! 'command "isearch-repeat-forward" 'domain 'targets 'effects '(write))
+(catalog-meta! 'command "isearch-repeat-backward" 'domain 'targets 'effects '(write))
 
 ;; Emacs surface: the current match is the region (mark at one end, point
 ;; at the other), a miss says so, RET keeps the point and drops the region.
 (define (isearch backward)
   (isearch-loop (if backward "I-search backward: " "I-search: ") backward
     (lambda (m q origin)
-      (cond ((equal? q "") (set-mark! #f) (goto-char! origin))
-            (m (if backward
-                   (begin (set-mark! (cadr m)) (goto-char! (car m)))
-                   (begin (set-mark! (car m)) (goto-char! (cadr m)))))
-            (else (message (string-append "Failing I-search: " q)))))
+      ;; the LIVE direction, not the one this search started with: C-r
+      ;; inside a forward search turns it around, and the point must land
+      ;; at the end the reader now moves toward
+      (let ((back (isearch--field 'backward)))
+        (cond ((equal? q "") (set-mark! #f) (goto-char! origin))
+              (m (if back
+                     (begin (set-mark! (cadr m)) (goto-char! (car m)))
+                     (begin (set-mark! (car m)) (goto-char! (cadr m)))))
+              (else (message (string-append "Failing I-search: " q))))))
     (lambda (q origin) (set-mark! #f))
     (lambda (origin) (set-mark! #f))))
 
@@ -3045,17 +2932,16 @@
         (auto-mode path)
         (run-hooks 'find-file-hook)))))
 
-;; files open in the current group: visit PATH, then join GROUP — but a
-;; buffer that already belongs somewhere stays where it is. Raw (visit)
+;; Files open in the active group. Existing memberships remain valid, so a
+;; file already used elsewhere becomes a member of both groups. Raw (visit)
 ;; keeps no group policy, so desktop restore stays clean.
 (define (visit-in-group path g)
   (visit path)
-  (when (and g (not (buffer-group (current-buffer))))
-    (buffer-set-local! (current-buffer) 'group g)))
+  (when g (buffer-add-group! (current-buffer) g)))
 
 (define-command "find-file" "Visit a file, prompting with filename completion"
   (lambda ()
-    (let ((g (buffer-group (current-buffer))))
+    (let ((g (frame-group)))
       (read-file-name "Find file: " (lambda (p) (visit-in-group p g))))))
 
 ;; the project a buffer belongs to, as a short name for the prompt.
@@ -3298,7 +3184,9 @@
         ;; those three fields all match what you type. The icon leads them,
         ;; so the count is four.
         4
-        #f
+        ;; the switcher is the power organiser: it opens as a centered
+        ;; palette, not the bottom minibuffer line
+        "palette"
         ;; this handler serves TAB and RET both (the complete contract):
         ;; RET hands it the highlighted candidate — answer it back as the
         ;; confirm value. TAB with no selection and an input that names
@@ -5111,7 +4999,8 @@
 ;; 'render-mode is the chat's chosen VIEW ("agent" rich, "plain" text) —
 ;; a choice about the chat, so identity (S11)
 (define chat-identity-locals
-  '(group group-meta group-layout group-noise agent-connector agent-model agent-effort
+  '(group groups group-state-holder group-meta group-layout group-noise
+    agent-connector agent-model agent-effort
     chat-presets chat-permission-mode render-mode default-directory
     agent-permission-profile window-class header-line
     code-agent-saved
@@ -5151,9 +5040,9 @@
 
 ;; PROCESS state — mirrors a live runtime, so it is always stale after a
 ;; restart and meaningless after a reset: both clear it wholesale
-;; ('agent-queued is retired — queued messages live in the 'chat-queued
-;; conversation local now — but stays listed so old sessions' stale
-;; values are still swept)
+;; ('agent-queued is retired — queued messages live in the transcript as
+;; "queued" blocks now — but stays listed so old sessions' stale values
+;; are still swept)
 (define chat-runtime-locals
   '(agent-slug agent-queued agent-waiting chat-waiting chat-activity
     agent-cancelling agent-seed-context agent-tool-bodies
@@ -5444,8 +5333,8 @@
 ;;; until its first send, and up-arrow has to work before then.
 
 ;; just past the marker: where the live input begins. A message queued
-;; mid-turn does not live here — RET moves it into the 'chat-queued
-;; local (agent-echo-queued!), and the input clears.
+;; mid-turn does not live here — RET echoes it into the transcript as a
+;; muted "queued" block (agent-echo-queued!), and the input clears.
 (define (chat-input-start buf)
   (+ (chat-mark buf)
      (or (buffer-local buf 'agent-marker-bytes)
@@ -5472,146 +5361,6 @@
 ;;; ...moved to packages/chat.scm: the record, compaction, healing, the
 ;;; tool surface, the usage ledger, and the direct lane's turn context.
 ;;; Policy about a conversation is not the editor's business.
-
-
-
-;;; --- buffer groups: work buffers + one chat, tied by a tag --------------------
-;;; A group is nothing but a shared buffer-local: every member — code, doc,
-;;; AND the chat — carries 'group "name". The group is stored nowhere else;
-;;; (group-buffers g) derives it on demand. So membership persists with the
-;;; locals (desktop restore included), a killed buffer simply leaves the
-;;; set, and the chat is found by role (chat-mode member), not by pointer.
-;;; C-c w from a work buffer groups it by itself and opens the group chat
-;;; on the right; C-c g joins a named group; C-c q talks to the group chat.
-;;; The "*chat:" names avoid the "*chat*"/"*llm:" popup rules on purpose.
-
-(define (buffer-group b)
-  (or (buffer-local b 'group)
-      ;; legacy: a pre-group companion pointer doubles as a group tag
-      (buffer-local b 'companion-of)))
-
-;; the group column in a buffer prompt. A group founded by a file
-;; buffer carries the full path as its name; show the last segment.
-(define (group-label g)
-  (if g
-      (car (reverse (string-split g "/")))
-      ""))
-
-;; a group's metadata lives on its chat buffer: the chat is the group's
-;; durable surface, so 'group-meta rides chat-identity-locals and
-;; survives reset, restart, and save
-;; the buffer that holds a group's durable state ('group-meta,
-;; 'group-layout): its chat. A chat made by group-chat but never shown
-;; has no mode yet, so fall back to the chat buffer by name.
-(define (group-holder g)
-  (let ((chats (filter chat-buffer? (group-buffers-mru g))))
-    (if (pair? chats)
-        (car chats)
-        (let ((buf (group-chat-name g)))
-          (and (buffer-exists? buf) buf)))))
-
-(define (group-meta g)
-  (let ((h (group-holder g))) (and h (buffer-local h 'group-meta))))
-
-(define (group-meta-set! g text)
-  (buffer-set-local! (group-chat g) 'group-meta text))
-
-;; a group's window arrangement rides its chat too, as one opaque
-;; window-tree value: capture on leave, restore on switch
-(define (group-layout g)
-  (let ((h (group-holder g))) (and h (buffer-local h 'group-layout))))
-
-(define (group-layout-save! g)
-  (buffer-set-local! (group-chat g) 'group-layout (window-tree)))
-
-;; switch the frame to a group: save the layout you leave, then bring
-;; the group's saved layout back exactly as you left it. A group with
-;; no saved layout opens its most recent member full-frame.
-;; a group that never saved a layout still ARRIVES arranged: the most
-;; recent work buffer on the left, and on the right the group chat
-;; (companion noise "loud") or the next work buffer. One member alone
-;; fills the frame.
-(define (group-default-layout! g)
-  (let* ((docs (group-docs g))
-         (main (if (pair? docs) (car docs) (group-chat g)))
-         (loud (equal? (group-noise g) "loud"))
-         (side (cond ((and loud (pair? docs)) (group-chat g))
-                     ((and (pair? docs) (pair? (cdr docs))) (car (cdr docs)))
-                     (else #f))))
-    (delete-other-windows!)
-    (switch-to-buffer! main)
-    (when side
-      (split-window! 'h 0.6)
-      (other-window!)
-      (switch-to-buffer! side)
-      (when loud (set-mode! "chat-mode"))
-      (let ((w (window-showing main)))
-        (when w (select-window! w))))))
-
-;; a restored window whose buffer is an empty, unmodified, pathlike
-;; shell — and whose file exists — re-reads from disk. The layout
-;; recreated the NAME; the content lives in the file.
-(define (group-restore-files! g)
-  (let ((back (active-window)))
-    (for-each
-      (lambda (w)
-        (let ((b (car (cdr w))))
-          (when (and (string-prefix? "/" b)
-                     (file-exists? b)
-                     (not (file-directory? b)))
-            ;; a member killed since the snapshot came back as an
-            ;; empty shell: re-read its file, and its membership with it
-            (when (and (= (buffer-size b) 0)
-                       (not (buffer-modified? b)))
-              (select-window! (car w))
-              (buffer-kill! b)
-              (visit b)
-              (buffer-set-local! b 'group g)))))
-      (window-list))
-    (when (window-exists? back) (select-window! back))))
-
-(define (group-restore-prune! g)
-  (for-each
-    (lambda (w)
-      (let ((b (car (cdr w))))
-        (when (and (buffer-local b 'transient)
-                   (not (equal? (buffer-group b) g))
-                   (> (length (window-list)) 1))
-          (delete-window-id! (car w)))))
-    (window-list)))
-
-(define (switch-to-group! g)
-  ;; one winner entry per switch: the arrangement you leave, not the
-  ;; intermediate steps of building the next one
-  (winner-save!)
-  (set! *winner-inhibit* #t)
-  (let ((from (frame-group)))
-    (when (and from (not (equal? from g)))
-      (group-layout-save-if-shown! from)))
-  (set-frame-local! 'current-group g)
-  (let ((saved (group-layout g)))
-    (if saved
-        (begin
-          (window-tree-set! saved)
-          ;; a layout stores NAMES: a member killed since the snapshot
-          ;; comes back as an empty shell with no locals — re-read its
-          ;; file and restore its membership FIRST, or the validation
-          ;; below sees a group with nothing on screen
-          (group-restore-files! g)
-          ;; an old snapshot may have memorialized a transient surface
-          ;; (the board, a listing) that is not a member: drop it.
-          ;; Beyond that the layout restores AS SAVED — it is the
-          ;; group's own record, and second-guessing it against
-          ;; membership tags kept stomping real arrangements. The
-          ;; capture rule (only from inside) keeps new snapshots sane.
-          (group-restore-prune! g))
-        (group-default-layout! g)))
-  (set! *winner-inhibit* #f)
-  ;; the switch itself is a history entry: the group joins the one MRU
-  ;; stream, above the member buffers the restore just bumped
-  (mru-note-group! g)
-  (windows-shown-catchup!)
-  (message (string-append "switched to group " (group-label g))))
 
 ;; a mode whose buffer went stale OFF screen registers a catch-up
 ;; here; the switcher runs it for every window it just (re)filled.
@@ -5695,274 +5444,6 @@
 (define (delete-window!)
   (winner-save!)
   (builtin-delete-window!))
-
-;; the group the FRAME stands in. Switching sets it; a detour through
-;; an ungrouped buffer (scratch, help) does not lose it. The buffer's
-;; own group is the fallback for a frame that never switched.
-(define (frame-group)
-  ;; the buffer you are IN is the truth when it has a group; the
-  ;; frame-local covers detours through ungrouped buffers. The old
-  ;; precedence went stale: drifting into a group by plain switches
-  ;; left the frame naming some earlier group, so leaving snapshotted
-  ;; the wrong one and "the last arrangement" was never saved.
-  (or (buffer-group (current-buffer))
-      (frame-local 'current-group)))
-
-;; a layout snapshot is only true when the group is on screen: saving
-;; a scratch detour AS the group's arrangement would overwrite the
-;; real one
-(define (group-on-screen? g)
-  (let loop ((ws (window-list)))
-    (cond ((null? ws) #f)
-          ((equal? (buffer-group (car (cdr (car ws)))) g) #t)
-          (else (loop (cdr ws))))))
-
-;; a group's layout is captured only from INSIDE the group: the
-;; buffer you act from is a member. What happens on any other surface
-;; — the board, a listing, a detour — never rewrites it, so the last
-;; arrangement made IN the group is the one that comes back.
-(define (group-layout-save-if-shown! g)
-  (when (and g (equal? (buffer-group (current-buffer)) g))
-    (group-layout-save! g)))
-
-;; a group is UNCOVERED when no window shows a transient surface from
-;; outside it — a board, a listing. Its own members are transient too
-;; (a mail view, a dired listing), and they are part of the group's
-;; arrangement, not a cover on it.
-(define (group-uncovered? g)
-  (let loop ((ws (window-list)))
-    (cond ((null? ws) #t)
-          ((let ((b (car (cdr (car ws)))))
-             (and (buffer-local b 'transient)
-                  (not (equal? (buffer-group b) g))))
-           #f)
-          (else (loop (cdr ws))))))
-
-;; NAME is about to take a pane. When it comes from outside the group
-;; on screen, the arrangement it covers goes on record first. Only an
-;; uncovered arrangement counts: a second board must not overwrite the
-;; snapshot the first one earned. A group with no holder yet gets no
-;; snapshot — displaying a buffer must not create a chat.
-(define (group-layout-save-before-cover! name)
-  (let ((g (frame-group)))
-    (when (and g
-               (not (equal? (buffer-group name) g))
-               (group-holder g)
-               (group-on-screen? g)
-               (group-uncovered? g))
-      (group-layout-save! g))))
-
-;; found a group from what is on screen: every window's buffer joins,
-;; the layout is saved, and the group chat holds the durable state
-(define (group-found-from-windows! name)
-  (for-each (lambda (w)
-              (let ((b (car (cdr w))))
-                (when (and b (not (string-prefix? " " b)))
-                  (buffer-set-local! b 'group name))))
-            (window-list))
-  (group-layout-save! name)
-  (set-frame-local! 'current-group name)
-  (message (string-append "founded group " name " from "
-             (number->string (length (window-list))) " windows")))
-
-;; the LLM reads the member list and writes one sentence of metadata
-(define (group-describe! g)
-  (message "LLM writing group description...")
-  (llm (string-append
-         "These buffers form one working group in an editor.\n"
-         "Write one sentence that says what the group is for.\n"
-         "Return ONLY the sentence.\n\n"
-         (string-join (group-buffers-mru g) "\n"))
-       (lambda (text)
-         (group-meta-set! g (string-trim text))
-         (when (buffer-exists? *groups-buffer*)
-           (list-refresh! *groups-buffer*))
-         (message (string-append (group-label g) ": " (string-trim text))))))
-
-;; C-c d from a grouped buffer
-(define-command "group-describe"
-  "Ask the LLM to write this group's description"
-  (lambda ()
-    (let ((g (buffer-group (current-buffer))))
-      (if g (group-describe! g) (message "Not in a group")))))
-
-;;; --- the groups board: C-x G --------------------------------------------------
-;;; The command-palette design's second panel as a list: one row per group —
-;;; members, companion noise, metadata. RET switches (layout and all),
-;;; d asks the LLM to describe, n cycles noise, x dissolves.
-
-(define *groups-buffer* "*groups*")
-
-;; companion noise policy, an identity local on the group chat:
-;; "off" (no companion window), "quiet" (notify on finish), "loud"
-;; (lives in a window). Display rules read it; the board sets it.
-(define (group-noise g)
-  (let ((h (group-holder g)))
-    (or (and h (buffer-local h 'group-noise)) "quiet")))
-
-(define (group-noise-set! g v)
-  (buffer-set-local! (group-chat g) 'group-noise v))
-
-(define (group-line buf g)
-  (let ((members (group-buffers-mru g))
-        (m (group-meta g)))
-    (string-append
-      (string-pad-right (group-label g) 22)
-      (string-pad-right (string-append (number->string (length members)) " buffers") 12)
-      (string-pad-right (group-noise g) 8)
-      (string-join (map buffer-short-label (take-n members 4)) " · ")
-      (if m (string-append "  —  " m) ""))))
-
-;; a group with a modified member has unsaved work in it
-(define (group-dirty? g)
-  (pair? (filter buffer-modified? (group-buffers g))))
-
-(define (group-noise-face n)
-  (cond ((equal? n "loud") "warn")
-        ((equal? n "off") "faint")
-        (else "dim")))
-
-;; the members read as the group's contents, then what the group is for
-(define (group-cells buf g)
-  (let ((members (group-buffers-mru g)))
-    (list (if (group-dirty? g) (list "●" "warn") "")
-          (list (group-label g) "accent")
-          (list (number->string (length members)) "dim")
-          (list (group-noise g) (group-noise-face (group-noise g)))
-          (list (string-append
-                  (string-join (map buffer-short-label (take-n members 3)) " · ")
-                  (let ((m (group-meta g)))
-                    (if m (string-append "  —  " m) "")))
-                "faint"))))
-
-(define (groups-meta buf)
-  (let* ((rows (list-entries buf))
-         (n (length rows))
-         (bufs (fold (lambda (acc g) (+ acc (length (group-buffers g)))) 0 rows))
-         (dirty (length (filter group-dirty? rows))))
-    (string-append (number->string n) (if (= n 1) " group" " groups")
-                   " · " (number->string bufs) " buffers"
-                   " · " (number->string dirty) " modified"
-                   " · most recent first")))
-
-(define (groups--current)
-  (let ((g (list-current (current-buffer))))
-    (or g (begin (message "no group on this line") #f))))
-
-(define-command "group-switch" "Switch to the group at point"
-  (lambda ()
-    (let ((g (groups--current)))
-      (when g (switch-to-group! g)))))
-
-;; a verb here acts on every marked group, or on the row at point when
-;; nothing is marked — the rule every list follows. The marks go when the
-;; verb has run, because a mark on a group that no longer exists outlives
-;; every refresh.
-(define (groups--act! word verb)
-  (let* ((buf (current-buffer))
-         (targets (list-targets buf)))
-    (if (null? targets)
-        (message "no group on this line")
-        (begin (for-each verb targets)
-               (for-each (lambda (g) (list-unmark-key! buf g)) targets)
-               (list-refresh! buf)
-               (message (string-append word " " (number->string (length targets))
-                                       " " (list-noun buf (length targets))))))))
-
-(define-command "group-describe-at-point" "LLM-describe the marked groups"
-  (lambda () (groups--act! "describing" group-describe!)))
-
-(define-command "group-noise-cycle" "Cycle the companion noise of the marked groups"
-  (lambda ()
-    (groups--act! "cycled"
-      (lambda (g)
-        (let ((cur (group-noise g)))
-          (group-noise-set! g (cond ((equal? cur "off") "quiet")
-                                    ((equal? cur "quiet") "loud")
-                                    (else "off"))))))))
-
-(define-command "group-dissolve" "Remove the group tag from every member"
-  (lambda ()
-    (groups--act! "dissolved"
-      (lambda (g)
-        (for-each (lambda (b)
-                    (buffer-set-local! b 'group #f)
-                    (buffer-set-local! b 'companion-of #f))
-                  (group-buffers g))))))
-
-;; kill a whole context: every member buffer dies, except a modified
-;; file buffer — unsaved work never dies silently
-(define (group-kill! g)
-  (let* ((members (group-buffers g))
-         (kept (filter (lambda (b) (and (buffer-path b) (buffer-modified? b)))
-                       members)))
-    (for-each (lambda (b) (unless (member b kept) (buffer-kill! b)))
-              members)
-    (when (equal? (frame-local 'current-group) g)
-      (set-frame-local! 'current-group #f))
-    (message (string-append "killed group " (group-label g)
-               (if (pair? kept)
-                   (string-append " — kept " (number->string (length kept))
-                                  " modified")
-                   "")))))
-
-(define-command "group-kill" "Kill every buffer in the current group"
-  (lambda ()
-    (let ((g (frame-group)))
-      (if g (group-kill! g) (message "Not in a group")))))
-
-;; rename a context: every member retags, and the durable state
-;; follows. The chat buffer keeps its NAME (there is no buffer
-;; rename); membership is by role, so a live chat stays the group's.
-;; An unshown chat is found by name, so its identity is copied onto
-;; the new name's chat instead.
-(define (group-rename! old new)
-  (cond
-    ((equal? (string-trim new) "") (message "Group needs a name"))
-    ((pair? (group-buffers new))
-     (message (string-append "Group " new " already exists")))
-    ((null? (group-buffers old))
-     (message (string-append "No group " old)))
-    (else
-      (let ((holder (group-holder old)))
-        (for-each (lambda (b) (buffer-set-local! b 'group new))
-                  (group-buffers old))
-        (when (and holder (not (chat-buffer? holder)))
-          (let ((meta (buffer-local holder 'group-meta))
-                (layout (buffer-local holder 'group-layout))
-                (noise (buffer-local holder 'group-noise)))
-            (buffer-set-local! holder 'group #f)
-            (let ((chat (group-chat new)))
-              (when meta (buffer-set-local! chat 'group-meta meta))
-              (when layout (buffer-set-local! chat 'group-layout layout))
-              (when noise (buffer-set-local! chat 'group-noise noise)))))
-        (when (equal? (frame-local 'current-group) old)
-          (set-frame-local! 'current-group new))
-        (message (string-append "renamed group " (group-label old) " to " new))))))
-
-(define-command "group-rename" "Rename the current group"
-  (lambda ()
-    (let ((g (frame-group)))
-      (if (not g)
-          (message "Not in a group")
-          (minibuffer-read (string-append "Rename " (group-label g) " to: ") '()
-            (lambda (new) (group-rename! g (string-trim new))))))))
-
-(define-command "group-rename-at-point" "Rename the group at point"
-  (lambda ()
-    (let ((g (groups--current)))
-      (when g
-        (minibuffer-read (string-append "Rename " (group-label g) " to: ") '()
-          (lambda (new)
-            (group-rename! g (string-trim new))
-            (when (buffer-exists? *groups-buffer*)
-              (list-refresh! *groups-buffer*))))))))
-
-(define-command "group-kill-at-point" "Kill every buffer of the marked groups"
-  (lambda () (groups--act! "killed" group-kill!)))
-
-(define-command "groups-refresh" "Refresh the groups board"
-  (lambda () (list-refresh! *groups-buffer*)))
 
 ;;; --- the modeline dashboard -----------------------------------------------------
 ;;; modeline-expand toggles a popup that says everything about HERE: the
@@ -6340,47 +5821,6 @@
     ;; (paredit paints the matching delimiter here)
     (run-hooks 'post-command-hook)))
 
-(define-command "groups" "The groups board: switch, describe, set noise"
-  (lambda () (list-mode-show! "groups-mode")))
-
-(define-list-mode! "groups-mode"
-  (list
-    'doc (string-append
-           "Every buffer group as a table: members, companion noise, "
-           "metadata. RET switches to the group and restores its layout; "
-           "d writes its description with the LLM; n cycles noise; "
-           "x dissolves; K kills the members. `m` marks a group, `*` marks "
-           "every one, and the verbs act on the marked groups — or on the "
-           "row at point when nothing is marked. `/` narrows as you type "
-           "and `\\` widens by one.")
-    'buffer *groups-buffer*
-    'rows (lambda (buf) (list-keep buf (group-names)))
-    'columns (lambda (buf)
-               (list (list "" 1)
-                     (list "group" 24)
-                     (list "buffers" 7 'right)
-                     (list "noise" 6)
-                     (list "members" #f)))
-    'cells group-cells
-    'title (lambda (buf) "Groups")
-    'meta groups-meta
-    'total (lambda (buf) (length (group-names)))
-    'footer (lambda (buf)
-              '(("RET" "switch") ("m" "mark") ("*" "all") ("r" "rename")
-                ("d" "describe") ("n" "noise") ("x" "dissolve")
-                ("K" "kill buffers") ("/" "filter") ("g" "refresh")
-                ("q" "quit")))
-    'key (lambda (buf g) g)
-    'noun "group"
-    'keys '(("RET" "group-switch") ("r" "group-rename-at-point")
-            ("d" "group-describe-at-point")
-            ("n" "group-noise-cycle") ("x" "group-dissolve")
-            ("K" "group-kill-at-point")
-            ("g" "groups-refresh") ("q" "quit-window"))))
-
-(define (group-buffers g)
-  (filter (lambda (b) (equal? (buffer-group b) g)) (buffer-list)))
-
 ;; members in MRU order; buffers never visited this session trail
 ;; behind. A group is a SET: the list dedupes by name, whatever the
 ;; sources produce.
@@ -6390,27 +5830,8 @@
           ((member (car xs) seen) (loop (cdr xs) seen out))
           (else (loop (cdr xs) (cons (car xs) seen) (cons (car xs) out))))))
 
-(define (group-buffers-mru g)
-  (let ((mru (filter (lambda (b) (equal? (buffer-group b) g))
-                     (buffer-list-mru))))
-    (dedupe-names
-      (append mru (remove (lambda (b) (member b mru)) (group-buffers g))))))
-
-(define (group-names)
-  (fold (lambda (acc b)
-          (let ((g (buffer-group b)))
-            (if (and g (not (member g acc))) (append acc (list g)) acc)))
-        '() (append (buffer-list-mru) (buffer-list))))
-
 (define (chat-buffer? b)
   (equal? (buffer-local b 'mode-name) "chat-mode"))
-
-;; the group's chat counts by NAME as well as by mode: a chat made by
-;; group-chat but never shown has no mode yet, and it is still not a
-;; work buffer
-(define (group-docs g)
-  (remove (lambda (b) (or (chat-buffer? b) (equal? b (group-chat-name g))))
-          (group-buffers-mru g)))
 
 ;;; --- asking about windows -------------------------------------------------------
 ;;; (window-list) is ((id buffer) ...) and five places walked it by hand,
@@ -6440,180 +5861,6 @@
     (cond ((null? ws) #f)
           ((not (equal? (car (car ws)) me)) (car (car ws)))
           (else (loop (cdr ws))))))
-
-;; a buffer with no group founds one named after itself
-(define (group-ensure! b)
-  (or (buffer-group b)
-      (begin (buffer-set-local! b 'group b) b)))
-
-;; a fresh group chat is a rich surface from birth: help on top (a "meta"
-;; card in the agent design), then the >>> you: input region
-(define (group-chat-init! buf g)
-  (chat-surface-init! buf (string-append "companion · " g)
-    (string-append
-      "RET sends · C-c w hops to the document · "
-      "C-c m model · C-c C-v plain view\n"
-      "it reads the live buffers before it speaks, "
-      "and edits them in place when you ask\n")))
-
-(define (group-chat-name g) (string-append "*chat:" g "*"))
-
-;; the group's chat = its most recently used chat-mode member; created on
-;; demand already tagged, so a killed chat is simply remade next time
-(define (group-chat g)
-  (let ((chats (filter chat-buffer? (group-buffers-mru g))))
-    (if (pair? chats)
-        (car chats)
-        (let ((buf (group-chat-name g)))
-          (unless (buffer-exists? buf)
-            (buffer-create buf)
-            (group-chat-init! buf g))
-          (buffer-set-local! buf 'group g)
-          ;; Optional packages may attach durable group identity (for
-          ;; example, a worktree workspace) to the newly created chat.
-          (when (boundp (quote workspace-chat-inherit!))
-            (workspace-chat-inherit! buf g))
-          buf))))
-
-;; ensure the two-pane layout (work left, group chat right) and select the
-;; chat window; returns the chat buffer name
-(define (group-chat-show! g)
-  (let ((buf (group-chat g)))
-    (let ((w (window-showing buf)))
-      (if w
-          (select-window! w)
-          (begin
-            (delete-other-windows!)
-            (split-window! 'h 0.6)
-            (other-window!)
-            (switch-to-buffer! buf))))
-    (set-mode! "chat-mode")
-    (end-of-buffer!)
-    buf))
-
-;; ask the group without leaving the current buffer: the minibuffer prompt
-;; becomes a group-chat turn, point stays put, the reply lands on the right
-(define (group-ask! g)
-  (minibuffer-read (string-append "Ask " g ": ") (history-items 'companion-ask)
-    (lambda (prompt)
-      (history-push! 'companion-ask prompt)
-      (let ((back (active-window)))
-        (group-chat-show! g)
-        (insert! prompt)
-        (run-command "agent-send")
-        (when (window-exists? back)
-          (select-window! back))))))
-
-;; the group a joining buffer gets by default: the group the frame
-;; stands in, else the most recent group in history. The buffer's own
-;; group is never the default — joining it is a no-op.
-(define (group-join-default buf)
-  (let ((own (buffer-group buf))
-        (fg (frame-local 'current-group)))
-    (if (and fg (not (equal? fg own)))
-        fg
-        (let loop ((rows (mru-list)))
-          (cond ((null? rows) #f)
-                ((and (equal? (car (car rows)) "group")
-                      (not (equal? (car (cdr (car rows))) own)))
-                 (car (cdr (car rows))))
-                (else (loop (cdr rows))))))))
-
-;; C-c g : join a group. RET takes the default — so a stray buffer
-;; moves into the group you last stood in with one press. A typed
-;; name joins that group, or founds it.
-(define-command "group-join" "Join a group; RET takes the last visited group; a new name founds one"
-  (lambda ()
-    (let* ((buf (current-buffer))
-           (default (group-join-default buf))
-           (names (filter (lambda (g) (not (equal? g default))) (group-names))))
-      (minibuffer-read
-        (if default
-            (string-append "Join group (default " (group-label default) "): ")
-            "Join group: ")
-        (if default
-            (cons (list default "last visited") names)
-            names)
-        (lambda (input)
-          (let ((g (if (equal? (string-trim input) "")
-                       (or default "")
-                       input)))
-            (cond
-              ((equal? g "") (message "Group needs a name"))
-              ;; a group is a set — joining twice is a no-op that says so
-              ((equal? (buffer-group buf) g)
-               (message (string-append buf " is already in " (group-label g))))
-              (else
-                (buffer-set-local! buf 'group g)
-                (message (string-append buf " joined group " (group-label g)))))))))))
-
-(define-command "group-remove" "Remove the current buffer from its group"
-  (lambda ()
-    (let* ((buf (current-buffer)) (g (buffer-group buf)))
-      (if g
-          (begin
-            (buffer-set-local! buf 'group #f)
-            (buffer-set-local! buf 'companion-of #f)
-            (message (string-append buf " left group " g)))
-          (message "Not in a group")))))
-
-(define-command "group-list" "List the current buffer's group members"
-  (lambda ()
-    (let ((g (buffer-group (current-buffer))))
-      (if g
-          (message (string-append g ": "
-                     (string-join (group-buffers-mru g) " · ")
-                     (let ((m (group-meta g)))
-                       (if m (string-append " — " m) ""))))
-          (message "Not in a group")))))
-
-;; make an existing conversation a group's chat: pick a buffer, join its
-;; group (founding one named after it if it has none)
-(define-command "chat-adopt" "Make this chat the companion of a chosen buffer"
-  (lambda ()
-    (let ((chat (current-buffer)))
-      (minibuffer-read "Companion for buffer: "
-        (filter (lambda (b) (not (equal? b chat))) (buffer-list-mru))
-        (lambda (doc)
-          (if (not (buffer-exists? doc))
-              (message (string-append "No buffer " doc))
-              (let ((g (group-ensure! doc)))
-                ;; joining the group is the whole act; the layout is
-                ;; group-chat-show!'s job, and it is the only place that
-                ;; knows what a chat's two panes look like
-                (buffer-set-local! chat 'group g)
-                ;; the document takes this window first, so the layout
-                ;; builder lands the chat beside it rather than on it
-                (switch-to-buffer! doc)
-                (group-chat-show! g)
-                (message (string-append chat " now accompanies " g)))))))))
-
-;; C-c w toggles sides: in a work buffer it opens (or refocuses) the group
-;; chat, grouping the buffer by itself first if needed; in the chat it hops
-;; to the group's most recent work buffer; in a groupless chat it adopts
-(define-command "chat-companion" "Toggle between a work buffer and its group chat"
-  (lambda ()
-    (let* ((cur (current-buffer))
-           (g (buffer-group cur)))
-      (cond ((and (chat-buffer? cur) g)
-             (let ((docs (group-docs g)))
-               (if (null? docs)
-                   (message (string-append "Group " g " has no work buffers"))
-                   (let ((w (window-showing (car docs))))
-                     (if w
-                         (select-window! w)
-                         (switch-to-buffer! (car docs)))))))
-            ((chat-buffer? cur) (run-command "chat-adopt"))
-            (else (group-chat-show! (group-ensure! cur)))))))
-
-;; C-c RET in a work buffer: talk to the group chat without leaving it.
-;; (In a chat buffer it just sends, exactly like RET.)
-(define-command "chat-companion-ask" "Ask the group chat without leaving this buffer"
-  (lambda ()
-    (let ((cur (current-buffer)))
-      (if (chat-buffer? cur)
-          (run-command "agent-send")
-          (group-ask! (group-ensure! cur))))))
 
 ;; C-c q : ask from anywhere. In a grouped buffer (its chat included) the
 ;; prompt becomes a turn in the group's one chat; ungrouped, it goes to
@@ -6684,11 +5931,12 @@
               rows))
       (switch-to-buffer! buf))))
 
-;; a fresh conversation on the same surface: open the group chat, wipe it
-(define-command "chat-new" "Start a fresh chat conversation"
+;; Start another conversation in the active group. chat-reset remains the
+;; command that clears only the selected chat.
+(define-command "chat-new" "Start another chat in the active group"
   (lambda ()
-    (run-command "chat")
-    (run-command "chat-reset")))
+    (let ((g (or (frame-group) (group-ensure! (current-buffer)))))
+      (group-chat-new! g))))
 
 ;; C-c q from anywhere: the prompt becomes a turn in this buffer's group
 ;; chat (founding the group first if needed) — one chat interface, always
@@ -6700,10 +5948,7 @@
 (global-set-key "C-c r" "chat-send-region")
 (global-set-key "C-c q" "llm-ask")
 (global-set-key "C-c w" "chat-companion")
-(global-set-key "C-c g" "group-join")
-(global-set-key "C-c d" "group-describe")
 
-(global-set-key "C-x G" "groups")
 ;; Cmd-p is intent search; M-x remains literal command-name completion.
 (global-set-key "s-p" "command-palette")
 ;; winner: any layout change is one keystroke from undone
@@ -7258,9 +6503,6 @@
 (global-set-key "M-g M-g" "goto-line")
 (global-set-key "M-m" "back-to-indentation")
 (global-set-key "C-c l" "copy-buffer-link")
-(global-set-key "C-c C-v" "preview-mode")
-(global-set-key "C-c C-a" "app-preview")
-(global-set-key "C-c C-r" "app-reload")
 (global-set-key "C-`" "popup-toggle")
 (global-set-key "C-M-`" "popup-bufferize")
 (global-set-key "C-M-v" "scroll-other-window")
@@ -7469,10 +6711,7 @@
 (public! 'llm-with-model "(llm-with-model PROMPT MODEL HANDLER) — async completion with an explicit model")
 (public! 'llm-model "Current model id")
 (public! 'set-llm-model! "(set-llm-model! ID) — a \"provider:model\" prefix routes to that provider; a bare id is Anthropic")
-(public! 'buffer-group "(buffer-group NAME) -> the buffer's group tag or #f")
-(public! 'group-buffers "(group-buffers G) -> names of the buffers tagged 'group G")
-(public! 'group-chat "(group-chat G) — find or create G's chat buffer; returns its name")
-(public! 'group-chat-show! "(group-chat-show! G) — open/focus G's chat pane; returns its name")
+
 
 ;; git
 ;; Every one takes an optional trailing CALLBACK. With one the call returns

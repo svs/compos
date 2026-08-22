@@ -1,7 +1,15 @@
 # Groups specification
 
 ## 1. Purpose
+Being able to quickly load and unload context is core to the power user experience. For this we have created Groups. Working inside a group is highly optimised for everyone - humans and agents.
 
+With 100s of buffers open, it is imperative to quickly switch only within buffers in a group. Group membership itself changes rapidly.
+
+If we don't have an easy way to start a new group then groups get dirty. some sort of file-new-group command? another thing we find ourselves needing again and again is 'move visible buffers to this group'. group-found-from-visible? found is the wrong term. group is created if not found.
+
+TODO check if we're using the same exact match required semantics as vertico/corfu?
+
+## What they are
 A group is one editor work context. It joins buffers, chats, a window layout, recency, metadata, and companion policy.
 
 This document defines required behavior for the Scheme implementation and its tests. It uses **MUST**, **SHOULD**, and **MAY** as normative terms.
@@ -10,13 +18,23 @@ Groups are not security boundaries. Groups do not own files, projects, Git workt
 
 ## Design Goals
 
-A group is a fundamental unit of work. All buffers in a group are connected to each other as a shared context. Switching between buffers in a group should feel easy. Switching between groups should be easy. In general a group should open the way you left it.
+A group is a fundamental unit of work and a curated membership set. It is also the user's receiving context: entering a group changes where the user stands, while pull, push, and pop change membership without changing where the user stands. All buffers in a group are available as shared context. Switching within a group and switching between groups should both feel easy. In general, a group should restore the last valid homogeneous layout in which it was visible.
 
-One model of stumpwm that I really like is that you decide the frame and then you pull whatever you want to you. As such pull-to-group and push-to-group should be basic buffer functions.
+### pull
+One model of stumpwm that I really like is that you decide the frame and then pull whatever you want to you. As such, pull-to-group and push-to-group should be basic buffer operations. They should remain explicit, cancellable, repeatable, and safe with modified buffers.
 
 This is an important indication of the emacs mind. Instead of imperatively switching to a buffer then changing its group membership, we declare what we want. We want to pull a buffer to this group.
 
 Pull the context to you is a core operating principle.  
+
+### push
+
+But push is indispensable as well. From a buffer, we may want to create a new group containing it, create a group from all visible buffers, push a buffer to another group, or add a buffer to another group. Creating or adding membership preserves existing memberships; moving work is a separate explicit operation that adds the destination membership and removes a named source membership.
+
+# pop
+Remove the current group's membership from a buffer while preserving the buffer and every other membership. Pop is not a file operation and does not imply a context switch.
+
+Question: did i miss anything?
 
 ## 2. Terms
 
@@ -25,102 +43,107 @@ Pull the context to you is a core operating principle.
 | **group ID** | The immutable opaque identity of one group. |
 | **group name** | The mutable user-visible label of one group. |
 | **group record** | Durable state keyed by the group ID. |
-| **member** | A live buffer whose buffer-local `group-id` equals the group ID. |
-| **work member** | A member that is not a chat buffer. |
-| **group chat** | Any chat buffer whose `group-id` equals the group ID. |
+| **work member** | A live non-chat buffer whose buffer-local `group-ids` set contains the group ID. |
+| **group chat** | A chat buffer whose single buffer-local `group-id` equals the group ID. |
+| **member** | A work member or group chat. |
 | **primary chat** | The optional chat selected for companion and ask actions. |
-| **frame context** | The frame-local group ID in `current-group`. |
-| **visible group** | A group with at least one member in the frame window tree. |
-| **remembered layout** | The latest valid arrangement saved when a visible group is left. |
+| **frame context** | The frame-local group ID in `current-group`; the group where the user stands. |
+| **foreign buffer** | A live buffer that is not a member of the frame context, even if it belongs to other groups. |
+| **visible group** | A group whose members are the only work buffers displayed in the frame window tree. |
+| **remembered layout** | The latest valid snapshot recorded while all visible buffers belong to one group; this is what group entry restores. |
 | **default layout** | A generated recovery or initial arrangement used when no valid remembered layout exists. |
-| **peek** | A temporary display of foreign work that changes neither membership nor frame context. |
+| **pull** | Add a selected work buffer to the frame context. |
+| **push** | Add selected work to any chosen existing group or to a newly created group. |
+| **pop** | Remove a selected work buffer from the frame context without killing it or changing other memberships. |
 
 ## 2.1 User stories
 
-These stories describe the intended experience. Later requirements define the exact state changes.
+These stories describe the intended experience from the group where the user is working. The current group is where the user stands; other groups and their buffers are sources from which work is pulled.
 
-### Discover groups and projects
+### Discover buffers to pull
 
-- As a user, I want one view of groups and projects, so I can understand my available contexts.
-- As a user, I want group rows to show purpose and recent work, so names are not my only cue.
-- As a user, I want project rows to show related groups, so I can find curated workspaces.
-- As a user, I want search to match groups, projects, buffers, modes, and paths.
-- As a user, I want to expand a group or project without entering it.
-- As a user, I want empty groups to remain visible until I remove them.
+- As a user working in a group, I want the pull command to show all live work buffers directly, including current-group, foreign, and ungrouped buffers.
+- As a user working in a group, I want each buffer to show its groups, project, mode, and path, so I can recognize the work I may pull.
+- As a user working in a group, I want search to match buffer name and all rendered group, project, mode, and path annotations.
+- As a user working in a group, I want to select or mark buffers without first choosing or entering a source context.
 
-A project is discovered from the filesystem. A group is a workspace that I curate.
+The pull palette's candidate set is all live work buffers. Groups and projects annotate those candidates; neither is a first-layer source chooser in the pull UI.
 
 One group can include several projects. One project can contribute buffers to several groups.
 
-### Stand in and move between groups
+### Stand in the receiving group
 
-- As a user, I want the current group to be the place where I stand.
-- As a user, I want ordinary buffer switching to move only among members of that group.
-- As a user, I want switching groups to restore the destination as I last left it.
-- As a user, I want to choose a group and then optionally choose a destination inside it.
-- As a user, I do not want group switching to move the buffer from which I invoked it.
-- As a user, I want the previous group and previous buffer to be fast default targets.
-- As a user, I want cancellation to restore every previewed window change.
-- As a user, I want one undo action to reverse an accidental context switch.
+- As a user working in a group, I want the current group to be the stable receiving context for every pull.
+- As a user working in a group, I want ordinary buffer switching to move only among buffers already available in the receiving group.
+- As a user working in a group, I want switching groups to restore the destination as I last left it.
+- As a user working in a group, I want to inspect another group and select buffers from it without switching into it.
+- As a user working in a group, I want switching groups to be an explicit change of where I stand, distinct from pulling buffers.
+- As a user working in a group, I want the previous group and previous buffer to be fast default targets.
+- As a user working in a group, I want cancellation to restore every previewed window change.
+- As a user working in a group, I want one undo action to reverse an accidental context switch.
 
 Entering a project need not create a group. Projects supply files and annotations; groups remain the frame contexts.
 
-### Create and organize groups
+### Create receiving contexts
 
-- As a user, I want to create a group from my current windows.
-- As a user, I want to create an empty group before I open its files.
-- As a user, I want to rename a group without changing its identity or active work.
-- As a user, I want to dissolve a group without killing its buffers.
-- As a user, I want group names to remain unique and easy to search.
-- As a user, I want groups to survive restart even when they contain no live buffers.
+- As a user working in a group, I want to create and enter an empty group, so I can begin with a clean receiving context.
+- As a user working in a buffer, I want to create a group around that buffer, so starting focused work is one action.
+- As a user working in several windows, I want to create a group from the visible work buffers and layout, so the context in front of me becomes reusable.
+- As a user creating from existing work, I want old memberships preserved unless I explicitly pop them, so shared buffers remain shared.
+- As a user working in a group, I want to rename a group without changing its identity or active work.
+- As a user working in a group, I want to dissolve a group without killing its buffers.
+- As a user working in a group, I want group names to remain unique and easy to search.
+- As a user working in a group, I want groups to survive restart even when they contain no live buffers.
 
-### Pull and push work
+### Pull, push, and pop buffers
 
-- As a user, I want to pull an ungrouped or foreign buffer into the group where I stand.
-- As a user, I want to push one or more current members to another group.
-- As a user, I want to select the work first; I do not want to visit each buffer before changing membership.
-- As a user, I want pull and push to preserve files, text, modified state, point, and undo history.
-- As a user, I want removing membership to preserve the buffer.
-- As a user, I want membership changes to leave me in the current group.
-- As a user, I want a visible pushed buffer to be replaced safely without entering its destination.
+- As a user working in a group, I want to choose from all live work buffers and pull selected buffers into the group where I stand.
+- As a user working in a group, I want to push the current buffer or marked buffers to any existing group, or create a new destination group, without leaving this group.
+- As a user working in a group, I want to pop a buffer from this group without killing it or removing its other memberships.
+- As a user working in a group, I want pull, push, and pop to be separate explicit choices.
+- As a user working in a group, I want to select buffers before changing membership; I do not want to visit each buffer first.
+- As a user working in a group, I want every membership change to preserve files, text, modified state, point, and undo history.
+- As a user working in a group, I want a pulled or pushed buffer to remain in its existing groups unless I explicitly pop it there.
+- As a user working in a group, I want every pull, push, and pop to leave me in the group where I stand.
+- As a user working in a group, I want visible popped buffers replaced safely without switching groups.
 
 Commands and prompts MUST say **buffer** when they change membership and **file** only when they change disk state. Keybindings are mappings onto the named operations; they do not define the operations.
 
-### Return to groups as they were left
+### Preserve the receiving context
 
-- As a user, I want a group to reopen as I last validly left it.
-- As a user, I want ordinary splits and window changes to become part of that remembered state when I leave.
-- As a user, I do not want popups, peeks, or covering surfaces to overwrite remembered state.
-- As a user, I want missing buffers and invalid snapshots to heal instead of blocking entry.
-- As a user, I want a generated default for a new or unrecoverable group.
-- As a user, I want an explicit reset to that default.
-- As a user, I want layout history to remain separate for each frame.
+- As a user working in a group, I want a group to reopen as I last validly left it.
+- As a user working in a group, I want ordinary splits, window changes, and buffer switches to update the remembered snapshot whenever all visible work buffers belong to this group.
+- As a user working in a group, I do not want source browsing, previews, popups, or covering surfaces to overwrite remembered state.
+- As a user working in a group, I want missing buffers and invalid snapshots to heal instead of blocking entry.
+- As a user working in a group, I want a generated default for a new or unrecoverable group.
+- As a user working in a group, I want an explicit reset to that default.
+- As a user working in a group, I want layout history to remain separate for each frame.
 
-The remembered layout is observed state, not a manually maintained canonical template. The default layout is only an initial arrangement, an explicit reset target, or a recovery fallback.
+The remembered layout is observed state: whenever all visible work buffers belong to one group, that group's snapshot is updated, and that snapshot is what group entry restores. Mixed-group displays, source browsing, previews, popups, and covering surfaces do not update it. The default layout is only an initial arrangement, an explicit reset target, or a recovery fallback.
 
-### Work with multiple chats
+### Pull conversational context together
 
-- As a user, I want a group to contain zero, one, or many chats.
-- As a user, I want one chat to act as the default companion.
-- As a user, I want to change the primary chat without changing the group.
-- As a user, I want to create or close chats without affecting work membership.
-- As a user, I want ask and work-chat toggle commands to use the primary chat.
-- As a user, I want a clear choice when no primary chat exists.
-- As a user, I want each chat to retain its own history and identity.
+- As a user working in a group, I want a group to contain zero, one, or many chats alongside the buffers gathered there.
+- As a user working in a group, I want one chat to act as the default companion.
+- As a user working in a group, I want to change the primary chat without changing the group.
+- As a user working in a group, I want to create or close chats without affecting work membership.
+- As a user working in a group, I want ask and work-chat toggle commands to use the primary chat.
+- As a user working in a group, I want a clear choice when no primary chat exists.
+- As a user working in a group, I want each chat to retain its own history and identity.
 
-### Recover and stay safe
+### Change context safely and recoverably
 
-- As a user, I want groups, names, membership, chats, and layouts to survive restart.
-- As a user, I want old name-based groups to migrate without duplicate workspaces.
-- As a user, I want modified files protected during group kill.
-- As a user, I want partial failures to identify every surviving buffer.
-- As a user, I want concurrent frames to keep independent layouts and contexts.
-- As a user, I want delayed agent responses to follow stable group identity.
-- As a user, I want failures in one group to leave other groups unchanged.
+- As a user working in a group, I want groups, names, membership, chats, and layouts to survive restart, so sources and receiving contexts remain available.
+- As a user working in a group, I want old name-based groups to migrate without duplicate workspaces or ambiguous sources.
+- As a user working in a group, I want modified files protected during group kill.
+- As a user working in a group, I want partial pull, push, or pop failures to identify which buffers changed and which did not.
+- As a user working in a group, I want concurrent frames to keep independent layouts and receiving contexts.
+- As a user working in a group, I want delayed agent responses to follow stable group identity.
+- As a user working in a group, I want failures in one group to leave every other group unchanged.
 
 ## 2.2 Interaction model
 
-The current group is the place where the user stands. Commands either move within that place, bring work into it, send work out of it, or move the user to another place.
+The current group is the place where the user stands. Commands move within that place, pull work into it, push work to another place, pop work out of it, create a new place, or switch where the user stands.
 
 [UX-LOCUS-1] The frame context MUST be the implicit destination for ordinary open, create, and pull operations.
 
@@ -128,23 +151,31 @@ The current group is the place where the user stands. Commands either move withi
 
 [UX-LOCUS-3] Projects provide sources and annotations for work. They MUST NOT become a second frame-context system.
 
+[UX-LOCUS-4] Ordinary buffer switching MUST remain restricted to the current group, regardless of how many foreign buffers are live.
+
 ### Command roles
 
 | Operation | Meaning |
 |---|---|
-| **switch buffer** | Visit another member of the current group. |
-| **switch group** | Stand in another group and restore it as last left. |
-| **pull buffer** | Bring a selected buffer into the current group. |
-| **push buffer** | Send a selected member to another group. |
-| **peek buffer** | Temporarily display foreign work without changing membership. |
+| `group-switch-to-buffer` | Visit another member of the current group. |
+| `group-switch` | Stand in another group and restore it as last left. |
+| `group-pull-buffer` | Bring a selected buffer into the current group. |
+| `group-push-buffer` | Add selected work to any existing group or a newly created group without removing current memberships. |
+| `group-pop` | Remove one work buffer, or marked Ibuffer work buffers, from the current group without killing them. |
+| `group-new` | Create and enter an empty group. |
+| `group-new-from-buffer` | Create and enter a group seeded from the current work buffer. |
+| `group-new-from-visible` | Create and enter a group seeded from visible work buffers. |
+| `group-chat` | Select or create the current group's primary chat. |
 
 [UX-ROLE-1] Switching a buffer MUST NOT change membership.
 
 [UX-ROLE-2] Switching a group MUST NOT move the buffer from which the command was invoked.
 
-[UX-ROLE-3] Pull and push MUST NOT switch the frame context.
+[UX-ROLE-3] Pull, push, and pop MUST NOT switch the frame context.
 
-[UX-ROLE-4] Prompts MUST use the verbs **switch**, **pull**, **push**, and **peek** precisely.
+[UX-ROLE-4] Prompts MUST use the verbs **switch**, **pull**, **push**, **pop**, and **new** precisely.
+
+[UX-ROLE-5] Pop MUST mean removal from a group, never killing the buffer or changing its file.
 
 ### Default scope and universal prefix
 
@@ -152,14 +183,16 @@ An unprefixed command operates in the current group. One universal prefix expose
 
 | Command shape | Required scope |
 |---|---|
-| buffer switch | Members of the current group. |
-| prefixed buffer switch | All buffers, with foreign membership visible. |
+| `group-switch-to-buffer` | Members of the current group. |
+| `C-u group-switch-to-buffer` | All buffers, with foreign membership visible. |
 | find file | Current group; a successful visit joins it. |
 | prefixed find file | Choose a project or source, then open the file into the current group. |
-| create chat | Current group. |
-| prefixed create chat | Choose the destination group first. |
-| pull buffer | Choose a source context, then buffers. |
-| push buffer | Choose buffers here, then a destination group. |
+| `group-chat` | Select or create a chat in the current group. |
+| `C-u group-chat` | Choose the destination group first. |
+| `group-pull-buffer` | Choose from all live work buffers. |
+| `group-push-buffer` | Choose buffers here, then any existing group or **New group**. |
+| `group-pop` | Pop one buffer, or compatible marked buffers when invoked from Ibuffer. |
+| `group-new` | Choose empty, current buffer, or visible buffers as the seed. |
 
 [UX-PREFIX-1] One `C-u` MUST mean "make the implicit context explicit."
 
@@ -169,35 +202,73 @@ An unprefixed command operates in the current group. One universal prefix expose
 
 [UX-PREFIX-4] Cancelling either layer MUST leave membership, frame context, windows, layouts, and MRU unchanged.
 
-### Pull and push
+### Pull, push, pop, and move
 
 Pull expresses "bring that work here":
 
 ```text
-Choose source context -> choose one or more buffers -> pull into current group
+Choose one or more buffers from all live work buffers -> add to current group
 ```
 
-Push expresses "send this work there":
+Push expresses "make this work available there":
 
 ```text
-Choose one or more current members -> choose destination group -> push
+Choose one or more current work members -> choose any existing group or New group -> add there
 ```
 
-[UX-PULL-1] Pulling an ungrouped buffer MUST assign the current group ID.
+Pop expresses "quit that work from here":
 
-[UX-PULL-2] Pulling a foreign member MUST replace its old group ID with the current group ID.
+```text
+Choose one or more current work members -> remove current group membership
+```
 
-[UX-PULL-3] Pull MAY display the chosen buffer after success, but MUST NOT require an intermediate visit.
+Pull and push add membership and never remove an existing membership. Pop removes exactly one membership and never kills a buffer. Move is merely the explicit compound operation **push there, then pop here**.
 
-[UX-PUSH-1] Pushing MUST replace each selected member's group ID with the destination group ID.
+[UX-PULL-1] The pull palette MUST list all live work buffers directly; it MUST NOT require choosing a source group or project first.
 
-[UX-PUSH-2] Pushing MUST leave the user in the source frame context.
+[UX-PULL-2] Pulling an ungrouped work buffer MUST add the current group ID to its `group-ids` set.
 
-[UX-PUSH-3] When the pushed buffer is visible, the source layout MUST choose a live replacement without entering the destination.
+[UX-PULL-3] Pulling a work buffer from another group MUST add the current group ID without removing any existing group ID.
 
-[UX-MOVE-1] Pull and push MUST preserve file identity, text, modified state, point, and undo history.
+[UX-PULL-4] Pull MAY display the chosen buffer after success, but MUST NOT require an intermediate visit.
 
-[UX-MOVE-2] Neither operation moves or renames a file on disk.
+[UX-PUSH-1] The push destination palette MUST list every existing group and a **New group** choice.
+
+[UX-PUSH-2] Pushing MUST add the destination group ID to each selected work buffer without removing its current memberships.
+
+[UX-PUSH-3] Choosing **New group** MUST create the destination and add the selected buffers without entering it.
+
+[UX-PUSH-4] Pushing MUST leave the user in the source frame context.
+
+[UX-PUSH-5] Push MUST NOT remove or replace a visible source buffer merely because it was added elsewhere.
+
+[UX-POP-1] Popping MUST remove only the current group ID from each selected work buffer.
+
+[UX-POP-2] Popping MUST leave the user in the current frame context and preserve every other membership.
+
+[UX-POP-3] A visible popped buffer MUST be replaced safely by current-group work, a group chat, or a neutral fallback.
+
+[UX-MOVE-1] Move MUST name both the destination group to add and the source group to remove, and MUST complete the push before the pop.
+
+[UX-MOVE-2] Pull, push, pop, and move MUST preserve file identity, text, modified state, point, and undo history.
+
+[UX-MOVE-3] None of these operations moves or renames a file on disk.
+
+[UX-MOVE-4] Chats MUST NOT be pulled, pushed, popped, or moved as shared work buffers; chat ownership remains single-group.
+
+### Group creation
+
+Groups must be cheap to start so they do not accumulate unrelated work.
+
+[UX-NEW-1] The user MUST be able to create and enter an empty group.
+
+[UX-NEW-2] The user MUST be able to create and enter a group seeded with the current work buffer.
+
+[UX-NEW-3] The user MUST be able to create and enter a group seeded with all visible work buffers and the current layout.
+
+[UX-NEW-4] Seeding a group MUST add membership without silently removing existing memberships.
+
+[UX-NEW-5] Moving seeded buffers out of an old group MUST be an explicit follow-up pop.
 
 ### Minibuffer behavior
 
@@ -229,17 +300,17 @@ Group switching is one operation: choose a group and stand there.
 
 [UX-GROUP-5] The destination layer MUST offer the last-focused member, other recent members, chats, and group actions.
 
-### Foreign buffers and peeking
+### Foreign buffers
 
 A foreign buffer is not an ordinary member of the current switching pool.
 
-[UX-FOREIGN-1] Selecting a foreign buffer from a broadened search MUST make the distinction explicit.
+[UX-FOREIGN-1] A broadened search MUST make foreign and ungrouped status explicit.
 
-[UX-FOREIGN-2] The available actions MUST include **pull here**, **switch to its group**, and **peek** when valid.
+[UX-FOREIGN-2] Accepting a foreign or ungrouped buffer MUST switch the selected window to that buffer without changing any membership or the frame context.
 
-[UX-FOREIGN-3] Peek MUST preserve both group memberships and the frame context.
+[UX-FOREIGN-3] **Pull here** MUST remain an explicit, separate action when the buffer can join the current group.
 
-[UX-FOREIGN-4] A peek is a temporary detour and MUST NOT overwrite either group's remembered layout.
+[UX-FOREIGN-4] An accepted foreign-buffer switch is ordinary displayed state; snapshot updates MUST follow the same visible-group rules as any other buffer switch.
 
 ### Interaction grammar
 
@@ -273,19 +344,25 @@ A UUID is a suitable representation. Its exact representation is an implementati
 
 ### 3.2 Membership
 
-[G-MEM-1] A member MUST carry one buffer-local `group-id`.
+Work-buffer membership and chat ownership use different cardinalities.
 
-[G-MEM-2] A buffer MUST belong to zero or one group.
+[G-MEM-1] A work buffer MUST carry a buffer-local set of group IDs named `group-ids`.
 
-[G-MEM-3] The implementation MUST derive live membership from buffer tags. It MUST NOT keep another authoritative roster.
+[G-MEM-2] A work buffer MUST belong to zero, one, or many groups.
 
-[G-MEM-4] Killing a buffer MUST remove it from derived membership without a cleanup step.
+[G-MEM-3] The implementation MUST derive live work membership from `group-ids`. It MUST NOT keep another authoritative roster.
 
-[G-MEM-5] Every group chat MUST carry the same `group-id` as other members.
+[G-MEM-4] Killing a work buffer MUST remove it from every group's derived membership without a cleanup step.
+
+[G-MEM-5] A chat MUST carry exactly one buffer-local `group-id` and MUST belong to at most one group.
 
 [G-MEM-6] User interfaces MUST distinguish work members, chat members, and total members.
 
-Transient prompts and list buffers SHOULD remain ungrouped. A user MAY add other special buffers.
+[G-MEM-7] Membership sets MUST contain unique valid group IDs; adding an existing membership and removing an absent membership MUST be no-ops.
+
+[G-MEM-8] A successful pull, push, or pop MUST be visible to group switching, buffer switching, boards, and agent context on their next read; stale membership caches MUST be invalidated.
+
+Transient prompts and list buffers SHOULD remain ungrouped. A user MAY add other non-chat special buffers as work members.
 
 ### 3.3 Group record
 
@@ -326,11 +403,13 @@ Each frame stores a group ID in `current-group`.
 
 [G-FRAME-2] A detour through an ungrouped buffer MUST preserve `current-group`.
 
-[G-FRAME-3] Ordinary switching MUST exclude another group's members. A deliberate peek at a foreign member MUST preserve `current-group`.
+[G-FRAME-3] Ordinary switching MUST include buffers whose membership contains the frame context and exclude buffers that do not. A broadened switch to a foreign or ungrouped buffer MUST preserve `current-group` and every membership.
 
-[G-FRAME-4] When no frame context exists, the current buffer's valid group ID MAY initialize it.
+[G-FRAME-4] When no frame context exists and the current buffer has exactly one valid membership, that group ID MAY initialize it.
 
-[G-FRAME-5] Dissolving the frame context MUST clear `current-group`.
+[G-FRAME-5] When the current buffer has several memberships, initialization MUST require an explicit group choice.
+
+[G-FRAME-6] Dissolving the frame context MUST clear `current-group`.
 
 ```mermaid
 flowchart LR
@@ -338,7 +417,8 @@ flowchart LR
   W --> A[Work member]
   W --> C1[Chat A]
   W --> C2[Chat B]
-  A -. group-id .-> R[(Group record)]
+  A -. group-ids .-> R[(Current group record)]
+  A -. group-ids .-> O[(Other group record)]
   C1 -. group-id .-> R
   C2 -. group-id .-> R
   R --> N[group-name]
@@ -359,7 +439,7 @@ flowchart LR
 
 [G-NAME-5] Names MAY contain spaces. Prompts and rows MUST display them without ambiguity.
 
-[G-NAME-6] A name change MUST NOT change the group ID or any membership tag.
+[G-NAME-6] A name change MUST NOT change the group ID, any work-membership set, or any chat-owner tag.
 
 [G-NAME-7] A project-name collision MUST join the existing group or report a conflict.
 
@@ -375,63 +455,99 @@ Success MUST create or reuse the group record. It MUST preserve metadata and exi
 
 Failure MUST report the reason and leave no partial group.
 
-### 5.2 Pull and push
+### 5.2 Pull, push, and pop
 
-Pull and push are the two directional forms of membership change.
+Pull, push, and pop are the primitive work-membership operations.
 
-[G-PULL-1] Pulling an existing member of the current group MUST be a no-op.
+- Pull means "bring that buffer into the group where I stand."
+- Push means "make this buffer available in any chosen existing group or a newly created group."
+- Pop means "quit this buffer from the group where I stand." It is the conceptual push to no group.
 
-[G-PULL-2] Pulling an ungrouped buffer MUST set its `group-id` to the frame context.
+[G-PULL-1] Pull MUST enumerate all live work buffers directly, including current-group, foreign, and ungrouped buffers.
 
-[G-PULL-3] Pulling a foreign member MUST replace its old tag with the frame context ID.
+[G-PULL-2] Pulling a work member already in the current group MUST be a no-op.
 
-[G-PULL-4] Pull MUST resolve the destination from the invoking frame, not from the selected buffer.
+[G-PULL-3] Pulling an ungrouped work buffer MUST add the frame context ID to its `group-ids` set.
 
-[G-PUSH-1] Push MUST require an explicit destination group.
+[G-PULL-4] Pulling a work buffer from another group MUST add the frame context ID without removing existing memberships.
 
-[G-PUSH-2] Pushing MUST replace the selected member's old tag with the destination group ID.
+[G-PULL-5] Pull MUST resolve the destination from the invoking frame, not from the selected buffer.
 
-[G-PUSH-3] Push MUST preserve the invoking frame context.
+[G-PUSH-1] Push MUST present every existing group and a **New group** choice as possible destinations.
 
-[G-PUSH-4] Pull and push MUST support marked buffers as one transaction.
+[G-PUSH-2] Choosing **New group** MUST create a destination record without entering it, then add the selected buffers only after creation succeeds.
 
-[G-MOVE-1] Pull and push MUST preserve text, file identity, modified state, point, and undo history.
+[G-PUSH-3] Pushing MUST add the destination group ID to each selected work buffer's `group-ids` set without removing existing memberships.
 
-[G-MOVE-2] Failed destination-record creation MUST leave every old membership authoritative.
+[G-PUSH-4] Push MUST preserve the invoking frame context and every source membership.
 
-[G-MOVE-3] Membership changes MUST NOT move or rename files on disk.
+[G-POP-1] Pop MUST remove only the invoking frame's group ID from each selected work buffer's `group-ids` set.
 
-### 5.3 Remove
+[G-POP-2] Pop MUST preserve the buffer, its contents, and every other group membership.
 
-[G-REMOVE-1] Remove MUST clear only the selected buffer's `group-id` tag.
+[G-POP-3] Popping an absent membership MUST be a no-op.
 
-[G-REMOVE-2] Remove MUST preserve the buffer and its contents.
+[G-POP-4] Popping the last work member MUST preserve the group record and any chat members.
 
-[G-REMOVE-3] Removing the last work member MUST preserve the group record and any chat members.
+[G-POP-5] If a popped buffer is visible in the current group, the command MUST replace it safely with another current-group member, the primary chat, or a neutral fallback. It MUST NOT switch the frame context.
 
-[G-REMOVE-4] Removing a chat MUST NOT remove the group record or other chats.
+[G-POP-6] Outside Ibuffer, `group-pop` MUST operate on exactly one explicitly supplied buffer, defaulting to the current buffer.
 
-### 5.4 Found from current windows
+[G-POP-7] In Ibuffer, `group-pop` MUST operate on all compatible marked buffers when marks exist; otherwise it MUST operate on the buffer at point.
 
-`group-found-from-windows(NAME)` forms one group from visible buffers.
+[G-MEMOP-1] Pull and push MUST support marked work buffers as one transaction. `group-pop` MUST treat marked Ibuffer work buffers as one transaction.
 
-[G-FOUND-1] The command MUST capture the layout before it changes tags or windows.
+[G-MEMOP-2] Pull, push, and pop MUST preserve text, file identity, modified state, point, and undo history.
 
-[G-FOUND-2] It MUST exclude minibuffers and transient prompt buffers.
+[G-MEMOP-3] Membership operations MUST NOT move or rename files on disk.
 
-[G-FOUND-3] It MUST warn before moving buffers from existing groups.
+[G-MEMOP-4] These operations MUST reject chat buffers and direct the user to chat-specific actions.
 
-[G-FOUND-4] Cancellation MUST preserve tags, layouts, frame state, and MRU state.
+Removing a chat from its owning group is a chat-specific operation: it clears only the chat's single `group-id` and does not affect the record or other chats.
 
-[G-FOUND-5] Success MUST enter the new group and save the captured layout.
+### 5.3 Move as composition
+
+Move is not a fourth primitive. It is an explicit push followed by a pop.
+
+[G-MOVE-1] A move MUST name both the destination group to push to and the source group to pop from.
+
+[G-MOVE-2] A move MUST add every selected work buffer to the destination before removing the named source membership.
+
+[G-MOVE-3] If destination creation or any push fails, no source membership may be popped.
+
+[G-MOVE-4] A move MUST obey the preservation and visible-buffer rules of its component push and pop operations.
+
+### 5.4 Create a group
+
+Group creation has three explicit entry points:
+
+- `group-new(NAME)` creates and enters an empty receiving context;
+- `group-new-from-buffer(NAME, BUFFER)` creates and enters a group containing one work buffer;
+- `group-new-from-visible(NAME)` creates and enters a group containing the visible work buffers and their captured layout.
+
+"Create" or "new" is the user-facing verb. Implementations MUST NOT expose "found" as the creation verb.
+
+[G-NEW-1] Every creation path MUST create or explicitly reuse one group record before changing membership.
+
+[G-NEW-2] Creating from a buffer MUST add the new group ID without removing any existing membership.
+
+[G-NEW-3] Creating from visible buffers MUST capture the layout before changing membership, and MUST exclude minibuffers, transient prompt buffers, and chats owned by another group.
+
+[G-NEW-4] Creating from visible buffers MUST add the new group ID to each included work buffer without removing existing memberships.
+
+[G-NEW-5] Success MUST enter the new group. Empty creation MUST build its default layout; buffer creation MUST focus that buffer; visible creation MUST restore the captured layout.
+
+[G-NEW-6] Cancellation or failure MUST preserve memberships, chat ownership, windows, layouts, frame state, and MRU state.
+
+[G-NEW-7] A request to move the current or visible buffers into a new group MUST be expressed as successful creation and push followed by an explicit pop from a named old group.
 
 ### 5.5 Open a file
 
-[G-FILE-1] A successful visit from grouped work MUST join the file to the frame context.
+[G-FILE-1] A successful visit from grouped work MUST pull the file buffer into the frame context.
 
-[G-FILE-2] A failed visit MUST NOT create a tag.
+[G-FILE-2] A failed visit MUST NOT create a membership.
 
-[G-FILE-3] A visit from ungrouped work MUST remain ungrouped unless the user selects a group.
+[G-FILE-3] A visit from ungrouped work MUST remain ungrouped unless the user selects or creates a group.
 
 [G-FILE-4] An external file rename or deletion MUST NOT remove membership.
 
@@ -451,27 +567,29 @@ Buffer switching and group switching are different movements. Buffer switching m
 
 [G-SWITCH-5] The current group's last-focused member MUST update after an accepted switch.
 
+[G-SWITCH-6] Candidate enumeration for ordinary switching SHOULD scale with current-group membership, not total live buffer count.
+
 When no frame context exists, the ordinary switcher MAY use ungrouped buffers and the current project as fallbacks. It MUST make that fallback scope visible.
 
 ### 6.2 Broadened switching
 
 A prefixed switch MAY search all buffers, groups, projects, and chats.
 
-| Selection | Required choices |
+| Selection | Behavior |
 |---|---|
 | current-group member | Switch here. |
-| foreign member | Pull here, switch to its group, or peek. |
-| ungrouped buffer | Pull here or peek. |
+| foreign buffer | Switch here; offer pull here and switch group as separate actions. |
+| ungrouped buffer | Switch here; offer pull here as a separate action. |
 | group | Switch group. |
 | project | Inspect or choose a file to pull into the current group. |
 
-[G-BROAD-1] A foreign selection MUST NOT silently become a permanent mixed-group window.
+[G-BROAD-1] Accepting a foreign or ungrouped buffer MUST replace only the selected window's buffer and MUST NOT change membership or `current-group`.
 
 [G-BROAD-2] The palette MUST display each candidate's group or ungrouped status.
 
 [G-BROAD-3] Pulling from the broadened switcher MUST complete as one membership transaction.
 
-[G-BROAD-4] Switching to the foreign buffer's group MUST save and restore layouts as one context switch.
+[G-BROAD-4] When a foreign buffer belongs to several groups, switching to its group MUST require choosing one; the switch MUST save and restore layouts as one context switch.
 
 ### 6.3 Group switching
 
@@ -507,16 +625,18 @@ A group-name match MUST return its group entry. A broadened search MAY also retu
 
 [G-PREVIEW-6] Reentry MUST replace the earlier preview transaction rather than stack restoration records.
 
-[G-PREVIEW-7] Previewing foreign work MUST be visibly identified as a peek.
-
 ```mermaid
 stateDiagram-v2
   [*] --> CurrentGroup
   CurrentGroup --> CurrentGroup: switch member
-  CurrentGroup --> Pull: choose foreign buffer
+  CurrentGroup --> ForeignDisplay: switch foreign buffer
+  ForeignDisplay --> CurrentGroup: switch current-group member
+  CurrentGroup --> Pull: pull foreign buffer
   Pull --> CurrentGroup: retag and accept
-  CurrentGroup --> Peek: preview foreign buffer
-  Peek --> CurrentGroup: cancel
+  CurrentGroup --> Pop: choose member to pop
+  Pop --> CurrentGroup: untag and replace if visible
+  CurrentGroup --> Preview: preview candidate
+  Preview --> CurrentGroup: cancel
   CurrentGroup --> SaveOutgoing: switch group
   SaveOutgoing --> RestoreIncoming
   RestoreIncoming --> OtherGroup
@@ -536,11 +656,9 @@ A snapshot contains the window tree, split ratios, displayed buffers, point, and
 
 ### 7.2 Save rules
 
-The implementation MUST save a group layout:
+The implementation MUST update a group's remembered snapshot whenever all visible work buffers in the frame belong to that group. This includes ordinary splits, window changes, buffer switches, and other layout changes while the group is homogeneous.
 
-1. when the switcher opens from a visible group;
-2. before a context switch leaves a visible group;
-3. before a covering surface replaces a visible group pane.
+It MUST NOT update a group's snapshot when the visible frame is empty or contains buffers from multiple groups. Before a context switch or covering surface changes a homogeneous group display, the current snapshot MUST already represent that visible arrangement.
 
 [G-SAVE-1] A full-frame detour MUST NOT overwrite the saved layout.
 
@@ -610,9 +728,10 @@ The board is a management and relationship view, not a competing navigation syst
 |---|---|
 | `RET` | Stand in the group and restore it as last left. |
 | `TAB` | Expand or collapse members and chats without entering. |
-| `SPC` | Mark a compatible group or expanded buffer row. |
+| `SPC` | Mark or unmark a compatible group or expanded buffer row. |
 | action: **Pull here** | Pull marked buffer rows into the current group. |
-| action: **Push to group** | Push marked current-group buffer rows to a chosen destination. |
+| action: **Push to group** | Push marked current-group buffer rows to any existing group or a newly created group. |
+| action: **New group** | Create an empty group, or create one from compatible marked buffer rows. |
 | `d` | Generate one-line metadata. |
 | `n` | Cycle noise. |
 | `x` | Dissolve the group. |
@@ -633,6 +752,8 @@ The board is a management and relationship view, not a competing navigation syst
 
 [G-BOARD-7] A project relationship is annotation and a source of files; accepting a project MUST NOT silently create or enter a group.
 
+[G-BOARD-8] Group creation MUST make the choice between an empty group and a group from selected buffers explicit.
+
 ### 9.1 Describe
 
 [G-DESC-1] Describe MUST use current membership and existing metadata.
@@ -645,13 +766,13 @@ The board is a management and relationship view, not a competing navigation syst
 
 ### 9.2 Dissolve
 
-[G-DISSOLVE-1] Dissolve MUST clear the `group-id` tag from every live member.
+[G-DISSOLVE-1] Dissolve MUST remove the dissolved group ID from every live work member's `group-ids` set while preserving their other memberships.
 
 [G-DISSOLVE-2] It MUST preserve text, files, modified state, points, and undo history.
 
 [G-DISSOLVE-3] It MUST clear matching frame contexts.
 
-[G-DISSOLVE-4] Every retained chat MUST lose its `group-id`. The group record MUST be retired.
+[G-DISSOLVE-4] Every retained chat owned by the group MUST lose its single `group-id`. The group record MUST be retired.
 
 [G-DISSOLVE-5] Repeating dissolve MUST be safe.
 
@@ -670,6 +791,7 @@ The board is a management and relationship view, not a competing navigation syst
 [G-KILL-6] The command MUST NOT report full success while a member survives.
 
 [G-KILL-7] Full success MUST retire the group record and clear matching frame contexts.
+
 ## 10. Rename
 
 Rename changes `group-name` on one group record. The `group-id` remains unchanged.
@@ -682,7 +804,7 @@ It performs these steps:
 4. Update `group-name`.
 5. Refresh name-based indexes and visible rows.
 
-[G-RENAME-1] Rename MUST NOT change member tags, frame contexts, MRU identities, layouts, chat identities, or agent lanes.
+[G-RENAME-1] Rename MUST NOT change work-membership sets, chat-owner tags, frame contexts, MRU identities, layouts, chat identities, or agent lanes.
 
 [G-RENAME-2] Failure MUST preserve the previous name.
 
@@ -694,7 +816,7 @@ It performs these steps:
 
 ## 11. Persistence and recovery
 
-Desktop persistence includes group records, member `group-id` tags, and independent chat identity.
+Desktop persistence includes group records, work-buffer `group-ids` sets, chat `group-id` ownership, and independent chat identity.
 
 Rendered rows, overlays, cached membership, and live tasks MUST NOT persist as identity state.
 
@@ -702,44 +824,46 @@ Rendered rows, overlays, cached membership, and live tasks MUST NOT persist as i
 
 [G-PERSIST-2] Supported non-file buffers MUST restore text, point, and identity locals.
 
-[G-PERSIST-3] Chat reset MUST preserve its chat identity and `group-id`.
+[G-PERSIST-3] Chat reset MUST preserve its chat identity and single `group-id`.
 
-[G-PERSIST-4] Restart MUST NOT duplicate records, chats, MRU entries, or agent lanes.
+[G-PERSIST-4] Restart MUST NOT duplicate records, memberships, chats, MRU entries, or agent lanes.
 
 [G-PERSIST-5] One malformed group MUST NOT abort the desktop restore.
 
-[G-PERSIST-6] Queries MUST tolerate member tags before records and records before members.
+[G-PERSIST-6] Queries MUST tolerate membership tags before records and records before members.
 
 Restore MUST perform deterministic repair:
 
 - normalize invalid noise to `quiet`;
 - select one record for each duplicated group ID;
+- deduplicate and validate every work buffer's `group-ids` set;
 - avoid merging ambiguous layouts;
-- retain valid membership when record state is missing;
+- retain valid memberships when record state is missing;
+- retain at most one owning group for each chat;
 - quarantine or report invalid names;
 - reject malformed snapshots;
 - tolerate missing or inaccessible files;
 - rebuild board and switcher state.
 
 An orphaned group record MAY remain until cleanup. Cleanup MUST report why it discards durable state.
+
 ### 11.1 Migration from name identity
 
-Older desktop data MAY store a group name in `group` instead of a stable ID.
+Older desktop data MAY store one group name in `group` instead of stable membership IDs.
 
 [G-MIGRATE-1] Restore MUST generate one group ID for each distinct valid legacy name.
 
 [G-MIGRATE-2] Restore MUST create one group record for that ID and name.
 
-[G-MIGRATE-3] Restore MUST replace all matching legacy member tags with the generated ID.
+[G-MIGRATE-3] Restore MUST migrate each legacy work-buffer tag to a singleton `group-ids` set containing the generated ID.
 
 [G-MIGRATE-4] Restore MUST migrate layout, metadata, and noise into the record.
 
-[G-MIGRATE-5] Restore MUST keep every legacy chat as an independent chat member.
+[G-MIGRATE-5] Restore MUST keep every legacy chat as an independently identified, single-group-owned chat member.
 
 [G-MIGRATE-6] Restore MAY select the most recent legacy chat as `primary-chat-id`.
 
 [G-MIGRATE-7] Migration MUST be idempotent across interrupted restores.
-
 
 ## 12. Multiple frames and concurrency
 
@@ -780,7 +904,7 @@ Older desktop data MAY store a group name in `group` instead of a stable ID.
 
 [G-AGENT-3] The prompt SHOULD include paths, projects, mode instructions, and metadata.
 
-[G-AGENT-4] Moving a buffer MUST affect future group work only.
+[G-AGENT-4] Pulling, pushing, or popping a buffer MUST affect future group work only.
 
 [G-AGENT-5] Running work MUST finish in its original lane or receive explicit cancellation.
 
@@ -798,21 +922,22 @@ Older desktop data MAY store a group name in `group` instead of a stable ID.
 | Duplicate name | Join explicitly or report a conflict. |
 | Group name equals a buffer name | Keep separate group and buffer entries. |
 | Any chat dies while work survives | Keep the record, membership, and other chats. |
-| Last work member leaves | Keep the record and chats. Show the primary chat when available. |
+| Last work member is popped | Keep the record and chats. Show the primary chat when available. |
 | Last member leaves | Keep the record until explicit dissolve, kill, or cleanup. |
-| Current buffer is ungrouped | Preserve the frame context. |
-| Plain switch shows another group | Preserve the frame context and layout. |
+| Current buffer has no current-group membership | Preserve the frame context. |
+| Popped buffer remains visible | Replace it with a live current-group member, primary chat, or neutral fallback without switching groups. |
+| A broadened switch shows a buffer outside the current group | Preserve membership and frame context; apply the ordinary visible-group snapshot rules. |
 | Context has no visible member | Do not save its remembered layout. |
-| Snapshot has some dead buffers | Replace or collapse invalid windows. |
+| Snapshot has some dead or popped buffers | Replace or collapse invalid windows. |
 | Snapshot has no live member | Build and save the default layout. |
 | Snapshot has different dimensions | Restore best effort, then save healed state. |
 | Preview candidate dies | Cancel to a live fallback. |
 | Switcher is reentered | Replace the first preview transaction safely. |
-| Project file has no group | Offer project group creation. |
+| Project file has no group | Offer explicit group creation; do not create one merely by entering the project. |
 | Non-project buffer has no group | Use a plain switch and explain the result. |
 | File is deleted externally | Keep membership and report file errors separately. |
 | Buffer dies during board refresh | Recompute and continue. |
-| Modified file during dissolve | Clear only the tag. |
+| Shared modified file during dissolve | Remove only the dissolved group ID; preserve the buffer and other memberships. |
 | Modified file during kill | Preserve unless standard confirmation allows loss. |
 | Kill leaves survivors | Report partial completion and reasons. |
 | Rename fails | Preserve the old name and stable group ID. |
@@ -824,22 +949,25 @@ Older desktop data MAY store a group name in `group` instead of a stable ID.
 | Unknown noise | Normalize to `quiet`. |
 | Malformed layout | Reject it without aborting group entry. |
 | Group spans projects | Preserve the group. Project remains an annotation. |
-| User cancels founding | Preserve tags, windows, MRU, and context. |
+| User cancels group creation | Preserve membership sets, chat-owner tags, windows, MRU, and context. |
+| Push fails during a requested move | Do not pop the source membership. |
 
 ## 15. Invariants
 
-1. Every live buffer has zero or one `group-id` tag.
-2. Every reported member is live and has the matching tag.
-3. Every repaired group ID has exactly one durable group record.
-4. A plain buffer switch changes one displayed buffer only.
-5. A context switch saves the visible source and restores or heals the destination.
-6. A detour cannot overwrite a saved layout.
-7. One context switch creates one group MRU entry and one winner undo step.
-8. No group command silently discards modified file content.
-9. Join, ensure-record, refresh, remove, dissolve, and restore tolerate repetition.
-10. Membership lists, counts, and prompts derive from live buffers. Group rows derive from records.
-11. Identity survives restart. Runtime and rendered state rebuild after restart.
-12. Failure in one group does not corrupt another group.
+1. Every live work buffer has a unique set of zero or more valid group IDs.
+2. Every live chat has zero or one owning group ID.
+3. Every reported member is live and its work-membership set or chat-owner tag contains the matching group ID.
+4. Every repaired group ID has exactly one durable group record.
+5. A plain buffer switch changes one displayed buffer only and searches only the current group.
+6. Pull adds the current group, push adds an explicitly chosen group, and pop removes the current group; none has a hidden removal or context switch.
+7. Whenever all visible work buffers belong to one group, that group's snapshot is updated; a context switch restores or heals the destination snapshot.
+8. A detour cannot overwrite a saved layout.
+9. One context switch creates one group MRU entry and one winner undo step.
+10. No group command silently discards modified file content.
+11. Pull, push, pop, ensure-record, refresh, dissolve, and restore tolerate repetition.
+12. Membership lists, counts, and prompts derive from live buffers. Group rows derive from records.
+13. Identity survives restart. Runtime and rendered state rebuild after restart.
+14. Failure in one group does not corrupt another group.
 
 ## 16. Acceptance tests
 
@@ -847,8 +975,8 @@ Each requirement ID MUST map to a focused test or an explicit integration-test g
 
 Tests MUST inspect state, not only rendered windows. Relevant assertions include:
 
-- buffer-local tags;
-- group ID, record fields, and member tags;
+- work-buffer membership sets and chat-owner tags;
+- group ID, record fields, and derived members;
 - frame context;
 - selected window and buffer;
 - tree, point, and scroll;
@@ -861,57 +989,65 @@ Tests MUST inspect state, not only rendered windows. Relevant assertions include
 
 The minimum scenario set is:
 
-1. Found, pull, repeat pull, push, remove, and repeat remove.
-2. Ordinary current-group buffer switching and `C-u` broadened switching.
-3. Foreign-buffer choices: pull here, switch to its group, peek, and cancel.
-4. Group selection followed by immediate entry and by a second-layer destination.
-5. Project selection as a file source without creating a competing frame context.
-6. Accept and cancel after several previews.
-7. Cancel after the preview candidate dies.
-8. Valid, partial, stale, malformed, and cross-size layout restore.
-9. Automatic save-on-leave, popup exclusion, peek exclusion, and explicit reset to default.
-10. Scratch, help, popup, and full-frame detours.
-11. All noise values, invalid noise, cycling, and restart.
-12. Dissolve with clean, modified file, and modified non-file buffers.
-13. Kill with success, cancellation, and survivors.
-14. Rename success, collision, injected failure, and active work.
-15. Missing, duplicate, and orphan records, plus interrupted restore.
-16. Two-frame entry, concurrent saves, and duplicate creation.
-17. Board expansion and refresh while buffers and groups disappear.
-18. Pull and push of marked board or palette rows as a single transaction.
-19. Describe success, failure, rename, and stale response.
-20. Restart with files, non-file buffers, chats, layouts, and MRU.
-21. Zero, one, and many chats, including primary-chat reassignment.
-22. Legacy name-based migration, including interrupted migration.
-23. Case-insensitive matching across candidate text and rendered marginalia.
-24. `C-u` cancellation at either layer with no membership, layout, MRU, or frame-context change.
+1. Create an empty group, create one from the current buffer, and create one from visible buffers; cancel each creation path and verify no state change.
+2. Pull from a palette containing current-group, foreign, and ungrouped buffers; repeat pull; push to an existing group; push to **New group** without entering it; repeat push; pop; and repeat pop.
+3. Compose a move as push followed by pop, and verify a failed push prevents the pop.
+4. Pull a work buffer from group A into group B, switch to each group, and verify the same live buffer remains available in both.
+5. Pop a visible buffer from the current group and verify a safe replacement without a context switch.
+6. Ordinary current-group buffer switching with hundreds of live foreign buffers, and `C-u` broadened switching.
+7. Broadened switching to foreign and ungrouped buffers; verify that acceptance changes one window only and preserves membership and frame context.
+8. Group selection followed by immediate entry and by a second-layer destination.
+9. Project selection as a file source without creating a competing frame context.
+10. Accept and cancel after several previews, including after the preview candidate dies.
+11. Valid, partial, stale, malformed, and cross-size layout restore.
+12. Snapshot updates whenever all visible work buffers belong to one group, including after a broadened switch; mixed-group displays, popup exclusion, and explicit reset to default.
+13. Scratch, help, popup, and full-frame detours.
+14. All noise values, invalid noise, cycling, and restart.
+15. Dissolve with a shared clean buffer, shared modified file, and shared modified non-file buffer; preserve other memberships.
+16. Kill with success, cancellation, and survivors.
+17. Rename success, collision, injected failure, and active work.
+18. Missing, duplicate, and orphan records, plus interrupted restore.
+19. Two-frame entry, concurrent saves, and duplicate creation.
+20. Board expansion and refresh while buffers and groups disappear.
+21. Pull and push marked board or palette rows as single transactions; verify push offers every existing group and **New group**. Invoke `group-pop` on one buffer and on multiple marked Ibuffer rows.
+22. Describe success, failure, rename, and stale response.
+23. Restart with files, multi-group work buffers, non-file buffers, chats, layouts, and MRU.
+24. Zero, one, and many chats, including primary-chat reassignment and rejection of shared chat membership.
+25. Legacy name-based migration, including interrupted migration.
+26. Case-insensitive matching across candidate text and rendered marginalia.
+27. `C-u` cancellation at either layer with no membership, layout, MRU, or frame-context change.
 
 Key-driven tests MUST dispatch the real key sequence through the editor key dispatcher.
+
 ## 17. Reference command surface
 
-The interaction model has four primary verbs. Bindings expose those verbs; they do not redefine them.
+The interaction model has the primary navigation verb **switch** and the primary membership verbs **pull**, **push**, and **pop**. Bindings expose those verbs; they do not redefine them.
 
-| Intent | Reference binding | Operation |
+| Intent | Reference binding | Command / operation |
 |---|---|---|
-| Move within the current group | `C-x b` | List current-group buffers and chats, using the existing case-insensitive candidate-plus-marginalia matcher. |
-| Broaden the current buffer search | `C-u C-x b` | Include foreign and ungrouped buffers; accepting one requires **pull here**, **switch to its group**, or **peek**. |
-| Stand in another group | `C-x g` | Choose a group, then optionally choose a destination within it. Immediate acceptance restores the group as last left. |
+| Move within the current group | `C-x b` | `group-switch-to-buffer`: list only current-group buffers and chats, using the existing case-insensitive candidate-plus-marginalia matcher. |
+| Broaden the current buffer search | `C-u C-x b` | `C-u group-switch-to-buffer`: include foreign and ungrouped buffers; accepting one switches the selected window without changing membership or frame context. |
+| Stand in another group | `C-x g` | `group-switch`: choose a group, then optionally choose a destination within it. Immediate acceptance restores the group as last left. |
 | Navigate a project as a source | `C-x p p` | Choose a project, then a file or open buffer; visiting it from grouped work pulls it into the current group. |
 | Find a file here | `C-x C-f` | Visit a file and join it to the current group after a successful open. |
 | Choose a source, then find a file here | `C-u C-x C-f` | Choose a project or other file source, then open the result into the current group. |
-| Pull selected work here | command action: **Pull buffer here** | Choose a source and one or more buffers without visiting them first. |
-| Push selected work away | command action: **Push buffer to group** | Choose one or more current members, then the destination group. |
-| Toggle work and companion | `C-c w` | Toggle between grouped work and the primary chat. |
+| Pull selected work here | command action | `group-pull-buffer`: choose directly from all live work buffers without visiting them first. |
+| Push selected work away | command action | `group-push-buffer`: choose current members, then any existing group or **New group**. |
+| Pop work from here | direct command / Ibuffer action | `group-pop`: pop one buffer, or all compatible marked Ibuffer buffers, while preserving every other membership. |
+| Start an empty group | command action | `group-new`: create and enter an empty receiving context. |
+| Start a group with this buffer | command action | `group-new-from-buffer`: create and enter a group containing the current work buffer. |
+| Start a group from the layout | command action | `group-new-from-visible`: create and enter a group containing the visible work buffers and the captured layout. |
+| Toggle work and companion | `C-c w` | `group-chat`: select the primary chat, or create one when none exists. |
 | Ask the group companion | `C-c q` | Ask the primary chat without leaving the work buffer. |
 | Walk layout history | `C-c <left>` / `C-c <right>` | Undo or redo frame-local layout changes. |
 
-[UX-KEY-1] `C-x b` MUST remain the fast path for movement inside the current group. It MUST NOT become an everything palette in its unprefixed form.
+[UX-KEY-1] `C-x b` MUST remain the fast path for movement inside the current group, even when hundreds of buffers are live. It MUST NOT become an everything palette in its unprefixed form.
 
 [UX-KEY-2] `C-u` MUST broaden or expose the implicit context while preserving the command's verb.
 
 [UX-KEY-3] `C-x g` MUST mean group navigation: choose the place where the user will stand. It MUST NOT change the invoking buffer's membership.
 
-[UX-KEY-4] Pull and push MUST be available as actions on buffer candidates and marked buffers in every applicable list surface.
+[UX-KEY-4] Pull and push MUST be available on applicable buffer candidates and marked-buffer surfaces. `group-pop` MUST operate on one buffer directly and on multiple marked buffers in Ibuffer.
 
 [UX-KEY-5] No binding named only "group" may silently combine navigation and membership mutation.
 
@@ -919,9 +1055,10 @@ The interaction model has four primary verbs. Bindings expose those verbs; they 
 
 [UX-KEY-7] Dedicated shortcuts such as a groups board binding MAY exist, but the complete workflow MUST remain discoverable from the primary switch, group-navigation, and candidate-action surfaces.
 
-Expected operations include `group-switch`, `group-pull-buffer`, `group-push-buffer`, `group-peek-buffer`, `group-remove-buffer`, `group-chat`, `group-describe`, `group-noise-cycle`, `group-dissolve`, `group-kill`, and `group-rename`.
+Expected operations include `group-switch-to-buffer`, `group-switch`, `group-new`, `group-new-from-buffer`, `group-new-from-visible`, `group-pull-buffer`, `group-push-buffer`, `group-pop`, `group-chat`, `group-describe`, `group-noise-cycle`, `group-dissolve`, `group-kill`, and `group-rename`.
 
-Names and bindings MAY change after usability testing. The verbs, scopes, cancellation behavior, and observable state transitions are normative.
+Bindings MAY change after usability testing. The `group-*` command names, verbs, scopes, cancellation behavior, and observable state transitions are normative.
+
 ## 18. Presentation
 
 The switcher uses the shared centered candidate palette. Plain line input remains in the bottom bar.

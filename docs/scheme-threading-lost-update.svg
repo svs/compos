@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 560" role="img" aria-labelledby="title desc">
+  <title id="title">Two serial lanes lose an update</title>
+  <desc id="desc">Both lanes read counter zero, compute one, and write one. The final counter is one instead of two.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2d3e72"/>
+    </marker>
+    <style>
+      .label{font:600 18px system-ui,sans-serif;fill:#1b1a17}
+      .detail{font:14px ui-monospace,monospace;fill:#625d53}
+      .lane{font:700 16px system-ui,sans-serif;fill:#2d3e72}
+      .arrow{fill:none;stroke:#2d3e72;stroke-width:3;marker-end:url(#arrow)}
+      .arrow-label{font:13px system-ui,sans-serif;fill:#625d53}
+      .node{stroke-width:2}
+    </style>
+  </defs>
+
+  <text class="lane" x="280" y="56">LANE A — SERIAL</text>
+  <text class="lane" x="280" y="286">LANE B — SERIAL</text>
+  <line x1="280" y1="70" x2="960" y2="70" stroke="#d1c9b8"/>
+  <line x1="280" y1="300" x2="960" y2="300" stroke="#d1c9b8"/>
+
+  <rect class="node" x="35" y="205" width="190" height="120" rx="18" fill="#ece8f5" stroke="#5f4e87"/>
+  <text class="label" x="130" y="248" text-anchor="middle">Shared counter</text>
+  <text class="detail" x="130" y="282" text-anchor="middle">initial = 0</text>
+
+  <rect class="node" x="280" y="95" width="190" height="105" rx="14" fill="#e1e8f6" stroke="#2d3e72"/>
+  <text class="label" x="375" y="137" text-anchor="middle">Read 0</text>
+  <text class="detail" x="375" y="169" text-anchor="middle">t0</text>
+
+  <rect class="node" x="530" y="95" width="190" height="105" rx="14" fill="#e1e8f6" stroke="#2d3e72"/>
+  <text class="label" x="625" y="137" text-anchor="middle">Compute 1</text>
+  <text class="detail" x="625" y="169" text-anchor="middle">0 + 1</text>
+
+  <rect class="node" x="780" y="95" width="190" height="105" rx="14" fill="#cbd8f0" stroke="#2d3e72"/>
+  <text class="label" x="875" y="137" text-anchor="middle">Write 1</text>
+  <text class="detail" x="875" y="169" text-anchor="middle">t2</text>
+
+  <rect class="node" x="280" y="325" width="190" height="105" rx="14" fill="#f5ecd5" stroke="#805e18"/>
+  <text class="label" x="375" y="367" text-anchor="middle">Read 0</text>
+  <text class="detail" x="375" y="399" text-anchor="middle">t1</text>
+
+  <rect class="node" x="530" y="325" width="190" height="105" rx="14" fill="#f5ecd5" stroke="#805e18"/>
+  <text class="label" x="625" y="367" text-anchor="middle">Compute 1</text>
+  <text class="detail" x="625" y="399" text-anchor="middle">0 + 1</text>
+
+  <rect class="node" x="780" y="325" width="190" height="105" rx="14" fill="#ecd9ad" stroke="#805e18"/>
+  <text class="label" x="875" y="367" text-anchor="middle">Write 1</text>
+  <text class="detail" x="875" y="399" text-anchor="middle">t3</text>
+
+  <rect class="node" x="1040" y="205" width="205" height="120" rx="18" fill="#f6e5e1" stroke="#9a382d"/>
+  <text class="label" x="1142" y="247" text-anchor="middle">Shared counter</text>
+  <text class="detail" x="1142" y="279" text-anchor="middle">final = 1</text>
+  <text x="1142" y="352" text-anchor="middle" font-family="system-ui,sans-serif" font-size="15" font-weight="700" fill="#9a382d">Expected 2 — one update is lost</text>
+
+  <path class="arrow" d="M225 245 C245 195 255 160 280 150"/>
+  <path class="arrow" d="M225 285 C245 335 255 370 280 378"/>
+  <path class="arrow" d="M470 148 L530 148"/>
+  <path class="arrow" d="M720 148 L780 148"/>
+  <path class="arrow" d="M470 378 L530 378"/>
+  <path class="arrow" d="M720 378 L780 378"/>
+  <path class="arrow" d="M970 148 C1005 165 1015 210 1040 240"/>
+  <path class="arrow" d="M970 378 C1005 360 1015 315 1040 290"/>
+
+  <text class="arrow-label" x="983" y="174">stores 1</text>
+  <text class="arrow-label" x="973" y="370">overwrites with 1</text>
+</svg>

@@ -507,12 +507,12 @@ defmodule Aimax.Core.Session do
       |> Path.join("*.scm")
       |> Path.wildcard()
       # load order: custom.scm (defcustom), then tools.scm (define-tool!),
-      # then recipes.scm (defrecipe!) and components.scm (defcomponent) —
-      # packages call these forms at load time, so the form must exist
-      # first; the rest load alphabetically
+      # then recipes.scm (defrecipe!), components.scm (defcomponent) and
+      # preview.scm (on-preview-link!) — packages call these forms at load
+      # time, so the form must exist first; the rest load alphabetically
       |> Enum.sort_by(
         &{Enum.find_index(
-           ["custom.scm", "tools.scm", "recipes.scm", "components.scm"],
+           ["custom.scm", "tools.scm", "recipes.scm", "components.scm", "preview.scm"],
            fn n -> n == Path.basename(&1) end
          ) || 99, &1}
       )

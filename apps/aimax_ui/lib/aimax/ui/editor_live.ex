@@ -257,6 +257,32 @@ defmodule Aimax.Ui.EditorLive do
   defp dir_arg(d) when d in [-1, 0, 1], do: d
   defp dir_arg(_), do: 0
 
+  # a click on a link in a rendered page. The frame never follows the link
+  # itself: the href comes here and Scheme says what it means (a help page's
+  # source link, a URL for the reader).
+  def handle_event("preview_link", %{"win" => win, "href" => href}, socket)
+      when is_binary(href) and byte_size(href) <= 2000 do
+    with id when is_integer(id) <- safe_int(win) do
+      Input.run(socket.assigns.frame, fn ->
+        Aimax.Core.Session.call_named("preview-follow-link!", [id, href])
+      end)
+    end
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
+  # the page named a source line and how far along it the caret sits
+  def handle_event("preview_goto_src", %{"win" => win, "p" => at, "off" => off} = p, socket)
+      when is_integer(at) and is_integer(off) do
+    with id when is_integer(id) <- safe_int(win) do
+      Input.run(socket.assigns.frame, fn ->
+        Aimax.Core.Session.call_named("preview-goto-src!", [id, at, off, p["extend"] == true])
+      end)
+    end
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
   def handle_event("preview_goto_pos", %{"win" => win, "pos" => pos} = p, socket)
       when is_integer(pos) do
     with id when is_integer(id) <- safe_int(win) do
@@ -698,6 +724,9 @@ defmodule Aimax.Ui.EditorLive do
     end
   end
 
+  # a client that cannot name its window sends null: no window, no crash
+  defp safe_int(_), do: nil
+
   # --- rendering -------------------------------------------------------------
 
   @impl true
@@ -793,7 +822,7 @@ defmodule Aimax.Ui.EditorLive do
             <span class="mb-count">{count_text(@state.minibuffer)}</span>
           </div>
         </div>
-        <div class="echo-bar">
+        <div :if={Map.get(@state.minibuffer, :style) == "palette"} class="echo-bar">
           <span class="echo">{@state.echo}</span>
           <span class="mb-spacer"></span>
         </div>
@@ -1577,6 +1606,10 @@ defmodule Aimax.Ui.EditorLive do
   # can render off for a moment; the sandbox runs no scripts, so a mangled
   # span is a display blemish and nothing more.
   @pt_sentinel "\uE000"
+  # one marker per source line that draws text; it becomes a .ln span that
+  # names the line's byte offset, so a key in the page can say which source
+  # line the reader moved to
+  @anchor "\uE005"
   @llm_start "\uE002"
   @llm_end "\uE003"
   @llm_meta_end "\uE004"
@@ -1592,28 +1625,44 @@ defmodule Aimax.Ui.EditorLive do
     p = point |> max(0) |> min(byte_size(text))
     m = if is_integer(mark), do: mark |> max(0) |> min(byte_size(text)), else: nil
 
-    marked = mark_preview_positions(text, p, m, overlays)
+    anchors = line_anchors(text)
+    marked = mark_preview_positions(text, p, m, overlays, anchors)
 
-    preview_html("markdown", marked, faces, authored)
+    "markdown"
+    |> preview_html(marked, faces, authored)
+    |> place_anchors(anchors)
   end
 
   def preview_doc(rm, text, _point, _mark, faces, authored, _overlays),
     do: preview_html(rm, text, faces, authored)
 
-  defp mark_preview_positions(text, point, mark, overlays) do
+  defp mark_preview_positions(text, point, mark, overlays, anchors) do
     positions =
       [{cursor_spot(text, point), @pt_sentinel}, {mark && cursor_spot(text, mark), "\uE001"}] ++
-        preview_overlay_positions(text, overlays)
+        preview_overlay_positions(text, overlays) ++
+        Enum.map(anchors, &{&1, @anchor})
 
     positions =
       positions
       |> Enum.reject(fn {at, _} -> is_nil(at) end)
-      |> Enum.sort_by(fn {at, _} -> -at end)
+      # a sentinel inside a character makes the document invalid UTF-8, and
+      # the Markdown parser then raises on the whole page
+      |> Enum.map(fn {at, sentinel} -> {Text.floor_utf8(text, at), sentinel} end)
+      # Later insertions at one offset land BEFORE earlier ones, so the
+      # order here is the reverse of the order in the page: a quote marker
+      # the overlay adds keeps the start of its line, the line's anchor sits
+      # after it, and the cursor stays innermost, right at point.
+      |> Enum.sort_by(fn {at, sentinel} -> {-at, sentinel_rank(sentinel)} end)
 
     Enum.reduce(positions, text, fn {at, sentinel}, acc ->
       binary_part(acc, 0, at) <> sentinel <> binary_part(acc, at, byte_size(acc) - at)
     end)
   end
+
+  defp sentinel_rank(@pt_sentinel), do: 0
+  defp sentinel_rank("\uE001"), do: 0
+  defp sentinel_rank(@anchor), do: 1
+  defp sentinel_rank(_), do: 2
 
   # Preview formatting belongs to llm-mode, not to the Markdown document.
   # Render its response overlay through a temporary blockquote so Earmark can
@@ -1644,28 +1693,194 @@ defmodule Aimax.Ui.EditorLive do
     end)
   end
 
+
+  # A rendered row belongs to a source line, and the page is the only place
+  # that knows which rows exist: a wrapped paragraph is many rows, a fence
+  # line is none. So mark every source line that draws text, at the spot the
+  # cursor would take on it. The client reads the nearest marker above the
+  # row it moved to, and point follows the source.
+  defp line_anchors(text) do
+    text
+    |> line_starts()
+    |> Enum.map(fn ls -> {ls, cursor_spot(text, ls)} end)
+    |> Enum.filter(fn {ls, spot} -> spot != nil and line_start(text, spot) == ls end)
+    |> Enum.map(&elem(&1, 1))
+  end
+
+  defp line_starts(text) do
+    [0 | Enum.map(:binary.matches(text, "\n"), fn {at, _} -> at + 1 end)]
+    |> Enum.reject(&(&1 > byte_size(text)))
+  end
+
+  # The markers come back in source order, so the Nth marker in the page is
+  # the Nth anchored line. A parser that drops one would shift every offset
+  # after it, so a count that does not match gives up and leaves the page
+  # without anchors: the fragment mapping still works.
+  defp place_anchors(html, anchors) do
+    if length(:binary.matches(html, @anchor)) == length(anchors) do
+      html |> String.split(@anchor) |> weave_anchors(anchors)
+    else
+      String.replace(html, @anchor, "")
+    end
+  end
+
+  defp weave_anchors([head | parts], anchors) do
+    Enum.zip(parts, anchors)
+    |> Enum.reduce(head, fn {part, at}, acc ->
+      acc <> ~s(<span class="ln" data-p="#{at}"></span>) <> part
+    end)
+  end
+
   # Point often sits inside a line's BLOCK marker — byte 0 of "# Title" is
   # where a freshly opened file rests — and a sentinel inside the marker
-  # un-headings the line. Snap the cursor to the marker's end. On a fence
-  # line, show no cursor at all: a broken fence re-renders the whole
-  # document below it.
-  defp cursor_spot(text, p) do
-    ls =
-      case :binary.matches(binary_part(text, 0, p), "\n") do
-        [] -> 0
-        ms -> ms |> List.last() |> elem(0) |> Kernel.+(1)
-      end
+  # un-headings the line. Snap the cursor to the marker's end.
+  #
+  # Some lines draw no text of their own: a fence, a rule, a Setext
+  # underline, a table's alignment row, an empty line. A sentinel there
+  # breaks the block it belongs to, and hiding the cursor loses point. So
+  # the cursor moves to the nearest line that DOES draw text — the code
+  # inside the fence, the heading above the underline, the first row of the
+  # table. The depth guard stops a run of such lines from looping.
+  defp cursor_spot(text, p), do: cursor_spot(text, p, 0)
 
-    line = text |> binary_part(ls, byte_size(text) - ls) |> String.split("\n", parts: 2) |> hd()
+  defp cursor_spot(_text, _p, depth) when depth > 4, do: nil
 
-    if line |> String.trim_leading() |> String.starts_with?("```") do
-      nil
-    else
-      case Regex.run(~r/^(?:\s{0,3}(?:\#{1,6}|[-*+]|\d+\.|>)\s+)+/, line, return: :index) do
-        [{0, len}] when p < ls + len -> ls + len
-        _ -> p
-      end
+  defp cursor_spot(text, p, depth) do
+    ls = line_start(text, p)
+    line = line_at(text, ls)
+    trimmed = String.trim_leading(line)
+    below = ls + byte_size(line) + 1
+    above = ls - 1
+
+    cond do
+      # The opening fence draws the block's head, the closing fence draws
+      # nothing: put the cursor at the near end of the code itself.
+      String.starts_with?(trimmed, "```") ->
+        if fence_opens?(text, ls),
+          do: spot_below(text, below, p, depth),
+          else: spot_above(text, above, p, depth)
+
+      # Inside a fenced block every character is literal, so a sentinel is
+      # safe wherever point stands.
+      inside_fence?(text, ls) ->
+        p
+
+      # An empty line renders as nothing. A sentinel there makes it a line
+      # of text, which glues the next block onto it: the table below a blank
+      # line stops being a table.
+      String.trim(trimmed) == "" ->
+        spot_below(text, below, p, depth)
+
+      # The underline belongs to the heading above it.
+      setext_underline?(text, ls, trimmed) ->
+        spot_above(text, above, p, depth)
+
+      rule_line?(trimmed) ->
+        spot_below(text, below, p, depth)
+
+      # The alignment row makes the table a table, and it draws nothing.
+      table_delimiter_row?(trimmed) ->
+        spot_below(text, below, p, depth)
+
+      table_row?(trimmed) ->
+        line |> table_row_spot(ls, p) |> link_target_spot(line, ls)
+
+      true ->
+        p |> marker_spot(line, ls) |> link_target_spot(line, ls)
     end
+  end
+
+  defp spot_below(text, below, _p, depth) when below <= byte_size(text),
+    do: cursor_spot(text, below, depth + 1)
+
+  defp spot_below(_text, _below, p, _depth), do: p
+
+  defp spot_above(text, above, _p, depth) when above >= 0,
+    do: cursor_spot(text, above, depth + 1)
+
+  defp spot_above(_text, _above, p, _depth), do: p
+
+  defp line_start(text, p) do
+    case :binary.matches(binary_part(text, 0, p), "\n") do
+      [] -> 0
+      ms -> ms |> List.last() |> elem(0) |> Kernel.+(1)
+    end
+  end
+
+  defp line_at(text, ls),
+    do: text |> binary_part(ls, byte_size(text) - ls) |> String.split("\n", parts: 2) |> hd()
+
+  # A fence line opens a block when an even number of fences stands above it.
+  defp fence_opens?(text, ls), do: rem(fences_above(text, ls), 2) == 0
+
+  defp inside_fence?(text, ls), do: rem(fences_above(text, ls), 2) == 1
+
+  defp fences_above(text, ls) do
+    text
+    |> binary_part(0, ls)
+    |> String.split("\n")
+    |> Enum.count(&String.starts_with?(String.trim_leading(&1), "```"))
+  end
+
+  # `===` under text is a heading. The same run under a blank line is a rule.
+  defp setext_underline?(text, ls, trimmed) do
+    Regex.match?(~r/^[=-]+[ \t]*$/, trimmed) and ls > 0 and
+      text |> line_at(line_start(text, ls - 1)) |> String.trim() != ""
+  end
+
+  defp rule_line?(trimmed),
+    do: Regex.match?(~r/^([-*_])[ \t]*(\1[ \t]*){2,}$/, trimmed)
+
+  defp marker_spot(p, line, ls) do
+    case Regex.run(~r/^(?:\s{0,3}(?:\#{1,6}|[-*+]|\d+\.|>)\s+)+/, line, return: :index) do
+      [{0, len}] when p < ls + len -> ls + len
+      _ -> p
+    end
+  end
+
+  # A link target renders as an attribute, not as text, so a cursor inside
+  # it never draws. Keep it at the end of the label the reader can see.
+  defp link_target_spot(nil, _line, _ls), do: nil
+
+  defp link_target_spot(p, line, ls) do
+    Regex.scan(~r/\]\([^)]*\)/, line, return: :index)
+    |> List.flatten()
+    |> Enum.reduce(p, fn {at, len}, acc ->
+      if acc > ls + at and acc < ls + at + len, do: ls + at, else: acc
+    end)
+  end
+
+  # A row stays a table row only while its pipes stand at the line edges.
+  # Point rests at column 0 after every vertical move, and a sentinel there
+  # ends the table at that row: everything below it falls back to raw text.
+  # So keep the cursor inside the first and the last cell.
+  defp table_row_spot(line, ls, p) do
+    first =
+      case Regex.run(~r/^\s*\|[ \t]*/, line, return: :index) do
+        [{0, len}] -> len
+        _ -> 0
+      end
+
+    last =
+      case Regex.run(~r/[ \t]*\|[ \t]*$/, line, return: :index) do
+        [{at, _}] -> at
+        _ -> byte_size(line)
+      end
+
+    cond do
+      first >= last -> nil
+      p < ls + first -> ls + first
+      p > ls + last -> ls + last
+      true -> p
+    end
+  end
+
+  defp table_row?(trimmed) do
+    String.starts_with?(trimmed, "|") and length(:binary.matches(trimmed, "|")) >= 2
+  end
+
+  defp table_delimiter_row?(trimmed) do
+    String.contains?(trimmed, "-") and Regex.match?(~r/^\|[\s:|-]*$/, trimmed)
   end
 
   defp preview_html("html", text, _faces, true), do: text
@@ -1731,6 +1946,9 @@ defmodule Aimax.Ui.EditorLive do
     h3{font-size:18px;color:#{accent}}
     code,pre{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:13.5px}
     code{background:#{inset};padding:1px 4px;border-radius:2px}
+    /* a name in a heading is still the heading: the code span must not
+       shrink it to body size, nor box it */
+    h1 code,h2 code,h3 code,h4 code{background:none;padding:0;font-size:.92em}
     pre{background:#{inset};padding:10px 12px;border-left:3px solid #{accent};overflow-x:auto}
     pre code{background:none;padding:0}
     .code-block{margin:1em 0;border:1px solid #{border};border-radius:6px;overflow:hidden;background:#{inset}}
@@ -1750,9 +1968,15 @@ defmodule Aimax.Ui.EditorLive do
          border-left:4px solid #{accent};border-radius:7px;background:#{inset};color:#{fg};user-select:text}
     blockquote.llm-response>:first-child{margin-top:0}
     blockquote.llm-response>:last-child{margin-bottom:0}
-    table{border-collapse:collapse;font-size:14px;display:block;overflow-x:auto;max-width:100%}
-    th,td{border:1px solid #{border};padding:5px 9px}
-    th{background:#{inset};text-align:left}
+    table{border-collapse:collapse;font-size:14px;display:block;overflow-x:auto;
+          max-width:100%;margin:0 0 1.2em}
+    /* rules between rows, none around them: a reference table reads as
+       columns, not as a grid of boxes */
+    th,td{border:0;border-bottom:1px solid #{border};padding:6px 14px 6px 0;
+          vertical-align:top}
+    th{background:none;text-align:left;color:#{dim};font:600 11px/1.7 "IBM Plex Mono",ui-monospace,Menlo,monospace;
+       letter-spacing:.09em;text-transform:uppercase}
+    tr:last-child td{border-bottom:0}
     img{max-width:100%;height:auto;border-radius:3px}
     hr{border:0;border-top:1px solid #{border};margin:22px 0}
     .tweet{margin:12px 0;padding:12px 16px;border:1px solid #{border};border-radius:10px;
@@ -1771,6 +1995,7 @@ defmodule Aimax.Ui.EditorLive do
     .pt{display:inline-block;width:2px;height:1.05em;margin:0 -1px;vertical-align:-0.18em;
         background:#{accent};animation:ptb 1.1s step-end infinite}
     .mk{display:inline-block;width:0;height:0}
+    .ln{display:inline-block;width:0;height:0}
     @keyframes ptb{0%,49%{opacity:1}50%,100%{opacity:0}}
     </style></head><body>#{body}</body></html>
     """
@@ -1857,7 +2082,7 @@ defmodule Aimax.Ui.EditorLive do
       end
 
     header =
-      {"div", [{"class", "code-block-head"}],
+      {"div", [{"class", "code-block-head"}, {"data-chrome", "1"}],
        [{"span", [{"class", "code-lang"}], [label.language], %{}} | actions], %{}}
 
     {"div", [{"class", "code-block"}], [header, pre], %{}}

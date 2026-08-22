@@ -61,7 +61,8 @@ defmodule Aimax.Mix.Daemon do
         "tools.scm" -> {1, path}
         "recipes.scm" -> {2, path}
         "components.scm" -> {3, path}
-        _ -> {4, path}
+        "preview.scm" -> {4, path}
+        _ -> {5, path}
       end
     end)
   end

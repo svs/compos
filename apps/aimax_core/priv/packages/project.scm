@@ -256,7 +256,7 @@
   ;; also guarantees that joining a relative candidate produces one slash.
   (let ((root (strip-trailing-slash root)))
     (project-remember! root)
-    (let ((g (buffer-group (current-buffer)))
+    (let ((g (frame-group))
           (base (project-file-candidates root)))
       (minibuffer-read* (string-append "Find file in " (project-name root) ": ")
         base

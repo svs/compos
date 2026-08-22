@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ai-max.el - Scheme multithreading</title>
+<style>
+:root{--paper:#fbfaf6;--ink:#1b1a17;--soft:#625d53;--rule:#d1c9b8;--blue:#e1e8f6;--indigo:#2d3e72;--green:#e2eee5;--green-i:#286441;--amber:#f5ecd5;--amber-i:#805e18;--violet:#ece8f5;--violet-i:#5f4e87;--red:#f6e5e1;--red-i:#9a382d}
+*{box-sizing:border-box}body{max-width:72em;margin:0;padding:32px 36px 70px;background:var(--paper);color:var(--ink);font:15px/1.58 "IBM Plex Sans",system-ui,sans-serif}
+h1,h2{font-family:Spectral,Georgia,serif}h1{margin:0;font-size:29px}h2{margin:34px 0 10px;padding-bottom:5px;border-bottom:1px solid var(--rule);font-size:20px}h3{color:var(--indigo);font-size:15px}
+.sub{margin:2px 0 20px;color:var(--soft);font-size:13px}.lead,.note{padding:12px 15px;border-left:4px solid var(--indigo);background:var(--blue)}.note{margin:14px 0;border-left-width:3px;border-color:var(--amber-i);background:var(--amber)}.risk{border-color:var(--red-i);background:var(--red)}
+code,pre{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:13px}code{padding:1px 4px;border-radius:3px;background:#f0ece1}
+table{width:100%;border-collapse:collapse;font-size:13.5px}th{padding:6px 9px 6px 0;border-bottom:1px solid var(--rule);color:var(--soft);font-size:10px;text-align:left;text-transform:uppercase;letter-spacing:.1em}td{padding:7px 12px 7px 0;border-top:1px solid #e5dfd1;vertical-align:top}
+.diagram{margin:16px 0 22px;padding:16px;border:1px solid var(--rule);border-radius:8px;background:#fffefa;overflow-x:auto}.diagram svg{display:block;width:100%;height:auto}.diagram .sub{margin:10px 0 0}.cap{margin:0 0 12px;color:var(--soft);font-size:11px;font-weight:650;text-transform:uppercase;letter-spacing:.1em}
+.flow{display:flex;gap:22px;min-width:850px}.col{display:flex;flex:1;flex-direction:column;gap:9px;position:relative}.col:not(:last-child):after{content:"->";position:absolute;right:-20px;top:47%;color:var(--indigo);font-size:20px;font-weight:bold}
+.node{min-height:59px;padding:9px 11px;border:1px solid #aaa18e;border-radius:7px;background:#fff}.node b,.node span{display:block}.node span{color:var(--soft);font-size:12px}.ui{border-color:var(--indigo);background:var(--blue)}.group{border-color:var(--green-i);background:var(--green)}.other{border-color:var(--amber-i);background:var(--amber)}.store{border-color:var(--violet-i);background:var(--violet)}.tall{display:flex;min-height:263px;align-items:center;justify-content:center;text-align:center}
+.steps{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:19px;min-width:850px}.step{position:relative;min-height:130px;padding:10px;border:1px solid var(--rule);border-radius:6px;background:#f1eee5}.step:not(:last-child):after{content:"->";position:absolute;right:-18px;top:52px;color:var(--indigo);font-weight:bold}.step h3{margin:5px 0}.step p{margin:0;color:var(--soft);font-size:12px}.n{color:var(--soft);font:650 11px/1 monospace}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card{padding:11px 14px;border:1px solid var(--rule);border-radius:6px}.card h3{margin-top:0}
+.questions{counter-reset:q;list-style:none;margin-left:0;padding:0}.questions li{counter-increment:q;margin:10px 0;padding:9px 12px;border-left:2px solid var(--indigo);background:#f1eee5}.questions li:before{content:counter(q) ". ";color:var(--indigo);font-weight:bold}
+@media(max-width:760px){body{padding:22px 18px}.split{grid-template-columns:1fr}}@media print{body{max-width:none}.diagram{break-inside:avoid}}
+</style></head><body>
+<h1>How Scheme multithreading works</h1>
+<p class="sub">ai-max.el interpreter and execution lanes - current implementation - updated 2026-08-22</p>
+<p class="lead"><strong>Short version:</strong> many BEAM processes can evaluate against one Scheme world.
+Each lane stays serial. Different lanes run concurrently. Each evaluation uses private frames, then publishes only escaped state.</p>
+
+<h2>The mental model</h2>
+<p>The old Session process executed all Scheme code. A long RPC evaluation could delay a keystroke.
+The current Session stores only an interpreter handle. Lane workers execute the code.</p>
+
+<div class="diagram"><p class="cap">Diagram 1 - serial inside a lane, concurrent across lanes</p>
+<div class="flow" role="img" aria-label="Callers select serial lane workers, which run Scheme against one shared store.">
+<div class="col">
+<div class="node ui"><b>Key dispatch</b><span>keyboard and minibuffer</span></div>
+<div class="node group"><b>Project activity</b><span>buffers and agent events</span></div>
+<div class="node other"><b>RPC connection</b><span>one socket process</span></div>
+<div class="node other"><b>LLM tool loop</b><span>one task</span></div>
+</div><div class="col">
+<div class="node ui"><b>:ui lane</b><span>A, then B, then C</span></div>
+<div class="node group"><b>{:group, project}</b><span>A, then B, then C</span></div>
+<div class="node other"><b>{:rpc, pid}</b><span>A, then B, then C</span></div>
+<div class="node other"><b>{:llm, pid}</b><span>A, then B, then C</span></div>
+</div><div class="col"><div class="node tall"><div><b>Scheme.exec</b><span>read forms</span><span>evaluate sequentially</span><span>use local frames</span><span>record escapes</span><span>selective flush</span></div></div></div>
+<div class="col"><div class="node store tall"><div><b>Shared ETS store</b><span>global frame</span><span>published frames</span><span>one row per binding</span></div></div></div>
+</div></div>
+
+<p>A lane is a GenServer worker with a FIFO mailbox. The worker runs one job at a time.
+The supervisor creates workers only when required. An idle worker exits after five minutes.</p>
+<table><tr><th>Lane key</th><th>Owner</th><th>Guarantee</th></tr>
+<tr><td><code>:ui</code></td><td>Keys, commands, minibuffer callbacks, and default Session calls.</td><td>Editor input stays ordered.</td></tr>
+<tr><td><code>{:group, group}</code></td><td>Buffers in one group and their agent callbacks.</td><td>Project policy stays ordered.</td></tr>
+<tr><td><code>{:buffer, name}</code></td><td>A buffer without a group.</td><td>Mode setup stays ordered for that buffer.</td></tr>
+<tr><td><code>{:rpc, pid}</code></td><td>One RPC connection.</td><td>Other connections can proceed.</td></tr>
+<tr><td><code>{:llm, pid}</code></td><td>One LLM tool loop.</td><td>Tools stay ordered inside that loop.</td></tr>
+<tr><td><code>{:agent, slug}</code></td><td>Fallback before an agent gets a buffer lane.</td><td>One agent stays serial.</td></tr></table>
+<div class="note"><strong>One Scheme expression does not run in parallel.</strong>
+It runs sequentially in one worker. Concurrency exists between top-level executions.</div>
+
+<h2>One evaluation, from call to reply</h2>
+<div class="diagram"><p class="cap">Diagram 2 - top-level execution lifecycle</p>
+<div class="steps" role="img" aria-label="Five stages from lane selection to reply.">
+<div class="step"><span class="n">01</span><h3>Select</h3><p>A Session entry point receives a lane key.</p></div>
+<div class="step"><span class="n">02</span><h3>Queue</h3><p><code>Lane.run</code> sends a call. Same-worker re-entry runs inline.</p></div>
+<div class="step"><span class="n">03</span><h3>Register</h3><p><code>with_eval</code> records the worker PID. GC cannot start.</p></div>
+<div class="step"><span class="n">04</span><h3>Evaluate</h3><p>New call and <code>let</code> frames stay in a local map.</p></div>
+<div class="step"><span class="n">05</span><h3>Publish</h3><p>The flush copies escaped frames. The worker replies.</p></div>
+</div></div>
+<p><code>Scheme.exec</code> is the required boundary for every evaluator entry point.
+An error drops private frames. Writes already made to shared frames remain.</p>
+<div class="split"><div class="card"><h3>What a lane protects</h3><ul>
+<li>Job order for one owner.</li><li>Re-entry without self-call deadlock.</li>
+<li>The UI from unrelated slow work.</li><li>The queue from one raised job.</li></ul></div>
+<div class="card"><h3>What a lane does not protect</h3><ul>
+<li>Globals shared by different lanes.</li><li>Multi-binding transactions.</li>
+<li>Read-modify-write updates across lanes.</li><li>External effects before an error.</li></ul></div></div>
+
+<h2>The two-tier environment store</h2>
+<p>The interpreter handle contains an ETS table identifier and the global frame reference.
+Every lane receives the same handle. Closures capture frame references, not snapshots.</p>
+<div class="diagram"><p class="cap">Diagram 3 - private frames and selective publication</p>
+<div class="flow" role="img" aria-label="A closure causes one local frame to move into the shared store.">
+<div class="col"><div class="node group tall"><div><b>Lane A local map</b><span>call frame 401</span><span>let frame 402</span><span>closure captures 401</span></div></div></div>
+<div class="col"><div class="node other tall"><div><b>Selective flush</b><span>mark result closures</span><span>mark primitive arguments</span><span>mark shared writes</span></div></div></div>
+<div class="col"><div class="node store tall"><div><b>Shared ETS</b><span>global frame</span><span>frame 401 is published</span><span>frame 402 disappears</span></div></div></div>
+<div class="col"><div class="node ui tall"><div><b>Later execution</b><span>any lane resolves frame 401</span><span><code>set!</code> semantics remain</span></div></div></div>
+</div></div>
+
+<p>During boot, all frames stay local for speed. After package loading, one sweep removes dead frames.
+The loader then publishes the survivors. Normal executions use the selective flush.</p>
+<table><tr><th>Operation</th><th>Local frame</th><th>Shared frame</th></tr>
+<tr><td>Lookup</td><td>Read the local map.</td><td>Read ETS and cache it for this execution.</td></tr>
+<tr><td><code>define</code></td><td>Update the local map.</td><td>Write one ETS row immediately.</td></tr>
+<tr><td><code>set!</code></td><td>Update the nearest local binding.</td><td>Write the nearest shared binding immediately.</td></tr>
+<tr><td>Closure</td><td>Capture a frame reference.</td><td>Resolve that reference from any lane.</td></tr></table>
+<p>ETS writes become globally available immediately. Another running execution can hold a cached old value.
+The cache resets at the next <code>Scheme.exec</code> boundary.</p>
+<div class="note risk"><strong>A complete evaluation is not a transaction.</strong>
+Two lanes can interleave global reads and writes. Concurrent increments can lose an update.
+Use the same lane when an invariant spans multiple operations.</div>
+<h3>The short stale-frame window</h3>
+<p>A primitive can expose a closure before its evaluation finishes.
+Another lane can call it before the flush publishes its frame.
+That call returns <code>stale environment frame</code>. The reference works after the first evaluation flushes.</p>
+
+<h2>Garbage collection and cancellation</h2>
+<p>The environment GC uses reachability. Roots include the global frame, commands, escaped callbacks, minibuffers, and buffer locals.
+The Session checks every 30 seconds. It sweeps after the frame count more than doubles.</p>
+<div class="diagram"><p class="cap">Diagram 4 - the GC claim</p>
+<div class="flow" role="img" aria-label="GC skips active evaluations and briefly blocks new evaluations during a sweep.">
+<div class="col"><div class="node group"><b>An eval is active</b><span>PID has an in-flight row</span></div><div class="node"><b>No eval is active</b><span>the claim can succeed</span></div></div>
+<div class="col"><div class="node other"><b>GC tries</b><span>returns busy and retries later</span></div><div class="node store"><b>Mark and sweep</b><span>new evals wait in 5 ms steps</span></div></div>
+<div class="col"><div class="node ui tall" style="min-height:127px"><div><b>Resume</b><span>remove the claim</span><span>start with fresh caches</span></div></div></div>
+</div></div>
+<p>In-flight rows use worker PIDs. GC removes rows for dead workers.
+The GC claim also stores its sweeper PID. New evaluations remove an orphaned claim.</p>
+<p><code>Lane.kill</code> terminates only the worker. The shared store and buffers survive.
+Queued jobs do not survive. The next call creates a new worker.</p>
+
+<h2>Failure and timing semantics</h2>
+<table><tr><th>Situation</th><th>Result</th></tr>
+<tr><td>A job raises or exits</td><td>The caller gets an error. The worker accepts its next job.</td></tr>
+<tr><td>A caller times out</td><td>The log names the lane, job, duration, and worker stack.</td></tr>
+<tr><td>A job takes more than 250 ms</td><td>Telemetry records it. The log reports a slow job.</td></tr>
+<tr><td>An eval fails after global writes</td><td>The writes remain. Private frames disappear.</td></tr>
+<tr><td>A lane is killed</td><td>Its queue disappears. Shared state remains.</td></tr>
+<tr><td>GC sees an active eval</td><td>GC skips the sweep and retries later.</td></tr>
+<tr><td>An eval starts during GC</td><td>It waits until the claim disappears.</td></tr></table>
+
+<h2>Worked race example</h2>
+<pre><code>;; Lane A and lane B share this binding.
+(define counter 0)
+
+;; Both lanes can read 0 before either writes.
+(set! counter (+ counter 1))
+
+;; The final value can be 1, not 2.</code></pre>
+<div class="diagram"><p class="cap">Diagram 5 - two serial lanes can still lose an update</p>
+<a href="../boards/scheme-threading-lost-update.tldr" title="Open the editable tldraw source">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 560" role="img" aria-labelledby="title desc">
+  <title id="title">Two serial lanes lose an update</title>
+  <desc id="desc">Both lanes read counter zero, compute one, and write one. The final counter is one instead of two.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2d3e72"/>
+    </marker>
+    <style>
+      .label{font:600 18px system-ui,sans-serif;fill:#1b1a17}
+      .detail{font:14px ui-monospace,monospace;fill:#625d53}
+      .lane{font:700 16px system-ui,sans-serif;fill:#2d3e72}
+      .arrow{fill:none;stroke:#2d3e72;stroke-width:3;marker-end:url(#arrow)}
+      .arrow-label{font:13px system-ui,sans-serif;fill:#625d53}
+      .node{stroke-width:2}
+    </style>
+  </defs>
+
+  <text class="lane" x="280" y="56">LANE A — SERIAL</text>
+  <text class="lane" x="280" y="286">LANE B — SERIAL</text>
+  <line x1="280" y1="70" x2="960" y2="70" stroke="#d1c9b8"/>
+  <line x1="280" y1="300" x2="960" y2="300" stroke="#d1c9b8"/>
+
+  <rect class="node" x="35" y="205" width="190" height="120" rx="18" fill="#ece8f5" stroke="#5f4e87"/>
+  <text class="label" x="130" y="248" text-anchor="middle">Shared counter</text>
+  <text class="detail" x="130" y="282" text-anchor="middle">initial = 0</text>
+
+  <rect class="node" x="280" y="95" width="190" height="105" rx="14" fill="#e1e8f6" stroke="#2d3e72"/>
+  <text class="label" x="375" y="137" text-anchor="middle">Read 0</text>
+  <text class="detail" x="375" y="169" text-anchor="middle">t0</text>
+
+  <rect class="node" x="530" y="95" width="190" height="105" rx="14" fill="#e1e8f6" stroke="#2d3e72"/>
+  <text class="label" x="625" y="137" text-anchor="middle">Compute 1</text>
+  <text class="detail" x="625" y="169" text-anchor="middle">0 + 1</text>
+
+  <rect class="node" x="780" y="95" width="190" height="105" rx="14" fill="#cbd8f0" stroke="#2d3e72"/>
+  <text class="label" x="875" y="137" text-anchor="middle">Write 1</text>
+  <text class="detail" x="875" y="169" text-anchor="middle">t2</text>
+
+  <rect class="node" x="280" y="325" width="190" height="105" rx="14" fill="#f5ecd5" stroke="#805e18"/>
+  <text class="label" x="375" y="367" text-anchor="middle">Read 0</text>
+  <text class="detail" x="375" y="399" text-anchor="middle">t1</text>
+
+  <rect class="node" x="530" y="325" width="190" height="105" rx="14" fill="#f5ecd5" stroke="#805e18"/>
+  <text class="label" x="625" y="367" text-anchor="middle">Compute 1</text>
+  <text class="detail" x="625" y="399" text-anchor="middle">0 + 1</text>
+
+  <rect class="node" x="780" y="325" width="190" height="105" rx="14" fill="#ecd9ad" stroke="#805e18"/>
+  <text class="label" x="875" y="367" text-anchor="middle">Write 1</text>
+  <text class="detail" x="875" y="399" text-anchor="middle">t3</text>
+
+  <rect class="node" x="1040" y="205" width="205" height="120" rx="18" fill="#f6e5e1" stroke="#9a382d"/>
+  <text class="label" x="1142" y="247" text-anchor="middle">Shared counter</text>
+  <text class="detail" x="1142" y="279" text-anchor="middle">final = 1</text>
+  <text x="1142" y="352" text-anchor="middle" font-family="system-ui,sans-serif" font-size="15" font-weight="700" fill="#9a382d">Expected 2 — one update is lost</text>
+
+  <path class="arrow" d="M225 245 C245 195 255 160 280 150"/>
+  <path class="arrow" d="M225 285 C245 335 255 370 280 378"/>
+  <path class="arrow" d="M470 148 L530 148"/>
+  <path class="arrow" d="M720 148 L780 148"/>
+  <path class="arrow" d="M470 378 L530 378"/>
+  <path class="arrow" d="M720 378 L780 378"/>
+  <path class="arrow" d="M970 148 C1005 165 1015 210 1040 240"/>
+  <path class="arrow" d="M970 378 C1005 360 1015 315 1040 290"/>
+
+  <text class="arrow-label" x="983" y="174">stores 1</text>
+  <text class="arrow-label" x="973" y="370">overwrites with 1</text>
+</svg>
+
+</a>
+<p class="sub">Editable source: <code>boards/scheme-threading-lost-update.tldr</code></p>
+</div>
+
+<h2>Questions for design review</h2>
+<ol class="questions">
+<li><strong>Is one group the correct serialization boundary?</strong> One slow agent callback holds all Scheme work for that group.</li>
+<li><strong>Which globals require atomic operations?</strong> Counters, registries, and read-modify-write state can race.</li>
+<li><strong>Should Scheme expose lane selection?</strong> Elixir call sites select lanes today.</li>
+<li><strong>Should stale closure publication become impossible?</strong> Immediate publication can restore high ETS churn.</li>
+<li><strong>Should GC remain stop-the-world?</strong> A larger store can make the pause visible.</li>
+<li><strong>Which callbacks still use <code>:ui</code>?</strong> Async producers need explicit lanes to protect input.</li>
+</ol>
+
+<h2>Source map</h2>
+<table><tr><th>File</th><th>Responsibility</th></tr>
+<tr><td><code>apps/aimax_core/lib/aimax/core/lane.ex</code></td><td>Lane keys, workers, queues, timeouts, and telemetry.</td></tr>
+<tr><td><code>apps/aimax_core/lib/aimax/core/session.ex</code></td><td>Lane routing, roots, and the GC timer.</td></tr>
+<tr><td><code>apps/aimax_scheme/lib/aimax/scheme.ex</code></td><td>The <code>Scheme.exec</code> boundary and selective flush.</td></tr>
+<tr><td><code>apps/aimax_scheme/lib/aimax/scheme/env.ex</code></td><td>Local maps, ETS rows, caches, escape tracking, and GC coordination.</td></tr>
+<tr><td><code>apps/aimax_scheme/lib/aimax/scheme/gc.ex</code></td><td>Reachability marking and frame deletion.</td></tr>
+<tr><td><code>apps/aimax_core/lib/aimax/core/agent.ex</code></td><td>Maps agents to group or buffer lanes.</td></tr>
+<tr><td><code>apps/aimax_rpc/lib/aimax/rpc/server.ex</code></td><td>Assigns one lane to each RPC connection.</td></tr></table>
+<p class="sub">Open this file in ai-max, then use <kbd>C-c C-v</kbd> for the preview.</p>
+</body></html>

@@ -307,6 +307,49 @@ defmodule Aimax.EditorTest do
     assert Buffer.mark(buf) == nil
   end
 
+  test "C-s repeats the search, wraps, and C-r turns it around", %{buf: buf} do
+    type("alpha beta gamma beta delta beta")
+    press(["M-<"])
+
+    press(["C-s"])
+    type("beta")
+    # first match: point at its end, mark at its start
+    assert Buffer.point(buf) == 10
+    assert Buffer.mark(buf) == 6
+
+    press(["C-s"])
+    assert Buffer.point(buf) == 21
+    press(["C-s"])
+    assert Buffer.point(buf) == 32
+
+    # past the last match the search wraps to the first
+    press(["C-s"])
+    assert Buffer.point(buf) == 10
+    assert echo() == "Search wrapped"
+
+    # C-r turns the same search around
+    press(["C-r"])
+    assert Buffer.point(buf) == 6
+    assert Buffer.mark(buf) == 10
+
+    press(["RET"])
+    assert Buffer.mark(buf) == nil
+  end
+
+  test "an empty C-s repeats the last search", %{buf: buf} do
+    type("one two one")
+    press(["M-<"])
+
+    press(["C-s"])
+    type("two")
+    press(["RET"])
+    assert Buffer.point(buf) == 7
+
+    press(["M-<", "C-s", "C-s"])
+    assert Buffer.point(buf) == 7
+    press(["RET"])
+  end
+
   test "isearch backward", %{buf: buf} do
     type("one two one")
     press(["C-r"])
@@ -3163,15 +3206,16 @@ defmodule Aimax.EditorTest do
     {:ok, _} = Aimax.Core.Session.eval("(delete-other-windows!)")
   end
 
-  test "prompts with candidates open as a centered palette; line inputs do not" do
+  test "a completion prompt keeps the bottom bar; only the switcher floats" do
+    # the switcher asks for the centered palette by name
     open_switch_prompt()
     assert Editor.render_state().minibuffer.style == "palette"
     press(["C-g"])
-    # M-x completes over commands, so it is a palette too
+    # M-x completes over commands and still keeps the bottom bar, like Emacs
     press(["M-x"])
-    assert Editor.render_state().minibuffer.style == "palette"
+    assert Editor.render_state().minibuffer.style in [nil, false]
     press(["C-g"])
-    # eval-expression has no candidates: it keeps the bottom bar
+    # eval-expression has no candidates: it keeps the bottom bar too
     press(["M-:"])
     assert Editor.render_state().minibuffer.style in [nil, false]
     press(["C-g"])
@@ -3564,6 +3608,41 @@ defmodule Aimax.MinibufferEditingTest do
     Buffer.goto(path, second)
     assert goto.(0, 1) == third
     assert goto.(0, -1) == first
+
+    press(["C-x", "1"])
+    File.rm!(path)
+  end
+
+  # the page names the source line a rendered row belongs to, so a move can
+  # never land in another block: point stays on that line, at the column the
+  # row reports, and clamps to the line's end.
+  test "a preview move follows the source line the page names" do
+    path =
+      Path.join(System.tmp_dir!(), "aimax-prevsrc-#{System.unique_integer([:positive])}.md")
+
+    File.write!(path, "| keys | command |\n| --- | --- |\n| `a` | [`one`](aimax:def/one) |\n")
+
+    press(["C-x", "C-f"])
+    type(path)
+    press(["RET"])
+    press(["C-c", "C-v"])
+
+    win = Editor.render_state() |> Map.get(:tree) |> Map.get(:id)
+    text = Buffer.text(path)
+    row = (:binary.match(text, "| `a`") |> elem(0)) + 2
+
+    {:ok, _} = Aimax.Core.Session.call_named("preview-goto-src!", [win, row, 4, false])
+    assert Buffer.point(path) == row + 4
+
+    # a column past the end of the line stops at the line's end
+    {:ok, _} = Aimax.Core.Session.call_named("preview-goto-src!", [win, row, 999, false])
+    assert Buffer.point(path) == byte_size(text) - 1
+
+    # extend keeps the mark, so shift-arrow grows a region
+    Buffer.goto(path, row)
+
+    {:ok, _} = Aimax.Core.Session.call_named("preview-goto-src!", [win, row, 3, true])
+    assert {:ok, "`a`"} = Aimax.Core.Session.call_named("clipboard-copy", [])
 
     press(["C-x", "1"])
     File.rm!(path)

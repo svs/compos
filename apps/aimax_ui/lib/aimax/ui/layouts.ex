@@ -596,46 +596,46 @@ defmodule Aimax.Ui.Layouts do
           .prompt { color: var(--accent-fg, #26356b); font-weight: 600; white-space: pre; flex-shrink: 0; }
           .mb-input { white-space: pre; flex-shrink: 0; font-family: var(--font-mono); }
           .mb-input .cursor { background: var(--cursor-bg, #26356b); }
-          /* vertico-style minibuffer: transient, keyboard-only.
-             EVERY prompt floats centered over the windows: a bottom bar
-             on a big monitor reads as ambient status, and a prompt that
-             owns the keyboard must read as a thing to answer or
-             dismiss. Input on top, candidates below. The echo bar keeps
-             the bottom row, so the window tree does not reflow while a
-             prompt is open. */
+          /* vertico-style minibuffer: transient, keyboard-only. A plain
+             prompt is a BOTTOM bar, like Emacs: the candidates sit above
+             the input, the input sits on the last row, and the eye goes
+             to one place for every prompt. Only the palette floats. */
           .mb-panel {
-            position: fixed; left: 50%; top: 22dvh;
-            transform: translateX(-50%);
-            width: min(860px, 94vw);
-            display: flex; flex-direction: column;
-            max-height: 56dvh;
+            flex-shrink: 0;
             background: var(--window-bg, #fdfcf8);
+            border-top: 2px solid var(--accent-fg, #26356b);
+            animation: rise 110ms ease-out;
+          }
+          /* palette style: the prompt floats centered over the windows,
+             input on top, candidates below — the buffer switcher asks
+             for this shape. The echo bar keeps the bottom row, so the
+             window tree does not reflow while the palette is open. */
+          .mb-panel.palette {
+            position: fixed; left: 50%; top: 14dvh;
+            transform: translateX(-50%);
+            /* FIXED geometry: the box never changes size while you type —
+               fewer candidates leave empty rows, never a smaller panel */
+            width: min(1100px, 96vw);
+            height: 62dvh;
+            display: flex; flex-direction: column;
             border: 1px solid var(--border, #e2dbc9);
             border-top: 2px solid var(--accent-fg, #26356b);
             border-radius: 10px;
             box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
             overflow: hidden;
             z-index: 40;
+            animation: none;
             /* NO entry animation: a patched node's animation can stall
-               at its first frame and leave the panel painted at
+               at its first frame and leave the palette painted at
                opacity 0 — an open, working, invisible prompt */
           }
-          .mb-panel .mb-input-row {
+          .mb-panel.palette .mb-input-row {
             order: -1;
             border-top: none;
             border-bottom: 1px solid var(--border, #e2dbc9);
             flex: 0 0 auto;
           }
-          .mb-panel .mb-label-row { order: -2; flex: 0 0 auto; }
-          /* palette style: the buffer switcher's bigger, FIXED geometry —
-             the box never changes size while you type; fewer candidates
-             leave empty rows, never a smaller panel */
-          .mb-panel.palette {
-            top: 14dvh;
-            width: min(1100px, 96vw);
-            height: 62dvh;
-            max-height: none;
-          }
+          .mb-panel.palette .mb-label-row { order: -2; flex: 0 0 auto; }
           .mb-panel.palette .mb-cands {
             max-height: none; flex: 1;
             /* rows keep their natural height — no stretching to fill */
@@ -898,6 +898,39 @@ defmodule Aimax.Ui.Layouts do
             visualGoal.y = y + (d.scrollingElement || d.documentElement).scrollTop;
           }
 
+          // The page carries one .ln marker per source line that draws text.
+          // The marker above a caret names that line's byte offset, and the
+          // rendered text between the two says how far along the line the
+          // caret sits. Point then follows the source, and rows the source
+          // does not own — a code block's head, an embed — carry
+          // data-chrome and are skipped instead.
+          function sourceSpot(d, node, off) {
+            const marks = d.querySelectorAll("span.ln");
+            if (!marks.length) return null;
+            const caret = d.createRange();
+            caret.setStart(node, off);
+            caret.collapse(true);
+            let found = null;
+            for (const m of marks) {
+              const at = d.createRange();
+              at.selectNode(m);
+              if (caret.compareBoundaryPoints(Range.START_TO_START, at) < 0) break;
+              found = m;
+            }
+            if (!found) return null;
+            const span = d.createRange();
+            span.setStartAfter(found);
+            span.setEnd(node, off);
+            const p = parseInt(found.dataset.p, 10);
+            if (!Number.isFinite(p)) return null;
+            return { p: p, off: span.toString().length };
+          }
+
+          function isChrome(node) {
+            const el = node && (node.nodeType === 1 ? node : node.parentElement);
+            return !!(el && el.closest && el.closest("[data-chrome], .code-block-head, .tweet"));
+          }
+
           // One rendered fragment names many source positions: the code span
           // `-b` sits in the file ten times. So say which one this is —
           // count the same text on the page before this occurrence — and
@@ -1066,14 +1099,40 @@ defmodule Aimax.Ui.Layouts do
                   // card — names no source position. A caret there matches
                   // its short label text anywhere in the file, so it must
                   // not move point.
-                  const chromeNode = (node) => {
-                    const el = node.parentElement;
-                    return el && el.closest && el.closest(".code-block-head, .tweet");
+                  const chromeNode = (node) => isChrome(node);
+                  // A link is the page's own button: the frame must not
+                  // navigate to it (the document here is a render, not a
+                  // site). The href goes to the daemon, which decides what
+                  // the link means. An in-page anchor keeps the browser's
+                  // own scroll.
+                  const linkAt = (e) => {
+                    const t = e.target;
+                    const a = t && t.closest && t.closest("a[href]");
+                    if (!a) return null;
+                    const href = a.getAttribute("href") || "";
+                    return (href === "" || href.startsWith("#")) ? null : href;
                   };
+                  // the click only cancels the navigation: the mousedown
+                  // below already sent the link, because moving point
+                  // re-renders the document and the anchor dies with it
+                  d.addEventListener("click", (e) => {
+                    if (linkAt(e)) e.preventDefault();
+                  }, true);
                   d.addEventListener("mousedown", (e) => {
                     // Only the left button moves point. A right click keeps
                     // the region for the copy that follows it.
                     if (e.button !== 0) return;
+                    // a link answers the click itself: it must not also
+                    // move point, or the re-render kills the anchor first
+                    const href = linkAt(e);
+                    if (href) {
+                      e.preventDefault();
+                      this.pushEvent("preview_link", {
+                        win: parseInt(this.el.dataset.win, 10),
+                        href: href
+                      });
+                      return;
+                    }
                     // A generated response is atomic to the editor cursor,
                     // but its prose remains ordinary browser-selectable text.
                     // Do not patch the iframe on mousedown or a drag would
@@ -1090,6 +1149,14 @@ defmodule Aimax.Ui.Layouts do
                     visualGoal.x = null;
                     visualGoal.y = null;
                     this.dragFrom = { x: e.clientX, y: e.clientY };
+                    const src = sourceSpot(d, node, off);
+                    if (src) {
+                      this.pushEvent("preview_goto_src", {
+                        win: parseInt(this.el.dataset.win, 10),
+                        p: src.p, off: src.off, dir: 0, extend: false
+                      });
+                      return;
+                    }
                     this.pushEvent("preview_goto", Object.assign(
                       { win: parseInt(this.el.dataset.win, 10) },
                       previewSpot(d, node, off, 0)));
@@ -1379,9 +1446,19 @@ defmodule Aimax.Ui.Layouts do
                       });
                       return true;
                     }
+                    // a row the source does not own: keep walking
+                    if (isChrome(node)) continue;
                     const off = c.startOffset !== undefined ? c.startOffset : c.offset;
                     this.visualLinePending = true;
                     rememberRow(d, rowMid + dir * step);
+                    const src = sourceSpot(d, node, off);
+                    if (src) {
+                      this.pushEvent("preview_goto_src", {
+                        win: parseInt(frame.dataset.win, 10),
+                        p: src.p, off: src.off, dir: dir, extend: extend
+                      });
+                      return true;
+                    }
                     this.pushEvent("preview_goto", Object.assign(
                       { win: parseInt(frame.dataset.win, 10), extend: extend },
                       previewSpot(d, node, off, dir)));
@@ -1426,7 +1503,16 @@ defmodule Aimax.Ui.Layouts do
                     probe.collapse(true);
                     const cr = probe.getBoundingClientRect();
                     if (Math.abs(cr.top - r.top) > line * 0.65) continue;
+                    if (isChrome(node)) continue;
                     this.visualLinePending = true;
+                    const src = sourceSpot(d, node, off);
+                    if (src) {
+                      this.pushEvent("preview_goto_src", {
+                        win: parseInt(frame.dataset.win, 10),
+                        p: src.p, off: src.off, dir: 0, extend: extend
+                      });
+                      return true;
+                    }
                     // the edge of the row this cursor already sits on, so
                     // the move names no direction
                     this.pushEvent("preview_goto", Object.assign(

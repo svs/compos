@@ -1,0 +1,1854 @@
+{
+  "tldrawFileFormatVersion": 1,
+  "schema": {
+    "schemaVersion": 2,
+    "sequences": {
+      "com.tldraw.store": 5,
+      "com.tldraw.asset": 1,
+      "com.tldraw.camera": 1,
+      "com.tldraw.document": 2,
+      "com.tldraw.instance": 26,
+      "com.tldraw.instance_page_state": 5,
+      "com.tldraw.page": 1,
+      "com.tldraw.instance_presence": 6,
+      "com.tldraw.pointer": 1,
+      "com.tldraw.shape": 4,
+      "com.tldraw.user": 1,
+      "com.tldraw.asset.image": 6,
+      "com.tldraw.asset.video": 5,
+      "com.tldraw.asset.bookmark": 2,
+      "com.tldraw.shape.group": 0,
+      "com.tldraw.shape.text": 4,
+      "com.tldraw.shape.bookmark": 2,
+      "com.tldraw.shape.draw": 4,
+      "com.tldraw.shape.geo": 11,
+      "com.tldraw.shape.note": 12,
+      "com.tldraw.shape.line": 5,
+      "com.tldraw.shape.frame": 1,
+      "com.tldraw.shape.arrow": 8,
+      "com.tldraw.shape.highlight": 3,
+      "com.tldraw.shape.embed": 4,
+      "com.tldraw.shape.image": 5,
+      "com.tldraw.shape.video": 4,
+      "com.tldraw.binding.arrow": 1
+    }
+  },
+  "records": [
+    {
+      "x": 160,
+      "y": 252,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 1,
+          "segmentIndex": 1,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-counter-0-b-read-1-1",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aCQpPSzG",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "none",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": 1400,
+          "y": 0
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "reads"
+                }
+              ]
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 1560,
+      "y": 252,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 1,
+          "segmentIndex": 2,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-counter-0-b-read-1-2",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aDUI7lHG",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "arrow",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": 0,
+          "y": -32
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 352,
+      "y": 160,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 0,
+          "segmentIndex": 2,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-counter-0-a-read-0-2",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aAwvUWtG",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "arrow",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": 348,
+          "y": 0
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "reads"
+                }
+              ]
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "z": 1,
+      "meta": {},
+      "id": "camera:page:page",
+      "typeName": "camera"
+    },
+    {
+      "x": 1400,
+      "y": 100,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "step",
+          "evidence": []
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-b-read",
+      "type": "geo",
+      "parentId": "page:page",
+      "index": "a3oCqPgV",
+      "props": {
+        "geo": "rectangle",
+        "dash": "solid",
+        "url": "",
+        "w": 320,
+        "h": 120,
+        "growY": 0,
+        "scale": 1,
+        "labelColor": "black",
+        "color": "violet",
+        "fill": "semi",
+        "size": "m",
+        "font": "sans",
+        "align": "middle",
+        "verticalAlign": "middle",
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Lane B reads 0"
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "t1"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 2100,
+      "y": 100,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "step",
+          "evidence": []
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-a-compute",
+      "type": "geo",
+      "parentId": "page:page",
+      "index": "a4EOoi0V",
+      "props": {
+        "geo": "rectangle",
+        "dash": "solid",
+        "url": "",
+        "w": 320,
+        "h": 120,
+        "growY": 0,
+        "scale": 1,
+        "labelColor": "black",
+        "color": "green",
+        "fill": "semi",
+        "size": "m",
+        "font": "sans",
+        "align": "middle",
+        "verticalAlign": "middle",
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Lane A computes 1"
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "0 + 1"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 700,
+      "y": 100,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "step",
+          "evidence": []
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-a-read",
+      "type": "geo",
+      "parentId": "page:page",
+      "index": "a2VHEfBV",
+      "props": {
+        "geo": "rectangle",
+        "dash": "solid",
+        "url": "",
+        "w": 320,
+        "h": 120,
+        "growY": 0,
+        "scale": 1,
+        "labelColor": "black",
+        "color": "light-blue",
+        "fill": "semi",
+        "size": "m",
+        "font": "sans",
+        "align": "middle",
+        "verticalAlign": "middle",
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Lane A reads 0"
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "t0"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 0,
+      "y": 444,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "step",
+          "evidence": []
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-b-compute",
+      "type": "geo",
+      "parentId": "page:page",
+      "index": "a51BcSzl",
+      "props": {
+        "geo": "rectangle",
+        "dash": "solid",
+        "url": "",
+        "w": 320,
+        "h": 120,
+        "growY": 0,
+        "scale": 1,
+        "labelColor": "black",
+        "color": "orange",
+        "fill": "semi",
+        "size": "m",
+        "font": "sans",
+        "align": "middle",
+        "verticalAlign": "middle",
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Lane B computes 1"
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "0 + 1"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 860,
+      "y": 564,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 6,
+          "segmentIndex": 0,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-a-write-counter-1-6-0",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aQ3SetyV",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "none",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": 0,
+          "y": 64
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 860,
+      "y": 628,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 6,
+          "segmentIndex": 1,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-a-write-counter-1-6-1",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aRm7gF6V",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "none",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": 1400,
+          "y": 0
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "stores 1"
+                }
+              ]
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 2260,
+      "y": 628,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 6,
+          "segmentIndex": 2,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-a-write-counter-1-6-2",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aSvzfkYG",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "arrow",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": 0,
+          "y": -64
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 1720,
+      "y": 504,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 7,
+          "segmentIndex": 0,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-b-write-counter-1-7-0",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aT3NgOiV",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "none",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": 32,
+          "y": 0
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 1752,
+      "y": 504,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 7,
+          "segmentIndex": 2,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-b-write-counter-1-7-2",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aUKX7RQV",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "arrow",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": 348,
+          "y": 0
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "overwrites with 1"
+                }
+              ]
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 700,
+      "y": 444,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "step",
+          "evidence": []
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-a-write",
+      "type": "geo",
+      "parentId": "page:page",
+      "index": "a64wqHVV",
+      "props": {
+        "geo": "rectangle",
+        "dash": "solid",
+        "url": "",
+        "w": 320,
+        "h": 120,
+        "growY": 0,
+        "scale": 1,
+        "labelColor": "black",
+        "color": "blue",
+        "fill": "semi",
+        "size": "m",
+        "font": "sans",
+        "align": "middle",
+        "verticalAlign": "middle",
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Lane A writes 1"
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "t2"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 1400,
+      "y": 444,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "step",
+          "evidence": []
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-b-write",
+      "type": "geo",
+      "parentId": "page:page",
+      "index": "a7wkrTxV",
+      "props": {
+        "geo": "rectangle",
+        "dash": "solid",
+        "url": "",
+        "w": 320,
+        "h": 120,
+        "growY": 0,
+        "scale": 1,
+        "labelColor": "black",
+        "color": "light-blue",
+        "fill": "semi",
+        "size": "m",
+        "font": "sans",
+        "align": "middle",
+        "verticalAlign": "middle",
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Lane B writes 1"
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "t3"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 860,
+      "y": 220,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 2,
+          "segmentIndex": 0,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-a-read-a-compute-2-0",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aESnPCMV",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "none",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": 0,
+          "y": 64
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 2282,
+      "y": 220,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 4,
+          "segmentIndex": 0,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-a-compute-a-write-4-0",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aK1ksE8V",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "none",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": 0,
+          "y": 128
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 860,
+      "y": 284,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 2,
+          "segmentIndex": 1,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-a-read-a-compute-2-1",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aFRlSAnV",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "none",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": 1400,
+          "y": 0
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 1582,
+      "y": 220,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 3,
+          "segmentIndex": 0,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-b-read-b-compute-3-0",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aHmXRd0V",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "none",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": 0,
+          "y": 96
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "title",
+          "evidence": []
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-title",
+      "type": "text",
+      "parentId": "page:page",
+      "index": "a0tYn1YV",
+      "props": {
+        "color": "black",
+        "size": "xl",
+        "font": "sans",
+        "textAlign": "start",
+        "w": 2540,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Two serial lanes can still lose an update"
+                }
+              ]
+            }
+          ]
+        },
+        "scale": 1,
+        "autoSize": false
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 2282,
+      "y": 348,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 4,
+          "segmentIndex": 1,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-a-compute-a-write-4-1",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aLhFxfHV",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "none",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": -1422,
+          "y": 0
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 2260,
+      "y": 284,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 2,
+          "segmentIndex": 2,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-a-read-a-compute-2-2",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aGxZl9NV",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "arrow",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": 0,
+          "y": -64
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 1582,
+      "y": 316,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 3,
+          "segmentIndex": 1,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-b-read-b-compute-3-1",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aIPOGcHV",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "none",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": -1422,
+          "y": 0
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 860,
+      "y": 348,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 4,
+          "segmentIndex": 2,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-a-compute-a-write-4-2",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aMbITobV",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "arrow",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": 0,
+          "y": 96
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 160,
+      "y": 316,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 3,
+          "segmentIndex": 2,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-b-read-b-compute-3-2",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aJyV76VV",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "arrow",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": 0,
+          "y": 128
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 160,
+      "y": 564,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 5,
+          "segmentIndex": 0,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-b-compute-b-write-5-0",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aNHVe6zl",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "none",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": 0,
+          "y": 32
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 160,
+      "y": 596,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 5,
+          "segmentIndex": 1,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-b-compute-b-write-5-1",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aOgzjHiG",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "none",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": 1400,
+          "y": 0
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 1560,
+      "y": 596,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 5,
+          "segmentIndex": 2,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-b-compute-b-write-5-2",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aP66zjHl",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "arrow",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": 0,
+          "y": -32
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "editingShapeId": null,
+      "croppingShapeId": null,
+      "selectedShapeIds": [],
+      "hoveredShapeId": null,
+      "erasingShapeIds": [],
+      "hintingShapeIds": [],
+      "focusedGroupId": null,
+      "meta": {},
+      "id": "instance_page_state:L-_8Yabm8GFOEDiZgfWLq",
+      "pageId": "page:page",
+      "typeName": "instance_page_state"
+    },
+    {
+      "meta": {},
+      "id": "page:page",
+      "name": "Page 1",
+      "index": "a1",
+      "typeName": "page"
+    },
+    {
+      "gridSize": 10,
+      "name": "scheme-threading-lost-update",
+      "meta": {},
+      "id": "document:document",
+      "typeName": "document"
+    },
+    {
+      "x": 0,
+      "y": 100,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "step",
+          "evidence": []
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-counter-0",
+      "type": "geo",
+      "parentId": "page:page",
+      "index": "a1l5GUyl",
+      "props": {
+        "geo": "rectangle",
+        "dash": "solid",
+        "url": "",
+        "w": 320,
+        "h": 120,
+        "growY": 0,
+        "scale": 1,
+        "labelColor": "black",
+        "color": "blue",
+        "fill": "semi",
+        "size": "m",
+        "font": "sans",
+        "align": "middle",
+        "verticalAlign": "middle",
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Shared counter"
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Initial value: 0"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "typeName": "shape"
+    },
+    {
+      "followingUserId": null,
+      "opacityForNextShape": 1,
+      "stylesForNextShape": {},
+      "brush": null,
+      "scribbles": [],
+      "cursor": {
+        "type": "default",
+        "rotation": 0
+      },
+      "isFocusMode": false,
+      "exportBackground": true,
+      "isDebugMode": false,
+      "isToolLocked": false,
+      "screenBounds": {
+        "x": 0,
+        "y": 0,
+        "w": 1080,
+        "h": 720
+      },
+      "insets": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "zoomBrush": null,
+      "isGridMode": false,
+      "isPenMode": false,
+      "chatMessage": "",
+      "isChatting": false,
+      "highlightedUserIds": [],
+      "isFocused": false,
+      "devicePixelRatio": 1,
+      "isCoarsePointer": false,
+      "isHoveringCanvas": null,
+      "openMenus": [],
+      "isChangingStyle": false,
+      "isReadonly": false,
+      "meta": {},
+      "duplicateProps": null,
+      "cameraState": "idle",
+      "id": "instance:instance",
+      "currentPageId": "page:page",
+      "typeName": "instance"
+    },
+    {
+      "x": 2100,
+      "y": 444,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "step",
+          "evidence": []
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-counter-1",
+      "type": "geo",
+      "parentId": "page:page",
+      "index": "a8sH8bKV",
+      "props": {
+        "geo": "rectangle",
+        "dash": "solid",
+        "url": "",
+        "w": 320,
+        "h": 120,
+        "growY": 0,
+        "scale": 1,
+        "labelColor": "black",
+        "color": "violet",
+        "fill": "semi",
+        "size": "m",
+        "font": "sans",
+        "align": "middle",
+        "verticalAlign": "middle",
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Shared counter"
+                }
+              ]
+            },
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Final: 1, expected: 2"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "lastActivityTimestamp": 0,
+      "meta": {},
+      "id": "pointer:QgtOTZ1r9WGnNTwIFYKoG",
+      "typeName": "pointer"
+    },
+    {
+      "x": 320,
+      "y": 160,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 0,
+          "segmentIndex": 0,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-counter-0-a-read-0-0",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "a9rxMjEV",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "none",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": 32,
+          "y": 0
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    },
+    {
+      "x": 160,
+      "y": 220,
+      "rotation": 0,
+      "isLocked": false,
+      "opacity": 1,
+      "meta": {
+        "tldrawMcp": {
+          "diagramId": "workflow-mt44ywwe",
+          "repoName": "Two serial lanes can still lose an update",
+          "kind": "connection",
+          "evidence": [],
+          "connectionIndex": 1,
+          "segmentIndex": 0,
+          "segmentCount": 3
+        }
+      },
+      "id": "shape:workflow-mt44ywwe-arrow-counter-0-b-read-1-0",
+      "type": "arrow",
+      "parentId": "page:page",
+      "index": "aBUqwfol",
+      "props": {
+        "kind": "arc",
+        "labelColor": "black",
+        "color": "black",
+        "fill": "none",
+        "dash": "solid",
+        "size": "s",
+        "arrowheadStart": "none",
+        "arrowheadEnd": "none",
+        "font": "sans",
+        "start": {
+          "x": 0,
+          "y": 0
+        },
+        "end": {
+          "x": 0,
+          "y": 32
+        },
+        "bend": 0,
+        "richText": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph"
+            }
+          ]
+        },
+        "labelPosition": 0.5,
+        "scale": 1,
+        "elbowMidPoint": 0.5
+      },
+      "typeName": "shape"
+    }
+  ]
+}

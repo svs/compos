@@ -319,6 +319,10 @@ defmodule Aimax.Core.SchemeAPI do
         "(local-remap*! BUF FROM TO) — in buffer BUF, every key bound to FROM runs TO.",
       "key-for-command" =>
         "(key-for-command COMMAND) — return the tersest key sequence bound to COMMAND, or \"\".",
+      "key-binding" =>
+        "(key-binding SEQ) — the command SEQ runs in this buffer: a name, 'prefix, or #f. SEQ is a list of keys.",
+      "capture-key!" =>
+        "(capture-key! COMMAND) — the next key sequence runs COMMAND instead of its own binding; COMMAND reads it with (last-keys). #f disarms.",
       "last-command" => "(last-command) — return the name of the last command that ran.",
       "last-keys" =>
         "(last-keys) — return the key sequence whose keymap lookup ran the current command.",
@@ -1257,6 +1261,19 @@ defmodule Aimax.Core.SchemeAPI do
         :void
       end,
       "key-for-command" => fn [name] -> Editor.key_for_command(name) end,
+      # what a key sequence means here, without pressing it
+      "key-binding" => fn [seq] ->
+        case Editor.lookup_key(seq) do
+          {:command, name} -> name
+          :prefix -> {:sym, "prefix"}
+          _ -> false
+        end
+      end,
+      # describe-key arms this, then reads the sequence back with (last-keys)
+      "capture-key!" => fn [command] ->
+        Editor.set_key_capture(command)
+        :void
+      end,
       # a mode's own stylesheet, rendered into the page beside the face
       # variables. Modes are trusted code — they can eval anything — so the
       # CSS ships raw.

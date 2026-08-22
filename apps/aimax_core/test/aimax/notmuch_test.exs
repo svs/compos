@@ -29,6 +29,10 @@ defmodule Aimax.NotmuchTest do
   {"thread": "0002", "timestamp": 1786037671, "date_relative": "Yest. 23:04", "matched": 1, "total": 2, "authors": "Bob| Carol", "subject": "Quarterly report", "query": ["id:m2", "id:m3"], "tags": ["inbox"]}]
   """
 
+  @sender_search_json ~S"""
+  [{"thread": "0001", "timestamp": 1786065644, "date_relative": "Today 06:50", "matched": 1, "total": 1, "authors": "Alice", "subject": "Hello world", "query": ["id:m1", null], "tags": ["inbox", "unread"]}]
+  """
+
   @show_json ~S"""
   [[[{"id": "m1", "match": true, "excluded": false, "filename": ["/Users/svs/Mail/svsrecruiting/mail/cur/abc:2,S"], "timestamp": 1786065644, "date_relative": "Today 06:50", "tags": ["inbox", "unread"], "duplicate": 1, "body": [{"id": 1, "content-type": "multipart/alternative", "content": [{"id": 2, "content-type": "text/plain", "content": "Hi there, this is the body.\n"}, {"id": 3, "content-type": "text/html", "content-charset": "utf-8", "content-length": 100}]}], "headers": {"Subject": "Hello world", "From": "Alice <alice@example.com>", "To": "svs@svsrecruiting.com", "Date": "Thu, 07 Aug 2026 06:50:44 +0530"}}, []]]]
   """
@@ -45,6 +49,7 @@ defmodule Aimax.NotmuchTest do
     dir = Path.join(System.tmp_dir!(), "nm-stub-#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
     File.write!(Path.join(dir, "search.json"), @search_json)
+    File.write!(Path.join(dir, "sender-search.json"), @sender_search_json)
     File.write!(Path.join(dir, "show.json"), @show_json)
     File.write!(Path.join(dir, "reply.json"), @reply_json)
 
@@ -59,6 +64,8 @@ defmodule Aimax.NotmuchTest do
     case "$1" in
       search)
         case "$*" in
+          *thread:{from:alice@example.com}*) printf '[]\n';;
+          *from:alice@example.com*) cat "$dir/sender-search.json";;
           *--output=messages*) echo "id:m1";;
           *--output=tags*) printf 'important\ninbox\nunread\n';;
           *) cat "$dir/search.json";;
@@ -299,11 +306,38 @@ defmodule Aimax.NotmuchTest do
     assert calls(dir) =~ "tag -inbox -m -- ( tag:inbox ) and tag:m"
   end
 
-  test "@ narrows the search to the sender", %{dir: dir} do
+  test "@ and F push replacement filters that backslash removes in order", %{dir: dir} do
     eval!(~s{(run-command "notmuch-inbox")})
     press("@")
     assert calls(dir) =~ "show --format=json --body=false thread:0001"
-    assert eval!(~s{(buffer-text "*notmuch*")}) =~ "from:alice@example.com"
+    assert eval!(~s{(length (list-entries "*notmuch*"))}) == "1"
+
+    assert eval!(~s{(nm--query-of "*notmuch*")}) ==
+             ~s{"from:alice@example.com"}
+
+    press("F")
+
+    assert eval!(~s{(nm--query-of "*notmuch*")}) == ~s{"tag:m"}
+
+    press("\\")
+
+    assert eval!(~s{(nm--query-of "*notmuch*")}) ==
+             ~s{"from:alice@example.com"}
+
+    press("\\")
+    assert eval!(~s{(nm--query-of "*notmuch*")}) == ~s{"tag:inbox"}
+    assert eval!(~s{(length (list-entries "*notmuch*"))}) == "2"
+  end
+
+  test "opening a mailbox refreshes rows cached by a filter" do
+    eval!(~s{(run-command "notmuch-inbox")})
+    press("@")
+    assert eval!(~s{(length (list-entries "*notmuch*"))}) == "1"
+
+    press("q")
+    press("RET")
+    assert eval!(~s{(nm--query-of "*notmuch*")}) == ~s{"tag:inbox"}
+    assert eval!(~s{(length (list-entries "*notmuch*"))}) == "2"
   end
 
   test "the search buffer carries column and status overlays" do
@@ -384,7 +418,7 @@ defmodule Aimax.NotmuchTest do
 
     press("RET")
     assert eval!("(current-buffer)") == ~s{"*notmuch*"}
-    assert eval!(~s{(buffer-local "*notmuch*" 'notmuch-query)}) == ~s{"tag:inbox"}
+    assert eval!(~s{(nm--query-of "*notmuch*")}) == ~s{"tag:inbox"}
 
     press("q")
     assert eval!("(current-buffer)") == ~s{"*mailboxes*"}
@@ -395,15 +429,20 @@ defmodule Aimax.NotmuchTest do
     press("j")
     type("unread")
     press("RET")
-    assert eval!(~s{(buffer-local "*notmuch*" 'notmuch-query)}) == ~s{"tag:unread"}
+    assert eval!(~s{(nm--query-of "*notmuch*")}) == ~s{"tag:unread"}
   end
 
   test "/ narrows the current search", %{dir: _} do
     eval!(~s{(run-command "notmuch-inbox")})
+    # The old derived local cannot bypass the base and filter stack.
+    eval!(~s{(buffer-set-local! "*notmuch*" 'notmuch-query "from:bob")})
+    assert eval!(~s{(nm--query-of "*notmuch*")}) == ~s{"tag:inbox"}
+
     press("/")
     type("from:alice")
     press("RET")
-    assert eval!(~s{(buffer-local "*notmuch*" 'notmuch-query)}) ==
+
+    assert eval!(~s{(nm--query-of "*notmuch*")}) ==
              ~s{"( tag:inbox ) and from:alice"}
   end
 
@@ -478,17 +517,22 @@ defmodule Aimax.NotmuchTest do
     assert out =~ "0002"
     assert out =~ "+important"
   end
+
   test "structured filters can be removed without parsing query text", %{dir: _} do
     eval!(~s{(run-command "notmuch-inbox")})
-    eval!(~s{(buffer-set-local! "*notmuch*" 'notmuch-query-base "tag:inbox and from:alice")})
-    eval!(~s{(buffer-set-local! "*notmuch*" 'notmuch-query-filters '())})
+    press("s")
+    type("tag:inbox and from:alice")
+    press("RET")
     press("/")
     type("subject:report")
     press("RET")
-    assert eval!(~s{(buffer-local "*notmuch*" 'notmuch-query)}) ==
+
+    assert eval!(~s{(nm--query-of "*notmuch*")}) ==
              ~s{"( tag:inbox and from:alice ) and subject:report"}
-    eval!(~s{(run-command "notmuch-unfilter-last")})
-    assert eval!(~s{(buffer-local "*notmuch*" 'notmuch-query)}) ==
+
+    press("\\")
+
+    assert eval!(~s{(nm--query-of "*notmuch*")}) ==
              ~s{"tag:inbox and from:alice"}
   end
 end

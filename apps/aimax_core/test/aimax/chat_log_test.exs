@@ -103,6 +103,30 @@ defmodule Aimax.ChatLogTest do
     refute Buffer.get_local(buf, "chat-log-id")
   end
 
+  test "chat-restore reopens a reset conversation from the local archive" do
+    slug =
+      eval_str!("""
+      (execute* "recover this" '(backend "stub" script
+        (((type chunk text "Recovered answer.\\n")))))
+      """)
+
+    buf = "*chat:#{slug}*"
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
+
+    path = eval_str!(~s[(chat-log-path "#{buf}")])
+    assert eventually(fn -> File.exists?(path) end)
+
+    eval!(~s[(begin (switch-to-buffer! "#{buf}") (run-command "chat-reset") #t)])
+    eval!(~s[(run-command "chat-restore")])
+    Editor.minibuffer_set_input(Path.basename(path))
+    eval!("(minibuffer-confirm!)")
+
+    assert eval_str!("(current-buffer)") == path
+    assert Buffer.get_local(path, "mode-name") == "chat-mode"
+    assert Buffer.text(path) =~ "recover this"
+    assert Buffer.text(path) =~ "Recovered answer."
+  end
+
   defp eventually(fun, tries \\ 40) do
     cond do
       fun.() -> true

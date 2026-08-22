@@ -24,12 +24,16 @@ Before an acceptance run or suite change, load
 ```sh
 bin/test-fast                               # the suite in 4 partitions; all four apps must stay green
 mix test                                    # one lane — use it when one readable log matters
-pkill -f "mix run"; sleep 1
-(mix run --no-halt >> ~/.aimax/daemon.log 2>&1 &); sleep 6
+mix aimax.restart                           # stop, start, and wait for the daemon
+mix aimax.reload apps/aimax_core/priv/packages/foo.scm   # one package, no restart
+mix aimax.reload --all                      # every package plus ~/.aimax/init.scm
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4004/
 ```
 
-A daemon restart is required to reload `priv/*.scm`. Browser clients reload
+Never `pkill` a daemon: the tree can hold other sessions and other
+worktrees, and `mix aimax.restart` stops this one through its own socket.
+A restart is required for Elixir code and for `priv/editor.scm`. A package
+in `priv/packages/` reloads without one. Browser clients reload
 themselves (boot-id). Editor state (buffers, windows, theme) is restored from
 `~/.aimax/desktop.etf`. **Rule: everything survives a reload** — file buffers
 reopen via `(visit)`; non-file buffers (chat, agent threads, scratch) persist

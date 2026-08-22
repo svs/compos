@@ -37,7 +37,10 @@ defmodule Aimax.Core.KeyDispatch do
     %{minibuffer: mb, pending: pending, completion: completion} = snapshot
     transient = Map.get(snapshot, :transient)
 
+    capture = Map.get(snapshot, :key_capture)
+
     cond do
+      capture -> capture_key(key, pending, capture)
       mb -> minibuffer_key(key, mb, pending)
       completion -> completion_key(key, pending)
       transient -> transient_key(key, pending)
@@ -80,6 +83,31 @@ defmodule Aimax.Core.KeyDispatch do
             Editor.completion_dismiss()
             buffer_key(key, pending)
         end
+    end
+  end
+
+  # --- one-shot key capture --------------------------------------------------
+  # Scheme arms the capture (describe-key does). The next COMPLETE key
+  # sequence runs the armed command instead of its own binding, and that
+  # command reads the sequence back with (last-keys). A prefix accumulates
+  # here the way it does everywhere else, so the capture reads "C-x C-f"
+  # as one sequence.
+
+  defp capture_key(key, pending, command) do
+    Editor.user_acted()
+    seq = pending ++ [key]
+
+    case lookup_esc_meta(seq) do
+      :prefix ->
+        Editor.set_pending(seq)
+        Editor.set_echo(Enum.join(seq, " ") <> "-")
+
+      _ ->
+        Editor.set_pending([])
+        Editor.set_key_capture(nil)
+        Editor.set_last_keys(seq)
+        Editor.set_echo("")
+        run(command)
     end
   end
 

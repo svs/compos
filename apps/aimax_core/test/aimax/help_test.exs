@@ -40,7 +40,7 @@ defmodule Aimax.HelpTest do
     # the page is markdown: a title, the mode's own words, a key table
     assert text =~ "# switch-mode"
     assert text =~ "The buffer switcher"
-    assert text =~ "| key | command | what it does |"
+    assert text =~ "| keys | command | what it does |"
     assert text =~ "| `RET` | [`switch-visit`](aimax:def/switch-visit) |"
     assert text =~ "Visit the selected row"
 
@@ -72,7 +72,7 @@ defmodule Aimax.HelpTest do
 
     assert text =~ "## This buffer"
     assert text =~ "## Everywhere"
-    assert text =~ "| `C-x C-b` | [`switch-to-buffer`](aimax:def/switch-to-buffer) |"
+    assert text =~ "[`switch-to-buffer`](aimax:def/switch-to-buffer)"
 
     [local, global] = [
       :binary.match(text, "## This buffer"),
@@ -90,8 +90,8 @@ defmodule Aimax.HelpTest do
 
     text = Buffer.text("*Help*")
     assert text =~ "# `C-x C-f`"
-    assert text =~ "## [`find-file`](aimax:def/find-file) — a command"
-    assert text =~ "This binding is global"
+    assert text =~ "**[`find-file`](aimax:def/find-file)** — Visit a file"
+    assert text =~ "global, in every buffer"
 
     # the key described is a key not pressed: find-file never prompted
     assert Editor.snapshot().minibuffer == nil
@@ -108,7 +108,7 @@ defmodule Aimax.HelpTest do
     text = Buffer.text("*Help*")
     assert text =~ "# `RET`"
     assert text =~ "switch-visit"
-    assert text =~ "This binding is local to `*switch*`."
+    assert text =~ "local to this buffer"
   end
 
   test "C-h k over an unbound key says so, and the capture ends" do
@@ -117,7 +117,7 @@ defmodule Aimax.HelpTest do
     press(["C-h", "k"])
     press(["C-x", "C-M-y"])
 
-    assert Buffer.text("*Help*") =~ "`C-x C-M-y` runs no command here."
+    assert Buffer.text("*Help*") =~ "No command runs this key."
 
     # one shot only: the next key runs its own command again
     press(["C-x", "C-f"])
@@ -132,7 +132,7 @@ defmodule Aimax.HelpTest do
     press(["C-x", "C-f"])
 
     # the page draws the name as a link the client can click
-    assert Buffer.text("*Help*") =~ "## [`find-file`](aimax:def/find-file)"
+    assert Buffer.text("*Help*") =~ "**[`find-file`](aimax:def/find-file)**"
 
     # following it lands in the file that defines find-file, at the form
     eval!(~s{(preview-follow-link! (active-window) "aimax:def/find-file")})
@@ -213,7 +213,7 @@ defmodule Aimax.HelpTest do
 
     press("M-?")
     text = Buffer.text("*Help*")
-    assert text =~ "Group: `hg-grp-#{n}`"
+    assert text =~ "group `hg-grp-#{n}`"
     assert text =~ "where the help test lives"
     press("q")
 
@@ -237,9 +237,9 @@ defmodule Aimax.HelpTest do
     text = Buffer.text("*Help*")
 
     assert text =~ "## [`split-window-right`](aimax:def/split-window-right) — a command"
-    assert text =~ "Bound to `C-x 3`"
+    assert text =~ "bound to `C-x 3`"
     # and the page still says where the reader is
-    assert text =~ "Buffer `*zz-help*` in `fundamental-mode`."
+    assert text =~ "`*zz-help*` in `fundamental-mode`"
   end
 
   test "M-? describes a public function at point by its signature" do
@@ -248,7 +248,7 @@ defmodule Aimax.HelpTest do
                     (goto-char! 3))})
 
     press("M-?")
-    assert Buffer.text("*Help*") =~ "## [`help-doc!`](aimax:def/help-doc!) — a function"
+    assert Buffer.text("*Help*") =~ "## [`help-doc!`](aimax:def/help-doc%21) — a function"
     assert Buffer.text("*Help*") =~ "(help-doc! TITLE MARKDOWN)"
   end
 

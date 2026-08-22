@@ -58,6 +58,62 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (define *notmuch-search-buffer* "*notmuch*")
 
+;; A search has one base and a stack of added terms. Commands change only
+;; these two locals. The effective query is derived, so no command can leave
+;; the rows and the filter stack describing different searches.
+(define (nm--query-with-filters base filters)
+  (if (null? filters)
+      base
+      (let ((filter (car filters)))
+        (if (and (pair? filter) (equal? (car filter) "only"))
+            (cadr filter)
+            (string-append "( "
+                           (nm--query-with-filters base (cdr filters))
+                           " ) and " filter)))))
+
+(define (nm--query-base-of buf)
+  (let ((base (buffer-local buf 'notmuch-query-base)))
+    (if base
+        base
+        ;; Migrate a buffer saved before the query stack became authoritative.
+        (let ((legacy (or (buffer-local buf 'notmuch-query)
+                          notmuch-default-query)))
+          (buffer-set-local! buf 'notmuch-query-base legacy)
+          (buffer-set-local! buf 'notmuch-query-filters '())
+          (buffer-set-local! buf 'notmuch-query #f)
+          legacy))))
+
+(define (nm--query-filters-of buf)
+  (or (buffer-local buf 'notmuch-query-filters) '()))
+
+(define (nm--query-of buf)
+  (nm--query-with-filters (nm--query-base-of buf)
+                          (nm--query-filters-of buf)))
+
+(define (nm--query-reset! buf query)
+  (buffer-set-local! buf 'notmuch-query-base query)
+  (buffer-set-local! buf 'notmuch-query-filters '())
+  ;; Keep a restored legacy local inert. The stack now owns the query.
+  (buffer-set-local! buf 'notmuch-query #f))
+
+(define (nm--query-push! buf term)
+  (nm--query-base-of buf)
+  (buffer-set-local! buf 'notmuch-query-filters
+    (cons term (nm--query-filters-of buf))))
+
+(define (nm--query-push-only! buf term)
+  (nm--query-base-of buf)
+  (buffer-set-local! buf 'notmuch-query-filters
+    (cons (list "only" term) (nm--query-filters-of buf))))
+
+(define (nm--query-pop! buf)
+  (let ((filters (nm--query-filters-of buf)))
+    (if (null? filters)
+        #f
+        (begin
+          (buffer-set-local! buf 'notmuch-query-filters (cdr filters))
+          #t))))
+
 ;;; --- CLI plumbing -------------------------------------------------------------
 
 (define (nm--quote s)
@@ -220,13 +276,16 @@ when a message has no text/plain part." 'group 'notmuch)
     'remap '(("next-line" "notmuch-next") ("previous-line" "notmuch-prev"))))
 
 (define (nm--open-index! query)
-  (let ((buf *notmuch-search-buffer*))
+  (let* ((buf *notmuch-search-buffer*)
+         (cached? (and (buffer-exists? buf)
+                       (pair? (buffer-local buf 'list-entries)))))
     (unless (buffer-exists? buf) (buffer-create buf))
-    (buffer-set-local! buf 'notmuch-query-base query)
-    (buffer-set-local! buf 'notmuch-query-filters '())
-    (buffer-set-local! buf 'notmuch-query query)
+    (nm--query-reset! buf query)
     (switch-to-buffer! buf)
     (set-mode! "notmuch-mode")
+    ;; The mode setup can reuse cached rows. A mailbox selection requests
+    ;; current rows for its new base query.
+    (when cached? (nm--refresh! buf))
     (list-goto-first-entry buf)))
 
 (define-command "notmuch-inbox" "Open the mail index on the default query"
@@ -435,9 +494,7 @@ when a message has no text/plain part." 'group 'notmuch)
     (let ((buf (current-buffer)))
       (minibuffer-read "Notmuch search: " '()
         (lambda (q)
-          (buffer-set-local! buf 'notmuch-query-base q)
-          (buffer-set-local! buf 'notmuch-query-filters '())
-          (buffer-set-local! buf 'notmuch-query q)
+          (nm--query-reset! buf q)
           (nm--refresh! buf)
           (goto-char! 0) (next-line!) (beginning-of-line!))))))
 
@@ -481,7 +538,7 @@ when a message has no text/plain part." 'group 'notmuch)
 (define-command "notmuch-smart-untag" "Remove the searched-for tag from this thread"
   (lambda ()
     (let* ((buf (current-buffer))
-           (query (or (buffer-local buf 'notmuch-query) ""))
+           (query (nm--query-of buf))
            (th (nm--thread-at buf)))
       (cond ((not th) (message "No thread on this line"))
             ((and (string-prefix? "tag:" query)
@@ -544,13 +601,6 @@ when a message has no text/plain part." 'group 'notmuch)
             (let ((e (assoc key notmuch-jump-searches)))
               (when e (nm--open-index! (caddr e)))))))))
 
-(define (nm--query-with-filters base filters)
-  (if (null? filters)
-      base
-      (string-append "( "
-                     (nm--query-with-filters base (cdr filters))
-                     " ) and " (car filters))))
-
 (define-command "notmuch-filter" "Narrow this search with more terms (and)"
   (lambda ()
     (let ((buf (current-buffer)))
@@ -558,28 +608,16 @@ when a message has no text/plain part." 'group 'notmuch)
         (lambda (terms)
           (let ((term (string-trim terms)))
             (unless (equal? term "")
-              (let* ((base (or (buffer-local buf 'notmuch-query-base)
-                               (nm--query-of buf)))
-                     (filters (or (buffer-local buf 'notmuch-query-filters) '()))
-                     (next (cons term filters)))
-                (buffer-set-local! buf 'notmuch-query-base base)
-                (buffer-set-local! buf 'notmuch-query-filters next)
-                (buffer-set-local! buf 'notmuch-query
-                  (nm--query-with-filters base next))
-                (nm--refresh! buf)
-                (goto-char! 0) (next-line!) (beginning-of-line!)))))))))
+              (nm--query-push! buf term)
+              (nm--refresh! buf)
+              (goto-char! 0) (next-line!) (beginning-of-line!))))))))
 
 (define-command "notmuch-unfilter-last" "Remove the most recently added notmuch filter"
   (lambda ()
-    (let* ((buf (current-buffer))
-           (filters (buffer-local buf 'notmuch-query-filters))
-           (base (buffer-local buf 'notmuch-query-base)))
-      (if (or (not filters) (null? filters) (not base))
+    (let ((buf (current-buffer)))
+      (if (not (nm--query-pop! buf))
           (message "No structured notmuch filters to remove")
-          (let ((rest (cdr filters)))
-            (buffer-set-local! buf 'notmuch-query-filters rest)
-            (buffer-set-local! buf 'notmuch-query
-              (nm--query-with-filters base rest))
+          (begin
             (nm--refresh! buf)
             (message "Removed last notmuch filter"))))))
 
@@ -602,15 +640,12 @@ when a message has no text/plain part." 'group 'notmuch)
             (if (equal? email "")
                 (message "Could not extract the sender")
                 (begin
-                  (buffer-set-local! buf 'notmuch-query (string-append "from:" email))
+                  (nm--query-push-only! buf (string-append "from:" email))
                   (nm--refresh! buf)
                   (goto-char! 0) (next-line!) (beginning-of-line!)
                   (message (string-append "from:" email)))))))))
 
 ;;; --- marks: dired-style bulk operations via the m tag ---------------------------
-
-(define (nm--query-of buf)
-  (or (buffer-local buf 'notmuch-query) notmuch-default-query))
 
 ;; bulk queries carry parens — shell syntax unless quoted as one argument
 (define (nm--tag-marked! buf changes)
@@ -648,7 +683,7 @@ when a message has no text/plain part." 'group 'notmuch)
 (define-command "notmuch-filter-marked" "Show only the marked threads"
   (lambda ()
     (let ((buf (current-buffer)))
-      (buffer-set-local! buf 'notmuch-query "tag:m")
+      (nm--query-push-only! buf "tag:m")
       (nm--refresh! buf)
       (goto-char! 0) (next-line!) (beginning-of-line!))))
 

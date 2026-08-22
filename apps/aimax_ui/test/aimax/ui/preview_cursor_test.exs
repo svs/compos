@@ -6,6 +6,9 @@ defmodule Aimax.Ui.PreviewCursorTest do
   @faces %{}
   @pt ~s(<span class="pt"></span>)
 
+  defp strip_anchors(html),
+    do: String.replace(html, ~r/<span class="ln" data-p="\d+"><\/span>/, "")
+
   test "the cursor span sits at point in rendered markdown" do
     html = EditorLive.preview_doc("markdown", "hello world", 5, @faces, false)
     assert html =~ "hello#{@pt} world"
@@ -59,10 +62,134 @@ defmodule Aimax.Ui.PreviewCursorTest do
     assert html =~ "#{@pt}two"
   end
 
-  test "point on a fence line hides the cursor instead of breaking the fence" do
+  test "point on the opening fence shows the cursor in the code" do
     html = EditorLive.preview_doc("markdown", "```\ncode\n```\n", 1, @faces, false)
-    refute html =~ @pt
     assert html =~ "<code"
+    assert html =~ "#{@pt}code"
+  end
+
+  test "point on the closing fence shows the cursor at the end of the code" do
+    text = "```\ncode\n```\n"
+    at = (:binary.match(text, "```\n", scope: {5, byte_size(text) - 5}) |> elem(0)) + 1
+    html = EditorLive.preview_doc("markdown", text, at, @faces, false)
+
+    assert html =~ "<code"
+    assert html =~ "code#{@pt}"
+  end
+
+  test "a table inside a code fence keeps the cursor where point is" do
+    text = "```\n| a | b |\n```\n"
+    html = EditorLive.preview_doc("markdown", text, 4, @faces, false)
+
+    assert html =~ "#{@pt}| a | b |"
+  end
+
+  @table """
+  intro
+
+  | keys | command |
+  | --- | --- |
+  | `a` | `one` |
+  | `b` | `two` |
+  """
+
+  test "point at the start of a table row keeps every row of the table" do
+    start = :binary.match(@table, "| `a`") |> elem(0)
+    html = EditorLive.preview_doc("markdown", @table, start, @faces, false)
+
+    assert length(Regex.scan(~r/<tr>/, html)) == 3
+    assert html =~ @pt
+  end
+
+  test "point at the end of a table row keeps the table" do
+    stop = (:binary.match(@table, "| `a` | `one` |") |> elem(0)) + byte_size("| `a` | `one` |")
+    html = EditorLive.preview_doc("markdown", @table, stop, @faces, false)
+
+    assert length(Regex.scan(~r/<tr>/, html)) == 3
+    assert html =~ @pt
+  end
+
+  test "point on the header row keeps the table" do
+    for at <- 0..byte_size("| keys | command |") do
+      start = (:binary.match(@table, "| keys") |> elem(0)) + at
+      html = EditorLive.preview_doc("markdown", @table, start, @faces, false)
+
+      assert length(Regex.scan(~r/<tr>/, html)) == 3, "point #{at} of the header row broke the table"
+    end
+  end
+
+  test "point on the alignment row shows the cursor in the first body row" do
+    start = :binary.match(@table, "| --- |") |> elem(0)
+    html = EditorLive.preview_doc("markdown", @table, start + 3, @faces, false)
+
+    assert length(Regex.scan(~r/<tr>/, html)) == 3
+    assert html =~ @pt
+  end
+
+  test "point on the blank line above a table shows the cursor in the table" do
+    start = (:binary.match(@table, "intro") |> elem(0)) + byte_size("intro") + 1
+    html = EditorLive.preview_doc("markdown", @table, start, @faces, false)
+
+    assert length(Regex.scan(~r/<tr>/, html)) == 3
+    assert html =~ @pt
+  end
+
+  test "point on a rule line keeps the rule and shows the cursor below it" do
+    html = EditorLive.preview_doc("markdown", "one\n\n---\n\ntwo\n", 6, @faces, false)
+
+    assert html =~ "<hr"
+    assert html =~ "#{@pt}two"
+  end
+
+  test "point on a Setext underline keeps the heading and shows the cursor in it" do
+    html = EditorLive.preview_doc("markdown", "Title\n=====\n\nbody\n", 8, @faces, false)
+
+    assert html =~ "<h1>"
+    assert html =~ "Title#{@pt}"
+  end
+
+  test "point inside a link target shows the cursor at the end of the label" do
+    text = "see [the docs](http://example.com/page) here\n"
+    at = (:binary.match(text, "http://") |> elem(0)) + 4
+    html = EditorLive.preview_doc("markdown", text, at, @faces, false)
+
+    assert html =~ ~s(<a href="http://example.com/page")
+    assert html =~ "docs#{@pt}"
+  end
+
+  test "point inside a character renders the page instead of raising" do
+    text = "a \u00b7 b\n"
+    html = EditorLive.preview_doc("markdown", text, 3, @faces, false)
+
+    assert html =~ @pt
+  end
+
+  test "every source line that draws text carries its byte offset" do
+    text = "# Title\n\nbody line\n\n| a | b |\n| --- | --- |\n| c | d |\n"
+    html = EditorLive.preview_doc("markdown", text, 0, @faces, false)
+
+    at = Regex.scan(~r/<span class="ln" data-p="(\d+)"><\/span>/, html) |> Enum.map(&List.last/1)
+
+    # the heading (past its marker), the body line, the header row, the
+    # body row, and the empty last line — the blank lines and the alignment
+    # row draw nothing, so they name nothing
+    assert at == ["2", "9", "22", "46", "54"]
+  end
+
+  test "a rendered line's anchor sits in the line it names" do
+    text = "one\n\ntwo\n"
+    html = EditorLive.preview_doc("markdown", text, 0, @faces, false)
+
+    # the anchor stands at the head of its line, the cursor inside it
+    assert html =~ ~s(<span class="ln" data-p="0"></span><span class="pt"></span>one)
+    assert html =~ ~s(<span class="ln" data-p="5"></span>two)
+  end
+
+  test "the code block head is chrome, not source" do
+    text = "```elixir\ncode\n```\n"
+    html = EditorLive.preview_doc("markdown", text, 0, @faces, false)
+
+    assert html =~ ~s(data-chrome="1")
   end
 
   test "Morg header arguments keep a fenced block in the Markdown preview" do
@@ -75,7 +202,7 @@ defmodule Aimax.Ui.PreviewCursorTest do
 
     html = EditorLive.preview_doc("markdown", text, 0, @faces, false)
 
-    assert html =~ ~s(<div class="code-block-head">)
+    assert html =~ ~s(<div class="code-block-head" data-chrome="1">)
     assert html =~ ~r/<span class="code-lang">\s*scheme\s*<\/span>/
     assert html =~ ~r/<kbd>\s*C-c C-c\s*<\/kbd>\s*run/
 
@@ -83,7 +210,8 @@ defmodule Aimax.Ui.PreviewCursorTest do
              ~r/<kbd>\s*C-c C-x\s*<\/kbd>\s*tangle → <code>examples\/group-noise.scm<\/code>/
 
     assert html =~ ~s(<pre><code class="scheme">)
-    assert html =~ "(define (group-noise-next noise)\n  noise)"
+    # every source line carries its anchor, code lines included
+    assert strip_anchors(html) =~ "(define (group-noise-next noise)\n  noise)"
     refute html =~ ~s(class="inline")
   end
 

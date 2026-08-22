@@ -772,6 +772,39 @@
 (public! 'chat-log-files
   "(chat-log-files) — every archived conversation as a .chat path")
 
+;; Reset deliberately forgets 'chat-log-id, so recovery cannot depend on the
+;; current buffer remembering which conversation came before it.  Present the
+;; local archive newest first instead; the timestamped basenames are unique and
+;; concise enough for completion, while the callback resolves the full path.
+(define (chat-log-files-newest)
+  (map cadr
+    (sort
+      (map (lambda (path) (list (- 0 (file-mtime path)) path))
+           (chat-log-files)))))
+
+(define (chat-log-leaf path)
+  (cadr (path-split path)))
+
+(define (chat-log-path-by-leaf leaf paths)
+  (let ((matches
+          (filter (lambda (path) (equal? (chat-log-leaf path) leaf)) paths)))
+    (and (pair? matches) (car matches))))
+
+(define-command "chat-restore" "Restore a locally archived conversation"
+  (lambda ()
+    (let ((paths (chat-log-files-newest))
+          (g (frame-group)))
+      (if (null? paths)
+          (message "No archived chats")
+          (minibuffer-read* "Restore chat: " (map chat-log-leaf paths)
+            (list
+              (list 'confirm
+                (lambda (leaf)
+                  (let ((path (chat-log-path-by-leaf leaf paths)))
+                    (if path
+                        (visit-in-group path g)
+                        (message "No such archived chat")))))))))))
+
 ;; a group title becomes a file name: keep word characters, dot and dash
 (define (chat-log-name g)
   (let loop ((s g))

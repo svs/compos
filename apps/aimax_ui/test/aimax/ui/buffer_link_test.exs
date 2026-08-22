@@ -35,7 +35,7 @@ defmodule Aimax.Ui.BufferLinkTest do
     "http://localhost:#{port}"
   end
 
-  test "C-c l copies an unescaped link to this buffer and line", %{conn: conn} do
+  test "C-c l copies the link to this buffer and line", %{conn: conn} do
     buf = "/tmp/link #{System.unique_integer([:positive])}.txt"
     Editor.set_window_buffer(buf)
     :ok = Buffer.append(buf, "alpha\nbravo\ncharlie\n", source: :editor)
@@ -44,7 +44,8 @@ defmodule Aimax.Ui.BufferLinkTest do
     keys(view, ["M-<", "C-n"])
     keys(view, ["C-c", "l"])
 
-    want = "#{base()}/b/#{buf}?line=2"
+    # the buffer name is one encoded segment, so a path keeps its slashes
+    want = "#{base()}/b/#{URI.encode(buf, &URI.char_unreserved?/1)}?line=2"
     assert_push_event(view, "clipboard", %{text: ^want})
     # C-y pastes the same link in a client that cannot write the clipboard
     assert Editor.kill_top() == want

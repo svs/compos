@@ -255,13 +255,18 @@ defmodule Aimax.Ui.EditorLiveTest do
   test "a completed rich chat accepts the next input through the UI", %{conn: conn} do
     before = MapSet.new(Aimax.Core.Agent.list())
 
+    # the script rides a CONNECTOR, not one call's opts: the second turn
+    # re-attaches, and a chat that only remembers a connector name would
+    # come back on the default backend and hang
     {:ok, _} =
       Aimax.Core.Session.eval("""
-      (execute* "first" '(backend "stub" script
-        (((type tool-call id "tc1" title "Large completed edit" kind "edit" status "pending")
+      (define-connector! "zz-ui-stub" '(backend "stub" script
+        (((type tool-call id "tc1" title "Large completed edit" kind "other" status "pending")
           (type tool-update id "tc1" status "completed" text "#{String.duplicate("changed line", 2_000)}"))
          ((type chunk text "Accepted next input.")))))
       """)
+
+    {:ok, _} = Aimax.Core.Session.eval(~s{(execute* "first" '(connector "zz-ui-stub"))})
 
     [slug] = MapSet.difference(MapSet.new(Aimax.Core.Agent.list()), before) |> MapSet.to_list()
     on_exit(fn -> Aimax.Core.Agent.kill(slug) end)

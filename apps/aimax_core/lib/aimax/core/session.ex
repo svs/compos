@@ -58,7 +58,7 @@ defmodule Aimax.Core.Session do
   """
   def eval(src, fid \\ nil, timeout \\ 30_000, lane \\ nil) do
     fid = fid(fid)
-    Lane.run(lane || :ui, fn from -> exec_eval(src, fid, from) end, timeout, "eval")
+    Lane.run(lane || :ui, fn from -> exec_eval(src, fid, from) end, timeout, eval_label(src))
   end
 
   @doc "The live interpreter handle (constant after init)."
@@ -150,6 +150,14 @@ defmodule Aimax.Core.Session do
   def call_named(fun, args, fid \\ nil, timeout \\ 30_000, lane \\ nil) when is_binary(fun) do
     fid = fid(fid)
     Lane.run(lane || :ui, fn _from -> exec_call_named(fun, args, fid) end, timeout, "call #{fun}")
+  end
+
+  # A slow eval holds its lane, and the lane log names the job. "eval"
+  # alone names nothing: it took a labelled run to learn that the nine
+  # second jobs in the suite were all apropos. Carry the source, flattened
+  # and short, so the log line is the diagnosis.
+  defp eval_label(src) do
+    "eval " <> (src |> String.replace(~r/\s+/, " ") |> String.slice(0, 70))
   end
 
   defp fid(nil), do: Frame.current()

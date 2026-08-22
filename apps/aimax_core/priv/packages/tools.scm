@@ -288,6 +288,58 @@
 ;;; appear somewhere in the entry. A query that finds nothing falls back to
 ;;; edit distance, so a near-miss on a name still lands.
 
+;; catalog-entry walks the whole catalog, and apropos enriches every hit
+;; through it. The empty query hits everything: about 1300 hits across a
+;; 1275 entry catalog is 1.6 million walks, and the search held the :ui
+;; lane for nine seconds. Build one index per search instead.
+;;
+;; This Scheme has no hash table, so the index buckets the catalog by the
+;; first character of the name. A bucket holds tens of entries where the
+;; catalog holds thousands, and a lookup reads one bucket.
+
+;; A component answers to its qualified name, and the bucket must still
+;; find it: "ui/card" and "card" both bucket under "c".
+;; apropos binds this for the span of one search. recipes.scm also calls
+;; apropos--enrich, and it gets #f here and the linear walk, unchanged.
+(define *apropos--index* #f)
+
+(define (apropos--bucket-key name)
+  (let* ((n (catalog--string (or name "")))
+         (cut (string-rindex n "/"))
+         (base (if cut (substring n (+ cut 1) (string-length n)) n)))
+    (if (equal? base "") "" (string-downcase (substring base 0 1)))))
+
+(define (apropos--index)
+  (let* ((es (catalog))
+         (keyed (map (lambda (e)
+                       (list (apropos--bucket-key (catalog--get e 'name)) e))
+                     es))
+         (keys (dedupe-names (map car keyed))))
+    (map (lambda (k)
+           (list k (map (lambda (p) (car (cdr p)))
+                        (filter (lambda (p) (equal? (car p) k)) keyed))))
+         keys)))
+
+;; the catalog entry for KIND and NAME, read from the index apropos built.
+;; With no index it falls back to the linear walk, so a caller outside a
+;; search keeps working.
+(define (apropos--lookup index kind name)
+  (if (not index)
+      (catalog-entry kind name)
+      (let* ((k (catalog--string kind))
+             (n (catalog--string name))
+             (cell (assoc (apropos--bucket-key n) index)))
+        (and cell
+             (let loop ((es (car (cdr cell))))
+               (cond ((null? es) #f)
+                     ((and (equal? (catalog--string (or (catalog--get (car es) 'kind) "")) k)
+                           (if (and (equal? k "component") (string-contains? n "/"))
+                               (equal? (catalog--get (car es) 'qualified-name) n)
+                               (equal? (catalog--string
+                                         (or (catalog--get (car es) 'name) "")) n)))
+                      (car es))
+                     (else (loop (cdr es)))))))))
+
 (define (apropos--words q)
   (filter (lambda (w) (not (equal? w "")))
           (string-split (string-downcase (string-trim q)) " ")))
@@ -317,7 +369,7 @@
 
 (define (apropos--key row words)
   (and (apropos--hit? (string-append (car row) " " (nth 1 row)) words)
-       (let ((cmd (catalog-entry 'command (nth 1 row))))
+       (let ((cmd (apropos--lookup *apropos--index* 'command (nth 1 row))))
          (append (list 'kind "key" 'name (car row) 'runs (nth 1 row)
                        'domain "keys" 'effects
                        (if cmd (catalog--get cmd 'effects) '("read")))
@@ -340,7 +392,8 @@
   (let* ((kind (or catalog-kind (plist-get hit 'kind)))
          (name (or (and (equal? kind "component") (plist-get hit 'qualified-name))
                    (plist-get hit 'name) (plist-get hit 'task)))
-         (e (and name (catalog-entry (string->symbol kind) name))))
+         (e (and name (apropos--lookup *apropos--index*
+                                       (string->symbol kind) name))))
     (if (not e)
         hit
         (append hit
@@ -425,6 +478,12 @@
 ;; Recipes come first: a task-level hit beats four name-level ones, and it
 ;; is the answer the caller actually wanted.
 (define (apropos query &rest filters)
+  (set! *apropos--index* (apropos--index))
+  (let ((result (apropos--search query filters)))
+    (set! *apropos--index* #f)
+    result))
+
+(define (apropos--search query filters)
   (let* ((words (apropos--words query))
          (hits (append
                  (if (boundp (quote recipe-search)) (recipe-search query) '())

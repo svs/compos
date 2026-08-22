@@ -49,8 +49,15 @@ defmodule Aimax.Core do
             self() == Process.whereis(Aimax.Core.Editor) ->
               :ok
 
-            self() == Process.whereis(Aimax.Core.Session) ->
-              unless Process.get(:aimax_inline_runtime_restore), do: restore_runtime_later(name)
+            # Scheme evaluates in a Lane worker now, not inside Session, so
+            # asking for the Session pid here answered no forever: a wake
+            # driven by Scheme fell through to the synchronous restore and
+            # called back into the lane it was already running on. Ask the
+            # question the code means — am I inside an eval? — and let
+            # switch-to-buffer! say when it owns the restore itself.
+            Registry.keys(Aimax.Core.LaneRegistry, self()) != [] ->
+              unless Process.get(:aimax_inline_runtime_restore, false),
+                do: restore_runtime_later(name)
 
             true ->
               restore_runtime(name)

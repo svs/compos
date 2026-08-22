@@ -1623,12 +1623,17 @@ defmodule Aimax.Core.Editor do
   defp read_only_buffer?(buffer), do: Buffer.exists?(buffer) and Buffer.read_only?(buffer)
 
   # does the read-only map claim this sequence, and is the buffer read-only?
-  defp readonly_hit?(state, seq, buffer) do
+  # The keys are lists, so a caller that hands over anything else must not
+  # reach List.starts_with?: it raises, and a raise here takes the Editor
+  # and every local keymap with it.
+  defp readonly_hit?(state, seq, buffer) when is_list(seq) do
     map = readonly_map(state)
 
     (Map.has_key?(map, seq) or Enum.any?(Map.keys(map), &List.starts_with?(&1, seq))) and
       read_only_buffer?(buffer)
   end
+
+  defp readonly_hit?(_state, _seq, _buffer), do: false
 
   # the desktop's read-only tree: structure, tops, points, scroll state
   defp dtree(%{type: :leaf, id: id, buffer: b} = leaf) do

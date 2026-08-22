@@ -1270,7 +1270,7 @@ defmodule Aimax.Core.SchemeAPI do
       "key-for-command" => fn [name] -> Editor.key_for_command(name) end,
       # what a key sequence means here, without pressing it
       "key-binding" => fn [seq] ->
-        case Editor.lookup_key(seq) do
+        case Editor.lookup_key(key_seq(seq)) do
           {:command, name} -> name
           :prefix -> {:sym, "prefix"}
           _ -> false
@@ -1769,6 +1769,14 @@ defmodule Aimax.Core.SchemeAPI do
 
   # (fold-get BUF 'all) reads the union, the same word overlay-clear! uses
   defp fold_tag(tag), do: if(plain(tag) == "all", do: :all, else: plain(tag))
+
+  # A key sequence is a list of keys. Scheme writes one the way a person
+  # says it — "C-x b" — and the keymaps hold ["C-x", "b"]. Take either.
+  # A bare string reaching the keymap walk raises inside the Editor call,
+  # and an Editor that dies loses every buffer's local keymap.
+  defp key_seq(seq) when is_list(seq), do: Enum.map(seq, &plain/1)
+  defp key_seq(seq) when is_binary(seq), do: String.split(seq, " ", trim: true)
+  defp key_seq(seq), do: [plain(seq)]
 
   # System.cmd has no time limit, so a hung command would hold the caller —
   # and in the inline form the caller is the Session — forever. Run through

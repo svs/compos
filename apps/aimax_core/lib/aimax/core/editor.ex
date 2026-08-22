@@ -1129,6 +1129,11 @@ defmodule Aimax.Core.Editor do
       Enum.flat_map(state.mru, fn
         {:group, g} -> [["group", g]]
         b when is_binary(b) -> if b in Aimax.Core.buffer_names(), do: [["buffer", b]], else: []
+        # anything else is not a place the user went. Drop it, never raise
+        # on it: this runs inside Editor.handle_call, and a raise here kills
+        # the Editor and takes every buffer's local keymap with it. A chat
+        # that loses its keymap stops sending on RET.
+        _ -> []
       end)
 
     {:reply, rows, state}
@@ -1483,11 +1488,20 @@ defmodule Aimax.Core.Editor do
 
   defp put_frame(state, f), do: %{state | frames: Map.put(state.frames, f.id, f)}
 
-  defp bump_mru(state, buffer) do
-    if is_binary(buffer), do: Aimax.Core.BufferStore.touch(buffer)
-    if is_binary(buffer) and Buffer.exists?(buffer), do: Buffer.touch(buffer)
-    %{state | mru: Enum.take([buffer | List.delete(state.mru, buffer)], 500)}
+  # the history holds buffer names and group marks. A window with no buffer
+  # offers `false` here; it names no place, so it never enters the history.
+  defp bump_mru(state, buffer) when is_binary(buffer) do
+    Aimax.Core.BufferStore.touch(buffer)
+    if Buffer.exists?(buffer), do: Buffer.touch(buffer)
+    push_mru(state, buffer)
   end
+
+  defp bump_mru(state, {:group, _} = mark), do: push_mru(state, mark)
+
+  defp bump_mru(state, _other), do: state
+
+  defp push_mru(state, entry),
+    do: %{state | mru: Enum.take([entry | List.delete(state.mru, entry)], 500)}
 
   defp bump_frame(state, fid),
     do: %{state | frame_mru: [fid | List.delete(state.frame_mru, fid)]}

@@ -1083,6 +1083,27 @@ defmodule Aimax.EditorTest do
     assert echo() == "Buffer #{taken} already exists"
   end
 
+  test "a window with no buffer cannot kill the editor through the history", %{buf: buf} do
+    pid = Process.whereis(Editor)
+
+    # a window can hold `false` where a buffer name belongs. The history
+    # used to take it, and mru-list then raised inside Editor.handle_call:
+    # the Editor died and every buffer lost its local keymap, so RET in a
+    # chat stopped sending.
+    :sys.replace_state(pid, fn state -> %{state | mru: [false | state.mru]} end)
+
+    assert is_list(Editor.mru_all())
+    assert Process.whereis(Editor) == pid
+
+    # real entries still land, in order, in both shapes
+    :sys.replace_state(pid, fn state -> %{state | mru: [buf]} end)
+    Editor.mru_note_group("g")
+    Editor.set_window_buffer(buf)
+
+    assert Editor.mru_all() == [["buffer", buf], ["group", "g"]]
+    assert Process.whereis(Editor) == pid
+  end
+
   test "find-file TAB filename completion completes and descends directories" do
     root = Path.join(System.tmp_dir!(), "aimax-fc-#{System.unique_integer([:positive])}")
     File.mkdir_p!(Path.join(root, "subdir"))

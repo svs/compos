@@ -373,7 +373,7 @@
 ;; opaque ID belongs to the code and must never reach the screen. A caller
 ;; can hold an ID whose record is gone, so fall back to what it passed.
 (define (group-display-name g)
-  (or (group-name g) g))
+  (or (group-name g) (and (string? g) g) ""))
 
 ;; a group's metadata lives on its chat buffer: the chat is the group's
 ;; durable surface, so 'group-meta rides chat-identity-locals and
@@ -1117,7 +1117,16 @@
 
 ;; the group a joining buffer gets by default: the group the frame
 ;; stands in, else the most recent group in history. The buffer's own
-;; group is never the default — joining it is a no-op.
+;; group is never the default — joining it is a no-op. The answer is a
+;; display name, because the prompt and the candidate list show it.
+(define (group-join-default buf)
+  (let loop ((ids (list (frame-group)
+                        (group-resolve-id (frame-local 'previous-group)))))
+    (cond ((null? ids) #f)
+          ((and (car ids) (not (buffer-in-group? buf (car ids))))
+           (group-name (car ids)))
+          (else (loop (cdr ids))))))
+
 (define (group-visible-work-buffers)
   (dedupe-names
     (filter group-work-buffer?

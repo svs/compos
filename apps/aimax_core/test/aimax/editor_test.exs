@@ -2215,12 +2215,12 @@ defmodule Aimax.EditorTest do
     chat = "*chat:proj*"
     type("defmodule Rope do end")
 
+    # the stub runs in a Task, so an assertion here can never fail the
+    # test. Send the prompt back and assert in the test process instead.
+    test_pid = self()
+
     Application.put_env(:aimax_core, :llm_chat_fun, fn %{system: system} ->
-      # the per-send preamble enumerates the whole group, not one document
-      assert system =~ ~s{group "proj"}
-      assert system =~ ~s{"#{buf}"}
-      assert system =~ ~s{"#{notes}"}
-      assert system =~ "buffer-text"
+      send(test_pid, {:system, system})
       {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "aye"}]}}
     end)
 
@@ -2252,6 +2252,13 @@ defmodule Aimax.EditorTest do
     press(["RET"])
 
     assert eventually(fn -> Buffer.text(chat) =~ "aye" end)
+
+    # the per-send preamble enumerates the whole group, not one document
+    assert_receive {:system, system}, 5_000
+    assert system =~ ~s{group "proj"}
+    assert system =~ ~s{"#{buf}"}
+    assert system =~ ~s{"#{notes}"}
+
     assert group_name(buffer_group(chat)) == "proj"
     assert Editor.current_buffer() == notes
     assert Buffer.point(notes) == point
@@ -2301,8 +2308,14 @@ defmodule Aimax.EditorTest do
     end)
 
     # stand in a group, then drift to an ungrouped buffer
-    {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-set-local! "#{buf}" 'group "#{g}")})
-    {:ok, _} = Aimax.Core.Session.eval(~s{(switch-to-group! "#{g}")})
+    _id =
+      group_id!("""
+      (let ((id (group-record-create! "#{g}")))
+        (buffer-add-group! "#{buf}" id)
+        (switch-to-group! id)
+        id)
+      """)
+
     Editor.set_window_buffer(stray)
 
     # the prompt names the default; a bare RET joins it

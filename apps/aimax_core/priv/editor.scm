@@ -4590,7 +4590,8 @@
     (if (null? docs)
         ""
         (string-append
-          "\n\nThe user works in the editor buffer group \"" g "\":\n"
+          "\n\nThe user works in the editor buffer group \""
+          (group-display-name g) "\":\n"
           (fold (lambda (acc d)
                   (string-append acc "- \"" d "\""
                     (let ((m (buffer-local d 'mode-name)))
@@ -5085,7 +5086,7 @@
        ;; membership changes, not when the user switches buffers.
        (string-append
          "You are the user's companion in a side chat for their buffer "
-         "group \"" g "\". The group's buffers:\n"
+         "group \"" (group-display-name g) "\". The group's buffers:\n"
          (fold (lambda (acc d)
                  (string-append acc "- \"" d "\""
                    (let ((m (buffer-local d 'mode-name)))

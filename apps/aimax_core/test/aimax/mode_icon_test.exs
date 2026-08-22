@@ -88,7 +88,7 @@ defmodule Aimax.ModeIconTest do
     test "the switcher leads each row's annotation with the icon" do
       eval!(~s{(buffer-create "*zz-icon-chat*")})
       eval!(~s{(buffer-set-local! "*zz-icon-chat*" 'mode-name "chat-mode")})
-      eval!(~s{(run-command "ibuffer")})
+      eval!(~s{(run-command "switch-to-buffer")})
 
       # the annotation follows the name, and the icon leads it
       assert Buffer.text("*switch*") =~ ~r/\*zz-icon-chat\* +\x{F086}/u

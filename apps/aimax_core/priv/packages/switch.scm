@@ -580,14 +580,10 @@
   "Switch buffer: type to narrow, RET visits, C-g shows groups"
   (lambda () (switch-open! 'buffers)))
 
-(define-command "ibuffer" "The buffer switcher (the old ibuffer, merged into it)"
-  (lambda () (switch-open! 'buffers)))
-
 ;; C-x G: pick a context, then pick a buffer or file in it
 (define-command "switch-groups" "Switch group or project, then pick a buffer or file in it"
   (lambda () (switch-open! 'groups)))
 
-(global-set-key "C-x C-b" "switch-to-buffer")
 (global-set-key "C-x G" "switch-groups")
 
 (category! 'buffers)

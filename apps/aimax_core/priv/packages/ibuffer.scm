@@ -1,0 +1,212 @@
+;;; ibuffer.scm --- the buffer list as a dired: filter, mark, act.
+;;;
+;;; C-x C-b and M-x ibuffer open *ibuffer*. The table shows one row per
+;;; buffer in MRU order. It includes the modified flag, name, size, mode,
+;;; group, and file status. The keys follow traditional Emacs ibuffer:
+;;; m marks, * marks all rows, d flags for killing, x executes, u and U
+;;; unmark, RET visits, g refreshes, and q quits. / narrows the table.
+
+(define *ibuffer-buffer* "*ibuffer*")
+(add-display-rule! *ibuffer-buffer* 'popup)
+
+(define (ibuffer-workspace-buffer? b)
+  (let* ((root (and (boundp (quote daemon-workspace-root))
+                    (daemon-workspace-root)))
+         (path (or (buffer-path b)
+                   (and (string-prefix? "/" b) b))))
+    (or (not (string? root))
+        (not path)
+        (equal? path root)
+        (string-prefix? (string-append root "/") path))))
+
+(define (ibuffer-visible)
+  (list-keep *ibuffer-buffer*
+    (filter (lambda (b)
+              (and (not (equal? b *ibuffer-buffer*))
+                   (not (string-prefix? " " b))
+                   (ibuffer-workspace-buffer? b)))
+            (buffer-list-mru))))
+
+(define (ibuffer-total)
+  (length (filter (lambda (b)
+                    (and (not (equal? b *ibuffer-buffer*))
+                         (not (string-prefix? " " b))
+                         (ibuffer-workspace-buffer? b)))
+                  (buffer-list-mru))))
+
+(define (ibuffer-human n)
+  (cond ((>= n 1048576)
+         (string-append (number->string (quotient n 1048576)) "M"))
+        ((>= n 1024)
+         (string-append (number->string (quotient n 1024)) "k"))
+        (else (number->string n))))
+
+(define (ibuffer-cells buf b)
+  (list (if (buffer-modified? b) (list "●" "warn") "")
+        (list (buffer-icon b) "faint")
+        (list b (if (string-prefix? "*" b) "accent" #f))
+        (list (ibuffer-human (buffer-size b)) "dim")
+        (list (or (buffer-local b 'mode-name) "Fundamental") "faint")
+        (list (group-label (buffer-group b)) "accent")
+        (list (if (buffer-path b) "✓" "") "ok")))
+
+(define (ibuffer-meta buf)
+  (let* ((rows (list-entries buf))
+         (n (length rows))
+         (dirty (length (filter buffer-modified? rows))))
+    (string-append (number->string n) (if (= n 1) " buffer" " buffers")
+                   " · " (number->string dirty) " modified"
+                   " · most recent first")))
+
+(define (ibuffer-refresh!) (list-refresh! *ibuffer-buffer*))
+(define (ibuffer-current) (list-current *ibuffer-buffer*))
+(define (ibuffer-filter-push! f) (list-filter-push! *ibuffer-buffer* f))
+
+(domain! 'buffers)
+(effects! '(read))
+
+(define-command "ibuffer" "List buffers in a traditional management table"
+  (lambda ()
+    (let ((from (active-window)))
+      (buffer-create *ibuffer-buffer*)
+      ;; Typed narrowing is temporary. Keep any mode-specific filters.
+      (list-clear-query! *ibuffer-buffer*)
+      (display-buffer *ibuffer-buffer*)
+      (let ((w (window-showing-other *ibuffer-buffer* from)))
+        (if w (select-window! w) (switch-to-buffer! *ibuffer-buffer*)))
+      (set-mode! "ibuffer-mode")
+      (ibuffer-refresh!)
+      (list-goto-first-entry *ibuffer-buffer*))))
+
+(define-command "ibuffer-visit" "Visit the selected buffer in another window"
+  (lambda ()
+    (let ((b (ibuffer-current)))
+      (if (and b (buffer-known? b))
+          (let ((w (display-buffer-other-window! b)))
+            (run-command "quit-window")
+            (when (and w (window-exists? w)) (select-window! w))
+            (switch-to-buffer! b))
+          (message "no buffer here")))))
+
+(define-command "ibuffer-refresh" "Refresh the buffer table"
+  (lambda () (ibuffer-refresh!)))
+
+;; Keep the former public helper for callers and historical tests.
+(define (ibuffer-preview!)
+  (let ((b (ibuffer-current)))
+    (when (and b (buffer-known? b))
+      (display-buffer-other-window! b))))
+
+(define-command "ibuffer-next" "Move down and preview the selected buffer"
+  (lambda () (list-move! 1)))
+
+(define-command "ibuffer-prev" "Move up and preview the selected buffer"
+  (lambda () (list-move! -1)))
+
+(effects! '(destroy))
+
+(define-command "ibuffer-kill" "Kill the marked buffers, or the row at point"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (targets (list-targets buf))
+           (n 0))
+      (when (buffer-known? "*scratch*")
+        (display-buffer-other-window! "*scratch*"))
+      (for-each (lambda (b)
+                  (when (buffer-known? b)
+                    (list-unmark-key! buf b)
+                    (if (process-running? b) (process-kill! b))
+                    (buffer-kill! b)
+                    (set! n (+ n 1))))
+                targets)
+      (list-refresh! buf)
+      (message (if (and (= n 0) (pair? targets))
+                   "already gone"
+                   (string-append "killed " (number->string n) " "
+                                  (list-noun buf n)))))))
+
+(define *ibuffer-no-group* "(none)")
+
+(define (ibuffer-group! buf targets g)
+  (let ((n (length targets))
+        (out? (equal? g *ibuffer-no-group*)))
+    (for-each (lambda (b)
+                (buffer-set-local! b 'group (if out? #f g))
+                (when out? (buffer-set-local! b 'companion-of #f))
+                (list-unmark-key! buf b))
+              targets)
+    (list-refresh! buf)
+    (message (string-append (number->string n) " " (list-noun buf n)
+                            (if out? " left their group"
+                                (string-append " joined " g))))))
+
+(effects! '(write))
+
+(define-command "ibuffer-group"
+  "Put the marked buffers in a group, or take them out of one"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (targets (filter buffer-known? (list-targets buf)))
+           (n (length targets)))
+      (if (null? targets)
+          (message "no buffer here")
+          (minibuffer-read
+            (string-append "Group for " (number->string n) " "
+                           (list-noun buf n) ": ")
+            (cons (list *ibuffer-no-group* "remove from the group")
+                  (group-names))
+            (lambda (input)
+              (let ((g (string-trim input)))
+                (ibuffer-group! buf targets
+                  (if (equal? g "") *ibuffer-no-group* g)))))))))
+
+(effects! '(read))
+
+(mode-icon! "ibuffer-mode" "")
+
+(define-list-mode! "ibuffer-mode"
+  (list
+    'doc (string-append
+           "A traditional buffer management table. Each row shows the "
+           "modified flag, size, mode, group, and file status. / narrows "
+           "the table and \\ widens it. m marks one row, * marks all shown "
+           "rows, u unmarks one row, and U clears all marks. k kills now. "
+           "d flags rows for killing, and x executes the flags. G puts "
+           "the targets in a group. RET visits, g refreshes, and q quits.")
+    'buffer *ibuffer-buffer*
+    'category 'buffer
+    'rows (lambda (buf) (ibuffer-visible))
+    'stamp (lambda (buf) (length (buffer-list-mru)))
+    'columns (lambda (buf)
+               (list (list "" 1)
+                     (list "" 1)
+                     (list "buffer" #f)
+                     (list "size" 7 'right)
+                     (list "mode" 16)
+                     (list "group" 18)
+                     (list "file" 4)))
+    'cells ibuffer-cells
+    'title (lambda (buf) "Buffers")
+    'meta ibuffer-meta
+    'total (lambda (buf) (ibuffer-total))
+    'footer (lambda (buf)
+              '(("RET" "visit") ("m" "mark") ("*" "all") ("k" "kill")
+                ("G" "group") ("d" "flag") ("x" "execute") ("/" "filter")
+                ("\\" "widen") ("g" "refresh") ("q" "quit")))
+    'flags (list (list "d" "D" "kill"
+                       (lambda (buf b)
+                         (and (buffer-known? b)
+                              (begin (buffer-kill! b) #t)))))
+    'noun "buffer"
+    'preview (lambda (buf b)
+               (when (buffer-known? b) (display-buffer-other-window! b)))
+    'keys '(("RET" "ibuffer-visit") ("k" "ibuffer-kill")
+            ("G" "ibuffer-group") ("g" "ibuffer-refresh")
+            ("q" "quit-window"))))
+
+(global-set-key "C-x C-b" "ibuffer")
+
+(category! 'buffers)
+(catalog-meta! 'command "ibuffer-kill" 'domain 'buffers 'effects '(destroy))
+(catalog-meta! 'command "ibuffer-group" 'domain 'buffers 'effects '(write))
+(public! 'ibuffer-refresh! "(ibuffer-refresh!) — rebuild the *ibuffer* table")

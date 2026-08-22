@@ -30,7 +30,7 @@ defmodule Aimax.HelpTest do
   # mode's page opens through C-h m there
   test "C-h m in the switcher opens the mode's page, rendered and read-only" do
     eval!(~s{(begin (buffer-create "*zz-help*") (switch-to-buffer! "*zz-help*")
-                    (run-command "ibuffer"))})
+                    (run-command "switch-to-buffer"))})
 
     press(["C-h", "m"])
 
@@ -65,7 +65,7 @@ defmodule Aimax.HelpTest do
 
   test "C-h b lists local bindings before global ones" do
     eval!(~s{(begin (buffer-create "*zz-help*") (switch-to-buffer! "*zz-help*")
-                    (run-command "ibuffer"))})
+                    (run-command "switch-to-buffer"))})
 
     press(["C-h", "b"])
     text = Buffer.text("*Help*")
@@ -100,7 +100,7 @@ defmodule Aimax.HelpTest do
 
   test "C-h k names the map that answered: a local key wins" do
     eval!(~s{(begin (buffer-create "*zz-help*") (switch-to-buffer! "*zz-help*")
-                    (run-command "ibuffer"))})
+                    (run-command "switch-to-buffer"))})
 
     press(["C-h", "k"])
     press("RET")
@@ -278,7 +278,7 @@ defmodule Aimax.HelpTest do
 
   test "M-? with no name at point still shows the buffer, its mode and its keys" do
     eval!(~s{(begin (buffer-create "*zz-help*") (switch-to-buffer! "*zz-help*")
-                    (run-command "ibuffer"))})
+                    (run-command "switch-to-buffer"))})
 
     press("M-?")
     text = Buffer.text("*Help*")
@@ -291,7 +291,7 @@ defmodule Aimax.HelpTest do
 
   test "M-? inside *Help* asks about the buffer the reader came from" do
     eval!(~s{(begin (buffer-create "*zz-help*") (switch-to-buffer! "*zz-help*")
-                    (run-command "ibuffer"))})
+                    (run-command "switch-to-buffer"))})
 
     press("M-?")
     press("M-?")

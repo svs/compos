@@ -1,7 +1,7 @@
 defmodule Aimax.ProvenanceTest do
   use ExUnit.Case, async: false
 
-  alias Aimax.Core.{Buffer, Editor, Session}
+  alias Aimax.Core.{Buffer, Editor, ProvenanceStore, Session}
 
   defp unique(label), do: "*provenance-#{label}-#{System.unique_integer([:positive])}*"
 
@@ -150,6 +150,119 @@ defmodule Aimax.ProvenanceTest do
     assert Buffer.provenance(name).head_hash == status.head_hash
     assert Buffer.provenance_history(name) == history
     assert Buffer.text(name) == "ab"
+  end
+
+  describe "the typing path" do
+    # the store, read past the buffer: what is durable right now, not what
+    # the buffer would flush if asked
+    defp durable(name), do: ProvenanceStore.history(Buffer.id(name))
+
+    test "typing batches into one revision at the checkpoint boundary" do
+      name = new_buffer("batch", "")
+
+      for {c, i} <- Enum.with_index(["a", "b", "c", "d", "e"]) do
+        :ok = Buffer.insert_at(name, i, c, source: :user)
+      end
+
+      # nothing reached SQLite yet: five keystrokes, one pending changeset
+      assert [%{kind: "root"}] = durable(name)
+
+      :ok = Buffer.checkpoint_now(name)
+
+      assert [%{kind: "root"}, revision] = durable(name)
+      assert revision.actor.kind == "user"
+      assert %{ops: ops} = revision.operation
+      assert length(ops) == 5
+      assert Enum.map(ops, & &1.inserted) == ["a", "b", "c", "d", "e"]
+      assert revision.content_hash == Buffer.provenance(name).head_hash
+      assert Buffer.text(name) == "abcde"
+    end
+
+    test "an agent edit is durable before its caller hears that it worked" do
+      name = new_buffer("atomic", "base")
+      :ok = Buffer.insert_at(name, 4, "!", source: {:agent, "run-7"})
+
+      # no checkpoint, no read through the buffer: it is already written
+      assert [%{kind: "root"}, revision] = durable(name)
+      assert revision.actor.id == "agent:run-7"
+      assert revision.operation == %{pos: 4, inserted: "!", deleted: ""}
+    end
+
+    test "a second actor closes the first actor's changeset before its own" do
+      name = new_buffer("actors", "")
+      :ok = Buffer.insert_at(name, 0, "h", source: :user)
+      :ok = Buffer.insert_at(name, 1, "i", source: :user)
+
+      # the agent's arrival flushes the typing, then records its own work
+      :ok = Buffer.insert_at(name, 2, "!", source: {:agent, "run-9"})
+
+      assert [root, typed, agent] = durable(name)
+      assert root.kind == "root"
+      assert typed.actor.kind == "user"
+      assert %{ops: [%{inserted: "h"}, %{inserted: "i"}]} = typed.operation
+      assert agent.actor.id == "agent:run-9"
+      assert agent.parent_id == typed.id
+      assert typed.parent_id == root.id
+    end
+
+    test "a changeset records the group the work happened in" do
+      name = new_buffer("group", "")
+      :ok = Buffer.set_local(name, "group", "inbox")
+      :ok = Buffer.insert_at(name, 0, "a", source: :user)
+      :ok = Buffer.checkpoint_now(name)
+
+      assert [_root, revision] = durable(name)
+      assert revision.metadata.group == "inbox"
+    end
+
+    test "a move to another group closes the changeset behind it" do
+      name = new_buffer("regroup", "")
+      :ok = Buffer.set_local(name, "group", "inbox")
+      :ok = Buffer.insert_at(name, 0, "a", source: :user)
+
+      :ok = Buffer.set_local(name, "group", "archive")
+      :ok = Buffer.insert_at(name, 1, "b", source: :user)
+      :ok = Buffer.checkpoint_now(name)
+
+      assert [_root, first, second] = durable(name)
+      assert first.metadata.group == "inbox"
+      assert second.metadata.group == "archive"
+      assert second.parent_id == first.id
+    end
+
+    test "a buffer in no group records no group" do
+      name = new_buffer("groupless", "")
+      :ok = Buffer.insert_at(name, 0, "a", source: :user)
+      :ok = Buffer.checkpoint_now(name)
+
+      assert [_root, revision] = durable(name)
+      refute Map.has_key?(revision.metadata, :group)
+    end
+
+    test "a save makes the typing behind it durable" do
+      path = Path.join(System.tmp_dir!(), "prov-save-#{System.unique_integer([:positive])}.txt")
+      name = new_buffer("save", "")
+      on_exit(fn -> File.rm(path) end)
+
+      :ok = Buffer.insert_at(name, 0, "x", source: :user)
+      assert [%{kind: "root"}] = durable(name)
+
+      assert {:ok, ^path} = Buffer.save(name, path)
+      assert [%{kind: "root"}, %{actor: %{kind: "user"}}] = durable(name)
+    end
+
+    test "a stopped buffer records nothing and says it has a gap" do
+      name = new_buffer("stopped", "")
+
+      :ok =
+        Buffer.provenance_stop(name, source: :editor, reason: "test", policy_source: "user")
+
+      :ok = Buffer.insert_at(name, 0, "x", source: :user)
+      :ok = Buffer.checkpoint_now(name)
+
+      assert [%{kind: "root"}] = durable(name)
+      assert Buffer.provenance(name).gap
+    end
   end
 
   test "checkpoint records only while recording is active" do

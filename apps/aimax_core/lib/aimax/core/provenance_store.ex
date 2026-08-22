@@ -30,10 +30,39 @@ defmodule Aimax.Core.ProvenanceStore do
   def status(buffer_id), do: GenServer.call(__MODULE__, {:status, buffer_id})
   def history(buffer_id), do: GenServer.call(__MODULE__, {:history, buffer_id})
 
-  def record_change(buffer_id, expected_head, version, actor, pos, inserted, deleted, text) do
+  def record_change(
+        buffer_id,
+        expected_head,
+        version,
+        actor,
+        pos,
+        inserted,
+        deleted,
+        text,
+        context \\ %{}
+      ) do
+    record_changeset(
+      buffer_id,
+      expected_head,
+      version,
+      actor,
+      [%{pos: pos, inserted: inserted, deleted: deleted}],
+      text,
+      context
+    )
+  end
+
+  @doc """
+  Record one actor's operations as a single revision.
+
+  The buffer batches keystrokes and calls this at a boundary, so the
+  transaction and the content hash happen once for the batch rather than once
+  for each key.
+  """
+  def record_changeset(buffer_id, expected_head, version, actor, ops, text, context \\ %{}) do
     GenServer.call(
       __MODULE__,
-      {:record_change, buffer_id, expected_head, version, actor, pos, inserted, deleted, text},
+      {:record_changeset, buffer_id, expected_head, version, actor, ops, text, context},
       30_000
     )
   end
@@ -87,7 +116,8 @@ defmodule Aimax.Core.ProvenanceStore do
             text,
             actor,
             Keyword.get(opts, :policy_source, "default"),
-            Keyword.get(opts, :retention, "durable")
+            Keyword.get(opts, :retention, "durable"),
+            Keyword.get(opts, :context, %{})
           )
 
         status ->
@@ -144,7 +174,7 @@ defmodule Aimax.Core.ProvenanceStore do
   end
 
   def handle_call(
-        {:record_change, buffer_id, expected_head, version, actor, pos, inserted, deleted, text},
+        {:record_changeset, buffer_id, expected_head, version, actor, ops, text, context},
         _from,
         conn
       ) do
@@ -176,7 +206,7 @@ defmodule Aimax.Core.ProvenanceStore do
               expected_head,
               current.head_id,
               blob(actor),
-              blob(%{version: version, pos: pos, inserted: inserted, deleted: deleted}),
+              blob(%{version: version, ops: ops, context: context}),
               now()
             ]
           )
@@ -202,9 +232,9 @@ defmodule Aimax.Core.ProvenanceStore do
               kind: "edit",
               content_hash: hash,
               actor: actor,
-              operation: %{pos: pos, inserted: inserted, deleted: deleted},
+              operation: operation(ops),
               snapshot: nil,
-              metadata: %{}
+              metadata: context
             })
 
             exec(
@@ -330,7 +360,11 @@ defmodule Aimax.Core.ProvenanceStore do
     end
   end
 
-  defp create_root(conn, buffer_id, text, actor, policy_source, retention) do
+  # One operation reads as itself. Many read as the changeset they formed.
+  defp operation([op]), do: op
+  defp operation(ops), do: %{ops: ops}
+
+  defp create_root(conn, buffer_id, text, actor, policy_source, retention, context) do
     revision_id = revision_id()
     hash = content_hash(text)
 
@@ -345,7 +379,7 @@ defmodule Aimax.Core.ProvenanceStore do
         actor: actor,
         operation: nil,
         snapshot: text,
-        metadata: %{origin: "buffer"}
+        metadata: Map.put(context, :origin, "buffer")
       })
 
       exec(

@@ -42,12 +42,19 @@ defmodule Aimax.Core.Buffer do
   # (a restart would resurrect it empty anyway; better to stay dead loudly)
   use GenServer, restart: :temporary
 
+  require Logger
+
   alias Aimax.Core.{BufferStore, Events, ProvenanceStore, Rope, Text, TS}
 
   @registry Aimax.Core.BufferRegistry
   @undo_limit 500
   @edit_log_limit 500
   @checkpoint_debounce 1_500
+
+  # Typing does not reach SQLite. Each keystroke appends one operation to a
+  # pending changeset; the checkpoint boundary above writes the batch. The cap
+  # bounds the journal when a burst outruns the timer.
+  @provenance_batch_limit 200
 
   defmodule Ref do
     @moduledoc "Immutable buffer identity. Names are mutable lookup aliases."
@@ -80,6 +87,9 @@ defmodule Aimax.Core.Buffer do
             edit_log: [],
             edit_log_len: 0,
             provenance: nil,
+            pending_ops: [],
+            pending_actor: nil,
+            pending_group: nil,
             id: nil,
             checkpoint_timer: nil,
             idle_timer: nil,
@@ -441,7 +451,10 @@ defmodule Aimax.Core.Buffer do
   def handle_info(_, state), do: {:noreply, state}
 
   @impl true
-  def terminate(_reason, %{discard: true}), do: :ok
+  def terminate(_reason, %{discard: true} = state) do
+    flush_provenance(state)
+    :ok
+  end
   def terminate(_reason, state), do: write_checkpoint(state)
 
   @impl true
@@ -720,10 +733,13 @@ defmodule Aimax.Core.Buffer do
   def handle_call(:authors, _from, state), do: {:reply, state.authors, state}
   def handle_call(:edit_log, _from, state), do: {:reply, state.edit_log, state}
 
-  def handle_call(:provenance, _from, state),
-    do: {:reply, state.provenance, state}
+  def handle_call(:provenance, _from, state) do
+    state = flush_provenance(state)
+    {:reply, state.provenance, state}
+  end
 
   def handle_call({:provenance_start, src, author, opts}, _from, state) do
+    state = flush_provenance(state)
     actor = resolve_actor(author, src)
     {text, state} = fetch_text(state)
     reason = Keyword.get(opts, :reason, "explicit")
@@ -736,6 +752,7 @@ defmodule Aimax.Core.Buffer do
   end
 
   def handle_call({:provenance_stop, src, author, opts}, _from, state) do
+    state = flush_provenance(state)
     actor = resolve_actor(author, src)
     reason = Keyword.get(opts, :reason, "explicit")
     policy_source = Keyword.get(opts, :policy_source, "user")
@@ -751,6 +768,7 @@ defmodule Aimax.Core.Buffer do
   end
 
   def handle_call({:provenance_checkpoint, src, author, opts}, _from, state) do
+    state = flush_provenance(state)
     actor = resolve_actor(author, src)
     reason = Keyword.get(opts, :reason, "explicit")
 
@@ -763,8 +781,10 @@ defmodule Aimax.Core.Buffer do
     end
   end
 
-  def handle_call(:provenance_history, _from, state),
-    do: {:reply, ProvenanceStore.history(state.id), state}
+  def handle_call(:provenance_history, _from, state) do
+    state = flush_provenance(state)
+    {:reply, ProvenanceStore.history(state.id), state}
+  end
 
   def handle_call({:motion, motion}, _from, state) do
     {text, state} = fetch_text(state)
@@ -831,7 +851,7 @@ defmodule Aimax.Core.Buffer do
         state = log_edit(state, "undo", 0, 0, 0)
         actor = local_actor("system:undo", "system", "undo", :undo)
         # Provenance keeps the complete replacement so replay stays exact.
-        state = log_provenance(state, actor, 0, new_text, old_text)
+        state = log_provenance(state, actor, 0, new_text, old_text, :undo)
         state = ts_invalidate(state)
         broadcast(state, 0, "", 0, :undo)
         {:reply, :ok, checkpoint_later(state)}
@@ -961,7 +981,7 @@ defmodule Aimax.Core.Buffer do
         state = %{state | path: path, saved_version: state.version}
         Events.broadcast_editor(:locals)
         broadcast(state, state.point, "", 0, :locals)
-        {:reply, {:ok, path}, state |> touch_state() |> checkpoint_later()}
+        {:reply, {:ok, path}, state |> flush_provenance() |> touch_state() |> checkpoint_later()}
     end
   end
 
@@ -982,7 +1002,8 @@ defmodule Aimax.Core.Buffer do
         text,
         actor,
         policy_source: "default",
-        retention: if(state.persistent, do: "durable", else: "session")
+        retention: if(state.persistent, do: "durable", else: "session"),
+        context: context(buffer_group(state))
       )
 
     status =
@@ -1088,15 +1109,21 @@ defmodule Aimax.Core.Buffer do
       checkpoint: BufferStore.checkpoint_path(state.id)
     }
 
-  defp write_checkpoint(%{discard: true} = state), do: state
-  defp write_checkpoint(%{persistent: false} = state), do: state
+  # Provenance flushes on every checkpoint boundary, including the ones that
+  # write no state: a dormant, unsaved, or discarded buffer still owns its
+  # history.
+  defp write_checkpoint(state),
+    do: state |> flush_provenance() |> write_state_checkpoint()
+
+  defp write_state_checkpoint(%{discard: true} = state), do: state
+  defp write_state_checkpoint(%{persistent: false} = state), do: state
 
   # Nothing changed since the last write, so the file on disk is current.
   # A forced checkpoint of a clean buffer costs one comparison, not one
   # serialization of the whole text.
-  defp write_checkpoint(%{dirty: false} = state), do: state
+  defp write_state_checkpoint(%{dirty: false} = state), do: state
 
-  defp write_checkpoint(state) do
+  defp write_state_checkpoint(state) do
     BufferStore.atomic_write(
       BufferStore.checkpoint_path(state.id),
       :erlang.term_to_binary(checkpoint(state))
@@ -1110,7 +1137,7 @@ defmodule Aimax.Core.Buffer do
 
   # Every state mutation marks the buffer dirty here, so the flag is the
   # answer to "did anything change since the last write?".
-  defp checkpoint_later(%{persistent: false} = state), do: state
+  defp checkpoint_later(%{persistent: false, pending_ops: []} = state), do: state
 
   defp checkpoint_later(%{checkpoint_timer: nil} = state),
     do: %{
@@ -1212,7 +1239,7 @@ defmodule Aimax.Core.Buffer do
 
     state = %{state | authors: stamp_insert(state.authors, pos, len, author)}
     state = log_edit(state, author, pos, len, 0)
-    state = log_provenance(state, actor, pos, text, "")
+    state = log_provenance(state, actor, pos, text, "", src)
 
     state = %{
       state
@@ -1261,7 +1288,7 @@ defmodule Aimax.Core.Buffer do
     state = adjust_ranges(state, &adjust_delete(&1, pos, len), &adjust_delete(&1, pos, len))
     state = %{state | authors: stamp_delete(state.authors, pos, len)}
     state = log_edit(state, author, pos, 0, len)
-    state = log_provenance(state, actor, pos, "", deleted)
+    state = log_provenance(state, actor, pos, "", deleted, src)
     state = %{state | goal_col: nil, last_insert_end: nil, insert_run: 0, undo_next: 0}
     broadcast(state, pos, "", len, src)
     state
@@ -1389,7 +1416,7 @@ defmodule Aimax.Core.Buffer do
       else: %{state | edit_log: log, edit_log_len: len}
   end
 
-  defp log_provenance(%{provenance: nil} = state, _actor, _pos, _inserted, _deleted),
+  defp log_provenance(%{provenance: nil} = state, _actor, _pos, _inserted, _deleted, _src),
     do: state
 
   defp log_provenance(
@@ -1397,31 +1424,101 @@ defmodule Aimax.Core.Buffer do
          _actor,
          _pos,
          _inserted,
-         _deleted
+         _deleted,
+         _src
        ) do
     %{state | provenance: %{provenance | gap: true}}
   end
 
-  defp log_provenance(state, actor, pos, inserted, deleted) do
+  # One changeset holds one actor's work. An edit by anyone else closes the
+  # pending one first, so a batch can never span two actors and invent
+  # authorship for either.
+  defp log_provenance(state, actor, pos, inserted, deleted, src) do
+    group = buffer_group(state)
+    state = if same_context?(state, actor, group), do: state, else: flush_provenance(state)
+
+    op = %{pos: pos, inserted: inserted, deleted: deleted}
+
+    if batchable?(src) do
+      state = %{
+        state
+        | pending_ops: [op | state.pending_ops],
+          pending_actor: actor,
+          pending_group: group
+      }
+
+      if length(state.pending_ops) >= @provenance_batch_limit,
+        do: flush_provenance(state),
+        else: state
+    else
+      # An atomic edit is durable before its caller hears that it worked. An
+      # agent writes a whole hunk at a time, so the transaction is rare and
+      # the round trip hides inside the tool call that asked for it.
+      state
+      |> flush_provenance()
+      |> Map.merge(%{pending_ops: [op], pending_actor: actor, pending_group: group})
+      |> flush_provenance()
+    end
+  end
+
+  # An empty changeset takes whatever context the next edit brings.
+  defp same_context?(%{pending_ops: []}, _actor, _group), do: true
+
+  defp same_context?(state, actor, group),
+    do: state.pending_actor.id == actor.id and state.pending_group == group
+
+  # groups.scm owns the policy; the buffer-local is the mechanism, and this
+  # reads it without asking Scheme, because a mutation cannot call back in.
+  defp buffer_group(state), do: state.locals["group"]
+
+  # Only keyboard typing batches. Everything else arrives whole.
+  defp batchable?(:user), do: true
+  defp batchable?(_), do: false
+
+  # The pending changeset becomes one revision: N operations, one hash, one
+  # transaction. Called at every checkpoint boundary, on an actor change, and
+  # before anything reads the durable history.
+  defp flush_provenance(%{pending_ops: []} = state), do: state
+
+  defp flush_provenance(%{provenance: nil} = state),
+    do: %{state | pending_ops: [], pending_actor: nil, pending_group: nil}
+
+  defp flush_provenance(state) do
+    ops = Enum.reverse(state.pending_ops)
     {text, state} = fetch_text(state)
 
-    case ProvenanceStore.record_change(
-           state.id,
-           state.provenance.head_id,
-           state.version,
-           actor,
-           pos,
-           inserted,
-           deleted,
-           text
-         ) do
+    result =
+      ProvenanceStore.record_changeset(
+        state.id,
+        state.provenance.head_id,
+        state.version,
+        state.pending_actor,
+        ops,
+        text,
+        context(state.pending_group)
+      )
+
+    state = %{state | pending_ops: [], pending_actor: nil, pending_group: nil}
+
+    case result do
       {:ok, status} ->
         %{state | provenance: provenance_state(status)}
 
-      {:error, {:stale_revision, conflict}} ->
-        raise "stale local Provenance head: #{inspect(conflict)}"
+      {:error, reason} ->
+        # The Buffer is the only writer to its own cell, so a stale head means
+        # a defect, not a race. Losing the buffer would cost more than losing
+        # the batch: mark the gap, say so, and keep editing.
+        Logger.error(
+          "provenance flush failed for #{state.name}: #{inspect(reason)}"
+        )
+
+        %{state | provenance: %{state.provenance | gap: true}}
     end
   end
+
+  # A buffer that belongs to no group records no group, rather than "none".
+  defp context(nil), do: %{}
+  defp context(group), do: %{group: group}
 
   defp adjust_point_insert(state, pos, len) do
     %{

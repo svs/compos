@@ -27,6 +27,7 @@
 (set-face-attribute! 'prov-edit 'fg "#2e6b45")
 (set-face-attribute! 'prov-gap 'fg "#a83a2b" 'weight "600")
 (set-face-attribute! 'prov-actor 'fg "#7a5a1a")
+(set-face-attribute! 'prov-group 'fg "#5a3a7a")
 
 ;;; --- what a row knows ---------------------------------------------------------
 
@@ -63,24 +64,47 @@
         ((equal? kind "gap") "prov-gap")
         (else "prov-edit")))
 
+;; where the work happened. groups.scm sets the buffer-local; the revision
+;; keeps the name it had at the time, not the one the buffer wears now.
+(define (prov-group-label rev)
+  (or (prov-get (prov-get rev 'metadata) 'group) ""))
+
 (define (prov-actor-label rev)
   (let ((actor (prov-get rev 'actor)))
     (or (prov-get actor 'display_name) (prov-get actor 'id) "?")))
 
-;; an edit says what it did; a root and a gap say how much text they hold
+;; the bytes one operation added and removed, as (INSERTED DELETED).
+;; This dialect's cons wants a list tail, so a pair is a two-element list.
+(define (prov-op-sizes op)
+  (list (string-length (or (prov-get op 'inserted) ""))
+        (string-length (or (prov-get op 'deleted) ""))))
+
+(define (prov-sum ops)
+  (let loop ((rest ops) (ins 0) (del 0))
+    (if (null? rest)
+        (list ins del)
+        (let ((sizes (prov-op-sizes (car rest))))
+          (loop (cdr rest) (+ ins (car sizes)) (+ del (cadr sizes)))))))
+
+;; one operation names its position. A changeset names how many it holds,
+;; because typing arrives as a batch and the positions move within it.
 (define (prov-change rev)
   (let ((op (prov-get rev 'operation)))
-    (if op
-        (let ((ins (or (prov-get op 'inserted) ""))
-              (del (or (prov-get op 'deleted) ""))
-              (pos (or (prov-get op 'pos) 0)))
-          (string-append "@" (number->string pos)
-                         " +" (number->string (string-length ins))
-                         " -" (number->string (string-length del))))
+    (if (not op)
         (let ((bytes (prov-get rev 'snapshot_bytes)))
           (if bytes
               (string-append "snapshot " (number->string bytes) "B")
-              "")))))
+              ""))
+        (let ((ops (prov-get op 'ops)))
+          (if ops
+              (let ((sizes (prov-sum ops)))
+                (string-append (number->string (length ops)) " ops"
+                               " +" (number->string (car sizes))
+                               " -" (number->string (cadr sizes))))
+              (let ((sizes (prov-op-sizes op)))
+                (string-append "@" (number->string (or (prov-get op 'pos) 0))
+                               " +" (number->string (car sizes))
+                               " -" (number->string (cadr sizes)))))))))
 
 (define (prov-when rev)
   (let ((ms (prov-get rev 'created_at)))
@@ -97,11 +121,13 @@
   (let ((rev (prov-plist id)))
     (if (not rev)
         (list (list "" "faint") (list "?" "prov-edit") (list "" "prov-actor")
-              (list "" "dim") (list "" "faint") (list "" "faint"))
+              (list "" "prov-group") (list "" "dim") (list "" "faint")
+              (list "" "faint"))
         (let ((kind (or (prov-get rev 'kind) "edit")))
           (list (list (number->string (prov-index id)) "faint")
                 (list kind (prov-kind-face kind))
                 (list (prov-actor-label rev) "prov-actor")
+                (list (prov-group-label rev) "prov-group")
                 (list (prov-change rev) "dim")
                 (list (prov-when rev) "faint")
                 (list (prov-short (prov-get rev 'content_hash)) "faint"))))))
@@ -129,6 +155,8 @@
                 (or (prov-get rev 'kind) "edit") " " (prov-short id)
                 " . parent " (prov-short (prov-get rev 'parent_id))
                 " . " (prov-change rev)
+                (let ((g (prov-group-label rev)))
+                  (if (equal? g "") "" (string-append " . group " g)))
                 " . actor " (or (prov-get actor 'id) "?")
                 " (" (or (prov-get actor 'kind) "?")
                 ", " (or (prov-get actor 'assurance) "?") ")"
@@ -151,8 +179,9 @@
     'buffer *buffer-log-buffer*
     'rows prov-ids
     'columns (lambda (buf)
-               (list (list "#" 4) (list "kind" 6) (list "actor" 22)
-                     (list "change" 18) (list "when" 10) (list "hash" #f)))
+               (list (list "#" 4) (list "kind" 6) (list "actor" 18)
+                     (list "group" 14) (list "change" 16) (list "when" 9)
+                     (list "hash" #f)))
     'cells prov-cells
     'title (lambda (buf)
              (string-append "Provenance: " (or *buffer-log-target* "?")))

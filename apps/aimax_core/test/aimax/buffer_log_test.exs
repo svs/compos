@@ -66,6 +66,18 @@ defmodule Aimax.BufferLogTest do
     assert log_text() =~ "policy user"
   end
 
+  test "typed work reads as the changeset it formed", %{name: name} do
+    for {c, i} <- Enum.with_index(["a", "b", "c"]) do
+      :ok = Buffer.insert_at(name, i, c, source: :user)
+    end
+
+    eval!(~s{(switch-to-buffer! "#{name}")})
+    press(["C-x", "v", "l"])
+
+    assert log_text() =~ "3 ops +3 -0"
+    assert log_text() =~ "user"
+  end
+
   test "RET describes the revision on the line", %{name: name} do
     :ok = Buffer.insert_at(name, 4, "!", source: {:agent, "run-7"})
     eval!(~s{(switch-to-buffer! "#{name}")})

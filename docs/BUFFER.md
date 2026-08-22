@@ -28,6 +28,15 @@ An ordinary non-file buffer is therefore provenanced and durable when the buffer
 
 A leading-space name or lack of a file path MUST NOT, by itself, disable Provenance. Buffer creation metadata and mode policy decide persistence and recording explicitly.
 
+## Group
+
+A buffer may stand in a group. Every changeset records the group the buffer
+stood in at the time, read from the buffer-local that `groups.scm` sets.
+
+The group is context, not identity. It does not change the buffer's cell, its
+history, or its actor. A buffer that moves to another group keeps every
+revision it already has, each still naming the group it was written in.
+
 ## Effective policy
 
 The effective recording policy is resolved in this order:

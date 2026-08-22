@@ -95,11 +95,28 @@ The current process-scoped edit-author mechanism is the seed of this design, but
 
 Manual keyboard input uses the signed-in or locally configured user identity. An agent edit uses the agent run that invoked the editing tool, even though the buffer process mechanically performs the mutation. A formatter or mode-generated edit names that component as actor and may name the initiating user or agent in `on_behalf_of`.
 
-Actor, source, and intent are separate:
+Actor, source, intent, and context are separate:
 
 - **actor** answers who caused or authored the content change
 - **source** answers which path performed it, such as keyboard, command, Scheme API, agent tool, formatter, restore, or external import
 - **intent** answers why related changes belong together
+- **context** answers where the work happened
+
+### Context
+
+A revision records the group the buffer stood in when the work happened. The
+group is a workspace, not a principal: the same actor works in several groups,
+and a buffer moves between them. So the group belongs to the changeset beside
+the actor, never inside the actor's identity.
+
+A changeset holds one actor's work in one group. A change of either closes the
+pending changeset and opens the next one, so a revision can never span two
+groups and report the wrong one for half of its operations.
+
+The revision keeps the group name it had at the time. Moving a buffer to
+another group later does not rewrite the history of the work done before the
+move. A buffer that belongs to no group records no group, rather than a name
+that means "none".
 
 ### Unknown and unauthenticated actors
 
@@ -278,7 +295,8 @@ Actor metadata stores stable internal IDs and minimal display information. Authe
 
 The live implementation now provides:
 
-1. structured actor contexts with derived author strings for compatibility
+1. structured actor contexts with derived author strings for compatibility, and
+   the group each changeset happened in
 2. a stable cell and root revision for every buffer
 3. default-on recording with explicit mode policy
 4. accepted head and hash linkage in buffer checkpoints
@@ -293,26 +311,60 @@ The live implementation now provides:
 Compilation, the focused tests, and eviction recovery pass. Existing persisted
 in-memory epochs are not imported.
 
-Phase 1 is not complete. Three gaps remain:
+One gap remains:
 
-- **Every keystroke writes to SQLite.** `log_provenance/5` flattens the whole
-  buffer, hashes it with SHA-256, and calls one global GenServer that runs a
-  `BEGIN IMMEDIATE` transaction. This happens inside the buffer's own call, so
-  the cost lands on the typing path. The build plan names batching and
-  transaction boundaries as the way to keep recording off that path. Neither
-  exists yet, and no latency measurement gates the work. A measurement taken
-  against an on-disk WAL database gives 0.35 ms for one keystroke in a 343 KB
-  buffer, against 0.007 ms with recording stopped. That is 50 times the cost,
-  and it grows with the size of the buffer, because each keystroke flattens
-  and hashes the whole text. It is not yet perceptible. It becomes perceptible
-  in a large buffer, and every buffer shares the one store process.
-- **A stale head crashes the buffer.** `log_provenance/5` raises on
-  `{:stale_revision, conflict}`. The specification asks for a structured
-  conflict that preserves the proposal. A raise kills the buffer process and
-  loses its state.
 - **Checkpoint records an event, not a boundary.** The store writes a
   `checkpoint` lifecycle row. It does not close a changeset, because Phase 1
   has no changeset table. The name promises more than the operation does.
+
+## Two recording lanes
+
+Recording has two lanes, because the two kinds of edit have different shapes.
+
+**The interactive lane batches.** A keystroke appends one operation to a
+pending changeset held in the buffer process. Nothing reaches SQLite. The
+buffer's existing checkpoint throttle, which already runs at most once every
+1.5 seconds, closes the batch: N operations, one content hash, one
+transaction, one revision. The cost of a keystroke becomes a list append.
+
+| | before | after |
+|---|---|---|
+| empty buffer | 0.100 ms | 0.007 ms |
+| 343 KB buffer | 0.349 ms | 0.008 ms |
+| against recording stopped | 50x | 1.3x |
+
+The cost also stops growing with the buffer. Before, each keystroke flattened
+and hashed the whole text, so a 3 MB buffer paid about 2.2 ms per key. Now the
+hash happens once per batch. This satisfies the invariant that every accepted
+content hash is reproducible from a verified snapshot and subsequent
+operations: the hash addresses the batch result, and the operations inside it
+replay from the previous hash.
+
+**The atomic lane does not batch.** An agent, an RPC client, or an undo writes
+whole work at once and rarely. Such an edit records synchronously, with the
+compare-and-swap, before its caller hears that it worked. The round trip hides
+inside the tool call that asked for it, and the attribution for generated
+content is durable immediately, which is the question Provenance exists to
+answer.
+
+A changeset holds one actor's work. An edit by a different actor closes the
+pending one first, so a batch can never span two actors and invent authorship
+for either. The buffer also flushes before anything reads the durable history,
+so no reader sees a head the buffer has already moved past.
+
+Flush boundaries: the checkpoint timer, a save, a stop, a start, an explicit
+checkpoint, eviction, buffer termination, an actor change, a group change, and
+a cap of 200 pending operations.
+
+A crash loses at most one pending changeset. That surfaces as a gap on the
+next activation, because the buffer checkpoint carries the accepted head and
+hash and the comparison already catches a mismatch. The durability of the text
+is the checkpoint's job, not Provenance's.
+
+A stale head no longer raises. The buffer is the only writer to its own cell,
+so a stale head means a defect rather than a race. Losing the buffer would
+cost more than losing the batch, so the flush marks the gap, logs the reason,
+and the buffer keeps working.
 ## Build plan
 
 Provenance should be built, but the specification is a destination rather than one release.

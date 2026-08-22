@@ -119,8 +119,13 @@ loader; call `namespace!` only when the public vocabulary differs.
   - Do not remove articles or other words to make a sentence shorter.
   - This applies to replies, commit messages, and comments in code.
 - Terse replies: outcome first, bullets, no recaps, no verification narration.
-- Test everything, especially the Scheme kernel; drive tests through
-  `KeyDispatch.handle_key/1` — the same path the GUI uses.
+- Test everything, especially the Scheme kernel. Test an interaction
+  through `KeyDispatch.handle_key/1` — the same path the GUI uses. Test
+  policy in Scheme: put a `deftest` in `priv/tests/*.scm`, where the test
+  calls the function and reads the value. `mix test` runs both;
+  `M-x run-scheme-tests` runs the Scheme half alone.
+- A test names the command, never the key that happens to run it. A
+  binding moves; the behaviour is what the test is for.
 - Verify UI changes in a real browser, screenshot, then commit.
 - Use subagents for verification sweeps to keep context clean.
 - Emacs is the reference: copy its semantics unless there's a reason not to.

@@ -82,22 +82,28 @@ defmodule Aimax.Core.Session do
 
   @doc "Apply a Scheme closure (e.g. a minibuffer confirm callback)."
   def apply_callback(closure, args, fid \\ nil, lane \\ nil) do
-    apply_callback_retry(closure, args, fid(fid), lane, 20)
+    fid = fid(fid)
+    Lane.run(lane || :ui, fn _from -> exec_apply(closure, args, fid) end, 30_000, "apply")
   end
 
-  # A closure that escaped mid-eval can reach us before its frame reaches the
-  # shared store, and the apply then fails with "stale environment frame"
-  # (env.ex). That ref heals when the originating eval exits, so wait for it:
-  # dropping the call loses an async reply outright — a chat naming itself, a
-  # browser answer, an LLM completion. Backend.call_context waits the same way.
-  defp apply_callback_retry(closure, args, fid, lane, retries) do
-    result = Lane.run(lane || :ui, fn _from -> exec_apply(closure, args, fid) end, 30_000, "apply")
+  @doc """
+  Apply a closure that has been waiting on a reply from outside the editor.
+
+  Such a closure escaped mid-eval and can come back before its frame reaches
+  the shared store, and the apply then fails with "stale environment frame"
+  (env.ex). That ref heals when the originating eval exits, so wait for it:
+  dropping the call loses the reply outright, and a chat never names itself.
+  Backend.call_context waits the same way. Only the slow, out-of-editor
+  replies pay this — an ordinary callback must still fail fast.
+  """
+  def apply_reply_callback(closure, args, fid \\ nil, lane \\ nil, retries \\ 10) do
+    result = apply_callback(closure, args, fid, lane)
 
     case result do
       {:error, msg} when retries > 0 ->
         if is_binary(msg) and msg =~ "stale environment frame" do
-          Process.sleep(50)
-          apply_callback_retry(closure, args, fid, lane, retries - 1)
+          Process.sleep(20)
+          apply_reply_callback(closure, args, fid, lane, retries - 1)
         else
           result
         end
@@ -855,7 +861,7 @@ defmodule Aimax.Core.Session do
 
         Aimax.Core.LLM.complete(prompt, fn text ->
           try do
-            apply_callback(callback, [text])
+            apply_reply_callback(callback, [text])
           after
             :ets.delete(@escaped, key)
           end
@@ -869,7 +875,7 @@ defmodule Aimax.Core.Session do
 
         Aimax.Core.LLM.complete(prompt, to_string(model), fn text ->
           try do
-            apply_callback(callback, [text])
+            apply_reply_callback(callback, [text])
           after
             :ets.delete(@escaped, key)
           end
@@ -899,7 +905,7 @@ defmodule Aimax.Core.Session do
           dispatcher,
           fn text ->
             try do
-              apply_callback(callback, [text])
+              apply_reply_callback(callback, [text])
             after
               :ets.delete(@escaped, key)
             end

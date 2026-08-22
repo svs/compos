@@ -1,5 +1,11 @@
 defmodule Aimax.SkillsTest do
-  @moduledoc "skills.scm: the skill catalog and the sanitized Codex home."
+  @moduledoc """
+  The skills tests that need directories of files on disk.
+
+  The catalog and the sanitized environment are Scheme policy and live in
+  priv/tests/skills-test.scm. These two stay here because they build skill
+  directories, and Scheme has no way to remove one.
+  """
 
   use ExUnit.Case
 
@@ -19,44 +25,6 @@ defmodule Aimax.SkillsTest do
     end)
 
     :ok
-  end
-
-  test "the loader scans priv/skills into the catalog" do
-    assert eval!("(skills)") =~ "code-editing"
-    entry = eval!(~s{(catalog-entry 'skill "code-editing")})
-    assert entry =~ "skill"
-    assert entry =~ "Load before the first code edit"
-  end
-
-  test "(skill NAME) returns the body without the frontmatter" do
-    body = eval!(~s{(skill "code-editing")})
-    assert body =~ "code-outline"
-    assert body =~ "smallest edit"
-    refute body =~ "description:"
-  end
-
-  test "an unknown skill answers with the available names" do
-    assert eval!(~s{(skill "zz-none")}) =~ "no such skill"
-    assert eval!(~s{(skill "zz-none")}) =~ "code-editing"
-  end
-
-  test "skills-note indexes every skill, one line each" do
-    note = eval!("(skills-note)")
-    assert note =~ ~s{(skill \\"code-editing\\")}
-    assert note =~ "Load a skill with eval-scheme"
-  end
-
-  test "skills-note-without hides an active skill from the on-demand index" do
-    note = eval!(~s{(skills-note-without "code-editing")})
-    refute note =~ ~s{(skill \\"code-editing\\")}
-  end
-
-  test "the chat system prompt carries the index for an aimax-tools chat" do
-    buf = "*sk-chat-#{System.unique_integer([:positive])}*"
-    eval!(~s{(buffer-create "#{buf}")})
-    on_exit(fn -> Aimax.Core.kill_buffer(buf) end)
-
-    assert eval!(~s{(chat-tool-system "#{buf}")}) =~ "SKILLS"
   end
 
   test "a user skill in ~/.aimax/skills joins the catalog and wins by name" do
@@ -95,15 +63,6 @@ defmodule Aimax.SkillsTest do
     assert eval!(~s{(skill "zz-user-skill")}) =~ "Changed on disk after the scan."
   end
 
-  test "codex-config-with-env points codex at the sanitized home and scrubs keys" do
-    env = eval!(~s{(plist-get (codex-config-with-env '(backend "codex-app-server")) 'env)})
-    assert env =~ "CODEX_HOME"
-    assert env =~ ~s{("OPENAI_API_KEY" #f)}
-
-    home = unquote_str(eval!("(codex-home)"))
-    assert File.exists?(Path.join([home, "skills", "code-editing", "SKILL.md"]))
-  end
-
   test "the sweep keeps codex's own state dirs and still drops a stale skill" do
     home = unquote_str(eval!("(codex-home)"))
 
@@ -121,19 +80,4 @@ defmodule Aimax.SkillsTest do
     refute File.exists?(Path.join(stale, "SKILL.md"))
   end
 
-  test "agent-resolve-config gives every codex thread the sanitized env" do
-    env = eval!(~s{(plist-get (agent-resolve-config '(connector "codex-app-server")) 'env)})
-    assert env =~ "CODEX_HOME"
-  end
-
-  test "codex-home-sanitized #f leaves the config alone" do
-    eval!("(customize-set! 'codex-home-sanitized #f)")
-    conf = eval!(~s{(codex-config-with-env '(backend "codex-app-server"))})
-    refute conf =~ "CODEX_HOME"
-  end
-
-  test "the api lane keeps its own environment" do
-    env = eval!(~s{(plist-get (agent-resolve-config '(connector "api")) 'env)})
-    refute env =~ "CODEX_HOME"
-  end
 end

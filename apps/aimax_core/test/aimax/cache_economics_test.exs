@@ -93,6 +93,9 @@ defmodule Aimax.CacheEconomicsTest do
     type("read it")
     press(["RET"])
     assert_receive {:req, first}, 2_000
+    # let the reply land before typing again: a turn that is still writing
+    # its transcript moves the input region under the keystrokes
+    assert eventually(fn -> Buffer.text(chat) =~ "ok" end)
 
     eval!(~s[(buffer-append! "*doc1*" "a second paragraph appeared\\n")])
 
@@ -146,6 +149,7 @@ defmodule Aimax.CacheEconomicsTest do
     type("first")
     press(["RET"])
     assert_receive {:req, first}, 2_000
+    assert eventually(fn -> Buffer.text(chat) =~ "ok" end)
 
     # turn 2 with *doc-b* most recently used — the MRU order flips
     order2 = eval!(~s[(begin (switch-to-buffer! "*doc-b*") (group-docs "*doc-a*"))])
@@ -175,6 +179,7 @@ defmodule Aimax.CacheEconomicsTest do
     type("hello")
     press(["RET"])
     assert_receive {:req, first}, 2_000
+    assert eventually(fn -> Buffer.text(buf) =~ "ok" end)
     frozen = length(first.tools)
     assert frozen > 0
 
@@ -191,6 +196,7 @@ defmodule Aimax.CacheEconomicsTest do
     type("again")
     press(["RET"])
     assert_receive {:req, second}, 2_000
+    assert eventually(fn -> Buffer.text(buf) =~ "again" end)
 
     # the running conversation kept the list it started with
     assert length(second.tools) == frozen

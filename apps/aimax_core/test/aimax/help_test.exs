@@ -41,7 +41,7 @@ defmodule Aimax.HelpTest do
     assert text =~ "# switch-mode"
     assert text =~ "The buffer switcher"
     assert text =~ "| key | command | what it does |"
-    assert text =~ "| `RET` | switch-visit |"
+    assert text =~ "| `RET` | [`switch-visit`](aimax:def/switch-visit) |"
     assert text =~ "Visit the selected row"
 
     # and it opens as a page, not as a buffer to edit
@@ -72,7 +72,7 @@ defmodule Aimax.HelpTest do
 
     assert text =~ "## This buffer"
     assert text =~ "## Everywhere"
-    assert text =~ "| `C-x C-b` | switch-to-buffer |"
+    assert text =~ "| `C-x C-b` | [`switch-to-buffer`](aimax:def/switch-to-buffer) |"
 
     [local, global] = [
       :binary.match(text, "## This buffer"),
@@ -90,7 +90,7 @@ defmodule Aimax.HelpTest do
 
     text = Buffer.text("*Help*")
     assert text =~ "# `C-x C-f`"
-    assert text =~ "## `find-file` — a command"
+    assert text =~ "## [`find-file`](aimax:def/find-file) — a command"
     assert text =~ "This binding is global"
 
     # the key described is a key not pressed: find-file never prompted
@@ -123,6 +123,39 @@ defmodule Aimax.HelpTest do
     press(["C-x", "C-f"])
     assert Editor.snapshot().minibuffer != nil
     Editor.minibuffer_close()
+  end
+
+  test "a name in a help page is a link to its source, and the link opens it" do
+    eval!(~s{(begin (buffer-create "*zz-help*") (switch-to-buffer! "*zz-help*"))})
+
+    press(["C-h", "k"])
+    press(["C-x", "C-f"])
+
+    # the page draws the name as a link the client can click
+    assert Buffer.text("*Help*") =~ "## [`find-file`](aimax:def/find-file)"
+
+    # following it lands in the file that defines find-file, at the form
+    eval!(~s{(preview-follow-link! (active-window) "aimax:def/find-file")})
+
+    assert eval!(~s{(current-buffer)}) =~ "editor.scm"
+    line = eval!(~s{(buffer-substring (point) (+ (point) 30))})
+    assert line =~ "define-command \\\"find-file\\\""
+
+    # the popup closed: the page must not cover the code it sent you to
+    assert eval!(~s{(popup-open?)}) == "#f"
+  end
+
+  test "M-. in a help page opens the source of the name at point" do
+    eval!(~s{(begin (buffer-create "*zz-help*") (switch-to-buffer! "*zz-help*"))})
+
+    press(["C-h", "k"])
+    press(["C-x", "C-f"])
+
+    # point on the name in the page's own markdown
+    eval!(~s{(goto-char! (string-index (buffer-text "*Help*") "find-file"))})
+    press(["M-."])
+
+    assert eval!(~s{(current-buffer)}) =~ "editor.scm"
   end
 
   test "C-h a searches the editor and renders the hits as a page" do
@@ -203,7 +236,7 @@ defmodule Aimax.HelpTest do
     press("M-?")
     text = Buffer.text("*Help*")
 
-    assert text =~ "## `split-window-right` — a command"
+    assert text =~ "## [`split-window-right`](aimax:def/split-window-right) — a command"
     assert text =~ "Bound to `C-x 3`"
     # and the page still says where the reader is
     assert text =~ "Buffer `*zz-help*` in `fundamental-mode`."
@@ -215,7 +248,7 @@ defmodule Aimax.HelpTest do
                     (goto-char! 3))})
 
     press("M-?")
-    assert Buffer.text("*Help*") =~ "## `help-doc!` — a function"
+    assert Buffer.text("*Help*") =~ "## [`help-doc!`](aimax:def/help-doc!) — a function"
     assert Buffer.text("*Help*") =~ "(help-doc! TITLE MARKDOWN)"
   end
 
@@ -252,7 +285,7 @@ defmodule Aimax.HelpTest do
 
     assert text =~ "# Here"
     assert text =~ "## switch-mode"
-    assert text =~ "| `RET` | switch-visit |"
+    assert text =~ "| `RET` | [`switch-visit`](aimax:def/switch-visit) |"
     assert {:ok, ~s{"help-mode"}} = Session.eval(~s{(buffer-local "*Help*" 'mode-name)})
   end
 
@@ -295,8 +328,12 @@ defmodule Aimax.HelpTest do
   # until a reader presses M-? and finds keys with nothing saying what the
   # mode is for. Nineteen modes drifted that way before anyone noticed.
   test "every mode says what it is for" do
+    # zz- modes are test fixtures: another file's define-mode outlives it in
+    # the same interpreter, and the audit is about the modes we ship
     undocumented =
-      eval!(~s{(filter (lambda (m) (not (mode-doc m))) (map car *mode-setups*))})
+      eval!(~s{(filter (lambda (m) (and (not (mode-doc m))
+                                        (not (string-prefix? "zz-" m))))
+                       (map car *mode-setups*))})
 
     assert undocumented == "()",
            "these modes call define-mode but never mode-doc!: #{undocumented}"

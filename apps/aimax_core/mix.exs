@@ -37,6 +37,7 @@ defmodule Aimax.Core.MixProject do
       {:earmark, "~> 1.4"},
       # fsevents/inotify: how a diff buffer learns that an agent wrote to disk
       {:file_system, "~> 1.0"},
+      {:exqlite, "~> 0.27"},
       {:rustler, "~> 0.36.0"}
     ]
   end

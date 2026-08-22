@@ -24,6 +24,11 @@ defmodule Aimax.Core.Buffer do
   spans but stamps nothing (desktop restore is not an edit). Both live in
   memory only: a daemon restart clears attribution.
 
+  Provenance is default-on for every buffer. A supervised SQLite store keeps
+  immutable roots, exact edit operations, structured actors, content hashes,
+  and recording gaps. Modes can stop recording without deleting history.
+  Starting resumes the accepted head and snapshots an unrecorded interval.
+
   Per-window points (Emacs window-point): `win_points` holds a point/mark/goal
   per window id for every window displaying this buffer EXCEPT the one
   swapped in (the selected window of the last-active frame — the Editor
@@ -37,7 +42,7 @@ defmodule Aimax.Core.Buffer do
   # (a restart would resurrect it empty anyway; better to stay dead loudly)
   use GenServer, restart: :temporary
 
-  alias Aimax.Core.{BufferStore, Events, Rope, Text, TS}
+  alias Aimax.Core.{BufferStore, Events, ProvenanceStore, Rope, Text, TS}
 
   @registry Aimax.Core.BufferRegistry
   @undo_limit 500
@@ -74,6 +79,7 @@ defmodule Aimax.Core.Buffer do
             authors: [],
             edit_log: [],
             edit_log_len: 0,
+            provenance: nil,
             id: nil,
             checkpoint_timer: nil,
             idle_timer: nil,
@@ -255,6 +261,27 @@ defmodule Aimax.Core.Buffer do
   @doc "The mutation journal, newest first: [{version, author, pos, ins, del}]."
   def edit_log(name), do: GenServer.call(via(name), :edit_log)
 
+  @doc "Return the durable Provenance status for the buffer."
+  def provenance(name), do: GenServer.call(via(name), :provenance)
+
+  @doc "Start or resume Provenance without deleting prior history."
+  def provenance_start(name, opts \\ []) do
+    GenServer.call(via(name), {:provenance_start, source(opts), author(opts), opts})
+  end
+
+  @doc "Stop recording after all accepted changes are durable."
+  def provenance_stop(name, opts \\ []) do
+    GenServer.call(via(name), {:provenance_stop, source(opts), author(opts), opts})
+  end
+
+  @doc "Close the current Provenance changeset without deleting history."
+  def provenance_checkpoint(name, opts \\ []) do
+    GenServer.call(via(name), {:provenance_checkpoint, source(opts), author(opts), opts})
+  end
+
+  @doc "Return durable revisions oldest first."
+  def provenance_history(name), do: GenServer.call(via(name), :provenance_history)
+
   @doc "1-based logical line -> {start_byte, line_text sans newline}, clamped."
   def line_at(name, line), do: GenServer.call(via(name), {:line_at, line})
 
@@ -394,6 +421,7 @@ defmodule Aimax.Core.Buffer do
       end
 
     state = %{state | persistent: not String.starts_with?(name, " ")}
+    state = attach_provenance(state)
     {:ok, _} = Registry.register(@registry, {:id, state.id}, state.name)
     {:ok, state |> schedule_checkpoint() |> reset_idle_timer()}
   end
@@ -692,6 +720,52 @@ defmodule Aimax.Core.Buffer do
   def handle_call(:authors, _from, state), do: {:reply, state.authors, state}
   def handle_call(:edit_log, _from, state), do: {:reply, state.edit_log, state}
 
+  def handle_call(:provenance, _from, state),
+    do: {:reply, state.provenance, state}
+
+  def handle_call({:provenance_start, src, author, opts}, _from, state) do
+    actor = resolve_actor(author, src)
+    {text, state} = fetch_text(state)
+    reason = Keyword.get(opts, :reason, "explicit")
+    policy_source = Keyword.get(opts, :policy_source, "user")
+
+    {:ok, status} =
+      ProvenanceStore.start_recording(state.id, text, actor, reason, policy_source)
+
+    {:reply, :ok, %{state | provenance: provenance_state(status)} |> checkpoint_later()}
+  end
+
+  def handle_call({:provenance_stop, src, author, opts}, _from, state) do
+    actor = resolve_actor(author, src)
+    reason = Keyword.get(opts, :reason, "explicit")
+    policy_source = Keyword.get(opts, :policy_source, "user")
+
+    if policy_source == "mode" and state.provenance.policy_source == "user" do
+      {:reply, :ok, state}
+    else
+      {:ok, status} =
+        ProvenanceStore.stop_recording(state.id, actor, reason, policy_source)
+
+      {:reply, :ok, %{state | provenance: provenance_state(status)} |> checkpoint_later()}
+    end
+  end
+
+  def handle_call({:provenance_checkpoint, src, author, opts}, _from, state) do
+    actor = resolve_actor(author, src)
+    reason = Keyword.get(opts, :reason, "explicit")
+
+    case ProvenanceStore.checkpoint(state.id, actor, reason) do
+      {:ok, status} ->
+        {:reply, :ok, %{state | provenance: provenance_state(status)} |> checkpoint_later()}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call(:provenance_history, _from, state),
+    do: {:reply, ProvenanceStore.history(state.id), state}
+
   def handle_call({:motion, motion}, _from, state) do
     {text, state} = fetch_text(state)
 
@@ -734,6 +808,8 @@ defmodule Aimax.Core.Buffer do
         {:reply, {:error, :no_undo}, state}
 
       {rope, point, mark, authors} ->
+        old_text = Rope.to_binary(state.rope)
+        new_text = Rope.to_binary(rope)
         state = push_history(state, {state.rope, state.point, state.mark, state.authors})
 
         state = %{
@@ -751,9 +827,11 @@ defmodule Aimax.Core.Buffer do
             insert_run: 0
         }
 
-        # zero lengths: the journal marks the discontinuity, the restored
-        # spans carry the attribution
+        # The compatibility journal marks an undo as a discontinuity.
         state = log_edit(state, "undo", 0, 0, 0)
+        actor = local_actor("system:undo", "system", "undo", :undo)
+        # Provenance keeps the complete replacement so replay stays exact.
+        state = log_provenance(state, actor, 0, new_text, old_text)
         state = ts_invalidate(state)
         broadcast(state, 0, "", 0, :undo)
         {:reply, :ok, checkpoint_later(state)}
@@ -887,6 +965,67 @@ defmodule Aimax.Core.Buffer do
     end
   end
 
+  defp attach_provenance(state) do
+    text = Rope.to_binary(state.rope)
+
+    actor =
+      local_actor(
+        "system:buffer",
+        "system",
+        "buffer",
+        if(state.path, do: :file_load, else: :buffer_create)
+      )
+
+    {:ok, status} =
+      ProvenanceStore.ensure_cell(
+        state.id,
+        text,
+        actor,
+        policy_source: "default",
+        retention: if(state.persistent, do: "durable", else: "session")
+      )
+
+    status =
+      cond do
+        status.head_hash == text_hash(text) ->
+          status
+
+        not status.recording ->
+          %{status | gap: true}
+
+        true ->
+          {:ok, recovered} =
+            ProvenanceStore.start_recording(
+              state.id,
+              text,
+              actor,
+              "restore-mismatch",
+              status.policy_source
+            )
+
+          recovered
+      end
+
+    %{state | provenance: provenance_state(status)}
+  end
+
+  defp provenance_state(status) do
+    %{
+      enabled: status.recording,
+      cell_id: status.cell_id,
+      head_id: status.head_id,
+      head_hash: status.head_hash,
+      policy_source: status.policy_source,
+      retention: status.retention,
+      gap: status.gap
+    }
+  end
+
+  defp text_hash(text) do
+    :crypto.hash(:sha256, text)
+    |> Base.encode16(case: :lower)
+  end
+
   defp new_id, do: Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
 
   defp read_checkpoint(nil), do: nil
@@ -936,7 +1075,8 @@ defmodule Aimax.Core.Buffer do
       locals: serializable_locals(state.locals),
       hidden: state.hidden,
       buffer_version: state.version,
-      modified: state.version != state.saved_version
+      modified: state.version != state.saved_version,
+      provenance: state.provenance
     }
   end
 
@@ -1052,7 +1192,8 @@ defmodule Aimax.Core.Buffer do
   # snap?: false only inside :replace_range, which snapshots once for the pair
   defp do_insert(state, pos, text, src, author, snap? \\ true) do
     len = Kernel.byte_size(text)
-    author = resolve_author(author, src)
+    actor = resolve_actor(author, src)
+    author = actor_label(actor)
     state = if snap?, do: maybe_snapshot_insert(state, pos, text, src), else: state
     old_rope = state.rope
 
@@ -1068,8 +1209,10 @@ defmodule Aimax.Core.Buffer do
 
     state =
       adjust_ranges(state, &adjust_insert(&1, pos, len), &adjust_insert_stay(&1, pos, len))
+
     state = %{state | authors: stamp_insert(state.authors, pos, len, author)}
     state = log_edit(state, author, pos, len, 0)
+    state = log_provenance(state, actor, pos, text, "")
 
     state = %{
       state
@@ -1086,6 +1229,7 @@ defmodule Aimax.Core.Buffer do
   # (Emacs groups ~20) — undoing a typed word char-by-char is misery
   defp maybe_snapshot_insert(state, pos, text, :user)
        when Kernel.byte_size(text) == 1 and text != "\n" do
+    # amalgamate only onto a previous self-insert (insert_run > 0) â never
     # amalgamate only onto a previous self-insert (insert_run > 0) — never
     # chain onto a newline/paste/programmatic insert's undo step
     if state.last_insert_end == pos and state.insert_run > 0 and state.insert_run < 20 do
@@ -1099,9 +1243,11 @@ defmodule Aimax.Core.Buffer do
     do: %{snapshot(state) | insert_run: 0}
 
   defp do_delete(state, pos, len, src, author, snap? \\ true) do
-    author = resolve_author(author, src)
+    actor = resolve_actor(author, src)
+    author = actor_label(actor)
     state = if snap?, do: snapshot(state), else: state
     old_rope = state.rope
+    deleted = Rope.slice(old_rope, pos, len)
 
     state = %{
       state
@@ -1115,10 +1261,13 @@ defmodule Aimax.Core.Buffer do
     state = adjust_ranges(state, &adjust_delete(&1, pos, len), &adjust_delete(&1, pos, len))
     state = %{state | authors: stamp_delete(state.authors, pos, len)}
     state = log_edit(state, author, pos, 0, len)
+    state = log_provenance(state, actor, pos, "", deleted)
     state = %{state | goal_col: nil, last_insert_end: nil, insert_run: 0, undo_next: 0}
     broadcast(state, pos, "", len, src)
     state
   end
+
+  
 
   # trim lazily at 2x the cap: amortizes the O(limit) Enum.take so a burst of
   # keystrokes doesn't rebuild a 500-cons list on every edit
@@ -1136,15 +1285,70 @@ defmodule Aimax.Core.Buffer do
 
   # --- authorship ------------------------------------------------------------
 
-  # nil author: fall back to a name derived from the source; :none stamps
-  # nothing (the spans still shift through the edit)
-  defp resolve_author(:none, _src), do: nil
-  defp resolve_author(nil, :user), do: "user"
-  defp resolve_author(nil, :editor), do: "editor"
-  defp resolve_author(nil, :process), do: "process"
-  defp resolve_author(nil, {:agent, slug}), do: "agent:" <> slug
-  defp resolve_author(nil, src), do: inspect(src)
-  defp resolve_author(author, _src), do: to_string(author)
+  # The durable actor is structured. actor_label/1 preserves the old author
+  # spans and edit-log API until callers migrate.
+  defp resolve_actor(%{} = actor, src) do
+    actor
+    |> Map.put_new(:source, inspect(src))
+    |> Map.put_new(:assurance, "explicit")
+  end
+
+  defp resolve_actor(:none, src) do
+    %{
+      id: "system:materialization",
+      kind: "system",
+      display_name: "materialization",
+      assurance: "system",
+      source: inspect(src),
+      stamp: false
+    }
+  end
+
+  defp resolve_actor(nil, :user), do: local_actor("user:local", "user", "user", :user)
+  defp resolve_actor(nil, :editor), do: local_actor("system:editor", "system", "editor", :editor)
+  defp resolve_actor(nil, :process), do: local_actor("process:local", "process", "process", :process)
+
+  defp resolve_actor(nil, {:agent, slug}) do
+    local_actor("agent:" <> slug, "agent", "agent:" <> slug, {:agent, slug})
+    |> Map.put(:run_id, slug)
+  end
+
+  defp resolve_actor(nil, src) do
+    local_actor("unknown:" <> inspect(src), "unknown", inspect(src), src)
+    |> Map.put(:assurance, "unverified")
+  end
+
+  defp resolve_actor(author, src) do
+    label = to_string(author)
+    kind =
+      cond do
+        String.starts_with?(label, "agent:") -> "agent"
+        String.starts_with?(label, "mode:") -> "mode"
+        String.starts_with?(label, "process:") -> "process"
+        String.starts_with?(label, "user:") -> "user"
+        true -> "legacy"
+      end
+
+    id = if kind == "legacy", do: "legacy:" <> label, else: label
+
+    local_actor(id, kind, label, src)
+    |> Map.put(:assurance, "legacy")
+  end
+
+  defp local_actor(id, kind, display_name, source) do
+    %{
+      id: id,
+      kind: kind,
+      display_name: display_name,
+      authority: "local",
+      assurance: "local",
+      session_id: nil,
+      source: inspect(source)
+    }
+  end
+
+  defp actor_label(%{stamp: false}), do: nil
+  defp actor_label(%{display_name: display_name}), do: display_name
 
   # a span that contains the insertion point splits — the inserted text
   # must not inherit the surrounding span's author
@@ -1183,6 +1387,40 @@ defmodule Aimax.Core.Buffer do
     if len > @edit_log_limit * 2,
       do: %{state | edit_log: Enum.take(log, @edit_log_limit), edit_log_len: @edit_log_limit},
       else: %{state | edit_log: log, edit_log_len: len}
+  end
+
+  defp log_provenance(%{provenance: nil} = state, _actor, _pos, _inserted, _deleted),
+    do: state
+
+  defp log_provenance(
+         %{provenance: %{enabled: false} = provenance} = state,
+         _actor,
+         _pos,
+         _inserted,
+         _deleted
+       ) do
+    %{state | provenance: %{provenance | gap: true}}
+  end
+
+  defp log_provenance(state, actor, pos, inserted, deleted) do
+    {text, state} = fetch_text(state)
+
+    case ProvenanceStore.record_change(
+           state.id,
+           state.provenance.head_id,
+           state.version,
+           actor,
+           pos,
+           inserted,
+           deleted,
+           text
+         ) do
+      {:ok, status} ->
+        %{state | provenance: provenance_state(status)}
+
+      {:error, {:stale_revision, conflict}} ->
+        raise "stale local Provenance head: #{inspect(conflict)}"
+    end
   end
 
   defp adjust_point_insert(state, pos, len) do

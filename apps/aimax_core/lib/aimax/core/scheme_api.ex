@@ -56,6 +56,16 @@ defmodule Aimax.Core.SchemeAPI do
         "(buffer-authors BUF) — return (START END AUTHOR) attribution spans for the current text.",
       "buffer-edit-log" =>
         "(buffer-edit-log BUF) — return (VERSION AUTHOR POS INS DEL) edit records, newest first.",
+      "buffer-provenance-status" =>
+        "(buffer-provenance-status BUF) — return the durable recording state and accepted head.",
+      "buffer-provenance-history" =>
+        "(buffer-provenance-history BUF) — return the revisions from root to accepted head.",
+      "buffer-provenance-start!" =>
+        "(buffer-provenance-start! BUF [ACTOR REASON POLICY]) — start or resume recording; bridges any gap.",
+      "buffer-provenance-stop!" =>
+        "(buffer-provenance-stop! BUF [ACTOR REASON POLICY]) — stop recording; keeps all history.",
+      "buffer-provenance-checkpoint!" =>
+        "(buffer-provenance-checkpoint! BUF) — close the current changeset.",
       "overlay-set!" =>
         "(overlay-set! BUF TAG RANGES) — replace TAG's overlays with (START END FACE) byte ranges.",
       "overlay-clear!" =>
@@ -397,6 +407,60 @@ defmodule Aimax.Core.SchemeAPI do
       end,
       "buffer-edit-log" => fn [name] ->
         for {v, a, pos, ins, del} <- Buffer.edit_log(name), do: [v, a || false, pos, ins, del]
+      end,
+      "buffer-provenance-status" => fn [name] ->
+        Buffer.provenance(name) |> json_to_scheme_value()
+      end,
+      # the snapshot payload stays in SQLite: a root revision of a large file
+      # would cross into Scheme whole on every redraw. Its size still reads.
+      "buffer-provenance-history" => fn [name] ->
+        Buffer.provenance_history(name)
+        |> Enum.map(fn revision ->
+          revision
+          |> Map.put(:snapshot_bytes, revision.snapshot && byte_size(revision.snapshot))
+          |> Map.delete(:snapshot)
+        end)
+        |> json_to_scheme_value()
+      end,
+      "buffer-provenance-start!" => fn
+        [name] ->
+          :ok = Buffer.provenance_start(name, source: :editor)
+          :void
+
+        [name, actor, reason, policy_source] ->
+          :ok =
+            Buffer.provenance_start(
+              name,
+              source: :editor,
+              author: plain(actor),
+              reason: plain(reason),
+              policy_source: plain(policy_source)
+            )
+
+          :void
+      end,
+      "buffer-provenance-stop!" => fn
+        [name] ->
+          :ok = Buffer.provenance_stop(name, source: :editor)
+          :void
+
+        [name, actor, reason, policy_source] ->
+          :ok =
+            Buffer.provenance_stop(
+              name,
+              source: :editor,
+              author: plain(actor),
+              reason: plain(reason),
+              policy_source: plain(policy_source)
+            )
+
+          :void
+      end,
+      "buffer-provenance-checkpoint!" => fn [name] ->
+        case Buffer.provenance_checkpoint(name, source: :editor) do
+          :ok -> :void
+          {:error, reason} -> [{:sym, "error"}, Atom.to_string(reason)]
+        end
       end,
       # overlays: (overlay-set! buf 'org (list (list s e "org-todo") ...))
       # replaces the tag's whole range set — the fontification model is
@@ -1646,6 +1710,13 @@ defmodule Aimax.Core.SchemeAPI do
   defp dir_atom({:sym, "v"}), do: :v
   defp dir_atom("h"), do: :h
   defp dir_atom("v"), do: :v
+
+  defp json_to_scheme_value(value) do
+    value
+    |> Jason.encode!()
+    |> Jason.decode!()
+    |> Aimax.Core.LLM.json_to_scheme()
+  end
 
   defp plain({:sym, s}), do: s
   defp plain(v), do: v

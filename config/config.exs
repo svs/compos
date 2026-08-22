@@ -57,6 +57,7 @@ if config_env() == :test do
 
   config :aimax_core,
     home: "/tmp/aimax-test-home-#{suffix}",
+    provenance_path: ":memory:",
     desktop_path: "/tmp/aimax-desktop-test-#{suffix}.etf",
     daemon_registry_path: "/tmp/aimax-daemons-test-#{suffix}.json",
     desktop_autorestore: false,

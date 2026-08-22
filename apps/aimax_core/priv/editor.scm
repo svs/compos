@@ -31,6 +31,15 @@
 ;; DOMAIN is the subject area; EFFECTS say what invoking it may do.
 (define *catalog* '())
 
+;; Deriving an index from the catalog costs more than reading it, so a
+;; reader caches what it built and checks this counter to know the cache
+;; still answers. Every write to *catalog* moves it.
+(define *catalog-gen* 0)
+
+(define (catalog-generation) *catalog-gen*)
+
+(define (catalog--touch!) (set! *catalog-gen* (+ *catalog-gen* 1)))
+
 ;; One key string per live entry, for the registration fast path. The
 ;; `member` builtin runs in Elixir, so a fresh load asks "seen before?"
 ;; without an interpreted scan; only a re-registration pays the rebuild.
@@ -108,6 +117,7 @@
           (begin
             (set! *catalog* (cons entry *catalog*))
             (set! *catalog-keys* (cons key *catalog-keys*)))))
+    (catalog--touch!)
     entry))
 
 (define (catalog) (reverse *catalog*))
@@ -143,6 +153,7 @@
                                  (equal? (catalog--get e 'qualified-name)
                                          (catalog--get old 'qualified-name))))
                           *catalog*)))
+          (catalog--touch!)
           updated))))
 
 ;; Commands are an Elixir registry underneath, but this wrapper gives every

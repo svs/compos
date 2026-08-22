@@ -303,6 +303,20 @@
 ;; apropos--enrich, and it gets #f here and the linear walk, unchanged.
 (define *apropos--index* #f)
 
+;; Building the index costs more than a narrow search does: 245ms against
+;; a 1275 entry catalog, paid on every call. The catalog only changes when
+;; a package registers something, so keep the index and rebuild it when
+;; the generation moves.
+(define *apropos--index-cache* #f)
+(define *apropos--index-gen* -1)
+
+(define (apropos--index-cached)
+  (let ((gen (catalog-generation)))
+    (unless (and *apropos--index-cache* (equal? gen *apropos--index-gen*))
+      (set! *apropos--index-cache* (apropos--index))
+      (set! *apropos--index-gen* gen))
+    *apropos--index-cache*))
+
 (define (apropos--bucket-key name)
   (let* ((n (catalog--string (or name "")))
          (cut (string-rindex n "/"))
@@ -310,35 +324,65 @@
     (if (equal? base "") "" (string-downcase (substring base 0 1)))))
 
 (define (apropos--index)
-  (let* ((es (catalog))
-         (keyed (map (lambda (e)
-                       (list (apropos--bucket-key (catalog--get e 'name)) e))
-                     es))
-         (keys (dedupe-names (map car keyed))))
-    (map (lambda (k)
-           (list k (map (lambda (p) (car (cdr p)))
-                        (filter (lambda (p) (equal? (car p) k)) keyed))))
-         keys)))
+  ;; Each row is (LOOKUP-KEY ENTRY) with the key already built, so a scan
+  ;; compares one string where it used to walk two plists per entry. A
+  ;; component answers to its qualified name as well, so it gets a row for
+  ;; each name it answers to.
+  ;; cons and reverse: appending to the accumulator once per entry copies
+  ;; the list every time, and the build cost more than the walk it saves.
+  (let* ((rows
+           (reverse
+             (fold
+               (lambda (out e)
+                 (let* ((kind (catalog--string (or (catalog--get e 'kind) "")))
+                        (name (catalog--string (or (catalog--get e 'name) "")))
+                        (qual (catalog--string (or (catalog--get e 'qualified-name) "")))
+                        (enrichment
+                        (list 'qualified-name (catalog--get e 'qualified-name)
+                              'package (catalog--get e 'package)
+                              'namespace (catalog--get e 'namespace)
+                              'domain (catalog--get e 'domain)
+                              'effects (catalog--get e 'effects)
+                              'use (catalog--get e 'use)))
+                      (row (list (apropos--bucket-key name)
+                                 (string-append kind " " name) enrichment)))
+                   (if (or (equal? qual "") (equal? qual name))
+                       (cons row out)
+                       (cons (list (apropos--bucket-key qual)
+                                   (string-append kind " " qual) enrichment)
+                             (cons row out)))))
+               '() (catalog))))
+         (buckets (dedupe-names (map car rows))))
+    (map (lambda (b)
+           (list b (map cdr (filter (lambda (r) (equal? (car r) b)) rows))))
+         buckets)))
 
 ;; the catalog entry for KIND and NAME, read from the index apropos built.
 ;; With no index it falls back to the linear walk, so a caller outside a
 ;; search keeps working.
+(define (apropos--enrichment-of e)
+  (list 'qualified-name (catalog--get e 'qualified-name)
+        'package (catalog--get e 'package)
+        'namespace (catalog--get e 'namespace)
+        'domain (catalog--get e 'domain)
+        'effects (catalog--get e 'effects)
+        'use (catalog--get e 'use)))
+
+;; the six enrichment fields for KIND and NAME, already built when the
+;; index holds them. With no index it reads the catalog and builds them,
+;; so a caller outside a search keeps working.
 (define (apropos--lookup index kind name)
   (if (not index)
-      (catalog-entry kind name)
-      (let* ((k (catalog--string kind))
-             (n (catalog--string name))
-             (cell (assoc (apropos--bucket-key n) index)))
+      (let ((e (catalog-entry kind name)))
+        (and e (apropos--enrichment-of e)))
+      (let* ((want (string-append (catalog--string kind) " "
+                                  (catalog--string name)))
+             (cell (assoc (apropos--bucket-key (catalog--string name)) index)))
         (and cell
-             (let loop ((es (car (cdr cell))))
-               (cond ((null? es) #f)
-                     ((and (equal? (catalog--string (or (catalog--get (car es) 'kind) "")) k)
-                           (if (and (equal? k "component") (string-contains? n "/"))
-                               (equal? (catalog--get (car es) 'qualified-name) n)
-                               (equal? (catalog--string
-                                         (or (catalog--get (car es) 'name) "")) n)))
-                      (car es))
-                     (else (loop (cdr es)))))))))
+             (let loop ((rows (car (cdr cell))))
+               (cond ((null? rows) #f)
+                     ((equal? (car (car rows)) want) (car (cdr (car rows))))
+                     (else (loop (cdr rows)))))))))
 
 (define (apropos--words q)
   (filter (lambda (w) (not (equal? w "")))
@@ -372,10 +416,10 @@
        (let ((cmd (apropos--lookup *apropos--index* 'command (nth 1 row))))
          (append (list 'kind "key" 'name (car row) 'runs (nth 1 row)
                        'domain "keys" 'effects
-                       (if cmd (catalog--get cmd 'effects) '("read")))
+                       (if cmd (plist-get cmd 'effects) '("read")))
                  (if cmd
-                     (list 'package (catalog--get cmd 'package)
-                           'namespace (catalog--get cmd 'namespace))
+                     (list 'package (plist-get cmd 'package)
+                           'namespace (plist-get cmd 'namespace))
                      '())))))
 
 (define (apropos--var v words)
@@ -394,15 +438,7 @@
                    (plist-get hit 'name) (plist-get hit 'task)))
          (e (and name (apropos--lookup *apropos--index*
                                        (string->symbol kind) name))))
-    (if (not e)
-        hit
-        (append hit
-          (list 'qualified-name (catalog--get e 'qualified-name)
-                'package (catalog--get e 'package)
-                'namespace (catalog--get e 'namespace)
-                'domain (catalog--get e 'domain)
-                'effects (catalog--get e 'effects)
-                'use (catalog--get e 'use))))))
+    (if (not e) hit (append hit e))))
 
 ;; catalog-meta! accepts a symbol for domain and friends, so read every
 ;; field through catalog--string before appending it into the haystack
@@ -448,6 +484,15 @@
 ;; an exact name is an answer, a recipe is a ready composition, and a name
 ;; prefix is generally more useful than a mention buried in prose.
 (define (apropos--rank hits query)
+  ;; An empty query has no name to rank against, and the order it came in
+  ;; is the answer. Leave before building the four buckets: the let* below
+  ;; runs its predicates over every hit, and apropos-category asks with an
+  ;; empty query every time.
+  (if (equal? (string-trim query) "")
+      hits
+      (apropos--rank-by-name hits query)))
+
+(define (apropos--rank-by-name hits query)
   (let* ((q (string-downcase (string-trim query)))
          (name-of (lambda (h)
                     (string-downcase
@@ -466,7 +511,7 @@
                             (and (not (exact? h)) (not (recipe? h)) (prefix? h))) hits))
          (rest (filter (lambda (h)
                          (and (not (exact? h)) (not (recipe? h)) (not (prefix? h)))) hits)))
-    (if (equal? q "") hits (append exact recipes prefixes rest))))
+    (append exact recipes prefixes rest)))
 
 ;; an internal entry carries its doc when the primitive has one; a bare
 ;; userland define stays a bare name — describe-function has its source
@@ -478,7 +523,7 @@
 ;; Recipes come first: a task-level hit beats four name-level ones, and it
 ;; is the answer the caller actually wanted.
 (define (apropos query &rest filters)
-  (set! *apropos--index* (apropos--index))
+  (set! *apropos--index* (apropos--index-cached))
   (let ((result (apropos--search query filters)))
     (set! *apropos--index* #f)
     result))

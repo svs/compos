@@ -39,13 +39,36 @@ defmodule Aimax.SchemeSuiteTest do
     refute out =~ "canary-must-pass", "a passing check recorded a failure"
   end
 
+  # priv/tests/canary-test.scm registers this, and it fails on purpose.
+  @canary "zz-canary-always-fails"
+
+  # test-self-check calls the check functions directly. This goes the whole
+  # way: a file loads, a test registers, run-test runs it, and a failure
+  # comes back. A file that fails to load takes its tests with it in
+  # silence, and without this the bridge reads that as a shorter green run.
+  test "a registered test can load, run, and report red" do
+    found = names()
+
+    assert @canary in found,
+           "the canary did not load — priv/tests is not being read, or a file raised on load"
+
+    assert {:ok, out} = Session.eval("(run-test '#{@canary})")
+    assert out =~ "canary", "the canary ran and reported nothing: run-test cannot go red"
+    refute out == "()", "the canary passed, so a failing test reports as passing"
+  end
+
   test "the Scheme suite passes" do
     found = names()
 
     assert found != [], "priv/tests registered no tests — did load-tests! find the directory?"
 
+    real = found -- [@canary]
+
+    assert length(real) > 20,
+           "only #{length(real)} tests loaded — a test file probably raised on load"
+
     failures =
-      for name <- found,
+      for name <- real,
           result = Session.eval("(run-test '#{name})"),
           reduced = reduce(name, result),
           reduced != nil,

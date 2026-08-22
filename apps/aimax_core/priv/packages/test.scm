@@ -45,6 +45,13 @@
             (list (list name doc thunk))))
   name)
 
+;; There is no buffer-set-text! primitive: replace the whole range.
+(define (test-buffer! name text)
+  (unless (buffer-exists? name) (buffer-create name))
+  (buffer-delete-range! name 0 (buffer-size name))
+  (when (and text (not (equal? text ""))) (buffer-insert! name 0 text))
+  name)
+
 (define (test-fail! text)
   (set! *test-failures* (append *test-failures* (list text))))
 
@@ -155,8 +162,7 @@
                       (list (string-append "  FAIL  " (symbol->string name)))
                       (map (lambda (f) (string-append "          " f)) fs)))))))
         (test-names))
-      (unless (buffer-exists? buf) (buffer-create buf))
-      (buffer-set-text! buf
+      (test-buffer! buf
         (string-append
           (number->string (length (test-names))) " tests, "
           (number->string failed) " failing\n\n"
@@ -176,6 +182,8 @@
   "(check-contains! HAYSTACK NEEDLE LABEL) — record a failure unless HAYSTACK holds NEEDLE")
 (public! 'test-names "(test-names) — every registered test name")
 (public! 'run-test "(run-test 'name) — run one test; () means it passed")
+(public! 'test-buffer!
+  "(test-buffer! NAME TEXT) — make or empty a buffer and give it TEXT; answers NAME")
 (public! 'test-self-check
   "(test-self-check) — prove the checks can fail; answers the failures three bad assertions record")
 (public! 'load-tests! "(load-tests!) — load every .scm under priv/tests; answers the test count")

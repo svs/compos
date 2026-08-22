@@ -18,16 +18,18 @@
 (domain! 'testing)
 (effects! '(read))
 
-;; key-binding answers what a key means HERE: the local map wins, then
-;; the read-only map, then the global one. A test that does not say where
-;; it stands reads whatever buffer the editor happens to show — with a
-;; prompt open, C-g answers minibuffer-cancel. So pin a plain buffer.
-(define (with-plain-buffer thunk)
-  (let ((buf "*zzkm-plain*"))
-    (unless (buffer-exists? buf) (buffer-create buf))
-    (let ((out (with-current-buffer buf thunk)))
-      (buffer-kill! buf)
-      out)))
+;; THE GLOBAL MAP AS DATA. global-keys answers rows of (KEYS COMMAND)
+;; with no context at all, which is what a keymap assertion wants.
+;;
+;; key-binding is the other thing: it answers what a key means HERE, and
+;; "here" is the window's buffer — not the buffer with-current-buffer
+;; names. Wrapping a lookup in with-current-buffer pins nothing, and a
+;; test written that way reads whatever the editor happens to show. It
+;; passed until a buffer with a live isearch was on screen and C-s
+;; answered isearch-repeat-forward.
+(define (global-key-command keys)
+  (let ((row (assoc keys (global-keys))))
+    (and row (nth 1 row))))
 
 ;; Emacs is the reference, so these are the keys it puts where it puts
 ;; them. A rebinding here is a decision, and it should have to edit a
@@ -48,13 +50,11 @@
 (deftest 'the-core-keys-are-where-emacs-puts-them
   "the bindings a person arrives already knowing"
   (lambda ()
-    (with-plain-buffer
-      (lambda ()
-        (for-each
-          (lambda (row)
-            (check-equal! (key-binding (car row)) (nth 1 row)
-                          (string-append (car row) " runs the Emacs command")))
-          *keymap-test-core*)))))
+    (for-each
+      (lambda (row)
+        (check-equal! (global-key-command (car row)) (nth 1 row)
+                      (string-append (car row) " runs the Emacs command")))
+      *keymap-test-core*)))
 
 (deftest 'every-global-binding-names-a-live-command
   "a key bound to a command that does not exist is a dead key"
@@ -70,17 +70,15 @@
 (deftest 'a-prefix-reads-as-a-prefix
   "C-x holds a map, so it answers prefix and never a command"
   (lambda ()
-    (with-plain-buffer
-      (lambda ()
-        (check-equal! (key-binding "C-x") 'prefix "C-x is a prefix")
-        (check-equal! (key-binding "C-c") 'prefix "C-c is a prefix")
-        (check-false! (key-binding "C-x zzqx") "an unbound sequence answers #f")))))
+    (check-equal! (key-binding "C-x") 'prefix "C-x is a prefix")
+    (check-equal! (key-binding "C-c") 'prefix "C-c is a prefix")
+    (check-false! (key-binding "C-x zzqx") "an unbound sequence answers #f")))
 
 (deftest 'key-binding-takes-a-string-or-a-list
   "the introspection a keymap test leans on, in both shapes"
   (lambda ()
-    (with-plain-buffer
-      (lambda ()
+    (begin
+      (begin
         (check-equal! (key-binding "C-x b") (key-binding (list "C-x" "b"))
                       "a written sequence and a list agree")
         ;; a bad argument used to raise inside the Editor call, and an
@@ -95,12 +93,10 @@
 (deftest 'C-x-b-names-the-group-aware-switcher
   "the binding half of the seam"
   (lambda ()
-    (with-plain-buffer
-      (lambda ()
-        (check-equal! (key-binding "C-x b") "group-switch-to-buffer"
-                      "C-x b runs the group-aware buffer prompt")
-        (check-true! (member "group-switch-to-buffer" (command-names))
-                     "and that command exists")))))
+    (check-equal! (global-key-command "C-x b") "group-switch-to-buffer"
+                  "C-x b runs the group-aware buffer prompt")
+    (check-true! (member "group-switch-to-buffer" (command-names))
+                 "and that command exists")))
 
 (deftest 'the-switcher-command-opens-a-prompt
   "the behaviour half of the seam, without pressing anything"
@@ -127,7 +123,5 @@
   (lambda ()
     (check-true! (member "switch-to-buffer" (command-names))
                  "the modal switcher keeps its command")
-    (with-plain-buffer
-      (lambda ()
-        (check-equal! (key-binding "C-x G") "switch-groups"
-                      "and the groups view keeps its key")))))
+    (check-equal! (global-key-command "C-x G") "switch-groups"
+                  "and the groups view keeps its key")))

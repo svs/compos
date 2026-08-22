@@ -46,6 +46,123 @@ defmodule Aimax.DesktopRestoreTest do
     :ok
   end
 
+  test "desktop-clear saves modified files and removes the cleared desktop" do
+    n = System.unique_integer([:positive])
+    path = Path.join(System.tmp_dir!(), "desktop-clear-#{n}.txt")
+    clean = "*desktop-clear-#{n}*"
+    File.write!(path, "saved\n")
+
+    on_exit(fn ->
+      File.rm(path)
+      for b <- [path, clean], Buffer.exists?(b), do: Aimax.Core.kill_buffer(b)
+    end)
+
+    eval!(~s{(begin (visit "#{path}")
+                    (insert! "agent ")
+                    (buffer-create "#{clean}"))})
+
+    KeyDispatch.handle_key("M-x")
+    Enum.each(String.graphemes("desktop-clear"), &KeyDispatch.handle_key/1)
+    KeyDispatch.handle_key("RET")
+
+    assert Editor.render_state().minibuffer.prompt ==
+             "Save #{path}? (y, n, A all, N none) "
+    KeyDispatch.handle_key("y")
+
+    assert File.read!(path) == "agent saved\n"
+    refute Buffer.exists?(path)
+    refute Buffer.exists?(clean)
+    assert Editor.current_buffer() == "*scratch*"
+    assert eval!("*minibuffer-history*") == "()"
+
+    assert :ok = Desktop.save_now()
+    assert :ok = Desktop.restore_now()
+    refute Buffer.exists?(path)
+    refute Buffer.exists?(clean)
+  end
+
+  test "desktop-clear keeps a modified file that the user does not save" do
+    n = System.unique_integer([:positive])
+    path = Path.join(System.tmp_dir!(), "desktop-keep-#{n}.txt")
+    clean = "*desktop-doomed-#{n}*"
+    File.write!(path, "saved\n")
+
+    on_exit(fn ->
+      File.rm(path)
+      for b <- [path, clean], Buffer.exists?(b), do: Aimax.Core.kill_buffer(b)
+    end)
+
+    eval!(~s{(begin (visit "#{path}")
+                    (insert! "unsaved ")
+                    (buffer-create "#{clean}"))})
+
+    eval!(~s{(run-command "desktop-clear")})
+    KeyDispatch.handle_key("n")
+
+    assert Buffer.exists?(path)
+    assert Buffer.text(path) == "unsaved saved\n"
+    assert File.read!(path) == "saved\n"
+    refute Buffer.exists?(clean)
+  end
+
+  test "C-g quits desktop-clear without killing buffers" do
+    n = System.unique_integer([:positive])
+    path = Path.join(System.tmp_dir!(), "desktop-quit-#{n}.txt")
+    clean = "*desktop-quit-#{n}*"
+    File.write!(path, "saved\n")
+
+    on_exit(fn ->
+      File.rm(path)
+      for b <- [path, clean], Buffer.exists?(b), do: Aimax.Core.kill_buffer(b)
+    end)
+
+    eval!(~s{(begin (visit "#{path}")
+                    (insert! "unsaved ")
+                    (buffer-create "#{clean}")
+                    (run-command "desktop-clear"))})
+
+    KeyDispatch.handle_key("C-g")
+
+    refute Editor.render_state().minibuffer
+    assert Buffer.exists?(path)
+    assert Buffer.exists?(clean)
+    assert Buffer.text(path) == "unsaved saved\n"
+    assert File.read!(path) == "saved\n"
+  end
+
+  test "A saves every remaining file and N saves none" do
+    n = System.unique_integer([:positive])
+    a = Path.join(System.tmp_dir!(), "desktop-all-a-#{n}.txt")
+    b = Path.join(System.tmp_dir!(), "desktop-all-b-#{n}.txt")
+    File.write!(a, "a\n")
+    File.write!(b, "b\n")
+
+    on_exit(fn ->
+      for path <- [a, b] do
+        File.rm(path)
+        if Buffer.exists?(path), do: Aimax.Core.kill_buffer(path)
+      end
+    end)
+
+    eval!(~s{(begin (visit "#{a}") (insert! "saved ")
+                    (visit "#{b}") (insert! "also ")
+                    (run-command "desktop-clear"))})
+    KeyDispatch.handle_key("A")
+
+    assert File.read!(a) == "saved a\n"
+    assert File.read!(b) == "also b\n"
+    refute Buffer.exists?(a)
+    refute Buffer.exists?(b)
+
+    File.write!(a, "original\n")
+    eval!(~s{(begin (visit "#{a}") (insert! "discarded ")
+                    (run-command "desktop-clear"))})
+    KeyDispatch.handle_key("N")
+
+    assert File.read!(a) == "original\n"
+    refute Buffer.exists?(a)
+  end
+
   # S2: one restore path. The mode setup fn rebuilds presentation from
   # the locals it finds, so the locals MUST be on the buffer before it
   # runs — a probe mode makes the order observable.

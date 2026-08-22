@@ -1847,12 +1847,19 @@
 ;;;   (persist-global! 'my-thing (lambda () *my-thing*)
 ;;;                              (lambda (v) (set! *my-thing* v)))
 
-(define *desktop-globals* '())   ; ((KEY GET PUT) ...)
+(define *desktop-globals* '())   ; ((KEY GET PUT CLEAR) ...)
 
 (define (persist-global! key get put)
-  (set! *desktop-globals*
-    (cons (list key get put)
-          (remove (lambda (e) (equal? (car e) key)) *desktop-globals*))))
+  (let* ((old (assoc key *desktop-globals*))
+         (initial (get))
+         ;; A package reload re-registers the variable after it changed.
+         ;; Keep the first reset closure instead of adopting that live value.
+         (reset (if old
+                    (car (cdr (cdr (cdr old))))
+                    (lambda () (put initial)))))
+    (set! *desktop-globals*
+      (cons (list key get put reset)
+            (remove (lambda (e) (equal? (car e) key)) *desktop-globals*)))))
 
 ;; what the desktop writes
 (define (desktop-globals)
@@ -1866,6 +1873,82 @@
       (let ((hit (assoc (car e) saved)))
         (when hit ((car (cdr (cdr e))) (cadr hit)))))
     *desktop-globals*))
+
+(define (desktop-globals-clear!)
+  (for-each
+    (lambda (e) ((car (cdr (cdr (cdr e))))))
+    *desktop-globals*))
+
+;; desktop-clear follows Emacs: remove every non-internal buffer and reset
+;; the globals that ride in the desktop. Each modified file gets one question.
+;; A saves all remaining files. N explicitly discards all remaining edits.
+(define (desktop-clear--finish kept members)
+  (let ((doomed (filter (lambda (b) (not (member b kept))) members)))
+    (desktop-globals-clear!)
+    (for-each
+      (lambda (b)
+        (when (process-running? b) (process-kill! b))
+        (buffer-kill! b))
+      doomed)
+    (message
+      (string-append "Cleared desktop: "
+                     (number->string (length doomed)) " buffers"
+                     (if (pair? kept)
+                         (string-append "; kept "
+                                        (number->string (length kept))
+                                        " unsaved")
+                         "")))))
+
+(define (desktop-clear--save-all dirty members)
+  (for-each save-buffer-named! dirty)
+  (desktop-clear--finish '() members))
+
+(define (desktop-clear--ask-save dirty kept members)
+  (if (null? dirty)
+      (desktop-clear--finish kept members)
+      (let* ((b (car dirty))
+             (answer (lambda (k) (lambda () (minibuffer-detach!) (k)))))
+        (minibuffer-read*
+          (string-append "Save " b "? (y, n, A all, N none) ") '()
+          (list
+            (list 'change
+              (lambda (input)
+                (cond
+                  ((string-suffix? "y" input)
+                   ((answer
+                      (lambda ()
+                        (save-buffer-named! b)
+                        (desktop-clear--ask-save (cdr dirty) kept members)))))
+                  ((string-suffix? "n" input)
+                   ((answer
+                      (lambda ()
+                        (desktop-clear--ask-save
+                          (cdr dirty) (cons b kept) members)))))
+                  ((string-suffix? "A" input)
+                   ((answer (lambda () (desktop-clear--save-all dirty members)))))
+                  ((string-suffix? "N" input)
+                   ((answer (lambda () (desktop-clear--finish '() members)))))
+                  (else (minibuffer-input! "")))))
+            (list 'confirm
+              (lambda (v) (desktop-clear--ask-save dirty kept members)))
+            (list 'cancel (lambda () #f))
+            (list 'style "question"))))))
+
+(domain! 'desktop)
+(effects! '(destroy))
+
+(define-command "desktop-clear"
+  "Empty the desktop, asking whether to save each modified file"
+  (lambda ()
+    (let* ((members (buffer-list-mru))
+           (dirty (filter
+                    (lambda (b)
+                      (and (buffer-path b) (buffer-modified? b)))
+                    members)))
+      (desktop-clear--ask-save dirty '() members))))
+
+(domain! 'unknown)
+(effects! '(unknown))
 
 ;;; --- minor modes --------------------------------------------------------------
 ;;; A minor mode = its name in the buffer-local 'minor-modes list + an
@@ -2030,6 +2113,22 @@
     (when done
       (for-each (lambda (fn) (fn old new)) *buffer-renamed-hooks*))
     done))
+
+(define-command "buffer-rename" "Rename the current buffer without changing its file"
+  (lambda ()
+    (let ((old (current-buffer)))
+      (minibuffer-read (string-append "Rename buffer " old " to: ") '()
+        (lambda (input)
+          (let ((new (string-trim input)))
+            (cond
+              ((equal? new "") (message "Buffer needs a name"))
+              ((equal? new old) (message (string-append "Buffer is already named " old)))
+              ((buffer-known? new)
+               (message (string-append "Buffer " new " already exists")))
+              ((rename-buffer! old new)
+               (message (string-append "Renamed buffer " old " to " new)))
+              (else
+               (message (string-append "Could not rename buffer " old))))))))))
 
 ;; The primitive changes the window and wakes the process; Scheme owns the
 ;; mode closures, so it also completes runtime restoration in this same

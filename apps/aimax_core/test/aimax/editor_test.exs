@@ -1050,6 +1050,39 @@ defmodule Aimax.EditorTest do
     assert echo() == "minibuffer-confirm: undefined command: rest\\"
   end
 
+  test "M-x buffer-rename renames the current buffer and refuses a taken name", %{buf: old} do
+    renamed = "renamed-#{System.unique_integer([:positive])}"
+    taken = "taken-#{System.unique_integer([:positive])}"
+    {:ok, _} = Aimax.Core.create_buffer(taken, text: "occupied")
+
+    on_exit(fn ->
+      for name <- [old, renamed, taken], Buffer.exists?(name), do: Aimax.Core.kill_buffer(name)
+    end)
+
+    press(["M-x"])
+    type("buffer-rename")
+    press(["RET"])
+    expected_prompt = "Rename buffer #{old} to: "
+    assert %{prompt: ^expected_prompt} = Editor.render_state().minibuffer
+
+    type(renamed)
+    press(["RET"])
+
+    assert Editor.current_buffer() == renamed
+    refute Buffer.exists?(old)
+    assert echo() == "Renamed buffer #{old} to #{renamed}"
+
+    press(["M-x"])
+    type("buffer-rename")
+    press(["RET"])
+    type(taken)
+    press(["RET"])
+
+    assert Editor.current_buffer() == renamed
+    assert Buffer.text(taken) == "occupied"
+    assert echo() == "Buffer #{taken} already exists"
+  end
+
   test "find-file TAB filename completion completes and descends directories" do
     root = Path.join(System.tmp_dir!(), "aimax-fc-#{System.unique_integer([:positive])}")
     File.mkdir_p!(Path.join(root, "subdir"))

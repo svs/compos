@@ -37,12 +37,20 @@ defmodule Aimax.Scheme.Builtins do
         end
       end,
       "sort" => fn [l] -> Enum.sort(l) end,
-      "cons" => fn [h, t] when is_list(t) -> [h | t] end,
+      # any tail, not only a list: the reader reads (a . b), so cons must
+      # build it too. list? tells a proper list from a dotted pair.
+      "cons" => fn [h, t] -> [h | t] end,
       "car" => fn [[h | _]] -> h end,
       "cdr" => fn [[_ | t]] -> t end,
       "list" => fn args -> args end,
       "null?" => fn [x] -> x == [] end,
       "pair?" => fn [x] -> is_list(x) and x != [] end,
+      "list?" => fn [x] -> proper_list?(x) end,
+      "char?" => fn [x] -> match?({:char, _}, x) end,
+      "char->integer" => fn [{:char, cp}] -> cp end,
+      "integer->char" => fn [i] when is_integer(i) -> {:char, i} end,
+      "string->char" => fn [<<cp::utf8, _::binary>>] -> {:char, cp} end,
+      "char->string" => fn [{:char, cp}] -> <<cp::utf8>> end,
       "length" => fn [l] -> length(l) end,
       "append" => fn lists -> Enum.concat(lists) end,
       "reverse" => fn [l] -> Enum.reverse(l) end,
@@ -245,7 +253,13 @@ defmodule Aimax.Scheme.Builtins do
       "abs" => "(abs N) — return the absolute value of N.",
       "member" => "(member X LST) — return the tail of LST from the first X, or false.",
       "sort" => "(sort LST) — return LST sorted in ascending term order.",
-      "cons" => "(cons H T) — prepend H to the list T; T must be a list.",
+      "cons" => "(cons H T) — prepend H to T. A non-list T makes a dotted pair.",
+      "list?" => "(list? X) — return true if X is a proper list.",
+      "char?" => "(char? X) — return true if X is a character.",
+      "char->integer" => "(char->integer C) — return the codepoint of C.",
+      "integer->char" => "(integer->char N) — return the character for codepoint N.",
+      "string->char" => "(string->char S) — return the first character of S.",
+      "char->string" => "(char->string C) — return C as a one-character string.",
       "car" => "(car LST) — return the first element of LST.",
       "cdr" => "(cdr LST) — return LST without its first element.",
       "list" => "(list X ...) — return a list of the arguments.",
@@ -341,4 +355,8 @@ defmodule Aimax.Scheme.Builtins do
     end
   end
 
+
+  defp proper_list?([]), do: true
+  defp proper_list?([_ | t]), do: proper_list?(t)
+  defp proper_list?(_), do: false
 end

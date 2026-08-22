@@ -295,8 +295,14 @@
 ;; the 0-based index of the entry line BUF's point is on, or #f above the
 ;; entries. BUF's own point, not (point): a context provider asks about a
 ;; list buffer while another buffer is current.
+;; The text and the point are two reads of one buffer, and another lane
+;; can refresh the list between them. A list that grew then answered with
+;; a point past the end of the text this call holds, and the read crashed.
+;; Point belongs to the text we have: clamp it into that text.
 (define (line-index-at buf header-lines)
-  (let* ((before (substring-bytes (buffer-text buf) 0 (buffer-point buf)))
+  (let* ((text (buffer-text buf))
+         (p (min (buffer-point buf) (string-byte-length text)))
+         (before (substring-bytes text 0 p))
          (ln (- (length (string-split before "\n")) 1 header-lines)))
     (and (>= ln 0) ln)))
 

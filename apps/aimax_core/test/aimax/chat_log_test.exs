@@ -8,7 +8,7 @@ defmodule Aimax.ChatLogTest do
 
   use ExUnit.Case
 
-  alias Aimax.Core.{Agent, Buffer, Editor, Session}
+  alias Aimax.Core.{Agent, Buffer, Editor, KeyDispatch, Session}
 
   defp eval!(src), do: (fn {:ok, p} -> p end).(Session.eval(src))
 
@@ -126,6 +126,57 @@ defmodule Aimax.ChatLogTest do
     assert Buffer.text(path) =~ "recover this"
     assert Buffer.text(path) =~ "Recovered answer."
   end
+
+  test "the chats list ends with the saved chats and RET revives one" do
+    slug =
+      eval_str!("""
+      (execute* "revive me" '(backend "stub" script
+        (((type chunk text "Old answer.\\n")))))
+      """)
+
+    buf = "*chat:#{slug}*"
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
+
+    path = eval_str!(~s[(chat-log-path "#{buf}")])
+    assert eventually(fn -> File.exists?(path) end)
+
+    # archive the chat: the runtime and the buffer both go, the file stays
+    Agent.kill(slug)
+    Aimax.Core.kill_buffer(buf)
+    assert eventually(fn -> not Buffer.exists?(buf) end)
+
+    eval!(~s[(run-command "chat-list")])
+    rows = Buffer.get_local("*chats*", "list-entries")
+    assert path in rows
+
+    # the archive rows sit under every live chat
+    live = Enum.count(rows, &Buffer.exists?/1)
+    assert Enum.all?(Enum.take(rows, live), &Buffer.exists?/1)
+
+    text = Buffer.text("*chats*")
+    assert text =~ "archived"
+
+    # RET on the row reads the file back: the conversation returns
+    eval!(~s[(begin (switch-to-buffer! "*chats*") #t)])
+    row = Enum.find_index(rows, &(&1 == path))
+    eval!(~s[(list-goto-first-entry "*chats*")])
+    press(List.duplicate("C-n", row))
+    press(["RET"])
+
+    assert Buffer.exists?(path)
+    assert Buffer.get_local(path, "mode-name") == "chat-mode"
+    assert Buffer.text(path) =~ "revive me"
+    assert Buffer.text(path) =~ "Old answer."
+
+    # the revived chat is a live row now, so the archive does not repeat it
+    eval!(~s[(run-command "chat-list")])
+    saved = Enum.filter(Buffer.get_local("*chats*", "list-entries"), &(&1 == path))
+    assert length(saved) == 1
+
+    Aimax.Core.kill_buffer(path)
+  end
+
+  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
 
   defp eventually(fun, tries \\ 40) do
     cond do

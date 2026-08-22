@@ -1973,6 +1973,70 @@
                          (inner (cdr bs) (cons (car bs) acc)))
                         (else (inner (cdr bs) acc)))))))))
 
+;;; --- the archive: the saved chats, under the live ones ---------------------------
+;;; chat.scm writes every conversation to <aimax-home>/chats. A chat you
+;;; killed keeps its file, so the list ends with the newest saved chats.
+;;; One archive row is one .chat path. RET visits it, .chat opens in
+;;; chat-mode, and the conversation comes back as a live row.
+;;;
+;;; A conversation appears once. A saved chat that is open already is a
+;;; buffer, and a live chat names the file it logs to in 'chat-log-id, so
+;;; both drop out of the archive rows.
+
+(category! 'chat)
+(effects! '(read))
+
+(defcustom 'chats-archived-limit 15
+  "How many saved chats the *chats* list shows below the live ones."
+  'group 'chat 'type 'integer)
+
+;; the file each live chat writes itself to. Read the local, do not call
+;; chat-log-path: that one assigns an id to a chat which has none yet.
+(define (chats-live-log-paths)
+  (let loop ((bs (chat-list-bufs)) (acc '()))
+    (if (null? bs)
+        acc
+        (let ((id (buffer-local (car bs) 'chat-log-id)))
+          (loop (cdr bs)
+                (if id
+                    (cons (string-append (chat-log-dir) "/" id ".chat") acc)
+                    acc))))))
+
+;; the newest saved conversations which no buffer shows
+(define (chats-archived-rows)
+  (if (not (boundp (quote chat-log-files-newest)))
+      '()
+      (let ((live (chats-live-log-paths)))
+        (take-n (filter (lambda (path)
+                          (and (not (buffer-known? path))
+                               (not (member path live))))
+                        (chat-log-files-newest))
+                chats-archived-limit))))
+
+;; every live row is a buffer name, so a row no buffer answers to is a path
+(define (chats-archived-row? e)
+  (and (string? e) (not (buffer-known? e))))
+
+;; "1787320944-aimax-groups.chat" -> "aimax-groups"
+(define (chats-archived-title path)
+  (let* ((leaf (chat-log-leaf path))
+         (title (re-replace "\\.chat$" (re-replace "^[0-9]+-" leaf "") "")))
+    (if (equal? title "") leaf title)))
+
+(define (chats-archived-cells path)
+  (list (list "." "faint")
+        (list (chats-archived-title path) "dim")
+        (list "" "faint")
+        (list (format-time (file-mtime path) "%Y-%m-%d %H:%M") "faint")
+        (list "archived" "faint")
+        (list "" "faint")))
+
+;; the live chats, attention first, then the archive
+(define (chats-rows)
+  (append (agents-sorted) (chats-archived-rows)))
+
+(effects! '(write))
+
 (define (agents-line b)
   (let* ((slug (buffer-local b 'agent-slug))
          (status (chat-row-status b))
@@ -1987,7 +2051,7 @@
           (string-append "+" (number->string (plist-get info 'queued)) " queued")
           ""))))
 
-(define (agents-cells buf b)
+(define (agents-live-cells b)
   (let* ((slug (buffer-local b 'agent-slug))
          (status (chat-row-status b))
          (info (and slug (agent-info slug)))
@@ -2004,9 +2068,17 @@
                     "")
                 "warn"))))
 
+(define (agents-cells buf b)
+  (if (chats-archived-row? b)
+      (chats-archived-cells b)
+      (agents-live-cells b)))
+
 (define (agents-meta buf)
-  (string-append (number->string (length (list-entries buf)))
-                 " chats · attention first"))
+  (let* ((es (list-entries buf))
+         (saved (length (filter chats-archived-row? es))))
+    (string-append (number->string (- (length es) saved))
+                   " chats · attention first · "
+                   (number->string saved) " saved")))
 
 (define (agents-refresh!)
   (when (buffer-exists? *agents-buffer*)
@@ -2030,9 +2102,15 @@
                (string-append verb " " (car bs))
                (string-append verb " " (number->string (length bs)) " chats"))))
 
+;; RET opens the chat at point. An archive row is a file: visiting it
+;; runs chat-mode, which revives the conversation.
 (define (agents-visit-current)
   (let ((b (agents-current-buf)))
-    (when b (switch-to-buffer! b) (end-of-buffer!))))
+    (cond ((not b) #f)
+          ((chats-archived-row? b)
+           (visit-in-group b (frame-group))
+           (end-of-buffer!))
+          (else (switch-to-buffer! b) (end-of-buffer!)))))
 
 ;; the other window follows the highlight, like ibuffer/notmuch
 (define (agents-preview!)
@@ -2149,9 +2227,11 @@
            "a permission request for the marked chats, or for the chat at point "
            "when nothing is marked. `k` flags a runtime to kill, `d` flags a "
            "whole chat to archive, and `x` runs the flags. `RET` opens the chat "
-           "at point.")
+           "at point. Under the live chats the list shows the newest saved "
+           "conversations. `RET` on one of them reads its file back and revives "
+           "the chat.")
     'buffer *agents-buffer*
-    'rows (lambda (buf) (agents-sorted))
+    'rows (lambda (buf) (chats-rows))
     'columns (lambda (buf)
                (list (list "" 1) (list "chat" #f) (list "slug" 12)
                      (list "model" 26) (list "status" 17)
@@ -2175,6 +2255,8 @@
                          (and (buffer-exists? b)
                               (begin (agents-archive! b) #t)))))
     'noun "chat"
+    ;; an archive row has no runtime, so no verb here can act on it
+    'markable? (lambda (buf e) (not (chats-archived-row? e)))
     'keys '(("RET" "agents-visit") ("s" "agents-steer") ("y" "agents-allow")
             ("n" "agents-deny")
             ("g" "agents-refresh") ("+" "agent-open") ("q" "quit-window"))

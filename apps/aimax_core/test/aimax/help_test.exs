@@ -82,6 +82,49 @@ defmodule Aimax.HelpTest do
     assert elem(local, 0) < elem(global, 0)
   end
 
+  test "C-h k describes the next key instead of running it" do
+    eval!(~s{(begin (buffer-create "*zz-help*") (switch-to-buffer! "*zz-help*"))})
+
+    press(["C-h", "k"])
+    press(["C-x", "C-f"])
+
+    text = Buffer.text("*Help*")
+    assert text =~ "# `C-x C-f`"
+    assert text =~ "## `find-file` — a command"
+    assert text =~ "This binding is global"
+
+    # the key described is a key not pressed: find-file never prompted
+    assert Editor.snapshot().minibuffer == nil
+    assert {:ok, ~s{"help-mode"}} = Session.eval(~s{(buffer-local "*Help*" 'mode-name)})
+  end
+
+  test "C-h k names the map that answered: a local key wins" do
+    eval!(~s{(begin (buffer-create "*zz-help*") (switch-to-buffer! "*zz-help*")
+                    (run-command "ibuffer"))})
+
+    press(["C-h", "k"])
+    press("RET")
+
+    text = Buffer.text("*Help*")
+    assert text =~ "# `RET`"
+    assert text =~ "switch-visit"
+    assert text =~ "This binding is local to `*switch*`."
+  end
+
+  test "C-h k over an unbound key says so, and the capture ends" do
+    eval!(~s{(begin (buffer-create "*zz-help*") (switch-to-buffer! "*zz-help*"))})
+
+    press(["C-h", "k"])
+    press(["C-x", "C-M-y"])
+
+    assert Buffer.text("*Help*") =~ "`C-x C-M-y` runs no command here."
+
+    # one shot only: the next key runs its own command again
+    press(["C-x", "C-f"])
+    assert Editor.snapshot().minibuffer != nil
+    Editor.minibuffer_close()
+  end
+
   test "C-h a searches the editor and renders the hits as a page" do
     eval!(~s{(begin (buffer-create "*zz-help*") (switch-to-buffer! "*zz-help*"))})
 
@@ -271,7 +314,10 @@ defmodule Aimax.HelpTest do
   defp find_ctop(%{type: :split, children: [a, b]}, buf),
     do: find_ctop(a, buf) || find_ctop(b, buf)
 
-  test "the scroll keys move a preview page instead of point" do
+  # A markdown preview draws the cursor and takes edits, so the motion keys
+  # move point there. Only an html or app window, which shows no point at
+  # all, scrolls instead — see preview-buffer? in editor.scm.
+  test "the motion keys move point in the Help page, not the page itself" do
     eval!(~s{(begin (buffer-create "*zz-help*") (switch-to-buffer! "*zz-help*"))})
     press(["C-h", "b"])
 
@@ -279,20 +325,33 @@ defmodule Aimax.HelpTest do
     assert eval!(~s{(current-buffer)}) == ~s{"*Help*"}
     assert ctop("*Help*") == 0
 
+    point = eval!(~s{(point)})
+    press("<down>")
+    assert eval!(~s{(point)}) != point
+    assert ctop("*Help*") == 0
+  end
+
+  test "the scroll keys move an html preview page instead of point" do
+    eval!(~s{(begin (buffer-create "*zz-html*") (switch-to-buffer! "*zz-html*")
+                    (insert! "<h1>Hi</h1>")
+                    (buffer-set-local! "*zz-html*" 'render-mode "html"))})
+
+    assert ctop("*zz-html*") == 0
+
     # the down arrow scrolls the page, and point stays where it was
     point = eval!(~s{(point)})
     press("<down>")
-    down = ctop("*Help*")
+    down = ctop("*zz-html*")
     assert down > 0, "<down> did not scroll the preview"
     assert eval!(~s{(point)}) == point
 
     # a page key moves further than a line key
     press("<next>")
-    assert ctop("*Help*") > down
+    assert ctop("*zz-html*") > down
 
     # and it goes back up, never past the top
     press(["M-<", "M-<"])
-    assert ctop("*Help*") == 0
+    assert ctop("*zz-html*") == 0
   end
 
   test "the scroll keys still move point in an ordinary buffer" do

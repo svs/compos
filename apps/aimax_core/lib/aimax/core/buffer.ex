@@ -16,13 +16,19 @@ defmodule Aimax.Core.Buffer do
   Authorship: every mutation carries an author — an explicit `author:` opt,
   the caller-process `:aimax_edit_author` value, or a name derived from the
   source (`"user"`, `"editor"`, `"process"`, `"agent:SLUG"`). `authors` holds
-  the live attribution spans `{start, end, author}` for the current text;
-  spans split, shift, and merge through edits, and undo restores them with
-  the rope. `edit_log` is a capped, newest-first journal of the mutations
+  the live attribution spans `{start, end, changeset_id}` for the current
+  text; spans split, shift, and merge through edits, and undo restores them
+  with the rope. The span names the CHANGESET that wrote those bytes, which
+  is the revision the provenance store records, so the span inherits the
+  actor, the time, and the group instead of copying a display name. `origins`
+  resolves those ids in memory, and `authors/1` still answers labels.
+
+  `edit_log` is a capped, newest-first journal of the mutations
   (`{version, author, pos, inserted, deleted}`) — it also records what
   deletions removed, which the spans cannot. `author: :none` adjusts the
-  spans but stamps nothing (desktop restore is not an edit). Both live in
-  memory only: a daemon restart clears attribution.
+  spans but stamps nothing (desktop restore is not an edit). The spans and
+  their origins ride in the checkpoint, so attribution survives a restart;
+  the edit log does not.
 
   Provenance is default-on for every buffer. A supervised SQLite store keeps
   immutable roots, exact edit operations, structured actors, content hashes,
@@ -84,9 +90,11 @@ defmodule Aimax.Core.Buffer do
             ts: nil,
             win_points: %{},
             authors: [],
+            origins: %{},
             edit_log: [],
             edit_log_len: 0,
             provenance: nil,
+            changeset_id: nil,
             pending_ops: [],
             pending_actor: nil,
             pending_group: nil,
@@ -265,8 +273,76 @@ defmodule Aimax.Core.Buffer do
   def kill_line(name, opts \\ []),
     do: GenServer.call(via(name), {:kill_line, source(opts), author(opts)})
 
-  @doc "Attribution spans for the current text: [{start, end, author}], sorted."
-  def authors(name), do: GenServer.call(via(name), :authors)
+  @doc """
+  Attribution spans for the current text, as `{start, end, author}`, sorted.
+
+  A dormant buffer answers from its checkpoint, so attribution reads the
+  same whether the buffer holds a process or not.
+  """
+  def authors(name) do
+    %{spans: spans, origins: origins} = author_fold(name)
+    resolve_spans(spans, origins)
+  end
+
+  @doc """
+  The fold: `%{spans: [{start, end, changeset_id}], origins: %{id => origin}}`.
+
+  A span names the changeset that wrote its bytes, and an origin holds that
+  changeset's actor. This is the form that turns into hunks; `authors/1` is
+  the display view of the same data.
+  """
+  def author_fold(name) do
+    try do
+      if exists?(name),
+        do: GenServer.call(registry_name(name), :author_fold),
+        else: dormant_fold(name)
+    catch
+      :exit, _ -> dormant_fold(name)
+    end
+  end
+
+  defp dormant_fold(name) do
+    cp = dormant(name)
+    %{spans: Map.get(cp, :authors) || [], origins: Map.get(cp, :origins) || %{}}
+  end
+
+  defp resolve_spans(spans, origins) do
+    spans
+    |> Enum.map(fn {s, e, id} ->
+      case origins[id] do
+        %{actor: actor} -> {s, e, actor_label(actor) || "unknown"}
+        _ -> {s, e, "unknown"}
+      end
+    end)
+    |> merge_spans()
+  end
+
+  @doc """
+  Attribution by line: `[{line, author, bytes}]`, 1-based, line order.
+
+  A line two actors touched appears once per actor, largest share first.
+  This is the view that meets a diff: git speaks lines, the buffer speaks
+  bytes, and the bytes are what the edits actually moved.
+  """
+  def author_lines(name) do
+    try do
+      if exists?(name),
+        do: GenServer.call(registry_name(name), :author_lines),
+        else: dormant_author_lines(name)
+    catch
+      :exit, _ -> dormant_author_lines(name)
+    end
+  end
+
+  defp dormant_author_lines(name) do
+    cp = dormant(name)
+
+    line_rows(
+      Map.get(cp, :text) || "",
+      Map.get(cp, :authors) || [],
+      Map.get(cp, :origins) || %{}
+    )
+  end
 
   @doc "The mutation journal, newest first: [{version, author, pos, ins, del}]."
   def edit_log(name), do: GenServer.call(via(name), :edit_log)
@@ -730,7 +806,17 @@ defmodule Aimax.Core.Buffer do
     end
   end
 
-  def handle_call(:authors, _from, state), do: {:reply, state.authors, state}
+  def handle_call(:authors, _from, state),
+    do: {:reply, resolve_spans(state.authors, state.origins), state}
+
+  def handle_call(:author_fold, _from, state),
+    do: {:reply, %{spans: state.authors, origins: state.origins}, state}
+
+  def handle_call(:author_lines, _from, state) do
+    {text, state} = fetch_text(state)
+    {:reply, line_rows(text, state.authors, state.origins), state}
+  end
+
   def handle_call(:edit_log, _from, state), do: {:reply, state.edit_log, state}
 
   def handle_call(:provenance, _from, state) do
@@ -851,7 +937,8 @@ defmodule Aimax.Core.Buffer do
         state = log_edit(state, "undo", 0, 0, 0)
         actor = local_actor("system:undo", "system", "undo", :undo)
         # Provenance keeps the complete replacement so replay stays exact.
-        state = log_provenance(state, actor, 0, new_text, old_text, :undo)
+        {_changeset, state} = open_changeset(state, actor, :undo)
+        state = record_op(state, actor, 0, new_text, old_text, :undo)
         state = ts_invalidate(state)
         broadcast(state, 0, "", 0, :undo)
         {:reply, :ok, checkpoint_later(state)}
@@ -1076,8 +1163,21 @@ defmodule Aimax.Core.Buffer do
       locals: cp[:locals] || %{},
       hidden: cp[:hidden] || %{},
       version: version,
-      saved_version: saved_version
+      saved_version: saved_version,
+      authors: restored_authors(cp),
+      origins: cp[:origins] || %{}
     }
+  end
+
+  # A checkpoint written before the fold existed restores no spans, and a
+  # span cannot outlive the text it describes: a file re-read from disk can
+  # be shorter than the buffer that wrote the checkpoint.
+  defp restored_authors(cp) do
+    size = Kernel.byte_size(cp[:text] || "")
+
+    (cp[:authors] || [])
+    |> Enum.map(fn {s, e, id} -> {min(s, size), min(e, size), id} end)
+    |> Enum.reject(fn {s, e, _} -> s >= e end)
   end
 
   defp checkpoint(state) do
@@ -1097,7 +1197,9 @@ defmodule Aimax.Core.Buffer do
       hidden: state.hidden,
       buffer_version: state.version,
       modified: state.version != state.saved_version,
-      provenance: state.provenance
+      provenance: state.provenance,
+      authors: state.authors,
+      origins: Map.take(state.origins, Enum.map(state.authors, fn {_, _, id} -> id end))
     }
   end
 
@@ -1113,7 +1215,7 @@ defmodule Aimax.Core.Buffer do
   # write no state: a dormant, unsaved, or discarded buffer still owns its
   # history.
   defp write_checkpoint(state),
-    do: state |> flush_provenance() |> write_state_checkpoint()
+    do: state |> flush_provenance() |> prune_origins() |> write_state_checkpoint()
 
   defp write_state_checkpoint(%{discard: true} = state), do: state
   defp write_state_checkpoint(%{persistent: false} = state), do: state
@@ -1237,9 +1339,10 @@ defmodule Aimax.Core.Buffer do
     state =
       adjust_ranges(state, &adjust_insert(&1, pos, len), &adjust_insert_stay(&1, pos, len))
 
-    state = %{state | authors: stamp_insert(state.authors, pos, len, author)}
+    {changeset, state} = open_changeset(state, actor, src)
+    state = %{state | authors: stamp_insert(state.authors, pos, len, stamp_id(actor, changeset))}
     state = log_edit(state, author, pos, len, 0)
-    state = log_provenance(state, actor, pos, text, "", src)
+    state = record_op(state, actor, pos, text, "", src)
 
     state = %{
       state
@@ -1286,9 +1389,10 @@ defmodule Aimax.Core.Buffer do
     state = ts_track(state, old_rope, pos, pos + len, pos)
     state = adjust_point_delete(state, pos, len)
     state = adjust_ranges(state, &adjust_delete(&1, pos, len), &adjust_delete(&1, pos, len))
+    {_changeset, state} = open_changeset(state, actor, src)
     state = %{state | authors: stamp_delete(state.authors, pos, len)}
     state = log_edit(state, author, pos, 0, len)
-    state = log_provenance(state, actor, pos, "", deleted, src)
+    state = record_op(state, actor, pos, "", deleted, src)
     state = %{state | goal_col: nil, last_insert_end: nil, insert_run: 0, undo_next: 0}
     broadcast(state, pos, "", len, src)
     state
@@ -1377,6 +1481,79 @@ defmodule Aimax.Core.Buffer do
   defp actor_label(%{stamp: false}), do: nil
   defp actor_label(%{display_name: display_name}), do: display_name
 
+  # Byte spans become line rows: each span is cut at the newlines it crosses,
+  # and the pieces are summed per line and per actor. A line the agent only
+  # renamed one word in still names the human who wrote the rest, with the
+  # byte counts that say who owns most of it.
+  defp line_rows(_text, [], _origins), do: []
+
+  defp line_rows(text, spans, origins) do
+    starts = line_start_index(text)
+    size = Kernel.byte_size(text)
+
+    spans
+    |> Enum.flat_map(fn {s, e, id} -> span_line_bytes(starts, size, s, e, label_for(origins, id)) end)
+    |> Enum.reduce(%{}, fn {line, author, bytes}, acc ->
+      Map.update(acc, {line, author}, bytes, &(&1 + bytes))
+    end)
+    |> Enum.map(fn {{line, author}, bytes} -> {line, author, bytes} end)
+    |> Enum.sort_by(fn {line, author, bytes} -> {line, -bytes, author} end)
+  end
+
+  defp label_for(origins, id) do
+    case origins[id] do
+      %{actor: actor} -> actor_label(actor) || "unknown"
+      _ -> "unknown"
+    end
+  end
+
+  defp line_start_index(text),
+    do: List.to_tuple([0 | Enum.map(:binary.matches(text, "\n"), fn {at, _} -> at + 1 end)])
+
+  defp span_line_bytes(starts, size, s, e, author) do
+    first = line_at_pos(starts, s)
+    last = line_at_pos(starts, max(e - 1, s))
+
+    for line <- first..last do
+      from = max(s, elem(starts, line - 1))
+      to = min(e, line_end(starts, size, line))
+      {line, author, max(to - from, 0)}
+    end
+    |> Enum.reject(fn {_, _, bytes} -> bytes == 0 end)
+  end
+
+  defp line_end(starts, size, line) do
+    if line < tuple_size(starts), do: elem(starts, line) - 1, else: size
+  end
+
+  # 1-based line for a byte offset, by binary search over the line starts
+  defp line_at_pos(starts, pos), do: line_at_pos(starts, pos, 0, tuple_size(starts) - 1)
+
+  defp line_at_pos(_starts, _pos, low, high) when low >= high, do: low + 1
+
+  defp line_at_pos(starts, pos, low, high) do
+    mid = div(low + high + 1, 2)
+
+    if elem(starts, mid) <= pos,
+      do: line_at_pos(starts, pos, mid, high),
+      else: line_at_pos(starts, pos, low, mid - 1)
+  end
+
+  # The fold keeps one span per changeset. Two runs by one actor stay apart
+  # there, because they are different work; the label view merges them,
+  # because they read the same.
+
+  # An origin outlives its bytes only until the next checkpoint. Undo can
+  # bring a span back, so the history holds a claim on its origin too.
+  defp prune_origins(state) do
+    live =
+      [state.authors | Enum.map(state.history, fn {_, _, _, authors} -> authors end)]
+      |> Enum.flat_map(fn spans -> Enum.map(spans, fn {_, _, id} -> id end) end)
+      |> MapSet.new()
+
+    %{state | origins: Map.take(state.origins, MapSet.to_list(live))}
+  end
+
   # a span that contains the insertion point splits — the inserted text
   # must not inherit the surrounding span's author
   defp stamp_insert(authors, pos, len, author) do
@@ -1416,10 +1593,52 @@ defmodule Aimax.Core.Buffer do
       else: %{state | edit_log: log, edit_log_len: len}
   end
 
-  defp log_provenance(%{provenance: nil} = state, _actor, _pos, _inserted, _deleted, _src),
+  # One changeset holds one actor's uninterrupted run of edits, and its id is
+  # the id of the revision the store records. Opening it is the only place
+  # that decides "same work or new work", so the span the fold stamps and the
+  # revision the store writes can never disagree. An edit by anyone else, or
+  # in another group, closes the open one first.
+  defp open_changeset(state, actor, src) do
+    group = buffer_group(state)
+
+    if continues?(state, actor, group, src) do
+      {state.changeset_id, state}
+    else
+      state = flush_provenance(state)
+      id = ProvenanceStore.new_revision_id()
+
+      {id,
+       %{
+         state
+         | changeset_id: id,
+           pending_actor: actor,
+           pending_group: group,
+           origins: Map.put(state.origins, id, origin(actor))
+       }}
+    end
+  end
+
+  defp continues?(%{changeset_id: nil}, _actor, _group, _src), do: false
+
+  defp continues?(state, actor, group, src) do
+    batchable?(src) and state.pending_actor != nil and
+      state.pending_actor.id == actor.id and state.pending_group == group
+  end
+
+  # What a span's id resolves to. The revision row holds the same actor, so
+  # this is a cache that keeps `authors/1` out of SQLite, and the only copy
+  # for a buffer whose recording is off.
+  defp origin(actor), do: %{actor: actor, at: now_ms()}
+
+  defp now_ms, do: System.system_time(:millisecond)
+
+  # `author: :none` (desktop restore) adjusts the spans and stamps nothing.
+  defp stamp_id(actor, changeset), do: if(Map.get(actor, :stamp, true), do: changeset, else: nil)
+
+  defp record_op(%{provenance: nil} = state, _actor, _pos, _inserted, _deleted, _src),
     do: state
 
-  defp log_provenance(
+  defp record_op(
          %{provenance: %{enabled: false} = provenance} = state,
          _actor,
          _pos,
@@ -1430,42 +1649,25 @@ defmodule Aimax.Core.Buffer do
     %{state | provenance: %{provenance | gap: true}}
   end
 
-  # One changeset holds one actor's work. An edit by anyone else closes the
-  # pending one first, so a batch can never span two actors and invent
-  # authorship for either.
-  defp log_provenance(state, actor, pos, inserted, deleted, src) do
-    group = buffer_group(state)
-    state = if same_context?(state, actor, group), do: state, else: flush_provenance(state)
-
+  defp record_op(state, actor, pos, inserted, deleted, src) do
     op = %{pos: pos, inserted: inserted, deleted: deleted}
 
-    if batchable?(src) do
-      state = %{
-        state
-        | pending_ops: [op | state.pending_ops],
-          pending_actor: actor,
-          pending_group: group
-      }
+    state = %{
+      state
+      | pending_ops: [op | state.pending_ops],
+        pending_actor: actor,
+        pending_group: buffer_group(state)
+    }
 
-      if length(state.pending_ops) >= @provenance_batch_limit,
-        do: flush_provenance(state),
-        else: state
-    else
+    cond do
       # An atomic edit is durable before its caller hears that it worked. An
       # agent writes a whole hunk at a time, so the transaction is rare and
       # the round trip hides inside the tool call that asked for it.
-      state
-      |> flush_provenance()
-      |> Map.merge(%{pending_ops: [op], pending_actor: actor, pending_group: group})
-      |> flush_provenance()
+      not batchable?(src) -> flush_provenance(state)
+      length(state.pending_ops) >= @provenance_batch_limit -> flush_provenance(state)
+      true -> state
     end
   end
-
-  # An empty changeset takes whatever context the next edit brings.
-  defp same_context?(%{pending_ops: []}, _actor, _group), do: true
-
-  defp same_context?(state, actor, group),
-    do: state.pending_actor.id == actor.id and state.pending_group == group
 
   # groups.scm owns the policy; the buffer-local is the mechanism, and this
   # reads it without asking Scheme, because a mutation cannot call back in.
@@ -1478,10 +1680,10 @@ defmodule Aimax.Core.Buffer do
   # The pending changeset becomes one revision: N operations, one hash, one
   # transaction. Called at every checkpoint boundary, on an actor change, and
   # before anything reads the durable history.
-  defp flush_provenance(%{pending_ops: []} = state), do: state
+  defp flush_provenance(%{pending_ops: []} = state), do: %{state | changeset_id: nil}
 
   defp flush_provenance(%{provenance: nil} = state),
-    do: %{state | pending_ops: [], pending_actor: nil, pending_group: nil}
+    do: %{state | pending_ops: [], pending_actor: nil, pending_group: nil, changeset_id: nil}
 
   defp flush_provenance(state) do
     ops = Enum.reverse(state.pending_ops)
@@ -1495,10 +1697,11 @@ defmodule Aimax.Core.Buffer do
         state.pending_actor,
         ops,
         text,
-        context(state.pending_group)
+        context(state.pending_group),
+        state.changeset_id
       )
 
-    state = %{state | pending_ops: [], pending_actor: nil, pending_group: nil}
+    state = %{state | pending_ops: [], pending_actor: nil, pending_group: nil, changeset_id: nil}
 
     case result do
       {:ok, status} ->

@@ -53,16 +53,26 @@ defmodule Aimax.Core.ProvenanceStore do
   end
 
   @doc """
+  A fresh revision id, for a caller that names the changeset before it ends.
+
+  The buffer stamps its attribution spans with this id while the changeset is
+  open, and passes the same id to `record_changeset/8`. The span and the
+  revision are then the same thing, so a span carries the actor, the time,
+  and the group by reference.
+  """
+  def new_revision_id, do: revision_id()
+
+  @doc """
   Record one actor's operations as a single revision.
 
   The buffer batches keystrokes and calls this at a boundary, so the
   transaction and the content hash happen once for the batch rather than once
-  for each key.
+  for each key. `id` names the revision; without one the store picks the name.
   """
-  def record_changeset(buffer_id, expected_head, version, actor, ops, text, context \\ %{}) do
+  def record_changeset(buffer_id, expected_head, version, actor, ops, text, context \\ %{}, id \\ nil) do
     GenServer.call(
       __MODULE__,
-      {:record_changeset, buffer_id, expected_head, version, actor, ops, text, context},
+      {:record_changeset, buffer_id, expected_head, version, actor, ops, text, context, id},
       30_000
     )
   end
@@ -174,7 +184,7 @@ defmodule Aimax.Core.ProvenanceStore do
   end
 
   def handle_call(
-        {:record_changeset, buffer_id, expected_head, version, actor, ops, text, context},
+        {:record_changeset, buffer_id, expected_head, version, actor, ops, text, context, id},
         _from,
         conn
       ) do
@@ -220,7 +230,7 @@ defmodule Aimax.Core.ProvenanceStore do
             }}}
 
         true ->
-          new_id = revision_id()
+          new_id = id || revision_id()
           hash = content_hash(text)
 
           transact(conn, fn ->

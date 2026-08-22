@@ -6588,6 +6588,7 @@
 (public! 'buffer-insert! "(buffer-insert! NAME BYTE-POS TEXT)")
 (public! 'buffer-delete-range! "(buffer-delete-range! NAME BYTE-POS BYTE-LEN)")
 (public! 'buffer-authors "(buffer-authors NAME) -> (START END AUTHOR) spans: who wrote each byte range")
+(public! 'buffer-author-lines "(buffer-author-lines NAME) -> (LINE AUTHOR BYTES) rows: who wrote each line, and how much of it")
 (public! 'buffer-edit-log "(buffer-edit-log NAME) -> (VERSION AUTHOR POS INS DEL) records, newest first")
 (public! 'buffer-provenance-status "(buffer-provenance-status NAME) -> the durable recording state and accepted head")
 (public! 'buffer-provenance-history "(buffer-provenance-history NAME) -> revisions from root to accepted head")

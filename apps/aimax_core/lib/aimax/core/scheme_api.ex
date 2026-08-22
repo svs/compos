@@ -54,6 +54,8 @@ defmodule Aimax.Core.SchemeAPI do
         "(buffer-replace-range! BUF POS LEN TEXT) — replace LEN bytes at byte POS with TEXT as one undo step; ignores read-only.",
       "buffer-authors" =>
         "(buffer-authors BUF) — return (START END AUTHOR) attribution spans for the current text.",
+      "buffer-author-lines" =>
+        "(buffer-author-lines BUF) — return (LINE AUTHOR BYTES) attribution rows, 1-based, in line order; a line two actors touched appears once per actor.",
       "buffer-edit-log" =>
         "(buffer-edit-log BUF) — return (VERSION AUTHOR POS INS DEL) edit records, newest first.",
       "buffer-provenance-status" =>
@@ -408,6 +410,9 @@ defmodule Aimax.Core.SchemeAPI do
       end,
       "buffer-authors" => fn [name] ->
         for {s, e, a} <- Buffer.authors(name), do: [s, e, a]
+      end,
+      "buffer-author-lines" => fn [name] ->
+        for {line, author, bytes} <- Buffer.author_lines(name), do: [line, author, bytes]
       end,
       "buffer-edit-log" => fn [name] ->
         for {v, a, pos, ins, del} <- Buffer.edit_log(name), do: [v, a || false, pos, ins, del]

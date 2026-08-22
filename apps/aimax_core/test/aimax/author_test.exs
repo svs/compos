@@ -2,9 +2,15 @@ defmodule Aimax.AuthorTest do
   use ExUnit.Case
 
   alias Aimax.Core
-  alias Aimax.Core.{Buffer, Session}
+  alias Aimax.Core.{Buffer, ProvenanceStore, Session}
 
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
+
+  defp evict(name) do
+    :ok = Buffer.checkpoint_now(name)
+    [{pid, _}] = Registry.lookup(Aimax.Core.BufferRegistry, name)
+    :ok = DynamicSupervisor.terminate_child(Aimax.Core.BufferSupervisor, pid)
+  end
 
   defp new_buf(text \\ "") do
     name = uniq("au")
@@ -120,6 +126,116 @@ defmodule Aimax.AuthorTest do
 
     {:ok, _} = Session.eval(~s{(buffer-append! "#{b}" "after")})
     assert Buffer.authors(b) == [{0, 5, "editor"}]
+  end
+
+  # The fold is the durable form: a span names the changeset that wrote its
+  # bytes, and the changeset holds the actor. The label view is a read of it.
+  test "a span names the changeset that wrote it, and the origin holds the actor" do
+    b = new_buf()
+    :ok = Buffer.append(b, "abc", source: {:agent, "c1"})
+
+    %{spans: [{0, 3, id}], origins: origins} = Buffer.author_fold(b)
+
+    assert is_binary(id)
+    assert %{actor: actor} = origins[id]
+    assert actor.id == "agent:c1"
+    assert actor.kind == "agent"
+    assert actor.run_id == "c1"
+  end
+
+  test "the changeset a span names is the revision the store recorded" do
+    b = new_buf()
+    :ok = Buffer.append(b, "abc", source: {:agent, "c1"})
+
+    %{spans: [{0, 3, id}]} = Buffer.author_fold(b)
+
+    assert id in Enum.map(ProvenanceStore.history(Buffer.id(b)), & &1.id)
+  end
+
+  test "two runs by one author are two changesets, and one span to read" do
+    b = new_buf()
+    :ok = Buffer.append(b, "abc", source: :editor, author: "a1")
+    :ok = Buffer.append(b, "def", source: :editor, author: "a1")
+
+    %{spans: [{0, 3, first}, {3, 6, second}]} = Buffer.author_fold(b)
+
+    refute first == second
+    assert Buffer.authors(b) == [{0, 6, "a1"}]
+  end
+
+  test "attribution survives the buffer process dying" do
+    b = new_buf()
+    :ok = Buffer.append(b, "abc", source: {:agent, "c1"})
+    :ok = Buffer.append(b, "def", source: :editor, author: "a1")
+
+    %{spans: before} = Buffer.author_fold(b)
+    evict(b)
+
+    assert Buffer.authors(b) == [{0, 3, "agent:c1"}, {3, 6, "a1"}]
+    assert %{spans: ^before} = Buffer.author_fold(b)
+  end
+
+  test "a restored fold keeps only the origins its spans still name" do
+    b = new_buf()
+    :ok = Buffer.append(b, "abc", source: :editor, author: "a1")
+    :ok = Buffer.append(b, "def", source: :editor, author: "a2")
+    :ok = Buffer.delete_range(b, 0, 3)
+
+    evict(b)
+
+    %{spans: [{0, 3, id}], origins: origins} = Buffer.author_fold(b)
+
+    assert Map.keys(origins) == [id]
+    assert Buffer.authors(b) == [{0, 3, "a2"}]
+  end
+
+  # git speaks lines, the buffer speaks bytes. The line view is where the two
+  # meet, so an agent can stage its own work and leave the rest alone.
+  test "a span that crosses a newline attributes both lines" do
+    b = new_buf()
+    :ok = Buffer.append(b, "one\ntwo\n", source: :editor, author: "a1")
+
+    # a line's bytes are its text; the newline that ends it is not part of it
+    assert Buffer.author_lines(b) == [{1, "a1", 3}, {2, "a1", 3}]
+  end
+
+  test "a line two actors touched names both, the larger share first" do
+    b = new_buf()
+    :ok = Buffer.append(b, "def render(buf) do\n", source: :editor, author: "human")
+    :ok = Buffer.insert_at(b, 11, "fer", source: :editor, author: "agent:x")
+
+    assert [{1, "human", 18}, {1, "agent:x", 3}] = Buffer.author_lines(b)
+  end
+
+  test "the line view answers from a dormant buffer too" do
+    b = new_buf()
+    :ok = Buffer.append(b, "one\ntwo\n", source: {:agent, "c1"})
+    evict(b)
+
+    assert Buffer.author_lines(b) == [{1, "agent:c1", 3}, {2, "agent:c1", 3}]
+  end
+
+  test "an agent asks which line runs are its own" do
+    b = new_buf()
+    :ok = Buffer.append(b, "mine one\nmine two\n", source: {:agent, "c1"})
+    :ok = Buffer.append(b, "yours\n", source: :editor, author: "human")
+    :ok = Buffer.append(b, "mine three\n", source: {:agent, "c1"})
+
+    assert {:ok, ~s{((1 2) (4 4))}} =
+             Session.eval(~s{(author-line-runs "#{b}" "agent:c1")})
+
+    assert {:ok, "#t"} = Session.eval(~s{(lines-mine? "#{b}" 1 2 "agent:c1")})
+    assert {:ok, "#f"} = Session.eval(~s{(lines-mine? "#{b}" 1 3 "agent:c1")})
+  end
+
+  test "a line the agent only edited part of is nobody's to claim alone" do
+    b = new_buf()
+    :ok = Buffer.append(b, "shared line\n", source: :editor, author: "human")
+    :ok = Buffer.insert_at(b, 6, "X", source: {:agent, "c1"})
+
+    assert {:ok, "#f"} = Session.eval(~s{(lines-mine? "#{b}" 1 1 "agent:c1")})
+    assert {:ok, "#f"} = Session.eval(~s{(lines-mine? "#{b}" 1 1 "human")})
+    assert {:ok, ~s{()}} = Session.eval(~s{(author-line-runs "#{b}" "agent:c1")})
   end
 
   test "buffer-authors and buffer-edit-log read from Scheme" do

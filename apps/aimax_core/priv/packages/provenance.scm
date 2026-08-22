@@ -301,6 +301,76 @@
 (global-set-key "C-x v l" "buffer-log")
 
 (category! 'buffers)
+;;; --- who owns a line ----------------------------------------------------------
+;;; An agent commits its own work and leaves everyone else's alone. To do
+;;; that it must ask one question about a range of lines: is all of this
+;;; mine? These read (buffer-author-lines BUF), which reports bytes, so a
+;;; line two actors touched answers with both of them.
+;;;
+;;; This Scheme has no dotted pairs, so an owner is the two-element list
+;;; (AUTHOR BYTES).
+
+(define (prov--rows-in rows first last)
+  (filter (lambda (r) (and (>= (car r) first) (<= (car r) last))) rows))
+
+(define (prov--add-bytes acc who bytes)
+  (let ((hit (assoc who acc)))
+    (if hit
+        (cons (list who (+ (cadr hit) bytes))
+              (filter (lambda (e) (not (equal? (car e) who))) acc))
+        (cons (list who bytes) acc))))
+
+;; ((AUTHOR BYTES) ...) for lines FIRST..LAST, the largest share first.
+;; sort takes no comparator here, so the key leads and the order flips.
+(define (lines-authors buf first last)
+  (let loop ((rows (prov--rows-in (buffer-author-lines buf) first last)) (acc '()))
+    (if (null? rows)
+        (map (lambda (e) (list (cadr e) (car e)))
+             (reverse (sort (map (lambda (e) (list (cadr e) (car e))) acc))))
+        (loop (cdr rows)
+              (prov--add-bytes acc (cadr (car rows)) (caddr (car rows)))))))
+
+;; #t when every attributed byte in FIRST..LAST belongs to WHO. A range with
+;; no attribution answers #f: text nobody claims is not yours to commit.
+(define (lines-mine? buf first last who)
+  (let ((owners (lines-authors buf first last)))
+    (and (pair? owners)
+         (null? (filter (lambda (e) (not (equal? (car e) who))) owners)))))
+
+;; The lines WHO owns outright: every actor named on the line is WHO. Rows
+;; arrive in line order, so one walk groups them.
+(define (prov--sole-lines rows who)
+  (let loop ((rs rows) (line #f) (sole #f) (acc '()))
+    (cond
+      ((null? rs)
+       (reverse (if (and line sole) (cons line acc) acc)))
+      ((equal? (car (car rs)) line)
+       (loop (cdr rs) line (and sole (equal? (cadr (car rs)) who)) acc))
+      (else
+       (loop (cdr rs)
+             (car (car rs))
+             (equal? (cadr (car rs)) who)
+             (if (and line sole) (cons line acc) acc))))))
+
+;; consecutive lines join, so the answer reads like a hunk list
+(define (prov--runs lines)
+  (let loop ((ls lines) (run #f) (acc '()))
+    (cond
+      ((null? ls) (reverse (if run (cons run acc) acc)))
+      ((not run) (loop (cdr ls) (list (car ls) (car ls)) acc))
+      ((= (car ls) (+ 1 (cadr run))) (loop (cdr ls) (list (car run) (car ls)) acc))
+      (else (loop (cdr ls) (list (car ls) (car ls)) (cons run acc))))))
+
+(define (author-line-runs buf who)
+  (prov--runs (prov--sole-lines (buffer-author-lines buf) who)))
+
+(public! 'lines-authors
+  "(lines-authors BUF FIRST LAST) -> ((AUTHOR BYTES) ...) who wrote lines FIRST..LAST, largest share first")
+(public! 'lines-mine?
+  "(lines-mine? BUF FIRST LAST WHO) -> #t when every attributed byte in those lines is WHO's")
+(public! 'author-line-runs
+  "(author-line-runs BUF WHO) -> ((FIRST LAST) ...) the line runs WHO owns outright")
+
 (public! 'buffer-log-target "(buffer-log-target) — the buffer *buffer-log* shows, or #f")
 
 (define (buffer-log-target) *buffer-log-target*)

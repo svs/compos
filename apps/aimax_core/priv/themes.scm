@@ -33,10 +33,40 @@
 (define (persist-theme! name)
   (write-file! (theme-file) (string-append "(load-theme \"" name "\")\n")))
 
+;;; --- face defaults ------------------------------------------------------------
+;;; A package declares the faces it draws with. The theme owns the color.
+;;; `defface!` applies a default only when the current theme does not name
+;;; the face, so a package load never overwrites the theme. A package
+;;; reload re-runs its declarations; with plain `set-face-attribute!` at
+;;; the top level, the package's light color replaced the dark theme's
+;;; color every time.
+
+(define *current-theme* #f)
+(define *face-defaults* '())            ; ((FACE ATTR VALUE ...) ...)
+
+(define (theme-faces name)
+  (let ((t (assoc name *themes*))) (if t (cadr t) '())))
+
+;; #f when no theme is loaded, or when the theme leaves this face alone
+(define (theme-face-spec face)
+  (assoc face (theme-faces *current-theme*)))
+
+(define (defface! face &rest attrs)
+  (set! *face-defaults*
+        (cons (cons face attrs)
+              (filter (lambda (d) (not (equal? (car d) face))) *face-defaults*)))
+  (if (theme-face-spec face)
+      #f
+      (apply set-face-attribute! (cons face attrs))))
+
 (define (load-theme name)
   (let ((t (assoc name *themes*)))
     (if t
         (begin
+          (set! *current-theme* name)
+          ;; the package defaults first: a face the new theme does not name
+          ;; falls back to its default, not to the last theme's color
+          (for-each (lambda (d) (apply set-face-attribute! d)) *face-defaults*)
           (for-each (lambda (spec) (apply set-face-attribute! spec)) (cadr t))
           (persist-theme! name)
           (message (string-append "Loaded theme " name)))
@@ -325,4 +355,6 @@
 
 (category! 'faces)
 (public! 'load-theme "(load-theme NAME) — switch color theme (persists)")
+(public! 'defface! "(defface! FACE ATTR VALUE ...) — a package's default face; the theme wins")
+(public! 'theme-faces "(theme-faces NAME) -> the theme's face specs")
 (public! '*themes* "The theme registry: ((name . spec) ...)")

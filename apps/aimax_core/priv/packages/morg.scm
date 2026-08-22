@@ -428,10 +428,10 @@
 
 ;;; --- fontification -----------------------------------------------------------
 
-(set-face-attribute! 'morg-code 'fg "#3d6b4f")
-(set-face-attribute! 'morg-bold 'weight "700")
-(set-face-attribute! 'morg-italic 'style "italic")
-(set-face-attribute! 'morg-result 'fg "#8a857a")
+(defface! 'morg-code 'fg "#3d6b4f")
+(defface! 'morg-bold 'weight "700")
+(defface! 'morg-italic 'style "italic")
+(defface! 'morg-result 'fg "#8a857a")
 
 ;; markdown info string -> loaded tree-sitter language, or #f
 (define *morg-ts-aliases*

@@ -10,12 +10,12 @@
 
 ;;; --- faces --------------------------------------------------------------------
 
-(set-face-attribute! 'agent-tool 'fg "#7aa2f7")
-(set-face-attribute! 'agent-thought 'fg "#787c99")
-(set-face-attribute! 'agent-permission 'fg "#e0af68")
-(set-face-attribute! 'agent-question 'fg "#7aa2f7")
-(set-face-attribute! 'agent-meta 'fg "#787c99")
-(set-face-attribute! 'agent-queued 'fg "#565a6e")
+(defface! 'agent-tool 'fg "#7aa2f7")
+(defface! 'agent-thought 'fg "#787c99")
+(defface! 'agent-permission 'fg "#e0af68")
+(defface! 'agent-question 'fg "#7aa2f7")
+(defface! 'agent-meta 'fg "#787c99")
+(defface! 'agent-queued 'fg "#565a6e")
 
 ;; threads are primary work surfaces, not popups — they take the full window
 ;; (the *chats* fleet list is the popup-weight surface)

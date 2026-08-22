@@ -2363,6 +2363,35 @@ defmodule Aimax.EditorTest do
     {:ok, _} = Aimax.Core.Session.eval(~s{(load-theme "aimax-dark")})
   end
 
+  test "defface! declares a default that the theme beats" do
+    {:ok, _} = Aimax.Core.Session.eval(~s{(load-theme "paper-night")})
+
+    # a package reload re-declares its faces at load time; the theme's
+    # color must hold, or the dark theme turns light after every reload
+    {:ok, _} = Aimax.Core.Session.eval(~s{(defface! 'nm-author 'fg "#26356b")})
+    assert Editor.render_state().faces["nm-author"]["fg"] == "#9fb0ea"
+
+    # a face that no theme names takes the package default
+    {:ok, _} = Aimax.Core.Session.eval(~s{(defface! 'tt-gauge 'fg "#111111")})
+    assert Editor.render_state().faces["tt-gauge"]["fg"] == "#111111"
+
+    # a theme that names the face wins
+    {:ok, _} =
+      Aimax.Core.Session.eval(
+        ~s{(define-theme "tt-theme" (list (list 'tt-gauge 'fg "#eeeeee")))}
+      )
+
+    {:ok, _} = Aimax.Core.Session.eval(~s{(load-theme "tt-theme")})
+    assert Editor.render_state().faces["tt-gauge"]["fg"] == "#eeeeee"
+
+    # the next theme leaves the face alone, so the default returns
+    {:ok, _} = Aimax.Core.Session.eval(~s{(load-theme "paper-night")})
+    assert Editor.render_state().faces["tt-gauge"]["fg"] == "#111111"
+
+    # restore
+    {:ok, _} = Aimax.Core.Session.eval(~s{(load-theme "aimax-dark")})
+  end
+
   test "key-for-command reverse lookup" do
     {:ok, printed} = Aimax.Core.Session.eval(~s{(key-for-command "find-file")})
     assert printed == inspect("C-x C-f")

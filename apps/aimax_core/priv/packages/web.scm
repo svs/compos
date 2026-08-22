@@ -17,13 +17,13 @@
 (domain! 'web)
 (effects! '(read external))
 
-(set-face-attribute! 'web-link 'fg "#7aa2f7")
-(set-face-attribute! 'web-meta
+(defface! 'web-link 'fg "#7aa2f7")
+(defface! 'web-meta
   'fg "var(--dim-fg)"
   'bg "var(--window-inactive-bg)"
   'weight "600")
-(set-face-attribute! 'web-date 'fg "var(--dim-fg)" 'size "0.82em")
-(set-face-attribute! 'web-separator 'fg "transparent")
+(defface! 'web-date 'fg "var(--dim-fg)" 'size "0.82em")
+(defface! 'web-separator 'fg "transparent")
 
 ;; browser TABS: one buffer per page, every one in the "browse" group.
 ;; The switcher finds them by mode — typing "browse" narrows to them.

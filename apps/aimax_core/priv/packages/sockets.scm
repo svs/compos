@@ -22,11 +22,11 @@
 ;; one g press sees one consistent snapshot
 (define *sockets-rows* '())
 
-(set-face-attribute! 'sock-up 'fg "#2e6b45" 'weight "600")
-(set-face-attribute! 'sock-error 'fg "#a83a2b" 'weight "600")
-(set-face-attribute! 'sock-off 'fg "#8a857a")
-(set-face-attribute! 'sock-kind 'fg "#7a5a1a")
-(set-face-attribute! 'sock-name 'fg "#26356b" 'weight "600")
+(defface! 'sock-up 'fg "#2e6b45" 'weight "600")
+(defface! 'sock-error 'fg "#a83a2b" 'weight "600")
+(defface! 'sock-off 'fg "#8a857a")
+(defface! 'sock-kind 'fg "#7a5a1a")
+(defface! 'sock-name 'fg "#26356b" 'weight "600")
 
 ;;; --- what a row knows ---------------------------------------------------------
 

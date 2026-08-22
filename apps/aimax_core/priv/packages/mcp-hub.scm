@@ -17,14 +17,14 @@
 
 (define *mcp-hub-buffer* "*mcp-hub*")
 
-(set-face-attribute! 'mcp-ready 'fg "#2e6b45" 'weight "600")
-(set-face-attribute! 'mcp-error 'fg "#a83a2b" 'weight "600")
-(set-face-attribute! 'mcp-off 'fg "#8a857a")
-(set-face-attribute! 'mcp-name 'fg "#26356b" 'weight "600")
-(set-face-attribute! 'mcp-preset 'fg "#7a5a1a")
-(set-face-attribute! 'mcp-heading 'fg "#26356b" 'weight "700")
-(set-face-attribute! 'mcp-item 'fg "#7a5a1a" 'weight "600")
-(set-face-attribute! 'mcp-dim 'fg "#8a857a")
+(defface! 'mcp-ready 'fg "#2e6b45" 'weight "600")
+(defface! 'mcp-error 'fg "#a83a2b" 'weight "600")
+(defface! 'mcp-off 'fg "#8a857a")
+(defface! 'mcp-name 'fg "#26356b" 'weight "600")
+(defface! 'mcp-preset 'fg "#7a5a1a")
+(defface! 'mcp-heading 'fg "#26356b" 'weight "700")
+(defface! 'mcp-item 'fg "#7a5a1a" 'weight "600")
+(defface! 'mcp-dim 'fg "#8a857a")
 
 ;;; --- what a row knows ---------------------------------------------------------
 

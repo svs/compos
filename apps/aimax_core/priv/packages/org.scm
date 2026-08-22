@@ -158,19 +158,19 @@
 
 ;;; --- fontification -----------------------------------------------------------
 
-(set-face-attribute! 'org-level-1 'fg "#26356b" 'weight "700")
-(set-face-attribute! 'org-level-2 'fg "#7a5a1a" 'weight "600")
-(set-face-attribute! 'org-level-3 'fg "#3d6b4f" 'weight "600")
-(set-face-attribute! 'org-level-4 'fg "#6b3d5b" 'weight "600")
-(set-face-attribute! 'org-todo 'fg "#a03020" 'weight "700")
-(set-face-attribute! 'org-done 'fg "#3d6b4f" 'decoration "line-through")
-(set-face-attribute! 'org-priority 'fg "#7a5a1a" 'weight "600")
-(set-face-attribute! 'org-date 'fg "#26356b" 'style "italic")
-(set-face-attribute! 'org-tag 'fg "#8a857a")
-(set-face-attribute! 'org-checkbox 'fg "#26356b" 'weight "600")
-(set-face-attribute! 'org-cookie 'fg "#7a5a1a")
-(set-face-attribute! 'org-meta 'fg "#8a857a")
-(set-face-attribute! 'fold-marker 'fg "#8a857a")
+(defface! 'org-level-1 'fg "#26356b" 'weight "700")
+(defface! 'org-level-2 'fg "#7a5a1a" 'weight "600")
+(defface! 'org-level-3 'fg "#3d6b4f" 'weight "600")
+(defface! 'org-level-4 'fg "#6b3d5b" 'weight "600")
+(defface! 'org-todo 'fg "#a03020" 'weight "700")
+(defface! 'org-done 'fg "#3d6b4f" 'decoration "line-through")
+(defface! 'org-priority 'fg "#7a5a1a" 'weight "600")
+(defface! 'org-date 'fg "#26356b" 'style "italic")
+(defface! 'org-tag 'fg "#8a857a")
+(defface! 'org-checkbox 'fg "#26356b" 'weight "600")
+(defface! 'org-cookie 'fg "#7a5a1a")
+(defface! 'org-meta 'fg "#8a857a")
+(defface! 'fold-marker 'fg "#8a857a")
 
 ;; sub-spans (todo/priority/tags/dates...) REPLACE the headline face over
 ;; their range rather than stacking on it — overlapping classes would

@@ -23,14 +23,14 @@
 ;; one g press sees one consistent snapshot
 (define *buffer-log-rows* '())
 
-(set-face-attribute! 'prov-root 'fg "#26356b" 'weight "600")
-(set-face-attribute! 'prov-edit 'fg "#2e6b45")
-(set-face-attribute! 'prov-gap 'fg "#a83a2b" 'weight "600")
-(set-face-attribute! 'prov-actor 'fg "#7a5a1a")
-(set-face-attribute! 'prov-group 'fg "#5a3a7a")
-(set-face-attribute! 'prov-ins 'fg "#2e6b45")
-(set-face-attribute! 'prov-del 'fg "#a83a2b")
-(set-face-attribute! 'prov-heading 'fg "#26356b" 'weight "600")
+(defface! 'prov-root 'fg "#26356b" 'weight "600")
+(defface! 'prov-edit 'fg "#2e6b45")
+(defface! 'prov-gap 'fg "#a83a2b" 'weight "600")
+(defface! 'prov-actor 'fg "#7a5a1a")
+(defface! 'prov-group 'fg "#5a3a7a")
+(defface! 'prov-ins 'fg "#2e6b45")
+(defface! 'prov-del 'fg "#a83a2b")
+(defface! 'prov-heading 'fg "#26356b" 'weight "600")
 
 ;;; --- what a row knows ---------------------------------------------------------
 

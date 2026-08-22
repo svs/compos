@@ -158,11 +158,11 @@ when a message has no text/plain part." 'group 'notmuch)
 
 ;;; --- search buffer ------------------------------------------------------------
 
-(set-face-attribute! 'nm-date 'fg "#8a8a8a")
-(set-face-attribute! 'nm-author 'fg "#26356b")
-(set-face-attribute! 'nm-unread 'weight "700")
-(set-face-attribute! 'nm-tags 'fg "#9a9a72")
-(set-face-attribute! 'nm-marked 'fg "#a03020" 'weight "700")
+(defface! 'nm-date 'fg "#8a8a8a")
+(defface! 'nm-author 'fg "#26356b")
+(defface! 'nm-unread 'weight "700")
+(defface! 'nm-tags 'fg "#9a9a72")
+(defface! 'nm-marked 'fg "#a03020" 'weight "700")
 
 (define (nm--search-json query limit)
   (or (nm--json (string-append "search --format=json --limit="
@@ -955,8 +955,8 @@ when a message has no text/plain part." 'group 'notmuch)
 ;; reply (point lands there), attribution, the original quoted as text
 (define *mail-header-separator* "--text follows this line--")
 
-(set-face-attribute! 'nm-hdr 'fg "#26356b" 'weight "600")
-(set-face-attribute! 'nm-sep 'fg "#9a9a72")
+(defface! 'nm-hdr 'fg "#26356b" 'weight "600")
+(defface! 'nm-sep 'fg "#9a9a72")
 
 (define (nm--quote-text text)
   (string-append "> "

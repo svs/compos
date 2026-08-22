@@ -535,7 +535,7 @@
 
 ;; A command takes its domain and its effects from the state in force when
 ;; it is declared, so the two are set here rather than with the functions
-;; below: a command that says what it does needs no backfill to guess.
+;; below: a command must say what it does, because nothing else will.
 (category! 'graphql)
 
 (effects! '(write external))

@@ -76,22 +76,12 @@
          (pkg (or (catalog--get meta 'package) *loading-package*))
          (qualified (or (catalog--get meta 'qualified-name)
                         (string-append (catalog--string ns) "/" n)))
-         (raw-domain (or (catalog--get meta 'domain) *catalog-domain*))
-         (declared-effects (catalog--get meta 'effects))
-         (raw-effects (or declared-effects *catalog-effects*))
-         (bundled? (equal? *loading-origin* 'bundled))
-         (luna (if bundled? (catalog-backfill-entry k qualified) #f))
-         (luna-domain (and luna (catalog--get luna 'domain)))
-         (luna-effects (and luna (catalog--get luna 'effects)))
-         (domain (if (and (equal? raw-domain 'unknown) luna-domain)
-                     luna-domain raw-domain))
-         (effects (if (and (member 'unknown raw-effects) luna-effects)
-                      luna-effects raw-effects))
-         (declared? (and (not (equal? raw-domain 'unknown))
-                         (not (member 'unknown raw-effects))))
-         (source (cond (declared? "declared")
-                       (luna "luna")
-                       (else "unknown")))
+         (domain (or (catalog--get meta 'domain) *catalog-domain*))
+         (effects (or (catalog--get meta 'effects) *catalog-effects*))
+         ;; The source declares the metadata, or the entry says it does not
+         ;; know. A guess here becomes a permission input, so there is none.
+         (declared? (and (not (equal? domain 'unknown))
+                         (not (member 'unknown effects))))
          (entry (append
                   (list 'kind k 'name n
                         'qualified-name qualified 'package (catalog--string pkg)
@@ -99,9 +89,7 @@
                         'origin (catalog--string *loading-origin*)
                         'domain (catalog--string domain)
                         'effects (map catalog--string effects)
-                        'metadata-source source
-                        'metadata-confidence (and luna (catalog--get luna 'confidence))
-                        'metadata-model (and luna (catalog--get luna 'model))
+                        'metadata-source (if declared? "declared" "unknown")
                         'doc doc)
                   meta)))
     (let ((key (catalog--key k n qualified)))
@@ -139,13 +127,30 @@
       (catalog--merge (catalog--put entry (car meta) (cadr meta))
                       (cdr (cdr meta)))))
 
-;; Explicit metadata wins over inference. Packages use this for consequential
-;; operations whose effect cannot be read reliably from an old docstring.
+;; domain and effects reach an entry as strings, whichever door they come
+;; through. A symbol here made the same domain appear twice in a facet list.
+(define (catalog--normalise-meta meta)
+  (cond ((or (null? meta) (null? (cdr meta))) meta)
+        ((equal? (car meta) 'domain)
+         (cons 'domain (cons (catalog--string (cadr meta))
+                             (catalog--normalise-meta (cdr (cdr meta))))))
+        ((equal? (car meta) 'effects)
+         (cons 'effects (cons (map catalog--string (cadr meta))
+                              (catalog--normalise-meta (cdr (cdr meta))))))
+        (else (cons (car meta) (cons (cadr meta)
+                                     (catalog--normalise-meta (cdr (cdr meta))))))))
+
+;; An explicit declaration wins over the scope in force. Packages use this for
+;; one entry in a mixed section, and the entry then counts as declared.
 (define (catalog-meta! kind name &rest meta)
   (let ((old (catalog-entry kind name)))
     (if (not old)
         #f
-        (let ((updated (catalog--merge old meta)))
+        (let* ((merged (catalog--merge old (catalog--normalise-meta meta)))
+               (updated (catalog--put merged 'metadata-source
+                          (if (and (not (equal? (catalog--get merged 'domain) "unknown"))
+                                   (not (member "unknown" (catalog--get merged 'effects))))
+                              "declared" "unknown"))))
           (set! *catalog*
             (cons updated
                   (remove (lambda (e)
@@ -6567,6 +6572,7 @@
 
 (define-command "eval-buffer" "Evaluate the current buffer as Scheme"
   (lambda () (echo-value (eval-buffer (current-buffer)))))
+(catalog-meta! 'command "eval-buffer" 'domain 'commands 'effects '(write execute))
 
 (define-command "eval-region" "Evaluate the region as Scheme"
   (lambda ()
@@ -6966,36 +6972,52 @@
 ;;; asks for the shape of an area instead of guessing at a search.
 
 (category! 'buffers)
+;; The scope declares what each name costs. It was a guess in a generated
+;; artifact before, and a guess must not reach the permission policy.
+(domain! 'buffers)
+(effects! '(read))
 (public! 'buffer-list "All buffer names")
 (public! 'buffer-list-mru "Buffer names, most recently used first")
 (public! 'buffer-exists? "(buffer-exists? NAME) -> bool")
 (public! 'buffer-known? "(buffer-known? NAME) -> bool: live OR dormant. A list shows dormant buffers, so a verb asks this one")
 (catalog-meta! 'function "buffer-known?" 'domain 'buffers 'effects '(read))
+(effects! '(write))
 (public! 'buffer-sleep! "(buffer-sleep! NAME) — checkpoint NAME and stop its process; the buffer stays known. #f when NAME is on screen, busy, or pinned")
 (catalog-meta! 'function "buffer-sleep!" 'domain 'buffers 'effects '(write))
+(effects! '(read))
 (public! 'buffer-text "(buffer-text NAME) -> the buffer's full text")
 (public! 'buffer-size "(buffer-size NAME) -> size in bytes")
+(effects! '(write))
 (public! 'buffer-create "(buffer-create NAME) — create if missing")
+(effects! '(destroy))
 (public! 'buffer-kill! "(buffer-kill! NAME) — kill a buffer; repoint its windows first")
+(effects! '(write))
 (public! 'buffer-append! "(buffer-append! NAME TEXT) — append; the usual way to add text")
 (public! 'buffer-insert! "(buffer-insert! NAME BYTE-POS TEXT)")
 (public! 'buffer-delete-range! "(buffer-delete-range! NAME BYTE-POS BYTE-LEN)")
+(effects! '(read))
 (public! 'buffer-authors "(buffer-authors NAME) -> (START END AUTHOR) spans: who wrote each byte range")
 (public! 'buffer-author-lines "(buffer-author-lines NAME) -> (LINE AUTHOR BYTES) rows: who wrote each line, and how much of it")
 (public! 'buffer-edit-log "(buffer-edit-log NAME) -> (VERSION AUTHOR POS INS DEL) records, newest first")
 (public! 'buffer-provenance-status "(buffer-provenance-status NAME) -> the durable recording state and accepted head")
 (public! 'buffer-provenance-history "(buffer-provenance-history NAME) -> revisions from root to accepted head")
+(effects! '(write))
 (public! 'buffer-provenance-start! "(buffer-provenance-start! NAME [ACTOR REASON POLICY]) -> start or resume recording")
 (public! 'buffer-provenance-stop! "(buffer-provenance-stop! NAME [ACTOR REASON POLICY]) -> stop without deleting history")
 (public! 'buffer-provenance-checkpoint! "(buffer-provenance-checkpoint! NAME) -> close the current changeset")
 (public! 'with-edit-author "(with-edit-author AUTHOR THUNK) — attribute THUNK's buffer edits to AUTHOR")
+(effects! '(read))
 (public! 'buffer-path "(buffer-path NAME) -> file path or #f")
 (public! 'buffer-modified? "(buffer-modified? NAME) -> unsaved changes?")
 (public! 'buffer-local "(buffer-local NAME KEY) -> buffer-local value or #f")
+(effects! '(write))
 (public! 'buffer-set-local! "(buffer-set-local! NAME KEY VALUE) — locals persist with the desktop")
+(effects! '(read))
 (public! 'current-buffer "Name of the buffer point is in")
+(effects! '(write))
 (public! 'switch-to-buffer! "(switch-to-buffer! NAME) — show in the active window")
 (public! 'visit "(visit PATH) — open a file (Emacs find-file); /ssh:HOST:/PATH opens over ssh")
+(domain! 'unknown)
 (effects! '(read))
 (public! 'buffer-link "(buffer-link [NAME] [LINE]) -> a URL that opens the buffer here; no NAME means this buffer at point")
 (public! 'buffer-raw-link "(buffer-raw-link [NAME]) -> a URL that serves the buffer text as plain text")
@@ -7030,11 +7052,14 @@
 (public! 'beginning-of-buffer! "Move point to the start")
 
 (category! 'windows)
+(domain! 'windows)
+(effects! '(read))
 (public! 'window-list "((id buffer-name) ...) for every window")
 (public! 'window-showing "(window-showing NAME) — the window showing NAME, or #f")
 (public! 'window-buffer "(window-buffer ID) — the buffer that window shows, or #f")
 (public! 'other-window-id "(other-window-id ME) — any window that is not ME, or #f")
 (public! 'active-window "Id of the selected window")
+(effects! '(write))
 (public! 'select-window! "(select-window! ID)")
 (public! 'split-window! "(split-window! 'h|'v [RATIO]) — ratio = first pane's share")
 (public! 'delete-window-id! "(delete-window-id! ID)")
@@ -7047,9 +7072,13 @@
 (public! 'define-mode-layout!
   "(define-mode-layout! MODE '(h|v RATIO PANE ...)) — the frame arrangement that mode asks for; a PANE is 'self, a buffer-local name, or a buffer name")
 (public! 'apply-layout! "(apply-layout! ANCHOR SPEC) — arrange the frame by SPEC, ANCHOR keeping focus")
+(effects! '(read))
 (public! 'buffer-layout "(buffer-layout NAME) — the layout NAME's modes declare, or #f")
+(effects! '(write))
 (public! 'with-layout-suppressed "(with-layout-suppressed THUNK) — run THUNK without the layout engine arranging the frame")
 
+(domain! 'unknown)
+(effects! '(unknown))
 (category! 'interaction)
 (public! 'message "(message TEXT) — echo area")
 (public! 'minibuffer-read "(minibuffer-read PROMPT CANDIDATES HANDLER) — async; HANDLER gets the choice")
@@ -7111,6 +7140,7 @@
 
 (category! 'chat)
 (public! 'llm "(llm PROMPT HANDLER) — async completion; HANDLER gets the text")
+(catalog-meta! 'function "llm" 'domain 'llm 'effects '(read external execute spend))
 (public! 'llm-with-model "(llm-with-model PROMPT MODEL HANDLER) — async completion with an explicit model")
 (public! 'llm-model "Current model id")
 (public! 'set-llm-model! "(set-llm-model! ID) — a \"provider:model\" prefix routes to that provider; a bare id is Anthropic")

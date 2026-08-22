@@ -4,9 +4,8 @@ defmodule Aimax.AproposTest do
 
   The search, the entries and the cold start are Scheme policy and live in
   priv/tests/apropos-test.scm. Four tests stay here. Two read the Elixir
-  registration maps directly. Two are red today, on the bundled backfill
-  and the frozen Luna count, and a red test in the Scheme suite would hide
-  the next real failure.
+  registration maps directly. Two hold the metadata line across the whole
+  catalog, which one package's Scheme test cannot see.
   """
 
   use ExUnit.Case
@@ -19,27 +18,28 @@ defmodule Aimax.AproposTest do
   end
 
   describe "the catalog" do
-    test "the bundled backfill leaves no unknown metadata" do
+    test "an entry declares its metadata or admits it does not know" do
+      # The catalog has two answers. A guessed third answer reaches the
+      # permission policy, which is why there is no generator for one.
       assert {:ok, "()"} =
                Session.eval("""
                (filter (lambda (e)
-                         (and (equal? (plist-get e 'origin) "bundled")
-                              (or (equal? (plist-get e 'domain) "unknown")
-                                  (member "unknown" (plist-get e 'effects)))))
+                         (not (member (plist-get e 'metadata-source)
+                                      '("declared" "unknown"))))
                        (catalog))
                """)
     end
 
-    test "new bundled declarations cannot silently expand the Luna backfill" do
-      # A new Scheme declaration must stamp itself. Change this frozen count
-      # only after regenerating and reviewing the Luna artifact.
+    test "unstamped bundled declarations do not multiply" do
+      # An unstamped entry reads "unknown", so the permission policy asks
+      # before it acts. That is correct, and it is also a debt. A new
+      # declaration stamps itself: lower this number, never raise it.
       assert eval!("""
              (length (filter (lambda (e)
-                               (equal? (plist-get e 'metadata-source) "luna"))
+                               (and (equal? (plist-get e 'origin) "bundled")
+                                    (equal? (plist-get e 'metadata-source) "unknown")))
                              (catalog)))
-             """) == "653"
-
-      assert Aimax.Core.CatalogBackfill.count() == 713
+             """) == "587"
     end
   end
 

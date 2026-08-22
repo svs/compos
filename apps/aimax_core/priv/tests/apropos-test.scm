@@ -6,9 +6,8 @@
 ;;; cold-start path — an agent that has just connected and knows nothing.
 ;;;
 ;;; Four tests stay in ExUnit. Two read Elixir modules directly
-;;; (Builtins.docs, SchemeAPI.docs). Two are red today, on the bundled
-;;; backfill and the frozen Luna count, and a red test here would hide the
-;;; next real failure.
+;;; (Builtins.docs, SchemeAPI.docs). Two hold the metadata line: the
+;;; catalog reports what the source declares, and nothing else.
 
 (domain! 'testing)
 (effects! '(read))
@@ -90,8 +89,8 @@
     (t--ap-forget-catalog! "command" "zz-unstamped")
     (t--ap-forget-catalog! "command" "zz-stamped")))
 
-(deftest 'luna-classified-consequential-entries-carry-metadata
-  "the backfill names its model and its confidence"
+(deftest 'consequential-entries-declare-their-effects
+  "the entries that spend, execute or destroy say so in their own source"
   (lambda ()
     (check-equal! (plist-get (catalog-entry 'function "llm") 'effects)
                   '("read" "external" "execute" "spend") "llm spends")
@@ -99,10 +98,8 @@
                   '("write" "execute") "eval-buffer executes")
     (check-equal! (plist-get (catalog-entry 'command "notmuch-trash") 'effects)
                   '("destroy") "notmuch-trash destroys")
-    (let ((llm (catalog-entry 'function "llm")))
-      (check-equal! (plist-get llm 'metadata-source) "luna" "the source")
-      (check-equal! (plist-get llm 'metadata-model) "openai:gpt-5.6-luna" "the model")
-      (check-equal! (plist-get llm 'metadata-confidence) 0.98 "the confidence"))))
+    (check-equal! (plist-get (catalog-entry 'function "llm") 'metadata-source)
+                  "declared" "declared in the source, never guessed")))
 
 (deftest 'every-public-entry-carries-a-signature-and-a-category
   "the sig is parsed out of the doc, so the house way needs no extra work"

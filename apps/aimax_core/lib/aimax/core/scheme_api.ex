@@ -148,8 +148,6 @@ defmodule Aimax.Core.SchemeAPI do
         "(json-parse STR) — parse JSON; objects become plists with symbol keys; #f on failure.",
       "json-encode" =>
         "(json-encode V [PRETTY]) — encode a Scheme value as a JSON string; a plist becomes an object. A truthy PRETTY indents the output.",
-      "catalog-backfill-entry" =>
-        "(catalog-backfill-entry KIND QUALIFIED-NAME) — the frozen backfill metadata for a bundled declaration, as a plist, or #f.",
       "write-file!" =>
         "(write-file! PATH TEXT) — write TEXT to PATH, create parent directories; return #t.",
       "start-process!" =>
@@ -685,15 +683,6 @@ defmodule Aimax.Core.SchemeAPI do
         case Jason.decode(s) do
           {:ok, v} -> Aimax.Core.LLM.json_to_scheme(v)
           {:error, _} -> false
-        end
-      end,
-      # (catalog-backfill-entry KIND QUALIFIED-NAME) — the frozen Luna
-      # classification for one bundled declaration, as a plist, or #f. The
-      # catalog reads it when the source declares no domain or effects.
-      "catalog-backfill-entry" => fn [kind, qualified] ->
-        case Aimax.Core.CatalogBackfill.lookup(kind, qualified) do
-          nil -> false
-          entry -> Aimax.Core.LLM.json_to_scheme(entry)
         end
       end,
       # (json-encode V [PRETTY]) — the inverse: a plist becomes an object,

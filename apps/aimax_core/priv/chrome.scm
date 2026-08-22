@@ -510,8 +510,7 @@
 (public! 'tab-cdp "(tab-cdp TAB METHOD PARAMS K) — raw Chrome DevTools Protocol")
 (public! 'browser-connected? "(browser-connected?) — is the ai-max Chrome extension attached?")
 
-;; the rest of this section predates the metadata declarations and takes the
-;; reviewed backfill; a new name stamps itself
+;; every name below stamps itself
 (domain! 'chrome)
 (effects! '(read))
 (public! 'chrome-window "(chrome-window) — the browser window this frame is displayed in, or #f")

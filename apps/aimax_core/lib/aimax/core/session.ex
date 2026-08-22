@@ -503,8 +503,8 @@ defmodule Aimax.Core.Session do
       )
 
     # Everything defined after boot — the REPL, a chat's eval-scheme, a
-    # runtime define — is the user's, not ours. The Luna backfill applies to
-    # bundled entries only, so the origin has to say which is which.
+    # runtime define — is the user's, not ours, and the origin says which
+    # is which.
     interp |> load_packages() |> load_init() |> stamp_origin_user()
   end
 
@@ -556,10 +556,9 @@ defmodule Aimax.Core.Session do
       # The catalog stamp comes from the loader: one file is one package,
       # named by its basename, and its metadata starts unknown. Without the
       # stamp a file inherited the package of whichever file loaded before
-      # it, so the qualified name was wrong, the Luna backfill (keyed
-      # PACKAGE/NAME) missed, and the entry kept unknown metadata. A file
-      # whose public vocabulary differs still calls package! or namespace!
-      # itself, and wins — it runs after this.
+      # it, so the qualified name was wrong. A file whose public vocabulary
+      # differs still calls package! or namespace! itself, and wins — it
+      # runs after this.
       interp = stamp_load_unit(interp, path, origin)
 
       case Scheme.eval_string(interp, File.read!(path)) do

@@ -31,20 +31,6 @@ defmodule Aimax.Core.LLM do
   @doc "Synchronous request — for callers managing their own tasks."
   def request(prompt), do: run_request(prompt, model())
 
-  @doc "Run FUN with a process-local provider key, without requiring a Scheme session."
-  def with_provider_key(provider, key, fun)
-      when is_binary(provider) and is_binary(key) and is_function(fun, 0) do
-    slot = {__MODULE__, :provider_key, provider}
-    previous = Process.get(slot)
-    Process.put(slot, key)
-
-    try do
-      fun.()
-    after
-      if previous, do: Process.put(slot, previous), else: Process.delete(slot)
-    end
-  end
-
   def complete(prompt, callback) when is_function(callback, 1),
     do: complete(prompt, model(), callback)
 
@@ -437,19 +423,16 @@ defmodule Aimax.Core.LLM do
   # Hand the resolved key VALUE to req_llm as a per-request :api_key option.
   # Elixir asks Scheme for the value BY PROVIDER ((llm-key "deepseek")); the
   # provider -> key association is explicit Scheme config, so there is no
-  # provider -> secret-name convention anywhere in Elixir. A process-dict
-  # override (the catalog backfill task's with_provider_key) still wins,
-  # keyed by provider — and because it short-circuits, that task needs no
-  # running Session. No key anywhere is an error, not a silent env fallback.
+  # provider -> secret-name convention anywhere in Elixir. Scheme is the one
+  # resolution point. No key anywhere is an error, not a silent env fallback.
   defp key_opts(spec) do
     provider = provider_of(spec)
 
     key =
-      Process.get({__MODULE__, :provider_key, provider}) ||
-        case Session.call_named("llm-key", [provider]) do
-          {:ok, k} when is_binary(k) and k != "" -> k
-          _ -> nil
-        end
+      case Session.call_named("llm-key", [provider]) do
+        {:ok, k} when is_binary(k) and k != "" -> k
+        _ -> nil
+      end
 
     case key do
       k when is_binary(k) and k != "" -> {:ok, [api_key: k]}

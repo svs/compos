@@ -574,6 +574,7 @@ when a message has no text/plain part." 'group 'notmuch)
   (lambda () (nm--tag! (current-buffer) "-inbox")))
 (define-command "notmuch-trash" "Trash the thread at point (+trash -inbox -unread)"
   (lambda () (nm--tag! (current-buffer) "+trash -inbox -unread")))
+(catalog-meta! 'command "notmuch-trash" 'domain 'mail 'effects '(destroy))
 
 (define-command "notmuch-toggle-unread" "Toggle the unread tag on the thread at point"
   (lambda ()

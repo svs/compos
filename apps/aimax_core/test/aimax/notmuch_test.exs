@@ -48,6 +48,7 @@ defmodule Aimax.NotmuchTest do
   setup do
     dir = Path.join(System.tmp_dir!(), "nm-stub-#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
     File.write!(Path.join(dir, "search.json"), @search_json)
     File.write!(Path.join(dir, "sender-search.json"), @sender_search_json)
     File.write!(Path.join(dir, "show.json"), @show_json)

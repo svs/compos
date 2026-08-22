@@ -2316,13 +2316,17 @@
 ;; is a mode like any other — so the column stays full and says something
 ;; true. The size pads itself: a size reads right-aligned, and only the
 ;; field knows that.
+;; This lambda is the file prompt's hot loop: it runs once for every entry
+;; in the directory. Read the stat once, and scan auto-mode-alist once —
+;; the icon column and the mode column both want the mode, and file-icon
+;; would scan the alist a second time to find it.
 (marginalia! 'file
   (lambda (name)
-    (let ((st (file-stat (string-append *marginalia-file-dir* name))))
-      (list (if (string-prefix? "d" (car st)) (mode-icon "Dired") (file-icon name))
-            (if (string-prefix? "d" (car st))
-                "Dired"
-                (or (auto-mode-for name) "Fundamental"))
+    (let* ((st (file-stat (string-append *marginalia-file-dir* name)))
+           (dir? (string-prefix? "d" (car st)))
+           (mode (and (not dir?) (auto-mode-for name))))
+      (list (if dir? (mode-icon "Dired") (mode-icon mode))
+            (if dir? "Dired" (or mode "Fundamental"))
             (string-pad-left (car (cdr st)) 6)
             (car (cdr (cdr st)))))))
 
@@ -3083,9 +3087,20 @@
 ;; A candidate is a bare name and the annotator stats a path, so the
 ;; listing says which directory it listed. Every file prompt goes through
 ;; here, and nothing else has to know the annotator needs it.
+;; A prompt shows eight rows at a time. Annotating every entry to show
+;; eight is the file prompt's worst case: the annotator stats the file and
+;; reads auto-mode-alist for each one, so 5000 entries cost 1.8s on the
+;; :ui lane and the editor stops between keystrokes. Past this many
+;; entries a person does not read the listing, they type to narrow it, so
+;; hand over bare names and let the typing do the work. The core takes
+;; plain strings wherever it takes (NAME HINT) pairs.
+(define *file-annotate-limit* 500)
+
 (define (file-candidates dir names)
   (set! *marginalia-file-dir* dir)
-  (annotate 'file names))
+  (if (> (length names) *file-annotate-limit*)
+      names
+      (annotate 'file names)))
 
 ;; (file-complete input selected) -> (list new-input candidates)
 ;; selected: a candidate the user arrowed onto — inserted into the path,

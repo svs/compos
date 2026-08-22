@@ -1786,10 +1786,26 @@ defmodule Aimax.Core.SchemeAPI do
       ])
 
     deadline = System.monotonic_time(:millisecond) + limit
-    collect_port(port, deadline, [])
+    t0 = System.monotonic_time(:millisecond)
+    out = collect_port(port, deadline, [])
+    report_slow_shell(cmd, dir, System.monotonic_time(:millisecond) - t0)
+    out
   rescue
     _ -> ""
   end
+
+  # The inline form holds its lane for as long as the command runs, so a
+  # slow command is a frozen editor. The lane log names the job "eval" and
+  # stops there; without the command text, a slow shell is invisible. Name
+  # it here, at the same threshold the lane uses.
+  @slow_shell_ms 250
+
+  defp report_slow_shell(cmd, dir, ms) when ms > @slow_shell_ms do
+    require Logger
+    Logger.warning("shell: #{ms}ms in #{dir}: #{String.slice(cmd, 0, 160)}")
+  end
+
+  defp report_slow_shell(_cmd, _dir, _ms), do: :ok
 
   defp collect_port(port, deadline, acc) do
     left = deadline - System.monotonic_time(:millisecond)

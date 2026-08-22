@@ -84,6 +84,7 @@ defmodule Aimax.ChatResetTest do
 
   test "a saved .chat file revives as a live conversation" do
     dir = Path.join(System.tmp_dir!(), "chat-revive-#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf!(dir) end)
     File.mkdir_p!(dir)
     path = Path.join(dir, "old-talk.chat")
     File.write!(path, "### You\nremember the plan?\n### Assistant\nYes: ship mail.\n### You\n")
@@ -95,6 +96,7 @@ defmodule Aimax.ChatResetTest do
 
   test "C-x C-s on a rich chat writes the flattened transcript" do
     dir = Path.join(System.tmp_dir!(), "chat-flat-#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf!(dir) end)
     File.mkdir_p!(dir)
     path = Path.join(dir, "rich.chat")
 
@@ -119,6 +121,7 @@ defmodule Aimax.ChatResetTest do
 
   test "C-x C-s on a non-file chat converts it to a .chat file buffer" do
     dir = Path.join(System.tmp_dir!(), "chat-cxs-#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf!(dir) end)
     File.mkdir_p!(dir)
     path = Path.join(dir, "talk.chat")
 

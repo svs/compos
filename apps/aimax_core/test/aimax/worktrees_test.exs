@@ -31,7 +31,12 @@ defmodule Aimax.WorktreesTest do
 
     File.write!(Path.join(root, "a.txt"), "hello\n")
     sh!("git add . && git -c user.email=t@t -c user.name=t commit -q -m a", root)
-    on_exit(fn -> File.rm_rf!(root) end)
+    # scratch_repo makes two directories; both must go, or the sibling
+    # piles up in the temp dir and every file prompt pays to list it
+    on_exit(fn ->
+      File.rm_rf!(root)
+      File.rm_rf!("#{root}-worktrees")
+    end)
     # canonical (/private/var, not /var): git-root canonicalizes, and the
     # worktree paths derive from it
     {real, 0} = System.cmd("pwd", ["-P"], cd: root)

@@ -607,7 +607,8 @@ defmodule Aimax.Ui.EditorLive do
   defp build_static(leaf) do
     spans =
       case leaf.ts_lang do
-        nil ->
+        # nil: no mode ever named a grammar. false: a mode left and took it.
+        lang when lang in [nil, false] ->
           []
 
         _lang ->
@@ -977,9 +978,22 @@ defmodule Aimax.Ui.EditorLive do
             <div class="dash-grid">
               <div class="dash-cell">
                 <div class="dash-title">modes</div>
-                <div class="dash-big">{@node.mode}</div>
+                <div
+                  class="dash-big dash-toggle"
+                  title={"toggle #{@node.mode}"}
+                  phx-click="ui_cmd"
+                  phx-value-win={@node.id}
+                  phx-value-cmd={"mode:" <> @node.mode}
+                >{@node.mode}</div>
                 <div :if={@node.minor_modes != []} class="dash-chips">
-                  <span :for={m <- @node.minor_modes} class="dash-chip">{m}</span>
+                  <span
+                    :for={m <- @node.minor_modes}
+                    class="dash-chip dash-chip-on"
+                    title={"toggle #{m}"}
+                    phx-click="ui_cmd"
+                    phx-value-win={@node.id}
+                    phx-value-cmd={"mode:" <> m}
+                  >{m}</span>
                 </div>
                 <div class="dash-row">
                   <span class="dash-k">read-only</span><span class="dash-sp"></span><span class="dash-v">{if @node.read_only, do: "yes", else: "no"}</span>
@@ -1132,7 +1146,15 @@ defmodule Aimax.Ui.EditorLive do
           phx-value-win={@node.id}
           phx-value-cmd="modeline-expand"
         >{@node.buffer}</span>
-        <span class="ml-mode">{@node.mode}<%= if ml_group(@node) do %> · {ml_group(@node)}<% end %><%= if @node.modified do %> · modified<% end %></span>
+        <span
+          class="ml-mode ml-toggle"
+          title={"toggle #{@node.mode}"}
+          phx-click="ui_cmd"
+          phx-value-win={@node.id}
+          phx-value-cmd={"mode:" <> @node.mode}
+        >{@node.mode}</span>
+        <span :if={ml_group(@node)} class="ml-mode">· {ml_group(@node)}</span>
+        <span :if={@node.modified} class="ml-mode">· modified</span>
         <span :if={@node.render_mode in ["html", "markdown"]} class="ml-mode">preview</span>
         <span
           :if={@node.modeline_info}

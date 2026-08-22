@@ -571,6 +571,8 @@ defmodule Aimax.Ui.Layouts do
           .modeline .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
           .ml-pos { font-family: var(--font-mono); font-size: 10.5px; opacity: 0.75; }
           .ml-mode { font-family: var(--font-mono); font-size: 10.5px; opacity: 0.6; white-space: nowrap; }
+          .ml-toggle { cursor: pointer; }
+          .ml-toggle:hover { opacity: 1; text-decoration: underline; }
           .ml-group {
             font-family: var(--font-mono); font-size: 10.5px;
             color: var(--accent-fg, #26356b); opacity: 0.85;

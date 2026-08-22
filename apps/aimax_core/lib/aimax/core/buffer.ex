@@ -1284,8 +1284,12 @@ defmodule Aimax.Core.Buffer do
 
   # --- incremental tree-sitter ------------------------------------------------
 
+  # a mode that leaves clears 'ts-lang, and the local carries #f (false) to
+  # say so. No language, no parser: false must drop the state, not hold it.
+  defp init_ts(state, lang) when lang in [nil, false], do: %{state | ts: nil}
+
   defp init_ts(state, lang) do
-    case lang && TS.ts_state_new(lang) do
+    case TS.ts_state_new(lang) do
       nil -> %{state | ts: nil}
       res -> %{state | ts: %{res: res, spans: nil}}
     end

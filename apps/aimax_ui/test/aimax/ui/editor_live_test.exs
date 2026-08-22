@@ -312,6 +312,67 @@ defmodule Aimax.Ui.EditorLiveTest do
     assert eventually(fn -> not (render(view) =~ "ag-activity") end)
   end
 
+  # a minor mode is visible where it runs: the modeline names it, a click on
+  # the name toggles it, and the echo area states the new state
+  # the modeline names the major mode alone; the expanded modeline (C-x ?)
+  # names the minor modes, and a click on one toggles it
+  test "the expanded modeline names a minor mode and a click toggles it", %{conn: conn} do
+    buf = Aimax.Core.Editor.current_buffer()
+    {:ok, _} = Aimax.Core.Session.eval(~s{(run-command "visual-line-mode")})
+
+    {:ok, _view, html} = live(conn, "/")
+    refute html =~ "mode:visual-line-mode"
+
+    {:ok, _} = Aimax.Core.Session.eval(~s{(run-command "modeline-expand")})
+    {:ok, view, html} = live(conn, "/")
+    assert html =~ ~s(phx-value-cmd="mode:visual-line-mode")
+
+    html =
+      view |> element(~s(span[phx-value-cmd="mode:visual-line-mode"])) |> render_click()
+
+    refute html =~ "mode:visual-line-mode"
+    assert html =~ "visual-line-mode disabled"
+    assert {:ok, off} = Aimax.Core.Session.eval(~s{(minor-mode-on? "#{buf}" "visual-line-mode")})
+    assert off in [false, "#f"]
+
+    # the same toggle from a command reaches the running view too
+    {:ok, _} = Aimax.Core.Session.eval(~s{(run-command "visual-line-mode")})
+    assert eventually(fn -> render(view) =~ "mode:visual-line-mode" end)
+    {:ok, _} = Aimax.Core.Session.eval(~s{(run-command "visual-line-mode")})
+    {:ok, _} = Aimax.Core.Session.eval(~s{(run-command "modeline-expand")})
+  end
+
+  # the major mode toggles from the modeline too: a view mode (a rendered
+  # help page) leaves the buffer as plain text, and the next click restores it
+  test "a click on the major mode name leaves it for Fundamental",
+       %{conn: conn} do
+    buf = Aimax.Core.Editor.current_buffer()
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(
+        ~s{(with-current-buffer "#{buf}" (lambda () (begin (buffer-set-local! "#{buf}" 'render-mode "markdown") (set-mode! "html-mode"))))}
+      )
+
+    {:ok, view, html} = live(conn, "/")
+    assert html =~ ~s(phx-value-cmd="mode:html-mode")
+
+    html = view |> element(~s(span[phx-value-cmd="mode:html-mode"])) |> render_click()
+    assert html =~ "html-mode off"
+    # no mode at all: the modeline names that Fundamental
+    assert html =~ ~s(phx-value-cmd="mode:Fundamental")
+    assert {:ok, off} = Aimax.Core.Session.eval(~s{(buffer-local "#{buf}" 'mode-name)})
+    assert off in [false, "#f"]
+    assert {:ok, render} = Aimax.Core.Session.eval(~s{(buffer-local "#{buf}" 'render-mode)})
+    assert render in [false, "#f"]
+    # the grammar belongs to the mode: no mode, no highlighting
+    assert {:ok, lang} = Aimax.Core.Session.eval(~s{(buffer-local "#{buf}" 'ts-lang)})
+    assert lang in [false, "#f"]
+
+    # this buffer visits no file, so there is no mode to read back
+    html = view |> element(~s(span[phx-value-cmd="mode:Fundamental"])) |> render_click()
+    assert html =~ "no mode for this buffer"
+  end
+
   defp eventually(fun, tries \\ 60) do
     cond do
       fun.() ->

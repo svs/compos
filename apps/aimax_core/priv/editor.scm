@@ -1828,8 +1828,9 @@
 
 (define (define-mode name setup)
   (set! *mode-setups* (cons (list name setup) *mode-setups*))
-  ;; every mode is an M-x command, like Emacs
-  (define-command name (lambda () (set-mode! name)))
+  ;; every mode is an M-x command, like Emacs. The command toggles: the
+  ;; command that puts you in a mode takes you out of it again.
+  (define-command name (lambda () (modeline-toggle-mode! name)))
   (catalog-register! 'mode name "Major mode"
     'use (string-append "(run-command \"" name "\")")))
 
@@ -1991,6 +1992,63 @@
     (if (minor-mode-on? buf name)
         (begin (disable-minor-mode! buf name) #f)
         (begin (enable-minor-mode! buf name) #t))))
+
+;; The modeline names the modes this buffer runs, and a click on a name
+;; toggles that mode. The modeline names the major mode; the expanded
+;; modeline names the minor modes. Every mode is an M-x command too, and
+;; the command toggles the same way.
+;;
+;; A minor mode with a command of its own name runs the command, because
+;; the command owns the rest of the policy. A major mode has no off switch
+;; of its own. To leave it gives the buffer back with no mode at all:
+;; Fundamental, the state a buffer has before any mode claims it. Nothing
+;; remembers the mode you left, as in Emacs. normal-mode reads the file
+;; name again and the mode comes back. The echo area states each result.
+
+(define (major-mode-off! buf name)
+  (buffer-set-local! buf 'render-mode #f)
+  (buffer-set-local! buf 'preview-renderer #f)
+  ;; the grammar is the mode's: no mode, no colours
+  (buffer-set-local! buf 'ts-lang #f)
+  (buffer-set-read-only! buf #f)
+  (buffer-set-local! buf 'mode-name #f))
+
+;; Emacs's normal-mode: the mode the file name asks for, applied again.
+(define-command "normal-mode"
+  "Set the major mode the buffer's file name asks for"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (path (buffer-path buf))
+           (m (and path (auto-mode-for path))))
+      (if m
+          (begin (set-mode! m) (message (string-append m " on")))
+          (message "no mode for this buffer")))))
+
+(define (modeline-toggle-mode! name)
+  (let* ((buf (current-buffer))
+         (major (or (buffer-local buf 'mode-name) "Fundamental")))
+    (cond
+      ;; a minor mode toggles in place. A name that is both is a major
+      ;; mode here, because its own command would call this back forever.
+      ((and (assoc name *minor-mode-setups*) (not (assoc name *mode-setups*)))
+       (if (member name (command-names))
+           (run-command name)
+           (toggle-minor-mode! name))
+       (message (string-append name
+                               (if (minor-mode-on? buf name)
+                                   " enabled"
+                                   " disabled"))))
+      ;; the buffer is in another mode: enter this one
+      ((not (equal? name major))
+       (set-mode! name)
+       (message (string-append name " on")))
+      ;; Fundamental is no mode: there is nothing to leave, so read the
+      ;; file name again. This is the way back for a file buffer.
+      ((equal? major "Fundamental")
+       (run-command "normal-mode"))
+      (else
+        (major-mode-off! buf name)
+        (message (string-append name " off"))))))
 
 (define (restore-minor-modes! buf)
   (for-each
@@ -5949,6 +6007,9 @@
 .dash-chip { padding: 2px 8px; border-radius: 6px; background: var(--window-bg, #fdfcf8);
              border: 1px solid var(--border, #e2dbc9); font-family: var(--font-mono);
              font-size: 10.5px; color: var(--dim-fg, #57534a); }
+.dash-chip-on, .dash-toggle { cursor: pointer; }
+.dash-chip-on:hover, .dash-toggle:hover { border-color: var(--accent-fg, #26356b);
+                                          color: var(--accent-fg, #26356b); }
 .dash-spark { display: flex; align-items: flex-end; gap: 2px; height: 44px; }
 .dash-bar { flex: 1; border-radius: 1px; background: var(--accent-fg, #26356b);
             min-width: 3px; }
@@ -7039,13 +7100,17 @@
 
 ;; one gate for clicks that run a command (dup #24). A transcript button
 ;; sends a command name; the modeline-info segment sends its buffer. The
-;; whitelist lives here: a button runs agent-* commands only, a modeline
-;; click runs the buffer's own modeline-info-command.
+;; whitelist lives here: a button runs agent-* commands only, a "mode:NAME"
+;; click toggles that mode, and a modeline click runs the buffer's own
+;; modeline-info-command.
 (define (ui-command! cmd buf)
   (cond ((and (string? cmd) (string-prefix? "agent-" cmd))
          (run-command cmd))
         ;; the modeline's name is the dashboard's click target
         ((equal? cmd "modeline-expand") (run-command cmd))
+        ;; a mode name in the modeline toggles that mode
+        ((and (string? cmd) (string-prefix? "mode:" cmd))
+         (modeline-toggle-mode! (string-join (cdr (string-split cmd ":")) ":")))
         ((string? buf)
          (let ((c (buffer-local buf 'modeline-info-command)))
            (when (string? c) (run-command c))))

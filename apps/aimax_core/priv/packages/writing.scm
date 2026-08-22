@@ -62,6 +62,19 @@
 
 ;;; --- workspace ---------------------------------------------------------------
 
+;; The document's own presets, remembered once. writing-mode saves the look
+;; it repaints and nothing else, so the workspace keeps this one itself. The
+;; value rides inside a list: a document with no presets must still read as
+;; remembered, and an empty list is not #f.
+(define (writing--remember-presets! buf)
+  (unless (buffer-local buf 'writing-saved-presets)
+    (buffer-set-local! buf 'writing-saved-presets
+      (list (or (buffer-local buf 'chat-presets) '())))))
+
+(define (writing--saved-presets buf)
+  (let ((saved (buffer-local buf 'writing-saved-presets)))
+    (if saved (car saved) '())))
+
 (define (writing--configured-presets buf)
   ;; Rebuild from the pre-writing value on every refresh.  That makes removing
   ;; a preset from writing-presets take effect immediately instead of leaving
@@ -73,7 +86,7 @@
            (append required
                    (filter (lambda (preset) (not (member preset required)))
                            writing-presets)))
-         (base (or (writing--saved buf 'chat-presets) '())))
+         (base (writing--saved-presets buf)))
     (append requested
             (filter (lambda (preset) (not (member preset requested))) base))))
 
@@ -300,6 +313,7 @@
 ;;; as three panes: left, middle, and right.
 
 (define (writing--layout-apply! buf)
+  (writing--remember-presets! buf)
   (let* ((group (writing--workspace! buf))
          (scratch (scratch-ensure! buf))
          (chat (group-chat group)))

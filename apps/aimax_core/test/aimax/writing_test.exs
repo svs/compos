@@ -53,7 +53,8 @@ defmodule Aimax.WritingTest do
 
       Aimax.Core.list_buffers()
       |> Enum.filter(
-        &(String.starts_with?(&1, "*writing:") or String.starts_with?(&1, "*scratch:"))
+        &(String.starts_with?(&1, "*writing:") or String.starts_with?(&1, "*scratch:") or
+            String.starts_with?(&1, "*chat:"))
       )
       |> Enum.each(&Aimax.Core.kill_buffer/1)
     end)
@@ -95,9 +96,12 @@ defmodule Aimax.WritingTest do
     assert Buffer.get_local(buf, "render-mode") == "markdown"
     assert Buffer.get_local(buf, "preview-renderer") == "markdown"
     assert Buffer.get_local(buf, "visual-line-mode") == true
-    writing_leaf = Enum.find(Editor.render_state().tree.children, &(&1.buffer == buf))
-    assert writing_leaf.visual_line_mode == true
-    assert Buffer.get_local(buf, "group") == buf
+    # writing-mode is presentation only: the panes and the group belong to
+    # writing-layout, which M-x write turns on
+    tree = Editor.render_state().tree
+    leaf = if tree.type == :leaf, do: tree, else: Enum.find(tree.children, &(&1.buffer == buf))
+    assert leaf.visual_line_mode == true
+    refute Buffer.get_local(buf, "group")
     style = Buffer.get_local(buf, "style")
     assert style =~ "--default-family:Spectral, Georgia, serif;"
     assert style =~ "--writing-measure:62ch;"
@@ -111,7 +115,7 @@ defmodule Aimax.WritingTest do
 
   test "word count live-updates as you type" do
     buf = fresh_buffer("wr-live-#{System.unique_integer([:positive])}", "")
-    eval!(~s{(run-command "writing-mode")})
+    eval!(~s{(run-command "write")})
     assert Buffer.get_local(buf, "modeline-info") == "0 words"
 
     type("hello brave new world")
@@ -124,7 +128,7 @@ defmodule Aimax.WritingTest do
 
   test "Shift-left and Shift-right extend the region instead of changing buffers" do
     buf = fresh_buffer("wr-select-#{System.unique_integer([:positive])}.md", "abc")
-    eval!(~s{(run-command "writing-mode")})
+    eval!(~s{(run-command "write")})
     eval!("(end-of-buffer!)")
 
     press(["S-<left>", "S-<left>"])
@@ -140,7 +144,7 @@ defmodule Aimax.WritingTest do
 
   test "Alt-arrows move by word and Alt-Shift-arrows select by word" do
     buf = fresh_buffer("wr-word-#{System.unique_integer([:positive])}.md", "one two three")
-    eval!(~s{(run-command "writing-mode")})
+    eval!(~s{(run-command "write")})
     eval!("(end-of-buffer!)")
 
     press(["M-<left>"])
@@ -165,7 +169,7 @@ defmodule Aimax.WritingTest do
         "alpha beta\ngamma delta"
       )
 
-    eval!(~s{(run-command "writing-mode")})
+    eval!(~s{(run-command "write")})
 
     Buffer.goto(buf, 16)
     press(["s-S-<left>"])
@@ -195,6 +199,7 @@ defmodule Aimax.WritingTest do
     org_style = Buffer.get_local(buf, "style")
     assert org_style =~ "--default-size:14.5px;"
 
+    # writing-mode toggles the look; write only ever enters the workspace
     eval!(~s{(run-command "writing-mode")})
     assert Buffer.get_local(buf, "style") =~ "--default-size:17px;"
 
@@ -223,10 +228,10 @@ defmodule Aimax.WritingTest do
       if Buffer.exists?(scratch), do: Aimax.Core.kill_buffer(scratch)
     end)
 
-    eval!(~s{(run-command "writing-mode")})
+    eval!(~s{(run-command "write")})
 
     assert Editor.current_buffer() == buf
-    assert length(Editor.list_windows()) == 2
+    assert length(Editor.list_windows()) == 3
     assert Enum.any?(Editor.list_windows(), fn {_id, name} -> name == buf end)
     assert Enum.any?(Editor.list_windows(), fn {_id, name} -> name == scratch end)
     assert Buffer.text(scratch) == "# Scratch — #{Path.basename(buf)}\n\n"
@@ -248,11 +253,11 @@ defmodule Aimax.WritingTest do
     # C-c s is navigation once Writing Mode has established the workspace.
     press(["C-c", "s"])
     assert Editor.current_buffer() == scratch
-    assert length(Editor.list_windows()) == 2
+    assert length(Editor.list_windows()) == 3
 
     press(["C-c", "s"])
     assert Editor.current_buffer() == buf
-    assert length(Editor.list_windows()) == 2
+    assert length(Editor.list_windows()) == 3
   end
 
   test "writing mode reduces a three-window frame to the document and its scratch" do
@@ -277,11 +282,12 @@ defmodule Aimax.WritingTest do
     eval!(~s{(select-window! (window-showing "#{buf}"))})
     assert length(Editor.list_windows()) == 3
 
-    eval!(~s{(run-command "writing-mode")})
+    eval!(~s{(run-command "write")})
 
+    # the workspace is three panes: the document, its scratch, its chat
     windows = Editor.list_windows()
-    assert length(windows) == 2
-    assert Enum.map(windows, fn {_id, name} -> name end) == [buf, scratch]
+    assert length(windows) == 3
+    assert Enum.take(Enum.map(windows, fn {_id, name} -> name end), 2) == [buf, scratch]
     assert Editor.current_buffer() == buf
   end
 
@@ -297,7 +303,7 @@ defmodule Aimax.WritingTest do
     # an API-lane model id names the same model Codex spells without the
     # provider prefix: the session opens on Codex, under the name Codex knows
     eval!(~s{(customize-set! 'writing-model "openai:gpt-5.6-luna")})
-    eval!(~s{(run-command "writing-mode")})
+    eval!(~s{(run-command "write")})
 
     assert eval!(~s{(buffer-llm-connector "#{scratch}")}) == ~s("codex-app-server")
 
@@ -310,7 +316,8 @@ defmodule Aimax.WritingTest do
   end
 
   test "a mode's layout declaration is what the engine applies" do
-    assert eval!(~s{(mode-layout "writing-mode")}) == "(h 0.62 self scratch-buffer)"
+    assert eval!(~s{(mode-layout "writing-layout")}) ==
+             "(h 0.34 self scratch-buffer writing-chat-buffer)"
   end
 
   test "writing LLM configuration lands on the scratch only" do
@@ -319,7 +326,7 @@ defmodule Aimax.WritingTest do
     on_exit(fn -> eval!(~s{(customize-set! 'writing-model "")}) end)
 
     eval!(~s{(customize-set! 'writing-model "openai:test-writer")})
-    eval!(~s{(run-command "writing-mode")})
+    eval!(~s{(run-command "write")})
     assert Buffer.get_local(buf, "writing-model") == "openai:test-writer"
     assert Buffer.get_local(buf, "writing-instructions") =~ "Preserve their voice"
     refute "llm-mode" in Buffer.get_local(buf, "minor-modes")
@@ -336,7 +343,7 @@ defmodule Aimax.WritingTest do
 
     eval!(~s{(buffer-set-local! "#{buf}" 'chat-presets '(project aimax))})
     eval!("(set! writing-presets '(aimax web))")
-    eval!(~s{(run-command "writing-mode")})
+    eval!(~s{(run-command "write")})
 
     assert Buffer.get_local(scratch, "chat-presets") == [sym: "aimax", sym: "web", sym: "project"]
 
@@ -350,7 +357,7 @@ defmodule Aimax.WritingTest do
              sym: "project"
            ]
 
-    eval!(~s{(run-command "writing-mode")})
+    eval!(~s{(run-command "write")})
     assert Buffer.get_local(buf, "chat-presets") == [sym: "project", sym: "aimax"]
   end
 
@@ -362,7 +369,7 @@ defmodule Aimax.WritingTest do
       if Buffer.exists?(companion), do: Aimax.Core.kill_buffer(companion)
     end)
 
-    eval!(~s{(run-command "writing-mode")})
+    eval!(~s{(run-command "write")})
     press(["C-c", "w"])
 
     assert Editor.current_buffer() == companion
@@ -373,19 +380,19 @@ defmodule Aimax.WritingTest do
 
   test "customizing the measure repaints live writing buffers" do
     buf = fresh_buffer("wr-cust-#{System.unique_integer([:positive])}", "words here\n")
-    eval!(~s{(run-command "writing-mode")})
+    eval!(~s{(run-command "write")})
     assert Buffer.get_local(buf, "style") =~ "--writing-measure:62ch;"
 
     eval!(~s{(customize-set! 'writing-measure "44ch")})
     assert Buffer.get_local(buf, "style") =~ "--writing-measure:44ch;"
 
     eval!(~s{(customize-set! 'writing-measure "62ch")})
-    eval!(~s{(run-command "writing-mode")})
+    eval!(~s{(run-command "write")})
   end
 
   test "restore-minor-modes! re-runs setup idempotently (reload path)" do
     buf = fresh_buffer("wr-restore-#{System.unique_integer([:positive])}", "some prose\n")
-    eval!(~s{(run-command "writing-mode")})
+    eval!(~s{(run-command "write")})
 
     eval!(~s{(restore-minor-modes! "#{buf}")})
 

@@ -137,7 +137,10 @@ defmodule Aimax.CodeModeTest do
     buf = fresh_buffer("cm-instr-#{System.unique_integer([:positive])}.ex", "code\n")
 
     plain = eval!(~s{(chat-preamble-body "#{buf}" (list "#{buf}"))})
-    refute plain =~ "code-outline"
+    # the shared edit protocol names the structural readers for any buffer;
+    # what code-mode adds is the coding voice and its own instructions
+    refute plain =~ "coding companion"
+    refute plain =~ "browser category is denied"
     assert plain =~ "writing companion"
 
     eval!(~s{(run-command "code-mode")})
@@ -159,7 +162,8 @@ defmodule Aimax.CodeModeTest do
     eval!("(define zz-code-instructions code-instructions)")
     on_exit(fn -> eval!("(customize-set! 'code-instructions zz-code-instructions)") end)
     eval!(~s{(customize-set! 'code-instructions "")})
-    refute eval!(~s{(llm-mode--group-note "#{buf}")}) =~ "code-outline"
+    # the shared edit protocol stays; the code instructions are the user's
+    refute eval!(~s{(llm-mode--group-note "#{buf}")}) =~ "buffer-insert-after!"
   end
 
   test "code-mode denies browser tools until the user enables browser-mode" do

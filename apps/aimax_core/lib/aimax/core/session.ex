@@ -82,8 +82,29 @@ defmodule Aimax.Core.Session do
 
   @doc "Apply a Scheme closure (e.g. a minibuffer confirm callback)."
   def apply_callback(closure, args, fid \\ nil, lane \\ nil) do
-    fid = fid(fid)
-    Lane.run(lane || :ui, fn _from -> exec_apply(closure, args, fid) end, 30_000, "apply")
+    apply_callback_retry(closure, args, fid(fid), lane, 20)
+  end
+
+  # A closure that escaped mid-eval can reach us before its frame reaches the
+  # shared store, and the apply then fails with "stale environment frame"
+  # (env.ex). That ref heals when the originating eval exits, so wait for it:
+  # dropping the call loses an async reply outright — a chat naming itself, a
+  # browser answer, an LLM completion. Backend.call_context waits the same way.
+  defp apply_callback_retry(closure, args, fid, lane, retries) do
+    result = Lane.run(lane || :ui, fn _from -> exec_apply(closure, args, fid) end, 30_000, "apply")
+
+    case result do
+      {:error, msg} when retries > 0 ->
+        if is_binary(msg) and msg =~ "stale environment frame" do
+          Process.sleep(50)
+          apply_callback_retry(closure, args, fid, lane, retries - 1)
+        else
+          result
+        end
+
+      _ ->
+        result
+    end
   end
 
   @doc """

@@ -1,6 +1,6 @@
 ---
 name: aimax-restart
-description: Restart the ai-max daemon, or hot-reload Scheme into it without a restart. Use whenever a change must reach the running editor — after editing priv/*.scm or any Elixir source, when the daemon is wedged or not answering, or before verifying behaviour in the real editor.
+description: Restart the ai-max daemon, or hot-reload Scheme into it without a restart. Use whenever a change must reach the running editor: after editing priv/*.scm or any Elixir source, when the daemon is wedged or not answering, or before verifying behaviour in the real editor.
 ---
 
 # Getting a change into the running daemon
@@ -81,7 +81,7 @@ time mix run --no-start -e ':ok'    # ~0.5s: mix overhead alone
 ```
 
 If those are fast and boot is not, the cost is inside application start. Time the
-supervision children directly rather than guessing — start `:aimax_scheme`, then
+supervision children directly rather than guessing. Start `:aimax_scheme`, then
 add `Aimax.Core.Application`'s children one at a time under your own supervisor
 with `:timer.tc`, pointing `AIMAX_HOME` at a scratch copy of the real home:
 

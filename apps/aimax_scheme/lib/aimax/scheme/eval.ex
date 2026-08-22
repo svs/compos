@@ -25,7 +25,12 @@ defmodule Aimax.Scheme.Eval do
       when is_number(expr) or is_binary(expr) or is_boolean(expr),
       do: {expr, store}
 
+  def eval({:char, _} = ch, _env, store), do: {ch, store}
+
   def eval([{:sym, "quote"}, form], _env, store), do: {form, store}
+
+  # `(a ,b ,@c) — the template is data, and unquote evaluates one hole in it
+  def eval([{:sym, "quasiquote"}, template], env, store), do: quasi(template, 1, env, store)
 
   def eval([{:sym, "if"}, c, t], env, store), do: eval([{:sym, "if"}, c, t, :void], env, store)
 
@@ -111,10 +116,15 @@ defmodule Aimax.Scheme.Eval do
   end
 
   # application
-  def eval([op | arg_forms], env, store) do
+  def eval([op | arg_forms], env, store) when is_list(arg_forms) do
     {f, store} = eval_arg(op, env, store)
     {args, store} = eval_args(arg_forms, env, store, [])
     apply_fn(f, args, store)
+  end
+
+  # (f . x) — a dotted pair is data, and nothing applies it
+  def eval([_ | _] = improper, _env, _store) do
+    raise Error, message: "cannot call a dotted pair: #{Aimax.Scheme.Printer.print(improper)}"
   end
 
   def eval(other, _env, _store) do
@@ -150,7 +160,14 @@ defmodule Aimax.Scheme.Eval do
     e in Error ->
       reraise e, __STACKTRACE__
 
-    e in [ArgumentError, FunctionClauseError, MatchError, CaseClauseError, ArithmeticError, KeyError] ->
+    e in [
+      ArgumentError,
+      FunctionClauseError,
+      MatchError,
+      CaseClauseError,
+      ArithmeticError,
+      KeyError
+    ] ->
       reraise Error,
               [message: "#{name}: #{Exception.message(e)}"],
               __STACKTRACE__
@@ -158,6 +175,60 @@ defmodule Aimax.Scheme.Eval do
 
   def apply_fn(other, _args, _store) do
     raise Error, message: "not a function: #{inspect(other)}"
+  end
+
+  # --- quasiquote ------------------------------------------------------------
+  #
+  # DEPTH counts the nesting: a nested quasiquote raises it, an unquote lowers
+  # it, and only an unquote at depth 1 evaluates. Anything else rebuilds as
+  # data, so `(a `(b ,(c))) keeps its inner template intact.
+
+  defp quasi([{:sym, "unquote"}, form], 1, env, store), do: eval_arg(form, env, store)
+
+  defp quasi([{:sym, "unquote"}, form], depth, env, store) do
+    {inner, store} = quasi(form, depth - 1, env, store)
+    {[{:sym, "unquote"}, inner], store}
+  end
+
+  defp quasi([{:sym, "quasiquote"}, form], depth, env, store) do
+    {inner, store} = quasi(form, depth + 1, env, store)
+    {[{:sym, "quasiquote"}, inner], store}
+  end
+
+  defp quasi(list, depth, env, store) when is_list(list),
+    do: quasi_list(list, depth, env, store, [])
+
+  defp quasi(other, _depth, _env, store), do: {other, store}
+
+  defp quasi_list([], _depth, _env, store, acc), do: {Enum.reverse(acc), store}
+
+  # `(1 . ,x) reads as (1 unquote x): an unquote in the tail is the dotted tail
+  defp quasi_list([{:sym, "unquote"}, form], 1, env, store, acc) do
+    {tail, store} = eval_arg(form, env, store)
+    {List.foldl(acc, tail, fn x, t -> [x | t] end), store}
+  end
+
+  defp quasi_list([[{:sym, "unquote-splicing"}, form] | rest], 1, env, store, acc) do
+    {spliced, store} = eval_arg(form, env, store)
+
+    unless is_list(spliced) do
+      raise Error,
+        message: "unquote-splicing needs a list, got: #{Aimax.Scheme.Printer.print(spliced)}"
+    end
+
+    quasi_list(rest, 1, env, store, Enum.reverse(spliced, acc))
+  end
+
+  # (a . ,b) — the dotted tail is one more template
+  defp quasi_list([head | tail], depth, env, store, acc) when not is_list(tail) do
+    {head, store} = quasi(head, depth, env, store)
+    {tail, store} = quasi(tail, depth, env, store)
+    {List.foldl([head | acc], tail, fn x, t -> [x | t] end), store}
+  end
+
+  defp quasi_list([head | rest], depth, env, store, acc) do
+    {head, store} = quasi(head, depth, env, store)
+    quasi_list(rest, depth, env, store, [head | acc])
   end
 
   # --- helpers ---------------------------------------------------------------
@@ -243,7 +314,9 @@ defmodule Aimax.Scheme.Eval do
   defp parse_optionals!([name | more], opt), do: parse_optionals!(more, [name | opt])
 
   defp rest_name!([name]) when name not in ["&optional", "&rest"], do: name
-  defp rest_name!(other), do: raise(Error, message: "&rest takes exactly one name, got: #{inspect(other)}")
+
+  defp rest_name!(other),
+    do: raise(Error, message: "&rest takes exactly one name, got: #{inspect(other)}")
 
   defp bind_params!(req, opt, rest, args) do
     nreq = length(req)

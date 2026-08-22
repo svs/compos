@@ -66,9 +66,22 @@
               (set! *group-records* (append *group-records* (list record)))
               id)))))
 
+;; group-new-id! writes this prefix, so a string that carries it is an id
+;; and never a name a person chose.
+(define (group-id-string? value)
+  (and (string? value) (string-prefix? "grp:" value)))
+
+;; An id that answers no record is a dangling reference, not a new name.
+;; Every membership is an id now, and a buffer can hold one whose record
+;; is gone — a restart restores the buffer locals, and the records ride a
+;; different lane. Founding a group from it puts "grp:1787432485:1" in the
+;; C-c g list and on the reader's screen. buffer-group-ids already drops
+;; such an id on read; the write path must refuse it the same way.
 (define (group-ensure-record! value)
   (or (group-resolve-id value)
-      (and (string? value) (group-record-create! value))))
+      (and (string? value)
+           (not (group-id-string? value))
+           (group-record-create! value))))
 
 (define (group-record-update! value field new-value)
   (let ((id (group-resolve-id value)))

@@ -122,6 +122,23 @@ defmodule Aimax.GroupSwitchCommandTest do
     assert result == "(#t 1 1 0)"
   end
 
+  test "a dangling id founds no group and never becomes a name", %{first: work} do
+    # A restart brings the buffer locals back before the records. The
+    # buffer then names a group nobody can resolve, and that id must not
+    # found a group called after itself: the C-c g list shows names.
+    result =
+      eval!("""
+      (list (group-ensure-record! "grp:9999:1")
+            (buffer-add-group! "#{work}" "grp:9999:1")
+            (length (group-ids))
+            (if (group-ensure-record! "a chosen name") #t #f)
+            (length (group-names)))
+      """)
+
+    assert result == "(#f #f 0 #t 1)"
+    assert eval!("(group-names)") == ~s{("a chosen name")}
+  end
+
   test "empty group records remain durable" do
     id = group_id("empty")
 

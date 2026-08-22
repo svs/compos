@@ -82,6 +82,23 @@
                          " does not contain " (value->string needle)))
         #f)))
 
+;; The harness must be able to fail. A check that recorded nothing, or a
+;; run-test that always answered (), would let every test below pass
+;; while proving nothing — and the bridge could not tell the difference.
+;; This runs one assertion that must fail and one that must pass, and
+;; answers what it recorded. Elixir asserts the shape, so the proof that
+;; Scheme can report a failure does not itself rest on Scheme.
+(define (test-self-check)
+  (let ((saved *test-failures*))
+    (set! *test-failures* '())
+    (check-equal! 1 2 "canary-must-fail")
+    (check-equal! 1 1 "canary-must-pass")
+    (check-true! #f "canary-true-must-fail")
+    (check-false! #t "canary-false-must-fail")
+    (let ((out *test-failures*))
+      (set! *test-failures* saved)
+      out)))
+
 (effects! '(read))
 
 (define (test-names) (map car *tests*))
@@ -159,6 +176,8 @@
   "(check-contains! HAYSTACK NEEDLE LABEL) — record a failure unless HAYSTACK holds NEEDLE")
 (public! 'test-names "(test-names) — every registered test name")
 (public! 'run-test "(run-test 'name) — run one test; () means it passed")
+(public! 'test-self-check
+  "(test-self-check) — prove the checks can fail; answers the failures three bad assertions record")
 (public! 'load-tests! "(load-tests!) — load every .scm under priv/tests; answers the test count")
 
 (message "test.scm loaded")

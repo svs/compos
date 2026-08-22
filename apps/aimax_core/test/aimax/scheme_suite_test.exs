@@ -27,6 +27,18 @@ defmodule Aimax.SchemeSuiteTest do
     |> String.split(" ", trim: true)
   end
 
+  # Before trusting a green suite, prove the harness can go red. Three bad
+  # assertions must record, one good one must not. Without this a broken
+  # check- function reads exactly like a passing suite.
+  test "the harness can fail" do
+    out = eval!("(test-self-check)")
+
+    assert out =~ "canary-must-fail", "check-equal! recorded no failure"
+    assert out =~ "canary-true-must-fail", "check-true! recorded no failure"
+    assert out =~ "canary-false-must-fail", "check-false! recorded no failure"
+    refute out =~ "canary-must-pass", "a passing check recorded a failure"
+  end
+
   test "the Scheme suite passes" do
     found = names()
 

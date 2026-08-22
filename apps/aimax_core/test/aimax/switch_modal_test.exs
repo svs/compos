@@ -1,10 +1,15 @@
 defmodule Aimax.SwitchModalTest do
   @moduledoc """
-  The merged switcher: C-x b opens ONE modal list buffer. Typing narrows
-  (filter is the default act); C- chords act on rows — RET visits, C-k
-  kills, C-SPC marks, C-t groups, C-g shows groups, ESC quits. The
-  highlight previews into the window you came from, and dormant rows
-  stay killable and visitable.
+  The merged switcher: ONE modal list buffer. Typing narrows (filter is
+  the default act); C- chords act on rows — RET visits, C-k kills, C-SPC
+  marks, C-t groups, C-g shows groups, ESC quits. The highlight previews
+  into the window you came from, and dormant rows stay killable and
+  visitable.
+
+  C-x b no longer opens it: groups.scm binds that key to the minibuffer
+  prompt group-switch-to-buffer, which lists the current group's members
+  first. The modal switcher answers to M-x switch-to-buffer and to C-x G
+  for the groups view, so these tests run the command.
   """
 
   use ExUnit.Case
@@ -33,7 +38,7 @@ defmodule Aimax.SwitchModalTest do
 
   defp home_shows(home), do: Enum.find_value(windows(), fn {id, b} -> if id == home, do: b end)
 
-  # four buffers, the third one current, then C-x b
+  # four buffers, the third one current, then the modal switcher
   defp open_switcher do
     {:ok, _} =
       Session.eval(~s{(begin
@@ -46,7 +51,7 @@ defmodule Aimax.SwitchModalTest do
         #t)})
 
     home = Enum.find_value(windows(), fn {id, b} -> if b == "*zz-mc*", do: id end)
-    press(["C-x", "b"])
+    {:ok, _} = Session.eval(~s[(run-command "switch-to-buffer")])
     home
   end
 
@@ -194,7 +199,7 @@ defmodule Aimax.SwitchModalTest do
     type("zzg-set")
     press(["RET"])
 
-    assert eval!(~s{(buffer-group "*zz-ma*")}) == ~s{"zzg-set"}
+    assert eval!(~s{(group-name (buffer-group "*zz-ma*"))}) == ~s{"zzg-set"}
     press(["ESC"])
   end
 
@@ -231,7 +236,7 @@ defmodule Aimax.SwitchModalTest do
     press(["RET"])
 
     # the group came up, and the second step is open: card first, rows after
-    assert eval!("(frame-local 'current-group)") == ~s{"zzg-card"}
+    assert eval!("(group-name (frame-local 'current-group))") == ~s{"zzg-card"}
     assert Editor.current_buffer() == @switch
     assert eval!(~s{(buffer-local "#{@switch}" 'switch-view)}) == ~s{(locked "zzg-card")}
     assert eval!(~s{(map car (list-entries "#{@switch}"))}) =~ "zz-ma"
@@ -251,7 +256,7 @@ defmodule Aimax.SwitchModalTest do
         (delete-other-windows!)
         #t)})
 
-    press(["C-x", "G"])
+    {:ok, _} = Session.eval(~s[(run-command "switch-groups")])
     assert Editor.current_buffer() == @switch
     assert eval!(~s{(buffer-local "#{@switch}" 'switch-view)}) == "groups"
 
@@ -259,7 +264,7 @@ defmodule Aimax.SwitchModalTest do
     press(["RET"])
 
     # the group came up, and the switcher reopened locked to its buffers
-    assert eval!("(frame-local 'current-group)") == ~s{"zzg-pick"}
+    assert eval!("(group-name (frame-local 'current-group))") == ~s{"zzg-pick"}
     assert Editor.current_buffer() == @switch
     entries = eval!(~s{(map car (list-entries "#{@switch}"))})
     assert entries =~ "zz-m"
@@ -306,7 +311,7 @@ defmodule Aimax.SwitchModalTest do
     type("notes")
     press(["RET"])
     assert Editor.current_buffer() == Path.join(root, "notes.txt")
-    assert eval!(~s{(buffer-group "#{root}/notes.txt")}) == ~s{"#{root}"}
+    assert eval!(~s{(group-name (buffer-group "#{root}/notes.txt"))}) == ~s{"#{root}"}
   end
 
   test "the chrome chord table serves the minibuffer prompt, not the modal buffer" do

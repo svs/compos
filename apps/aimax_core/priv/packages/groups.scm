@@ -374,19 +374,23 @@
       (buffer-add-group! b new-id)
       (buffer-remove-group! b old-id))))
 
-;; the group column in a buffer prompt. A group founded by a file
-;; buffer carries the full path as its name; show the last segment.
-(define (group-label g)
-  (let ((name (group-name g)))
-    (if name
-        (car (reverse (string-split name "/")))
-        "")))
-
+;; the group column in a buffer prompt. A group founded by a file buffer
+;; carries the full path as its name; show the last segment.
+;;
 ;; Every prompt and message names a group the way a person named it. The
 ;; opaque ID belongs to the code and must never reach the screen. A caller
 ;; can hold an ID whose record is gone, so fall back to what it passed.
 (define (group-display-name g)
   (or (group-name g) (and (string? g) g) ""))
+
+;; The short name a card wears. A project root is not a group yet, so it
+;; keeps its own basename rather than going blank.
+(define (group-label g)
+  (let ((name (group-display-name g)))
+    (if (equal? name "")
+        ""
+        (car (reverse (string-split name "/"))))))
+
 
 ;; a group's metadata lives on its chat buffer: the chat is the group's
 ;; durable surface, so 'group-meta rides chat-identity-locals and
@@ -1358,8 +1362,12 @@
           (map car (list-targets buf))
           (list buf)))))
 
+;; The prompt takes a typed name as well as a listed one, and a name it
+;; does not know is a group to found — the same answer the "New group"
+;; row gives. group-ensure-record! still refuses an id, so a dangling
+;; membership cannot found a group named after itself.
 (define (group-push-buffers-to! buffers destination)
-  (let ((id (group-resolve-id destination))
+  (let ((id (group-ensure-record! destination))
         (changed 0)
         (skipped 0))
     (if (not id)

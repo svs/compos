@@ -143,21 +143,51 @@ defmodule Aimax.SwitchTest do
     press(["C-g"])
 
     assert_receive {:transport_open, codex, cmd}, 1_000
-    assert cmd =~ "codex-acp"
-    np = handshake(codex, "sess-codex")
+    # the codex connector is the native App Server now, not the ACP bridge
+    assert cmd =~ "codex app-server"
 
-    # presets came along: the new session gets their servers
-    names = Enum.map(np["mcpServers"] || [], & &1["name"])
-    assert names == ["zz-sw"]
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+    inject(codex, %{"jsonrpc" => "2.0", "id" => iid, "result" => %{}})
 
     # the conversation carried over: the first prompt seeds it
     focus(buf)
     type("still there?")
     press(["RET"])
-    sent = reply_turn(codex, "sess-codex", "codex says hi")
+
+    assert_receive {:frame,
+                    %{
+                      "method" => "thread/start",
+                      "id" => thread_id,
+                      "params" => %{"config" => %{"mcp_servers" => mcp_servers}}
+                    }},
+                   2_000
+
+    # presets came along: the new thread gets their servers, beside the
+    # intrinsic aimax bridge every chat carries
+    assert Enum.sort(Map.keys(mcp_servers)) == ["aimax", "zz-sw"]
+
+    inject(codex, %{
+      "id" => thread_id,
+      "result" => %{"thread" => %{"id" => "sess-codex"}, "model" => "gpt-5.6-sol"}
+    })
+
+    assert_receive {:frame, %{"method" => "turn/start", "id" => turn_id, "params" => turn}}, 2_000
+    sent = Jason.encode!(turn["input"])
     assert sent =~ "hello there"
     assert sent =~ "api says hi"
     assert sent =~ "still there?"
+
+    inject(codex, %{"id" => turn_id, "result" => %{"turn" => %{"id" => "turn-1"}}})
+
+    inject(codex, %{
+      "method" => "item/agentMessage/delta",
+      "params" => %{"itemId" => "msg-1", "delta" => "codex says hi"}
+    })
+
+    inject(codex, %{
+      "method" => "turn/completed",
+      "params" => %{"turnId" => "turn-1"}
+    })
 
     assert eventually(fn -> Buffer.text(buf) =~ "codex says hi" end)
     assert Buffer.get_local(buf, "modeline-info") =~ "codex"

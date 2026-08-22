@@ -150,15 +150,18 @@ defmodule Aimax.MCPTest do
       # first pull triggers the lazy connect; specs appear once ready
       eval!(~s{(chat-extra-tool-specs "*zz-mcp-chat*")})
 
+      # the intrinsic aimax bridge rides every chat, so count this server's
+      # tools rather than the whole list
       wait_until(fn ->
-        eval!(~s{(length (chat-extra-tool-specs "*zz-mcp-chat*"))}) == "1"
+        eval!(~s{(length (filter (lambda (s) (string-prefix? "mcp__zzfake__" (car s)))
+                                (chat-extra-tool-specs "*zz-mcp-chat*")))}) == "1"
       end)
 
-      assert eval!(~s{(car (car (chat-extra-tool-specs "*zz-mcp-chat*")))}) =~ "mcp__zzfake__echo"
+      assert eval!(~s{(chat-extra-tool-specs "*zz-mcp-chat*")}) =~ "mcp__zzfake__echo"
 
-      # a chat with no presets adds nothing
-      assert eval!(~s{(begin (buffer-set-local! "*zz-mcp-chat*" 'chat-presets '())
-                             (chat-extra-tool-specs "*zz-mcp-chat*"))}) == "()"
+      # dropping the preset drops its tools; the aimax bridge stays
+      refute eval!(~s{(begin (buffer-set-local! "*zz-mcp-chat*" 'chat-presets '())
+                             (chat-extra-tool-specs "*zz-mcp-chat*"))}) =~ "mcp__zzfake__"
     end
 
     test "chat-tool-list groups the model's tools under the server that serves them" do

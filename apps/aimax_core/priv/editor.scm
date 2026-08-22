@@ -565,8 +565,12 @@
 ;; drop the typed query and keep the mode's own kinds (dired's dotfiles).
 ;; No refresh: the caller is opening the list and draws it next.
 (define (list-clear-query! buf)
-  (buffer-set-local! buf 'list-filters
-    (filter (lambda (f) (not (equal? (car f) "match"))) (list-filters buf))))
+  (let* ((fs (list-filters buf))
+         (rest (filter (lambda (f) (not (equal? (car f) "match"))) fs)))
+    (buffer-set-local! buf 'list-filters rest)
+    ;; #t when a query was really there: the caller must then draw from
+    ;; the source, because the cached rows ARE the narrowed ones.
+    (not (equal? (length fs) (length rest)))))
 
 (define (list-filter-pop! buf)
   (let ((fs (list-filters buf)))
@@ -1281,18 +1285,19 @@
 ;; buffer. The mode setup calls it with (current-buffer); opening a list
 ;; calls it with the buffer it just made, so neither has to select first.
 (define (list-mode-init! buf name)
-  (let ((opts (list-mode-opts name)))
+  (let* ((opts (list-mode-opts name))
+         ;; A list opens WIDE. The typed narrowing answers a question you
+         ;; asked THIS time; a local persists, so C-x C-b days later opened
+         ;; on a three-row list narrowed by a word you no longer remember
+         ;; typing. The mode's own kinds (dired's dotfiles) are a setting,
+         ;; and stay.
+         (widened? (list-clear-query! buf)))
     (buffer-set-local! buf 'list-mode name)
     ;; derived content (S15): the refresh below re-renders it from
     ;; rows-fn, so the desktop saves mode + locals, not the rows
     (buffer-set-local! buf 'transient #t)
     ;; the stamp names the rows of one render — a restart draws new ones
     (desktop-skip! buf 'list-stamp)
-    ;; A list opens WIDE. The typed narrowing answers a question you asked
-    ;; THIS time; a local persists, so C-x C-b days later opened on a
-    ;; three-row list narrowed by a word you no longer remember typing.
-    ;; The mode's own kinds (dired's dotfiles) are a setting, and stay.
-    (list-clear-query! buf)
     ;; a list buffer's text IS its view. A buffer keeps the locals of the
     ;; mode before it, so dired on a directory that once held a diff kept
     ;; 'render-mode "blocks" and the window drew no rows at all.
@@ -1326,7 +1331,10 @@
     ;; from the network (sentry) froze the UI for the round trip — then
     ;; went back to sleep. 'cached renders the rows already in the buffer
     ;; and reaches the source only when there are none; `g` refetches.
-    (list-render! buf 'cached)
+    ;; A clear that dropped a query reaches the source instead: the cached
+    ;; rows are the narrowed ones, so reusing them would show the narrowing
+    ;; this open just removed.
+    (list-render! buf (if widened? #f 'cached))
     ;; the rewrite leaves the buffer's point after the key bar — a list
     ;; opens with point on the first row
     (list-goto-index! buf 0)

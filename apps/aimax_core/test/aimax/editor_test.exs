@@ -839,7 +839,10 @@ defmodule Aimax.EditorTest do
 
     assert_receive {:llm_prompt, req}
     assert req.model == "openai:test-writer"
-    assert req.tools == []
+    # the editor bridge rides every LLM surface (mcp.scm chat-presets-of),
+    # so an inline completion holds the same tools a chat does
+    assert "act" in Enum.map(req.tools, & &1.name)
+    assert "eval-scheme" in Enum.map(req.tools, & &1.name)
     assert [%{content: "The complete document is context."}] = req.messages
     assert "llm-mode" in Buffer.get_local(buf, "minor-modes")
 
@@ -1324,7 +1327,7 @@ defmodule Aimax.EditorTest do
     press(["C-x", "C-f"])
     type(path)
     press(["RET"])
-    press(["C-c", "C-v"])
+    # a visited Morg file opens in writing-mode with the preview on
     assert Buffer.get_local(path, "render-mode") == "markdown"
     {:ok, _} = Aimax.Core.Session.eval(~s{(set-mode! "rust-mode")})
     assert Buffer.get_local(path, "ts-lang") == "rust"
@@ -3368,7 +3371,7 @@ defmodule Aimax.MinibufferEditingTest do
     press(["C-x", "C-f"])
     type(path)
     press(["RET"])
-    press(["C-c", "C-v"])
+    # a visited Morg file opens in writing-mode with the preview on
     assert Buffer.get_local(path, "render-mode") == "markdown"
 
     Buffer.goto(path, 0)

@@ -78,17 +78,59 @@ defmodule Aimax.BufferLogTest do
     assert log_text() =~ "user"
   end
 
+  test "the list shows the text a change inserted", %{name: name} do
+    :ok = Buffer.insert_at(name, 4, " and cheese", source: :user)
+    eval!(~s{(switch-to-buffer! "#{name}")})
+    press(["C-x", "v", "l"])
+
+    assert log_text() =~ "and cheese"
+  end
+
+  test "a deletion reads as the text it removed", %{name: name} do
+    :ok = Buffer.delete_range(name, 0, 4, source: :user)
+    eval!(~s{(switch-to-buffer! "#{name}")})
+    press(["C-x", "v", "l"])
+
+    assert log_text() =~ "-base"
+  end
+
+  test "a newline in the text does not break the row", %{name: name} do
+    :ok = Buffer.insert_at(name, 4, "\nsecond line", source: :user)
+    eval!(~s{(switch-to-buffer! "#{name}")})
+    press(["C-x", "v", "l"])
+
+    assert log_text() =~ "\\nsecond line"
+  end
+
+  test "RET opens the whole revision with every operation and its text", %{name: name} do
+    :ok = Buffer.insert_at(name, 4, "!", source: {:agent, "run-7"})
+    eval!(~s{(switch-to-buffer! "#{name}")})
+    press(["C-x", "v", "l"])
+    on_exit(fn -> Aimax.Core.kill_buffer("*revision*") end)
+
+    # the agent revision is the last row
+    eval!(~s{(list-goto-index! "*buffer-log*" 1)})
+    press("RET")
+
+    text = Buffer.text("*revision*")
+    assert text =~ "actor    agent:run-7"
+    assert text =~ "@4"
+    assert text =~ "+ !"
+    assert text =~ "hash     "
+  end
+
   test "RET describes the revision on the line", %{name: name} do
     :ok = Buffer.insert_at(name, 4, "!", source: {:agent, "run-7"})
     eval!(~s{(switch-to-buffer! "#{name}")})
     press(["C-x", "v", "l"])
 
     press("RET")
-    echo = Editor.snapshot().echo
+    on_exit(fn -> Aimax.Core.kill_buffer("*revision*") end)
 
-    assert echo =~ "root"
-    assert echo =~ "actor system:buffer"
-    assert echo =~ "system"
+    text = Buffer.text("*revision*")
+    assert text =~ "root"
+    assert text =~ "actor    system:buffer"
+    assert text =~ "system"
   end
 
   test "a buffer with no history says so rather than raising" do

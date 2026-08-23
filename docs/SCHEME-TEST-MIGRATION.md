@@ -148,10 +148,17 @@ worked in the commit message. Run it.
 
 Finish with `bin/test-fast` in a worktree at HEAD, not in this tree:
 another session edits it, and its uncommitted work adds failures that are
-not yours. A clean worktree answers 38-40. The count moves between runs —
-a good part of this suite is timing flake — so diff the failure NAMES
-against a baseline run instead of trusting the number, and check whether
-any name sits in a file you touched.
+not yours. A clean worktree answers 38-42: four runs across two commits
+gave 38, 39, 40 and 42. The count moves between runs, and so do the
+names, so diff the failure NAMES against a baseline instead of trusting
+the number, and check whether any name sits in a file you touched.
+
+A name that sits in a file you touched is not yet yours. Run that file
+alone across three seeds, then run it beside the Scheme suite, then run
+the PRE-CHANGE commit twice. `pull adds the current group without
+switching context` failed twice at HEAD and in neither of the two runs
+before the change, which looked conclusive; it then failed at the
+pre-change commit as well. Two runs is not a baseline.
 
 ## State at handoff
 

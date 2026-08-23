@@ -234,10 +234,14 @@ Three limits decided every split:
 - ~~Scheme cannot wait for an answer.~~ **Fixed.** `(wait-until PRED
   &optional TIMEOUT-MS INTERVAL-MS)` polls and answers #t, or #f at the
   deadline. It blocks its lane, the way `mcp-call!` does, and caps itself
-  at 10s so a runaway predicate stays inside Lane's 30s timeout. Roughly
-  36 tests were blocked on this alone — `chrome` 5, `lsp_scheme` 5,
-  `lsp_conn` 4, `llm_tools` 3, `lsp_primitives` 3, `watch` 3 — and none of
-  them have been moved yet.
+  at 10s so a runaway predicate stays inside Lane's 30s timeout.
+
+  It unlocks about 11 tests, not the 36 first claimed here. That count
+  scanned each test BODY for a fixture path, and in the LSP, MCP and
+  watch files the fixture lives in the setup helper — those tests need
+  `wait-until` AND the fixture path AND a removable temp directory, so
+  waiting was never their binding constraint. **Read the helper, not only
+  the test.** None of the 11 have been moved yet.
 - **Helper names are global across test files.** load-tests! reads the
   directory in order, so a `(define (t--foo ...))` in two files takes the
   definition of whichever loaded last. Two morg files both defined
@@ -328,9 +332,16 @@ moving it as written would have deleted the person's groups on the first
 `M-x run-scheme-tests`. Read the setup before you read the assertions,
 and prefer a delta over a clean slate.
 
-Blocked on a seam, not on judgement. Three small additions unlock 28
-tests:
+Blocked on a seam, not on judgement:
 
+- **The fake servers are in the wrong tree.** `test/support/fake_lsp_server.exs`
+  and `fake_mcp_server.exs` are why 12-15 tests cannot move: `priv/tests`
+  must not reach into the Elixir test tree, and a release ships no
+  `test/`. Moving them under `priv/`, with `delete-directory!` beside
+  them for the temp project, is the largest single unlock left — bigger
+  than any primitive. `lsp_scheme_test` is the shape of it: five tests
+  that need `wait-until` AND the fixture path AND a directory they can
+  remove.
 - **`setenv`** unlocks `keys_test` (14). The whole key chain is Scheme
   behind it.
 - **`delete-directory!`** unlocks the four fixture tests still held in

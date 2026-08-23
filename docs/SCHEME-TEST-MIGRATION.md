@@ -155,7 +155,7 @@ any name sits in a file you touched.
 
 ## State at handoff
 
-Commit `79293c1`. Scheme suite: 146 tests, one red by design.
+Commit `afa6f11`. Scheme suite: 186 tests, one red by design.
 
 In Scheme:
 
@@ -164,7 +164,10 @@ In Scheme:
 | `graphql-test.scm` | 24 (moved) |
 | `apropos-test.scm` | 22 (moved) |
 | `code-structure-test.scm` | 13 (moved) |
+| `annotate-test.scm` | 12 (moved) |
+| `chat-rename-test.scm` | 12 (moved) |
 | `code-agent-mode-test.scm` | 11 (moved) |
+| `group-records-test.scm` | 11 (moved) |
 | `skills-test.scm` | 10 (moved) |
 | `groups-test.scm` | 9 |
 | `web-browse-test.scm` | 9 (moved) |
@@ -174,17 +177,19 @@ In Scheme:
 | `edit-semantics-test.scm` | 6 (moved) |
 | `permission-test.scm` | 6 (moved) |
 | `sentry-test.scm` | 6 (moved) |
+| `marginalia-test.scm` | 5 (moved) |
 | `imenu-test.scm` | 4 (moved) |
 | `buffer-cache-test.scm` | 3 (moved) |
 | `canary-test.scm` | 1, always red |
 
 ## What moved, and what could not
 
-111 tests moved. `graphql_test`, `imenu_test`, `buffer_cache_test`,
-`code_structure_test` and `chat_heal_test` are gone entirely.
-`apropos_test`, `skills_test`, `mode_icon_test`, `sentry_test`,
-`permission_test` and `web_browse_test` keep only what Scheme cannot
-hold.
+151 tests moved. `graphql_test`, `imenu_test`, `buffer_cache_test`,
+`code_structure_test` and `chat_heal_test` are gone entirely. Ten more
+files keep only what Scheme cannot hold: `apropos_test`, `skills_test`,
+`mode_icon_test`, `sentry_test`, `permission_test`, `web_browse_test`,
+`chat_rename_test`, `marginalia_project_test`, `annotate_test` and
+`group_switch_command_test`.
 
 Three limits decided every split:
 
@@ -264,11 +269,7 @@ Worth a pass, in this order:
 
 | file | movable | note |
 |---|---|---|
-| `annotate_test` | 9 of 25 | |
-| `group_switch_command_test` | 9 of 26 | 14 press keys |
 | `mcp_test` | 6-8 of 16 | `mcp-call!` connects and waits inside Scheme |
-| `chat_rename_test` | 7 of 14 | |
-| `marginalia_project_test` | 6 of 11 | |
 | `morg_test` | 6 of 32 | 20 press keys |
 | `help_test` | 5 of 25 | 20 press keys |
 | `paredit_test` | 5 of 42 | 36 press keys |
@@ -278,6 +279,12 @@ Worth a pass, in this order:
 
 Then two or three each in `grammar`, `mcp_hub`, `writing`, `occur_ts`,
 `fold_tag`, `feeds`, `scheme_ide`, `sockets`, `core` and `daemon`.
+
+A file's setup can be more destructive than any of its tests.
+`group_switch_command_test` wiped `*group-records*` before every test, so
+moving it as written would have deleted the person's groups on the first
+`M-x run-scheme-tests`. Read the setup before you read the assertions,
+and prefer a delta over a clean slate.
 
 Blocked on a seam, not on judgement. Three small additions unlock 28
 tests:

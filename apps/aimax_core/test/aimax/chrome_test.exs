@@ -281,10 +281,15 @@ defmodule Aimax.ChromeTest do
       assert eval!("(window-list)") == before
     end
 
-    # a tab you can switch to belongs in the same list as the buffers
-    # the same list wherever you press it — only what selecting DOES differs
-    test "C-x b is the editor's own command, redefined rather than rebound" do
-      assert eval!(~s[(key-for-command "switch-to-buffer")]) == ~s("C-x b")
+    # a tab you can switch to belongs in the same list as the buffers,
+    # so chrome routes a chord to an EDITOR command. It defines no
+    # command and binds no key of its own, and a name that moved would
+    # leave the page pressing a chord that reaches nothing.
+    test "every chord chrome claims names a command some package defines" do
+      assert eval!("""
+             (filter (lambda (row) (not (member (car (cdr row)) (command-names))))
+                     *chrome-chord-commands*)
+             """) == "()"
     end
 
     test "with no extension attached the prompt is still just the buffer list" do
@@ -303,10 +308,18 @@ defmodule Aimax.ChromeTest do
     # so it drifted and then outranked the truth. The only fact kept is the tab
     # you were last in and the ring's head at that moment; if the head has not
     # moved, nothing has been displayed since and the tab still leads.
-    test "C-x b from a page routes to the returning prompt, not raw dispatch" do
-      assert eval!(~s[(chrome--chord-command '("C-x" "b"))]) == ~s("switch-to-buffer-prompt")
+    test "a chord chrome claims routes to its command; the rest go through the keymap" do
+      # which chord chrome claims is its own preference, so the test reads
+      # the table instead of naming one
+      claimed = eval!("(car (car *chrome-chord-commands*))") |> Jason.decode!()
+      command = eval!("(car (cdr (car *chrome-chord-commands*)))")
+
+      keys =
+        claimed |> String.split(" ", trim: true) |> Enum.map_join(" ", &~s{"#{&1}"})
+
+      assert eval!(~s[(chrome--chord-command (list #{keys}))]) == command
       # anything without its own browser meaning still goes through the keymap
-      assert eval!(~s[(chrome--chord-command '("C-x" "o"))]) == "#f"
+      assert eval!(~s[(chrome--chord-command '("<f9>" "zz"))]) == "#f"
     end
 
     test "confirming a prompt raises the editor; cancelling does not" do

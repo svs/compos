@@ -37,7 +37,9 @@ defmodule Aimax.LSPSchemeTest do
     File.write!(path, text)
 
     name = "fake#{tag}"
-    mode = "lspt#{tag}-mode"
+    # zz- names a test fixture: a define-mode outlives the test in the
+    # same interpreter, and the shipped-mode audits skip that prefix
+    mode = "zz-lspt#{tag}-mode"
 
     on_exit(fn ->
       case LSP.parse_id("#{name}@#{root}") do

@@ -1,14 +1,15 @@
 defmodule Aimax.GroupSwitchCommandTest do
   @moduledoc """
-  One test, and it is red.
+  One test: a pull that takes a whole marked set in one act.
 
   The switcher is Scheme and its tests are Scheme —
   priv/tests/group-switch-test.scm covers founding a group, pull, push,
   pop, the two headings, the three ways to answer, and the layout restore.
 
-  This one fails here and has in every baseline: two rows are marked and
-  the pull runs, but neither buffer joins the group. It is kept as the
-  record of that, not as coverage.
+  This one was red in every baseline, and it was the test that was
+  wrong: it opened ibuffer and pressed the switcher's chords at it.
+  ibuffer was this same list from edb89bf until 584f308 gave the
+  traditional table back.
   """
 
   use ExUnit.Case
@@ -94,18 +95,20 @@ defmodule Aimax.GroupSwitchCommandTest do
       (buffer-add-group! "#{first}" "#{here}")
       (set-frame-local! 'current-group "#{here}")
       (switch-to-buffer! "#{first}")
-      (run-command "ibuffer"))
+      ;; the modal switcher by its own name: ibuffer was this same list
+      ;; from edb89bf until 584f308 gave the traditional table back
+      (run-command "switch-to-buffer"))
     """)
 
+    # typing is the filter; the verbs go by name, because a key moves
     type(second)
-    KeyDispatch.handle_key("C-SPC")
+    eval!(~s[(run-command "switch-mark")])
 
-    for _ <- 1..String.length(second), do: KeyDispatch.handle_key("DEL")
+    for _ <- 1..String.length(second), do: eval!(~s[(run-command "switch-del")])
 
     type(third)
-    KeyDispatch.handle_key("C-SPC")
-    KeyDispatch.handle_key("C-c")
-    KeyDispatch.handle_key("l")
+    eval!(~s[(run-command "switch-mark")])
+    eval!(~s[(run-command "group-pull-buffer")])
 
     assert eval!(~s{(buffer-in-group? "#{second}" "#{here}")}) == "#t"
     assert eval!(~s{(buffer-in-group? "#{third}" "#{here}")}) == "#t"

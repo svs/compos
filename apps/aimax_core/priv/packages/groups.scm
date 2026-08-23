@@ -1344,6 +1344,9 @@
                            (if (= skipped 0) ""
                                (string-append "; skipped "
                                               (number->string skipped)))))
+          ;; the same reason as the push: a list that shows membership is
+          ;; stale now, and the marks that chose these buffers are spent
+          (run-hooks 'group-membership-hook)
           changed))))
 
 (define-command "group-pull-buffer"

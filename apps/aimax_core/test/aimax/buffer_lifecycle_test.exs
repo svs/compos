@@ -85,7 +85,9 @@ defmodule Aimax.BufferLifecycleTest do
 
   test "waking completes mode setup internally before returning" do
     name = unique("mode-wake")
-    mode = "wake-mode-#{System.unique_integer([:positive])}"
+    # zz- names a test fixture: the mode outlives this test in the same
+    # interpreter, and the shipped-mode audits skip that prefix
+    mode = "zz-wake-mode-#{System.unique_integer([:positive])}"
     {:ok, ^name} = Aimax.Core.create_buffer(name)
 
     assert {:ok, _} =

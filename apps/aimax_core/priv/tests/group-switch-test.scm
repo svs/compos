@@ -113,8 +113,11 @@
       (switch-to-buffer! t--sw-first)
       (run-command "group-pull-buffer")
 
-      (check-true! (member t--sw-second (t--sw-labels)) "the other buffer is offered")
+      ;; narrow first: the prompt offers every live work buffer, and the
+      ;; suite shares one editor, so the full list holds whatever the
+      ;; other files left open. Typing the name is how a person finds it.
       (t--sw-type! t--sw-second)
+      (check-true! (member t--sw-second (t--sw-labels)) "the other buffer is offered")
       (t--sw-key! "confirm")
 
       (check-true! (buffer-in-group? t--sw-second here) "it joined this group")

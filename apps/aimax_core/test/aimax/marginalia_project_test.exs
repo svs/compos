@@ -34,12 +34,16 @@ defmodule Aimax.MarginaliaProjectTest do
         for b <- ["*mp-ga*", "*mp-gb*", "*switch*"], do: Aimax.Core.kill_buffer(b)
       end)
 
+      # groups are records: the legacy 'group local is cleared by the
+      # reader, so writing it left the buffer in no group at all. And the
+      # modal switcher goes by its own name — ibuffer was this same list
+      # from edb89bf until 584f308 gave the traditional table back.
       {:ok, _} =
         Session.eval(~s{(begin
           (buffer-create "*mp-ga*")
           (buffer-create "*mp-gb*")
-          (buffer-set-local! "*mp-ga*" 'group "work/dishwasher")
-          (run-command "ibuffer"))})
+          (buffer-add-group! "*mp-ga*" (group-record-create! "work/dishwasher"))
+          (run-command "switch-to-buffer"))})
 
       assert Aimax.Core.Buffer.text("*switch*") =~ "*mp-gb*"
 

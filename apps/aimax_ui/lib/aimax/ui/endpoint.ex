@@ -32,6 +32,14 @@ defmodule Aimax.Ui.Endpoint do
   plug(Plug.Static, at: "/", from: :aimax_ui, only: ~w(manifest.webmanifest icons images))
 
   plug(Plug.Session, @session_options)
+
+  # Tidewave is an MCP server over the running daemon: a coding agent evaluates
+  # Elixir in this VM, reads the logs, and reads the docs of the locked deps.
+  # It mounts at /tidewave/mcp. Dev only, so a release never carries it.
+  if Mix.env() == :dev do
+    plug(Tidewave)
+  end
+
   plug(Aimax.Ui.Router)
 
   @doc """

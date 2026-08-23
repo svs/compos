@@ -146,9 +146,12 @@ and take its tests with it. Leave the canary alone.
 `run-scheme-tests` command that called a nonexistent primitive and said it
 worked in the commit message. Run it.
 
-Finish with `bin/test-fast` and compare the failure count to the baseline
-below. It moves between runs — a good part of this suite is timing flake —
-so treat anything inside 43-53 as unchanged, and investigate outside it.
+Finish with `bin/test-fast` in a worktree at HEAD, not in this tree:
+another session edits it, and its uncommitted work adds failures that are
+not yours. A clean worktree answers 38-40. The count moves between runs —
+a good part of this suite is timing flake — so diff the failure NAMES
+against a baseline run instead of trusting the number, and check whether
+any name sits in a file you touched.
 
 ## State at handoff
 

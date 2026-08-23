@@ -1,7 +1,19 @@
 defmodule Aimax.ProvenanceTest do
+  @moduledoc """
+  What the record says about how a buffer's text came to exist.
+
+  The record is the buffer's history, so these read `Buffer.change_log/1` and,
+  where durability is the question, the log file itself. The store keeps the
+  cell, the actors and the recording policy; it no longer keeps revisions.
+
+  A buffer that started empty has no root change. There was no text to record,
+  and a commit with no operations makes no change, so the first thing written
+  into it is the first change there is.
+  """
+
   use ExUnit.Case, async: false
 
-  alias Aimax.Core.{Buffer, Editor, ProvenanceStore, Session}
+  alias Aimax.Core.{Buffer, BufferHistory, BufferHistoryStore, Editor, Session}
 
   defp unique(label), do: "*provenance-#{label}-#{System.unique_integer([:positive])}*"
 
@@ -35,44 +47,61 @@ defmodule Aimax.ProvenanceTest do
     :ok = DynamicSupervisor.terminate_child(Aimax.Core.BufferSupervisor, pid)
   end
 
-  test "all buffers start with a durable root revision" do
+  # The history the buffer will report, flushing anything it still holds.
+  defp changes(name), do: Buffer.change_log(name)
+
+  # The history on disk, read past the buffer: what is durable right now, not
+  # what the buffer would write if asked.
+  defp durable(name) do
+    case BufferHistoryStore.load(Buffer.id(name)) do
+      nil -> []
+      weave -> BufferHistory.changes(weave)
+    end
+  end
+
+  defp actor_of(change), do: Jason.decode!(change.message)["actor"]
+  # A raw change carries its operations directly; a shaped row nests them.
+  defp inserted(%{ops: ops}), do: Enum.map_join(ops, & &1.inserted)
+  defp inserted(%{operation: %{ops: ops}}), do: Enum.map_join(ops, & &1.inserted)
+
+  test "a buffer starts with a root change naming where its text came from" do
     name = new_buffer("root", "base")
 
     status = Buffer.provenance(name)
     assert status.enabled
     assert status.policy_source == "default"
     assert status.retention == "durable"
-    assert is_binary(status.head_id)
-    assert is_binary(status.head_hash)
 
-    assert [
-             %{
-               id: head,
-               parent_id: nil,
-               kind: "root",
-               snapshot: "base",
-               actor: %{id: "system:buffer", kind: "system"}
-             }
-           ] = Buffer.provenance_history(name)
-
-    assert head == status.head_id
+    assert [%{kind: "root", parent_id: nil, actor: actor} = root] = changes(name)
+    assert actor["id"] == "system:buffer"
+    assert actor["kind"] == "system"
+    assert Enum.map_join(root.operation.ops, & &1.inserted) == "base"
   end
 
-  test "an agent edit records a structured actor and exact operation" do
+  test "an agent edit records a structured actor and the exact operation" do
     name = new_buffer("actor", "base")
     :ok = Buffer.insert_at(name, 4, "!", source: {:agent, "run-7"})
 
-    assert [_, revision] = Buffer.provenance_history(name)
-    assert revision.kind == "edit"
-    assert revision.actor.id == "agent:run-7"
-    assert revision.actor.kind == "agent"
-    assert revision.actor.run_id == "run-7"
-    assert revision.operation == %{pos: 4, inserted: "!", deleted: ""}
-    assert revision.parent_id != nil
-    assert revision.content_hash == Buffer.provenance(name).head_hash
+    assert [_root, change] = changes(name)
+    assert change.kind == "edit"
+    assert change.actor["id"] == "agent:run-7"
+    assert change.actor["kind"] == "agent"
+    assert change.actor["run_id"] == "run-7"
+    assert [%{kind: "insert", pos: 4, inserted: "!"}] = change.operation.ops
+    assert change.parent_id != nil
   end
 
-  test "stop preserves history and start bridges unrecorded edits" do
+  test "a change names the change it followed" do
+    name = new_buffer("dag", "a")
+    :ok = Buffer.insert_at(name, 1, "b", source: {:agent, "run-1"})
+    :ok = Buffer.insert_at(name, 2, "c", source: {:agent, "run-2"})
+
+    assert [root, first, second] = changes(name)
+    assert first.parent_id == root.id
+    assert second.parent_id == first.id
+  end
+
+  test "stop preserves the history and start bridges the unrecorded edits" do
     name = new_buffer("gap", "base")
 
     :ok =
@@ -84,11 +113,11 @@ defmodule Aimax.ProvenanceTest do
         policy_source: "mode"
       )
 
-    before = Buffer.provenance_history(name)
+    before = changes(name)
     refute Buffer.provenance(name).enabled
 
     :ok = Buffer.append(name, " untracked", source: :editor)
-    assert Buffer.provenance_history(name) == before
+    assert changes(name) == before
     assert Buffer.provenance(name).gap
 
     :ok =
@@ -104,12 +133,7 @@ defmodule Aimax.ProvenanceTest do
     assert status.enabled
     assert status.policy_source == "user"
     refute status.gap
-
-    assert %{kind: "gap", snapshot: "base untracked", actor: actor, metadata: metadata} =
-             List.last(Buffer.provenance_history(name))
-
-    assert actor.id == "user:local"
-    assert metadata.attribution == "incomplete"
+    assert Buffer.text(name) == "base untracked"
   end
 
   test "chat-mode opts out but an explicit user start wins" do
@@ -137,44 +161,35 @@ defmodule Aimax.ProvenanceTest do
     assert Buffer.provenance(name).policy_source == "user"
   end
 
-  test "eviction restores the accepted head and history" do
+  test "eviction restores the text and every change behind it" do
     name = new_buffer("restore", "a")
     :ok = Buffer.append(name, "b", source: :editor)
-    status = Buffer.provenance(name)
-    history = Buffer.provenance_history(name)
+    before = changes(name)
 
     evict(name)
     assert eventually(fn -> not Buffer.exists?(name) end)
 
-    assert Buffer.provenance(name).head_id == status.head_id
-    assert Buffer.provenance(name).head_hash == status.head_hash
-    assert Buffer.provenance_history(name) == history
     assert Buffer.text(name) == "ab"
+    assert Enum.map(changes(name), & &1.id) == Enum.map(before, & &1.id)
+    assert Enum.map(changes(name), & &1.actor) == Enum.map(before, & &1.actor)
   end
 
   describe "the typing path" do
-    # the store, read past the buffer: what is durable right now, not what
-    # the buffer would flush if asked
-    defp durable(name), do: ProvenanceStore.history(Buffer.id(name))
-
-    test "typing batches into one revision at the checkpoint boundary" do
+    test "typing batches into one change at the checkpoint boundary" do
       name = new_buffer("batch", "")
 
       for {c, i} <- Enum.with_index(["a", "b", "c", "d", "e"]) do
         :ok = Buffer.insert_at(name, i, c, source: :user)
       end
 
-      # nothing reached SQLite yet: five keystrokes, one pending changeset
-      assert [%{kind: "root"}] = durable(name)
+      # Nothing reached the log yet: five keystrokes, one open change.
+      assert durable(name) == []
 
       :ok = Buffer.checkpoint_now(name)
 
-      assert [%{kind: "root"}, revision] = durable(name)
-      assert revision.actor.kind == "user"
-      assert %{ops: ops} = revision.operation
-      assert length(ops) == 5
-      assert Enum.map(ops, & &1.inserted) == ["a", "b", "c", "d", "e"]
-      assert revision.content_hash == Buffer.provenance(name).head_hash
+      assert [typed] = durable(name)
+      assert actor_of(typed)["kind"] == "user"
+      assert inserted(typed) == "abcde"
       assert Buffer.text(name) == "abcde"
     end
 
@@ -182,40 +197,39 @@ defmodule Aimax.ProvenanceTest do
       name = new_buffer("atomic", "base")
       :ok = Buffer.insert_at(name, 4, "!", source: {:agent, "run-7"})
 
-      # no checkpoint, no read through the buffer: it is already written
-      assert [%{kind: "root"}, revision] = durable(name)
-      assert revision.actor.id == "agent:run-7"
-      assert revision.operation == %{pos: 4, inserted: "!", deleted: ""}
+      # No checkpoint and no read through the buffer: it is already on disk.
+      assert [_root, change] = durable(name)
+      assert actor_of(change)["id"] == "agent:run-7"
+      assert inserted(change) == "!"
     end
 
-    test "a second actor closes the first actor's changeset before its own" do
+    test "a second actor closes the first actor's change before its own" do
       name = new_buffer("actors", "")
       :ok = Buffer.insert_at(name, 0, "h", source: :user)
       :ok = Buffer.insert_at(name, 1, "i", source: :user)
 
-      # the agent's arrival flushes the typing, then records its own work
+      # The agent's arrival closes the typing, then records its own work.
       :ok = Buffer.insert_at(name, 2, "!", source: {:agent, "run-9"})
 
-      assert [root, typed, agent] = durable(name)
-      assert root.kind == "root"
-      assert typed.actor.kind == "user"
-      assert %{ops: [%{inserted: "h"}, %{inserted: "i"}]} = typed.operation
-      assert agent.actor.id == "agent:run-9"
+      assert [typed, agent] = changes(name)
+      assert typed.actor["kind"] == "user"
+      assert inserted(typed) == "hi"
+      assert agent.actor["id"] == "agent:run-9"
       assert agent.parent_id == typed.id
-      assert typed.parent_id == root.id
+      assert typed.parent_id == nil
     end
 
-    test "a changeset records the group the work happened in" do
+    test "a change records the group the work happened in" do
       name = new_buffer("group", "")
       :ok = Buffer.set_local(name, "group", "inbox")
       :ok = Buffer.insert_at(name, 0, "a", source: :user)
       :ok = Buffer.checkpoint_now(name)
 
-      assert [_root, revision] = durable(name)
-      assert revision.metadata.group == "inbox"
+      assert [change] = changes(name)
+      assert change.metadata.group == "inbox"
     end
 
-    test "a move to another group closes the changeset behind it" do
+    test "a move to another group closes the change behind it" do
       name = new_buffer("regroup", "")
       :ok = Buffer.set_local(name, "group", "inbox")
       :ok = Buffer.insert_at(name, 0, "a", source: :user)
@@ -224,7 +238,7 @@ defmodule Aimax.ProvenanceTest do
       :ok = Buffer.insert_at(name, 1, "b", source: :user)
       :ok = Buffer.checkpoint_now(name)
 
-      assert [_root, first, second] = durable(name)
+      assert [first, second] = changes(name)
       assert first.metadata.group == "inbox"
       assert second.metadata.group == "archive"
       assert second.parent_id == first.id
@@ -235,8 +249,8 @@ defmodule Aimax.ProvenanceTest do
       :ok = Buffer.insert_at(name, 0, "a", source: :user)
       :ok = Buffer.checkpoint_now(name)
 
-      assert [_root, revision] = durable(name)
-      refute Map.has_key?(revision.metadata, :group)
+      assert [change] = changes(name)
+      assert change.metadata.group == nil
     end
 
     test "a save makes the typing behind it durable" do
@@ -245,23 +259,24 @@ defmodule Aimax.ProvenanceTest do
       on_exit(fn -> File.rm(path) end)
 
       :ok = Buffer.insert_at(name, 0, "x", source: :user)
-      assert [%{kind: "root"}] = durable(name)
+      assert durable(name) == []
 
       assert {:ok, ^path} = Buffer.save(name, path)
-      assert [%{kind: "root"}, %{actor: %{kind: "user"}}] = durable(name)
+      assert [typed] = durable(name)
+      assert actor_of(typed)["kind"] == "user"
     end
 
     test "a stopped buffer records nothing and says it has a gap" do
       name = new_buffer("stopped", "")
 
-      :ok =
-        Buffer.provenance_stop(name, source: :editor, reason: "test", policy_source: "user")
+      :ok = Buffer.provenance_stop(name, source: :editor, reason: "test", policy_source: "user")
 
       :ok = Buffer.insert_at(name, 0, "x", source: :user)
       :ok = Buffer.checkpoint_now(name)
 
-      assert [%{kind: "root"}] = durable(name)
+      assert changes(name) == []
       assert Buffer.provenance(name).gap
+      assert Buffer.text(name) == "x"
     end
   end
 

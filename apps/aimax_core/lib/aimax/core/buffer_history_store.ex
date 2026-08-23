@@ -47,6 +47,24 @@ defmodule Aimax.Core.BufferHistoryStore do
   # Anything else is the torn tail, or the clean end of the file.
   defp frames(_partial, acc), do: Enum.reverse(acc)
 
+  @doc """
+  The history on disk, as a document, without going near the buffer process.
+
+  This is what survived, rather than what a running buffer would write if
+  asked, so it is the honest answer to "is this durable yet".
+  """
+  def load(id, peer \\ 0) do
+    case read(id) do
+      [] ->
+        nil
+
+      blobs ->
+        weave = Aimax.Core.BufferHistory.new(peer)
+        Enum.each(blobs, &Aimax.Core.BufferHistory.import(weave, &1))
+        weave
+    end
+  end
+
   @doc "Append one blob. Returns the bytes written, or 0 on failure."
   def append(id, blob) when is_binary(blob) do
     if blob == "" do

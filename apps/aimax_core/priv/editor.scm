@@ -7012,7 +7012,7 @@
 (public! 'buffer-author-lines "(buffer-author-lines NAME) -> (LINE AUTHOR BYTES) rows: who wrote each line, and how much of it")
 (public! 'buffer-edit-log "(buffer-edit-log NAME) -> (VERSION AUTHOR POS INS DEL) records, newest first")
 (public! 'buffer-provenance-status "(buffer-provenance-status NAME) -> the durable recording state and accepted head")
-(public! 'buffer-provenance-history "(buffer-provenance-history NAME) -> revisions from root to accepted head")
+(public! 'buffer-history "(buffer-history NAME) -> every change to the buffer, oldest first, with its actor")
 (effects! '(write))
 (public! 'buffer-provenance-start! "(buffer-provenance-start! NAME [ACTOR REASON POLICY]) -> start or resume recording")
 (public! 'buffer-provenance-stop! "(buffer-provenance-stop! NAME [ACTOR REASON POLICY]) -> stop without deleting history")

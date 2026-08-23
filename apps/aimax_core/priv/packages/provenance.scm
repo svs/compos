@@ -7,8 +7,13 @@
 ;;;   RET   describe this revision: actor, source, operation, hash
 ;;;   g / q refresh . bury
 ;;;
-;;; The rows come from (buffer-provenance-history NAME). This buffer only
-;;; names them; Aimax.Core.ProvenanceStore owns the history.
+;;; The rows come from (buffer-history NAME). This buffer only names them;
+;;; Aimax.Core.BufferHistory owns the history, and a change is what one actor
+;;; did in one uninterrupted run.
+;;;
+;;; A delete reports how many bytes it removed, not the text. The removed text
+;;; is still in the history, but reading it back means checking out the version
+;;; before the delete, which a list of rows does not do.
 
 (domain! 'buffers)
 (effects! '(read))
@@ -47,7 +52,7 @@
   (set! *buffer-log-rows*
     (if (and *buffer-log-target* (buffer-known? *buffer-log-target*))
         (map (lambda (rev) (cons (prov-get rev 'id) rev))
-             (buffer-provenance-history *buffer-log-target*))
+             (buffer-history *buffer-log-target*))
         '())))
 
 (define (prov-plist id)
@@ -100,18 +105,19 @@
 (define (prov-excerpt rev)
   (let* ((ops (prov-ops-of rev))
          (ins (prov-text-of ops 'inserted))
-         (del (prov-text-of ops 'deleted)))
-    (cond ((and (equal? ins "") (equal? del "")) "")
-          ((equal? del "") (prov-clip (prov-one-line ins) 60))
-          ((equal? ins "") (string-append "-" (prov-clip (prov-one-line del) 58)))
-          (else (string-append (prov-clip (prov-one-line ins) 40)
-                               "  -" (prov-clip (prov-one-line del) 18))))))
+         (del (cadr (prov-sum ops))))
+    (cond ((and (equal? ins "") (= del 0)) "")
+          ((= del 0) (prov-clip (prov-one-line ins) 60))
+          ((equal? ins "") (string-append "-" (number->string del) "B"))
+          (else (string-append (prov-clip (prov-one-line ins) 50)
+                               "  -" (number->string del) "B")))))
 
 ;; the bytes one operation added and removed, as (INSERTED DELETED).
 ;; This dialect's cons wants a list tail, so a pair is a two-element list.
+;; An insert knows its text; a delete knows only how much it took.
 (define (prov-op-sizes op)
   (list (string-length (or (prov-get op 'inserted) ""))
-        (string-length (or (prov-get op 'deleted) ""))))
+        (or (prov-get op 'deleted) 0)))
 
 (define (prov-sum ops)
   (let loop ((rest ops) (ins 0) (del 0))
@@ -125,20 +131,20 @@
 (define (prov-change rev)
   (let ((op (prov-get rev 'operation)))
     (if (not op)
-        (let ((bytes (prov-get rev 'snapshot_bytes)))
-          (if bytes
-              (string-append "snapshot " (number->string bytes) "B")
-              ""))
-        (let ((ops (prov-get op 'ops)))
-          (if ops
-              (let ((sizes (prov-sum ops)))
-                (string-append (number->string (length ops)) " ops"
-                               " +" (number->string (car sizes))
-                               " -" (number->string (cadr sizes))))
-              (let ((sizes (prov-op-sizes op)))
-                (string-append "@" (number->string (or (prov-get op 'pos) 0))
-                               " +" (number->string (car sizes))
-                               " -" (number->string (cadr sizes)))))))))
+        ""
+        ;; One operation names its position, because that is the useful thing
+        ;; to know about it. Several name how many, because their positions
+        ;; move within the change.
+        (let* ((ops (or (prov-get op 'ops) '()))
+               (sizes (prov-sum ops))
+               (amounts (string-append " +" (number->string (car sizes))
+                                       " -" (number->string (cadr sizes)))))
+          (cond
+            ((null? ops) "")
+            ((null? (cdr ops))
+             (string-append "@" (number->string (or (prov-get (car ops) 'pos) 0))
+                            amounts))
+            (else (string-append (number->string (length ops)) " ops" amounts)))))))
 
 (define (prov-when rev)
   (let ((ms (prov-get rev 'created_at)))
@@ -170,8 +176,8 @@
 (define (prov-excerpt-face rev)
   (let* ((ops (prov-ops-of rev))
          (ins (prov-text-of ops 'inserted))
-         (del (prov-text-of ops 'deleted)))
-    (cond ((and (equal? ins "") (not (equal? del ""))) "prov-del")
+         (del (cadr (prov-sum ops))))
+    (cond ((and (equal? ins "") (> del 0)) "prov-del")
           ((equal? ins "") "faint")
           (else "prov-ins"))))
 
@@ -192,10 +198,11 @@
   (apply string-append
     (map (lambda (o)
            (let ((ins (or (prov-get o 'inserted) ""))
-                 (del (or (prov-get o 'deleted) "")))
+                 (del (or (prov-get o 'deleted) 0)))
              (string-append
                "@" (number->string (or (prov-get o 'pos) 0)) "\n"
-               (if (equal? del "") "" (string-append "  - " del "\n"))
+               (if (= del 0) ""
+                   (string-append "  - " (number->string del) " bytes\n"))
                (if (equal? ins "") "" (string-append "  + " ins "\n")))))
          ops)))
 
@@ -213,16 +220,12 @@
              ", " (or (prov-get actor 'assurance) "?") ")\n"
              "source   " (or (prov-get actor 'source) "?") "\n"
              (if (equal? group "") "" (string-append "group    " group "\n"))
-             "version  " (number->string (or (prov-get rev 'buffer_version) 0)) "\n"
-             "hash     " (or (prov-get rev 'content_hash) "?") "\n"
+             "counter  " (number->string (or (prov-get rev 'buffer_version) 0)) "\n"
+             "lamport  " (number->string (or (prov-get rev 'lamport) 0)) "\n"
              "when     " (prov-when rev) "\n"
              "\n"
              (if (null? ops)
-                 (let ((bytes (prov-get rev 'snapshot_bytes)))
-                   (if bytes
-                       (string-append "snapshot of " (number->string bytes)
-                                      " bytes, held in the store\n")
-                       "no operations\n"))
+                 "no operations\n"
                  (string-append (prov-change rev) "\n\n" (prov-op-lines ops))))))
     (buffer-set-read-only! buf #f)
     (buffer-delete-range! buf 0 (buffer-size buf))

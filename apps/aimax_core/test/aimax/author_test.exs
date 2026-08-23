@@ -2,7 +2,7 @@ defmodule Aimax.AuthorTest do
   use ExUnit.Case
 
   alias Aimax.Core
-  alias Aimax.Core.{Buffer, ProvenanceStore, Session}
+  alias Aimax.Core.{Buffer, Session}
 
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
@@ -143,13 +143,17 @@ defmodule Aimax.AuthorTest do
     assert actor.run_id == "c1"
   end
 
-  test "the changeset a span names is the revision the store recorded" do
+  # A span names a changeset, and the fold's own origins say who that was. The
+  # buffer's history says the same thing about the same work, so the two agree
+  # on the actor without sharing an id.
+  test "the changeset a span names resolves to the actor who wrote it" do
     b = new_buf()
     :ok = Buffer.append(b, "abc", source: {:agent, "c1"})
 
-    %{spans: [{0, 3, id}]} = Buffer.author_fold(b)
+    %{spans: [{0, 3, id}], origins: origins} = Buffer.author_fold(b)
 
-    assert id in Enum.map(ProvenanceStore.history(Buffer.id(b)), & &1.id)
+    assert origins[id].actor.id == "agent:c1"
+    assert Enum.any?(Buffer.change_log(b), &(&1.actor["id"] == "agent:c1"))
   end
 
   test "two runs by one author are two changesets, and one span to read" do

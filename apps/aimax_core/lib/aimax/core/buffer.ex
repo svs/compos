@@ -363,6 +363,70 @@ defmodule Aimax.Core.Buffer do
   def history(name), do: GenServer.call(via(name), :history)
 
   @doc """
+  Every change to this buffer, oldest first, as the buffer log reads them.
+
+  Each is `%{id:, parent_id:, kind:, actor:, operation:, created_at:, ...}`.
+  The actor and the group come out of the change message, which is where they
+  are durable.
+  """
+  def change_log(name) do
+    case history(name) do
+      nil ->
+        []
+
+      weave ->
+        changes = History.changes(weave)
+        Enum.map(changes, &change_row(&1, changes))
+    end
+  end
+
+  # A dependency names the last operation of the change it followed, never that
+  # change's own id, so it has to be resolved back to the change holding it.
+  defp parent_of(deps, changes) do
+    Enum.find_value(deps, fn {peer, counter} ->
+      changes
+      |> Enum.filter(&(&1.peer == peer and &1.counter <= counter))
+      |> Enum.max_by(& &1.counter, fn -> nil end)
+      |> case do
+        nil -> nil
+        change -> change_id(change.peer, change.counter)
+      end
+    end)
+  end
+
+  defp change_row(change, changes) do
+    {actor, group} = decode_message(change.message)
+
+    %{
+      id: change_id(change.peer, change.counter),
+      parent_id: parent_of(change.deps, changes),
+      kind: change_kind(actor),
+      actor: actor,
+      operation: %{ops: Enum.map(change.ops, &Map.from_struct/1)},
+      metadata: %{group: group},
+      created_at: change.timestamp * 1000,
+      buffer_version: change.counter,
+      lamport: change.lamport
+    }
+  end
+
+  defp change_id(peer, counter), do: "#{peer}@#{counter}"
+
+  # The kind a reader cares about: where the text came from, not which Loro
+  # container it landed in.
+  defp change_kind(%{"id" => "system:buffer"}), do: "root"
+  defp change_kind(%{"id" => "system:reload"}), do: "gap"
+  defp change_kind(%{"id" => "system:resync"}), do: "gap"
+  defp change_kind(_), do: "edit"
+
+  defp decode_message(message) do
+    case Jason.decode(message || "") do
+      {:ok, %{"actor" => actor} = m} -> {actor, m["group"]}
+      _ -> {%{"id" => "unknown", "kind" => "unknown"}, nil}
+    end
+  end
+
+  @doc """
   An anchor on a byte position: an opaque token that keeps naming the same
   place while the text around it changes.
 
@@ -393,9 +457,6 @@ defmodule Aimax.Core.Buffer do
   def provenance_checkpoint(name, opts \\ []) do
     GenServer.call(via(name), {:provenance_checkpoint, source(opts), author(opts), opts})
   end
-
-  @doc "Return durable revisions oldest first."
-  def provenance_history(name), do: GenServer.call(via(name), :provenance_history)
 
   @doc "1-based logical line -> {start_byte, line_text sans newline}, clamped."
   def line_at(name, line), do: GenServer.call(via(name), {:line_at, line})
@@ -805,6 +866,8 @@ defmodule Aimax.Core.Buffer do
       state = if text != "", do: do_insert(state, pos, text, src, author, false), else: state
       # never a self-insert run: the next typed char starts its own undo step
       state = %{state | insert_run: 0}
+      # The pair is one step, so it closes here rather than between its halves.
+      state = if batchable?(src), do: state, else: settle(state)
       {:reply, :ok, state |> touch_state() |> checkpoint_later()}
     end
   end
@@ -912,11 +975,6 @@ defmodule Aimax.Core.Buffer do
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
-  end
-
-  def handle_call(:provenance_history, _from, state) do
-    state = flush_provenance(state)
-    {:reply, ProvenanceStore.history(state.id), state}
   end
 
   def handle_call({:motion, motion}, _from, state) do
@@ -1106,7 +1164,15 @@ defmodule Aimax.Core.Buffer do
         state = %{state | path: path, saved_version: state.version}
         Events.broadcast_editor(:locals)
         broadcast(state, state.point, "", 0, :locals)
-        {:reply, {:ok, path}, state |> flush_provenance() |> touch_state() |> checkpoint_later()}
+        state =
+          state
+          |> flush_provenance()
+          |> close_undo_step()
+          |> persist_history()
+          |> touch_state()
+          |> checkpoint_later()
+
+        {:reply, {:ok, path}, state}
     end
   end
 
@@ -1308,7 +1374,9 @@ defmodule Aimax.Core.Buffer do
   defp commit_on_actor_change(%{history_actor: nil} = state, _actor), do: state
 
   defp commit_on_actor_change(state, actor) do
-    if state.history_actor.id == actor.id, do: state, else: commit_history(state)
+    if state.history_actor.id == actor.id and state.history_group == buffer_group(state),
+      do: state,
+      else: commit_history(state)
   end
 
   # Undo swaps the whole rope, so the document takes the result and works out
@@ -1373,8 +1441,8 @@ defmodule Aimax.Core.Buffer do
 
       other when is_binary(other) ->
         Logger.error(
-          "loro document diverged in #{state.name}: rope #{Kernel.byte_size(text)} B, " <>
-            "document #{Kernel.byte_size(other)} B; resynchronizing from the rope"
+          "history diverged in #{state.name}: rope #{Kernel.byte_size(text)} B, " <>
+            "history #{Kernel.byte_size(other)} B; resynchronizing from the rope"
         )
 
         state
@@ -1383,7 +1451,7 @@ defmodule Aimax.Core.Buffer do
         |> commit_history()
 
       {:error, reason} ->
-        Logger.error("loro document unreadable in #{state.name}: #{inspect(reason)}")
+        Logger.error("history unreadable in #{state.name}: #{inspect(reason)}")
         state
     end
   end
@@ -1584,7 +1652,7 @@ defmodule Aimax.Core.Buffer do
     }
 
     state = log_edit(state, actor_label(actor), pos, added, removed)
-    state = record_op(state, actor, pos, inserted, "", :undo)
+    state = record_op(state, actor, pos, inserted, "", :undo, true)
     state = ts_invalidate(state)
     broadcast(state, 0, "", 0, :undo)
     # The undo manager wrote and closed its own change, so the document holds
@@ -1866,7 +1934,7 @@ defmodule Aimax.Core.Buffer do
     state = mirror_insert(state, pos, text, actor)
     state = %{state | authors: stamp_insert(state.authors, pos, len, stamp_id(actor, changeset))}
     state = log_edit(state, author, pos, len, 0)
-    state = record_op(state, actor, pos, text, "", src)
+    state = record_op(state, actor, pos, text, "", src, snap?)
 
     state = %{
       state
@@ -1918,7 +1986,7 @@ defmodule Aimax.Core.Buffer do
     state = mirror_delete(state, pos, len, actor)
     state = %{state | authors: stamp_delete(state.authors, pos, len)}
     state = log_edit(state, author, pos, 0, len)
-    state = record_op(state, actor, pos, "", deleted, src)
+    state = record_op(state, actor, pos, "", deleted, src, snap?)
     state = %{state | goal_col: nil, last_insert_end: nil, insert_run: 0, undo_run: false}
     broadcast(state, pos, "", len, src)
     state
@@ -2155,7 +2223,7 @@ defmodule Aimax.Core.Buffer do
   # `author: :none` (desktop restore) adjusts the spans and stamps nothing.
   defp stamp_id(actor, changeset), do: if(Map.get(actor, :stamp, true), do: changeset, else: nil)
 
-  defp record_op(%{provenance: nil} = state, _actor, _pos, _inserted, _deleted, _src),
+  defp record_op(%{provenance: nil} = state, _actor, _pos, _inserted, _deleted, _src, _whole?),
     do: state
 
   defp record_op(
@@ -2164,12 +2232,13 @@ defmodule Aimax.Core.Buffer do
          _pos,
          _inserted,
          _deleted,
-         _src
+         _src,
+         _whole?
        ) do
     %{state | provenance: %{provenance | gap: true}}
   end
 
-  defp record_op(state, actor, pos, inserted, deleted, src) do
+  defp record_op(state, actor, pos, inserted, deleted, src, whole?) do
     op = %{pos: pos, inserted: inserted, deleted: deleted}
 
     state = %{
@@ -2181,13 +2250,21 @@ defmodule Aimax.Core.Buffer do
 
     cond do
       # An atomic edit is durable before its caller hears that it worked. An
-      # agent writes a whole hunk at a time, so the transaction is rare and
-      # the round trip hides inside the tool call that asked for it.
+      # agent writes a whole hunk at a time, so the commit and the append are
+      # rare and the round trip hides inside the tool call that asked for it.
+      # An atomic edit is durable before its caller hears that it worked. Only
+      # when it is a whole step: a replacement is a delete and an insert, and
+      # closing between them would make them two changes and two undo steps.
+      not batchable?(src) and whole? -> settle(state)
       not batchable?(src) -> flush_provenance(state)
-      length(state.pending_ops) >= @provenance_batch_limit -> flush_provenance(state)
+      length(state.pending_ops) >= @provenance_batch_limit -> settle(state)
       true -> state
     end
   end
+
+  # Close the open change and put it on disk.
+  defp settle(state),
+    do: state |> flush_provenance() |> close_undo_step() |> persist_history()
 
   # groups.scm owns the policy; the buffer-local is the mechanism, and this
   # reads it without asking Scheme, because a mutation cannot call back in.
@@ -2205,38 +2282,11 @@ defmodule Aimax.Core.Buffer do
   defp flush_provenance(%{provenance: nil} = state),
     do: %{state | pending_ops: [], pending_actor: nil, pending_group: nil, changeset_id: nil}
 
+  # The history itself is a change in the weave, written by commit_history and
+  # persisted by the log. Nothing is recorded twice, so this only closes the
+  # pending batch and leaves the store its cell, its actors and its policy.
   defp flush_provenance(state) do
-    ops = Enum.reverse(state.pending_ops)
-    {text, state} = fetch_text(state)
-
-    result =
-      ProvenanceStore.record_changeset(
-        state.id,
-        state.provenance.head_id,
-        state.version,
-        state.pending_actor,
-        ops,
-        text,
-        context(state.pending_group),
-        state.changeset_id
-      )
-
-    state = %{state | pending_ops: [], pending_actor: nil, pending_group: nil, changeset_id: nil}
-
-    case result do
-      {:ok, status} ->
-        %{state | provenance: provenance_state(status)}
-
-      {:error, reason} ->
-        # The Buffer is the only writer to its own cell, so a stale head means
-        # a defect, not a race. Losing the buffer would cost more than losing
-        # the batch: mark the gap, say so, and keep editing.
-        Logger.error(
-          "provenance flush failed for #{state.name}: #{inspect(reason)}"
-        )
-
-        %{state | provenance: %{state.provenance | gap: true}}
-    end
+    %{state | pending_ops: [], pending_actor: nil, pending_group: nil, changeset_id: nil}
   end
 
   # A buffer that belongs to no group records no group, rather than "none".

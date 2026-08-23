@@ -1,7 +1,14 @@
 defmodule Aimax.BufferLogTest do
   @moduledoc """
   M-x buffer-log (packages/provenance.scm): the list that shows a buffer's
-  accepted revisions, driven the way a person drives it - through KeyDispatch.
+  changes, driven the way a person drives it - through KeyDispatch.
+
+  The rows come from the buffer's history rather than from a revision table, so
+  two things read differently than they used to. Adjacent single-character
+  inserts are one operation, because the history stores a run rather than a
+  keystroke each. And a delete reports how many bytes it took, not the text:
+  the text is still in the history, but reading it back means checking out the
+  version before the delete.
   """
 
   use ExUnit.Case, async: false
@@ -66,6 +73,8 @@ defmodule Aimax.BufferLogTest do
     assert log_text() =~ "policy user"
   end
 
+  # Three keystrokes in a row are one operation of three bytes, not three of
+  # one. The history run-length encodes a run, which is why typing is cheap.
   test "typed work reads as the changeset it formed", %{name: name} do
     for {c, i} <- Enum.with_index(["a", "b", "c"]) do
       :ok = Buffer.insert_at(name, i, c, source: :user)
@@ -74,7 +83,8 @@ defmodule Aimax.BufferLogTest do
     eval!(~s{(switch-to-buffer! "#{name}")})
     press(["C-x", "v", "l"])
 
-    assert log_text() =~ "3 ops +3 -0"
+    assert log_text() =~ "+3 -0"
+    assert log_text() =~ "abc"
     assert log_text() =~ "user"
   end
 
@@ -86,12 +96,13 @@ defmodule Aimax.BufferLogTest do
     assert log_text() =~ "and cheese"
   end
 
-  test "a deletion reads as the text it removed", %{name: name} do
+  test "a deletion reads as the bytes it removed", %{name: name} do
     :ok = Buffer.delete_range(name, 0, 4, source: :user)
     eval!(~s{(switch-to-buffer! "#{name}")})
     press(["C-x", "v", "l"])
 
-    assert log_text() =~ "-base"
+    assert log_text() =~ "+0 -4"
+    assert log_text() =~ "-4B"
   end
 
   test "a newline in the text does not break the row", %{name: name} do
@@ -116,7 +127,9 @@ defmodule Aimax.BufferLogTest do
     assert text =~ "actor    agent:run-7"
     assert text =~ "@4"
     assert text =~ "+ !"
-    assert text =~ "hash     "
+    # A change names its place in the DAG rather than hashing its result.
+    assert text =~ "parent   "
+    assert text =~ "lamport  "
   end
 
   test "RET describes the revision on the line", %{name: name} do

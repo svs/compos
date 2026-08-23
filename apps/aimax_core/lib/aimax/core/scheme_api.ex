@@ -64,8 +64,8 @@ defmodule Aimax.Core.SchemeAPI do
         "(buffer-edit-log BUF) — return (VERSION AUTHOR POS INS DEL) edit records, newest first.",
       "buffer-provenance-status" =>
         "(buffer-provenance-status BUF) — return the durable recording state and accepted head.",
-      "buffer-provenance-history" =>
-        "(buffer-provenance-history BUF) — return the revisions from root to accepted head.",
+      "buffer-history" =>
+        "(buffer-history BUF) — return every change to the buffer, oldest first: who made it, what it did, and when. A delete reports how many bytes it removed, not the text.",
       "buffer-provenance-start!" =>
         "(buffer-provenance-start! BUF [ACTOR REASON POLICY]) — start or resume recording; bridges any gap.",
       "buffer-provenance-stop!" =>
@@ -432,16 +432,8 @@ defmodule Aimax.Core.SchemeAPI do
       "buffer-provenance-status" => fn [name] ->
         Buffer.provenance(name) |> json_to_scheme_value()
       end,
-      # the snapshot payload stays in SQLite: a root revision of a large file
-      # would cross into Scheme whole on every redraw. Its size still reads.
-      "buffer-provenance-history" => fn [name] ->
-        Buffer.provenance_history(name)
-        |> Enum.map(fn revision ->
-          revision
-          |> Map.put(:snapshot_bytes, revision.snapshot && byte_size(revision.snapshot))
-          |> Map.delete(:snapshot)
-        end)
-        |> json_to_scheme_value()
+      "buffer-history" => fn [name] ->
+        Buffer.change_log(name) |> json_to_scheme_value()
       end,
       "buffer-provenance-start!" => fn
         [name] ->

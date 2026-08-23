@@ -287,24 +287,68 @@ fn history_import(res: ResourceArc<WeaveRes>, bytes: Binary) -> NifResult<usize>
 /// One tuple per change: peer, counter, lamport, unix timestamp, message.
 /// The message carries the actor, so this is the attribution record.
 #[rustler::nif(schedule = "DirtyCpu")]
-fn history_changes(res: ResourceArc<WeaveRes>) -> NifResult<Vec<(u64, i32, u32, i64, String)>> {
+fn history_changes(res: ResourceArc<WeaveRes>) -> NifResult<Vec<Change>> {
     let st = state(&res)?;
     let json = st
         .doc
         .export_json_updates_without_peer_compression(&Default::default(), &st.doc.oplog_vv());
+
     Ok(json
         .changes
         .into_iter()
-        .map(|c| {
-            (
-                c.id.peer,
-                c.id.counter,
-                c.lamport,
-                c.timestamp,
-                c.msg.map(|m| m.to_string()).unwrap_or_default(),
-            )
+        .map(|c| Change {
+            peer: c.id.peer,
+            counter: c.id.counter,
+            lamport: c.lamport,
+            timestamp: c.timestamp,
+            message: c.msg.map(|m| m.to_string()).unwrap_or_default(),
+            deps: c.deps.iter().map(|d| (d.peer, d.counter)).collect(),
+            ops: c.ops.iter().filter_map(text_op).collect(),
         })
         .collect())
+}
+
+/// One change, as the buffer log reads it.
+#[derive(rustler::NifStruct)]
+#[module = "Aimax.Core.BufferHistory.Change"]
+struct Change {
+    peer: u64,
+    counter: i32,
+    lamport: u32,
+    timestamp: i64,
+    message: String,
+    deps: Vec<(u64, i32)>,
+    ops: Vec<Op>,
+}
+
+/// A delete carries a position and a length, never the text it removed. The
+/// text is still in the history, but reading it back means checking out the
+/// version before the delete, which the log does not do per row.
+#[derive(rustler::NifStruct)]
+#[module = "Aimax.Core.BufferHistory.Op"]
+struct Op {
+    kind: String,
+    pos: i64,
+    inserted: String,
+    deleted: i64,
+}
+
+fn text_op(op: &loro::JsonOp) -> Option<Op> {
+    match &op.content {
+        loro::JsonOpContent::Text(loro::JsonTextOp::Insert { pos, text }) => Some(Op {
+            kind: "insert".into(),
+            pos: *pos as i64,
+            inserted: text.clone(),
+            deleted: 0,
+        }),
+        loro::JsonOpContent::Text(loro::JsonTextOp::Delete { pos, len, .. }) => Some(Op {
+            kind: "delete".into(),
+            pos: *pos as i64,
+            inserted: String::new(),
+            deleted: *len as i64,
+        }),
+        _ => None,
+    }
 }
 
 rustler::init!("Elixir.Aimax.Core.BufferHistoryNif");

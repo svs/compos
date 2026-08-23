@@ -207,8 +207,9 @@ buffer names.
 `checkpoint/1` (`buffer.ex:1187`) serializes flattened text today, and
 `restored_state/1` (`:1161`) calls `Rope.new(cp[:text])`. Add exported history bytes
 beside the text, so history survives eviction while the text keeps its current recovery
-path. `provenance.sqlite3` becomes the index: the cell registry, the actor table, and
-the queries a DAG walk cannot answer cheaply.
+path. `provenance.sqlite3` keeps the cell registry, the actors, and the recording policy. It
+no longer keeps revisions: the history is the record, and the log file is where it
+lives.
 
 ### The metadata plane
 
@@ -395,13 +396,13 @@ arrives with the transport in Phase 6. Converting them now would churn correct c
 put a NIF call on the point path for no change in behaviour, so it waits for the phase
 that needs it.
 
-**Phase 5 - the history becomes durable.** In progress.
+**Phase 5 - the history becomes durable, and is the only record. Done.**
 
-Done: the history survives eviction and restart. `BufferHistoryStore` keeps one log file
-per buffer under `~/.aimax/history/`, a sequence of length-prefixed blobs: a snapshot
-first, updates after. Measured on an 85 KB source file, a snapshot is 74 KB and 500 typed
-characters export as 1.2 KB, so appending on every checkpoint is affordable only in the
-update form. The log is rewritten as one snapshot when it outgrows four times the text.
+`BufferHistoryStore` keeps one log file per buffer under `~/.aimax/history/`, a sequence
+of length-prefixed blobs: a snapshot first, updates after. Measured on an 85 KB source
+file, a snapshot is 74 KB and 500 typed characters export as 1.2 KB, so appending on
+every checkpoint is affordable only in the update form. The log is rewritten as one
+snapshot when it outgrows four times the text.
 
 A torn tail is expected rather than exceptional. A crash between the write and the flush
 leaves a partial frame, so the reader stops at the first frame it cannot trust and keeps
@@ -411,10 +412,31 @@ When the text moved while the buffer was away, a file re-read from disk being th
 case, the history takes the new text as a change by a `system:reload` actor rather than
 being discarded.
 
-Left: `Buffer.provenance_history/1` and the SQLite revision rows it reads. `M-x
-buffer-log` still renders from them. Once it reads the change list instead,
-`flush_provenance` stops writing revisions and the store keeps only the cell registry,
-the actor table, and the recording policy.
+`flush_provenance` no longer writes revisions. `Buffer.provenance_history/1` is gone and
+`Buffer.change_log/1` replaces it, reading the weave. `M-x buffer-log` renders from that,
+so the store now keeps only the cell, the actors, and the recording policy.
+
+Four things came out of doing it.
+
+**A change names the end of its parent, not its parent.** Loro's `deps` point at the last
+operation of the change they follow, so a reader has to resolve a dependency back to the
+change that contains it before it means anything.
+
+**A delete records how many bytes it took, not the text.** The removed text is still in
+the history, but reading it back means checking out the version before the delete, which
+a list of rows does not do. The log shows the count.
+
+**Adjacent keystrokes are one operation.** The history run-length encodes a run, so five
+typed characters are one operation of five bytes rather than five of one. The old revision
+rows kept them apart.
+
+**An empty buffer has no root change.** A commit with no operations makes no change, so
+the first thing written into an empty buffer is the first change there is.
+
+The atomic lane keeps its promise. An agent edit commits and reaches the log before its
+caller hears that it worked, and a save does the same for the typing behind it. A
+replacement stays one change and one undo step, because closing between its delete and
+its insert would make it two.
 
 **Phase 6 - transport.** Additive, once a topology is chosen.
 

@@ -188,11 +188,27 @@ defmodule Aimax.Core.BufferHistory do
   `%{peer:, counter:, lamport:, timestamp:, message:}`. The message carries the
   actor, so this is the attribution record.
   """
-  def changes(%__MODULE__{res: res}) do
-    res
-    |> BufferHistoryNif.history_changes()
-    |> Enum.map(fn {peer, counter, lamport, timestamp, message} ->
-      %{peer: peer, counter: counter, lamport: lamport, timestamp: timestamp, message: message}
-    end)
+  defmodule Op do
+    @moduledoc "One operation inside a change. Positions are Loro's text index."
+    defstruct kind: "insert", pos: 0, inserted: "", deleted: 0
   end
+
+  defmodule Change do
+    @moduledoc """
+    One change: an actor's uninterrupted run of work, closed by a commit.
+
+    `deps` are the changes this one followed, which is the DAG. `message`
+    carries the actor and the group as JSON, because a Loro change has no
+    other durable field to put them in.
+    """
+    defstruct peer: 0,
+              counter: 0,
+              lamport: 0,
+              timestamp: 0,
+              message: "",
+              deps: [],
+              ops: []
+  end
+
+  def changes(%__MODULE__{res: res}), do: BufferHistoryNif.history_changes(res)
 end

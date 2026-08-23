@@ -152,10 +152,7 @@ so treat anything inside 43-53 as unchanged, and investigate outside it.
 
 ## State at handoff
 
-Commit `98dd0c8`. Suite: 40 failures in a clean worktree at HEAD. Measure
-in a worktree: another session edits this tree, and its uncommitted work
-adds failures that are not yours. Scheme suite: 118 tests, one red by
-design.
+Commit `79293c1`. Scheme suite: 146 tests, one red by design.
 
 In Scheme:
 
@@ -167,18 +164,24 @@ In Scheme:
 | `code-agent-mode-test.scm` | 11 (moved) |
 | `skills-test.scm` | 10 (moved) |
 | `groups-test.scm` | 9 |
+| `web-browse-test.scm` | 9 (moved) |
 | `mode-icon-test.scm` | 8 (moved) |
+| `chat-heal-test.scm` | 7 (moved) |
 | `keymap-test.scm` | 7 |
 | `edit-semantics-test.scm` | 6 (moved) |
+| `permission-test.scm` | 6 (moved) |
+| `sentry-test.scm` | 6 (moved) |
 | `imenu-test.scm` | 4 (moved) |
 | `buffer-cache-test.scm` | 3 (moved) |
 | `canary-test.scm` | 1, always red |
 
 ## What moved, and what could not
 
-83 tests moved. `graphql_test`, `imenu_test`, `buffer_cache_test` and
-`code_structure_test` are gone entirely. `apropos_test`, `skills_test` and
-`mode_icon_test` keep only what Scheme cannot hold.
+111 tests moved. `graphql_test`, `imenu_test`, `buffer_cache_test`,
+`code_structure_test` and `chat_heal_test` are gone entirely.
+`apropos_test`, `skills_test`, `mode_icon_test`, `sentry_test`,
+`permission_test` and `web_browse_test` keep only what Scheme cannot
+hold.
 
 Three limits decided every split:
 
@@ -188,13 +191,26 @@ Three limits decided every split:
   `mode_icon_test`.
 - **Scheme cannot set an environment variable.** There is `getenv` and no
   `setenv`. This is what holds `keys_test` where it is.
+- **Scheme cannot wait for an answer.** There is no poll and no sleep, so
+  a test that starts an asynchronous job and waits for it stays in ExUnit:
+  the LSP and MCP subprocess tests, and the Substack conversion.
 - **A registration is one-way.** `define-command`, `define-list-mode!`,
-  `public!` and `catalog-register!` all write registries with no removal
-  call. Tests that register clear the Scheme half by hand
-  (`*catalog*`, `*catalog-keys*`, `*public-api*`, `*public-keys*`,
-  `*list-modes*`, `*mode-setups*`, `*mode-docs*`, `*mode-icons*`). The M-x
+  `public!`, `define-tool!`, `allow-command-when!` and `catalog-register!`
+  all write registries with no removal call. Tests that register clear the
+  Scheme half by hand (`*catalog*`, `*catalog-keys*`, `*public-api*`,
+  `*public-keys*`, `*list-modes*`, `*mode-setups*`, `*mode-docs*`,
+  `*mode-icons*`, `*llm-tools*`, `*command-permission-rules*`). The M-x
   command table is Elixir, and a test command name stays until the next
   restart. A removal primitive would close this.
+
+## The suite runs in the live editor
+
+`M-x run-scheme-tests` runs against the person's own daemon. A test that
+touches a global must put it back, and that now includes their files and
+their window: `web-browse-test.scm` saves the visited-URL file and the
+current buffer before it browses. A test that seems to need a fixture on
+disk probably needs a seam instead — `sentry-test.scm` and
+`web-browse-test.scm` both replace one Scheme variable and reach nothing.
 
 ## The two red tests are gone, and so is the backfill
 
@@ -218,23 +234,57 @@ saw both. `no-entry-carries-the-same-key-twice` holds that line.
 
 ## The queue
 
-| file | tests | verdict |
+Every remaining file was read by what its assertions read, not by how
+much `Session.eval` it calls. Eval density lies: `chrome_test` is 32
+eval-heavy tests and none of them move, because they assert on frames a
+stub socket process received.
+
+Worth a pass, in this order:
+
+| file | movable | note |
 |---|---|---|
-| `keys_test` | 14 | needs a `setenv` primitive first |
-| `mcp_test` | 16 | 4 movable; the rest drive a real subprocess |
-| `lsp_primitives_test` | 5 | drives a fake server and polls it — stays |
-| `overlay_test` | 6 | `Buffer.set_overlays/2` is mechanism — stays |
-| `usage_shape_test` | 8 | `LLM.usage_strings/2` is Elixir — stays |
-| `session_safe_test` | 2 | proves the Session survives a bad eval — stays |
-| `buffer_replace_test` | 7 | mechanism — stays |
+| `annotate_test` | 9 of 25 | |
+| `group_switch_command_test` | 9 of 26 | 14 press keys |
+| `mcp_test` | 6-8 of 16 | `mcp-call!` connects and waits inside Scheme |
+| `chat_rename_test` | 7 of 14 | |
+| `marginalia_project_test` | 6 of 11 | |
+| `morg_test` | 6 of 32 | 20 press keys |
+| `help_test` | 5 of 25 | 20 press keys |
+| `paredit_test` | 5 of 42 | 36 press keys |
+| `mode_toggle_test` | 4 of 8 | |
+| `command_palette_test` | 4 of 9 | |
+| `code_mode_test` | 4 of 14 | |
 
-`mcp_test` has four tests that need no subprocess: the ACP translation,
-the system note, the quiet failure on an unknown preset, and
-`chat-tool-list`. The rest connect to `test/support/fake_mcp_server.exs`
-and wait for the handshake, which Scheme has no way to poll.
+Then two or three each in `grammar`, `mcp_hub`, `writing`, `occur_ts`,
+`fold_tag`, `feeds`, `scheme_ide`, `sockets`, `core` and `daemon`.
 
-**A `setenv` primitive would unlock `keys_test`.** It is one primitive,
-and the whole key chain is Scheme policy behind it.
+Blocked on a seam, not on judgement. Three small additions unlock 28
+tests:
+
+- **`setenv`** unlocks `keys_test` (14). The whole key chain is Scheme
+  behind it.
+- **`delete-directory!`** unlocks the four fixture tests still held in
+  `skills_test` and `mode_icon_test`.
+- **A Scheme-visible LLM stub seam** unlocks `chat_compact_test` (12).
+  It is pure policy otherwise, but the model is stubbed with
+  `Application.put_env(:aimax_core, :llm_request_fun, ...)`, which Scheme
+  cannot reach. `sentry-test.scm` shows the shape a Scheme seam should
+  take.
+
+Confirmed staying:
+
+| file | why |
+|---|---|
+| `editor_test` | 127 of 148 drive `KeyDispatch`, which is the point of it |
+| `chrome_test` | a stub socket process and the frames it receives |
+| `spotify_test` | the same wire, plus keys |
+| `chat_agent_test` | an Elixir Transport behaviour |
+| `author_test` | `Buffer` provenance calls |
+| `lsp_conn_test`, `lsp_primitives_test` | a fake server, polled |
+| `overlay_test`, `buffer_replace_test` | `Buffer` range mechanics |
+| `usage_shape_test` | `LLM.usage_strings/2` |
+| `session_safe_test` | proves the Session survives a bad eval |
+| the `aimax_scheme` suites | 76 tests of the interpreter, which is mechanism |
 
 ## Also open, unrelated to this task
 

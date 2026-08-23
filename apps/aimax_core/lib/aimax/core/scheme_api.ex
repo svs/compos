@@ -278,6 +278,8 @@ defmodule Aimax.Core.SchemeAPI do
         "(window-tree) — return the frame's window layout as an opaque value for window-tree-set!.",
       "window-tree-set!" =>
         "(window-tree-set! LAYOUT) — replace the frame's windows with a layout from window-tree.",
+      "window-tree-buffers" =>
+        "(window-tree-buffers LAYOUT) — return the buffer names a layout from window-tree holds.",
       "window-rects" =>
         "(window-rects) — return (WIN BUFFER X Y W H) rows with fractional rectangles.",
       "select-window!" =>
@@ -1080,6 +1082,10 @@ defmodule Aimax.Core.SchemeAPI do
         Editor.restore_tree(tree, active)
         :void
       end,
+      # A saved layout names buffers, and a name can outlive its buffer.
+      # Scheme decides what to do about that — visit the file, drop the
+      # window — so it must be able to read the names back out.
+      "window-tree-buffers" => fn [%{tree: tree}] -> tree_buffers(tree) end,
       "window-rects" => fn [] -> Editor.window_rects() end,
       "select-window!" => fn [id] -> Editor.set_active(id) == :ok end,
       "active-window" => fn [] -> Editor.active_window() end,
@@ -1748,6 +1754,10 @@ defmodule Aimax.Core.SchemeAPI do
   defp plain(v), do: v
 
   # the desktop's tuple spec for a window tree — what restore_tree accepts
+  defp tree_buffers({:leaf, b, _, _, _, _}), do: [b]
+  defp tree_buffers({:split, _, _, a, b}), do: tree_buffers(a) ++ tree_buffers(b)
+  defp tree_buffers(_), do: []
+
   defp tree_spec(%{type: :leaf, buffer: b} = leaf) do
     {:leaf, b, Map.get(leaf, :top, 0), Map.get(leaf, :point, 0), Map.get(leaf, :manual, false),
      Map.get(leaf, :ctop, 0)}

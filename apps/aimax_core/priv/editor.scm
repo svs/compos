@@ -604,8 +604,12 @@
 ;; drop the typed query and keep the mode's own kinds (dired's dotfiles).
 ;; No refresh: the caller is opening the list and draws it next.
 (define (list-clear-query! buf)
-  (buffer-set-local! buf 'list-filters
-    (filter (lambda (f) (not (equal? (car f) "match"))) (list-filters buf))))
+  (let* ((before (list-filters buf))
+         (rest (filter (lambda (f) (not (equal? (car f) "match"))) before)))
+    (buffer-set-local! buf 'list-filters rest)
+    ;; #t when it dropped a query, so the caller knows the rows in the
+    ;; buffer are narrower than the list now holds
+    (not (= (length before) (length rest)))))
 
 (define (list-filter-pop! buf)
   (let ((fs (list-filters buf)))
@@ -1320,7 +1324,8 @@
 ;; buffer. The mode setup calls it with (current-buffer); opening a list
 ;; calls it with the buffer it just made, so neither has to select first.
 (define (list-mode-init! buf name)
-  (let ((opts (list-mode-opts name)))
+  (let ((opts (list-mode-opts name))
+        (widened #f))
     (buffer-set-local! buf 'list-mode name)
     ;; derived content (S15): the refresh below re-renders it from
     ;; rows-fn, so the desktop saves mode + locals, not the rows
@@ -1331,7 +1336,7 @@
     ;; THIS time; a local persists, so C-x C-b days later opened on a
     ;; three-row list narrowed by a word you no longer remember typing.
     ;; The mode's own kinds (dired's dotfiles) are a setting, and stay.
-    (list-clear-query! buf)
+    (set! widened (list-clear-query! buf))
     ;; a list buffer's text IS its view. A buffer keeps the locals of the
     ;; mode before it, so dired on a directory that once held a diff kept
     ;; 'render-mode "blocks" and the window drew no rows at all.
@@ -1365,7 +1370,12 @@
     ;; from the network (sentry) froze the UI for the round trip — then
     ;; went back to sleep. 'cached renders the rows already in the buffer
     ;; and reaches the source only when there are none; `g` refetches.
-    (list-render! buf 'cached)
+    ;; ...unless the clear above just widened the list. The rows in the
+    ;; buffer are the ones a narrowing kept, so drawing them back would
+    ;; open the list on a query it no longer holds: the filters read
+    ;; empty and the rows stay narrow, for good. A dired listing that
+    ;; matched one file kept showing that file every time it re-opened.
+    (list-render! buf (if widened #t 'cached))
     ;; the rewrite leaves the buffer's point after the key bar — a list
     ;; opens with point on the first row
     (list-goto-index! buf 0)

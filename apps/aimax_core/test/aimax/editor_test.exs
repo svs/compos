@@ -2697,7 +2697,7 @@ defmodule Aimax.EditorTest do
     assert Editor.current_buffer() == plain
   end
 
-  test "C-x b is history first: previous buffer defaults, containers ride under it" do
+  test "the switch prompt is history first: previous buffer defaults, containers ride under it" do
     n = System.unique_integer([:positive])
     m1 = "ct-a-#{n}"
     m2 = "ct-b-#{n}"
@@ -2740,8 +2740,7 @@ defmodule Aimax.EditorTest do
     # arrangement is what comes up.)
     open_switch_prompt()
 
-    {:ok, _} =
-      Aimax.Core.Session.eval(~s{(buffer-set-local! (group-chat "#{id}") 'group-layout #f)})
+    {:ok, _} = Aimax.Core.Session.eval(~s{(group-record-update! "#{id}" 'layout #f)})
 
     type(m1)
     press(["C-RET"])
@@ -2824,19 +2823,21 @@ defmodule Aimax.EditorTest do
     home = "hs-home-#{n}"
     for x <- [m1, m2, home], do: Aimax.Core.create_buffer(x)
 
-    {:ok, _} =
-      Aimax.Core.Session.eval("""
-      (begin (set-frame-local! 'current-group #f)
-             (delete-other-windows!)
-             (switch-to-buffer! "#{m1}")
-             (switch-to-buffer! "#{m2}")
-             (buffer-set-local! "#{m1}" 'group "hsgrp-#{n}")
-             (buffer-set-local! "#{m2}" 'group "hsgrp-#{n}")
-             (switch-to-group! "hsgrp-#{n}")
-             (switch-to-buffer! "#{home}")
-             ;; leave the context: the frame stands nowhere now, so the
-             ;; group is history like anything else
-             (set-frame-local! 'current-group #f))
+    id =
+      group_id!("""
+      (let ((id (group-record-create! "hsgrp-#{n}")))
+        (set-frame-local! 'current-group #f)
+        (delete-other-windows!)
+        (switch-to-buffer! "#{m1}")
+        (switch-to-buffer! "#{m2}")
+        (buffer-add-group! "#{m1}" id)
+        (buffer-add-group! "#{m2}" id)
+        (switch-to-group! id)
+        (switch-to-buffer! "#{home}")
+        ;; leave the context: the frame stands nowhere now, so the
+        ;; group is history like anything else
+        (set-frame-local! 'current-group #f)
+        id)
       """)
 
     # the switch is itself a history entry: the group's card leads the
@@ -2857,8 +2858,10 @@ defmodule Aimax.EditorTest do
     open_switch_prompt()
     press(["RET"])
 
-    assert Aimax.Core.Session.eval("(frame-local 'current-group)") ==
-             {:ok, ~s{"hsgrp-#{n}"}}
+    # a group's name can change and its ID cannot, so the frame stands in
+    # the ID and the test reads the name off it
+    assert Aimax.Core.Session.eval("(frame-local 'current-group)") == {:ok, ~s{"#{id}"}}
+    assert group_name(id) == "hsgrp-#{n}"
 
     assert Editor.current_buffer() in [m1, m2]
 
@@ -3084,11 +3087,16 @@ defmodule Aimax.EditorTest do
     {:ok, _} =
       Aimax.Core.Session.eval(~s{(begin (delete-other-windows!) (switch-to-buffer! "#{buf}"))})
 
-    open_group_switcher()
+    # switch-visit founds a group named the narrowing when no row matches.
+    # The group-aware prompt does not: it only switches.
+    open_modal_switcher()
     type("zzqxw-#{n}")
     press(["RET"])
-    assert Aimax.Core.Session.eval(~s{(buffer-group "#{buf}")}) == {:ok, ~s{"zzqxw-#{n}"}}
-    {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-set-local! "#{buf}" 'group #f)})
+
+    id = buffer_group(buf)
+    assert id, "#{buf} joined no group"
+    assert group_name(id) == "zzqxw-#{n}"
+    {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-move-to-group! "#{buf}" #f)})
   end
 
   test "the groups board lists a group; noise cycles and persists" do
@@ -3328,15 +3336,16 @@ defmodule Aimax.EditorTest do
 
     {:ok, _} =
       Aimax.Core.Session.eval("""
-      (begin (set-frame-local! 'current-group #f)
-             (delete-other-windows!)
-             (visit "#{f}")
-             (buffer-set-local! "#{f}" 'group "gsgrp-#{n}")
-             (group-layout-save! "gsgrp-#{n}")
-             (switch-to-buffer! "#{home}")
-             (buffer-kill! "#{f}")
-             (switch-to-group! "gsgrp-#{n}")
-             #t)
+      (let ((id (group-record-create! "gsgrp-#{n}")))
+        (set-frame-local! 'current-group #f)
+        (delete-other-windows!)
+        (visit "#{f}")
+        (buffer-add-group! "#{f}" id)
+        (group-layout-save! id)
+        (switch-to-buffer! "#{home}")
+        (buffer-kill! "#{f}")
+        (switch-to-group! id)
+        #t)
       """)
 
     assert Editor.current_buffer() == f

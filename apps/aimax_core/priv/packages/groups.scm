@@ -611,6 +611,17 @@
 (public! 'define-scene! "(define-scene! NAME SPEC) — declare a group's arrangement; SPEC is (DIR RATIO PANE ...) where a PANE is \"NAME\", (ensure \"NAME\" \"COMMAND\"), or group-chat")
 (public! 'scene-open! "(scene-open! NAME) — stand in the scene's group and build its arrangement, making any missing pane")
 
+;; A layout names buffers, and a member killed since it was saved is a
+;; name with nothing behind it. The window restore makes a buffer for
+;; every name it finds, so a killed file came back as an empty buffer
+;; carrying the path of a file that still holds its text. Visit the file
+;; first: the same rule the desktop restore keeps.
+(define (group-revive-layout-files! saved)
+  (for-each (lambda (b)
+              (when (and (not (buffer-known? b)) (file-exists? b))
+                (visit b)))
+            (window-tree-buffers saved)))
+
 (define (switch-to-group! g)
   (let ((id (begin (group-migrate-live!) (group-resolve-id g))))
     (if (not id)
@@ -627,6 +638,7 @@
           (let ((saved (group-layout id)))
             (if saved
                 (begin
+                  (group-revive-layout-files! saved)
                   (window-tree-set! saved)
                   (group-restore-prune! id))
                 (begin

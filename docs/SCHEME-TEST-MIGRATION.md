@@ -152,21 +152,20 @@ so treat anything inside 43-53 as unchanged, and investigate outside it.
 
 ## State at handoff
 
-Commit `d19d4b0`. Suite: 40 failures in a clean worktree at HEAD, and
-the Scheme suite is green there. Measure in a worktree: another session
-edits this tree, and its uncommitted work adds failures that are not
-yours. Scheme suite: 115 tests, one
-red by design.
+Commit `98dd0c8`. Suite: 40 failures in a clean worktree at HEAD. Measure
+in a worktree: another session edits this tree, and its uncommitted work
+adds failures that are not yours. Scheme suite: 118 tests, one red by
+design.
 
 In Scheme:
 
 | file | tests |
 |---|---|
-| `apropos-test.scm` | 19 (moved) |
 | `graphql-test.scm` | 24 (moved) |
+| `apropos-test.scm` | 22 (moved) |
 | `code-structure-test.scm` | 13 (moved) |
-| `skills-test.scm` | 10 (moved) |
 | `code-agent-mode-test.scm` | 11 (moved) |
+| `skills-test.scm` | 10 (moved) |
 | `groups-test.scm` | 9 |
 | `mode-icon-test.scm` | 8 (moved) |
 | `keymap-test.scm` | 7 |
@@ -175,9 +174,9 @@ In Scheme:
 | `buffer-cache-test.scm` | 3 (moved) |
 | `canary-test.scm` | 1, always red |
 
-## What the last pass moved, and what it left
+## What moved, and what could not
 
-81 tests moved. `graphql_test`, `imenu_test`, `buffer_cache_test` and
+83 tests moved. `graphql_test`, `imenu_test`, `buffer_cache_test` and
 `code_structure_test` are gone entirely. `apropos_test`, `skills_test` and
 `mode_icon_test` keep only what Scheme cannot hold.
 
@@ -196,6 +195,26 @@ Three limits decided every split:
   `*list-modes*`, `*mode-setups*`, `*mode-docs*`, `*mode-icons*`). The M-x
   command table is Elixir, and a test command name stays until the next
   restart. A removal primitive would close this.
+
+## The two red tests are gone, and so is the backfill
+
+The first pass left two tests in ExUnit because they were red: the
+bundled backfill and the frozen Luna count. `ffbdb8a` answered them by
+deleting the Luna backfill — the artifact guessed domain and effects for
+496 entries, the effects feed the permission policy, and the artifact was
+stale. `metadata-source` now has two values, "declared" and "unknown".
+
+`9effeee` then moved both tests, rewritten against that reality:
+`an-entry-declares-its-metadata-or-admits-it-does-not-know` holds the two
+values, and `unstamped-bundled-declarations-do-not-multiply` freezes the
+unstamped count at 587. **Lower that number, never raise it.** A new
+declaration stamps itself.
+
+`98dd0c8` fixed a real bug the move surfaced: `catalog-register!`
+appended the caller's meta plist after the keys it computed from it, so
+an entry carried `domain` twice — once as a string and once as a symbol.
+`plist-get` reads the first, so a reader saw the right value and a walker
+saw both. `no-entry-carries-the-same-key-twice` holds that line.
 
 ## The queue
 
@@ -216,15 +235,6 @@ and wait for the handshake, which Scheme has no way to poll.
 
 **A `setenv` primitive would unlock `keys_test`.** It is one primitive,
 and the whole key chain is Scheme policy behind it.
-
-## One thing to know about the live editor
-
-`M-x run-scheme-tests` runs against a daemon that hot-reloaded packages.
-The reload path stamps `origin "user"`, so the Luna backfill does not
-apply to a reloaded package, and its catalog entry can read different
-effects than a fresh boot gives. `notmuch-trash` shows this: `("write")`
-in a long-lived daemon, `("destroy")` on a fresh boot. CI boots fresh.
-Restart before trusting a catalog failure in the live editor.
 
 ## Also open, unrelated to this task
 

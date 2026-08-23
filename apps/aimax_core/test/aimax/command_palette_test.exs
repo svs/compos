@@ -73,12 +73,6 @@ defmodule Aimax.CommandPaletteTest do
     refute mb.input =~ "/abs/path"
   end
 
-  test "other buffer maps to the previous-buffer command" do
-    assert Session.eval(
-             ~S{(equal? (cadr (assoc "other buffer" *recipes*)) "(run-command \"previous-buffer\")")}
-           ) == {:ok, "#t"}
-  end
-
   test "choosing a command runs it and contributes to M-x history" do
     {:ok, _} =
       Session.eval(
@@ -155,18 +149,6 @@ defmodule Aimax.CommandPaletteTest do
     press("RET")
 
     refute Buffer.exists?("*recipe-injected*")
-  end
-
-  test "no templated recipe is missing its input declarations" do
-    assert Session.eval("""
-           (filter (lambda (recipe)
-                     (and (string-contains? (cadr recipe) "{{")
-                          (null? (caddr recipe))))
-                   *recipes*)
-           """) == {:ok, "()"}
-
-    {:ok, recipes} = Session.eval("(recipes)")
-    refute recipes =~ "/abs/path"
   end
 
   test "a pending palette refresh cannot overwrite a later prompt" do

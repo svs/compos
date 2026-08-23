@@ -1,7 +1,10 @@
 defmodule Aimax.PareditTest do
   @moduledoc """
   paredit.scm driven through KeyDispatch.handle_key/1 — the same path
-  the GUI uses. The scanner tests call the pure functions directly.
+  the GUI uses. paredit IS key behaviour, so this is where it belongs.
+
+  The scanner takes text and an offset and answers an offset. Those tests
+  are Scheme and live in priv/tests/paredit-scan-test.scm.
   """
 
   use ExUnit.Case
@@ -39,38 +42,6 @@ defmodule Aimax.PareditTest do
   end
 
   # --- scanner ---------------------------------------------------------------
-
-  test "par-scan-forward walks lists, atoms, strings, and char literals" do
-    assert eval!(~S{(par-scan-forward "(foo bar) baz" 0)}) == "9"
-    assert eval!(~S{(par-scan-forward "(foo bar) baz" 9)}) == "13"
-    assert eval!(~S{(par-scan-forward "'(a b) c" 0)}) == "6"
-    assert eval!(~S{(par-scan-forward "\"a\\\"b\" c" 0)}) == "6"
-    assert eval!(~S{(par-scan-forward "#\\( x" 0)}) == "3"
-    assert eval!(~S{(par-scan-forward "; c\nfoo" 0)}) == "7"
-    assert eval!(~S{(par-scan-forward "#|x (|# foo" 0)}) == "11"
-  end
-
-  test "par-scan-forward answers #f at a closer or at end of text" do
-    assert eval!(~S{(par-scan-forward "(a) " 3)}) == "#f"
-    assert eval!(~S{(par-scan-forward "(a b)" 4)}) == "#f"
-  end
-
-  test "par-scan-backward finds the previous sibling start" do
-    assert eval!(~S{(par-scan-backward "(a bb)" 5)}) == "3"
-    assert eval!(~S{(par-scan-backward "(a bb)" 3)}) == "1"
-    assert eval!(~S{(par-scan-backward "(a bb)" 1)}) == "#f"
-    assert eval!(~S{(par-scan-backward "(a) (b) x" 8)}) == "4"
-  end
-
-  test "par-up and par-close see the enclosing list through strings and comments" do
-    assert eval!(~S{(par-up "(a (b c) d)" 5)}) == "3"
-    assert eval!(~S{(par-up "(a (b c) d)" 2)}) == "0"
-    assert eval!(~S{(par-up "x y" 2)}) == "#f"
-    assert eval!(~S{(par-close "(a (b c) d)" 5)}) == "7"
-    assert eval!(~S{(par-up "(a \"))\" b)" 8)}) == "0"
-    assert eval!(~S{(par-close "(a ;)
- b)" 3)}) == "8"
-  end
 
   # --- motion through keys ---------------------------------------------------
 
@@ -493,10 +464,4 @@ defmodule Aimax.PareditTest do
     eval!("(set! paredit-in-scheme-mode #t)")
   end
 
-  test "the keys pass through only when another paredit buffer installed them" do
-    # the dispatcher commands are global; a plain buffer only reaches
-    # them when its own keymap binds them, so this asserts the local map
-    buf = fresh_buffer("(a)\n", plain: true)
-    assert eval!(~s{(local-keys "#{buf}")}) == "()"
-  end
 end

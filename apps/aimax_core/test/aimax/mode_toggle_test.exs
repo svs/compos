@@ -3,6 +3,9 @@ defmodule Aimax.ModeToggleTest do
   A mode toggles from the modeline. The modeline names the major mode; the
   expanded modeline names the minor modes. Both send "mode:NAME" through the
   one click gate, ui-command!.
+
+  The toggle itself is Scheme and lives in priv/tests/mode-toggle-test.scm.
+  What stays here reads a grammar through Buffer, or a rendered window.
   """
 
   use ExUnit.Case
@@ -27,18 +30,6 @@ defmodule Aimax.ModeToggleTest do
   defp click(name, mode) do
     eval!(~s{(with-current-buffer "#{name}" (lambda () (ui-command! "mode:#{mode}" #f)))})
     Editor.render_state().echo
-  end
-
-  test "a minor mode toggles off and on, and the echo area states each result" do
-    name = fresh_buffer("alpha\n")
-    eval!(~s{(run-command "visual-line-mode")})
-    assert eval!(~s{(minor-mode-on? "#{name}" "visual-line-mode")}) == "#t"
-
-    assert click(name, "visual-line-mode") =~ "visual-line-mode disabled"
-    assert eval!(~s{(minor-mode-on? "#{name}" "visual-line-mode")}) == "#f"
-
-    assert click(name, "visual-line-mode") =~ "visual-line-mode enabled"
-    assert eval!(~s{(minor-mode-on? "#{name}" "visual-line-mode")}) == "#t"
   end
 
   test "the major mode leaves for Fundamental and takes its grammar with it" do
@@ -76,12 +67,6 @@ defmodule Aimax.ModeToggleTest do
     assert Buffer.ts_highlight(path) != []
   end
 
-  test "a buffer with no file has no mode to derive" do
-    name = fresh_buffer("alpha\n")
-    assert click(name, "Fundamental") =~ "no mode for this buffer"
-    assert eval!(~s{(buffer-local "#{name}" 'mode-name)}) == "#f"
-  end
-
   test "a view mode gives the buffer back: no preview, no read-only" do
     name = fresh_buffer("# a page\n")
     eval!(~s{(begin (buffer-set-local! "#{name}" 'render-mode "markdown")
@@ -112,20 +97,4 @@ defmodule Aimax.ModeToggleTest do
     assert eval!(~s{(buffer-local "#{name}" 'mode-name)}) == ~s("elixir-mode")
   end
 
-  test "a command for another mode enters it, it does not leave the current one" do
-    name = fresh_buffer("<p>hi</p>\n")
-    eval!(~s{(with-current-buffer "#{name}" (lambda () (run-command "elixir-mode")))})
-
-    assert click(name, "html-mode") =~ "html-mode on"
-    assert eval!(~s{(buffer-local "#{name}" 'mode-name)}) == ~s("html-mode")
-    assert eval!(~s{(buffer-local "#{name}" 'ts-lang)}) == ~s("html")
-  end
-
-  test "text-mode is a mode like any other, so it leaves too" do
-    name = fresh_buffer("alpha\n")
-    eval!(~s{(with-current-buffer "#{name}" (lambda () (set-mode! "text-mode")))})
-
-    assert click(name, "text-mode") =~ "text-mode off"
-    assert eval!(~s{(buffer-local "#{name}" 'mode-name)}) == "#f"
-  end
 end

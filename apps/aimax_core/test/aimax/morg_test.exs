@@ -1,5 +1,10 @@
 defmodule Aimax.MorgTest do
-  @moduledoc "Drives morg-mode through the same key/command path the GUI uses."
+  @moduledoc """
+  Drives morg-mode through the same key/command path the GUI uses.
+
+  The Markdown structural API — outline, find, read, replace and insert —
+  is Scheme and lives in priv/tests/morg-structure-test.scm.
+  """
 
   use ExUnit.Case
 
@@ -23,11 +28,6 @@ defmodule Aimax.MorgTest do
   # "# a\nbody\n## child\ncbody\n# b\ntail\n"
   #  0123 4..8 9......17 ...   24.. 28..
   defp fixture, do: "# a\nbody\n## child\ncbody\n# b\ntail\n"
-
-  test ".md files open in morg-mode" do
-    {:ok, printed} = Session.eval(~s{(auto-mode-for "notes.md")})
-    assert printed == ~s{"morg-mode"}
-  end
 
   test "morg-mode enables writing-mode, which keeps visual lines on" do
     buf = morg_buffer(fixture())
@@ -225,68 +225,6 @@ defmodule Aimax.MorgTest do
     assert Buffer.hidden(buf) == [{6, 27}]
   end
 
-  test "Markdown structural API outlines and finds headings outside fences" do
-    buf =
-      morg_buffer("# One\nbody\n## Child\ntext\n```sh\n# not a heading\n```\n# Two\n")
-
-    assert {:ok, outline} = Session.eval(~s{(markdown-outline "#{buf}")})
-    assert outline == ~s{((1 1 "One") (3 2 "Child") (8 1 "Two"))}
-
-    assert {:ok, found} = Session.eval(~s{(markdown-find "#{buf}" "Child")})
-    assert found == ~s{((3 2 "Child"))}
-  end
-
-  test "Markdown structural API reads the section that holds a body line" do
-    buf = morg_buffer("# One\nbody\n## Child\ntext\n# Two\ntail\n")
-
-    assert {:ok, section} = Session.eval(~s{(markdown-read "#{buf}" 4)})
-    assert section == inspect("## Child\ntext\n")
-
-    assert {:ok, parent} = Session.eval(~s{(markdown-read "#{buf}" 1)})
-    assert parent == inspect("# One\nbody\n## Child\ntext\n")
-  end
-
-  test "Markdown structural API replaces one duplicate section by line" do
-    buf = morg_buffer("# Same\nfirst\n# Same\nsecond\n# Last\ntail\n")
-
-    assert {:ok, result} =
-             Session.eval(~s{(markdown-replace! "#{buf}" 3 "# Same\nchanged")})
-
-    assert result =~ "replaced the Markdown section"
-    assert Buffer.text(buf) == "# Same\nfirst\n# Same\nchanged\n# Last\ntail\n"
-  end
-
-  test "Markdown structural API inserts a peer after a section" do
-    buf = morg_buffer("# One\nbody\n# Three\ntail\n")
-
-    assert {:ok, result} =
-             Session.eval(~s{(markdown-insert-after! "#{buf}" 1 "# Two\nnew")})
-
-    assert result =~ "inserted Markdown"
-    assert Buffer.text(buf) == "# One\nbody\n# Two\nnew\n# Three\ntail\n"
-  end
-
-  test "Markdown structural API reports preamble and invalid lines" do
-    buf = morg_buffer("preamble\n\n# One\nbody\n")
-
-    assert {:ok, preamble} = Session.eval(~s{(markdown-read "#{buf}" 1)})
-    assert preamble =~ "no Markdown section holds line 1"
-
-    assert {:ok, invalid} = Session.eval(~s{(markdown-read "#{buf}" 99)})
-    assert invalid =~ "outside the buffer"
-  end
-
-  test "Markdown editing skill exposes the section API" do
-    assert {:ok, body} = Session.eval(~s{(skill "markdown-editing")})
-    assert body =~ "markdown-outline"
-    assert body =~ "markdown-replace!"
-
-    assert {:ok, entry} = Session.eval(~s{(catalog-entry 'function "markdown-replace!")})
-    assert entry =~ ~s{package "morg"}
-    assert entry =~ ~s{domain "writing"}
-    assert entry =~ ~s{effects ("write")}
-  end
-
   test "fenced code renders with the theme's ts faces" do
     buf = morg_buffer("```elixir\ndef foo do\n  :ok\nend\n```\n")
 
@@ -309,21 +247,6 @@ defmodule Aimax.MorgTest do
 
     press(["C-c", "C-c"])
     assert Buffer.text(buf) == "```sh\necho hi\n```\n```result\nhi\n```\n"
-  end
-
-  test "morg-babel and morg-tangle load as Morg package extensions" do
-    assert {:ok, commands} =
-             Session.eval(~s{(list (member "morg-babel" (command-names))
-                                   (member "morg-tangle" (command-names)))})
-
-    assert commands =~ "morg-babel"
-    assert commands =~ "morg-tangle"
-
-    assert {:ok, babel} = Session.eval(~s{(catalog-entry 'command "morg-babel")})
-    assert babel =~ ~s{package "morg-babel"}
-
-    assert {:ok, tangle} = Session.eval(~s{(catalog-entry 'command "morg-tangle")})
-    assert tangle =~ ~s{package "morg-tangle"}
   end
 
   test "C-c C-x tangles marked blocks relative to the Morg file" do

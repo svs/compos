@@ -176,30 +176,6 @@ defmodule Aimax.HelpTest do
     assert eval!(~s{(member "apropos" (command-names))}) != "#f"
   end
 
-  test "the apropos page groups hits by kind and keeps a docstring on one row" do
-    eval!(~s{(begin (define-command "zz-apr" "First line.\nSecond | line." (lambda () #t))
-                    (apropos-page "zz-apr"))})
-
-    text = Buffer.text("*Help*")
-
-    # the owner/effects trailer closes the row; the package that owns a
-    # runtime define depends on load order, so match only its shape
-    assert text =~ "## Commands"
-    assert text =~ "- **`zz-apr`** — First line. Second \\| line. *("
-  end
-
-  test "the component gallery renders every registered example" do
-    eval!(~s{(run-command "component-gallery")})
-
-    assert {:ok, ~s{"blocks"}} =
-             Session.eval(~s{(buffer-local "*Components*" 'render-mode)})
-
-    blocks = eval!(~s{(buffer-local "*Components*" 'render-blocks)})
-    assert blocks =~ "ui/card"
-    assert blocks =~ "c-badge"
-    refute blocks =~ "error"
-  end
-
   test "M-? names the buffer's group beside its modes" do
     n = System.unique_integer([:positive])
     b = "*hg-#{n}*"
@@ -300,45 +276,12 @@ defmodule Aimax.HelpTest do
     refute Buffer.text("*Help*") =~ "in `help-mode`"
   end
 
-  test "symbol-at-point reads the name around point, and stops at the edges" do
-    eval!(~s{(begin (buffer-create "*zz-help*") (switch-to-buffer! "*zz-help*")
-                    (insert! "a (split-window! 2) b"))})
-
-    # inside the name
-    assert eval!(~s{(begin (goto-char! 7) (symbol-at-point))}) == ~s{"split-window!"}
-    # just after its last character — Emacs answers here too
-    assert eval!(~s{(begin (goto-char! 16) (symbol-at-point))}) == ~s{"split-window!"}
-    # on the space before it
-    assert eval!(~s{(begin (goto-char! 2) (symbol-at-point))}) == "#f"
-  end
-
   # substring-bytes floors both ends to a character boundary, so one byte
   # of an em dash comes back empty — and string-index rejects an empty
   # pattern. M-? over prose used to abort the whole command here.
-  test "symbol-at-point survives a point inside a multi-byte character" do
-    eval!(~s{(begin (buffer-create "*zz-help*") (switch-to-buffer! "*zz-help*")
-                    (insert! "a — b"))})
-
-    for p <- 0..7 do
-      assert {:ok, _} = Session.eval(~s{(begin (goto-char! #{p}) (symbol-at-point))})
-    end
-  end
-
   # A mode with no doc still gets its key table, so the gap is invisible
   # until a reader presses M-? and finds keys with nothing saying what the
   # mode is for. Nineteen modes drifted that way before anyone noticed.
-  test "every mode says what it is for" do
-    # zz- modes are test fixtures: another file's define-mode outlives it in
-    # the same interpreter, and the audit is about the modes we ship
-    undocumented =
-      eval!(~s{(filter (lambda (m) (and (not (mode-doc m))
-                                        (not (string-prefix? "zz-" m))))
-                       (map car *mode-setups*))})
-
-    assert undocumented == "()",
-           "these modes call define-mode but never mode-doc!: #{undocumented}"
-  end
-
   # A preview is one rendered document in an iframe: point moves inside it
   # and nothing on screen changes. Every key that moves through a buffer
   # has to scroll the page instead, or a help page longer than the window

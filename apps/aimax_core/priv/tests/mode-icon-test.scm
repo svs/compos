@@ -4,8 +4,9 @@
 ;;; looks like a chat wherever it is listed. The glyphs are Nerd Font
 ;;; characters: one cell each, in the colour of the text.
 ;;;
-;;; The two dired tests stay in ExUnit: they need a directory of files on
-;;; disk, and this Scheme has no way to remove one.
+;;; The two listing tests came here from ExUnit. They need a directory of
+;;; files on disk, so they build one under (aimax-home) and remove it with
+;;; shell-command->string.
 
 (domain! 'testing)
 (effects! '(write))
@@ -107,3 +108,59 @@
       (check-true! (< (t--icon-at note t--icon-chat) (t--icon-at note "chat-mode"))
                    "the icon leads the name"))
     (buffer-kill! "*zz-icon-chat2*")))
+
+;;; --- the listings, over a directory the test builds -------------------------
+
+(define t--icon-md "")
+(define t--icon-dir (string-append (aimax-home) "/zz-icon-dir"))
+
+(define (t--icon-dir-make!)
+  (shell-command->string (string-append "rm -rf " t--icon-dir))
+  (shell-command->string (string-append "mkdir -p " t--icon-dir "/subdir"))
+  (write-file! (string-append t--icon-dir "/one.ex") "x\n")
+  (write-file! (string-append t--icon-dir "/two.md") "# x\n"))
+
+(define (t--icon-dir-remove!)
+  (shell-command->string (string-append "rm -rf " t--icon-dir)))
+
+(effects! '(write))
+
+(deftest 'dired-leads-each-row-with-the-icon
+  "one registry, read by the listing too"
+  (lambda ()
+    (t--icon-dir-make!)
+    (dired-open t--icon-dir)
+    (let ((text (buffer-text t--icon-dir)))
+      (for-each
+        (lambda (pair)
+          (let ((name (car pair)) (icon (cadr pair)))
+            (let ((row (t--icon-row text name)))
+              (check-true! (string? row) (string-append "the listing names " name))
+              (when (string? row)
+                (check-contains! row icon (string-append name " wears its icon"))
+                (check-true! (< (t--icon-at row icon) (t--icon-at row name))
+                             (string-append "the icon leads " name))))))
+        ;; ".." is a directory too, and it wears Dired's icon
+        (list (list "one.ex" t--icon-elixir)
+              (list "two.md" t--icon-md)
+              (list "subdir/" t--icon-dired)
+              (list ".." t--icon-dired))))
+    (buffer-kill! t--icon-dir)
+    (t--icon-dir-remove!)))
+
+(deftest 'the-file-prompt-annotates-with-the-same-icon
+  "the prompt reads the name, so the glyph follows the name"
+  (lambda ()
+    (t--icon-dir-make!)
+    (let ((held *marginalia-file-dir*))
+      (set! *marginalia-file-dir* (string-append t--icon-dir "/"))
+      (let ((notes (annotate 'file (list "one.ex" "subdir/"))))
+        (let ((file (cadr (car notes))) (dir (cadr (nth 1 notes))))
+          (check-contains! file "elixir-mode" "the file names its mode")
+          (check-contains! file t--icon-elixir "and wears its icon")
+          (check-true! (< (t--icon-at file t--icon-elixir) (t--icon-at file "elixir-mode"))
+                       "the icon leads the name")
+          (check-contains! dir "Dired" "the directory names Dired")
+          (check-contains! dir t--icon-dired "and wears the Dired icon")))
+      (set! *marginalia-file-dir* held))
+    (t--icon-dir-remove!)))

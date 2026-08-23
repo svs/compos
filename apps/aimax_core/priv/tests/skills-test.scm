@@ -1,8 +1,9 @@
 ;;; skills-test.scm --- skills.scm: the skill catalog and the sanitized
 ;;; Codex home.
 ;;;
-;;; Two tests stay in ExUnit: they build skill directories on disk, and
-;;; this Scheme has make-directory! but no way to remove one.
+;;; The two directory tests came here from ExUnit. A test builds its own
+;;; skill directory under (aimax-home) and removes it with
+;;; shell-command->string, so nothing is left behind.
 
 (domain! 'testing)
 (effects! '(read))
@@ -83,3 +84,54 @@
   (lambda ()
     (check-false! (plist-get (agent-resolve-config '(connector "api")) 'env)
                   "the api lane adds nothing")))
+
+;;; --- the catalog reads directories, so these tests build one ----------------
+
+(define t--skill-dir (string-append (aimax-home) "/skills/zz-user-skill"))
+
+(define (t--skill-write! body)
+  (write-file! (string-append t--skill-dir "/SKILL.md")
+               (string-append "---\nname: zz-user-skill\n"
+                              "description: A user skill for the test.\n---\n\n"
+                              body "\n")))
+
+(deftest 'a-user-skill-in-the-home-joins-the-catalog-and-wins-by-name
+  "the home directory is a source like priv/skills, and it is read last"
+  (lambda ()
+    (shell-command->string (string-append "mkdir -p " t--skill-dir))
+    (t--skill-write! "The user's own instructions.")
+    (skills-scan!)
+    (check-true! (assoc "zz-user-skill" (skills)) "the listing names it")
+    (check-contains! (skill "zz-user-skill") "The user's own instructions." "the body")
+
+    ;; the body comes off disk at every call, so an edit needs no rescan
+    (t--skill-write! "Changed on disk after the scan.")
+    (check-contains! (skill "zz-user-skill") "Changed on disk after the scan."
+                     "the body after the edit")
+
+    (shell-command->string (string-append "rm -rf " t--skill-dir))
+    (skills-scan!)
+    (check-false! (assoc "zz-user-skill" (skills)) "and it leaves no row")))
+
+(deftest 'the-sweep-keeps-codexs-own-state-dirs-and-still-drops-a-stale-skill
+  "codex writes under .system, which carries no SKILL.md of its own"
+  (lambda ()
+    ;; its own home, never (codex-home): the sweep deletes what it does not
+    ;; recognise, and in a live editor that is the person's real codex state
+    (let* ((home (string-append (aimax-home) "/zz-codex-home"))
+           (system (string-append home "/skills/.system/imagegen"))
+           (stale (string-append home "/skills/zz-stale")))
+      (shell-command->string (string-append "rm -rf " home))
+      (shell-command->string (string-append "mkdir -p " system))
+      (shell-command->string (string-append "mkdir -p " stale))
+      (write-file! (string-append stale "/SKILL.md") "gone soon")
+
+      (codex-home-render-skills! home)
+
+      (check-true! (file-exists? system) "the .system directory survives the sweep")
+      (check-false! (file-exists? (string-append stale "/SKILL.md"))
+                    "and the stale skill does not")
+      (check-true! (file-exists? (string-append home "/skills/code-editing/SKILL.md"))
+                   "the bundled skills are rendered in its place")
+
+      (shell-command->string (string-append "rm -rf " home)))))

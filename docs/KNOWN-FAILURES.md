@@ -18,6 +18,37 @@ same way:
 - `the switcher narrows by the annotation the marginalia supplies` — the
   modal switcher does not narrow.
 
+## Faster ways to ask
+
+`mix test` has the flags for this; reach for them before a four-minute
+partition run.
+
+**`--failed`** runs only the tests that failed the last time they ran —
+RSpec's `--only-failures`. The manifest is
+`_build/test/lib/<app>/.mix/.mix_test_failures`, one per umbrella app, and
+it accumulates across invocations rather than holding only the last run.
+Use it for the re-check loop after a fix:
+
+```sh
+cd apps/aimax_core && mix test --failed
+```
+
+It answers "what failed when I last ran it". It cannot answer "was this
+already red before my change" — by the time you ask, your change is in.
+That question is what this file is for.
+
+**`--stale`** runs only the tests referencing modules that changed. The
+inner loop while editing.
+
+**`--repeat-until-failure N`** is the one for the 21 names below that fail
+in one run out of ten. Characterising a flake by re-running the whole
+suite and waiting to see if a name comes back costs four minutes a
+sample; this costs one test:
+
+```sh
+cd apps/aimax_core && mix test --repeat-until-failure 50 test/aimax/switcher_sleep_test.exs
+```
+
 ## How to use it
 
 Run `bin/test-fast` in a worktree at HEAD, not in the shared checkout —

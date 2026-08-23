@@ -70,7 +70,7 @@ Loro has no line index. It offers `insert_utf8`, `delete_utf8`, `len_utf8`, `spl
 `char_at`, and nothing equivalent to `rope_byte_to_line`, `rope_line_to_byte`, or
 `rope_line_count` (`rope_nif.ex:10-12`), which the point, the renderer, and every
 motion call constantly. ropey answers those in O(log n), so `rope.ex` and
-`native/aimax_rope` stay untouched.
+`apps/aimax_core/native/aimax_rope` stay untouched.
 
 ## Actors, undo, and cursors
 
@@ -83,6 +83,10 @@ The existing `source` becomes the Loro origin string: `user`, `agent:codex`, `ed
 - `add_exclude_origin_prefix(prefix)` keeps an origin out of a manager's stack. The
   human's manager excludes `agent:`, so agent edits never enter human undo. That is
   the fix for the bug above.
+- **Every manager must also exclude the `undo` origin.** An undo is itself a change,
+  and it carries the `undo` origin. Without the exclusion, one actor's undo lands on the
+  other actor's stack, so the other actor's next undo reverses it and restores work that
+  was just removed. Phase 0 reproduced this and confirmed the exclusion fixes it.
 - `group_start` / `group_end` handle an agent editing mid-group: "If the remote changes
   are conflicting we split the undo item and close the group."
 - `set_merge_interval(ms)` groups typing.
@@ -111,7 +115,7 @@ Two uses, neither of them an agent affordance:
 
 ## Design
 
-### New crate `native/aimax_loro`
+### New crate `apps/aimax_core/native/aimax_loro`
 
 ```rust
 struct DocState {
@@ -123,7 +127,7 @@ struct DocState {
 struct DocRes(Mutex<DocState>);
 ```
 
-Mutable behind a `Mutex`, like `TsRes` (`native/aimax_ts/src/lib.rs:397`), not like
+Mutable behind a `Mutex`, like `TsRes` in `aimax_ts/src/lib.rs:397`, not like
 `RopeRes`, which has immutable-value semantics.
 
 | NIF | Scheduler | Notes |
@@ -142,14 +146,23 @@ Mutable behind a `Mutex`, like `TsRes` (`native/aimax_ts/src/lib.rs:397`), not l
 
 **Pass text as `Binary`, never `String`.** Both existing crates take `text: String`,
 which copies the whole buffer into Rust on entry. `ts_state_highlight(res, text)`
-(`native/aimax_ts/src/lib.rs:454`) copies the entire buffer on every highlight and
-every structural motion keypress. Fix that in the same pass. It is the reason a NIF
+(`aimax_ts/src/lib.rs:454`) copies the entire buffer on every highlight and every
+structural motion keypress. Fix that in the same pass. It is the reason a NIF
 gets called slow.
 
 ### Changeset metadata
 
-- `set_next_commit_origin(origin)` - the actor, from `resolve_actor/2` (`buffer.ex:1425`)
-- `set_next_commit_message(msg)` - intent
+Origin and message are not interchangeable. **Only the message is durable.** `Change`
+carries `commit_msg`; it carries no origin field, and Phase 0 confirmed that origin does
+not survive an export and import. Origin is an event-time label that the undo managers
+filter on while the document is live.
+
+So every commit sets both:
+
+- `set_next_commit_message(msg)` - the durable record: the actor from `resolve_actor/2`
+  (`buffer.ex:1425`), its run id, and the intent
+- `set_next_commit_origin(origin)` - the live routing label: `user`, `agent:codex`,
+  `editor`, `process`, which is what `add_exclude_origin_prefix` matches
 - `set_next_commit_timestamp(ts)`
 - `set_change_merge_interval(i)` - merges adjacent same-peer changes, which is the
   interactive batching lane implemented in the library
@@ -210,16 +223,55 @@ project already put its rope in Rust.
 so the CRDT's own structure answers the Provenance questions. There is no Loro package
 on hex, so this NIF is code the project owns.
 
+## Phase 0 results
+
+Run on 2026-08-23, loro 1.13.9, release build with LTO, from
+`apps/aimax_core/native/aimax_loro/src/main.rs`. The budget is 7 us, which is the
+0.007 ms per keystroke the buffer meets today.
+
+```
+loro insert_utf8, one character        median      ropey, same edit
+  empty document, append               0.250 us
+  343 KB, append                       0.250 us
+  343 KB, middle                       0.417 us    0.042 us
+  3 MB,   middle                       0.416 us    0.083 us
+
+343 KB document, 200 ops exchanged
+  export updates                        11-21 us   294 B on the wire
+  import updates                        77-82 us
+  to_string                             44-65 us
+  cursor resolve                        25-46 us
+```
+
+**The gate passes.** A Loro insert costs 0.25 to 0.42 us against a 7 us budget, and it
+does not grow with the document: 343 KB and 3 MB cost the same. Loro adds about 0.33 us
+on top of the ropey edit that already happens, so a keystroke stays around 0.5 us before
+NIF overhead. Two hundred keystrokes compress to 294 bytes on the wire.
+
+Three findings changed the design, and each is folded into the sections above.
+
+1. **Origin is not durable.** It is an event-time label. `commit_msg` is a field of
+   `Change` and survived an export and import round trip with the peer id intact. The
+   actor goes in the message; the origin only drives undo filtering.
+2. **Undo needs its own exclusion.** Reproduced: with two managers and no `undo`
+   exclusion, the agent's undo entered the human's stack, and the human's next undo
+   restored the agent's text instead of removing the human's own. Adding the exclusion
+   to both managers gave clean, symmetric per-actor undo.
+3. **Cursor resolution is not free.** At 25 to 46 us it is fifty times a keystroke.
+   Phase 4 must cache the resolved point and invalidate it on change, never resolve per
+   access. This number is one sample and needs a proper median before Phase 4 starts.
+
+The oplog grows about one byte per character, so a 343 KB buffer carries a 353 KB
+oplog. Snapshot sizes measured here are not meaningful, because the synthetic seed text
+is one line repeated and compresses far better than real source.
+
 ## Phases
 
-**Phase 0 - measure first.** There is no NIF benchmark anywhere in the repo. Build the
-crate standalone and measure `insert_utf8`, `export(updates)`, `import`, and
-`get_cursor_pos`, against the current 0.007 ms per keystroke. Gate the rest on the
-keystroke path staying under it.
+**Phase 0 - measure first. Done.** See the results above.
 
-**Phase 1 - the crate and the wrapper.** `native/aimax_loro` plus an `Aimax.Core.Doc`
-wrapper. No buffer changes. Elixir tests for an export and import round trip, two-doc
-convergence, and per-actor undo with an excluded origin.
+**Phase 1 - the crate and the wrapper.** Turn the crate into a rustler cdylib, plus an
+`Aimax.Core.Doc` wrapper. No buffer changes. Elixir tests for an export and import
+round trip, two-doc convergence, and per-actor undo with an excluded origin.
 
 **Phase 2 - mirror from the funnel.** Add `state.doc`. `do_insert` and `do_delete`
 apply to the doc after the rope. Desktop restore (`desktop.ex:187`) calls `doc_update`.
@@ -249,10 +301,10 @@ because the oplog grows without bound per buffer.
 - **Divergence.** Two representations can disagree. The hash check at checkpoint
   boundaries is the detector; rebuild the rope from the doc to fix it. Log rather than
   crash, matching `flush_provenance` (`buffer.ex:1714`).
-- **Peer identity under one PeerID.** All local actors share the replica's PeerID, so
-  they are distinguished only by origin. Verify early that origin exclusion gives clean
-  per-actor undo; if it does not, the fallback is one document per actor, synced
-  in-process, which is heavier but unambiguous.
+- **Peer identity under one PeerID.** Resolved in Phase 0. All local actors share the
+  replica's PeerID and are distinguished by origin, and origin exclusion gives clean
+  symmetric per-actor undo once every manager also excludes `undo`. The fallback, one
+  document per actor synced in-process, is not needed.
 - **Memory is doubled and half is invisible to the BEAM.** A `ResourceArc` drops when
   the last term is collected, not when the buffer process dies. Check against the
   eviction path in `buffer_store.ex:147`.

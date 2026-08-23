@@ -1,0 +1,13 @@
+[package]
+name = "aimax_loro"
+version = "0.1.0"
+edition = "2021"
+
+# Phase 0 is a standalone measurement gate, so the crate builds as a plain
+# binary. Phase 1 adds rustler and turns it into a cdylib NIF.
+[dependencies]
+loro = "=1.13.9"
+ropey = "1.6"
+
+[profile.release]
+lto = true

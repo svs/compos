@@ -1702,7 +1702,15 @@ defmodule Aimax.Core.Session do
       #
       # This BLOCKS its lane, the way mcp-call! does. Lanes are serial and
       # independent, so a wait on the RPC or test lane never delays a
-      # keystroke on :ui. @wait_cap keeps a bad predicate well inside the
+      # keystroke on :ui.
+      #
+      # It therefore CANNOT wait for work that needs the lane it is holding.
+      # lsp.scm delivers its events on :ui, so a wait-until on :ui for an
+      # LSP connection to reach "ready" blocks the very transition it waits
+      # for and always times out — while the same server polled from
+      # outside an eval is ready in two seconds. Waiting for a debounce, a
+      # buffer another process writes, or an MCP reply is fine: those
+      # complete elsewhere. @wait_cap keeps a bad predicate well inside the
       # 30s Lane timeout, so a runaway wait reports as #f and not as a
       # frozen lane nobody can name.
       "wait-until" => fn args, store ->

@@ -215,50 +215,6 @@ defmodule Aimax.AuthorTest do
     assert Buffer.author_lines(b) == [{1, "agent:c1", 3}, {2, "agent:c1", 3}]
   end
 
-  test "an agent asks which line runs are its own" do
-    b = new_buf()
-    :ok = Buffer.append(b, "mine one\nmine two\n", source: {:agent, "c1"})
-    :ok = Buffer.append(b, "yours\n", source: :editor, author: "human")
-    :ok = Buffer.append(b, "mine three\n", source: {:agent, "c1"})
-
-    assert {:ok, ~s{((1 2) (4 4))}} =
-             Session.eval(~s{(author-line-runs "#{b}" "agent:c1")})
-
-    assert {:ok, "#t"} = Session.eval(~s{(lines-mine? "#{b}" 1 2 "agent:c1")})
-    assert {:ok, "#f"} = Session.eval(~s{(lines-mine? "#{b}" 1 3 "agent:c1")})
-  end
-
-  test "a line the agent only edited part of is nobody's to claim alone" do
-    b = new_buf()
-    :ok = Buffer.append(b, "shared line\n", source: :editor, author: "human")
-    :ok = Buffer.insert_at(b, 6, "X", source: {:agent, "c1"})
-
-    assert {:ok, "#f"} = Session.eval(~s{(lines-mine? "#{b}" 1 1 "agent:c1")})
-    assert {:ok, "#f"} = Session.eval(~s{(lines-mine? "#{b}" 1 1 "human")})
-    assert {:ok, ~s{()}} = Session.eval(~s{(author-line-runs "#{b}" "agent:c1")})
-  end
-
-  test "buffer-authors and buffer-edit-log read from Scheme" do
-    b = new_buf()
-    :ok = Buffer.append(b, "abc", source: {:agent, "c1"})
-
-    assert {:ok, ~s{((0 3 "agent:c1"))}} = Session.eval(~s{(buffer-authors "#{b}")})
-    assert {:ok, log} = Session.eval(~s{(buffer-edit-log "#{b}")})
-    assert log =~ ~s{"agent:c1" 0 3 0}
-  end
-
-  test "agent attribution does not remove Scheme mechanisms" do
-    assert {:ok, out} = Session.eval(~s{(shell-command->string "echo hi")})
-    assert out =~ "hi"
-
-    assert {:ok, agent_out} =
-             Session.eval(~s{
-               (with-edit-author "agent:a1"
-                 (lambda () (shell-command->string "echo hi")))})
-
-    assert agent_out =~ "hi"
-  end
-
   test "Scheme can produce line-numbered source without a core primitive" do
     path = Path.join(System.tmp_dir!(), "aimax-numbered-#{System.unique_integer([:positive])}")
     File.write!(path, "alpha\nbeta\n")

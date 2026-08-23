@@ -256,6 +256,14 @@ Three limits decided every split:
   deadline. It blocks its lane, the way `mcp-call!` does, and caps itself
   at 10s so a runaway predicate stays inside Lane's 30s timeout.
 
+  **It cannot wait for work that needs its own lane.** lsp.scm delivers
+  its events on `:ui`, so waiting there for a connection to reach "ready"
+  blocks the transition it waits for and times out every time — the same
+  server polled from outside an eval is ready in two seconds. A debounce,
+  a buffer another process writes, or an MCP reply are all fine: they
+  complete elsewhere. Check where the work finishes before reaching for
+  it.
+
   It unlocks about 11 tests, not the 36 first claimed here. That count
   scanned each test BODY for a fixture path, and in the LSP, MCP and
   watch files the fixture lives in the setup helper — those tests need

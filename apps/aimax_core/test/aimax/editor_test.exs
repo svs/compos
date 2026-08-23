@@ -13,6 +13,17 @@ defmodule Aimax.EditorTest do
     {:ok, _} = Aimax.Core.Session.eval(~s[(run-command "#{command}")])
   end
 
+  # A chat gets a runtime on its first send, on the connector it names or
+  # the default. The default is claude-code, which is a subprocess this
+  # test env does not have — so the send went nowhere and no reply ever
+  # came. "api" is the in-process connector, and :llm_chat_fun is its
+  # seam: the stub these tests install.
+  defp use_api_connector! do
+    {:ok, before} = Aimax.Core.Session.eval("*default-connector*")
+    {:ok, _} = Aimax.Core.Session.eval(~s{(set! *default-connector* "api")})
+    on_exit(fn -> Aimax.Core.Session.eval(~s{(set! *default-connector* #{before})}) end)
+  end
+
   defp fresh_buffer do
     name = "test-#{System.unique_integer([:positive])}"
     # reset editor state a failed test may have left behind
@@ -2252,6 +2263,8 @@ defmodule Aimax.EditorTest do
       Aimax.Core.kill_buffer(chat)
       Aimax.Core.kill_buffer(notes)
     end)
+
+    use_api_connector!()
 
     # C-c g founds the group from the code buffer, then the notes join it
     press(["C-c", "g"])

@@ -131,7 +131,12 @@ defmodule Aimax.SwitchTest do
     {:ok, _} =
       Session.eval("""
       (begin
-        (buffer-set-local! "#{buf}" 'group "zz-group")
+        ;; groups are records: the reader clears the legacy 'group local
+        ;; the moment a buffer has a real membership, so writing it here
+        ;; put the chat in no group at all
+        ;; a chat holds one 'group-id, so buffer-add-group! REFUSES it and
+        ;; answers #f. buffer-move-to-group! routes a chat to the chat form.
+        (buffer-move-to-group! "#{buf}" (group-record-create! "zz-group"))
         (buffer-set-local! "#{buf}" 'chat-presets '(zz-swpack))
         (buffer-set-local! "#{buf}" 'chat-permission-mode 'ask)
         #t)
@@ -277,7 +282,7 @@ defmodule Aimax.SwitchTest do
 
     # --- and everything that defines the chat is still there ------------
     assert Buffer.get_local(buf, "agent-slug") == "a1"
-    assert Buffer.get_local(buf, "group") == "zz-group"
+    assert Session.eval(~s{(group-name (buffer-group "#{buf}"))}) == {:ok, ~s{"zz-group"}}
     assert Buffer.get_local(buf, "chat-presets") == [sym: "zz-swpack"]
     assert Buffer.get_local(buf, "chat-permission-mode") == {:sym, "ask"}
     assert Buffer.get_local(buf, "chat-cost") >= cost_after_api

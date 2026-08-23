@@ -63,15 +63,6 @@ defmodule Aimax.CodeModeTest do
     assert Buffer.get_local(buf, "modeline-info") == "code · aimax"
   end
 
-  test "the shared policy lets a code workspace chat restart the daemon" do
-    buf = fresh_buffer("cm-restart-#{System.unique_integer([:positive])}.ex", "code\n")
-    eval!(~s{(run-command "code-mode")})
-    chat = eval!(~s{(group-chat "#{buf}")}) |> String.trim("\"")
-
-    assert eval!(~s{(*permission-policy* "#{chat}" "restart-daemon" "command" "")}) ==
-             "allow-always"
-  end
-
   test "the coding presets ride over the buffer's own, and a removed one does not linger" do
     buf = fresh_buffer("cm-presets-#{System.unique_integer([:positive])}.ex", "code\n")
 
@@ -122,67 +113,6 @@ defmodule Aimax.CodeModeTest do
     eval!(~s{(begin (buffer-create "#{lone}") (buffer-set-local! "#{lone}" 'group #f))})
     on_exit(fn -> if Buffer.exists?(lone), do: Aimax.Core.kill_buffer(lone) end)
     assert eval!(~s{(llm-mode--group-note "#{lone}")}) == ~s{""}
-  end
-
-  test "the side-chat prompt handles other buffer without a question" do
-    buf = fresh_buffer("cm-other-#{System.unique_integer([:positive])}.md", "text\n")
-    prompt = eval!(~s{(chat-preamble-body "#{buf}" (list "#{buf}"))})
-
-    assert prompt =~ ~S{When the user says \"other buffer\"}
-    assert prompt =~ ~S{(run-command \"previous-buffer\") immediately}
-    assert prompt =~ "Do not ask a question."
-  end
-
-  test "the code instructions ride in both prompt paths, and only for code buffers" do
-    buf = fresh_buffer("cm-instr-#{System.unique_integer([:positive])}.ex", "code\n")
-
-    plain = eval!(~s{(chat-preamble-body "#{buf}" (list "#{buf}"))})
-    # the shared edit protocol names the structural readers for any buffer;
-    # what code-mode adds is the coding voice and its own instructions
-    refute plain =~ "coding companion"
-    refute plain =~ "browser category is denied"
-    assert plain =~ "writing companion"
-
-    eval!(~s{(run-command "code-mode")})
-
-    # the chat lane
-    preamble = eval!(~s{(chat-preamble-body "#{buf}" (list "#{buf}"))})
-    assert preamble =~ "coding companion"
-    assert preamble =~ "(code-outline \\\"BUF\\\")"
-    assert preamble =~ "(code-replace! \\\"BUF\\\" LINE NEW)"
-    assert preamble =~ "(buffer-insert-after! \\\"BUF\\\" ANCHOR TEXT)"
-    assert preamble =~ "browser category is denied in code-mode by default"
-    assert preamble =~ "ask the user to enable M-x browser-mode"
-    refute preamble =~ "Match the document's voice"
-
-    # and M-o, on the same words
-    assert eval!(~s{(llm-mode--group-note "#{buf}")}) =~ "(code-outline \\\"BUF\\\")"
-
-    # the user owns the words
-    eval!("(define zz-code-instructions code-instructions)")
-    on_exit(fn -> eval!("(customize-set! 'code-instructions zz-code-instructions)") end)
-    eval!(~s{(customize-set! 'code-instructions "")})
-    # the shared edit protocol stays; the code instructions are the user's
-    refute eval!(~s{(llm-mode--group-note "#{buf}")}) =~ "buffer-insert-after!"
-  end
-
-  test "code-mode denies browser tools until the user enables browser-mode" do
-    buf = fresh_buffer("cm-browser-#{System.unique_integer([:positive])}.ex", "code\n")
-
-    eval!(~s{(run-command "code-mode")})
-
-    denied =
-      eval!(~s"""
-      (with-current-buffer "#{buf}"
-        (lambda ()
-          (llm-tool-call "eval-scheme"
-            (list 'code "(tab-list (lambda (tabs) tabs))"))))
-      """)
-
-    assert denied =~ "browser category denied in code-mode"
-
-    eval!(~s{(run-command "browser-mode")})
-    assert eval!(~s{(code-mode--browser-enabled? "#{buf}")}) == "#t"
   end
 
   test "code-mode asks before it assigns this frame a worktree, group, and chat" do

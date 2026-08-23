@@ -4,8 +4,13 @@
 ;;; painted from that, the relocation follows an edit above, and the
 ;;; margin shows the thread.
 ;;;
-;;; Thirteen tests stay in ExUnit: ten press keys, and three write an
-;;; annotation store to disk beside the document.
+;;; Nothing here presses a key. Every list verb is a command, and the
+;;; store is written and read with write-file! and read-file.
+;;;
+;;; One test stays in ExUnit: a margin card CLICK. It arrives on
+;;; SchemeAPI.block_click/2, which looks a handler up in ETS and applies
+;;; it — Scheme has no way into that path, which is what makes it the
+;;; bridge. What the handler then does is annotate--click!, tested above.
 
 (domain! 'testing)
 (effects! '(write))
@@ -179,3 +184,215 @@
       (check-equal! (plist-get (car (buffer-annotations t--ann-buf)) 'source) "check"
                     "the annotation names the check source")
       (t--ann-done!))))
+
+
+;;; --- the list -------------------------------------------------------------------
+
+(define (t--ann-list!)
+  ;; the list is built for the CURRENT buffer, so the document must be it
+  (switch-to-buffer! t--ann-buf)
+  (run-command "annotate-list")
+  "*annotations*")
+
+(deftest 'annotate-next-steps-to-the-annotation-and-selects-it
+  "the point moves to the span, and the span shows as selected"
+  (lambda ()
+    (t--ann-fresh!)
+    (enable-minor-mode! t--ann-buf "annotate-mode")
+    (t--ann-llm-warning!)
+    (with-current-buffer t--ann-buf (lambda () (run-command "annotate-next")))
+    (check-equal! (buffer-point t--ann-buf) 17 "point sits on the span")
+    (check-true! (buffer-local t--ann-buf 'ann-selected) "and it is the selected one")
+    (check-true! (member '(17 22 "ann-selected") (buffer-overlays t--ann-buf))
+                 "with the selected face")
+    (t--ann-done!)))
+
+(deftest 'the-list-shows-the-rows-and-the-tabs-narrow-them
+  "all, then errors, then the author — and back"
+  (lambda ()
+    (t--ann-fresh!)
+    (t--ann-llm-warning!)
+    (t--ann-reader-note!)
+    (let ((list-buf (t--ann-list!)))
+      (check-equal! (current-buffer) list-buf "the list has the focus")
+      (let ((text (buffer-text list-buf)))
+        (check-contains! text "Overstated claim" "the warning")
+        (check-contains! text "Keep, verbatim" "the note")
+        (check-contains! text "[all 2]" "and the tab counts both"))
+
+      ;; all -> errors: the warning stays, the note goes
+      (run-command "annotate-tab-next")
+      (let ((text (buffer-text list-buf)))
+        (check-contains! text "[errors 1]" "the errors tab")
+        (check-contains! text "Overstated claim" "keeps the warning")
+        (check-false! (string-contains? text "Keep, verbatim") "and drops the note"))
+
+      (run-command "annotate-tab-next")
+      (check-contains! (buffer-text list-buf) "[claude 1]" "then the author tab")
+
+      (run-command "annotate-tab-prev")
+      (run-command "annotate-tab-prev")
+      (check-contains! (buffer-text list-buf) "[all 2]" "and back to all"))
+    (t--ann-done!)))
+
+(deftest 'resolve-toggles-the-row-at-point
+  "resolving is not deleting: the same key reopens it"
+  (lambda ()
+    (t--ann-fresh!)
+    (let ((id (t--ann-llm-warning!)))
+      (t--ann-list!)
+      (run-command "annotate-resolve")
+      (check-equal! (plist-get (annotate--find t--ann-buf id) 'state) "resolved" "resolved")
+      (run-command "annotate-resolve")
+      (check-equal! (plist-get (annotate--find t--ann-buf id) 'state) "open" "and open again"))
+    (t--ann-done!)))
+
+(deftest 'apply-fix-edits-the-document-and-resolves-the-annotation
+  "the suggestion is applied where the span is"
+  (lambda ()
+    (t--ann-fresh!)
+    (let ((id (t--ann-add! '(source "llm" severity "suggestion" line 1 match "beta"
+                             title "Rename" who "claude" when "now"
+                             fix-old "beta" fix-new "betta"))))
+      (t--ann-list!)
+      (run-command "annotate-apply-fix")
+      (check-contains! (buffer-text t--ann-buf) "alpha betta" "the document took the fix")
+      (check-equal! (plist-get (annotate--find t--ann-buf id) 'state) "resolved"
+                    "and the annotation is resolved"))
+    (t--ann-done!)))
+
+(deftest 'apply-fix-reports-a-stale-fix-instead-of-editing
+  "the text moved under the annotation, so the fix no longer fits"
+  (lambda ()
+    (t--ann-fresh!)
+    (t--ann-add! '(source "llm" severity "suggestion" line 1 match "beta"
+                   title "Rename" who "claude" when "now"
+                   fix-old "beta" fix-new "betta"))
+    (buffer-delete-range! t--ann-buf 6 4)
+    (t--ann-list!)
+    (run-command "annotate-apply-fix")
+    (check-contains! (buffer-text t--ann-buf) "alpha \ngamma" "the document is untouched")
+    (t--ann-done!)))
+
+(deftest 'dismiss-hides-the-row-for-this-session-only
+  "the annotation is still there; it is the view that dropped it"
+  (lambda ()
+    (t--ann-fresh!)
+    (t--ann-llm-warning!)
+    (t--ann-reader-note!)
+    (t--ann-list!)
+    (run-command "annotate-dismiss")
+    (check-equal! (length (annotate-visible t--ann-buf)) 1 "one row is visible")
+    (check-equal! (length (buffer-annotations t--ann-buf)) 2 "and both are still kept")
+    (t--ann-done!)))
+
+(deftest 'a-suggestion-reply-becomes-the-fix
+  "the model answers with the replacement, trimmed"
+  (lambda ()
+    (t--ann-fresh!)
+    (let ((id (t--ann-llm-warning!)))
+      (annotate--suggest-apply! t--ann-buf id "delta" "  epsilon  ")
+      (check-equal! (plist-get (annotate--find t--ann-buf id) 'fix-new) "epsilon"
+                    "the fix is the trimmed reply")
+      (t--ann-list!)
+      (run-command "annotate-apply-fix")
+      (check-contains! (buffer-text t--ann-buf) "gamma epsilon" "and applying it edits the line"))
+    (t--ann-done!)))
+
+;;; --- the margin -----------------------------------------------------------------
+
+(deftest 'annotate-mode-builds-the-margin-cards
+  "one card per annotation, and the selected one opens"
+  (lambda ()
+    (t--ann-fresh!)
+    (let ((id (t--ann-llm-warning!)))
+      (t--ann-reader-note!)
+      (enable-minor-mode! t--ann-buf "annotate-mode")
+      (check-true! (buffer-known? "*margin*") "the margin exists")
+
+      (let ((blocks (value->string (annotate--margin-blocks "*margin*"))))
+        (check-contains! blocks "margin · 2 annotations" "the header counts them")
+        (check-contains! blocks "Overstated claim" "the first card")
+        (check-contains! blocks "Keep, verbatim" "the second"))
+
+      (buffer-set-local! t--ann-buf 'ann-selected id)
+      (let ((blocks (value->string (annotate--margin-blocks "*margin*"))))
+        (check-contains! blocks "ann-card open" "the selected card opens")
+        (check-contains! blocks (string-append "ann:resolve:" id) "with its action chips")))
+    (t--ann-done!)))
+
+(deftest 'annotate-margin-mode-by-hand-redirects-instead-of-hijacking-the-buffer
+  "the margin is a mode for the margin buffer, not for a document"
+  (lambda ()
+    (t--ann-fresh!)
+    (with-current-buffer t--ann-buf (lambda () (run-command "annotate-margin-mode")))
+    (check-false! (buffer-local t--ann-buf 'render-mode) "the document is not made a margin")
+    (t--ann-done!)))
+
+;;; --- the store ------------------------------------------------------------------
+
+(define (t--ann-store-clean! buf)
+  (let ((path (annotate-store-file buf)))
+    (when (and path (file-exists? path)) (delete-file! path)))
+  (when (buffer-known? buf) (buffer-kill! buf)))
+
+(deftest 'annotations-of-a-file-buffer-live-in-a-file-and-load-back
+  "a document's notes outlive the buffer that showed them"
+  (lambda ()
+    (let ((fbuf (string-append (aimax-home) "/zz-annotate-notes.txt")))
+      (write-file! fbuf "alpha beta\ngamma delta\n")
+      (test-buffer! fbuf "alpha beta\ngamma delta\n")
+      (annotate! fbuf '(source "reader" severity "note" line 2 match "delta"
+                        title "Stored" who "you" when "now"))
+
+      (let ((path (annotate-store-file fbuf)))
+        (check-true! (file-exists? path) "the store file was written")
+        (check-contains! (read-file path) "Stored" "and holds the note")
+
+        ;; a fresh buffer with no locals reads the file back on mode enable
+        (buffer-set-local! fbuf 'annotations '())
+        (enable-minor-mode! fbuf "annotate-mode")
+        (check-equal! (length (buffer-annotations fbuf)) 1 "the note came back")
+        (disable-minor-mode! fbuf "annotate-mode")
+        (delete-file! path))
+      (t--ann-store-clean! fbuf)
+      (delete-file! fbuf))))
+
+(deftest 'the-store-keeps-reader-and-llm-annotations-never-checker-ones
+  "a checker's diagnostics are live, and re-derived every time"
+  (lambda ()
+    (let ((fbuf (string-append (aimax-home) "/zz-annotate-checked.txt")))
+      (write-file! fbuf "alpha beta\n")
+      (test-buffer! fbuf "alpha beta\n")
+      (annotate! fbuf '(source "check" severity "error" line 1 match "alpha"
+                        title "Diag" who "ts" when "live"))
+      (annotate! fbuf '(source "llm" severity "note" line 1 match "beta"
+                        title "Kept" who "claude" when "now"))
+
+      (let ((stored (read-file (annotate-store-file fbuf))))
+        (check-contains! stored "Kept" "the llm note is stored")
+        (check-false! (string-contains? stored "Diag") "the checker's is not"))
+      (t--ann-store-clean! fbuf)
+      (delete-file! fbuf))))
+
+(deftest 'a-file-inside-a-project-stores-its-annotations-in-the-project
+  "the notes travel with the repository, not with the machine"
+  (lambda ()
+    (let* ((root (string-append (aimax-home) "/zz-annotate-repo"))
+           (fbuf (string-append root "/src/x.txt")))
+      (shell-command->string (string-append "rm -rf " root))
+      (make-directory! (string-append root "/.git"))
+      (make-directory! (string-append root "/src"))
+      (write-file! fbuf "alpha beta\n")
+      (test-buffer! fbuf "alpha beta\n")
+
+      (check-equal! (annotate-store-file fbuf)
+                    (string-append root "/.aimax/annotations/src%2Fx.txt.scm")
+                    "the store sits under the project")
+      (annotate! fbuf '(source "reader" severity "note" line 1 match "beta"
+                        title "In repo" who "you" when "now"))
+      (check-contains! (read-file (string-append root "/.aimax/annotations/src%2Fx.txt.scm"))
+                       "In repo" "and holds the note")
+
+      (when (buffer-known? fbuf) (buffer-kill! fbuf))
+      (shell-command->string (string-append "rm -rf " root)))))

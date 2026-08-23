@@ -78,6 +78,21 @@ defmodule Aimax.SchemeSuiteTest do
     assert clashes == [], "defined in more than one test file: #{inspect(clashes)}"
   end
 
+  # Some files reset buffer names the editor itself owns — notmuch's
+  # *notmuch* and *mail*. They declare it, and run-scheme-tests skips them
+  # in a live editor. Here the home is a throwaway one, so they MUST run:
+  # a gate that quietly hid them would be worse than no gate.
+  test "the gated tests are not gated here" do
+    assert eval!("(begin (load-tests!) (editor-is-disposable?))") == "#t",
+           "the test home is not disposable, so the suite would skip the gated files"
+
+    gated = eval!("(length *disposable-only-tests*)") |> String.to_integer()
+    assert gated > 0, "no file declares itself disposable-only — did the declaration move?"
+
+    assert eval!("(length (test-names-here))") == eval!("(length (test-names))"),
+           "the suite is skipping #{gated} tests it should be running"
+  end
+
   test "the Scheme suite passes" do
     found = names()
 

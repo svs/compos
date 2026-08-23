@@ -30,6 +30,36 @@
 
 (define *tests* '())
 
+;;; --- tests that need a disposable editor ---------------------------------------
+;;; Some packages own fixed global buffer names: notmuch's index is
+;;; *notmuch* and its message view is *mail*, in a test and in a person's
+;;; editor alike. A test of those must reset them, and resetting them in a
+;;; live editor throws away real work. It happened: a notmuch test killed a
+;;; live *mail*, *notmuch* and the chat beside them.
+;;;
+;;; Such a file says so at the top, and the suite refuses to run it unless
+;;; the editor is a throwaway one.
+
+(define *test-file-needs-disposable* #f)
+(define *disposable-only-tests* '())
+
+;; The test env and AIMAX_VERIFY both put the home under /tmp; a person's
+;; editor keeps it in ~/.aimax. Nothing else distinguishes them, and
+;; guessing wrong in this direction destroys buffers.
+(define (editor-is-disposable?) (string-prefix? "/tmp/" (aimax-home)))
+
+(define (tests-need-a-disposable-editor! why)
+  (set! *test-file-needs-disposable* why)
+  why)
+
+(define (test-needs-disposable? name) (member name *disposable-only-tests*))
+
+;; what run-scheme-tests may run HERE
+(define (test-names-here)
+  (if (editor-is-disposable?)
+      (test-names)
+      (remove test-needs-disposable? (test-names))))
+
 ;; failures for the test running now. run-test owns it.
 (define *test-failures* '())
 
@@ -43,6 +73,8 @@
   (set! *tests*
     (append (remove (lambda (t) (equal? (car t) name)) *tests*)
             (list (list name doc thunk))))
+  (when *test-file-needs-disposable*
+    (set! *disposable-only-tests* (cons name *disposable-only-tests*)))
   name)
 
 ;; There is no buffer-set-text! primitive: replace the whole range.
@@ -137,14 +169,21 @@
 ;; -> () when the test passes, else the failures it recorded
 (define (run-test name)
   (let ((t (assoc name *tests*)))
-    (if (not t)
-        (list (string-append "no such test: " (symbol->string name)))
+    (cond
+      ((not t) (list (string-append "no such test: " (symbol->string name))))
+      ;; the guard sits HERE, not only in the listing: a person who runs
+      ;; one test by hand must not lose their buffers to it either
+      ((and (test-needs-disposable? name) (not (editor-is-disposable?)))
+       (list (string-append (symbol->string name)
+                            " needs a disposable editor: it resets buffer names this"
+                            " editor is using. Run it with mix test.")))
+      (else
         (begin
           (set! *test-failures* '())
           ((car (cdr (cdr t))))
           (let ((out *test-failures*))
             (set! *test-failures* '())
-            out)))))
+            out))))))
 
 ;; Load every .scm under priv/tests. The package loader does not reach
 ;; them: a test is not a package, and the catalog should not carry one
@@ -153,20 +192,26 @@
 
 (define (load-tests!)
   (let ((dir (test-dir)))
+    (set! *disposable-only-tests* '())
     (for-each
       (lambda (name)
         (when (string-suffix? ".scm" name)
+          ;; the declaration is per file, so it must not leak to the next
+          (set! *test-file-needs-disposable* #f)
           (load (string-append dir "/" name))))
       (list-dir dir))
+    (set! *test-file-needs-disposable* #f)
     (length *tests*)))
 
 (define-command "run-scheme-tests"
   "Run the Scheme test suite and report it in *test-results*"
   (lambda ()
     (load-tests!)
-    (let ((buf "*test-results*")
-          (failed 0)
-          (lines '()))
+    (let* ((buf "*test-results*")
+           (failed 0)
+           (lines '())
+           (names (test-names-here))
+           (skipped (- (length (test-names)) (length names))))
       (for-each
         (lambda (name)
           (let ((fs (run-test name)))
@@ -179,11 +224,17 @@
                     (append lines
                       (list (string-append "  FAIL  " (symbol->string name)))
                       (map (lambda (f) (string-append "          " f)) fs)))))))
-        (test-names))
+        names)
       (test-buffer! buf
         (string-append
-          (number->string (length (test-names))) " tests, "
-          (number->string failed) " failing\n\n"
+          (number->string (length names)) " tests, "
+          (number->string failed) " failing"
+          (if (> skipped 0)
+              (string-append ", " (number->string skipped)
+                             " skipped — they reset buffer names this editor uses;"
+                             " run them with mix test")
+              "")
+          "\n\n"
           (string-join lines "\n") "\n"))
       (display-buffer buf)
       (message (string-append (number->string failed) " failing")))))
@@ -199,6 +250,12 @@
 (public! 'check-contains!
   "(check-contains! HAYSTACK NEEDLE LABEL) — record a failure unless HAYSTACK holds NEEDLE")
 (public! 'test-names "(test-names) — every registered test name")
+(public! 'test-names-here
+  "(test-names-here) — the tests this editor may run; a live one skips those needing a disposable editor")
+(public! 'tests-need-a-disposable-editor!
+  "(tests-need-a-disposable-editor! WHY) — declare that this file's tests reset shared buffer names")
+(public! 'editor-is-disposable?
+  "(editor-is-disposable?) — #t when the home is a throwaway one, so a test may reset shared names")
 (public! 'run-test "(run-test 'name) — run one test; () means it passed")
 (public! 'test-buffer!
   "(test-buffer! NAME TEXT) — make or empty a buffer and give it TEXT; answers NAME")

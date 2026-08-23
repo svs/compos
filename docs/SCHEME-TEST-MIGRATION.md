@@ -225,10 +225,15 @@ files keep only what Scheme cannot hold: `apropos_test`, `skills_test`,
 
 Three limits decided every split:
 
-- **Scheme cannot remove a directory.** It has `make-directory!`,
-  `write-file!` and `delete-file!`, but no `rmdir`. A test that builds a
-  fixture tree stays in ExUnit: two in `skills_test`, two in
-  `mode_icon_test`.
+- ~~Scheme cannot remove a directory.~~ **Wrong, and it was wrong when
+  first written.** `shell-command->string` is a primitive, so a test can
+  run `rm -rf` and `chmod +x` like any other. Both are verified. A test
+  can therefore BUILD ITS OWN FIXTURE — write the stub, make it
+  executable, point the package's Scheme seam at it, delete it after.
+  That is how `notmuch_test` already works in ExUnit, and its seam
+  (`notmuch-program`) is Scheme. Prefer a path under `(aimax-home)`: the
+  suite runs in a live editor, and `rm -rf` from a test wants a short
+  leash.
 - **Scheme cannot set an environment variable.** There is `getenv` and no
   `setenv`. This is what holds `keys_test` where it is.
 - ~~Scheme cannot wait for an answer.~~ **Fixed.** `(wait-until PRED
@@ -344,8 +349,9 @@ Blocked on a seam, not on judgement:
   remove.
 - **`setenv`** unlocks `keys_test` (14). The whole key chain is Scheme
   behind it.
-- **`delete-directory!`** unlocks the four fixture tests still held in
-  `skills_test` and `mode_icon_test`.
+- ~~`delete-directory!`~~ is not needed: `shell-command->string` already
+  runs `rm -rf`. The four tests in `skills_test` and `mode_icon_test` are
+  movable today.
 - **A Scheme-visible LLM stub seam** unlocks `chat_compact_test` (12).
   It is pure policy otherwise, but the model is stubbed with
   `Application.put_env(:aimax_core, :llm_request_fun, ...)`, which Scheme

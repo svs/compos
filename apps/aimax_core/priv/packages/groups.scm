@@ -1388,6 +1388,10 @@
                            (if (= skipped 0) ""
                                (string-append "; skipped "
                                               (number->string skipped)))))
+          ;; a list that shows membership is now stale, and the marks that
+          ;; chose these buffers are spent. The push happens under a
+          ;; minibuffer callback, so no caller can refresh after it.
+          (run-hooks 'group-membership-hook)
           changed))))
 
 (define (group-push-read-destination! buffers)

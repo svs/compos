@@ -8,6 +8,11 @@ defmodule Aimax.EditorTest do
   defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
   defp type(str), do: str |> String.graphemes() |> press()
 
+  # A verb by its name. Which key reaches it is a preference that moves.
+  defp run(command) do
+    {:ok, _} = Aimax.Core.Session.eval(~s[(run-command "#{command}")])
+  end
+
   defp fresh_buffer do
     name = "test-#{System.unique_integer([:positive])}"
     # reset editor state a failed test may have left behind
@@ -58,6 +63,19 @@ defmodule Aimax.EditorTest do
   # prompt (a browser page); these tests drive it directly
   defp open_switch_prompt do
     {:ok, _} = Aimax.Core.Session.eval(~s[(run-command "switch-to-buffer-prompt")])
+  end
+
+  # Open a switcher by its own command, never by a key. A binding is a
+  # preference and it moves: C-x b named the modal switcher until the
+  # group-aware prompt took it, and every test that pressed it failed the
+  # same night, each one reporting a *switch* buffer that nobody opened.
+  # A test that says which switcher it means cannot fail that way.
+  defp open_modal_switcher do
+    {:ok, _} = Aimax.Core.Session.eval(~s[(run-command "switch-to-buffer")])
+  end
+
+  defp open_group_switcher do
+    {:ok, _} = Aimax.Core.Session.eval(~s[(run-command "group-switch-to-buffer")])
   end
 
   defp clear_minibuffer do
@@ -429,8 +447,12 @@ defmodule Aimax.EditorTest do
       {:ok, _} = Aimax.Core.Session.eval(~s{(begin
         (buffer-create "*zz-ib-a*")
         (buffer-set-local! "*zz-ib-a*" 'mode-name "zz-mode")
-        (buffer-create "*zz-ib-b*")
-        (run-command "ibuffer"))})
+        (buffer-create "*zz-ib-b*"))})
+
+      # ibuffer was the same modal list for a while (edb89bf) and is its
+      # own table again (584f308). This test is about the modal switcher,
+      # so it opens the modal switcher. ibuffer_test.exs owns the table.
+      open_modal_switcher()
 
       assert Editor.current_buffer() == "*switch*"
       assert Buffer.read_only?("*switch*")
@@ -463,9 +485,10 @@ defmodule Aimax.EditorTest do
       assert Editor.current_buffer() == "*zz-ib-b*"
     end
 
-    # C-c g joins the buffer you are in; C-t in the switcher groups a SET.
-    # The annotation reads it back, and an empty answer takes them out.
-    test "C-t puts the marked buffers in a group, and an empty answer removes it" do
+    # One buffer joins a group where it stands; the switcher pushes a SET.
+    # The prompt offers the groups that exist and "New group" first, so
+    # this founds one and reads the membership back.
+    test "the marked buffers push into a group as one act" do
       on_exit(fn ->
         for b <- ["*zz-gr-a*", "*zz-gr-b*", "*switch*"], do: Aimax.Core.kill_buffer(b)
         Editor.delete_other_windows()
@@ -475,32 +498,32 @@ defmodule Aimax.EditorTest do
         (buffer-create "*zz-gr-a*")
         (buffer-create "*zz-gr-b*"))})
 
-      press(["C-x", "C-b"])
+      open_modal_switcher()
       type("zz-gr")
 
-      press(["C-SPC", "C-SPC", "C-t"])
-      assert Editor.render_state().minibuffer.prompt =~ "Group for 2 buffers"
+      # the verbs by name: a key in this list is a preference and moves
+      run("switch-mark")
+      run("switch-mark")
+      run("switch-group")
+
+      assert Editor.render_state().minibuffer.prompt =~ "Push buffers to group"
+
+      # "New group" leads the candidates, so RET founds one and the next
+      # prompt takes its name
+      press(["RET"])
+      assert Editor.render_state().minibuffer.prompt =~ "New destination group"
       type("zz-crew")
       press(["RET"])
 
-      assert {:ok, ~s{"zz-crew"}} =
-               Aimax.Core.Session.eval(~s{(buffer-local "*zz-gr-a*" 'group)})
-
-      assert {:ok, ~s{"zz-crew"}} =
-               Aimax.Core.Session.eval(~s{(buffer-local "*zz-gr-b*" 'group)})
+      a = buffer_group("*zz-gr-a*")
+      b = buffer_group("*zz-gr-b*")
+      assert a, "*zz-gr-a* joined no group"
+      assert b == a, "the two marked buffers landed in different groups"
+      assert group_name(a) == "zz-crew"
 
       # the act ends the marks, and the annotation says the group
       assert Buffer.text("*switch*") =~ "zz-crew"
       refute Buffer.text("*switch*") =~ ~r/^\* /m
-
-      # "(none)" leads the prompt, so RET on an empty answer removes
-      {:ok, _} = Aimax.Core.Session.eval(~s{(list-goto-first-entry "*switch*")})
-      press(["C-SPC", "C-SPC", "C-t"])
-      assert Editor.render_state().minibuffer.candidates |> hd() |> Map.get(:label) == "(none)"
-      press(["RET"])
-
-      assert {:ok, "#f"} = Aimax.Core.Session.eval(~s{(buffer-local "*zz-gr-a*" 'group)})
-      assert {:ok, "#f"} = Aimax.Core.Session.eval(~s{(buffer-local "*zz-gr-b*" 'group)})
       press(["ESC"])
     end
 
@@ -519,7 +542,7 @@ defmodule Aimax.EditorTest do
 
       home = window_of("*zz-pv-a*")
       assert home
-      press(["C-x", "b"])
+      open_modal_switcher()
       assert Editor.current_buffer() == "*switch*"
       type("zz-pv")
 
@@ -1672,7 +1695,7 @@ defmodule Aimax.EditorTest do
     assert Buffer.exists?(Editor.current_buffer())
   end
 
-  test "buffer ring: C-x b defaults to previous buffer; kill lands on MRU", %{buf: a} do
+  test "buffer ring: the switcher reaches a buffer by name; kill lands on MRU", %{buf: a} do
     b = "ring-b-#{System.unique_integer([:positive])}"
     c = "ring-c-#{System.unique_integer([:positive])}"
     Editor.set_window_buffer(a)
@@ -1680,12 +1703,12 @@ defmodule Aimax.EditorTest do
     Editor.set_window_buffer(c)
 
     # containers may hold the default now; the ring is reachable by name
-    press(["C-x", "b"])
+    open_modal_switcher()
     type(b)
     press(["RET"])
     assert Editor.current_buffer() == b
 
-    press(["C-x", "b"])
+    open_modal_switcher()
     type(c)
     press(["RET"])
     assert Editor.current_buffer() == c
@@ -2423,11 +2446,24 @@ defmodule Aimax.EditorTest do
     press(["C-g"])
   end
 
-  test "which-key panel appears for pending prefix" do
+  # The panel must offer what the map holds. Naming a binding here would
+  # send this test red the day somebody moves one, which is a preference
+  # changing and not a bug in which-key. So it reads the map back.
+  test "the which-key panel offers the pending prefix's own bindings" do
     press(["C-x"])
     wk = Editor.render_state().which_key
-    assert %{key: "b", command: "switch-to-buffer"} in wk
-    assert %{key: "C-f", command: "find-file"} in wk
+    assert is_list(wk) and wk != [], "a pending prefix drew no panel"
+
+    # a panel row can name a whole sequence under the prefix ("p d"), so
+    # the lookup takes the keys apart the same way the map holds them
+    for %{key: key, command: command} <- wk do
+      seq = Enum.map_join(String.split(key, " ", trim: true), " ", &~s{"#{&1}"})
+
+      assert {:ok, ~s{"#{command}"}} ==
+               Aimax.Core.Session.eval(~s{(key-binding (list "C-x" #{seq}))}),
+             "the panel offers C-x #{key} => #{command}; the map does not agree"
+    end
+
     press(["C-g"])
     assert Editor.render_state().which_key == nil
   end
@@ -2607,16 +2643,16 @@ defmodule Aimax.EditorTest do
     File.rm_rf!(root)
   end
 
-  test "switch-to-buffer via C-x b", %{buf: buf} do
+  test "switch-to-buffer moves the window to the buffer you name", %{buf: buf} do
     other = "other-#{System.unique_integer([:positive])}"
     Aimax.Core.create_buffer(other)
 
-    press(["C-x", "b"])
+    open_modal_switcher()
     type(other)
     press(["RET"])
     assert Editor.current_buffer() == other
 
-    press(["C-x", "b"])
+    open_modal_switcher()
     type(buf)
     press(["RET"])
     assert Editor.current_buffer() == buf
@@ -2951,7 +2987,7 @@ defmodule Aimax.EditorTest do
              (switch-to-buffer! "*scratch*"))
       """)
 
-    press(["C-x", "b"])
+    open_group_switcher()
     type("one.txt")
     press(["C-RET"])
 
@@ -3048,7 +3084,7 @@ defmodule Aimax.EditorTest do
     {:ok, _} =
       Aimax.Core.Session.eval(~s{(begin (delete-other-windows!) (switch-to-buffer! "#{buf}"))})
 
-    press(["C-x", "b"])
+    open_group_switcher()
     type("zzqxw-#{n}")
     press(["RET"])
     assert Aimax.Core.Session.eval(~s{(buffer-group "#{buf}")}) == {:ok, ~s{"zzqxw-#{n}"}}
@@ -3189,7 +3225,7 @@ defmodule Aimax.EditorTest do
             (buffer-set-local! buf 'probe-caught #t))))
       """)
 
-    press(["C-x", "b"])
+    open_modal_switcher()
     type(b)
     press(["RET"])
     assert Editor.current_buffer() == b
@@ -3453,11 +3489,13 @@ defmodule Aimax.EditorTest do
 
     test "windows can show different buffers", %{buf: buf} do
       other = "win-#{System.unique_integer([:positive])}"
-      # C-x b RET on a NEW name founds a group now; an existing buffer switches
+      # this test is about the windows, so it takes the plainest switcher:
+      # the modal one previews into the window it was opened from, which is
+      # a second thing happening to the layout under test
       Aimax.Core.create_buffer(other)
       press(["C-x", "3"])
       press(["C-x", "o"])
-      press(["C-x", "b"])
+      open_group_switcher()
       type(other)
       press(["RET"])
 

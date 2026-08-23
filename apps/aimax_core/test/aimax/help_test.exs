@@ -63,7 +63,7 @@ defmodule Aimax.HelpTest do
     assert {:ok, ~s{"markdown"}} = Session.eval(~s{(buffer-local "*Help*" 'render-mode)})
   end
 
-  test "C-h b lists local bindings before global ones" do
+  test "the binding help lists local bindings before global ones" do
     eval!(~s{(begin (buffer-create "*zz-help*") (switch-to-buffer! "*zz-help*")
                     (run-command "switch-to-buffer"))})
 
@@ -72,7 +72,12 @@ defmodule Aimax.HelpTest do
 
     assert text =~ "## This buffer"
     assert text =~ "## Everywhere"
-    assert text =~ "[`switch-to-buffer`](aimax:def/switch-to-buffer)"
+
+    # both tables carry rows. Naming a binding here would send this red
+    # for a rebinding, which is a preference and not a bug in the help.
+    [this, every] = String.split(text, "## Everywhere", parts: 2)
+    assert this =~ "aimax:def/", "the local table listed no command"
+    assert every =~ "aimax:def/", "the global table listed no command"
 
     [local, global] = [
       :binary.match(text, "## This buffer"),

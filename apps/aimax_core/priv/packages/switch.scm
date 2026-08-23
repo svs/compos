@@ -407,6 +407,17 @@
   "Push the marked buffers, or the row at point, to another group"
   (lambda () (run-command "group-push-buffer")))
 
+;; group-push-buffer prompts, so it changes membership inside a
+;; minibuffer callback and returns long before. The switcher hears about
+;; it the same way anything else does: the annotation reads a group, so a
+;; changed membership makes the rows stale, and the marks that chose
+;; those buffers are spent.
+(add-hook! 'group-membership-hook
+  (lambda ()
+    (when (buffer-known? *switch-buffer*)
+      (list-clear-marks! *switch-buffer*)
+      (list-refresh! *switch-buffer*))))
+
 (effects! '(read))
 
 ;; C-o flips between the buffers and the contexts. C-g keeps its one

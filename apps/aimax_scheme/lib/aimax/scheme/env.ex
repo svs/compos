@@ -98,6 +98,17 @@ defmodule Aimax.Scheme.Env do
     end
   end
 
+  @doc """
+  Drop this process's cached shared reads.
+
+  The cache exists because an ETS read copies the term, and it is cleared
+  at each exec boundary — so within one eval, another lane's writes are
+  invisible. A primitive that POLLS inside a single eval (wait-until) must
+  clear it between polls, or it watches a snapshot and always times out.
+  Frames in `local` are this eval's own and are untouched.
+  """
+  def forget_cached_reads, do: Process.put(:scheme_cache, %{})
+
   defp cached_parent(tid, cache, ref) do
     case cache do
       %{{:parent, ^ref} => parent} ->

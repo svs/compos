@@ -43,6 +43,10 @@ defmodule Aimax.Core.Session do
   # the call must give up first and say so.
   @mcp_wait 25_000
 
+  # the longest a (wait-until) may hold its lane. Lane.run gives an eval
+  # 30s, so a runaway predicate must give up first and answer #f.
+  @wait_cap 10_000
+
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   # every entry point carries the caller's frame context into this process:
@@ -790,6 +794,8 @@ defmodule Aimax.Core.Session do
         "(with-current-buffer BUF THUNK) — run THUNK with BUF current without displaying it or changing any window.",
       "eval-string-safe" =>
         "(eval-string-safe SRC) — evaluate SRC; return (ok VAL) or (error MSG).",
+      "wait-until" =>
+        "(wait-until PRED &optional TIMEOUT-MS INTERVAL-MS) — poll PRED until it answers true; return #t, or #f at the deadline.",
       "symbol-value" => "(symbol-value 'NAME) — return the global value of the symbol.",
       "set-symbol-value!" =>
         "(set-symbol-value! 'NAME VAL) — set the global value of the symbol.",
@@ -1687,6 +1693,25 @@ defmodule Aimax.Core.Session do
           Aimax.Scheme.Eval.apply_fn(thunk, [], store)
         end)
       end,
+      # (wait-until PRED &optional TIMEOUT-MS INTERVAL-MS) -> #t | #f
+      #
+      # Wait for work that is not on this lane: a subprocess handshake, a
+      # debounce, a fetch that answers through a callback. Polling beats a
+      # fixed sleep — it returns the moment the condition holds, and a
+      # sleep long enough to be safe is a sleep long enough to be slow.
+      #
+      # This BLOCKS its lane, the way mcp-call! does. Lanes are serial and
+      # independent, so a wait on the RPC or test lane never delays a
+      # keystroke on :ui. @wait_cap keeps a bad predicate well inside the
+      # 30s Lane timeout, so a runaway wait reports as #f and not as a
+      # frozen lane nobody can name.
+      "wait-until" => fn args, store ->
+        [pred | rest] = args
+        timeout = min(wait_arg(rest, 0, 2_000), @wait_cap)
+        interval = max(wait_arg(rest, 1, 20), 5)
+        deadline = System.monotonic_time(:millisecond) + timeout
+        wait_until_loop(pred, deadline, interval, store)
+      end,
       # (eval-string-safe SRC) -> (ok VAL) | (error MSG) — the catch this
       # dialect lacks; the eval-scheme tool's did-you-mean feedback needs to
       # observe the error instead of aborting the whole handler
@@ -2085,6 +2110,31 @@ defmodule Aimax.Core.Session do
   defp plist_val_to_elixir({:sym, str}), do: str
   defp plist_val_to_elixir(v) when is_list(v), do: Enum.map(v, &plist_val_to_elixir/1)
   defp plist_val_to_elixir(v), do: v
+
+  # false is the only false value in this dialect: nil, '() and 0 are all
+  # true, so the test is exactly `!= false` and never Elixir truthiness.
+  defp wait_until_loop(pred, deadline, interval, store) do
+    {value, store} = Aimax.Scheme.Eval.apply_fn(pred, [], store)
+
+    cond do
+      value != false -> {true, store}
+      System.monotonic_time(:millisecond) >= deadline -> {false, store}
+      true ->
+        Process.sleep(interval)
+        # reads of shared frames are cached per process and cleared once
+        # per exec. Polling happens INSIDE one exec, so without this the
+        # predicate re-reads its own first answer until the deadline.
+        Aimax.Scheme.Env.forget_cached_reads()
+        wait_until_loop(pred, deadline, interval, store)
+    end
+  end
+
+  defp wait_arg(rest, index, default) do
+    case Enum.at(rest, index) do
+      n when is_integer(n) and n > 0 -> n
+      _ -> default
+    end
+  end
 
   # the task owns the timeout, not the connection: Conn gives a tool call
   # two minutes, and the session cannot wait that long for anything

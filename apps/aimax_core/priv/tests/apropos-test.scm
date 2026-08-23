@@ -122,6 +122,25 @@
                       (catalog)))
       587 "the unstamped bundled entries")))
 
+(deftest 'no-entry-carries-the-same-key-twice
+  "one entry, one answer per key: a duplicate hides from plist-get and not from a walker"
+  (lambda ()
+    (let ((keys (lambda (pl)
+                  (let loop ((xs pl) (ks '()))
+                    (if (or (null? xs) (null? (cdr xs)))
+                        (reverse ks)
+                        (loop (cdr (cdr xs)) (cons (car xs) ks)))))))
+      (check-equal!
+        (map (lambda (e) (plist-get e 'qualified-name))
+             (filter (lambda (e)
+                       (let ((ks (keys e)))
+                         (let dup ((xs ks))
+                           (cond ((null? xs) #f)
+                                 ((member (car xs) (cdr xs)) #t)
+                                 (else (dup (cdr xs)))))))
+                     (catalog)))
+        '() "every entry has distinct keys"))))
+
 (deftest 'every-public-entry-carries-a-signature-and-a-category
   "the sig is parsed out of the doc, so the house way needs no extra work"
   (lambda ()

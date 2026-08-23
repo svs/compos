@@ -69,6 +69,20 @@
         ((symbol? x) (symbol->string x))
         (else (value->string x))))
 
+;; The entry computes these keys, so a copy in meta made the same key
+;; appear twice. plist-get reads the first, so the duplicate was invisible
+;; to a reader and visible to anything that walks the entry.
+(define catalog--computed-keys
+  '(kind name qualified-name package namespace origin domain effects
+    metadata-source doc))
+
+(define (catalog--strip-computed pl)
+  (cond ((or (null? pl) (null? (cdr pl))) '())
+        ((member (car pl) catalog--computed-keys)
+         (catalog--strip-computed (cdr (cdr pl))))
+        (else (cons (car pl)
+                    (cons (cadr pl) (catalog--strip-computed (cdr (cdr pl))))))))
+
 (define (catalog-register! kind name doc &rest meta)
   (let* ((n (catalog--string name))
          (k (catalog--string kind))
@@ -91,7 +105,7 @@
                         'effects (map catalog--string effects)
                         'metadata-source (if declared? "declared" "unknown")
                         'doc doc)
-                  meta)))
+                  (catalog--strip-computed meta))))
     (let ((key (catalog--key k n qualified)))
       (if (member key *catalog-keys*)
           (set! *catalog*

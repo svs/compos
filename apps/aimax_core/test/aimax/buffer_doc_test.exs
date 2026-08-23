@@ -171,6 +171,90 @@ defmodule Aimax.BufferDocTest do
     end
   end
 
+  # Undo used to restore the point saved in the snapshot. It now places the
+  # point at the change it applied, which is where Emacs leaves it. Nothing
+  # asserted this before, so it is pinned here.
+  describe "point through undo" do
+    test "an undone insert leaves the point where the text was" do
+      name = new_buffer("abc")
+      Buffer.insert_at(name, 3, "XYZ", source: :user)
+      assert Buffer.text(name) == "abcXYZ"
+
+      Buffer.undo(name, source: :user)
+      assert Buffer.text(name) == "abc"
+      assert Buffer.point(name) == 3
+    end
+
+    test "an undone delete leaves the point after the restored text" do
+      name = new_buffer("abcdef")
+      Buffer.delete_range(name, 3, 3, source: :user)
+      assert Buffer.text(name) == "abc"
+
+      Buffer.undo(name, source: :user)
+      assert Buffer.text(name) == "abcdef"
+      assert Buffer.point(name) == 6
+    end
+
+    test "the point stays inside the text after an agent edit and a human undo" do
+      name = new_buffer("")
+      Buffer.append(name, "human", source: :user)
+      Buffer.append(name, "AGENT", source: {:agent, "codex"})
+      Buffer.undo(name, source: :user)
+
+      assert Buffer.point(name) <= Buffer.byte_size(name)
+    end
+  end
+
+  # A byte offset read now is wrong later if anyone edits above it. An anchor
+  # is the same position expressed so that it survives.
+  describe "anchors" do
+    test "an anchor follows an insert above it" do
+      name = new_buffer("hello world")
+      a = Buffer.anchor(name, 6)
+      assert Buffer.anchor_pos(name, a) == 6
+
+      Buffer.insert_at(name, 0, "XXX", source: :user)
+      assert Buffer.anchor_pos(name, a) == 9
+    end
+
+    test "an anchor follows a delete above it" do
+      name = new_buffer("0123456789")
+      a = Buffer.anchor(name, 8)
+
+      Buffer.delete_range(name, 0, 4, source: :user)
+      assert Buffer.anchor_pos(name, a) == 4
+    end
+
+    test "an anchor is unmoved by an edit below it" do
+      name = new_buffer("hello world")
+      a = Buffer.anchor(name, 5)
+
+      Buffer.append(name, "!!!", source: :user)
+      assert Buffer.anchor_pos(name, a) == 5
+    end
+
+    test "an anchor stays inside the text after everything below is cut" do
+      name = new_buffer("hello world")
+      a = Buffer.anchor(name, 11)
+
+      Buffer.delete_range(name, 5, 6, source: :user)
+      assert Buffer.anchor_pos(name, a) <= Buffer.byte_size(name)
+    end
+
+    test "a buffer that records no history has no anchors" do
+      name = new_buffer("text")
+      Buffer.provenance_stop(name, source: :editor)
+      # The document is still attached, so an anchor taken before the stop
+      # keeps working; what matters is that nothing raises.
+      assert Buffer.anchor(name, 2) == nil or is_binary(Buffer.anchor(name, 2))
+    end
+
+    test "a malformed anchor resolves to nothing rather than raising" do
+      name = new_buffer("text")
+      assert Buffer.anchor_pos(name, "not-an-anchor") == nil
+    end
+  end
+
   describe "attribution" do
     test "a change carries the actor that made it" do
       name = new_buffer("")

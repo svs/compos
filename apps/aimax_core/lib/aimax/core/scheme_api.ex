@@ -52,6 +52,10 @@ defmodule Aimax.Core.SchemeAPI do
         "(buffer-delete-range! BUF POS LEN) — delete LEN bytes at byte POS; ignores read-only.",
       "buffer-replace-range!" =>
         "(buffer-replace-range! BUF POS LEN TEXT) — replace LEN bytes at byte POS with TEXT as one undo step; ignores read-only.",
+      "buffer-anchor" =>
+        "(buffer-anchor BUF POS) — an opaque anchor on byte POS that keeps naming the same place while the text around it changes; #f if the buffer records no history.",
+      "buffer-anchor-pos" =>
+        "(buffer-anchor-pos BUF ANCHOR) — where an anchor from buffer-anchor points now, or #f if it cannot be resolved. Read a position now, edit at it later, and the edit still lands where you meant.",
       "buffer-authors" =>
         "(buffer-authors BUF) — return (START END AUTHOR) attribution spans for the current text.",
       "buffer-author-lines" =>
@@ -409,6 +413,12 @@ defmodule Aimax.Core.SchemeAPI do
       "buffer-replace-range!" => fn [name, pos, len, text] ->
         :ok = Buffer.replace_range(name, pos, len, text, source: :editor)
         :void
+      end,
+      "buffer-anchor" => fn [name, pos] ->
+        Buffer.anchor(name, pos) || false
+      end,
+      "buffer-anchor-pos" => fn [name, anchor] ->
+        Buffer.anchor_pos(name, anchor) || false
       end,
       "buffer-authors" => fn [name] ->
         for {s, e, a} <- Buffer.authors(name), do: [s, e, a]

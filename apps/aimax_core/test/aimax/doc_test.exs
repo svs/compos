@@ -188,6 +188,20 @@ defmodule Aimax.DocTest do
       assert Doc.cursor_pos(doc, cursor) == 8
     end
 
+    # A cursor names an operation, not an offset, and operations are durable.
+    # An anchor handed out now must still mean the same place after a restart.
+    test "a cursor resolves against a reopened document" do
+      doc = Doc.new(1)
+      write(doc, 0, "0123456789", "user", @human)
+      cursor = Doc.cursor(doc, 5)
+
+      {:ok, reopened} = Doc.open(2, Doc.export_snapshot(doc))
+      assert Doc.cursor_pos(reopened, cursor) == 5
+
+      write(reopened, 0, "abc", "user", @human)
+      assert Doc.cursor_pos(reopened, cursor) == 8
+    end
+
     test "a cursor survives a deletion above it" do
       doc = Doc.new(1)
       write(doc, 0, "0123456789", "user", @human)

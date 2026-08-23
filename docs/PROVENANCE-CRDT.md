@@ -122,6 +122,13 @@ Two uses, neither of them an agent affordance:
   taken at read time makes the range survive. This is the concrete win for agents, and
   it is invisible: no point, no highlight, nothing rendered.
 
+  Phase 4 traced where this is reachable. The text-anchored tools, `buffer-replace!` and
+  its family, are already safe: they locate their target by a unique string inside the
+  same call, and refuse when it is missing or ambiguous. The hole is `code-outline` to
+  `code-replace!`, which addresses a definition by line number across turns, and which
+  the system prompt teaches as the way to edit code. `eval-scheme` can reach the raw
+  offset primitives directly, which no anchor can close.
+
 ## Design
 
 ### New crate `apps/aimax_core/native/aimax_loro`
@@ -273,9 +280,12 @@ Three findings changed the design, and each is folded into the sections above.
    exclusion, the agent's undo entered the human's stack, and the human's next undo
    restored the agent's text instead of removing the human's own. Adding the exclusion
    to both managers gave clean, symmetric per-actor undo.
-3. **Cursor resolution is not free.** At 25 to 46 us it is fifty times a keystroke.
-   Phase 4 must cache the resolved point and invalidate it on change, never resolve per
-   access. This number is one sample and needs a proper median before Phase 4 starts.
+3. ~~**Cursor resolution is not free.** At 25 to 46 us it is fifty times a keystroke.~~
+   **Wrong, and corrected in Phase 4.** That was one cold call. The median says taking a
+   cursor costs 0.17 us and resolving a fresh one costs 0.042 us, at every document size
+   from 64 KB to 3 MB. The cost tracks the edits made since the cursor was taken, not the
+   size of the document: after 2000 edits a resolve costs about 15 us. So a cursor the
+   buffer re-takes on every move is free, and only a long-lived anchor ever pays.
 
 The oplog grows about one byte per character, so a 343 KB buffer carries a 353 KB
 oplog. Snapshot sizes measured here are not meaningful, because the synthetic seed text
@@ -348,9 +358,33 @@ A checkpoint closes the open undo step, so a typing run crossing the 1.5 second 
 becomes two steps rather than one. Emacs already caps a run at 20 characters, so this is
 a comparable granularity rather than a new kind of split.
 
-**Phase 4 - cursors.** The human's point and mark become Loro cursors, retiring
-`adjust_point_insert` and `adjust_ranges`. Agent read-to-edit ranges take a cursor pair
-at read time, so a human typing above a pending agent edit no longer misplaces it.
+**Phase 4 - cursors. Half done, deliberately.**
+
+`Buffer.anchor/2` and `Buffer.anchor_pos/2` turn a byte position into a token that keeps
+naming the same place while the text around it changes, and survives a restart. They
+reach Scheme as `(buffer-anchor BUF POS)` and `(buffer-anchor-pos BUF ANCHOR)`, base64 so
+an anchor travels through a tool call. `code-outline` now anchors every line it reports
+and `code--with-node` follows the anchor, which closes a real hole on the documented
+agent path: an agent reads an outline, thinks for a few seconds, and calls
+`code-replace!` with a line that a person has meanwhile moved.
+
+**The name check turned out to matter more than the anchor.** Two comments at the top
+level change which level tree-sitter folds at, so the outline collapses from two
+functions to one module, and a line that named a function now names the whole file.
+The anchor still resolves, so position alone is not enough. `code-outline` records the
+name it reported for each line, and `code--with-node` refuses when the definition it
+finds no longer carries that name. Without the check, `code-replace!` would have
+silently replaced the entire file. That failure exists today, before any of this.
+
+Each `code-outline` call replaces the map, because the lines an agent holds come from
+the outline it last read.
+
+**The point and mark stay as they are.** `adjust_point_insert` and `adjust_ranges` are
+O(1) arithmetic and correct for every edit the buffer applies itself, which is every edit
+that exists today. They become wrong only for an edit the buffer did not apply, which
+arrives with the transport in Phase 6. Converting them now would churn correct code and
+put a NIF call on the point path for no change in behaviour, so it waits for the phase
+that needs it.
 
 **Phase 5 - provenance reads the oplog.** `flush_provenance/1` (`buffer.ex:1687`)
 commits a Loro change with actor metadata instead of writing revisions. `M-x buffer-log`

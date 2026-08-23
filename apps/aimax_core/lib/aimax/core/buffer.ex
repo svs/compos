@@ -360,6 +360,23 @@ defmodule Aimax.Core.Buffer do
   """
   def doc(name), do: GenServer.call(via(name), :doc)
 
+  @doc """
+  An anchor on a byte position: an opaque token that keeps naming the same
+  place while the text around it changes.
+
+  A byte offset read now and used later is wrong if anyone edited above it in
+  between, which is what happens when an agent reads a buffer, thinks, and then
+  edits. An anchor survives that, and survives a restart, because it names an
+  operation rather than a distance from the start.
+
+  Returns nil for a buffer whose mode records no history.
+  """
+  def anchor(name, pos) when pos >= 0, do: GenServer.call(via(name), {:anchor, pos})
+
+  @doc "Where an anchor points now, or nil if it cannot be resolved."
+  def anchor_pos(name, anchor) when is_binary(anchor),
+    do: GenServer.call(via(name), {:anchor_pos, anchor})
+
   @doc "Start or resume Provenance without deleting prior history."
   def provenance_start(name, opts \\ []) do
     GenServer.call(via(name), {:provenance_start, source(opts), author(opts), opts})
@@ -844,6 +861,14 @@ defmodule Aimax.Core.Buffer do
     {:reply, state.doc, state}
   end
 
+  def handle_call({:anchor, pos}, _from, state) do
+    {:reply, take_anchor(state, pos), state}
+  end
+
+  def handle_call({:anchor_pos, anchor}, _from, state) do
+    {:reply, read_anchor(state, anchor), state}
+  end
+
   def handle_call({:provenance_start, src, author, opts}, _from, state) do
     state = flush_provenance(state)
     actor = resolve_actor(author, src)
@@ -1308,6 +1333,32 @@ defmodule Aimax.Core.Buffer do
 
   defp resync_actor,
     do: local_actor("system:resync", "system", "resync", :doc_resync)
+
+  # --- anchors ---------------------------------------------------------------
+  #
+  # A cursor names an operation, so it keeps naming the same place while text
+  # is inserted and deleted around it. The bytes cross into Scheme and out to a
+  # tool call as base64, because an anchor travels through JSON.
+
+  defp take_anchor(%{doc: nil}, _pos), do: nil
+
+  defp take_anchor(state, pos) do
+    case Doc.cursor(state.doc, min(pos, Rope.byte_size(state.rope))) do
+      cursor when is_binary(cursor) -> Base.url_encode64(cursor, padding: false)
+      _ -> nil
+    end
+  end
+
+  defp read_anchor(%{doc: nil}, _anchor), do: nil
+
+  defp read_anchor(state, anchor) do
+    with {:ok, bytes} <- Base.url_decode64(anchor, padding: false),
+         pos when is_integer(pos) <- Doc.cursor_pos(state.doc, bytes) do
+      min(pos, Rope.byte_size(state.rope))
+    else
+      _ -> nil
+    end
+  end
 
   # --- undo ------------------------------------------------------------------
   #

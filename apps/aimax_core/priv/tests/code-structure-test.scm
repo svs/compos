@@ -191,3 +191,51 @@
                   '("read") "code-sexp reads")
     (check-equal! (plist-get (catalog-entry 'function "code-sexp-replace!") 'effects)
                   '("write") "code-sexp-replace! writes")))
+
+;;; --- an outline line survives a person typing --------------------------------
+;;; The read-then-write gap: code-outline reports a line, the model thinks for
+;;; a few seconds, and code-replace! arrives with that line. A person editing
+;;; above the target in between used to make it replace the wrong definition.
+;;; The outline anchors every line it reports, so the line still names the
+;;; definition it named when the agent read it.
+
+(effects! '(write))
+
+(deftest 'code-replace-follows-the-outline-anchor-after-an-edit-above
+  "an insert above the target must not move the definition a line names"
+  (lambda ()
+    (let ((buf (t--code-ts! "zz-code-anchor" t--code-elixir)))
+      ;; the agent reads: `two` starts on line 6
+      (check-true! (member '(6 "call" "two" "def two(x) do") (code-outline buf))
+                   "the outline names line 6")
+
+      ;; a person adds a line inside `one` while the agent thinks, so `two`
+      ;; slides down to line 7. Nothing calls code-outline again: the anchors
+      ;; belong to the outline the agent actually read.
+      (buffer-insert! buf 42 "    x + 0\n")
+
+      ;; the agent still says 6, and still means `two`
+      (check-equal! (code-replace! buf 6 "def two(x) do\n    x * 2\n  end")
+                    "replaced the call at line 6" "the anchor found it")
+      (check-contains! (buffer-text buf) "x * 2" "the new body landed")
+      (check-contains! (buffer-text buf) "x + 0" "the person's line survived")
+      (check-contains! (buffer-text buf) "x + 1" "one was left alone")
+      (buffer-kill! buf))))
+
+;; An anchor still resolves after the thing it named stops being a definition,
+;; so the name the outline reported is what proves it is the same one. Two
+;; comments at the top level change which level folds, and the outline
+;; collapses to the module: without this check, line 6 would silently replace
+;; the whole file.
+(deftest 'code-replace-refuses-when-the-structure-moved-under-it
+  "a refusal the caller can act on beats replacing the wrong definition"
+  (lambda ()
+    (let ((buf (t--code-ts! "zz-code-anchor-gone" t--code-elixir)))
+      (code-outline buf)
+      (buffer-insert! buf 0 "# a note\n# another\n")
+      (check-contains! (code-replace! buf 6 "def three(x) do\n    x\n  end")
+                       "call (code-outline BUF) again"
+                       "it refuses rather than replacing the wrong definition")
+      (check-contains! (buffer-text buf) "x + 2" "two is untouched")
+      (check-contains! (buffer-text buf) "x + 1" "one is untouched")
+      (buffer-kill! buf))))

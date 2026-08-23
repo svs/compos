@@ -696,22 +696,53 @@
                               (string-trim (code--group-text rest c 1))))
                            (else rest)))))))))
 
+;; A line number read now is wrong later. An agent calls code-outline, thinks
+;; for a few seconds, then calls code-replace! with a line from that outline —
+;; and if a person added a line above meanwhile, that number now names a
+;; different definition. So the outline also anchors every line it reports, and
+;; code--with-node follows the anchor instead of the number.
+;;
+;; The name rides along as a second check: an anchor still resolves after its
+;; definition is deleted, and the name is what proves it is the same one. It
+;; also catches a subtler case. Two comments at the top level change which
+;; level folds, so the outline collapses to the module, and a line that used to
+;; name a function now names the whole file. The check refuses; without it the
+;; replacement would silently swallow everything.
+;;
+;; One outline at a time. Each call replaces the map, because the lines an
+;; agent holds come from the outline it last read.
+(define (code--remember-anchors! buf nodes)
+  (buffer-set-local! buf 'code-anchors
+    (map (lambda (n)
+           (list (line-number-at-pos (code--start n))
+                 (buffer-anchor buf (code--start n))
+                 (code--name (code--head buf n))))
+         nodes)))
+
+;; buffer-local answers #f when the outline has never run here.
+(define (code--anchor-row buf line)
+  (let ((anchors (buffer-local buf 'code-anchors)))
+    (and anchors (assoc line anchors))))
+
 (define (code--outline-rows buf)
   (let* ((lines (string-split (buffer-text buf) "\n"))
-         (count (length lines)))
-    (map (lambda (n)
-           (let ((line (line-number-at-pos (code--start n)))
-                 (head (code--head buf n)))
-             (list line
-                   (code--kind n)
-                   (code--name head)
-                   (or (code--doc-above lines count (- line 2))
-                       (code--doc-inside buf n)
-                       head))))
+         (count (length lines))
          ;; a comment is context for a definition, not a definition: it
          ;; feeds the doc column and stays out of the outline
-         (filter (lambda (n) (not (string-index (code--kind n) "comment")))
-                 (code--fold-nodes buf)))))
+         (nodes (filter (lambda (n) (not (string-index (code--kind n) "comment")))
+                        (code--fold-nodes buf)))
+         (rows (map (lambda (n)
+                      (let ((line (line-number-at-pos (code--start n)))
+                            (head (code--head buf n)))
+                        (list line
+                              (code--kind n)
+                              (code--name head)
+                              (or (code--doc-above lines count (- line 2))
+                                  (code--doc-inside buf n)
+                                  head))))
+                    nodes)))
+    (code--remember-anchors! buf nodes)
+    rows))
 
 ;; Every entry point runs through here. The node questions read the CURRENT
 ;; buffer, and code--top-nodes reads the chosen backend from a local — so the
@@ -742,7 +773,9 @@
 ;; the definition that holds LINE. The fold level is the level a reader
 ;; lands on, so an agent and a reader address the same things.
 (define (code--at-line buf line)
-  (let* ((pos (line-start-position line))
+  (let* ((row (code--anchor-row buf line))
+         (anchored (and row (nth 1 row) (buffer-anchor-pos buf (nth 1 row))))
+         (pos (or anchored (line-start-position line)))
          (hit (let loop ((ns (code--fold-nodes buf)))
                 (cond ((null? ns) #f)
                       ((and (<= (code--start (car ns)) pos)
@@ -764,11 +797,30 @@
                               (number->string lines) " lines"))
               (else
                 (let ((n (code--at-line buf line)))
-                  (if n
-                      (k n)
-                      (string-append "no definition holds line "
-                                     (number->string line)
-                                     " — call (code-outline BUF) for the lines that do")))))))))
+                  (cond
+                    ((not n)
+                     (string-append "no definition holds line "
+                                    (number->string line)
+                                    " — call (code-outline BUF) for the lines that do"))
+                    ((code--moved-on? buf line n)
+                     (string-append "line " (number->string line)
+                                    " no longer holds " (code--anchor-name buf line)
+                                    " — the buffer changed since the outline;"
+                                    " call (code-outline BUF) again"))
+                    (else (k n))))))))))
+
+;; The anchor found a definition; this asks whether it is still the one the
+;; outline named. A definition deleted since then leaves an anchor that
+;; resolves onto its neighbour, and only the name catches that.
+(define (code--anchor-name buf line)
+  (let ((row (code--anchor-row buf line)))
+    (if (and row (nth 2 row)) (nth 2 row) "that definition")))
+
+(define (code--moved-on? buf line n)
+  (let ((row (code--anchor-row buf line)))
+    (and row
+         (nth 2 row)
+         (not (equal? (nth 2 row) (code--name (code--head buf n)))))))
 
 (define (code-read buf line)
   (code--with-node buf line (lambda (n) (code--text buf n))))

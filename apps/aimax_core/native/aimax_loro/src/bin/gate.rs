@@ -274,6 +274,56 @@ fn probe_undo_granularity() {
     println!("    after one undo       {:?}", t2.to_string());
 }
 
+/// Phase 0 timed one cursor resolve and got 25 to 46 us, which would be fifty
+/// keystrokes. Phase 4 needs the median, and needs to know whether the cost
+/// grows with the document or with the edits made since the cursor was taken.
+fn bench_cursor(size: usize) {
+    let text = seed(size);
+    let (doc, t) = doc_with(&text);
+
+    let cursor = t.get_cursor(size / 2, Default::default()).unwrap();
+
+    let mut fresh = Vec::new();
+    for _ in 0..500 {
+        let start = Instant::now();
+        let _ = doc.get_cursor_pos(&cursor).unwrap().current.pos;
+        fresh.push(start.elapsed().as_nanos() as f64 / 1000.0);
+    }
+
+    // Now age the cursor: edits above it move it, and the resolve has to
+    // account for them.
+    for i in 0..2000 {
+        t.insert_utf8(i * 2, "z").unwrap();
+        if i % 200 == 199 {
+            doc.commit();
+        }
+    }
+    doc.commit();
+
+    let mut aged = Vec::new();
+    for _ in 0..500 {
+        let start = Instant::now();
+        let _ = doc.get_cursor_pos(&cursor).unwrap().current.pos;
+        aged.push(start.elapsed().as_nanos() as f64 / 1000.0);
+    }
+
+    // And taking one, which the agent path does per read.
+    let mut take = Vec::new();
+    for i in 0..500 {
+        let start = Instant::now();
+        let _ = t.get_cursor(i, Default::default()).unwrap();
+        take.push(start.elapsed().as_nanos() as f64 / 1000.0);
+    }
+
+    println!(
+        "  {:>4} KB   take {:>7.3} us   resolve {:>7.3} us   after 2000 edits {:>7.3} us",
+        size / 1024,
+        median_us(take),
+        median_us(fresh),
+        median_us(aged)
+    );
+}
+
 fn main() {
     println!("Loro Phase 0 gate. Keystroke budget is {} us.\n", BUDGET_US);
 
@@ -293,4 +343,9 @@ fn main() {
     probe_agent_undo_isolation();
     probe_durable_actor();
     probe_undo_granularity();
+
+    println!("\n  cursors");
+    bench_cursor(64 * 1024);
+    bench_cursor(343 * 1024);
+    bench_cursor(3 * 1024 * 1024);
 }

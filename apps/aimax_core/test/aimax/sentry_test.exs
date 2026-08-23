@@ -55,8 +55,8 @@ defmodule Aimax.SentryTest do
     """)
 
     eval!(~S|(run-command "sentry")|)
-    assert eval!(~S|(buffer-group "*Sentry issues*")|) == ~s{"sentry"}
-    assert eval!(~S|(buffer-group (group-chat "sentry"))|) == ~s{"sentry"}
+    assert eval!(~S|(group-name (buffer-group "*Sentry issues*"))|) == ~s{"sentry"}
+    assert eval!(~S|(group-name (buffer-group (group-chat "sentry")))|) == ~s{"sentry"}
 
     eval!(~S|(switch-to-buffer! "*Sentry issues*")|)
     eval!(~S|(list-goto-first-entry "*Sentry issues*")|)
@@ -70,7 +70,7 @@ defmodule Aimax.SentryTest do
     assert text =~ "hidden"
     refute text =~ "<!doctype html>"
     assert eval!(~S|(buffer-local "*Sentry issue: 42*" 'render-mode)|) == ~s{"blocks"}
-    assert eval!(~S|(buffer-group "*Sentry issue: 42*")|) == ~s{"sentry"}
+    assert eval!(~S|(group-name (buffer-group "*Sentry issue: 42*"))|) == ~s{"sentry"}
 
     eval!(~S|(switch-to-buffer! "*Sentry issues*")|)
     KeyDispatch.handle_key("n")
@@ -78,7 +78,7 @@ defmodule Aimax.SentryTest do
 
     assert Buffer.exists?("*Sentry issue: 43*")
     assert Buffer.text("*Sentry issue: 43*") =~ "ATS-43"
-    assert eval!(~S|(buffer-group "*Sentry issue: 43*")|) == ~s{"sentry"}
+    assert eval!(~S|(group-name (buffer-group "*Sentry issue: 43*"))|) == ~s{"sentry"}
 
     eval!(
       ~S|(set! *sentry-transport* (lambda (url) "{\"id\":\"42\",\"shortId\":\"ATS-42\",\"title\":\"downloaded twice\"}\n200"))|

@@ -315,6 +315,10 @@ defmodule Aimax.SwitchModalTest do
   end
 
   test "the chrome chord table serves the minibuffer prompt, not the modal buffer" do
-    assert eval!(~s{(chrome--chord-command '("C-x" "b"))}) == ~s{"switch-to-buffer-prompt"}
+    # which chord chrome claims is its own preference, so read the table
+    claimed = eval!("(car (car *chrome-chord-commands*))") |> Jason.decode!()
+    keys = claimed |> String.split(" ", trim: true) |> Enum.map_join(" ", &~s{"#{&1}"})
+
+    assert eval!(~s{(chrome--chord-command (list #{keys}))}) == ~s{"switch-to-buffer-prompt"}
   end
 end

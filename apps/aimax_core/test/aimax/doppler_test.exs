@@ -27,6 +27,7 @@ defmodule Aimax.DopplerTest do
       secrets)
         case "$2" in
           get) printf 'super-secret' ;;
+          download) printf '{"ANTHROPIC_API_KEY":"super-secret","DATABASE_URL":"super-secret","SENTRY_AUTH_TOKEN":"super-secret"}' ;;
           set|delete) : ;;
           *) printf '{"ANTHROPIC_API_KEY":{},"DATABASE_URL":{}}' ;;
         esac
@@ -93,25 +94,36 @@ defmodule Aimax.DopplerTest do
     press("RET")
 
     assert Editor.take_clipboard("f-main") == "super-secret"
-    assert File.read!(calls) =~ "secrets get ANTHROPIC_API_KEY"
+    # the first miss warms the whole config in one call, so the value
+    # arrives from `secrets download` and not from a per-name get
+    assert File.read!(calls) =~ "secrets download"
     refute eval!(~s{(buffer-text "*doppler*")}) =~ "super-secret"
   end
 
-  test "a secret value is one doppler process per session", %{calls: calls} do
+  test "a secret value is one doppler process per config, not per secret", %{calls: calls} do
     assert eval!(~s{(doppler-secret-value "personal" "dev" "SENTRY_AUTH_TOKEN")}) ==
              ~s{"super-secret"}
 
     fetched = length(String.split(File.read!(calls), "\n", trim: true))
 
-    # the second read serves the cache: no new doppler process
+    # the first miss warmed the whole config, so a SECOND name costs no
+    # process at all — that is what the download buys
+    assert eval!(~s{(doppler-secret-value "personal" "dev" "DATABASE_URL")}) ==
+             ~s{"super-secret"}
+
     assert eval!(~s{(doppler-secret-value "personal" "dev" "SENTRY_AUTH_TOKEN")}) ==
              ~s{"super-secret"}
+
     assert length(String.split(File.read!(calls), "\n", trim: true)) == fetched
 
-    # a write drops its entry, so the next read fetches again
+    # a write drops that one entry, and the config is warm already, so the
+    # next read asks for that name alone
     eval!(~s{(doppler-secret-set! "personal" "dev" "SENTRY_AUTH_TOKEN" "rotated")})
     eval!(~s{(doppler-secret-value "personal" "dev" "SENTRY_AUTH_TOKEN")})
-    assert File.read!(calls) |> String.split("\n", trim: true) |> Enum.count(&(&1 =~ "secrets get")) == 2
+
+    assert File.read!(calls)
+           |> String.split("\n", trim: true)
+           |> Enum.count(&(&1 =~ "secrets get SENTRY_AUTH_TOKEN")) == 1
   end
 
   test "mouse rows select and action controls run the keyboard commands", %{calls: calls} do
@@ -123,7 +135,9 @@ defmodule Aimax.DopplerTest do
 
     SchemeAPI.block_click("*doppler*", "doppler:copy")
     assert Editor.take_clipboard("f-main") == "super-secret"
-    assert File.read!(calls) =~ "secrets get DATABASE_URL"
+    # one call warms the whole config, so the value comes from the
+    # download rather than a get for this one name
+    assert File.read!(calls) =~ "secrets download"
 
     SchemeAPI.block_click("*doppler*", "doppler:add")
     eval!(~s{(minibuffer-input! "mouse_key")})

@@ -270,13 +270,17 @@
           (else (loop (cdr gs))))))
 
 ;; a project is also a group: tag its open buffers and found it
+;; Groups are records: the reader clears the legacy 'group local the
+;; moment a buffer has a real membership, so writing it here founded
+;; nothing and left every buffer where it was.
 (define (switch-found-project! root)
-  (for-each (lambda (x)
-              (when (and (not (buffer-group x))
-                         (equal? (buffer-project-root x) root))
-                (buffer-set-local! x 'group root)))
-            (buffer-list))
-  (switch-to-group! root))
+  (let ((id (group-ensure-record! root)))
+    (for-each (lambda (x)
+                (when (and (not (buffer-group x))
+                           (equal? (buffer-project-root x) root))
+                  (buffer-add-group! x id)))
+              (buffer-list))
+    (switch-to-group! id)))
 
 (define (switch-pick! buf e context?)
   (let ((name (car e))
@@ -304,10 +308,15 @@
            (switch-open! (list 'locked (nth 1 target))))))
       ;; a project file nobody has open: visit it — it joins the group
       ((switch-file-row? e)
-       (let ((path (switch-file-path e))
-             (g (and (pair? view) (nth 1 view))))
+       (let* ((path (switch-file-path e))
+              (g (and (pair? view) (nth 1 view)))
+              ;; the locked view can name a PROJECT that has no group
+              ;; yet, and visit-in-group adds nothing to a group that
+              ;; does not exist. The file joins that project's group, so
+              ;; found it here.
+              (id (and g (or (group-resolve-id g) (group-ensure-record! g)))))
          (switch-close! buf #f)
-         (visit-in-group path g)))
+         (visit-in-group path id)))
       ((buffer-known? name)
        (switch-close! buf name)
        (if context?

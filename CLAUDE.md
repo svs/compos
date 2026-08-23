@@ -125,7 +125,13 @@ loader; call `namespace!` only when the public vocabulary differs.
   calls the function and reads the value. `mix test` runs both;
   `M-x run-scheme-tests` runs the Scheme half alone.
 - A test names the command, never the key that happens to run it. A
-  binding moves; the behaviour is what the test is for.
+  binding moves; the behaviour is what the test is for. **Never assert a
+  production binding at all** — not `C-x b` names the switcher, not the
+  Emacs core keys, not a mode's chord table. A binding is a preference,
+  and a test that names one goes red the day somebody moves it, reporting
+  a broken editor when the editor is fine. Test that BINDING WORKS with
+  keys you bind yourself: `priv/tests/keymap-test.scm` binds dummy keys
+  under `<f9>` to its own dummy commands and presses those.
 - Verify UI changes in a real browser, screenshot, then commit.
 - Use subagents for verification sweeps to keep context clean.
 - Emacs is the reference: copy its semantics unless there's a reason not to.

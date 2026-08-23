@@ -162,7 +162,7 @@ pre-change commit as well. Two runs is not a baseline.
 
 ## State at handoff
 
-Commit `afa6f11`. Scheme suite: 186 tests, one red by design.
+Commit `6a9890b`. Scheme suite: 190 tests, one red by design.
 
 In Scheme:
 
@@ -177,6 +177,7 @@ In Scheme:
 | `group-records-test.scm` | 11 (moved) |
 | `skills-test.scm` | 10 (moved) |
 | `groups-test.scm` | 9 |
+| `mcp-policy-test.scm` | 4 (moved) |
 | `web-browse-test.scm` | 9 (moved) |
 | `mode-icon-test.scm` | 8 (moved) |
 | `chat-heal-test.scm` | 7 (moved) |
@@ -191,7 +192,7 @@ In Scheme:
 
 ## What moved, and what could not
 
-151 tests moved. `graphql_test`, `imenu_test`, `buffer_cache_test`,
+155 tests moved. `graphql_test`, `imenu_test`, `buffer_cache_test`,
 `code_structure_test` and `chat_heal_test` are gone entirely. Ten more
 files keep only what Scheme cannot hold: `apropos_test`, `skills_test`,
 `mode_icon_test`, `sentry_test`, `permission_test`, `web_browse_test`,
@@ -276,7 +277,6 @@ Worth a pass, in this order:
 
 | file | movable | note |
 |---|---|---|
-| `mcp_test` | 6-8 of 16 | `mcp-call!` connects and waits inside Scheme |
 | `morg_test` | 6 of 32 | 20 press keys |
 | `help_test` | 5 of 25 | 20 press keys |
 | `paredit_test` | 5 of 42 | 36 press keys |
@@ -286,6 +286,12 @@ Worth a pass, in this order:
 
 Then two or three each in `grammar`, `mcp_hub`, `writing`, `occur_ts`,
 `fold_tag`, `feeds`, `scheme_ide`, `sockets`, `core` and `daemon`.
+
+`mcp_test` is done: 4 of 16 moved. The other twelve need the fake server
+in `test/support`, or catch a raise, or run the tool loop in Elixir.
+`mcp-call!` and `mcp-tools` connect and wait inside Scheme, so they read
+as movable — they are not, because the command they register is a path
+into the test tree, and `priv/tests` must not reach there.
 
 A file's setup can be more destructive than any of its tests.
 `group_switch_command_test` wiped `*group-records*` before every test, so

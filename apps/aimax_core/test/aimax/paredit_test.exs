@@ -1,10 +1,14 @@
 defmodule Aimax.PareditTest do
   @moduledoc """
-  paredit.scm driven through KeyDispatch.handle_key/1 — the same path
-  the GUI uses. paredit IS key behaviour, so this is where it belongs.
+  What paredit does with a KEY, driven through KeyDispatch.handle_key/1 —
+  the same path the GUI uses.
 
-  The scanner takes text and an offset and answers an offset. Those tests
-  are Scheme and live in priv/tests/paredit-scan-test.scm.
+  The editing itself is Scheme: every behaviour is a named command, and
+  priv/tests/paredit-test.scm runs the command and reads the buffer. What
+  is left here is dispatch — self-insert interleaved with paredit, the
+  fallback when the mode is off, undo batching, arrow-chord precedence,
+  and show-paren, which hangs off the key path and does not fire on
+  run-command.
   """
 
   use ExUnit.Case
@@ -45,67 +49,6 @@ defmodule Aimax.PareditTest do
 
   # --- motion through keys ---------------------------------------------------
 
-  test "C-M-f and C-M-b step over expressions and out of lists" do
-    buf = fresh_buffer("(foo bar) baz\n")
-
-    press(["C-M-f"])
-    assert Buffer.point(buf) == 9
-    press(["C-M-f"])
-    assert Buffer.point(buf) == 13
-
-    press(["C-M-b"])
-    assert Buffer.point(buf) == 10
-    press(["C-M-b"])
-    assert Buffer.point(buf) == 0
-
-    # inside a list, at its end, C-M-f exits past the closer
-    Buffer.goto(buf, 8)
-    press(["C-M-f"])
-    assert Buffer.point(buf) == 9
-  end
-
-  test "C-M-u climbs to the opener; C-M-d dives into the next list" do
-    buf = fresh_buffer("(a (b c) d)\n")
-
-    Buffer.goto(buf, 5)
-    press(["C-M-u"])
-    assert Buffer.point(buf) == 3
-    press(["C-M-u"])
-    assert Buffer.point(buf) == 0
-
-    press(["C-M-d"])
-    assert Buffer.point(buf) == 1
-    press(["C-M-d"])
-    assert Buffer.point(buf) == 4
-  end
-
-  test "C-M-k kills one expression onto the kill ring" do
-    buf = fresh_buffer("(foo) bar\n")
-
-    press(["C-M-k"])
-    assert Buffer.text(buf) == " bar\n"
-    assert eval!("(kill-top)") == ~S{"(foo)"}
-  end
-
-  test "C-M-SPC marks the expression after point" do
-    buf = fresh_buffer("(a b) c\n")
-
-    press(["C-M-SPC"])
-    assert eval!("(mark)") == "5"
-    assert Buffer.point(buf) == 0
-  end
-
-  test "motion works inside strings: out to the quote ends" do
-    buf = fresh_buffer(~S{(a "x y" b)} <> "\n")
-
-    Buffer.goto(buf, 5)
-    press(["C-M-f"])
-    assert Buffer.point(buf) == 8
-    Buffer.goto(buf, 5)
-    press(["C-M-b"])
-    assert Buffer.point(buf) == 3
-  end
-
   # --- pair insertion --------------------------------------------------------
 
   test "typing a form end-to-end keeps the text balanced" do
@@ -116,59 +59,6 @@ defmodule Aimax.PareditTest do
     assert Buffer.point(buf) == 5
   end
 
-  test "( after an atom inserts a separating space" do
-    buf = fresh_buffer("ab\n")
-
-    Buffer.goto(buf, 2)
-    press(["("])
-    assert Buffer.text(buf) == "ab ()\n"
-    assert Buffer.point(buf) == 4
-  end
-
-  test ") with no enclosing list inserts nothing" do
-    buf = fresh_buffer("x\n")
-
-    Buffer.goto(buf, 1)
-    press([")"])
-    assert Buffer.text(buf) == "x\n"
-    assert echo() =~ "No enclosing list"
-  end
-
-  test ") removes blank space before the closer" do
-    buf = fresh_buffer("(a  )\n")
-
-    Buffer.goto(buf, 2)
-    press([")"])
-    assert Buffer.text(buf) == "(a)\n"
-    assert Buffer.point(buf) == 3
-  end
-
-  test ") does not pull the closer into a line comment" do
-    buf = fresh_buffer("(a ;x\n)\n")
-
-    Buffer.goto(buf, 2)
-    press([")"])
-    assert Buffer.text(buf) == "(a ;x\n)\n"
-    assert Buffer.point(buf) == 7
-  end
-
-  test "double quote pairs, escapes inside, and exits at the closer" do
-    buf = fresh_buffer("")
-
-    press(["\""])
-    assert Buffer.text(buf) == "\"\""
-    assert Buffer.point(buf) == 1
-
-    press(["\""])
-    assert Buffer.text(buf) == "\"\""
-    assert Buffer.point(buf) == 2
-
-    # inside a string a quote arrives escaped
-    buf2 = fresh_buffer("\"ab\"\n")
-    Buffer.goto(buf2, 2)
-    press(["\""])
-    assert Buffer.text(buf2) == "\"a\\\"b\"\n"
-  end
 
   test "( inside a string or comment self-inserts" do
     buf = fresh_buffer("\"a\" ;c\n")
@@ -182,62 +72,8 @@ defmodule Aimax.PareditTest do
     assert Buffer.text(buf) == "\"a(\" ;c(\n"
   end
 
+
   # --- balanced deletion -----------------------------------------------------
-
-  test "DEL deletes an empty pair whole and refuses to break a full one" do
-    buf = fresh_buffer("()\n")
-    Buffer.goto(buf, 2)
-    press(["DEL"])
-    assert Buffer.text(buf) == "\n"
-
-    buf2 = fresh_buffer("(a)\n")
-    Buffer.goto(buf2, 3)
-    press(["DEL"])
-    assert Buffer.text(buf2) == "(a)\n"
-    assert Buffer.point(buf2) == 2
-
-    Buffer.goto(buf2, 1)
-    press(["DEL"])
-    assert Buffer.text(buf2) == "(a)\n"
-    assert Buffer.point(buf2) == 0
-  end
-
-  test "DEL between a pair deletes both delimiters" do
-    buf = fresh_buffer("()\n")
-    Buffer.goto(buf, 1)
-    press(["DEL"])
-    assert Buffer.text(buf) == "\n"
-
-    buf2 = fresh_buffer("\"\"\n")
-    Buffer.goto(buf2, 1)
-    press(["DEL"])
-    assert Buffer.text(buf2) == "\n"
-  end
-
-  test "DEL inside a string deletes text but guards the opening quote" do
-    buf = fresh_buffer("\"ab\"\n")
-
-    Buffer.goto(buf, 2)
-    press(["DEL"])
-    assert Buffer.text(buf) == "\"b\"\n"
-
-    press(["DEL"])
-    assert Buffer.text(buf) == "\"b\"\n"
-    assert Buffer.point(buf) == 0
-  end
-
-  test "C-d mirrors: empty pair goes whole, a full one is entered" do
-    buf = fresh_buffer("()\n")
-    press(["C-d"])
-    assert Buffer.text(buf) == "\n"
-
-    buf2 = fresh_buffer("(a)\n")
-    press(["C-d"])
-    assert Buffer.text(buf2) == "(a)\n"
-    assert Buffer.point(buf2) == 1
-    press(["C-d"])
-    assert Buffer.text(buf2) == "()\n"
-  end
 
   test "one DEL is one undo step for a pair" do
     buf = fresh_buffer("()\n")
@@ -248,85 +84,10 @@ defmodule Aimax.PareditTest do
     assert Buffer.text(buf) == "()\n"
   end
 
+
   # --- balanced kill-line ----------------------------------------------------
 
-  test "C-k kills to the end of line but never a closer" do
-    buf = fresh_buffer("(a b) c\n")
-    Buffer.goto(buf, 1)
-    press(["C-k"])
-    assert Buffer.text(buf) == "() c\n"
-    assert eval!("(kill-top)") == ~S{"a b"}
-  end
-
-  test "C-k reaches past eol to finish a datum that starts before it" do
-    buf = fresh_buffer("(a (b\n c) d)\n")
-    Buffer.goto(buf, 1)
-    press(["C-k"])
-    assert Buffer.text(buf) == "( d)\n"
-  end
-
-  test "C-k in a string stops at the closing quote" do
-    buf = fresh_buffer("\"ab cd\" x\n")
-    Buffer.goto(buf, 1)
-    press(["C-k"])
-    assert Buffer.text(buf) == "\"\" x\n"
-  end
-
-  test "C-k at eol kills the newline; before a lone closer it kills nothing" do
-    buf = fresh_buffer("a\nb\n")
-    Buffer.goto(buf, 1)
-    press(["C-k"])
-    assert Buffer.text(buf) == "ab\n"
-
-    buf2 = fresh_buffer("(a)\n")
-    Buffer.goto(buf2, 2)
-    press(["C-k"])
-    assert Buffer.text(buf2) == "(a)\n"
-  end
-
-  test "C-k kills a trailing comment with the datums" do
-    buf = fresh_buffer("(a b ;x\n)\n")
-    Buffer.goto(buf, 1)
-    press(["C-k"])
-    assert Buffer.text(buf) == "(\n)\n"
-  end
-
   # --- structure -------------------------------------------------------------
-
-  test "slurp forward pulls the next datum in; one undo restores" do
-    buf = fresh_buffer("(foo) bar\n")
-    Buffer.goto(buf, 4)
-    press(["C-<right>"])
-    assert Buffer.text(buf) == "(foo bar)\n"
-    assert Buffer.point(buf) == 4
-
-    Buffer.undo(buf)
-    assert Buffer.text(buf) == "(foo) bar\n"
-  end
-
-  test "barf forward pushes the last datum out; one undo restores" do
-    buf = fresh_buffer("(foo bar)\n")
-    Buffer.goto(buf, 8)
-    press(["C-<left>"])
-    assert Buffer.text(buf) == "(foo) bar\n"
-    assert Buffer.point(buf) == 4
-
-    Buffer.undo(buf)
-    assert Buffer.text(buf) == "(foo bar)\n"
-  end
-
-  test "slurp and barf backward mirror" do
-    buf = fresh_buffer("a (b)\n")
-    Buffer.goto(buf, 3)
-    eval!(~s{(run-command "paredit-slurp-backward")})
-    assert Buffer.text(buf) == "(a b)\n"
-
-    buf2 = fresh_buffer("(a b)\n")
-    Buffer.goto(buf2, 3)
-    eval!(~s{(run-command "paredit-barf-backward")})
-    assert Buffer.text(buf2) == "a (b)\n"
-    assert Buffer.point(buf2) == 3
-  end
 
   test "the canonical chords slurp and barf: C-) C-( C-} C-{" do
     buf = fresh_buffer("(foo) bar\n")
@@ -344,58 +105,6 @@ defmodule Aimax.PareditTest do
     assert Buffer.text(buf2) == "a (b)\n"
   end
 
-  test "splice removes the enclosing delimiters" do
-    buf = fresh_buffer("(a (b c) d)\n")
-    Buffer.goto(buf, 5)
-    press(["M-s"])
-    assert Buffer.text(buf) == "(a b c d)\n"
-    assert Buffer.point(buf) == 4
-  end
-
-  test "raise replaces the list with the datum at point" do
-    buf = fresh_buffer("(a (b c) d)\n")
-    Buffer.goto(buf, 4)
-    press(["M-r"])
-    assert Buffer.text(buf) == "(a b d)\n"
-    assert Buffer.point(buf) == 3
-  end
-
-  test "wrap puts the next datum in a fresh pair" do
-    buf = fresh_buffer("foo bar\n")
-    press(["M-("])
-    assert Buffer.text(buf) == "(foo) bar\n"
-    assert Buffer.point(buf) == 1
-  end
-
-  test "structure ops touch nothing without a target" do
-    buf = fresh_buffer("x\n")
-    Buffer.goto(buf, 1)
-    press(["C-<right>"])
-    assert Buffer.text(buf) == "x\n"
-    assert echo() =~ "No enclosing list"
-
-    buf2 = fresh_buffer("(a) \n")
-    Buffer.goto(buf2, 1)
-    press(["C-<right>"])
-    assert Buffer.text(buf2) == "(a) \n"
-    assert echo() =~ "Nothing to slurp"
-  end
-
-  test "structure ops refuse a read-only buffer" do
-    buf = fresh_buffer("(a) b\n")
-    :ok = Buffer.set_read_only(buf, true)
-    Buffer.goto(buf, 1)
-    press(["C-<right>"])
-    assert Buffer.text(buf) == "(a) b\n"
-    assert echo() =~ "read-only"
-  end
-
-  test "slurp keeps byte offsets straight around multibyte text" do
-    buf = fresh_buffer("(é) x\n")
-    Buffer.goto(buf, 1)
-    press(["C-<right>"])
-    assert Buffer.text(buf) == "(é x)\n"
-  end
 
   # --- passthrough -----------------------------------------------------------
 
@@ -412,6 +121,7 @@ defmodule Aimax.PareditTest do
     assert echo() =~ "No structural navigation"
   end
 
+
   # --- word motion and show-paren --------------------------------------------
 
   test "the arrow chords move by word; paredit keeps C-arrows, M-arrows pass through" do
@@ -427,6 +137,7 @@ defmodule Aimax.PareditTest do
     assert Buffer.point(buf2) == 4
   end
 
+
   test "point beside a delimiter lights the pair; elsewhere it goes dark" do
     buf = fresh_buffer("(ab)x\n")
 
@@ -439,12 +150,14 @@ defmodule Aimax.PareditTest do
     refute eval!(~s{(buffer-overlays "#{buf}")}) =~ "paren-match"
   end
 
+
   test "a delimiter inside a string does not light" do
     buf = fresh_buffer(~S{"a)" b} <> "\n")
     Buffer.goto(buf, 2)
     press(["<right>"])
     refute eval!(~s{(buffer-overlays "#{buf}")}) =~ "paren-match"
   end
+
 
   # --- enablement ------------------------------------------------------------
 
@@ -463,5 +176,6 @@ defmodule Aimax.PareditTest do
 
     eval!("(set! paredit-in-scheme-mode #t)")
   end
+
 
 end

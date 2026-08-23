@@ -58,16 +58,22 @@
 (deftest 'a-registered-server-starts-reaches-ready-and-stops
   "the one test that pays for a real process, so it covers the whole round trip"
   (lambda ()
-    (let* ((root (aimax-home))
-           (id (lsp-ensure! t--lsp-name root)))
+    ;; its own empty directory, never (aimax-home): in a live editor that
+    ;; is the person's real state, and a server told to index it can take
+    ;; minutes or fall over. An empty root reaches ready in about a second.
+    (let* ((root (string-append (aimax-home) "/zz-lsp-root"))
+           (id (begin (make-directory! root) (lsp-ensure! t--lsp-name root))))
       (check-true! (string? id) "ensure answers a connection id")
       (check-contains! id t--lsp-name "named for the server")
       (check-contains! id root "and rooted where we asked")
 
       ;; the handshake is a subprocess round trip: it answers on its own
-      ;; schedule, and wait-until is what a Scheme test has for that
+      ;; schedule, and wait-until is what a Scheme test has for that.
+      ;; Wait on THIS row: the editor running the suite may already hold
+      ;; other connections, and "is anything ready" is true before ours is.
       (check-true! (wait-until (lambda ()
-                                 (string-contains? (value->string (lsp-connections)) "ready"))
+                                 (let ((row (assoc id (lsp-connections))))
+                                   (and row (equal? (nth 1 row) "ready"))))
                                15000 100)
                    "it reaches ready")
 
@@ -84,4 +90,5 @@
 
       (lsp-stop! id)
       (check-true! (wait-until (lambda () (not (assoc id (lsp-connections)))) 5000 50)
-                   "and it stops"))))
+                   "and it stops")
+      (shell-command->string (string-append "rm -rf " root)))))

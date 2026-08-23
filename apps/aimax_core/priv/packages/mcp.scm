@@ -9,6 +9,11 @@
 ;;; (mcp-register! 'name SPEC) declares a server without connecting:
 ;;;   stdio: (list 'command "npx" 'args (list "-y" "pkg") 'env (list 'K "v"))
 ;;;   http:  (list 'url "https://host/mcp" 'headers (list 'authorization "..."))
+;;; A trusted local override can mark every tool as read-only:
+;;;   'read-only #t
+;;; Per-tool effects can replace that default for exceptions:
+;;;   'tool-effects (list 'publish '(write))
+;;; MCP calls always add the 'external modifier to local effects.
 ;;; A "@VAR" in 'env, 'headers or 'url is a key reference, resolved by
 ;;; packages/keys.scm here in Scheme, just before the spec leaves for
 ;;; Elixir. The connection layer sees only literal values: it never learns

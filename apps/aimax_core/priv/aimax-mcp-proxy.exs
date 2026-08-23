@@ -14,23 +14,97 @@ defmodule AimaxProxy do
   def sock, do: System.get_env("AIMAX_SOCK") || Path.expand("~/.aimax/sock")
 
   def loop do
+    scheduler = self()
+    spawn(fn -> read_input(scheduler) end)
+    schedule(0, [], false)
+  end
+
+  defp read_input(scheduler) do
     case IO.gets("") do
       :eof ->
-        :ok
+        send(scheduler, :input_done)
 
       {:error, _} ->
-        :ok
+        send(scheduler, :input_done)
 
       line ->
-        line |> String.trim() |> handle()
-        loop()
+        case String.trim(line) do
+          "" -> :ok
+          json -> send(scheduler, {:request, :json.decode(json)})
+        end
+
+        read_input(scheduler)
     end
   end
 
-  defp handle(""), do: :ok
+  # Consecutive read-only calls share one window. Any other message is a
+  # barrier: it waits for earlier reads and blocks later reads until done.
+  defp schedule(active_reads, queue, input_done?) do
+    cond do
+      active_reads == 0 and queue != [] ->
+        drain(queue, input_done?)
 
-  defp handle(line) do
-    case :json.decode(line) do
+      active_reads == 0 and input_done? ->
+        :ok
+
+      true ->
+        receive do
+          {:request, message} when queue == [] ->
+            if read_request?(message) do
+              start_read(message)
+              schedule(active_reads + 1, [], input_done?)
+            else
+              schedule(active_reads, [message], input_done?)
+            end
+
+          {:request, message} ->
+            schedule(active_reads, queue ++ [message], input_done?)
+
+          :read_done ->
+            schedule(active_reads - 1, queue, input_done?)
+
+          :input_done ->
+            schedule(active_reads, queue, true)
+        end
+    end
+  end
+
+  defp drain([], input_done?), do: schedule(0, [], input_done?)
+
+  defp drain([message | rest], input_done?) do
+    if read_request?(message) do
+      {reads, remaining} = Enum.split_while([message | rest], &read_request?/1)
+      Enum.each(reads, &start_read/1)
+      schedule(length(reads), remaining, input_done?)
+    else
+      handle(message)
+      drain(rest, input_done?)
+    end
+  end
+
+  defp start_read(message) do
+    scheduler = self()
+
+    Task.start(fn ->
+      try do
+        handle(message)
+      after
+        send(scheduler, :read_done)
+      end
+    end)
+  end
+
+  defp read_request?(message) do
+    case message do
+      %{"method" => "tools/call", "params" => %{"name" => name}} ->
+        read_only?(name)
+
+      _ -> false
+    end
+  end
+
+  defp handle(message) do
+    case message do
       %{"method" => "initialize", "id" => id, "params" => params} ->
         reply(id, %{
           protocolVersion: params["protocolVersion"] || "2025-06-18",
@@ -41,7 +115,9 @@ defmodule AimaxProxy do
       %{"method" => "tools/list", "id" => id} ->
         case rpc_eval("(mcp-proxy-tools-json)") do
           {:ok, b64} ->
-            reply(id, %{tools: b64 |> unprint() |> Base.decode64!() |> :json.decode()})
+            tools = b64 |> unprint() |> Base.decode64!() |> :json.decode()
+            remember_effects(tools)
+            reply(id, %{tools: tools})
 
           {:error, msg} ->
             reply_error(id, msg)
@@ -64,6 +140,30 @@ defmodule AimaxProxy do
 
       _notification ->
         :ok
+    end
+  end
+
+  defp remember_effects(tools) do
+    table = effects_table()
+    :ets.delete_all_objects(table)
+
+    for %{"name" => name} = tool <- tools do
+      read_only = get_in(tool, ["annotations", "readOnlyHint"]) == true
+      :ets.insert(table, {name, read_only})
+    end
+  end
+
+  defp read_only?(name) do
+    case :ets.lookup(effects_table(), name) do
+      [{^name, true}] -> true
+      _ -> false
+    end
+  end
+
+  defp effects_table do
+    case :ets.whereis(:aimax_proxy_effects) do
+      :undefined -> :ets.new(:aimax_proxy_effects, [:named_table, :public, :set])
+      table -> table
     end
   end
 
@@ -197,4 +297,4 @@ defmodule AimaxProxy do
   defp send_msg(msg), do: msg |> json_encode() |> IO.iodata_to_binary() |> IO.puts()
 end
 
-AimaxProxy.loop()
+unless System.get_env("AIMAX_PROXY_NO_LOOP") == "1", do: AimaxProxy.loop()

@@ -229,6 +229,9 @@ defmodule Aimax.ChatAgentTest do
     names = Enum.map(tools, & &1["name"])
     assert "eval-scheme" in names
     assert Enum.all?(tools, & &1["inputSchema"])
+    assert Enum.all?(tools, &is_boolean(&1["annotations"]["readOnlyHint"]))
+    assert Enum.find(tools, &(&1["name"] == "apropos"))["annotations"]["readOnlyHint"]
+    refute Enum.find(tools, &(&1["name"] == "eval-scheme"))["annotations"]["readOnlyHint"]
 
     eval!(~s{(buffer-create "*zz-uchat*")})
     eval!(~s{(buffer-append! "*zz-uchat*" "proxy sees mé")})
@@ -242,5 +245,33 @@ defmodule Aimax.ChatAgentTest do
 
     # eval-scheme returns the printed value, quotes included
     assert result == ~s{"proxy sees mé"}
+  end
+
+  test "the proxy runs independent read-only Scheme tools concurrently" do
+    eval!("""
+    (define-tool! 'zz-proxy-read "Delayed proxy read." '()
+      (lambda (args)
+        (wait-until (lambda () #f) 300 300)
+        "read")
+      '(read))
+    """)
+
+    args = Base.encode64("{}")
+    code = ~s{(mcp-proxy-call "zz-proxy-read" "#{args}")}
+    started = System.monotonic_time(:millisecond)
+
+    replies =
+      1..2
+      |> Task.async_stream(fn _ -> Session.eval(code) end, ordered: true, timeout: 2_000)
+      |> Enum.to_list()
+
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    assert Enum.all?(replies, fn
+             {:ok, {:ok, encoded}} -> encoded |> String.trim("\"") |> Base.decode64!() == "read"
+             _ -> false
+           end)
+
+    assert elapsed < 520
   end
 end

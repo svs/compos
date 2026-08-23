@@ -8,7 +8,7 @@ defmodule Aimax.Core.MCP do
   `MCP.Conn` GenServer speaking JSON-RPC over stdio (spawned subprocess)
   or streamable HTTP. Once the handshake finishes, the server's tools are
   published to :persistent_term as specs shaped like the Scheme tool
-  registry — `[qualified_name, description, input_schema_json]` — so
+  registry — `[qualified_name, description, input_schema_json, effects]` — so
   `llm-tool-specs`-style lists can carry them unchanged.
 
   Tool names are qualified `mcp__<server>__<tool>` (Anthropic tool-name
@@ -195,19 +195,60 @@ defmodule Aimax.Core.MCP do
   end
 
   @doc false
-  def publish(name, tools) do
+  def publish(name, tools, policy \\ %{}) do
+    policy = publish_policy(policy)
+    overrides = effect_overrides(policy["tool-effects"])
+    default = if policy["read-only"] == true, do: ["read"], else: nil
+
     specs =
       for t <- tools do
         [
           "mcp__#{name}__#{sanitize(t["name"])}",
           t["description"] || t["name"],
-          Jason.encode!(t["inputSchema"] || %{"type" => "object", "properties" => %{}})
+          Jason.encode!(t["inputSchema"] || %{"type" => "object", "properties" => %{}}),
+          tool_effects(t, overrides, default)
         ]
       end
 
     wire_names = Map.new(tools, fn t -> {sanitize(t["name"]), t["name"]} end)
     :persistent_term.put({:aimax_mcp, name}, %{specs: specs, tools: wire_names})
   end
+
+  # MCP annotations are hints. A missing or false readOnlyHint stays
+  # unknown, so it cannot enter the concurrent read path. Scheme config can
+  # override one tool when a trusted server omits or misstates the hint.
+  defp tool_effects(tool, overrides, default) do
+    case Map.get(overrides, tool["name"], default) do
+      nil ->
+        if get_in(tool, ["annotations", "readOnlyHint"]) == true,
+          do: ["read", "external"],
+          else: ["unknown", "external"]
+
+      effects ->
+        effects
+        |> List.wrap()
+        |> Enum.map(&to_string/1)
+        |> then(fn values ->
+          if "external" in values, do: values, else: values ++ ["external"]
+        end)
+    end
+  end
+
+  defp publish_policy(policy) when is_map(policy), do: policy
+  defp publish_policy(_), do: %{}
+
+  defp effect_overrides(overrides) when is_map(overrides), do: overrides
+
+  defp effect_overrides(overrides) when is_list(overrides) do
+    overrides
+    |> Enum.chunk_every(2)
+    |> Map.new(fn
+      [name, effects] -> {to_string(name), effects}
+      [name] -> {to_string(name), ["unknown"]}
+    end)
+  end
+
+  defp effect_overrides(_), do: %{}
 
   defp sanitize(tool), do: String.replace(tool, ~r/[^a-zA-Z0-9_-]/, "_")
 end

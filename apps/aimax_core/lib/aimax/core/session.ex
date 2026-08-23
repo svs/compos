@@ -1353,7 +1353,11 @@ defmodule Aimax.Core.Session do
         specs
         |> Enum.map(fn spec ->
           %{input_schema: schema} = t = Aimax.Core.LLM.tool_json(spec)
-          t |> Map.delete(:input_schema) |> Map.put(:inputSchema, schema)
+
+          t
+          |> Map.delete(:input_schema)
+          |> Map.put(:inputSchema, schema)
+          |> Map.put(:annotations, Aimax.Core.LLM.tool_annotations(spec))
         end)
         |> Jason.encode!()
       end,

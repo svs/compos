@@ -392,6 +392,14 @@ defmodule Aimax.Core.LLM do
     }
   end
 
+  @doc "MCP annotations derived from one ai-max tool effect declaration."
+  def tool_annotations([_name, _description, _params, effects]) do
+    effects = Enum.map(List.wrap(effects), &plain/1)
+    %{readOnlyHint: Enum.any?(effects, &(&1 in ["pure", "read"]))}
+  end
+
+  def tool_annotations([_name, _description, _params]), do: %{readOnlyHint: false}
+
   defp plain({:sym, s}), do: s
   defp plain(s) when is_binary(s), do: s
 

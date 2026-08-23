@@ -40,9 +40,13 @@ defmodule FakeMCP do
             %{
               name: "echo",
               description: "Echo back v.",
+              annotations: %{readOnlyHint: true},
               inputSchema: %{
                 type: "object",
-                properties: %{v: %{type: "string", description: "value to echo"}},
+                properties: %{
+                  v: %{type: "string", description: "value to echo"},
+                  wait: %{type: "integer", description: "milliseconds to wait"}
+                },
                 required: ["v"]
               }
             }
@@ -50,6 +54,7 @@ defmodule FakeMCP do
         })
 
       %{"method" => "tools/call", "id" => id, "params" => params} ->
+        if is_integer(params["arguments"]["wait"]), do: Process.sleep(params["arguments"]["wait"])
         v = params["arguments"]["v"] || ""
         reply(id, %{content: [%{type: "text", text: "echo:" <> v}]})
 

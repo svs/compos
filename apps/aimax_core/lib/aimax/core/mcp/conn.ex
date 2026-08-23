@@ -294,7 +294,7 @@ defmodule Aimax.Core.MCP.Conn do
         |> send_req("tools/list", %{}, :tools)
 
       {:tools, %{"result" => %{"tools" => tools}}} ->
-        MCP.publish(state.name, tools)
+        MCP.publish(state.name, tools, state.spec)
         Session.message("mcp: #{state.name} ready (#{length(tools)} tools)")
         MCP.notify(state.name, :ready)
         discover(%{state | status: :ready})

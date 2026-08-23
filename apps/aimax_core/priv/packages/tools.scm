@@ -46,6 +46,11 @@
         ((custom--plist-get (cadr t) 'handler) args)
         (string-append "no such tool: " name))))
 
+(define (llm-tool-read-only? name)
+  (let* ((tool (assoc (string->symbol name) *llm-tools*))
+         (effects (and tool (custom--plist-get (cadr tool) 'effects))))
+    (and (pair? effects) (member (car effects) '(pure read)) #t)))
+
 ;; the standing context every tool-enabled request carries — the "skill"
 (define *llm-system*
   (string-append
@@ -895,16 +900,28 @@
        ;; command ends. Keys, saves and other evals run meanwhile.
        (let* ((parts (and (equal? name "eval-scheme")
                           (mcp-proxy--shell-code args-json)))
-              (token (and parts (eval-defer!))))
-         (if token
+              (read-only? (llm-tool-read-only? name))
+              (token (and (or parts read-only?) (eval-defer!))))
+         (cond
+           ((and token parts)
              (let ((resolve (lambda (out)
                               (eval-resolve! token
                                 (base64-encode (value->string out))))))
                (if (cadr parts)
                    (shell-command->string (car parts) (cadr parts) resolve)
                    (shell-command->string (car parts) resolve))
-               'pending)
-             (base64-encode (mcp-proxy--sync name args-json author)))))
+               'pending))
+           ((and token read-only?)
+            (task-run!
+              (lambda ()
+                (base64-encode (mcp-proxy--sync name args-json author)))
+              (lambda (ok value)
+                (eval-resolve! token
+                  (if ok value
+                      (base64-encode (string-append "error: " (value->string value)))))))
+            'pending)
+           (else
+             (base64-encode (mcp-proxy--sync name args-json author))))))
       (else
         (base64-encode
           (string-append

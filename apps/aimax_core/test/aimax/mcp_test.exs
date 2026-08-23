@@ -46,13 +46,33 @@ defmodule Aimax.MCPTest do
     test "handshake publishes qualified specs carrying the raw JSON schema" do
       connect!("fake")
 
-      assert [[name, desc, schema]] = MCP.tool_specs(["fake"])
+      assert [[name, desc, schema, effects]] = MCP.tool_specs(["fake"])
       assert name == "mcp__fake__echo"
       assert desc =~ "Echo"
       assert Jason.decode!(schema)["required"] == ["v"]
+      assert effects == ["read", "external"]
 
       assert [%{name: "fake", status: :ready, tools: 1}] =
                Enum.filter(MCP.connections(), &(&1.name == "fake"))
+    end
+
+    test "missing annotations stay unknown and trusted config can override them" do
+      MCP.publish("plain", [%{"name" => "look", "inputSchema" => %{}}])
+      on_exit(fn -> :persistent_term.erase({:aimax_mcp, "plain"}) end)
+
+      assert [[_, _, _, ["unknown", "external"]]] = MCP.tool_specs(["plain"])
+
+      MCP.publish("plain", [%{"name" => "look", "inputSchema" => %{}}], %{"read-only" => true})
+
+      assert [[_, _, _, ["read", "external"]]] = MCP.tool_specs(["plain"])
+
+      MCP.publish(
+        "plain",
+        [%{"name" => "look", "inputSchema" => %{}}],
+        %{"read-only" => true, "tool-effects" => ["look", ["write"]]}
+      )
+
+      assert [[_, _, _, ["write", "external"]]] = MCP.tool_specs(["plain"])
     end
 
     test "call and call_qualified round trip; unknown server reports" do
@@ -88,6 +108,66 @@ defmodule Aimax.MCPTest do
   end
 
   describe "tool loop bridge" do
+    test "read-only tools on separate MCP servers run concurrently" do
+      connect!("parallel-a")
+      connect!("parallel-b")
+      me = self()
+
+      Application.put_env(:aimax_core, :llm_chat_fun, fn %{messages: messages} ->
+        seen_result? =
+          Enum.any?(messages, fn m ->
+            is_list(m.content) and
+              Enum.any?(m.content, &(is_map(&1) and &1[:type] == "tool_result"))
+          end)
+
+        if seen_result? do
+          send(me, :parallel_mcp_done)
+
+          {:ok,
+           %{
+             "stop_reason" => "end_turn",
+             "content" => [%{"type" => "text", "text" => "done"}]
+           }}
+        else
+          {:ok,
+           %{
+             "stop_reason" => "tool_use",
+             "content" => [
+               %{
+                 "type" => "tool_use",
+                 "id" => "parallel-a",
+                 "name" => "mcp__parallel-a__echo",
+                 "input" => %{"v" => "a", "wait" => 300}
+               },
+               %{
+                 "type" => "tool_use",
+                 "id" => "parallel-b",
+                 "name" => "mcp__parallel-b__echo",
+                 "input" => %{"v" => "b", "wait" => 300}
+               }
+             ]
+           }}
+        end
+      end)
+
+      on_exit(fn -> Application.delete_env(:aimax_core, :llm_chat_fun) end)
+
+      specs = MCP.tool_specs(["parallel-a", "parallel-b"])
+      started = System.monotonic_time(:millisecond)
+
+      assert {:ok, "done", %{}, "end_turn"} =
+               Aimax.Core.LLM.run_tool_loop(
+                 [%{role: "user", content: "go"}],
+                 "sys",
+                 specs,
+                 fn _, _ -> raise "MCP must not use the Scheme dispatcher" end
+               )
+
+      elapsed = System.monotonic_time(:millisecond) - started
+      assert_receive :parallel_mcp_done
+      assert elapsed < 520
+    end
+
     test "mcp__ tools dispatch to the client, not the Scheme dispatcher" do
       connect!("fake4")
 

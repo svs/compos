@@ -5,11 +5,9 @@
 ;;; Scheme seam, so nothing here needs Elixir — write-file! makes the
 ;;; stub, shell-command->string makes it executable and removes it after.
 ;;;
-;;; Eleven tests stay in ExUnit. Nine drive a PROMPT: typing a saved-search
-;;; name, a filter query, a tag, or answering a confirmation — dispatch,
-;;; and the minibuffer is the path the GUI uses. Two assert the two-pane
-;;; layout, and how a window splits depends on the frame: in a live editor
-;;; notmuch-preview reuses the window this suite runs in.
+;;; Nothing here presses a key. A prompt is answered with
+;;; minibuffer-change! and minibuffer-confirm, which is the path a typed
+;;; answer takes, and every row verb is a named command.
 
 (domain! 'testing)
 (effects! '(write))
@@ -328,4 +326,215 @@
       (check-contains! out "tagged" "it reports the change")
       (check-contains! out "0002" "on the thread")
       (check-contains! out "+important" "with the tag"))
+    (t--nm-done!)))
+
+
+;;; --- the prompts ----------------------------------------------------------------
+
+(define (t--nm-answer! text)
+  (minibuffer-change! text)
+  (run-command "minibuffer-confirm"))
+
+(deftest 'jump-goes-to-a-saved-search-by-name
+  "the mailbox names are the completion set"
+  (lambda ()
+    (t--nm-setup!)
+    (run-command "notmuch-inbox")
+    (run-command "notmuch-jump")
+    (t--nm-answer! "unread")
+    (check-equal! (nm--query-of "*notmuch*") "tag:unread" "the saved search opened")
+    (t--nm-done!)))
+
+(deftest 'filter-narrows-the-current-search
+  "the base query and the filter stack, never a derived string"
+  (lambda ()
+    (t--nm-setup!)
+    (run-command "notmuch-inbox")
+    ;; the old derived local cannot bypass the base and filter stack
+    (buffer-set-local! "*notmuch*" 'notmuch-query "from:bob")
+    (check-equal! (nm--query-of "*notmuch*") "tag:inbox" "the local is ignored")
+
+    (run-command "notmuch-filter")
+    (t--nm-answer! "from:alice")
+    (check-equal! (nm--query-of "*notmuch*") "( tag:inbox ) and from:alice"
+                  "the filter rides on the base")
+    (t--nm-done!)))
+
+(deftest 'add-tag-completes-from-the-database
+  "the tags come from notmuch, not from a list we keep"
+  (lambda ()
+    (t--nm-setup!)
+    (run-command "notmuch-inbox")
+    (run-command "notmuch-add-tag")
+    (t--nm-answer! "important")
+    (let ((log (t--nm-calls)))
+      (check-contains! log "search --output=tags" "it asked the database")
+      (check-contains! log "tag +important -- thread:0001" "and tagged the thread"))
+    (t--nm-done!)))
+
+(deftest 'structured-filters-are-removed-without-parsing-query-text
+  "the stack is data, so a pop needs no parser"
+  (lambda ()
+    (t--nm-setup!)
+    (run-command "notmuch-inbox")
+    (run-command "notmuch-search")
+    (t--nm-answer! "tag:inbox and from:alice")
+    (run-command "notmuch-filter")
+    (t--nm-answer! "subject:report")
+    (check-equal! (nm--query-of "*notmuch*") "( tag:inbox and from:alice ) and subject:report"
+                  "the filter rides on the search")
+
+    (run-command "notmuch-unfilter-last")
+    (check-equal! (nm--query-of "*notmuch*") "tag:inbox and from:alice"
+                  "and popping leaves the search alone")
+    (t--nm-done!)))
+
+(deftest 'replacement-filters-are-removed-in-order
+  "by-sender and by-marked replace each other; backslash walks back"
+  (lambda ()
+    (t--nm-setup!)
+    (run-command "notmuch-inbox")
+    (run-command "notmuch-filter-by-sender")
+    (check-contains! (t--nm-calls) "show --format=json --body=false thread:0001"
+                     "it read the sender off the thread")
+    (check-equal! (length (list-entries "*notmuch*")) 1 "one row matches")
+    (check-equal! (nm--query-of "*notmuch*") "from:alice@example.com" "the sender filter")
+
+    (run-command "notmuch-filter-marked")
+    (check-equal! (nm--query-of "*notmuch*") "tag:m" "the marked filter replaced it")
+
+    (run-command "notmuch-unfilter-last")
+    (check-equal! (nm--query-of "*notmuch*") "from:alice@example.com" "and back to the sender")
+    (run-command "notmuch-unfilter-last")
+    (check-equal! (nm--query-of "*notmuch*") "tag:inbox" "and back to the mailbox")
+    (check-equal! (length (list-entries "*notmuch*")) 2 "with every row again")
+    (t--nm-done!)))
+
+(deftest 'opening-a-mailbox-refreshes-rows-cached-by-a-filter
+  "the cached rows are the filter's, not the mailbox's"
+  (lambda ()
+    (t--nm-setup!)
+    (run-command "notmuch-inbox")
+    (run-command "notmuch-filter-by-sender")
+    (check-equal! (length (list-entries "*notmuch*")) 1 "the filter cut the rows")
+
+    (run-command "notmuch")
+    (run-command "notmuch-hello-open")
+    (check-equal! (nm--query-of "*notmuch*") "tag:inbox" "the mailbox query is back")
+    (check-equal! (length (list-entries "*notmuch*")) 2 "and all its rows")
+    (t--nm-done!)))
+
+(deftest 'mark-all-then-archive-marked-asks-before-it-acts
+  "a bulk change over a whole query takes a confirmation"
+  (lambda ()
+    (t--nm-setup!)
+    (run-command "notmuch-inbox")
+    (run-command "notmuch-mark-all")
+    (check-contains! (t--nm-calls) "tag +m -- ( tag:inbox )" "every thread in the query is marked")
+
+    (run-command "notmuch-archive-marked")
+    (t--nm-answer! "yes")
+    (check-contains! (t--nm-calls) "tag -inbox -m -- ( tag:inbox ) and tag:m"
+                     "and the archive names the marked set")
+    (t--nm-done!)))
+
+(deftest 'embark-acts-on-the-email-at-point
+  "the target is the row, and the act tool drives the same table"
+  (lambda ()
+    (t--nm-setup!)
+    (run-command "notmuch-inbox")
+    (let ((target (value->string (target-at "*notmuch*"))))
+      (check-contains! target "email" "the target is an email")
+      (check-contains! target "0001" "and names the thread"))
+
+    (run-command "embark-act")
+    (t--nm-answer! "archive")
+    (check-contains! (t--nm-calls) "tag -inbox -- thread:0001" "the action ran")
+
+    ;; the tool reports what the ACTION did, never a blind "done" — a model
+    ;; told an archive succeeded when it did not will keep going
+    (let ((out (llm-tool-call "act" (list 'type "email" 'id "thread:0002" 'action "trash"))))
+      (check-contains! out "0002" "it names the thread")
+      (check-contains! out "+trash -inbox -unread" "and the tags it set"))
+    (check-contains! (t--nm-calls) "tag +trash -inbox -unread -- thread:0002" "which really ran")
+
+    (check-contains! (llm-tool-call "act" (list 'type "email" 'id "no-such-thread" 'action "trash"))
+                     "no such thread" "a thread that is not there says so")
+    (let ((out (llm-tool-call "act" (list 'type "email" 'id "0002" 'action "explode"))))
+      (check-contains! out "no such action" "and an action that is not there")
+      (check-contains! out "archive" "naming the ones there are"))
+    (t--nm-done!)))
+
+;;; --- the two-pane reading flow ---------------------------------------------------
+
+(deftest 'preview-opens-the-other-window-and-keeps-the-focus
+  "reading down a list must not move the point out of it"
+  (lambda ()
+    (t--nm-setup!)
+    (run-command "notmuch-inbox")
+    (run-command "notmuch-preview")
+    (check-equal! (current-buffer) "*notmuch*" "focus stayed on the list")
+    (check-equal! (length (window-list)) 2 "and the preview opened beside it")
+    (check-contains! (t--nm-calls) "show --format=json --include-html thread:0001" "the fetch")
+    (t--nm-done!)))
+
+(deftest 'moving-the-highlight-updates-the-shown-mail-and-marks-it-read
+  "with auto-preview on, the next row is fetched and read"
+  (lambda ()
+    (t--nm-setup!)
+    (let ((saved notmuch-auto-preview))
+      (set! notmuch-auto-preview #t)
+      (run-command "notmuch-inbox")
+      (run-command "notmuch-next")
+      (let ((log (t--nm-calls)))
+        (check-contains! log "show --format=json --include-html thread:0002" "the second thread")
+        (check-contains! log "tag -unread -- thread:0002" "and it was marked read"))
+      (check-equal! (current-buffer) "*notmuch*" "focus stayed on the list")
+      (check-equal! (length (window-list)) 2 "the preview is beside it")
+      (set! notmuch-auto-preview saved))
+    (t--nm-done!)))
+
+;;; --- composing a reply -----------------------------------------------------------
+
+(deftest 'reply-is-a-message-mode-buffer-that-sends
+  "headers, a separator, the quote, and point on the body"
+  (lambda ()
+    (t--nm-setup!)
+    (run-command "notmuch-inbox")
+    (run-command "notmuch-open-thread")
+    ;; the message view has its own reply: the index replies to the
+    ;; thread's newest message, this one to the message on screen
+    (run-command "notmuch-show-reply")
+    (check-equal! (current-buffer) "*compose*" "a compose buffer")
+
+    (let ((text (buffer-text "*compose*")))
+      (check-contains! text "From: SVS <svs@svsrecruiting.com>" "the From header")
+      (check-contains! text "To: Alice <alice@example.com>" "the To header")
+      (check-contains! text "Subject: Re: Hello world" "the Subject")
+      (check-contains! text "In-Reply-To: <m1>" "the In-Reply-To")
+      (check-contains! text "--text follows this line--" "the separator")
+      (check-contains! text "Alice <alice@example.com> writes:" "the attribution")
+      (check-contains! text "> Hi there, this is the body." "and the quote"))
+    (check-contains! (t--nm-calls) "reply --format=json id:" "it asked notmuch for the reply")
+
+    ;; point sits on the empty line right after the separator
+    (check-contains! (substring-bytes (buffer-text "*compose*") 0
+                                      (with-current-buffer "*compose*" (lambda () (point))))
+                     "line--\n" "point is past the separator")
+
+    ;; header names and the separator carry faces
+    (let ((faces (value->string (buffer-overlays "*compose*"))))
+      (check-contains! faces "nm-hdr" "the header face")
+      (check-contains! faces "nm-sep" "and the separator face"))
+
+    ;; sending turns the separator into the RFC822 blank line
+    (let ((sent (string-append t--nm-dir "/sent.eml"))
+          (saved notmuch-send-routes))
+      (set! notmuch-send-routes (list (list "" (string-append "cat > " sent))))
+      (with-current-buffer "*compose*" (lambda () (run-command "mail-send")))
+      (let ((body (or (read-file sent) "")))
+        (check-false! (string-contains? body "text follows this line") "the separator is gone")
+        (check-contains! body "Subject: Re: Hello world" "the headers survived")
+        (check-contains! body "References: <m1>\n\n" "and a blank line divides them"))
+      (set! notmuch-send-routes saved))
     (t--nm-done!)))

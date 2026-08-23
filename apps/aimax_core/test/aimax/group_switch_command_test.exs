@@ -1,4 +1,12 @@
 defmodule Aimax.GroupSwitchCommandTest do
+  @moduledoc """
+  The group switcher, driven through the keys.
+
+  The records themselves — the stable id, the membership set, the dangling
+  id, dissolve, the layouts and the frame context — are Scheme policy and
+  live in priv/tests/group-records-test.scm.
+  """
+
   use ExUnit.Case
 
   alias Aimax.Core.{Editor, KeyDispatch, Session}
@@ -68,83 +76,6 @@ defmodule Aimax.GroupSwitchCommandTest do
     end)
 
     %{first: first, second: second, third: third}
-  end
-
-  test "rename keeps a stable group ID", %{first: buffer} do
-    id = group_id("stable")
-    eval!(~s{(buffer-add-group! "#{buffer}" "#{id}")})
-
-    eval!(~s{(group-rename! "#{id}" "renamed")})
-
-    assert eval!(~s{(buffer-group "#{buffer}")}) == Jason.encode!(id)
-    assert eval!(~s{(group-name "#{id}")}) == ~s{"renamed"}
-  end
-
-  test "work buffers keep unique group ID sets", %{first: buffer} do
-    left = group_id("left")
-    right = group_id("right")
-
-    result =
-      eval!("""
-      (begin
-        (buffer-add-group! "#{buffer}" "#{left}")
-        (buffer-add-group! "#{buffer}" "#{left}")
-        (buffer-add-group! "#{buffer}" "#{right}")
-        (buffer-remove-group! "#{buffer}" "#{left}")
-        (list (buffer-in-group? "#{buffer}" "#{left}")
-              (buffer-in-group? "#{buffer}" "#{right}")
-              (length (buffer-group-ids "#{buffer}"))))
-      """)
-
-    assert result == "(#f #t 1)"
-  end
-
-  test "legacy names migrate once to stable IDs", %{first: work} do
-    chat = "*chat:legacy*"
-    Aimax.Core.create_buffer(chat)
-
-    on_exit(fn -> Aimax.Core.kill_buffer(chat) end)
-
-    result =
-      eval!("""
-      (begin
-        (buffer-set-local! "#{work}" 'group "legacy")
-        (buffer-set-local! "#{chat}" 'group "legacy")
-        (with-current-buffer "#{chat}" (lambda () (set-mode! "chat-mode")))
-        (let ((work-id (buffer-group "#{work}"))
-              (chat-id (chat-group-id "#{chat}")))
-          (list (equal? work-id chat-id)
-                (length (group-ids))
-                (length (buffer-group-ids "#{work}"))
-                (length (buffer-group-ids "#{chat}")))))
-      """)
-
-    assert result == "(#t 1 1 0)"
-  end
-
-  test "a dangling id founds no group and never becomes a name", %{first: work} do
-    # A restart brings the buffer locals back before the records. The
-    # buffer then names a group nobody can resolve, and that id must not
-    # found a group called after itself: the C-c g list shows names.
-    result =
-      eval!("""
-      (list (group-ensure-record! "grp:9999:1")
-            (buffer-add-group! "#{work}" "grp:9999:1")
-            (length (group-ids))
-            (if (group-ensure-record! "a chosen name") #t #f)
-            (length (group-names)))
-      """)
-
-    assert result == "(#f #f 0 #t 1)"
-    assert eval!("(group-names)") == ~s{("a chosen name")}
-  end
-
-  test "empty group records remain durable" do
-    id = group_id("empty")
-
-    assert eval!(~s{(group-name "#{id}")}) == ~s{"empty"}
-    assert eval!(~s{(length (group-buffers "#{id}"))}) == "0"
-    assert eval!("(if (assoc 'groups-v2 (desktop-globals)) #t #f)") == "#t"
   end
 
   test "new from visible preserves old memberships and the layout", %{
@@ -559,31 +490,6 @@ defmodule Aimax.GroupSwitchCommandTest do
     assert eval!(~s[(buffer-in-group? "#{third}" "#{current_id}")]) == "#f"
   end
 
-  test "a chat clears a group id whose record is gone", %{first: first} do
-    gone = group_id("gone")
-    chat = "*chat:dangling-#{System.unique_integer([:positive])}*"
-    Aimax.Core.create_buffer(chat)
-    on_exit(fn -> Aimax.Core.kill_buffer(chat) end)
-
-    eval!("""
-    (begin
-      (buffer-add-group! "#{first}" "#{gone}")
-      (buffer-set-local! "#{chat}" 'group-id "#{gone}")
-      (buffer-set-local! "#{chat}" 'mode-name "chat-mode"))
-    """)
-
-    assert eval!(~s[(chat-group-id "#{chat}")]) == Jason.encode!(gone)
-
-    # the record goes while the chat is not swept (asleep, or deleted
-    # straight from the board): the id it holds now names nothing
-    eval!(~s{(group-record-delete! "#{gone}")})
-
-    # reading it heals it, rather than handing back a dead id forever
-    assert eval!(~s[(chat-group-id "#{chat}")]) == "#f"
-    assert eval!(~s[(buffer-local "#{chat}" 'group-id)]) == "#f"
-    assert eval!(~s[(buffer-group-summary "#{chat}")]) == ~s{"ungrouped"}
-  end
-
   test "C-x g changes context and restores the saved layout", %{
     first: first,
     second: second
@@ -613,123 +519,4 @@ defmodule Aimax.GroupSwitchCommandTest do
     assert eval!(~s{(buffer-group "#{first}")}) == Jason.encode!(left)
   end
 
-  test "a group can own many chats and one primary chat" do
-    id = group_id("chat-owner")
-
-    on_exit(fn ->
-      Aimax.Core.kill_buffer("*chat:chat-owner*")
-      Aimax.Core.kill_buffer("*chat:chat-owner:2*")
-    end)
-
-    result =
-      eval!("""
-      (let* ((first (group-chat "#{id}"))
-             (second (group-chat-new! "#{id}")))
-        (list (not (equal? first second))
-              (equal? (chat-group-id first) "#{id}")
-              (equal? (chat-group-id second) "#{id}")
-              (equal? (group-primary-chat "#{id}") second)
-              (length (buffer-group-ids first))
-              (length (filter chat-buffer? (group-buffers "#{id}")))))
-      """)
-
-    assert result == "(#t #t #t #t 0 2)"
-  end
-
-  test "dissolve keeps buffers and their other memberships", %{first: first} do
-    dissolved = group_id("dissolved")
-    kept = group_id("kept")
-
-    eval!("""
-    (begin
-      (buffer-add-group! "#{first}" "#{dissolved}")
-      (buffer-add-group! "#{first}" "#{kept}")
-      (group-dissolve! "#{dissolved}"))
-    """)
-
-    assert eval!(~s{(buffer-exists? "#{first}")}) == "#t"
-    assert eval!(~s{(buffer-group-ids "#{first}")}) == ~s{("#{kept}")}
-    assert eval!(~s{(group-resolve-id "#{dissolved}")}) == "#f"
-  end
-
-  test "remembered layouts are keyed by frame", %{first: first} do
-    id = group_id("layout")
-
-    result =
-      eval!("""
-      (begin
-        (buffer-add-group! "#{first}" "#{id}")
-        (switch-to-buffer! "#{first}")
-        (group-layout-save! "#{id}")
-        (let ((saved (group-record-layout (group-record-by-id "#{id}"))))
-          (list (equal? (car saved) 'per-frame)
-                (equal? (car (car (cdr saved))) (selected-frame))
-                (equal? (group-layout "#{id}") (window-tree)))))
-      """)
-
-    assert result == "(#t #t #t)"
-  end
-
-
-  test "frame group context restores stable IDs without runtime locals" do
-    current = group_id("frame-current")
-    previous = group_id("frame-previous")
-
-    restored =
-      eval!("""
-      (begin
-        (set-frame-local! 'current-group "#{current}")
-        (set-frame-local! 'previous-group "#{previous}")
-        (set-frame-local! 'winner-pos 7)
-        (let ((saved (group-frame-context-state)))
-          (set-frame-local! 'current-group #f)
-          (set-frame-local! 'previous-group #f)
-          (group-frame-context-restore! saved)
-          (list (frame-local 'current-group)
-                (frame-local 'previous-group)
-                (frame-local 'winner-pos))))
-      """)
-
-    assert restored == ~s{("#{current}" "#{previous}" 7)}
-
-    malformed =
-      eval!("""
-      (begin
-        (group-frame-context-restore!
-          (list 'bad
-                (list (selected-frame)
-                      (list (list 'current-group)
-                            (list 'current-group 42)
-                            (list 'previous-group "#{previous}")))))
-        (list (frame-local 'current-group)
-              (frame-local 'previous-group)
-              (frame-local 'winner-pos)))
-      """)
-
-    assert malformed == ~s{(#f "#{previous}" 7)}
-
-    deleted = group_id("frame-deleted")
-
-    cleared =
-      eval!("""
-      (begin
-        (set-frame-local! 'current-group "#{deleted}")
-        (set-frame-local! 'previous-group "#{deleted}")
-        (group-record-delete! "#{deleted}")
-        (list (frame-local 'current-group)
-              (frame-local 'previous-group)
-              (frame-local 'winner-pos)))
-      """)
-
-    assert cleared == "(#f #f 7)"
-
-  end
-
-  test "invalid noise normalizes to quiet" do
-    id = group_id("noise")
-
-    eval!(~s{(group-noise-set! "#{id}" "unknown")})
-
-    assert eval!(~s{(group-noise "#{id}")}) == ~s{"quiet"}
-  end
 end

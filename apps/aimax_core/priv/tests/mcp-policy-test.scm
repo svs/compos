@@ -3,12 +3,19 @@
 ;;; What a server IS, how a chat reaches one, and what the model is told
 ;;; about them. None of this needs a server on the other end.
 ;;;
-;;; Twelve tests stay in ExUnit. Six drive the client against the fake
-;;; server in test/support and poll it. Three assert that an eval raises,
-;;; which Scheme cannot catch. Three run the tool loop through Elixir.
+;;; Seven tests stay in ExUnit, and each is the bridge: six drive the
+;;; Elixir client API — MCP.connect, MCP.call, MCP.tool_specs — and one
+;;; runs the tool loop through an Application.put_env stub.
+;;;
+;;; An eighth would move but cannot yet: mcp-call!'s CALLBACK form hands
+;;; its text to a closure created inside the test, and a closure created
+;;; mid-eval points at a frame no other process can resolve, so the reply
+;;; is dropped in silence. See docs/BUG-escaped-closure-handlers.md.
 
 (domain! 'testing)
 (effects! '(write))
+
+
 
 ;; The registry and the preset list are global, and the live editor's own
 ;; servers are in them. Every test takes out exactly what it put in.
@@ -128,3 +135,103 @@
       (let ((said (buffer-text "*messages*")))
         (check-contains! (substring said mark (string-length said))
                          "unknown server zz-unregistered" "and it says which one")))))
+
+;;; --- the fake server -------------------------------------------------------------
+;;; A test writes its own: the registry takes a command and arguments, so
+;;; the fixture is a file this test lays down and removes. priv/tests must
+;;; not reach into the Elixir test tree, and a release ships no test/.
+
+(define t--mcp-dir (string-append (aimax-home) "/zz-mcp"))
+(define t--mcp-server (string-append t--mcp-dir "/fake_mcp_server.exs"))
+
+(define t--mcp-script "# Minimal MCP server over stdio for tests: newline-delimited JSON-RPC,\n# initialize handshake, one tool (\"echo\"). Uses OTP's :json — no deps, so it\n# runs as `elixir fake_mcp_server.exs` straight from a Port.\n#\n# It advertises resources AND prompts but only implements resources/list:\n# prompts/list falls through to -32601, which is exactly what a real server\n# that overstates its capabilities does, and the client must survive it.\ndefmodule FakeMCP do\n  def loop do\n    case IO.gets(\"\") do\n      :eof -> :ok\n      {:error, _} -> :ok\n      line ->\n        line |> String.trim() |> handle()\n        loop()\n    end\n  end\n\n  defp handle(\"\"), do: :ok\n\n  defp handle(line) do\n    case :json.decode(line) do\n      %{\"method\" => \"initialize\", \"id\" => id, \"params\" => params} ->\n        reply(id, %{\n          protocolVersion: params[\"protocolVersion\"],\n          capabilities: %{tools: %{}, resources: %{}, prompts: %{}},\n          serverInfo: %{name: \"fake-mcp\", version: \"0.0.1\"}\n        })\n\n      %{\"method\" => \"resources/list\", \"id\" => id} ->\n        reply(id, %{\n          resources: [\n            %{uri: \"file:///fake.txt\", name: \"fake.txt\", description: \"A fake file.\"}\n          ]\n        })\n\n      %{\"method\" => \"tools/list\", \"id\" => id} ->\n        reply(id, %{\n          tools: [\n            %{\n              name: \"echo\",\n              description: \"Echo back v.\",\n              inputSchema: %{\n                type: \"object\",\n                properties: %{v: %{type: \"string\", description: \"value to echo\"}},\n                required: [\"v\"]\n              }\n            }\n          ]\n        })\n\n      %{\"method\" => \"tools/call\", \"id\" => id, \"params\" => params} ->\n        v = params[\"arguments\"][\"v\"] || \"\"\n        reply(id, %{content: [%{type: \"text\", text: \"echo:\" <> v}]})\n\n      %{\"method\" => _, \"id\" => id} ->\n        send_msg(%{jsonrpc: \"2.0\", id: id, error: %{code: -32601, message: \"method not found\"}})\n\n      _notification ->\n        :ok\n    end\n  end\n\n  defp reply(id, result), do: send_msg(%{jsonrpc: \"2.0\", id: id, result: result})\n\n  # the client may disconnect mid-reply; a dead stdout is not news\n  defp send_msg(msg) do\n    msg |> :json.encode() |> IO.iodata_to_binary() |> IO.puts()\n  catch\n    _, _ -> :ok\n  end\nend\n\nFakeMCP.loop()\n")
+
+(define (t--mcp-setup!)
+  (shell-command->string (string-append "rm -rf " t--mcp-dir))
+  (make-directory! t--mcp-dir)
+  (write-file! t--mcp-server t--mcp-script)
+  t--mcp-server)
+
+(define (t--mcp-register! name)
+  (mcp-register! name (list 'command "elixir" 'args (list t--mcp-server)))
+  name)
+
+(define (t--mcp-forget! &rest names)
+  (for-each
+    (lambda (n)
+      (mcp-disconnect! n)
+      (set! *mcp-registry* (remove (lambda (e) (equal? (car e) n)) *mcp-registry*)))
+    names)
+  (shell-command->string (string-append "rm -rf " t--mcp-dir)))
+
+(deftest 'mcp-call-connects-waits-for-the-handshake-and-answers
+  "the call does the connecting, so a caller never has to"
+  (lambda ()
+    (t--mcp-setup!)
+    (t--mcp-register! 'zzcall)
+    ;; never connected: the call does that itself and waits for the tools
+    (check-equal! (mcp-call! 'zzcall "echo" "{\"v\":\"hi\"}") "echo:hi" "a JSON argument")
+    ;; a plist is arguments too — Scheme code should not write JSON by hand
+    (check-equal! (mcp-call! 'zzcall "echo" '(v "there")) "echo:there" "and a plist")
+    (t--mcp-forget! 'zzcall)))
+
+(deftest 'mcp-tools-connects-first-so-the-list-is-never-falsely-empty
+  "an empty list from an unconnected server is a lie"
+  (lambda ()
+    (t--mcp-setup!)
+    (t--mcp-register! 'zztools)
+    (check-equal! (mcp-tools 'zztools) '(("echo" "Echo back v.")) "the tool and its doc")
+
+    ;; the arguments, so nobody guesses parameter names
+    (let ((schema (mcp-tool-schema 'zztools "echo")))
+      (check-contains! schema "required" "the schema names what is required")
+      (check-contains! schema "\"v\"" "and the parameter"))
+    (check-equal! (mcp-tool-schema 'zztools "no-such-tool") "" "an unknown tool has none")
+    (t--mcp-forget! 'zztools)))
+
+(deftest 'mcp-find-searches-every-servers-tools
+  "by description, not only by name"
+  (lambda ()
+    (t--mcp-setup!)
+    (t--mcp-register! 'zzfind)
+    ;; "echo" never appears as a word in the request a user actually writes
+    (check-equal! (mcp-find "back v" 'zzfind) '(("zzfind" "echo" "Echo back v."))
+                  "the description answers")
+    (check-equal! (mcp-find "nothing|missing" 'zzfind) '() "a miss is empty")
+    (check-contains! (value->string (mcp-find "zzz|echo" 'zzfind)) "echo"
+                     "and several words, any of which may hit")
+    (t--mcp-forget! 'zzfind)))
+
+(deftest 'a-preset-pulls-a-servers-specs-into-a-chat-once-ready
+  "the first pull triggers the lazy connect"
+  (lambda ()
+    (t--mcp-setup!)
+    (t--mcp-register! 'zzfake)
+    (define-preset! 'zzweb "test preset" '(zzfake))
+    (let ((chat (test-buffer! "*zz-mcp-chat*" "")))
+      (buffer-set-local! chat 'chat-presets '(zzweb))
+      (chat-extra-tool-specs chat)
+
+      ;; the intrinsic aimax bridge rides every chat, so count THIS
+      ;; server's tools rather than the whole list
+      (check-true! (wait-until
+                     (lambda ()
+                       (= 1 (length (filter (lambda (s) (string-prefix? "mcp__zzfake__" (car s)))
+                                            (chat-extra-tool-specs chat)))))
+                     20000 100)
+                   "the specs appear once the server is ready")
+
+      ;; dropping the preset drops its tools; the aimax bridge stays
+      (buffer-set-local! chat 'chat-presets '())
+      (check-false! (string-contains? (value->string (chat-extra-tool-specs chat)) "mcp__zzfake__")
+                    "and the tools go with the preset")
+      (buffer-kill! chat))
+    (set! *chat-presets* (remove (lambda (e) (equal? (car e) 'zzweb)) *chat-presets*))
+    (t--mcp-forget! 'zzfake)))
+
+(deftest 'a-call-to-a-server-that-is-not-there-fails-with-words
+  "not a hang, and not a silent nothing"
+  (lambda ()
+    (let ((out (eval-string-safe "(mcp-call! 'zz-not-a-server \"echo\" \"{}\")")))
+      (check-equal! (car out) 'error "the call fails")
+      (check-contains! (cadr out) "not connected" "and says why"))))

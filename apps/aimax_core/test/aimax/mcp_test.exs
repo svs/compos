@@ -1,12 +1,18 @@
 defmodule Aimax.MCPTest do
   @moduledoc """
-  MCP client: stdio handshake against a real subprocess (the fake server in
-  test/support), tool bridging into the LLM loop, and the Scheme policy
-  that needs a server on the other end.
+  The MCP bridge: the Elixir client, and one test waiting on a bug.
 
-  The policy that does not — the ACP translation, the system note, the
-  tool list and the quiet failures — is Scheme and lives in
-  priv/tests/mcp-policy-test.scm.
+  The policy — the registry, the ACP translation, the system note, the
+  tool list, mcp-call!, mcp-tools, mcp-find and the preset pull — is
+  Scheme and lives in priv/tests/mcp-policy-test.scm, which writes its own
+  fake server rather than reaching into this tree.
+
+  What stays drives MCP.connect, MCP.call, MCP.tool_specs and the tool
+  loop through an Application.put_env stub. Plus the CALLBACK form of
+  mcp-call!: it hands its text to a closure created inside the test, and a
+  closure created mid-eval points at a frame no other process can resolve,
+  so from Scheme the reply is dropped in silence. See
+  docs/BUG-escaped-closure-handlers.md; when that is fixed this one moves.
   """
 
   use ExUnit.Case
@@ -140,46 +146,6 @@ defmodule Aimax.MCPTest do
   end
 
   describe "scheme policy (packages/mcp.scm)" do
-    test "registry + preset + chat-extra-tool-specs pull specs once ready" do
-      on_exit(fn ->
-        MCP.disconnect("zzfake")
-        Aimax.Core.kill_buffer("*zz-mcp-chat*")
-      end)
-
-      eval!(~s{(mcp-register! 'zzfake (list 'command "elixir" 'args (list "#{@fixture}")))})
-      eval!(~s{(define-preset! 'zzweb "test preset" '(zzfake))})
-      eval!(~s{(buffer-create "*zz-mcp-chat*")})
-      eval!(~s{(buffer-set-local! "*zz-mcp-chat*" 'chat-presets '(zzweb))})
-
-      # first pull triggers the lazy connect; specs appear once ready
-      eval!(~s{(chat-extra-tool-specs "*zz-mcp-chat*")})
-
-      # the intrinsic aimax bridge rides every chat, so count this server's
-      # tools rather than the whole list
-      wait_until(fn ->
-        eval!(~s{(length (filter (lambda (s) (string-prefix? "mcp__zzfake__" (car s)))
-                                (chat-extra-tool-specs "*zz-mcp-chat*")))}) == "1"
-      end)
-
-      assert eval!(~s{(chat-extra-tool-specs "*zz-mcp-chat*")}) =~ "mcp__zzfake__echo"
-
-      # dropping the preset drops its tools; the aimax bridge stays
-      refute eval!(~s{(begin (buffer-set-local! "*zz-mcp-chat*" 'chat-presets '())
-                             (chat-extra-tool-specs "*zz-mcp-chat*"))}) =~ "mcp__zzfake__"
-    end
-
-    test "mcp-call! connects, waits for the handshake, and returns the tool's text" do
-      on_exit(fn -> MCP.disconnect("zzcall") end)
-      eval!(~s{(mcp-register! 'zzcall (list 'command "elixir" 'args (list "#{@fixture}")))})
-
-      # never connected: the call does that itself and waits for the tools
-      refute MCP.connected?("zzcall")
-      assert eval!(~S[(mcp-call! 'zzcall "echo" "{\"v\":\"hi\"}")]) == ~s["echo:hi"]
-
-      # a plist is arguments too — Scheme code should not write JSON by hand
-      assert eval!(~s[(mcp-call! 'zzcall "echo" '(v "there"))]) == ~s["echo:there"]
-    end
-
     test "the callback form returns at once and hands the text over later" do
       on_exit(fn -> MCP.disconnect("zzcb") end)
       eval!(~s{(mcp-register! 'zzcb (list 'command "elixir" 'args (list "#{@fixture}")))})
@@ -189,38 +155,6 @@ defmodule Aimax.MCPTest do
 
       wait_until(fn -> match?({:ok, "#t"}, Session.eval("(boundp 'zz-cb-reply)")) end)
       assert eval!("zz-cb-reply") == ~s[(#t "echo:later")]
-    end
-
-    test "mcp-tools connects first, so the list is never falsely empty" do
-      on_exit(fn -> MCP.disconnect("zztools") end)
-      eval!(~s{(mcp-register! 'zztools (list 'command "elixir" 'args (list "#{@fixture}")))})
-
-      refute MCP.connected?("zztools")
-      assert eval!("(mcp-tools 'zztools)") == ~s[(("echo" "Echo back v."))]
-
-      # the arguments, so nobody guesses parameter names
-      schema = eval!(~s[(mcp-tool-schema 'zztools "echo")])
-      assert schema =~ "required"
-      assert schema =~ "\\\"v\\\""
-      assert eval!(~s[(mcp-tool-schema 'zztools "no-such-tool")]) == ~s[""]
-    end
-
-    test "mcp-find searches every server's tools the way apropos-api does" do
-      on_exit(fn -> MCP.disconnect("zzfind") end)
-      eval!(~s{(mcp-register! 'zzfind (list 'command "elixir" 'args (list "#{@fixture}")))})
-
-      # by description, not only by name — "echo" never appears as a word
-      # in the request a user actually writes
-      assert eval!(~s[(mcp-find "back v" 'zzfind)]) == ~s[(("zzfind" "echo" "Echo back v."))]
-      assert eval!(~s[(mcp-find "nothing|missing" 'zzfind)]) == "()"
-
-      # several words, any of which may hit
-      assert eval!(~s[(mcp-find "zzz|echo" 'zzfind)]) =~ "echo"
-    end
-
-    test "a call to a server that is not there fails with words, not a hang" do
-      assert {:error, msg} = Session.eval(~S[(mcp-call! 'zz-not-a-server "echo" "{}")])
-      assert msg =~ "not connected"
     end
 
   end

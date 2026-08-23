@@ -52,7 +52,7 @@
   (set! *test-file-needs-disposable* why)
   why)
 
-(define (test-needs-disposable? name) (member name *disposable-only-tests*))
+(define (test-needs-disposable? name) (assoc name *disposable-only-tests*))
 
 ;; what run-scheme-tests may run HERE
 (define (test-names-here)
@@ -74,7 +74,8 @@
     (append (remove (lambda (t) (equal? (car t) name)) *tests*)
             (list (list name doc thunk))))
   (when *test-file-needs-disposable*
-    (set! *disposable-only-tests* (cons name *disposable-only-tests*)))
+    (set! *disposable-only-tests*
+      (cons (list name *test-file-needs-disposable*) *disposable-only-tests*)))
   name)
 
 ;; There is no buffer-set-text! primitive: replace the whole range.
@@ -175,8 +176,9 @@
       ;; one test by hand must not lose their buffers to it either
       ((and (test-needs-disposable? name) (not (editor-is-disposable?)))
        (list (string-append (symbol->string name)
-                            " needs a disposable editor: it resets buffer names this"
-                            " editor is using. Run it with mix test.")))
+                            " needs a disposable editor — it "
+                            (cadr (test-needs-disposable? name))
+                            ". Run it with mix test.")))
       (else
         (begin
           (set! *test-failures* '())

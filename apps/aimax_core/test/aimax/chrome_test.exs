@@ -6,6 +6,10 @@ defmodule Aimax.ChromeTest do
   way the Stub agent backend stands in for a real one. Outbound tests assert
   what lands on the wire; inbound tests feed the daemon the frames a tab would
   send when someone presses M-x in it.
+
+  What the editor DECIDES — which tabs are beside you, a tab's label, the
+  order of the switch list — needs no extension and lives in
+  priv/tests/chrome-test.scm.
   """
 
   use ExUnit.Case
@@ -185,10 +189,6 @@ defmodule Aimax.ChromeTest do
       assert_receive {:frame, %{"id" => 4, "ok" => true, "result" => %{"message" => ""}}}, 2000
     end
 
-    test "the chord handler names the keys it would dispatch" do
-      # the formatting half, with no dispatcher involved
-      assert eval!(~s[(chrome--get (chrome--chord '()) 'message)]) == ~s("")
-    end
   end
 
   # The gap that made C-x b look broken: the command reached the daemon and
@@ -281,27 +281,7 @@ defmodule Aimax.ChromeTest do
       assert eval!("(window-list)") == before
     end
 
-    test "a buffer that is not on screen has no window to go to" do
-      eval!(~s[(buffer-create "*off-screen*")])
-      assert eval!(~s[(chrome--window-showing "*off-screen*")]) == "#f"
-    end
-
     # a tab you can switch to belongs in the same list as the buffers
-    test "tabs in this window become candidates, marked with a globe" do
-      tabs = ~s{'((id 7 title "Hacker News" url "https://news.ycombinator.com/" window 1)
-                  (id 8 title "Luma" url "https://luma.com/" window 2))}
-
-      assert eval!(~s[(car (chrome--tab-candidate (car #{tabs})))]) == ~s("🌐 Hacker News")
-
-      # only this browser window's tabs — C-x b offers what is beside you
-      eval!("(set-frame-local! 'chrome-window 1)")
-      assert eval!(~s[(length (chrome--here-tabs #{tabs}))]) == "1"
-
-      # and the label round-trips back to the tab it names
-      assert eval!(~s[(chrome--get (chrome--tab-by-label "🌐 Luma" #{tabs}) 'id)]) == "8"
-      assert eval!(~s[(chrome--tab-by-label "*scratch*" #{tabs})]) == "#f"
-    end
-
     # the same list wherever you press it — only what selecting DOES differs
     test "C-x b is the editor's own command, redefined rather than rebound" do
       assert eval!(~s[(key-for-command "switch-to-buffer")]) == ~s("C-x b")
@@ -323,25 +303,6 @@ defmodule Aimax.ChromeTest do
     # so it drifted and then outranked the truth. The only fact kept is the tab
     # you were last in and the ring's head at that moment; if the head has not
     # moved, nothing has been displayed since and the tab still leads.
-    test "buffers keep the editor's order; a tab leads only while it is latest" do
-      bufs = ~s{'(("*a*" "") ("*b*" ""))}
-      tabs = ~s{'(("🌐 News" ""))}
-
-      eval!("(set-frame-local! 'chrome-tab-visit #f)")
-      assert eval!(~s[(map car (chrome--order #{bufs} #{tabs}))]) == ~s{("*a*" "*b*" "🌐 News")}
-
-      # a keypress in the tab: it is now the most recent place
-      eval!(~s[(chrome--note-tab! "🌐 News")])
-      assert eval!("(chrome--tab-is-latest?)") == "#t"
-      assert eval!(~s[(map car (chrome--order #{bufs} #{tabs}))]) == ~s{("🌐 News" "*a*" "*b*")}
-
-      # display a buffer and the ring's head moves, so the tab is stale — no
-      # bookkeeping needed here, the editor's own ring invalidates it
-      eval!(~s[(begin (buffer-create "*ring-moved*") (switch-to-buffer! "*ring-moved*"))])
-      assert eval!("(chrome--tab-is-latest?)") == "#f"
-      assert eval!(~s[(map car (chrome--order #{bufs} #{tabs}))]) == ~s{("*a*" "*b*" "🌐 News")}
-    end
-
     test "C-x b from a page routes to the returning prompt, not raw dispatch" do
       assert eval!(~s[(chrome--chord-command '("C-x" "b"))]) == ~s("switch-to-buffer-prompt")
       # anything without its own browser meaning still goes through the keymap

@@ -24,6 +24,7 @@ defmodule Aimax.Core.SchemeAPI do
     |> Map.merge(editor_primitives())
     |> Map.merge(git_primitives())
     |> Map.merge(watch_primitives())
+    |> Map.merge(telemetry_primitives())
   end
 
   @doc "One-line doc for every primitive: signature, then an em dash, then one sentence."
@@ -119,6 +120,9 @@ defmodule Aimax.Core.SchemeAPI do
       "watched-paths" => "(watched-paths) — return the watched roots.",
       "fs-on-change!" =>
         "(fs-on-change! FN) — register the ONE handler that gets a root when a watched tree changes.",
+      "telemetry-snapshot" =>
+        "(telemetry-snapshot [LIMIT]) — return recent Scheme lane and task events, newest first.",
+      "telemetry-clear!" => "(telemetry-clear!) — discard retained Scheme telemetry events.",
       "block-on-click!" =>
         "(block-on-click! FN) — register the ONE handler that gets (BUF ID) when a block with a click id is clicked.",
       "define-style!" =>
@@ -376,6 +380,45 @@ defmodule Aimax.Core.SchemeAPI do
       "make-directory!" =>
         "(make-directory! PATH) — create the directory and its parents; return #t."
     }
+  end
+
+  defp telemetry_primitives do
+    %{
+      "telemetry-snapshot" => fn
+        [] -> telemetry_events(200)
+        [limit] -> telemetry_events(trunc(limit))
+      end,
+      "telemetry-clear!" => fn [] ->
+        :ok = Aimax.Core.Telemetry.clear()
+        :void
+      end
+    }
+  end
+
+  defp telemetry_events(limit) do
+    limit = max(0, min(limit, 1_000))
+
+    Aimax.Core.Telemetry.events(limit)
+    |> Enum.map(fn event ->
+      [
+        {:sym, "kind"},
+        event.kind,
+        {:sym, "time-ms"},
+        event.time_ms,
+        {:sym, "duration-ms"},
+        event.duration_ms,
+        {:sym, "queue-ms"},
+        event.queue_ms,
+        {:sym, "backlog"},
+        event.backlog,
+        {:sym, "owner"},
+        event.owner,
+        {:sym, "label"},
+        event.label,
+        {:sym, "status"},
+        event.status
+      ]
+    end)
   end
 
   defp buffer_primitives do

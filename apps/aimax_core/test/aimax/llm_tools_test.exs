@@ -12,8 +12,12 @@ defmodule Aimax.LLMToolsTest do
 
   defp wait_until(fun, tries \\ 100) do
     cond do
-      fun.() -> :ok
-      tries == 0 -> flunk("condition never became true")
+      fun.() ->
+        :ok
+
+      tries == 0 ->
+        flunk("condition never became true")
+
       true ->
         Process.sleep(20)
         wait_until(fun, tries - 1)
@@ -45,19 +49,23 @@ defmodule Aimax.LLMToolsTest do
       assert eval!(~s{(llm-tool-call "no-such" '())}) == ~s{"no such tool: no-such"}
     end
 
-    test "the built-in toolbox is exactly the seven-tool surface" do
+    test "the built-in toolbox exposes concurrent repository reads" do
       specs = eval!("(map car (llm-tool-specs))")
-      # six for the editor itself, and spotify — a device in the browser, not
-      # a part of the editor, so eval-scheme cannot stand in for it
-      for t <- ~w(eval-scheme apropos apropos-categories describe-function act ask spotify) do
+      # Focused repository readers avoid wrapping safe reads in the
+      # deliberately conservative eval-scheme tool.
+      for t <-
+            ~w(eval-scheme apropos apropos-categories describe-function read-file code-outline code-read act ask spotify) do
         assert specs =~ t
       end
 
       # nothing else ships (test-registered zz-* tools excluded)
       count =
-        eval!(~s{(length (filter (lambda (t) (not (string-prefix? "zz-" (symbol->string (car t))))) *llm-tools*))})
+        eval!(
+          ~s{(length (filter (lambda (t) (not (string-prefix? "zz-" (symbol->string (car t))))) *llm-tools*))}
+        )
 
-      assert count == "7"
+      assert count == "10"
+      assert eval!(~s{(nth 3 (assoc "apropos" (llm-tool-specs)))}) == "(read)"
     end
 
     test "eval-scheme errors suggest the real name with its signature" do
@@ -197,6 +205,122 @@ defmodule Aimax.LLMToolsTest do
   end
 
   describe "tool loop" do
+    test "four read-only tools from one model round evaluate concurrently" do
+      me = self()
+      handler = "scheme-read-start-#{System.unique_integer([:positive])}"
+
+      :ok =
+        :telemetry.attach(
+          handler,
+          [:aimax, :scheme, :task, :start],
+          fn _, measurements, metadata, _ ->
+            send(me, {:scheme_read_start, measurements, metadata})
+          end,
+          nil
+        )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      eval!("""
+      (define-tool! 'zz-parallel-read "Delayed read."
+        (list (list 'v "string" "value"))
+        (lambda (args)
+          (wait-until (lambda () #f) 250 250)
+          (custom--plist-get args 'v))
+        '(read))
+      """)
+
+      stub_chat(fn %{messages: messages} ->
+        if has_tool_result?(messages) do
+          [%{content: results} | _] = Enum.reverse(messages)
+          send(me, {:parallel_results, Enum.map(results, & &1.content)})
+
+          {:ok,
+           %{
+             "stop_reason" => "end_turn",
+             "content" => [%{"type" => "text", "text" => "parallel reads complete"}]
+           }}
+        else
+          {:ok,
+           %{
+             "stop_reason" => "tool_use",
+             "content" =>
+               for n <- 1..4 do
+                 %{
+                   "type" => "tool_use",
+                   "id" => "tu_read_#{n}",
+                   "name" => "zz-parallel-read",
+                   "input" => %{"v" => Integer.to_string(n)}
+                 }
+               end
+           }}
+        end
+      end)
+
+      eval!(~s{(llm-with-tools "read four things"
+                 (lambda (t) (set-symbol-value! 'zz-parallel-reply t)))})
+
+      starts =
+        for _ <- 1..4 do
+          assert_receive {:scheme_read_start, %{system_time: time},
+                          %{label: "tool zz-parallel-read"}},
+                         1_000
+
+          time
+        end
+
+      assert Enum.max(starts) - Enum.min(starts) < 150
+      assert_receive {:parallel_results, ["1", "2", "3", "4"]}, 1_000
+
+      wait_until(fn -> match?({:ok, "#t"}, Session.eval("(boundp 'zz-parallel-reply)")) end)
+      assert eval!("zz-parallel-reply") == ~s{"parallel reads complete"}
+    end
+
+    test "write tools remain on the serial dispatcher" do
+      name = "*zz-serial-tools-#{System.unique_integer([:positive])}*"
+      on_exit(fn -> Aimax.Core.kill_buffer(name) end)
+      eval!(~s{(buffer-create "#{name}")})
+
+      eval!("""
+      (define-tool! 'zz-serial-write "Ordered write."
+        (list (list 'v "string" "value"))
+        (lambda (args)
+          (buffer-append! #{inspect(name)} (custom--plist-get args 'v))
+          "ok")
+        '(write))
+      """)
+
+      stub_chat(fn %{messages: messages} ->
+        if has_tool_result?(messages) do
+          {:ok,
+           %{
+             "stop_reason" => "end_turn",
+             "content" => [%{"type" => "text", "text" => "serial writes complete"}]
+           }}
+        else
+          {:ok,
+           %{
+             "stop_reason" => "tool_use",
+             "content" =>
+               for n <- 1..4 do
+                 %{
+                   "type" => "tool_use",
+                   "id" => "tu_write_#{n}",
+                   "name" => "zz-serial-write",
+                   "input" => %{"v" => Integer.to_string(n)}
+                 }
+               end
+           }}
+        end
+      end)
+
+      eval!(~s{(llm-with-tools "write four things"
+                 (lambda (t) (set-symbol-value! 'zz-serial-reply t)))})
+
+      wait_until(fn -> match?({:ok, "#t"}, Session.eval("(boundp 'zz-serial-reply)")) end)
+      assert Buffer.text(name) == "1234"
+    end
+
     test "dispatches tool_use, feeds results back, delivers final text" do
       me = self()
 
@@ -232,6 +356,7 @@ defmodule Aimax.LLMToolsTest do
 
       assert eval!("zz-reply") == ~s{"Org font is now ToolFont."}
       assert eval!("org-font-family") == ~s{"ToolFont"}
+
       assert File.read!(Path.join(Aimax.Core.home(), "custom.scm")) =~
                ~s{'(org-font-family "ToolFont")}
 
@@ -252,6 +377,7 @@ defmodule Aimax.LLMToolsTest do
         if has_tool_result?(messages) do
           [%{content: results} | _] = Enum.reverse(messages)
           [%{content: err} | _] = results
+
           {:ok,
            %{
              "stop_reason" => "end_turn",
@@ -286,7 +412,12 @@ defmodule Aimax.LLMToolsTest do
          %{
            "stop_reason" => "tool_use",
            "content" => [
-             %{"type" => "tool_use", "id" => "tu_n", "name" => "eval-scheme", "input" => %{"code" => "(+ 1 1)"}}
+             %{
+               "type" => "tool_use",
+               "id" => "tu_n",
+               "name" => "eval-scheme",
+               "input" => %{"code" => "(+ 1 1)"}
+             }
            ]
          }}
       end)
@@ -455,8 +586,12 @@ defmodule Aimax.LLMToolsTest do
         "anthropic" => %{
           "models" => %{
             "claude-sonnet-5" => %{
-              "cost" => %{"input" => 9999.0, "output" => 9999.0,
-                          "cache_read" => 9999.0, "cache_write" => 9999.0}
+              "cost" => %{
+                "input" => 9999.0,
+                "output" => 9999.0,
+                "cache_read" => 9999.0,
+                "cache_write" => 9999.0
+              }
             }
           }
         }
@@ -500,7 +635,8 @@ defmodule Aimax.LLMToolsTest do
       wait_until(fn -> match?({:ok, "#t"}, Session.eval("(boundp 'zz-cost)")) end)
       wait_until(fn -> File.exists?(ledger) end)
 
-      row = ledger |> File.read!() |> String.split("\n", trim: true) |> List.last() |> Jason.decode!()
+      row =
+        ledger |> File.read!() |> String.split("\n", trim: true) |> List.last() |> Jason.decode!()
 
       # the token counts still land verbatim
       assert row["input"] == 11

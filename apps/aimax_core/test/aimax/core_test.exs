@@ -110,6 +110,112 @@ defmodule Aimax.CoreTest do
       assert_receive {:fired, [%{inserted: "human edit"}]}, 500
     end
 
+    test "subscribes once per buffer and unsubscribes with the last rule" do
+      name = uniq("subscriptions")
+      {:ok, _} = Core.create_buffer(name)
+      ref = Buffer.ref(name)
+
+      ids =
+        for _ <- 1..3 do
+          {:ok, id} = Reactor.on_change(name, :any, fn _ -> :ok end, eager: true)
+          id
+        end
+
+      assert length(Registry.lookup(Events.registry(), {:buffer_change, ref})) == 1
+
+      Enum.each(Enum.take(ids, 2), &Reactor.remove/1)
+      assert length(Registry.lookup(Events.registry(), {:buffer_change, ref})) == 1
+
+      Reactor.remove(List.last(ids))
+      assert Registry.lookup(Events.registry(), {:buffer_change, ref}) == []
+    end
+
+    test "serializes one rule and coalesces changes while its handler runs" do
+      name = uniq("serialized-handler")
+      {:ok, _} = Core.create_buffer(name)
+      test = self()
+
+      {:ok, rule} =
+        Reactor.on_change(
+          name,
+          :any,
+          fn changes ->
+            send(test, {:handler_started, self(), changes})
+
+            receive do
+              :release -> :ok
+            after
+              1_000 -> {:error, "test handler timed out"}
+            end
+          end,
+          eager: true
+        )
+
+      Buffer.append(name, "one")
+      assert_receive {:handler_started, first, [%{inserted: "one"}]}, 500
+
+      Buffer.append(name, "two")
+      Buffer.append(name, "three")
+      refute_receive {:handler_started, _, _}, 100
+
+      send(first, :release)
+
+      assert_receive {:handler_started, second, changes}, 500
+      assert Enum.map(changes, & &1.inserted) == ["two", "three"]
+      send(second, :release)
+
+      Reactor.remove(rule)
+    end
+
+    test "retains a batch when its handler reports an error" do
+      name = uniq("failed-handler")
+      {:ok, _} = Core.create_buffer(name)
+
+      {:ok, id} =
+        Reactor.on_change(name, :any, fn _ -> {:error, "broken"} end, eager: true)
+
+      Buffer.append(name, "keep me")
+
+      assert eventually(fn ->
+               rule = Enum.find(Reactor.rules(), &(&1.id == id))
+               rule.pending != [] and not rule.in_flight and rule.timer == nil
+             end)
+
+      rule = Enum.find(Reactor.rules(), &(&1.id == id))
+      assert Enum.map(rule.pending, & &1.inserted) == ["keep me"]
+      Reactor.remove(id)
+    end
+
+    test "retains a batch when its handler task is killed" do
+      name = uniq("killed-handler")
+      {:ok, _} = Core.create_buffer(name)
+      test = self()
+
+      {:ok, id} =
+        Reactor.on_change(
+          name,
+          :any,
+          fn _changes ->
+            send(test, {:handler_task, self()})
+            Process.sleep(:infinity)
+          end,
+          eager: true
+        )
+
+      Buffer.append(name, "keep this too")
+      assert_receive {:handler_task, task}, 500
+      Process.exit(task, :kill)
+
+      assert eventually(fn ->
+               rule = Enum.find(Reactor.rules(), &(&1.id == id))
+               rule.pending != [] and rule.in_flight == false
+             end)
+
+      rule = Enum.find(Reactor.rules(), &(&1.id == id))
+      assert Enum.map(rule.pending, & &1.inserted) == ["keep this too"]
+      Reactor.remove(id)
+    end
+
     test "a rule follows immutable buffer identity through rename and wake" do
       old = uniq("reactor-old")
       new = uniq("reactor-new")

@@ -141,14 +141,27 @@ defmodule Aimax.Scheme.Eval do
 
   def apply_fn({:builtin, name, fun}, args, store) when is_function(fun, 1) do
     # a closure handed to a host primitive escapes Scheme (command tables,
-    # hooks, buffer locals): the selective flush must publish its frames
-    unless MapSet.member?(@non_retaining, name), do: Env.note_escape(args)
+    # hooks, buffer locals): publish its frames before the host can call it
+    store = promote_primitive_args(name, args, store)
     {builtin_apply(name, fn -> fun.(args) end), store}
   end
 
   def apply_fn({:builtin, name, fun}, args, store) when is_function(fun, 2) do
-    unless MapSet.member?(@non_retaining, name), do: Env.note_escape(args)
+    store = promote_primitive_args(name, args, store)
     builtin_apply(name, fn -> fun.(args, store) end)
+  end
+
+  def apply_fn(other, _args, _store) do
+    raise Error, message: "not a function: #{inspect(other)}"
+  end
+
+  defp promote_primitive_args(name, args, store) do
+    if MapSet.member?(@non_retaining, name) do
+      store
+    else
+      if guard = Process.get(:aimax_scheme_host_guard), do: guard.(name, args)
+      Env.promote(store, args)
+    end
   end
 
   defp builtin_apply(name, thunk) do
@@ -157,14 +170,17 @@ defmodule Aimax.Scheme.Eval do
     e in Error ->
       reraise e, __STACKTRACE__
 
-    e in [ArgumentError, FunctionClauseError, MatchError, CaseClauseError, ArithmeticError, KeyError] ->
+    e in [
+      ArgumentError,
+      FunctionClauseError,
+      MatchError,
+      CaseClauseError,
+      ArithmeticError,
+      KeyError
+    ] ->
       reraise Error,
               [message: "#{name}: #{Exception.message(e)}"],
               __STACKTRACE__
-  end
-
-  def apply_fn(other, _args, _store) do
-    raise Error, message: "not a function: #{inspect(other)}"
   end
 
   # --- helpers ---------------------------------------------------------------
@@ -250,7 +266,9 @@ defmodule Aimax.Scheme.Eval do
   defp parse_optionals!([name | more], opt), do: parse_optionals!(more, [name | opt])
 
   defp rest_name!([name]) when name not in ["&optional", "&rest"], do: name
-  defp rest_name!(other), do: raise(Error, message: "&rest takes exactly one name, got: #{inspect(other)}")
+
+  defp rest_name!(other),
+    do: raise(Error, message: "&rest takes exactly one name, got: #{inspect(other)}")
 
   defp bind_params!(req, opt, rest, args) do
     nreq = length(req)

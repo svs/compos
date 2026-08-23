@@ -70,6 +70,17 @@ if config_env() != :test do
   # an environment variable wins over the conf file
   get = fn env_key, conf_key -> System.get_env(env_key) || conf[conf_key] end
 
+  if execution = get.("AIMAX_SCHEME_EXECUTION", "scheme_execution") do
+    mode =
+      case execution do
+        "lanes" -> :lanes
+        "single_actor" -> :single_actor
+        other -> raise "scheme_execution must be lanes or single_actor, got: #{other}"
+      end
+
+    config :aimax_core, scheme_execution: mode
+  end
+
   if registry = get.("AIMAX_DAEMON_REGISTRY", "registry") do
     config :aimax_core, daemon_registry_path: Path.expand(registry)
   end

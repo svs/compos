@@ -1645,9 +1645,7 @@
   ;; a codex thread runs in a sanitized CODEX_HOME so the user's own
   ;; ~/.codex config and skills never reach it (skills.scm, which loads
   ;; after this file). The backend test walks the plist with the member
-  ;; builtin: this fn is on the turn-start path, where a plist-get call
-  ;; allocates a loop frame that loses the cross-lane flush race
-  ;; ("stale environment frame") — see env.ex.
+  ;; builtin so it exercises the same representation as the turn-start path.
   (let* ((conf0 (agent-resolve-config* opts))
          (codex? (let ((tl (member (quote backend) conf0)))
                    (and tl (pair? (cdr tl))

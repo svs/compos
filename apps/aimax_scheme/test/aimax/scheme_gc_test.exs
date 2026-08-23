@@ -82,6 +82,40 @@ defmodule Aimax.Scheme.GCTest do
     assert {:ok, 42, _} = Task.await(task)
   end
 
+  test "a primitive can call an escaped closure before its eval exits" do
+    test = self()
+
+    interp =
+      Scheme.new(
+        primitives: %{
+          "hold" => fn [closure] ->
+            send(test, {:escaped, closure})
+
+            receive do
+              :release -> true
+            end
+          end
+        }
+      )
+      |> Scheme.flush()
+
+    eval =
+      Task.async(fn ->
+        Scheme.exec(interp, fn interp ->
+          Scheme.eval_string(interp, "(let ((n 41)) (hold (lambda () (+ n 1))))")
+        end)
+      end)
+
+    assert_receive {:escaped, closure}, 500
+
+    callback =
+      Task.async(fn -> Scheme.exec(interp, fn i -> Scheme.call(i, closure, []) end) end)
+
+    assert {:ok, 42, _} = Task.await(callback)
+    send(eval.pid, :release)
+    assert {:ok, true, _} = Task.await(eval)
+  end
+
   test "a result closure's frames survive the selective flush" do
     interp = Scheme.new() |> Scheme.flush()
 
@@ -92,5 +126,29 @@ defmodule Aimax.Scheme.GCTest do
 
     task = Task.async(fn -> Scheme.exec(interp, fn i -> Scheme.call(i, closure, []) end) end)
     assert {:ok, 7, _} = Task.await(task)
+  end
+
+  test "an interpreter snapshot has private mutable globals" do
+    interp = Scheme.new() |> Scheme.flush()
+
+    {:ok, _, interp} =
+      Scheme.exec(interp, fn interp -> Scheme.eval_string(interp, "(define isolated-value 1)") end)
+
+    snapshot = Scheme.snapshot(interp)
+
+    actor =
+      Task.async(fn ->
+        private = Scheme.from_snapshot(snapshot)
+
+        {:ok, _, private} =
+          Scheme.exec(private, fn private ->
+            Scheme.eval_string(private, "(set! isolated-value 2)")
+          end)
+
+        Scheme.exec(private, fn private -> Scheme.eval_string(private, "isolated-value") end)
+      end)
+
+    assert {:ok, 2, _} = Task.await(actor)
+    assert {:ok, 1, _} = Scheme.exec(interp, &Scheme.eval_string(&1, "isolated-value"))
   end
 end

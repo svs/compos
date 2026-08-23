@@ -3,6 +3,19 @@
 Paste this into a new session. Everything below was verified on
 `dcdc4e7`, in the test env (`MIX_TEST_PARTITION=1 MIX_ENV=test mix run`).
 
+## Resolution
+
+Fixed on the `codex/beam-scheme` worktree. Before a host primitive or a
+shared binding can expose a closure, the evaluator promotes that closure's
+reachable local frames into ETS and removes them from the local tier. Later
+mutation writes through to ETS, so another worker can invoke the callback
+before the registering eval returns.
+
+Reactor now also keeps one monitored task per rule, coalesces events while it
+runs, and restores the attempted batch on errors or task death. The regression
+coverage is in `on_change_test.exs`, `scheme_gc_test.exs`, and
+`single_actor_test.exs`.
+
 ## Summary
 
 `(on-change! BUF (lambda ...))` registers a handler. If that lambda

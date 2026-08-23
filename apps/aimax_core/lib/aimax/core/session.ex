@@ -19,7 +19,7 @@ defmodule Aimax.Core.Session do
 
   require Logger
 
-  alias Aimax.Core.{Buffer, Editor, Frame, Lane}
+  alias Aimax.Core.{Buffer, Editor, Frame, Lane, SchemeActor, SchemeTask}
   alias Aimax.Scheme
 
   @messages "*messages*"
@@ -106,12 +106,10 @@ defmodule Aimax.Core.Session do
   @doc """
   Apply a closure that has been waiting on a reply from outside the editor.
 
-  Such a closure escaped mid-eval and can come back before its frame reaches
-  the shared store, and the apply then fails with "stale environment frame"
-  (env.ex). That ref heals when the originating eval exits, so wait for it:
-  dropping the call loses the reply outright, and a chat never names itself.
-  Backend.call_context waits the same way. Only the slow, out-of-editor
-  replies pay this — an ordinary callback must still fail fast.
+  Closure frames are now published before exposure. Keep the bounded stale-ref
+  retry as defense for persisted references from an older or faulty root set:
+  dropping an out-of-editor reply loses it outright. Backend.call_context uses
+  the same defensive retry. Ordinary callbacks still fail fast.
   """
   def apply_reply_callback(closure, args, fid \\ nil, lane \\ nil, retries \\ 10) do
     result = apply_callback(closure, args, fid, lane)
@@ -144,6 +142,18 @@ defmodule Aimax.Core.Session do
       30_000,
       String.trim("call-fn #{label}")
     )
+  end
+
+  @doc "Apply a read-only closure in its own supervised shared-world process."
+  def call_fn_concurrent(closure, args, fid \\ nil, timeout \\ 30_000, label \\ "") do
+    case SchemeTask.call(closure, args, timeout,
+           fid: fid(fid),
+           buffer: Frame.buffer_context(),
+           label: String.trim("tool #{label}")
+         ) do
+      {:ok, value} -> {:ok, value}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   @doc """
@@ -647,6 +657,27 @@ defmodule Aimax.Core.Session do
       "primitive-docs" =>
         "(primitive-docs) — return (NAME DOC) pairs for every Elixir primitive, sorted.",
       "message" => "(message TEXT) — show TEXT in the echo area.",
+      "actor-spawn" =>
+        "(actor-spawn BEHAVIOR STATE) — start an isolated Scheme actor; BEHAVIOR returns (NEW-STATE REPLY).",
+      "actor-self" => "(actor-self) — return the current isolated actor, or #f.",
+      "actor-ref?" => "(actor-ref? VALUE) — return #t when VALUE is a Scheme actor reference.",
+      "actor-alive?" => "(actor-alive? ACTOR) — return #t when ACTOR is running.",
+      "actor-send!" => "(actor-send! ACTOR MESSAGE) — send a data message without waiting.",
+      "actor-call" =>
+        "(actor-call ACTOR MESSAGE [MS]) — send a data message and return its reply.",
+      "actor-after!" => "(actor-after! MS ACTOR MESSAGE) — send a data message after the delay.",
+      "actor-monitor!" =>
+        "(actor-monitor! OBSERVER TARGET TAG) — send (down TAG REASON) when TARGET stops.",
+      "actor-stop!" => "(actor-stop! ACTOR) — stop ACTOR and invalidate its reference.",
+      "task-spawn" =>
+        "(task-spawn THUNK) — run a zero-argument Scheme closure concurrently over the shared editor world.",
+      "task-run!" =>
+        "(task-run! THUNK CALLBACK [MS]) — run THUNK concurrently; later call CALLBACK with OK? and its value or error.",
+      "task-await" =>
+        "(task-await TASK [MS]) — wait for a Scheme task and return its value, or raise its error.",
+      "task-ref?" => "(task-ref? VALUE) — return #t when VALUE is a Scheme task reference.",
+      "task-alive?" => "(task-alive? TASK) — return #t while TASK remains available.",
+      "task-cancel!" => "(task-cancel! TASK) — stop a Scheme task.",
       "define-command" =>
         "(define-command NAME [DOC] FN) — register an M-x command; DOC shows in M-x.",
       "command-names" => "(command-names) — return every M-x command name.",
@@ -687,8 +718,7 @@ defmodule Aimax.Core.Session do
         "(mcp-await-ready SERVER [MS]) — wait until the server is ready; return #t or #f.",
       "mcp-tool-call" =>
         "(mcp-tool-call SERVER TOOL ARGS [TIMEOUT|CB]) — call one tool; without CB, wait for text.",
-      "lsp-start!" =>
-        "(lsp-start! NAME ROOT SPEC) — start a language server for a project root.",
+      "lsp-start!" => "(lsp-start! NAME ROOT SPEC) — start a language server for a project root.",
       "lsp-stop!" =>
         "(lsp-stop! ID) — stop the connection \"name@root\" with the shutdown handshake.",
       "lsp-connections" => "(lsp-connections) — return (id status name root) per connection.",
@@ -700,8 +730,7 @@ defmodule Aimax.Core.Session do
       "lsp-open!" => "(lsp-open! ID BUF) — open BUF on the server and keep it in sync.",
       "lsp-close!" => "(lsp-close! ID BUF) — close BUF on the server.",
       "lsp-notify!" => "(lsp-notify! ID METHOD PARAMS) — send a notification to the server.",
-      "lsp-request" =>
-        "(lsp-request ID METHOD PARAMS CB) — send a request; CB gets (OK RESULT).",
+      "lsp-request" => "(lsp-request ID METHOD PARAMS CB) — send a request; CB gets (OK RESULT).",
       "lsp-buffer-request" =>
         "(lsp-buffer-request ID METHOD BUF BYTE-POS [EXTRA] CB) — request at a buffer position; CB gets (OK RESULT).",
       "tool-specs-json" =>
@@ -792,6 +821,8 @@ defmodule Aimax.Core.Session do
         "(with-edit-author AUTHOR THUNK) — run THUNK; buffer edits it makes are attributed to the string AUTHOR.",
       "with-current-buffer" =>
         "(with-current-buffer BUF THUNK) — run THUNK with BUF current without displaying it or changing any window.",
+      "with-scheme-lock" =>
+        "(with-scheme-lock KEY THUNK) — run THUNK once at a time for KEY across Scheme processes.",
       "eval-string-safe" =>
         "(eval-string-safe SRC) — evaluate SRC; return (ok VAL) or (error MSG).",
       "wait-until" =>
@@ -847,6 +878,66 @@ defmodule Aimax.Core.Session do
       "message" => fn [text] ->
         message(to_string(text))
         :void
+      end,
+      "actor-spawn" => fn [behavior, initial_state], store ->
+        interp = %Scheme{store: store, global: global}
+
+        case SchemeActor.start(interp, behavior, initial_state) do
+          {:ok, ref} -> {ref, store}
+          {:error, reason} -> raise_scheme("actor-spawn: #{reason}")
+        end
+      end,
+      "actor-self" => fn [] -> SchemeActor.current() end,
+      "actor-ref?" => fn [value] -> SchemeActor.actor_ref?(value) end,
+      "actor-alive?" => fn [actor] -> SchemeActor.alive?(actor) end,
+      "actor-send!" => fn [actor, message] ->
+        case SchemeActor.cast(actor, message) do
+          :ok -> true
+          {:error, reason} -> raise_scheme("actor-send!: #{reason}")
+        end
+      end,
+      "actor-call" => fn
+        [actor, message] ->
+          actor_call(actor, message, 5_000)
+
+        [actor, message, timeout] ->
+          actor_call(actor, message, trunc(timeout))
+      end,
+      "actor-after!" => fn [milliseconds, actor, message] ->
+        case SchemeActor.deliver_after(actor, trunc(milliseconds), message) do
+          :ok -> true
+          {:error, reason} -> raise_scheme("actor-after!: #{reason}")
+        end
+      end,
+      "actor-monitor!" => fn [observer, target, tag] ->
+        case SchemeActor.monitor(observer, target, tag) do
+          :ok -> true
+          {:error, reason} -> raise_scheme("actor-monitor!: #{reason}")
+        end
+      end,
+      "actor-stop!" => fn [actor] ->
+        :ok = SchemeActor.stop(actor)
+        true
+      end,
+      "task-spawn" => fn [closure] ->
+        case SchemeTask.start(closure) do
+          {:ok, ref} -> ref
+          {:error, reason} -> raise_scheme("task-spawn: #{reason}")
+        end
+      end,
+      "task-run!" => fn
+        [closure, callback] -> scheme_task_run(closure, callback, 300_000)
+        [closure, callback, timeout] -> scheme_task_run(closure, callback, trunc(timeout))
+      end,
+      "task-await" => fn
+        [task] -> scheme_task_await(task, 30_000)
+        [task, timeout] -> scheme_task_await(task, trunc(timeout))
+      end,
+      "task-ref?" => fn [value] -> SchemeTask.task_ref?(value) end,
+      "task-alive?" => fn [task] -> SchemeTask.alive?(task) end,
+      "task-cancel!" => fn [task] ->
+        :ok = SchemeTask.cancel(task)
+        true
       end,
       "define-command" => fn
         [name, closure] ->
@@ -1693,6 +1784,19 @@ defmodule Aimax.Core.Session do
           Aimax.Scheme.Eval.apply_fn(thunk, [], store)
         end)
       end,
+      # Scheme tasks share global bindings. This narrow lock lets Scheme
+      # publish an expensive derived value once after shared source changes.
+      # The process identity keeps :global's requester identity distinct.
+      "with-scheme-lock" => fn [key, thunk], store ->
+        lock = {{__MODULE__, :scheme_lock, key}, self()}
+
+        :global.trans(lock, fn ->
+          # A waiting eval can hold shared reads from before the lock. Refresh
+          # them so the critical section sees the previous owner's writes.
+          Aimax.Scheme.Env.forget_cached_reads()
+          Aimax.Scheme.Eval.apply_fn(thunk, [], store)
+        end)
+      end,
       # (wait-until PRED &optional TIMEOUT-MS INTERVAL-MS) -> #t | #f
       #
       # Wait for work that is not on this lane: a subprocess handshake, a
@@ -1930,6 +2034,7 @@ defmodule Aimax.Core.Session do
             {:scheme_debounce, key, generation},
             trunc(ms)
           )
+
         :ets.insert(@escaped, {key, {generation, timer, callback, arg, Frame.current()}})
         :void
       end,
@@ -2097,6 +2202,58 @@ defmodule Aimax.Core.Session do
 
   defp raise_scheme(msg), do: raise(Aimax.Scheme.Eval.Error, message: msg)
 
+  defp actor_call(actor, message, timeout) do
+    case SchemeActor.call(actor, message, timeout) do
+      {:ok, reply} -> reply
+      {:error, reason} -> raise_scheme("actor-call: #{reason}")
+    end
+  end
+
+  defp scheme_task_await(task, timeout) do
+    case SchemeTask.await(task, timeout) do
+      {:ok, value} -> value
+      {:error, reason} -> raise_scheme("task-await: #{reason}")
+    end
+  end
+
+  defp scheme_task_run(closure, callback, timeout) do
+    case SchemeTask.start(closure) do
+      {:ok, task} ->
+        key = {:scheme_task_callback, task.id}
+        :ets.insert(@escaped, {key, callback})
+        fid = Frame.current()
+        lane = Lane.current() || :ui
+
+        case Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
+               result = SchemeTask.await(task, timeout)
+
+               args =
+                 case result do
+                   {:ok, value} -> [true, value]
+                   {:error, reason} -> [false, reason]
+                 end
+
+               try do
+                 apply_callback(callback, args, fid, lane)
+               after
+                 :ets.delete(@escaped, key)
+                 SchemeTask.cancel(task)
+               end
+             end) do
+          {:ok, _pid} ->
+            task
+
+          {:error, reason} ->
+            :ets.delete(@escaped, key)
+            SchemeTask.cancel(task)
+            raise_scheme("task-run!: #{inspect(reason)}")
+        end
+
+      {:error, reason} ->
+        raise_scheme("task-run!: #{reason}")
+    end
+  end
+
   # ('cmd "claude-code-acp" 'cwd "/x") -> %{"cmd" => "...", "cwd" => "/x"}
   # Duplicate keys: FIRST wins, matching scheme's plist-get (configs are
   # built by prepending overrides) — Map.new alone would keep the last.
@@ -2125,8 +2282,12 @@ defmodule Aimax.Core.Session do
     {value, store} = Aimax.Scheme.Eval.apply_fn(pred, [], store)
 
     cond do
-      value != false -> {true, store}
-      System.monotonic_time(:millisecond) >= deadline -> {false, store}
+      value != false ->
+        {true, store}
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        {false, store}
+
       true ->
         Process.sleep(interval)
         # reads of shared frames are cached per process and cleared once

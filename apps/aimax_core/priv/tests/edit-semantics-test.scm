@@ -26,15 +26,15 @@
       (t--drop-edit!))))
 
 (deftest 'replace-all-is-one-pass
-  "one delete and one insert, whatever the number of hits, so two undos
-   put the text back"
+  "one atomic replacement, whatever the number of hits, so one undo
+   puts the text back"
   (lambda ()
     (let ((buf (t--edit-buffer "a a a\n")))
       (buffer-replace-all! buf "a" "X")
       (check-equal! (buffer-text buf) "X X X\n" "the pass landed")
       (with-current-buffer buf
-        (lambda () (run-command "undo") (run-command "undo")))
-      (check-equal! (buffer-text buf) "a a a\n" "two undos restore the text")
+        (lambda () (run-command "undo")))
+      (check-equal! (buffer-text buf) "a a a\n" "one undo restores the text")
       (t--drop-edit!))))
 
 (deftest 'insert-before-and-after-place-text-around-an-anchor

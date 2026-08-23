@@ -103,11 +103,9 @@ defmodule Aimax.Core.Agent.Backend do
     end
   end
 
-  # The context call is cross-lane: the eval that created a closure it
-  # touches may still be running, so its frames are not yet flushed to the
-  # shared store ("stale environment frame", env.ex). The ref heals when
-  # that eval exits — and reading the context is idempotent — so wait and
-  # retry instead of failing the turn.
+  # Closure frames publish before cross-lane exposure. Retain a bounded retry
+  # for persisted references from an older or faulty root set; reading context
+  # is idempotent, so retrying is safer than dropping the turn.
   defp call_context(fun, slug, display, retries) do
     result =
       Aimax.Core.Session.call_fn(

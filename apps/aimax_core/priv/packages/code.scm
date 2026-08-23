@@ -832,10 +832,9 @@
     (lambda (n)
       (let ((start (code--start n))
             (kind (code--kind n)))
-        ;; delete then insert at the same offset: one definition swapped
-        ;; for another, with no exact-string match to get wrong
-        (buffer-delete-range! buf start (- (code--end n) start))
-        (buffer-insert! buf start new)
+        ;; One buffer message: parallel readers see the old definition or
+        ;; the new one, never the empty interval between delete and insert.
+        (buffer-replace-range! buf start (- (code--end n) start) new)
         (string-append "replaced the " kind " at line " (number->string line))))))
 
 ;;; --- sexp selection: the smallest expression around a text anchor -------------
@@ -876,8 +875,7 @@
         (if (string? n)
             n
             (let ((start (code--start n)))
-              (buffer-delete-range! buf start (- (code--end n) start))
-              (buffer-insert! buf start new)
+              (buffer-replace-range! buf start (- (code--end n) start) new)
               (string-append "replaced the " (code--kind n))))))))
 
 (effects! '(read))
@@ -889,6 +887,23 @@
   "(code-read BUF LINE) — the exact text of the definition that holds LINE")
 (public! 'code-sexp
   "(code-sexp BUF ANCHOR [LEVELS]) — the smallest expression that spans the unique ANCHOR text; LEVELS parents widen it")
+
+(define-tool! 'code-outline
+  "List every definition in a live source buffer as (LINE KIND NAME DOC). Use this before code-read; independent read tools can run concurrently."
+  (list (list 'buffer "string" "live source buffer name"))
+  (lambda (args)
+    (value->string (code-outline (custom--plist-get args 'buffer))))
+  '(read))
+
+(define-tool! 'code-read
+  "Read the complete definition holding LINE in a live source buffer. Obtain LINE from code-outline."
+  (list (list 'buffer "string" "live source buffer name")
+        (list 'line "number" "1-based line from code-outline"))
+  (lambda (args)
+    (code-read (custom--plist-get args 'buffer)
+               (custom--plist-get args 'line)))
+  '(read))
+
 (effects! '(write))
 (public! 'code-replace!
   "(code-replace! BUF LINE NEW) — replace the whole definition that holds LINE")

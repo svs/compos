@@ -82,6 +82,30 @@
 (define (chat-turn-push! buf role text)
   (chat-record-push! buf role (list (list "text" text)) #f))
 
+;;; --- parallel agent work -------------------------------------------------------
+;;; The runtime supplies cheap shared-world Scheme tasks. Chat chooses the
+;;; useful policy: fan out at most four jobs, await them in input order, then
+;;; move to the next batch. A task can use the normal agent tool path — apropos,
+;;; code-read and buffer edits — and each target buffer remains its own serial
+;;; authority.
+
+(define (chat--parallel-batch f xs)
+  (let* ((tasks (map (lambda (x) (task-spawn (lambda () (f x)))) xs))
+         (values (map task-await tasks)))
+    (for-each task-cancel! tasks)
+    values))
+
+(define (chat-parallel-map f xs)
+  (let loop ((remaining xs) (out '()))
+    (if (null? remaining)
+        out
+        (let ((batch (chat-take remaining 4)))
+          (loop (chat-drop remaining 4)
+                (append out (chat--parallel-batch f batch)))))))
+
+(public! 'chat-parallel-map
+  "(chat-parallel-map FN ITEMS) — apply FN in up to four concurrent shared-world Scheme tasks; return results in input order")
+
 ;; Backends that do NOT write the record themselves get it from the event
 ;; stream instead: an ACP adapter runs its turn in a subprocess, and its
 ;; events are all we see. A stateless backend replays the record, so it

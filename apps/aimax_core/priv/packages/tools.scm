@@ -24,7 +24,8 @@
 ;; and *permission-policy* reads it from there.
 (define (define-tool! name description params handler &optional effects)
   (set! *llm-tools*
-    (cons (list name (list 'description description 'params params 'handler handler))
+    (cons (list name (list 'description description 'params params 'handler handler
+                           'effects (or effects '(unknown))))
           (remove (lambda (t) (equal? (car t) name)) *llm-tools*)))
   (if effects
       (catalog-register! 'tool name description 'effects effects)
@@ -35,7 +36,8 @@
   (map (lambda (t)
          (list (symbol->string (car t))
                (custom--plist-get (cadr t) 'description)
-               (custom--plist-get (cadr t) 'params)))
+               (custom--plist-get (cadr t) 'params)
+               (custom--plist-get (cadr t) 'effects)))
        (reverse *llm-tools*)))
 
 (define (llm-tool-call name args)
@@ -95,6 +97,8 @@
     "(code-sexp-replace! BUF ANCHOR NEW) replaces it; an optional LEVELS "
     "argument widens the selection by parents. Do not call buffer-text on "
     "a whole source file when the outline answers the question. "
+    "When several independent read tools are needed, issue up to four in "
+    "the same tool round; the editor evaluates read-only tools concurrently. "
     "Run a focused external check directly with "
     "(shell-command->string CMD (default-directory)); it returns stdout and "
     "stderr together. Use an interactive shell buffer only when the task "
@@ -299,23 +303,44 @@
 
 ;; A component answers to its qualified name, and the bucket must still
 ;; find it: "ui/card" and "card" both bucket under "c".
-;; apropos binds this for the span of one search. recipes.scm also calls
-;; apropos--enrich, and it gets #f here and the linear walk, unchanged.
-(define *apropos--index* #f)
-
 ;; Building the index costs more than a narrow search does: 245ms against
 ;; a 1275 entry catalog, paid on every call. The catalog only changes when
 ;; a package registers something, so keep the index and rebuild it when
 ;; the generation moves.
 (define *apropos--index-cache* #f)
 (define *apropos--index-gen* -1)
+(define *apropos--rows-cache* #f)
+(define *apropos--rows-gen* -1)
+
+(define (apropos--ensure-index! gen)
+  (unless (and *apropos--index-cache* (equal? gen *apropos--index-gen*))
+    (set! *apropos--index-cache* (apropos--index))
+    (set! *apropos--index-gen* gen))
+  *apropos--index-cache*)
 
 (define (apropos--index-cached)
   (let ((gen (catalog-generation)))
-    (unless (and *apropos--index-cache* (equal? gen *apropos--index-gen*))
-      (set! *apropos--index-cache* (apropos--index))
-      (set! *apropos--index-gen* gen))
-    *apropos--index-cache*))
+    (if (and *apropos--index-cache* (equal? gen *apropos--index-gen*))
+        *apropos--index-cache*
+        (with-scheme-lock 'apropos-cache
+          (lambda () (apropos--ensure-index! (catalog-generation)))))))
+
+;; Search used to rebuild names, docs, metadata plists, and lowercase strings
+;; on every query. Publish those rows once for the catalog generation instead:
+;; each query then performs only word checks and ranking over immutable data.
+(define (apropos--rows-cached)
+  (let ((gen (catalog-generation)))
+    (if (and *apropos--rows-cache* (equal? gen *apropos--rows-gen*))
+        *apropos--rows-cache*
+        (with-scheme-lock 'apropos-cache
+          (lambda ()
+            (let ((locked-gen (catalog-generation)))
+              (unless (and *apropos--rows-cache*
+                           (equal? locked-gen *apropos--rows-gen*))
+                (let ((index (apropos--ensure-index! locked-gen)))
+                  (set! *apropos--rows-cache* (apropos--rows index))
+                  (set! *apropos--rows-gen* locked-gen)))
+              *apropos--rows-cache*))))))
 
 (define (apropos--bucket-key name)
   (let* ((n (catalog--string (or name "")))
@@ -395,25 +420,26 @@
             ((string-contains? h (car ws)) (loop (cdr ws)))
             (else #f)))))
 
-(define (apropos--fn e words)
+(define (apropos--fn e words index)
   (and (apropos--hit? (string-append (car e) " " (nth 1 e) " " (nth 2 e) " "
                                      (symbol->string (nth 3 e)))
                       words)
        (apropos--enrich
          (list 'kind "function" 'name (car e) 'sig (nth 2 e)
                'doc (nth 1 e) 'domain (symbol->string (nth 3 e))
-               'category (symbol->string (nth 3 e))))))
+               'category (symbol->string (nth 3 e))) #f index)))
 
-(define (apropos--command n words)
+(define (apropos--command n words index)
   (let ((doc (command-doc n)))
     (and (apropos--hit? (string-append n " " doc) words)
          (apropos--enrich
            (list 'kind "command" 'name n 'doc doc
-                 'key (let ((k (key-for-command n))) (if (equal? k "") #f k)))))))
+                 'key (let ((k (key-for-command n))) (if (equal? k "") #f k)))
+           #f index))))
 
-(define (apropos--key row words)
+(define (apropos--key row words index)
   (and (apropos--hit? (string-append (car row) " " (nth 1 row)) words)
-       (let ((cmd (apropos--lookup *apropos--index* 'command (nth 1 row))))
+       (let ((cmd (apropos--lookup index 'command (nth 1 row))))
          (append (list 'kind "key" 'name (car row) 'runs (nth 1 row)
                        'domain "keys" 'effects
                        (if cmd (plist-get cmd 'effects) '("read")))
@@ -422,21 +448,21 @@
                            'namespace (plist-get cmd 'namespace))
                      '())))))
 
-(define (apropos--var v words)
+(define (apropos--var v words index)
   (let* ((rec (cadr v))
          (name (symbol->string (car v)))
          (doc (or (custom--plist-get rec 'doc) "")))
     (and (apropos--hit? (string-append name " " doc) words)
          (apropos--enrich (list 'kind "variable" 'name name 'doc doc)
-                          "setting"))))
+                          "setting" index))))
 
 (define (apropos--compact xs) (filter (lambda (x) x) xs))
 
-(define (apropos--enrich hit &optional catalog-kind)
+(define (apropos--enrich hit &optional catalog-kind index)
   (let* ((kind (or catalog-kind (plist-get hit 'kind)))
          (name (or (and (equal? kind "component") (plist-get hit 'qualified-name))
                    (plist-get hit 'name) (plist-get hit 'task)))
-         (e (and name (apropos--lookup *apropos--index*
+         (e (and name (apropos--lookup index
                                        (string->symbol kind) name))))
     (if (not e) hit (append hit e))))
 
@@ -463,6 +489,30 @@
                           (value->string (or (catalog--get e 'example) '())))
            words)
          e)))
+
+;; One row is (LOWERCASED-SEARCH-TEXT HIT). The original registry order is
+;; retained because it is the stable fallback order after ranking buckets.
+(define (apropos--rows index)
+  (let ((hits
+          (append
+            (apropos--compact
+              (map (lambda (e) (apropos--fn e '() index)) (public-api)))
+            (apropos--compact
+              (map (lambda (n) (apropos--command n '() index)) (command-names)))
+            (apropos--compact
+              (map (lambda (r) (apropos--key r '() index)) (global-keys)))
+            (apropos--compact
+              (map (lambda (v) (apropos--var v '() index)) *custom-vars*))
+            (apropos--compact
+              (map (lambda (e) (apropos--catalog-entry e '())) (catalog))))))
+    (map (lambda (hit) (list (string-downcase (value->string hit)) hit)) hits)))
+
+(define (apropos--row-hit? row words)
+  (let ((hay (car row)))
+    (let loop ((ws words))
+      (cond ((null? ws) #t)
+            ((string-contains? hay (car ws)) (loop (cdr ws)))
+            (else #f)))))
 
 (define (apropos--filter filters key)
   (or (plist-get filters key)
@@ -523,21 +573,17 @@
 ;; Recipes come first: a task-level hit beats four name-level ones, and it
 ;; is the answer the caller actually wanted.
 (define (apropos query &rest filters)
-  (set! *apropos--index* (apropos--index-cached))
-  (let ((result (apropos--search query filters)))
-    (set! *apropos--index* #f)
-    result))
+  ;; Build rows first. Their single-flight refresh also publishes the index.
+  ;; The next lookup is then a cheap read of the same catalog generation.
+  (let ((rows (apropos--rows-cached)))
+    (apropos--search query filters (apropos--index-cached) rows)))
 
-(define (apropos--search query filters)
+(define (apropos--search query filters index rows)
   (let* ((words (apropos--words query))
          (hits (append
                  (if (boundp (quote recipe-search)) (recipe-search query) '())
-                 (apropos--compact (map (lambda (e) (apropos--fn e words)) (public-api)))
-                 (apropos--compact (map (lambda (n) (apropos--command n words)) (command-names)))
-                 (apropos--compact (map (lambda (r) (apropos--key r words)) (global-keys)))
-                 (apropos--compact (map (lambda (v) (apropos--var v words)) *custom-vars*))
-                 (apropos--compact (map (lambda (e) (apropos--catalog-entry e words))
-                                        (catalog)))))
+                 (map (lambda (row) (car (cdr row)))
+                      (filter (lambda (row) (apropos--row-hit? row words)) rows))))
          (filtered (filter (lambda (h) (apropos--filter-match? h filters)) hits)))
     (if (or (pair? filtered) (null? words) (pair? filters))
         (apropos--rank filtered query)
@@ -546,7 +592,8 @@
                (apropos--enrich
                  (list 'kind "function" 'name (car e) 'sig (nth 2 e) 'doc (nth 1 e)
                        'domain (symbol->string (nth 3 e))
-                       'category (symbol->string (nth 3 e)) 'note "closest name")))
+                       'category (symbol->string (nth 3 e)) 'note "closest name")
+                 #f index))
              (tool--suggest (string-trim query))))))
 
 ;; everything in one category — the shape of the API, not a search of it
@@ -711,6 +758,14 @@
   "(read-file-numbered PATH) — read source text files with stable line numbers for exact citations")
 (catalog-meta! 'function "read-file-numbered" 'domain 'discovery 'effects '(read))
 
+(define-tool! 'read-file
+  "Read one source file with stable line numbers for exact citations. Independent read-file, apropos, describe-function, code-outline, and code-read calls can be issued together and run concurrently."
+  (list (list 'path "string" "absolute or workspace-relative source file path"))
+  (lambda (args)
+    (let ((result (read-file-numbered (custom--plist-get args 'path))))
+      (if result result "error: file does not exist or cannot be read")))
+  '(read))
+
 
 (domain! 'buffers)
 (effects! '(write))
@@ -722,8 +777,7 @@
     (if (string? pos)
         pos
         (begin
-          (buffer-delete-range! b pos (string-byte-length old))
-          (buffer-insert! b pos new)
+          (buffer-replace-range! b pos (string-byte-length old) new)
           "edited"))))
 
 ;;; --- the rest of edit-file semantics ------------------------------------------
@@ -759,12 +813,12 @@
             (if (= hits 0)
                 "error: old text not found — read the buffer and copy it exactly"
                 (begin
-                  ;; one delete and one insert, whatever the number of hits:
-                  ;; the change hooks see one pass instead of one per
-                  ;; occurrence. It is the shape buffer-replace! has, so it
-                  ;; takes the same two undos to put back.
-                  (buffer-delete-range! b 0 (string-byte-length text))
-                  (buffer-insert! b 0 (string-join (string-split text old) new))
+                  ;; One buffer message, whatever the number of hits: another
+                  ;; Scheme evaluator cannot observe the delete half of a
+                  ;; replacement or interleave an edit between the halves.
+                  (buffer-replace-range!
+                    b 0 (string-byte-length text)
+                    (string-join (string-split text old) new))
                   (string-append "replaced " (number->string hits)
                                  (if (= hits 1) " occurrence" " occurrences"))))))))
 

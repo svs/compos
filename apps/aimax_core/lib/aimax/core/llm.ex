@@ -109,7 +109,13 @@ defmodule Aimax.Core.LLM do
   """
   def run_tool_loop(messages, system, specs, dispatcher, opts \\ []) do
     tools = Enum.map(specs, &tool_json/1)
-    tool_loop(messages, system, tools, dispatcher, 0, %{}, Map.new(opts))
+
+    opts =
+      opts
+      |> Map.new()
+      |> Map.put(:tool_effects, tool_effects(specs))
+
+    tool_loop(messages, system, tools, dispatcher, 0, %{}, opts)
   end
 
   defp deliver_usage(usage, on_usage) do
@@ -133,27 +139,7 @@ defmodule Aimax.Core.LLM do
       {:ok, %{"stop_reason" => "tool_use", "content" => blocks} = resp} ->
         emit_unstreamed_text(resp, opts)
 
-        results =
-          for %{"type" => "tool_use"} = b <- blocks do
-            if opts[:on_tool], do: opts[:on_tool].(b["id"], b["name"], b["input"])
-
-            {result, error?} =
-              case gate_call(opts[:gate], b["name"], b["input"]) do
-                :allow ->
-                  case intrinsic_tool(opts[:tool_handler], b["name"], b["input"]) do
-                    :dispatch -> run_tool(dispatcher, b["name"], b["input"])
-                    {:ok, text} -> {to_string(text), false}
-                    {:error, text} -> {"error: #{text}", true}
-                  end
-
-                {:deny, why} ->
-                  {"permission denied: #{why}", true}
-              end
-
-            if opts[:on_tool_done], do: opts[:on_tool_done].(b["id"], result)
-
-            %{type: "tool_result", tool_use_id: b["id"], content: result, is_error: error?}
-          end
+        results = run_tool_blocks(blocks, dispatcher, opts)
 
         # text steered in mid-turn rides the same user message as the tool
         # results, after them — and the record below keeps the merged turn,
@@ -186,6 +172,90 @@ defmodule Aimax.Core.LLM do
 
   defp stop_of(%{"stop_reason" => r}) when is_binary(r), do: r
   defp stop_of(_), do: "end_turn"
+
+  # A model can return several independent tool_use blocks in one round.
+  # Read-only Scheme handlers run as structured BEAM tasks, bounded per turn;
+  # any write/unknown call keeps the whole round on the serial dispatcher.
+  # The conservative all-read rule makes mixed rounds an ordering barrier.
+  defp run_tool_blocks(blocks, dispatcher, opts) do
+    calls = for %{"type" => "tool_use"} = block <- blocks, do: block
+
+    if length(calls) > 1 and Enum.all?(calls, &read_tool?(&1, opts)) do
+      Enum.each(calls, &tool_started(&1, opts))
+
+      max_concurrency = Application.get_env(:aimax_core, :scheme_read_concurrency, 4)
+
+      calls
+      |> Task.async_stream(
+        &tool_result(&1, dispatcher, opts, true, false),
+        max_concurrency: max(1, max_concurrency),
+        ordered: true,
+        timeout: 35_000,
+        on_timeout: :kill_task
+      )
+      |> Enum.zip(calls)
+      |> Enum.map(fn
+        {{:ok, result}, _call} ->
+          result
+
+        {{:exit, reason}, call} ->
+          text = "error: concurrent tool failed: #{inspect(reason)}"
+          tool_finished(call, text, opts)
+          tool_result_block(call, text, true)
+      end)
+    else
+      Enum.map(calls, &tool_result(&1, dispatcher, opts, false, true))
+    end
+  end
+
+  defp tool_result(call, dispatcher, opts, concurrent?, emit_start?) do
+    if emit_start?, do: tool_started(call, opts)
+
+    {result, error?} =
+      case gate_call(opts[:gate], call["name"], call["input"]) do
+        :allow ->
+          case intrinsic_tool(opts[:tool_handler], call["name"], call["input"]) do
+            :dispatch -> run_tool(dispatcher, call["name"], call["input"], concurrent?)
+            {:ok, text} -> {to_string(text), false}
+            {:error, text} -> {"error: #{text}", true}
+          end
+
+        {:deny, why} ->
+          {"permission denied: #{why}", true}
+      end
+
+    tool_finished(call, result, opts)
+    tool_result_block(call, result, error?)
+  end
+
+  defp tool_started(call, opts) do
+    if opts[:on_tool], do: opts[:on_tool].(call["id"], call["name"], call["input"])
+  end
+
+  defp tool_finished(call, result, opts) do
+    if opts[:on_tool_done], do: opts[:on_tool_done].(call["id"], result)
+  end
+
+  defp tool_result_block(call, result, error?) do
+    %{type: "tool_result", tool_use_id: call["id"], content: result, is_error: error?}
+  end
+
+  defp read_tool?(call, opts) do
+    case Map.get(opts[:tool_effects], call["name"], []) do
+      [level | _] when level in ["pure", "read"] -> true
+      _ -> false
+    end
+  end
+
+  defp tool_effects(specs) do
+    Map.new(specs, fn
+      [name, _description, _params, effects] ->
+        {plain(name), Enum.map(List.wrap(effects), &plain/1)}
+
+      [name, _description, _params] ->
+        {plain(name), []}
+    end)
+  end
 
   # The running total, after every round. A turn that is cancelled or that
   # dies mid-loop still spent what it spent: the caller holds this figure
@@ -246,7 +316,7 @@ defmodule Aimax.Core.LLM do
   # web fetch inside Session.call_fn would block every keystroke.
   # Returns {result-text, error?}: the wire marks a failed tool result, and
   # the record keeps the mark.
-  defp run_tool(_dispatcher, "mcp__" <> _ = name, input) do
+  defp run_tool(_dispatcher, "mcp__" <> _ = name, input, _concurrent?) do
     Session.message("tool: #{name} #{inspect(input)}")
 
     case Aimax.Core.MCP.call_qualified(name, input) do
@@ -255,12 +325,25 @@ defmodule Aimax.Core.LLM do
     end
   end
 
-  defp run_tool(dispatcher, name, input) do
+  defp run_tool(dispatcher, name, input, concurrent?) do
     Session.message("tool: #{name} #{inspect(input)}")
 
     # the tool loop's own lane: a slow Scheme tool holds this loop, not
     # the UI — self() is the loop task, so each loop serializes alone
-    case Session.call_fn(dispatcher, [name, json_to_scheme(input)], nil, {:llm, self()}, "tool #{name}") do
+    result =
+      if concurrent? do
+        Session.call_fn_concurrent(dispatcher, [name, json_to_scheme(input)], nil, 30_000, name)
+      else
+        Session.call_fn(
+          dispatcher,
+          [name, json_to_scheme(input)],
+          nil,
+          {:llm, self()},
+          "tool #{name}"
+        )
+      end
+
+    case result do
       {:ok, v} when is_binary(v) -> {v, false}
       {:ok, v} -> {Aimax.Scheme.Printer.print(v), false}
       {:error, msg} -> {"error: #{msg}", true}
@@ -284,6 +367,12 @@ defmodule Aimax.Core.LLM do
   to external ACP agents.
   """
   # MCP-bridged tools carry their original JSON schema verbatim
+  def tool_json([name, description, schema, _effects]) when is_binary(schema),
+    do: %{name: plain(name), description: description, input_schema: Jason.decode!(schema)}
+
+  def tool_json([name, description, params, _effects]),
+    do: tool_json([name, description, params])
+
   def tool_json([name, description, schema]) when is_binary(schema),
     do: %{name: plain(name), description: description, input_schema: Jason.decode!(schema)}
 

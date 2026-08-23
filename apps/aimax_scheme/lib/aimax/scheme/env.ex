@@ -11,9 +11,9 @@ defmodule Aimax.Scheme.Env do
 
     * During an eval, new frames live in `local` — a plain map threaded
       through evaluation, exactly the old single-process store.
-    * At eval exit the runner flushes `local` to the ETS table in one
-      bulk insert (`flush/1`): closures that escaped into command tables,
-      handlers, and buffer locals now resolve from any process.
+    * Before a host primitive or shared write exposes a closure, its reachable
+      frames move to ETS. The exit flush keeps returned closures and drops
+      unreferenced local frames.
     * `define`/`set!` on a frame that is already shared (not in `local`)
       writes through to ETS at once — a global define is visible to
       every lane mid-eval.
@@ -23,10 +23,9 @@ defmodule Aimax.Scheme.Env do
   never clobber each other. Closures capture a frame ref, not a
   snapshot; `set!` semantics hold, now across processes too.
 
-  A closure can escape mid-eval (define-command, then a long tail) — a
-  cross-lane call in that window sees a frame not yet flushed and gets a
-  "stale environment frame" Scheme error, not a crash; the ref heals at
-  flush. Serial use per lane never observes this.
+  A stale reference can still be detected after invalid external input or a
+  faulty root set, but ordinary closure publication is complete before the
+  closure becomes visible to another process.
   """
 
   defstruct [:tid, local: %{}]
@@ -35,16 +34,34 @@ defmodule Aimax.Scheme.Env do
     defexception [:message]
   end
 
-  def new do
+  def new(access \\ :public) when access in [:public, :protected, :private] do
     %__MODULE__{
       tid:
         :ets.new(:aimax_scheme_env, [
           :ordered_set,
-          :public,
+          access,
           read_concurrency: true,
           write_concurrency: true
         ])
     }
+  end
+
+  @doc "Copyable shared rows without GC lock metadata."
+  def export_shared(%__MODULE__{tid: tid}) do
+    tid
+    |> :ets.tab2list()
+    |> Enum.filter(fn
+      {{:frame, _ref}, _parent} -> true
+      {{:var, _ref, _name}, _value} -> true
+      _ -> false
+    end)
+  end
+
+  @doc "Build an environment from rows exported by export_shared/1."
+  def import_shared(rows, access \\ :private) do
+    store = new(access)
+    if rows != [], do: :ets.insert(store.tid, rows)
+    store
   end
 
   @doc "Create a frame; returns {ref, store}."
@@ -129,11 +146,11 @@ defmodule Aimax.Scheme.Env do
 
       _ ->
         # shared frame: write through, visible to every lane at once.
-        # The value escapes this exec's local tier by definition.
+        # Publish captured frames before the value becomes visible.
+        store = promote(store, [val])
         shared_parent(tid, ref)
         :ets.insert(tid, {{:var, ref, name}, val})
         cache_put(ref, name, val)
-        note_escape(val)
         store
     end
   end
@@ -165,9 +182,9 @@ defmodule Aimax.Scheme.Env do
       _ ->
         cond do
           :ets.member(tid, {:var, ref, name}) ->
+            store = promote(store, [val])
             :ets.insert(tid, {{:var, ref, name}, val})
             cache_put(ref, name, val)
-            note_escape(val)
             store
 
           (p = shared_parent(tid, ref)) != nil ->
@@ -197,11 +214,10 @@ defmodule Aimax.Scheme.Env do
   @doc """
   Publish only the local frames that escaped this exec, and drop the
   rest. A frame escapes when a closure that captures it leaves Scheme:
-  in the result (ROOTS), as an argument to a primitive, or written
-  through to a shared frame — the last two are noted per-process by
-  `note_escape/1` while the exec runs. Everything else is a dead `let`
-  or call frame: publishing it was the store leak (millions of dead
-  frames), and the bulk ETS copy froze the lane for seconds.
+  the runner supplies the result as ROOTS. Primitive arguments and shared
+  writes promote captured frames before they become visible. Everything
+  else is a dead `let` or call frame: publishing it was the store leak
+  (millions of dead frames), and the bulk ETS copy froze the lane for seconds.
 
   The runner calls this at eval exit, inside the in-flight section —
   never after it, or a sweep could run between the eval and its escape
@@ -211,7 +227,7 @@ defmodule Aimax.Scheme.Env do
     if map_size(local) == 0 do
       store
     else
-      work = Enum.reduce(roots, Process.get(:scheme_escapes) || [], &closure_refs/2)
+      work = Enum.reduce(roots, [], &closure_refs/2)
       seen = flush_mark(local, work, MapSet.new())
 
       rows =
@@ -226,6 +242,40 @@ defmodule Aimax.Scheme.Env do
       if rows != [], do: :ets.insert(tid, rows)
       %{store | local: %{}}
     end
+  end
+
+  @doc """
+  Publish the local frames reachable from ROOTS now.
+
+  The promoted frames leave the local tier. Later reads and writes use ETS,
+  so another process can invoke an escaped closure before this eval exits.
+  Other local frames stay private and keep the hot path unchanged.
+  """
+  def promote(%__MODULE__{local: local} = store, roots) when is_list(roots) do
+    if map_size(local) == 0 do
+      store
+    else
+      work = Enum.reduce(roots, [], &closure_refs/2)
+      seen = flush_mark(local, work, MapSet.new())
+      publish_marked(store, seen)
+    end
+  end
+
+  defp publish_marked(%__MODULE__{tid: tid, local: local} = store, seen) do
+    rows =
+      Enum.flat_map(seen, fn ref ->
+        case local do
+          %{^ref => {vars, parent}} ->
+            [{{:frame, ref}, parent} | Enum.map(vars, fn {n, v} -> {{:var, ref, n}, v} end)]
+
+          _ ->
+            []
+        end
+      end)
+
+    if rows != [], do: :ets.insert(tid, rows)
+
+    %{store | local: Map.drop(local, MapSet.to_list(seen))}
   end
 
   # mark restricted to the local tier: a ref not in `local` is shared
@@ -246,19 +296,6 @@ defmodule Aimax.Scheme.Env do
         work = Enum.reduce(vars, work, fn {_n, v}, a -> closure_refs(v, a) end)
         flush_mark(local, work, MapSet.put(seen, ref))
     end
-  end
-
-  @doc """
-  Record a value's closure refs as escaped from the running exec, so the
-  selective flush publishes their frames. A no-op outside an exec.
-  """
-  def note_escape(val) do
-    case Process.get(:scheme_escapes) do
-      nil -> :ok
-      acc -> Process.put(:scheme_escapes, closure_refs(val, acc))
-    end
-
-    :ok
   end
 
   @doc "Deep-scan a term for closures, accumulating their captured frame refs."
@@ -343,17 +380,11 @@ defmodule Aimax.Scheme.Env do
     # a fresh read cache per exec: another lane's writes land here, and a
     # sweep between execs cannot leave a stale cached frame behind
     outer = Process.put(:scheme_cache, %{})
-    # the escape log the selective flush reads; nested execs get their own
-    outer_esc = Process.put(:scheme_escapes, [])
 
     try do
       fun.()
     after
       if outer, do: Process.put(:scheme_cache, outer), else: Process.delete(:scheme_cache)
-
-      if outer_esc,
-        do: Process.put(:scheme_escapes, outer_esc),
-        else: Process.delete(:scheme_escapes)
 
       case :ets.update_counter(tid, {:eval, self()}, -1, {{:eval, self()}, 0}) do
         n when n <= 0 -> :ets.delete(tid, {:eval, self()})

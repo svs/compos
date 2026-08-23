@@ -28,12 +28,15 @@ apps/aimax_rpc       JSON-RPC over ~/.aimax/sock ("eval is the API")
 ```
 
 ### aimax_scheme
-R7RS-subset interpreter. Values **are** BEAM terms; closures are funs; TCO from
+R7RS-subset interpreter. Values **are** BEAM terms; closures are Scheme values;
+TCO comes from
 the BEAM. Symbols are `{:sym, name}` — never atoms (user code must not grow the
 atom table). Host primitives are plain Elixir funs, `fun/1` (args) or `fun/2`
 (args + interpreter store, for callbacks into Scheme).
 
-Known debt: env frames are never collected — long sessions grow.
+Environment frames are reachability-collected. A closure exposed to a host
+primitive or shared binding is published immediately, before the primitive can
+dispatch it to another worker.
 
 ### aimax_core
 - **Buffer** — one GenServer per buffer: rope, point/mark, buffer-local vars,
@@ -64,7 +67,19 @@ Known debt: env frames are never collected — long sessions grow.
   popup → buffer keymap; breaks the undo chain for non-undo commands.
 - **Session** — owns the Scheme interpreter; loads `priv/*.scm`, then
   `~/.aimax/ai-config.scm`, then `~/.aimax/init.scm`. All commands are Scheme
-  closures in an ETS table.
+  closures in an ETS table. Ordinary evaluation can use compatibility lanes or
+  one serial worker (`AIMAX_SCHEME_EXECUTION=single_actor`).
+- **SchemeActor** — optional isolated Scheme processes. Each owns a private
+  environment and serial mailbox. Only data crosses actor boundaries; buffers
+  and other editor mechanisms remain shared services. See
+  `docs/SCHEME-ACTORS.md`.
+- **SchemeTask** — one-shot Scheme computations in supervised BEAM processes
+  over the live shared environment. Explicit Scheme can fan out with task
+  primitives; an LLM round automatically runs up to four `pure`/`read` tools
+  concurrently. A global admission limit prevents simultaneous agents from
+  multiplying that without bound. Tasks do not copy the booted Scheme world.
+- **Telemetry** — a bounded core collector for lane and Scheme-task events.
+  `telemetry.scm` owns the list mode, filtering, thresholds, and commands.
 - **TS** — Rustler NIF (`native/aimax_ts`): highlight, structural nav, queries.
 - **Proc** — PTY processes streaming into buffers (comint).
 - **Reactor** — debounced buffer-change rules (the agent trigger primitive).

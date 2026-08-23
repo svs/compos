@@ -25,6 +25,23 @@ defmodule Aimax.Core.Lane do
 
   @registry Aimax.Core.LaneRegistry
   @supervisor Aimax.Core.LaneSupervisor
+  @single_lane :scheme
+
+  @doc "The configured Scheme scheduler: :lanes or :single_actor."
+  def execution_mode do
+    Application.get_env(:aimax_core, :scheme_execution, :lanes)
+  end
+
+  @doc "Resolve a logical owner to its execution lane."
+  def route(key) do
+    case execution_mode() do
+      :lanes -> key
+      :single_actor -> @single_lane
+    end
+  end
+
+  @doc "The lane key of the running worker, or nil outside a lane."
+  def current, do: Process.get(:aimax_scheme_lane)
 
   @doc """
   Run FUN in the lane named by KEY and return its reply. FUN receives the
@@ -38,18 +55,25 @@ defmodule Aimax.Core.Lane do
   lane names the job that holds it.
   """
   def run(key, fun, timeout \\ 30_000, label \\ "") do
+    logical_key = key
+    key = route(key)
     pid = whereis(key)
+    enqueued_at = System.monotonic_time(:millisecond)
 
     if pid == self() do
       {:reply, value} = fun.(nil)
       value
     else
       try do
-        GenServer.call(pid, {:run, fun, label}, timeout)
+        GenServer.call(pid, {:run, fun, label, logical_key, enqueued_at}, timeout)
       catch
         # the worker idled out between lookup and call: take a fresh one
         :exit, {:noproc, _} ->
-          GenServer.call(whereis(key), {:run, fun, label}, timeout)
+          GenServer.call(
+            whereis(key),
+            {:run, fun, label, logical_key, enqueued_at},
+            timeout
+          )
 
         # the lane is held past the caller's deadline: say by what, and
         # where it is stuck — this line is the whole diagnosis of a
@@ -58,7 +82,8 @@ defmodule Aimax.Core.Lane do
           {stack, running} = worker_state(pid)
 
           Logger.warning(
-            "lane #{inspect(key)}: #{label} timed out after #{timeout}ms " <>
+            "lane #{inspect(key)} owner #{inspect(logical_key)}: #{label} " <>
+              "timed out after #{timeout}ms " <>
               "while the worker runs #{running}; worker at #{stack}"
           )
 
@@ -98,10 +123,21 @@ defmodule Aimax.Core.Lane do
   end
 
   @doc "Run FUN in the lane without waiting; the reply is discarded."
-  def cast(key, fun, label \\ ""), do: GenServer.cast(whereis(key), {:run, fun, label})
+  def cast(key, fun, label \\ "") do
+    logical_key = key
+    key = route(key)
+    enqueued_at = System.monotonic_time(:millisecond)
+
+    GenServer.cast(
+      whereis(key),
+      {:run, fun, label, logical_key, enqueued_at}
+    )
+  end
 
   @doc "Kill the lane's worker; queued work is lost, the store survives."
   def kill(key) do
+    key = route(key)
+
     case Registry.lookup(@registry, key) do
       [{pid, _}] -> Process.exit(pid, :kill)
       [] -> :ok
@@ -159,15 +195,18 @@ defmodule Aimax.Core.Lane do
     end
 
     @impl true
-    def init(key), do: {:ok, key, @idle}
+    def init(key) do
+      Process.put(:aimax_scheme_lane, key)
+      {:ok, key, @idle}
+    end
 
     # one slow job is one frozen lane: report every job's duration as
     # telemetry, and put the slow ones in the log by name
     @slow_ms 250
 
     @impl true
-    def handle_call({:run, fun, label}, from, key) do
-      case timed(key, label, fn -> guarded(fun, from) end) do
+    def handle_call({:run, fun, label, owner, enqueued_at}, from, key) do
+      case timed(key, owner, label, enqueued_at, fn -> guarded(fun, from) end) do
         {:reply, value} -> {:reply, value, key, @idle}
         # the fun claimed the reply slot (eval-defer!): it answers later
         # through GenServer.reply — this worker moves on at once
@@ -176,8 +215,8 @@ defmodule Aimax.Core.Lane do
     end
 
     @impl true
-    def handle_cast({:run, fun, label}, key) do
-      timed(key, label, fn -> guarded(fun, nil) end)
+    def handle_cast({:run, fun, label, owner, enqueued_at}, key) do
+      timed(key, owner, label, enqueued_at, fn -> guarded(fun, nil) end)
       {:noreply, key, @idle}
     end
 
@@ -192,8 +231,10 @@ defmodule Aimax.Core.Lane do
       :exit, reason -> {:reply, {:error, "exit: #{inspect(reason)}"}}
     end
 
-    defp timed(key, label, fun) do
+    defp timed(key, owner, label, enqueued_at, fun) do
       t0 = System.monotonic_time(:millisecond)
+      queue_time = max(t0 - enqueued_at, 0)
+      {:message_queue_len, backlog} = Process.info(self(), :message_queue_len)
       :ets.insert(Aimax.Core.Lane.jobs_table(), {self(), label, t0})
 
       try do
@@ -201,11 +242,19 @@ defmodule Aimax.Core.Lane do
       after
         ms = System.monotonic_time(:millisecond) - t0
         :ets.delete(Aimax.Core.Lane.jobs_table(), self())
-        :telemetry.execute([:aimax, :lane, :job], %{duration: ms}, %{lane: key, label: label})
+
+        :telemetry.execute(
+          [:aimax, :lane, :job],
+          %{duration: ms, queue_time: queue_time, backlog: backlog},
+          %{lane: key, owner: owner, label: label}
+        )
 
         if ms > @slow_ms do
           require Logger
-          Logger.warning("lane #{inspect(key)}: slow job #{label} #{ms}ms")
+
+          Logger.warning(
+            "lane #{inspect(key)} owner #{inspect(owner)}: slow job #{label} #{ms}ms"
+          )
         end
       end
     end

@@ -29,9 +29,11 @@ defmodule Aimax.Core.Reactor do
 
   use GenServer
 
+  require Logger
+
   alias Aimax.Core.{Buffer, Editor, Events}
 
-  defstruct rules: %{}, next_id: 1
+  defstruct rules: %{}, by_buffer: %{}, next_id: 1
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
@@ -61,10 +63,14 @@ defmodule Aimax.Core.Reactor do
   @impl true
   def handle_call({:on_change, buffer, matcher, handler, opts}, _from, state) do
     buffer_ref = Buffer.ref(buffer)
-    Events.subscribe(buffer_ref)
+    id = state.next_id
+
+    unless Map.has_key?(state.by_buffer, buffer_ref) do
+      Events.subscribe(buffer_ref)
+    end
 
     rule = %{
-      id: state.next_id,
+      id: id,
       buffer_ref: buffer_ref,
       matcher: matcher,
       handler: handler,
@@ -72,23 +78,52 @@ defmodule Aimax.Core.Reactor do
       sources: Keyword.get(opts, :sources, [:user]),
       eager: Keyword.get(opts, :eager, false),
       pending: [],
-      timer: nil
+      timer: nil,
+      in_flight: false
     }
 
-    state = %{state | rules: Map.put(state.rules, rule.id, rule), next_id: rule.id + 1}
-    {:reply, {:ok, rule.id}, state}
+    state = %{
+      state
+      | rules: Map.put(state.rules, id, rule),
+        by_buffer: Map.update(state.by_buffer, buffer_ref, MapSet.new([id]), &MapSet.put(&1, id)),
+        next_id: id + 1
+    }
+
+    {:reply, {:ok, id}, state}
   end
 
-  def handle_call({:remove, id}, _from, state),
-    do: {:reply, :ok, %{state | rules: Map.delete(state.rules, id)}}
+  def handle_call({:remove, id}, _from, state) do
+    case state.rules[id] do
+      nil ->
+        {:reply, :ok, state}
+
+      rule ->
+        if rule.timer, do: Process.cancel_timer(rule.timer)
+        if rule.in_flight, do: Process.demonitor(rule.in_flight.monitor, [:flush])
+
+        ids = state.by_buffer |> Map.fetch!(rule.buffer_ref) |> MapSet.delete(id)
+
+        by_buffer =
+          if MapSet.size(ids) == 0 do
+            Events.unsubscribe(rule.buffer_ref)
+            Map.delete(state.by_buffer, rule.buffer_ref)
+          else
+            Map.put(state.by_buffer, rule.buffer_ref, ids)
+          end
+
+        {:reply, :ok, %{state | rules: Map.delete(state.rules, id), by_buffer: by_buffer}}
+    end
+  end
 
   def handle_call(:rules, _from, state), do: {:reply, Map.values(state.rules), state}
 
   @impl true
   def handle_info({:buffer_change, buffer, change}, state) do
     rules =
-      Map.new(state.rules, fn {id, rule} ->
-        {id, maybe_accumulate(rule, buffer, change)}
+      state.by_buffer
+      |> Map.get(buffer, MapSet.new())
+      |> Enum.reduce(state.rules, fn id, rules ->
+        Map.update!(rules, id, &maybe_accumulate(&1, change))
       end)
 
     {:noreply, %{state | rules: rules}}
@@ -102,12 +137,29 @@ defmodule Aimax.Core.Reactor do
       %{pending: []} ->
         {:noreply, state}
 
+      %{in_flight: in_flight} = rule when in_flight != false ->
+        {:noreply, put_in(state.rules[id], %{rule | timer: nil})}
+
       rule ->
         if rule.eager or in_scope?(rule.buffer_ref, screen()) do
           changes = Enum.reverse(rule.pending)
           handler = rule.handler
-          Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn -> handler.(changes) end)
-          {:noreply, put_in(state.rules[id], %{rule | pending: [], timer: nil})}
+          reactor = self()
+
+          case Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
+                 result = run_handler(handler, changes)
+                 send(reactor, {:handler_done, id, changes, result})
+               end) do
+            {:ok, pid} ->
+              monitor = Process.monitor(pid)
+              in_flight = %{monitor: monitor, changes: changes}
+              rule = %{rule | pending: [], timer: nil, in_flight: in_flight}
+              {:noreply, put_in(state.rules[id], rule)}
+
+            {:error, reason} ->
+              Logger.error("reactor rule #{id} could not start: #{inspect(reason)}")
+              {:noreply, put_in(state.rules[id], %{rule | timer: nil})}
+          end
         else
           # park: keep the redo, drop the timer. The :changed subscription
           # below re-arms it when the buffer reaches a window.
@@ -116,11 +168,49 @@ defmodule Aimax.Core.Reactor do
     end
   end
 
+  def handle_info({:handler_done, id, changes, result}, state) do
+    case state.rules[id] do
+      nil ->
+        {:noreply, state}
+
+      rule ->
+        Process.demonitor(rule.in_flight.monitor, [:flush])
+        rule = %{rule | in_flight: false}
+
+        rule =
+          if handler_ok?(result) do
+            arm_pending(rule)
+          else
+            Logger.error("reactor rule #{id} failed: #{handler_error(result)}")
+            %{rule | pending: rule.pending ++ Enum.reverse(changes), timer: nil}
+          end
+
+        {:noreply, put_in(state.rules[id], rule)}
+    end
+  end
+
+  def handle_info({:DOWN, monitor, :process, _pid, reason}, state) do
+    case Enum.find(state.rules, fn {_id, rule} ->
+           rule.in_flight != false and rule.in_flight.monitor == monitor
+         end) do
+      nil ->
+        {:noreply, state}
+
+      {id, rule} ->
+        Logger.error("reactor rule #{id} task exited: #{inspect(reason)}")
+        attempted = Enum.reverse(rule.in_flight.changes)
+        rule = %{rule | in_flight: false, pending: rule.pending ++ attempted, timer: nil}
+        {:noreply, put_in(state.rules[id], rule)}
+    end
+  end
+
   # the Editor firehose: any editor mutation may have put a parked buffer
   # on screen. Cheap when nothing is parked; one visibility read otherwise.
   def handle_info({:editor_change, _what}, state) do
     parked =
-      Enum.filter(state.rules, fn {_id, r} -> r.pending != [] and r.timer == nil end)
+      Enum.filter(state.rules, fn {_id, r} ->
+        r.pending != [] and r.timer == nil and r.in_flight == false
+      end)
 
     case parked do
       [] ->
@@ -145,19 +235,40 @@ defmodule Aimax.Core.Reactor do
     end
   end
 
-  defp maybe_accumulate(rule, buffer, change) do
-    if rule.buffer_ref == buffer and source_ok?(rule, change) and matches?(rule.matcher, change) do
+  defp maybe_accumulate(rule, change) do
+    if source_ok?(rule, change) and matches?(rule.matcher, change) do
       rule = %{rule | pending: [change | rule.pending]}
 
-      if rule.timer do
+      if rule.timer != nil or rule.in_flight != false do
         rule
       else
-        %{rule | timer: Process.send_after(self(), {:fire, rule.id}, rule.debounce)}
+        arm_pending(rule)
       end
     else
       rule
     end
   end
+
+  defp arm_pending(%{pending: []} = rule), do: rule
+
+  defp arm_pending(rule) do
+    %{rule | timer: Process.send_after(self(), {:fire, rule.id}, rule.debounce)}
+  end
+
+  defp run_handler(handler, changes) do
+    {:ok, handler.(changes)}
+  rescue
+    e -> {:error, Exception.message(e)}
+  catch
+    kind, reason -> {:error, "#{kind}: #{inspect(reason)}"}
+  end
+
+  defp handler_ok?({:ok, {:error, _}}), do: false
+  defp handler_ok?({:ok, _}), do: true
+  defp handler_ok?({:error, _}), do: false
+
+  defp handler_error({:ok, {:error, message}}), do: to_string(message)
+  defp handler_error({:error, message}), do: to_string(message)
 
   # :locals is the phantom change buffer-set-local! broadcasts so views
   # repaint. It is not an edit. A rule that hears it and writes a local in

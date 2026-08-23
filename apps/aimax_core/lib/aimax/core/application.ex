@@ -12,17 +12,23 @@ defmodule Aimax.Core.Application do
       {Registry, keys: :unique, name: Aimax.Core.AgentRegistry},
       {Registry, keys: :unique, name: Aimax.Core.MCPRegistry},
       {Registry, keys: :unique, name: Aimax.Core.LSPRegistry},
+      {Registry, keys: :unique, name: Aimax.Core.SchemeActorRegistry},
+      {Registry, keys: :unique, name: Aimax.Core.SchemeTaskRegistry},
       {DynamicSupervisor, name: Aimax.Core.BufferSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: Aimax.Core.ProcSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: Aimax.Core.AgentSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: Aimax.Core.MCPSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: Aimax.Core.LSPSupervisor, strategy: :one_for_one},
+      {DynamicSupervisor, name: Aimax.Core.SchemeActorSupervisor, strategy: :one_for_one},
+      {DynamicSupervisor, name: Aimax.Core.SchemeTaskSupervisor, strategy: :one_for_one},
+      Aimax.Core.SchemeReadLimiter,
       # Scheme execution lanes: serial workers, one per group/agent/conn,
       # started lazily — must be up before Session so callbacks fired
       # during the stdlib load have somewhere to run
       {Registry, keys: :unique, name: Aimax.Core.LaneRegistry},
       {DynamicSupervisor, name: Aimax.Core.LaneSupervisor, strategy: :one_for_one},
       {Task.Supervisor, name: Aimax.Core.TaskSupervisor},
+      Aimax.Core.Telemetry,
       Aimax.Core.BufferStore,
       Aimax.Core.Reactor,
       Aimax.Core.Watch,
@@ -34,6 +40,11 @@ defmodule Aimax.Core.Application do
       Aimax.Core.Browser,
       Aimax.Core.Session,
       Aimax.Core.Desktop,
+      %{
+        id: Aimax.Core.SchemeWarmup,
+        start: {Aimax.Core.SchemeWarmup, :start_link, [[]]},
+        restart: :temporary
+      },
       Aimax.Core.LLMDb,
       # one-shot: register user-installed grammars with the NIF
       %{

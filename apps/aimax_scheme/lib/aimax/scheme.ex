@@ -68,6 +68,16 @@ defmodule Aimax.Scheme do
     %{interp | store: store}
   end
 
+  @doc "Snapshot the shared Scheme world for an isolated actor."
+  def snapshot(%__MODULE__{store: store, global: global}) do
+    {global, Env.export_shared(store)}
+  end
+
+  @doc "Create an isolated interpreter from snapshot/1 data."
+  def from_snapshot({global, rows}, access \\ :private) do
+    %__MODULE__{store: Env.import_shared(rows, access), global: global}
+  end
+
   @doc """
   Evaluate all forms in a string. Returns `{:ok, last_value, interp}` or
   `{:error, message}`. Definitions made before the failing form persist —
@@ -125,8 +135,8 @@ defmodule Aimax.Scheme do
   def exec(%__MODULE__{store: store} = interp, fun) do
     Env.with_eval(store, fn ->
       case fun.(interp) do
-        # selective: only frames that escaped (result, primitive args,
-        # shared writes) publish — the rest are dead let/call frames
+        # Primitive arguments and shared writes promote before exposure.
+        # The exit flush keeps result closures and drops dead call frames.
         {:ok, val, %__MODULE__{} = interp2} -> {:ok, val, flush(interp2, [val])}
         other -> other
       end
@@ -136,7 +146,7 @@ defmodule Aimax.Scheme do
   @doc "Publish the whole local frame tier to the shared table (boot)."
   def flush(%__MODULE__{store: store} = interp), do: %{interp | store: Env.flush(store)}
 
-  @doc "Publish only the local frames reachable from ROOTS or the escape log."
+  @doc "Publish only the local frames reachable from ROOTS."
   def flush(%__MODULE__{store: store} = interp, roots),
     do: %{interp | store: Env.flush(store, roots)}
 

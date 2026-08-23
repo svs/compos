@@ -48,6 +48,37 @@ defmodule Aimax.OnChangeTest do
     assert Buffer.text(sink) == "0:hello:0:editor\n5:ab:0:user\n"
   end
 
+  test "a capturing hook can fire before its registering eval exits" do
+    src = uniq("capturing")
+    suffix = System.unique_integer([:positive])
+    hits = "*capturing-hits-#{suffix}*"
+    rule = "*capturing-rule-#{suffix}*"
+    lane = {:capturing_hook, self()}
+    {:ok, _} = Core.create_buffer(src)
+    show(src)
+
+    assert {:ok, _} = Session.eval("(begin (define #{hits} 0) (define #{rule} #f))")
+
+    assert {:ok, "(#t 5)"} =
+             Session.eval(
+               """
+               (let ((tag "local"))
+                 (set! #{rule}
+                   (on-change! "#{src}"
+                     (lambda (p i d s)
+                       (set! #{hits} (+ #{hits} (string-length tag))))
+                     'eager))
+                 (buffer-insert! "#{src}" 0 "x")
+                 (list (wait-until (lambda () (> #{hits} 0)) 1000 10) #{hits}))
+               """,
+               nil,
+               5_000,
+               lane
+             )
+
+    Session.eval("(remove-on-change! #{rule})")
+  end
+
   test "undo-sourced changes reach the hook (the fold/overlay heal path)" do
     src = uniq("watched")
     sink = uniq("sink")

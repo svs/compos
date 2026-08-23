@@ -17,9 +17,10 @@ table{width:100%;border-collapse:collapse;font-size:13.5px}th{padding:6px 9px 6p
 @media(max-width:760px){body{padding:22px 18px}.split{grid-template-columns:1fr}}@media print{body{max-width:none}.diagram{break-inside:avoid}}
 </style></head><body>
 <h1>How Scheme multithreading works</h1>
-<p class="sub">ai-max.el interpreter and execution lanes - current implementation - updated 2026-08-22</p>
+<p class="sub">ai-max.el interpreter and execution lanes - current implementation - updated 2026-08-23</p>
 <p class="lead"><strong>Short version:</strong> many BEAM processes can evaluate against one Scheme world.
-Each lane stays serial. Different lanes run concurrently. Each evaluation uses private frames, then publishes only escaped state.</p>
+Each lane stays serial. Different lanes run concurrently. Set <code>AIMAX_SCHEME_EXECUTION=single_actor</code>
+to route ordinary Scheme through one worker. Explicit isolated actors remain optional; see <code>docs/SCHEME-ACTORS.md</code>.</p>
 
 <h2>The mental model</h2>
 <p>The old Session process executed all Scheme code. A long RPC evaluation could delay a keystroke.
@@ -37,7 +38,7 @@ The current Session stores only an interpreter handle. Lane workers execute the 
 <div class="node group"><b>{:group, project}</b><span>A, then B, then C</span></div>
 <div class="node other"><b>{:rpc, pid}</b><span>A, then B, then C</span></div>
 <div class="node other"><b>{:llm, pid}</b><span>A, then B, then C</span></div>
-</div><div class="col"><div class="node tall"><div><b>Scheme.exec</b><span>read forms</span><span>evaluate sequentially</span><span>use local frames</span><span>record escapes</span><span>selective flush</span></div></div></div>
+</div><div class="col"><div class="node tall"><div><b>Scheme.exec</b><span>read forms</span><span>evaluate sequentially</span><span>use local frames</span><span>promote exposed closures</span><span>selective flush</span></div></div></div>
 <div class="col"><div class="node store tall"><div><b>Shared ETS store</b><span>global frame</span><span>published frames</span><span>one row per binding</span></div></div></div>
 </div></div>
 
@@ -48,10 +49,14 @@ The supervisor creates workers only when required. An idle worker exits after fi
 <tr><td><code>{:group, group}</code></td><td>Buffers in one group and their agent callbacks.</td><td>Project policy stays ordered.</td></tr>
 <tr><td><code>{:buffer, name}</code></td><td>A buffer without a group.</td><td>Mode setup stays ordered for that buffer.</td></tr>
 <tr><td><code>{:rpc, pid}</code></td><td>One RPC connection.</td><td>Other connections can proceed.</td></tr>
-<tr><td><code>{:llm, pid}</code></td><td>One LLM tool loop.</td><td>Tools stay ordered inside that loop.</td></tr>
+<tr><td><code>{:llm, pid}</code></td><td>One LLM tool loop.</td><td>Writes stay ordered; an all-read round fans out at most four tasks.</td></tr>
 <tr><td><code>{:agent, slug}</code></td><td>Fallback before an agent gets a buffer lane.</td><td>One agent stays serial.</td></tr></table>
-<div class="note"><strong>One Scheme expression does not run in parallel.</strong>
-It runs sequentially in one worker. Concurrency exists between top-level executions.</div>
+<div class="note"><strong>An ordinary Scheme expression stays sequential.</strong>
+It can explicitly fan work out with <code>task-spawn</code>, <code>task-run!</code>, or
+<code>chat-parallel-map</code>. Each task is a supervised BEAM process over the same
+booted environment; no environment snapshot is copied. The LLM tool loop does
+this automatically when a round contains only <code>pure</code>/<code>read</code>
+tools, with a global admission cap across agents.</div>
 
 <h2>One evaluation, from call to reply</h2>
 <div class="diagram"><p class="cap">Diagram 2 - top-level execution lifecycle</p>
@@ -95,9 +100,9 @@ The cache resets at the next <code>Scheme.exec</code> boundary.</p>
 Two lanes can interleave global reads and writes. Concurrent increments can lose an update.
 Use the same lane when an invariant spans multiple operations.</div>
 <h3>The short stale-frame window</h3>
-<p>A primitive can expose a closure before its evaluation finishes.
-Another lane can call it before the flush publishes its frame.
-That call returns <code>stale environment frame</code>. The reference works after the first evaluation flushes.</p>
+<p>A primitive can expose a closure before its evaluation finishes. The evaluator now publishes
+the closure's reachable frames before invoking that primitive, so another lane can call it immediately.
+Later mutation of the promoted frame writes through to the shared store.</p>
 
 <h2>Garbage collection and cancellation</h2>
 <p>The environment GC uses reachability. Roots include the global frame, commands, escaped callbacks, minibuffers, and buffer locals.
@@ -210,7 +215,7 @@ Queued jobs do not survive. The next call creates a new worker.</p>
 <li><strong>Is one group the correct serialization boundary?</strong> One slow agent callback holds all Scheme work for that group.</li>
 <li><strong>Which globals require atomic operations?</strong> Counters, registries, and read-modify-write state can race.</li>
 <li><strong>Should Scheme expose lane selection?</strong> Elixir call sites select lanes today.</li>
-<li><strong>Should stale closure publication become impossible?</strong> Immediate publication can restore high ETS churn.</li>
+<li><strong>Which synchronous waits must become actors?</strong> In single-worker mode, a wait cannot block the worker that must deliver its callback.</li>
 <li><strong>Should GC remain stop-the-world?</strong> A larger store can make the pause visible.</li>
 <li><strong>Which callbacks still use <code>:ui</code>?</strong> Async producers need explicit lanes to protect input.</li>
 </ol>
@@ -220,7 +225,7 @@ Queued jobs do not survive. The next call creates a new worker.</p>
 <tr><td><code>apps/aimax_core/lib/aimax/core/lane.ex</code></td><td>Lane keys, workers, queues, timeouts, and telemetry.</td></tr>
 <tr><td><code>apps/aimax_core/lib/aimax/core/session.ex</code></td><td>Lane routing, roots, and the GC timer.</td></tr>
 <tr><td><code>apps/aimax_scheme/lib/aimax/scheme.ex</code></td><td>The <code>Scheme.exec</code> boundary and selective flush.</td></tr>
-<tr><td><code>apps/aimax_scheme/lib/aimax/scheme/env.ex</code></td><td>Local maps, ETS rows, caches, escape tracking, and GC coordination.</td></tr>
+<tr><td><code>apps/aimax_scheme/lib/aimax/scheme/env.ex</code></td><td>Local maps, ETS rows, caches, immediate closure promotion, and GC coordination.</td></tr>
 <tr><td><code>apps/aimax_scheme/lib/aimax/scheme/gc.ex</code></td><td>Reachability marking and frame deletion.</td></tr>
 <tr><td><code>apps/aimax_core/lib/aimax/core/agent.ex</code></td><td>Maps agents to group or buffer lanes.</td></tr>
 <tr><td><code>apps/aimax_rpc/lib/aimax/rpc/server.ex</code></td><td>Assigns one lane to each RPC connection.</td></tr></table>

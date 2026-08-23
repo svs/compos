@@ -1336,7 +1336,12 @@
     ;; THIS time; a local persists, so C-x C-b days later opened on a
     ;; three-row list narrowed by a word you no longer remember typing.
     ;; The mode's own kinds (dired's dotfiles) are a setting, and stay.
-    (set! widened (list-clear-query! buf))
+    ;; ...but a WAKE is not an open. Clearing the query there would leave
+    ;; the buffer holding the rows a narrowing kept with no query to
+    ;; explain them, and redrawing them from the source is the fetch a
+    ;; preview must not pay.
+    (unless *buffer-waking*
+      (set! widened (list-clear-query! buf)))
     ;; a list buffer's text IS its view. A buffer keeps the locals of the
     ;; mode before it, so dired on a directory that once held a diff kept
     ;; 'render-mode "blocks" and the window drew no rows at all.
@@ -2236,6 +2241,19 @@
         (if m ((cadr m) buf))))
     (or (buffer-local buf 'minor-modes) '())))
 
+;; #t while a wake rebuilds a buffer's runtime. A wake is not an open:
+;; the switcher previews a dormant buffer by re-running its mode setup,
+;; and a list whose rows come from the network must not pay that fetch
+;; inside a preview. list-mode-init! reads this.
+(define *buffer-waking* #f)
+
+(define (with-buffer-waking thunk)
+  (let ((was *buffer-waking*))
+    (set! *buffer-waking* #t)
+    (let ((r (thunk)))
+      (set! *buffer-waking* was)
+      r)))
+
 ;; A dormant buffer wakes with literal persisted locals but none of the
 ;; runtime machinery those locals describe. Re-run both setup layers with a
 ;; logical current buffer: restoration must not display or select BUF.
@@ -2244,9 +2262,11 @@
     (lambda ()
       (with-current-buffer buf
         (lambda ()
-          (let ((mode (buffer-local buf 'mode-name)))
-            (when mode (set-mode! mode)))
-          (restore-minor-modes! buf))))))
+          (with-buffer-waking
+            (lambda ()
+              (let ((mode (buffer-local buf 'mode-name)))
+                (when mode (set-mode! mode)))
+              (restore-minor-modes! buf))))))))
 
 ;;; Visual lines are a buffer capability, independent of the major mode.
 ;;; The client measures rendered rows; this minor mode owns the durable flag.

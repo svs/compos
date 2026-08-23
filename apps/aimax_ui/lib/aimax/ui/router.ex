@@ -13,7 +13,8 @@ defmodule Aimax.Ui.Router do
   scope "/" do
     pipe_through(:browser)
     live("/", Aimax.Ui.EditorLive)
-    live("/operad", Aimax.Ui.HomepageLive)
+    live("/operad", Aimax.Ui.HomepageLive, :operad)
+    live("/emma", Aimax.Ui.HomepageLive, :emma)
 
     # a buffer link: the tab's own frame shows BUFFER, at LINE when the
     # query gives one. The name is one percent-encoded segment, so a file

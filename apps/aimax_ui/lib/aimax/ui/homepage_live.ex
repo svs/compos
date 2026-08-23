@@ -3,7 +3,28 @@ defmodule Aimax.Ui.HomepageLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign(socket, page_title: "Operad — The OS for knowledge work")}
+    brand =
+      case socket.assigns.live_action do
+        :emma ->
+          %{
+            key: :emma,
+            name: "Emma",
+            wordmark: "λemma",
+            eyebrow: "Emma — the thinking person’s browser",
+            email: "hello@emma.space"
+          }
+
+        _operad ->
+          %{
+            key: :operad,
+            name: "Operad",
+            wordmark: "operad",
+            eyebrow: "Operad — the thinking person’s browser",
+            email: "hello@operad.work"
+          }
+      end
+
+    {:ok, assign(socket, brand: brand, page_title: "#{brand.name} — The OS for knowledge work")}
   end
 
   @impl true
@@ -50,6 +71,7 @@ defmodule Aimax.Ui.HomepageLive do
 
         .operad-brand { display: flex; align-items: center; gap: 12px; }
         .operad-brand img { width: 38px; height: 38px; border-radius: 11px; }
+        .operad-brand .emma-logo-image { width: 116px; height: auto; border-radius: 0; }
         .operad-brand span { font-size: 20px; font-weight: 500; letter-spacing: -0.04em; }
         .operad-nav-links { display: flex; align-items: center; gap: 30px; color: #aaa9b4; font-size: 14px; }
         .operad-nav-links a { transition: color 160ms ease; }
@@ -318,6 +340,7 @@ defmodule Aimax.Ui.HomepageLive do
 
         .operad-final { padding: 150px 0 90px; text-align: center; }
         .operad-final img { width: 126px; height: 126px; margin-bottom: 28px; border-radius: 30px; }
+        .operad-final .emma-final-logo { width: min(680px, 90vw); height: auto; border-radius: 0; }
         .operad-final h2 { font-size: clamp(48px, 6vw, 78px); font-weight: 450; letter-spacing: -0.065em; }
         .operad-final p { max-width: 580px; margin: 20px auto 32px; color: #8f8e9a; font-size: 18px; }
         .operad-final .operad-actions { justify-content: center; }
@@ -385,9 +408,15 @@ defmodule Aimax.Ui.HomepageLive do
 
       <div class="operad-shell">
         <nav class="operad-nav" aria-label="Primary navigation">
-          <a class="operad-brand" href="#top" aria-label="Operad home">
-            <img src="/images/operad-fractal-512.png" alt="" />
-            <span>operad</span>
+          <a class="operad-brand" href="#top" aria-label={"#{@brand.name} home"}>
+            <img :if={@brand.key == :operad} src="/images/operad-fractal-512.png" alt="" />
+            <span :if={@brand.key == :operad}>operad</span>
+            <img
+              :if={@brand.key == :emma}
+              class="emma-logo-image"
+              src="/images/emma-logo-v1.png"
+              alt="λemma"
+            />
           </a>
           <div class="operad-nav-links">
             <a href="#read">Read</a>
@@ -400,7 +429,7 @@ defmodule Aimax.Ui.HomepageLive do
 
         <section class="operad-hero" id="top">
           <div class="operad-hero-copy">
-            <div class="operad-eyebrow">Operad — the thinking person’s browser</div>
+            <div class="operad-eyebrow">{@brand.eyebrow}</div>
             <h1>The OS for <span>knowledge work.</span></h1>
             <p class="operad-hero-lede">
               Bring your documents, conversations, research, tools, and AI into one connected workspace.
@@ -411,7 +440,7 @@ defmodule Aimax.Ui.HomepageLive do
               <a class="operad-button" href="#workspace">See how it works ↓</a>
             </div>
             <p class="operad-hero-note">
-              Not a chat window. Operad holds the live material of every app you work in.
+              Not a chat window. {@brand.name} holds the live material of every app you work in.
             </p>
           </div>
           <div class="operad-hero-art">
@@ -420,18 +449,18 @@ defmodule Aimax.Ui.HomepageLive do
           </div>
         </section>
 
-        <section class="operad-proof" aria-label="Operad product preview">
+        <section class="operad-proof" aria-label={"#{@brand.name} product preview"}>
           <div class="work-surface real-product">
             <img
               class="product-screenshot"
               src="/images/operad-sentry-workspace.png"
-              alt="Operad showing a Sentry issue list with its actions, stack trace, and details beside the work"
+              alt={"#{@brand.name} showing a Sentry issue list with its actions, stack trace, and details beside the work"}
             />
           </div>
         </section>
       </div>
 
-      <section class="capability-band" aria-label="Operad capabilities">
+      <section class="capability-band" aria-label={"#{@brand.name} capabilities"}>
         <article class="capability-cell" id="read">
           <h2>Read.</h2>
           <p>Newsletters, papers, threads, and reports become text you can mark up.</p>
@@ -461,7 +490,7 @@ defmodule Aimax.Ui.HomepageLive do
             <div>
               <h2>Your work is scattered beyond reach.</h2>
               <p>
-                Knowledge work now spans too many tabs, tools, and agents. Operad gathers it into
+                Knowledge work now spans too many tabs, tools, and agents. {@brand.name} gathers it into
                 one navigable information space without hiding what happens.
               </p>
             </div>
@@ -545,7 +574,7 @@ defmodule Aimax.Ui.HomepageLive do
             <span class="section-number">03 — YOUR CONTROL</span>
             <h2 style="margin-top: 25px">Reach for a command, not another app.</h2>
             <p>
-              Operad brings the next source, tool, or action to your current position. Your work
+              {@brand.name} brings the next source, tool, or action to your current position. Your work
               stays visible while the workspace changes around it.
             </p>
           </div>
@@ -565,18 +594,24 @@ defmodule Aimax.Ui.HomepageLive do
 
       <section class="operad-final" id="access">
         <div class="operad-shell">
-          <img src="/images/operad-fractal-512.png" alt="Operad recursive emblem" />
+          <img :if={@brand.key == :operad} src="/images/operad-fractal-512.png" alt="Operad recursive emblem" />
+          <img
+            :if={@brand.key == :emma}
+            class="emma-final-logo"
+            src="/images/emma-logo-v1.png"
+            alt="λemma"
+          />
           <h2>Your whole working world. Within reach.</h2>
           <p>The OS for knowledge work.</p>
           <div class="operad-actions">
-            <a class="operad-button primary" href="mailto:hello@operad.work?subject=Operad%20early%20access">Get early access</a>
+            <a class="operad-button primary" href={"mailto:#{@brand.email}?subject=#{@brand.name}%20early%20access"}>Get early access</a>
           </div>
         </div>
       </section>
 
       <footer class="operad-shell operad-footer">
-        <span><strong>operad</strong> · The OS for knowledge work</span>
-        <span>© 2026 Operad</span>
+        <span><strong>{@brand.wordmark}</strong> · The OS for knowledge work</span>
+        <span>© 2026 {@brand.name}</span>
       </footer>
     </main>
     """

@@ -63,6 +63,7 @@ A changeset groups revisions produced by one intent. It provides atomic acceptan
 ### Materialization
 
 A buffer or file is a projection of accepted refs. Operational snapshots accelerate restoration but are not revisions and cannot replace parentage, attribution, or proposals.
+
 ## Actors
 
 ### Actor identity
@@ -129,6 +130,7 @@ A normal edit MUST NOT use a no-actor sentinel. No-actor mutations are reserved 
 Delegation is preserved. A useful chain is `user -> chat session -> agent run -> editing tool`.
 
 The revision's primary actor is the principal responsible for the proposed content, normally the agent run in this example. The initiating user and mechanical tool remain queryable without falsely attributing generated text directly to the human or to the buffer process.
+
 ## Recording lifecycle
 
 A participating buffer is in one of two durable states:
@@ -183,6 +185,7 @@ Checkpoint never clears immutable history. Compaction may replace old operation 
 History deletion is separate from stop and requires an explicit target and policy decision. Durable deletion SHOULD leave a tombstone when synchronization or references make silent disappearance unsafe.
 
 Session-retained Provenance may be discarded with its buffer session. Durable history survives ordinary kill, close, eviction, and restart.
+
 ## Mutation transactions
 
 Every semantic edit runs in a mutation transaction containing:
@@ -215,6 +218,7 @@ On a stale expected revision, return a structured conflict containing the expect
 Rebase creates a new proposal with causal links to the original. Combining proposals creates a changeset that cites every input. Rejection and discard are explicit events.
 
 Local interactive edits may read and accept within the buffer's serialized call. Agents and external clients must use the snapshot revision they were given.
+
 ## Non-file buffers
 
 Provenance attaches to buffer identity, not filesystem presence.
@@ -227,6 +231,7 @@ Provenance attaches to buffer identity, not filesystem presence.
 - read-only buffers may still have a root revision and imported external revisions
 
 A mode opt-out is a deliberate product decision, not an inference from "non-file."
+
 ## Persistence model
 
 The first backend is a supervised local SQLite store. Celld is deferred.
@@ -246,6 +251,7 @@ The store uses WAL mode and serializes mutations through one GenServer. Each acc
 Buffer checkpoints contain a copy of the accepted head and content hash. On activation, the buffer reads the authoritative cell from SQLite and compares its hash with restored text. A mismatch while recording creates an explicit recovery snapshot. A mismatch while stopped remains an attribution gap until recording resumes.
 
 Large content objects, replay beyond the stored snapshots and operations, multi-cell transactions, and content-addressed external storage are later phases.
+
 ## Backend contract
 
 A backend provides, at minimum:
@@ -262,11 +268,12 @@ A backend provides, at minimum:
 - apply retention and deletion policy
 
 Backend errors distinguish stale revision, invalid operation, actor-policy rejection, storage failure, corruption, and unavailable content.
+
 ## Mode and API contract
 
 Modes declare a recording policy and retention preference; they do not directly delete history. Policy installation must happen before initial generated mutations.
 
-Public commands provide status, start, stop, checkpoint, clear override, history, and proposal resolution. `M-x buffer-log` (`C-x v l`) shows the accepted revisions of the current buffer, oldest first, with the recording state and the policy that set it in the header. `RET` describes one revision: its actor, source, operation, and hash. The Scheme history primitive omits the snapshot payload and reports its size, so a large file does not cross into Scheme on every redraw. Programmatic mutation APIs accept actor context, expected revision, intent, and changeset.
+Public commands provide status, start, stop, checkpoint, clear override, history, and proposal resolution. `M-x buffer-log` (`C-x v l`) shows the accepted revisions of the current buffer, oldest first. The header gives the recording state and the policy that set it. `RET` describes one revision: its actor, source, operation, and hash. The Scheme history primitive omits the snapshot payload and reports its size, so a large file does not cross into Scheme on every redraw. Programmatic mutation APIs accept actor context, expected revision, intent, and changeset.
 
 Compatibility callers that supply only an author string are wrapped as unverified legacy actors until migrated.
 
@@ -365,15 +372,16 @@ A stale head no longer raises. The buffer is the only writer to its own cell,
 so a stale head means a defect rather than a race. Losing the buffer would
 cost more than losing the batch, so the flush marks the gap, logs the reason,
 and the buffer keeps working.
+
 ## Build plan
 
 Provenance should be built, but the specification is a destination rather than one release.
 
 ### Phase 1: durable provenance kernel
 
-Build structured actor context, one cell per buffer, default-on and mode opt-out policy, SQLite-backed revisions, checkpoint linkage, lifecycle events, non-destructive start and stop, attribution-gap recovery, and history/status inspection.
+Build the structured actor context and one cell per buffer. Add default-on recording with mode opt-out policy, SQLite-backed revisions, checkpoint linkage, and lifecycle events. Make start and stop non-destructive. Add attribution-gap recovery and history and status inspection.
 
-This phase proves the two uncertain assumptions: that actor context can propagate reliably through every mutation path, and that durable recording can stay off the interactive typing latency path through batching and transaction boundaries.
+This phase proves two uncertain assumptions. First, the actor context propagates reliably through every mutation path. Second, batching and transaction boundaries keep durable recording off the interactive typing latency path.
 
 ### Phase 2: concurrent proposals
 

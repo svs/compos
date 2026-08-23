@@ -22,11 +22,17 @@
   'group 'appearance
   'set (lambda (v) (set-face-attribute! 'preview 'size v)))
 
+(defcustom 'preview-measure "33em"
+  "Maximum line length for rendered pages. 33em of the serif stack is about 70 characters."
+  'group 'appearance
+  'set (lambda (v) (set-face-attribute! 'preview 'measure v)))
+
 ;; defcustom stores the value; the face must say it too, on load and
 ;; after a restart
 (set-face-attribute! 'preview
   'family preview-font-family
-  'size preview-font-size)
+  'size preview-font-size
+  'measure preview-measure)
 
 (define-command "preview-font-toggle"
   "Switch rendered pages between the serif and the monospace stacks"
@@ -35,6 +41,9 @@
       (customize-set! 'preview-font-family
                       (if mono? *preview-serif* *preview-mono*))
       (customize-set! 'preview-font-size (if mono? "16.5px" "14.5px"))
+      ;; a monospace character is wider, so the same character count
+      ;; needs more em
+      (customize-set! 'preview-measure (if mono? "33em" "42em"))
       (message (if mono? "rendered pages: serif" "rendered pages: monospace")))))
 
 ;;; --- text scale (Emacs C-x C-+, on the Cmd chords) ----------------------------

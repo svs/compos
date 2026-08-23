@@ -1615,6 +1615,15 @@ defmodule Aimax.Ui.EditorLive do
   # can render off for a moment; the sandbox runs no scripts, so a mangled
   # span is a display blemish and nothing more.
   @pt_sentinel "\uE000"
+
+  # A font face belongs to one document. The preview runs in its own
+  # about:blank frame, so the root layout's link does not reach it: the
+  # frame rendered Georgia and Menlo while the chrome rendered Spectral
+  # and IBM Plex Mono. The frame must ask for the fonts itself.
+  @preview_fonts """
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  """
   # one marker per source line that draws text; it becomes a .ln span that
   # names the line's byte offset, so a key in the page can say which source
   # line the reader moved to
@@ -1943,16 +1952,31 @@ defmodule Aimax.Ui.EditorLive do
     # defcustoms; themes and init.scm may set it like any face)
     family = face(faces, "preview", "family", "Spectral,Georgia,serif")
     size = face(faces, "preview", "size", "16.5px")
+    # the measure is the readability lever. 44em of Spectral ran to 94
+    # characters a line; prose reads fastest between 65 and 75.
+    measure = face(faces, "preview", "measure", "33em")
 
     """
-    <!DOCTYPE html><html><head><meta charset="utf-8"><style>
-    body{margin:0 auto;padding:30px 34px 70px;max-width:44em;overflow-wrap:break-word;
-         word-break:normal;font:#{size}/1.7 #{family};color:#{fg};background:#{bg}}
-    p{margin:0 0 1em}
-    h1,h2,h3,h4{font-family:#{family};line-height:1.25;margin:1.4em 0 0.4em}
+    <!DOCTYPE html><html><head><meta charset="utf-8">#{@preview_fonts}<style>
+    body{margin:0 auto;padding:30px 34px 70px;max-width:#{measure};overflow-wrap:break-word;
+         word-break:normal;font:#{size}/1.7 #{family};color:#{fg};background:#{bg};
+         -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+    p{margin:0 0 1.15em;text-wrap:pretty}
+    /* a heading must separate the sections, so its space above is much
+       larger than the space below it */
+    h1,h2,h3,h4{font-family:#{family};line-height:1.25;text-wrap:balance}
     body>h1:first-child{margin-top:0}
-    h1{font-size:29px}h2{font-size:22px;border-bottom:1px solid #{border};padding-bottom:4px}
-    h3{font-size:18px;color:#{accent}}
+    h1{font-size:29px;margin:1.6em 0 .6em}
+    h2{font-size:22px;margin:2.1em 0 .7em;border-bottom:1px solid #{border};padding-bottom:4px}
+    h3{font-size:18px;margin:1.9em 0 .5em;color:#{accent}}
+    h4{font-size:15.5px;margin:1.6em 0 .4em;color:#{dim}}
+    /* the browser default indents a list 40px and puts no space between
+       the items: a list of requirements then reads as one block */
+    ul,ol{margin:0 0 1.15em;padding-left:1.35em}
+    li{margin:0 0 .4em;text-wrap:pretty}
+    li:last-child{margin-bottom:0}
+    li>ul,li>ol{margin:.4em 0 0}
+    li::marker{color:#{dim}}
     code,pre{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:13.5px}
     code{background:#{inset};padding:1px 4px;border-radius:2px}
     /* a name in a heading is still the heading: the code span must not

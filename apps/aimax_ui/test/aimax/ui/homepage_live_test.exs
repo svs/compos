@@ -28,6 +28,21 @@ defmodule Aimax.Ui.HomepageLiveTest do
     assert html =~ "Get early access"
   end
 
+  test "renders the Emma homepage with the lambda wordmark" do
+    {:ok, _view, html} = live(build_conn(), "/emma")
+
+    assert html =~ "Emma — the thinking person’s browser"
+    assert html =~ "λ"
+    assert html =~ "emma"
+    assert html =~ "/images/emma-logo-v1.png"
+    assert html =~ "The OS for"
+    assert html =~ "knowledge work."
+    assert html =~ "Emma holds the live material"
+    assert html =~ "Emma capabilities"
+    assert html =~ "mailto:hello@emma.space"
+    refute html =~ "Operad — the thinking person’s browser"
+  end
+
   test "keeps the editor on the root route" do
     Aimax.Core.Editor.set_window_buffer("homepage-route-test")
     {:ok, _view, html} = live(build_conn(), "/")

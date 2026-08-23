@@ -205,23 +205,25 @@
       (t--wr-done! buf))))
 
 (deftest 'the-word-count-is-recomputed-from-the-buffer
-  "the count and its label are Scheme; delivering it is the Reactor's job"
+  "the counter and its label are Scheme; the delivery is the one exception"
   (lambda ()
     (let ((buf (t--wr-write! "zz-writing-live.md" "")))
       (check-equal! (buffer-local buf 'modeline-info) "0 words" "an empty document")
 
-      ;; the hook is registered, so an edit will reach the counter
+      ;; the hook that will call it is registered
       (check-equal! (length (filter (lambda (h) (equal? (car h) buf)) *writing-hooks*)) 1
                     "one change hook watches the document")
 
-      ;; and the counter itself, which is what the hook calls. The delivery
-      ;; is debounced, fires only while the buffer is visible, and its
-      ;; callback wants the :ui lane — so a wait-until here would block the
-      ;; very thing it waits for. That path is the Reactor's, and its test
-      ;; belongs with the bridge.
+      ;; and the counter it calls. This test cannot watch the hook FIRE:
+      ;; write registered that closure during THIS eval, and a closure only
+      ;; reaches shared state when the eval exits (see Env's two-tier
+      ;; store), so a cross-process call to it now sees an unflushed frame.
+      ;; One eval per test means one eval cannot both register a hook and
+      ;; wait for it. writing_test.exs holds that one delivery test.
       (buffer-insert! buf 0 "hello brave new world")
       (writing--update-count! buf)
-      (check-equal! (buffer-local buf 'modeline-info) "4 words · 1 min" "the count and the read time")
+      (check-equal! (buffer-local buf 'modeline-info) "4 words · 1 min"
+                    "the count and the read time")
       (t--wr-done! buf))))
 
 (deftest 'visual-line-mode-toggles-visual-row-motion-for-any-buffer

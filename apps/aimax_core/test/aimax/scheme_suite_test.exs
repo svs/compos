@@ -14,10 +14,21 @@ defmodule Aimax.SchemeSuiteTest do
 
   alias Aimax.Core.Session
 
+  # The suite runs on its OWN lane, never :ui.
+  #
+  # wait-until holds the lane it runs on, and the editor delivers its
+  # work on :ui — an on-change hook, an LSP status, a debounced redraw.
+  # A suite that holds :ui blocks the very deliveries its tests wait for,
+  # and they time out looking exactly like a slow server. Off :ui they
+  # land in milliseconds.
+  @lane {:scheme_suite, __MODULE__}
+
   defp eval!(code) do
-    {:ok, out} = Session.eval(code)
+    {:ok, out} = eval(code)
     out
   end
+
+  defp eval(code), do: Session.eval(code, nil, 30_000, @lane)
 
   # symbols print as a bare list: (a b c)
   defp names do
@@ -52,7 +63,7 @@ defmodule Aimax.SchemeSuiteTest do
     assert @canary in found,
            "the canary did not load — priv/tests is not being read, or a file raised on load"
 
-    assert {:ok, out} = Session.eval("(run-test '#{@canary})")
+    assert {:ok, out} = eval("(run-test '#{@canary})")
     assert out =~ "canary", "the canary ran and reported nothing: run-test cannot go red"
     refute out == "()", "the canary passed, so a failing test reports as passing"
   end
@@ -105,7 +116,7 @@ defmodule Aimax.SchemeSuiteTest do
 
     failures =
       for name <- real,
-          result = Session.eval("(run-test '#{name})"),
+          result = eval("(run-test '#{name})"),
           reduced = reduce(name, result),
           reduced != nil,
           do: reduced

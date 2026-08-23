@@ -1,13 +1,17 @@
 defmodule Aimax.WritingTest do
   @moduledoc """
-  The writing bridge: what only the Elixir side can answer.
+  One test, and one reason it cannot be Scheme.
 
-  writing.scm is Scheme and its tests are Scheme —
-  priv/tests/writing-test.scm covers the look, the workspace, the
-  selection keymap, the presets, the measure and the restore path. What is
-  left here is the render tree carrying visual-line-mode, and the one
-  delivery Scheme cannot reach: typing updates the word count through the
-  Reactor, debounced and only while the buffer is visible.
+  writing.scm is Scheme and priv/tests/writing-test.scm covers all of it —
+  the look, the workspace, the selection keymap, the presets, the measure,
+  the restore path and the word counter itself.
+
+  What is left is the DELIVERY: typing updates the count through an
+  on-change hook. That hook is a closure registered when write runs, and a
+  closure only reaches shared state when its eval exits (Env's two-tier
+  store). run-test is one eval per test, so no Scheme test can both
+  register the hook and watch it fire. This one can, because ExUnit
+  registers it in one eval and types in the next.
   """
 
   use ExUnit.Case
@@ -71,54 +75,6 @@ defmodule Aimax.WritingTest do
     :ok
   end
 
-  test "M-x visual-line-mode toggles visual-row motion for any buffer" do
-    buf = fresh_buffer("vl-mx-#{System.unique_integer([:positive])}", "one long line\n")
-
-    press(["M-x"])
-    type("visual-line-mode")
-    press(["RET"])
-
-    assert Buffer.get_local(buf, "visual-line-mode") == true
-    assert "visual-line-mode" in Buffer.get_local(buf, "minor-modes")
-    tree = Editor.render_state().tree
-    leaf = if tree.type == :leaf, do: tree, else: Enum.find(tree.children, &(&1.buffer == buf))
-    assert leaf.visual_line_mode == true
-
-    press(["M-x"])
-    type("visual-line-mode")
-    press(["RET"])
-
-    refute Buffer.get_local(buf, "visual-line-mode")
-    refute "visual-line-mode" in Buffer.get_local(buf, "minor-modes")
-  end
-
-
-  test "M-x writing-mode enables the centered prose look" do
-    buf = fresh_buffer("wr-mx-#{System.unique_integer([:positive])}", "one two three\n")
-
-    press(["M-x"])
-    type("writing-mode")
-    press(["RET"])
-
-    assert Buffer.get_local(buf, "minor-modes") == ["writing-mode"]
-    assert Buffer.get_local(buf, "line-numbers") == "off"
-    assert Buffer.get_local(buf, "window-class") == "writing"
-    assert Buffer.get_local(buf, "render-mode") == "markdown"
-    assert Buffer.get_local(buf, "preview-renderer") == "markdown"
-    assert Buffer.get_local(buf, "visual-line-mode") == true
-    # writing-mode is presentation only: the panes and the group belong to
-    # writing-layout, which M-x write turns on
-    tree = Editor.render_state().tree
-    leaf = if tree.type == :leaf, do: tree, else: Enum.find(tree.children, &(&1.buffer == buf))
-    assert leaf.visual_line_mode == true
-    refute Buffer.get_local(buf, "group")
-    style = Buffer.get_local(buf, "style")
-    assert style =~ "--default-family:Spectral, Georgia, serif;"
-    assert style =~ "--writing-measure:62ch;"
-    assert Buffer.get_local(buf, "modeline-info") =~ ~r/^3 words · 1 min$/
-  end
-
-
   test "word count live-updates as you type" do
     buf = fresh_buffer("wr-live-#{System.unique_integer([:positive])}", "")
     eval!(~s{(run-command "write")})
@@ -131,6 +87,7 @@ defmodule Aimax.WritingTest do
                Buffer.get_local(buf, "modeline-info") == "4 words · 1 min"
              end)
   end
+
 
 
 end

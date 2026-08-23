@@ -32,7 +32,25 @@ under a second with no restart.
 
 ## The rule that decides what moves
 
-**Policy moves. Mechanism stays.**
+**Policy moves. Mechanism stays. Behaviour is policy; dispatch is not.**
+
+Do not split a package by how its ExUnit file was written. paredit and
+morg were first split at "does this test press a key", which left 37 and
+24 tests behind. That was the wrong axis: every paredit behaviour and
+every morg behaviour is a NAMED COMMAND, so a Scheme test sets a buffer
+and a point, runs the command, and reads the text. Pressing the key
+checked the same thing and paid the dispatch path to say so.
+
+What a key test still earns: that the key REACHES the command through
+prefixes, local versus global maps, remaps and minor-mode precedence;
+self-insert interleaved with a mode; undo batching; and anything hung off
+the key path rather than the command path. show-paren is the clean
+example — it does not fire on `run-command`, so Scheme cannot see it, and
+those two tests belong in ExUnit. That is a handful per keymap, not one
+per behaviour.
+
+A keymap is data. `*paredit-keys*` is a table of (KEY COMMAND FALLBACK),
+so ONE test reads it and asserts every key names a live command.
 
 Ask what the assertions read. If they read Scheme values —
 buffer-locals, catalog entries, group records, keymap rows — it is
@@ -162,12 +180,14 @@ pre-change commit as well. Two runs is not a baseline.
 
 ## State at handoff
 
-Commit `e0b5312`. Scheme suite: 214 tests, one red by design.
+Commit `de7182e`. Scheme suite: 259 tests, one red by design.
 
 In Scheme:
 
 | file | tests |
 |---|---|
+| `paredit-test.scm` | 34 (moved) |
+| `morg-test.scm` | 24 (moved) |
 | `graphql-test.scm` | 24 (moved) |
 | `apropos-test.scm` | 22 (moved) |
 | `code-structure-test.scm` | 13 (moved) |
@@ -180,12 +200,10 @@ In Scheme:
 | `mcp-policy-test.scm` | 4 (moved) |
 | `web-browse-test.scm` | 9 (moved) |
 | `mode-icon-test.scm` | 8 (moved) |
-| `morg-structure-test.scm` | 8 (moved) |
 | `chat-heal-test.scm` | 7 (moved) |
 | `keymap-test.scm` | 7 |
 | `edit-semantics-test.scm` | 6 (moved) |
 | `help-page-test.scm` | 5 (moved) |
-| `paredit-scan-test.scm` | 5 (moved) |
 | `permission-test.scm` | 6 (moved) |
 | `sentry-test.scm` | 6 (moved) |
 | `marginalia-test.scm` | 5 (moved) |
@@ -197,7 +215,7 @@ In Scheme:
 
 ## What moved, and what could not
 
-179 tests moved. `graphql_test`, `imenu_test`, `buffer_cache_test`,
+224 tests moved. `graphql_test`, `imenu_test`, `buffer_cache_test`,
 `code_structure_test` and `chat_heal_test` are gone entirely. Ten more
 files keep only what Scheme cannot hold: `apropos_test`, `skills_test`,
 `mode_icon_test`, `sentry_test`, `permission_test`, `web_browse_test`,
@@ -212,9 +230,19 @@ Three limits decided every split:
   `mode_icon_test`.
 - **Scheme cannot set an environment variable.** There is `getenv` and no
   `setenv`. This is what holds `keys_test` where it is.
-- **Scheme cannot wait for an answer.** There is no poll and no sleep, so
-  a test that starts an asynchronous job and waits for it stays in ExUnit:
-  the LSP and MCP subprocess tests, and the Substack conversion.
+- ~~Scheme cannot wait for an answer.~~ **Fixed.** `(wait-until PRED
+  &optional TIMEOUT-MS INTERVAL-MS)` polls and answers #t, or #f at the
+  deadline. It blocks its lane, the way `mcp-call!` does, and caps itself
+  at 10s so a runaway predicate stays inside Lane's 30s timeout. Roughly
+  36 tests were blocked on this alone — `chrome` 5, `lsp_scheme` 5,
+  `lsp_conn` 4, `llm_tools` 3, `lsp_primitives` 3, `watch` 3 — and none of
+  them have been moved yet.
+- **Helper names are global across test files.** load-tests! reads the
+  directory in order, so a `(define (t--foo ...))` in two files takes the
+  definition of whichever loaded last. Two morg files both defined
+  `t--morg!` with different arities and five tests died with "arity
+  mismatch" naming neither file. The bridge now fails on any name defined
+  twice. Prefer one test file per package.
 - **A registration is one-way.** `define-command`, `define-list-mode!`,
   `public!`, `define-tool!`, `allow-command-when!` and `catalog-register!`
   all write registries with no removal call. Tests that register clear the

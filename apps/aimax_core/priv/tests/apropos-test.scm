@@ -5,9 +5,8 @@
 ;;; the line on the search, on what an entry must carry, and on the
 ;;; cold-start path — an agent that has just connected and knows nothing.
 ;;;
-;;; Four tests stay in ExUnit. Two read Elixir modules directly
-;;; (Builtins.docs, SchemeAPI.docs). Two hold the metadata line: the
-;;; catalog reports what the source declares, and nothing else.
+;;; Two tests stay in ExUnit. Both read Elixir registration maps
+;;; directly (Builtins.docs, SchemeAPI.docs), which have no Scheme surface.
 
 (domain! 'testing)
 (effects! '(read))
@@ -100,6 +99,28 @@
                   '("destroy") "notmuch-trash destroys")
     (check-equal! (plist-get (catalog-entry 'function "llm") 'metadata-source)
                   "declared" "declared in the source, never guessed")))
+
+(deftest 'an-entry-declares-its-metadata-or-admits-it-does-not-know
+  "the catalog has two answers; a guessed third one reaches the permission policy"
+  (lambda ()
+    (check-equal!
+      (map (lambda (e) (plist-get e 'qualified-name))
+           (filter (lambda (e)
+                     (not (member (plist-get e 'metadata-source)
+                                  '("declared" "unknown"))))
+                   (catalog)))
+      '() "every entry says declared or unknown")))
+
+(deftest 'unstamped-bundled-declarations-do-not-multiply
+  "an unstamped entry asks before it acts, which is correct and is also a debt"
+  (lambda ()
+    ;; A new declaration stamps itself. Lower this number, never raise it.
+    (check-equal!
+      (length (filter (lambda (e)
+                        (and (equal? (plist-get e 'origin) "bundled")
+                             (equal? (plist-get e 'metadata-source) "unknown")))
+                      (catalog)))
+      587 "the unstamped bundled entries")))
 
 (deftest 'every-public-entry-carries-a-signature-and-a-category
   "the sig is parsed out of the doc, so the house way needs no extra work"

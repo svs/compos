@@ -1,47 +1,13 @@
 defmodule Aimax.AproposTest do
   @moduledoc """
-  The catalog tests that Scheme cannot hold.
+  The two catalog tests that Scheme cannot hold.
 
-  The search, the entries and the cold start are Scheme policy and live in
-  priv/tests/apropos-test.scm. Four tests stay here. Two read the Elixir
-  registration maps directly. Two hold the metadata line across the whole
-  catalog, which one package's Scheme test cannot see.
+  The search, the entries, the cold start and the metadata line are Scheme
+  policy and live in priv/tests/apropos-test.scm. These two stay here: they
+  read the Elixir registration maps, which have no Scheme surface.
   """
 
   use ExUnit.Case
-
-  alias Aimax.Core.Session
-
-  defp eval!(src) do
-    {:ok, printed} = Session.eval(src)
-    printed
-  end
-
-  describe "the catalog" do
-    test "an entry declares its metadata or admits it does not know" do
-      # The catalog has two answers. A guessed third answer reaches the
-      # permission policy, which is why there is no generator for one.
-      assert {:ok, "()"} =
-               Session.eval("""
-               (filter (lambda (e)
-                         (not (member (plist-get e 'metadata-source)
-                                      '("declared" "unknown"))))
-                       (catalog))
-               """)
-    end
-
-    test "unstamped bundled declarations do not multiply" do
-      # An unstamped entry reads "unknown", so the permission policy asks
-      # before it acts. That is correct, and it is also a debt. A new
-      # declaration stamps itself: lower this number, never raise it.
-      assert eval!("""
-             (length (filter (lambda (e)
-                               (and (equal? (plist-get e 'origin) "bundled")
-                                    (equal? (plist-get e 'metadata-source) "unknown")))
-                             (catalog)))
-             """) == "587"
-    end
-  end
 
   describe "internal primitives" do
     test "docs cover the registration maps exactly, both ways" do

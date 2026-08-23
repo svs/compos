@@ -207,9 +207,15 @@ buffer names.
 `checkpoint/1` (`buffer.ex:1187`) serializes flattened text today, and
 `restored_state/1` (`:1161`) calls `Rope.new(cp[:text])`. Add exported history bytes
 beside the text, so history survives eviction while the text keeps its current recovery
-path. `provenance.sqlite3` keeps the cell registry, the actors, and the recording policy. It
-no longer keeps revisions: the history is the record, and the log file is where it
-lives.
+path. There is no database. `provenance.sqlite3` and `Aimax.Core.ProvenanceStore` are gone.
+
+The store's last job was the recording policy, which is four fields: whether to record,
+which policy said so, the retention, and whether there is a gap. The buffer checkpoint
+already carried them, so they are read back from there. Everything else it held was
+either dead (proposals, `head_id`, `head_hash`) or a second copy of the buffer's text,
+written into a root revision that the weave already holds.
+
+`exqlite` stays in `mix.exs`. Nothing uses it today.
 
 ### The metadata plane
 
@@ -397,6 +403,8 @@ put a NIF call on the point path for no change in behaviour, so it waits for the
 that needs it.
 
 **Phase 5 - the history becomes durable, and is the only record. Done.**
+
+The database went with it. See "Persistence" above.
 
 `BufferHistoryStore` keeps one log file per buffer under `~/.aimax/history/`, a sequence
 of length-prefixed blobs: a snapshot first, updates after. Measured on an 85 KB source

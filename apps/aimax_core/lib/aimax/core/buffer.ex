@@ -50,7 +50,7 @@ defmodule Aimax.Core.Buffer do
 
   require Logger
 
-  alias Aimax.Core.{BufferHistoryStore, BufferStore, Events, ProvenanceStore, Rope, Text, TS}
+  alias Aimax.Core.{BufferHistoryStore, BufferStore, Events, Rope, Text, TS}
   alias Aimax.Core.BufferHistory, as: History
 
   @registry Aimax.Core.BufferRegistry
@@ -937,44 +937,51 @@ defmodule Aimax.Core.Buffer do
   def handle_call({:provenance_start, src, author, opts}, _from, state) do
     state = flush_provenance(state)
     actor = resolve_actor(author, src)
+    policy_source = policy_of(opts)
+
+    state = %{
+      state
+      | provenance: %{state.provenance | enabled: true, policy_source: policy_source, gap: false}
+    }
+
+    # Edits made while recording was off never reached the history, so it is
+    # behind the rope. One change bridges the interval, attributed to whoever
+    # started recording rather than to whoever typed: nobody recorded that.
     {text, state} = fetch_text(state)
-    reason = Keyword.get(opts, :reason, "explicit")
-    policy_source = Keyword.get(opts, :policy_source, "user")
 
-    {:ok, status} =
-      ProvenanceStore.start_recording(state.id, text, actor, reason, policy_source)
+    state =
+      state
+      |> mirror_update(text)
+      |> claim(%{actor | id: "system:gap", kind: "system"})
+      |> commit_history()
 
-    {:reply, :ok, %{state | provenance: provenance_state(status)} |> checkpoint_later()}
+    {:reply, :ok, checkpoint_later(state)}
   end
 
-  def handle_call({:provenance_stop, src, author, opts}, _from, state) do
+  def handle_call({:provenance_stop, _src, _author, opts}, _from, state) do
     state = flush_provenance(state)
-    actor = resolve_actor(author, src)
-    reason = Keyword.get(opts, :reason, "explicit")
-    policy_source = Keyword.get(opts, :policy_source, "user")
+    policy_source = policy_of(opts)
 
     if policy_source == "mode" and state.provenance.policy_source == "user" do
       {:reply, :ok, state}
     else
-      {:ok, status} =
-        ProvenanceStore.stop_recording(state.id, actor, reason, policy_source)
+      # Everything recorded so far is committed and on disk before recording
+      # stops, so stopping never loses the work behind it.
+      state = settle(state)
 
-      {:reply, :ok, %{state | provenance: provenance_state(status)} |> checkpoint_later()}
+      state = %{
+        state
+        | provenance: %{state.provenance | enabled: false, policy_source: policy_source}
+      }
+
+      {:reply, :ok, checkpoint_later(state)}
     end
   end
 
-  def handle_call({:provenance_checkpoint, src, author, opts}, _from, state) do
-    state = flush_provenance(state)
-    actor = resolve_actor(author, src)
-    reason = Keyword.get(opts, :reason, "explicit")
-
-    case ProvenanceStore.checkpoint(state.id, actor, reason) do
-      {:ok, status} ->
-        {:reply, :ok, %{state | provenance: provenance_state(status)} |> checkpoint_later()}
-
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
-    end
+  def handle_call({:provenance_checkpoint, _src, _author, _opts}, _from, state) do
+    if state.provenance.enabled,
+      do: {:reply, :ok, state |> settle() |> checkpoint_later()},
+      else: {:reply, {:error, :not_recording}, state}
   end
 
   def handle_call({:motion, motion}, _from, state) do
@@ -1176,67 +1183,29 @@ defmodule Aimax.Core.Buffer do
     end
   end
 
+  # The recording policy, which the checkpoint restores and this seeds. It is
+  # four fields about whether to record, not a record of anything: the history
+  # itself lives in the weave and its log.
+  defp attach_provenance(%{provenance: %{enabled: _}} = state), do: state
+
   defp attach_provenance(state) do
-    text = Rope.to_binary(state.rope)
-
-    actor =
-      local_actor(
-        "system:buffer",
-        "system",
-        "buffer",
-        if(state.path, do: :file_load, else: :buffer_create)
-      )
-
-    {:ok, status} =
-      ProvenanceStore.ensure_cell(
-        state.id,
-        text,
-        actor,
-        policy_source: "default",
-        retention: if(state.persistent, do: "durable", else: "session"),
-        context: context(buffer_group(state))
-      )
-
-    status =
-      cond do
-        status.head_hash == text_hash(text) ->
-          status
-
-        not status.recording ->
-          %{status | gap: true}
-
-        true ->
-          {:ok, recovered} =
-            ProvenanceStore.start_recording(
-              state.id,
-              text,
-              actor,
-              "restore-mismatch",
-              status.policy_source
-            )
-
-          recovered
-      end
-
-    %{state | provenance: provenance_state(status)}
-  end
-
-  defp provenance_state(status) do
     %{
-      enabled: status.recording,
-      cell_id: status.cell_id,
-      head_id: status.head_id,
-      head_hash: status.head_hash,
-      policy_source: status.policy_source,
-      retention: status.retention,
-      gap: status.gap
+      state
+      | provenance: %{
+          enabled: true,
+          policy_source: "default",
+          retention: if(state.persistent, do: "durable", else: "session"),
+          gap: false
+        }
     }
   end
 
-  defp text_hash(text) do
-    :crypto.hash(:sha256, text)
-    |> Base.encode16(case: :lower)
-  end
+  defp policy_of(opts), do: Keyword.get(opts, :policy_source, "user")
+
+  # A changeset id is local to this buffer: the authorship fold names it and
+  # the origins map resolves it. The history has its own ids for its own
+  # changes, and the two never have to agree.
+  defp new_changeset_id, do: Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
 
   # --- the Loro document -----------------------------------------------------
   #
@@ -1746,7 +1715,8 @@ defmodule Aimax.Core.Buffer do
       version: version,
       saved_version: saved_version,
       authors: restored_authors(cp),
-      origins: cp[:origins] || %{}
+      origins: cp[:origins] || %{},
+      provenance: cp[:provenance]
     }
   end
 
@@ -2193,7 +2163,7 @@ defmodule Aimax.Core.Buffer do
       # undo manager records only what happens after it exists. This runs on an
       # actor change, not per keystroke.
       state = ensure_undo_actor(state, actor)
-      id = ProvenanceStore.new_revision_id()
+      id = new_changeset_id()
 
       {id,
        %{
@@ -2288,10 +2258,6 @@ defmodule Aimax.Core.Buffer do
   defp flush_provenance(state) do
     %{state | pending_ops: [], pending_actor: nil, pending_group: nil, changeset_id: nil}
   end
-
-  # A buffer that belongs to no group records no group, rather than "none".
-  defp context(nil), do: %{}
-  defp context(group), do: %{group: group}
 
   defp adjust_point_insert(state, pos, len) do
     %{

@@ -187,8 +187,7 @@
         "no buffer"
         (string-append (if (prov-get st 'enabled) "recording" "stopped")
                        " . policy " (or (prov-get st 'policy_source) "?")
-                       (if (prov-get st 'gap) " . gap" "")
-                       " . head " (prov-short (prov-get st 'head_id))))))
+                       (if (prov-get st 'gap) " . gap" "")))))
 
 ;;; --- the verbs ----------------------------------------------------------------
 

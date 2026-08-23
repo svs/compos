@@ -94,6 +94,9 @@ defmodule Aimax.Core.Doc do
     DocNif.doc_register_actor(res, actor, exclude, max_steps)
   end
 
+  @doc "Whether this actor already has an undo manager."
+  def actor?(%__MODULE__{res: res}, actor), do: DocNif.doc_has_actor(res, actor)
+
   # ------------------------------------------------------------- mutation
 
   @doc "Insert at a byte offset. Returns the new byte length."

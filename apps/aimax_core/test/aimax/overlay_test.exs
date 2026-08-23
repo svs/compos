@@ -107,14 +107,16 @@ defmodule Aimax.OverlayTest do
     assert Buffer.overlays(b) == []
   end
 
-  test "undo swaps the rope without adjusting ranges (heal is the mode's job)" do
+  # Undo used to swap a whole rope snapshot in, leaving every range stale for
+  # the mode to heal. It now applies the change the document worked out, and
+  # the same adjustment every other edit uses moves the ranges with the text.
+  test "undo adjusts ranges like any other change" do
     b = new_buf("abc")
     :ok = Buffer.set_overlays(b, "t", [{0, 3, "f"}])
     :ok = Buffer.insert_at(b, 0, "Z")
     assert Buffer.overlays(b) == [{1, 4, "f"}]
     :ok = Buffer.undo(b)
     assert Buffer.text(b) == "abc"
-    # stale on purpose — the :undo change event triggers mode recompute
-    assert Buffer.overlays(b) == [{1, 4, "f"}]
+    assert Buffer.overlays(b) == [{0, 3, "f"}]
   end
 end

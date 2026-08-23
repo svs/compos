@@ -78,13 +78,11 @@ defmodule Aimax.Core.Buffer do
             point: 0,
             mark: nil,
             read_only: false,
-            history: [],
-            history_len: 0,
+            undo_run: false,
             locals: %{},
             goal_col: nil,
             last_insert_end: nil,
             insert_run: 0,
-            undo_next: 0,
             overlays: %{},
             overlay_gen: 0,
             hidden: %{},
@@ -95,6 +93,8 @@ defmodule Aimax.Core.Buffer do
             edit_log: [],
             edit_log_len: 0,
             provenance: nil,
+            doc_actor: nil,
+            doc_group: nil,
             changeset_id: nil,
             pending_ops: [],
             pending_actor: nil,
@@ -393,7 +393,8 @@ defmodule Aimax.Core.Buffer do
   def beginning_of_buffer(name), do: GenServer.call(via(name), {:motion, :bob})
   def end_of_buffer(name), do: GenServer.call(via(name), {:motion, :eob})
 
-  def undo(name), do: GenServer.call(via(name), :undo)
+  def undo(name, opts \\ []),
+    do: GenServer.call(via(name), {:undo, source(opts), author(opts)})
 
   @doc """
   All render inputs (text, point, mark, version, locals, overlays, hidden)
@@ -780,7 +781,7 @@ defmodule Aimax.Core.Buffer do
       {:reply, {:error, :out_of_bounds}, state}
     else
       # one snapshot for the pair: the whole replacement is one undo step
-      state = snapshot(state)
+      state = close_undo_step(state)
       state = if len > 0, do: do_delete(state, pos, len, src, author, false), else: state
       state = if text != "", do: do_insert(state, pos, text, src, author, false), else: state
       # never a self-insert run: the next typed char starts its own undo step
@@ -839,7 +840,7 @@ defmodule Aimax.Core.Buffer do
   end
 
   def handle_call(:doc, _from, state) do
-    state = flush_provenance(state)
+    state = state |> flush_provenance() |> close_undo_step()
     {:reply, state.doc, state}
   end
 
@@ -923,45 +924,35 @@ defmodule Aimax.Core.Buffer do
     {:reply, point, state |> Map.put(:point, point) |> checkpoint_later()}
   end
 
-  # Emacs undo: the pre-undo state is pushed onto the same history, so undos
-  # are themselves undoable and no state is ever lost. `undo_next` walks the
-  # chain during a run of consecutive undos; any other command breaks the
-  # chain, after which undo reverses the undos (redo).
-  def handle_call(:undo, _from, state) do
-    case Enum.at(state.history, state.undo_next) do
-      nil ->
-        {:reply, {:error, :no_undo}, state}
+  # Undo belongs to the actor that asks for it. The document reverts only that
+  # actor's operations and rebases them over everyone else's, so undoing your
+  # own typing no longer reverts the agent's work in the same buffer.
+  #
+  # The Emacs model survives on top of that. A run of consecutive undos keeps
+  # walking back; any other command breaks the run, after which undo replays
+  # the undos, which is Emacs's redo.
+  def handle_call({:undo, src, author}, _from, state) do
+    actor = resolve_actor(author, src)
 
-      {rope, point, mark, authors} ->
-        old_text = Rope.to_binary(state.rope)
-        new_text = Rope.to_binary(rope)
-        state = push_history(state, {state.rope, state.point, state.mark, state.authors})
+    if state.doc == nil do
+      {:reply, {:error, :no_undo}, state}
+    else
+      # Close the open step, so the work being undone is a complete change.
+      state = state |> close_undo_step() |> ensure_undo_actor(actor)
+      id = undo_scope(actor)
 
-        state = %{
-          state
-          | rope: rope,
-            bin: nil,
-            point: point,
-            mark: mark,
-            authors: authors,
-            version: state.version + 1,
-            # +1 for the push above, +1 to step past the restored state
-            undo_next: state.undo_next + 2,
-            goal_col: nil,
-            last_insert_end: nil,
-            insert_run: 0
-        }
+      case undo_or_redo(state, id) do
+        {:ok, _} ->
+          state = state |> apply_doc_text(actor) |> Map.put(:undo_run, true)
+          {:reply, :ok, checkpoint_later(state)}
 
-        # The compatibility journal marks an undo as a discontinuity.
-        state = mirror_update(state, new_text)
-        state = log_edit(state, "undo", 0, 0, 0)
-        actor = local_actor("system:undo", "system", "undo", :undo)
-        # Provenance keeps the complete replacement so replay stays exact.
-        {_changeset, state} = open_changeset(state, actor, :undo)
-        state = record_op(state, actor, 0, new_text, old_text, :undo)
-        state = ts_invalidate(state)
-        broadcast(state, 0, "", 0, :undo)
-        {:reply, :ok, checkpoint_later(state)}
+        :none ->
+          {:reply, {:error, :no_undo}, state}
+
+        {:error, reason} ->
+          Logger.error("undo failed for #{state.name}: #{inspect(reason)}")
+          {:reply, {:error, :no_undo}, state}
+      end
     end
   end
 
@@ -1065,7 +1056,7 @@ defmodule Aimax.Core.Buffer do
   end
 
   def handle_call(:break_undo_chain, _from, state),
-    do: {:reply, :ok, %{state | undo_next: 0}}
+    do: {:reply, :ok, %{state | undo_run: false}}
 
   # a save is not an edit, but the modified flag every view shows just
   # changed — repaint through the same phantom-change channel set_local
@@ -1204,16 +1195,38 @@ defmodule Aimax.Core.Buffer do
   defp mirroring?(%{provenance: %{enabled: true}}), do: true
   defp mirroring?(_), do: false
 
-  defp mirror_insert(state, pos, text) do
-    if mirroring?(state),
-      do: doc_result(state, Doc.insert(state.doc, pos, text), "insert"),
-      else: state
+  defp mirror_insert(state, pos, text, actor) do
+    if mirroring?(state) do
+      state
+      |> commit_on_actor_change(actor)
+      |> doc_result(Doc.insert(state.doc, pos, text), "insert")
+      |> claim(actor)
+    else
+      state
+    end
   end
 
-  defp mirror_delete(state, pos, len) do
-    if mirroring?(state),
-      do: doc_result(state, Doc.delete(state.doc, pos, len), "delete"),
-      else: state
+  defp mirror_delete(state, pos, len, actor) do
+    if mirroring?(state) do
+      state
+      |> commit_on_actor_change(actor)
+      |> doc_result(Doc.delete(state.doc, pos, len), "delete")
+      |> claim(actor)
+    else
+      state
+    end
+  end
+
+  # Who owns the operations sitting uncommitted in the document. Provenance
+  # clears `pending_actor` on its own schedule, so the document keeps its own
+  # answer and the two no longer have to flush together.
+  defp claim(state, actor), do: %{state | doc_actor: actor, doc_group: buffer_group(state)}
+
+  # A change holds one actor's work. A different actor closes the open one.
+  defp commit_on_actor_change(%{doc_actor: nil} = state, _actor), do: state
+
+  defp commit_on_actor_change(state, actor) do
+    if state.doc_actor.id == actor.id, do: state, else: commit_doc(state)
   end
 
   # Undo swaps the whole rope, so the document takes the result and works out
@@ -1233,20 +1246,18 @@ defmodule Aimax.Core.Buffer do
 
   defp doc_result(state, _ok, _what), do: state
 
-  defp commit_doc(%{pending_actor: nil} = state), do: state
+  defp commit_doc(%{doc_actor: nil} = state), do: state
 
   defp commit_doc(state) do
-    if mirroring?(state), do: do_commit_doc(state), else: state
-  end
+    if mirroring?(state) do
+      Doc.commit(
+        state.doc,
+        doc_origin(state.doc_actor),
+        doc_message(state.doc_actor, state.doc_group)
+      )
+    end
 
-  defp do_commit_doc(state) do
-    Doc.commit(
-      state.doc,
-      doc_origin(state.pending_actor),
-      doc_message(state.pending_actor, state.pending_group)
-    )
-
-    state
+    %{state | doc_actor: nil, doc_group: nil}
   end
 
   # The origin is the live label the undo managers filter on in Phase 3. The
@@ -1284,9 +1295,10 @@ defmodule Aimax.Core.Buffer do
             "document #{Kernel.byte_size(other)} B; resynchronizing from the rope"
         )
 
-        mirror_update(state, text)
-        commit_doc(%{state | pending_actor: resync_actor(), pending_group: buffer_group(state)})
         state
+        |> mirror_update(text)
+        |> claim(resync_actor())
+        |> commit_doc()
 
       {:error, reason} ->
         Logger.error("loro document unreadable in #{state.name}: #{inspect(reason)}")
@@ -1296,6 +1308,180 @@ defmodule Aimax.Core.Buffer do
 
   defp resync_actor,
     do: local_actor("system:resync", "system", "resync", :doc_resync)
+
+  # --- undo ------------------------------------------------------------------
+  #
+  # One commit is one undo step. The buffer decides where a step ends, exactly
+  # where it used to push a snapshot, and the document remembers the rest.
+  # A run of typed characters stays one step because nothing commits until the
+  # run breaks.
+
+  # An undo stack belongs to a scope, not to one actor id. A command that the
+  # user invoked edits as `system:editor`, and Emacs undoes it as the user's
+  # own work, so the user's scope owns every kind except the ones that act on
+  # their own: agents and processes.
+  #
+  # Agents share one scope with each other. No caller needs them apart yet.
+  defp undo_scope(%{kind: "agent"} = actor), do: actor.id
+  defp undo_scope(%{kind: "process"}), do: "process"
+  defp undo_scope(_actor), do: "user"
+
+  defp undo_excludes("user"), do: ~w(agent process)
+  defp undo_excludes("process"), do: ~w(user agent system mode legacy unknown)
+  defp undo_excludes(_agent), do: ~w(user process system mode legacy unknown)
+
+  defp close_undo_step(state), do: commit_doc(state)
+
+  defp ensure_undo_actor(%{doc: nil} = state, _actor), do: state
+
+  defp ensure_undo_actor(state, actor) do
+    scope = undo_scope(actor)
+
+    unless Doc.actor?(state.doc, scope) do
+      Doc.register_actor(state.doc, scope, undo_excludes(scope), @undo_limit)
+    end
+
+    state
+  end
+
+  # Emacs: a run of undos keeps walking back, and the first undo after the run
+  # breaks replays them instead.
+  defp undo_or_redo(state, id) do
+    {undos, redos} = Doc.undo_count(state.doc, id)
+
+    cond do
+      not state.undo_run and redos > 0 -> result(Doc.redo(state.doc, id))
+      undos > 0 -> result(Doc.undo(state.doc, id))
+      redos > 0 -> result(Doc.redo(state.doc, id))
+      true -> :none
+    end
+  end
+
+  defp result(true), do: {:ok, true}
+  defp result(false), do: :none
+  defp result({:error, reason}), do: {:error, reason}
+
+  # The document led, so the rope follows. Comparing the two texts gives one
+  # contiguous replacement that always reaches the right result. A step that
+  # touched separate regions produces a wider span than it strictly changed,
+  # which costs precision in the authorship fold and nothing in the text.
+  defp apply_doc_text(state, actor) do
+    {old, state} = fetch_text(state)
+
+    case Doc.text(state.doc) do
+      {:error, reason} ->
+        Logger.error("undo could not read the document in #{state.name}: #{inspect(reason)}")
+        state
+
+      new ->
+        case text_delta(old, new) do
+          nil -> state
+          {pos, removed, inserted} -> rewrite(state, actor, pos, removed, inserted)
+        end
+    end
+  end
+
+  defp rewrite(state, actor, pos, removed, inserted) do
+    old_rope = state.rope
+    rope = if removed > 0, do: Rope.delete(state.rope, pos, removed), else: state.rope
+    rope = if inserted != "", do: Rope.insert(rope, pos, inserted), else: rope
+    added = Kernel.byte_size(inserted)
+
+    state = %{state | rope: rope, bin: nil, version: state.version + 1}
+    state = ts_track(state, old_rope, pos, pos + removed, pos + added)
+
+    state =
+      state
+      |> adjust_point_delete(pos, removed)
+      |> adjust_ranges(&adjust_delete(&1, pos, removed), &adjust_delete(&1, pos, removed))
+      |> adjust_point_insert(pos, added)
+      |> adjust_ranges(&adjust_insert(&1, pos, added), &adjust_insert_stay(&1, pos, added))
+
+    # An undo authors what it restores. The actor asking for it is responsible
+    # for the text that comes back.
+    {changeset, state} = open_changeset(state, actor, :undo)
+    authors = if removed > 0, do: stamp_delete(state.authors, pos, removed), else: state.authors
+
+    # Only stamp bytes that came back. Stamping zero of them would leave an
+    # empty span behind, and an undo that only deletes leaves the surviving
+    # spans exactly as their authors wrote them.
+    authors =
+      if added > 0,
+        do: stamp_insert(authors, pos, added, stamp_id(actor, changeset)),
+        else: authors
+
+    state = %{
+      state
+      | authors: authors,
+        point: pos + added,
+        goal_col: nil,
+        last_insert_end: nil,
+        insert_run: 0
+    }
+
+    state = log_edit(state, actor_label(actor), pos, added, removed)
+    state = record_op(state, actor, pos, inserted, "", :undo)
+    state = ts_invalidate(state)
+    broadcast(state, 0, "", 0, :undo)
+    # The undo manager wrote and closed its own change, so the document holds
+    # no uncommitted work of ours.
+    %{state | doc_actor: nil, doc_group: nil}
+  end
+
+  # The one contiguous replacement between two texts: skip the common prefix,
+  # skip the common suffix, and what is left is the change. Both ends step back
+  # to a character boundary, because the rope floors a byte offset that lands
+  # inside a character and would otherwise cut one in half.
+  defp text_delta(same, same), do: nil
+
+  defp text_delta(old, new) do
+    prefix = char_floor(old, common_prefix(old, new, 0))
+
+    suffix =
+      common_suffix(
+        old,
+        new,
+        min(Kernel.byte_size(old) - prefix, Kernel.byte_size(new) - prefix)
+      )
+
+    suffix = suffix_floor(old, suffix)
+    removed = Kernel.byte_size(old) - prefix - suffix
+    inserted = binary_part(new, prefix, Kernel.byte_size(new) - prefix - suffix)
+    {prefix, removed, inserted}
+  end
+
+  defp common_prefix(old, new, i) do
+    limit = min(Kernel.byte_size(old), Kernel.byte_size(new))
+
+    if i < limit and :binary.at(old, i) == :binary.at(new, i),
+      do: common_prefix(old, new, i + 1),
+      else: i
+  end
+
+  defp common_suffix(old, new, limit, i \\ 0)
+  defp common_suffix(_old, _new, limit, i) when i >= limit, do: limit
+
+  defp common_suffix(old, new, limit, i) do
+    a = :binary.at(old, Kernel.byte_size(old) - 1 - i)
+    b = :binary.at(new, Kernel.byte_size(new) - 1 - i)
+    if a == b, do: common_suffix(old, new, limit, i + 1), else: i
+  end
+
+  # A UTF-8 continuation byte is 0b10xxxxxx. The prefix ends earlier and the
+  # suffix starts later, so both moves widen the changed span rather than
+  # cutting a character in half.
+  defp continuation?(bin, i),
+    do: i < Kernel.byte_size(bin) and Bitwise.band(:binary.at(bin, i), 0xC0) == 0x80
+
+  defp char_floor(_bin, 0), do: 0
+  defp char_floor(bin, i), do: if(continuation?(bin, i), do: char_floor(bin, i - 1), else: i)
+
+  defp char_ceil(bin, i), do: if(continuation?(bin, i), do: char_ceil(bin, i + 1), else: i)
+
+  defp suffix_floor(bin, suffix) do
+    start = char_ceil(bin, Kernel.byte_size(bin) - suffix)
+    Kernel.byte_size(bin) - start
+  end
 
   defp new_id, do: Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
 
@@ -1378,7 +1564,13 @@ defmodule Aimax.Core.Buffer do
   # write no state: a dormant, unsaved, or discarded buffer still owns its
   # history.
   defp write_checkpoint(state),
-    do: state |> flush_provenance() |> verify_doc() |> prune_origins() |> write_state_checkpoint()
+    do:
+      state
+      |> flush_provenance()
+      |> close_undo_step()
+      |> verify_doc()
+      |> prune_origins()
+      |> write_state_checkpoint()
 
   defp write_state_checkpoint(%{discard: true} = state), do: state
   defp write_state_checkpoint(%{persistent: false} = state), do: state
@@ -1486,7 +1678,7 @@ defmodule Aimax.Core.Buffer do
     len = Kernel.byte_size(text)
     actor = resolve_actor(author, src)
     author = actor_label(actor)
-    state = if snap?, do: maybe_snapshot_insert(state, pos, text, src), else: state
+    state = if snap?, do: maybe_close_undo_step(state, pos, text, src), else: state
     old_rope = state.rope
 
     state = %{
@@ -1506,7 +1698,7 @@ defmodule Aimax.Core.Buffer do
     # work, and a document operation applied before that flush would be
     # committed under the previous actor's name.
     {changeset, state} = open_changeset(state, actor, src)
-    state = mirror_insert(state, pos, text)
+    state = mirror_insert(state, pos, text, actor)
     state = %{state | authors: stamp_insert(state.authors, pos, len, stamp_id(actor, changeset))}
     state = log_edit(state, author, pos, len, 0)
     state = record_op(state, actor, pos, text, "", src)
@@ -1515,7 +1707,7 @@ defmodule Aimax.Core.Buffer do
       state
       | goal_col: nil,
         last_insert_end: pos + len,
-        undo_next: 0
+        undo_run: false
     }
 
     broadcast(state, pos, text, 0, src)
@@ -1524,7 +1716,7 @@ defmodule Aimax.Core.Buffer do
 
   # amalgamate consecutive single-char self-inserts into one undo step
   # (Emacs groups ~20) — undoing a typed word char-by-char is misery
-  defp maybe_snapshot_insert(state, pos, text, :user)
+  defp maybe_close_undo_step(state, pos, text, :user)
        when Kernel.byte_size(text) == 1 and text != "\n" do
     # amalgamate only onto a previous self-insert (insert_run > 0) â never
     # amalgamate only onto a previous self-insert (insert_run > 0) — never
@@ -1532,17 +1724,17 @@ defmodule Aimax.Core.Buffer do
     if state.last_insert_end == pos and state.insert_run > 0 and state.insert_run < 20 do
       %{state | insert_run: state.insert_run + 1}
     else
-      %{snapshot(state) | insert_run: 1}
+      %{close_undo_step(state) | insert_run: 1}
     end
   end
 
-  defp maybe_snapshot_insert(state, _pos, _text, _src),
-    do: %{snapshot(state) | insert_run: 0}
+  defp maybe_close_undo_step(state, _pos, _text, _src),
+    do: %{close_undo_step(state) | insert_run: 0}
 
   defp do_delete(state, pos, len, src, author, snap? \\ true) do
     actor = resolve_actor(author, src)
     author = actor_label(actor)
-    state = if snap?, do: snapshot(state), else: state
+    state = if snap?, do: close_undo_step(state), else: state
     old_rope = state.rope
     deleted = Rope.slice(old_rope, pos, len)
 
@@ -1558,11 +1750,11 @@ defmodule Aimax.Core.Buffer do
     state = adjust_ranges(state, &adjust_delete(&1, pos, len), &adjust_delete(&1, pos, len))
     # After open_changeset, for the reason given in do_insert.
     {_changeset, state} = open_changeset(state, actor, src)
-    state = mirror_delete(state, pos, len)
+    state = mirror_delete(state, pos, len, actor)
     state = %{state | authors: stamp_delete(state.authors, pos, len)}
     state = log_edit(state, author, pos, 0, len)
     state = record_op(state, actor, pos, "", deleted, src)
-    state = %{state | goal_col: nil, last_insert_end: nil, insert_run: 0, undo_next: 0}
+    state = %{state | goal_col: nil, last_insert_end: nil, insert_run: 0, undo_run: false}
     broadcast(state, pos, "", len, src)
     state
   end
@@ -1571,18 +1763,6 @@ defmodule Aimax.Core.Buffer do
 
   # trim lazily at 2x the cap: amortizes the O(limit) Enum.take so a burst of
   # keystrokes doesn't rebuild a 500-cons list on every edit
-  defp snapshot(state),
-    do: push_history(state, {state.rope, state.point, state.mark, state.authors})
-
-  defp push_history(state, entry) do
-    history = [entry | state.history]
-    len = state.history_len + 1
-
-    if len > @undo_limit * 2,
-      do: %{state | history: Enum.take(history, @undo_limit), history_len: @undo_limit},
-      else: %{state | history: history, history_len: len}
-  end
-
   # --- authorship ------------------------------------------------------------
 
   # The durable actor is structured. actor_label/1 preserves the old author
@@ -1712,12 +1892,14 @@ defmodule Aimax.Core.Buffer do
   # there, because they are different work; the label view merges them,
   # because they read the same.
 
-  # An origin outlives its bytes only until the next checkpoint. Undo can
-  # bring a span back, so the history holds a claim on its origin too.
+  # An origin outlives its bytes only until the next checkpoint. Undo used to
+  # restore an old span wholesale, so the snapshot stack held a claim on its
+  # origin. It no longer does: an undo stamps what it restores with the actor
+  # that asked for it, so only the live spans keep their origins.
   defp prune_origins(state) do
     live =
-      [state.authors | Enum.map(state.history, fn {_, _, _, authors} -> authors end)]
-      |> Enum.flat_map(fn spans -> Enum.map(spans, fn {_, _, id} -> id end) end)
+      state.authors
+      |> Enum.map(fn {_, _, id} -> id end)
       |> MapSet.new()
 
     %{state | origins: Map.take(state.origins, MapSet.to_list(live))}
@@ -1774,6 +1956,10 @@ defmodule Aimax.Core.Buffer do
       {state.changeset_id, state}
     else
       state = flush_provenance(state)
+      # Before the actor's first operation reaches the document, because an
+      # undo manager records only what happens after it exists. This runs on an
+      # actor change, not per keystroke.
+      state = ensure_undo_actor(state, actor)
       id = ProvenanceStore.new_revision_id()
 
       {id,
@@ -1856,7 +2042,6 @@ defmodule Aimax.Core.Buffer do
 
   defp flush_provenance(state) do
     ops = Enum.reverse(state.pending_ops)
-    state = commit_doc(state)
     {text, state} = fetch_text(state)
 
     result =

@@ -87,12 +87,21 @@ The existing `source` becomes the Loro origin string: `user`, `agent:codex`, `ed
   and it carries the `undo` origin. Without the exclusion, one actor's undo lands on the
   other actor's stack, so the other actor's next undo reverses it and restores work that
   was just removed. Phase 0 reproduced this and confirmed the exclusion fixes it.
-- `group_start` / `group_end` handle an agent editing mid-group: "If the remote changes
-  are conflicting we split the undo item and close the group."
-- `set_merge_interval(ms)` groups typing.
+- **One commit is one undo step.** Phase 3 measured it: three commits give three steps,
+  and eleven characters inside one commit give one. So the buffer keeps deciding where a
+  step ends, exactly where it used to push a snapshot, and a run of typed characters
+  stays one step because nothing commits until the run breaks. `group_start` and
+  `group_end` are not needed for this and are not used.
+- `set_merge_interval(0)` on every manager, so elapsed time never groups anything on top
+  of the buffer's own boundaries.
 - `set_max_undo_steps(500)` to match today's `@undo_limit`. The default is 100.
 - `undo` is local-only by construction: it reverts the bound peer's operations and
   rebases them over concurrent work, rather than restoring a stale whole-text snapshot.
+
+**A stack belongs to a scope, not to an actor id.** A command the user invoked edits as
+`system:editor`, and Emacs undoes it as the user's own work. So the user's scope owns
+every kind except the two that act on their own, `agent` and `process`. Agents share one
+scope with each other; no caller needs them apart yet.
 
 This retires `state.history`, `snapshot/1`, and the wholesale rope swap at `:927`.
 
@@ -303,9 +312,41 @@ The invariant check materializes the document text at every checkpoint, which co
 about 65 us for a 343 KB buffer at a 1.5 second cadence. That is affordable while the
 rope is authoritative and worth keeping until the mirror has proven itself.
 
-**Phase 3 - undo moves to Loro.** Per-actor `UndoManager`, `agent:` excluded from the
-human's stack. Retire `state.history` and `snapshot/1`. This is the phase that changes
-observable behaviour and the undo tests.
+**Phase 3 - undo moves to Loro. Done.** Undo runs through the asking actor's
+`UndoManager`, so it reverts only that actor's operations and rebases them over
+everyone else's. `state.history`, `snapshot/1`, and `push_history` are gone. 19 tests in
+`buffer_doc_test.exs`.
+
+Less changed than the plan expected. Both Emacs undo-model tests in `editor_test` pass
+untouched: a run of undos still walks back, and a command that breaks the run still turns
+the next undo into a redo. Only one existing test changed, and it changed for the better,
+described below.
+
+Three things had to be worked out while building it.
+
+**The document commit had to come off the provenance flush.** `continues?` is false for
+every non-batchable source, so an `:editor` or agent edit opens a changeset per
+operation. While the document committed inside `flush_provenance`, a `replace_range`
+split into two changes, and its delete and insert became two undo steps. The buffer now
+tracks `doc_actor`, the actor whose operations sit uncommitted in the document, and
+commits on an actor change, at an undo boundary, and at a checkpoint. Provenance keeps
+its own schedule.
+
+**Undo applies a change rather than restoring a snapshot.** Comparing the rope's text
+with the document's gives one contiguous replacement, which then runs through the same
+range adjustment as any other edit. Overlays and the point now move with the text through
+an undo instead of going stale for a mode to heal. `overlay_test` asserted the staleness
+and now asserts the tracking.
+
+**An undo authors only what it brings back.** Text restored by an undo is stamped with
+the actor that asked for it. An undo that only deletes stamps nothing, so surviving spans
+keep the authors that wrote them, and `author_test` passes unchanged. The full record
+stays in the oplog either way: the original change and the undo are both there with their
+own actors.
+
+A checkpoint closes the open undo step, so a typing run crossing the 1.5 second boundary
+becomes two steps rather than one. Emacs already caps a run at 20 characters, so this is
+a comparable granularity rather than a new kind of split.
 
 **Phase 4 - cursors.** The human's point and mark become Loro cursors, retiring
 `adjust_point_insert` and `adjust_ranges`. Agent read-to-edit ranges take a cursor pair
@@ -320,9 +361,8 @@ because the oplog grows without bound per buffer.
 
 ## Risks
 
-- **Undo semantics change in Phase 3, deliberately.** Human undo will skip agent edits.
-  That is the point, and the undo tests must be rewritten to assert it rather than
-  preserved.
+- **Undo semantics changed in Phase 3, deliberately.** Human undo skips agent edits, and
+  overlays now track through an undo. The Emacs undo and redo model survived unchanged.
 - **Divergence.** Two representations can disagree. The hash check at checkpoint
   boundaries is the detector; rebuild the rope from the doc to fix it. Log rather than
   crash, matching `flush_provenance` (`buffer.ex:1714`).

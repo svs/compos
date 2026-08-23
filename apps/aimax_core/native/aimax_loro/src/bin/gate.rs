@@ -234,6 +234,46 @@ fn probe_durable_actor() {
     }
 }
 
+/// Phase 3 asks: is one commit one undo step? Emacs granularity depends on it.
+/// `type("ab") RET type("cd")` must undo in three steps, not one.
+fn probe_undo_granularity() {
+    let doc = LoroDoc::new();
+    doc.set_peer_id(1).unwrap();
+    let t = doc.get_text("text");
+    let mut m = UndoManager::new(&doc);
+    m.set_merge_interval(0);
+
+    for chunk in ["ab", "\n", "cd"] {
+        doc.set_next_commit_origin("user");
+        let at = t.len_utf8();
+        t.insert_utf8(at, chunk).unwrap();
+        doc.commit();
+    }
+
+    println!("\n  undo granularity: one commit per step");
+    println!("    start                {:?}   steps {}", t.to_string(), m.undo_count());
+    for _ in 0..3 {
+        m.undo().unwrap();
+        println!("    after undo           {:?}", t.to_string());
+    }
+
+    // And the amalgamated case: many characters inside one commit.
+    let doc2 = LoroDoc::new();
+    doc2.set_peer_id(1).unwrap();
+    let t2 = doc2.get_text("text");
+    let mut m2 = UndoManager::new(&doc2);
+    m2.set_merge_interval(0);
+    for c in "hello world".chars() {
+        let at = t2.len_utf8();
+        t2.insert_utf8(at, &c.to_string()).unwrap();
+    }
+    doc2.set_next_commit_origin("user");
+    doc2.commit();
+    println!("    11 chars, one commit {:?}   steps {}", t2.to_string(), m2.undo_count());
+    m2.undo().unwrap();
+    println!("    after one undo       {:?}", t2.to_string());
+}
+
 fn main() {
     println!("Loro Phase 0 gate. Keystroke budget is {} us.\n", BUDGET_US);
 
@@ -252,4 +292,5 @@ fn main() {
     probe_per_actor_undo();
     probe_agent_undo_isolation();
     probe_durable_actor();
+    probe_undo_granularity();
 }

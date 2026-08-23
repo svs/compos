@@ -118,6 +118,59 @@ defmodule Aimax.BufferDocTest do
     end
   end
 
+  # The bug Phase 3 exists to fix. Before it, `state.history` was one linear
+  # stack across every actor, so undoing your own typing first undid whatever
+  # an agent had written into the buffer since.
+  describe "undo belongs to the actor" do
+    test "the human's undo skips the agent's edit" do
+      name = new_buffer("")
+      Buffer.append(name, "human", source: :user)
+      Buffer.append(name, " agent", source: {:agent, "codex"})
+      assert Buffer.text(name) == "human agent"
+
+      assert :ok = Buffer.undo(name, source: :user)
+      assert Buffer.text(name) == " agent"
+      assert_mirrored(name)
+    end
+
+    test "the agent's work survives repeated human undo" do
+      name = new_buffer("")
+      Buffer.append(name, "one", source: :user)
+      Buffer.append(name, "AGENT", source: {:agent, "codex"})
+      Buffer.append(name, "two", source: :user)
+
+      Buffer.undo(name, source: :user)
+      Buffer.undo(name, source: :user)
+      assert Buffer.text(name) == "AGENT"
+    end
+
+    test "an agent undoes its own work and leaves the human's alone" do
+      name = new_buffer("")
+      Buffer.append(name, "human", source: :user)
+      Buffer.append(name, "AGENT", source: {:agent, "codex"})
+
+      assert :ok = Buffer.undo(name, source: {:agent, "codex"})
+      assert Buffer.text(name) == "human"
+    end
+
+    # A command edits as system:editor on the user's behalf, so Emacs undoes
+    # it as the user's own work.
+    test "a command's edit is the user's to undo" do
+      name = new_buffer("")
+      Buffer.append(name, "typed", source: :user)
+      Buffer.append(name, " by a command", source: :editor)
+
+      assert :ok = Buffer.undo(name, source: :user)
+      assert Buffer.text(name) == "typed"
+    end
+
+    test "an actor with nothing to undo says so" do
+      name = new_buffer("start")
+      Buffer.append(name, " agent", source: {:agent, "codex"})
+      assert {:error, :no_undo} = Buffer.undo(name, source: :user)
+    end
+  end
+
   describe "attribution" do
     test "a change carries the actor that made it" do
       name = new_buffer("")

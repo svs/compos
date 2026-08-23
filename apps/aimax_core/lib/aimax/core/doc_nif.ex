@@ -5,6 +5,7 @@ defmodule Aimax.Core.DocNif do
   def doc_new(_peer), do: :erlang.nif_error(:nif_not_loaded)
   def doc_open(_peer, _snapshot), do: :erlang.nif_error(:nif_not_loaded)
   def doc_register_actor(_d, _actor, _exclude, _max), do: :erlang.nif_error(:nif_not_loaded)
+  def doc_has_actor(_d, _actor), do: :erlang.nif_error(:nif_not_loaded)
 
   def doc_insert(_d, _pos, _text), do: :erlang.nif_error(:nif_not_loaded)
   def doc_delete(_d, _pos, _len), do: :erlang.nif_error(:nif_not_loaded)

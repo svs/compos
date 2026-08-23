@@ -105,12 +105,20 @@ fn doc_register_actor(
     }
     let mut m = UndoManager::new(&st.doc);
     m.set_max_undo_steps(max_steps);
+    // One commit is one undo step, so the buffer's commit boundaries already
+    // decide what undoes together. Time must not group anything on top.
+    m.set_merge_interval(0);
     m.add_exclude_origin_prefix(UNDO_ORIGIN);
     for prefix in &exclude {
         m.add_exclude_origin_prefix(prefix);
     }
     st.undo.insert(actor, m);
     Ok(atoms::ok())
+}
+
+#[rustler::nif]
+fn doc_has_actor(res: ResourceArc<DocRes>, actor: String) -> NifResult<bool> {
+    Ok(state(&res)?.undo.contains_key(&actor))
 }
 
 // ----------------------------------------------------------------- mutation

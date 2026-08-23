@@ -2324,7 +2324,25 @@ defmodule Aimax.Core.Buffer do
 
   # groups.scm owns the policy; the buffer-local is the mechanism, and this
   # reads it without asking Scheme, because a mutation cannot call back in.
-  defp buffer_group(state), do: state.locals["group"]
+  # groups.scm owns the policy; the buffer-local is the mechanism, and this
+  # reads it without asking Scheme, because a mutation cannot call back in.
+  #
+  # A chat holds one `group-id`. A work buffer holds a `group-ids` list, and
+  # `buffer-group` in groups.scm prefers whichever of them the frame is
+  # currently showing. A record must not depend on which frame someone was
+  # looking at, so the first id is the answer here.
+  #
+  # `group` is the local both of those replaced. `buffer-add-group!` sets it to
+  # false on every join, so a buffer that still carries a string there has not
+  # been touched since the migration.
+  defp buffer_group(state) do
+    case state.locals do
+      %{"group-id" => id} when is_binary(id) -> id
+      %{"group-ids" => [id | _]} when is_binary(id) -> id
+      %{"group" => name} when is_binary(name) -> name
+      _ -> nil
+    end
+  end
 
   # Only keyboard typing batches. Everything else arrives whole.
   defp batchable?(:user), do: true

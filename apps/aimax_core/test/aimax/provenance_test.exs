@@ -60,6 +60,13 @@ defmodule Aimax.ProvenanceTest do
   end
 
   defp actor_of(change), do: Jason.decode!(change.message)["actor"]
+
+  # The opaque id groups.scm gave this buffer's group, which is what a record
+  # keeps: a name can be edited, an id cannot.
+  defp group_id(name) do
+    {:ok, printed} = Session.eval(~s{(buffer-group "#{name}")})
+    String.trim(printed, "\"")
+  end
   # A raw change carries its operations directly; a shaped row nests them.
   defp inserted(%{ops: ops}), do: Enum.map_join(ops, & &1.inserted)
   defp inserted(%{operation: %{ops: ops}}), do: Enum.map_join(ops, & &1.inserted)
@@ -219,28 +226,45 @@ defmodule Aimax.ProvenanceTest do
       assert typed.parent_id == nil
     end
 
+    # Through groups.scm, the way a buffer really joins one. Setting the old
+    # `group` local by hand was how this test passed while the buffers people
+    # actually use recorded nothing.
     test "a change records the group the work happened in" do
       name = new_buffer("group", "")
-      :ok = Buffer.set_local(name, "group", "inbox")
+      {:ok, _} = Session.eval(~s{(buffer-add-group! "#{name}" "inbox")})
       :ok = Buffer.insert_at(name, 0, "a", source: :user)
       :ok = Buffer.checkpoint_now(name)
 
       assert [change] = changes(name)
-      assert change.metadata.group == "inbox"
+      assert change.metadata.group == group_id(name)
+      assert is_binary(change.metadata.group)
+    end
+
+    test "a chat records the group that owns it" do
+      name = new_buffer("chatgroup", "")
+      :ok = Buffer.set_local(name, "group-id", "grp:7")
+      :ok = Buffer.insert_at(name, 0, "a", source: :user)
+      :ok = Buffer.checkpoint_now(name)
+
+      assert [change] = changes(name)
+      assert change.metadata.group == "grp:7"
     end
 
     test "a move to another group closes the change behind it" do
       name = new_buffer("regroup", "")
-      :ok = Buffer.set_local(name, "group", "inbox")
+      {:ok, _} = Session.eval(~s{(buffer-add-group! "#{name}" "inbox")})
+      first_group = group_id(name)
       :ok = Buffer.insert_at(name, 0, "a", source: :user)
 
-      :ok = Buffer.set_local(name, "group", "archive")
+      {:ok, _} = Session.eval(~s{(buffer-remove-group! "#{name}" "inbox")})
+      {:ok, _} = Session.eval(~s{(buffer-add-group! "#{name}" "archive")})
       :ok = Buffer.insert_at(name, 1, "b", source: :user)
       :ok = Buffer.checkpoint_now(name)
 
       assert [first, second] = changes(name)
-      assert first.metadata.group == "inbox"
-      assert second.metadata.group == "archive"
+      assert first.metadata.group == first_group
+      assert second.metadata.group == group_id(name)
+      refute first.metadata.group == second.metadata.group
       assert second.parent_id == first.id
     end
 

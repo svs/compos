@@ -57,6 +57,27 @@ defmodule Aimax.SchemeSuiteTest do
     refute out == "()", "the canary passed, so a failing test reports as passing"
   end
 
+  # Test files share one namespace: load-tests! loads them in directory
+  # order, so a helper defined in two files silently takes the definition
+  # of whichever loaded last. Two morg files both defined t--morg! with
+  # different arities, and five tests died with "arity mismatch" pointing
+  # at neither file. Names are checked here because it is a fact about the
+  # files on disk, not about any one test.
+  test "no two test files define the same helper" do
+    dir = Path.join(:code.priv_dir(:aimax_core), "tests")
+
+    owners =
+      for path <- Path.wildcard(Path.join(dir, "*.scm")),
+          [_, name] <- Regex.scan(~r/^\(define \(([^\s)]+)/m, File.read!(path)),
+          reduce: %{} do
+        acc -> Map.update(acc, name, [Path.basename(path)], &[Path.basename(path) | &1])
+      end
+
+    clashes = for {name, files} <- owners, length(Enum.uniq(files)) > 1, do: {name, files}
+
+    assert clashes == [], "defined in more than one test file: #{inspect(clashes)}"
+  end
+
   test "the Scheme suite passes" do
     found = names()
 

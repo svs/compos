@@ -1,9 +1,12 @@
 defmodule Aimax.MorgTest do
   @moduledoc """
-  Drives morg-mode through the same key/command path the GUI uses.
+  What morg-mode does that Scheme cannot reach: a block that runs a shell
+  or tangles to disk, and the preview toggle on C-c C-v.
 
-  The Markdown structural API — outline, find, read, replace and insert —
-  is Scheme and lives in priv/tests/morg-structure-test.scm.
+  The mode itself is Scheme — folding, the TODO cycle, the org faces, the
+  fenced-code grammar and the Markdown structural API all live in
+  priv/tests/morg-test.scm, where a test runs the command that the key
+  runs and reads the buffer back.
   """
 
   use ExUnit.Case
@@ -29,13 +32,6 @@ defmodule Aimax.MorgTest do
   #  0123 4..8 9......17 ...   24.. 28..
   defp fixture, do: "# a\nbody\n## child\ncbody\n# b\ntail\n"
 
-  test "morg-mode enables writing-mode, which keeps visual lines on" do
-    buf = morg_buffer(fixture())
-
-    assert Buffer.get_local(buf, "visual-line-mode") == true
-    assert "writing-mode" in Buffer.get_local(buf, "minor-modes")
-  end
-
   # markdown-mode does not exist: no define-mode registers it, and set-mode!
   # has no teardown hook, so morg's folds, keys, and overlays survive the
   # switch. The contract below is the design; building it needs the mode, a
@@ -53,6 +49,7 @@ defmodule Aimax.MorgTest do
     press(["C-c", "C-v"])
     assert Buffer.get_local(buf, "render-mode") == "markdown"
   end
+
 
   @tag :skip
   test "switching from morg to markdown removes Morg behavior" do
@@ -77,169 +74,6 @@ defmodule Aimax.MorgTest do
     refute Enum.any?(Buffer.overlays(buf), fn {_, _, face} -> face =~ "org-level" end)
   end
 
-  test "morg-mode fontifies headings with the org level faces" do
-    buf = morg_buffer(fixture())
-    assert Buffer.get_local(buf, "mode-name") == "morg-mode"
-    # a fenced block resolves its own grammar (morg-ts-lang); the buffer
-    # itself carries none, and no markdown grammar ships
-
-    ovs = Buffer.overlays(buf)
-    assert {0, 3, "org-level-1"} in ovs
-    assert {9, 17, "org-level-2"} in ovs
-  end
-
-  test "C-c C-t cycles TODO, DONE, and no state" do
-    buf = morg_buffer("# task\n")
-    :ok = Buffer.goto(buf, 0)
-
-    press(["C-c", "C-t"])
-    assert Buffer.text(buf) == "# TODO task\n"
-    assert {2, 6, "org-todo"} in Buffer.overlays(buf)
-
-    press(["C-c", "C-t"])
-    assert Buffer.text(buf) == "# DONE task\n"
-    assert {2, 6, "org-done"} in Buffer.overlays(buf)
-
-    press(["C-c", "C-t"])
-    assert Buffer.text(buf) == "# task\n"
-    refute Enum.any?(Buffer.overlays(buf), fn {_, _, face} ->
-             face in ["org-todo", "org-done"]
-           end)
-  end
-
-  test "C-c C-t does not change a body line" do
-    text = "# task\nbody\n"
-    buf = morg_buffer(text)
-    :ok = Buffer.goto(buf, 8)
-
-    press(["C-c", "C-t"])
-    assert Buffer.text(buf) == text
-  end
-
-  test "TODO cycling keeps a folded task folded and undoes in one step" do
-    buf = morg_buffer("# task\nbody\n")
-    :ok = Buffer.goto(buf, 0)
-    press("TAB")
-    assert Buffer.hidden(buf) == [{6, 12}]
-
-    press(["C-c", "C-t"])
-    assert Buffer.text(buf) == "# TODO task\nbody\n"
-    assert Buffer.hidden(buf) == [{11, 17}]
-
-    press("C-/")
-    assert Buffer.text(buf) == "# task\nbody\n"
-  end
-
-  test "TAB folds and unfolds the heading subtree at point" do
-    buf = morg_buffer(fixture())
-    :ok = Buffer.goto(buf, 0)
-
-    press("TAB")
-    # "# a" subtree = body + child + cbody (bytes 3..23)
-    assert Buffer.hidden(buf) == [{3, 23}]
-
-    press("TAB")
-    assert Buffer.hidden(buf) == []
-  end
-
-  test "S-TAB cycles overview / show-all" do
-    buf = morg_buffer(fixture())
-    :ok = Buffer.goto(buf, 0)
-
-    press("S-TAB")
-    refute Buffer.hidden(buf) == []
-
-    press("S-TAB")
-    assert Buffer.hidden(buf) == []
-  end
-
-  test "M-x morg-outline folds every heading body" do
-    buf = morg_buffer(fixture())
-    :ok = Buffer.goto(buf, 9)
-    press("TAB")
-    :ok = Buffer.goto(buf, 5)
-
-    press("M-x")
-    type("morg-outline")
-    press("RET")
-
-    assert Buffer.get_local(buf, "morg-folds") == [0, 9, 24]
-    assert Buffer.hidden(buf) == [{3, 8}, {17, 23}, {27, 33}]
-    assert Buffer.point(buf) == 0
-
-    press("M-x")
-    type("morg-outline")
-    press("RET")
-
-    assert Buffer.get_local(buf, "morg-folds") == [0, 9, 24]
-  end
-
-  test "TAB toggles one heading without leaving outline mode" do
-    buf = morg_buffer(fixture())
-
-    press("M-x")
-    type("morg-outline")
-    press("RET")
-
-    :ok = Buffer.goto(buf, 9)
-    press("TAB")
-
-    assert Buffer.get_local(buf, "morg-outline") == true
-    assert Buffer.get_local(buf, "morg-folds") == [0, 24]
-    assert Buffer.hidden(buf) == [{3, 8}, {27, 33}]
-
-    press("TAB")
-    assert Buffer.hidden(buf) == [{3, 8}, {17, 23}, {27, 33}]
-  end
-
-  test "TAB on a fence folds the code block" do
-    buf = morg_buffer("```elixir\n1 + 1\n```\n# next\n")
-    :ok = Buffer.goto(buf, 0)
-
-    press("TAB")
-    # open fence eol (9) .. end of the close fence line (19)
-    assert Buffer.hidden(buf) == [{9, 19}]
-
-    press("TAB")
-    assert Buffer.hidden(buf) == []
-  end
-
-  test "TAB inside a block body folds the enclosing block" do
-    buf = morg_buffer("```elixir\n1 + 1\n```\n")
-    :ok = Buffer.goto(buf, 12)
-
-    press("TAB")
-    assert Buffer.hidden(buf) == [{9, 19}]
-  end
-
-  test "a # line inside a fenced block is not a heading" do
-    buf = morg_buffer("# real\n```sh\n# comment\n```\n")
-
-    ovs = Buffer.overlays(buf)
-    assert {0, 6, "org-level-1"} in ovs
-    refute Enum.any?(ovs, fn {s, _, f} -> s == 13 and f =~ "org-level" end)
-
-    # the fold from the heading swallows the whole block: no second heading
-    :ok = Buffer.goto(buf, 0)
-    press("TAB")
-    assert Buffer.hidden(buf) == [{6, 27}]
-  end
-
-  test "fenced code renders with the theme's ts faces" do
-    buf = morg_buffer("```elixir\ndef foo do\n  :ok\nend\n```\n")
-
-    assert Enum.any?(Buffer.overlays(buf), fn {_, _, f} ->
-             String.starts_with?(f, "ts-")
-           end)
-  end
-
-  test "an unknown language renders plain, without error" do
-    buf = morg_buffer("```brainfuck\n+++\n```\n")
-
-    refute Enum.any?(Buffer.overlays(buf), fn {_, _, f} ->
-             String.starts_with?(f, "ts-")
-           end)
-  end
 
   test "C-c C-c runs a sh block into a result block" do
     buf = morg_buffer("```sh\necho hi\n```\n")
@@ -248,6 +82,7 @@ defmodule Aimax.MorgTest do
     press(["C-c", "C-c"])
     assert Buffer.text(buf) == "```sh\necho hi\n```\n```result\nhi\n```\n"
   end
+
 
   test "C-c C-x tangles marked blocks relative to the Morg file" do
     dir = Path.join(System.tmp_dir!(), "morg-tangle-#{System.unique_integer([:positive])}")
@@ -276,6 +111,7 @@ defmodule Aimax.MorgTest do
     refute File.exists?(Path.join(dir, "no"))
   end
 
+
   test "a second run replaces the result block" do
     buf = morg_buffer("```sh\necho hi\n```\n")
     :ok = Buffer.goto(buf, 7)
@@ -285,6 +121,7 @@ defmodule Aimax.MorgTest do
     assert Buffer.text(buf) == "```sh\necho hi\n```\n```result\nhi\n```\n"
   end
 
+
   test "a scheme block evaluates in the editor's interpreter" do
     buf = morg_buffer("```scheme\n(+ 1 2)\n```\n")
     :ok = Buffer.goto(buf, 11)
@@ -292,6 +129,7 @@ defmodule Aimax.MorgTest do
     press(["C-c", "C-c"])
     assert Buffer.text(buf) == "```scheme\n(+ 1 2)\n```\n```result\n3\n```\n"
   end
+
 
   test "C-c C-c outside a block does not edit the buffer" do
     buf = morg_buffer(fixture())
@@ -301,6 +139,7 @@ defmodule Aimax.MorgTest do
     assert Buffer.text(buf) == fixture()
   end
 
+
   test "the result block is not runnable" do
     buf = morg_buffer("```result\nold\n```\n")
     :ok = Buffer.goto(buf, 11)
@@ -309,28 +148,5 @@ defmodule Aimax.MorgTest do
     assert Buffer.text(buf) == "```result\nold\n```\n"
   end
 
-  test "folds re-anchor through edits above them" do
-    buf = morg_buffer(fixture())
-    :ok = Buffer.goto(buf, 0)
 
-    press("TAB")
-    assert Buffer.hidden(buf) == [{3, 23}]
-
-    # an insert before the fold pushes the hidden range down
-    :ok = Buffer.insert_at(buf, 0, "x", source: :user)
-    assert Buffer.hidden(buf) == [{4, 24}]
-  end
-
-  test "mode setup re-derives folds from the surviving local" do
-    buf = morg_buffer(fixture())
-    :ok = Buffer.goto(buf, 0)
-    press("TAB")
-    assert Buffer.hidden(buf) == [{3, 23}]
-
-    # a restart drops hidden ranges but keeps locals: simulate, re-setup
-    {:ok, _} = Session.eval(~s{(fold-set! "#{buf}" 'morg '())})
-    assert Buffer.hidden(buf) == []
-    {:ok, _} = Session.eval(~s{(set-mode! "morg-mode")})
-    assert Buffer.hidden(buf) == [{3, 23}]
-  end
 end

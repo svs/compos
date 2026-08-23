@@ -181,44 +181,34 @@ pre-change commit as well. Two runs is not a baseline.
 
 ## State at handoff
 
-Commit `fbe3326`. Scheme suite: 297 tests, one red by design.
+Commit `bd3a259`. Scheme suite: 398 tests, one red by design. Full suite
+in a clean worktree: 36 and 30 failures over two runs, inside the 35-42
+band, with the Scheme suite green in both.
 
-In Scheme:
+ExUnit files fully retired: `graphql`, `imenu`, `buffer_cache`,
+`code_structure`, `chat_heal`, `notmuch`, `code_mode`, `paredit`.
 
-| file | tests |
-|---|---|
-| `paredit-test.scm` | 34 (moved) |
-| `morg-test.scm` | 24 (moved) |
-| `graphql-test.scm` | 24 (moved) |
-| `apropos-test.scm` | 22 (moved) |
-| `notmuch-test.scm` | 16 (another session, in flight) |
-| `code-structure-test.scm` | 13 (moved) |
-| `skills-test.scm` | 12 (moved) |
-| `chat-rename-test.scm` | 12 (moved) |
-| `annotate-test.scm` | 12 (moved) |
-| `group-records-test.scm` | 11 (moved) |
-| `code-agent-mode-test.scm` | 11 (moved) |
-| `mode-icon-test.scm` | 10 (moved) |
-| `web-browse-test.scm` | 9 (moved) |
-| `groups-test.scm` | 9 |
-| `keymap-test.scm` | 7 |
-| `chat-heal-test.scm` | 7 (moved) |
-| `sentry-test.scm` | 6 (moved) |
-| `permission-test.scm` | 6 (moved) |
-| `edit-semantics-test.scm` | 6 (moved) |
-| `occur-ts-test.scm` | 5 (moved) |
-| `marginalia-test.scm` | 5 (moved) |
-| `help-page-test.scm` | 5 (moved) |
-| `feeds-test.scm` | 5 (moved) |
-| `mode-toggle-test.scm` | 4 (moved) |
-| `mcp-policy-test.scm` | 4 (moved) |
-| `lsp-test.scm` | 4 (new coverage) |
-| `imenu-test.scm` | 4 (moved) |
-| `buffer-cache-test.scm` | 3 (moved) |
-| `treesit-test.scm` | 2 (moved) |
-| `scheme-ide-test.scm` | 2 (moved) |
-| `recipes-test.scm` | 2 (moved) |
-| `canary-test.scm` | 1, always red |
+What is left in ExUnit, and why each one is there:
+
+| file | left | why |
+|---|---|---|
+| `chrome` | 28 | a stub socket process and the frames it receives — not read yet |
+| `mcp` | 7 | 6 drive the Elixir client API; 1 waits on the closure bug |
+| `morg` | 2 | set-mode! has no teardown, so markdown-mode is unbuilt |
+| `annotate` | 1 | SchemeAPI.block_click, the entry a browser click arrives on |
+| `writing` | 1 | the Reactor delivers the word count; the counter itself is Scheme |
+| `group_switch_command` | 1 | red in every baseline: marked pull joins no group |
+| `marginalia_project` | 1 | red in every baseline: the modal switcher's narrowing |
+| `author` | 20 | provenance is being rewritten on a CRDT — see below |
+| `editor`, `evil`, … | | the interaction suite and the Elixir APIs |
+
+**`author` was skipped deliberately.** `docs/PROVENANCE-CRDT.md` says the
+current subsystem "does not survive" the move to Loro. Five of its tests
+cover `buffer-author-fold` and `Buffer.id` — the changeset layer being
+retired — and seven test span arithmetic a CRDT does natively. The four
+already moved (`author-line-runs`, `lines-mine?`, `buffer-authors`,
+`with-edit-author`) are the durable contract, and now pin what the
+rewrite must keep satisfying.
 
 ## What moved, and what could not
 

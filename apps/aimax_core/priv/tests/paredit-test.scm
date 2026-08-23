@@ -5,10 +5,10 @@
 ;;; happens to run it is a separate fact, asserted once from the table
 ;;; below.
 ;;;
-;;; Nine tests stay in ExUnit, and each is about DISPATCH, not editing:
-;;; self-insert interleaved with paredit, the fallback when the mode is
-;;; off, undo batching, the arrow-chord precedence, and show-paren, which
-;;; hangs off the key path and does not fire on run-command.
+;;; Where a fact really belongs to the KEY path — self-insert interleaved
+;;; with paredit, the fallback when the mode is off, show-paren — the test
+;;; uses dispatch-keys, which is the queue a keystroke arrives on. That is
+;;; still Scheme; it is not a keymap assertion in disguise.
 
 (domain! 'testing)
 (effects! '(write))
@@ -432,3 +432,144 @@
     (t--par-run! "paredit-slurp-forward")
     (check-equal! (t--par-text) "(é x)\n" "the datum came in cleanly")
     (t--par-done!)))
+
+
+;;; --- the key path ----------------------------------------------------------------
+;;; dispatch-keys puts a key on the same queue a keystroke arrives on. It
+;;; answers at once and the keys land after, so what follows is waited for.
+
+(define (t--par-keys! keys)
+  ;; a key goes to the WINDOW's buffer, so the buffer must be on screen
+  (switch-to-buffer! t--par-buf)
+  (dispatch-keys keys))
+
+(define (t--par-wait-text! expected)
+  (wait-until (lambda () (equal? (t--par-text) expected)) 3000 20))
+
+(deftest 'typing-a-form-end-to-end-keeps-the-text-balanced
+  "the pair closes itself, and the closer walks past it"
+  (lambda ()
+    (t--par! "" 0)
+    (t--par-keys! (list "(" "f" "o" "o" ")"))
+    (check-true! (t--par-wait-text! "(foo)") "the form is balanced")
+    (check-equal! (t--par-point) 5 "and point is past the closer")
+    (t--par-done!)))
+
+(deftest 'an-opener-inside-a-string-or-comment-self-inserts
+  "a delimiter in text is text"
+  (lambda ()
+    (t--par! "\"a\" ;c\n" 2)
+    (t--par-run! "paredit-open-round")
+    (check-equal! (t--par-text) "\"a(\" ;c\n" "inside the string it is a character")
+
+    (buffer-goto! t--par-buf 7)
+    (t--par-run! "paredit-open-round")
+    (check-equal! (t--par-text) "\"a(\" ;c(\n" "and inside the comment too")
+    (t--par-done!)))
+
+(deftest 'one-delete-of-a-pair-is-one-undo-step
+  "the pair went as one thing, so it comes back as one"
+  (lambda ()
+    (t--par! "()\n" 2)
+    (t--par-run! "paredit-backward-delete")
+    (check-equal! (t--par-text) "\n" "the pair went")
+    (with-current-buffer t--par-buf (lambda () (undo!)))
+    (check-equal! (t--par-text) "()\n" "and one undo brought it back")
+    (t--par-done!)))
+
+(deftest 'without-the-mode-the-keys-keep-their-default-behaviour
+  "each key runs a dispatcher that falls through"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-paredit-plain" "(foo) bar\n")))
+      (switch-to-buffer! buf)
+      (buffer-goto! buf 0)
+
+      ;; C-M-k has no fallback command: a quiet no-op
+      (run-command "paredit--key-C-M-k")
+      (check-equal! (buffer-text buf) "(foo) bar\n" "nothing was killed")
+
+      ;; C-M-f falls through to forward-sexp, which has no grammar here
+      (let ((mark (string-length (buffer-text "*messages*"))))
+        (run-command "paredit--key-C-M-f")
+        (check-equal! (buffer-point buf) 0 "point did not move")
+        (let ((said (buffer-text "*messages*")))
+          (check-contains! (substring said mark (string-length said))
+                           "No structural navigation" "and it said why")))
+      (buffer-kill! buf))))
+
+(deftest 'the-arrow-chords-move-by-word-and-paredit-keeps-the-c-arrows
+  "M-arrows pass through in both; C-arrows are paredit's when the mode is on"
+  (lambda ()
+    (let ((plain (test-buffer! "zz-paredit-words" "foo bar\n")))
+      (switch-to-buffer! plain)
+      (buffer-goto! plain 0)
+      (run-command "paredit--key-C-<right>")
+      (check-equal! (buffer-point plain) 3 "C-<right> moves by word without the mode")
+      (run-command "forward-word")
+      (check-equal! (buffer-point plain) 7 "and M-<right>, which paredit never claims")
+      (buffer-kill! plain))
+
+    ;; paredit does not bind the M-arrows at all — that is what "pass
+    ;; through" means, and the table is where it is said
+    (check-false! (assoc "M-<right>" *paredit-keys*) "paredit claims no M-<right>")
+    (check-false! (assoc "M-<left>" *paredit-keys*) "nor M-<left>")
+    (check-equal! (global-key-command "M-<right>") "forward-word"
+                  "so it stays the word motion")
+    (t--par! "(foo bar)\n" 1)
+    (with-current-buffer t--par-buf (lambda () (run-command "forward-word")))
+    (check-equal! (t--par-point) 4 "which still works inside the mode")
+    (t--par-done!)))
+
+;;; --- show-paren ------------------------------------------------------------------
+;;; This runs after a KEY, not after a command, so these two dispatch.
+
+(deftest 'point-beside-a-delimiter-lights-the-pair
+  "and elsewhere it goes dark"
+  (lambda ()
+    (t--par! "(ab)x\n" 0)
+    (t--par-keys! (list "<right>" "<right>" "<right>" "<right>"))
+    (check-true! (wait-until (lambda () (member '(0 1 "paren-match") (buffer-overlays t--par-buf)))
+                             3000 20)
+                 "the opener lights")
+    (check-true! (member '(3 4 "paren-match") (buffer-overlays t--par-buf)) "and the closer")
+    (check-equal! (t--par-point) 4 "with point beside the pair")
+
+    (t--par-keys! (list "<right>"))
+    (check-true! (wait-until
+                   (lambda ()
+                     (not (member "paren-match" (map caddr (buffer-overlays t--par-buf)))))
+                   3000 20)
+                 "and a step away puts it out")
+    (t--par-done!)))
+
+(deftest 'a-delimiter-inside-a-string-does-not-light
+  "a closer in text has no pair to name"
+  (lambda ()
+    (t--par! "\"a)\" b\n" 2)
+    (t--par-keys! (list "<right>"))
+    (wait-until (lambda () (equal? (t--par-point) 3)) 3000 20)
+    (check-false! (member "paren-match" (map caddr (buffer-overlays t--par-buf)))
+                  "nothing lights")
+    (t--par-done!)))
+
+;;; --- enablement ------------------------------------------------------------------
+
+(deftest 'scheme-mode-enables-paredit-and-the-defcustom-turns-it-off
+  "the mode rides the major mode, and the setting is the user's"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-paredit-scheme" "")))
+      (with-current-buffer buf (lambda () (set-mode! "scheme-mode")))
+      (check-true! (minor-mode-on? buf "paredit-mode") "scheme-mode brings it")
+      (switch-to-buffer! buf)
+      (run-command "paredit-open-round")
+      (check-equal! (buffer-text buf) "()" "and it is really on")
+      (disable-minor-mode! buf "paredit-mode")
+      (buffer-kill! buf))
+
+    (let ((saved paredit-in-scheme-mode))
+      (set! paredit-in-scheme-mode #f)
+      (let ((buf (test-buffer! "zz-paredit-scheme2" "")))
+        (with-current-buffer buf (lambda () (set-mode! "scheme-mode")))
+        (check-false! (minor-mode-on? buf "paredit-mode") "the setting turns it off")
+        (buffer-kill! buf))
+      (set! paredit-in-scheme-mode saved))))

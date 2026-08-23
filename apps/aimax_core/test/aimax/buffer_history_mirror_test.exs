@@ -1,4 +1,4 @@
-defmodule Aimax.BufferDocTest do
+defmodule Aimax.BufferHistoryMirrorTest do
   @moduledoc """
   Phase 2 of `docs/PROVENANCE-CRDT.md`: the buffer mirrors every text mutation
   into its Loro document.
@@ -10,12 +10,13 @@ defmodule Aimax.BufferDocTest do
 
   use ExUnit.Case
 
-  alias Aimax.Core.{Buffer, Doc, KeyDispatch}
+  alias Aimax.Core.{Buffer, KeyDispatch}
+  alias Aimax.Core.BufferHistory, as: History
 
   defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
 
   defp new_buffer(text) do
-    name = "doc-mirror-#{System.unique_integer([:positive])}"
+    name = "weave-mirror-#{System.unique_integer([:positive])}"
     {:ok, _} = Aimax.Core.create_buffer(name, text: text)
     on_exit(fn -> Aimax.Core.kill_buffer(name) end)
     name
@@ -23,40 +24,40 @@ defmodule Aimax.BufferDocTest do
 
   # The invariant. Reads through the public accessor, which flushes first.
   defp assert_mirrored(name) do
-    doc = Buffer.doc(name)
-    assert doc, "#{name} has no document"
-    assert Doc.text(doc) == Buffer.text(name)
-    doc
+    weave = Buffer.history(name)
+    assert weave, "#{name} has no document"
+    assert History.text(weave) == Buffer.text(name)
+    weave
   end
 
   defp messages(name) do
     name
-    |> Buffer.doc()
-    |> Doc.history()
+    |> Buffer.history()
+    |> History.changes()
     |> Enum.map(&Jason.decode!(&1.message))
   end
 
   describe "the mirror" do
-    test "a new buffer's document starts equal to its text" do
+    test "a new buffer's history starts equal to its text" do
       name = new_buffer("hello world")
       assert_mirrored(name)
-      assert Doc.text(Buffer.doc(name)) == "hello world"
+      assert History.text(Buffer.history(name)) == "hello world"
     end
 
-    test "an insert reaches the document" do
+    test "an insert reaches the history" do
       name = new_buffer("hello")
       Buffer.append(name, " world", source: :editor)
       assert_mirrored(name)
     end
 
-    test "a delete reaches the document" do
+    test "a delete reaches the history" do
       name = new_buffer("hello world")
       Buffer.delete_range(name, 5, 6, source: :editor)
       assert Buffer.text(name) == "hello"
       assert_mirrored(name)
     end
 
-    test "a replace reaches the document as one changeset" do
+    test "a replace reaches the history as one changeset" do
       name = new_buffer("one two three")
       Buffer.replace_range(name, 4, 3, "TWO", source: :editor)
       assert Buffer.text(name) == "one TWO three"
@@ -70,7 +71,7 @@ defmodule Aimax.BufferDocTest do
       assert_mirrored(name)
     end
 
-    test "typing through the real key path reaches the document" do
+    test "typing through the real key path reaches the history" do
       name = new_buffer("")
       Aimax.Core.Editor.set_window_buffer(name)
       press(["a", "b", "c"])
@@ -90,7 +91,7 @@ defmodule Aimax.BufferDocTest do
       assert Buffer.text(name) == "first"
     end
 
-    test "leaves the document equal to the rope" do
+    test "leaves the history equal to the rope" do
       name = new_buffer("")
       Buffer.append(name, "first", source: :editor)
       Buffer.append(name, " second", source: :editor)
@@ -255,6 +256,71 @@ defmodule Aimax.BufferDocTest do
     end
   end
 
+  # A buffer that goes away and comes back must bring its history with it.
+  # Without the log the document is rebuilt from the text and every earlier
+  # state, and everyone who wrote it, is gone.
+  describe "the history log" do
+    defp evict(name) do
+      :ok = Buffer.checkpoint_now(name)
+      [{pid, _}] = Registry.lookup(Aimax.Core.BufferRegistry, name)
+      :ok = DynamicSupervisor.terminate_child(Aimax.Core.BufferSupervisor, pid)
+    end
+
+    test "history survives eviction" do
+      name = new_buffer("")
+      Buffer.append(name, "human ", source: :user)
+      Buffer.append(name, "agent", source: {:agent, "codex"})
+      before = messages(name)
+      assert length(before) >= 2
+
+      evict(name)
+
+      assert Buffer.text(name) == "human agent"
+      after_ = messages(name)
+      ids = Enum.map(after_, &get_in(&1, ["actor", "id"]))
+      assert "agent:codex" in ids
+      assert Enum.any?(ids, &String.starts_with?(&1, "user:"))
+    end
+
+    test "the mirror is intact after eviction, and keeps recording" do
+      name = new_buffer("start")
+      Buffer.append(name, " more", source: :editor)
+      evict(name)
+
+      assert_mirrored(name)
+      Buffer.append(name, " again", source: :editor)
+      assert Buffer.text(name) == "start more again"
+      assert_mirrored(name)
+    end
+
+    test "undo still works on a buffer that came back" do
+      name = new_buffer("")
+      Buffer.append(name, "one", source: :user)
+      evict(name)
+
+      Buffer.append(name, "two", source: :user)
+      assert Buffer.text(name) == "onetwo"
+      assert :ok = Buffer.undo(name, source: :user)
+      assert Buffer.text(name) == "one"
+    end
+
+    test "a torn tail costs the last batch and not the history" do
+      name = new_buffer("")
+      Buffer.append(name, "kept", source: :user)
+      :ok = Buffer.checkpoint_now(name)
+      id = Buffer.id(name)
+
+      evict(name)
+
+      # A crash between the write and the flush leaves a partial frame.
+      path = Aimax.Core.BufferHistoryStore.path(id)
+      File.write!(path, <<0, 0, 16, 0, 1, 2, 3>>, [:append])
+
+      assert Buffer.text(name) == "kept"
+      assert_mirrored(name)
+    end
+  end
+
   describe "attribution" do
     test "a change carries the actor that made it" do
       name = new_buffer("")
@@ -300,17 +366,17 @@ defmodule Aimax.BufferDocTest do
   end
 
   describe "divergence" do
-    test "a checkpoint repairs a document that fell behind the rope" do
+    test "a checkpoint repairs a history that fell behind the rope" do
       name = new_buffer("original")
-      doc = Buffer.doc(name)
+      weave = Buffer.history(name)
 
       # Force divergence the way a failed mirror would.
-      Doc.insert(doc, 0, "XX")
-      Doc.commit(doc, "system", ~s({"actor":{"id":"test"},"group":null}))
-      refute Doc.text(doc) == Buffer.text(name)
+      History.insert(weave, 0, "XX")
+      History.commit(weave, "system", ~s({"actor":{"id":"test"},"group":null}))
+      refute History.text(weave) == Buffer.text(name)
 
       Buffer.checkpoint_now(name)
-      assert Doc.text(Buffer.doc(name)) == Buffer.text(name)
+      assert History.text(Buffer.history(name)) == Buffer.text(name)
     end
   end
 end

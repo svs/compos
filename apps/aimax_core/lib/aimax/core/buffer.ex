@@ -50,7 +50,8 @@ defmodule Aimax.Core.Buffer do
 
   require Logger
 
-  alias Aimax.Core.{BufferStore, Doc, Events, ProvenanceStore, Rope, Text, TS}
+  alias Aimax.Core.{BufferHistoryStore, BufferStore, Events, ProvenanceStore, Rope, Text, TS}
+  alias Aimax.Core.BufferHistory, as: History
 
   @registry Aimax.Core.BufferRegistry
   @undo_limit 500
@@ -70,7 +71,7 @@ defmodule Aimax.Core.Buffer do
 
   defstruct name: nil,
             rope: nil,
-            doc: nil,
+            history: nil,
             bin: nil,
             version: 0,
             saved_version: 0,
@@ -93,8 +94,9 @@ defmodule Aimax.Core.Buffer do
             edit_log: [],
             edit_log_len: 0,
             provenance: nil,
-            doc_actor: nil,
-            doc_group: nil,
+            history_actor: nil,
+            history_group: nil,
+            history_persisted: nil,
             changeset_id: nil,
             pending_ops: [],
             pending_actor: nil,
@@ -358,7 +360,7 @@ defmodule Aimax.Core.Buffer do
   reads it and does not edit it. Flushes first, so the caller never sees a
   change the buffer has already made but not committed.
   """
-  def doc(name), do: GenServer.call(via(name), :doc)
+  def history(name), do: GenServer.call(via(name), :history)
 
   @doc """
   An anchor on a byte position: an opaque token that keeps naming the same
@@ -539,7 +541,7 @@ defmodule Aimax.Core.Buffer do
     # buffer, like *messages*, says so with :persistent.
     persistent? = Keyword.get(opts, :persistent, not String.starts_with?(name, " "))
     state = %{state | persistent: persistent?}
-    state = state |> attach_provenance() |> attach_doc()
+    state = state |> attach_provenance() |> attach_history()
     {:ok, _} = Registry.register(@registry, {:id, state.id}, state.name)
     {:ok, state |> schedule_checkpoint() |> reset_idle_timer()}
   end
@@ -856,9 +858,9 @@ defmodule Aimax.Core.Buffer do
     {:reply, state.provenance, state}
   end
 
-  def handle_call(:doc, _from, state) do
+  def handle_call(:history, _from, state) do
     state = state |> flush_provenance() |> close_undo_step()
-    {:reply, state.doc, state}
+    {:reply, state.history, state}
   end
 
   def handle_call({:anchor, pos}, _from, state) do
@@ -959,7 +961,7 @@ defmodule Aimax.Core.Buffer do
   def handle_call({:undo, src, author}, _from, state) do
     actor = resolve_actor(author, src)
 
-    if state.doc == nil do
+    if state.history == nil do
       {:reply, {:error, :no_undo}, state}
     else
       # Close the open step, so the work being undone is a complete change.
@@ -968,7 +970,7 @@ defmodule Aimax.Core.Buffer do
 
       case undo_or_redo(state, id) do
         {:ok, _} ->
-          state = state |> apply_doc_text(actor) |> Map.put(:undo_run, true)
+          state = state |> apply_history_text(actor) |> Map.put(:undo_run, true)
           {:reply, :ok, checkpoint_later(state)}
 
         :none ->
@@ -1182,18 +1184,33 @@ defmodule Aimax.Core.Buffer do
   # A buffer whose mode opted out of recording gets no document either, so one
   # policy governs both. `attach_provenance` always answers with a map, so
   # there is no nil case here.
-  defp attach_doc(%{provenance: %{enabled: false}} = state), do: state
+  defp attach_history(%{provenance: %{enabled: false}} = state), do: state
 
-  defp attach_doc(state) do
+  defp attach_history(state) do
     {text, state} = fetch_text(state)
-    doc = Doc.new(Doc.replica_peer())
 
-    if text != "", do: Doc.insert(doc, 0, text)
+    case restore_history(state, text) do
+      nil -> %{state | history: seed_history(state, text)}
+      weave -> %{state | history: weave, history_persisted: History.version(weave)}
+    end
+  rescue
+    # A history is not worth losing a buffer over. Without one the buffer
+    # behaves as it did before any of this.
+    e ->
+      Logger.error("no history attached to #{state.name}: #{inspect(e)}")
+      state
+  end
 
-    Doc.commit(
-      doc,
+  # A buffer the store has never seen. The seed change says how the text got
+  # here, so even a buffer with no log on disk has an origin.
+  defp seed_history(state, text) do
+    weave = History.new(History.replica_peer())
+    if text != "", do: History.insert(weave, 0, text)
+
+    History.commit(
+      weave,
       "system",
-      doc_message(
+      history_message(
         local_actor(
           "system:buffer",
           "system",
@@ -1204,19 +1221,59 @@ defmodule Aimax.Core.Buffer do
       )
     )
 
-    %{state | doc: doc}
-  rescue
-    # A document is not worth losing a buffer over. Without one the buffer
-    # behaves exactly as it did before this phase.
-    e ->
-      Logger.error("loro document not attached to #{state.name}: #{inspect(e)}")
-      state
+    weave
   end
 
-  # Recording can stop after the document is attached. A stopped buffer flushes
+  # The log holds everything this buffer ever was. Reading it back is the whole
+  # point of writing it: an evicted buffer that comes back keeps its history,
+  # and so does one that comes back after a restart.
+  defp restore_history(state, text) do
+    case BufferHistoryStore.read(state.id) do
+      [] ->
+        nil
+
+      blobs ->
+        weave = History.new(History.replica_peer())
+        Enum.each(blobs, &History.import(weave, &1))
+        reconcile_history(state, weave, text)
+    end
+  rescue
+    e ->
+      Logger.error("could not restore the history for #{state.name}: #{inspect(e)}")
+      nil
+  end
+
+  # The text can move while the buffer is away: a file re-read from disk, or an
+  # edit made by something else. What came before is still this buffer's, so the
+  # history takes the new text as a change rather than being thrown away.
+  defp reconcile_history(state, weave, text) do
+    case History.text(weave) do
+      ^text ->
+        weave
+
+      other when is_binary(other) ->
+        History.update(weave, text)
+
+        History.commit(
+          weave,
+          "system",
+          history_message(
+            local_actor("system:reload", "system", "reload", :external_change),
+            buffer_group(state)
+          )
+        )
+
+        weave
+
+      _ ->
+        nil
+    end
+  end
+
+  # Recording can stop after the history is attached. A stopped buffer flushes
   # nothing, so a mirrored operation would never get a message. One test
   # answers both questions.
-  defp mirroring?(%{doc: nil}), do: false
+  defp mirroring?(%{history: nil}), do: false
   defp mirroring?(%{provenance: %{enabled: true}}), do: true
   defp mirroring?(_), do: false
 
@@ -1224,7 +1281,7 @@ defmodule Aimax.Core.Buffer do
     if mirroring?(state) do
       state
       |> commit_on_actor_change(actor)
-      |> doc_result(Doc.insert(state.doc, pos, text), "insert")
+      |> history_result(History.insert(state.history, pos, text), "insert")
       |> claim(actor)
     else
       state
@@ -1235,7 +1292,7 @@ defmodule Aimax.Core.Buffer do
     if mirroring?(state) do
       state
       |> commit_on_actor_change(actor)
-      |> doc_result(Doc.delete(state.doc, pos, len), "delete")
+      |> history_result(History.delete(state.history, pos, len), "delete")
       |> claim(actor)
     else
       state
@@ -1245,54 +1302,54 @@ defmodule Aimax.Core.Buffer do
   # Who owns the operations sitting uncommitted in the document. Provenance
   # clears `pending_actor` on its own schedule, so the document keeps its own
   # answer and the two no longer have to flush together.
-  defp claim(state, actor), do: %{state | doc_actor: actor, doc_group: buffer_group(state)}
+  defp claim(state, actor), do: %{state | history_actor: actor, history_group: buffer_group(state)}
 
   # A change holds one actor's work. A different actor closes the open one.
-  defp commit_on_actor_change(%{doc_actor: nil} = state, _actor), do: state
+  defp commit_on_actor_change(%{history_actor: nil} = state, _actor), do: state
 
   defp commit_on_actor_change(state, actor) do
-    if state.doc_actor.id == actor.id, do: state, else: commit_doc(state)
+    if state.history_actor.id == actor.id, do: state, else: commit_history(state)
   end
 
   # Undo swaps the whole rope, so the document takes the result and works out
   # the operations. Phase 3 moves undo into the document and retires this.
   defp mirror_update(state, text) do
     if mirroring?(state),
-      do: doc_result(state, Doc.update(state.doc, text), "update"),
+      do: history_result(state, History.update(state.history, text), "update"),
       else: state
   end
 
   # A failed mirror leaves the document behind the rope. The checkpoint
   # comparison finds that and resynchronizes, so log it and keep editing.
-  defp doc_result(state, {:error, reason}, what) do
+  defp history_result(state, {:error, reason}, what) do
     Logger.error("loro #{what} failed for #{state.name}: #{inspect(reason)}")
     state
   end
 
-  defp doc_result(state, _ok, _what), do: state
+  defp history_result(state, _ok, _what), do: state
 
-  defp commit_doc(%{doc_actor: nil} = state), do: state
+  defp commit_history(%{history_actor: nil} = state), do: state
 
-  defp commit_doc(state) do
+  defp commit_history(state) do
     if mirroring?(state) do
-      Doc.commit(
-        state.doc,
-        doc_origin(state.doc_actor),
-        doc_message(state.doc_actor, state.doc_group)
+      History.commit(
+        state.history,
+        history_origin(state.history_actor),
+        history_message(state.history_actor, state.history_group)
       )
     end
 
-    %{state | doc_actor: nil, doc_group: nil}
+    %{state | history_actor: nil, history_group: nil}
   end
 
   # The origin is the live label the undo managers filter on in Phase 3. The
   # actor id already reads `user:local`, `agent:codex`, `system:undo`, so a
   # prefix match on it separates the actors.
-  defp doc_origin(actor), do: Map.get(actor, :id, "unknown")
+  defp history_origin(actor), do: Map.get(actor, :id, "unknown")
 
   # The durable record. A Loro change carries no origin field, so everything
   # that must survive an export goes in the message.
-  defp doc_message(actor, group) do
+  defp history_message(actor, group) do
     Jason.encode!(%{actor: actor, group: group})
   rescue
     _ -> to_string(Map.get(actor, :id, "unknown"))
@@ -1305,12 +1362,12 @@ defmodule Aimax.Core.Buffer do
   # In this phase the rope is authoritative, so a mismatch resynchronizes the
   # document from the rope. That direction reverses in Phase 5, once the
   # document owns the history the rope cannot rebuild.
-  defp verify_doc(%{doc: nil} = state), do: state
+  defp verify_history(%{history: nil} = state), do: state
 
-  defp verify_doc(state) do
+  defp verify_history(state) do
     {text, state} = fetch_text(state)
 
-    case Doc.text(state.doc) do
+    case History.text(state.history) do
       ^text ->
         state
 
@@ -1323,7 +1380,7 @@ defmodule Aimax.Core.Buffer do
         state
         |> mirror_update(text)
         |> claim(resync_actor())
-        |> commit_doc()
+        |> commit_history()
 
       {:error, reason} ->
         Logger.error("loro document unreadable in #{state.name}: #{inspect(reason)}")
@@ -1332,7 +1389,63 @@ defmodule Aimax.Core.Buffer do
   end
 
   defp resync_actor,
-    do: local_actor("system:resync", "system", "resync", :doc_resync)
+    do: local_actor("system:resync", "system", "resync", :history_resync)
+
+  # --- persisting the document -----------------------------------------------
+  #
+  # Appended at every checkpoint boundary, which costs about 1.2 KB per 500
+  # typed characters. The log is rewritten as one snapshot when it grows past
+  # a multiple of the text, so the file tracks the buffer instead of the number
+  # of edits ever made to it.
+
+  defp persist_history(%{history: nil} = state), do: state
+  defp persist_history(%{discard: true} = state), do: state
+  defp persist_history(%{persistent: false} = state), do: state
+
+  defp persist_history(state) do
+    # Nothing written yet means the log starts empty, so it wants everything.
+    # Exporting "since the current version" would write nothing at all.
+    exported =
+      case state.history_persisted do
+        nil -> History.export_all(state.history)
+        from -> History.export_updates(state.history, from)
+      end
+
+    case exported do
+      updates when is_binary(updates) and Kernel.byte_size(updates) > 0 ->
+        written = BufferHistoryStore.append(state.id, updates)
+        state = %{state | history_persisted: History.version(state.history)}
+        if written > 0, do: maybe_compact(state), else: state
+
+      _ ->
+        state
+    end
+  rescue
+    e ->
+      # The text is safe in the checkpoint either way. Losing the log costs
+      # history, which is worth a loud message and not a dead buffer.
+      Logger.error("could not persist the document for #{state.name}: #{inspect(e)}")
+      state
+  end
+
+  # A snapshot of an 85 KB source file is about 75 KB, so a log several times
+  # that has more update frames than content and is worth collapsing.
+  @history_log_slack 4
+
+  defp maybe_compact(state) do
+    if BufferHistoryStore.size(state.id) > max(@history_log_slack * Rope.byte_size(state.rope), 64 * 1024) do
+      case History.export_snapshot(state.history) do
+        snapshot when is_binary(snapshot) ->
+          BufferHistoryStore.compact(state.id, snapshot)
+          %{state | history_persisted: History.version(state.history)}
+
+        _ ->
+          state
+      end
+    else
+      state
+    end
+  end
 
   # --- anchors ---------------------------------------------------------------
   #
@@ -1340,20 +1453,20 @@ defmodule Aimax.Core.Buffer do
   # is inserted and deleted around it. The bytes cross into Scheme and out to a
   # tool call as base64, because an anchor travels through JSON.
 
-  defp take_anchor(%{doc: nil}, _pos), do: nil
+  defp take_anchor(%{history: nil}, _pos), do: nil
 
   defp take_anchor(state, pos) do
-    case Doc.cursor(state.doc, min(pos, Rope.byte_size(state.rope))) do
+    case History.cursor(state.history, min(pos, Rope.byte_size(state.rope))) do
       cursor when is_binary(cursor) -> Base.url_encode64(cursor, padding: false)
       _ -> nil
     end
   end
 
-  defp read_anchor(%{doc: nil}, _anchor), do: nil
+  defp read_anchor(%{history: nil}, _anchor), do: nil
 
   defp read_anchor(state, anchor) do
     with {:ok, bytes} <- Base.url_decode64(anchor, padding: false),
-         pos when is_integer(pos) <- Doc.cursor_pos(state.doc, bytes) do
+         pos when is_integer(pos) <- History.cursor_pos(state.history, bytes) do
       min(pos, Rope.byte_size(state.rope))
     else
       _ -> nil
@@ -1381,15 +1494,15 @@ defmodule Aimax.Core.Buffer do
   defp undo_excludes("process"), do: ~w(user agent system mode legacy unknown)
   defp undo_excludes(_agent), do: ~w(user process system mode legacy unknown)
 
-  defp close_undo_step(state), do: commit_doc(state)
+  defp close_undo_step(state), do: commit_history(state)
 
-  defp ensure_undo_actor(%{doc: nil} = state, _actor), do: state
+  defp ensure_undo_actor(%{history: nil} = state, _actor), do: state
 
   defp ensure_undo_actor(state, actor) do
     scope = undo_scope(actor)
 
-    unless Doc.actor?(state.doc, scope) do
-      Doc.register_actor(state.doc, scope, undo_excludes(scope), @undo_limit)
+    unless History.actor?(state.history, scope) do
+      History.register_actor(state.history, scope, undo_excludes(scope), @undo_limit)
     end
 
     state
@@ -1398,12 +1511,12 @@ defmodule Aimax.Core.Buffer do
   # Emacs: a run of undos keeps walking back, and the first undo after the run
   # breaks replays them instead.
   defp undo_or_redo(state, id) do
-    {undos, redos} = Doc.undo_count(state.doc, id)
+    {undos, redos} = History.undo_count(state.history, id)
 
     cond do
-      not state.undo_run and redos > 0 -> result(Doc.redo(state.doc, id))
-      undos > 0 -> result(Doc.undo(state.doc, id))
-      redos > 0 -> result(Doc.redo(state.doc, id))
+      not state.undo_run and redos > 0 -> result(History.redo(state.history, id))
+      undos > 0 -> result(History.undo(state.history, id))
+      redos > 0 -> result(History.redo(state.history, id))
       true -> :none
     end
   end
@@ -1416,10 +1529,10 @@ defmodule Aimax.Core.Buffer do
   # contiguous replacement that always reaches the right result. A step that
   # touched separate regions produces a wider span than it strictly changed,
   # which costs precision in the authorship fold and nothing in the text.
-  defp apply_doc_text(state, actor) do
+  defp apply_history_text(state, actor) do
     {old, state} = fetch_text(state)
 
-    case Doc.text(state.doc) do
+    case History.text(state.history) do
       {:error, reason} ->
         Logger.error("undo could not read the document in #{state.name}: #{inspect(reason)}")
         state
@@ -1476,7 +1589,7 @@ defmodule Aimax.Core.Buffer do
     broadcast(state, 0, "", 0, :undo)
     # The undo manager wrote and closed its own change, so the document holds
     # no uncommitted work of ours.
-    %{state | doc_actor: nil, doc_group: nil}
+    %{state | history_actor: nil, history_group: nil}
   end
 
   # The one contiguous replacement between two texts: skip the common prefix,
@@ -1619,7 +1732,8 @@ defmodule Aimax.Core.Buffer do
       state
       |> flush_provenance()
       |> close_undo_step()
-      |> verify_doc()
+      |> verify_history()
+      |> persist_history()
       |> prune_origins()
       |> write_state_checkpoint()
 

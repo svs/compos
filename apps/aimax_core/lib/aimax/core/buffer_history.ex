@@ -1,4 +1,4 @@
-defmodule Aimax.Core.Doc do
+defmodule Aimax.Core.BufferHistory do
   @moduledoc """
   A buffer's Loro document: its history, its undo stacks, and its cursors.
   See `docs/PROVENANCE-CRDT.md`.
@@ -20,7 +20,7 @@ defmodule Aimax.Core.Doc do
   the same resource, so a document cannot be an undo snapshot.
   """
 
-  alias Aimax.Core.DocNif
+  alias Aimax.Core.BufferHistoryNif
 
   defstruct [:res, :peer]
 
@@ -72,11 +72,11 @@ defmodule Aimax.Core.Doc do
   tells them apart.
   """
   def new(peer) when is_integer(peer) and peer >= 0,
-    do: %__MODULE__{res: DocNif.doc_new(peer), peer: peer}
+    do: %__MODULE__{res: BufferHistoryNif.history_new(peer), peer: peer}
 
   @doc "Reopen a document from `export_snapshot/1` bytes."
   def open(peer, snapshot) when is_integer(peer) and is_binary(snapshot) do
-    case DocNif.doc_open(peer, snapshot) do
+    case BufferHistoryNif.history_open(peer, snapshot) do
       res when is_reference(res) -> {:ok, %__MODULE__{res: res, peer: peer}}
       other -> other
     end
@@ -91,21 +91,21 @@ defmodule Aimax.Core.Doc do
   """
   def register_actor(%__MODULE__{res: res}, actor, exclude \\ [], max_steps \\ @default_undo_steps)
       when is_binary(actor) and is_list(exclude) do
-    DocNif.doc_register_actor(res, actor, exclude, max_steps)
+    BufferHistoryNif.history_register_actor(res, actor, exclude, max_steps)
   end
 
   @doc "Whether this actor already has an undo manager."
-  def actor?(%__MODULE__{res: res}, actor), do: DocNif.doc_has_actor(res, actor)
+  def actor?(%__MODULE__{res: res}, actor), do: BufferHistoryNif.history_has_actor(res, actor)
 
   # ------------------------------------------------------------- mutation
 
   @doc "Insert at a byte offset. Returns the new byte length."
   def insert(%__MODULE__{res: res}, pos, text) when pos >= 0 and is_binary(text),
-    do: DocNif.doc_insert(res, pos, text)
+    do: BufferHistoryNif.history_insert(res, pos, text)
 
   @doc "Delete `len` bytes at a byte offset. Returns the new byte length."
   def delete(%__MODULE__{res: res}, pos, len) when pos >= 0 and len >= 0,
-    do: DocNif.doc_delete(res, pos, len)
+    do: BufferHistoryNif.history_delete(res, pos, len)
 
   @doc """
   Replace the whole text, emitting the minimal operations. For a caller that
@@ -115,7 +115,7 @@ defmodule Aimax.Core.Doc do
   goes line by line.
   """
   def update(%__MODULE__{res: res}, text) when is_binary(text),
-    do: DocNif.doc_update(res, text, Kernel.byte_size(text) > 50_000)
+    do: BufferHistoryNif.history_update(res, text, Kernel.byte_size(text) > 50_000)
 
   @doc """
   Close the pending change.
@@ -125,25 +125,25 @@ defmodule Aimax.Core.Doc do
   """
   def commit(%__MODULE__{res: res}, origin, msg, timestamp \\ nil)
       when is_binary(origin) and is_binary(msg) do
-    DocNif.doc_commit(res, origin, msg, timestamp || System.system_time(:second))
+    BufferHistoryNif.history_commit(res, origin, msg, timestamp || System.system_time(:second))
   end
 
   # ----------------------------------------------------------------- read
 
   @doc "The whole text. O(n), and not the buffer's read path."
-  def text(%__MODULE__{res: res}), do: DocNif.doc_text(res)
+  def text(%__MODULE__{res: res}), do: BufferHistoryNif.history_text(res)
 
-  def byte_size(%__MODULE__{res: res}), do: DocNif.doc_len(res)
+  def byte_size(%__MODULE__{res: res}), do: BufferHistoryNif.history_len(res)
 
   # ----------------------------------------------------------------- undo
 
   @doc "Undo one change by `actor`. Returns whether anything was undone."
-  def undo(%__MODULE__{res: res}, actor), do: DocNif.doc_undo(res, actor)
+  def undo(%__MODULE__{res: res}, actor), do: BufferHistoryNif.history_undo(res, actor)
 
-  def redo(%__MODULE__{res: res}, actor), do: DocNif.doc_redo(res, actor)
+  def redo(%__MODULE__{res: res}, actor), do: BufferHistoryNif.history_redo(res, actor)
 
   @doc "`{undo_count, redo_count}` for one actor."
-  def undo_count(%__MODULE__{res: res}, actor), do: DocNif.doc_undo_count(res, actor)
+  def undo_count(%__MODULE__{res: res}, actor), do: BufferHistoryNif.history_undo_count(res, actor)
 
   # -------------------------------------------------------------- cursors
 
@@ -154,29 +154,32 @@ defmodule Aimax.Core.Doc do
   Resolving costs far more than an edit, so cache the result and resolve on
   change, never per access.
   """
-  def cursor(%__MODULE__{res: res}, pos) when pos >= 0, do: DocNif.doc_cursor(res, pos)
+  def cursor(%__MODULE__{res: res}, pos) when pos >= 0, do: BufferHistoryNif.history_cursor(res, pos)
 
   def cursor_pos(%__MODULE__{res: res}, cursor) when is_binary(cursor),
-    do: DocNif.doc_cursor_pos(res, cursor)
+    do: BufferHistoryNif.history_cursor_pos(res, cursor)
 
   # --------------------------------------------------- export and import
 
   @doc "The current version, for `export_updates/2`."
-  def version(%__MODULE__{res: res}), do: DocNif.doc_version(res)
+  def version(%__MODULE__{res: res}), do: BufferHistoryNif.history_version(res)
 
   @doc "Full state and history, for a checkpoint."
-  def export_snapshot(%__MODULE__{res: res}), do: DocNif.doc_export_snapshot(res)
+  def export_snapshot(%__MODULE__{res: res}), do: BufferHistoryNif.history_export_snapshot(res)
+
+  @doc "Every change, as updates. What a log file starts with."
+  def export_all(%__MODULE__{res: res}), do: BufferHistoryNif.history_export_all(res)
 
   @doc "Everything since `from`. The same bytes go to disk and to a peer."
   def export_updates(%__MODULE__{res: res}, from) when is_binary(from),
-    do: DocNif.doc_export_updates(res, from)
+    do: BufferHistoryNif.history_export_updates(res, from)
 
   @doc """
   Import bytes another replica wrote. Returns the new byte length, because the
   caller must rebuild its rope from the result.
   """
   def import(%__MODULE__{res: res}, bytes) when is_binary(bytes),
-    do: DocNif.doc_import(res, bytes)
+    do: BufferHistoryNif.history_import(res, bytes)
 
   # -------------------------------------------------------------- history
 
@@ -185,9 +188,9 @@ defmodule Aimax.Core.Doc do
   `%{peer:, counter:, lamport:, timestamp:, message:}`. The message carries the
   actor, so this is the attribution record.
   """
-  def history(%__MODULE__{res: res}) do
+  def changes(%__MODULE__{res: res}) do
     res
-    |> DocNif.doc_history()
+    |> BufferHistoryNif.history_changes()
     |> Enum.map(fn {peer, counter, lamport, timestamp, message} ->
       %{peer: peer, counter: counter, lamport: lamport, timestamp: timestamp, message: message}
     end)

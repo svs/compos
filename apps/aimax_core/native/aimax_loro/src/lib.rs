@@ -23,16 +23,16 @@ mod atoms {
 /// The undo origin Loro stamps on the changes an undo itself produces.
 const UNDO_ORIGIN: &str = "undo";
 
-struct DocState {
+struct WeaveState {
     doc: LoroDoc,
     text: LoroText,
     undo: HashMap<String, UndoManager>,
 }
 
-struct DocRes(Mutex<DocState>);
+struct WeaveRes(Mutex<WeaveState>);
 
 #[rustler::resource_impl]
-impl rustler::Resource for DocRes {}
+impl rustler::Resource for WeaveRes {}
 
 fn err(msg: impl std::fmt::Display) -> Error {
     Error::Term(Box::new(msg.to_string()))
@@ -48,11 +48,11 @@ fn str_of<'a>(b: &'a Binary) -> NifResult<&'a str> {
     std::str::from_utf8(b.as_slice()).map_err(err)
 }
 
-fn state(res: &ResourceArc<DocRes>) -> NifResult<std::sync::MutexGuard<'_, DocState>> {
+fn state(res: &ResourceArc<WeaveRes>) -> NifResult<std::sync::MutexGuard<'_, WeaveState>> {
     res.0.lock().map_err(|_| err("document lock poisoned"))
 }
 
-fn build(peer: u64) -> DocState {
+fn build(peer: u64) -> WeaveState {
     let doc = LoroDoc::new();
     doc.set_peer_id(peer).expect("set peer id on a fresh doc");
     // Loro merges adjacent changes from one peer within a second, and every
@@ -62,7 +62,7 @@ fn build(peer: u64) -> DocState {
     // Measured both ways: `set_change_merge_interval(0)` changes no behaviour
     // here and only adds change headers, so the default stands.
     let text = doc.get_text("text");
-    DocState {
+    WeaveState {
         doc,
         text,
         undo: HashMap::new(),
@@ -72,19 +72,19 @@ fn build(peer: u64) -> DocState {
 // ---------------------------------------------------------------- lifecycle
 
 #[rustler::nif]
-fn doc_new(peer: u64) -> ResourceArc<DocRes> {
-    ResourceArc::new(DocRes(Mutex::new(build(peer))))
+fn history_new(peer: u64) -> ResourceArc<WeaveRes> {
+    ResourceArc::new(WeaveRes(Mutex::new(build(peer))))
 }
 
 /// Open a document from exported bytes. The peer id is the local replica's,
 /// not the one that wrote the snapshot.
 #[rustler::nif(schedule = "DirtyCpu")]
-fn doc_open(peer: u64, snapshot: Binary) -> NifResult<ResourceArc<DocRes>> {
+fn history_open(peer: u64, snapshot: Binary) -> NifResult<ResourceArc<WeaveRes>> {
     let st = build(peer);
     st.doc.import(snapshot.as_slice()).map_err(err)?;
     // set_peer_id again: import can carry a peer id from the snapshot.
     st.doc.set_peer_id(peer).map_err(err)?;
-    Ok(ResourceArc::new(DocRes(Mutex::new(st))))
+    Ok(ResourceArc::new(WeaveRes(Mutex::new(st))))
 }
 
 /// Register an actor that can undo. Call this before the actor's first edit;
@@ -93,8 +93,8 @@ fn doc_open(peer: u64, snapshot: Binary) -> NifResult<ResourceArc<DocRes>> {
 /// `exclude` lists origin prefixes this actor must not undo. The `undo` origin
 /// is always excluded, so one actor's undo never enters another's stack.
 #[rustler::nif]
-fn doc_register_actor(
-    res: ResourceArc<DocRes>,
+fn history_register_actor(
+    res: ResourceArc<WeaveRes>,
     actor: String,
     exclude: Vec<String>,
     max_steps: usize,
@@ -117,21 +117,21 @@ fn doc_register_actor(
 }
 
 #[rustler::nif]
-fn doc_has_actor(res: ResourceArc<DocRes>, actor: String) -> NifResult<bool> {
+fn history_has_actor(res: ResourceArc<WeaveRes>, actor: String) -> NifResult<bool> {
     Ok(state(&res)?.undo.contains_key(&actor))
 }
 
 // ----------------------------------------------------------------- mutation
 
 #[rustler::nif]
-fn doc_insert(res: ResourceArc<DocRes>, pos: usize, text: Binary) -> NifResult<usize> {
+fn history_insert(res: ResourceArc<WeaveRes>, pos: usize, text: Binary) -> NifResult<usize> {
     let st = state(&res)?;
     st.text.insert_utf8(pos, str_of(&text)?).map_err(err)?;
     Ok(st.text.len_utf8())
 }
 
 #[rustler::nif]
-fn doc_delete(res: ResourceArc<DocRes>, pos: usize, len: usize) -> NifResult<usize> {
+fn history_delete(res: ResourceArc<WeaveRes>, pos: usize, len: usize) -> NifResult<usize> {
     let st = state(&res)?;
     st.text.delete_utf8(pos, len).map_err(err)?;
     Ok(st.text.len_utf8())
@@ -141,7 +141,7 @@ fn doc_delete(res: ResourceArc<DocRes>, pos: usize, len: usize) -> NifResult<usi
 /// is the wholesale-swap path: desktop restore, and any other caller that
 /// knows the result but not the edit.
 #[rustler::nif(schedule = "DirtyCpu")]
-fn doc_update(res: ResourceArc<DocRes>, text: Binary, by_line: bool) -> NifResult<usize> {
+fn history_update(res: ResourceArc<WeaveRes>, text: Binary, by_line: bool) -> NifResult<usize> {
     let st = state(&res)?;
     let s = str_of(&text)?;
     let opts = Default::default();
@@ -156,8 +156,8 @@ fn doc_update(res: ResourceArc<DocRes>, text: Binary, by_line: bool) -> NifResul
 /// Close the pending change. `msg` is durable and carries the actor; `origin`
 /// is the live label the undo managers filter on.
 #[rustler::nif]
-fn doc_commit(
-    res: ResourceArc<DocRes>,
+fn history_commit(
+    res: ResourceArc<WeaveRes>,
     origin: String,
     msg: String,
     timestamp: i64,
@@ -173,20 +173,20 @@ fn doc_commit(
 // --------------------------------------------------------------------- read
 
 #[rustler::nif(schedule = "DirtyCpu")]
-fn doc_text(env: Env, res: ResourceArc<DocRes>) -> NifResult<Binary> {
+fn history_text(env: Env, res: ResourceArc<WeaveRes>) -> NifResult<Binary> {
     let st = state(&res)?;
     Ok(bin(env, st.text.to_string().as_bytes()))
 }
 
 #[rustler::nif]
-fn doc_len(res: ResourceArc<DocRes>) -> NifResult<usize> {
+fn history_len(res: ResourceArc<WeaveRes>) -> NifResult<usize> {
     Ok(state(&res)?.text.len_utf8())
 }
 
 // --------------------------------------------------------------------- undo
 
 #[rustler::nif]
-fn doc_undo(res: ResourceArc<DocRes>, actor: String) -> NifResult<bool> {
+fn history_undo(res: ResourceArc<WeaveRes>, actor: String) -> NifResult<bool> {
     let mut st = state(&res)?;
     let m = st
         .undo
@@ -196,7 +196,7 @@ fn doc_undo(res: ResourceArc<DocRes>, actor: String) -> NifResult<bool> {
 }
 
 #[rustler::nif]
-fn doc_redo(res: ResourceArc<DocRes>, actor: String) -> NifResult<bool> {
+fn history_redo(res: ResourceArc<WeaveRes>, actor: String) -> NifResult<bool> {
     let mut st = state(&res)?;
     let m = st
         .undo
@@ -206,7 +206,7 @@ fn doc_redo(res: ResourceArc<DocRes>, actor: String) -> NifResult<bool> {
 }
 
 #[rustler::nif]
-fn doc_undo_count(res: ResourceArc<DocRes>, actor: String) -> NifResult<(usize, usize)> {
+fn history_undo_count(res: ResourceArc<WeaveRes>, actor: String) -> NifResult<(usize, usize)> {
     let st = state(&res)?;
     let m = st
         .undo
@@ -220,7 +220,7 @@ fn doc_undo_count(res: ResourceArc<DocRes>, actor: String) -> NifResult<(usize, 
 /// A cursor over `pos` that survives concurrent edits. Encoded opaquely; the
 /// caller stores the bytes and hands them back to resolve.
 #[rustler::nif]
-fn doc_cursor(env: Env, res: ResourceArc<DocRes>, pos: usize) -> NifResult<Option<Binary>> {
+fn history_cursor(env: Env, res: ResourceArc<WeaveRes>, pos: usize) -> NifResult<Option<Binary>> {
     let st = state(&res)?;
     Ok(st
         .text
@@ -229,7 +229,7 @@ fn doc_cursor(env: Env, res: ResourceArc<DocRes>, pos: usize) -> NifResult<Optio
 }
 
 #[rustler::nif]
-fn doc_cursor_pos(res: ResourceArc<DocRes>, cursor: Binary) -> NifResult<usize> {
+fn history_cursor_pos(res: ResourceArc<WeaveRes>, cursor: Binary) -> NifResult<usize> {
     let st = state(&res)?;
     let c = loro::cursor::Cursor::decode(cursor.as_slice()).map_err(err)?;
     Ok(st.doc.get_cursor_pos(&c).map_err(err)?.current.pos)
@@ -238,24 +238,24 @@ fn doc_cursor_pos(res: ResourceArc<DocRes>, cursor: Binary) -> NifResult<usize> 
 // -------------------------------------------------------- export and import
 
 #[rustler::nif]
-fn doc_version(env: Env, res: ResourceArc<DocRes>) -> NifResult<Binary> {
+fn history_version(env: Env, res: ResourceArc<WeaveRes>) -> NifResult<Binary> {
     let st = state(&res)?;
     Ok(bin(env, &st.doc.oplog_vv().encode()))
 }
 
 #[rustler::nif(schedule = "DirtyCpu")]
-fn doc_export_snapshot(env: Env, res: ResourceArc<DocRes>) -> NifResult<Binary> {
+fn history_export_snapshot(env: Env, res: ResourceArc<WeaveRes>) -> NifResult<Binary> {
     let st = state(&res)?;
     let bytes = st.doc.export(ExportMode::Snapshot).map_err(err)?;
     Ok(bin(env, &bytes))
 }
 
-/// Updates since `from`, an encoded version from `doc_version`. These bytes go
+/// Updates since `from`, an encoded version from `history_version`. These bytes go
 /// to disk and to a peer without change.
 #[rustler::nif(schedule = "DirtyCpu")]
-fn doc_export_updates<'a>(
+fn history_export_updates<'a>(
     env: Env<'a>,
-    res: ResourceArc<DocRes>,
+    res: ResourceArc<WeaveRes>,
     from: Binary,
 ) -> NifResult<Binary<'a>> {
     let st = state(&res)?;
@@ -264,10 +264,19 @@ fn doc_export_updates<'a>(
     Ok(bin(env, &bytes))
 }
 
+/// Everything this history holds, as updates rather than a snapshot. What a
+/// log file starts with when nothing has been written for this buffer yet.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn history_export_all(env: Env, res: ResourceArc<WeaveRes>) -> NifResult<Binary> {
+    let st = state(&res)?;
+    let bytes = st.doc.export(ExportMode::all_updates()).map_err(err)?;
+    Ok(bin(env, &bytes))
+}
+
 /// Import bytes another replica wrote. Returns the new byte length, because
 /// the caller must rebuild its rope from the result.
 #[rustler::nif(schedule = "DirtyCpu")]
-fn doc_import(res: ResourceArc<DocRes>, bytes: Binary) -> NifResult<usize> {
+fn history_import(res: ResourceArc<WeaveRes>, bytes: Binary) -> NifResult<usize> {
     let st = state(&res)?;
     st.doc.import(bytes.as_slice()).map_err(err)?;
     Ok(st.text.len_utf8())
@@ -278,7 +287,7 @@ fn doc_import(res: ResourceArc<DocRes>, bytes: Binary) -> NifResult<usize> {
 /// One tuple per change: peer, counter, lamport, unix timestamp, message.
 /// The message carries the actor, so this is the attribution record.
 #[rustler::nif(schedule = "DirtyCpu")]
-fn doc_history(res: ResourceArc<DocRes>) -> NifResult<Vec<(u64, i32, u32, i64, String)>> {
+fn history_changes(res: ResourceArc<WeaveRes>) -> NifResult<Vec<(u64, i32, u32, i64, String)>> {
     let st = state(&res)?;
     let json = st
         .doc
@@ -298,4 +307,4 @@ fn doc_history(res: ResourceArc<DocRes>) -> NifResult<Vec<(u64, i32, u32, i64, S
         .collect())
 }
 
-rustler::init!("Elixir.Aimax.Core.DocNif");
+rustler::init!("Elixir.Aimax.Core.BufferHistoryNif");

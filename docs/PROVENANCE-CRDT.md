@@ -63,7 +63,7 @@ undo, cursors, and the wire format.
   `do_delete` (`:1379`) already know the exact `(pos, text)` and `(pos, len)`, so they
   apply the rope edit and then call `insert_utf8` / `delete_utf8`. No diff.
 - **Remote or imported edits: Loro leads, the rope rebuilds.**
-- **Invariant:** `Rope.to_binary(rope) == doc.get_text().to_string()`, checked by hash
+- **Invariant:** `Rope.to_binary(rope) == History.text(history)`, checked by hash
   at the checkpoint boundaries where the buffer already compares hashes.
 
 Loro has no line index. It offers `insert_utf8`, `delete_utf8`, `len_utf8`, `splice`,
@@ -76,7 +76,7 @@ motion call constantly. ropey answers those in O(log n), so `rope.ex` and
 
 **PeerID is the replica. Origin is the actor.** One `LoroDoc` per buffer, one PeerID.
 The existing `source` becomes the Loro origin string: `user`, `agent:codex`, `editor`,
-`process`. This is what makes per-actor undo work without per-actor documents.
+`process`. This is what makes per-actor undo work without a history per actor.
 
 **One `UndoManager` per actor that can undo.** The API is built for this case:
 
@@ -134,13 +134,12 @@ Two uses, neither of them an agent affordance:
 ### New crate `apps/aimax_core/native/aimax_loro`
 
 ```rust
-struct DocState {
+struct WeaveState {
     doc: LoroDoc,
     text: LoroText,
-    undo: HashMap<String, UndoManager>,   // actor -> manager
-    version: u64,
+    undo: HashMap<String, UndoManager>,   // undo scope -> manager
 }
-struct DocRes(Mutex<DocState>);
+struct WeaveRes(Mutex<WeaveState>);
 ```
 
 Mutable behind a `Mutex`, like `TsRes` in `aimax_ts/src/lib.rs:397`, not like
@@ -148,17 +147,17 @@ Mutable behind a `Mutex`, like `TsRes` in `aimax_ts/src/lib.rs:397`, not like
 
 | NIF | Scheduler | Notes |
 |---|---|---|
-| `doc_new(bytes)` | DirtyCpu | new, or import an existing document |
-| `doc_insert(res, pos, bytes)` | normal | `insert_utf8` |
-| `doc_delete(res, pos, len)` | normal | `delete_utf8` |
-| `doc_update(res, bytes, by_line)` | DirtyCpu | wholesale swap: desktop restore |
-| `doc_commit(res, origin, msg, ts)` | normal | closes a change |
-| `doc_undo(res, actor)` / `doc_redo(res, actor)` | normal | per-actor manager |
-| `doc_cursor(res, pos)` / `doc_cursor_pos(res, cursor)` | normal | stable points |
-| `doc_export_snapshot(res)` / `doc_export_updates(res, vv)` | DirtyCpu | disk and wire |
-| `doc_import(res, bytes)` | DirtyCpu | returns the new text |
-| `doc_history(res, span)` | DirtyCpu | `export_json_in_id_span`, for `buffer-log` |
-| `doc_to_binary(res)` | DirtyCpu | invariant checks only, not a read path |
+| `history_new(peer)` | DirtyCpu | a new history, for one replica |
+| `history_insert(res, pos, bytes)` | normal | `insert_utf8` |
+| `history_delete(res, pos, len)` | normal | `delete_utf8` |
+| `history_update(res, bytes, by_line)` | DirtyCpu | wholesale swap: desktop restore |
+| `history_commit(res, origin, msg, ts)` | normal | closes a change |
+| `history_undo(res, actor)` / `history_redo(res, actor)` | normal | per-actor manager |
+| `history_cursor(res, pos)` / `history_cursor_pos(res, cursor)` | normal | stable points |
+| `history_export_snapshot(res)` / `history_export_updates(res, vv)` | DirtyCpu | disk and wire |
+| `history_import(res, bytes)` | DirtyCpu | returns the new text |
+| `history_changes(res)` | DirtyCpu | `export_json_in_id_span`, for `buffer-log` |
+| `history_text(res)` | DirtyCpu | invariant checks only, not a read path |
 
 **Pass text as `Binary`, never `String`.** Both existing crates take `text: String`,
 which copies the whole buffer into Rust on entry. `ts_state_highlight(res, text)`
@@ -171,7 +170,7 @@ gets called slow.
 Origin and message are not interchangeable. **Only the message is durable.** `Change`
 carries `commit_msg`; it carries no origin field, and Phase 0 confirmed that origin does
 not survive an export and import. Origin is an event-time label that the undo managers
-filter on while the document is live.
+filter on while the history is live.
 
 So every commit sets both:
 
@@ -193,10 +192,20 @@ and its flush boundaries already decide what one change contains.
 The existing actor-change flush boundary already sits in the right place: `continues?/4`
 (`buffer.ex:1625`) closes a changeset when `pending_actor.id` changes.
 
+### Naming
+
+The structure is `Aimax.Core.BufferHistory`, held as `state.history` and read as
+`Buffer.history/1`. `Aimax.Core.BufferHistoryStore` owns the files.
+
+Two cautions. `state.history` meant the undo snapshot stack until Phase 3 deleted it, so
+that field name means something else in commits before `502860d`. And
+`BufferStore.history` is a different thing again: the cross-process list of recently used
+buffer names.
+
 ### Persistence
 
 `checkpoint/1` (`buffer.ex:1187`) serializes flattened text today, and
-`restored_state/1` (`:1161`) calls `Rope.new(cp[:text])`. Add exported document bytes
+`restored_state/1` (`:1161`) calls `Rope.new(cp[:text])`. Add exported history bytes
 beside the text, so history survives eviction while the text keeps its current recovery
 path. `provenance.sqlite3` becomes the index: the cell registry, the actor table, and
 the queries a DAG walk cannot answer cheaply.
@@ -254,12 +263,12 @@ Run on 2026-08-23, loro 1.13.9, release build with LTO, from
 
 ```
 loro insert_utf8, one character        median      ropey, same edit
-  empty document, append               0.250 us
+  empty history, append               0.250 us
   343 KB, append                       0.250 us
   343 KB, middle                       0.417 us    0.042 us
   3 MB,   middle                       0.416 us    0.083 us
 
-343 KB document, 200 ops exchanged
+343 KB history, 200 ops exchanged
   export updates                        11-21 us   294 B on the wire
   import updates                        77-82 us
   to_string                             44-65 us
@@ -267,7 +276,7 @@ loro insert_utf8, one character        median      ropey, same edit
 ```
 
 **The gate passes.** A Loro insert costs 0.25 to 0.42 us against a 7 us budget, and it
-does not grow with the document: 343 KB and 3 MB cost the same. Loro adds about 0.33 us
+does not grow with the history: 343 KB and 3 MB cost the same. Loro adds about 0.33 us
 on top of the ropey edit that already happens, so a keystroke stays around 0.5 us before
 NIF overhead. Two hundred keystrokes compress to 294 bytes on the wire.
 
@@ -282,9 +291,9 @@ Three findings changed the design, and each is folded into the sections above.
    to both managers gave clean, symmetric per-actor undo.
 3. ~~**Cursor resolution is not free.** At 25 to 46 us it is fifty times a keystroke.~~
    **Wrong, and corrected in Phase 4.** That was one cold call. The median says taking a
-   cursor costs 0.17 us and resolving a fresh one costs 0.042 us, at every document size
+   cursor costs 0.17 us and resolving a fresh one costs 0.042 us, at every size
    from 64 KB to 3 MB. The cost tracks the edits made since the cursor was taken, not the
-   size of the document: after 2000 edits a resolve costs about 15 us. So a cursor the
+   size of the history: after 2000 edits a resolve costs about 15 us. So a cursor the
    buffer re-takes on every move is free, and only a long-lived anchor ever pays.
 
 The oplog grows about one byte per character, so a 343 KB buffer carries a 353 KB
@@ -296,36 +305,36 @@ is one line repeated and compresses far better than real source.
 **Phase 0 - measure first. Done.** See the results above.
 
 **Phase 1 - the crate and the wrapper. Done.** `aimax_loro` is a rustler cdylib and
-`Aimax.Core.Doc` wraps it, with 15 tests. Nothing calls it yet. Cursors and versions
+`Aimax.Core.BufferHistory` wraps it, with 15 tests. Nothing calls it yet. Cursors and versions
 cross the boundary as opaque binaries, because `Cursor` and `VersionVector` encode
-themselves. `doc_register_actor` always excludes the `undo` origin, so the Phase 0 trap
+themselves. `history_register_actor` always excludes the `undo` origin, so the Phase 0 trap
 cannot be reintroduced by a caller.
 
-**Phase 2 - mirror from the funnel. Done.** `state.doc` holds the document, `do_insert`
+**Phase 2 - mirror from the funnel. Done.** `state.history` holds the history, `do_insert`
 and `do_delete` mirror into it, `verify_doc` asserts the invariant at every checkpoint
-boundary, and `Buffer.doc/1` reads it. Undo still runs the old path and its tests are
-unchanged. 14 tests in `buffer_doc_test.exs`.
+boundary, and `Buffer.history/1` reads it. Undo still runs the old path and its tests are
+unchanged. 14 tests in `buffer_history_mirror_test.exs`.
 
 Two corrections to the plan came out of building it.
 
 **The mirror runs after `open_changeset`, never before.** Opening a changeset flushes
-the previous actor's work, and a document operation applied before that flush is
+the previous actor's work, and a history operation applied before that flush is
 committed under the previous actor's name. The symptom was a human's change and an
 agent's change collapsing into one change attributed to the human. The ordering is now
 load-bearing and commented at both call sites.
 
 **Desktop restore needs no special path.** It replaces text through `delete_range` and
 `append` (`desktop.ex:187`), so it already funnels through `do_insert` and `do_delete`.
-Only undo swaps the rope wholesale, so `doc_update` has exactly one caller.
+Only undo swaps the rope wholesale, so `history_update` has exactly one caller.
 
-The invariant check materializes the document text at every checkpoint, which costs
+The invariant check materializes the history's text at every checkpoint, which costs
 about 65 us for a 343 KB buffer at a 1.5 second cadence. That is affordable while the
 rope is authoritative and worth keeping until the mirror has proven itself.
 
 **Phase 3 - undo moves to Loro. Done.** Undo runs through the asking actor's
 `UndoManager`, so it reverts only that actor's operations and rebases them over
 everyone else's. `state.history`, `snapshot/1`, and `push_history` are gone. 19 tests in
-`buffer_doc_test.exs`.
+`buffer_history_mirror_test.exs`.
 
 Less changed than the plan expected. Both Emacs undo-model tests in `editor_test` pass
 untouched: a run of undos still walks back, and a command that breaks the run still turns
@@ -334,16 +343,16 @@ described below.
 
 Three things had to be worked out while building it.
 
-**The document commit had to come off the provenance flush.** `continues?` is false for
+**The history commit had to come off the provenance flush.** `continues?` is false for
 every non-batchable source, so an `:editor` or agent edit opens a changeset per
-operation. While the document committed inside `flush_provenance`, a `replace_range`
+operation. While the history committed inside `flush_provenance`, a `replace_range`
 split into two changes, and its delete and insert became two undo steps. The buffer now
-tracks `doc_actor`, the actor whose operations sit uncommitted in the document, and
+tracks `history_actor`, the actor whose operations sit uncommitted in the history, and
 commits on an actor change, at an undo boundary, and at a checkpoint. Provenance keeps
 its own schedule.
 
 **Undo applies a change rather than restoring a snapshot.** Comparing the rope's text
-with the document's gives one contiguous replacement, which then runs through the same
+with the history's gives one contiguous replacement, which then runs through the same
 range adjustment as any other edit. Overlays and the point now move with the text through
 an undo instead of going stale for a mode to heal. `overlay_test` asserted the staleness
 and now asserts the tracking.
@@ -364,7 +373,7 @@ a comparable granularity rather than a new kind of split.
 naming the same place while the text around it changes, and survives a restart. They
 reach Scheme as `(buffer-anchor BUF POS)` and `(buffer-anchor-pos BUF ANCHOR)`, base64 so
 an anchor travels through a tool call. `code-outline` now anchors every line it reports
-and `code--with-node` follows the anchor, which closes a real hole on the documented
+and `code--with-node` follows the anchor, which closes a real hole on the historyed
 agent path: an agent reads an outline, thinks for a few seconds, and calls
 `code-replace!` with a line that a person has meanwhile moved.
 
@@ -386,10 +395,26 @@ arrives with the transport in Phase 6. Converting them now would churn correct c
 put a NIF call on the point path for no change in behaviour, so it waits for the phase
 that needs it.
 
-**Phase 5 - provenance reads the oplog.** `flush_provenance/1` (`buffer.ex:1687`)
-commits a Loro change with actor metadata instead of writing revisions. `M-x buffer-log`
-reads `doc_history`. Checkpoints carry document bytes. Add a shallow-snapshot policy,
-because the oplog grows without bound per buffer.
+**Phase 5 - the history becomes durable.** In progress.
+
+Done: the history survives eviction and restart. `BufferHistoryStore` keeps one log file
+per buffer under `~/.aimax/history/`, a sequence of length-prefixed blobs: a snapshot
+first, updates after. Measured on an 85 KB source file, a snapshot is 74 KB and 500 typed
+characters export as 1.2 KB, so appending on every checkpoint is affordable only in the
+update form. The log is rewritten as one snapshot when it outgrows four times the text.
+
+A torn tail is expected rather than exceptional. A crash between the write and the flush
+leaves a partial frame, so the reader stops at the first frame it cannot trust and keeps
+everything before it: a crash costs the last batch and never the history.
+
+When the text moved while the buffer was away, a file re-read from disk being the usual
+case, the history takes the new text as a change by a `system:reload` actor rather than
+being discarded.
+
+Left: `Buffer.provenance_history/1` and the SQLite revision rows it reads. `M-x
+buffer-log` still renders from them. Once it reads the change list instead,
+`flush_provenance` stops writing revisions and the store keeps only the cell registry,
+the actor table, and the recording policy.
 
 **Phase 6 - transport.** Additive, once a topology is chosen.
 
@@ -425,7 +450,7 @@ because the oplog grows without bound per buffer.
   human undoes. Assert the human's text is reverted and the agent's text is untouched.
   This test fails against the current code.
 - Invariant test: after a scripted sequence of user edits, agent edits, undo, and redo,
-  assert `Rope.to_binary(rope) == doc_to_binary(doc)`.
+  assert `Rope.to_binary(rope) == History.text(history)`.
 - Cursor test: place a point, have an agent insert above it, assert the point moved by
   the inserted byte count without a manual adjustment.
 - Stale-anchor test: an agent takes a cursor pair over a range, the human inserts above

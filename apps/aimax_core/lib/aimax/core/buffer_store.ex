@@ -100,8 +100,13 @@ defmodule Aimax.Core.BufferStore do
 
   def handle_call({:forget, name}, _from, state) do
     case state.entries[name] do
-      %{id: id} -> File.rm(checkpoint_path(id))
-      _ -> :ok
+      %{id: id} ->
+        File.rm(checkpoint_path(id))
+        # The history goes with the buffer it belonged to.
+        Aimax.Core.BufferHistoryStore.forget(id)
+
+      _ ->
+        :ok
     end
 
     state = %{

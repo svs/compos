@@ -3,6 +3,11 @@ defmodule Aimax.AnnotateTest do
   The annotation layer, driven through the same key path the GUI uses.
   The 'annotations buffer-local is the model; overlays and the
   *annotations* list are projections. docs/ANNOTATIONS.md is the design.
+
+  The model itself — painting, relocation, the thread, the suggestion
+  prompt and the check source — is Scheme policy and lives in
+  priv/tests/annotate-test.scm. Ten tests here press keys, and three write
+  an annotation store to disk beside the document.
   """
 
   use ExUnit.Case
@@ -11,7 +16,6 @@ defmodule Aimax.AnnotateTest do
 
   @buf "annotate-test.txt"
   @list "*annotations*"
-  @text "alpha beta\ngamma delta\nepsilon zeta\n"
 
   defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
 
@@ -63,36 +67,6 @@ defmodule Aimax.AnnotateTest do
     add(~s[(source "llm" severity "suggestion" line 1 match "beta"
             title "Rename" who "claude" when "now"
             fix-old "beta" fix-new "betta")])
-  end
-
-  test "annotate! paints an overlay on the matched text" do
-    llm_warning()
-    # "alpha beta\n" is 11 bytes; "delta" sits at 17..22
-    assert {17, 22, "ann-llm"} in Buffer.overlays(@buf)
-  end
-
-  test "a resolved annotation paints nothing" do
-    id = llm_warning()
-    eval!(~s[(annotate--update! "#{@buf}" "#{id}" 'state "resolved")])
-    eval!(~s[(annotate--paint! "#{@buf}")])
-    assert Buffer.overlays(@buf) == []
-  end
-
-  test "relocate follows the text through an edit above" do
-    llm_warning()
-    eval!(~s[(buffer-insert! "#{@buf}" 0 "intro\\n")])
-    eval!(~s[(annotate--relocate! "#{@buf}")])
-    eval!(~s[(annotate--paint! "#{@buf}")])
-
-    assert eval!(~s[(plist-get (car (buffer-annotations "#{@buf}")) 'line)]) == "3"
-    assert {23, 28, "ann-llm"} in Buffer.overlays(@buf)
-  end
-
-  test "annotate-clear! drops one source and keeps the rest" do
-    llm_warning()
-    reader_note()
-    eval!(~s[(annotate-clear! "#{@buf}" "llm")])
-    assert eval!(~s[(length (buffer-annotations "#{@buf}"))]) == "1"
   end
 
   test "M-n steps to the annotation and selects it" do
@@ -188,45 +162,6 @@ defmodule Aimax.AnnotateTest do
     assert blocks =~ "ann:resolve:#{id}"
   end
 
-  test "a margin click runs the verb" do
-    id = llm_warning()
-    eval!(~s[(enable-minor-mode! "#{@buf}" "annotate-mode")])
-    eval!(~s[(annotate--click! "#{@buf}" "resolve" (annotate--find "#{@buf}" "#{id}"))])
-
-    assert eval_s!(~s[(plist-get (annotate--find "#{@buf}" "#{id}") 'state)]) ==
-             "resolved"
-  end
-
-  test "a reply joins the annotation's thread and the margin shows it" do
-    id = llm_warning()
-    eval!(~s[(enable-minor-mode! "#{@buf}" "annotate-mode")])
-    eval!(~s[(buffer-set-local! "#{@buf}" 'ann-selected "#{id}")])
-    eval!(~s[(annotate-reply! "#{@buf}" "#{id}" "Second this.")])
-
-    assert eval!(
-             ~s[(length (plist-get (annotate--find "#{@buf}" "#{id}") 'thread))]
-           ) == "1"
-
-    assert eval!(~s[(annotate--margin-blocks "*margin*")]) =~ "Second this."
-  end
-
-  test "the suggestion prompt carries the span, the context, and the ask" do
-    llm_warning()
-
-    prompt =
-      eval_s!("""
-      (let* ((a (car (buffer-annotations "#{@buf}")))
-             (text (buffer-text "#{@buf}"))
-             (at (annotate--locate text (annotate--line-bounds text) a)))
-        (annotate--suggest-prompt "#{@buf}" a at))
-      """)
-
-    assert prompt =~ "delta"
-    assert prompt =~ "gamma delta"
-    assert prompt =~ "Overstated claim"
-    assert prompt =~ "ONLY the replacement text"
-  end
-
   test "a suggestion reply becomes the fix and y applies it" do
     id = llm_warning()
     eval!(~s{(annotate--suggest-apply! "#{@buf}" "#{id}" "delta" "  epsilon  ")})
@@ -239,23 +174,9 @@ defmodule Aimax.AnnotateTest do
     assert Buffer.text(@buf) =~ "gamma epsilon"
   end
 
-  test "an empty suggestion reply changes nothing" do
-    id = llm_warning()
-    eval!(~s{(annotate--suggest-apply! "#{@buf}" "#{id}" "delta" "   ")})
-    assert eval!(~s[(plist-get (annotate--find "#{@buf}" "#{id}") 'fix-new)]) == "#f"
-  end
-
   test "annotate-margin-mode by hand redirects instead of hijacking the buffer" do
     eval!(~s[(run-command "annotate-margin-mode")])
     assert Buffer.get_local(@buf, "render-mode") == nil
-  end
-
-  test "turning annotate-mode off closes the margin window" do
-    llm_warning()
-    eval!(~s[(enable-minor-mode! "#{@buf}" "annotate-mode")])
-    eval!(~s[(display-buffer-other-window! "*margin*")])
-    eval!(~s[(disable-minor-mode! "#{@buf}" "annotate-mode")])
-    assert eval!(~s[(window-showing "*margin*")]) == "#f"
   end
 
   test "annotations of a file buffer live in a file and load back" do
@@ -291,10 +212,6 @@ defmodule Aimax.AnnotateTest do
                 line 1 match "beta" title "Second" who "you" when "now")))})
 
     assert id == "a2"
-  end
-
-  test "a non-file buffer has no store" do
-    assert eval!(~s[(annotate-store-file "#{@buf}")]) == "#f"
   end
 
   test "the store keeps reader and llm annotations, never checker ones" do
@@ -380,32 +297,4 @@ defmodule Aimax.AnnotateTest do
     end
   end
 
-  test "the mode help names annotate-add and its key" do
-    eval!(~s[(enable-minor-mode! "#{@buf}" "annotate-mode")])
-    eval!(~s[(run-command "describe-mode")])
-    on_exit(fn -> if Buffer.exists?("*Help*"), do: Aimax.Core.kill_buffer("*Help*") end)
-
-    help = Buffer.text("*Help*")
-    assert help =~ "C-c ! a"
-    assert help =~ "annotate-add"
-    assert help =~ "Margin notes"
-  end
-
-  test "the check source reports tree-sitter ERROR nodes" do
-    langs = eval!("(ts-langs)")
-
-    if langs =~ ~s("json") do
-      eval!("""
-      (begin
-        (buffer-set-local! "#{@buf}" 'ts-lang "json")
-        (buffer-delete-range! "#{@buf}" 0 #{byte_size(@text)})
-        (buffer-insert! "#{@buf}" 0 "[1,,]\\n"))
-      """)
-
-      eval!(~s[(annotate--check! "#{@buf}")])
-
-      assert eval_s!(~s[(plist-get (car (buffer-annotations "#{@buf}")) 'source)]) ==
-               "check"
-    end
-  end
 end

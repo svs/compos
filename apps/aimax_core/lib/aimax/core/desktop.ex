@@ -9,7 +9,7 @@ defmodule Aimax.Core.Desktop do
 
   require Logger
 
-  alias Aimax.Core.{Buffer, Editor, Events, Session}
+  alias Aimax.Core.{Editor, Events, Session}
 
   @debounce 1_500
 
@@ -152,61 +152,6 @@ defmodule Aimax.Core.Desktop do
   defp do_restore do
     with {:ok, bin} <- File.read(path()),
          %{} = desktop <- :erlang.binary_to_term(bin) do
-      # v1/v2 migration only. Version 3 never stores buffer state here.
-      buffers = desktop[:buffers] || []
-      # reopen through visit so modes + hooks apply, then lay the saved
-      # buffer-locals back on top so toggled state (preview, line numbers,
-      # a hand-picked mode) survives too
-      for entry <- buffers, bpath = elem(entry, 0) do
-        {point, locals, text} =
-          case entry do
-            {_, point} -> {point, %{}, nil}
-            {_, point, locals} -> {point, locals, nil}
-            {_, point, locals, text} -> {point, locals, text}
-          end
-
-        # a vanished file with saved unsaved edits still restores: the
-        # snapshot text is the only copy of that work. One buffer that
-        # dies mid-restore must not abort the loop: every buffer after it
-        # in the file — every chat — would be lost, and the next save
-        # would write the crippled state over the desktop.
-        try do
-          if restorable?(bpath) or is_binary(text) do
-            Session.call_named("visit", [bpath])
-            # visit can decline (unreachable remote host) — skip, don't crash boot
-            if Buffer.exists?(bpath) do
-              # unsaved edits lay over what visit read. When a save landed
-              # before the restart the texts match, nothing is replaced, and
-              # the buffer stays clean. When the file moved on disk AND the
-              # snapshot holds edits, the snapshot wins — it is the copy the
-              # user watched leave their fingers.
-              if is_binary(text) and text != Buffer.text(bpath) do
-                size = Buffer.byte_size(bpath)
-
-                if size > 0,
-                  do: Buffer.delete_range(bpath, 0, size, source: :editor, author: :none)
-
-                if text != "", do: Buffer.append(bpath, text, source: :editor, author: :none)
-              end
-
-              apply_saved_state(bpath, point, locals)
-            end
-          end
-        catch
-          kind, reason ->
-            Logger.warning("desktop: skipped #{bpath}: #{inspect(kind)} #{inspect(reason)}")
-        end
-      end
-
-      for {name, text, point, locals} <- desktop[:scratch] || [] do
-        try do
-          restore_scratch(name, text, point, locals)
-        catch
-          kind, reason ->
-            Logger.warning("desktop: skipped #{name}: #{inspect(kind)} #{inspect(reason)}")
-        end
-      end
-
       restore_frames(desktop)
 
       # Waking installs literal buffer state. Runtime-only mode machinery is
@@ -261,45 +206,4 @@ defmodule Aimax.Core.Desktop do
 
   defp restore_frames(_), do: :ok
 
-  # non-file buffer: content and locals go down first, THEN set-mode! —
-  # the mode's setup fn rebuilds presentation (local keys, overlays,
-  # folds) from the locals it finds on the buffer
-  # remote buffers restore by re-fetching over ssh — (visit) does that;
-  # a vanished local file is the only thing that drops a buffer
-  defp restorable?(bpath),
-    do: File.exists?(bpath) or String.starts_with?(bpath, "/ssh:")
-
-  defp restore_scratch(name, text, point, locals) do
-    unless Buffer.exists?(name), do: Aimax.Core.create_buffer(name)
-
-    size = Buffer.byte_size(name)
-    # :none — a restore is not an edit; the content stays unattributed
-    if size > 0, do: Buffer.delete_range(name, 0, size, source: :editor, author: :none)
-    if text != "", do: Buffer.append(name, text, source: :editor, author: :none)
-
-    apply_saved_state(name, point, locals)
-  end
-
-  # ONE restore path for saved buffer state (S2, dup #27): the locals go
-  # down first, THEN set-mode! runs unconditionally — every mode's setup
-  # fn rebuilds presentation (local keys, overlays, folds) from the locals
-  # it finds on the buffer. Minor modes rebuild the same way. Point goes
-  # last: a setup fn is free to move it.
-  defp apply_saved_state(name, point, locals) do
-    Enum.each(locals, fn {k, v} -> Buffer.set_local(name, k, v) end)
-
-    # the buffer's own lane: a slow mode setup (an agent chat reviving
-    # its backend) must never queue keystrokes behind the restore
-    lane = Aimax.Core.Lane.for_buffer(name)
-
-    if mode = locals["mode-name"] do
-      Session.call_named("desktop-apply-mode!", [name, mode], nil, 120_000, lane)
-    end
-
-    if locals["minor-modes"] not in [nil, []] do
-      Session.call_named("restore-minor-modes!", [name], nil, 120_000, lane)
-    end
-
-    Buffer.goto(name, point)
-  end
 end

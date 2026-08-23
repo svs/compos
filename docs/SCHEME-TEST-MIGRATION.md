@@ -166,8 +166,9 @@ worked in the commit message. Run it.
 
 Finish with `bin/test-fast` in a worktree at HEAD, not in this tree:
 another session edits it, and its uncommitted work adds failures that are
-not yours. A clean worktree answers 38-42: four runs across two commits
-gave 38, 39, 40 and 42. The count moves between runs, and so do the
+not yours. A clean worktree answers 35-42, and the floor keeps dropping as
+key-driven tests become Scheme tests: 38, 39, 40 and 42 before the
+paredit and morg redo, 39 and 35 after it. The count moves between runs, and so do the
 names, so diff the failure NAMES against a baseline instead of trusting
 the number, and check whether any name sits in a file you touched.
 

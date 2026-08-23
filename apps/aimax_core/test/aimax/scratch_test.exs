@@ -7,6 +7,19 @@ defmodule Aimax.ScratchTest do
 
   defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
 
+  # the verb by name. Which key reaches it is a preference that moves.
+  defp run(command), do: eval!(~s[(run-command "#{command}")])
+
+  # the group a buffer belongs to, by NAME. Groups are records: the
+  # legacy 'group local is cleared the moment a buffer has a real
+  # membership, so reading it answers nil for a buffer that is in a group.
+  defp group_of(name) do
+    case eval!(~s{(group-name (buffer-group "#{name}"))}) do
+      "#f" -> nil
+      quoted -> String.trim(quoted, ~s{"})
+    end
+  end
+
   defp eval!(src) do
     {:ok, printed} = Session.eval(src)
     printed
@@ -37,27 +50,27 @@ defmodule Aimax.ScratchTest do
     :ok
   end
 
-  test "C-c s opens a plain scratch beside any ordinary buffer and toggles back" do
+  test "the scratch opens beside any ordinary buffer and toggles back" do
     owner = fresh_buffer("scratch-any-#{System.unique_integer([:positive])}", "ordinary\n")
     scratch = "*scratch:#{owner}*"
 
-    press(["C-c", "s"])
+    run("scratch-buffer")
 
     assert Editor.current_buffer() == scratch
     assert Buffer.text(scratch) == "# Scratch — #{owner}\n\n"
     assert Buffer.get_local(owner, "scratch-buffer") == scratch
     assert Buffer.get_local(scratch, "scratch-owner") == owner
-    assert Buffer.get_local(scratch, "group") == owner
+    assert group_of(scratch) == owner
     assert Buffer.get_local(scratch, "mode-name") == "text-mode"
     refute Buffer.get_local(scratch, "render-mode")
     refute Buffer.get_local(scratch, "preview-renderer")
     refute Buffer.get_local(scratch, "visual-line-mode")
 
-    press(["C-c", "s"])
+    run("scratch-buffer")
     assert Editor.current_buffer() == owner
     assert length(Editor.list_windows()) == 2
 
-    press(["C-c", "s"])
+    run("scratch-buffer")
     assert Editor.current_buffer() == scratch
     assert length(Editor.list_windows()) == 2
   end
@@ -69,7 +82,7 @@ defmodule Aimax.ScratchTest do
     eval!(~s{(enable-minor-mode! "#{owner}" "llm-mode")})
     eval!(~s{(buffer-set-local! "#{owner}" 'llm-model "openai:test-model")})
     eval!(~s{(buffer-set-local! "#{owner}" 'chat-presets '("files" "web"))})
-    press(["C-c", "s"])
+    run("scratch-buffer")
 
     assert Buffer.get_local(scratch, "minor-modes") == ["llm-mode"]
     assert Buffer.get_local(scratch, "llm-model") == "openai:test-model"
@@ -81,7 +94,7 @@ defmodule Aimax.ScratchTest do
     owner = fresh_buffer("scratch-delete-#{System.unique_integer([:positive])}", "owner\n")
     scratch = "*scratch:#{owner}*"
 
-    press(["C-c", "s"])
+    run("scratch-buffer")
     :ok = Buffer.append(scratch, "keep remove tail", source: :editor)
 
     prefix = byte_size("# Scratch — #{owner}\n\nkeep ")
@@ -111,7 +124,7 @@ defmodule Aimax.ScratchTest do
     eval!(~s{(buffer-set-local! "#{legacy}" 'preview-renderer "markdown")})
     eval!(~s{(buffer-set-local! "#{legacy}" 'render-mode "markdown")})
 
-    press(["C-c", "s"])
+    run("scratch-buffer")
 
     assert Editor.current_buffer() == legacy
     assert Buffer.text(legacy) == old_text

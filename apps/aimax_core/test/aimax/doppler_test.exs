@@ -79,7 +79,9 @@ defmodule Aimax.DopplerTest do
     eval!(~s{(run-command "doppler")})
 
     assert eval!("(current-buffer)") == ~s{"*doppler*"}
-    assert eval!(~s{(buffer-group "*doppler*")}) == ~s{"doppler"}
+    # groups are records: buffer-group answers a stable ID, and the name
+    # is what a person picked and can change
+    assert eval!(~s{(group-name (buffer-group "*doppler*"))}) == ~s{"doppler"}
     assert eval!(~s{(buffer-local "*doppler*" 'window-class)}) == "#f"
     assert eval!(~s{(buffer-local "*doppler*" 'window-style)}) == "#f"
     assert eval!(~s{(display-action-for "*doppler*")}) == "same"

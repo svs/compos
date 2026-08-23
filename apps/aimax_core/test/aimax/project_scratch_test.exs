@@ -10,6 +10,19 @@ defmodule Aimax.ProjectScratchTest do
 
   defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
 
+  # the verbs by name. Which key reaches one is a preference that moves.
+  defp run(command), do: eval!(~s[(run-command "#{command}")])
+
+  # the group a buffer belongs to, by NAME. Groups are records: the
+  # legacy 'group local is cleared the moment a buffer has a real
+  # membership, so reading it answers nil for a buffer that is in a group.
+  defp group_of(name) do
+    case eval!(~s{(group-name (buffer-group "#{name}"))}) do
+      "#f" -> nil
+      quoted -> String.trim(quoted, ~s{"})
+    end
+  end
+
   defp eval!(src) do
     {:ok, printed} = Session.eval(src)
     printed
@@ -53,29 +66,29 @@ defmodule Aimax.ProjectScratchTest do
     :ok
   end
 
-  test "C-x p s opens the project's scratch, tags the project's buffers, and toggles back" do
+  test "the project scratch opens, tags the project's buffers, and toggles back" do
     {_root, a, b} = project()
     buf = open(a)
     eval!(~s{(find-file "#{b}")})
     root = eval!(~s{(buffer-project-root "#{buf}")}) |> String.trim(~s{"})
 
-    press(["C-x", "p", "s"])
+    run("project-scratch")
     scratch = Editor.current_buffer()
 
     assert scratch == "*scratch:project #{root}*"
     assert Buffer.text(scratch) =~ "# Scratch — project "
-    assert Buffer.get_local(scratch, "group") == root
+    assert group_of(scratch) == root
     assert Buffer.get_local(scratch, "project-scratch-root") == root
 
     # every open buffer of the project joined the group, so a chat in the
     # scratch can name and edit them
-    assert Buffer.get_local(buf, "group") == root
-    assert Buffer.get_local(Path.expand(b), "group") == root
+    assert group_of(buf) == root
+    assert group_of(Path.expand(b)) == root
 
-    press(["C-x", "p", "s"])
+    run("project-scratch")
     assert Editor.current_buffer() == buf
 
-    press(["C-x", "p", "s"])
+    run("project-scratch")
     assert Editor.current_buffer() == scratch
   end
 
@@ -86,7 +99,7 @@ defmodule Aimax.ProjectScratchTest do
 
     eval!(~s{(buffer-set-local! "#{buf}" 'chat-presets '(aimax))})
     eval!(~s{(buffer-set-local! "#{buf}" 'llm-model "openai:test-coder")})
-    press(["C-x", "p", "s"])
+    run("project-scratch")
     scratch = Editor.current_buffer()
 
     assert Buffer.get_local(scratch, "chat-presets") == [sym: "aimax"]
@@ -94,9 +107,9 @@ defmodule Aimax.ProjectScratchTest do
 
     # a later visit from a buffer with different presets must not rewrite the
     # conversation's identity
-    press(["C-x", "p", "s"])
+    run("project-scratch")
     eval!(~s{(buffer-set-local! "#{buf}" 'chat-presets '(web))})
-    press(["C-x", "p", "s"])
+    run("project-scratch")
 
     assert Editor.current_buffer() == "*scratch:project #{root}*"
     assert Buffer.get_local(scratch, "chat-presets") == [sym: "aimax"]
@@ -107,12 +120,12 @@ defmodule Aimax.ProjectScratchTest do
     buf = open(a)
     root = eval!(~s{(buffer-project-root "#{buf}")}) |> String.trim(~s{"})
 
-    press(["C-c", "s"])
+    run("scratch-buffer")
     file_scratch = Editor.current_buffer()
     assert file_scratch == "*scratch:#{buf}*"
 
-    press(["C-c", "s"])
-    press(["C-x", "p", "s"])
+    run("scratch-buffer")
+    run("project-scratch")
 
     assert Editor.current_buffer() == "*scratch:project #{root}*"
     assert Buffer.exists?(file_scratch)
@@ -128,7 +141,7 @@ defmodule Aimax.ProjectScratchTest do
     eval!(~s{(buffer-set-local! "#{name}" 'default-directory "/")})
 
     Editor.set_echo("")
-    press(["C-x", "p", "s"])
+    run("project-scratch")
 
     assert Editor.current_buffer() == name
     assert Editor.snapshot().echo =~ "No project here"

@@ -101,6 +101,19 @@ defmodule Aimax.Core.BufferHistory do
     BufferHistoryNif.history_register_actor(res, actor, exclude, max_steps)
   end
 
+  @doc """
+  Write as a different peer from here on.
+
+  A file buffer seeds its history from the bytes on disk, and every replica
+  reading the same bytes must write that seed as the same peer, or the two
+  seeds are rival insertions that concatenate instead of merging. The seed goes
+  in under a shared identity; everything after it goes in as this replica.
+  """
+  def set_peer(%__MODULE__{res: res} = h, peer) when is_integer(peer) and peer >= 0 do
+    BufferHistoryNif.history_set_peer(res, peer)
+    %{h | peer: peer}
+  end
+
   @doc "Whether this actor already has an undo manager."
   def actor?(%__MODULE__{res: res}, actor), do: BufferHistoryNif.history_has_actor(res, actor)
 

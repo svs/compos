@@ -446,6 +446,56 @@ caller hears that it worked, and a save does the same for the typing behind it. 
 replacement stays one change and one undo step, because closing between its delete and
 its insert would make it two.
 
+## Two machines, one file
+
+The next feature, and the reason the rest of this exists. Measured, not designed: what
+follows is what the probes said, and none of it is built.
+
+**Replicas never share storage.** Each machine keeps its own log, its own buffer id, its
+own peer id, and they exchange `export_updates` bytes over the socket. Neither reads the
+other's disk. That is what the two-daemon run showed, and it means no key ever has to
+agree between machines.
+
+**Opening the same file on two machines does not share its history.** Both seed from the
+bytes on disk as their own insertion, so the two documents are unrelated and merging
+concatenates them:
+
+```
+two daemons each open the same file    ->  "hello\nhello\n"
+```
+
+That is true of every CRDT: identical content is not shared ancestry. For a file buffer
+it is the ordinary path rather than an edge, because the buffer is never empty.
+
+**A shared seed fixes it, and the fix is one line.** Write the seed insert under a peer
+id both replicas agree on, so identical bytes produce identical operations and Loro sees
+one root rather than two. Immediately after, each replica takes its own peer id and every
+later edit is attributed to the machine that made it. `BufferHistory.set_peer/2` is that
+line; it commits first, so the seed closes before the identity changes. Nothing calls it
+yet.
+
+```
+same file, shared seed, then both edit  ->  both read
+  "defmodule X do\n  # a note\n  def a, do: 1\n  def b, do: 2\nend\n"
+  converged, three changes
+```
+
+**What is left is addressing, not identity.** Two problems were tangled together and are
+not the same. Identity asks whether two documents are the same one, and the shared seed
+answers it. Addressing asks how one daemon names the other's copy, and today `peer-sync!`
+names a buffer, which for a file is its path. That works when both machines use the same
+absolute path and fails when they do not.
+
+The buffer already holds something both replicas will agree on once seeded: the root
+operation's id, derived from the content they both started from. Asking for "the buffer
+whose history starts with this root" needs no registry, no pairing, and no agreement
+about paths.
+
+Two open questions. The shared seed peer should come from a hash of the seed content
+rather than a constant, so two unrelated files never claim the same operation ids. And a
+replica whose copy of the file is stale has a genuinely different root, so the merge must
+refuse loudly rather than silently doubling the file.
+
 **Phase 6 - transport. The receive half is done; the wire is not.**
 
 A buffer can take changes another replica made. `Buffer.merge/2` imports them, the rope

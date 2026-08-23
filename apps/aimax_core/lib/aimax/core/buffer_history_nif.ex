@@ -6,6 +6,7 @@ defmodule Aimax.Core.BufferHistoryNif do
   def history_open(_peer, _snapshot), do: :erlang.nif_error(:nif_not_loaded)
   def history_register_actor(_d, _actor, _exclude, _max), do: :erlang.nif_error(:nif_not_loaded)
   def history_has_actor(_d, _actor), do: :erlang.nif_error(:nif_not_loaded)
+  def history_set_peer(_d, _peer), do: :erlang.nif_error(:nif_not_loaded)
 
   def history_insert(_d, _pos, _text), do: :erlang.nif_error(:nif_not_loaded)
   def history_delete(_d, _pos, _len), do: :erlang.nif_error(:nif_not_loaded)

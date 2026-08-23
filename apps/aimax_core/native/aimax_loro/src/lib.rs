@@ -116,6 +116,18 @@ fn history_register_actor(
     Ok(atoms::ok())
 }
 
+/// Take a new peer identity for the operations from here on. The seed a file
+/// buffer starts with is written as a peer both replicas agree on, so the two
+/// seeds are the same operations rather than rival ones; after that each
+/// replica writes as itself.
+#[rustler::nif]
+fn history_set_peer(res: ResourceArc<WeaveRes>, peer: u64) -> NifResult<Atom> {
+    let st = state(&res)?;
+    st.doc.commit();
+    st.doc.set_peer_id(peer).map_err(err)?;
+    Ok(atoms::ok())
+}
+
 #[rustler::nif]
 fn history_has_actor(res: ResourceArc<WeaveRes>, actor: String) -> NifResult<bool> {
     Ok(state(&res)?.undo.contains_key(&actor))

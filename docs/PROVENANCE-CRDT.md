@@ -269,9 +269,11 @@ is one line repeated and compresses far better than real source.
 
 **Phase 0 - measure first. Done.** See the results above.
 
-**Phase 1 - the crate and the wrapper.** Turn the crate into a rustler cdylib, plus an
-`Aimax.Core.Doc` wrapper. No buffer changes. Elixir tests for an export and import
-round trip, two-doc convergence, and per-actor undo with an excluded origin.
+**Phase 1 - the crate and the wrapper. Done.** `aimax_loro` is a rustler cdylib and
+`Aimax.Core.Doc` wraps it, with 15 tests. Nothing calls it yet. Cursors and versions
+cross the boundary as opaque binaries, because `Cursor` and `VersionVector` encode
+themselves. `doc_register_actor` always excludes the `undo` origin, so the Phase 0 trap
+cannot be reintroduced by a caller.
 
 **Phase 2 - mirror from the funnel.** Add `state.doc`. `do_insert` and `do_delete`
 apply to the doc after the rope. Desktop restore (`desktop.ex:187`) calls `doc_update`.

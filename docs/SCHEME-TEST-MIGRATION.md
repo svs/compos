@@ -181,7 +181,7 @@ pre-change commit as well. Two runs is not a baseline.
 
 ## State at handoff
 
-Commit `de7182e`. Scheme suite: 259 tests, one red by design.
+Commit `fbe3326`. Scheme suite: 297 tests, one red by design.
 
 In Scheme:
 
@@ -191,37 +191,51 @@ In Scheme:
 | `morg-test.scm` | 24 (moved) |
 | `graphql-test.scm` | 24 (moved) |
 | `apropos-test.scm` | 22 (moved) |
+| `notmuch-test.scm` | 16 (another session, in flight) |
 | `code-structure-test.scm` | 13 (moved) |
-| `annotate-test.scm` | 12 (moved) |
+| `skills-test.scm` | 12 (moved) |
 | `chat-rename-test.scm` | 12 (moved) |
-| `code-agent-mode-test.scm` | 11 (moved) |
+| `annotate-test.scm` | 12 (moved) |
 | `group-records-test.scm` | 11 (moved) |
-| `skills-test.scm` | 10 (moved) |
-| `groups-test.scm` | 9 |
-| `mcp-policy-test.scm` | 4 (moved) |
+| `code-agent-mode-test.scm` | 11 (moved) |
+| `mode-icon-test.scm` | 10 (moved) |
 | `web-browse-test.scm` | 9 (moved) |
-| `mode-icon-test.scm` | 8 (moved) |
-| `chat-heal-test.scm` | 7 (moved) |
+| `groups-test.scm` | 9 |
 | `keymap-test.scm` | 7 |
-| `edit-semantics-test.scm` | 6 (moved) |
-| `help-page-test.scm` | 5 (moved) |
-| `permission-test.scm` | 6 (moved) |
+| `chat-heal-test.scm` | 7 (moved) |
 | `sentry-test.scm` | 6 (moved) |
+| `permission-test.scm` | 6 (moved) |
+| `edit-semantics-test.scm` | 6 (moved) |
+| `occur-ts-test.scm` | 5 (moved) |
 | `marginalia-test.scm` | 5 (moved) |
-| `imenu-test.scm` | 4 (moved) |
+| `help-page-test.scm` | 5 (moved) |
+| `feeds-test.scm` | 5 (moved) |
 | `mode-toggle-test.scm` | 4 (moved) |
+| `mcp-policy-test.scm` | 4 (moved) |
+| `lsp-test.scm` | 4 (new coverage) |
+| `imenu-test.scm` | 4 (moved) |
 | `buffer-cache-test.scm` | 3 (moved) |
+| `treesit-test.scm` | 2 (moved) |
+| `scheme-ide-test.scm` | 2 (moved) |
 | `recipes-test.scm` | 2 (moved) |
 | `canary-test.scm` | 1, always red |
 
 ## What moved, and what could not
 
-224 tests moved. `graphql_test`, `imenu_test`, `buffer_cache_test`,
-`code_structure_test` and `chat_heal_test` are gone entirely. Ten more
-files keep only what Scheme cannot hold: `apropos_test`, `skills_test`,
-`mode_icon_test`, `sentry_test`, `permission_test`, `web_browse_test`,
-`chat_rename_test`, `marginalia_project_test`, `annotate_test` and
-`group_switch_command_test`.
+242 tests moved. `graphql_test`, `imenu_test`, `buffer_cache_test`,
+`code_structure_test`, `chat_heal_test`, `feeds_test`, `skills_test` and
+`mode_icon_test` are gone entirely. Eleven more files keep only what
+Scheme cannot hold: `apropos_test`, `sentry_test`, `permission_test`,
+`web_browse_test`, `chat_rename_test`, `marginalia_project_test`,
+`annotate_test`, `group_switch_command_test`, `occur_ts_test`,
+`grammar_test` and `scheme_ide_test`.
+
+The last three name the axis better than any rule does. `occur_ts_test`
+keeps one test, and it is the key path: `M-s t` through the prefix, and
+the query read before any list exists. `grammar_test` keeps the three
+that call the Rust side. `scheme_ide_test` keeps four, and every one
+reads render state — the echo area and the completion dropdown, which
+Scheme cannot see.
 
 Three limits decided every split:
 
@@ -233,7 +247,8 @@ Three limits decided every split:
   That is how `notmuch_test` already works in ExUnit, and its seam
   (`notmuch-program`) is Scheme. Prefer a path under `(aimax-home)`: the
   suite runs in a live editor, and `rm -rf` from a test wants a short
-  leash.
+  leash. The four directory tests in `skills_test` and `mode_icon_test`
+  moved on this, and each one builds and removes its own fixture.
 - **Scheme cannot set an environment variable.** There is `getenv` and no
   `setenv`. This is what holds `keys_test` where it is.
 - ~~Scheme cannot wait for an answer.~~ **Fixed.** `(wait-until PRED
@@ -316,9 +331,18 @@ much `Session.eval` it calls. Eval density lies: `chrome_test` is 32
 eval-heavy tests and none of them move, because they assert on frames a
 stub socket process received.
 
-What is left is the long tail: two or three each in `code_mode`,
-`grammar`, `mcp_hub`, `writing`, `occur_ts`, `fold_tag`, `feeds`,
-`scheme_ide`, `sockets`, `core` and `daemon`. Roughly 25 tests.
+`feeds`, `occur_ts`, `grammar` and `scheme_ide` are done. What is left of
+the long tail is thinner than the first count: two or three each in
+`code_mode`, `mcp_hub`, `writing`, `sockets`, `core` and `daemon`.
+
+Three of those were read again and answered no. `fold_tag_test` drives
+`Buffer.set_hidden/3`, `clear_hidden` and `render_snapshot` — tagged
+folds are buffer mechanics, and every assertion reads a range list off
+the snapshot. `sockets_test` names `Daemon` and `Proc` directly. Most of
+`writing_test` is chords: Shift-arrows, Alt-arrows and the selection
+keys, which is the key path doing exactly what a key test is for. Two
+tests there do move (`count-words`, and the locals `writing-mode` sets),
+and one test does not earn a file — take them with the tail.
 
 `code_mode_test` has four that read Scheme values, but three of them run
 `M-x code-mode` first, which joins a group, opens a chat and loads the

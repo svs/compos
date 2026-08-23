@@ -6,6 +6,10 @@ defmodule Aimax.PermissionTest do
   send-mail attempt still banners — proved on the ACP lane (Stub) and the
   direct lane (ReqLLM). Double-answering is a no-op; killing a chat with a
   pending request resolves it; ask mode behaves exactly as before.
+
+  The policy itself is Scheme, and its tests live in
+  priv/tests/permission-test.scm. What stays here runs a whole agent turn
+  against a backend and answers its banners through keys.
   """
 
   use ExUnit.Case
@@ -39,152 +43,6 @@ defmodule Aimax.PermissionTest do
     end)
 
     :ok
-  end
-
-  describe "the policy itself" do
-    test "the deny-list catches irreversible outward acts, and only those" do
-      for verb <- [
-            "send-mail",
-            "sendmail",
-            "mail-send",
-            "Send Message to bob@example.com",
-            "permanently delete",
-            "empty-trash",
-            "git push",
-            "publish"
-          ] do
-        assert eval!(~s{(permission-denied-verb? "#{verb}")}) != "#f",
-               "expected #{verb} to be deny-listed"
-      end
-
-      for safe <- ["buffer-text", "read foo.ex", "eval-scheme", "mail-search tag:inbox"] do
-        assert eval!(~s{(permission-denied-verb? "#{safe}")}) == "#f",
-               "expected #{safe} to pass"
-      end
-    end
-
-    test "mode decides everything the deny-list doesn't" do
-      buf = "*zz-policy*"
-      eval!(~s{(buffer-create "#{buf}")})
-      on_exit(fn -> Aimax.Core.kill_buffer(buf) end)
-
-      # default (approve): ordinary tools run, deny-listed ones ask
-      assert eval!(~s{(*permission-policy* "#{buf}" "eval-scheme" "tool" "(+ 1 1)")}) ==
-               "allow-always"
-
-      assert eval!(~s{(*permission-policy* "#{buf}" "eval-scheme" "tool" "(mail-send ...)")}) ==
-               "ask"
-
-      # ask mode: everything asks
-      eval!(~s{(buffer-set-local! "#{buf}" 'chat-permission-mode 'ask)})
-      assert eval!(~s{(*permission-policy* "#{buf}" "eval-scheme" "tool" "(+ 1 1)")}) == "ask"
-
-      # auto: same as approve at OUR chokepoints — the deny-list holds
-      eval!(~s{(buffer-set-local! "#{buf}" 'chat-permission-mode 'auto)})
-      assert eval!(~s{(*permission-policy* "#{buf}" "eval-scheme" "tool" "(+ 1 1)")}) ==
-               "allow-always"
-
-      assert eval!(~s{(*permission-policy* "#{buf}" "eval-scheme" "tool" "(mail-send ...)")}) ==
-               "ask"
-    end
-
-    test "a tool's declared side effects decide before the chat mode does" do
-      buf = "*zz-effects*"
-      eval!(~s{(buffer-create "#{buf}")})
-
-      eval!("""
-      (define-tool! 'zz-shred "test: irreversible" '()
-        (lambda (args) "gone") '(destroy))
-      """)
-
-      on_exit(fn ->
-        Aimax.Core.kill_buffer(buf)
-        Session.eval("(set! *llm-tools* (remove (lambda (t) (equal? (car t) 'zz-shred)) *llm-tools*))")
-      end)
-
-      # read-only tools never ask, even in ask mode
-      eval!(~s{(buffer-set-local! "#{buf}" 'chat-permission-mode 'ask)})
-      assert eval!(~s{(*permission-policy* "#{buf}" "apropos" "tool" "apropos args")}) ==
-               "allow-always"
-
-      # destroy-effect tools ask, even in approve mode
-      eval!(~s{(buffer-set-local! "#{buf}" 'chat-permission-mode 'approve)})
-      assert eval!(~s{(*permission-policy* "#{buf}" "zz-shred" "tool" "zz-shred args")}) ==
-               "ask"
-
-      # a tool the catalog does not know falls through to the mode
-      assert eval!(~s{(*permission-policy* "#{buf}" "zz-unknown" "tool" "zz-unknown args")}) ==
-               "allow-always"
-    end
-
-    test "a per-agent profile denies its own patterns; no profile is allow-all" do
-      buf = "*zz-profile*"
-      eval!(~s{(buffer-create "#{buf}")})
-      on_exit(fn -> Aimax.Core.kill_buffer(buf) end)
-
-      # no profile: the shared deny-list holds, everything else allows
-      assert eval!(~s{(*permission-policy* "#{buf}" "eval-scheme" "tool" "(graphql-run ...)")}) ==
-               "allow-always"
-
-      # a profile with one extra deny pattern rejects exactly that verb
-      eval!(
-        ~s{(buffer-set-local! "#{buf}" 'agent-permission-profile '(deny-patterns ("graphql")))}
-      )
-
-      assert eval!(~s{(*permission-policy* "#{buf}" "eval-scheme" "tool" "(graphql-run ...)")}) ==
-               "reject"
-
-      # ...and leaves everything else alone
-      assert eval!(~s{(*permission-policy* "#{buf}" "eval-scheme" "tool" "(+ 1 1)")}) ==
-               "allow-always"
-
-      # the pure seam permission packages call: #f profile is allow-all
-      assert eval!(~s{(profile-denies? #f "anything")}) == "#f"
-      assert eval!(~s{(profile-denies? '(deny-patterns ("git push")) "git push origin")}) !=
-               "#f"
-    end
-
-    test "modes can grant a named command through the shared policy" do
-      allowed = "*zz-command-allowed*"
-      other = "*zz-command-other*"
-      eval!(~s{(begin (buffer-create "#{allowed}") (buffer-create "#{other}"))})
-
-      on_exit(fn ->
-        Aimax.Core.kill_buffer(allowed)
-        Aimax.Core.kill_buffer(other)
-      end)
-
-      eval!(
-        ~s{(allow-command-when! "zz-reload"
-              (lambda (buf) (equal? buf "#{allowed}")))}
-      )
-
-      assert eval!(~s{(*permission-policy* "#{allowed}" "zz-reload" "command" "")}) ==
-               "allow-always"
-
-      assert eval!(~s{(*permission-policy* "#{other}" "zz-reload" "command" "")}) ==
-               "ask"
-    end
-
-    test "the MCP proxy refuses deny-listed payloads even when the agent stopped asking" do
-      args = Base.encode64(Jason.encode!(%{"code" => ~s{(mail-send "bob" "hi")}}))
-
-      out =
-        eval!(~s{(mcp-proxy-call "eval-scheme" "#{args}")})
-        |> String.trim("\"")
-        |> Base.decode64!()
-
-      assert out =~ "refused"
-      # the pattern that caught it, so the agent knows what to ask for
-      assert out =~ "mail"
-
-      # an ordinary payload still runs
-      ok = Base.encode64(Jason.encode!(%{"code" => "(+ 20 22)"}))
-
-      assert eval!(~s{(mcp-proxy-call "eval-scheme" "#{ok}")})
-             |> String.trim("\"")
-             |> Base.decode64!() =~ "42"
-    end
   end
 
   describe "the ACP lane (Stub backend)" do

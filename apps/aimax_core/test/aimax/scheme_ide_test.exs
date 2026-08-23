@@ -1,8 +1,10 @@
 defmodule Aimax.SchemeIdeTest do
   @moduledoc """
-  scheme-ide.scm: the editor answering for its own dialect — definition
-  across buffers and source files, primitive docs, and completion over
-  the catalog. Driven through KeyDispatch, the GUI's path.
+  What M-. , M-, , C-c C-d and C-M-i put on the screen.
+
+  Every assertion here reads render state: the echo area and the
+  completion dropdown. Where a name is defined, and whether the checker
+  is quiet, are Scheme policy and live in priv/tests/scheme-ide-test.scm.
   """
 
   use ExUnit.Case
@@ -32,14 +34,6 @@ defmodule Aimax.SchemeIdeTest do
     Editor.minibuffer_close()
     Editor.set_pending([])
     :ok
-  end
-
-  test "find-def reaches the bundled source and the catalog's packages" do
-    assert eval!(~S{(car (cdr (scheme-ide--find-def "kill-region-1")))}) =~ "editor.scm"
-    assert eval!(~S{(car (cdr (scheme-ide--find-def "paredit-in-scheme-mode")))}) =~
-             "paredit.scm"
-
-    assert eval!(~S{(scheme-ide--find-def "zz-no-such-name-9x9")}) == "#f"
   end
 
   test "M-. jumps to a definition in the buffer; M-, returns" do
@@ -85,9 +79,4 @@ defmodule Aimax.SchemeIdeTest do
     press(["C-g"])
   end
 
-  test "the squiggle check is quiet without the scheme grammar" do
-    buf = scheme_buffer("(unbalanced\n")
-    eval!(~s{(scheme-ide--check! "#{buf}")})
-    refute eval!(~s{(buffer-overlays "#{buf}")}) =~ "scheme-err"
-  end
 end

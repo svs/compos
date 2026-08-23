@@ -1,9 +1,17 @@
 defmodule Aimax.GrammarTest do
-  @moduledoc "Runtime grammar loading: NIF registry, install plumbing, mode wiring."
+  @moduledoc """
+  The NIF and the install plumbing.
+
+  Which grammar a mode declares, and what the install surface offers, are
+  Scheme policy and live in priv/tests/treesit-test.scm. These tests stay
+  because they call the Rust side directly: a library that will not load,
+  a repository that is not a grammar, and the scopes a highlight answers
+  with.
+  """
 
   use ExUnit.Case
 
-  alias Aimax.Core.{Session, TreeSitter, TS}
+  alias Aimax.Core.{TreeSitter, TS}
 
   test "ts_load_grammar reports failures instead of crashing" do
     assert TS.ts_load_grammar("zz", "/no/such/lib.dylib", "(comment) @comment") =~ "error: open"
@@ -34,42 +42,12 @@ defmodule Aimax.GrammarTest do
     File.rm_rf!(tmp)
   end
 
-  test "scheme-mode wires ts-lang for .scm buffers" do
-    on_exit(fn -> Aimax.Core.kill_buffer("*zz-scm*") end)
-
-    {:ok, _} =
-      Session.eval(~s{(begin (buffer-create "*zz-scm*")
-                             (switch-to-buffer! "*zz-scm*")
-                             (set-mode! "scheme-mode")
-                             (buffer-local "*zz-scm*" 'ts-lang))})
-
-    assert {:ok, ~s{"scheme"}} = Session.eval(~s{(buffer-local "*zz-scm*" 'ts-lang)})
-  end
-
-  test "html-mode wires ts-lang, and the html grammar is compiled in" do
-    on_exit(fn -> Aimax.Core.kill_buffer("*zz-html*") end)
-
-    {:ok, _} =
-      Session.eval(~s{(begin (buffer-create "*zz-html*")
-                             (switch-to-buffer! "*zz-html*")
-                             (set-mode! "html-mode"))})
-
-    assert {:ok, ~s{"html"}} = Session.eval(~s{(buffer-local "*zz-html*" 'ts-lang)})
-
+  test "the html grammar is compiled in, and answers with its scopes" do
     spans = TS.ts_highlight("html", ~s|<body class="x"><!-- c --></body>|)
     scopes = spans |> Enum.map(&elem(&1, 2)) |> Enum.uniq() |> Enum.sort()
     assert "tag" in scopes
     assert "attribute" in scopes
     assert "string" in scopes
     assert "comment" in scopes
-  end
-
-  test "the install command surface is registered" do
-    {:ok, out} = Session.eval("(ts-known-url \"scheme\")")
-    assert out =~ "6cdh/tree-sitter-scheme"
-    {:ok, markdown} = Session.eval("(ts-known-url \"markdown\")")
-    assert markdown =~ "tree-sitter-grammars/tree-sitter-markdown"
-    {:ok, langs} = Session.eval("(ts-langs)")
-    assert langs =~ "elixir"
   end
 end

@@ -1,7 +1,17 @@
 defmodule Aimax.OccurTsTest do
+  @moduledoc """
+  What the key path owes, and nothing else.
+
+  The captures, the rendered list, the preview, the visit and the catalog
+  row are Scheme policy and live in priv/tests/occur-ts-test.scm. This one
+  test stays because it is about dispatch: `M-s t` reaches the command
+  through the `M-s` prefix, and the command reads its query in the
+  minibuffer before any list exists.
+  """
+
   use ExUnit.Case
 
-  alias Aimax.Core.{Buffer, Editor, KeyDispatch, Session}
+  alias Aimax.Core.{Buffer, Editor, KeyDispatch}
 
   @json """
   {
@@ -12,13 +22,7 @@ defmodule Aimax.OccurTsTest do
 
   @query ~S[(pair key: (string) @key)]
 
-  defp eval!(source) do
-    {:ok, printed} = Session.eval(source)
-    printed
-  end
-
   defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
-  defp offset(text, needle), do: text |> :binary.match(needle) |> elem(0)
 
   setup do
     source = "occur-ts-source-#{System.unique_integer([:positive])}"
@@ -40,15 +44,7 @@ defmodule Aimax.OccurTsTest do
     %{source: source}
   end
 
-  test "ts-filter returns structured captures for an explicit grammar", %{source: source} do
-    result = eval!(~s[(ts-filter "#{source}" "json" "#{@query}")])
-
-    assert result =~ ~s{capture "key" start}
-    assert result =~ ~S{line 2 match "\"one\"" text "  \"one\": 1,"}
-    assert result =~ ~S{line 3 match "\"two\"" text "  \"two\": 2"}
-  end
-
-  test "occur-ts opens through key dispatch and renders a selectable list", %{source: source} do
+  test "M-s t reaches the command, which reads the query first", %{source: source} do
     press(["M-s", "t"])
     assert Editor.render_state().minibuffer.prompt == "Tree-sitter query: "
 
@@ -56,47 +52,7 @@ defmodule Aimax.OccurTsTest do
     press("RET")
 
     assert Buffer.get_local("*occur-ts*", "mode-name") == "occur-ts-mode"
-    assert Buffer.get_local("*occur-ts*", "transient") == true
     assert Buffer.get_local("*occur-ts*", "occur-ts-source") == source
-
-    text = Buffer.text("*occur-ts*")
-    assert text =~ "Tree-sitter matches"
-    assert text =~ "2 captures · json"
-    assert text =~ "2  key"
-    assert text =~ ~s{"one": 1}
-    assert text =~ ~s{"two": 2}
-  end
-
-  test "moving previews captures and RET visits the source", %{source: source} do
-    eval!(~s[(occur-ts-open "#{source}" "json" "#{@query}")])
-    Editor.set_window_buffer("*occur-ts*")
-    eval!(~s[(list-goto-first-entry "*occur-ts*")])
-
-    press("n")
-    assert Buffer.point(source) == offset(@json, ~s{"two"})
-    assert Editor.current_buffer() == "*occur-ts*"
-
-    press("RET")
-    assert Editor.current_buffer() == source
-    assert Buffer.point(source) == offset(@json, ~s{"two"})
-  end
-
-  test "restoring the mode rebuilds rows from its source locals", %{source: source} do
-    eval!(~s[(occur-ts-open "#{source}" "json" "#{@query}")])
-    :ok = Buffer.set_read_only("*occur-ts*", false)
-    :ok = Buffer.delete_range("*occur-ts*", 0, Buffer.byte_size("*occur-ts*"), source: :editor)
-    :ok = Buffer.append("*occur-ts*", "stale", source: :editor)
-
-    eval!(~s[(with-current-buffer "*occur-ts*" (lambda () (set-mode! "occur-ts-mode")))])
-
-    assert Buffer.text("*occur-ts*") =~ ~s{"one": 1}
-    assert Buffer.text("*occur-ts*") =~ ~s{"two": 2}
-    assert Buffer.read_only?("*occur-ts*")
-  end
-
-  test "the public API and command are discoverable" do
-    assert eval!(~s[(apropos "capture plists")]) =~ "ts-filter"
-    assert eval!(~s[(catalog-entry 'command "occur-ts")]) =~ ~s{effects ("write")}
-    assert eval!(~s[(key-for-command "occur-ts")]) == ~s{"M-s t"}
+    assert Buffer.get_local("*occur-ts*", "occur-ts-query") == @query
   end
 end

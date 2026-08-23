@@ -27,6 +27,46 @@ defmodule Aimax.Core.Doc do
   @default_undo_steps 500
 
   @doc """
+  This replica's peer id, stable across restarts.
+
+  A peer is a replica, not an actor. Every local actor writing to one document
+  shares it, and the commit message tells them apart. The id must stay the same
+  across restarts, or each restart looks like a new replica and the oplog grows
+  a peer per boot.
+
+  Two daemons that share a home would share this id. That is safe only while
+  they never edit one document at the same time.
+  """
+  def replica_peer do
+    case :persistent_term.get({__MODULE__, :peer}, nil) do
+      nil ->
+        peer = read_or_create_peer()
+        :persistent_term.put({__MODULE__, :peer}, peer)
+        peer
+
+      peer ->
+        peer
+    end
+  end
+
+  defp read_or_create_peer do
+    path = Path.join(Aimax.Core.home(), "peer-id")
+
+    with {:ok, raw} <- File.read(path),
+         {peer, _} <- Integer.parse(String.trim(raw)),
+         true <- peer > 0 do
+      peer
+    else
+      _ ->
+        # 63 bits: Loro reserves the top of the u64 range.
+        peer = :binary.decode_unsigned(:crypto.strong_rand_bytes(8)) |> Bitwise.>>>(1)
+        File.mkdir_p!(Path.dirname(path))
+        File.write!(path, Integer.to_string(peer))
+        peer
+    end
+  end
+
+  @doc """
   A new empty document for a replica. `peer` names the replica, not the actor:
   a human and an agent editing the same buffer share it, and the commit message
   tells them apart.

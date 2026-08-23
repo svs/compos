@@ -55,6 +55,12 @@ fn state(res: &ResourceArc<DocRes>) -> NifResult<std::sync::MutexGuard<'_, DocSt
 fn build(peer: u64) -> DocState {
     let doc = LoroDoc::new();
     doc.set_peer_id(peer).expect("set peer id on a fresh doc");
+    // Loro merges adjacent changes from one peer within a second, and every
+    // local actor shares this replica's peer id. Merging is safe anyway,
+    // because Loro keeps changes with different commit messages apart, and two
+    // changes with the same message are the same actor doing the same work.
+    // Measured both ways: `set_change_merge_interval(0)` changes no behaviour
+    // here and only adds change headers, so the default stands.
     let text = doc.get_text("text");
     DocState {
         doc,

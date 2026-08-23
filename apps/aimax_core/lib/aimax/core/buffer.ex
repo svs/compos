@@ -50,7 +50,7 @@ defmodule Aimax.Core.Buffer do
 
   require Logger
 
-  alias Aimax.Core.{BufferStore, Events, ProvenanceStore, Rope, Text, TS}
+  alias Aimax.Core.{BufferStore, Doc, Events, ProvenanceStore, Rope, Text, TS}
 
   @registry Aimax.Core.BufferRegistry
   @undo_limit 500
@@ -70,6 +70,7 @@ defmodule Aimax.Core.Buffer do
 
   defstruct name: nil,
             rope: nil,
+            doc: nil,
             bin: nil,
             version: 0,
             saved_version: 0,
@@ -350,6 +351,15 @@ defmodule Aimax.Core.Buffer do
   @doc "Return the durable Provenance status for the buffer."
   def provenance(name), do: GenServer.call(via(name), :provenance)
 
+  @doc """
+  The buffer's Loro document, or nil when its mode opted out of recording.
+
+  The document is a mutable handle shared with the buffer process, so a caller
+  reads it and does not edit it. Flushes first, so the caller never sees a
+  change the buffer has already made but not committed.
+  """
+  def doc(name), do: GenServer.call(via(name), :doc)
+
   @doc "Start or resume Provenance without deleting prior history."
   def provenance_start(name, opts \\ []) do
     GenServer.call(via(name), {:provenance_start, source(opts), author(opts), opts})
@@ -511,7 +521,7 @@ defmodule Aimax.Core.Buffer do
     # buffer, like *messages*, says so with :persistent.
     persistent? = Keyword.get(opts, :persistent, not String.starts_with?(name, " "))
     state = %{state | persistent: persistent?}
-    state = attach_provenance(state)
+    state = state |> attach_provenance() |> attach_doc()
     {:ok, _} = Registry.register(@registry, {:id, state.id}, state.name)
     {:ok, state |> schedule_checkpoint() |> reset_idle_timer()}
   end
@@ -828,6 +838,11 @@ defmodule Aimax.Core.Buffer do
     {:reply, state.provenance, state}
   end
 
+  def handle_call(:doc, _from, state) do
+    state = flush_provenance(state)
+    {:reply, state.doc, state}
+  end
+
   def handle_call({:provenance_start, src, author, opts}, _from, state) do
     state = flush_provenance(state)
     actor = resolve_actor(author, src)
@@ -938,6 +953,7 @@ defmodule Aimax.Core.Buffer do
         }
 
         # The compatibility journal marks an undo as a discontinuity.
+        state = mirror_update(state, new_text)
         state = log_edit(state, "undo", 0, 0, 0)
         actor = local_actor("system:undo", "system", "undo", :undo)
         # Provenance keeps the complete replacement so replay stays exact.
@@ -1138,6 +1154,149 @@ defmodule Aimax.Core.Buffer do
     |> Base.encode16(case: :lower)
   end
 
+  # --- the Loro document -----------------------------------------------------
+  #
+  # See `docs/PROVENANCE-CRDT.md`. The document mirrors the rope: the rope
+  # leads for a local edit, and every mutation path funnels through `do_insert`
+  # and `do_delete`, so mirroring in those two places covers all of them.
+  #
+  # Nothing reads the document yet. It records history and merges concurrent
+  # work; the rope stays the working representation and the line index.
+
+  # A buffer whose mode opted out of recording gets no document either, so one
+  # policy governs both. `attach_provenance` always answers with a map, so
+  # there is no nil case here.
+  defp attach_doc(%{provenance: %{enabled: false}} = state), do: state
+
+  defp attach_doc(state) do
+    {text, state} = fetch_text(state)
+    doc = Doc.new(Doc.replica_peer())
+
+    if text != "", do: Doc.insert(doc, 0, text)
+
+    Doc.commit(
+      doc,
+      "system",
+      doc_message(
+        local_actor(
+          "system:buffer",
+          "system",
+          "buffer",
+          if(state.path, do: :file_load, else: :buffer_create)
+        ),
+        buffer_group(state)
+      )
+    )
+
+    %{state | doc: doc}
+  rescue
+    # A document is not worth losing a buffer over. Without one the buffer
+    # behaves exactly as it did before this phase.
+    e ->
+      Logger.error("loro document not attached to #{state.name}: #{inspect(e)}")
+      state
+  end
+
+  # Recording can stop after the document is attached. A stopped buffer flushes
+  # nothing, so a mirrored operation would never get a message. One test
+  # answers both questions.
+  defp mirroring?(%{doc: nil}), do: false
+  defp mirroring?(%{provenance: %{enabled: true}}), do: true
+  defp mirroring?(_), do: false
+
+  defp mirror_insert(state, pos, text) do
+    if mirroring?(state),
+      do: doc_result(state, Doc.insert(state.doc, pos, text), "insert"),
+      else: state
+  end
+
+  defp mirror_delete(state, pos, len) do
+    if mirroring?(state),
+      do: doc_result(state, Doc.delete(state.doc, pos, len), "delete"),
+      else: state
+  end
+
+  # Undo swaps the whole rope, so the document takes the result and works out
+  # the operations. Phase 3 moves undo into the document and retires this.
+  defp mirror_update(state, text) do
+    if mirroring?(state),
+      do: doc_result(state, Doc.update(state.doc, text), "update"),
+      else: state
+  end
+
+  # A failed mirror leaves the document behind the rope. The checkpoint
+  # comparison finds that and resynchronizes, so log it and keep editing.
+  defp doc_result(state, {:error, reason}, what) do
+    Logger.error("loro #{what} failed for #{state.name}: #{inspect(reason)}")
+    state
+  end
+
+  defp doc_result(state, _ok, _what), do: state
+
+  defp commit_doc(%{pending_actor: nil} = state), do: state
+
+  defp commit_doc(state) do
+    if mirroring?(state), do: do_commit_doc(state), else: state
+  end
+
+  defp do_commit_doc(state) do
+    Doc.commit(
+      state.doc,
+      doc_origin(state.pending_actor),
+      doc_message(state.pending_actor, state.pending_group)
+    )
+
+    state
+  end
+
+  # The origin is the live label the undo managers filter on in Phase 3. The
+  # actor id already reads `user:local`, `agent:codex`, `system:undo`, so a
+  # prefix match on it separates the actors.
+  defp doc_origin(actor), do: Map.get(actor, :id, "unknown")
+
+  # The durable record. A Loro change carries no origin field, so everything
+  # that must survive an export goes in the message.
+  defp doc_message(actor, group) do
+    Jason.encode!(%{actor: actor, group: group})
+  rescue
+    _ -> to_string(Map.get(actor, :id, "unknown"))
+  end
+
+  # The invariant: the rope and the document hold the same bytes. Checked at
+  # every checkpoint boundary, which is also where the buffer already compares
+  # content hashes.
+  #
+  # In this phase the rope is authoritative, so a mismatch resynchronizes the
+  # document from the rope. That direction reverses in Phase 5, once the
+  # document owns the history the rope cannot rebuild.
+  defp verify_doc(%{doc: nil} = state), do: state
+
+  defp verify_doc(state) do
+    {text, state} = fetch_text(state)
+
+    case Doc.text(state.doc) do
+      ^text ->
+        state
+
+      other when is_binary(other) ->
+        Logger.error(
+          "loro document diverged in #{state.name}: rope #{Kernel.byte_size(text)} B, " <>
+            "document #{Kernel.byte_size(other)} B; resynchronizing from the rope"
+        )
+
+        mirror_update(state, text)
+        commit_doc(%{state | pending_actor: resync_actor(), pending_group: buffer_group(state)})
+        state
+
+      {:error, reason} ->
+        Logger.error("loro document unreadable in #{state.name}: #{inspect(reason)}")
+        state
+    end
+  end
+
+  defp resync_actor,
+    do: local_actor("system:resync", "system", "resync", :doc_resync)
+
   defp new_id, do: Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
 
   defp read_checkpoint(nil), do: nil
@@ -1219,7 +1378,7 @@ defmodule Aimax.Core.Buffer do
   # write no state: a dormant, unsaved, or discarded buffer still owns its
   # history.
   defp write_checkpoint(state),
-    do: state |> flush_provenance() |> prune_origins() |> write_state_checkpoint()
+    do: state |> flush_provenance() |> verify_doc() |> prune_origins() |> write_state_checkpoint()
 
   defp write_state_checkpoint(%{discard: true} = state), do: state
   defp write_state_checkpoint(%{persistent: false} = state), do: state
@@ -1343,7 +1502,11 @@ defmodule Aimax.Core.Buffer do
     state =
       adjust_ranges(state, &adjust_insert(&1, pos, len), &adjust_insert_stay(&1, pos, len))
 
+    # After open_changeset, never before. Opening flushes the previous actor's
+    # work, and a document operation applied before that flush would be
+    # committed under the previous actor's name.
     {changeset, state} = open_changeset(state, actor, src)
+    state = mirror_insert(state, pos, text)
     state = %{state | authors: stamp_insert(state.authors, pos, len, stamp_id(actor, changeset))}
     state = log_edit(state, author, pos, len, 0)
     state = record_op(state, actor, pos, text, "", src)
@@ -1393,7 +1556,9 @@ defmodule Aimax.Core.Buffer do
     state = ts_track(state, old_rope, pos, pos + len, pos)
     state = adjust_point_delete(state, pos, len)
     state = adjust_ranges(state, &adjust_delete(&1, pos, len), &adjust_delete(&1, pos, len))
+    # After open_changeset, for the reason given in do_insert.
     {_changeset, state} = open_changeset(state, actor, src)
+    state = mirror_delete(state, pos, len)
     state = %{state | authors: stamp_delete(state.authors, pos, len)}
     state = log_edit(state, author, pos, 0, len)
     state = record_op(state, actor, pos, "", deleted, src)
@@ -1691,6 +1856,7 @@ defmodule Aimax.Core.Buffer do
 
   defp flush_provenance(state) do
     ops = Enum.reverse(state.pending_ops)
+    state = commit_doc(state)
     {text, state} = fetch_text(state)
 
     result =

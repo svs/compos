@@ -164,8 +164,15 @@ So every commit sets both:
 - `set_next_commit_origin(origin)` - the live routing label: `user`, `agent:codex`,
   `editor`, `process`, which is what `add_exclude_origin_prefix` matches
 - `set_next_commit_timestamp(ts)`
-- `set_change_merge_interval(i)` - merges adjacent same-peer changes, which is the
-  interactive batching lane implemented in the library
+
+Loro also merges adjacent changes from one peer within a second, and every local actor
+shares this replica's peer id. Phase 2 measured `set_change_merge_interval(0)` and left
+the default: Loro keeps changes with different commit messages apart, and two changes
+with the same message are one actor doing the same work. Disabling the merge changed no
+behaviour and only added change headers.
+
+The buffer, not the library, owns batching. The pending changeset in the buffer process
+and its flush boundaries already decide what one change contains.
 
 The existing actor-change flush boundary already sits in the right place: `continues?/4`
 (`buffer.ex:1625`) closes a changeset when `pending_actor.id` changes.
@@ -275,10 +282,26 @@ cross the boundary as opaque binaries, because `Cursor` and `VersionVector` enco
 themselves. `doc_register_actor` always excludes the `undo` origin, so the Phase 0 trap
 cannot be reintroduced by a caller.
 
-**Phase 2 - mirror from the funnel.** Add `state.doc`. `do_insert` and `do_delete`
-apply to the doc after the rope. Desktop restore (`desktop.ex:187`) calls `doc_update`.
-Assert the invariant at every checkpoint boundary. Undo still runs the old path, so
-behaviour does not move yet.
+**Phase 2 - mirror from the funnel. Done.** `state.doc` holds the document, `do_insert`
+and `do_delete` mirror into it, `verify_doc` asserts the invariant at every checkpoint
+boundary, and `Buffer.doc/1` reads it. Undo still runs the old path and its tests are
+unchanged. 14 tests in `buffer_doc_test.exs`.
+
+Two corrections to the plan came out of building it.
+
+**The mirror runs after `open_changeset`, never before.** Opening a changeset flushes
+the previous actor's work, and a document operation applied before that flush is
+committed under the previous actor's name. The symptom was a human's change and an
+agent's change collapsing into one change attributed to the human. The ordering is now
+load-bearing and commented at both call sites.
+
+**Desktop restore needs no special path.** It replaces text through `delete_range` and
+`append` (`desktop.ex:187`), so it already funnels through `do_insert` and `do_delete`.
+Only undo swaps the rope wholesale, so `doc_update` has exactly one caller.
+
+The invariant check materializes the document text at every checkpoint, which costs
+about 65 us for a 343 KB buffer at a 1.5 second cadence. That is affordable while the
+rope is authoritative and worth keeping until the mirror has proven itself.
 
 **Phase 3 - undo moves to Loro.** Per-actor `UndoManager`, `agent:` excluded from the
 human's stack. Retire `state.history` and `snapshot/1`. This is the phase that changes

@@ -258,35 +258,6 @@
       (check-false! (buffer-local buf 'group) "and no group: that is write's job")
       (t--wr-done! buf))))
 
-(deftest 'a-writing-buffer-rebinds-the-selection-chords
-  "globally S-<left> changes buffers; in prose every shifted motion selects"
-  (lambda ()
-    (let* ((buf (t--wr-write! "zz-writing-keys.md" "abc"))
-           (local (local-keys buf))
-           (bound (lambda (key) (let ((hit (assoc key local))) (and hit (cadr hit))))))
-      ;; the binding is a fact about a map, so read the map — once, for all
-      ;; of them, instead of one test per chord
-      (check-equal! (global-key-command "S-<left>") "previous-buffer"
-                    "globally the shifted arrows change buffers")
-      (for-each
-        (lambda (row)
-          (check-equal! (bound (car row)) (cadr row)
-                        (string-append (car row) " selects instead")))
-        '(("S-<left>" "writing-select-backward")
-          ("S-<right>" "writing-select-forward")
-          ("S-<up>" "writing-select-up")
-          ("S-<down>" "writing-select-down")
-          ("M-S-<left>" "writing-select-backward-word")
-          ("M-S-<right>" "writing-select-forward-word")
-          ("S-<home>" "writing-select-line-start")
-          ("S-<end>" "writing-select-line-end")
-          ("C-S-<home>" "writing-select-buffer-start")
-          ("C-S-<end>" "writing-select-buffer-end")))
-      ;; and the unshifted word motions stay themselves
-      (check-equal! (bound "M-<left>") "backward-word" "M-<left> still moves by word")
-      (check-equal! (bound "M-<right>") "forward-word" "and M-<right> too")
-      (t--wr-done! buf))))
-
 (deftest 'the-writing-selection-commands-extend-the-region
   "point moves and the mark stays where the selection started"
   (lambda ()

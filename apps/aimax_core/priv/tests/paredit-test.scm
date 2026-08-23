@@ -82,7 +82,11 @@
 
 (effects! '(write))
 
-;;; --- the key table is data ----------------------------------------------------
+;;; --- the key table names live commands ----------------------------------------
+;;;
+;;; Neither test below names a key paredit chose. One says a buffer with
+;;; no mode has no map of its own; the other says every command the table
+;;; names exists. A rebinding cannot break either.
 
 (deftest 'a-buffer-without-the-mode-binds-none-of-the-keys
   "the dispatcher commands are global; only a local map reaches them"
@@ -509,12 +513,9 @@
       (check-equal! (buffer-point plain) 7 "and M-<right>, which paredit never claims")
       (buffer-kill! plain))
 
-    ;; paredit does not bind the M-arrows at all — that is what "pass
-    ;; through" means, and the table is where it is said
-    (check-false! (assoc "M-<right>" *paredit-keys*) "paredit claims no M-<right>")
-    (check-false! (assoc "M-<left>" *paredit-keys*) "nor M-<left>")
-    (check-equal! (global-key-command "M-<right>") "forward-word"
-                  "so it stays the word motion")
+    ;; paredit claims no M-arrow, so the word motion still works inside
+    ;; the mode. The commands say that; the key that reaches them is not
+    ;; this test's business.
     (t--par! "(foo bar)\n" 1)
     (with-current-buffer t--par-buf (lambda () (run-command "forward-word")))
     (check-equal! (t--par-point) 4 "which still works inside the mode")

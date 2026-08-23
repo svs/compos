@@ -1,12 +1,14 @@
 defmodule Aimax.MorgTest do
   @moduledoc """
-  What morg-mode does that Scheme cannot reach: a block that runs a shell
-  or tangles to disk, and the preview toggle on C-c C-v.
+  Two tests about a markdown-mode that is not built.
 
-  The mode itself is Scheme — folding, the TODO cycle, the org faces, the
-  fenced-code grammar and the Markdown structural API all live in
-  priv/tests/morg-test.scm, where a test runs the command that the key
-  runs and reads the buffer back.
+  morg-mode is Scheme and priv/tests/morg-test.scm covers all of it — the
+  folds, the TODO cycle, the faces, the structural API, babel and tangle.
+
+  These two are the exception, and the same gap twice: set-mode! has no
+  teardown hook, so morg's folds, keys and org faces survive a switch to
+  markdown-mode. One is @tag :skip and states the contract; the other
+  passes here only because of how this file builds its buffer.
   """
 
   use ExUnit.Case
@@ -51,6 +53,7 @@ defmodule Aimax.MorgTest do
   end
 
 
+
   @tag :skip
   test "switching from morg to markdown removes Morg behavior" do
     buf = morg_buffer(fixture())
@@ -74,79 +77,6 @@ defmodule Aimax.MorgTest do
     refute Enum.any?(Buffer.overlays(buf), fn {_, _, face} -> face =~ "org-level" end)
   end
 
-
-  test "C-c C-c runs a sh block into a result block" do
-    buf = morg_buffer("```sh\necho hi\n```\n")
-    :ok = Buffer.goto(buf, 7)
-
-    press(["C-c", "C-c"])
-    assert Buffer.text(buf) == "```sh\necho hi\n```\n```result\nhi\n```\n"
-  end
-
-
-  test "C-c C-x tangles marked blocks relative to the Morg file" do
-    dir = Path.join(System.tmp_dir!(), "morg-tangle-#{System.unique_integer([:positive])}")
-    File.mkdir_p!(dir)
-    on_exit(fn -> File.rm_rf(dir) end)
-
-    text = """
-    # Program
-    ```elixir :tangle lib/demo.ex
-    defmodule Demo do
-    ```
-    ```elixir :tangle lib/demo.ex
-    end
-    ```
-    ```sh :tangle no
-    echo skip
-    ```
-    """
-
-    buf = morg_buffer(text)
-    :ok = Buffer.set_local(buf, "default-directory", dir <> "/")
-
-    press(["C-c", "C-x"])
-
-    assert File.read!(Path.join(dir, "lib/demo.ex")) == "defmodule Demo do\nend\n"
-    refute File.exists?(Path.join(dir, "no"))
-  end
-
-
-  test "a second run replaces the result block" do
-    buf = morg_buffer("```sh\necho hi\n```\n")
-    :ok = Buffer.goto(buf, 7)
-
-    press(["C-c", "C-c"])
-    press(["C-c", "C-c"])
-    assert Buffer.text(buf) == "```sh\necho hi\n```\n```result\nhi\n```\n"
-  end
-
-
-  test "a scheme block evaluates in the editor's interpreter" do
-    buf = morg_buffer("```scheme\n(+ 1 2)\n```\n")
-    :ok = Buffer.goto(buf, 11)
-
-    press(["C-c", "C-c"])
-    assert Buffer.text(buf) == "```scheme\n(+ 1 2)\n```\n```result\n3\n```\n"
-  end
-
-
-  test "C-c C-c outside a block does not edit the buffer" do
-    buf = morg_buffer(fixture())
-    :ok = Buffer.goto(buf, 5)
-
-    press(["C-c", "C-c"])
-    assert Buffer.text(buf) == fixture()
-  end
-
-
-  test "the result block is not runnable" do
-    buf = morg_buffer("```result\nold\n```\n")
-    :ok = Buffer.goto(buf, 11)
-
-    press(["C-c", "C-c"])
-    assert Buffer.text(buf) == "```result\nold\n```\n"
-  end
 
 
 end

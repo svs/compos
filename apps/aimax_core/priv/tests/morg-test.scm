@@ -8,8 +8,10 @@
 ;;; replace! and insert-after! address a section by the LINE its heading
 ;;; is on, so an agent edits one section and never a whole file.
 ;;;
-;;; Eight stay in ExUnit: six run a shell or tangle to disk, one presses
-;;; C-c C-v for the preview, and one is a skipped design contract.
+;;; Two stay in ExUnit, both about a markdown-mode that is not built:
+;;; one is a skipped design contract, and the other passes there but not
+;;; here — set-mode! has no teardown hook, so morg's org faces survive the
+;;; switch, which is the very gap the skipped test describes.
 
 (domain! 'testing)
 (effects! '(write))
@@ -309,3 +311,78 @@
                   "morg-babel" "babel names its own package")
     (check-equal! (plist-get (catalog-entry 'command "morg-tangle") 'package)
                   "morg-tangle" "and so does tangle")))
+
+
+;;; --- babel and tangle ------------------------------------------------------------
+
+(deftest 'a-shell-block-runs-into-a-result-block
+  "the result is a block, so a second run can replace it"
+  (lambda ()
+    (t--morg! "```sh\necho hi\n```\n" 7)
+    (t--morg-run! "morg-babel")
+    (check-equal! (buffer-text t--morg-buf) "```sh\necho hi\n```\n```result\nhi\n```\n"
+                  "the output landed in a result block")
+    (t--morg-done!)))
+
+(deftest 'a-second-run-replaces-the-result-block
+  "not a second one appended"
+  (lambda ()
+    (t--morg! "```sh\necho hi\n```\n" 7)
+    (t--morg-run! "morg-babel")
+    (t--morg-run! "morg-babel")
+    (check-equal! (buffer-text t--morg-buf) "```sh\necho hi\n```\n```result\nhi\n```\n"
+                  "still one result block")
+    (t--morg-done!)))
+
+(deftest 'a-scheme-block-evaluates-in-the-editors-interpreter
+  "the same interpreter the editor is written in"
+  (lambda ()
+    (t--morg! "```scheme\n(+ 1 2)\n```\n" 11)
+    (t--morg-run! "morg-babel")
+    (check-equal! (buffer-text t--morg-buf) "```scheme\n(+ 1 2)\n```\n```result\n3\n```\n"
+                  "the value came back")
+    (t--morg-done!)))
+
+(deftest 'running-outside-a-block-does-not-edit-the-buffer
+  "there is nothing to run, so nothing happens"
+  (lambda ()
+    (t--morg! t--morg-fixture 5)
+    (t--morg-run! "morg-babel")
+    (check-equal! (buffer-text t--morg-buf) t--morg-fixture "the document is untouched")
+    (t--morg-done!)))
+
+(deftest 'a-result-block-is-not-runnable
+  "output is not source"
+  (lambda ()
+    (t--morg! "```result\nold\n```\n" 11)
+    (t--morg-run! "morg-babel")
+    (check-equal! (buffer-text t--morg-buf) "```result\nold\n```\n" "nothing ran")
+    (t--morg-done!)))
+
+(deftest 'tangle-writes-marked-blocks-relative-to-the-morg-file
+  "one file from two blocks, and a block marked no is skipped"
+  (lambda ()
+    (let ((dir (string-append (aimax-home) "/zz-morg-tangle")))
+      (shell-command->string (string-append "rm -rf " dir))
+      (make-directory! dir)
+      (t--morg!
+        (string-append
+          "# Program\n"
+          "```elixir :tangle lib/demo.ex\n"
+          "defmodule Demo do\n"
+          "```\n"
+          "```elixir :tangle lib/demo.ex\n"
+          "end\n"
+          "```\n"
+          "```sh :tangle no\n"
+          "echo skip\n"
+          "```\n")
+        0)
+      (buffer-set-local! t--morg-buf 'default-directory (string-append dir "/"))
+      (t--morg-run! "morg-tangle")
+
+      (check-equal! (read-file (string-append dir "/lib/demo.ex")) "defmodule Demo do\nend\n"
+                    "both blocks landed in one file, in order")
+      (check-false! (file-exists? (string-append dir "/no")) "and the skipped block wrote nothing")
+      (shell-command->string (string-append "rm -rf " dir))
+      (t--morg-done!))))

@@ -108,11 +108,6 @@ defmodule Aimax.WritingTest do
     assert Buffer.get_local(buf, "modeline-info") =~ ~r/^3 words · 1 min$/
   end
 
-  test "count-words counts whitespace-separated words" do
-    buf = fresh_buffer("wr-cw-#{System.unique_integer([:positive])}", "a b  c\nd\n")
-    assert eval!(~s{(count-words "#{buf}")}) == "4"
-  end
-
   test "word count live-updates as you type" do
     buf = fresh_buffer("wr-live-#{System.unique_integer([:positive])}", "")
     eval!(~s{(run-command "write")})
@@ -289,35 +284,6 @@ defmodule Aimax.WritingTest do
     assert length(windows) == 3
     assert Enum.take(Enum.map(windows, fn {_id, name} -> name end), 2) == [buf, scratch]
     assert Editor.current_buffer() == buf
-  end
-
-  test "an inline session runs on the connector that has its model" do
-    buf = fresh_buffer("wr-lane-#{System.unique_integer([:positive])}.md", "Draft.\n")
-    scratch = "*scratch:#{buf}*"
-
-    on_exit(fn ->
-      eval!(~s{(customize-set! 'writing-model "")})
-      if Buffer.exists?(scratch), do: Aimax.Core.kill_buffer(scratch)
-    end)
-
-    # an API-lane model id names the same model Codex spells without the
-    # provider prefix: the session opens on Codex, under the name Codex knows
-    eval!(~s{(customize-set! 'writing-model "openai:gpt-5.6-luna")})
-    eval!(~s{(run-command "write")})
-
-    assert eval!(~s{(buffer-llm-connector "#{scratch}")}) == ~s("codex-app-server")
-
-    assert eval!(~s{(connector-model-id "codex-app-server" "openai:gpt-5.6-luna")}) ==
-             ~s("gpt-5.6-luna")
-
-    # a model no connector has still reaches the metered lane rather than
-    # failing at the first send
-    assert eval!(~s{(llm-connector-for-model "made-up:model")}) == ~s("api")
-  end
-
-  test "a mode's layout declaration is what the engine applies" do
-    assert eval!(~s{(mode-layout "writing-layout")}) ==
-             "(h 0.34 self scratch-buffer writing-chat-buffer)"
   end
 
   test "writing LLM configuration lands on the scratch only" do

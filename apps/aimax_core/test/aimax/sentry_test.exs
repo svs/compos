@@ -1,6 +1,10 @@
 defmodule Aimax.SentryTest do
   @moduledoc """
-  packages/sentry.scm — the read-only Sentry client, offline.
+  The Sentry tests that drive keys.
+
+  The client itself is Scheme policy and lives in
+  priv/tests/sentry-test.scm. These three stay here: they press RET, n, p,
+  a, R and y through KeyDispatch, which is the path the GUI uses.
 
   Tests replace the transport seam. No test reads Doppler or reaches Sentry.
   """
@@ -35,82 +39,6 @@ defmodule Aimax.SentryTest do
     end)
 
     :ok
-  end
-
-  test "the defaults point at the production ATS project" do
-    assert eval!("(list sentry-org sentry-project sentry-environment)") ==
-             ~S{("svs-recruiting" "ats-ash" "prod")}
-  end
-
-  test "an issue search encodes filters and caps its limit" do
-    eval!(~S"""
-    (begin
-      (define *sentry-test-url* "")
-      (set! *sentry-transport*
-        (lambda (url)
-          (set! *sentry-test-url* url)
-          "[]\n200"))
-      (sentry-list-issues "is:unresolved assigned:me" "prod" "7d" 500))
-    """)
-
-    url = eval!("*sentry-test-url*")
-
-    assert url =~ "/api/0/projects/svs-recruiting/ats-ash/issues/"
-    assert url =~ "query=is%3Aunresolved%20assigned%3Ame"
-    assert url =~ "environment=prod"
-    assert url =~ "statsPeriod=7d"
-    assert url =~ "per_page=50"
-  end
-
-  test "HTTP failures have one safe result shape" do
-    eval!(~S|(set! *sentry-transport* (lambda (url) "private response body\n403"))|)
-
-    reply = eval!("(sentry-list-issues)")
-
-    assert reply =~ "errors"
-    assert reply =~ "HTTP 403"
-    refute reply =~ "private response body"
-  end
-
-  test "the client enforces its row limit when Sentry returns more" do
-    eval!(
-      ~S|(set! *sentry-transport* (lambda (url) "[{\"id\":\"1\"},{\"id\":\"2\"},{\"id\":\"3\"}]\n200"))|
-    )
-
-    reply = eval!(~S|(sentry-list-issues "" "prod" "24h" 2)|)
-    assert reply =~ ~s{(id "1"}
-    assert reply =~ ~s{(id "2"}
-    refute reply =~ ~s{(id "3"}
-  end
-
-  test "the issue detail puts the exception first and keeps complete raw JSON" do
-    text =
-      eval!("""
-      (sentry--issue-text
-        (list 'shortId "ATS-1"
-              'title ""
-              'status "unresolved"
-              'metadata
-              (list 'type "RuntimeError"
-                    'value "credits exhausted"
-                    'secret "visible-in-raw")))
-      """)
-
-    assert text =~ "ATS-1  RuntimeError"
-    assert text =~ "Exception\\ncredits exhausted"
-    assert text =~ "Raw issue JSON"
-    assert text =~ "visible-in-raw"
-    refute text =~ "<!doctype html>"
-  end
-
-  test "the public API declares its domain and effects" do
-    entry = eval!(~S|(catalog-entry 'function "sentry-list-issues")|)
-
-    assert entry =~ ~s{domain "sentry"}
-    assert entry =~ ~s{effects ("read" "external")}
-
-    command = eval!(~S|(catalog-entry 'command "sentry")|)
-    assert command =~ ~s{effects ("write" "external")}
   end
 
   test "RET opens distinct grouped detail buffers through the real key path" do

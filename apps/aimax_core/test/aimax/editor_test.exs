@@ -56,6 +56,16 @@ defmodule Aimax.EditorTest do
     if quoted == "#f", do: nil, else: String.trim(quoted, "\"")
   end
 
+  # Is NAME a member of the group called GROUP? A buffer can hold several
+  # memberships, and buffer-group answers only the first — so a test that
+  # asks "is it in this group" must ask that, not "which group is it in".
+  # A project group another test founded put itself first and the reader
+  # saw the wrong name.
+  defp in_group?(name, group) do
+    {:ok, quoted} = Aimax.Core.Session.eval(~s{(buffer-in-group? "#{name}" "#{group}")})
+    quoted == "#t"
+  end
+
   # The display name a group ID currently carries.
   defp group_name(id) do
     {:ok, quoted} = Aimax.Core.Session.eval(~s{(group-name "#{id}")})
@@ -2271,14 +2281,14 @@ defmodule Aimax.EditorTest do
     assert Editor.snapshot().minibuffer.prompt =~ ~r/^Join group/
     type("proj")
     press(["RET"])
-    assert group_name(buffer_group(buf)) == "proj"
+    assert in_group?(buf, "proj")
 
     {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-create "#{notes}")})
     Editor.set_window_buffer(notes)
     press(["C-c", "g"])
     type("proj")
     press(["RET"])
-    assert group_name(buffer_group(notes)) == "proj"
+    assert in_group?(notes, "proj")
 
     # C-c q in a grouped buffer routes to the group chat, focus stays put
     point = Buffer.point(notes)
@@ -2295,7 +2305,7 @@ defmodule Aimax.EditorTest do
     assert system =~ ~s{"#{buf}"}
     assert system =~ ~s{"#{notes}"}
 
-    assert group_name(buffer_group(chat)) == "proj"
+    assert in_group?(chat, "proj")
     assert Editor.current_buffer() == notes
     assert Buffer.point(notes) == point
     assert length(Editor.list_windows()) == 2
@@ -2329,7 +2339,7 @@ defmodule Aimax.EditorTest do
              Buffer.exists?(chat) && Buffer.text(chat) =~ "aye"
            end)
 
-    assert group_name(buffer_group(chat)) == "proj"
+    assert in_group?(chat, "proj")
 
     press(["C-x", "1"])
   end

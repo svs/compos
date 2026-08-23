@@ -162,7 +162,7 @@ pre-change commit as well. Two runs is not a baseline.
 
 ## State at handoff
 
-Commit `6a9890b`. Scheme suite: 190 tests, one red by design.
+Commit `e0b5312`. Scheme suite: 214 tests, one red by design.
 
 In Scheme:
 
@@ -180,19 +180,24 @@ In Scheme:
 | `mcp-policy-test.scm` | 4 (moved) |
 | `web-browse-test.scm` | 9 (moved) |
 | `mode-icon-test.scm` | 8 (moved) |
+| `morg-structure-test.scm` | 8 (moved) |
 | `chat-heal-test.scm` | 7 (moved) |
 | `keymap-test.scm` | 7 |
 | `edit-semantics-test.scm` | 6 (moved) |
+| `help-page-test.scm` | 5 (moved) |
+| `paredit-scan-test.scm` | 5 (moved) |
 | `permission-test.scm` | 6 (moved) |
 | `sentry-test.scm` | 6 (moved) |
 | `marginalia-test.scm` | 5 (moved) |
 | `imenu-test.scm` | 4 (moved) |
+| `mode-toggle-test.scm` | 4 (moved) |
 | `buffer-cache-test.scm` | 3 (moved) |
+| `recipes-test.scm` | 2 (moved) |
 | `canary-test.scm` | 1, always red |
 
 ## What moved, and what could not
 
-155 tests moved. `graphql_test`, `imenu_test`, `buffer_cache_test`,
+179 tests moved. `graphql_test`, `imenu_test`, `buffer_cache_test`,
 `code_structure_test` and `chat_heal_test` are gone entirely. Ten more
 files keep only what Scheme cannot hold: `apropos_test`, `skills_test`,
 `mode_icon_test`, `sentry_test`, `permission_test`, `web_browse_test`,
@@ -273,19 +278,14 @@ much `Session.eval` it calls. Eval density lies: `chrome_test` is 32
 eval-heavy tests and none of them move, because they assert on frames a
 stub socket process received.
 
-Worth a pass, in this order:
+What is left is the long tail: two or three each in `code_mode`,
+`grammar`, `mcp_hub`, `writing`, `occur_ts`, `fold_tag`, `feeds`,
+`scheme_ide`, `sockets`, `core` and `daemon`. Roughly 25 tests.
 
-| file | movable | note |
-|---|---|---|
-| `morg_test` | 6 of 32 | 20 press keys |
-| `help_test` | 5 of 25 | 20 press keys |
-| `paredit_test` | 5 of 42 | 36 press keys |
-| `mode_toggle_test` | 4 of 8 | |
-| `command_palette_test` | 4 of 9 | |
-| `code_mode_test` | 4 of 14 | |
-
-Then two or three each in `grammar`, `mcp_hub`, `writing`, `occur_ts`,
-`fold_tag`, `feeds`, `scheme_ide`, `sockets`, `core` and `daemon`.
+`code_mode_test` has four that read Scheme values, but three of them run
+`M-x code-mode` first, which joins a group, opens a chat and loads the
+coding presets. In a live editor that is a lot of state to put back, and
+one test alone does not earn a file. Take it with the long tail.
 
 `mcp_test` is done: 4 of 16 moved. The other twelve need the fake server
 in `test/support`, or catch a raise, or run the tool loop in Elixir.

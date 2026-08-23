@@ -2,7 +2,11 @@ defmodule Aimax.MCPTest do
   @moduledoc """
   MCP client: stdio handshake against a real subprocess (the fake server in
   test/support), tool bridging into the LLM loop, and the Scheme policy
-  layer (registry, presets, per-chat specs).
+  that needs a server on the other end.
+
+  The policy that does not — the ACP translation, the system note, the
+  tool list and the quiet failures — is Scheme and lives in
+  priv/tests/mcp-policy-test.scm.
   """
 
   use ExUnit.Case
@@ -164,55 +168,6 @@ defmodule Aimax.MCPTest do
                              (chat-extra-tool-specs "*zz-mcp-chat*"))}) =~ "mcp__zzfake__"
     end
 
-    test "chat-tool-list groups the model's tools under the server that serves them" do
-      on_exit(fn ->
-        Aimax.Core.kill_buffer("*zz-list-chat*")
-        Aimax.Core.kill_buffer("*chat tools*")
-      end)
-
-      # the frozen list IS what the model sees, so the report reads it
-      eval!(~s{(define-preset! 'zzlistpack "list pack" '(zzlist))})
-      eval!(~s{(buffer-create "*zz-list-chat*")})
-      eval!(~s{(buffer-set-local! "*zz-list-chat*" 'mode-name "chat-mode")})
-      eval!(~s{(buffer-set-local! "*zz-list-chat*" 'chat-presets '(zzlistpack))})
-
-      eval!("""
-      (buffer-set-local! "*zz-list-chat*" 'chat-tool-specs
-        '(("eval-scheme" "Run Scheme in the editor." ())
-          ("mcp__zzlist__echo" "Echo back v.\nA second line nobody needs here." "{}")))
-      """)
-
-      eval!(~s[(begin (switch-to-buffer! "*zz-list-chat*") (run-command "chat-tool-list"))])
-      text = Aimax.Core.Buffer.text("*chat tools*")
-
-      # the header answers "what does this chat hold, and can the model see it?"
-      assert text =~ "presets: aimax, zzlistpack"
-      assert text =~ "2 tools · "
-
-      # every tool sits under the server that serves it, on one line
-      assert text =~ ~r/\naimax\n  eval-scheme +Run Scheme in the editor\./
-      assert text =~ ~r/\nzzlist\n  mcp__zzlist__echo +Echo back v\.\n/
-      refute text =~ "A second line"
-    end
-
-    test "an http server translates to an ACP entry; a spec with neither is dropped" do
-      eval!(~s{(mcp-register! 'zzhttp '(type "http" url "https://zz.test/mcp"
-                                       headers (Authorization "Bearer zz")))})
-      eval!(~s{(mcp-register! 'zzstdio '(command "zz-bin" args ("--stdio") env (K "v")))})
-      eval!(~s{(mcp-register! 'zzempty '(note "no transport here"))})
-
-      assert eval!("(mcp-acp-server 'zzhttp)") ==
-               ~s{(name "zzhttp" type "http" url "https://zz.test/mcp" } <>
-                 ~s{headers (("Authorization" "Bearer zz")))}
-
-      assert eval!("(mcp-acp-server 'zzstdio)") ==
-               ~s{(name "zzstdio" command "zz-bin" args ("--stdio") env (("K" "v")))}
-
-      assert eval!("(mcp-acp-server 'zzempty)") == "#f"
-      assert eval!("(mcp-acp-servers '(zzempty zzhttp))") =~ "zzhttp"
-      refute eval!("(mcp-acp-servers '(zzempty zzhttp))") =~ "zzempty"
-    end
-
     test "mcp-call! connects, waits for the handshake, and returns the tool's text" do
       on_exit(fn -> MCP.disconnect("zzcall") end)
       eval!(~s{(mcp-register! 'zzcall (list 'command "elixir" 'args (list "#{@fixture}")))})
@@ -263,44 +218,10 @@ defmodule Aimax.MCPTest do
       assert eval!(~s[(mcp-find "zzz|echo" 'zzfind)]) =~ "echo"
     end
 
-    test "the system note names the servers and the way to call one" do
-      eval!(~s{(mcp-register! 'zznote '(type "http" url "https://zz.test/mcp"))})
-      note = eval!("(mcp-system-note '(zznote))")
-
-      assert note =~ "zznote"
-      assert note =~ "never ssh"
-      assert note =~ "mcp-call!"
-      assert note =~ "unfamiliar operation"
-      assert note =~ "do not repeat an equivalent search"
-
-      # a chat that holds no servers is told about none: advertising one
-      # its tool gate does not hold sends the agent looking for a host
-      assert eval!("(mcp-system-note '())") == ~s{""}
-
-      # the direct lane carries it in the system text of every turn, for
-      # the servers THIS chat's presets expose
-      on_exit(fn -> Aimax.Core.kill_buffer("*zz-note-chat*") end)
-      eval!(~s{(buffer-create "*zz-note-chat*")})
-      eval!(~s{(buffer-set-local! "*zz-note-chat*" 'agent-slug "zznoteslug")})
-      eval!(~s{(buffer-set-local! "*zz-note-chat*" 'chat-use-tools #t)})
-      refute eval!(~s{(chat-mcp-note "*zz-note-chat*")}) =~ "zznote"
-
-      eval!(~s{(define-preset! 'zznotepreset "a test preset" '(zznote))})
-      eval!(~s{(buffer-set-local! "*zz-note-chat*" 'chat-presets '(zznotepreset))})
-      assert eval!(~s{(chat-mcp-note "*zz-note-chat*")}) =~ "zznote"
-    end
-
     test "a call to a server that is not there fails with words, not a hang" do
       assert {:error, msg} = Session.eval(~S[(mcp-call! 'zz-not-a-server "echo" "{}")])
       assert msg =~ "not connected"
     end
 
-    test "unknown presets and servers stay quiet failures, not crashes" do
-      assert eval!("(preset-servers 'zz-none)") == "()"
-      eval!("(mcp-ensure! 'zz-unregistered)")
-
-      {:ok, text} = Session.eval(~s{(buffer-text "*messages*")})
-      assert text =~ "unknown server zz-unregistered"
-    end
   end
 end

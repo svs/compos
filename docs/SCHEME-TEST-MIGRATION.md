@@ -206,7 +206,25 @@ Three limits decided every split:
   command table is Elixir, and a test command name stays until the next
   restart. A removal primitive would close this.
 
-## The suite runs in the live editor
+## Do not run the suite in a session you care about
+
+`mix test` is self-contained: the test env boots its own editor in its own
+BEAM, with `home:` and the socket keyed on the checkout and the partition
+(`config/config.exs`). It never opens `~/.aimax/sock`. That is the gate.
+
+`M-x run-scheme-tests` runs the same files against YOUR daemon, and it is
+not free. Ten of the sixteen files move a window, open the switcher,
+display a list buffer, or write a file. Three leave a name in the M-x
+table until the next restart, because the Elixir command table has no
+removal call. Worst: `web-browse-test.scm` and `sentry-test.scm` install a
+stub into `*web-fetch*` and `*sentry-transport*` and restore it at the
+end. A check that FAILS still restores. A test that RAISES does not, and
+your real browsing stays stubbed with nothing on screen to say why.
+
+Use the live loop while writing a test, on a session you can restart. Use
+`mix test` to believe the answer.
+
+## What a live test still owes you
 
 `M-x run-scheme-tests` runs against the person's own daemon. A test that
 touches a global must put it back, and that now includes their files and

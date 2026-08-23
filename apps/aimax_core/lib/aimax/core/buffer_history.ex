@@ -29,13 +29,20 @@ defmodule Aimax.Core.BufferHistory do
   @doc """
   This replica's peer id, stable across restarts.
 
-  A peer is a replica, not an actor. Every local actor writing to one document
-  shares it, and the commit message tells them apart. The id must stay the same
-  across restarts, or each restart looks like a new replica and the oplog grows
-  a peer per boot.
+  **A home is a replica.** The id lives in `~/.aimax/peer-id` beside the
+  buffers, the checkpoints and the history logs, and everything in that
+  directory belongs to the one writer the id names. Two daemons sharing a home
+  are the same replica and must not run at once, which their checkpoints
+  already required.
 
-  Two daemons that share a home would share this id. That is safe only while
-  they never edit one document at the same time.
+  A peer is not an actor. Every local actor writing here shares this id, and
+  the commit message tells them apart. It stays the same across restarts, or
+  each boot would look like a new replica and the version vector would grow a
+  peer per boot.
+
+  The corollary catches people out: two buffers in one daemon are not two
+  replicas. They share this id, so a history exported from one cannot be merged
+  into the other as though it came from elsewhere.
   """
   def replica_peer do
     case :persistent_term.get({__MODULE__, :peer}, nil) do

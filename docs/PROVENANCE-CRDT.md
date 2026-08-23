@@ -446,7 +446,35 @@ caller hears that it worked, and a save does the same for the typing behind it. 
 replacement stays one change and one undo step, because closing between its delete and
 its insert would make it two.
 
-**Phase 6 - transport.** Additive, once a topology is chosen.
+**Phase 6 - transport. The receive half is done; the wire is not.**
+
+A buffer can take changes another replica made. `Buffer.merge/2` imports them, the rope
+follows through the same path an undo uses, and the point is carried past the edit rather
+than moved to it. `Buffer.updates_since/2` exports what a replica at a given version is
+missing, and `Buffer.version_token/1` is that version. The bytes are the same in both
+directions and the same as the log holds, so a wire and a file carry the history in one
+form.
+
+Verified in `buffer_merge_test.exs`: an edit made here and one made there both survive,
+both sides finish with the same text, both actors are named in the merged history, typing
+continues over an arriving change, and undoing your own work after a merge does not take
+back theirs.
+
+**A home is a replica.** The peer id lives in `~/.aimax/peer-id` beside the buffers and
+the logs, and everything in that directory belongs to the one writer it names. The
+corollary caught the first draft of the test: two buffers in one daemon share that id, so
+they are not two replicas, and a history exported from one cannot be merged into the
+other. A real peer has its own home.
+
+What is left is the wire, and it needs the topology decision the plan deferred: whether
+one daemon is the server and the rest connect to it, or every daemon is a full replica
+exchanging updates directly. `export_updates` produces the same bytes either way, which
+is why this half could be built without deciding.
+
+Two Loro capabilities are still not exposed, and the wire wants both. `subscribe`
+delivers a change event, which would replace the text diff `apply_history_text` does to
+work out what arrived. `checkout` reads the text at any past version, which is what
+`M-x buffer-log` needs to show a state rather than a list.
 
 ## Risks
 

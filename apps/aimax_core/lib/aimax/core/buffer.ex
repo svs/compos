@@ -443,6 +443,35 @@ defmodule Aimax.Core.Buffer do
   def anchor_pos(name, anchor) when is_binary(anchor),
     do: GenServer.call(via(name), {:anchor_pos, anchor})
 
+  @doc """
+  This buffer's version, as the token a replica hands over to ask for what it
+  is missing. Opaque, and only meaningful to `updates_since/2`.
+  """
+  def version_token(name), do: GenServer.call(via(name), :version_token)
+
+  @doc """
+  Everything this buffer knows that a replica at `token` does not.
+
+  Pass `nil` for a replica that knows nothing. The bytes are what `merge/2`
+  takes, and they are the same bytes the log holds, so a wire and a file carry
+  the history in one form.
+  """
+  def updates_since(name, token \\ nil),
+    do: GenServer.call(via(name), {:updates_since, token})
+
+  @doc """
+  Take changes another replica made and let this buffer catch up.
+
+  The history merges them, the rope follows, and the point stays where the
+  person left it. Concurrent edits do not conflict: two replicas that exchange
+  updates both ways end up with the same text.
+
+  Returns `{:ok, changed?}`, or `{:error, reason}` when the bytes are not
+  something this buffer can read.
+  """
+  def merge(name, bytes) when is_binary(bytes),
+    do: GenServer.call(via(name), {:merge, bytes}, 30_000)
+
   @doc "Start or resume Provenance without deleting prior history."
   def provenance_start(name, opts \\ []) do
     GenServer.call(via(name), {:provenance_start, source(opts), author(opts), opts})
@@ -933,6 +962,59 @@ defmodule Aimax.Core.Buffer do
   def handle_call({:anchor_pos, anchor}, _from, state) do
     {:reply, read_anchor(state, anchor), state}
   end
+
+  def handle_call(:version_token, _from, state) do
+    state = state |> flush_provenance() |> close_undo_step()
+    {:reply, state.history && History.version(state.history), state}
+  end
+
+  def handle_call({:updates_since, _token}, _from, %{history: nil} = state),
+    do: {:reply, {:error, :no_history}, state}
+
+  def handle_call({:updates_since, token}, _from, state) do
+    # Close the open change first: a replica must never be told about work
+    # this buffer has not finished writing.
+    state = state |> flush_provenance() |> close_undo_step()
+
+    reply =
+      case token do
+        nil -> History.export_all(state.history)
+        from -> History.export_updates(state.history, from)
+      end
+
+    {:reply, reply, state}
+  end
+
+  def handle_call({:merge, _bytes}, _from, %{history: nil} = state),
+    do: {:reply, {:error, :no_history}, state}
+
+  def handle_call({:merge, bytes}, _from, state) do
+    # Our own work closes before theirs arrives, so the merge cannot fold a
+    # half-written local change together with a remote one.
+    state = state |> flush_provenance() |> close_undo_step()
+    {before, state} = fetch_text(state)
+
+    case History.import(state.history, bytes) do
+      {:error, reason} ->
+        Logger.error("merge refused in #{state.name}: #{inspect(reason)}")
+        {:reply, {:error, reason}, state}
+
+      _len ->
+        state = apply_history_text(state, merge_actor(state), :remote)
+        {text, state} = fetch_text(state)
+
+        # Their change is already committed on the replica that made it, so
+        # this only puts the bytes in our log.
+        state = persist_history(state)
+        {:reply, {:ok, text != before}, checkpoint_later(state)}
+    end
+  end
+
+  # The authorship fold wants one actor for the bytes that arrived. The change
+  # itself carries the actor who really wrote it, so the fold says "elsewhere"
+  # and the history says who.
+  defp merge_actor(_state),
+    do: local_actor("system:remote", "system", "remote", :merge)
 
   def handle_call({:provenance_start, src, author, opts}, _from, state) do
     state = flush_provenance(state)
@@ -1566,23 +1648,23 @@ defmodule Aimax.Core.Buffer do
   # contiguous replacement that always reaches the right result. A step that
   # touched separate regions produces a wider span than it strictly changed,
   # which costs precision in the authorship fold and nothing in the text.
-  defp apply_history_text(state, actor) do
+  defp apply_history_text(state, actor, src \\ :undo) do
     {old, state} = fetch_text(state)
 
     case History.text(state.history) do
       {:error, reason} ->
-        Logger.error("undo could not read the document in #{state.name}: #{inspect(reason)}")
+        Logger.error("could not read the history in #{state.name}: #{inspect(reason)}")
         state
 
       new ->
         case text_delta(old, new) do
           nil -> state
-          {pos, removed, inserted} -> rewrite(state, actor, pos, removed, inserted)
+          {pos, removed, inserted} -> rewrite(state, actor, pos, removed, inserted, src)
         end
     end
   end
 
-  defp rewrite(state, actor, pos, removed, inserted) do
+  defp rewrite(state, actor, pos, removed, inserted, src) do
     old_rope = state.rope
     rope = if removed > 0, do: Rope.delete(state.rope, pos, removed), else: state.rope
     rope = if inserted != "", do: Rope.insert(rope, pos, inserted), else: rope
@@ -1598,9 +1680,10 @@ defmodule Aimax.Core.Buffer do
       |> adjust_point_insert(pos, added)
       |> adjust_ranges(&adjust_insert(&1, pos, added), &adjust_insert_stay(&1, pos, added))
 
-    # An undo authors what it restores. The actor asking for it is responsible
-    # for the text that comes back.
-    {changeset, state} = open_changeset(state, actor, :undo)
+    # An undo authors what it restores: the actor who asked for it is
+    # responsible for the text coming back. A merge authors nothing new, and
+    # the actor is whoever wrote the change on the replica it came from.
+    {changeset, state} = open_changeset(state, actor, src)
     authors = if removed > 0, do: stamp_delete(state.authors, pos, removed), else: state.authors
 
     # Only stamp bytes that came back. Stamping zero of them would leave an
@@ -1611,21 +1694,24 @@ defmodule Aimax.Core.Buffer do
         do: stamp_insert(authors, pos, added, stamp_id(actor, changeset)),
         else: authors
 
+    # An undo puts the point on what it restored, because the person asked for
+    # it and wants to see it. A change from elsewhere must not move the point:
+    # the adjustments above already carried it past the edit.
     state = %{
       state
       | authors: authors,
-        point: pos + added,
+        point: if(src == :undo, do: pos + added, else: state.point),
         goal_col: nil,
         last_insert_end: nil,
         insert_run: 0
     }
 
     state = log_edit(state, actor_label(actor), pos, added, removed)
-    state = record_op(state, actor, pos, inserted, "", :undo, true)
+    state = record_op(state, actor, pos, inserted, "", src, true)
     state = ts_invalidate(state)
-    broadcast(state, 0, "", 0, :undo)
-    # The undo manager wrote and closed its own change, so the document holds
-    # no uncommitted work of ours.
+    broadcast(state, 0, "", 0, src)
+    # The change was written and closed elsewhere, by the undo manager or by
+    # another replica, so this buffer holds no uncommitted work of its own.
     %{state | history_actor: nil, history_group: nil}
   end
 

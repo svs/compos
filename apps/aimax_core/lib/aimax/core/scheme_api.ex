@@ -52,6 +52,14 @@ defmodule Aimax.Core.SchemeAPI do
         "(buffer-delete-range! BUF POS LEN) — delete LEN bytes at byte POS; ignores read-only.",
       "buffer-replace-range!" =>
         "(buffer-replace-range! BUF POS LEN TEXT) — replace LEN bytes at byte POS with TEXT as one undo step; ignores read-only.",
+      "buffer-version-token" =>
+        "(buffer-version-token BUF) — what this replica knows, as an opaque token to hand a peer; #f if the buffer records no history.",
+      "buffer-updates-since" =>
+        "(buffer-updates-since BUF TOKEN) — every change a replica at TOKEN has not seen, base64. Pass #f for a replica that knows nothing.",
+      "buffer-merge!" =>
+        "(buffer-merge! BUF UPDATES) — take base64 changes another replica made; the rope follows and the point stays put. #t when the text changed.",
+      "peer-eval" =>
+        "(peer-eval SOCKET CODE) — evaluate CODE on the daemon listening at SOCKET, a local path or host:/path over ssh. Returns its printed result, or raises when it cannot be reached.",
       "buffer-anchor" =>
         "(buffer-anchor BUF POS) — an opaque anchor on byte POS that keeps naming the same place while the text around it changes; #f if the buffer records no history.",
       "buffer-anchor-pos" =>
@@ -413,6 +421,38 @@ defmodule Aimax.Core.SchemeAPI do
       "buffer-replace-range!" => fn [name, pos, len, text] ->
         :ok = Buffer.replace_range(name, pos, len, text, source: :editor)
         :void
+      end,
+      "buffer-version-token" => fn [name] ->
+        case Buffer.version_token(name) do
+          token when is_binary(token) -> Base.url_encode64(token, padding: false)
+          _ -> false
+        end
+      end,
+      "buffer-updates-since" => fn [name, token] ->
+        from =
+          case token do
+            t when is_binary(t) -> Base.url_decode64!(t, padding: false)
+            _ -> nil
+          end
+
+        case Buffer.updates_since(name, from) do
+          bytes when is_binary(bytes) -> Base.url_encode64(bytes, padding: false)
+          {:error, reason} -> raise Aimax.Scheme.Eval.Error, message: inspect(reason)
+        end
+      end,
+      "buffer-merge!" => fn [name, updates] ->
+        bytes = Base.url_decode64!(updates, padding: false)
+
+        case Buffer.merge(name, bytes) do
+          {:ok, changed?} -> changed?
+          {:error, reason} -> raise Aimax.Scheme.Eval.Error, message: inspect(reason)
+        end
+      end,
+      "peer-eval" => fn [socket, code] ->
+        case Aimax.Core.Peer.eval(socket, code) do
+          {:ok, printed} -> printed
+          {:error, reason} -> raise Aimax.Scheme.Eval.Error, message: inspect(reason)
+        end
       end,
       "buffer-anchor" => fn [name, pos] ->
         Buffer.anchor(name, pos) || false

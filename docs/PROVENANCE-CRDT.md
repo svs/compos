@@ -466,10 +466,31 @@ corollary caught the first draft of the test: two buffers in one daemon share th
 they are not two replicas, and a history exported from one cannot be merged into the
 other. A real peer has its own home.
 
-What is left is the wire, and it needs the topology decision the plan deferred: whether
-one daemon is the server and the rest connect to it, or every daemon is a full replica
-exchanging updates directly. `export_updates` produces the same bytes either way, which
-is why this half could be built without deciding.
+**The wire is the socket the daemon already listens on.** There is no Loro server: Loro
+emits bytes and something moves them, and eval is the API. `Aimax.Core.Peer` sends one
+`eval` to another home's socket, locally or over ssh through the same `~/.ssh/config`
+remote buffers use. `priv/packages/peers.scm` holds the policy: `peer-pull!`,
+`peer-push!`, `peer-sync!`, and `M-x sync-buffer-with-peer`.
+
+The exchange is two questions and two answers, and both sides ask, so neither leads:
+
+```
+what do you have?        (buffer-version-token BUF)
+what am I missing?       (buffer-updates-since BUF TOKEN)
+here is what you missed  (buffer-merge! BUF UPDATES)
+```
+
+Verified between two real daemons, `AIMAX_HOME=/tmp/peer-a` and `/tmp/peer-b`, each with
+its own home, socket and peer id. Both held "base". A appended " FROM-A" and B inserted
+"FROM-B " with neither having seen the other, so A read "base FROM-A" and B read
+"FROM-B base". One `peer-sync!` from B, and both read "FROM-B base FROM-A". A's history
+then carried two changes under two different peer ids, which is what proves the work came
+from two replicas rather than one.
+
+Nothing polls. A sync happens when somebody asks for one, because deciding when is a
+policy question nobody has answered. The topology question the plan deferred is now
+narrower than it was: peers reach each other directly, and a relay is only needed for a
+replica that is never online at the same time as the others.
 
 Two Loro capabilities are still not exposed, and the wire wants both. `subscribe`
 delivers a change event, which would replace the text diff `apply_history_text` does to

@@ -167,7 +167,9 @@
 (deftest 'a-headless-find-file-still-parses-with-the-grammar
   "the mode a file opens in must reach tree-sitter with no window"
   (lambda ()
-    (let ((path "/tmp/zz_headless_code.ex"))
+    ;; aimax-home, not /tmp: under mix test it is the run's own home, and
+    ;; in the live editor it is ~/.aimax. Either way the file is ours.
+    (let ((path (string-append (aimax-home) "/zz_headless_code.ex")))
       (write-file! path t--code-elixir)
       (find-file path)
       (check-true! (member '(2 "call" "one" "def one(x) do") (code-outline path))

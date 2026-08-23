@@ -1,7 +1,11 @@
 defmodule Aimax.MarginaliaProjectTest do
   @moduledoc """
-  Marginalia: M-x candidates carry keybinding + docstring hints.
+  Marginalia: the prompts that a test must press keys to open.
   Projects: root discovery, git-aware file listing, known-project memory.
+
+  The annotator registry and the column padding are Scheme policy and live
+  in priv/tests/marginalia-test.scm. What stays here opens a prompt and
+  reads the minibuffer, or builds a git checkout on disk.
   """
 
   use ExUnit.Case
@@ -21,45 +25,6 @@ defmodule Aimax.MarginaliaProjectTest do
   end
 
   describe "marginalia" do
-    test "annotate pairs names with their category's annotator" do
-      {:ok, _} = Session.eval(~s{(marginalia! 'mp-one (lambda (n) (string-append "<" n ">")))})
-
-      assert {:ok, ~s{(("a" "<a>") ("bb" "<bb>"))}} =
-               Session.eval(~s{(annotate 'mp-one (list "a" "bb"))})
-
-      # a category nobody annotates hands its candidates back untouched
-      assert {:ok, ~s{("x" "y")}} = Session.eval(~s{(annotate 'mp-nobody (list "x" "y"))})
-    end
-
-    test "several fields become columns, padded across the whole set" do
-      {:ok, _} = Session.eval(~s{(marginalia! 'mp-cols (lambda (n) (list n "z")))})
-
-      # "a" pads to the width of "bbb", so the second field starts in the
-      # same place on both rows
-      assert {:ok, ~s{(("a" "a    z") ("bbb" "bbb  z"))}} =
-               Session.eval(~s{(annotate 'mp-cols (list "a" "bbb"))})
-    end
-
-    test "a row whose last fields say nothing ends early" do
-      {:ok, _} =
-        Session.eval("""
-        (marginalia! 'mp-trim
-          (lambda (n) (if (equal? n "a") (list "" "") (list "x" "yy"))))
-        """)
-
-      assert {:ok, ~s{(("a" "") ("b" "x  yy"))}} =
-               Session.eval(~s{(annotate 'mp-trim (list "a" "b"))})
-    end
-
-    test "marginalia! registers an annotator and replaces one" do
-      {:ok, _} = Session.eval(~s{(marginalia! 'mp-cat (lambda (n) (string-append "<" n ">")))})
-      assert {:ok, ~s{(("q" "<q>"))}} = Session.eval(~s{(annotate 'mp-cat (list "q"))})
-
-      # one annotator per category: the second registration wins
-      {:ok, _} = Session.eval(~s{(marginalia! 'mp-cat (lambda (n) "second"))})
-      assert {:ok, ~s{(("q" "second"))}} = Session.eval(~s{(annotate 'mp-cat (list "q"))})
-    end
-
     test "find-file candidates carry mode, size and date" do
       root = Path.join(System.tmp_dir!(), "mp-marg-#{System.unique_integer([:positive])}")
       File.mkdir_p!(Path.join(root, "sub"))
@@ -119,16 +84,6 @@ defmodule Aimax.MarginaliaProjectTest do
       assert text =~ "/dishwasher"
       assert {:ok, ~s{"*mp-ga*"}} = Session.eval(~s{(car (list-current "*switch*"))})
       press(["ESC"])
-    end
-
-    test "define-command stores a docstring, command-doc reads it back" do
-      {:ok, _} =
-        Session.eval(~s{(define-command "mp-frob" "Frob the marginalia test" (lambda () #t))})
-
-      assert {:ok, ~s{"Frob the marginalia test"}} = Session.eval(~s{(command-doc "mp-frob")})
-      # 2-arity form still works and reads as empty doc
-      {:ok, _} = Session.eval(~s{(define-command "mp-plain" (lambda () #t))})
-      assert {:ok, ~s{""}} = Session.eval(~s{(command-doc "mp-plain")})
     end
 
     test "M-x hints show keybinding and doc" do

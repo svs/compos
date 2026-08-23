@@ -52,6 +52,24 @@
   (when (and text (not (equal? text ""))) (buffer-insert! name 0 text))
   name)
 
+;; A test that registers a name must take it out again. define-command,
+;; public!, define-tool! and catalog-register! all write registries with
+;; no removal call, so a test clears the Scheme half by hand. The M-x
+;; command table is Elixir and has none, so that name stays until the next
+;; restart.
+(define (test-forget-catalog! kind name)
+  (let ((e (catalog-entry (string->symbol kind) name)))
+    (when e
+      (set! *catalog-keys*
+        (remove (lambda (k)
+                  (equal? k (catalog--key kind name (plist-get e 'qualified-name))))
+                *catalog-keys*))
+      (set! *catalog*
+        (remove (lambda (x) (and (equal? (plist-get x 'kind) kind)
+                                 (equal? (plist-get x 'name) name)))
+                *catalog*))))
+  name)
+
 (define (test-fail! text)
   (set! *test-failures* (append *test-failures* (list text))))
 
@@ -186,6 +204,8 @@
   "(test-buffer! NAME TEXT) — make or empty a buffer and give it TEXT; answers NAME")
 (public! 'test-self-check
   "(test-self-check) — prove the checks can fail; answers the failures three bad assertions record")
+(public! 'test-forget-catalog!
+  "(test-forget-catalog! KIND NAME) — drop a test's catalog entry; the M-x name stays until a restart")
 (public! 'load-tests! "(load-tests!) — load every .scm under priv/tests; answers the test count")
 
 (message "test.scm loaded")

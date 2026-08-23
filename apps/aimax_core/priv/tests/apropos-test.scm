@@ -16,26 +16,10 @@
 
 (effects! '(write))
 
-;; A test that registers a name must take it out again. This clears the
-;; two Scheme registries. The M-x command table is Elixir and has no
-;; removal, so a test command name stays until the next restart.
-(define (t--ap-forget-catalog! kind name)
-  (let ((e (catalog-entry (string->symbol kind) name)))
-    (when e
-      (set! *catalog-keys*
-        (remove (lambda (k)
-                  (equal? k (catalog--key kind name (plist-get e 'qualified-name))))
-                *catalog-keys*))
-      (set! *catalog*
-        (remove (lambda (x) (and (equal? (plist-get x 'kind) kind)
-                                 (equal? (plist-get x 'name) name)))
-                *catalog*))))
-  name)
-
 (define (t--ap-forget-public! name)
   (set! *public-api* (remove (lambda (e) (equal? (car e) name)) *public-api*))
   (set! *public-keys* (remove (lambda (k) (equal? k name)) *public-keys*))
-  (t--ap-forget-catalog! "function" name))
+  (test-forget-catalog! "function" name))
 
 ;;; --- the catalog --------------------------------------------------------------
 
@@ -85,8 +69,8 @@
       (check-equal! (plist-get stamped 'effects) '("destroy" "external") "the declared effects")
       (check-equal! (plist-get stamped 'metadata-source) "declared" "declared, not guessed"))
 
-    (t--ap-forget-catalog! "command" "zz-unstamped")
-    (t--ap-forget-catalog! "command" "zz-stamped")))
+    (test-forget-catalog! "command" "zz-unstamped")
+    (test-forget-catalog! "command" "zz-stamped")))
 
 (deftest 'consequential-entries-declare-their-effects
   "the entries that spend, execute or destroy say so in their own source"

@@ -16,6 +16,7 @@
 ;;;   C-h m   describe-mode      — this buffer's mode and its keys
 ;;;   C-h b   describe-bindings  — every binding, local first
 ;;;   C-h a   apropos            — search the editor by words
+;;;   M-x describe-buffer-locals — this buffer's own variables and their values
 
 (define *help-buffer* "*Help*")
 ;; A help page is a popup: it floats over the right of the frame instead
@@ -142,6 +143,52 @@
                      (string-join (help--key-rows keys) "\n")
                      "\n")))
 
+;;; --- buffer locals -------------------------------------------------------------
+;;; A buffer's locals are its state: the mode, the renderer, a chat's
+;;; identity, a list's rows. The keys answered "what can I press here";
+;;; the locals answer "what does this buffer know".
+
+;; the value column says what a value IS, not everything it holds. A
+;; transcript is thousands of entries, and a help page is a page.
+(define help--local-width 60)
+
+(define (help--clip s)
+  (let ((one (string-join (string-split s "\n") " ")))
+    (if (> (string-length one) help--local-width)
+        (string-append (substring one 0 help--local-width) "...")
+        one)))
+
+(define (help--local-value v)
+  (cond
+    ((equal? v #t) "#t")
+    ((equal? v #f) "#f")
+    ((null? v) "()")
+    ((string? v) (help--clip (value->string v)))
+    ((number? v) (number->string v))
+    ((symbol? v) (string-append "'" (symbol->string v)))
+    ((pair? v)
+     (if (<= (length v) 4)
+         (help--clip (value->string v))
+         (string-append "(" (number->string (length v)) " items)")))
+    (else (help--clip (value->string v)))))
+
+;; help--kbd is the safe code span: it escapes the "|" that ends a cell
+;; and the backtick that ends the span
+(define (help--locals-table buf)
+  (let ((ls (buffer-locals buf)))
+    (if (null? ls)
+        "This buffer sets no locals.\n"
+        (string-append
+          "| name | value |\n| --- | --- |\n"
+          (string-join
+            (map (lambda (p)
+                   (string-append
+                     "| " (help--kbd (symbol->string (car p)))
+                     " | " (help--kbd (help--local-value (cadr p))) " |"))
+                 ls)
+            "\n")
+          "\n"))))
+
 (define (help--minor-modes buf)
   (let ((ms (or (buffer-local buf 'minor-modes) '())))
     (if (null? ms) "" (string-append "minor modes `" (string-join ms "` `") "`"))))
@@ -198,6 +245,26 @@
                     (current-buffer)))
            (mode (or (buffer-local buf 'mode-name) "fundamental-mode")))
       (help-doc! mode (help--mode-markdown buf mode))
+      (buffer-set-local! *help-buffer* 'help-from buf))))
+
+(domain! 'help)
+(effects! '(write))
+
+(define-command "describe-buffer-locals" "Show this buffer's local variables and their values"
+  (lambda ()
+    ;; read the buffer BEFORE the page opens, the way describe-mode does
+    (let* ((buf (if (equal? (current-buffer) *help-buffer*)
+                    (or (buffer-local *help-buffer* 'help-from) (current-buffer))
+                    (current-buffer)))
+           (mode (or (buffer-local buf 'mode-name) "fundamental-mode")))
+      (help-doc! "locals"
+        (string-append
+          "# Buffer locals\n\n"
+          "Buffer `" buf "`, mode `" mode "`. "
+          "Read one value with `(buffer-local \"" buf "\" 'name)`.\n\n"
+          (help--locals-table buf)
+          "\n---\n\n"
+          "`M-x` runs a command by name · `q` closes this page\n"))
       (buffer-set-local! *help-buffer* 'help-from buf))))
 
 (define-command "describe-bindings" "Show every key binding, this buffer's first"

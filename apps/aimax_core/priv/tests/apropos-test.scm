@@ -104,7 +104,7 @@
                         (and (equal? (plist-get e 'origin) "bundled")
                              (equal? (plist-get e 'metadata-source) "unknown")))
                       (catalog)))
-      587 "the unstamped bundled entries")))
+      548 "the unstamped bundled entries")))
 
 (deftest 'no-entry-carries-the-same-key-twice
   "one entry, one answer per key: a duplicate hides from plist-get and not from a walker"

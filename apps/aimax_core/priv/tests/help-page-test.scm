@@ -72,6 +72,26 @@
       (when (buffer-known? here) (switch-to-buffer! here))
       (buffer-kill! buf))))
 
+(deftest 'the-locals-page-lists-what-the-buffer-knows
+  "the keys say what you can press; the locals say what the buffer knows"
+  (lambda ()
+    (let ((buf (test-buffer! "*zz-help-locals*" "text"))
+          (here (current-buffer)))
+      (buffer-set-local! buf 'zz-flavour "vanilla")
+      (buffer-set-local! buf 'zz-rows '(1 2 3 4 5 6))
+      (with-current-buffer buf (lambda () (run-command "describe-buffer-locals")))
+      (let ((text (buffer-text "*Help*")))
+        (check-contains! text "# Buffer locals" "the page")
+        (check-contains! text "`zz-flavour`" "the name of a local")
+        (check-contains! text "\"vanilla\"" "its value")
+        (check-contains! text "(6 items)"
+                         "a long value says its size, not its contents")
+        (check-false! (string-contains? text "## Everywhere")
+                      "and the page is locals, not keys"))
+      (when (buffer-known? "*Help*") (buffer-kill! "*Help*"))
+      (when (buffer-known? here) (switch-to-buffer! here))
+      (buffer-kill! buf))))
+
 (deftest 'every-mode-says-what-it-is-for
   "a mode with no doc still gets its key table, so the gap is invisible"
   (lambda ()

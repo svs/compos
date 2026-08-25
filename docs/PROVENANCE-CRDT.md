@@ -586,7 +586,7 @@ work out what arrived. `checkout` reads the text at any past version, which is w
   it, the agent's `replace_range` lands on the intended text and not on a shifted offset.
 - Convergence test: two docs edit the same buffer, exchange updates both ways, and
   converge to the same text and the same frontier.
-- Restart test: edit, `mix aimax.restart`, confirm the text and the history return.
+- Restart test: edit, restart the daemon through its lifecycle control, and confirm the text and history return.
   Editor state must survive a reload, per the project rule.
 - Drive real keystrokes through `KeyDispatch.handle_key/1`, not the buffer API.
 - Verify a code buffer, a morg buffer, and a chat buffer in a browser, then screenshot.

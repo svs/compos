@@ -4,7 +4,7 @@ defmodule Aimax.Core.Daemon do
 
   The daemon runs via `mix run --no-halt` from the project root. A restart
   saves the desktop, then hands a detached shell the same launch command
-  `mix aimax.restart` uses. The shell waits for this BEAM to exit, then
+  The daemon lifecycle uses. The shell waits for this BEAM to exit, then
   relaunches. The new daemon never fights the old one for the port or the
   socket.
 

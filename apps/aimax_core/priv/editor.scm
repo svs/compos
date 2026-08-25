@@ -3277,6 +3277,24 @@
         (remote-sh! (car hp) (string-append "mkdir -p -- " (sh-quote (cadr hp)))))
       (local-make-directory! p)))
 
+;; A binary document can own its open path before find-file decodes the bytes.
+;; Each entry is (SUFFIX OPENER). OPENER receives the normalized local path.
+(define *file-openers* '())
+
+(define (register-file-opener! suffix opener)
+  (set! *file-openers*
+    (cons (list suffix opener)
+          (remove (lambda (entry) (equal? (car entry) suffix)) *file-openers*)))
+  suffix)
+
+(define (file-opener-for path)
+  (let loop ((entries *file-openers*))
+    (cond ((null? entries) #f)
+          ((string-suffix? (string-downcase (car (car entries)))
+                           (string-downcase path))
+           (cadr (car entries)))
+          (else (loop (cdr entries))))))
+
 (define (remote-visit path)
   (if (buffer-exists? path)
       (switch-to-buffer! path)
@@ -3308,9 +3326,13 @@
       ((remote-path? path) (remote-visit path))
       ((file-directory? path) (dired-open path))
       (else
-        (switch-to-buffer! (find-file path))
-        (auto-mode path)
-        (run-hooks 'find-file-hook)))))
+        (let ((opener (file-opener-for path)))
+          (if opener
+              (opener path)
+              (begin
+                (switch-to-buffer! (find-file path))
+                (auto-mode path)
+                (run-hooks 'find-file-hook))))))))
 
 ;; files open in the current group: visit PATH, then join GROUP — but a
 ;; buffer that already belongs somewhere stays where it is. Raw (visit)
@@ -7079,6 +7101,8 @@
 (effects! '(write))
 (public! 'switch-to-buffer! "(switch-to-buffer! NAME) — show in the active window")
 (public! 'visit "(visit PATH) — open a file (Emacs find-file); /ssh:HOST:/PATH opens over ssh")
+(public! 'register-file-opener! "(register-file-opener! SUFFIX FN) — let FN open matching local files before text decoding")
+(catalog-meta! 'function "register-file-opener!" 'domain 'files 'effects '(write))
 (domain! 'unknown)
 (effects! '(read))
 (public! 'buffer-link "(buffer-link [NAME] [LINE]) -> a URL that opens the buffer here; no NAME means this buffer at point")

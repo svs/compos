@@ -22,6 +22,7 @@ defmodule Aimax.Core.PdfReaderTest do
         (define zz-pdf-render-page *pdf-render-page*)
         (define zz-pdf-page-text *pdf-page-text*)
         (define zz-pdf-file-exists *pdf-file-exists?*)
+        (define zz-pdf-clear-render-cache *pdf-clear-render-cache!*)
         (define zz-pdf-working-copy-exists *pdf-working-copy-exists?*)
         (define zz-pdf-copy-file *pdf-copy-file!*)
         (define zz-pdf-edit-pages *pdf-edit-pages!*)
@@ -35,12 +36,25 @@ defmodule Aimax.Core.PdfReaderTest do
       (define zz-pdf-orders '())
       (define zz-pdf-undo-count 0)
       (define zz-pdf-reset-count 0)
+      (define zz-pdf-cache-clear-count 0)
+      (define zz-pdf-render-count 0)
       (define zz-pdf-writes '())
-      (set! *pdf-page-count* (lambda (path) 3))
-      (set! *pdf-render-page* (lambda (path page zoom) "aGVsbG8="))
+      (set! *pdf-page-count*
+        (lambda (path)
+          (if (and (string-contains? path "-edited.pdf") (pair? zz-pdf-orders))
+              (length (car zz-pdf-orders))
+              3)))
+      (set! *pdf-render-page*
+        (lambda (path page zoom)
+          (set! zz-pdf-render-count (+ zz-pdf-render-count 1))
+          "aGVsbG8="))
       (set! *pdf-page-text*
         (lambda (path page) (string-append "Text for page " (number->string page))))
       (set! *pdf-file-exists?* (lambda (path) #t))
+      (set! *pdf-clear-render-cache!*
+        (lambda (path)
+          (set! zz-pdf-cache-clear-count (+ zz-pdf-cache-clear-count 1))
+          #t))
       (set! *pdf-working-copy-exists?*
         (lambda (path)
           (if (or (member path (map cadr zz-pdf-writes))
@@ -83,6 +97,7 @@ defmodule Aimax.Core.PdfReaderTest do
         (set! *pdf-render-page* zz-pdf-render-page)
         (set! *pdf-page-text* zz-pdf-page-text)
         (set! *pdf-file-exists?* zz-pdf-file-exists)
+        (set! *pdf-clear-render-cache!* zz-pdf-clear-render-cache)
         (set! *pdf-working-copy-exists?* zz-pdf-working-copy-exists)
         (set! *pdf-copy-file!* zz-pdf-copy-file)
         (set! *pdf-edit-pages!* zz-pdf-edit-pages)
@@ -409,6 +424,21 @@ defmodule Aimax.Core.PdfReaderTest do
     assert eval!("(length zz-pdf-writes)") == "2"
     assert eval!("(car (car zz-pdf-writes))") == first
     assert eval!("(cadr (car zz-pdf-writes))") == first
+  end
+
+  test "text insertion reverts an open working-copy buffer" do
+    eval!(~S|(pdf-edit-open "/tmp/live-form.pdf")|)
+    buf = Editor.current_buffer()
+    renders_before = String.to_integer(eval!("zz-pdf-render-count"))
+
+    result = eval!(~S|(pdf-insert-text "/tmp/live-form.pdf" 1 240 148 "Jane Doe")|)
+
+    assert result == ~S["/tmp/live-form-edited.pdf"]
+    assert Editor.current_buffer() == buf
+    assert Buffer.get_local(buf, "mode-name") == "pdf-edit-mode"
+    assert String.to_integer(eval!("zz-pdf-render-count")) == renders_before + 1
+    assert eval!("zz-pdf-cache-clear-count") == "1"
+    assert Buffer.text(buf) =~ "data:image/png;base64,aGVsbG8="
   end
 
   test "an old chained filename is updated without adding another suffix" do

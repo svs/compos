@@ -45,6 +45,15 @@
     (string-append (aimax-home) "/pdf-cache/"
                    (pdf--path-key (string-append path ":" stamp)))))
 
+(define (pdf--clear-render-cache-real path)
+  ;; Stable working-copy paths can change more than once per second. Clear the
+  ;; current version's cache so a same-second edit cannot show an old page.
+  (shell-command->string
+    (string-append "rm -rf -- " (sh-quote (pdf--cache-dir path))))
+  #t)
+
+(define *pdf-clear-render-cache!* pdf--clear-render-cache-real)
+
 (define (pdf--page-file path page zoom)
   (let ((width (quotient (* pdf-render-width zoom) 100)))
     (string-append (pdf--cache-dir path) "/page-"
@@ -425,7 +434,9 @@
            (list 'error "PDF font size must be positive"))
           ((*pdf-write-text!* source destination page x baseline-y
                              (or text "") font size)
-           destination)
+           (begin
+             (pdf--revert-open-buffers! destination)
+             destination))
           (else (list 'error "Could not write the generated PDF copy")))))
 
 (define (pdf-insert-text-after path query text &optional gap0 font0 size0)
@@ -504,6 +515,18 @@
   ;; A normal file buffer owns one canonical path. Synthetic PDF buffers store
   ;; pdf-path because they do not have a file association.
   (or (buffer-path buf) (buffer-local buf 'pdf-path)))
+
+(define (pdf--revert-open-buffers! path)
+  "Clear cached pages and rerender each open buffer for PATH."
+  (*pdf-clear-render-cache!* path)
+  (for-each
+    (lambda (buf)
+      (when (and (equal? (pdf--buffer-path buf) path)
+                 (member (buffer-local buf 'mode-name)
+                         '("pdf-reader-mode" "pdf-edit-mode")))
+        (pdf--render! buf #t)))
+    (buffer-list))
+  path)
 
 (define (pdf--action verb label key)
   (string-append
@@ -681,7 +704,11 @@
       (message (if (pdf--dark? buf) "Dark PDF page" "Light PDF page")))))
 
 (define-command "pdf-refresh" "Reload PDF metadata and the current page"
-  (lambda () (pdf--render! (current-buffer) #t)))
+  (lambda ()
+    (let ((path (pdf--buffer-path (current-buffer))))
+      (if path
+          (pdf--revert-open-buffers! path)
+          (message "This buffer has no PDF file")))))
 
 (define (pdf--page-order total)
   (let loop ((page 1))
@@ -728,7 +755,7 @@
               (buffer-set-local! buf 'pdf-total (length order))
               (buffer-set-local! buf 'pdf-page
                 (max 1 (min (length order) new-page)))
-              (pdf--render! buf #f)
+              (pdf--revert-open-buffers! path)
               (message (string-append success-message " · " path)))
             (message
               "Could not edit the generated PDF copy; Poppler, MuPDF, and ImageMagick are required")))))
@@ -788,7 +815,7 @@
           (message "This command requires pdf-edit-mode")
           (if (*pdf-undo-edit!* path undo-path)
               (begin
-                (pdf--render! buf #t)
+                (pdf--revert-open-buffers! path)
                 (message (string-append "Swapped undo state · " path)))
               (message "Nothing to undo yet"))))))
 
@@ -803,7 +830,7 @@
           (if (*pdf-reset-edit!* original path undo-path)
               (begin
                 (buffer-set-local! buf 'pdf-page 1)
-                (pdf--render! buf #t)
+                (pdf--revert-open-buffers! path)
                 (message (string-append "Reset generated copy from original · " path)))
               (message "Could not reset the generated PDF copy"))))))
 

@@ -1183,8 +1183,42 @@
         (lambda () (set-mode! "chat-mode"))))
     buf))
 
+;; A chat is named for its group, and a group founded on a file buffer is
+;; named for the path. A path makes a buffer name nobody can read, so the
+;; chat takes the file name. It keeps as much of the directory as it needs
+;; to stay unique. The chat's group, directory and identity do not change.
+(define (group-chat--parts p)
+  (filter (lambda (s) (not (equal? s ""))) (string-split p "/")))
+
+(define (group-chat--free? name id)
+  (or (not (buffer-known? name))
+      (equal? (chat-group-id name) id)))
+
 (define (group-chat-name g)
-  (string-append "*chat:" (group-name g) "*"))
+  (let* ((id (group-resolve-id g))
+         (label (or (group-name (or id g)) g)))
+    (if (not (string-prefix? "/" label))
+        (string-append "*chat:" label "*")
+        (let* ((parts (group-chat--parts label))
+               (depth (length parts)))
+          (let loop ((n 1))
+            (let ((name (string-append "*chat:"
+                                       (string-join (last-n parts n) "/")
+                                       "*")))
+              (cond ((>= n depth) name)
+                    ((group-chat--free? name id) name)
+                    (else (loop (+ n 1))))))))))
+
+;; a chat named before this rule takes the short name the next time the
+;; group asks for it
+(define (group-chat--heal-name! buf id)
+  (let ((want (group-chat-name id)))
+    (if (and (string-prefix? "*chat:/" buf)
+             (not (equal? want buf))
+             (not (buffer-known? want))
+             (rename-buffer! buf want))
+        want
+        buf)))
 
 ;; the group's chat = its most recently used chat-mode member; created on
 ;; demand already tagged, so a killed chat is simply remade next time
@@ -1198,7 +1232,7 @@
          (primary (and id (group-primary-chat id)))
          (chats (and id (filter chat-buffer? (group-buffers-mru id)))))
     (cond (primary
-           (group-chat-init! primary id))
+           (group-chat-init! (group-chat--heal-name! primary id) id))
           ((and chats (pair? chats))
            (let ((buf (car chats)))
              (group-chat-init! buf id)

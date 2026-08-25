@@ -7005,12 +7005,19 @@
 
 ;; the major mode carries the weight; the minor modes trail it
 (define (dash--mode-segs buf)
-  (let ((major (dashboard--mode-name (or (buffer-local buf 'mode-name) "Fundamental")))
-        (minors (or (buffer-local buf 'minor-modes) '())))
+  (let* ((major (dashboard--mode-name (or (buffer-local buf 'mode-name) "Fundamental")))
+         (minors (or (buffer-local buf 'minor-modes) '()))
+         ;; a rendered preview is a mode the reader can see. It rides
+         ;; 'render-mode, not the minor-mode list, so read it here.
+         (render (buffer-local buf 'render-mode))
+         (extra (if (and (string? render)
+                         (member render '("html" "markdown")))
+                    (list "preview")
+                    '())))
     (cons (list "dseg-strong" major)
           (map (lambda (m)
                  (list "f-dim" (string-append " · " (dashboard--mode-name m))))
-               minors))))
+               (append minors extra)))))
 
 ;; the last group is where you are; the ones before it are the path
 (define (dash--group-segs buf)

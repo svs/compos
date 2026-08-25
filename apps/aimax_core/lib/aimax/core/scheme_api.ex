@@ -260,6 +260,8 @@ defmodule Aimax.Core.SchemeAPI do
       "buffer-set-local!" => "(buffer-set-local! BUF KEY VALUE) — set a buffer-local variable.",
       "buffer-local" =>
         "(buffer-local BUF KEY) — return a buffer-local variable's value, or #f if unset.",
+      "buffer-locals" =>
+        "(buffer-locals BUF) — return ((KEY VALUE) ...) for every buffer-local, sorted by name.",
       "set-mark!" => "(set-mark! POS) — set the mark at byte POS; #f clears the mark.",
       "mark" => "(mark) — return the mark's byte offset, or #f if no mark is set.",
       "region-beginning" =>
@@ -1060,6 +1062,15 @@ defmodule Aimax.Core.SchemeAPI do
         :void
       end,
       "buffer-local" => fn [buf, k] -> Buffer.get_local(buf, plain(k)) || false end,
+      # every local at once, so a help page can show a buffer's own state.
+      # The name comes back as a symbol, the way the setter takes it.
+      "buffer-locals" => fn [buf] ->
+        buf
+        |> Buffer.locals()
+        |> Enum.map(fn {k, v} -> {to_string(k), v} end)
+        |> Enum.sort_by(fn {k, _} -> k end)
+        |> Enum.map(fn {k, v} -> [{:sym, k}, v || false] end)
+      end,
 
       # mark & region
       "set-mark!" => fn

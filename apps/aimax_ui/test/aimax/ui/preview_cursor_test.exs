@@ -51,6 +51,23 @@ defmodule Aimax.Ui.PreviewCursorTest do
     assert html =~ "#{@pt}Title"
   end
 
+  test "a heading after a paragraph renders as a heading" do
+    html = EditorLive.preview_doc("markdown", "body\n\n## Next section\n", 0, @faces, false)
+
+    assert html =~ "<p>"
+    assert html =~ "body"
+    assert html =~ "<h2>"
+    assert html =~ "Next section"
+  end
+
+  test "an unmatched inline backtick does not hide later headings" do
+    text = "A `broken code span.\n\n## Next section\n"
+    html = EditorLive.preview_doc("markdown", text, 0, @faces, false)
+
+    assert html =~ "<h2>"
+    assert html =~ "Next section"
+  end
+
   test "point inside the heading marker snaps past it" do
     html = EditorLive.preview_doc("markdown", "# Title\n", 1, @faces, false)
     assert html =~ "<h1>"

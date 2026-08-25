@@ -1232,6 +1232,27 @@ defmodule Aimax.Ui.Layouts do
                       { win: parseInt(this.el.dataset.win, 10) },
                       previewSpot(d, node, off, 0)));
                   }, true);
+                  // Clicking the preview gives keyboard focus to the iframe.
+                  // Keyboard events do not cross that browsing-context boundary,
+                  // so forward them to the editor's existing dispatcher.
+                  const forwardKey = (type, e) => {
+                    if (e.defaultPrevented) return;
+                    e.preventDefault();
+                    window.dispatchEvent(new KeyboardEvent(type, {
+                      key: e.key,
+                      code: e.code,
+                      location: e.location,
+                      ctrlKey: e.ctrlKey,
+                      altKey: e.altKey,
+                      shiftKey: e.shiftKey,
+                      metaKey: e.metaKey,
+                      repeat: e.repeat,
+                      bubbles: false,
+                      cancelable: true
+                    }));
+                  };
+                  d.addEventListener("keydown", forwardKey.bind(null, "keydown"), true);
+                  d.addEventListener("keyup", forwardKey.bind(null, "keyup"), true);
                   // A drag cannot keep its native selection: the goto above
                   // re-renders the document and the anchor node dies. So a
                   // drag extends the editor region to the caret under the

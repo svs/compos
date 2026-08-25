@@ -2063,11 +2063,48 @@ defmodule Aimax.Ui.EditorLive do
   # fence as inline code. Keep the arguments in the buffer, but hide them
   # from the preview parser so the body remains a real code block.
   defp markdown_preview_source(text) do
-    Regex.replace(
-      ~r/^([ \t]*```[ \t]*[A-Za-z0-9_+.-]+)[ \t]+(?=:[A-Za-z])[^\r\n]*$/m,
-      text,
-      "\\1"
-    )
+    text
+    |> then(fn source ->
+      Regex.replace(
+        ~r/^([ \t]*```[ \t]*[A-Za-z0-9_+.-]+)[ \t]+(?=:[A-Za-z])[^\r\n]*$/m,
+        source,
+        "\\1"
+      )
+    end)
+    |> recover_unmatched_inline_backticks()
+  end
+
+  # Earmark keeps an unmatched inline backtick open until the end of the
+  # document. Escape an unmatched delimiter so later blocks still parse.
+  # Fenced code blocks keep their backticks because they define structure.
+  defp recover_unmatched_inline_backticks(text) do
+    {parts, segment, _fenced?} =
+      text
+      |> String.split("\n", trim: false)
+      |> Enum.with_index()
+      |> Enum.reduce({[], "", false}, fn {raw_line, index}, {parts, segment, fenced?} ->
+        line = if index == 0, do: raw_line, else: "\n" <> raw_line
+
+        if Regex.match?(~r/^\s*```/, raw_line) do
+          {[recover_inline_backticks(segment), line | parts], "", not fenced?}
+        else
+          if fenced?,
+            do: {[line | parts], segment, fenced?},
+            else: {parts, segment <> line, fenced?}
+        end
+      end)
+
+    Enum.reverse([recover_inline_backticks(segment) | parts]) |> IO.iodata_to_binary()
+  end
+
+  defp recover_inline_backticks(segment) do
+    delimiters = Regex.scan(~r/(?<!`)`(?!`)/, segment)
+
+    if rem(length(delimiters), 2) == 1 do
+      Regex.replace(~r/(?<!`)`(?!`)/, segment, fn _ -> "\\`" end)
+    else
+      segment
+    end
   end
 
   defp markdown_fence_labels(text) do

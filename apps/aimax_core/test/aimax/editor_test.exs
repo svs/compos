@@ -606,11 +606,19 @@ defmodule Aimax.EditorTest do
   describe "dired (pure Scheme userland)" do
     setup do
       root = Path.join(System.tmp_dir!(), "aimax-dired-#{System.unique_integer([:positive])}")
+      trash = root <> "-trash"
       File.mkdir_p!(Path.join(root, "subdir"))
       File.write!(Path.join(root, "alpha.txt"), "A")
       File.write!(Path.join(root, "beta.txt"), "B")
-      on_exit(fn -> File.rm_rf!(root) end)
-      {:ok, root: root}
+      Application.put_env(:aimax_core, :trash_dir, trash)
+
+      on_exit(fn ->
+        Application.delete_env(:aimax_core, :trash_dir)
+        File.rm_rf!(root)
+        File.rm_rf!(trash)
+      end)
+
+      {:ok, root: root, trash: trash}
     end
 
     test "listing, navigation, visiting files and dirs", %{root: root} do
@@ -644,7 +652,10 @@ defmodule Aimax.EditorTest do
       assert Editor.current_buffer() == root
     end
 
-    test "marks: d flags, x executes with confirmation; m/u; + mkdir", %{root: root} do
+    test "marks: d flags, x executes with confirmation; m/u; + mkdir", %{
+      root: root,
+      trash: trash
+    } do
       {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
 
       # point on "..": n -> alpha.txt; d flags it (D mark, advances)
@@ -659,10 +670,11 @@ defmodule Aimax.EditorTest do
 
       # x executes the flagged deletion after confirmation
       press(["x"])
-      assert Editor.render_state().minibuffer.prompt =~ "delete 1 file"
+      assert Editor.render_state().minibuffer.prompt =~ "trash 1 file"
       type("yes")
       press(["RET"])
       refute File.exists?(Path.join(root, "alpha.txt"))
+      assert File.read!(Path.join(trash, "alpha.txt")) == "A"
       refute Buffer.text(root) =~ "alpha.txt"
 
       # + creates a directory
@@ -878,6 +890,158 @@ defmodule Aimax.EditorTest do
       assert text =~ ~r/ +subdir\/ .*drwx/m
       # the key bar says what the list does
       assert text =~ "RET visit"
+    end
+
+    test "rename refuses the parent row", %{root: root} do
+      {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
+
+      run("dired-rename")
+
+      refute Editor.render_state().minibuffer
+      assert echo() == "Select a file, not the parent row"
+      assert File.dir?(Path.dirname(root))
+    end
+
+    test "structured entries preserve exact bytes and symlinks", %{root: root} do
+      exact = Path.join(root, "exact.bin")
+      link = Path.join(root, "alpha-link")
+      unicode_dir = Path.join(root, "café")
+      File.mkdir_p!(unicode_dir)
+      File.write!(exact, :binary.copy("x", 1537))
+      File.ln_s!("alpha.txt", link)
+
+      {:ok, entries} = Aimax.Core.Session.eval(~s{(directory-entries "#{root}")})
+      assert entries =~ ~s{bytes 1537}
+      assert entries =~ ~s{type "symlink"}
+
+      assert {:ok, inspect(unicode_dir <> "/")} ==
+               Aimax.Core.Session.eval(~s{(path-directory "#{unicode_dir}/file.txt")})
+
+      {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
+      assert Buffer.text(root) =~ ~r/alpha-link .*lrw/
+
+      {:ok, _} =
+        Aimax.Core.Session.eval(~s{(dired-filter-push! (list "type" "link"))})
+
+      assert Buffer.text(root) =~ "alpha-link"
+      refute Buffer.text(root) =~ "alpha.txt"
+
+      press(["n", "d", "x"])
+      assert Editor.render_state().minibuffer.prompt =~ "trash 1 file"
+      type("yes")
+      press(["RET"])
+
+      assert {:error, :enoent} = File.lstat(link)
+      assert File.read!(Path.join(root, "alpha.txt")) == "A"
+    end
+
+    test "an unreadable path is an error view, not an empty directory", %{root: root} do
+      missing = Path.join(root, "missing")
+      {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{missing}")})
+
+      assert Buffer.text(missing) =~ "error:"
+      assert Buffer.text(missing) =~ "missing"
+    end
+
+    test "sorting, copying, chmod, and links use Dired commands", %{root: root} do
+      File.write!(Path.join(root, "largest.bin"), :binary.copy("z", 10_000))
+      {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
+
+      run("dired-sort-cycle")
+
+      assert {:ok, ~s{"alpha.txt"}} =
+               Aimax.Core.Session.eval(~s{(cadr (buffer-local "#{root}" 'list-source-entries))})
+
+      run("dired-sort-reverse")
+
+      assert {:ok, ~s{"largest.bin"}} =
+               Aimax.Core.Session.eval(~s{(cadr (buffer-local "#{root}" 'list-source-entries))})
+
+      run("dired-dirs-first")
+
+      assert {:ok, ~s{"subdir/"}} =
+               Aimax.Core.Session.eval(~s{(cadr (buffer-local "#{root}" 'list-source-entries))})
+
+      {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
+      {:ok, _} = Aimax.Core.Session.eval(~s{(list-set-query! "#{root}" "alpha.txt")})
+      press(["n"])
+      run("dired-copy")
+      type(Path.join(root, "alpha-copy.txt"))
+      press(["RET"])
+      assert File.read!(Path.join(root, "alpha-copy.txt")) == "A"
+
+      run("dired-chmod")
+      type("600")
+      press(["RET"])
+      assert Bitwise.band(File.stat!(Path.join(root, "alpha.txt")).mode, 0o777) == 0o600
+
+      run("dired-symlink")
+      type(Path.join(root, "alpha-command-link"))
+      press(["RET"])
+
+      assert File.read_link!(Path.join(root, "alpha-command-link")) ==
+               Path.join(root, "alpha.txt")
+    end
+
+    test "Git status handles spaces, Unicode, renames, and directory aggregation", %{root: root} do
+      git = fn args ->
+        {_out, 0} = System.cmd("git", args, cd: root, stderr_to_stdout: true)
+      end
+
+      File.mkdir_p!(Path.join(root, "café"))
+      File.write!(Path.join(root, "café/inside.txt"), "before")
+      git.(["init", "-q", "-b", "main"])
+      git.(["add", "-A"])
+
+      git.([
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-q",
+        "-m",
+        "initial"
+      ])
+
+      File.rename!(Path.join(root, "beta.txt"), Path.join(root, "renamed name.txt"))
+      git.(["add", "-A"])
+      File.write!(Path.join(root, "alpha.txt"), "changed")
+      File.write!(Path.join(root, "新 file.txt"), "new")
+      File.write!(Path.join(root, "café/inside.txt"), "after")
+
+      {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
+      text = Buffer.text(root)
+
+      assert text =~ ~r/alpha\.txt .*modified/
+      assert text =~ ~r/renamed name\.txt .*renamed/
+      assert text =~ ~r/新 file\.txt .*untracked/
+      assert text =~ ~r/café\/ .*modified/
+      assert text =~ "⎇ main"
+    end
+
+    test "a visible Dired buffer follows filesystem changes", %{root: root} do
+      {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
+
+      assert {:ok, "#t"} =
+               Aimax.Core.Session.eval(~s{(buffer-local "#{root}" 'dired-watch-armed)})
+
+      assert {:ok, watched} = Aimax.Core.Session.eval("(watched-paths)")
+      assert watched =~ root
+      refute {:ok, "#f"} == Aimax.Core.Session.eval(~s{(window-showing "#{root}")})
+
+      path = Path.join(root, "appeared.txt")
+      File.write!(path, "new")
+      state = :sys.get_state(Aimax.Core.Watch)
+
+      {backend, ^root} =
+        Enum.find(state.pids, fn {_pid, watched_root} -> watched_root == root end)
+
+      send(Aimax.Core.Watch, {:file_event, backend, {path, [:modified]}})
+
+      assert eventually(fn -> Buffer.text(root) =~ "appeared.txt" end)
     end
 
     test "find-file prefills default-directory; // resets (Emacs rule)", %{root: root} do

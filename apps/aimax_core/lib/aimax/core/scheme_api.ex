@@ -147,6 +147,8 @@ defmodule Aimax.Core.SchemeAPI do
         "(find-file PATH) — open the file PATH in a buffer and return the buffer name.",
       "list-dir" =>
         "(list-dir DIR) — return sorted entry names; directories carry a trailing slash.",
+      "directory-entries" =>
+        "(directory-entries DIR) — return sorted entry plists with name, type, exact bytes, mtime, size, date, and perms; return (error MSG) when DIR cannot be read.",
       "expand-path" => "(expand-path PATH) — expand PATH to an absolute path.",
       "file-stat" => "(file-stat PATH) — return (PERMS SIZE DATE) strings in dired style.",
       "url-encode" => "(url-encode S) — percent-encode S as one URL path segment.",
@@ -377,6 +379,14 @@ defmodule Aimax.Core.SchemeAPI do
         "(set-frame-group-label! NAME [FRAME]) — name the group a frame stands in, for the modeline; #f clears it. FRAME defaults to the selected one.",
       "delete-file!" =>
         "(delete-file! PATH) — delete a file or empty directory; return #t or error.",
+      "trash-file!" =>
+        "(trash-file! PATH) — move one file or directory to the user trash; return its new path.",
+      "copy-file!" =>
+        "(copy-file! SOURCE DESTINATION) — copy one file or directory without overwriting; return DESTINATION.",
+      "set-file-mode!" => "(set-file-mode! PATH MODE) — set octal MODE such as 755 on PATH.",
+      "touch-file!" => "(touch-file! PATH) — update PATH's mtime or create an empty file.",
+      "make-symlink!" =>
+        "(make-symlink! TARGET LINK) — create LINK as a symbolic link to TARGET without overwriting.",
       "buffer-rename!" =>
         "(buffer-rename! OLD NEW) — rename a buffer in place, keeping its text, point, locals and undo; return NEW, or #f if the name is taken. Policy lives in rename-buffer!.",
       "rename-file!" =>
@@ -700,6 +710,21 @@ defmodule Aimax.Core.SchemeAPI do
 
           {:error, _} ->
             []
+        end
+      end,
+      # One read supplies Dired's row data. File.lstat/2 preserves links,
+      # and exact bytes stay separate from the formatted display value.
+      "directory-entries" => fn [dir] ->
+        expanded = Path.expand(if dir == "", do: ".", else: dir)
+
+        case File.ls(expanded) do
+          {:ok, names} ->
+            names
+            |> Enum.sort()
+            |> Enum.map(&directory_entry(expanded, &1))
+
+          {:error, reason} ->
+            [{:sym, "error"}, file_error(reason, expanded)]
         end
       end,
       "expand-path" => fn [p] -> Path.expand(p) end,
@@ -1471,7 +1496,12 @@ defmodule Aimax.Core.SchemeAPI do
       "delete-file!" => fn [p] ->
         path = Path.expand(p)
 
-        result = if File.dir?(path), do: File.rmdir(path), else: File.rm(path)
+        result =
+          case File.lstat(path) do
+            {:ok, %{type: :directory}} -> File.rmdir(path)
+            {:ok, _} -> File.rm(path)
+            {:error, reason} -> {:error, reason}
+          end
 
         case result do
           :ok ->
@@ -1479,6 +1509,93 @@ defmodule Aimax.Core.SchemeAPI do
 
           {:error, reason} ->
             raise Aimax.Scheme.Eval.Error, message: "delete failed: #{reason} (#{path})"
+        end
+      end,
+      "trash-file!" => fn [p] ->
+        path = Path.expand(p)
+        trash = user_trash_dir()
+        :ok = File.mkdir_p(trash)
+        target = unused_path(Path.join(trash, Path.basename(path)))
+
+        case File.rename(path, target) do
+          :ok ->
+            target
+
+          {:error, reason} ->
+            raise Aimax.Scheme.Eval.Error,
+              message: "trash failed: #{reason} (#{path} -> #{target})"
+        end
+      end,
+      "copy-file!" => fn [source, destination] ->
+        source = Path.expand(source)
+        destination = Path.expand(destination)
+
+        cond do
+          path_present?(destination) ->
+            raise Aimax.Scheme.Eval.Error,
+              message: "copy failed: destination exists (#{destination})"
+
+          true ->
+            :ok = File.mkdir_p(Path.dirname(destination))
+
+            case File.cp_r(source, destination) do
+              {:ok, _paths} ->
+                destination
+
+              {:error, reason, failed} ->
+                raise Aimax.Scheme.Eval.Error,
+                  message: "copy failed: #{reason} (#{failed})"
+            end
+        end
+      end,
+      "set-file-mode!" => fn [p, mode] ->
+        path = Path.expand(p)
+
+        with {value, ""} <- Integer.parse(to_string(mode), 8),
+             :ok <- File.chmod(path, value) do
+          true
+        else
+          :error ->
+            raise Aimax.Scheme.Eval.Error, message: "invalid octal mode: #{mode}"
+
+          {:error, reason} ->
+            raise Aimax.Scheme.Eval.Error,
+              message: "chmod failed: #{reason} (#{path})"
+
+          {_value, _rest} ->
+            raise Aimax.Scheme.Eval.Error, message: "invalid octal mode: #{mode}"
+        end
+      end,
+      "touch-file!" => fn [p] ->
+        path = Path.expand(p)
+        :ok = File.mkdir_p(Path.dirname(path))
+
+        case File.touch(path) do
+          :ok ->
+            true
+
+          {:error, reason} ->
+            raise Aimax.Scheme.Eval.Error,
+              message: "touch failed: #{reason} (#{path})"
+        end
+      end,
+      "make-symlink!" => fn [target, link] ->
+        link = Path.expand(link)
+
+        if path_present?(link) do
+          raise Aimax.Scheme.Eval.Error,
+            message: "link failed: destination exists (#{link})"
+        else
+          :ok = File.mkdir_p(Path.dirname(link))
+
+          case File.ln_s(target, link) do
+            :ok ->
+              link
+
+            {:error, reason} ->
+              raise Aimax.Scheme.Eval.Error,
+                message: "link failed: #{reason} (#{link})"
+          end
         end
       end,
       # the buffer keeps its process, so nothing in it moves. A name that is
@@ -1951,8 +2068,101 @@ defmodule Aimax.Core.SchemeAPI do
   defp shell_async_limit,
     do: Application.get_env(:aimax_core, :shell_async_timeout_ms, 600_000)
 
+  defp directory_entry(dir, base) do
+    path = Path.join(dir, base)
+
+    case File.lstat(path, time: :posix) do
+      {:ok, stat} ->
+        name = if stat.type == :directory, do: base <> "/", else: base
+
+        [
+          {:sym, "name"},
+          name,
+          {:sym, "type"},
+          Atom.to_string(stat.type),
+          {:sym, "bytes"},
+          stat.size,
+          {:sym, "mtime"},
+          stat.mtime,
+          {:sym, "size"},
+          format_size(stat.size),
+          {:sym, "date"},
+          format_mtime(stat.mtime),
+          {:sym, "perms"},
+          format_mode(stat)
+        ]
+
+      {:error, reason} ->
+        [
+          {:sym, "name"},
+          base,
+          {:sym, "type"},
+          "missing",
+          {:sym, "bytes"},
+          0,
+          {:sym, "mtime"},
+          0,
+          {:sym, "size"},
+          "?",
+          {:sym, "date"},
+          "?",
+          {:sym, "perms"},
+          "??????????",
+          {:sym, "error"},
+          file_error(reason, path)
+        ]
+    end
+  end
+
+  defp file_error(reason, path) do
+    detail = reason |> :file.format_error() |> List.to_string()
+    "#{detail}: #{path}"
+  end
+
+  defp path_present?(path) do
+    case File.lstat(path) do
+      {:ok, _} -> true
+      {:error, :enoent} -> false
+      {:error, _} -> true
+    end
+  end
+
+  defp user_trash_dir do
+    case Application.get_env(:aimax_core, :trash_dir) do
+      nil ->
+        home = System.user_home!()
+
+        case :os.type() do
+          {:unix, :darwin} ->
+            Path.join(home, ".Trash")
+
+          _ ->
+            Path.join([
+              System.get_env("XDG_DATA_HOME") || Path.join(home, ".local/share"),
+              "Trash",
+              "files"
+            ])
+        end
+
+      dir ->
+        Path.expand(dir)
+    end
+  end
+
+  defp unused_path(path, suffix \\ 0) do
+    candidate = if suffix == 0, do: path, else: path <> ".#{suffix}"
+    if path_present?(candidate), do: unused_path(path, suffix + 1), else: candidate
+  end
+
   defp format_mode(stat) do
-    type = if stat.type == :directory, do: "d", else: "-"
+    type =
+      case stat.type do
+        :directory -> "d"
+        :symlink -> "l"
+        :regular -> "-"
+        :device -> "b"
+        _ -> "?"
+      end
 
     bits =
       [0o400, 0o200, 0o100, 0o040, 0o020, 0o010, 0o004, 0o002, 0o001]

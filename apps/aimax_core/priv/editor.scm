@@ -3211,6 +3211,7 @@
 ;; listing a dir re-fetches and caches, stat lookups ride the cache — so a
 ;; dired refresh costs one ssh call, not one per file.
 (define *remote-ls-cache* '())   ; ((dir ((name (perms size date)) ...)) ...)
+(define *remote-ls-errors* '())  ; ((dir message) ...)
 
 (define (remote-dir-key d)       ; ".../log/" -> ".../log", but keep ":/" roots
   (if (and (string-suffix? "/" d) (not (string-suffix? ":/" d)))
@@ -3224,8 +3225,17 @@
           '()
           (let ((r (remote-list-dir (car hp) (cadr hp))))
             (if (and (pair? r) (symbol? (car r)))   ; (error MSG)
-                (begin (message (cadr r)) '())
                 (begin
+                  (set! *remote-ls-errors*
+                    (cons (list dir (cadr r))
+                          (filter (lambda (e) (not (equal? (car e) dir)))
+                                  *remote-ls-errors*)))
+                  (message (cadr r))
+                  '())
+                (begin
+                  (set! *remote-ls-errors*
+                    (filter (lambda (e) (not (equal? (car e) dir)))
+                            *remote-ls-errors*))
                   (set! *remote-ls-cache*
                     (cons (list dir r)
                           (filter (lambda (c) (not (equal? (car c) dir)))
@@ -3249,6 +3259,35 @@
       (map car (remote-ls! dir))
       (local-list-dir dir)))
 
+(define local-directory-entries directory-entries)
+
+(define (remote-entry-type perms)
+  (cond ((string-prefix? "d" perms) "directory")
+        ((string-prefix? "l" perms) "symlink")
+        ((string-prefix? "-" perms) "regular")
+        (else "other")))
+
+(define (remote-entry-info entry)
+  (let* ((name (car entry))
+         (st (cadr entry))
+         (n (string->number (cadr st))))
+    (list 'name name
+          'type (remote-entry-type (car st))
+          'bytes (if (number? n) n 0)
+          'mtime 0
+          'size (cadr st)
+          'date (caddr st)
+          'perms (car st))))
+
+(define (directory-entries dir)
+  (if (remote-path? dir)
+      (let ((entries (remote-ls! dir))
+            (failure (assoc (remote-dir-key dir) *remote-ls-errors*)))
+        (if failure
+            (list 'error (cadr failure))
+            (map remote-entry-info entries)))
+      (local-directory-entries dir)))
+
 (define local-file-stat file-stat)
 (define (file-stat p0)
   (if (remote-path? p0)
@@ -3267,7 +3306,9 @@
         (let ((q (sh-quote (cadr hp))))
           ;; parity with the local primitive: files rm, dirs rmdir (empty only)
           (remote-sh! (car hp)
-            (string-append "if [ -d " q " ]; then rmdir -- " q "; else rm -- " q "; fi"))))
+            (string-append "if [ -L " q " ]; then rm -- " q
+                           "; elif [ -d " q " ]; then rmdir -- " q
+                           "; else rm -- " q "; fi"))))
       (local-delete-file! p)))
 
 (define local-make-directory! make-directory!)
@@ -3276,6 +3317,92 @@
       (let ((hp (remote-parse p)))
         (remote-sh! (car hp) (string-append "mkdir -p -- " (sh-quote (cadr hp)))))
       (local-make-directory! p)))
+
+(define local-rename-file! rename-file!)
+(define (rename-file! source destination)
+  (cond
+    ((and (remote-path? source) (remote-path? destination))
+     (let ((from (remote-parse source)) (to (remote-parse destination)))
+       (if (not (equal? (car from) (car to)))
+           (begin (message "Remote rename requires one host") #f)
+           (and (remote-sh! (car from)
+                  (string-append "mkdir -p -- "
+                                 (sh-quote (path-directory (cadr to)))
+                                 " && test ! -e " (sh-quote (cadr to))
+                                 " && mv -- " (sh-quote (cadr from))
+                                 " " (sh-quote (cadr to))))
+                destination))))
+    ((or (remote-path? source) (remote-path? destination))
+     (message "Copy between local and remote paths first")
+     #f)
+    (else (local-rename-file! source destination))))
+
+(define local-copy-file! copy-file!)
+(define (copy-file! source destination)
+  (cond
+    ((and (remote-path? source) (remote-path? destination))
+     (let ((from (remote-parse source)) (to (remote-parse destination)))
+       (if (not (equal? (car from) (car to)))
+           (begin (message "Remote copy requires one host") #f)
+           (and (remote-sh! (car from)
+                  (string-append "mkdir -p -- "
+                                 (sh-quote (path-directory (cadr to)))
+                                 " && test ! -e " (sh-quote (cadr to))
+                                 " && cp -R -- " (sh-quote (cadr from))
+                                 " " (sh-quote (cadr to))))
+                destination))))
+    ((or (remote-path? source) (remote-path? destination))
+     (message "Local and remote copy is not available")
+     #f)
+    (else (local-copy-file! source destination))))
+
+(define local-trash-file! trash-file!)
+(define (trash-file! p)
+  (if (remote-path? p)
+      (let* ((hp (remote-parse p))
+             (q (sh-quote (cadr hp))))
+        (remote-sh! (car hp)
+          (string-append
+            "trash=\"$HOME/.local/share/Trash/files\"; mkdir -p -- \"$trash\"; "
+            "base=$(basename -- " q "); target=\"$trash/$base\"; n=1; "
+            "while [ -e \"$target\" ]; do target=\"$trash/$base.$n\"; n=$((n+1)); done; "
+            "mv -- " q " \"$target\"")))
+      (local-trash-file! p)))
+
+(define local-set-file-mode! set-file-mode!)
+(define (set-file-mode! p mode)
+  (if (remote-path? p)
+      (let ((hp (remote-parse p)))
+        (remote-sh! (car hp)
+          (string-append "chmod -- " (sh-quote mode) " " (sh-quote (cadr hp)))))
+      (local-set-file-mode! p mode)))
+
+(define local-touch-file! touch-file!)
+(define (touch-file! p)
+  (if (remote-path? p)
+      (let ((hp (remote-parse p)))
+        (remote-sh! (car hp) (string-append "touch -- " (sh-quote (cadr hp)))))
+      (local-touch-file! p)))
+
+(define local-make-symlink! make-symlink!)
+(define (make-symlink! target link)
+  (cond
+    ((and (remote-path? target) (remote-path? link))
+     (let ((from (remote-parse target)) (to (remote-parse link)))
+       (if (not (equal? (car from) (car to)))
+           (begin (message "Remote link requires one host") #f)
+           (remote-sh! (car from)
+             (string-append "ln -s -- " (sh-quote (cadr from))
+                            " " (sh-quote (cadr to)))))))
+    ((remote-path? link)
+     (let ((to (remote-parse link)))
+       (remote-sh! (car to)
+         (string-append "ln -s -- " (sh-quote target)
+                        " " (sh-quote (cadr to))))))
+    ((remote-path? target)
+     (message "A local link cannot target a remote path")
+     #f)
+    (else (local-make-symlink! target link))))
 
 ;; A binary document can own its open path before find-file decodes the bytes.
 ;; Each entry is (SUFFIX OPENER). OPENER receives the normalized local path.

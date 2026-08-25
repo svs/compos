@@ -140,6 +140,18 @@ defmodule Aimax.RemoteTest do
     Session.eval(~s{(buffer-kill! "#{rp}")})
   end
 
+  test "remote Dired moves to its parent without corrupting the path", %{dir: dir} do
+    parent = Path.join(dir, "remote-parent")
+    child = Path.join(parent, "child")
+    File.mkdir_p!(child)
+
+    {:ok, _} = Session.eval(~s{(visit "#{remote(child)}")})
+    {:ok, _} = Session.eval(~s{(run-command "dired-up")})
+
+    assert Editor.current_buffer() == remote(parent)
+    assert Buffer.get_local(remote(parent), "mode-name") == "Dired"
+  end
+
   test "list-dir and file-stat work on remote paths", %{dir: dir} do
     sub = Path.join(dir, "stats")
     File.mkdir_p!(sub)
@@ -169,6 +181,39 @@ defmodule Aimax.RemoteTest do
     File.write!(file, "x")
     {:ok, _} = Session.eval(~s{(delete-file! "#{remote(file)}")})
     refute File.exists?(file)
+  end
+
+  test "structured entries and file operations keep remote parity", %{dir: dir} do
+    sub = Path.join(dir, "remote-ops")
+    File.mkdir_p!(sub)
+    source = Path.join(sub, "source.txt")
+    copy = Path.join(sub, "copy.txt")
+    moved = Path.join(sub, "moved.txt")
+    link = Path.join(sub, "link.txt")
+    touched = Path.join(sub, "touched.txt")
+    File.write!(source, "remote data")
+
+    {:ok, entries} = Session.eval(~s{(directory-entries "#{remote(sub)}")})
+    assert entries =~ ~s{bytes 11}
+    assert entries =~ ~s{type "regular"}
+
+    {:ok, _} = Session.eval(~s{(copy-file! "#{remote(source)}" "#{remote(copy)}")})
+    assert File.read!(copy) == "remote data"
+
+    {:ok, _} = Session.eval(~s{(rename-file! "#{remote(copy)}" "#{remote(moved)}")})
+    refute File.exists?(copy)
+    assert File.read!(moved) == "remote data"
+
+    {:ok, _} = Session.eval(~s{(set-file-mode! "#{remote(moved)}" "600")})
+    assert Bitwise.band(File.stat!(moved).mode, 0o777) == 0o600
+
+    {:ok, _} = Session.eval(~s{(touch-file! "#{remote(touched)}")})
+    assert File.exists?(touched)
+
+    {:ok, _} =
+      Session.eval(~s{(make-symlink! "#{remote(moved)}" "#{remote(link)}")})
+
+    assert File.read_link!(link) == moved
   end
 
   test "tail-open follows a growing local file", %{dir: dir} do

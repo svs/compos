@@ -158,6 +158,44 @@ defmodule Aimax.Ui.EditorLiveTest do
     keys(view, ["C-g"])
   end
 
+  test "which-key renders ordered modifier groups with filter metadata", %{conn: conn} do
+    buf = Aimax.Core.Editor.current_buffer()
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin
+        (local-set-key* "#{buf}" "<f9> z" "forward-char")
+        (local-set-key* "#{buf}" "<f9> a" "backward-char")
+        (local-set-key* "#{buf}" "<f9> C-z" "forward-char")
+        (local-set-key* "#{buf}" "<f9> C-a" "backward-char")
+        (local-set-key* "#{buf}" "<f9> M-a" "backward-char"))
+      """)
+
+    {:ok, view, _} = live(conn, "/")
+    html = keys(view, ["<f9>"])
+
+    assert html =~ "Hold a modifier · / filters commands"
+    assert html =~ ~s(data-modifiers="")
+    assert html =~ ~s(data-modifiers="C")
+    assert html =~ ~s(data-modifiers="M")
+    assert html =~ ~s(data-command="forward-char")
+    assert html =~ ~s(data-command="backward-char")
+    assert html =~ ~s(class="wk-empty" hidden)
+    assert html =~ ~r/class="wk-count" data-total="\d+"/
+
+    {unmodified, _} = :binary.match(html, ">Unmodified<")
+    {control, _} = :binary.match(html, ">Control<")
+    {meta, _} = :binary.match(html, ">Meta<")
+    {plain_a, _} = :binary.match(html, ">a</span>")
+    {plain_z, _} = :binary.match(html, ">z</span>")
+    {control_a, _} = :binary.match(html, ">C-a</span>")
+    {control_z, _} = :binary.match(html, ">C-z</span>")
+
+    assert unmodified < control and control < meta
+    assert plain_a < plain_z and control_a < control_z
+    keys(view, ["C-g"])
+  end
+
   test "window splits render as a tree", %{conn: conn} do
     {:ok, view, _} = live(conn, "/")
     html = keys(view, ["C-x", "3"])

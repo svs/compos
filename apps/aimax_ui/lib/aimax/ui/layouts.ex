@@ -821,18 +821,57 @@ defmodule Aimax.Ui.Layouts do
             background: var(--window-bg, #fdfcf8);
             border-top: 2px solid var(--accent-fg, #26356b);
             padding: 10px 14px 12px;
+            max-height: 44vh;
+            overflow-y: auto;
             animation: rise 120ms ease-out;
           }
           .wk-title {
+            display: flex; justify-content: space-between; gap: 18px;
             font-family: var(--font-mono); font-size: 10px;
             letter-spacing: 0.14em; text-transform: uppercase;
             color: var(--dim-fg, #8a857a); padding-bottom: 8px;
           }
-          .wk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 4px 22px; }
-          .wk-item { display: flex; align-items: baseline; gap: 8px; font-family: var(--font-mono); font-size: 12px; }
-          .wk-key { color: var(--accent-fg, #26356b); font-weight: 600; min-width: 34px; }
-          .wk-arrow { color: var(--linenum-fg, #b3ac9c); }
-          .wk-cmd { color: var(--dim-fg, #57534a); }
+          .wk-filter { letter-spacing: 0.04em; text-transform: none; }
+          .wk-groups { display: flex; flex-direction: column; gap: 10px; }
+          .wk-group[hidden] { display: none; }
+          .wk-item[hidden] { display: none; }
+          .wk-empty {
+            padding: 10px 0 3px;
+            color: var(--dim-fg, #8a857a);
+            font-family: var(--font-mono); font-size: 12px;
+          }
+          .wk-group-title {
+            display: flex; align-items: baseline; gap: 7px;
+            margin: 0 0 4px; padding-bottom: 3px;
+            border-bottom: 1px solid var(--border, #e2dbc9);
+            color: var(--accent-fg, #26356b);
+            font-family: var(--font-mono); font-size: 11px;
+            letter-spacing: 0.08em; text-transform: uppercase;
+          }
+          .wk-group-title span {
+            color: var(--dim-fg, #8a857a); font-size: 9px; font-weight: 400;
+          }
+          .wk-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 3px 22px;
+          }
+          .wk-item {
+            display: grid; grid-template-columns: minmax(8ch, auto) 1fr;
+            align-items: baseline; gap: 8px;
+            min-width: 0; font-family: var(--font-mono); font-size: 12px;
+          }
+          .wk-key {
+            justify-self: start;
+            min-width: 3ch; padding: 1px 5px;
+            border: 1px solid var(--border, #d8d0c0); border-radius: 3px;
+            background: var(--select-bg, #e7e9f1);
+            color: var(--accent-fg, #26356b); font-weight: 700;
+          }
+          .wk-cmd {
+            min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+            color: var(--dim-fg, #57534a);
+          }
         </style>
       </head>
       <body>
@@ -885,6 +924,22 @@ defmodule Aimax.Ui.Layouts do
             if (e.ctrlKey) spec = "C-" + spec;
             if (e.metaKey) spec = "s-" + spec; // s- = super = Cmd
             return spec;
+          }
+
+          const WHICH_KEY_MODIFIERS = {
+            "Control": "C", "Alt": "M", "Shift": "S", "Meta": "s"
+          };
+          const WHICH_KEY_MODIFIER_LABELS = {
+            "C": "Control", "M": "Meta", "S": "Shift", "s": "Super"
+          };
+
+          function heldWhichKeyModifiers(e) {
+            const held = [];
+            if (e.ctrlKey) held.push("C");
+            if (e.altKey) held.push("M");
+            if (e.shiftKey) held.push("S");
+            if (e.metaKey) held.push("s");
+            return held;
           }
 
           // The column a visual-line move keeps while it walks rows, and the
@@ -1350,6 +1405,52 @@ defmodule Aimax.Ui.Layouts do
                 if (this.bootCheck()) return;
                 this.handleEvent("navigate", ({url}) => window.location.assign(url));
                 this.visualLinePending = false;
+                this.whichKeyHeld = new Set();
+                this.whichKeyQuery = "";
+                this.whichKeyFiltering = false;
+                this.applyWhichKeyFilter = () => {
+                  const panel = document.querySelector(".which-key");
+                  if (!panel) {
+                    this.whichKeyQuery = "";
+                    this.whichKeyFiltering = false;
+                    return;
+                  }
+                  const held = Array.from(this.whichKeyHeld);
+                  const terms = this.whichKeyQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
+                  let visible = 0;
+                  panel.querySelectorAll(".wk-group").forEach((group) => {
+                    const groupModifiers = (group.dataset.modifiers || "").split(" ").filter(Boolean);
+                    const modifierMatch = held.length === 0 ||
+                      held.every((modifier) => groupModifiers.includes(modifier));
+                    let groupVisible = 0;
+                    group.querySelectorAll(".wk-item").forEach((item) => {
+                      const command = item.dataset.command || "";
+                      item.hidden = !terms.every((term) => command.includes(term));
+                      if (!item.hidden) groupVisible++;
+                    });
+                    group.hidden = !modifierMatch || groupVisible === 0;
+                    if (modifierMatch) visible += groupVisible;
+                  });
+                  const hint = panel.querySelector(".wk-filter");
+                  if (hint) {
+                    const query = this.whichKeyQuery;
+                    hint.textContent = this.whichKeyFiltering
+                      ? "/ " + query + "▏ · RET applies · ESC clears"
+                      : query
+                        ? "Command: " + query + " · / edits · ESC clears"
+                        : held.length === 0
+                          ? "Hold a modifier · / filters commands"
+                          : "Showing " + held.map((modifier) =>
+                              WHICH_KEY_MODIFIER_LABELS[modifier]).join(" + ");
+                  }
+                  const count = panel.querySelector(".wk-count");
+                  const total = count ? parseInt(count.dataset.total, 10) : 0;
+                  const filtered = terms.length > 0 || held.length > 0;
+                  if (count) count.textContent = filtered ? visible + " / " + total + " bindings"
+                    : total + " bindings";
+                  const empty = panel.querySelector(".wk-empty");
+                  if (empty) empty.hidden = visible > 0;
+                };
                 this.syncCursorFocus = () => {
                   const focused = document.hasFocus() && !document.body.classList.contains("unfocused");
                   document.querySelectorAll(".window iframe[data-rm='markdown']").forEach((frame) => {
@@ -1551,6 +1652,59 @@ defmodule Aimax.Ui.Layouts do
                   return "";
                 };
                 this.handler = (e) => {
+                  const panel = document.querySelector(".which-key");
+                  const modifier = WHICH_KEY_MODIFIERS[e.key];
+                  if (modifier && panel && !this.whichKeyFiltering) {
+                    e.preventDefault();
+                    this.whichKeyHeld.add(modifier);
+                    this.applyWhichKeyFilter();
+                    return;
+                  }
+                  if (modifier && panel && this.whichKeyFiltering) {
+                    e.preventDefault();
+                    return;
+                  }
+                  if (panel && e.key === "/" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+                    e.preventDefault();
+                    this.whichKeyFiltering = true;
+                    this.whichKeyHeld.clear();
+                    this.applyWhichKeyFilter();
+                    return;
+                  }
+                  if (panel && this.whichKeyFiltering) {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      this.whichKeyFiltering = false;
+                      this.applyWhichKeyFilter();
+                      return;
+                    }
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      this.whichKeyQuery = "";
+                      this.whichKeyFiltering = false;
+                      this.applyWhichKeyFilter();
+                      return;
+                    }
+                    if (e.key === "Backspace") {
+                      e.preventDefault();
+                      this.whichKeyQuery = this.whichKeyQuery.slice(0, -1);
+                      this.applyWhichKeyFilter();
+                      return;
+                    }
+                    if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+                      e.preventDefault();
+                      this.whichKeyQuery += e.key.toLowerCase();
+                      this.applyWhichKeyFilter();
+                      return;
+                    }
+                  }
+                  if (panel && this.whichKeyQuery && e.key === "Escape") {
+                    e.preventDefault();
+                    this.whichKeyQuery = "";
+                    this.applyWhichKeyFilter();
+                    return;
+                  }
+                  this.whichKeyHeld = new Set(heldWhichKeyModifiers(e));
                   // Cmd-C with no native selection: copy the editor region
                   // (with one, the browser's own copy handles it)
                   if (e.metaKey && !e.ctrlKey && !e.altKey && e.key === "c" &&
@@ -1582,6 +1736,11 @@ defmodule Aimax.Ui.Layouts do
                 };
                 window.addEventListener("keydown", this.handler);
                 this.keyupH = (e) => {
+                  const modifier = WHICH_KEY_MODIFIERS[e.key];
+                  if (modifier) {
+                    this.whichKeyHeld.delete(modifier);
+                    this.applyWhichKeyFilter();
+                  }
                   if (e.key === "ArrowUp" || e.key === "ArrowDown" ||
                       (e.ctrlKey && (e.key === "n" || e.key === "p"))) {
                     this.visualLinePending = false;
@@ -1811,6 +1970,8 @@ defmodule Aimax.Ui.Layouts do
                 document.body.appendChild(this.sink);
 
                 this.blurH = () => {
+                  this.whichKeyHeld.clear();
+                  this.applyWhichKeyFilter();
                   const el = document.activeElement;
                   // an app window is the one iframe that KEEPS the keyboard:
                   // its text fields and its keys are the point of it. C-g in
@@ -1852,6 +2013,7 @@ defmodule Aimax.Ui.Layouts do
               updated() {
                 if (this.bootCheck()) return;
                 this.visualLinePending = false;
+                this.applyWhichKeyFilter();
                 this.syncCursorFocus();
                 // re-measure after every patch: splits, buffer switches and
                 // per-buffer styles all change how many rows fit where

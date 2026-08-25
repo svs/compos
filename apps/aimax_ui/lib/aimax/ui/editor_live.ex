@@ -734,6 +734,15 @@ defmodule Aimax.Ui.EditorLive do
 
   # --- rendering -------------------------------------------------------------
 
+  defp which_key_groups(bindings) do
+    bindings
+    |> Enum.chunk_by(& &1.modifiers)
+    |> Enum.map(fn group ->
+      first = hd(group)
+      {first.modifier_label, first.modifiers, group}
+    end)
+  end
+
   @impl true
   # the disconnected mount is not a client: it attaches no frame and
   # renders a neutral splash — the connected mount replaces it (S14)
@@ -768,13 +777,28 @@ defmodule Aimax.Ui.EditorLive do
         <.tree node={@state.tree} active={@state.active} completion={@state.completion} />
       </div>
       <div :if={@state.which_key && @state.minibuffer == nil && @state.transient == nil} class="which-key">
-        <div class="wk-title">{Enum.join(@state.pending, " ")} —  {length(@state.which_key)} bindings</div>
-        <div class="wk-grid">
-          <div :for={w <- @state.which_key} class="wk-item">
-            <span class="wk-key">{w.key}</span>
-            <span class="wk-arrow">→</span>
-            <span class="wk-cmd">{w.command}</span>
-          </div>
+        <div class="wk-title">
+          <span>
+            {Enum.join(@state.pending, " ")} —
+            <span class="wk-count" data-total={length(@state.which_key)}>
+              {length(@state.which_key)} bindings
+            </span>
+          </span>
+          <span class="wk-filter" aria-live="polite">Hold a modifier · / filters commands</span>
+        </div>
+        <div class="wk-groups">
+          <%= for {label, modifiers, bindings} <- which_key_groups(@state.which_key) do %>
+            <section class="wk-group" data-modifiers={Enum.join(modifiers, " ")}>
+              <h3 class="wk-group-title">{label}<span>{length(bindings)}</span></h3>
+              <div class="wk-grid">
+                <div :for={w <- bindings} class="wk-item" data-command={String.downcase(w.command)}>
+                  <span class="wk-key">{w.key}</span>
+                  <span class="wk-cmd">{w.command}</span>
+                </div>
+              </div>
+            </section>
+          <% end %>
+          <div class="wk-empty" hidden>No matching commands</div>
         </div>
       </div>
       <%= if @state.minibuffer do %>

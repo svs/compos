@@ -1745,10 +1745,56 @@ defmodule Aimax.Core.Editor do
     |> Enum.flat_map(&Map.to_list/1)
     |> Enum.filter(fn {seq, _} -> List.starts_with?(seq, f.pending) and seq != f.pending end)
     |> Enum.map(fn {seq, cmd} ->
-      %{key: Enum.join(Enum.drop(seq, length(f.pending)), " "), command: cmd}
+      keys = Enum.drop(seq, length(f.pending))
+      {modifiers, base} = which_key_modifiers(hd(keys))
+
+      %{
+        key: Enum.join(keys, " "),
+        command: cmd,
+        modifiers: modifiers,
+        modifier_label: which_key_modifier_label(modifiers),
+        sort_key: [String.downcase(base) | tl(keys)]
+      }
     end)
     |> Enum.uniq_by(& &1.key)
-    |> Enum.sort_by(& &1.key)
+    |> Enum.sort_by(fn item ->
+      unmodified = if item.modifiers == [], do: 0, else: 1
+      {unmodified, item.modifier_label, item.sort_key, item.key}
+    end)
+    |> Enum.map(&Map.delete(&1, :sort_key))
+  end
+
+  @which_key_modifier_order ~w(C M S s)
+  @which_key_shifted_printable ~w(! @ # $ % ^ & * \( \) _ + { } | : " < > ? ~)
+
+  defp which_key_modifiers(key) do
+    {explicit, base} = take_key_modifiers(key, [])
+
+    shifted =
+      String.length(base) == 1 and
+        (base in @which_key_shifted_printable or String.downcase(base) != base)
+
+    modifiers = if shifted, do: ["S" | explicit], else: explicit
+    {Enum.filter(@which_key_modifier_order, &(&1 in modifiers)), base}
+  end
+
+  defp take_key_modifiers(<<modifier::binary-size(1), "-", rest::binary>>, found)
+       when modifier in @which_key_modifier_order,
+       do: take_key_modifiers(rest, [modifier | found])
+
+  defp take_key_modifiers(key, found), do: {found, key}
+
+  defp which_key_modifier_label([]), do: "Unmodified"
+
+  defp which_key_modifier_label(modifiers) do
+    modifiers
+    |> Enum.map(fn
+      "C" -> "Control"
+      "M" -> "Meta"
+      "S" -> "Shift"
+      "s" -> "Super"
+    end)
+    |> Enum.join(" + ")
   end
 
   # --- tree helpers ----------------------------------------------------------

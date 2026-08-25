@@ -2491,6 +2491,47 @@ defmodule Aimax.EditorTest do
     assert Editor.render_state().which_key == nil
   end
 
+  test "the which-key panel groups modifiers and sorts each group alphabetically", %{buf: buf} do
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin
+        (local-set-key* "#{buf}" "<f9> z" "forward-char")
+        (local-set-key* "#{buf}" "<f9> a" "backward-char")
+        (local-set-key* "#{buf}" "<f9> C-z" "forward-char")
+        (local-set-key* "#{buf}" "<f9> C-a" "backward-char")
+        (local-set-key* "#{buf}" "<f9> C-A" "beginning-of-line")
+        (local-set-key* "#{buf}" "<f9> M-z" "forward-char")
+        (local-set-key* "#{buf}" "<f9> M-a" "backward-char")
+        (local-set-key* "#{buf}" "<f9> Z" "end-of-line")
+        (local-set-key* "#{buf}" "<f9> A" "beginning-of-line")
+        (local-set-key* "#{buf}" "<f9> s-a" "beginning-of-buffer"))
+      """)
+
+    press(["<f9>"])
+
+    test_keys = ["a", "z", "C-a", "C-z", "C-A", "M-a", "M-z", "A", "Z", "s-a"]
+
+    ordered =
+      Editor.render_state().which_key
+      |> Enum.filter(&(&1.key in test_keys))
+      |> Enum.map(fn item -> {item.modifier_label, item.modifiers, item.key} end)
+
+    assert ordered == [
+             {"Unmodified", [], "a"},
+             {"Unmodified", [], "z"},
+             {"Control", ["C"], "C-a"},
+             {"Control", ["C"], "C-z"},
+             {"Control + Shift", ["C", "S"], "C-A"},
+             {"Meta", ["M"], "M-a"},
+             {"Meta", ["M"], "M-z"},
+             {"Shift", ["S"], "A"},
+             {"Shift", ["S"], "Z"},
+             {"Super", ["s"], "s-a"}
+           ]
+
+    press(["C-g"])
+  end
+
   test "themes are pure scheme: load-theme sets semantic faces" do
     {:ok, _} = Aimax.Core.Session.eval(~s{(load-theme "tokyo-night")})
     faces = Editor.render_state().faces

@@ -2334,7 +2334,11 @@
             (lambda ()
               (let ((mode (buffer-local buf 'mode-name)))
                 (when mode (set-mode! mode)))
-              (restore-minor-modes! buf))))))))
+              (restore-minor-modes! buf)))))))
+  ;; The modeline is derived state. Rebuild it here so a restored desktop
+  ;; shows its top line and its short name before the first command runs.
+  (when (boundp (quote dashboard--sync!))
+    (dashboard--sync! buf)))
 
 ;;; Visual lines are a buffer capability, independent of the major mode.
 ;;; The client measures rendered rows; this minor mode owns the durable flag.
@@ -7050,10 +7054,18 @@
 ;; The modeline names the buffer the short way: project coordinates inside
 ;; a project, "~" for the home directory outside one. The buffer name keeps
 ;; the absolute path, and the modeline's tooltip still says it.
+;; A buffer with no file can still name one: "*chat:/Users/me/notes.md*".
+;; Write the home directory as ~ wherever it appears in the name.
+(define (abbreviate-home-in text)
+  (let ((home (getenv "HOME")))
+    (if (and (string? text) (string? home) (> (string-length home) 1))
+        (string-join (string-split text home) "~")
+        text)))
+
 (define (buffer-modeline-name buf)
   (let ((path (buffer-path buf))
         (root (buffer-project-root buf)))
-    (cond ((not (string? path)) buf)
+    (cond ((not (string? path)) (abbreviate-home-in buf))
           ((and (string? root) (not (equal? root ""))
                 (string-prefix? (string-append root "/") path))
            (substring path (+ 1 (string-length root)) (string-length path)))
@@ -7063,9 +7075,13 @@
   (desktop-skip! buf 'dashboard-line)
   (desktop-skip! buf 'dashboard-line-blocks)
   (desktop-skip! buf 'modeline-name)
+  (desktop-skip! buf 'modeline-project)
   (buffer-set-local! buf 'dashboard-line (dashboard-one-line buf))
   (buffer-set-local! buf 'dashboard-line-blocks (dashboard-line-blocks buf))
-  (buffer-set-local! buf 'modeline-name (buffer-modeline-name buf)))
+  (buffer-set-local! buf 'modeline-name (buffer-modeline-name buf))
+  ;; the project stands beside the name: the name says where in the
+  ;; project, the project says which one
+  (buffer-set-local! buf 'modeline-project (buffer-project-label buf)))
 
 ;; The fingerprint reads locals only — never the live tool surface. It
 ;; runs after every command, and asking the surface there would start
@@ -7106,9 +7122,13 @@
     (dashboard--sync! buf)
     (list-post-command! buf)
     ;; a list on screen shows what is, not what was: the command may have
-    ;; killed a buffer the list beside it still names
+    ;; killed a buffer the list beside it still names. Every visible
+    ;; buffer keeps its own modeline, so an inactive window says the truth
+    ;; without waiting for you to visit it.
     (for-each (lambda (w)
-                (unless (equal? (cadr w) buf) (list-post-command! (cadr w))))
+                (unless (equal? (cadr w) buf)
+                  (list-post-command! (cadr w))
+                  (dashboard--sync! (cadr w))))
               (window-list))
     (when (buffer-local buf 'modeline-expanded)
       (let ((fp (dash--fingerprint buf)))

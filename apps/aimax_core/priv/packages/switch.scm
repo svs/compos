@@ -131,6 +131,38 @@
 (define (switch-ann e)
   (if (and (> (length e) 1) (string? (nth 1 e))) (nth 1 e) ""))
 
+;; File buffers are named by their absolute path. Showing that as the row
+;; label and then repeating marginalia's path in the detail cell wastes the
+;; wide part of the switcher while truncating the one thing a person needs:
+;; the filename. Keep the candidate itself untouched (selection and matching
+;; still use the absolute path), but give the row a short, non-repeating face.
+(define (switch-buffer-label name)
+  (let ((path (buffer-path name)))
+    (if (and (string? path) (not (equal? path "")))
+        (cadr (path-split path))
+        name)))
+
+(define (switch-parent-label path)
+  (let* ((dir (car (path-split path)))
+         (n (string-length dir))
+         (bare (if (and (> n 1)
+                        (equal? (substring dir (- n 1) n) "/"))
+                   (substring dir 0 (- n 1))
+                   dir)))
+    (cond ((equal? bare "") "")
+          ((equal? bare "/") "/")
+          (else (cadr (path-split bare))))))
+
+(define (switch-buffer-detail name)
+  (let* ((path (buffer-path name))
+         (mode (or (buffer-local name 'mode-name) "Fundamental"))
+         (parent (if (and (string? path) (not (equal? path "")))
+                     (switch-parent-label path)
+                     "")))
+    (if (equal? parent "")
+        mode
+        (string-append mode "  ·  " parent))))
+
 ;; a container's 4th element is its member chips; a file row's is its
 ;; root — only a list answers as chips
 (define (switch-chips e)
@@ -154,8 +186,12 @@
       ((buffer-known? name)
        (list (if (and (buffer-exists? name) (buffer-modified? name))
                  (list "●" "warn") "")
-             (list name (if (string-prefix? "*" name) "accent" #f))
-             (list ann "faint")))
+             (list (switch-buffer-label name)
+                   (if (string-prefix? "*" name) "accent" #f))
+             (list (if (buffer-path name)
+                       (switch-buffer-detail name)
+                       ann)
+                   "faint")))
       ;; a seam row — a browser tab
       (else (list "" (list name "accent") (list ann "dim"))))))
 
@@ -528,8 +564,8 @@
     'stamp (lambda (buf) (length (buffer-list-mru)))
     'columns (lambda (buf)
                (list (list "" 1)
-                     (list "buffer" 34)
-                     (list "" #f)))
+                     (list "buffer" #f)
+                     (list "details" 24)))
     'cells switch-cells
     'title (lambda (buf)
              (let ((view (or (buffer-local buf 'switch-view) 'buffers)))

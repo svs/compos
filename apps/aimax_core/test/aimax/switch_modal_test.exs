@@ -131,6 +131,36 @@ defmodule Aimax.SwitchModalTest do
     press(["ESC"])
   end
 
+  test "file rows show the complete filename once, without repeating its path" do
+    root = Path.join(System.tmp_dir!(), "switch-row-#{System.unique_integer([:positive])}")
+    filename = "A complete and deliberately long filename for the switcher.txt"
+    path = Path.join(root, filename)
+    File.mkdir_p!(root)
+    File.write!(path, "switch row\n")
+
+    on_exit(fn ->
+      Aimax.Core.kill_buffer(path)
+      File.rm_rf!(root)
+    end)
+
+    {:ok, _} =
+      Session.eval(~s{(begin
+        (find-file "#{path}")
+        (switch-to-buffer! "*zz-mc*")
+        (switch-open! 'buffers)
+        #t)})
+
+    type("deliberately long")
+    text = Buffer.text(@switch)
+
+    assert text =~ filename
+    assert length(String.split(text, filename)) == 2, "filename is repeated in the row"
+    refute text =~ path
+    assert text =~ "Fundamental"
+
+    press(["ESC"])
+  end
+
   test "moving the highlight previews into the home window; ESC puts it back" do
     home = open_switcher()
 

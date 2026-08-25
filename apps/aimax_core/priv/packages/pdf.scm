@@ -78,6 +78,7 @@
         " -layout " (sh-quote path) " - 2>/dev/null"))))
 
 (define *pdf-file-exists?* file-exists?)
+(define *pdf-working-copy-exists?* file-exists?)
 
 (define (pdf--command-succeeded? output)
   (and output (string-contains? output "AIMAX_PDF_OK")))
@@ -402,13 +403,18 @@
                           'ascent top 'descent (max 0 (- bottom)) 'unit "pt"))))))))
 
 (define (pdf-insert-text path0 page x baseline-y text &optional font0 size0)
-  "Insert positioned text into a new timestamped sibling PDF."
-  (let* ((source (expand-path path0))
+  "Insert text into one generated working PDF."
+  (let* ((requested (expand-path path0))
          (font (or font0 "Helvetica"))
          (size (or size0 12))
-         (destination (pdf--generated-path source)))
-    (cond ((not (*pdf-file-exists?* source))
-           (list 'error (string-append "No PDF at " source)))
+         (destination (pdf--working-path requested))
+         (source
+           (if (and (not (equal? requested destination))
+                    (*pdf-working-copy-exists?* destination))
+               destination
+               requested)))
+    (cond ((not (*pdf-file-exists?* requested))
+           (list 'error (string-append "No PDF at " requested)))
           ((or (not (number? page)) (< page 1))
            (list 'error "PDF page must be a positive number"))
           ((or (not (number? x)) (not (number? baseline-y)))
@@ -457,16 +463,18 @@
 (define (pdf--generated-path source)
   (let* ((parts (path-split source))
          (dir (car parts))
-         (stem (pdf--pdf-stem (cadr parts)))
-         (stamp (format-time (current-time) "%Y%m%d-%H%M%S"))
-         (prefix (string-append dir stem "-edited-" stamp)))
-    (let loop ((number 1))
-      (let ((candidate
-              (string-append prefix
-                (if (= number 1) ""
-                    (string-append "-" (number->string number)))
-                ".pdf")))
-        (if (file-exists? candidate) (loop (+ number 1)) candidate)))))
+         (stem (pdf--pdf-stem (cadr parts))))
+    (string-append dir stem "-edited.pdf")))
+
+(define (pdf--generated-copy? path)
+  (re-match?
+    "-edited(\\.pdf|-[0-9]{8}-[0-9]{6}(-[0-9]+)?\\.pdf)$"
+    (pdf--basename path)))
+
+(define (pdf--working-path source)
+  ;; The first edit protects the original with a generated sibling. Later
+  ;; edits replace that sibling atomically instead of creating name chains.
+  (if (pdf--generated-copy? source) source (pdf--generated-path source)))
 
 (define (pdf--undo-path path)
   (string-append (aimax-home) "/pdf-edit-undo/"
@@ -491,6 +499,11 @@
 
 (define (pdf--dark? buf)
   (if (buffer-local buf 'pdf-dark?) #t #f))
+
+(define (pdf--buffer-path buf)
+  ;; A normal file buffer owns one canonical path. Synthetic PDF buffers store
+  ;; pdf-path because they do not have a file association.
+  (or (buffer-path buf) (buffer-local buf 'pdf-path)))
 
 (define (pdf--action verb label key)
   (string-append
@@ -599,7 +612,7 @@
   (with-current-buffer buf (lambda () (goto-char! 0))))
 
 (define (pdf--render! buf recount?)
-  (let ((path (buffer-local buf 'pdf-path))
+  (let ((path (pdf--buffer-path buf))
         (original (buffer-local buf 'pdf-original-path))
         (dark? (pdf--dark? buf)))
     (if (not (and path (*pdf-file-exists?* path)))
@@ -794,6 +807,9 @@
               (message "Could not reset the generated PDF copy"))))))
 
 (define (pdf-reader-setup! buf)
+  ;; Old reader versions copied a file buffer's path into pdf-path. Keep the
+  ;; file association as the single source for ordinary PDF buffers.
+  (when (buffer-path buf) (buffer-set-local! buf 'pdf-path #f))
   (buffer-set-local! buf 'transient #t)
   (buffer-set-local! buf 'preview-renderer "html")
   (buffer-set-local! buf 'render-mode "html")
@@ -807,6 +823,8 @@
   (local-set-key* buf "<left>" "pdf-previous-page")
   (local-set-key* buf "SPC" "pdf-next-page")
   (local-set-key* buf "DEL" "pdf-previous-page")
+  (local-set-key* buf "<next>" "pdf-next-page")
+  (local-set-key* buf "<prior>" "pdf-previous-page")
   (local-set-key* buf "<home>" "pdf-first-page")
   (local-set-key* buf "<end>" "pdf-last-page")
   (local-set-key* buf "+" "pdf-zoom-in")
@@ -845,12 +863,14 @@
 
 (define (pdf-edit-open source0)
   (let* ((source (expand-path source0))
-         (destination (pdf--generated-path source))
+         (destination (pdf--working-path source))
          (zoom (pdf--zoom (current-buffer)))
          (dark? (pdf--dark? (current-buffer))))
     (if (not (*pdf-file-exists?* source))
         (begin (message (string-append "No PDF at " source)) #f)
-        (if (not (*pdf-copy-file!* source destination))
+        (if (not (or (equal? source destination)
+                     (*pdf-working-copy-exists?* destination)
+                     (*pdf-copy-file!* source destination)))
             (begin (message "Could not create a generated PDF copy") #f)
             (let ((buf (pdf--edit-buffer-name destination)))
               (buffer-create buf)
@@ -886,13 +906,32 @@
   (lambda ()
     (let* ((buf (current-buffer))
            (already (buffer-local buf 'pdf-original-path))
-           (source (buffer-local buf 'pdf-path)))
+           (source (pdf--buffer-path buf)))
       (cond (already
               (message (string-append "Already editing generated copy · " source)))
             (source (pdf-edit-open source))
             (else (read-file-name "PDF file to edit: " pdf-edit-open))))))
 
-(register-file-opener! ".pdf" pdf-open)
+(define (pdf--register-auto-mode!)
+  (set! *auto-mode-alist*
+    (cons '(".pdf" "pdf-reader-mode")
+          (filter
+            (lambda (entry)
+              (not (equal? (string-downcase (car entry)) ".pdf")))
+            *auto-mode-alist*)))
+  ;; A package reload can happen after find-file creates a PDF buffer. Apply
+  ;; the new default now instead of waiting for that buffer to reopen.
+  (for-each
+    (lambda (buf)
+      (let ((path (buffer-path buf)))
+        (when (and path
+                   (string-suffix? ".pdf" (string-downcase path))
+                   (*pdf-file-exists?* path))
+          (with-current-buffer buf
+            (lambda () (set-mode! "pdf-reader-mode"))))))
+    (buffer-list)))
+
+(pdf--register-auto-mode!)
 
 (on-preview-link! "pdf"
   (lambda (verb)
@@ -926,8 +965,8 @@
   "(pdf-measure-font FONT SIZE TEXT) -> width and ink metrics in points; FONT is a PDF base-font name")
 (catalog-meta! 'function "pdf-measure-font" 'domain 'documents 'effects '(execute))
 (public! 'pdf-insert-text
-  "(pdf-insert-text PATH PAGE X BASELINE-Y TEXT [FONT] [SIZE]) -> generated sibling path; coordinates are PDF points from top-left")
+  "(pdf-insert-text PATH PAGE X BASELINE-Y TEXT [FONT] [SIZE]) -> one working-copy path; the first edit creates it and later edits update it")
 (catalog-meta! 'function "pdf-insert-text" 'domain 'documents 'effects '(read write execute))
 (public! 'pdf-insert-text-after
-  "(pdf-insert-text-after PATH QUERY TEXT [GAP] [FONT] [SIZE]) -> generated sibling path after the first matching line")
+  "(pdf-insert-text-after PATH QUERY TEXT [GAP] [FONT] [SIZE]) -> one working-copy path after the first matching line")
 (catalog-meta! 'function "pdf-insert-text-after" 'domain 'documents 'effects '(read write execute))

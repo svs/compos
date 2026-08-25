@@ -22,6 +22,7 @@ defmodule Aimax.Core.PdfReaderTest do
         (define zz-pdf-render-page *pdf-render-page*)
         (define zz-pdf-page-text *pdf-page-text*)
         (define zz-pdf-file-exists *pdf-file-exists?*)
+        (define zz-pdf-working-copy-exists *pdf-working-copy-exists?*)
         (define zz-pdf-copy-file *pdf-copy-file!*)
         (define zz-pdf-edit-pages *pdf-edit-pages!*)
         (define zz-pdf-undo-edit *pdf-undo-edit!*)
@@ -40,6 +41,11 @@ defmodule Aimax.Core.PdfReaderTest do
       (set! *pdf-page-text*
         (lambda (path page) (string-append "Text for page " (number->string page))))
       (set! *pdf-file-exists?* (lambda (path) #t))
+      (set! *pdf-working-copy-exists?*
+        (lambda (path)
+          (if (or (member path (map cadr zz-pdf-writes))
+                  (member path (map cadr zz-pdf-copies)))
+              #t #f)))
       (set! *pdf-copy-file!*
         (lambda (source destination)
           (set! zz-pdf-copies (cons (list source destination) zz-pdf-copies))
@@ -77,6 +83,7 @@ defmodule Aimax.Core.PdfReaderTest do
         (set! *pdf-render-page* zz-pdf-render-page)
         (set! *pdf-page-text* zz-pdf-page-text)
         (set! *pdf-file-exists?* zz-pdf-file-exists)
+        (set! *pdf-working-copy-exists?* zz-pdf-working-copy-exists)
         (set! *pdf-copy-file!* zz-pdf-copy-file)
         (set! *pdf-edit-pages!* zz-pdf-edit-pages)
         (set! *pdf-undo-edit!* zz-pdf-undo-edit)
@@ -99,12 +106,13 @@ defmodule Aimax.Core.PdfReaderTest do
     :ok
   end
 
-  test "visit opens a PDF as a rendered reader before binary decoding" do
+  test "visit opens a PDF as a rendered reader" do
     eval!(~S|(visit "/tmp/reader-guide.PDF")|)
     buf = Editor.current_buffer()
 
     assert Buffer.get_local(buf, "mode-name") == "pdf-reader-mode"
-    assert Buffer.get_local(buf, "pdf-path") == "/tmp/reader-guide.PDF"
+    assert Buffer.path(buf) == "/tmp/reader-guide.PDF"
+    refute Buffer.get_local(buf, "pdf-path")
     assert Buffer.get_local(buf, "pdf-page") == 1
     assert Buffer.get_local(buf, "pdf-total") == 3
     assert Buffer.get_local(buf, "render-mode") == "html"
@@ -115,6 +123,39 @@ defmodule Aimax.Core.PdfReaderTest do
     assert Buffer.text(buf) =~ ~s(class="control-group")
     assert Buffer.text(buf) =~ "Text for page 1"
     assert Buffer.text(buf) =~ "data:image/png;base64,aGVsbG8="
+  end
+
+  test "mode setup uses the path of an existing PDF file buffer" do
+    eval!(~S"""
+    (begin
+      (switch-to-buffer! (find-file "/tmp/direct-mode.PdF"))
+      (auto-mode "/tmp/direct-mode.PdF"))
+    """)
+
+    buf = Editor.current_buffer()
+    assert Buffer.get_local(buf, "mode-name") == "pdf-reader-mode"
+    assert Buffer.path(buf) == "/tmp/direct-mode.PdF"
+    refute Buffer.get_local(buf, "pdf-path")
+    assert Buffer.get_local(buf, "pdf-total") == 3
+    assert Buffer.text(buf) =~ "Page 1 of 3"
+    assert Buffer.text(buf) =~ "data:image/png;base64,aGVsbG8="
+    refute Buffer.text(buf) =~ "Missing PDF"
+  end
+
+  test "package registration upgrades an existing PDF file buffer" do
+    eval!(~S"""
+    (begin
+      (switch-to-buffer! (find-file "/tmp/already-open.pdf"))
+      (set-mode! "text-mode")
+      (buffer-set-local! (current-buffer) 'pdf-path "/tmp/stale-copy.pdf")
+      (pdf--register-auto-mode!))
+    """)
+
+    buf = Editor.current_buffer()
+    assert Buffer.get_local(buf, "mode-name") == "pdf-reader-mode"
+    assert Buffer.path(buf) == "/tmp/already-open.pdf"
+    refute Buffer.get_local(buf, "pdf-path")
+    assert Buffer.text(buf) =~ "Page 1 of 3"
   end
 
   test "mode keys navigate pages and change zoom through key dispatch" do
@@ -135,6 +176,14 @@ defmodule Aimax.Core.PdfReaderTest do
 
     press("p")
     assert Buffer.get_local(buf, "pdf-page") == 2
+
+    press("<next>")
+    assert Buffer.get_local(buf, "pdf-page") == 3
+    assert Buffer.text(buf) =~ "Text for page 3"
+
+    press("<prior>")
+    assert Buffer.get_local(buf, "pdf-page") == 2
+    assert Buffer.text(buf) =~ "Text for page 2"
   end
 
   test "dark page mode follows key dispatch and keeps the editor palette" do
@@ -202,7 +251,7 @@ defmodule Aimax.Core.PdfReaderTest do
     assert Buffer.get_local(buf, "pdf-zoom") == 125
   end
 
-  test "pdf-edit-mode creates a timestamped sibling and preserves the original path" do
+  test "pdf-edit-mode creates one stable sibling and preserves the original path" do
     eval!(~S|(visit "/tmp/edit-source.pdf")|)
     eval!(~S|(run-command "pdf-edit-mode")|)
     buf = Editor.current_buffer()
@@ -212,10 +261,22 @@ defmodule Aimax.Core.PdfReaderTest do
     assert Buffer.get_local(buf, "mode-name") == "pdf-edit-mode"
     assert Buffer.get_local(buf, "pdf-original-path") == "/tmp/edit-source.pdf"
     assert destination != "/tmp/edit-source.pdf"
-    assert destination =~ ~r|^/tmp/edit-source-edited-\d{8}-\d{6}(?:-\d+)?\.pdf$|
+    assert destination == "/tmp/edit-source-edited.pdf"
     assert eval!("(length zz-pdf-copies)") == "1"
     assert Buffer.text(buf) =~ "Editing generated copy"
     assert Buffer.text(buf) =~ "Original remains unchanged: /tmp/edit-source.pdf"
+  end
+
+  test "reopening pdf-edit-mode reuses its existing working copy" do
+    eval!(~S|(pdf-edit-open "/tmp/reopen-source.pdf")|)
+    first = Buffer.get_local(Editor.current_buffer(), "pdf-path")
+
+    eval!(~S|(pdf-edit-open "/tmp/reopen-source.pdf")|)
+    second = Buffer.get_local(Editor.current_buffer(), "pdf-path")
+
+    assert first == "/tmp/reopen-source-edited.pdf"
+    assert second == first
+    assert eval!("(length zz-pdf-copies)") == "1"
   end
 
   test "edit keys structurally change only the generated copy" do
@@ -304,10 +365,10 @@ defmodule Aimax.Core.PdfReaderTest do
              "0.3"
   end
 
-  test "positioned text insertion writes only a timestamped sibling" do
+  test "positioned text insertion writes one stable sibling" do
     result = eval!(~S|(pdf-insert-text "/tmp/form.pdf" 1 240 148 "Jane Doe" "Helvetica" 14)|)
 
-    assert result =~ ~r|^"/tmp/form-edited-\d{8}-\d{6}(?:-\d+)?\.pdf"$|
+    assert result == ~S["/tmp/form-edited.pdf"]
     assert eval!("(length zz-pdf-writes)") == "1"
     assert eval!("(car (car zz-pdf-writes))") == ~S["/tmp/form.pdf"]
     assert eval!("(nth 2 (car zz-pdf-writes))") == "1"
@@ -317,6 +378,33 @@ defmodule Aimax.Core.PdfReaderTest do
     assert eval!("(nth 6 (car zz-pdf-writes))") == ~S["Helvetica"]
     assert eval!("(nth 7 (car zz-pdf-writes))") == "14"
     refute result == ~S["/tmp/form.pdf"]
+  end
+
+  test "later text insertions update the existing generated copy" do
+    eval!(~S"""
+    (begin
+      (define zz-pdf-first-working
+        (pdf-insert-text "/tmp/repeated-form.pdf" 1 240 148 "Jane"))
+      (define zz-pdf-second-working
+        (pdf-insert-text "/tmp/repeated-form.pdf" 1 280 148 "Doe")))
+    """)
+
+    first = eval!("zz-pdf-first-working")
+    assert first == ~S["/tmp/repeated-form-edited.pdf"]
+    assert eval!("zz-pdf-second-working") == first
+    assert eval!("(length zz-pdf-writes)") == "2"
+    assert eval!("(car (car zz-pdf-writes))") == first
+    assert eval!("(cadr (car zz-pdf-writes))") == first
+  end
+
+  test "an old chained filename is updated without adding another suffix" do
+    chained =
+      "/tmp/form-edited-20260825-120000-edited-20260825-120100-edited-20260825-120200.pdf"
+
+    result = eval!(~s|(pdf-insert-text "#{chained}" 1 240 148 "Jane Doe")|)
+
+    assert result == inspect(chained)
+    assert eval!("(cadr (car zz-pdf-writes))") == inspect(chained)
   end
 
   test "text can be inserted after the first located line" do

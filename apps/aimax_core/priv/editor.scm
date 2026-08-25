@@ -3320,10 +3320,14 @@
   (when (and g (group-resolve-id g))
     (buffer-add-group! (current-buffer) g)))
 
+(define find-file-prefix-action (lambda () #f))
+
 (define-command "find-file" "Visit a file, prompting with filename completion"
   (lambda ()
-    (let ((g (buffer-group (current-buffer))))
-      (read-file-name "Find file: " (lambda (p) (visit-in-group p g))))))
+    (if (current-prefix-arg)
+        (find-file-prefix-action)
+        (let ((g (buffer-group (current-buffer))))
+          (read-file-name "Find file: " (lambda (p) (visit-in-group p g)))))))
 
 ;; the project a buffer belongs to, as a short name for the prompt.
 ;; project.scm supplies the real answer through this seam (dup #6);
@@ -6600,6 +6604,51 @@
         (load path)
         (message (string-append "Loaded " path))))))
 
+(domain! 'interaction)
+(effects! '(write))
+
+(define (prefix-numeric-value raw)
+  (cond ((number? raw) raw)
+        ((and (pair? raw) (number? (car raw))) (car raw))
+        ((equal? raw '-) -1)
+        (else 1)))
+
+(define-command "universal-argument" "Start or multiply the next command's prefix argument"
+  (lambda ()
+    (let ((raw (current-prefix-arg)))
+      (set-prefix-arg!
+        (cond ((number? raw) (list (* raw 4)))
+              ((and (pair? raw) (number? (car raw))) (list (* (car raw) 4)))
+              ((equal? raw '-) (list -4))
+              (else (list 4)))))))
+
+(define-command "digit-argument" "Add a digit to the next command's prefix argument"
+  (lambda ()
+    (let* ((raw (current-prefix-arg))
+           (digit (string->number (car (reverse (last-keys)))))
+           (negative? (or (equal? raw '-) (and (number? raw) (< raw 0))))
+           (base (if (number? raw) (abs raw) 0))
+           (value (+ (* base 10) digit)))
+      (set-prefix-arg! (if negative? (- value) value)))))
+
+(define-command "negative-argument" "Negate the next command's prefix argument"
+  (lambda ()
+    (let ((raw (current-prefix-arg)))
+      (set-prefix-arg!
+        (cond ((number? raw) (- raw))
+              ((equal? raw '-) 1)
+              (else '-))))))
+
+(undo-exempt! "universal-argument")
+(undo-exempt! "digit-argument")
+(undo-exempt! "negative-argument")
+
+(public! 'prefix-numeric-value
+  "(prefix-numeric-value RAW) -> RAW as an integer; #f becomes 1")
+
+(domain! 'unknown)
+(effects! '(unknown))
+
 (define-command "keyboard-quit" "Quit the current operation and clear the mark"
   (lambda ()
     (set-mark! #f)
@@ -6902,6 +6951,7 @@
 (global-set-key "C-_" "undo")
 (global-set-key "C-x u" "undo")
 (global-set-key "C-g" "keyboard-quit")
+(global-set-key "C-u" "universal-argument")
 ;; ESC is Meta (dispatch translates unbound ESC k to M-k); a doubled ESC
 ;; quits, the Emacs way
 (global-set-key "ESC ESC" "keyboard-quit")

@@ -135,6 +135,7 @@ loader; call `namespace!` only when the public vocabulary differs.
 - Verify UI changes in a real browser, screenshot, then commit.
 - Use subagents for verification sweeps to keep context clean.
 - Emacs is the reference: copy its semantics unless there's a reason not to.
+- When the user names an Emacs feature, implement its shared mechanism. Do not imitate only the named key sequence.
 
 ## Layout
 

@@ -14,6 +14,7 @@ defmodule Aimax.Core.KeyDispatch do
   alias Aimax.Core.{Buffer, Editor, Frame, Session}
 
   @named ~w(RET DEL TAB SPC ESC <delete> <left> <right> <up> <down> <home> <end>)
+  @prefix_commands ~w(universal-argument digit-argument negative-argument)
 
   @doc """
   Dispatch a key for a frame: stamps the frame context so every Editor and
@@ -44,7 +45,7 @@ defmodule Aimax.Core.KeyDispatch do
       mb -> minibuffer_key(key, mb, pending)
       completion -> completion_key(key, pending)
       transient -> transient_key(key, pending)
-      true -> buffer_key(key, pending)
+      true -> buffer_key(key, pending, Map.get(snapshot, :prefix_arg))
     end
 
     :ok
@@ -161,14 +162,27 @@ defmodule Aimax.Core.KeyDispatch do
     end
   end
 
-  defp buffer_key(key, pending) do
+  defp buffer_key(key, pending), do: buffer_key(key, pending, Editor.prefix_arg())
+
+  defp buffer_key(key, pending, prefix_arg) do
     # a key ends any manual-scroll override: the view follows point again
     Editor.user_acted()
     Editor.set_echo("")
 
-    resolve_and_run(key, pending, fn seq ->
-      Editor.set_echo(Enum.join(seq, " ") <> " is undefined")
-    end)
+    if prefix_arg != nil and pending == [] and argument_key?(key) do
+      Editor.set_last_keys([key])
+      run(if(key == "-", do: "negative-argument", else: "digit-argument"))
+    else
+      resolve_and_run(
+        key,
+        pending,
+        fn seq ->
+          Editor.set_prefix_arg(nil)
+          Editor.set_echo(Enum.join(seq, " ") <> " is undefined")
+        end,
+        prefix_arg
+      )
+    end
   end
 
   # THE lookup ladder (dup #21) — every surface resolves a key the same
@@ -176,7 +190,7 @@ defmodule Aimax.Core.KeyDispatch do
   # through. A command runs; a prefix accumulates and echoes; anything
   # else clears the prefix, self-inserts a printable, and otherwise defers
   # to UNDEFINED — the one point where the surfaces differ.
-  defp resolve_and_run(key, pending, undefined) do
+  defp resolve_and_run(key, pending, undefined, prefix_arg \\ nil) do
     seq = pending ++ [key]
 
     case lookup_esc_meta(seq) do
@@ -199,8 +213,8 @@ defmodule Aimax.Core.KeyDispatch do
         Editor.set_pending([])
 
         cond do
-          pending == [] and key == "SPC" -> self_insert(" ")
-          pending == [] and printable?(key) -> self_insert(key)
+          pending == [] and key == "SPC" -> self_insert(" ", prefix_arg)
+          pending == [] and printable?(key) -> self_insert(key, prefix_arg)
           true -> undefined.(seq)
         end
     end
@@ -259,10 +273,17 @@ defmodule Aimax.Core.KeyDispatch do
     end
   end
 
-  defp self_insert(text) do
-    case Buffer.insert(Editor.current_buffer(), text) do
-      :ok -> Editor.set_last_command("self-insert-command")
-      {:error, :read_only} -> Editor.set_echo("Buffer is read-only")
+  defp self_insert(text, prefix_arg \\ nil) do
+    count = prefix_numeric_value(prefix_arg)
+    inserted = if count > 0, do: String.duplicate(text, count), else: ""
+
+    case Buffer.insert(Editor.current_buffer(), inserted) do
+      :ok ->
+        Editor.finish_command("self-insert-command", false)
+
+      {:error, :read_only} ->
+        Editor.finish_command("self-insert-command", false)
+        Editor.set_echo("Buffer is read-only")
     end
   end
 
@@ -276,9 +297,35 @@ defmodule Aimax.Core.KeyDispatch do
     end
 
     case Session.run_command(name) do
-      :ok -> Editor.set_last_command(name)
-      {:error, msg} -> Editor.set_echo("#{name}: #{msg}")
+      :ok ->
+        keep_prefix = name in @prefix_commands
+        Editor.finish_command(name, keep_prefix)
+        if keep_prefix, do: show_prefix_arg()
+
+      {:error, msg} ->
+        Editor.finish_command(name, false)
+        Editor.set_echo("#{name}: #{msg}")
     end
+  end
+
+  defp argument_key?(key), do: key in ~w(0 1 2 3 4 5 6 7 8 9 -)
+
+  defp prefix_numeric_value(nil), do: 1
+  defp prefix_numeric_value([n]) when is_integer(n), do: n
+  defp prefix_numeric_value(n) when is_integer(n), do: n
+  defp prefix_numeric_value({:sym, "-"}), do: -1
+  defp prefix_numeric_value(_), do: 1
+
+  defp show_prefix_arg do
+    text =
+      case Editor.prefix_arg() do
+        [n] -> "C-u #{n}"
+        n when is_integer(n) -> Integer.to_string(n)
+        {:sym, "-"} -> "-"
+        _ -> "C-u"
+      end
+
+    Editor.set_echo(text)
   end
 
   defp printable?(key) do

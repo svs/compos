@@ -215,6 +215,47 @@
 
 (define (project-dired-input? f) (or (equal? f ".") (equal? f "./")))
 
+;;; Project grouping is an ordered policy table. Each rule is
+;;; (NAME PREDICATE RESOLVER). The first matching predicate wins, and its
+;;; resolver returns a group name, a group ID, or #f. With no match, the
+;;; project root names its group. User config can prepend a narrow rule and
+;;; remove it by name while iterating on grouping policy.
+(unless (boundp '*project-grouping-rules*)
+  (set-symbol-value! '*project-grouping-rules* '()))
+
+(define (add-project-grouping-rule! name predicate resolver)
+  (set! *project-grouping-rules*
+    (cons (list name predicate resolver)
+          (remove (lambda (rule) (equal? (car rule) name))
+                  *project-grouping-rules*)))
+  name)
+
+(define (remove-project-grouping-rule! name)
+  (set! *project-grouping-rules*
+    (remove (lambda (rule) (equal? (car rule) name))
+            *project-grouping-rules*))
+  name)
+
+(define (project-group-target root)
+  (let loop ((rules *project-grouping-rules*))
+    (cond ((null? rules) root)
+          (((nth 1 (car rules)) root) ((nth 2 (car rules)) root))
+          (else (loop (cdr rules))))))
+
+(define (project-enter-group-as! root target)
+  (let ((id (and target (group-ensure-record! target))))
+    (when id
+      (for-each (lambda (buf)
+                  (when (and (not (buffer-group buf))
+                             (equal? (buffer-project-root buf) root))
+                    (buffer-add-group! buf id)))
+                (buffer-list))
+      (switch-to-group! id))
+    id))
+
+(define (project-enter-group! root)
+  (project-enter-group-as! root (project-group-target root)))
+
 ;; git ls-files does not list an ignored file, and it cannot list a file
 ;; that does not exist yet. Both are real answers to "which file", so the
 ;; prompt reads the disk as well: the directory you type into leads, its
@@ -265,7 +306,7 @@
               (list 'confirm
                 (lambda (f)
                   (if (project-dired-input? f)
-                      (dired-open root)
+                      (visit-in-group root g)
                       ;; the file opens in the current group, like find-file
                       (visit-in-group (string-append root "/" f) g)))))))))
 
@@ -277,25 +318,61 @@
           (project-find-file-in root)
           (message "Not in a project (no .git above)")))))
 
+(define (project-switch-project-read explicit-group?)
+  (let ((projects (known-projects)))
+    (if (null? projects)
+        (message "No known projects yet — visit a file in one first")
+        ;; the current project leads: the first option in a switch
+        ;; prompt is the place you are in
+        (let* ((cur (project-current))
+               (ordered (history-order 'project projects))
+               (ordered (if (and cur (member cur ordered))
+                            (cons cur (remove (lambda (p) (equal? p cur))
+                                              ordered))
+                            ordered)))
+          (minibuffer-read "Switch to project: "
+            (map (lambda (p) (list p (project-name p))) ordered)
+            (lambda (p)
+              (if explicit-group?
+                  (group-read-or-create! "Switch project to group: "
+                    (lambda (g)
+                      (history-push! 'project p)
+                      (project-enter-group-as! p g)
+                      (project-find-file-in p)))
+                  (begin
+                    (history-push! 'project p)
+                    (project-enter-group! p)
+                    (project-find-file-in p)))))))))
+
 (define-command "project-switch-project"
-  "Pick a known project, then find a file in it"
+  "Enter a known project's group, then find a file in it"
+  (lambda () (project-switch-project-read (current-prefix-arg))))
+
+(define-command "project-switch-project-in-group"
+  "Choose a project, then choose or create its destination group"
+  (lambda () (project-switch-project-read #t)))
+
+(define-command "find-file-in-group"
+  "Choose or create a group, switch to it, then visit a file"
   (lambda ()
-    (let ((projects (known-projects)))
-      (if (null? projects)
-          (message "No known projects yet — visit a file in one first")
-          ;; the current project leads: the first option in a switch
-          ;; prompt is the place you are in
-          (let* ((cur (project-current))
-                 (ordered (history-order 'project projects))
-                 (ordered (if (and cur (member cur ordered))
-                              (cons cur (remove (lambda (p) (equal? p cur))
-                                                ordered))
-                              ordered)))
-            (minibuffer-read "Switch to project: "
-              (map (lambda (p) (list p (project-name p))) ordered)
-              (lambda (p)
-                (history-push! 'project p)
-                (project-find-file-in p))))))))
+    (group-read-or-create! "Switch file to group: "
+      (lambda (g)
+        (switch-to-group! g)
+        (read-file-name "Find file: "
+          (lambda (path) (visit-in-group path g)))))))
+
+(define-command "dired-in-group"
+  "Choose or create a group, switch to it, then open a directory"
+  (lambda ()
+    (group-read-or-create! "Switch Dired to group: "
+      (lambda (g)
+        (switch-to-group! g)
+        (read-file-name "Dired (directory): "
+          (lambda (path)
+            (visit-in-group (normalize-file-input path) g)))))))
+
+(set! find-file-prefix-action
+  (lambda () (run-command "find-file-in-group")))
 
 (define-command "project-dired"
   "Open dired at the current project's root"
@@ -394,6 +471,9 @@
 (global-set-key "C-x p d" "project-dired")
 (global-set-key "C-x p g" "project-ripgrep")
 (global-set-key "C-x p k" "project-kill-all")
+(global-set-key "C-x C-g f" "find-file-in-group")
+(global-set-key "C-x C-g d" "dired-in-group")
+(global-set-key "C-x C-g p" "project-switch-project-in-group")
 
 (category! 'project)
 (catalog-meta! 'command "project-kill-all" 'domain 'project 'effects '(destroy))
@@ -407,6 +487,21 @@
 (catalog-meta! 'function "project-search-matches" 'domain 'project 'effects '(read execute))
 (public! 'project-open-files
   "(project-open-files ROOT) -> paths of ROOT's open buffers, relative, MRU first")
+(public! 'add-project-grouping-rule!
+  "(add-project-grouping-rule! NAME PREDICATE RESOLVER) — prepend a project-to-group rule")
+(catalog-meta! 'function "add-project-grouping-rule!" 'domain 'project 'effects '(write))
+(public! 'remove-project-grouping-rule!
+  "(remove-project-grouping-rule! NAME) — remove one project grouping rule")
+(catalog-meta! 'function "remove-project-grouping-rule!" 'domain 'project 'effects '(write))
+(public! 'project-group-target
+  "(project-group-target ROOT) -> the first rule's group name, group ID, or #f")
+(catalog-meta! 'function "project-group-target" 'domain 'project 'effects '(read))
+(public! 'project-enter-group!
+  "(project-enter-group! ROOT) — resolve, create, and enter the project's group")
+(catalog-meta! 'function "project-enter-group!" 'domain 'project 'effects '(write))
+(public! 'project-enter-group-as!
+  "(project-enter-group-as! ROOT GROUP) — add project buffers and enter GROUP")
+(catalog-meta! 'function "project-enter-group-as!" 'domain 'project 'effects '(write))
 (public! 'known-projects "Project roots the editor has seen")
 (public! 'project-ripgrep-in
   "(project-ripgrep-in ROOT PATTERN) — ripgrep ROOT, then pick a match with preview")

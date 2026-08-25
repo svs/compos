@@ -123,6 +123,319 @@ defmodule Aimax.ProjectSearchTest do
   end
 
   describe "project-find-file candidates" do
+    test "project-switch-project enters the selected project's group", %{root: root} do
+      mail = "zz-ps-mail-#{System.unique_integer([:positive])}"
+
+      eval!(~s{
+        (begin
+          (buffer-create "#{mail}")
+          (buffer-add-group! "#{mail}" (group-ensure-record! "#{mail}"))
+          (switch-to-buffer! "#{mail}")
+          (switch-to-group! "#{mail}")
+          (project-remember! "#{root}"))})
+
+      on_exit(fn ->
+        eval!(~s{
+          (begin
+            (let ((mail-id (group-resolve-id "#{mail}"))
+                  (project-id (group-resolve-id "#{root}")))
+              (when mail-id (group-record-delete! mail-id))
+              (when project-id (group-record-delete! project-id)))
+            #t)})
+
+        Aimax.Core.kill_buffer(mail)
+      end)
+
+      press(["C-x", "p", "p"])
+      press(String.graphemes(root))
+      press("RET")
+      press("RET")
+
+      assert eval!("(current-buffer)") == ~s{"#{root}"}
+      assert eval!("(group-name (frame-group))") == ~s{"#{root}"}
+      assert eval!("(buffer-in-group? (current-buffer) (frame-group))") == "#t"
+    end
+
+    test "project-switch-project with a prefix can create an explicit destination", %{root: root} do
+      source = "zz-ps-prefix-source-#{System.unique_integer([:positive])}"
+      target = "zz-ps-prefix-target-#{System.unique_integer([:positive])}"
+
+      eval!(~s{
+        (begin
+          (buffer-create "#{source}")
+          (buffer-add-group! "#{source}" (group-ensure-record! "#{source}"))
+          (switch-to-buffer! "#{source}")
+          (switch-to-group! "#{source}")
+          (project-remember! "#{root}"))})
+
+      on_exit(fn ->
+        eval!(~s{
+          (begin
+            (for-each
+              (lambda (name)
+                (let ((id (group-resolve-id name)))
+                  (when id (group-record-delete! id))))
+              (list "#{source}" "#{target}" "#{root}"))
+            #t)})
+
+        Aimax.Core.kill_buffer(source)
+      end)
+
+      press(["C-u", "C-x", "p", "p"])
+      assert Editor.render_state().minibuffer.prompt == "Switch to project: "
+
+      press(String.graphemes(root))
+      press("RET")
+      assert Editor.render_state().minibuffer.prompt == "Switch project to group: "
+
+      press(String.graphemes(target))
+      press("RET")
+      assert Editor.render_state().minibuffer.prompt == "Find file in #{Path.basename(root)}: "
+
+      press("RET")
+
+      assert eval!("(current-buffer)") == ~s{"#{root}"}
+      assert eval!("(group-name (frame-group))") == ~s{"#{target}"}
+      assert eval!(~s{(buffer-in-group? "#{root}" "#{target}")}) == "#t"
+      assert eval!(~s{(group-resolve-id "#{target}")}) != "#f"
+      assert eval!(~s{(group-resolve-id "#{root}")}) == "#f"
+    end
+
+    test "cancelling the explicit group choice preserves the current group", %{root: root} do
+      source = "zz-ps-prefix-cancel-#{System.unique_integer([:positive])}"
+      target = "zz-ps-prefix-unused-#{System.unique_integer([:positive])}"
+
+      eval!(~s{
+        (begin
+          (buffer-create "#{source}")
+          (buffer-add-group! "#{source}" (group-ensure-record! "#{source}"))
+          (group-ensure-record! "#{target}")
+          (switch-to-buffer! "#{source}")
+          (switch-to-group! "#{source}")
+          (project-remember! "#{root}"))})
+
+      on_exit(fn ->
+        eval!(~s{
+          (begin
+            (for-each
+              (lambda (name)
+                (let ((id (group-resolve-id name)))
+                  (when id (group-record-delete! id))))
+              (list "#{source}" "#{target}" "#{root}"))
+            #t)})
+
+        Aimax.Core.kill_buffer(source)
+      end)
+
+      press(["C-u", "C-x", "p", "p"])
+      press(String.graphemes(root))
+      press(["RET", "C-g"])
+
+      refute Editor.render_state().minibuffer
+      assert eval!("(current-buffer)") == ~s{"#{source}"}
+      assert eval!("(group-name (frame-group))") == ~s{"#{source}"}
+      assert eval!(~s{(group-resolve-id "#{root}")}) == "#f"
+    end
+
+    test "find-file-in-group creates and switches to a new chosen group before visiting", %{
+      root: root
+    } do
+      source = "zz-ps-find-source-#{System.unique_integer([:positive])}"
+      target = "zz-ps-find-target-#{System.unique_integer([:positive])}"
+      path = Path.join(root, "top.txt")
+
+      eval!(~s{
+        (begin
+          (buffer-create "#{source}")
+          (buffer-add-group! "#{source}" (group-ensure-record! "#{source}"))
+          (switch-to-buffer! "#{source}")
+          (switch-to-group! "#{source}"))})
+
+      on_exit(fn ->
+        eval!(~s{
+          (begin
+            (for-each
+              (lambda (name)
+                (let ((id (group-resolve-id name)))
+                  (when id (group-record-delete! id))))
+              (list "#{source}" "#{target}"))
+            #t)})
+
+        Aimax.Core.kill_buffer(source)
+      end)
+
+      press(["C-u", "C-x", "C-f"])
+      assert Editor.render_state().minibuffer.prompt == "Switch file to group: "
+
+      press(String.graphemes(target))
+      press("RET")
+      assert Editor.render_state().minibuffer.prompt == "Find file: "
+      assert eval!("(group-name (frame-group))") == ~s{"#{target}"}
+
+      press(String.graphemes(path))
+      press("RET")
+
+      assert eval!("(current-buffer)") == ~s{"#{path}"}
+      assert eval!(~s{(group-resolve-id "#{target}")}) != "#f"
+      assert eval!(~s{(buffer-in-group? "#{path}" "#{target}")}) == "#t"
+    end
+
+    test "dired-in-group creates its destination and keeps an existing membership", %{
+      root: root
+    } do
+      source = "zz-ps-dired-source-#{System.unique_integer([:positive])}"
+      other = "zz-ps-dired-other-#{System.unique_integer([:positive])}"
+      target = "zz-ps-dired-target-#{System.unique_integer([:positive])}"
+
+      eval!(~s{
+        (begin
+          (visit-in-group "#{root}" (group-ensure-record! "#{other}"))
+          (buffer-create "#{source}")
+          (buffer-add-group! "#{source}" (group-ensure-record! "#{source}"))
+          (switch-to-buffer! "#{source}")
+          (switch-to-group! "#{source}")
+          (global-set-key "<f9> d" "dired-in-group"))})
+
+      on_exit(fn ->
+        eval!(~s{
+          (begin
+            (for-each
+              (lambda (name)
+                (let ((id (group-resolve-id name)))
+                  (when id (group-record-delete! id))))
+              (list "#{source}" "#{other}" "#{target}"))
+            #t)})
+
+        Aimax.Core.kill_buffer(source)
+      end)
+
+      press(["<f9>", "d"])
+      assert Editor.render_state().minibuffer.prompt == "Switch Dired to group: "
+
+      press(String.graphemes(target))
+      press("RET")
+      assert Editor.render_state().minibuffer.prompt == "Dired (directory): "
+      assert eval!("(group-name (frame-group))") == ~s{"#{target}"}
+
+      press(String.graphemes(root))
+      press("RET")
+
+      assert eval!("(current-buffer)") == ~s{"#{root}"}
+      assert eval!(~s{(buffer-in-group? "#{root}" "#{other}")}) == "#t"
+      assert eval!(~s{(buffer-in-group? "#{root}" "#{target}")}) == "#t"
+    end
+
+    test "project-switch-project-in-group creates the chosen destination", %{root: root} do
+      source = "zz-ps-command-source-#{System.unique_integer([:positive])}"
+      target = "zz-ps-command-target-#{System.unique_integer([:positive])}"
+
+      eval!(~s{
+        (begin
+          (buffer-create "#{source}")
+          (buffer-add-group! "#{source}" (group-ensure-record! "#{source}"))
+          (switch-to-buffer! "#{source}")
+          (switch-to-group! "#{source}")
+          (project-remember! "#{root}")
+          (global-set-key "<f9> p" "project-switch-project-in-group"))})
+
+      on_exit(fn ->
+        eval!(~s{
+          (begin
+            (for-each
+              (lambda (name)
+                (let ((id (group-resolve-id name)))
+                  (when id (group-record-delete! id))))
+              (list "#{source}" "#{target}" "#{root}"))
+            #t)})
+
+        Aimax.Core.kill_buffer(source)
+      end)
+
+      press(["<f9>", "p"])
+      press(String.graphemes(root))
+      press("RET")
+      assert Editor.render_state().minibuffer.prompt == "Switch project to group: "
+
+      press(String.graphemes(target))
+      press(["RET", "RET"])
+
+      assert eval!("(current-buffer)") == ~s{"#{root}"}
+      assert eval!("(group-name (frame-group))") == ~s{"#{target}"}
+      assert eval!(~s{(buffer-in-group? "#{root}" "#{target}")}) == "#t"
+    end
+
+    test "project-switch-project preserves an existing Dired buffer's other group", %{root: root} do
+      other = "zz-ps-other-#{System.unique_integer([:positive])}"
+
+      eval!(~s{
+        (begin
+          (switch-to-group! (group-ensure-record! "#{other}"))
+          (visit-in-group "#{root}" (frame-group))
+          (project-remember! "#{root}"))})
+
+      on_exit(fn ->
+        eval!(~s{
+          (begin
+            (let ((other-id (group-resolve-id "#{other}"))
+                  (project-id (group-resolve-id "#{root}")))
+              (when other-id (group-record-delete! other-id))
+              (when project-id (group-record-delete! project-id)))
+            #t)})
+      end)
+
+      press(["C-x", "p", "p"])
+      press(String.graphemes(root))
+      press(["RET", "RET"])
+
+      assert eval!("(group-name (frame-group))") == ~s{"#{root}"}
+      assert eval!(~s{(buffer-in-group? "#{root}" "#{root}")}) == "#t"
+      assert eval!(~s{(buffer-in-group? "#{root}" "#{other}")}) == "#t"
+    end
+
+    test "a project grouping rule can override the destination group", %{root: root} do
+      source = "zz-ps-source-#{System.unique_integer([:positive])}"
+      target = "zz-ps-target-#{System.unique_integer([:positive])}"
+      rule = "zz-ps-route-#{System.unique_integer([:positive])}"
+
+      eval!(~s{
+        (begin
+          (buffer-create "#{source}")
+          (buffer-add-group! "#{source}" (group-ensure-record! "#{source}"))
+          (group-ensure-record! "#{target}")
+          (switch-to-buffer! "#{source}")
+          (switch-to-group! "#{source}")
+          (add-project-grouping-rule! "#{rule}"
+            (lambda (candidate) (equal? candidate "#{root}"))
+            (lambda (candidate) "#{target}"))
+          (project-remember! "#{root}"))})
+
+      project_package = Application.app_dir(:aimax_core, "priv/packages/project.scm")
+      assert {:ok, 1} = Session.reload_files([project_package])
+      assert eval!(~s{(project-group-target "#{root}")}) == ~s{"#{target}"}
+
+      on_exit(fn ->
+        eval!(~s{
+          (begin
+            (remove-project-grouping-rule! "#{rule}")
+            (for-each
+              (lambda (name)
+                (let ((id (group-resolve-id name)))
+                  (when id (group-record-delete! id))))
+              (list "#{source}" "#{target}" "#{root}"))
+            #t)})
+
+        Aimax.Core.kill_buffer(source)
+      end)
+
+      press(["C-x", "p", "p"])
+      press(String.graphemes(root))
+      press(["RET", "RET"])
+
+      assert eval!("(group-name (frame-group))") == ~s{"#{target}"}
+      assert eval!(~s{(buffer-in-group? "#{root}" "#{target}")}) == "#t"
+      assert eval!(~s{(group-resolve-id "#{root}")}) == "#f"
+    end
+
     test "the root comes first, then directories, open files, and the rest", %{root: root} do
       eval!(~s{(visit "#{root}/lib/b.txt")})
 

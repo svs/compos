@@ -1185,6 +1185,17 @@
                (message (string-append "Group " name " already exists")))
               (else (receive name)))))))
 
+;; Read one existing group, or create the typed name. Commands use this
+;; reader when the group is their destination rather than their subject.
+(define (group-read-or-create! prompt receive)
+  (minibuffer-read prompt (group-names)
+    (lambda (input)
+      (let ((name (string-trim input)))
+        (if (equal? name "")
+            (message "Group needs a name")
+            (receive (or (group-resolve-id name)
+                         (group-ensure-record! name))))))))
+
 (define-command "group-new" "Create and enter an empty group"
   (lambda ()
     (group-read-new-name "New group: "
@@ -1595,12 +1606,17 @@
 (global-set-key "C-x G" "groups")
 (global-set-key "C-x b" "group-switch-to-buffer")
 (global-set-key "C-x g" "group-switch")
+(global-set-key "C-x C-g g" "group-switch")
+(global-set-key "C-x C-g j" "group-join")
+(global-set-key "C-x C-g l" "groups")
 
 (public! 'group-ids "(group-ids) -> durable opaque group IDs")
 (public! 'group-name "(group-name ID) -> the current display name")
 (public! 'buffer-group-ids "(buffer-group-ids NAME) -> work memberships")
 (public! 'buffer-in-group? "(buffer-in-group? NAME ID) -> membership")
 (public! 'group-record-create! "(group-record-create! NAME) -> new stable ID or #f")
+(public! 'group-read-or-create!
+  "(group-read-or-create! PROMPT RECEIVE) — read an existing group or create the typed name")
 (public! 'buffer-group "(buffer-group NAME) -> the buffer's group tag or #f")
 (public! 'group-buffers "(group-buffers G) -> names of the buffers tagged 'group G")
 (public! 'group-chat "(group-chat G) — find or create G's chat buffer; returns its name")

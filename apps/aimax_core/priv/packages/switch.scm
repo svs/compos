@@ -274,13 +274,7 @@
 ;; moment a buffer has a real membership, so writing it here founded
 ;; nothing and left every buffer where it was.
 (define (switch-found-project! root)
-  (let ((id (group-ensure-record! root)))
-    (for-each (lambda (x)
-                (when (and (not (buffer-group x))
-                           (equal? (buffer-project-root x) root))
-                  (buffer-add-group! x id)))
-              (buffer-list))
-    (switch-to-group! id)))
+  (project-enter-group! root))
 
 (define (switch-pick! buf e context?)
   (let ((name (car e))

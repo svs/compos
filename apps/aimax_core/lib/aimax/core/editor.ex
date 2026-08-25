@@ -130,6 +130,16 @@ defmodule Aimax.Core.Editor do
   def set_pending(seq, fid \\ nil), do: GenServer.call(__MODULE__, {:set_pending, seq, fid(fid)})
   def set_echo(msg, fid \\ nil), do: GenServer.call(__MODULE__, {:set_echo, msg, fid(fid)})
 
+  @doc "The calling frame's raw Emacs prefix argument, or nil."
+  def prefix_arg(fid \\ nil), do: GenServer.call(__MODULE__, {:prefix_arg, fid(fid)})
+
+  def set_prefix_arg(arg, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_prefix_arg, arg, fid(fid)})
+
+  @doc "Record the command and clear its one-shot prefix unless KEEP_PREFIX is true."
+  def finish_command(name, keep_prefix, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:finish_command, name, keep_prefix, fid(fid)})
+
   @doc """
   Arm a one-shot key capture: the next complete key sequence runs COMMAND
   instead of its own binding, and `last_keys/0` reports the sequence. nil
@@ -387,6 +397,7 @@ defmodule Aimax.Core.Editor do
       tree: %{type: :leaf, id: 1, buffer: @scratch, top: 0, manual: false},
       active: 1,
       pending: [],
+      prefix_arg: nil,
       key_capture: nil,
       transient: nil,
       minibuffer: nil,
@@ -445,6 +456,7 @@ defmodule Aimax.Core.Editor do
           tree: %{type: :leaf, id: state.next_win, buffer: buffer, top: 0, manual: false},
           active: state.next_win,
           pending: [],
+          prefix_arg: nil,
           key_capture: nil,
           transient: nil,
           minibuffer: nil,
@@ -548,6 +560,7 @@ defmodule Aimax.Core.Editor do
 
   def handle_call({:snapshot, fid}, _from, state) do
     f = frame(state, fid)
+
     snap =
       Map.take(f, [
         :pending,
@@ -558,6 +571,8 @@ defmodule Aimax.Core.Editor do
         :transient,
         :key_capture
       ])
+      |> Map.put(:prefix_arg, Map.get(f, :prefix_arg))
+
     # expose the selection flag KeyDispatch needs without leaking the list
     snap =
       case snap.minibuffer do
@@ -958,6 +973,21 @@ defmodule Aimax.Core.Editor do
     if f.pending == seq,
       do: {:reply, :ok, state},
       else: changed(:ok, put_frame(state, %{f | pending: seq}), f.id)
+  end
+
+  def handle_call({:prefix_arg, fid}, _from, state),
+    do: {:reply, Map.get(frame(state, fid), :prefix_arg), state}
+
+  def handle_call({:set_prefix_arg, arg, fid}, _from, state) do
+    f = frame(state, fid)
+    arg = if arg in [nil, false], do: nil, else: arg
+    {:reply, :ok, put_frame(state, Map.put(f, :prefix_arg, arg))}
+  end
+
+  def handle_call({:finish_command, name, keep_prefix, fid}, _from, state) do
+    f = frame(state, fid)
+    f = if keep_prefix, do: f, else: Map.put(f, :prefix_arg, nil)
+    {:reply, :ok, %{put_frame(state, f) | last_command: name}}
   end
 
   # No render depends on the capture flag, so it never marks the frame

@@ -1030,9 +1030,16 @@ The interaction model has the primary navigation verb **switch** and the primary
 | Move within the current group | `C-x b` | `group-switch-to-buffer`: list only current-group buffers and chats, using the existing case-insensitive candidate-plus-marginalia matcher. |
 | Broaden the current buffer search | `C-u C-x b` | `C-u group-switch-to-buffer`: include foreign and ungrouped buffers; accepting one switches the selected window without changing membership or frame context. |
 | Stand in another group | `C-x g` | `group-switch`: choose a group, then optionally choose a destination within it. Immediate acceptance restores the group as last left. |
-| Navigate a project as a source | `C-x p p` | Choose a project, then a file or open buffer; visiting it from grouped work pulls it into the current group. |
+| Switch to a project | `C-x p p` | Enter the project's group, then choose a file, open buffer, or its root Dired buffer. |
+| Switch a project into a chosen group | `C-u C-x p p` | Choose a project, enter an existing or new destination group, then choose its file or root. |
 | Find a file here | `C-x C-f` | Visit a file and join it to the current group after a successful open. |
-| Choose a source, then find a file here | `C-u C-x C-f` | Choose a project or other file source, then open the result into the current group. |
+| Find a file in a chosen group | `C-u C-x C-f` | Enter an existing or new group, switch context to it, then visit a file there. |
+| Switch group | `C-x C-g g` | Choose a group and restore its saved context. |
+| Find a grouped file | `C-x C-g f` | Enter an existing or new group, then visit a file there. |
+| Open grouped Dired | `C-x C-g d` | Enter an existing or new group, then open a directory there. |
+| Switch a grouped project | `C-x C-g p` | Choose a project and its existing or new destination group. |
+| Join this buffer | `C-x C-g j` | Join the current buffer to an existing or new group. |
+| Open the group board | `C-x C-g l` | List all groups and their current state. |
 | Pull selected work here | command action | `group-pull-buffer`: choose directly from all live work buffers without visiting them first. |
 | Push selected work away | command action | `group-push-buffer`: choose current members, then any existing group or **New group**. |
 | Pop work from here | direct command / Ibuffer action | `group-pop`: pop one buffer, or all compatible marked Ibuffer buffers, while preserving every other membership. |
@@ -1042,6 +1049,8 @@ The interaction model has the primary navigation verb **switch** and the primary
 | Toggle work and companion | `C-c w` | `group-chat`: select the primary chat, or create one when none exists. |
 | Ask the group companion | `C-c q` | Ask the primary chat without leaving the work buffer. |
 | Walk layout history | `C-c <left>` / `C-c <right>` | Undo or redo frame-local layout changes. |
+
+`project-group-target` uses the first matching project grouping rule. User config can prepend and remove named rules without changing navigation commands.
 
 [UX-KEY-1] `C-x b` MUST remain the fast path for movement inside the current group, even when hundreds of buffers are live. It MUST NOT become an everything palette in its unprefixed form.
 

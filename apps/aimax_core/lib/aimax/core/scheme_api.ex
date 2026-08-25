@@ -344,6 +344,10 @@ defmodule Aimax.Core.SchemeAPI do
       "last-command" => "(last-command) — return the name of the last command that ran.",
       "last-keys" =>
         "(last-keys) — return the key sequence whose keymap lookup ran the current command.",
+      "current-prefix-arg" =>
+        "(current-prefix-arg) — return this frame's raw one-shot prefix argument, or #f.",
+      "set-prefix-arg!" =>
+        "(set-prefix-arg! VALUE) — set this frame's raw one-shot prefix argument; #f clears it.",
       "window-rows" => "(window-rows) — return the number of text rows in the active window.",
       "window-cols" =>
         "(window-cols [WIN]) — return the number of text columns in WIN, or in the active window.",
@@ -1370,6 +1374,11 @@ defmodule Aimax.Core.SchemeAPI do
       end,
       "last-command" => fn [] -> Editor.last_command() end,
       "last-keys" => fn [] -> Editor.last_keys() end,
+      "current-prefix-arg" => fn [] -> Editor.prefix_arg() || false end,
+      "set-prefix-arg!" => fn [arg] ->
+        Editor.set_prefix_arg(arg)
+        :void
+      end,
       "window-rows" => fn [] -> Editor.window_rows() end,
       # the client measures its own font and reports it; a window nobody
       # measured is worth the default

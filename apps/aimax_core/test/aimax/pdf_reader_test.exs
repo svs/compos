@@ -215,6 +215,20 @@ defmodule Aimax.Core.PdfReaderTest do
     refute html =~ ~s(aria-label="Page navigation")
   end
 
+  test "the PDF header keeps its title, status, and controls on one line" do
+    eval!(~S|(visit "/tmp/reader-header.pdf")|)
+
+    html = Buffer.text(Editor.current_buffer())
+    assert html =~ ~s(.toolbar{position:sticky;top:0;z-index:2;display:flex;align-items:center)
+    assert html =~ ~s(white-space:nowrap;overflow-x:auto)
+
+    assert html =~
+             ~s(.controls{display:flex;flex:0 0 auto;align-items:center;gap:8px;flex-wrap:nowrap})
+
+    assert html =~ ~s(<header class="toolbar"><span class="title")
+    refute html =~ ~s(class="identity")
+  end
+
   test "mode setup rebuilds the document and local keys after restore" do
     eval!(~S"""
     (begin

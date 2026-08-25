@@ -514,8 +514,14 @@
     (if e
         (car (cdr e))
         (let ((d (lambda (name args)
-                   (with-edit-author (string-append "agent:" slug)
-                     (lambda () (llm-tool-call name args))))))
+                   (let ((buf (agent-buf slug)))
+                     (if (and buf (buffer-exists? buf))
+                         (with-current-buffer buf
+                           (lambda ()
+                             (with-edit-author (string-append "agent:" slug)
+                               (lambda () (llm-tool-call name args)))))
+                         (with-edit-author (string-append "agent:" slug)
+                           (lambda () (llm-tool-call name args))))))))
           (set! *chat-dispatchers* (cons (list slug d) *chat-dispatchers*))
           d))))
 

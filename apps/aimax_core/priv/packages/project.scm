@@ -165,9 +165,23 @@
           (write-file! *projects-file*
             (string-append (string-join (cons root (known-projects)) "\n") "\n"))))))
 
+;; The compact modeline shows the file in project coordinates, then the
+;; project name. These are derived display values, not buffer identity, so
+;; keep them out of the persisted buffer-local contract.
+(define (project-modeline-refresh!)
+  (let* ((buf (current-buffer))
+         (path (buffer-path buf))
+         (root (and path (project-root-cached (parent-dir path)))))
+    (buffer-set-local! buf 'modeline-file
+      (or (and root (project--relative root path)) path ""))
+    (buffer-set-local! buf 'modeline-project
+      (if root (project-name root) ""))))
+
 ;; every visited file teaches the editor its project
 (add-hook! 'find-file-hook
-  (lambda () (project-remember! (project-current))))
+  (lambda ()
+    (project-remember! (project-current))
+    (project-modeline-refresh!)))
 
 ;;; --- commands ----------------------------------------------------------------
 
@@ -358,8 +372,7 @@
     (group-read-or-create! "Switch file to group: "
       (lambda (g)
         (switch-to-group! g)
-        (read-file-name "Find file: "
-          (lambda (path) (visit-in-group path g)))))))
+        (find-file-read g)))))
 
 (define-command "dired-in-group"
   "Choose or create a group, switch to it, then open a directory"
@@ -371,8 +384,12 @@
           (lambda (path)
             (visit-in-group (normalize-file-input path) g)))))))
 
-(set! find-file-prefix-action
-  (lambda () (run-command "find-file-in-group")))
+(set! find-file-group-reader
+  (lambda (receive)
+    (group-read-or-create! "Switch file to group: "
+      (lambda (group)
+        (switch-to-group! group)
+        (receive group)))))
 
 (define-command "project-dired"
   "Open dired at the current project's root"
@@ -473,7 +490,6 @@
 (global-set-key "C-x p k" "project-kill-all")
 (global-set-key "C-x C-g f" "find-file-in-group")
 (global-set-key "C-x C-g d" "dired-in-group")
-(global-set-key "C-x C-g p" "project-switch-project-in-group")
 
 (category! 'project)
 (catalog-meta! 'command "project-kill-all" 'domain 'project 'effects '(destroy))

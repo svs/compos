@@ -214,7 +214,7 @@ defmodule Aimax.Core.Editor do
   def set_mb_redirect(bool, fid \\ nil),
     do: GenServer.call(__MODULE__, {:mb_redirect, bool, fid(fid)})
 
-  @doc "Name the group this frame stands in; nil clears the modeline segment."
+  @doc "Record the group context this frame stands in; nil clears it."
   def set_frame_group_label(label, fid \\ nil),
     do: GenServer.call(__MODULE__, {:set_group_label, label, fid(fid)})
 
@@ -376,6 +376,9 @@ defmodule Aimax.Core.Editor do
   def window_cols(win \\ nil, fid \\ nil),
     do: GenServer.call(__MODULE__, {:window_cols, win, fid(fid)})
 
+  @doc "Estimated usable columns across the whole frame."
+  def frame_cols(fid \\ nil), do: GenServer.call(__MODULE__, {:frame_cols, fid(fid)})
+
   @doc "Columns of a window showing BUF, in any frame — else the active window's."
   def buffer_cols(buf, fid \\ nil),
     do: GenServer.call(__MODULE__, {:buffer_cols, buf, fid(fid)})
@@ -406,9 +409,8 @@ defmodule Aimax.Core.Editor do
       completion: nil,
       total_rows: 40,
       win_rows: %{},
-      # the group this frame stands in, by NAME. Naming is Scheme policy —
-      # the record table lives there — so Scheme pushes the label and the
-      # modeline only renders it.
+      # the group this frame stands in, by NAME. Naming and membership are
+      # Scheme policy; rendering uses this only to compact a buffer's groups.
       group_label: nil,
       win_cols: %{}
     }
@@ -700,6 +702,7 @@ defmodule Aimax.Core.Editor do
     {:reply,
      %{
        frame: f.id,
+       frame_group: Map.get(f, :group_label),
        tree: rendered,
        active: f.active,
        pending: f.pending,
@@ -770,6 +773,25 @@ defmodule Aimax.Core.Editor do
     f = frame(state, fid)
     cols = Map.get(f, :win_cols, %{})
     {:reply, Map.get(cols, win || f.active, @default_cols), state}
+  end
+
+  def handle_call({:frame_cols, fid}, _from, state) do
+    f = frame(state, fid)
+    measured = Map.get(f, :win_cols, %{})
+
+    estimates =
+      for [id, _buffer, _x, _y, width, _height] <- leaf_rects(f.tree, {0.0, 0.0, 1.0, 1.0}),
+          cols when is_number(cols) <- [Map.get(measured, id)],
+          width > 0,
+          do: cols / width
+
+    frame_cols =
+      case estimates do
+        [] -> @default_cols
+        values -> values |> Enum.max() |> round()
+      end
+
+    {:reply, frame_cols, state}
   end
 
   def handle_call({:scroll_active, delta, fid}, _from, state) do
@@ -1060,6 +1082,7 @@ defmodule Aimax.Core.Editor do
         on_complete: nil,
         on_change: nil,
         on_cancel: nil,
+        on_collect: nil,
         input: "",
         filter: true,
         match_hint: false,
@@ -1947,6 +1970,19 @@ defmodule Aimax.Core.Editor do
     {a, max(rows - a, 3)}
   end
 
+  defp modeline_group(groups, current) when is_list(groups) do
+    names = Enum.filter(groups, &is_binary/1)
+
+    cond do
+      names == [] -> nil
+      length(names) == 1 -> hd(names)
+      is_binary(current) and current in names -> "#{current} (#{length(names) - 1} more)"
+      true -> "#{length(names)} groups"
+    end
+  end
+
+  defp modeline_group(_groups, _current), do: nil
+
   # exists? then call still races a dying buffer (registry entries linger);
   # a dead buffer renders empty instead of crashing the Editor
   defp safe_snapshot(buffer, win_id) do
@@ -1958,16 +1994,26 @@ defmodule Aimax.Core.Editor do
   # render walk: computes per-window rows (v-splits divide), clamps and
   # auto-follows the viewport top (unless manually scrolled), and returns
   # both the updated tree (tops persist) and the render payload
-  defp render_walk(%{type: :split, dir: dir, children: [a, b]} = split, rows, win_rows, group) do
+  defp render_walk(
+         %{type: :split, dir: dir, children: [a, b]} = split,
+         rows,
+         win_rows,
+         frame_group
+       ) do
     ratio = Map.get(split, :ratio, 0.5)
     {rows_a, rows_b} = split_rows(dir, rows, ratio)
-    {a2, ra} = render_walk(a, rows_a, win_rows, group)
-    {b2, rb} = render_walk(b, rows_b, win_rows, group)
+    {a2, ra} = render_walk(a, rows_a, win_rows, frame_group)
+    {b2, rb} = render_walk(b, rows_b, win_rows, frame_group)
 
     {%{split | children: [a2, b2]}, %{type: :split, dir: dir, ratio: ratio, children: [ra, rb]}}
   end
 
-  defp render_walk(%{type: :leaf, id: id, buffer: buffer} = leaf, rows, win_rows, group) do
+  defp render_walk(
+         %{type: :leaf, id: id, buffer: buffer} = leaf,
+         rows,
+         win_rows,
+         frame_group
+       ) do
     # the client's measured row count for this window wins over split math:
     # line height varies per buffer, so only the client knows what fits
     rows = Map.get(win_rows, id, rows)
@@ -2024,18 +2070,27 @@ defmodule Aimax.Core.Editor do
       version: snap.version,
       modified: snap.modified,
       mode: Map.get(locals, "mode-name") || "Fundamental",
+      # what the modeline calls this buffer: project coordinates inside a
+      # project, "~" for the home directory outside one. Scheme decides.
+      modeline_name: Map.get(locals, "modeline-name"),
+      modeline_file: Map.get(locals, "modeline-file"),
+      modeline_project: Map.get(locals, "modeline-project"),
       # free-form per-buffer modeline segment (agent connector, etc.)
       modeline_info: Map.get(locals, "modeline-info"),
+      selected: Map.get(locals, "buffer-selected", false),
+      dashboard_line: Map.get(locals, "dashboard-line"),
+      # the same line as keyed segments: Scheme names the classes,
+      # the client draws the blocks it already knows how to draw
+      dashboard_line_blocks: Map.get(locals, "dashboard-line-blocks"),
       # persistent buffer-owned context above the content. Scheme supplies
       # the text; the client only renders this generic header mechanism.
       header_line: Map.get(locals, "header-line"),
       # the same mechanism under the content — a list's key bar pins here
       footer_line: Map.get(locals, "footer-line"),
-      # the group the FRAME stands in, by name. Every window of a frame
-      # shows the same one: the modeline says where you are, so it stays
-      # steady when you visit an ungrouped buffer. Membership itself lives
-      # in 'group-ids, and only Scheme can turn an id into a name.
-      group: group,
+      # Scheme resolves durable ids into membership names. This last, purely
+      # presentational compaction must happen per frame: one buffer can be
+      # visible on two monitors whose current groups differ.
+      group: modeline_group(Map.get(locals, "modeline-groups"), frame_group),
       ts_lang: Map.get(locals, "ts-lang"),
       overlays: snap.overlays,
       overlay_gen: snap.overlay_gen,

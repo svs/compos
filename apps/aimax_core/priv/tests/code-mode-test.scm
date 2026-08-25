@@ -157,6 +157,8 @@
       (check-equal! (current-buffer) scratch "the scratch has the focus")
       (check-equal! (buffer-local scratch 'chat-presets) '(aimax) "with the coding presets")
       (check-equal! (buffer-group scratch) (buffer-group buf) "in the document's group")
+      (check-equal! (buffer-group-role scratch (buffer-group buf)) "scratch"
+                    "with the scratch role")
       (check-true! (member "llm-mode" (buffer-local scratch 'minor-modes)) "and llm-mode on")
       (t--cm-off! scratch))))
 

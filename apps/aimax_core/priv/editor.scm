@@ -311,8 +311,48 @@
 
 (define (list-mode-of buf) (buffer-local buf 'list-mode))
 
+(define (list-plist-key? pl key)
+  (let loop ((rest pl))
+    (cond ((or (null? rest) (null? (cdr rest))) #f)
+          ((equal? (car rest) key) #t)
+          (else (loop (cdr (cdr rest)))))))
+
+(define (list-layout-bound buf profile key)
+  (let ((value (plist-get profile key)))
+    (if (procedure? value) (value buf) value)))
+
+(define (list-layout-match? buf profile width)
+  (let ((minimum (list-layout-bound buf profile 'min-cols))
+        (maximum (list-layout-bound buf profile 'max-cols)))
+    (or (plist-get profile 'default)
+        (and (or minimum maximum)
+             (or (not minimum) (>= width minimum))
+             (or (not maximum) (<= width maximum))))))
+
+(define (list-select-layout buf layouts width)
+  (let loop ((rest layouts))
+    (cond ((null? rest) '())
+          ((list-layout-match? buf (car rest) width) (car rest))
+          (else (loop (cdr rest))))))
+
+;; Select one responsive profile per draw. Every option read then uses it.
+(define (list-active-layout buf)
+  (let* ((opts (list-mode-opts (list-mode-of buf)))
+         (layouts (or (plist-get opts 'layouts) '()))
+         (width (list-view-width buf))
+         (cache (buffer-local buf 'list-layout-cache)))
+    (if (and (pair? cache) (equal? (car cache) width))
+        (cadr cache)
+        (let ((profile (list-select-layout buf layouts width)))
+          (buffer-set-local! buf 'list-layout-cache (list width profile))
+          profile))))
+
 (define (list-opt buf key)
-  (plist-get (list-mode-opts (list-mode-of buf)) key))
+  (let* ((opts (list-mode-opts (list-mode-of buf)))
+         (profile (list-active-layout buf)))
+    (if (list-plist-key? profile key)
+        (plist-get profile key)
+        (plist-get opts key))))
 
 ;; how many lines of header sit above the first entry — a header may be
 ;; several lines, and every one of the five had hardcoded its own count
@@ -565,9 +605,9 @@
 ;; way — `m`, `u`, `U` and `*` — and a list that declares flags also gets
 ;; the flag chars and `x`. They go in before the list's own keys, so a
 ;; list can still claim any of them for something else.
-(define (list-install-mark-keys! buf opts)
-  (let ((fs (or (plist-get opts 'flags) '())))
-    (when (or (pair? fs) (plist-get opts 'columns))
+(define (list-install-mark-keys! buf)
+  (let ((fs (or (list-opt buf 'flags) '())))
+    (when (or (pair? fs) (list-opt buf 'columns))
       (local-set-key* buf "m" "list-mark")
       (local-set-key* buf "u" "list-unmark")
       (local-set-key* buf "U" "list-unmark-all")
@@ -717,6 +757,10 @@
 ;;;   'cells    (buf entry) -> (CELL ...)   CELL is a string, or (TEXT FACE)
 ;;;   'footer   (buf) -> ((KEY WORD) ...)   the key bar under the rows
 ;;;   'preview  (buf entry)                 what moving the highlight shows
+;;;   'compact  #t                          merge title and meta; omit rules
+;;;   'layouts  ordered profile plists. A profile can override view options.
+;;;             min-cols and max-cols select by measured text width.
+;;;             A final (default #t ...) profile supplies the fallback.
 ;;;
 ;;; A list whose rows come from a slow source (the network) declares the
 ;;; source through the buffer cache instead of 'rows doing the fetch:
@@ -907,10 +951,20 @@
   (let* ((cols (list-columns buf))
          (w (list-view-width buf))
          (meta (list-meta-line buf)))
-    (append (list (list-title-line buf w))
-            (if (equal? (car meta) "") '() (list meta))
-            (list (list-rule-line w))
-            (list (list-label-line buf cols)))))
+    (if (list-opt buf 'compact)
+        (if (and (null? (list-filters buf))
+                 (not (equal? (car meta) "")))
+            (list (list (list-fit
+                          (string-append (list-say buf 'title) "  " (car meta)) w)
+                        '())
+                  (list-label-line buf cols))
+            (append (list (list-title-line buf w))
+                    (if (equal? (car meta) "") '() (list meta))
+                    (list (list-label-line buf cols))))
+        (append (list (list-title-line buf w))
+                (if (equal? (car meta) "") '() (list meta))
+                (list (list-rule-line w))
+                (list (list-label-line buf cols))))))
 
 ;; the header as lines. A mode's own 'header is text it wrote itself, so
 ;; its lines carry no faces.
@@ -940,8 +994,10 @@
          (keys (if f (f buf) '())))
     (if (null? keys)
         '()
-        (list (list-rule-line (list-view-width buf))
-              (list-key-bar buf keys)))))
+        (if (list-opt buf 'compact)
+            (list (list-key-bar buf keys))
+            (list (list-rule-line (list-view-width buf))
+                  (list-key-bar buf keys))))))
 
 ;; one entry as one line. The mark column belongs to the mechanism: three
 ;; renders were each prepending their own.
@@ -1208,6 +1264,7 @@
 
 (define (list-render! buf fetch)
   (when (buffer-exists? buf)
+    (buffer-set-local! buf 'list-layout-cache #f)
     (buffer-set-local! buf 'list-columns-cache #f)
     ;; a rewrite dumps point to 0 — keep the reader's place. The place is
     ;; the ROW the reader is on, not the byte and not the number: a
@@ -1327,6 +1384,8 @@
   (let ((opts (list-mode-opts name))
         (widened #f))
     (buffer-set-local! buf 'list-mode name)
+    (desktop-skip! buf 'list-layout-cache)
+    (buffer-set-local! buf 'list-layout-cache #f)
     ;; derived content (S15): the refresh below re-renders it from
     ;; rows-fn, so the desktop saves mode + locals, not the rows
     (buffer-set-local! buf 'transient #t)
@@ -1351,11 +1410,11 @@
     (local-set-key* buf "?" "describe-mode")
     ;; m/u/U/* and the flag keys — also before the mode's own keys, for
     ;; the same reason
-    (list-install-mark-keys! buf opts)
+    (list-install-mark-keys! buf)
     ;; a table moves the same way in every list: n and p walk the rows and
     ;; stop at the ends, and the line-motion keys REMAP, so the arrows and
     ;; C-n/C-p walk them too
-    (when (plist-get opts 'columns)
+    (when (list-opt buf 'columns)
       (local-set-key* buf "n" "list-next")
       (local-set-key* buf "p" "list-prev")
       (local-remap*! buf "next-line" "list-next")
@@ -1753,8 +1812,9 @@
 ;; STYLE picks the presentation; unset, the palette rule decides.
 ;; COMPLETE, when given, runs on TAB with (INPUT SELECTED) and can
 ;; answer (list NEW-INPUT CANDIDATES) to replace the pool.
+;; COLLECT, when given, receives the candidate rows left after narrowing.
 (define (minibuffer-read-preview prompt cands on-select on-confirm on-cancel
-                                 &optional match-hint style complete)
+                                 &optional match-hint style complete collect)
   (set! *mb-select-fn* (lambda (sel) (with-invoking-buffer (lambda () (on-select sel)))))
   (minibuffer-read* prompt cands
     (append
@@ -1767,7 +1827,8 @@
             (list 'change  (lambda (input) (mb-select-notify!)))
             (list 'match-hint (if match-hint match-hint #f))
             (list 'style (prompt-style cands style)))
-      (if complete (list (list 'complete complete)) '()))))
+      (if complete (list (list 'complete complete)) '())
+      (if collect (list (list 'collect collect)) '()))))
 
 (let ((mb (minibuffer-buffer)))
   (local-set-key* mb "RET" "minibuffer-confirm")
@@ -2010,6 +2071,8 @@
 (mode-icon! "html-mode" "")
 (mode-icon! "chat-mode" "")
 (mode-icon! "shell-mode" "")
+(mode-icon! "term-mode" "")
+(mode-icon! "comint-shell-mode" "")
 (mode-icon! "tail-mode" "")
 (mode-icon! "collect-mode" "")
 
@@ -2028,7 +2091,12 @@
 ;; down for the whole call.
 (define (desktop-apply-mode! buf mode)
   (with-layout-suppressed
-    (lambda () (with-current-buffer buf (lambda () (set-mode! mode))))))
+    (lambda ()
+      (with-current-buffer buf (lambda () (set-mode! mode)))
+      ;; The compact dashboard is derived state. Rebuild it during restore so
+      ;; a saved desktop shows it before the first command runs.
+      (when (boundp (quote dashboard--sync!))
+        (dashboard--sync! buf)))))
 
 ;;; --- globals that outlive a restart (savehist) ---------------------------------
 ;;; The desktop saves buffers, windows and buffer-locals. A global was
@@ -2356,7 +2424,9 @@
 (define (auto-mode-for name)
   (let loop ((es *auto-mode-alist*))
     (cond ((null? es) #f)
-          ((string-suffix? (car (car es)) name) (car (cdr (car es))))
+          ((string-suffix? (string-downcase (car (car es)))
+                           (string-downcase name))
+           (car (cdr (car es))))
           (else (loop (cdr es))))))
 
 (define (auto-mode path)
@@ -2995,6 +3065,85 @@
 (define-command "isearch-backward" "Do incremental search backward"
   (lambda () (isearch #t)))
 
+;;; --- replace ---------------------------------------------------------------
+;;; Replacement uses the same literal search primitive as isearch. Collect
+;;; matches before editing, then apply them from right to left so byte
+;;; positions stay valid when the replacement has a different length.
+
+(define (replace--matches buf old from acc)
+  (let ((m #f))
+    (with-current-buffer buf (lambda () (set! m (buffer-search old from))))
+    (if m
+        (replace--matches buf old (cadr m) (cons m acc))
+        (reverse acc))))
+
+(define (replace--all! buf old new from)
+  (if (equal? old "")
+      0
+      (let ((matches (replace--matches buf old from '())))
+        (for-each
+          (lambda (m)
+            (buffer-replace-range! buf (car m)
+                                   (- (cadr m) (car m)) new))
+          (reverse matches))
+        (length matches))))
+
+(define (replace--prompt prompt k)
+  (minibuffer-read* prompt '()
+    (list (list 'confirm k)
+          (list 'cancel (lambda () (message "Quit"))))))
+
+(define (replace--read-new buf old prompt k)
+  (replace--prompt prompt k))
+
+(define-command "replace-string" "Replace every literal occurrence of text"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (replace--prompt "Replace string: "
+        (lambda (old)
+          (if (equal? old "")
+              (message "Replace string cannot be empty")
+              (replace--read-new buf old "Replace string with: "
+                (lambda (new)
+                  (let ((n 0))
+                    (with-invoking-buffer
+                      (lambda () (set! n (replace--all! buf old new 0))))
+                    (message (string-append "Replaced "
+                      (number->string n)
+                      (if (= n 1) " occurrence" " occurrences"))))))))))))
+
+(define-command "query-replace" "Replace literal text with confirmation"
+  (lambda ()
+    (let ((buf (current-buffer)) (origin (point)))
+      (replace--prompt "Query replace: "
+        (lambda (old)
+          (if (equal? old "")
+              (message "Query replace cannot search for an empty string")
+              (replace--read-new buf old "Query replace with: "
+                (lambda (new)
+                  (let loop ((from origin) (n 0))
+                    (let ((m #f))
+                      (with-invoking-buffer
+                        (lambda () (set! m (buffer-search old from))))
+                      (if (not m)
+                          (message (string-append "Replaced "
+                            (number->string n)
+                            (if (= n 1) " occurrence" " occurrences")))
+                          (begin
+                            (with-invoking-buffer
+                              (lambda () (goto-char! (car m))))
+                            (y-or-n
+                              (string-append "Replace " old " with " new "? ")
+                              (lambda ()
+                                (buffer-replace-range! buf (car m)
+                                  (- (cadr m) (car m)) new)
+                                (loop (+ (car m) (string-byte-length new))
+                                      (+ n 1)))
+                              (lambda () (loop (cadr m) n)))))))))))))))
+
+(catalog-meta! 'command "replace-string" 'domain 'editing 'effects '(write))
+(catalog-meta! 'command "query-replace" 'domain 'editing 'effects '(write))
+
 ;;; --- files & buffers -------------------------------------------------------
 
 ;; A new buffer inherits the directory of the buffer that made it (Emacs:
@@ -3227,6 +3376,18 @@
 (define (read-file-name prompt k)
   (read-file-name-initial prompt (default-directory) k))
 
+;; Emacs' abbreviate-file-name: the home directory is "~". A modeline or a
+;; prompt says the short form; the buffer keeps the absolute path.
+(define (abbreviate-file-name path)
+  (let ((home (getenv "HOME")))
+    (cond ((not (string? path)) path)
+          ((not (and (string? home) (> (string-length home) 1))) path)
+          ((equal? path home) "~")
+          ((string-prefix? (string-append home "/") path)
+           (string-append "~" (substring path (string-length home)
+                                         (string-length path))))
+          (else path))))
+
 ;;; --- remote files (/ssh:host:/path — TRAMP-lite) ---------------------------
 ;;; Transport is two primitives (remote-read / remote-write; ssh underneath,
 ;;; so ~/.ssh/config aliases, agent and ControlMaster all apply). Everything
@@ -3442,35 +3603,22 @@
      #f)
     (else (local-make-symlink! target link))))
 
-;; A binary document can own its open path before find-file decodes the bytes.
-;; Each entry is (SUFFIX OPENER). OPENER receives the normalized local path.
-(define *file-openers* '())
-
-(define (register-file-opener! suffix opener)
-  (set! *file-openers*
-    (cons (list suffix opener)
-          (remove (lambda (entry) (equal? (car entry) suffix)) *file-openers*)))
-  suffix)
-
-(define (file-opener-for path)
-  (let loop ((entries *file-openers*))
-    (cond ((null? entries) #f)
-          ((string-suffix? (string-downcase (car (car entries)))
-                           (string-downcase path))
-           (cadr (car entries)))
-          (else (loop (cdr entries))))))
-
 (define (remote-visit path)
   (if (buffer-exists? path)
-      (switch-to-buffer! path)
+      (begin
+        (switch-to-buffer! path)
+        (current-buffer))
       (let ((hp (remote-parse path)))
         (if (not hp)
-            (message "Remote path is /ssh:HOST:/PATH")
+            (begin
+              (message "Remote path is /ssh:HOST:/PATH")
+              #f)
             (let ((r (remote-read (car hp) (cadr hp))))
               (cond
                 ((equal? r 'directory) (dired-open path))
                 ((pair? r)   ; (error MSG) — unreachable host, unreadable file
-                 (message (string-append path ": " (cadr r))))
+                 (message (string-append path ": " (cadr r)))
+                 #f)
                 (else
                   (begin
                     ;; find-file names the buffer after the path and records
@@ -3483,38 +3631,42 @@
                     (goto-char! 0)
                     (auto-mode path)
                     (run-hooks 'find-file-hook)
-                    (if (equal? r 'absent) (message "(New remote file)"))))))))))
+                    (if (equal? r 'absent) (message "(New remote file)"))
+                    (current-buffer)))))))))
 
-(define (visit path0)
-  (let ((path (normalize-file-input path0)))
-    (cond
-      ((remote-path? path) (remote-visit path))
-      ((file-directory? path) (dired-open path))
-      (else
-        (let ((opener (file-opener-for path)))
-          (if opener
-              (opener path)
-              (begin
-                (switch-to-buffer! (find-file path))
-                (auto-mode path)
-                (run-hooks 'find-file-hook))))))))
+(define (visit path0 &optional group)
+  (let* ((path (normalize-file-input path0))
+         (buf
+           (cond
+             ((remote-path? path) (remote-visit path))
+             ((file-directory? path) (dired-open path))
+             (else
+               (begin
+                 (switch-to-buffer! (find-file path))
+                 (auto-mode path)
+                 (run-hooks 'find-file-hook)
+                 (current-buffer))))))
+    ;; A visit without GROUP has no group policy. Desktop restore uses it.
+    ;; Interactive and agent callers pass their own stable context.
+    (when (and buf group)
+      (buffer-add-group! buf group))
+    buf))
 
-;; files open in the current group: visit PATH, then join GROUP — but a
-;; buffer that already belongs somewhere stays where it is. Raw (visit)
-;; keeps no group policy, so desktop restore stays clean.
-(define (visit-in-group path g)
-  (visit path)
-  (when (and g (group-resolve-id g))
-    (buffer-add-group! (current-buffer) g)))
+;; Compatibility name for packages and user config.
+(define (visit-in-group path group) (visit path group))
 
-(define find-file-prefix-action (lambda () #f))
+;; A package supplies the prefix reader. Its callback receives the chosen
+;; group. This keeps the prefix mechanism separate from file completion.
+(define find-file-group-reader (lambda (receive) (receive (frame-group))))
+
+(define (find-file-read &optional group)
+  (read-file-name "Find file: " (lambda (path) (visit path group))))
 
 (define-command "find-file" "Visit a file, prompting with filename completion"
   (lambda ()
     (if (current-prefix-arg)
-        (find-file-prefix-action)
-        (let ((g (buffer-group (current-buffer))))
-          (read-file-name "Find file: " (lambda (p) (visit-in-group p g)))))))
+        (find-file-group-reader find-file-read)
+        (find-file-read (frame-group)))))
 
 ;; the project a buffer belongs to, as a short name for the prompt.
 ;; project.scm supplies the real answer through this seam (dup #6);
@@ -3736,7 +3888,9 @@
                          ;; leaving must snapshot the group you were
                          ;; really in
                          (let ((bg (buffer-group picked)))
-                           (when bg (set-frame-local! 'current-group bg)))
+                           (when bg
+                             (set-frame-local! 'current-group bg)
+                             (frame-group-label-refresh!)))
                          (windows-shown-catchup!))))
                   (else
                    ;; nothing matches: RET founds a group named PICKED
@@ -3809,18 +3963,26 @@
 ;;; PARAMS is a plist, and every key has a default, so a rule says only
 ;;; what it wants to change:
 ;;;
-;;;   'side   'right | 'left | 'top | 'bottom | 'center   default 'right
+;;;   'side   'right | 'left | 'top | 'bottom | 'center
+;;;           default right, or bottom on compact frames
 ;;;           'center floats a fixed modal in the middle of the frame
-;;;   'size   the share of the frame it takes     default 0.38
+;;;   'size   the share of the frame it takes     default one third
 ;;;
 ;;; A popup floats over the frame — see popup-float! for what that means
 ;;; and what it deliberately does not change. `C-\`` toggles it and
 ;;; `C-M-\`` settles it into the layout, on the side it already floats on.
 
-(define *display-buffer-defaults* (list 'side 'right 'size 0.38))
+(define *window-third* (/ 1 3))
+
+(define *display-buffer-defaults* (list 'side 'right 'size *window-third*))
+
+;; Packages can make the default responsive without changing explicit display
+;; rules. layouts.scm chooses bottom on compact frames and right otherwise.
+(define popup-default-side (lambda () 'right))
 
 (define *display-buffer-alist*
   (list (list "*shell*" 'popup '())
+        (list "*opencode" 'popup '())
         (list "*messages*" 'popup '())
         (list "*llm*" 'popup '())))
 
@@ -3840,12 +4002,16 @@
 (define (display-action-for name) (cadr (display-rule-for name)))
 
 ;; a rule's own value, else the default for that key
-(define (display-param name key)
+(define (display-rule-param name key)
   (let* ((rule (display-rule-for name))
          (rest (cdr (cdr rule)))
          (params (if (null? rest) '() (car rest)))
          (v (plist-get params key)))
-    (if v v (plist-get *display-buffer-defaults* key))))
+    v))
+
+(define (display-param name key)
+  (or (display-rule-param name key)
+      (plist-get *display-buffer-defaults* key)))
 
 ;; frame-local policy state: values keyed by the selected frame — each
 ;; browser gets its own popup, its own ibuffer home window. Pruned when a
@@ -3893,7 +4059,9 @@
 
 (define (popup-window)
   (let ((w (frame-local 'popup-window)))
-    (if (and w (window-exists? w)) w (popup--by-class))))
+    (if (and w (window-exists? w) (popup--class? (window-buffer w)))
+        w
+        (popup--by-class))))
 
 (define (popup-buffer)
   (or (frame-local 'popup-buffer)
@@ -3910,10 +4078,9 @@
        (window-exists? (popup-window))
        (not (null? (cdr (window-list))))))
 
-;; Where the popup came from. A popup is a visit, not a move: when it
-;; closes you are back in the window you left, in the buffer it showed,
-;; at the point you left. The record is (WINDOW BUFFER POINT), and the
-;; frame keeps one — a popup shows one buffer at a time.
+;; Where the popup came from. A popup is a visit, not a move. Closing it
+;; restores work windows changed by a preview. The return record is
+;; (WINDOW BUFFER POINT). The work record is ((WINDOW BUFFER) ...).
 ;;
 ;; Read the buffer from the window, never from (current-buffer): a popup
 ;; can open from inside a prompt, and (current-buffer) answers with the
@@ -3923,13 +4090,44 @@
 ;; from the desktop has nothing to go back to, so its close only closes.
 (define (popup-remember!)
   (let ((w (active-window)))
+    (unless (popup-open?)
+      (set-frame-local! 'popup-work (window-list))
+      (set-frame-local! 'popup-layout (window-tree)))
     ;; a popup that shows the next popup does not move you: the window
     ;; you came from is still the one the first popup remembered
     (when (not (equal? w (popup-window)))
       (set-frame-local! 'popup-return
         (list w (window-buffer w) (buffer-point (window-buffer w)))))))
 
-(define (popup-forget!) (set-frame-local! 'popup-return #f))
+(define (popup-saved-layout)
+  (or (frame-local 'popup-layout)
+      (let ((buf (popup-buffer)))
+        (and buf (buffer-local buf 'popup-return-layout)))))
+
+(define (popup-forget!)
+  (let ((buf (popup-buffer)))
+    (when (and buf (buffer-known? buf))
+      (buffer-set-local! buf 'popup-return-layout #f)))
+  (set-frame-local! 'popup-return #f)
+  (set-frame-local! 'popup-work #f)
+  (set-frame-local! 'popup-layout #f))
+
+;; Restore only live buffers into surviving work windows. This preserves window
+;; ids and ratios. It also does not recreate a buffer that ibuffer killed.
+(define (popup-work-restore!)
+  (for-each
+    (lambda (row)
+      (let ((w (car row)) (buf (cadr row)))
+        (when (and (window-exists? w) (buffer-exists? buf)
+                   (not (equal? (window-buffer w) buf)))
+          (select-window! w)
+          (switch-to-buffer! buf))))
+    (or (frame-local 'popup-work) '())))
+
+(define (popup-layout-live? layout)
+  (and layout
+       (null? (filter (lambda (buf) (not (buffer-exists? buf)))
+                      (window-tree-buffers layout)))))
 
 ;; Go back. The window can be gone (you split or closed it from inside
 ;; the popup) and the buffer can be dead (ibuffer killed it) — each step
@@ -3955,13 +4153,29 @@
 (define (popup-close!)
   (let* ((w (popup-window))
          (mine? (equal? (active-window) w))
-         (buf (and w (window-buffer w))))
+         (buf (and w (window-buffer w)))
+         (focus (active-window))
+         (work (frame-local 'popup-work))
+         (layout (popup-saved-layout)))
     ;; the buffer stops floating the moment it stops being the popup, or
     ;; it would float again in an ordinary window
     (when buf (popup-float! buf #f))
-    (when w (delete-window-id! w))
     (set-frame-local! 'popup-window #f)
-    (if mine? (popup-return!) (popup-forget!))))
+    (cond
+      ((pair? work)
+       (when w (delete-window-id! w))
+       (popup-work-restore!)
+       (if mine?
+           (popup-return!)
+           (begin
+             (when (window-exists? focus) (select-window! focus))
+             (popup-forget!))))
+      ((popup-layout-live? layout)
+       (popup-forget!)
+       (window-tree-set! layout))
+      (else
+       (when w (delete-window-id! w))
+       (if mine? (popup-return!) (popup-forget!))))))
 
 ;; A popup FLOATS, and only visibly: it stays an ordinary window in the
 ;; tree, so every window command still reaches it. The class takes its
@@ -3989,12 +4203,15 @@
     (other-window!)
     (if first? (window-swap! (if (equal? side 'left) 'left 'up)))))
 
-(define (popup-show name)
-  (let ((side (display-param name 'side))
-        (size (display-param name 'size)))
+(define (popup-show-on name side size)
     ;; before the focus moves: this is the place you come back to
     (popup-remember!)
-    (set-frame-local! 'popup-buffer name)
+    (let ((old (popup-buffer))
+          (layout (popup-saved-layout)))
+      (when (and old (not (equal? old name)) (buffer-known? old))
+        (buffer-set-local! old 'popup-return-layout #f))
+      (set-frame-local! 'popup-buffer name)
+      (when layout (buffer-set-local! name 'popup-return-layout layout)))
     (popup-float! name side size)
     (if (popup-open?)
         (begin
@@ -4003,7 +4220,20 @@
         (begin
           (popup--split-for side size)
           (set-frame-local! 'popup-window (active-window))
-          (switch-to-buffer! name)))))
+          (switch-to-buffer! name))))
+
+(define (popup-show name)
+  (popup-show-on name
+    (or (display-rule-param name 'side) (popup-default-side))
+    (display-param name 'size)))
+
+;; Force any buffer into the popup without adding a durable display rule.
+;; Agents use this when a result is temporary. The popup toggle dismisses it.
+(define (display-buffer-popup! name &optional side size)
+  (group-layout-save-before-cover! name)
+  (popup-show-on name
+    (or side (popup-default-side))
+    (or size (plist-get *display-buffer-defaults* 'size))))
 
 (define (display-buffer name)
   ;; a board, a listing, any surface from outside the group takes its
@@ -4121,10 +4351,46 @@
 (define (layout--dir spec) (if (pair? spec) (car spec) 'h))
 (define (layout--ratio spec) (if (pair? spec) (cadr spec) 0.5))
 
+;; Return the window made by one split. Window ids are stable, so the new id
+;; is the only id that was not present before the split.
+(define (layout--new-window before)
+  (let loop ((windows (window-list)))
+    (cond ((null? windows) #f)
+          ((not (member (car (car windows)) before)) (car (car windows)))
+          (else (loop (cdr windows))))))
+
+(define (layout--valid-ratio ratio fallback)
+  (if (and (number? ratio) (> ratio 0) (< ratio 1)) ratio fallback))
+
+;; Fill the selected leaf with BUFFERS along DIR. FIRST-RATIO controls the
+;; first pane. Each later split divides the remaining space evenly. Three
+;; panes therefore use 1/3, then 1/2, and finish as equal thirds.
+(define (layout--fill-line! buffers dir first-ratio)
+  (when (pair? buffers)
+    (switch-to-buffer! (car buffers))
+    (let loop ((rest (cdr buffers)) (first? #t))
+      (when (pair? rest)
+        (let* ((count (+ 1 (length rest)))
+               (ratio (if first?
+                          (layout--valid-ratio first-ratio (/ 1 count))
+                          (/ 1 count)))
+               (before (map car (window-list))))
+          (split-window! dir ratio)
+          (let ((new (layout--new-window before)))
+            (when new
+              (select-window! new)
+              (switch-to-buffer! (car rest))
+              (loop (cdr rest) #f)))))))
+  buffers)
+
 ;; The engine runs one arrangement at a time. switch-to-buffer! wakes a dormant
 ;; buffer, which re-runs its mode setups; without this flag that wake would ask
 ;; for another layout in the middle of this one.
 (define *layout-busy* #f)
+
+;; Winner records one entry for a complete layout change. The wrapped split
+;; functions consult this flag, including during mode layouts and tiling.
+(define *winner-inhibit* #f)
 
 ;; Run THUNK with the engine standing down. Desktop restore uses this: it
 ;; rebuilds the exact windows it saved, and a mode setup that runs inside it
@@ -4161,20 +4427,193 @@
         ;; mode setup asks the engine for a layout of its own. One
         ;; arrangement at a time, materialising included.
         (set! *layout-busy* #t)
+        (winner-save!)
+        (set! *winner-inhibit* #t)
         (let ((panes (layout--panes anchor spec)))
           (when (pair? panes)
             (delete-other-windows!)
-            (switch-to-buffer! (car panes))
-            (for-each
-              (lambda (b)
-                (split-window! (layout--dir spec) (layout--ratio spec))
-                (other-window!)
-                (switch-to-buffer! b))
-              (cdr panes))
+            (layout--fill-line! panes (layout--dir spec) (layout--ratio spec))
             (let ((w (window-showing anchor)))
               (when w (select-window! w))))
+          (set! *winner-inhibit* #f)
           (set! *layout-busy* #f)
           panes))))
+
+;; Return one buffer for each visible work window. Put the selected window first.
+;; Keep duplicate buffers because two windows can show different points in one buffer.
+;; Floating buffers cover a layout and do not become members of it.
+(define (layout-visible-buffers)
+  (let* ((selected-window (active-window))
+         (selected (window-buffer selected-window)))
+    (let loop ((windows (window-list))
+               (acc (if (popup--class? selected) '() (list selected))))
+      (if (null? windows)
+          acc
+          (let ((win (car (car windows)))
+                (buf (car (cdr (car windows)))))
+            (loop (cdr windows)
+              (if (or (equal? win selected-window) (popup--class? buf))
+                  acc
+                  (append acc (list buf)))))))))
+
+;; Validate each requested pane without removing duplicate buffer names.
+(define (layout--known-buffers buffers)
+  (let loop ((rest buffers) (acc '()))
+    (if (null? rest)
+        (reverse acc)
+        (let ((buf (car rest)))
+          (loop (cdr rest)
+            (if (and (string? buf) (buffer-known? buf))
+                (cons buf acc)
+                acc))))))
+
+(define (layout--drop-n values n)
+  (if (or (= n 0) (null? values)) values (layout--drop-n (cdr values) (- n 1))))
+
+;; A balanced binary tiler. Alternating split directions produces a grid.
+;; Ratios follow the leaf counts, so odd grids give the larger half more room.
+(define (layout--grid! buffers dir)
+  (if (null? (cdr buffers))
+      (switch-to-buffer! (car buffers))
+      (let* ((count (length buffers))
+             (left-count (quotient (+ count 1) 2))
+             (left (take-n buffers left-count))
+             (right (layout--drop-n buffers left-count))
+             (before (map car (window-list)))
+             (left-window (active-window)))
+        (split-window! dir (/ left-count count))
+        (let ((right-window (layout--new-window before))
+              (next-dir (if (equal? dir 'h) 'v 'h)))
+          (select-window! left-window)
+          (layout--grid! left next-dir)
+          (select-window! right-window)
+          (layout--grid! right next-dir)))))
+
+;; Build a two-zone layout. The main pane takes two thirds. The other buffers
+;; share a one-third stack on SIDE.
+(define (layout--main-stack! buffers side)
+  (let* ((main (car buffers))
+         (stack (cdr buffers))
+         (horizontal? (or (equal? side 'left) (equal? side 'right)))
+         (split-dir (if horizontal? 'h 'v))
+         (stack-dir (if horizontal? 'v 'h))
+         (stack-first? (or (equal? side 'left) (equal? side 'top)))
+         (before (map car (window-list)))
+         (first-window (active-window)))
+    (switch-to-buffer! (if stack-first? (car stack) main))
+    (split-window! split-dir (if stack-first? *window-third* (- 1 *window-third*)))
+    (let ((second-window (layout--new-window before)))
+      (if stack-first?
+          (begin
+            (select-window! first-window)
+            (layout--fill-line! stack stack-dir (/ 1 (length stack)))
+            (select-window! second-window)
+            (switch-to-buffer! main))
+          (begin
+            (select-window! second-window)
+            (layout--fill-line! stack stack-dir (/ 1 (length stack))))))))
+
+(define *window-layout-algorithms*
+  '(columns rows grid main-right main-left main-bottom main-top))
+
+;; Arrange explicit buffers with a named tiling algorithm. The first buffer is
+;; the main buffer and keeps focus. This is the stable agent-facing entry point.
+(define (tile-windows! algorithm buffers)
+  (let ((panes (layout--known-buffers buffers)))
+    (cond
+      ((not (member algorithm *window-layout-algorithms*))
+       (message "Unknown window layout") #f)
+      ((null? panes) (message "No live buffers to arrange") #f)
+      (*layout-busy* panes)
+      (else
+        (when (popup-open?) (popup-close!))
+        (set! *layout-busy* #t)
+        (winner-save!)
+        (set! *winner-inhibit* #t)
+        (delete-other-windows!)
+        (cond
+          ((equal? algorithm 'columns)
+           (layout--fill-line! panes 'h (/ 1 (length panes))))
+          ((equal? algorithm 'rows)
+           (layout--fill-line! panes 'v (/ 1 (length panes))))
+          ((equal? algorithm 'grid)
+           (layout--grid! panes 'h))
+          ((equal? algorithm 'main-right)
+           (if (null? (cdr panes)) (switch-to-buffer! (car panes))
+               (layout--main-stack! panes 'right)))
+          ((equal? algorithm 'main-left)
+           (if (null? (cdr panes)) (switch-to-buffer! (car panes))
+               (layout--main-stack! panes 'left)))
+          ((equal? algorithm 'main-bottom)
+           (if (null? (cdr panes)) (switch-to-buffer! (car panes))
+               (layout--main-stack! panes 'bottom)))
+          (else
+           (if (null? (cdr panes)) (switch-to-buffer! (car panes))
+               (layout--main-stack! panes 'top))))
+        (let ((home (window-showing (car panes))))
+          (when home (select-window! home)))
+        (set! *winner-inhibit* #f)
+        (set! *layout-busy* #f)
+        panes))))
+
+(define (tile-visible-windows! algorithm)
+  (let ((panes (layout-visible-buffers)))
+    (if (< (length panes) 2)
+        (begin (message "Open at least two work buffers") #f)
+        (tile-windows! algorithm panes))))
+
+(define (window-layout-command algorithm)
+  (lambda () (tile-visible-windows! algorithm)))
+
+;; Layout selection is a live preview. Keep the complete frame arrangement so
+;; cancelling the prompt returns both the windows and the selected window.
+(define (window-layout-preview! name)
+  (if (equal? name "adaptive")
+      (tile-visible-adaptive!)
+      (tile-visible-windows! (string->symbol name))))
+
+(define (window-layout-preview-without-history! name)
+  (let ((was *winner-inhibit*))
+    (set! *winner-inhibit* #t)
+    (let ((result (window-layout-preview! name)))
+      (set! *winner-inhibit* was)
+      result)))
+
+(define-command "window-layout-columns" "Tile visible buffers in equal columns"
+  (window-layout-command 'columns))
+(define-command "window-layout-rows" "Tile visible buffers in equal rows"
+  (window-layout-command 'rows))
+(define-command "window-layout-grid" "Tile visible buffers in a balanced grid"
+  (window-layout-command 'grid))
+(define-command "window-layout-main-right" "Put the main buffer beside a right stack"
+  (window-layout-command 'main-right))
+(define-command "window-layout-main-bottom" "Put the main buffer above a bottom stack"
+  (window-layout-command 'main-bottom))
+
+(define-command "window-layout" "Choose a tiling layout for visible buffers"
+  (lambda ()
+    (let ((saved (window-tree)))
+      (minibuffer-read-preview "Window layout: "
+        '( ("adaptive" "choose from usable monitor width")
+           ("columns" "equal vertical panes")
+           ("rows" "equal horizontal panes")
+           ("grid" "balanced grid")
+           ("main-right" "main pane plus right third")
+           ("main-left" "main pane plus left third")
+           ("main-bottom" "main pane plus bottom third")
+           ("main-top" "main pane plus top third"))
+        window-layout-preview-without-history!
+        (lambda (name)
+          ;; Commit from the original arrangement so winner records one real
+          ;; layout change, not an intermediate preview arrangement.
+          (window-tree-set! saved)
+          (window-layout-preview! name))
+        (lambda () (window-tree-set! saved))))))
+
+(for-each
+  (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write)))
+  '("window-layout" "window-layout-columns" "window-layout-rows"
+    "window-layout-grid" "window-layout-main-right" "window-layout-main-bottom"))
 
 ;; The engine's entry point: a mode turned on in BUF. Arrange the frame only
 ;; when BUF is the buffer the user is looking at.
@@ -4204,6 +4643,12 @@
         (if (popup-buffer)
             (popup-show (popup-buffer))
             (message "No popup buffer yet")))))
+
+(define-command "popup-buffer" "Show any buffer in the floating popup"
+  (lambda ()
+    (minibuffer-read "Popup buffer: " (buffer-candidates)
+      (lambda (name) (display-buffer-popup! name)))))
+(catalog-meta! 'command "popup-buffer" 'domain 'windows 'effects '(write))
 
 ;; popper-toggle-type: the popup you want to keep stops floating and
 ;; becomes an ordinary window, in the place it already occupies.
@@ -4256,11 +4701,11 @@
 (local-set-key* " *read-only*" "q" "quit-window")
 
 ;;; --- collect: the prompt continues as a buffer (embark-collect) ------------
-;;; C-c C-o in any prompt closes it and writes the candidates that survive
-;;; your input into *Collect*. The buffer keeps the prompt's behaviour:
-;;; n/p preview in the window the prompt ran in, RET accepts, q cancels.
+;;; C-c C-o closes the prompt and collects the candidates that survive its
+;;; input. A prompt can route them to a reusable domain list such as ibuffer.
+;;; Other prompts use *Collect*, which keeps preview, accept, and cancel.
 ;;; The handlers come from the prompt itself — minibuffer-detach! closes it
-;;; without firing anything and hands them over — so every prompt collects.
+;;; without firing anything and hands them over.
 
 (define *collect-buffer* "*Collect*")
 
@@ -4395,19 +4840,26 @@
     (let ((d (minibuffer-detach!)))
       (if (not d)
           (message "No prompt to collect")
-          (let ((select *mb-select-fn*))
+          (let* ((select *mb-select-fn*)
+                 (cands (cadr (assoc 'candidates d)))
+                 (collector-entry (assoc 'collect d))
+                 (collector (and collector-entry (cadr collector-entry))))
             (set! *mb-select-fn* #f)
             ;; the prompt is gone, so the list behind it no longer owns the
             ;; minibuffer's arrows
             (set! *mb-list-buffer* #f)
-            (set! *collect-select* select)
-            (set! *collect-confirm* (cadr (assoc 'confirm d)))
-            (set! *collect-cancel* (cadr (assoc 'cancel d)))
-            (set! *collect-complete* (cadr (assoc 'complete d)))
-            (set! *collect-input* (cadr (assoc 'input d)))
-            (set! *collect-window* (active-window))
-            (collect-open! (cadr (assoc 'prompt d))
-                           (cadr (assoc 'candidates d))))))))
+            (if collector
+                (begin
+                  (collect-forget!)
+                  (collector cands))
+                (begin
+                  (set! *collect-select* select)
+                  (set! *collect-confirm* (cadr (assoc 'confirm d)))
+                  (set! *collect-cancel* (cadr (assoc 'cancel d)))
+                  (set! *collect-complete* (cadr (assoc 'complete d)))
+                  (set! *collect-input* (cadr (assoc 'input d)))
+                  (set! *collect-window* (active-window))
+                  (collect-open! (cadr (assoc 'prompt d)) cands))))))))
 
 (define-mode "collect-mode"
   (lambda ()
@@ -4477,9 +4929,93 @@
   "Scroll the next window down nearly a full screen"
   (lambda () (scroll-other-window-by! (- 2 (window-rows)))))
 
-;;; --- shell (comint) --------------------------------------------------------
-;;; RET in a process buffer sends the current line to the process (deleting
-;;; it first — the pty echo brings it back); RET elsewhere is just a newline.
+;;; --- terminal and comint ---------------------------------------------------
+
+(domain! 'processes)
+(effects! '(write execute))
+
+;; The terminal receives raw PTY bytes outside the editor render loop. Its
+;; bounded plain transcript stays in the buffer for search, agents, and /raw.
+;; The login flag works for zsh, bash, and fish. Override this in init.scm.
+(define *terminal-command* "exec \"${SHELL:-/bin/zsh}\" -l")
+
+(define (terminal-mode-init! buf)
+  (buffer-set-local! buf 'render-mode "terminal")
+  (buffer-set-local! buf 'line-numbers "off")
+  (buffer-set-read-only! buf #t)
+  (unless (process-running? buf)
+    ;; A terminal app records its own launch command in the buffer.  That
+    ;; local rides the desktop, so waking *opencode* starts OpenCode again
+    ;; instead of silently turning the buffer into a login shell.
+    (start-terminal! buf
+      (or (buffer-local buf 'terminal-command) *terminal-command*))))
+
+;; shell-mode remains a terminal mode so old desktop snapshots migrate on
+;; their next wake. term-mode is the explicit name for new terminal buffers.
+(define-mode "shell-mode"
+  (lambda () (terminal-mode-init! (current-buffer))))
+(define-mode "term-mode"
+  (lambda () (terminal-mode-init! (current-buffer))))
+
+(mode-doc! "shell-mode"
+  "A raw PTY terminal. Full-screen programs and app servers render outside the editor document loop. The bounded transcript stays readable as buffer text.")
+(mode-doc! "term-mode"
+  "A raw PTY terminal. Full-screen programs and app servers render outside the editor document loop. The bounded transcript stays readable as buffer text.")
+
+(define-command "shell" "Open a raw PTY shell in the *shell* buffer"
+  (lambda ()
+    (buffer-create "*shell*")
+    (buffer-set-local! "*shell*" 'mode-name "term-mode")
+    (with-current-buffer "*shell*"
+      (lambda () (terminal-mode-init! "*shell*")))
+    (display-buffer "*shell*")))
+
+;; OpenCode is a terminal application, not an editor mode: it gets the same
+;; fast raw PTY, ANSI colour, keyboard routing, and readable transcript as
+;; *shell*.  One semantic `opencode` role per group makes renamed groups keep
+;; finding their session without encoding durable identity in the buffer name.
+(define *opencode-command* "exec opencode")
+
+(define (opencode-buffer-name group)
+  (if group
+      (string-append "*opencode:" (group-name group) "*")
+      "*opencode*"))
+
+(define (opencode-open! group)
+  (let* ((dir (default-directory))
+         (known (and group (group-buffer-as group 'opencode)))
+         (buf (or known (opencode-buffer-name group))))
+    (buffer-create buf)
+    ;; A stopped or restored app keeps the directory and exact command it was
+    ;; born with.  Re-running M-x opencode therefore resumes the same session.
+    (unless (buffer-local buf 'terminal-command)
+      (buffer-set-local! buf 'default-directory dir)
+      (buffer-set-local! buf 'terminal-command
+        (string-append "cd -- " (sh-quote dir) " && " *opencode-command*)))
+    (buffer-set-local! buf 'mode-name "term-mode")
+    (when group (buffer-add-group-as! buf group 'opencode))
+    (with-current-buffer buf (lambda () (terminal-mode-init! buf)))
+    (display-buffer buf)))
+
+;; groups.scm replaces this seam with its native reader.  Keeping the reader
+;; out of terminal code also lets ai-max boot without the optional workspace
+;; package loaded.
+(define opencode-group-reader
+  (lambda (receive) (receive (frame-group))))
+
+(define-command "opencode"
+  "Open OpenCode for this group; with C-u, choose a group"
+  (lambda ()
+    (if (current-prefix-arg)
+        (opencode-group-reader opencode-open!)
+        (opencode-open! (frame-group)))))
+
+(define-command "opencode-in-group"
+  "Choose a group, then open its OpenCode terminal"
+  (lambda () (opencode-group-reader opencode-open!)))
+
+;;; RET in a comint process sends the current line to the process. RET
+;;; elsewhere inserts a newline.
 
 ;; Comint contract: processes run with TERM=dumb and are expected to degrade
 ;; (bash does automatically; zsh needs zle/prompt padding off — the flags
@@ -4489,24 +5025,22 @@
 ;; Override *shell-command* in your init.scm.
 (define *shell-command* "exec /bin/zsh -f -i +o zle +o prompt_cr +o prompt_sp")
 
-;; a real mode (S8): restore re-runs this setup, so a restored shell
-;; keeps its transcript and gets a fresh process under it (tail-mode's
-;; pattern)
-(define-mode "shell-mode"
+;; The text-buffer shell remains available for tools that want comint.
+(define-mode "comint-shell-mode"
   (lambda ()
     (let ((buf (current-buffer)))
       (unless (process-running? buf)
         (start-process! buf *shell-command*)))))
 
-(mode-doc! "shell-mode"
+(mode-doc! "comint-shell-mode"
   "A shell under the editor. `RET` sends the text after the process mark to the shell. A restart keeps the transcript and starts a new shell.")
 
-(define-command "shell" "Run an inferior shell in the *shell* buffer"
+(define-command "comint-shell" "Open a text-buffer shell in *comint-shell*"
   (lambda ()
-    (if (not (process-running? "*shell*"))
-        (start-process! "*shell*" *shell-command*))
-    (display-buffer "*shell*")
-    (buffer-set-local! "*shell*" 'mode-name "shell-mode")
+    (if (not (process-running? "*comint-shell*"))
+        (start-process! "*comint-shell*" *shell-command*))
+    (display-buffer "*comint-shell*")
+    (buffer-set-local! "*comint-shell*" 'mode-name "comint-shell-mode")
     (end-of-buffer!)))
 
 (define-command "newline-or-send" "Send input to the process, or insert a newline"
@@ -5307,6 +5841,10 @@
                "You are the user's writing companion in a side chat. They are ")
            (if code? "working in " "writing in ")
            "the editor buffer named \"" doc "\". "
+           (let ((role (and g (buffer-group-role doc g))))
+             (if role
+                 (string-append "This is the group's \"" role "\" buffer. ")
+                 ""))
            *chat-edit-protocol*
            (if code? "" " Match the document's voice.")
            (chat-code-note docs)
@@ -5323,6 +5861,8 @@
          "group \"" (group-display-name g) "\". The group's buffers:\n"
          (fold (lambda (acc d)
                  (string-append acc "- \"" d "\""
+                   (let ((role (buffer-group-role d g)))
+                     (if role (string-append " as " role) ""))
                    (let ((m (buffer-local d 'mode-name)))
                      (if m (string-append " (" m ")") ""))
                    "\n"))
@@ -5608,7 +6148,7 @@
 ;; 'render-mode is the chat's chosen VIEW ("agent" rich, "plain" text) —
 ;; a choice about the chat, so identity (S11)
 (define chat-identity-locals
-  '(group group-id chat-id group-meta group-layout group-noise
+  '(group group-id modeline-groups chat-id group-meta group-layout group-noise
     agent-connector agent-model agent-effort
     chat-presets chat-permission-mode render-mode default-directory
     agent-permission-profile window-class header-line
@@ -5992,7 +6532,6 @@
 
 ;; a compound operation (a group switch builds its layout in steps)
 ;; saves ONCE and inhibits the wrapped mutators' pushes underneath
-(define *winner-inhibit* #f)
 
 (define (winner-save!)
   (unless *winner-inhibit*
@@ -6013,24 +6552,37 @@
                      (number->string (+ idx 1)) "/"
                      (number->string (length ring))))))))
 
-(define-command "winner-undo" "Restore the previous window layout"
-  (lambda ()
-    (set! *winner-inhibit* #f)
-    (let ((pos (frame-local 'winner-pos)))
-      (if pos
-          (winner--restore (+ pos 1))
-          ;; entering the walk: the CURRENT arrangement joins the ring
-          ;; first, so redo can come all the way back
-          (begin
-            (winner-save!)
-            (winner--restore 1))))))
+(define (winner-previous!)
+  (set! *winner-inhibit* #f)
+  (let ((pos (frame-local 'winner-pos)))
+    (if pos
+        (winner--restore (+ pos 1))
+        ;; entering the walk: the CURRENT arrangement joins the ring
+        ;; first, so next can return to it.
+        (begin
+          (winner-save!)
+          (winner--restore 1)))))
 
-(define-command "winner-redo" "Walk forward to a later window layout"
-  (lambda ()
-    (let ((pos (frame-local 'winner-pos)))
-      (if (and pos (> pos 0))
-          (winner--restore (- pos 1))
-          (message "at the latest layout")))))
+(define (winner-next!)
+  (let ((pos (frame-local 'winner-pos)))
+    (if (and pos (> pos 0))
+        (winner--restore (- pos 1))
+        (message "at the latest layout"))))
+
+;; These names describe the operation as a desktop switch: the saved tree
+;; contains both the window arrangement and the buffer shown in each window.
+(define-command "winner-previous" "Switch to the previous window and buffer arrangement"
+  (lambda () (winner-previous!)))
+(define-command "winner-next" "Switch to the next window and buffer arrangement"
+  (lambda () (winner-next!)))
+(define-command "winner-undo" "Restore the previous window and buffer arrangement"
+  (lambda () (winner-previous!)))
+(define-command "winner-redo" "Walk forward to a later window and buffer arrangement"
+  (lambda () (winner-next!)))
+
+(for-each
+  (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write)))
+  '("winner-previous" "winner-next" "winner-undo" "winner-redo"))
 
 ;; the window mutators the keyboard reaches (C-x 1/2/3/0, popups) push
 ;; the arrangement they are about to destroy
@@ -6102,6 +6654,20 @@
 .dash-bar.h1 { height: 4px; } .dash-bar.h2 { height: 9px; } .dash-bar.h3 { height: 14px; }
 .dash-bar.h4 { height: 19px; } .dash-bar.h5 { height: 24px; } .dash-bar.h6 { height: 29px; }
 .dash-bar.h7 { height: 34px; } .dash-bar.h8 { height: 39px; } .dash-bar.h9 { height: 44px; }
+.dash-persistent { display: flex; align-items: center; gap: 20px; min-width: 0;
+                   padding: 7px 18px 8px; border-bottom: 2px solid var(--accent-fg, #26356b);
+                   background: var(--window-bg, #fdfcf8); cursor: pointer; }
+.dseg { display: flex; flex-direction: column; gap: 1px; min-width: 0;
+        font-family: var(--font-mono); }
+.dseg-r { align-items: flex-end; }
+.dseg-k { font-size: 9px; letter-spacing: .16em; text-transform: uppercase;
+          color: var(--faint-fg, #b3ac9c); white-space: nowrap; }
+.dseg-v { font-size: 12.5px; color: var(--default-fg, #1b1a17);
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dseg-strong { font-weight: 600; }
+.dseg-rule { width: 1px; height: 24px; flex: 0 0 auto;
+             background: var(--border-bg, #cbc4b1); opacity: .5; }
+.dseg-gap { flex: 1 1 auto; }
 ")
 
 (define (dash--row k v &optional cls)
@@ -6140,23 +6706,37 @@
                           (string-append (number->string (buffer-size buf)) " B") #f)))))))
 
 (define (dash--group buf)
-  (let ((g (buffer-group buf)))
-    (if (not g)
+  (let* ((ids (if (chat-buffer? buf)
+                  (let ((g (chat-group-id buf))) (if g (list g) '()))
+                  (buffer-group-ids buf)))
+         (current (frame-local 'current-group))
+         (primary (cond ((and current (member current ids)) current)
+                        ((pair? ids) (car ids))
+                        (else #f))))
+    (if (null? ids)
         (dash--section "group"
           (list (dash--row "group" "none" "dim")
                 (dash--row "join" "C-c g" "dim")))
-        (dash--section "group"
+        (dash--section (if (null? (cdr ids)) "group" "groups")
           (append
-            (list (list 'tag "div" 'class "dash-big" 'text (group-label g)))
+            ;; C-x ? is the unabridged counterpart to the compact modeline:
+            ;; every membership is named, with the frame's current one first.
+            (list (list 'tag "div" 'class "dash-chips"
+                        'children
+                        (map (lambda (g) (dash--chip (group-label g)))
+                             (if (and current (member current ids))
+                                 (cons current
+                                       (remove (lambda (g) (equal? g current)) ids))
+                                 ids))))
             ;; every member shows, as wrapping chips — one truncating
             ;; row hid the companion chat behind an ellipsis
             (list (list 'tag "div" 'class "dash-chips"
                         'children
                         (map (lambda (m) (dash--chip (buffer-short-label m)))
-                             (group-buffers-mru g)))
-                  (dash--row "companion" (group-noise g))
-                  (dash--row "layout" (if (group-layout g) "saved" "default")))
-            (let ((m (group-meta g)))
+                             (group-buffers-mru primary)))
+                  (dash--row "companion" (group-noise primary))
+                  (dash--row "layout" (if (group-layout primary) "saved" "default")))
+            (let ((m (group-meta primary)))
               (if m (list (dash--row "about" m)) '())))))))
 
 ;; the ledger, folded two ways: cost per day (the sparkline) and the
@@ -6374,6 +6954,119 @@
         (dash--tools buf)
         (dash--llm buf)))
 
+(define (dashboard--group-ids buf)
+  (if (chat-buffer? buf)
+      (let ((g (chat-group-id buf))) (if g (list g) '()))
+      (buffer-group-ids buf)))
+
+(define (dashboard--mode-name name)
+  (let ((s (if (symbol? name) (symbol->string name) name)))
+    (if (and (string? s) (string-suffix? "-mode" s))
+        (substring s 0 (- (string-length s) 5))
+        (or s "Fundamental"))))
+
+;; The compact dashboard stays at the top of the window. It keeps the LLM
+;; context and every group visible in one line, then opens the full panel.
+(define (dashboard-one-line buf)
+  (let* ((ids (dashboard--group-ids buf))
+         (modes (cons (or (buffer-local buf 'mode-name) "Fundamental")
+                      (or (buffer-local buf 'minor-modes) '())))
+         (mode-text (string-join (map dashboard--mode-name modes) " · "))
+         (groups (if (pair? ids)
+                     (string-join (map group-label ids) " · ")
+                     "none")))
+    (string-append
+      "mode " mode-text
+      "   groups " groups
+      "   llm " (dash--model buf)
+      "   lane " (dash--lane buf))))
+
+;;; The same facts, keyed. A flat run of tokens spends one weight on
+;;; every word, so nothing reads first. Each segment puts a whisper-sized
+;;; key over its value, and the value carries the line. Place goes left,
+;;; machine state goes right, and a hairline rule separates them.
+
+(define (dash--seg key segs align)
+  (list 'tag "div"
+        'class (if (equal? align 'right) "dseg dseg-r" "dseg")
+        'children
+        (list (list 'tag "div" 'class "dseg-k" 'text key)
+              (list 'tag "div" 'class "dseg-v" 'segs segs))))
+
+(define (dash--seg-rule)
+  (list 'tag "span" 'class "dseg-rule"))
+
+(define (dash--seg-gap)
+  (list 'tag "span" 'class "dseg-gap"))
+
+;; the major mode carries the weight; the minor modes trail it
+(define (dash--mode-segs buf)
+  (let ((major (dashboard--mode-name (or (buffer-local buf 'mode-name) "Fundamental")))
+        (minors (or (buffer-local buf 'minor-modes) '())))
+    (cons (list "dseg-strong" major)
+          (map (lambda (m)
+                 (list "f-dim" (string-append " · " (dashboard--mode-name m))))
+               minors))))
+
+;; the last group is where you are; the ones before it are the path
+(define (dash--group-segs buf)
+  (let ((labels (map group-label (dashboard--group-ids buf))))
+    (if (null? labels)
+        (list (list "f-faint" "none"))
+        (let loop ((rest labels) (out '()))
+          (if (null? (cdr rest))
+              (reverse (cons (list "dseg-strong" (car rest)) out))
+              (loop (cdr rest)
+                    (cons (list "f-faint" " / ")
+                          (cons (list "f-dim" (car rest)) out))))))))
+
+;; "openrouter:sonnet" reads as one word until the provider steps back
+(define (dash--model-segs buf)
+  (let* ((model (dash--model buf))
+         (parts (string-split model ":")))
+    (if (> (length parts) 1)
+        (list (list "f-dim" (string-append (car parts) ":"))
+              (list "dseg-strong" (string-join (cdr parts) ":")))
+        (list (list "dseg-strong" model)))))
+
+;; the top line names the file, the bottom modeline keeps the path
+(define (dash--buffer-name buf)
+  (let ((parts (string-split buf "/")))
+    (if (pair? parts) (car (reverse parts)) buf)))
+
+(define (dashboard-line-blocks buf)
+  (list (dash--seg "mode" (dash--mode-segs buf) 'left)
+        (dash--seg-rule)
+        (dash--seg "group" (dash--group-segs buf) 'left)
+        (dash--seg-rule)
+        (dash--seg "buffer"
+                   (list (list "f-accent dseg-strong" (dash--buffer-name buf)))
+                   'left)
+        (dash--seg-gap)
+        (dash--seg "llm" (dash--model-segs buf) 'right)
+        (dash--seg-rule)
+        (dash--seg "lane" (list (list "f-ok dseg-strong" (dash--lane buf))) 'right)))
+
+;; The modeline names the buffer the short way: project coordinates inside
+;; a project, "~" for the home directory outside one. The buffer name keeps
+;; the absolute path, and the modeline's tooltip still says it.
+(define (buffer-modeline-name buf)
+  (let ((path (buffer-path buf))
+        (root (buffer-project-root buf)))
+    (cond ((not (string? path)) buf)
+          ((and (string? root) (not (equal? root ""))
+                (string-prefix? (string-append root "/") path))
+           (substring path (+ 1 (string-length root)) (string-length path)))
+          (else (abbreviate-file-name path)))))
+
+(define (dashboard--sync! buf)
+  (desktop-skip! buf 'dashboard-line)
+  (desktop-skip! buf 'dashboard-line-blocks)
+  (desktop-skip! buf 'modeline-name)
+  (buffer-set-local! buf 'dashboard-line (dashboard-one-line buf))
+  (buffer-set-local! buf 'dashboard-line-blocks (dashboard-line-blocks buf))
+  (buffer-set-local! buf 'modeline-name (buffer-modeline-name buf)))
+
 ;; The fingerprint reads locals only — never the live tool surface. It
 ;; runs after every command, and asking the surface there would start
 ;; MCP servers on a cursor move. The frozen list and the presets are the
@@ -6382,7 +7075,8 @@
   (let ((chat (dash--here-chat buf)))
     (list (buffer-local buf 'mode-name)
           (buffer-local buf 'minor-modes)
-          (buffer-group buf)
+          (dashboard--group-ids buf)
+          (frame-local 'current-group)
           (buffer-local buf 'agent-model)
           (buffer-local buf 'agent-connector)
           (buffer-local buf 'llm-model)
@@ -6409,6 +7103,7 @@
 ;; buffer rebuilds itself — modes, group, model all change under it
 (define (post-command!)
   (let ((buf (current-buffer)))
+    (dashboard--sync! buf)
     (list-post-command! buf)
     ;; a list on screen shows what is, not what was: the command may have
     ;; killed a buffer the list beside it still names
@@ -6557,8 +7252,8 @@
 ;; Cmd-p is intent search; M-x remains literal command-name completion.
 (global-set-key "s-p" "command-palette")
 ;; winner: any layout change is one keystroke from undone
-(global-set-key "C-c <left>" "winner-undo")
-(global-set-key "C-c <right>" "winner-redo")
+(global-set-key "C-c <left>" "winner-previous")
+(global-set-key "C-c <right>" "winner-next")
 ;; the modeline, expanded — also a click on the modeline's name
 (global-set-key "C-x ?" "modeline-expand")
 (global-set-key "C-c RET" "chat-companion-ask")
@@ -6613,11 +7308,17 @@
 (define-command "execute-extended-command"
   "Run a command by name, with its keybinding and doc alongside"
   (lambda ()
-    (minibuffer-read "M-x "
-      (annotate 'command (history-order 'M-x (command-names)))
-      (lambda (cmd)
-        (history-push! 'M-x cmd)
-        (run-command cmd)))))
+    ;; M-x itself finishes before its minibuffer callback runs. Preserve the
+    ;; raw prefix across that boundary, then consume it after the selected
+    ;; command has had the same view it would get from a direct keybinding.
+    (let ((prefix (current-prefix-arg)))
+      (minibuffer-read "M-x "
+        (annotate 'command (history-order 'M-x (command-names)))
+        (lambda (cmd)
+          (history-push! 'M-x cmd)
+          (when prefix (set-prefix-arg! prefix))
+          (run-command cmd)
+          (when prefix (set-prefix-arg! #f)))))))
 
 ;;; Cmd-p answers "how do I do this?" while M-x answers "what is the
 ;;; command called?". Apropos supplies task-language matches from command
@@ -6836,10 +7537,13 @@
 (domain! 'unknown)
 (effects! '(unknown))
 
-(define-command "keyboard-quit" "Quit the current operation and clear the mark"
+(define-command "keyboard-quit" "Quit the current operation; close the active popup or clear the mark"
   (lambda ()
     (set-mark! #f)
-    (message "Quit")))
+    (if (and (popup-open?) (equal? (active-window) (popup-window)))
+        (popup-close!)
+        (message "Quit"))))
+(catalog-meta! 'command "keyboard-quit" 'domain 'interaction 'effects '(write))
 
 ;;; --- tiling windows --------------------------------------------------------
 
@@ -6989,6 +7693,31 @@
 (define-command "next-buffer" "Walk back toward the most recently used buffer"
   (lambda () (buffer-cycle! -1)))
 
+(define-command "buffer-select" "Toggle selection on the active buffer"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (selected (not (buffer-local buf 'buffer-selected))))
+      (buffer-set-local! buf 'buffer-selected selected)
+      (message (string-append buf (if selected " selected" " deselected"))))))
+
+(define-command "buffer-unselect" "Clear selection on the active buffer"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (buffer-set-local! buf 'buffer-selected #f)
+      (message (string-append buf " unselected")))))
+
+(define-command "buffer-unselect-all" "Clear selection on every buffer"
+  (lambda ()
+    (let ((cleared 0))
+      (for-each
+        (lambda (buf)
+          (when (buffer-local buf 'buffer-selected)
+            (buffer-set-local! buf 'buffer-selected #f)
+            (set! cleared (+ cleared 1))))
+        (buffer-list))
+      (message (string-append "Unselected " (number->string cleared)
+                             " buffer" (if (= cleared 1) "" "s"))))))
+
 ;; the UI reports clicks; which window gets focus and what that means
 ;; (chat focuses its input) is policy
 (define (mouse-select-window! id)
@@ -7029,6 +7758,46 @@
     (if (equal? text "")
         (kill-top)
         (begin (kill-push! text) text))))
+
+;;; Pasted image bytes arrive from the browser as base64. The writing modes
+;;; own the Markdown policy; ordinary buffers keep the normal text paste path.
+(define (clipboard-image-extension mime)
+  (cond ((equal? mime "image/jpeg") ".jpg")
+        ((equal? mime "image/gif") ".gif")
+        ((equal? mime "image/webp") ".webp")
+        ((equal? mime "image/svg+xml") ".svg")
+        ((equal? mime "image/avif") ".avif")
+        (else ".png")))
+
+(define (clipboard-image-destination path)
+  ;; Markdown destinations with spaces need angle brackets.
+  (if (re-match "[ \\t]" path)
+      (string-append "<" path ">")
+      path))
+
+(define (clipboard-image-paste! data mime)
+  (let* ((buf (current-buffer))
+         (mode (buffer-local buf 'mode-name))
+         (writing? (or (equal? mode "morg-mode")
+                       (minor-mode-on? buf "writing-mode"))))
+    (if (not writing?)
+        (message "Pasted images work in morg-mode and writing-mode")
+        (let ((initial (string-append "image" (clipboard-image-extension mime))))
+          (read-file-name-initial "Save pasted image: " initial
+            (lambda (path)
+              (if (equal? path "")
+                  (message "Pasted image was not saved")
+                  (begin
+                    (write-file! path (base64-decode data))
+                    (insert! (string-append "![image]("
+                                            (clipboard-image-destination path)
+                                            ")"))
+                    (message (string-append "Saved pasted image to " path))))))))))
+
+(domain! 'writing)
+(effects! '(write))
+(public! 'clipboard-image-paste!
+  "(clipboard-image-paste! DATA MIME) — prompt for an image path, save the bytes, and insert a Markdown image in morg or writing mode")
 
 ;;; --- buffer links ----------------------------------------------------------
 ;;; A link is one string that points at a buffer, and two readers follow it.
@@ -7183,6 +7952,7 @@
 (global-set-key "C-x C-x" "exchange-point-and-mark")
 (global-set-key "C-s" "isearch-forward")
 (global-set-key "C-r" "isearch-backward")
+(global-set-key "M-%" "query-replace")
 
 (global-set-key "C-x C-f" "find-file")
 (global-set-key "C-x C-s" "save-buffer")
@@ -7201,6 +7971,8 @@
 (global-set-key "C-x 0" "delete-window")
 (global-set-key "C-x 1" "delete-other-windows")
 (global-set-key "C-x o" "other-window")
+(global-set-key "C-x l" "window-layout")
+(global-set-key "C-c p" "popup-buffer")
 (global-set-key "s-<left>" "windmove-left")
 (global-set-key "s-<right>" "windmove-right")
 (global-set-key "s-<up>" "windmove-up")
@@ -7265,9 +8037,8 @@
 (public! 'current-buffer "Name of the buffer point is in")
 (effects! '(write))
 (public! 'switch-to-buffer! "(switch-to-buffer! NAME) — show in the active window")
-(public! 'visit "(visit PATH) — open a file (Emacs find-file); /ssh:HOST:/PATH opens over ssh")
-(public! 'register-file-opener! "(register-file-opener! SUFFIX FN) — let FN open matching local files before text decoding")
-(catalog-meta! 'function "register-file-opener!" 'domain 'files 'effects '(write))
+(public! 'visit "(visit PATH [GROUP]) — open a file; GROUP joins it to that context; /ssh:HOST:/PATH opens over ssh")
+(public! 'find-file-read "(find-file-read [GROUP]) — prompt for a file and join it to GROUP; no GROUP keeps it ungrouped")
 (domain! 'unknown)
 (effects! '(read))
 (public! 'buffer-link "(buffer-link [NAME] [LINE]) -> a URL that opens the buffer here; no NAME means this buffer at point")
@@ -7306,6 +8077,7 @@
 (domain! 'windows)
 (effects! '(read))
 (public! 'window-list "((id buffer-name) ...) for every window")
+(public! 'frame-cols "(frame-cols) — usable text columns across the selected frame")
 (public! 'window-showing "(window-showing NAME) — the window showing NAME, or #f")
 (public! 'window-buffer "(window-buffer ID) — the buffer that window shows, or #f")
 (public! 'other-window-id "(other-window-id ME) — any window that is not ME, or #f")
@@ -7317,12 +8089,18 @@
 (public! 'delete-other-windows! "Make the active window the only one")
 (public! 'other-window! "Select the next window")
 (public! 'display-buffer "(display-buffer NAME) — honors display rules (popups)")
+(public! 'display-buffer-popup!
+  "(display-buffer-popup! NAME [SIDE SIZE]) — force NAME into a temporary one-third popup; compact frames use the bottom")
 (public! 'display-buffer-other-window! "(display-buffer-other-window! NAME) — show NAME without leaving this window; picks the window at display time (reuse → other → split)")
 (public! 'add-display-rule!
   "(add-display-rule! SUBSTRING 'popup|'same) — popup floats over the right of the frame; one per frame, reused")
 (public! 'define-mode-layout!
   "(define-mode-layout! MODE '(h|v RATIO PANE ...)) — the frame arrangement that mode asks for; a PANE is 'self, a buffer-local name, or a buffer name")
 (public! 'apply-layout! "(apply-layout! ANCHOR SPEC) — arrange the frame by SPEC, ANCHOR keeping focus")
+(public! 'tile-windows!
+  "(tile-windows! ALGORITHM BUFFERS) — arrange names with columns, rows, grid, main-right, main-left, main-bottom, or main-top")
+(public! 'tile-visible-windows!
+  "(tile-visible-windows! ALGORITHM) — rearrange visible work windows with a named tiler")
 (effects! '(read))
 (public! 'buffer-layout "(buffer-layout NAME) — the layout NAME's modes declare, or #f")
 (effects! '(write))
@@ -7340,7 +8118,9 @@
 (catalog-meta! 'command "reset-layout" 'domain 'windows 'effects '(write))
 (catalog-meta! 'function "define-mode-layout!" 'domain 'windows 'effects '(write))
 (public! 'read-file-name "(read-file-name PROMPT K) — prompt with filename completion from default-directory; K gets the typed path")
-(public! 'minibuffer-read-preview "(minibuffer-read-preview PROMPT CANDIDATES ON-SELECT ON-CONFIRM ON-CANCEL &optional MATCH-HINT) — consult-style: ON-SELECT fires with the highlighted candidate as selection moves; MATCH-HINT also matches the input against the marginalia")
+(public! 'abbreviate-file-name "(abbreviate-file-name PATH) — PATH with the home directory written as ~")
+(public! 'buffer-modeline-name "(buffer-modeline-name BUF) — BUF's name for the modeline: project-relative, or ~ for home")
+(public! 'minibuffer-read-preview "(minibuffer-read-preview PROMPT CANDIDATES ON-SELECT ON-CONFIRM ON-CANCEL &optional MATCH-HINT STYLE COMPLETE COLLECT) — preview candidates and optionally route collected rows")
 (public! 'window-preview-buffer! "(window-preview-buffer! NAME) — show NAME in the active window without touching the MRU ring")
 
 (category! 'commands)
@@ -7358,6 +8138,10 @@
 (public! 'local-remap! "(local-remap! FROM-COMMAND TO-COMMAND) — Emacs [remap]: every key bound to FROM runs TO in this buffer (arrows, C-n/C-p, user bindings alike)")
 (public! 'local-remap*! "(local-remap*! BUF FROM-COMMAND TO-COMMAND) — remap in an explicit buffer")
 (public! 'define-mode "(define-mode NAME SETUP) — major mode; SETUP must rebuild from locals")
+(public! 'define-list-mode!
+  "(define-list-mode! NAME OPTS) — create a selectable text-table mode. Responsive layouts are ordered profiles selected by min-cols, max-cols, or default; profiles may override columns, cells, footer, and compact."
+  'ui)
+(catalog-meta! 'function "define-list-mode!" 'domain 'ui 'effects '(write))
 (public! 'marginalia! "(marginalia! CATEGORY FN) — FN turns one candidate of CATEGORY ('file 'buffer 'command) into the text beside it; replaces the annotator for that category")
 (public! 'annotate "(annotate CATEGORY NAMES) — NAMES as (LABEL HINT) candidates, through CATEGORY's annotator; NAMES unchanged when nothing registered one")
 (public! 'set-mode! "(set-mode! NAME) on the current buffer")

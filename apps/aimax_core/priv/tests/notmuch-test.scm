@@ -478,6 +478,34 @@
     (check-contains! (t--nm-calls) "show --format=json --include-html thread:0001" "the fetch")
     (t--nm-done!)))
 
+(deftest 'a-scene-role-routes-open-to-show-without-evicting-chat
+  "index, show and chat are semantic panes, not positions guessed by a command"
+  (lambda ()
+    (t--nm-setup!)
+    (define-scene! "zz-nm-role-scene"
+      '(h 0.32 (as index (ensure "*notmuch*" "notmuch-inbox"))
+               (as show (ensure "*mail*" "notmuch-show-current"))
+               (as chat group-chat)))
+    (scene-open! "zz-nm-role-scene")
+    (let* ((id (group-resolve-id "zz-nm-role-scene"))
+           (index-window (group-window-as id 'index))
+           (show-window (group-window-as id 'show))
+           (chat-window (group-window-as id 'chat))
+           (chat (group-buffer-as id 'chat)))
+      (check-equal! (window-buffer index-window) "*notmuch*" "index names the inbox pane")
+      (check-equal! (window-buffer show-window) "*mail*" "show names the message pane")
+      (check-equal! (window-buffer chat-window) chat "chat names the companion pane")
+      (select-window! index-window)
+      (run-command "notmuch-open-thread")
+      (check-equal! (active-window) index-window "open kept focus in the index")
+      (check-equal! (window-buffer index-window) "*notmuch*" "the index stayed put")
+      (check-contains! (buffer-text "*mail*") "Hi there" "the show pane opened the mail")
+      (check-equal! (window-buffer chat-window) chat "the chat stayed put")
+      (group-dissolve! id))
+    (set! *scenes*
+      (remove (lambda (entry) (equal? (car entry) "zz-nm-role-scene")) *scenes*))
+    (t--nm-done!)))
+
 (deftest 'moving-the-highlight-updates-the-shown-mail-and-marks-it-read
   "with auto-preview on, the next row is fetched and read"
   (lambda ()

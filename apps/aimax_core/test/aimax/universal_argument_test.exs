@@ -4,6 +4,7 @@ defmodule Aimax.UniversalArgumentTest do
   alias Aimax.Core.{Buffer, Editor, KeyDispatch, Session}
 
   defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+  defp type(text), do: text |> String.graphemes() |> press()
 
   defp eval!(source) do
     {:ok, value} = Session.eval(source)
@@ -36,6 +37,15 @@ defmodule Aimax.UniversalArgumentTest do
 
   test "universal-argument supplies one raw argument to the next command" do
     press(["<f9>", "u", "<f9>", "c"])
+
+    assert eval!("*zz-prefix-seen*") == "(4)"
+    assert eval!("(current-prefix-arg)") == "#f"
+  end
+
+  test "M-x forwards and consumes the raw prefix argument" do
+    press(["<f9>", "u", "M-x"])
+    type("zz-prefix-capture")
+    press("RET")
 
     assert eval!("*zz-prefix-seen*") == "(4)"
     assert eval!("(current-prefix-arg)") == "#f"

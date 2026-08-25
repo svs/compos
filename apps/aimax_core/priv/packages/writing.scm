@@ -325,7 +325,8 @@
 (register-minor-mode! "writing-layout" writing--layout-apply!
   (lambda (buf) #t))
 
-(define-mode-layout! "writing-layout" '(h 0.34 self scratch-buffer writing-chat-buffer))
+(define-mode-layout! "writing-layout"
+  (list 'h *window-third* 'self 'scratch-buffer 'writing-chat-buffer))
 
 (define-command "writing-layout" "Open the writing workspace layout"
   (lambda ()

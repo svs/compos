@@ -224,6 +224,37 @@ async function readerWindow() {
 }
 
 const OPS = {
+  // Run Chrome's built-in Gemini Nano Prompt API in the active page. The
+  // model is local to Chrome, so this connector needs no network credential.
+  async "gemini-nano"({ system = "", messages = [], prompt }) {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (!tab?.id) throw new Error("Chrome has no active tab for Gemini Nano");
+
+    const result = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: "MAIN",
+      func: async ({ system, messages, prompt }) => {
+        if (!globalThis.LanguageModel?.create) {
+          throw new Error("Chrome Prompt API is not available in this tab");
+        }
+
+        const initialPrompts = [];
+        if (system) initialPrompts.push({ role: "system", content: system });
+        for (const message of messages || []) {
+          if (message?.role && typeof message.content === "string") {
+            initialPrompts.push({ role: message.role, content: message.content });
+          }
+        }
+
+        const session = await LanguageModel.create({ initialPrompts });
+        return session.prompt(prompt);
+      },
+      args: [{ system, messages, prompt }],
+    });
+
+    return result?.[0]?.result || "";
+  },
+
   // The editor's reader fetches THROUGH the browser: the user's cookies
   // and Chrome's HTTP cache ride along, so a page that knows them logged
   // in reads logged in. The reply is the response body as text.

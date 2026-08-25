@@ -1,10 +1,19 @@
 ;;; ibuffer.scm --- the buffer list as a dired: filter, mark, act.
 ;;;
 ;;; C-x C-b and M-x ibuffer open *ibuffer*. The table shows one row per
-;;; buffer in MRU order. It includes the modified flag, name, size, mode,
-;;; group, and file status. The keys follow traditional Emacs ibuffer:
+;;; buffer in MRU order. Compact rows combine size, mode, and group details.
+;;; Wide rows also show file status. The keys follow traditional Emacs ibuffer:
 ;;; m marks, * marks all rows, d flags for killing, x executes, u and U
 ;;; unmark, RET visits, g refreshes, and q quits. / narrows the table.
+
+(domain! 'buffers)
+(effects! '(read))
+
+(defgroup 'buffers "Buffer lists and buffer management.")
+
+(defcustom 'ibuffer-compact-cols 100
+  "Below this width, ibuffer combines size, mode, and group details."
+  'group 'buffers 'type 'number)
 
 (define *ibuffer-buffer* "*ibuffer*")
 (add-display-rule! *ibuffer-buffer* 'popup)
@@ -19,20 +28,22 @@
         (equal? path root)
         (string-prefix? (string-append root "/") path))))
 
-(define (ibuffer-visible)
-  (list-keep *ibuffer-buffer*
-    (filter (lambda (b)
-              (and (not (equal? b *ibuffer-buffer*))
-                   (not (string-prefix? " " b))
-                   (ibuffer-workspace-buffer? b)))
-            (buffer-list-mru))))
+(define (ibuffer-row? b)
+  (and (buffer-known? b)
+       (not (equal? b *ibuffer-buffer*))
+       (not (string-prefix? " " b))
+       (ibuffer-workspace-buffer? b)))
 
-(define (ibuffer-total)
-  (length (filter (lambda (b)
-                    (and (not (equal? b *ibuffer-buffer*))
-                         (not (string-prefix? " " b))
-                         (ibuffer-workspace-buffer? b)))
-                  (buffer-list-mru))))
+;; #f means the ordinary complete table. A list, including an empty list,
+;; is the exact result set that a buffer prompt handed to ibuffer.
+(define (ibuffer-source)
+  (let ((scope (buffer-local *ibuffer-buffer* 'ibuffer-scope)))
+    (filter ibuffer-row? (if (equal? scope #f) (buffer-list-mru) scope))))
+
+(define (ibuffer-visible)
+  (list-keep *ibuffer-buffer* (ibuffer-source)))
+
+(define (ibuffer-total) (length (ibuffer-source)))
 
 (define (ibuffer-human n)
   (cond ((>= n 1048576)
@@ -41,14 +52,52 @@
          (string-append (number->string (quotient n 1024)) "k"))
         (else (number->string n))))
 
-(define (ibuffer-cells buf b)
+(define (ibuffer-short-mode b)
+  (let* ((mode (or (buffer-local b 'mode-name) "Fundamental"))
+         (n (string-length mode)))
+    (if (and (> n 5) (string-suffix? "-mode" mode))
+        (substring mode 0 (- n 5))
+        mode)))
+
+(define (ibuffer-details b)
+  (string-join
+    (filter (lambda (part) (not (equal? part "")))
+      (list (ibuffer-human (buffer-size b))
+            (ibuffer-short-mode b)
+            (group-label (buffer-group b))))
+    " · "))
+
+(define (ibuffer-compact-columns buf)
+  (let ((name-width (max 20 (min 32 (quotient (list-view-width buf) 2)))))
+    (list (list "" 1)
+          (list "" 1)
+          (list "buffer" name-width)
+          (list "details" #f))))
+
+(define (ibuffer-wide-columns buf)
+  (list (list "" 1)
+        (list "" 1)
+        (list "buffer" #f)
+        (list "size" 7 'right)
+        (list "mode" 16)
+        (list "group" 18)
+        (list "file" 4)))
+
+(define (ibuffer-cell-head b)
   (list (if (buffer-modified? b) (list "●" "warn") "")
         (list (buffer-icon b) "faint")
-        (list b (if (string-prefix? "*" b) "accent" #f))
-        (list (ibuffer-human (buffer-size b)) "dim")
-        (list (or (buffer-local b 'mode-name) "Fundamental") "faint")
-        (list (group-label (buffer-group b)) "accent")
-        (list (if (buffer-path b) "✓" "") "ok")))
+        (list b (if (string-prefix? "*" b) "accent" #f))))
+
+(define (ibuffer-compact-cells buf b)
+  (append (ibuffer-cell-head b)
+          (list (list (ibuffer-details b) "faint"))))
+
+(define (ibuffer-wide-cells buf b)
+  (append (ibuffer-cell-head b)
+    (list (list (ibuffer-human (buffer-size b)) "dim")
+          (list (or (buffer-local b 'mode-name) "Fundamental") "faint")
+          (list (group-label (buffer-group b)) "accent")
+          (list (if (buffer-path b) "✓" "") "ok"))))
 
 (define (ibuffer-meta buf)
   (let* ((rows (list-entries buf))
@@ -56,7 +105,16 @@
          (dirty (length (filter buffer-modified? rows))))
     (string-append (number->string n) (if (= n 1) " buffer" " buffers")
                    " · " (number->string dirty) " modified"
-                   " · most recent first")))
+                   " · recent first")))
+
+(define (ibuffer-compact-footer buf)
+  '(("RET" "visit") ("m" "mark") ("k" "kill") ("G" "group")
+    ("d" "flag") ("x" "execute") ("/" "filter") ("q" "quit")))
+
+(define (ibuffer-wide-footer buf)
+  '(("RET" "visit") ("m" "mark") ("*" "all") ("k" "kill")
+    ("G" "group") ("d" "flag") ("x" "execute") ("/" "filter")
+    ("\\" "widen") ("g" "refresh") ("q" "quit")))
 
 (define (ibuffer-refresh!) (list-refresh! *ibuffer-buffer*))
 (define (ibuffer-current) (list-current *ibuffer-buffer*))
@@ -65,18 +123,25 @@
 (domain! 'buffers)
 (effects! '(read))
 
+(define (ibuffer-open! scope)
+  (let ((from (active-window)))
+    (buffer-create *ibuffer-buffer*)
+    (buffer-set-local! *ibuffer-buffer* 'ibuffer-scope scope)
+    ;; Typed narrowing is temporary. Keep any mode-specific filters.
+    (list-clear-query! *ibuffer-buffer*)
+    (display-buffer *ibuffer-buffer*)
+    (let ((w (window-showing-other *ibuffer-buffer* from)))
+      (if w (select-window! w) (switch-to-buffer! *ibuffer-buffer*)))
+    (set-mode! "ibuffer-mode")
+    (ibuffer-refresh!)
+    (list-goto-first-entry *ibuffer-buffer*)))
+
+(define (ibuffer-open-buffers! buffers)
+  (ibuffer-open! (dedupe-names (filter buffer-known? buffers)))
+  (list-preview! *ibuffer-buffer*))
+
 (define-command "ibuffer" "List buffers in a traditional management table"
-  (lambda ()
-    (let ((from (active-window)))
-      (buffer-create *ibuffer-buffer*)
-      ;; Typed narrowing is temporary. Keep any mode-specific filters.
-      (list-clear-query! *ibuffer-buffer*)
-      (display-buffer *ibuffer-buffer*)
-      (let ((w (window-showing-other *ibuffer-buffer* from)))
-        (if w (select-window! w) (switch-to-buffer! *ibuffer-buffer*)))
-      (set-mode! "ibuffer-mode")
-      (ibuffer-refresh!)
-      (list-goto-first-entry *ibuffer-buffer*))))
+  (lambda () (ibuffer-open! #f)))
 
 (define-command "ibuffer-visit" "Visit the selected buffer in another window"
   (lambda ()
@@ -131,8 +196,7 @@
   (let ((n (length targets))
         (out? (equal? g *ibuffer-no-group*)))
     (for-each (lambda (b)
-                (buffer-set-local! b 'group (if out? #f g))
-                (when out? (buffer-set-local! b 'companion-of #f))
+                (buffer-move-to-group! b (if out? #f g))
                 (list-unmark-key! buf b))
               targets)
     (list-refresh! buf)
@@ -167,8 +231,8 @@
 (define-list-mode! "ibuffer-mode"
   (list
     'doc (string-append
-           "A traditional buffer management table. Each row shows the "
-           "modified flag, size, mode, group, and file status. / narrows "
+           "A traditional buffer management table. Compact rows combine "
+           "size, mode, and group details. Wide rows also show file status. / narrows "
            "the table and \\ widens it. m marks one row, * marks all shown "
            "rows, u unmarks one row, and U clears all marks. k kills now. "
            "d flags rows for killing, and x executes the flags. G puts "
@@ -177,22 +241,22 @@
     'category 'buffer
     'rows (lambda (buf) (ibuffer-visible))
     'stamp (lambda (buf) (length (buffer-list-mru)))
-    'columns (lambda (buf)
-               (list (list "" 1)
-                     (list "" 1)
-                     (list "buffer" #f)
-                     (list "size" 7 'right)
-                     (list "mode" 16)
-                     (list "group" 18)
-                     (list "file" 4)))
-    'cells ibuffer-cells
+    'layouts
+      (list
+        (list 'name 'compact
+              'max-cols (lambda (buf) (- ibuffer-compact-cols 1))
+              'columns ibuffer-compact-columns
+              'cells ibuffer-compact-cells
+              'footer ibuffer-compact-footer)
+        (list 'name 'wide
+              'default #t
+              'columns ibuffer-wide-columns
+              'cells ibuffer-wide-cells
+              'footer ibuffer-wide-footer))
     'title (lambda (buf) "Buffers")
     'meta ibuffer-meta
     'total (lambda (buf) (ibuffer-total))
-    'footer (lambda (buf)
-              '(("RET" "visit") ("m" "mark") ("*" "all") ("k" "kill")
-                ("G" "group") ("d" "flag") ("x" "execute") ("/" "filter")
-                ("\\" "widen") ("g" "refresh") ("q" "quit")))
+    'compact #t
     'flags (list (list "d" "D" "kill"
                        (lambda (buf b)
                          (and (buffer-known? b)
@@ -210,3 +274,4 @@
 (catalog-meta! 'command "ibuffer-kill" 'domain 'buffers 'effects '(destroy))
 (catalog-meta! 'command "ibuffer-group" 'domain 'buffers 'effects '(write))
 (public! 'ibuffer-refresh! "(ibuffer-refresh!) — rebuild the *ibuffer* table")
+(public! 'ibuffer-open-buffers! "(ibuffer-open-buffers! BUFFERS) — open ibuffer on exactly these known buffers")

@@ -25,6 +25,17 @@
       (check-equal! (buffer-text buf) "X Y X Y X\n" "and both changed")
       (t--drop-edit!))))
 
+(deftest 'editor-replace-string-replaces-every-occurrence
+  "the editor replacement pass searches the target buffer, not the minibuffer"
+  (lambda ()
+    (let ((buf (t--edit-buffer "one two one"))
+          (count 0))
+      (with-current-buffer buf
+        (lambda () (set! count (replace--all! buf "one" "X" 0))))
+      (check-equal! count 2 "two matches are replaced")
+      (check-equal! (buffer-text buf) "X two X" "the target buffer changes")
+      (t--drop-edit!))))
+
 (deftest 'replace-all-is-one-pass
   "one atomic replacement, whatever the number of hits, so one undo
    puts the text back"

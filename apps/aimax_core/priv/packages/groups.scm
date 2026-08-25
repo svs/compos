@@ -1,14 +1,16 @@
 ;;; groups.scm --- Buffer groups, saved layouts, and companion chats.
 
 ;;;; A group is a durable context with a stable record and opaque ID.
-;;;; Work buffers contain group ID sets. Chats contain one owning group ID.
+;;;; Work buffers contain group ID sets and may name their role in each group.
+;;;; Chats contain one owning group ID and always have the role "chat".
 ;;;; This package owns membership, switching, layouts, records, and chats.
 
 (domain! 'buffers)
 (effects! '(write))
 
 ;;; --- durable group records and buffer-local membership -------------------------
-;;; Work buffers use 'group-ids. Chats use one 'group-id and one 'chat-id. —
+;;; Work buffers use 'group-ids plus 'group-roles. Chats use one 'group-id
+;;; and one 'chat-id. —
 ;;; Old 'group and 'companion-of — locals migrate on the first membership read.
 ;;; Group records persist independently, including empty and chatless groups.
 ;;; (group-buffers g) derives live membership from buffer-local identity.
@@ -98,7 +100,8 @@
                       (if (equal? field 'noise) new-value (group-record-noise record))
                       (if (equal? field 'primary-chat-id) new-value
                           (group-record-primary-chat-id record)))))
-          *group-records*)))))
+          *group-records*))
+      (when (equal? field 'name) (modeline-groups-refresh!)))))
 
 (define (group-record-delete! value)
   (let ((id (group-resolve-id value)))
@@ -106,12 +109,14 @@
       (group-frame-context-remove-id! id)
       (set! *group-records*
         (remove (lambda (record) (equal? (group-record-id record) id))
-                *group-records*)))))
+                *group-records*))
+      (modeline-groups-refresh!))))
 
 (define (group-state-restore! saved)
   (when (and (pair? saved) (pair? (cdr saved)))
     (set! *group-next-id* (car saved))
-    (set! *group-records* (car (cdr saved)))))
+    (set! *group-records* (car (cdr saved)))
+    (modeline-groups-refresh!)))
 
 (persist-global! 'groups-v2
   (lambda () (list *group-next-id* *group-records*))
@@ -320,6 +325,23 @@
     (let ((known (filter string? names)))
       (if (pair? known) (string-join known ", ") "ungrouped"))))
 
+;; Names are cached on the buffer for the render path. The compact label is
+;; frame-relative (the same buffer can appear in two frames), so Elixir combines
+;; this membership data with that frame's current-group name while rendering.
+(define (buffer-modeline-group-refresh! b)
+  (let ((names (if (chat-buffer? b)
+                   (let ((id (chat-group-id b)))
+                     (if id (list (group-name id)) '()))
+                   (map group-name (buffer-group-ids b)))))
+    (let ((known (filter string? names)))
+      (unless (equal? (buffer-local b 'modeline-groups) known)
+        (buffer-set-local! b 'modeline-groups known))
+      known)))
+
+(define (modeline-groups-refresh!)
+  (for-each buffer-modeline-group-refresh! (buffer-list))
+  #t)
+
 (define (buffer-in-group? b value)
   (let ((id (group-resolve-id value)))
     (if (and id
@@ -334,19 +356,59 @@
     (buffer-set-local! b 'group-id id)
     (buffer-set-local! b 'group #f)
     (buffer-set-local! b 'companion-of #f)
+    (buffer-modeline-group-refresh! b)
     id))
+
+;; A role belongs to the membership, not globally to the buffer: one buffer
+;; can be `source` in one group and `reference` in another. Strings are kept
+;; in the local so desktop files are readable; callers may use symbols.
+(define (group-role-name role)
+  (cond ((string? role) role)
+        ((symbol? role) (symbol->string role))
+        (else #f)))
+
+(define (buffer-group-role b value)
+  (let ((id (group-resolve-id value)))
+    (cond ((not id) #f)
+          ((chat-buffer? b)
+           (and (equal? (chat-group-id b) id) "chat"))
+          (else
+            (let ((entry (assoc id (or (buffer-local b 'group-roles) '()))))
+              (and entry (car (cdr entry))))))))
+
+(define (buffer-set-group-role! b value role)
+  (let ((id (group-resolve-id value))
+        (name (group-role-name role)))
+    (cond ((or (not id) (not name)) #f)
+          ;; A chat's relationship is ownership rather than ordinary work
+          ;; membership, but semantically it is always the group's chat.
+          ((chat-buffer? b)
+           (and (equal? (chat-group-id b) id) "chat"))
+          ((not (buffer-in-group? b id)) #f)
+          (else
+            (let ((others
+                    (remove (lambda (entry) (equal? (car entry) id))
+                            (or (buffer-local b 'group-roles) '()))))
+              (buffer-set-local! b 'group-roles
+                (append others (list (list id name))))
+              name)))))
 
 (define (buffer-add-group! b value)
   (let ((id (group-ensure-record! value)))
     (cond ((not id) #f)
           ((chat-buffer? b) #f)
-          ((buffer-in-group? b id) id)
+          ((buffer-in-group? b id) (buffer-modeline-group-refresh! b) id)
           (else
             (buffer-set-local! b 'group-ids
               (append (buffer-group-ids b) (list id)))
             (buffer-set-local! b 'group #f)
             (buffer-set-local! b 'companion-of #f)
+            (buffer-modeline-group-refresh! b)
             id))))
+
+(define (buffer-add-group-as! b value role)
+  (let ((id (buffer-add-group! b value)))
+    (and id (buffer-set-group-role! b id role) id)))
 
 (define (buffer-move-to-group! b value)
   (let ((id (and value (group-ensure-record! value))))
@@ -354,8 +416,10 @@
         (chat-set-group! b id)
         (begin
           (buffer-set-local! b 'group-ids (if id (list id) '()))
+          (buffer-set-local! b 'group-roles '())
           (buffer-set-local! b 'group #f)
-          (buffer-set-local! b 'companion-of #f)))
+          (buffer-set-local! b 'companion-of #f)
+          (buffer-modeline-group-refresh! b)))
     id))
 
 (define (buffer-remove-group! b value)
@@ -364,14 +428,22 @@
       (if (chat-buffer? b)
           (when (equal? (chat-group-id b) id)
             (buffer-set-local! b 'group-id #f))
-          (buffer-set-local! b 'group-ids
-            (remove (lambda (x) (equal? x id)) (buffer-group-ids b)))))))
+          (begin
+            (buffer-set-local! b 'group-ids
+              (remove (lambda (x) (equal? x id)) (buffer-group-ids b)))
+            (buffer-set-local! b 'group-roles
+              (remove (lambda (entry) (equal? (car entry) id))
+                      (or (buffer-local b 'group-roles) '())))))
+      (buffer-modeline-group-refresh! b))))
 
 (define (buffer-replace-group! b old new)
   (let ((old-id (group-resolve-id old))
-        (new-id (group-ensure-record! new)))
+        (new-id (group-ensure-record! new))
+        (role (buffer-group-role b old)))
     (when (and old-id new-id (buffer-in-group? b old-id))
-      (buffer-add-group! b new-id)
+      (if role
+          (buffer-add-group-as! b new-id role)
+          (buffer-add-group! b new-id))
       (buffer-remove-group! b old-id))))
 
 ;; the group column in a buffer prompt. A group founded by a file buffer
@@ -412,9 +484,11 @@
     (and primary
          (let loop ((buffers (buffer-list)))
            (cond ((null? buffers) #f)
-                 ((and (chat-buffer? (car buffers))
-                       (equal? (chat-group-id (car buffers)) id)
-                       (equal? (buffer-local (car buffers) 'chat-id) primary))
+                 ((and (equal? (group-resolve-id
+                                 (buffer-local (car buffers) 'group-id))
+                               id)
+                       (equal? (buffer-local (car buffers) 'chat-id)
+                               primary))
                   (car buffers))
                  (else (loop (cdr buffers))))))))
 
@@ -509,11 +583,12 @@
           (delete-window-id! (car w)))))
     (window-list)))
 
-;; the modeline names the group the FRAME stands in, and only Scheme can
-;; turn a record id into a name — so every move that changes where the
-;; frame stands, or what its group is called, pushes the label out.
+;; Scheme owns both sides of the modeline's group context: the frame's current
+;; group name and every buffer's membership names. The renderer only compacts
+;; those facts for the width available in the bar.
 (define (frame-group-label-refresh!)
-  (set-frame-group-label! (or (group-name (frame-local 'current-group)) #f)))
+  (set-frame-group-label! (or (group-name (frame-local 'current-group)) #f))
+  (modeline-groups-refresh!))
 
 ;; a reattached frame keeps its group in *frame-locals*, but the Elixir
 ;; frame behind it is new and its label is empty — so push it on attach
@@ -524,17 +599,18 @@
 ;;; how to build each pane, as data.
 ;;;
 ;;;   (define-scene! "mail"
-;;;     '(h 0.32 (ensure "*notmuch*" "notmuch-index")
-;;;              (ensure "*notmuch-show*" "notmuch-preview")
-;;;              group-chat))
+;;;     '(h 0.32 (as index (ensure "*notmuch*" "notmuch-index"))
+;;;              (as show (ensure "*notmuch-show*" "notmuch-preview"))
+;;;              (as chat group-chat)))
 ;;;
 ;;; Running it always gives the same frame, in the same group. Run it twice
 ;;; and nothing moves; kill any pane's buffer and the next run builds it
 ;;; back. That is the whole contract, and it is why a scene declares its
 ;;; panes with `ensure` — a name plus the command that makes it.
 ;;;
-;;; The spec is the mode-layout grammar (DIR RATIO PANE ...), plus one pane
-;;; of its own: group-chat, the group's own chat, made if it does not exist.
+;;; The spec is the mode-layout grammar (DIR RATIO PANE ...), plus `(as ROLE
+;;; PANE)`: a semantic, group-relative name for that pane. `group-chat` is
+;;; the group's own chat, made if it does not exist.
 ;;; Every pane a scene realises JOINS its group, so a scene's buffers are
 ;;; members by construction rather than by hand.
 ;;;
@@ -561,10 +637,21 @@
 ;; group-chat is the one pane the generic engine cannot name: the buffer
 ;; depends on the group, and it may have to be made. Resolve it here, then
 ;; hand the engine a spec it already understands.
+(define (scene--as? pane)
+  (and (pair? pane) (equal? (car pane) 'as)
+       (pair? (cdr pane)) (pair? (cdr (cdr pane)))))
+
+(define (scene--role pane)
+  (and (scene--as? pane) (group-role-name (car (cdr pane)))))
+
+(define (scene--declared-pane pane)
+  (if (scene--as? pane) (car (cdr (cdr pane))) pane))
+
 (define (scene--pane id pane)
-  (if (equal? pane 'group-chat)
-      (or (group-chat id) "")
-      pane))
+  (let ((pane (scene--declared-pane pane)))
+    (if (equal? pane 'group-chat)
+        (or (group-chat id) "")
+        pane)))
 
 (define (scene--resolve id spec)
   (if (not (pair? spec))
@@ -597,6 +684,18 @@
                             (chat-set-group! b id)
                             (buffer-add-group! b id)))
                       panes)
+            ;; `as` is a role on this buffer's membership in this group.
+            ;; Bind after the layout has materialised every ensure pane.
+            (for-each
+              (lambda (declared)
+                (let* ((role (scene--role declared))
+                       (pane (scene--pane id declared))
+                       (buf (and role (layout--pane anchor pane))))
+                  (when buf
+                    (if (chat-buffer? buf)
+                        (chat-set-group! buf id)
+                        (buffer-add-group-as! buf id role)))))
+              (cdr (cdr spec)))
             (mru-note-group! id)
             (windows-shown-catchup!)
             panes)))))
@@ -608,7 +707,7 @@
           (message "No scenes declared")
           (minibuffer-read "Scene: " names scene-open!)))))
 
-(public! 'define-scene! "(define-scene! NAME SPEC) — declare a group's arrangement; SPEC is (DIR RATIO PANE ...) where a PANE is \"NAME\", (ensure \"NAME\" \"COMMAND\"), or group-chat")
+(public! 'define-scene! "(define-scene! NAME SPEC) — declare a group's arrangement; write each pane as (as ROLE PANE), where PANE is \"NAME\", (ensure \"NAME\" \"COMMAND\"), or group-chat")
 (public! 'scene-open! "(scene-open! NAME) — stand in the scene's group and build its arrangement, making any missing pane")
 
 ;; A layout names buffers, and a member killed since it was saved is a
@@ -890,6 +989,7 @@
     (when (equal? (frame-local 'current-group) id)
       (set-frame-local! 'current-group #f))
     (when id (group-record-delete! id))
+    (frame-group-label-refresh!)
     (message
       (if (pair? survivors)
           (string-append "Killed group " name ". Kept "
@@ -998,12 +1098,42 @@
     (dedupe-names
       (append mru (remove (lambda (b) (member b mru)) (group-buffers id))))))
 
+;; Semantic membership lookup. This is the vocabulary a scene, a person and
+;; an agent share: "show" resolves without knowing a buffer name or position.
+(define (group-buffers-as g role)
+  (let ((id (group-resolve-id g))
+        (name (group-role-name role)))
+    (if (and id name)
+        (filter (lambda (b) (equal? (buffer-group-role b id) name))
+                (group-buffers-mru id))
+        '())))
+
+(define (group-buffer-as g role)
+  (let ((buffers (group-buffers-as g role)))
+    (and (pair? buffers) (car buffers))))
+
+(define (group-window-as g role)
+  (let ((buffers (group-buffers-as g role)))
+    (let loop ((windows (window-list)))
+      (cond ((null? windows) #f)
+            ((member (car (cdr (car windows))) buffers) (car (car windows)))
+            (else (loop (cdr windows)))))))
+
+(define (scene-buffer role)
+  (let ((id (frame-local 'current-group)))
+    (and id (group-buffer-as id role))))
+
+(define (scene-window role)
+  (let ((id (frame-local 'current-group)))
+    (and id (group-window-as id role))))
+
 (define (group-migrate-live!)
   (for-each
     (lambda (buf)
       (if (chat-buffer? buf)
           (chat-group-id buf)
-          (buffer-group-ids buf)))
+          (buffer-group-ids buf))
+      (buffer-modeline-group-refresh! buf))
     (buffer-list))
   #t)
 
@@ -1033,17 +1163,25 @@
         id)))
 
 ;; a fresh group chat is a rich surface from birth: help on top (a "meta"
-;; card in the agent design), then the >>> you: input region
+;; card in the agent design), then the >>> you: input region. Build the
+;; surface before mode setup, because setup sees the marker and installs the
+;; rich chat runtime. An identity-only buffer from an old restore heals here.
 (define (group-chat-init! buf g)
-  (let ((id (group-resolve-id g)))
-    (with-current-buffer buf
-      (lambda () (set-mode! "chat-mode")))
-    (chat-surface-init! buf (string-append "companion · " (group-name id))
-      (string-append
-        "RET sends · C-c w hops to the document · "
-        "C-c m model · C-c C-v plain view\n"
-        "it reads the live buffers before it speaks, "
-        "and edits them in place when you ask\n"))))
+  (let ((id (group-resolve-id g))
+        (setup? (or (not (chat-buffer? buf))
+                    (not (buffer-local buf 'agent-saved-mark)))))
+    (when (and (= (buffer-size buf) 0)
+               (not (buffer-local buf 'agent-saved-mark)))
+      (chat-surface-init! buf (string-append "companion · " (group-name id))
+        (string-append
+          "RET sends · C-c w hops to the document · "
+          "C-c m model · C-c C-v plain view\n"
+          "it reads the live buffers before it speaks, "
+          "and edits them in place when you ask\n")))
+    (when setup?
+      (with-current-buffer buf
+        (lambda () (set-mode! "chat-mode"))))
+    buf))
 
 (define (group-chat-name g)
   (string-append "*chat:" (group-name g) "*"))
@@ -1059,16 +1197,18 @@
   (let* ((id (group-ensure-record! g))
          (primary (and id (group-primary-chat id)))
          (chats (and id (filter chat-buffer? (group-buffers-mru id)))))
-    (cond (primary primary)
+    (cond (primary
+           (group-chat-init! primary id))
           ((and chats (pair? chats))
            (let ((buf (car chats)))
+             (group-chat-init! buf id)
              (group-record-update! id 'primary-chat-id (chat-stable-id! buf))
              buf))
           (id
             (let ((buf (group-chat-name id)))
               (unless (buffer-exists? buf)
-                (buffer-create buf)
-                (group-chat-init! buf id))
+                (buffer-create buf))
+              (group-chat-init! buf id)
               (chat-set-group! buf id)
               (group-record-update! id 'primary-chat-id (chat-stable-id! buf))
               (when (boundp (quote workspace-chat-inherit!))
@@ -1195,6 +1335,16 @@
             (message "Group needs a name")
             (receive (or (group-resolve-id name)
                          (group-ensure-record! name))))))))
+
+;; C-u M-x opencode and the group-prefix command use the same destination
+;; reader as files and projects.  Enter the group first so a new terminal
+;; inherits that group's working directory and layout context.
+(set! opencode-group-reader
+  (lambda (receive)
+    (group-read-or-create! "Open OpenCode in group: "
+      (lambda (group)
+        (switch-to-group! group)
+        (receive group)))))
 
 (define-command "group-new" "Create and enter an empty group"
   (lambda ()
@@ -1325,7 +1475,16 @@
               (sleep-woken! #f))
             ;; The mode, group, and project match the input. The icon is
             ;; the first field, so the match hint covers four fields.
-            4)))))
+            4 #f #f
+            ;; Collection reuses ibuffer. It receives only the candidates
+            ;; that survived the prompt's narrowing; headings are not buffers.
+            (lambda (rows)
+              (when (buffer-known? here) (window-preview-buffer! here))
+              (sleep-woken! #f)
+              (let ((buffers (filter buffer-known? (map car rows))))
+                (if (null? buffers)
+                    (message "No buffer candidates to collect")
+                    (ibuffer-open-buffers! buffers)))))))))
 
 (define (group-pull-buffers! buffers value)
   (let ((id (group-resolve-id value))
@@ -1388,6 +1547,15 @@
           (map car (list-targets buf))
           (list buf)))))
 
+(define (group-selected-visible-work-buffers)
+  (filter (lambda (buf) (buffer-local buf 'buffer-selected))
+          (group-visible-work-buffers)))
+
+(define (group-command-selected-or-visible-buffers)
+  (let* ((visible (group-visible-work-buffers))
+         (selected (group-selected-visible-work-buffers)))
+    (if (pair? selected) selected visible)))
+
 ;; The prompt takes a typed name as well as a listed one, and a name it
 ;; does not know is a group to found — the same answer the "New group"
 ;; row gives. group-ensure-record! still refuses an id, so a dangling
@@ -1420,6 +1588,18 @@
           (run-hooks 'group-membership-hook)
           changed))))
 
+(define (group-confirm-target! id continue)
+  (if (not id)
+      (message "Group needs a name")
+      (let ((members (group-buffers-mru id)))
+        (if (null? members)
+            (continue)
+            (y-or-n
+              (string-append "Target group " (group-name id) " contains:\n"
+                             (string-join members "\n")
+                             "\nContinue? ")
+              continue)))))
+
 (define (group-push-read-destination! buffers)
   (minibuffer-read "Push buffers to group: "
     (cons (list "New group" "create without entering") (group-names))
@@ -1429,7 +1609,10 @@
             (lambda (name)
               (let ((id (group-record-create! name)))
                 (when id (group-push-buffers-to! buffers id)))))
-          (group-push-buffers-to! buffers destination)))))
+          (let ((id (or (group-resolve-id destination)
+                        (group-record-create! destination))))
+            (group-confirm-target! id
+              (lambda () (group-push-buffers-to! buffers id))))))))
 
 (define-command "group-push-buffer"
   "Push the current or marked work buffers to another group"
@@ -1438,6 +1621,71 @@
       (if (null? buffers)
           (message "No work buffer selected")
           (group-push-read-destination! buffers)))))
+
+(define (group-move-buffers-to! buffers destination source)
+  (let ((id (group-ensure-record! destination))
+        (source-id (group-resolve-id source)))
+    (cond
+      ((not source-id) (message "No source group"))
+      ((equal? id source-id) (message "Destination is already the source group"))
+      (else
+        (let ((eligible
+               (filter (lambda (buf)
+                         (and (buffer-known? buf)
+                              (group-work-buffer? buf)
+                              (buffer-in-group? buf source-id)))
+                       buffers)))
+          (for-each (lambda (buf)
+                      (buffer-add-group! buf id)
+                      (buffer-remove-group! buf source-id))
+                    eligible)
+          (run-hooks 'group-membership-hook)
+          (message (string-append "Moved " (number->string (length eligible))
+                                  " buffer"
+                                  (if (= (length eligible) 1) "" "s")
+                                  " from " (group-name source-id)
+                                  " to " (group-name id)))
+          (length eligible))))))
+
+(define (group-move-read-destination! buffers source)
+  (minibuffer-read "Move buffers to group: "
+    (cons (list "New group" "create without entering") (group-names))
+    (lambda (destination)
+      (if (equal? destination "New group")
+          (group-read-new-name "New destination group: "
+            (lambda (name)
+              (let ((id (group-record-create! name)))
+                (when id (group-move-buffers-to! buffers id source)))))
+          (let ((id (or (group-resolve-id destination)
+                        (group-record-create! destination))))
+            (group-confirm-target! id
+              (lambda () (group-move-buffers-to! buffers id source))))))))
+
+(define-command "group-push-visible"
+  "Push selected buffers, or all visible work buffers, to another group"
+  (lambda ()
+    (let ((buffers (group-command-selected-or-visible-buffers)))
+      (if (null? buffers)
+          (message "No work buffers selected or visible")
+          (group-push-read-destination! buffers)))))
+
+(define-command "group-push-selected"
+  "Push explicitly selected visible work buffers to another group"
+  (lambda ()
+    (let ((buffers (group-selected-visible-work-buffers)))
+      (if (null? buffers)
+          (message "No selected visible work buffers")
+          (group-push-read-destination! buffers)))))
+
+(define-command "group-move-visible"
+  "Move selected buffers, or all visible work buffers, to another group"
+  (lambda ()
+    (let ((buffers (group-command-selected-or-visible-buffers))
+          (source (frame-local 'current-group)))
+      (cond
+        ((null? buffers) (message "No work buffers selected or visible"))
+        ((not (group-resolve-id source)) (message "No source group"))
+        (else (group-move-read-destination! buffers source))))))
 
 (define (group-pop-replacement id popped)
   (let* ((popped-buffers (if (pair? popped) popped (list popped)))
@@ -1598,6 +1846,18 @@
           (run-command "agent-send")
           (group-ask! (group-ensure! cur))))))
 
+(define-command "group-show-all"
+  "Tile every buffer in the current group with the adaptive layout"
+  (lambda ()
+    (let ((group (frame-group)))
+      (if (not group)
+          (message "No current group")
+          (let ((buffers (group-buffers-mru group)))
+            ;; A durable group can outlive every work buffer. Its primary
+            ;; chat is the group surface that can always be reconstructed.
+            (tile-adaptive-windows!
+              (if (pair? buffers) buffers (list (group-chat group)))))))))
+
 
 (mode-icon! "groups-mode" "")
 
@@ -1607,18 +1867,28 @@
 (global-set-key "C-x b" "group-switch-to-buffer")
 (global-set-key "C-x g" "group-switch")
 (global-set-key "C-x C-g g" "group-switch")
+(global-set-key "C-x C-g p" "group-push-selected")
 (global-set-key "C-x C-g j" "group-join")
 (global-set-key "C-x C-g l" "groups")
+(global-set-key "C-x C-g o" "opencode-in-group")
+(global-set-key "C-x C-g s" "group-show-all")
 
 (public! 'group-ids "(group-ids) -> durable opaque group IDs")
 (public! 'group-name "(group-name ID) -> the current display name")
 (public! 'buffer-group-ids "(buffer-group-ids NAME) -> work memberships")
 (public! 'buffer-in-group? "(buffer-in-group? NAME ID) -> membership")
+(public! 'buffer-group-role "(buffer-group-role BUFFER GROUP) -> semantic role string or #f; chats answer \"chat\"")
+(public! 'buffer-add-group-as! "(buffer-add-group-as! BUFFER GROUP ROLE) — join GROUP with a semantic role")
 (public! 'group-record-create! "(group-record-create! NAME) -> new stable ID or #f")
 (public! 'group-read-or-create!
   "(group-read-or-create! PROMPT RECEIVE) — read an existing group or create the typed name")
 (public! 'buffer-group "(buffer-group NAME) -> the buffer's group tag or #f")
 (public! 'group-buffers "(group-buffers G) -> names of the buffers tagged 'group G")
+(public! 'group-buffers-as "(group-buffers-as GROUP ROLE) -> buffers with that group-relative role")
+(public! 'group-buffer-as "(group-buffer-as GROUP ROLE) -> most recent buffer with ROLE, or #f")
+(public! 'group-window-as "(group-window-as GROUP ROLE) -> visible window for ROLE, or #f")
+(public! 'scene-buffer "(scene-buffer ROLE) -> current scene/group buffer with ROLE, or #f")
+(public! 'scene-window "(scene-window ROLE) -> current scene/group window with ROLE, or #f")
 (public! 'group-chat "(group-chat G) — find or create G's chat buffer; returns its name")
 (public! 'group-chat-show! "(group-chat-show! G) — open/focus G's chat pane; returns its name")
 

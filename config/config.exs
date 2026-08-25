@@ -31,6 +31,18 @@ config :aimax_core, daemon_registry_path: Path.expand("~/.aimax/daemons.json")
 
 config :phoenix, :json_library, Jason
 
+if config_env() == :dev do
+  config :aimax_ui, Aimax.Ui.Endpoint,
+    code_reloader: true,
+    debug_errors: true,
+    live_reload: [
+      patterns: [
+        ~r"apps/aimax_ui/priv/static/.*(js|css|png|jpeg|jpg|gif|svg)$",
+        ~r"apps/aimax_ui/(lib|priv)/.*(ex|heex)$"
+      ]
+    ]
+end
+
 # AIMAX_VERIFY=1 mix run --no-halt: an isolated daemon (own port, home,
 # socket) for verifying changes from a worktree while the real one runs
 if config_env() == :dev and System.get_env("AIMAX_VERIFY") do

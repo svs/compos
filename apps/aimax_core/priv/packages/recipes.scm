@@ -44,10 +44,10 @@
 ;;; --- windows ------------------------------------------------------------------
 
 (defrecipe! "open a file"
-  "(visit {{path}})"
+  "(visit {{path}} (buffer-group (current-buffer)))"
   (list (list 'path "File: ")))
 (defrecipe! "open a file in a split"
-  "(begin (split-window! 'h) (other-window!) (visit {{path}}))"
+  "(let ((group (buffer-group (current-buffer)))) (split-window! 'h) (other-window!) (visit {{path}} group))"
   (list (list 'path "File: ")))
 (defrecipe! "split the window side by side"
   "(split-window! 'h 0.5)")
@@ -58,6 +58,11 @@
 (defrecipe! "show a buffer in the other window"
   "(display-buffer-other-window! {{buffer}})"
   (list (list 'buffer "Buffer: ")))
+(defrecipe! "show a buffer in a dismissible popup"
+  "(display-buffer-popup! {{buffer}})"
+  (list (list 'buffer "Buffer: ")))
+(catalog-meta! 'recipe "show a buffer in a dismissible popup"
+  'domain 'windows 'effects '(write))
 (defrecipe! "other buffer"
   "(run-command \"previous-buffer\")")
 
@@ -113,7 +118,7 @@
   "(dired {{path}})"
   (list (list 'path "Directory: ")))
 (defrecipe! "open a file over ssh"
-  "(visit {{path}})"
+  "(visit {{path}} (buffer-group (current-buffer)))"
   (list (list 'path "Remote path (/ssh:host:/path): ")))
 
 ;;; --- chat and agents ----------------------------------------------------------

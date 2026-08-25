@@ -138,6 +138,7 @@ defmodule Aimax.Core.Agent.Backend do
     case Map.get(config, "backend", "acp") do
       "stub" -> __MODULE__.Stub
       "req-llm" -> __MODULE__.ReqLLM
+      "chrome-gemini-nano" -> __MODULE__.ChromeGeminiNano
       "codex-app-server" -> __MODULE__.CodexAppServer
       _ -> __MODULE__.ACP
     end

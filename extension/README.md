@@ -63,6 +63,19 @@ two daemons never fight over `~/.aimax/sock`. See `config/runtime.exs`.
 Unlike the earlier browse-in-a-buffer version, a daemon may address **any** tab,
 not only ones it opened — that's the point of an ambient layer.
 
+## Gemini Nano
+
+The `gemini-nano` connector runs Chrome's built-in Prompt API in the active tab.
+Use a Chrome build with `LanguageModel` enabled, load this extension, then set
+the connector for new chats in `~/.aimax/init.scm`:
+
+```scheme
+(set! *default-connector* "gemini-nano")
+```
+
+Gemini Nano runs locally in Chrome. It needs no API key. The connector is
+stateless, so each request sends the saved chat transcript to Chrome again.
+
 ## From Scheme
 
 ```scheme

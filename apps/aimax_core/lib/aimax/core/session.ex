@@ -2102,7 +2102,8 @@ defmodule Aimax.Core.Session do
               ],
               [{:sym, "confirm"}, mb[:on_confirm] || false],
               [{:sym, "cancel"}, mb[:on_cancel] || false],
-              [{:sym, "complete"}, mb[:on_complete] || false]
+              [{:sym, "complete"}, mb[:on_complete] || false],
+              [{:sym, "collect"}, mb[:on_collect] || false]
             ]
         end
       end,

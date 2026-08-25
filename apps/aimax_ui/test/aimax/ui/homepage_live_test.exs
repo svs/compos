@@ -43,6 +43,26 @@ defmodule Aimax.Ui.HomepageLiveTest do
     refute html =~ "Operad — the thinking person’s browser"
   end
 
+  test "renders the Compos homepage with its compositional identity" do
+    {:ok, _view, html} = live(build_conn(), "/compos")
+
+    assert html =~ "COMPOS / SYSTEM 0.1 / LOCAL-FIRST"
+    assert html =~ "compos-wordmark"
+    assert html =~ "compos.in · © 2026 Compos"
+    assert html =~ "/images/compos-emblem-v1.png"
+    assert html =~ "/images/compos-study-symbolic-composition-v1.png"
+    assert html =~ "The Composable OS for"
+    assert html =~ "knowledge work."
+    assert html =~ "A programmable environment for navigating and composing live work contexts."
+    assert html =~ "System model"
+    assert html =~ "Context is a first-class object."
+    assert html =~ "One workspace. Multiple live sources."
+    assert html =~ "Machine actions remain inspectable."
+    assert html =~ "/images/operad-sentry-workspace.png"
+    assert html =~ "mailto:hello@compos.in"
+    refute html =~ "Emma — the thinking person’s browser"
+  end
+
   test "keeps the editor on the root route" do
     Aimax.Core.Editor.set_window_buffer("homepage-route-test")
     {:ok, _view, html} = live(build_conn(), "/")

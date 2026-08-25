@@ -16,6 +16,10 @@ defmodule Aimax.Ui.Layouts do
         <link rel="manifest" href="/manifest.webmanifest" />
         <link rel="icon" type="image/png" href="/icons/aimax-192.png" />
         <link rel="apple-touch-icon" href="/icons/aimax-192.png" />
+        <link
+          rel="stylesheet"
+          href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css"
+        />
         <meta name="theme-color" content="#e6e0d2" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
@@ -91,29 +95,42 @@ defmodule Aimax.Ui.Layouts do
             transition: flex-grow var(--chrome-anim, 140ms) ease-out;
           }
           .split-child > * { flex: 1; min-width: 0; min-height: 0; }
-          /* THE modal floats, and ONLY visibly: it stays an ordinary
-             window in the tree, so every window command still reaches
-             it. Taking its split out of the flow is what makes it float
-             — the window it covers keeps its full height underneath. */
-          .split-child:has(> .window.popup-center) {
+          /* A popup stays in the window tree, so editor commands can reach it.
+             Its split leaves the visual flow. The sibling then fills that split.
+             The popup measures itself against .windows, which is the frame. */
+          .split-child:has(> .window.popup) {
             flex: 0 0 0 !important; overflow: visible; transition: none;
           }
-          /* Tiling only: a side popup is an ordinary split — its share
-             comes from the split ratio like every window's. ONE surface
-             floats: the centered modal. Its sibling takes the whole
-             split, or the modal would float over a strip of nothing.
-             The daemon writes each child's share inline, and inline
-             styles only yield to !important. */
-          .split:has(> .split-child > .window.popup-center)
-            > .split-child:not(:has(> .window.popup-center)) {
+          .split:has(> .split-child > .window.popup)
+            > .split-child:not(:has(> .window.popup)) {
             flex-grow: 1 !important;
           }
+          .window.popup-right,
+          .window.popup-left,
+          .window.popup-top,
+          .window.popup-bottom,
           .window.popup-center {
             position: absolute; z-index: 20;
             box-shadow: 0 0 30px rgba(0, 0, 0, 0.30);
             border: var(--chrome-border, none);
             border-radius: var(--chrome-radius, 0);
             animation: popup-rise var(--chrome-anim, 140ms) ease-out;
+          }
+          .window.popup-right,
+          .window.popup-left {
+            top: 0; bottom: 0;
+            width: var(--popup-size, 33.333%);
+          }
+          .window.popup-right { right: 0; }
+          .window.popup-left { left: 0; }
+          .window.popup-top,
+          .window.popup-bottom {
+            left: 0; right: 0;
+            height: var(--popup-size, 33.333%);
+          }
+          .window.popup-top { top: 0; }
+          .window.popup-bottom { bottom: 0; }
+          .window.popup-center {
             top: 50%; left: 50%; transform: translate(-50%, -50%);
             width: var(--popup-size, 56%); max-width: 1100px;
             min-width: min(520px, 100%);
@@ -188,6 +205,14 @@ defmodule Aimax.Ui.Layouts do
             font-variant-ligatures: common-ligatures;
             letter-spacing: -0.1px;
           }
+          .terminal-view {
+            flex: 1; min-width: 0; min-height: 0; overflow: hidden;
+            padding: 7px 8px;
+            background: #111318;
+          }
+          .terminal-view .xterm { height: 100%; }
+          .terminal-view .xterm-viewport { overflow-y: auto !important; }
+          .terminal-view .xterm-screen { margin: 0; }
           /* buffers under the ship-all threshold get every line at once
              (editor_live.ex) — the browser owns scroll position natively
              here, no server round-trip per scroll tick */
@@ -280,8 +305,7 @@ defmodule Aimax.Ui.Layouts do
             padding: 0 16px;
           }
           .window.writing.active .line.hl-line { background: transparent; }
-          .window.writing .modeline { opacity: 0.35; transition: opacity 0.2s ease; }
-          .window.writing .modeline:hover { opacity: 1; }
+          .window.writing .modeline { opacity: 1; }
           /* HTML preview: sandboxed (no scripts), styles/images allowed */
           .html-preview {
             flex: 1; width: 100%; border: 0;
@@ -534,17 +558,25 @@ defmodule Aimax.Ui.Layouts do
           .ts-embedded { color: inherit; }
           .modeline {
             display: flex; align-items: center; gap: 8px;
-            height: 26px; padding: 0 10px;
+            min-height: 32px; padding: 0 12px;
             flex-shrink: 0;
-            background: var(--modeline-bg, #eae5da);
-            color: var(--modeline-fg, #57534a);
-            border-top: 1px solid var(--border, #cbc4b1);
-            font-size: 11.5px;
+            background: var(--modeline-bg, #ded9ca);
+            color: var(--modeline-fg, #34322c);
+            font-size: 12px;
           }
           .window.active .modeline {
-            background: var(--modeline-active-bg, #e7e9f1);
-            color: var(--modeline-active-fg, #1b1a17);
-            border-top: 2px solid var(--accent-fg, #26356b);
+            background: var(--modeline-active-bg, #e1e5f1);
+            color: var(--modeline-active-fg, #18203f);
+          }
+          .window.buffer-selected .modeline {
+            box-shadow: inset 3px 0 var(--accent-fg, #26356b);
+          }
+          .window.buffer-selected {
+            outline: 2px solid var(--accent-fg, #26356b);
+            outline-offset: -2px;
+          }
+          .window.buffer-selected .modeline {
+            box-shadow: inset 3px 0 var(--accent-fg, #26356b);
           }
           .dash-live {
             display: flex; gap: 16px; padding: 6px 16px;
@@ -568,9 +600,13 @@ defmodule Aimax.Ui.Layouts do
             background: var(--linenum-fg, #c3bcac); flex: 0 0 auto;
           }
           .ml-dot.modified { background: var(--warn-fg, #7a5a1a); }
-          .modeline .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-          .ml-pos { font-family: var(--font-mono); font-size: 10.5px; opacity: 0.75; }
-          .ml-mode { font-family: var(--font-mono); font-size: 10.5px; opacity: 0.6; white-space: nowrap; }
+          .modeline .name { font-weight: 700; color: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .ml-icon { display: inline-block; min-width: 1.1em; color: var(--accent-fg, #26356b); font-weight: 700; text-align: center; }
+          .ml-pos { font-family: var(--font-mono); font-size: 11px; opacity: 1; white-space: nowrap; }
+          .ml-mode { font-family: var(--font-mono); font-size: 11px; opacity: 1; white-space: nowrap; }
+          .ml-group-item { color: var(--accent-fg, #26356b); }
+          .ml-state-modified { color: var(--warn-fg, #7a5a1a); font-weight: 600; }
+          .ml-info { color: inherit; }
           .ml-toggle { cursor: pointer; }
           .ml-toggle:hover { opacity: 1; text-decoration: underline; }
           .ml-group {
@@ -878,6 +914,9 @@ defmodule Aimax.Ui.Layouts do
         {@inner_content}
         <script src="/phx/phoenix.min.js"></script>
         <script src="/lv/phoenix_live_view.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/addon-webgl.min.js"></script>
         <script>
           const NAMED = {
             "Enter": "RET", "Backspace": "DEL", "Delete": "<delete>", "Tab": "TAB", " ": "SPC",
@@ -1038,6 +1077,120 @@ defmodule Aimax.Ui.Layouts do
 
           const PAGE_BOOT = document.querySelector("meta[name='boot-id']").getAttribute("content");
           const Hooks = {
+            Terminal: {
+              mounted() {
+                if (!window.Terminal || !window.FitAddon) {
+                  this.el.textContent = "Terminal assets did not load.";
+                  return;
+                }
+
+                const styles = getComputedStyle(this.el.closest(".window"));
+                const color = (name, fallback) => styles.getPropertyValue(name).trim() || fallback;
+                this.term = new window.Terminal({
+                  cursorBlink: true,
+                  scrollback: 10000,
+                  fontFamily: color("--font-mono", "ui-monospace, Menlo, monospace"),
+                  fontSize: 13,
+                  lineHeight: 1.15,
+                  theme: {
+                    background: "#111318",
+                    foreground: "#e6e1d8",
+                    cursor: color("--cursor-bg", "#d6b95e"),
+                    selectionBackground: color("--select-bg", "#36405a")
+                  }
+                });
+                this.fitAddon = new window.FitAddon.FitAddon();
+                this.term.loadAddon(this.fitAddon);
+                this.term.open(this.el);
+                if (window.WebglAddon) {
+                  try {
+                    this.webglAddon = new window.WebglAddon.WebglAddon();
+                    this.webglAddon.onContextLoss(() => this.webglAddon.dispose());
+                    this.term.loadAddon(this.webglAddon);
+                  } catch (_) { this.webglAddon = null; }
+                }
+
+                this.socket = new Phoenix.Socket("/terminal", {});
+                this.socket.connect();
+                this.channel = this.socket.channel("terminal", { buffer: this.el.dataset.buffer });
+                const write64 = (encoded) => {
+                  if (!encoded || !this.term) return;
+                  const raw = atob(encoded);
+                  const bytes = Uint8Array.from(raw, c => c.charCodeAt(0));
+                  this.term.write(bytes);
+                };
+                this.channel.on("output", ({ data }) => write64(data));
+                this.channel.on("exit", ({ status }) => {
+                  this.term.write(`\r\n\x1b[90m[process exited: ${status}]\x1b[0m\r\n`);
+                });
+                this.channel.join()
+                  .receive("ok", ({ history }) => write64(history))
+                  .receive("error", ({ reason }) => {
+                    this.term.write(`\r\n[terminal unavailable: ${reason}]\r\n`);
+                  });
+
+                this.dataSub = this.term.onData(data => this.channel.push("input", { data }));
+                this.editorSequence = false;
+                this.keyboardOwnerH = (event) => {
+                  const owner = event.detail && event.detail.terminal;
+                  const owns = owner === this.el.id;
+                  this.editorSequence = !owns;
+                  if (owns && document.hasFocus()) this.term.focus();
+                };
+                window.addEventListener("aimax:keyboard-owner", this.keyboardOwnerH);
+                this.term.attachCustomKeyEventHandler((e) => {
+                  if (e.metaKey && e.key.toLowerCase() === "c" && this.term.hasSelection()) {
+                    navigator.clipboard.writeText(this.term.getSelection());
+                    return false;
+                  }
+
+                  const spec = keySpec(e);
+                  // Browser commands remain browser commands. Returning false
+                  // without preventing the event lets Cmd-R/L/T/W and native
+                  // clipboard handling continue outside xterm.
+                  if (spec === null && e.metaKey) return false;
+                  const editorOpen = !!document.querySelector(
+                    ".mb-panel, .which-key, .transient-panel"
+                  );
+                  const editorEntry = ["C-x", "M-x", "C-g", "C-`", "C-M-`", "s-p"].includes(spec);
+                  if (spec && (this.editorSequence || editorOpen || editorEntry)) {
+                    e.preventDefault();
+                    this.editorSequence = true;
+                    this.pushEvent("key", { k: spec });
+                    return false;
+                  }
+                  return true;
+                });
+
+                this.fit = () => {
+                  if (!this.term || !this.fitAddon) return;
+                  this.fitAddon.fit();
+                  this.channel.push("resize", { cols: this.term.cols, rows: this.term.rows });
+                };
+                this.observer = new ResizeObserver(() => {
+                  cancelAnimationFrame(this.fitFrame);
+                  this.fitFrame = requestAnimationFrame(this.fit);
+                });
+                this.observer.observe(this.el);
+                requestAnimationFrame(() => {
+                  this.fit();
+                  const active = this.el.closest(".window")?.classList.contains("active");
+                  const editorOpen = document.querySelector(
+                    ".mb-panel, .which-key, .transient-panel"
+                  );
+                  if (active && !editorOpen && document.hasFocus()) this.term.focus();
+                });
+              },
+              destroyed() {
+                if (this.observer) this.observer.disconnect();
+                if (this.dataSub) this.dataSub.dispose();
+                window.removeEventListener("aimax:keyboard-owner", this.keyboardOwnerH);
+                if (this.channel) this.channel.leave();
+                if (this.socket) this.socket.disconnect();
+                if (this.term) this.term.dispose();
+                cancelAnimationFrame(this.fitFrame);
+              }
+            },
             // A preview draws inside an iframe, so the keyboard cannot
             // reach it the way it reaches a line window: the daemon moves
             // the window's pixel offset and this hook applies it. The
@@ -1115,7 +1268,23 @@ defmodule Aimax.Ui.Layouts do
                 this.lastPt = pt;
                 const d = this.doc();
                 const el = d && d.querySelector(".pt");
-                if (el) el.scrollIntoView({ block: "nearest" });
+                const s = this.scroller();
+                if (el && s) {
+                  // The new document tree may not have layout yet. Defer the
+                  // measurement until the frame paints, then center point in
+                  // the iframe's own scrollport.
+                  const reveal = () => {
+                    const current = this.doc();
+                    const marker = current && current.querySelector(".pt");
+                    const scroll = this.scroller();
+                    if (!marker || !scroll) return;
+                    const r = marker.getBoundingClientRect();
+                    const target = scroll.scrollTop + r.top -
+                      (this.el.clientHeight / 2) + (r.height / 2);
+                    scroll.scrollTop = Math.max(0, target);
+                  };
+                  requestAnimationFrame(() => requestAnimationFrame(reveal));
+                }
                 this.selectRegion();
               },
               selectRegion() {
@@ -1484,6 +1653,22 @@ defmodule Aimax.Ui.Layouts do
                     }
                   });
                 };
+                this.syncKeyboardOwner = () => {
+                  const editorOpen = document.querySelector(
+                    ".mb-panel, .which-key, .transient-panel"
+                  );
+                  const terminal = editorOpen
+                    ? null
+                    : document.querySelector(".window.active .terminal-view");
+                  window.dispatchEvent(new CustomEvent("aimax:keyboard-owner", {
+                    detail: { terminal: terminal ? terminal.id : null }
+                  }));
+
+                  const focusedTerminal = document.activeElement?.closest?.(".terminal-view");
+                  if (document.hasFocus() && (editorOpen || (!terminal && focusedTerminal))) {
+                    this.sink?.focus();
+                  }
+                };
                 // visual-line-mode belongs to the buffer, but only the
                 // browser knows where proportional rendered prose wraps.
                 // Resolve the screen line here, then send the same semantic
@@ -1673,6 +1858,7 @@ defmodule Aimax.Ui.Layouts do
                   return "";
                 };
                 this.handler = (e) => {
+                  if (e.target.closest && e.target.closest(".terminal-view")) return;
                   const panel = document.querySelector(".which-key");
                   const modifier = WHICH_KEY_MODIFIERS[e.key];
                   if (modifier && panel && !this.whichKeyFiltering) {
@@ -1757,6 +1943,7 @@ defmodule Aimax.Ui.Layouts do
                 };
                 window.addEventListener("keydown", this.handler);
                 this.keyupH = (e) => {
+                  if (e.target.closest && e.target.closest(".terminal-view")) return;
                   const modifier = WHICH_KEY_MODIFIERS[e.key];
                   if (modifier) {
                     this.whichKeyHeld.delete(modifier);
@@ -1772,6 +1959,24 @@ defmodule Aimax.Ui.Layouts do
                 // system clipboard: Cmd-V fires a native paste event (cmd
                 // keys pass through keySpec untouched)
                 this.pasteH = (e) => {
+                  if (e.target.closest && e.target.closest(".terminal-view")) return;
+                  const items = e.clipboardData && Array.from(e.clipboardData.items || []);
+                  const image = items && items.find((item) => item.kind === "file" && item.type.startsWith("image/"));
+                  if (image) {
+                    e.preventDefault();
+                    const blob = image.getAsFile();
+                    if (!blob) return;
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      const comma = reader.result.indexOf(",");
+                      if (comma >= 0) {
+                        const data = reader.result.slice(comma + 1);
+                        this.pushEvent("paste_image", { data, mime: blob.type || image.type });
+                      }
+                    };
+                    reader.readAsDataURL(blob);
+                    return;
+                  }
                   const text = e.clipboardData && e.clipboardData.getData("text/plain");
                   if (!text) return;
                   e.preventDefault();
@@ -1929,7 +2134,7 @@ defmodule Aimax.Ui.Layouts do
                   // still using the windowed path
                   if (
                     e.target.closest &&
-                    e.target.closest(".ag-scroll, .blocks-scroll, .buf.client-scroll")
+                    e.target.closest(".ag-scroll, .blocks-scroll, .buf.client-scroll, .terminal-view")
                   )
                     return;
                   e.preventDefault();
@@ -1972,6 +2177,7 @@ defmodule Aimax.Ui.Layouts do
                 this.focusH = () => {
                   document.body.classList.remove("unfocused");
                   this.syncCursorFocus();
+                  this.syncKeyboardOwner();
                 };
                 // the keyboard sink: one focusable element that is never a
                 // preview. A click in a preview moves focus INTO its iframe,
@@ -2030,12 +2236,14 @@ defmodule Aimax.Ui.Layouts do
                 window.addEventListener("blur", this.blurH);
                 if (!document.hasFocus()) document.body.classList.add("unfocused");
                 this.syncCursorFocus();
+                this.syncKeyboardOwner();
               },
               updated() {
                 if (this.bootCheck()) return;
                 this.visualLinePending = false;
                 this.applyWhichKeyFilter();
                 this.syncCursorFocus();
+                this.syncKeyboardOwner();
                 // re-measure after every patch: splits, buffer switches and
                 // per-buffer styles all change how many rows fit where
                 clearTimeout(this._wrt);

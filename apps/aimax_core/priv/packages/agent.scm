@@ -1606,6 +1606,11 @@
                           (if (member m acc) acc (append acc (list m))))
                         *llm-models* (llm-available-models)))))
 
+;; Chrome's built-in Prompt API runs Gemini Nano locally in a browser tab.
+;; The ai-max extension supplies the browser operation; no API key is needed.
+(define-connector! "gemini-nano"
+  '(backend "chrome-gemini-nano" models ("gemini-nano")))
+
 ;; What a connector's backend CAN DO, asked of the backend itself. Every
 ;; question that used to be "is this the api lane?" is one of these now: a
 ;; new lane declares what it is instead of being special-cased by name.
@@ -1750,6 +1755,8 @@
   (let ((backend (or (plist-get (connector-config name) 'backend) "acp")))
     (cond ((equal? name "opencode")
            "OpenCode — multi-provider ACP agent")
+          ((equal? name "gemini-nano")
+           "Chrome Gemini Nano — local browser inference")
           ((equal? backend "req-llm")
            "direct API — metered, cached, cheap lane")
           ((equal? backend "codex-app-server")

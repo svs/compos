@@ -103,6 +103,15 @@ defmodule Aimax.EditorTest do
     press(List.duplicate("DEL", String.length(Editor.snapshot().minibuffer.input)))
   end
 
+  setup_all do
+    # These tests keep chat names as readable handles. ChatRenameTest owns the
+    # independent title model and its asynchronous rename behavior.
+    {:ok, before} = Aimax.Core.Session.eval("chat-auto-rename")
+    {:ok, _} = Aimax.Core.Session.eval("(set! chat-auto-rename #f)")
+    on_exit(fn -> Aimax.Core.Session.eval("(set! chat-auto-rename #{before})") end)
+    :ok
+  end
+
   setup do
     {:ok, buf: fresh_buffer()}
   end
@@ -1908,14 +1917,16 @@ defmodule Aimax.EditorTest do
       press(["M-x"])
       type("shell")
       press(["RET"])
-      assert eventually(fn -> Aimax.Core.Proc.running?("*shell*") end)
+      assert eventually(fn -> Aimax.Core.Terminal.running?("*shell*") end)
 
-      # the default display rule: a right side window taking 0.38 of the
+      # the default display rule: a right side window taking one third of the
       # frame, floating — the class and the share reach the client here
       state = Editor.render_state()
       assert %{type: :split, dir: :h, ratio: ratio} = state.tree
-      assert_in_delta ratio, 0.62, 0.001
+      assert_in_delta ratio, 2 / 3, 0.001
       assert Editor.current_buffer() == "*shell*"
+      assert Buffer.get_local("*shell*", "render-mode") == "terminal"
+      assert Buffer.read_only?("*shell*")
 
       assert {:ok, ~s{"popup popup-right"}} =
                Aimax.Core.Session.eval(~s{(buffer-local "*shell*" 'window-class)})
@@ -1934,7 +1945,104 @@ defmodule Aimax.EditorTest do
       type("quit-window")
       press(["RET"])
       assert %{type: :leaf} = Editor.render_state().tree
-      Aimax.Core.Proc.kill("*shell*")
+      Aimax.Core.Terminal.kill("*shell*")
+    end
+
+    test "C-u M-x opencode chooses a group and opens its persistent terminal", %{buf: buf} do
+      n = System.unique_integer([:positive])
+      group = "opencode-#{n}"
+      opencode = "*opencode:#{group}*"
+      dir = Path.join(System.tmp_dir!(), "opencode cwd #{n}")
+      File.mkdir_p!(dir)
+
+      {:ok, old_command} = Aimax.Core.Session.eval("*opencode-command*")
+
+      on_exit(fn ->
+        Aimax.Core.Terminal.kill(opencode)
+        if Buffer.exists?(opencode), do: Aimax.Core.kill_buffer(opencode)
+        Aimax.Core.Session.eval(~s{(set! *opencode-command* #{old_command})})
+        Aimax.Core.Session.eval(~s{(set-frame-local! 'current-group #f)})
+        Aimax.Core.Session.eval(~s{(group-record-delete! "#{group}")})
+        File.rm_rf!(dir)
+      end)
+
+      {:ok, _} =
+        Aimax.Core.Session.eval("""
+        (begin
+          (set! *opencode-command*
+            "exec /bin/sh -c 'printf OPENCODE_READY; sleep 30'")
+          (buffer-set-local! "#{buf}" 'default-directory "#{dir}")
+          (let ((id (group-record-create! "#{group}")))
+            (buffer-add-group! "#{buf}" id)
+            (set-frame-local! 'current-group id)))
+        """)
+
+      press(["C-u", "M-x"])
+      type("opencode")
+      press(["RET"])
+      assert Editor.snapshot().minibuffer.prompt == "Open OpenCode in group: "
+
+      type(group)
+      press(["RET"])
+
+      assert eventually(fn -> Aimax.Core.Terminal.running?(opencode) end)
+      assert Editor.current_buffer() == opencode
+      assert Buffer.get_local(opencode, "mode-name") == "term-mode"
+      assert Buffer.get_local(opencode, "render-mode") == "terminal"
+      assert Buffer.get_local(opencode, "default-directory") == dir
+      assert Buffer.get_local(opencode, "terminal-command") =~ "cd -- '#{dir}'"
+      assert eventually(fn -> Buffer.text(opencode) =~ "OPENCODE_READY" end)
+      assert in_group?(opencode, group)
+
+      assert {:ok, ~s{"opencode"}} =
+               Aimax.Core.Session.eval(~s{(buffer-group-role "#{opencode}" "#{group}")})
+
+      assert {:ok, ~s{"C-x C-g o"}} =
+               Aimax.Core.Session.eval(~s{(key-for-command "opencode-in-group")})
+    end
+
+    test "popup-buffer summons any buffer and the toggle dismisses it", %{buf: buf} do
+      target = "popup-any-#{System.unique_integer([:positive])}"
+      Aimax.Core.create_buffer(target)
+
+      press(["M-x"])
+      type("popup-buffer")
+      press(["RET"])
+      type(target)
+      press(["RET"])
+
+      assert Editor.current_buffer() == target
+
+      assert {:ok, ~s{"popup popup-right"}} =
+               Aimax.Core.Session.eval(~s{(buffer-local "#{target}" 'window-class)})
+
+      press(["C-`"])
+      assert Editor.current_buffer() == buf
+      assert %{type: :leaf} = Editor.render_state().tree
+      {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-kill! "#{target}")})
+    end
+
+    test "the default popup moves to the bottom on a compact frame", %{buf: buf} do
+      target = "popup-compact-#{System.unique_integer([:positive])}"
+      Aimax.Core.create_buffer(target)
+      Editor.set_window_cols(%{Editor.active_window() => 80})
+
+      press(["M-x"])
+      type("popup-buffer")
+      press(["RET"])
+      type(target)
+      press(["RET"])
+
+      assert %{type: :split, dir: :v, ratio: ratio} = Editor.render_state().tree
+      assert_in_delta ratio, 2 / 3, 0.001
+
+      assert {:ok, ~s{"popup popup-bottom"}} =
+               Aimax.Core.Session.eval(~s{(buffer-local "#{target}" 'window-class)})
+
+      press(["C-`"])
+      assert Editor.current_buffer() == buf
+      Editor.set_window_cols(%{})
+      {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-kill! "#{target}")})
     end
 
     # A popup is a visit, not a move: closing it puts you back in the
@@ -3177,14 +3285,14 @@ defmodule Aimax.EditorTest do
 
     assert length(Editor.list_windows()) == 2
 
-    # C-x 1 destroys the split; winner-undo brings it back
+    # C-x 1 destroys the split; winner-previous brings it back.
     press(["C-x", "1"])
     assert length(Editor.list_windows()) == 1
-    press(["C-c", "<left>"])
+    run("winner-previous")
     assert length(Editor.list_windows()) == 2
 
-    # redo walks forward to the single window again
-    press(["C-c", "<right>"])
+    # winner-next walks forward to the single window again.
+    run("winner-next")
     assert length(Editor.list_windows()) == 1
     {:ok, _} = Aimax.Core.Session.eval("(delete-other-windows!)")
   end
@@ -3209,7 +3317,7 @@ defmodule Aimax.EditorTest do
     assert Editor.current_buffer() == m
 
     # undo: back to the arrangement before the switch
-    press(["C-c", "<left>"])
+    run("winner-previous")
     assert Editor.current_buffer() == home
 
     {:ok, _} =
@@ -3719,6 +3827,23 @@ defmodule Aimax.EditorTest do
   end
 
   describe "tiling windows" do
+    test "frame width is reconstructed from measured pane columns" do
+      Editor.set_window_cols(%{})
+      assert Editor.frame_cols() == 100
+
+      Editor.split(:h, 2 / 3)
+
+      measurements =
+        Map.new(Editor.window_rects(), fn [id, _buffer, _x, _y, width, _height] ->
+          {id, round(180 * width)}
+        end)
+
+      Editor.set_window_cols(measurements)
+      assert Editor.frame_cols() == 180
+      Editor.delete_other_windows()
+      Editor.set_window_cols(%{})
+    end
+
     test "split below/right builds a tree, C-x o cycles, C-x 1/0 collapse", %{buf: buf} do
       press(["C-x", "2"])
       press(["C-x", "3"])
@@ -3759,6 +3884,215 @@ defmodule Aimax.EditorTest do
       assert buffers == Enum.sort([buf, other])
       press(["C-x", "1"])
     end
+
+    test "named tilers make exact thirds and one undo restores the prior layout", %{buf: buf} do
+      n = System.unique_integer([:positive])
+      second = "tile-second-#{n}"
+      third = "tile-third-#{n}"
+      fourth = "tile-fourth-#{n}"
+      for name <- [second, third, fourth], do: Aimax.Core.create_buffer(name)
+
+      {:ok, _} =
+        Aimax.Core.Session.eval("""
+        (begin (delete-other-windows!)
+               (switch-to-buffer! "#{buf}")
+               (split-window! 'h 0.7)
+               (other-window!)
+               (switch-to-buffer! "#{second}")
+               (split-window! 'h 0.8)
+               (other-window!)
+               (switch-to-buffer! "#{third}")
+               (set-frame-local! 'winner-ring #f)
+               (set-frame-local! 'winner-pos #f))
+        """)
+
+      press(["M-x"])
+      type("window-layout-columns")
+      press(["RET"])
+
+      columns = Editor.render_state().tree
+
+      assert %{
+               type: :split,
+               dir: :h,
+               ratio: first,
+               children: [_, %{type: :split, dir: :h, ratio: second_ratio}]
+             } = columns
+
+      assert_in_delta first, 1 / 3, 0.001
+      assert_in_delta second_ratio, 1 / 2, 0.001
+
+      press(["M-x"])
+      type("window-layout-main-right")
+      press(["RET"])
+
+      assert %{
+               type: :split,
+               dir: :h,
+               ratio: main,
+               children: [_, %{type: :split, dir: :v, ratio: stack}]
+             } = Editor.render_state().tree
+
+      assert_in_delta main, 2 / 3, 0.001
+      assert_in_delta stack, 1 / 2, 0.001
+
+      press(["M-x"])
+      type("winner-undo")
+      press(["RET"])
+      assert layout_shape(Editor.render_state().tree) == layout_shape(columns)
+
+      {:ok, _} =
+        Aimax.Core.Session.eval(
+          ~s{(tile-windows! 'grid (list "#{buf}" "#{second}" "#{third}" "#{fourth}"))}
+        )
+
+      assert %{
+               type: :split,
+               dir: :h,
+               ratio: grid,
+               children: [
+                 %{type: :split, dir: :v, ratio: upper},
+                 %{type: :split, dir: :v, ratio: lower}
+               ]
+             } = Editor.render_state().tree
+
+      assert_in_delta grid, 1 / 2, 0.001
+      assert_in_delta upper, 1 / 2, 0.001
+      assert_in_delta lower, 1 / 2, 0.001
+
+      {:ok, _} = Aimax.Core.Session.eval("(delete-other-windows!)")
+
+      for name <- [second, third, fourth],
+          do: Aimax.Core.Session.eval(~s{(buffer-kill! "#{name}")})
+    end
+
+    test "window layout selection previews and restores the layout on cancel", %{buf: buf} do
+      second = "layout-preview-second-#{System.unique_integer([:positive])}"
+      third = "layout-preview-third-#{System.unique_integer([:positive])}"
+      for name <- [second, third], do: Aimax.Core.create_buffer(name)
+
+      {:ok, _} =
+        Aimax.Core.Session.eval("""
+        (begin (delete-other-windows!)
+               (switch-to-buffer! "#{buf}")
+               (split-window! 'h 0.7)
+               (other-window!)
+               (switch-to-buffer! "#{second}")
+               (split-window! 'v 0.6)
+               (other-window!)
+               (switch-to-buffer! "#{third}"))
+        """)
+
+      before = Editor.render_state().tree
+      run("window-layout")
+      type("columns")
+
+      assert Editor.render_state().tree != before
+      press(["C-g"])
+      assert layout_shape(Editor.render_state().tree) == layout_shape(before)
+
+      for name <- [second, third],
+          do: Aimax.Core.Session.eval(~s{(buffer-kill! "#{name}")})
+    end
+
+    test "adaptive layout command follows the measured frame width", %{buf: buf} do
+      n = System.unique_integer([:positive])
+      second = "adaptive-second-#{n}"
+      third = "adaptive-third-#{n}"
+      for name <- [second, third], do: Aimax.Core.create_buffer(name)
+
+      {:ok, _} =
+        Aimax.Core.Session.eval("""
+        (begin (delete-other-windows!)
+               (switch-to-buffer! "#{buf}")
+               (split-window! 'h 0.7)
+               (other-window!)
+               (switch-to-buffer! "#{second}")
+               (split-window! 'h 0.8)
+               (other-window!)
+               (switch-to-buffer! "#{third}"))
+        """)
+
+      measure_frame = fn total ->
+        Map.new(Editor.window_rects(), fn [id, _buffer, _x, _y, width, _height] ->
+          {id, max(1, round(total * width))}
+        end)
+        |> Editor.set_window_cols()
+      end
+
+      measure_frame.(80)
+      press(["M-x"])
+      type("window-layout-adaptive")
+      press(["RET"])
+
+      assert %{
+               type: :split,
+               dir: :v,
+               ratio: compact_main,
+               children: [_, %{type: :split, dir: :h}]
+             } = Editor.render_state().tree
+
+      assert_in_delta compact_main, 2 / 3, 0.001
+
+      measure_frame.(240)
+      press(["M-x"])
+      type("window-layout-adaptive")
+      press(["RET"])
+
+      assert %{
+               type: :split,
+               dir: :h,
+               ratio: first,
+               children: [_, %{type: :split, dir: :h, ratio: second_ratio}]
+             } = Editor.render_state().tree
+
+      assert_in_delta first, 1 / 3, 0.001
+      assert_in_delta second_ratio, 1 / 2, 0.001
+
+      Editor.delete_other_windows()
+      Editor.set_window_cols(%{})
+
+      for name <- [second, third],
+          do: Aimax.Core.Session.eval(~s{(buffer-kill! "#{name}")})
+    end
+
+    test "adaptive layout preserves every ordinary visible window", %{buf: buf} do
+      n = System.unique_integer([:positive])
+      second = "adaptive-duplicate-#{n}"
+      replaced = "adaptive-replaced-#{n}"
+      shell = "*shell* ordinary #{n}"
+      for name <- [second, replaced, shell], do: Aimax.Core.create_buffer(name)
+
+      {:ok, _} =
+        Aimax.Core.Session.eval("""
+        (begin
+          (buffer-set-local! "#{shell}" 'window-class #f)
+          (tile-windows! 'grid
+            (list "#{buf}" "#{second}" "#{replaced}" "#{shell}"))
+          (select-window! (window-showing "#{replaced}"))
+          (switch-to-buffer! "#{second}")
+          (select-window! (window-showing "#{buf}")))
+        """)
+
+      before = Editor.render_state().tree |> collect_buffers() |> Enum.sort()
+      assert before == Enum.sort([buf, second, second, shell])
+
+      press(["M-x"])
+      type("window-layout")
+      press(["RET"])
+      type("adaptive")
+      press(["RET"])
+
+      after_layout = Editor.render_state().tree |> collect_buffers() |> Enum.sort()
+      assert after_layout == before
+      assert length(Editor.list_windows()) == 4
+      assert {:ok, "#f"} = Aimax.Core.Session.eval(~s{(buffer-local "#{shell}" 'window-class)})
+
+      Editor.delete_other_windows()
+
+      for name <- [second, replaced, shell],
+          do: Aimax.Core.Session.eval(~s{(buffer-kill! "#{name}")})
+    end
   end
 
   defp collect_ids(%{type: :leaf, id: id}), do: [id]
@@ -3766,6 +4100,12 @@ defmodule Aimax.EditorTest do
 
   defp collect_buffers(%{type: :leaf, buffer: b}), do: [b]
   defp collect_buffers(%{type: :split, children: c}), do: Enum.flat_map(c, &collect_buffers/1)
+
+  defp layout_shape(%{type: :leaf, buffer: buffer}), do: {:leaf, buffer}
+
+  defp layout_shape(%{type: :split, dir: dir, ratio: ratio, children: children}) do
+    {:split, dir, ratio, Enum.map(children, &layout_shape/1)}
+  end
 end
 
 defmodule Aimax.MinibufferEditingTest do
@@ -3990,8 +4330,12 @@ defmodule Aimax.MinibufferEditingTest do
     assert Buffer.point(path) == 5
 
     # a region already dragged out survives the failed extend
-    {:ok, _} = Aimax.Core.Session.call_named("preview-select!", [win, "runs a", " little", "a", "", 0, 0, 0])
-    {:ok, _} = Aimax.Core.Session.call_named("preview-select!", [win, "\n", "no source match", "", "A", 0, 0, 0])
+    {:ok, _} =
+      Aimax.Core.Session.call_named("preview-select!", [win, "runs a", " little", "a", "", 0, 0, 0])
+
+    {:ok, _} =
+      Aimax.Core.Session.call_named("preview-select!", [win, "\n", "no source match", "", "A", 0, 0, 0])
+
     assert {:ok, " runs a"} = Aimax.Core.Session.call_named("clipboard-copy", [])
 
     press(["C-x", "1"])

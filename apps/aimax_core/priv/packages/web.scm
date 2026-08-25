@@ -54,7 +54,9 @@
 ;; Preferred site parsers are XSLT files. Add one row and the matching
 ;; stylesheet; the generic readable and page fallbacks remain automatic.
 (define *web--xslt-sites*
-  '(("https://substack.com" "substack.xsl" "feed")))
+  '(("https://substack.com" "substack.xsl" "feed")
+    ("https://mukeshbishnoi.com" "mukeshbishnoi.xsl" "portfolio")
+    ("https://www.mukeshbishnoi.com" "mukeshbishnoi.xsl" "portfolio")))
 
 (define (web--xslt-site url)
   (let loop ((sites *web--xslt-sites*))

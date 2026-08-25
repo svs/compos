@@ -56,6 +56,23 @@
       (t--gs-drop! left right)
       (t--gs-kill! buf))))
 
+(deftest 'a-role-belongs-to-one-buffer-group-membership
+  "the same buffer can mean different things in different groups"
+  (lambda ()
+    (let ((buf (t--gs-buf))
+          (left (group-record-create! "zzgs-role-left"))
+          (right (group-record-create! "zzgs-role-right")))
+      (buffer-add-group-as! buf left 'index)
+      (buffer-add-group-as! buf right "reference")
+      (check-equal! (buffer-group-role buf left) "index" "the symbol became a role")
+      (check-equal! (buffer-group-role buf right) "reference" "the other role is independent")
+      (check-equal! (group-buffer-as left 'index) buf "a role finds its buffer")
+      (check-false! (group-buffer-as right 'index) "roles do not leak between groups")
+      (buffer-remove-group! buf left)
+      (check-false! (buffer-group-role buf left) "leaving removes the role too")
+      (t--gs-drop! left right)
+      (t--gs-kill! buf))))
+
 (deftest 'legacy-names-migrate-once-to-stable-ids
   "two buffers naming one group end up in one record, not two"
   (lambda ()
@@ -133,10 +150,39 @@
       (check-false! (equal? first second) "two chats, two buffers")
       (check-equal! (chat-group-id first) id "the first belongs to the group")
       (check-equal! (chat-group-id second) id "and so does the second")
+      (check-equal! (buffer-group-role first id) "chat" "a group chat has the chat role")
       (check-equal! (group-primary-chat id) second "the newest is the primary one")
       (check-equal! (length (buffer-group-ids first)) 0 "a chat belongs, it is not a member")
       (check-equal! (length (filter chat-buffer? (group-buffers id))) 2 "the group owns both")
       (t--gs-kill! first second)
+      (t--gs-drop! id))))
+
+(deftest 'a-group-chat-is-ready-before-any-window-shows-it
+  "scene layouts can use the chat immediately after group-chat creates it"
+  (lambda ()
+    (let* ((id (group-record-create! "zzgs-ready-chat"))
+           (chat (group-chat id)))
+      (check-equal! (buffer-local chat 'mode-name) "chat-mode" "the mode is set")
+      (check-true! (buffer-local chat 'agent-saved-mark) "the rich input exists")
+      (check-true! (> (buffer-size chat) 0) "the surface exists")
+      (t--gs-kill! chat)
+      (t--gs-drop! id))))
+
+(deftest 'an-identity-only-primary-chat-heals-its-mode
+  "a restored chat cannot remain an inert buffer or duplicate itself"
+  (lambda ()
+    (let* ((id (group-record-create! "zzgs-heal-chat"))
+           (chat "*zz-gs-renamed-primary*")
+           (chat-id "chat:zzgs-heal"))
+      (test-buffer! chat "")
+      (buffer-set-local! chat 'group-id id)
+      (buffer-set-local! chat 'chat-id chat-id)
+      (group-record-update! id 'primary-chat-id chat-id)
+      (check-equal! (group-chat id) chat "the stable identity wins")
+      (check-equal! (buffer-local chat 'mode-name) "chat-mode" "the mode heals")
+      (check-true! (buffer-local chat 'agent-saved-mark) "the input heals")
+      (check-false! (buffer-known? (group-chat-name id)) "no duplicate appears")
+      (t--gs-kill! chat)
       (t--gs-drop! id))))
 
 ;;; --- dissolve and layout ------------------------------------------------------

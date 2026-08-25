@@ -14,6 +14,10 @@ defmodule Aimax.Ui.EditorLive do
   alias Aimax.Scheme.Text
   alias Aimax.Ui.AppServer
 
+  # A normal space collapses inside an empty line, so it cannot give the
+  # cursor a visible width. Keep the placeholder a non-breaking space.
+  @cursor_placeholder "\u00a0"
+
   @impl true
   def mount(params, _session, socket) do
     # each browser TAB is a frame (S5): the client sends its remembered
@@ -325,6 +329,18 @@ defmodule Aimax.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
+  # Browsers expose pasted files as clipboard items. Keep the bytes base64
+  # encoded across the LiveView event; Scheme chooses the destination and
+  # inserts the document markup.
+  def handle_event("paste_image", %{"data" => data, "mime" => mime}, socket)
+      when is_binary(data) and is_binary(mime) do
+    Input.run(socket.assigns.frame, fn ->
+      Aimax.Core.Session.call_named("clipboard-image-paste!", [data, mime])
+    end)
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
   # Cmd-C with no native selection: reply with the region (or kill top)
   # for the client to put on the OS clipboard — what "copy" MEANS is
   # Scheme's (clipboard-copy), like paste (S12, dup #26)
@@ -399,7 +415,7 @@ defmodule Aimax.Ui.EditorLive do
 
     subscribed =
       if connected?(socket) do
-        visible = state.tree |> visible_buffers() |> MapSet.new()
+        visible = state.tree |> event_buffers() |> MapSet.new()
 
         # a buffer that left the window set stops feeding this client (S15)
         socket.assigns.subscribed
@@ -441,12 +457,26 @@ defmodule Aimax.Ui.EditorLive do
   defp leaf_ids(%{type: :split, children: children}), do: Enum.flat_map(children, &leaf_ids/1)
   defp leaf_ids(_), do: []
 
+  # The raw PTY channel owns terminal painting. Its transcript still changes
+  # as a normal buffer, but those changes must not refresh the LiveView tree.
+  defp event_buffers(%{type: :leaf, render_mode: "terminal"}), do: []
+  defp event_buffers(%{type: :leaf, buffer: buffer}), do: [buffer]
+
+  defp event_buffers(%{type: :split, children: children}),
+    do: Enum.flat_map(children, &event_buffers/1)
+
+  defp event_buffers(_), do: []
+
   # two-level cache: the raw line split is keyed by buffer VERSION only, so
   # cursor motion never re-splits the buffer; span decoration (cursor/region/
   # hl-line) is recomputed per render but only for lines it actually touches
   defp decorate(%{type: :split} = split, cache, faces) do
     {children, cache} = Enum.map_reduce(split.children, cache, &decorate(&1, &2, faces))
     {%{split | children: children}, cache}
+  end
+
+  defp decorate(%{type: :leaf, render_mode: "terminal"} = leaf, cache, _faces) do
+    {Map.put(leaf, :lines, []), cache}
   end
 
   # preview buffers skip the line machinery entirely; the theme is baked into
@@ -716,9 +746,6 @@ defmodule Aimax.Ui.EditorLive do
 
     per_line
   end
-
-  defp visible_buffers(%{type: :leaf, buffer: b}), do: [b]
-  defp visible_buffers(%{type: :split, children: c}), do: Enum.flat_map(c, &visible_buffers/1)
 
   defp safe_int(v) when is_integer(v), do: v
 
@@ -1019,15 +1046,25 @@ defmodule Aimax.Ui.EditorLive do
     ~H"""
     <div
       id={"win-#{@node.id}"}
-      class={"window #{if @active?, do: "active", else: "inactive"} #{if !@node.line_numbers, do: "no-nums"} #{@node.window_class}"}
+      class={"window #{if @active?, do: "active", else: "inactive"} #{if @node.selected, do: "buffer-selected"} #{if !@node.line_numbers, do: "no-nums"} #{@node.window_class}"}
       style={@node.window_style}
       data-win-id={@node.id}
       data-path={@path}
       data-read-only={to_string(@read_only)}
     >
       <div :if={@node.header_line} class="buffer-header">{@node.header_line}</div>
-      <div :if={@node.dash} class="dash-top">
-        <div class="dash-live">
+      <div :if={@node.dash || @node.dashboard_line_blocks} class="dash-top">
+        <div
+          :if={@node.dashboard_line_blocks}
+          class="dash-persistent"
+          title="open dashboard"
+          phx-click="ui_cmd"
+          phx-value-win={@node.id}
+          phx-value-cmd="modeline-expand"
+        >
+          <.blk :for={b <- @node.dashboard_line_blocks} b={block_view(b)} line={-1} win={@node.id} />
+        </div>
+        <div :if={@node.dash} class="dash-live">
           <span>L{@line}:C{@col}</span>
           <span>point {@node.point}</span>
           <span>{ml_bytes(@node.text)}</span>
@@ -1066,6 +1103,16 @@ defmodule Aimax.Ui.EditorLive do
           <% _ -> %>
         <% end %>
       </div>
+      <%= if @node.render_mode == "terminal" do %>
+        <div
+          class="terminal-view"
+          id={"terminal-#{@node.id}"}
+          phx-hook="Terminal"
+          phx-update="ignore"
+          data-buffer={@node.buffer}
+          data-win={@node.id}
+        ></div>
+      <% else %>
       <%= if @node.render_mode == "blocks" and Map.has_key?(@node, :blk) do %>
         <div class="blocks-view" id={"blocks-#{@node.id}"} phx-hook="BlockScroll">
           <div class="blocks-scroll">
@@ -1190,6 +1237,7 @@ defmodule Aimax.Ui.EditorLive do
       <% end %>
       <% end %>
       <% end %>
+      <% end %>
       <div :if={@node.footer_line} class="buffer-footer">{@node.footer_line}</div>
       <div class="modeline">
         <span
@@ -1203,20 +1251,15 @@ defmodule Aimax.Ui.EditorLive do
         <span
           class="name"
           style="cursor:pointer"
-          title="expand (C-x ?)"
+          title={@node.buffer}
           phx-click="ui_cmd"
           phx-value-win={@node.id}
           phx-value-cmd="modeline-expand"
-        >{@node.buffer}</span>
-        <span
-          class="ml-mode ml-toggle"
-          title={"toggle #{@node.mode}"}
-          phx-click="ui_cmd"
-          phx-value-win={@node.id}
-          phx-value-cmd={"mode:" <> @node.mode}
-        >{@node.mode}</span>
-        <span :if={ml_group(@node)} class="ml-mode">· {ml_group(@node)}</span>
-        <span :if={@node.modified} class="ml-mode">· modified</span>
+        >{ml_name(@node)}</span>
+        <span :if={@node.modeline_project && @node.modeline_project != ""} class="ml-mode">
+          · {@node.modeline_project}
+        </span>
+        <span :if={@node.selected} class="ml-mode ml-selected">● selected</span>
         <span :if={@node.render_mode in ["html", "markdown"]} class="ml-mode">preview</span>
         <span
           :if={@node.modeline_info}
@@ -1227,7 +1270,13 @@ defmodule Aimax.Ui.EditorLive do
           phx-value-buf={@node.buffer}
         >{@node.modeline_info}</span>
         <span class="mb-spacer"></span>
-        <span class="ml-pos">{ml_bytes(@node.text)} · L{@line}:C{@col} · {pct(@node)}</span>
+        <span class="ml-pos">
+          <%= if @node.render_mode == "terminal" do %>
+            <span class="ml-icon">▣</span> PTY · transcript {ml_bytes(@node.text)}
+          <% else %>
+            <span class="ml-icon">≡</span> {ml_bytes(@node.text)} · <span class="ml-icon">⌖</span> L{@line}:C{@col} · {pct(@node)}
+          <% end %>
+        </span>
       </div>
     </div>
     """
@@ -1296,10 +1345,10 @@ defmodule Aimax.Ui.EditorLive do
 
                 case from_image do
                   [image | after_image] when point == s ->
-                    before ++ [{" ", "cursor"}, image | after_image]
+                    before ++ [{@cursor_placeholder, "cursor"}, image | after_image]
 
                   [image | after_image] ->
-                    before ++ [image, {" ", "cursor"} | after_image]
+                    before ++ [image, {@cursor_placeholder, "cursor"} | after_image]
 
                   [] ->
                     segs
@@ -1311,7 +1360,7 @@ defmodule Aimax.Ui.EditorLive do
 
           # cursor sitting on this line's newline (or at EOF on the last line)
           if point >= line.start and point == le,
-            do: segs ++ [{" ", "cursor"}],
+            do: segs ++ [{@cursor_placeholder, "cursor"}],
             else: segs
         else
           line.segs
@@ -1734,7 +1783,6 @@ defmodule Aimax.Ui.EditorLive do
         []
     end)
   end
-
 
   # A rendered row belongs to a source line, and the page is the only place
   # that knows which rows exist: a wrapped paragraph is many rows, a fence
@@ -2307,21 +2355,10 @@ defmodule Aimax.Ui.EditorLive do
     end
   end
 
-  # the group segment: the frame's group by name, shortened — and dropped
-  # when it is just the buffer's own name (a self-founded group), which
-  # printed the filename twice. A group named after a path shows its last
-  # segment; a name like "*GROUPS*" has none and passes through whole.
-  # A window with no buffer carries false here, and Path.basename(false)
-  # raised inside the render, which killed the LiveView on every mount and
-  # left the whole editor blank. The modeline must survive an empty window.
-  defp ml_group(%{group: g, buffer: b}) when is_binary(g) and is_binary(b) do
-    label = Path.basename(g)
-    if label == Path.basename(b), do: nil, else: label
-  end
-
-  defp ml_group(%{group: g}) when is_binary(g), do: Path.basename(g)
-
-  defp ml_group(_), do: nil
+  # the modeline names the buffer the short way; the tooltip keeps the
+  # absolute path. Scheme decides what short means (project.scm).
+  defp ml_name(%{modeline_name: name}) when is_binary(name) and name != "", do: name
+  defp ml_name(%{buffer: buffer}), do: buffer
 
   defp ml_bytes(text) do
     b = Kernel.byte_size(text)

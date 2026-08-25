@@ -29,6 +29,48 @@ defmodule Aimax.Ui.EditorLiveTest do
     assert html =~ "ui-test-"
   end
 
+  test "keeps the cursor visible on a blank line", %{conn: conn} do
+    buf = Aimax.Core.Editor.current_buffer()
+    Aimax.Core.Buffer.insert(buf, "\ntext")
+
+    {:ok, _view, html} = live(conn, "/")
+
+    assert html =~ ~s(<span class="cursor"> </span>)
+  end
+
+  test "a terminal renders a direct PTY surface instead of transcript lines", %{conn: conn} do
+    buf = Aimax.Core.Editor.current_buffer()
+    Aimax.Core.Buffer.set_local(buf, "render-mode", "terminal")
+    Aimax.Core.Buffer.insert(buf, "rails transcript stays readable", source: :process)
+
+    {:ok, _view, html} = live(conn, "/")
+
+    assert html =~ ~s(phx-hook="Terminal")
+    assert html =~ ~s(data-buffer="#{buf}")
+    refute html =~ "rails transcript stays readable"
+    assert Aimax.Core.Buffer.text(buf) == "rails transcript stays readable"
+  end
+
+  test "an editor chord from a terminal completes through the minibuffer", %{conn: conn} do
+    terminal = Aimax.Core.Editor.current_buffer()
+    target = "terminal-switch-target-#{System.unique_integer([:positive])}"
+    Aimax.Core.Buffer.set_local(terminal, "render-mode", "terminal")
+    Aimax.Core.create_buffer(target)
+
+    on_exit(fn -> Aimax.Core.kill_buffer(target) end)
+
+    {:ok, view, _html} = live(conn, "/")
+    html = keys(view, ["C-x", "b"])
+    assert html =~ "mb-panel"
+
+    html = type(view, target)
+    assert html =~ target
+
+    html = keys(view, ["RET"])
+    refute html =~ "mb-panel"
+    assert Aimax.Core.Editor.current_buffer() == target
+  end
+
   # Any click in a preview iframe moves focus into the iframe, and the blur
   # relay answers with a win-only mouse event — for a right click too. A
   # window selection is not a click on text, so it must keep the region.
@@ -202,6 +244,41 @@ defmodule Aimax.Ui.EditorLiveTest do
     assert html =~ ~s(class="split h")
     html = keys(view, ["C-x", "1"])
     refute html =~ ~s(class="split h")
+  end
+
+  test "a side popup renders at the frame edge outside the work layout", %{conn: conn} do
+    base = Aimax.Core.Editor.current_buffer()
+    other = "ui-popup-other-#{System.unique_integer([:positive])}"
+    popup = "ui-popup-#{System.unique_integer([:positive])}"
+    Aimax.Core.create_buffer(other)
+    Aimax.Core.create_buffer(popup)
+
+    on_exit(fn ->
+      Aimax.Core.Editor.delete_other_windows()
+
+      for name <- [other, popup] do
+        if Aimax.Core.Buffer.exists?(name), do: Aimax.Core.kill_buffer(name)
+      end
+    end)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin
+        (tile-windows! 'columns (list "#{base}" "#{other}"))
+        (select-window! (window-showing "#{base}"))
+        (display-buffer-popup! "#{popup}" 'right (/ 1 3)))
+      """)
+
+    assert {:ok, "#f"} =
+             Aimax.Core.Session.eval(~s{(if (member "#{popup}" (layout-visible-buffers)) #t #f)})
+
+    {:ok, _view, html} = live(conn, "/")
+    assert html =~ ~r/class="window [^"]*popup popup-right"/
+    assert html =~ "--popup-size:33.33333333333333%"
+    assert html =~ ".split-child:has(> .window.popup)"
+    assert html =~ ".window.popup-right { right: 0; }"
+    assert html =~ "width: var(--popup-size, 33.333%);"
+    assert html =~ ".window.popup-bottom { bottom: 0; }"
   end
 
   test "undo works through the window", %{conn: conn} do

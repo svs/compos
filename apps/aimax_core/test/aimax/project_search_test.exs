@@ -237,6 +237,33 @@ defmodule Aimax.ProjectSearchTest do
       assert eval!(~s{(group-resolve-id "#{root}")}) == "#f"
     end
 
+    test "find-file uses the selected frame group without a prefix", %{root: root} do
+      source = "zz-ps-find-current-#{System.unique_integer([:positive])}"
+      path = Path.join(root, "top.txt")
+
+      eval!(~s{
+        (begin
+          (buffer-create "#{source}")
+          (buffer-add-group! "#{source}" (group-ensure-record! "#{source}"))
+          (switch-to-buffer! "#{source}")
+          (switch-to-group! "#{source}"))})
+
+      on_exit(fn ->
+        eval!(~s{
+          (let ((id (group-resolve-id "#{source}")))
+            (when id (group-record-delete! id)))})
+
+        Aimax.Core.kill_buffer(source)
+      end)
+
+      press(["C-x", "C-f"])
+      assert Editor.render_state().minibuffer.prompt == "Find file: "
+      press(String.graphemes(path))
+      press("RET")
+
+      assert eval!(~s{(buffer-in-group? "#{path}" "#{source}")}) == "#t"
+    end
+
     test "find-file-in-group creates and switches to a new chosen group before visiting", %{
       root: root
     } do

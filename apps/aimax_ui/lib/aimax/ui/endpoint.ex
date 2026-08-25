@@ -10,6 +10,15 @@ defmodule Aimax.Ui.Endpoint do
 
   socket("/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]])
 
+  socket("/terminal", Aimax.Ui.TerminalSocket,
+    websocket: [check_origin: true],
+    longpoll: false
+  )
+
+  if code_reloading? do
+    socket("/phoenix/live_reload/socket", Phoenix.LiveReloader.Socket)
+  end
+
   # The Chrome extension's wire. The extension dials from its service worker,
   # so Chrome stamps Origin: chrome-extension://<id> on the handshake. A web
   # page cannot forge that header, so the origin check rejects every https://
@@ -31,14 +40,19 @@ defmodule Aimax.Ui.Endpoint do
   # the PWA manifest and icons — Chrome installs the editor as its own app
   plug(Plug.Static, at: "/", from: :aimax_ui, only: ~w(manifest.webmanifest icons images))
 
-  plug(Plug.Session, @session_options)
-
   # Tidewave is an MCP server over the running daemon: a coding agent evaluates
   # Elixir in this VM, reads the logs, and reads the docs of the locked deps.
   # It mounts at /tidewave/mcp. Dev only, so a release never carries it.
   if Mix.env() == :dev do
     plug(Tidewave)
   end
+
+  if code_reloading? do
+    plug(Phoenix.LiveReloader)
+    plug(Phoenix.CodeReloader)
+  end
+
+  plug(Plug.Session, @session_options)
 
   plug(Aimax.Ui.Router)
 

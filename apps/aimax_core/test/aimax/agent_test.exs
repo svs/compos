@@ -846,7 +846,8 @@ defmodule Aimax.AgentTest do
 
     # the pinned model has no spawn-time route on this lane — the backend
     # sets the option itself once the session reports it
-    assert_receive {:frame, %{"method" => "session/set_config_option", "id" => pin_id, "params" => pin}},
+    assert_receive {:frame,
+                    %{"method" => "session/set_config_option", "id" => pin_id, "params" => pin}},
                    1_000
 
     assert pin == %{
@@ -862,7 +863,11 @@ defmodule Aimax.AgentTest do
     })
 
     buf = "*chat:a1*"
-    assert eventually(fn -> Buffer.get_local(buf, "agent-model") == "opencode/claude-sonnet-5" end)
+
+    assert eventually(fn ->
+             Buffer.get_local(buf, "agent-model") == "opencode/claude-sonnet-5"
+           end)
+
     assert eventually(fn -> Buffer.get_local(buf, "agent-mode") == "build" end)
     assert [["build", "build", _], ["plan", "plan", _]] = Buffer.get_local(buf, "agent-modes")
 
@@ -1129,6 +1134,27 @@ defmodule Aimax.AgentTest do
     assert {:ok, "()"} = Session.eval(~s[(connector-models "test-conn")])
     assert {:ok, api_models} = Session.eval(~s[(connector-models "api")])
     assert api_models =~ "openrouter" or api_models =~ "claude"
+  end
+
+  test "gemini nano connector is available for new browser-backed instances" do
+    assert {:ok, names} = Session.eval("(connector-names)")
+    assert names =~ "gemini-nano"
+
+    assert {:ok, models} = Session.eval(~s[(connector-models "gemini-nano")])
+    assert models =~ "gemini-nano"
+
+    assert {:ok, capabilities} = Session.eval(~s[(connector-capabilities "gemini-nano")])
+    assert capabilities =~ "stateless"
+
+    assert {:ok, description} = Session.eval(~s[(connector-description "gemini-nano")])
+    assert description =~ "Chrome Gemini Nano"
+
+    assert {:ok, backend} =
+             Session.eval(
+               ~s[(plist-get (agent-resolve-config '(connector "gemini-nano")) 'backend)]
+             )
+
+    assert backend =~ "chrome-gemini-nano"
   end
 
   test "desktop: agent transcript, folds, and overlays survive restore; thread revives on RET" do

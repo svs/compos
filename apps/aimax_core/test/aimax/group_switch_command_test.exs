@@ -1,6 +1,6 @@
 defmodule Aimax.GroupSwitchCommandTest do
   @moduledoc """
-  One test: a pull that takes a whole marked set in one act.
+  Group integration at the Elixir/Scheme rendering and command boundary.
 
   The switcher is Scheme and its tests are Scheme —
   priv/tests/group-switch-test.scm covers founding a group, pull, push,
@@ -40,6 +40,9 @@ defmodule Aimax.GroupSwitchCommandTest do
     end
   end
 
+  defp leaves(%{type: :leaf} = leaf), do: [leaf]
+  defp leaves(%{type: :split, children: children}), do: Enum.flat_map(children, &leaves/1)
+
   defp type(text) do
     text
     |> String.graphemes()
@@ -63,6 +66,7 @@ defmodule Aimax.GroupSwitchCommandTest do
       (set! *group-next-id* 0)
       (set-frame-local! 'current-group #f)
       (set-frame-local! 'previous-group #f)
+      (frame-group-label-refresh!)
       (delete-other-windows!)
       (switch-to-buffer! "#{first}"))
     """)
@@ -76,6 +80,7 @@ defmodule Aimax.GroupSwitchCommandTest do
         (set! *group-next-id* 0)
         (set-frame-local! 'current-group #f)
         (set-frame-local! 'previous-group #f)
+        (frame-group-label-refresh!)
         (delete-other-windows!))
       """)
     end)
@@ -119,5 +124,60 @@ defmodule Aimax.GroupSwitchCommandTest do
     assert Editor.current_buffer() == first
   end
 
+  test "modelines compact this buffer's memberships relative to the frame group", %{
+    first: first,
+    second: second,
+    third: third
+  } do
+    here = group_id("modeline-here")
+    other = group_id("modeline-other")
+    extra = group_id("modeline-extra")
 
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{here}")
+      (buffer-add-group! "#{first}" "#{other}")
+      (buffer-add-group! "#{first}" "#{extra}")
+      (buffer-add-group! "#{second}" "#{other}")
+      (buffer-add-group! "#{second}" "#{extra}")
+      (buffer-add-group! "#{third}" "#{other}")
+      (set-frame-local! 'current-group "#{here}")
+      (frame-group-label-refresh!)
+      (delete-other-windows!)
+      (switch-to-buffer! "#{first}")
+      (split-window! 'h)
+      (other-window!)
+      (switch-to-buffer! "#{second}")
+      (split-window! 'v)
+      (other-window!)
+      (switch-to-buffer! "#{third}"))
+    """)
+
+    rendered = Editor.render_state()
+    by_buffer = rendered.tree |> leaves() |> Map.new(&{&1.buffer, &1})
+
+    assert by_buffer[first].group == "modeline-here (2 more)"
+    assert by_buffer[second].group == "2 groups"
+    assert by_buffer[third].group == "modeline-other"
+    assert rendered.frame_group == "modeline-here"
+
+    # C-x ? is the expanded, lossless view: it names every membership.
+    eval!(~s{(select-window! (window-showing "#{first}"))})
+    KeyDispatch.handle_key("C-x")
+    KeyDispatch.handle_key("?")
+
+    blocks =
+      first
+      |> Aimax.Core.Buffer.get_local("modeline-dash-blocks")
+      |> inspect(limit: :infinity, printable_limit: :infinity)
+
+    assert blocks =~ "modeline-here"
+    assert blocks =~ "modeline-other"
+    assert blocks =~ "modeline-extra"
+
+    # Zero memberships is genuinely ungrouped even while the frame stays here.
+    eval!(~s{(buffer-move-to-group! "#{third}" #f)})
+    by_buffer = Editor.render_state().tree |> leaves() |> Map.new(&{&1.buffer, &1})
+    assert by_buffer[third].group == nil
+  end
 end

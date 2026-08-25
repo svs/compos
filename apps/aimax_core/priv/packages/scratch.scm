@@ -81,7 +81,7 @@
       (buffer-set-local! owner 'scratch-buffer scratch)
       (buffer-set-local! scratch 'scratch-owner owner)
       (buffer-set-local! scratch 'scratch-buffer scratch)
-      (buffer-set-local! scratch 'group group))
+      (buffer-add-group-as! scratch group 'scratch))
     (scratch--inherit-llm! owner scratch)))
 
 (define (scratch--focus! buffer)

@@ -165,6 +165,10 @@
   "the known projects are what a prompt offers"
   (lambda ()
     (let ((root (t--marg-project!)))
-      (visit (string-append root "/top.txt"))
+      (let ((buf (visit (string-append root "/top.txt"))))
+        (check-equal! (buffer-local buf 'modeline-file) "top.txt"
+                      "the modeline uses the project-relative filename")
+        (check-equal! (buffer-local buf 'modeline-project) "zz-marg-proj"
+                      "the modeline names the project"))
       (check-contains! (value->string (known-projects)) root "the project is remembered")
       (t--marg-project-done! root))))

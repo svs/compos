@@ -160,9 +160,15 @@ The current group is the place where the user stands. Commands move within that 
 | Operation | Meaning |
 |---|---|
 | `group-switch-to-buffer` | Visit another member of the current group. |
+| `buffer-select` | Toggle selection on the active visible buffer. |
+| `buffer-unselect` | Clear selection on the active buffer. |
+| `buffer-unselect-all` | Clear selection on every buffer. |
 | `group-switch` | Stand in another group and restore it as last left. |
 | `group-pull-buffer` | Bring a selected buffer into the current group. |
 | `group-push-buffer` | Add selected work to any existing group or a newly created group without removing current memberships. |
+| `group-push-visible` | Add selected buffers, or all visible work buffers, to an existing or new group. |
+| `group-push-selected` | Push only explicitly selected visible work buffers to an existing or new group. |
+| `group-move-visible` | Move selected buffers, or all visible work buffers, from the current group to an existing or new group. |
 | `group-pop` | Remove one work buffer, or marked Ibuffer work buffers, from the current group without killing them. |
 | `group-new` | Create and enter an empty group. |
 | `group-new-from-buffer` | Create and enter a group seeded from the current work buffer. |

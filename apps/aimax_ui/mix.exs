@@ -30,6 +30,7 @@ defmodule Aimax.Ui.MixProject do
       {:req, "~> 0.5"},
       {:phoenix, "~> 1.8"},
       {:phoenix_live_view, "~> 1.1"},
+      {:phoenix_live_reload, "~> 1.6", only: :dev},
       {:phoenix_live_dashboard, "~> 0.8"},
       {:telemetry_metrics, "~> 1.1"},
       {:telemetry_poller, "~> 1.3"},

@@ -32,16 +32,17 @@ defmodule Aimax.ChatInputGuardTest do
   end
 
   defp stub_chat do
-    {:ok, _} =
+    {:ok, printed_slug} =
       Session.eval("""
       (execute* "go" '(backend "stub" script
         (((type user-msg text "go")
           (type chunk text "Hi.\\n")))))
       """)
 
-    buf = "*chat:a1*"
+    slug = String.trim(printed_slug, "\"")
+    buf = "*chat:#{slug}*"
     assert eventually(fn -> Buffer.text(buf) =~ "Hi." end)
-    assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
+    assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
     {:ok, _} = Session.eval(~s[(begin (switch-to-buffer! "#{buf}") (end-of-buffer!))])
     buf
   end

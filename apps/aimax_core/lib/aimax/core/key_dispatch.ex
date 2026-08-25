@@ -277,6 +277,17 @@ defmodule Aimax.Core.KeyDispatch do
     count = prefix_numeric_value(prefix_arg)
     inserted = if count > 0, do: String.duplicate(text, count), else: ""
 
+    # A printable key replaces an active region in Emacs. The fast path used
+    # to insert directly into the rope, which made mirrored selections from a
+    # Markdown preview behave differently from delete commands.
+    case Session.call_named("region-text", []) do
+      {:ok, region} when is_binary(region) and byte_size(region) > 0 ->
+        Session.run_command("delete-backward-char")
+
+      _ ->
+        :ok
+    end
+
     case Buffer.insert(Editor.current_buffer(), inserted) do
       :ok ->
         Editor.finish_command("self-insert-command", false)

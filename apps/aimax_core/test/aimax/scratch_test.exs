@@ -114,6 +114,16 @@ defmodule Aimax.ScratchTest do
     assert Buffer.mark(scratch) == nil
   end
 
+  test "typing replaces an active region" do
+    buf = fresh_buffer("self-insert-region-#{System.unique_integer([:positive])}", "abc")
+
+    eval!(~s{(begin (goto-char! 0) (set-mark! (point)) (goto-char! 2))})
+    press(["X"])
+
+    assert Buffer.text(buf) == "Xc"
+    assert Buffer.mark(buf) == nil
+  end
+
   test "the first use adopts an old writing scratch without changing its text" do
     owner = fresh_buffer("scratch-migrate-#{System.unique_integer([:positive])}.md", "draft\n")
     legacy = "*writing:#{owner}*"

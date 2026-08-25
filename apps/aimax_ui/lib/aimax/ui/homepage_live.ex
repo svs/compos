@@ -1,17 +1,31 @@
 defmodule Aimax.Ui.HomepageLive do
   use Phoenix.LiveView
 
+  @palettes ~w(ultraviolet phosphor ember monochrome)
+  @motifs ~w(lambda swan)
+
   @impl true
   def mount(_params, _session, socket) do
     brand =
       case socket.assigns.live_action do
+        :compos ->
+          %{
+            key: :compos,
+            name: "Compos",
+            wordmark: "compos",
+            eyebrow: "COMPOS / QUIET COMPUTING ENVIRONMENT",
+            email: "hello@compos.in",
+            tagline: "The Composable OS for knowledge work"
+          }
+
         :emma ->
           %{
             key: :emma,
             name: "Emma",
             wordmark: "λemma",
             eyebrow: "Emma — the thinking person’s browser",
-            email: "hello@emma.space"
+            email: "hello@emma.space",
+            tagline: "The OS for knowledge work"
           }
 
         _operad ->
@@ -20,17 +34,34 @@ defmodule Aimax.Ui.HomepageLive do
             name: "Operad",
             wordmark: "operad",
             eyebrow: "Operad — the thinking person’s browser",
-            email: "hello@operad.work"
+            email: "hello@operad.work",
+            tagline: "The OS for knowledge work"
           }
       end
 
-    {:ok, assign(socket, brand: brand, page_title: "#{brand.name} — The OS for knowledge work")}
+    {:ok,
+     assign(socket,
+       brand: brand,
+       palette: "ultraviolet",
+       motif: "lambda",
+       page_title: "#{brand.name} — #{brand.tagline}"
+     )}
+  end
+
+  @impl true
+  def handle_event("set-palette", %{"palette" => palette}, socket) when palette in @palettes do
+    {:noreply, assign(socket, palette: palette)}
+  end
+
+  @impl true
+  def handle_event("set-motif", %{"motif" => motif}, socket) when motif in @motifs do
+    {:noreply, assign(socket, motif: motif)}
   end
 
   @impl true
   def render(assigns) do
     ~H"""
-    <main class="operad-site">
+    <main class={["operad-site", @brand.key == :compos && "compos-site", "palette-#{@palette}"]}>
       <style>
         body:has(.operad-site) {
           overflow: auto;
@@ -46,11 +77,19 @@ defmodule Aimax.Ui.HomepageLive do
           --muted: #9897a5;
           --violet: #9784ff;
           --cyan: #71dcff;
+          --glow: rgba(92, 70, 220, 0.12);
+          --emblem-filter: saturate(0.78) contrast(1.12);
+          --mark-blue: #376fc2;
+          --mark-ochre: #cf8e35;
+          --mark-rose: #bd716d;
+          --mark-violet: #655070;
+          --mark-cyan: #45bfd1;
+          --mark-ivory: #e7ddc6;
           --hairline: rgba(236, 233, 223, 0.13);
           min-height: 100vh;
           overflow: hidden;
           background:
-            radial-gradient(circle at 76% 10%, rgba(92, 70, 220, 0.12), transparent 26rem),
+            radial-gradient(circle at 76% 10%, var(--glow), transparent 26rem),
             var(--void);
           color: var(--paper);
           font: 400 16px/1.55 var(--font-sans);
@@ -72,7 +111,13 @@ defmodule Aimax.Ui.HomepageLive do
         .operad-brand { display: flex; align-items: center; gap: 12px; }
         .operad-brand img { width: 38px; height: 38px; border-radius: 11px; }
         .operad-brand .emma-logo-image { width: 116px; height: auto; border-radius: 0; }
+        .operad-brand .compos-logo-image { width: 42px; height: 42px; border-radius: 50%; }
         .operad-brand span { font-size: 20px; font-weight: 500; letter-spacing: -0.04em; }
+        .operad-brand .compos-wordmark {
+          color: #d8d5df;
+          font: 500 17px/1 var(--font-mono);
+          letter-spacing: -0.045em;
+        }
         .operad-nav-links { display: flex; align-items: center; gap: 30px; color: #aaa9b4; font-size: 14px; }
         .operad-nav-links a { transition: color 160ms ease; }
         .operad-nav-links a:hover { color: var(--paper); }
@@ -141,6 +186,8 @@ defmodule Aimax.Ui.HomepageLive do
           color: transparent;
         }
 
+        .compos-site .operad-hero h1 .compos-aspect { display: inline; }
+
         .operad-hero-lede {
           max-width: 610px;
           margin: 32px 0 34px;
@@ -188,6 +235,208 @@ defmodule Aimax.Ui.HomepageLive do
           animation: operad-breathe 10s ease-in-out infinite;
         }
 
+        .compos-site .operad-fractal {
+          width: min(680px, 55vw);
+          transform: translate(-43%, -50%);
+          mix-blend-mode: normal;
+          animation: compos-hue-drift 28s ease-in-out infinite alternate;
+        }
+
+        @keyframes compos-hue-drift {
+          0% { filter: hue-rotate(-5deg) saturate(0.92) brightness(0.97); }
+          48% { filter: hue-rotate(2deg) saturate(1) brightness(1); }
+          100% { filter: hue-rotate(8deg) saturate(0.96) brightness(0.99); }
+        }
+
+        .compos-symbolic-svg { overflow: visible; }
+        .compos-symbolic-svg .mark-base { opacity: 0.48; }
+        .compos-symbolic-svg .pigment-surface {
+          filter: url(#compos-pigment);
+        }
+        .compos-symbolic-svg .paper-grain {
+          opacity: 0.2;
+          mix-blend-mode: soft-light;
+          pointer-events: none;
+        }
+        .compos-symbolic-svg .mark-contour {
+          fill: none;
+          stroke: rgba(235, 228, 214, 0.13);
+          stroke-width: 3;
+          vector-effect: non-scaling-stroke;
+        }
+        .compos-symbolic-svg .color-field {
+          transform-box: fill-box;
+          transform-origin: center;
+          mix-blend-mode: screen;
+        }
+        .compos-symbolic-svg .color-field-a { animation: compos-swirl-a 16s ease-in-out infinite alternate; }
+        .compos-symbolic-svg .color-field-b { animation: compos-swirl-b 21s ease-in-out infinite alternate; }
+        .compos-symbolic-svg .color-field-c { animation: compos-swirl-c 27s linear infinite; }
+        .compos-symbolic-svg .composition-core {
+          transform-box: fill-box;
+          transform-origin: center;
+          animation: compos-core 8s ease-in-out infinite;
+        }
+        .compos-symbolic-svg .lambda-output {
+          transform-box: fill-box;
+          transform-origin: center;
+          animation: compos-lambda 10s ease-in-out infinite;
+          filter: url(#compos-pigment);
+          mix-blend-mode: screen;
+        }
+
+        @keyframes compos-swirl-a {
+          from { transform: translate(-5%, 3%) rotate(-16deg) scale(1.08); }
+          to { transform: translate(8%, -6%) rotate(34deg) scale(1.24); }
+        }
+
+        @keyframes compos-swirl-b {
+          from { transform: translate(7%, -4%) rotate(12deg) scale(1.16); }
+          to { transform: translate(-7%, 7%) rotate(-42deg) scale(1.02); }
+        }
+
+        @keyframes compos-swirl-c {
+          from { transform: rotate(0deg) scale(1.08); }
+          50% { transform: rotate(180deg) scale(1.28); }
+          to { transform: rotate(360deg) scale(1.08); }
+        }
+
+        @keyframes compos-core {
+          0%, 100% { transform: scale(0.92); opacity: 0.82; }
+          50% { transform: scale(1.08); opacity: 1; }
+        }
+
+        @keyframes compos-lambda {
+          0%, 100% { transform: scale(0.94) rotate(-2deg); opacity: 0.82; }
+          50% { transform: scale(1.04) rotate(2deg); opacity: 1; }
+        }
+
+        .compos-site .operad-orbit { opacity: 0.34; }
+        .compos-site .operad-eyebrow::before { border-radius: 0; transform: rotate(45deg); }
+
+        .compos-site.palette-phosphor {
+          --violet: #76d39b;
+          --cyan: #98efd0;
+          --glow: rgba(49, 170, 112, 0.11);
+          --emblem-filter: hue-rotate(232deg) saturate(0.62) contrast(1.14);
+          --mark-blue: #318c72;
+          --mark-ochre: #a7c96e;
+          --mark-rose: #5faa82;
+          --mark-violet: #3e695d;
+          --mark-cyan: #98efd0;
+          --mark-ivory: #d9e9d8;
+        }
+
+        .compos-site.palette-ember {
+          --violet: #e69b62;
+          --cyan: #f1c778;
+          --glow: rgba(195, 92, 42, 0.1);
+          --emblem-filter: hue-rotate(128deg) saturate(0.72) contrast(1.12) sepia(0.16);
+          --mark-blue: #9d5745;
+          --mark-ochre: #e0a051;
+          --mark-rose: #cf6650;
+          --mark-violet: #743f49;
+          --mark-cyan: #f1c778;
+          --mark-ivory: #ead8bb;
+        }
+
+        .compos-site.palette-monochrome {
+          --violet: #dad7ce;
+          --cyan: #9c9ba2;
+          --glow: rgba(218, 215, 206, 0.07);
+          --emblem-filter: grayscale(1) saturate(0) contrast(1.2) brightness(0.94);
+          --mark-blue: #a9a8a3;
+          --mark-ochre: #d3d0c7;
+          --mark-rose: #8f8e8a;
+          --mark-violet: #666661;
+          --mark-cyan: #e3e0d6;
+          --mark-ivory: #f0ede4;
+        }
+
+        .palette-dock {
+          position: absolute;
+          right: 1.5%;
+          bottom: 2%;
+          z-index: 4;
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          padding: 6px;
+          border: 1px solid var(--hairline);
+          background: rgba(6, 7, 10, 0.72);
+          backdrop-filter: blur(14px);
+        }
+
+        .motif-dock {
+          position: absolute;
+          right: 1.5%;
+          bottom: 10%;
+          z-index: 4;
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          padding: 6px;
+          border: 1px solid var(--hairline);
+          background: rgba(6, 7, 10, 0.72);
+          backdrop-filter: blur(14px);
+        }
+
+        .motif-dock > span {
+          padding: 0 8px 0 4px;
+          color: #656471;
+          font: 500 9px/1 var(--font-mono);
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+        }
+
+        .motif-button {
+          min-width: 38px;
+          height: 31px;
+          padding: 0 8px;
+          border: 1px solid transparent;
+          background: transparent;
+          color: #777683;
+          font: 500 11px/1 var(--font-mono);
+          cursor: pointer;
+        }
+
+        .motif-button:hover,
+        .motif-button.active {
+          border-color: color-mix(in srgb, var(--violet), transparent 42%);
+          color: var(--paper);
+        }
+
+        .palette-dock > span {
+          padding: 0 8px 0 4px;
+          color: #656471;
+          font: 500 9px/1 var(--font-mono);
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+        }
+
+        .palette-swatch {
+          display: grid;
+          width: 31px;
+          height: 31px;
+          padding: 0;
+          place-items: center;
+          border: 1px solid transparent;
+          background: transparent;
+          cursor: pointer;
+        }
+
+        .palette-swatch::before {
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          background: var(--swatch);
+          box-shadow: 0 0 9px color-mix(in srgb, var(--swatch), transparent 34%);
+          content: "";
+        }
+
+        .palette-swatch:hover,
+        .palette-swatch.active { border-color: color-mix(in srgb, var(--swatch), transparent 40%); }
+
         @keyframes operad-breathe {
           0%, 100% { transform: translate(-43%, -50%) scale(0.985); opacity: 0.9; }
           50% { transform: translate(-43%, -50%) scale(1.015); opacity: 1; }
@@ -198,6 +447,92 @@ defmodule Aimax.Ui.HomepageLive do
           z-index: 3;
           margin-top: 0;
           padding-bottom: 132px;
+        }
+
+        .system-index {
+          margin: 0 0 32px;
+          border: 1px solid var(--hairline);
+          background: rgba(8, 9, 13, 0.76);
+          font-family: var(--font-mono);
+        }
+        .system-index header,
+        .system-index footer {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          min-height: 48px;
+          padding: 0 18px;
+          color: #72717d;
+          font-size: 10px;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+        }
+        .system-index header { border-bottom: 1px solid var(--hairline); }
+        .system-index footer { border-top: 1px solid var(--hairline); }
+        .system-index header strong { color: #bbb8c2; font-weight: 500; }
+        .system-grid { display: grid; grid-template-columns: repeat(3, 1fr); }
+        .system-object {
+          min-height: 174px;
+          padding: 22px 20px;
+          border-left: 1px solid var(--hairline);
+          border-top: 1px solid var(--hairline);
+        }
+        .system-object:nth-child(3n + 1) { border-left: 0; }
+        .system-object:nth-child(-n + 3) { border-top: 0; }
+        .system-object b { color: var(--violet); font: 500 10px/1 var(--font-mono); }
+        .system-object h3 { margin: 25px 0 9px; color: #d8d5df; font: 500 15px/1.2 var(--font-mono); }
+        .system-object p { color: #74737f; font: 400 12px/1.65 var(--font-mono); }
+
+        .compos-essay {
+          padding: 112px 0 150px;
+          border-top: 1px solid var(--hairline);
+        }
+        .compos-essay-head {
+          display: grid;
+          grid-template-columns: 0.72fr 1.28fr;
+          gap: 80px;
+          padding-bottom: 72px;
+          border-bottom: 1px solid var(--hairline);
+        }
+        .compos-essay-head span,
+        .essay-number {
+          color: #777683;
+          font: 500 10px/1.5 var(--font-mono);
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+        }
+        .compos-essay-head h2 {
+          max-width: 850px;
+          font: 450 clamp(46px, 5.5vw, 76px)/1.02 var(--font-sans);
+          letter-spacing: -0.065em;
+        }
+        .essay-section {
+          display: grid;
+          grid-template-columns: 0.72fr 1.28fr;
+          gap: 80px;
+          padding: 78px 0;
+          border-bottom: 1px solid var(--hairline);
+        }
+        .essay-prose { max-width: 780px; }
+        .essay-prose h3 {
+          margin-bottom: 30px;
+          color: #e4e1d8;
+          font: 450 clamp(30px, 3.2vw, 48px)/1.08 var(--font-sans);
+          letter-spacing: -0.045em;
+        }
+        .essay-prose p {
+          color: #aaa8b2;
+          font: 400 clamp(18px, 1.65vw, 22px)/1.72 var(--font-sans);
+          letter-spacing: -0.018em;
+        }
+        .essay-prose p + p { margin-top: 26px; }
+        .essay-prose em { color: #dfdcd3; font-style: normal; }
+        .essay-coda {
+          max-width: 900px;
+          padding-top: 94px;
+          color: #dcd9d0;
+          font: 450 clamp(32px, 4vw, 58px)/1.15 var(--font-sans);
+          letter-spacing: -0.05em;
         }
 
         .work-surface {
@@ -360,6 +695,13 @@ defmodule Aimax.Ui.HomepageLive do
           .editor-windows { min-height: 518px; grid-template-columns: 58% 42%; }
           .buffer-body { padding-left: 38px; }
           .section-intro, .control-band { grid-template-columns: 1fr; gap: 28px; }
+          .compos-essay-head,
+          .essay-section { grid-template-columns: 1fr; gap: 30px; }
+          .system-grid { grid-template-columns: repeat(2, 1fr); }
+          .system-object:nth-child(3n + 1) { border-left: 1px solid var(--hairline); }
+          .system-object:nth-child(2n + 1) { border-left: 0; }
+          .system-object:nth-child(-n + 3) { border-top: 1px solid var(--hairline); }
+          .system-object:nth-child(-n + 2) { border-top: 0; }
           .scattered-grid { grid-template-columns: repeat(2, 1fr); }
           .workspace-grid { grid-template-columns: 1fr; }
           .workspace-card.wide { min-height: 620px; }
@@ -385,6 +727,11 @@ defmodule Aimax.Ui.HomepageLive do
           .operad-section { padding: 92px 0; }
           .section-intro h2, .control-copy h2 { font-size: 42px; }
           .scattered-grid { grid-template-columns: 1fr; }
+          .system-grid { grid-template-columns: 1fr; }
+          .system-object,
+          .system-object:nth-child(3n + 1),
+          .system-object:nth-child(2n + 1) { border-left: 0; border-top: 1px solid var(--hairline); }
+          .system-object:first-child { border-top: 0; }
           .scattered-card { min-height: 170px; }
           .scattered-card .card-icon { margin-bottom: 32px; }
           .workspace-card { min-height: 330px; padding: 26px; }
@@ -417,6 +764,13 @@ defmodule Aimax.Ui.HomepageLive do
               src="/images/emma-logo-v1.png"
               alt="λemma"
             />
+            <img
+              :if={@brand.key == :compos}
+              class="compos-logo-image"
+              src="/images/compos-emblem-v1.png"
+              alt=""
+            />
+            <span :if={@brand.key == :compos} class="compos-wordmark">compos</span>
           </a>
           <div class="operad-nav-links">
             <a href="#read">Read</a>
@@ -430,23 +784,303 @@ defmodule Aimax.Ui.HomepageLive do
         <section class="operad-hero" id="top">
           <div class="operad-hero-copy">
             <div class="operad-eyebrow">{@brand.eyebrow}</div>
-            <h1>The OS for <span>knowledge work.</span></h1>
-            <p class="operad-hero-lede">
+            <h1 :if={@brand.key != :compos}>The OS for <span>knowledge work.</span></h1>
+            <h1 :if={@brand.key == :compos}>
+              The <span class="compos-aspect">Composable</span> OS for knowledge work.
+            </h1>
+            <p :if={@brand.key != :compos} class="operad-hero-lede">
               Bring your documents, conversations, research, tools, and AI into one connected workspace.
               Everything stays within arm’s reach.
             </p>
-            <div class="operad-actions">
+            <p :if={@brand.key == :compos} class="operad-hero-lede">
+              The internet turned work into an interrupt stream. In Compos,
+              <strong>the working context is explicit, inspectable, and composed by you.</strong>
+              It is a quiet place for thinking, writing, coding, and sustained work.
+            </p>
+            <div :if={@brand.key != :compos} class="operad-actions">
               <a class="operad-button primary" href="#access">Get early access</a>
               <a class="operad-button" href="#workspace">See how it works ↓</a>
             </div>
-            <p class="operad-hero-note">
+            <div :if={@brand.key == :compos} class="operad-actions">
+              <a class="operad-button primary" href="#model">Read the system model ↓</a>
+              <a class="operad-button" href="#workspace">Inspect the workspace ↓</a>
+            </div>
+            <p :if={@brand.key != :compos} class="operad-hero-note">
               Not a chat window. {@brand.name} holds the live material of every app you work in.
+            </p>
+            <p :if={@brand.key == :compos} class="operad-hero-note">
+              NO FEED · NO NOTIFICATIONS · EXPLICIT CONTEXT · INTERRUPTIBLE MACHINES
             </p>
           </div>
           <div class="operad-hero-art">
             <div class="operad-orbit"></div>
-            <img class="operad-fractal" src="/images/operad-fractal-master.png" alt="" aria-hidden="true" />
+            <img
+              :if={@brand.key != :compos}
+              class="operad-fractal"
+              src="/images/operad-fractal-master.png"
+              alt=""
+              aria-hidden="true"
+            />
+            <img
+              :if={@brand.key == :compos}
+              class="operad-fractal"
+              src="/images/compos-study-symbolic-composition-v1.png"
+              alt="Lambda, branching application, and nested scope compose into a shared center"
+            />
+            <svg
+              :if={false}
+              class="operad-fractal compos-symbolic-svg"
+              viewBox="0 0 800 800"
+              role="img"
+              aria-label={if @motif == "lambda", do: "Independent fields compose into lambda", else: "Lambda and nested scope compose into an abstract swan"}
+            >
+              <defs>
+                <mask id="compos-mark-mask">
+                  <rect width="800" height="800" fill="black" />
+                  <path d="M108 525 L255 292 C292 233 300 196 265 170 C244 154 214 151 174 151 L174 95 C249 90 309 109 339 157 C371 208 354 274 310 343 L492 624 L402 624 L263 410 L193 525 Z" fill="white" />
+                  <path d="M448 355 C484 313 501 263 501 201 C501 167 522 143 552 143 C582 143 602 166 602 200 C602 253 586 303 559 345 C602 333 647 311 690 280 C713 263 744 270 758 294 C772 320 763 350 737 365 C684 398 625 417 568 420 C601 450 642 472 690 488 C718 497 731 526 721 553 C711 581 682 594 654 582 C584 555 531 517 493 469 Z" fill="white" />
+                  <path d="M178 494 C216 442 273 416 337 421 C405 425 460 465 484 527 C508 591 492 657 444 701 C399 742 331 753 269 727 C210 703 172 652 167 590 C164 554 168 522 178 494 Z M252 517 C231 544 226 580 239 611 C255 649 291 672 332 669 C373 666 406 638 416 599 C426 560 410 519 376 497 C335 470 282 478 252 517 Z" fill="white" fill-rule="evenodd" />
+                  <path d="M340 405 C386 382 439 385 483 414 C528 444 553 494 550 547 C547 602 516 650 468 674 L430 597 C452 586 467 565 468 540 C470 516 458 493 438 480 C415 465 387 464 364 476 Z" fill="white" />
+                </mask>
+                <mask id="compos-lambda-input-mask">
+                  <rect width="800" height="800" fill="black" />
+                  <path d="M61 325 C119 193 273 143 401 282 C342 347 296 431 267 557 C157 554 76 463 61 325 Z" fill="white" />
+                  <path d="M739 266 C657 153 508 169 399 282 C462 348 510 433 536 558 C648 536 729 426 739 266 Z" fill="white" />
+                  <path d="M143 676 C170 526 268 420 400 376 C532 420 630 526 657 676 C523 716 277 716 143 676 Z" fill="white" />
+                  <path d="M226 163 C323 80 490 83 579 174 C520 191 457 221 400 281 C343 222 282 190 226 163 Z" fill="white" />
+                </mask>
+
+                <radialGradient id="compos-flow-a" cx="38%" cy="34%" r="72%">
+                  <stop offset="0" style="stop-color: var(--mark-cyan)" />
+                  <stop offset="0.38" style="stop-color: var(--mark-blue)" />
+                  <stop offset="0.75" style="stop-color: var(--mark-violet)" />
+                  <stop offset="1" style="stop-color: var(--mark-rose)" />
+                </radialGradient>
+                <linearGradient id="compos-flow-b" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" style="stop-color: var(--mark-ochre)" />
+                  <stop offset="0.48" style="stop-color: var(--mark-rose)" />
+                  <stop offset="1" style="stop-color: var(--mark-cyan)" />
+                </linearGradient>
+                <radialGradient id="compos-core" cx="50%" cy="50%" r="50%">
+                  <stop offset="0" style="stop-color: var(--mark-ivory)" />
+                  <stop offset="0.46" style="stop-color: var(--mark-cyan)" />
+                  <stop offset="1" style="stop-color: var(--mark-violet)" />
+                </radialGradient>
+                <filter id="compos-pigment" x="-8%" y="-8%" width="116%" height="116%" color-interpolation-filters="sRGB">
+                  <feTurbulence
+                    type="fractalNoise"
+                    baseFrequency="0.018 0.42"
+                    numOctaves="3"
+                    seed="37"
+                    result="paper-fiber"
+                  />
+                  <feTurbulence
+                    type="fractalNoise"
+                    baseFrequency="0.72"
+                    numOctaves="4"
+                    seed="19"
+                    result="pigment-grain"
+                  />
+                  <feBlend in="paper-fiber" in2="pigment-grain" mode="multiply" result="surface-noise" />
+                  <feColorMatrix
+                    in="surface-noise"
+                    type="matrix"
+                    values="0.9 0 0 0 0.05  0 0.82 0 0 0.04  0 0 0.72 0 0.03  0 0 0 0.34 0"
+                    result="toned-noise"
+                  />
+                  <feComposite in="toned-noise" in2="SourceAlpha" operator="in" result="clipped-noise" />
+                  <feBlend in="SourceGraphic" in2="clipped-noise" mode="soft-light" result="textured-color" />
+                  <feDisplacementMap
+                    in="textured-color"
+                    in2="paper-fiber"
+                    scale="1.2"
+                    xChannelSelector="R"
+                    yChannelSelector="G"
+                  />
+                </filter>
+                <filter id="compos-grain-only" x="0" y="0" width="100%" height="100%">
+                  <feTurbulence type="fractalNoise" baseFrequency="0.58" numOctaves="4" seed="53" />
+                  <feColorMatrix type="saturate" values="0" />
+                </filter>
+              </defs>
+
+              <g :if={@motif == "swan"}>
+              <g class="pigment-surface">
+                <g class="mark-base">
+                <path d="M108 525 L255 292 C292 233 300 196 265 170 C244 154 214 151 174 151 L174 95 C249 90 309 109 339 157 C371 208 354 274 310 343 L492 624 L402 624 L263 410 L193 525 Z" style="fill: var(--mark-blue)" />
+                <path d="M448 355 C484 313 501 263 501 201 C501 167 522 143 552 143 C582 143 602 166 602 200 C602 253 586 303 559 345 C602 333 647 311 690 280 C713 263 744 270 758 294 C772 320 763 350 737 365 C684 398 625 417 568 420 C601 450 642 472 690 488 C718 497 731 526 721 553 C711 581 682 594 654 582 C584 555 531 517 493 469 Z" style="fill: var(--mark-ochre)" />
+                <path d="M178 494 C216 442 273 416 337 421 C405 425 460 465 484 527 C508 591 492 657 444 701 C399 742 331 753 269 727 C210 703 172 652 167 590 C164 554 168 522 178 494 Z M252 517 C231 544 226 580 239 611 C255 649 291 672 332 669 C373 666 406 638 416 599 C426 560 410 519 376 497 C335 470 282 478 252 517 Z" style="fill: var(--mark-rose)" fill-rule="evenodd" />
+                <path d="M340 405 C386 382 439 385 483 414 C528 444 553 494 550 547 C547 602 516 650 468 674 L430 597 C452 586 467 565 468 540 C470 516 458 493 438 480 C415 465 387 464 364 476 Z" style="fill: var(--mark-violet)" />
+                </g>
+
+                <g mask="url(#compos-mark-mask)">
+                  <rect class="color-field color-field-a" x="55" y="40" width="690" height="690" fill="url(#compos-flow-a)" />
+                  <ellipse class="color-field color-field-b" cx="520" cy="320" rx="280" ry="190" fill="url(#compos-flow-b)" opacity="0.72" />
+                  <path class="color-field color-field-c" d="M115 590 C250 300 541 273 738 486 C573 382 356 653 115 590 Z" fill="url(#compos-flow-b)" opacity="0.55" />
+                </g>
+
+                <g class="composition-core">
+                  <path
+                    d="M211 555 C277 447 414 419 543 470 C591 489 626 520 646 558 C576 607 466 630 356 605 C286 590 237 573 211 555 Z"
+                    fill="url(#compos-core)"
+                    opacity="0.7"
+                  />
+                  <path
+                    d="M277 542 C354 463 466 457 565 516 C493 508 425 535 371 590 C326 579 294 563 277 542 Z"
+                    style="fill: var(--mark-violet)"
+                    opacity="0.58"
+                  />
+                  <path
+                    d="M444 515 C395 463 377 399 394 331 C408 275 448 228 505 213"
+                    fill="none"
+                    stroke="var(--mark-ivory)"
+                    stroke-width="46"
+                    stroke-linecap="round"
+                    opacity="0.9"
+                  />
+                  <ellipse cx="516" cy="211" rx="35" ry="28" style="fill: var(--mark-ivory)" opacity="0.94" />
+                  <path d="M544 207 L608 222 L546 238 Z" style="fill: var(--mark-ochre)" opacity="0.86" />
+                  <circle cx="524" cy="204" r="5" fill="#07080b" />
+                  <path
+                    d="M301 537 C369 480 461 477 546 522 C476 519 418 544 371 590 C338 578 314 561 301 537 Z"
+                    style="fill: var(--mark-cyan)"
+                    opacity="0.34"
+                  />
+                </g>
+              </g>
+              <rect
+                class="paper-grain"
+                width="800"
+                height="800"
+                mask="url(#compos-mark-mask)"
+                filter="url(#compos-grain-only)"
+                fill="white"
+              />
+              <path class="mark-contour" d="M108 525 L255 292 C292 233 300 196 265 170 C244 154 214 151 174 151 M448 355 C501 301 501 252 501 201 M178 494 C216 442 273 416 337 421 C405 425 460 465 484 527" />
+              </g>
+
+              <g :if={@motif == "lambda"} class="pigment-surface">
+                <g class="mark-base">
+                  <path d="M61 325 C119 193 273 143 401 282 C342 347 296 431 267 557 C157 554 76 463 61 325 Z" style="fill: var(--mark-blue)" />
+                  <path d="M739 266 C657 153 508 169 399 282 C462 348 510 433 536 558 C648 536 729 426 739 266 Z" style="fill: var(--mark-ochre)" />
+                  <path d="M143 676 C170 526 268 420 400 376 C532 420 630 526 657 676 C523 716 277 716 143 676 Z" style="fill: var(--mark-rose)" />
+                  <path d="M226 163 C323 80 490 83 579 174 C520 191 457 221 400 281 C343 222 282 190 226 163 Z" style="fill: var(--mark-violet)" />
+                </g>
+                <g mask="url(#compos-lambda-input-mask)">
+                  <rect class="color-field color-field-a" x="38" y="48" width="724" height="680" fill="url(#compos-flow-a)" />
+                  <ellipse class="color-field color-field-b" cx="548" cy="310" rx="304" ry="218" fill="url(#compos-flow-b)" opacity="0.74" />
+                  <path class="color-field color-field-c" d="M92 631 C235 272 566 265 732 565 C556 408 326 730 92 631 Z" fill="url(#compos-flow-b)" opacity="0.58" />
+                </g>
+                <circle cx="400" cy="381" r="128" fill="url(#compos-core)" opacity="0.38" />
+                <path
+                  class="lambda-output"
+                  d="M291 583 L383 373 C410 311 409 271 375 239 M383 373 L526 583"
+                  fill="none"
+                  stroke="var(--mark-ivory)"
+                  stroke-width="54"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <path
+                  d="M291 583 L383 373 C410 311 409 271 375 239 M383 373 L526 583"
+                  fill="none"
+                  stroke="var(--mark-cyan)"
+                  stroke-width="18"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  opacity="0.72"
+                />
+              </g>
+              <rect
+                :if={@motif == "lambda"}
+                class="paper-grain"
+                width="800"
+                height="800"
+                mask="url(#compos-lambda-input-mask)"
+                filter="url(#compos-grain-only)"
+                fill="white"
+              />
+            </svg>
+            <div :if={false} class="motif-dock" aria-label="Compose output form">
+              <span>Form</span>
+              <button
+                :for={{motif, label} <- [{"lambda", "λ"}, {"swan", "swan"}]}
+                type="button"
+                class={["motif-button", @motif == motif && "active"]}
+                phx-click="set-motif"
+                phx-value-motif={motif}
+                data-motif={motif}
+                aria-label={"Use #{motif} composition"}
+                aria-pressed={to_string(@motif == motif)}
+              >
+                {label}
+              </button>
+            </div>
+            <div :if={false} class="palette-dock" aria-label="Compose color palette">
+              <span>Palette</span>
+              <button
+                :for={{palette, color} <- [
+                  {"ultraviolet", "#9784ff"},
+                  {"phosphor", "#76d39b"},
+                  {"ember", "#e69b62"},
+                  {"monochrome", "#dad7ce"}
+                ]}
+                type="button"
+                class={["palette-swatch", @palette == palette && "active"]}
+                style={"--swatch: #{color}"}
+                phx-click="set-palette"
+                phx-value-palette={palette}
+                data-palette={palette}
+                aria-label={"Use #{palette} palette"}
+                aria-pressed={to_string(@palette == palette)}
+              >
+              </button>
+            </div>
           </div>
+        </section>
+
+        <section :if={@brand.key == :compos} class="system-index" id="model" aria-label="Compos system model">
+          <header>
+            <strong>System model</strong>
+            <span>compos://workspace · six primary objects</span>
+          </header>
+          <div class="system-grid">
+            <article class="system-object">
+              <b>01 / BUFFER</b>
+              <h3>Material with identity</h3>
+              <p>Text, processes, agents, tools, and remote systems appear as addressable buffers.</p>
+            </article>
+            <article class="system-object">
+              <b>02 / VIEW</b>
+              <h3>A projection, not a container</h3>
+              <p>Multiple views can expose the same live object without copying its state.</p>
+            </article>
+            <article class="system-object">
+              <b>03 / CONTEXT</b>
+              <h3>An explicit working set</h3>
+              <p>Sources, selections, history, and tools compose into a context you can inspect.</p>
+            </article>
+            <article class="system-object">
+              <b>04 / OPERATION</b>
+              <h3>A reversible state transition</h3>
+              <p>Commands act in place. Provenance records the actor, input, output, and affected object.</p>
+            </article>
+            <article class="system-object">
+              <b>05 / AGENT</b>
+              <h3>The agent comes to the work</h3>
+              <p>Machine intelligence enters the chosen context. The work never moves into an agent interface.</p>
+            </article>
+            <article class="system-object">
+              <b>06 / COMPOSITION</b>
+              <h3>Objects retain their structure</h3>
+              <p>Inputs stay independently navigable while their shared result becomes a new object.</p>
+            </article>
+          </div>
+          <footer>
+            <span>Execution: local process graph</span>
+            <span>Input: keyboard · RPC · agent</span>
+            <span>State: inspectable · persistent · undoable</span>
+          </footer>
         </section>
 
         <section class="operad-proof" aria-label={"#{@brand.name} product preview"}>
@@ -460,38 +1094,118 @@ defmodule Aimax.Ui.HomepageLive do
         </section>
       </div>
 
-      <section class="capability-band" aria-label={"#{@brand.name} capabilities"}>
+      <section :if={@brand.key == :compos} class="compos-essay" id="workspace">
+        <div class="operad-shell">
+          <header class="compos-essay-head">
+            <span>Design notes / context and attention</span>
+            <h2>Composing context is a first-class problem for knowledge workers.</h2>
+          </header>
+
+          <article class="essay-section">
+            <span class="essay-number">01 / THE CONDITION</span>
+            <div class="essay-prose">
+              <h3>Our tools have mistaken access for understanding.</h3>
+              <p>
+                A project is a graph of notes, sources, drafts, conversations, queries, programs, and
+                decisions. Current software partitions that graph by application, then asks the person doing
+                the work to compose its missing context in memory. The browser preserves access to each part,
+                but a row of tabs is not a model of how those parts relate. Every switch makes context
+                composition an invisible manual task that must finish before the actual work can continue.
+              </p>
+              <p>
+                The same applications share one interrupt surface. Feeds, notifications, messages, and
+                background processes compete to define the foreground. They preserve recency, not relevance.
+                The result is an enormous implicit context with no stable representation: everything remains
+                available, while the structure needed to think about it disappears.
+              </p>
+              <p>
+                Chat-first agents intensify this failure. Their conversation becomes the primary object, so
+                the user exports fragments of a project into a prompt, explains relationships the system
+                cannot see, and imports the answer back into the work. The agent may be fast, but its context
+                is temporary and its operation is opaque. The person is left to reconcile two incomplete
+                representations: the project as it exists and the project as the agent briefly understood it.
+              </p>
+            </div>
+          </article>
+
+          <article class="essay-section">
+            <span class="essay-number">02 / THE SYSTEM</span>
+            <div class="essay-prose">
+              <h3>Compos makes the working context a first-class object.</h3>
+              <p>
+                In Compos, a buffer can represent a note, document, query result, process, remote system, or
+                agent. Each object keeps its identity, address, history, and native operations. Views project
+                related objects into a workspace without copying their content or flattening their structure.
+                A composed context records what is present, how it is shown, and which references connect it.
+                It can be inspected, saved, resumed, and transformed like any other object.
+              </p>
+              <p>
+                The agent comes to this context. You do not go to the agent. Machine intelligence receives the
+                active object, selected references, available tools, and explicit permissions. Its reads and
+                writes occur beside the work, where provenance remains visible and execution can be
+                interrupted, revised, or undone. The conversation is one useful view of the operation, not a
+                replacement for the material on which the operation acts.
+              </p>
+              <p>
+                Composition does not merge every source into one document. The parts remain independently
+                addressable while their relations become available for thought and computation. The same model
+                can support reading, writing, research, programming, and operations work because its stable
+                unit is neither the app nor the chat. It is the context. Input is pulled into that context
+                deliberately; arrival does not imply display, and display does not imply interruption. Quiet
+                is therefore not a visual theme. It is a property of the system.
+              </p>
+            </div>
+          </article>
+
+          <p class="essay-coda">
+            Compos is a quiet context graph with programmable views and local agents. It holds the project
+            without requiring every part of the project to demand attention at once.
+          </p>
+        </div>
+      </section>
+
+      <section :if={@brand.key != :compos} class="capability-band" aria-label={"#{@brand.name} capabilities"}>
         <article class="capability-cell" id="read">
           <h2>Read.</h2>
-          <p>Newsletters, papers, threads, and reports become text you can mark up.</p>
+          <p :if={@brand.key != :compos}>Newsletters, papers, threads, and reports become text you can mark up.</p>
+          <p :if={@brand.key == :compos}>Parse remote material into local text. Preserve source identity, location, and annotations.</p>
         </article>
         <article class="capability-cell" id="write">
           <h2>Write.</h2>
-          <p>Compose across live sources. Keep citations attached to every sentence.</p>
+          <p :if={@brand.key != :compos}>Compose across live sources. Keep citations attached to every sentence.</p>
+          <p :if={@brand.key == :compos}>Edit the live object. Keep source links and provenance attached to the resulting text.</p>
         </article>
         <article class="capability-cell" id="communicate">
           <h2>Communicate.</h2>
-          <p>Reply, assign, and record the decision where the evidence already lives.</p>
+          <p :if={@brand.key != :compos}>Reply, assign, and record the decision where the evidence already lives.</p>
+          <p :if={@brand.key == :compos}>Address people and systems from the active context. Record the resulting state transition.</p>
         </article>
         <article class="capability-cell" id="monitor">
           <h2>Monitor.</h2>
-          <p>Keep errors, deploys, projects, and queues beside the work they affect.</p>
+          <p :if={@brand.key != :compos}>Keep errors, deploys, projects, and queues beside the work they affect.</p>
+          <p :if={@brand.key == :compos}>Project event streams into live buffers. Filter, mark, and act without leaving the workspace.</p>
         </article>
         <article class="capability-cell" id="fix">
           <h2>Fix.</h2>
-          <p>Hand an issue to an agent. Inspect the change, then approve or undo it.</p>
+          <p :if={@brand.key != :compos}>Hand an issue to an agent. Inspect the change, then approve or undo it.</p>
+          <p :if={@brand.key == :compos}>Run a command or delegate an operation. Inspect its diff, provenance, and undo boundary.</p>
         </article>
       </section>
 
-      <section class="operad-section" id="why">
+      <section :if={@brand.key != :compos} class="operad-section" id="why">
         <div class="operad-shell">
           <div class="section-intro">
             <span class="section-number">01 — THE PROBLEM</span>
             <div>
-              <h2>Your work is scattered beyond reach.</h2>
-              <p>
+              <h2 :if={@brand.key != :compos}>Your work is scattered beyond reach.</h2>
+              <h2 :if={@brand.key == :compos}>The network is noisy. Your workspace does not have to be.</h2>
+              <p :if={@brand.key != :compos}>
                 Knowledge work now spans too many tabs, tools, and agents. {@brand.name} gathers it into
                 one navigable information space without hiding what happens.
+              </p>
+              <p :if={@brand.key == :compos}>
+                Feeds, tabs, messages, and agents compete to decide what deserves attention. Compos admits
+                only the context you choose. Nothing arrives merely because it can.
               </p>
             </div>
           </div>
@@ -516,14 +1230,19 @@ defmodule Aimax.Ui.HomepageLive do
         </div>
       </section>
 
-      <section class="operad-section" id="workspace">
+      <section :if={@brand.key != :compos} class="operad-section" id="workspace">
         <div class="operad-shell">
           <div class="section-intro">
             <span class="section-number">02 — THE WORKSPACE</span>
             <div>
-              <h2>The right thing appears beside the work.</h2>
-              <p>
+              <h2 :if={@brand.key != :compos}>The right thing appears beside the work.</h2>
+              <h2 :if={@brand.key == :compos}>A place to think, write, code, and finish.</h2>
+              <p :if={@brand.key != :compos}>
                 Open a source, inspect a detail, ask an agent, or run an action without changing context.
+              </p>
+              <p :if={@brand.key == :compos}>
+                The internet becomes material instead of weather. Read a source, shape an argument, inspect
+                a system, or write a program without surrendering the workspace to incoming noise.
               </p>
             </div>
           </div>
@@ -568,14 +1287,19 @@ defmodule Aimax.Ui.HomepageLive do
         </div>
       </section>
 
-      <section class="operad-section">
+      <section :if={@brand.key != :compos} class="operad-section">
         <div class="operad-shell control-band">
           <div class="control-copy">
             <span class="section-number">03 — YOUR CONTROL</span>
-            <h2 style="margin-top: 25px">Reach for a command, not another app.</h2>
-            <p>
+            <h2 :if={@brand.key != :compos} style="margin-top: 25px">Reach for a command, not another app.</h2>
+            <h2 :if={@brand.key == :compos} style="margin-top: 25px">Quiet is a system property.</h2>
+            <p :if={@brand.key != :compos}>
               {@brand.name} brings the next source, tool, or action to your current position. Your work
               stays visible while the workspace changes around it.
+            </p>
+            <p :if={@brand.key == :compos}>
+              Compos does not compete for attention. It waits. Agents work in view and can be paused.
+              Context enters by command, not by feed. The workspace keeps your place.
             </p>
           </div>
           <div class="control-principles">
@@ -592,7 +1316,7 @@ defmodule Aimax.Ui.HomepageLive do
         </div>
       </section>
 
-      <section class="operad-final" id="access">
+      <section :if={@brand.key != :compos} class="operad-final" id="access">
         <div class="operad-shell">
           <img :if={@brand.key == :operad} src="/images/operad-fractal-512.png" alt="Operad recursive emblem" />
           <img
@@ -601,17 +1325,25 @@ defmodule Aimax.Ui.HomepageLive do
             src="/images/emma-logo-v1.png"
             alt="λemma"
           />
-          <h2>Your whole working world. Within reach.</h2>
-          <p>The OS for knowledge work.</p>
+          <img
+            :if={@brand.key == :compos}
+            src="/images/compos-study-symbolic-composition-v1.png"
+            alt="Lambda, branching application, and nested scope compose into a shared center"
+          />
+          <h2 :if={@brand.key != :compos}>Your whole working world. Within reach.</h2>
+          <h2 :if={@brand.key == :compos}>A quiet computer for serious work.</h2>
+          <p :if={@brand.key != :compos}>{@brand.tagline}.</p>
+          <p :if={@brand.key == :compos}>Active development · local-first runtime · programmable in Scheme · rendered with LiveView.</p>
           <div class="operad-actions">
-            <a class="operad-button primary" href={"mailto:#{@brand.email}?subject=#{@brand.name}%20early%20access"}>Get early access</a>
+            <a class="operad-button primary" href={"mailto:#{@brand.email}?subject=#{@brand.name}%20development%20access"}>Request development access</a>
           </div>
         </div>
       </section>
 
       <footer class="operad-shell operad-footer">
-        <span><strong>{@brand.wordmark}</strong> · The OS for knowledge work</span>
-        <span>© 2026 {@brand.name}</span>
+        <span><strong>{@brand.wordmark}</strong> · {@brand.tagline}</span>
+        <span :if={@brand.key != :compos}>© 2026 {@brand.name}</span>
+        <span :if={@brand.key == :compos}>compos.in · © 2026 Compos</span>
       </footer>
     </main>
     """

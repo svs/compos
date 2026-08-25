@@ -117,6 +117,34 @@
                    "a lost record still answers a string")
       (buffer-kill! buf))))
 
+(deftest 'modeline-memberships-follow-the-buffer
+  "the render cache holds all and only this buffer's group names"
+  (lambda ()
+    (let ((buf "*zztest-modeline-groups*")
+          (one (t--group "modeline-one"))
+          (two (t--group "modeline-two")))
+      (buffer-create buf)
+      (buffer-modeline-group-refresh! buf)
+      (check-equal! (buffer-local buf 'modeline-groups) '()
+                    "an ungrouped buffer carries no modeline membership")
+      (buffer-add-group! buf one)
+      (check-equal! (buffer-local buf 'modeline-groups) '("zztest-modeline-one")
+                    "one membership carries its name")
+      (buffer-add-group! buf two)
+      (check-equal! (buffer-local buf 'modeline-groups)
+                    '("zztest-modeline-one" "zztest-modeline-two")
+                    "multiple memberships are all retained for C-x ? and compaction")
+      (group-rename! two "zztest-modeline-renamed")
+      (check-equal! (buffer-local buf 'modeline-groups)
+                    '("zztest-modeline-one" "zztest-modeline-renamed")
+                    "renaming a group refreshes its member labels")
+      (buffer-remove-group! buf one)
+      (check-equal! (buffer-local buf 'modeline-groups) '("zztest-modeline-renamed")
+                    "leaving a group removes only that name")
+      (buffer-kill! buf)
+      (t--drop! one)
+      (t--drop! two))))
+
 (deftest 'push-founds-a-typed-name
   "the push prompt takes a name it does not list, and founds it"
   (lambda ()

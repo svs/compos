@@ -15,6 +15,7 @@ defmodule Aimax.Ui.Router do
     live("/", Aimax.Ui.EditorLive)
     live("/operad", Aimax.Ui.HomepageLive, :operad)
     live("/emma", Aimax.Ui.HomepageLive, :emma)
+    live("/compos", Aimax.Ui.HomepageLive, :compos)
 
     # a buffer link: the tab's own frame shows BUFFER, at LINE when the
     # query gives one. The name is one percent-encoded segment, so a file

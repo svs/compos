@@ -463,7 +463,8 @@ when a message has no text/plain part." 'group 'notmuch)
     ((layout-arranging?) (thunk))
     (else
       (let ((back (active-window))
-            (pane (window-showing *notmuch-show-buffer*)))
+            (pane (or (scene-window 'show)
+                      (window-showing *notmuch-show-buffer*))))
         (if pane
             (select-window! pane)
             (begin
@@ -961,9 +962,16 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (define-command "notmuch-open-thread" "Open the thread at point"
   (lambda ()
-    (let ((th (nm--thread-at (current-buffer))))
+    (let ((buf (current-buffer))
+          (th (nm--thread-at (current-buffer)))
+          ;; A scene names semantics, not coordinates. RET fills its `show`
+          ;; pane without moving focus from `index`. Outside a scene it keeps
+          ;; the traditional behavior of opening in the current window.
+          (pane (scene-window 'show)))
       (if th
-          (nm--open-thread! (nm--th-id th) (nm--th-subject th))
+          (if pane
+              (nm--preview! buf)
+              (nm--open-thread! (nm--th-id th) (nm--th-subject th)))
           (message "No thread on this line")))))
 
 (define-command "notmuch-show-toggle-view" "Switch between the HTML and text views"

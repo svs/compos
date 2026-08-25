@@ -11,6 +11,13 @@
 (domain! 'testing)
 (effects! '(read))
 
+(deftest 'pasted-image-markdown-uses-angle-brackets-for-spaces
+  "Markdown image destinations with spaces use angle brackets"
+  (lambda ()
+    (check-equal! (clipboard-image-destination "images/my sketch.png")
+                  "<images/my sketch.png>"
+                  "the destination is valid Markdown")))
+
 (define (t--wr-locals buf)
   (map (lambda (k) (list k (buffer-local buf k)))
        '(window-class modeline-info line-numbers render-mode preview-renderer
@@ -29,7 +36,7 @@
   "the layout is data, so the engine has nothing to interpret"
   (lambda ()
     (check-equal! (mode-layout "writing-layout")
-                  '(h 0.34 self scratch-buffer writing-chat-buffer)
+                  (list 'h *window-third* 'self 'scratch-buffer 'writing-chat-buffer)
                   "the document, its scratch, and its chat")))
 
 ;;; --- a chat is not a document ---------------------------------------------------

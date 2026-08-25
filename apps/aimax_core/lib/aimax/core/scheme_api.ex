@@ -170,6 +170,8 @@ defmodule Aimax.Core.SchemeAPI do
         "(write-file! PATH TEXT) — write TEXT to PATH, create parent directories; return #t.",
       "start-process!" =>
         "(start-process! BUF CMD) — start a shell process attached to BUF; return #t on success.",
+      "start-terminal!" =>
+        "(start-terminal! BUF CMD) — start a raw PTY whose bounded plain transcript stays in BUF; return #t on success.",
       "process-send!" =>
         "(process-send! BUF TEXT) — send TEXT to the buffer's process; return #t on success.",
       "process-running?" => "(process-running? BUF) — return #t if the buffer's process runs.",
@@ -324,7 +326,7 @@ defmodule Aimax.Core.SchemeAPI do
       "minibuffer-read" =>
         "(minibuffer-read PROMPT CANDIDATES [ON-COMPLETE] ON-CONFIRM) — activate the minibuffer.",
       "minibuffer-read*" =>
-        "(minibuffer-read* PROMPT CANDIDATES HANDLERS) — activate the minibuffer with a handler alist.",
+        "(minibuffer-read* PROMPT CANDIDATES HANDLERS) — activate the minibuffer with a handler alist, including an optional collect handler.",
       "global-set-key" =>
         "(global-set-key SEQ COMMAND) — bind the key sequence SEQ to COMMAND globally.",
       "local-set-key" =>
@@ -353,6 +355,7 @@ defmodule Aimax.Core.SchemeAPI do
       "window-rows" => "(window-rows) — return the number of text rows in the active window.",
       "window-cols" =>
         "(window-cols [WIN]) — return the number of text columns in WIN, or in the active window.",
+      "frame-cols" => "(frame-cols) — estimate the usable text columns across the current frame.",
       "buffer-cols" =>
         "(buffer-cols BUF) — return the text columns of a window showing BUF, else the active window's.",
       "recenter!" => "(recenter!) — center the active window on the cursor line.",
@@ -376,7 +379,7 @@ defmodule Aimax.Core.SchemeAPI do
       "minibuffer-set-candidates!" =>
         "(minibuffer-set-candidates! CANDIDATES) — replace the minibuffer's candidate list.",
       "set-frame-group-label!" =>
-        "(set-frame-group-label! NAME [FRAME]) — name the group a frame stands in, for the modeline; #f clears it. FRAME defaults to the selected one.",
+        "(set-frame-group-label! NAME [FRAME]) — record a frame's group context; #f clears it. FRAME defaults to the selected one.",
       "delete-file!" =>
         "(delete-file! PATH) — delete a file or empty directory; return #t or error.",
       "trash-file!" =>
@@ -823,24 +826,47 @@ defmodule Aimax.Core.SchemeAPI do
           _ -> false
         end
       end,
-      "process-send!" => fn [buffer, text] ->
-        Aimax.Core.Proc.send_text(buffer, text) == :ok
+      "start-terminal!" => fn [buffer, cmd] ->
+        case Aimax.Core.Terminal.start(buffer, cmd) do
+          {:ok, _} -> true
+          {:error, {:already_started, _}} -> true
+          _ -> false
+        end
       end,
-      "process-running?" => fn [buffer] -> Aimax.Core.Proc.running?(buffer) end,
+      "process-send!" => fn [buffer, text] ->
+        result =
+          if Aimax.Core.Terminal.running?(buffer),
+            do: Aimax.Core.Terminal.send_text(buffer, text),
+            else: Aimax.Core.Proc.send_text(buffer, text)
+
+        result == :ok
+      end,
+      "process-running?" => fn [buffer] ->
+        Aimax.Core.Terminal.running?(buffer) or Aimax.Core.Proc.running?(buffer)
+      end,
       "process-mark" => fn [buffer] -> Aimax.Core.Proc.mark(buffer) end,
       "buffer-substring" => fn [s, e] ->
         text = Buffer.text(Editor.current_buffer())
         binary_part(text, s, min(e, Kernel.byte_size(text)) - s)
       end,
       "process-kill!" => fn [buffer] ->
-        Aimax.Core.Proc.kill(buffer)
+        if Aimax.Core.Terminal.running?(buffer),
+          do: Aimax.Core.Terminal.kill(buffer),
+          else: Aimax.Core.Proc.kill(buffer)
+
         :void
       end,
       "process-list" => fn [] ->
-        for {name, cmd} <- Aimax.Core.Proc.list(), do: [name, cmd]
+        for {name, cmd} <- Enum.sort(Aimax.Core.Proc.list() ++ Aimax.Core.Terminal.list()),
+            do: [name, cmd]
       end,
       "process-restart!" => fn [buffer] ->
-        case Aimax.Core.Proc.restart(buffer) do
+        result =
+          if Aimax.Core.Terminal.running?(buffer),
+            do: Aimax.Core.Terminal.restart(buffer),
+            else: Aimax.Core.Proc.restart(buffer)
+
+        case result do
           {:ok, _} -> true
           _ -> false
         end
@@ -1297,7 +1323,7 @@ defmodule Aimax.Core.SchemeAPI do
           :void
       end,
       # full form: handlers is an alist of (list 'confirm f) (list 'change f)
-      # (list 'complete f) (list 'cancel f) (list 'initial "text")
+      # (list 'complete f) (list 'cancel f) (list 'collect f) (list 'initial "text")
       # (list 'match-hint #t) — the last one widens the filter to the
       # annotation, so a prompt matches what a candidate MEANS. #t means
       # the first field; an integer N means the first N fields.
@@ -1309,6 +1335,9 @@ defmodule Aimax.Core.SchemeAPI do
               # A dynamic provider has already filtered/ranked its results.
               "filter" -> {:filter, v}
               "match-hint" -> {:match_hint, v}
+              # A prompt can reuse a domain list when its filtered result is
+              # collected. Scheme decides the target and receives the rows.
+              "collect" -> {:on_collect, v}
               # "palette" renders the prompt as a centered panel
               "style" -> {:style, v}
               key -> {String.to_existing_atom("on_" <> key), v}
@@ -1413,6 +1442,7 @@ defmodule Aimax.Core.SchemeAPI do
         [win] when is_integer(win) -> Editor.window_cols(win)
         _ -> Editor.window_cols()
       end,
+      "frame-cols" => fn [] -> Editor.frame_cols() end,
       "recenter!" => fn [] ->
         Editor.recenter()
         :void

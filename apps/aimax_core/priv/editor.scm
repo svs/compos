@@ -3078,10 +3078,41 @@
             (run-hooks 'after-save-hook)
             (message (string-append "Wrote " p)))))))
 
+;; A pathless buffer still has a useful name and mode. Use both when C-x C-w
+;; asks for a destination. Outer stars are editor notation, not filename
+;; characters. The mode supplies an extension only when the name has none
+;; that the editor already recognizes.
+(define (write-file-buffer-stem name)
+  (let ((n (string-length name)))
+    (let ((stem (if (and (> n 1)
+                         (string-prefix? "*" name)
+                         (string-suffix? "*" name))
+                    (substring name 1 (- n 1))
+                    name)))
+      (if (equal? (string-trim stem) "") "untitled" stem))))
+
+(define (write-file-mode-extension mode)
+  (let loop ((entries *auto-mode-alist*))
+    (cond ((or (not mode) (null? entries)) "")
+          ((equal? mode (cadr (car entries))) (car (car entries)))
+          (else (loop (cdr entries))))))
+
+(define (write-file-default-path buf)
+  (let ((path (buffer-path buf)))
+    (if (and (string? path) (not (equal? path "")))
+        path
+        (let* ((stem (write-file-buffer-stem buf))
+               (mode (buffer-local buf 'mode-name))
+               (ext (if (auto-mode-for stem)
+                        ""
+                        (write-file-mode-extension mode))))
+          (string-append (default-directory) stem ext)))))
+
 (define-command "write-file" "Write the buffer to a file; the buffer becomes that file's buffer"
   (lambda ()
     (let ((old (current-buffer)))
-      (read-file-name (string-append "Write " old " to file: ")
+      (read-file-name-initial (string-append "Write " old " to file: ")
+        (write-file-default-path old)
         (lambda (p) (write-buffer-to-file! old p))))))
 
 ;; Save a buffer that is not the current one. save-buffer acts on the
@@ -3171,23 +3202,30 @@
           (set! *file-nav-dir* dir)
           (minibuffer-set-candidates! (file-candidates dir (list-dir dir)))))))
 
-;; ONE file prompt (dup #17): minibuffer with filename completion, rooted
-;; at default-directory. K receives the confirmed text exactly as typed.
+;; ONE file prompt (dup #17): minibuffer with filename completion. INITIAL
+;; chooses its starting directory and text. K receives the confirmed text
+;; exactly as typed.
 ;; match-hint: the annotation names the mode the file opens in, so "dired"
 ;; narrows the listing to the directories and "elixir" to the .ex files.
-(define (read-file-name prompt k)
-  (let ((dd (default-directory)))
-    (set! *file-nav-dir* dd)
-    (let ((cands (file-candidates dd (list-dir dd))))
+(define (read-file-name-initial prompt initial k)
+  (let* ((dd (default-directory))
+         (seed (if (and (string? initial) (not (equal? initial ""))) initial dd))
+         (seed-dir (car (path-split (normalize-file-input seed))))
+         (dir (if (equal? seed-dir "") dd seed-dir)))
+    (set! *file-nav-dir* dir)
+    (let ((cands (file-candidates dir (list-dir dir))))
       (minibuffer-read* prompt cands
         (list (list 'complete file-complete)
               (list 'change file-nav-change)
-              (list 'initial dd)
+              (list 'initial seed)
               ;; the icon leads the annotation, so the mode is the second
               ;; field: both must be in reach for "dired" to find a directory
               (list 'match-hint 2)
               (list 'style (prompt-style cands #f))
               (list 'confirm k))))))
+
+(define (read-file-name prompt k)
+  (read-file-name-initial prompt (default-directory) k))
 
 ;;; --- remote files (/ssh:host:/path — TRAMP-lite) ---------------------------
 ;;; Transport is two primitives (remote-read / remote-write; ssh underneath,

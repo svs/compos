@@ -2805,6 +2805,10 @@ defmodule Aimax.EditorTest do
 
     press(["C-x", "C-w"])
     assert Editor.render_state().minibuffer.prompt =~ "Write #{buf} to file:"
+
+    assert String.ends_with?(Editor.render_state().minibuffer.input, "/#{buf}")
+
+    clear_minibuffer()
     type(path)
     press(["RET"])
 
@@ -2812,6 +2816,21 @@ defmodule Aimax.EditorTest do
     assert Editor.current_buffer() == path
     refute Buffer.exists?(buf)
     File.rm!(path)
+  end
+
+  test "write-file proposes the buffer name with its mode extension" do
+    buf = "*pdf text or image*"
+    Editor.set_window_buffer(buf)
+    {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-set-local! "#{buf}" 'mode-name "chat-mode")})
+
+    run("write-file")
+
+    assert String.ends_with?(
+             Editor.render_state().minibuffer.input,
+             "/pdf text or image.chat"
+           )
+
+    press(["C-g"])
   end
 
   test "TAB into a directory, then RET opens dired (not the first entry)" do

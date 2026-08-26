@@ -418,6 +418,20 @@ defmodule Aimax.DesktopRestoreTest do
     assert eval!("*dr-dropped*") == ~s{"boot"}
   end
 
+  test "LLM configuration history survives desktop restore" do
+    eval!(~s{
+      (set! *llm-config-history*
+        '(("codex-app-server" "gpt-5.6-terra" "high")))
+    })
+    assert :ok = Desktop.save_now()
+
+    eval!("(set! *llm-config-history* '())")
+    assert :ok = Desktop.restore_now()
+
+    assert eval!("*llm-config-history*") ==
+             ~s{(("codex-app-server" "gpt-5.6-terra" "high"))}
+  end
+
   # unsaved edits are state: a modified file buffer's text rides the
   # desktop and lays back over what visit read from disk
   test "unsaved edits in a file buffer survive restore" do

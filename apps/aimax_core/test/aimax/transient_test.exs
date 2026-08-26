@@ -203,6 +203,129 @@ defmodule Aimax.TransientTest do
     press("C-q")
   end
 
+  test "the LLM menu applies a previously selected combination" do
+    buf = Editor.current_buffer()
+
+    on_exit(fn ->
+      Session.run_command("transient-quit-all")
+      eval!("(set! *llm-config-history* '())")
+    end)
+
+    eval!(~s{(llm-config-apply! "#{buf}" "api" "openai:gpt-5.6-luna" "medium")})
+    eval!(~s{
+      (set! *llm-config-history*
+        '(("codex-app-server" "gpt-5.6-terra" "high")))
+    })
+
+    Session.run_command("llm-configure")
+
+    assert [%{title: "Arguments"}, %{title: "Recent combinations", items: recent}] =
+             Editor.render_state().transient.groups
+
+    assert hd(recent).description == "codex-app-server · gpt-5.6-terra · high"
+
+    press("1")
+
+    assert Buffer.get_local(buf, "llm-connector") == "codex-app-server"
+    assert Buffer.get_local(buf, "llm-model") == "gpt-5.6-terra"
+    assert Buffer.get_local(buf, "llm-effort") == "high"
+    assert Editor.render_state().transient == nil
+    assert eval!("*llm-config-history*") =~
+             ~s{(("codex-app-server" "gpt-5.6-terra" "high"))}
+  end
+
+  test "the LLM menu records only a confirmed final combination" do
+    buf = Editor.current_buffer()
+
+    on_exit(fn ->
+      Session.run_command("transient-quit-all")
+      eval!("(set! *llm-config-history* '())")
+    end)
+
+    eval!(~s{
+      (set! *llm-config-history* '())
+      (llm-config-apply! "#{buf}" "codex-app-server" "gpt-5.6-terra" "high")
+    })
+
+    # Opening and cancelling a picker does not create history.
+    Session.run_command("llm-configure")
+    press("m")
+    press("C-g")
+    press("C-g")
+    assert eval!("*llm-config-history*") == "()"
+
+    # A confirmed model changes the buffer immediately. History commits only
+    # when C-g closes the configuration selector.
+    Session.run_command("llm-configure")
+    press("m")
+    type("gpt-5.6-luna")
+    press("RET")
+
+    assert Buffer.get_local(buf, "llm-model") == "gpt-5.6-luna"
+    assert eval!("*llm-config-history*") == "()"
+
+    press("C-g")
+
+    assert eval!("*llm-config-history*") ==
+             ~s{(("codex-app-server" "gpt-5.6-luna" "default"))}
+  end
+
+  test "an exiting LLM menu row commits the confirmed combination" do
+    buf = Editor.current_buffer()
+
+    on_exit(fn ->
+      Session.run_command("transient-quit-all")
+      eval!("(set! *llm-config-history* '())")
+    end)
+
+    eval!(~s{
+      (set! *llm-config-history* '())
+      (llm-config-apply! "#{buf}" "codex-app-server" "gpt-5.6-terra" "high")
+    })
+
+    Session.run_command("llm-configure")
+    press("m")
+    type("gpt-5.6-luna")
+    press("RET")
+    press("t")
+
+    assert Editor.render_state().transient == nil
+    assert eval!("*llm-config-history*") ==
+             ~s{(("codex-app-server" "gpt-5.6-luna" "default"))}
+  end
+
+  test "the LLM menu applies a previous combination to a chat" do
+    buf = "*zz-transient-history-chat*"
+    eval!(~s{(buffer-create "#{buf}")})
+
+    on_exit(fn ->
+      Session.run_command("transient-quit-all")
+      eval!(~s{
+        (let ((slug (buffer-local "#{buf}" 'agent-slug)))
+          (when slug (llm-session-close! slug)))
+        (set! *llm-config-history* '())
+      })
+      Aimax.Core.kill_buffer(buf)
+    end)
+
+    eval!(~s{
+      (buffer-set-local! "#{buf}" 'mode-name "chat-mode")
+      (buffer-set-local! "#{buf}" 'agent-connector "api")
+      (buffer-set-local! "#{buf}" 'agent-saved-mark 0)
+      (set! *llm-config-history*
+        '(("api" "openai:gpt-5.6-luna" "high")
+          ("api" "default" "default")))
+    })
+
+    Editor.set_window_buffer(buf)
+    Session.run_command("llm-configure")
+    press("1")
+
+    assert Buffer.get_local(buf, "agent-connector") == "api"
+    assert Buffer.get_local(buf, "agent-model") == "openai:gpt-5.6-luna"
+    assert Buffer.get_local(buf, "agent-effort") == "high"
+  end
+
   # one row of the active transient, by its description
   defp row(description) do
     Editor.render_state().transient.groups

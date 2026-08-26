@@ -30,6 +30,13 @@
 
 (define (transient-prefix name) (assoc name *transient-prefixes*))
 
+(define (transient--prefix-option prefix key)
+  (plist-get (car (cdr (cdr (cdr prefix)))) key))
+
+(define (transient--run-hook prefix key state)
+  (let ((fn (and prefix (transient--prefix-option prefix key))))
+    (when fn (fn (plist-get state 'scope)))))
+
 (define (transient-suffix key description command &rest properties)
   (append (list 'kind 'suffix 'key key 'description description 'command command)
           properties))
@@ -264,6 +271,7 @@
                (state (transient--put seed 'values
                         (transient--initial-values prefix groups))))
           (transient--set-active! state)
+          (transient--run-hook prefix 'on-setup state)
           (transient--render!)))))
 
 (define (transient--remember! state)
@@ -279,6 +287,8 @@
   (set-frame-local! 'transient-current-values (plist-get state 'values)))
 
 (define (transient--exit! state)
+  (transient--run-hook
+    (transient-prefix (plist-get state 'prefix)) 'on-quit state)
   (transient--remember! state)
   (transient--export! state)
   (transient--close-menu!)
@@ -347,18 +357,27 @@
     (let* ((state (transient--active))
            (stack (and state (plist-get state 'stack))))
       (if (and stack (pair? stack))
-          (begin (transient--set-active! (car stack)) (transient--render!))
+          (begin
+            (transient--run-hook
+              (transient-prefix (plist-get state 'prefix)) 'on-quit state)
+            (transient--set-active! (car stack))
+            (transient--render!))
           (when state
+            (transient--run-hook
+              (transient-prefix (plist-get state 'prefix)) 'on-quit state)
             (transient--close-menu!)
             (transient--set-active! #f)
             (message "Quit"))))))
 
 (define-command "transient-quit-all" "Exit this transient and every parent"
   (lambda ()
-    (when (transient--active)
-      (transient--close-menu!)
-      (transient--set-active! #f)
-      (message "Quit"))))
+    (let ((state (transient--active)))
+      (when state
+        (transient--run-hook
+          (transient-prefix (plist-get state 'prefix)) 'on-quit state)
+        (transient--close-menu!)
+        (transient--set-active! #f)
+        (message "Quit")))))
 
 (define-command "transient-suspend" "Suspend this transient for later resumption"
   (lambda ()
@@ -444,23 +463,28 @@
 
 ;;; --- the editor's LLM configuration menu ----------------------------------
 
-(define (llm-config--chat? buf)
-  (equal? (buffer-local buf 'mode-name) "chat-mode"))
-
 (define (llm-config--connector buf)
-  (or (buffer-local buf (if (llm-config--chat? buf) 'agent-connector 'llm-connector))
-      (if (llm-config--chat? buf) *default-connector* "codex-app-server")))
+  (car (llm-config-combination buf)))
 
 (define (llm-config--model buf)
-  (or (buffer-local buf (if (llm-config--chat? buf) 'agent-model 'llm-model))
-      "default"))
+  (cadr (llm-config-combination buf)))
 
 (define (llm-config--effort buf)
-  (or (buffer-local buf (if (llm-config--chat? buf) 'agent-effort 'llm-effort))
-      "default"))
+  (caddr (llm-config-combination buf)))
 
 (define (llm-config--refresh!)
   (when (transient--active) (transient--render!)))
+
+(define (llm-config--setup! _buf)
+  (set-frame-local! 'llm-config-selected #f))
+
+(define (llm-config--mark-selected!)
+  (set-frame-local! 'llm-config-selected #t))
+
+(define (llm-config--quit! buf)
+  (when (frame-local 'llm-config-selected)
+    (llm-config-remember! (llm-config-combination buf)))
+  (set-frame-local! 'llm-config-selected #f))
 
 ;;; Presets are the tool selection: a preset names MCP servers, and the
 ;;; servers serve the tools. So the menu picks presets and reports what
@@ -541,6 +565,7 @@
         (lambda (choice)
           (unless (equal? choice "")
             (llm-config-apply! buf choice "default" "default")
+            (llm-config--mark-selected!)
             (llm-config--refresh!)))
         (lambda () #f)))))
 
@@ -557,6 +582,7 @@
         (lambda (model)
           (unless (equal? model "")
             (llm-config-apply! buf connector model "default")
+            (llm-config--mark-selected!)
             (llm-config--refresh!)))
         (lambda () #f)))))
 
@@ -579,24 +605,56 @@
         (lambda (effort)
           (unless (equal? effort "")
             (llm-config-apply! buf connector model effort)
+            (llm-config--mark-selected!)
             (llm-config--refresh!)))
         (lambda () #f)))))
 
+(define (llm-config--history-label combination)
+  (string-join combination " · "))
+
+(define (llm-config--history-key index)
+  (if (= index 10) "0" (number->string index)))
+
+(define (llm-config--history-items buf)
+  (let loop ((choices *llm-config-history*) (index 1) (items '()))
+    (if (null? choices)
+        (reverse items)
+        (let ((choice (car choices)))
+          (loop (cdr choices) (+ index 1)
+            (cons
+              (transient-suffix
+                (llm-config--history-key index)
+                (llm-config--history-label choice)
+                (lambda ()
+                  (llm-config-apply! buf (car choice) (cadr choice) (caddr choice))
+                  (llm-config-remember! choice)
+                  (set-frame-local! 'llm-config-selected #f)
+                  (run-command "transient-quit-all"))
+                'transient 'stay)
+              items))))))
+
+(define (llm-config--groups buf)
+  (let ((history (llm-config--history-items buf)))
+    (append
+      (list
+        (list "Arguments"
+          (transient-infix "b" "Backend" "llm-config-pick-backend"
+            (lambda (scope) (llm-config--connector scope)))
+          (transient-infix "m" "Model" "llm-config-pick-model"
+            (lambda (scope) (llm-config--model scope)))
+          (transient-infix "e" "Effort" "llm-config-pick-effort"
+            (lambda (scope) (llm-config--effort scope)))
+          (transient-infix "p" "Presets" "llm-config-pick-preset"
+            (lambda (scope) (llm-config--presets-label scope)))
+          (transient-suffix "t" "Tools" "chat-tool-list"
+            'value-fn (lambda (scope) (llm-config--tools-label scope)))))
+      (if (null? history) '() (list (cons "Recent combinations" history))))))
+
 (transient-define-prefix "llm-configure"
   "Configure this buffer's language model"
-  (lambda (buf)
-    (list
-      (list "Arguments"
-        (transient-infix "b" "Backend" "llm-config-pick-backend"
-          (lambda (scope) (llm-config--connector scope)))
-        (transient-infix "m" "Model" "llm-config-pick-model"
-          (lambda (scope) (llm-config--model scope)))
-        (transient-infix "e" "Effort" "llm-config-pick-effort"
-          (lambda (scope) (llm-config--effort scope)))
-        (transient-infix "p" "Presets" "llm-config-pick-preset"
-          (lambda (scope) (llm-config--presets-label scope)))
-        (transient-suffix "t" "Tools" "chat-tool-list"
-          'value-fn (lambda (scope) (llm-config--tools-label scope)))))))
+  llm-config--groups
+  'on-setup llm-config--setup!
+  'on-quit llm-config--quit!)
 
 (define (transient--values-file)
   (string-append (aimax-home) "/transient-values.scm"))

@@ -6601,6 +6601,31 @@
       (if (equal? effort "default") "" (string-append " · " effort))
       " — the conversation carries over")))
 
+;; The configuration menu keeps recent complete choices, not three unrelated
+;; input histories. The transient records one final choice when it closes.
+(define *llm-config-history* '())
+(define llm-config-history-limit 10)
+
+(persist-global! 'llm-config-history
+  (lambda () *llm-config-history*)
+  (lambda (v) (set! *llm-config-history* v)))
+
+(define (llm-config-combination buf)
+  (let ((chat? (equal? (buffer-local buf 'mode-name) "chat-mode")))
+    (list
+      (or (buffer-local buf (if chat? 'agent-connector 'llm-connector))
+          (if chat? *default-connector* "codex-app-server"))
+      (or (buffer-local buf (if chat? 'agent-model 'llm-model)) "default")
+      (or (buffer-local buf (if chat? 'agent-effort 'llm-effort)) "default"))))
+
+(define (llm-config-remember! combination)
+  (set! *llm-config-history*
+    (take-n
+      (cons combination
+        (remove (lambda (old) (equal? old combination)) *llm-config-history*))
+      llm-config-history-limit))
+  combination)
+
 ;; One configuration surface for every LLM frontend. Chat buffers apply the
 ;; choice to their durable session; ordinary buffers persist it as llm-mode
 ;; locals, and their next turn resumes or starts the matching session.

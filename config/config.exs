@@ -51,24 +51,13 @@ if config_env() == :dev do
     ]
 end
 
-# A daemon on any port is still the reader's editor: it loads the real
-# ai-config.scm, init.scm, custom.scm, theme and faces. AIMAX_CONFIG says
-# where that config lives; the daemon's own state - desktop, buffers,
-# socket - stays in its home. Point it at an empty directory for a daemon
-# that must boot with no config at all.
-if config_env() == :dev and System.get_env("AIMAX_CONFIG") do
-  config :aimax_core, config_dir: Path.expand(System.get_env("AIMAX_CONFIG"))
-end
-
 # AIMAX_VERIFY=1 mix run --no-halt: an isolated daemon (own port, home,
-# socket) for verifying changes from a worktree while the real one runs.
-# It reads the real config, so what it draws is what the reader would see.
+# socket) for verifying changes from a worktree while the real one runs
 if config_env() == :dev and System.get_env("AIMAX_VERIFY") do
   config :aimax_ui, Aimax.Ui.Endpoint, http: [ip: {127, 0, 0, 1}, port: 4104]
   config :aimax_ui, app_port: 4105
 
   config :aimax_core,
-    config_dir: Path.expand(System.get_env("AIMAX_CONFIG") || "~/.aimax"),
     home: "/tmp/aimax-verify-home",
     desktop_path: "/tmp/aimax-verify-home/desktop.etf"
 

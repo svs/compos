@@ -101,6 +101,42 @@ defmodule Aimax.Core.Markdown.Html do
   defp node(%{kind: kind} = node, _text, marks) when kind in @silent,
     do: {marks_only(node, marks), drop_marks(node, marks)}
 
+  # A table row's pipes are anonymous to the grammar, like a link's
+  # brackets, so they never become nodes and would fall through as text.
+  # In a row, everything that is not a cell is markup.
+  defp node(%{kind: kind} = node, text, marks) when kind in [:table_head, :table_row] do
+    cell = if kind == :table_head, do: "th", else: "td"
+
+    cells = Enum.filter(node.children, &(&1.kind == :cell))
+    last = List.last(cells)
+
+    {drawn, marks} =
+      Enum.map_reduce(cells, marks, fn child, marks ->
+        # A mark standing on a pipe belongs to the cell beside it, or it
+        # would be consumed with the markup and the caret would vanish. It
+        # goes INSIDE a cell that already exists: a cell of its own would
+        # change the table, and the page must not change when point moves.
+        {ahead, marks} = Enum.split_while(marks, fn {off, _} -> off < child.start end)
+        {inner, marks} = children(child, text, marks)
+
+        {tail, marks} =
+          if child == last,
+            do: Enum.split_while(marks, fn {off, _} -> off < node.stop end),
+            else: {[], marks}
+
+        {[
+           ~s(<#{cell} data-src="#{child.start}-#{child.stop}">),
+           Enum.map(ahead, &elem(&1, 1)),
+           inner,
+           Enum.map(tail, &elem(&1, 1)),
+           "</#{cell}>"
+         ], marks}
+      end)
+
+    {[~s(<tr data-src="#{node.start}-#{node.stop}">), drawn, "</tr>"],
+     drop_marks(node, marks)}
+  end
+
   # A link's brackets and parentheses are anonymous to the grammar, so they
   # never become nodes and would otherwise fall through as text. Draw the
   # label alone, and let the destination become the attribute it always was.

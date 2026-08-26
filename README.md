@@ -86,10 +86,10 @@ lane over `req_llm` with native tool use, and an ACP lane that drives an
 external agent CLI. Permission prompts become minibuffer gates. Tool calls
 render as components in the buffer. `M-|` pipes a region through a model.
 
-**Applications, all in userland Scheme** — org-mode, notmuch mail, git and
-diff-mode, project, per-agent git worktrees, an MCP client and server hub, a
-GraphQL client, a Spotify remote, a writing workspace, a code browser, dired,
-ibuffer, help, and Emacs-style customization.
+**Applications, all in userland Scheme** — org-mode, spreadsheets, notmuch
+mail, git and diff-mode, project, per-agent git worktrees, an MCP client and
+server hub, a GraphQL client, a Spotify remote, a writing workspace, a code
+browser, dired, ibuffer, help, and Emacs-style customization.
 
 **Packaging** — `mix release` builds a daemon. `bin/aimax` starts it.
 `AIMAX_APP_PORT` sets the port.

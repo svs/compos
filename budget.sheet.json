@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "sheets": [
+    {
+      "name": "Budget",
+      "data": [
+        ["Item", "Amount"],
+        ["Tea", 2],
+        ["Coffee", 3],
+        ["Total", "=SUM(B2:B3)"]
+      ]
+    }
+  ]
+}

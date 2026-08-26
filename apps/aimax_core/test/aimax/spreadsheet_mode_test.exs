@@ -38,7 +38,15 @@ defmodule Aimax.SpreadsheetModeTest do
     assert Jason.decode!(File.read!(path))["version"] == 1
     assert Buffer.get_local(buffer, "mode-name") == "spreadsheet-mode"
     assert Buffer.get_local(buffer, "render-mode") == "app"
-    assert Buffer.text(buffer) =~ "jspreadsheet-ce@5.0.4"
+    assert Buffer.text(buffer) =~ "@univerjs/presets@0.25.1"
+    assert Buffer.text(buffer) =~ "@univerjs/preset-sheets-core@0.25.1"
+    assert Buffer.text(buffer) =~ "UniverSheetsCorePreset"
+    assert Buffer.text(buffer) =~ ~s(id="app" tabindex="0")
+    assert Buffer.text(buffer) =~ "univerSnapshot"
+    assert Buffer.text(buffer) =~ "book.save()"
+    assert Buffer.text(buffer) =~ "getRange('A1').activate()"
+    assert Buffer.text(buffer) =~ "aimax:'request-focus'"
+    assert Buffer.text(buffer) =~ "book.setActiveSheet(sheets[wanted])"
     assert Buffer.text(buffer) =~ "_aimax/spreadsheet"
   end
 
@@ -47,6 +55,7 @@ defmodule Aimax.SpreadsheetModeTest do
 
     workbook = %{
       "version" => 1,
+      "univerSnapshot" => %{"styles" => %{}, "resources" => []},
       "sheets" => [
         %{
           "name" => "Budget",
@@ -59,6 +68,8 @@ defmodule Aimax.SpreadsheetModeTest do
              call!("spreadsheet-app-request", [buffer, "write", Jason.encode!(workbook)])
 
     stored = Jason.decode!(File.read!(path))
+    assert stored["univerSnapshot"]["styles"] == %{}
+
     assert get_in(stored, ["sheets", Access.at(0), "data", Access.at(0), Access.at(1)]) ==
              "=SUM(B2:B3)"
 
@@ -66,6 +77,53 @@ defmodule Aimax.SpreadsheetModeTest do
     assert [400, error] = call!("spreadsheet-app-request", [buffer, "write", ~s({"bad":true})])
     assert error =~ "not valid"
     assert File.read!(path) == original
+  end
+
+  test "agents can read and write a workbook by buffer name without displaying it", %{path: path} do
+    buffer = call!("spreadsheet-open!", [path])
+    generation = Buffer.get_local(buffer, "app-generation")
+
+    workbook = %{
+      "version" => 1,
+      "activeSheet" => 0,
+      "univerSnapshot" => %{
+        "id" => "agent-book",
+        "sheetOrder" => ["agent-sheet"],
+        "sheets" => %{
+          "agent-sheet" => %{
+            "id" => "agent-sheet",
+            "cellData" => %{"0" => %{"0" => %{"v" => "Task"}}}
+          }
+        }
+      },
+      "sheets" => [%{"name" => "Agent data", "data" => [["Task", "Done"], ["QA", true]]}]
+    }
+
+    buffer_literal = Jason.encode!(buffer)
+    workbook_literal = workbook |> Jason.encode!() |> Jason.encode!()
+
+    assert {:ok, "#t"} =
+             Session.eval(
+               "(spreadsheet-write! #{buffer_literal} (json-parse #{workbook_literal}))"
+             )
+
+    assert Buffer.get_local(buffer, "app-generation") == generation + 1
+
+    assert {:ok, encoded} =
+             Session.eval("(json-encode (spreadsheet-read #{buffer_literal}) #t)")
+
+    assert encoded |> Jason.decode!() |> Jason.decode!() == workbook
+
+    assert ["Agent data"] == call!("spreadsheet-sheet-names", [buffer])
+    assert true == call!("spreadsheet-set-cell!", [buffer, 1, "B2", "=COUNTIF(B1:B1,\"Done\")"])
+    assert "=COUNTIF(B1:B1,\"Done\")" == call!("spreadsheet-read-cell", [buffer, 1, "B2"])
+
+    stored = Jason.decode!(File.read!(path))
+    assert stored["activeSheet"] == 0
+    assert stored["univerSnapshot"] == workbook["univerSnapshot"]
+
+    assert get_in(stored, ["sheets", Access.at(0), "data", Access.at(1), Access.at(1)]) ==
+             "=COUNTIF(B1:B1,\"Done\")"
   end
 
   test "the mode setup rebuilds the app and its reload command works through key dispatch", %{
@@ -76,7 +134,7 @@ defmodule Aimax.SpreadsheetModeTest do
     Buffer.set_local(buffer, "render-mode", false)
 
     assert {:ok, _} = Session.eval(~s{(set-mode! "spreadsheet-mode")})
-    assert Buffer.text(buffer) =~ "jspreadsheet"
+    assert Buffer.text(buffer) =~ "UniverSheetsCorePreset"
     assert Buffer.get_local(buffer, "render-mode") == "app"
 
     generation = Buffer.get_local(buffer, "app-generation")

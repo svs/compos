@@ -1515,6 +1515,17 @@ defmodule Aimax.Ui.Layouts do
                     // C-g inside the app gives the keyboard back to the editor
                     const sink = document.getElementById("kb-sink");
                     if (sink) sink.focus();
+                  } else if (m.aimax === "request-focus") {
+                    // A cross-origin app cannot focus its own iframe element.
+                    // The parent grants focus only to the selected app window.
+                    const active = this.el.closest(".window")?.classList.contains("active");
+                    const editorOpen = document.querySelector(
+                      ".mb-panel, .which-key, .transient-panel"
+                    );
+                    if (active && !editorOpen && document.hasFocus()) {
+                      this.el.focus({ preventScroll: true });
+                      this.el.contentWindow?.postMessage({ aimax: "focus-granted" }, "*");
+                    }
                   } else if (m.aimax === "browser-location") {
                     this.pushEvent("browser_location", {
                       win: parseInt(this.el.dataset.win, 10),

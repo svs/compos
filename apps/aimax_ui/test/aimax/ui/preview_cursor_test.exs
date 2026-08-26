@@ -9,6 +9,17 @@ defmodule Aimax.Ui.PreviewCursorTest do
   defp strip_anchors(html),
     do: String.replace(html, ~r/<span class="ln" data-p="\d+"><\/span>/, "")
 
+  test "the caret is painted, not just present" do
+    # It once carried width:0. The span was in the page, in the right place,
+    # in the right colour, painting nothing - and every check of visibility
+    # and opacity said it was fine.
+    css = EditorLive.preview_doc("markdown", "hi\n", 0, @faces, false)
+
+    assert [rule] = Regex.run(~r/\.pt\{[^}]*\}/, css)
+    assert rule =~ ~r/width:\s*(?!0[;\s}])/, "the caret has no width: #{rule}"
+    assert rule =~ ~r/height:\s*(?!0[;\s}])/, "the caret has no height: #{rule}"
+  end
+
   test "the cursor span sits at point in rendered markdown" do
     html = EditorLive.preview_doc("markdown", "hello world", 5, @faces, false)
     assert html =~ "hello#{@pt} world"

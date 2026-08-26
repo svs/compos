@@ -41,7 +41,13 @@ defmodule Aimax.Core.Hotload do
 
   # The config home also holds this session's state, which the daemon writes
   # to constantly. None of it is source.
-  @config_noise ~w(buffers chats worktree-daemons)
+  #
+  # `grammars` is the one that does not look like state: installing a
+  # tree-sitter grammar drops <lang>-highlights.scm beside the shared
+  # object, and a highlights query is Scheme only to look at. Reading one
+  # as editor Scheme answers "unbound variable: [" for the query's
+  # alternation, then "unbound variable: atx_heading" for a node name.
+  @config_noise ~w(buffers chats worktree-daemons grammars)
 
   def start_link(opts \\ []) do
     {name, opts} = Keyword.pop(opts, :name, __MODULE__)

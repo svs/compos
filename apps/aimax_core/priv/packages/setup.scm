@@ -181,17 +181,25 @@
       (setup--show-doppler!)
       (setup--secret-help! name)))
 
-(define (setup-openrouter-enable!)
-  "Register the stored OpenRouter key and select hosted inference."
+;; Registration is mechanism: the key becomes usable. Selection is policy:
+;; which connector a chat rides is the user's choice. The two are separate
+;; calls, so boot can do the first without doing the second.
+(define (setup-openrouter-register!)
+  "Register the stored OpenRouter key. Do not select a connector."
   (let ((key (key-get "OPENROUTER_API_KEY")))
     (if key
-        (begin
-          (register-llm-key! "openrouter" key)
-          (set! *default-connector* "api")
-          (set-llm-model! setup-openrouter-model)
-          (message "OpenRouter is ready as the default inference provider")
-          #t)
-        (begin (message "OPENROUTER_API_KEY is not available") #f))))
+        (begin (register-llm-key! "openrouter" key) #t)
+        #f)))
+
+(define (setup-openrouter-enable!)
+  "Register the stored OpenRouter key and select hosted inference."
+  (if (setup-openrouter-register!)
+      (begin
+        (set! *default-connector* "api")
+        (set-llm-model! setup-openrouter-model)
+        (message "OpenRouter is ready as the default inference provider")
+        #t)
+      (begin (message "OPENROUTER_API_KEY is not available") #f)))
 
 (define (setup--store-openrouter-key! destination key)
   (cond
@@ -397,6 +405,8 @@
   "(setup-connectors) — readiness of the bootstrap connectors")
 (public! 'setup-provider-bootstrap!
   "(setup-provider-bootstrap!) — select Gemini Nano as the default connector")
+(public! 'setup-openrouter-register!
+  "(setup-openrouter-register!) — register the stored OpenRouter key; leave the connector alone")
 (public! 'setup-openrouter-enable!
   "(setup-openrouter-enable!) — register the stored OpenRouter key and select hosted inference")
 (public! 'setup-find-file-other-window!
@@ -407,5 +417,10 @@
   "(bot-show-document-other-window! BUFFER TITLE MARKDOWN SILENT?) — show bot documentation only in another window")
 (public! 'setup-report "(setup-report) — secret-free first-run setup report")
 
-;; A key installed by an earlier setup run becomes active after every reload.
-(when (key-get "OPENROUTER_API_KEY") (setup-openrouter-enable!))
+;; A key installed by an earlier setup run stays usable after every reload.
+;; This registers the key only. It does not select the connector: the user
+;; owns that choice, `customize` keeps it in custom.scm, and a load-time
+;; set! overwrites the choice on every boot and on every reload of this
+;; file. Run `M-x setup-bot`, or (setup-openrouter-enable!), to select the
+;; hosted lane.
+(setup-openrouter-register!)

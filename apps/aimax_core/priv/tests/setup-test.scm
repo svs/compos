@@ -87,3 +87,32 @@
       (set! *llm-keys* old-keys)
       (set! *default-connector* old-connector)
       (set-llm-model! old-model))))
+
+;; The bug this guards: setup.scm registered the stored key by calling
+;; setup-openrouter-enable! at load time. Every boot and every reload of
+;; the file then set *default-connector* to "api". A chat spawned after
+;; that rode the metered lane, and no ACP thread could start.
+(deftest 'a-stored-key-registers-without-choosing-the-connector
+  "registration is mechanism; the connector stays the user's choice"
+  (lambda ()
+    (let ((old-cache *key-cache*)
+          (old-keys *llm-keys*)
+          (old-connector *default-connector*)
+          (old-model (llm-model)))
+      (set! *key-cache* (cons '("OPENROUTER_API_KEY" "zz-test-key") *key-cache*))
+      (set! *default-connector* "claude-code")
+      (check-true! (setup-openrouter-register!) "the key registers")
+      (check-equal! *default-connector* "claude-code" "the connector is untouched")
+      (check-equal! (llm-model) old-model "the model is untouched")
+      (set! *key-cache* old-cache)
+      (set! *llm-keys* old-keys)
+      (set! *default-connector* old-connector)
+      (set-llm-model! old-model))))
+
+;; Boot must leave the ACP default in place. setup.scm loads before this
+;; test runs, so this reads the value its load-time form produced.
+(deftest 'boot-does-not-choose-the-inference-connector
+  "no bundled package selects a connector while it loads"
+  (lambda ()
+    (check-equal! *default-connector* "claude-code"
+                  "the boot default the user did not change")))

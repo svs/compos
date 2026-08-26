@@ -176,6 +176,36 @@ defmodule Aimax.Core.Buffer do
   def path(name), do: dormant_read(name, :path, :path)
   def modified?(name), do: dormant_read(name, :modified, :modified?)
   def point(name), do: dormant_read(name, :point, :point)
+
+  @doc """
+  Where the caret stands, as the buffer's own fact: the byte offset, and
+  the 1-based line and byte column it falls on. Answers nil when the buffer
+  shows no caret.
+
+  A display asks the buffer where the caret is. It does not work the answer
+  out from the text, and it does not get to decide whether there is one: a
+  rendered page and a source view read the same answer and draw it their
+  own way. A mode that shows no caret says so with the `caret` local, which
+  is how a terminal, a rendered help page, or a list keeps a clean page.
+
+  The point is clamped here, so no caller has to.
+  """
+  def caret(name) do
+    if get_local(name, "caret") == false do
+      nil
+    else
+      case point(name) do
+        nil ->
+          nil
+
+        p ->
+          text = text(name)
+          pos = p |> max(0) |> min(Kernel.byte_size(text))
+          {line, column} = Text.line_col(text, pos)
+          %{point: pos, line: line, column: column}
+      end
+    end
+  end
   def touch(name), do: GenServer.cast(via(name), :touch)
   def checkpoint_now(name), do: GenServer.call(via(name), :checkpoint_now, 30_000)
   def eviction_info(name), do: GenServer.call(via(name), :eviction_info)

@@ -55,11 +55,23 @@ defmodule Aimax.Core.Markdown.Html do
     # read where the text is escaped - the deepest point of the walk. The
     # process holds it rather than every function passing it down.
     Process.put(:aimax_md_whitespace, opts[:whitespace] == true)
+    # An image's source is a path in the document and a URL on the page, and
+    # only the caller knows how one becomes the other. A pasted image is an
+    # absolute path, which a browser will not load: without this it drew
+    # nothing.
+    Process.put(:aimax_md_image_src, opts[:image_src])
 
     marks = Enum.sort_by(marks, &elem(&1, 0))
     {iodata, marks} = nodes(tree, text, 0, marks)
+
+    # The blank lines after the last block are lines too, and RET at the end
+    # of a document makes one of them. Without this the caret landed after
+    # the closing tag of the last block, outside every line on the page.
+    last = tree |> List.last() |> then(&if(&1, do: &1.stop, else: 0))
+    {tail, marks} = blank_lines(text, last, byte_size(text), marks)
+
     # a mark past the last byte still has to be drawn
-    IO.iodata_to_binary([iodata, Enum.map(marks, &elem(&1, 1))])
+    IO.iodata_to_binary([iodata, tail, Enum.map(marks, &elem(&1, 1))])
   end
 
   # Between blocks, whitespace is structure: the blank line that separates
@@ -83,7 +95,7 @@ defmodule Aimax.Core.Markdown.Html do
         {gap, marks} =
           if content?,
             do: slice(text, at, node.start, marks),
-            else: gap_marks(at, node.start, marks)
+            else: blank_lines(text, at, node.start, marks)
 
         {body, marks} = node(node, text, marks)
         {[skipped, gap, body], {node.stop, node.kind in @silent, marks}}
@@ -92,10 +104,29 @@ defmodule Aimax.Core.Markdown.Html do
     {parts, marks}
   end
 
-  defp gap_marks(at, stop, marks) do
-    {here, rest} = Enum.split_while(marks, fn {off, _} -> off < stop and off >= at end)
-    {Enum.map(here, &elem(&1, 1)), rest}
+  # A blank line the author typed is a line, and a reader who presses RET
+  # has to see one appear. Between blocks each newline is exactly that: draw
+  # it as an empty line of its own, tall enough to stand in, and put any
+  # mark that falls on it inside - so point can sit on a blank line and show
+  # there.
+  defp blank_lines(text, at, stop, marks) when at < stop do
+    gap = binary_part(text, at, stop - at)
+
+    {lines, marks} =
+      :binary.matches(gap, "\n")
+      |> Enum.map(fn {i, _} -> at + i end)
+      |> Enum.map_reduce(marks, fn pos, marks ->
+        {here, rest} = Enum.split_while(marks, fn {off, _} -> off <= pos end)
+        {[~s(<div class="bl" data-s="#{pos}">), Enum.map(here, &elem(&1, 1)), "</div>"], rest}
+      end)
+
+    # a mark past the last newline of the gap still belongs to the gap
+    {tail, marks} = Enum.split_while(marks, fn {off, _} -> off < stop end)
+
+    {[lines, Enum.map(tail, &elem(&1, 1))], marks}
   end
+
+  defp blank_lines(_text, _at, _stop, marks), do: {[], marks}
 
   # The space between a marker and what it marks belongs to the marker: the
   # grammar gives "#" its own node and leaves the space after it, which would
@@ -215,10 +246,17 @@ defmodule Aimax.Core.Markdown.Html do
   end
 
   defp node(%{kind: :image} = node, text, marks) do
-    src = child_text(node, text, :link_destination)
+    src = node |> child_text(text, :link_destination) |> image_src()
     alt = child_text(node, text, :link_text)
     {_inner, marks} = label(node, text, marks)
     {[~s(<img src="), escape(src), ~s(" alt="), escape(alt), ~s(">)], marks}
+  end
+
+  defp image_src(src) do
+    case Process.get(:aimax_md_image_src) do
+      fun when is_function(fun, 1) -> fun.(src)
+      _ -> src
+    end
   end
 
   # The label's own text, with every mark that fell anywhere in the link
@@ -267,7 +305,12 @@ defmodule Aimax.Core.Markdown.Html do
 
   defp children(node, text, marks) do
     {inner, marks} = nodes(node.children, text, node.start, marks, node.kind)
-    {tail, marks} = slice(text, last_stop(node), node.stop, marks)
+
+    {tail, marks} =
+      if node.kind in @containers,
+        do: blank_lines(text, last_stop(node), node.stop, marks),
+        else: slice(text, last_stop(node), node.stop, marks)
+
     {[inner, tail], marks}
   end
 

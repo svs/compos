@@ -1762,7 +1762,12 @@ defmodule Aimax.Ui.EditorLive do
   # the buffer's version: a keystroke that moves point redraws and nothing
   # more, and only an edit parses again.
   defp render_preview(:tree_sitter, rm, leaf, pt, mark, faces, cache) do
-    opts = [whitespace: Aimax.Core.Buffer.get_local(leaf.buffer, "whitespace-mode") == true]
+    opts = [
+      whitespace: Aimax.Core.Buffer.get_local(leaf.buffer, "whitespace-mode") == true,
+      # a pasted image is an absolute path, and a browser will not load one
+      image_src: &local_image_src/1
+    ]
+
     tree_key = {leaf.buffer, leaf.version}
 
     case md_tree(leaf, tree_key, cache) do
@@ -2295,6 +2300,9 @@ defmodule Aimax.Ui.EditorLive do
     .pt.idle{animation:none;opacity:0.45}
     /* whitespace-mode: the newline the author typed, drawn where it is.
        Muted enough to read past, present enough to aim at. */
+    /* a blank line the author typed: a line, so pressing RET shows one */
+    .bl{height:1.7em}
+    .bl:has(.pt){height:1.7em}
     /* whitespace-mode. Every mark is a pseudo-element painted over the
        character the author typed, so the text keeps its own bytes and the
        page does not reflow when the marks come on. */

@@ -64,6 +64,13 @@ defmodule Aimax.Core.TreeSitter do
 
   @doc "Clone, compile, and load a grammar. Slow — run in a Task."
   def install(name, repo_url) do
+    # A pasted URL brings its whitespace with it, and git reads everything
+    # before "://" as the protocol: one leading space answers
+    # "protocol ' https' is not supported", which names neither the space
+    # nor the paste.
+    name = String.trim(name)
+    repo_url = String.trim(repo_url)
+
     File.mkdir_p!(grammars_dir())
     src = Path.join([grammars_dir(), "src", name])
     File.rm_rf(src)

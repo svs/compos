@@ -2300,8 +2300,11 @@ defmodule Aimax.Ui.EditorLive do
        page does not reflow when the marks come on. */
     .ws{position:relative}
     .ws.nl::before{content:"¶";color:#{dim};opacity:.5;font-size:.85em}
-    .ws.sp::before{content:"·";position:absolute;left:0;right:0;text-align:center;
-                   color:#{dim};opacity:.45;pointer-events:none}
+    /* a run of spaces, marked along its whole width rather than one span
+       per space: the dots repeat, the text keeps its own bytes */
+    .ws.sp{background-image:radial-gradient(circle,#{dim} 0.9px,transparent 1px);
+           background-size:.32em 100%;background-position:center;
+           background-repeat:repeat-x;opacity:.55}
     .ws.tab::before{content:"»";position:absolute;left:0;color:#{dim};opacity:.45;
                     pointer-events:none}
     .mk{display:inline-block;width:0;height:0}

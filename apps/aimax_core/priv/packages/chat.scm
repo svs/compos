@@ -541,13 +541,19 @@
 ;; ordering, duplication and cache stability inspectable without parsing the
 ;; final prose.  mcp.scm loads after this package and supplies the tool-side
 ;; fragments when it is present.
-(define (chat-system-prompt-parts buf &optional tools?)
+(define (chat-live-system-prompt-parts buf &optional tools?)
   (append
     (if (and tools?
              (boundp (quote chat-tool-system-parts)))
         (chat-tool-system-parts buf)
         '())
     (list (list "chat-preamble" (chat-preamble buf)))))
+
+(define (chat-system-prompt-parts buf &optional tools?)
+  (let ((live (chat-live-system-prompt-parts buf tools?)))
+    (if (boundp (quote chat-prompt-snapshot-parts))
+        (chat-prompt-snapshot-parts buf 'direct live)
+        live)))
 
 (define (chat-thread-context slug display)
   (let* ((buf (agent-buf slug))
@@ -563,9 +569,11 @@
 
 (domain! 'chat)
 (effects! '(read))
+(public! 'chat-live-system-prompt-parts
+  "(chat-live-system-prompt-parts BUF [TOOLS?]) — current direct prompt fragments before the conversation freeze")
+(effects! '(write))
 (public! 'chat-system-prompt-parts
   "(chat-system-prompt-parts BUF [TOOLS?]) — named system-prompt fragments in their exact send order")
-(effects! '(write))
 
 (llm-session-context-fn! (lambda (slug display) (chat-thread-context slug display)))
 

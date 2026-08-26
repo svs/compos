@@ -147,7 +147,7 @@
           (if (equal? note "") conf (agent-config-append-system conf note)))
         conf)))
 
-(define (agent-system-prompt-parts conf)
+(define (agent-live-system-prompt-parts conf)
   (let* ((buf (plist-get conf 'buffer))
          (mode-parts
            (if (and buf (boundp (quote prompt-buffer-parts)))
@@ -170,6 +170,13 @@
               (list (list "mcp" mcp-note)
                     (list "aimax-primer" primer))))))
 
+(define (agent-system-prompt-parts conf)
+  (let* ((buf (plist-get conf 'buffer))
+         (live (agent-live-system-prompt-parts conf)))
+    (if (and buf (boundp (quote chat-prompt-snapshot-parts)))
+        (chat-prompt-snapshot-parts buf 'acp live)
+        live)))
+
 (define (agent-config-with-system-parts conf)
   (fold (lambda (out part) (agent-config-append-system out (car (cdr part))))
         conf (agent-system-prompt-parts conf)))
@@ -178,10 +185,13 @@
 
 (effects! '(read))
 
-(public! 'agent-system-prompt-parts
-  "(agent-system-prompt-parts CONF) — named ACP system-prompt fragments in session-start order")
+(public! 'agent-live-system-prompt-parts
+  "(agent-live-system-prompt-parts CONF) — current ACP fragments before the conversation freeze")
 
 (effects! '(write))
+
+(public! 'agent-system-prompt-parts
+  "(agent-system-prompt-parts CONF) — named ACP system-prompt fragments in session-start order")
 
 (define (agent-resolve-config* opts)
   (let* ((cname (or (plist-get opts 'connector) *default-connector*))

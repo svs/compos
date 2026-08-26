@@ -15,8 +15,8 @@ available.
 
 The code-agent fragment itself is `code-agent-system-note` in
 `priv/packages/code.scm`. It is loaded because `priv/init.scm` explicitly loads
-that package. Enabling `code-agent-mode` makes the fragment eligible; it does
-not permanently copy prose into a chat record.
+that package. Enabling `code-agent-mode` makes the fragment eligible. The first
+send copies the composed fragment into the conversation snapshot.
 
 ## Direct API turns
 
@@ -24,8 +24,10 @@ At the start of every direct API turn, `Agent.send_prompt` asks
 `Aimax.Core.Agent.Backend.context/2` for context. The registered Scheme closure
 is `chat-thread-context` in `priv/packages/chat.scm`.
 
-`chat-system-prompt-parts` returns the exact ordered fragments sent on the
-wire. With tools enabled they are:
+The first turn stores `chat-prompt-snapshot` with the conversation.
+`chat-system-prompt-parts` returns this frozen set on every later turn.
+`chat-live-system-prompt-parts` computes current sources without changing the
+snapshot. With tools enabled the fragments are:
 
 1. `aimax-tools` — the intrinsic editor tool primer.
 2. `mcp` — notes for the remote servers this chat actually holds.
@@ -39,9 +41,10 @@ presence and duplication without parsing prose.
 
 ## ACP sessions
 
-ACP tools are fixed when a session starts. `agent-system-prompt-parts` in
-`priv/packages/agent-connectors.scm` returns buffer-local mode fragments,
-followed by the `mcp` and `aimax-primer` fragments.
+ACP tools and prompts are fixed when a session starts.
+`agent-system-prompt-parts` uses the same conversation snapshot as the direct
+lane. It contains buffer-local mode fragments, then `mcp` and `aimax-primer`.
+`agent-live-system-prompt-parts` computes current sources for inspection.
 `agent-config-with-system-parts` appends them through
 `_meta.systemPrompt.append`. A connector or preset change restarts or
 reattaches the session. A direct API turn can rebuild its context without this.
@@ -58,8 +61,12 @@ derived state. Mode setup must rebuild it after restore or reload.
 
 `chat-mode` enables `code-agent-mode` during setup because every chat is an
 agent surface. `code-agent-mode` owns the `code-agent` fragment. A mode change
-can invalidate the direct prompt cache. An ACP chat reconnects before its next
-turn so the session receives the changed fragment set.
+updates the live fragment source. It does not change a frozen conversation.
+
+Run `M-x chat-refresh-prompt` to replace the snapshot from current sources.
+This command intentionally breaks the direct prompt cache. It reconnects an
+idle ACP session immediately. It defers a busy ACP reconnect until the next
+turn.
 
 ## Quiet editor policy
 
@@ -80,18 +87,16 @@ checked-in effect later without changing this prompt contract.
 page shows the connector lane, lifecycle, ordered fragment names, byte counts,
 each fragment, and the final canonical join.
 
-For direct API chats, the page shows the value for the next turn. For ACP
-chats, it reconstructs the session append from current buffer state. A live
-ACP session keeps the value from its session start until reconnect. The ACP
+The page shows the frozen conversation prompt when one exists. Before the
+first send, it shows the prospective prompt from current sources. The ACP
 connector can also supply a system prompt that ai-max does not own.
 
 ## Stability and volatile context
 
-System text and tool definitions form the reusable prompt-cache prefix. Keep
-fragment wording and ordering stable across turns. Buffer contents, the newest
-user request, tool results and other changing material belong in messages or
-context blocks, not in stable standing fragments. Sort collections whose
-incidental order can change.
+System text and tool definitions form the reusable prompt-cache prefix. A chat
+freezes both at the conversation start. Source edits and mode changes cannot
+rewrite the system prefix midway. Buffer contents, the newest user request,
+tool results and other changing material belong in messages or context blocks.
 
 ## Change checklist
 

@@ -36,17 +36,30 @@ defmodule Aimax.Core.Markdown.Html do
 
   Answers `{:error, :no_grammar}` when the Markdown grammar is missing.
   """
-  def render(text, marks \\ []) do
+  def render(text, marks \\ [], opts \\ []) do
     case Markdown.parse(text) do
-      {:error, reason} ->
-        {:error, reason}
-
-      {:ok, tree} ->
-        marks = Enum.sort_by(marks, &elem(&1, 0))
-        {iodata, marks} = nodes(tree, text, 0, marks)
-        # a mark past the last byte still has to be drawn
-        {:ok, IO.iodata_to_binary([iodata, Enum.map(marks, &elem(&1, 1))])}
+      {:error, reason} -> {:error, reason}
+      {:ok, tree} -> {:ok, render_tree(tree, text, marks, opts)}
     end
+  end
+
+  @doc """
+  Draw an already-parsed TREE.
+
+  Parsing a document costs a hundred times what drawing it does, and moving
+  the caret does not change the tree. So the caller parses once per edit and
+  draws once per keystroke.
+  """
+  def render_tree(tree, text, marks \\ [], opts \\ []) do
+    # Whether whitespace draws is one answer for the whole page, and it is
+    # read where the text is escaped - the deepest point of the walk. The
+    # process holds it rather than every function passing it down.
+    Process.put(:aimax_md_whitespace, opts[:whitespace] == true)
+
+    marks = Enum.sort_by(marks, &elem(&1, 0))
+    {iodata, marks} = nodes(tree, text, 0, marks)
+    # a mark past the last byte still has to be drawn
+    IO.iodata_to_binary([iodata, Enum.map(marks, &elem(&1, 1))])
   end
 
   # Walk a list of siblings, emitting the source between them as text.
@@ -100,6 +113,24 @@ defmodule Aimax.Core.Markdown.Html do
   # sitting in a heading's "# " would vanish while point was really there.
   defp node(%{kind: kind} = node, _text, marks) when kind in @silent,
     do: {marks_only(node, marks), drop_marks(node, marks)}
+
+  # A list item with one paragraph is a tight item, and its text belongs
+  # beside the bullet. Wrapped in a block-level <p> it dropped to the line
+  # below, and every bullet stood alone above its own sentence. An item with
+  # more than one block is loose, and keeps its paragraphs.
+  defp node(%{kind: :item} = node, text, marks) do
+    node =
+      case Enum.filter(node.children, &(&1.kind == :paragraph)) do
+        [only] -> %{node | children: bare(node.children, only)}
+        _ -> node
+      end
+
+    {inner, marks} = children(node, text, marks)
+    {[~s(<li data-src="#{node.start}-#{node.stop}">), inner, "</li>"], marks}
+  end
+
+  defp bare(children, target),
+    do: Enum.map(children, fn c -> if c == target, do: %{c | kind: :bare}, else: c end)
 
   # A table row's pipes are anonymous to the grammar, like a link's
   # brackets, so they never become nodes and would fall through as text.
@@ -265,9 +296,18 @@ defmodule Aimax.Core.Markdown.Html do
     do: {~s(<#{name} data-src="#{s}-#{e}">), "</#{name}>"}
 
   defp escape(text) do
-    text
-    |> String.replace("&", "&amp;")
-    |> String.replace("<", "&lt;")
-    |> String.replace(">", "&gt;")
+    escaped =
+      text
+      |> String.replace("&", "&amp;")
+      |> String.replace("<", "&lt;")
+      |> String.replace(">", "&gt;")
+
+    if Process.get(:aimax_md_whitespace) do
+      # the glyph goes BEFORE the newline, so the line still breaks where the
+      # author broke it, and the reader can see where that is
+      String.replace(escaped, "\n", ~s(<span class="ws">¶</span>\n))
+    else
+      escaped
+    end
   end
 end

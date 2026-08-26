@@ -503,12 +503,13 @@ defmodule Aimax.Ui.EditorLive do
     # placeholder misses and the card renders
     key =
       {leaf.buffer, leaf.version, rm, leaf.preview_authored, :erlang.phash2(faces), pt, mark,
-       :erlang.phash2(leaf.overlays), Aimax.Ui.Oembed.generation(), preview_engine(leaf.buffer, rm)}
+       :erlang.phash2(leaf.overlays), Aimax.Ui.Oembed.generation(), preview_engine(leaf.buffer, rm),
+       Aimax.Core.Buffer.get_local(leaf.buffer, "whitespace-mode")}
 
-    html =
+    {html, cache} =
       case cache[{:preview, leaf.id}] do
-        {^key, html} -> html
-        _ -> render_preview(preview_engine(leaf.buffer, rm), rm, leaf, pt, mark, faces)
+        {^key, html} -> {html, cache}
+        _ -> render_preview(preview_engine(leaf.buffer, rm), rm, leaf, pt, mark, faces, cache)
       end
 
     {Map.merge(leaf, %{lines: [], preview: html}),
@@ -1756,16 +1757,41 @@ defmodule Aimax.Ui.EditorLive do
 
   defp preview_engine(_buffer, _rm), do: :earmark
 
-  defp render_preview(:tree_sitter, rm, leaf, pt, mark, faces) do
-    case preview_doc_ts(leaf.text, pt, mark, faces, leaf.overlays) do
-      {:ok, html} -> html
-      # no grammar installed: draw the page rather than nothing
-      {:error, _} -> render_preview(:earmark, rm, leaf, pt, mark, faces)
+  # Parsing a document costs a hundred times what drawing it does, and the
+  # tree does not change when the caret moves. So the tree is cached against
+  # the buffer's version: a keystroke that moves point redraws and nothing
+  # more, and only an edit parses again.
+  defp render_preview(:tree_sitter, rm, leaf, pt, mark, faces, cache) do
+    opts = [whitespace: Aimax.Core.Buffer.get_local(leaf.buffer, "whitespace-mode") == true]
+    tree_key = {leaf.buffer, leaf.version}
+
+    case md_tree(leaf, tree_key, cache) do
+      {nil, cache} ->
+        # no grammar installed: draw the page rather than nothing
+        render_preview(:earmark, rm, leaf, pt, mark, faces, cache)
+
+      {tree, cache} ->
+        {:ok, html} = preview_doc_ts(tree, leaf.text, pt, mark, faces, leaf.overlays, opts)
+        {html, cache}
     end
   end
 
-  defp render_preview(:earmark, rm, leaf, pt, mark, faces),
-    do: preview_doc(rm, leaf.text, pt, mark, faces, leaf.preview_authored, leaf.overlays)
+  defp render_preview(:earmark, rm, leaf, pt, mark, faces, cache),
+    do:
+      {preview_doc(rm, leaf.text, pt, mark, faces, leaf.preview_authored, leaf.overlays), cache}
+
+  defp md_tree(leaf, tree_key, cache) do
+    case cache[{:md_tree, leaf.id}] do
+      {^tree_key, tree} ->
+        {tree, cache}
+
+      _ ->
+        case Aimax.Core.Markdown.parse(ts_overlay_source(leaf.text, leaf.overlays)) do
+          {:ok, tree} -> {tree, Map.put(cache, {:md_tree, leaf.id}, {tree_key, tree})}
+          {:error, _} -> {nil, cache}
+        end
+    end
+  end
 
   @doc """
   Render a Markdown preview through the tree-sitter renderer.
@@ -1775,7 +1801,7 @@ defmodule Aimax.Ui.EditorLive do
   Answers `{:error, :no_grammar}` when the Markdown grammar is missing, and
   the caller falls back rather than drawing nothing.
   """
-  def preview_doc_ts(text, point, mark, faces, overlays) do
+  def preview_doc_ts(tree, text, point, mark, faces, overlays, opts \\ []) do
     size = byte_size(text)
     p = point |> max(0) |> min(size)
     m = if is_integer(mark), do: mark |> max(0) |> min(size), else: nil
@@ -1785,10 +1811,15 @@ defmodule Aimax.Ui.EditorLive do
         [{p, ~s(<span class="pt"></span>)}] ++
         if(m, do: [{m, ~s(<span class="mk"></span>)}], else: [])
 
-    case Aimax.Core.Markdown.Html.render(ts_overlay_source(text, overlays), marks) do
-      {:ok, body} -> {:ok, markdown_page(body, faces)}
-      {:error, reason} -> {:error, reason}
-    end
+    body =
+      Aimax.Core.Markdown.Html.render_tree(
+        tree,
+        ts_overlay_source(text, overlays),
+        marks,
+        opts
+      )
+
+    {:ok, markdown_page(body, faces)}
   end
 
   defp ts_line_marks(text) do
@@ -2262,6 +2293,9 @@ defmodule Aimax.Ui.EditorLive do
        It still draws: a reader who looks at the page from another window
        must still see where point stands. Emacs draws a hollow box here. */
     .pt.idle{animation:none;opacity:0.45}
+    /* whitespace-mode: the newline the author typed, drawn where it is.
+       Muted enough to read past, present enough to aim at. */
+    .ws{color:#{dim};opacity:.55;font-size:.85em;vertical-align:.05em}
     .mk{display:inline-block;width:0;height:0}
     .ln{display:inline-block;width:0;height:0}
     @keyframes ptb{0%,49%{opacity:1}50%,100%{opacity:0}}

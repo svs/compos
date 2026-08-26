@@ -192,9 +192,32 @@ when a message has no text/plain part." 'group 'notmuch)
 ;; thread, and the bar in front of the row says the first of them:
 ;; unread. The rest stay words, and they are what gives way when the
 ;; window narrows.
+;; Every tag stays on the line. A tag list that does not fit loses the
+;; END OF EACH WORD, not its last words: "impor… inbox perso… sent"
+;; still says which four tags the thread carries, and a cut list says
+;; the thread has two. Each word gets the same room, and the spaces
+;; between them take one character each.
+(define (nm--fit-tags s w)
+  (let* ((tags (filter (lambda (t) (not (equal? t ""))) (string-split s " ")))
+         (n (length tags))
+         (room (if (= n 0) 0 (quotient (- w (- n 1)) n))))
+    (cond ((= n 0) "")
+          ;; no room for a word: one letter each, and they lose the
+          ;; spaces too — a column of initials still counts the tags
+          ((< room 2)
+           (string-join (map (lambda (t) (substring t 0 1)) tags) ""))
+          (else
+            (string-join
+              (map (lambda (t)
+                     (if (> (string-length t) room)
+                         (string-append (substring t 0 (- room 1)) "…")
+                         t))
+                   tags)
+              " ")))))
+
 (define (nm--search-columns buf)
   (list (list (list "" 1) (list "subject" #f 'left 'end) (list "date" 13 'right))
-        (list (list "" 1) (list "author" #f) (list "tags" 24 'right 'end))))
+        (list (list "" 1) (list "author" #f) (list "tags" 24 'right nm--fit-tags))))
 
 (define (nm--subject-face tags)
   (cond ((member "m" tags) "nm-marked")

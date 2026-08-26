@@ -756,7 +756,8 @@
 ;;;   'columns  (buf) -> ((LABEL WIDTH ALIGN TRIM) ...)
 ;;;                      WIDTH #f means the rest of the line.
 ;;;                      ALIGN is 'left or 'right.
-;;;                      TRIM is 'middle (the default) or 'end.
+;;;                      TRIM is 'middle (the default), 'end, or a
+;;;                      (TEXT WIDTH) -> TEXT fn of the mode's own.
 ;;;   'cells    (buf entry) -> (CELL ...)   CELL is a string, or (TEXT FACE)
 ;;;
 ;;; A row may take more than one line. Such a mode declares the two in
@@ -864,6 +865,13 @@
   (cond ((not w) s)
         ((<= (string-length s) w) s)
         ((<= w 3) (substring s 0 w))
+        ;; a column that knows what its text IS shortens it itself: the
+        ;; tags of a mail thread are words, and every word can lose its
+        ;; end and still say which tag it is. The mechanism holds the
+        ;; column to its width after the mode had its say.
+        ((procedure? trim)
+         (let ((out (trim s w)))
+           (if (> (string-length out) w) (substring out 0 w) out)))
         ((equal? trim 'end) (string-append (substring s 0 (- w 1)) "…"))
         (else
           (let* ((keep (- w 1))
@@ -887,7 +895,8 @@
 (define (list-col-width c) (car (cdr c)))
 (define (list-col-align c) (if (> (length c) 2) (nth 2 c) 'left))
 
-;; how the column gives up space: 'middle (the default) or 'end
+;; how the column gives up space: 'middle (the default), 'end, or a fn
+;; the mode wrote
 (define (list-col-trim c) (if (> (length c) 3) (nth 3 c) 'middle))
 
 ;; how wide the table is: the rule and the right-hand chip measure

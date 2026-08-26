@@ -120,6 +120,20 @@
                   "one move goes to the next thread")
     (t--nm-done!)))
 
+(deftest 'a-narrow-tag-column-shortens-every-tag-and-drops-none
+  "the reader sees which tags a thread carries, not the first two of them"
+  (lambda ()
+    (let ((tags "important inbox personal sent"))
+      (check-equal! (nm--fit-tags tags 40) tags "wide enough: the words stand")
+      (let ((out (nm--fit-tags tags 24)))
+        (check-equal! (length (string-split out " ")) 4 "narrow: four tags remain")
+        (check-true! (<= (string-length out) 24) "and the column holds them")
+        (check-contains! out "impo" "the head of each word says which tag it is")
+        (check-contains! out "sent" "including the last one"))
+      ;; too narrow for words: one letter each, and the count still reads
+      (check-equal! (nm--fit-tags tags 5) "iips" "no room: the initials")
+      (check-equal! (nm--fit-tags "" 24) "" "no tags, no text"))))
+
 (deftest 'opening-a-thread-renders-text-plain-only-and-marks-it-read
   "the HTML alternative is not the one a reader wants"
   (lambda ()

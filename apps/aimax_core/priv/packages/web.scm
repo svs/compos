@@ -658,6 +658,7 @@
   (local-set-key* buf "M-<left>" "browse-back")
   (local-set-key* buf "M-<right>" "browse-forward")
   (local-set-key* buf "g" "browse-refresh")
+  (local-set-key* buf "m" "page-mode-cycle")
   (local-set-key* buf "o" "browse-open-external")
   ;; the preview chord: "show me the rendered thing" — the browser
   (local-set-key* buf "C-c C-v" "browse-open-external")
@@ -697,7 +698,7 @@ the link at point and s-RET opens it as its own tab, TAB and n/p
 walk the links, M-<left> and l go back, M-<right> goes forward, g
 asks where to go — RET refetches this page, a visited site or a
 fresh URL goes there — o opens the page in the real browser, and
-C-s searches to any link.")
+C-s searches to any link. m returns to the raw live page.")
 
 ;; the one entry point: normalize, enter the mode, fetch
 ;; a tab's name: the host, and the page's last path segment

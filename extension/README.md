@@ -11,6 +11,15 @@ of them.
   dispatcher the GUI uses.
 - From Scheme, any tab is addressable: run JS in it, read it, put a line on its
   screen, type into it for real.
+- `M-x full-browser` opens an interactive site inside an ai-max window. The
+  page runs its JavaScript and uses this Chrome profile's available session.
+  The extension removes framing headers only inside the ai-max tab, so sites
+  that normally reject iframes can load there. It applies the active ai-max
+  colors without changing the site's layout or typography. Press
+  <kbd>C-g</kbd> inside the site to return keyboard focus to the editor.
+- Page handling progresses through `raw-mode`, `theme-mode`, and
+  `readable-mode`. Press <kbd>m</kbd> to cycle. Readable mode uses the existing
+  site XSLT, Mozilla Readability, and whole-page fallback pipeline.
 
 ## Install
 

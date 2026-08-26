@@ -851,10 +851,10 @@ defmodule Aimax.Core.Editor do
     end
   end
 
-  # the three render modes the client draws in an iframe
+  # the render modes the client draws in an iframe
   defp preview?(buffer) do
     try do
-      Buffer.locals(buffer)["render-mode"] in ["html", "markdown", "app"]
+      Buffer.locals(buffer)["render-mode"] in ["html", "markdown", "app", "browser"]
     catch
       :exit, _ -> false
     end
@@ -2142,6 +2142,12 @@ defmodule Aimax.Core.Editor do
       # an app reloads when this number changes, and only then: a keystroke
       # must not restart the app you are typing at
       app_gen: Map.get(locals, "app-generation") || 0,
+      # An interactive browser view keeps its address and reload generation
+      # in Scheme-owned locals. The client only gives them to an iframe.
+      browser_url: Map.get(locals, "browser-url"),
+      browser_src_url: Map.get(locals, "browser-src-url") || Map.get(locals, "browser-url"),
+      browser_gen: Map.get(locals, "browser-generation") || 0,
+      browser_page_mode: Map.get(locals, "browser-page-mode") || "raw-mode",
       top: top,
       # the payload says what the daemon knows about scroll (S1): manual
       # pins the windowed top; ctop is a client-scrolled window's pixel

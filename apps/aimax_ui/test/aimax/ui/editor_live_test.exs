@@ -61,6 +61,44 @@ defmodule Aimax.Ui.EditorLiveTest do
     assert Aimax.Core.Buffer.text(buf) == "rails transcript stays readable"
   end
 
+  test "an interactive web buffer renders a direct session-sharing iframe", %{conn: conn} do
+    buf = Aimax.Core.Editor.current_buffer()
+    Aimax.Core.Buffer.set_local(buf, "mode-name", "full-browser-mode")
+    Aimax.Core.Buffer.set_local(buf, "render-mode", "browser")
+    Aimax.Core.Buffer.set_local(buf, "browser-url", "https://session.test/account?from=aimax")
+    Aimax.Core.Buffer.set_local(buf, "browser-src-url", "https://session.test/account?from=aimax")
+    Aimax.Core.Buffer.set_local(buf, "browser-generation", 3)
+    Aimax.Core.Buffer.insert(buf, "backing text stays hidden", source: :editor)
+
+    {:ok, view, html} = live(conn, "/")
+
+    assert html =~ ~s(class="browser-preview")
+    assert html =~ ~s(phx-hook="AppFrame")
+    assert html =~ ~s(name="aimax-browser-)
+    assert html =~ "https://session.test/account?from=aimax"
+    assert html =~ "allow-same-origin"
+    assert html =~ "data-theme-bg="
+    assert html =~ "data-theme-fg="
+    assert html =~ ~s(data-page-mode="raw-mode")
+    assert html =~ ">web</span>"
+    refute html =~ "backing text stays hidden"
+
+    win = Aimax.Core.Editor.render_state().tree.id
+
+    view
+    |> element("#editor")
+    |> render_hook("browser_location", %{
+      "win" => win,
+      "url" => "https://session.test/profile",
+      "title" => "Your profile"
+    })
+
+    assert Aimax.Core.Buffer.get_local(buf, "browser-url") == "https://session.test/profile"
+
+    assert Aimax.Core.Buffer.get_local(buf, "browser-src-url") ==
+             "https://session.test/account?from=aimax"
+  end
+
   test "an editor chord from a terminal completes through the minibuffer", %{conn: conn} do
     terminal = Aimax.Core.Editor.current_buffer()
     target = "terminal-switch-target-#{System.unique_integer([:positive])}"

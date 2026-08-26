@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "ai-max",
-  "version": "0.5.4",
+  "version": "0.5.8",
   "description": "ai-max's keys and commands in every tab, and a wire so the editor can drive any of them.",
   "permissions": [
     "tabs",
     "scripting",
     "storage",
     "debugger",
-    "alarms"
+    "alarms",
+    "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -32,7 +33,7 @@
         "overlay.js"
       ],
       "run_at": "document_idle",
-      "all_frames": false
+      "all_frames": true
     }
   ],
   "omnibox": {

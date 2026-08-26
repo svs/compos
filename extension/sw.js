@@ -24,6 +24,50 @@ const HEARTBEAT_MS = 20000;
 // how long a debugger session lingers before we let go of the tab
 const CDP_IDLE_MS = 30000;
 
+// A normal iframe obeys a site's clickjacking headers. That is correct for
+// ordinary pages, but it prevents ai-max's explicit full-browser surface from
+// loading sites such as dashboards and hosted development apps. Session rules
+// remove the framing header and CSP response headers, only for subframes in
+// an ai-max tab. DNR cannot remove only CSP's frame-ancestors directive. The
+// site's remaining network traffic and every ordinary tab keep Chrome's
+// normal protection.
+const EMBED_RULE_BASE = 10_000_000;
+
+function embedRuleId(tabId) {
+  return EMBED_RULE_BASE + tabId;
+}
+
+async function allowEmbeddingIn(tabId) {
+  if (!Number.isInteger(tabId) || !chrome.declarativeNetRequest) return;
+  const id = embedRuleId(tabId);
+  await chrome.declarativeNetRequest.updateSessionRules({
+    removeRuleIds: [id],
+    addRules: [{
+      id,
+      priority: 1,
+      action: {
+        type: "modifyHeaders",
+        responseHeaders: [
+          { header: "x-frame-options", operation: "remove" },
+          { header: "content-security-policy", operation: "remove" },
+          { header: "content-security-policy-report-only", operation: "remove" }
+        ]
+      },
+      condition: {
+        tabIds: [tabId],
+        resourceTypes: ["sub_frame"]
+      }
+    }]
+  });
+}
+
+async function stopEmbeddingIn(tabId) {
+  if (!Number.isInteger(tabId) || !chrome.declarativeNetRequest) return;
+  await chrome.declarativeNetRequest.updateSessionRules({
+    removeRuleIds: [embedRuleId(tabId)]
+  });
+}
+
 /** port -> Conn */
 const conns = new Map();
 
@@ -484,7 +528,10 @@ async function rediscoverEditors() {
     tabs.map(async (t) => {
       try {
         const r = await chrome.tabs.sendMessage(t.id, { cmd: "frame" });
-        if (r?.frame) editors.set(t.windowId, { tabId: t.id, frame: r.frame });
+        if (r?.frame) {
+          editors.set(t.windowId, { tabId: t.id, frame: r.frame });
+          await allowEmbeddingIn(t.id);
+        }
       } catch {
         /* not an ai-max page, or no content script in it */
       }
@@ -500,6 +547,17 @@ async function announceAll() {
 // a tab closing or navigating away takes its window's binding with it
 chrome.tabs.onRemoved.addListener((tabId) => {
   for (const [win, ed] of editors) if (ed.tabId === tabId) editors.delete(win);
+  stopEmbeddingIn(tabId).catch(() => {});
+});
+
+// A top-level navigation turns the old ai-max tab into an ordinary tab. Drop
+// its exception immediately; a newly loaded ai-max page registers and adds it
+// again after its editor frame is ready. Subframe navigation does not emit a
+// tab URL change here, so browsing inside ai-max leaves the rule intact.
+chrome.tabs.onUpdated.addListener((tabId, change) => {
+  if (!change.url) return;
+  for (const [win, ed] of editors) if (ed.tabId === tabId) editors.delete(win);
+  stopEmbeddingIn(tabId).catch(() => {});
 });
 
 // dragging a tab between windows moves the binding with it
@@ -533,6 +591,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     if (msg.cmd === "register") {
       const was = editors.get(windowId);
       editors.set(windowId, { tabId: tab, frame: msg.frame });
+      await allowEmbeddingIn(tab);
       // the page re-registers on every visibility change; only a new binding
       // is worth a round trip to the daemon
       if (!was || was.frame !== msg.frame || was.tabId !== tab) announce(windowId, msg.frame);
@@ -679,7 +738,10 @@ async function reinject() {
     tabs.map(async (t) => {
       if (!t.id || !/^https?:/.test(t.url || "")) return;
       try {
-        await chrome.scripting.executeScript({ target: { tabId: t.id }, files: ["overlay.js"] });
+        await chrome.scripting.executeScript({
+          target: { tabId: t.id, allFrames: true },
+          files: ["overlay.js"]
+        });
       } catch {
         /* a page we're not allowed into */
       }

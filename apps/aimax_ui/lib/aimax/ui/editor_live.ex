@@ -1748,85 +1748,273 @@ defmodule Aimax.Ui.EditorLive do
   def preview_doc(rm, text, point, mark, faces, authored),
     do: preview_doc(rm, text, point, mark, faces, authored, [])
 
+  # The source is rendered exactly as the author wrote it. The caret, the
+  # mark, and one anchor per drawn line are put into the rendered tree
+  # afterwards, at the place the source offset landed. Nothing is put into
+  # the source, so no position of point can change how the page parses: the
+  # document renders the same way with the caret anywhere in it.
   def preview_doc("markdown", text, point, mark, faces, authored, overlays) do
-    p = point |> max(0) |> min(byte_size(text))
-    m = if is_integer(mark), do: mark |> max(0) |> min(byte_size(text)), else: nil
+    size = byte_size(text)
+    p = point |> max(0) |> min(size)
+    m = if is_integer(mark), do: mark |> max(0) |> min(size), else: nil
 
-    blank = blank_point_line(text, p, overlays)
-    anchors = line_anchors(text, blank)
-    marked = mark_preview_positions(text, p, m, overlays, anchors, blank)
+    # at one spot the line's anchor goes in first and the caret stays
+    # innermost, so a click beside the caret still reads the line it is on
+    marks =
+      line_marks(text) ++
+        [{p, 1, @pt_sentinel}] ++
+        if(m, do: [{m, 1, @mk_sentinel}], else: [])
 
-    "markdown"
-    |> preview_html(marked, faces, authored)
-    |> place_anchors(anchors)
+    preview_html("markdown", text, faces, authored, overlays, marks)
+  end
+
+  # A mark is a character, not an element. Earmark's pretty-printer puts a
+  # newline and an indent inside an empty element, and that whitespace
+  # draws: the caret read as a wide space in the middle of a word. A
+  # private-use character is ordinary text to the printer, and becomes the
+  # span once the page is built.
+  @mk_sentinel "\uE001"
+  @anchor_end "\uE006"
+
+  ## --- where a source offset lands on the page -------------------------------
+  ##
+  ## The rendered text of a document is the source text with the markup taken
+  ## out, in the same order. So one walk in step with the source says which
+  ## source byte every rendered character came from, and that one answer
+  ## places the caret, the mark, and every line anchor.
+  ##
+  ## This is the whole of it. There is no rule for a table row, a Setext
+  ## underline, a fence, a link target, or a blank line, because none of
+  ## those can go wrong: the source is never touched, so the parse cannot
+  ## change, and a construct the renderer drops simply has no rendered
+  ## character to sit in.
+
+  # markup runs are short. A rendered character the source does not have
+  # nearby is one the renderer made up - a table's padding, an entity - so
+  # do not hunt for it down the rest of the document.
+  @seek_window 2048
+  @ws_window 8
+
+  defp mark_ast(ast, source, marks) do
+    offsets = ast |> node_texts() |> source_offsets(source)
+
+    plan =
+      marks
+      |> drop_undrawn_anchors(offsets, source)
+      |> Enum.sort_by(fn {at, rank, _} -> {at, rank} end)
+      |> then(&plan_marks(offsets, &1))
+
+    {marked, _index} = mark_nodes(ast, plan, 0)
+    marked
+  end
+
+  # A line that drew nothing names nothing. This is the alignment's answer,
+  # not a rule about blank lines: a line drops out when no rendered
+  # character came from it, whether it is empty, a fence, or a table's
+  # alignment row. The caret always stays - point is somewhere even when the
+  # line it stands on draws no text.
+  defp drop_undrawn_anchors(marks, offsets, source) do
+    drew = drawn_lines(offsets, source)
+
+    Enum.filter(marks, fn
+      {at, 0, _mark} -> MapSet.member?(drew, at)
+      _caret -> true
+    end)
+  end
+
+  # Both sides are sorted, so one pass says which line starts had a rendered
+  # character come from their line.
+  defp drawn_lines(offsets, source) do
+    drawn = offsets |> Enum.concat() |> Enum.reject(&is_nil/1) |> Enum.sort()
+    starts = [0 | Enum.map(:binary.matches(source, "\n"), fn {at, _} -> at + 1 end)]
+
+    walk_lines(starts, drawn, MapSet.new())
+  end
+
+  defp walk_lines([], _drawn, acc), do: acc
+
+  defp walk_lines([start | rest], drawn, acc) do
+    stop = List.first(rest)
+    {here, later} = Enum.split_while(drawn, fn at -> is_nil(stop) or at < stop end)
+
+    acc = if here == [], do: acc, else: MapSet.put(acc, start)
+    walk_lines(rest, later, acc)
+  end
+
+  defp node_texts(ast) when is_list(ast), do: Enum.flat_map(ast, &node_texts/1)
+  defp node_texts(text) when is_binary(text), do: [text]
+  defp node_texts({_tag, _attrs, children, _meta}), do: node_texts(children)
+  defp node_texts(_), do: []
+
+  # For each rendered text node, the source offset of each of its characters,
+  # or nil for a character the source does not have.
+  defp source_offsets(texts, source) do
+    {offsets, _cursor} =
+      Enum.map_reduce(texts, 0, fn text, cursor -> align(text, source, cursor, []) end)
+
+    offsets
+  end
+
+  defp align(<<>>, _source, cursor, acc), do: {Enum.reverse(acc), cursor}
+
+  defp align(<<c::utf8, rest::binary>>, source, cursor, acc) when c in [?\s, ?\n, ?\t, ?\r] do
+    # the renderer pads and pretty-prints, so only take a space the source
+    # really has, and only right here
+    case seek(source, cursor, c, @ws_window) do
+      nil -> align(rest, source, cursor, [nil | acc])
+      at -> align(rest, source, at + 1, [at | acc])
+    end
+  end
+
+  defp align(<<c::utf8, rest::binary>>, source, cursor, acc) do
+    case seek(source, cursor, c, @seek_window) do
+      nil -> align(rest, source, cursor, [nil | acc])
+      at -> align(rest, source, at + byte_size(<<c::utf8>>), [at | acc])
+    end
+  end
+
+  defp seek(source, cursor, c, window) do
+    limit = min(byte_size(source) - cursor, window)
+
+    if limit <= 0 do
+      nil
+    else
+      case :binary.match(source, <<c::utf8>>, scope: {cursor, limit}) do
+        :nomatch -> nil
+        {at, _} -> at
+      end
+    end
+  end
+
+  # A mark goes after the last rendered character the source put before it.
+  # That is what makes the end of a line the end of a line: point standing on
+  # the newline belongs to the text it closes, not to the block below.
+  # Both sides are in source order, so this is one merge.
+  defp plan_marks(offsets, marks) do
+    flat =
+      offsets
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {list, node} ->
+        list
+        |> Enum.with_index()
+        |> Enum.flat_map(fn
+          {nil, _char} -> []
+          {at, char} -> [{at, node, char}]
+        end)
+      end)
+
+    merge_marks(flat, marks, nil, %{})
+  end
+
+  defp merge_marks(_flat, [], _last, plan), do: plan
+
+  defp merge_marks([], [{_at, _rank, node} | rest], last, plan),
+    do: merge_marks([], rest, last, put_mark(plan, last, node))
+
+  defp merge_marks([{at, ni, ci} | tail] = flat, [{want, rank, node} | rest] = marks, last, plan) do
+    if at < want do
+      merge_marks(tail, marks, {ni, ci}, plan)
+    else
+      # An anchor names the line it starts, so it goes BEFORE that line's
+      # first character. The caret goes AFTER the last character the source
+      # put before it, which is what makes the end of a line the end of a
+      # line rather than the start of the next one.
+      plan =
+        case rank do
+          0 -> add_cut(plan, ni, ci, node)
+          _ -> put_mark(plan, last, node)
+        end
+
+      merge_marks(flat, rest, last, plan)
+    end
+  end
+
+  # keyed by the text node, so splitting one node reads its own cuts and
+  # never walks the whole plan: a page re-renders on every keystroke
+  defp put_mark(plan, nil, node), do: add_cut(plan, 0, 0, node)
+  defp put_mark(plan, {ni, ci}, node), do: add_cut(plan, ni, ci + 1, node)
+
+  defp add_cut(plan, ni, ci, node),
+    do: Map.update(plan, ni, [{ci, node}], &[{ci, node} | &1])
+
+  defp mark_nodes(nodes, plan, index) when is_list(nodes) do
+    {lists, next} =
+      Enum.map_reduce(nodes, index, fn node, i -> mark_node(node, plan, i) end)
+
+    {Enum.concat(lists), next}
+  end
+
+  defp mark_node(text, plan, index) when is_binary(text),
+    do: {split_text(text, plan, index), index + 1}
+
+  defp mark_node({tag, attrs, children, meta}, plan, index) do
+    {kids, next} = mark_nodes(children, plan, index)
+    {[{tag, attrs, kids, meta}], next}
+  end
+
+  defp mark_node(other, _plan, index), do: {[other], index}
+
+  # The text node stays one string: the marks go into it as characters, so
+  # the tree keeps its shape and the printer has no element to indent.
+  defp split_text(text, plan, index) do
+    case Map.get(plan, index) do
+      nil -> [text]
+      cuts -> [weave(String.codepoints(text), Enum.reverse(cuts), 0, [])]
+    end
+  end
+
+  # The page is built, so the marks become elements now. A mark that landed
+  # inside a code block is still only a character there, and turns into the
+  # same span: the caret draws in code the way it draws in prose.
+  defp spans_for_marks(html) do
+    html
+    |> String.replace(
+      ~r/#{@anchor}(\d+)#{@anchor_end}/u,
+      ~s(<span class="ln" data-p="\\1"></span>)
+    )
+    |> String.replace(@pt_sentinel, ~s(<span class="pt"></span>))
+    |> String.replace(@mk_sentinel, ~s(<span class="mk"></span>))
+  end
+
+  defp weave(chars, [], _at, out), do: IO.iodata_to_binary([Enum.reverse(out), chars])
+
+  defp weave([], [{_char, mark} | rest], at, out), do: weave([], rest, at, [mark | out])
+
+  defp weave([c | tail] = chars, [{char, mark} | rest] = cuts, at, out) do
+    if at == char do
+      weave(chars, rest, at, [mark | out])
+    else
+      weave(tail, cuts, at + 1, [c | out])
+    end
+  end
+
+  # An overlay reshapes what is parsed - llm-mode quotes its answer - but it
+  # only ever adds markup, which draws no character. The rendered text is
+  # still the source's own, so the marks keep the source's offsets and need
+  # no correction. Inserting from the end backwards keeps the earlier
+  # offsets true while the string grows.
+  defp overlay_source(text, overlays) do
+    text
+    |> preview_overlay_positions(overlays)
+    |> Enum.sort_by(fn {at, _} -> -at end)
+    |> Enum.reduce(text, fn {at, insert}, acc ->
+      at = acc |> Text.floor_utf8(at) |> max(0) |> min(byte_size(acc))
+      binary_part(acc, 0, at) <> insert <> binary_part(acc, at, byte_size(acc) - at)
+    end)
+  end
+
+  # A line that draws text carries its byte offset, so a key that moves a
+  # rendered row can say which source line the reader moved to. Every line
+  # start is offered; the ones whose line draws nothing simply never find a
+  # rendered character to sit before, and drop out.
+  defp line_marks(text) do
+    [0 | Enum.map(:binary.matches(text, "\n"), fn {at, _} -> at + 1 end)]
+    |> Enum.reject(&(&1 > byte_size(text)))
+    |> Enum.map(fn at -> {at, 0, @anchor <> Integer.to_string(at) <> @anchor_end} end)
   end
 
   def preview_doc(rm, text, _point, _mark, faces, authored, _overlays),
     do: preview_html(rm, text, faces, authored)
-
-  defp mark_preview_positions(text, point, mark, overlays, anchors, blank) do
-    positions =
-      point_position(text, point, blank) ++
-        mark_position(text, mark) ++
-        Enum.map(preview_overlay_positions(text, overlays), fn {at, s} -> {at, 2, s} end) ++
-        (anchors |> Enum.reject(&(&1 == blank)) |> Enum.map(&{&1, 1, @anchor}))
-
-    positions =
-      positions
-      |> Enum.reject(fn {at, _rank, _s} -> is_nil(at) end)
-      # a sentinel inside a character makes the document invalid UTF-8, and
-      # the Markdown parser then raises on the whole page
-      |> Enum.map(fn {at, rank, s} -> {Text.floor_utf8(text, at), rank, s} end)
-      # Later insertions at one offset land BEFORE earlier ones, so the rank
-      # here is the reverse of the order in the page: a quote marker the
-      # overlay adds keeps the start of its line, the line's anchor sits
-      # after it, and the cursor stays innermost, right at point.
-      |> Enum.sort_by(fn {at, rank, _s} -> {-at, rank} end)
-
-    Enum.reduce(positions, text, fn {at, _rank, s}, acc ->
-      binary_part(acc, 0, at) <> s <> binary_part(acc, at, byte_size(acc) - at)
-    end)
-  end
-
-  # The point's own blank line draws an empty paragraph, and that paragraph
-  # needs a blank line on each side or it joins the block above or below. The
-  # anchor rides inside it, so the client still reads the source line the
-  # caret stands on.
-  defp point_position(_text, _point, ls) when is_integer(ls),
-    do: [{ls, 0, "\n" <> @anchor <> @pt_sentinel <> "\n"}]
-
-  defp point_position(text, point, nil), do: [{cursor_spot(text, point), 0, @pt_sentinel}]
-
-  defp mark_position(_text, nil), do: []
-  defp mark_position(text, mark), do: [{cursor_spot(text, mark), 0, "\uE001"}]
-
-  # A blank line has no Markdown node, so a cursor on it has nowhere to draw.
-  # The old answer moved the cursor to the next line that draws text. The
-  # caret then stood in front of another block's words while every keystroke
-  # went to the blank line: RET at the end of a document looked like it did
-  # nothing, and RET above a table threw the caret into the first cell. Give
-  # the line its own empty paragraph instead. An llm overlay quotes the lines
-  # it covers, so leave those to it.
-  defp blank_point_line(text, p, overlays) do
-    ls = line_start(text, p)
-
-    if blank_line?(text, ls) and not overlaid?(overlays, ls), do: ls, else: nil
-  end
-
-  # A blank line inside a fence is literal text. It draws, so it is not blank
-  # for this purpose.
-  defp blank_line?(text, ls),
-    do: text |> line_at(ls) |> String.trim() == "" and not inside_fence?(text, ls)
-
-  defp overlaid?(overlays, ls) do
-    Enum.any?(overlays || [], fn
-      {start, finish, _face} when is_integer(start) and is_integer(finish) ->
-        ls >= start and ls <= finish
-
-      _ ->
-        false
-    end)
-  end
 
   # Preview formatting belongs to llm-mode, not to the Markdown document.
   # Render its response overlay through a temporary blockquote so Earmark can
@@ -1857,204 +2045,6 @@ defmodule Aimax.Ui.EditorLive do
     end)
   end
 
-  # A rendered row belongs to a source line, and the page is the only place
-  # that knows which rows exist: a wrapped paragraph is many rows, a fence
-  # line is none. So mark every source line that draws text, at the spot the
-  # cursor would take on it. The client reads the nearest marker above the
-  # row it moved to, and point follows the source.
-  defp line_anchors(text, blank) do
-    text
-    |> line_starts()
-    |> Enum.map(fn ls -> {ls, line_anchor_spot(text, ls, blank)} end)
-    |> Enum.filter(fn {ls, spot} -> spot != nil and line_start(text, spot) == ls end)
-    |> Enum.map(&elem(&1, 1))
-  end
-
-  # The point's blank line draws its own paragraph, so it anchors to itself.
-  # Every other blank line draws nothing, and an anchor there would join the
-  # line to the block above and end it.
-  defp line_anchor_spot(_text, ls, ls), do: ls
-
-  defp line_anchor_spot(text, ls, _blank) do
-    if blank_line?(text, ls), do: nil, else: cursor_spot(text, ls)
-  end
-
-  defp line_starts(text) do
-    [0 | Enum.map(:binary.matches(text, "\n"), fn {at, _} -> at + 1 end)]
-    |> Enum.reject(&(&1 > byte_size(text)))
-  end
-
-  # The markers come back in source order, so the Nth marker in the page is
-  # the Nth anchored line. A parser that drops one would shift every offset
-  # after it, so a count that does not match gives up and leaves the page
-  # without anchors: the fragment mapping still works.
-  defp place_anchors(html, anchors) do
-    if length(:binary.matches(html, @anchor)) == length(anchors) do
-      html |> String.split(@anchor) |> weave_anchors(anchors)
-    else
-      String.replace(html, @anchor, "")
-    end
-  end
-
-  defp weave_anchors([head | parts], anchors) do
-    Enum.zip(parts, anchors)
-    |> Enum.reduce(head, fn {part, at}, acc ->
-      acc <> ~s(<span class="ln" data-p="#{at}"></span>) <> part
-    end)
-  end
-
-  # Point often sits inside a line's BLOCK marker — byte 0 of "# Title" is
-  # where a freshly opened file rests — and a sentinel inside the marker
-  # un-headings the line. Snap the cursor to the marker's end.
-  #
-  # Some lines draw no text of their own: a fence, a rule, a Setext
-  # underline, a table's alignment row, an empty line. A sentinel there
-  # breaks the block it belongs to, and hiding the cursor loses point. So
-  # the cursor moves to the nearest line that DOES draw text — the code
-  # inside the fence, the heading above the underline, the first row of the
-  # table. The depth guard stops a run of such lines from looping.
-  defp cursor_spot(text, p), do: cursor_spot(text, p, 0)
-
-  defp cursor_spot(_text, _p, depth) when depth > 4, do: nil
-
-  defp cursor_spot(text, p, depth) do
-    ls = line_start(text, p)
-    line = line_at(text, ls)
-    trimmed = String.trim_leading(line)
-    below = ls + byte_size(line) + 1
-    above = ls - 1
-
-    cond do
-      # The opening fence draws the block's head, the closing fence draws
-      # nothing: put the cursor at the near end of the code itself.
-      String.starts_with?(trimmed, "```") ->
-        if fence_opens?(text, ls),
-          do: spot_below(text, below, p, depth),
-          else: spot_above(text, above, p, depth)
-
-      # Inside a fenced block every character is literal, so a sentinel is
-      # safe wherever point stands.
-      inside_fence?(text, ls) ->
-        p
-
-      # An empty line has no Markdown node of its own. Keep it attached to
-      # the nearest rendered node so the sentinel cannot turn a blank line
-      # into a paragraph and break tables or adjacent blocks.
-      String.trim(trimmed) == "" ->
-        spot_below(text, below, p, depth)
-
-      # The underline belongs to the heading above it.
-      setext_underline?(text, ls, trimmed) ->
-        spot_above(text, above, p, depth)
-
-      rule_line?(trimmed) ->
-        spot_below(text, below, p, depth)
-
-      # The alignment row makes the table a table, and it draws nothing.
-      table_delimiter_row?(trimmed) ->
-        spot_below(text, below, p, depth)
-
-      table_row?(trimmed) ->
-        line |> table_row_spot(ls, p) |> link_target_spot(line, ls)
-
-      true ->
-        p |> marker_spot(line, ls) |> link_target_spot(line, ls)
-    end
-  end
-
-  defp spot_below(text, below, _p, depth) when below <= byte_size(text),
-    do: cursor_spot(text, below, depth + 1)
-
-  defp spot_below(_text, _below, p, _depth), do: p
-
-  defp spot_above(text, above, _p, depth) when above >= 0,
-    do: cursor_spot(text, above, depth + 1)
-
-  defp spot_above(_text, _above, p, _depth), do: p
-
-  defp line_start(text, p) do
-    case :binary.matches(binary_part(text, 0, p), "\n") do
-      [] -> 0
-      ms -> ms |> List.last() |> elem(0) |> Kernel.+(1)
-    end
-  end
-
-  defp line_at(text, ls),
-    do: text |> binary_part(ls, byte_size(text) - ls) |> String.split("\n", parts: 2) |> hd()
-
-  # A fence line opens a block when an even number of fences stands above it.
-  defp fence_opens?(text, ls), do: rem(fences_above(text, ls), 2) == 0
-
-  defp inside_fence?(text, ls), do: rem(fences_above(text, ls), 2) == 1
-
-  defp fences_above(text, ls) do
-    text
-    |> binary_part(0, ls)
-    |> String.split("\n")
-    |> Enum.count(&String.starts_with?(String.trim_leading(&1), "```"))
-  end
-
-  # `===` under text is a heading. The same run under a blank line is a rule.
-  defp setext_underline?(text, ls, trimmed) do
-    Regex.match?(~r/^[=-]+[ \t]*$/, trimmed) and ls > 0 and
-      text |> line_at(line_start(text, ls - 1)) |> String.trim() != ""
-  end
-
-  defp rule_line?(trimmed),
-    do: Regex.match?(~r/^([-*_])[ \t]*(\1[ \t]*){2,}$/, trimmed)
-
-  defp marker_spot(p, line, ls) do
-    case Regex.run(~r/^(?:\s{0,3}(?:\#{1,6}|[-*+]|\d+\.|>)\s+)+/, line, return: :index) do
-      [{0, len}] when p < ls + len -> ls + len
-      _ -> p
-    end
-  end
-
-  # A link target renders as an attribute, not as text, so a cursor inside
-  # it never draws. Keep it at the end of the label the reader can see.
-  defp link_target_spot(nil, _line, _ls), do: nil
-
-  defp link_target_spot(p, line, ls) do
-    Regex.scan(~r/\]\([^)]*\)/, line, return: :index)
-    |> List.flatten()
-    |> Enum.reduce(p, fn {at, len}, acc ->
-      if acc > ls + at and acc < ls + at + len, do: ls + at, else: acc
-    end)
-  end
-
-  # A row stays a table row only while its pipes stand at the line edges.
-  # Point rests at column 0 after every vertical move, and a sentinel there
-  # ends the table at that row: everything below it falls back to raw text.
-  # So keep the cursor inside the first and the last cell.
-  defp table_row_spot(line, ls, p) do
-    first =
-      case Regex.run(~r/^\s*\|[ \t]*/, line, return: :index) do
-        [{0, len}] -> len
-        _ -> 0
-      end
-
-    last =
-      case Regex.run(~r/[ \t]*\|[ \t]*$/, line, return: :index) do
-        [{at, _}] -> at
-        _ -> byte_size(line)
-      end
-
-    cond do
-      first >= last -> nil
-      p < ls + first -> ls + first
-      p > ls + last -> ls + last
-      true -> p
-    end
-  end
-
-  defp table_row?(trimmed) do
-    String.starts_with?(trimmed, "|") and length(:binary.matches(trimmed, "|")) >= 2
-  end
-
-  defp table_delimiter_row?(trimmed) do
-    String.contains?(trimmed, "-") and Regex.match?(~r/^\|[\s:|-]*$/, trimmed)
-  end
-
   defp preview_html("html", text, _faces, true), do: text
 
   # shr-style theming (Emacs eww): authored LAYOUT and typography survive,
@@ -2081,23 +2071,32 @@ defmodule Aimax.Ui.EditorLive do
     end
   end
 
-  defp preview_html("markdown", text, faces, _authored) do
-    fence_labels = markdown_fence_labels(text)
+  defp preview_html("markdown", text, faces, authored),
+    do: preview_html("markdown", text, faces, authored, [], [])
+
+  # MARKS are {source offset, rank, node}. They go into the rendered tree,
+  # never into the source. TEXT is what the marks are measured against, so
+  # the overlay a mode paints may reshape what is parsed without moving a
+  # single offset: a quote marker draws no character, so the rendered text
+  # stays the source's own.
+  defp preview_html("markdown", text, faces, _authored, overlays, marks) do
+    source = overlay_source(text, overlays)
+    fence_labels = markdown_fence_labels(source)
 
     body =
-      text
+      source
       |> markdown_preview_source()
-      |> Earmark.as_ast(compact_output: false)
+      |> Earmark.as_ast(compact_output: false, smartypants: false)
       |> case do
         {:ok, ast, _} -> ast
         {:error, ast, _} -> ast
       end
+      |> mark_ast(text, marks)
       |> label_code_blocks(fence_labels)
       |> tag_llm_responses()
       |> embed_urls()
       |> Earmark.Transform.transform(compact_output: false)
-      |> String.replace(@pt_sentinel, ~s(<span class="pt"></span>))
-      |> String.replace("\uE001", ~s(<span class="mk"></span>))
+      |> spans_for_marks()
 
     %{bg: bg, fg: fg, accent: accent, link: link, dim: dim, border: border, inset: inset} =
       preview_palette(faces)

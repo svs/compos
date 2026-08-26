@@ -21,6 +21,15 @@
   (register-minor-mode! mode
     (lambda (b) (buffer-set-local! b 'zz-hr-minor-stamp stamp))))
 
+;; A reload also rebuilds every visible buffer, and the test frame has
+;; windows of its own. Take that half out to count the mode half alone.
+(define (t--hr-modes-only thunk)
+  (let ((was *reload-refresh-visible*))
+    (set! *reload-refresh-visible* #f)
+    (let ((r (thunk)))
+      (set! *reload-refresh-visible* was)
+      r)))
+
 (deftest 'a-reloaded-major-mode-rebuilds-the-buffers-already-in-it
   "the setup fn runs again where the mode is worn, and nowhere else"
   (lambda ()
@@ -35,7 +44,8 @@
     ;; one reload, redefining one of the two modes
     (reload-begin!)
     (t--hr-major! "zz-hr-mode" 2)
-    (check-equal! (reload-finish!) 1 "one buffer wore the mode the reload named")
+    (check-equal! (t--hr-modes-only reload-finish!) 1
+      "one buffer wore the mode the reload named")
 
     (check-equal! (buffer-local t--hr-a 'zz-hr-stamp) 2 "it took the new setup")
     (check-equal! (buffer-local t--hr-b 'zz-hr-stamp) 1 "the other mode was left alone")
@@ -52,7 +62,8 @@
 
     (reload-begin!)
     (t--hr-minor! "zz-hr-minor" 2)
-    (check-equal! (reload-finish!) 1 "the buffer wearing it was rebuilt")
+    (check-equal! (t--hr-modes-only reload-finish!) 1
+      "the buffer wearing it was rebuilt")
     (check-equal! (buffer-local t--hr-a 'zz-hr-minor-stamp) 2 "with the new setup")
 
     (disable-minor-mode! t--hr-a "zz-hr-minor")
@@ -66,7 +77,8 @@
     (with-current-buffer t--hr-a (lambda () (set-mode! "zz-hr-mode")))
 
     (reload-begin!)
-    (check-equal! (reload-finish!) 0 "no mode named, no buffer touched")
+    (check-equal! (t--hr-modes-only reload-finish!) 0
+      "no mode named, no buffer touched")
     (buffer-kill! t--hr-a)))
 
 (deftest 'outside-a-reload-nothing-is-recorded
@@ -74,7 +86,8 @@
   (lambda ()
     (t--hr-major! "zz-hr-quiet" 1)
     (reload-begin!)
-    (check-equal! (reload-finish!) 0 "the definition before the bracket was not carried in")))
+    (check-equal! (t--hr-modes-only reload-finish!) 0
+      "the definition before the bracket was not carried in")))
 
 (deftest 'a-mode-registry-does-not-grow-when-a-file-reloads
   "assoc reads the newest either way; an auto-reloader must not stack rows"
@@ -99,4 +112,38 @@
     (check-false! (buffer-wears-mode? t--hr-a '("zz-hr-absent")) "and nothing else")
 
     (disable-minor-mode! t--hr-a "zz-hr-minor")
+    (buffer-kill! t--hr-a)))
+
+(deftest 'a-reload-rebuilds-the-buffers-you-can-see
+  "a setup fn calls helpers the same save can change without touching define-mode"
+  (lambda ()
+    (t--hr-major! "zz-hr-visible" 1)
+    (test-buffer! t--hr-a "alpha\n")
+    (with-current-buffer t--hr-a (lambda () (set-mode! "zz-hr-visible")))
+    (switch-to-buffer! t--hr-a)
+    (check-equal! (buffer-local t--hr-a 'zz-hr-stamp) 1 "the mode set the buffer up once")
+
+    ;; the reload redefines no mode at all: only a helper changed
+    (t--hr-major! "zz-hr-visible" 2)
+    (reload-begin!)
+    (reload-finish!)
+
+    (check-equal! (buffer-local t--hr-a 'zz-hr-stamp) 2
+      "the visible buffer was not rebuilt")
+    (buffer-kill! t--hr-a)))
+
+(deftest 'the-visible-refresh-can-be-turned-off
+  "a session whose mode setup is expensive opts out"
+  (lambda ()
+    (t--hr-major! "zz-hr-visible" 3)
+    (test-buffer! t--hr-a "alpha\n")
+    (with-current-buffer t--hr-a (lambda () (set-mode! "zz-hr-visible")))
+    (switch-to-buffer! t--hr-a)
+
+    (t--hr-major! "zz-hr-visible" 4)
+    (reload-begin!)
+    (t--hr-modes-only reload-finish!)
+
+    (check-equal! (buffer-local t--hr-a 'zz-hr-stamp) 3
+      "the refresh ran with the switch off")
     (buffer-kill! t--hr-a)))

@@ -203,6 +203,10 @@ defmodule Aimax.Core.SchemeAPI do
         "(daemon-restart!) — save the desktop, restart the daemon, and reload Scheme; return #t.",
       "reload-files!" =>
         "(reload-files! PATHS) — evaluate the changed top-level forms of each .scm and refresh the modes they redefine; return (FILES FORMS).",
+      "window-list-all" =>
+        "(window-list-all) — return ((WINDOW-ID BUFFER FRAME-ID) ...) for every window on every frame.",
+      "redraw!" =>
+        "(redraw!) — tell every connected client to re-render every frame; return #t.",
       "daemon-provision-workspace!" =>
         "(daemon-provision-workspace! PATH NAME) — start or reuse a daemon from PATH; return (URL HOME PORT).",
       "goto-char!" => "(goto-char! POS) — move point to byte POS; return POS.",
@@ -931,6 +935,19 @@ defmodule Aimax.Core.SchemeAPI do
             raise Aimax.Scheme.Eval.Error,
               message: "the tree does not compile; staying up: #{out}"
         end
+      end,
+      "window-list-all" => fn [] ->
+        Enum.map(Editor.list_windows_all(), fn {id, buffer, fid} -> [id, buffer, fid] end)
+      end,
+      # A reload changes what a render would produce, but nothing asks for
+      # one: the client repaints on an editor event, and evaluating a
+      # definition is not an event. Without this a reloaded modeline, face,
+      # or fringe stays on screen exactly as it was until the next keystroke,
+      # which reads as "the reload did nothing".
+      "redraw!" => fn [] ->
+        Aimax.Core.Events.broadcast_editor(:redraw)
+        Enum.each(Editor.frame_list(), &Aimax.Core.Events.broadcast_frame/1)
+        true
       end,
       # The incremental form reloader, which lives in the Session. Scheme
       # cannot reach it otherwise: the diff is over read forms, and the

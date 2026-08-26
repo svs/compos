@@ -2026,9 +2026,41 @@
 
 (define (reload-finish!)
   (set! *reloading?* #f)
-  (let ((modes *reload-touched*))
+  (let* ((modes *reload-touched*)
+         (bufs (reload--buffers-to-rebuild modes)))
     (set! *reload-touched* '())
-    (reload-refresh-modes! modes)))
+    (for-each restore-buffer-runtime! bufs)
+    ;; A reload changes what a render would produce, but nothing asks for
+    ;; one: a client repaints on an editor event, and evaluating a
+    ;; definition is not an event. Without this a new modeline, face, or
+    ;; fringe stays on screen exactly as it was until the next keystroke,
+    ;; which reads as "the reload did nothing".
+    (redraw!)
+    (length bufs)))
+
+;; Every buffer in a window, on every frame. A reload names only the modes
+;; whose define-mode form changed, and a setup fn calls helpers that the
+;; same save can change without touching that form. So rebuild what the
+;; person is looking at as well: that is two to five buffers, never the
+;; whole buffer list, and it is the difference between a save you can see
+;; and a save you cannot. Set this to #f for a session where a mode setup
+;; is expensive.
+(define *reload-refresh-visible* #t)
+
+(define (reload--visible-buffers)
+  (if *reload-refresh-visible*
+      (map (lambda (w) (car (cdr w))) (window-list-all))
+      '()))
+
+;; The buffers one reload must rebuild: every buffer wearing a mode the
+;; reload redefined, plus every visible buffer. Once each, live only.
+(define (reload--buffers-to-rebuild modes)
+  (let loop ((bs (append (reload--mode-buffers modes) (reload--visible-buffers)))
+             (acc '()))
+    (cond ((null? bs) (reverse acc))
+          ((or (member (car bs) acc) (not (buffer-exists? (car bs))))
+           (loop (cdr bs) acc))
+          (else (loop (cdr bs) (cons (car bs) acc))))))
 
 ;; Does B wear one of MODES, as its major mode or as a minor mode?
 (define (buffer-wears-mode? b modes)
@@ -2038,21 +2070,22 @@
           ((and (car names) (member (car names) modes)) #t)
           (else (loop (cdr names))))))
 
+(define (reload--mode-buffers modes)
+  (if (null? modes)
+      '()
+      (filter (lambda (b)
+                (and (buffer-exists? b) (buffer-wears-mode? b modes)))
+              (buffer-list))))
+
 ;; Re-run mode setup wherever one of MODES is worn. Returns the number of
 ;; buffers rebuilt. restore-buffer-runtime! is desktop restore's entry: it
 ;; re-runs the major setup and every minor setup with the buffer current,
 ;; the layout engine suppressed, and the buffer neither displayed nor
 ;; selected. So the frame does not move and the point does not jump.
 (define (reload-refresh-modes! modes)
-  (if (null? modes)
-      0
-      (let loop ((bs (buffer-list)) (n 0))
-        (cond ((null? bs) n)
-              ((and (buffer-exists? (car bs))
-                    (buffer-wears-mode? (car bs) modes))
-               (restore-buffer-runtime! (car bs))
-               (loop (cdr bs) (+ n 1)))
-              (else (loop (cdr bs) n))))))
+  (let ((bs (reload--mode-buffers modes)))
+    (for-each restore-buffer-runtime! bs)
+    (length bs)))
 
 (domain! 'unknown)
 (effects! '(unknown))

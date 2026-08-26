@@ -396,7 +396,9 @@ defmodule Aimax.Ui.PreviewCursorTest do
       "one\n\n```a\nA\n```\n\ntwo\n\n```b\nB\n```\n\nthree\n"
 
     html = EditorLive.preview_doc("markdown", text, 0, @faces, false)
-    seen = strip_anchors(html)
+    # the body alone: a word in a stylesheet comment is not a block, and
+    # searching the whole page once made "two" turn up inside the CSS
+    seen = html |> String.split("<body>") |> List.last() |> strip_anchors()
 
     order = fn needle -> :binary.match(seen, needle) |> elem(0) end
 

@@ -248,10 +248,23 @@
     ("doppler:widen" "Widen" "\\")
     ("doppler:refresh" "Refresh" "g")))
 
-(define (doppler--row-block name i)
+(define (doppler--elide-value value)
+  ;; Keep enough hidden text that a short value never appears in full.
+  (if (and (string? value) (> (string-length value) 12))
+      (let ((n (string-length value)))
+        (string-append (substring value 0 4) "…"
+                       (substring value (- n 4) n)))
+      "••••"))
+
+(define (doppler--row-block buf name i)
   ;; Four table header lines put the first secret on line five.
   (component 'ui/row
-    (list 'text name
+    (list 'segs
+          (list (list "doppler-secret-name" name)
+                (list "c-dim doppler-secret-value"
+                      (doppler--elide-value
+                        (doppler-secret-value
+                          (doppler--project buf) (doppler--config buf) name))))
           'class "doppler-row"
           'click (string-append "doppler:row:" (number->string i))
           'lines (list (+ i 5) (+ i 5))
@@ -275,7 +288,7 @@
             (if (null? xs)
                 (reverse rows)
                 (loop (cdr xs) (+ i 1)
-                      (cons (doppler--row-block (car xs) i) rows))))))))
+                      (cons (doppler--row-block buf (car xs) i) rows))))))))
 
 (define (doppler--rows buf)
   (let* ((names (dp--secret-name-list (doppler--project buf) (doppler--config buf)))
@@ -430,20 +443,25 @@
 (define-list-mode! "doppler-mode"
   (list
     'doc (string-append
-           "The secret names in one Doppler project and config. Values stay hidden. "
-           "Click a row to select it, then use the action bar or the matching key. "
+           "The secret names in one Doppler project and config. Values show only their first and last four characters. "
+           "Short values stay fully hidden. Click a row to select it, then use the action bar or the matching key. "
            "`RET` copies one value. `+` adds a secret, and `e` replaces one value. "
            "`P` selects a project, and `C` selects a config. `d` flags secrets, and "
            "`x` deletes them after confirmation.")
     'buffer *doppler-buffer*
     'rows doppler--rows
     'key (lambda (buf name) name)
-    'columns (lambda (buf) (list (list "secret" #f)))
-    'cells (lambda (buf name) (list name))
+    'columns (lambda (buf) (list (list "secret" #f) (list "value" 11)))
+    'cells (lambda (buf name)
+             (list name
+                   (doppler--elide-value
+                     (doppler-secret-value
+                       (doppler--project buf) (doppler--config buf) name))))
     'title (lambda (buf)
              (string-append "Doppler  " (doppler--project buf) "/" (doppler--config buf)))
     'meta (lambda (buf)
-            (string-append (number->string (length (list-entries buf))) " secret names; values hidden"))
+            (string-append (number->string (length (list-entries buf)))
+                           " secret names; values elided"))
     'total (lambda (buf) (or (buffer-local buf 'doppler-total) 0))
     'footer (lambda (buf)
               '(("RET" "copy") ("+" "add") ("e" "set") ("P" "project")
@@ -475,7 +493,9 @@
 
 (define-style! 'doppler "
 .doppler-title { font-family: var(--font-serif); font-size: 21px; padding: 6px 2px 10px; }
-.doppler-row { border-bottom: 1px solid var(--border-bg); cursor: pointer; }
+.doppler-row { display: grid; grid-template-columns: minmax(0, 1fr) 11ch; column-gap: 16px; border-bottom: 1px solid var(--border-bg); cursor: pointer; }
+.doppler-secret-name { overflow: hidden; text-overflow: ellipsis; }
+.doppler-secret-value { justify-self: start; }
 .doppler-row:hover { background: var(--hl-line-bg); }
 ")
 

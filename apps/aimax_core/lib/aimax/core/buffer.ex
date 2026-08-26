@@ -50,7 +50,7 @@ defmodule Aimax.Core.Buffer do
 
   require Logger
 
-  alias Aimax.Core.{BufferHistoryStore, BufferStore, Events, Rope, Text, TS}
+  alias Aimax.Core.{BufferHistoryStore, BufferStore, BufferView, Events, Rope, Text, TS}
   alias Aimax.Core.BufferHistory, as: History
 
   @registry Aimax.Core.BufferRegistry
@@ -132,7 +132,7 @@ defmodule Aimax.Core.Buffer do
 
   @doc "Return a buffer's immutable persisted id."
   def id(%Ref{id: id}), do: id
-  def id(name), do: dormant_read(name, :id, :id)
+  def id(name), do: viewed(name, :id, fn -> dormant_read(name, :id, :id) end)
 
   @doc "Resolve a buffer handle to its current mutable name."
   def name(%Ref{id: id} = ref) do
@@ -167,15 +167,39 @@ defmodule Aimax.Core.Buffer do
   def exists?(%Ref{id: id}), do: Registry.lookup(@registry, {:id, id}) != []
   def exists?(name), do: Registry.lookup(@registry, name) != []
 
+  # Reads take the published row when the buffer has one. A row is written
+  # by the owning process before it answers the write that made it, so a
+  # reader never sees a state older than its own last write. Without a row
+  # the read falls back to the process, and then to the checkpoint.
+  #
   # A name with neither a process nor a checkpoint reads as empty, not as
   # nil: a list renders a row for every name the catalog holds, and one
   # buffer that died mid-render used to raise out of the whole render.
-  def text(name), do: dormant_read(name, :text, :text) || ""
-  def byte_size(name), do: Kernel.byte_size(text(name))
-  def version(name), do: dormant_read(name, :buffer_version, :version)
-  def path(name), do: dormant_read(name, :path, :path)
-  def modified?(name), do: dormant_read(name, :modified, :modified?)
-  def point(name), do: dormant_read(name, :point, :point)
+  defp viewed(name, key, fallback) do
+    case BufferView.fetch(name) do
+      {:ok, view} -> Map.fetch!(view, key)
+      :error -> fallback.()
+    end
+  end
+
+  def text(name) do
+    case BufferView.fetch(name) do
+      {:ok, view} -> BufferView.text(view)
+      :error -> dormant_read(name, :text, :text) || ""
+    end
+  end
+
+  def byte_size(name), do: viewed(name, :size, fn -> Kernel.byte_size(text(name)) end)
+
+  def version(name),
+    do: viewed(name, :version, fn -> dormant_read(name, :buffer_version, :version) end)
+
+  def path(name), do: viewed(name, :path, fn -> dormant_read(name, :path, :path) end)
+
+  def modified?(name),
+    do: viewed(name, :modified, fn -> dormant_read(name, :modified, :modified?) end)
+
+  def point(name), do: viewed(name, :point, fn -> dormant_read(name, :point, :point) end)
 
   @doc """
   Where the caret stands, as the buffer's own fact: the byte offset, and
@@ -206,6 +230,7 @@ defmodule Aimax.Core.Buffer do
       end
     end
   end
+
   def touch(name), do: GenServer.cast(via(name), :touch)
   def checkpoint_now(name), do: GenServer.call(via(name), :checkpoint_now, 30_000)
   def eviction_info(name), do: GenServer.call(via(name), :eviction_info)
@@ -220,33 +245,39 @@ defmodule Aimax.Core.Buffer do
 
   def goto(name, pos), do: GenServer.call(via(name), {:goto, pos})
 
-  def mark(name), do: dormant_read(name, :mark, :mark)
+  def mark(name), do: viewed(name, :mark, fn -> dormant_read(name, :mark, :mark) end)
   def set_mark(name, pos), do: GenServer.call(via(name), {:set_mark, pos})
 
-  def read_only?(name), do: dormant_read(name, :read_only, :read_only?)
+  def read_only?(name),
+    do: viewed(name, :read_only, fn -> dormant_read(name, :read_only, :read_only?) end)
   def set_read_only(name, bool), do: GenServer.call(via(name), {:set_read_only, bool})
 
   # buffer-local variables (mode name, mode state, anything Scheme wants)
   def set_local(name, key, val), do: GenServer.call(via(name), {:set_local, key, val})
 
-  def get_local(name, key) do
-    if exists?(name),
-      do: GenServer.call(registry_name(name), {:get_local, key}),
-      else: name |> dormant() |> Map.get(:locals, %{}) |> Map.get(key)
-  end
+  def get_local(name, key), do: Map.get(locals(name), key)
 
   def locals(name) do
-    if exists?(name),
-      do: GenServer.call(registry_name(name), :locals),
-      else: name |> dormant() |> Map.get(:locals, %{})
+    viewed(name, :locals, fn ->
+      if exists?(name),
+        do: GenServer.call(registry_name(name), :locals),
+        else: name |> dormant() |> Map.get(:locals, %{})
+    end)
   end
 
   # overlays: per-tag face ranges (fontification). Byte positions auto-adjust
   # on edits (like mark); modes replace their whole tag set on recompute.
   def set_overlays(name, tag, ranges), do: GenServer.call(via(name), {:set_overlays, tag, ranges})
   def clear_overlays(name, tag \\ :all), do: GenServer.call(via(name), {:clear_overlays, tag})
-  def overlays(name), do: GenServer.call(via(name), :overlays)
-  def overlay_gen(name), do: GenServer.call(via(name), :overlay_gen)
+  def overlays(name) do
+    case BufferView.fetch(name) do
+      {:ok, view} -> BufferView.overlays(view)
+      :error -> GenServer.call(via(name), :overlays)
+    end
+  end
+
+  def overlay_gen(name),
+    do: viewed(name, :overlay_gen, fn -> GenServer.call(via(name), :overlay_gen) end)
 
   # hidden: folded byte ranges — filtered out of the display, skipped by
   # line motion. Auto-adjusted like overlays.
@@ -262,7 +293,18 @@ defmodule Aimax.Core.Buffer do
   def set_hidden(name, tag, ranges), do: GenServer.call(via(name), {:set_hidden, tag, ranges})
 
   @doc "One tag's ranges, or the union of every tag with `:all`."
-  def hidden(name, tag \\ :all), do: GenServer.call(via(name), {:hidden, tag})
+  def hidden(name, tag \\ :all)
+
+  # the row carries the union the display asks for; one tag still asks the
+  # buffer, because only it knows which owner wrote which range
+  def hidden(name, :all) do
+    case BufferView.fetch(name) do
+      {:ok, view} -> BufferView.hidden(view)
+      :error -> GenServer.call(via(name), {:hidden, :all})
+    end
+  end
+
+  def hidden(name, tag), do: GenServer.call(via(name), {:hidden, tag})
 
   def clear_hidden(name, tag \\ :all), do: GenServer.call(via(name), {:clear_hidden, tag})
 
@@ -537,11 +579,22 @@ defmodule Aimax.Core.Buffer do
 
   @doc """
   All render inputs (text, point, mark, version, locals, overlays, hidden)
-  in one call. With a win_id, point/mark/cursor geometry come from that
+  in one read. With a win_id, point/mark/cursor geometry come from that
   window's stored point when it has one (the swapped-in window doesn't —
   it falls through to the buffer point, which is its live point).
+
+  This reads the published row, so a render never queues behind the buffer
+  it draws. It falls back to the process only in the moment between
+  `start_link` and the first publish.
   """
-  def render_snapshot(name, win_id \\ nil),
+  def render_snapshot(name, win_id \\ nil) do
+    case BufferView.snapshot(name, win_id) do
+      nil -> call_render_snapshot(name, win_id)
+      snapshot -> snapshot
+    end
+  end
+
+  defp call_render_snapshot(name, win_id),
     do: GenServer.call(via(name), {:render_snapshot, win_id})
 
   # per-window points: the Editor drives these on selection changes
@@ -663,65 +716,155 @@ defmodule Aimax.Core.Buffer do
     state = %{state | persistent: persistent?}
     state = state |> attach_provenance() |> attach_history()
     {:ok, _} = Registry.register(@registry, {:id, state.id}, state.name)
-    {:ok, state |> schedule_checkpoint() |> reset_idle_timer()}
+    state = state |> schedule_checkpoint() |> reset_idle_timer()
+
+    # publish before the first caller can look: this process is registered
+    # from `start_link`, so a reader can already resolve the name here
+    BufferView.track(self(), state.name)
+    BufferView.put(view(state))
+    {:ok, state}
   end
 
-  @impl true
-  def handle_cast(:touch, state), do: {:noreply, touch_state(state)}
+  # Every callback returns through these three, and they are the only place
+  # the read model is written. A new callback therefore cannot forget to
+  # publish, which is the whole reason the reads may trust the row.
+  #
+  # The ETS write lands BEFORE the GenServer sends the reply, so a caller
+  # that writes and then reads always sees its own write.
 
   @impl true
-  def handle_info(:checkpoint, state),
+  def handle_call(msg, from, state), do: msg |> on_call(from, state) |> published(state)
+
+  @impl true
+  def handle_cast(msg, state), do: msg |> on_cast(state) |> published(state)
+
+  @impl true
+  def handle_info(msg, state), do: msg |> on_info(state) |> published(state)
+
+  defp published({:reply, reply, state}, before), do: {:reply, reply, publish(state, before)}
+
+  defp published({:reply, reply, state, extra}, before),
+    do: {:reply, reply, publish(state, before), extra}
+
+  defp published({:noreply, state}, before), do: {:noreply, publish(state, before)}
+  defp published({:noreply, state, extra}, before), do: {:noreply, publish(state, before), extra}
+  defp published(other, _before), do: other
+
+  # The fields the view holds. An untouched field is the SAME term, so a
+  # message that only reads costs one pointer comparison each and writes
+  # nothing.
+  @view_fields ~w(name id rope bin version saved_version path read_only
+                  point mark locals overlays overlay_gen hidden win_points)a
+
+  defp publish(state, before) do
+    if Enum.any?(@view_fields, &(Map.fetch!(state, &1) != Map.fetch!(before, &1))),
+      do: BufferView.put(view(state))
+
+    state
+  end
+
+  # `bin` rides along only when this process already flattened the rope for
+  # its own sake. It is never flattened to publish: a buffer nobody displays
+  # must not pay O(n) per edit, and a reader can flatten the published rope
+  # in its own process.
+  defp view(state) do
+    %{
+      name: state.name,
+      id: state.id,
+      rope: state.rope,
+      bin: state.bin,
+      size: Rope.byte_size(state.rope),
+      version: state.version,
+      modified: state.version != state.saved_version,
+      path: state.path,
+      read_only: state.read_only,
+      # Clamped here for the same reason `on_call(:point, ...)` clamps: point
+      # never stands outside the buffer, and a redraw that shortens the text
+      # leaves it there. Nearly every reader takes point from this row now, so
+      # publishing the raw value would route around that guarantee.
+      point: clamp(state.point, state),
+      mark: state.mark && clamp(state.mark, state),
+      locals: state.locals,
+      # the RAW tag maps: flattening them costs a concat and a sort, and a
+      # write must not pay for a shape only a reader wants. An edit adjusts
+      # every range, so this would otherwise run on every keystroke instead
+      # of on every render. `BufferView` flattens, in the reading process.
+      overlays: state.overlays,
+      overlay_gen: state.overlay_gen,
+      hidden: state.hidden,
+      win_points: state.win_points
+    }
+  end
+
+  defp on_cast(:touch, state), do: {:noreply, touch_state(state)}
+
+  defp on_info(:checkpoint, state),
     do: {:noreply, %{write_checkpoint(state) | checkpoint_timer: nil}}
 
-  def handle_info({:idle_timeout, generation}, state) do
+  defp on_info({:idle_timeout, generation}, state) do
     BufferStore.idle_expired(state.name, state.id, generation)
     {:noreply, %{state | idle_timer: nil}}
   end
 
-  def handle_info(_, state), do: {:noreply, state}
+  # BufferView restarted with an empty table and asked for our row back.
+  # `publish/2` writes only what changed, so the row has to be forced.
+  defp on_info(:republish_view, state) do
+    BufferView.track(self(), state.name)
+    BufferView.put(view(state))
+    {:noreply, state}
+  end
+
+  defp on_info(_, state), do: {:noreply, state}
 
   @impl true
   def terminate(_reason, %{discard: true} = state) do
+    BufferView.forget(state.name)
     flush_provenance(state)
     :ok
   end
-  def terminate(_reason, state), do: write_checkpoint(state)
 
-  @impl true
-  def handle_call(:text, _from, state) do
+  def terminate(_reason, state) do
+    BufferView.forget(state.name)
+    write_checkpoint(state)
+  end
+
+  defp on_call(:text, _from, state) do
     {text, state} = fetch_text(state)
     {:reply, text, state}
   end
 
-  def handle_call(:id, _from, state), do: {:reply, state.id, state}
-  def handle_call(:name, _from, state), do: {:reply, state.name, state}
+  defp on_call(:id, _from, state), do: {:reply, state.id, state}
+  defp on_call(:name, _from, state), do: {:reply, state.name, state}
 
-  def handle_call(:byte_size, _from, state), do: {:reply, Rope.byte_size(state.rope), state}
-  def handle_call(:version, _from, state), do: {:reply, state.version, state}
-  def handle_call(:path, _from, state), do: {:reply, state.path, state}
+  defp on_call(:byte_size, _from, state), do: {:reply, Rope.byte_size(state.rope), state}
+  defp on_call(:version, _from, state), do: {:reply, state.version, state}
+  defp on_call(:path, _from, state), do: {:reply, state.path, state}
   # Point never stands outside the buffer. A redraw can replace a list's
   # text with a shorter one while point stays where it was, and every
   # reader that turns point into a byte range then asks for bytes that are
-  # not there. wp_get and every setter clamp; so does this.
-  def handle_call(:point, _from, state), do: {:reply, clamp(state.point, state), state}
-  def handle_call(:checkpoint_now, _from, state), do: {:reply, :ok, write_checkpoint(state)}
+  # not there. wp_get and every setter clamp; so does this, and so does the
+  # published row, which is where nearly every reader now takes it from.
+  defp on_call(:point, _from, state), do: {:reply, clamp(state.point, state), state}
+  defp on_call(:checkpoint_now, _from, state), do: {:reply, :ok, write_checkpoint(state)}
 
-  def handle_call(:eviction_info, _from, state),
+  defp on_call(:eviction_info, _from, state),
     do: {:reply, %{id: state.id, idle_gen: state.idle_gen, locals: state.locals}, state}
 
-  def handle_call({:prepare_evict, generation}, _from, state) do
+  defp on_call({:prepare_evict, generation}, _from, state) do
     if state.idle_gen == generation,
       do: {:reply, true, write_checkpoint(state)},
       else: {:reply, false, state}
   end
 
-  def handle_call(:discard, _from, state), do: {:reply, :ok, %{state | discard: true}}
+  defp on_call(:discard, _from, state), do: {:reply, :ok, %{state | discard: true}}
 
-  def handle_call({:rename, new_name, new_path}, _from, state) do
+  defp on_call({:rename, new_name, new_path}, _from, state) do
     case Registry.register(@registry, new_name, state.id) do
       {:ok, _} ->
         Registry.unregister(@registry, state.name)
         old = state.name
+        # the row moves with the name; the name it leaves keeps no row
+        BufferView.forget(old)
         state = %{state | name: new_name, path: new_path} |> checkpoint_later() |> touch_state()
         state = write_checkpoint(state)
         BufferStore.renamed(old, metadata(state))
@@ -732,20 +875,20 @@ defmodule Aimax.Core.Buffer do
     end
   end
 
-  def handle_call(:modified?, _from, state),
+  defp on_call(:modified?, _from, state),
     do: {:reply, state.version != state.saved_version, state}
 
-  def handle_call({:goto, pos}, _from, state),
+  defp on_call({:goto, pos}, _from, state),
     do: {:reply, :ok, state |> Map.put(:point, clamp(pos, state)) |> checkpoint_later()}
 
-  def handle_call(:mark, _from, state), do: {:reply, state.mark, state}
+  defp on_call(:mark, _from, state), do: {:reply, state.mark, state}
 
-  def handle_call(:read_only?, _from, state), do: {:reply, state.read_only, state}
+  defp on_call(:read_only?, _from, state), do: {:reply, state.read_only, state}
 
-  def handle_call({:set_read_only, bool}, _from, state),
+  defp on_call({:set_read_only, bool}, _from, state),
     do: {:reply, :ok, state |> Map.put(:read_only, bool) |> checkpoint_later()}
 
-  def handle_call({:set_local, key, val}, _from, state) do
+  defp on_call({:set_local, key, val}, _from, state) do
     state = %{state | locals: Map.put(state.locals, key, val)}
     state = if key == "ts-lang", do: init_ts(state, val), else: state
     # Locals feed rendering ('style, mode-name, 'render-blocks) and
@@ -759,12 +902,12 @@ defmodule Aimax.Core.Buffer do
     {:reply, :ok, checkpoint_later(state)}
   end
 
-  def handle_call({:get_local, key}, _from, state),
+  defp on_call({:get_local, key}, _from, state),
     do: {:reply, Map.get(state.locals, key), state}
 
-  def handle_call(:locals, _from, state), do: {:reply, state.locals, state}
+  defp on_call(:locals, _from, state), do: {:reply, state.locals, state}
 
-  def handle_call({:set_overlays, tag, ranges}, _from, state) do
+  defp on_call({:set_overlays, tag, ranges}, _from, state) do
     {:reply, :ok,
      %{
        state
@@ -773,10 +916,10 @@ defmodule Aimax.Core.Buffer do
      }}
   end
 
-  def handle_call({:clear_overlays, :all}, _from, state),
+  defp on_call({:clear_overlays, :all}, _from, state),
     do: {:reply, :ok, %{state | overlays: %{}, overlay_gen: state.overlay_gen + 1}}
 
-  def handle_call({:clear_overlays, tag}, _from, state) do
+  defp on_call({:clear_overlays, tag}, _from, state) do
     {:reply, :ok,
      %{
        state
@@ -785,34 +928,34 @@ defmodule Aimax.Core.Buffer do
      }}
   end
 
-  def handle_call(:overlays, _from, state),
+  defp on_call(:overlays, _from, state),
     do: {:reply, state.overlays |> Map.values() |> Enum.concat(), state}
 
-  def handle_call(:overlay_gen, _from, state), do: {:reply, state.overlay_gen, state}
+  defp on_call(:overlay_gen, _from, state), do: {:reply, state.overlay_gen, state}
 
   # an empty range list drops the tag: an owner with nothing folded costs
   # nothing to union
-  def handle_call({:set_hidden, tag, []}, _from, state),
+  defp on_call({:set_hidden, tag, []}, _from, state),
     do:
       {:reply, :ok,
        state |> Map.put(:hidden, Map.delete(state.hidden, tag)) |> checkpoint_later()}
 
-  def handle_call({:set_hidden, tag, ranges}, _from, state),
+  defp on_call({:set_hidden, tag, ranges}, _from, state),
     do:
       {:reply, :ok,
        state
        |> Map.put(:hidden, Map.put(state.hidden, tag, Enum.sort(ranges)))
        |> checkpoint_later()}
 
-  def handle_call({:hidden, :all}, _from, state), do: {:reply, hidden_union(state), state}
+  defp on_call({:hidden, :all}, _from, state), do: {:reply, hidden_union(state), state}
 
-  def handle_call({:hidden, tag}, _from, state),
+  defp on_call({:hidden, tag}, _from, state),
     do: {:reply, Map.get(state.hidden, tag, []), state}
 
-  def handle_call({:clear_hidden, :all}, _from, state),
+  defp on_call({:clear_hidden, :all}, _from, state),
     do: {:reply, :ok, state |> Map.put(:hidden, %{}) |> checkpoint_later()}
 
-  def handle_call({:clear_hidden, tag}, _from, state),
+  defp on_call({:clear_hidden, tag}, _from, state),
     do:
       {:reply, :ok,
        state |> Map.put(:hidden, Map.delete(state.hidden, tag)) |> checkpoint_later()}
@@ -820,19 +963,19 @@ defmodule Aimax.Core.Buffer do
   # read-only blocks :user mutations only — programmatic sources (:editor,
   # :process, agents) are the inhibit-read-only path (dired regenerates its
   # own read-only buffer this way)
-  def handle_call({:insert, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
-  def handle_call({:append, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
-  def handle_call({:insert_at, _, _, :user, _, _locals}, _f, %{read_only: true} = s), do: ro(s)
-  def handle_call({:delete_range, _, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
-  def handle_call({:replace_range, _, _, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
-  def handle_call({:delete_char, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
-  def handle_call({:kill_line, :user, _}, _f, %{read_only: true} = s), do: ro(s)
+  defp on_call({:insert, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
+  defp on_call({:append, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
+  defp on_call({:insert_at, _, _, :user, _, _locals}, _f, %{read_only: true} = s), do: ro(s)
+  defp on_call({:delete_range, _, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
+  defp on_call({:replace_range, _, _, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
+  defp on_call({:delete_char, _, :user, _}, _f, %{read_only: true} = s), do: ro(s)
+  defp on_call({:kill_line, :user, _}, _f, %{read_only: true} = s), do: ro(s)
 
-  def handle_call({:line_of, pos}, _from, state) do
+  defp on_call({:line_of, pos}, _from, state) do
     {:reply, Rope.byte_to_line(state.rope, clamp(pos, state)) + 1, state}
   end
 
-  def handle_call({:line_at, line}, _from, state) do
+  defp on_call({:line_at, line}, _from, state) do
     rope = state.rope
     count = Rope.line_count(rope)
     line = line |> max(1) |> min(count)
@@ -841,13 +984,13 @@ defmodule Aimax.Core.Buffer do
     {:reply, {s, rope |> Rope.slice(s, e - s) |> String.trim_trailing("\n")}, state}
   end
 
-  def handle_call({:set_mark, nil}, _from, state),
+  defp on_call({:set_mark, nil}, _from, state),
     do: {:reply, :ok, state |> Map.put(:mark, nil) |> checkpoint_later()}
 
-  def handle_call({:set_mark, pos}, _from, state),
+  defp on_call({:set_mark, pos}, _from, state),
     do: {:reply, :ok, state |> Map.put(:mark, clamp(pos, state)) |> checkpoint_later()}
 
-  def handle_call({:search, q, from, dir}, _from, state) do
+  defp on_call({:search, q, from, dir}, _from, state) do
     {text, state} = fetch_text(state)
 
     result =
@@ -880,13 +1023,13 @@ defmodule Aimax.Core.Buffer do
     {:reply, result, state}
   end
 
-  def handle_call({:insert, text, src, author}, _from, state) do
+  defp on_call({:insert, text, src, author}, _from, state) do
     # do_insert's point adjustment already advances point past the insertion
     {:reply, :ok,
      state |> do_insert(state.point, text, src, author) |> touch_state() |> checkpoint_later()}
   end
 
-  def handle_call({:append, text, src, author}, _from, state) do
+  defp on_call({:append, text, src, author}, _from, state) do
     {:reply, :ok,
      state
      |> do_insert(Rope.byte_size(state.rope), text, src, author)
@@ -894,7 +1037,7 @@ defmodule Aimax.Core.Buffer do
      |> checkpoint_later()}
   end
 
-  def handle_call({:insert_at, pos, text, src, author, locals}, _from, state) do
+  defp on_call({:insert_at, pos, text, src, author, locals}, _from, state) do
     # locals first: do_insert broadcasts, and the frame it paints must
     # already see them
     state = %{state | locals: Map.merge(state.locals, locals)}
@@ -903,7 +1046,7 @@ defmodule Aimax.Core.Buffer do
      state |> do_insert(pos, text, src, author) |> touch_state() |> checkpoint_later()}
   end
 
-  def handle_call({:delete_range, pos, len, src, author}, _from, state) do
+  defp on_call({:delete_range, pos, len, src, author}, _from, state) do
     size = Rope.byte_size(state.rope)
 
     if pos < 0 or len < 0 or pos + len > size do
@@ -917,7 +1060,7 @@ defmodule Aimax.Core.Buffer do
     end
   end
 
-  def handle_call({:replace_range, pos, len, text, src, author}, _from, state) do
+  defp on_call({:replace_range, pos, len, text, src, author}, _from, state) do
     size = Rope.byte_size(state.rope)
 
     if pos < 0 or len < 0 or pos + len > size do
@@ -935,7 +1078,7 @@ defmodule Aimax.Core.Buffer do
     end
   end
 
-  def handle_call({:delete_char, n, src, author}, _from, state) do
+  defp on_call({:delete_char, n, src, author}, _from, state) do
     {text, state} = fetch_text(state)
 
     {pos, len} =
@@ -951,7 +1094,7 @@ defmodule Aimax.Core.Buffer do
     {:reply, {:ok, deleted}, state |> Map.put(:point, pos) |> touch_state() |> checkpoint_later()}
   end
 
-  def handle_call({:kill_line, src, author}, _from, state) do
+  defp on_call({:kill_line, src, author}, _from, state) do
     {text, state} = fetch_text(state)
     {_bol, eol} = Text.line_bounds(text, state.point)
     len = if state.point == eol and eol < Kernel.byte_size(text), do: 1, else: eol - state.point
@@ -966,46 +1109,46 @@ defmodule Aimax.Core.Buffer do
     end
   end
 
-  def handle_call(:authors, _from, state),
+  defp on_call(:authors, _from, state),
     do: {:reply, resolve_spans(state.authors, state.origins), state}
 
-  def handle_call(:author_fold, _from, state),
+  defp on_call(:author_fold, _from, state),
     do: {:reply, %{spans: state.authors, origins: state.origins}, state}
 
-  def handle_call(:author_lines, _from, state) do
+  defp on_call(:author_lines, _from, state) do
     {text, state} = fetch_text(state)
     {:reply, line_rows(text, state.authors, state.origins), state}
   end
 
-  def handle_call(:edit_log, _from, state), do: {:reply, state.edit_log, state}
+  defp on_call(:edit_log, _from, state), do: {:reply, state.edit_log, state}
 
-  def handle_call(:provenance, _from, state) do
+  defp on_call(:provenance, _from, state) do
     state = flush_provenance(state)
     {:reply, state.provenance, state}
   end
 
-  def handle_call(:history, _from, state) do
+  defp on_call(:history, _from, state) do
     state = state |> flush_provenance() |> close_undo_step()
     {:reply, state.history, state}
   end
 
-  def handle_call({:anchor, pos}, _from, state) do
+  defp on_call({:anchor, pos}, _from, state) do
     {:reply, take_anchor(state, pos), state}
   end
 
-  def handle_call({:anchor_pos, anchor}, _from, state) do
+  defp on_call({:anchor_pos, anchor}, _from, state) do
     {:reply, read_anchor(state, anchor), state}
   end
 
-  def handle_call(:version_token, _from, state) do
+  defp on_call(:version_token, _from, state) do
     state = state |> flush_provenance() |> close_undo_step()
     {:reply, state.history && History.version(state.history), state}
   end
 
-  def handle_call({:updates_since, _token}, _from, %{history: nil} = state),
+  defp on_call({:updates_since, _token}, _from, %{history: nil} = state),
     do: {:reply, {:error, :no_history}, state}
 
-  def handle_call({:updates_since, token}, _from, state) do
+  defp on_call({:updates_since, token}, _from, state) do
     # Close the open change first: a replica must never be told about work
     # this buffer has not finished writing.
     state = state |> flush_provenance() |> close_undo_step()
@@ -1019,10 +1162,10 @@ defmodule Aimax.Core.Buffer do
     {:reply, reply, state}
   end
 
-  def handle_call({:merge, _bytes}, _from, %{history: nil} = state),
+  defp on_call({:merge, _bytes}, _from, %{history: nil} = state),
     do: {:reply, {:error, :no_history}, state}
 
-  def handle_call({:merge, bytes}, _from, state) do
+  defp on_call({:merge, bytes}, _from, state) do
     # Our own work closes before theirs arrives, so the merge cannot fold a
     # half-written local change together with a remote one.
     state = state |> flush_provenance() |> close_undo_step()
@@ -1050,7 +1193,7 @@ defmodule Aimax.Core.Buffer do
   defp merge_actor(_state),
     do: local_actor("system:remote", "system", "remote", :merge)
 
-  def handle_call({:provenance_start, src, author, opts}, _from, state) do
+  defp on_call({:provenance_start, src, author, opts}, _from, state) do
     state = flush_provenance(state)
     actor = resolve_actor(author, src)
     policy_source = policy_of(opts)
@@ -1074,7 +1217,7 @@ defmodule Aimax.Core.Buffer do
     {:reply, :ok, checkpoint_later(state)}
   end
 
-  def handle_call({:provenance_stop, _src, _author, opts}, _from, state) do
+  defp on_call({:provenance_stop, _src, _author, opts}, _from, state) do
     state = flush_provenance(state)
     policy_source = policy_of(opts)
 
@@ -1094,13 +1237,13 @@ defmodule Aimax.Core.Buffer do
     end
   end
 
-  def handle_call({:provenance_checkpoint, _src, _author, _opts}, _from, state) do
+  defp on_call({:provenance_checkpoint, _src, _author, _opts}, _from, state) do
     if state.provenance.enabled,
       do: {:reply, :ok, state |> settle() |> checkpoint_later()},
       else: {:reply, {:error, :not_recording}, state}
   end
 
-  def handle_call({:motion, motion}, _from, state) do
+  defp on_call({:motion, motion}, _from, state) do
     {text, state} = fetch_text(state)
 
     state =
@@ -1139,7 +1282,7 @@ defmodule Aimax.Core.Buffer do
   # The Emacs model survives on top of that. A run of consecutive undos keeps
   # walking back; any other command breaks the run, after which undo replays
   # the undos, which is Emacs's redo.
-  def handle_call({:undo, src, author}, _from, state) do
+  defp on_call({:undo, src, author}, _from, state) do
     actor = resolve_actor(author, src)
 
     if state.history == nil do
@@ -1166,7 +1309,7 @@ defmodule Aimax.Core.Buffer do
 
   # everything the renderer needs, in one round trip; line geometry is
   # O(log n) rope lookups, not text scans
-  def handle_call({:render_snapshot, win_id}, _from, state) do
+  defp on_call({:render_snapshot, win_id}, _from, state) do
     {text, state} = fetch_text(state)
 
     {point, mark} =
@@ -1198,7 +1341,7 @@ defmodule Aimax.Core.Buffer do
      }, state}
   end
 
-  def handle_call({:wp_swap_in, win_id}, _from, state) do
+  defp on_call({:wp_swap_in, win_id}, _from, state) do
     case state.win_points[win_id] do
       nil ->
         # first display in this window: it inherits the buffer point
@@ -1216,67 +1359,67 @@ defmodule Aimax.Core.Buffer do
     end
   end
 
-  def handle_call({:wp_save, win_id}, _from, state) do
+  defp on_call({:wp_save, win_id}, _from, state) do
     entry = %{point: state.point, mark: state.mark, goal: state.goal_col}
     {:reply, :ok, %{state | win_points: Map.put(state.win_points, win_id, entry)}}
   end
 
-  def handle_call({:wp_set, win_id, pos}, _from, state) do
+  defp on_call({:wp_set, win_id, pos}, _from, state) do
     entry = %{point: clamp(pos, state), mark: nil, goal: nil}
     {:reply, :ok, %{state | win_points: Map.put(state.win_points, win_id, entry)}}
   end
 
-  def handle_call({:wp_drop, win_id}, _from, state),
+  defp on_call({:wp_drop, win_id}, _from, state),
     do: {:reply, :ok, %{state | win_points: Map.delete(state.win_points, win_id)}}
 
-  def handle_call({:wp_get, win_id}, _from, state) do
+  defp on_call({:wp_get, win_id}, _from, state) do
     case state.win_points[win_id] do
       %{point: p} -> {:reply, clamp(p, state), state}
       nil -> {:reply, state.point, state}
     end
   end
 
-  def handle_call(:ts_highlight, _from, %{ts: nil} = state), do: {:reply, [], state}
+  defp on_call(:ts_highlight, _from, %{ts: nil} = state), do: {:reply, [], state}
 
-  def handle_call(:ts_highlight, _from, %{ts: %{spans: spans}} = state) when spans != nil,
+  defp on_call(:ts_highlight, _from, %{ts: %{spans: spans}} = state) when spans != nil,
     do: {:reply, spans, state}
 
-  def handle_call(:ts_highlight, _from, %{ts: ts} = state) do
+  defp on_call(:ts_highlight, _from, %{ts: ts} = state) do
     {text, state} = fetch_text(state)
     spans = TS.ts_state_highlight(ts.res, text)
     {:reply, spans, %{state | ts: %{ts | spans: spans}}}
   end
 
-  def handle_call({:ts_node, _kind, _s, _e, _op}, _from, %{ts: nil} = state),
+  defp on_call({:ts_node, _kind, _s, _e, _op}, _from, %{ts: nil} = state),
     do: {:reply, nil, state}
 
-  def handle_call({:ts_node, kind, s, e, op}, _from, %{ts: ts} = state) do
+  defp on_call({:ts_node, kind, s, e, op}, _from, %{ts: ts} = state) do
     {text, state} = fetch_text(state)
     {:reply, TS.ts_state_node(ts.res, text, kind, s, e, op), state}
   end
 
-  def handle_call({:ts_children, _kind, _s, _e}, _from, %{ts: nil} = state),
+  defp on_call({:ts_children, _kind, _s, _e}, _from, %{ts: nil} = state),
     do: {:reply, [], state}
 
-  def handle_call({:ts_children, kind, s, e}, _from, %{ts: ts} = state) do
+  defp on_call({:ts_children, kind, s, e}, _from, %{ts: ts} = state) do
     {text, state} = fetch_text(state)
     {:reply, TS.ts_state_children(ts.res, text, kind, s, e), state}
   end
 
-  def handle_call(:break_undo_chain, _from, state),
+  defp on_call(:break_undo_chain, _from, state),
     do: {:reply, :ok, %{state | undo_run: false}}
 
   # a save is not an edit, but the modified flag every view shows just
   # changed — repaint through the same phantom-change channel set_local
   # uses (:locals triggers no reactor rules)
-  def handle_call(:mark_saved, _from, state) do
+  defp on_call(:mark_saved, _from, state) do
     state = %{state | saved_version: state.version}
     Events.broadcast_editor(:locals)
     broadcast(state, state.point, "", 0, :locals)
     {:reply, :ok, checkpoint_later(state)}
   end
 
-  def handle_call({:save, override}, _from, state) do
+  defp on_call({:save, override}, _from, state) do
     case override || state.path do
       nil ->
         {:reply, {:error, :no_path}, state}
@@ -2476,6 +2619,14 @@ defmodule Aimax.Core.Buffer do
   end
 
   defp broadcast(state, pos, inserted, deleted, src) do
+    # The row goes out BEFORE the event that announces it. A subscriber
+    # wakes on this message and reads the row without asking us, so a row
+    # written after the send would let a client paint one edit behind and
+    # then sit there: no further event would arrive to correct it. The
+    # callback wrapper publishes again on the way out, which is one more
+    # small write and the reason a caller still reads its own last write.
+    BufferView.put(view(state))
+
     change = %{
       version: state.version,
       pos: pos,

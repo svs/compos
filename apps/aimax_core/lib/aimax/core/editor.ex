@@ -2059,8 +2059,17 @@ defmodule Aimax.Core.Editor do
 
   # exists? then call still races a dying buffer (registry entries linger);
   # a dead buffer renders empty instead of crashing the Editor
+  # The read model answers this without a message, which is why the walk
+  # may run here at all: this process holds the whole editor while it
+  # renders, and it used to wait on each visible buffer in turn. One buffer
+  # busy with a reparse, a checkpoint or a save then stalled every frame of
+  # every client. Now only a buffer with no row costs a call, and a dormant
+  # one still draws empty rather than waking.
   defp safe_snapshot(buffer, win_id) do
-    if Buffer.exists?(buffer), do: Buffer.render_snapshot(buffer, win_id), else: @empty_snapshot
+    case Aimax.Core.BufferView.snapshot(buffer, win_id) do
+      nil -> if Buffer.exists?(buffer), do: Buffer.render_snapshot(buffer, win_id), else: @empty_snapshot
+      snapshot -> snapshot
+    end
   catch
     :exit, _ -> @empty_snapshot
   end

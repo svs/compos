@@ -163,6 +163,7 @@ when a message has no text/plain part." 'group 'notmuch)
 (defface! 'nm-unread 'weight "700")
 (defface! 'nm-tags 'fg "#9a9a72")
 (defface! 'nm-marked 'fg "#a03020" 'weight "700")
+(defface! 'nm-bar 'fg "#26356b")
 
 (define (nm--search-json query limit)
   (or (nm--json (string-append "search --format=json --limit="
@@ -184,44 +185,31 @@ when a message has no text/plain part." 'group 'notmuch)
                           (or (nm--get th 'date_relative) "")))
        (nm--search-json (nm--query-of buf) notmuch-search-limit)))
 
-;; one row's fitted columns: date, author, subject, tag string — render
-;; joins them, the overlay fn measures them for the face ranges
-(define (nm--th-cols th)
-  (list (nm--fit (nm--th-date th) 13)
-        (nm--fit (nm--th-authors th) 24)
-        (nm--th-subject th)
-        (string-append "  (" (string-join (nm--th-tags th) " ") ")")))
+;; Two lines per thread. The subject owns the first line, so a narrow
+;; window never truncates it; the date sits at the right of that line,
+;; where a compressed date still reads. The author and the tags share
+;; the second line. Four tags out of a hundred change how you read a
+;; thread, and the bar in front of the row says the first of them:
+;; unread. The rest stay words, and they are what gives way when the
+;; window narrows.
+(define (nm--search-columns buf)
+  (list (list (list "" 1) (list "subject" #f 'left 'end) (list "date" 13 'right))
+        (list (list "" 1) (list "author" #f) (list "tags" 24 'right 'end))))
 
-(define (nm--search-line th)
-  (let ((c (nm--th-cols th)))
-    (string-append (car c) " " (cadr c) " " (caddr c) (list-ref c 3))))
-
-;; columns get faces by byte range; unread/marked rows a subject face
-(define (nm--search-overlays buf th off)
-  (let* ((c (nm--th-cols th))
-         (d-end (+ off (string-byte-length (car c))))
-         (a-start (+ d-end 1))
-         (a-end (+ a-start (string-byte-length (cadr c))))
-         (s-start (+ a-end 1))
-         (s-end (+ s-start (string-byte-length (caddr c))))
-         (t-end (+ s-end (string-byte-length (list-ref c 3))))
-         (tags (nm--th-tags th)))
-    (list (list off d-end "nm-date")
-          (list a-start a-end "nm-author")
-          (list s-start s-end (cond ((member "m" tags) "nm-marked")
-                                    ((member "unread" tags) "nm-unread")
-                                    (else "nm-subject")))
-          (list s-end t-end "nm-tags"))))
+(define (nm--subject-face tags)
+  (cond ((member "m" tags) "nm-marked")
+        ((member "unread" tags) "nm-unread")
+        (else "nm-subject")))
 
 (define (nm--search-cells buf th)
-  (let ((tags (nm--th-tags th)))
-    (list (list (nm--th-date th) "nm-date")
-          (list (nm--th-authors th) "nm-author")
-          (list (nm--th-subject th)
-                (cond ((member "m" tags) "nm-marked")
-                      ((member "unread" tags) "nm-unread")
-                      (else "nm-subject")))
-          (list (string-join tags " ") "nm-tags"))))
+  (let* ((tags (nm--th-tags th))
+         (bar (if (member "unread" tags) "▌" " ")))
+    (list (list (list bar "nm-bar")
+                (list (nm--th-subject th) (nm--subject-face tags))
+                (list (nm--th-date th) "nm-date"))
+          (list " "
+                (list (nm--th-authors th) "nm-author")
+                (list (string-join tags " ") "nm-tags")))))
 
 (define (nm--search-meta buf)
   (string-append (number->string (length (list-entries buf)))
@@ -243,10 +231,8 @@ when a message has no text/plain part." 'group 'notmuch)
            "on every marked thread. `s` starts a new search; `q` goes back "
            "to the mailboxes.")
     'rows nm--search-rows
-    'columns (lambda (buf)
-               (list (list "date" 13) (list "author" 24)
-                     (list "subject" #f) (list "tags" 20)))
-    'cells nm--search-cells
+    'row-columns nm--search-columns
+    'row-cells nm--search-cells
     'title (lambda (buf) "Mail")
     'meta nm--search-meta
     'total (lambda (buf) (length (list-entries buf)))
@@ -513,28 +499,31 @@ when a message has no text/plain part." 'group 'notmuch)
 
 ;; the shown mail follows the highlight: every move previews, and opening
 ;; a thread marks it read (the open itself tags -unread)
+;; a thread is a ROW, and a row is two lines — the list moves by rows,
+;; so every move here goes through the list and none of them counts
+;; lines
+(define (nm--move! step)
+  (let ((buf (current-buffer)))
+    (list-move-in! buf step)
+    (nm--maybe-preview! buf)))
+
 (define-command "notmuch-next" "Move down; the shown mail follows"
-  (lambda ()
-    (next-line!) (beginning-of-line!)
-    (nm--maybe-preview! (current-buffer))))
+  (lambda () (nm--move! 1)))
 
 (define-command "notmuch-prev" "Move up; the shown mail follows"
-  (lambda ()
-    (previous-line!) (beginning-of-line!)
-    (nm--maybe-preview! (current-buffer))))
+  (lambda () (nm--move! -1)))
 
 (define-command "notmuch-first-thread" "Jump to the newest thread"
   (lambda ()
-    (goto-char! 0) (next-line!) (beginning-of-line!)
-    (nm--maybe-preview! (current-buffer))))
+    (let ((buf (current-buffer)))
+      (list-goto-first-entry buf)
+      (nm--maybe-preview! buf))))
 
 (define-command "notmuch-last-thread" "Jump to the oldest listed thread"
   (lambda ()
-    (end-of-buffer!) (beginning-of-line!)
-    ;; the listing ends with a newline — land on the last entry, not after it
-    (when (not (nm--thread-at (current-buffer)))
-      (previous-line!) (beginning-of-line!))
-    (nm--maybe-preview! (current-buffer))))
+    (let* ((buf (current-buffer)) (n (length (list-entries buf))))
+      (when (> n 0) (list-goto-index! buf (- n 1)))
+      (nm--maybe-preview! buf))))
 
 (define-command "notmuch-refresh" "Re-run the search and refresh the listing"
   (lambda () (nm--refresh! (current-buffer)) (message "Refreshed")))
@@ -546,15 +535,11 @@ when a message has no text/plain part." 'group 'notmuch)
         (lambda (q)
           (nm--query-reset! buf q)
           (nm--refresh! buf)
-          (goto-char! 0) (next-line!) (beginning-of-line!))))))
+          (list-goto-first-entry buf))))))
 
 ;;; --- tagging ------------------------------------------------------------------
 
-(define (nm--goto-index! buf i)
-  (goto-char! 0)
-  (let loop ((k (+ i 1)))
-    (when (> k 0) (next-line!) (loop (- k 1))))
-  (beginning-of-line!))
+(define (nm--goto-index! buf i) (list-goto-index! buf i))
 
 ;; tag, refresh, stay at the same list INDEX — when the change removes the
 ;; row (archive/trash on an inbox view) that index IS the next thread —
@@ -661,7 +646,7 @@ when a message has no text/plain part." 'group 'notmuch)
             (unless (equal? term "")
               (nm--query-push! buf term)
               (nm--refresh! buf)
-              (goto-char! 0) (next-line!) (beginning-of-line!))))))))
+              (list-goto-first-entry buf))))))))
 
 (define-command "notmuch-unfilter-last" "Remove the most recently added notmuch filter"
   (lambda ()
@@ -693,7 +678,7 @@ when a message has no text/plain part." 'group 'notmuch)
                 (begin
                   (nm--query-push-only! buf (string-append "from:" email))
                   (nm--refresh! buf)
-                  (goto-char! 0) (next-line!) (beginning-of-line!)
+                  (list-goto-first-entry buf)
                   (message (string-append "from:" email)))))))))
 
 ;;; --- marks: dired-style bulk operations via the m tag ---------------------------
@@ -712,7 +697,7 @@ when a message has no text/plain part." 'group 'notmuch)
           (begin
             (nm--tag! buf (if (member "m" (nm--th-tags th)) "-m" "+m"))
             ;; marking keeps the row — advance past it, dired-style
-            (next-line!) (beginning-of-line!))
+            (list-move-in! buf 1))
           (message "No thread on this line")))))
 
 (define-command "notmuch-mark-all" "Mark every thread in this search"
@@ -736,7 +721,7 @@ when a message has no text/plain part." 'group 'notmuch)
     (let ((buf (current-buffer)))
       (nm--query-push-only! buf "tag:m")
       (nm--refresh! buf)
-      (goto-char! 0) (next-line!) (beginning-of-line!))))
+      (list-goto-first-entry buf))))
 
 (define (nm--confirm-marked buf verb changes)
   (minibuffer-read (string-append verb " all marked threads? ")

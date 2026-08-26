@@ -101,6 +101,25 @@
       (check-contains! faces "nm-unread" "and the unread mark"))
     (t--nm-done!)))
 
+(deftest 'the-index-gives-each-thread-two-lines
+  "the subject owns the first line; the author and the tags share the second"
+  (lambda ()
+    (t--nm-setup!)
+    (run-command "notmuch-inbox")
+    (let* ((lines (string-split (buffer-text "*notmuch*") "\n"))
+           (subj (filter (lambda (l) (string-contains? l "Hello world")) lines))
+           (auth (filter (lambda (l) (string-contains? l "Alice")) lines)))
+      (check-equal! (length subj) 1 "the subject is on one line")
+      (check-equal! (length auth) 1 "the author is on another")
+      (check-false! (string-contains? (car subj) "Alice") "the two do not share a line")
+      (check-contains! (car subj) "Today 06:50" "the date rides with the subject")
+      (check-contains! (car auth) "inbox unread" "the tags ride with the author"))
+    ;; a row is two lines, and one move is one thread
+    (t--nm-run! "notmuch-next")
+    (check-equal! (nm--th-subject (nm--thread-at "*notmuch*")) "Quarterly report"
+                  "one move goes to the next thread")
+    (t--nm-done!)))
+
 (deftest 'opening-a-thread-renders-text-plain-only-and-marks-it-read
   "the HTML alternative is not the one a reader wants"
   (lambda ()
@@ -122,8 +141,7 @@
   (lambda ()
     (t--nm-setup!)
     (run-command "notmuch-inbox")
-    (next-line!)
-    (beginning-of-line!)
+    (t--nm-run! "notmuch-next")
     (t--nm-run! "notmuch-open-thread")
 
     (check-equal! (current-buffer) "*mail*" "the mail view is current")

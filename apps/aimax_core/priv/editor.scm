@@ -607,7 +607,7 @@
 ;; list can still claim any of them for something else.
 (define (list-install-mark-keys! buf)
   (let ((fs (or (list-opt buf 'flags) '())))
-    (when (or (pair? fs) (list-opt buf 'columns))
+    (when (or (pair? fs) (list-table? buf))
       (local-set-key* buf "m" "list-mark")
       (local-set-key* buf "u" "list-unmark")
       (local-set-key* buf "U" "list-unmark-all")
@@ -692,10 +692,12 @@
 (define (list-annotation buf e)
   (string-join (list-annotation-fields buf e) " "))
 
-;; the whole row as text: the line you see, and what it means. A table
-;; row matches on its columns, because its columns are what it shows.
+;; the whole row as text: the lines you see, and what they mean. A table
+;; row matches on its columns, because its columns are what it shows, and
+;; a row of two lines matches on both of them.
 (define (list-row-text buf e)
-  (string-append (car (list-row-line buf e)) " " (list-annotation buf e)))
+  (string-append (string-join (map car (list-row-lines buf e)) " ")
+                 " " (list-annotation buf e)))
 
 (define (list-match? buf e input)
   (let ((m (list-opt buf 'match)))
@@ -751,10 +753,20 @@
 ;;;   'title    (buf) -> string             what this list shows
 ;;;   'meta     (buf) -> string             the counts under the title
 ;;;   'total    (buf) -> number             rows before the filters, for the chip
-;;;   'columns  (buf) -> ((LABEL WIDTH ALIGN) ...)
+;;;   'columns  (buf) -> ((LABEL WIDTH ALIGN TRIM) ...)
 ;;;                      WIDTH #f means the rest of the line.
 ;;;                      ALIGN is 'left or 'right.
+;;;                      TRIM is 'middle (the default) or 'end.
 ;;;   'cells    (buf entry) -> (CELL ...)   CELL is a string, or (TEXT FACE)
+;;;
+;;; A row may take more than one line. Such a mode declares the two in
+;;; the plural — one column list and one cell list per line of a row:
+;;;
+;;;   'row-columns (buf) -> (COLUMNS ...)
+;;;   'row-cells   (buf entry) -> (CELLS ...)
+;;;
+;;; The mark goes on the first line and the lines under it start where it
+;;; does. A two-line row has no single label row, so the head shows none.
 ;;;   'footer   (buf) -> ((KEY WORD) ...)   the key bar under the rows
 ;;;   'preview  (buf entry)                 what moving the highlight shows
 ;;;   'compact  #t                          merge title and meta; omit rules
@@ -792,23 +804,44 @@
     (map (lambda (c)
            (if (list-col-width c)
                c
-               (list (car c) rest (list-col-align c))))
+               (list (car c) rest (list-col-align c) (list-col-trim c))))
          cols)))
 
-;; The mode's 'columns fn runs once per draw: every later call in the
+;; a mode says its columns once per line of a row. A one-line list says
+;; 'columns and means one line; a two-line list says 'row-columns.
+(define (list-declared-columns buf)
+  (let ((g (list-opt buf 'row-columns))
+        (f (list-opt buf 'columns)))
+    (cond (g (g buf))
+          (f (list (f buf)))
+          (else '()))))
+
+;; The mode's columns fn runs once per draw: every later call in the
 ;; same draw reads the cache. The cache keys on the width, so a resize
 ;; recomputes. A draw clears the cache first.
+(define (list-column-lines buf)
+  (let ((w (list-view-width buf))
+        (cache (buffer-local buf 'list-columns-cache)))
+    (if (and (pair? cache) (equal? (car cache) w))
+        (cadr cache)
+        (let ((cols (map (lambda (cs) (list-fit-columns cs w))
+                         (list-declared-columns buf))))
+          (buffer-set-local! buf 'list-columns-cache (list w cols))
+          cols))))
+
+;; the first line's columns — the label row and every caller that means
+;; "the columns" reads these
 (define (list-columns buf)
-  (let ((f (list-opt buf 'columns)))
-    (if f
-        (let ((w (list-view-width buf))
-              (cache (buffer-local buf 'list-columns-cache)))
-          (if (and (pair? cache) (equal? (car cache) w))
-              (cadr cache)
-              (let ((cols (list-fit-columns (f buf) w)))
-                (buffer-set-local! buf 'list-columns-cache (list w cols))
-                cols)))
-        '())))
+  (let ((ls (list-column-lines buf)))
+    (if (pair? ls) (car ls) '())))
+
+;; how many lines one row takes. A render reads the mode; motion reads
+;; what the last render wrote, so a mode that changed under a stale
+;; buffer never moves point to a line that is not there.
+(define (list-row-height buf) (max 1 (length (list-column-lines buf))))
+
+(define (list-drawn-row-height buf)
+  (or (buffer-local buf 'list-row-height) 1))
 
 (define (list-table? buf) (pair? (list-columns buf)))
 
@@ -823,10 +856,15 @@
 ;; a name too long for its column loses its MIDDLE: the head says what
 ;; the thing is and the tail says which one, and a path or a suffix lives
 ;; in the tail. The columns after it stay where the labels say they are.
-(define (list-fit s w)
+;;
+;; A column whose tail says nothing declares 'end instead, and loses the
+;; end: a subject and a tag list both read from the left, and a middle
+;; cut through a list of words invents a word that is not there.
+(define (list-fit s w trim)
   (cond ((not w) s)
         ((<= (string-length s) w) s)
         ((<= w 3) (substring s 0 w))
+        ((equal? trim 'end) (string-append (substring s 0 (- w 1)) "…"))
         (else
           (let* ((keep (- w 1))
                  (head (quotient (+ keep 1) 2))
@@ -849,6 +887,9 @@
 (define (list-col-width c) (car (cdr c)))
 (define (list-col-align c) (if (> (length c) 2) (nth 2 c) 'left))
 
+;; how the column gives up space: 'middle (the default) or 'end
+(define (list-col-trim c) (if (> (length c) 3) (nth 3 c) 'middle))
+
 ;; how wide the table is: the rule and the right-hand chip measure
 ;; themselves against it, so nothing has to ask the window
 ;; one row of cells as text plus the faces on it. A span is (OFFSET
@@ -859,7 +900,8 @@
     (if (or (null? cs) (null? ks))
         (list text (reverse spans))
         (let* ((k (car ks))
-               (fitted (list-fit (list-cell-text (car cs)) (list-col-width k)))
+               (fitted (list-fit (list-cell-text (car cs)) (list-col-width k)
+                                 (list-col-trim k)))
                (padded (if (null? (cdr ks))
                            fitted
                            (list-pad fitted (list-col-width k) (list-col-align k))))
@@ -947,6 +989,13 @@
                                      (string-byte-length note))
                                   (string-byte-length note) "warn")))))))
 
+;; one label per column says nothing about a row of two lines: the row
+;; itself is the only place the two meet, so a two-line list shows none
+(define (list-label-lines buf cols)
+  (if (> (list-row-height buf) 1)
+      '()
+      (list (list-label-line buf cols))))
+
 (define (list-table-head buf)
   (let* ((cols (list-columns buf))
          (w (list-view-width buf))
@@ -954,17 +1003,19 @@
     (if (list-opt buf 'compact)
         (if (and (null? (list-filters buf))
                  (not (equal? (car meta) "")))
-            (list (list (list-fit
-                          (string-append (list-say buf 'title) "  " (car meta)) w)
-                        '())
-                  (list-label-line buf cols))
+            (append (list (list (list-fit
+                                  (string-append (list-say buf 'title) "  "
+                                                 (car meta))
+                                  w 'middle)
+                                '()))
+                    (list-label-lines buf cols))
             (append (list (list-title-line buf w))
                     (if (equal? (car meta) "") '() (list meta))
-                    (list (list-label-line buf cols))))
+                    (list-label-lines buf cols)))
         (append (list (list-title-line buf w))
                 (if (equal? (car meta) "") '() (list meta))
                 (list (list-rule-line w))
-                (list (list-label-line buf cols))))))
+                (list-label-lines buf cols)))))
 
 ;; the header as lines. A mode's own 'header is text it wrote itself, so
 ;; its lines carry no faces.
@@ -999,35 +1050,59 @@
             (list (list-rule-line (list-view-width buf))
                   (list-key-bar buf keys))))))
 
-;; one entry as one line. The mark column belongs to the mechanism: three
-;; renders were each prepending their own.
-(define (list-row-line buf e)
+;; one entry's cells, one list per line of the row
+(define (list-row-cells buf e)
+  (let ((g (list-opt buf 'row-cells))
+        (f (list-opt buf 'cells)))
+    (cond (g (g buf e))
+          (f (list (f buf e)))
+          (else '()))))
+
+;; one entry as its lines. The mark column belongs to the mechanism:
+;; three renders were each prepending their own. The mark goes on the
+;; first line, and the lines under it start where it does.
+(define (list-row-lines buf e)
   (let ((mark (if (list-marks-column? buf) (list-mark-of buf e) "")))
     (if (list-table? buf)
-        (let* ((laid (list-lay-out ((list-opt buf 'cells) buf e) (list-columns buf)))
-               (head (string-append mark " "))
-               (n (string-byte-length head)))
-          (list (string-trim-right (string-append head (car laid)))
-                (append (if (equal? mark " ")
-                            '()
-                            (list (list 0 (string-byte-length mark) "alert")))
-                        (list-shift-spans (car (cdr laid)) n))))
-        (list (string-append mark ((list-opt buf 'render) buf e)) '()))))
+        (let* ((head (string-append mark " "))
+               (blank (string-repeat " " (string-length head))))
+          (let loop ((cs (list-row-cells buf e))
+                     (ks (list-column-lines buf))
+                     (first? #t)
+                     (out '()))
+            (if (or (null? cs) (null? ks))
+                (reverse out)
+                (let* ((laid (list-lay-out (car cs) (car ks)))
+                       (pre (if first? head blank))
+                       (n (string-byte-length pre)))
+                  (loop (cdr cs) (cdr ks) #f
+                        (cons (list (string-trim-right
+                                      (string-append pre (car laid)))
+                                    (append (if (or (not first?)
+                                                    (equal? mark " ")
+                                                    (equal? mark ""))
+                                                '()
+                                                (list (list 0 (string-byte-length mark)
+                                                            "alert")))
+                                            (list-shift-spans (car (cdr laid)) n)))
+                              out))))))
+        (list (list (string-append mark ((list-opt buf 'render) buf e)) '())))))
 
 ;; the whole view, top to bottom
 (define (list-view-lines buf rows)
   (append (list-head-lines buf)
-          (map (lambda (e) (list-row-line buf e)) rows)
+          (fold (lambda (acc e) (append acc (list-row-lines buf e))) '() rows)
           (list-foot-lines buf)))
 
 ;; write the lines, answer their overlays, and leave every row's byte
 ;; offset on the buffer — motion and the mode's own overlays then read
 ;; the same numbers the text has
-(define (list-write! buf lines first-row n-rows)
+(define (list-write! buf lines first-row n-rows per)
   (let loop ((ls lines) (i 0) (off 0) (ovs '()) (offsets '()))
     (if (null? ls)
         (begin (buffer-set-local! buf 'list-offsets (reverse offsets))
                (buffer-set-local! buf 'list-head-count first-row)
+               (buffer-set-local! buf 'list-row-height per)
                (reverse ovs))
         (let ((text (car (car ls)))
               (spans (car (cdr (car ls)))))
@@ -1040,7 +1115,10 @@
                                     (nth 2 s))
                               acc))
                       ovs spans)
-                (if (and (>= i first-row) (< i (+ first-row n-rows)))
+                ;; one offset per row: a row of two lines answers with
+                ;; the line the reader lands on
+                (if (and (>= i first-row) (< i (+ first-row (* n-rows per)))
+                         (= 0 (modulo (- i first-row) per)))
                     (cons off offsets)
                     offsets))))))
 
@@ -1052,8 +1130,9 @@
 ;; header names the row count, and asking it to count rows that a refresh
 ;; is halfway through replacing reads the rows that went
 (define (list-index buf)
-  (line-index-at buf (or (buffer-local buf 'list-head-count)
-                         (list-header-lines buf))))
+  (let ((ln (line-index-at buf (or (buffer-local buf 'list-head-count)
+                                   (list-header-lines buf)))))
+    (and ln (quotient ln (list-drawn-row-height buf)))))
 
 (define (list-goto-index! buf i)
   (let ((offs (list-offsets buf)))
@@ -1284,7 +1363,8 @@
       ;; entries first: the header states the row count
       (buffer-set-local! buf 'list-entries rows)
       (let ((base (list-write! buf (list-view-lines buf rows)
-                               (list-header-lines buf) (length rows))))
+                               (list-header-lines buf) (length rows)
+                               (list-row-height buf))))
         (overlay-set! buf 'list (append base (list-row-overlays buf rows))))
       (buffer-set-read-only! buf ro)
       (when (list-table? buf)
@@ -1414,7 +1494,7 @@
     ;; a table moves the same way in every list: n and p walk the rows and
     ;; stop at the ends, and the line-motion keys REMAP, so the arrows and
     ;; C-n/C-p walk them too
-    (when (list-opt buf 'columns)
+    (when (list-table? buf)
       (local-set-key* buf "n" "list-next")
       (local-set-key* buf "p" "list-prev")
       (local-remap*! buf "next-line" "list-next")

@@ -1,15 +1,14 @@
 {
   "manifest_version": 3,
   "name": "ai-max",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "description": "ai-max's keys and commands in every tab, and a wire so the editor can drive any of them.",
   "permissions": [
     "tabs",
     "scripting",
     "storage",
     "debugger",
-    "alarms",
-    "declarativeNetRequestWithHostAccess"
+    "alarms"
   ],
   "host_permissions": [
     "<all_urls>"

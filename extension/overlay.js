@@ -33,73 +33,10 @@ let palette = null;
 let pending = null; // an in-flight chord, e.g. ["C-x"]
 let enabled = true;
 
-// The full browser is a real cross-origin frame inside ai-max. Leave the
-// page's keys alone there. C-g is the one escape key: it returns focus to the
-// editor through the same message bridge that app buffers use.
 const topFrame = window === window.top;
-const embeddedInAimax =
-  !topFrame &&
-  (window.name.startsWith("aimax-browser-") ||
-    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(document.referrer || ""));
 
-if (embeddedInAimax) {
-  let reportedLocation = "";
-  let reportedTitle = "";
-  const reportLocation = () => {
-    if (location.href === reportedLocation && document.title === reportedTitle) return;
-    reportedLocation = location.href;
-    reportedTitle = document.title;
-    window.parent.postMessage(
-      { aimax: "browser-location", url: reportedLocation, title: reportedTitle },
-      "*"
-    );
-  };
-  reportLocation();
-  // History API navigation does not reload the content script. Poll lightly
-  // so SPA routes and late title changes still reach ai-max's address line.
-  const locationTimer = setInterval(reportLocation, 500);
-  window.addEventListener("pagehide", () => clearInterval(locationTimer), { once: true });
-  window.addEventListener("keydown", (event) => {
-    if (event.ctrlKey && !event.altKey && !event.metaKey && event.code === "KeyG") {
-      event.preventDefault();
-      event.stopPropagation();
-      window.parent.postMessage({ aimax: "release" }, "*");
-    }
-  }, true);
-  window.addEventListener("message", (event) => {
-    if (event.source !== window.parent || event.data?.aimax !== "browser-theme") return;
-    let style = document.getElementById("aimax-browser-theme");
-    if (event.data.mode === "raw-mode") {
-      if (style) style.remove();
-      return;
-    }
-    const supplied = event.data.palette || {};
-    const color = (value, fallback) =>
-      typeof value === "string" && CSS.supports("color", value) ? value : fallback;
-    const palette = {
-      bg: color(supplied.bg, "#111318"),
-      fg: color(supplied.fg, "#e6e1d8"),
-      link: color(supplied.link, "#7aa2f7"),
-      border: color(supplied.border, "#3b4261"),
-      inset: color(supplied.inset, "#1a1b26")
-    };
-    if (!style) {
-      style = document.createElement("style");
-      style.id = "aimax-browser-theme";
-      (document.head || document.documentElement).appendChild(style);
-    }
-    style.textContent = `
-      html,body{background:${palette.bg} !important;color:${palette.fg} !important}
-      *,*::before,*::after{background-color:transparent !important;color:inherit !important;border-color:${palette.border} !important}
-      a,a:visited{color:${palette.link} !important}
-      input,textarea,select,button,[role="button"],[role="dialog"],[role="menu"],[role="listbox"],[role="option"],pre,code,kbd,th{background-color:${palette.inset} !important;color:${palette.fg} !important}
-      ::selection{background-color:${palette.link} !important;color:${palette.bg} !important}
-    `;
-  });
-}
-
-// Embedded pages need only the bridge above. Nested frames need nothing.
-// Build the command overlay only once, in an ordinary top-level page.
+// Frames inside ai-max, and nested frames anywhere, need nothing from this
+// file. Build the command overlay only once, in an ordinary top-level page.
 if (topFrame) {
 
 // --- the shadow UI ---------------------------------------------------------

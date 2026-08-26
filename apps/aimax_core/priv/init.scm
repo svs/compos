@@ -74,7 +74,6 @@
 (load-bundled-package "treesit.scm")
 (load-bundled-package "web.scm")
 (load-bundled-package "web-server.scm")
-(load-bundled-package "full-browser.scm")
 (load-bundled-package "worktrees.scm")
 (load-bundled-package "writing.scm")
 

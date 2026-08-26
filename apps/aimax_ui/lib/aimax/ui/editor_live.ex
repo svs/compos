@@ -280,25 +280,6 @@ defmodule Aimax.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
-  # The extension content script can see an embedded page's current URL. It
-  # reports navigation so Scheme can keep the address and related commands
-  # aligned with the page. Browsers without the extension keep the entered URL.
-  def handle_event(
-        "browser_location",
-        %{"win" => win, "url" => url} = params,
-        socket
-      )
-      when is_binary(url) and byte_size(url) <= 4_000 do
-    with id when is_integer(id) <- safe_int(win),
-         true <- String.starts_with?(url, ["https://", "http://"]) do
-      Input.run(socket.assigns.frame, fn ->
-        Aimax.Core.Session.call_named("full-browser-location!", [id, url, params["title"] || ""])
-      end)
-    end
-
-    {:noreply, socket |> drain() |> refresh()}
-  end
-
   # the page named a source line and how far along it the caret sits
   def handle_event("preview_goto_src", %{"win" => win, "p" => at, "off" => off} = p, socket)
       when is_integer(at) and is_integer(off) do
@@ -538,12 +519,6 @@ defmodule Aimax.Ui.EditorLive do
   # window holds only the frame that points at it
   defp decorate(%{type: :leaf, render_mode: "app"} = leaf, cache, _faces) do
     {Map.merge(leaf, %{lines: [], app_url: AppServer.app_url(leaf.buffer, leaf.app_gen)}), cache}
-  end
-
-  # An interactive web page renders itself. Scheme owns its URL and commands;
-  # this clause supplies only the direct browser surface.
-  defp decorate(%{type: :leaf, render_mode: "browser"} = leaf, cache, faces) do
-    {Map.merge(leaf, %{lines: [], browser_palette: preview_palette(faces)}), cache}
   end
 
   # rich agent transcript: blocks (from agent.scm's block model) become
@@ -1233,29 +1208,6 @@ defmodule Aimax.Ui.EditorLive do
           </div>
         </div>
       <% else %>
-      <%= if @node.render_mode == "browser" and is_binary(@node.browser_src_url) do %>
-        <%!-- Keep the real site origin so this frame can use the host browser's
-             cookies and storage. The sandbox prevents frame-busting top-level
-             navigation while it permits normal page interaction. --%>
-        <iframe
-          class="browser-preview"
-          id={"browser-#{@node.id}-#{@node.browser_gen}"}
-          name={"aimax-browser-#{@node.id}"}
-          phx-hook="AppFrame"
-          data-win={@node.id}
-          data-ctop={@node.ctop}
-          data-theme-bg={@node.browser_palette.bg}
-          data-theme-fg={@node.browser_palette.fg}
-          data-theme-link={@node.browser_palette.link}
-          data-theme-border={@node.browser_palette.border}
-          data-theme-inset={@node.browser_palette.inset}
-          data-page-mode={@node.browser_page_mode}
-          sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-downloads allow-presentation allow-pointer-lock"
-          allow="clipboard-read; clipboard-write; fullscreen; geolocation; microphone; camera"
-          src={@node.browser_src_url}
-          title={@node.browser_url}
-        ></iframe>
-      <% else %>
       <%= if @node.render_mode == "app" and Map.has_key?(@node, :app_url) do %>
         <%!-- An app runs its own scripts, so it must not share the editor's
              origin: it is served from 127.0.0.1:4005, and the parent is
@@ -1322,7 +1274,6 @@ defmodule Aimax.Ui.EditorLive do
       <% end %>
       <% end %>
       <% end %>
-      <% end %>
       <div :if={@node.footer_line} class="buffer-footer">{@node.footer_line}</div>
       <div class="modeline">
         <span
@@ -1346,7 +1297,6 @@ defmodule Aimax.Ui.EditorLive do
         </span>
         <span :if={@node.selected} class="ml-mode ml-selected">● selected</span>
         <span :if={@node.render_mode in ["html", "markdown"]} class="ml-mode">preview</span>
-        <span :if={@node.render_mode == "browser"} class="ml-mode">web</span>
         <span
           :if={@node.modeline_info}
           class="ml-mode"

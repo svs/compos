@@ -319,7 +319,7 @@ defmodule Aimax.Ui.Layouts do
           }
           .window.active .html-preview { background: var(--window-bg, #fdfcf8); }
           /* an app paints its own background — the editor supplies none */
-          .app-preview, .browser-preview {
+          .app-preview {
             flex: 1; width: 100%; min-height: 0; border: 0; background: #fff;
           }
           .region { background: var(--region-bg, #e7e9f1); }
@@ -1526,12 +1526,6 @@ defmodule Aimax.Ui.Layouts do
                       this.el.focus({ preventScroll: true });
                       this.el.contentWindow?.postMessage({ aimax: "focus-granted" }, "*");
                     }
-                  } else if (m.aimax === "browser-location") {
-                    this.pushEvent("browser_location", {
-                      win: parseInt(this.el.dataset.win, 10),
-                      url: m.url,
-                      title: m.title || ""
-                    });
                   }
                 };
                 window.addEventListener("message", this.onMsg);
@@ -1549,19 +1543,6 @@ defmodule Aimax.Ui.Layouts do
                 const w = this.el.contentWindow;
                 if (!w) return;
                 w.postMessage({ aimax: "scroll", top: top }, "*");
-                if (this.el.classList.contains("browser-preview")) {
-                  w.postMessage({
-                    aimax: "browser-theme",
-                    mode: this.el.dataset.pageMode || "raw-mode",
-                    palette: {
-                      bg: this.el.dataset.themeBg,
-                      fg: this.el.dataset.themeFg,
-                      link: this.el.dataset.themeLink,
-                      border: this.el.dataset.themeBorder,
-                      inset: this.el.dataset.themeInset
-                    }
-                  }, "*");
-                }
               }
             },
             // transcript follows output unless the reader scrolled up.
@@ -2257,9 +2238,7 @@ defmodule Aimax.Ui.Layouts do
                   // an app window is the one iframe that KEEPS the keyboard:
                   // its text fields and its keys are the point of it. C-g in
                   // the app posts "release" and the sink takes focus back.
-                  if (el && el.classList &&
-                      (el.classList.contains("app-preview") ||
-                       el.classList.contains("browser-preview"))) {
+                  if (el && el.classList && el.classList.contains("app-preview")) {
                     const appWin = el.closest(".window[data-win-id]");
                     if (appWin) {
                       this.pushEvent("mouse", { win: parseInt(appWin.dataset.winId, 10) });

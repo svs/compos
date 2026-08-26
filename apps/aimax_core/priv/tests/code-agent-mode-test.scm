@@ -82,8 +82,8 @@
       (check-false! (buffer-local chat 'agent-connector) "and the connector is untouched")
       (t--cam-reset! chat))))
 
-(deftest 'a-writing-workspace-never-moves-to-the-coding-preset
-  "a chat that accompanies a document is not a coding chat"
+(deftest 'chat-mode-always-enables-code-agent-mode
+  "writing and coding chats use the same agent prompt mechanism"
   (lambda ()
     (let ((chat (t--cam-chat "writing"))
           (doc "cam-doc.md"))
@@ -91,8 +91,10 @@
       (buffer-set-local! doc 'group doc)
       (buffer-set-local! chat 'group doc)
       (enable-minor-mode! doc "writing-mode")
-      (t--cam-edit! chat)
-      (check-false! (t--cam-on? chat) "the writing group held the preset off")
+      (with-current-buffer chat (lambda () (set-mode! "chat-mode")))
+      (check-true! (t--cam-on? chat) "chat-mode enabled its agent mode")
+      (check-true! (assoc "code-agent" (prompt-buffer-parts chat))
+                   "the mode injected its named prompt fragment")
       (disable-minor-mode! doc "writing-mode")
       (buffer-kill! doc)
       (t--cam-reset! chat))))

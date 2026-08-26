@@ -149,10 +149,10 @@
 
 (define (agent-system-prompt-parts conf)
   (let* ((buf (plist-get conf 'buffer))
-         (code-note
-           (if (and buf (boundp (quote code-agent-system-note)))
-               (code-agent-system-note buf)
-               ""))
+         (mode-parts
+           (if (and buf (boundp (quote prompt-buffer-parts)))
+               (prompt-buffer-parts buf)
+               '()))
          (mcp-note
            (if (and (boundp (quote mcp-system-note))
                     (boundp (quote preset-servers)))
@@ -166,9 +166,9 @@
          (primer (if (boundp (quote hello)) (hello) "")))
     (filter
       (lambda (part) (not (equal? (car (cdr part)) "")))
-      (list (list "code-agent" code-note)
-            (list "mcp" mcp-note)
-            (list "aimax-primer" primer)))))
+      (append mode-parts
+              (list (list "mcp" mcp-note)
+                    (list "aimax-primer" primer))))))
 
 (define (agent-config-with-system-parts conf)
   (fold (lambda (out part) (agent-config-append-system out (car (cdr part))))

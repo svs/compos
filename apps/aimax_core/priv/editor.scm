@@ -6453,7 +6453,7 @@
     agent-models agent-mode agent-modes chat-mcp-dirty
     chat-history-pos chat-history-draft
     agent-unstick agent-scroll-top
-    code-agent-switch-pending))
+    code-agent-switch-pending prompt-parts))
 
 (define (chat-clear-locals! buf keys)
   (for-each (lambda (k) (buffer-set-local! buf k #f)) keys))

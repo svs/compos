@@ -1260,6 +1260,8 @@
 ;; on desktop restore, and a re-run must not undo a model the user chose
 ;; while the mode was on.
 (define (code-agent--apply! buf)
+  (when (boundp (quote prompt-part-set!))
+    (prompt-part-set! buf "code-agent" (code-agent-system-note buf)))
   (unless (buffer-local buf 'code-agent-saved)
     (buffer-set-local! buf 'code-agent-saved
       (list (list 'agent-connector (or (buffer-local buf 'agent-connector) #f))
@@ -1305,6 +1307,8 @@
     (and hit (cadr hit))))
 
 (define (code-agent--teardown! buf)
+  (when (boundp (quote prompt-part-remove!))
+    (prompt-part-remove! buf "code-agent"))
   (let ((conn (code-agent--saved buf 'agent-connector))
         (model (code-agent--saved buf 'agent-model))
         (effort (code-agent--saved buf 'agent-effort))
@@ -1321,7 +1325,15 @@
             (buffer-set-local! buf 'agent-model model)
             (buffer-set-local! buf 'agent-effort effort))))))
 
-(register-minor-mode! "code-agent-mode" code-agent--apply! code-agent--teardown!)
+(register-minor-mode!
+  "code-agent-mode"
+  (lambda (buf) (code-agent--apply! buf))
+  (lambda (buf) (code-agent--teardown! buf)))
+
+;; Every chat is an agent surface. Its mode setup installs the matching prompt
+;; fragment and connector policy before the first turn.
+(add-hook! 'chat-mode-hook
+  (lambda () (enable-minor-mode! (current-buffer) "code-agent-mode")))
 
 ;; agent.scm reports every tool call here (boundp-guarded: this package
 ;; loads after it). The first call that edits code turns the mode on.

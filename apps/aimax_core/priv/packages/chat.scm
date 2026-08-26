@@ -537,9 +537,6 @@
 ;; the new user message itself and records it in the same breath, so there
 ;; is no in-flight turn to strip here: `display` is now unused, and the
 ;; dedup hack it used to need is gone with it.
-(define (prompt-parts-text parts)
-  (string-join (map (lambda (part) (car (cdr part))) parts) "\n\n"))
-
 ;; Prompt composition is data before it is text.  A named fragment makes
 ;; ordering, duplication and cache stability inspectable without parsing the
 ;; final prose.  mcp.scm loads after this package and supplies the tool-side
@@ -568,8 +565,6 @@
 (effects! '(read))
 (public! 'chat-system-prompt-parts
   "(chat-system-prompt-parts BUF [TOOLS?]) — named system-prompt fragments in their exact send order")
-(public! 'prompt-parts-text
-  "(prompt-parts-text PARTS) — join named prompt fragments with the canonical separator")
 (effects! '(write))
 
 (llm-session-context-fn! (lambda (slug display) (chat-thread-context slug display)))

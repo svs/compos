@@ -7,10 +7,11 @@ assembled near an HTTP call.
 ## Sources and boot order
 
 `priv/editor.scm` defines `chat-preamble`, the stable conversation and buffer
-role. Bundled packages then load in the order written in `priv/init.scm`:
-`agent.scm`, `chat.scm`, `code.scm`, later `mcp.scm`, and finally `skills.scm`.
-Definitions that cross that order use `boundp`; `init.scm` is the authoritative
-answer to when a prompt source becomes available.
+role. Feature packages own the facts for their named fragments. The
+`priv/packages/prompts.scm` package owns shared prose, the canonical join, and
+prompt inspection. It loads after `skills.scm`, when all bundled providers are
+ready. `init.scm` is the authoritative answer to when a prompt source becomes
+available.
 
 The code-agent fragment itself is `code-agent-system-note` in
 `priv/packages/code.scm`. It is loaded because `priv/init.scm` explicitly loads
@@ -29,7 +30,7 @@ wire. With tools enabled they are:
 1. `aimax-tools` — the intrinsic editor tool primer.
 2. `mcp` — notes for the remote servers this chat actually holds.
 3. `skills` — the currently available skill index.
-4. `code-agent` — code-agent-mode's standing instructions, when enabled.
+4. Buffer-local mode fragments, in their injection order.
 5. `chat-preamble` — the chat or companion role.
 
 Empty fragments are omitted. `prompt-parts-text` performs the sole canonical
@@ -39,8 +40,8 @@ presence and duplication without parsing prose.
 ## ACP sessions
 
 ACP tools are fixed when a session starts. `agent-system-prompt-parts` in
-`priv/packages/agent-connectors.scm` returns the ordered `code-agent`, `mcp`,
-and `aimax-primer` fragments.
+`priv/packages/agent-connectors.scm` returns buffer-local mode fragments,
+followed by the `mcp` and `aimax-primer` fragments.
 `agent-config-with-system-parts` appends them through
 `_meta.systemPrompt.append`. A connector or preset change restarts or
 reattaches the session. A direct API turn can rebuild its context without this.
@@ -49,9 +50,20 @@ The two lanes must express the same capabilities even though their protocols
 have different lifecycles. A prompt change is incomplete until both lanes are
 considered and their focused tests pass.
 
+## Mode fragments
+
+Modes inject named fragments with `prompt-part-set!` and remove them with
+`prompt-part-remove!`. The ordered `prompt-parts` buffer-local holds this
+derived state. Mode setup must rebuild it after restore or reload.
+
+`chat-mode` enables `code-agent-mode` during setup because every chat is an
+agent surface. `code-agent-mode` owns the `code-agent` fragment. A mode change
+can invalidate the direct prompt cache. An ACP chat reconnects before its next
+turn so the session receives the changed fragment set.
+
 ## Quiet editor policy
 
-`*agent-quiet-prompt*` in `priv/packages/tools.scm` owns the default visible-state
+`*agent-quiet-prompt*` in `priv/packages/prompts.scm` owns the default visible-state
 policy. The direct lane receives it through `aimax-tools`. ACP sessions receive
 it through `hello` in the `aimax-primer` fragment.
 
@@ -61,6 +73,17 @@ operations with the `display` effect. The agent-facing `apropos` tool excludes
 that effect by default and accepts `include-display` for presentation work.
 Public Scheme `apropos` remains complete. Tool enforcement can use the same
 checked-in effect later without changing this prompt contract.
+
+## Inspection
+
+`M-x chat-show-prompt` opens a read-only help page for the selected chat. The
+page shows the connector lane, lifecycle, ordered fragment names, byte counts,
+each fragment, and the final canonical join.
+
+For direct API chats, the page shows the value for the next turn. For ACP
+chats, it reconstructs the session append from current buffer state. A live
+ACP session keeps the value from its session start until reconnect. The ACP
+connector can also supply a system prompt that ai-max does not own.
 
 ## Stability and volatile context
 

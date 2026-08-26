@@ -132,17 +132,17 @@
                      (skills-note-without "code-editing")
                      (skills-note))
                  ""))
-         ;; code-agent-mode keeps one on-demand load instruction in the prompt.
-         (code-note
-           (if code-active?
-               (code-agent-system-note buf)
-               "")))
+         (mode-parts
+           (if (boundp (quote prompt-buffer-parts))
+               (prompt-buffer-parts buf)
+               '())))
     (filter
       (lambda (part) (not (equal? (car (cdr part)) "")))
-      (list (list "aimax-tools" (if aimax? *llm-system* ""))
-            (list "mcp" note)
-            (list "skills" sk)
-            (list "code-agent" code-note)))))
+      (append
+        (list (list "aimax-tools" (if aimax? *llm-system* ""))
+              (list "mcp" note)
+              (list "skills" sk))
+        mode-parts))))
 
 (define (chat-tool-system buf)
   (prompt-parts-text (chat-tool-system-parts buf)))

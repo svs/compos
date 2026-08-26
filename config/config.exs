@@ -32,6 +32,14 @@ config :aimax_core, daemon_registry_path: Path.expand("~/.aimax/daemons.json")
 config :phoenix, :json_library, Jason
 
 if config_env() == :dev do
+  # A saved file reaches the running daemon with no restart: Scheme reloads
+  # its changed forms, Elixir recompiles in place. Aimax.Core.Hotload owns
+  # the watcher; the recompiler is named here because aimax_core depends on
+  # neither phoenix nor aimax_ui.
+  config :aimax_core,
+    hotload: true,
+    hotload_recompile: {Phoenix.CodeReloader, :reload, [Aimax.Ui.Endpoint]}
+
   config :aimax_ui, Aimax.Ui.Endpoint,
     code_reloader: true,
     debug_errors: true,

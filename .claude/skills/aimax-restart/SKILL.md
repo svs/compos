@@ -1,60 +1,77 @@
 ---
 name: aimax-restart
-description: Restart the ai-max daemon, or hot-reload Scheme into it without a restart. Use whenever a change must reach the running editor: after editing priv/*.scm or any Elixir source, when the daemon is wedged or not answering, or before verifying behaviour in the real editor.
+description: Get a change into the running ai-max daemon. Use whenever a change must reach the running editor: after editing priv/*.scm or any Elixir source, when the daemon is wedged or not answering, or before verifying behaviour in the real editor.
 ---
 
 # Getting a change into the running daemon
 
-Pick the cheapest path that reaches the change. A restart is the last resort,
-not the default.
+**Do nothing.** In development the daemon reloads itself, and a restart is
+almost never the answer.
 
-| You changed | Do this | Cost |
+`Aimax.Core.Hotload` (apps/aimax_core/lib/aimax/core/hotload.ex) watches
+`apps/*/lib`, `apps/aimax_core/priv`, and the config home. A save arms a 200 ms
+debounce, and the burst then goes to the reloader that fits the file.
+
+| You changed | What happens on save | Cost |
 |---|---|---|
-| One `priv/packages/*.scm` file | `mix aimax.reload apps/aimax_core/priv/packages/foo.scm` | under 1s |
-| Several Scheme files | `mix aimax.reload --all` | ~2s |
-| `priv/editor.scm` | `mix aimax.restart` | ~4s |
-| Any Elixir source | `mix aimax.restart` | ~4s |
+| Any `priv/**/*.scm`, including `editor.scm` | the changed top-level forms evaluate; modes refresh | under 1s |
+| `~/.aimax/init.scm`, `ai-config.scm`, `~/.aimax/packages/*.scm` | the same | under 1s |
+| Any `.ex` or `.heex` under `apps/*/lib` | the Phoenix code reloader recompiles and reloads the modules | 1-3s |
 
-`editor.scm` is core bootstrap policy, so `mix aimax.reload` refuses it by name
-(apps/aimax_core/lib/mix/tasks/aimax.daemon.ex:91). Restart instead.
+The echo area states the result: `3 files, 12 forms reloaded`, `1 module
+recompiled`, or the first line of a compile error. The same line lands in
+`*messages*`, so `curl -s http://localhost:4004/raw/*messages*` reads it.
 
-## Restart
+## What a Scheme reload actually does
 
-```sh
-mix aimax.restart                 # the user's daemon on ~/.aimax
-mix aimax.restart --home ~/.aimax-web
-```
+It is not `(load PATH)`. The daemon reads the file, compares each top-level
+form against what that file last held, and evaluates only the forms whose text
+changed. A file with one changed line costs one form, so `editor.scm` costs
+what its diff costs.
 
-The task saves and stops the daemon over RPC, waits for it to go, starts a new
-one detached, and waits for `ping` to answer. It prints `ai-max restarted` only
-when the new daemon serves. Read that line as the success condition.
+It then re-runs mode setup on the buffers already open in a mode the reload
+redefined, and on no others. `reload-begin!` and `reload-finish!` in
+`editor.scm` own that policy; `define-mode` and `register-minor-mode!` name the
+modes they touch. This is the work desktop restore does, so the same rule
+holds: a setup fn rebuilds presentation from the buffer's locals, and stacks
+nothing twice. A setup fn that breaks that rule breaks hot reload.
 
-Never `pkill -f "mix run"`. The user runs concurrent sessions and worktree
-daemons out of this tree; a broad kill takes theirs down too. `mix aimax.restart`
-addresses one daemon by its home.
+The refresh reads the `define-mode` form, not the file. If you change a helper
+the setup fn calls and leave the `define-mode` form alone, the new helper is
+live but the open buffers keep what the old setup installed. Re-enter the mode
+there (`M-x <mode-name>` twice, or `M-x normal-mode`) to see it.
 
-Do not hand-roll a kill plus a fixed `sleep`. The sleep is a guess, and a
-backgrounded `mix run` gives no failure signal.
-
-## Reload
+## Asking for a reload by name
 
 ```sh
 mix aimax.reload apps/aimax_core/priv/packages/notmuch.scm
 mix aimax.reload --all
 ```
 
-Registrations replace by name, so a reload does not stack duplicates. It
-re-evaluates the file's top-level forms: new commands, keymaps, faces, and mode
-definitions land at once.
+`M-x reload-file` is the same reload from inside the editor, with completion
+over the stdlib, the bundled packages, and the user packages. Reach for either
+only for a file outside the watched roots, or when you want to name the file
+yourself.
 
-A reload does NOT re-run mode setup on buffers that are already open. A buffer
-keeps the keys and overlays its setup fn installed earlier. To see a mode change
-in an open buffer, re-set the mode there, or restart.
+## When a restart IS required
+
+Three changes, and nothing else. Nothing reloads them in place:
+
+- a new dependency in a `mix.exs`,
+- a change to a supervision tree or to application start,
+- a NIF rebuild (`apps/aimax_core/native/aimax_ts`).
+
+Then use `M-x restart-daemon`, or evaluate `(daemon-restart!)` over the socket.
+It compiles first, refuses the restart if the tree does not compile, saves the
+desktop, respawns, and stops this VM. Buffers, windows and theme come back
+from `~/.aimax/desktop.etf`.
+
+Never `pkill -f "mix run"`. The user runs concurrent sessions and worktree
+daemons out of this tree, and a broad kill takes theirs down too. Never
+hand-roll a kill plus a fixed `sleep`: the sleep is a guess, and a
+backgrounded `mix run` gives no failure signal.
 
 ## When the daemon does not come back
-
-The task waits 60s and then raises `daemon did not come back`. That message means
-the wait expired, not that the daemon failed. Check before you act:
 
 ```sh
 bin/aimax state                                  # answers = it is up
@@ -67,13 +84,26 @@ socket opens last, after `Aimax.Core.Session` loads the whole Scheme corpus, so
 `pgrep` proves nothing about readiness. Only `ping` does.
 
 Compile errors surface in `daemon.log`, not on your terminal, because the new
-daemon starts detached. Run `mix compile` first when you suspect one; it fails in
-1s and leaves the old daemon serving.
+daemon starts detached. Run `mix compile` first when you suspect one: it fails
+in 1s and leaves the old daemon serving.
+
+## Verifying from a worktree
+
+A second daemon on `~/.aimax` writes `desktop.etf` and clobbers the user's
+session. Use the isolated one instead — its own port, home, and socket:
+
+```sh
+AIMAX_VERIFY=1 mix run --no-halt >> /tmp/aimax-verify.log 2>&1 &
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"ping","params":{}}' | nc -U /tmp/aimax-verify.sock
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"shutdown","params":{}}' | nc -U /tmp/aimax-verify.sock
+```
+
+Hot reload runs there too, so a save reaches the verify daemon the same way.
 
 ## What boot costs, and what makes it slow
 
-A healthy boot is about 3s: roughly 1.5s of mix overhead and compile check, 1.5s
-of application start, and whatever the user's config spends on top.
+A healthy boot is about 3s: roughly 1.5s of mix overhead and compile check,
+1.5s of application start, and whatever the user's config spends on top.
 Measure before you accept a slow one:
 
 ```sh
@@ -81,43 +111,29 @@ time mix compile                    # ~0.8s when up to date
 time mix run --no-start -e ':ok'    # ~0.5s: mix overhead alone
 ```
 
-If those are fast and boot is not, the cost is inside application start. Time the
-supervision children directly rather than guessing. Start `:aimax_scheme`, then
-add `Aimax.Core.Application`'s children one at a time under your own supervisor
-with `:timer.tc`, pointing `AIMAX_HOME` at a scratch copy of the real home:
-
-```sh
-cp -R ~/.aimax/buffers ~/.aimax/desktop.etf /tmp/probe-home/
-AIMAX_HOME=/tmp/probe-home AIMAX_PORT=4104 AIMAX_APP_PORT=4105 \
-  mix run --no-start probe.exs
-```
-
-Always probe a copy. A second daemon on `~/.aimax` writes `desktop.etf` and
-clobbers the user's session.
+If those are fast and boot is not, the cost is inside application start. Time
+the supervision children directly rather than guessing. Start `:aimax_scheme`,
+then add `Aimax.Core.Application`'s children one at a time under your own
+supervisor with `:timer.tc`, pointing `AIMAX_HOME` at a scratch copy of the
+real home. Always probe a copy.
 
 Two known costs live on the boot path:
 
 - **The Scheme corpus.** `Session.init/1` evaluates about 32k lines of Scheme
-  synchronously (apps/aimax_core/lib/aimax/core/session.ex:457-548). There is no
-  cache and no mtime check. It costs ~1.5s and every boot pays it. This is the
-  largest remaining item.
-- **User config shell-outs.** `load_init/1` (session.ex:575) evaluates
-  `ai-config.scm` and `init.scm` from the config home. Top-level forms there can
-  spawn processes, and each `shell-command->string` blocks for up to 15s. A
-  config that resolves ten secrets one at a time pays ten process spawns.
-  `doppler.scm` answers this by fetching a whole config in one call and caching
-  every name, so ten lookups cost one process. Any new package that shells out
-  at load time must do the same.
-
-The boot path has no timing of its own. If you suspect a new cost there, wrap
-`:timer.tc` around the `Enum.reduce` bodies in `load_stdlib!` (session.ex:462)
-and `load_packages` (session.ex:529) to get a per-file breakdown.
+  synchronously. There is no cache and no mtime check. It costs ~1.5s and every
+  boot pays it. This is the largest remaining item.
+- **User config shell-outs.** `load_init/1` evaluates `ai-config.scm` and
+  `init.scm` from the config home. Top-level forms there can spawn processes,
+  and each `shell-command->string` blocks for up to 15s. `doppler.scm` answers
+  this by fetching a whole config in one call and caching every name, so ten
+  lookups cost one process. Any new package that shells out at load time must
+  do the same.
 
 Nothing else on the boot path does network I/O. MCP and LSP only register at
 load; `llm_db` refreshes under a Task; the desktop restore is async and runs
 after the socket opens.
 
-Slow lane jobs do report themselves. `Aimax.Core.Lane` logs any job over 250ms
-with its lane and label (apps/aimax_core/lib/aimax/core/lane.ex:166), so
-`grep "slow job" ~/.aimax/daemon.log` names a stall that happens after boot.
-`Session.init` runs no lane jobs of its own, so nothing inside it is timed.
+Slow lane jobs report themselves. `Aimax.Core.Lane` logs any job over 250ms
+with its lane and label, so `grep "slow job" ~/.aimax/daemon.log` names a stall
+that happens after boot. `Session.init` runs no lane jobs of its own, so
+nothing inside it is timed.

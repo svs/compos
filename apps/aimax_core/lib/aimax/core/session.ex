@@ -21,6 +21,7 @@ defmodule Aimax.Core.Session do
 
   alias Aimax.Core.{Buffer, Editor, Frame, Lane, SchemeActor, SchemeTask}
   alias Aimax.Scheme
+  alias Aimax.Scheme.Reader
 
   @messages "*messages*"
 
@@ -39,6 +40,14 @@ defmodule Aimax.Core.Session do
   # this process
   @pt {__MODULE__, :interp}
 
+  # Every module that supplies a primitive fun. A primitive is an anonymous
+  # fun captured from one of these when the session booted; recompiling one
+  # purges the version the fun came from, and calling it then raises
+  # "function #Function<...> is invalid". The stamp is how a caller asks
+  # whether that has happened.
+  @primitive_modules [Aimax.Core.SchemeAPI, Aimax.Scheme.Builtins, __MODULE__]
+  @pt_stamp {__MODULE__, :primitive_stamp}
+
   # how long a waiting mcp-call! waits. The RPC layer gives an eval 30s, so
   # the call must give up first and say so.
   @mcp_wait 25_000
@@ -46,6 +55,9 @@ defmodule Aimax.Core.Session do
   # the longest a (wait-until) may hold its lane. Lane.run gives an eval
   # 30s, so a runaway predicate must give up first and answer #f.
   @wait_cap 10_000
+
+  @bootstrap_files ~w(editor.scm transient.scm dired.scm themes.scm chrome.scm init.scm)
+  @reload_context ~w(origin! package! namespace! category! domain! effects!)
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
@@ -87,9 +99,45 @@ defmodule Aimax.Core.Session do
     ArgumentError -> false
   end
 
-  @doc "Reload Scheme files atomically into the live interpreter."
+  @doc "Reload changed top-level forms from Scheme files into the live interpreter."
   def reload_files(paths) when is_list(paths),
     do: GenServer.call(__MODULE__, {:reload_files, paths}, 30_000)
+
+  @doc """
+  Re-bind every Elixir primitive after a code reload. Returns :ok.
+
+  A primitive is an anonymous fun captured from `Aimax.Core.SchemeAPI` and
+  `Aimax.Scheme.Builtins` when this session booted. Recompiling either module
+  purges the version those funs came from, and the next Scheme call raises
+  "function #Function<...> is invalid, likely because it points to an old
+  version of the code" — the whole editor dead, from one dev recompile.
+  Every hot recompile must call this.
+  """
+  def refresh_primitives, do: GenServer.call(__MODULE__, :refresh_primitives, 30_000)
+
+  @doc """
+  Rebind the primitives, but only if a module that supplies one has been
+  recompiled since the last binding. Returns :ok.
+
+  The check is three `module_info(:md5)` calls and one persistent_term read,
+  so a caller on a request path can ask every time.
+  """
+  def refresh_primitives_if_stale do
+    if primitives_stale?(), do: refresh_primitives(), else: :ok
+  end
+
+  @doc "Has a module that supplies a primitive been recompiled since binding?"
+  def primitives_stale?, do: :persistent_term.get(@pt_stamp, nil) != primitive_stamp()
+
+  defp primitive_stamp do
+    Enum.map(@primitive_modules, fn module ->
+      try do
+        module.module_info(:md5)
+      rescue
+        _ -> nil
+      end
+    end)
+  end
 
   @doc "Run a named command (Scheme closure from the commands table)."
   def run_command(name, fid \\ nil, lane \\ nil) do
@@ -231,9 +279,14 @@ defmodule Aimax.Core.Session do
     interp = Scheme.flush(interp)
 
     :persistent_term.put(@pt, interp)
+    :persistent_term.put(@pt_stamp, primitive_stamp())
     Process.send_after(self(), :gc_tick, @gc_interval)
 
-    {:ok, %{last_live: Scheme.frame_count(interp)}}
+    {:ok,
+     %{
+       last_live: Scheme.frame_count(interp),
+       reload_manifest: reload_manifest()
+     }}
   end
 
   # a primitive calling a dead GenServer (buffer killed while a callback was
@@ -418,23 +471,32 @@ defmodule Aimax.Core.Session do
     {:reply, :persistent_term.get(@pt), state}
   end
 
+  def handle_call(:refresh_primitives, _from, state) do
+    interp = interp()
+    interp = Scheme.rebind_primitives(interp, Aimax.Core.SchemeAPI.primitives())
+    interp = Scheme.register(interp, session_primitives(interp.global))
+    :persistent_term.put(@pt, interp)
+    :persistent_term.put(@pt_stamp, primitive_stamp())
+    {:reply, :ok, state}
+  end
+
   def handle_call({:reload_files, paths}, _from, state) do
-    result =
-      Scheme.exec(interp(), fn interp ->
-        Enum.reduce_while(paths, {:ok, nil, interp}, fn path, {:ok, _, interp} ->
-          expanded = Path.expand(path)
+    # A dev code reload keeps the existing GenServer state. Seed the new
+    # manifest lazily so adding this mechanism does not require a restart.
+    manifest = Map.get(state, :reload_manifest) || reload_manifest()
 
-          with {:ok, src} <- File.read(expanded),
-               {:ok, _value, next} <- Scheme.eval_string(interp, src) do
-            {:cont, {:ok, nil, next}}
-          else
-            {:error, reason} -> {:halt, {:error, "#{expanded}: #{inspect(reason)}"}}
-          end
+    with {:ok, files} <- reload_changes(paths, manifest),
+         {:ok, _, _interp} <- eval_reload_forms(files) do
+      next_manifest =
+        Enum.reduce(files, manifest, fn {path, fingerprints, _forms}, acc ->
+          Map.put(acc, path, fingerprints)
         end)
-      end)
 
-    case result do
-      {:ok, _, _interp} -> {:reply, {:ok, length(paths)}, state}
+      changed = Enum.reduce(files, 0, fn {_, _, forms}, n -> n + length(forms) end)
+
+      {:reply, {:ok, %{files: length(files), forms: changed}},
+       Map.put(state, :reload_manifest, next_manifest)}
+    else
       {:error, message} -> {:reply, {:error, message}, state}
     end
   end
@@ -497,7 +559,7 @@ defmodule Aimax.Core.Session do
   defp load_stdlib!(interp) do
     interp =
       Enum.reduce(
-        ["editor.scm", "transient.scm", "dired.scm", "themes.scm", "chrome.scm"],
+        @bootstrap_files,
         interp,
         fn file, interp ->
           path = Application.app_dir(:aimax_core, "priv/#{file}")
@@ -519,71 +581,10 @@ defmodule Aimax.Core.Session do
     # Everything defined after boot — the REPL, a chat's eval-scheme, a
     # runtime define — is the user's, not ours, and the origin says which
     # is which.
-    interp |> load_packages() |> load_init() |> stamp_origin_user()
-  end
-
-  # bundled packages: priv/packages/**/*.scm, loaded after the stdlib. Unlike
-  # the stdlib these are severable — org-mode lives here so it can be
-  # extracted into a real package later, and a broken package logs loudly
-  # instead of bricking boot.
-  defp load_packages(interp) do
-    package_dir = Application.app_dir(:aimax_core, "priv/packages")
-
-    top_level =
-      package_dir
-      |> Path.join("*.scm")
-      |> Path.wildcard()
-      # load order: custom.scm (defcustom), then tools.scm (define-tool!),
-      # then recipes.scm (defrecipe!), components.scm (defcomponent) and
-      # preview.scm (on-preview-link!) — packages call these forms at load
-      # time, so the form must exist first; the rest load alphabetically
-      |> Enum.sort_by(
-        &{Enum.find_index(
-           ["custom.scm", "tools.scm", "recipes.scm", "components.scm", "preview.scm"],
-           fn n -> n == Path.basename(&1) end
-         ) || 99, &1}
-      )
-
-    # A package can keep extensions in its own directory. Load these after
-    # every top-level package, so an extension can use its package's base API.
-    nested =
-      package_dir
-      |> Path.join("**/*.scm")
-      |> Path.wildcard()
-      |> Enum.reject(&(&1 in top_level))
-      |> Enum.sort()
-
-    bundled = top_level ++ nested
-
-    # user packages (~/.aimax/packages/*.scm, e.g. installed from github via
-    # package-install) load after the bundled set so they can build on it
-    user =
-      Aimax.Core.home()
-      |> Path.join("packages")
-      |> Path.join("*.scm")
-      |> Path.wildcard()
-      |> Enum.sort()
-
-    stamped = Enum.map(bundled, &{&1, :bundled}) ++ Enum.map(user, &{&1, :user})
-
-    Enum.reduce(stamped, interp, fn {path, origin}, interp ->
-      # The catalog stamp comes from the loader: one file is one package,
-      # named by its basename, and its metadata starts unknown. Without the
-      # stamp a file inherited the package of whichever file loaded before
-      # it, so the qualified name was wrong. A file whose public vocabulary
-      # differs still calls package! or namespace! itself, and wins — it
-      # runs after this.
-      interp = stamp_load_unit(interp, path, origin)
-
-      case Scheme.eval_string(interp, File.read!(path)) do
-        {:ok, _, interp2} ->
-          interp2
-
-        {:error, msg} ->
-          Logger.error("package #{Path.basename(path)} failed to load: #{msg}")
-          interp
-      end
-    end)
+    # init.scm above owns the complete bundled package order. User config runs
+    # only after that boot manifest has finished and explicitly loads any user
+    # packages it wants from ~/.aimax/packages.
+    interp |> load_user_init() |> stamp_origin_user()
   end
 
   # The stamp is its own eval, so a package's own line numbers stay its own.
@@ -593,6 +594,150 @@ defmodule Aimax.Core.Session do
     case Scheme.eval_string(interp, code) do
       {:ok, _, interp2} -> interp2
       {:error, _} -> interp
+    end
+  end
+
+  defp reload_changes(paths, manifest) do
+    Enum.reduce_while(paths, {:ok, []}, fn path, {:ok, acc} ->
+      expanded = canonical(path)
+
+      try do
+        with {:ok, src} <- File.read(expanded) do
+          forms = Reader.read_all(src)
+          fingerprints = form_fingerprints(forms)
+
+          changed =
+            case Map.fetch(manifest, expanded) do
+              {:ok, previous} ->
+                Enum.filter(forms, fn form ->
+                  reload_context?(form) or not MapSet.member?(previous, form_fingerprint(form))
+                end)
+
+              :error ->
+                forms
+            end
+
+          {:cont, {:ok, [{expanded, fingerprints, changed} | acc]}}
+        else
+          {:error, reason} -> {:halt, {:error, "#{expanded}: #{inspect(reason)}"}}
+        end
+      rescue
+        error -> {:halt, {:error, "#{expanded}: #{Exception.message(error)}"}}
+      end
+    end)
+    |> case do
+      {:ok, files} -> {:ok, Enum.reverse(files)}
+      error -> error
+    end
+  end
+
+  # A reload is bracketed by two Scheme hooks. `reload-begin!` opens the
+  # record; every `define-mode` and `register-minor-mode!` the reload
+  # evaluates names itself in it. `reload-finish!` re-runs mode setup on
+  # the buffers that wear one of those modes, so a mode change reaches the
+  # buffers already open in it. Without that, a reloaded mode holds the old
+  # keys and overlays until a restart, which is the reason a restart was
+  # ever needed for a mode change.
+  #
+  # The hooks run inside the same `Scheme.exec` as the forms, so they see
+  # exactly the definitions this reload made. Both are guarded by `boundp`:
+  # a reload of `editor.scm` itself starts before either name exists.
+  @reload_begin "(if (boundp (quote reload-begin!)) (reload-begin!))"
+  @reload_finish "(if (boundp (quote reload-finish!)) (reload-finish!))"
+
+  defp eval_reload_forms(files) do
+    Scheme.exec(interp(), fn interp ->
+      interp = eval_hook(interp, @reload_begin)
+
+      case reduce_reload_files(files, interp) do
+        {:ok, value, interp} ->
+          {:ok, value, eval_hook(interp, @reload_finish)}
+
+        # The finish hook runs after a failed reload too: the forms that did
+        # evaluate can already have redefined a mode, and the record must
+        # not carry those names into the next reload.
+        {:error, message, interp} ->
+          eval_hook(interp, @reload_finish)
+          {:error, message}
+      end
+    end)
+  end
+
+  defp reduce_reload_files(files, interp) do
+    Enum.reduce_while(files, {:ok, nil, interp}, fn {path, _fingerprints, forms},
+                                                    {:ok, _, current} ->
+      current = stamp_load_unit(current, path, reload_origin(path))
+
+      case Scheme.eval_forms(current, forms) do
+        {:ok, value, next} -> {:cont, {:ok, value, next}}
+        {:error, message} -> {:halt, {:error, message, current}}
+      end
+    end)
+  end
+
+  defp eval_hook(interp, src) do
+    case Scheme.eval_string(interp, src) do
+      {:ok, _, interp2} -> interp2
+      {:error, message} ->
+        Logger.error("reload hook failed: #{message}")
+        interp
+    end
+  end
+
+  defp reload_context?([{:sym, name} | _]), do: name in @reload_context
+  defp reload_context?(_), do: false
+
+  defp form_fingerprints(forms), do: MapSet.new(forms, &form_fingerprint/1)
+  defp form_fingerprint(form), do: :crypto.hash(:sha256, :erlang.term_to_binary(form))
+
+  defp reload_origin(path) do
+    user_packages = Path.join(Aimax.Core.config_dir(), "packages") |> canonical()
+    if String.starts_with?(canonical(path), user_packages <> "/"), do: :user, else: :bundled
+  end
+
+  defp reload_manifest do
+    reload_source_paths()
+    |> Enum.reduce(%{}, fn path, acc ->
+      case File.read(path) do
+        {:ok, src} ->
+          try do
+            Map.put(acc, Path.expand(path), form_fingerprints(Reader.read_all(src)))
+          rescue
+            _ -> acc
+          end
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  defp reload_source_paths do
+    priv = canonical(Application.app_dir(:aimax_core, "priv"))
+    packages = Path.wildcard(Path.join([priv, "packages", "**/*.scm"]))
+    Enum.map(@bootstrap_files, &Path.join(priv, &1)) ++ packages
+  end
+
+  @doc """
+  A path with every symlinked ancestor resolved.
+
+  Mix puts a symlink at `_build/dev/lib/aimax_core/priv`, so
+  `Application.app_dir/2` and a reload request name the same file with two
+  different strings. The manifest is keyed by one and looked up by the
+  other, and `Path.expand/1` does not resolve links. Every reload of a file
+  therefore looked new, and re-evaluated all of it. Both sides go through
+  this function now.
+  """
+  def canonical(path) do
+    path = Path.expand(path)
+
+    case :file.read_link(path) do
+      {:ok, target} ->
+        canonical(Path.expand(target, Path.dirname(path)))
+
+      _ ->
+        parent = Path.dirname(path)
+        if parent == path, do: path, else: Path.join(canonical(parent), Path.basename(path))
     end
   end
 
@@ -607,11 +752,12 @@ defmodule Aimax.Core.Session do
     end
   end
 
-  # user config: <home>/ai-config.scm, init.scm, then custom.scm (saved
+  # After the explicit bundled priv/init.scm boot manifest: user config is
+  # <home>/ai-config.scm, init.scm, then custom.scm (saved
   # customizations load last so they win over init) — errors log loudly
   # but never brick boot. (load "...") works from inside either. Tests set
   # :home to a tmp dir so the user's real init.scm stays out of them.
-  defp load_init(interp) do
+  defp load_user_init(interp) do
     Enum.reduce(["ai-config.scm", "init.scm", "custom.scm"], interp, fn file, interp ->
       path = Path.join(Aimax.Core.config_dir(), file)
 

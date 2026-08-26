@@ -8,6 +8,25 @@ defmodule Aimax.LoadTest do
 
   alias Aimax.Core.Session
 
+  test "stock init explicitly loads every bundled package" do
+    priv = Application.app_dir(:aimax_core, "priv")
+    init = File.read!(Path.join(priv, "init.scm"))
+
+    listed =
+      ~r/\(load-bundled-package\s+"([^"]+)"\)/
+      |> Regex.scan(init, capture: :all_but_first)
+      |> Enum.map(&hd/1)
+
+    packages =
+      priv
+      |> Path.join("packages/**/*.scm")
+      |> Path.wildcard()
+      |> Enum.map(&Path.relative_to(&1, Path.join(priv, "packages")))
+
+    assert Enum.sort(listed) == Enum.sort(packages)
+    assert length(listed) == length(Enum.uniq(listed))
+  end
+
   test "(load ...) resolves a relative path against the config home" do
     home = Aimax.Core.home()
     File.write!(Path.join(home, "load-relative-test.scm"), "(define load-relative-mark 42)\n")
@@ -40,6 +59,47 @@ defmodule Aimax.LoadTest do
     # the catalog stamps the file's own package name
     assert {:ok, printed} = Session.eval(~s{(catalog-entry 'command "zz-reloaded")})
     assert printed =~ "zz-reload-test"
+  end
+
+  test "the core Scheme reload evaluates changed forms instead of the whole bootstrap" do
+    editor = Application.app_dir(:aimax_core, "priv/editor.scm")
+
+    {elapsed, result} = :timer.tc(fn -> Session.reload_files([editor]) end)
+
+    assert {:ok, %{files: 1, forms: forms}} = result
+    assert forms > 0
+    assert elapsed < 5_000_000
+  end
+
+  # Mix symlinks priv into _build, so Application.app_dir/2 and a reload
+  # request name the same file with two different strings. The boot manifest
+  # is keyed by one and looked up by the other. Before Session.canonical/1 the
+  # two never matched, and the first reload of any file from the checkout
+  # re-evaluated all of it — every `mix aimax.reload` paid the whole file.
+  test "the boot manifest matches a path from the source tree, not only the build symlink" do
+    build = Application.app_dir(:aimax_core, "priv/themes.scm")
+    source = Session.canonical(build)
+
+    refute source == build, "priv is not a symlink in this build; the test proves nothing"
+
+    all = source |> File.read!() |> Aimax.Scheme.Reader.read_all() |> length()
+    assert {:ok, %{forms: forms}} = Session.reload_files([source])
+
+    assert forms < div(all, 2),
+           "an unchanged file re-evaluated #{forms} of its #{all} forms"
+  end
+
+  test "incremental reload skips unchanged package forms" do
+    path = Path.join(System.tmp_dir!(), "zz-incremental-reload.scm")
+
+    File.write!(path, "(define zz-reload-count 1)\n(define zz-reload-value 1)\n")
+    on_exit(fn -> File.rm(path) end)
+
+    assert {:ok, %{forms: 2}} = Session.reload_files([path])
+
+    File.write!(path, "(define zz-reload-count 1)\n(define zz-reload-value 2)\n")
+    assert {:ok, %{forms: 1}} = Session.reload_files([path])
+    assert {:ok, "2"} = Session.eval("zz-reload-value")
   end
 
   test "the reload prompt completes over stdlib, bundled, and user packages" do

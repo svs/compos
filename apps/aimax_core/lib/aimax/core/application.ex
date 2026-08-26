@@ -42,6 +42,8 @@ defmodule Aimax.Core.Application do
       Aimax.Core.Browser,
       Aimax.Core.Session,
       Aimax.Core.Desktop,
+      # dev: a saved source file reaches this daemon without a restart
+      Aimax.Core.Hotload,
       %{
         id: Aimax.Core.SchemeWarmup,
         start: {Aimax.Core.SchemeWarmup, :start_link, [[]]},

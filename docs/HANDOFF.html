@@ -63,13 +63,19 @@ beyond one line. The user is recreating Emacs — don't hedge or over-flag.</li>
 </ul>
 
 <h3>The dev loop</h3>
-<pre><code>mix test                                   # all 4 apps
-pkill -f "mix run"; sleep 1
-(mix run --no-halt &gt;&gt; ~/.aimax/daemon.log 2&gt;&amp;1 &amp;); sleep 6
+<pre><code>bin/test-fast                              # all 4 apps
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4004/
 git add -A &amp;&amp; git commit -m "..."</code></pre>
-<p>A restart is required to reload <code>priv/*.scm</code>. The browser auto-reloads itself
+<p><strong>Do not restart to see a change.</strong> <code>Aimax.Core.Hotload</code> watches
+<code>apps/*/lib</code>, <code>apps/aimax_core/priv</code> and the config home. Saving a
+<code>.scm</code> reloads its changed top-level forms and re-runs mode setup on the
+buffers wearing a mode the reload redefined. Saving an <code>.ex</code> recompiles the
+module in place. The echo area states the result. The browser auto-reloads itself
 (boot-id mechanism) — no manual refresh needed.</p>
+<p>A restart is still needed for three things, and nothing else: a new dependency,
+a change to a supervision tree, and a NIF rebuild. Then use
+<code>M-x restart-daemon</code>, which saves the desktop first. Never
+<code>pkill -f "mix run"</code>: the tree holds other sessions and worktree daemons.</p>
 
 <h3>Driving the editor from the outside</h3>
 <pre><code>printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(buffer-list)"}}' \

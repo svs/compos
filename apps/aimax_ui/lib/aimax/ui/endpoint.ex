@@ -50,11 +50,28 @@ defmodule Aimax.Ui.Endpoint do
   if code_reloading? do
     plug(Phoenix.LiveReloader)
     plug(Phoenix.CodeReloader)
+    # Phoenix.CodeReloader can have just purged the module the Scheme
+    # primitives were captured from. A primitive is an anonymous fun, and a
+    # purged fun raises "function #Function<...> is invalid" on the next
+    # keystroke — the editor dead from one page load. Rebind before the
+    # request reaches a LiveView. Aimax.Core.Hotload usually gets there
+    # first; this closes the window when a page load recompiles instead.
+    plug(:rebind_scheme_primitives)
   end
 
   plug(Plug.Session, @session_options)
 
   plug(Aimax.Ui.Router)
+
+  @doc false
+  def rebind_scheme_primitives(conn, _opts) do
+    Aimax.Core.Session.refresh_primitives_if_stale()
+    conn
+  rescue
+    _ -> conn
+  catch
+    :exit, _ -> conn
+  end
 
   @doc """
   Accept the browser bridge only from a Chrome extension origin.

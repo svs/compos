@@ -201,6 +201,8 @@ defmodule Aimax.Core.SchemeAPI do
         "(listener-restart! NAME) — stop and start the named listen socket; return #t.",
       "daemon-restart!" =>
         "(daemon-restart!) — save the desktop, restart the daemon, and reload Scheme; return #t.",
+      "reload-files!" =>
+        "(reload-files! PATHS) — evaluate the changed top-level forms of each .scm and refresh the modes they redefine; return (FILES FORMS).",
       "daemon-provision-workspace!" =>
         "(daemon-provision-workspace! PATH NAME) — start or reuse a daemon from PATH; return (URL HOME PORT).",
       "goto-char!" => "(goto-char! POS) — move point to byte POS; return POS.",
@@ -928,6 +930,18 @@ defmodule Aimax.Core.SchemeAPI do
           {:error, {:compile_failed, out}} ->
             raise Aimax.Scheme.Eval.Error,
               message: "the tree does not compile; staying up: #{out}"
+        end
+      end,
+      # The incremental form reloader, which lives in the Session. Scheme
+      # cannot reach it otherwise: the diff is over read forms, and the
+      # manifest of what each file last held is the Session's state.
+      "reload-files!" => fn [paths] ->
+        case Aimax.Core.Session.reload_files(List.wrap(paths)) do
+          {:ok, %{files: files, forms: forms}} ->
+            [files, forms]
+
+          {:error, reason} ->
+            raise Aimax.Scheme.Eval.Error, message: "reload failed: #{inspect(reason)}"
         end
       end,
       "daemon-provision-workspace!" => fn [workspace, name] ->

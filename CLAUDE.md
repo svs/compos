@@ -24,17 +24,23 @@ Before an acceptance run or suite change, load
 ```sh
 bin/test-fast                               # the suite in 4 partitions; all four apps must stay green
 mix test                                    # one lane — use it when one readable log matters
-mix aimax.restart                           # stop, start, and wait for the daemon
-mix aimax.reload apps/aimax_core/priv/packages/foo.scm   # one package, no restart
-mix aimax.reload --all                      # every package plus ~/.aimax/init.scm
+mix aimax.reload apps/aimax_core/priv/packages/foo.scm   # a file outside the watched roots
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4004/
 ```
 
-Never `pkill` a daemon: the tree can hold other sessions and other
-worktrees, and `mix aimax.restart` stops this one through its own socket.
-A restart is required for Elixir code and for `priv/editor.scm`. A package
-in `priv/packages/` reloads without one. Browser clients reload
-themselves (boot-id). Editor state (buffers, windows, theme) is restored from
+**Do not restart to see a change.** `Aimax.Core.Hotload` watches `apps/*/lib`,
+`apps/aimax_core/priv`, and the config home. Saving a `.scm` reloads only the
+top-level forms whose text changed, then re-runs mode setup on the buffers
+wearing a mode the reload redefined. Saving an `.ex` recompiles the module in
+place through the Phoenix code reloader. The echo area states the result.
+`M-x reload-file` is the same reload, asked for by name.
+
+A restart is still required for exactly three changes: a new dependency, a
+change to a supervision tree, and a NIF rebuild. Use `M-x restart-daemon`,
+which saves the desktop first. Never `pkill` a daemon: the tree can hold other
+sessions and other worktrees.
+
+Browser clients reload themselves (boot-id). Editor state (buffers, windows, theme) is restored from
 `~/.aimax/desktop.etf`. **Rule: everything survives a reload** — file buffers
 reopen via `(visit)`; non-file buffers (chat, agent threads, scratch) persist
 content+point+locals, and the mode setup fn rebuilds keys/overlays/folds from
@@ -148,4 +154,8 @@ apps/aimax_ui       LiveView frontend (a client — no editor logic)
 apps/aimax_rpc      JSON-RPC over ~/.aimax/sock ("eval is the API")
 ```
 
-User config: `~/.aimax/ai-config.scm` then `~/.aimax/init.scm`, both optional.
+Boot order is explicit: `editor.scm`, the small stdlib files, then stock
+`priv/init.scm`, which lists every bundled package in dependency order. After
+stock boot, user config runs as `~/.aimax/ai-config.scm`, `~/.aimax/init.scm`,
+then saved `~/.aimax/custom.scm`. User-installed packages load only when the
+user init names them with `(load "packages/name.scm")`.

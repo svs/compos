@@ -51,20 +51,11 @@ defmodule Aimax.Mix.Daemon do
 
   def package_paths(root) do
     package_dir = Path.join(root, "apps/aimax_core/priv/packages")
+    init = Path.join(root, "apps/aimax_core/priv/init.scm")
 
-    package_dir
-    |> Path.join("*.scm")
-    |> Path.wildcard()
-    |> Enum.sort_by(fn path ->
-      case Path.basename(path) do
-        "custom.scm" -> {0, path}
-        "tools.scm" -> {1, path}
-        "recipes.scm" -> {2, path}
-        "components.scm" -> {3, path}
-        "preview.scm" -> {4, path}
-        _ -> {5, path}
-      end
-    end)
+    ~r/\(load-bundled-package\s+"([^"]+)"\)/
+    |> Regex.scan(File.read!(init), capture: :all_but_first)
+    |> Enum.map(fn [file] -> Path.join(package_dir, file) end)
   end
 end
 
@@ -87,21 +78,37 @@ defmodule Mix.Tasks.Aimax.Reload do
         true -> Mix.raise("name one or more .scm files, or pass --all")
       end
 
-    if Enum.any?(paths, &(Path.basename(&1) == "editor.scm")) do
-      Mix.raise("editor.scm is core bootstrap policy; use mix aimax.restart")
-    end
-
     case Aimax.Mix.Daemon.rpc(home, "reload", %{"paths" => paths}) do
-      {:ok, %{"reloaded" => count}} -> Mix.shell().info("reloaded #{count} Scheme files")
-      {:error, reason} -> Mix.raise("reload failed: #{inspect(reason)}")
+      {:ok, %{"reloaded" => count, "forms" => forms}} ->
+        Mix.shell().info("reloaded #{count} Scheme files · #{forms} changed forms")
+
+      {:ok, %{"reloaded" => count}} ->
+        Mix.shell().info("reloaded #{count} Scheme files")
+
+      {:error, reason} ->
+        Mix.raise("reload failed: #{inspect(reason)}")
     end
   end
 
   defp all_paths(root, home) do
     priv = Path.join(root, "apps/aimax_core/priv")
-    core = Enum.map(~w(dired.scm themes.scm chrome.scm), &Path.join(priv, &1))
-    init = Path.join(home, "init.scm")
-    core ++ Aimax.Mix.Daemon.package_paths(root) ++ if(File.exists?(init), do: [init], else: [])
+
+    core =
+      Enum.map(
+        ~w(editor.scm transient.scm dired.scm themes.scm chrome.scm init.scm),
+        &Path.join(priv, &1)
+      )
+
+    # the user's own Scheme too: config first, then anything installed under
+    # <home>/packages. `--all` must mean all, or a reload leaves half a session.
+    config =
+      Enum.filter(
+        Enum.map(~w(ai-config.scm init.scm custom.scm), &Path.join(home, &1)),
+        &File.exists?/1
+      )
+
+    user = Path.wildcard(Path.join([home, "packages", "*.scm"]))
+
+    core ++ Aimax.Mix.Daemon.package_paths(root) ++ config ++ user
   end
 end
-

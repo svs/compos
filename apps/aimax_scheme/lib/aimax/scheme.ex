@@ -68,6 +68,51 @@ defmodule Aimax.Scheme do
     %{interp | store: store}
   end
 
+  @doc """
+  Re-bind every host primitive in the global frame, after a code reload.
+
+  A primitive is an anonymous fun the host captured when it built this
+  interpreter. Recompiling the module that defined the fun purges the old
+  version, and calling the captured fun then raises "function ... is
+  invalid, likely because it points to an old version of the code". This
+  rebinds each name to a fun from the module version now loaded. EXTRA is
+  the host's own primitive map, merged over the builtins exactly as `new/1`
+  merges it.
+
+  The global frame lives in the shared tier after boot, so the new binding
+  is visible to every lane at once.
+  """
+  def rebind_primitives(%__MODULE__{} = interp, extra \\ %{}) do
+    fresh = Map.merge(Builtins.all(), extra)
+
+    # Rebind by the primitive's OWN name, never by the variable's. A host
+    # stdlib routinely wraps a primitive — `(define raw-buffer-create
+    # buffer-create)` then `(define (buffer-create name) ...)` — so writing
+    # `fresh` straight into the global frame would put the primitive back
+    # over the wrapper and undo the stdlib. Instead: walk the frame, and
+    # where a variable still holds a builtin, swap that builtin's fun for
+    # the one the loaded module has now. The alias keeps its alias; the
+    # wrapper keeps its wrapper; every dead fun goes.
+    store =
+      Enum.reduce(Env.frame_names(interp.store, interp.global), interp.store, fn name, store ->
+        case Env.fetch(store, interp.global, name) do
+          {:ok, {:builtin, primitive, _old}} ->
+            case Map.fetch(fresh, primitive) do
+              {:ok, fun} -> Env.define(store, interp.global, name, {:builtin, primitive, fun})
+              :error -> store
+            end
+
+          _ ->
+            store
+        end
+      end)
+
+    # A primitive this version ADDS, which no name holds yet. Anything the
+    # frame already binds is left alone: a host that redefined a primitive
+    # in Scheme and kept no alias must keep its redefinition.
+    register(%{interp | store: store}, Map.drop(fresh, Env.frame_names(store, interp.global)))
+  end
+
   @doc "Snapshot the shared Scheme world for an isolated actor."
   def snapshot(%__MODULE__{store: store, global: global}) do
     {global, Env.export_shared(store)}
@@ -84,8 +129,11 @@ defmodule Aimax.Scheme do
   the store is shared and mutable, as in Emacs.
   """
   def eval_string(%__MODULE__{} = interp, src) do
-    forms = Reader.read_all(src)
+    eval_forms(interp, Reader.read_all(src))
+  end
 
+  @doc "Evaluate already parsed top-level forms."
+  def eval_forms(%__MODULE__{} = interp, forms) when is_list(forms) do
     {val, store} =
       Enum.reduce(forms, {:void, interp.store}, fn form, {_val, store} ->
         Eval.eval(form, interp.global, store)

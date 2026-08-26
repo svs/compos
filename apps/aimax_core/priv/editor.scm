@@ -1990,14 +1990,86 @@
                                   (marginalia-join (marginalia-trim (car rs)) ws))
                             out))))))))
 
+;;; --- hot reload -------------------------------------------------------------
+;;; A save reloads that file's changed top-level forms into this session.
+;;; A new definition alone does not reach a buffer that is already open:
+;;; the mode setup fn installed the old keys, overlays and folds, and
+;;; nothing re-runs it. That is the one reason a mode change used to need
+;;; a restart.
+;;;
+;;; Session.reload_files/1 brackets every reload with these two fns.
+;;; reload-begin! opens a record. define-mode and register-minor-mode!
+;;; write their name into it. reload-finish! re-runs setup on every live
+;;; buffer that wears one of those modes, and on nothing else — a save in
+;;; markdown.scm must not rebuild a shell buffer.
+;;;
+;;; The work is the work desktop restore does, so the same rule holds: a
+;;; setup fn rebuilds presentation from the buffer's locals, and stacks
+;;; nothing twice.
+
+(domain! 'system)
+(effects! '(write))
+
+(define *reloading?* #f)
+(define *reload-touched* '())
+
+;; Name a mode this reload defined. Outside a reload this records nothing,
+;; so boot pays nothing for it.
+(define (reload--touch! name)
+  (when *reloading?*
+    (set! *reload-touched* (cons name *reload-touched*))))
+
+(define (reload-begin!)
+  (set! *reloading?* #t)
+  (set! *reload-touched* '())
+  #t)
+
+(define (reload-finish!)
+  (set! *reloading?* #f)
+  (let ((modes *reload-touched*))
+    (set! *reload-touched* '())
+    (reload-refresh-modes! modes)))
+
+;; Does B wear one of MODES, as its major mode or as a minor mode?
+(define (buffer-wears-mode? b modes)
+  (let loop ((names (cons (buffer-local b 'mode-name)
+                          (or (buffer-local b 'minor-modes) '()))))
+    (cond ((null? names) #f)
+          ((and (car names) (member (car names) modes)) #t)
+          (else (loop (cdr names))))))
+
+;; Re-run mode setup wherever one of MODES is worn. Returns the number of
+;; buffers rebuilt. restore-buffer-runtime! is desktop restore's entry: it
+;; re-runs the major setup and every minor setup with the buffer current,
+;; the layout engine suppressed, and the buffer neither displayed nor
+;; selected. So the frame does not move and the point does not jump.
+(define (reload-refresh-modes! modes)
+  (if (null? modes)
+      0
+      (let loop ((bs (buffer-list)) (n 0))
+        (cond ((null? bs) n)
+              ((and (buffer-exists? (car bs))
+                    (buffer-wears-mode? (car bs) modes))
+               (restore-buffer-runtime! (car bs))
+               (loop (cdr bs) (+ n 1)))
+              (else (loop (cdr bs) n))))))
+
+(domain! 'unknown)
+(effects! '(unknown))
+
 ;;; --- modes ------------------------------------------------------------------
 ;;; A major mode = mode-name buffer-local + a setup fn (local keys, vars).
 ;;; The registry, auto-mode-alist, everything: userland.
 
 (define *mode-setups* '())
 
+;; Replace the entry by name. assoc reads the newest first either way, but
+;; a reloader that runs on every save must not grow this list without end.
 (define (define-mode name setup)
-  (set! *mode-setups* (cons (list name setup) *mode-setups*))
+  (set! *mode-setups*
+    (cons (list name setup)
+          (remove (lambda (e) (equal? (car e) name)) *mode-setups*)))
+  (reload--touch! name)
   ;; every mode is an M-x command, like Emacs. The command toggles: the
   ;; command that puts you in a mode takes you out of it again.
   (define-command name (lambda () (modeline-toggle-mode! name)))
@@ -2225,7 +2297,9 @@
 
 (define (register-minor-mode! name setup &optional teardown)
   (set! *minor-mode-setups*
-    (cons (list name setup teardown) *minor-mode-setups*)))
+    (cons (list name setup teardown)
+          (remove (lambda (e) (equal? (car e) name)) *minor-mode-setups*)))
+  (reload--touch! name))
 
 (define (minor-mode-on? buf name)
   (let ((ms (buffer-local buf 'minor-modes)))

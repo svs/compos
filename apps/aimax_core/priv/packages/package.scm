@@ -1,9 +1,9 @@
 ;;; package.scm --- fetch and load user packages.
 ;;;
 ;;; A package is a plain .scm file. Bundled ones ship in priv/packages;
-;;; user ones live in <aimax-home>/packages and load at boot right after
-;;; the bundled set (see Session.load_packages). This package only adds
-;;; the fetch step:
+;;; user ones live in <aimax-home>/packages. Load the ones you want explicitly
+;;; from ~/.aimax/init.scm, after the bundled package manifest has completed.
+;;; This package only adds the fetch step:
 ;;;
 ;;;   (package-install! "https://example.com/foo.scm")   raw url
 ;;;   (package-install! "user/repo")                     github <repo>.scm on main
@@ -46,7 +46,8 @@
           (if (string-contains? out "FETCH-OK")
               (begin
                 (load path)
-                (message (string-append name " installed and loaded")))
+                (message (string-append name " installed and loaded; add (load \"packages/"
+                                        name "\") to ~/.aimax/init.scm")))
               (message (string-append "fetch failed: " (string-trim out))))))))
 
 (define-command "package-install" "Fetch a package (.scm) from github/url and load it"
@@ -68,21 +69,25 @@
 (public! 'package-list "Names of installed user packages")
 
 ;;; --- reloading one file into the live session --------------------------------
-;;; The dev loop for a Scheme change was a full daemon restart. (load PATH)
-;;; already evaluates a file in the session; this adds the policy: save the
-;;; buffer first, stamp the package context from the file name, and say what
-;;; happened. Registrations replace by name, so a reload does not stack
-;;; duplicates. An Elixir change still needs a daemon restart.
+;;; Every file takes the same path: the daemon's incremental form reloader.
+;;; It reads the file, evaluates only the top-level forms whose text
+;;; changed, stamps the package context from the file name, and re-runs
+;;; mode setup on the buffers wearing a mode the reload redefined. So
+;;; editor.scm costs what its diff costs, and no file needs a restart.
+;;;
+;;; In development the daemon also does this by itself: Aimax.Core.Hotload
+;;; watches the sources and reloads a file when it is saved. This command
+;;; is the manual door — for a file outside the watched roots, and for a
+;;; reload you want to ask for by name.
 
 (domain! 'packages)
 (effects! '(write execute))
 
 (define (reload-file path)
   (let* ((file (car (reverse (string-split path "/"))))
-         (name (car (string-split file ".scm"))))
-    (package! (string->symbol name))
-    (load path)
-    (message (string-append "reloaded " file))
+         (result (reload-files! (list path))))
+    (message (string-append "reloaded " file " · "
+                            (number->string (cadr result)) " changed forms"))
     path))
 
 (public! 'reload-file

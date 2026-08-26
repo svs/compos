@@ -2270,7 +2270,7 @@ defmodule Aimax.Ui.EditorLive do
         line = if index == 0, do: raw_line, else: "\n" <> raw_line
 
         if Regex.match?(~r/^\s*```/, raw_line) do
-          {[recover_inline_backticks(segment), line | parts], "", not fenced?}
+          {[line, recover_inline_backticks(segment) | parts], "", not fenced?}
         else
           if fenced?,
             do: {[line | parts], segment, fenced?},

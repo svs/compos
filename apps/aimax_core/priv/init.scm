@@ -1,8 +1,8 @@
 ;;; init.scm --- explicit bundled package boot order.
 ;;;
 ;;; The Elixir bootstrap loads editor.scm and the small stdlib first, then
-;;; evaluates this file. Keep package dependencies visible here: adding a file
-;;; under priv/packages does not add it to boot until it is named below.
+;;; evaluates this file. Keep top-level package dependencies visible here. A
+;;; compound package entry point loads its focused internal modules.
 ;;;
 ;;; After this file, Session evaluates ~/.aimax/ai-config.scm,
 ;;; ~/.aimax/init.scm, and ~/.aimax/custom.scm. User packages therefore belong
@@ -25,12 +25,7 @@
 (load-bundled-package "preview.scm")
 
 (load-bundled-package "agenda.scm")
-(load-bundled-package "agent-permissions.scm")
-(load-bundled-package "agent-connectors.scm")
-(load-bundled-package "agent-transcript.scm")
 (load-bundled-package "agent.scm")
-(load-bundled-package "agent-session.scm")
-(load-bundled-package "agent-fleet.scm")
 (load-bundled-package "annotate.scm")
 (load-bundled-package "appearance.scm")
 (load-bundled-package "bookmark.scm")

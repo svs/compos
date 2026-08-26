@@ -3,6 +3,14 @@
 ;;; Focused modules own transcript state, permissions, connectors, sessions,
 ;;; and the chat fleet. This file only coordinates backend event batches.
 
+;; This compound package owns the load order of its focused modules.
+(load-bundled-package "agent-permissions.scm")
+(load-bundled-package "agent-connectors.scm")
+(load-bundled-package "agent-transcript.scm")
+
+;; A nested load changes catalog attribution. Restore this entry point's name.
+(package! 'agent)
+
 (define *agent-output-kinds* '(chunk thought tool-call tool-update plan question error))
 
 (define (agent-handle-event slug e)
@@ -303,3 +311,8 @@
 
 (public! 'agent-answer-question!
   "(agent-answer-question! SLUG ID ANSWER) — answer the agent's pending branching question")
+
+;; Session and fleet APIs depend on the event coordinator above.
+(load-bundled-package "agent-session.scm")
+(load-bundled-package "agent-fleet.scm")
+(package! 'agent)

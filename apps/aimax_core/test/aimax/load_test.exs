@@ -8,14 +8,31 @@ defmodule Aimax.LoadTest do
 
   alias Aimax.Core.Session
 
-  test "stock init explicitly loads every bundled package" do
+  test "stock init reaches every bundled package through package entry points" do
     priv = Application.app_dir(:aimax_core, "priv")
     init = File.read!(Path.join(priv, "init.scm"))
+    load_pattern = ~r/\(load-bundled-package\s+"([^"]+)"\)/
 
-    listed =
-      ~r/\(load-bundled-package\s+"([^"]+)"\)/
+    top_level =
+      load_pattern
       |> Regex.scan(init, capture: :all_but_first)
       |> Enum.map(&hd/1)
+
+    nested =
+      Enum.flat_map(top_level, fn package ->
+        path = Path.join([priv, "packages", package])
+
+        if File.regular?(path) do
+          path
+          |> File.read!()
+          |> then(&Regex.scan(load_pattern, &1, capture: :all_but_first))
+          |> Enum.map(&hd/1)
+        else
+          []
+        end
+      end)
+
+    loaded = top_level ++ nested
 
     packages =
       priv
@@ -23,8 +40,31 @@ defmodule Aimax.LoadTest do
       |> Path.wildcard()
       |> Enum.map(&Path.relative_to(&1, Path.join(priv, "packages")))
 
-    assert Enum.sort(listed) == Enum.sort(packages)
-    assert length(listed) == length(Enum.uniq(listed))
+    assert Enum.sort(loaded) == Enum.sort(packages)
+    assert length(loaded) == length(Enum.uniq(loaded))
+
+    assert "agent.scm" in top_level
+    refute "agent-transcript.scm" in top_level
+
+    agent_modules =
+      priv
+      |> Path.join("packages/agent.scm")
+      |> File.read!()
+      |> then(&Regex.scan(load_pattern, &1, capture: :all_but_first))
+      |> Enum.map(&hd/1)
+
+    assert agent_modules == [
+             "agent-permissions.scm",
+             "agent-connectors.scm",
+             "agent-transcript.scm",
+             "agent-session.scm",
+             "agent-fleet.scm"
+           ]
+
+    assert {:ok, entry} =
+             Session.eval(~s{(catalog-entry 'function "agent-answer-question!")})
+
+    assert entry =~ ~s{qualified-name "agent/agent-answer-question!"}
   end
 
   test "(load ...) resolves a relative path against the config home" do

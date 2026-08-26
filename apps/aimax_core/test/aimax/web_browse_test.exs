@@ -47,16 +47,18 @@ defmodule Aimax.WebBrowseTest do
   setup do
     eval!(~S"""
     (set! *web-fetch*
-      (lambda (url k)
+      (lambda (url want k)
         (cond
           ((string-contains? url "second")
-           (k "# Second page\n\nback home: [home](https://site.test/)\n"))
+           (k (list want "# Second page\n\nback home: [home](https://site.test/)\n" #f)))
           (else
-           (k (string-append
-                "# Front page\n\n"
-                "Read the [second page](/second.html) or the "
-                "[docs](docs/intro.html) or leave via "
-                "[elsewhere](https://other.test/x).\n"))))))
+           (k (list want
+                (string-append
+                  "# Front page\n\n"
+                  "Read the [second page](/second.html) or the "
+                  "[docs](docs/intro.html) or leave via "
+                  "[elsewhere](https://other.test/x).\n")
+                #f))))))
     """)
 
     Editor.minibuffer_close()
@@ -124,9 +126,9 @@ defmodule Aimax.WebBrowseTest do
     (begin
       (define *zz-nav-fetches* 0)
       (set! *web-fetch*
-        (lambda (url k)
+        (lambda (url want k)
           (set! *zz-nav-fetches* (+ *zz-nav-fetches* 1))
-          (k (string-append "# page\n\ngo [next](https://site.test/second.html)\n")))))
+          (k (list want "# page\n\ngo [next](https://site.test/second.html)\n" #f)))))
     """)
 
     buf = browse!("https://site.test/index.html")
@@ -161,16 +163,19 @@ defmodule Aimax.WebBrowseTest do
   end
 
   test "Substack keeps feed articles and groups reaction counts" do
-    assert eval!(~S{(web--xslt-site "https://substack.com/inbox")}) =~ "substack.xsl"
-    assert eval!(~S{(web--xslt-site "https://example.com")}) == "#f"
+    assert eval!(~S{(web--site-parser "https://substack.com/inbox")}) =~ "substack.xsl"
+    assert eval!(~S{(web--site-parser "https://example.com")}) == "#f"
 
     eval!(~S"""
     (begin
       (define *zz-substack-md* #f)
-      (web--convert-html
-        "https://substack.com/"
-        "<html><body><nav>Home Subscriptions Chat Activity Explore Dashboard</nav><main><div role='article' aria-label='Note'><img src='https://substackcdn.com/image/fetch/avatar.jpeg' alt='Alice avatar'><a href='/@alice'>Alice</a><a href='/@alice/note/c-1' title='Aug 3, 2026, 9:00 PM'>Aug 3</a><p>This is the first useful feed note. It contains enough text to remain above the parser confidence threshold.</p><img src='https://substackcdn.com/image/fetch/content-image.png' alt='A useful diagram'><p>The second paragraph proves that the selected article body survives conversion with its links and prose intact.</p><p>The third paragraph keeps this fixture representative of a real Substack feed item.</p><a href='https://alice.example/p/clickable-post'><img src='https://substackcdn.com/image/fetch/article-card.png' alt=''><div><a href='https://alice.example'>Alice publication</a><div>Clickable article title</div></div></a><img src='https://substackcdn.com/image/fetch/w_20,h_20/publication.png' sizes='20px' alt='Alice publication'><div class='actions'><button aria-label='Like'><svg></svg><span>34</span></button><button aria-label='Comment'><svg></svg><span>2</span></button><button aria-label='Restack'><svg></svg><span>3</span></button><button aria-label='Share'><svg></svg></button></div></div><div role='article' aria-label='Note'><a href='/@bob'>Bob</a><a href='/@bob/note/c-2'>Aug 4</a><p>This is the second useful feed note. It verifies that one separator appears between two semantic articles.</p></div><section><h2>People to follow</h2><p>Suggested Person</p></section></main></body></html>"
-        (lambda (md) (set! *zz-substack-md* md))))
+      (define *zz-substack-html*
+        "<html><body><nav>Home Subscriptions Chat Activity Explore Dashboard</nav><main><div role='article' aria-label='Note'><img src='https://substackcdn.com/image/fetch/avatar.jpeg' alt='Alice avatar'><a href='/@alice'>Alice</a><a href='/@alice/note/c-1' title='Aug 3, 2026, 9:00 PM'>Aug 3</a><p>This is the first useful feed note. It contains enough text to remain above the parser confidence threshold.</p><img src='https://substackcdn.com/image/fetch/content-image.png' alt='A useful diagram'><p>The second paragraph proves that the selected article body survives conversion with its links and prose intact.</p><p>The third paragraph keeps this fixture representative of a real Substack feed item.</p><a href='https://alice.example/p/clickable-post'><img src='https://substackcdn.com/image/fetch/article-card.png' alt=''><div><a href='https://alice.example'>Alice publication</a><div>Clickable article title</div></div></a><img src='https://substackcdn.com/image/fetch/w_20,h_20/publication.png' sizes='20px' alt='Alice publication'><div class='actions'><button aria-label='Like'><svg></svg><span>34</span></button><button aria-label='Comment'><svg></svg><span>2</span></button><button aria-label='Restack'><svg></svg><span>3</span></button><button aria-label='Share'><svg></svg></button></div></div><div role='article' aria-label='Note'><a href='/@bob'>Bob</a><a href='/@bob/note/c-2'>Aug 4</a><p>This is the second useful feed note. It verifies that one separator appears between two semantic articles.</p></div><section><h2>People to follow</h2><p>Suggested Person</p></section></main></body></html>")
+      ;; the reading takes a FILE: one fetch is written once and each
+      ;; reading is a command over it
+      (let ((f (web--write-html! *zz-substack-html*)))
+        (web--read "https://substack.com/" f "calm"
+          (lambda (md) (delete-file! f) (set! *zz-substack-md* md)))))
     """)
 
     md =

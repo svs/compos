@@ -38,7 +38,8 @@
   (set! *web-visited-file* (string-append t--feeds-dir "/web-visited"))
   (set! *feeds-fetch*
     (lambda (urls k) (k (feeds--parse-lines t--feeds-lines))))
-  (set! *web-fetch* (lambda (url k) (k "# An article\n\nbody text\n"))))
+  (set! *web-fetch*
+    (lambda (url want k) (k (list want "# An article\n\nbody text\n" #f)))))
 
 (define (t--feeds-teardown!)
   (for-each (lambda (b)

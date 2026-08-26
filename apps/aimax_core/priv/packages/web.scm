@@ -41,99 +41,150 @@
 
 (define (web--shell-quote text)
   (string-append "'" (string-join (string-split text "'") "'\\''") "'"))
+;;; --- the two readings -----------------------------------------------------------
+;;; One page, one path, two readings.
+;;;
+;;;   CALM  the page distilled: a site parser when the site has one,
+;;;         else Readability. The article, without the nav, the
+;;;         subscribe box and the like counts.
+;;;   FULL  the whole document as text.
+;;;
+;;; `R` switches between them. The switch re-reads the html the buffer
+;;; already holds, so it costs one conversion and no network.
+;;;
+;;; A reading is a CHOICE, not a discovery. The reader asks for one in
+;;; 'browse-want and gets one in 'browse-reading. The two differ when
+;;; calm finds no article: the buffer shows full, and the modeline says
+;;; why.
 
-;; the fetched html, converted three ways in order from one file:
-;;   1. the ARTICLE — `readable` (Mozilla's readability) extracts it,
-;;      which drops the page furniture: nav, subscribe boxes, like
-;;      counts, audio players. Absent or empty (a page that is not an
-;;      article, or the tool is not installed), then
-;;   2. the WHOLE page through pandoc, and
-;;   3. when pandoc answers only a "[TABLE]" placeholder (a nested
-;;      table layout), the page again with the table tags flattened,
-;;      so it reads as lines with its links intact.
-;; Preferred site parsers are XSLT files. Add one row and the matching
-;; stylesheet; the generic readable and page fallbacks remain automatic.
-(define *web--xslt-sites*
-  '(("https://substack.com" "substack.xsl" "feed")
-    ("https://mukeshbishnoi.com" "mukeshbishnoi.xsl" "portfolio")
-    ("https://www.mukeshbishnoi.com" "mukeshbishnoi.xsl" "portfolio")))
+(defcustom 'browse-reading "calm"
+  "Which reading a page opens in: \"calm\" for the article alone, \"full\" for the whole document."
+  'group 'web 'type 'string)
 
-(define (web--xslt-site url)
-  (let loop ((sites *web--xslt-sites*))
-    (if (null? sites)
-        #f
-        (let* ((site (car sites))
-               (base (car site)))
-          (if (or (equal? url base)
-                  (string-prefix? (string-append base "/") url))
-              site
-              (loop (cdr sites)))))))
+;; the reading name, normalized. Anything that is not full is calm.
+(define (web--reading name)
+  (if (equal? name "full") "full" "calm"))
 
-(define (web--xslt-command url html-file pandoc)
-  (let ((site (web--xslt-site url)))
-    (if (not site)
-        #f
-        (let ((stylesheet
-                (web--shell-quote
-                  (string-append
-                    (aimax-priv-dir)
-                    "/packages/web/parsers/"
-                    (car (cdr site))))))
+(define (web--want buf)
+  (web--reading
+    (or (buffer-local buf 'browse-want)
+        (if (boundp 'browse-reading) browse-reading "calm"))))
+
+;;; --- sites ----------------------------------------------------------------------
+;;; One row per site the readings get wrong on their own. Two sites need
+;;; two different things, so a row says both.
+
+;;   PARSER   a stylesheet under web/parsers, or #f for Readability
+;;   RENDER?  #t when the server answers a fetch with a script shell, so
+;;            the reading needs a real tab. substack.com sends 9 KB of
+;;            scaffolding to a fetch and 123 KB of feed to a tab.
+(define *web--sites*
+  '(("https://substack.com" "substack.xsl" #t)
+    ("https://html.duckduckgo.com" "duckduckgo.xsl" #f)
+    ("https://mukeshbishnoi.com" "mukeshbishnoi.xsl" #f)
+    ("https://www.mukeshbishnoi.com" "mukeshbishnoi.xsl" #f)))
+
+(define (web--site url)
+  (let loop ((sites *web--sites*))
+    (cond ((null? sites) #f)
+          ((let ((base (car (car sites))))
+             (or (equal? url base)
+                 (string-prefix? (string-append base "/") url)))
+           (car sites))
+          (else (loop (cdr sites))))))
+
+(define (web--site-parser url)
+  (let ((site (web--site url)))
+    (and site (car (cdr site)))))
+
+(define (web--site-render? url)
+  (let ((site (web--site url)))
+    (and site (car (cdr (cdr site))) #t)))
+
+;;; --- reading the html -----------------------------------------------------------
+
+;; no hard wrap: a paragraph is ONE line, and the window wraps it at its
+;; own width like any buffer text
+(define *web--pandoc*
+  " | pandoc --wrap=none -f html-native_divs-native_spans -t gfm-raw_html")
+
+;; A reading is ONE command over one file. No cascade lives inside it: a
+;; short answer is not an error here, and what a short answer means is
+;; web--attempt's decision, above.
+(define (web--calm-command url file)
+  (let ((sheet (web--site-parser url)))
+    (string-append
+      (if sheet
           (string-append
-            "m=" (car (cdr (cdr site))) "; out=$(xsltproc --html "
-            stylesheet " " (web--shell-quote html-file)
-            " 2>/dev/null" pandoc "); ")))))
+            "xsltproc --html "
+            (web--shell-quote
+              (string-append (aimax-priv-dir) "/packages/web/parsers/" sheet))
+            " ")
+          (string-append "readable --base " (web--shell-quote url) " "))
+      (web--shell-quote file) " 2>/dev/null" *web--pandoc*)))
 
-(define (web--convert-html url html k)
-  (let ((f (string-append (aimax-home) "/browse-fetch.html"))
-        (u (web--shell-quote url))
-        ;; no hard wrap: a paragraph is ONE line, and the window wraps
-        ;; it at its own width like any buffer text
-        (p " | pandoc --wrap=none -f html-native_divs-native_spans -t gfm-raw_html"))
-    (write-file! f html)
-    (shell-command->string
-      (string-append
-        ;; the first output line NAMES the reading that won — "feed",
-        ;; "article", or "page" — and the modeline shows it
-        (or (web--xslt-command url f p)
-            (string-append
-              "m=article; out=$(readable --base " u " " (web--shell-quote f)
-              " 2>/dev/null" p "); "))
-        "if [ \"${#out}\" -lt 200 ]; then m=article; out=$(readable --base " u " "
-        (web--shell-quote f) " 2>/dev/null" p "); fi; "
-        "if [ \"${#out}\" -lt 200 ]; then m=page; out=$(cat " (web--shell-quote f) p "); fi; "
-        "case \"$out\" in *'[TABLE]'*) m=page; "
-        "out=$(perl -pe 's{</?(?:table|tbody|thead|tr|td|th)\\b[^>]*>}{ }gi'"
-        " < " (web--shell-quote f) p ");; esac; "
-        "printf '%s\\n%s' \"$m\" \"$out\"")
-      (lambda (out)
-        (let ((nl (and (string? out) (string-index out "\n"))))
-          (cond
-            ((or (not nl) (equal? (string-trim out) "")) (k #f))
-            (else
-              (set! *web--last-kind* (substring-bytes out 0 nl))
-              (let ((md (substring-bytes out (+ nl 1) (string-byte-length out))))
-                (k (if (equal? (string-trim md) "") #f md))))))))))
+(define (web--full-command file)
+  (string-append "cat " (web--shell-quote file) *web--pandoc*))
 
-;; URL -> markdown, in a Task. Tests replace this seam. ONE download;
-;; the conversion reads the same bytes from a file. Holding a session
-;; copy of the page, the fetch revalidates instead: a 304 costs only
-;; headers, and the copy serves again with a fresh stamp.
-;; the cache fetch sets *web--revalidate* when it holds a copy to fall
-;; back on: the fetch then sends the ETag, and a 304 costs headers only
+;; A nested table layout defeats pandoc, which writes a "[TABLE]"
+;; placeholder instead of the rows. Flattening the table tags gives the
+;; page back as lines, with its links intact.
+(define (web--flatten-command file)
+  (string-append
+    "perl -pe 's{</?(?:table|tbody|thead|tr|td|th)\\b[^>]*>}{ }gi' < "
+    (web--shell-quote file) *web--pandoc*))
+
+;; under this many bytes a reading found nothing worth showing
+(define *web--thin-bytes* 200)
+
+(define (web--thin? md)
+  (or (not (string? md))
+      (< (string-byte-length (string-trim md)) *web--thin-bytes*)))
+
+;; Every read gets its own file. Two tabs that fetch at once must not
+;; read each other's page.
+(define *web--read-seq* 0)
+
+(define (web--write-html! html)
+  (set! *web--read-seq* (+ *web--read-seq* 1))
+  (let ((file (string-append (aimax-home) "/browse-fetch-"
+                             (number->string *web--read-seq*) ".html")))
+    (write-file! file html)
+    file))
+
+;; FILE of html -> markdown for one READING. K gets the markdown, or #f.
+(define (web--read url file reading k)
+  (shell-command->string
+    (if (equal? reading "full")
+        (web--full-command file)
+        (web--calm-command url file))
+    (lambda (md)
+      (cond
+        ;; The table rescue comes FIRST. A page laid out in nested
+        ;; tables — news.ycombinator.com is one — reads as the eight
+        ;; bytes "[TABLE]\n", which the thin test would throw away.
+        ((and (equal? reading "full")
+              (string? md)
+              (string-contains? md "[TABLE]"))
+         (shell-command->string (web--flatten-command file)
+           (lambda (flat) (k (if (web--thin? flat) #f flat)))))
+        ((web--thin? md) (k #f))
+        (else (k md))))))
+
+;;; --- fetching -------------------------------------------------------------------
+;;; The browser fetches, not curl: the user's cookies and Chrome's http
+;;; cache ride along, so a page that knows them logged in reads logged
+;;; in, and a search that refuses curl answers a browser. A plain fetch
+;;; costs about a quarter second.
+;;;
+;;; A SNAPSHOT loads the page in a real background tab, so scripts and
+;;; SSO redirects run and the reader gets the rendered document. It
+;;; costs about ten times a fetch, so only a page that needs it pays:
+;;; a site the registry marks, or a server that sent no document at all.
+
+;; the cache fetch sets this when it holds a copy to fall back on: the
+;; fetch then sends the page's saved ETag, and a 304 costs headers only
 (define *web--revalidate* #f)
-
-;; which reading the last conversion produced: "article" or "page".
-;; A stubbed or served fetch leaves the default.
-(define *web--last-kind* "page")
-
-(define (web--pipeline url k)
-  (*web-fetch-html* url
-    (lambda (html)
-      (if html (web--convert-html url html k) (k #f)))
-    *web--revalidate*))
-
-(define *web-fetch* web--pipeline)
 
 ;; URL -> the raw html. Tests replace this seam. REVALIDATE? sends the
 ;; page's saved ETag (curl --etag-compare): an unchanged page answers
@@ -153,18 +204,60 @@
         "rm -f \"$t\" \"$e.new\"")
       (lambda (out) (k (if (equal? (string-trim out) "") #f out))))))
 
-;; the browser first: logged in on a site there means logged in here.
-;; A SNAPSHOT, not a plain fetch — a real background tab loads the
-;; page, so per-site sessions (Substack keeps one per publication
-;; subdomain), SSO redirects and scripts all run, and the reader gets
-;; the RENDERED document. No browser, or no answer — curl, with the
-;; ETag discipline.
-(define (web--html-pipeline url k &optional revalidate?)
-  (browser-snapshot url
+;; RENDER? asks for the rendered document, from a real tab. With no
+;; browser at all, curl answers either way.
+(define (web--html-pipeline url k &optional revalidate? render?)
+  ((if render? browser-snapshot browser-fetch) url
     (lambda (html)
       (if html (k html) (web--curl-html url k revalidate?)))))
 
 (define *web-fetch-html* web--html-pipeline)
+
+;;; --- the pipeline ---------------------------------------------------------------
+
+;; URL and the WANTed reading -> the reading that was found, its
+;; markdown, and the html it came from. K gets that list, or (#f #f #f).
+(define (web--pipeline url want k)
+  (web--attempt url (web--reading want) (web--site-render? url) k))
+
+;; Fetch, then read. RENDERED? says this html came from a real tab, so
+;; an empty answer stops instead of asking for a tab again.
+(define (web--attempt url want rendered? k)
+  (*web-fetch-html* url
+    (lambda (html)
+      (if (not html)
+          (k (list #f #f #f))
+          (let ((file (web--write-html! html)))
+            (web--read url file want
+              (lambda (md)
+                (cond
+                  (md (web--answer file (list want md html) k))
+                  ;; Calm found no article. That is an answer, not a
+                  ;; failure: an index page IS its links, so read it
+                  ;; whole. Full finding nothing is the real failure.
+                  ((equal? want "calm")
+                   (web--read url file "full"
+                     (lambda (full)
+                       (if full
+                           (web--answer file (list "full" full html) k)
+                           (web--retry url want file rendered? k)))))
+                  (else (web--retry url want file rendered? k))))))))
+    *web--revalidate*
+    rendered?))
+
+(define (web--answer file result k)
+  (delete-file! file)
+  (k result))
+
+;; No document at all: the server sent a script shell, and only a real
+;; tab renders one.
+(define (web--retry url want file rendered? k)
+  (delete-file! file)
+  (if rendered?
+      (k (list #f #f #f))
+      (web--attempt url want #t k)))
+
+(define *web-fetch* web--pipeline)
 
 ;;; --- visited sites --------------------------------------------------------------
 ;;; Every rendered page remembers itself: one "URL TITLE" line, newest
@@ -253,33 +346,56 @@
 
 (define *web--empty-link-pattern* "!?\\[\\]\\(([^)\\s]*)\\)")
 
+;;; Both link passes below walk ONE list of match ranges and collect
+;;; their output in chunks. The two habits they avoid each cost the
+;;; square of the page size:
+;;;
+;;;   re-find from a moving offset — Regex.run(offset:) scans from the
+;;;     start every call. One re-find* pass over a 640 KB page finds
+;;;     1896 matches in 7 ms; 1896 offset calls take 520 ms.
+;;;   string-append onto one growing answer — every match copies the
+;;;     whole page written so far.
+;;;
+;;; A match is "[label](target)", or the same with a leading "!". The
+;;; label holds no "]" and the target holds no ")", so one index inside
+;;; the match finds both.
+
+(define (web--link-parts m)
+  (let ((close (string-index m "]"))
+        (len (string-byte-length m)))
+    (if (and close (< (+ close 2) len))
+        (list (substring-bytes m (if (string-prefix? "!" m) 2 1) close)
+              (substring-bytes m (+ close 2) (- len 1)))
+        (list "" ""))))
+
 (define (web--fix-empty-links s)
-  (let loop ((pos 0) (out "") (last-wrapper? #f))
-    (let ((hit (re-find *web--empty-link-pattern* s pos)))
-      (if (not hit)
-          (string-append out (substring-bytes s pos (string-byte-length s)))
-          (let* ((ms (car hit))
-                 (me (car (cdr hit)))
-                 (gs (re-groups *web--empty-link-pattern* s ms))
-                 (ur (car (cdr gs)))
-                 (url (substring-bytes s (car ur) (car (cdr ur))))
-                 (between (string-trim (substring-bytes s pos ms)))
-                 (head (string-append out (substring-bytes s pos ms)))
-                 (image-syntax? (equal? (substring-bytes s ms (+ ms 1)) "!"))
-                 (img? (web--image-url? url)))
-            (cond
-              ;; Drop only an image nested in an empty link wrapper.
-              ;; Adjacent standalone images are separate content.
-              ((and img? last-wrapper? image-syntax? (equal? between ""))
-               (loop me head #f))
-              ;; The URL becomes the label. The img-embed face draws it.
-              (img?
-               (loop me
-                     (string-append head "[" url "](" url ")")
-                     (not image-syntax?)))
-              (else
-               (loop me head
-                     (and last-wrapper? (equal? between ""))))))))))
+  (let loop ((hits (re-find* *web--empty-link-pattern* s))
+             (pos 0) (chunks '()) (last-wrapper? #f))
+    (if (null? hits)
+        (string-join
+          (reverse (cons (substring-bytes s pos (string-byte-length s)) chunks))
+          "")
+        (let* ((ms (car (car hits)))
+               (me (car (cdr (car hits))))
+               (url (car (cdr (web--link-parts (substring-bytes s ms me)))))
+               (before (substring-bytes s pos ms))
+               (between (string-trim before))
+               (head (cons before chunks))
+               (image-syntax? (equal? (substring-bytes s ms (+ ms 1)) "!"))
+               (img? (web--image-url? url)))
+          (cond
+            ;; Drop only an image nested in an empty link wrapper.
+            ;; Adjacent standalone images are separate content.
+            ((and img? last-wrapper? image-syntax? (equal? between ""))
+             (loop (cdr hits) me head #f))
+            ;; The URL becomes the label. The img-embed face draws it.
+            (img?
+             (loop (cdr hits) me
+                   (cons (string-append "[" url "](" url ")") head)
+                   (not image-syntax?)))
+            (else
+             (loop (cdr hits) me head
+                   (and last-wrapper? (equal? between "")))))))))
 
 (define (web--tidy md)
   (let loop ((ls (string-split (web--unescape (web--fix-empty-links md)) "\n"))
@@ -305,33 +421,51 @@
 ;; range and the target collect in LINKS. Anchors (#...) stay plain.
 (define *web--link-pattern* "!?\\[([^]]*)\\]\\(([^)\\s]*)\\)")
 
+;; LEN counts the output bytes written so far, so a label's range is
+;; arithmetic. Measuring one growing string instead rebuilds the page
+;; per link — see web--link-parts above for both traps.
 (define (web--parse md)
-  (let loop ((pos 0) (out "") (links '()))
-    (let ((hit (re-find *web--link-pattern* md pos)))
-      (if (not hit)
-          (list (string-append out (substring-bytes md pos (string-byte-length md)))
-                (reverse links))
-          (let* ((ms (car hit))
-                 (me (car (cdr hit)))
-                 ;; pair 0 is the whole match; the label and target follow
-                 (gs (re-groups *web--link-pattern* md ms))
-                 (lr (car (cdr gs)))
-                 (ur (car (cdr (cdr gs))))
-                 (label (substring-bytes md (car lr) (car (cdr lr))))
-                 (url (substring-bytes md (car ur) (car (cdr ur))))
-                 (head (string-append out (substring-bytes md pos ms)))
-                 (start (string-byte-length head))
-                 (end (+ start (string-byte-length label))))
-            (loop me
-                  (string-append head label)
-                  (if (or (equal? label "") (string-prefix? "#" url))
-                      links
-                      (cons (list start end url) links))))))))
+  (let loop ((hits (re-find* *web--link-pattern* md))
+             (pos 0) (chunks '()) (len 0) (links '()))
+    (if (null? hits)
+        (list (string-join
+                (reverse (cons (substring-bytes md pos (string-byte-length md)) chunks))
+                "")
+              (reverse links))
+        (let* ((ms (car (car hits)))
+               (me (car (cdr (car hits))))
+               (parts (web--link-parts (substring-bytes md ms me)))
+               (label (car parts))
+               (url (car (cdr parts)))
+               (before (substring-bytes md pos ms))
+               (start (+ len (string-byte-length before)))
+               (end (+ start (string-byte-length label))))
+          (loop (cdr hits) me
+                (cons label (cons before chunks))
+                end
+                (if (or (equal? label "") (string-prefix? "#" url))
+                    links
+                    (cons (list start end url) links)))))))
 
 ;; a link target against the page it came from: absolute stays, //host
 ;; takes the scheme, /path takes the origin, anything else appends to the
 ;; page's directory
-(define (web--resolve url base)
+;; A search engine wraps every result in a redirect of its own.
+;; The reader follows the RESULT: DuckDuckGo carries the real target
+;; in a uddg= parameter, so RET lands on the page, not on the hop.
+(define *web--redirect-pattern* "[?&]uddg=([^&]*)")
+
+(define (web--unwrap url)
+  (let ((hit (re-find *web--redirect-pattern* url 0)))
+    (if (not hit)
+        url
+        (let* ((gs (re-groups *web--redirect-pattern* url (car hit)))
+               (r (car (cdr gs)))
+               (target (url-decode (substring-bytes url (car r) (car (cdr r))))))
+          (if (string-contains? target "://") target url)))))
+
+(define (web--resolve raw base)
+  (let ((url (web--unwrap raw)))
   (cond ((string-contains? url "://") url)
         ((string-prefix? "//" url)
          (string-append (car (string-split base "://")) ":" url))
@@ -347,7 +481,7 @@
                  (slash (string-rindex clean "/")))
             (if (and slash (> slash (+ (string-index clean "://") 2)))
                 (string-append (substring-bytes clean 0 (+ slash 1)) url)
-                (string-append clean "/" url))))))
+                (string-append clean "/" url)))))))
 
 ;; the public name: other packages (feeds) resolve their links the
 ;; same one way
@@ -355,13 +489,19 @@
 
 ;;; --- rendering ------------------------------------------------------------------
 
-;; the modeline says WHICH reading this is: "article" when readability
-;; extracted one, "page" for the whole page, "feed" for a feed parse
+;; The modeline names the reading on screen. When that is not the
+;; reading the person asked for, it says why — otherwise `R` looks
+;; broken on a page that has no article to show.
+(define (web--reading-label buf)
+  (let ((reading (buffer-local buf 'browse-reading)))
+    (cond ((not reading) "")
+          ((equal? reading (web--want buf)) (string-append reading " · "))
+          (else (string-append reading " (no article) · ")))))
+
 (define (web--update-modeline! buf)
   (buffer-set-local! buf 'modeline-info
     (string-append
-      (let ((kind (buffer-local buf 'browse-kind)))
-        (if kind (string-append kind " · ") ""))
+      (web--reading-label buf)
       (or (buffer-local buf 'browse-url) "")
       (let ((age (cache-age-label buf)))
         (if age (string-append " · " age) "")))))
@@ -465,18 +605,24 @@
             (k #f)
             (begin
               (set! *web--revalidate* (and hit #t))
-              (*web-fetch* url
-                (lambda (md)
-                  (cond (md (k md))
-                        (hit (set! *web--last-kind* (web--page-kind hit))
-                             (k (nth 1 hit)))
-                        (else (k #f)))))))))
+              (*web-fetch* url (web--want b)
+                (lambda (found)
+                  (let ((md (and (pair? found) (nth 1 found))))
+                    (cond (md (k found))
+                          ;; the copy we hold beats an empty view
+                          (hit (k (list (nth 1 hit) (nth 2 hit) #f)))
+                          (else (k #f))))))))))
     ;; a fetch completion is the one moment a page enters the session
     ;; cache — serving from it must not refresh its age
-    (lambda (b md)
-      (buffer-set-local! b 'browse-kind *web--last-kind*)
-      (web--page-remember! b (buffer-local b 'browse-url) md)
-      (web--render! b md))
+    (lambda (b found)
+      (let ((reading (nth 0 found))
+            (md (nth 1 found))
+            (html (nth 2 found)))
+        (buffer-set-local! b 'browse-reading reading)
+        ;; the html stays so `R` can re-read it without a fetch
+        (buffer-set-local! b 'browse-html html)
+        (web--page-remember! b (buffer-local b 'browse-url) reading md)
+        (web--render! b md)))
     *web-cache-ttl*))
 
 ;;; --- navigation -----------------------------------------------------------------
@@ -488,17 +634,14 @@
 
 (define *web-page-cache-max* 20)
 
-;; an entry keeps the reading's KIND too, so a served copy still says
-;; article or page in the modeline
-(define (web--page-remember! buf url md)
+;; an entry is (URL READING MD TIME): a served copy still names the
+;; reading it was read in
+(define (web--page-remember! buf url reading md)
   (buffer-set-local! buf 'browse-pages
-    (take-n (cons (list url md (current-time) *web--last-kind*)
+    (take-n (cons (list url reading md (current-time))
                   (filter (lambda (e) (not (equal? (car e) url)))
                           (or (buffer-local buf 'browse-pages) '())))
             *web-page-cache-max*)))
-
-(define (web--page-kind hit)
-  (if (> (length hit) 3) (nth 3 hit) "page"))
 
 (define (web--page-cached buf url)
   (assoc url (or (buffer-local buf 'browse-pages) '())))
@@ -516,9 +659,11 @@
         (begin
           ;; the page's own age drives the TTL: a wake still refreshes
           ;; one that has grown old
-          (buffer-set-local! buf 'cache-time (nth 2 hit))
-          (buffer-set-local! buf 'browse-kind (web--page-kind hit))
-          (web--render! buf (nth 1 hit)))
+          (buffer-set-local! buf 'cache-time (nth 3 hit))
+          (buffer-set-local! buf 'browse-reading (nth 1 hit))
+          ;; a served copy is markdown, not html: `R` on it must fetch
+          (buffer-set-local! buf 'browse-html #f)
+          (web--render! buf (nth 2 hit)))
         (begin
           ;; a new page: the old stamp must not satisfy the TTL
           (buffer-set-local! buf 'cache-time #f)
@@ -643,6 +788,42 @@
 
 ;; the ORIGINAL page is the browser's job — the editor renders text,
 ;; and for everything else there is a real renderer one key away
+;; The switch re-reads the html this buffer already holds: one
+;; conversion, no network. Only a page served from the session copy —
+;; which keeps markdown, not html — has to fetch again.
+(define (web--reread! buf)
+  (let ((html (buffer-local buf 'browse-html))
+        (url (buffer-local buf 'browse-url))
+        (want (web--want buf)))
+    (message (string-append "reading " want " …"))
+    (cond
+      ((not url) (message "no page here"))
+      ((not html)
+       (buffer-set-local! buf 'cache-time #f)
+       (cache-refresh! buf))
+      (else
+        (let ((file (web--write-html! html)))
+          (web--read url file want
+            (lambda (md)
+              (delete-file! file)
+              (if md
+                  (begin
+                    (buffer-set-local! buf 'browse-reading want)
+                    (web--page-remember! buf url want md)
+                    (web--render! buf md))
+                  ;; the page has no article: it stays whole, and the
+                  ;; modeline says so
+                  (begin
+                    (web--update-modeline! buf)
+                    (message "no article on this page — showing it whole"))))))))))
+
+(define-command "browse-toggle-reading" "Switch between the calm and the full reading"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (buffer-set-local! buf 'browse-want
+        (if (equal? (web--want buf) "calm") "full" "calm"))
+      (web--reread! buf))))
+
 (define-command "browse-open-external" "Open this page in the real browser"
   (lambda ()
     (let ((url (buffer-local (current-buffer) 'browse-url)))
@@ -659,6 +840,8 @@
   (local-set-key* buf "M-<right>" "browse-forward")
   (local-set-key* buf "g" "browse-refresh")
   (local-set-key* buf "o" "browse-open-external")
+  ;; eww binds R to eww-readable; the same key, the same idea
+  (local-set-key* buf "R" "browse-toggle-reading")
   ;; the preview chord: "show me the rendered thing" — the browser
   (local-set-key* buf "C-c C-v" "browse-open-external")
   (local-set-key* buf "q" "quit-window"))
@@ -667,9 +850,11 @@
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-read-only! buf #t)
-      ;; the session page cache is heavy and derives from the URL: a
-      ;; restart refetches, the desktop must not carry it
+      ;; the session page cache and the held html are both heavy and
+      ;; both derive from the URL: a restart refetches, and the desktop
+      ;; must not carry either
       (desktop-skip! buf 'browse-pages)
+      (desktop-skip! buf 'browse-html)
       ;; the reading look is the WRITING look: one centered measure for
       ;; prose everywhere — writing-mode owns the class and the setting
       (buffer-set-local! buf 'window-class "writing")
@@ -692,23 +877,39 @@
       (cache-wake! buf))))
 
 (mode-doc! "browse-mode"
-  "A web page as readable text — the article, extracted. RET follows
-the link at point and s-RET opens it as its own tab, TAB and n/p
-walk the links, M-<left> and l go back, M-<right> goes forward, g
-asks where to go — RET refetches this page, a visited site or a
-fresh URL goes there — o opens the page in the real browser, and
-C-s searches to any link.")
+  "A web page as readable text, in one of two readings. Calm shows
+the article alone; full shows the whole document. R switches
+between them without fetching again. RET follows the link at point
+and s-RET opens it as its own tab, TAB and n/p walk the links,
+M-<left> and l go back, M-<right> goes forward, g asks where to go
+- RET refetches this page, a visited site or a fresh URL goes
+there - o opens the page in the real browser, and C-s searches to
+any link.")
 
 ;; the one entry point: normalize, enter the mode, fetch
 ;; a tab's name: the host, and the page's last path segment
 (define (web--slug url)
-  (let* ((tail (car (reverse (string-split url "://"))))
-         (parts (filter (lambda (p) (not (equal? p "")))
-                        (string-split tail "/")))
-         (host (if (pair? parts) (car parts) tail)))
-    (if (> (length parts) 1)
-        (string-append host "/" (car (reverse parts)))
-        host)))
+  (let ((q (web--query url)))
+    (if q
+        ;; a search names itself by what was asked, not by the engine
+        (string-append "search: " q)
+        (let* ((tail (car (reverse (string-split url "://"))))
+               (parts (filter (lambda (p) (not (equal? p "")))
+                              (string-split tail "/")))
+               (host (if (pair? parts) (car parts) tail)))
+          (if (> (length parts) 1)
+              (string-append host "/" (car (reverse parts)))
+              host)))))
+
+;; the question a search URL carries, or #f for an ordinary page
+(define (web--query url)
+  (let ((base (if (boundp 'browse-search-url)
+                  browse-search-url
+                  "https://html.duckduckgo.com/html/?q=")))
+    (and (string-prefix? base url)
+         (not (equal? url base))
+         (url-decode (substring-bytes url (string-byte-length base)
+                                      (string-byte-length url))))))
 
 ;; browser-tab semantics: inside a browse buffer the URL navigates IN
 ;; PLACE; outside, the page's own tab comes up — the one that already
@@ -726,10 +927,40 @@ C-s searches to any link.")
           (web--goto-url! name url #t)
           name))))
 
+;;; --- what the person typed ------------------------------------------------------
+;;; One prompt takes both a page and a question, the way a browser's
+;;; address bar does. A name that could be a host is one; anything else
+;;; is a search.
+
+(defcustom 'browse-search-url "https://html.duckduckgo.com/html/?q="
+  "Where a search goes. The query is percent-encoded and appended."
+  'group 'web 'type 'string)
+
+;; A host has a dot in its first segment and no space: "gnu.org" and
+;; "gnu.org/software" are hosts, "emacs lisp manual" and "readable" are
+;; not. localhost is the one host with no dot.
+(define (web--url? text)
+  (let* ((first (car (string-split text "/")))
+         (host (car (string-split first "?"))))
+    (and (not (string-contains? text " "))
+         (or (equal? host "localhost")
+             (string-prefix? "localhost:" host)
+             (and (string-contains? host ".")
+                  (not (string-prefix? "." host))
+                  (not (string-suffix? "." host)))))))
+
+;; the address bar rule: a host gets a scheme, a question gets a search
+(define (web--target text)
+  (let ((t (string-trim text)))
+    (cond ((string-contains? t "://") t)
+          ((web--url? t) (string-append "https://" t))
+          (else (string-append (if (boundp 'browse-search-url)
+                                   browse-search-url
+                                   "https://html.duckduckgo.com/html/?q=")
+                               (url-encode t))))))
+
 (define (browse url)
-  (let ((full (if (string-contains? url "://")
-                  url
-                  (string-append "https://" url))))
+  (let ((full (web--target url)))
     (if (web--buffer? (current-buffer))
         (begin (web--goto-url! (current-buffer) full #t)
                (current-buffer))
@@ -756,16 +987,17 @@ C-s searches to any link.")
   (string-append
     "Use XSLT for site-specific parsers; do not add a Scheme wrapper for a transform-only parser. "
     "Put the stylesheet under web/parsers. "
-    "Add (BASE-URL STYLESHEET KIND) to *web--xslt-sites*; KIND becomes the modeline reading name. "
-    "web--xslt-command runs xsltproc --html before pandoc. "
+    "Add (BASE-URL STYLESHEET RENDER?) to *web--sites*; the stylesheet becomes the calm reading. "
+    "Set RENDER? to #t only when the server answers a fetch with a script shell: it costs a real browser tab. "
+    "web--calm-command runs xsltproc --html before pandoc. "
     "Preserve useful links, content images, and semantic text in transformed HTML. "
-    "Unregistered sites and short transform outputs continue through readable and page fallbacks.")
+    "Unregistered sites read through readable, and a short calm reading falls back to the full page.")
   'domain 'web
   'effects '(pure)
-  'use "create web/parsers/example.xsl; add (\"https://example.com\" \"example.xsl\" \"article\") to *web--xslt-sites*")
+  'use "create web/parsers/example.xsl; add (\"https://example.com\" \"example.xsl\" #f) to *web--sites*")
 
 (public! 'browse
-  "(browse URL) — read URL as text in its own tab buffer (*browse:host/page*); in a browse buffer it navigates in place")
+  "(browse URL) — read URL as text in its own tab buffer (*browse:host/page*); a name that is not a host becomes a search; in a browse buffer it navigates in place")
 
 (public! 'url-resolve
   "(url-resolve URL BASE) — resolve a link target against the page it came from: absolute stays, //host takes the scheme, /path takes the origin, the rest appends to the page's directory")

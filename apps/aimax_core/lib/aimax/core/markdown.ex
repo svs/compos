@@ -23,22 +23,44 @@ defmodule Aimax.Core.Markdown do
 
   alias Aimax.Core.TS
 
+  # One capture per node kind, because a capture name is how a kind reaches
+  # Elixir. The marker kinds are named too: their bytes are markup, and a
+  # renderer has to know which bytes those are in order to leave them out.
   @block_query """
   (atx_heading) @heading
   (setext_heading) @heading
+  (atx_h1_marker) @atx_h1_marker
+  (atx_h2_marker) @atx_h2_marker
+  (atx_h3_marker) @atx_h3_marker
+  (atx_h4_marker) @atx_h4_marker
+  (atx_h5_marker) @atx_h5_marker
+  (atx_h6_marker) @atx_h6_marker
+  (setext_h1_underline) @setext_h1_underline
+  (setext_h2_underline) @setext_h2_underline
   (paragraph) @paragraph
   (fenced_code_block) @code
   (indented_code_block) @code
+  (fenced_code_block_delimiter) @fence
   (info_string) @info
   (code_fence_content) @code_text
   (block_quote) @quote
+  (block_quote_marker) @quote_marker
+  (block_continuation) @continuation
   (list) @list
   (list_item) @item
+  (list_marker_dot) @marker_dot
+  (list_marker_parenthesis) @marker_paren
+  (list_marker_minus) @marker_bullet
+  (list_marker_star) @marker_bullet
+  (list_marker_plus) @marker_bullet
+  (task_list_marker_checked) @task_done
+  (task_list_marker_unchecked) @task_todo
   (thematic_break) @rule
   (pipe_table) @table
   (pipe_table_header) @table_head
   (pipe_table_row) @table_row
   (pipe_table_cell) @cell
+  (pipe_table_delimiter_row) @table_delimiter
   (inline) @inline
   """
 
@@ -47,11 +69,17 @@ defmodule Aimax.Core.Markdown do
   (strong_emphasis) @strong
   (strikethrough) @strike
   (code_span) @code_span
+  (emphasis_delimiter) @delimiter
+  (code_span_delimiter) @delimiter
   (inline_link) @link
   (image) @image
   (link_text) @link_text
+  (image_description) @link_text
   (link_destination) @link_destination
+  (link_title) @link_title
+  (link_label) @link_label
   (uri_autolink) @autolink
+  (hard_line_break) @break
   """
 
   @doc """

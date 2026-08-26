@@ -501,14 +501,19 @@ defmodule Aimax.Ui.EditorLive do
 
     # the oembed generation moves when a tweet fetch lands, so the cached
     # placeholder misses and the card renders
+    engine = preview_engine(leaf.buffer, rm)
+
     key =
       {leaf.buffer, leaf.version, rm, leaf.preview_authored, :erlang.phash2(faces), pt, mark,
-       :erlang.phash2(leaf.overlays), Aimax.Ui.Oembed.generation()}
+       :erlang.phash2(leaf.overlays), Aimax.Ui.Oembed.generation(), engine}
 
     html =
       case cache[{:preview, leaf.id}] do
-        {^key, html} -> html
-        _ -> preview_doc(rm, leaf.text, pt, mark, faces, leaf.preview_authored, leaf.overlays)
+        {^key, html} ->
+          html
+
+        _ ->
+          render_preview(engine, rm, leaf, pt, mark, faces)
       end
 
     {Map.merge(leaf, %{lines: [], preview: html}),
@@ -1741,6 +1746,31 @@ defmodule Aimax.Ui.EditorLive do
   @llm_end "\uE003"
   @llm_meta_end "\uE004"
 
+  # Which renderer draws a Markdown page. The tree-sitter one places the
+  # caret by asking the document where a byte was drawn; the Earmark one
+  # still carries the code-block heads, the llm-response blockquotes, and
+  # the URL embeds, so it stays the default until those are ported. A
+  # buffer asks for the other with the `preview-engine` local.
+  defp preview_engine(buffer, "markdown") do
+    case Aimax.Core.Buffer.get_local(buffer, "preview-engine") do
+      "tree-sitter" -> :tree_sitter
+      _ -> :earmark
+    end
+  end
+
+  defp preview_engine(_buffer, _rm), do: :earmark
+
+  defp render_preview(:tree_sitter, rm, leaf, pt, mark, faces) do
+    case preview_doc_ts(leaf.text, pt, mark, faces, leaf.overlays) do
+      {:ok, html} -> html
+      # no grammar installed: draw the page rather than nothing
+      {:error, _} -> render_preview(:earmark, rm, leaf, pt, mark, faces)
+    end
+  end
+
+  defp render_preview(:earmark, rm, leaf, pt, mark, faces),
+    do: preview_doc(rm, leaf.text, pt, mark, faces, leaf.preview_authored, leaf.overlays)
+
   @doc false
   def preview_doc(rm, text, point, faces, authored),
     do: preview_doc(rm, text, point, nil, faces, authored, [])
@@ -1766,6 +1796,35 @@ defmodule Aimax.Ui.EditorLive do
         if(m, do: [{m, 1, @mk_sentinel}], else: [])
 
     preview_html("markdown", text, faces, authored, overlays, marks)
+  end
+
+  @doc """
+  Render a Markdown preview through the tree-sitter renderer.
+
+  Every node knows the source it came from, so the caret is cut in at its
+  byte instead of being placed by an alignment. Answers `{:error,
+  :no_grammar}` when the Markdown grammar is not installed.
+  """
+  def preview_doc_ts(text, point, mark, faces, overlays) do
+    size = byte_size(text)
+    p = point |> max(0) |> min(size)
+    m = if is_integer(mark), do: mark |> max(0) |> min(size), else: nil
+
+    marks =
+      ts_line_marks(text) ++
+        [{p, ~s(<span class="pt"></span>)}] ++
+        if(m, do: [{m, ~s(<span class="mk"></span>)}], else: [])
+
+    case Aimax.Core.Markdown.Html.render(overlay_source(text, overlays), marks) do
+      {:ok, body} -> {:ok, markdown_page(body, faces)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp ts_line_marks(text) do
+    [0 | Enum.map(:binary.matches(text, "\n"), fn {at, _} -> at + 1 end)]
+    |> Enum.reject(&(&1 > byte_size(text)))
+    |> Enum.map(fn at -> {at, ~s(<span class="ln" data-p="#{at}"></span>)} end)
   end
 
   # A mark is a character, not an element. Earmark's pretty-printer puts a
@@ -2080,24 +2139,32 @@ defmodule Aimax.Ui.EditorLive do
   # single offset: a quote marker draws no character, so the rendered text
   # stays the source's own.
   defp preview_html("markdown", text, faces, _authored, overlays, marks) do
+    markdown_page(earmark_body(text, overlays, marks), faces)
+  end
+
+  defp earmark_body(text, overlays, marks) do
     source = overlay_source(text, overlays)
     fence_labels = markdown_fence_labels(source)
 
-    body =
-      source
-      |> markdown_preview_source()
-      |> Earmark.as_ast(compact_output: false, smartypants: false)
-      |> case do
-        {:ok, ast, _} -> ast
-        {:error, ast, _} -> ast
-      end
-      |> mark_ast(text, marks)
-      |> label_code_blocks(fence_labels)
-      |> tag_llm_responses()
-      |> embed_urls()
-      |> Earmark.Transform.transform(compact_output: false)
-      |> spans_for_marks()
+    source
+    |> markdown_preview_source()
+    |> Earmark.as_ast(compact_output: false, smartypants: false)
+    |> case do
+      {:ok, ast, _} -> ast
+      {:error, ast, _} -> ast
+    end
+    |> mark_ast(text, marks)
+    |> label_code_blocks(fence_labels)
+    |> tag_llm_responses()
+    |> embed_urls()
+    |> Earmark.Transform.transform(compact_output: false)
+    |> spans_for_marks()
+  end
 
+  # The page around a rendered body: the reader's typography and palette.
+  # Both renderers draw into it, so the only difference between them is the
+  # body itself.
+  defp markdown_page(body, faces) do
     %{bg: bg, fg: fg, accent: accent, link: link, dim: dim, border: border, inset: inset} =
       preview_palette(faces)
 

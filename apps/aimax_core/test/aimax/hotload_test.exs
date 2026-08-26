@@ -114,6 +114,14 @@ defmodule Aimax.HotloadTest do
       refute Hotload.source?("/home/u/.aimax/buffers/scratch.scm")
       refute Hotload.source?("/home/u/.aimax/chats/a/turn.scm")
     end
+
+    test "refuses a tree-sitter query, which is Scheme only to look at" do
+      # installing a grammar drops this beside the shared object. Read as
+      # editor Scheme it answers "unbound variable: [" for the query's
+      # alternation, then "unbound variable: atx_heading" for a node name.
+      refute Hotload.source?("/home/u/.aimax/grammars/markdown-highlights.scm")
+      refute Hotload.source?("/home/u/.aimax/grammars/src/markdown/queries/highlights.scm")
+    end
   end
 
   describe "the debounce" do

@@ -28,6 +28,37 @@
 
 ;;; --- the id -------------------------------------------------------------------
 
+(deftest 'new-groups-get-distinct-durable-accent-colors
+  "a group color belongs to the record and survives a rename"
+  (lambda ()
+    (let* ((left (group-record-create! "zzgs-color-left"))
+           (right (group-record-create! "zzgs-color-right"))
+           (color (group-record-color (group-record-by-id left)))
+           (buf (t--gs-buf)))
+      (check-true! (string-prefix? "#" color) "the color is a CSS hex value")
+      (check-false!
+        (equal? color (group-record-color (group-record-by-id right)))
+        "adjacent groups get distinct accents")
+      (check-equal! (list-cell-face (nth 1 (group-cells #f left)))
+                    (group-color-face left)
+                    "the groups board uses the group's own accent")
+      (buffer-add-group! buf left)
+      (let* ((face (buffer-filename-face buf))
+             (candidate (car (annotate 'buffer (list buf)))))
+        (check-equal! face (group-color-face left)
+                      "the filename face follows the group")
+        (check-equal! (nth 4 candidate) face
+                      "a minibuffer candidate carries the filename face")
+        (check-equal! (list-cell-face (nth 2 (ibuffer-cell-head buf))) face
+                      "ibuffer uses the filename face")
+        (check-equal! (list-cell-face (nth 1 (switch-cells #f candidate))) face
+                      "the modal switcher uses the filename face"))
+      (buffer-move-to-group! buf #f)
+      (group-rename! left "zzgs-color-renamed")
+      (check-equal! (group-record-color (group-record-by-id left)) color
+                    "renaming keeps the accent")
+      (t--gs-drop! left right))))
+
 (deftest 'a-rename-keeps-a-stable-group-id
   "the buffer holds the id, so the name is free to move"
   (lambda ()

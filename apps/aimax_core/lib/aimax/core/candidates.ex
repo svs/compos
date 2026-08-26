@@ -58,6 +58,16 @@ defmodule Aimax.Core.Candidates do
           chips: Enum.map(chips, &to_string/1)
         }
 
+      [label, hint, kind, chips, face]
+      when is_binary(label) and is_list(chips) and is_binary(face) ->
+        %{
+          label: label,
+          hint: to_string(hint),
+          kind: to_string(kind),
+          chips: Enum.map(chips, &to_string/1),
+          face: face
+        }
+
       %{label: _} = c ->
         c
 

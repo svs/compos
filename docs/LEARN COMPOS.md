@@ -1,8 +1,8 @@
-# Learn ai-max
+# Learn Compos
 
 ## Contents
 
-- [Welcome to ai-max](#welcome-to-ai-max)
+- [Welcome to Compos](#welcome-to-Compos)
 - [How to read Emacs notation](#how-to-read-emacs-notation)
 - [Your first five minutes](#your-first-five-minutes)
 - [Commands and M-x](#commands-and-m-x)
@@ -13,11 +13,22 @@
 - [A small guided exercise](#a-small-guided-exercise)
 - [Quick reference](#quick-reference)
 
-## Welcome to ai-max
+## Welcome to Compos
 
-ai-max is an Emacs-style editor. You work in buffers, run named commands, and use a companion chat when you want help.
+Compos is an Emacs-style editor. You work in buffers, run named commands, and use a companion chat when you want help.
+
+
+
 
 You do not need to learn everything at once. Begin by opening a file, making a change, and saving it. The rest can be discovered as you work. If you want to know why emacs is built the way it is and why you should be interested, read Why?
+
+
+
+
+
+
+
+
 
 
 ## How to read Emacs notation
@@ -99,7 +110,7 @@ Try asking: `What can I do in this mode?`, `Which keys matter here?`, or `Explai
 
 ## Configuration
 
-ai-max can be adjusted without editing its source code. Settings control behavior, while faces control appearance.
+Compos can be adjusted without editing its source code. Settings control behavior, while faces control appearance.
 
 Run `M-x customize` to browse the available options. Change a value and save it to keep the change after restarting the editor.
 

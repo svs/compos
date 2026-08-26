@@ -218,6 +218,10 @@ defmodule Aimax.Core.Editor do
   def set_frame_group_label(label, fid \\ nil),
     do: GenServer.call(__MODULE__, {:set_group_label, label, fid(fid)})
 
+  @doc "Record the group label and accent color for this frame."
+  def set_frame_group_style(label, color, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_group_style, label, color, fid(fid)})
+
   def key_for_command(command), do: GenServer.call(__MODULE__, {:key_for_command, command})
 
   @doc "Buffers in most-recently-displayed order (Emacs buffer list)."
@@ -412,6 +416,7 @@ defmodule Aimax.Core.Editor do
       # the group this frame stands in, by NAME. Naming and membership are
       # Scheme policy; rendering uses this only to compact a buffer's groups.
       group_label: nil,
+      group_color: nil,
       win_cols: %{}
     }
 
@@ -468,6 +473,7 @@ defmodule Aimax.Core.Editor do
           total_rows: 40,
           win_rows: %{},
           group_label: nil,
+          group_color: nil,
           win_cols: %{}
         }
 
@@ -703,6 +709,7 @@ defmodule Aimax.Core.Editor do
      %{
        frame: f.id,
        frame_group: Map.get(f, :group_label),
+       frame_group_color: Map.get(f, :group_color),
        tree: rendered,
        active: f.active,
        pending: f.pending,
@@ -721,10 +728,28 @@ defmodule Aimax.Core.Editor do
   def handle_call({:set_group_label, label, fid}, _from, state) do
     f = frame(state, fid)
 
-    if Map.get(f, :group_label) == label do
+    updated =
+      f
+      |> Map.put(:group_label, label)
+      |> then(fn frame ->
+        if is_nil(label), do: Map.put(frame, :group_color, nil), else: frame
+      end)
+
+    if updated == f do
       {:reply, :ok, state}
     else
-      changed(:ok, put_frame(state, Map.put(f, :group_label, label)), f.id)
+      changed(:ok, put_frame(state, updated), f.id)
+    end
+  end
+
+  def handle_call({:set_group_style, label, color, fid}, _from, state) do
+    f = frame(state, fid)
+
+    if Map.get(f, :group_label) == label and Map.get(f, :group_color) == color do
+      {:reply, :ok, state}
+    else
+      updated = f |> Map.put(:group_label, label) |> Map.put(:group_color, color)
+      changed(:ok, put_frame(state, updated), f.id)
     end
   end
 
@@ -2091,6 +2116,9 @@ defmodule Aimax.Core.Editor do
       # presentational compaction must happen per frame: one buffer can be
       # visible on two monitors whose current groups differ.
       group: modeline_group(Map.get(locals, "modeline-groups"), frame_group),
+      # Scheme selects the buffer-owned group that supplies its color.
+      # The frame group remains separate context for the bottom bar.
+      group_color: Map.get(locals, "modeline-group-color"),
       ts_lang: Map.get(locals, "ts-lang"),
       overlays: snap.overlays,
       overlay_gen: snap.overlay_gen,

@@ -113,8 +113,8 @@ Do not press a key to find out what it does. That checks two facts as one
 and takes 300 ms to say so.
 
 ```scheme
-(check-equal! (global-key-command "C-x b") "group-switch-to-buffer" ...)
-(run-command "group-switch-to-buffer")
+(check-equal! (global-key-command "C-x b") "group-switch-buffer" ...)
+(run-command "group-switch-buffer")
 (check-true! (string? (minibuffer-selected)) ...)
 ```
 

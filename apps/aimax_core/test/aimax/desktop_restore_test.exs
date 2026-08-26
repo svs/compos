@@ -67,6 +67,7 @@ defmodule Aimax.DesktopRestoreTest do
 
     assert Editor.render_state().minibuffer.prompt ==
              "Save #{path}? (y, n, A all, N none) "
+
     KeyDispatch.handle_key("y")
 
     assert File.read!(path) == "agent saved\n"
@@ -190,6 +191,44 @@ defmodule Aimax.DesktopRestoreTest do
     assert :ok = Desktop.restore_now()
     assert Buffer.exists?(name)
     assert Buffer.get_local(name, "seen") == "marker"
+  end
+
+  test "group records restore before buffer runtime validates memberships" do
+    n = System.unique_integer([:positive])
+    name = "*group-restore-#{n}*"
+    group = "group-restore-#{n}"
+
+    on_exit(fn ->
+      if Buffer.exists?(name), do: Aimax.Core.kill_buffer(name)
+      Session.eval(~s{(group-record-delete! "#{group}")})
+    end)
+
+    eval!("""
+    (begin
+      (switch-to-buffer! "#{name}")
+      (buffer-add-group! "#{name}" "#{group}")
+      (switch-to-group! "#{group}"))
+    """)
+
+    assert Editor.render_state().frame_group == group
+    assert :ok = Desktop.save_now()
+
+    Editor.set_window_buffer("*scratch*")
+    evict(name)
+
+    # Simulate the fresh Scheme defaults seen before desktop restore.
+    eval!("""
+    (begin
+      (set! *group-records* '())
+      (set! *group-next-id* 0)
+      (set-frame-local! 'current-group #f)
+      (set-frame-group-label! #f))
+    """)
+
+    assert :ok = Desktop.restore_now()
+    assert Buffer.exists?(name)
+    assert eval!(~s{(buffer-group-summary "#{name}")}) == inspect(group)
+    assert Editor.render_state().frame_group == group
   end
 
   # a mode can declare a local as DERIVED: the desktop then skips it, and

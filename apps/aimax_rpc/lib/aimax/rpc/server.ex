@@ -120,8 +120,15 @@ defmodule Aimax.Rpc.Server do
   defp handle_request(%{"method" => "reload", "params" => %{"paths" => paths}} = req)
        when is_list(paths) do
     case Session.reload_files(paths) do
-      {:ok, count} -> %{jsonrpc: "2.0", id: req["id"], result: %{"reloaded" => count}}
-      {:error, msg} -> error_resp(req["id"], -32000, msg)
+      {:ok, %{files: count, forms: forms}} ->
+        %{
+          jsonrpc: "2.0",
+          id: req["id"],
+          result: %{"reloaded" => count, "forms" => forms}
+        }
+
+      {:error, msg} ->
+        error_resp(req["id"], -32000, msg)
     end
   end
 

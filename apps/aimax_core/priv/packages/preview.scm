@@ -208,19 +208,44 @@
          (parts (string-split body "/")))
     (list (car parts) (url-decode (string-join (cdr parts) "/")))))
 
+;; A Markdown file link is a URL, so remove its query and fragment before
+;; decoding it. Resolve a relative target beside the source buffer's file.
+(define (preview--file-href href)
+  (let* ((without-fragment (car (string-split href "#")))
+         (without-query (car (string-split without-fragment "?")))
+         (decoded (url-decode without-query)))
+    (if (string-prefix? "file://" decoded)
+        (substring decoded 7 (string-length decoded))
+        decoded)))
+
+(define (preview--file-target source href)
+  (let ((target (preview--file-href href)))
+    (cond ((or (string-prefix? "/" target)
+               (string-prefix? "~" target))
+           (expand-path target))
+          ((and (string? source) (buffer-path source))
+           (let ((joined (string-append (car (path-split (buffer-path source)))
+                                        target)))
+             (if (remote-path? joined) joined (expand-path joined))))
+          (else (expand-path target)))))
+
 (define (preview-follow-link! win href)
   (mouse-select-window! win)
-  (cond
-    ((string-prefix? "aimax:" href)
-     (let* ((parts (preview--link-parts href))
-            (hit (assoc (car parts) *preview-link-verbs*)))
-       (if hit
-           ((cadr hit) (cadr parts))
-           (message (string-append "No handler for " href)))))
-    ((and (or (string-prefix? "http://" href) (string-prefix? "https://" href))
-          (boundp 'browse))
-     (browse href))
-    (else (message href))))
+  (let ((source (current-buffer)))
+    (cond
+      ((string-prefix? "aimax:" href)
+       (let* ((parts (preview--link-parts href))
+              (hit (assoc (car parts) *preview-link-verbs*)))
+         (if hit
+             ((cadr hit) (cadr parts))
+             (message (string-append "No handler for " href)))))
+      ((and (or (string-prefix? "http://" href) (string-prefix? "https://" href))
+            (boundp 'browse))
+       (browse href))
+      ((re-match "^[A-Za-z][A-Za-z0-9+.-]*:" href)
+       (message (string-append "No handler for " href)))
+      (else
+        (visit (preview--file-target source href) (frame-group))))))
 
 (public! 'on-preview-link!
   "(on-preview-link! VERB FN) — claim the aimax:VERB/ARG links in a rendered page; FN gets ARG"

@@ -154,6 +154,16 @@ defmodule Aimax.Core.Desktop do
          %{} = desktop <- :erlang.binary_to_term(bin) do
       restore_frames(desktop)
 
+      # Runtime setup reads persisted policy. Group modelines, for example,
+      # validate buffer membership against the durable group record table.
+      # Restore globals before setup so valid IDs are not treated as dangling
+      # and written back as empty buffer locals.
+      case desktop[:globals] do
+        nil -> :ok
+        [] -> :ok
+        globals -> Session.call_named("desktop-globals!", [globals])
+      end
+
       # Waking installs literal buffer state. Runtime-only mode machinery is
       # rebuilt only after the Editor call has returned, avoiding a
       # Session -> Editor deadlock during tree construction.
@@ -164,14 +174,6 @@ defmodule Aimax.Core.Desktop do
 
       for {face, attrs} <- desktop[:faces] || %{} do
         Editor.set_face(face, attrs)
-      end
-
-      # Scheme globals last: nothing else in the restore reads them, and
-      # they must land on top of whatever the stdlib set at load time
-      case desktop[:globals] do
-        nil -> :ok
-        [] -> :ok
-        globals -> Session.call_named("desktop-globals!", [globals])
       end
 
       # Seed the cache: a save that runs before the Session is free again
@@ -205,5 +207,4 @@ defmodule Aimax.Core.Desktop do
     do: Editor.restore_tree(tree, desktop[:active_buffer])
 
   defp restore_frames(_), do: :ok
-
 end

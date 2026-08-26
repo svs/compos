@@ -31,4 +31,9 @@ defmodule Aimax.Ui.Router do
   # link. Loopback only, and the answer carries no CORS header: a page you
   # visit can send this request but cannot read the reply.
   forward("/raw", Aimax.Ui.Raw)
+
+  # Markdown keeps absolute filesystem paths. The preview signs each local
+  # image path before the browser requests it, so this route exposes only a
+  # path the editor rendered and never accepts an arbitrary filename.
+  forward("/local-image", Aimax.Ui.LocalImage)
 end

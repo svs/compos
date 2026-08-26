@@ -6,10 +6,8 @@ defmodule Aimax.SwitchModalTest do
   into the window you came from, and dormant rows stay killable and
   visitable.
 
-  C-x b no longer opens it: groups.scm binds that key to the minibuffer
-  prompt group-switch-to-buffer, which lists the current group's members
-  first. The modal switcher answers to M-x switch-to-buffer and to C-x G
-  for the groups view, so these tests run the command.
+  C-x b opens the group-aware minibuffer prompt. The modal switcher remains
+  available as M-x switch-to-buffer.
   """
 
   use ExUnit.Case

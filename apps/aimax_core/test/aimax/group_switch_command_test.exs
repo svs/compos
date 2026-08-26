@@ -124,6 +124,57 @@ defmodule Aimax.GroupSwitchCommandTest do
     assert Editor.current_buffer() == first
   end
 
+  test "grouped filenames carry their group face in minibuffer candidates", %{
+    first: first,
+    second: second
+  } do
+    here = group_id("filename-face")
+
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{here}")
+      (buffer-add-group! "#{second}" "#{here}")
+      (set-frame-local! 'current-group "#{here}")
+      (frame-group-label-refresh!)
+      (switch-to-buffer! "#{first}")
+      (run-command "group-switch-buffer"))
+    """)
+
+    expected = eval!(~s[(group-color-face "#{here}")]) |> Jason.decode!()
+    candidate = Enum.find(Editor.render_state().minibuffer.candidates, &(&1.label == second))
+
+    assert candidate.face == expected
+  end
+
+  test "a buffer supplies its own color while the frame remains in another group", %{
+    first: first,
+    second: second
+  } do
+    mail = group_id("color-mail")
+    docs = group_id("color-docs")
+
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{mail}")
+      (buffer-add-group! "#{second}" "#{docs}")
+      (set-frame-local! 'current-group "#{mail}")
+      (frame-group-label-refresh!)
+      (switch-to-buffer! "#{second}"))
+    """)
+
+    rendered = Editor.render_state()
+    leaf = rendered.tree |> leaves() |> Enum.find(&(&1.buffer == second))
+    docs_color = eval!(~s[(group-record-color (group-record-by-id "#{docs}"))]) |> Jason.decode!()
+    mail_color = eval!(~s[(group-record-color (group-record-by-id "#{mail}"))]) |> Jason.decode!()
+    docs_face = eval!(~s[(group-color-face "#{docs}")]) |> Jason.decode!()
+
+    assert rendered.frame_group == "color-mail"
+    assert leaf.group == "color-docs"
+    assert leaf.group_color == docs_color
+    refute leaf.group_color == mail_color
+    assert eval!(~s[(buffer-filename-face "#{second}")]) == Jason.encode!(docs_face)
+  end
+
   test "modelines compact this buffer's memberships relative to the frame group", %{
     first: first,
     second: second,
@@ -160,6 +211,7 @@ defmodule Aimax.GroupSwitchCommandTest do
     assert by_buffer[second].group == "2 groups"
     assert by_buffer[third].group == "modeline-other"
     assert rendered.frame_group == "modeline-here"
+    assert rendered.frame_group_color =~ ~r/^#[0-9a-f]{6}$/i
 
     # C-x ? is the expanded, lossless view: it names every membership.
     eval!(~s{(select-window! (window-showing "#{first}"))})

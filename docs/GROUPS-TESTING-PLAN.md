@@ -124,19 +124,19 @@ Confirm the buffer ends in the destination and leaves the source.
 
 ### TODO Check narrow buffer switching
 
-**Run:** `C-x b` (`M-x group-switch-to-buffer`).
+**Run:** `C-x b` (`M-x group-switch-buffer`).
 
-Press `C-x b` inside a group. Confirm only current-group members appear.
+Press `C-x b` inside a group. Confirm current-group members appear before all other buffers.
 
-### TODO Check broadened buffer switching
+### TODO Check the other-buffers section
 
-**Run:** `C-u C-x b`.
+**Run:** `C-x b`.
 
-Press `C-u C-x b`. Confirm foreign and ungrouped buffers appear.
+Confirm foreign and ungrouped buffers appear after the current-group section.
 
 ### TODO Select a foreign buffer from the broad switcher
 
-**Run:** `C-u C-x b`.
+**Run:** `C-x b`.
 
 Confirm membership and frame group do not change.
 
@@ -160,7 +160,7 @@ Confirm ordinary buffer switching remains usable.
 
 ### TODO Stress the switcher with many unrelated buffers
 
-**Run:** `C-x b`, then `C-u C-x b`.
+**Run:** `C-x b`.
 
 Confirm narrow and broadened switching remain responsive and selectable.
 

@@ -86,7 +86,8 @@
 (define (ibuffer-cell-head b)
   (list (if (buffer-modified? b) (list "●" "warn") "")
         (list (buffer-icon b) "faint")
-        (list b (if (string-prefix? "*" b) "accent" #f))))
+        (list b (or (buffer-filename-face b)
+                    (if (string-prefix? "*" b) "accent" #f)))))
 
 (define (ibuffer-compact-cells buf b)
   (append (ibuffer-cell-head b)
@@ -96,7 +97,8 @@
   (append (ibuffer-cell-head b)
     (list (list (ibuffer-human (buffer-size b)) "dim")
           (list (or (buffer-local b 'mode-name) "Fundamental") "faint")
-          (list (group-label (buffer-group b)) "accent")
+          (list (group-label (buffer-group b))
+                (and (buffer-group b) (group-color-face (buffer-group b))))
           (list (if (buffer-path b) "✓" "") "ok"))))
 
 (define (ibuffer-meta buf)

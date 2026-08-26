@@ -96,7 +96,7 @@ defmodule Aimax.EditorTest do
   end
 
   defp open_group_switcher do
-    {:ok, _} = Aimax.Core.Session.eval(~s[(run-command "group-switch-to-buffer")])
+    {:ok, _} = Aimax.Core.Session.eval(~s[(run-command "group-switch-buffer")])
   end
 
   defp clear_minibuffer do
@@ -2840,9 +2840,7 @@ defmodule Aimax.EditorTest do
 
     # a theme that names the face wins
     {:ok, _} =
-      Aimax.Core.Session.eval(
-        ~s{(define-theme "tt-theme" (list (list 'tt-gauge 'fg "#eeeeee")))}
-      )
+      Aimax.Core.Session.eval(~s{(define-theme "tt-theme" (list (list 'tt-gauge 'fg "#eeeeee")))})
 
     {:ok, _} = Aimax.Core.Session.eval(~s{(load-theme "tt-theme")})
     assert Editor.render_state().faces["tt-gauge"]["fg"] == "#eeeeee"
@@ -3995,6 +3993,20 @@ defmodule Aimax.EditorTest do
           do: Aimax.Core.Session.eval(~s{(buffer-kill! "#{name}")})
     end
 
+    test "three columns pulls the next buffers from the MRU ring", %{buf: buf} do
+      second = "three-columns-second-#{System.unique_integer([:positive])}"
+      third = "three-columns-third-#{System.unique_integer([:positive])}"
+      for name <- [second, third], do: Aimax.Core.create_buffer(name)
+
+      run("window-layout-columns")
+
+      assert Editor.render_state().tree |> collect_buffers() |> Enum.sort() ==
+               Enum.sort([buf, second, third])
+
+      for name <- [second, third],
+          do: Aimax.Core.Session.eval(~s{(buffer-kill! "#{name}")})
+    end
+
     test "adaptive layout command follows the measured frame width", %{buf: buf} do
       n = System.unique_integer([:positive])
       second = "adaptive-second-#{n}"
@@ -4331,10 +4343,28 @@ defmodule Aimax.MinibufferEditingTest do
 
     # a region already dragged out survives the failed extend
     {:ok, _} =
-      Aimax.Core.Session.call_named("preview-select!", [win, "runs a", " little", "a", "", 0, 0, 0])
+      Aimax.Core.Session.call_named("preview-select!", [
+        win,
+        "runs a",
+        " little",
+        "a",
+        "",
+        0,
+        0,
+        0
+      ])
 
     {:ok, _} =
-      Aimax.Core.Session.call_named("preview-select!", [win, "\n", "no source match", "", "A", 0, 0, 0])
+      Aimax.Core.Session.call_named("preview-select!", [
+        win,
+        "\n",
+        "no source match",
+        "",
+        "A",
+        0,
+        0,
+        0
+      ])
 
     assert {:ok, " runs a"} = Aimax.Core.Session.call_named("clipboard-copy", [])
 

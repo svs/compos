@@ -159,7 +159,7 @@ The current group is the place where the user stands. Commands move within that 
 
 | Operation | Meaning |
 |---|---|
-| `group-switch-to-buffer` | Visit another member of the current group. |
+| `group-switch-buffer` | Visit another member of the current group. |
 | `buffer-select` | Toggle selection on the active visible buffer. |
 | `buffer-unselect` | Clear selection on the active buffer. |
 | `buffer-unselect-all` | Clear selection on every buffer. |
@@ -191,8 +191,8 @@ An unprefixed command operates in the current group. One universal prefix expose
 
 | Command shape | Required scope |
 |---|---|
-| `group-switch-to-buffer` | Members of the current group. |
-| `C-u group-switch-to-buffer` | All buffers, with foreign membership visible. |
+| `group-switch-buffer` | Members of the current group. |
+| `C-u group-switch-buffer` | All buffers, with foreign membership visible. |
 | find file | Current group; a successful visit joins it. |
 | prefixed find file | Choose a project or source, then open the file into the current group. |
 | `group-chat` | Select or create a chat in the current group. |
@@ -1033,8 +1033,7 @@ The interaction model has the primary navigation verb **switch** and the primary
 
 | Intent | Reference binding | Command / operation |
 |---|---|---|
-| Move within the current group | `C-x b` | `group-switch-to-buffer`: list only current-group buffers and chats, using the existing case-insensitive candidate-plus-marginalia matcher. |
-| Broaden the current buffer search | `C-u C-x b` | `C-u group-switch-to-buffer`: include foreign and ungrouped buffers; accepting one switches the selected window without changing membership or frame context. |
+| Switch buffers | `C-x b` | List current-group buffers first, followed by foreign and ungrouped buffers; accepting one follows its group, or clears the frame group when it is ungrouped. |
 | Stand in another group | `C-x g` | `group-switch`: choose a group, then optionally choose a destination within it. Immediate acceptance restores the group as last left. |
 | Switch to a project | `C-x p p` | Enter the project's group, then choose a file, open buffer, or its root Dired buffer. |
 | Switch a project into a chosen group | `C-u C-x p p` | Choose a project, enter an existing or new destination group, then choose its file or root. |
@@ -1058,7 +1057,7 @@ The interaction model has the primary navigation verb **switch** and the primary
 
 `project-group-target` uses the first matching project grouping rule. User config can prepend and remove named rules without changing navigation commands.
 
-[UX-KEY-1] `C-x b` MUST remain the fast path for movement inside the current group, even when hundreds of buffers are live. It MUST NOT become an everything palette in its unprefixed form.
+[UX-KEY-1] `C-x b` keeps current-group buffers at the front without hiding the rest of the buffer list.
 
 [UX-KEY-2] `C-u` MUST broaden or expose the implicit context while preserving the command's verb.
 
@@ -1072,7 +1071,7 @@ The interaction model has the primary navigation verb **switch** and the primary
 
 [UX-KEY-7] Dedicated shortcuts such as a groups board binding MAY exist, but the complete workflow MUST remain discoverable from the primary switch, group-navigation, and candidate-action surfaces.
 
-Expected operations include `group-switch-to-buffer`, `group-switch`, `group-new`, `group-new-from-buffer`, `group-new-from-visible`, `group-pull-buffer`, `group-push-buffer`, `group-pop`, `group-chat`, `group-describe`, `group-noise-cycle`, `group-dissolve`, `group-kill`, and `group-rename`.
+Expected operations include `group-switch-buffer`, `group-switch`, `group-new`, `group-new-from-buffer`, `group-new-from-visible`, `group-pull-buffer`, `group-push-buffer`, `group-pop`, `group-chat`, `group-describe`, `group-noise-cycle`, `group-dissolve`, `group-kill`, and `group-rename`.
 
 Bindings MAY change after usability testing. The `group-*` command names, verbs, scopes, cancellation behavior, and observable state transitions are normative.
 

@@ -18,6 +18,61 @@
                   "<images/my sketch.png>"
                   "the destination is valid Markdown")))
 
+(deftest 'pasted-image-extension-follows-the-clipboard-mime-type
+  "The default image name follows the clipboard type"
+  (lambda ()
+    (check-equal! (clipboard-image-extension "image/jpeg") ".jpg"
+                  "JPEG uses a JPG suffix")
+    (check-equal! (clipboard-image-extension "image/png") ".png"
+                  "PNG uses a PNG suffix")))
+
+(deftest 'user-paste-hooks-run-before-writing-defaults-and-can-consume
+  "a named userland handler can replace writing-mode paste policy"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-writing-paste-hook.md" "")))
+      (enable-minor-mode! buf "writing-mode")
+      (add-paste-hook! "writing-mode" 'zz-user-paste
+        (lambda (kind data mime)
+          (if (equal? kind "image")
+              (begin
+                (insert! (string-append "[" mime ":" data "]"))
+                #t)
+              #f)))
+      (with-current-buffer buf
+        (lambda () (clipboard-image-paste! "bytes" "image/png")))
+      (check-equal! (buffer-text buf) "[image/png:bytes]"
+                    "the user handler consumed the image without prompting")
+      ;; Re-evaluating the same init entry replaces it instead of stacking it.
+      (add-paste-hook! 'writing-mode 'zz-user-paste
+        (lambda (kind data mime) #f))
+      (check-equal!
+        (length
+          (filter
+            (lambda (entry)
+              (and (equal? (car entry) "writing-mode")
+                   (equal? (cadr entry) 'zz-user-paste)))
+            *paste-hooks*))
+        1
+        "named registration is idempotent")
+      (remove-paste-hook! "writing-mode" 'zz-user-paste)
+      (disable-minor-mode! buf "writing-mode")
+      (buffer-kill! buf))))
+
+(deftest 'writing-paste-hooks-may-pass-text-through
+  "returning #f preserves ordinary clipboard paste"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-writing-text-paste.md" "")))
+      (enable-minor-mode! buf "writing-mode")
+      (add-paste-hook! "writing-mode" 'zz-observe-text
+        (lambda (kind data mime) #f))
+      (with-current-buffer buf
+        (lambda () (clipboard-paste! "ordinary text")))
+      (check-equal! (buffer-text buf) "ordinary text"
+                    "unconsumed text uses the normal paste path")
+      (remove-paste-hook! "writing-mode" 'zz-observe-text)
+      (disable-minor-mode! buf "writing-mode")
+      (buffer-kill! buf))))
+
 (define (t--wr-locals buf)
   (map (lambda (k) (list k (buffer-local buf k)))
        '(window-class modeline-info line-numbers render-mode preview-renderer

@@ -388,6 +388,8 @@ defmodule Aimax.Core.SchemeAPI do
         "(minibuffer-set-candidates! CANDIDATES) — replace the minibuffer's candidate list.",
       "set-frame-group-label!" =>
         "(set-frame-group-label! NAME [FRAME]) — record a frame's group context; #f clears it. FRAME defaults to the selected one.",
+      "set-frame-group-style!" =>
+        "(set-frame-group-style! NAME COLOR [FRAME]) — record a frame's group label and accent color.",
       "delete-file!" =>
         "(delete-file! PATH) — delete a file or empty directory; return #t or error.",
       "trash-file!" =>
@@ -1558,6 +1560,24 @@ defmodule Aimax.Core.SchemeAPI do
         [label, fid] ->
           Editor.set_frame_group_label(
             if(is_binary(label), do: label, else: nil),
+            if(is_binary(fid), do: fid, else: nil)
+          )
+
+          :void
+      end,
+      "set-frame-group-style!" => fn
+        [label, color] ->
+          Editor.set_frame_group_style(
+            if(is_binary(label), do: label, else: nil),
+            if(is_binary(color), do: color, else: nil)
+          )
+
+          :void
+
+        [label, color, fid] ->
+          Editor.set_frame_group_style(
+            if(is_binary(label), do: label, else: nil),
+            if(is_binary(color), do: color, else: nil),
             if(is_binary(fid), do: fid, else: nil)
           )
 

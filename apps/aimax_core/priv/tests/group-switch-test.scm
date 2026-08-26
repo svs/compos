@@ -34,12 +34,12 @@
 
 (define (t--sw-done!)
   (when (minibuffer-state) (minibuffer-cancel!))
+  (set-frame-local! 'current-group #f)
+  (set-frame-local! 'previous-group #f)
   (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b)))
             (list t--sw-first t--sw-second t--sw-third))
   (set! *group-records* '())
   (set! *group-next-id* 0)
-  (set-frame-local! 'current-group #f)
-  (set-frame-local! 'previous-group #f)
   (delete-other-windows!))
 
 (define (t--sw-type! text) (minibuffer-change! text))
@@ -62,7 +62,10 @@
           ((equal? (car ls) label) i)
           (else (loop (cdr ls) (+ i 1))))))
 
-(define (t--sw-open-switcher!) (run-command "group-switch-to-buffer"))
+(define (t--sw-open-switcher!) (run-command "group-switch-buffer"))
+(define (t--sw-open-all!)
+  (set-prefix-arg! 4)
+  (run-command "group-switch-buffer"))
 
 ;;; --- founding a group -----------------------------------------------------------
 
@@ -276,6 +279,25 @@
                      "the selected buffer joined it")))
     (t--sw-done!)))
 
+(deftest 'push-selected-falls-back-to-the-current-buffer
+  "with no selection, the current work buffer joins the destination"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((source (group-record-create! "zzsw-source")))
+      (buffer-add-group! t--sw-first source)
+      (set-frame-local! 'current-group source)
+      (switch-to-buffer! t--sw-first)
+      (run-command "group-push-selected")
+      (t--sw-type! "zzsw-current-destination")
+      (t--sw-key! "confirm")
+      (let ((destination (group-resolve-id "zzsw-current-destination")))
+        (check-true! destination "the destination was created")
+        (check-true! (buffer-in-group? t--sw-first destination)
+                     "the current buffer joined it")
+        (check-false! (buffer-in-group? t--sw-second destination)
+                      "another buffer did not join")))
+    (t--sw-done!)))
+
 (deftest 'move-visible-removes-the-current-group
   "visible work buffers leave the current group after joining the destination"
   (lambda ()
@@ -329,20 +351,17 @@
     (switch-to-buffer! t--sw-first)
     (list current foreign)))
 
-(deftest 'the-switcher-puts-the-groups-own-members-first-and-still-switches
-  "a member leads; a stranger is in the pool below"
+(deftest 'the-switcher-lists-the-current-group-before-other-buffers
+  "members come first and foreign buffers remain reachable"
   (lambda ()
     (t--sw-setup!)
     (let ((ids (t--sw-three-groups!)))
       (t--sw-open-switcher!)
-      (check-true! (< (t--sw-at t--sw-second) (t--sw-at "other buffers"))
-                   "the member sits above the other-buffers heading")
-
-      ;; a stranger may sit below the rendered window: filter to prove it
-      ;; is in the pool at all, then clear the filter again
-      (t--sw-type! t--sw-third)
-      (check-true! (member t--sw-third (t--sw-labels)) "the stranger is reachable")
-      (t--sw-type! "")
+      (let ((labels (t--sw-labels)))
+        (check-true! (member t--sw-second labels) "the member is reachable")
+        (check-true! (member t--sw-third labels) "the stranger is reachable")
+        (check-true! (< (t--sw-at t--sw-second) (t--sw-at t--sw-third))
+                     "the member is listed before the stranger"))
 
       (t--sw-type! t--sw-second)
       (t--sw-key! "confirm")
@@ -350,12 +369,12 @@
       (check-equal! (frame-local 'current-group) (car ids) "and the context held"))
     (t--sw-done!)))
 
-(deftest 'the-switcher-lists-every-buffer-under-two-headings
-  "nothing is hidden: the group's own first, then the rest"
+(deftest 'a-broadened-switcher-lists-every-buffer-under-two-headings
+  "C-u lists the group's own first, then the rest"
   (lambda ()
     (t--sw-setup!)
     (t--sw-three-groups!)
-    (t--sw-open-switcher!)
+    (t--sw-open-all!)
     (let ((labels (t--sw-labels)))
       (check-true! (member "in this group" labels) "the first heading")
       (check-true! (member "other buffers" labels) "the second")
@@ -378,7 +397,7 @@
   (lambda ()
     (t--sw-setup!)
     (t--sw-three-groups!)
-    (t--sw-open-switcher!)
+    (t--sw-open-all!)
     (check-equal! (t--sw-selected) t--sw-second "the first selection is a real buffer")
 
     (t--sw-key! "next-candidate")
@@ -397,7 +416,7 @@
   (lambda ()
     (t--sw-setup!)
     (t--sw-three-groups!)
-    (t--sw-open-switcher!)
+    (t--sw-open-all!)
     ;; the third buffer lives only in the foreign group, so filtering to it
     ;; leaves the group's own section empty
     (t--sw-type! t--sw-third)
@@ -416,7 +435,7 @@
     (let* ((ids (t--sw-three-groups!))
            (current (car ids))
            (foreign (cadr ids)))
-      (t--sw-open-switcher!)
+      (t--sw-open-all!)
       (t--sw-type! t--sw-third)
       (t--sw-key! "confirm-adopt")
 
@@ -444,7 +463,7 @@
       (delete-other-windows!)
       (switch-to-buffer! t--sw-first)
 
-      (t--sw-open-switcher!)
+      (t--sw-open-all!)
       (t--sw-type! t--sw-third)
       (t--sw-key! "confirm-context")
 
@@ -453,18 +472,36 @@
       (check-false! (buffer-in-group? t--sw-third current) "it did not join this group"))
     (t--sw-done!)))
 
-(deftest 'confirm-moves-nothing-but-the-window
-  "RET: no membership changes, no context changes"
+(deftest 'confirm-follows-the-picked-buffers-group-without-moving-membership
+  "RET changes the frame standing but does not change membership"
   (lambda ()
     (t--sw-setup!)
     (let ((ids (t--sw-three-groups!)))
-      (t--sw-open-switcher!)
+      (t--sw-open-all!)
       (t--sw-type! t--sw-third)
       (t--sw-key! "confirm")
 
       (check-equal! (current-buffer) t--sw-third "the window moved")
-      (check-equal! (frame-local 'current-group) (car ids) "the context did not")
+      (check-equal! (frame-local 'current-group) (cadr ids) "the frame followed it")
       (check-false! (buffer-in-group? t--sw-third (car ids)) "and no membership changed"))
+    (t--sw-done!)))
+
+(deftest 'switching-to-an-ungrouped-buffer-clears-the-frame-group
+  "a broadened buffer switch leaves group isolation when the target is ungrouped"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((here (group-record-create! "zzsw-current")))
+      (buffer-add-group! t--sw-first here)
+      (buffer-add-group! t--sw-second here)
+      (set-frame-local! 'current-group here)
+      (switch-to-buffer! t--sw-first)
+
+      (t--sw-open-all!)
+      (t--sw-type! t--sw-third)
+      (t--sw-key! "confirm")
+
+      (check-equal! (current-buffer) t--sw-third "the ungrouped buffer is current")
+      (check-false! (frame-local 'current-group) "the frame left group isolation"))
     (t--sw-done!)))
 
 (deftest 'switching-context-restores-the-saved-layout
@@ -489,4 +526,30 @@
       (check-equal! (frame-local 'current-group) right "the context moved")
       (check-equal! (frame-local 'previous-group) left "and remembers where from")
       (check-equal! (buffer-group t--sw-first) left "the other buffer kept its group"))
+    (t--sw-done!)))
+
+(deftest 'killing-a-visible-group-buffer-never-shows-a-foreign-buffer
+  "a grouped frame replaces a killed member from that group only"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((here (group-record-create! "zzsw-here"))
+          (foreign (group-record-create! "zzsw-foreign")))
+      (buffer-add-group! t--sw-first here)
+      (buffer-add-group! t--sw-second here)
+      (buffer-add-group! t--sw-third foreign)
+      (set-frame-local! 'current-group here)
+      (switch-to-buffer! t--sw-third)
+      (switch-to-buffer! t--sw-first)
+      (split-window! 'h 0.5)
+      (switch-to-buffer! t--sw-second)
+
+      (buffer-kill! t--sw-second)
+
+      (check-false! (member t--sw-third (map cadr (window-list)))
+                    "the foreign MRU buffer stayed hidden")
+      (for-each
+        (lambda (row)
+          (check-true! (buffer-in-group? (cadr row) here)
+                       "every visible replacement belongs to the current group"))
+        (window-list)))
     (t--sw-done!)))

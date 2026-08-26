@@ -29,6 +29,16 @@ defmodule Aimax.Ui.EditorLiveTest do
     assert html =~ "ui-test-"
   end
 
+  test "a window applies its buffer group color", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    buf = Aimax.Core.Editor.current_buffer()
+    Aimax.Core.Buffer.set_local(buf, "modeline-group-color", "#9b6ab3")
+
+    html = render(view)
+
+    assert html =~ "--buffer-group-color: #9b6ab3"
+  end
+
   test "keeps the cursor visible on a blank line", %{conn: conn} do
     buf = Aimax.Core.Editor.current_buffer()
     Aimax.Core.Buffer.insert(buf, "\ntext")
@@ -196,7 +206,7 @@ defmodule Aimax.Ui.EditorLiveTest do
     {:ok, view, _} = live(conn, "/")
     html = keys(view, ["C-x"])
     assert html =~ "which-key"
-    assert html =~ "switch-to-buffer"
+    assert html =~ "group-switch-buffer"
     keys(view, ["C-g"])
   end
 

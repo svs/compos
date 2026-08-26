@@ -60,7 +60,7 @@ defmodule Aimax.Ui.Layouts do
                 #171312 62%);
             color: #fff8ee; font: 600 11px/1.25 var(--font-mono);
             letter-spacing: 0.015em;
-            box-shadow: 0 4px 18px color-mix(in srgb, var(--error-fg, #d13b32) 24%, transparent);
+            box-shadow: none;
             z-index: 40;
           }
           .workspace-bar-kind, .workspace-bar-port {
@@ -600,18 +600,18 @@ defmodule Aimax.Ui.Layouts do
             background: var(--linenum-fg, #c3bcac); flex: 0 0 auto;
           }
           .ml-dot.modified { background: var(--warn-fg, #7a5a1a); }
-          .modeline .name { font-weight: 700; color: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .modeline .name { font-weight: 700; color: var(--buffer-group-color, inherit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
           .ml-icon { display: inline-block; min-width: 1.1em; color: var(--accent-fg, #26356b); font-weight: 700; text-align: center; }
           .ml-pos { font-family: var(--font-mono); font-size: 11px; opacity: 1; white-space: nowrap; }
           .ml-mode { font-family: var(--font-mono); font-size: 11px; opacity: 1; white-space: nowrap; }
-          .ml-group-item { color: var(--accent-fg, #26356b); }
+          .ml-group-item { color: var(--buffer-group-color, var(--accent-fg, #26356b)); }
           .ml-state-modified { color: var(--warn-fg, #7a5a1a); font-weight: 600; }
           .ml-info { color: inherit; }
           .ml-toggle { cursor: pointer; }
           .ml-toggle:hover { opacity: 1; text-decoration: underline; }
           .ml-group {
             font-family: var(--font-mono); font-size: 10.5px;
-            color: var(--accent-fg, #26356b); opacity: 0.85;
+            color: var(--buffer-group-color, var(--accent-fg, #26356b)); opacity: 0.85;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
             max-width: 16ch; flex: 0 1 auto;
           }
@@ -624,6 +624,10 @@ defmodule Aimax.Ui.Layouts do
             font-family: var(--font-mono); font-size: 12.5px;
           }
           .echo { color: var(--dim-fg, #57534a); white-space: pre; }
+          .ml-frame-group {
+            color: var(--frame-group-color, var(--accent-fg, #26356b)); font-size: 11px;
+            font-weight: 650; white-space: nowrap;
+          }
           .echo-hint {
             color: var(--dim-fg, #8a857a); opacity: 0.8; font-size: 11px;
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -825,7 +829,8 @@ defmodule Aimax.Ui.Layouts do
             background: var(--select-bg, #e7e9f1);
             border-left-color: var(--accent-fg, #26356b);
           }
-          .mb-cand.selected .mb-label { color: var(--accent-fg, #26356b); font-weight: 600; }
+          .mb-cand.selected .mb-label:not([class*="f-group-color-"]) { color: var(--accent-fg, #26356b); }
+          .mb-cand.selected .mb-label { font-weight: 600; }
           /* the floor: the widest label in the WHOLE set, from the core.
              The ceiling matches the cap the core applies to that width —
              one very long name must not push the annotations off the
@@ -1405,8 +1410,11 @@ defmodule Aimax.Ui.Layouts do
                   // Keyboard events do not cross that browsing-context boundary,
                   // so forward them to the editor's existing dispatcher.
                   const forwardKey = (type, e) => {
-                    if (e.defaultPrevented) return;
-                    e.preventDefault();
+                    // The iframe is the focused browsing context after a
+                    // click. Always forward keydown: the browser may already
+                    // have marked the iframe event handled (notably Space
+                    // and Enter), even though the editor still needs it.
+                    if (type === "keydown") e.preventDefault();
                     window.dispatchEvent(new KeyboardEvent(type, {
                       key: e.key,
                       code: e.code,
@@ -1416,7 +1424,7 @@ defmodule Aimax.Ui.Layouts do
                       shiftKey: e.shiftKey,
                       metaKey: e.metaKey,
                       repeat: e.repeat,
-                      bubbles: false,
+                      bubbles: true,
                       cancelable: true
                     }));
                   };
@@ -1961,17 +1969,19 @@ defmodule Aimax.Ui.Layouts do
                 this.pasteH = (e) => {
                   if (e.target.closest && e.target.closest(".terminal-view")) return;
                   const items = e.clipboardData && Array.from(e.clipboardData.items || []);
-                  const image = items && items.find((item) => item.kind === "file" && item.type.startsWith("image/"));
-                  if (image) {
+                  const files = e.clipboardData && Array.from(e.clipboardData.files || []);
+                  const image = items && items.find((item) => item.type.startsWith("image/"));
+                  const imageFile = image ? image.getAsFile() :
+                    (files && files.find((file) => file.type.startsWith("image/")));
+                  if (imageFile) {
                     e.preventDefault();
-                    const blob = image.getAsFile();
-                    if (!blob) return;
+                    const blob = imageFile;
                     const reader = new FileReader();
                     reader.onload = () => {
                       const comma = reader.result.indexOf(",");
                       if (comma >= 0) {
                         const data = reader.result.slice(comma + 1);
-                        this.pushEvent("paste_image", { data, mime: blob.type || image.type });
+                        this.pushEvent("paste_image", { data, mime: blob.type });
                       }
                     };
                     reader.readAsDataURL(blob);

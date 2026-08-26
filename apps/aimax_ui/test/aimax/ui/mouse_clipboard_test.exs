@@ -8,7 +8,7 @@ defmodule Aimax.Ui.MouseClipboardTest do
 
   @endpoint Aimax.Ui.Endpoint
 
-  alias Aimax.Core.{Buffer, Editor}
+  alias Aimax.Core.{Buffer, Editor, KeyDispatch, Session}
 
   setup do
     Editor.minibuffer_close()
@@ -82,6 +82,47 @@ defmodule Aimax.Ui.MouseClipboardTest do
     assert Buffer.point(buf) == 11
     assert Buffer.mark(buf) == nil
     assert Editor.kill_top() == "there"
+  end
+
+  test "image paste prompts from the buffer directory, creates directories, and inserts Markdown",
+       %{
+         conn: conn
+       } do
+    root = Path.join(System.tmp_dir!(), "aimax-image-paste-#{System.unique_integer([:positive])}")
+    document = Path.join(root, "note.md")
+    destination = Path.join([root, "images", "diagram.png"])
+    File.mkdir_p!(root)
+    File.write!(document, "")
+
+    on_exit(fn ->
+      Aimax.Core.kill_buffer(document)
+      File.rm_rf(root)
+    end)
+
+    {:ok, ^document} = Aimax.Core.open_file(document)
+    Editor.set_window_buffer(document)
+    assert {:ok, _} = Session.eval(~s{(run-command "writing-mode")})
+    {:ok, view, _html} = live(conn, "/")
+
+    view
+    |> element("#editor")
+    |> render_hook("paste_image", %{
+      "data" => Base.encode64("png bytes"),
+      "mime" => "image/png"
+    })
+
+    assert Editor.render_state().minibuffer.input == Path.join(root, "image_1.png")
+
+    Editor.minibuffer_set_input(destination)
+    KeyDispatch.handle_key("RET")
+
+    assert Editor.render_state().minibuffer.prompt =~
+             "Create directory #{Path.dirname(destination)}?"
+
+    KeyDispatch.handle_key("y")
+
+    assert File.read!(destination) == "png bytes"
+    assert Buffer.text(document) == "![image](#{destination})"
   end
 
   test "copy with an active region replies with it on the clipboard event", %{conn: conn} do

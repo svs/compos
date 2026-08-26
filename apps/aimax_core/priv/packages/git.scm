@@ -6,9 +6,9 @@
 ;;; backend — a patch file, two directories, an agent's proposed edits —
 ;;; registers the same three functions and gets the same buffer.
 ;;;
-;;; M-x git-diff (C-x g) opens the diff for the directory you are in. In a
+;;; M-x git-diff opens the diff for the directory you are in. In a
 ;;; subdirectory the diff covers only that subtree, and the buffer is named
-;;; for the scope.
+;;; for the scope. C-x g belongs to group navigation.
 
 (define git-log-count 20)
 
@@ -122,8 +122,8 @@
   "An old name for `diff-show`. The mode rewrites the locals of a buffer saved before the diff backends, then changes to `diff-show`.")
 
 ;; The directory the diff is about. The current buffer's directory when it
-;; sits in a repository; otherwise the most recent buffer that does — C-x g
-;; from a chat or *scratch* means "the project I am working in", not the
+;; sits in a repository; otherwise the most recent buffer that does — M-x
+;; git-diff from a chat or *scratch* means "the project I am working in", not the
 ;; home directory. Standing in a subdirectory scopes the diff to it; the
 ;; fallback takes the found buffer's ROOT, because a chat has no place in
 ;; the tree. The scan is capped: MRU means a hit comes early.
@@ -164,7 +164,7 @@
 ;; buffer, found no 'diff-backend local, and did nothing. This override
 ;; supplies the policy: a diff buffer refreshes in place; a file buffer
 ;; opens the diff for that one file; every other buffer opens the diff for
-;; its directory. `C-x g` (git-diff) keeps the directory scope. The scope
+;; its directory. `M-x git-diff` keeps the directory scope. The scope
 ;; comes from git-prefix, not string arithmetic on the root: git resolves
 ;; symlinks in the root, the buffer path keeps them.
 (define (git--basename p)
@@ -196,6 +196,3 @@
   (if (and (> (string-length p) 1) (string-suffix? "/" p))
       (substring p 0 (- (string-length p) 1))
       p))
-
-
-(global-set-key "C-x g" "git-diff")

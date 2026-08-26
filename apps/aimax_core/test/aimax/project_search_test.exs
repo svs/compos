@@ -437,7 +437,7 @@ defmodule Aimax.ProjectSearchTest do
           (project-remember! "#{root}"))})
 
       project_package = Application.app_dir(:aimax_core, "priv/packages/project.scm")
-      assert {:ok, 1} = Session.reload_files([project_package])
+      assert {:ok, %{files: 1}} = Session.reload_files([project_package])
       assert eval!(~s{(project-group-target "#{root}")}) == ~s{"#{target}"}
 
       on_exit(fn ->

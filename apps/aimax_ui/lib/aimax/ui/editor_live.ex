@@ -334,9 +334,19 @@ defmodule Aimax.Ui.EditorLive do
   # inserts the document markup.
   def handle_event("paste_image", %{"data" => data, "mime" => mime}, socket)
       when is_binary(data) and is_binary(mime) do
-    Input.run(socket.assigns.frame, fn ->
-      Aimax.Core.Session.call_named("clipboard-image-paste!", [data, mime])
-    end)
+    result =
+      Input.run(socket.assigns.frame, fn ->
+        Aimax.Core.Session.call_named("clipboard-image-paste!", [data, mime])
+      end)
+
+    case result do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        require Logger
+        Logger.error("image paste failed: #{inspect(reason)}")
+    end
 
     {:noreply, socket |> drain() |> refresh()}
   end
@@ -785,7 +795,7 @@ defmodule Aimax.Ui.EditorLive do
 
   def render(assigns) do
     ~H"""
-    <div id="editor" class="editor-root" phx-hook="Keys" data-boot={@boot_id} data-frame={@frame}>
+    <div id="editor" class="editor-root" style={frame_group_style(@state)} phx-hook="Keys" data-boot={@boot_id} data-frame={@frame}>
       <style :if={@state.faces != %{}}><%= Phoenix.HTML.raw(face_css(@state.faces)) %></style>
     <style :if={@state.styles != %{}}><%= Phoenix.HTML.raw(Enum.join(Map.values(@state.styles), "\n")) %></style>
       <div :if={@state.workspace} class="workspace-bar">
@@ -854,7 +864,7 @@ defmodule Aimax.Ui.EditorLive do
                   </div>
                 <% else %>
                   <div class={"mb-cand #{if c.selected, do: "selected"}"}>
-                    <span class="mb-label">{c.label}</span>
+                    <span class={"mb-label #{candidate_face_class(c)}"}>{c.label}</span>
                     <span class="mb-hint">{c.hint}</span>
                   </div>
                   <% end %>
@@ -913,6 +923,7 @@ defmodule Aimax.Ui.EditorLive do
           <div class="echo-bar">
             <span class="echo">{@state.echo}</span>
             <span class="mb-spacer"></span>
+            <span :if={@state.frame_group} class="ml-frame-group">group {@state.frame_group}</span>
             <span :if={@state.modeline_extra != ""} class="ml-extra">{@state.modeline_extra}</span>
             <span class="echo-hint" :if={@state.echo == ""}>C-x C-f · C-x b · C-x d · C-c a n agent · M-x · C-g</span>
           </div>
@@ -928,6 +939,31 @@ defmodule Aimax.Ui.EditorLive do
       _ -> "?"
     end
   end
+
+  defp frame_group_style(%{frame_group_color: color}) when is_binary(color) do
+    if Regex.match?(~r/^#[0-9a-fA-F]{6}$/, color), do: "--frame-group-color: #{color}", else: nil
+  end
+
+  defp frame_group_style(_state), do: nil
+
+  defp window_style(node) do
+    color = Map.get(node, :group_color)
+
+    group_style =
+      if is_binary(color) and Regex.match?(~r/^#[0-9a-fA-F]{6}$/, color),
+        do: "--buffer-group-color: #{color}",
+        else: nil
+
+    [Map.get(node, :window_style), group_style]
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.join("; ")
+  end
+
+  defp candidate_face_class(%{face: face}) when is_binary(face) do
+    if Regex.match?(~r/^[a-zA-Z0-9_-]+$/, face), do: "f-#{face}", else: ""
+  end
+
+  defp candidate_face_class(_candidate), do: ""
 
   # cursor sits at the minibuffer's point (it's a real buffer): split the
   # input into before-point, the grapheme under the cursor, and the rest
@@ -1047,7 +1083,7 @@ defmodule Aimax.Ui.EditorLive do
     <div
       id={"win-#{@node.id}"}
       class={"window #{if @active?, do: "active", else: "inactive"} #{if @node.selected, do: "buffer-selected"} #{if !@node.line_numbers, do: "no-nums"} #{@node.window_class}"}
-      style={@node.window_style}
+      style={window_style(@node)}
       data-win-id={@node.id}
       data-path={@path}
       data-read-only={to_string(@read_only)}
@@ -1855,9 +1891,9 @@ defmodule Aimax.Ui.EditorLive do
       inside_fence?(text, ls) ->
         p
 
-      # An empty line renders as nothing. A sentinel there makes it a line
-      # of text, which glues the next block onto it: the table below a blank
-      # line stops being a table.
+      # An empty line has no Markdown node of its own. Keep it attached to
+      # the nearest rendered node so the sentinel cannot turn a blank line
+      # into a paragraph and break tables or adjacent blocks.
       String.trim(trimmed) == "" ->
         spot_below(text, below, p, depth)
 
@@ -2033,10 +2069,10 @@ defmodule Aimax.Ui.EditorLive do
     body{margin:0 auto;padding:30px 34px 70px;max-width:#{measure};overflow-wrap:break-word;
          word-break:normal;font:#{size}/1.7 #{family};color:#{fg};background:#{bg};
          -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-    p{margin:0 0 1.15em;text-wrap:pretty}
+    p{margin:0 0 1.15em}
     /* a heading must separate the sections, so its space above is much
        larger than the space below it */
-    h1,h2,h3,h4{font-family:#{family};line-height:1.25;text-wrap:balance}
+    h1,h2,h3,h4{font-family:#{family};line-height:1.25}
     body>h1:first-child{margin-top:0}
     h1{font-size:29px;margin:1.6em 0 .6em}
     h2{font-size:22px;margin:2.1em 0 .7em;border-bottom:1px solid #{border};padding-bottom:4px}
@@ -2045,7 +2081,7 @@ defmodule Aimax.Ui.EditorLive do
     /* the browser default indents a list 40px and puts no space between
        the items: a list of requirements then reads as one block */
     ul,ol{margin:0 0 1.15em;padding-left:1.35em}
-    li{margin:0 0 .4em;text-wrap:pretty}
+    li{margin:0 0 .4em}
     li:last-child{margin-bottom:0}
     li>ul,li>ol{margin:.4em 0 0}
     li::marker{color:#{dim}}
@@ -2097,7 +2133,7 @@ defmodule Aimax.Ui.EditorLive do
     .tweet .tw-media{width:100%;border-radius:8px;margin:2px 0 8px}
     .tw-date{color:#{dim};font-size:13px;text-decoration:none}
     ::highlight(region){background:color-mix(in srgb,#{accent} 32%,transparent)}
-    .pt{display:inline-block;width:2px;height:1.05em;margin:0 -1px;vertical-align:-0.18em;
+    .pt{display:inline-block;width:0;height:1.05em;margin:0;vertical-align:-0.18em;
         background:#{accent};animation:ptb 1.1s step-end infinite}
     .mk{display:inline-block;width:0;height:0}
     .ln{display:inline-block;width:0;height:0}
@@ -2320,10 +2356,31 @@ defmodule Aimax.Ui.EditorLive do
     end
   end
 
+  defp embed_node({"img", atts, children, meta}) do
+    atts =
+      Enum.map(atts, fn
+        {"src", src} when is_binary(src) -> {"src", local_image_src(src)}
+        attr -> attr
+      end)
+
+    [{"img", atts, children, meta}]
+  end
+
   defp embed_node({tag, atts, children, meta}) when is_list(children),
     do: [{tag, atts, embed_urls(children), meta}]
 
   defp embed_node(other), do: [other]
+
+  defp local_image_src(src) do
+    path =
+      if String.starts_with?(src, "<") and String.ends_with?(src, ">") do
+        binary_part(src, 1, byte_size(src) - 2)
+      else
+        src
+      end
+
+    if Path.type(path) == :absolute, do: Aimax.Ui.LocalImage.url(path), else: src
+  end
 
   defp image_url?(url) do
     case URI.parse(url) do

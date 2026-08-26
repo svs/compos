@@ -21,6 +21,15 @@
 
 (define *group-records* '())
 (define *group-next-id* 0)
+(define *group-colors*
+  '("#d05a47" "#3f7cac" "#4f8a5b" "#9b6ab3" "#c28a2c" "#347f7a"))
+
+(defface! 'group-color-1 'fg "#d05a47" 'weight "700")
+(defface! 'group-color-2 'fg "#3f7cac" 'weight "700")
+(defface! 'group-color-3 'fg "#4f8a5b" 'weight "700")
+(defface! 'group-color-4 'fg "#9b6ab3" 'weight "700")
+(defface! 'group-color-5 'fg "#c28a2c" 'weight "700")
+(defface! 'group-color-6 'fg "#347f7a" 'weight "700")
 
 (define (group-record-id record) (nth 0 record))
 (define (group-record-name record) (nth 1 record))
@@ -28,6 +37,46 @@
 (define (group-record-layout record) (nth 3 record))
 (define (group-record-noise record) (nth 4 record))
 (define (group-record-primary-chat-id record) (nth 5 record))
+(define (group-record-color record)
+  (and (> (length record) 6) (nth 6 record)))
+
+(define (group-color-face value)
+  (let* ((record (and value
+                      (or (group-record-by-id value)
+                          (group-record-by-name value))))
+         (color (if record (group-record-color record) value)))
+    (cond ((equal? color "#d05a47") "group-color-1")
+          ((equal? color "#3f7cac") "group-color-2")
+          ((equal? color "#4f8a5b") "group-color-3")
+          ((equal? color "#9b6ab3") "group-color-4")
+          ((equal? color "#c28a2c") "group-color-5")
+          ((equal? color "#347f7a") "group-color-6")
+          (else "accent"))))
+
+(define (buffer-color-group buf)
+  (if (chat-buffer? buf)
+      (chat-group-id buf)
+      (let ((ids (buffer-group-ids buf)))
+        (and (pair? ids) (car ids)))))
+
+(define (buffer-filename-face buf)
+  (let ((group (buffer-color-group buf)))
+    (and group (group-color-face group))))
+
+(define candidate-face-for-base
+  (if (boundp 'candidate-face-for-base)
+      candidate-face-for-base
+      candidate-face-for))
+
+(set! candidate-face-for
+  (lambda (category name)
+    (if (and (equal? category 'buffer) (buffer-known? name))
+        (or (buffer-filename-face name)
+            (candidate-face-for-base category name))
+        (candidate-face-for-base category name))))
+
+(define (group-next-color)
+  (nth (modulo (- *group-next-id* 1) (length *group-colors*)) *group-colors*))
 
 (define (group-record-by-id id)
   (let loop ((records *group-records*))
@@ -64,7 +113,7 @@
           ((group-record-by-name clean) #f)
           (else
             (let* ((id (group-new-id!))
-                   (record (list id clean #f #f "quiet" #f)))
+                   (record (list id clean #f #f "quiet" #f (group-next-color))))
               (set! *group-records* (append *group-records* (list record)))
               id)))))
 
@@ -99,9 +148,13 @@
                       (if (equal? field 'layout) new-value (group-record-layout record))
                       (if (equal? field 'noise) new-value (group-record-noise record))
                       (if (equal? field 'primary-chat-id) new-value
-                          (group-record-primary-chat-id record)))))
+                          (group-record-primary-chat-id record))
+                      (if (equal? field 'color) new-value
+                          (group-record-color record)))))
           *group-records*))
-      (when (equal? field 'name) (modeline-groups-refresh!)))))
+      (when (member field '(name color))
+        (group-frame-styles-refresh!)
+        (modeline-groups-refresh!)))))
 
 (define (group-record-delete! value)
   (let ((id (group-resolve-id value)))
@@ -112,17 +165,38 @@
                 *group-records*))
       (modeline-groups-refresh!))))
 
+(define (group-record-colors-restore records)
+  (let loop ((rest records) (index 0) (out '()))
+    (if (null? rest)
+        (reverse out)
+        (let* ((record (car rest))
+               (color (or (group-record-color record)
+                          (nth (modulo index (length *group-colors*))
+                               *group-colors*))))
+          (loop (cdr rest) (+ index 1)
+                (cons (append (take-n record 6) (list color)) out))))))
+
 (define (group-state-restore! saved)
   (when (and (pair? saved) (pair? (cdr saved)))
     (set! *group-next-id* (car saved))
-    (set! *group-records* (car (cdr saved)))
+    (set! *group-records* (group-record-colors-restore (car (cdr saved))))
     (modeline-groups-refresh!)))
 
-(persist-global! 'groups-v2
-  (lambda () (list *group-next-id* *group-records*))
-  group-state-restore!)
-
 (define *group-frame-context-keys* '(current-group previous-group))
+
+(define (group-frame-style-set! frame value)
+  (let* ((id (group-resolve-id value))
+         (record (and id (group-record-by-id id))))
+    (set-frame-group-style!
+      (and record (group-record-name record))
+      (and record (group-record-color record))
+      frame)))
+
+(define (group-frame-styles-refresh!)
+  (for-each
+    (lambda (frame)
+      (group-frame-style-set! frame (frame-local-in frame 'current-group)))
+    (frame-list)))
 
 (define (group-frame-context-id locals key)
   (let ((entry (assoc key
@@ -202,9 +276,7 @@
                  (fr (assoc frame *frame-locals*))
                  (locals (if fr (car (cdr fr)) '()))
                  (kv (assoc 'current-group locals)))
-            (set-frame-group-label!
-              (or (and kv (group-name (car (cdr kv)))) #f)
-              frame))))
+            (group-frame-style-set! frame (and kv (car (cdr kv)))))))
       saved)))
 
 
@@ -230,6 +302,13 @@
 (persist-global! 'group-frame-contexts
   group-frame-context-state
   group-frame-context-restore!)
+
+;; persist-global! restores the most recently registered entry first. Group
+;; frame contexts resolve their IDs through the record table, so register the
+;; records after the contexts and restore them before the contexts.
+(persist-global! 'groups-v2
+  (lambda () (list *group-next-id* *group-records*))
+  group-state-restore!)
 
 (define (group-work-buffer? b)
   (and (buffer-known? b)
@@ -325,22 +404,29 @@
     (let ((known (filter string? names)))
       (if (pair? known) (string-join known ", ") "ungrouped"))))
 
-;; Names are cached on the buffer for the render path. The compact label is
-;; frame-relative (the same buffer can appear in two frames), so Elixir combines
-;; this membership data with that frame's current-group name while rendering.
+;; Names and the primary membership color are cached for the render path.
+;; The compact label is frame-relative. The color always belongs to the buffer.
 (define (buffer-modeline-group-refresh! b)
   (let ((names (if (chat-buffer? b)
                    (let ((id (chat-group-id b)))
                      (if id (list (group-name id)) '()))
                    (map group-name (buffer-group-ids b)))))
-    (let ((known (filter string? names)))
+    (let* ((known (filter string? names))
+           (group (buffer-color-group b))
+           (record (and group (group-record-by-id group)))
+           (color (and record (group-record-color record))))
       (unless (equal? (buffer-local b 'modeline-groups) known)
         (buffer-set-local! b 'modeline-groups known))
+      (unless (equal? (buffer-local b 'modeline-group-color) color)
+        (buffer-set-local! b 'modeline-group-color color))
       known)))
 
 (define (modeline-groups-refresh!)
   (for-each buffer-modeline-group-refresh! (buffer-list))
   #t)
+
+;; Install derived color locals for buffers that predate this package reload.
+(modeline-groups-refresh!)
 
 (define (buffer-in-group? b value)
   (let ((id (group-resolve-id value)))
@@ -587,7 +673,7 @@
 ;; group name and every buffer's membership names. The renderer only compacts
 ;; those facts for the width available in the bar.
 (define (frame-group-label-refresh!)
-  (set-frame-group-label! (or (group-name (frame-local 'current-group)) #f))
+  (group-frame-style-set! (selected-frame) (frame-local 'current-group))
   (modeline-groups-refresh!))
 
 ;; a reattached frame keeps its group in *frame-locals*, but the Elixir
@@ -872,7 +958,7 @@
 (define (group-cells buf g)
   (let ((members (group-buffers-mru g)))
     (list (if (group-dirty? g) (list "●" "warn") "")
-          (list (group-label g) "accent")
+          (list (group-label g) (group-color-face g))
           (list (number->string (length members)) "dim")
           (list (group-noise g) (group-noise-face (group-noise g)))
           (list (string-append
@@ -1097,6 +1183,48 @@
                   '())))
     (dedupe-names
       (append mru (remove (lambda (b) (member b mru)) (group-buffers id))))))
+
+;; A grouped frame never falls through to the global MRU when a visible
+;; buffer dies. Capture each affected frame before the core removes the
+;; buffer. Afterward, fill its windows from that frame's current group only.
+(define (group-kill-visible-in-frame frame)
+  (map cadr
+    (filter (lambda (row) (equal? (caddr row) frame))
+            (window-list-all))))
+
+(define (group-kill-replacement group frame)
+  (let* ((visible (group-kill-visible-in-frame frame))
+         (members (group-buffers-mru group))
+         (hidden (filter (lambda (buf) (not (member buf visible))) members)))
+    (cond ((pair? hidden) (car hidden))
+          ((pair? members) (car members))
+          (else (group-chat group)))))
+
+(define (group-buffer-kill-repair name)
+  (let ((places
+          (fold
+            (lambda (found row)
+              (let* ((frame (caddr row))
+                     (group (and (equal? (cadr row) name)
+                                 (frame-local-in frame 'current-group))))
+                (if (group-resolve-id group)
+                    (cons (list (car row) frame group) found)
+                    found)))
+            '()
+            (window-list-all))))
+    (lambda ()
+      (for-each
+        (lambda (place)
+          (let ((win (car place))
+                (frame (cadr place))
+                (group (caddr place)))
+            (when (frame-of-window win)
+              (let ((replacement (group-kill-replacement group frame)))
+                (when replacement
+                  (window-set-buffer! win replacement))))))
+        places))))
+
+(set! buffer-kill-repair group-buffer-kill-repair)
 
 ;; Semantic membership lookup. This is the vocabulary a scene, a person and
 ;; an agent share: "show" resolves without knowing a buffer name or position.
@@ -1406,12 +1534,10 @@
   (filter group-work-buffer? (buffer-list)))
 
 ;;; --- one buffer prompt, in sections ------------------------------------------
-;;; C-x b lists EVERY buffer. It does not scope, and it never hides one:
-;;; a prompt you have to escape from is a prompt that lies about what it
-;;; knows. The order carries the meaning instead — the current group's
-;;; members come first under "in this group", everything else follows
-;;; under "other buffers". A separator is a heading, not a choice: the
-;;; selection steps over it and RET never confirms one.
+;;; C-x b lists the current group's buffers first, then every other buffer.
+;;; Without a current group, the prompt lists all buffers in one section.
+;;; A separator is a heading, not a choice: the selection steps over it and
+;;; RET never confirms one.
 ;;;
 ;;; Three verbs on one candidate:
 ;;;   RET    go there; one window changes and nothing else moves
@@ -1472,9 +1598,12 @@
     (when (buffer-known? buf)
       (cond (adopt (group-switch-adopt! buf id))
             (context (buffer-context-switch! buf))
-            (else (switch-to-buffer! buf))))))
+            (else
+              (switch-to-buffer! buf)
+              (set-frame-local! 'current-group (buffer-group buf))
+              (frame-group-label-refresh!))))))
 
-(define-command "group-switch-to-buffer"
+(define-command "group-switch-buffer"
   "Switch to a buffer; C-RET enters its group, S-RET pulls it into this one"
   (lambda ()
     (set! *mb-confirm-context* #f)
@@ -1704,11 +1833,15 @@
           (group-push-read-destination! buffers)))))
 
 (define-command "group-push-selected"
-  "Push explicitly selected visible work buffers to another group"
+  "Push selected visible work buffers, or the current buffer, to another group"
   (lambda ()
-    (let ((buffers (group-selected-visible-work-buffers)))
+    (let* ((selected (group-selected-visible-work-buffers))
+           (current (current-buffer))
+           (buffers (cond ((pair? selected) selected)
+                          ((group-work-buffer? current) (list current))
+                          (else '()))))
       (if (null? buffers)
-          (message "No selected visible work buffers")
+          (message "No selected or current work buffer")
           (group-push-read-destination! buffers)))))
 
 (define-command "group-move-visible"
@@ -1898,7 +2031,7 @@
 (global-set-key "C-c g" "group-join")
 (global-set-key "C-c d" "group-describe")
 (global-set-key "C-x G" "groups")
-(global-set-key "C-x b" "group-switch-to-buffer")
+(global-set-key "C-x b" "group-switch-buffer")
 (global-set-key "C-x g" "group-switch")
 (global-set-key "C-x C-g g" "group-switch")
 (global-set-key "C-x C-g p" "group-push-selected")
@@ -1917,6 +2050,14 @@
 (public! 'group-read-or-create!
   "(group-read-or-create! PROMPT RECEIVE) — read an existing group or create the typed name")
 (public! 'buffer-group "(buffer-group NAME) -> the buffer's group tag or #f")
+(effects! '(read))
+(public! 'buffer-color-group
+  "(buffer-color-group NAME) -> the buffer-owned group that supplies its color, or #f"
+  'buffers)
+(public! 'buffer-filename-face
+  "(buffer-filename-face NAME) -> the group color face for a buffer filename, or #f"
+  'buffers)
+(effects! '(write))
 (public! 'group-buffers "(group-buffers G) -> names of the buffers tagged 'group G")
 (public! 'group-buffers-as "(group-buffers-as GROUP ROLE) -> buffers with that group-relative role")
 (public! 'group-buffer-as "(group-buffer-as GROUP ROLE) -> most recent buffer with ROLE, or #f")
@@ -1932,6 +2073,8 @@
 (catalog-meta! 'command "group-kill-at-point" 'domain 'buffers 'effects '(destroy))
 (catalog-meta! 'command "groups" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "buffer-group" 'domain 'buffers 'effects '(read))
+(catalog-meta! 'function "buffer-color-group" 'domain 'buffers 'effects '(read))
+(catalog-meta! 'function "buffer-filename-face" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "group-buffers" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "group-chat" 'domain 'buffers 'effects '(write))
 (catalog-meta! 'function "group-chat-show!" 'domain 'buffers 'effects '(write))

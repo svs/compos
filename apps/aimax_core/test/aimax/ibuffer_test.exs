@@ -195,7 +195,7 @@ defmodule Aimax.IbufferTest do
       (group-record-create! "#{group}")
       (local-set-key* (minibuffer-buffer) "<f9>" "minibuffer-collect")
       (local-set-key* (minibuffer-buffer) "<f6>" "minibuffer-confirm")
-      (run-command "group-switch-to-buffer"))})
+      (run-command "group-switch-buffer"))})
 
     type("zz-collected")
     press("<f9>")

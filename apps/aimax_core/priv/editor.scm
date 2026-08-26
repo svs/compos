@@ -1924,6 +1924,10 @@
 
 (define *marginalia* '())    ; ((CATEGORY FN) ...)
 
+;; Packages can attach a face to a candidate label. The candidate renderer
+;; carries the face without knowing why that name has that color.
+(define candidate-face-for (lambda (category name) #f))
+
 (define (marginalia! category fn)
   (set! *marginalia*
     (cons (list category fn)
@@ -1985,10 +1989,14 @@
           (let loop ((ns names) (rs rows) (out '()))
             (if (null? ns)
                 (reverse out)
-                (loop (cdr ns) (cdr rs)
-                      (cons (list (car ns)
-                                  (marginalia-join (marginalia-trim (car rs)) ws))
-                            out))))))))
+                (let* ((name (car ns))
+                       (hint (marginalia-join (marginalia-trim (car rs)) ws))
+                       (face (candidate-face-for category name)))
+                  (loop (cdr ns) (cdr rs)
+                        (cons (if face
+                                  (list name hint "candidate" '() face)
+                                  (list name hint))
+                              out)))))))))
 
 ;;; --- hot reload -------------------------------------------------------------
 ;;; A save reloads that file's changed top-level forms into this session.
@@ -3999,9 +4007,8 @@
                          ;; leaving must snapshot the group you were
                          ;; really in
                          (let ((bg (buffer-group picked)))
-                           (when bg
-                             (set-frame-local! 'current-group bg)
-                             (frame-group-label-refresh!)))
+                           (set-frame-local! 'current-group bg)
+                           (frame-group-label-refresh!))
                          (windows-shown-catchup!))))
                   (else
                    ;; nothing matches: RET founds a group named PICKED
@@ -4045,6 +4052,18 @@
                  (and st (= 1 (plist-get st 'total)) (minibuffer-selected)))
                (list (minibuffer-selected) all))
               (else #f))))))))
+
+;; Packages can repair windows after the core releases a killed buffer.
+;; The callback returns a thunk because its policy must inspect the old buffer
+;; before the core removes it, then repair the surviving windows afterwards.
+(define buffer-kill-raw!
+  (if (boundp 'buffer-kill-raw!) buffer-kill-raw! buffer-kill!))
+(define buffer-kill-repair (lambda (name) (lambda () #f)))
+
+(define (buffer-kill! name)
+  (let ((repair (buffer-kill-repair name)))
+    (buffer-kill-raw! name)
+    (when repair (repair))))
 
 (define-command "kill-buffer" "Kill a buffer, defaulting to the current one"
   (lambda ()
@@ -4129,12 +4148,15 @@
 ;; frame is deleted.
 (define *frame-locals* '())   ; ((frame ((key val) ...)) ...)
 
-(define (frame-local key)
-  (let ((fr (assoc (selected-frame) *frame-locals*)))
+(define (frame-local-in frame key)
+  (let ((fr (assoc frame *frame-locals*)))
     (if fr
         (let ((kv (assoc key (cadr fr))))
           (if kv (cadr kv) #f))
         #f)))
+
+(define (frame-local key)
+  (frame-local-in (selected-frame) key))
 
 (define (set-frame-local! key val)
   (let* ((frame (selected-frame))
@@ -4567,6 +4589,27 @@
                   acc
                   (append acc (list buf)))))))))
 
+;; The three-column command is useful as a quick workspace view. If fewer than
+;; three work buffers are visible, fill the remaining columns from the current
+;; group's MRU ring first, then from the global MRU ring.
+(define (layout--three-columns buffers)
+  (let* ((group (and (boundp (quote frame-group)) (frame-group)))
+         (group-buffers
+           (if (and group (boundp (quote group-buffers-mru)))
+               (group-buffers-mru group)
+               '()))
+         (rest (append group-buffers (buffer-list-mru))))
+    (let loop ((rest rest)
+             (result buffers))
+      (cond ((>= (length result) 3) result)
+            ((null? rest) result)
+            ((or (not (buffer-known? (car rest)))
+                 (string-prefix? " " (car rest))
+                 (member (car rest) result)
+                 (popup--class? (car rest)))
+             (loop (cdr rest) result))
+            (else (loop (cdr rest) (append result (list (car rest)))))))))
+
 ;; Validate each requested pane without removing duplicate buffer names.
 (define (layout--known-buffers buffers)
   (let loop ((rest buffers) (acc '()))
@@ -4668,7 +4711,10 @@
         panes))))
 
 (define (tile-visible-windows! algorithm)
-  (let ((panes (layout-visible-buffers)))
+  (let* ((visible (layout-visible-buffers))
+         (panes (if (equal? algorithm 'columns)
+                    (layout--three-columns visible)
+                    visible)))
     (if (< (length panes) 2)
         (begin (message "Open at least two work buffers") #f)
         (tile-windows! algorithm panes))))
@@ -4699,9 +4745,9 @@
   (window-layout-command 'rows))
 (define-command "window-layout-grid" "Tile visible buffers in a balanced grid"
   (window-layout-command 'grid))
-(define-command "window-layout-main-right" "Put the main buffer beside a right stack"
+(define-command "window-layout-main-right" "Show a two-thirds main pane and a companion on the right"
   (window-layout-command 'main-right))
-(define-command "window-layout-main-bottom" "Put the main buffer above a bottom stack"
+(define-command "window-layout-main-bottom" "Show a two-thirds main pane and a one-third bottom pane"
   (window-layout-command 'main-bottom))
 
 (define-command "window-layout" "Choose a tiling layout for visible buffers"
@@ -4709,13 +4755,13 @@
     (let ((saved (window-tree)))
       (minibuffer-read-preview "Window layout: "
         '( ("adaptive" "choose from usable monitor width")
-           ("columns" "equal vertical panes")
-           ("rows" "equal horizontal panes")
+           ("columns" "3 columns")
+           ("rows" "equal rows")
            ("grid" "balanced grid")
-           ("main-right" "main pane plus right third")
-           ("main-left" "main pane plus left third")
-           ("main-bottom" "main pane plus bottom third")
-           ("main-top" "main pane plus top third"))
+           ("main-right" "companion view (companion on the right)")
+           ("main-left" "2/3 + 1/3 (companion on the left)")
+           ("main-bottom" "2/3 + 1/3 (companion below)")
+           ("main-top" "2/3 + 1/3 (companion above)"))
         window-layout-preview-without-history!
         (lambda (name)
           ;; Commit from the original arrangement so winner records one real
@@ -6769,19 +6815,22 @@
 .dash-bar.h4 { height: 19px; } .dash-bar.h5 { height: 24px; } .dash-bar.h6 { height: 29px; }
 .dash-bar.h7 { height: 34px; } .dash-bar.h8 { height: 39px; } .dash-bar.h9 { height: 44px; }
 .dash-persistent { display: flex; align-items: center; gap: 20px; min-width: 0;
-                   padding: 7px 18px 8px; border-bottom: 2px solid var(--accent-fg, #26356b);
+                   padding: 7px 18px 8px; border-bottom: 2px solid var(--buffer-group-color, var(--accent-fg, #26356b));
                    background: var(--window-bg, #fdfcf8); cursor: pointer; }
 .dseg { display: flex; flex-direction: column; gap: 1px; min-width: 0;
         font-family: var(--font-mono); }
 .dseg-r { align-items: flex-end; }
+.dseg-inline { flex-direction: row; align-items: baseline; gap: 7px; }
 .dseg-k { font-size: 9px; letter-spacing: .16em; text-transform: uppercase;
           color: var(--faint-fg, #b3ac9c); white-space: nowrap; }
 .dseg-v { font-size: 12.5px; color: var(--default-fg, #1b1a17);
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dseg-strong { font-weight: 600; }
+.dseg-group-current { color: var(--buffer-group-color, var(--default-fg, #1b1a17)); }
 .dseg-rule { width: 1px; height: 24px; flex: 0 0 auto;
              background: var(--border-bg, #cbc4b1); opacity: .5; }
 .dseg-gap { flex: 1 1 auto; }
+.dseg-stack { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 ")
 
 (define (dash--row k v &optional cls)
@@ -7100,9 +7149,11 @@
 ;;; key over its value, and the value carries the line. Place goes left,
 ;;; machine state goes right, and a hairline rule separates them.
 
-(define (dash--seg key segs align)
+(define (dash--seg key segs align &optional extra-class)
   (list 'tag "div"
-        'class (if (equal? align 'right) "dseg dseg-r" "dseg")
+        'class (string-append
+                (if (equal? align 'right) "dseg dseg-r" "dseg")
+                (if extra-class (string-append " " extra-class) ""))
         'children
         (list (list 'tag "div" 'class "dseg-k" 'text key)
               (list 'tag "div" 'class "dseg-v" 'segs segs))))
@@ -7136,7 +7187,7 @@
         (list (list "f-faint" "none"))
         (let loop ((rest labels) (out '()))
           (if (null? (cdr rest))
-              (reverse (cons (list "dseg-strong" (car rest)) out))
+              (reverse (cons (list "dseg-strong dseg-group-current" (car rest)) out))
               (loop (cdr rest)
                     (cons (list "f-faint" " / ")
                           (cons (list "f-dim" (car rest)) out))))))))
@@ -7150,23 +7201,17 @@
               (list "dseg-strong" (string-join (cdr parts) ":")))
         (list (list "dseg-strong" model)))))
 
-;; the top line names the file, the bottom modeline keeps the path
-(define (dash--buffer-name buf)
-  (let ((parts (string-split buf "/")))
-    (if (pair? parts) (car (reverse parts)) buf)))
-
 (define (dashboard-line-blocks buf)
   (list (dash--seg "mode" (dash--mode-segs buf) 'left)
         (dash--seg-rule)
         (dash--seg "group" (dash--group-segs buf) 'left)
         (dash--seg-rule)
-        (dash--seg "buffer"
-                   (list (list "f-accent dseg-strong" (dash--buffer-name buf)))
-                   'left)
-        (dash--seg-gap)
-        (dash--seg "llm" (dash--model-segs buf) 'right)
-        (dash--seg-rule)
-        (dash--seg "lane" (list (list "f-ok dseg-strong" (dash--lane buf))) 'right)))
+        (list 'tag "div" 'class "dseg-stack"
+              'children
+              (list (dash--seg "llm" (dash--model-segs buf) 'right "dseg-inline")
+                    (dash--seg "lane"
+                      (list (list "f-ok dseg-strong" (dash--lane buf)))
+                      'right "dseg-inline")))))
 
 ;; The modeline names the buffer the short way: project coordinates inside
 ;; a project, "~" for the home directory outside one. The buffer name keeps
@@ -7878,14 +7923,69 @@
            (when (string? c) (run-command c))))
         (else #f)))
 
-;; system clipboard: paste lands on the kill ring too (Emacs interprogram-paste)
+;; System clipboard delivery stops here. Paste policy belongs to Scheme: a
+;; major or minor mode can register a named handler, and user config loaded
+;; after the stock packages therefore gets first refusal. A handler receives
+;; KIND, DATA, and MIME and returns #t only when it consumed the paste.
+;; Replacing a named entry in place is important: reloading a package updates
+;; its closure without moving it ahead of later user registrations.
+(unless (boundp '*paste-hooks*)
+  (set-symbol-value! '*paste-hooks* '()))
+
+(define (paste-mode-name mode)
+  (if (symbol? mode) (symbol->string mode) mode))
+
+(define (paste-hook-replace hooks mode name fn)
+  (cond ((null? hooks) #f)
+        ((and (equal? (car (car hooks)) mode)
+              (equal? (cadr (car hooks)) name))
+         (cons (list mode name fn) (cdr hooks)))
+        (else
+          (let ((rest (paste-hook-replace (cdr hooks) mode name fn)))
+            (and rest (cons (car hooks) rest))))))
+
+(define (add-paste-hook! mode name fn)
+  (let* ((mode-name (paste-mode-name mode))
+         (replaced (paste-hook-replace *paste-hooks* mode-name name fn)))
+    (set! *paste-hooks*
+      (if replaced replaced (cons (list mode-name name fn) *paste-hooks*))))
+  name)
+
+(define (remove-paste-hook! mode name)
+  (let ((mode-name (paste-mode-name mode)))
+    (set! *paste-hooks*
+      (remove
+        (lambda (entry)
+          (and (equal? (car entry) mode-name)
+               (equal? (cadr entry) name)))
+        *paste-hooks*)))
+  name)
+
+(define (paste-mode-active? buf mode)
+  (or (equal? (buffer-local buf 'mode-name) mode)
+      (minor-mode-on? buf mode)))
+
+(define (run-paste-hooks! kind data mime)
+  (let ((buf (current-buffer)))
+    (let loop ((hooks *paste-hooks*))
+      (cond ((null? hooks) #f)
+            ((and (paste-mode-active? buf (car (car hooks)))
+                  ((car (cdr (cdr (car hooks)))) kind data mime))
+             #t)
+            (else (loop (cdr hooks)))))))
+
 (define (clipboard-paste! text)
-  (kill-push! text)
-  ;; System paste follows the ordinary editor rule: replace the active
-  ;; region, then leave point active rather than continuing selection mode.
-  (when (mark) (delete-region!))
-  (insert! text)
-  (set-mark! #f))
+  (unless (run-paste-hooks! "text" text "text/plain")
+    (kill-push! text)
+    ;; System paste follows the ordinary editor rule: replace the active
+    ;; region, then leave point active rather than continuing selection mode.
+    (when (mark) (delete-region!))
+    (insert! text)
+    (set-mark! #f)))
+
+(define (clipboard-image-paste! data mime)
+  (unless (run-paste-hooks! "image" data mime)
+    (message "No paste hook handled this image")))
 
 ;; Cmd-C with no native selection (S12, dup #26): the region when one
 ;; exists — pushed to the kill ring, Emacs interprogram-cut — else the
@@ -7895,46 +7995,6 @@
     (if (equal? text "")
         (kill-top)
         (begin (kill-push! text) text))))
-
-;;; Pasted image bytes arrive from the browser as base64. The writing modes
-;;; own the Markdown policy; ordinary buffers keep the normal text paste path.
-(define (clipboard-image-extension mime)
-  (cond ((equal? mime "image/jpeg") ".jpg")
-        ((equal? mime "image/gif") ".gif")
-        ((equal? mime "image/webp") ".webp")
-        ((equal? mime "image/svg+xml") ".svg")
-        ((equal? mime "image/avif") ".avif")
-        (else ".png")))
-
-(define (clipboard-image-destination path)
-  ;; Markdown destinations with spaces need angle brackets.
-  (if (re-match "[ \\t]" path)
-      (string-append "<" path ">")
-      path))
-
-(define (clipboard-image-paste! data mime)
-  (let* ((buf (current-buffer))
-         (mode (buffer-local buf 'mode-name))
-         (writing? (or (equal? mode "morg-mode")
-                       (minor-mode-on? buf "writing-mode"))))
-    (if (not writing?)
-        (message "Pasted images work in morg-mode and writing-mode")
-        (let ((initial (string-append "image" (clipboard-image-extension mime))))
-          (read-file-name-initial "Save pasted image: " initial
-            (lambda (path)
-              (if (equal? path "")
-                  (message "Pasted image was not saved")
-                  (begin
-                    (write-file! path (base64-decode data))
-                    (insert! (string-append "![image]("
-                                            (clipboard-image-destination path)
-                                            ")"))
-                    (message (string-append "Saved pasted image to " path))))))))))
-
-(domain! 'writing)
-(effects! '(write))
-(public! 'clipboard-image-paste!
-  "(clipboard-image-paste! DATA MIME) — prompt for an image path, save the bytes, and insert a Markdown image in morg or writing mode")
 
 ;;; --- buffer links ----------------------------------------------------------
 ;;; A link is one string that points at a buffer, and two readers follow it.
@@ -8293,6 +8353,8 @@
 (catalog-meta! 'function "buffer-icon" 'domain 'interaction 'effects '(read))
 (catalog-meta! 'function "file-icon" 'domain 'interaction 'effects '(pure))
 (public! 'add-hook! "(add-hook! 'name-hook FN)")
+(public! 'add-paste-hook! "(add-paste-hook! MODE NAME FN) — for a major or minor MODE, register named FN(kind data mime); #t consumes the paste")
+(public! 'remove-paste-hook! "(remove-paste-hook! MODE NAME) — remove a named paste handler")
 (public! 'layout-arranging? "(layout-arranging?) — #t while the layout engine is building the frame; a package that moves windows must stand down")
 (public! 'layout-abort! "(layout-abort!) — clear a layout build left in progress by a failure; a top-level build calls this first")
 (public! 'frame-attached! "(frame-attached!) — a client attached this frame; runs frame-attach-hook so per-frame display state is pushed again")

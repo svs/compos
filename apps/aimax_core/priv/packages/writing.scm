@@ -60,6 +60,74 @@
   "Standing instructions for completion, rewrite, and writing chat commands."
   'group 'writing 'type 'string 'set writing--refresh!)
 
+;;; --- pasted images ----------------------------------------------------------
+
+(define (clipboard-image-extension mime)
+  (cond ((equal? mime "image/jpeg") ".jpg")
+        ((equal? mime "image/gif") ".gif")
+        ((equal? mime "image/webp") ".webp")
+        ((equal? mime "image/svg+xml") ".svg")
+        ((equal? mime "image/avif") ".avif")
+        (else ".png")))
+
+(define (clipboard-image-destination path)
+  (if (re-match "[ \\t]" path)
+      (string-append "<" path ">")
+      path))
+
+(define (clipboard-image-save! buf data full)
+  (let* ((dir (car (path-split full)))
+         (shown-dir (if (and (> (string-length dir) 1)
+                             (string-suffix? "/" dir))
+                        (substring dir 0 (- (string-length dir) 1))
+                        dir)))
+    (if (file-directory? dir)
+        (begin
+          (write-file! full (base64-decode data))
+          (with-current-buffer buf
+            (lambda ()
+              (insert! (string-append "![image]("
+                                      (clipboard-image-destination full)
+                                      ")"))))
+          (message (string-append "Saved pasted image to " full)))
+        (y-or-n
+          (string-append "Create directory " shown-dir "?")
+          (lambda ()
+            (make-directory! dir)
+            (clipboard-image-save! buf data full))
+          (lambda () (message "Pasted image was not saved"))))))
+
+(define (clipboard-image-default-path buf mime)
+  (let* ((suffix (clipboard-image-extension mime))
+         (path (buffer-path buf))
+         (dir (if (and (string? path) (not (equal? path "")))
+                  (car (path-split path))
+                  (default-directory))))
+    (let loop ((n 1))
+      (let ((candidate (string-append dir "image_"
+                                      (number->string n) suffix)))
+        (if (file-exists? candidate)
+            (loop (+ n 1))
+            candidate)))))
+
+(define (writing-image-paste! kind data mime)
+  (if (not (equal? kind "image"))
+      #f
+      (let* ((buf (current-buffer))
+             (initial (clipboard-image-default-path buf mime)))
+        (read-file-name-initial "Save pasted image: " initial
+          (lambda (path)
+            (if (equal? path "")
+                (message "Pasted image was not saved")
+                (clipboard-image-save! buf data (expand-path path)))))
+        #t)))
+
+;; morg-mode and the writing minor mode share the stock Markdown image policy.
+;; ~/.aimax/init.scm loads after this package, so a user handler registered
+;; there runs first and may consume or pass through each paste.
+(add-paste-hook! "writing-mode" 'writing-image writing-image-paste!)
+(add-paste-hook! "morg-mode" 'writing-image writing-image-paste!)
+
 ;;; --- workspace ---------------------------------------------------------------
 
 ;; The document's own presets, remembered once. writing-mode saves the look

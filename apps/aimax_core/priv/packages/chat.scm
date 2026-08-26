@@ -537,6 +537,21 @@
 ;; the new user message itself and records it in the same breath, so there
 ;; is no in-flight turn to strip here: `display` is now unused, and the
 ;; dedup hack it used to need is gone with it.
+(define (prompt-parts-text parts)
+  (string-join (map (lambda (part) (car (cdr part))) parts) "\n\n"))
+
+;; Prompt composition is data before it is text.  A named fragment makes
+;; ordering, duplication and cache stability inspectable without parsing the
+;; final prose.  mcp.scm loads after this package and supplies the tool-side
+;; fragments when it is present.
+(define (chat-system-prompt-parts buf &optional tools?)
+  (append
+    (if (and tools?
+             (boundp (quote chat-tool-system-parts)))
+        (chat-tool-system-parts buf)
+        '())
+    (list (list "chat-preamble" (chat-preamble buf)))))
+
 (define (chat-thread-context slug display)
   (let* ((buf (agent-buf slug))
          (healed (chat-heal! buf))
@@ -545,17 +560,17 @@
       (message (string-append "healed this chat: dropped " (number->string healed)
                               " orphaned tool " (if (= healed 1) "block" "blocks"))))
     (list 'turns (reverse (chat-record buf))
-          'system (if tools?
-                      (let ((tool-system
-                              (if (boundp (quote chat-tool-system))
-                                  (chat-tool-system buf)
-                                  "")))
-                        (if (equal? tool-system "")
-                            (chat-preamble buf)
-                            (string-append tool-system "\n\n" (chat-preamble buf))))
-                      (chat-preamble buf))
+          'system (prompt-parts-text (chat-system-prompt-parts buf tools?))
           'tools (if tools? (chat-tools buf) '())
           'dispatcher (chat-tool-dispatch slug))))
+
+(domain! 'chat)
+(effects! '(read))
+(public! 'chat-system-prompt-parts
+  "(chat-system-prompt-parts BUF [TOOLS?]) — named system-prompt fragments in their exact send order")
+(public! 'prompt-parts-text
+  "(prompt-parts-text PARTS) — join named prompt fragments with the canonical separator")
+(effects! '(write))
 
 (llm-session-context-fn! (lambda (slug display) (chat-thread-context slug display)))
 

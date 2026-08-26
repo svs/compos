@@ -293,9 +293,9 @@
 ;;; so "how do I split a window" found nothing while split-window! sat
 ;;; there with a doc saying exactly that.
 ;;;
-;;; Matching is word-AND, like mcp-find: every word of the query must
-;;; appear somewhere in the entry. A query that finds nothing falls back to
-;;; edit distance, so a near-miss on a name still lands.
+;;; Matching is hybrid. Literal word-AND hits rank first. OpenAI embeddings
+;;; add semantic recall when a key is configured. A query that finds nothing
+;;; falls back to edit distance, so a near-miss on a name still lands.
 
 ;; catalog-entry walks the whole catalog, and apropos enriches every hit
 ;; through it. The empty query hits everything: about 1300 hits across a
@@ -414,9 +414,41 @@
                      ((equal? (car (car rows)) want) (car (cdr (car rows))))
                      (else (loop (cdr rows)))))))))
 
+(define *apropos--stop-words*
+  '("a" "an" "and" "current" "do" "for" "how" "i" "in" "my" "of"
+    "please" "the" "this" "to" "with"))
+
+(domain! 'discovery)
+(effects! '(read))
+
+(defcustom 'apropos-semantic-search #t
+  "Use OpenAI embeddings to add semantic apropos results when an OpenAI key exists."
+  'group 'discovery)
+
+(defcustom 'apropos-semantic-limit 24
+  "The maximum semantic results that apropos reads from the embedding index."
+  'group 'discovery)
+
+(defcustom 'apropos-semantic-threshold 0.30
+  "The minimum cosine similarity for an apropos semantic result."
+  'group 'discovery)
+
+(define (apropos--raw-words q)
+  (filter
+    (lambda (w) (not (equal? w "")))
+    (string-split
+      (string-join
+        (string-split
+          (string-join (string-split (string-downcase (string-trim q)) "_") " ")
+          "/")
+        " ")
+      " ")))
+
 (define (apropos--words q)
-  (filter (lambda (w) (not (equal? w "")))
-          (string-split (string-downcase (string-trim q)) " ")))
+  (let* ((raw (apropos--raw-words q))
+         (meaningful (filter (lambda (w) (not (member w *apropos--stop-words*))) raw)))
+    ;; A stop-word-only query must not become the empty-query catalog listing.
+    (if (pair? meaningful) meaningful raw)))
 
 (define (apropos--hit? hay words)
   (let ((h (string-downcase hay)))
@@ -513,11 +545,83 @@
     (map (lambda (hit) (list (string-downcase (value->string hit)) hit)) hits)))
 
 (define (apropos--row-hit? row words)
-  (let ((hay (car row)))
-    (let loop ((ws words))
-      (cond ((null? ws) #t)
-            ((string-contains? hay (car ws)) (loop (cdr ws)))
-            (else #f)))))
+  (apropos--hit? (car row) words))
+
+(define (apropos--same-hit? a b)
+  (and (equal? (plist-get a 'kind) (plist-get b 'kind))
+       (equal? (or (plist-get a 'qualified-name) (plist-get a 'name) (plist-get a 'task))
+               (or (plist-get b 'qualified-name) (plist-get b 'name) (plist-get b 'task)))))
+
+(define (apropos--has-hit? hits hit)
+  (pair? (filter (lambda (h) (apropos--same-hit? h hit)) hits)))
+
+(define (apropos--name-query? query words)
+  (and (= (length words) 1)
+       (or (string-contains? query "-")
+           (string-contains? query "!")
+           (string-contains? query "?"))))
+
+(define (apropos--name-suggestions query words index)
+  (if (not (apropos--name-query? query words))
+      '()
+      (map (lambda (e)
+             (apropos--enrich
+               (list 'kind "function" 'name (car e) 'sig (nth 2 e) 'doc (nth 1 e)
+                     'domain (symbol->string (nth 3 e))
+                     'category (symbol->string (nth 3 e)) 'note "closest name")
+               #f index))
+           (tool--suggest (string-trim query)))))
+
+(define (apropos--semantic-sources rows)
+  (append
+    (if (boundp (quote recipe-search)) (recipe-search "") '())
+    (map (lambda (row) (car (cdr row))) rows)))
+
+(define (apropos--embedding-field hit key)
+  (let ((value (plist-get hit key)))
+    (if value (value->string value) "")))
+
+(define (apropos--embedding-text hit)
+  (string-append
+    "Editor API candidate. Kind: " (apropos--embedding-field hit 'kind)
+    ". Name: " (or (plist-get hit 'qualified-name)
+                    (plist-get hit 'name) (plist-get hit 'task) "")
+    ". Description: " (apropos--embedding-field hit 'doc)
+    ". Signature: " (apropos--embedding-field hit 'sig)
+    ". Domain: " (apropos--embedding-field hit 'domain)
+    ". Effects: " (apropos--embedding-field hit 'effects)
+    ". Usage: " (or (plist-get hit 'use) (plist-get hit 'run) "")))
+
+(define (apropos--semantic-hits query rows filters)
+  (let ((key (and apropos-semantic-search
+                  (boundp (quote llm-key))
+                  (llm-key "openai"))))
+    (if (or (not key) (equal? key "") (equal? (string-trim query) ""))
+        '()
+        (let* ((sources (apropos--semantic-sources rows))
+               (texts (map apropos--embedding-text sources))
+               (eligible (map (lambda (hit) (apropos--filter-match? hit filters)) sources))
+               (semantic-query (string-append "Find the editor API for this task: " query))
+               (scores (embedding-search semantic-query texts key
+                                         apropos-semantic-limit eligible)))
+          (map (lambda (score)
+                 (append (nth (car score) sources)
+                         (list 'note "semantic match" 'semantic-score (nth 1 score))))
+               (filter (lambda (score) (>= (nth 1 score) apropos-semantic-threshold))
+                       scores))))))
+
+(define (apropos-rebuild-embeddings!)
+  (let ((path (embedding-cache-clear!))
+        (key (and (boundp (quote llm-key)) (llm-key "openai"))))
+    (if (or (not key) (equal? key ""))
+        (string-append "Cleared " path "; no OpenAI key is configured.")
+        (begin
+          ;; This result is discarded. The embedding mechanism still indexes
+          ;; every current source before it selects the small result set.
+          (apropos--semantic-hits "editor API discovery" (apropos--rows-cached) '())
+          (if (file-exists? path)
+              (string-append "Rebuilt " path ".")
+              (string-append "Could not rebuild " path "; lexical apropos remains available."))))))
 
 (define (apropos--filter filters key)
   (or (plist-get filters key)
@@ -535,9 +639,7 @@
          (or (not domain) (equal? (plist-get hit 'domain) (catalog--string domain)))
          (or (not effect) (member (catalog--string effect) (or (plist-get hit 'effects) '()))))))
 
-;; Small deterministic ranking, without embeddings or another model call:
-;; an exact name is an answer, a recipe is a ready composition, and a name
-;; prefix is generally more useful than a mention buried in prose.
+;; Exact names and literal recipes remain ahead of vector results.
 (define (apropos--rank hits query)
   ;; An empty query has no name to rank against, and the order it came in
   ;; is the answer. Leave before building the four buckets: the let* below
@@ -545,7 +647,14 @@
   ;; empty query every time.
   (if (equal? (string-trim query) "")
       hits
-      (apropos--rank-by-name hits query)))
+      (let ((literal (filter (lambda (h) (not (equal? (plist-get h 'note)
+                                                       "semantic match")))
+                             hits))
+            (semantic (filter (lambda (h) (equal? (plist-get h 'note)
+                                                   "semantic match"))
+                              hits)))
+        (append (apropos--rank-by-name literal query)
+                semantic))))
 
 (define (apropos--rank-by-name hits query)
   (let* ((q (string-downcase (string-trim query)))
@@ -585,14 +694,21 @@
 
 (define (apropos--search query filters index rows)
   (let* ((words (apropos--words query))
-         (hits (append
-                 (if (boundp (quote recipe-search)) (recipe-search query) '())
-                 (map (lambda (row) (car (cdr row)))
-                      (filter (lambda (row) (apropos--row-hit? row words)) rows))))
+         (recipes (if (boundp (quote recipe-search)) (recipe-search query) '()))
+         (literal-rows (filter (lambda (row) (apropos--row-hit? row words)) rows))
+         (literal-hits (append recipes (map (lambda (row) (car (cdr row))) literal-rows)))
+         (suggestions (if (pair? literal-hits) '()
+                          (apropos--name-suggestions query words index)))
+         (semantic-hits
+           (filter (lambda (hit)
+                     (and (not (apropos--has-hit? literal-hits hit))
+                          (not (apropos--has-hit? suggestions hit))))
+                   (apropos--semantic-hits query rows filters)))
+         (hits (append literal-hits suggestions semantic-hits))
          (filtered (filter (lambda (h) (apropos--filter-match? h filters)) hits)))
     (if (or (pair? filtered) (null? words) (pair? filters))
         (apropos--rank filtered query)
-        ;; nothing matched: the query is probably a near-miss on a name
+        ;; No embedding key exists and nothing matched. Try any name shape.
         (map (lambda (e)
                (apropos--enrich
                  (list 'kind "function" 'name (car e) 'sig (nth 2 e) 'doc (nth 1 e)
@@ -607,16 +723,21 @@
 
 (category! 'discovery)
 (public! 'apropos
-  "(apropos \"words\" ['kind K 'package P 'namespace N 'domain D 'effect E]) — search the whole catalog and optionally filter it. Start here.")
+  "(apropos QUERY &rest FILTERS) — hybrid literal/semantic catalog search; accepts kind/package/namespace/domain/effect filters. The public call shape is unchanged.")
+(catalog-meta! 'function "apropos" 'domain 'discovery 'effects '(read external spend))
+(public! 'apropos-rebuild-embeddings!
+  "(apropos-rebuild-embeddings!) — clear and rebuild the OpenAI embedding cache for the current catalog")
+(catalog-meta! 'function "apropos-rebuild-embeddings!"
+  'domain 'discovery 'effects '(write external spend))
 (public! 'apropos-category
   "(apropos-category 'windows) — every public function in one category")
 (public! 'public-categories "(public-categories) — the category names")
 
 (define-tool! 'apropos
   (string-append
-    "Search the editor by WORDS, not by regex: public functions with their "
+    "Search the editor by intent, not by regex: public functions with their "
     "signatures, M-x commands with their docstrings, keybindings, and "
-    "settings. Every word must appear somewhere in the entry, so "
+    "settings. Literal matches rank first. OpenAI embeddings add semantic matches, so "
     "\"split window\" finds the window splitters and \"chat cost\" finds "
     "the cost commands. This is the supported surface and the place to "
     "start. Nothing matched? You get the closest names instead. Pass "
@@ -624,7 +745,7 @@
     "category as a compatibility alias for domain, or scope \"all\" to include "
     "the internal primitives, one-line docs only, which may change "
     "without notice.")
-  (list (list 'query "string" "words, e.g. \"open a file\" or \"buffer text\"")
+  (list (list 'query "string" "intent words, e.g. \"open a file\" or \"remove document\"")
         (list 'kind "string" "function, command, key, variable, recipe, mode, or component" 'optional)
         (list 'package "string" "owning load unit" 'optional)
         (list 'namespace "string" "stable public vocabulary" 'optional)
@@ -656,7 +777,7 @@
                                         (apropos--internal n (primitive-doc n) words))
                                       (global-names)))))
               (apply apropos (cons q filters)))))))
-  '(read))
+  '(read external spend))
 
 (define-tool! 'apropos-categories
   "List the catalog facets: kinds, packages, namespaces, domains, and effects. Cheapest way to see the shape of the surface before searching it."

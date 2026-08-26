@@ -167,8 +167,11 @@ has it — no restart, no compile step:
 ```
 
 Every public definition carries catalog metadata — a `domain!` and an
-`effects!` scope. `M-x apropos` searches that catalog, so an agent can ask
-what the editor can do, and what each answer will touch.
+`effects!` scope. `M-x apropos` searches that catalog by words and, when an
+OpenAI key is configured, by semantic similarity. Literal hits still rank
+first; catalog vectors are cached on disk and regenerated with
+`M-x apropos-rebuild-embeddings`. The Scheme API remains
+`(apropos QUERY &rest FILTERS)`.
 
 ## Design commitments
 

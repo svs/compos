@@ -397,12 +397,19 @@
         "· `q` closes this page\n"))))
 
 (define-command "apropos"
-  "Search the whole editor by words: functions, commands, keys and settings"
+  "Search the whole editor by words or intent; literal hits rank before cached semantic hits"
   (lambda ()
     (minibuffer-read "Apropos (words): " (history-items 'apropos)
       (lambda (query)
         (history-push! 'apropos query)
         (apropos-page query)))))
+(catalog-meta! 'command "apropos" 'domain 'discovery 'effects '(read external spend))
+
+(define-command "apropos-rebuild-embeddings"
+  "Clear and rebuild the OpenAI embedding cache for the current catalog"
+  (lambda () (message (apropos-rebuild-embeddings!))))
+(catalog-meta! 'command "apropos-rebuild-embeddings"
+  'domain 'discovery 'effects '(write external spend))
 
 ;;; --- contextual help: what is here, right now ----------------------------------
 ;;; `M-?` answers one question: "what am I looking at, and what can I do
@@ -508,6 +515,7 @@
 (public! 'mode-doc! "(mode-doc! MODE DOC) — what a mode is for; describe-mode prints it")
 (public! 'local-keys "(local-keys BUF) — ((KEYS COMMAND) ...) for BUF's own bindings")
 (public! 'apropos-page "(apropos-page \"words\") — the apropos hits as a rendered *Help* page")
+(catalog-meta! 'function "apropos-page" 'domain 'discovery 'effects '(read external spend))
 
 ;;; --- describe-key: press the key, read the page --------------------------------
 ;;; `C-h k` answers the question a keyboard asks: "what does THIS do?".

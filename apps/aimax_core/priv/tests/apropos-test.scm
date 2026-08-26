@@ -172,11 +172,61 @@
 
 ;;; --- the search ---------------------------------------------------------------
 
+(deftest 'apropos-keeps-its-public-call-shape
+  "semantic search changes ranking, not the Scheme API"
+  (lambda ()
+    (check-equal! (nth 2 (public-entry "apropos"))
+                  "(apropos QUERY &rest FILTERS)"
+                  "the public signature is unchanged")))
+
 (deftest 'doc-text-is-searched-not-only-names
   "the phrase is in the doc of a function whose name does not hold it"
   (lambda ()
     (check-true! (member "buffer-list-mru" (t--ap-names (apropos "most recently used")))
                  "the doc answered")))
+
+(deftest 'semantic-results-join-the-catalog-and-keep-filters
+  "embedding scores become labeled catalog hits and keep strict filters"
+  (lambda ()
+    (check-equal! (plist-get (catalog-entry 'function "apropos") 'effects)
+                  '("read" "external" "spend") "the search declares its API cost")
+    (let* ((rows (apropos--rows-cached))
+           (sources (apropos--semantic-sources rows))
+           (hit (filter (lambda (h) (equal? (plist-get h 'name) "buffer-kill!")) sources)))
+      (check-true! (pair? hit) "the source holds buffer-kill!")
+      (when (pair? hit)
+        (let* ((semantic (append (car hit) (list 'note "semantic match" 'semantic-score 0.91)))
+               (destroy (filter (lambda (h) (apropos--filter-match? h (list 'effect 'destroy)))
+                                (list semantic))))
+          (check-equal! (plist-get semantic 'note) "semantic match" "the label")
+          (check-equal! (plist-get semantic 'semantic-score) 0.91 "the score")
+          (check-true! (member "buffer-kill!" (t--ap-names destroy))
+                       "the effect filter keeps the destructive hit"))))))
+
+(deftest 'embedding-rebuild-explains-a-missing-key
+  "a manual rebuild clears the cache and reports why it cannot refill"
+  (lambda ()
+    (let ((old-key llm-key))
+      (set! llm-key (lambda (provider) #f))
+      (let ((result (apropos-rebuild-embeddings!)))
+        (set! llm-key old-key)
+        (check-contains! result "no OpenAI key" "the result explains the empty cache")))))
+
+(deftest 'literal-results-rank-before-semantic-results
+  "a direct vocabulary match stays ahead of a vector result"
+  (lambda ()
+    (let* ((literal (list 'kind "function" 'name "buffer-kill!"))
+           (semantic (list 'kind "function" 'name "other" 'note "semantic match"
+                           'semantic-score 0.95))
+           (hits (apropos--rank (list semantic literal) "kill buffer")))
+      (check-equal! (plist-get (car hits) 'name) "buffer-kill!"
+                    "the literal hit is first"))))
+
+(deftest 'punctuation-and-filler-words-do-not-block-intent
+  "natural phrasing and compound words keep their meaningful terms"
+  (lambda ()
+    (check-true! (member "split-window!" (t--ap-names (apropos "how do I split a window")))
+                 "filler words do not block the splitter")))
 
 (deftest 'responsive-list-layouts-are-publicly-discoverable
   "an agent creating a list finds the profile syntax before writing width branches"

@@ -49,15 +49,7 @@
 ;; the secret back into the config file. A url that carries a key must
 ;; never print — mcp-url-shown cuts the query string off every display.
 (define (mcp-resolve-spec spec)
-  (if (or (null? spec) (null? (cdr spec)))
-      '()
-      (let ((k (car spec)) (v (cadr spec)))
-        (cons k
-              (cons (cond ((or (equal? k 'env) (equal? k 'headers))
-                           (key-resolve-plist v))
-                          ((equal? k 'url) (key-resolve v))
-                          (else v))
-                    (mcp-resolve-spec (cddr spec)))))))
+  (spec-resolve spec '(env plist headers plist args each url value)))
 
 ;; a url without its query string. Every line that shows a url goes on a
 ;; screen or into a chat buffer, and a key can ride in the query.
@@ -127,13 +119,9 @@
             (for-each mcp-ensure! servers)
             (mcp-tool-specs (map symbol->string servers)))))))
 
-(define (chat-tool-system buf)
+(define (chat-tool-system-parts buf)
   (let* ((aimax? (chat-aimax-tools? buf))
          (note (mcp-system-note (chat-remote-servers buf)))
-         (base (cond ((and aimax? (not (equal? note "")))
-                      (string-append *llm-system* "\n\n" note))
-                     (aimax? *llm-system*)
-                     (else note)))
          ;; the skill index (packages/skills.scm, loads after this file)
          ;; rides here — the one system-prompt carrier every lane shares.
          ;; Only a chat that holds eval-scheme can load a skill.
@@ -144,15 +132,26 @@
                      (skills-note-without "code-editing")
                      (skills-note))
                  ""))
-         (with-skills (if (equal? sk "") base (string-append base "\n\n" sk)))
          ;; code-agent-mode keeps one on-demand load instruction in the prompt.
          (code-note
            (if code-active?
                (code-agent-system-note buf)
                "")))
-    (if (equal? code-note "")
-        with-skills
-        (string-append with-skills "\n\n" code-note))))
+    (filter
+      (lambda (part) (not (equal? (car (cdr part)) "")))
+      (list (list "aimax-tools" (if aimax? *llm-system* ""))
+            (list "mcp" note)
+            (list "skills" sk)
+            (list "code-agent" code-note)))))
+
+(define (chat-tool-system buf)
+  (prompt-parts-text (chat-tool-system-parts buf)))
+
+(domain! 'chat)
+(effects! '(read))
+(public! 'chat-tool-system-parts
+  "(chat-tool-system-parts BUF) — named tool-prompt fragments in their exact send order")
+(effects! '(write))
 
 ;; Which LLM surface does a preset command act on? The shared LLM session
 ;; layer owns this configuration; chat-mode and inline llm-mode are its UIs.

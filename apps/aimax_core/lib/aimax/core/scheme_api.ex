@@ -25,6 +25,7 @@ defmodule Aimax.Core.SchemeAPI do
     |> Map.merge(git_primitives())
     |> Map.merge(watch_primitives())
     |> Map.merge(telemetry_primitives())
+    |> Map.merge(discovery_primitives())
   end
 
   @doc "One-line doc for every primitive: signature, then an em dash, then one sentence."
@@ -123,6 +124,10 @@ defmodule Aimax.Core.SchemeAPI do
       "telemetry-snapshot" =>
         "(telemetry-snapshot [LIMIT]) — return recent Scheme lane and task events, newest first.",
       "telemetry-clear!" => "(telemetry-clear!) — discard retained Scheme telemetry events.",
+      "embedding-search" =>
+        "(embedding-search QUERY TEXTS KEY LIMIT ELIGIBLE) — embed QUERY and TEXTS with OpenAI, cache text vectors on disk, and return eligible cosine scores.",
+      "embedding-cache-clear!" =>
+        "(embedding-cache-clear!) — delete cached apropos vectors from disk and memory; return the cache path.",
       "block-on-click!" =>
         "(block-on-click! FN) — register the ONE handler that gets (BUF ID) when a block with a click id is clicked.",
       "define-style!" =>
@@ -205,8 +210,7 @@ defmodule Aimax.Core.SchemeAPI do
         "(reload-files! PATHS) — evaluate the changed top-level forms of each .scm and refresh the modes they redefine; return (FILES FORMS).",
       "window-list-all" =>
         "(window-list-all) — return ((WINDOW-ID BUFFER FRAME-ID) ...) for every window on every frame.",
-      "redraw!" =>
-        "(redraw!) — tell every connected client to re-render every frame; return #t.",
+      "redraw!" => "(redraw!) — tell every connected client to re-render every frame; return #t.",
       "daemon-provision-workspace!" =>
         "(daemon-provision-workspace! PATH NAME) — start or reuse a daemon from PATH; return (URL HOME PORT).",
       "goto-char!" => "(goto-char! POS) — move point to byte POS; return POS.",
@@ -887,6 +891,32 @@ defmodule Aimax.Core.SchemeAPI do
         text = Buffer.text(buf)
         {bol, eol} = Aimax.Core.Text.line_bounds(text, Buffer.point(buf))
         binary_part(text, bol, eol - bol)
+      end
+    }
+  end
+
+  defp discovery_primitives do
+    %{
+      "embedding-cache-clear!" => fn [] ->
+        path = Aimax.Core.EmbeddingIndex.cache_path()
+        :ok = Aimax.Core.EmbeddingIndex.clear(path)
+        path
+      end,
+      "embedding-search" => fn [query, texts, key, limit, eligible] ->
+        case Aimax.Core.EmbeddingIndex.search(to_string(query), texts, to_string(key)) do
+          {:ok, scores} ->
+            mask = List.to_tuple(eligible)
+
+            scores
+            |> Enum.filter(fn {index, _score} ->
+              index < tuple_size(mask) and elem(mask, index)
+            end)
+            |> Enum.take(max(0, limit))
+            |> Enum.map(fn {index, score} -> [index, score] end)
+
+          {:error, _reason} ->
+            []
+        end
       end
     }
   end

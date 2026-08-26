@@ -103,12 +103,10 @@
             (plist-get conf 'mcp-servers)
             (not (boundp (quote presets-acp-servers))))
         conf
-        (agent-config-with-primer
-          (agent-config-with-mcp-note
-            (agent-config-with-code-note
-              (append conf
-                (list 'mcp-servers
-                      (presets-acp-servers (or (plist-get conf 'presets) '()))))))))))
+        (agent-config-with-system-parts
+          (append conf
+            (list 'mcp-servers
+                  (presets-acp-servers (or (plist-get conf 'presets) '()))))))))
 
 (define (agent-config-with-primer conf)
   (let ((primer (if (boundp (quote hello)) (hello) "")))
@@ -148,6 +146,42 @@
         (let ((note (code-agent-system-note buf)))
           (if (equal? note "") conf (agent-config-append-system conf note)))
         conf)))
+
+(define (agent-system-prompt-parts conf)
+  (let* ((buf (plist-get conf 'buffer))
+         (code-note
+           (if (and buf (boundp (quote code-agent-system-note)))
+               (code-agent-system-note buf)
+               ""))
+         (mcp-note
+           (if (and (boundp (quote mcp-system-note))
+                    (boundp (quote preset-servers)))
+               (mcp-system-note
+                 (fold (lambda (acc p)
+                         (fold (lambda (acc2 s)
+                                 (if (member s acc2) acc2 (cons s acc2)))
+                               acc (preset-servers p)))
+                       '() (or (plist-get conf 'presets) '())))
+               ""))
+         (primer (if (boundp (quote hello)) (hello) "")))
+    (filter
+      (lambda (part) (not (equal? (car (cdr part)) "")))
+      (list (list "code-agent" code-note)
+            (list "mcp" mcp-note)
+            (list "aimax-primer" primer)))))
+
+(define (agent-config-with-system-parts conf)
+  (fold (lambda (out part) (agent-config-append-system out (car (cdr part))))
+        conf (agent-system-prompt-parts conf)))
+
+(domain! 'chat)
+
+(effects! '(read))
+
+(public! 'agent-system-prompt-parts
+  "(agent-system-prompt-parts CONF) — named ACP system-prompt fragments in session-start order")
+
+(effects! '(write))
 
 (define (agent-resolve-config* opts)
   (let* ((cname (or (plist-get opts 'connector) *default-connector*))

@@ -59,8 +59,12 @@
 
       ;; read-only tools never ask, even in ask mode
       (buffer-set-local! buf 'chat-permission-mode 'ask)
-      (check-equal! (*permission-policy* buf "apropos" "tool" "apropos args")
+      (check-equal! (*permission-policy* buf "describe-function" "tool" "describe args")
                     'allow-always "a read never asks")
+
+      ;; semantic apropos can call the embeddings API
+      (check-equal! (*permission-policy* buf "apropos" "tool" "apropos args")
+                    'ask "a search that can spend asks")
 
       ;; destroy-effect tools ask, even in approve mode
       (buffer-set-local! buf 'chat-permission-mode 'approve)

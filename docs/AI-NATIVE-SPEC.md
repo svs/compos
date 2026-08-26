@@ -468,8 +468,9 @@ the caller's context, which is where it already is.
 written one for 95 of 126 entries with nothing reading it) and carries a
 category, set once per section with `(category! 'name)`. `(apropos ...)`
 searches recipes first, then the public API, the M-x commands and their
-docstrings, the keybindings, and the defcustoms — word-AND, with an
-edit-distance fallback. `recipes.scm` holds ~30 task→expression lines. The
+docstrings, the keybindings, and the defcustoms. It now combines literal-first
+ranking with cached OpenAI embeddings and an edit-distance fallback.
+`recipes.scm` holds ~30 task→expression lines. The
 RPC server answers `initialize` with `(hello)`, and raw-socket eval errors
 run the same did-you-mean the tool path gets. An ACP agent gets the primer
 on `session/new`.

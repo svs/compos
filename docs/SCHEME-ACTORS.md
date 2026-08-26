@@ -72,11 +72,11 @@ again. Structural and exact-match replacement helpers submit one
 replacement, never its deleted midpoint. The task layer deliberately does not
 add a competing transaction model.
 
-`apropos` is safe to run in parallel. Its per-search index is lexical rather
-than temporary global state. The persistent index cache is keyed by catalog
-generation. The intended load/unload evolution is one serialized catalog
-writer publishing an immutable generation snapshot; searches then read one
-snapshot without excluding one another.
+`apropos` is safe to run in parallel. Its Scheme rows support literal matching.
+OpenAI vectors add semantic recall when an OpenAI key exists. Catalog vectors
+persist by content hash under the ai-max home. The cache stores no keys or raw
+catalog text. Searches fall back to lexical matching when embeddings fail.
+Run `M-x apropos-rebuild-embeddings` to clear and refill the complete cache.
 
 Lane telemetry reports execution duration, queue time, and backlog at
 `[:aimax, :lane, :job]`. Shared task telemetry reports duration and status at

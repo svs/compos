@@ -1286,7 +1286,13 @@
         "Use it to edit live ai-max buffers instead of the filesystem sandbox.\n"
         "Before the first code edit, load it once with eval-scheme: "
         "(skill \"code-editing\").\n"
-        "If this conversation already contains that tool result, do not load it again.")
+        "If this conversation already contains that tool result, do not load it again.\n"
+        "DISCOVERY\n"
+        "Before guessing an editor API name, call (apropos \"intent\"). "
+        "Exact and literal hits rank first; vector hits say semantic match.\n"
+        "PROMPT CHANGES\n"
+        "Read docs/PROMPTS.md. Prompt fragments, their order and lifecycle, "
+        "and direct-API/ACP parity are one contract.")
       ""))
 
 (effects! '(read))

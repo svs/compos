@@ -165,6 +165,10 @@ Apropos adds semantic discovery. It searches function documentation,
 signatures, commands, keys, settings, components, recipes, package metadata,
 domains, and effects.
 
+Literal search stays in Scheme. OpenAI embeddings add semantic results when a
+key exists. Catalog vectors persist by content hash in the ai-max home. API or
+cache failures leave the literal result path unchanged.
+
 The current implementation derives normalized apropos rows from several
 registries. It caches the rows by catalog generation. The first caller after a
 catalog change builds them under one Scheme lock. Concurrent callers reuse the

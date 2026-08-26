@@ -2234,6 +2234,30 @@ defmodule Aimax.Ui.Layouts do
                 };
                 window.addEventListener("focus", this.focusH);
                 window.addEventListener("blur", this.blurH);
+
+                // "unfocused" hides every cursor, and only the focus event
+                // above clears it. The line below sets it from a poll, and a
+                // browser answers that poll with false while it is still
+                // settling a new document — a reconnect, a boot-id reload.
+                // The window never lost the focus, so no focus event ever
+                // comes to undo it, and the editor sits there with no cursor
+                // until the reader alt-tabs away and back. A key or a
+                // pointer proves the window has the focus, whatever the poll
+                // said, so let either one heal the state.
+                this.proveFocusH = () => {
+                  if (document.hasFocus() && document.body.classList.contains("unfocused")) {
+                    this.focusH();
+                  }
+                };
+                window.addEventListener("pointerdown", this.proveFocusH, true);
+                window.addEventListener("keydown", this.proveFocusH, true);
+                // a tab that comes back to the front re-reads the poll, and
+                // by then the answer is the true one
+                this.visibilityH = () => {
+                  if (document.visibilityState === "visible") this.proveFocusH();
+                };
+                document.addEventListener("visibilitychange", this.visibilityH);
+
                 if (!document.hasFocus()) document.body.classList.add("unfocused");
                 this.syncCursorFocus();
                 this.syncKeyboardOwner();
@@ -2279,6 +2303,9 @@ defmodule Aimax.Ui.Layouts do
                 window.removeEventListener("scroll", this.cscrollH, true);
                 window.removeEventListener("focus", this.focusH);
                 window.removeEventListener("blur", this.blurH);
+                window.removeEventListener("pointerdown", this.proveFocusH, true);
+                window.removeEventListener("keydown", this.proveFocusH, true);
+                document.removeEventListener("visibilitychange", this.visibilityH);
                 window.removeEventListener("paste", this.pasteH);
                 window.removeEventListener("mouseup", this.mouseH);
                 if (this.sink) this.sink.remove();

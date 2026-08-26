@@ -2220,7 +2220,12 @@ defmodule Aimax.Ui.EditorLive do
         line = if index == 0, do: raw_line, else: "\n" <> raw_line
 
         if Regex.match?(~r/^\s*```/, raw_line) do
-          {[recover_inline_backticks(segment), line | parts], "", not fenced?}
+          # parts is reversed at the end, so the fence line goes in FIRST and
+          # the text it closes goes in after it. The other order rebuilt the
+          # document with every fence line ahead of the text above it: the
+          # first fence landed on the first heading, and the whole page
+          # rendered as the code that fence opened.
+          {[line, recover_inline_backticks(segment) | parts], "", not fenced?}
         else
           if fenced?,
             do: {[line | parts], segment, fenced?},

@@ -365,4 +365,33 @@ defmodule Aimax.Ui.PreviewCursorTest do
     assert html =~ "More answer."
     assert html =~ @pt
   end
+
+  test "a fenced block stays where the author put it" do
+    text = "# Title\n\nbody one\n\n```text\ncode\n```\n\n## Later\n\nbody two\n"
+    html = EditorLive.preview_doc("markdown", text, 0, @faces, false)
+    seen = strip_anchors(html)
+
+    # the fence used to be rebuilt ahead of the text above it: it landed on
+    # the first heading and the whole page rendered as the code it opened
+    assert seen =~ "<h1>"
+    assert seen =~ "<h2>"
+    assert seen =~ "body one"
+    assert seen =~ "body two"
+    assert seen =~ "<pre><code class=\"text\">code</code></pre>"
+  end
+
+  test "a document with many fences keeps every block in order" do
+    text =
+      "one\n\n```a\nA\n```\n\ntwo\n\n```b\nB\n```\n\nthree\n"
+
+    html = EditorLive.preview_doc("markdown", text, 0, @faces, false)
+    seen = strip_anchors(html)
+
+    order = fn needle -> :binary.match(seen, needle) |> elem(0) end
+
+    assert order.("one") < order.("<code class=\"a\">")
+    assert order.("<code class=\"a\">") < order.("two")
+    assert order.("two") < order.("<code class=\"b\">")
+    assert order.("<code class=\"b\">") < order.("three")
+  end
 end

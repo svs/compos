@@ -2145,6 +2145,10 @@ defmodule Aimax.Ui.EditorLive do
     ::highlight(region){background:color-mix(in srgb,#{accent} 32%,transparent)}
     .pt{display:inline-block;width:2px;height:1.05em;margin:0 -1px;vertical-align:-0.18em;
         background:#{accent};animation:ptb 1.1s step-end infinite}
+    /* The window does not own the keyboard, so the caret stops blinking.
+       It still draws: a reader who looks at the page from another window
+       must still see where point stands. Emacs draws a hollow box here. */
+    .pt.idle{animation:none;opacity:0.45}
     .mk{display:inline-block;width:0;height:0}
     .ln{display:inline-block;width:0;height:0}
     @keyframes ptb{0%,49%{opacity:1}50%,100%{opacity:0}}

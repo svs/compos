@@ -272,9 +272,15 @@ defmodule Aimax.Ui.Layouts do
           .window.inactive .cursor {
             visibility: hidden; animation: none;
           }
-          /* A cursor means keyboard focus. No focused frame, no cursor. */
-          body.unfocused .cursor {
-            visibility: hidden !important; animation: none !important;
+          /* The frame does not own the keyboard, so the cursor stops
+             blinking and goes hollow. It does NOT go away: a reader who
+             looks at the editor from a terminal must still see where point
+             stands, and Emacs draws a hollow box for the same reason. */
+          body.unfocused .window.active .cursor {
+            background: transparent !important;
+            color: inherit !important;
+            box-shadow: inset 0 0 0 1px var(--cursor-bg, #26356b);
+            animation: none !important;
           }
           .no-nums .linenum { display: none; }
           /* an img-embed seg: the picture, in the text's place */
@@ -1323,7 +1329,11 @@ defmodule Aimax.Ui.Layouts do
                 const pt = d.querySelector(".pt");
                 if (pt) {
                   const active = this.el.closest(".window")?.classList.contains("active");
-                  pt.style.visibility = document.hasFocus() && active ? "visible" : "hidden";
+                  // a window that does not own the keyboard draws the caret
+                  // idle, never nothing: point is still somewhere, and the
+                  // reader still has to see where
+                  pt.style.visibility = active ? "visible" : "hidden";
+                  pt.classList.toggle("idle", !(document.hasFocus() && active));
                 }
                 this.apply();
                 this.selectRegion();
@@ -1649,7 +1659,8 @@ defmodule Aimax.Ui.Layouts do
                     const pt = d && d.querySelector(".pt");
                     if (pt) {
                       const active = frame.closest(".window")?.classList.contains("active");
-                      pt.style.visibility = focused && active ? "visible" : "hidden";
+                      pt.style.visibility = active ? "visible" : "hidden";
+                      pt.classList.toggle("idle", !(focused && active));
                     }
                   });
                 };

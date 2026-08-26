@@ -298,6 +298,25 @@
                       "another buffer did not join")))
     (t--sw-done!)))
 
+(deftest 'push-selected-prefers-an-explicit-selection
+  "an explicit selection excludes the unselected current buffer"
+  (lambda ()
+    (t--sw-setup!)
+    (split-window! 'h 0.5)
+    (other-window!)
+    (switch-to-buffer! t--sw-second)
+    (run-command "buffer-select")
+    (other-window!)
+    (run-command "group-push-selected")
+    (t--sw-type! "zzsw-selected-destination")
+    (t--sw-key! "confirm")
+    (let ((destination (group-resolve-id "zzsw-selected-destination")))
+      (check-true! (buffer-in-group? t--sw-second destination)
+                   "the selected buffer joined")
+      (check-false! (buffer-in-group? t--sw-first destination)
+                    "the current buffer stayed out"))
+    (t--sw-done!)))
+
 (deftest 'move-visible-removes-the-current-group
   "visible work buffers leave the current group after joining the destination"
   (lambda ()

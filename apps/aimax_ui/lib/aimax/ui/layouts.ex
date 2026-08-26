@@ -1851,6 +1851,12 @@ defmodule Aimax.Ui.Layouts do
                     }
                     // a row the source does not own: keep walking
                     if (isChrome(node)) continue;
+                    // The newline that ends a row is drawn text too, and its
+                    // box reaches into the gap below the row. A probe that
+                    // lands there answers "the end of the line you are on",
+                    // so the caret never leaves the row. Keep walking until
+                    // the browser offers a character the reader can see.
+                    if (!node.textContent || !node.textContent.trim()) continue;
                     const off = c.startOffset !== undefined ? c.startOffset : c.offset;
                     this.visualLinePending = true;
                     rememberRow(d, rowMid + dir * step);

@@ -1031,6 +1031,8 @@ defmodule Aimax.Ui.Layouts do
           // the text before it. No counting back to a line mark, and nothing
           // to be wrong by: markup the renderer took out is not in the run.
           const utf8 = new TextEncoder();
+          const PREVIEW_UTF8 = utf8;
+          const CARET_RE = /<span class="pt"><\/span>/g;
 
           function exactSpot(d, node, off) {
             const el = node.nodeType === 1 ? node : node.parentElement;
@@ -1276,9 +1278,71 @@ defmodule Aimax.Ui.Layouts do
                   const bytes = Uint8Array.from(atob(encoded), c => c.charCodeAt(0));
                   html = new TextDecoder().decode(bytes);
                 } catch (_) { return; }
+
+                // Moving the caret used to rebuild the document: DOMParser
+                // read 235kB, innerHTML read it again, and 5000 elements
+                // laid out afresh - on every keystroke, and that was the
+                // judder. When the page differs only in where the caret is,
+                // move the caret. Every run of text says the source byte it
+                // began at, so the caret's new home is a lookup.
+                const caretOnly =
+                  this.lastHtml &&
+                  html.replace(CARET_RE, "") === this.lastHtml.replace(CARET_RE, "");
+
+                if (caretOnly && this.placeCaret(d, this.el.dataset.pt)) {
+                  this.lastDoc = encoded;
+                  this.lastHtml = html;
+                  return;
+                }
+
                 const next = new DOMParser().parseFromString(html, "text/html");
                 d.documentElement.innerHTML = next.documentElement.innerHTML;
                 this.lastDoc = encoded;
+                this.lastHtml = html;
+              },
+
+              // Put the caret at source byte POINT, in the run that owns it.
+              // Answers false when the page cannot say where that is, and
+              // the caller rebuilds instead.
+              placeCaret(d, point) {
+                const at = parseInt(point, 10);
+                if (!Number.isFinite(at)) return false;
+
+                let target = null;
+                let within = 0;
+                for (const run of d.querySelectorAll("span.s[data-s]")) {
+                  const start = parseInt(run.dataset.s, 10);
+                  if (!Number.isFinite(start) || start > at) continue;
+                  const len = PREVIEW_UTF8.encode(run.textContent).length;
+                  if (at <= start + len) { target = run; within = at - start; }
+                }
+                if (!target) return false;
+
+                const node = target.firstChild;
+                if (!node || node.nodeType !== 3) return false;
+
+                // bytes to characters: the split has to fall on a character
+                let chars = 0;
+                let bytes = 0;
+                const text = node.textContent;
+                while (chars < text.length && bytes < within) {
+                  bytes += PREVIEW_UTF8.encode(text[chars]).length;
+                  chars += 1;
+                }
+                if (bytes !== within) return false;
+
+                const old = d.querySelector(".pt");
+                if (old) {
+                  const host = old.parentNode;
+                  old.remove();
+                  if (host) host.normalize();
+                }
+
+                const caret = d.createElement("span");
+                caret.className = "pt";
+                const rest = node.splitText(chars);
+                rest.parentNode.insertBefore(caret, rest);
+                return true;
               },
               scroller() {
                 const d = this.doc();
@@ -1308,11 +1372,17 @@ defmodule Aimax.Ui.Layouts do
                   // The new document tree may not have layout yet. Defer the
                   // measurement until the frame paints, then center point in
                   // the iframe's own scrollport.
-                  // Scroll the least that puts point back on the page, and
-                  // nothing at all while it is already there. Centring it on
-                  // every move threw the document half a page at a time, and
-                  // a reader who moves down one line expects the page to
-                  // hold still. This is scroll-conservatively.
+                  // While point is on the page, do not scroll at all: a
+                  // reader who moves down one line expects the page to hold
+                  // still, and centring on every move threw the document
+                  // half a page at a time. When point leaves the page, put
+                  // it back in the MIDDLE, so there is a screenful of what
+                  // comes next rather than one line of it.
+                  //
+                  // That is what Emacs does by default, and it is the one
+                  // rule: the motion handler used to make its own room by a
+                  // different measure, and which of the two you got depended
+                  // on the numbers.
                   const reveal = () => {
                     const current = this.doc();
                     const marker = current && current.querySelector(".pt");
@@ -1320,15 +1390,14 @@ defmodule Aimax.Ui.Layouts do
                     if (!marker || !scroll) return;
                     const r = marker.getBoundingClientRect();
                     const h = this.el.clientHeight;
-                    const margin = Math.min(90, Math.max(24, h / 6));
+                    const edge = Math.min(48, h / 8);
 
-                    if (r.top >= margin && r.bottom <= h - margin) return;
+                    if (r.top >= edge && r.bottom <= h - edge) return;
 
-                    const target =
-                      r.top < margin
-                        ? scroll.scrollTop + r.top - margin
-                        : scroll.scrollTop + r.bottom - (h - margin);
-                    scroll.scrollTop = Math.max(0, target);
+                    scroll.scrollTop = Math.max(
+                      0,
+                      scroll.scrollTop + r.top - h / 2 + r.height / 2
+                    );
                   };
                   requestAnimationFrame(() => requestAnimationFrame(reveal));
                 }
@@ -1812,11 +1881,14 @@ defmodule Aimax.Ui.Layouts do
                       parseFloat(d.defaultView.getComputedStyle(parentEl).lineHeight) || 20;
                     const room = dir > 0 ? frame.clientHeight - r.bottom : r.top;
 
+                    // the same rule the page follows when point leaves it:
+                    // put point in the middle, so what comes next is a
+                    // screenful rather than one line
                     if (room < lh * 3) {
                       const scroll = d.scrollingElement || d.documentElement;
                       scroll.scrollTop = Math.max(
                         0,
-                        scroll.scrollTop + r.top - frame.clientHeight / 2
+                        scroll.scrollTop + r.top - frame.clientHeight / 2 + r.height / 2
                       );
                       r = pt.getBoundingClientRect();
                       visualGoal.y = null;

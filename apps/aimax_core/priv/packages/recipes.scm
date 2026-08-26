@@ -46,15 +46,23 @@
 (defrecipe! "open a file"
   "(visit {{path}} (buffer-group (current-buffer)))"
   (list (list 'path "File: ")))
+(catalog-meta! 'recipe "open a file" 'domain 'files 'effects '(write display))
 (defrecipe! "open a file in a split"
   "(let ((group (buffer-group (current-buffer)))) (split-window! 'h) (other-window!) (visit {{path}} group))"
   (list (list 'path "File: ")))
+(catalog-meta! 'recipe "open a file in a split"
+  'domain 'files 'effects '(write display))
 (defrecipe! "split the window side by side"
   "(split-window! 'h 0.5)")
+(catalog-meta! 'recipe "split the window side by side"
+  'domain 'windows 'effects '(write display))
 (defrecipe! "split the window above and below"
   "(split-window! 'v 0.5)")
+(catalog-meta! 'recipe "split the window above and below"
+  'domain 'windows 'effects '(write display))
 (defrecipe! "one window again"
   "(delete-other-windows!)")
+(catalog-meta! 'recipe "one window again" 'domain 'windows 'effects '(write display))
 (defrecipe! "show a buffer in the other window"
   "(display-buffer-other-window! {{buffer}})"
   (list (list 'buffer "Buffer: ")))
@@ -96,6 +104,8 @@
         (list 'new "With: ")))
 (defrecipe! "make a scratch buffer and show it"
   "(begin (buffer-create \"*notes*\") (switch-to-buffer! \"*notes*\"))")
+(catalog-meta! 'recipe "make a scratch buffer and show it"
+  'domain 'buffers 'effects '(write display))
 (defrecipe! "save the current buffer"
   "(run-command \"save-buffer\")")
 (defrecipe! "which buffer am I in"
@@ -103,8 +113,12 @@
 (defrecipe! "insert text where the cursor is"
   "(insert! {{text}})"
   (list (list 'text "Text: ")))
+(catalog-meta! 'recipe "insert text where the cursor is"
+  'domain 'editing 'effects '(write display))
 (defrecipe! "go to the end of the buffer"
   "(end-of-buffer!)")
+(catalog-meta! 'recipe "go to the end of the buffer"
+  'domain 'editing 'effects '(write display))
 
 ;;; --- finding things -----------------------------------------------------------
 

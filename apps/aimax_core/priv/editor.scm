@@ -1628,6 +1628,8 @@
   (lambda () (or (preview-scroll! -1000000) (beginning-of-buffer!))))
 (define-command "end-of-buffer" "Move point to the end of the buffer"
   (lambda () (or (preview-scroll! 1000000) (end-of-buffer!))))
+(catalog-meta! 'command "beginning-of-buffer" 'domain 'editing 'effects '(write display))
+(catalog-meta! 'command "end-of-buffer" 'domain 'editing 'effects '(write display))
 
 (define (preview--positions text needle)
   (let loop ((from 0) (acc (list)))
@@ -3882,6 +3884,7 @@
     (if (current-prefix-arg)
         (find-file-group-reader find-file-read)
         (find-file-read (frame-group)))))
+(catalog-meta! 'command "find-file" 'domain 'buffers 'effects '(write display))
 
 ;; the project a buffer belongs to, as a short name for the prompt.
 ;; project.scm supplies the real answer through this seam (dup #6);
@@ -7912,6 +7915,10 @@
   (lambda ()
     (other-window!)
     (chat-snap-to-input!)))
+(for-each
+  (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
+  '("split-window-below" "split-window-right" "delete-window"
+    "delete-other-windows" "other-window"))
 
 ;; Cmd-arrows (s- = super) are geometric windmove: window-rects gives each
 ;; leaf's normalized frame rectangle, and the neighbor in DIR is the nearest
@@ -8013,6 +8020,8 @@
   (lambda () (buffer-cycle! 1)))
 (define-command "next-buffer" "Walk back toward the most recently used buffer"
   (lambda () (buffer-cycle! -1)))
+(catalog-meta! 'command "previous-buffer" 'domain 'buffers 'effects '(write display))
+(catalog-meta! 'command "next-buffer" 'domain 'buffers 'effects '(write display))
 
 (define-command "buffer-select" "Toggle selection on the active buffer"
   (lambda ()
@@ -8473,6 +8482,8 @@
 (public! 'buffer-modeline-name "(buffer-modeline-name BUF) — BUF's name for the modeline: project-relative, or ~ for home")
 (public! 'minibuffer-read-preview "(minibuffer-read-preview PROMPT CANDIDATES ON-SELECT ON-CONFIRM ON-CANCEL &optional MATCH-HINT STYLE COMPLETE COLLECT) — preview candidates and optionally route collected rows")
 (public! 'window-preview-buffer! "(window-preview-buffer! NAME) — show NAME in the active window without touching the MRU ring")
+(catalog-meta! 'function "window-preview-buffer!"
+  'domain 'interaction 'effects '(write display))
 
 (category! 'commands)
 (public! 'define-command "(define-command NAME [DOC] THUNK) — register an M-x command; DOC shows in M-x")

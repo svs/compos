@@ -16,6 +16,7 @@
 ;;;   a archive · d trash · u smart-untag · . toggle unread · @ by sender
 ;;;   m mark+advance · M mark all · U unmark all · F show marked
 ;;;   A archive marked · D trash marked · t tag marked · T tag this thread
+;;;   / add a tag filter · \ remove the last filter · l raw filter
 ;;;   s new search · g refresh · q quit
 ;;; Thread buffer keys:  v html/text view · a archive · r reply · q quit
 ;;; Compose buffer keys: C-c C-c send · C-c C-k abort
@@ -178,46 +179,61 @@ when a message has no text/plain part." 'group 'notmuch)
 (define (nm--th-date th) (list-ref th 4))
 
 (define (nm--search-rows buf)
-  (map (lambda (th) (list (nm--get th 'thread)
-                          (or (nm--get th 'subject) "")
-                          (or (nm--get th 'authors) "")
-                          (or (nm--get th 'tags) '())
-                          (or (nm--get th 'date_relative) "")))
-       (nm--search-json (nm--query-of buf) notmuch-search-limit)))
+  (let ((rows (map (lambda (th) (list (nm--get th 'thread)
+                                      (or (nm--get th 'subject) "")
+                                      (or (nm--get th 'authors) "")
+                                      (or (nm--get th 'tags) '())
+                                      (or (nm--get th 'date_relative) "")))
+                   (nm--search-json (nm--query-of buf) notmuch-search-limit))))
+    ;; the tag column measures itself against the threads this search
+    ;; found. It reads the number here, and not from the entries: a draw
+    ;; lays the columns out while the entries it replaces are still the
+    ;; ones on the buffer.
+    (buffer-set-local! buf 'nm-tags-need
+      (fold (lambda (acc th) (max acc (string-length (nm--tags-text th)))) 6 rows))
+    rows))
 
 ;; Two lines per thread. The subject owns the first line, so a narrow
 ;; window never truncates it; the date sits at the right of that line,
 ;; where a compressed date still reads. The author and the tags share
-;; the second line. Four tags out of a hundred change how you read a
-;; thread, and the bar in front of the row says the first of them:
-;; unread. The rest stay words, and they are what gives way when the
-;; window narrows.
-;; Every tag stays on the line. A tag list that does not fit loses the
-;; END OF EACH WORD, not its last words: "impor… inbox perso… sent"
-;; still says which four tags the thread carries, and a cut list says
-;; the thread has two. Each word gets the same room, and the spaces
-;; between them take one character each.
+;; the second line, and the bar in front of the row says the tag you
+;; read first: unread.
+;;
+;; The reader sees EVERY tag a thread carries. A tag longer than five
+;; characters keeps its first three letters and says the rest is
+;; missing: "attachment" reads "att..". The author is what gives way
+;; when the window narrows.
+(define nm-tag-width 5)
+
+(define (nm--short-tag t)
+  (if (> (string-length t) nm-tag-width)
+      (string-append (substring t 0 3) "..")
+      t))
+
 (define (nm--fit-tags s w)
   (let* ((tags (filter (lambda (t) (not (equal? t ""))) (string-split s " ")))
-         (n (length tags))
-         (room (if (= n 0) 0 (quotient (- w (- n 1)) n))))
-    (cond ((= n 0) "")
-          ;; no room for a word: one letter each, and they lose the
-          ;; spaces too — a column of initials still counts the tags
-          ((< room 2)
-           (string-join (map (lambda (t) (substring t 0 1)) tags) ""))
-          (else
-            (string-join
-              (map (lambda (t)
-                     (if (> (string-length t) room)
-                         (string-append (substring t 0 (- room 1)) "…")
-                         t))
-                   tags)
-              " ")))))
+         (short (string-join (map nm--short-tag tags) " ")))
+    (cond ((null? tags) "")
+          ((<= (string-length short) w) short)
+          ;; not even the short forms fit: one letter per tag, and the
+          ;; reader still counts them
+          (else (string-join (map (lambda (t) (substring t 0 1)) tags) "")))))
+
+(define (nm--tags-text th)
+  (string-join (map nm--short-tag (nm--th-tags th)) " "))
+
+;; The tag column is as wide as the busiest thread of this search needs,
+;; so every thread shows every tag it has. It stops at half the window:
+;; past that the author has nothing left to say, and a thread with that
+;; many tags falls back to the initials.
+(define (nm--tags-width buf)
+  (let ((need (or (buffer-local buf 'nm-tags-need) 6)))
+    (min need (max 10 (quotient (list-view-width buf) 2)))))
 
 (define (nm--search-columns buf)
   (list (list (list "" 1) (list "subject" #f 'left 'end) (list "date" 13 'right))
-        (list (list "" 1) (list "author" #f) (list "tags" 24 'right nm--fit-tags))))
+        (list (list "" 1) (list "author" #f)
+              (list "tags" (nm--tags-width buf) 'right nm--fit-tags))))
 
 (define (nm--subject-face tags)
   (cond ((member "m" tags) "nm-marked")
@@ -232,7 +248,7 @@ when a message has no text/plain part." 'group 'notmuch)
                 (list (nm--th-date th) "nm-date"))
           (list " "
                 (list (nm--th-authors th) "nm-author")
-                (list (string-join tags " ") "nm-tags")))))
+                (list (nm--tags-text th) "nm-tags")))))
 
 (define (nm--search-meta buf)
   (string-append (number->string (length (list-entries buf)))
@@ -251,7 +267,8 @@ when a message has no text/plain part." 'group 'notmuch)
     'doc (string-append
            "One notmuch search as a list of threads. `RET` opens, `SPC` "
            "previews, `a`/`d`/`t` tag, `m` marks and the capital keys act "
-           "on every marked thread. `s` starts a new search; `q` goes back "
+           "on every marked thread. `/` adds a tag filter; `\\` removes it. "
+           "`s` starts a new search; `q` goes back "
            "to the mailboxes.")
     'rows nm--search-rows
     'row-columns nm--search-columns
@@ -263,7 +280,8 @@ when a message has no text/plain part." 'group 'notmuch)
     'footer (lambda (buf)
               '(("RET" "open") ("SPC" "preview") ("m" "mark")
                 ("a" "archive") ("d" "trash") ("t" "tag")
-                ("s" "search") ("/" "filter") ("g" "refresh")
+                ("s" "search") ("/" "tag filter") ("\\" "unfilter")
+                ("g" "refresh")
                 ("q" "mailboxes")))
     'keys '(("n" "notmuch-next") ("p" "notmuch-prev")
             ("RET" "notmuch-open-thread") ("SPC" "notmuch-preview")
@@ -277,7 +295,7 @@ when a message has no text/plain part." 'group 'notmuch)
             ("D" "notmuch-trash-marked") ("t" "notmuch-tag-marked")
             ("T" "notmuch-edit-tags") ("+" "notmuch-add-tag")
             ("-" "notmuch-remove-tag") ("j" "notmuch-jump")
-            ("/" "notmuch-filter")
+            ("/" "notmuch-filter-by-tag")
             ("\\" "notmuch-unfilter-last") ("l" "notmuch-filter")
             ("s" "notmuch-search") ("g" "notmuch-refresh")
             ;; like notmuch-emacs: q in the index goes back to the mailboxes
@@ -618,6 +636,16 @@ when a message has no text/plain part." 'group 'notmuch)
   (filter (lambda (t) (not (equal? t "")))
           (string-split (string-trim (nm--run "search --output=tags '*'")) "\n")))
 
+;; Only offer tags that occur in the current result. The menu cannot lead
+;; from a useful inbox view to an empty result through an unrelated tag.
+(define (nm--query-tags buf)
+  (filter (lambda (t) (not (equal? t "")))
+          (string-split
+            (string-trim
+              (nm--run (string-append "search --output=tags -- "
+                                      (nm--quote (nm--query-of buf)))))
+            "\n")))
+
 (define-command "notmuch-add-tag" "Add a tag to the thread at point (completes)"
   (lambda ()
     (let ((buf (current-buffer)))
@@ -670,6 +698,27 @@ when a message has no text/plain part." 'group 'notmuch)
               (nm--query-push! buf term)
               (nm--refresh! buf)
               (list-goto-first-entry buf))))))))
+
+(domain! 'mail)
+(effects! '(write external execute))
+
+(define-command "notmuch-filter-by-tag"
+  "Choose a tag from the current results and add it to this search"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (tags (nm--query-tags buf)))
+      (if (null? tags)
+          (message "No tags occur in this search")
+          (minibuffer-read "Add tag filter: " tags
+            (lambda (choice)
+              (let ((tag (string-trim choice)))
+                (unless (equal? tag "")
+                  (nm--query-push! buf (string-append "tag:" tag))
+                  (nm--refresh! buf)
+                  (list-goto-first-entry buf)
+                  (message (string-append "Added tag filter: " tag))))))))))
+
+(effects! '(unknown))
 
 (define-command "notmuch-unfilter-last" "Remove the most recently added notmuch filter"
   (lambda ()

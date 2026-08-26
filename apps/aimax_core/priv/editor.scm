@@ -1353,7 +1353,6 @@
 (define (list-render! buf fetch)
   (when (buffer-exists? buf)
     (buffer-set-local! buf 'list-layout-cache #f)
-    (buffer-set-local! buf 'list-columns-cache #f)
     ;; a rewrite dumps point to 0 — keep the reader's place. The place is
     ;; the ROW the reader is on, not the byte and not the number: a
     ;; reflowed table moves every byte, and a most-recently-used list
@@ -1371,6 +1370,14 @@
       (buffer-delete-range! buf 0 (buffer-size buf))
       ;; entries first: the header states the row count
       (buffer-set-local! buf 'list-entries rows)
+      ;; and the columns lay out against the rows this draw writes. The
+      ;; cache clears HERE, not before the fetch: reading point asks the
+      ;; header how many lines it has, and that laid the columns out
+      ;; while the rows they must fit were still the last draw's. A mode
+      ;; that measures its column against its rows then measured the
+      ;; rows that went. Every later call in this draw reads the cache,
+      ;; so the mode's columns fn still runs once.
+      (buffer-set-local! buf 'list-columns-cache #f)
       (let ((base (list-write! buf (list-view-lines buf rows)
                                (list-header-lines buf) (length rows)
                                (list-row-height buf))))

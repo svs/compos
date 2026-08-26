@@ -113,26 +113,32 @@
       (check-equal! (length auth) 1 "the author is on another")
       (check-false! (string-contains? (car subj) "Alice") "the two do not share a line")
       (check-contains! (car subj) "Today 06:50" "the date rides with the subject")
-      (check-contains! (car auth) "inbox unread" "the tags ride with the author"))
+      ;; "unread" is six characters, so the column shows it as "unr.."
+      (check-contains! (car auth) "inbox unr.." "the tags ride with the author"))
     ;; a row is two lines, and one move is one thread
     (t--nm-run! "notmuch-next")
     (check-equal! (nm--th-subject (nm--thread-at "*notmuch*")) "Quarterly report"
                   "one move goes to the next thread")
     (t--nm-done!)))
 
-(deftest 'a-narrow-tag-column-shortens-every-tag-and-drops-none
-  "the reader sees which tags a thread carries, not the first two of them"
+(deftest 'every-tag-shows-and-a-long-one-keeps-three-letters
+  "which tags a thread carries is what the column is for"
   (lambda ()
-    (let ((tags "important inbox personal sent"))
-      (check-equal! (nm--fit-tags tags 40) tags "wide enough: the words stand")
-      (let ((out (nm--fit-tags tags 24)))
-        (check-equal! (length (string-split out " ")) 4 "narrow: four tags remain")
-        (check-true! (<= (string-length out) 24) "and the column holds them")
-        (check-contains! out "impo" "the head of each word says which tag it is")
-        (check-contains! out "sent" "including the last one"))
-      ;; too narrow for words: one letter each, and the count still reads
-      (check-equal! (nm--fit-tags tags 5) "iips" "no room: the initials")
-      (check-equal! (nm--fit-tags "" 24) "" "no tags, no text"))))
+    (check-equal! (nm--short-tag "attachment") "att.." "a long tag keeps three letters")
+    (check-equal! (nm--short-tag "inbox") "inbox" "five characters still fit")
+    (check-equal! (nm--short-tag "sent") "sent" "and a short one is itself")
+    (let ((tags '("attachment" "important" "inbox" "personal" "sent")))
+      (check-equal! (nm--tags-text (list "0001" "s" "a" tags "d"))
+                    "att.. imp.. inbox per.. sent"
+                    "every tag reads, none of them goes")
+      ;; the column takes what the busiest row needs
+      (check-equal! (nm--fit-tags "att.. imp.. inbox per.. sent" 28)
+                    "att.. imp.. inbox per.. sent"
+                    "the short forms stand when the column holds them")
+      ;; too narrow even for those: one letter each, and the count reads
+      (check-equal! (nm--fit-tags "attachment important inbox personal sent" 6)
+                    "aiips" "no room: the initials, all five of them"))
+    (check-equal! (nm--fit-tags "" 24) "" "no tags, no text")))
 
 (deftest 'opening-a-thread-renders-text-plain-only-and-marks-it-read
   "the HTML alternative is not the one a reader wants"
@@ -390,6 +396,23 @@
     (t--nm-answer! "from:alice")
     (check-equal! (nm--query-of "*notmuch*") "( tag:inbox ) and from:alice"
                   "the filter rides on the base")
+    (t--nm-done!)))
+
+(deftest 'tag-filter-menu-adds-a-filter-inside-the-inbox
+  "the menu offers tags from the current result and preserves the inbox base"
+  (lambda ()
+    (t--nm-setup!)
+    (run-command "notmuch-inbox")
+    (run-command "notmuch-filter-by-tag")
+    (check-equal! (minibuffer-selected) "important"
+                  "the menu contains a tag from the inbox result")
+    (t--nm-answer! "unread")
+    (check-equal! (nm--query-of "*notmuch*") "( tag:inbox ) and tag:unread"
+                  "the selected tag narrows the inbox")
+
+    (run-command "notmuch-unfilter-last")
+    (check-equal! (nm--query-of "*notmuch*") "tag:inbox"
+                  "removing the filter restores the inbox")
     (t--nm-done!)))
 
 (deftest 'add-tag-completes-from-the-database

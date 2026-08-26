@@ -25,7 +25,12 @@
 (load-bundled-package "preview.scm")
 
 (load-bundled-package "agenda.scm")
+(load-bundled-package "agent-permissions.scm")
+(load-bundled-package "agent-connectors.scm")
+(load-bundled-package "agent-transcript.scm")
 (load-bundled-package "agent.scm")
+(load-bundled-package "agent-session.scm")
+(load-bundled-package "agent-fleet.scm")
 (load-bundled-package "annotate.scm")
 (load-bundled-package "appearance.scm")
 (load-bundled-package "bookmark.scm")

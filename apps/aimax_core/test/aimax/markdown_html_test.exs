@@ -15,16 +15,21 @@ defmodule Aimax.MarkdownHtmlTest do
 
   @pt ~s(<span class="pt"></span>)
 
+  # Every run of drawn text is wrapped in a span naming its source byte, and
+  # whitespace-mode adds more. None of that is structure: strip the spans and
+  # what is left is the blocks and the text.
+  defp bare(html), do: String.replace(html, ~r{</?span[^>]*>}, "")
+
   defp render!(text, marks \\ []) do
     {:ok, html} = Html.render(text, marks)
     html
   end
 
   test "markup is consumed, and what it marked is drawn" do
-    assert render!("# Title\n") =~ ~r{<h1 data-src="0-8">Title}
-    assert render!("a **bold** b\n") =~ "<strong data-src=\"2-10\">bold</strong>"
-    assert render!("a `code` b\n") =~ "<code data-src=\"2-8\">code</code>"
-    assert render!("- one\n") =~ ~r{<ul[^>]*><li[^>]*>one}
+    assert bare(render!("# Title\n")) =~ ~r{<h1 data-src="0-8">Title}
+    assert bare(render!("a **bold** b\n")) =~ "<strong data-src=\"2-10\">bold</strong>"
+    assert bare(render!("a `code` b\n")) =~ "<code data-src=\"2-8\">code</code>"
+    assert bare(render!("- one\n")) =~ ~r{<ul[^>]*><li[^>]*>one}
   end
 
   test "a tight item's text stands beside its bullet" do
@@ -33,7 +38,7 @@ defmodule Aimax.MarkdownHtmlTest do
     html = render!("- one item\n- two item\n")
 
     refute html =~ "<p"
-    assert html =~ ~r{<li[^>]*>one item}
+    assert bare(html) =~ ~r{<li[^>]*>one item}
   end
 
   test "a loose item keeps its paragraphs" do
@@ -46,7 +51,7 @@ defmodule Aimax.MarkdownHtmlTest do
     html = render!("see [docs](http://x.com) here\n")
 
     assert html =~ ~s(<a href="http://x.com")
-    assert html =~ ">docs</a>"
+    assert bare(html) =~ ">docs</a>"
     refute html =~ "[docs]"
     refute html =~ ">http://x.com<"
   end
@@ -81,7 +86,7 @@ defmodule Aimax.MarkdownHtmlTest do
     # byte 18 falls between the "o" and the "l" of bold
     html = render!("# Title\n\nbody **bold** here\n", [{18, @pt}])
 
-    assert html =~ "bo#{@pt}ld"
+    assert html =~ ~r{>bo</span>#{Regex.escape(@pt)}<span[^>]*>ld}
   end
 
   test "a mark inside markup still draws" do
@@ -95,8 +100,39 @@ defmodule Aimax.MarkdownHtmlTest do
     html = render!("a <script>x</script> & b\n")
 
     refute html =~ "<script>"
-    assert html =~ "&lt;script&gt;"
-    assert html =~ "&amp;"
+    assert bare(html) =~ "&lt;script&gt;"
+    assert bare(html) =~ "&amp;"
+  end
+
+  test "every run of drawn text names the source byte it began at" do
+    # This is what makes motion exact. The page used to answer "which line,
+    # and how many rendered characters along" - a count wrong by every byte
+    # of markup taken out, so `**bold**` threw it off by four and the caret
+    # landed somewhere else on every move down.
+    text = "a **bold** and [docs](http://x) end\n"
+    html = render!(text)
+
+    runs =
+      Regex.scan(~r{<span class="s" data-s="(\d+)">([^<]*)</span>}, html)
+      |> Enum.map(fn [_, at, body] -> {String.to_integer(at), body} end)
+
+    assert runs != []
+
+    for {at, body} <- runs do
+      assert binary_part(text, at, byte_size(body)) == body,
+             "a run said byte #{at}, but the source there is not #{inspect(body)}"
+    end
+  end
+
+  test "whitespace marks add no text, so an offset stays true" do
+    text = "one two\nthree\n"
+    {:ok, plain} = Html.render(text)
+    {:ok, marked} = Html.render(text, [], whitespace: true)
+
+    # the marks are drawn by CSS: the bytes between the tags do not move
+    assert bare(marked) == bare(plain)
+    assert marked =~ ~s(<span class="ws sp"> </span>)
+    assert marked =~ ~s(<span class="ws nl"></span>)
   end
 
   test "the page does not change when the caret moves" do
@@ -124,7 +160,7 @@ defmodule Aimax.MarkdownHtmlTest do
     for point <- 0..byte_size(text)//1 do
       drawn = render!(text, [{point, @pt}])
 
-      assert String.replace(drawn, @pt, "") == base,
+      assert bare(drawn) == bare(base),
              "the page changed with the caret at byte #{point}"
 
       assert drawn =~ @pt, "the caret vanished at byte #{point}"

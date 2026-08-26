@@ -1027,6 +1027,30 @@ defmodule Aimax.Ui.Layouts do
           // caret sits. Point then follows the source, and rows the source
           // does not own — a code block's head, an embed — carry
           // data-chrome and are skipped instead.
+          // The exact answer, when the page carries one. Every run of drawn
+          // text says the source byte it began at, and a run is the source's
+          // own bytes, so the caret's byte is that offset plus the bytes of
+          // the text before it. No counting back to a line mark, and nothing
+          // to be wrong by: markup the renderer took out is not in the run.
+          const utf8 = new TextEncoder();
+
+          function exactSpot(d, node, off) {
+            const el = node.nodeType === 1 ? node : node.parentElement;
+            const run = el && el.closest && el.closest("span.s[data-s]");
+            if (!run) return null;
+            const at = parseInt(run.dataset.s, 10);
+            if (!Number.isFinite(at)) return null;
+
+            const upto = d.createRange();
+            upto.setStart(run, 0);
+            upto.setEnd(node, off);
+
+            // whitespace-mode paints its marks with CSS, so the text in the
+            // range is the source's own bytes and nothing has to be taken
+            // back out of the count
+            return at + utf8.encode(upto.toString()).length;
+          }
+
           function sourceSpot(d, node, off) {
             const marks = d.querySelectorAll("span.ln");
             if (!marks.length) return null;
@@ -1286,14 +1310,26 @@ defmodule Aimax.Ui.Layouts do
                   // The new document tree may not have layout yet. Defer the
                   // measurement until the frame paints, then center point in
                   // the iframe's own scrollport.
+                  // Scroll the least that puts point back on the page, and
+                  // nothing at all while it is already there. Centring it on
+                  // every move threw the document half a page at a time, and
+                  // a reader who moves down one line expects the page to
+                  // hold still. This is scroll-conservatively.
                   const reveal = () => {
                     const current = this.doc();
                     const marker = current && current.querySelector(".pt");
                     const scroll = this.scroller();
                     if (!marker || !scroll) return;
                     const r = marker.getBoundingClientRect();
-                    const target = scroll.scrollTop + r.top -
-                      (this.el.clientHeight / 2) + (r.height / 2);
+                    const h = this.el.clientHeight;
+                    const margin = Math.min(90, Math.max(24, h / 6));
+
+                    if (r.top >= margin && r.bottom <= h - margin) return;
+
+                    const target =
+                      r.top < margin
+                        ? scroll.scrollTop + r.top - margin
+                        : scroll.scrollTop + r.bottom - (h - margin);
                     scroll.scrollTop = Math.max(0, target);
                   };
                   requestAnimationFrame(() => requestAnimationFrame(reveal));
@@ -1406,6 +1442,14 @@ defmodule Aimax.Ui.Layouts do
                     visualGoal.x = null;
                     visualGoal.y = null;
                     this.dragFrom = { x: e.clientX, y: e.clientY };
+                    const exact = exactSpot(d, node, off);
+                    if (exact !== null) {
+                      this.pushEvent("preview_goto_pos", {
+                        win: parseInt(this.el.dataset.win, 10),
+                        pos: exact, extend: false
+                      });
+                      return;
+                    }
                     const src = sourceSpot(d, node, off);
                     if (src) {
                       this.pushEvent("preview_goto_src", {
@@ -1768,7 +1812,24 @@ defmodule Aimax.Ui.Layouts do
                   try { d = frame.contentDocument; } catch (_) { return false; }
                   const pt = d && d.querySelector(".pt");
                   if (!pt) return false;
-                  const r = pt.getBoundingClientRect();
+                  let r = pt.getBoundingClientRect();
+
+                  // The browser only answers for a point inside the
+                  // scrollport, so a caret scrolled off the page made every
+                  // probe below return nothing, the handler gave up, and the
+                  // key fell through to a move by SOURCE line - which is the
+                  // jump. Bring point back first, then ask.
+                  if (r.bottom <= 0 || r.top >= frame.clientHeight) {
+                    const scroll = d.scrollingElement || d.documentElement;
+                    scroll.scrollTop = Math.max(
+                      0,
+                      scroll.scrollTop + r.top - frame.clientHeight / 3
+                    );
+                    r = pt.getBoundingClientRect();
+                    visualGoal.x = null;
+                    visualGoal.y = null;
+                  }
+
                   const parent = pt.parentElement || d.body;
                   const css = d.defaultView.getComputedStyle(parent);
                   const line = parseFloat(css.lineHeight) ||
@@ -1807,6 +1868,15 @@ defmodule Aimax.Ui.Layouts do
                     const off = c.startOffset !== undefined ? c.startOffset : c.offset;
                     this.visualLinePending = true;
                     rememberRow(d, rowMid + dir * step);
+                    const exact = exactSpot(d, node, off);
+                    if (exact !== null) {
+                      this.pushEvent("preview_goto_pos", {
+                        win: parseInt(frame.dataset.win, 10),
+                        pos: exact,
+                        extend: extend
+                      });
+                      return true;
+                    }
                     const src = sourceSpot(d, node, off);
                     if (src) {
                       this.pushEvent("preview_goto_src", {

@@ -2295,7 +2295,15 @@ defmodule Aimax.Ui.EditorLive do
     .pt.idle{animation:none;opacity:0.45}
     /* whitespace-mode: the newline the author typed, drawn where it is.
        Muted enough to read past, present enough to aim at. */
-    .ws{color:#{dim};opacity:.55;font-size:.85em;vertical-align:.05em}
+    /* whitespace-mode. Every mark is a pseudo-element painted over the
+       character the author typed, so the text keeps its own bytes and the
+       page does not reflow when the marks come on. */
+    .ws{position:relative}
+    .ws.nl::before{content:"¶";color:#{dim};opacity:.5;font-size:.85em}
+    .ws.sp::before{content:"·";position:absolute;left:0;right:0;text-align:center;
+                   color:#{dim};opacity:.45;pointer-events:none}
+    .ws.tab::before{content:"»";position:absolute;left:0;color:#{dim};opacity:.45;
+                    pointer-events:none}
     .mk{display:inline-block;width:0;height:0}
     .ln{display:inline-block;width:0;height:0}
     @keyframes ptb{0%,49%{opacity:1}50%,100%{opacity:0}}

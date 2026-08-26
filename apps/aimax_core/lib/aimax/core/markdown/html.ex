@@ -62,17 +62,39 @@ defmodule Aimax.Core.Markdown.Html do
     IO.iodata_to_binary([iodata, Enum.map(marks, &elem(&1, 1))])
   end
 
-  # Walk a list of siblings, emitting the source between them as text.
-  defp nodes(nodes, text, from, marks) do
+  # Between blocks, whitespace is structure: the blank line that separates
+  # two paragraphs is not something the author wrote INTO either of them.
+  # Drawn as text it puts a stray line between every block - invisible until
+  # whitespace-mode drew it, and then three marks stacked on a line of their
+  # own. Inside a paragraph or a heading the same bytes ARE content, and a
+  # line break there is the author's.
+  #
+  # A mark in that gap still draws: point can stand on a blank line, and it
+  # has to show.
+  @containers ~w(root list item quote table table_head table_row code)a
+
+  defp nodes(nodes, text, from, marks, parent \\ :root) do
+    content? = parent not in @containers
+
     {parts, {_at, _after_marker, marks}} =
       Enum.map_reduce(nodes, {from, false, marks}, fn node, {at, after_marker, marks} ->
         {skipped, at, marks} = skip_separator(text, at, node.start, after_marker, marks)
-        {gap, marks} = slice(text, at, node.start, marks)
+
+        {gap, marks} =
+          if content?,
+            do: slice(text, at, node.start, marks),
+            else: gap_marks(at, node.start, marks)
+
         {body, marks} = node(node, text, marks)
         {[skipped, gap, body], {node.stop, node.kind in @silent, marks}}
       end)
 
     {parts, marks}
+  end
+
+  defp gap_marks(at, stop, marks) do
+    {here, rest} = Enum.split_while(marks, fn {off, _} -> off < stop and off >= at end)
+    {Enum.map(here, &elem(&1, 1)), rest}
   end
 
   # The space between a marker and what it marks belongs to the marker: the
@@ -103,11 +125,25 @@ defmodule Aimax.Core.Markdown.Html do
     {parts, cursor} =
       Enum.map_reduce(here, at, fn {off, html}, cursor ->
         off = max(off, cursor)
-        {[escape(binary_part(text, cursor, off - cursor)), html], off}
+        {[run(text, cursor, off), html], off}
       end)
 
-    {[parts, escape(binary_part(text, cursor, stop - cursor))], rest}
+    {[parts, run(text, cursor, stop)], rest}
   end
+
+  # Every run of drawn text says where in the source it began. A reader
+  # moving down a line asks the page where the caret landed, and the page
+  # can now answer exactly instead of counting rendered characters back to
+  # the nearest line mark - a count that is wrong by every byte of markup
+  # the renderer took out, so `**bold**` threw it off by four.
+  defp run(_text, from, to) when from >= to, do: []
+
+  defp run(text, from, to),
+    do: [
+      ~s(<span class="s" data-s="#{from}">),
+      escape(binary_part(text, from, to - from)),
+      "</span>"
+    ]
 
   # Consumed: its bytes are markup. A mark inside it still draws, or a caret
   # sitting in a heading's "# " would vanish while point was really there.
@@ -230,7 +266,7 @@ defmodule Aimax.Core.Markdown.Html do
   end
 
   defp children(node, text, marks) do
-    {inner, marks} = nodes(node.children, text, node.start, marks)
+    {inner, marks} = nodes(node.children, text, node.start, marks, node.kind)
     {tail, marks} = slice(text, last_stop(node), node.stop, marks)
     {[inner, tail], marks}
   end
@@ -303,9 +339,17 @@ defmodule Aimax.Core.Markdown.Html do
       |> String.replace(">", "&gt;")
 
     if Process.get(:aimax_md_whitespace) do
-      # the glyph goes BEFORE the newline, so the line still breaks where the
-      # author broke it, and the reader can see where that is
-      String.replace(escaped, "\n", ~s(<span class="ws">¶</span>\n))
+      # Every mark is drawn by CSS, not written into the text: the space and
+      # the newline stay exactly as the author typed them. A glyph written
+      # as text would be counted as source when the page says where a caret
+      # landed, and every space would move point along by one.
+      # one pass, or the second replacement rewrites the markup the first
+      # one just wrote: a "ws nl" span is full of spaces
+      Regex.replace(~r/[\n \t]/, escaped, fn
+        "\n" -> ~s(<span class="ws nl"></span>\n)
+        " " -> ~s(<span class="ws sp"> </span>)
+        "\t" -> ~s(<span class="ws tab">\t</span>)
+      end)
     else
       escaped
     end

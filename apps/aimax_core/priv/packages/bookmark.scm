@@ -166,6 +166,25 @@
       (bookmark-save!)))
   (bookmark--refresh-list!))
 
+;; A bookmark on a buffer with no file — a chat, a listing — is addressed
+;; by its name alone, so a rename orphans it and the jump reports a
+;; missing location. Move the pointer with the buffer. This never loads
+;; the store: a rename before the first read has nothing to fix.
+(on-buffer-renamed!
+  (lambda (old new)
+    (when (pair? *bookmarks*)
+      (let ((hits (filter (lambda (record)
+                            (equal? (bookmark--get record 'buffer #f) old))
+                          *bookmarks*)))
+        (when (pair? hits)
+          (set! *bookmarks*
+            (map (lambda (record)
+                   (if (equal? (bookmark--get record 'buffer #f) old)
+                       (bookmark--put record 'buffer new)
+                       record))
+                 *bookmarks*))
+          (bookmark--changed!))))))
+
 (domain! 'navigation)
 (effects! '(read))
 

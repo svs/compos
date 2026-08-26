@@ -6850,6 +6850,24 @@
         (winner--restore (- pos 1))
         (message "at the latest layout"))))
 
+;; The ring holds layouts, and a layout names its buffers. A rename that
+;; does not reach the ring makes winner-undo restore a window on a dead
+;; name. Every frame keeps its own ring, so the sweep walks them all.
+(on-buffer-renamed!
+  (lambda (old new)
+    (set! *frame-locals*
+      (map (lambda (frame-entry)
+             (list (car frame-entry)
+                   (map (lambda (item)
+                          (if (equal? (car item) 'winner-ring)
+                              (list 'winner-ring
+                                    (map (lambda (tree)
+                                           (window-tree-rename tree old new))
+                                         (car (cdr item))))
+                              item))
+                        (car (cdr frame-entry)))))
+           *frame-locals*))))
+
 ;; These names describe the operation as a desktop switch: the saved tree
 ;; contains both the window arrangement and the buffer shown in each window.
 (define-command "winner-previous" "Switch to the previous window and buffer arrangement"

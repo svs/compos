@@ -312,6 +312,8 @@ defmodule Aimax.Core.SchemeAPI do
         "(window-tree-set! LAYOUT) — replace the frame's windows with a layout from window-tree.",
       "window-tree-buffers" =>
         "(window-tree-buffers LAYOUT) — return the buffer names a layout from window-tree holds.",
+      "window-tree-rename" =>
+        "(window-tree-rename LAYOUT OLD NEW) — a copy of LAYOUT with the buffer name OLD replaced by NEW.",
       "window-rects" =>
         "(window-rects) — return (WIN BUFFER X Y W H) rows with fractional rectangles.",
       "select-window!" =>
@@ -1300,6 +1302,12 @@ defmodule Aimax.Core.SchemeAPI do
       # Scheme decides what to do about that — visit the file, drop the
       # window — so it must be able to read the names back out.
       "window-tree-buffers" => fn [%{tree: tree}] -> tree_buffers(tree) end,
+      # A rename must reach a stored layout too, not only the live frame.
+      # The swap is tree mechanics; which stores hold a layout is policy,
+      # so Scheme owns the sweep and this returns one renamed copy.
+      "window-tree-rename" => fn [%{tree: tree, active: active} = layout, old, new] ->
+        %{layout | tree: tree_rename(tree, old, new), active: if(active == old, do: new, else: active)}
+      end,
       "window-rects" => fn [] -> Editor.window_rects() end,
       "select-window!" => fn [id] -> Editor.set_active(id) == :ok end,
       "active-window" => fn [] -> Editor.active_window() end,
@@ -2090,6 +2098,14 @@ defmodule Aimax.Core.SchemeAPI do
   defp tree_buffers({:leaf, b, _, _, _, _}), do: [b]
   defp tree_buffers({:split, _, _, a, b}), do: tree_buffers(a) ++ tree_buffers(b)
   defp tree_buffers(_), do: []
+
+  defp tree_rename({:leaf, b, top, point, manual, ctop}, old, new),
+    do: {:leaf, if(b == old, do: new, else: b), top, point, manual, ctop}
+
+  defp tree_rename({:split, dir, ratio, a, b}, old, new),
+    do: {:split, dir, ratio, tree_rename(a, old, new), tree_rename(b, old, new)}
+
+  defp tree_rename(other, _old, _new), do: other
 
   defp tree_spec(%{type: :leaf, buffer: b} = leaf) do
     {:leaf, b, Map.get(leaf, :top, 0), Map.get(leaf, :point, 0), Map.get(leaf, :manual, false),

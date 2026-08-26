@@ -112,3 +112,20 @@
     (check-false! (bookmark--read-file t--bm-store)
                   "invalid Scheme data is rejected")
     (t--bm-teardown!)))
+
+(deftest 'a-bookmark-on-a-buffer-with-no-file-follows-a-rename
+  "the name is the only address such a bookmark has"
+  (lambda ()
+    (t--bm-setup!)
+    (let ((buf (test-buffer! "*zz-bm-chat*" "hello\n")))
+      (bookmark-store! "zz-chat-mark"
+        (bookmark--normalize
+          (list 'name "zz-chat-mark" 'handler "file"
+                'buffer buf 'position 0))
+        #t)
+      (rename-buffer! buf "*zz-bm-chat-named*")
+      (check-equal! (bookmark--get (bookmark-get "zz-chat-mark") 'buffer "")
+                    "*zz-bm-chat-named*" "the bookmark points at the new name")
+      (for-each (lambda (n) (when (buffer-known? n) (buffer-kill! n)))
+                (list "*zz-bm-chat*" "*zz-bm-chat-named*")))
+    (t--bm-teardown!)))

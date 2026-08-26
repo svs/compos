@@ -615,6 +615,31 @@
 (define (group-layout-save! g)
   (group-layout-set! g (window-tree)))
 
+;; A saved layout names its buffers, because a name IS the buffer handle
+;; here. Membership escapes renames by riding the buffer ('group-ids), but
+;; a layout points the other way: the group holds it, so the group must
+;; hear the rename. rename-buffer! already tells every owner of name-keyed
+;; state; this makes the group records one of them.
+(define (group-layout-rename layout old new)
+  (cond ((not layout) layout)
+        ((and (pair? layout) (equal? (car layout) 'per-frame))
+         (cons 'per-frame
+               (map (lambda (entry)
+                      (list (car entry)
+                            (window-tree-rename (car (cdr entry)) old new)))
+                    (cdr layout))))
+        (else (window-tree-rename layout old new))))
+
+(on-buffer-renamed!
+  (lambda (old new)
+    (for-each
+      (lambda (record)
+        (let ((layout (group-record-layout record)))
+          (when layout
+            (group-record-update! (group-record-id record) 'layout
+              (group-layout-rename layout old new)))))
+      *group-records*)))
+
 
 
 

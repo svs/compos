@@ -315,23 +315,107 @@
 
 ;;; --- babel and tangle ------------------------------------------------------------
 
+
+;;; A shell block runs off the editor lane, so a test drives the seam
+;;; instead of a shell: t--babel-now! answers at once, and t--babel-later!
+;;; holds the answer until the test asks for it.
+
+(define t--babel-real-shell *morg-babel-shell*)
+(define t--babel-pending #f)
+
+(define (t--babel-now! out)
+  (set! *morg-babel-shell*
+    (lambda (runner body k) (k out))))
+
+(define (t--babel-later!)
+  (set! t--babel-pending #f)
+  (set! *morg-babel-shell*
+    (lambda (runner body k) (set! t--babel-pending k))))
+
+(define (t--babel-answer! out)
+  (let ((k t--babel-pending))
+    (set! t--babel-pending #f)
+    (k out)))
+
+(define (t--babel-restore!)
+  (set! *morg-babel-shell* t--babel-real-shell)
+  (set! t--babel-pending #f))
+
 (deftest 'a-shell-block-runs-into-a-result-block
   "the result is a block, so a second run can replace it"
   (lambda ()
+    (t--babel-now! "hi\n")
     (t--morg! "```sh\necho hi\n```\n" 7)
     (t--morg-run! "morg-babel")
     (check-equal! (buffer-text t--morg-buf) "```sh\necho hi\n```\n```result\nhi\n```\n"
                   "the output landed in a result block")
+    (t--babel-restore!)
     (t--morg-done!)))
 
 (deftest 'a-second-run-replaces-the-result-block
   "not a second one appended"
   (lambda ()
+    (t--babel-now! "hi\n")
     (t--morg! "```sh\necho hi\n```\n" 7)
     (t--morg-run! "morg-babel")
     (t--morg-run! "morg-babel")
     (check-equal! (buffer-text t--morg-buf) "```sh\necho hi\n```\n```result\nhi\n```\n"
                   "still one result block")
+    (t--babel-restore!)
+    (t--morg-done!)))
+
+(deftest 'a-running-block-says-so-until-its-output-arrives
+  "the editor is free while the command works"
+  (lambda ()
+    (t--babel-later!)
+    (t--morg! "```sh\nsleep 1\n```\n" 7)
+    (t--morg-run! "morg-babel")
+    (check-equal! (buffer-text t--morg-buf)
+                  "```sh\nsleep 1\n```\n```result\nrunning\n```\n"
+                  "the result block reports the run")
+    (t--babel-answer! "done\n")
+    (check-equal! (buffer-text t--morg-buf)
+                  "```sh\nsleep 1\n```\n```result\ndone\n```\n"
+                  "and the output replaced it")
+    (t--babel-restore!)
+    (t--morg-done!)))
+
+(deftest 'the-output-finds-the-block-after-the-document-moves-it
+  "the block's identity is its language and its body, not a byte offset"
+  (lambda ()
+    (t--babel-later!)
+    (t--morg! "```sh\necho hi\n```\n" 7)
+    (t--morg-run! "morg-babel")
+    (buffer-insert! t--morg-buf 0 "# Title\n\n")
+    (t--babel-answer! "hi\n")
+    (check-equal! (buffer-text t--morg-buf)
+                  "# Title\n\n```sh\necho hi\n```\n```result\nhi\n```\n"
+                  "the output landed in the block that ran")
+    (t--babel-restore!)
+    (t--morg-done!)))
+
+(deftest 'one-block-runs-once-at-a-time
+  "a second start while the first still runs is refused"
+  (lambda ()
+    (t--babel-later!)
+    (t--morg! "```sh\necho hi\n```\n" 7)
+    (t--morg-run! "morg-babel")
+    (check-equal! (car (morg-babel-execute t--morg-buf 7)) 'error
+                  "the second start is an error")
+    (t--babel-answer! "hi\n")
+    (check-equal! (car (morg-babel-execute t--morg-buf 7)) 'pending
+                  "and the block runs again once the first run ends")
+    (t--babel-restore!)
+    (t--morg-done!)))
+
+(deftest 'a-sync-block-answers-before-the-command-returns
+  "`:sync` holds the editor, so the result is there when the command ends"
+  (lambda ()
+    (t--morg! "```sh :sync\necho hi\n```\n" 13)
+    (t--morg-run! "morg-babel")
+    (check-equal! (buffer-text t--morg-buf)
+                  "```sh :sync\necho hi\n```\n```result\nhi\n```\n"
+                  "the real shell ran on the lane")
     (t--morg-done!)))
 
 (deftest 'a-scheme-block-evaluates-in-the-editors-interpreter

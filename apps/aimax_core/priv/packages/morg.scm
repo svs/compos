@@ -2,8 +2,8 @@
 ;;;
 ;;; morg-mode is a superset of the plain markdown experience. TAB folds a
 ;;; `#` heading's subtree or a fenced code block. S-TAB folds the whole
-;;; file. morg-babel runs fenced blocks. morg-tangle writes marked blocks
-;;; to source files. Fenced code renders with the theme's ts-* faces through
+;;; file. morg-babel runs fenced blocks, off the editor lane. morg-tangle
+;;; writes marked blocks to source files. Fenced code renders with the theme's ts-* faces through
 ;;; (ts-highlight-string LANG TEXT) when the grammar is loaded.
 ;;;
 ;;; OFFSET RULE: every index that touches the buffer, an overlay, or a
@@ -553,7 +553,7 @@
             *morg-hooks*))))
 
 (mode-doc! "morg-mode"
-  "Markdown with org habits. `TAB` folds a heading or code block. `C-c C-c` runs a block. `C-c C-x` tangles marked blocks. `C-c C-v` renders the page.")
+  "Markdown with org habits. `TAB` folds a heading or code block. `C-c C-c` runs a block, off the editor lane: the result fence says `running` until the output arrives. Add `:sync` after the language to wait for it. `C-c C-x` tangles marked blocks. `C-c C-v` renders the page.")
 
 (mode-icon! "morg-mode" "")
 

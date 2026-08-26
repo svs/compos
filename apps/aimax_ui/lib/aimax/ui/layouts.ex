@@ -1801,19 +1801,26 @@ defmodule Aimax.Ui.Layouts do
                   let r = pt.getBoundingClientRect();
 
                   // The browser only answers for a point inside the
-                  // scrollport, so a caret scrolled off the page made every
-                  // probe below return nothing, the handler gave up, and the
-                  // key fell through to a move by SOURCE line - which is the
-                  // jump. Bring point back first, then ask.
-                  if (r.bottom <= 0 || r.top >= frame.clientHeight) {
-                    const scroll = d.scrollingElement || d.documentElement;
-                    scroll.scrollTop = Math.max(
-                      0,
-                      scroll.scrollTop + r.top - frame.clientHeight / 3
-                    );
-                    r = pt.getBoundingClientRect();
-                    visualGoal.x = null;
-                    visualGoal.y = null;
+                  // scrollport. A caret off the page, OR one on the last row
+                  // the page shows, leaves the probe below with nowhere to
+                  // land: it returns nothing, the handler gives up, and the
+                  // key falls through to a move by SOURCE line - the jump.
+                  // Make room in the direction of travel first, then ask.
+                  {
+                    const parentEl = pt.parentElement || d.body;
+                    const lh =
+                      parseFloat(d.defaultView.getComputedStyle(parentEl).lineHeight) || 20;
+                    const room = dir > 0 ? frame.clientHeight - r.bottom : r.top;
+
+                    if (room < lh * 3) {
+                      const scroll = d.scrollingElement || d.documentElement;
+                      scroll.scrollTop = Math.max(
+                        0,
+                        scroll.scrollTop + r.top - frame.clientHeight / 2
+                      );
+                      r = pt.getBoundingClientRect();
+                      visualGoal.y = null;
+                    }
                   }
 
                   const parent = pt.parentElement || d.body;

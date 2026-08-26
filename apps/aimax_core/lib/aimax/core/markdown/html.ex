@@ -343,12 +343,18 @@ defmodule Aimax.Core.Markdown.Html do
       # the newline stay exactly as the author typed them. A glyph written
       # as text would be counted as source when the page says where a caret
       # landed, and every space would move point along by one.
-      # one pass, or the second replacement rewrites the markup the first
-      # one just wrote: a "ws nl" span is full of spaces
-      Regex.replace(~r/[\n \t]/, escaped, fn
+      # One pass, or the second replacement rewrites the markup the first
+      # one just wrote: a "ws nl" span is full of spaces.
+      #
+      # A mark for EVERY space cost a span per space: 8697 of them in one
+      # document, two thirds of the page, redrawn on every keystroke, and
+      # the judder was the cost. Emacs does not mark every space either.
+      # These are the spaces that carry something a reader cannot otherwise
+      # see: a run of two or more, and a space before a line break.
+      Regex.replace(~r/\n|\t|  +|[ ](?=\n)|[ ]$/, escaped, fn
         "\n" -> ~s(<span class="ws nl"></span>\n)
-        " " -> ~s(<span class="ws sp"> </span>)
         "\t" -> ~s(<span class="ws tab">\t</span>)
+        spaces -> ~s(<span class="ws sp">#{spaces}</span>)
       end)
     else
       escaped

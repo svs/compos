@@ -131,8 +131,22 @@ defmodule Aimax.MarkdownHtmlTest do
 
     # the marks are drawn by CSS: the bytes between the tags do not move
     assert bare(marked) == bare(plain)
-    assert marked =~ ~s(<span class="ws sp"> </span>)
     assert marked =~ ~s(<span class="ws nl"></span>)
+  end
+
+  test "only the spaces a reader cannot otherwise see are marked" do
+    # A span per space cost 8697 elements in one document, two thirds of the
+    # page, redrawn on every keystroke. A single space between words shows
+    # itself; a run of them does not.
+    {:ok, single} = Html.render("one two three\n", [], whitespace: true)
+    refute single =~ ~s(class="ws sp")
+
+    {:ok, run} = Html.render("one  two\n", [], whitespace: true)
+    assert run =~ ~s(<span class="ws sp">  </span>)
+
+    # and the bytes still do not move
+    {:ok, plain} = Html.render("one  two\n")
+    assert bare(run) == bare(plain)
   end
 
   test "the page does not change when the caret moves" do

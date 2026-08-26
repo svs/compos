@@ -199,21 +199,27 @@
       (t--gs-kill! chat)
       (t--gs-drop! id))))
 
-(deftest 'an-identity-only-primary-chat-heals-its-mode
+(deftest 'an-identity-only-primary-chat-heals-its-mode-and-its-name
   "a restored chat cannot remain an inert buffer or duplicate itself"
   (lambda ()
     (let* ((id (group-record-create! "zzgs-heal-chat"))
            (chat "*zz-gs-renamed-primary*")
+           (want (group-chat-name id))
            (chat-id "chat:zzgs-heal"))
       (test-buffer! chat "")
       (buffer-set-local! chat 'group-id id)
       (buffer-set-local! chat 'chat-id chat-id)
       (group-record-update! id 'primary-chat-id chat-id)
-      (check-equal! (group-chat id) chat "the stable identity wins")
-      (check-equal! (buffer-local chat 'mode-name) "chat-mode" "the mode heals")
-      (check-true! (buffer-local chat 'agent-saved-mark) "the input heals")
-      (check-false! (buffer-known? (group-chat-name id)) "no duplicate appears")
-      (t--gs-kill! chat)
+
+      ;; the stable identity wins: the SAME buffer answers, and it takes
+      ;; the name of its group rather than a second buffer appearing there
+      (check-equal! (group-chat id) want "the chat takes its group's name")
+      (check-equal! (buffer-local want 'chat-id) chat-id "and it is the same chat")
+      (check-false! (buffer-known? chat) "the old name is gone, so there is no duplicate")
+
+      (check-equal! (buffer-local want 'mode-name) "chat-mode" "the mode heals")
+      (check-true! (buffer-local want 'agent-saved-mark) "the input heals")
+      (t--gs-kill! chat want)
       (t--gs-drop! id))))
 
 ;;; --- dissolve and layout ------------------------------------------------------

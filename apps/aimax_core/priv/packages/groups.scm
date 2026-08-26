@@ -1369,11 +1369,12 @@
 ;; name is replaced. A name the person typed is not derived, so M-x
 ;; buffer-rename on a chat sticks and no re-derive takes it back.
 (define (group-chat--derived? buf)
-  (or (equal? buf (buffer-local buf 'chat-derived-name))
-      ;; a chat named before this rule carries no memory, and a name that
-      ;; still reads as *chat:...* was ours to begin with
-      (and (not (buffer-local buf 'chat-derived-name))
-           (string-prefix? "*chat:" buf))))
+  ;; A chat named before this rule carries no memory of a derived name, so
+  ;; it cannot say whether a person typed it or the old namer invented it.
+  ;; Treat it as derivable once. After the re-derive it carries the name,
+  ;; and from then on a name a person types is the one that is kept.
+  (or (not (buffer-local buf 'chat-derived-name))
+      (equal? buf (buffer-local buf 'chat-derived-name))))
 
 (define (group-chat--claim-name! buf)
   (buffer-set-local! buf 'chat-derived-name buf)
@@ -1409,6 +1410,40 @@
             (group-record-update! (group-record-id record) 'name new)
             (group-chat-rederive! (group-record-id record))))
         *group-records*))))
+
+;; Every chat the old namer titled, back to the name of its group. A chat
+;; with no memory of a derived name predates the rule, and group-chat
+;; re-derives it the next time its group asks. This does the same sweep
+;; for every group at once, so a title nobody is about to open moves too.
+;; A dormant chat has no process to rename, so it waits for its group.
+(define (group-chat-derive-all!)
+  (let ((moved '()))
+    (for-each
+      (lambda (record)
+        (let* ((id (group-record-id record))
+               (buf (group-primary-chat id)))
+          (when (and buf (buffer-exists? buf)
+                     (not (buffer-local buf 'chat-derived-name)))
+            (let ((want (group-chat-rederive! id)))
+              (unless (equal? want buf)
+                (set! moved (cons (list buf want) moved)))))))
+      *group-records*)
+    (reverse moved)))
+
+(define-command "chat-derive-names"
+  "Rename every chat to the name of the group it accompanies"
+  (lambda ()
+    (let ((moved (group-chat-derive-all!)))
+      (if (null? moved)
+          (message "Every chat already carries the name of its group")
+          (message
+            (string-append
+              (number->string (length moved)) " chats renamed: "
+              (string-join (map (lambda (m) (car (cdr m))) moved) ", ")))))))
+
+(category! 'chat)
+(public! 'group-chat-derive-all!
+  "(group-chat-derive-all!) — rename every chat to its group's name; return the (OLD NEW) pairs")
 
 ;; the group's chat = its most recently used chat-mode member; created on
 ;; demand already tagged, so a killed chat is simply remade next time

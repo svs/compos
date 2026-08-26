@@ -98,6 +98,29 @@
       (t--rn-drop! id)
       (t--rn-kill! "*chat:zzname-manual*" "*my own name*"))))
 
+(deftest 'a-chat-the-old-namer-titled-goes-back-to-its-groups-name
+  "no memory of a derived name means the name predates the rule"
+  (lambda ()
+    (let ((id (group-record-create! "zzname-legacy"))
+          (chat (test-buffer! "*fix the preset merge*" "")))
+      (chat-set-group! chat id)
+      (group-record-update! id 'primary-chat-id (chat-stable-id! chat))
+      (check-false! (buffer-local chat 'chat-derived-name)
+                    "the legacy chat carries no derived name")
+
+      (let ((moved (group-chat-derive-all!)))
+        (check-true! (member (list chat "*chat:zzname-legacy*") moved)
+                     "the sweep reports the move"))
+      (check-true! (buffer-known? "*chat:zzname-legacy*") "the chat took its group's name")
+      (check-false! (buffer-known? chat) "and left the title behind")
+
+      ;; and now it remembers, so a name the person types is kept
+      (rename-buffer! "*chat:zzname-legacy*" "*mine*")
+      (check-equal! (group-chat-rederive! id) "*mine*" "the typed name stays")
+
+      (t--rn-drop! id)
+      (t--rn-kill! chat "*chat:zzname-legacy*" "*mine*"))))
+
 (deftest 'the-derived-name-is-an-identity-local
   "who the chat is, so it survives a reset, a restart and a save"
   (lambda ()

@@ -428,6 +428,26 @@
 ;; sibling file shows on the next reload too.
 (add-hook! 'after-save-hook (lambda () (for-each app-reload! (app-buffers))))
 
+;;; --- whitespace-mode ---------------------------------------------------------
+;;; A rendered page hides the newline the author typed, so a reader cannot
+;;; see where a line ends, and a caret that moves across one looks like it
+;;; jumped. Draw the newline, muted, where it is. Emacs answers the same
+;;; question with the same mode name.
+
+(define (whitespace--apply! buf)
+  (buffer-set-local! buf 'whitespace-mode #t))
+
+(define (whitespace--teardown! buf)
+  (buffer-set-local! buf 'whitespace-mode #f))
+
+(register-minor-mode! "whitespace-mode" whitespace--apply! whitespace--teardown!)
+
+(define-command "whitespace-mode" "Toggle the newline and space marks"
+  (lambda ()
+    (if (toggle-minor-mode! "whitespace-mode")
+        (message "whitespace-mode enabled")
+        (message "whitespace-mode disabled"))))
+
 (global-set-key "C-c C-v" "preview-mode")
 (global-set-key "C-c C-a" "app-preview")
 (global-set-key "C-c C-r" "app-reload")

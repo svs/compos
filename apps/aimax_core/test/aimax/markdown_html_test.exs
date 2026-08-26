@@ -24,7 +24,22 @@ defmodule Aimax.MarkdownHtmlTest do
     assert render!("# Title\n") =~ ~r{<h1 data-src="0-8">Title}
     assert render!("a **bold** b\n") =~ "<strong data-src=\"2-10\">bold</strong>"
     assert render!("a `code` b\n") =~ "<code data-src=\"2-8\">code</code>"
-    assert render!("- one\n") =~ ~r{<ul[^>]*><li[^>]*><p[^>]*>one}
+    assert render!("- one\n") =~ ~r{<ul[^>]*><li[^>]*>one}
+  end
+
+  test "a tight item's text stands beside its bullet" do
+    # wrapped in a block-level <p>, every bullet sat alone on a line above
+    # its own sentence
+    html = render!("- one item\n- two item\n")
+
+    refute html =~ "<p"
+    assert html =~ ~r{<li[^>]*>one item}
+  end
+
+  test "a loose item keeps its paragraphs" do
+    html = render!("- one\n\n  more of one\n")
+
+    assert html =~ "<p"
   end
 
   test "a link draws its label and keeps its destination as an attribute" do

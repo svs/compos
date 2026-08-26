@@ -10,6 +10,8 @@ defmodule Aimax.BufferHistoryMirrorTest do
 
   use ExUnit.Case
 
+  import ExUnit.CaptureLog
+
   alias Aimax.Core.{Buffer, KeyDispatch}
   alias Aimax.Core.BufferHistory, as: History
 
@@ -376,6 +378,31 @@ defmodule Aimax.BufferHistoryMirrorTest do
       refute History.text(weave) == Buffer.text(name)
 
       Buffer.checkpoint_now(name)
+      assert History.text(Buffer.history(name)) == Buffer.text(name)
+    end
+
+    # A chat buffer stops recording in its mode setup and then streams
+    # thousands of bytes into the rope. The document is supposed to stay
+    # behind, so a checkpoint must say nothing about it.
+    test "a checkpoint says nothing about a buffer that stopped recording" do
+      name = new_buffer("before")
+      Buffer.provenance_stop(name, source: :editor)
+      Buffer.append(name, " after", source: :editor)
+
+      log = capture_log(fn -> :ok = Buffer.checkpoint_now(name) end)
+
+      refute log =~ "history diverged"
+      assert Buffer.text(name) == "before after"
+    end
+
+    # Recording starts again and the interval closes in one change, which is
+    # the repair the checkpoint must not attempt on its own.
+    test "recording again brings the history back to the rope" do
+      name = new_buffer("before")
+      Buffer.provenance_stop(name, source: :editor)
+      Buffer.append(name, " after", source: :editor)
+      Buffer.provenance_start(name, source: :editor)
+
       assert History.text(Buffer.history(name)) == Buffer.text(name)
     end
   end

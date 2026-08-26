@@ -1483,6 +1483,12 @@ defmodule Aimax.Core.Buffer do
   # document owns the history the rope cannot rebuild.
   defp verify_history(%{history: nil} = state), do: state
 
+  # Recording can be off while the document stays attached. Then the rope is
+  # meant to run ahead: the mirror is off, and `provenance_start` bridges the
+  # interval with one change. A comparison here reports a divergence that it
+  # cannot repair, once per checkpoint, for as long as the buffer lives.
+  defp verify_history(%{provenance: %{enabled: false}} = state), do: state
+
   defp verify_history(state) do
     {text, state} = fetch_text(state)
 

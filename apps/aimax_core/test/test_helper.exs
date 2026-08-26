@@ -37,6 +37,25 @@ end
 
 Aimax.TestTmp.sweep()
 
+# A tree-sitter grammar is a compiled artifact, not a fixture, so a test
+# that needs one is excluded where it is missing rather than passing on an
+# empty answer. The run then says "excluded", which a silent skip never
+# does. Grammars live in the reader's home; a test home has none, so load
+# the real ones read-only when they are there.
+markdown_grammar? =
+  Enum.all?(["markdown", "markdown-inline"], fn name ->
+    dir = Path.expand("~/.aimax/grammars")
+    lib = Path.join(dir, name <> if(:os.type() |> elem(1) == :darwin, do: ".dylib", else: ".so"))
+    query = Path.join(dir, name <> "-highlights.scm")
+
+    File.exists?(lib) and File.exists?(query) and
+      Aimax.Core.TS.ts_load_grammar(name, lib, File.read!(query)) == "ok"
+  end)
+
+unless markdown_grammar? do
+  ExUnit.configure(exclude: [:markdown_grammar])
+end
+
 ExUnit.start()
 
 # Most agent tests exercise chat behavior against this repository checkout.

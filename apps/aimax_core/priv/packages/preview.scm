@@ -169,6 +169,129 @@
   "(preview-goto-src! WIN POS OFF EXTEND) — put point OFF rendered characters along the source line that starts at POS"
   'interaction)
 
+;;; --- RET in a rendered page --------------------------------------------------
+;;; A reader of a rendered page sees blocks, so RET makes a block. One
+;;; newline is a soft break in Markdown: the old RET left point on a line of
+;;; its own, and the first keystroke pulled the text back into the paragraph
+;;; above. A block break is two newlines, and the point's own empty line
+;;; needs two more below it. Code, table rows, and list items keep their own
+;;; meaning for RET. S-RET is still the soft break.
+
+;; The run of newlines that touches POS. Both ends read one byte at a time
+;; and only ever compare it to a newline, so a multi-byte character stops
+;; the walk instead of being cut.
+(define (preview--run-start pos)
+  (let loop ((i pos))
+    (if (and (> i 0) (equal? (buffer-substring (- i 1) i) "\n"))
+        (loop (- i 1))
+        i)))
+
+(define (preview--run-end pos)
+  (let ((len (buffer-size (current-buffer))))
+    (let loop ((i pos))
+      (if (and (< i len) (equal? (buffer-substring i (+ i 1)) "\n"))
+          (loop (+ i 1))
+          i))))
+
+;; Point ends a line when the next byte is a newline, or when it is the end
+;; of the buffer. Then RET opens an empty block and point stands in it, so
+;; the block needs a separator below as well as above. Otherwise point keeps
+;; the text after it and starts the block that text now begins.
+(define (preview--block-break!)
+  (let* ((buf (current-buffer))
+         (len (buffer-size buf))
+         (p (point))
+         (s (preview--run-start p))
+         (e (preview--run-end p)))
+    (if (or (> e p) (= p len))
+        (let ((fill (if (or (= s 0) (= e len)) "\n\n" "\n\n\n\n"))
+              (at (if (= s 0) 0 (+ s 2))))
+          (buffer-replace-range! buf s (- e s) fill)
+          (goto-char! at))
+        (begin
+          (buffer-replace-range! buf s (- p s) "\n\n")
+          (goto-char! (+ s 2))))))
+
+;; A list item continues the list. An ordered item counts on; a bullet
+;; repeats. The third value is the length of the marker, which says where
+;; the item's own text starts.
+(define (preview--next-marker line)
+  (let ((bullet (re-match "^([ \t]*)([-*+])[ \t]+" line)))
+    (if bullet
+        (list (cadr bullet) (caddr bullet) (string-length (car bullet)))
+        (let ((ordered (re-match "^([ \t]*)([0-9]+)([.)])[ \t]+" line)))
+          (if ordered
+              (list (cadr ordered)
+                    (string-append
+                      (number->string (+ 1 (string->number (caddr ordered))))
+                      (list-ref ordered 3))
+                    (string-length (car ordered)))
+              #f)))))
+
+;; RET on an item that has no text ends the list, the way every list editor
+;; does: the marker goes, and the empty line becomes a block of its own.
+(define (preview--list-newline! line item)
+  (let* ((buf (current-buffer))
+         (ls (line-start-position (line-number-at-pos (point))))
+         (width (caddr item)))
+    (if (equal? (string-trim (substring line width (string-length line))) "")
+        (begin
+          (buffer-replace-range! buf ls width "")
+          (goto-char! ls)
+          (preview--block-break!))
+        (insert! (string-append "\n" (car item) (cadr item) " ")))))
+
+;; Every character inside a fence is literal, and a table row means nothing
+;; once it is split, so RET keeps its plain meaning on those lines.
+(define (preview--fence-line? line) (re-match "^[ \t]*```" line))
+
+(define (preview--in-fence? ls)
+  (let loop ((lines (string-split (buffer-substring 0 ls) "\n")) (n 0))
+    (if (null? lines)
+        (= (remainder n 2) 1)
+        (loop (cdr lines)
+              (if (preview--fence-line? (car lines)) (+ n 1) n)))))
+
+(define (preview--literal-line? ls line)
+  (or (preview--fence-line? line)
+      (re-match "^[ \t]*[|]" line)
+      (preview--in-fence? ls)))
+
+;; A rendered page the reader can type into. A read-only page — help, a
+;; diff, a bookmark note — keeps the plain newline, and so does every
+;; renderer that is not Markdown.
+(define (preview--markdown-edit?)
+  (let ((buf (current-buffer)))
+    (and (equal? (buffer-local buf 'render-mode) "markdown")
+         (not (buffer-read-only? buf)))))
+
+(define (preview-newline!)
+  (let* ((p (point))
+         (ls (line-start-position (line-number-at-pos p)))
+         (line (line-text)))
+    (if (preview--literal-line? ls line)
+        (insert! "\n")
+        (let ((item (preview--next-marker line)))
+          (if item
+              (preview--list-newline! line item)
+              (preview--block-break!))))))
+(public! 'preview-newline!
+  "(preview-newline!) — end the block at point in a rendered Markdown page"
+  'interaction)
+
+(define-command "preview-newline"
+  "Insert a newline, or end the block in a rendered page"
+  (lambda ()
+    (if (preview--markdown-edit?)
+        (preview-newline!)
+        (run-command "newline-or-send"))))
+
+;; preview.scm loads after editor.scm, so this takes RET from the plain
+;; newline and hands back to it for every buffer that is not a Markdown
+;; preview. S-RET stays the soft line break.
+(global-set-key "RET" "preview-newline")
+(global-set-key "S-RET" "newline")
+
 (define (preview-select! win before after wb wa nth wn dir)
   (let ((anchor (or (mark) (point))))
     (preview-goto! win before after wb wa nth wn dir)

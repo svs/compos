@@ -1752,8 +1752,9 @@ defmodule Aimax.Ui.EditorLive do
     p = point |> max(0) |> min(byte_size(text))
     m = if is_integer(mark), do: mark |> max(0) |> min(byte_size(text)), else: nil
 
-    anchors = line_anchors(text)
-    marked = mark_preview_positions(text, p, m, overlays, anchors)
+    blank = blank_point_line(text, p, overlays)
+    anchors = line_anchors(text, blank)
+    marked = mark_preview_positions(text, p, m, overlays, anchors, blank)
 
     "markdown"
     |> preview_html(marked, faces, authored)
@@ -1763,33 +1764,69 @@ defmodule Aimax.Ui.EditorLive do
   def preview_doc(rm, text, _point, _mark, faces, authored, _overlays),
     do: preview_html(rm, text, faces, authored)
 
-  defp mark_preview_positions(text, point, mark, overlays, anchors) do
+  defp mark_preview_positions(text, point, mark, overlays, anchors, blank) do
     positions =
-      [{cursor_spot(text, point), @pt_sentinel}, {mark && cursor_spot(text, mark), "\uE001"}] ++
-        preview_overlay_positions(text, overlays) ++
-        Enum.map(anchors, &{&1, @anchor})
+      point_position(text, point, blank) ++
+        mark_position(text, mark) ++
+        Enum.map(preview_overlay_positions(text, overlays), fn {at, s} -> {at, 2, s} end) ++
+        (anchors |> Enum.reject(&(&1 == blank)) |> Enum.map(&{&1, 1, @anchor}))
 
     positions =
       positions
-      |> Enum.reject(fn {at, _} -> is_nil(at) end)
+      |> Enum.reject(fn {at, _rank, _s} -> is_nil(at) end)
       # a sentinel inside a character makes the document invalid UTF-8, and
       # the Markdown parser then raises on the whole page
-      |> Enum.map(fn {at, sentinel} -> {Text.floor_utf8(text, at), sentinel} end)
-      # Later insertions at one offset land BEFORE earlier ones, so the
-      # order here is the reverse of the order in the page: a quote marker
-      # the overlay adds keeps the start of its line, the line's anchor sits
+      |> Enum.map(fn {at, rank, s} -> {Text.floor_utf8(text, at), rank, s} end)
+      # Later insertions at one offset land BEFORE earlier ones, so the rank
+      # here is the reverse of the order in the page: a quote marker the
+      # overlay adds keeps the start of its line, the line's anchor sits
       # after it, and the cursor stays innermost, right at point.
-      |> Enum.sort_by(fn {at, sentinel} -> {-at, sentinel_rank(sentinel)} end)
+      |> Enum.sort_by(fn {at, rank, _s} -> {-at, rank} end)
 
-    Enum.reduce(positions, text, fn {at, sentinel}, acc ->
-      binary_part(acc, 0, at) <> sentinel <> binary_part(acc, at, byte_size(acc) - at)
+    Enum.reduce(positions, text, fn {at, _rank, s}, acc ->
+      binary_part(acc, 0, at) <> s <> binary_part(acc, at, byte_size(acc) - at)
     end)
   end
 
-  defp sentinel_rank(@pt_sentinel), do: 0
-  defp sentinel_rank("\uE001"), do: 0
-  defp sentinel_rank(@anchor), do: 1
-  defp sentinel_rank(_), do: 2
+  # The point's own blank line draws an empty paragraph, and that paragraph
+  # needs a blank line on each side or it joins the block above or below. The
+  # anchor rides inside it, so the client still reads the source line the
+  # caret stands on.
+  defp point_position(_text, _point, ls) when is_integer(ls),
+    do: [{ls, 0, "\n" <> @anchor <> @pt_sentinel <> "\n"}]
+
+  defp point_position(text, point, nil), do: [{cursor_spot(text, point), 0, @pt_sentinel}]
+
+  defp mark_position(_text, nil), do: []
+  defp mark_position(text, mark), do: [{cursor_spot(text, mark), 0, "\uE001"}]
+
+  # A blank line has no Markdown node, so a cursor on it has nowhere to draw.
+  # The old answer moved the cursor to the next line that draws text. The
+  # caret then stood in front of another block's words while every keystroke
+  # went to the blank line: RET at the end of a document looked like it did
+  # nothing, and RET above a table threw the caret into the first cell. Give
+  # the line its own empty paragraph instead. An llm overlay quotes the lines
+  # it covers, so leave those to it.
+  defp blank_point_line(text, p, overlays) do
+    ls = line_start(text, p)
+
+    if blank_line?(text, ls) and not overlaid?(overlays, ls), do: ls, else: nil
+  end
+
+  # A blank line inside a fence is literal text. It draws, so it is not blank
+  # for this purpose.
+  defp blank_line?(text, ls),
+    do: text |> line_at(ls) |> String.trim() == "" and not inside_fence?(text, ls)
+
+  defp overlaid?(overlays, ls) do
+    Enum.any?(overlays || [], fn
+      {start, finish, _face} when is_integer(start) and is_integer(finish) ->
+        ls >= start and ls <= finish
+
+      _ ->
+        false
+    end)
+  end
 
   # Preview formatting belongs to llm-mode, not to the Markdown document.
   # Render its response overlay through a temporary blockquote so Earmark can
@@ -1825,12 +1862,21 @@ defmodule Aimax.Ui.EditorLive do
   # line is none. So mark every source line that draws text, at the spot the
   # cursor would take on it. The client reads the nearest marker above the
   # row it moved to, and point follows the source.
-  defp line_anchors(text) do
+  defp line_anchors(text, blank) do
     text
     |> line_starts()
-    |> Enum.map(fn ls -> {ls, cursor_spot(text, ls)} end)
+    |> Enum.map(fn ls -> {ls, line_anchor_spot(text, ls, blank)} end)
     |> Enum.filter(fn {ls, spot} -> spot != nil and line_start(text, spot) == ls end)
     |> Enum.map(&elem(&1, 1))
+  end
+
+  # The point's blank line draws its own paragraph, so it anchors to itself.
+  # Every other blank line draws nothing, and an anchor there would join the
+  # line to the block above and end it.
+  defp line_anchor_spot(_text, ls, ls), do: ls
+
+  defp line_anchor_spot(text, ls, _blank) do
+    if blank_line?(text, ls), do: nil, else: cursor_spot(text, ls)
   end
 
   defp line_starts(text) do
@@ -2135,6 +2181,10 @@ defmodule Aimax.Ui.EditorLive do
     ::highlight(region){background:color-mix(in srgb,#{accent} 32%,transparent)}
     .pt{display:inline-block;width:0;height:1.05em;margin:0;vertical-align:-0.18em;
         background:#{accent};animation:ptb 1.1s step-end infinite}
+    /* The window does not own the keyboard, so the caret stops blinking.
+       It still draws: a reader who looks at the page from another window
+       must still see where point stands. Emacs draws a hollow box here. */
+    .pt.idle{animation:none;opacity:0.45}
     .mk{display:inline-block;width:0;height:0}
     .ln{display:inline-block;width:0;height:0}
     @keyframes ptb{0%,49%{opacity:1}50%,100%{opacity:0}}

@@ -143,7 +143,7 @@ defmodule Aimax.Ui.PreviewCursorTest do
     assert html =~ @pt
   end
 
-  test "point on the blank line above a table shows the cursor in the table" do
+  test "point on the blank line above a table keeps every row of the table" do
     start = (:binary.match(@table, "intro") |> elem(0)) + byte_size("intro") + 1
     html = EditorLive.preview_doc("markdown", @table, start, @faces, false)
 
@@ -187,10 +187,10 @@ defmodule Aimax.Ui.PreviewCursorTest do
 
     at = Regex.scan(~r/<span class="ln" data-p="(\d+)"><\/span>/, html) |> Enum.map(&List.last/1)
 
-    # the heading (past its marker), the body line, the header row, the
-    # body row, and the empty last line — the blank lines and the alignment
-    # row draw nothing, so they name nothing
-    assert at == ["2", "9", "22", "46", "54"]
+    # the heading (past its marker), the body line, the header row, and the
+    # body row — the blank lines and the alignment row draw nothing, so they
+    # name nothing
+    assert at == ["2", "9", "22", "46"]
   end
 
   test "a rendered line's anchor sits in the line it names" do
@@ -263,5 +263,106 @@ defmodule Aimax.Ui.PreviewCursorTest do
     assert html =~ "With another line."
     refute html =~ "\uE002"
     refute html =~ "\uE003"
+  end
+
+  # RET on a full line leaves point on a blank line. The blank line draws no
+  # Markdown node, so the cursor used to move to the next line that draws
+  # text: the caret stood in front of another block's words while the typing
+  # went to the blank line. The blank line the point stands on now draws an
+  # empty paragraph of its own.
+
+  defp blocks(html) do
+    html
+    |> String.split("<body>")
+    |> List.last()
+    |> String.replace(~r/<span class="ln" data-p="\d+"><\/span>/, "")
+    |> String.replace("\n", "")
+  end
+
+  test "RET between two paragraphs puts the cursor on its own line" do
+    html = EditorLive.preview_doc("markdown", "para1\n\npara2\n", 6, @faces, false)
+
+    assert blocks(html) =~ "<p>para1</p><p>#{@pt}</p><p>para2</p>"
+  end
+
+  test "RET at the end of the document draws a new empty line" do
+    html = EditorLive.preview_doc("markdown", "para1\n", 6, @faces, false)
+
+    assert blocks(html) =~ "<p>para1</p><p>#{@pt}</p>"
+  end
+
+  test "the cursor above a table stays out of the table" do
+    text = "intro\n\n| a | b |\n| - | - |\n"
+    html = EditorLive.preview_doc("markdown", text, 6, @faces, false)
+
+    assert blocks(html) =~ "<p>intro</p><p>#{@pt}</p><table>"
+    refute html =~ ~r/<t[hd][^>]*>\s*#{Regex.escape(@pt)}/
+  end
+
+  test "the cursor above a heading stays out of the heading" do
+    html = EditorLive.preview_doc("markdown", "intro\n\n# Head\n", 6, @faces, false)
+
+    assert blocks(html) =~ "<p>#{@pt}</p><h1>Head</h1>"
+  end
+
+  test "a blank line at the top of the document draws the cursor" do
+    html = EditorLive.preview_doc("markdown", "\npara\n", 0, @faces, false)
+
+    assert blocks(html) =~ "<p>#{@pt}</p><p>para</p>"
+  end
+
+  test "one of several blank lines draws the cursor and keeps the rest apart" do
+    html = EditorLive.preview_doc("markdown", "a\n\n\n\nb\n", 3, @faces, false)
+
+    assert blocks(html) =~ "<p>a</p><p>#{@pt}</p><p>b</p>"
+  end
+
+  test "an empty document draws the cursor" do
+    html = EditorLive.preview_doc("markdown", "", 0, @faces, false)
+
+    assert blocks(html) =~ "<p>#{@pt}</p>"
+  end
+
+  test "a blank line inside a fence keeps the cursor in the code" do
+    html = EditorLive.preview_doc("markdown", "```\na\n\nb\n```\n", 6, @faces, false)
+
+    assert html =~ "<pre><code>"
+    assert strip_anchors(html) =~ "a\n#{@pt}\nb"
+  end
+
+  test "the point's blank line names its own byte offset" do
+    html = EditorLive.preview_doc("markdown", "para1\n\npara2\n", 6, @faces, false)
+
+    assert html =~ ~s(<span class="ln" data-p="6"></span>#{@pt})
+  end
+
+  test "a blank line the point has left names nothing" do
+    html = EditorLive.preview_doc("markdown", "para1\n\npara2\n", 8, @faces, false)
+
+    at = Regex.scan(~r/<span class="ln" data-p="(\d+)"><\/span>/, html) |> Enum.map(&List.last/1)
+
+    assert at == ["0", "7"]
+  end
+
+  test "an llm overlay keeps the blank lines it quotes" do
+    text = "Prompt\n\nAn answer.\n\nMore answer.\n"
+    start = byte_size("Prompt\n\n")
+    finish = byte_size(text) - 1
+    blank = byte_size("Prompt\n\nAn answer.\n")
+
+    html =
+      EditorLive.preview_doc(
+        "markdown",
+        text,
+        blank,
+        nil,
+        @faces,
+        false,
+        [{start, finish, "llm-response"}]
+      )
+
+    assert html =~ ~s(<blockquote class="llm-response")
+    assert html =~ "More answer."
+    assert html =~ @pt
   end
 end

@@ -69,7 +69,9 @@ their own effects. The shared catalog separates:
 - `package`: who owns and replaces an entry
 - `namespace`: its stable public vocabulary
 - `domain`: the subject area it concerns
-- `effects`: `pure`, `read`, `write`, `destroy`, `spend`, `execute`, `external`
+- `effects`: `pure`, `read`, `write`, `destroy`, `spend`, `execute`, `external`, `display`
+
+`display` marks operations that change visible buffers, focus, point, mark, or scroll state.
 
 Search these facets with `apropos`; `apropos-components` is only a convenience
 wrapper for `kind=component`.

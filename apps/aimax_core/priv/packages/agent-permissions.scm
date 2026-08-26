@@ -68,7 +68,8 @@
   (and (equal? kind "tool")
        (let ((fx (permission-tool-effects title)))
          (and fx
-              (cond ((or (member "destroy" fx) (member "spend" fx)) 'ask)
+              (cond ((equal? title "apropos") 'allow-always)
+                    ((or (member "destroy" fx) (member "spend" fx)) 'ask)
                     ((null? (remove (lambda (f) (member f '("pure" "read"))) fx))
                      'allow-always)
                     (else #f))))))

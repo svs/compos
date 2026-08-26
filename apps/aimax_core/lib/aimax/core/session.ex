@@ -473,8 +473,17 @@ defmodule Aimax.Core.Session do
 
   def handle_call(:refresh_primitives, _from, state) do
     interp = interp()
-    interp = Scheme.rebind_primitives(interp, Aimax.Core.SchemeAPI.primitives())
-    interp = Scheme.register(interp, session_primitives(interp.global))
+
+    # Session's own primitives must go through the SAME rebind. A register
+    # after the rebind fixes two things badly. An alias holds a
+    # `{:builtin, "define-command", fun}` tuple that only the rebind walk
+    # reaches, so `define-command--raw` in editor.scm keeps the purged fun.
+    # A register also puts the raw primitive back over the Scheme wrapper
+    # that editor.scm defines for the same name.
+    extra =
+      Map.merge(Aimax.Core.SchemeAPI.primitives(), session_primitives(interp.global))
+
+    interp = Scheme.rebind_primitives(interp, extra)
     :persistent_term.put(@pt, interp)
     :persistent_term.put(@pt_stamp, primitive_stamp())
     {:reply, :ok, state}
@@ -677,7 +686,9 @@ defmodule Aimax.Core.Session do
 
   defp eval_hook(interp, src) do
     case Scheme.eval_string(interp, src) do
-      {:ok, _, interp2} -> interp2
+      {:ok, _, interp2} ->
+        interp2
+
       {:error, message} ->
         Logger.error("reload hook failed: #{message}")
         interp
@@ -879,6 +890,36 @@ defmodule Aimax.Core.Session do
       "lsp-request" => "(lsp-request ID METHOD PARAMS CB) — send a request; CB gets (OK RESULT).",
       "lsp-buffer-request" =>
         "(lsp-buffer-request ID METHOD BUF BYTE-POS [EXTRA] CB) — request at a buffer position; CB gets (OK RESULT).",
+      "db-connect!" =>
+        "(db-connect! NAME SPEC) — open a named database connection; SPEC has 'adapter 'database 'user 'password 'host or 'socket_dir 'port 'ssl.",
+      "db-disconnect!" => "(db-disconnect! NAME) — close the database connection NAME.",
+      "db-connected?" => "(db-connected? NAME) — #t when NAME is open.",
+      "db-list" => "(db-list) — return (name adapter database) per connection.",
+      "db-adapters" => "(db-adapters) — the database adapters this build can open.",
+      "db-query" =>
+        "(db-query NAME SQL [PARAMS] CB) — run SQL with bound PARAMS; CB gets (OK RESULT), RESULT a plist of 'columns 'rows 'count 'command.",
+      "endpoint-start!" =>
+        "(endpoint-start! NAME SPEC) — open a named connection; SPEC picks the transport and framing.",
+      "endpoint-stop!" => "(endpoint-stop! NAME) — close the connection NAME.",
+      "endpoint-send!" =>
+        "(endpoint-send! NAME TEXT) — write one frame; do not wait for an answer.",
+      "endpoint-ask" =>
+        "(endpoint-ask NAME TEXT UNTIL [TIMEOUT] CB) — send a frame, collect frames up to the sentinel UNTIL; CB gets (OK FRAMES).",
+      "endpoint-on-event!" =>
+        "(endpoint-on-event! HANDLER) — set the handler that gets (NAME KIND TEXT) for unsolicited frames.",
+      "endpoint-list" =>
+        "(endpoint-list) — return (name status transport framing queued) per connection.",
+      "endpoint-detail" =>
+        "(endpoint-detail NAME) — return a status plist, or #f when never started.",
+      "endpoint-log" =>
+        "(endpoint-log NAME) — return ((time dir text) ...) frames, oldest first.",
+      "web-server-start!" =>
+        "(web-server-start! NAME SPEC HANDLER) — start an HTTP callback or webhook server; HANDLER receives a request plist and returns a response plist.",
+      "web-server-stop!" => "(web-server-stop! NAME) — stop the named HTTP server.",
+      "web-server-list" =>
+        "(web-server-list) — return (name host port url max-body) for every programmable HTTP server.",
+      "web-server-detail" =>
+        "(web-server-detail NAME) — return the server detail plist, or #f when the server is not running.",
       "tool-specs-json" =>
         "(tool-specs-json SPECS) — return the specs as MCP tools/list JSON text.",
       "priv-path" =>
@@ -942,7 +983,9 @@ defmodule Aimax.Core.Session do
       "agent-set-mode!" =>
         "(agent-set-mode! SLUG MODE) — switch the permission mode; #f when unsupported.",
       "agent-info" =>
-        "(agent-info SLUG) — return a plist: slug, buffer, status, queued, permission, question; or #f.",
+        "(agent-info SLUG) — return a plist: slug, buffer, status, queued, steering, permission, question; or #f.",
+      "agent-steer!" =>
+        "(agent-steer! SLUG) — send the oldest queued message into the running turn; return #t when sent.",
       "agent-on-event!" =>
         "(agent-on-event! HANDLER) — set the global agent event handler: (HANDLER SLUG EVENTS).",
       "agent-context-fn!" =>
@@ -1493,6 +1536,115 @@ defmodule Aimax.Core.Session do
 
           :void
       end,
+      # --- Databases (Aimax.Core.DB; policy in packages/db.scm) ------------
+      "db-connect!" => fn [name, spec] ->
+        case Aimax.Core.DB.connect(s(name), plist_to_map(spec)) do
+          {:ok, _} -> :void
+          {:error, msg} -> raise_scheme("db-connect!: #{msg}")
+        end
+      end,
+      "db-disconnect!" => fn [name] ->
+        Aimax.Core.DB.disconnect(s(name))
+        :void
+      end,
+      "db-connected?" => fn [name] -> Aimax.Core.DB.whereis(s(name)) != nil end,
+      "db-list" => fn [] ->
+        for c <- Aimax.Core.DB.connections(), do: [c.name, c.adapter, c.database]
+      end,
+      "db-adapters" => fn [] -> String.split(Aimax.Core.DB.known_adapters(), ", ") end,
+      "db-query" => fn
+        [name, sql, params, callback] ->
+          Aimax.Core.DB.query(s(name), s(sql), db_params(params), db_cb(callback))
+          :void
+
+        [name, sql, callback] ->
+          Aimax.Core.DB.query(s(name), s(sql), [], db_cb(callback))
+          :void
+      end,
+      # --- Endpoints (Aimax.Core.Endpoint; policy in Scheme packages) ------
+      "endpoint-start!" => fn [name, spec] ->
+        case Aimax.Core.Endpoint.start(s(name), endpoint_spec(spec)) do
+          {:ok, _} -> :void
+          {:error, msg} -> raise_scheme("endpoint-start!: #{inspect(msg)}")
+        end
+      end,
+      "endpoint-stop!" => fn [name] ->
+        Aimax.Core.Endpoint.stop(s(name))
+        :void
+      end,
+      "endpoint-send!" => fn [name, text] ->
+        Aimax.Core.Endpoint.Conn.send_frame(endpoint_conn!(name), s(text))
+        :void
+      end,
+      "endpoint-ask" => fn
+        [name, text, until, callback] ->
+          endpoint_ask(name, text, until, false, callback)
+
+        [name, text, until, timeout, callback] ->
+          endpoint_ask(name, text, until, timeout, callback)
+      end,
+      "endpoint-on-event!" => fn [handler] ->
+        :ets.insert(@escaped, {{:endpoint_handler}, handler})
+        :void
+      end,
+      "endpoint-list" => fn [] ->
+        for c <- Aimax.Core.Endpoint.connections(),
+            do: [c.name, to_string(c.status), to_string(c.transport), c.framing, c.queued]
+      end,
+      "endpoint-detail" => fn [name] ->
+        case Aimax.Core.Endpoint.detail(s(name)) do
+          nil ->
+            false
+
+          d ->
+            [
+              {:sym, "status"},
+              to_string(d.status),
+              {:sym, "reason"},
+              Map.get(d, :reason, ""),
+              {:sym, "transport"},
+              to_string(d.transport),
+              {:sym, "framing"},
+              Map.get(d, :framing, ""),
+              {:sym, "queued"},
+              Map.get(d, :queued, 0)
+            ]
+        end
+      end,
+      "endpoint-log" => fn [name] ->
+        for e <- Aimax.Core.Endpoint.log(s(name)) do
+          [
+            e.at
+            |> :calendar.system_time_to_local_time(:millisecond)
+            |> NaiveDateTime.from_erl!()
+            |> Calendar.strftime("%H:%M:%S"),
+            to_string(e.dir),
+            e.text
+          ]
+        end
+      end,
+      # --- Inbound HTTP servers (Bandit mechanism; Scheme handlers) -------
+      "web-server-start!" => fn [name, spec, handler] ->
+        case Aimax.Core.WebServer.start(s(name), plist_to_map(spec), handler) do
+          {:ok, detail} -> web_server_detail(detail)
+          {:error, msg} -> raise_scheme("web-server-start!: #{msg}")
+        end
+      end,
+      "web-server-stop!" => fn [name] ->
+        Aimax.Core.WebServer.stop(s(name))
+        :void
+      end,
+      "web-server-list" => fn [] ->
+        for server <- Aimax.Core.WebServer.servers() do
+          [server.name, server.host, server.port, server.url, server.max_body]
+        end
+      end,
+      "web-server-detail" => fn [name] ->
+        case Aimax.Core.WebServer.detail(s(name)) do
+          nil -> false
+          detail -> web_server_detail(detail)
+        end
+      end,
       # MCP-shaped JSON for a list of registry tool specs — the proxy's
       # tools/list payload (input_schema key renamed to MCP's camelCase)
       "tool-specs-json" => fn [specs] ->
@@ -1719,6 +1871,12 @@ defmodule Aimax.Core.Session do
           {:error, r} -> raise_scheme("agent-prompt!: #{inspect(r)}")
         end
       end,
+      "agent-steer!" => fn [slug] ->
+        case Aimax.Core.LLMSession.steer_next(s(slug)) do
+          :sent -> true
+          {:error, _reason} -> false
+        end
+      end,
       "agent-cancel!" => fn [slug] ->
         Aimax.Core.LLMSession.cancel(s(slug))
         :void
@@ -1823,6 +1981,8 @@ defmodule Aimax.Core.Session do
               {:sym, to_string(info.status)},
               {:sym, "queued"},
               info.queued,
+              {:sym, "steering"},
+              info.steering,
               {:sym, "permission"},
               perm,
               {:sym, "question"},
@@ -2547,6 +2707,130 @@ defmodule Aimax.Core.Session do
 
   defp lsp_callback_args({:ok, result}), do: [true, Aimax.Core.LLM.json_to_scheme(result)]
   defp lsp_callback_args({:error, msg}), do: [false, to_string(msg)]
+
+  # Scheme values -> bound query parameters. A parameter is never spliced
+  # into SQL text, so a string stays a string whatever it contains.
+  defp db_params(list) when is_list(list), do: Enum.map(list, &db_param/1)
+  defp db_params(_), do: []
+
+  defp db_param({:sym, "null"}), do: nil
+  defp db_param(false), do: false
+  defp db_param(true), do: true
+  defp db_param({:sym, other}), do: other
+  defp db_param(v), do: v
+
+  # A decoded row value -> a Scheme term. SQL NULL becomes #f, the same
+  # answer json-parse gives, and a numeric becomes text so no precision is
+  # lost on the way through a float.
+  defp db_value(nil), do: false
+  defp db_value(%Decimal{} = d), do: Decimal.to_string(d)
+  defp db_value(%DateTime{} = t), do: DateTime.to_iso8601(t)
+  defp db_value(%NaiveDateTime{} = t), do: NaiveDateTime.to_iso8601(t)
+  defp db_value(%Date{} = d), do: Date.to_iso8601(d)
+  defp db_value(%Time{} = t), do: Time.to_iso8601(t)
+  defp db_value(v) when is_list(v), do: Enum.map(v, &db_value/1)
+  defp db_value(v) when is_map(v) and not is_struct(v), do: Aimax.Core.LLM.json_to_scheme(v)
+  defp db_value(v) when is_struct(v), do: inspect(v)
+  defp db_value(v), do: v
+
+  defp db_cb(callback) do
+    refkey = {:db_call, make_ref()}
+    :ets.insert(@escaped, {refkey, callback})
+
+    fn result ->
+      try do
+        apply_callback(callback, db_callback_args(result))
+      after
+        :ets.delete(@escaped, refkey)
+      end
+    end
+  end
+
+  defp db_callback_args({:ok, r}) do
+    [
+      true,
+      [
+        {:sym, "columns"},
+        r.columns,
+        {:sym, "rows"},
+        Enum.map(r.rows, fn row -> Enum.map(row, &db_value/1) end),
+        {:sym, "count"},
+        r.num_rows,
+        {:sym, "command"},
+        r.command
+      ]
+    ]
+  end
+
+  defp db_callback_args({:error, msg}), do: [false, to_string(msg)]
+
+  # endpoint spec plist -> the map Endpoint.Conn reads. 'env is itself a
+  # plist; 'args is a list of strings; everything else crosses verbatim.
+  defp endpoint_spec(plist) do
+    plist
+    |> plist_to_map()
+    |> Map.new(fn
+      {"env", v} when is_list(v) ->
+        {"env",
+         v |> Enum.chunk_every(2) |> Map.new(fn [a, b] -> {to_string(a), to_string(b)} end)}
+
+      {"args", v} when is_list(v) ->
+        {"args", Enum.map(v, &to_string/1)}
+
+      {k, v} ->
+        {k, v}
+    end)
+  end
+
+  defp endpoint_conn!(name) do
+    case Aimax.Core.Endpoint.whereis(s(name)) do
+      nil -> raise_scheme("endpoint: no connection #{s(name)}")
+      pid -> pid
+    end
+  end
+
+  defp endpoint_ask(name, text, until, timeout, callback) do
+    pid = endpoint_conn!(name)
+    sentinel = if until == false, do: nil, else: s(until)
+    ms = if is_integer(timeout) and timeout > 0, do: timeout, else: nil
+    Aimax.Core.Endpoint.Conn.ask(pid, s(text), sentinel, ms, endpoint_cb(callback))
+    :void
+  end
+
+  # A GC-rooted result callback, same shape as lsp_cb/2: it fires from the
+  # conn process, so the Scheme apply always moves to a task.
+  defp endpoint_cb(callback) do
+    refkey = {:endpoint_call, make_ref()}
+    :ets.insert(@escaped, {refkey, callback})
+
+    fn result ->
+      Task.Supervisor.start_child(Aimax.Core.TaskSupervisor, fn ->
+        try do
+          apply_callback(callback, endpoint_callback_args(result))
+        after
+          :ets.delete(@escaped, refkey)
+        end
+      end)
+    end
+  end
+
+  defp endpoint_callback_args({:ok, frames}), do: [true, frames]
+  defp endpoint_callback_args({:error, msg}), do: [false, to_string(msg)]
+
+  defp web_server_detail(detail) do
+    [
+      {:sym, "name"},
+      detail.name,
+      {:sym, "host"},
+      detail.host,
+      {:sym, "port"},
+      detail.port,
+      {:sym, "url"},
+      detail.url,
+      {:sym, "max-body"},
+      detail.max_body
+    ]
+  end
 
   defp mcp_spec(plist) do
     plist

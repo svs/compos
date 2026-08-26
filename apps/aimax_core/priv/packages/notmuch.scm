@@ -16,7 +16,7 @@
 ;;;   a archive · d trash · u smart-untag · . toggle unread · @ by sender
 ;;;   m mark+advance · M mark all · U unmark all · F show marked
 ;;;   A archive marked · D trash marked · t tag marked · T tag this thread
-;;;   / add a tag filter · \ remove the last filter · l raw filter
+;;;   / custom query filter · l add a tag filter · \ remove the last filter
 ;;;   s new search · g refresh · q quit
 ;;; Thread buffer keys:  v html/text view · a archive · r reply · q quit
 ;;; Compose buffer keys: C-c C-c send · C-c C-k abort
@@ -267,7 +267,8 @@ when a message has no text/plain part." 'group 'notmuch)
     'doc (string-append
            "One notmuch search as a list of threads. `RET` opens, `SPC` "
            "previews, `a`/`d`/`t` tag, `m` marks and the capital keys act "
-           "on every marked thread. `/` adds a tag filter; `\\` removes it. "
+           "on every marked thread. `/` adds a custom query filter. "
+           "`l` adds a tag filter; `\\` removes it. "
            "`s` starts a new search; `q` goes back "
            "to the mailboxes.")
     'rows nm--search-rows
@@ -280,7 +281,8 @@ when a message has no text/plain part." 'group 'notmuch)
     'footer (lambda (buf)
               '(("RET" "open") ("SPC" "preview") ("m" "mark")
                 ("a" "archive") ("d" "trash") ("t" "tag")
-                ("s" "search") ("/" "tag filter") ("\\" "unfilter")
+                ("s" "search") ("/" "custom filter") ("l" "tag filter")
+                ("\\" "unfilter")
                 ("g" "refresh")
                 ("q" "mailboxes")))
     'keys '(("n" "notmuch-next") ("p" "notmuch-prev")
@@ -295,8 +297,8 @@ when a message has no text/plain part." 'group 'notmuch)
             ("D" "notmuch-trash-marked") ("t" "notmuch-tag-marked")
             ("T" "notmuch-edit-tags") ("+" "notmuch-add-tag")
             ("-" "notmuch-remove-tag") ("j" "notmuch-jump")
-            ("/" "notmuch-filter-by-tag")
-            ("\\" "notmuch-unfilter-last") ("l" "notmuch-filter")
+            ("/" "notmuch-filter")
+            ("\\" "notmuch-unfilter-last") ("l" "notmuch-filter-by-tag")
             ("s" "notmuch-search") ("g" "notmuch-refresh")
             ;; like notmuch-emacs: q in the index goes back to the mailboxes
             ("q" "notmuch"))

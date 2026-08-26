@@ -57,14 +57,16 @@ defmodule Aimax.Core.Agent do
   def prompt(slug, text, display \\ nil), do: call(slug, {:prompt, text, display})
 
   @doc """
-  Drain queued prompts into the RUNNING turn — steering. The direct lane's
-  turn task calls this between tool rounds. Each drained message echoes as
-  a `user-msg` event at that moment, so the transcript shows it where the
+  Drain prompts explicitly promoted into the RUNNING turn. A boundary-steering
+  backend calls this before its next model request. Each drained message echoes
+  as a `user-msg` event at that moment, so the transcript shows it where the
   model actually reads it. Returns `[{text, display}]`; `[]` when idle or
-  nothing is queued. Backends that cannot take mid-turn input never call
-  this, and their queue pops at turn-end as before.
+  nothing was promoted.
   """
   def take_steering(slug), do: call(slug, :take_steering)
+
+  @doc "Promote the oldest queued prompt into the running turn."
+  def steer_next(slug), do: call(slug, :steer_next)
 
   @doc """
   Remove one queued prompt without running it. Matches the first queue
@@ -197,6 +199,14 @@ defmodule Aimax.Core.Agent do
 
     backend = Backend.module(config)
     {:ok, handle} = backend.start(Map.put(config, "slug", slug), self())
+    capabilities = backend.capabilities()
+
+    steering =
+      cond do
+        :push_steering in capabilities -> :push
+        :boundary_steering in capabilities -> :boundary
+        true -> :none
+      end
 
     {:ok,
      %{
@@ -214,6 +224,14 @@ defmodule Aimax.Core.Agent do
        delivery_timer: nil,
        context_pending: false,
        prompt_queue: [],
+       steering_queue: [],
+       pending_steers: %{},
+       pending_steer_order: [],
+       steering_fallbacks: [],
+       pending_turn_end: nil,
+       steering_settle_timer: nil,
+       next_steer_id: 1,
+       steering: steering,
        pending_permission: nil,
        pending_question: nil,
        # which turn a context fetch belongs to (see send_prompt)
@@ -255,17 +273,54 @@ defmodule Aimax.Core.Agent do
     end
   end
 
-  def handle_call(:take_steering, _from, %{prompt_queue: [_ | _] = queue, status: s} = state)
+  def handle_call(:take_steering, _from, %{steering_queue: [_ | _] = queue, status: s} = state)
       when s in [:running, :needs_attention] do
     state =
       Enum.reduce(queue, state, fn {text, display}, acc ->
         enqueue(acc, Backend.plist(type: :"user-msg", text: display || text))
       end)
 
-    {:reply, queue, %{state | prompt_queue: []}}
+    {:reply, queue, %{state | steering_queue: []}}
   end
 
   def handle_call(:take_steering, _from, state), do: {:reply, [], state}
+
+  def handle_call(:steer_next, _from, state) do
+    case {state.status, state.steering, state.prompt_queue} do
+      {s, :push, [{text, display} | rest]} when s in [:running, :needs_attention] ->
+        token = state.next_steer_id
+
+        case state.backend.steer(state.handle, token, text, display, state.epoch) do
+          :ok ->
+            pending = Map.put(state.pending_steers, token, {text, display, state.epoch, :pending})
+
+            {:reply, :sent,
+             %{
+               state
+               | prompt_queue: rest,
+                 pending_steers: pending,
+                 pending_steer_order: state.pending_steer_order ++ [token],
+                 next_steer_id: token + 1
+             }}
+
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
+
+      {s, :boundary, [next | rest]} when s in [:running, :needs_attention] ->
+        {:reply, :sent,
+         %{state | prompt_queue: rest, steering_queue: state.steering_queue ++ [next]}}
+
+      {_status, :none, _queue} ->
+        {:reply, {:error, :unsupported}, state}
+
+      {_status, _steering, []} ->
+        {:reply, {:error, :empty}, state}
+
+      _ ->
+        {:reply, {:error, :not_running}, state}
+    end
+  end
 
   def handle_call({:dequeue, text}, _from, state) do
     case Enum.split_while(state.prompt_queue, fn {t, d} -> (d || t) != text end) do
@@ -279,10 +334,18 @@ defmodule Aimax.Core.Agent do
     # still arrive for the active turn, but it must not start queued work.
     # Advancing the epoch also discards a context fetch for a cancelled turn.
     context_pending = state.context_pending
+    deferred_turn_end = state.pending_turn_end
+    state = cancel_steering_settle_timer(state)
 
     state = %{
       state
       | prompt_queue: [],
+        steering_queue: [],
+        pending_steers: %{},
+        pending_steer_order: [],
+        steering_fallbacks: [],
+        pending_turn_end: nil,
+        steering_settle_timer: nil,
         epoch: state.epoch + 1,
         context_pending: false
     }
@@ -294,6 +357,9 @@ defmodule Aimax.Core.Agent do
 
     state =
       cond do
+        deferred_turn_end ->
+          finish_turn(state, deferred_turn_end)
+
         context_pending ->
           state
           |> enqueue(Backend.plist(type: :"turn-end", "stop-reason": "cancelled"))
@@ -438,7 +504,10 @@ defmodule Aimax.Core.Agent do
        buffer: Buffer.name(state.buffer_ref),
        buffer_id: Buffer.id(state.buffer_ref),
        status: state.status,
-       queued: length(state.prompt_queue),
+       queued:
+         length(state.prompt_queue) + length(state.steering_queue) +
+           map_size(state.pending_steers) + length(state.steering_fallbacks),
+       steering: state.steering != :none,
        permission:
          case state.pending_permission do
            %{rpc_id: id, title: title, options: opts} ->
@@ -464,7 +533,7 @@ defmodule Aimax.Core.Agent do
         {:reply, :sent, send_prompt(state, text, display)}
 
       s when s in [:starting, :running, :needs_attention] ->
-        {:reply, :queued, %{state | prompt_queue: state.prompt_queue ++ [{text, display}]}}
+        {:reply, :queued, queue_prompt(state, text, display)}
 
       :dead ->
         {:reply, {:error, :dead}, state}
@@ -552,6 +621,35 @@ defmodule Aimax.Core.Agent do
   end
 
   def handle_info({:deliver_events, _stale}, state), do: {:noreply, state}
+
+  def handle_info(
+        {:steering_settle_timeout, epoch},
+        %{epoch: epoch, pending_turn_end: event} = state
+      )
+      when not is_nil(event) do
+    # The turn is confirmed complete, so an unacknowledged steer can no
+    # longer be trusted as delivered. Put every unresolved entry back in
+    # submission order and let the ordinary queue make progress. Supported
+    # push backends acknowledge consumed steering before terminal completion;
+    # this timeout is recovery for a lost or malformed protocol response.
+    pending =
+      Map.new(state.pending_steers, fn
+        {token, {text, display, steer_epoch, :pending}} ->
+          {token, {text, display, steer_epoch, :fallback}}
+
+        entry ->
+          entry
+      end)
+
+    state =
+      %{state | pending_steers: pending, steering_settle_timer: nil}
+      |> drain_settled_steering()
+      |> maybe_finish_deferred_turn()
+
+    {:noreply, state}
+  end
+
+  def handle_info({:steering_settle_timeout, _stale_epoch}, state), do: {:noreply, state}
 
   def handle_info(_msg, state), do: {:noreply, state}
 
@@ -641,6 +739,18 @@ defmodule Aimax.Core.Agent do
   # goes idle while the chat keeps its active flag and waiting presentation.
   defp apply_backend_event(state, event) do
     case Backend.event_type(event) do
+      "steering-ready" ->
+        %{state | steering: :push}
+
+      "steering-disabled" ->
+        %{state | steering: :none}
+
+      "steering-accepted" ->
+        steering_accepted(state, event)
+
+      "steering-fallback" ->
+        steering_fallback(state, event)
+
       "ready" ->
         state |> set_status(:idle) |> pop_prompt_queue()
 
@@ -651,16 +761,18 @@ defmodule Aimax.Core.Agent do
         )
 
       "turn-end" ->
-        # a turn that ends with a request still open (the agent gave up,
-        # the wire died) resolves it cancelled — never a stuck banner
-        state
-        |> then(fn s -> if s.pending_permission, do: resolve_permission(s, nil), else: s end)
-        |> then(fn s ->
-          if s.pending_question, do: resolve_question(s, s.pending_question.id, nil), else: s
-        end)
-        |> enqueue(event)
-        |> set_status(:idle)
-        |> pop_prompt_queue()
+        # A transport may report completion before its steering RPC reply.
+        # Keep the turn open until every committed steer is accepted or put
+        # back; otherwise a younger queued prompt can overtake or erase it.
+        if state.pending_steer_order == [] do
+          finish_turn(state, event)
+        else
+          timer =
+            state.steering_settle_timer ||
+              Process.send_after(self(), {:steering_settle_timeout, state.epoch}, 2_000)
+
+          %{state | pending_turn_end: event, steering_settle_timer: timer}
+        end
 
       "permission" ->
         options =
@@ -704,6 +816,118 @@ defmodule Aimax.Core.Agent do
   end
 
   # --- lifecycle helpers ------------------------------------------------------
+
+  defp queue_prompt(state, text, display),
+    do: %{state | prompt_queue: state.prompt_queue ++ [{text, display}]}
+
+  defp steering_accepted(state, event) do
+    settle_steering(state, event, :accepted)
+  end
+
+  defp steering_fallback(state, event) do
+    settle_steering(state, event, :fallback)
+  end
+
+  defp settle_steering(state, event, outcome) do
+    token = Backend.plist_get(event, "token")
+    epoch = Backend.plist_get(event, "epoch")
+
+    state =
+      case Map.fetch(state.pending_steers, token) do
+        {:ok, {text, display, ^epoch, :pending}} when epoch == state.epoch ->
+          %{
+            state
+            | pending_steers:
+                Map.put(state.pending_steers, token, {text, display, epoch, outcome})
+          }
+
+        _ ->
+          state
+      end
+
+    state
+    |> drain_settled_steering()
+    |> maybe_finish_deferred_turn()
+  end
+
+  defp drain_settled_steering(%{pending_steer_order: []} = state), do: state
+
+  defp drain_settled_steering(%{pending_steer_order: [token | rest]} = state) do
+    case Map.get(state.pending_steers, token) do
+      {_text, _display, _epoch, :pending} ->
+        state
+
+      {text, display, _epoch, :accepted} ->
+        %{
+          state
+          | pending_steers: Map.delete(state.pending_steers, token),
+            pending_steer_order: rest
+        }
+        |> enqueue(Backend.plist(type: :"user-msg", text: display || text))
+        |> drain_settled_steering()
+
+      {text, display, _epoch, :fallback} ->
+        %{
+          state
+          | pending_steers: Map.delete(state.pending_steers, token),
+            pending_steer_order: rest,
+            steering_fallbacks: state.steering_fallbacks ++ [{text, display}]
+        }
+        |> drain_settled_steering()
+
+      nil ->
+        drain_settled_steering(%{state | pending_steer_order: rest})
+    end
+  end
+
+  defp maybe_finish_deferred_turn(%{pending_steer_order: [], pending_turn_end: event} = state)
+       when not is_nil(event),
+       do: finish_turn(%{state | pending_turn_end: nil}, event)
+
+  defp maybe_finish_deferred_turn(state), do: state
+
+  defp finish_turn(state, event) do
+    # a turn that ends with a request still open (the agent gave up,
+    # the wire died) resolves it cancelled — never a stuck banner
+    state
+    |> cancel_steering_settle_timer()
+    |> restore_boundary_steering()
+    |> restore_push_fallbacks()
+    |> then(fn s -> if s.pending_permission, do: resolve_permission(s, nil), else: s end)
+    |> then(fn s ->
+      if s.pending_question, do: resolve_question(s, s.pending_question.id, nil), else: s
+    end)
+    |> enqueue(event)
+    |> set_status(:idle)
+    |> pop_prompt_queue()
+  end
+
+  defp cancel_steering_settle_timer(%{steering_settle_timer: nil} = state), do: state
+
+  defp cancel_steering_settle_timer(state) do
+    Process.cancel_timer(state.steering_settle_timer)
+    %{state | steering_settle_timer: nil}
+  end
+
+  defp restore_boundary_steering(%{steering_queue: []} = state), do: state
+
+  defp restore_boundary_steering(state) do
+    %{
+      state
+      | prompt_queue: state.steering_queue ++ state.prompt_queue,
+        steering_queue: []
+    }
+  end
+
+  defp restore_push_fallbacks(%{steering_fallbacks: []} = state), do: state
+
+  defp restore_push_fallbacks(state) do
+    %{
+      state
+      | prompt_queue: state.steering_fallbacks ++ state.prompt_queue,
+        steering_fallbacks: []
+    }
+  end
 
   defp send_prompt(state, text, display) do
     state =

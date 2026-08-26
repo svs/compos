@@ -103,9 +103,9 @@ defmodule Aimax.Core.LLM do
   `:model` overrides `model/0`.
   `:tool_handler` can intercept an intrinsic tool and return `{:ok, text}` or
   `{:error, text}`. It returns `:dispatch` for the normal Scheme/MCP path.
-  `:steer` is a zero-arg fn the loop calls after each tool round; the user
-  text it returns joins the tool-result message, so the model reads a
-  mid-turn message at its next round and the wire keeps alternating roles.
+  `:steer` is a zero-arg fn the loop calls before each next model request.
+  After a tool response, its text joins the tool-result message. After a
+  normal response, it starts the next request without ending the turn.
   """
   def run_tool_loop(messages, system, specs, dispatcher, opts \\ []) do
     tools = Enum.map(specs, &tool_json/1)
@@ -163,7 +163,20 @@ defmodule Aimax.Core.LLM do
         record(opts, "assistant", blocks)
         usage = add_usage(usage, resp)
         report_usage(opts, usage)
-        {:ok, Enum.map_join(blocks, "", &(&1["text"] || "")), usage, stop_of(resp)}
+
+        case steered_blocks(opts[:steer]) do
+          [] ->
+            {:ok, Enum.map_join(blocks, "", &(&1["text"] || "")), usage, stop_of(resp)}
+
+          steered ->
+            record(opts, "user", steered)
+
+            messages =
+              messages ++
+                [%{role: "assistant", content: blocks}, %{role: "user", content: steered}]
+
+            tool_loop(messages, system, tools, dispatcher, rounds + 1, usage, opts)
+        end
 
       {:error, msg} ->
         {:error, msg}
@@ -639,6 +652,12 @@ defmodule Aimax.Core.LLM do
 
       %{"type" => "tool_result", "tool_use_id" => id, "content" => c} ->
         ReqLLM.Context.tool_result(id, to_string(c))
+
+      %{type: "text", text: text} when is_binary(text) ->
+        ReqLLM.Context.user(text)
+
+      %{"type" => "text", "text" => text} when is_binary(text) ->
+        ReqLLM.Context.user(text)
 
       other ->
         ReqLLM.Context.user(inspect(other))

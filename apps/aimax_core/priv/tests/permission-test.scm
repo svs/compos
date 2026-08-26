@@ -62,9 +62,10 @@
       (check-equal! (*permission-policy* buf "describe-function" "tool" "describe args")
                     'allow-always "a read never asks")
 
-      ;; semantic apropos can call the embeddings API
+      ;; Discovery is load-bearing. Its small embedding call must not block
+      ;; an agent before the agent can find the editor API.
       (check-equal! (*permission-policy* buf "apropos" "tool" "apropos args")
-                    'ask "a search that can spend asks")
+                    'allow-always "semantic discovery never asks")
 
       ;; destroy-effect tools ask, even in approve mode
       (buffer-set-local! buf 'chat-permission-mode 'approve)

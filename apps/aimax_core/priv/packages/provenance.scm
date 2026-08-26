@@ -4,7 +4,8 @@
 ;;; buffer you were in, oldest first. The header names the recording state,
 ;;; the policy that set it, and the accepted head.
 ;;;
-;;;   RET   describe this revision: actor, source, operation, hash
+;;;   n / p preview the pointed revision
+;;;   RET   visit this revision: actor, source, operation, hash
 ;;;   g / q refresh . bury
 ;;;
 ;;; The rows come from (buffer-history NAME). This buffer only names them;
@@ -235,6 +236,22 @@
   (let ((rev (buffer-local buf 'revision)))
     (when rev (prov-render-revision! buf rev))))
 
+;; Moving in the log keeps focus in the list and updates the other window.
+;; RET selects that same window, so preview and visit show one durable view.
+(define (prov-show-revision! rev select?)
+  (let ((buf *revision-buffer*))
+    (buffer-create buf)
+    (buffer-set-local! buf 'revision rev)
+    (buffer-set-local! buf 'mode-name "revision-mode")
+    (prov-revision-setup! buf)
+    (let ((win (display-buffer-other-window! buf)))
+      (when (and select? win (window-exists? win))
+        (select-window! win)))))
+
+(define (prov-preview-revision! buf id)
+  (let ((rev (prov-plist id)))
+    (when rev (prov-show-revision! rev #f))))
+
 (mode-icon! "revision-mode" "")
 
 (define-mode "revision-mode" (lambda () (prov-revision-setup! (current-buffer))))
@@ -242,21 +259,18 @@
 (mode-doc! "revision-mode"
   "One revision of one buffer: its actor, its group, and every operation it holds, with the text each one inserted and deleted.")
 
-(define-command "buffer-log-describe" "Show this revision in full, with the text it moved"
+(define-command "buffer-log-describe" "Visit this revision in full, with the text it moved"
   (lambda ()
     (let* ((id (list-current *buffer-log-buffer*))
            (rev (and id (prov-plist id))))
       (if (not rev)
           (message "no revision on this line")
-          (let ((buf *revision-buffer*))
-            (buffer-create buf)
-            (buffer-set-local! buf 'revision rev)
-            (buffer-set-local! buf 'mode-name "revision-mode")
-            (prov-revision-setup! buf)
-            (display-buffer buf))))))
+          (prov-show-revision! rev #t)))))
 
 (define-command "buffer-log-refresh" "Redraw the revision list"
-  (lambda () (list-refresh! *buffer-log-buffer*)))
+  (lambda ()
+    (list-refresh! *buffer-log-buffer*)
+    (list-preview! *buffer-log-buffer*)))
 
 ;;; --- the hub -------------------------------------------------------------------
 
@@ -268,8 +282,8 @@
            "Every accepted revision of one buffer, oldest first. The header "
            "names the recording state, the policy that set it, and the "
            "accepted head. The text column shows what the change inserted, or "
-           "what it deleted when it only deleted. `RET` opens the whole "
-           "revision, with every operation and its text.")
+           "what it deleted when it only deleted. Moving previews the pointed "
+           "revision. `RET` visits it, with every operation and its text.")
     'buffer *buffer-log-buffer*
     'rows prov-ids
     'columns (lambda (buf)
@@ -282,8 +296,10 @@
     'total (lambda (buf) (length (list-source-entries buf)))
     'no-marks #t
     'local-filter #t
+    'preview prov-preview-revision!
     'footer (lambda (buf)
-              '(("RET" "show") ("/" "filter") ("g" "refresh") ("q" "quit")))
+              '(("n/p" "preview") ("RET" "visit") ("/" "filter")
+                ("g" "refresh") ("q" "quit")))
     'keys '(("RET" "buffer-log-describe")
             ("g" "buffer-log-refresh")
             ("q" "quit-window"))))
@@ -295,7 +311,8 @@
           (list-refresh! *buffer-log-buffer*)
           (begin
             (set! *buffer-log-target* buf)
-            (list-mode-show! "buffer-log-mode"))))))
+            (list-mode-show! "buffer-log-mode")
+            (list-preview! *buffer-log-buffer*))))))
 
 (global-set-key "C-x v l" "buffer-log")
 

@@ -23,6 +23,10 @@ defmodule Aimax.Core.Agent.Backend.ACP do
   def prompt(pid, text, _context), do: GenServer.call(pid, {:prompt, text})
 
   @impl Backend
+  def steer(pid, token, text, _display, epoch),
+    do: GenServer.call(pid, {:steer, token, text, epoch})
+
+  @impl Backend
   def cancel(pid), do: GenServer.call(pid, :cancel)
 
   @impl Backend
@@ -88,6 +92,28 @@ defmodule Aimax.Core.Agent.Backend.ACP do
        "prompt" => [%{"type" => "text", "text" => text}]
      })}
   end
+
+  def handle_call({:steer, token, text, epoch}, _from, %{session_id: sid} = state)
+      when is_binary(sid) do
+    pending = {:steer, token, epoch}
+
+    state =
+      request(
+        state,
+        "_session/steering",
+        %{
+          "sessionId" => sid,
+          "prompt" => [%{"type" => "text", "text" => text}],
+          "_meta" => %{"steering" => %{"idleBehavior" => "promptRequired"}}
+        },
+        pending
+      )
+
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:steer, _token, _text, _epoch}, _from, state),
+    do: {:reply, {:error, :no_session}, state}
 
   def handle_call(:cancel, _from, state) do
     state =
@@ -185,11 +211,13 @@ defmodule Aimax.Core.Agent.Backend.ACP do
 
   # --- json-rpc ---------------------------------------------------------------
 
-  defp request(state, method, params) do
+  defp request(state, method, params, pending_method \\ nil) do
     id = state.next_id
     frame = %{"jsonrpc" => "2.0", "id" => id, "method" => method, "params" => params}
     send_frame(state, frame)
-    %{state | next_id: id + 1, pending_rpc: Map.put(state.pending_rpc, id, method)}
+
+    pending_method = pending_method || method
+    %{state | next_id: id + 1, pending_rpc: Map.put(state.pending_rpc, id, pending_method)}
   end
 
   defp notify(state, method, params) do
@@ -228,7 +256,12 @@ defmodule Aimax.Core.Agent.Backend.ACP do
     state = %{state | pending_rpc: pending}
 
     case {method, frame} do
-      {"initialize", %{"result" => _}} ->
+      {"initialize", %{"result" => result}} ->
+        state =
+          if get_in(result, ["_meta", "steering", "supported"]) == true,
+            do: emit(state, type: :"steering-ready"),
+            else: state
+
         params = %{
           "cwd" => Map.get(state.config, "cwd", File.cwd!()),
           "mcpServers" =>
@@ -296,6 +329,18 @@ defmodule Aimax.Core.Agent.Backend.ACP do
 
       {"session/prompt", %{"result" => result}} ->
         emit(state, type: :"turn-end", "stop-reason": Map.get(result, "stopReason", "end_turn"))
+
+      {{:steer, token, epoch}, %{"result" => %{"outcome" => "promptRequired"}}} ->
+        emit(state, type: :"steering-fallback", token: token, epoch: epoch)
+
+      {{:steer, token, epoch}, %{"result" => %{"outcome" => outcome}}}
+      when outcome in ["injected", "startedNewTurn"] ->
+        emit(state, type: :"steering-accepted", token: token, epoch: epoch)
+
+      {{:steer, token, epoch}, %{"error" => _error}} ->
+        state
+        |> emit(type: :"steering-disabled")
+        |> emit(type: :"steering-fallback", token: token, epoch: epoch)
 
       {_, %{"error" => err}} ->
         state =

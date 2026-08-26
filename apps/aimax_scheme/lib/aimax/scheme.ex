@@ -85,6 +85,13 @@ defmodule Aimax.Scheme do
   def rebind_primitives(%__MODULE__{} = interp, extra \\ %{}) do
     fresh = Map.merge(Builtins.all(), extra)
 
+    # The caller is a host process outside `exec`, so its read cache is a
+    # leftover from whatever it evaluated last. The walk below reads every
+    # global name and writes back what it reads; a stale cached value would
+    # get written into the shared tier and undo a later definition. Read
+    # from ETS.
+    Env.forget_cached_reads()
+
     # Rebind by the primitive's OWN name, never by the variable's. A host
     # stdlib routinely wraps a primitive — `(define raw-buffer-create
     # buffer-create)` then `(define (buffer-create name) ...)` — so writing

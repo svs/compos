@@ -125,7 +125,42 @@
             (cons (key-resolve (cadr pl))
                   (key-resolve-plist (cddr pl))))))
 
+
+;; One spec, one resolution point, every module.
+;;
+;; FIELDS is a plist naming the spec keys that may hold a reference, and
+;; how each one carries it:
+;;
+;;   value  the value is a reference, or a list of parts to join
+;;   plist  the value is a plist of its own; every value resolves (env)
+;;   each   the value is a list; every element resolves on its own (args)
+;;
+;; A key that FIELDS does not name passes through untouched, so a spec
+;; never resolves twice and a value whose own text starts with "@" stays
+;; literal. Resolve once, in Scheme, at the moment the spec leaves for
+;; Elixir: no Elixir module holds a secret or knows where one lives.
+;;
+;;   (spec-resolve spec '(url value env plist args each))
+(define (spec-resolve spec fields)
+  (if (or (null? spec) (null? (cdr spec)))
+      '()
+      (let* ((k (car spec))
+             (v (cadr spec))
+             (kind (plist-get fields k)))
+        (cons k
+              (cons (cond ((equal? kind 'plist) (key-resolve-plist v))
+                          ((equal? kind 'each) (map key-resolve v))
+                          ((equal? kind 'value) (key-resolve v))
+                          (else v))
+                    (spec-resolve (cddr spec) fields))))))
+
 (category! 'secrets)
+(public! 'spec-resolve
+  "(spec-resolve SPEC FIELDS) — resolve the \"@VAR\" references in a config spec; FIELDS names each secret-bearing key as 'value, 'plist, or 'each")
+(public! 'key-resolve
+  "(key-resolve V) — \"@VAR\" becomes the secret; a list of parts joins after each resolves; anything else passes through")
+(public! 'key-resolve-plist
+  "(key-resolve-plist PL) — resolve every value of a plist, keys untouched")
 (public! 'key-forget!
   "(key-forget! VAR) — drop VAR from the key cache; the next lookup reads Doppler again")
 (public! 'key-cached-names

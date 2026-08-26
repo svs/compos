@@ -211,7 +211,8 @@
             ("k" "sockets-stop") ("g" "sockets-refresh")
             ("q" "quit-window"))))
 
-(define-command "sockets" "List every socket the daemon holds"
+(define-command "sockets"
+  "List every socket the daemon holds. To open a client connection to another program, use endpoint-register!"
   (lambda () (list-mode-show! "sockets-mode")))
 
 (global-set-key "C-c a s" "sockets")

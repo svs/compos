@@ -143,7 +143,17 @@
                (agent-revive! slug))
              (let ((input (string-trim (chat-input-text buf))))
                (if (equal? input "")
-                   (insert! "\n")
+                   ;; A blank RET commits the oldest queued message as
+                   ;; steering. Non-empty RET only adds to the queue.
+                   (let ((info (agent-info slug)))
+                     (if (and (plist-get info 'steering)
+                              (> (plist-get info 'queued) 0)
+                              (member (plist-get info 'status)
+                                      (list 'running 'needs_attention)))
+                         (if (agent-steer! slug)
+                             (message "steering the oldest queued message")
+                             (message "the queued message could not steer this turn"))
+                         (insert! "\n")))
                    (begin
                      ;; the message itself lands in the record when its
                      ;; turn starts; only the walk position resets here
@@ -152,17 +162,15 @@
                        (if (equal? result 'queued)
                            ;; mid-turn: the message moves up into the
                            ;; transcript at once, muted, and the input clears
-                           ;; for the next one. The direct lane steers it into
-                           ;; the running turn at the next tool round; other
-                           ;; backends run it when the turn ends.
+                           ;; for the next one. Blank RET can explicitly steer
+                           ;; the oldest row; otherwise it runs after this turn.
                            (begin
                              (agent-echo-queued! slug input)
                              (chat-clear-input! buf)
                              (end-of-buffer!)
                              (message
-                               (if (and (boundp (quote chat-stateless?))
-                                        (chat-stateless? buf))
-                                   "queued — the agent reads it at its next step"
+                               (if (plist-get (agent-info slug) 'steering)
+                                   "queued — press RET again to steer"
                                    "queued — runs when this turn ends")))
                            (begin
                              (chat-clear-input! buf)
@@ -281,16 +289,20 @@
           (message "no queued messages")
           (let* ((rev (reverse texts))
                  (text (car rev))
-                 (kept (reverse (cdr rev))))
-            (when (and slug (not (equal? (agent-status slug) 'dead)))
-              (agent-dequeue! slug text))
-            (buffer-set-local! buf 'chat-queued (if (null? kept) #f kept))
-            (let ((draft (chat-input-text buf)))
-              (chat-replace-input! buf
-                (if (equal? (string-trim draft) "")
-                    text
-                    (string-append text "\n" draft))))
-            (message "unqueued — the message is back in the input"))))))
+                 (kept (reverse (cdr rev)))
+                 (removed (if (and slug (not (equal? (agent-status slug) 'dead)))
+                              (agent-dequeue! slug text)
+                              #t)))
+            (if (not removed)
+                (message "already committed as steering")
+                (begin
+                  (buffer-set-local! buf 'chat-queued (if (null? kept) #f kept))
+                  (let ((draft (chat-input-text buf)))
+                    (chat-replace-input! buf
+                      (if (equal? (string-trim draft) "")
+                          text
+                          (string-append text "\n" draft))))
+                  (message "unqueued — the message is back in the input"))))))))
 
 (define (agent-claimed-slugs)
   (filter (lambda (s) s)

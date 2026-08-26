@@ -1,10 +1,9 @@
 defmodule Aimax.SteeringTest do
   @moduledoc """
-  Steering: text typed while a turn runs joins that turn at its next tool
-  round on the direct lane, instead of waiting for the turn to end. The
-  thread drains its prompt queue (`Agent.take_steering/1`), the tool loop
-  appends the text to the tool-result message, and the transcript echoes
-  the message at the drain point.
+  Steering is an explicit two-step interaction: non-empty RET queues text,
+  then RET on the blank input promotes the oldest queued message. Boundary
+  backends drain that promoted message at the next model-request boundary;
+  push backends inject it into the live turn.
   """
 
   use ExUnit.Case
@@ -43,8 +42,12 @@ defmodule Aimax.SteeringTest do
 
   defp eventually(fun, tries \\ 80) do
     cond do
-      fun.() -> true
-      tries == 0 -> false
+      fun.() ->
+        true
+
+      tries == 0 ->
+        false
+
       true ->
         Process.sleep(50)
         eventually(fun, tries - 1)
@@ -65,30 +68,6 @@ defmodule Aimax.SteeringTest do
     end)
 
     :ok
-  end
-
-  test "take_steering drains the queue into the running turn and echoes it" do
-    {slug, buf} = paused_stub_chat("go")
-
-    # the scripted turn pauses at the permission — the turn is running
-    assert eventually(fn -> match?(%{status: :needs_attention}, Agent.info(slug)) end)
-
-    # a prompt mid-turn queues instead of sending
-    assert Agent.prompt(slug, "steer me") == :queued
-    assert Agent.info(slug).queued == 1
-
-    # the drain empties the queue and echoes the message into the transcript
-    assert Agent.take_steering(slug) == [{"steer me", nil}]
-    assert Agent.info(slug).queued == 0
-    assert Agent.take_steering(slug) == []
-    assert eventually(fn -> Buffer.text(buf) =~ ">>> you: steer me" end)
-
-    # the turn ends with an empty queue: nothing runs twice
-    assert Agent.respond_permission(slug, 3, "opt-allow") == :ok
-    assert eventually(fn -> match?(%{status: :idle, queued: 0}, Agent.info(slug)) end)
-
-    # an idle thread has nothing to steer
-    assert Agent.take_steering(slug) == []
   end
 
   test "RET mid-turn moves the message into the transcript and frees the input" do
@@ -172,6 +151,7 @@ defmodule Aimax.SteeringTest do
   test "the tool loop appends steered text to the tool-result message" do
     Process.put(:zz_round, 0)
     Process.put(:zz_records, [])
+    Process.put(:zz_steered, false)
 
     Application.put_env(:aimax_core, :llm_chat_fun, fn req ->
       round = Process.get(:zz_round)
@@ -189,7 +169,8 @@ defmodule Aimax.SteeringTest do
            }}
 
         _ ->
-          {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "ok"}]}}
+          {:ok,
+           %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "ok"}]}}
       end
     end)
 
@@ -200,7 +181,14 @@ defmodule Aimax.SteeringTest do
                [],
                nil,
                tool_handler: fn _name, _input -> {:ok, "tool ran"} end,
-               steer: fn -> ["change course"] end,
+               steer: fn ->
+                 if Process.get(:zz_steered) do
+                   []
+                 else
+                   Process.put(:zz_steered, true)
+                   ["change course"]
+                 end
+               end,
                on_record: fn role, blocks ->
                  Process.put(:zz_records, Process.get(:zz_records) ++ [{role, blocks}])
                end
@@ -217,6 +205,39 @@ defmodule Aimax.SteeringTest do
     # the record keeps the merged turn, so a replay matches this wire
     assert {"user", ^content} =
              Enum.find(Process.get(:zz_records), &match?({"user", _}, &1))
+  end
+
+  test "the tool loop continues immediately when steering follows a normal response" do
+    Process.put(:zz_round, 0)
+    Process.put(:zz_steered, false)
+
+    Application.put_env(:aimax_core, :llm_chat_fun, fn req ->
+      round = Process.get(:zz_round)
+      Process.put(:zz_round, round + 1)
+      Process.put({:zz_normal_req, round}, req.messages)
+
+      text = if round == 0, do: "first answer", else: "revised answer"
+      {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => text}]}}
+    end)
+
+    assert {:ok, "revised answer", _usage, "end_turn"} =
+             Aimax.Core.LLM.run_tool_loop(
+               [%{role: "user", content: "go"}],
+               "sys",
+               [],
+               nil,
+               steer: fn ->
+                 if Process.get(:zz_steered) do
+                   []
+                 else
+                   Process.put(:zz_steered, true)
+                   ["change course"]
+                 end
+               end
+             )
+
+    %{role: "user", content: [%{"type" => "text", "text" => "change course"}]} =
+      Process.get({:zz_normal_req, 1}) |> List.last()
   end
 
   test "the direct lane steers a queued prompt into the running turn" do
@@ -245,9 +266,19 @@ defmodule Aimax.SteeringTest do
     assert eventually(fn -> match?(%{status: :idle}, Agent.info(slug)) end)
     assert Agent.prompt(slug, "start the work") == :sent
 
-    # round 1 is on the wire; the user types — it queues, not sends
+    # Round 1 is on the wire. A non-empty RET only queues the message.
     assert_receive {:llm_req, _messages, worker}, 10_000
-    assert Agent.prompt(slug, "actually, do less") == :queued
+    focus(buf)
+    type("actually, do less")
+    press(["RET"])
+    type("keep this for later")
+    press(["RET"])
+    assert eventually(fn -> Agent.info(slug).queued == 2 end)
+    assert queued_texts(buf) == ["actually, do less", "keep this for later"]
+
+    # RET on the now-blank input promotes only the oldest queued message.
+    press(["RET"])
+    assert Agent.info(slug).queued == 2
 
     send(
       worker,
@@ -266,6 +297,8 @@ defmodule Aimax.SteeringTest do
     %{role: "user", content: content} = List.last(messages)
     assert Enum.any?(content, &match?(%{type: "tool_result", tool_use_id: "t1"}, &1))
     assert Enum.any?(content, &match?(%{"type" => "text", "text" => "actually, do less"}, &1))
+    refute Enum.any?(content, &match?(%{"type" => "text", "text" => "keep this for later"}, &1))
+    assert eventually(fn -> queued_texts(buf) == ["keep this for later"] end)
 
     send(
       worker2,
@@ -273,9 +306,20 @@ defmodule Aimax.SteeringTest do
        {:ok, %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "done"}]}}}
     )
 
-    # the transcript echoes the steered message; the queue never re-runs it
+    # The steered message is not re-run. The second FIFO row starts normally
+    # only after the original turn finishes.
     assert eventually(fn -> Buffer.text(buf) =~ ">>> you: actually, do less" end)
+    assert_receive {:llm_req, followup, worker3}, 10_000
+    assert %{role: "user", content: "keep this for later"} = List.last(followup)
+
+    send(
+      worker3,
+      {:reply,
+       {:ok,
+        %{"stop_reason" => "end_turn", "content" => [%{"type" => "text", "text" => "all done"}]}}}
+    )
+
     assert eventually(fn -> match?(%{status: :idle, queued: 0}, Agent.info(slug)) end)
-    assert eventually(fn -> Buffer.text(buf) =~ "done" end)
+    assert eventually(fn -> Buffer.text(buf) =~ "all done" end)
   end
 end

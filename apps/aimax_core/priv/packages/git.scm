@@ -35,6 +35,28 @@
                            acc)))
               (else (loop (cdr es) acc))))))
 
+;; A merge conflict, by the same XY codes dired reads: both sides touched
+;; the path (AA/DD) or git left a "U" on either side.
+(define (git--conflict? entry)
+  (let ((index (diff--get entry 'index))
+        (worktree (diff--get entry 'worktree)))
+    (or (equal? index "U") (equal? worktree "U")
+        (and (equal? index "A") (equal? worktree "A"))
+        (and (equal? index "D") (equal? worktree "D")))))
+
+(define (git--conflict-paths status)
+  (if (diff--error? status)
+      '()
+      (map (lambda (e) (diff--get e 'path)) (filter git--conflict? status))))
+
+;; The diff itself only ever computes "added/deleted/renamed/modified" from
+;; a/b; "conflict" is a git word, so git says it here, the way git--untracked
+;; already says "untracked" — an override diff-mode's card status reads back.
+(define (git--mark-conflicts files paths)
+  (map (lambda (f)
+         (if (member (diff--name f) paths) (cons 'status (cons "conflict" f)) f))
+       files))
+
 ;; Newest first. Watching an agent work, the file it just touched is the one
 ;; you want at the top; a deleted file has no mtime and sorts last.
 (define (git--by-mtime root files)
@@ -58,7 +80,8 @@
                 (lambda (staged)
                   (git-log root git-log-count (or scope "")
                     (lambda (commits)
-                      (let* ((un (git--ok unstaged))
+                      (let* ((un (git--mark-conflicts (git--ok unstaged)
+                                                       (git--conflict-paths status)))
                              (st (git--ok staged))
                              (tracked (append (map diff--name un) (map diff--name st))))
                         (cb (list (list "Unstaged changes" (git--by-mtime root un))

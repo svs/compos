@@ -21,6 +21,10 @@ defmodule Aimax.Core.Agent.Backend do
     * `ready` — session established; the thread goes idle and pops its queue
     * `turn-failed` — the turn died with no result; idle without a turn-end
 
+  Steering negotiation and acknowledgements are control events too:
+  `steering-ready`, `steering-disabled`, `steering-accepted`, and
+  `steering-fallback` are consumed by the Agent rather than rendered.
+
   `prompt/3`'s context map carries what a backend may need to execute a turn
   against the transcript truth: `turns`, `system`, `tools`, `dispatcher`,
   `display`. The Agent assembles it at turn start and hands it over — a
@@ -30,6 +34,13 @@ defmodule Aimax.Core.Agent.Backend do
 
   @callback start(config :: map, owner :: pid) :: {:ok, handle :: term} | {:error, term}
   @callback prompt(handle :: term, text :: String.t(), context :: map) :: :ok
+  @callback steer(
+              handle :: term,
+              token :: non_neg_integer,
+              text :: String.t(),
+              display :: String.t() | nil,
+              epoch :: non_neg_integer
+            ) :: :ok | {:error, term}
   @callback cancel(handle :: term) :: :ok
   @callback close(handle :: term) :: :ok
   @callback set_model(handle :: term, model_id :: String.t()) :: :ok | {:error, term}
@@ -41,6 +52,12 @@ defmodule Aimax.Core.Agent.Backend do
               | :streaming
               | :session_modes
               | :reasoning_effort
+              # The backend can push input into a running turn. Stateful
+              # protocols acknowledge delivery through steering control events.
+              | :push_steering
+              # The backend's model loop pulls queued input at safe request
+              # boundaries. It does not need a transport callback.
+              | :boundary_steering
               # no server-side session: the whole conversation of record is
               # replayed on every turn. Three things follow, and Scheme reads
               # this rather than asking which connector it is — a new lane
@@ -61,7 +78,7 @@ defmodule Aimax.Core.Agent.Backend do
   """
   @callback set_mode(handle :: term, mode_id :: String.t()) :: :ok | {:error, term}
 
-  @optional_callbacks set_mode: 2, set_effort: 2, respond_question: 3
+  @optional_callbacks set_mode: 2, set_effort: 2, respond_question: 3, steer: 5
 
   @escaped :aimax_escaped_closures
 

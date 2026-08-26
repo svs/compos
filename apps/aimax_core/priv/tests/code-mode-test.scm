@@ -10,14 +10,53 @@
 
 (define t--cm-buf "zz-code-mode.ex")
 
-(deftest 'the-side-chat-prompt-handles-other-buffer-without-a-question
-  "two words a person says all day, and the call that answers them"
+(deftest 'agents-work-quietly-unless-the-user-asks-for-presentation
+  "the shared prompt keeps work out of the user's visible editor state"
+  (lambda ()
+    (for-each
+      (lambda (prompt)
+        (check-contains! prompt "QUIET EDITOR" "quiet is the default")
+        (check-contains! prompt "reachable through Scheme without making a buffer visible"
+                         "Scheme does not need display")
+        (check-contains! prompt "Do not select, switch to, or display a buffer merely to work"
+                         "work does not move the editor")
+        (check-contains! prompt "only when the user asks to see it"
+                         "display is for the user")
+        (check-contains! prompt "excludes display-effect operations by default"
+                         "discovery starts quiet")
+        (check-contains! prompt "Preserve focus" "presentation keeps the user's place"))
+      (list *llm-system* (hello)))))
+
+(deftest 'agent-discovery-hides-display-effects-until-presentation-is-explicit
+  "the tool filter hides visible movement without removing the public API"
+  (lambda ()
+    (let ((effects (plist-get
+                     (catalog-entry 'function "display-buffer-other-window!")
+                     'effects))
+          (quiet (llm-tool-call "apropos"
+                   (list 'query "display-buffer-other-window!")))
+          (present (llm-tool-call "apropos"
+                     (list 'query "display-buffer-other-window!"
+                           'include-display #t))))
+      (check-true! (member "display" effects) "the effect is checked-in metadata")
+      (check-false! (string-contains? quiet "display-buffer-other-window!")
+                    "default agent discovery is quiet")
+      (check-contains! present "display-buffer-other-window!"
+                       "an explicit presentation search opts in")
+      (check-contains! (value->string (apropos "display-buffer-other-window!"))
+                       "display-buffer-other-window!"
+                       "the public catalog remains complete"))))
+
+(deftest 'the-side-chat-prompt-distinguishes-display-from-buffer-history
+  "open in the other buffer means another window; switch means buffer history"
   (lambda ()
     (let* ((buf (test-buffer! "zz-code-mode.md" "text\n"))
            (prompt (chat-preamble-body buf (list buf))))
-      (check-contains! prompt "When the user says \"other buffer\"" "it names the words")
-      (check-contains! prompt "(run-command \"previous-buffer\") immediately" "and the call")
-      (check-contains! prompt "Do not ask a question." "and says not to ask")
+      (check-contains! prompt "\"open it in the other buffer\"" "it names the display request")
+      (check-contains! prompt "(display-buffer-other-window! NAME)" "and uses another window")
+      (check-contains! prompt "\"switch to the other buffer\"" "it names the history request")
+      (check-contains! prompt "(run-command \"previous-buffer\")" "and uses buffer history")
+      (check-contains! prompt "when the target is clear" "and does not ask needlessly")
       (buffer-kill! buf))))
 
 ;;; --- from here down, the tests turn code-mode on --------------------------------

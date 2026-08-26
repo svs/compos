@@ -10,11 +10,15 @@
 (domain! 'testing)
 (effects! '(read))
 
-(deftest 'other-buffer-maps-to-the-previous-buffer-command
-  "the words a person says, and the call that answers them"
+(deftest 'display-and-history-have-unambiguous-buffer-recipes
+  "display targets another window; switching targets buffer history"
   (lambda ()
+    (check-equal! (cadr (assoc "show a buffer in the other window" *recipes*))
+                  "(display-buffer-other-window! {{buffer}})" "the display recipe")
     (check-equal! (cadr (assoc "other buffer" *recipes*))
-                  "(run-command \"previous-buffer\")" "the recipe line")))
+                  "(display-buffer-other-window! {{buffer}})" "the common phrase")
+    (check-equal! (cadr (assoc "switch to the previous buffer" *recipes*))
+                  "(run-command \"previous-buffer\")" "the history recipe")))
 
 (deftest 'no-templated-recipe-is-missing-its-input-declarations
   "a line with braces and no inputs runs with the braces still in it"

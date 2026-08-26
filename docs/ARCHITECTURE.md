@@ -82,6 +82,19 @@ dispatch it to another worker.
   `telemetry.scm` owns the list mode, filtering, thresholds, and commands.
 - **TS** — Rustler NIF (`native/aimax_ts`): highlight, structural nav, queries.
 - **Proc** — PTY processes streaming into buffers (comint).
+- **Endpoint** — named long-lived connections to the world outside the
+  editor. Two transports (`exec` a subprocess, `tcp` a socket) and five
+  framings (line, delimiter, content-length, length, raw) — `length`
+  reads a binary length-prefixed protocol, so Elixir does the byte math
+  and Scheme receives whole messages. It carries frames and
+  holds no protocol: correlation is a serial ask queue with a sentinel, and
+  what a frame means is Scheme policy. A connector for a database, a REPL,
+  or a line-oriented service is a Scheme package over one endpoint, with no
+  new Elixir. LSP and MCP predate it and still hand-roll the same shape.
+- **WebServer** — named programmable inbound HTTP listeners. Each agent can
+  start and stop its own Bandit server on a configured address and port.
+  Elixir owns HTTP transport and parsing. One Scheme handler owns all routes
+  and returns the status, headers, and body for each request.
 - **Reactor** — debounced buffer-change rules (the agent trigger primitive).
 - **LLM** — one async primitive; provider routing; key resolution.
 - **Desktop** — snapshot/restore of buffers, every frame's window tree

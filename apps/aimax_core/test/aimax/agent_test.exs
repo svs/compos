@@ -184,6 +184,35 @@ defmodule Aimax.AgentTest do
     assert turn["effort"] == "high"
     inject(backend, %{"id" => turn_request, "result" => %{"turn" => %{"id" => "turn-1"}}})
 
+    assert :ok =
+             Aimax.Core.Agent.Backend.CodexAppServer.steer(
+               backend,
+               7,
+               "change direction",
+               nil,
+               3
+             )
+
+    assert_receive {:frame,
+                    %{
+                      "method" => "turn/steer",
+                      "id" => steer_request,
+                      "params" => steer
+                    }},
+                   1_000
+
+    assert steer == %{
+             "threadId" => "thread-1",
+             "expectedTurnId" => "turn-1",
+             "input" => [%{"type" => "text", "text" => "change direction"}]
+           }
+
+    inject(backend, %{"id" => steer_request, "result" => %{"turnId" => "turn-1"}})
+    assert_receive {:backend_event, steer_event}, 1_000
+    assert Backend.event_type(steer_event) == "steering-accepted"
+    assert Backend.plist_get(steer_event, "token") == 7
+    assert Backend.plist_get(steer_event, "epoch") == 3
+
     inject(backend, %{
       "method" => "item/agentMessage/delta",
       "params" => %{"itemId" => "msg-1", "delta" => "Hi"}
@@ -288,6 +317,42 @@ defmodule Aimax.AgentTest do
     assert_receive {:frame, %{"method" => "turn/start", "params" => second_turn}}, 1_000
     assert second_turn["input"] == [%{"type" => "text", "text" => "second"}]
     assert second_turn["effort"] == "high"
+  end
+
+  test "cancelling Codex before turn start discards backend-held steering" do
+    {:ok, backend} =
+      Aimax.Core.Agent.Backend.CodexAppServer.start(
+        %{"cmd" => "fake", "cwd" => File.cwd!(), "model" => "gpt-5.5"},
+        self()
+      )
+
+    on_exit(fn -> Aimax.Core.Agent.Backend.CodexAppServer.close(backend) end)
+
+    assert_receive {:transport_open, ^backend}, 1_000
+    assert_receive {:transport_cmd, "fake"}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => init_id}}, 1_000
+    inject(backend, %{"id" => init_id, "result" => %{}})
+    assert_receive {:frame, %{"method" => "initialized"}}, 1_000
+    assert_receive {:frame, %{"method" => "model/list"}}, 1_000
+
+    assert :ok =
+             Aimax.Core.Agent.Backend.CodexAppServer.prompt(backend, "start", %{
+               system: "system",
+               tools: []
+             })
+
+    assert_receive {:frame, %{"method" => "thread/start", "id" => thread_request}}, 1_000
+    assert :ok = Aimax.Core.Agent.Backend.CodexAppServer.steer(backend, 1, "stale", nil, 1)
+    assert :ok = Aimax.Core.Agent.Backend.CodexAppServer.cancel(backend)
+
+    inject(backend, %{
+      "id" => thread_request,
+      "result" => %{"thread" => %{"id" => "thread-cancelled"}}
+    })
+
+    assert_receive {:frame, %{"method" => "turn/start", "id" => turn_request}}, 1_000
+    inject(backend, %{"id" => turn_request, "result" => %{"turn" => %{"id" => "turn-late"}}})
+    refute_receive {:frame, %{"method" => "turn/steer"}}, 100
   end
 
   # the codex lane names MCP tools server/tool and carries their arguments
@@ -484,6 +549,26 @@ defmodule Aimax.AgentTest do
     {"a1", "*chat:a1*", agent}
   end
 
+  defp boot_steering_acp(session_id) do
+    {:ok, _} = Session.eval(~s[(execute* "" '(permission-mode ask))])
+    assert_receive {:transport_open, agent}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => iid,
+      "result" => %{
+        "protocolVersion" => 1,
+        "_meta" => %{"steering" => %{"supported" => true}}
+      }
+    })
+
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+    inject(agent, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => session_id}})
+    assert eventually(fn -> Agent.info("a1").steering end)
+    {"a1", agent}
+  end
+
   defp focus(buf) do
     {:ok, _} = Session.eval(~s[(begin (switch-to-buffer! "#{buf}") (end-of-buffer!))])
   end
@@ -660,7 +745,7 @@ defmodule Aimax.AgentTest do
     assert binary_part(text, body_start, byte_size("split window")) == "split window"
   end
 
-  test "typing at the marker + RET steers; queued while running; queue pops on turn end" do
+  test "typing at the marker queues while running and pops on turn end" do
     {slug, buf, agent} = boot("")
     focus(buf)
 
@@ -696,6 +781,293 @@ defmodule Aimax.AgentTest do
              parts = String.split(Buffer.text(buf), "second message")
              length(parts) == 2
            end)
+  end
+
+  test "Claude ACP queues on non-empty RET and steers the oldest row on blank RET" do
+    {:ok, _} = Session.eval(~s[(execute* "" '(permission-mode ask))])
+    assert_receive {:transport_open, agent}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => iid,
+      "result" => %{
+        "protocolVersion" => 1,
+        "_meta" => %{"steering" => %{"supported" => true}}
+      }
+    })
+
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+    inject(agent, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "sess-s"}})
+
+    slug = "a1"
+    buf = "*chat:a1*"
+    assert eventually(fn -> Agent.info(slug).steering end)
+    focus(buf)
+
+    type("start")
+    press(["RET"])
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => prompt_id}}, 1_000
+
+    type("change direction")
+    press(["RET"])
+    assert eventually(fn -> Agent.info(slug).queued == 1 end)
+    assert Buffer.get_local(buf, "chat-queued") == ["change direction"]
+    refute_receive {:frame, %{"method" => "_session/steering"}}, 100
+
+    press(["RET"])
+
+    assert_receive {:frame,
+                    %{
+                      "method" => "_session/steering",
+                      "id" => steer_id,
+                      "params" => steer
+                    }},
+                   1_000
+
+    assert steer["sessionId"] == "sess-s"
+    assert steer["prompt"] == [%{"type" => "text", "text" => "change direction"}]
+    assert get_in(steer, ["_meta", "steering", "idleBehavior"]) == "promptRequired"
+
+    # Once blank RET commits the row, unqueue cannot put a duplicate draft
+    # back under the user's cursor while the transport owns delivery.
+    press(["C-c", "C-d"])
+    assert Buffer.get_local(buf, "chat-queued") == ["change direction"]
+    assert {:ok, ~s{""}} = Session.eval(~s{(chat-input-text "#{buf}")})
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => steer_id,
+      "result" => %{"outcome" => "injected"}
+    })
+
+    assert eventually(fn -> Agent.info(slug).queued == 0 end)
+    assert eventually(fn -> Buffer.get_local(buf, "chat-queued") in [nil, false, []] end)
+    assert eventually(fn -> Buffer.text(buf) =~ ">>> you: change direction" end)
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => prompt_id,
+      "result" => %{"stopReason" => "end_turn"}
+    })
+
+    assert eventually(fn -> Agent.info(slug).status == :idle end)
+    refute_receive {:frame, %{"method" => "session/prompt"}}, 100
+  end
+
+  test "Claude ACP preserves the queued row when steering requires a new prompt" do
+    {:ok, _} = Session.eval(~s[(execute* "" '(permission-mode ask))])
+    assert_receive {:transport_open, agent}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => iid,
+      "result" => %{
+        "protocolVersion" => 1,
+        "_meta" => %{"steering" => %{"supported" => true}}
+      }
+    })
+
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+    inject(agent, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "sess-f"}})
+
+    slug = "a1"
+    buf = "*chat:a1*"
+    assert eventually(fn -> Agent.info(slug).steering end)
+    focus(buf)
+
+    type("start")
+    press(["RET"])
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => prompt_id}}, 1_000
+
+    type("try to steer")
+    press(["RET"])
+    press(["RET"])
+
+    assert_receive {:frame, %{"method" => "_session/steering", "id" => steer_id}}, 1_000
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => steer_id,
+      "result" => %{"outcome" => "promptRequired"}
+    })
+
+    # ACP declined live injection, so the message remains visibly queued and
+    # must run exactly once as the next ordinary prompt.
+    assert eventually(fn -> Agent.info(slug).queued == 1 end)
+    assert Buffer.get_local(buf, "chat-queued") == ["try to steer"]
+    refute Buffer.text(buf) =~ ">>> you: try to steer"
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => prompt_id,
+      "result" => %{"stopReason" => "end_turn"}
+    })
+
+    assert_receive {:frame,
+                    %{
+                      "method" => "session/prompt",
+                      "id" => fallback_id,
+                      "params" => %{"prompt" => [%{"text" => "try to steer"}]}
+                    }},
+                   1_000
+
+    assert eventually(fn -> Buffer.text(buf) =~ ">>> you: try to steer" end)
+    assert eventually(fn -> Agent.info(slug).queued == 0 end)
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => fallback_id,
+      "result" => %{"stopReason" => "end_turn"}
+    })
+
+    assert eventually(fn -> Agent.info(slug).status == :idle end)
+    refute_receive {:frame, %{"method" => "session/prompt"}}, 100
+  end
+
+  test "Claude ACP completion waits for out-of-order steering fallbacks and preserves FIFO" do
+    {:ok, _} = Session.eval(~s[(execute* "" '(permission-mode ask))])
+    assert_receive {:transport_open, agent}, 1_000
+    assert_receive {:frame, %{"method" => "initialize", "id" => iid}}, 1_000
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => iid,
+      "result" => %{
+        "protocolVersion" => 1,
+        "_meta" => %{"steering" => %{"supported" => true}}
+      }
+    })
+
+    assert_receive {:frame, %{"method" => "session/new", "id" => nid}}, 1_000
+    inject(agent, %{"jsonrpc" => "2.0", "id" => nid, "result" => %{"sessionId" => "sess-r"}})
+
+    slug = "a1"
+    assert eventually(fn -> Agent.info(slug).steering end)
+    assert Agent.prompt(slug, "start") == :sent
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => prompt_id}}, 1_000
+
+    assert Agent.prompt(slug, "first") == :queued
+    assert Agent.steer_next(slug) == :sent
+    assert_receive {:frame, %{"method" => "_session/steering", "id" => first_id}}, 1_000
+
+    assert Agent.prompt(slug, "second") == :queued
+    assert Agent.steer_next(slug) == :sent
+    assert_receive {:frame, %{"method" => "_session/steering", "id" => second_id}}, 1_000
+
+    # Completion wins the wire race, then the second fallback arrives first.
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => prompt_id,
+      "result" => %{"stopReason" => "end_turn"}
+    })
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => second_id,
+      "result" => %{"outcome" => "promptRequired"}
+    })
+
+    refute_receive {:frame, %{"method" => "session/prompt"}}, 100
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => first_id,
+      "result" => %{"outcome" => "promptRequired"}
+    })
+
+    assert_receive {:frame,
+                    %{
+                      "method" => "session/prompt",
+                      "id" => first_prompt,
+                      "params" => %{"prompt" => [%{"text" => "first"}]}
+                    }},
+                   1_000
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => first_prompt,
+      "result" => %{"stopReason" => "end_turn"}
+    })
+
+    assert_receive {:frame,
+                    %{
+                      "method" => "session/prompt",
+                      "id" => second_prompt,
+                      "params" => %{"prompt" => [%{"text" => "second"}]}
+                    }},
+                   1_000
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => second_prompt,
+      "result" => %{"stopReason" => "end_turn"}
+    })
+
+    assert eventually(fn -> match?(%{status: :idle, queued: 0}, Agent.info(slug)) end)
+  end
+
+  test "cancel finishes a turn whose completion is waiting on steering acknowledgement" do
+    {slug, agent} = boot_steering_acp("sess-cancel")
+    assert Agent.prompt(slug, "start") == :sent
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => prompt_id}}, 1_000
+
+    assert Agent.prompt(slug, "committed") == :queued
+    assert Agent.steer_next(slug) == :sent
+    assert_receive {:frame, %{"method" => "_session/steering", "id" => steer_id}}, 1_000
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => prompt_id,
+      "result" => %{"stopReason" => "end_turn"}
+    })
+
+    assert eventually(fn -> Agent.info(slug).status == :running end)
+    assert Agent.cancel(slug) == :ok
+    assert eventually(fn -> match?(%{status: :idle, queued: 0}, Agent.info(slug)) end)
+    refute_receive {:frame, %{"method" => "session/prompt"}}, 100
+
+    # A late transport answer has no ownership left and cannot resurrect it.
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => steer_id,
+      "result" => %{"outcome" => "promptRequired"}
+    })
+
+    assert eventually(fn -> match?(%{status: :idle, queued: 0}, Agent.info(slug)) end)
+  end
+
+  test "a missing steering acknowledgement falls back after completed turn" do
+    {slug, agent} = boot_steering_acp("sess-timeout")
+    assert Agent.prompt(slug, "start") == :sent
+    assert_receive {:frame, %{"method" => "session/prompt", "id" => prompt_id}}, 1_000
+
+    assert Agent.prompt(slug, "must survive") == :queued
+    assert Agent.steer_next(slug) == :sent
+    assert_receive {:frame, %{"method" => "_session/steering"}}, 1_000
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => prompt_id,
+      "result" => %{"stopReason" => "end_turn"}
+    })
+
+    assert_receive {:frame,
+                    %{
+                      "method" => "session/prompt",
+                      "id" => fallback_id,
+                      "params" => %{"prompt" => [%{"text" => "must survive"}]}
+                    }},
+                   3_000
+
+    inject(agent, %{
+      "jsonrpc" => "2.0",
+      "id" => fallback_id,
+      "result" => %{"stopReason" => "end_turn"}
+    })
+
+    assert eventually(fn -> match?(%{status: :idle, queued: 0}, Agent.info(slug)) end)
   end
 
   test "Codex App Server is visible; deprecated Codex names remain hidden compatibility connectors" do

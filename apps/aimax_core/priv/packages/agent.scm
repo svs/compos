@@ -11,6 +11,8 @@
 ;; A nested load changes catalog attribution. Restore this entry point's name.
 (package! 'agent)
 
+;; event kinds that count as the turn having produced something visible —
+;; a turn-end after none of them is a silent turn
 (define *agent-output-kinds* '(chunk thought tool-call tool-update plan question error))
 
 (define (agent-handle-event slug e)
@@ -297,13 +299,13 @@
       (agents-modeline-refresh!)
       (agents-refresh!))))
 
+;; Branching questions are not permission requests. Their answer goes back
+;; to the model as the result of its `ask` tool call.
 (define (agent-answer-question! slug id answer)
   (agent-question-respond! slug id answer))
 
 (category! 'chat)
-
 (effects! '(write))
-
 (public! 'agent-answer-question!
   "(agent-answer-question! SLUG ID ANSWER) — answer the agent's pending branching question")
 

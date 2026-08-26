@@ -20,7 +20,7 @@
 
 ;; EFFECTS is the tool's side-effect declaration for the permission
 ;; policy: a list with one level (pure, read, write, destroy) plus
-;; modifiers (external, execute, spend). The catalog entry carries it,
+;; modifiers (external, execute, spend, display). The catalog entry carries it,
 ;; and *permission-policy* reads it from there.
 (define (define-tool! name description params handler &optional effects)
   (set! *llm-tools*
@@ -51,12 +51,28 @@
          (effects (and tool (custom--plist-get (cadr tool) 'effects))))
     (and (pair? effects) (member (car effects) '(pure read)) #t)))
 
+;; Agents work through the Scheme object model. Visible editor state belongs
+;; to the user, so showing a buffer is an explicit presentation action.
+(define *agent-quiet-prompt*
+  (string-append
+    "QUIET EDITOR — work through names, not visible state. The complete "
+    "editor is reachable through Scheme without making a buffer visible. "
+    "Use APIs that take a buffer name for reading, editing, saving, and "
+    "inspection. Do not select, switch to, or display a buffer merely to "
+    "work on it. Do not move the user's selected window, visible buffers, "
+    "point, mark, or scroll position. You can mention a useful buffer by "
+    "name. Display a buffer only when the user asks to see it or the result "
+    "needs presentation. Display is a presentation action, never a "
+    "prerequisite for work. Preserve focus unless the user asks to move "
+    "there. Agent discovery excludes display-effect operations by default. "
+    "Include them only for an explicit presentation request. "))
+
 ;; the standing context every tool-enabled request carries — the "skill"
 (define *llm-system*
   (string-append
     "You are the assistant inside ai-max, an Emacs-style editor scripted in "
     "Scheme, and you act on the live editor through eval-scheme — one tool, "
-    "the whole editor. Appearance and behavior are controlled by "
+    "the whole editor. " *agent-quiet-prompt* "Appearance and behavior are controlled by "
     "customizable variables and faces; changes made through customize "
     "persist across restarts. To change how something looks: discover the "
     "knob with (customize-apropos \"font\"), set it with "
@@ -69,8 +85,8 @@
     "append to any buffer — the usual way to add text; (buffer-create NAME); "
     "(buffer-replace! NAME OLD NEW) exact unique replacement in a live "
     "buffer; (find-file PATH) loads a file without displaying it; "
-    "(switch-to-buffer! NAME) changes only the tool's internal current "
-    "buffer; (with-current-buffer NAME THUNK) scopes that internal switch; "
+    "(with-current-buffer NAME THUNK) scopes an operation that lacks a named "
+    "buffer argument and restores its context; "
     "(current-buffer); "
     "(insert! TEXT) at point in the current buffer; (message TEXT) echoes; "
     "(run-command \"name\") runs any M-x command. File buffers are named by "
@@ -78,7 +94,7 @@
     "M-x commands, keybindings, settings, recipes, modes and UI components "
     "by WORDS — (apropos \"split window\"), not a regex. Filter with kind, "
     "package, namespace, domain, or effect. Effects are pure/read/write/"
-    "destroy/spend/execute/external: prefer pure/read while investigating "
+    "destroy/spend/execute/external/display: prefer pure/read while investigating "
     "and inspect consequential calls before using them. apropos-categories "
     "shows the shape of the surface first. Everything "
     "outside the public API is private implementation detail; reach for it "
@@ -110,7 +126,7 @@
     "actually requires an ongoing process. "
     "When you WRITE Scheme, stamp every public section with (domain! 'NAME) "
     "and (effects! '(LEVEL MODIFIERS...)). LEVEL is pure, read, write, "
-    "destroy, or unknown; modifiers are external, execute, and spend. Never "
+    "destroy, or unknown; modifiers are external, execute, spend, and display. Never "
     "use read as a guess. The loader stamps package and namespace. Before "
     "writing a Scheme package, query apropos for existing APIs and components. "
     "Before choosing or defining UI, read docs/COMPONENTS.md and reuse a catalogued "
@@ -632,12 +648,16 @@
         (package (apropos--filter filters 'package))
         (namespace (apropos--filter filters 'namespace))
         (domain (apropos--filter filters 'domain))
-        (effect (apropos--filter filters 'effect)))
+        (effect (apropos--filter filters 'effect))
+        (exclude-effect (apropos--filter filters 'exclude-effect)))
     (and (or (not kind) (equal? (plist-get hit 'kind) (catalog--string kind)))
          (or (not package) (equal? (plist-get hit 'package) (catalog--string package)))
          (or (not namespace) (equal? (plist-get hit 'namespace) (catalog--string namespace)))
          (or (not domain) (equal? (plist-get hit 'domain) (catalog--string domain)))
-         (or (not effect) (member (catalog--string effect) (or (plist-get hit 'effects) '()))))))
+         (or (not effect) (member (catalog--string effect) (or (plist-get hit 'effects) '())))
+         (or (not exclude-effect)
+             (not (member (catalog--string exclude-effect)
+                          (or (plist-get hit 'effects) '())))))))
 
 ;; Exact names and literal recipes remain ahead of vector results.
 (define (apropos--rank hits query)
@@ -742,7 +762,8 @@
     "the cost commands. This is the supported surface and the place to "
     "start. Nothing matched? You get the closest names instead. Pass "
     "kind/package/namespace/domain/effect narrow the catalog. Pass "
-    "category as a compatibility alias for domain, or scope \"all\" to include "
+    "Display-effect operations stay hidden unless include-display is true. "
+    "Pass category as a compatibility alias for domain, or scope \"all\" to include "
     "the internal primitives, one-line docs only, which may change "
     "without notice.")
   (list (list 'query "string" "intent words, e.g. \"open a file\" or \"remove document\"")
@@ -750,7 +771,8 @@
         (list 'package "string" "owning load unit" 'optional)
         (list 'namespace "string" "stable public vocabulary" 'optional)
         (list 'domain "string" "subject area, e.g. windows or buffers" 'optional)
-        (list 'effect "string" "pure, read, write, destroy, spend, execute, or external" 'optional)
+        (list 'effect "string" "pure, read, write, destroy, spend, execute, external, or display" 'optional)
+        (list 'include-display "boolean" "include operations that move visible editor state" 'optional)
         (list 'category "string" "deprecated alias for domain" 'optional)
         (list 'scope "string" "\"public\" (default) or \"all\"" 'optional))
   (lambda (args)
@@ -761,13 +783,15 @@
           (namespace (custom--plist-get args 'namespace))
           (domain (custom--plist-get args 'domain))
           (effect (custom--plist-get args 'effect))
+          (include-display (custom--plist-get args 'include-display))
           (scope (or (custom--plist-get args 'scope) "public")))
       (let ((filters
               (append (if kind (list 'kind kind) '())
                       (if package (list 'package package) '())
                       (if namespace (list 'namespace namespace) '())
                       (if (or domain cat) (list 'domain (or domain cat)) '())
-                      (if effect (list 'effect effect) '()))))
+                      (if effect (list 'effect effect) '())
+                      (if include-display '() (list 'exclude-effect 'display)))))
         (value->string
           (if (equal? scope "all")
               (let ((words (apropos--words q)))
@@ -821,6 +845,7 @@
   (string-append
     "ai-max — an Emacs-style editor on the BEAM, scripted in this Scheme. "
     "Everything the GUI can do, you can do: eval is the whole API.\n\n"
+    *agent-quiet-prompt* "\n\n"
     "DISCOVERY — one call:\n"
     "  (apropos \"words\")        search functions, commands, keys and "
     "settings, recipes, modes and components by WORDS, not regex.\n"

@@ -41,7 +41,7 @@
 ;;; converts with line-start-position, which is O(log n) on the rope.
 ;;;
 ;;; Keys: n/p hunk · N/P file · TAB fold · RET visit · g refresh
-;;;       w watch · q quit · C-c C-v the plain unified view
+;;;       w watch · m merge conflicts only · q quit · C-c C-v the plain unified view
 
 ;;; --- backends ------------------------------------------------------------------
 
@@ -360,16 +360,42 @@
 (define (diff--reblock! buf)
   (buffer-set-local! buf 'render-blocks (diff--blocks buf)))
 
+;;; A merge conflict is a card whose status came back "conflict" (git.scm
+;;; tags it). The bar above the cards names how many there are and doubles
+;;; as the button: click it, or press `m`, to see only those and nothing
+;;; else — the sections, the other cards, the commit log all drop out.
+
+(define (diff--conflict-cards layout)
+  (filter (lambda (c) (equal? (diff--get c 'status) "conflict")) layout))
+
+(define (diff--has-conflicts? layout) (pair? (diff--conflict-cards layout)))
+
+(define (diff--conflict-bar buf layout)
+  (let ((n (length (diff--conflict-cards layout))))
+    (if (= n 0)
+        '()
+        (list (list 'tag "div" 'class "diff-conflict-bar" 'click "diff-conflict-toggle"
+                    'segs (list (list "diff-conflict-icon" "⚠")
+                                (list "diff-conflict-label"
+                                      (string-append (number->string n) " merge conflict"
+                                                     (if (= n 1) "" "s")))
+                                (list "diff-conflict-hint"
+                                      (if (buffer-local buf 'diff-conflict-only)
+                                          "show all" "show conflicts only"))))))))
+
 (define (diff--blocks buf)
   (let* ((layout (diff-layout buf))
-         (commits (or (buffer-local buf 'diff-commits) '()))
+         (only? (and (buffer-local buf 'diff-conflict-only) (diff--has-conflicts? layout)))
+         (visible (if only? (diff--conflict-cards layout) layout))
+         (commits (if only? '() (or (buffer-local buf 'diff-commits) '())))
          (msg (diff--preamble buf)))
     (append
-      (if (equal? msg "") '() (list (list 'tag "pre" 'class "diff-message" 'text msg)))
-      (if (and (null? layout) (null? commits))
+      (diff--conflict-bar buf layout)
+      (if (or only? (equal? msg "")) '() (list (list 'tag "pre" 'class "diff-message" 'text msg)))
+      (if (and (null? visible) (null? commits))
           (list (component 'ui/empty '(text "nothing to show" class "diff-empty")))
           '())
-      (diff--section-blocks buf layout)
+      (diff--section-blocks buf visible)
       (diff--commit-blocks commits))))
 
 ;; everything above the first card or section header: a revision's own
@@ -879,12 +905,27 @@
     (diff--refold! buf)
     (diff--reblock! buf)))
 
+;; the top bar's button: narrow the view to conflicted files, or back. A
+;; buffer with nothing in conflict has no bar to click, so `m` says so.
+(define (diff-toggle-conflicts! buf)
+  (if (diff--has-conflicts? (diff-layout buf))
+      (begin
+        (buffer-set-local! buf 'diff-conflict-only (not (buffer-local buf 'diff-conflict-only)))
+        (diff--reblock! buf))
+      (message "no merge conflicts")))
+
+(define-command "diff-toggle-conflicts" "Show only merge-conflicted files, or show everything again"
+  (lambda () (diff-toggle-conflicts! (current-buffer))))
+
 ;; the click registry (components.scm) fans the one click primitive out to
 ;; every blocks mode. The id is ours only in a diff buffer.
 (on-block-click! 'diff
   (lambda (buf id)
     (and (buffer-local buf 'diff-backend)
-         (begin (diff-toggle-card! buf id) #t))))
+         (begin (if (equal? id "diff-conflict-toggle")
+                    (diff-toggle-conflicts! buf)
+                    (diff-toggle-card! buf id))
+                #t))))
 
 ;;; --- watching -----------------------------------------------------------------
 
@@ -951,6 +992,7 @@
   (local-set-key "RET" "diff-visit")
   (local-set-key "g" "diff-revert")
   (local-set-key "w" "diff-toggle-watch")
+  (local-set-key "m" "diff-toggle-conflicts")
   (local-set-key "q" "quit-window")
   (local-set-key "C-c C-v" "diff-toggle-view"))
 
@@ -979,7 +1021,7 @@
       (diff-refresh buf))))
 
 (mode-doc! "diff-mode"
-  "The changes you have not committed, as cards. `n` and `p` step over hunks, `N` and `P` over files. `TAB` folds a card and `RET` opens the file at that line. `g` re-reads the diff, and `w` follows the tree.")
+  "The changes you have not committed, as cards. `n` and `p` step over hunks, `N` and `P` over files. `TAB` folds a card and `RET` opens the file at that line. `g` re-reads the diff, and `w` follows the tree. A merge in conflict shows a bar above the cards; `m`, or clicking it, narrows the view to only those files.")
 
 ;;; --- the stylesheet -----------------------------------------------------------
 ;;; The mode ships its own CSS; the client renders structure and knows none
@@ -987,6 +1029,10 @@
 
 (define-style! 'diff "
 .diff-message { font-family: var(--font-mono); font-size: 12px; line-height: 1.55; margin: 0 0 12px; padding: 10px 12px; border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--hl-line-bg, rgba(0,0,0,0.03)); border-left: 2px solid var(--diff-file-fg, rgba(0,0,0,0.2)); }
+.diff-conflict-bar { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 8px 12px; margin: 0 0 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 12px; background: var(--diff-conflict-bg, rgba(168, 58, 43, 0.12)); border: 1px solid var(--alert-fg, #a83a2b); }
+.diff-conflict-icon { color: var(--alert-fg, #a83a2b); }
+.diff-conflict-label { font-weight: 600; color: var(--alert-fg, #a83a2b); }
+.diff-conflict-hint { margin-left: auto; color: var(--dim-fg, #8a857a); font-size: 11px; }
 .diff-section { font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim-fg, #8a857a); padding: 12px 2px 6px; margin-top: 4px; border-bottom: 1px solid var(--border-bg, rgba(0,0,0,0.10)); }
 .blocks-scroll > .diff-section:first-child { margin-top: 0; padding-top: 2px; }
 .diff-log { font-family: var(--font-mono); font-size: 12px; padding-top: 6px; }

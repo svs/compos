@@ -1,4 +1,6 @@
 defmodule Aimax.Scheme.Builtins do
+  import Bitwise
+
   alias Aimax.Scheme.Text
 
   @moduledoc """
@@ -154,6 +156,39 @@ defmodule Aimax.Scheme.Builtins do
         # snap both ends down to codepoint boundaries (Text says why)
         Text.slice(s, from, to)
       end,
+      # reading and writing single bytes: a binary protocol arrives as
+      # bytes, and Scheme has no character type to decode them with. These
+      # are the accessors a length prefix or a message tag needs.
+      "string-byte" => fn [s, i] ->
+        if i < 0 or i >= byte_size(s) do
+          false
+        else
+          :binary.at(s, i)
+        end
+      end,
+      "string-bytes" => fn
+        [s] -> :binary.bin_to_list(s)
+        [s, from, to] -> bytes_range(s, from, to)
+      end,
+      "bytes->string" => fn [bytes] ->
+        Enum.each(bytes, fn b ->
+          unless is_integer(b) and b >= 0 and b <= 255 do
+            raise Eval.Error, message: "bytes->string: #{inspect(b)} is not a byte"
+          end
+        end)
+
+        :binary.list_to_bin(bytes)
+      end,
+      # An unsigned integer out of a byte range, and back. Big-endian by
+      # default: every network protocol writes its lengths that way.
+      "bytes->integer" => fn
+        [s, from, width] -> decode_int(s, from, width, "big")
+        [s, from, width, endian] -> decode_int(s, from, width, endian)
+      end,
+      "integer->bytes" => fn
+        [n, width] -> encode_int(n, width, "big")
+        [n, width, endian] -> encode_int(n, width, endian)
+      end,
       # binary-safe transport encoding (MCP proxy, anything crossing RPC
       # where printed-string escaping would be ambiguous)
       "base64-encode" => fn [s] -> Base.encode64(s) end,
@@ -299,6 +334,11 @@ defmodule Aimax.Scheme.Builtins do
       "string-repeat" => "(string-repeat S N) — return S repeated N times.",
       "string-byte-length" => "(string-byte-length S) — return the length of S in bytes.",
       "substring-bytes" => "(substring-bytes S FROM TO) — return the byte range FROM..TO, snapped to codepoint boundaries.",
+      "string-byte" => "(string-byte S I) — return byte I of S as an integer 0..255, or #f past the end.",
+      "string-bytes" => "(string-bytes S [FROM TO]) — return the bytes of S, or of a byte range, as integers.",
+      "bytes->string" => "(bytes->string BYTES) — build a string from a list of integers 0..255.",
+      "bytes->integer" => "(bytes->integer S FROM WIDTH [ENDIAN]) — read an unsigned integer of WIDTH bytes at FROM; ENDIAN is \"big\" (default) or \"little\".",
+      "integer->bytes" => "(integer->bytes N WIDTH [ENDIAN]) — write N as WIDTH bytes; ENDIAN is \"big\" (default) or \"little\".",
       "base64-encode" => "(base64-encode S) — return S encoded as base64.",
       "base64-decode" => "(base64-decode S) — decode the base64 string S; error on invalid input.",
       "string-split" => "(string-split S SEP) — split S on the separator SEP into a list.",
@@ -332,6 +372,37 @@ defmodule Aimax.Scheme.Builtins do
 
   # compiled-regex cache: org refontification runs the same handful of
   # patterns on every change, so compile each pattern exactly once
+  defp bytes_range(s, from, to) do
+    if from < 0 or to < from or to > byte_size(s) do
+      raise Eval.Error, message: "string-bytes: range #{from}..#{to} out of 0..#{byte_size(s)}"
+    end
+
+    s |> :binary.part(from, to - from) |> :binary.bin_to_list()
+  end
+
+  defp decode_int(s, from, width, endian) do
+    if from < 0 or width < 1 or from + width > byte_size(s) do
+      raise Eval.Error,
+        message: "bytes->integer: #{from}+#{width} out of 0..#{byte_size(s)}"
+    end
+
+    :binary.decode_unsigned(:binary.part(s, from, width), endian_of(endian))
+  end
+
+  defp encode_int(n, width, endian) do
+    if width < 1 or n < 0 or n >= 1 <<< (8 * width) do
+      raise Eval.Error, message: "integer->bytes: #{n} does not fit in #{width} bytes"
+    end
+
+    case endian_of(endian) do
+      :big -> <<n::big-size(width)-unit(8)>>
+      :little -> <<n::little-size(width)-unit(8)>>
+    end
+  end
+
+  defp endian_of("little"), do: :little
+  defp endian_of(_), do: :big
+
   defp re!(pat) do
     key = {:aimax_scheme_re, pat}
 

@@ -43,6 +43,68 @@ defmodule Aimax.SchemeTest do
     assert run("(fold + 0 '(1 2 3 4))") == 10
   end
 
+  test "string escapes reach the bytes a protocol needs" do
+    # \n and \t were already here; a line protocol needs CR, and a binary
+    # one needs every byte. Without these a package cannot speak CRLF.
+    assert run(~S|"a\nb"|) == "a\nb"
+    assert run(~S|"a\tb"|) == "a\tb"
+    assert run(~S|"a\rb"|) == "a\rb"
+    assert run(~S|"a\r\nb"|) == "a\r\nb"
+    assert run(~S|"\\"|) == "\\"
+    assert run(~S|"a\"b"|) == ~s|a"b|
+  end
+
+  test "the hex escape yields one raw byte, NUL and high bytes included" do
+    assert run(~S|"\x41;"|) == "A"
+    assert run(~S|"\x00;"|) == <<0>>
+    assert run(~S|"\xff;"|) == <<255>>
+    assert run(~S|"\x00;Q\xff;"|) == <<0, ?Q, 255>>
+    # uppercase digits and a codepoint above one byte
+    assert run(~S|"\x0D;\x0A;"|) == "\r\n"
+    assert run(~S|"\x3bb;"|) == "λ"
+  end
+
+  test "a hex escape without its terminator is an error, not a silent literal" do
+    # Reader errors raise rather than returning {:error, _} — see the
+    # "errors are returned, not raised" test, which fails on the same edge.
+    assert_raise Aimax.Scheme.Reader.Error, fn ->
+      Scheme.eval_string(Scheme.new(), ~S|"\x41"|)
+    end
+
+    assert_raise Aimax.Scheme.Reader.Error, fn ->
+      Scheme.eval_string(Scheme.new(), ~S|"\xzz;"|)
+    end
+  end
+
+  test "byte accessors read and build a binary protocol message" do
+    assert run(~S|(string-byte "ABC" 0)|) == 65
+    assert run(~S|(string-byte "ABC" 2)|) == 67
+    assert run(~S|(string-byte "ABC" 9)|) == false
+    assert run(~S|(string-bytes "AB")|) == [65, 66]
+    assert run(~S|(string-bytes "ABCD" 1 3)|) == [66, 67]
+    assert run(~S|(bytes->string (list 65 0 255))|) == <<65, 0, 255>>
+  end
+
+  test "integers cross the byte boundary both ways" do
+    # a PostgreSQL Int32 length: big-endian by default
+    assert run(~S|(bytes->integer "\x00;\x00;\x00;\x12;" 0 4)|) == 18
+    assert run(~S|(bytes->integer "\x12;\x00;\x00;\x00;" 0 4 "little")|) == 18
+    assert run(~S|(integer->bytes 18 4)|) == <<0, 0, 0, 18>>
+    assert run(~S|(integer->bytes 18 4 "little")|) == <<18, 0, 0, 0>>
+    # the round trip a length prefix actually needs
+    assert run(~S|(bytes->integer (integer->bytes 99999 4) 0 4)|) == 99_999
+  end
+
+  test "a byte operation that cannot fit says so" do
+    # eval errors come back as {:error, msg}; the run/1 helper matches :ok
+    assert {:error, m1} = Scheme.eval_string(Scheme.new(), ~S|(integer->bytes 256 1)|)
+    assert m1 =~ "does not fit"
+    assert {:error, m2} = Scheme.eval_string(Scheme.new(), ~S|(bytes->integer "ab" 0 4)|)
+    assert m2 =~ "out of"
+    assert {:error, m3} = Scheme.eval_string(Scheme.new(), ~S|(bytes->string (list 300))|)
+    assert m3 =~ "not a byte"
+  end
+
   test "strings and symbols" do
     assert run(~s{(string-append "a" "b" "c")}) == "abc"
     assert run(~s{(string-contains? "hello" "ell")}) == true

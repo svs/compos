@@ -50,7 +50,7 @@
     (if (< (frame-cols) window-layout-compact-cols) 'bottom 'right)))
 
 (catalog-meta! 'command "window-layout-adaptive"
-  'domain 'windows 'effects '(write))
+  'domain 'windows 'effects '(write display))
 
 (effects! '(read))
 (public! 'window-layout-for-width

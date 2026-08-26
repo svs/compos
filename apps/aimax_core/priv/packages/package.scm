@@ -106,6 +106,21 @@
             (scm (string-append (aimax-priv-dir) "/packages"))
             (scm (package-dir)))))
 
+;; The force-reload door. A primitive is an anonymous fun the session
+;; captured from an Elixir module at boot. Recompiling that module purges
+;; the fun, and the next Scheme call that reaches it raises "points to an
+;; old version of the code". One dead command, or a dead editor. The dev
+;; watcher rebinds after every recompile, so this is the manual door: for a
+;; daemon that is already wedged, and for a recompile the watcher missed.
+;;
+;; This does NOT re-evaluate Scheme files. Use `reload-file` for that. A
+;; blanket re-run of every top-level form re-runs boot side effects, and
+;; `reload-files!` is not re-entrant.
+(define-command "reload-scheme" "Rebind every Elixir primitive in the live session"
+  (lambda ()
+    (refresh-primitives!)
+    (message "primitives rebound")))
+
 (define-command "reload-file" "Reload a Scheme package into the live session"
   (lambda ()
     (let* ((buf (current-buffer))

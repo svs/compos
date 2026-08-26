@@ -33,6 +33,7 @@ defmodule Aimax.BufferLogTest do
     on_exit(fn ->
       Editor.set_window_buffer("*scratch*")
       Aimax.Core.kill_buffer("*buffer-log*")
+      Aimax.Core.kill_buffer("*revision*")
       Aimax.Core.kill_buffer(name)
     end)
 
@@ -96,6 +97,23 @@ defmodule Aimax.BufferLogTest do
     assert log_text() =~ "and cheese"
   end
 
+  test "the pointed row previews its revision without leaving the log", %{name: name} do
+    :ok = Buffer.insert_at(name, 4, "!", source: {:agent, "run-7"})
+    eval!(~s{(switch-to-buffer! "#{name}")})
+
+    press(["C-x", "v", "l"])
+
+    assert Editor.current_buffer() == "*buffer-log*"
+    assert Buffer.text("*revision*") =~ "actor    system:buffer"
+    assert eval!(~s{(window-showing "*revision*")}) != "#f"
+
+    press("n")
+
+    assert Editor.current_buffer() == "*buffer-log*"
+    assert Buffer.text("*revision*") =~ "actor    agent:run-7"
+    assert Buffer.text("*revision*") =~ "+ !"
+  end
+
   test "a deletion reads as the bytes it removed", %{name: name} do
     :ok = Buffer.delete_range(name, 0, 4, source: :user)
     eval!(~s{(switch-to-buffer! "#{name}")})
@@ -113,7 +131,7 @@ defmodule Aimax.BufferLogTest do
     assert log_text() =~ "\\nsecond line"
   end
 
-  test "RET opens the whole revision with every operation and its text", %{name: name} do
+  test "RET visits the whole revision with every operation and its text", %{name: name} do
     :ok = Buffer.insert_at(name, 4, "!", source: {:agent, "run-7"})
     eval!(~s{(switch-to-buffer! "#{name}")})
     press(["C-x", "v", "l"])
@@ -123,6 +141,7 @@ defmodule Aimax.BufferLogTest do
     eval!(~s{(list-goto-index! "*buffer-log*" 1)})
     press("RET")
 
+    assert Editor.current_buffer() == "*revision*"
     text = Buffer.text("*revision*")
     assert text =~ "actor    agent:run-7"
     assert text =~ "@4"

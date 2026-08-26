@@ -16,7 +16,7 @@ defmodule Aimax.Ui.AppServer do
 
   use Plug.Router
 
-  alias Aimax.Core.Buffer
+  alias Aimax.Core.{Buffer, Session}
 
   plug(:match)
   plug(:dispatch)
@@ -29,6 +29,17 @@ defmodule Aimax.Ui.AppServer do
     port = Application.get_env(:aimax_ui, :app_port) || 4005
     name = URI.encode(buffer, &URI.char_unreserved?/1)
     "http://127.0.0.1:#{port}/a/#{token()}/b/#{name}/?v=#{gen}"
+  end
+
+  get "/a/:tok/b/:buf/_aimax/spreadsheet" do
+    spreadsheet_request(conn, tok, buf, "read", "")
+  end
+
+  put "/a/:tok/b/:buf/_aimax/spreadsheet" do
+    case read_request_body(conn) do
+      {:ok, body, conn} -> spreadsheet_request(conn, tok, buf, "write", body)
+      {:error, conn} -> send_resp(conn, 413, ~s({"error":"workbook is too large"}))
+    end
   end
 
   get "/a/:tok/b/:buf/*rest" do
@@ -120,6 +131,40 @@ defmodule Aimax.Ui.AppServer do
     |> put_resp_header("cache-control", "no-store")
     |> put_resp_content_type(type)
     |> send_resp(200, body)
+  end
+
+  # An app cannot write files from its isolated origin. This narrow bridge
+  # sends workbook requests to Scheme, where the selected backend owns policy.
+  defp spreadsheet_request(conn, tok, buffer, method, body) do
+    with true <- Plug.Crypto.secure_compare(tok, token()),
+         true <- app_buffer?(buffer),
+         {:ok, [status, response]} when is_integer(status) and is_binary(response) <-
+           Session.call_named(
+             "spreadsheet-app-request",
+             [buffer, method, body],
+             nil,
+             30_000,
+             {:spreadsheet, buffer}
+           ) do
+      conn
+      |> put_resp_header("cache-control", "no-store")
+      |> put_resp_content_type("application/json")
+      |> send_resp(status, response)
+    else
+      _ -> send_resp(conn, 404, ~s({"error":"no spreadsheet"}))
+    end
+  end
+
+  defp read_request_body(conn, acc \\ "") do
+    case Plug.Conn.read_body(conn,
+           length: 20_000_000,
+           read_length: 1_000_000,
+           read_timeout: 15_000
+         ) do
+      {:ok, body, conn} -> {:ok, acc <> body, conn}
+      {:more, body, conn} -> read_request_body(conn, acc <> body)
+      {:error, _} -> {:error, conn}
+    end
   end
 
   # The app is a document in another origin, so the editor cannot reach into

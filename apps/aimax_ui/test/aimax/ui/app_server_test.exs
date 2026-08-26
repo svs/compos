@@ -32,6 +32,9 @@ defmodule Aimax.Ui.AppServerTest do
 
   defp get(path), do: AppServer.call(conn(:get, path), AppServer.init([]))
 
+  defp put(path, body),
+    do: AppServer.call(conn(:put, path, body), AppServer.init([]))
+
   defp url(buffer, rest), do: "/a/#{AppServer.token()}/b/#{URI.encode(buffer, &URI.char_unreserved?/1)}#{rest}"
 
   test "serves the buffer's live text as the app document", %{buffer: b} do
@@ -99,5 +102,32 @@ defmodule Aimax.Ui.AppServerTest do
     assert AppServer.app_url(b, 7) =~ "http://127.0.0.1:"
     assert AppServer.app_url(b, 7) =~ AppServer.token()
     assert String.ends_with?(AppServer.app_url(b, 7), "/?v=7")
+  end
+
+  test "the spreadsheet bridge reads and writes through Scheme", %{dir: dir} do
+    path = Path.join(dir, "workbook.sheet.json")
+    {:ok, sheet} = Aimax.Core.Session.call_named("spreadsheet-open!", [path])
+    endpoint = url(sheet, "/_aimax/spreadsheet")
+
+    read = get(endpoint)
+    assert read.status == 200
+    assert Jason.decode!(read.resp_body)["version"] == 1
+
+    workbook = %{
+      "version" => 1,
+      "sheets" => [%{"name" => "Saved", "data" => [["=1+1"]]}]
+    }
+
+    write = put(endpoint, Jason.encode!(workbook))
+    assert write.status == 200
+    assert Jason.decode!(write.resp_body) == %{"ok" => true}
+    [saved_sheet] = Jason.decode!(File.read!(path))["sheets"]
+    assert saved_sheet["name"] == "Saved"
+
+    Aimax.Core.kill_buffer(sheet)
+  end
+
+  test "the spreadsheet bridge refuses an ordinary app", %{buffer: b} do
+    assert get(url(b, "/_aimax/spreadsheet")).status == 404
   end
 end

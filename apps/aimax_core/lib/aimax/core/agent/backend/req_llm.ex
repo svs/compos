@@ -64,7 +64,8 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
     do: GenServer.call(pid, {:respond_permission, rpc_id, option_id})
 
   @impl Backend
-  def capabilities, do: [:models, :streaming, :reasoning_effort, :stateless, :metered]
+  def capabilities,
+    do: [:models, :streaming, :reasoning_effort, :boundary_steering, :stateless, :metered]
 
   # --- server -----------------------------------------------------------------
 
@@ -443,7 +444,9 @@ defmodule Aimax.Core.Agent.Backend.ReqLLM do
         end
 
     case fun do
-      nil -> :ok
+      nil ->
+        :ok
+
       fun ->
         Session.call_fn(
           fun,

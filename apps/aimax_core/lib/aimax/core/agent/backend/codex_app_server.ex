@@ -20,6 +20,10 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
   def prompt(pid, text, context), do: GenServer.call(pid, {:prompt, text, context})
 
   @impl Backend
+  def steer(pid, token, text, _display, epoch),
+    do: GenServer.call(pid, {:steer, token, text, epoch})
+
+  @impl Backend
   def cancel(pid), do: GenServer.call(pid, :cancel)
 
   @impl Backend
@@ -45,7 +49,7 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
     do: GenServer.call(pid, {:respond_question, rpc_id, answer})
 
   @impl Backend
-  def capabilities, do: [:models, :streaming, :reasoning_effort]
+  def capabilities, do: [:models, :streaming, :reasoning_effort, :push_steering]
 
   @impl GenServer
   def init({config, owner}) do
@@ -67,6 +71,7 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
       thread_id: nil,
       turn_id: nil,
       pending_prompt: nil,
+      pending_steers: [],
       model: string_value(Map.get(config, "model")),
       effort: normalize_effort(Map.get(config, "effort")),
       models: []
@@ -102,12 +107,25 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
     {:reply, :ok, start_turn(state, text)}
   end
 
+  def handle_call({:steer, token, text, epoch}, _from, state) do
+    steer = {token, text, epoch}
+
+    state =
+      if is_binary(state.thread_id) and is_binary(state.turn_id),
+        do: send_steer(state, steer),
+        else: %{state | pending_steers: state.pending_steers ++ [steer]}
+
+    {:reply, :ok, state}
+  end
+
   def handle_call(:cancel, _from, %{thread_id: tid, turn_id: turn_id} = state)
       when is_binary(tid) and is_binary(turn_id) do
+    state = %{state | pending_steers: []}
     {:reply, :ok, request(state, "turn/interrupt", %{"threadId" => tid, "turnId" => turn_id})}
   end
 
-  def handle_call(:cancel, _from, state), do: {:reply, :ok, state}
+  def handle_call(:cancel, _from, state),
+    do: {:reply, :ok, %{state | pending_steers: []}}
 
   # Developer instructions contain the exact runtime model identity and are
   # fixed when a Codex thread starts. Let the shared chat switcher reattach
@@ -194,14 +212,16 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
 
   # App Server uses JSON-RPC semantics but intentionally omits the
   # `jsonrpc: "2.0"` header on the wire.
-  defp request(state, method, params) do
+  defp request(state, method, params, pending_method \\ nil) do
     id = state.next_id
     send_frame(state, %{"id" => id, "method" => method, "params" => params})
+
+    pending_method = pending_method || method
 
     %{
       state
       | next_id: id + 1,
-        pending_rpc: Map.put(state.pending_rpc, id, method)
+        pending_rpc: Map.put(state.pending_rpc, id, pending_method)
     }
   end
 
@@ -259,12 +279,19 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
         end
 
       {"turn/start", %{"result" => %{"turn" => %{"id" => turn_id}}}} ->
-        %{state | turn_id: turn_id}
+        state |> Map.put(:turn_id, turn_id) |> flush_steers()
 
       {"turn/start", %{"error" => error}} ->
         state
+        |> fallback_pending_steers()
         |> emit(type: :error, text: error_message("turn/start", error))
         |> emit(type: :"turn-failed")
+
+      {{:steer, token, epoch}, %{"result" => %{"turnId" => _turn_id}}} ->
+        emit(state, type: :"steering-accepted", token: token, epoch: epoch)
+
+      {{:steer, token, epoch}, %{"error" => _error}} ->
+        emit(state, type: :"steering-fallback", token: token, epoch: epoch)
 
       {_, %{"error" => error}} ->
         emit(state, type: :error, text: error_message(method, error))
@@ -312,7 +339,9 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
   defp handle_frame(state, %{"method" => method, "params" => params}) do
     case method do
       "turn/started" ->
-        %{state | turn_id: get_in(params, ["turn", "id"]) || Map.get(params, "turnId")}
+        state
+        |> Map.put(:turn_id, get_in(params, ["turn", "id"]) || Map.get(params, "turnId"))
+        |> flush_steers()
 
       "turn/completed" ->
         turn = Map.get(params, "turn", %{})
@@ -368,6 +397,37 @@ defmodule Aimax.Core.Agent.Backend.CodexAppServer do
   end
 
   defp handle_frame(state, _frame), do: state
+
+  defp send_steer(state, {token, text, epoch}) do
+    request(
+      state,
+      "turn/steer",
+      %{
+        "threadId" => state.thread_id,
+        "expectedTurnId" => state.turn_id,
+        "input" => [%{"type" => "text", "text" => text}]
+      },
+      {:steer, token, epoch}
+    )
+  end
+
+  defp flush_steers(%{thread_id: tid, turn_id: turn_id} = state)
+       when is_binary(tid) and is_binary(turn_id) do
+    steers = state.pending_steers
+    state = %{state | pending_steers: []}
+    Enum.reduce(steers, state, &send_steer(&2, &1))
+  end
+
+  defp flush_steers(state), do: state
+
+  defp fallback_pending_steers(state) do
+    state =
+      Enum.reduce(state.pending_steers, state, fn {token, _text, epoch}, acc ->
+        emit(acc, type: :"steering-fallback", token: token, epoch: epoch)
+      end)
+
+    %{state | pending_steers: []}
+  end
 
   defp thread_start_params(config, model, context) do
     %{

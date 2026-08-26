@@ -437,7 +437,7 @@
 (mode-doc! "writing-layout"
   "The explicit writing workspace: group, companion scratch, panes, and LLM configuration.")
 
-(catalog-meta! 'command "writing-layout" 'domain 'windows 'effects '(write))
+(catalog-meta! 'command "writing-layout" 'domain 'windows 'effects '(write display))
 (catalog-meta! 'command "write" 'domain 'writing 'effects '(write))
 
 (effects! '(read))

@@ -203,6 +203,23 @@ defmodule Aimax.HotloadTest do
       assert {:ok, _} = Session.eval("(command-names)")
     end
 
+    test "a rebind keeps the stdlib's alias and wrapper over a Session primitive" do
+      :persistent_term.put({Session, :primitive_stamp}, :stale)
+      assert :ok = Session.refresh_primitives_if_stale()
+
+      # editor.scm aliases define-command, then wraps the same name in
+      # Scheme. The alias must hold a live fun, and the wrapper must still
+      # be the wrapper. The wrapper returns the name; the raw one returns
+      # void, so the printed value says which one ran.
+      assert {:ok, ~s{"zz-rebind-probe"}} =
+               Session.eval(~s{(define-command "zz-rebind-probe" "probe" (lambda () 1))}),
+             "the rebind put the raw primitive back over editor.scm's wrapper"
+
+      assert {:ok, ""} =
+               Session.eval(~s{(define-command--raw "zz-rebind-raw" (lambda () 1))}),
+             "the alias of a Session primitive kept a purged fun"
+    end
+
     test "a Scheme error is reported, and the daemon stays up" do
       server = start_hotload()
       path = scm("zz-hotload-bad.scm", "(this-name-does-not-exist)\n")

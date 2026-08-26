@@ -31,6 +31,7 @@ defmodule Aimax.Core.LLMSession do
   end
 
   def send(id, text, display \\ nil), do: Agent.prompt(id, text, display)
+  def steer_next(id), do: Agent.steer_next(id)
   def dequeue(id, text), do: Agent.dequeue(id, text)
   def cancel(id), do: Agent.cancel(id)
   def set_model(id, model), do: Agent.set_model(id, model)

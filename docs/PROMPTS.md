@@ -49,6 +49,19 @@ The two lanes must express the same capabilities even though their protocols
 have different lifecycles. A prompt change is incomplete until both lanes are
 considered and their focused tests pass.
 
+## Quiet editor policy
+
+`*agent-quiet-prompt*` in `priv/packages/tools.scm` owns the default visible-state
+policy. The direct lane receives it through `aimax-tools`. ACP sessions receive
+it through `hello` in the `aimax-primer` fragment.
+
+Agents work on named buffers without displaying or selecting them. Display is
+only for an explicit presentation request. The catalog marks visible-state
+operations with the `display` effect. The agent-facing `apropos` tool excludes
+that effect by default and accepts `include-display` for presentation work.
+Public Scheme `apropos` remains complete. Tool enforcement can use the same
+checked-in effect later without changing this prompt contract.
+
 ## Stability and volatile context
 
 System text and tool definitions form the reusable prompt-cache prefix. Keep

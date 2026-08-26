@@ -4867,7 +4867,7 @@
         (lambda () (window-tree-set! saved))))))
 
 (for-each
-  (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write)))
+  (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
   '("window-layout" "window-layout-columns" "window-layout-rows"
     "window-layout-grid" "window-layout-main-right" "window-layout-main-bottom"))
 
@@ -4904,7 +4904,7 @@
   (lambda ()
     (minibuffer-read "Popup buffer: " (buffer-candidates)
       (lambda (name) (display-buffer-popup! name)))))
-(catalog-meta! 'command "popup-buffer" 'domain 'windows 'effects '(write))
+(catalog-meta! 'command "popup-buffer" 'domain 'windows 'effects '(write display))
 
 ;; popper-toggle-type: the popup you want to keep stops floating and
 ;; becomes an ordinary window, in the place it already occupies.
@@ -6069,8 +6069,12 @@
     "(buffer-text \"NAME\"), and change any buffer with "
     "(buffer-replace! \"NAME\" OLD NEW) — exact unique old string -> new; "
     "it edits the live buffer, never the file. Make the smallest edit "
-    "that does the job. When the user says \"other buffer\", run "
-    "(run-command \"previous-buffer\") immediately. Do not ask a question."))
+    "that does the job. Treat \"buffer\" and \"window\" precisely. When the "
+    "user says \"open it in the other buffer\" or \"show it in the other "
+    "buffer\", show the named target with (display-buffer-other-window! NAME). "
+    "This call preserves the selected window. When the user says \"switch to "
+    "the other buffer\", run (run-command \"previous-buffer\"). Do not ask a "
+    "question when the target is clear."))
 
 (define (chat-preamble buf)
   (let* ((g (buffer-group buf))
@@ -6876,7 +6880,7 @@
   (lambda () (winner-next!)))
 
 (for-each
-  (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write)))
+  (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
   '("winner-previous" "winner-next" "winner-undo" "winner-redo"))
 
 ;; the window mutators the keyboard reaches (C-x 1/2/3/0, popups) push
@@ -8367,16 +8371,20 @@
 (public! 'buffer-set-local! "(buffer-set-local! NAME KEY VALUE) — locals persist with the desktop")
 (effects! '(read))
 (public! 'current-buffer "Name of the buffer point is in")
-(effects! '(write))
+(effects! '(write display))
 (public! 'switch-to-buffer! "(switch-to-buffer! NAME) — show in the active window")
 (public! 'visit "(visit PATH [GROUP]) — open a file; GROUP joins it to that context; /ssh:HOST:/PATH opens over ssh")
 (public! 'find-file-read "(find-file-read [GROUP]) — prompt for a file and join it to GROUP; no GROUP keeps it ungrouped")
+(for-each
+  (lambda (name) (catalog-meta! 'function name 'domain 'buffers 'effects '(write display)))
+  '("switch-to-buffer!" "visit" "find-file-read"))
 (domain! 'unknown)
 (effects! '(read))
 (public! 'buffer-link "(buffer-link [NAME] [LINE]) -> a URL that opens the buffer here; no NAME means this buffer at point")
 (public! 'buffer-raw-link "(buffer-raw-link [NAME]) -> a URL that serves the buffer text as plain text")
 (effects! '(write))
 (public! 'open-buffer-link! "(open-buffer-link! NAME LINE) — show the buffer a link names; LINE may be #f")
+(catalog-meta! 'function "open-buffer-link!" 'domain 'buffers 'effects '(write display))
 (effects! '(unknown))
 (public! 'tail-open "(tail-open PATH) — follow a file with tail -F, local or /ssh: remote")
 (public! 'sh-quote "(sh-quote S) — S as one safe single-quoted word for a shell command")
@@ -8404,6 +8412,10 @@
 (public! 'symbol-at-point-in "(symbol-at-point-in CHARS) — the name around point over the alphabet CHARS, or #f")
 (public! 'end-of-buffer! "Move point to the end")
 (public! 'beginning-of-buffer! "Move point to the start")
+(for-each
+  (lambda (name) (catalog-meta! 'function name 'domain 'editing 'effects '(write display)))
+  '("goto-char!" "set-mb-redirect!" "insert!" "delete-char!" "set-mark!"
+    "end-of-buffer!" "beginning-of-buffer!"))
 
 (category! 'windows)
 (domain! 'windows)
@@ -8414,7 +8426,7 @@
 (public! 'window-buffer "(window-buffer ID) — the buffer that window shows, or #f")
 (public! 'other-window-id "(other-window-id ME) — any window that is not ME, or #f")
 (public! 'active-window "Id of the selected window")
-(effects! '(write))
+(effects! '(write display))
 (public! 'select-window! "(select-window! ID)")
 (public! 'split-window! "(split-window! 'h|'v [RATIO]) — ratio = first pane's share")
 (public! 'delete-window-id! "(delete-window-id! ID)")
@@ -8424,15 +8436,22 @@
 (public! 'display-buffer-popup!
   "(display-buffer-popup! NAME [SIDE SIZE]) — force NAME into a temporary one-third popup; compact frames use the bottom")
 (public! 'display-buffer-other-window! "(display-buffer-other-window! NAME) — show NAME without leaving this window; picks the window at display time (reuse → other → split)")
-(public! 'add-display-rule!
-  "(add-display-rule! SUBSTRING 'popup|'same) — popup floats over the right of the frame; one per frame, reused")
-(public! 'define-mode-layout!
-  "(define-mode-layout! MODE '(h|v RATIO PANE ...)) — the frame arrangement that mode asks for; a PANE is 'self, a buffer-local name, or a buffer name")
 (public! 'apply-layout! "(apply-layout! ANCHOR SPEC) — arrange the frame by SPEC, ANCHOR keeping focus")
 (public! 'tile-windows!
   "(tile-windows! ALGORITHM BUFFERS) — arrange names with columns, rows, grid, main-right, main-left, main-bottom, or main-top")
 (public! 'tile-visible-windows!
   "(tile-visible-windows! ALGORITHM) — rearrange visible work windows with a named tiler")
+(for-each
+  (lambda (name) (catalog-meta! 'function name 'domain 'windows 'effects '(write display)))
+  '("select-window!" "split-window!" "delete-window-id!"
+    "delete-other-windows!" "other-window!" "display-buffer"
+    "display-buffer-popup!" "display-buffer-other-window!" "apply-layout!"
+    "tile-windows!" "tile-visible-windows!"))
+(effects! '(write))
+(public! 'add-display-rule!
+  "(add-display-rule! SUBSTRING 'popup|'same) — set display policy without showing a buffer")
+(public! 'define-mode-layout!
+  "(define-mode-layout! MODE '(h|v RATIO PANE ...)) — set a mode layout without applying it")
 (effects! '(read))
 (public! 'buffer-layout "(buffer-layout NAME) — the layout NAME's modes declare, or #f")
 (effects! '(write))
@@ -8447,7 +8466,7 @@
 (catalog-meta! 'function "debounce!" 'domain 'interaction 'effects '(write execute))
 (public! 'y-or-n "(y-or-n PROMPT YES &optional NO) — a one-key question; y runs YES, n and C-g run NO")
 (catalog-meta! 'function "y-or-n" 'domain 'interaction 'effects '(read))
-(catalog-meta! 'command "reset-layout" 'domain 'windows 'effects '(write))
+(catalog-meta! 'command "reset-layout" 'domain 'windows 'effects '(write display))
 (catalog-meta! 'function "define-mode-layout!" 'domain 'windows 'effects '(write))
 (public! 'read-file-name "(read-file-name PROMPT K) — prompt with filename completion from default-directory; K gets the typed path")
 (public! 'abbreviate-file-name "(abbreviate-file-name PATH) — PATH with the home directory written as ~")
@@ -8458,7 +8477,7 @@
 (category! 'commands)
 (public! 'define-command "(define-command NAME [DOC] THUNK) — register an M-x command; DOC shows in M-x")
 (public! 'domain! "(domain! 'NAME) — stamp following catalog declarations with their subject area")
-(public! 'effects! "(effects! '(LEVEL MODIFIERS...)) — stamp following declarations; LEVEL is pure/read/write/destroy/unknown")
+(public! 'effects! "(effects! '(LEVEL MODIFIERS...)) — LEVEL is pure/read/write/destroy/unknown; modifiers include external/execute/spend/display")
 (public! 'namespace! "(namespace! 'NAME) — set the public vocabulary for following declarations")
 (public! 'catalog-meta! "(catalog-meta! KIND NAME 'domain D 'effects '(E ...)) — override catalog discovery metadata")
 (public! 'run-command "(run-command NAME) — invoke any M-x command")

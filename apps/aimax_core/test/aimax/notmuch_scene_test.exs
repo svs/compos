@@ -23,6 +23,8 @@ defmodule Aimax.NotmuchSceneTest do
       (set! nm--run
         (lambda (args)
           (cond
+            ((string-prefix? "search --output=tags" args)
+             "unread\ninbox\n")
             ((string-prefix? "search" args)
              "[{\"thread\":\"zz-thread\",\"timestamp\":1786065644,\"date_relative\":\"Today\",\"matched\":1,\"total\":1,\"authors\":\"Alice\",\"subject\":\"Role routed mail\",\"query\":[\"id:zz-message\"],\"tags\":[\"inbox\"]}]")
             ((string-prefix? "show" args)
@@ -72,5 +74,21 @@ defmodule Aimax.NotmuchSceneTest do
     assert eval!(~S|(window-buffer (scene-window 'index))|) == ~s{"*notmuch*"}
     assert eval!(~S|(buffer-text (scene-buffer 'show))|) =~ "The routed body."
     assert eval!(~S|(window-buffer (scene-window 'chat))|) == ~s{"*chat:zz-notmuch-scene*"}
+  end
+
+  test "a mode key opens the tag menu and applies its selection" do
+    eval!(~S"""
+    (begin
+      (run-command "notmuch-inbox")
+      (local-set-key "C-c C-8" "notmuch-filter-by-tag"))
+    """)
+
+    KeyDispatch.handle_key("C-c")
+    KeyDispatch.handle_key("C-8")
+
+    assert eval!(~S|(minibuffer-selected)|) == ~s{"unread"}
+    KeyDispatch.handle_key("RET")
+
+    assert eval!(~S|(nm--query-of "*notmuch*")|) == ~s{"( tag:inbox ) and tag:unread"}
   end
 end

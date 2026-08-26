@@ -147,3 +147,21 @@
     (check-equal! (buffer-local t--hr-a 'zz-hr-stamp) 3
       "the refresh ran with the switch off")
     (buffer-kill! t--hr-a)))
+
+;; M-x reload-scheme is the manual door for a purged primitive. The rebind
+;; must leave the stdlib alone: editor.scm aliases define-command and then
+;; wraps the same name in Scheme, and a rebind that writes the primitive map
+;; straight in puts the raw primitive back over the wrapper.
+(deftest 'reload-scheme-rebinds-the-primitives-and-keeps-the-stdlib
+  "the alias still calls, and the Scheme wrapper is still the wrapper"
+  (lambda ()
+    (run-command "reload-scheme")
+
+    ;; the wrapper answers with the name; the raw primitive answers void
+    (check-equal! (define-command "zz-reload-scheme-a" "probe" (lambda () 1))
+      "zz-reload-scheme-a" "the rebind put the raw primitive over the wrapper")
+    (check-equal! (procedure? define-command--raw) #t
+      "the alias of a Session primitive lost its fun")
+    (define-command--raw "zz-reload-scheme-b" (lambda () 1))
+    (check-equal! (command-doc "zz-reload-scheme-b") ""
+      "the alias did not register the command")))

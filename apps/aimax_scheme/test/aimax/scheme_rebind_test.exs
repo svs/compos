@@ -56,6 +56,28 @@ defmodule Aimax.SchemeRebindTest do
     assert {:ok, 7, _} = Scheme.eval_string(interp, "(host-extra)")
   end
 
+  test "a stale read cache in the caller does not resurrect an old binding" do
+    # The host calls rebind from its own process, not from inside `exec`, so
+    # its `:scheme_cache` still holds whatever it read last. Another process
+    # then redefines the name. The walk writes back what it reads, so a stale
+    # cached primitive goes over the wrapper the other process just defined.
+    # Flush first: the global frame must live in the shared tier, as it does
+    # after boot. A local frame reads from the store, never from the cache.
+    interp = Scheme.flush(interp(1))
+    Aimax.Scheme.Env.fetch(interp.store, interp.global, "host-answer")
+
+    Task.await(
+      Task.async(fn ->
+        {:ok, _, _} = Scheme.eval_string(interp, "(define (host-answer) 99)")
+      end)
+    )
+
+    interp = Scheme.rebind_primitives(interp, %{"host-answer" => fn [] -> 2 end})
+
+    assert {:ok, 99, _} = Scheme.eval_string(interp, "(host-answer)"),
+           "the rebind read a stale cache and put the primitive back"
+  end
+
   test "the builtins are rebound too" do
     interp = interp(1)
     interp = Scheme.rebind_primitives(interp, %{"host-answer" => fn [] -> 1 end})

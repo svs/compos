@@ -63,7 +63,30 @@ defmodule Aimax.Scheme.Reader do
   defp tok_string(<<"\\\\", rest::binary>>, acc), do: tok_string(rest, ["\\" | acc])
   defp tok_string(<<"\\n", rest::binary>>, acc), do: tok_string(rest, ["\n" | acc])
   defp tok_string(<<"\\t", rest::binary>>, acc), do: tok_string(rest, ["\t" | acc])
+  defp tok_string(<<"\\r", rest::binary>>, acc), do: tok_string(rest, ["\r" | acc])
+
+  # R7RS hex escape: \xHH; — the only way to write a byte a keyboard has no
+  # key for. A line protocol needs CR, and a binary one needs every byte,
+  # so the escape yields a raw byte rather than a codepoint.
+  defp tok_string(<<"\\x", rest::binary>>, acc) do
+    case hex_escape(rest, []) do
+      {byte, rest} -> tok_string(rest, [byte | acc])
+      :error -> raise(Error, message: "bad \\x escape in string: expected \\xHH;")
+    end
+  end
+
   defp tok_string(<<c::utf8, rest::binary>>, acc), do: tok_string(rest, [<<c::utf8>> | acc])
+
+  defp hex_escape(<<";", rest::binary>>, [_ | _] = digits) do
+    n = digits |> Enum.reverse() |> IO.iodata_to_binary() |> String.to_integer(16)
+    if n <= 0xFF, do: {<<n>>, rest}, else: {<<n::utf8>>, rest}
+  end
+
+  defp hex_escape(<<c, rest::binary>>, digits)
+       when c in ~c[0123456789abcdefABCDEF] and length(digits) < 6,
+       do: hex_escape(rest, [<<c>> | digits])
+
+  defp hex_escape(_, _), do: :error
 
   defp tok_atom(<<c, _::binary>> = bin, acc) when c in ~c[ \t\r\n()";'] or bin == <<>> do
     {acc |> Enum.reverse() |> IO.iodata_to_binary(), bin}

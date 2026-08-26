@@ -58,13 +58,23 @@
 (defrecipe! "show a buffer in the other window"
   "(display-buffer-other-window! {{buffer}})"
   (list (list 'buffer "Buffer: ")))
+(catalog-meta! 'recipe "show a buffer in the other window"
+  'domain 'windows 'effects '(write display))
+;; Keep the words people use for this action. Re-registering the old title
+;; also corrects its previous-buffer mapping during a hot reload.
+(defrecipe! "other buffer"
+  "(display-buffer-other-window! {{buffer}})"
+  (list (list 'buffer "Buffer: ")))
+(catalog-meta! 'recipe "other buffer" 'domain 'windows 'effects '(write display))
 (defrecipe! "show a buffer in a dismissible popup"
   "(display-buffer-popup! {{buffer}})"
   (list (list 'buffer "Buffer: ")))
 (catalog-meta! 'recipe "show a buffer in a dismissible popup"
-  'domain 'windows 'effects '(write))
-(defrecipe! "other buffer"
+  'domain 'windows 'effects '(write display))
+(defrecipe! "switch to the previous buffer"
   "(run-command \"previous-buffer\")")
+(catalog-meta! 'recipe "switch to the previous buffer"
+  'domain 'buffers 'effects '(write display))
 
 (defrecipe! "what windows are open"
   "(window-list-all)")

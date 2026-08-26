@@ -33,11 +33,17 @@ defmodule Aimax.Core.MixProject do
       {:jason, "~> 1.4"},
       # the wire seam: Req's plug adapter lets tests inspect the exact
       # request req_llm builds (cache breakpoints, tool defs) with no network
-      {:plug, "~> 1.18", only: :test},
+      {:plug, "~> 1.18"},
+      # Agents create short-lived inbound HTTP servers. Bandit owns the
+      # socket and HTTP byte parsing; Scheme owns every request handler.
+      {:bandit, "~> 1.5"},
       {:earmark, "~> 1.4"},
       # fsevents/inotify: how a diff buffer learns that an agent wrote to disk
       {:file_system, "~> 1.0"},
       {:exqlite, "~> 0.27"},
+      # the database mechanism: wire protocol, auth, pooling, and type
+      # decoding are not things Scheme can supply
+      {:postgrex, "~> 0.20"},
       {:rustler, "~> 0.36.0"}
     ]
   end

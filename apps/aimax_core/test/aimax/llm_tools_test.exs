@@ -572,6 +572,69 @@ defmodule Aimax.LLMToolsTest do
       assert %{"cache_control" => %{"type" => "ephemeral"}} = last_block
     end
 
+    test "steered text reaches the next req_llm request as plain user text" do
+      me = self()
+      request_count = :atomics.new(1, [])
+      steer_count = :atomics.new(1, [])
+
+      Application.put_env(:aimax_core, :llm_req_opts,
+        req_http_options: [
+          plug: fn conn ->
+            {:ok, body, conn} = Plug.Conn.read_body(conn)
+            round = :atomics.add_get(request_count, 1, 1)
+            send(me, {:steering_wire, round, Jason.decode!(body)})
+
+            text = if round == 1, do: "first answer", else: "final answer"
+
+            conn
+            |> Plug.Conn.put_resp_content_type("application/json")
+            |> Plug.Conn.resp(
+              200,
+              Jason.encode!(%{
+                "id" => "msg_#{round}",
+                "type" => "message",
+                "role" => "assistant",
+                "model" => "claude-sonnet-5",
+                "content" => [%{"type" => "text", "text" => text}],
+                "stop_reason" => "end_turn",
+                "usage" => %{"input_tokens" => 3, "output_tokens" => 2}
+              })
+            )
+          end
+        ]
+      )
+
+      {:ok, _} = Session.eval(~s{(register-llm-key! 'anthropic "sk-test")})
+
+      on_exit(fn ->
+        Application.delete_env(:aimax_core, :llm_req_opts)
+        Session.eval(~s{(set! *llm-keys* '())})
+      end)
+
+      assert {:ok, "final answer", _usage, "end_turn"} =
+               LLM.run_tool_loop(
+                 [%{role: "user", content: "start"}],
+                 "system",
+                 [],
+                 "claude-sonnet-5",
+                 steer: fn ->
+                   if :atomics.add_get(steer_count, 1, 1) == 1,
+                     do: ["change course"],
+                     else: []
+                 end
+               )
+
+      assert_received {:steering_wire, 1, _first_body}
+      assert_received {:steering_wire, 2, second_body}
+
+      last_user =
+        second_body["messages"]
+        |> Enum.reverse()
+        |> Enum.find(&(&1["role"] == "user"))
+
+      assert [%{"type" => "text", "text" => "change course"}] = last_user["content"]
+    end
+
     # req_llm prices the request against its own model database, and it
     # knows the one thing the token counts don't say: whether the
     # provider's input_tokens already includes the cached tokens. Ours

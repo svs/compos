@@ -208,6 +208,8 @@ defmodule Aimax.Core.SchemeAPI do
         "(daemon-restart!) — save the desktop, restart the daemon, and reload Scheme; return #t.",
       "reload-files!" =>
         "(reload-files! PATHS) — evaluate the changed top-level forms of each .scm and refresh the modes they redefine; return (FILES FORMS).",
+      "refresh-primitives!" =>
+        "(refresh-primitives!) — rebind every Elixir primitive to the version now loaded; return #t.",
       "window-list-all" =>
         "(window-list-all) — return ((WINDOW-ID BUFFER FRAME-ID) ...) for every window on every frame.",
       "redraw!" => "(redraw!) — tell every connected client to re-render every frame; return #t.",
@@ -994,6 +996,15 @@ defmodule Aimax.Core.SchemeAPI do
           {:error, reason} ->
             raise Aimax.Scheme.Eval.Error, message: "reload failed: #{inspect(reason)}"
         end
+      end,
+      # A primitive is an anonymous fun captured when the session booted.
+      # Recompiling the module that holds it purges that version, and the
+      # next call raises "points to an old version of the code". The dev
+      # watcher rebinds after every recompile; this is the door to ask by
+      # name when a daemon is already wedged.
+      "refresh-primitives!" => fn [] ->
+        :ok = Aimax.Core.Session.refresh_primitives()
+        true
       end,
       "daemon-provision-workspace!" => fn [workspace, name] ->
         case Aimax.Core.Daemon.provision_workspace(workspace, name) do

@@ -2225,21 +2225,22 @@ defmodule Aimax.Ui.EditorLive do
     body{margin:0 auto;padding:30px 34px 70px;max-width:#{measure};overflow-wrap:break-word;
          word-break:normal;font:#{size}/1.7 #{family};color:#{fg};background:#{bg};
          -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-    p{margin:0 0 1.15em}
+    /* The blank lines the author typed are drawn, so the space between
+       blocks is the space in the document. A CSS margin on top of them
+       counted the same gap twice, and one blank line opened two. */
+    p{margin:0}
     /* a heading must separate the sections, so its space above is much
        larger than the space below it */
     h1,h2,h3,h4{font-family:#{family};line-height:1.25}
-    body>h1:first-child{margin-top:0}
-    h1{font-size:29px;margin:1.6em 0 .6em}
-    h2{font-size:22px;margin:2.1em 0 .7em;border-bottom:1px solid #{border};padding-bottom:4px}
-    h3{font-size:18px;margin:1.9em 0 .5em;color:#{accent}}
-    h4{font-size:15.5px;margin:1.6em 0 .4em;color:#{dim}}
+    h1{font-size:29px;margin:0}
+    h2{font-size:22px;margin:0;border-bottom:1px solid #{border};padding-bottom:4px}
+    h3{font-size:18px;margin:0;color:#{accent}}
+    h4{font-size:15.5px;margin:0;color:#{dim}}
     /* the browser default indents a list 40px and puts no space between
        the items: a list of requirements then reads as one block */
-    ul,ol{margin:0 0 1.15em;padding-left:1.35em}
-    li{margin:0 0 .4em}
-    li:last-child{margin-bottom:0}
-    li>ul,li>ol{margin:.4em 0 0}
+    ul,ol{margin:0;padding-left:1.35em}
+    li{margin:0}
+    li>ul,li>ol{margin:0}
     li::marker{color:#{dim}}
     code,pre{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-size:13.5px}
     code{background:#{inset};padding:1px 4px;border-radius:2px}
@@ -2248,7 +2249,7 @@ defmodule Aimax.Ui.EditorLive do
     h1 code,h2 code,h3 code,h4 code{background:none;padding:0;font-size:.92em}
     pre{background:#{inset};padding:10px 12px;border-left:3px solid #{accent};overflow-x:auto}
     pre code{background:none;padding:0}
-    .code-block{margin:1em 0;border:1px solid #{border};border-radius:6px;overflow:hidden;background:#{inset}}
+    .code-block{margin:0;border:1px solid #{border};border-radius:6px;overflow:hidden;background:#{inset}}
     .code-block-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:6px 10px;
       border-bottom:1px solid #{border};color:#{dim};font:12px/1.4 "IBM Plex Mono",ui-monospace,Menlo,monospace}
     .code-lang{margin-right:auto;color:#{accent};font-weight:700;text-transform:uppercase;letter-spacing:.06em}
@@ -2260,13 +2261,13 @@ defmodule Aimax.Ui.EditorLive do
       text-decoration-color:color-mix(in srgb,currentColor 45%,transparent)}
     a:hover{text-decoration-color:currentColor}
     a:empty{display:none}
-    blockquote{margin:12px 0;padding:2px 14px;border-left:3px solid #{border};color:#{dim}}
+    blockquote{margin:0;padding:2px 14px;border-left:3px solid #{border};color:#{dim}}
     blockquote.llm-response{margin:18px 0;padding:12px 16px;border:1px solid #{border};
          border-left:4px solid #{accent};border-radius:7px;background:#{inset};color:#{fg};user-select:text}
     blockquote.llm-response>:first-child{margin-top:0}
     blockquote.llm-response>:last-child{margin-bottom:0}
     table{border-collapse:collapse;font-size:14px;display:block;overflow-x:auto;
-          max-width:100%;margin:0 0 1.2em}
+          max-width:100%;margin:0}
     /* rules between rows, none around them: a reference table reads as
        columns, not as a grid of boxes */
     th,td{border:0;border-bottom:1px solid #{border};padding:6px 14px 6px 0;
@@ -2275,7 +2276,7 @@ defmodule Aimax.Ui.EditorLive do
        letter-spacing:.09em;text-transform:uppercase}
     tr:last-child td{border-bottom:0}
     img{max-width:100%;height:auto;border-radius:3px}
-    hr{border:0;border-top:1px solid #{border};margin:22px 0}
+    hr{border:0;border-top:1px solid #{border};margin:0}
     .tweet{margin:12px 0;padding:12px 16px;border:1px solid #{border};border-radius:10px;
            max-width:32em;background:#{inset};font-size:14.5px}
     .tweet blockquote{margin:0;padding:0;border:0;color:#{fg}}

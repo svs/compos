@@ -93,9 +93,15 @@ defmodule Aimax.Core.Markdown.Html do
         {skipped, at, marks} = skip_separator(text, at, node.start, after_marker, marks)
 
         {gap, marks} =
-          if content?,
-            do: slice(text, at, node.start, marks),
-            else: blank_lines(text, at, node.start, marks)
+          cond do
+            content? -> slice(text, at, node.start, marks)
+            # A blank line is a blank line only between blocks. The newline
+            # that separates two table rows, or two list items, separates
+            # them - it is not a line the author left empty. Drawn as one,
+            # a twenty row table opened a screenful of nothing above itself.
+            parent == :root -> blank_lines(text, at, node.start, marks)
+            true -> gap_marks(at, node.start, marks)
+          end
 
         {body, marks} = node(node, text, marks)
         {[skipped, gap, body], {node.stop, node.kind in @silent, marks}}
@@ -127,6 +133,11 @@ defmodule Aimax.Core.Markdown.Html do
   end
 
   defp blank_lines(_text, _at, _stop, marks), do: {[], marks}
+
+  defp gap_marks(at, stop, marks) do
+    {here, rest} = Enum.split_while(marks, fn {off, _} -> off >= at and off < stop end)
+    {Enum.map(here, &elem(&1, 1)), rest}
+  end
 
   # The space between a marker and what it marks belongs to the marker: the
   # grammar gives "#" its own node and leaves the space after it, which would
@@ -308,7 +319,7 @@ defmodule Aimax.Core.Markdown.Html do
 
     {tail, marks} =
       if node.kind in @containers,
-        do: blank_lines(text, last_stop(node), node.stop, marks),
+        do: gap_marks(last_stop(node), node.stop, marks),
         else: slice(text, last_stop(node), node.stop, marks)
 
     {[inner, tail], marks}

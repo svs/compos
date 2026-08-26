@@ -110,14 +110,17 @@ defmodule Aimax.Core.Markdown do
   # back, so every node in the tree speaks the document's own coordinates.
   defp expand_inlines(nodes, _text, false), do: nodes
 
+  # A table cell holds its text directly: the block grammar gives it no
+  # `inline` child to stand for the contents. Read a cell the same way, or
+  # emphasis in a table stays as the author's asterisks.
+  @inline_holders [:inline, :cell]
+
   defp expand_inlines(nodes, text, true) do
     Enum.map(nodes, fn node ->
-      cond do
-        node.kind == :inline and node.children == [] ->
-          %{node | children: inline_nodes(text, node.start, node.stop)}
-
-        true ->
-          %{node | children: expand_inlines(node.children, text, true)}
+      if node.kind in @inline_holders and node.children == [] do
+        %{node | children: inline_nodes(text, node.start, node.stop)}
+      else
+        %{node | children: expand_inlines(node.children, text, true)}
       end
     end)
   end

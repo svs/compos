@@ -52,13 +52,7 @@ defmodule Aimax.SwitchTest do
         (define-preset! 'zz-swpack "switch pack" '(zz-sw)))
       """)
 
-    # this test follows one buffer by name across three backends, and the
-    # stub answers every request with the same text — including the one that
-    # names the chat, which would rename the buffer out from under it
-    {:ok, _} = Session.eval("(customize-set! 'chat-auto-rename #f)")
-
     on_exit(fn ->
-      Session.eval("(customize-set! 'chat-auto-rename #t)")
       Application.delete_env(:aimax_core, :acp_transport)
       Application.delete_env(:aimax_core, :llm_chat_fun)
       Enum.each(Agent.list(), &Agent.kill/1)

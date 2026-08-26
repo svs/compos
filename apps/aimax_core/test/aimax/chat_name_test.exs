@@ -1,11 +1,10 @@
-defmodule Aimax.ChatRenameTest do
+defmodule Aimax.ChatNameTest do
   @moduledoc """
   The two rename tests Scheme cannot hold.
 
-  The cadence, the name, the rename and the model call are Scheme policy
-  and live in priv/tests/chat-rename-test.scm. One test here starts an
-  agent and reads the buffer ref its session holds. The other presses
-  C-c s.
+  How a chat gets its name is Scheme policy and lives in
+  priv/tests/chat-name-test.scm. One test here starts an agent and reads
+  the buffer ref its session holds. The other presses C-c s.
   """
 
   use ExUnit.Case
@@ -39,7 +38,7 @@ defmodule Aimax.ChatRenameTest do
   end
 
   describe "the rename itself" do
-    test "a live LLM session follows an auto-renamed chat into its second turn" do
+    test "a live LLM session follows a renamed chat into its second turn" do
       old = buffer("*zz-live-chat*", "conversation\n")
       slug = "rename-#{System.unique_integer([:positive])}"
       ref = Buffer.ref(old)

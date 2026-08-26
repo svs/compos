@@ -653,145 +653,38 @@
             (insert! (string-append "```\n" text "\n```\n"))
             (message "Region added to chat"))))))
 
-;;; --- the conversation names itself ---------------------------------------------
-;;; A chat is born named after the buffer or the group it came from. After one
-;;; turn it can say what it is ABOUT, so a small model reads the recent turns
-;;; and the buffer takes that name. The cadence is turn 1, then every third
-;;; turn: a conversation that drifts gets a name that follows it, and a
-;;; conversation that holds still costs one cheap call per three turns.
+;;; --- the conversation is named for its group ------------------------------------
+;;; A chat's name is DERIVED, never invented: *chat:<group>*, and a group
+;;; founded on one buffer carries that buffer's name. So a chat reads as the
+;;; work it accompanies, and it follows that work when the name moves.
+;;; groups.scm owns the derivation (group-chat-name) and the re-derive
+;;; (group-chat-rederive!).
 ;;;
-;;; The rename keeps the buffer's process, so the transcript, the point, the
-;;; presets and a live agent thread all survive it (rename-buffer!). Nothing
-;;; finds a chat by its name: a group finds its chat by mode and membership,
-;;; and a thread finds its buffer by slug.
+;;; A small model used to read the recent turns and title the chat. That is
+;;; gone: it cost a call every third turn, it made the name drift away from
+;;; the buffer it accompanies, and a stale title stranded every store that
+;;; named the chat.
+;;;
+;;; M-x buffer-rename still works on a chat and the name sticks: a name the
+;;; person typed is not derived, so no re-derive replaces it.
 
 (domain! 'chat)
 (effects! '(read))
 
-(defgroup 'chat "Chats: the conversation of record, and how a chat names itself.")
-
-(defcustom 'chat-auto-rename #t
-  "Name a chat buffer from its own content, after the first turn and then every third turn."
-  'group 'chat 'type 'boolean)
-
-(defcustom 'chat-rename-model "openai:gpt-5.6-luna"
-  "The model that reads a chat and writes its name. A small, cheap model is the point."
-  'group 'chat 'type 'string)
-
-(defcustom 'chat-rename-turns 4
-  "How many recent turns the namer reads. Recent turns are what makes the name follow a drifting conversation."
-  'group 'chat 'type 'number)
-
-;; turn 1, then 4, 7, 10 — "after the first turn, and every third turn after
-;; that". Turn 0 has nothing to read.
-(define (chat-rename-turn? n)
-  (and (> n 0) (= (modulo n 3) 1)))
+(defgroup 'chat "Chats: the conversation of record.")
 
 ;; What counts as a turn on this surface: the chat lane records the user's
 ;; messages, and llm-mode's M-o records one response range per send. One
-;; number, so one cadence covers every chat surface.
+;; number, so one count covers every chat surface.
 (define (chat-turn-count buf)
   (let ((record (chat-record buf)))
     (if (pair? record)
         (length (filter (lambda (t) (equal? (plist-get t 'role) "user")) record))
         (length (or (buffer-local buf 'llm-responses) '())))))
 
-;; A chat that lives in a FILE keeps the name of its file, and a buffer the
-;; editor did not name (a source file with llm-mode on) is not a chat.
-(define (chat-renameable? buf)
-  (and chat-auto-rename
-       (buffer-exists? buf)
-       (not (buffer-path buf))
-       (string-prefix? "*" buf)))
-
-;; the tail of a string — the part of a conversation that says where it went
-(define (chat-rename-tail text n)
-  (let ((len (string-length text)))
-    (if (> len n) (substring text (- len n) len) text)))
-
-(define (chat-rename-excerpt buf)
-  (let ((recent (last-n (chat-turns buf) chat-rename-turns)))
-    (if (null? recent)
-        ;; an M-o surface keeps no record: its own text IS the conversation
-        (chat-rename-tail (buffer-text buf) 2000)
-        ;; the START of each recent turn: a turn says what it is about in
-        ;; its first lines, and the recent turns are the drift
-        (fold (lambda (acc t)
-                (let ((text (cadr t)))
-                  (string-append acc (car t) ": "
-                    (if (> (string-length text) 600) (substring text 0 600) text)
-                    "\n\n")))
-              "" recent))))
-
-;; a buffer name is one line in the switcher: no newline, no asterisk (that
-;; marks the buffer kind), no slash (that reads as a path), no quotes
-(define (chat-rename-clean title)
-  (let* ((t (string-trim title))
-         (t (string-join (string-split t "\n") " "))
-         (t (string-join (string-split t "*") ""))
-         (t (string-join (string-split t "/") " "))
-         (t (string-join (string-split t "\"") ""))
-         (t (string-trim t)))
-    (if (> (string-length t) 60) (string-trim (substring t 0 60)) t)))
-
-;; The same title twice is two chats about one subject: number the later
-;; one. BUF's own name is not a collision — the namer often answers with
-;; the title the chat already has, and that must stay a no-op. Without
-;; this check the chat renames itself to " 2", the old name heals back
-;; as an empty buffer, and the next naming turn flips it again.
-(define (chat-rename-unique buf base)
-  (let loop ((n 1))
-    (let ((name (if (= n 1)
-                    (string-append "*" base "*")
-                    (string-append "*" base " " (number->string n) "*"))))
-      (cond ((> n 20) #f)
-            ((equal? name buf) name)
-            ((buffer-exists? name) (loop (+ n 1)))
-            (else name)))))
-
-(effects! '(write))
-
-(define (chat-rename-apply! buf title)
-  (let ((clean (chat-rename-clean title)))
-    (unless (equal? clean "")
-      (let ((name (chat-rename-unique buf clean)))
-        (when (and name (buffer-exists? buf) (not (equal? name buf)))
-          (when (rename-buffer! buf name)
-            (when (boundp (quote workspace-name-from-chat!))
-              (workspace-name-from-chat! name clean))
-            (message (string-append "chat named: " name))))))))
-
-(effects! '(spend external))
-
-;; ONE call, on the small model, with no tools: the namer reads text and
-;; returns text. The turn number is stamped BEFORE the call, so a reply that
-;; arrives late cannot start a second naming call for the same turn.
-(define (chat-rename-from-content! buf)
-  (let ((n (chat-turn-count buf)))
-    (when (and (chat-renameable? buf)
-               (chat-rename-turn? n)
-               (not (equal? (buffer-local buf 'chat-renamed-at) n)))
-      (buffer-set-local! buf 'chat-renamed-at n)
-      (llm-tools
-        (string-append
-          "Name this editor conversation.\n"
-          "Answer with 2 to 5 words in lower case. No quotes, no punctuation, "
-          "no file paths.\n"
-          "Say what the conversation is ABOUT, in the user's own words where "
-          "you can.\n\n"
-          (chat-rename-excerpt buf))
-        "" '() llm-tool-call
-        (lambda (title) (chat-rename-apply! buf title))
-        #f
-        chat-rename-model))))
-
 (category! 'chat)
-(effects! '(spend external))
-(public! 'chat-rename-from-content!
-  "(chat-rename-from-content! BUF) — name a chat from its recent turns, on the naming cadence")
-(effects! '(pure))
-(public! 'chat-rename-turn?
-  "(chat-rename-turn? N) — #t on the turns a chat renames itself (1, then every third)")
+(public! 'chat-turn-count
+  "(chat-turn-count BUF) — how many user turns a chat surface holds")
 
 ;;; --- the chat log: every conversation, saved -------------------------------------
 ;;; Every chat writes itself to <aimax-home>/chats/<id>.chat when a turn

@@ -45,7 +45,6 @@ defmodule Aimax.ChatModeTest do
     assert Buffer.get_local(chat, "mode-name") == "chat-mode"
     assert is_integer(Buffer.get_local(chat, "agent-saved-mark"))
 
-    Buffer.set_local(chat, "chat-renamed-at", 1)
     Editor.set_window_buffer(chat)
     Buffer.goto(chat, Buffer.byte_size(chat))
     type("hello")

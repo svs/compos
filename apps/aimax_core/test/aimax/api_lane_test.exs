@@ -173,9 +173,6 @@ defmodule Aimax.ApiLaneTest do
 
     {:ok, _} = Session.eval(~s{(execute* "" '(connector "api"))})
     buf = "*chat:a1*"
-    # This test controls the task turn. The independent small-model chat
-    # namer must not consume its {:sent, ...} synchronization message.
-    Buffer.set_local(buf, "chat-renamed-at", 1)
     focus(buf)
 
     type("first message")

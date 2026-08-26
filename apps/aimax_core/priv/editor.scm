@@ -5877,10 +5877,6 @@
                               (let* ((start (llm-mode--last-response-start buf))
                                      (end (- (agent-append! id "\n") 1)))
                                 (llm-mode--stream-range! buf start end #t)))
-                            ;; A scratch chat has one more turn to read: it may
-                            ;; name itself on the same cadence as the chat lane.
-                            (when (boundp (quote chat-rename-from-content!))
-                              (chat-rename-from-content! buf))
                             ;; The untouched suffix was part of the sent
                             ;; snapshot when insertion happened in the middle.
                             (buffer-set-local! buf 'llm-session-dirty
@@ -6405,6 +6401,9 @@
 ;; a choice about the chat, so identity (S11)
 (define chat-identity-locals
   '(group group-id modeline-groups chat-id group-meta group-layout group-noise
+    ;; the last name the chat DERIVED from its group: a name the person
+    ;; typed does not match it, and that is what makes a manual rename stick
+    chat-derived-name
     agent-connector agent-model agent-effort
     chat-presets chat-permission-mode render-mode default-directory
     agent-permission-profile window-class header-line
@@ -6426,9 +6425,6 @@
     ;; clears it with the transcript
     agent-prose-from
     chat-tool-specs chat-cost chat-last-usage chat-usage-total
-    ;; the turn this chat last named itself on: a reset starts a new
-    ;; conversation, which must name itself again from its first turn
-    chat-renamed-at
     ;; a one-shot note for the next send (a skill body a mode pushed):
     ;; undelivered it must survive a restart, and a reset drops it
     chat-note-once

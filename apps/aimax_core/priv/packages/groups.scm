@@ -1127,6 +1127,8 @@
           (else
             (let ((before (group-name id)))
               (group-record-update! id 'name clean)
+              ;; the chat is named for the group, so it follows the group
+              (group-chat-rederive! id)
               (frame-group-label-refresh!)
               (message (string-append "Renamed group " before " to " clean)))))))
 
@@ -1362,16 +1364,51 @@
                     ((group-chat--free? name id) name)
                     (else (loop (+ n 1))))))))))
 
-;; a chat named before this rule takes the short name the next time the
-;; group asks for it
+;; A chat's name is DERIVED, never invented, so it follows the group it
+;; accompanies. The chat remembers the last name it derived; only that
+;; name is replaced. A name the person typed is not derived, so M-x
+;; buffer-rename on a chat sticks and no re-derive takes it back.
+(define (group-chat--derived? buf)
+  (or (equal? buf (buffer-local buf 'chat-derived-name))
+      ;; a chat named before this rule carries no memory, and a name that
+      ;; still reads as *chat:...* was ours to begin with
+      (and (not (buffer-local buf 'chat-derived-name))
+           (string-prefix? "*chat:" buf))))
+
+(define (group-chat--claim-name! buf)
+  (buffer-set-local! buf 'chat-derived-name buf)
+  buf)
+
+(define (group-chat-rederive! g)
+  (let* ((id (group-resolve-id g))
+         (buf (and id (group-primary-chat id)))
+         (want (and buf (buffer-known? buf) (group-chat-name id))))
+    (cond ((not want) #f)
+          ((equal? buf want) (group-chat--claim-name! buf))
+          ((not (group-chat--derived? buf)) buf)
+          ((buffer-known? want) buf)
+          ((rename-buffer! buf want) (group-chat--claim-name! want))
+          (else buf))))
+
+;; the same re-derive, asked for by the reader that is about to show the chat
 (define (group-chat--heal-name! buf id)
-  (let ((want (group-chat-name id)))
-    (if (and (string-prefix? "*chat:/" buf)
-             (not (equal? want buf))
-             (not (buffer-known? want))
-             (rename-buffer! buf want))
-        want
-        buf)))
+  (or (group-chat-rederive! id) buf))
+
+;; A group founded on one buffer is NAMED for that buffer, so the buffer's
+;; name is the group's name. Renaming the buffer must move both, or the
+;; group keeps a label for a buffer nobody can find and the chat beside it
+;; still reads as the old work. The chat then re-derives, which renames it
+;; too, which the layout sweep above follows in turn.
+(on-buffer-renamed!
+  (lambda (old new)
+    (unless (chat-buffer? new)
+      (for-each
+        (lambda (record)
+          (when (and (equal? (group-record-name record) old)
+                     (not (group-record-by-name new)))
+            (group-record-update! (group-record-id record) 'name new)
+            (group-chat-rederive! (group-record-id record))))
+        *group-records*))))
 
 ;; the group's chat = its most recently used chat-mode member; created on
 ;; demand already tagged, so a killed chat is simply remade next time
@@ -1395,6 +1432,7 @@
             (let ((buf (group-chat-name id)))
               (unless (buffer-exists? buf)
                 (buffer-create buf))
+              (group-chat--claim-name! buf)
               (group-chat-init! buf id)
               (chat-set-group! buf id)
               (group-record-update! id 'primary-chat-id (chat-stable-id! buf))

@@ -26,12 +26,7 @@ defmodule Aimax.CacheEconomicsTest do
   setup do
     Editor.minibuffer_close()
     Editor.delete_other_windows()
-    # a chat names itself after turn 1 through the same LLM seam. That
-    # rename would be the next request these tests assert on.
-    {:ok, _} = Session.eval("(customize-set! 'chat-auto-rename #f)")
-
     on_exit(fn ->
-      Session.eval("(customize-set! 'chat-auto-rename #t)")
       Application.delete_env(:aimax_core, :llm_chat_fun)
       Application.delete_env(:aimax_core, :llm_req_opts)
       Application.delete_env(:aimax_core, :llm_retry_base_ms)

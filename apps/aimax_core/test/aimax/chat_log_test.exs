@@ -19,10 +19,7 @@ defmodule Aimax.ChatLogTest do
   setup do
     Editor.minibuffer_close()
     Editor.delete_other_windows()
-    {:ok, _} = Session.eval("(customize-set! 'chat-auto-rename #f)")
-
     on_exit(fn ->
-      Session.eval("(customize-set! 'chat-auto-rename #t)")
       Enum.each(Agent.list(), &Agent.kill/1)
 
       Enum.each(Aimax.Core.list_buffers(), fn name ->

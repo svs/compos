@@ -103,15 +103,6 @@ defmodule Aimax.EditorTest do
     press(List.duplicate("DEL", String.length(Editor.snapshot().minibuffer.input)))
   end
 
-  setup_all do
-    # These tests keep chat names as readable handles. ChatRenameTest owns the
-    # independent title model and its asynchronous rename behavior.
-    {:ok, before} = Aimax.Core.Session.eval("chat-auto-rename")
-    {:ok, _} = Aimax.Core.Session.eval("(set! chat-auto-rename #f)")
-    on_exit(fn -> Aimax.Core.Session.eval("(set! chat-auto-rename #{before})") end)
-    :ok
-  end
-
   setup do
     {:ok, buf: fresh_buffer()}
   end

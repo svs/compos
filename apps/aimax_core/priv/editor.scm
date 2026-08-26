@@ -4679,6 +4679,9 @@
 ;; Layout selection is a live preview. Keep the complete frame arrangement so
 ;; cancelling the prompt returns both the windows and the selected window.
 (define (window-layout-preview! name)
+  ;; A failed earlier arrangement must not disable a later interactive
+  ;; preview. This command is a new top-level layout request.
+  (layout-abort!)
   (if (equal? name "adaptive")
       (tile-visible-adaptive!)
       (tile-visible-windows! (string->symbol name))))

@@ -49,6 +49,8 @@ defmodule Aimax.Ui.AppServerTest do
     assert conn.resp_body =~ "<h1>hi</h1>"
     # and the bridge the editor talks to the app over
     assert conn.resp_body =~ ~s{aimax==="scroll"}
+    assert conn.resp_body =~ ~s{aimax:"release"}
+    assert conn.resp_body =~ "stopImmediatePropagation"
   end
 
   test "serves a sibling file from the app's own directory", %{buffer: b} do

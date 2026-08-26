@@ -2099,6 +2099,20 @@ defmodule Aimax.Ui.Layouts do
                     this.applyWhichKeyFilter();
                     return;
                   }
+                  // C-g from an app lands on the keyboard sink. RET while
+                  // that app window is still selected returns the keyboard
+                  // to the app, preserving the control that was active
+                  // inside it (a spreadsheet cell, editor, and so on).
+                  if (e.key === "Enter" && !e.ctrlKey && !e.altKey && !e.metaKey &&
+                      !e.shiftKey && !panel) {
+                    const app = document.querySelector(".window.active .app-preview");
+                    if (app) {
+                      e.preventDefault();
+                      app.focus({ preventScroll: true });
+                      app.contentWindow?.postMessage({ aimax: "focus-granted" }, "*");
+                      return;
+                    }
+                  }
                   this.whichKeyHeld = new Set(heldWhichKeyModifiers(e));
                   // Cmd-C with no native selection: copy the editor region
                   // (with one, the browser's own copy handles it)

@@ -184,7 +184,11 @@ defmodule Aimax.Ui.AppServer do
     },250)
   },true);
   addEventListener("keydown",function(e){
-    if(e.ctrlKey&&e.key==="g"){e.preventDefault();parent.postMessage({aimax:"release"},"*")}
+    if(e.ctrlKey&&!e.altKey&&!e.metaKey&&e.key.toLowerCase()==="g"){
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      parent.postMessage({aimax:"release"},"*")
+    }
   },true);
   })()</script>
   """

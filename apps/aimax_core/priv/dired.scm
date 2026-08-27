@@ -588,10 +588,17 @@
 
 (define-command "dired-visit" "Visit the file or directory named on this line"
   (lambda ()
-    (let ((p (dired-path-at-point)))
+    (let ((p (dired-path-at-point))
+          (entry (dired-entry)))
       (if p
-          ;; visit handles dirs (dired) AND files (auto-mode + find-file-hook)
-          (visit p)
+          (if (or (equal? entry "..") (dired-directory? entry))
+              (visit p)
+              (let* ((dired-buffer (current-buffer))
+                     (file-buffer (visit p)))
+                (when file-buffer
+                  (switch-to-buffer! dired-buffer)
+                  (display-buffer-other-window! file-buffer))
+                file-buffer))
           (message "No file on this line")))))
 
 (define-command "dired-up" "Open the parent directory in Dired"

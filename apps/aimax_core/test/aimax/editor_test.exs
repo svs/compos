@@ -636,12 +636,22 @@ defmodule Aimax.EditorTest do
       {:ok, entry} = Aimax.Core.Session.eval("(dired-entry)")
       assert entry == inspect("alpha.txt")
 
-      # RET visits the file
+      # RET previews the file without moving focus or point from Dired.
+      {:ok, dired_window} = Aimax.Core.Session.eval("(active-window)")
       press(["RET"])
-      assert Editor.current_buffer() == Path.join(root, "alpha.txt")
-      assert Buffer.text(Editor.current_buffer()) == "A"
+      assert Editor.current_buffer() == root
+      assert Buffer.text(Path.join(root, "alpha.txt")) == "A"
+      assert {:ok, ^dired_window} = Aimax.Core.Session.eval("(active-window)")
+      assert {:ok, current_entry} = Aimax.Core.Session.eval("(dired-entry)")
+      assert current_entry == inspect("alpha.txt")
+      assert {:ok, ^dired_window} = Aimax.Core.Session.eval(~s{(window-showing "#{root}")})
 
-      # back to dired, descend into subdir via RET
+      assert {:ok, file_window} =
+               Aimax.Core.Session.eval(~s{(window-showing "#{Path.join(root, "alpha.txt")}")})
+
+      refute file_window == dired_window
+
+      # Directories still navigate in the selected Dired window.
       {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
       press(["n", "n", "n"])
       press(["RET"])

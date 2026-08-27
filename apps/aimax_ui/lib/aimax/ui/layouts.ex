@@ -1075,6 +1075,23 @@ defmodule Aimax.Ui.Layouts do
             return { p: p, off: span.toString().length };
           }
 
+          // The image a probe landed on, and the source byte it names. A
+          // probe over a picture answers with the element that holds it and
+          // the index of the picture inside it, not with a text node.
+          function imageAt(node, off) {
+            let el = null;
+            if (node.nodeType === 1) {
+              el = node.tagName === "IMG"
+                ? node
+                : (node.children && node.children[off]) || null;
+            } else if (node.nodeType === 3) {
+              return null;
+            }
+            if (!el || el.tagName !== "IMG") return null;
+            const at = parseInt(el.dataset.s, 10);
+            return Number.isFinite(at) ? at : null;
+          }
+
           function isChrome(node) {
             const el = node && (node.nodeType === 1 ? node : node.parentElement);
             return !!(el && el.closest && el.closest("[data-chrome], .code-block-head, .tweet"));
@@ -1941,7 +1958,24 @@ defmodule Aimax.Ui.Layouts do
                     const c = caretAt(rowMid + dir * step);
                     if (!c) continue;
                     const node = c.startContainer || c.offsetNode;
-                    if (!node || node.nodeType !== 3) continue;
+                    if (!node) continue;
+                    // A picture is a row the reader sees, and it draws no
+                    // text to measure. Read the byte it names instead, or
+                    // the move falls through to a move by source line and
+                    // drags point to the end of the image's own line.
+                    const picture = imageAt(node, c.startOffset !== undefined
+                      ? c.startOffset : c.offset);
+                    if (picture !== null) {
+                      this.visualLinePending = true;
+                      rememberRow(d, rowMid + dir * step);
+                      this.pushEvent("preview_goto_pos", {
+                        win: parseInt(frame.dataset.win, 10),
+                        pos: picture,
+                        extend: extend
+                      });
+                      return true;
+                    }
+                    if (node.nodeType !== 3) continue;
                     const response = node.parentElement && node.parentElement.closest(".llm-response");
                     if (response) {
                       const start = parseInt(response.dataset.start, 10);

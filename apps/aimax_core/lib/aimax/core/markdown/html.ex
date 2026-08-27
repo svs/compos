@@ -256,12 +256,27 @@ defmodule Aimax.Core.Markdown.Html do
      marks}
   end
 
+  # The picture says the byte it was drawn from, like every other element.
+  # Without it the page had a row the source did not own: a move down landed
+  # on the image, found no text to measure, and fell back to a move by
+  # source line, which dragged point to the end of the `![alt](url)` line.
   defp node(%{kind: :image} = node, text, marks) do
     src = node |> child_text(text, :link_destination) |> image_src()
     alt = child_text(node, text, :link_text)
     {_inner, marks} = label(node, text, marks)
-    {[~s(<img src="), escape(src), ~s(" alt="), escape(alt), ~s(">)], marks}
+
+    {[
+       ~s(<img data-src="#{node.start}-#{node.stop}" data-s="#{node.start}" src="),
+       attr(src),
+       ~s(" alt="),
+       attr(alt),
+       ~s(">)
+     ], marks}
   end
+
+  # An attribute holds a value, never markup: a break drawn into one would
+  # be read as part of the value.
+  defp attr(text), do: without_breaks(fn -> escape(text) end)
 
   defp image_src(src) do
     case Process.get(:aimax_md_image_src) do
@@ -295,12 +310,83 @@ defmodule Aimax.Core.Markdown.Html do
     do: Enum.reject(marks, fn {off, _} -> off >= node.start and off < child.start end)
 
   defp node(%{kind: :code} = node, text, marks) do
-    lang = child_text(node, text, :info)
-    {inner, marks} = children(node, text, marks)
-    class = if lang == "", do: "", else: ~s( class="#{escape(lang)}")
+    # The fence names the language, and a Morg fence adds arguments after
+    # it. Only the first word is the language: the whole info string as a
+    # class made ":tangle" and its target into classes of their own.
+    {lang, args} = fence_info(child_text(node, text, :info))
 
-    {[~s(<pre data-src="#{node.start}-#{node.stop}"><code#{class}>), inner, "</code></pre>"],
-     marks}
+    # <pre> draws a newline as a line already. A break added inside one
+    # would draw the same newline twice and open the block by a line for
+    # every line it holds.
+    {inner, marks} = without_breaks(fn -> children(node, text, marks) end)
+    class = if lang == "", do: "", else: ~s( class="#{attr(lang)}")
+
+    pre = [~s(<pre data-src="#{node.start}-#{node.stop}"><code#{class}>), inner, "</code></pre>"]
+
+    {[~s(<div class="code-block">), code_head(lang, args), pre, "</div>"], marks}
+  end
+
+  # The language is the first word of the info string; the rest are the
+  # block's arguments.
+  defp fence_info(info) do
+    case String.split(String.trim(info), ~r/\s+/, parts: 2) do
+      [""] -> {"", ""}
+      [lang] -> {lang, ""}
+      [lang, args] -> {lang, args}
+    end
+  end
+
+  # The head names the language and the keys that act on the block. It
+  # draws no source, so it is marked as chrome and carries no byte a caret
+  # can land on.
+  defp code_head("", _args), do: []
+
+  defp code_head(lang, args) do
+    [
+      ~s(<div class="code-block-head" data-chrome="1">),
+      ~s(<span class="code-lang">),
+      escape(lang),
+      "</span>",
+      code_actions(lang, args),
+      "</div>"
+    ]
+  end
+
+  # morg-babel runs a block by its language alone, so the key is offered by
+  # language alone. It asks for no argument, and a block that carries none
+  # still runs.
+  defp code_actions(lang, args), do: [run_action(lang), tangle_action(args)]
+
+  # The languages morg-babel runs: scheme, which it evaluates in the editor
+  # itself, and every language `*morg-babel-runners*` gives a shell runner.
+  # This repeats morg/morg-babel.scm, which is the one that decides. Keep
+  # the two the same, or the head offers a key that does nothing.
+  @runnable ~w(scheme sh bash zsh shell python py elixir exs js javascript node ruby)
+
+  defp run_action(lang) do
+    if String.downcase(lang) in @runnable do
+      ~s(<span class="code-action"><kbd>C-c C-c</kbd> run</span>)
+    else
+      []
+    end
+  end
+
+  defp tangle_action(args) do
+    case Regex.run(~r/:tangle[ \t]+([^ \t]+)/i, args, capture: :all_but_first) do
+      [target] ->
+        if String.downcase(target) == "no" do
+          []
+        else
+          [
+            ~s(<span class="code-action"><kbd>C-c C-x</kbd> tangle &rarr; <code>),
+            escape(target),
+            "</code></span>"
+          ]
+        end
+
+      _ ->
+        []
+    end
   end
 
   defp node(node, text, marks) do
@@ -320,9 +406,22 @@ defmodule Aimax.Core.Markdown.Html do
     {tail, marks} =
       if node.kind in @containers,
         do: gap_marks(last_stop(node), node.stop, marks),
-        else: slice(text, last_stop(node), node.stop, marks)
+        else: block_tail(text, last_stop(node), node.stop, marks)
 
     {[inner, tail], marks}
+  end
+
+  # The newline that ends a block is the end of the block, not a line inside
+  # it. Drawn as a break it opened an empty line under every paragraph and
+  # every list item. The byte is still drawn, so a caret can stand on it.
+  defp block_tail(text, from, stop, marks) do
+    if stop > from and binary_part(text, stop - 1, 1) == "\n" do
+      {head, marks} = slice(text, from, stop - 1, marks)
+      {last, marks} = without_breaks(fn -> slice(text, stop - 1, stop, marks) end)
+      {[head, last], marks}
+    else
+      slice(text, from, stop, marks)
+    end
   end
 
   defp last_stop(%{children: []} = node), do: node.start
@@ -392,7 +491,8 @@ defmodule Aimax.Core.Markdown.Html do
       |> String.replace("<", "&lt;")
       |> String.replace(">", "&gt;")
 
-    if Process.get(:aimax_md_whitespace) do
+    marked =
+      if Process.get(:aimax_md_whitespace) do
       # Every mark is drawn by CSS, not written into the text: the space and
       # the newline stay exactly as the author typed them. A glyph written
       # as text would be counted as source when the page says where a caret
@@ -405,13 +505,35 @@ defmodule Aimax.Core.Markdown.Html do
       # the judder was the cost. Emacs does not mark every space either.
       # These are the spaces that carry something a reader cannot otherwise
       # see: a run of two or more, and a space before a line break.
-      Regex.replace(~r/\n|\t|  +|[ ](?=\n)|[ ]$/, escaped, fn
-        "\n" -> ~s(<span class="ws nl"></span>\n)
-        "\t" -> ~s(<span class="ws tab">\t</span>)
-        spaces -> ~s(<span class="ws sp">#{spaces}</span>)
-      end)
-    else
-      escaped
+        Regex.replace(~r/\n|\t|  +|[ ](?=\n)|[ ]$/, escaped, fn
+          "\n" -> ~s(<span class="ws nl"></span>\n)
+          "\t" -> ~s(<span class="ws tab">\t</span>)
+          spaces -> ~s(<span class="ws sp">#{spaces}</span>)
+        end)
+      else
+        escaped
+      end
+
+    if Process.get(:aimax_md_nobreak), do: marked, else: break_lines(marked)
+  end
+
+  # A newline the author typed inside a paragraph is a line the reader has
+  # to see. HTML folds it into a space, so the paragraph reflowed and every
+  # line moved away from the source that drew it. The break is an element,
+  # never text, so the page still reports the same byte for a caret.
+  defp break_lines(html), do: String.replace(html, "\n", "<br>\n")
+
+  # While the flag stands, a newline draws as itself and not as a break.
+  # The old value is put back, so one code block does not silence the
+  # breaks of the document below it.
+  defp without_breaks(fun) do
+    was = Process.get(:aimax_md_nobreak)
+    Process.put(:aimax_md_nobreak, true)
+
+    try do
+      fun.()
+    after
+      Process.put(:aimax_md_nobreak, was)
     end
   end
 end

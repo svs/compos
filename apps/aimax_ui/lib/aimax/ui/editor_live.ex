@@ -1756,14 +1756,16 @@ defmodule Aimax.Ui.EditorLive do
 
   @doc false
   # Which renderer draws a Markdown page. The tree-sitter one asks the
-  # document where a byte was drawn; the Earmark one still carries the
-  # code-block heads, the llm-response blockquotes and the URL embeds, so it
-  # stays the default until those are ported. A buffer asks for the other
-  # with the `preview-engine` local.
+  # document where a byte was drawn, so the caret stands on its own byte and
+  # every line the author typed draws as a line. It is the default. Earmark
+  # still carries the llm-response blockquotes, and the embeds that turn a
+  # bare image URL into a picture and an x.com link into a card. A buffer
+  # asks for it with the `preview-engine` local, and a page with no grammar
+  # falls back to it on its own.
   defp preview_engine(buffer, "markdown") do
     case Aimax.Core.Buffer.get_local(buffer, "preview-engine") do
-      "tree-sitter" -> :tree_sitter
-      _ -> :earmark
+      "earmark" -> :earmark
+      _ -> :tree_sitter
     end
   end
 
@@ -2204,7 +2206,11 @@ defmodule Aimax.Ui.EditorLive do
 
     text
     |> markdown_preview_source()
-    |> Earmark.as_ast(compact_output: false)
+    # The preview shows the document the author typed. A newline the author
+    # put inside a paragraph is a line the reader must see, so a soft break
+    # draws as a line break. Markdown joins those lines into one paragraph,
+    # which reflowed the text and moved every line away from its source.
+    |> Earmark.as_ast(compact_output: false, breaks: true)
     |> case do
       {:ok, ast, _} -> ast
       {:error, ast, _} -> ast

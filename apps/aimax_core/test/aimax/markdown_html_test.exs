@@ -180,4 +180,121 @@ defmodule Aimax.MarkdownHtmlTest do
       assert drawn =~ @pt, "the caret vanished at byte #{point}"
     end
   end
+  test "a newline inside a paragraph draws as a line break" do
+    # the author hard-wraps a paragraph; every line the author typed is a
+    # line the reader sees, so the text never reflows away from its source
+    html = render!("One line\nsecond line\n")
+
+    assert bare(html) =~ "One line<br>"
+    assert bare(html) =~ "second line"
+  end
+
+  test "the newline that ends a block draws no break" do
+    # a break there opened an empty line under every paragraph
+    html = render!("only line\n")
+
+    refute bare(html) =~ ~r{<br>\s*</p>}
+  end
+
+  test "a fenced code block draws its own lines and gains no break" do
+    html = render!("```sh\necho one\necho two\n```\n")
+
+    [_, code] = String.split(html, "<pre")
+    refute code =~ "<br>"
+    assert bare(code) =~ "echo one"
+    assert bare(code) =~ "echo two"
+  end
+
+  test "a list item keeps its own line and breaks nowhere" do
+    html = render!("- first\n- second\n")
+
+    refute html =~ "<br>"
+    assert length(Regex.scan(~r/<li[ >]/, html)) == 2
+  end
+
+  test "a fenced block wears a head naming its language" do
+    html = render!("```sh\necho hi\n```\n")
+
+    assert html =~ ~s(<div class="code-block">)
+    assert html =~ ~s(<span class="code-lang">sh</span>)
+    # the head draws no source, so a caret never lands in it
+    assert html =~ ~s(data-chrome="1")
+  end
+
+  test "the language is the first word of the info string, not the whole of it" do
+    # the whole string as a class made ":tangle" and its target classes too
+    html = render!("```scheme :tangle out.scm\n(+ 1 2)\n```\n")
+
+    assert html =~ ~s(<code class="scheme">)
+    refute html =~ ~s(class="scheme :tangle out.scm")
+  end
+
+  test "a block offers every key that acts on it" do
+    html = render!("```sh :tangle out.sh\necho hi\n```\n")
+
+    assert html =~ "C-c C-c"
+    assert html =~ "C-c C-x"
+    assert html =~ "out.sh"
+  end
+
+  test "a scheme block offers the run key" do
+    # morg-babel evaluates scheme in the editor itself, ahead of the shell
+    # runners, so it runs even though it has no runner of its own
+    html = render!("```scheme\n(+ 1 1)\n```\n")
+
+    assert html =~ "C-c C-c"
+  end
+
+  test "a block tangles even when its language does not run" do
+    html = render!("```json :tangle out.json\n{}\n```\n")
+
+    refute html =~ "C-c C-c"
+    assert html =~ "C-c C-x"
+    assert html =~ "out.json"
+  end
+
+  test "a runnable block offers the run key with no argument" do
+    # morg-babel runs a block by its language alone
+    html = render!("```sh\necho hi\n```\n")
+
+    assert html =~ "C-c C-c"
+  end
+
+  test "a language morg cannot run offers no run key" do
+    # the head must not name a key that does nothing
+    html = render!("```json\n{}\n```\n")
+
+    refute html =~ "C-c C-c"
+  end
+
+  test "a block that tangles to no offers no tangle" do
+    html = render!("```python :tangle no\nx = 1\n```\n")
+
+    assert html =~ "C-c C-c"
+    refute html =~ "C-c C-x"
+  end
+
+  test "a block with no language wears no head" do
+    html = render!("```\nbare\n```\n")
+
+    refute html =~ "code-block-head"
+    assert html =~ "<pre"
+  end
+
+  test "a picture says the byte it was drawn from" do
+    # without an anchor a move down found no text on the image's row and
+    # fell back to a move by source line, which dragged point to the end
+    html = render!("![a](/tmp/x.png)\n")
+
+    assert html =~ ~s(data-s="0")
+    assert html =~ ~s(<img )
+  end
+
+  test "an attribute holds a value, never a break" do
+    html = render!("![a](/tmp/x.png)\n")
+
+    refute html =~ ~s(src="<br>)
+    refute html =~ ~s(alt="<br>)
+  end
+
 end

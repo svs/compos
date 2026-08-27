@@ -35,7 +35,11 @@ defmodule Aimax.Ui.AppServerTest do
   defp put(path, body),
     do: AppServer.call(conn(:put, path, body), AppServer.init([]))
 
-  defp url(buffer, rest), do: "/a/#{AppServer.token()}/b/#{URI.encode(buffer, &URI.char_unreserved?/1)}#{rest}"
+  defp post(path, body),
+    do: AppServer.call(conn(:post, path, body), AppServer.init([]))
+
+  defp url(buffer, rest),
+    do: "/a/#{AppServer.token()}/b/#{URI.encode(buffer, &URI.char_unreserved?/1)}#{rest}"
 
   test "serves the buffer's live text as the app document", %{buffer: b} do
     Buffer.insert_at(b, 0, "<!-- unsaved -->")
@@ -125,6 +129,20 @@ defmodule Aimax.Ui.AppServerTest do
     assert Jason.decode!(write.resp_body) == %{"ok" => true}
     [saved_sheet] = Jason.decode!(File.read!(path))["sheets"]
     assert saved_sheet["name"] == "Saved"
+
+    status =
+      post(
+        endpoint,
+        Jason.encode!(%{"state" => "ready", "mounted" => [], "drawn" => [], "failed" => []})
+      )
+
+    assert status.status == 200
+    assert Jason.decode!(status.resp_body) == %{"ok" => true}
+
+    assert {:ok, chart_status} =
+             Aimax.Core.Session.call_named("spreadsheet-chart-status", [sheet])
+
+    assert [{:sym, "state"}, "ready"] in Enum.chunk_every(chart_status, 2)
 
     Aimax.Core.kill_buffer(sheet)
   end

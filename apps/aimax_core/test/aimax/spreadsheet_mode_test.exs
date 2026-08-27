@@ -40,7 +40,16 @@ defmodule Aimax.SpreadsheetModeTest do
     assert Buffer.get_local(buffer, "render-mode") == "app"
     assert Buffer.text(buffer) =~ "@univerjs/presets@0.25.1"
     assert Buffer.text(buffer) =~ "@univerjs/preset-sheets-core@0.25.1"
+    assert Buffer.text(buffer) =~ "@univerjs/preset-sheets-drawing@0.25.1"
     assert Buffer.text(buffer) =~ "UniverSheetsCorePreset"
+    assert Buffer.text(buffer) =~ "UniverSheetsDrawingPreset"
+    assert Buffer.text(buffer) =~ "api.registerComponent('AimaxChart',AimaxChart)"
+    assert Buffer.text(buffer) =~ "addFloatDomToRange"
+    assert Buffer.text(buffer) =~ "getDisplayValues()"
+    assert Buffer.text(buffer) =~ "ResizeObserver"
+    assert Buffer.text(buffer) =~ "api.Event.LifeCycleChanged"
+    assert Buffer.text(buffer) =~ "api.Enum.LifecycleStages.Rendered"
+    assert Buffer.text(buffer) =~ "markChartDrawn(spec.id)"
     assert Buffer.text(buffer) =~ ~s(id="app" tabindex="0")
     assert Buffer.text(buffer) =~ "univerSnapshot"
     assert Buffer.text(buffer) =~ "book.save()"
@@ -48,6 +57,84 @@ defmodule Aimax.SpreadsheetModeTest do
     assert Buffer.text(buffer) =~ "aimax:'request-focus'"
     assert Buffer.text(buffer) =~ "book.setActiveSheet(sheets[wanted])"
     assert Buffer.text(buffer) =~ "_aimax/spreadsheet"
+  end
+
+  test "agents can persist charts embedded in sheet ranges", %{path: path} do
+    buffer = call!("spreadsheet-open!", [path])
+
+    workbook = %{
+      "version" => 1,
+      "sheets" => [
+        %{
+          "name" => "Budget",
+          "data" => [["Month", "Spend"], ["Jan", 10], ["Feb", 12]]
+        }
+      ]
+    }
+
+    assert [200, _] =
+             call!("spreadsheet-app-request", [buffer, "write", Jason.encode!(workbook)])
+
+    assert true ==
+             call!("spreadsheet-add-chart!", [
+               buffer,
+               "Budget",
+               "monthly-spend",
+               "line",
+               "A1:B3",
+               "D2:K18",
+               "Monthly spending"
+             ])
+
+    stored = Jason.decode!(File.read!(path))
+    chart = get_in(stored, ["extensions", "aimax", "charts", Access.at(0)])
+
+    assert chart == %{
+             "id" => "monthly-spend",
+             "sheet" => "Budget",
+             "type" => "line",
+             "source" => "A1:B3",
+             "anchor" => "D2:K18",
+             "title" => "Monthly spending"
+           }
+
+    assert true == call!("spreadsheet-delete-chart!", [buffer, "monthly-spend"])
+    assert get_in(Jason.decode!(File.read!(path)), ["extensions", "aimax", "charts"]) == []
+  end
+
+  test "agents can create a chart without choosing its ID or anchor", %{path: path} do
+    buffer = call!("spreadsheet-open!", [path])
+
+    workbook = %{
+      "version" => 1,
+      "sheets" => [%{"name" => "Budget", "data" => [["Month", "Spend"], ["Jan", 10]]}]
+    }
+
+    assert [200, _] =
+             call!("spreadsheet-app-request", [buffer, "write", Jason.encode!(workbook)])
+
+    assert true ==
+             call!("spreadsheet-chart!", [buffer, "Budget", "A1:B2", "column", "Spend"])
+
+    [chart_pairs] = call!("spreadsheet-charts", [buffer])
+
+    chart =
+      chart_pairs
+      |> Enum.chunk_every(2)
+      |> Map.new(fn [{:sym, key}, value] -> {key, value} end)
+
+    assert chart["id"] == "chart-1"
+    assert chart["anchor"] == "D1:K16"
+
+    status =
+      call!("spreadsheet-chart-status", [buffer])
+      |> Enum.chunk_every(2)
+      |> Map.new(fn [{:sym, key}, value] -> {key, value} end)
+
+    assert status["configured"] == ["chart-1"]
+    assert status["state"] == "loading"
+    assert status["mounted"] == []
+    assert status["drawn"] == []
   end
 
   test "writes formulas through the backend and rejects invalid workbooks", %{path: path} do

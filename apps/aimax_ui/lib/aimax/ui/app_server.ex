@@ -42,6 +42,13 @@ defmodule Aimax.Ui.AppServer do
     end
   end
 
+  post "/a/:tok/b/:buf/_aimax/spreadsheet" do
+    case read_request_body(conn) do
+      {:ok, body, conn} -> spreadsheet_request(conn, tok, buf, "chart-status", body)
+      {:error, conn} -> send_resp(conn, 413, ~s({"error":"chart status is too large"}))
+    end
+  end
+
   get "/a/:tok/b/:buf/*rest" do
     cond do
       not Plug.Crypto.secure_compare(tok, token()) ->

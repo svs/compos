@@ -162,13 +162,13 @@
                                  (if (member s acc2) acc2 (cons s acc2)))
                                acc (preset-servers p)))
                        '() (or (plist-get conf 'presets) '())))
-               ""))
-         (primer (if (boundp (quote hello)) (hello) "")))
+               "")))
     (filter
       (lambda (part) (not (equal? (car (cdr part)) "")))
-      (append mode-parts
-              (list (list "mcp" mcp-note)
-                    (list "aimax-primer" primer))))))
+      (append
+        (aimax-acp-prompt-parts)
+        (list (list "mcp" mcp-note))
+        mode-parts))))
 
 (define (agent-system-prompt-parts conf)
   (let* ((buf (plist-get conf 'buffer))

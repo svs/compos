@@ -6057,8 +6057,8 @@
 ;;; with; only the newest message carries fresh bytes.
 
 ;; how to read and change a live buffer. One string: the two copies of
-;; this paragraph had drifted apart. (R7 folds it into one primer with
-;; *llm-system* and the mcp note.)
+;; this paragraph had drifted apart. Prompt composition adds it as the stable
+;; chat preamble after the shared guidance and MCP note.
 (define *chat-edit-protocol*
   (string-append
     "Never guess a buffer's contents. For a source buffer, read the "

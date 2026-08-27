@@ -16,6 +16,54 @@
     (lambda (buf) (when (buffer-known? buf) (buffer-kill! buf)))
     (cons "*Help*" buffers)))
 
+(deftest 'direct-and-acp-agents-share-the-same-standing-guidance
+  "both lanes compose the same named text files in the same order"
+  (lambda ()
+    (let ((direct (aimax-direct-prompt-parts))
+          (acp (aimax-acp-prompt-parts)))
+      (check-equal! direct acp "the lane guidance is identical")
+      (check-equal! (map car direct)
+                    '("aimax-identity" "quiet-editor" "chat-context"
+                      "scheme-api" "discovery" "repository"
+                      "scheme-authoring" "browser" "catalog" "recipes")
+                    "the checked-in fragment order is explicit")
+      (for-each
+        (lambda (part)
+          (check-true! (> (string-length (cadr part)) 0)
+                       (string-append (car part) " is not empty")))
+        direct)
+      (check-equal! (hello) (prompt-parts-text acp)
+                    "hello is only the shared composition")
+      (check-contains! (hello) "(chat-context)"
+                       "every agent learns to inspect its context"))))
+
+(deftest 'chat-context-names-the-conversation-and-its-companions
+  "the structured context reports identity, group membership, and prompt state"
+  (lambda ()
+    (let ((chat (t--prompt-chat "*prompt-context*" "api"))
+          (doc "prompt-context.md"))
+      (test-buffer! doc "work")
+      (buffer-set-local! chat 'group "prompt-context-group")
+      (buffer-set-local! doc 'group "prompt-context-group")
+      (buffer-set-local! doc 'mode-name "text-mode")
+      (buffer-set-local! chat 'agent-slug "prompt-agent")
+      (buffer-set-local! chat 'default-directory "/tmp/prompt-context")
+      (let ((ctx (with-current-buffer chat (lambda () (chat-context)))))
+        (check-equal! (plist-get ctx 'chat) chat "the chat name")
+        (check-equal! (plist-get ctx 'agent) "prompt-agent" "the agent name")
+        (check-true! (member chat (plist-get ctx 'group-members))
+                     "the chat belongs to the group")
+        (check-true! (member doc (plist-get ctx 'companions))
+                     "the work buffer is a companion")
+        (check-equal! (plist-get ctx 'directory) "/tmp/prompt-context"
+                      "the workspace directory")
+        (check-equal! (plist-get ctx 'prompt) 'prospective
+                      "the prompt starts prospective"))
+      (chat-prompt-freeze! chat)
+      (check-equal! (plist-get (chat-context chat) 'prompt) 'frozen
+                    "the context reports the frozen prompt")
+      (t--prompt-cleanup chat doc))))
+
 (deftest 'chat-show-prompt-shows-the-direct-prompt-and-its-composition
   "the help page names each fragment and includes the canonical join"
   (lambda ()
@@ -49,8 +97,10 @@
                        "the page says that the prompt is not frozen yet")
       (check-contains! page "first send freezes it"
                        "the page states the conversation lifecycle")
-      (check-equal! (car (car (reverse parts))) "aimax-primer"
-                    "the primer remains the final ACP fragment")
+      (check-equal! (car (car parts)) "aimax-identity"
+                    "ACP starts with the shared guidance")
+      (check-true! (assoc "chat-context" parts)
+                   "ACP receives the shared context guidance")
       (t--prompt-cleanup chat))))
 
 (deftest 'modes-compose-named-buffer-local-prompt-fragments

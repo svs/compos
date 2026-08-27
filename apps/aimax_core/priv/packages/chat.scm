@@ -541,6 +541,32 @@
 ;; ordering, duplication and cache stability inspectable without parsing the
 ;; final prose.  mcp.scm loads after this package and supplies the tool-side
 ;; fragments when it is present.
+(define (chat-context &optional buf)
+  (let* ((chat (or buf (current-buffer)))
+         (group (buffer-group chat))
+         (members (if group (group-buffers group) '()))
+         (companions (if group (group-docs group) '())))
+    (list
+      'chat chat
+      'agent (or (buffer-local chat 'agent-slug) #f)
+      'connector (or (buffer-local chat 'agent-connector) "api")
+      'model (or (buffer-local chat 'agent-model) (llm-model))
+      'group (or group #f)
+      'group-name (if group (group-display-name group) #f)
+      'group-members members
+      'companions companions
+      'roles (if group
+                 (map (lambda (name)
+                        (list name (or (buffer-group-role name group) #f)))
+                      companions)
+                 '())
+      'directory (or (buffer-local chat 'default-directory) (default-directory))
+      'visible-context (editor-context chat)
+      'prompt (if (and (boundp (quote chat-prompt-frozen?))
+                       (chat-prompt-frozen? chat))
+                  'frozen
+                  'prospective))))
+
 (define (chat-live-system-prompt-parts buf &optional tools?)
   (append
     (if (and tools?
@@ -569,6 +595,8 @@
 
 (domain! 'chat)
 (effects! '(read))
+(public! 'chat-context
+  "(chat-context [BUF]) — chat identity, group, companions, workspace, visible context, and prompt state")
 (public! 'chat-live-system-prompt-parts
   "(chat-live-system-prompt-parts BUF [TOOLS?]) — current direct prompt fragments before the conversation freeze")
 (effects! '(write))

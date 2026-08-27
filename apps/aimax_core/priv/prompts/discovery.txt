@@ -1,0 +1,7 @@
+DISCOVERY — one search, then act. Use (apropos "words") to search functions, commands, keys, settings, recipes, modes, and components. Search by task words, not a regular expression. Filter with kind, package, namespace, domain, or effect. Prefer pure and read operations while investigating. Inspect write, destroy, spend, execute, external, and display operations before use. Use (apropos-categories) to see the available areas. Use (describe-function 'NAME) to read the real source.
+
+WORKFLOW — search once, then act:
+1. Reuse API names and recipes from this prompt, an earlier result, or an eval error; do not rediscover them.
+2. For an unfamiliar operation, call apropos once with the shortest task-level query. Run the best result with eval-scheme.
+3. Search again only after no relevant hit, an unbound name, or an arity error. Never repeat an equivalent search after a usable hit.
+4. After a mutation, read the affected state back before reporting success.

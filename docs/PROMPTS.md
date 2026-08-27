@@ -7,11 +7,12 @@ assembled near an HTTP call.
 ## Sources and boot order
 
 `priv/editor.scm` defines `chat-preamble`, the stable conversation and buffer
-role. Feature packages own the facts for their named fragments. The
-`priv/packages/prompts.scm` package owns shared prose, the canonical join, and
-prompt inspection. It loads after `skills.scm`, when all bundled providers are
-ready. `init.scm` is the authoritative answer to when a prompt source becomes
-available.
+role. Checked-in standing guidance lives as plain text in `priv/prompts/`.
+`priv/packages/prompts.scm` names and orders those files, adds generated catalog
+and recipe fragments, and owns the canonical join and prompt inspection.
+Feature packages own the facts for their mode-specific fragments. The package
+loads after `skills.scm`, when all bundled providers are ready. `init.scm` is
+the authoritative answer to when a prompt source becomes available.
 
 The code-agent fragment itself is `code-agent-system-note` in
 `priv/packages/code.scm`. It is loaded because `priv/init.scm` explicitly loads
@@ -29,11 +30,12 @@ The first turn stores `chat-prompt-snapshot` with the conversation.
 `chat-live-system-prompt-parts` computes current sources without changing the
 snapshot. With tools enabled the fragments are:
 
-1. `aimax-tools` — the intrinsic editor tool primer.
-2. `mcp` — notes for the remote servers this chat actually holds.
-3. `skills` — the currently available skill index.
-4. Buffer-local mode fragments, in their injection order.
-5. `chat-preamble` — the chat or companion role.
+1. Shared text-file fragments from `priv/prompts/`, in their declared order.
+2. `catalog` and `recipes` — generated shared guidance.
+3. `mcp` — notes for the remote servers this chat actually holds.
+4. `skills` — the currently available skill index.
+5. Buffer-local mode fragments, in their injection order.
+6. `chat-preamble` — the chat or companion role.
 
 Empty fragments are omitted. `prompt-parts-text` performs the sole canonical
 join using two newlines. This data form lets tests and diagnostics verify order,
@@ -43,7 +45,9 @@ presence and duplication without parsing prose.
 
 ACP tools and prompts are fixed when a session starts.
 `agent-system-prompt-parts` uses the same conversation snapshot as the direct
-lane. It contains buffer-local mode fragments, then `mcp` and `aimax-primer`.
+lane. It contains the same shared text-file, `catalog`, and `recipes` fragments,
+then `mcp` and the buffer-local mode fragments. `hello` is a compatibility and
+RPC view that joins those same ACP fragments; it is not separate guidance.
 `agent-live-system-prompt-parts` computes current sources for inspection.
 `agent-config-with-system-parts` appends them through
 `_meta.systemPrompt.append`. A connector or preset change restarts or
@@ -70,9 +74,8 @@ turn.
 
 ## Quiet editor policy
 
-`*agent-quiet-prompt*` in `priv/packages/prompts.scm` owns the default visible-state
-policy. The direct lane receives it through `aimax-tools`. ACP sessions receive
-it through `hello` in the `aimax-primer` fragment.
+`priv/prompts/quiet-editor.txt` owns the default visible-state policy. Both
+connector lanes receive it as the named `quiet-editor` fragment.
 
 Agents work on named buffers without displaying or selecting them. Display is
 only for an explicit presentation request. The catalog marks visible-state
@@ -80,6 +83,16 @@ operations with the `display` effect. The agent-facing `apropos` tool excludes
 that effect by default and accepts `include-display` for presentation work.
 Public Scheme `apropos` remains complete. Tool enforcement can use the same
 checked-in effect later without changing this prompt contract.
+
+## Conversation context
+
+`priv/prompts/chat-context.txt` tells every agent to call `(chat-context)` once
+at the start of a task. The structured result identifies the chat buffer,
+agent, connector, model, group and members, companion buffers and roles,
+workspace directory, visible editor context, and whether the prompt is still
+prospective or frozen. Agents call it again when group membership, companions,
+or visible work changes. This keeps identity and buffer guidance uniform across
+direct and ACP agents without baking volatile state into the cached prompt.
 
 ## Inspection
 

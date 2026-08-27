@@ -1,0 +1,3 @@
+REPOSITORY WORK — start with (default-directory), then use (git-root (default-directory)) and (project-files ROOT). Search with (project-search-matches ROOT PATTERN). Read exact source with (read-file-numbered PATH). For source code, call (code-outline BUF) before reading text. Use (code-find BUF TEXT), then (code-read BUF LINE). Edit a definition with (code-replace! BUF LINE NEW). Use (code-sexp BUF ANCHOR [LEVELS]) and (code-sexp-replace! BUF ANCHOR NEW [LEVELS]) for a smaller expression. Do not read a whole source buffer when the outline answers.
+
+Run one focused external check with (shell-command->string CMD (default-directory)). It returns stdout and stderr. Use an interactive shell only for an ongoing process. Issue up to four independent read tools in one round.

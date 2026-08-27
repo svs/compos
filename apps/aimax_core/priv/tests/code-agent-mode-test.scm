@@ -138,10 +138,10 @@
                       1 "the named code-agent fragment occurs once")
         (check-equal! (car (car (reverse system-parts))) "chat-preamble"
                       "the preamble remains the final fragment")
-        (check-equal! (car (car acp-parts)) "code-agent"
-                      "ACP names the same standing code fragment")
-        (check-equal! (car (car (reverse acp-parts))) "aimax-primer"
-                      "ACP keeps its primer last")
+        (check-equal! (car (car acp-parts)) "aimax-identity"
+                      "ACP starts with the shared guidance")
+        (check-equal! (car (car (reverse acp-parts))) "code-agent"
+                      "ACP includes the mode fragment once")
         (check-equal! (prompt-parts-text system-parts)
                       (string-append first "\n\n" (chat-preamble chat))
                       "named parts reproduce the wire prompt")

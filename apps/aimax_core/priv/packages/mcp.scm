@@ -135,12 +135,16 @@
          (mode-parts
            (if (boundp (quote prompt-buffer-parts))
                (prompt-buffer-parts buf)
+               '()))
+         (guidance
+           (if (and aimax? (boundp (quote aimax-direct-prompt-parts)))
+               (aimax-direct-prompt-parts)
                '())))
     (filter
       (lambda (part) (not (equal? (car (cdr part)) "")))
       (append
-        (list (list "aimax-tools" (if aimax? *llm-system* ""))
-              (list "mcp" note)
+        guidance
+        (list (list "mcp" note)
               (list "skills" sk))
         mode-parts))))
 
@@ -345,8 +349,7 @@
 ;; The note every tool-using model gets. A model knows only the tools it
 ;; holds: an assistant asked to "run whoami on ats-ash" read the name as a
 ;; hostname and reached for ssh, because nothing said the name belongs to
-;; an MCP server. The browser paragraph in *llm-system* exists for the same
-;; reason.
+;; an MCP server. The shared browser prompt fragment exists for the same reason.
 ;; Search every registered server's tools by name and description. This is
 ;; apropos for MCP: the prompt carries the server names and this verb,
 ;; nothing more, and the model pulls the one tool it needs. Injecting 66

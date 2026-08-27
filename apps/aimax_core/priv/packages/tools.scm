@@ -52,7 +52,11 @@
     (and (pair? effects) (member (car effects) '(pure read)) #t)))
 
 (define (llm-with-tools prompt handler)
-  (llm-tools prompt *llm-system* (llm-tool-specs) llm-tool-call handler))
+  (llm-tools prompt
+    (if (boundp (quote aimax-direct-prompt-parts))
+        (prompt-parts-text (aimax-direct-prompt-parts))
+        *llm-system*)
+    (llm-tool-specs) llm-tool-call handler))
 
 ;; embark for the model: the same target/action table C-. uses. The
 ;; editor context names the target ids; act runs the verb on one.

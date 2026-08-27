@@ -20,6 +20,33 @@
     (".md" "markdown") (".markdown" "markdown") (".org" "markdown")
     (".txt" "markdown")))
 
+;; Which renderer draws a Markdown page. Elixir owns both engines and reads
+;; this choice from the 'preview-engine buffer-local; the choice itself is
+;; policy, so it is made here.
+;;
+;; The tree-sitter engine draws from the grammar's own tree, so it knows
+;; where every byte was drawn: the caret lands on the byte it belongs to,
+;; and a click maps back to the source. Earmark cannot answer that question.
+;; Earmark still carries the code-block heads, the llm-response blockquotes
+;; and the URL embeds, so a page that uses those loses them until they are
+;; ported. Set this to "earmark" to get them back.
+;;
+;; A buffer with no grammar falls back to Earmark rather than drawing
+;; nothing, so this is safe to set on a machine with no markdown grammar.
+(defgroup 'preview "Rendered pages.")
+
+(defcustom 'markdown-preview-engine "tree-sitter"
+  "Which renderer draws a Markdown page: \"tree-sitter\" or \"earmark\"."
+  'group 'preview 'type 'string)
+
+(public! 'preview-set-engine!
+  "(preview-set-engine! BUF) — put the configured Markdown engine on BUF")
+
+;; Called wherever a buffer starts rendering as markdown. Elixir reads the
+;; local per render, so a change reaches the page on the next draw.
+(define (preview-set-engine! buf)
+  (buffer-set-local! buf 'preview-engine markdown-preview-engine))
+
 ;; A generated buffer has no extension to read a renderer from, so it says
 ;; which renderer it wants in a buffer-local. Help docs are the case: the
 ;; text is markdown, the buffer is "*Help*", and C-c C-v must still toggle
@@ -47,6 +74,7 @@
             (let ((r (preview-renderer-for (current-buffer))))
               (if r
                   (begin
+                    (if (equal? r "markdown") (preview-set-engine! (current-buffer)))
                     (buffer-set-local! (current-buffer) 'render-mode r)
                     (message (string-append "Preview on (" r ") — C-c C-v toggles")))
                   (message "No preview renderer for this buffer")))))))

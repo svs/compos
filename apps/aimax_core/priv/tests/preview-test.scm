@@ -172,3 +172,47 @@
                     "Start [Preview package](../packages/preview.scm)here"
                     "the typed label appears at point")
       (buffer-kill! buf))))
+
+(deftest 'a-markdown-page-carries-the-configured-engine
+  "the engine choice is policy, so Scheme puts it on the buffer"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-preview-engine.md" "# title\n")))
+      (with-current-buffer buf
+        (lambda ()
+          (check-equal! (buffer-local buf 'preview-engine) #f
+                        "a plain source buffer names no engine")
+          (run-command "preview-mode")
+          (check-equal! (buffer-local buf 'render-mode) "markdown"
+                        "the page renders as markdown")
+          (check-equal! (buffer-local buf 'preview-engine) markdown-preview-engine
+                        "and it carries the configured engine")))
+      (buffer-kill! buf))))
+
+(deftest 'the-engine-setting-decides-which-renderer-a-page-gets
+  "changing the setting changes the next page, and only that"
+  (lambda ()
+    (let ((saved markdown-preview-engine)
+          (buf (test-buffer! "zz-preview-engine-2.md" "# title\n")))
+      (set! markdown-preview-engine "earmark")
+      (preview-set-engine! buf)
+      (check-equal! (buffer-local buf 'preview-engine) "earmark"
+                    "the buffer takes the setting it was given")
+      (set! markdown-preview-engine "tree-sitter")
+      (preview-set-engine! buf)
+      (check-equal! (buffer-local buf 'preview-engine) "tree-sitter"
+                    "and follows it back again")
+      (set! markdown-preview-engine saved)
+      (buffer-kill! buf))))
+
+(deftest 'an-html-page-names-no-markdown-engine
+  "only a markdown page carries the local the markdown renderer reads"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-preview-engine.html" "<p>hi</p>\n")))
+      (with-current-buffer buf
+        (lambda ()
+          (run-command "preview-mode")
+          (check-equal! (buffer-local buf 'render-mode) "html"
+                        "the page renders as html")
+          (check-equal! (buffer-local buf 'preview-engine) #f
+                        "and names no markdown engine")))
+      (buffer-kill! buf))))

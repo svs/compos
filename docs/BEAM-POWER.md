@@ -101,10 +101,18 @@ table and does nothing else: it holds no buffer state and runs no buffer code.
 On restart it re-adopts every live buffer and asks each for its row, so the
 model heals instead of waiting for the next edit.
 
-`Aimax.Core.Session` still breaks this rule. It owns the Scheme environment
-table, the command table and the escaped-closure table, and it also runs the
-riskiest code in the daemon. A Session crash therefore destroys every command
-and every global. Fixing that means a table owner that only owns tables.
+`Aimax.Core.SchemeTables` is the same answer for the Scheme world.
+`Aimax.Core.Session` loads the stdlib, reloads files, rebinds primitives and
+sweeps frames, and it used to own all three of the Scheme tables as well. One
+crash there took every registered command and the whole environment with it,
+and every lane worker holding the published handle then read a dead table id.
+
+The two named tables are created once by the owner. Session empties and
+refills them, so their identity is stable across a restart. The environment
+table has to be created where `Scheme.new` runs, so Session names the owner
+its heir: the table transfers instead of dying, in-flight lane work finishes
+against it, and the owner drops it once the new Session has published its
+replacement.
 
 ### Know which lane you are on
 
@@ -155,9 +163,19 @@ Named so a contributor can pick one up, not as a warning.
 - `Aimax.Core.Editor` is one global process for every frame. Frames are already
   independent. They could be processes, with the shared parts (keymaps, faces,
   kill ring) in ETS.
-- `Aimax.Core.Session` owns hot ETS and runs risky code. See above.
-- Tree-sitter shares the buffer mailbox. A reparse sits in front of typing. It
-  wants its own process, or a task that publishes spans into the read model.
-- The top-level supervisor is `:one_for_one`, but the child list documents a
-  dependency order. A Session crash leaves `Desktop` and `Hotload` running
-  against a dead interpreter. The tail of that list wants `:rest_for_one`.
+- Tree-sitter shares the buffer mailbox. `ts_node` is asked once per keypress
+  and carries a 30 second timeout, in the process that also serves `:insert`,
+  so a reparse of a large file sits in front of typing.
+
+  The fix is a process per buffer that owns the parser, takes edits as casts
+  and publishes spans into the read model. It is NOT a task: `TsRes` is a
+  `Mutex<TsState>`, so a task parsing in parallel would hold that mutex and
+  block the buffer's next `ts_state_edit` **inside the NIF**, which is worse
+  than waiting in a mailbox. Whatever owns the parser must be the only thing
+  that touches it. The hard part is keeping the tree in step with the rope
+  through undo, which swaps a whole rope underneath it.
+- The top-level supervisor is `:one_for_one`, and the child list documents a
+  dependency order. `:rest_for_one` for the tail looks like the answer and is
+  not: `Desktop.init` sends itself `:restore`, so a Session crash would
+  re-restore the whole desktop over live buffers. Start order already comes
+  from the list. Anything done here has to leave Desktop out.

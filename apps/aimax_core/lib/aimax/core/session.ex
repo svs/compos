@@ -259,16 +259,36 @@ defmodule Aimax.Core.Session do
 
   @impl true
   def init(_opts) do
-    :ets.new(Aimax.Core.SchemeAPI.commands_table(), [:named_table, :public, :set])
-    :ets.new(@escaped, [:named_table, :public, :set])
+    # The tables belong to Aimax.Core.SchemeTables, which runs no Scheme and
+    # so cannot die of it. Empty them rather than create them: their identity
+    # then survives a crash here, and no lane worker holding the published
+    # handle ever reads a dead table id.
+    Enum.each(Aimax.Core.SchemeTables.named_tables(), &Aimax.Core.SchemeTables.reset/1)
     # *messages* is this session's log, so it starts empty every boot. Drop
     # the row and the checkpoint an older daemon left: without this, the
     # catalog still names *messages*, create_buffer restores last session's
     # text, and boot pays for a restore nobody wants.
     Aimax.Core.BufferStore.forget(@messages)
-    {:ok, _} = Aimax.Core.create_buffer(@messages, persistent: false)
+
+    case Aimax.Core.create_buffer(@messages, persistent: false) do
+      {:ok, _} ->
+        :ok
+
+      # A restart, not a boot: the log buffer outlived the process that
+      # writes to it. Matching only {:ok, _} here made this init fail, and a
+      # Session that cannot restart is a Session whose every crash ends as a
+      # crash loop and takes the application down with it. Empty the buffer
+      # instead, which is what a fresh session's log means.
+      {:error, :already_exists} ->
+        size = Aimax.Core.Buffer.byte_size(@messages)
+        if size > 0, do: Aimax.Core.Buffer.delete_range(@messages, 0, size, source: :editor)
+        :ok
+    end
 
     interp = Scheme.new(primitives: Aimax.Core.SchemeAPI.primitives())
+    # this process created the environment table, so a crash here would
+    # destroy it; hand it to the table owner instead
+    Aimax.Core.SchemeTables.adopt(interp.store.tid)
     interp = Scheme.register(interp, session_primitives(interp.global))
     interp = load_stdlib!(interp)
 

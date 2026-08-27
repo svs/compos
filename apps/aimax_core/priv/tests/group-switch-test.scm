@@ -67,6 +67,17 @@
   (set-prefix-arg! 4)
   (run-command "group-switch-buffer"))
 
+(deftest 'group-switch-buffer-opens-its-candidate-prompt
+  "the buffer helper has its own arity and opens the prompt"
+  (lambda ()
+    (t--sw-setup!)
+    (t--sw-open-switcher!)
+    (check-true! (minibuffer-state) "the prompt opened")
+    (check-equal! (plist-get (minibuffer-state) 'prompt)
+                  "Switch buffer: "
+                  "the buffer switcher owns the prompt")
+    (t--sw-done!)))
+
 ;;; --- founding a group -----------------------------------------------------------
 
 (deftest 'new-from-visible-preserves-old-memberships-and-the-layout
@@ -104,6 +115,31 @@
       (check-false! (frame-local 'current-group) "the frame stands in none")
       (check-equal! (buffer-group-ids t--sw-first) '() "the buffer joined none")
       (check-equal! (window-tree) before "and the windows did not move"))
+    (t--sw-done!)))
+
+(deftest 'new-buffers-use-the-derived-current-group
+  "buffer-new joins a homogeneous context and stays ungrouped in a mixed one"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((here (group-record-create! "zzsw-here"))
+          (grouped "zz-sw-new-grouped")
+          (ungrouped "zz-sw-new-ungrouped"))
+      (buffer-add-group! t--sw-first here)
+      (switch-to-buffer! t--sw-first)
+      (run-command "buffer-new")
+      (t--sw-type! grouped)
+      (t--sw-key! "confirm-input")
+      (check-true! (buffer-in-group? grouped here) "homogeneous work inherits current-group")
+
+      (switch-to-buffer! t--sw-third)
+      (check-false! (frame-group) "the ungrouped buffer clears current-group")
+      (run-command "buffer-new")
+      (t--sw-type! ungrouped)
+      (t--sw-key! "confirm-input")
+      (check-equal! (buffer-group-ids ungrouped) '() "without current-group it starts ungrouped")
+
+      (buffer-kill! grouped)
+      (buffer-kill! ungrouped))
     (t--sw-done!)))
 
 ;;; --- pull, push, pop -------------------------------------------------------------
@@ -491,6 +527,30 @@
       (check-false! (buffer-in-group? t--sw-third current) "it did not join this group"))
     (t--sw-done!)))
 
+(deftest 'context-confirm-asks-which-membership-to-enter
+  "C-RET on a multiply grouped buffer does not guess its destination"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((here (group-record-create! "zzsw-here"))
+          (first (group-record-create! "zzsw-first-choice"))
+          (second (group-record-create! "zzsw-second-choice")))
+      (buffer-add-group! t--sw-first here)
+      (buffer-add-group! t--sw-second first)
+      (buffer-add-group! t--sw-second second)
+      (switch-to-buffer! t--sw-first)
+
+      (t--sw-open-all!)
+      (t--sw-type! t--sw-second)
+      (t--sw-key! "confirm-context")
+      (check-true! (member "zzsw-first-choice" (t--sw-labels)) "the first membership is offered")
+      (check-true! (member "zzsw-second-choice" (t--sw-labels)) "the second membership is offered")
+      (t--sw-type! "zzsw-second-choice")
+      (t--sw-key! "confirm")
+
+      (check-equal! (frame-group) second "the chosen membership was entered")
+      (check-equal! (current-buffer) t--sw-second "the candidate has focus"))
+    (t--sw-done!)))
+
 (deftest 'confirm-follows-the-picked-buffers-group-without-moving-membership
   "RET changes the frame standing but does not change membership"
   (lambda ()
@@ -545,6 +605,166 @@
       (check-equal! (frame-local 'current-group) right "the context moved")
       (check-equal! (frame-local 'previous-group) left "and remembers where from")
       (check-equal! (buffer-group t--sw-first) left "the other buffer kept its group"))
+    (t--sw-done!)))
+
+(deftest 'switching-context-removes-foreign-panes-from-a-saved-layout
+  "a stale layout cannot reintroduce work that no longer belongs to the group"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((docs (group-record-create! "zzsw-docs"))
+          (foreign (group-record-create! "zzsw-foreign")))
+      (buffer-add-group! t--sw-first docs)
+      (buffer-add-group! t--sw-second docs)
+      (buffer-add-group! t--sw-third docs)
+
+      (switch-to-buffer! t--sw-first)
+      (split-window! 'h 0.34)
+      (other-window!)
+      (switch-to-buffer! t--sw-second)
+      (split-window! 'h 0.5)
+      (other-window!)
+      (switch-to-buffer! t--sw-third)
+      (group-layout-save! docs)
+
+      ;; The pane was valid when DOCS saved it. It became foreign later.
+      (buffer-remove-group! t--sw-third docs)
+      (buffer-add-group! t--sw-third foreign)
+
+      (delete-other-windows!)
+      (switch-to-buffer! t--sw-third)
+      (switch-to-group! docs)
+
+      (check-false! (member t--sw-third (map cadr (window-list)))
+                    "the foreign pane was removed")
+      (check-false! (member t--sw-third (window-tree-buffers (group-layout docs)))
+                    "the healed snapshot no longer remembers it")
+      (for-each
+        (lambda (window)
+          (check-true! (buffer-in-group? (cadr window) docs)
+                       "every restored pane belongs to DOCS"))
+        (window-list))
+      (check-equal! (frame-group) docs "the restored frame remains homogeneous"))
+    (t--sw-done!)))
+
+(deftest 'group-switch-uses-mru-when-the-visible-frame-is-homogeneous
+  "a frame already inside one group offers the other groups by recency"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((here (group-record-create! "zzsw-here"))
+          (older (group-record-create! "zzsw-older"))
+          (recent (group-record-create! "zzsw-recent")))
+      (buffer-add-group! t--sw-first here)
+      (buffer-add-group! t--sw-second here)
+      (set-frame-local! 'current-group here)
+      (delete-other-windows!)
+      (switch-to-buffer! t--sw-first)
+      (split-window! 'h 0.5)
+      (other-window!)
+      (switch-to-buffer! t--sw-second)
+      (mru-note-group! older)
+      (mru-note-group! recent)
+      (mru-note-group! here)
+
+      (check-true! (group-visible-homogeneous? here) "the shared predicate sees one group")
+      (run-command "group-switch")
+      (check-equal! (t--sw-selected) "zzsw-recent" "the most recent other group leads")
+      (check-true! (< (t--sw-at "zzsw-recent") (t--sw-at "zzsw-older"))
+                   "the other groups keep MRU order")
+      (check-false! (member "zzsw-here" (t--sw-labels))
+                    "the current group is not a destination"))
+    (t--sw-done!)))
+
+(deftest 'group-switch-puts-the-current-buffers-groups-first-in-a-mixed-frame
+  "a foreign selected buffer makes its groups immediate destinations"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((here (group-record-create! "zzsw-here"))
+          (target (group-record-create! "zzsw-target"))
+          (recent (group-record-create! "zzsw-recent")))
+      (buffer-add-group! t--sw-first here)
+      (buffer-add-group! t--sw-second target)
+      (set-frame-local! 'current-group here)
+      (delete-other-windows!)
+      (switch-to-buffer! t--sw-first)
+      (split-window! 'h 0.5)
+      (other-window!)
+      (switch-to-buffer! t--sw-second)
+      (mru-note-group! target)
+      (mru-note-group! recent)
+      (mru-note-group! here)
+
+      (check-false! (group-visible-homogeneous? here) "the shared predicate sees the detour")
+      (run-command "group-switch")
+      (check-equal! (t--sw-selected) "zzsw-target" "the selected buffer's group leads")
+      (check-true! (< (t--sw-at "zzsw-target") (t--sw-at "zzsw-recent"))
+                   "the buffer's group outranks a newer unrelated group"))
+    (t--sw-done!)))
+
+(deftest 'current-group-is-derived-from-every-visible-work-buffer
+  "homogeneous windows establish a context and a foreign window clears it"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((here (group-record-create! "zzsw-here"))
+          (foreign (group-record-create! "zzsw-foreign")))
+      (buffer-add-group! t--sw-first here)
+      (buffer-add-group! t--sw-second here)
+      (buffer-add-group! t--sw-third foreign)
+      (switch-to-buffer! t--sw-first)
+      (check-equal! (frame-group) here "one grouped window establishes its group")
+
+      (split-window! 'h 0.5)
+      (other-window!)
+      (switch-to-buffer! t--sw-second)
+      (check-equal! (frame-group) here "two members keep the shared group")
+
+      (switch-to-buffer! t--sw-third)
+      (check-false! (frame-group) "a foreign visible buffer makes the frame mixed")
+
+      (delete-window!)
+      (check-equal! (frame-group) here "removing the foreign window restores homogeneity"))
+    (t--sw-done!)))
+
+(deftest 'context-confirm-on-an-ungrouped-buffer-starts-a-group
+  "C-RET turns a new entrant into an explicit context"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((here (group-record-create! "zzsw-here")))
+      (buffer-add-group! t--sw-first here)
+      (switch-to-buffer! t--sw-first)
+      (t--sw-open-all!)
+      (t--sw-type! t--sw-third)
+      (t--sw-key! "confirm-context")
+      (t--sw-type! "zzsw-started")
+      (t--sw-key! "confirm")
+
+      (let ((started (group-resolve-id "zzsw-started")))
+        (check-true! started "a group was created")
+        (check-true! (buffer-in-group? t--sw-third started) "the picked buffer joined it")
+        (check-equal! (frame-group) started "the new context was entered")
+        (check-equal! (current-buffer) t--sw-third "the picked buffer has focus")))
+    (t--sw-done!)))
+
+(deftest 'switch-to-group-can-pop-the-current-buffer-into-a-new-context
+  "the explicit action adds the destination and removes only the current group"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((source (group-record-create! "zzsw-source"))
+          (kept (group-record-create! "zzsw-kept")))
+      (buffer-add-group! t--sw-first source)
+      (buffer-add-group! t--sw-first kept)
+      (switch-to-buffer! t--sw-first)
+      (set-frame-local! 'current-group source)
+      (run-command "switch-to-group")
+      (t--sw-type! "Move this buffer into a new group")
+      (t--sw-key! "confirm")
+      (t--sw-type! "zzsw-popped")
+      (t--sw-key! "confirm")
+
+      (let ((popped (group-resolve-id "zzsw-popped")))
+        (check-true! (buffer-in-group? t--sw-first popped) "the destination was added")
+        (check-false! (buffer-in-group? t--sw-first source) "the visible source was removed")
+        (check-true! (buffer-in-group? t--sw-first kept) "an unrelated membership remains")
+        (check-equal! (frame-group) popped "the new group was entered")))
     (t--sw-done!)))
 
 (deftest 'killing-a-visible-group-buffer-never-shows-a-foreign-buffer

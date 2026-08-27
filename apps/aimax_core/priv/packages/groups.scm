@@ -443,6 +443,8 @@
     (buffer-set-local! b 'group #f)
     (buffer-set-local! b 'companion-of #f)
     (buffer-modeline-group-refresh! b)
+    (when (boundp 'group-current-recalculate!)
+      (group-current-recalculate!))
     id))
 
 ;; A role belongs to the membership, not globally to the buffer: one buffer
@@ -490,6 +492,8 @@
             (buffer-set-local! b 'group #f)
             (buffer-set-local! b 'companion-of #f)
             (buffer-modeline-group-refresh! b)
+            (when (boundp 'group-current-recalculate!)
+              (group-current-recalculate!))
             id))))
 
 (define (buffer-add-group-as! b value role)
@@ -506,6 +510,8 @@
           (buffer-set-local! b 'group #f)
           (buffer-set-local! b 'companion-of #f)
           (buffer-modeline-group-refresh! b)))
+    (when (boundp 'group-current-recalculate!)
+      (group-current-recalculate!))
     id))
 
 (define (buffer-remove-group! b value)
@@ -520,7 +526,9 @@
             (buffer-set-local! b 'group-roles
               (remove (lambda (entry) (equal? (car entry) id))
                       (or (buffer-local b 'group-roles) '())))))
-      (buffer-modeline-group-refresh! b))))
+      (buffer-modeline-group-refresh! b))
+    (when (boundp 'group-current-recalculate!)
+      (group-current-recalculate!))))
 
 (define (buffer-replace-group! b old new)
   (let ((old-id (group-resolve-id old))
@@ -684,15 +692,30 @@
 ;; recreated the NAME; the content lives in the file.
 
 
-(define (group-restore-prune! g)
-  (for-each
-    (lambda (w)
-      (let ((b (car (cdr w))))
-        (when (and (buffer-local b 'transient)
-                   (not (equal? (buffer-group b) g))
-                   (> (length (window-list)) 1))
-          (delete-window-id! (car w)))))
-    (window-list)))
+(define (group-restore-sanitize! g)
+  (let* ((id (group-resolve-id g))
+         (members (group-buffers-mru id))
+         (pool (if (pair? members) members (list (group-chat id))))
+         (shown
+           (filter (lambda (buf) (buffer-in-group? buf id))
+                   (map cadr (window-list)))))
+    (for-each
+      (lambda (window)
+        (let ((win (car window))
+              (buf (cadr window)))
+          (unless (buffer-in-group? buf id)
+            (let ((hidden
+                    (filter (lambda (candidate)
+                              (not (member candidate shown)))
+                            pool)))
+              (cond ((pair? hidden)
+                     (window-set-buffer! win (car hidden))
+                     (set! shown (cons (car hidden) shown)))
+                    ((> (length (window-list)) 1)
+                     (delete-window-id! win))
+                    (else
+                     (window-set-buffer! win (car pool))))))))
+      (window-list))))
 
 ;; Scheme owns both sides of the modeline's group context: the frame's current
 ;; group name and every buffer's membership names. The renderer only compacts
@@ -832,6 +855,8 @@
                 (visit b)))
             (window-tree-buffers saved)))
 
+(define *group-current-inhibit* #f)
+
 (define (switch-to-group! g)
   (let ((id (begin (group-migrate-live!) (group-resolve-id g))))
     (if (not id)
@@ -839,6 +864,7 @@
         (begin
           (winner-save!)
           (set! *winner-inhibit* #t)
+          (set! *group-current-inhibit* #t)
           (let ((from (frame-group)))
             (when (and from (not (equal? from id)))
               (group-layout-save-if-shown! from)
@@ -850,31 +876,69 @@
                 (begin
                   (group-revive-layout-files! saved)
                   (window-tree-set! saved)
-                  (group-restore-prune! id))
+                  (group-restore-sanitize! id)
+                  (group-layout-save! id))
                 (begin
                   (group-default-layout! id)
                   (group-layout-save! id))))
+          (set! *group-current-inhibit* #f)
           (set! *winner-inhibit* #f)
+          (group-current-recalculate!)
           (mru-note-group! id)
           (windows-shown-catchup!)
           (message (string-append "Switched to group " (group-name id)))))))
 
-;; the group the FRAME stands in. Switching sets it; a detour through
-;; an ungrouped buffer (scratch, help) does not lose it. The buffer's
-;; own group is the fallback for a frame that never switched.
+;; The visible frame derives its current group. The stored frame-local is the
+;; last calculated answer, not an independent standing context.
 (define (frame-group)
   (let* ((current (frame-local 'current-group))
          (resolved (group-resolve-id current)))
-    (if resolved
-        (begin
-          (unless (equal? current resolved)
-            (set-frame-local! 'current-group resolved))
-          resolved)
-        (let ((ids (if (chat-buffer? (current-buffer))
-                       (let ((id (chat-group-id (current-buffer))))
-                         (if id (list id) '()))
-                       (buffer-group-ids (current-buffer)))))
-          (if (and (pair? ids) (null? (cdr ids))) (car ids) #f)))))
+    (cond (resolved
+           (unless (equal? current resolved)
+             (set-frame-local! 'current-group resolved))
+           resolved)
+          (else
+            (when current (set-frame-local! 'current-group #f))
+            #f))))
+
+(define (group-context-memberships buf)
+  (cond ((buffer-local buf 'transient) #f)
+        ((chat-buffer? buf)
+         (let ((id (chat-group-id buf))) (if id (list id) '())))
+        ((group-work-buffer? buf) (buffer-group-ids buf))
+        (else #f)))
+
+(define (group-common-memberships rows)
+  (if (null? rows)
+      #f
+      (fold (lambda (common ids)
+              (filter (lambda (id) (member id ids)) common))
+            (car rows)
+            (cdr rows))))
+
+(define (group-current-choice common current)
+  (cond ((not common) current)
+        ((null? common) #f)
+        ((and current (member current common)) current)
+        (else
+          (let ((recent (filter (lambda (id) (member id common))
+                                (group-ids-mru))))
+            (if (pair? recent) (car recent) (car common))))))
+
+(define (group-current-recalculate!)
+  (unless *group-current-inhibit*
+    (let* ((rows (filter (lambda (ids) ids)
+                         (map (lambda (window)
+                                (group-context-memberships (car (cdr window))))
+                              (window-list))))
+           (current (frame-group))
+           (next (group-current-choice (group-common-memberships rows) current)))
+      (unless (equal? next current)
+        (set-frame-local! 'current-group next)
+        (frame-group-label-refresh!))
+      next)))
+
+(set! window-state-changed! group-current-recalculate!)
 
 ;; a layout snapshot is only true when the group is on screen: saving
 ;; a scratch detour AS the group's arrangement would overwrite the
@@ -886,14 +950,11 @@
 ;; — the board, a listing, a detour — never rewrites it, so the last
 ;; arrangement made IN the group is the one that comes back.
 (define (group-visible-homogeneous? g)
-  (let ((id (group-resolve-id g))
-        (work (group-visible-work-buffers)))
-    (and id
-         (pair? work)
-         (null? (filter (lambda (b) (not (buffer-in-group? b id))) work)))))
+  (let ((id (group-resolve-id g)))
+    (and id (equal? (frame-group) id))))
 
 (define (group-layout-save-if-shown! g)
-  (when (group-visible-homogeneous? g)
+  (when (and (group-visible-homogeneous? g) (group-uncovered? g))
     (group-layout-save! g)))
 
 ;; a group is UNCOVERED when no window shows a transient surface from
@@ -1006,28 +1067,96 @@
   (let ((g (list-current (current-buffer))))
     (or g (begin (message "no group on this line") #f))))
 
-(define-command "group-switch" "Switch to a group and restore its layout"
+;; Group navigation uses the same recency stream as buffer navigation.
+;; Groups without a history entry trail in record order.
+(define (group-ids-mru)
+  (let loop ((rows (mru-list)) (found '()))
+    (if (null? rows)
+        (let ((recent (reverse found)))
+          (append recent
+                  (filter (lambda (id) (not (member id recent)))
+                          (group-ids))))
+        (let* ((row (car rows))
+               (id (and (equal? (car row) "group")
+                        (group-resolve-id (car (cdr row))))))
+          (loop (cdr rows)
+                (if (and id (not (member id found)))
+                    (cons id found)
+                    found))))))
+
+(define (group-buffer-memberships buf)
+  (if (chat-buffer? buf)
+      (let ((id (chat-group-id buf))) (if id (list id) '()))
+      (buffer-group-ids buf)))
+
+;; A homogeneous frame already shows the group where the user stands.
+;; In a mixed frame, put the selected foreign buffer's groups before the
+;; remaining MRU groups so one RET enters its context.
+(define (group-switch-candidate-ids)
+  (let* ((current (frame-group))
+         (recent (filter (lambda (id) (not (equal? id current)))
+                         (group-ids-mru)))
+         (mine (group-buffer-memberships (current-buffer))))
+    (if (group-visible-homogeneous? current)
+        recent
+        (append (filter (lambda (id) (member id mine)) recent)
+                (filter (lambda (id) (not (member id mine))) recent)))))
+
+(define (group-switch-new-action)
+  (let ((buf (current-buffer))
+        (current (frame-group)))
+    (cond ((not (group-work-buffer? buf))
+           (list "Start an empty group" #f #f))
+          ((and current (buffer-in-group? buf current))
+           (list "Move this buffer into a new group" buf current))
+          (else
+            (list "Start a new group with this buffer" buf #f)))))
+
+(define (switch-to-group-candidates)
+  (let* ((current (frame-group))
+         (recent (filter (lambda (id) (not (equal? id current)))
+                         (group-ids-mru)))
+         (mine (group-buffer-memberships (current-buffer)))
+         (mine-recent (filter (lambda (id) (member id mine)) recent))
+         (others (filter (lambda (id) (not (member id mine))) recent))
+         (action (group-switch-new-action))
+         (action-row (list (car action) "new context")))
+    (if (group-visible-homogeneous? current)
+        (append (map group-name recent) (list action-row))
+        (append (map group-name mine-recent)
+                (list action-row)
+                (map group-name others)))))
+
+(define (group-switch-run-new-action! action)
+  (let ((label (car action))
+        (buf (car (cdr action)))
+        (source (car (cdr (cdr action)))))
+    (group-read-new-name (string-append label ": ")
+      (lambda (name)
+        (if buf
+            (group-create-with-buffer! name buf source)
+            (group-create-and-enter! name '() #f))))))
+
+(define-command "switch-to-group" "Switch to a group and restore its layout"
   (lambda ()
     (if (equal? (list-mode-of (current-buffer)) "groups-mode")
         (let ((g (groups--current)))
           (when g (switch-to-group! g)))
-        (let* ((previous (frame-local 'previous-group))
-               (previous-name (and (group-resolve-id previous)
-                                   (group-name previous)))
-               (others (filter (lambda (name)
-                                 (not (equal? name previous-name)))
-                               (group-names)))
-               (candidates (if previous-name
-                               (cons (list previous-name "previous group") others)
-                               others)))
+        (let* ((action (group-switch-new-action))
+               (candidates (switch-to-group-candidates)))
           (if (null? candidates)
               (message "No groups")
               (minibuffer-read "Switch group: " candidates
                 (lambda (name)
                   (let ((id (group-resolve-id (string-trim name))))
-                    (if id
-                        (switch-to-group! id)
-                        (message "No such group"))))))))))
+                    (cond (id (switch-to-group! id))
+                          ((equal? name (car action))
+                           (group-switch-run-new-action! action))
+                          (else (message "No such group")))))))))))
+
+;; Compatibility name for existing configuration.
+(define-command "group-switch" "Switch to a group and restore its layout"
+  (lambda () (run-command "switch-to-group")))
 
 ;; a verb here acts on every marked group, or on the row at point when
 ;; nothing is marked — the rule every list follows. The marks go when the
@@ -1631,14 +1760,19 @@
     (group-read-new-name "New group: "
       (lambda (name) (group-create-and-enter! name '() #f)))))
 
-(define-command "group-new-from-buffer"
-  "Create and enter a group that contains the current work buffer"
+(define-command "buffer-new" "Create a buffer in the current group"
   (lambda ()
-    (let ((buf (current-buffer)))
-      (if (not (group-work-buffer? buf))
-          (message "The current buffer is not a work buffer")
-          (group-read-new-name "New group from buffer: "
-            (lambda (name) (group-create-and-enter! name (list buf) #f)))))))
+    (let ((group (frame-group)))
+      (minibuffer-read "New buffer: " '()
+        (lambda (input)
+          (let ((name (string-trim input)))
+            (cond ((equal? name "") (message "Buffer needs a name"))
+                  ((buffer-known? name)
+                   (message (string-append "Buffer " name " already exists")))
+                  (else
+                    (buffer-create name)
+                    (when group (buffer-add-group! name group))
+                    (switch-to-buffer! name)))))))))
 
 (define-command "group-new-from-visible"
   "Create and enter a group that contains the visible work buffers"
@@ -1647,6 +1781,76 @@
           (layout (window-tree)))
       (group-read-new-name "New group from visible buffers: "
         (lambda (name) (group-create-and-enter! name buffers layout))))))
+
+(define (buffer-family buf)
+  (let* ((owner (or (buffer-local buf 'scratch-owner) buf))
+         (scratch (and (buffer-known? owner)
+                       (buffer-local owner 'scratch-buffer)))
+         (candidates (append (list owner)
+                             (if (and scratch (buffer-known? scratch))
+                                 (list scratch)
+                                 '())
+                             (if (equal? owner buf) '() (list buf)))))
+    (dedupe-names
+      (filter (lambda (name)
+                (and (buffer-known? name) (group-work-buffer? name)))
+              candidates))))
+
+(define (group-create-with-buffer! name buf source)
+  (let ((id (group-record-create! name))
+        (family (buffer-family buf))
+        (source-id (group-resolve-id source)))
+    (if (not id)
+        (message (string-append "Could not create group " name))
+        (begin
+          (set! *group-current-inhibit* #t)
+          (for-each (lambda (member) (buffer-add-group! member id)) family)
+          (when source-id
+            (for-each
+              (lambda (member)
+                (when (buffer-in-group? member source-id)
+                  (buffer-remove-group! member source-id)))
+              family))
+          (set! *group-current-inhibit* #f)
+          (switch-to-group! id)
+          (let ((window (window-showing buf)))
+            (if window (select-window! window) (switch-to-buffer! buf)))
+          id))))
+
+(define-command "group-new-with-buffer"
+  "Create and enter a group with the current buffer family"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (not (group-work-buffer? buf))
+          (message "The current buffer is not a work buffer")
+          (group-read-new-name "New group with buffer: "
+            (lambda (name) (group-create-with-buffer! name buf #f)))))))
+
+;; Compatibility name for older configuration.
+(define-command "group-new-from-buffer"
+  "Create and enter a group with the current buffer family"
+  (lambda () (run-command "group-new-with-buffer")))
+
+(define (switch-buffer-to-group! buf id)
+  (switch-to-group! id)
+  (let ((window (window-showing buf)))
+    (if window (select-window! window) (switch-to-buffer! buf))))
+
+(define (group-buffer-context-switch! buf)
+  (let ((ids (group-buffer-memberships buf)))
+    (cond
+      ((null? ids)
+       (group-read-new-name "Start a group with this buffer: "
+         (lambda (name) (group-create-with-buffer! name buf #f))))
+      ((null? (cdr ids)) (switch-buffer-to-group! buf (car ids)))
+      (else
+        (let ((ordered (filter (lambda (id) (member id ids)) (group-ids-mru))))
+          (minibuffer-read "Switch buffer to group: " (map group-name ordered)
+            (lambda (name)
+              (let ((id (group-resolve-id name)))
+                (when id (switch-buffer-to-group! buf id))))))))))
+
+(set! buffer-context-switch! group-buffer-context-switch!)
 
 (define (group-all-work-buffers)
   (filter group-work-buffer? (buffer-list)))
@@ -1679,7 +1883,7 @@
 
 ;; annotate the WHOLE pool once, then split it: the marginalia columns
 ;; line up across both sections, because they were measured over both
-(define (group-switch-candidates id here)
+(define (group-buffer-switch-candidates id here)
   (let* ((all (group-switch-all-buffers-but here))
          (rows (annotate 'buffer all))
          (mine (filter (lambda (row)
@@ -1717,9 +1921,7 @@
       (cond (adopt (group-switch-adopt! buf id))
             (context (buffer-context-switch! buf))
             (else
-              (switch-to-buffer! buf)
-              (set-frame-local! 'current-group (buffer-group buf))
-              (frame-group-label-refresh!))))))
+              (switch-to-buffer! buf))))))
 
 (define-command "group-switch-buffer"
   "Switch to a buffer; C-RET enters its group, S-RET pulls it into this one"
@@ -1728,7 +1930,7 @@
     (set! *mb-confirm-adopt* #f)
     (let* ((here (current-buffer))
            (id (group-resolve-id (frame-local 'current-group)))
-           (candidates (group-switch-candidates id here))
+           (candidates (group-buffer-switch-candidates id here))
            (woken '())
            (sleep-woken!
              (lambda (keep)
@@ -1927,6 +2129,98 @@
                                   " from " (group-name source-id)
                                   " to " (group-name id)))
           (length eligible))))))
+
+(define (buffer-add-family-to-group! buf destination)
+  (let ((family (buffer-family buf))
+        (id (group-resolve-id destination)))
+    (if (not id)
+        (message "No destination group")
+        (begin
+          (for-each (lambda (member) (buffer-add-group! member id)) family)
+          (run-hooks 'group-membership-hook)
+          (message (string-append "Added " (number->string (length family))
+                                  " buffer"
+                                  (if (= (length family) 1) "" "s")
+                                  " to " (group-name id)))
+          family))))
+
+(define (buffer-move-family-to-group! buf destination source)
+  (let ((family (buffer-family buf))
+        (to (group-resolve-id destination))
+        (from (group-resolve-id source)))
+    (cond ((not to) (message "No destination group"))
+          ((not from) (message "Move needs a source group"))
+          ((equal? to from) (message "Destination is already the source group"))
+          (else
+            (set! *group-current-inhibit* #t)
+            (for-each (lambda (member) (buffer-add-group! member to)) family)
+            (for-each
+              (lambda (member)
+                (when (buffer-in-group? member from)
+                  (buffer-remove-group! member from)))
+              family)
+            (set! *group-current-inhibit* #f)
+            (group-current-recalculate!)
+            (run-hooks 'group-membership-hook)
+            (message (string-append "Moved " (number->string (length family))
+                                    " buffer"
+                                    (if (= (length family) 1) "" "s")
+                                    " to " (group-name to)))
+            family))))
+
+(define-command "buffer-add-to-group" "Add the current buffer family to a group"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (not (group-work-buffer? buf))
+          (message "The current buffer is not a work buffer")
+          (group-read-or-create! "Add buffer to group: "
+            (lambda (group) (buffer-add-family-to-group! buf group)))))))
+
+(define (buffer-move-read-destination! buf source)
+  (group-read-or-create! "Move buffer to group: "
+    (lambda (group) (buffer-move-family-to-group! buf group source))))
+
+(define-command "buffer-move-to-group" "Move the current buffer family between groups"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (ids (group-buffer-memberships buf))
+           (current (frame-group))
+           (source (and current (member current ids) current)))
+      (cond ((not (group-work-buffer? buf))
+             (message "The current buffer is not a work buffer"))
+            (source (buffer-move-read-destination! buf source))
+            ((null? ids) (message "Move needs a source group"))
+            ((null? (cdr ids)) (buffer-move-read-destination! buf (car ids)))
+            (else
+              (minibuffer-read "Move buffer from group: " (map group-name ids)
+                (lambda (name)
+                  (let ((id (group-resolve-id name)))
+                    (when id (buffer-move-read-destination! buf id))))))))))
+
+(define-command "buffer-remove-from-group"
+  "Remove one group membership from the current buffer family"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (ids (group-buffer-memberships buf))
+           (current (frame-group))
+           (source (and current (member current ids) current))
+           (remove-from
+             (lambda (id)
+               (for-each
+                 (lambda (member)
+                   (when (buffer-in-group? member id)
+                     (buffer-remove-group! member id)))
+                 (buffer-family buf))
+               (run-hooks 'group-membership-hook)
+               (message (string-append "Removed buffer from " (group-name id))))))
+      (cond (source (remove-from source))
+            ((null? ids) (message "The buffer is not in a group"))
+            ((null? (cdr ids)) (remove-from (car ids)))
+            (else
+              (minibuffer-read "Remove buffer from group: " (map group-name ids)
+                (lambda (name)
+                  (let ((id (group-resolve-id name)))
+                    (when id (remove-from id))))))))))
 
 (define (group-move-read-destination! buffers source)
   (minibuffer-read "Move buffers to group: "
@@ -2150,19 +2444,20 @@
 (global-set-key "C-c d" "group-describe")
 (global-set-key "C-x G" "groups")
 (global-set-key "C-x b" "group-switch-buffer")
-(global-set-key "C-x g" "group-switch")
-(global-set-key "C-x C-g g" "group-switch")
-(global-set-key "C-x C-g p" "group-push-selected")
-(global-set-key "C-x C-g j" "group-join")
-(global-set-key "C-x C-g l" "groups")
-(global-set-key "C-x C-g o" "opencode-in-group")
-(global-set-key "C-x C-g s" "group-show-all")
+(global-set-key "C-x g" "switch-to-group")
 
 (public! 'group-ids "(group-ids) -> durable opaque group IDs")
 (public! 'group-name "(group-name ID) -> the current display name")
 (public! 'buffer-group-ids "(buffer-group-ids NAME) -> work memberships")
 (public! 'buffer-in-group? "(buffer-in-group? NAME ID) -> membership")
 (public! 'buffer-group-role "(buffer-group-role BUFFER GROUP) -> semantic role string or #f; chats answer \"chat\"")
+(public! 'group-visible-homogeneous?
+  "(group-visible-homogeneous? GROUP) -> #t when GROUP is the frame's derived current group")
+(public! 'group-current-recalculate!
+  "(group-current-recalculate!) -> derive the frame's current group from its visible buffers")
+(public! 'group-ids-mru "(group-ids-mru) -> all group IDs in most-recently-used order")
+(public! 'buffer-family
+  "(buffer-family BUFFER) -> BUFFER and its explicitly attached scratch companion")
 (public! 'buffer-add-group-as! "(buffer-add-group-as! BUFFER GROUP ROLE) — join GROUP with a semantic role")
 (public! 'group-record-create! "(group-record-create! NAME) -> new stable ID or #f")
 (public! 'group-read-or-create!
@@ -2203,4 +2498,5 @@
 (catalog-meta! 'function "chat-inject-reply!" 'domain 'chat 'effects '(write display))
 (catalog-meta! 'function "chat-reply-link" 'domain 'chat 'effects '(pure))
 
+(group-current-recalculate!)
 (message "groups.scm loaded")

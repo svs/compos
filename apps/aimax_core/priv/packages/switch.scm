@@ -356,10 +356,7 @@
              ;; the preview already put it in the home window — go there
              (let ((w (window-showing name)))
                (if w (select-window! w) (switch-to-buffer! name)))
-             ;; a plain switch moves no windows, but the frame's standing
-             ;; follows where you are
-             (let ((bg (buffer-group name)))
-               (when bg (set-frame-local! 'current-group bg)))
+             (group-current-recalculate!)
              (windows-shown-catchup!))))
       ((*switch-pick* name)
        (switch-close! buf #f))

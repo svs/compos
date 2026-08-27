@@ -7,6 +7,10 @@
   (set! *chat-dispatchers*
     (remove (lambda (entry) (equal? (car entry) slug)) *chat-dispatchers*)))
 
+(define (t--fgc-confirm! text)
+  (minibuffer-change! text)
+  (run-command "minibuffer-confirm-input"))
+
 (deftest 'an-explicit-file-group-adds-membership-without-moving-the-file
   "an existing file can join another group while it keeps its first group"
   (lambda ()
@@ -39,6 +43,54 @@
       (buffer-kill! work)
       (delete-file! path)
       (group-record-delete! group))))
+
+(deftest 'interactive-find-file-groups-only-a-new-buffer
+  "new work joins the current group but reopening live work preserves membership"
+  (lambda ()
+    (let* ((new-path "/tmp/aimax-zz-new-current-group.txt")
+           (live-path "/tmp/aimax-zz-live-current-group.txt")
+           (current (group-record-create! "zz-find-current"))
+           (other (group-record-create! "zz-find-other")))
+      (write-file! new-path "new\n")
+      (write-file! live-path "live\n")
+      (visit live-path other)
+      (set-frame-local! 'current-group current)
+
+      (find-file-read current)
+      (t--fgc-confirm! new-path)
+      (check-true! (buffer-in-group? new-path current)
+                   "a newly opened buffer joins current-group")
+
+      (find-file-read current)
+      (t--fgc-confirm! live-path)
+      (check-true! (buffer-in-group? live-path other)
+                   "the live buffer keeps its existing group")
+      (check-false! (buffer-in-group? live-path current)
+                    "reopening does not silently pull it into current-group")
+
+      (buffer-kill! new-path)
+      (buffer-kill! live-path)
+      (delete-file! new-path)
+      (delete-file! live-path)
+      (group-record-delete! current)
+      (group-record-delete! other))))
+
+(deftest 'find-file-in-new-group-creates-and-enters-the-context
+  "the direct new-context command creates the file and group as one action"
+  (lambda ()
+    (let ((path "/tmp/aimax-zz-file-in-new-group.txt"))
+      (write-file! path "context\n")
+      (run-command "find-file-in-new-group")
+      (t--fgc-confirm! path)
+      (t--fgc-confirm! "zz-file-new-group")
+      (let ((id (group-resolve-id "zz-file-new-group")))
+        (check-true! id "the group was created")
+        (check-true! (buffer-in-group? path id) "the file belongs to it")
+        (check-equal! (frame-group) id "the new group was entered")
+        (check-equal! (current-buffer) path "the file is selected")
+        (buffer-kill! path)
+        (delete-file! path)
+        (group-record-delete! id)))))
 
 (deftest 'a-direct-agent-file-visit-uses-the-originating-chat-group
   "the user can switch buffers while the agent keeps its chat context"

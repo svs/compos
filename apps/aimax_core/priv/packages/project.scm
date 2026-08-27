@@ -374,6 +374,35 @@
         (switch-to-group! g)
         (find-file-read g)))))
 
+(define-command "find-file-in-new-group"
+  "Choose a file, create a group with it, and enter the group"
+  (lambda ()
+    (read-file-name "Find file in new group: "
+      (lambda (path)
+        (group-read-new-name "New group: "
+          (lambda (name)
+            (let ((id (group-record-create! name)))
+              (if (not id)
+                  (message (string-append "Could not create group " name))
+                  (begin
+                    (set! *group-current-inhibit* #t)
+                    (let ((buf (visit-in-group (normalize-file-input path) id)))
+                      (if (not buf)
+                          (begin
+                            (group-record-delete! id)
+                            (set! *group-current-inhibit* #f)
+                            (message "Could not visit the file"))
+                          (begin
+                            (for-each (lambda (member)
+                                        (buffer-add-group! member id))
+                                      (buffer-family buf))
+                            (set! *group-current-inhibit* #f)
+                            (switch-to-group! id)
+                            (let ((window (window-showing buf)))
+                              (if window
+                                  (select-window! window)
+                                  (switch-to-buffer! buf)))))))))))))))
+
 (define-command "dired-in-group"
   "Choose or create a group, switch to it, then open a directory"
   (lambda ()
@@ -488,8 +517,7 @@
 (global-set-key "C-x p d" "project-dired")
 (global-set-key "C-x p g" "project-ripgrep")
 (global-set-key "C-x p k" "project-kill-all")
-(global-set-key "C-x C-g f" "find-file-in-group")
-(global-set-key "C-x C-g d" "dired-in-group")
+(global-set-key "C-x C-g" "find-file-in-new-group")
 
 (category! 'project)
 (catalog-meta! 'command "project-kill-all" 'domain 'project 'effects '(destroy))

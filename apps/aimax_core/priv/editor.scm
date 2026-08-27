@@ -2618,6 +2618,10 @@
               (else
                (message (string-append "Could not rename buffer " old))))))))))
 
+;; Packages derive policy from the accepted window state through this seam.
+;; Preview uses a different primitive and does not call it.
+(define window-state-changed! (lambda () #t))
+
 ;; The primitive changes the window and wakes the process; Scheme owns the
 ;; mode closures, so it also completes runtime restoration in this same
 ;; interpreter turn. A caller never sees the buffer between those two steps.
@@ -2625,6 +2629,7 @@
   (let ((restoring (not (buffer-exists? buf))))
     (window-switch-buffer! buf)
     (when restoring (restore-buffer-runtime! buf))
+    (window-state-changed!)
     buf))
 
 (define *auto-mode-alist*
@@ -3858,8 +3863,11 @@
              ((remote-path? path) (remote-visit path))
              ((file-directory? path) (dired-open path))
              (else
-               (begin
-                 (switch-to-buffer! (find-file path))
+               (let ((file-buffer (find-file path)))
+                 ;; An explicit destination joins before display. The derived
+                 ;; current group therefore never sees a half-placed buffer.
+                 (when group (buffer-add-group! file-buffer group))
+                 (switch-to-buffer! file-buffer)
                  (auto-mode path)
                  (run-hooks 'find-file-hook)
                  (current-buffer))))))
@@ -3877,7 +3885,11 @@
 (define find-file-group-reader (lambda (receive) (receive (frame-group))))
 
 (define (find-file-read &optional group)
-  (read-file-name "Find file: " (lambda (path) (visit path group))))
+  (read-file-name "Find file: "
+    (lambda (path)
+      (let* ((normalized (normalize-file-input path))
+             (existing (buffer-known? normalized)))
+        (visit normalized (if existing #f group))))))
 
 (define-command "find-file" "Visit a file, prompting with filename completion"
   (lambda ()
@@ -4099,16 +4111,7 @@
                    ;; and all — is C-RET's job, and only C-RET's.
                    (if explicit
                        (buffer-context-switch! picked)
-                       (begin
-                         (switch-to-buffer! picked)
-                         ;; a plain switch moves no windows, but the
-                         ;; frame's STANDING follows where you are —
-                         ;; leaving must snapshot the group you were
-                         ;; really in
-                         (let ((bg (buffer-group picked)))
-                           (set-frame-local! 'current-group bg)
-                           (frame-group-label-refresh!))
-                         (windows-shown-catchup!))))
+                       (switch-to-buffer! picked)))
                   (else
                    ;; nothing matches: RET founds a group named PICKED
                    ;; from the current windows. The preview may still
@@ -6892,22 +6895,38 @@
 
 ;; the window mutators the keyboard reaches (C-x 1/2/3/0, popups) push
 ;; the arrangement they are about to destroy
+(define builtin-window-tree-set! window-tree-set!)
+(define (window-tree-set! tree)
+  (builtin-window-tree-set! tree)
+  (window-state-changed!))
+
 (define builtin-delete-other-windows! delete-other-windows!)
 (define (delete-other-windows!)
   (winner-save!)
-  (builtin-delete-other-windows!))
+  (builtin-delete-other-windows!)
+  (window-state-changed!))
 
 (define builtin-split-window! split-window!)
 (define (split-window! dir &optional ratio)
   (winner-save!)
-  (if ratio
-      (builtin-split-window! dir ratio)
-      (builtin-split-window! dir)))
+  (let ((result (if ratio
+                    (builtin-split-window! dir ratio)
+                    (builtin-split-window! dir))))
+    (window-state-changed!)
+    result))
 
 (define builtin-delete-window! delete-window!)
 (define (delete-window!)
   (winner-save!)
-  (builtin-delete-window!))
+  (let ((result (builtin-delete-window!)))
+    (window-state-changed!)
+    result))
+
+(define builtin-delete-window-id! delete-window-id!)
+(define (delete-window-id! id)
+  (let ((result (builtin-delete-window-id! id)))
+    (window-state-changed!)
+    result))
 
 ;;; --- the modeline dashboard -----------------------------------------------------
 ;;; modeline-expand toggles a popup that says everything about HERE: the

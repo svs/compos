@@ -146,7 +146,14 @@ defmodule Aimax.GroupSwitchCommandTest do
     assert candidate.face == expected
   end
 
-  test "a buffer supplies its own color while the frame remains in another group", %{
+  test "C-x C-g begins finding a file for a new group" do
+    KeyDispatch.handle_key("C-x")
+    KeyDispatch.handle_key("C-g")
+
+    assert Editor.render_state().minibuffer.prompt == "Find file in new group: "
+  end
+
+  test "a homogeneous buffer supplies both its buffer and frame color", %{
     first: first,
     second: second
   } do
@@ -168,7 +175,7 @@ defmodule Aimax.GroupSwitchCommandTest do
     mail_color = eval!(~s[(group-record-color (group-record-by-id "#{mail}"))]) |> Jason.decode!()
     docs_face = eval!(~s[(group-color-face "#{docs}")]) |> Jason.decode!()
 
-    assert rendered.frame_group == "color-mail"
+    assert rendered.frame_group == "color-docs"
     assert leaf.group == "color-docs"
     assert leaf.group_color == docs_color
     refute leaf.group_color == mail_color
@@ -207,10 +214,10 @@ defmodule Aimax.GroupSwitchCommandTest do
     rendered = Editor.render_state()
     by_buffer = rendered.tree |> leaves() |> Map.new(&{&1.buffer, &1})
 
-    assert by_buffer[first].group == "modeline-here (2 more)"
-    assert by_buffer[second].group == "2 groups"
+    assert by_buffer[first].group == "modeline-other (2 more)"
+    assert by_buffer[second].group == "modeline-other (1 more)"
     assert by_buffer[third].group == "modeline-other"
-    assert rendered.frame_group == "modeline-here"
+    assert rendered.frame_group == "modeline-other"
     assert rendered.frame_group_color =~ ~r/^#[0-9a-f]{6}$/i
 
     # C-x ? is the expanded, lossless view: it names every membership.

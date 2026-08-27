@@ -1997,9 +1997,6 @@ defmodule Aimax.EditorTest do
 
       assert {:ok, ~s{"opencode"}} =
                Aimax.Core.Session.eval(~s{(buffer-group-role "#{opencode}" "#{group}")})
-
-      assert {:ok, ~s{"C-x C-g o"}} =
-               Aimax.Core.Session.eval(~s{(key-for-command "opencode-in-group")})
     end
 
     test "popup-buffer summons any buffer and the toggle dismisses it", %{buf: buf} do

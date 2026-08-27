@@ -156,3 +156,20 @@
         (check-equal! (buffer-group buf) id "and the buffer joined it")
         (t--drop! id))
       (buffer-kill! buf))))
+
+(deftest 'a-reply-link-fills-the-chat-without-sending
+  "a reply action writes the draft and leaves the conversation unchanged"
+  (lambda ()
+    (let* ((id (t--group "reply-link"))
+           (chat (group-chat id))
+           (before (chat-turn-count chat)))
+      (with-current-buffer chat
+        (lambda () (chat-inject-reply! "Yes, use this option.")))
+      (check-equal! (chat-input-text chat) "Yes, use this option."
+                    "the action fills the live reply")
+      (check-equal! (chat-turn-count chat) before "the action does not send the reply")
+      (check-equal! (chat-reply-link "Use it" "Yes, use this option.")
+                    "[Use it](aimax:reply/Yes%2C%20use%20this%20option.)"
+                    "the helper emits the shared action-link form")
+      (buffer-kill! chat)
+      (t--drop! id))))

@@ -1531,6 +1531,26 @@
   (let ((buf (group-chat g)))
     (and buf (group-chat-buffer-show! buf))))
 
+;; An action link can fill a chat reply without sending it. A link inside a
+;; chat targets that chat. A document link targets the receiving group's chat.
+(define (chat-inject-reply! text)
+  (let* ((here (current-buffer))
+         (group (or (frame-group) (buffer-group here)))
+         (target (if (chat-buffer? here) here (and group (group-chat group)))))
+    (if (not target)
+        (message "No chat receives this reply")
+        (begin
+          (with-current-buffer target
+            (lambda () (chat-replace-input! target text)))
+          (group-chat-buffer-show! target)
+          (message "Reply added to chat")
+          target))))
+
+(define (chat-reply-link label reply)
+  (string-append "[" label "](aimax:reply/" (url-encode reply) ")"))
+
+(on-preview-link! "reply" chat-inject-reply!)
+
 ;; ask the group without leaving the current buffer: the minibuffer prompt
 ;; becomes a group-chat turn, point stays put, the reply lands on the right
 (define (group-ask! g)
@@ -2164,6 +2184,10 @@
 (public! 'scene-window "(scene-window ROLE) -> current scene/group window with ROLE, or #f")
 (public! 'group-chat "(group-chat G) — find or create G's chat buffer; returns its name")
 (public! 'group-chat-show! "(group-chat-show! G) — open/focus G's chat pane; returns its name")
+(public! 'chat-inject-reply!
+  "(chat-inject-reply! TEXT) — put TEXT in this chat, or the current group's chat, without sending")
+(public! 'chat-reply-link
+  "(chat-reply-link LABEL REPLY) — a Markdown action link that fills a chat reply")
 
 (catalog-meta! 'command "group-describe" 'domain 'buffers 'effects '(write external spend))
 (catalog-meta! 'command "group-describe-at-point" 'domain 'buffers 'effects '(write external spend))
@@ -2176,5 +2200,7 @@
 (catalog-meta! 'function "group-buffers" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "group-chat" 'domain 'buffers 'effects '(write))
 (catalog-meta! 'function "group-chat-show!" 'domain 'buffers 'effects '(write))
+(catalog-meta! 'function "chat-inject-reply!" 'domain 'chat 'effects '(write display))
+(catalog-meta! 'function "chat-reply-link" 'domain 'chat 'effects '(pure))
 
 (message "groups.scm loaded")

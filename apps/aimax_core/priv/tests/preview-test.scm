@@ -108,3 +108,60 @@
                         "a read-only page keeps the plain newline")
           (buffer-set-read-only! buf #f)))
       (buffer-kill! buf))))
+
+(deftest 'document-links-resolve-beside-the-source-document
+  "a relative document link keeps the source document as its base"
+  (lambda ()
+    (let ((source (visit (string-append (aimax-priv-dir) "/tests/preview-test.scm"))))
+      (check-equal!
+        (preview--file-target source "../packages/preview.scm")
+        (string-append (aimax-priv-dir) "/packages/preview.scm")
+        "the target is beside the source and not the process directory")
+      (check-equal! (document-link--encode-target "../notes/a draft.md")
+                    "../notes/a%20draft.md"
+                    "the link keeps path separators and encodes spaces"))))
+
+(define (t--preview-link-target)
+  (string-append (aimax-priv-dir) "/packages/preview.scm"))
+
+(define (t--preview-link-buffer name text)
+  (let ((buf (test-buffer! name text)))
+    (buffer-set-local! buf 'default-directory
+                       (string-append (aimax-priv-dir) "/tests/"))
+    buf))
+
+(define (t--preview-link-confirm! text)
+  (minibuffer-change! text)
+  (run-command "minibuffer-confirm-input"))
+
+(deftest 'insert-document-link-uses-the-selected-text
+  "the command replaces selected text with a relative Markdown link"
+  (lambda ()
+    (let ((buf (t--preview-link-buffer "zz-preview-selected.md" "Read this")))
+      (with-current-buffer buf
+        (lambda ()
+          (goto-char! 4)
+          (set-mark! 0)
+          (run-command "insert-document-link")
+          (t--preview-link-confirm! (t--preview-link-target))))
+      (check-equal! (buffer-text buf) "[Read](../packages/preview.scm) this"
+                    "the selection becomes the label")
+      (buffer-kill! buf))))
+
+(deftest 'insert-document-link-prompts-for-text-without-a-selection
+  "the command asks for link text when no text is selected"
+  (lambda ()
+    (let ((buf (t--preview-link-buffer "zz-preview-point.md" "Start here")))
+      (with-current-buffer buf
+        (lambda ()
+          (goto-char! 6)
+          (set-mark! #f)
+          (run-command "insert-document-link")
+          (t--preview-link-confirm! (t--preview-link-target))))
+      (check-contains! (plist-get (minibuffer-state) 'prompt) "Link text:"
+                       "the second prompt asks for the label")
+      (t--preview-link-confirm! "Preview package")
+      (check-equal! (buffer-text buf)
+                    "Start [Preview package](../packages/preview.scm)here"
+                    "the typed label appears at point")
+      (buffer-kill! buf))))

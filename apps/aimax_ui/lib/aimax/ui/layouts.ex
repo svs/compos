@@ -1489,7 +1489,7 @@ defmodule Aimax.Ui.Layouts do
                     const href = linkAt(e);
                     if (href) {
                       e.preventDefault();
-                      this.pushEvent("preview_link", {
+                      this.pushEvent(e.shiftKey ? "preview_link_to_group" : "preview_link", {
                         win: parseInt(this.el.dataset.win, 10),
                         href: href
                       });
@@ -1667,6 +1667,18 @@ defmodule Aimax.Ui.Layouts do
                 this.scroller = this.el.querySelector(".ag-scroll");
                 this.stick = this.el.dataset.stick !== "false";
                 this.report = null;
+                this.linkH = (e) => {
+                  const link = e.target.closest && e.target.closest("a[href]");
+                  if (!link || !this.el.contains(link)) return;
+                  const href = link.getAttribute("href") || "";
+                  if (href === "" || href.startsWith("#")) return;
+                  e.preventDefault();
+                  this.pushEvent(e.shiftKey ? "preview_link_to_group" : "preview_link", {
+                    win: parseInt(this.el.dataset.win, 10),
+                    href: href
+                  });
+                };
+                this.el.addEventListener("click", this.linkH);
                 this.scroller.addEventListener("scroll", () => {
                   const s = this.scroller;
                   this.stick = s.scrollHeight - s.scrollTop - s.clientHeight < 40;
@@ -1686,6 +1698,7 @@ defmodule Aimax.Ui.Layouts do
                 if (this.stick) this.scroller.scrollTop = this.scroller.scrollHeight;
               },
               destroyed() {
+                this.el.removeEventListener("click", this.linkH);
                 clearTimeout(this.report);
               }
             },

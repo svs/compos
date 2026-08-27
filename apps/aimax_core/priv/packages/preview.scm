@@ -352,6 +352,93 @@
              (if (remote-path? joined) joined (expand-path joined))))
           (else (expand-path target)))))
 
+;;; --- insert document links --------------------------------------------------
+
+(domain! 'documents)
+(effects! '(write display))
+
+(define (document-link--parts path)
+  (filter (lambda (part) (not (equal? part ""))) (string-split path "/")))
+
+(define (document-link--drop-common left right)
+  (if (and (pair? left) (pair? right) (equal? (car left) (car right)))
+      (document-link--drop-common (cdr left) (cdr right))
+      (list left right)))
+
+(define (document-link--absolute-target base input)
+  (let ((target (normalize-file-input input)))
+    (cond ((remote-path? target) target)
+          ((or (string-prefix? "/" target) (string-prefix? "~" target))
+           (expand-path target))
+          (else (expand-path (string-append base target))))))
+
+(define (document-link--relative-target base target)
+  (if (or (remote-path? base) (remote-path? target))
+      target
+      (let* ((rest (document-link--drop-common
+                     (document-link--parts (expand-path base))
+                     (document-link--parts (expand-path target))))
+             (up (string-repeat "../" (length (car rest))))
+             (down (string-join (cadr rest) "/"))
+             (relative (string-append up down)))
+        (if (equal? relative "") "." relative))))
+
+(define (document-link--encode-target target)
+  (re-replace-all "%2F" (url-encode target) "/"))
+
+(define (document-link--insert! buf start end label target)
+  (if (not (buffer-known? buf))
+      (message "The source document is gone")
+      (with-current-buffer buf
+        (lambda ()
+          (when (> end start) (buffer-delete-range! buf start (- end start)))
+          (goto-char! start)
+          (insert! (string-append "[" label "](" target ")"))
+          (set-mark! #f)))))
+
+(define-command "insert-document-link"
+  "Choose a document and insert its Markdown link at point"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (selected? (and (mark) (< (region-beginning) (region-end))))
+           (start (if selected? (region-beginning) (point)))
+           (end (if selected? (region-end) (point)))
+           (label (and selected? (region-text)))
+           (path (buffer-path buf))
+           (base (if path (car (path-split path)) (default-directory))))
+      (read-file-name-initial "Link target: " base
+        (lambda (input)
+          (let* ((absolute (document-link--absolute-target base input))
+                 (relative (document-link--relative-target base absolute))
+                 (target (document-link--encode-target relative)))
+            (if label
+                (document-link--insert! buf start end label target)
+                (minibuffer-read "Link text: " '()
+                  (lambda (text)
+                    (if (equal? (string-trim text) "")
+                        (message "Link text is required")
+                        (document-link--insert! buf start end text target)))))))))))
+
+(domain! 'interaction)
+(effects! '(write))
+
+;; A document follows the receiving frame by default. The explicit form
+;; enters its chosen group first, then gives the document that membership.
+(define (preview--follow-document! source href group)
+  (visit (preview--file-target source href) group))
+
+(define (link-follow-to-group win href)
+  (mouse-select-window! win)
+  (let ((source (current-buffer)))
+    (if (re-match "^[A-Za-z][A-Za-z0-9+.-]*:" href)
+        (message "Only document links can follow to a group")
+        (if (not (boundp 'group-read-or-create!))
+            (message "Groups are not available")
+            (group-read-or-create! "Follow document to group: "
+              (lambda (group)
+                (switch-to-group! group)
+                (preview--follow-document! source href group)))))))
+
 (define (preview-follow-link! win href)
   (mouse-select-window! win)
   (let ((source (current-buffer)))
@@ -368,7 +455,7 @@
       ((re-match "^[A-Za-z][A-Za-z0-9+.-]*:" href)
        (message (string-append "No handler for " href)))
       (else
-        (visit (preview--file-target source href) (frame-group))))))
+        (preview--follow-document! source href (frame-group))))))
 
 (public! 'on-preview-link!
   "(on-preview-link! VERB FN) — claim the aimax:VERB/ARG links in a rendered page; FN gets ARG"
@@ -376,8 +463,12 @@
 (public! 'preview-follow-link!
   "(preview-follow-link! WIN HREF) — follow a link a reader clicked in a rendered page"
   'interaction)
+(public! 'link-follow-to-group
+  "(link-follow-to-group WIN HREF) — choose or name a group, then follow the document link there"
+  'interaction)
 (catalog-meta! 'function "on-preview-link!" 'domain 'interaction 'effects '(write))
 (catalog-meta! 'function "preview-follow-link!" 'domain 'interaction 'effects '(write))
+(catalog-meta! 'function "link-follow-to-group" 'domain 'interaction 'effects '(write display))
 
 ;;; --- apps --------------------------------------------------------------
 ;;; preview-mode renders a page the way eww does: themed, and inert. An app

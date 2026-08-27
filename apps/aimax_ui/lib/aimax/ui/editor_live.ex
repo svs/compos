@@ -280,6 +280,17 @@ defmodule Aimax.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
+  def handle_event("preview_link_to_group", %{"win" => win, "href" => href}, socket)
+      when is_binary(href) and byte_size(href) <= 2000 do
+    with id when is_integer(id) <- safe_int(win) do
+      Input.run(socket.assigns.frame, fn ->
+        Aimax.Core.Session.call_named("link-follow-to-group", [id, href])
+      end)
+    end
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
   # the page named a source line and how far along it the caret sits
   def handle_event("preview_goto_src", %{"win" => win, "p" => at, "off" => off} = p, socket)
       when is_integer(at) and is_integer(off) do
@@ -1163,6 +1174,7 @@ defmodule Aimax.Ui.EditorLive do
           id={"agent-#{@node.id}"}
           phx-hook="AgentScroll"
           data-buf={@node.buffer}
+          data-win={@node.id}
           data-stick={to_string(@node.agent.stick)}
           data-scroll-top={@node.agent.scroll_top}
         >

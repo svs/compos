@@ -446,26 +446,36 @@
           (else
             (list 405 (json-encode (list 'error "Unsupported spreadsheet request."))))))))
 
-(define spreadsheet--app-html
-  (string-append
+(define (spreadsheet--app-html)
+  (let ((dark? (and (boundp 'theme-dark?) (theme-dark?))))
+    (string-append
     "<!doctype html><html><head><meta charset=\"utf-8\">"
     "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+    (if dark?
+        "<meta name=\"color-scheme\" content=\"dark\">"
+        "<meta name=\"color-scheme\" content=\"light\">")
     "<title>Spreadsheet</title>"
     "<link rel=\"stylesheet\" href=\"https://unpkg.com/@univerjs/preset-sheets-core@0.25.1/lib/index.css\">"
     "<link rel=\"stylesheet\" href=\"https://unpkg.com/@univerjs/preset-sheets-drawing@0.25.1/lib/index.css\">"
     "<style>"
     "*,*::before,*::after{box-sizing:border-box}html,body,#app{width:100%;height:100%;margin:0;padding:0}"
-    "html,body{overflow:hidden;background:#fff;font:13px system-ui,sans-serif}"
+    (if dark?
+        "html,body{overflow:hidden;background:#1f201f;color-scheme:dark;font:13px system-ui,sans-serif}"
+        "html,body{overflow:hidden;background:#fff;color-scheme:light;font:13px system-ui,sans-serif}")
     "#app{position:relative;outline:none}"
     "#status{position:fixed;z-index:10000;right:12px;bottom:8px;max-width:50vw;padding:4px 9px;"
-    "border:1px solid rgba(120,120,120,.24);border-radius:999px;background:rgba(255,255,255,.9);"
-    "color:#686868;font:12px system-ui,sans-serif;box-shadow:0 1px 5px rgba(0,0,0,.08);pointer-events:none}"
-    "#status[data-state=error]{color:#b42318;border-color:#f3b7b2;background:#fff3f2}"
+    (if dark?
+        "border:1px solid rgba(201,198,190,.22);border-radius:999px;background:rgba(31,32,31,.9);color:#c9c6be;font:12px system-ui,sans-serif;box-shadow:0 1px 5px rgba(0,0,0,.28);pointer-events:none}"
+        "border:1px solid rgba(120,120,120,.24);border-radius:999px;background:rgba(255,255,255,.9);color:#686868;font:12px system-ui,sans-serif;box-shadow:0 1px 5px rgba(0,0,0,.08);pointer-events:none}")
+    (if dark?
+        "#status[data-state=error]{color:#ffb4ab;border-color:#8c4a45;background:#321d1b}"
+        "#status[data-state=error]{color:#b42318;border-color:#f3b7b2;background:#fff3f2}")
     "#status[data-state=saved]{opacity:0;transition:opacity .8s 1.2s}"
     ".aimax-chart{width:100%;height:100%;min-width:1px;min-height:1px;overflow:hidden;"
-    "border:1px solid rgba(120,120,120,.28);border-radius:8px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.12)}"
+    (if dark?
+        "border:1px solid rgba(201,198,190,.22);border-radius:8px;background:#252625;box-shadow:0 2px 10px rgba(0,0,0,.32)}"
+        "border:1px solid rgba(120,120,120,.28);border-radius:8px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.12)}")
     ".aimax-chart>*{pointer-events:none}"
-    "@media(prefers-color-scheme:dark){html,body{background:#1f201f}#status{background:rgba(31,32,31,.9);color:#c9c6be}.aimax-chart{background:#252625}}"
     "</style></head><body>"
     "<div id=\"app\" tabindex=\"0\"></div><div id=\"status\" data-state=\"loading\">Loading workbook…</div>"
     "<script src=\"https://unpkg.com/react@18.3.1/umd/react.production.min.js\"></script>"
@@ -491,7 +501,9 @@
     "if(type==='scatter'){base.xAxis={type:'value',name:head[0]||''};base.yAxis={type:'value',name:head[1]||''};base.series=[{name:head[1]||'',type:'scatter',data:body.map(function(row){return[numberValue(row[0]),numberValue(row[1])]})}];return base}"
     "var categories=body.map(function(row){return String(row[0]==null?'':row[0])}),series=[];for(var c=1;c<Math.max(2,head.length);c++){var item={name:head[c]||('Series '+c),type:type==='line'||type==='area'?'line':'bar',data:body.map(function(row){return numberValue(row[c])})};if(type==='area')item.areaStyle={};series.push(item)}"
     "if(type==='bar'){base.xAxis={type:'value'};base.yAxis={type:'category',data:categories}}else{base.xAxis={type:'category',data:categories};base.yAxis={type:'value'}}base.series=series;return base}"
-    "function AimaxChart(props){var ref=React.useRef(null),spec=props.data||{};React.useEffect(function(){if(!ref.current||!book)return;var dark=matchMedia('(prefers-color-scheme: dark)').matches,chart=echarts.init(ref.current,dark?'dark':null);"
+    "function AimaxChart(props){var ref=React.useRef(null),spec=props.data||{};React.useEffect(function(){if(!ref.current||!book)return;var chart=echarts.init(ref.current,"
+    (if dark? "'dark'" "null")
+    ");"
     "function draw(){try{var sheet=sheetNamed(spec.sheet);if(!sheet)throw new Error('No sheet named '+spec.sheet);chart.setOption(chartOption(spec,sheet.getRange(spec.source).getDisplayValues()),true);chart.resize();markChartDrawn(spec.id)}catch(e){markChartFailed(spec.id,e.message||String(e))}}draw();addEventListener('aimax:chart-data',draw);var observer=typeof ResizeObserver==='function'?new ResizeObserver(function(){chart.resize()}):null;if(observer)observer.observe(ref.current);"
     "return function(){removeEventListener('aimax:chart-data',draw);if(observer)observer.disconnect();chart.dispose()}},[spec]);return React.createElement('div',{className:'aimax-chart',ref:ref})}"
     "function chartState(){var total=chartSpecs().length;if(chartFailed.length)return'error';if(chartDrawn.length===total)return'ready';if(chartMounted.length)return'mounted';return'rendered'}"
@@ -526,17 +538,19 @@
     "addEventListener('message',function(e){if(e.data&&e.data.aimax==='focus-granted')focusGrid()});"
     "async function load(){try{var r=await fetch(endpoint,{cache:'no-store'});model=await r.json();"
     "if(!r.ok||model.error)throw new Error(model.error||('Load failed: '+r.status));"
-    "var create=UniverPresets.createUniver,core=UniverCore,preset=UniverPresetSheetsCore,drawing=UniverPresetSheetsDrawing;var made=create({locale:core.LocaleType.EN_US,locales:{enUS:core.mergeLocales(UniverPresetSheetsCoreEnUS,UniverPresetSheetsDrawingEnUS)},presets:[preset.UniverSheetsCorePreset({container:'app'}),drawing.UniverSheetsDrawingPreset()]});api=made.univerAPI;api.registerComponent('AimaxChart',AimaxChart);var chartsMounted=false;api.addEvent(api.Event.LifeCycleChanged,function(event){if(!chartsMounted&&event.stage===api.Enum.LifecycleStages.Rendered){chartsMounted=true;mountCharts()}});"
+    "var create=UniverPresets.createUniver,core=UniverCore,preset=UniverPresetSheetsCore,drawing=UniverPresetSheetsDrawing;var made=create({"
+    (if dark? "darkMode:true," "")
+    "locale:core.LocaleType.EN_US,locales:{enUS:core.mergeLocales(UniverPresetSheetsCoreEnUS,UniverPresetSheetsDrawingEnUS)},presets:[preset.UniverSheetsCorePreset({container:'app'}),drawing.UniverSheetsDrawingPreset()]});api=made.univerAPI;api.registerComponent('AimaxChart',AimaxChart);var chartsMounted=false;api.addEvent(api.Event.LifeCycleChanged,function(event){if(!chartsMounted&&event.stage===api.Enum.LifecycleStages.Rendered){chartsMounted=true;mountCharts()}});"
     "book=api.createWorkbook(snapshotOf(model));var wanted=Number.isInteger(model.activeSheet)?model.activeSheet:0,sheets=book.getSheets();if(sheets[wanted])book.setActiveSheet(sheets[wanted]);"
-    "if(matchMedia('(prefers-color-scheme: dark)').matches&&api.toggleDarkMode)api.toggleDarkMode();"
+    (if dark? "if(api.toggleDarkMode)api.toggleDarkMode(true);" "")
     "api.onCommandExecuted(function(){schedule();refreshCharts()});loading=false;state('saved','Saved');setTimeout(function(){parent.postMessage({aimax:'request-focus'},'*')},80)}catch(e){state('error',e.message||String(e));console.error(e)}}"
     "addEventListener('beforeunload',function(){if(timer){clearTimeout(timer);save()}});load();"
-    "})();</script></body></html>"))
+    "})();</script></body></html>")))
 
 (define (spreadsheet--render! buffer)
   (buffer-set-local! buffer 'spreadsheet-chart-runtime
     (list 'state "loading" 'mounted '() 'drawn '() 'failed '()))
-  (buffer-replace-range! buffer 0 (buffer-size buffer) spreadsheet--app-html)
+  (buffer-replace-range! buffer 0 (buffer-size buffer) (spreadsheet--app-html))
   (buffer-set-local! buffer 'preview-renderer "html")
   (buffer-set-local! buffer 'render-mode "app")
   (buffer-set-read-only! buffer #t)
@@ -547,6 +561,10 @@
     (app-reload! (current-buffer))
     (message "Reloaded the spreadsheet")))
 
+(define-command "spreadsheet-save" "Confirm that the workbook app saves automatically"
+  (lambda ()
+    (message "Spreadsheet changes save automatically")))
+
 (define-command "spreadsheet-visit-source" "Visit the current workbook data source"
   (lambda ()
     (let ((source (buffer-local (current-buffer) 'spreadsheet-source)))
@@ -555,10 +573,44 @@
           (message "This spreadsheet has no file data source")))))
 
 (define (spreadsheet--setup! buffer)
-  (local-set-key* buffer "g" "spreadsheet-reload")
-  (local-set-key* buffer "v" "spreadsheet-visit-source")
-  (local-set-key* buffer "q" "quit-window")
-  (spreadsheet--render! buffer))
+  (if (buffer-path buffer)
+      (begin
+        ;; The grid HTML belongs in its app buffer. Keep the JSON file buffer
+        ;; intact when a user invokes this mode on the data source itself.
+        (buffer-set-local! buffer 'render-mode #f)
+        (buffer-set-local! buffer 'preview-renderer #f)
+        (set-mode! "json-mode")
+        (message "Use spreadsheet-open to open this workbook as a grid"))
+      (begin
+        (local-set-key* buffer "C-x C-s" "spreadsheet-save")
+        (local-set-key* buffer "g" "spreadsheet-reload")
+        (local-set-key* buffer "v" "spreadsheet-visit-source")
+        (local-set-key* buffer "q" "quit-window")
+        (spreadsheet--render! buffer))))
+
+(define (spreadsheet--refresh-theme!)
+  (for-each
+    (lambda (buffer)
+      (when (and (equal? (buffer-local buffer 'mode-name) "spreadsheet-mode")
+                 (buffer-local buffer 'spreadsheet-backend)
+                 (buffer-local buffer 'spreadsheet-source))
+        (spreadsheet--render! buffer)))
+    (buffer-list)))
+
+(add-hook! 'theme-change-hook spreadsheet--refresh-theme!)
+
+;; A stale app renderer once put its HTML into a file-backed workbook buffer.
+;; Refuse that payload at the final save boundary, even if locals are corrupt.
+(define (spreadsheet--guard-html-save!)
+  (let ((path (buffer-path (current-buffer)))
+        (text (buffer-text (current-buffer))))
+    (when (and path
+               (string-suffix? ".sheet.json" (string-downcase path))
+               (or (string-prefix? "<!doctype html" (string-downcase text))
+                   (string-prefix? "<html" (string-downcase text))))
+      (error "Refusing to save spreadsheet app HTML as workbook JSON"))))
+
+(add-hook! 'before-save-hook spreadsheet--guard-html-save!)
 
 (mode-icon! "spreadsheet-mode" "󰈛")
 

@@ -51,6 +51,31 @@
 (define (theme-face-spec face)
   (assoc face (theme-faces *current-theme*)))
 
+(define (theme--hex-digit text at)
+  (let ((digit (substring-bytes (string-downcase text) at (+ at 1))))
+    (let loop ((digits (string-split "0123456789abcdef" "")) (value 0))
+      (cond
+        ((null? digits) #f)
+        ((equal? (car digits) digit) value)
+        (else (loop (cdr digits) (+ value 1)))))))
+
+(define (theme--hex-byte text at)
+  (let ((high (theme--hex-digit text at))
+        (low (theme--hex-digit text (+ at 1))))
+    (and high low (+ (* high 16) low))))
+
+;; Apps cannot read the editor's CSS variables across their origin boundary.
+;; Give them the theme's appearance without naming specific palettes.
+(define (theme-dark?)
+  (let* ((spec (theme-face-spec 'default))
+         (background (and spec (plist-get (cdr spec) 'bg))))
+    (and (string? background)
+         (re-match "^#[0-9A-Fa-f]{6}$" background)
+         (let ((red (theme--hex-byte background 1))
+               (green (theme--hex-byte background 3))
+               (blue (theme--hex-byte background 5)))
+           (< (+ (* red 299) (* green 587) (* blue 114)) 128000)))))
+
 (define (defface! face &rest attrs)
   (set! *face-defaults*
         (cons (cons face attrs)
@@ -69,6 +94,7 @@
           (for-each (lambda (d) (apply set-face-attribute! d)) *face-defaults*)
           (for-each (lambda (spec) (apply set-face-attribute! spec)) (cadr t))
           (persist-theme! name)
+          (run-hooks 'theme-change-hook)
           (message (string-append "Loaded theme " name)))
         (message (string-append "No such theme: " name)))))
 
@@ -357,4 +383,7 @@
 (public! 'load-theme "(load-theme NAME) — switch color theme (persists)")
 (public! 'defface! "(defface! FACE ATTR VALUE ...) — a package's default face; the theme wins")
 (public! 'theme-faces "(theme-faces NAME) -> the theme's face specs")
+(public! 'theme-dark? "(theme-dark?) -> #t when the current theme has a dark default background")
 (public! '*themes* "The theme registry: ((name . spec) ...)")
+
+(catalog-meta! 'function "theme-dark?" 'domain 'faces 'effects '(read))

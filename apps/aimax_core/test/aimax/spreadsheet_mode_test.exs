@@ -44,6 +44,23 @@ defmodule Aimax.SpreadsheetModeTest do
     assert Buffer.text(buffer) =~ "UniverSheetsCorePreset"
     assert Buffer.text(buffer) =~ "UniverSheetsDrawingPreset"
     assert Buffer.text(buffer) =~ "api.registerComponent('AimaxChart',AimaxChart)"
+    assert {:ok, _} = Session.eval(~s{(load-theme "aimax-dark")})
+    assert Buffer.text(buffer) =~ ~s(<meta name="color-scheme" content="dark">)
+    assert Buffer.text(buffer) =~ "color-scheme:dark"
+    assert Buffer.text(buffer) =~ "made=create({darkMode:true,locale:"
+    assert Buffer.text(buffer) =~ "echarts.init(ref.current,'dark')"
+    assert Buffer.text(buffer) =~ "if(api.toggleDarkMode)api.toggleDarkMode(true)"
+    refute Buffer.text(buffer) =~ "prefers-color-scheme"
+
+    assert {:ok, _} = Session.eval(~s{(load-theme "paper")})
+    assert Buffer.text(buffer) =~ ~s(<meta name="color-scheme" content="light">)
+    assert Buffer.text(buffer) =~ "color-scheme:light"
+    assert Buffer.text(buffer) =~ "made=create({locale:"
+    refute Buffer.text(buffer) =~ "made=create({darkMode:true,locale:"
+    assert Buffer.text(buffer) =~ "echarts.init(ref.current,null)"
+    refute Buffer.text(buffer) =~ "if(api.toggleDarkMode)api.toggleDarkMode(true)"
+
+    assert {:ok, _} = Session.eval(~s{(load-theme "aimax-dark")})
     assert Buffer.text(buffer) =~ "addFloatDomToPosition"
     refute Buffer.text(buffer) =~ "addFloatDomToRange"
     assert Buffer.text(buffer) =~ "initialChartPosition"
@@ -72,6 +89,47 @@ defmodule Aimax.SpreadsheetModeTest do
     assert Buffer.text(buffer) =~ "aimax:'request-focus'"
     assert Buffer.text(buffer) =~ "book.setActiveSheet(sheets[wanted])"
     assert Buffer.text(buffer) =~ "_aimax/spreadsheet"
+
+    stored = File.read!(path)
+    assert :ok = KeyDispatch.handle_key("C-x")
+    assert :ok = KeyDispatch.handle_key("C-s")
+    assert Editor.snapshot().minibuffer == nil
+    assert File.read!(path) == stored
+  end
+
+  test "running spreadsheet mode on the JSON source does not replace its data", %{path: path} do
+    workbook = ~s({"version":1,"sheets":[{"name":"Safe","data":[["value"]]}]}\n)
+    File.write!(path, workbook)
+
+    assert {:ok, _} = Session.eval(~s{(visit "#{path}")})
+    source = Editor.current_buffer()
+    assert Buffer.text(source) == workbook
+
+    Buffer.set_local(source, "render-mode", "app")
+    Buffer.set_local(source, "preview-renderer", "html")
+
+    assert {:ok, _} = Session.eval(~s{(set-mode! "spreadsheet-mode")})
+
+    assert Editor.current_buffer() == source
+    assert Buffer.get_local(source, "mode-name") == "json-mode"
+    assert Buffer.get_local(source, "render-mode") in [nil, false]
+    assert Buffer.get_local(source, "preview-renderer") in [nil, false]
+    assert Buffer.text(source) == workbook
+    assert File.read!(path) == workbook
+  end
+
+  test "save-buffer refuses HTML in a workbook source", %{path: path} do
+    workbook = ~s({"version":1,"sheets":[{"name":"Safe","data":[["value"]]}]}\n)
+    File.write!(path, workbook)
+    assert {:ok, _} = Session.eval(~s{(visit "#{path}")})
+
+    source = Editor.current_buffer()
+    html = "<!doctype html><html><body>internal app</body></html>"
+    Buffer.replace_range(source, 0, Buffer.byte_size(source), html)
+
+    assert {:error, message} = Session.eval(~s{(run-command "save-buffer")})
+    assert message =~ "Refusing to save spreadsheet app HTML"
+    assert File.read!(path) == workbook
   end
 
   test "agents can persist charts embedded in sheet ranges", %{path: path} do

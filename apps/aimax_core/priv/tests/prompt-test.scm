@@ -35,7 +35,19 @@
       (check-equal! (hello) (prompt-parts-text acp)
                     "hello is only the shared composition")
       (check-contains! (hello) "(chat-context)"
-                       "every agent learns to inspect its context"))))
+                       "every agent learns to inspect its context")
+      (check-contains! (hello) "Research as much as the task requires"
+                       "discovery is not artificially curtailed")
+      (check-contains! (hello) "continue with more batches"
+                       "research can use repeated concurrent batches")
+      (check-contains! (hello) "not that research stops after one batch"
+                       "one-shot applies to questions, not the whole phase")
+      (check-contains! (hello) "almost never read a full file"
+                       "agents prefer structural reads")
+      (check-contains! (hello) "Most source files have a tree-sitter grammar"
+                       "agents know surgical source editing is available")
+      (check-contains! (hello) "Write Scheme unless the user explicitly specifies another language"
+                       "Scheme remains the default implementation language"))))
 
 (deftest 'chat-context-names-the-conversation-and-its-companions
   "the structured context reports identity, group membership, and prompt state"

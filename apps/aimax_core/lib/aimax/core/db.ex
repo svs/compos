@@ -14,17 +14,23 @@ defmodule Aimax.Core.DB do
   could not supply.
 
   One connection per name, not a pool. The editor runs queries with little
-  concurrency, and a single connection is what makes an explicit
-  transaction work: `begin`, the statements, and `commit` all reach the
-  same session. A pool would scatter them.
+  concurrency, and a single connection is what makes a scoped transaction
+  work: every query through its handle reaches the checked-out session.
 
-  Queries never block the caller's lane. `query/4` answers through a
-  callback, the way LSP requests and endpoint asks do.
+  `query/4` never blocks the caller's lane. It answers through a callback,
+  the way LSP requests and endpoint asks do. `query/3` is blocking and
+  belongs on a worker lane, such as a Morg Scheme task.
   """
 
   require Logger
 
   @adapters %{"postgres" => Postgrex, "postgresql" => Postgrex}
+
+  defmodule Transaction do
+    @moduledoc false
+    @enforce_keys [:name, :owner, :ref]
+    defstruct [:name, :owner, :ref]
+  end
 
   @doc "Open a named connection. SPEC picks the adapter and its options."
   def connect(name, spec) when is_binary(name) and is_map(spec) do
@@ -174,6 +180,58 @@ defmodule Aimax.Core.DB do
         :ok
     end
   end
+
+  @doc "Run SQL on the calling process. The caller must choose a non-UI lane."
+  def query(%Transaction{} = transaction, sql, params) do
+    with :ok <- active_transaction(transaction) do
+      run(Process.get(transaction_key(transaction.ref)), sql, params)
+    end
+  end
+
+  def query(name, sql, params) do
+    case whereis(name) do
+      nil -> {:error, "db: no connection #{name}"}
+      pid -> run(pid, sql, params)
+    end
+  end
+
+  @doc "Run FUN with a scoped transaction handle and return its value."
+  def with_transaction(name, fun) when is_function(fun, 1) do
+    case whereis(name) do
+      nil ->
+        {:error, "db: no connection #{name}"}
+
+      pid ->
+        case Postgrex.transaction(pid, fn conn -> in_transaction(name, conn, fun) end) do
+          {:ok, result} -> {:ok, result}
+          {:error, msg} -> {:error, to_string(msg)}
+        end
+    end
+  catch
+    :exit, _ -> {:error, "db: connection is not available"}
+  end
+
+  defp in_transaction(name, conn, fun) do
+    transaction = %Transaction{name: name, owner: self(), ref: make_ref()}
+    Process.put(transaction_key(transaction.ref), conn)
+
+    try do
+      fun.(transaction)
+    after
+      Process.delete(transaction_key(transaction.ref))
+    end
+  end
+
+  defp active_transaction(%Transaction{owner: owner}) when owner != self(),
+    do: {:error, "db: transaction belongs to another execution lane"}
+
+  defp active_transaction(%Transaction{ref: ref}) do
+    if Process.get(transaction_key(ref)),
+      do: :ok,
+      else: {:error, "db: transaction is no longer active"}
+  end
+
+  defp transaction_key(ref), do: {__MODULE__, :transaction, ref}
 
   defp run(pid, sql, params) do
     case Postgrex.query(pid, sql, params) do

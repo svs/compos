@@ -897,7 +897,9 @@ defmodule Aimax.Core.Session do
       "db-list" => "(db-list) — return (name adapter database) per connection.",
       "db-adapters" => "(db-adapters) — the database adapters this build can open.",
       "db-query" =>
-        "(db-query NAME SQL [PARAMS] CB) — run SQL with bound PARAMS; CB gets (OK RESULT), RESULT a plist of 'columns 'rows 'count 'command.",
+        "(db-query NAME-OR-TRANSACTION SQL [PARAMS] [CB]) — without CB, run on the calling lane and return RESULT; with CB, answer asynchronously with (OK RESULT).",
+      "db-with-transaction" =>
+        "(db-with-transaction NAME PROC) — call PROC with a scoped transaction handle; commit and return its value, or roll back on error.",
       "endpoint-start!" =>
         "(endpoint-start! NAME SPEC) — open a named connection; SPEC picks the transport and framing.",
       "endpoint-stop!" => "(endpoint-stop! NAME) — close the connection NAME.",
@@ -1553,6 +1555,12 @@ defmodule Aimax.Core.Session do
       end,
       "db-adapters" => fn [] -> String.split(Aimax.Core.DB.known_adapters(), ", ") end,
       "db-query" => fn
+        [target, sql] ->
+          db_query_sync(db_target(target), s(sql), [])
+
+        [target, sql, params] when is_list(params) ->
+          db_query_sync(db_target(target), s(sql), db_params(params))
+
         [name, sql, params, callback] ->
           Aimax.Core.DB.query(s(name), s(sql), db_params(params), db_cb(callback))
           :void
@@ -1560,6 +1568,14 @@ defmodule Aimax.Core.Session do
         [name, sql, callback] ->
           Aimax.Core.DB.query(s(name), s(sql), [], db_cb(callback))
           :void
+      end,
+      "db-with-transaction" => fn [name, procedure], store ->
+        case Aimax.Core.DB.with_transaction(s(name), fn transaction ->
+               Aimax.Scheme.Eval.apply_fn(procedure, [transaction], store)
+             end) do
+          {:ok, result_and_store} -> result_and_store
+          {:error, msg} -> raise_scheme("db-with-transaction: #{msg}")
+        end
       end,
       # --- Endpoints (Aimax.Core.Endpoint; policy in Scheme packages) ------
       "endpoint-start!" => fn [name, spec] ->
@@ -2745,6 +2761,24 @@ defmodule Aimax.Core.Session do
       end
     end
   end
+
+  defp db_query_sync(name, sql, params) do
+    case Aimax.Core.DB.query(name, sql, params) do
+      {:ok, result} ->
+        db_result(result)
+
+      {:error, msg} ->
+        raise_scheme("db-query: #{msg}")
+    end
+  end
+
+  defp db_result(result) do
+    [true, value] = db_callback_args({:ok, result})
+    value
+  end
+
+  defp db_target(%Aimax.Core.DB.Transaction{} = transaction), do: transaction
+  defp db_target(name), do: s(name)
 
   defp db_callback_args({:ok, r}) do
     [

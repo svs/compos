@@ -322,6 +322,8 @@
 
 (define t--babel-real-shell *morg-babel-shell*)
 (define t--babel-pending #f)
+(define t--babel-real-scheme *morg-babel-scheme*)
+(define t--babel-scheme-pending #f)
 
 (define (t--babel-now! out)
   (set! *morg-babel-shell*
@@ -337,9 +339,25 @@
     (set! t--babel-pending #f)
     (k out)))
 
+(define (t--babel-scheme-now!)
+  (set! *morg-babel-scheme*
+    (lambda (body k) (k #t (eval-string-safe body)))))
+
+(define (t--babel-scheme-later!)
+  (set! t--babel-scheme-pending #f)
+  (set! *morg-babel-scheme*
+    (lambda (body k) (set! t--babel-scheme-pending (list body k)))))
+
+(define (t--babel-scheme-answer!)
+  (let ((pending t--babel-scheme-pending))
+    (set! t--babel-scheme-pending #f)
+    ((cadr pending) #t (eval-string-safe (car pending)))))
+
 (define (t--babel-restore!)
   (set! *morg-babel-shell* t--babel-real-shell)
-  (set! t--babel-pending #f))
+  (set! t--babel-pending #f)
+  (set! *morg-babel-scheme* t--babel-real-scheme)
+  (set! t--babel-scheme-pending #f))
 
 (deftest 'a-shell-block-runs-into-a-result-block
   "the result is a block, so a second run can replace it"
@@ -421,10 +439,51 @@
 (deftest 'a-scheme-block-evaluates-in-the-editors-interpreter
   "the same interpreter the editor is written in"
   (lambda ()
+    (t--babel-scheme-now!)
     (t--morg! "```scheme\n(+ 1 2)\n```\n" 11)
     (t--morg-run! "morg-babel")
     (check-equal! (buffer-text t--morg-buf) "```scheme\n(+ 1 2)\n```\n```result\n3\n```\n"
                   "the value came back")
+    (t--babel-restore!)
+    (t--morg-done!)))
+
+(deftest 'a-scheme-block-runs-off-the-editor-lane
+  "the result says running until the Scheme task answers"
+  (lambda ()
+    (t--babel-scheme-later!)
+    (t--morg! "```scheme\n(+ 1 2)\n```\n" 11)
+    (t--morg-run! "morg-babel")
+    (check-equal! (buffer-text t--morg-buf)
+                  "```scheme\n(+ 1 2)\n```\n```result\nrunning\n```\n"
+                  "the result reports the pending Scheme work")
+    (t--babel-scheme-answer!)
+    (check-equal! (buffer-text t--morg-buf)
+                  "```scheme\n(+ 1 2)\n```\n```result\n3\n```\n"
+                  "the task result replaced running")
+    (t--babel-restore!)
+    (t--morg-done!)))
+
+(deftest 'a-scheme-block-runs-once-at-a-time
+  "the second run cannot start while the Scheme task runs"
+  (lambda ()
+    (t--babel-scheme-later!)
+    (t--morg! "```scheme\n(+ 1 2)\n```\n" 11)
+    (check-equal! (car (morg-babel-execute t--morg-buf 11)) 'pending
+                  "the first run starts")
+    (check-equal! (car (morg-babel-execute t--morg-buf 11)) 'error
+                  "the second run is refused")
+    (t--babel-scheme-answer!)
+    (t--babel-restore!)
+    (t--morg-done!)))
+
+(deftest 'a-sync-scheme-block-runs-on-the-calling-lane
+  "the sync marker keeps the old immediate Scheme behavior"
+  (lambda ()
+    (t--morg! "```scheme :sync\n(+ 1 2)\n```\n" 17)
+    (t--morg-run! "morg-babel")
+    (check-equal! (buffer-text t--morg-buf)
+                  "```scheme :sync\n(+ 1 2)\n```\n```result\n3\n```\n"
+                  "the result is present when the command returns")
     (t--morg-done!)))
 
 (deftest 'running-outside-a-block-does-not-edit-the-buffer

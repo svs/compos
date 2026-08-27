@@ -26,8 +26,12 @@ defmodule Aimax.DBTest do
 
   defp wait_until(fun, tries \\ 400) do
     cond do
-      fun.() -> :ok
-      tries == 0 -> flunk("condition never became true")
+      fun.() ->
+        :ok
+
+      tries == 0 ->
+        flunk("condition never became true")
+
       true ->
         Process.sleep(10)
         wait_until(fun, tries - 1)
@@ -66,6 +70,20 @@ defmodule Aimax.DBTest do
       assert eval!("x") =~ "no connection"
     end
 
+    test "a synchronous query raises when the connection is missing" do
+      assert {:error, message} = Session.eval(~s|(db-query "t-sync-missing" "select 1")|)
+      assert message =~ "no connection"
+    end
+
+    test "a transaction raises when the connection is missing" do
+      assert {:error, message} =
+               Session.eval(
+                 ~s|(db-with-transaction "t-tx-missing" (lambda (tx) (db-query tx "select 1")))|
+               )
+
+      assert message =~ "no connection"
+    end
+
     test "the adapter list names what this build can open" do
       assert eval!("(db-adapters)") =~ "postgres"
     end
@@ -88,6 +106,72 @@ defmodule Aimax.DBTest do
 
         # the same connection served both: no reconnect tax
         assert eval!(~s|(db-connected? "t-db")|) == "#t"
+      end
+    end
+
+    test "a synchronous query returns the result on its calling lane", ctx do
+      if ctx[:pg] == nil do
+        IO.puts("skipped: no local PostgreSQL")
+      else
+        open!("t-sync")
+
+        assert eval!(~s|(db-query "t-sync" "select 7 as n")|) ==
+                 ~s|(columns ("n") rows ((7)) count 1 command "select")|
+      end
+    end
+
+    test "a transaction returns the procedure value and rolls back failures", ctx do
+      if ctx[:pg] == nil do
+        IO.puts("skipped: no local PostgreSQL")
+      else
+        open!("t-sync-tx")
+        eval!(~s|(db-query "t-sync-tx" "create temporary table tx_values (n int)")|)
+
+        assert eval!("""
+               (db-with-transaction "t-sync-tx"
+                 (lambda (tx)
+                   (db-query tx "insert into tx_values values ($1)" (list 7))
+                   (db-query tx "select n from tx_values")))
+               """) == ~s|(columns ("n") rows ((7)) count 1 command "select")|
+
+        assert eval!("""
+               (db-with-transaction "t-sync-tx"
+                 (lambda (tx)
+                   (db-query tx "select 1")
+                   42))
+               """) == "42"
+
+        assert {:error, message} =
+                 Session.eval("""
+                 (db-with-transaction "t-sync-tx"
+                   (lambda (tx)
+                     (db-query tx "insert into tx_values values (9)")
+                     (db-query tx "select * from no_such_table")))
+                 """)
+
+        assert message =~ "42P01"
+
+        assert eval!(~s|(db-value (db-query "t-sync-tx" "select count(*) from tx_values"))|) ==
+                 "1"
+      end
+    end
+
+    test "a transaction handle cannot escape its procedure", ctx do
+      if ctx[:pg] == nil do
+        IO.puts("skipped: no local PostgreSQL")
+      else
+        open!("t-tx-scope")
+
+        assert eval!("""
+               (define escaped-tx #f)
+               (db-with-transaction "t-tx-scope"
+                 (lambda (tx)
+                   (set! escaped-tx tx)
+                   'committed))
+               """) == "committed"
+
+        assert {:error, message} = Session.eval(~s|(db-query escaped-tx "select 1")|)
+        assert message =~ "no longer active"
       end
     end
 

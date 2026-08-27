@@ -1,6 +1,6 @@
 defmodule Aimax.MorgTest do
   @moduledoc """
-  Two tests about a markdown-mode that is not built.
+  Browser-path checks that need Elixir timing or key dispatch.
 
   morg-mode is Scheme and priv/tests/morg-test.scm covers all of it — the
   folds, the TODO cycle, the faces, the structural API, babel and tangle.
@@ -29,10 +29,41 @@ defmodule Aimax.MorgTest do
     name
   end
 
+  defp eventually(fun, tries \\ 200)
+
+  defp eventually(fun, tries) do
+    cond do
+      fun.() ->
+        :ok
+
+      tries == 0 ->
+        flunk("condition never became true")
+
+      true ->
+        Process.sleep(10)
+        eventually(fun, tries - 1)
+    end
+  end
+
   @doc false
   # "# a\nbody\n## child\ncbody\n# b\ntail\n"
   #  0123 4..8 9......17 ...   24.. 28..
   defp fixture, do: "# a\nbody\n## child\ncbody\n# b\ntail\n"
+
+  test "Scheme Babel runs a blocking query off the UI lane" do
+    buf =
+      morg_buffer("""
+      ```scheme
+      (db-query "morg-missing" "select 1")
+      ```
+      """)
+
+    :ok = Buffer.goto(buf, 12)
+    press(["C-c", "C-c"])
+
+    eventually(fn -> Buffer.text(buf) =~ "db: no connection morg-missing" end)
+    assert Buffer.text(buf) =~ "```result\ndb-query: db: no connection morg-missing\n```"
+  end
 
   # markdown-mode does not exist: no define-mode registers it, and set-mode!
   # has no teardown hook, so morg's folds, keys, and overlays survive the
@@ -52,8 +83,6 @@ defmodule Aimax.MorgTest do
     assert Buffer.get_local(buf, "render-mode") == "markdown"
   end
 
-
-
   @tag :skip
   test "switching from morg to markdown removes Morg behavior" do
     buf = morg_buffer(fixture())
@@ -64,6 +93,7 @@ defmodule Aimax.MorgTest do
     {:ok, _} = Session.eval(~s{(set-mode! "markdown-mode")})
 
     assert Buffer.hidden(buf) == []
+
     refute Enum.any?(Editor.local_keys(buf), fn {_key, command} ->
              command in [
                "morg-cycle",
@@ -76,7 +106,4 @@ defmodule Aimax.MorgTest do
     :ok = Buffer.insert_at(buf, 0, "x", source: :user)
     refute Enum.any?(Buffer.overlays(buf), fn {_, _, face} -> face =~ "org-level" end)
   end
-
-
-
 end

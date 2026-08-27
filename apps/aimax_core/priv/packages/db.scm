@@ -148,13 +148,15 @@
 (public! 'db-disconnect! "(db-disconnect! NAME) — close the database connection NAME")
 (public! 'db-connected? "(db-connected? NAME) — #t when the database connection is open")
 (public! 'db-query
-  "(db-query NAME SQL [PARAMS] CB) — run a sql query with bound parameters; CB gets (OK RESULT)")
+  "(db-query NAME-OR-TRANSACTION SQL [PARAMS] [CB]) — return RESULT on the calling lane; with CB, answer asynchronously with (OK RESULT)")
+(public! 'db-with-transaction
+  "(db-with-transaction NAME PROC) — call PROC with a scoped transaction handle; commit and return its value, or roll back on error")
 (public! 'db-list "(db-list) — every open database as (name adapter database)")
 (public! 'db-adapters "(db-adapters) — the database adapters this build can open")
 
 (effects! '(read external))
 (defrecipe! "query a postgres database"
-  "(db-query {{name}} {{sql}} '() (lambda (ok r) (message (if ok (db-render-table r) r))))"
+  "(db-render-table (db-query {{name}} {{sql}}))"
   (list (list 'name "Database name: ") (list 'sql "SQL: ")))
 (defrecipe! "connect to a postgres database"
   "(db-register! {{name}} (list 'adapter \"postgres\" 'database {{database}}))"

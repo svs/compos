@@ -7,8 +7,8 @@
 ;;; `running` while the command works, and the output replaces that word
 ;;; when the command ends. You keep typing, and you can start more blocks
 ;;; while the first one runs. Add `:sync` after the language to hold the
-;;; editor until the block ends. A `scheme` block is always synchronous,
-;;; because it runs in the editor's own interpreter.
+;;; editor until the block ends. A Scheme block also runs off the editor
+;;; lane. Add `:sync` when it must run on the calling lane.
 ;;;
 ;;; The document can change while a block runs, so the block's place is
 ;;; not its byte offset. morg-babel-relocate finds the block again by its
@@ -50,12 +50,23 @@
 (define (morg-babel-run-shell runner body)
   (shell-command->string (morg-babel-script runner body)))
 
+(define (morg-babel-output value)
+  (if (string? value) value (value->string value)))
+
 ;; The seam every asynchronous block runs through. K receives the output.
 ;; A test replaces this to answer without a shell.
 (define (morg-babel-shell-async runner body k)
   (shell-command->string (morg-babel-script runner body) k))
 
 (define *morg-babel-shell* morg-babel-shell-async)
+
+;; Scheme evaluation uses a shared-world task. K gets the task status and
+;; the (ok VALUE) or (error MESSAGE) result from eval-string-safe.
+(define (morg-babel-scheme-async body k)
+  (task-run! (lambda () (eval-string-safe body)) k))
+
+;; A test replaces this to control when a Scheme task answers.
+(define *morg-babel-scheme* morg-babel-scheme-async)
 
 ;;; --- what is running now -----------------------------------------------------
 ;;; Runtime state: the (lang body) pairs this buffer runs at this moment.
@@ -168,6 +179,26 @@
       (lambda (out) (morg-babel-finish! buf idx lang body out)))
     (list 'pending lang)))
 
+(define (morg-babel-finish-scheme! buf idx lang body task-ok evaluated)
+  (cond
+    ((not task-ok)
+     (morg-babel-finish! buf idx lang body (morg-babel-output evaluated)))
+    ((equal? (car evaluated) 'error)
+     (morg-babel-finish! buf idx lang body (cadr evaluated)))
+    (else
+      (morg-babel-finish! buf idx lang body
+        (morg-babel-output (cadr evaluated))))))
+
+(define (morg-babel-start-scheme! buf scan fstart lang body)
+  (let ((idx (morg-babel-index scan buf fstart))
+        (key (list lang body)))
+    (morg-babel-claim! buf key)
+    (morg-babel-insert-result! buf fstart morg-babel-running-text)
+    (*morg-babel-scheme* body
+      (lambda (ok evaluated)
+        (morg-babel-finish-scheme! buf idx lang body ok evaluated)))
+    (list 'pending lang)))
+
 (define (morg-babel-execute buf pos)
   (let* ((scan (morg-scan buf))
          (a (morg-block-open scan pos)))
@@ -183,10 +214,15 @@
                      (body (substring-bytes (buffer-text buf)
                                             (car body-r) (cadr body-r))))
                 (cond
-                  ((equal? (string-downcase lang) "scheme")
+                  ((and (equal? (string-downcase lang) "scheme")
+                        (morg-babel-sync? e))
                    (morg-babel-insert-result! buf a
                      (value->string (eval-string body)))
                    (list 'ok lang))
+                  ((equal? (string-downcase lang) "scheme")
+                   (if (member (list lang body) (morg-babel-inflight buf))
+                       (list 'error "The scheme block already runs")
+                       (morg-babel-start-scheme! buf scan a lang body)))
                   ((not (morg-babel-runner lang))
                    (list 'error (string-append "No runner for " lang)))
                   ((morg-babel-sync? e)
@@ -212,7 +248,7 @@
   (lambda () (run-command "morg-babel")))
 
 (public! 'morg-babel-execute
-  "(morg-babel-execute BUF POS) — run the Morg block at POS and update its result fence; a shell block runs off the lane and returns (pending LANG)")
+  "(morg-babel-execute BUF POS) — run the Morg block at POS and update its result fence; an asynchronous block returns (pending LANG)")
 
 ;; Do not leak this extension's catalog context into the next package.
 (package! morg-babel-parent-package morg-babel-parent-namespace)

@@ -145,13 +145,16 @@
       (t--drop! one)
       (t--drop! two))))
 
-(deftest 'push-founds-a-typed-name
-  "the push prompt takes a name it does not list, and founds it"
+(deftest 'add-founds-a-typed-name
+  "the add prompt takes a name it does not list, and founds it"
   (lambda ()
-    (let ((buf "*zztest-push*"))
+    (let ((buf "*zztest-add*"))
       (buffer-create buf)
-      (group-push-buffers-to! (list buf) "zztest-pushed")
-      (let ((id (group-resolve-id "zztest-pushed")))
+      (switch-to-buffer! buf)
+      (run-command "buffer-add-to-group")
+      (minibuffer-change! "zztest-added")
+      (run-command "minibuffer-confirm")
+      (let ((id (group-resolve-id "zztest-added")))
         (check-true! id "the typed name founded a group")
         (check-equal! (buffer-group buf) id "and the buffer joined it")
         (t--drop! id))

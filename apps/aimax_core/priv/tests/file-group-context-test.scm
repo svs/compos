@@ -66,7 +66,7 @@
       (check-true! (buffer-in-group? live-path other)
                    "the live buffer keeps its existing group")
       (check-false! (buffer-in-group? live-path current)
-                    "reopening does not silently pull it into current-group")
+                    "reopening does not silently add it to current-group")
 
       (buffer-kill! new-path)
       (buffer-kill! live-path)

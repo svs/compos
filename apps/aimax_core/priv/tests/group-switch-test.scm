@@ -23,7 +23,10 @@
   (for-each
     (lambda (b)
       (test-buffer! b "")
-      (buffer-set-local! b 'buffer-selected #f))
+      (buffer-set-local! b 'buffer-selected #f)
+      (buffer-set-local! b 'scratch-buffer #f)
+      (buffer-set-local! b 'scratch-owner #f)
+      (buffer-set-local! b 'transient #f))
     (list t--sw-first t--sw-second t--sw-third))
   (set! *group-records* '())
   (set! *group-next-id* 0)
@@ -142,76 +145,144 @@
       (buffer-kill! ungrouped))
     (t--sw-done!)))
 
-;;; --- pull, push, pop -------------------------------------------------------------
+;;; --- add, move, remove -----------------------------------------------------------
 
-(deftest 'pull-adds-to-the-current-group-without-switching-context
-  "the buffer comes here; we do not go there"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((here (group-record-create! "zzsw-here"))
-          (there (group-record-create! "zzsw-there")))
-      (buffer-add-group! t--sw-first here)
-      (buffer-add-group! t--sw-second there)
-      (set-frame-local! 'current-group here)
-      (switch-to-buffer! t--sw-first)
-      (run-command "group-pull-buffer")
-
-      ;; narrow first: the prompt offers every live work buffer, and the
-      ;; suite shares one editor, so the full list holds whatever the
-      ;; other files left open. Typing the name is how a person finds it.
-      (t--sw-type! t--sw-second)
-      (check-true! (member t--sw-second (t--sw-labels)) "the other buffer is offered")
-      (t--sw-key! "confirm")
-
-      (check-true! (buffer-in-group? t--sw-second here) "it joined this group")
-      (check-true! (buffer-in-group? t--sw-second there) "and kept its own")
-      (check-equal! (frame-local 'current-group) here "the context did not move")
-      (check-equal! (current-buffer) t--sw-first "nor the window"))
-    (t--sw-done!)))
-
-(deftest 'push-adds-an-existing-destination-without-leaving-the-source
-  "the buffer goes there; we stay here"
+(deftest 'add-keeps-existing-memberships-and-visible-context
+  "add makes the buffer family available elsewhere without entering the destination"
   (lambda ()
     (t--sw-setup!)
     (let ((source (group-record-create! "zzsw-source"))
           (destination (group-record-create! "zzsw-destination")))
       (buffer-add-group! t--sw-first source)
-      (set-frame-local! 'current-group source)
       (switch-to-buffer! t--sw-first)
-      (run-command "group-push-buffer")
-
-      (let ((labels (t--sw-labels)))
-        (check-true! (member "New group" labels) "a new group is offered")
-        (check-true! (member "zzsw-destination" labels) "and the existing one"))
-
+      (run-command "buffer-add-to-group")
       (t--sw-type! "zzsw-destination")
       (t--sw-key! "confirm")
 
-      (check-true! (buffer-in-group? t--sw-first source) "it keeps the source group")
-      (check-true! (buffer-in-group? t--sw-first destination) "and joins the destination")
-      (check-equal! (frame-local 'current-group) source "the context stays")
-      (check-equal! (current-buffer) t--sw-first "and the window"))
+      (check-true! (buffer-in-group? t--sw-first source) "the source membership remains")
+      (check-true! (buffer-in-group? t--sw-first destination) "the destination is added")
+      (check-equal! (frame-group) source "the visible context remains the source")
+      (check-equal! (current-buffer) t--sw-first "the command does not change windows"))
     (t--sw-done!)))
 
-(deftest 'push-can-create-a-destination-without-entering-it
-  "two prompts: which group, then what to call it"
+(deftest 'add-can-create-a-destination-without-entering-it
+  "a typed destination creates one group and adds the current buffer"
   (lambda ()
     (t--sw-setup!)
     (let ((source (group-record-create! "zzsw-source")))
       (buffer-add-group! t--sw-first source)
-      (set-frame-local! 'current-group source)
       (switch-to-buffer! t--sw-first)
-      (run-command "group-push-buffer")
-
-      (t--sw-type! "New group")
-      (t--sw-key! "confirm")
+      (run-command "buffer-add-to-group")
       (t--sw-type! "zzsw-created")
       (t--sw-key! "confirm")
 
       (let ((created (group-resolve-id "zzsw-created")))
-        (check-true! created "the group was created")
-        (check-true! (buffer-in-group? t--sw-first created) "and the buffer joined it")
-        (check-equal! (frame-local 'current-group) source "without entering it")))
+        (check-true! created "the typed destination creates a group")
+        (check-true! (buffer-in-group? t--sw-first created) "the buffer joins it")
+        (check-equal! (frame-group) source "the frame does not enter it")))
+    (t--sw-done!)))
+
+(deftest 'move-removes-one-source-and-keeps-other-memberships
+  "move adds the destination and removes only the derived current group"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((source (group-record-create! "zzsw-source"))
+          (kept (group-record-create! "zzsw-kept"))
+          (destination (group-record-create! "zzsw-destination")))
+      (buffer-add-group! t--sw-first source)
+      (buffer-add-group! t--sw-first kept)
+      (switch-to-buffer! t--sw-first)
+      (set-frame-local! 'current-group source)
+      (run-command "buffer-move-to-group")
+      (t--sw-type! "zzsw-destination")
+      (t--sw-key! "confirm")
+
+      (check-false! (buffer-in-group? t--sw-first source) "the named source is removed")
+      (check-true! (buffer-in-group? t--sw-first kept) "another membership remains")
+      (check-true! (buffer-in-group? t--sw-first destination) "the destination is added")
+      (check-true! (buffer-known? t--sw-first) "move keeps the buffer alive"))
+    (t--sw-done!)))
+
+(deftest 'move-asks-for-a-source-when-the-visible-frame-has-none
+  "a multiply grouped buffer names the source before it names the destination"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((first (group-record-create! "zzsw-first-source"))
+          (second (group-record-create! "zzsw-second-source"))
+          (destination (group-record-create! "zzsw-destination")))
+      (buffer-add-group! t--sw-first first)
+      (buffer-add-group! t--sw-first second)
+      (switch-to-buffer! t--sw-first)
+      (set-frame-local! 'current-group #f)
+      (run-command "buffer-move-to-group")
+
+      (check-true! (member "zzsw-first-source" (t--sw-labels)) "the first source is offered")
+      (check-true! (member "zzsw-second-source" (t--sw-labels)) "the second source is offered")
+      (t--sw-type! "zzsw-first-source")
+      (t--sw-key! "confirm")
+      (t--sw-type! "zzsw-destination")
+      (t--sw-key! "confirm")
+
+      (check-false! (buffer-in-group? t--sw-first first) "the selected source is removed")
+      (check-true! (buffer-in-group? t--sw-first second) "the other source remains")
+      (check-true! (buffer-in-group? t--sw-first destination) "the destination is added"))
+    (t--sw-done!)))
+
+(deftest 'a-failed-move-keeps-the-source-membership
+  "move removes no source when it cannot resolve the destination"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((source (group-record-create! "zzsw-source")))
+      (buffer-add-group! t--sw-first source)
+      (buffer-move-family-to-group! t--sw-first "grp:missing" source)
+      (check-true! (buffer-in-group? t--sw-first source)
+                   "the failed move keeps the source"))
+    (t--sw-done!)))
+
+(deftest 'remove-drops-one-membership-and-keeps-the-buffer
+  "remove changes one membership without killing work"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((removed (group-record-create! "zzsw-removed"))
+          (kept (group-record-create! "zzsw-kept")))
+      (buffer-add-group! t--sw-first removed)
+      (buffer-add-group! t--sw-first kept)
+      (switch-to-buffer! t--sw-first)
+      (set-frame-local! 'current-group removed)
+      (run-command "buffer-remove-from-group")
+
+      (check-false! (buffer-in-group? t--sw-first removed) "the named membership is removed")
+      (check-true! (buffer-in-group? t--sw-first kept) "the other membership remains")
+      (check-true! (buffer-known? t--sw-first) "the buffer remains alive"))
+    (t--sw-done!)))
+
+(deftest 'membership-commands-include-the-explicit-buffer-family
+  "add, move, and remove apply to the document and its attached scratch buffer"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((source (group-record-create! "zzsw-family-source"))
+          (added (group-record-create! "zzsw-family-added"))
+          (moved (group-record-create! "zzsw-family-moved")))
+      (buffer-set-local! t--sw-first 'scratch-buffer t--sw-second)
+      (buffer-set-local! t--sw-second 'scratch-owner t--sw-first)
+      (buffer-add-group! t--sw-first source)
+      (buffer-add-group! t--sw-second source)
+      (switch-to-buffer! t--sw-first)
+
+      (buffer-add-family-to-group! t--sw-first added)
+      (check-true! (buffer-in-group? t--sw-first added) "the document is added")
+      (check-true! (buffer-in-group? t--sw-second added) "the scratch buffer is added")
+
+      (buffer-move-family-to-group! t--sw-first moved source)
+      (check-false! (buffer-in-group? t--sw-first source) "the document leaves the source")
+      (check-false! (buffer-in-group? t--sw-second source) "the scratch buffer leaves the source")
+      (check-true! (buffer-in-group? t--sw-first moved) "the document reaches the destination")
+      (check-true! (buffer-in-group? t--sw-second moved) "the scratch buffer reaches the destination")
+
+      (set-frame-local! 'current-group added)
+      (run-command "buffer-remove-from-group")
+      (check-false! (buffer-in-group? t--sw-first added) "remove changes the document")
+      (check-false! (buffer-in-group? t--sw-second added) "remove changes the scratch buffer"))
     (t--sw-done!)))
 
 (deftest 'buffer-select-toggles-the-active-buffer
@@ -235,165 +306,6 @@
                   "unselect all clears other buffers")
     (t--sw-done!)))
 
-(deftest 'push-visible-adds-all-visible-buffers
-  "visible work buffers join the destination and keep their old memberships"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((source (group-record-create! "zzsw-source"))
-          (destination (group-record-create! "zzsw-destination")))
-      (buffer-add-group! t--sw-first source)
-      (buffer-add-group! t--sw-second source)
-      (set-frame-local! 'current-group source)
-      (split-window! 'h 0.5)
-      (other-window!)
-      (switch-to-buffer! t--sw-second)
-      (run-command "group-push-visible")
-      (t--sw-type! "zzsw-destination")
-      (t--sw-key! "confirm")
-      (check-true! (buffer-in-group? t--sw-first source) "first keeps source")
-      (check-true! (buffer-in-group? t--sw-second source) "second keeps source")
-      (check-true! (buffer-in-group? t--sw-first destination) "first joins destination")
-      (check-true! (buffer-in-group? t--sw-second destination) "second joins destination"))
-    (t--sw-done!)))
-
-(deftest 'push-visible-prefers-selected-visible-buffers
-  "one selected visible buffer limits the push to that buffer"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((source (group-record-create! "zzsw-source"))
-          (destination (group-record-create! "zzsw-destination")))
-      (buffer-add-group! t--sw-first source)
-      (buffer-add-group! t--sw-second source)
-      (set-frame-local! 'current-group source)
-      (split-window! 'h 0.5)
-      (other-window!)
-      (switch-to-buffer! t--sw-second)
-      (switch-to-buffer! t--sw-first)
-      (run-command "buffer-select")
-      (run-command "group-push-visible")
-      (t--sw-type! "zzsw-destination")
-      (t--sw-key! "confirm")
-      (check-true! (buffer-in-group? t--sw-first destination) "selected buffer joins")
-      (check-false! (buffer-in-group? t--sw-second destination) "unselected buffer stays"))
-    (t--sw-done!)))
-
-(deftest 'push-visible-confirms-before-joining-a-nonempty-group
-  "a nonempty destination lists its buffers and still joins after yes"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((source (group-record-create! "zzsw-source"))
-          (destination (group-record-create! "zzsw-destination")))
-      (buffer-add-group! t--sw-first source)
-      (buffer-add-group! t--sw-second destination)
-      (set-frame-local! 'current-group source)
-      (switch-to-buffer! t--sw-first)
-      (run-command "buffer-select")
-      (run-command "group-push-visible")
-      (t--sw-type! "zzsw-destination")
-      (t--sw-key! "confirm")
-      (check-true! (minibuffer-state) "the nonempty target asks for confirmation")
-      (t--sw-type! "y")
-      (check-true! (buffer-in-group? t--sw-first destination)
-                   "yes completes the push"))
-    (t--sw-done!)))
-
-(deftest 'push-selected-founds-a-typed-destination
-  "an unknown destination name creates a group from the push prompt"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((source (group-record-create! "zzsw-source")))
-      (buffer-add-group! t--sw-first source)
-      (set-frame-local! 'current-group source)
-      (switch-to-buffer! t--sw-first)
-      (run-command "buffer-select")
-      (run-command "group-push-selected")
-      (t--sw-type! "zzsw-typed-destination")
-      (t--sw-key! "confirm")
-      (let ((destination (group-resolve-id "zzsw-typed-destination")))
-        (check-true! destination "the unknown destination was created")
-        (check-true! (buffer-in-group? t--sw-first destination)
-                     "the selected buffer joined it")))
-    (t--sw-done!)))
-
-(deftest 'push-selected-falls-back-to-the-current-buffer
-  "with no selection, the current work buffer joins the destination"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((source (group-record-create! "zzsw-source")))
-      (buffer-add-group! t--sw-first source)
-      (set-frame-local! 'current-group source)
-      (switch-to-buffer! t--sw-first)
-      (run-command "group-push-selected")
-      (t--sw-type! "zzsw-current-destination")
-      (t--sw-key! "confirm")
-      (let ((destination (group-resolve-id "zzsw-current-destination")))
-        (check-true! destination "the destination was created")
-        (check-true! (buffer-in-group? t--sw-first destination)
-                     "the current buffer joined it")
-        (check-false! (buffer-in-group? t--sw-second destination)
-                      "another buffer did not join")))
-    (t--sw-done!)))
-
-(deftest 'push-selected-prefers-an-explicit-selection
-  "an explicit selection excludes the unselected current buffer"
-  (lambda ()
-    (t--sw-setup!)
-    (split-window! 'h 0.5)
-    (other-window!)
-    (switch-to-buffer! t--sw-second)
-    (run-command "buffer-select")
-    (other-window!)
-    (run-command "group-push-selected")
-    (t--sw-type! "zzsw-selected-destination")
-    (t--sw-key! "confirm")
-    (let ((destination (group-resolve-id "zzsw-selected-destination")))
-      (check-true! (buffer-in-group? t--sw-second destination)
-                   "the selected buffer joined")
-      (check-false! (buffer-in-group? t--sw-first destination)
-                    "the current buffer stayed out"))
-    (t--sw-done!)))
-
-(deftest 'move-visible-removes-the-current-group
-  "visible work buffers leave the current group after joining the destination"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((source (group-record-create! "zzsw-source"))
-          (destination (group-record-create! "zzsw-destination")))
-      (buffer-add-group! t--sw-first source)
-      (buffer-add-group! t--sw-second source)
-      (set-frame-local! 'current-group source)
-      (split-window! 'h 0.5)
-      (other-window!)
-      (switch-to-buffer! t--sw-second)
-      (run-command "group-move-visible")
-      (t--sw-type! "zzsw-destination")
-      (t--sw-key! "confirm")
-      (check-false! (buffer-in-group? t--sw-first source) "first leaves source")
-      (check-false! (buffer-in-group? t--sw-second source) "second leaves source")
-      (check-true! (buffer-in-group? t--sw-first destination) "first joins destination")
-      (check-true! (buffer-in-group? t--sw-second destination) "second joins destination"))
-    (t--sw-done!)))
-
-(deftest 'pop-removes-only-the-current-group-and-replaces-a-visible-buffer
-  "the buffer leaves this group, keeps the others, and the window finds another"
-  (lambda ()
-    (t--sw-setup!)
-    (let ((here (group-record-create! "zzsw-here"))
-          (shared (group-record-create! "zzsw-shared")))
-      (buffer-add-group! t--sw-first here)
-      (buffer-add-group! t--sw-first shared)
-      (buffer-add-group! t--sw-second here)
-      (set-frame-local! 'current-group here)
-      (switch-to-buffer! t--sw-first)
-      (run-command "group-pop")
-
-      (check-false! (buffer-in-group? t--sw-first here) "it left this group")
-      (check-true! (buffer-in-group? t--sw-first shared) "and kept the other")
-      (check-equal! (frame-local 'current-group) here "the context did not move")
-      (check-equal! (current-buffer) t--sw-second "another member took the window")
-      (check-true! (buffer-exists? t--sw-first) "and the buffer still exists"))
-    (t--sw-done!)))
-
 ;;; --- the switch list -------------------------------------------------------------
 
 (define (t--sw-three-groups!)
@@ -403,6 +315,8 @@
     (buffer-add-group! t--sw-second current)
     (buffer-add-group! t--sw-third foreign)
     (set-frame-local! 'current-group current)
+    (switch-to-buffer! t--sw-second)
+    (switch-to-buffer! t--sw-third)
     (switch-to-buffer! t--sw-first)
     (list current foreign)))
 
@@ -482,23 +396,6 @@
     (t--sw-done!)))
 
 ;;; --- the three ways to answer ----------------------------------------------------
-
-(deftest 'adopt-pulls-the-buffer-into-the-current-group
-  "S-RET: the buffer comes here, the context does not move to meet it"
-  (lambda ()
-    (t--sw-setup!)
-    (let* ((ids (t--sw-three-groups!))
-           (current (car ids))
-           (foreign (cadr ids)))
-      (t--sw-open-all!)
-      (t--sw-type! t--sw-third)
-      (t--sw-key! "confirm-adopt")
-
-      (check-equal! (current-buffer) t--sw-third "we are in it")
-      (check-equal! (frame-local 'current-group) current "the context did not move")
-      (check-true! (buffer-in-group? t--sw-third current) "it joined this group")
-      (check-true! (buffer-in-group? t--sw-third foreign) "and kept the one it had"))
-    (t--sw-done!)))
 
 (deftest 'context-follows-the-buffer-into-its-group
   "C-RET: and the buffer is on screen even though the saved layout never showed it"
@@ -724,6 +621,39 @@
       (check-equal! (frame-group) here "removing the foreign window restores homogeneity"))
     (t--sw-done!)))
 
+(deftest 'current-group-keeps-a-common-membership-across-shared-work
+  "the previous common group wins when every visible buffer shares several groups"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((first (group-record-create! "zzsw-common-first"))
+          (second (group-record-create! "zzsw-common-second")))
+      (for-each
+        (lambda (buf)
+          (buffer-add-group! buf first)
+          (buffer-add-group! buf second))
+        (list t--sw-first t--sw-second))
+      (switch-to-buffer! t--sw-first)
+      (set-frame-local! 'current-group second)
+      (split-window! 'h 0.5)
+      (other-window!)
+      (switch-to-buffer! t--sw-second)
+      (check-equal! (frame-group) second "the existing common group remains current"))
+    (t--sw-done!)))
+
+(deftest 'transient-buffers-do-not-change-current-group
+  "a transient interface pane does not participate in homogeneity"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((here (group-record-create! "zzsw-here")))
+      (buffer-add-group! t--sw-first here)
+      (buffer-set-local! t--sw-second 'transient #t)
+      (switch-to-buffer! t--sw-first)
+      (split-window! 'h 0.5)
+      (other-window!)
+      (switch-to-buffer! t--sw-second)
+      (check-equal! (frame-group) here "the transient pane is ignored"))
+    (t--sw-done!)))
+
 (deftest 'context-confirm-on-an-ungrouped-buffer-starts-a-group
   "C-RET turns a new entrant into an explicit context"
   (lambda ()
@@ -744,7 +674,7 @@
         (check-equal! (current-buffer) t--sw-third "the picked buffer has focus")))
     (t--sw-done!)))
 
-(deftest 'switch-to-group-can-pop-the-current-buffer-into-a-new-context
+(deftest 'switch-to-group-can-move-the-current-buffer-into-a-new-context
   "the explicit action adds the destination and removes only the current group"
   (lambda ()
     (t--sw-setup!)
@@ -757,14 +687,14 @@
       (run-command "switch-to-group")
       (t--sw-type! "Move this buffer into a new group")
       (t--sw-key! "confirm")
-      (t--sw-type! "zzsw-popped")
+      (t--sw-type! "zzsw-moved")
       (t--sw-key! "confirm")
 
-      (let ((popped (group-resolve-id "zzsw-popped")))
-        (check-true! (buffer-in-group? t--sw-first popped) "the destination was added")
+      (let ((moved (group-resolve-id "zzsw-moved")))
+        (check-true! (buffer-in-group? t--sw-first moved) "the destination was added")
         (check-false! (buffer-in-group? t--sw-first source) "the visible source was removed")
         (check-true! (buffer-in-group? t--sw-first kept) "an unrelated membership remains")
-        (check-equal! (frame-group) popped "the new group was entered")))
+        (check-equal! (frame-group) moved "the new group was entered")))
     (t--sw-done!)))
 
 (deftest 'killing-a-visible-group-buffer-never-shows-a-foreign-buffer

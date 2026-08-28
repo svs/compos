@@ -1752,10 +1752,10 @@ defmodule Aimax.AgentTest do
     assert eventually(fn -> Buffer.text(Agent.info("a1").buffer) =~ "reply-1" end)
     assert eventually(fn -> match?(%{status: :idle}, Agent.info("a1")) end)
 
-    # The ordinary chat naming hook may rename *chat:a1* from its first
-    # response; continue through the session's authoritative buffer name.
+    # A chat is named for where it lives, never for what was said in it, so
+    # the name it was born with is the name it keeps.
     buf = Agent.info("a1").buffer
-    assert buf != initial_buf
+    assert buf == initial_buf
     assert Buffer.exists?(buf)
     focus(buf)
     type("and 8*8")

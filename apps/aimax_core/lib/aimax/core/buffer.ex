@@ -699,7 +699,11 @@ defmodule Aimax.Core.Buffer do
   def handle_call(:byte_size, _from, state), do: {:reply, Rope.byte_size(state.rope), state}
   def handle_call(:version, _from, state), do: {:reply, state.version, state}
   def handle_call(:path, _from, state), do: {:reply, state.path, state}
-  def handle_call(:point, _from, state), do: {:reply, state.point, state}
+  # Point never stands outside the buffer. A redraw can replace a list's
+  # text with a shorter one while point stays where it was, and every
+  # reader that turns point into a byte range then asks for bytes that are
+  # not there. wp_get and every setter clamp; so does this.
+  def handle_call(:point, _from, state), do: {:reply, clamp(state.point, state), state}
   def handle_call(:checkpoint_now, _from, state), do: {:reply, :ok, write_checkpoint(state)}
 
   def handle_call(:eviction_info, _from, state),

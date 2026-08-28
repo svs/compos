@@ -83,7 +83,10 @@
           (let ((b (browse "https://site.test/second.html")))
             (check-false! (equal? a b) "two pages, two tabs")
             (check-contains! a "*browse:" "the tab is named for the page")
-            (check-equal! (buffer-local b 'group) "browse" "both sit in the browse group")
+            ;; 'group is the legacy field: the first read migrates it into a
+            ;; group record and clears it. Ask the group.
+            (check-equal! (group-name (buffer-group b)) "browse"
+                          "both sit in the browse group")
 
             ;; the same url from outside returns to its tab, not a new one
             (switch-to-buffer! "*scratch*")

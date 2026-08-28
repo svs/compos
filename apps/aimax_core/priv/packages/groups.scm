@@ -379,6 +379,7 @@
                   (let ((id (group-ensure-record! legacy)))
                     (buffer-set-local! b 'group-ids (list id))
                     (buffer-set-local! b 'group #f)
+                    (buffer-set-local! b 'group-inherited #f)
                     (buffer-set-local! b 'companion-of #f)
                     (list id))
                   '()))))))
@@ -497,6 +498,7 @@
             (buffer-set-local! b 'group-ids
               (append (buffer-group-ids b) (list id)))
             (buffer-set-local! b 'group #f)
+            (buffer-set-local! b 'group-inherited #f)
             (buffer-set-local! b 'companion-of #f)
             (buffer-modeline-group-refresh! b)
             (when (boundp 'group-current-recalculate!)
@@ -515,6 +517,7 @@
           (buffer-set-local! b 'group-ids (if id (list id) '()))
           (buffer-set-local! b 'group-roles '())
           (buffer-set-local! b 'group #f)
+          (buffer-set-local! b 'group-inherited #f)
           (buffer-set-local! b 'companion-of #f)
           (buffer-modeline-group-refresh! b)))
     (when (boundp 'group-current-recalculate!)
@@ -949,11 +952,16 @@
 
 ;; Creation is the shared placement boundary. Commands do not each need to
 ;; remember this rule, and waking a dormant buffer does not run the hook.
+;; A new buffer joins the group the frame is in. That membership is
+;; INHERITED: nobody asked for it, and a board or a listing sheds it
+;; before it covers the group's pane. A membership a package asks for is
+;; not inherited, and every explicit path below clears the mark.
 (on-buffer-created!
   (lambda (buf)
     (let ((group (frame-group)))
       (when (and group (group-work-buffer? buf))
-        (buffer-add-group! buf group)))))
+        (buffer-add-group! buf group)
+        (buffer-set-local! buf 'group-inherited group)))))
 
 ;; a layout snapshot is only true when the group is on screen: saving
 ;; a scratch detour AS the group's arrangement would overwrite the
@@ -993,10 +1001,16 @@
 (define (group-layout-save-before-cover! name)
   (let ((id (frame-group)))
     ;; Creation runs before a board declares itself transient. Remove the
-    ;; inherited work membership before the board covers a group pane.
+    ;; membership creation handed it, and only that one: doppler, sentry
+    ;; and browse each name their own group, and a board that sheds a
+    ;; declared membership leaves those buffers in no group at all.
     (when (buffer-local name 'transient)
-      (for-each (lambda (group) (buffer-remove-group! name group))
-                (buffer-group-ids name)))
+      (let ((inherited (buffer-local name 'group-inherited)))
+        (when inherited
+          (for-each (lambda (group)
+                      (when (equal? group (group-resolve-id inherited))
+                        (buffer-remove-group! name group)))
+                    (buffer-group-ids name)))))
     (when (and id
                (not (buffer-in-group? name id))
                (group-visible-homogeneous? id)

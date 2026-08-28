@@ -52,6 +52,11 @@ defmodule Aimax.ChromeTest do
   # these tests make buffers in the shared session; leaving them behind changes
   # what buffer-list returns for everyone downstream
   setup do
+    # the frame's group and the last one visited are global editor state:
+    # a module that entered a group leaves the next one starting inside it
+    Aimax.Core.Session.eval(
+      "(begin (set-frame-local! 'current-group #f) (set-frame-local! 'previous-group #f))"
+    )
     on_exit(fn ->
       # a prompt left open belongs to the whole session, and the next test
       # would find the editor already asking it something

@@ -19,6 +19,11 @@ defmodule Aimax.SentryTest do
   end
 
   setup do
+    # the frame's group and the last one visited are global editor state:
+    # a module that entered a group leaves the next one starting inside it
+    Aimax.Core.Session.eval(
+      "(begin (set-frame-local! 'current-group #f) (set-frame-local! 'previous-group #f))"
+    )
     eval!("(set! *sentry-transport* sentry--curl)")
     eval!("(set! *sentry-write-transport* sentry--curl-write)")
     # the list fetches through the async seam; a synchronous delegate

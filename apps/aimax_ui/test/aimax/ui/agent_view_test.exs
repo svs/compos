@@ -263,7 +263,10 @@ defmodule Aimax.Ui.AgentViewTest do
     assert has_element?(view, ~s(button[phx-click="agent_answer"]), "No")
     assert has_element?(view, ~s(button[phx-click="agent_answer"]), "Diff first")
     assert html =~ "type another reply below"
-    refute html =~ "Always"
+    # a question is not a permission: no allow/always/deny buttons. Name the
+    # button, not the word — the page's own scripts contain prose too.
+    refute html =~ ~s(phx-value-cmd="agent-permission-always")
+    refute html =~ ~s(phx-value-cmd="agent-permission-allow")
   end
 
   # the other branch of the one ui_cmd gate: the modeline-info segment

@@ -52,6 +52,11 @@ defmodule Aimax.WorktreesTest do
   end
 
   setup do
+    # the frame's group and the last one visited are global editor state:
+    # a module that entered a group leaves the next one starting inside it
+    Aimax.Core.Session.eval(
+      "(begin (set-frame-local! 'current-group #f) (set-frame-local! 'previous-group #f))"
+    )
     Editor.minibuffer_close()
     Editor.set_pending([])
 

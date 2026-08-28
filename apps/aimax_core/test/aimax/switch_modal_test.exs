@@ -347,6 +347,8 @@ defmodule Aimax.SwitchModalTest do
     claimed = eval!("(car (car *chrome-chord-commands*))") |> Jason.decode!()
     keys = claimed |> String.split(" ", trim: true) |> Enum.map_join(" ", &~s{"#{&1}"})
 
-    assert eval!(~s{(chrome--chord-command (list #{keys}))}) == ~s{"switch-to-buffer-prompt"}
+    # the command must open a prompt, not the modal *switch* buffer:
+    # group-switch-buffer calls minibuffer-read-preview
+    assert eval!(~s{(chrome--chord-command (list #{keys}))}) == ~s{"group-switch-buffer"}
   end
 end

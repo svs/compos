@@ -60,10 +60,19 @@ defmodule Aimax.Ui.PreviewLinkTest do
 
   test "a document link follows inside the current group", %{
     conn: conn,
+    source: source,
     target: target,
     group: group
   } do
     {:ok, view, _html} = live(conn, "/")
+
+    # mounting is a new frame, and a frame's current group is its own. The
+    # reader is in the group when they click, so put this frame there.
+    assert {:ok, _} =
+             Session.eval(~s{(begin
+               (switch-to-buffer! "#{source}")
+               (switch-to-group! (group-resolve-id "#{group}")))})
+
     win = Editor.render_state().tree.id
 
     view

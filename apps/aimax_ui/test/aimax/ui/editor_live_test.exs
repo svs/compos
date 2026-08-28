@@ -29,6 +29,35 @@ defmodule Aimax.Ui.EditorLiveTest do
     assert html =~ "ui-test-"
   end
 
+  test "an instance accent renders a named frame indicator", %{conn: conn} do
+    old_name = Application.get_env(:aimax_core, :name)
+    old_accent = Application.get_env(:aimax_core, :accent)
+    Application.put_env(:aimax_core, :name, "code")
+    Application.put_env(:aimax_core, :accent, "#3f7cac")
+
+    on_exit(fn ->
+      restore_env(:name, old_name)
+      restore_env(:accent, old_accent)
+    end)
+
+    {:ok, _view, html} = live(conn, "/")
+
+    assert html =~ ~s(data-instance="code")
+    assert html =~ "instance-identified"
+    assert html =~ "--instance-accent: #3f7cac"
+  end
+
+  test "an invalid instance accent does not enter CSS", %{conn: conn} do
+    old_accent = Application.get_env(:aimax_core, :accent)
+    Application.put_env(:aimax_core, :accent, "red; display: none")
+    on_exit(fn -> restore_env(:accent, old_accent) end)
+
+    {:ok, _view, html} = live(conn, "/")
+
+    refute html =~ ~s(class="editor-root instance-identified")
+    refute html =~ ~s(style="--instance-accent)
+  end
+
   test "a window applies its buffer group color", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
     buf = Aimax.Core.Editor.current_buffer()
@@ -38,6 +67,21 @@ defmodule Aimax.Ui.EditorLiveTest do
 
     assert html =~ "--buffer-group-color: #9b6ab3"
   end
+
+  test "a pinned group name appears in the window modeline", %{conn: conn} do
+    {:ok, view, mounted} = live(conn, "/")
+    [_, frame] = Regex.run(~r/data-frame="([^"]+)"/, mounted)
+    buf = Aimax.Core.Editor.render_state(frame).tree.buffer
+    Aimax.Core.Buffer.set_local(buf, "modeline-groups", ["pinned-group"])
+    Aimax.Core.Editor.set_frame_group_style("pinned-group ", "#9b6ab3", frame)
+    html = render(view)
+
+    assert html =~ ~s(class="ml-group")
+    assert html =~ "· pinned-group "
+  end
+
+  defp restore_env(key, nil), do: Application.delete_env(:aimax_core, key)
+  defp restore_env(key, value), do: Application.put_env(:aimax_core, key, value)
 
   test "keeps the cursor visible on a blank line", %{conn: conn} do
     buf = Aimax.Core.Editor.current_buffer()
@@ -492,13 +536,17 @@ defmodule Aimax.Ui.EditorLiveTest do
 
     {:ok, _} =
       Aimax.Core.Session.eval(
-        ~s{(with-current-buffer "#{buf}" (lambda () (begin (buffer-set-local! "#{buf}" 'render-mode "markdown") (set-mode! "html-mode"))))}
+        ~s{(with-current-buffer "#{buf}" (lambda () (begin (buffer-set-local! "#{buf}" 'render-mode "markdown") (set-mode! "html-mode") (run-command "modeline-expand"))))}
       )
 
+    # the mode name is a control in the expanded modeline panel; the
+    # compact modeline shows the name without offering the toggle
     {:ok, view, html} = live(conn, "/")
     assert html =~ ~s(phx-value-cmd="mode:html-mode")
 
-    html = view |> element(~s(span[phx-value-cmd="mode:html-mode"])) |> render_click()
+    # the major mode is the panel's headline control, the minor modes are
+    # chips beside it, so match the attribute rather than the tag
+    html = view |> element(~s([phx-value-cmd="mode:html-mode"])) |> render_click()
     assert html =~ "html-mode off"
     # no mode at all: the modeline names that Fundamental
     assert html =~ ~s(phx-value-cmd="mode:Fundamental")
@@ -511,7 +559,7 @@ defmodule Aimax.Ui.EditorLiveTest do
     assert lang in [false, "#f"]
 
     # this buffer visits no file, so there is no mode to read back
-    html = view |> element(~s(span[phx-value-cmd="mode:Fundamental"])) |> render_click()
+    html = view |> element(~s([phx-value-cmd="mode:Fundamental"])) |> render_click()
     assert html =~ "no mode for this buffer"
   end
 

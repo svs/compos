@@ -26,7 +26,13 @@ defmodule Aimax.EditorTest do
 
   defp fresh_buffer do
     name = "test-#{System.unique_integer([:positive])}"
-    # reset editor state a failed test may have left behind
+    # reset editor state a failed test may have left behind. The frame's
+    # group is part of that state: a test that entered a group leaves the
+    # next one starting inside it, and a buffer born in a group is not the
+    # groupless buffer the next test asked for.
+    Aimax.Core.Session.eval(
+      "(begin (set-frame-local! 'current-group #f) (set-frame-local! 'previous-group #f))"
+    )
     Editor.minibuffer_close()
     Editor.completion_dismiss()
     Editor.set_pending([])
@@ -685,6 +691,27 @@ defmodule Aimax.EditorTest do
       {:ok, _} = Aimax.Core.Session.eval("(set-frame-local! 'current-group #f)")
       press(["n", "C-RET"])
       assert in_group?(Path.join(root, "beta.txt"), dired_id)
+    end
+
+    test "dired-visit prefers the Dired buffer group to the frame group", %{root: root} do
+      frame = "zz-dired-frame-#{System.unique_integer([:positive])}"
+      dired = "zz-dired-source-#{System.unique_integer([:positive])}"
+      frame_id = group_id!(~s{(group-record-create! "#{frame}")})
+      dired_id = group_id!(~s{(group-record-create! "#{dired}")})
+
+      {:ok, _} = Aimax.Core.Session.eval(~s{(set-frame-local! 'current-group "#{dired_id}")})
+      run("dired")
+      {:ok, _} = Aimax.Core.Session.eval(~s{(minibuffer-change! "#{root}")})
+      press(["RET"])
+      assert in_group?(root, dired_id)
+
+      # Dired is a transient surface. Another visible group can remain the
+      # frame context, but the Dired buffer is the more specific source.
+      {:ok, _} = Aimax.Core.Session.eval(~s{(set-frame-local! 'current-group "#{frame_id}")})
+      press(["n", "RET"])
+
+      assert in_group?(Path.join(root, "alpha.txt"), dired_id)
+      refute in_group?(Path.join(root, "alpha.txt"), frame_id)
     end
 
     test "marks: d flags, x executes with confirmation; m/u; + mkdir", %{
@@ -2525,9 +2552,12 @@ defmodule Aimax.EditorTest do
 
     type("Draft about ropes.")
 
-    # a groupless chat only comes from an old desktop — recreate one by hand
+    # a groupless chat only comes from an old desktop — recreate one by hand.
+    # Groupless means groupless: a buffer born while the frame is inside a
+    # group joins it, and the chat is then that group's, with its name.
     {:ok, _} =
       Aimax.Core.Session.eval(~s{(begin
+        (set-frame-local! 'current-group #f)
         (buffer-create "#{legacy}")
         (switch-to-buffer! "#{legacy}")
         (set-mode! "chat-mode"))})
@@ -2540,14 +2570,28 @@ defmodule Aimax.EditorTest do
     press(["RET"])
 
     assert group_name(buffer_group(buf)) == buf
-    assert buffer_group(legacy) == buffer_group(buf)
-    assert Editor.current_buffer() == legacy
 
-    # C-c w from the doc refocuses the adopted chat
+    # Adoption gives the chat a group, and a chat is named for where it
+    # lives: the old name was invented before that rule, so the chat is
+    # re-derived once and takes the group's name.
+    # Adoption puts the chat in the document's group and focuses it. The
+    # chat may also be re-named for that group — a chat is named for where
+    # it lives, and a name invented before that rule is derived once — so
+    # the test follows the buffer, not the old name. chat-name-test.scm
+    # owns the naming policy.
+    adopted = Editor.current_buffer()
+    assert Aimax.Core.Buffer.exists?(adopted)
+    assert buffer_group(adopted) == buffer_group(buf)
+
+    # C-c w from the doc refocuses the adopted chat. The re-derive can land
+    # between these presses, so read the chat back rather than remembering
+    # a name: what must hold is that the toggle returns to the group's chat.
     press(["C-c", "w"])
     assert Editor.current_buffer() == buf
     press(["C-c", "w"])
-    assert Editor.current_buffer() == legacy
+    back = Editor.current_buffer()
+    refute back == buf
+    assert buffer_group(back) == buffer_group(buf)
 
     press(["C-x", "1"])
   end
@@ -2555,7 +2599,10 @@ defmodule Aimax.EditorTest do
   test "buffer groups: C-c g tags members, C-c q talks to the group's one chat",
        %{buf: buf} do
     notes = "notes-#{System.unique_integer([:positive])}"
-    chat = "*chat:proj*"
+    # a unique name: the prompt completes over every live group, and a
+    # group another test left behind would answer to a shared prefix
+    group = "proj-#{System.unique_integer([:positive])}"
+    chat = "*chat:#{group}*"
     type("defmodule Rope do end")
 
     # the stub runs in a Task, so an assertion here can never fail the
@@ -2578,16 +2625,16 @@ defmodule Aimax.EditorTest do
     # C-c g founds the group from the code buffer, then the notes join it
     press(["C-c", "g"])
     assert Editor.snapshot().minibuffer.prompt =~ ~r/^Join group/
-    type("proj")
+    type(group)
     press(["RET"])
-    assert in_group?(buf, "proj")
+    assert in_group?(buf, group)
 
     {:ok, _} = Aimax.Core.Session.eval(~s{(buffer-create "#{notes}")})
     Editor.set_window_buffer(notes)
     press(["C-c", "g"])
-    type("proj")
+    type(group)
     press(["RET"])
-    assert in_group?(notes, "proj")
+    assert in_group?(notes, group)
 
     # C-c q in a grouped buffer routes to the group chat, focus stays put
     point = Buffer.point(notes)
@@ -2600,11 +2647,11 @@ defmodule Aimax.EditorTest do
 
     # the per-send preamble enumerates the whole group, not one document
     assert_receive {:system, system}, 5_000
-    assert system =~ ~s{group "proj"}
+    assert system =~ ~s{group "#{group}"}
     assert system =~ ~s{"#{buf}"}
     assert system =~ ~s{"#{notes}"}
 
-    assert in_group?(chat, "proj")
+    assert in_group?(chat, group)
     assert Editor.current_buffer() == notes
     assert Buffer.point(notes) == point
     assert length(Editor.list_windows()) == 2
@@ -2638,7 +2685,7 @@ defmodule Aimax.EditorTest do
              Buffer.exists?(chat) && Buffer.text(chat) =~ "aye"
            end)
 
-    assert in_group?(chat, "proj")
+    assert in_group?(chat, group)
 
     press(["C-x", "1"])
   end
@@ -2768,22 +2815,39 @@ defmodule Aimax.EditorTest do
     press(["C-g"])
   end
 
-  # The panel must offer what the map holds. Naming a binding here would
-  # send this test red the day somebody moves one, which is a preference
-  # changing and not a bug in which-key. So it reads the map back.
+  # The panel must offer what the map holds. Naming a production prefix
+  # here would send this test red the day somebody binds something under
+  # it — C-x C-g is a group prefix now — which is a preference changing
+  # and not a bug in which-key. So the test binds its own prefix and
+  # reads the map back.
   test "the which-key panel offers the pending prefix's own bindings" do
-    press(["C-x"])
+    {:ok, _} =
+      Aimax.Core.Session.eval("""
+      (begin
+        (define-command "zz-wk-one" "A dummy for the which-key panel" (lambda () #t))
+        (define-command "zz-wk-two" "Another dummy" (lambda () #t))
+        (global-set-key "<f9> a" "zz-wk-one")
+        (global-set-key "<f9> b" "zz-wk-two"))
+      """)
+
+    on_exit(fn ->
+      Aimax.Core.Session.eval(
+        ~s[(begin (global-unset-key "<f9> a") (global-unset-key "<f9> b"))]
+      )
+    end)
+
+    press(["<f9>"])
     wk = Editor.render_state().which_key
     assert is_list(wk) and wk != [], "a pending prefix drew no panel"
 
-    # a panel row can name a whole sequence under the prefix ("p d"), so
-    # the lookup takes the keys apart the same way the map holds them
+    # a panel row can name a whole sequence under the prefix, so the
+    # lookup takes the keys apart the same way the map holds them
     for %{key: key, command: command} <- wk do
       seq = Enum.map_join(String.split(key, " ", trim: true), " ", &~s{"#{&1}"})
 
       assert {:ok, ~s{"#{command}"}} ==
-               Aimax.Core.Session.eval(~s{(key-binding (list "C-x" #{seq}))}),
-             "the panel offers C-x #{key} => #{command}; the map does not agree"
+               Aimax.Core.Session.eval(~s{(key-binding (list "<f9>" #{seq}))}),
+             "the panel offers <f9> #{key} => #{command}; the map does not agree"
     end
 
     press(["C-g"])

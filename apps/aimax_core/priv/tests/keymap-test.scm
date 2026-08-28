@@ -12,9 +12,7 @@
 ;;; file binds its own dummy keys to its own dummy commands. Nothing here
 ;;; can go red when a real binding moves.
 ;;;
-;;; The dummy keys hang off <f9>, which nothing binds. There is no
-;;; global-unset-key, so the two <f9> rows stay in the map for the life
-;;; of the process. They name real commands and no keyboard sends them.
+;;; The dummy keys hang off <f9>, which nothing binds.
 
 (domain! 'testing)
 (effects! '(write))
@@ -104,6 +102,16 @@
     ;; it answers at all.
     (check-equal! (key-binding "") 'prefix
                   "an empty sequence answers prefix, it does not raise")))
+
+(deftest 'a-global-binding-can-be-removed
+  "unbinding one global key leaves sibling keys under the same prefix"
+  (lambda ()
+    (global-set-key "<f9> a" "keymap-test-dummy-one")
+    (global-set-key "<f9> b" "keymap-test-dummy-two")
+    (global-unset-key "<f9> a")
+    (check-false! (key-binding "<f9> a") "the selected binding is gone")
+    (check-equal! (key-binding "<f9> b") "keymap-test-dummy-two"
+                  "the sibling binding remains")))
 
 ;;; --- the map's own integrity --------------------------------------------------
 ;;;

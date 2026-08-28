@@ -50,6 +50,7 @@ defmodule Aimax.GroupSwitchCommandTest do
       (set! *group-next-id* 0)
       (set-frame-local! 'current-group #f)
       (set-frame-local! 'previous-group #f)
+      (set-frame-local! 'pinned-group #f)
       (frame-group-label-refresh!)
       (delete-other-windows!)
       (switch-to-buffer! "#{first}"))
@@ -64,6 +65,7 @@ defmodule Aimax.GroupSwitchCommandTest do
         (set! *group-next-id* 0)
         (set-frame-local! 'current-group #f)
         (set-frame-local! 'previous-group #f)
+        (set-frame-local! 'pinned-group #f)
         (frame-group-label-refresh!)
         (delete-other-windows!))
       """)
@@ -95,6 +97,9 @@ defmodule Aimax.GroupSwitchCommandTest do
   end
 
   test "C-x C-g opens the group menu and f finds a file for a new group" do
+    eval!(~s{(global-set-key "C-x C-g" "find-file-in-new-group")})
+    eval!("(group-keymap-install!)")
+
     KeyDispatch.handle_key("C-x")
     KeyDispatch.handle_key("C-g")
 
@@ -105,6 +110,68 @@ defmodule Aimax.GroupSwitchCommandTest do
     assert Editor.render_state().minibuffer.prompt == "Find file in new group: "
   end
 
+  test "a pinned group uses the pin icon in frame and buffer labels", %{first: first} do
+    pinned = group_id("pinned-label")
+
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{pinned}")
+      (set-frame-local! 'current-group "#{pinned}")
+      (switch-to-buffer! "#{first}")
+      (run-command "group-pin")
+      (post-command!))
+    """)
+
+    rendered = Editor.render_state()
+    leaf = rendered.tree |> leaves() |> Enum.find(&(&1.buffer == first))
+
+    assert rendered.frame_group == "pinned-label "
+    assert leaf.group == "pinned-label "
+    assert eval!(~s[(group-label "#{pinned}")]) == Jason.encode!("pinned-label ")
+
+    blocks = Aimax.Core.Buffer.get_local(first, "dashboard-line-blocks") |> inspect()
+    assert blocks =~ "pinned-label "
+  end
+
+  test "group switch candidates name buffers with project and home abbreviations" do
+    n = System.unique_integer([:positive])
+    test_home = eval!("(aimax-home)") |> Jason.decode!()
+    home = eval!(~s[(getenv "HOME")]) |> Jason.decode!()
+    root = Path.join(test_home, "zz-switch-project-#{n}")
+    project_file = Path.join(root, "lib/code.scm")
+    home_buffer = Path.join(home, "zz-switch-home-#{n}.scm")
+
+    File.mkdir_p!(Path.join(root, ".git"))
+    File.mkdir_p!(Path.dirname(project_file))
+    File.write!(project_file, "project")
+    Aimax.Core.create_buffer(home_buffer)
+
+    on_exit(fn ->
+      Session.eval(
+        ~s{(begin (buffer-kill! #{Jason.encode!(project_file)}) (buffer-kill! #{Jason.encode!(home_buffer)}))}
+      )
+
+      File.rm_rf!(root)
+    end)
+
+    group = group_id("switch-marginalia")
+
+    hint =
+      eval!("""
+      (begin
+        (visit #{Jason.encode!(project_file)})
+        (buffer-add-group! #{Jason.encode!(project_file)} "#{group}")
+        (buffer-add-group! #{Jason.encode!(home_buffer)} "#{group}")
+        (cadr (group-switch-candidate "#{group}")))
+      """)
+      |> Jason.decode!()
+
+    assert hint =~ "lib/code.scm"
+    assert hint =~ "~/zz-switch-home-#{n}.scm"
+    refute hint =~ root
+    refute hint =~ home_buffer
+  end
+
   test "a new group record schedules desktop persistence" do
     :ok = Events.subscribe_editor()
     name = "persisted-group-#{System.unique_integer([:positive])}"
@@ -112,6 +179,79 @@ defmodule Aimax.GroupSwitchCommandTest do
     group_id(name)
 
     assert_receive {:editor_change, :scheme_state}
+  end
+
+  test "buffer-remove-from-group applies pending removals on C-g", %{first: first} do
+    remove = group_id("remove-on-close")
+    keep = group_id("keep-on-close")
+
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{remove}")
+      (buffer-add-group! "#{first}" "#{keep}")
+      (switch-to-buffer! "#{first}")
+      (run-command "buffer-remove-from-group")
+      (minibuffer-change! "remove-on-close"))
+    """)
+
+    assert Editor.render_state().minibuffer.prompt == "Toggle group removal (C-g applies): "
+
+    KeyDispatch.handle_key("RET")
+    assert eval!(~s[(buffer-in-group? "#{first}" "#{remove}")]) == "#t"
+    assert Editor.render_state().minibuffer.prompt == "Toggle group removal (C-g applies): "
+
+    KeyDispatch.handle_key("C-g")
+    assert eval!(~s[(buffer-in-group? "#{first}" "#{remove}")]) == "#f"
+    assert eval!(~s[(buffer-in-group? "#{first}" "#{keep}")]) == "#t"
+    assert Editor.render_state().minibuffer == nil
+  end
+
+  test "group-remove stages the only membership before C-g applies it", %{first: first} do
+    only = group_id("remove-only-on-close")
+
+    eval!("""
+    (begin
+      (buffer-add-group! "#{first}" "#{only}")
+      (switch-to-buffer! "#{first}")
+      (run-command "group-remove"))
+    """)
+
+    assert Editor.render_state().minibuffer.prompt == "Toggle group removal (C-g applies): "
+    assert eval!(~s[(buffer-in-group? "#{first}" "#{only}")]) == "#t"
+
+    eval!(~s[(minibuffer-change! "remove-only-on-close")])
+    KeyDispatch.handle_key("RET")
+    assert eval!(~s[(buffer-in-group? "#{first}" "#{only}")]) == "#t"
+
+    KeyDispatch.handle_key("C-g")
+    assert eval!(~s[(buffer-in-group? "#{first}" "#{only}")]) == "#f"
+    assert Editor.render_state().minibuffer == nil
+  end
+
+  test "buffer-add-to-group changes selected buffers only", %{
+    first: first,
+    second: second,
+    third: third
+  } do
+    destination = group_id("selected-add")
+
+    eval!("""
+    (begin
+      (buffer-set-local! "#{first}" 'buffer-selected #t)
+      (buffer-set-local! "#{second}" 'buffer-selected #t)
+      (switch-to-buffer! "#{third}")
+      (run-command "buffer-add-to-group")
+      (minibuffer-change! "selected-add"))
+    """)
+
+    assert Editor.render_state().minibuffer.prompt == "Add buffers to group: "
+    KeyDispatch.handle_key("RET")
+
+    assert eval!(~s[(buffer-in-group? "#{first}" "#{destination}")]) == "#t"
+    assert eval!(~s[(buffer-in-group? "#{second}" "#{destination}")]) == "#t"
+    assert eval!(~s[(buffer-in-group? "#{third}" "#{destination}")]) == "#f"
+    assert eval!(~s[(buffer-local "#{first}" 'buffer-selected)]) == "#f"
+    assert eval!(~s[(buffer-local "#{second}" 'buffer-selected)]) == "#f"
   end
 
   test "a homogeneous buffer supplies both its buffer and frame color", %{

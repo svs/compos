@@ -151,6 +151,9 @@
     (let ((buf "*zztest-add*"))
       (buffer-create buf)
       (switch-to-buffer! buf)
+      ;; the command acts on the selection, so make one: a person marks
+      ;; the buffers first, in the switcher or with buffer-select
+      (buffer-set-local! buf 'buffer-selected #t)
       (run-command "buffer-add-to-group")
       (minibuffer-change! "zztest-added")
       (run-command "minibuffer-confirm")

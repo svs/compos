@@ -215,7 +215,11 @@
       ;; a buffer in no group says nothing: M-o on a lone document keeps
       ;; the system prompt it always had
       (let ((lone (test-buffer! "zz-cm-lone" "")))
-        (buffer-set-local! lone 'group #f)
+        ;; a buffer born while the frame is in a group inherits it, and
+        ;; 'group is only the legacy field. Drop the memberships to make
+        ;; this the groupless buffer the check is about.
+        (for-each (lambda (id) (buffer-remove-group! lone id))
+                  (buffer-group-ids lone))
         (check-equal! (llm-mode--group-note lone) "" "a lone buffer adds nothing")
         (buffer-kill! lone))
       (t--cm-off! scratch))))

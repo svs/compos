@@ -285,10 +285,12 @@
 (define (t--gs-with-frame-context thunk)
   (let ((current (frame-local 'current-group))
         (previous (frame-local 'previous-group))
+        (pinned (frame-local 'pinned-group))
         (winner (frame-local 'winner-pos)))
     (let ((out (thunk)))
       (set-frame-local! 'current-group current)
       (set-frame-local! 'previous-group previous)
+      (set-frame-local! 'pinned-group pinned)
       (set-frame-local! 'winner-pos winner)
       out)))
 
@@ -298,17 +300,21 @@
     (t--gs-with-frame-context
       (lambda ()
         (let ((current (group-record-create! "zzgs-frame-current"))
-              (previous (group-record-create! "zzgs-frame-previous")))
+              (previous (group-record-create! "zzgs-frame-previous"))
+              (pinned (group-record-create! "zzgs-frame-pinned")))
           (set-frame-local! 'current-group current)
           (set-frame-local! 'previous-group previous)
+          (set-frame-local! 'pinned-group pinned)
           (set-frame-local! 'winner-pos 7)
 
           (let ((saved (group-frame-context-state)))
             (set-frame-local! 'current-group #f)
             (set-frame-local! 'previous-group #f)
+            (set-frame-local! 'pinned-group #f)
             (group-frame-context-restore! saved)
             (check-equal! (frame-local 'current-group) current "the current group came back")
             (check-equal! (frame-local 'previous-group) previous "and the previous one")
+            (check-equal! (frame-local 'pinned-group) pinned "and the pin came back")
             (check-equal! (frame-local 'winner-pos) 7 "and the runtime local is untouched"))
 
           ;; malformed entries are skipped, one by one
@@ -317,20 +323,24 @@
                   (list (selected-frame)
                         (list (list 'current-group)
                               (list 'current-group 42)
-                              (list 'previous-group previous)))))
+                              (list 'previous-group previous)
+                              (list 'pinned-group pinned)))))
           (check-false! (frame-local 'current-group) "a malformed pair clears rather than guesses")
           (check-equal! (frame-local 'previous-group) previous "a good pair still lands")
+          (check-equal! (frame-local 'pinned-group) pinned "the valid pin still lands")
           (check-equal! (frame-local 'winner-pos) 7 "and the runtime local is still untouched")
 
           ;; a group whose record goes stops being the frame's context
           (let ((deleted (group-record-create! "zzgs-frame-deleted")))
             (set-frame-local! 'current-group deleted)
             (set-frame-local! 'previous-group deleted)
+            (set-frame-local! 'pinned-group deleted)
             (group-record-delete! deleted)
             (check-false! (frame-local 'current-group) "the deleted id is cleared")
-            (check-false! (frame-local 'previous-group) "on both"))
+            (check-false! (frame-local 'previous-group) "the previous id is cleared")
+            (check-false! (frame-local 'pinned-group) "the pin is cleared"))
 
-          (t--gs-drop! current previous))))))
+          (t--gs-drop! current previous pinned))))))
 
 (deftest 'invalid-group-noise-normalizes-to-quiet
   "a setting nobody defined is the quiet one, not an error"

@@ -44,6 +44,11 @@ defmodule Aimax.AgentTest do
   end
 
   setup do
+    # the frame's group and the last one visited are global editor state:
+    # a module that entered a group leaves the next one starting inside it
+    Aimax.Core.Session.eval(
+      "(begin (set-frame-local! 'current-group #f) (set-frame-local! 'previous-group #f))"
+    )
     :persistent_term.put(:agent_test_pid, self())
     Application.put_env(:aimax_core, :acp_transport, Aimax.AgentTest.FakeTransport)
 

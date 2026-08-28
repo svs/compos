@@ -264,6 +264,38 @@ defmodule Aimax.ProjectSearchTest do
       assert eval!(~s{(buffer-in-group? "#{path}" "#{source}")}) == "#t"
     end
 
+    test "project-find-file prefers the source buffer group to the frame group", %{root: root} do
+      source = "zz-ps-source-group-#{System.unique_integer([:positive])}"
+      fallback = "zz-ps-frame-group-#{System.unique_integer([:positive])}"
+      path = Path.join(root, "top.txt")
+
+      eval!(~s{
+        (begin
+          (buffer-create "#{source}")
+          (buffer-add-group! "#{source}" (group-ensure-record! "#{source}"))
+          (group-ensure-record! "#{fallback}")
+          (switch-to-buffer! "#{source}")
+          (set-frame-local! 'current-group (group-resolve-id "#{fallback}"))
+          (project-find-file-in "#{root}"))})
+
+      on_exit(fn ->
+        eval!(~s{
+          (for-each
+            (lambda (name)
+              (let ((id (group-resolve-id name)))
+                (when id (group-record-delete! id))))
+            (list "#{source}" "#{fallback}"))})
+
+        Aimax.Core.kill_buffer(source)
+      end)
+
+      press(String.graphemes("top.txt"))
+      press("RET")
+
+      assert eval!(~s{(buffer-in-group? "#{path}" "#{source}")}) == "#t"
+      assert eval!(~s{(buffer-in-group? "#{path}" "#{fallback}")}) == "#f"
+    end
+
     test "find-file-in-group creates and switches to a new chosen group before visiting", %{
       root: root
     } do

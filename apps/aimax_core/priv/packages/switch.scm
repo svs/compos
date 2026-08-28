@@ -441,10 +441,10 @@
                                 (string-append " joined " g))))))
 
 (define-command "switch-group"
-  "Push the marked buffers, or the row at point, to another group"
-  (lambda () (run-command "group-push-buffer")))
+  "Add the marked buffers, or the row at point, to another group"
+  (lambda () (run-command "buffer-add-to-group")))
 
-;; group-push-buffer prompts, so it changes membership inside a
+;; buffer-add-to-group prompts, so it changes membership inside a
 ;; minibuffer callback and returns long before. The switcher hears about
 ;; it the same way anything else does: the annotation reads a group, so a
 ;; changed membership makes the rows stale, and the marks that chose
@@ -520,9 +520,7 @@
           ;; select all: every row the narrowing shows; again unmarks
           (list "C-a" "list-mark-all")
           (list "C-k" "switch-kill")
-          (list "C-c l" "group-pull-buffer")
           (list "C-t" "switch-group")
-          (list "C-c p" "group-pop")
           (list "C-o" "switch-toggle-groups")
           (list "TAB" "switch-lock")
           (list "C-g" "switch-quit")
@@ -530,8 +528,8 @@
 
 (define *switch-footer*
   (string-append "type to narrow · DEL widen · RET switch · C-RET context · "
-                 "C-SPC mark · C-a all · C-k kill · C-c l pull · C-t push · "
-                 "C-c p pop · C-o groups · TAB lock · C-g quit"))
+                 "C-SPC mark · C-a all · C-k kill · C-t add to group · "
+                 "C-o groups · TAB lock · C-g quit"))
 
 
 (mode-icon! "switch-mode" "")
@@ -546,8 +544,7 @@
            "RET founds a group named what you typed. C-RET enters the "
            "row's group or project. C-SPC marks; C-a marks every shown "
            "row, and again unmarks them; C-k kills the marked "
-           "buffers or the row at point; C-c l pulls them into the current group; "
-           "C-t pushes them to another group; C-c p pops them from it. "
+           "buffers or the row at point; C-t adds them to another group. "
            "C-o shows groups and "
            "projects; TAB locks to one group — the card "
            "leads as the default, its buffers and its project files "

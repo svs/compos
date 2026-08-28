@@ -15,6 +15,7 @@ defmodule Aimax.GroupSwitchCommandTest do
   use ExUnit.Case
 
   alias Aimax.Core.{Editor, KeyDispatch, Session}
+  alias Aimax.Core.Events
 
   defp eval!(code) do
     case Session.eval(code) do
@@ -93,11 +94,24 @@ defmodule Aimax.GroupSwitchCommandTest do
     assert candidate.face == expected
   end
 
-  test "C-x C-g begins finding a file for a new group" do
+  test "C-x C-g opens the group menu and f finds a file for a new group" do
     KeyDispatch.handle_key("C-x")
     KeyDispatch.handle_key("C-g")
 
+    assert Editor.snapshot().pending == ["C-x", "C-g"]
+    assert Enum.any?(Editor.render_state().which_key, &(&1.key == "f"))
+
+    KeyDispatch.handle_key("f")
     assert Editor.render_state().minibuffer.prompt == "Find file in new group: "
+  end
+
+  test "a new group record schedules desktop persistence" do
+    :ok = Events.subscribe_editor()
+    name = "persisted-group-#{System.unique_integer([:positive])}"
+
+    group_id(name)
+
+    assert_receive {:editor_change, :scheme_state}
   end
 
   test "a homogeneous buffer supplies both its buffer and frame color", %{

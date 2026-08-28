@@ -196,7 +196,8 @@ defmodule Aimax.DesktopRestoreTest do
   test "group records restore before buffer runtime validates memberships" do
     n = System.unique_integer([:positive])
     name = "*group-restore-#{n}*"
-    group = "group-restore-#{n}"
+    original = "group-restore-#{n}"
+    group = "group-restored-name-#{n}"
 
     on_exit(fn ->
       if Buffer.exists?(name), do: Aimax.Core.kill_buffer(name)
@@ -206,7 +207,8 @@ defmodule Aimax.DesktopRestoreTest do
     eval!("""
     (begin
       (switch-to-buffer! "#{name}")
-      (buffer-add-group! "#{name}" "#{group}")
+      (buffer-add-group! "#{name}" "#{original}")
+      (group-rename! "#{original}" "#{group}")
       (switch-to-group! "#{group}"))
     """)
 

@@ -239,6 +239,29 @@
       (t--gs-drop! kept)
       (t--gs-kill! first))))
 
+(deftest 'group-kill-reports-the-modified-survivor
+  "a partial kill names the work that normal protection kept"
+  (lambda ()
+    (let* ((path "/tmp/aimax-zz-group-kill-partial.txt")
+           (ordinary (t--gs-buf))
+           (id (group-record-create! "zzgs-partial-kill"))
+           (mark (string-length (buffer-text "*messages*"))))
+      (write-file! path "saved\n")
+      (visit path)
+      (buffer-insert! path 0 "modified ")
+      (buffer-add-group! path id)
+      (buffer-add-group! ordinary id)
+      (group-kill! id)
+      (let ((said (buffer-text "*messages*")))
+        (check-contains! (substring said mark (string-length said))
+                         "Kept 1 buffer"
+                         "the command reports partial completion"))
+      (check-true! (buffer-known? path) "the modified file survives")
+      (check-false! (buffer-known? ordinary) "the ordinary buffer is killed")
+      (buffer-mark-saved! path)
+      (buffer-kill! path)
+      (delete-file! path))))
+
 (deftest 'remembered-layouts-are-keyed-by-frame
   "two frames on one group remember two layouts"
   (lambda ()

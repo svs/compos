@@ -837,6 +837,7 @@ defmodule Aimax.Core.Session do
       "task-cancel!" => "(task-cancel! TASK) — stop a Scheme task.",
       "define-command" =>
         "(define-command NAME [DOC] FN) — register an M-x command; DOC shows in M-x.",
+      "undefine-command" => "(undefine-command NAME) — remove an M-x command from the registry.",
       "command-names" => "(command-names) — return every M-x command name.",
       "global-keys" =>
         "(global-keys) — return ((KEYS COMMAND) ...) for every global key binding.",
@@ -1138,6 +1139,10 @@ defmodule Aimax.Core.Session do
         [name, doc, closure] when is_binary(doc) ->
           :ets.insert(Aimax.Core.SchemeAPI.commands_table(), {command_name(name), closure, doc})
           :void
+      end,
+      "undefine-command" => fn [name] ->
+        :ets.delete(Aimax.Core.SchemeAPI.commands_table(), command_name(name))
+        true
       end,
       "command-names" => fn [] -> command_names() end,
       # ((KEYS COMMAND) ...) for every global binding

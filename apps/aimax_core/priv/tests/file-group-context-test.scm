@@ -11,6 +11,9 @@
   (minibuffer-change! text)
   (run-command "minibuffer-confirm-input"))
 
+(define (t--fgc-cancel!)
+  (run-command "minibuffer-cancel"))
+
 (deftest 'an-explicit-file-group-adds-membership-without-moving-the-file
   "an existing file can join another group while it keeps its first group"
   (lambda ()
@@ -27,8 +30,8 @@
       (group-record-delete! first)
       (group-record-delete! second))))
 
-(deftest 'a-file-visit-without-a-group-does-not-borrow-the-selected-frame-group
-  "desktop and headless visits stay ungrouped unless the caller passes a group"
+(deftest 'a-new-file-visit-without-an-explicit-group-uses-current-group
+  "the shared creation hook places a new file in the visible context"
   (lambda ()
     (let* ((path "/tmp/aimax-zz-raw-file-context.txt")
            (work (test-buffer! "*zz-file-context-work*" ""))
@@ -38,7 +41,8 @@
       (switch-to-buffer! work)
       (set-frame-local! 'current-group group)
       (visit path)
-      (check-equal! (buffer-group-ids path) '() "the visit did not infer the frame group")
+      (check-true! (buffer-in-group? path group)
+                   "the new file inherits current-group")
       (buffer-kill! path)
       (buffer-kill! work)
       (delete-file! path)
@@ -75,6 +79,43 @@
       (group-record-delete! current)
       (group-record-delete! other))))
 
+(deftest 'cancelled-find-file-changes-no-membership
+  "cancelling the file prompt leaves the visible context unchanged"
+  (lambda ()
+    (let* ((path "/tmp/aimax-zz-cancelled-current-group.txt")
+           (work (test-buffer! "*zz-cancelled-file-work*" ""))
+           (group (group-record-create! "zz-cancelled-file-group")))
+      (buffer-add-group! work group)
+      (switch-to-buffer! work)
+      (set-frame-local! 'current-group group)
+      (find-file-read group)
+      (minibuffer-change! path)
+      (t--fgc-cancel!)
+      (check-false! (buffer-known? path) "the cancelled file has no buffer")
+      (check-equal! (buffer-group-ids work) (list group)
+                    "the existing membership stays unchanged")
+      (check-equal! (frame-group) group "the visible context stays unchanged")
+      (buffer-kill! work)
+      (group-record-delete! group))))
+
+(deftest 'failed-find-file-changes-no-membership
+  "a malformed remote visit creates no buffer and changes no group"
+  (lambda ()
+    (let* ((path "/ssh::/aimax-zz-failed-file")
+           (work (test-buffer! "*zz-failed-file-work*" ""))
+           (group (group-record-create! "zz-failed-file-group")))
+      (buffer-add-group! work group)
+      (switch-to-buffer! work)
+      (set-frame-local! 'current-group group)
+      (find-file-read group)
+      (t--fgc-confirm! path)
+      (check-false! (buffer-known? path) "the failed file has no buffer")
+      (check-equal! (buffer-group-ids work) (list group)
+                    "the existing membership stays unchanged")
+      (check-equal! (current-buffer) work "the failed visit keeps the work buffer")
+      (buffer-kill! work)
+      (group-record-delete! group))))
+
 (deftest 'find-file-in-new-group-creates-and-enters-the-context
   "the direct new-context command creates the file and group as one action"
   (lambda ()
@@ -91,6 +132,75 @@
         (buffer-kill! path)
         (delete-file! path)
         (group-record-delete! id)))))
+
+(deftest 'find-file-in-new-group-keeps-live-file-memberships
+  "a live file joins the new group without leaving its existing group"
+  (lambda ()
+    (let* ((path "/tmp/aimax-zz-live-file-new-group.txt")
+           (old (group-record-create! "zz-live-file-old-group")))
+      (write-file! path "live\n")
+      (visit path old)
+      (run-command "find-file-in-new-group")
+      (t--fgc-confirm! path)
+      (t--fgc-confirm! "zz-live-file-new-group")
+      (let ((new (group-resolve-id "zz-live-file-new-group")))
+        (check-true! (buffer-in-group? path old) "the old membership remains")
+        (check-true! (buffer-in-group? path new) "the new membership is added")
+        (check-equal! (frame-group) new "the new group is entered")
+        (buffer-kill! path)
+        (delete-file! path)
+        (group-record-delete! old)
+        (group-record-delete! new)))))
+
+(deftest 'find-file-in-new-group-rejects-a-duplicate-before-visiting
+  "a duplicate name creates no file buffer and changes no group"
+  (lambda ()
+    (let* ((path "/tmp/aimax-zz-duplicate-file-new-group.txt")
+           (existing (group-record-create! "zz-duplicate-file-group")))
+      (write-file! path "duplicate\n")
+      (run-command "find-file-in-new-group")
+      (t--fgc-confirm! path)
+      (t--fgc-confirm! "zz-duplicate-file-group")
+      (check-false! (buffer-known? path) "the command does not visit the file")
+      (check-equal! (group-resolve-id "zz-duplicate-file-group") existing
+                    "the existing record remains the only record")
+      (delete-file! path)
+      (group-record-delete! existing))))
+
+(deftest 'find-file-in-new-group-cancels-at-either-prompt
+  "cancelling either prompt creates no group and visits no file"
+  (lambda ()
+    (let ((path "/tmp/aimax-zz-cancel-file-new-group.txt"))
+      (write-file! path "cancel\n")
+
+      (run-command "find-file-in-new-group")
+      (minibuffer-change! path)
+      (t--fgc-cancel!)
+      (check-false! (buffer-known? path) "file-prompt cancellation visits nothing")
+
+      (run-command "find-file-in-new-group")
+      (t--fgc-confirm! path)
+      (minibuffer-change! "zz-cancel-file-new-group")
+      (t--fgc-cancel!)
+      (check-false! (buffer-known? path) "group-prompt cancellation visits nothing")
+      (check-false! (group-resolve-id "zz-cancel-file-new-group")
+                    "group-prompt cancellation creates no record")
+      (delete-file! path))))
+
+(deftest 'find-file-in-new-group-rolls-back-a-failed-visit
+  "a failed visit removes the new record and keeps the current buffer"
+  (lambda ()
+    (let ((path "/ssh::/aimax-zz-failed-new-group")
+          (work (test-buffer! "*zz-failed-new-group-work*" "")))
+      (switch-to-buffer! work)
+      (run-command "find-file-in-new-group")
+      (t--fgc-confirm! path)
+      (t--fgc-confirm! "zz-failed-new-group")
+      (check-false! (buffer-known? path) "the failed visit creates no buffer")
+      (check-false! (group-resolve-id "zz-failed-new-group")
+                    "the failed visit removes the group record")
+      (check-equal! (current-buffer) work "the failed visit keeps the work buffer")
+      (buffer-kill! work))))
 
 (deftest 'a-direct-agent-file-visit-uses-the-originating-chat-group
   "the user can switch buffers while the agent keeps its chat context"

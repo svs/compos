@@ -45,24 +45,28 @@
 (deftest 'group-show-all-wakes-a-dormant-member
   "sleep does not remove a buffer from its group"
   (lambda ()
-    (let* ((member (test-buffer! "*zz-group-show-sleeper*" "asleep"))
+    (let ((member "*zz-group-show-sleeper*"))
+      (when (buffer-known? member) (buffer-kill! member))
+      (let ((old (group-resolve-id "zz-group-show-sleeper")))
+        (when old (group-record-delete! old)))
+      (let* ((member (test-buffer! member "asleep"))
            (group (group-record-create! "zz-group-show-sleeper")))
-      (buffer-add-group! member group)
-      (switch-to-buffer! "*scratch*")
-      (delete-other-windows!)
-      (buffer-sleep! member)
-      (check-false! (buffer-exists? member) "the member is dormant")
-      (check-true! (buffer-known? member) "the group can still find its checkpoint")
-      (set-frame-local! 'current-group group)
+        (buffer-add-group! member group)
+        (switch-to-buffer! "*scratch*")
+        (delete-other-windows!)
+        (buffer-sleep! member)
+        (check-false! (buffer-exists? member) "the member is dormant")
+        (check-true! (buffer-known? member) "the group can still find its checkpoint")
+        (set-frame-local! 'current-group group)
 
-      (run-command "group-show-all")
-      (check-true! (buffer-exists? member) "show all woke the member")
-      (check-true! (window-showing member) "show all gave it a window")
+        (run-command "group-show-all")
+        (check-true! (buffer-exists? member) "show all woke the member")
+        (check-true! (window-showing member) "show all gave it a window")
 
-      (switch-to-buffer! "*scratch*")
-      (delete-other-windows!)
-      (buffer-kill! member)
-      (group-record-delete! group))))
+        (switch-to-buffer! "*scratch*")
+        (delete-other-windows!)
+        (buffer-kill! member)
+        (group-record-delete! group)))))
 
 (deftest 'group-show-all-gives-an-empty-group-its-primary-chat
   "an empty durable group still has one reconstructable surface"

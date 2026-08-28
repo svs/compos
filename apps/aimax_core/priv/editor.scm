@@ -189,6 +189,17 @@
       'use (string-append "(run-command \"" name "\")"))
     name))
 
+(define undefine-command--raw undefine-command)
+(define (undefine-command name)
+  (undefine-command--raw name)
+  (set! *catalog*
+    (remove (lambda (entry)
+              (and (equal? (catalog--get entry 'kind) "command")
+                   (equal? (catalog--get entry 'name) name)))
+            *catalog*))
+  (catalog--touch!)
+  name)
+
 ;;; --- public API registry -----------------------------------------------------
 ;;; The supported surface, curated: name + one-line doc. Everything else in
 ;;; the global namespace is implementation detail — callable, but private by
@@ -3368,16 +3379,30 @@
 
 ;;; --- files & buffers -------------------------------------------------------
 
+;; Every owner can apply policy to one truly new buffer. Waking a dormant
+;; buffer does not run these hooks because that buffer already has state.
+(define *buffer-created-hooks* '())
+
+(define (on-buffer-created! fn)
+  (set! *buffer-created-hooks* (cons fn *buffer-created-hooks*))
+  #t)
+
+(define (buffer-created! name)
+  (for-each (lambda (fn) (fn name)) *buffer-created-hooks*)
+  name)
+
 ;; A new buffer inherits the directory of the buffer that made it (Emacs:
 ;; default-directory is buffer-local and copied from the current buffer at
 ;; creation). Without this, every non-file buffer — chat, shell, agent
 ;; thread, listing — answers "~" and C-x C-f from it loses your place.
 (define raw-buffer-create buffer-create)
 (define (buffer-create name)
-  (let ((fresh (not (buffer-exists? name))))
+  (let ((fresh (not (buffer-exists? name)))
+        (new (not (buffer-known? name))))
     (raw-buffer-create name)
     (when (and fresh (boundp (quote default-directory)))
       (buffer-set-local! name 'default-directory (default-directory)))
+    (when new (buffer-created! name))
     name))
 
 ;; remote buffers save over ssh, never through the local filesystem
@@ -3506,6 +3531,16 @@
     (if i
         (substring input (+ i 1) (string-length input))
         input)))
+
+;; The host file primitive creates a buffer below the Scheme buffer-create
+;; wrapper. Wrap it here so file buffers use the same creation event.
+(define raw-find-file find-file)
+(define (find-file path)
+  (let* ((name (expand-path (normalize-file-input path)))
+         (new (not (buffer-known? name)))
+         (buf (raw-find-file name)))
+    (when new (buffer-created! buf))
+    buf))
 
 (define (path-split input)
   (let ((idx (string-rindex input "/")))
@@ -3856,8 +3891,15 @@
                     (if (equal? r 'absent) (message "(New remote file)"))
                     (current-buffer)))))))))
 
+(define (visit-apply-group! buf group existing)
+  (when (and buf group)
+    (if existing
+        (buffer-add-group! buf group)
+        (buffer-move-to-group! buf group))))
+
 (define (visit path0 &optional group)
   (let* ((path (normalize-file-input path0))
+         (existing (buffer-known? path))
          (buf
            (cond
              ((remote-path? path) (remote-visit path))
@@ -3866,15 +3908,14 @@
                (let ((file-buffer (find-file path)))
                  ;; An explicit destination joins before display. The derived
                  ;; current group therefore never sees a half-placed buffer.
-                 (when group (buffer-add-group! file-buffer group))
+                 (visit-apply-group! file-buffer group existing)
                  (switch-to-buffer! file-buffer)
                  (auto-mode path)
                  (run-hooks 'find-file-hook)
                  (current-buffer))))))
-    ;; A visit without GROUP has no group policy. Desktop restore uses it.
-    ;; Interactive and agent callers pass their own stable context.
-    (when (and buf group)
-      (buffer-add-group! buf group))
+    ;; A named destination overrides the inherited frame group for new work.
+    ;; Existing work adds the destination without losing its memberships.
+    (visit-apply-group! buf group existing)
     buf))
 
 ;; Compatibility name for packages and user config.

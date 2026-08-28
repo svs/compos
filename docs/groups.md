@@ -13,21 +13,218 @@ after the workflows.
 
 ## The one-minute model
 
-A buffer can belong to no groups, one group, or several groups. Membership
-means that the buffer is available when working in that group.
+A buffer can belong to no groups, one group, or several groups. Membership means that the buffer is available when working in that group.
 
-A frame has a derived value named `current-group`. The editor recalculates it
-whenever a displayed buffer changes.
+A frame has a derived value named `current-group`. The editor recalculates it whenever a displayed buffer changes.
 
-- If the visible group-bearing buffers share a group, `current-group` names it.
+- If the visible buffers share a group, `current-group` names it.
 - If the visible buffers do not share a group, `current-group` is null.
 - Transient interface buffers do not take part in this calculation.
 
-The result is intentionally simple. A homogeneous frame has somewhere to put
-new work. A mixed frame does not guess.
+The result is intentionally simple. A homogeneous frame has somewhere to put new work. A mixed frame does not guess.
 
-Groups do not own files or projects. They are not security boundaries. They
-organize editor state for people and agents.
+Groups do not own files or projects. They are not security boundaries. They organize editor state for people and agents.
+
+## User stories
+
+Read each story as a path:
+
+> **As a user** → **in this situation** → **I want this outcome** →
+> **the editor behaves this way** → **I use this command**.
+
+Some outcomes are automatic. In those cases the solution is a rule rather
+than another command to remember.
+
+### As a user working in a group
+
+#### I want to switch to another buffer in this group
+
+- Buffers in `current-group` appear first, in buffer MRU order.
+- Foreign and ungrouped buffers remain available after them.
+- `RET` shows the chosen buffer without changing any membership.
+- **Command:** `group-switch-buffer` (`C-x b`).
+
+#### I want to inspect a buffer from outside this group
+
+- I choose the foreign buffer from the ordinary buffer switcher.
+- Showing it does not add it to this group or remove it from another group.
+- The editor recalculates `current-group` after the buffer is shown.
+- **Command:** `group-switch-buffer` (`C-x b`, then `RET`).
+
+#### I want to switch to the chosen buffer's group
+
+- The editor restores that group's layout and then focuses the buffer.
+- If the buffer belongs to several groups, I choose one.
+- If the buffer is ungrouped, I can start a group with it.
+- **Command:** `group-switch-buffer` (`C-x b`, then `C-RET`).
+
+#### I want to switch to another group
+
+- If all visible work belongs to `current-group`, that group is not offered as
+  a destination. Other groups appear in group MRU order.
+- If the display is mixed, the current buffer's groups appear first, followed
+  by unrelated groups in group MRU order.
+- Accepting a group restores its last valid homogeneous layout.
+- **Command:** `switch-to-group` (`C-x g`).
+
+#### I want this buffer to be available in another group too
+
+- The destination is added without removing any existing membership.
+- I remain in the current visible context.
+- **Command:** `buffer-add-to-group`.
+
+#### I want to move this buffer from here to another group
+
+- I choose only the destination group.
+- The destination replaces every existing membership.
+- The buffer, file, text, point, modified state, and undo history survive.
+- **Command:** `buffer-move-to-group`.
+
+#### I want to remove this buffer from this group
+
+- Only the named membership is removed.
+- The buffer is not killed and its file is not changed.
+- **Command:** `buffer-remove-from-group`.
+
+#### I want a fresh empty group
+
+- The group is created only after I accept a unique name.
+- The editor enters its generated default layout.
+- **Command:** `group-new`.
+
+#### I want to manage this group
+
+- Rename it without changing its identity: `group-rename`.
+- Dissolve it without killing its buffers: `group-dissolve`.
+- Kill its buffers under the normal modified-buffer protections: `group-kill`.
+- Inspect and manage all groups: `groups`.
+
+### As a user working in a buffer
+
+#### I want this buffer to start a new group
+
+- If it is ungrouped, the action says **Start a group with this buffer**.
+- If it belongs to `current-group`, the group switcher can instead offer
+  **Move this buffer into a new group**.
+- Eligible attached work companions follow the buffer-family policy.
+- **Command:** `group-new-with-buffer`.
+
+#### I want to change this buffer's memberships explicitly
+
+- Add another membership: `buffer-add-to-group`.
+- Replace all memberships with one destination: `buffer-move-to-group`.
+- Remove one named membership: `buffer-remove-from-group`.
+- These commands work even when `current-group` is null.
+
+#### I want to create a new ordinary buffer
+
+- In a homogeneous display, the buffer joins `current-group` before it is
+  shown.
+- In a mixed display, it starts ungrouped because the editor cannot infer a
+  destination.
+- The shared creation hook applies this rule to files, Dired, and other new
+  work buffers.
+- **Command:** `buffer-new`.
+
+### As a user working with several visible windows
+
+#### I want the visible arrangement to become a group
+
+- Every eligible visible work buffer joins the new group.
+- The current window tree becomes its first remembered layout.
+- Existing memberships remain unless I explicitly move the buffers.
+- **Command:** `group-new-from-visible`.
+
+#### I want the current group to follow what is visible
+
+- After a displayed work buffer changes, the editor finds the groups shared by
+  all visible work buffers.
+- If they share a group, that group becomes `current-group`.
+- If they share none, `current-group` becomes null.
+- **Solution:** automatic homogeneity recalculation. No command captures or
+  clears `current-group` separately.
+
+#### I want the layout remembered when it represents one group
+
+- Homogeneous window changes update that group's remembered layout.
+- Mixed layouts, previews, popups, and covering surfaces do not overwrite it.
+- **Solution:** automatic homogeneous-layout observation.
+
+### As a user working without a current group
+
+#### I want to return to one of the current buffer's groups
+
+- The current buffer's groups appear first, in group MRU order.
+- Accepting one restores its complete layout.
+- **Command:** `switch-to-group` (`C-x g`).
+
+#### I want the current buffer to become a new context
+
+- An ungrouped buffer offers **Start a group with this buffer**.
+- A grouped buffer keeps its memberships unless I explicitly choose a move.
+- **Command:** `group-new-with-buffer`.
+
+#### I want to choose any other group
+
+- Groups unrelated to the current buffer remain available after its own
+  groups, in group MRU order.
+- **Command:** `switch-to-group` (`C-x g`).
+
+### As a user opening a file
+
+#### I want the file in the context in front of me
+
+- A newly visited file joins `current-group` when one exists.
+- If the file already has a live buffer, showing it does not silently change
+  its memberships.
+- With no current group, a new file buffer starts ungrouped.
+- **Command:** `find-file` (`C-x C-f`).
+
+#### I want the file to start a new group
+
+- The file and group are created or visited only after their prompts succeed.
+- The file buffer joins the new group, the group is entered, and the file is
+  focused.
+- An already live file keeps its other memberships.
+- **Command:** `find-file-in-new-group` (`C-x C-g f`).
+
+### As a user working with a group's conversations
+
+#### I want to open or create the primary group chat
+
+- A group may contain zero, one, or many chats, but has at most one primary
+  chat.
+- Chat ownership does not change work-buffer membership.
+- **Command:** `group-chat`.
+
+#### I want to move between work and its companion chat
+
+- Toggle between them: `chat-companion`.
+- Ask the companion without leaving the work buffer: `chat-companion-ask`.
+
+### As a user returning later or using several frames
+
+#### I want groups to survive restart
+
+- Stable identity, names, memberships, chats, and valid layouts persist.
+- Missing buffers and invalid layouts heal instead of blocking entry.
+- **Solution:** automatic persistence and recovery.
+
+#### I want each frame to keep its own context
+
+- Each frame derives `current-group` from its own visible buffers.
+- Group MRU and remembered layouts remain frame-local.
+- **Solution:** automatic frame-local state.
+
+### Safety shared by every story
+
+- Showing or switching buffers never changes membership implicitly.
+- Switching groups never changes membership.
+- Adding never removes another membership.
+- Move names one destination and replaces every existing membership.
+- Removing membership never kills a buffer or changes a file.
+- Cancellation restores previews and changes no durable state.
+- Partial multi-buffer operations report what changed, what did not, and why.
 
 ## Three things that must stay distinct
 
@@ -35,13 +232,11 @@ organize editor state for people and agents.
 
 Windows display buffers. Showing a buffer does not edit its memberships.
 
-The display can change `current-group` because that value is derived from the
-visible buffers. This is a recalculation, not a membership change.
+The display can change `current-group` because that value is derived from the visible buffers. This is a recalculation, not a membership change.
 
 ### Where a buffer is available
 
-A work buffer carries a set of group IDs. Adding or removing one ID changes
-where that buffer is available.
+A work buffer carries a set of group IDs. Adding or removing one ID changes where that buffer is available.
 
 The same live buffer can appear in several groups. Its text, point, modified
 state, and undo history remain shared.
@@ -51,8 +246,7 @@ state, and undo history remain shared.
 `current-group` describes the visible frame. It is not a second membership
 store and it is not a permanent promise about future windows.
 
-Entering a group restores a homogeneous layout. Showing foreign work can make
-the frame mixed and clear `current-group`.
+Entering a group restores a homogeneous layout. Showing foreign work can make the frame mixed and clear `current-group`.
 
 ## The vocabulary
 
@@ -63,13 +257,11 @@ Use these verbs consistently in commands, prompts, and documentation.
 | **show** | Display a buffer in one window. | No | Maybe, through recalculation |
 | **switch group** | Restore another group's layout. | No | Yes |
 | **add** | Make a buffer available in another group. | Yes | No |
-| **pull here** | Add a buffer to `current-group`. | Yes | No |
-| **move** | Add to a destination, then remove one named source. | Yes | Optional and explicit |
+| **move** | Replace all memberships with one destination. | Yes | No |
 | **remove** | Remove one named membership. | Yes | No |
 | **new** | Create a group record. | Only when a seed is supplied | Yes when accepted |
 
-“Push” and “pop” are useful implementation history, but they are not required
-user vocabulary. Prefer **add**, **move**, and **remove** in new interfaces.
+Use **add**, **move**, and **remove** for membership changes.
 
 ## Everyday workflow
 
@@ -80,8 +272,10 @@ When every visible work buffer belongs to one group, `current-group` is set.
 - `C-x b` puts buffers from that group first.
 - New work buffers join that group.
 - Newly visited files join that group.
-- Pull actions use that group as their destination.
 - The group's remembered layout can update.
+
+
+
 
 ### Look at something from outside the group
 
@@ -98,8 +292,7 @@ current buffer's groups appear before unrelated groups.
 Press `C-x g` and accept a group. The editor restores that group's last valid
 homogeneous layout.
 
-When the frame is already homogeneous, other groups appear in MRU order. The
-current group is not offered as a destination.
+When the frame is already homogeneous, other groups appear in MRU order. The current group is not offered as a destination.
 
 ### Start new work from the current buffer
 
@@ -152,8 +345,7 @@ and focuses the chosen buffer after restore.
 | Ungrouped buffer | Offer **Start a new group with this buffer**. |
 
 Candidate actions can offer membership changes, but those actions must name
-their effect. Examples are **Pull here**, **Add to group**, and **Move to
-group**.
+their effect. Examples are **Add to group** and **Move to group**.
 
 Cancellation restores any previewed buffer, point, scroll, selected window,
 and layout.
@@ -207,8 +399,8 @@ record and changes no membership.
 
 ## New buffers and files
 
-New work uses `current-group` directly. No command repeats the homogeneity
-calculation.
+New work uses `current-group` directly. A shared creation hook applies the
+rule, so commands do not repeat the homogeneity calculation.
 
 | State at creation | Result |
 |---|---|
@@ -232,9 +424,9 @@ does not add another membership silently.
 
 A failed or cancelled visit changes no membership.
 
-### Find a file in a new group: `C-x C-g`
+### Find a file in a new group: `C-x C-g f`
 
-`C-x C-g` is the direct counterpart to `C-x C-f`.
+`C-x C-g f` is the direct counterpart to `C-x C-f`.
 
 1. Choose a file.
 2. Name the new group.
@@ -259,8 +451,7 @@ mode, or group does not make two buffers a family.
 Starting or moving a context from one buffer includes its eligible family:
 
 - Add every live family member to the destination first.
-- Remove the named source only from family members that have it.
-- Preserve every other membership.
+- Remove every other membership from each family member.
 - Report the complete family before confirmation when it contains several
   buffers.
 
@@ -280,22 +471,12 @@ all existing memberships and does not enter the destination.
 
 Running it twice is a successful no-op.
 
-### Pull a buffer here
-
-`group-pull-buffer` is the convenient current-group form of add.
-
-It is available only when `current-group` is set. Its palette searches every
-live work buffer directly. The user does not choose a source group first.
-
 ### Move a buffer to a group
 
-`buffer-move-to-group` requires both a source and a destination.
+`buffer-move-to-group` requires one destination.
 
-The operation adds the destination before removing the source. A failed add
-must leave the source untouched.
-
-When `current-group` is set and the buffer belongs to it, the interface can
-use `current-group` as the named source. Otherwise the user chooses a source.
+The operation resolves the destination before it changes membership. A failed
+destination leaves every existing membership untouched.
 
 ### Remove a buffer from a group
 
@@ -305,13 +486,6 @@ buffer or changes a file.
 When a removed buffer remains visible, the editor recalculates
 `current-group`. A group command may replace it with another member when the
 operation promises to preserve a homogeneous layout.
-
-### Several selected buffers
-
-Add, move, and remove can operate on marked work buffers as one transaction.
-Incompatible candidates are absent or clearly disabled.
-
-The result reports changed, unchanged, and skipped buffers.
 
 ## Command naming
 
@@ -325,7 +499,6 @@ Canonical commands are named after the object they change.
 | `group-new` | Create and enter an empty group. |
 | `group-new-with-buffer` | Create and enter a group with the current buffer family. |
 | `group-new-from-visible` | Create and enter a group from eligible visible buffers. |
-| `group-pull-buffer` | Add selected work to `current-group`. |
 | `group-rename` | Rename a group without changing identity. |
 | `group-dissolve` | Remove a group record and its memberships without killing work. |
 | `group-kill` | Kill members under the standard buffer-kill policy. |
@@ -336,13 +509,11 @@ Canonical commands are named after the object they change.
 | Command | Meaning |
 |---|---|
 | `buffer-add-to-group` | Add one or more memberships. |
-| `buffer-move-to-group` | Add a destination, then remove one source. |
+| `buffer-move-to-group` | Replace all memberships with one destination. |
 | `buffer-remove-from-group` | Remove one named membership. |
 | `buffer-new` | Create work in `current-group`, or ungrouped when it is null. |
 
-Compatibility aliases can retain `group-switch`, older `group-push-*`, and
-`group-pop` during migration. New UI and documentation should use the
-canonical names.
+Compatibility aliases can retain `group-switch` during migration.
 
 ## Projects
 
@@ -477,7 +648,7 @@ Group identity uses an opaque ID. Rename and restart never change that ID.
 | Ungrouped buffer is current in a mixed frame | Put **Start a new group with this buffer** first in `C-x g`. |
 | Grouped foreign buffer is current in a mixed frame | Put its groups first in `C-x g`. |
 | Current buffer belongs to several groups | Order its destination groups by group MRU. |
-| Current member starts a new group | Add the new group, remove only `current-group`, then enter the new group. |
+| Current member starts a new group | Replace its memberships with the new group, then enter it. |
 | Foreign member starts a new group | Add the new group and preserve all existing memberships. |
 | Current group has no other work after a move | Keep the group record and chats. |
 | A visible membership is removed | Recalculate `current-group`; replace the buffer only when the command promises homogeneous repair. |
@@ -535,10 +706,9 @@ transient interface buffers.
 ### Atomic operations
 
 - Group creation writes the record before adding membership.
-- Move adds every destination membership before removing any source membership.
-- A failed add prevents all source removals.
+- Move resolves every destination before replacing any membership.
+- A failed destination preserves all existing memberships.
 - Cancellation before acceptance changes no record, membership, layout, or MRU.
-- Multi-buffer operations report complete and partial results.
 - Membership operations preserve text, files, modified state, point, and undo.
 
 ### Layout safety
@@ -565,16 +735,17 @@ At minimum, tests cover:
 
 1. Homogeneous, mixed, ungrouped, and multiply shared visible layouts.
 2. Recalculation after every buffer-display and membership change.
-3. New-buffer placement with set and null `current-group`.
+3. New-buffer placement with set and null `current-group`, including direct,
+   file, and Dired creation paths.
 4. `C-x C-f` for new, live, failed, and cancelled file visits.
-5. `C-x C-g` for new files, live files, duplicate names, and cancellation.
+5. `C-x C-g f` for new files, live files, duplicate names, and cancellation.
 6. `C-x b` ordering, foreign display, preview, and cancellation.
 7. `RET` display and `C-RET` context switching for one, many, and no groups.
 8. `C-x g` ordering for homogeneous, mixed, ungrouped, and multi-group buffers.
 9. Pure group-row acceptance versus explicit add and move actions.
 10. New groups from empty state, one buffer family, and visible buffers.
-11. Add, pull, move, and remove for one buffer and marked sets.
-12. Failed moves with no source removal.
+11. Add, move, and remove for one buffer.
+12. Failed moves with no membership change.
 13. Buffer-family operations with missing and incompatible companions.
 14. Layout save, restore, healing, default construction, and undo.
 15. Rename, dissolve, kill, modified work, and partial completion.
@@ -591,7 +762,7 @@ buffer state directly.
 2. Showing a buffer never edits membership.
 3. A group switch never edits membership.
 4. Add never removes a membership.
-5. Move names one destination and one source.
+5. Move names one destination and replaces existing memberships.
 6. Remove never kills a buffer or file.
 7. New work joins `current-group` only when that value is set.
 8. Mixed work never receives an inferred destination.

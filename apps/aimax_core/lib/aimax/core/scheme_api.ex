@@ -213,6 +213,8 @@ defmodule Aimax.Core.SchemeAPI do
       "window-list-all" =>
         "(window-list-all) — return ((WINDOW-ID BUFFER FRAME-ID) ...) for every window on every frame.",
       "redraw!" => "(redraw!) — tell every connected client to re-render every frame; return #t.",
+      "desktop-dirty!" =>
+        "(desktop-dirty!) — schedule persistence after Scheme-owned desktop state changes; return #t.",
       "daemon-provision-workspace!" =>
         "(daemon-provision-workspace! PATH NAME) — start or reuse a daemon from PATH; return (URL HOME PORT).",
       "goto-char!" => "(goto-char! POS) — move point to byte POS; return POS.",
@@ -983,6 +985,10 @@ defmodule Aimax.Core.SchemeAPI do
       "redraw!" => fn [] ->
         Aimax.Core.Events.broadcast_editor(:redraw)
         Enum.each(Editor.frame_list(), &Aimax.Core.Events.broadcast_frame/1)
+        true
+      end,
+      "desktop-dirty!" => fn [] ->
+        Aimax.Core.Events.broadcast_editor(:scheme_state)
         true
       end,
       # The incremental form reloader, which lives in the Session. Scheme

@@ -115,6 +115,7 @@
             (let* ((id (group-new-id!))
                    (record (list id clean #f #f "quiet" #f (group-next-color))))
               (set! *group-records* (append *group-records* (list record)))
+              (desktop-dirty!)
               id)))))
 
 ;; group-new-id! writes this prefix, so a string that carries it is an id
@@ -152,6 +153,7 @@
                       (if (equal? field 'color) new-value
                           (group-record-color record)))))
           *group-records*))
+      (desktop-dirty!)
       (when (member field '(name color))
         (group-frame-styles-refresh!)
         (modeline-groups-refresh!)))))
@@ -163,6 +165,7 @@
       (set! *group-records*
         (remove (lambda (record) (equal? (group-record-id record) id))
                 *group-records*))
+      (desktop-dirty!)
       (modeline-groups-refresh!))))
 
 (define (group-record-colors-restore records)
@@ -440,6 +443,10 @@
 (define (chat-set-group! b value)
   (let ((id (and value (group-ensure-record! value))))
     (buffer-set-local! b 'group-id id)
+    ;; A chat has ownership, not ordinary work-buffer memberships. Remove
+    ;; any creation-time membership before the chat mode declared its type.
+    (buffer-set-local! b 'group-ids '())
+    (buffer-set-local! b 'group-roles '())
     (buffer-set-local! b 'group #f)
     (buffer-set-local! b 'companion-of #f)
     (buffer-modeline-group-refresh! b)
@@ -667,7 +674,7 @@
 ;; fills the frame.
 (define (group-default-layout! g)
   (let* ((docs (group-docs g))
-         (chat (group-primary-chat g))
+         (chat (if (pair? docs) (group-primary-chat g) (group-chat g)))
          (main (cond ((pair? docs) (car docs))
                      (chat chat)
                      (else
@@ -902,9 +909,9 @@
             #f))))
 
 (define (group-context-memberships buf)
-  (cond ((buffer-local buf 'transient) #f)
-        ((chat-buffer? buf)
+  (cond ((chat-buffer? buf)
          (let ((id (chat-group-id buf))) (if id (list id) '())))
+        ((buffer-local buf 'transient) #f)
         ((group-work-buffer? buf) (buffer-group-ids buf))
         (else #f)))
 
@@ -939,6 +946,14 @@
       next)))
 
 (set! window-state-changed! group-current-recalculate!)
+
+;; Creation is the shared placement boundary. Commands do not each need to
+;; remember this rule, and waking a dormant buffer does not run the hook.
+(on-buffer-created!
+  (lambda (buf)
+    (let ((group (frame-group)))
+      (when (and group (group-work-buffer? buf))
+        (buffer-add-group! buf group)))))
 
 ;; a layout snapshot is only true when the group is on screen: saving
 ;; a scratch detour AS the group's arrangement would overwrite the
@@ -977,6 +992,11 @@
 ;; snapshot — displaying a buffer must not create a chat.
 (define (group-layout-save-before-cover! name)
   (let ((id (frame-group)))
+    ;; Creation runs before a board declares itself transient. Remove the
+    ;; inherited work membership before the board covers a group pane.
+    (when (buffer-local name 'transient)
+      (for-each (lambda (group) (buffer-remove-group! name group))
+                (buffer-group-ids name)))
     (when (and id
                (not (buffer-in-group? name id))
                (group-visible-homogeneous? id)
@@ -1793,7 +1813,9 @@
                              (if (equal? owner buf) '() (list buf)))))
     (dedupe-names
       (filter (lambda (name)
-                (and (buffer-known? name) (group-work-buffer? name)))
+                (and (buffer-known? name)
+                     (group-work-buffer? name)
+                     (not (buffer-local name 'transient))))
               candidates))))
 
 (define (group-create-with-buffer! name buf source)
@@ -1804,13 +1826,12 @@
         (message (string-append "Could not create group " name))
         (begin
           (set! *group-current-inhibit* #t)
-          (for-each (lambda (member) (buffer-add-group! member id)) family)
-          (when source-id
-            (for-each
-              (lambda (member)
-                (when (buffer-in-group? member source-id)
-                  (buffer-remove-group! member source-id)))
-              family))
+          (for-each
+            (lambda (member)
+              (if source-id
+                  (buffer-move-to-group! member id)
+                  (buffer-add-group! member id)))
+            family)
           (set! *group-current-inhibit* #f)
           (switch-to-group! id)
           (let ((window (window-showing buf)))
@@ -1904,11 +1925,11 @@
 
 (define (group-switch-adopt! buf id)
   (cond ((not id) (message "No current group"))
-        ((not (group-work-buffer? buf)) (message "Chats cannot be pulled"))
+        ((not (group-work-buffer? buf)) (message "Chats cannot be added"))
         (else
           (buffer-add-group! buf id)
           (switch-to-buffer! buf)
-          (message (string-append "Pulled " buf " into " (group-name id))))))
+          (message (string-append "Added " buf " to " (group-name id))))))
 
 (define (group-switch-confirm! buf id)
   (let ((context (let ((x *mb-confirm-context*))
@@ -1924,7 +1945,7 @@
               (switch-to-buffer! buf))))))
 
 (define-command "group-switch-buffer"
-  "Switch to a buffer; C-RET enters its group, S-RET pulls it into this one"
+  "Switch to a buffer; C-RET enters its group, S-RET adds it to this one"
   (lambda ()
     (set! *mb-confirm-context* #f)
     (set! *mb-confirm-adopt* #f)
@@ -1969,60 +1990,6 @@
                     (message "No buffer candidates to collect")
                     (ibuffer-open-buffers! buffers)))))))))
 
-(define (group-pull-buffers! buffers value)
-  (let ((id (group-resolve-id value))
-        (changed 0)
-        (unchanged 0)
-        (skipped 0))
-    (if (not id)
-        (message "No current group")
-        (begin
-          (for-each
-            (lambda (buf)
-              (cond ((not (and (buffer-known? buf) (group-work-buffer? buf)))
-                     (set! skipped (+ skipped 1)))
-                    ((buffer-in-group? buf id)
-                     (set! unchanged (+ unchanged 1)))
-                    (else
-                      (buffer-add-group! buf id)
-                      (set! changed (+ changed 1)))))
-            buffers)
-          (message
-            (string-append "Pulled " (number->string changed) " buffer"
-                           (if (= changed 1) "" "s") " into "
-                           (group-name id)
-                           (if (= unchanged 0) ""
-                               (string-append "; " (number->string unchanged)
-                                              " already there"))
-                           (if (= skipped 0) ""
-                               (string-append "; skipped "
-                                              (number->string skipped)))))
-          ;; the same reason as the push: a list that shows membership is
-          ;; stale now, and the marks that chose these buffers are spent
-          (run-hooks 'group-membership-hook)
-          changed))))
-
-(define-command "group-pull-buffer"
-  "Pull selected or marked live work buffers into the current group"
-  (lambda ()
-    (let ((id (frame-local 'current-group))
-          (source (current-buffer)))
-      (cond
-        ((not (group-resolve-id id))
-         (message "No current group"))
-        ((equal? (buffer-local source 'mode-name) "switch-mode")
-         (let ((buffers (group-command-work-buffers)))
-           (if (null? buffers)
-               (message "No work buffer selected")
-               (group-pull-buffers! buffers id))))
-        (else
-          (minibuffer-read "Pull buffer here: "
-            (annotate 'buffer (group-all-work-buffers))
-            (lambda (buf)
-              (if (not (group-work-buffer? buf))
-                  (message "No work buffer selected")
-                  (group-pull-buffers! (list buf) id)))))))))
-
 (define (group-command-work-buffers)
   (let ((buf (current-buffer)))
     (filter group-work-buffer?
@@ -2043,7 +2010,7 @@
 ;; does not know is a group to found — the same answer the "New group"
 ;; row gives. group-ensure-record! still refuses an id, so a dangling
 ;; membership cannot found a group named after itself.
-(define (group-push-buffers-to! buffers destination)
+(define (group-add-buffers-to! buffers destination)
   (let ((id (group-ensure-record! destination))
         (changed 0)
         (skipped 0))
@@ -2059,14 +2026,14 @@
                   (set! skipped (+ skipped 1))))
             buffers)
           (message
-            (string-append "Pushed " (number->string changed) " buffer"
+            (string-append "Added " (number->string changed) " buffer"
                            (if (= changed 1) "" "s") " to "
                            (group-name id)
                            (if (= skipped 0) ""
                                (string-append "; skipped "
                                               (number->string skipped)))))
           ;; a list that shows membership is now stale, and the marks that
-          ;; chose these buffers are spent. The push happens under a
+          ;; chose these buffers are spent. The add happens under a
           ;; minibuffer callback, so no caller can refresh after it.
           (run-hooks 'group-membership-hook)
           changed))))
@@ -2083,50 +2050,35 @@
                              "\nContinue? ")
               continue)))))
 
-(define (group-push-read-destination! buffers)
-  (minibuffer-read "Push buffers to group: "
+(define (group-add-read-destination! buffers)
+  (minibuffer-read "Add buffers to group: "
     (cons (list "New group" "create without entering") (group-names))
     (lambda (destination)
       (if (equal? destination "New group")
           (group-read-new-name "New destination group: "
             (lambda (name)
               (let ((id (group-record-create! name)))
-                (when id (group-push-buffers-to! buffers id)))))
+                (when id (group-add-buffers-to! buffers id)))))
           (let ((id (or (group-resolve-id destination)
                         (group-record-create! destination))))
             (group-confirm-target! id
-              (lambda () (group-push-buffers-to! buffers id))))))))
+              (lambda () (group-add-buffers-to! buffers id))))))))
 
-(define-command "group-push-buffer"
-  "Push the current or marked work buffers to another group"
-  (lambda ()
-    (let ((buffers (group-command-work-buffers)))
-      (if (null? buffers)
-          (message "No work buffer selected")
-          (group-push-read-destination! buffers)))))
-
-(define (group-move-buffers-to! buffers destination source)
-  (let ((id (group-ensure-record! destination))
-        (source-id (group-resolve-id source)))
+(define (group-move-buffers-to! buffers destination)
+  (let ((id (group-ensure-record! destination)))
     (cond
-      ((not source-id) (message "No source group"))
-      ((equal? id source-id) (message "Destination is already the source group"))
+      ((not id) (message "No destination group"))
       (else
         (let ((eligible
                (filter (lambda (buf)
                          (and (buffer-known? buf)
-                              (group-work-buffer? buf)
-                              (buffer-in-group? buf source-id)))
+                              (group-work-buffer? buf)))
                        buffers)))
-          (for-each (lambda (buf)
-                      (buffer-add-group! buf id)
-                      (buffer-remove-group! buf source-id))
-                    eligible)
+          (for-each (lambda (buf) (buffer-move-to-group! buf id)) eligible)
           (run-hooks 'group-membership-hook)
           (message (string-append "Moved " (number->string (length eligible))
                                   " buffer"
                                   (if (= (length eligible) 1) "" "s")
-                                  " from " (group-name source-id)
                                   " to " (group-name id)))
           (length eligible))))))
 
@@ -2144,21 +2096,13 @@
                                   " to " (group-name id)))
           family))))
 
-(define (buffer-move-family-to-group! buf destination source)
+(define (buffer-move-family-to-group! buf destination)
   (let ((family (buffer-family buf))
-        (to (group-resolve-id destination))
-        (from (group-resolve-id source)))
+        (to (group-resolve-id destination)))
     (cond ((not to) (message "No destination group"))
-          ((not from) (message "Move needs a source group"))
-          ((equal? to from) (message "Destination is already the source group"))
           (else
             (set! *group-current-inhibit* #t)
-            (for-each (lambda (member) (buffer-add-group! member to)) family)
-            (for-each
-              (lambda (member)
-                (when (buffer-in-group? member from)
-                  (buffer-remove-group! member from)))
-              family)
+            (for-each (lambda (member) (buffer-move-to-group! member to)) family)
             (set! *group-current-inhibit* #f)
             (group-current-recalculate!)
             (run-hooks 'group-membership-hook)
@@ -2171,31 +2115,26 @@
 (define-command "buffer-add-to-group" "Add the current buffer family to a group"
   (lambda ()
     (let ((buf (current-buffer)))
+      (if (equal? (buffer-local buf 'mode-name) "switch-mode")
+          (let ((buffers (group-command-work-buffers)))
+            (if (null? buffers)
+                (message "No work buffer selected")
+                (group-add-read-destination! buffers)))
+          (if (not (group-work-buffer? buf))
+              (message "The current buffer is not a work buffer")
+              (group-read-or-create! "Add buffer to group: "
+                (lambda (group) (buffer-add-family-to-group! buf group))))))))
+
+(define (buffer-move-read-destination! buf)
+  (group-read-or-create! "Move buffer to group: "
+    (lambda (group) (buffer-move-family-to-group! buf group))))
+
+(define-command "buffer-move-to-group" "Move the current buffer family to one group"
+  (lambda ()
+    (let ((buf (current-buffer)))
       (if (not (group-work-buffer? buf))
           (message "The current buffer is not a work buffer")
-          (group-read-or-create! "Add buffer to group: "
-            (lambda (group) (buffer-add-family-to-group! buf group)))))))
-
-(define (buffer-move-read-destination! buf source)
-  (group-read-or-create! "Move buffer to group: "
-    (lambda (group) (buffer-move-family-to-group! buf group source))))
-
-(define-command "buffer-move-to-group" "Move the current buffer family between groups"
-  (lambda ()
-    (let* ((buf (current-buffer))
-           (ids (group-buffer-memberships buf))
-           (current (frame-group))
-           (source (and current (member current ids) current)))
-      (cond ((not (group-work-buffer? buf))
-             (message "The current buffer is not a work buffer"))
-            (source (buffer-move-read-destination! buf source))
-            ((null? ids) (message "Move needs a source group"))
-            ((null? (cdr ids)) (buffer-move-read-destination! buf (car ids)))
-            (else
-              (minibuffer-read "Move buffer from group: " (map group-name ids)
-                (lambda (name)
-                  (let ((id (group-resolve-id name)))
-                    (when id (buffer-move-read-destination! buf id))))))))))
+          (buffer-move-read-destination! buf)))))
 
 (define-command "buffer-remove-from-group"
   "Remove one group membership from the current buffer family"
@@ -2222,7 +2161,7 @@
                   (let ((id (group-resolve-id name)))
                     (when id (remove-from id))))))))))
 
-(define (group-move-read-destination! buffers source)
+(define (group-move-read-destination! buffers)
   (minibuffer-read "Move buffers to group: "
     (cons (list "New group" "create without entering") (group-names))
     (lambda (destination)
@@ -2230,105 +2169,19 @@
           (group-read-new-name "New destination group: "
             (lambda (name)
               (let ((id (group-record-create! name)))
-                (when id (group-move-buffers-to! buffers id source)))))
+                (when id (group-move-buffers-to! buffers id)))))
           (let ((id (or (group-resolve-id destination)
                         (group-record-create! destination))))
             (group-confirm-target! id
-              (lambda () (group-move-buffers-to! buffers id source))))))))
-
-(define-command "group-push-visible"
-  "Push selected buffers, or all visible work buffers, to another group"
-  (lambda ()
-    (let ((buffers (group-command-selected-or-visible-buffers)))
-      (if (null? buffers)
-          (message "No work buffers selected or visible")
-          (group-push-read-destination! buffers)))))
-
-(define-command "group-push-selected"
-  "Push selected visible work buffers, or the current buffer, to another group"
-  (lambda ()
-    (let* ((selected (group-selected-visible-work-buffers))
-           (current (current-buffer))
-           (buffers (cond ((pair? selected) selected)
-                          ((group-work-buffer? current) (list current))
-                          (else '()))))
-      (if (null? buffers)
-          (message "No selected or current work buffer")
-          (group-push-read-destination! buffers)))))
+              (lambda () (group-move-buffers-to! buffers id))))))))
 
 (define-command "group-move-visible"
   "Move selected buffers, or all visible work buffers, to another group"
   (lambda ()
-    (let ((buffers (group-command-selected-or-visible-buffers))
-          (source (frame-local 'current-group)))
-      (cond
-        ((null? buffers) (message "No work buffers selected or visible"))
-        ((not (group-resolve-id source)) (message "No source group"))
-        (else (group-move-read-destination! buffers source))))))
-
-(define (group-pop-replacement id popped)
-  (let* ((popped-buffers (if (pair? popped) popped (list popped)))
-         (work (filter (lambda (b)
-                         (and (not (member b popped-buffers))
-                              (group-work-buffer? b)))
-                       (group-buffers-mru id))))
-    (cond ((pair? work) (car work))
-          ((group-primary-chat id) (group-primary-chat id))
-          (else
-            (unless (buffer-exists? "*scratch*") (buffer-create "*scratch*"))
-            "*scratch*"))))
-
-(define (group-pop-buffers! buffers value)
-  (let* ((id (group-resolve-id value))
-         (source (current-buffer))
-         (switcher? (equal? (buffer-local source 'mode-name) "switch-mode"))
-         (eligible
-           (if id
-               (filter (lambda (buf)
-                         (and (buffer-known? buf)
-                              (group-work-buffer? buf)
-                              (buffer-in-group? buf id)))
-                       buffers)
-               '()))
-         (skipped (- (length buffers) (length eligible))))
-    (cond
-      ((not id) (message "No current group"))
-      ((null? eligible) (message "No current-group work buffer selected"))
-      (else
-        (when switcher? (switch-restore-home! source))
-        (for-each (lambda (buf) (buffer-remove-group! buf id)) eligible)
-        (if switcher?
-            (let ((home (buffer-local source 'switch-here))
-                  (window (switch-home-window source)))
-              (for-each (lambda (buf) (list-unmark-key! source buf)) eligible)
-              (when (and window (member home eligible))
-                (window-preview-buffer!
-                  (group-pop-replacement id eligible) window))
-              (switch-close! source #f))
-            (when (member source eligible)
-              (switch-to-buffer! (group-pop-replacement id eligible))))
-        (message
-          (string-append "Popped " (number->string (length eligible))
-                         " buffer" (if (= (length eligible) 1) "" "s")
-                         " from " (group-name id)
-                         (if (= skipped 0) ""
-                             (string-append "; skipped "
-                                            (number->string skipped)))))
-        (length eligible)))))
-
-(define (group-pop-buffer! buf id)
-  (group-pop-buffers! (list buf) id))
-
-
-
-(define-command "group-pop"
-  "Pop the current or marked work buffers from the current group"
-  (lambda ()
-    (let ((id (frame-local 'current-group))
-          (buffers (group-command-work-buffers)))
-      (if (not (group-resolve-id id))
-          (message "No current group")
-          (group-pop-buffers! buffers id)))))
+    (let ((buffers (group-command-selected-or-visible-buffers)))
+      (if (null? buffers)
+          (message "No work buffers selected or visible")
+          (group-move-read-destination! buffers)))))
 
 ;; C-c g : join a group. RET takes the default — so a stray buffer
 ;; moves into the group you last stood in with one press. A typed
@@ -2445,6 +2298,22 @@
 (global-set-key "C-x G" "groups")
 (global-set-key "C-x b" "group-switch-buffer")
 (global-set-key "C-x g" "switch-to-group")
+
+;; C-x C-g is the group command map.
+(global-set-key "C-x C-g g" "switch-to-group")
+(global-set-key "C-x C-g a" "buffer-add-to-group")
+(global-set-key "C-x C-g m" "buffer-move-to-group")
+(global-set-key "C-x C-g r" "buffer-remove-from-group")
+(global-set-key "C-x C-g n" "group-new")
+(global-set-key "C-x C-g v" "group-new-from-visible")
+(global-set-key "C-x C-g l" "groups")
+(global-set-key "C-x C-g s" "group-show-all")
+(global-set-key "C-x C-g o" "opencode-in-group")
+
+;; Remove the previous membership vocabulary from hot-reloaded sessions.
+(for-each undefine-command
+  '("group-pull-buffer" "group-push-buffer" "group-push-visible"
+    "group-push-selected" "group-pop"))
 
 (public! 'group-ids "(group-ids) -> durable opaque group IDs")
 (public! 'group-name "(group-name ID) -> the current display name")

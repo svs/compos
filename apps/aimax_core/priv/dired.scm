@@ -452,7 +452,8 @@
                        #t))
     'noun "file"
     'markable? (lambda (buf e) (not (equal? e "..")))
-    'keys '(("RET" "dired-visit") ("g" "dired-revert") ("^" "dired-up")
+    'keys '(("RET" "dired-visit") ("C-RET" "dired-visit-in-group")
+            ("g" "dired-revert") ("^" "dired-up")
             ("+" "dired-mkdir") ("R" "dired-rename") ("q" "quit-window")
             ("C" "dired-copy") ("M" "dired-chmod") ("T" "dired-touch")
             ("L" "dired-symlink") ("s" "dired-sort-cycle")
@@ -586,20 +587,29 @@
 (define-command "dired-prev" "Move up to the previous line in the Dired buffer"
   (lambda () (list-move! -1)))
 
+(define (dired-visit-with-group group)
+  (let ((p (dired-path-at-point))
+        (entry (dired-entry)))
+    (if p
+        (if (or (equal? entry "..") (dired-directory? entry))
+            (visit p group)
+            (let* ((dired-buffer (current-buffer))
+                   (file-buffer (visit p group)))
+              (when file-buffer
+                (switch-to-buffer! dired-buffer)
+                (display-buffer-other-window! file-buffer))
+              file-buffer))
+        (message "No file on this line"))))
+
 (define-command "dired-visit" "Visit the file or directory named on this line"
+  (lambda () (dired-visit-with-group #f)))
+
+(define-command "dired-visit-in-group"
+  "Visit this entry in the current group, or the Dired buffer's group"
   (lambda ()
-    (let ((p (dired-path-at-point))
-          (entry (dired-entry)))
-      (if p
-          (if (or (equal? entry "..") (dired-directory? entry))
-              (visit p)
-              (let* ((dired-buffer (current-buffer))
-                     (file-buffer (visit p)))
-                (when file-buffer
-                  (switch-to-buffer! dired-buffer)
-                  (display-buffer-other-window! file-buffer))
-                file-buffer))
-          (message "No file on this line")))))
+    (let ((dired-buffer (current-buffer)))
+      (dired-visit-with-group
+        (or (frame-group) (buffer-group dired-buffer))))))
 
 (define-command "dired-up" "Open the parent directory in Dired"
   (lambda ()
@@ -721,6 +731,7 @@
         (message "Created")))))
 
 (global-set-key "C-x d" "dired")
+(global-set-key "C-x C-d" "dired")
 
 ;;; --- the public surface -------------------------------------------------------
 ;;; Dired's callable surface is mostly its M-x commands, which apropos

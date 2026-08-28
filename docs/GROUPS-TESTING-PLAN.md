@@ -24,7 +24,7 @@ Confirm it remains available without buffers or chats.
 
 ### TODO Create a group from the current buffer
 
-**Run:** `M-x group-new-from-buffer`
+**Run:** `M-x group-new-with-buffer`
 
 Confirm the current work buffer becomes a member.
 
@@ -60,65 +60,59 @@ Confirm the active group and chat keep working under the new name.
 
 ## Membership operations
 
-### TODO Pull an ungrouped buffer
+### TODO Add an ungrouped buffer
 
-**Run:** `M-x group-pull-buffer`
+**Run:** `M-x buffer-add-to-group`
 
 Confirm it joins the current group without changing frame context.
 
-### TODO Pull a foreign buffer
+### TODO Add a foreign buffer
 
-**Run:** `M-x group-pull-buffer`
+**Run:** `M-x buffer-add-to-group`
 
 Confirm it gains shared membership and remains in its original group.
 
-### TODO Pull the same buffer twice
+### TODO Add the same membership twice
 
-**Run:** Run `M-x group-pull-buffer` twice.
+**Run:** Run `M-x buffer-add-to-group` twice.
 
-Confirm the second pull is a no-op.
+Confirm the second add is a no-op.
 
-### TODO Pull several marked buffers
+### TODO Add several marked buffers
 
-**Run:** `M-x group-pull-buffer`; mark with `SPC`, accept with `RET`.
+**Run:** Open the buffer switcher, mark buffers, then run `M-x switch-group`.
 
-Mark buffers in the switcher and pull them together.
+Confirm every marked buffer gains the destination membership.
 
-### TODO Push one buffer to an existing group
+### TODO Move one buffer to an existing group
 
-**Run:** `M-x group-push-buffer`
+**Run:** `M-x buffer-move-to-group`
 
-Confirm the buffer joins the destination while the frame stays in the current group.
+Confirm the destination replaces every existing membership.
 
-### TODO Push marked buffers to a new group
+### TODO Remove one membership
 
-**Run:** `M-x group-push-buffer`; mark with `SPC`, choose **New group**.
+**Run:** `M-x buffer-remove-from-group`.
 
-Confirm the group is created once and receives every marked buffer.
+Confirm only the selected membership is removed.
 
-### TODO Pop a shared buffer
+### TODO Remove from a null current group
 
-**Run:** `M-x group-pop`
+**Run:** Clear the current context, then run `M-x buffer-remove-from-group`.
 
-Confirm only its membership in the current group is removed.
+Confirm the command asks which membership to remove.
 
-### TODO Pop the visible buffer
+### TODO Move an ungrouped buffer
 
-**Run:** `M-x group-pop`
+**Run:** `M-x buffer-move-to-group`.
 
-Confirm the window selects a safe replacement.
+Confirm the command asks only for the destination.
 
-### TODO Pop the final work buffer
+### TODO Keep memberships after a failed move
 
-**Run:** `M-x group-pop`
+**Run:** Attempt `M-x buffer-move-to-group` with an invalid destination.
 
-Confirm the now-empty group still exists.
-
-### TODO Move by composing push and pop
-
-**Run:** `M-x group-push-buffer`, then `M-x group-pop`.
-
-Confirm the buffer ends in the destination and leaves the source.
+Confirm every existing membership remains unchanged.
 
 ## Switching
 
@@ -142,13 +136,13 @@ Confirm membership and frame group do not change.
 
 ### TODO Switch groups
 
-**Run:** `M-x group-switch`.
+**Run:** `M-x switch-to-group`.
 
 Press `C-x g` and confirm the destination layout restores.
 
 ### TODO Switch repeatedly between two groups
 
-**Run:** `M-x group-switch` repeatedly.
+**Run:** `M-x switch-to-group` repeatedly.
 
 Confirm current-group and previous-group tracking stays correct.
 
@@ -168,25 +162,25 @@ Confirm narrow and broadened switching remain responsive and selectable.
 
 ### TODO Restore a multi-window layout
 
-**Run:** Arrange windows, then `M-x group-switch`.
+**Run:** Arrange windows, then `M-x switch-to-group`.
 
 Arrange two or three windows, leave the group, and return.
 
 ### TODO Restore split ratios
 
-**Run:** Resize windows, then `M-x group-switch`.
+**Run:** Resize windows, then `M-x switch-to-group`.
 
 Change window sizes, switch away, and confirm the ratios return.
 
 ### TODO Ignore transient UI when remembering layouts
 
-**Run:** Open the transient UI, then `M-x group-switch`.
+**Run:** Open the transient UI, then `M-x switch-to-group`.
 
 Open help, a popup, source view, or the groups board and confirm it does not replace the remembered work layout.
 
 ### TODO Cancel after previewing several candidates
 
-**Run:** Start `C-x b` or `M-x group-switch`, preview candidates, then `C-g`.
+**Run:** Start `C-x b` or `M-x switch-to-group`, preview candidates, then `C-g`.
 
 Confirm the tree, selected window, buffer, point, and scroll position all return.
 
@@ -204,19 +198,19 @@ Confirm restoration does not stack or corrupt the layout.
 
 ### TODO Restore with one killed layout buffer
 
-**Run:** Kill one layout buffer, then `M-x group-switch`.
+**Run:** Kill one layout buffer, then `M-x switch-to-group`.
 
 Confirm the remaining layout heals without resurrecting the killed buffer.
 
 ### TODO Restore with every layout buffer killed
 
-**Run:** Kill all layout buffers, then `M-x group-switch`.
+**Run:** Kill all layout buffers, then `M-x switch-to-group`.
 
 Confirm a safe default layout appears.
 
 ### TODO Keep different layouts in two frames
 
-**Run:** In each frame, use `M-x group-switch`.
+**Run:** In each frame, use `M-x switch-to-group`.
 
 Use the same group in two frames and confirm each frame restores its own layout.
 
@@ -312,7 +306,7 @@ Use populated groups, an empty group, multiple chats, custom noise, and custom l
 
 ### TODO Restore frame context after restart
 
-**Run:** Restart, then `M-x group-switch`.
+**Run:** Restart, then `M-x switch-to-group`.
 
 Confirm current-group and previous-group restore by stable ID.
 

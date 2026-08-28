@@ -517,7 +517,7 @@
 (global-set-key "C-x p d" "project-dired")
 (global-set-key "C-x p g" "project-ripgrep")
 (global-set-key "C-x p k" "project-kill-all")
-(global-set-key "C-x C-g" "find-file-in-new-group")
+(global-set-key "C-x C-g f" "find-file-in-new-group")
 
 (category! 'project)
 (catalog-meta! 'command "project-kill-all" 'domain 'project 'effects '(destroy))

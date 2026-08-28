@@ -506,10 +506,10 @@ defmodule Aimax.EditorTest do
       assert Editor.current_buffer() == "*zz-ib-b*"
     end
 
-    # One buffer joins a group where it stands; the switcher pushes a SET.
+    # One buffer joins a group where it stands; the switcher adds a set.
     # The prompt offers the groups that exist and "New group" first, so
     # this founds one and reads the membership back.
-    test "the marked buffers push into a group as one act" do
+    test "the marked buffers add to a group as one act" do
       on_exit(fn ->
         for b <- ["*zz-gr-a*", "*zz-gr-b*", "*switch*"], do: Aimax.Core.kill_buffer(b)
         Editor.delete_other_windows()
@@ -527,7 +527,7 @@ defmodule Aimax.EditorTest do
       run("switch-mark")
       run("switch-group")
 
-      assert Editor.render_state().minibuffer.prompt =~ "Push buffers to group"
+      assert Editor.render_state().minibuffer.prompt =~ "Add buffers to group"
 
       # "New group" leads the candidates, so RET founds one and the next
       # prompt takes its name
@@ -660,6 +660,31 @@ defmodule Aimax.EditorTest do
       # ^ goes back up
       press(["^"])
       assert Editor.current_buffer() == root
+    end
+
+    test "C-RET visits in the current group, falling back to the Dired group", %{root: root} do
+      current = "zz-dired-current-#{System.unique_integer([:positive])}"
+      dired = "zz-dired-buffer-#{System.unique_integer([:positive])}"
+      current_id = group_id!(~s{(group-record-create! "#{current}")})
+      dired_id = group_id!(~s{(group-record-create! "#{dired}")})
+
+      {:ok, _} = Aimax.Core.Session.eval(~s{(set-frame-local! 'current-group "#{dired_id}")})
+      run("dired")
+      {:ok, _} = Aimax.Core.Session.eval(~s{(minibuffer-change! "#{root}")})
+      press(["RET"])
+      assert in_group?(root, dired_id)
+
+      # A current frame group has priority over the Dired buffer's membership.
+      {:ok, _} = Aimax.Core.Session.eval(~s{(set-frame-local! 'current-group "#{current_id}")})
+      press(["n", "C-RET"])
+      assert in_group?(Path.join(root, "alpha.txt"), current_id)
+      refute in_group?(Path.join(root, "alpha.txt"), dired_id)
+
+      # With no current frame group, the listing's own group supplies context.
+      {:ok, _} = Aimax.Core.Session.eval(~s{(switch-to-buffer! "#{root}")})
+      {:ok, _} = Aimax.Core.Session.eval("(set-frame-local! 'current-group #f)")
+      press(["n", "C-RET"])
+      assert in_group?(Path.join(root, "beta.txt"), dired_id)
     end
 
     test "marks: d flags, x executes with confirmation; m/u; + mkdir", %{
@@ -3602,9 +3627,10 @@ defmodule Aimax.EditorTest do
     id =
       group_id!("""
       (let ((id (group-record-create! "rngrp-#{n}")))
-        (set-frame-local! 'current-group id)
         (buffer-add-group! "#{m1}" id)
         (buffer-add-group! "#{m2}" id)
+        (delete-other-windows!)
+        (switch-to-buffer! "#{m1}")
         (group-meta-set! id "the renamed group")
         (group-rename! id "fresh-#{n}")
         id)
@@ -3754,6 +3780,7 @@ defmodule Aimax.EditorTest do
     id =
       group_id!("""
       (let ((id (group-record-create! "gf-grp-#{n}")))
+        (set-frame-local! 'current-group #f)
         (buffer-create "gf-home-#{n}")
         (switch-to-buffer! "gf-home-#{n}")
         (buffer-add-group! "gf-home-#{n}" id)

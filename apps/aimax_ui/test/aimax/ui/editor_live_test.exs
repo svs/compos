@@ -318,6 +318,23 @@ defmodule Aimax.Ui.EditorLiveTest do
     assert String.valid?(html)
   end
 
+  test "a select overlay paints every touched line as one full-width row",
+       %{conn: conn} do
+    buf = Aimax.Core.Editor.current_buffer()
+    Aimax.Core.Buffer.append(buf, "subject\nauthor\nnext", source: {:agent, "test"})
+    selected_end = byte_size("subject\nauthor\n")
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(
+        ~s{(overlay-set! "#{buf}" 'zz-row (list (list 0 #{selected_end} "select")))}
+      )
+
+    {:ok, view, _} = live(conn, "/")
+    html = render(view)
+
+    assert length(Regex.scan(~r/class="line [^"]*selected-line[^"]*"/, html)) == 2
+  end
+
   test "an avatar image keeps its layout class and clean source", %{conn: conn} do
     buf = Aimax.Core.Editor.current_buffer()
     url = "https://images.example/avatar.jpeg"

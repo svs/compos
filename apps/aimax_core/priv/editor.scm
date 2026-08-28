@@ -313,6 +313,7 @@
 ;;;             matches the annotation too — see list-match?
 ;;;   match   (buf entry input) -> #t to keep. What `/` means here.
 ;;;   filter  (buf entry filter) -> #t to keep. The mode's own filter kinds.
+;;;   selection-face  face name for the row at point. Omit it for no highlight.
 
 (define *list-modes* '())
 
@@ -1158,7 +1159,31 @@
   (let ((offs (list-offsets buf)))
     (when (and (>= i 0) (< i (length offs)))
       (let ((p (nth i offs)))
-        (if (equal? (current-buffer) buf) (goto-char! p) (buffer-goto! buf p))))))
+        (if (equal? (current-buffer) buf) (goto-char! p) (buffer-goto! buf p))
+        (list-update-selection! buf)))))
+
+;; Point is the live selection. Keep its row key as durable state, and paint
+;; the complete row when the mode asks for a selection face. A row can use
+;; more than one line, so the overlay follows the rendered row height.
+(define (list-update-selection! buf)
+  (let* ((i (list-clamped-index buf))
+         (entries (list-entries buf))
+         (offsets (list-offsets buf))
+         (face (list-opt buf 'selection-face)))
+    (if (and i (< i (length entries)) (< i (length offsets)))
+        (let* ((entry (nth i entries))
+               (start (nth i offsets))
+               (size (fold (lambda (n line)
+                             (+ n (string-byte-length (car line)) 1))
+                           0 (list-row-lines buf entry))))
+          (buffer-set-local! buf 'list-selection-key (list-key buf entry))
+          (if face
+              (overlay-set! buf 'list-selection
+                (list (list start (+ start size) face)))
+              (overlay-clear! buf 'list-selection)))
+        ;; Keep the saved key when rows are temporarily empty. An async reload
+        ;; can use it when the rows arrive again.
+        (overlay-clear! buf 'list-selection))))
 
 ;; the row point sits on, clamped into the rows: below the last one is
 ;; the key bar, and a list where point can leave the rows has no row at
@@ -1220,7 +1245,8 @@
           (buffer-set-local! buf 'list-width w)
           (list-render! buf 'cached))))
     (list-restamp! buf)
-    (list-snap-point! buf)))
+    (list-snap-point! buf)
+    (list-update-selection! buf)))
 
 (define (list-preview! buf)
   (let ((f (list-opt buf 'preview))
@@ -1369,6 +1395,8 @@
     ;; reflowed table moves every byte, and a most-recently-used list
     ;; reorders the rows under the cursor.
     (let* ((here (list-current buf))
+           (selected-key (or (and here (list-key buf here))
+                             (buffer-local buf 'list-selection-key)))
            (was (list-index buf))
            (rows (list-render-rows! buf fetch))
            (cur? (equal? (current-buffer) buf))
@@ -1398,7 +1426,7 @@
         (buffer-set-local! buf 'list-width (list-view-width buf)))
       ;; the rows are now the rows this render shows: the stamp says so
       (list-stamp! buf)
-      (let ((i (and here (list-index-of buf rows (list-key buf here)))))
+      (let ((i (and selected-key (list-index-of buf rows selected-key))))
         (cond ((and i (pair? rows)) (list-goto-index! buf i))
               ;; the rows may have shrunk under point — the key bar is
               ;; not a row
@@ -1406,7 +1434,9 @@
                (list-goto-index! buf (min was (- (length rows) 1))))
               (else
                (let ((q (min p (buffer-size buf))))
-                 (if cur? (goto-char! q) (buffer-goto! buf q)))))))))
+                 (if cur? (goto-char! q) (buffer-goto! buf q))))))
+      (list-snap-point! buf)
+      (list-update-selection! buf))))
 
 ;; `g` and every source change fetch again; a filter keystroke only
 ;; redraws, and a 'local-filter list then reuses its cached source.
@@ -1547,9 +1577,8 @@
     ;; empty and the rows stay narrow, for good. A dired listing that
     ;; matched one file kept showing that file every time it re-opened.
     (list-render! buf (if widened #t 'cached))
-    ;; the rewrite leaves the buffer's point after the key bar — a list
-    ;; opens with point on the first row
-    (list-goto-index! buf 0)
+    ;; list-render! restores the selected row by key. It moves a new list to
+    ;; its first row, but it does not reset an existing list during reload.
     ;; a list that declares an off-lane source refreshes through the
     ;; buffer cache: the wake above drew what it had, and new rows land
     ;; when the fetch answers. 'rows keeps serving the cached entries.

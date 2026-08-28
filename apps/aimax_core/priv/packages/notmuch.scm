@@ -272,6 +272,8 @@ when a message has no text/plain part." 'group 'notmuch)
            "`s` starts a new search; `q` goes back "
            "to the mailboxes.")
     'rows nm--search-rows
+    'key (lambda (buf th) (nm--th-id th))
+    'selection-face "select"
     'row-columns nm--search-columns
     'row-cells nm--search-cells
     'title (lambda (buf) "Mail")

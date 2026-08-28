@@ -725,6 +725,7 @@ defmodule Aimax.Ui.EditorLive do
         num: num,
         ts: line_ts,
         ov: line_ov,
+        selected: Enum.any?(line_ov, fn {_, _, face} -> face == "f-select" end),
         segs: line_segs(part, start, line_ts, line_ov)
       }
     end)
@@ -1269,7 +1270,7 @@ defmodule Aimax.Ui.EditorLive do
         <div
           :for={ln <- @lines}
           id={"ln-#{@node.id}-#{ln.num}"}
-          class={"line #{if ln.current, do: "hl-line"}"}
+          class={"line #{if ln.current, do: "hl-line"} #{if ln.selected, do: "selected-line"}"}
         >
           <span class="linenum">{ln.num}</span>
           <span class="line-content"><.seg :for={{txt, cls} <- ln.segs} txt={txt} cls={cls} /><span
@@ -1415,7 +1416,13 @@ defmodule Aimax.Ui.EditorLive do
           line.segs
         end
 
-      %{num: line.num, current: current, start: line.start, segs: segs}
+      %{
+        num: line.num,
+        current: current,
+        selected: line.selected,
+        start: line.start,
+        segs: segs
+      }
     end)
   end
 

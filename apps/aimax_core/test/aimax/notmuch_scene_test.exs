@@ -26,7 +26,7 @@ defmodule Aimax.NotmuchSceneTest do
             ((string-prefix? "search --output=tags" args)
              "unread\ninbox\n")
             ((string-prefix? "search" args)
-             "[{\"thread\":\"zz-thread\",\"timestamp\":1786065644,\"date_relative\":\"Today\",\"matched\":1,\"total\":1,\"authors\":\"Alice\",\"subject\":\"Role routed mail\",\"query\":[\"id:zz-message\"],\"tags\":[\"inbox\"]}]")
+             "[{\"thread\":\"zz-thread\",\"timestamp\":1786065644,\"date_relative\":\"Today\",\"matched\":1,\"total\":1,\"authors\":\"Alice\",\"subject\":\"Role routed mail\",\"query\":[\"id:zz-message\"],\"tags\":[\"inbox\"]},{\"thread\":\"zz-thread-2\",\"timestamp\":1785979244,\"date_relative\":\"Yesterday\",\"matched\":1,\"total\":1,\"authors\":\"Bob\",\"subject\":\"Reloaded selection\",\"query\":[\"id:zz-message-2\"],\"tags\":[\"inbox\"]}]")
             ((string-prefix? "show" args)
              "[[[{\"id\":\"zz-message\",\"match\":true,\"excluded\":false,\"filename\":[\"/tmp/zz-message\"],\"timestamp\":1786065644,\"date_relative\":\"Today\",\"tags\":[\"inbox\"],\"duplicate\":1,\"body\":[{\"id\":1,\"content-type\":\"text/plain\",\"content\":\"The routed body.\\n\"}],\"headers\":{\"Subject\":\"Role routed mail\",\"From\":\"Alice <alice@example.com>\",\"To\":\"reader@example.com\",\"Date\":\"Thu, 07 Aug 2026 06:50:44 +0530\"}},[]]]]")
             (else ""))))
@@ -90,5 +90,56 @@ defmodule Aimax.NotmuchSceneTest do
     KeyDispatch.handle_key("RET")
 
     assert eval!(~S|(nm--query-of "*notmuch*")|) == ~s{"( tag:inbox ) and tag:unread"}
+  end
+
+  test "the highlighted row follows key dispatch and survives mode reload" do
+    eval!(~S"""
+    (begin
+      (run-command "notmuch-inbox")
+      (local-set-key "C-c C-7" "notmuch-next"))
+    """)
+
+    KeyDispatch.handle_key("C-c")
+    KeyDispatch.handle_key("C-7")
+
+    assert eval!(~S|(nm--th-id (nm--thread-at "*notmuch*"))|) == ~s{"zz-thread-2"}
+    assert eval!(selected_row_overlay?()) == "#t"
+    assert eval!(selected_row_covers_both_lines?()) == "#t"
+
+    eval!(~S|(with-current-buffer "*notmuch*" (lambda () (set-mode! "notmuch-mode")))|)
+
+    assert eval!(~S|(nm--th-id (nm--thread-at "*notmuch*"))|) == ~s{"zz-thread-2"}
+    assert eval!(selected_row_overlay?()) == "#t"
+    assert eval!(selected_row_covers_both_lines?()) == "#t"
+  end
+
+  defp selected_row_overlay? do
+    ~S"""
+    (let ((p (buffer-point "*notmuch*")))
+      (pair?
+        (filter
+          (lambda (overlay)
+            (and (equal? (list-ref overlay 2) "select")
+                 (<= (car overlay) p)
+                 (< p (cadr overlay))))
+          (buffer-overlays "*notmuch*"))))
+    """
+  end
+
+  defp selected_row_covers_both_lines? do
+    ~S"""
+    (let* ((text (buffer-text "*notmuch*"))
+           (subject (string-index text "Reloaded selection"))
+           (author (string-index text "Bob")))
+      (pair?
+        (filter
+          (lambda (overlay)
+            (and (equal? (list-ref overlay 2) "select")
+                 (<= (car overlay) subject)
+                 (< subject (cadr overlay))
+                 (<= (car overlay) author)
+                 (< author (cadr overlay))))
+          (buffer-overlays "*notmuch*"))))
+    """
   end
 end

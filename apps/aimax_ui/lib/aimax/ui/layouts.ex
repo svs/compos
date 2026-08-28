@@ -221,6 +221,12 @@ defmodule Aimax.Ui.Layouts do
                   /* empty lines must keep their height even with .linenum hidden (no-nums, writing-mode) */
                   min-height: 1lh; }
           .window.active .line.hl-line { background: var(--hl-line-bg, #f5f1e6); }
+          /* A select overlay names complete logical rows. Paint each touched
+             display line across the window, including its line-number area. */
+          .window .line.selected-line,
+          .window.active .line.selected-line {
+            background: var(--select-bg, #e7e9f1);
+          }
           .linenum {
             flex: 0 0 30px; text-align: right;
             font-size: 11px; color: var(--linenum-fg, #b3ac9c);

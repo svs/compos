@@ -2393,11 +2393,13 @@ defmodule Aimax.Ui.EditorLive do
     .tweet .tw-media{width:100%;border-radius:8px;margin:2px 0 8px}
     .tw-date{color:#{dim};font-size:13px;text-decoration:none}
     ::highlight(region){background:color-mix(in srgb,#{accent} 32%,transparent)}
-    /* the caret is a painted bar, so it needs a width: at width 0 it sits in
-       the page, in the right place, in the right colour, painting nothing.
-       The negative margin keeps it from pushing the text along. */
-    .pt{display:inline-block;width:2px;height:1.05em;margin:0 -1px;vertical-align:-0.18em;
-        background:#{accent};animation:ptb 1.1s step-end infinite}
+    /* The caret is an inline box with a painted left border and no content,
+       so it is invisible to line breaking: an inline-block is an atomic
+       inline, and the browser may wrap at it, even inside a word, and then
+       measure rows the caret itself moved. The negative margin keeps the
+       border from pushing the text along. */
+    .pt{display:inline;border-left:2px solid #{accent};margin:0 -1px;
+        animation:ptb 1.1s step-end infinite}
     /* The window does not own the keyboard, so the caret stops blinking.
        It still draws: a reader who looks at the page from another window
        must still see where point stands. Emacs draws a hollow box here. */

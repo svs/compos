@@ -1034,6 +1034,52 @@ defmodule Aimax.Ui.Layouts do
           const PREVIEW_UTF8 = utf8;
           const CARET_RE = /<span class="pt"><\/span>/g;
 
+          // The caret at a soft wrap. Point is the first byte of the lower
+          // row, and the wrap map says so, because the map measures
+          // characters. The caret is an empty box, and Chrome draws an
+          // empty box at a wrap at the end of the row ABOVE. So
+          // beginning-of-line drew the caret at the end of the row before,
+          // and the next press could move nothing. The caret stays where
+          // it is in the document and is shifted to the box of the
+          // character after it; relative position moves nothing else.
+          function settleCaret(d) {
+            const pt = d.querySelector(".pt");
+            if (!pt) return;
+            pt.style.position = "";
+            pt.style.left = "";
+            pt.style.top = "";
+            // the first drawn character after the caret. The renderer cuts
+            // the run at the caret, so that character usually begins the
+            // next run, not the next text node.
+            const walker = d.createTreeWalker(d.body, NodeFilter.SHOW_TEXT);
+            walker.currentNode = pt;
+            let next = walker.nextNode();
+            while (next && !next.textContent.length) next = walker.nextNode();
+            if (!next) return;
+            // a caret before a space is at a row's end, never its start: a
+            // hanging space reports a box on the row below, and that box
+            // is not where the caret belongs
+            if (/\s/.test(next.textContent[0])) return;
+            const r = d.createRange();
+            r.setStart(next, 0);
+            r.setEnd(next, 1);
+            const cr = r.getClientRects()[0];
+            const pr = pt.getBoundingClientRect();
+            if (!cr || cr.top <= pr.top + Math.max(2, pr.height * 0.5)) return;
+            pt.style.position = "relative";
+            pt.style.left = (cr.left - pr.left) + "px";
+            pt.style.top = (cr.top - pr.top) + "px";
+          }
+
+          // take the caret out, leaving the text it split as one node
+          function removeCaret(d) {
+            const old = d.querySelector(".pt");
+            if (!old) return;
+            const host = old.parentNode;
+            old.remove();
+            if (host) host.normalize();
+          }
+
           function exactSpot(d, node, off) {
             const el = node.nodeType === 1 ? node : node.parentElement;
             const run = el && el.closest && el.closest("span.s[data-s]");
@@ -1252,6 +1298,7 @@ defmodule Aimax.Ui.Layouts do
                   html.replace(CARET_RE, "") === this.lastHtml.replace(CARET_RE, "");
 
                 if (caretOnly && this.placeCaret(d, this.el.dataset.pt)) {
+                  settleCaret(d);
                   this.lastDoc = encoded;
                   this.lastHtml = html;
                   return;
@@ -1259,6 +1306,7 @@ defmodule Aimax.Ui.Layouts do
 
                 const next = new DOMParser().parseFromString(html, "text/html");
                 d.documentElement.innerHTML = next.documentElement.innerHTML;
+                settleCaret(d);
                 this.lastDoc = encoded;
                 this.lastHtml = html;
               },
@@ -1269,6 +1317,9 @@ defmodule Aimax.Ui.Layouts do
               placeCaret(d, point) {
                 const at = parseInt(point, 10);
                 if (!Number.isFinite(at)) return false;
+
+                // the old caret first, so the run it split is one text node
+                removeCaret(d);
 
                 let target = null;
                 let within = 0;
@@ -1292,13 +1343,6 @@ defmodule Aimax.Ui.Layouts do
                   chars += 1;
                 }
                 if (bytes !== within) return false;
-
-                const old = d.querySelector(".pt");
-                if (old) {
-                  const host = old.parentNode;
-                  old.remove();
-                  if (host) host.normalize();
-                }
 
                 const caret = d.createElement("span");
                 caret.className = "pt";
@@ -2047,8 +2091,11 @@ defmodule Aimax.Ui.Layouts do
                   while (i < total) {
                     const rect = rectAt(i);
                     // collapsed whitespace draws no box: it belongs to the
-                    // row before it
-                    if (!rect) { i++; continue; }
+                    // row before it. A space hanging at a wrap, when it
+                    // begins a text node, reports a zero-width box on the
+                    // row BELOW; it is the same space, and it is not where
+                    // the reader sees that row begin.
+                    if (!rect || rect.width === 0) { i++; continue; }
                     const tol = Math.max(2, rect.height * 0.5);
                     if (top === null || rect.top > top + tol) starts.push(i);
                     top = rect.top;
@@ -2127,6 +2174,11 @@ defmodule Aimax.Ui.Layouts do
                   return rows;
                 };
                 this.sendWrapMaps = () => {
+                  // a paint can move a wrap under a caret that did not
+                  // move: settle it again before the rows are read
+                  document.querySelectorAll("iframe[data-rm='markdown']").forEach((f) => {
+                    try { if (f.contentDocument) settleCaret(f.contentDocument); } catch (_) {}
+                  });
                   const maps = {};
                   document.querySelectorAll(".window[data-win-id]").forEach((win) => {
                     // a preview window keeps its buffer element in the page

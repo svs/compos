@@ -117,7 +117,8 @@ defmodule Aimax.Core.Lane do
   @doc "The running job per worker pid: {pid, label, started_at_ms}."
   def jobs_table do
     case :ets.whereis(:aimax_lane_jobs) do
-      :undefined -> :ets.new(:aimax_lane_jobs, [:named_table, :public, :set])
+      :undefined ->
+        :ets.new(:aimax_lane_jobs, [:named_table, :public, :set, read_concurrency: true])
       _tid -> :aimax_lane_jobs
     end
   end

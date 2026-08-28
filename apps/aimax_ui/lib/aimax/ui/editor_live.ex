@@ -229,7 +229,21 @@ defmodule Aimax.Ui.EditorLive do
       Input.run(socket.assigns.frame, fn ->
         case params do
           %{"line" => line, "col" => col} when is_integer(line) and is_integer(col) ->
-            Aimax.Core.Session.eval("(begin (mouse-select-window! #{id}) (set-mark! #f))")
+            # A click and a visual-row move take this same path, and they
+            # differ only in what becomes of the mark. Clearing it here
+            # unconditionally made every move a click, so the visual-line
+            # handler could not extend a selection at all and had to refuse
+            # the key. Where the caret goes is geometry; whether the region
+            # grows is the editor's business, so it rides as a parameter.
+            #
+            # Extending starts a region at point when there is none — the
+            # same rule `preview-goto-src!` follows for the preview.
+            mark =
+              if params["extend"] == true,
+                do: "(unless (mark) (set-mark! (point)))",
+                else: "(set-mark! #f)"
+
+            Aimax.Core.Session.eval("(begin (mouse-select-window! #{id}) #{mark})")
             Aimax.Core.Editor.mouse_goto(id, line, col)
 
           _ ->
@@ -1577,10 +1591,16 @@ defmodule Aimax.Ui.EditorLive do
   defp ag_block([s, e, "prose" | _], text, _open) do
     md = safe_slice(text, s, e)
 
+    # same raise as `earmark_ast/1`: one bad block must not kill the
+    # transcript that holds it
     html =
-      case Earmark.as_html(md, compact_output: false) do
-        {:ok, html, _} -> html
-        {:error, html, _} -> html
+      try do
+        case Earmark.as_html(md, compact_output: false) do
+          {:ok, html, _} -> html
+          {:error, html, _} -> html
+        end
+      rescue
+        _ -> "<pre>" <> html_escape(md) <> "</pre>"
       end
 
     %{kind: :prose, html: wrap_tables(html)}
@@ -2258,23 +2278,54 @@ defmodule Aimax.Ui.EditorLive do
   defp earmark_body(text) do
     fence_labels = markdown_fence_labels(text)
 
-    text
-    |> markdown_preview_source()
-    # The preview shows the document the author typed. A newline the author
-    # put inside a paragraph is a line the reader must see, so a soft break
-    # draws as a line break. Markdown joins those lines into one paragraph,
-    # which reflowed the text and moved every line away from its source.
-    |> Earmark.as_ast(compact_output: false, breaks: true)
-    |> case do
-      {:ok, ast, _} -> ast
-      {:error, ast, _} -> ast
+    case earmark_ast(markdown_preview_source(text)) do
+      {:ok, ast} ->
+        ast
+        |> label_code_blocks(fence_labels)
+        |> tag_llm_responses()
+        |> embed_urls()
+        |> Earmark.Transform.transform(compact_output: false)
+        |> String.replace(@pt_sentinel, ~s(<span class="pt"></span>))
+        |> String.replace("\uE001", ~s(<span class="mk"></span>))
+
+      {:error, why} ->
+        unparsed_body(text, why)
     end
-    |> label_code_blocks(fence_labels)
-    |> tag_llm_responses()
-    |> embed_urls()
-    |> Earmark.Transform.transform(compact_output: false)
-    |> String.replace(@pt_sentinel, ~s(<span class="pt"></span>))
-    |> String.replace("\uE001", ~s(<span class="mk"></span>))
+  end
+
+  # Earmark raises on some documents instead of answering {:error, ast, _}.
+  # An inline `{...}` reads as an attribute list, and one the parser cannot
+  # make sense of is a FunctionClauseError deep inside it. The raise reaches
+  # the LiveView, which dies, remounts, draws the same buffer and dies again:
+  # one document takes the whole client down, and the page never comes back.
+  #
+  # A parser that cannot read a document must say so and draw the source.
+  # The preview shows the document the author typed. A newline the author put
+  # inside a paragraph is a line the reader must see, so a soft break draws as
+  # a line break. Markdown joins those lines into one paragraph, which
+  # reflowed the text and moved every line away from its source.
+  defp earmark_ast(src) do
+    case Earmark.as_ast(src, compact_output: false, breaks: true) do
+      {:ok, ast, _} -> {:ok, ast}
+      {:error, ast, _} -> {:ok, ast}
+    end
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
+  # The document as it stands, plus what stopped the renderer. The reader
+  # keeps their text and learns why it is not a page.
+  defp unparsed_body(text, why) do
+    ~s(<div class="preview-error"><strong>This page did not render.</strong> ) <>
+      html_escape(why) <>
+      ~s(</div><pre class="preview-raw">) <> html_escape(text) <> ~s(</pre>)
+  end
+
+  defp html_escape(text) do
+    text
+    |> String.replace("&", "&amp;")
+    |> String.replace("<", "&lt;")
+    |> String.replace(">", "&gt;")
   end
 
   # The page around a rendered body: the reader's typography and palette.

@@ -30,6 +30,9 @@ defmodule Aimax.Core.Application do
       {DynamicSupervisor, name: Aimax.Core.SchemeActorSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: Aimax.Core.SchemeTaskSupervisor, strategy: :one_for_one},
       Aimax.Core.SchemeReadLimiter,
+      # before Session: it owns the Scheme world's ETS tables so a Session
+      # crash cannot destroy them, and Session empties them during init
+      Aimax.Core.SchemeTables,
       # Scheme execution lanes: serial workers, one per group/agent/conn,
       # started lazily — must be up before Session so callbacks fired
       # during the stdlib load have somewhere to run
@@ -37,6 +40,9 @@ defmodule Aimax.Core.Application do
       {DynamicSupervisor, name: Aimax.Core.LaneSupervisor, strategy: :one_for_one},
       {Task.Supervisor, name: Aimax.Core.TaskSupervisor},
       Aimax.Core.Telemetry,
+      # before BufferStore and every buffer: a buffer publishes its row from
+      # init, so the table must already exist when the first one starts
+      Aimax.Core.BufferView,
       Aimax.Core.BufferStore,
       Aimax.Core.Reactor,
       Aimax.Core.Watch,

@@ -299,6 +299,7 @@
   ;; so every ordinary edit, save, undo, and future narrowing command keeps
   ;; its normal editor semantics.
   (buffer-set-local! buf 'preview-renderer "markdown")
+  (preview-set-engine! buf)
   (buffer-set-local! buf 'render-mode "markdown")
   (buffer-set-local! buf 'visual-line-mode #t)
   (face-remap-in! buf 'default

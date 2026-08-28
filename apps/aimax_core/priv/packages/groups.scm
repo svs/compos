@@ -2136,14 +2136,19 @@
   ;; C-SPC in the switcher and `buffer-select` are two views of the same
   ;; selection.  A command invoked from the switcher must not lose selections
   ;; made on ordinary buffers, and a repeated name must still be acted on once.
+  ;; With no selection at all, the command means the current buffer.
   (let* ((buf (current-buffer))
          (marked (if (equal? (buffer-local buf 'mode-name) "switch-mode")
                      (list-live-marked buf *list-mark-char*)
                      '()))
          (selected (filter (lambda (candidate)
                              (buffer-local candidate 'buffer-selected))
-                           (buffer-list-mru))))
-    (filter group-work-buffer? (dedupe-names (append marked selected)))))
+                           (buffer-list-mru)))
+         (chosen (filter group-work-buffer?
+                         (dedupe-names (append marked selected)))))
+    (cond ((pair? chosen) chosen)
+          ((group-work-buffer? buf) (list buf))
+          (else '()))))
 
 (define (group-selected-visible-work-buffers)
   (filter (lambda (buf) (buffer-local buf 'buffer-selected))
@@ -2265,7 +2270,7 @@
   (lambda ()
     (let ((buffers (group-command-work-buffers)))
       (if (null? buffers)
-          (message "No work buffers selected")
+          (message "No work buffer selected, and the current buffer is not one")
           (group-add-read-destination! buffers)))))
 
 (define (buffer-move-read-destination! buf)

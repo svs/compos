@@ -74,6 +74,7 @@ than another command to remember.
 #### I want this buffer to be available in another group too
 
 - I select one or more buffers before I run the command.
+- If I select nothing, the command acts on the current buffer.
 - The destination is added without removing their existing memberships.
 - A successful add clears the selections.
 - I remain in the current visible context.
@@ -490,7 +491,8 @@ a family automatically.
 ### Add a buffer to a group
 
 `buffer-add-to-group` makes selected buffers available in the destination. It
-keeps all existing memberships and does not enter the destination.
+keeps all existing memberships and does not enter the destination. With no
+selection, it acts on the current buffer.
 
 Running it twice is a successful no-op.
 

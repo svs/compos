@@ -249,6 +249,24 @@
                     "the buffer receives the destination"))
     (t--sw-done!)))
 
+(deftest 'add-without-a-selection-acts-on-the-current-buffer
+  "no selection means the current buffer, so a lone work buffer can join a group"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((destination (group-record-create! "zzsw-current-add")))
+      (switch-to-buffer! t--sw-second)
+      (run-command "buffer-add-to-group")
+      (check-true! (minibuffer-state) "the destination prompt opens")
+      (t--sw-type! "zzsw-current-add")
+      (t--sw-key! "confirm")
+      (check-true! (buffer-in-group? t--sw-second destination)
+                   "the current buffer joins")
+      (check-false! (buffer-in-group? t--sw-first destination)
+                    "other buffers stay out")
+      (check-equal! (current-buffer) t--sw-second
+                    "the command does not change windows"))
+    (t--sw-done!)))
+
 (deftest 'add-uses-every-selected-buffer-and-clears-the-selection
   "the command changes selected buffers only, then consumes their selection"
   (lambda ()

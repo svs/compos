@@ -21,7 +21,14 @@ defmodule Aimax.ChatResetTest do
 
   use ExUnit.Case
 
-  alias Aimax.Core.{Buffer, Session}
+  alias Aimax.Core.{Buffer, KeyDispatch, Session}
+
+  # The save prompt arrives prefilled with a suggested file name. To choose a
+  # different absolute path, a user types it over the prefill: the leading
+  # slash makes the "//" that normalize-file-input reads as "start again
+  # here", which is Emacs' rule.
+  defp type_over_prefill(path),
+    do: ("/" <> path) |> String.graphemes() |> Enum.each(&KeyDispatch.handle_key/1)
 
   defp eval!(src) do
     {:ok, printed} = Session.eval(src)
@@ -107,7 +114,7 @@ defmodule Aimax.ChatResetTest do
       (chat-turn-push! (current-buffer) "assistant" "the mail client")
       #t)})
     eval!(~s{(run-command "save-buffer")})
-    Enum.each(String.graphemes("#{path}"), &Aimax.Core.KeyDispatch.handle_key/1)
+    type_over_prefill(path)
     Aimax.Core.KeyDispatch.handle_key("RET")
 
     saved = File.read!(path)
@@ -133,7 +140,7 @@ defmodule Aimax.ChatResetTest do
       #t)})
 
     eval!(~s{(run-command "save-buffer")})
-    Enum.each(String.graphemes("#{path}"), &Aimax.Core.KeyDispatch.handle_key/1)
+    type_over_prefill(path)
     Aimax.Core.KeyDispatch.handle_key("RET")
 
     assert File.read!(path) =~ "save me properly"

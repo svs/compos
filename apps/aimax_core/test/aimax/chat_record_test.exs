@@ -17,6 +17,12 @@ defmodule Aimax.ChatRecordTest do
   defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
   defp type(str), do: str |> String.graphemes() |> press()
 
+  # The save prompt arrives prefilled with a suggested file name. To choose a
+  # different absolute path, a user types it over the prefill: the leading
+  # slash makes the "//" that normalize-file-input reads as "start again
+  # here", which is Emacs' rule.
+  defp type_over_prefill(path), do: type("/" <> path)
+
   defp focus(buf),
     do: {:ok, _} = Session.eval(~s[(begin (switch-to-buffer! "#{buf}") (end-of-buffer!))])
 
@@ -166,7 +172,7 @@ defmodule Aimax.ChatRecordTest do
 
     focus(buf)
     {:ok, _} = Session.eval(~s{(run-command "save-buffer")})
-    type(path)
+    type_over_prefill(path)
     press(["RET"])
 
     saved = File.read!(path)

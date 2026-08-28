@@ -33,6 +33,12 @@ defmodule Aimax.ChatFileTest do
   defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
   defp type(str), do: str |> String.graphemes() |> press()
 
+  # The save prompt arrives prefilled with a suggested file name. To choose a
+  # different absolute path, a user types it over the prefill: the leading
+  # slash makes the "//" that normalize-file-input reads as "start again
+  # here", which is Emacs' rule.
+  defp type_over_prefill(path), do: type("/" <> path)
+
   defp eval!(src) do
     {:ok, printed} = Session.eval(src)
     printed
@@ -89,7 +95,7 @@ defmodule Aimax.ChatFileTest do
       #t)])
 
     eval!(~s{(run-command "save-buffer")})
-    type(path)
+    type_over_prefill(path)
     press(["RET"])
 
     saved = File.read!(path)
@@ -218,7 +224,7 @@ defmodule Aimax.ChatFileTest do
       #t)])
 
     eval!(~s{(run-command "save-buffer")})
-    type(path)
+    type_over_prefill(path)
     press(["RET"])
     first = File.read!(path)
 

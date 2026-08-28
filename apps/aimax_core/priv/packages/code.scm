@@ -1153,11 +1153,17 @@
 
 ;;; --- code-agent-mode: the chat that writes code -------------------------------
 ;;; code-mode starts from a source buffer. code-agent-mode starts from the
-;;; CHAT: agent.scm reports every tool call to code-agent-note-tool!, and
-;;; the first call that edits code turns the mode on. The mode prompts the chat
-;;; to load code-editing once. It also moves the chat to the coding preset.
-;;; A connector change restarts the session. The switch waits until the turn
-;;; ends, so it does not kill work.
+;;; CHAT. Every chat wears it: chat-mode setup turns it on. The mode prompts
+;;; the chat to load code-editing once, and it adds the coding tool presets.
+;;;
+;;; The mode keeps the chat on the backend the chat already has. It changes
+;;; the connector only when code-agent-connector names one. That knob is
+;;; empty by default, so a chat stays on the current default connector.
+;;; A connector change restarts the session, so the switch waits until the
+;;; turn ends. It does not kill work.
+;;;
+;;; agent.scm reports every tool call to code-agent-note-tool!. The first
+;;; call that edits code turns the mode on for a chat that does not wear it.
 ;;;
 ;;; M-x code-agent-mode toggles it by hand. Knobs live in the 'code group.
 
@@ -1165,19 +1171,19 @@
 (effects! '(write))
 
 (defcustom 'code-agent-auto #t
-  "Turn on code-agent-mode when a chat's agent edits code. Set #f to keep every chat on its own connector."
+  "Turn on code-agent-mode when a chat's agent edits code. Every chat already wears the mode; this covers a chat that does not."
   'group 'code 'type 'boolean)
 
-(defcustom 'code-agent-connector "codex-app-server"
-  "Connector for a chat in code-agent-mode. Empty means the chat keeps its own connector."
+(defcustom 'code-agent-connector ""
+  "Connector for a chat in code-agent-mode. Empty, the default, keeps the chat on its own connector."
   'group 'code 'type 'string)
 
-(defcustom 'code-agent-model "gpt-5.6-sol"
-  "Model for a chat in code-agent-mode. Empty means the connector's default model."
+(defcustom 'code-agent-model ""
+  "Model for a chat in code-agent-mode. Empty means the connector's default model. Read only when code-agent-connector names a connector."
   'group 'code 'type 'string)
 
-(defcustom 'code-agent-effort "medium"
-  "Reasoning effort for a chat in code-agent-mode. Empty means the connector's default."
+(defcustom 'code-agent-effort ""
+  "Reasoning effort for a chat in code-agent-mode. Empty means the connector's default. Read only when code-agent-connector names a connector."
   'group 'code 'type 'string)
 
 ;;; Which tool calls mean "this agent edits code"?
@@ -1215,10 +1221,11 @@
                                 (code-agent--quoted-names input))))))))
 
 ;; A code-mode workspace already sets its own model, and a writing
-;; workspace edits prose. Neither chat moves to the coding preset.
+;; workspace edits prose. Neither chat takes the mode from a tool call.
+;; The mode does not need a connector of its own to be worth turning on:
+;; it carries the code-editing instruction and the coding tool presets.
 (define (code-agent--eligible? buf)
   (and code-agent-auto
-       (not (equal? code-agent-connector ""))
        (not (minor-mode-on? buf "code-agent-mode"))
        (not (code-mode--workspace? buf))
        (null? (filter (lambda (b) (minor-mode-on? b "writing-mode"))
@@ -1232,12 +1239,17 @@
        (or (equal? code-agent-effort "")
            (equal? (or (buffer-local buf 'agent-effort) "") code-agent-effort))))
 
+;; Does the mode name a backend of its own? Empty means no: the chat keeps
+;; the connector it already has, which is the current default.
+(define (code-agent--pins?)
+  (not (equal? code-agent-connector "")))
+
 ;; The switch itself. A live session goes through chat-switch! — the one
 ;; switch function. A chat with no live runtime only changes its identity
 ;; locals: the next send attaches on them, and a desktop restore must not
 ;; spawn a backend.
 (define (code-agent--switch-now! buf)
-  (unless (or (equal? code-agent-connector "") (code-agent--on-target? buf))
+  (unless (or (not (code-agent--pins?)) (code-agent--on-target? buf))
     (let ((slug (buffer-local buf 'agent-slug)))
       (if (and slug (not (equal? (agent-status slug) 'dead)))
           (chat-switch! buf code-agent-connector code-agent-model
@@ -1256,6 +1268,14 @@
                                   ""
                                   (string-append " · " code-agent-effort)))))))
 
+;; What tool presets does this chat already receive? chat-presets-of adds the
+;; intrinsic aimax bridge, so the raw local understates the surface. mcp.scm
+;; loads after this file, so ask only when the function is there.
+(define (code-agent--effective-presets buf)
+  (if (boundp (quote chat-presets-of))
+      (chat-presets-of buf)
+      (or (buffer-local buf 'chat-presets) '())))
+
 ;; Only the FIRST enable saves state and moves the chat. The setup re-runs
 ;; on desktop restore, and a re-run must not undo a model the user chose
 ;; while the mode was on.
@@ -1263,19 +1283,28 @@
   (when (boundp (quote prompt-part-set!))
     (prompt-part-set! buf "code-agent" (code-agent-system-note buf)))
   (unless (buffer-local buf 'code-agent-saved)
+    ;; 'pinned records whether this enable took the chat's LLM identity. The
+    ;; teardown restores that identity only when the enable took it, so a
+    ;; mode that changed nothing never restarts a session on the way out.
     (buffer-set-local! buf 'code-agent-saved
-      (list (list 'agent-connector (or (buffer-local buf 'agent-connector) #f))
+      (list (list 'pinned (code-agent--pins?))
+            (list 'agent-connector (or (buffer-local buf 'agent-connector) #f))
             (list 'agent-model (or (buffer-local buf 'agent-model) #f))
             (list 'agent-effort (or (buffer-local buf 'agent-effort) #f))
             (list 'chat-presets (or (buffer-local buf 'chat-presets) #f))))
-    ;; the chat gains the coding tool presets, like a code-mode buffer does
-    (let* ((cur (or (buffer-local buf 'chat-presets) '()))
-           (merged (append code-presets
-                           (filter (lambda (p) (not (member p code-presets)))
-                                   cur))))
-      (unless (equal? merged cur)
-        (buffer-set-local! buf 'chat-presets merged)
-        (buffer-set-local! buf 'chat-mcp-dirty #t)))
+    ;; the chat gains the coding tool presets, like a code-mode buffer does.
+    ;; Only a preset the chat does not already receive is a change: every
+    ;; chat receives aimax, and marking a fresh chat dirty for it makes the
+    ;; first send reconnect a session that already holds those servers.
+    (let ((missing (filter (lambda (p)
+                             (not (member p (code-agent--effective-presets buf))))
+                           code-presets)))
+      (when (pair? missing)
+        (buffer-set-local! buf 'chat-presets
+          (append missing (or (buffer-local buf 'chat-presets) '())))
+        ;; only a live session can hold a stale tool list
+        (when (buffer-local buf 'agent-slug)
+          (buffer-set-local! buf 'chat-mcp-dirty #t))))
     (if (buffer-local buf 'chat-turn-active)
         (buffer-set-local! buf 'code-agent-switch-pending #t)
         (code-agent--switch-now! buf))))
@@ -1312,18 +1341,20 @@
   (let ((conn (code-agent--saved buf 'agent-connector))
         (model (code-agent--saved buf 'agent-model))
         (effort (code-agent--saved buf 'agent-effort))
-        (presets (code-agent--saved buf 'chat-presets)))
+        (presets (code-agent--saved buf 'chat-presets))
+        (pinned (code-agent--saved buf 'pinned)))
     (buffer-set-local! buf 'code-agent-switch-pending #f)
     (buffer-set-local! buf 'code-agent-saved #f)
     (buffer-set-local! buf 'chat-presets presets)
-    (let ((slug (buffer-local buf 'agent-slug)))
-      (if (and slug (not (equal? (agent-status slug) 'dead)))
-          (chat-switch! buf (or conn *default-connector*) (or model "")
-                        (or effort "default"))
-          (begin
-            (buffer-set-local! buf 'agent-connector conn)
-            (buffer-set-local! buf 'agent-model model)
-            (buffer-set-local! buf 'agent-effort effort))))))
+    (when pinned
+      (let ((slug (buffer-local buf 'agent-slug)))
+        (if (and slug (not (equal? (agent-status slug) 'dead)))
+            (chat-switch! buf (or conn *default-connector*) (or model "")
+                          (or effort "default"))
+            (begin
+              (buffer-set-local! buf 'agent-connector conn)
+              (buffer-set-local! buf 'agent-model model)
+              (buffer-set-local! buf 'agent-effort effort)))))))
 
 (register-minor-mode!
   "code-agent-mode"

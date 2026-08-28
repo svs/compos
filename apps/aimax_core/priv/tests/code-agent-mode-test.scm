@@ -1,5 +1,5 @@
-;;; code-agent-mode-test.scm --- a chat moves to the coding preset when
-;;; its agent edits code.
+;;; code-agent-mode-test.scm --- every chat wears code-agent-mode, and the
+;;; mode moves the backend only when the customs name one.
 
 (domain! 'testing)
 (effects! '(write))
@@ -17,8 +17,14 @@
 (define (t--cam-edit! buf)
   (code-agent-note-tool! buf "eval-scheme" "" "(code-replace! \"a.ex\" 3 \"x\")"))
 
-;; Every test leaves the customs where it found them: they are global, and
-;; the next test reads the same ones.
+;; The customs are global, and the next test reads the same ones. Every test
+;; that pins a backend asks for it, and every test gives the shipped defaults
+;; back. A leaked connector would move every chat the suite opens after it.
+(define (t--cam-pin!)
+  (customize-set! 'code-agent-connector "codex-app-server")
+  (customize-set! 'code-agent-model "gpt-5.6-sol")
+  (customize-set! 'code-agent-effort "medium"))
+
 (define (t--cam-reset! &rest buffers)
   (for-each
     (lambda (b)
@@ -27,21 +33,36 @@
         (buffer-kill! b)))
     buffers)
   (customize-set! 'code-agent-auto #t)
-  (customize-set! 'code-agent-connector "codex-app-server")
-  (customize-set! 'code-agent-model "gpt-5.6-sol")
-  (customize-set! 'code-agent-effort "medium"))
+  (customize-set! 'code-agent-connector "")
+  (customize-set! 'code-agent-model "")
+  (customize-set! 'code-agent-effort ""))
 
-(deftest 'the-coding-preset-has-its-defaults
-  "codex-app-server, gpt-5.6-sol, medium"
+(deftest 'the-mode-names-no-backend-of-its-own
+  "the chat keeps the current default connector"
   (lambda ()
-    (check-equal! code-agent-connector "codex-app-server" "the connector")
-    (check-equal! code-agent-model "gpt-5.6-sol" "the model")
-    (check-equal! code-agent-effort "medium" "the effort")))
+    (check-equal! code-agent-connector "" "the connector")
+    (check-equal! code-agent-model "" "the model")
+    (check-equal! code-agent-effort "" "the effort")))
+
+(deftest 'the-mode-leaves-the-chats-backend-alone
+  "the mode is on, and the identity locals do not move"
+  (lambda ()
+    (let ((chat (t--cam-chat "keep")))
+      (with-current-buffer chat (lambda () (set-mode! "chat-mode")))
+      (check-true! (t--cam-on? chat) "the mode is on")
+      (check-false! (buffer-local chat 'agent-connector)
+                    "the chat names no connector, so it uses the default")
+      (check-false! (buffer-local chat 'agent-model) "and no model")
+      (t--cam-edit! chat)
+      (check-false! (buffer-local chat 'agent-connector)
+                    "a code edit does not move it either")
+      (t--cam-reset! chat))))
 
 (deftest 'a-structural-code-edit-pins-the-coding-preset
   "the mode comes on and the identity locals move"
   (lambda ()
     (let ((chat (t--cam-chat "detect")))
+      (t--cam-pin!)
       (t--cam-edit! chat)
       (check-true! (t--cam-on? chat) "the mode is on")
       ;; no live runtime here: only the identity locals change, and the
@@ -103,6 +124,7 @@
   "the mode goes on at once; the connector moves when the turn is over"
   (lambda ()
     (let ((chat (t--cam-chat "turn")))
+      (t--cam-pin!)
       (buffer-set-local! chat 'chat-turn-active #t)
       (t--cam-edit! chat)
       (check-true! (t--cam-on? chat) "the mode is on")
@@ -153,6 +175,7 @@
   "connector, model, effort and presets all come back"
   (lambda ()
     (let ((chat (t--cam-chat "restore")))
+      (t--cam-pin!)
       (buffer-set-local! chat 'agent-connector "api")
       (buffer-set-local! chat 'agent-model "claude-sonnet-5")
       (buffer-set-local! chat 'agent-effort "high")
@@ -173,6 +196,7 @@
   "a restart re-runs setup, and setup must not overwrite a live choice"
   (lambda ()
     (let ((chat (t--cam-chat "rerun")))
+      (t--cam-pin!)
       (enable-minor-mode! chat "code-agent-mode")
       (buffer-set-local! chat 'agent-model "gpt-5.6-terra")
       (restore-minor-modes! chat)
@@ -183,6 +207,7 @@
   "the mode is already on, so nothing moves again"
   (lambda ()
     (let ((chat (t--cam-chat "idem")))
+      (t--cam-pin!)
       (t--cam-edit! chat)
       (buffer-set-local! chat 'agent-model "gpt-5.6-terra")
       (t--cam-edit! chat)

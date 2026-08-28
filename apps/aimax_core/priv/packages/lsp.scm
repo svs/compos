@@ -571,8 +571,14 @@
   "Start a language server when a visited file's mode has one."
   'group 'lsp 'type 'boolean)
 
+;; elixir-ls enables dialyzer by default.
+;; Dialyzer holds the incremental PLT in the server heap.
+;; One server here reached a 38 GB footprint and filled the swap file.
+;; The connection answers workspace/configuration from this plist.
+;; elixir-ls reads a flat map for the section it requests.
 (lsp-register! "elixir-ls"
-  (list 'command "elixir-ls" 'language "elixir" 'modes (list "elixir-mode")))
+  (list 'command "elixir-ls" 'language "elixir" 'modes (list "elixir-mode")
+        'settings (list 'dialyzerEnabled #f)))
 
 (lsp-register! "typescript-language-server"
   (list 'command "typescript-language-server" 'args (list "--stdio")

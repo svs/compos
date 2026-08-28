@@ -63,3 +63,10 @@
       (check-false! (minor-mode-on? "zz-lsp-gate.rb" "lsp-mode") "and nothing attached"))
     (customize-set! 'lsp-auto-start #t)
     (buffer-kill! "zz-lsp-gate.rb")))
+
+(deftest 'elixir-ls-registers-with-dialyzer-off
+  "a dialyzer default of on grew one server here to a 38 GB footprint"
+  (lambda ()
+    (check-equal! (plist-get (t--lsp-spec "elixir-ls") 'settings)
+                  (list 'dialyzerEnabled #f)
+                  "elixir-ls turns dialyzer off")))

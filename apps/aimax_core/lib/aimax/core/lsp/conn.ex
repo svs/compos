@@ -236,6 +236,14 @@ defmodule Aimax.Core.LSP.Conn do
     {:stop, :normal, %{state | status: status, port: nil}}
   end
 
+  # set_local, mark_saved and save broadcast a phantom change so views
+  # repaint when no text moved. buffer.ex marks it `source: :locals`, and
+  # every reactor whitelist already drops it. The LSP client must drop it
+  # too: a full-text didChange makes the server publish diagnostics, the
+  # diagnostics write buffer-locals, and the next phantom arrives. That
+  # loop pinned one elixir-ls at 8 cores with the version stuck at 0.
+  def handle_info({:buffer_change, _name, %{source: :locals}}, state), do: {:noreply, state}
+
   def handle_info({:buffer_change, name, _change}, state) do
     if Map.has_key?(state.docs, name) and not MapSet.member?(state.dirty, name) do
       Process.send_after(self(), {:flush_doc, name}, @flush_ms)

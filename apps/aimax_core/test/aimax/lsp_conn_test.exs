@@ -23,17 +23,20 @@ defmodule Aimax.LSPConnTest do
     end
   end
 
-  defp spec(env \\ %{}) do
-    %{"command" => "elixir", "args" => [@fixture], "env" => env, "language" => "elixir"}
+  defp spec(env, extra) do
+    Map.merge(
+      %{"command" => "elixir", "args" => [@fixture], "env" => env, "language" => "elixir"},
+      extra
+    )
   end
 
-  defp start!(name, env \\ %{}) do
+  defp start!(name, env \\ %{}, extra \\ %{}) do
     on_exit(fn ->
       LSP.stop(name, @root)
       wait_until(fn -> LSP.whereis(name, @root) == nil end)
     end)
 
-    {:ok, _} = LSP.start(name, @root, spec(env))
+    {:ok, _} = LSP.start(name, @root, spec(env, extra))
     wait_until(fn -> connected_status(name) == :ready end)
     LSP.whereis(name, @root)
   end
@@ -67,6 +70,29 @@ defmodule Aimax.LSPConnTest do
     assert Enum.any?(texts, &(&1 =~ "workspace/configuration"))
     # the fake acknowledges our configuration answer
     wait_until(fn -> Enum.any?(log_texts(pid), &(&1 =~ "fake/configAnswered")) end)
+  end
+
+  test "the spec's settings are what the configuration answer carries" do
+    pid = start!("fake-cfg", %{}, %{"settings" => %{"dialyzerEnabled" => false}})
+
+    wait_until(fn -> Enum.any?(log_texts(pid), &(&1 =~ "fake/configAnswered")) end)
+
+    answer = Enum.find(log_texts(pid), &(&1 =~ "fake/configAnswered"))
+    assert answer =~ ~s("dialyzerEnabled":false)
+  end
+
+  test "a buffer-local write syncs nothing; a text edit still syncs" do
+    pid = start!("fake-phantom")
+    buf = doc!(pid, "alpha\n")
+
+    # the phantom change: set_local repaints views, it moves no text.
+    # Diagnostics write locals, so syncing this one loops the server.
+    Buffer.set_local(buf, :lsp_diagnostics, [])
+    Process.sleep(300)
+    refute Enum.any?(log_texts(pid), &(&1 =~ "fake/sync"))
+
+    Buffer.insert_at(buf, 0, "beta ")
+    wait_until(fn -> Enum.any?(log_texts(pid), &(&1 =~ "fake/sync")) end)
   end
 
   test "buffer_request round-trips and enriches locations with byte offsets" do

@@ -1498,14 +1498,38 @@
   (or (not (buffer-known? name))
       (equal? (chat-group-id name) id)))
 
+;; A chat is named for where it lives, never for what was said in it.
+;; Files in a project answer to the project. A group a person named
+;; answers to that name. Anything else answers to the short name of the
+;; buffer it accompanies. project.scm loads after this file, so ask for
+;; the project only when the function is there.
+(define (group-chat--project-name label)
+  (and (boundp (quote project-root-from))
+       (boundp (quote project-name))
+       (let ((root (project-root-from label)))
+         (and (string? root) (project-name root)))))
+
+(define (group-chat--base label)
+  (if (not (string-prefix? "/" label))
+      label
+      (or (group-chat--project-name label)
+          (let ((parts (group-chat--parts label)))
+            (if (null? parts) label (string-join (last-n parts 1) "/"))))))
+
+;; Two groups can want one name — two files in one project, two projects
+;; with one directory name. The wanted name goes to whoever is free, and
+;; the next chat takes the next path segment with it until it is free
+;; again. A name a person types is not derived, so a rename outranks all
+;; of this.
 (define (group-chat-name g)
   (let* ((id (group-resolve-id g))
-         (label (or (group-name (or id g)) g)))
-    (if (not (string-prefix? "/" label))
-        (string-append "*chat:" label "*")
+         (label (or (group-name (or id g)) g))
+         (base (string-append "*chat:" (group-chat--base label) "*")))
+    (if (or (not (string-prefix? "/" label)) (group-chat--free? base id))
+        base
         (let* ((parts (group-chat--parts label))
                (depth (length parts)))
-          (let loop ((n 1))
+          (let loop ((n 2))
             (let ((name (string-append "*chat:"
                                        (string-join (last-n parts n) "/")
                                        "*")))

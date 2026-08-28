@@ -7,6 +7,14 @@ defmodule Aimax.WorktreesTest do
 
   defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
 
+  # chat-name-test.scm owns the naming policy. These tests are about what a
+  # workspace chat inherits and does, so they ask for the name rather than
+  # spell one out: a collision widens a name, and that depends on which
+  # other chats exist when the test runs.
+  defp chat_name!(group) do
+    eval!(~s{(group-chat-name "#{group}")}) |> String.trim(~s("))
+  end
+
   defp eval!(code) do
     {:ok, out} = Session.eval(code)
     out
@@ -101,7 +109,7 @@ defmodule Aimax.WorktreesTest do
     eval!(~s{(worktree-create "#{root}" "defaults")})
     workspace = "#{root}-worktrees/defaults"
     path = "#{workspace}/a.txt"
-    chat = "*chat:#{workspace}*"
+    chat = chat_name!(workspace)
 
     eval!(~s{(visit "#{path}")})
 
@@ -230,7 +238,7 @@ defmodule Aimax.WorktreesTest do
       (set! agent-send-msg! old-send))
     """)
 
-    chat = "*chat:#{wt}*"
+    chat = chat_name!(wt)
     assert Editor.current_buffer() == chat
     assert eval!(~s{(buffer-local "#{chat}" 'test-rebase-slug)}) == ~s{"rebase-test-agent"}
 

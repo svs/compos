@@ -361,11 +361,13 @@
         (check-equal! (read-file path) "defmodule One do\nend\n" "the checkout is untouched")
         (check-equal! (read-file task) "defmodule TaskOne do\nend\n" "and the worktree has the edit")
 
-        ;; the chat belongs to the workspace, not to the project
+        ;; the chat belongs to the workspace, not to the primary checkout.
+        ;; A chat is named for where it lives, and a worktree is its own
+        ;; checkout, so the name is the worktree's, not the whole path.
         (switch-to-buffer! task)
         (run-command "chat")
         (let ((chat (current-buffer)))
-          (check-equal! chat (string-append "*chat:" workspace "*") "the chat is the workspace's")
+          (check-equal! chat (group-chat-name workspace) "the chat is the workspace's")
           (check-equal! (buffer-local chat 'workspace-root) workspace "and carries its root")
           (check-equal! (buffer-local chat 'workspace-id) "a1" "and its id")
           (check-equal! (plist-get (agent-worktree-opts chat "a1" '()) 'cwd) workspace

@@ -1643,8 +1643,12 @@ defmodule Aimax.EditorTest do
     {:ok, _} = Aimax.Core.Session.eval(~s{(dired-open "#{root}")})
     press(["n", "RET"])
 
+    # RET previews the file and keeps the focus in Dired. What this test is
+    # about is the visit behind the preview: the buffer it opens runs
+    # auto-mode, so the file arrives with its own mode and grammar.
     path = Path.join(root, "code.ex")
-    assert Editor.current_buffer() == path
+    assert Editor.current_buffer() == root
+    assert Buffer.exists?(path)
     assert Buffer.get_local(path, "mode-name") == "elixir-mode"
     assert Buffer.get_local(path, "ts-lang") == "elixir"
 
@@ -4022,6 +4026,12 @@ defmodule Aimax.EditorTest do
       second = "three-columns-second-#{System.unique_integer([:positive])}"
       third = "three-columns-third-#{System.unique_integer([:positive])}"
       for name <- [second, third], do: Aimax.Core.create_buffer(name)
+
+      # Creating a buffer does not make it recent: it joins the ring behind
+      # everything already selected, *scratch* included. Select each one and
+      # come back, so the ring holds what this test says it holds.
+      for name <- [second, third, buf],
+          do: Aimax.Core.Session.eval(~s{(switch-to-buffer! "#{name}")})
 
       run("window-layout-columns")
 

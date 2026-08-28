@@ -137,6 +137,12 @@ defmodule Aimax.Scheme do
   """
   def eval_string(%__MODULE__{} = interp, src) do
     eval_forms(interp, Reader.read_all(src))
+  rescue
+    # eval_forms rescues what evaluation raises, but the read runs before
+    # it. Unbalanced text is the ordinary way a caller gets this wrong -
+    # a half-typed form in the minibuffer, a truncated file - and it must
+    # answer like every other error, not raise through the caller.
+    e in Reader.Error -> {:error, Exception.message(e)}
   end
 
   @doc "Evaluate already parsed top-level forms."

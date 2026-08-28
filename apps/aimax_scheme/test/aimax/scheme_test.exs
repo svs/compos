@@ -65,15 +65,10 @@ defmodule Aimax.SchemeTest do
   end
 
   test "a hex escape without its terminator is an error, not a silent literal" do
-    # Reader errors raise rather than returning {:error, _} — see the
-    # "errors are returned, not raised" test, which fails on the same edge.
-    assert_raise Aimax.Scheme.Reader.Error, fn ->
-      Scheme.eval_string(Scheme.new(), ~S|"\x41"|)
-    end
-
-    assert_raise Aimax.Scheme.Reader.Error, fn ->
-      Scheme.eval_string(Scheme.new(), ~S|"\xzz;"|)
-    end
+    # The reader raises; eval_string answers with the message, like every
+    # other error a caller can hit.
+    assert {:error, _} = Scheme.eval_string(Scheme.new(), ~S|"\x41"|)
+    assert {:error, _} = Scheme.eval_string(Scheme.new(), ~S|"\xzz;"|)
   end
 
   test "byte accessors read and build a binary protocol message" do

@@ -169,7 +169,7 @@ defmodule Aimax.DesktopRestoreTest do
   # runs — a probe mode makes the order observable.
   test "locals go down before the mode setup runs" do
     eval!("""
-    (define-mode "probe-mode"
+    (define-mode "zz-probe-mode"
       (lambda ()
         (buffer-set-local! (current-buffer) 'seen
           (or (buffer-local (current-buffer) 'probe) "MISSING"))))
@@ -180,7 +180,7 @@ defmodule Aimax.DesktopRestoreTest do
 
     eval!("""
     (begin (switch-to-buffer! "#{name}")
-           (set-mode! "probe-mode")
+           (set-mode! "zz-probe-mode")
            (buffer-set-local! (current-buffer) 'probe "marker"))
     """)
 

@@ -2639,7 +2639,7 @@ defmodule Aimax.EditorTest do
     # C-c q in a grouped buffer routes to the group chat, focus stays put
     point = Buffer.point(notes)
     press(["C-c", "q"])
-    assert Editor.snapshot().minibuffer.prompt == "Ask proj: "
+    assert Editor.snapshot().minibuffer.prompt == "Ask #{group}: "
     type("thoughts?")
     press(["RET"])
 

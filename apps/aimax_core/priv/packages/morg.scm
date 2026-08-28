@@ -377,6 +377,35 @@
             (morg-set-folds! buf '())
             (message "SHOW ALL"))))))
 
+;;; A folded line stands for more source than its visible text. When the
+;;; complete visible line is selected, copy and cut must use that source range.
+(define (morg-folded-entry-end scan buf anchor)
+  (let ((e (morg-entry-at scan anchor)))
+    (cond
+      ((and e (= (car e) anchor) (equal? (morg-kind e) 'heading))
+       (markdown--section-end scan buf e))
+      ((and e (= (car e) anchor) (equal? (morg-kind e) 'open))
+       (min (buffer-size buf) (+ (morg-block-close-end scan buf anchor) 1)))
+      (else #f))))
+
+(define (morg-lift-folded-region buf start end)
+  (let ((scan (morg-scan buf)))
+    (let loop ((folds (morg-folds buf)) (lifted-end end))
+      (if (null? folds)
+          (list start lifted-end)
+          (let* ((anchor (car folds))
+                 (entry (morg-entry-at scan anchor))
+                 (line-end (and entry
+                                 (+ anchor (string-byte-length (cadr entry)))))
+                 (block-end (morg-folded-entry-end scan buf anchor)))
+            (loop (cdr folds)
+                  (if (and line-end block-end
+                           (<= start anchor) (>= lifted-end line-end))
+                      (max lifted-end block-end)
+                      lifted-end)))))))
+
+(register-region-lifter! "morg-mode" morg-lift-folded-region)
+
 ;;; --- TODO --------------------------------------------------------------------
 
 ;; Replace one whole line as one undo step. Keep point at its byte column

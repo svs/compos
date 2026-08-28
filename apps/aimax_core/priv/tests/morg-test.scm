@@ -176,6 +176,104 @@
     (check-equal! (buffer-hidden t--morg-buf) '((3 23)) "and the setup rebuilt them")
     (t--morg-done!)))
 
+(deftest 'copying-a-selected-folded-heading-lifts-the-whole-subtree
+  "the visible heading represents its hidden body and child"
+  (lambda ()
+    (t--morg! t--morg-fixture 0)
+    (t--morg-run! "morg-cycle")
+    (with-current-buffer t--morg-buf
+      (lambda ()
+        (set-mark! 0)
+        (goto-char! 3)))
+
+    (t--morg-run! "copy-region-as-kill")
+    (check-equal! (kill-top) "# a\nbody\n## child\ncbody\n"
+                  "the hidden subtree is copied")
+    (check-equal! (buffer-text t--morg-buf) t--morg-fixture
+                  "copy does not edit the buffer")
+    (t--morg-done!)))
+
+(deftest 'copying-and-pasting-a-folded-heading-reproduces-the-whole-subtree
+  "the hidden body and child survive the complete copy-paste path"
+  (lambda ()
+    (t--morg! t--morg-fixture 0)
+    (t--morg-run! "morg-cycle")
+    (with-current-buffer t--morg-buf
+      (lambda ()
+        (set-mark! 0)
+        (goto-char! 3)))
+
+    (t--morg-run! "copy-region-as-kill")
+    (with-current-buffer t--morg-buf
+      (lambda () (end-of-buffer!)))
+    (t--morg-run! "yank")
+
+    (check-equal! (buffer-text t--morg-buf)
+                  (string-append t--morg-fixture
+                                 "# a\nbody\n## child\ncbody\n")
+                  "paste reproduces the complete folded subtree")
+    (t--morg-done!)))
+
+(deftest 'cutting-a-selected-folded-heading-lifts-the-whole-subtree
+  "one cut removes the heading, body, and child"
+  (lambda ()
+    (t--morg! t--morg-fixture 0)
+    (t--morg-run! "morg-cycle")
+    (with-current-buffer t--morg-buf
+      (lambda ()
+        (set-mark! 0)
+        (goto-char! 3)))
+
+    (t--morg-run! "kill-region")
+    (check-equal! (kill-top) "# a\nbody\n## child\ncbody\n"
+                  "the hidden subtree is on the kill ring")
+    (check-equal! (buffer-text t--morg-buf) "# b\ntail\n"
+                  "the complete subtree is gone")
+    (check-equal! (buffer-hidden t--morg-buf) '() "its stale fold is gone")
+    (t--morg-done!)))
+
+(deftest 'copying-part-of-a-folded-line-keeps-the-literal-region
+  "selecting words in a folded title must not copy its body"
+  (lambda ()
+    (t--morg! t--morg-fixture 0)
+    (t--morg-run! "morg-cycle")
+    (with-current-buffer t--morg-buf
+      (lambda ()
+        (set-mark! 2)
+        (goto-char! 3)))
+
+    (t--morg-run! "copy-region-as-kill")
+    (check-equal! (kill-top) "a" "only the selected title text is copied")
+    (t--morg-done!)))
+
+(deftest 'copying-a-selected-folded-fence-lifts-the-whole-block
+  "a folded code opener represents the body and closing fence"
+  (lambda ()
+    (t--morg! "```elixir\n1 + 1\n```\n# next\n" 0)
+    (t--morg-run! "morg-cycle")
+    (with-current-buffer t--morg-buf
+      (lambda ()
+        (set-mark! 0)
+        (goto-char! 9)))
+
+    (t--morg-run! "copy-region-as-kill")
+    (check-equal! (kill-top) "```elixir\n1 + 1\n```\n"
+                  "the complete fenced block is copied")
+    (t--morg-done!)))
+
+(deftest 'system-copy-lifts-a-selected-folded-heading
+  "the OS clipboard path uses the same structural region"
+  (lambda ()
+    (t--morg! t--morg-fixture 0)
+    (t--morg-run! "morg-cycle")
+    (with-current-buffer t--morg-buf
+      (lambda ()
+        (set-mark! 0)
+        (goto-char! 3)
+        (check-equal! (clipboard-copy) "# a\nbody\n## child\ncbody\n"
+                      "system copy receives the hidden subtree")))
+    (t--morg-done!)))
+
 ;;; --- TODO state ---------------------------------------------------------------
 
 (deftest 'morg-todo-cycles-todo-done-and-no-state

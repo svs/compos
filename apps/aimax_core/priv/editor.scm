@@ -2953,6 +2953,25 @@
         #t)
       #f))
 
+;; A mode may let one visible region represent a larger source range. Keep
+;; that policy here so keyboard copy, keyboard cut, and system copy agree.
+(define *region-lifters* '())
+
+(define (register-region-lifter! mode fn)
+  (set! *region-lifters*
+    (cons (list mode fn)
+          (filter (lambda (entry) (not (equal? (car entry) mode)))
+                  *region-lifters*))))
+
+(define (region-action-bounds)
+  (let* ((buf (current-buffer))
+         (start (region-beginning))
+         (end (region-end))
+         (hit (assoc (buffer-local buf 'mode-name) *region-lifters*)))
+    (if (and hit (procedure? (cadr hit)))
+        ((cadr hit) buf start end)
+        (list start end))))
+
 (define-command "forward-word" "Move point forward one word" (lambda () (forward-word!)))
 (define-command "backward-word" "Move point backward one word"
   (lambda () (backward-word!)))
@@ -3155,12 +3174,14 @@
 
 (define-command "kill-region" "Kill the text between point and mark"
   (lambda ()
-    (unless (kill-region-1 (region-beginning) (region-end))
-      (message "The region is empty"))))
+    (let ((bounds (region-action-bounds)))
+      (unless (kill-region-1 (car bounds) (cadr bounds))
+        (message "The region is empty")))))
 
 (define-command "copy-region-as-kill" "Save the region as if killed, but don't kill it"
   (lambda ()
-    (let ((text (region-text)))
+    (let* ((bounds (region-action-bounds))
+           (text (buffer-substring (car bounds) (cadr bounds))))
       (if (equal? text "")
           (message "The region is empty")
           (begin
@@ -8203,7 +8224,8 @@
 ;; exists — pushed to the kill ring, Emacs interprogram-cut — else the
 ;; newest kill
 (define (clipboard-copy)
-  (let ((text (region-text)))
+  (let* ((bounds (region-action-bounds))
+         (text (buffer-substring (car bounds) (cadr bounds))))
     (if (equal? text "")
         (kill-top)
         (begin (kill-push! text) text))))

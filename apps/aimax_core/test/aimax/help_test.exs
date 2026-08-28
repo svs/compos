@@ -41,7 +41,7 @@ defmodule Aimax.HelpTest do
     assert text =~ "# switch-mode"
     assert text =~ "The buffer switcher"
     assert text =~ "| keys | command | what it does |"
-    assert text =~ "| `RET` | [`switch-visit`](aimax:def/switch-visit) |"
+    assert text =~ "| `RET` | [`switch-visit`](aimax:cmd/switch-visit) |"
     assert text =~ "Visit the selected row"
 
     # and it opens as a page, not as a buffer to edit
@@ -76,8 +76,8 @@ defmodule Aimax.HelpTest do
     # both tables carry rows. Naming a binding here would send this red
     # for a rebinding, which is a preference and not a bug in the help.
     [this, every] = String.split(text, "## Everywhere", parts: 2)
-    assert this =~ "aimax:def/", "the local table listed no command"
-    assert every =~ "aimax:def/", "the global table listed no command"
+    assert this =~ "aimax:cmd/", "the local table listed no command"
+    assert every =~ "aimax:cmd/", "the global table listed no command"
 
     [local, global] = [
       :binary.match(text, "## This buffer"),
@@ -95,7 +95,7 @@ defmodule Aimax.HelpTest do
 
     text = Buffer.text("*Help*")
     assert text =~ "# `C-x C-f`"
-    assert text =~ "**[`find-file`](aimax:def/find-file)** — Visit a file"
+    assert text =~ "**[`find-file`](aimax:cmd/find-file)** — Visit a file"
     assert text =~ "global, in every buffer"
 
     # the key described is a key not pressed: find-file never prompted
@@ -136,11 +136,13 @@ defmodule Aimax.HelpTest do
     press(["C-h", "k"])
     press(["C-x", "C-f"])
 
-    # the page draws the name as a link the client can click
-    assert Buffer.text("*Help*") =~ "**[`find-file`](aimax:def/find-file)**"
+    # the page draws the name as a link the client can click. The page
+    # describes a command, so the link asks for the command definition:
+    # find-file is a function as well, and both answer to the name.
+    assert Buffer.text("*Help*") =~ "**[`find-file`](aimax:cmd/find-file)**"
 
     # following it lands in the file that defines find-file, at the form
-    eval!(~s{(preview-follow-link! (active-window) "aimax:def/find-file")})
+    eval!(~s{(preview-follow-link! (active-window) "aimax:cmd/find-file")})
 
     assert eval!(~s{(current-buffer)}) =~ "editor.scm"
     line = eval!(~s{(buffer-substring (point) (+ (point) 30))})
@@ -217,7 +219,7 @@ defmodule Aimax.HelpTest do
     press("M-?")
     text = Buffer.text("*Help*")
 
-    assert text =~ "## [`split-window-right`](aimax:def/split-window-right) — a command"
+    assert text =~ "## [`split-window-right`](aimax:cmd/split-window-right) — a command"
     assert text =~ "bound to `C-x 3`"
     # and the page still says where the reader is
     assert text =~ "`*zz-help*` in `fundamental-mode`"
@@ -266,7 +268,7 @@ defmodule Aimax.HelpTest do
 
     assert text =~ "# Here"
     assert text =~ "## switch-mode"
-    assert text =~ "| `RET` | [`switch-visit`](aimax:def/switch-visit) |"
+    assert text =~ "| `RET` | [`switch-visit`](aimax:cmd/switch-visit) |"
     assert {:ok, ~s{"help-mode"}} = Session.eval(~s{(buffer-local "*Help*" 'mode-name)})
   end
 

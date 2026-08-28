@@ -95,6 +95,21 @@
                    (catalog)))
       '() "every entry says declared or unknown")))
 
+(deftest 'lexical-apropos-answers-from-the-catalog-alone
+  "the semantic pass spends money, so a caller can ask for the catalog only"
+  (lambda ()
+    (let ((lexical (apropos "window" 'lexical #t)))
+      (check-true! (pair? lexical) "the literal catalog still answers")
+      (check-equal!
+        (filter (lambda (h) (equal? (plist-get h 'note) "semantic match"))
+                lexical)
+        '() "and no hit came from the embedding service")
+      ;; the flag is not a catalog field: it must not filter the hits away
+      (check-true!
+        (pair? (filter (lambda (h) (equal? (plist-get h 'kind) "function"))
+                       lexical))
+        "the functions are still there"))))
+
 (deftest 'unstamped-bundled-declarations-do-not-multiply
   "an unstamped entry asks before it acts, which is correct and is also a debt"
   (lambda ()

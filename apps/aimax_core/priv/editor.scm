@@ -7752,13 +7752,32 @@
                                   (if (= (length inputs) 1) " input" " inputs"))))))
       (else #f))))
 
+;; A command the palette can draw: name, key and doc, in apropos hit shape.
+(define (command-palette--command-hit name)
+  (list 'kind "command" 'name name 'doc (command-doc name)
+        'key (let ((k (key-for-command name))) (if (equal? k "") #f k))))
+
+;; The palette draws commands and recipes, so it searches those two alone.
+;; The whole catalog costs an index rebuild after every package load, and
+;; the semantic pass costs a network call. The palette searches again on
+;; every keystroke burst and can pay neither.
+(define (command-palette--search query)
+  (let ((words (apropos-query-words query)))
+    (append
+      (if (boundp (quote recipe-search)) (recipe-search query) '())
+      (map command-palette--command-hit
+           (filter (lambda (name)
+                     (apropos-text-hit?
+                       (string-append name " " (command-doc name)) words))
+                   (command-names))))))
+
 (define (command-palette-candidates query)
   (if (equal? (string-trim query) "")
       ;; The resting palette is familiar and cheap: the same MRU command
-      ;; table as M-x. Apropos takes over as soon as the user states intent.
+      ;; table as M-x. The search takes over as soon as the user states intent.
       (annotate 'command (history-order 'M-x (command-names)))
       (filter (lambda (candidate) candidate)
-              (map command-palette--candidate (apropos query)))))
+              (map command-palette--candidate (command-palette--search query)))))
 
 (define *command-palette-debounce-ms* 80)
 

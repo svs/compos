@@ -25,17 +25,33 @@
 
 ;;; --- definition --------------------------------------------------------------
 
-(define (scheme-ide--def-patterns s)
+;; One name can be a function and a command at once: find-file is both.
+;; KIND says which definition the caller asked for, so a help page about a
+;; command reaches the command. Every other pattern still follows, so a
+;; link whose kind no longer holds finds the name anyway.
+(define (scheme-ide--command-patterns s)
+  (list (string-append "(define-command \"" s "\"")))
+
+(define (scheme-ide--mode-patterns s)
+  (list (string-append "(define-mode \"" s "\"")
+        (string-append "(define-list-mode! \"" s "\"")))
+
+(define (scheme-ide--value-patterns s)
   (list (string-append "(define (" s " ")
         (string-append "(define (" s ")")
         (string-append "(define (" s "\n")
         (string-append "(define " s " ")
         (string-append "(define " s "\n")
-        (string-append "(define-command \"" s "\"")
-        (string-append "(define-mode \"" s "\"")
-        (string-append "(define-list-mode! \"" s "\"")
         (string-append "(defcustom '" s " ")
         (string-append "(defgroup '" s " ")))
+
+(define (scheme-ide--def-patterns s &optional kind)
+  (let ((command (scheme-ide--command-patterns s))
+        (mode (scheme-ide--mode-patterns s))
+        (value (scheme-ide--value-patterns s)))
+    (cond ((equal? kind 'command) (append command value mode))
+          ((equal? kind 'mode) (append mode value command))
+          (else (append value command mode)))))
 
 (define (scheme-ide--scm? name) (string-suffix? ".scm" name))
 
@@ -64,8 +80,8 @@
           (else (loop (cdr ps))))))
 
 ;; -> (SOURCE-KIND NAME BYTE-POS) or #f
-(define (scheme-ide--find-def sym)
-  (let ((pats (scheme-ide--def-patterns sym)))
+(define (scheme-ide--find-def sym &optional kind)
+  (let ((pats (scheme-ide--def-patterns sym kind)))
     (let loop ((ss (scheme-ide--sources)))
       (if (null? ss)
           #f

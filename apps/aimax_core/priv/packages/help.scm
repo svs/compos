@@ -47,11 +47,14 @@
 ;; clicks it and lands on the definition. The button is an ordinary
 ;; markdown link with an editor href — the client never navigates, it
 ;; hands the href to preview-follow-link!, which calls the handler below.
-(define (help--link name)
+;; VERB says what the page describes. One name can be a function and a
+;; command at once, and the reader wants the definition this page is about.
+(define (help--link name &optional verb)
   ;; the name rides in the href, and a name can hold a parenthesis
   ;; (paredit--key-( is a command): percent-encode it, or the link ends
   ;; in the middle of the name and the page shows its own markdown
-  (string-append "[" (help--kbd name) "](aimax:def/" (url-encode name) ")"))
+  (string-append "[" (help--kbd name) "](aimax:" (or verb "def") "/"
+                 (url-encode name) ")"))
 
 ;; TITLE names the page in the modeline; MARKDOWN is the page.
 (define (help-doc! title markdown)
@@ -130,7 +133,7 @@
 
 (define (help--key-rows keys)
   (map (lambda (g)
-         (string-append "| " (help--key-cell (cdr g)) " | " (help--link (car g))
+         (string-append "| " (help--key-cell (cdr g)) " | " (help--link (car g) "cmd")
                         " | " (help--cell (command-doc (car g))) " |"))
        (help--by-command keys)))
 
@@ -436,7 +439,7 @@
 (define (help--command-section name)
   (let ((k (key-for-command name)))
     (string-append
-      "## " (help--link name) " — a command\n\n"
+      "## " (help--link name "cmd") " — a command\n\n"
       (help--cell (command-doc name)) "\n\n"
       (help--meta (list (string-append "`M-x " name "`")
                         (if (equal? k "") "" (string-append "bound to " (help--kbd k))))))))
@@ -448,14 +451,26 @@
     (help--cell (nth 1 e)) "\n\n"))
 
 (define (help--mode-section name doc)
-  (string-append "## " (help--link name) " — a mode\n\n" doc "\n\n"
+  (string-append "## " (help--link name "mode") " — a mode\n\n" doc "\n\n"
                  "`M-x " name "` turns it on in this buffer.\n\n"))
 
 ;; A word that matches nothing is prose, not a name — most words in a diff
 ;; or a mail are. The page says nothing about it and goes straight to the
 ;; buffer, instead of opening with a heading that reports a dead end.
+;; A few hits from each section, in the order the sections rank. Ranking
+;; puts every recipe ahead of the functions, so a flat cap fills the page
+;; with recipes and never names a function. The page promises the closest
+;; matches, which means a spread.
+(define (help--apropos-spread hits per-section)
+  (reverse
+    (fold (lambda (out g)
+            (fold (lambda (acc h) (cons h acc))
+                  out
+                  (help--take (cdr g) per-section)))
+          '() (help--apropos-groups hits))))
+
 (define (help--apropos-section name)
-  (let ((hits (help--take (apropos name) 8)))
+  (let ((hits (help--apropos-spread (apropos name) 3)))
     (if (null? hits)
         ""
         (string-append "## `" name "` — the closest matches\n\n"
@@ -545,7 +560,7 @@
       (cond
         ((string? cmd)
          (string-append
-           "**" (help--link cmd) "** — " (help--cell (command-doc cmd)) "\n\n"
+           "**" (help--link cmd "cmd") "** — " (help--cell (command-doc cmd)) "\n\n"
            (help--meta (list (string-append "`M-x " cmd "`")
                              (help--key-source buf keys)
                              where))))
@@ -583,8 +598,9 @@
 ;;; markdown link, the client hands the href back, and scheme-ide finds the
 ;;; defining form. `M-.` asks the same question about the name at point.
 
-(define (help--goto-source name)
-  (let ((hit (and (boundp 'scheme-ide--find-def) (scheme-ide--find-def name))))
+(define (help--goto-source name &optional kind)
+  (let ((hit (and (boundp 'scheme-ide--find-def)
+                  (scheme-ide--find-def name kind))))
     (cond
       (hit
        (when (boundp 'lsp--push-marker!) (lsp--push-marker!))
@@ -601,6 +617,8 @@
       (else (message (string-append "No definition of " name))))))
 
 (on-preview-link! "def" help--goto-source)
+(on-preview-link! "cmd" (lambda (name) (help--goto-source name 'command)))
+(on-preview-link! "mode" (lambda (name) (help--goto-source name 'mode)))
 
 (define-command "help-goto-source"
   "Open the source of the name at point, in the file that defines it"

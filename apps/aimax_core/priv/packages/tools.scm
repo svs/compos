@@ -622,18 +622,34 @@
   (let ((rows (apropos--rows-cached)))
     (apropos--search query filters (apropos--index-cached) rows)))
 
-(define (apropos--search query filters index rows)
-  (let* ((words (apropos--words query))
+;; 'lexical #t asks for the catalog alone. The semantic pass embeds the
+;; query through an external service: it spends money and waits for the
+;; network on every call. A surface that searches while the user types
+;; must ask for the literal catalog. Remove the flag before the filters
+;; reach the match test, which reads the catalog fields only.
+(define (apropos--without-lexical filters)
+  (let loop ((in filters) (out '()))
+    (cond ((or (null? in) (null? (cdr in))) (reverse out))
+          ((equal? (car in) 'lexical) (loop (cdr (cdr in)) out))
+          (else (loop (cdr (cdr in))
+                      (cons (nth 1 in) (cons (car in) out)))))))
+
+(define (apropos--search query filters0 index rows)
+  (let* ((lexical? (plist-get filters0 'lexical))
+         (filters (apropos--without-lexical filters0))
+         (words (apropos--words query))
          (recipes (if (boundp (quote recipe-search)) (recipe-search query) '()))
          (literal-rows (filter (lambda (row) (apropos--row-hit? row words)) rows))
          (literal-hits (append recipes (map (lambda (row) (car (cdr row))) literal-rows)))
          (suggestions (if (pair? literal-hits) '()
                           (apropos--name-suggestions query words index)))
          (semantic-hits
-           (filter (lambda (hit)
-                     (and (not (apropos--has-hit? literal-hits hit))
-                          (not (apropos--has-hit? suggestions hit))))
-                   (apropos--semantic-hits query rows filters)))
+           (if lexical?
+               '()
+               (filter (lambda (hit)
+                         (and (not (apropos--has-hit? literal-hits hit))
+                              (not (apropos--has-hit? suggestions hit))))
+                       (apropos--semantic-hits query rows filters))))
          (hits (append literal-hits suggestions semantic-hits))
          (filtered (filter (lambda (h) (apropos--filter-match? h filters)) hits)))
     (if (or (pair? filtered) (null? words) (pair? filters))
@@ -653,8 +669,21 @@
 
 (category! 'discovery)
 (public! 'apropos
-  "(apropos QUERY &rest FILTERS) — hybrid literal/semantic catalog search; accepts kind/package/namespace/domain/effect filters. The public call shape is unchanged.")
+  "(apropos QUERY &rest FILTERS) — hybrid literal/semantic catalog search; accepts kind/package/namespace/domain/effect filters, and 'lexical #t for the catalog alone (no embedding call). The public call shape is unchanged.")
 (catalog-meta! 'function "apropos" 'domain 'discovery 'effects '(read external spend))
+
+;; The word test on its own. A surface that searches one narrow source -
+;; the command palette searches commands and recipes - matches the words
+;; the same way apropos does, without building the whole catalog index.
+(effects! '(pure))
+(public! 'apropos-query-words
+  "(apropos-query-words QUERY) -> the words a hit must all contain")
+(public! 'apropos-text-hit?
+  "(apropos-text-hit? TEXT WORDS) -> #t when TEXT contains every word")
+
+(define (apropos-query-words query) (apropos--words query))
+(define (apropos-text-hit? text words) (apropos--hit? text words))
+(effects! '(read external spend))
 (public! 'apropos-rebuild-embeddings!
   "(apropos-rebuild-embeddings!) — clear and rebuild the OpenAI embedding cache for the current catalog")
 (catalog-meta! 'function "apropos-rebuild-embeddings!"

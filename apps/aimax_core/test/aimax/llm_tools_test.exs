@@ -65,7 +65,10 @@ defmodule Aimax.LLMToolsTest do
         )
 
       assert count == "10"
-      assert eval!(~s{(nth 3 (assoc "apropos" (llm-tool-specs)))}) == "(read)"
+      # apropos reads the catalog, and its semantic pass embeds the query
+      # through an external service, so the stamp names external and spend.
+      # agent-permissions.scm allows the tool anyway: discovery must not ask.
+      assert eval!(~s{(nth 3 (assoc "apropos" (llm-tool-specs)))}) == "(read external spend)"
     end
 
     test "eval-scheme errors suggest the real name with its signature" do
@@ -123,7 +126,7 @@ defmodule Aimax.LLMToolsTest do
       assert out =~ "A test entry."
 
       # the system skill warns the model off elisp and teaches the split
-      assert eval!("*llm-system*") =~ "NOT Emacs Lisp"
+      assert eval!("*llm-system*") =~ "not Emacs Lisp"
       assert eval!("*llm-system*") =~ "buffer-append!"
       assert eval!("*llm-system*") =~ "public"
       assert eval!("*llm-system*") =~ "project-search-matches"

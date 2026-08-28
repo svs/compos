@@ -2243,9 +2243,7 @@ defmodule Aimax.Ui.EditorLive do
     body{margin:0 auto;padding:30px 34px 70px;max-width:#{measure};overflow-wrap:break-word;
          word-break:normal;font:#{size}/1.7 #{family};color:#{fg};background:#{bg};
          -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-    /* The blank lines the author typed are drawn, so the space between
-       blocks is the space in the document. A CSS margin on top of them
-       counted the same gap twice, and one blank line opened two. */
+    /* The renderer draws block gaps. CSS margins would count them twice. */
     p{margin:0}
     /* a heading must separate the sections, so its space above is much
        larger than the space below it */
@@ -2319,7 +2317,10 @@ defmodule Aimax.Ui.EditorLive do
     .pt.idle{animation:none;opacity:0.45}
     /* whitespace-mode: the newline the author typed, drawn where it is.
        Muted enough to read past, present enough to aim at. */
-    /* a blank line the author typed: a line, so pressing RET shows one */
+    /* One Markdown separator is compact. Extra blank lines keep their full
+       height, and the separator expands while point stands on it. */
+    .gap{height:.5em}
+    .gap:has(.pt){height:1.7em}
     .bl{height:1.7em}
     .bl:has(.pt){height:1.7em}
     /* whitespace-mode. Every mark is a pseudo-element painted over the

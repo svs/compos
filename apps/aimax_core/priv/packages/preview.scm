@@ -170,47 +170,9 @@
   'interaction)
 
 ;;; --- RET in a rendered page --------------------------------------------------
-;;; A reader of a rendered page sees blocks, so RET makes a block. One
-;;; newline is a soft break in Markdown: the old RET left point on a line of
-;;; its own, and the first keystroke pulled the text back into the paragraph
-;;; above. A block break is two newlines, and the point's own empty line
-;;; needs two more below it. Code, table rows, and list items keep their own
-;;; meaning for RET. S-RET is still the soft break.
-
-;; The run of newlines that touches POS. Both ends read one byte at a time
-;; and only ever compare it to a newline, so a multi-byte character stops
-;; the walk instead of being cut.
-(define (preview--run-start pos)
-  (let loop ((i pos))
-    (if (and (> i 0) (equal? (buffer-substring (- i 1) i) "\n"))
-        (loop (- i 1))
-        i)))
-
-(define (preview--run-end pos)
-  (let ((len (buffer-size (current-buffer))))
-    (let loop ((i pos))
-      (if (and (< i len) (equal? (buffer-substring i (+ i 1)) "\n"))
-          (loop (+ i 1))
-          i))))
-
-;; Point ends a line when the next byte is a newline, or when it is the end
-;; of the buffer. Then RET opens an empty block and point stands in it, so
-;; the block needs a separator below as well as above. Otherwise point keeps
-;; the text after it and starts the block that text now begins.
-(define (preview--block-break!)
-  (let* ((buf (current-buffer))
-         (len (buffer-size buf))
-         (p (point))
-         (s (preview--run-start p))
-         (e (preview--run-end p)))
-    (if (or (> e p) (= p len))
-        (let ((fill (if (or (= s 0) (= e len)) "\n\n" "\n\n\n\n"))
-              (at (if (= s 0) 0 (+ s 2))))
-          (buffer-replace-range! buf s (- e s) fill)
-          (goto-char! at))
-        (begin
-          (buffer-replace-range! buf s (- p s) "\n\n")
-          (goto-char! (+ s 2))))))
+;;; RET edits source text. One press inserts one newline. The renderer decides
+;;; whether Markdown shows that byte as a soft break or a block gap. Lists keep
+;;; their editor behavior: a non-empty item continues, and an empty item ends.
 
 ;; A list item continues the list. An ordered item counts on; a bullet
 ;; repeats. The third value is the length of the marker, which says where
@@ -237,8 +199,7 @@
     (if (equal? (string-trim (substring line width (string-length line))) "")
         (begin
           (buffer-replace-range! buf ls width "")
-          (goto-char! ls)
-          (preview--block-break!))
+          (goto-char! ls))
         (insert! (string-append "\n" (car item) (cadr item) " ")))))
 
 ;; Every character inside a fence is literal, and a table row means nothing
@@ -274,13 +235,13 @@
         (let ((item (preview--next-marker line)))
           (if item
               (preview--list-newline! line item)
-              (preview--block-break!))))))
+              (insert! "\n"))))))
 (public! 'preview-newline!
-  "(preview-newline!) — end the block at point in a rendered Markdown page"
+  "(preview-newline!) — insert one newline in a rendered Markdown page"
   'interaction)
 
 (define-command "preview-newline"
-  "Insert a newline, or end the block in a rendered page"
+  "Insert one newline in a rendered page"
   (lambda ()
     (if (preview--markdown-edit?)
         (preview-newline!)

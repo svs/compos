@@ -110,26 +110,51 @@ defmodule Aimax.Core.Markdown.Html do
     {parts, marks}
   end
 
-  # A blank line the author typed is a line, and a reader who presses RET
-  # has to see one appear. Between blocks each newline is exactly that: draw
-  # it as an empty line of its own, tall enough to stand in, and put any
-  # mark that falls on it inside - so point can sit on a blank line and show
-  # there.
+  # The first blank line between blocks is Markdown structure, so it draws a
+  # compact gap. Each additional blank line is content and keeps full height.
+  # A gap expands while point stands there, so RET always has a visible line.
   defp blank_lines(text, at, stop, marks) when at < stop do
     gap = binary_part(text, at, stop - at)
 
     {lines, marks} =
       :binary.matches(gap, "\n")
       |> Enum.map(fn {i, _} -> at + i end)
-      |> Enum.map_reduce(marks, fn pos, marks ->
+      |> Enum.with_index()
+      |> Enum.map_reduce(marks, fn {pos, index}, marks ->
         {here, rest} = Enum.split_while(marks, fn {off, _} -> off <= pos end)
-        {[~s(<div class="bl" data-s="#{pos}">), Enum.map(here, &elem(&1, 1)), "</div>"], rest}
+
+        class = if index == 0, do: "gap", else: "bl"
+
+        {[~s(<div class="#{class}" data-s="#{pos}">), Enum.map(here, &elem(&1, 1)), "</div>"],
+         rest}
       end)
 
-    # a mark past the last newline of the gap still belongs to the gap
-    {tail, marks} = Enum.split_while(marks, fn {off, _} -> off < stop end)
+    # At the end of the document, point after the final newline belongs to
+    # that line. Put its mark inside the line, where it has visible height.
+    terminal? = stop == byte_size(text)
 
-    {[lines, Enum.map(tail, &elem(&1, 1))], marks}
+    {tail, marks} =
+      Enum.split_while(marks, fn {off, _} -> off < stop or (terminal? and off == stop) end)
+
+    lines =
+      case {lines, tail} do
+        {[], _} ->
+          lines
+
+        {_, []} ->
+          lines
+
+        {lines, tail} ->
+          List.update_at(lines, -1, fn line ->
+            [
+              String.replace_suffix(IO.iodata_to_binary(line), "</div>", ""),
+              Enum.map(tail, &elem(&1, 1)),
+              "</div>"
+            ]
+          end)
+      end
+
+    {lines, marks}
   end
 
   defp blank_lines(_text, _at, _stop, marks), do: {[], marks}

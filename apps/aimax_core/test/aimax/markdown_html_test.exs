@@ -196,6 +196,23 @@ defmodule Aimax.MarkdownHtmlTest do
     refute bare(html) =~ ~r{<br>\s*</p>}
   end
 
+  test "one block separator is compact and extra blank lines stay full height" do
+    compact = render!("# Head\n\n- item\n")
+    spaced = render!("# Head\n\n\n- item\n")
+
+    assert compact =~ ~s(class="gap")
+    refute compact =~ ~s(class="bl")
+    assert spaced =~ ~s(class="gap")
+    assert spaced =~ ~s(class="bl")
+  end
+
+  test "point after a trailing blank line stays inside that visible line" do
+    text = "body\n\n"
+    html = render!(text, [{byte_size(text), @pt}])
+
+    assert html =~ ~r{<div class="gap"[^>]*>.*#{Regex.escape(@pt)}.*</div>}
+  end
+
   test "a fenced code block draws its own lines and gains no break" do
     html = render!("```sh\necho one\necho two\n```\n")
 

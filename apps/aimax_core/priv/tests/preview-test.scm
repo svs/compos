@@ -1,6 +1,6 @@
 ;;; preview-test.scm --- RET in a rendered page.
 ;;;
-;;; A reader of a rendered page sees blocks, so RET makes a block. Every
+;;; RET inserts one newline in the source. Every
 ;;; assertion here calls the command's own function and reads the buffer.
 ;;; Nothing presses a key: the binding is a preference, the behaviour is
 ;;; what these tests are for.
@@ -18,34 +18,41 @@
           (buffer-kill! buf)
           r)))))
 
-(deftest 'ret-at-a-line-end-opens-an-empty-block
-  "RET below a paragraph leaves point in a block of its own"
+(deftest 'ret-at-a-line-end-inserts-one-newline
+  "RET at a line end adds one source newline"
   (lambda ()
     (let ((r (t--preview-ret "zz-preview-end.md" "para1\npara2\n" 5)))
-      (check-equal! (car r) "para1\n\n\n\npara2\n"
-                    "the paragraphs stand apart, with an empty one between")
-      (check-equal! (cadr r) 7 "point stands on the empty block"))))
+      (check-equal! (car r) "para1\n\npara2\n" "one newline is added")
+      (check-equal! (cadr r) 6 "point moves one character"))))
 
-(deftest 'ret-at-the-end-of-the-document-opens-a-block
-  "RET on the last line still opens a block"
+(deftest 'ret-at-the-end-of-the-document-inserts-one-newline
+  "RET on the last line adds one source newline"
   (lambda ()
     (let ((r (t--preview-ret "zz-preview-eof.md" "para1\n" 5)))
       (check-equal! (car r) "para1\n\n" "one blank line ends the paragraph")
-      (check-equal! (cadr r) 7 "point stands after it"))))
+      (check-equal! (cadr r) 6 "point moves one character"))))
 
-(deftest 'ret-inside-a-paragraph-splits-it-in-two
-  "RET in the middle of a paragraph makes two paragraphs"
+(deftest 'ret-inside-a-paragraph-inserts-one-newline
+  "RET in a paragraph adds one source newline"
   (lambda ()
     (let ((r (t--preview-ret "zz-preview-split.md" "hello world\n" 5)))
-      (check-equal! (car r) "hello\n\n world\n" "the split is a block break")
-      (check-equal! (cadr r) 7 "point starts the second paragraph"))))
+      (check-equal! (car r) "hello\n world\n" "one newline splits the text")
+      (check-equal! (cadr r) 6 "point moves one character"))))
 
-(deftest 'ret-on-a-blank-line-keeps-exactly-one-empty-block
-  "a run of blank lines collapses to the one block point stands in"
+(deftest 'ret-at-the-start-of-a-block-inserts-one-newline
+  "RET at a block start adds one source newline"
+  (lambda ()
+    (let ((r (t--preview-ret "zz-preview-block-start.md"
+                             "intro\n\n# Head\n" 7)))
+      (check-equal! (car r) "intro\n\n\n# Head\n" "one newline is added")
+      (check-equal! (cadr r) 8 "point moves one character"))))
+
+(deftest 'ret-on-a-blank-line-inserts-one-newline
+  "RET extends a blank-line run by one newline"
   (lambda ()
     (let ((r (t--preview-ret "zz-preview-run.md" "a\n\n\n\n\nb\n" 3)))
-      (check-equal! (car r) "a\n\n\n\nb\n" "five newlines become four")
-      (check-equal! (cadr r) 3 "point keeps its empty block"))))
+      (check-equal! (car r) "a\n\n\n\n\n\nb\n" "one newline is added")
+      (check-equal! (cadr r) 4 "point moves one character"))))
 
 (deftest 'ret-inside-a-fence-stays-a-plain-newline
   "every character inside a fence is literal, RET included"
@@ -80,7 +87,7 @@
   (lambda ()
     (let ((r (t--preview-ret "zz-preview-list-end.md" "- one\n- \n" 8)))
       (check-equal! (car r) "- one\n\n" "the empty item is gone")
-      (check-equal! (cadr r) 7 "point stands in the new block"))))
+      (check-equal! (cadr r) 6 "point stands on the blank line"))))
 
 (deftest 'a-list-marker-names-the-item-that-follows-it
   "the marker reader answers the indent, the next marker, and its width"
@@ -102,7 +109,7 @@
                         "a buffer showing its source is not a rendered page")
           (buffer-set-local! buf 'render-mode "markdown")
           (check-equal! (preview--markdown-edit?) #t
-                        "a rendered Markdown page takes the block break")
+                        "a rendered Markdown page takes one newline")
           (buffer-set-read-only! buf #t)
           (check-equal! (preview--markdown-edit?) #f
                         "a read-only page keeps the plain newline")

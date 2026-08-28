@@ -1,9 +1,9 @@
 ---
-name: acceptance-testing
-description: Run or revise ai-max acceptance and dogfood scenarios for internal satisfaction. Use for benchmark runs, scoring, reports, and scenario design.
+name: rl-benchmark
+description: Run or revise ai-max reinforcement-learning benchmark and dogfood scenarios. Use for benchmark runs, scoring, reports, and scenario design. Do not use for repository unit or acceptance tests.
 ---
 
-# Acceptance-test ai-max
+# RL Benchmark
 
 Measure whether ai-max makes real work better for its user.
 Optimize for internal confidence, not leaderboard comparison.

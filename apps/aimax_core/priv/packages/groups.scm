@@ -102,6 +102,36 @@
                          (group-record-by-name value)))))
     (and record (group-record-name record))))
 
+(define *group-pin-icon* "")
+
+(define (group-pinned-in frame)
+  (let* ((held (frame-local-in frame 'pinned-group))
+         (id (group-resolve-id held)))
+    id))
+
+(define (group-pinned)
+  (let* ((held (frame-local 'pinned-group))
+         (id (group-resolve-id held)))
+    (when (and held (not id)) (set-frame-local! 'pinned-group #f))
+    id))
+
+(define (group-pinned? g)
+  (let ((id (group-resolve-id g)))
+    (and id (equal? id (group-pinned)))))
+
+(define (group-display-name g)
+  (or (group-name g) (and (string? g) g) ""))
+
+(define (group-display-label-in g frame)
+  (let ((name (group-display-name g)))
+    (if (and (not (equal? name ""))
+             (equal? (group-resolve-id g) (group-pinned-in frame)))
+        (string-append name " " *group-pin-icon*)
+        name)))
+
+(define (group-display-label g)
+  (group-display-label-in g (selected-frame)))
+
 (define (group-new-id!)
   (set! *group-next-id* (+ *group-next-id* 1))
   (string-append "grp:" (number->string (current-time)) ":"
@@ -185,13 +215,13 @@
     (set! *group-records* (group-record-colors-restore (car (cdr saved))))
     (modeline-groups-refresh!)))
 
-(define *group-frame-context-keys* '(current-group previous-group))
+(define *group-frame-context-keys* '(current-group previous-group pinned-group))
 
 (define (group-frame-style-set! frame value)
   (let* ((id (group-resolve-id value))
          (record (and id (group-record-by-id id))))
     (set-frame-group-style!
-      (and record (group-record-name record))
+      (and record (group-display-label-in id frame))
       (and record (group-record-color record))
       frame)))
 
@@ -222,9 +252,12 @@
                                (group-frame-context-id locals 'current-group)))
                  (previous (and (pair? locals)
                                 (group-frame-context-id locals 'previous-group)))
+                 (pinned (and (pair? locals)
+                              (group-frame-context-id locals 'pinned-group)))
                  (saved (append
                           (if current (list (list 'current-group current)) '())
-                          (if previous (list (list 'previous-group previous)) '()))))
+                          (if previous (list (list 'previous-group previous)) '())
+                          (if pinned (list (list 'pinned-group pinned)) '()))))
             (loop (cdr entries)
                   (if (and valid? (pair? saved))
                       (cons (list (car entry) saved) out)
@@ -246,6 +279,7 @@
                             '()))
                  (current (assoc 'current-group pairs))
                  (previous (assoc 'previous-group pairs))
+                 (pinned (assoc 'pinned-group pairs))
                  (restored
                    (append
                      (if (and current (string? (car (cdr current))))
@@ -253,6 +287,9 @@
                          '())
                      (if (and previous (string? (car (cdr previous))))
                          (list (list 'previous-group (car (cdr previous))))
+                         '())
+                     (if (and pinned (string? (car (cdr pinned))))
+                         (list (list 'pinned-group (car (cdr pinned))))
                          '())))
                  (old (assoc frame *frame-locals*))
                  (locals (if old (car (cdr old)) '()))
@@ -403,8 +440,8 @@
 (define (buffer-group-summary b)
   (let ((names (if (chat-buffer? b)
                    (let ((id (chat-group-id b)))
-                     (if id (list (group-name id)) '()))
-                   (map group-name (buffer-group-ids b)))))
+                     (if id (list (group-display-label id)) '()))
+                   (map group-display-label (buffer-group-ids b)))))
     (let ((known (filter string? names)))
       (if (pair? known) (string-join known ", ") "ungrouped"))))
 
@@ -493,7 +530,12 @@
   (let ((id (group-ensure-record! value)))
     (cond ((not id) #f)
           ((chat-buffer? b) #f)
-          ((buffer-in-group? b id) (buffer-modeline-group-refresh! b) id)
+          ;; already a member, but asking for it is still a declaration:
+          ;; the membership stops being one the buffer merely inherited
+          ((buffer-in-group? b id)
+           (buffer-set-local! b 'group-inherited #f)
+           (buffer-modeline-group-refresh! b)
+           id)
           (else
             (buffer-set-local! b 'group-ids
               (append (buffer-group-ids b) (list id)))
@@ -556,16 +598,16 @@
 ;; Every prompt and message names a group the way a person named it. The
 ;; opaque ID belongs to the code and must never reach the screen. A caller
 ;; can hold an ID whose record is gone, so fall back to what it passed.
-(define (group-display-name g)
-  (or (group-name g) (and (string? g) g) ""))
-
 ;; The short name a card wears. A project root is not a group yet, so it
 ;; keeps its own basename rather than going blank.
 (define (group-label g)
   (let ((name (group-display-name g)))
     (if (equal? name "")
         ""
-        (car (reverse (string-split name "/"))))))
+        (let ((short (car (reverse (string-split name "/")))))
+          (if (group-pinned? g)
+              (string-append short " " *group-pin-icon*)
+              short)))))
 
 
 ;; a group's metadata lives on its chat buffer: the chat is the group's
@@ -880,6 +922,9 @@
               (group-layout-save-if-shown! from)
               (set-frame-local! 'previous-group from)))
           (set-frame-local! 'current-group id)
+          ;; An explicit switch moves an active pin. The frame stays pinned,
+          ;; but it does not trap the user in the old group.
+          (when (group-pinned) (set-frame-local! 'pinned-group id))
           (frame-group-label-refresh!)
           (let ((saved (group-layout id)))
             (if saved
@@ -918,6 +963,12 @@
         ((group-work-buffer? buf) (buffer-group-ids buf))
         (else #f)))
 
+(define (group-visible-membership-rows)
+  (filter (lambda (ids) ids)
+          (map (lambda (window)
+                 (group-context-memberships (car (cdr window))))
+               (window-list))))
+
 (define (group-common-memberships rows)
   (if (null? rows)
       #f
@@ -937,18 +988,39 @@
 
 (define (group-current-recalculate!)
   (unless *group-current-inhibit*
-    (let* ((rows (filter (lambda (ids) ids)
-                         (map (lambda (window)
-                                (group-context-memberships (car (cdr window))))
-                              (window-list))))
+    (let* ((pinned (group-pinned))
+           (rows (group-visible-membership-rows))
            (current (frame-group))
-           (next (group-current-choice (group-common-memberships rows) current)))
+           (next (if pinned
+                     pinned
+                     (group-current-choice (group-common-memberships rows) current))))
       (unless (equal? next current)
         (set-frame-local! 'current-group next)
         (frame-group-label-refresh!))
       next)))
 
 (set! window-state-changed! group-current-recalculate!)
+
+(define-command "group-pin"
+  "Toggle a frame pin that keeps the current group through window changes"
+  (lambda ()
+    (let ((pinned (group-pinned)))
+      (if pinned
+          (let ((name (group-name pinned)))
+            (set-frame-local! 'pinned-group #f)
+            (desktop-dirty!)
+            (group-current-recalculate!)
+            (frame-group-label-refresh!)
+            (message (string-append "Unpinned group " name)))
+          (let ((id (or (frame-group) (buffer-group (current-buffer)))))
+            (if (not id)
+                (message "No group to pin")
+                (begin
+                  (set-frame-local! 'pinned-group id)
+                  (set-frame-local! 'current-group id)
+                  (desktop-dirty!)
+                  (frame-group-label-refresh!)
+                  (message (string-append "Pinned group " (group-name id))))))))))
 
 ;; Creation is the shared placement boundary. Commands do not each need to
 ;; remember this rule, and waking a dormant buffer does not run the hook.
@@ -973,8 +1045,16 @@
 ;; — the board, a listing, a detour — never rewrites it, so the last
 ;; arrangement made IN the group is the one that comes back.
 (define (group-visible-homogeneous? g)
-  (let ((id (group-resolve-id g)))
-    (and id (equal? (frame-group) id))))
+  (let ((id (group-resolve-id g))
+        (pinned (group-pinned)))
+    (and id
+         (equal? (frame-group) id)
+         ;; A pin preserves context, not homogeneity. Do not save a layout
+         ;; that contains foreign work merely because the frame is pinned.
+         (or (not pinned)
+             (let ((common (group-common-memberships
+                             (group-visible-membership-rows))))
+               (and common (member id common)))))))
 
 (define (group-layout-save-if-shown! g)
   (when (and (group-visible-homogeneous? g) (group-uncovered? g))
@@ -1146,6 +1226,11 @@
           (else
             (list "Start a new group with this buffer" buf #f)))))
 
+(define (group-switch-candidate g)
+  (let ((names (map buffer-modeline-name (group-buffers-mru g))))
+    (list (group-name g)
+          (if (pair? names) (string-join names " · ") "no buffers"))))
+
 (define (switch-to-group-candidates)
   (let* ((current (frame-group))
          (recent (filter (lambda (id) (not (equal? id current)))
@@ -1156,10 +1241,10 @@
          (action (group-switch-new-action))
          (action-row (list (car action) "new context")))
     (if (group-visible-homogeneous? current)
-        (append (map group-name recent) (list action-row))
-        (append (map group-name mine-recent)
+        (append (map group-switch-candidate recent) (list action-row))
+        (append (map group-switch-candidate mine-recent)
                 (list action-row)
-                (map group-name others)))))
+                (map group-switch-candidate others)))))
 
 (define (group-switch-run-new-action! action)
   (let ((label (car action))
@@ -1895,9 +1980,28 @@
   (let ((window (window-showing buf)))
     (if window (select-window! window) (switch-to-buffer! buf))))
 
+;; the project root a buffer belongs to, or #f when it belongs to none
+(define (group--project-root-of buf)
+  (let ((root (buffer-project-root buf)))
+    (and (string? root) (not (equal? root "")) root)))
+
 (define (group-buffer-context-switch! buf)
-  (let ((ids (group-buffer-memberships buf)))
+  (let ((ids (group-buffer-memberships buf))
+        (root (group--project-root-of buf)))
     (cond
+      ;; A project is a context that already exists. Enter it under the
+      ;; root's name and take the project's other open buffers along.
+      ;; Only a buffer with no project has to invent a name.
+      ((and (null? ids) root)
+       (let ((id (group-ensure-record! root)))
+         (for-each
+           (lambda (x)
+             (when (and (group-work-buffer? x)
+                        (null? (group-buffer-memberships x))
+                        (equal? (group--project-root-of x) root))
+               (buffer-add-group! x id)))
+           (buffer-list))
+         (switch-buffer-to-group! buf id)))
       ((null? ids)
        (group-read-new-name "Start a group with this buffer: "
          (lambda (name) (group-create-with-buffer! name buf #f))))
@@ -2029,11 +2133,17 @@
                     (ibuffer-open-buffers! buffers)))))))))
 
 (define (group-command-work-buffers)
-  (let ((buf (current-buffer)))
-    (filter group-work-buffer?
-      (if (equal? (buffer-local buf 'mode-name) "switch-mode")
-          (map car (list-targets buf))
-          (list buf)))))
+  ;; C-SPC in the switcher and `buffer-select` are two views of the same
+  ;; selection.  A command invoked from the switcher must not lose selections
+  ;; made on ordinary buffers, and a repeated name must still be acted on once.
+  (let* ((buf (current-buffer))
+         (marked (if (equal? (buffer-local buf 'mode-name) "switch-mode")
+                     (list-live-marked buf *list-mark-char*)
+                     '()))
+         (selected (filter (lambda (candidate)
+                             (buffer-local candidate 'buffer-selected))
+                           (buffer-list-mru))))
+    (filter group-work-buffer? (dedupe-names (append marked selected)))))
 
 (define (group-selected-visible-work-buffers)
   (filter (lambda (buf) (buffer-local buf 'buffer-selected))
@@ -2060,6 +2170,7 @@
               (if (and (buffer-known? buf) (group-work-buffer? buf))
                   (begin
                     (buffer-add-group! buf id)
+                    (buffer-set-local! buf 'buffer-selected #f)
                     (set! changed (+ changed 1)))
                   (set! skipped (+ skipped 1))))
             buffers)
@@ -2150,18 +2261,12 @@
                                     " to " (group-name to)))
             family))))
 
-(define-command "buffer-add-to-group" "Add the current buffer family to a group"
+(define-command "buffer-add-to-group" "Add the selected buffers to a group"
   (lambda ()
-    (let ((buf (current-buffer)))
-      (if (equal? (buffer-local buf 'mode-name) "switch-mode")
-          (let ((buffers (group-command-work-buffers)))
-            (if (null? buffers)
-                (message "No work buffer selected")
-                (group-add-read-destination! buffers)))
-          (if (not (group-work-buffer? buf))
-              (message "The current buffer is not a work buffer")
-              (group-read-or-create! "Add buffer to group: "
-                (lambda (group) (buffer-add-family-to-group! buf group))))))))
+    (let ((buffers (group-command-work-buffers)))
+      (if (null? buffers)
+          (message "No work buffers selected")
+          (group-add-read-destination! buffers)))))
 
 (define (buffer-move-read-destination! buf)
   (group-read-or-create! "Move buffer to group: "
@@ -2174,30 +2279,55 @@
           (message "The current buffer is not a work buffer")
           (buffer-move-read-destination! buf)))))
 
+(define (buffer-family-remove-groups! buf ids)
+  (for-each
+    (lambda (id)
+      (for-each
+        (lambda (member)
+          (when (buffer-in-group? member id)
+            (buffer-remove-group! member id)))
+        (buffer-family buf)))
+    ids)
+  (when (pair? ids) (run-hooks 'group-membership-hook))
+  (message
+    (if (null? ids)
+        "No group memberships changed"
+        (string-append "Removed " (number->string (length ids))
+                       " group membership"
+                       (if (= (length ids) 1) "" "s"))))
+  ids)
+
+(define (buffer-remove-candidates ids pending)
+  (map
+    (lambda (id)
+      (list (group-name id)
+            (if (member id pending)
+                "remove on C-g · RET keeps"
+                "keep · RET removes")))
+    ids))
+
+(define (buffer-remove-read! buf ids pending)
+  (minibuffer-read* "Toggle group removal (C-g applies): "
+    (buffer-remove-candidates ids pending)
+    (list
+      (list 'confirm
+        (lambda (name)
+          (let ((id (group-resolve-id name)))
+            (buffer-remove-read!
+              buf ids
+              (if (and id (member id pending))
+                  (remove (lambda (held) (equal? held id)) pending)
+                  (if id (append pending (list id)) pending))))))
+      (list 'cancel (lambda () (buffer-family-remove-groups! buf pending)))
+      (list 'style #f))))
+
 (define-command "buffer-remove-from-group"
-  "Remove one group membership from the current buffer family"
+  "Remove one or more group memberships from the current buffer family"
   (lambda ()
     (let* ((buf (current-buffer))
-           (ids (group-buffer-memberships buf))
-           (current (frame-group))
-           (source (and current (member current ids) current))
-           (remove-from
-             (lambda (id)
-               (for-each
-                 (lambda (member)
-                   (when (buffer-in-group? member id)
-                     (buffer-remove-group! member id)))
-                 (buffer-family buf))
-               (run-hooks 'group-membership-hook)
-               (message (string-append "Removed buffer from " (group-name id))))))
-      (cond (source (remove-from source))
-            ((null? ids) (message "The buffer is not in a group"))
-            ((null? (cdr ids)) (remove-from (car ids)))
-            (else
-              (minibuffer-read "Remove buffer from group: " (map group-name ids)
-                (lambda (name)
-                  (let ((id (group-resolve-id name)))
-                    (when id (remove-from id))))))))))
+           (ids (group-buffer-memberships buf)))
+      (cond ((null? ids) (message "The buffer is not in a group"))
+            (else (buffer-remove-read! buf ids '()))))))
 
 (define (group-move-read-destination! buffers)
   (minibuffer-read "Move buffers to group: "
@@ -2249,14 +2379,8 @@
                 (buffer-add-group! buf g)
                 (message (string-append buf " joined group " (group-label g)))))))))))
 
-(define-command "group-remove" "Remove the current buffer from its group"
-  (lambda ()
-    (let* ((buf (current-buffer)) (g (buffer-group buf)))
-      (if g
-          (begin
-            (buffer-remove-group! buf g)
-            (message (string-append buf " left group " (group-display-name g))))
-          (message "Not in a group")))))
+(define-command "group-remove" "Select group memberships to remove from this buffer"
+  (lambda () (run-command "buffer-remove-from-group")))
 
 (define-command "group-list" "List the current buffer's group members"
   (lambda ()
@@ -2331,22 +2455,27 @@
 
 (mode-icon! "groups-mode" "")
 
-(global-set-key "C-c g" "group-join")
-(global-set-key "C-c d" "group-describe")
-(global-set-key "C-x G" "groups")
-(global-set-key "C-x b" "group-switch-buffer")
-(global-set-key "C-x g" "switch-to-group")
+(define (group-keymap-install!)
+  (global-set-key "C-c g" "group-join")
+  (global-set-key "C-c d" "group-describe")
+  (global-set-key "C-x G" "groups")
+  (global-set-key "C-x b" "group-switch-buffer")
+  (global-set-key "C-x g" "switch-to-group")
 
-;; C-x C-g is the group command map.
-(global-set-key "C-x C-g g" "switch-to-group")
-(global-set-key "C-x C-g a" "buffer-add-to-group")
-(global-set-key "C-x C-g m" "buffer-move-to-group")
-(global-set-key "C-x C-g r" "buffer-remove-from-group")
-(global-set-key "C-x C-g n" "group-new")
-(global-set-key "C-x C-g v" "group-new-from-visible")
-(global-set-key "C-x C-g l" "groups")
-(global-set-key "C-x C-g s" "group-show-all")
-(global-set-key "C-x C-g o" "opencode-in-group")
+  ;; A previous release bound the prefix itself. Remove it during hot reload.
+  (global-unset-key "C-x C-g")
+  (global-set-key "C-x C-g g" "switch-to-group")
+  (global-set-key "C-x C-g a" "buffer-add-to-group")
+  (global-set-key "C-x C-g m" "buffer-move-to-group")
+  (global-set-key "C-x C-g r" "buffer-remove-from-group")
+  (global-set-key "C-x C-g n" "group-new")
+  (global-set-key "C-x C-g v" "group-new-from-visible")
+  (global-set-key "C-x C-g l" "groups")
+  (global-set-key "C-x C-g s" "group-show-all")
+  (global-set-key "C-x C-g o" "opencode-in-group")
+  (global-set-key "C-x C-g p" "group-pin"))
+
+(group-keymap-install!)
 
 ;; Remove the previous membership vocabulary from hot-reloaded sessions.
 (for-each undefine-command
@@ -2360,6 +2489,7 @@
 (public! 'buffer-group-role "(buffer-group-role BUFFER GROUP) -> semantic role string or #f; chats answer \"chat\"")
 (public! 'group-visible-homogeneous?
   "(group-visible-homogeneous? GROUP) -> #t when GROUP is the frame's derived current group")
+(public! 'group-pinned "(group-pinned) -> the pinned frame group ID, or #f")
 (public! 'group-current-recalculate!
   "(group-current-recalculate!) -> derive the frame's current group from its visible buffers")
 (public! 'group-ids-mru "(group-ids-mru) -> all group IDs in most-recently-used order")

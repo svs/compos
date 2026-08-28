@@ -49,7 +49,26 @@ defmodule Aimax.Ui.Layouts do
             overflow: hidden;
             -webkit-font-smoothing: antialiased;
           }
-          .editor-root { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+          .editor-root {
+            display: flex; flex-direction: column; position: relative;
+            height: 100dvh; overflow: hidden;
+          }
+          .editor-root.instance-identified::before {
+            content: attr(data-instance);
+            position: absolute; top: 0; right: 14px; z-index: 70;
+            padding: 4px 10px 5px;
+            border-radius: 0 0 6px 6px;
+            background: var(--instance-accent);
+            color: #fff; font: 700 11px/1 var(--font-mono);
+            letter-spacing: 0.06em; text-transform: uppercase;
+            pointer-events: none;
+          }
+          .editor-root.instance-identified::after {
+            content: "";
+            position: absolute; inset: 0; z-index: 69;
+            border: 4px solid var(--instance-accent);
+            pointer-events: none;
+          }
           .workspace-bar {
             flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
             min-height: 38px; padding: 7px 14px;
@@ -2152,12 +2171,11 @@ defmodule Aimax.Ui.Layouts do
                     this.applyWhichKeyFilter();
                     return;
                   }
-                  // C-g from an app lands on the keyboard sink. RET while
-                  // that app window is still selected returns the keyboard
-                  // to the app, preserving the control that was active
-                  // inside it (a spreadsheet cell, editor, and so on).
+                  // C-g from an app lands on the keyboard sink. RET returns
+                  // focus to the selected app when no editor panel owns RET.
                   if (e.key === "Enter" && !e.ctrlKey && !e.altKey && !e.metaKey &&
-                      !e.shiftKey && !panel) {
+                      !e.shiftKey &&
+                      !document.querySelector(".mb-panel, .which-key, .transient-panel")) {
                     const app = document.querySelector(".window.active .app-preview");
                     if (app) {
                       e.preventDefault();

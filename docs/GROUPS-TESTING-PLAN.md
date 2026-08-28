@@ -60,17 +60,27 @@ Confirm the active group and chat keep working under the new name.
 
 ## Membership operations
 
+### TODO Pin a frame group
+
+**Run:** `M-x group-pin` in a group, then display and kill a foreign buffer.
+
+Confirm `current-group` stays pinned. Confirm the foreign buffer never joins
+the group. Confirm the replacement belongs to the pinned group. Switch groups
+explicitly and confirm the pin moves. Run `M-x group-pin` again and confirm
+visible work derives `current-group` again.
+
 ### TODO Add an ungrouped buffer
 
 **Run:** `M-x buffer-add-to-group`
 
-Confirm it joins the current group without changing frame context.
+Confirm only selected buffers join the destination group. Confirm the command
+clears their selections without changing frame context.
 
 ### TODO Add a foreign buffer
 
 **Run:** `M-x buffer-add-to-group`
 
-Confirm it gains shared membership and remains in its original group.
+Confirm a selected foreign buffer gains shared membership and keeps its original group.
 
 ### TODO Add the same membership twice
 
@@ -94,7 +104,9 @@ Confirm the destination replaces every existing membership.
 
 **Run:** `M-x buffer-remove-from-group`.
 
-Confirm only the selected membership is removed.
+Confirm one or multiple memberships open a completion picker. Select one membership.
+Confirm the picker marks a pending removal without changing membership. Select
+it again to keep it. Press `C-g` and confirm the final pending removals apply.
 
 ### TODO Remove from a null current group
 

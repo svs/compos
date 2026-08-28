@@ -21,6 +21,9 @@ A frame has a derived value named `current-group`. The editor recalculates it wh
 - If the visible buffers do not share a group, `current-group` is null.
 - Transient interface buffers do not take part in this calculation.
 
+A frame can pin this value. A pin keeps `current-group` stable while buffers
+and windows change. It does not add foreign buffers to the pinned group.
+
 The result is intentionally simple. A homogeneous frame has somewhere to put new work. A mixed frame does not guess.
 
 Groups do not own files or projects. They are not security boundaries. They organize editor state for people and agents.
@@ -64,12 +67,15 @@ than another command to remember.
   a destination. Other groups appear in group MRU order.
 - If the display is mixed, the current buffer's groups appear first, followed
   by unrelated groups in group MRU order.
+- Each group's marginalia lists its buffers with project-relative names and `~`.
 - Accepting a group restores its last valid homogeneous layout.
 - **Command:** `switch-to-group` (`C-x g`).
 
 #### I want this buffer to be available in another group too
 
-- The destination is added without removing any existing membership.
+- I select one or more buffers before I run the command.
+- The destination is added without removing their existing memberships.
+- A successful add clears the selections.
 - I remain in the current visible context.
 - **Command:** `buffer-add-to-group`.
 
@@ -82,9 +88,12 @@ than another command to remember.
 
 #### I want to remove this buffer from this group
 
-- Only the named membership is removed.
+- The selector opens for one or many memberships.
+- `RET` toggles a pending removal without changing membership.
+- I can select the membership again to keep it.
+- `C-g` applies all pending removals and closes the selector.
 - The buffer is not killed and its file is not changed.
-- **Command:** `buffer-remove-from-group`.
+- **Commands:** `buffer-remove-from-group` and `group-remove`.
 
 #### I want a fresh empty group
 
@@ -144,6 +153,17 @@ than another command to remember.
 - **Solution:** automatic homogeneity recalculation. No command captures or
   clears `current-group` separately.
 
+#### I want this frame to stay in its current group
+
+- Pinning keeps `current-group` stable when a foreign buffer appears or dies.
+- Killing a visible buffer chooses a replacement from the pinned group.
+- Existing foreign buffers do not gain membership in the pinned group.
+- New buffers still join the pinned group through the normal creation rule.
+- An explicit group switch moves the pin to the selected group.
+- Every rendered name for the pinned group shows the pin icon ``.
+- Run the command again to release the pin and derive the visible group.
+- **Command:** `group-pin` (`C-x C-g p`).
+
 #### I want the layout remembered when it represents one group
 
 - Homogeneous window changes update that group's remembered layout.
@@ -175,6 +195,9 @@ than another command to remember.
 #### I want the file in the context in front of me
 
 - A newly visited file joins `current-group` when one exists.
+- Dired and project file commands prefer the source buffer's explicit group.
+- `RET` in Dired uses the Dired buffer's group.
+- `C-RET` in Dired uses the frame group, then falls back to the Dired group.
 - If the file already has a live buffer, showing it does not silently change
   its memberships.
 - With no current group, a new file buffer starts ungrouped.
@@ -466,8 +489,8 @@ a family automatically.
 
 ### Add a buffer to a group
 
-`buffer-add-to-group` makes the buffer available in the destination. It keeps
-all existing memberships and does not enter the destination.
+`buffer-add-to-group` makes selected buffers available in the destination. It
+keeps all existing memberships and does not enter the destination.
 
 Running it twice is a successful no-op.
 
@@ -480,8 +503,8 @@ destination leaves every existing membership untouched.
 
 ### Remove a buffer from a group
 
-`buffer-remove-from-group` removes exactly one membership. It never kills the
-buffer or changes a file.
+`buffer-remove-from-group` and `group-remove` open the same staged selector.
+They never kill the buffer or change a file.
 
 When a removed buffer remains visible, the editor recalculates
 `current-group`. A group command may replace it with another member when the
@@ -503,6 +526,7 @@ Canonical commands are named after the object they change.
 | `group-dissolve` | Remove a group record and its memberships without killing work. |
 | `group-kill` | Kill members under the standard buffer-kill policy. |
 | `group-chat` | Open or create the group's primary chat. |
+| `group-pin` | Keep the frame in one group until the command releases it. |
 
 ### Buffer commands
 
@@ -510,7 +534,7 @@ Canonical commands are named after the object they change.
 |---|---|
 | `buffer-add-to-group` | Add one or more memberships. |
 | `buffer-move-to-group` | Replace all memberships with one destination. |
-| `buffer-remove-from-group` | Remove one named membership. |
+| `buffer-remove-from-group` | Toggle pending removals; `C-g` applies and exits. |
 | `buffer-new` | Create work in `current-group`, or ungrouped when it is null. |
 
 Compatibility aliases can retain `group-switch` during migration.

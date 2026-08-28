@@ -441,7 +441,7 @@
                                 (string-append " joined " g))))))
 
 (define-command "switch-group"
-  "Add the marked buffers, or the row at point, to another group"
+  "Add the marked or otherwise selected buffers to another group"
   (lambda () (run-command "buffer-add-to-group")))
 
 ;; buffer-add-to-group prompts, so it changes membership inside a

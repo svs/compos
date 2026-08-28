@@ -20,6 +20,8 @@ defmodule Aimax.Ui.EditorLive do
 
   @impl true
   def mount(params, _session, socket) do
+    identity = instance_identity()
+
     # each browser TAB is a frame (S5): the client sends its remembered
     # frame id (sessionStorage, per tab) in the connect params; unknown
     # ids are honored so the frame survives a wiped desktop.etf, absent
@@ -55,7 +57,9 @@ defmodule Aimax.Ui.EditorLive do
           frame: fid,
           subscribed: MapSet.new(),
           line_cache: %{},
-          boot_id: :persistent_term.get(:aimax_boot_id, "dev")
+          boot_id: :persistent_term.get(:aimax_boot_id, "dev"),
+          instance_name: identity.name,
+          instance_accent: identity.accent
         )
 
       {:ok, refresh(socket)}
@@ -67,7 +71,9 @@ defmodule Aimax.Ui.EditorLive do
          state: nil,
          subscribed: MapSet.new(),
          line_cache: %{},
-         boot_id: :persistent_term.get(:aimax_boot_id, "dev")
+         boot_id: :persistent_term.get(:aimax_boot_id, "dev"),
+         instance_name: identity.name,
+         instance_accent: identity.accent
        )}
     end
   end
@@ -798,7 +804,14 @@ defmodule Aimax.Ui.EditorLive do
   # renders a neutral splash — the connected mount replaces it (S14)
   def render(%{state: nil} = assigns) do
     ~H"""
-    <div id="editor" class="editor-root splash" phx-hook="Keys" data-boot={@boot_id}>
+    <div
+      id="editor"
+      class={instance_class("editor-root splash", @instance_accent)}
+      style={instance_style(@instance_accent)}
+      phx-hook="Keys"
+      data-boot={@boot_id}
+      data-instance={@instance_name}
+    >
       <div style="display:flex;align-items:center;justify-content:center;height:100vh;opacity:.5;font-family:monospace">
         ai-max — connecting…
       </div>
@@ -808,7 +821,15 @@ defmodule Aimax.Ui.EditorLive do
 
   def render(assigns) do
     ~H"""
-    <div id="editor" class="editor-root" style={frame_group_style(@state)} phx-hook="Keys" data-boot={@boot_id} data-frame={@frame}>
+    <div
+      id="editor"
+      class={instance_class("editor-root", @instance_accent)}
+      style={root_style(@state, @instance_accent)}
+      phx-hook="Keys"
+      data-boot={@boot_id}
+      data-frame={@frame}
+      data-instance={@instance_name}
+    >
       <style :if={@state.faces != %{}}><%= Phoenix.HTML.raw(face_css(@state.faces)) %></style>
     <style :if={@state.styles != %{}}><%= Phoenix.HTML.raw(Enum.join(Map.values(@state.styles), "\n")) %></style>
       <div :if={@state.workspace} class="workspace-bar">
@@ -958,6 +979,31 @@ defmodule Aimax.Ui.EditorLive do
   end
 
   defp frame_group_style(_state), do: nil
+
+  defp instance_identity do
+    %{
+      name: Application.get_env(:aimax_core, :name, "aimax"),
+      accent: valid_accent(Application.get_env(:aimax_core, :accent))
+    }
+  end
+
+  defp valid_accent(color) when is_binary(color) do
+    if Regex.match?(~r/^#[0-9a-fA-F]{6}$/, color), do: color, else: nil
+  end
+
+  defp valid_accent(_color), do: nil
+
+  defp instance_style(nil), do: nil
+  defp instance_style(color), do: "--instance-accent: #{color}"
+
+  defp instance_class(base, nil), do: base
+  defp instance_class(base, _color), do: base <> " instance-identified"
+
+  defp root_style(state, accent) do
+    [frame_group_style(state), instance_style(accent)]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("; ")
+  end
 
   defp window_style(node) do
     color = Map.get(node, :group_color)
@@ -1309,6 +1355,7 @@ defmodule Aimax.Ui.EditorLive do
         <span :if={@node.modeline_project && @node.modeline_project != ""} class="ml-mode">
           · {@node.modeline_project}
         </span>
+        <span :if={@node.group} class="ml-group">· {@node.group}</span>
         <span :if={@node.selected} class="ml-mode ml-selected">● selected</span>
         <span :if={@node.render_mode in ["html", "markdown"]} class="ml-mode">preview</span>
         <span

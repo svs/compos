@@ -144,4 +144,10 @@ if config_env() != :test do
   # you can tell which tabs belong to which life
   derived_name = if home, do: Path.basename(home), else: "aimax"
   config :aimax_core, name: get.("AIMAX_NAME", "name") || derived_name
+
+  # an optional frame accent identifies this daemon at a glance. The view
+  # validates the value before it places the color in CSS.
+  if accent = get.("AIMAX_ACCENT", "accent") do
+    config :aimax_core, accent: accent
+  end
 end

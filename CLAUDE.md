@@ -18,8 +18,8 @@ sockets, PTYs, parsers, schedulers, and raw buffer mechanics.
 
 Before an implementation or fix, load `.agents/skills/code-change/SKILL.md`.
 That skill defines the durable completion gate for repository changes.
-Before an acceptance run or suite change, load
-`.agents/skills/acceptance-testing/SKILL.md`.
+Before an RL benchmark run or benchmark harness change, load
+`.agents/skills/rl-benchmark/SKILL.md`.
 
 ```sh
 bin/test-fast                               # the suite in 4 partitions; all four apps must stay green

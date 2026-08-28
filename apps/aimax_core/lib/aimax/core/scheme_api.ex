@@ -347,6 +347,8 @@ defmodule Aimax.Core.SchemeAPI do
         "(minibuffer-read* PROMPT CANDIDATES HANDLERS) — activate the minibuffer with a handler alist, including an optional collect handler.",
       "global-set-key" =>
         "(global-set-key SEQ COMMAND) — bind the key sequence SEQ to COMMAND globally.",
+      "global-unset-key" =>
+        "(global-unset-key SEQ) — remove the global binding for the key sequence SEQ.",
       "local-set-key" =>
         "(local-set-key SEQ COMMAND) — bind SEQ to COMMAND in the current buffer.",
       "local-set-key*" => "(local-set-key* BUF SEQ COMMAND) — bind SEQ to COMMAND in buffer BUF.",
@@ -1448,6 +1450,10 @@ defmodule Aimax.Core.SchemeAPI do
       end,
       "global-set-key" => fn [seq, command] ->
         Editor.bind_key(String.split(seq, " "), command)
+        :void
+      end,
+      "global-unset-key" => fn [seq] ->
+        Editor.unbind_key(String.split(seq, " "))
         :void
       end,
       "transient-show!" => fn

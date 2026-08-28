@@ -126,8 +126,11 @@ registry path.
 
 ```sh
 AIMAX_HOME=~/.aimax-feature AIMAX_PORT=4014 AIMAX_APP_PORT=4015 \
-  AIMAX_NAME=feature mix run --no-halt
+  AIMAX_NAME=feature AIMAX_ACCENT="#3f7cac" mix run --no-halt
 ```
+
+`AIMAX_ACCENT` adds a persistent colored frame and instance label. Use a
+six-digit CSS hex color so each daemon has a stable visual identity.
 
 In the window: `C-x 2/3/o/1/0` splits windows, `C-x C-f` finds a file,
 `C-x C-s` saves, `C-x b` switches buffers, `C-k` and `C-y` kill and yank,

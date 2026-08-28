@@ -438,6 +438,95 @@ const OPS = {
   async close({ tab }) {
     await chrome.tabs.remove(tab);
     return { closed: tab };
+  },
+
+  // --- tiling ---------------------------------------------------------------
+  //
+  // The editor tiles its own windows; these ops let it tile the browser the
+  // same way. Chrome has no split view an extension can reach, so a tile is a
+  // WINDOW, not a pane inside one. One tab per window, each window placed on
+  // the work area, is the same thing every tiling window manager does.
+  //
+  // Mechanism only. Which tab goes where, and what the rectangles are, is
+  // chrome.scm's policy.
+
+  // the usable rectangle of every display: the work area excludes the menu
+  // bar and the dock, so a placed window is never under them
+  async displays() {
+    const ds = await chrome.system.display.getInfo();
+    return {
+      displays: ds.map((d) => ({
+        id: d.id,
+        primary: d.isPrimary,
+        // workArea, not bounds: bounds includes the menu bar and the dock
+        left: d.workArea.left,
+        top: d.workArea.top,
+        width: d.workArea.width,
+        height: d.workArea.height
+      }))
+    };
+  },
+
+  async windows() {
+    const ws = await chrome.windows.getAll({ populate: true });
+    return {
+      windows: ws.map((w) => ({
+        id: w.id,
+        type: w.type,
+        state: w.state,
+        focused: w.focused,
+        left: w.left,
+        top: w.top,
+        width: w.width,
+        height: w.height,
+        tabs: (w.tabs || []).map((t) => ({
+          id: t.id,
+          url: t.url,
+          title: t.title,
+          active: t.active
+        }))
+      }))
+    };
+  },
+
+  // A minimized or maximized window ignores a move, so the state comes back
+  // to normal first and the geometry lands in a second call.
+  async "window-place"({ window, left, top, width, height }) {
+    const w = await chrome.windows.get(window);
+    if (w.state !== "normal") await chrome.windows.update(window, { state: "normal" });
+    await chrome.windows.update(window, {
+      left: Math.round(left),
+      top: Math.round(top),
+      width: Math.round(width),
+      height: Math.round(height)
+    });
+    return { window };
+  },
+
+  // A tile of its own: the tab leaves its strip for a new window at RECT.
+  // type "popup" drops the tab strip and the address bar, so the tile shows
+  // the page and nothing else — the editor is the chrome now.
+  async "tab-tile"({ tab, left, top, width, height, popup }) {
+    const t = await chrome.tabs.get(tab);
+    const w = await chrome.windows.create({
+      tabId: tab,
+      type: popup === false ? "normal" : "popup",
+      focused: false,
+      left: Math.round(left),
+      top: Math.round(top),
+      width: Math.round(width),
+      height: Math.round(height)
+    });
+    return { window: w.id, tab: t.id };
+  },
+
+  // the other direction: gather a tiled tab back into one window's strip
+  async "tab-gather"({ tab, window, index }) {
+    const moved = await chrome.tabs.move(tab, {
+      windowId: window,
+      index: index === undefined ? -1 : index
+    });
+    return { tab: Array.isArray(moved) ? moved[0].id : moved.id };
   }
 };
 

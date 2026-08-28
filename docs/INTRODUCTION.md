@@ -12,18 +12,9 @@ It is time to now go back to powerful interfaces. Back in the day, learning the 
 
 With LLMs that power is now available to everyone. I suggest we dive in.
 
-
-
-
-
-
-
-
-
-
 ## Context has become king
 
-What is the neckbeard hitting `scroll-other-window` saying with this action? He's saying that he doesn't go anywhere. What he wants he summons to him.
+What is the neckbeard hitting `scroll-other-window` saying with this action? He's saying that he doesn't go anywhere. What he wants he summons to him. 
 
 For many years,  when the Internet was simple, it was possible to go to where the thing was. No longer. We all have multiple chrome profiles and multiple browsers in multiple desktops. Writing a personal email and want to see server health for that third client? swipe desktop swipe desktop, switch to browser, search for tab, wrong window, cmd tab cmd tab....I mean can you imagine?
 
@@ -31,10 +22,12 @@ You have all powerful machine intelligence and it can't see which tab you're in.
 
 GUIs are not great for power surfing anyways. Someone else's interface can never be.
 
-
-
-
-
+```scheme
+(+ 1 1)
+```
+```result
+2
+```
 
 
 ## There is another way
@@ -61,6 +54,7 @@ Compos'consistent interface means that your same keybindings work everywhere. Ma
 agent? browser? editor? os? something.
 
 a fully programmable environment which you customize by talking to an agent. It is an annoyingly useful piece of software for people who want to think, to read, to write, to research. People who are tired of the agents being the only ones who know whats on the disk.
+
 
 
 

@@ -1316,7 +1316,7 @@ defmodule Aimax.Ui.HomepageLive do
         </div>
       </section>
 
-      <section :if={@brand.key != :compos} class="operad-final" id="access">
+      <section class="operad-final" id="access">
         <div class="operad-shell">
           <img :if={@brand.key == :operad} src="/images/operad-fractal-512.png" alt="Operad recursive emblem" />
           <img

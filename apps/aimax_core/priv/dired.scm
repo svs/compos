@@ -602,7 +602,10 @@
         (message "No file on this line"))))
 
 (define-command "dired-visit" "Visit the file or directory named on this line"
-  (lambda () (dired-visit-with-group #f)))
+  (lambda ()
+    ;; The Dired buffer's group is more specific than a frame or project
+    ;; fallback. An explicit visit also replaces inherited placement.
+    (dired-visit-with-group (buffer-group (current-buffer)))))
 
 (define-command "dired-visit-in-group"
   "Visit this entry in the current group, or the Dired buffer's group"

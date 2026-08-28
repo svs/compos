@@ -115,6 +115,9 @@ defmodule Aimax.Core.Editor do
   # keymap
   def bind_key(seq, command), do: GenServer.call(__MODULE__, {:bind_key, seq, command})
 
+  @doc "Drop the global binding for SEQ."
+  def unbind_key(seq), do: GenServer.call(__MODULE__, {:unbind_key, seq})
+
   def local_bind_key(buffer, seq, command),
     do: GenServer.call(__MODULE__, {:local_bind_key, buffer, seq, command})
 
@@ -1036,6 +1039,9 @@ defmodule Aimax.Core.Editor do
 
   def handle_call({:bind_key, seq, command}, _from, state),
     do: {:reply, :ok, %{state | keymap: Map.put(state.keymap, seq, command)}}
+
+  def handle_call({:unbind_key, seq}, _from, state),
+    do: {:reply, :ok, %{state | keymap: Map.delete(state.keymap, seq)}}
 
   # no-op writes must not broadcast — echo("")/pending([]) fire on every key
   def handle_call({:set_pending, seq, fid}, _from, state) do
@@ -2022,11 +2028,30 @@ defmodule Aimax.Core.Editor do
   defp modeline_group(groups, current) when is_list(groups) do
     names = Enum.filter(groups, &is_binary/1)
 
+    current_name =
+      cond do
+        current in names -> current
+        is_binary(current) -> Enum.find(names, &String.starts_with?(current, &1 <> " "))
+        true -> nil
+      end
+
+    decorated? = is_binary(current_name) and current != current_name
+
     cond do
-      names == [] -> nil
-      length(names) == 1 -> hd(names)
-      is_binary(current) and current in names -> "#{current} (#{length(names) - 1} more)"
-      true -> "#{length(names)} groups"
+      names == [] ->
+        nil
+
+      length(names) == 1 and decorated? and hd(names) == current_name ->
+        current
+
+      length(names) == 1 ->
+        hd(names)
+
+      is_binary(current_name) and current_name in names ->
+        "#{current} (#{length(names) - 1} more)"
+
+      true ->
+        "#{length(names)} groups"
     end
   end
 

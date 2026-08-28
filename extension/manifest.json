@@ -8,7 +8,8 @@
     "scripting",
     "storage",
     "debugger",
-    "alarms"
+    "alarms",
+    "system.display"
   ],
   "host_permissions": [
     "<all_urls>"

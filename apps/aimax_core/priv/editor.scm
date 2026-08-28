@@ -3949,7 +3949,16 @@
 
 (define (visit path0 &optional group)
   (let* ((path (normalize-file-input path0))
-         (existing (buffer-known? path))
+         ;; A directory answers to one buffer name whatever the prompt
+         ;; spelled: file completion offers "/dir/" and Dired names the
+         ;; buffer "/dir". Reading existence from the raw path calls a
+         ;; live buffer new, and a new buffer MOVES to the destination
+         ;; group instead of joining it, which silently drops the
+         ;; memberships it already had.
+         (existing (or (buffer-known? path)
+                       (and (boundp (quote dired-normalize-dir))
+                            (file-directory? path)
+                            (buffer-known? (dired-normalize-dir path)))))
          (buf
            (cond
              ((remote-path? path) (remote-visit path))
@@ -8630,6 +8639,7 @@
 (public! 'command-doc "(command-doc NAME) -> the command's docstring (\"\" if none)")
 (public! 'key-for-command "(key-for-command NAME) -> its global keybinding (\"\" if none)")
 (public! 'global-set-key "(global-set-key KEYS COMMAND-NAME), e.g. \"C-c x\"")
+(public! 'global-unset-key "(global-unset-key KEYS) — remove one global binding")
 (public! 'local-set-key "(local-set-key KEYS COMMAND-NAME) in the current buffer")
 (public! 'local-remap! "(local-remap! FROM-COMMAND TO-COMMAND) — Emacs [remap]: every key bound to FROM runs TO in this buffer (arrows, C-n/C-p, user bindings alike)")
 (public! 'local-remap*! "(local-remap*! BUF FROM-COMMAND TO-COMMAND) — remap in an explicit buffer")

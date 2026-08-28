@@ -76,8 +76,12 @@
 (defgroup 'project "Projects: a project is a git checkout.")
 
 (defcustom 'project-ripgrep-program "rg" "The ripgrep executable." 'group 'project)
-(defcustom 'project-ripgrep-args "--line-number --no-heading --color never --smart-case"
-  "Flags for every project-ripgrep run." 'group 'project)
+(defcustom 'project-ripgrep-args
+  "--line-number --no-heading --color never --smart-case --sort path"
+  "Flags for every project-ripgrep run. --sort path makes the result order
+the same on every run: without it ripgrep answers in the order its threads
+finish, so \"the first match\" is whichever file the disk offered first."
+  'group 'project)
 (defcustom 'project-ripgrep-limit 500
   "How many matches one search offers." 'group 'project)
 
@@ -311,7 +315,7 @@
   ;; also guarantees that joining a relative candidate produces one slash.
   (let ((root (strip-trailing-slash root)))
     (project-remember! root)
-    (let ((g (frame-group))
+    (let ((g (or (buffer-group (current-buffer)) (frame-group)))
           (base (project-file-candidates root)))
       (minibuffer-read* (string-append "Find file in " (project-name root) ": ")
         base

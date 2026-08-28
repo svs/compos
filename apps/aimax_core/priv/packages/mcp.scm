@@ -48,8 +48,12 @@
 ;; (mcp.exa.ai/mcp?exaApiKey=…) and refusing to resolve there only moved
 ;; the secret back into the config file. A url that carries a key must
 ;; never print — mcp-url-shown cuts the query string off every display.
+;; 'args is NOT a reference site. An npm package name starts with "@"
+;; ("-y" "@adenot/mcp-google-search"), so resolving there reads a package
+;; name as a key name. A match would put the secret itself into argv, where
+;; every process listing can read it.
 (define (mcp-resolve-spec spec)
-  (spec-resolve spec '(env plist headers plist args each url value)))
+  (spec-resolve spec '(env plist headers plist url value)))
 
 ;; a url without its query string. Every line that shows a url goes on a
 ;; screen or into a chat buffer, and a key can ride in the query.

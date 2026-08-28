@@ -41,9 +41,16 @@ defmodule Aimax.Core.Plist do
 
   def to_json(list, nil_for) when is_list(list) do
     if plist?(list) do
+      # A plist can hold the same key twice: Scheme code shadows a value by
+      # consing a new pair on the front, and plist-get answers with the
+      # first one it meets. Map.new would keep the LAST pair, so a shadowed
+      # value crossed into Elixir as the value Scheme had replaced. Keep the
+      # first pair, so both sides read one plist the same way.
       list
       |> Enum.chunk_every(2)
-      |> Map.new(fn [{:sym, k}, v] -> {k, to_json(v, nil_for)} end)
+      |> Enum.reduce(%{}, fn [{:sym, k}, v], acc ->
+        if Map.has_key?(acc, k), do: acc, else: Map.put(acc, k, to_json(v, nil_for))
+      end)
     else
       Enum.map(list, &to_json(&1, nil_for))
     end

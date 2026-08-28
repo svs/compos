@@ -147,6 +147,27 @@ defmodule Aimax.Ui.EditorLiveTest do
     assert cleared in [false, "#f"]
   end
 
+  # the client measures where the visual rows begin and sends the map;
+  # the editor keeps it for Scheme and draws nothing for it
+  test "a wrap map is kept for the window it names", %{conn: conn} do
+    win = Aimax.Core.Editor.render_state() |> Map.get(:tree) |> Map.get(:id)
+    {:ok, view, html} = live(conn, "/")
+    # the page names what the map measures: the buffer version and the
+    # start byte of every line
+    assert html =~ ~s(data-v=")
+    assert html =~ ~s(data-s="0")
+
+    view
+    |> element("#editor")
+    |> render_hook("wrap_map", %{"maps" => %{"#{win}" => %{"v" => 7, "r" => [0, 5, 10]}}})
+
+    assert {:ok, "7"} = Aimax.Core.Session.eval("(car (window-wrap-map #{win}))")
+    assert {:ok, "(0 5 10)"} = Aimax.Core.Session.eval("(cadr (window-wrap-map #{win}))")
+
+    # a window nobody measured has no map
+    assert {:ok, "#f"} = Aimax.Core.Session.eval("(window-wrap-map 999999)")
+  end
+
   test "a worktree buffer renders its persistent header and attention frame", %{conn: conn} do
     buf = Aimax.Core.Editor.current_buffer()
 

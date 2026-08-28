@@ -1019,33 +1019,6 @@ defmodule Aimax.Ui.Layouts do
             return held;
           }
 
-          // The column a visual-line move keeps while it walks rows, and the
-          // row it last aimed at. A click sets a new column, and the click
-          // arrives in the preview hook, so the two hooks share one holder.
-          //
-          // The row matters because the cursor marker does not always draw
-          // on the row it belongs to: a point right after a line break in
-          // the source draws at the END of the previous rendered row, where
-          // the browser collapses the break. Reading the next row from the
-          // marker would then read the same row twice and the cursor would
-          // stop moving. So remember the row this move aimed at, in page
-          // coordinates, and step from there.
-          const visualGoal = { x: null, y: null };
-
-          // the row a preview move works from: the marker's own row, unless
-          // the row we aimed at last time says the marker drew somewhere else
-          function visualBaseRow(d, rect, line) {
-            const mid = rect.top + Math.max(1, Math.min(rect.height / 2, line / 2));
-            if (visualGoal.y == null) return mid;
-            const top = (d.scrollingElement || d.documentElement).scrollTop;
-            const remembered = visualGoal.y - top;
-            return Math.abs(remembered - mid) > line * 0.65 ? remembered : mid;
-          }
-
-          function rememberRow(d, y) {
-            visualGoal.y = y + (d.scrollingElement || d.documentElement).scrollTop;
-          }
-
           // The page carries one .ln marker per source line that draws text.
           // The marker above a caret names that line's byte offset, and the
           // rendered text between the two says how far along the line the
@@ -1078,28 +1051,6 @@ defmodule Aimax.Ui.Layouts do
             return at + utf8.encode(upto.toString()).length;
           }
 
-          function sourceSpot(d, node, off) {
-            const marks = d.querySelectorAll("span.ln");
-            if (!marks.length) return null;
-            const caret = d.createRange();
-            caret.setStart(node, off);
-            caret.collapse(true);
-            let found = null;
-            for (const m of marks) {
-              const at = d.createRange();
-              at.selectNode(m);
-              if (caret.compareBoundaryPoints(Range.START_TO_START, at) < 0) break;
-              found = m;
-            }
-            if (!found) return null;
-            const span = d.createRange();
-            span.setStartAfter(found);
-            span.setEnd(node, off);
-            const p = parseInt(found.dataset.p, 10);
-            if (!Number.isFinite(p)) return null;
-            return { p: p, off: span.toString().length };
-          }
-
           // The image a probe landed on, and the source byte it names. A
           // probe over a picture answers with the element that holds it and
           // the index of the picture inside it, not with a text node.
@@ -1120,40 +1071,6 @@ defmodule Aimax.Ui.Layouts do
           function isChrome(node) {
             const el = node && (node.nodeType === 1 ? node : node.parentElement);
             return !!(el && el.closest && el.closest("[data-chrome], .code-block-head, .tweet"));
-          }
-
-          // One rendered fragment names many source positions: the code span
-          // `-b` sits in the file ten times. So say which one this is —
-          // count the same text on the page before this occurrence — and
-          // let Scheme pick that occurrence in the source.
-          function previewSpot(d, node, off, dir) {
-            const t = node.textContent;
-            const before = t.slice(0, off);
-            const after = t.slice(off);
-            const wb = (before.match(/[\w-]*$/) || [""])[0];
-            const wa = (after.match(/^[\w-]*/) || [""])[0];
-            let page = "";
-            try {
-              const r = d.createRange();
-              r.setStart(d.body, 0);
-              r.setEnd(node, off);
-              page = r.toString();
-            } catch (_) { page = ""; }
-            // the occurrence starts one BEFORE-length back from the caret
-            const count = (needle, back) => {
-              if (!needle) return 0;
-              const upto = page.length - back;
-              let n = 0;
-              for (let i = page.indexOf(needle); i >= 0 && i < upto;
-                   i = page.indexOf(needle, i + 1)) n++;
-              return n;
-            };
-            return {
-              before: before, after: after, wb: wb, wa: wa,
-              nth: count(before + after, before.length),
-              wn: count(wb + wa, wb.length),
-              dir: dir
-            };
           }
 
           const PAGE_BOOT = document.querySelector("meta[name='boot-id']").getAttribute("content");
@@ -1288,6 +1205,7 @@ defmodule Aimax.Ui.Layouts do
                   this.lastDoc = null;
                   this.syncDoc();
                   this.attach();
+                  if (window.aimaxRemeasure) window.aimaxRemeasure();
                 };
                 this.el.addEventListener("load", this.onLoad);
                 this.syncDoc();
@@ -1550,28 +1468,16 @@ defmodule Aimax.Ui.Layouts do
                     if (!node || node.nodeType !== 3) return;
                     if (chromeNode(node)) return;
                     const off = c.startOffset !== undefined ? c.startOffset : c.offset;
-                    visualGoal.x = null;
-                    visualGoal.y = null;
                     this.dragFrom = { x: e.clientX, y: e.clientY };
+                    // a click lands only where the page names the byte; a
+                    // spot with no run under it selects the window and
+                    // nothing more
                     const exact = exactSpot(d, node, off);
-                    if (exact !== null) {
-                      this.pushEvent("preview_goto_pos", {
-                        win: parseInt(this.el.dataset.win, 10),
-                        pos: exact, extend: false
-                      });
-                      return;
-                    }
-                    const src = sourceSpot(d, node, off);
-                    if (src) {
-                      this.pushEvent("preview_goto_src", {
-                        win: parseInt(this.el.dataset.win, 10),
-                        p: src.p, off: src.off, dir: 0, extend: false
-                      });
-                      return;
-                    }
-                    this.pushEvent("preview_goto", Object.assign(
-                      { win: parseInt(this.el.dataset.win, 10) },
-                      previewSpot(d, node, off, 0)));
+                    if (exact === null) return;
+                    this.pushEvent("preview_goto_pos", {
+                      win: parseInt(this.el.dataset.win, 10),
+                      pos: exact, extend: false
+                    });
                   }, true);
                   // Clicking the preview gives keyboard focus to the iframe.
                   // Keyboard events do not cross that browsing-context boundary,
@@ -1614,18 +1520,19 @@ defmodule Aimax.Ui.Layouts do
                     if (!node || node.nodeType !== 3) return null;
                     if (chromeNode(node)) return null;
                     const off = c.startOffset !== undefined ? c.startOffset : c.offset;
-                    return previewSpot(d, node, off, 0);
+                    return exactSpot(d, node, off);
                   };
-                  const dragExtend = (spot) => {
-                    this.pushEvent("preview_goto", Object.assign(
-                      { win: parseInt(this.el.dataset.win, 10), extend: true }, spot));
+                  const dragExtend = (pos) => {
+                    this.pushEvent("preview_goto_pos", {
+                      win: parseInt(this.el.dataset.win, 10), pos: pos, extend: true
+                    });
                   };
                   d.addEventListener("mousemove", (e) => {
                     if (!this.dragFrom || !(e.buttons & 1)) return;
                     const now = Date.now();
                     if (this.dragAt && now - this.dragAt < 100) return;
                     const spot = dragSpot(e);
-                    if (!spot) return;
+                    if (spot === null) return;
                     this.dragAt = now;
                     dragExtend(spot);
                   }, true);
@@ -1645,6 +1552,7 @@ defmodule Aimax.Ui.Layouts do
                       win: parseInt(this.el.dataset.win, 10),
                       top: Math.round(s.scrollTop)
                     });
+                    if (window.aimaxRemeasure) window.aimaxRemeasure();
                   }, 250);
                 }, true);
               }
@@ -1786,15 +1694,11 @@ defmodule Aimax.Ui.Layouts do
               reconnected() { this.bootCheck(); },
               updated() {
                 if (this.bootCheck()) return;
-                // A server patch acknowledges the last visual move. Keyup
-                // may land inside the iframe, so it cannot be the only reset.
-                this.visualLinePending = false;
                 if (this.syncCursorFocus) this.syncCursorFocus();
               },
               mounted() {
                 if (this.bootCheck()) return;
                 this.handleEvent("navigate", ({url}) => window.location.assign(url));
-                this.visualLinePending = false;
                 this.whichKeyHeld = new Set();
                 this.whichKeyQuery = "";
                 this.whichKeyFiltering = false;
@@ -1869,248 +1773,6 @@ defmodule Aimax.Ui.Layouts do
                   if (document.hasFocus() && (editorOpen || (!terminal && focusedTerminal))) {
                     this.sink?.focus();
                   }
-                };
-                // visual-line-mode belongs to the buffer, but only the
-                // browser knows where proportional rendered prose wraps.
-                // Resolve the screen line here, then send the same semantic
-                // preview position a mouse click sends; Scheme remains the
-                // owner of the resulting point move.
-                this.visualLineMove = (dir, extend) => {
-                  if (document.querySelector(".mb-panel")) return false;
-                  // A browser key-repeat can outrun the LiveView patch that
-                  // moves the cursor. Do not send another move from stale DOM.
-                  if (this.visualLinePending) return true;
-
-                  // A raw line window already knows how to map a browser caret
-                  // to its logical line and character offset. Use that same
-                  // geometry for wrapped visual rows.
-                  const raw = document.querySelector(
-                    ".window.active .buf[data-visual-lines='true']"
-                  );
-                  if (raw) {
-                    const cursor = raw.querySelector(".cursor");
-                    // Where the caret lands does not depend on whether a
-                    // selection is growing. Refusing the key when extending
-                    // sent it to the server, which moved by SOURCE line: in a
-                    // wrapped paragraph one S-<down> selected the whole thing.
-                    // The move is computed the same way either way, and the
-                    // mark rides along for the editor to decide.
-                    if (!cursor) return false;
-                    const r = cursor.getBoundingClientRect();
-                    const content = cursor.closest(".line-content") || cursor.parentElement;
-                    const css = getComputedStyle(content);
-                    const line = parseFloat(css.lineHeight) ||
-                      (parseFloat(css.fontSize) || 16) * 1.2;
-                    const x = visualGoal.x == null ? r.left : visualGoal.x;
-                    visualGoal.x = x;
-                    const y =
-                      r.top + Math.max(1, Math.min(r.height / 2, line / 2)) + dir * line;
-                    const box = raw.getBoundingClientRect();
-                    const caretAt = (px) => document.caretPositionFromPoint
-                      ? document.caretPositionFromPoint(px, y)
-                      : document.caretRangeFromPoint && document.caretRangeFromPoint(px, y);
-                    let pos = null;
-                    for (let dx = 0; !pos && dx <= box.width; dx += 4) {
-                      const xs = dx === 0 ? [x] : [x - dx, x + dx];
-                      for (const px of xs) {
-                        if (px < box.left || px > box.right) continue;
-                        const c = caretAt(px);
-                        if (!c) continue;
-                        const node = c.offsetNode || c.startContainer;
-                        const off = c.offset !== undefined ? c.offset : c.startOffset;
-                        pos = posIn(node, off);
-                        if (pos) break;
-                      }
-                    }
-                    if (!pos) return false;
-                    const winEl = raw.closest(".window[data-win-id]");
-                    if (!winEl) return false;
-                    this.visualLinePending = true;
-                    this.pushEvent("mouse", {
-                      win: parseInt(winEl.dataset.winId, 10),
-                      line: pos.line,
-                      col: pos.col,
-                      extend: extend
-                    });
-                    return true;
-                  }
-
-                  const frame = document.querySelector(
-                    ".window.active iframe[data-rm='markdown'][data-visual-lines='true']"
-                  );
-                  if (!frame) return false;
-                  let d;
-                  try { d = frame.contentDocument; } catch (_) { return false; }
-                  const pt = d && d.querySelector(".pt");
-                  if (!pt) return false;
-                  let r = pt.getBoundingClientRect();
-
-                  // The browser only answers for a point inside the
-                  // scrollport. A caret off the page, OR one on the last row
-                  // the page shows, leaves the probe below with nowhere to
-                  // land: it returns nothing, the handler gives up, and the
-                  // key falls through to a move by SOURCE line - the jump.
-                  // Make room in the direction of travel first, then ask.
-                  {
-                    const parentEl = pt.parentElement || d.body;
-                    const lh =
-                      parseFloat(d.defaultView.getComputedStyle(parentEl).lineHeight) || 20;
-                    const room = dir > 0 ? frame.clientHeight - r.bottom : r.top;
-
-                    // the same rule the page follows when point leaves it:
-                    // put point in the middle, so what comes next is a
-                    // screenful rather than one line
-                    if (room < lh * 3) {
-                      const scroll = d.scrollingElement || d.documentElement;
-                      scroll.scrollTop = Math.max(
-                        0,
-                        scroll.scrollTop + r.top - frame.clientHeight / 2 + r.height / 2
-                      );
-                      r = pt.getBoundingClientRect();
-                      visualGoal.y = null;
-                    }
-                  }
-
-                  const parent = pt.parentElement || d.body;
-                  const css = d.defaultView.getComputedStyle(parent);
-                  const line = parseFloat(css.lineHeight) ||
-                    (parseFloat(css.fontSize) || 16) * 1.2;
-                  const x = visualGoal.x == null ? r.left : visualGoal.x;
-                  visualGoal.x = x;
-                  const caretAt = (y) => d.caretRangeFromPoint
-                    ? d.caretRangeFromPoint(x, y)
-                    : d.caretPositionFromPoint && d.caretPositionFromPoint(x, y);
-                  // Margins between Markdown blocks are not caret positions.
-                  // Walk a little farther in the requested direction until
-                  // the browser gives us text on the neighboring screen line.
-                  const rowMid = visualBaseRow(d, r, line);
-                  for (let step = line; step <= line * 3; step += Math.max(2, line / 4)) {
-                    // Probe the middle of the target row. Its top edge can
-                    // resolve to the previous row or to an element container.
-                    const c = caretAt(rowMid + dir * step);
-                    if (!c) continue;
-                    const node = c.startContainer || c.offsetNode;
-                    if (!node) continue;
-                    // A picture is a row the reader sees, and it draws no
-                    // text to measure. Read the byte it names instead, or
-                    // the move falls through to a move by source line and
-                    // drags point to the end of the image's own line.
-                    const picture = imageAt(node, c.startOffset !== undefined
-                      ? c.startOffset : c.offset);
-                    if (picture !== null) {
-                      this.visualLinePending = true;
-                      rememberRow(d, rowMid + dir * step);
-                      this.pushEvent("preview_goto_pos", {
-                        win: parseInt(frame.dataset.win, 10),
-                        pos: picture,
-                        extend: extend
-                      });
-                      return true;
-                    }
-                    if (node.nodeType !== 3) continue;
-                    const response = node.parentElement && node.parentElement.closest(".llm-response");
-                    if (response) {
-                      const start = parseInt(response.dataset.start, 10);
-                      const end = parseInt(response.dataset.end, 10);
-                      if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
-                      this.visualLinePending = true;
-                      this.pushEvent("preview_goto_pos", {
-                        win: parseInt(frame.dataset.win, 10),
-                        pos: dir > 0 ? end + 1 : Math.max(0, start - 1),
-                        extend: extend
-                      });
-                      return true;
-                    }
-                    // a row the source does not own: keep walking
-                    if (isChrome(node)) continue;
-                    // The newline that ends a row is drawn text too, and its
-                    // box reaches into the gap below the row. A probe that
-                    // lands there answers "the end of the line you are on",
-                    // so the caret never leaves the row. Keep walking until
-                    // the browser offers a character the reader can see.
-                    if (!node.textContent || !node.textContent.trim()) continue;
-                    const off = c.startOffset !== undefined ? c.startOffset : c.offset;
-                    this.visualLinePending = true;
-                    rememberRow(d, rowMid + dir * step);
-                    const exact = exactSpot(d, node, off);
-                    if (exact !== null) {
-                      this.pushEvent("preview_goto_pos", {
-                        win: parseInt(frame.dataset.win, 10),
-                        pos: exact,
-                        extend: extend
-                      });
-                      return true;
-                    }
-                    const src = sourceSpot(d, node, off);
-                    if (src) {
-                      this.pushEvent("preview_goto_src", {
-                        win: parseInt(frame.dataset.win, 10),
-                        p: src.p, off: src.off, dir: dir, extend: extend
-                      });
-                      return true;
-                    }
-                    this.pushEvent("preview_goto", Object.assign(
-                      { win: parseInt(frame.dataset.win, 10), extend: extend },
-                      previewSpot(d, node, off, dir)));
-                    return true;
-                  }
-                  return false;
-                };
-                // Home/End and Cmd-Left/Right mean the edge of the rendered
-                // row in a writing preview, not the source Markdown line.
-                // Scan inward from the viewport edge at the cursor's y until
-                // the browser supplies a caret on this visual row.
-                this.visualLineEdge = (dir, extend) => {
-                  if (document.querySelector(".mb-panel")) return false;
-                  const frame = document.querySelector(
-                    ".window.active iframe[data-rm='markdown'][data-visual-lines='true']"
-                  );
-                  if (!frame) return false;
-                  let d;
-                  try { d = frame.contentDocument; } catch (_) { return false; }
-                  const pt = d && d.querySelector(".pt");
-                  if (!pt || this.visualLinePending) return !!pt;
-                  const r = pt.getBoundingClientRect();
-                  const parent = pt.parentElement || d.body;
-                  const css = d.defaultView.getComputedStyle(parent);
-                  const line = parseFloat(css.lineHeight) ||
-                    (parseFloat(css.fontSize) || 16) * 1.2;
-                  const y = visualBaseRow(d, r, line);
-                  const width = d.documentElement.clientWidth;
-                  const caretAt = (x) => d.caretRangeFromPoint
-                    ? d.caretRangeFromPoint(x, y)
-                    : d.caretPositionFromPoint && d.caretPositionFromPoint(x, y);
-                  for (let x = dir < 0 ? 0 : width - 1;
-                       dir < 0 ? x < width : x >= 0;
-                       x += dir < 0 ? 3 : -3) {
-                    const c = caretAt(x);
-                    if (!c) continue;
-                    const node = c.startContainer || c.offsetNode;
-                    if (!node || node.nodeType !== 3) continue;
-                    const off = c.startOffset !== undefined ? c.startOffset : c.offset;
-                    const probe = d.createRange();
-                    probe.setStart(node, off);
-                    probe.collapse(true);
-                    const cr = probe.getBoundingClientRect();
-                    if (Math.abs(cr.top - r.top) > line * 0.65) continue;
-                    if (isChrome(node)) continue;
-                    this.visualLinePending = true;
-                    const src = sourceSpot(d, node, off);
-                    if (src) {
-                      this.pushEvent("preview_goto_src", {
-                        win: parseInt(frame.dataset.win, 10),
-                        p: src.p, off: src.off, dir: 0, extend: extend
-                      });
-                      return true;
-                    }
-                    // the edge of the row this cursor already sits on, so
-                    // the move names no direction
-                    this.pushEvent("preview_goto", Object.assign(
-                      { win: parseInt(frame.dataset.win, 10), extend: extend },
-                      previewSpot(d, node, off, 0)));
-                    return true;
-                  }
-                  return false;
                 };
                 // a selection can live inside a same-origin preview iframe
                 // (an .llm-response drag), where the focused parent's own
@@ -2205,20 +1867,9 @@ defmodule Aimax.Ui.Layouts do
                   const spec = keySpec(e);
                   if (spec === null) return;
                   e.preventDefault();
-                  const edgeDir = ["<home>", "S-<home>", "s-<left>", "s-S-<left>"].includes(spec)
-                    ? -1
-                    : ["<end>", "S-<end>", "s-<right>", "s-S-<right>"].includes(spec)
-                      ? 1 : 0;
-                  const edgeExtend = spec === "S-<home>" || spec === "S-<end>" ||
-                    spec === "s-S-<left>" || spec === "s-S-<right>";
-                  if (edgeDir !== 0 && this.visualLineEdge(edgeDir, edgeExtend)) return;
-                  const visualDir = spec === "<down>" || spec === "C-n" ? 1
-                    : spec === "<up>" || spec === "C-p" ? -1
-                    : spec === "S-<down>" ? 1 : spec === "S-<up>" ? -1 : 0;
-                  const visualExtend = spec === "S-<down>" || spec === "S-<up>";
-                  if (visualDir !== 0 && this.visualLineMove(visualDir, visualExtend)) return;
-                  visualGoal.x = null;
-                  visualGoal.y = null;
+                  // every key goes to the editor as the key it is. A visual
+                  // row move is Scheme reading the wrap map this client
+                  // measured after the last paint; nothing is decided here.
                   this.pushEvent("key", { k: spec });
                 };
                 window.addEventListener("keydown", this.handler);
@@ -2228,10 +1879,6 @@ defmodule Aimax.Ui.Layouts do
                   if (modifier) {
                     this.whichKeyHeld.delete(modifier);
                     this.applyWhichKeyFilter();
-                  }
-                  if (e.key === "ArrowUp" || e.key === "ArrowDown" ||
-                      (e.ctrlKey && (e.key === "n" || e.key === "p"))) {
-                    this.visualLinePending = false;
                   }
                 };
                 window.addEventListener("keyup", this.keyupH);
@@ -2337,6 +1984,176 @@ defmodule Aimax.Ui.Layouts do
                   const area = document.querySelector(".windows");
                   if (area) this.pushEvent("viewport", { rows: Math.max(5, Math.floor(area.clientHeight / this.lineHeight)) });
                   this.sendWinRows();
+                  if (window.aimaxRemeasure) window.aimaxRemeasure();
+                };
+                // The wrap map. The browser is the only party that knows
+                // where proportional text wraps, so it measures where each
+                // visual row begins and reports the source byte offsets, per
+                // window, tagged with the buffer version the page shows.
+                // What a key means on those rows is Scheme's decision. The
+                // measure runs after paint, never on the key path, and is
+                // sent only when it changed, like win_rows.
+                this.lastWrapMaps = "";
+                const wrapUtf8 = new TextEncoder();
+                // the text nodes that are the source's own bytes. The cursor
+                // placeholder and the completion popup are chrome.
+                const sourceTextNodes = (root, doc) => {
+                  const out = [];
+                  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+                  let t;
+                  while ((t = walker.nextNode())) {
+                    const parent = t.parentElement;
+                    if (parent && parent.closest(".cap-pop")) continue;
+                    if (parent && parent.classList.contains("cursor") &&
+                        t.textContent === "\u00a0") continue;
+                    out.push(t);
+                  }
+                  return out;
+                };
+                // The UTF-16 indices at which a new row begins inside NODES,
+                // and the top of the last row. PREVTOP is the row the text
+                // before these nodes ended on, or null for a fresh block.
+                // Every probe is a one-character range: a collapsed range at
+                // a wrap boundary measures zero height and reports the NEXT
+                // row. Rows are monotonic in the index, so each row start is
+                // found by a binary search rather than a probe per character.
+                const rowBreaks = (doc, nodes, prevTop) => {
+                  const spans = [];
+                  let total = 0;
+                  for (const n of nodes) {
+                    spans.push({ n, at: total });
+                    total += n.textContent.length;
+                  }
+                  const locate = (i) => {
+                    let lo = 0, hi = spans.length - 1;
+                    while (lo < hi) {
+                      const mid = (lo + hi + 1) >> 1;
+                      if (spans[mid].at <= i) lo = mid; else hi = mid - 1;
+                    }
+                    return spans[lo];
+                  };
+                  const rectAt = (i) => {
+                    const sp = locate(i);
+                    const len = sp.n.textContent.length;
+                    const r = doc.createRange();
+                    r.setStart(sp.n, i - sp.at);
+                    r.setEnd(sp.n, Math.min(len, i - sp.at + 1));
+                    const rects = r.getClientRects();
+                    return rects.length ? rects[0] : null;
+                  };
+                  const starts = [];
+                  let top = prevTop;
+                  let i = 0;
+                  while (i < total) {
+                    const rect = rectAt(i);
+                    // collapsed whitespace draws no box: it belongs to the
+                    // row before it
+                    if (!rect) { i++; continue; }
+                    const tol = Math.max(2, rect.height * 0.5);
+                    if (top === null || rect.top > top + tol) starts.push(i);
+                    top = rect.top;
+                    // the last index still on this row
+                    let lo = i, hi = total - 1;
+                    while (lo < hi) {
+                      const mid = (lo + hi + 1) >> 1;
+                      const m = rectAt(mid);
+                      if (!m || m.top <= top + tol) lo = mid; else hi = mid - 1;
+                    }
+                    i = lo + 1;
+                  }
+                  return { starts, top };
+                };
+                const byteAt = (text, i) => wrapUtf8.encode(text.slice(0, i)).length;
+                // one screen of margin above and below what is visible: a
+                // move at the edge still has rows to land on, and the scroll
+                // that follows brings a fresh measure
+                const firstFrom = (els, lo) => {
+                  let a = 0, b = els.length - 1;
+                  while (a < b) {
+                    const m = (a + b) >> 1;
+                    if (els[m].getBoundingClientRect().bottom < lo) a = m + 1; else b = m;
+                  }
+                  return a;
+                };
+                // a line window: each .line names its start byte, and the
+                // rows inside it are where its own text wraps
+                const measureRaw = (buf) => {
+                  const rows = [];
+                  const lines = buf.querySelectorAll(":scope > .line");
+                  if (!lines.length) return rows;
+                  const box = buf.getBoundingClientRect();
+                  const lo = box.top - box.height, hi = box.bottom + box.height;
+                  for (let k = firstFrom(lines, lo); k < lines.length; k++) {
+                    const ln = lines[k];
+                    if (ln.getBoundingClientRect().top > hi) break;
+                    const start = parseInt(ln.dataset.s, 10);
+                    if (!Number.isFinite(start)) continue;
+                    const content = ln.querySelector(".line-content");
+                    if (!content) continue;
+                    const nodes = sourceTextNodes(content, document);
+                    const text = nodes.map((n) => n.textContent).join("");
+                    if (!text.length) { rows.push(start); continue; }
+                    for (const i of rowBreaks(document, nodes, null).starts) {
+                      rows.push(start + byteAt(text, i));
+                    }
+                  }
+                  return rows;
+                };
+                // a rendered page: the rows are runs of drawn text, each
+                // naming the source byte it began at. A run continues the
+                // row of the run before it unless the browser moved it down.
+                const measurePreview = (frame) => {
+                  const rows = [];
+                  let d;
+                  try { d = frame.contentDocument; } catch (_) { return null; }
+                  if (!d || !d.body) return null;
+                  const runs = d.querySelectorAll("span.s[data-s]");
+                  if (!runs.length) return rows;
+                  const h = frame.clientHeight;
+                  const lo = -h, hi = 2 * h;
+                  let top = null;
+                  for (let k = firstFrom(runs, lo); k < runs.length; k++) {
+                    const run = runs[k];
+                    if (run.getBoundingClientRect().top > hi) break;
+                    const at = parseInt(run.dataset.s, 10);
+                    if (!Number.isFinite(at)) continue;
+                    const nodes = sourceTextNodes(run, d);
+                    const text = nodes.map((n) => n.textContent).join("");
+                    if (!text.length) continue;
+                    const br = rowBreaks(d, nodes, top);
+                    for (const i of br.starts) rows.push(at + byteAt(text, i));
+                    top = br.top;
+                  }
+                  return rows;
+                };
+                this.sendWrapMaps = () => {
+                  const maps = {};
+                  document.querySelectorAll(".window[data-win-id]").forEach((win) => {
+                    // a preview window keeps its buffer element in the page
+                    // while the iframe draws: the iframe is what the reader
+                    // sees, so it is the one to measure
+                    const frame = win.querySelector(
+                      "iframe[data-rm='markdown'][data-visual-lines='true']");
+                    const buf = win.querySelector(".buf[data-visual-lines='true']");
+                    const el = frame || buf;
+                    if (!el) return;
+                    const v = parseInt(el.dataset.v, 10);
+                    if (!Number.isFinite(v)) return;
+                    const rows = frame ? measurePreview(frame) : measureRaw(buf);
+                    if (!rows) return;
+                    maps[win.dataset.winId] = { v, r: rows };
+                  });
+                  const key = JSON.stringify(maps);
+                  if (key !== this.lastWrapMaps) {
+                    this.lastWrapMaps = key;
+                    this.pushEvent("wrap_map", { maps });
+                  }
+                };
+                // the preview hook scrolls and reloads its own document, so
+                // it asks for a measure through this one door
+                window.aimaxRemeasure = () => {
+                  clearTimeout(this._wmt);
+                  this._wmt = setTimeout(this.sendWrapMaps, 40);
                 };
                 this.sendWinRows = () => {
                   const rows = {};
@@ -2449,6 +2266,7 @@ defmodule Aimax.Ui.Layouts do
                   clearTimeout(this.cscrollTimers.get(win));
                   this.cscrollTimers.set(win, setTimeout(() => {
                     this.pushEvent("cscroll", { win, top: Math.round(el.scrollTop) });
+                    window.aimaxRemeasure();
                   }, 250));
                 };
                 window.addEventListener("scroll", this.cscrollH, true);
@@ -2511,7 +2329,6 @@ defmodule Aimax.Ui.Layouts do
                     return;
                   }
                   document.body.classList.add("unfocused");
-                  this.visualLinePending = false;
                   this.syncCursorFocus();
                 };
                 window.addEventListener("focus", this.focusH);
@@ -2546,7 +2363,6 @@ defmodule Aimax.Ui.Layouts do
               },
               updated() {
                 if (this.bootCheck()) return;
-                this.visualLinePending = false;
                 this.applyWhichKeyFilter();
                 this.syncCursorFocus();
                 this.syncKeyboardOwner();
@@ -2554,6 +2370,7 @@ defmodule Aimax.Ui.Layouts do
                 // per-buffer styles all change how many rows fit where
                 clearTimeout(this._wrt);
                 this._wrt = setTimeout(this.sendWinRows, 30);
+                window.aimaxRemeasure();
 
                 // client-scrolled buffers (.buf.client-scroll) ship every
                 // line — the server no longer computes a windowing top to

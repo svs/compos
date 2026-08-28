@@ -357,6 +357,24 @@ defmodule Aimax.Core.Editor do
   def set_window_cols(map, fid \\ nil),
     do: GenServer.call(__MODULE__, {:set_window_cols, map, fid(fid)})
 
+  @doc """
+  The wrap maps the client measured after its last paint, per window:
+  `%{win_id => {version, row_starts}}`. `row_starts` are the byte offsets
+  where each visual row begins; `version` is the buffer version the page
+  showed. The client is the only party that knows where proportional
+  text wraps; what a key means on those rows is Scheme's decision.
+  """
+  def set_wrap_maps(map, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_wrap_maps, map, fid(fid)})
+
+  @doc "One window's wrap map, from Scheme: a test or a headless driver measuring for itself."
+  def set_wrap_map(win, version, rows, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_wrap_map, win, version, rows, fid(fid)})
+
+  @doc "The wrap map of WIN (the active window when nil): {version, row_starts} or nil."
+  def wrap_map(win \\ nil, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:wrap_map, win, fid(fid)})
+
   def scroll_active(delta_lines, fid \\ nil),
     do: GenServer.call(__MODULE__, {:scroll_active, delta_lines, fid(fid)})
 
@@ -420,7 +438,8 @@ defmodule Aimax.Core.Editor do
       # Scheme policy; rendering uses this only to compact a buffer's groups.
       group_label: nil,
       group_color: nil,
-      win_cols: %{}
+      win_cols: %{},
+      wrap_maps: %{}
     }
 
     {:ok,
@@ -477,7 +496,8 @@ defmodule Aimax.Core.Editor do
           win_rows: %{},
           group_label: nil,
           group_color: nil,
-          win_cols: %{}
+          win_cols: %{},
+          wrap_maps: %{}
         }
 
         state = %{state | frames: Map.put(state.frames, id, frame), next_win: state.next_win + 1}
@@ -781,6 +801,27 @@ defmodule Aimax.Core.Editor do
     if Map.get(f, :win_cols, %{}) == map,
       do: {:reply, false, state},
       else: {:reply, true, put_frame(state, Map.put(f, :win_cols, map))}
+  end
+
+  # what the client measured after its last paint. It moves nothing and
+  # draws nothing, so it never broadcasts: a key that arrives later reads
+  # it through Scheme, and a map that is behind the buffer is ignored
+  # there. The client sends every visual-line window each time, so the
+  # whole map is replaced.
+  def handle_call({:set_wrap_maps, map, fid}, _from, state) when is_map(map) do
+    f = frame(state, fid)
+    {:reply, :ok, put_frame(state, Map.put(f, :wrap_maps, map))}
+  end
+
+  def handle_call({:set_wrap_map, win, version, rows, fid}, _from, state) do
+    f = frame(state, fid)
+    maps = Map.put(Map.get(f, :wrap_maps, %{}), win, {version, rows})
+    {:reply, :ok, put_frame(state, Map.put(f, :wrap_maps, maps))}
+  end
+
+  def handle_call({:wrap_map, win, fid}, _from, state) do
+    f = frame(state, fid)
+    {:reply, Map.get(Map.get(f, :wrap_maps, %{}), win || f.active), state}
   end
 
   # a list lays itself out for the window it is IN, whichever frame that
@@ -2186,6 +2227,9 @@ defmodule Aimax.Core.Editor do
       style: Map.get(locals, "style"),
       render_mode: render_mode(locals),
       visual_line_mode: Map.get(locals, "visual-line-mode") == true,
+      # the page carries this so the wrap map it measures can name the
+      # text it measured
+      version: Buffer.version(buffer) || 0,
       agent: agent_leaf(locals, text),
       blocks: blocks_leaf(locals),
       minor_modes: Map.get(locals, "minor-modes") || [],

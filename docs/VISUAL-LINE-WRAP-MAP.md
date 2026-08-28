@@ -1,5 +1,15 @@
 # Problem: visual-line motion decides in the browser
 
+**Status (2026-08-29): done.** The client sends `wrap_map` (per window: the
+buffer version it drew and the byte offsets where visual rows begin) after
+every paint; `Editor.set_wrap_maps/2` keeps it; `(window-wrap-map WIN)` reads
+it; `visual-next-line!`, `visual-previous-line!`, `visual-beginning-of-line!`
+and `visual-end-of-line!` in `editor.scm` decide, with `priv/tests/visual-line-test.scm`
+as the rules. `visualLineMove`, `visualLineEdge`, `sourceSpot` and
+`previewSpot` are gone; `exactSpot` resolves clicks and drags. A stale map
+(the buffer moved on) falls back to the source line at once; a key never
+waits on a measurement.
+
 A task for an agent with a fresh context. Read `ARCHITECTURE.md` and
 `BEAM-POWER.md` (the section "The client measures. Scheme decides.") first.
 

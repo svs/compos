@@ -208,6 +208,24 @@ defmodule Aimax.Ui.EditorLive do
     end
   end
 
+  # per-window wrap maps: where the client saw each visual row begin, as
+  # source byte offsets, with the buffer version the page showed. Kept for
+  # the next key; it draws nothing, so nothing is refreshed
+  def handle_event("wrap_map", %{"maps" => maps}, socket) when is_map(maps) do
+    parsed =
+      for {id, %{"v" => v, "r" => rows}} <- maps,
+          is_integer(v),
+          is_list(rows),
+          Enum.all?(rows, &is_integer/1),
+          id_int = safe_int(id),
+          is_integer(id_int),
+          into: %{},
+          do: {id_int, {v, rows}}
+
+    Aimax.Core.Editor.set_wrap_maps(parsed, socket.assigns.frame)
+    {:noreply, socket}
+  end
+
   # wheel scrolls the hovered window when the client identified one,
   # falling back to this frame's active window
   def handle_event("scroll", %{"lines" => lines} = params, socket) when is_integer(lines) do
@@ -259,33 +277,6 @@ defmodule Aimax.Ui.EditorLive do
   # hook sends the text node split at the caret, how many times that text
   # comes before it on the page, and which way the key moves. Scheme finds
   # the spot in the source.
-  def handle_event("preview_goto", %{"win" => win} = p, socket) do
-    with id when is_integer(id) <- safe_int(win) do
-      Input.run(socket.assigns.frame, fn ->
-        command = if p["extend"] == true, do: "preview-select!", else: "preview-goto!"
-
-        Aimax.Core.Session.call_named(command, [
-          id,
-          p["before"] || "",
-          p["after"] || "",
-          p["wb"] || "",
-          p["wa"] || "",
-          count_arg(p["nth"]),
-          count_arg(p["wn"]),
-          dir_arg(p["dir"])
-        ])
-      end)
-    end
-
-    {:noreply, socket |> drain() |> refresh()}
-  end
-
-  defp count_arg(n) when is_integer(n) and n >= 0, do: n
-  defp count_arg(_), do: 0
-
-  defp dir_arg(d) when d in [-1, 0, 1], do: d
-  defp dir_arg(_), do: 0
-
   # a click on a link in a rendered page. The frame never follows the link
   # itself: the href comes here and Scheme says what it means (a help page's
   # source link, a URL for the reader).
@@ -305,18 +296,6 @@ defmodule Aimax.Ui.EditorLive do
     with id when is_integer(id) <- safe_int(win) do
       Input.run(socket.assigns.frame, fn ->
         Aimax.Core.Session.call_named("link-follow-to-group", [id, href])
-      end)
-    end
-
-    {:noreply, socket |> drain() |> refresh()}
-  end
-
-  # the page named a source line and how far along it the caret sits
-  def handle_event("preview_goto_src", %{"win" => win, "p" => at, "off" => off} = p, socket)
-      when is_integer(at) and is_integer(off) do
-    with id when is_integer(id) <- safe_int(win) do
-      Input.run(socket.assigns.frame, fn ->
-        Aimax.Core.Session.call_named("preview-goto-src!", [id, at, off, p["extend"] == true])
       end)
     end
 
@@ -1315,6 +1294,7 @@ defmodule Aimax.Ui.EditorLive do
           data-pt={@node.point}
           data-rm={@node.render_mode}
           data-visual-lines={to_string(@node.visual_line_mode)}
+          data-v={@node.version}
           data-doc={Base.encode64(@node.preview)}
           sandbox="allow-same-origin"
           title={@node.buffer}
@@ -1326,11 +1306,13 @@ defmodule Aimax.Ui.EditorLive do
         data-ctop={@node.ctop}
         data-manual={to_string(@node.manual)}
         data-visual-lines={to_string(@node.visual_line_mode)}
+        data-v={@node.version}
       >
         <div
           :for={ln <- @lines}
           id={"ln-#{@node.id}-#{ln.num}"}
           class={"line #{if ln.current, do: "hl-line"} #{if ln.selected, do: "selected-line"}"}
+          data-s={ln.start}
         >
           <span class="linenum">{ln.num}</span>
           <span class="line-content"><.seg :for={{txt, cls} <- ln.segs} txt={txt} cls={cls} /><span

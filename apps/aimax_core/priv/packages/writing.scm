@@ -204,16 +204,16 @@
   (lambda () (writing--select! forward-word!)))
 
 (define-command "writing-select-up" "Extend the region one visual line up"
-  (lambda () (writing--select! previous-line!)))
+  (lambda () (visual-previous-line! #t)))
 
 (define-command "writing-select-down" "Extend the region one visual line down"
-  (lambda () (writing--select! next-line!)))
+  (lambda () (visual-next-line! #t)))
 
 (define-command "writing-select-line-start" "Extend the region to the start of the line"
-  (lambda () (writing--select! beginning-of-line!)))
+  (lambda () (visual-beginning-of-line! #t)))
 
 (define-command "writing-select-line-end" "Extend the region to the end of the line"
-  (lambda () (writing--select! end-of-line!)))
+  (lambda () (visual-end-of-line! #t)))
 
 (define-command "writing-select-buffer-start" "Extend the region to the start of the buffer"
   (lambda () (writing--select! beginning-of-buffer!)))
@@ -319,9 +319,9 @@
   (local-set-key* buf "M-<right>" "forward-word")
   (local-set-key* buf "M-S-<left>" "writing-select-backward-word")
   (local-set-key* buf "M-S-<right>" "writing-select-forward-word")
-  ;; Platform-native prose movement. In Markdown preview the browser refines
-  ;; line boundaries to the visual row; the Scheme commands are the logical
-  ;; fallback used by the plain scratch buffer.
+  ;; Platform-native prose movement. With visual-line-mode on, the line
+  ;; commands read the wrap map the client measured and stop at the
+  ;; visual row; without one they stop at the source line.
   (local-set-key* buf "s-<left>" "beginning-of-line")
   (local-set-key* buf "s-<right>" "end-of-line")
   (local-set-key* buf "s-<up>" "beginning-of-buffer")

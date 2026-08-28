@@ -375,6 +375,12 @@ defmodule Aimax.Core.SchemeAPI do
       "window-rows" => "(window-rows) — return the number of text rows in the active window.",
       "window-cols" =>
         "(window-cols [WIN]) — return the number of text columns in WIN, or in the active window.",
+      "window-wrap-map" =>
+        "(window-wrap-map WIN) — return (VERSION ROWS) as the client measured WIN: the buffer version the page showed, and the byte offsets where its visual rows begin; #f when nothing was measured.",
+      "window-set-wrap-map!" =>
+        "(window-set-wrap-map! WIN VERSION ROWS) — record a wrap map for WIN the way the client does; for tests and headless drivers.",
+      "buffer-version" =>
+        "(buffer-version BUF) — return the buffer's edit version; it grows by one per change.",
       "frame-cols" => "(frame-cols) — estimate the usable text columns across the current frame.",
       "buffer-cols" =>
         "(buffer-cols BUF) — return the text columns of a window showing BUF, else the active window's.",
@@ -1547,6 +1553,24 @@ defmodule Aimax.Core.SchemeAPI do
         [win] when is_integer(win) -> Editor.window_cols(win)
         _ -> Editor.window_cols()
       end,
+      # the wrap map is a measurement the client made; Scheme reads it
+      # and decides what a row move means
+      "window-wrap-map" => fn
+        [win] when is_integer(win) ->
+          case Editor.wrap_map(win) do
+            {v, rows} -> [v, rows]
+            _ -> false
+          end
+
+        _ ->
+          false
+      end,
+      "window-set-wrap-map!" => fn [win, v, rows]
+                                   when is_integer(win) and is_integer(v) and is_list(rows) ->
+        Editor.set_wrap_map(win, v, rows)
+        :void
+      end,
+      "buffer-version" => fn [name] -> Buffer.version(name) || 0 end,
       "frame-cols" => fn [] -> Editor.frame_cols() end,
       "recenter!" => fn [] ->
         Editor.recenter()

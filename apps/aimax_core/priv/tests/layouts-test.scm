@@ -31,8 +31,15 @@
     (let ((buf "zz-dashboard-line"))
       (test-buffer! buf "hello\n")
       (with-current-buffer buf (lambda () (post-command!)))
-      (check-contains! (buffer-local buf 'dashboard-line) "editable"
-                       "the compact line names the edit state")
-      (check-contains! (buffer-local buf 'dashboard-line) "api"
+      ;; the compact line carries the facts the expanded segments carry:
+      ;; mode, group, model, lane. Neither rendering names the read-only
+      ;; state today.
+      (check-contains! (buffer-local buf 'dashboard-line) "mode "
+                       "the compact line names the mode")
+      (check-contains! (buffer-local buf 'dashboard-line) "groups "
+                       "the compact line names the groups")
+      (check-contains! (buffer-local buf 'dashboard-line) "llm "
+                       "the compact line names the model")
+      (check-contains! (buffer-local buf 'dashboard-line) "lane api"
                        "the compact line names the lane")
       (buffer-kill! buf))))

@@ -41,8 +41,10 @@
   (lambda ()
     (check-equal! (plist-get (catalog-entry 'function "apropos-page") 'package)
                   "help" "a function")
+    ;; the loader reads the file, so a declaration that moves house takes
+    ;; its new package with it: this one lives in agent-permissions.scm
     (check-equal! (plist-get (catalog-entry 'setting "permission-timeout-ms") 'package)
-                  "agent" "a setting")))
+                  "agent-permissions" "a setting")))
 
 (deftest 'new-scheme-must-stamp-metadata-instead-of-receiving-a-safe-guess
   "an unstamped declaration reads as unknown, and says so"
@@ -119,7 +121,7 @@
                         (and (equal? (plist-get e 'origin) "bundled")
                              (equal? (plist-get e 'metadata-source) "unknown")))
                       (catalog)))
-      548 "the unstamped bundled entries")))
+      506 "the unstamped bundled entries")))
 
 (deftest 'no-entry-carries-the-same-key-twice
   "one entry, one answer per key: a duplicate hides from plist-get and not from a walker"

@@ -13,13 +13,30 @@
                  "the curriculum path")
     (check-true! (file-exists? (training-document-path)) "the curriculum exists")))
 
+;; the visible text of every "- [Title](#anchor)" row. An action link
+;; points at a command, not at a heading, so it is not one of these.
+(define (t--contents-titles guide)
+  (filter (lambda (x) x)
+    (map (lambda (line)
+           (and (string-prefix? "- [" line)
+                (let ((i (string-index line "](#")))
+                  (and i (substring-bytes line 3 i)))))
+         (string-split guide "\n"))))
+
 (deftest 'training-curriculum-has-working-tour-anchors
-  "the document links its lessons and companion action"
+  "every lesson the contents lists is a heading, and the action link works"
   (lambda ()
-    (let ((guide (read-file (training-document-path))))
-      (check-contains! guide "](#m-x)" "the M-x anchor")
-      (check-contains! guide "](#shortcut-keys)" "the shortcut anchor")
-      (check-contains! guide "](#companion-chat)" "the companion anchor")
+    ;; Naming three anchors sent this test red the day a heading was
+    ;; reworded, which is an edit to the guide and not a broken guide.
+    ;; The contents must reach the lessons: that is the fact to hold.
+    (let* ((guide (read-file (training-document-path)))
+           (titles (t--contents-titles guide)))
+      (check-true! (>= (length titles) 5) "the contents lists the lessons")
+      (for-each
+        (lambda (title)
+          (check-contains! guide (string-append "## " title)
+                           (string-append "a heading for " title)))
+        titles)
       (check-contains! guide "aimax:training/summarize-mode" "the action link"))))
 
 (deftest 'training-tour-starts-with-m-x-and-waits

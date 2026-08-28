@@ -518,14 +518,32 @@
     ". Effects: " (apropos--embedding-field hit 'effects)
     ". Usage: " (or (plist-get hit 'use) (plist-get hit 'run) "")))
 
+;; The sources and their embedding texts change only when the catalog does.
+;; Rebuilding 1800 strings on every query cost more than a second, and the
+;; vectors they name are already on disk. Publish them once per generation,
+;; the way the rows are published.
+(define *apropos--sources-cache* #f)
+(define *apropos--texts-cache* #f)
+(define *apropos--sources-gen* -1)
+
+(define (apropos--sources-cached rows)
+  (let ((gen (catalog-generation)))
+    (unless (and *apropos--sources-cache* (equal? gen *apropos--sources-gen*))
+      (let ((sources (apropos--semantic-sources rows)))
+        (set! *apropos--sources-cache* sources)
+        (set! *apropos--texts-cache* (map apropos--embedding-text sources))
+        (set! *apropos--sources-gen* gen)))
+    (list *apropos--sources-cache* *apropos--texts-cache*)))
+
 (define (apropos--semantic-hits query rows filters)
   (let ((key (and apropos-semantic-search
                   (boundp (quote llm-key))
                   (llm-key "openai"))))
     (if (or (not key) (equal? key "") (equal? (string-trim query) ""))
         '()
-        (let* ((sources (apropos--semantic-sources rows))
-               (texts (map apropos--embedding-text sources))
+        (let* ((both (apropos--sources-cached rows))
+               (sources (car both))
+               (texts (nth 1 both))
                (eligible (map (lambda (hit) (apropos--filter-match? hit filters)) sources))
                (semantic-query (string-append "Find the editor API for this task: " query))
                (scores (embedding-search semantic-query texts key

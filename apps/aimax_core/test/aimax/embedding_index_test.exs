@@ -95,6 +95,29 @@ defmodule Aimax.EmbeddingIndexTest do
     assert length(rebuilt_request["input"]) == 3
   end
 
+  test "a smaller corpus keeps the vectors it left out" do
+    root = Path.join(System.tmp_dir!(), "aimax-embedding-#{System.unique_integer([:positive])}")
+    path = Path.join(root, "apropos.etf")
+    on_exit(fn -> EmbeddingIndex.forget_memory(path) end)
+    opts = [path: path, dimensions: 2]
+
+    kill = "function buffer-kill! Kill buffer B and remove its working copy."
+    theme = "function load-theme Apply a named color theme."
+
+    # a package is loaded: both entries embed once
+    assert {:ok, _} = EmbeddingIndex.search("remove the current document", [kill, theme], "k", opts)
+    assert_receive {:embedding_request, _}
+
+    # the package is unloaded, and a search runs against what is left
+    assert {:ok, _} = EmbeddingIndex.search("remove the current document", [kill], "k", opts)
+    refute_receive {:embedding_request, _}
+
+    # the package is loaded again. Its text did not change, so its vector is
+    # still the one already paid for: loading a library embeds nothing.
+    assert {:ok, _} = EmbeddingIndex.search("remove the current document", [kill, theme], "k", opts)
+    refute_receive {:embedding_request, _}
+  end
+
   test "an API failure leaves lexical fallback available", %{path: path} do
     Application.put_env(:aimax_core, :embedding_req_options,
       plug: fn conn ->

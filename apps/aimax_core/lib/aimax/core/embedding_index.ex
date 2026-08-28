@@ -88,8 +88,15 @@ defmodule Aimax.Core.EmbeddingIndex do
 
       query_vector = Map.get(fresh, query_hash) || Map.fetch!(query_cache, query_hash)
 
-      if missing_entries != [] or cache.vectors != entry_vectors do
-        write_cache!(path, model, dimensions, entry_vectors)
+      # Keep every vector already paid for, not just this corpus. A search
+      # over fewer texts - a package unloaded, a filtered index - used to
+      # persist its own subset and drop the rest, so loading the package
+      # back embedded it again. A vector costs money once.
+      # apropos-rebuild-embeddings! clears what a changed doc leaves behind.
+      persisted = Map.merge(cache.vectors, entry_vectors)
+
+      if missing_entries != [] or cache.vectors != persisted do
+        write_cache!(path, model, dimensions, persisted)
       end
 
       put_query(path, query_hash, query_vector, query_cache)

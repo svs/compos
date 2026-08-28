@@ -23,6 +23,44 @@ defmodule Aimax.WindowHealTest do
     refute Enum.any?(Editor.list_windows(), fn {_id, b} -> b == "heal-victim" end)
   end
 
+  test "killing a buffer removes its window instead of duplicating another buffer" do
+    Editor.delete_other_windows()
+    {:ok, _} = Aimax.Core.create_buffer("heal-survivor")
+    {:ok, _} = Aimax.Core.create_buffer("heal-layout-victim")
+    Editor.set_window_buffer("heal-survivor")
+    Editor.split(:h, 0.5)
+    Editor.set_window_buffer("heal-layout-victim")
+    assert length(Editor.list_windows()) == 2
+
+    Aimax.Core.kill_buffer("heal-layout-victim")
+
+    assert Editor.list_windows() |> Enum.map(&elem(&1, 1)) == ["heal-survivor"]
+    Aimax.Core.kill_buffer("heal-survivor")
+  end
+
+  test "killing a buffer shown in every window collapses duplicate windows" do
+    Editor.delete_other_windows()
+    {:ok, _} = Aimax.Core.create_buffer("heal-duplicate-victim")
+    Editor.set_window_buffer("heal-duplicate-victim")
+    Editor.split(:h, 0.5)
+    assert length(Editor.list_windows()) == 2
+
+    Aimax.Core.kill_buffer("heal-duplicate-victim")
+
+    assert length(Editor.list_windows()) == 1
+    refute Editor.current_buffer() == "heal-duplicate-victim"
+  end
+
+  test "killing a hidden buffer leaves the layout unchanged" do
+    Editor.delete_other_windows()
+    {:ok, _} = Aimax.Core.create_buffer("heal-hidden-victim")
+    before = Editor.list_windows()
+
+    Aimax.Core.kill_buffer("heal-hidden-victim")
+
+    assert Editor.list_windows() == before
+  end
+
   test "a click racing a buffer kill cannot crash the Editor" do
     Editor.delete_other_windows()
     {:ok, _} = Aimax.Core.create_buffer("heal-race")

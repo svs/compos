@@ -856,3 +856,26 @@
                        "every visible replacement belongs to the current group"))
         (window-list)))
     (t--sw-done!)))
+
+(deftest 'a-pinned-empty-group-lands-on-its-chat-after-the-final-kill
+  "the group chat is the total fallback when no live member remains"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((here (group-record-create! "zzsw-empty-pinned")))
+      (buffer-add-group! t--sw-first here)
+      (set-frame-local! 'current-group here)
+      (set-frame-local! 'pinned-group here)
+
+      (buffer-kill! t--sw-first)
+
+      (let ((fallback (current-buffer)))
+        (check-equal! fallback (group-chat here)
+                      "the empty pinned group lands on its chat")
+        (check-true! (chat-buffer? fallback)
+                     "the fallback is a live chat buffer")
+        (check-equal! (chat-group-id fallback) here
+                      "the fallback belongs to the pinned group")
+        (set-frame-local! 'pinned-group #f)
+        (set-frame-local! 'current-group #f)
+        (buffer-kill! fallback)))
+    (t--sw-done!)))

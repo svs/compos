@@ -901,11 +901,9 @@ defmodule Aimax.Core.Editor do
     {:reply, %{visible: visible, current: current}, state}
   end
 
-  # swap every window off BUFFER (it is being killed) onto the most
-  # recent live buffer — windows must never point at the dead
+  # Release every window from BUFFER before it dies. Remove its windows when
+  # another window can preserve the frame. A sole window needs a live buffer.
   def handle_call({:release_buffer, buffer}, _from, state) do
-    # prefer a buffer not already on screen — swapping to one that is
-    # (e.g. *ibuffer* while killing from inside it) duplicates windows
     visible = Enum.flat_map(state.frames, fn {_id, f} -> visible_buffers(f.tree) end)
 
     fallback =
@@ -918,7 +916,33 @@ defmodule Aimax.Core.Editor do
 
     frames =
       Map.new(state.frames, fn {id, f} ->
-        {id, %{f | tree: swap_buffer(f.tree, buffer, fallback)}}
+        victim_ids = wins_showing(f.tree, buffer)
+        survivors = f.tree |> leaf_ids_buffers() |> Enum.reject(&(elem(&1, 1) == buffer))
+
+        cond do
+          victim_ids == [] ->
+            {id, f}
+
+          survivors != [] ->
+            Enum.each(victim_ids, fn win ->
+              wp_safely(fn -> Buffer.drop_win_point(buffer, win) end)
+            end)
+
+            tree = Enum.reduce(victim_ids, f.tree, &remove_leaf(&2, &1))
+            active = if f.active in victim_ids, do: first_leaf(tree).id, else: f.active
+            {id, %{f | tree: tree, active: active}}
+
+          true ->
+            keep = if f.active in victim_ids, do: f.active, else: hd(victim_ids)
+            remove = List.delete(victim_ids, keep)
+
+            Enum.each(remove, fn win ->
+              wp_safely(fn -> Buffer.drop_win_point(buffer, win) end)
+            end)
+
+            tree = Enum.reduce(remove, f.tree, &remove_leaf(&2, &1))
+            {id, %{f | tree: swap_buffer(tree, buffer, fallback), active: keep}}
+        end
       end)
 
     changed(:ok, %{state | frames: frames, mru: List.delete(state.mru, buffer)})

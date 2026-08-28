@@ -1889,7 +1889,13 @@ defmodule Aimax.Ui.Layouts do
                   );
                   if (raw) {
                     const cursor = raw.querySelector(".cursor");
-                    if (!cursor || extend) return false;
+                    // Where the caret lands does not depend on whether a
+                    // selection is growing. Refusing the key when extending
+                    // sent it to the server, which moved by SOURCE line: in a
+                    // wrapped paragraph one S-<down> selected the whole thing.
+                    // The move is computed the same way either way, and the
+                    // mark rides along for the editor to decide.
+                    if (!cursor) return false;
                     const r = cursor.getBoundingClientRect();
                     const content = cursor.closest(".line-content") || cursor.parentElement;
                     const css = getComputedStyle(content);
@@ -1923,7 +1929,8 @@ defmodule Aimax.Ui.Layouts do
                     this.pushEvent("mouse", {
                       win: parseInt(winEl.dataset.winId, 10),
                       line: pos.line,
-                      col: pos.col
+                      col: pos.col,
+                      extend: extend
                     });
                     return true;
                   }

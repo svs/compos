@@ -229,7 +229,21 @@ defmodule Aimax.Ui.EditorLive do
       Input.run(socket.assigns.frame, fn ->
         case params do
           %{"line" => line, "col" => col} when is_integer(line) and is_integer(col) ->
-            Aimax.Core.Session.eval("(begin (mouse-select-window! #{id}) (set-mark! #f))")
+            # A click and a visual-row move take this same path, and they
+            # differ only in what becomes of the mark. Clearing it here
+            # unconditionally made every move a click, so the visual-line
+            # handler could not extend a selection at all and had to refuse
+            # the key. Where the caret goes is geometry; whether the region
+            # grows is the editor's business, so it rides as a parameter.
+            #
+            # Extending starts a region at point when there is none — the
+            # same rule `preview-goto-src!` follows for the preview.
+            mark =
+              if params["extend"] == true,
+                do: "(unless (mark) (set-mark! (point)))",
+                else: "(set-mark! #f)"
+
+            Aimax.Core.Session.eval("(begin (mouse-select-window! #{id}) #{mark})")
             Aimax.Core.Editor.mouse_goto(id, line, col)
 
           _ ->

@@ -179,3 +179,56 @@ Named so a contributor can pick one up, not as a warning.
   not: `Desktop.init` sends itself `:restore`, so a Session crash would
   re-restore the whole desktop over live buffers. Start order already comes
   from the list. Anything done here has to leave Desktop out.
+- Visual-line motion decides in the browser. See below: it is the same rule as
+  "derive in the reader", drawn across the client boundary, and drawn wrong.
+  `VISUAL-LINE-WRAP-MAP.md` states it as a task, with the landmines.
+
+## The client measures. Scheme decides.
+
+The rule about writers and readers has a twin at the browser boundary, and
+this is the place the codebase currently breaks it.
+
+One thing the daemon genuinely cannot know is where proportional text wraps.
+That depends on font metrics, the measured pixel width, kerning and zoom.
+morg-mode draws Spectral, not a grid, so the row a reader sees is a fact only
+the browser holds. (A monospace buffer is different: the daemon already has
+the measured column count from `set_window_cols` and could compute rows
+itself.)
+
+That reasoning is right, and the boundary drawn from it is wrong. The client
+does not send the measurement. It sends the decision. Five separate routines
+in `layouts.ex` (`visualLineMove`, `visualLineEdge`, `exactSpot`,
+`sourceSpot`, `previewSpot`) each work out what a key MEANS by probing the
+DOM. Each can be wrong in its own way, and none can be tested from here: the
+file has no coverage, and the code-change skill forbids driving ai-max through
+a browser to get some.
+
+Four bugs found in one afternoon, one per routine: a goal column that survived
+a horizontal move, a handler that refused to extend a selection because its
+transport cleared the mark, a missing branch that sent Cmd-Right to the end of
+a paragraph, and a fallback that counted rendered characters into a byte
+offset. Deciding what `End` means is policy, and it is living in JavaScript.
+
+The fix is to send the measurement instead. The client already reports
+geometry on every patch: `set_total_rows`, `set_window_rows`,
+`set_window_cols`. Add one more of exactly that kind: the **wrap map**, the
+byte offset where each visual row begins, per visible window. It is one small
+list of integers, bounded by the rows on screen, from `Range.getClientRects()`,
+re-sent on the trigger that already re-sends the row count.
+
+Motion then becomes Scheme over data:
+
+```scheme
+(visual-row-start POS)  (visual-row-end POS)  (visual-row-next POS GOAL-COL)
+```
+
+and every rule above becomes a `deftest` in `priv/tests/`. "A horizontal move
+ends a run of vertical ones" is three lines with a test, instead of an
+invariant nobody can run.
+
+The cost is real. The map has to stay true across edit, resize, font change
+and fold, and a stale map moves the caret to the wrong row, silent and
+plausible, the same bug class the read model has. The preview iframe needs its
+own map, because its rows are `data-s` runs rather than `.line` elements. And
+the win only arrives when the five routines are deleted, so it is one piece of
+work, not a patch beside them.

@@ -52,6 +52,10 @@ defmodule Compos.Ui.Layouts do
           .editor-root {
             display: flex; flex-direction: column; position: relative;
             height: 100dvh; overflow: hidden;
+            /* the application text scale (appearance.scm ui-scale): the
+               'ui face's zoom is a root variable, and the whole page
+               grows by it, rendered pages included */
+            zoom: var(--ui-zoom, 1);
           }
           .editor-root.instance-identified::before {
             content: attr(data-instance);
@@ -219,7 +223,9 @@ defmodule Compos.Ui.Layouts do
             /* default face drives the text font; themes/customize set the
                vars, buffer-face! overrides them per window via inline style */
             font-family: var(--default-family, var(--font-mono));
-            font-size: var(--default-size, 13px);
+            /* the buffer text scale (text-scale-increase) is a factor in
+               the same inline style; the size a remap names still holds */
+            font-size: calc(var(--default-size, 13px) * var(--text-scale-factor, 1));
             line-height: var(--default-line-height, 1.7);
             font-variant-ligatures: common-ligatures;
             letter-spacing: -0.1px;
@@ -445,6 +451,9 @@ defmodule Compos.Ui.Layouts do
           .html-preview {
             flex: 1; width: 100%; border: 0;
             background: var(--window-inactive-bg, #f4f0e6);
+            /* a rendered page is its own document and reads no variable
+               of ours; the buffer text scale zooms the frame instead */
+            zoom: var(--text-scale-factor, 1);
           }
           .window.active .html-preview { background: var(--window-bg, #fdfcf8); }
           /* an app paints its own background — the editor supplies none */
@@ -1091,10 +1100,11 @@ defmodule Compos.Ui.Layouts do
           // cmd combos belong to the browser (cmd-c/v/q, and cmd-v's native
           // paste event) — except the arrows, claimed for window motion,
           // and cmd-p, claimed for the command palette
-          // ...and the text-scale chords (cmd-+/-/0), claimed from the
-          // browser's whole-page zoom: the scale belongs to ONE buffer
+          // ...and the text-scale chords, claimed from the browser's
+          // whole-page zoom: cmd-=/-/0 scale the application (appearance.scm
+          // ui-scale), and their shifted shapes cmd-+/_/) scale ONE buffer
           const CMD_KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
-                            "a", "p", "+", "=", "-", "0", "Enter"];
+                            "a", "p", "+", "=", "-", "0", "_", ")", "Enter"];
 
           function keySpec(e) {
             if (["Control", "Meta", "Alt", "Shift"].includes(e.key)) return null;

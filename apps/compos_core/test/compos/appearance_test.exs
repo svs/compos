@@ -1,19 +1,23 @@
 defmodule Compos.AppearanceTest do
   @moduledoc """
-  packages/appearance.scm — the chrome the user sets. Text scale walks
-  a per-buffer ladder through the face remap, on the Cmd chords.
+  packages/appearance.scm — the chrome the user sets. Two text scales walk
+  the 1.2 ladder: the buffer scale is a factor in one buffer's face remap,
+  the application scale is the 'ui face's zoom. Tests name the commands;
+  a chord is a preference.
   """
 
   use ExUnit.Case
 
-  alias Compos.Core.{Editor, KeyDispatch, Session}
-
-  defp press(keys), do: Enum.each(List.wrap(keys), &KeyDispatch.handle_key/1)
+  alias Compos.Core.{Editor, Session}
 
   defp eval!(code) do
     {:ok, out} = Session.eval(code)
     out
   end
+
+  defp run!(command), do: {:ok, _} = Session.eval(~s{(run-command "#{command}")})
+
+  defp ui_zoom, do: get_in(Editor.desktop_view(), [:faces, "ui", "zoom"])
 
   setup do
     Editor.minibuffer_close()
@@ -21,41 +25,45 @@ defmodule Compos.AppearanceTest do
 
     on_exit(fn ->
       Compos.Core.kill_buffer("*zz-scale*")
+      Session.eval("(ui-scale-apply! 0)")
       Editor.delete_other_windows()
     end)
 
     :ok
   end
 
-  test "s-+ grows one buffer's text; s-0 resets; other remaps survive" do
+  test "the buffer scale is a factor in one buffer's remap; other remaps survive" do
     {:ok, _} =
       Session.eval(~s{(begin
         (buffer-create "*zz-scale*")
         (switch-to-buffer! "*zz-scale*")
-        (face-remap-in! "*zz-scale*" 'default (list 'family "TestSerif"))
+        (face-remap-in! "*zz-scale*" 'default (list 'family "TestSerif" 'size "17px"))
         #t)})
 
-    press(["s-+"])
+    run!("text-scale-increase")
     assert eval!(~s{(buffer-local "*zz-scale*" 'text-scale)}) == "1"
     style = eval!(~s{(buffer-local "*zz-scale*" 'style)})
-    assert style =~ "--default-size:15px"
+    assert style =~ "--text-scale-factor:1.2;"
     assert style =~ "--default-family:TestSerif", "the scale clobbered the family remap"
+    assert style =~ "--default-size:17px", "the scale clobbered the size remap"
 
-    press(["s-+", "s-+"])
+    run!("text-scale-increase")
+    run!("text-scale-increase")
     assert eval!(~s{(buffer-local "*zz-scale*" 'text-scale)}) == "3"
-    assert eval!(~s{(buffer-local "*zz-scale*" 'style)}) =~ "--default-size:20px"
+    assert eval!(~s{(buffer-local "*zz-scale*" 'style)}) =~ "--text-scale-factor:1.728;"
 
-    press(["s--"])
+    run!("text-scale-decrease")
     assert eval!(~s{(buffer-local "*zz-scale*" 'text-scale)}) == "2"
 
-    press(["s-0"])
+    run!("text-scale-reset")
     assert eval!(~s{(buffer-local "*zz-scale*" 'text-scale)}) == "0"
     style = eval!(~s{(buffer-local "*zz-scale*" 'style)})
-    refute style =~ "--default-size"
+    refute style =~ "--text-scale-factor"
     assert style =~ "--default-family:TestSerif"
+    assert style =~ "--default-size:17px"
   end
 
-  test "the scale clamps at the ends of the ladder" do
+  test "the buffer scale clamps at the ends of the ladder" do
     {:ok, _} =
       Session.eval(~s{(begin
         (buffer-create "*zz-scale*")
@@ -64,8 +72,34 @@ defmodule Compos.AppearanceTest do
         #t)})
 
     assert eval!(~s{(buffer-local "*zz-scale*" 'text-scale)}) == "6"
+    assert eval!(~s{(buffer-local "*zz-scale*" 'style)}) =~ "--text-scale-factor:2.986;"
 
     {:ok, _} = Session.eval(~s{(text-scale-apply! "*zz-scale*" -99)})
     assert eval!(~s{(buffer-local "*zz-scale*" 'text-scale)}) == "-4"
+  end
+
+  test "the application scale is the 'ui face's zoom and a saved setting" do
+    assert ui_zoom() == "1"
+
+    run!("ui-scale-increase")
+    assert eval!("ui-scale") == "1"
+    assert ui_zoom() == "1.2"
+
+    run!("ui-scale-increase")
+    assert ui_zoom() == "1.44"
+    assert eval!(~s{(cadr (assoc 'ui-scale *custom-set-vars*))}) == "2"
+
+    run!("ui-scale-decrease")
+    assert ui_zoom() == "1.2"
+
+    run!("ui-scale-reset")
+    assert eval!("ui-scale") == "0"
+    assert ui_zoom() == "1"
+  end
+
+  test "the application scale is a step on the ladder, so it clamps too" do
+    {:ok, _} = Session.eval("(ui-scale-apply! 99)")
+    assert eval!("ui-scale") == "6"
+    assert ui_zoom() == "2.986"
   end
 end

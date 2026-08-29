@@ -1507,6 +1507,7 @@ defmodule Compos.Ui.EditorLive do
           class="html-preview"
           id={"prev-#{@node.id}"}
           phx-hook="PreviewScroll"
+          style={@node.style}
           data-win={@node.id}
           data-ctop={@node.ctop}
           data-pt={@node.point}

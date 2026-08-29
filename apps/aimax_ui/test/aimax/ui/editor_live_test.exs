@@ -29,6 +29,25 @@ defmodule Aimax.Ui.EditorLiveTest do
     assert html =~ "ui-test-"
   end
 
+  test "the bottom frame modeline keeps the active file's full path", %{conn: conn} do
+    root = Path.join(System.tmp_dir!(), "aimax-frame-path-#{System.unique_integer([:positive])}")
+    path = Path.join(root, "notes.txt")
+    File.mkdir_p!(root)
+    File.write!(path, "notes\n")
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    {:ok, _} = Aimax.Core.Session.eval(~s{(visit "#{path}")})
+    {:ok, view, _html} = live(conn, "/")
+
+    assert has_element?(view, ".echo-bar .ml-frame-path", path)
+
+    Aimax.Core.Editor.set_echo("saved")
+    assert has_element?(view, ".echo-bar .ml-frame-path", path)
+
+    keys(view, ["C-x", "C-f"])
+    assert has_element?(view, ".mb-input-row .ml-frame-path", path)
+  end
+
   test "an instance accent renders a named frame indicator", %{conn: conn} do
     old_name = Application.get_env(:aimax_core, :name)
     old_accent = Application.get_env(:aimax_core, :accent)

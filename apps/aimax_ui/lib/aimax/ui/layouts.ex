@@ -657,6 +657,10 @@ defmodule Aimax.Ui.Layouts do
             font-family: var(--font-mono); font-size: 12.5px;
           }
           .echo { color: var(--dim-fg, #57534a); white-space: pre; }
+          .ml-frame-path {
+            min-width: 0; max-width: 62vw; overflow: hidden; text-overflow: ellipsis;
+            color: var(--dim-fg, #57534a); font-size: 11px; white-space: nowrap;
+          }
           .ml-frame-group {
             color: var(--frame-group-color, var(--accent-fg, #26356b)); font-size: 11px;
             font-weight: 650; white-space: nowrap;

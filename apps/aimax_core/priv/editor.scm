@@ -5859,6 +5859,17 @@
         (if (equal? note "") "" (string-append "\n\n" note)))
       ""))
 
+;; The prompt names ambient buffers but never copies their changing content.
+;; The agent pulls the structure it needs through the live outline APIs.
+(define (chat-ambient-context-note docs)
+  (if (null? docs)
+      ""
+      (string-append
+        "\n\nEach group member named above is ambient context for this chat. "
+        "The editor does not attach its outline or text. Pull each relevant "
+        "outline before you answer or edit. Use (code-outline \"NAME\") for "
+        "source and (markdown-outline \"NAME\") for Markdown.\n\n")))
+
 ;; ...and the voice that goes with them: a chat over one code-mode buffer is
 ;; not a writing companion, and telling it to match the document's voice
 ;; asks a coding session to imitate prose.
@@ -6325,6 +6336,7 @@
              (if role
                  (string-append "This is the group's \"" role "\" buffer. ")
                  ""))
+           (chat-ambient-context-note docs)
            *chat-edit-protocol*
            (if code? "" " Match the document's voice.")
            (chat-code-note docs)
@@ -6347,6 +6359,7 @@
                      (if m (string-append " (" m ")") ""))
                    "\n"))
                "" (sort docs))
+         (chat-ambient-context-note docs)
          *chat-edit-protocol*
          (chat-code-note docs)
          "\n\nThe chat transcript follows; reply to the last user turn "

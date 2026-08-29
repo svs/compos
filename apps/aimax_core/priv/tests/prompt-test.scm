@@ -76,6 +76,40 @@
                     "the context reports the frozen prompt")
       (t--prompt-cleanup chat doc))))
 
+(deftest 'group-members-are-pulled-as-ambient-context
+  "the chat names live context but does not attach member outlines or text"
+  (lambda ()
+    (let ((stale (group-resolve-id "prompt-ambient-group")))
+      (when stale (group-record-delete! stale)))
+    (let ((id (group-record-create! "prompt-ambient-group"))
+          (chat (t--prompt-chat "*prompt-ambient*" "api"))
+          (source "prompt-ambient.ex")
+          (notes "prompt-ambient.md"))
+      (test-buffer! source "def zz_ambient_secret, do: :hidden\n")
+      (test-buffer! notes "# ZZ Ambient Heading\nprivate body text\n")
+      (chat-set-group! chat id)
+      (buffer-add-group! source id)
+      (buffer-add-group! notes id)
+      (buffer-set-local! source 'mode-name "elixir-mode")
+      (buffer-set-local! notes 'mode-name "morg-mode")
+      (let ((preamble (chat-preamble chat)))
+        (check-contains! preamble "ambient context for this chat"
+                         "the members are standing context")
+        (check-contains! preamble "does not attach its outline or text"
+                         "the prompt states the pull contract")
+        (check-contains! preamble "(code-outline \"NAME\")"
+                         "source structure is pulled")
+        (check-contains! preamble "(markdown-outline \"NAME\")"
+                         "Markdown structure is pulled")
+        (check-false! (string-contains? preamble "zz_ambient_secret")
+                      "the source outline is not attached")
+        (check-false! (string-contains? preamble "ZZ Ambient Heading")
+                      "the Markdown outline is not attached")
+        (check-false! (string-contains? preamble "private body text")
+                      "the member text is not attached"))
+      (t--prompt-cleanup chat source notes)
+      (group-record-delete! id))))
+
 (deftest 'chat-show-prompt-shows-the-direct-prompt-and-its-composition
   "the help page names each fragment and includes the canonical join"
   (lambda ()

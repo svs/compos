@@ -477,6 +477,17 @@ defmodule Aimax.Ui.EditorLive do
   defp leaf_ids(%{type: :split, children: children}), do: Enum.flat_map(children, &leaf_ids/1)
   defp leaf_ids(_), do: []
 
+  defp frame_file_path(%{tree: tree, active: active}), do: active_file_path(tree, active)
+
+  defp active_file_path(%{type: :leaf, id: id, path: path}, id)
+       when is_binary(path) and path != "",
+       do: path
+
+  defp active_file_path(%{type: :split, children: children}, id),
+    do: Enum.find_value(children, &active_file_path(&1, id))
+
+  defp active_file_path(_, _), do: nil
+
   # The raw PTY channel owns terminal painting. Its transcript still changes
   # as a normal buffer, but those changes must not refresh the LiveView tree.
   defp event_buffers(%{type: :leaf, render_mode: "terminal"}), do: []
@@ -916,11 +927,13 @@ defmodule Aimax.Ui.EditorLive do
             <span class="prompt">{@state.minibuffer.prompt}</span>
             <span class="mb-input"><%= with {pre, cur, post} <- mb_split(@state.minibuffer) do %>{pre}<span class="cursor">{cur}</span>{post}<% end %></span>
             <span class="mb-spacer"></span>
+            <span :if={frame_file_path(@state)} class="ml-frame-path" title={frame_file_path(@state)}>{frame_file_path(@state)}</span>
             <span class="mb-count">{count_text(@state.minibuffer)}</span>
           </div>
         </div>
         <div :if={Map.get(@state.minibuffer, :style) == "palette"} class="echo-bar">
           <span class="echo">{@state.echo}</span>
+          <span :if={frame_file_path(@state)} class="ml-frame-path" title={frame_file_path(@state)}>{frame_file_path(@state)}</span>
           <span class="mb-spacer"></span>
         </div>
       <% else %>
@@ -944,11 +957,13 @@ defmodule Aimax.Ui.EditorLive do
           </div>
           <div class="echo-bar">
             <span class="echo">{@state.echo}</span>
+            <span :if={frame_file_path(@state)} class="ml-frame-path" title={frame_file_path(@state)}>{frame_file_path(@state)}</span>
             <span class="mb-spacer"></span>
           </div>
         <% else %>
           <div class="echo-bar">
             <span class="echo">{@state.echo}</span>
+            <span :if={frame_file_path(@state)} class="ml-frame-path" title={frame_file_path(@state)}>{frame_file_path(@state)}</span>
             <span class="mb-spacer"></span>
             <span :if={@state.frame_group} class="ml-frame-group">group {@state.frame_group}</span>
             <span :if={@state.modeline_extra != ""} class="ml-extra">{@state.modeline_extra}</span>

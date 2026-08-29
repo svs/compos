@@ -2040,7 +2040,8 @@
   (filter (lambda (b)
             (and (not (equal? b here))
                  (not (string-prefix? " " b))))
-          (buffer-list-mru)))
+          (dedupe-names
+            (append (window-buffer-history) (buffer-list-mru)))))
 
 (define (group-switch-separator label) (list label "" "separator"))
 

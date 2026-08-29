@@ -229,6 +229,11 @@ defmodule Aimax.Core.Editor do
 
   @doc "Buffers in most-recently-displayed order (Emacs buffer list)."
   def buffer_mru, do: GenServer.call(__MODULE__, :buffer_mru)
+
+  @doc "Previous buffers for one window, most recently displayed first."
+  def window_buffer_history(win \\ nil, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:window_buffer_history, win, fid(fid)})
+
   def mru_all, do: GenServer.call(__MODULE__, :mru_all)
   def mru_note_group(g), do: GenServer.call(__MODULE__, {:mru_note_group, g})
 
@@ -422,7 +427,7 @@ defmodule Aimax.Core.Editor do
 
     frame = %{
       id: @main_frame,
-      tree: %{type: :leaf, id: 1, buffer: @scratch, top: 0, manual: false},
+      tree: %{type: :leaf, id: 1, buffer: @scratch, history: [], top: 0, manual: false},
       active: 1,
       pending: [],
       prefix_arg: nil,
@@ -482,7 +487,14 @@ defmodule Aimax.Core.Editor do
 
         frame = %{
           id: id,
-          tree: %{type: :leaf, id: state.next_win, buffer: buffer, top: 0, manual: false},
+          tree: %{
+            type: :leaf,
+            id: state.next_win,
+            buffer: buffer,
+            history: [],
+            top: 0,
+            manual: false
+          },
           active: state.next_win,
           pending: [],
           prefix_arg: nil,
@@ -581,7 +593,7 @@ defmodule Aimax.Core.Editor do
         Aimax.Core.ensure_buffer(buffer)
         Buffer.touch(buffer)
         leaf = find_leaf(f.tree, win_id)
-        tree = replace_leaf(f.tree, win_id, %{leaf | buffer: buffer, top: 0, manual: false})
+        tree = replace_leaf(f.tree, win_id, visit_buffer(leaf, buffer))
         mru = Enum.take([buffer | List.delete(state.mru, buffer)], 50)
         changed(:ok, resync_swap(put_frame(%{state | mru: mru}, %{f | tree: tree})), f.id)
     end
@@ -985,7 +997,7 @@ defmodule Aimax.Core.Editor do
             end)
 
             tree = Enum.reduce(remove, f.tree, &remove_leaf(&2, &1))
-            {id, %{f | tree: swap_buffer(tree, buffer, fallback), active: keep}}
+            {id, %{f | tree: release_buffer_from_tree(tree, buffer, fallback), active: keep}}
         end
       end)
 
@@ -1290,6 +1302,24 @@ defmodule Aimax.Core.Editor do
     {:reply, Enum.reject(live ++ Enum.sort(rest), &String.starts_with?(&1, " ")), state}
   end
 
+  def handle_call({:window_buffer_history, win, fid}, _from, state) do
+    f = frame(state, fid)
+    leaf = find_leaf(f.tree, win || f.active)
+    known = MapSet.new(Aimax.Core.buffer_names())
+
+    history =
+      if leaf do
+        leaf
+        |> Map.get(:history, [])
+        |> Enum.filter(&(is_binary(&1) and MapSet.member?(known, &1)))
+        |> Enum.reject(&String.starts_with?(&1, " "))
+      else
+        []
+      end
+
+    {:reply, history, state}
+  end
+
   # the WHOLE history, group marks included: a group switch is an entry
   # like any buffer visit, so one stream ranks every place you went
   def handle_call(:mru_all, _from, state) do
@@ -1446,7 +1476,16 @@ defmodule Aimax.Core.Editor do
   def handle_call({:split, dir, ratio, fid}, _from, state) do
     f = frame(state, fid)
     old = find_leaf(f.tree, f.active)
-    new_leaf = %{type: :leaf, id: state.next_win, buffer: old.buffer, top: old.top, manual: false}
+
+    new_leaf = %{
+      type: :leaf,
+      id: state.next_win,
+      buffer: old.buffer,
+      history: Map.get(old, :history, []),
+      top: old.top,
+      manual: false
+    }
+
     split = %{type: :split, dir: dir, ratio: ratio, children: [old, new_leaf]}
     tree = replace_leaf(f.tree, f.active, split)
 
@@ -1568,7 +1607,7 @@ defmodule Aimax.Core.Editor do
     Buffer.touch(buffer)
     f = frame(state, fid)
     leaf = find_leaf(f.tree, f.active)
-    tree = replace_leaf(f.tree, f.active, %{leaf | buffer: buffer, top: 0, manual: false})
+    tree = replace_leaf(f.tree, f.active, visit_buffer(leaf, buffer))
     mru = Enum.take([buffer | List.delete(state.mru, buffer)], 50)
     changed(:ok, resync_swap(put_frame(%{state | mru: mru}, %{f | tree: tree})), f.id)
   end
@@ -1585,7 +1624,17 @@ defmodule Aimax.Core.Editor do
         leaf ->
           Aimax.Core.ensure_buffer(buffer)
           Buffer.touch(buffer)
-          tree = replace_leaf(f.tree, target, %{leaf | buffer: buffer, top: 0, manual: false})
+          origin = Map.get(leaf, :preview_origin, leaf.buffer)
+
+          previewed =
+            %{leaf | buffer: buffer, top: 0, manual: false}
+            |> then(fn next ->
+              if buffer == origin,
+                do: Map.delete(next, :preview_origin),
+                else: Map.put(next, :preview_origin, origin)
+            end)
+
+          tree = replace_leaf(f.tree, target, previewed)
           changed(:ok, put_frame(state, %{f | tree: tree}))
       end
     else
@@ -1789,6 +1838,7 @@ defmodule Aimax.Core.Editor do
     %{
       type: :leaf,
       buffer: b,
+      history: Map.get(leaf, :history, []),
       top: Map.get(leaf, :top, 0),
       point: safe_win_point(b, id),
       manual: Map.get(leaf, :manual, false),
@@ -1954,16 +2004,53 @@ defmodule Aimax.Core.Editor do
     do: Enum.flat_map(children, &visible_buffers/1)
 
   defp swap_buffer(%{type: :leaf} = leaf, from, to),
-    do: if(leaf.buffer == from, do: %{leaf | buffer: to, top: 0, manual: false}, else: leaf)
+    do:
+      leaf
+      |> Map.update(:history, [], &Enum.map(&1, fn b -> if b == from, do: to, else: b end))
+      |> then(fn renamed ->
+        if renamed.buffer == from,
+          do: %{renamed | buffer: to, top: 0, manual: false},
+          else: renamed
+      end)
 
   defp swap_buffer(%{type: :split} = split, from, to),
     do: %{split | children: Enum.map(split.children, &swap_buffer(&1, from, to))}
+
+  defp release_buffer_from_tree(%{type: :leaf} = leaf, buffer, fallback) do
+    leaf = Map.update(leaf, :history, [], &List.delete(&1, buffer))
+
+    if leaf.buffer == buffer,
+      do: %{leaf | buffer: fallback, top: 0, manual: false},
+      else: leaf
+  end
+
+  defp release_buffer_from_tree(%{type: :split} = split, buffer, fallback),
+    do: %{
+      split
+      | children: Enum.map(split.children, &release_buffer_from_tree(&1, buffer, fallback))
+    }
 
   defp replace_leaf(%{type: :leaf} = leaf, id, new),
     do: if(leaf.id == id, do: new, else: leaf)
 
   defp replace_leaf(%{type: :split} = split, id, new),
     do: %{split | children: Enum.map(split.children, &replace_leaf(&1, id, new))}
+
+  defp visit_buffer(leaf, buffer) do
+    previous = Map.get(leaf, :preview_origin, leaf.buffer)
+    history = Map.get(leaf, :history, [])
+
+    history =
+      if previous == buffer do
+        List.delete(history, buffer)
+      else
+        Enum.take([previous | List.delete(List.delete(history, previous), buffer)], 500)
+      end
+
+    leaf
+    |> Map.delete(:preview_origin)
+    |> Map.merge(%{buffer: buffer, history: history, top: 0, manual: false})
+  end
 
   # returns the tree with the leaf removed, or nil if the tree IS that leaf
   defp remove_leaf(%{type: :leaf, id: id}, id), do: nil
@@ -1983,7 +2070,7 @@ defmodule Aimax.Core.Editor do
   defp build_tree({:leaf, buffer}, n), do: build_tree({:leaf, buffer, 0}, n)
 
   defp build_tree({:leaf, buffer, top}, n),
-    do: {%{type: :leaf, id: n, buffer: buffer, top: top, manual: false}, n + 1}
+    do: {%{type: :leaf, id: n, buffer: buffer, history: [], top: top, manual: false}, n + 1}
 
   # 4-tuple carries a saved window point (desktop v2); it rides on the leaf
   # as :init_point until restore_tree writes it into the buffer
@@ -1997,6 +2084,13 @@ defmodule Aimax.Core.Editor do
   defp build_tree({:leaf, buffer, top, point, manual, ctop}, n) do
     {leaf, n} = build_tree({:leaf, buffer, top, point}, n)
     {%{leaf | manual: manual == true} |> Map.put(:ctop, ctop || 0), n}
+  end
+
+  # 7-tuple keeps the window-local buffer history across layout and desktop
+  # restore. Older layouts start with an empty history.
+  defp build_tree({:leaf, buffer, top, point, manual, ctop, history}, n) do
+    {leaf, n} = build_tree({:leaf, buffer, top, point, manual, ctop}, n)
+    {%{leaf | history: Enum.filter(history, &is_binary/1)}, n}
   end
 
   defp build_tree({:split, dir, a, b}, n), do: build_tree({:split, dir, 0.5, a, b}, n)

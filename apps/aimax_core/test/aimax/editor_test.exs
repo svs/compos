@@ -3562,6 +3562,56 @@ defmodule Aimax.EditorTest do
     press(["q"])
   end
 
+  test "the group switcher orders buffers by the invoking window's history" do
+    n = System.unique_integer([:positive])
+    first = "wh-first-#{n}"
+    last = "wh-last-#{n}"
+    home = "wh-home-#{n}"
+    noise = "wh-noise-#{n}"
+
+    for buf <- [first, last, home, noise], do: Aimax.Core.create_buffer(buf)
+
+    {:ok, original} =
+      Aimax.Core.Session.eval("""
+      (let ((id (group-record-create! "wh-group-#{n}")))
+        (set-frame-local! 'current-group id)
+        (delete-other-windows!)
+        (buffer-add-group! "#{first}" id)
+        (buffer-add-group! "#{last}" id)
+        (buffer-add-group! "#{home}" id)
+        (switch-to-buffer! "#{first}")
+        (switch-to-buffer! "#{last}")
+        (switch-to-buffer! "#{home}")
+        (let ((window (active-window)))
+          (split-window! 'h 0.5)
+          (other-window!)
+          (switch-to-buffer! "#{first}")
+          (switch-to-buffer! "#{noise}")
+          window))
+      """)
+
+    {:ok, _} = Aimax.Core.Session.eval("(select-window! #{original})")
+
+    assert {:ok, history} =
+             Aimax.Core.Session.eval(
+               "(let ((layout (window-tree))) (window-tree-set! layout) (window-buffer-history))"
+             )
+
+    assert history =~ ~r/\A\("#{last}" "#{first}"/
+
+    open_group_switcher()
+
+    labels =
+      Editor.render_state().minibuffer.candidates
+      |> Enum.map(& &1.label)
+      |> Enum.filter(&(&1 in [first, last, noise]))
+
+    assert labels == [last, first, noise]
+
+    press(["C-g"])
+    {:ok, _} = Aimax.Core.Session.eval("(delete-other-windows!)")
+  end
+
   test "the ring toggles: C-x b RET goes back, and back again" do
     n = System.unique_integer([:positive])
     a = "rg-a-#{n}"

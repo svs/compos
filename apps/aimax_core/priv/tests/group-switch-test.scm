@@ -83,6 +83,27 @@
                   "the buffer switcher owns the prompt")
     (t--sw-done!)))
 
+(deftest 'group-switch-buffer-pool-follows-the-invoking-window-history
+  "another window cannot reorder this window's previous buffers"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((noise "zz-sw-noise"))
+      (test-buffer! noise "")
+      (switch-to-buffer! t--sw-second)
+      (switch-to-buffer! t--sw-third)
+      (switch-to-buffer! t--sw-first)
+      (let ((window (active-window)))
+        (split-window! 'h 0.5)
+        (other-window!)
+        (switch-to-buffer! t--sw-second)
+        (switch-to-buffer! noise)
+        (select-window! window)
+        (let ((pool (group-switch-all-buffers-but t--sw-first)))
+          (check-equal! (car pool) t--sw-third "the last buffer in this window leads")
+          (check-equal! (cadr pool) t--sw-second "the older buffer follows it")))
+      (buffer-kill! noise))
+    (t--sw-done!)))
+
 ;;; --- founding a group -----------------------------------------------------------
 
 (deftest 'new-from-visible-preserves-old-memberships-and-the-layout

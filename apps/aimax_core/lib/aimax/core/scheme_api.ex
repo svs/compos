@@ -35,6 +35,8 @@ defmodule Aimax.Core.SchemeAPI do
       "buffer-list" => "(buffer-list) — return the names of all buffers.",
       "buffer-list-mru" =>
         "(buffer-list-mru) — return buffer names in most-recently-used order, without internal buffers.",
+      "window-buffer-history" =>
+        "(window-buffer-history [ID]) — return the window's previous buffers, most recent first.",
       "mru-list" =>
         "(mru-list) — return (\"buffer\" NAME) and (\"group\" NAME) rows: the whole history in recency order.",
       "mru-note-group!" => "(mru-note-group! NAME) — record a group switch as a history entry.",
@@ -474,6 +476,10 @@ defmodule Aimax.Core.SchemeAPI do
       end,
       "buffer-list" => fn [] -> Core.list_buffers() end,
       "buffer-list-mru" => fn [] -> Editor.buffer_mru() end,
+      "window-buffer-history" => fn
+        [] -> Editor.window_buffer_history()
+        [id] -> Editor.window_buffer_history(id)
+      end,
       # the whole history: ("buffer" NAME) and ("group" NAME) rows in
       # recency order — a group switch is an entry like a buffer visit
       "mru-list" => fn [] -> Editor.mru_all() end,
@@ -2142,12 +2148,18 @@ defmodule Aimax.Core.SchemeAPI do
   defp plain(v), do: v
 
   # the desktop's tuple spec for a window tree — what restore_tree accepts
+  defp tree_buffers({:leaf, b, _, _, _, _, _}), do: [b]
   defp tree_buffers({:leaf, b, _, _, _, _}), do: [b]
   defp tree_buffers({:split, _, _, a, b}), do: tree_buffers(a) ++ tree_buffers(b)
   defp tree_buffers(_), do: []
 
   defp tree_rename({:leaf, b, top, point, manual, ctop}, old, new),
     do: {:leaf, if(b == old, do: new, else: b), top, point, manual, ctop}
+
+  defp tree_rename({:leaf, b, top, point, manual, ctop, history}, old, new) do
+    renamed = Enum.map(history, fn name -> if name == old, do: new, else: name end)
+    {:leaf, if(b == old, do: new, else: b), top, point, manual, ctop, renamed}
+  end
 
   defp tree_rename({:split, dir, ratio, a, b}, old, new),
     do: {:split, dir, ratio, tree_rename(a, old, new), tree_rename(b, old, new)}
@@ -2156,7 +2168,7 @@ defmodule Aimax.Core.SchemeAPI do
 
   defp tree_spec(%{type: :leaf, buffer: b} = leaf) do
     {:leaf, b, Map.get(leaf, :top, 0), Map.get(leaf, :point, 0), Map.get(leaf, :manual, false),
-     Map.get(leaf, :ctop, 0)}
+     Map.get(leaf, :ctop, 0), Map.get(leaf, :history, [])}
   end
 
   defp tree_spec(%{type: :split, dir: dir, children: [a, b]} = s),

@@ -114,7 +114,7 @@ defmodule Aimax.Core.Desktop do
   # each window reopens at its own spot, pinned if the reader pinned it
   defp serialize(%{type: :leaf, buffer: b} = leaf) do
     {:leaf, b, Map.get(leaf, :top, 0), Map.get(leaf, :point, 0), Map.get(leaf, :manual, false),
-     Map.get(leaf, :ctop, 0)}
+     Map.get(leaf, :ctop, 0), Map.get(leaf, :history, [])}
   end
 
   defp serialize(%{type: :split, dir: dir, children: [a, b]} = split),

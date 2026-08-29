@@ -105,6 +105,30 @@
       (buffer-kill! noise))
     (t--sw-done!)))
 
+(deftest 'the-group-switcher-indexes-memberships-in-one-pass
+  "the one-pass index lists the members a scan per group lists, in the same order"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((a (group-record-create! "zz-sw-index-a"))
+          (b (group-record-create! "zz-sw-index-b")))
+      (buffer-add-group! t--sw-first a)
+      (buffer-add-group! t--sw-second a)
+      (buffer-add-group! t--sw-second b)
+      (switch-to-buffer! t--sw-second)
+      (switch-to-buffer! t--sw-first)
+      (let ((index (group-members-index)))
+        (check-equal! (group-members-in index a) (group-buffers-mru a)
+                      "group a: the index lists what the scan lists")
+        (check-equal! (group-members-in index b) (group-buffers-mru b)
+                      "group b: the index lists what the scan lists")
+        (check-equal! (car (group-members-in index a)) t--sw-first
+                      "the most recent member leads")
+        (check-equal! (group-members-in index "zz-sw-no-such-group") '()
+                      "an unknown group has no members")
+        (check-equal! (group-switch-candidate-in index b) (group-switch-candidate b)
+                      "the candidate row is the row the scan builds")))
+    (t--sw-done!)))
+
 ;;; --- founding a group -----------------------------------------------------------
 
 (deftest 'new-from-visible-preserves-old-memberships-and-the-layout

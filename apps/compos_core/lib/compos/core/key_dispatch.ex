@@ -51,6 +51,70 @@ defmodule Compos.Core.KeyDispatch do
     :ok
   end
 
+  @doc """
+  An input intent from the browser's text pipeline (`beforeinput`): TYPE is
+  the inputType, FROM..TO the byte range it targets (-1 = at point), TEXT
+  what it inserts. A collapsed intent at point is the key it stands for and
+  takes the key path, so the minibuffer, the keymaps, and completion see it
+  as a key. A ranged intent is Scheme policy (`input-intent!`).
+  """
+  def handle_intent(type, from, to, text) when is_binary(type) and is_binary(text) do
+    snapshot = Editor.snapshot()
+
+    routed? =
+      Map.get(snapshot, :minibuffer) != nil or Map.get(snapshot, :completion) != nil or
+        Map.get(snapshot, :transient) != nil or Map.get(snapshot, :key_capture) != nil
+
+    buffer = Editor.current_buffer()
+    point = if Buffer.exists?(buffer), do: Buffer.point(buffer), else: 0
+    # a collapsed intent acts at point, whatever byte the client named: the
+    # DOM caret lags the server by one patch, and typing goes where point is
+    at_point? = from == to
+
+    cond do
+      at_point? and intent_key(type, text) != nil ->
+        handle_key(intent_key(type, text))
+
+      # a routed surface (minibuffer, completion) takes text one key at a
+      # time: an input method commits a word, the prompt sees its letters
+      routed? and type in ~w(insertText insertReplacementText insertCompositionText) ->
+        text |> String.graphemes() |> Enum.each(&handle_key(intent_key("insertText", &1)))
+
+      true ->
+        run_intent(type, from, to, text, point)
+    end
+
+    :ok
+  end
+
+  defp intent_key("insertText", " "), do: "SPC"
+  defp intent_key("insertText", "\n"), do: "RET"
+
+  defp intent_key(type, text) when type in ["insertText", "insertReplacementText"] do
+    if String.length(text) == 1, do: text, else: nil
+  end
+
+  defp intent_key("insertParagraph", _), do: "RET"
+  defp intent_key("insertLineBreak", _), do: "RET"
+  defp intent_key("deleteContentBackward", _), do: "DEL"
+  defp intent_key("deleteContentForward", _), do: "<delete>"
+  defp intent_key(_, _), do: nil
+
+  defp run_intent(type, from, to, text, point) do
+    {from, to} = if from < 0 or to < 0, do: {point, point}, else: {min(from, to), max(from, to)}
+    buffer = Editor.current_buffer()
+    if Buffer.exists?(buffer), do: Buffer.break_undo_chain(buffer)
+
+    case Session.call_named("input-intent!", [type, from, to, text]) do
+      {:ok, _} ->
+        Editor.finish_command("input-intent", false)
+
+      other ->
+        Editor.finish_command("input-intent", false)
+        Editor.set_echo("input-intent: #{inspect(other)}")
+    end
+  end
+
   # --- completion popup routing ----------------------------------------------
   # What the popup's keys MEAN is Scheme's business (dup #22): the
   # " *completion*" keymap in editor.scm binds move/accept/quit, rebindable

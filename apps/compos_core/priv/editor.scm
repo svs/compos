@@ -8314,6 +8314,50 @@
   (select-window! id)
   (chat-snap-to-input!))
 
+;;; --- Input intents ---------------------------------------------------------
+;;; The browser's own text pipeline (input methods, dead keys, dictation,
+;;; autocorrect, spellcheck, native selection) reports what the user meant
+;;; through `beforeinput`. The client sends each intent as a type, a byte
+;;; range, and text. A collapsed intent at point is a key, and KeyDispatch
+;;; routes it as one. A ranged intent comes here: what the range means is
+;;; policy.
+
+(define *input-intent-handlers* '())
+
+;; (on-input-intent! TYPE FN): FN takes (from to text) and returns #t when
+;; it handled the intent. A mode registers "formatBold" here.
+(define (on-input-intent! type fn)
+  (set! *input-intent-handlers*
+    (cons (list type fn)
+          (remove (lambda (entry) (equal? (car entry) type))
+                  *input-intent-handlers*))))
+
+(define (input-intent--replace! from to text)
+  (goto-char! from)
+  (set-mark! to)
+  (delete-region!)
+  (set-mark! #f)
+  (goto-char! from)
+  (when (> (string-length text) 0) (insert! text))
+  #t)
+
+(define (input-intent! type from to text)
+  (let ((handler (assoc type *input-intent-handlers*)))
+    (cond
+      ((and handler ((cadr handler) from to text)) #t)
+      ((member type '("insertText" "insertReplacementText" "insertCompositionText"
+                      "insertFromPaste" "insertFromDrop" "insertFromYank"
+                      "insertTranspose"))
+       (input-intent--replace! from to text))
+      ((member type '("insertParagraph" "insertLineBreak"))
+       (input-intent--replace! from to "\n"))
+      ((string-prefix? "delete" type)
+       (input-intent--replace! from to ""))
+      ((equal? type "historyUndo") (run-command "undo") #t)
+      (else
+        (message (string-append "Unhandled input intent: " type))
+        #f))))
+
 ;; one gate for clicks that run a command (dup #24). A transcript button
 ;; sends a command name; the modeline-info segment sends its buffer. The
 ;; whitelist lives here: a button runs agent-* commands only, a modeline

@@ -252,6 +252,10 @@ defmodule Compos.Ui.Layouts do
             user-select: none;
           }
           .line-content { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; position: relative; }
+          /* the editable surface: the browser's text pipeline feeds
+             beforeinput intents; the server still draws the caret */
+          .buf[contenteditable] { outline: none; caret-color: transparent; }
+          .buf[contenteditable] .linenum { user-select: none; }
           /* completion-at-point popup: inline card anchored under the prefix */
           .cap-pop {
             position: absolute; top: calc(100% + 3px); z-index: 15;
@@ -1005,6 +1009,20 @@ defmodule Compos.Ui.Layouts do
             if (e.ctrlKey) spec = "C-" + spec;
             if (e.metaKey) spec = "s-" + spec; // s- = super = Cmd
             return spec;
+          }
+
+          // A key the browser's text pipeline should keep, because an
+          // editable buffer surface has focus: a printable character, a
+          // dead key or input-method key, and plain Enter, Backspace and
+          // Delete. Everything with a modifier, TAB, ESC, and the motion
+          // keys still travel as keys (keySpec).
+          function nativeTextKey(e) {
+            const a = document.activeElement;
+            if (!a || !a.closest || !a.closest(".buf[contenteditable]")) return false;
+            if (e.ctrlKey || e.altKey || e.metaKey) return false;
+            if (e.key === "Dead" || e.key === "Process" || e.key === "Unidentified") return true;
+            if (e.key.length === 1) return true;
+            return !e.shiftKey && (e.key === "Enter" || e.key === "Backspace" || e.key === "Delete");
           }
 
           const WHICH_KEY_MODIFIERS = {
@@ -1955,6 +1973,11 @@ defmodule Compos.Ui.Layouts do
                     else this.pushEvent("copy", {});
                     return;
                   }
+                  // An editable surface has focus: the browser's own text
+                  // pipeline turns this key into a beforeinput intent
+                  // (accents, input methods, dictation, autocorrect).
+                  // Chords, motion keys, and TAB still travel as keys.
+                  if (nativeTextKey(e)) return;
                   const spec = keySpec(e);
                   if (spec === null) return;
                   e.preventDefault();
@@ -2003,6 +2026,113 @@ defmodule Compos.Ui.Layouts do
                   this.pushEvent("paste", { text });
                 };
                 window.addEventListener("paste", this.pasteH);
+
+                // --- the editable surface --------------------------------
+                // A DOM position inside a line, as the source byte it names:
+                // the line's start plus the UTF-8 length of the drawn text
+                // before it. The caret placeholder (an nbsp the server drew
+                // at the end of a line) and the completion popup draw no
+                // source bytes.
+                const editableOf = (node) => {
+                  const el = node && (node.nodeType === 1 ? node : node.parentElement);
+                  return el && el.closest ? el.closest(".buf[contenteditable]") : null;
+                };
+                const winIdOf = (el) => {
+                  const win = el && el.closest(".window[data-win-id]");
+                  return win ? parseInt(win.dataset.winId, 10) : null;
+                };
+                const countsBytes = (t) => {
+                  const p = t.parentElement;
+                  if (!p || p.closest(".cap-pop")) return false;
+                  return !(p.classList.contains("cursor") && t.textContent === " ");
+                };
+                const domByte = (node, offset) => {
+                  const el = node.nodeType === 1 ? node : node.parentElement;
+                  const line = el && el.closest(".line");
+                  if (!line) return null;
+                  const start = parseInt(line.dataset.s, 10);
+                  if (isNaN(start)) return null;
+                  const content = line.querySelector(".line-content");
+                  if (!content) return start;
+                  // an element position names the text before its child
+                  let target = node, at = offset, after = false;
+                  if (node.nodeType === 1) {
+                    const child = node.childNodes[offset];
+                    if (child) { target = child; at = 0; }
+                    else { target = node.lastChild; after = true; }
+                  }
+                  let bytes = 0;
+                  const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+                  let t;
+                  while ((t = walker.nextNode())) {
+                    const inside = target && (t === target || (target.contains && target.contains(t)));
+                    if (inside && !after) {
+                      if (countsBytes(t) && t === target) bytes += utf8.encode(t.textContent.slice(0, at)).length;
+                      return start + bytes;
+                    }
+                    if (countsBytes(t)) bytes += utf8.encode(t.textContent).length;
+                    if (inside && after && t === target) return start + bytes;
+                  }
+                  return start + bytes;
+                };
+                this.beforeInputH = (e) => {
+                  const buf = editableOf(e.target);
+                  if (!buf) return;
+                  // an input method owns the DOM of its run until it ends
+                  if (e.isComposing || e.inputType === "insertCompositionText") {
+                    buf.setAttribute("phx-update", "ignore");
+                    return;
+                  }
+                  e.preventDefault();
+                  const range = e.getTargetRanges ? e.getTargetRanges()[0] : null;
+                  const from = range ? domByte(range.startContainer, range.startOffset) : null;
+                  const to = range ? domByte(range.endContainer, range.endOffset) : null;
+                  let text = e.data;
+                  if (text == null && e.dataTransfer) text = e.dataTransfer.getData("text/plain");
+                  this.pushEvent("intent", {
+                    win: winIdOf(buf), type: e.inputType,
+                    from: from == null ? -1 : from, to: to == null ? -1 : to,
+                    text: text || ""
+                  });
+                };
+                window.addEventListener("beforeinput", this.beforeInputH, true);
+                this.compStartH = (e) => {
+                  const buf = editableOf(e.target);
+                  if (buf) buf.setAttribute("phx-update", "ignore");
+                };
+                this.compEndH = (e) => {
+                  const buf = editableOf(e.target);
+                  if (!buf) return;
+                  buf.removeAttribute("phx-update");
+                  this.pushEvent("intent", {
+                    win: winIdOf(buf), type: "insertCompositionText",
+                    from: -1, to: -1, text: e.data || ""
+                  });
+                };
+                window.addEventListener("compositionstart", this.compStartH, true);
+                window.addEventListener("compositionend", this.compEndH, true);
+                // After a patch the active editable takes focus and the DOM
+                // caret stands on the server's cursor, so the next intent
+                // targets the byte the server means. A prompt, a panel, or
+                // a terminal keeps the keyboard it has.
+                this.syncEditable = () => {
+                  if (document.querySelector(".mb-panel, .which-key, .transient-panel")) return;
+                  const buf = document.querySelector(".window.active .buf[contenteditable]");
+                  if (!buf) return;
+                  const a = document.activeElement;
+                  if (a && a.closest && a.closest(".terminal-view, iframe, input, textarea")) return;
+                  if (a !== buf && !buf.contains(a)) buf.focus({ preventScroll: true });
+                  if (buf.hasAttribute("phx-update")) return;
+                  const sel = window.getSelection();
+                  if (!sel || !sel.isCollapsed) return;
+                  const cur = buf.querySelector(".cursor");
+                  const t = cur && cur.firstChild;
+                  if (t && t.nodeType === 3) {
+                    try { sel.collapse(t, 0); } catch (_) { /* detached mid-patch */ }
+                  }
+                };
+                this.syncEditable();
+
                 this.handleEvent("clipboard", ({ text }) => {
                   if (text) navigator.clipboard.writeText(text);
                 });
@@ -2465,6 +2595,7 @@ defmodule Compos.Ui.Layouts do
                 this.applyWhichKeyFilter();
                 this.syncCursorFocus();
                 this.syncKeyboardOwner();
+                this.syncEditable();
                 // re-measure after every patch: splits, buffer switches and
                 // per-buffer styles all change how many rows fit where
                 clearTimeout(this._wrt);
@@ -2505,6 +2636,9 @@ defmodule Compos.Ui.Layouts do
                 window.removeEventListener("keydown", this.proveFocusH, true);
                 document.removeEventListener("visibilitychange", this.visibilityH);
                 window.removeEventListener("paste", this.pasteH);
+                window.removeEventListener("beforeinput", this.beforeInputH, true);
+                window.removeEventListener("compositionstart", this.compStartH, true);
+                window.removeEventListener("compositionend", this.compEndH, true);
                 window.removeEventListener("mouseup", this.mouseH);
                 if (this.sink) this.sink.remove();
               }

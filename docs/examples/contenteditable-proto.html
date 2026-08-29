@@ -1,0 +1,222 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>contenteditable attack</title>
+<style>
+  body { font: 15px/1.5 -apple-system, sans-serif; margin: 0; display: grid; grid-template-columns: 1fr 380px; height: 100vh; }
+  #ed { padding: 24px; outline: none; white-space: pre-wrap; word-break: break-word; font-family: Menlo, monospace; }
+  #ed .line { min-height: 1.5em; }
+  #ed .run.b { font-weight: bold; }
+  #ed .line.h1 { font-size: 2em; font-weight: 700; font-family: Georgia, serif; line-height: 1.25; margin: .4em 0 .2em; }
+  #ed .line.h2 { font-size: 1.5em; font-weight: 700; font-family: Georgia, serif; line-height: 1.3; margin: .3em 0 .1em; }
+  #ed .line.quote { border-left: 3px solid #ccc; padding-left: 12px; color: #555; font-style: italic; }
+  #ed .island { display: inline-block; vertical-align: middle; user-select: all; }
+  #ed .island.img { width: 160px; height: 90px; border-radius: 6px; background: linear-gradient(135deg, #7ab, #cde); }
+  #ed .island.xpost { display: block; max-width: 420px; border: 1px solid #ccc; border-radius: 12px; padding: 12px; font-family: -apple-system, sans-serif; font-size: 14px; margin: 6px 0; }
+  #ed .island.xpost b { display: block; } #ed .island.xpost .h { color: #888; font-size: 12px; }
+  #side { background: #111; color: #9f9; font: 11px/1.35 Menlo, monospace; overflow: auto; padding: 8px; white-space: pre-wrap; }
+  #model { color: #fc6; border-bottom: 1px solid #444; margin-bottom: 6px; padding-bottom: 6px; }
+</style>
+<div id="ed" contenteditable="true" spellcheck="true" autocorrect="on" autocapitalize="off"></div>
+<div id="side"><div id="model"></div><div id="log"></div></div>
+<script>
+// ---- the "server": text is truth, point/mark are byte offsets, RTT simulated
+const enc = new TextEncoder(), dec = new TextDecoder();
+const server = {
+  bytes: enc.encode("Hello world.\nThis is a second line with **bold** text.\nAn image ![sunset](sunset.jpg) inline, then text.\nhttps://x.com/svs/status/1234567890\nType here: "),
+  point: 0, mark: null, version: 0,
+  apply(op) {
+    const {kind, from, to, text} = op;
+    if (kind === "replace") {
+      const ins = enc.encode(text || "");
+      const out = new Uint8Array(this.bytes.length - (to - from) + ins.length);
+      out.set(this.bytes.subarray(0, from), 0); out.set(ins, from); out.set(this.bytes.subarray(to), from + ins.length);
+      this.bytes = out; this.point = from + ins.length; this.mark = null; this.version++;
+    } else if (kind === "sel") { this.point = op.point; this.mark = op.mark; }
+  },
+  // rows: one per line, runs split on **...** so we test styled runs + hidden markup
+  rows() {
+    const text = dec.decode(this.bytes); const rows = []; let off = 0;
+    for (const line of text.split("\n")) {
+      const runs = []; let i = 0; const re = /\*\*(.+?)\*\*|!\[([^\]]*)\]\(([^)]*)\)/g; let m;
+      const xm = /^https:\/\/x\.com\/(\w+)\/status\/\d+$/.exec(line);
+      if (xm) { rows.push({id: rows.length, start: off, runs: [{s: off, text: line, cls: "", display: {kind: "xpost", user: xm[1]}}], block: "", hidden: 0}); off += enc.encode(line).length + 1; continue; }
+      const bm = /^(#{1,2} |> )/.exec(line); const block = bm ? (bm[1] === "# " ? "h1" : bm[1] === "## " ? "h2" : "quote") : "";
+      const hidden = bm ? bm[1].length : 0; if (bm) i = hidden;
+      while ((m = re.exec(line))) {
+        if (m.index < i) continue;
+        if (m.index > i) runs.push({s: 0, text: line.slice(i, m.index), cls: ""});
+        if (m[1] !== undefined) runs.push({s: 0, text: m[1], cls: "b", pre: 2, post: 2});
+        else runs.push({s: 0, text: m[0], cls: "", display: {kind: "img", alt: m[2], src: m[3]}});
+        i = m.index + m[0].length;
+      }
+      runs.push({s: 0, text: line.slice(i), cls: ""});
+      if (runs.length) runs[0].pre = (runs[0].pre || 0) + hidden;
+      let cur = off; for (const r of runs) { r.s = cur + (r.pre || 0); cur += enc.encode(r.text).length + (r.pre || 0) + (r.post || 0); }
+      rows.push({id: rows.length, start: off, runs, block, hidden});
+      off += enc.encode(line).length + 1;
+    }
+    return rows;
+  }
+};
+const RTT = 8;
+const roundtrip = (op) => new Promise(res => setTimeout(() => { server.apply(op); res({rows: server.rows(), point: server.point, mark: server.mark, v: server.version}); }, RTT));
+
+// ---- the client: dumb. renders rows, maps DOM selection <-> bytes, forwards intent.
+const ed = document.getElementById("ed"), logEl = document.getElementById("log"), modelEl = document.getElementById("model");
+const log = (...a) => { const s = a.map(x => typeof x === "string" ? x : JSON.stringify(x)).join(" "); console.log("[proto]", s); logEl.textContent = s + "\n" + logEl.textContent.slice(0, 6000); };
+let composing = false, held = null;
+// ops sent but not yet confirmed: a DOM position read now is in pre-op coordinates
+const pending = [];
+const mapThroughPending = (b) => { for (const op of pending) { if (b >= op.to) b += op.delta; else if (b > op.from) b = op.from + Math.max(0, Math.min(b - op.from, op.delta + (op.to - op.from))); } return b; };
+let caret = 0;
+function send(op) {
+  if (op.kind !== "replace") return roundtrip(op).then(render);
+  const p = {from: op.from, to: op.to, delta: enc.encode(op.text || "").length - (op.to - op.from)};
+  caret = op.from + enc.encode(op.text || "").length;
+  pending.push(p);
+  return roundtrip(op).then(st => { pending.splice(pending.indexOf(p), 1); render(st); });
+}
+
+function render(state) {
+  if (composing) { held = state; return; }
+  const old = Array.from(ed.children);
+  state.rows.forEach((row, i) => {
+    const html = row.runs.map(r => r.display
+      ? (r.display.kind === "img"
+          ? `<span class="run island img" contenteditable="false" data-s="${r.s}" data-len="${enc.encode(r.text).length}" title="${esc(r.display.alt)}"></span>`
+          : `<span class="run island xpost" contenteditable="false" data-s="${r.s}" data-len="${enc.encode(r.text).length}"><b>@${esc(r.display.user)}</b>A post embedded from X. The source line is the URL; this card is its display spec.<span class="h">${esc(r.text)}</span></span>`)
+      : `<span class="run ${r.cls}" data-s="${r.s}">${esc(r.text)}</span>`).join("") || `<span class="run" data-s="${row.start}"></span>`;
+    let el = old[i];
+    if (!el) { el = document.createElement("div"); el.className = "line"; ed.appendChild(el); }
+    el.dataset.id = row.id; el.dataset.s = row.start; el.dataset.hidden = row.hidden; el.className = "line " + row.block;
+    if (el.innerHTML !== html) el.innerHTML = html;
+  });
+  for (let i = state.rows.length; i < old.length; i++) old[i].remove();
+  if (pending.length === 0) setSelection(state.point, state.mark); // else: leave the caret; the last reply will place it
+  modelEl.textContent = `v${state.v} point=${state.point} mark=${state.mark}\n` + JSON.stringify(dec.decode(server.bytes));
+}
+const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+
+// DOM position -> byte offset: the run's data-s + utf8 length of the text before the caret in that run
+function toByte(node, offset) {
+  if (!node) return null;
+  let el = node.nodeType === 1 ? node : node.parentElement;
+  if (node.nodeType === 1) { // caret between elements: before child[offset], or after the last child
+    const isl = el.closest(".island"); if (isl) return parseInt(isl.dataset.s, 10) + (offset > 0 ? parseInt(isl.dataset.len, 10) : 0);
+    const child = node.childNodes[offset];
+    if (child) return child.classList && child.classList.contains("island") ? parseInt(child.dataset.s, 10) : toByte(child.nodeType === 3 ? child : child.firstChild || child, 0);
+    const last = node.lastChild; if (!last) return parseInt(el.closest("[data-s]")?.dataset.s ?? "0", 10);
+    return last.classList && last.classList.contains("island") ? parseInt(last.dataset.s, 10) + parseInt(last.dataset.len, 10) : toByte(last.nodeType === 3 ? last : last.lastChild || last, (last.nodeType === 3 ? last : last.lastChild || last).textContent.length);
+  }
+  const run = el.closest(".run"); if (!run) return null;
+  if (run.classList.contains("island")) return parseInt(run.dataset.s, 10) + (offset > 0 ? parseInt(run.dataset.len, 10) : 0);
+  return parseInt(run.dataset.s, 10) + enc.encode(node.textContent.slice(0, offset)).length;
+}
+// byte offset -> DOM position
+function toDom(byte) {
+  const runs = Array.from(ed.querySelectorAll(".run")); let best = null;
+  for (const r of runs) { const s = parseInt(r.dataset.s, 10); const isl = r.classList.contains("island"); const len = isl ? parseInt(r.dataset.len, 10) : enc.encode(r.textContent).length;
+    if (byte >= s && byte <= s + len) { if (isl) { const i = Array.from(r.parentNode.childNodes).indexOf(r); return {node: r.parentNode, offset: byte === s ? i : i + 1}; }
+      const t = r.firstChild || r.appendChild(document.createTextNode("")); return {node: t, offset: dec.decode(enc.encode(r.textContent).subarray(0, byte - s)).length}; } }
+  const last = runs[runs.length - 1]; const t = last.firstChild || last.appendChild(document.createTextNode("")); return {node: t, offset: t.textContent.length};
+}
+let settingSel = false;
+function setSelection(point, mark) {
+  const sel = window.getSelection(); const p = toDom(point); if (!p) return;
+  settingSel = true;
+  if (mark == null) sel.setBaseAndExtent(p.node, p.offset, p.node, p.offset);
+  else { const m = toDom(mark); sel.setBaseAndExtent(m.node, m.offset, p.node, p.offset); }
+  settingSel = false;
+}
+function selBytes() {
+  const sel = window.getSelection(); if (!sel.rangeCount || !ed.contains(sel.anchorNode)) return null;
+  const a = toByte(sel.anchorNode, sel.anchorOffset), f = toByte(sel.focusNode, sel.focusOffset);
+  if (a == null || f == null) return null;
+  return {from: Math.min(a, f), to: Math.max(a, f), anchor: a, focus: f};
+}
+
+// ---- intent: beforeinput is the whole story
+ed.addEventListener("beforeinput", (e) => {
+  const sel = selBytes(); const r = e.getTargetRanges()[0];
+  const range = r ? {from: toByte(r.startContainer, r.startOffset), to: toByte(r.endContainer, r.endOffset)} : sel;
+  log("beforeinput", e.inputType, JSON.stringify(e.data), "isComposing=" + e.isComposing, range);
+  if (e.isComposing || e.inputType === "insertCompositionText") return; // let the IME own the DOM
+  e.preventDefault();
+  let text = null;
+  switch (e.inputType) {
+    case "insertText": case "insertReplacementText": text = e.data ?? (e.dataTransfer && e.dataTransfer.getData("text/plain")) ?? ""; break;
+    case "insertParagraph": case "insertLineBreak": text = "\n"; break;
+    case "insertFromPaste": case "insertFromDrop": text = e.dataTransfer.getData("text/plain"); log("paste html?", !!e.dataTransfer.getData("text/html")); break;
+    case "deleteContentBackward": {
+      const rowEl = (r ? r.endContainer : window.getSelection().focusNode); const lineEl = (rowEl.nodeType === 1 ? rowEl : rowEl.parentElement).closest(".line");
+      const hid = lineEl ? parseInt(lineEl.dataset.hidden || "0", 10) : 0; const rowStart = lineEl ? parseInt(lineEl.dataset.s, 10) : -1;
+      if (hid && !pending.length && range.to === rowStart + hid && range.from < range.to) { log("-> unmark block", {from: rowStart, to: rowStart + hid}); send({kind: "replace", from: rowStart, to: rowStart + hid, text: ""}); return; }
+    }
+      if (pending.length && range.from === range.to) { send({kind:"replace", from: caret - 1, to: caret, text: ""}); return; } case "deleteContentForward": case "deleteWordBackward": case "deleteWordForward": case "deleteByCut": case "deleteSoftLineBackward": case "deleteHardLineBackward": text = ""; break;
+    case "historyUndo": log("-> server undo"); return;
+    case "historyRedo": log("-> server redo"); return;
+    case "formatBold": log("-> server toggle-bold on region", range); return;
+    default: log("unhandled", e.inputType); return;
+  }
+  // typing faster than the round trip: the DOM caret is stale, the optimistic caret is not
+  const collapsed = range.from === range.to;
+  const from = pending.length && collapsed ? caret : range.from, to = pending.length && collapsed ? caret : range.to;
+  send({kind: "replace", from, to, text});
+});
+ed.addEventListener("compositionstart", (e) => { composing = true; log("compositionstart", JSON.stringify(e.data)); });
+ed.addEventListener("compositionupdate", (e) => log("compositionupdate", JSON.stringify(e.data)));
+ed.addEventListener("compositionend", (e) => {
+  composing = false; log("compositionend", JSON.stringify(e.data));
+  // the browser mutated one run; read the caret's run back and send the diff as one replace
+  const sel = window.getSelection(); const run = sel.anchorNode && (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement).closest(".run");
+  if (run) {
+    const s = parseInt(run.dataset.s, 10);
+    // model text of that run = bytes from s of length of the run's ORIGINAL text; we know what the DOM says now
+    const rowStart = parseInt(run.parentElement.dataset.s, 10); const rows = server.rows(); const row = rows.find(r => r.start === rowStart);
+    const orig = row.runs.find(r => r.s === s); const origLen = enc.encode(orig.text).length;
+    roundtrip({kind: "replace", from: s, to: s + origLen, text: run.textContent}).then(render);
+  }
+  if (held) { const h = held; held = null; render(h); }
+});
+document.addEventListener("selectionchange", () => {
+  if (settingSel || composing || pending.length) return; const s = selBytes(); if (!s) return;
+  if (s.focus !== server.point || (s.anchor !== s.focus ? s.anchor : null) !== server.mark) {
+    server.apply({kind: "sel", point: s.focus, mark: s.anchor === s.focus ? null : s.anchor});
+    modelEl.textContent = `v${server.version} point=${server.point} mark=${server.mark} (native sel)\n` + JSON.stringify(dec.decode(server.bytes));
+  }
+});
+// editor chords still ride keydown; the browser keeps everything else
+// server commands on the byte model: Emacs chords ride keydown, the rest is the browser's
+const cmd = {
+  "a": () => { const t = dec.decode(server.bytes.subarray(0, server.point)); const ls = enc.encode(t.slice(0, t.lastIndexOf("\n") + 1)).length; const row = server.rows().find(r => r.start === ls); return {kind: "sel", point: ls + (row ? row.hidden : 0), mark: null}; },
+  "e": () => { const t = dec.decode(server.bytes); const p = dec.decode(server.bytes.subarray(0, server.point)).length; const nl = t.indexOf("\n", p); return {kind: "sel", point: enc.encode(t.slice(0, nl < 0 ? t.length : nl)).length, mark: null}; },
+  "f": () => ({kind: "sel", point: stepVisible(server.point, +1), mark: null}),
+  "b": () => ({kind: "sel", point: stepVisible(server.point, -1), mark: null}),
+  "d": () => ({kind: "replace", from: server.point, to: stepVisible(server.point, +1), text: ""}),
+  "k": () => { const t = dec.decode(server.bytes); const p = dec.decode(server.bytes.subarray(0, server.point)).length; const nl = t.indexOf("\n", p); const to = nl < 0 ? server.bytes.length : (nl === p ? server.point + 1 : enc.encode(t.slice(0, nl)).length); return {kind: "replace", from: server.point, to, text: ""}; },
+  " ": () => ({kind: "sel", point: server.point, mark: server.point}),
+  "g": () => ({kind: "sel", point: server.point, mark: null}),
+  // visual rows are the browser's: ask its layout, then selectionchange reports the byte
+  "n": () => { window.getSelection().modify("move", "forward", "line"); return null; },
+  "p": () => { window.getSelection().modify("move", "backward", "line"); return null; },
+};
+// a visible step skips hidden markup and treats an island as one character
+function stepVisible(p, dir) {
+  const runs = server.rows().flatMap(r => r.runs);
+  const spots = []; for (const r of runs) { const len = enc.encode(r.text).length; if (r.display) { spots.push(r.s, r.s + len); continue; } const bs = enc.encode(r.text); let i = 0; while (i <= bs.length) { spots.push(r.s + i); i++; while (i < bs.length && (bs[i] & 0xC0) === 0x80) i++; } }
+  spots.sort((a, b) => a - b); const uniq = [...new Set(spots)];
+  const idx = uniq.findIndex(x => dir > 0 ? x > p : x >= p); if (dir > 0) return idx < 0 ? p : uniq[idx]; const j = (idx < 0 ? uniq.length : idx) - 1; return j < 0 ? p : uniq[j];
+}
+ed.addEventListener("keydown", (e) => {
+  if (e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1) {
+    e.preventDefault(); const f = cmd[e.key]; log("chord C-" + e.key, f ? "" : "(unbound)");
+    if (f) { const op = f(); if (op) send(op); }
+    return;
+  }
+  if (e.key === "Dead" || e.key === "Process") log("keydown", e.key, "(not dropped: browser composes)");
+  if (e.metaKey && e.key === "z") { e.preventDefault(); log("chord s-z -> server undo"); }
+});
+ed.addEventListener("input", (e) => { if (!e.isComposing && e.inputType !== "insertCompositionText") log("!! DOM mutated without our consent:", e.inputType); });
+render({rows: server.rows(), point: server.bytes.length, mark: null, v: 0});
+window.proto = { server, render, selBytes };
+</script>

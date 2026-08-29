@@ -88,6 +88,20 @@ defmodule Compos.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
+  # an intent from the browser's text pipeline (beforeinput): what the user
+  # meant, as an inputType, a byte range, and text. KeyDispatch decides
+  # whether it is a key; Scheme decides what a range means.
+  def handle_event("intent", %{"type" => type, "from" => from, "to" => to} = p, socket)
+      when is_binary(type) and is_integer(from) and is_integer(to) do
+    text = if is_binary(p["text"]), do: p["text"], else: ""
+
+    Input.run(socket.assigns.frame, fn ->
+      Compos.Core.KeyDispatch.handle_intent(type, from, to, text)
+    end)
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
   # one handler for every click that runs a command: a transcript button
   # sends a command name, the modeline-info segment sends its buffer.
   # The Scheme gate ui-command! holds the whitelist — no policy here.
@@ -1379,6 +1393,10 @@ defmodule Compos.Ui.EditorLive do
         data-manual={to_string(@node.manual)}
         data-visual-lines={to_string(@node.visual_line_mode)}
         data-v={@node.version}
+        contenteditable={if @node.read_only, do: nil, else: "true"}
+        spellcheck="true"
+        autocorrect="on"
+        autocapitalize="off"
       >
         <div
           :for={ln <- @lines}
@@ -1386,10 +1404,11 @@ defmodule Compos.Ui.EditorLive do
           class={"line #{if ln.current, do: "hl-line"} #{if ln.selected, do: "selected-line"}"}
           data-s={ln.start}
         >
-          <span class="linenum">{ln.num}</span>
+          <span class="linenum" contenteditable="false">{ln.num}</span>
           <span class="line-content"><.seg :for={{txt, cls} <- ln.segs} txt={txt} cls={cls} /><span
               :if={@active? && @completion && ln.current}
               class="cap-pop"
+              contenteditable="false"
               style={"left: #{pop_col(@node.text, ln.start, @completion.start)}ch"}
             ><span class="cap-title">completion-at-point · {@completion.total}</span><span
               :for={c <- @completion.candidates}

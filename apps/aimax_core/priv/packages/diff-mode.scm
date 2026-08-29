@@ -936,11 +936,11 @@
            (on? (buffer-local buf 'diff-watch)))
       (cond ((not root) (message "this diff has no tree to watch"))
             (on?
-              (unwatch-path! root)
+              (unwatch-path! root 'deep)
               (buffer-set-local! buf 'diff-watch #f)
               (message "watch off"))
             (else
-              (watch-path! root)
+              (watch-path! root 'deep)
               (buffer-set-local! buf 'diff-watch #t)
               (message "watch on"))))))
 
@@ -1017,7 +1017,7 @@
       ;; and re-read; the open cards survive because diff--apply! only opens
       ;; cards it has not shown before.
       (when (and (buffer-local buf 'diff-watch) (buffer-local buf 'diff-root))
-        (watch-path! (buffer-local buf 'diff-root)))
+        (watch-path! (buffer-local buf 'diff-root) 'deep))
       (diff-refresh buf))))
 
 (mode-doc! "diff-mode"

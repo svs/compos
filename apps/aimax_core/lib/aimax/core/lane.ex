@@ -119,7 +119,9 @@ defmodule Aimax.Core.Lane do
     case :ets.whereis(:aimax_lane_jobs) do
       :undefined ->
         :ets.new(:aimax_lane_jobs, [:named_table, :public, :set, read_concurrency: true])
-      _tid -> :aimax_lane_jobs
+
+      _tid ->
+        :aimax_lane_jobs
     end
   end
 
@@ -205,13 +207,27 @@ defmodule Aimax.Core.Lane do
     # telemetry, and put the slow ones in the log by name
     @slow_ms 250
 
+    # A caller that timed out and died leaves its message in this mailbox.
+    # Nobody can receive the reply, so the work is waste: skip it. A burst
+    # of such jobs would otherwise hold the lane for minutes after every
+    # caller gave up.
     @impl true
-    def handle_call({:run, fun, label, owner, enqueued_at}, from, key) do
-      case timed(key, owner, label, enqueued_at, fn -> guarded(fun, from) end) do
-        {:reply, value} -> {:reply, value, key, @idle}
-        # the fun claimed the reply slot (eval-defer!): it answers later
-        # through GenServer.reply — this worker moves on at once
-        :noreply -> {:noreply, key, @idle}
+    def handle_call({:run, fun, label, owner, enqueued_at}, {caller, _} = from, key) do
+      if Process.alive?(caller) do
+        case timed(key, owner, label, enqueued_at, fn -> guarded(fun, from) end) do
+          {:reply, value} -> {:reply, value, key, @idle}
+          # the fun claimed the reply slot (eval-defer!): it answers later
+          # through GenServer.reply — this worker moves on at once
+          :noreply -> {:noreply, key, @idle}
+        end
+      else
+        :telemetry.execute(
+          [:aimax, :lane, :skipped],
+          %{queue_time: max(System.monotonic_time(:millisecond) - enqueued_at, 0)},
+          %{lane: key, owner: owner, label: label}
+        )
+
+        {:noreply, key, @idle}
       end
     end
 

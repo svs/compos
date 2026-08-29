@@ -8833,8 +8833,8 @@
 ;; the file watcher
 ;; The event is content-free: it names the root, and the handler re-queries.
 ;; Watch coalesces a burst of writes into one event per root.
-(public! 'watch-path! "(watch-path! DIR) -> the watched root; refcounted, so two watchers of one directory share one subscription")
-(public! 'unwatch-path! "(unwatch-path! DIR) — drop one reference; the subscription stops at zero")
+(public! 'watch-path! "(watch-path! DIR ['deep]) -> the watched root; refcounted, so two watchers of one directory share one subscription. A plain watch sees the direct children of DIR; 'deep sees the whole tree, for a repository")
+(public! 'unwatch-path! "(unwatch-path! DIR ['deep]) — drop one reference, 'deep for a deep one; the subscription stops at zero")
 (public! 'watched-paths "The watched roots")
 (public! 'on-fs-change! "(on-fs-change! FN) — FN gets the root string when a watched tree changes; keep it small, it schedules a refresh")
 

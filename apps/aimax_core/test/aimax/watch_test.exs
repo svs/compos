@@ -56,11 +56,11 @@ defmodule Aimax.WatchTest do
   # Watch with the silent backend, so every event the test sees is one the
   # test sent. fsevents replays what it buffered before the subscription, and
   # no amount of settling makes that reliable.
-  defp watch_quietly(ctx) do
+  defp watch_quietly(ctx, opts \\ []) do
     Application.put_env(:aimax_core, :fs_backend, Aimax.WatchTest.NoBackend)
     on_exit(fn -> Application.delete_env(:aimax_core, :fs_backend) end)
 
-    {:ok, root} = Watch.watch(ctx.dir, ctx.server)
+    {:ok, root} = Watch.watch(ctx.dir, ctx.server, opts)
     {root, backend(ctx.server)}
   end
 
@@ -119,8 +119,9 @@ defmodule Aimax.WatchTest do
     Task.await(task)
   end
 
+  # a repository is a deep watch: the diff buffer follows the whole tree
   test "git's object churn is silent, the index and the refs are not", ctx do
-    {_root, pid} = watch_quietly(ctx)
+    {_root, pid} = watch_quietly(ctx, deep: true)
 
     event(ctx, pid, "sub/.git/objects/aa/bbccdd")
     event(ctx, pid, ".git/objects/ee/ff0011")
@@ -133,6 +134,73 @@ defmodule Aimax.WatchTest do
       assert_receive {:fs_changed, _}, @settle, "expected #{path} to make the tree stale"
       quiet()
     end
+  end
+
+  test "a watch is shallow: a change below a child directory is silent", ctx do
+    {root, pid} = watch_quietly(ctx)
+
+    event(ctx, pid, "sub/deep.txt")
+    event(ctx, pid, "sub/deeper/deep.txt")
+    refute_receive {:fs_changed, _}, @settle
+
+    event(ctx, pid, "top.txt")
+    assert_receive {:fs_changed, ^root}, @settle
+  end
+
+  test "a deep reference sees the whole tree, and its leave ends that", ctx do
+    {root, pid} = watch_quietly(ctx)
+    {:ok, ^root} = Watch.watch(ctx.dir, ctx.server, deep: true)
+
+    event(ctx, pid, "sub/deep.txt")
+    assert_receive {:fs_changed, ^root}, @settle
+    quiet()
+
+    :ok = Watch.unwatch(ctx.dir, ctx.server, deep: true)
+    assert Watch.watching(ctx.server) == [root]
+
+    event(ctx, pid, "sub/deep.txt")
+    refute_receive {:fs_changed, _}, @settle
+
+    event(ctx, pid, "top.txt")
+    assert_receive {:fs_changed, ^root}, @settle
+  end
+
+  test "the Scheme handler runs once at a time per root, then once more for a burst during the run",
+       ctx do
+    {root, pid} = watch_quietly(ctx)
+    buf = "*watch-coalesce*"
+    Aimax.Core.create_buffer(buf)
+    on_exit(fn -> Aimax.Core.kill_buffer(buf) end)
+
+    # a slow handler: one second per run, so three bursts land inside one run
+    {:ok, _} =
+      Session.eval("""
+      (on-fs-change!
+        (lambda (r)
+          (if (equal? r "#{ctx.real}")
+              (begin
+                (buffer-append! "#{buf}" "run\\n")
+                (shell-command->string "sleep 1")))))
+      """)
+
+    for rel <- ["a.txt", "b.txt", "c.txt"] do
+      event(ctx, pid, rel)
+      assert_receive {:fs_changed, ^root}, @settle
+      Process.sleep(200)
+    end
+
+    # the first burst starts a run, the second marks the root pending, the
+    # third changes nothing: two runs in all, never three
+    assert wait_for(
+             fn ->
+               Process.sleep(500)
+               Aimax.Core.Buffer.text(buf) == "run\nrun\n"
+             end,
+             10
+           )
+
+    Process.sleep(1_500)
+    assert Aimax.Core.Buffer.text(buf) == "run\nrun\n"
   end
 
   test "an event for an unwatched backend is ignored", ctx do
@@ -177,15 +245,18 @@ defmodule Aimax.WatchTest do
 
     # fsevents arms a moment after the subscription and coalesces after that,
     # so write until it answers rather than assume one write is enough
-    assert wait_for(fn ->
-             touch(ctx.dir, "real.txt", "#{System.unique_integer()}")
+    assert wait_for(
+             fn ->
+               touch(ctx.dir, "real.txt", "#{System.unique_integer()}")
 
-             receive do
-               {:fs_changed, ^root} -> true
-             after
-               400 -> false
-             end
-           end, 15)
+               receive do
+                 {:fs_changed, ^root} -> true
+               after
+                 400 -> false
+               end
+             end,
+             15
+           )
   end
 
   # --- the Scheme surface ----------------------------------------------------
@@ -214,11 +285,14 @@ defmodule Aimax.WatchTest do
               (buffer-append! "#{buf}" (string-append root "\\n")))))
       """)
 
-    assert wait_for(fn ->
-             touch(ctx.dir, "scheme.txt", "#{System.unique_integer()}")
-             Process.sleep(400)
-             Aimax.Core.Buffer.text(buf) =~ ctx.real
-           end, 15)
+    assert wait_for(
+             fn ->
+               touch(ctx.dir, "scheme.txt", "#{System.unique_integer()}")
+               Process.sleep(400)
+               Aimax.Core.Buffer.text(buf) =~ ctx.real
+             end,
+             15
+           )
   end
 
   defp wait_for(fun, tries)

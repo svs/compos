@@ -122,9 +122,9 @@ defmodule Aimax.Core.SchemeAPI do
       "diff-word-range" =>
         "(diff-word-range OLD NEW) — return ((OS OE) (NS NE)) byte ranges of the differing span, or #f.",
       "watch-path!" =>
-        "(watch-path! DIR) — watch DIR for changes, refcounted; return the watched root or (error MSG).",
+        "(watch-path! DIR ['deep]) — watch DIR for changes, refcounted; return the watched root or (error MSG). A plain watch counts the direct children of DIR; 'deep counts the whole tree below it.",
       "unwatch-path!" =>
-        "(unwatch-path! DIR) — drop one watch reference; the subscription stops at zero.",
+        "(unwatch-path! DIR ['deep]) — drop one watch reference, 'deep for a deep one; the subscription stops at zero.",
       "watched-paths" => "(watched-paths) — return the watched roots.",
       "fs-on-change!" =>
         "(fs-on-change! FN) — register the ONE handler that gets a root when a watched tree changes.",
@@ -1934,14 +1934,16 @@ defmodule Aimax.Core.SchemeAPI do
   # subscribers is policy.
   defp watch_primitives do
     %{
-      "watch-path!" => fn [dir] ->
-        case Aimax.Core.Watch.watch(plain(dir)) do
+      "watch-path!" => fn [dir | rest] ->
+        deep? = rest == [{:sym, "deep"}]
+
+        case Aimax.Core.Watch.watch(plain(dir), Aimax.Core.Watch, deep: deep?) do
           {:ok, root} -> root
           {:error, msg} -> [{:sym, "error"}, msg]
         end
       end,
-      "unwatch-path!" => fn [dir] ->
-        Aimax.Core.Watch.unwatch(plain(dir))
+      "unwatch-path!" => fn [dir | rest] ->
+        Aimax.Core.Watch.unwatch(plain(dir), Aimax.Core.Watch, deep: rest == [{:sym, "deep"}])
         :void
       end,
       "watched-paths" => fn [] -> Aimax.Core.Watch.watching() end,

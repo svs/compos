@@ -311,13 +311,31 @@
       (delete-other-windows!)
       (switch-to-buffer! buf)
       (run-command "writing-mode")
-      (check-equal! (buffer-local buf 'minor-modes) '("writing-mode") "the mode is on")
+      (check-true! (member "writing-mode" (buffer-local buf 'minor-modes))
+                   "the writing mode is on")
+      (check-true! (member "preview-mode" (buffer-local buf 'minor-modes))
+                   "the preview mode owns the writing surface")
       (check-equal! (buffer-local buf 'line-numbers) "off" "no line numbers")
       (check-equal! (buffer-local buf 'window-class) "writing" "the writing measure")
       (check-equal! (buffer-local buf 'render-mode) "markdown" "rendered as markdown")
       (check-equal! (buffer-local buf 'preview-renderer) "markdown" "by the markdown renderer")
       (check-true! (buffer-local buf 'visual-line-mode) "with visual lines")
       (check-false! (buffer-local buf 'group) "and no group: that is write's job")
+      (t--wr-done! buf))))
+
+(deftest 'writing-mode-reapply-keeps-a-disabled-preview-off
+  "writing setup respects the preview mode state after first entry"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-writing-source.md" "one two three\n")))
+      (with-current-buffer buf
+        (lambda ()
+          (run-command "writing-mode")
+          (run-command "preview-mode")
+          (check-false! (minor-mode-on? buf "preview-mode")
+                        "the user chose source view")
+          (restore-minor-modes! buf)
+          (check-false! (buffer-local buf 'render-mode)
+                        "mode reapply preserves source view")))
       (t--wr-done! buf))))
 
 (deftest 'the-writing-selection-commands-extend-the-region

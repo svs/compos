@@ -188,6 +188,64 @@
                         "and it carries the configured engine")))
       (buffer-kill! buf))))
 
+(deftest 'preview-mode-membership-owns-the-rendered-view
+  "the mode list records the preview state that reload restores"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-preview-mode.md" "# title\n")))
+      (with-current-buffer buf
+        (lambda ()
+          (run-command "preview-mode")
+          (check-true! (minor-mode-on? buf "preview-mode")
+                       "the enabled mode is durable")
+          (check-equal! (buffer-local buf 'render-mode) "markdown"
+                        "the setup draws the page")
+          (check-true! (buffer-read-only? buf)
+                       "preview starts as a reading view")
+          (run-command "preview-mode")
+          (check-false! (minor-mode-on? buf "preview-mode")
+                        "the disabled mode leaves no durable entry")
+          (check-false! (buffer-local buf 'render-mode)
+                        "the teardown shows the source")
+          (check-true! (buffer-read-only? buf)
+                       "unpreview does not imply permission to edit")))
+      (buffer-kill! buf))))
+
+(deftest 'making-a-preview-writable-also-unpreviews-it
+  "read-only-mode exposes editable source and removes the preview mode"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-preview-edit.html" "<p>hi</p>\n")))
+      (with-current-buffer buf
+        (lambda ()
+          (run-command "preview-mode")
+          (run-command "read-only-mode")
+          (check-false! (buffer-read-only? buf)
+                        "the buffer is writable")
+          (check-false! (minor-mode-on? buf "preview-mode")
+                        "the reading mode is off")
+          (check-false! (buffer-local buf 'render-mode)
+                        "the editable source is visible")
+          (restore-minor-modes! buf)
+          (check-false! (buffer-local buf 'render-mode)
+                        "reload does not restore the disabled preview")))
+      (buffer-kill! buf))))
+
+(deftest 'preview-mode-reapply-preserves-the-last-choice
+  "reload rebuilds an enabled preview and leaves a disabled preview off"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-preview-reapply.html" "<p>hi</p>\n")))
+      (with-current-buffer buf
+        (lambda ()
+          (run-command "preview-mode")
+          (buffer-set-local! buf 'render-mode #f)
+          (restore-minor-modes! buf)
+          (check-equal! (buffer-local buf 'render-mode) "html"
+                        "reapply rebuilds the enabled preview")
+          (run-command "preview-mode")
+          (restore-minor-modes! buf)
+          (check-false! (buffer-local buf 'render-mode)
+                        "reapply leaves the disabled preview off")))
+      (buffer-kill! buf))))
+
 (deftest 'the-engine-setting-decides-which-renderer-a-page-gets
   "changing the setting changes the next page, and only that"
   (lambda ()

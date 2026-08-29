@@ -3016,28 +3016,6 @@
 (mode-doc! "html-mode"
   "HTML, parsed. You get the colours, and `C-M-f` and `C-M-b` step over whole elements. `C-c C-v` shows the rendered page, because the renderer reads the extension. `C-c C-a` runs the page as an app: its own scripts, its own storage, and the files beside it. A save reloads it, and `C-g` gives the keyboard back.")
 
-;; preview-mode: render the buffer instead of showing its source.
-;; Renderer picked by *preview-renderers* (extension -> renderer); the
-;; frontend knows "html" and "markdown". Add your own:
-;;   (set! *preview-renderers* (cons '(".rst" "markdown") *preview-renderers*))
-(define *preview-renderers*
-  '((".html" "html") (".htm" "html") (".svg" "html")
-    (".md" "markdown") (".markdown" "markdown") (".org" "markdown")
-    (".txt" "markdown")))
-
-;; A generated buffer has no extension to read a renderer from, so it says
-;; which renderer it wants in a buffer-local. Help docs are the case: the
-;; text is markdown, the buffer is "*Help*", and C-c C-v must still toggle
-;; between the source and the rendered page.
-(define (preview-renderer-for name)
-  (or (buffer-local name 'preview-renderer)
-      (let loop ((rs *preview-renderers*))
-        (if (null? rs)
-            #f
-            (if (string-suffix? (car (car rs)) name)
-                (cadr (car rs))
-                (loop (cdr rs)))))))
-
 ;; revert-buffer: re-read the file from disk (discards buffer edits).
 ;; Kill + re-visit so modes, hooks and fontification re-apply cleanly.
 (define-command "revert-buffer" "Re-read the current buffer's file from disk"
@@ -3052,24 +3030,6 @@
             (visit path)
             (goto-char! (min p (buffer-size (current-buffer))))
             (message "Reverted"))))))
-
-(define-command "preview-mode" "Toggle rendered preview of the current buffer"
-  (lambda ()
-    (if (equal? (buffer-local (current-buffer) 'mode-name) "chat-mode")
-        ;; a chat's rendered view is the rich transcript, not a markdown
-        ;; preview. A markdown render-mode here lost the chat UI with no
-        ;; way back — the chat's own toggle owns this buffer-local.
-        (run-command "chat-toggle-view")
-        (if (buffer-local (current-buffer) 'render-mode)
-            (begin
-              (buffer-set-local! (current-buffer) 'render-mode #f)
-              (message "Preview off"))
-            (let ((r (preview-renderer-for (current-buffer))))
-              (if r
-                  (begin
-                    (buffer-set-local! (current-buffer) 'render-mode r)
-                    (message (string-append "Preview on (" r ") — C-c C-v toggles")))
-                  (message "No preview renderer for this buffer")))))))
 
 ;;; --- apps --------------------------------------------------------------
 ;;; preview-mode renders a page the way eww does: themed, and inert. An app
@@ -5401,8 +5361,12 @@
     (let* ((buf (current-buffer))
            (ro? (buffer-read-only? buf)))
       (buffer-set-read-only! buf (not ro?))
-      ;; a file you make writable must show you the bytes you edit: an
-      ;; html file opens rendered, and the render hides them
+      ;; Making a preview writable also leaves the reading view. Remove the
+      ;; mode entry so a reload does not restore preview while the user edits.
+      (when (and ro? (minor-mode-on? buf "preview-mode"))
+        (disable-minor-mode! buf "preview-mode"))
+      ;; Keep compatibility with rendered file views that do not use
+      ;; preview-mode yet.
       (when (and ro? (buffer-path buf) (buffer-local buf 'render-mode))
         (buffer-set-local! buf 'render-mode #f))
       (message (if ro? "writable" "read-only")))))

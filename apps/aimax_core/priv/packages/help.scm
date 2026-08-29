@@ -69,6 +69,10 @@
     (let ((w (window-showing-other *help-buffer* from)))
       (if w (select-window! w) (switch-to-buffer! *help-buffer*)))
     (set-mode! "help-mode")
+    ;; Opening a new help page starts in its reading view. Later runtime
+    ;; reapplies preserve this mode membership exactly as the user left it.
+    (unless (minor-mode-on? *help-buffer* "preview-mode")
+      (enable-minor-mode! *help-buffer* "preview-mode"))
     (goto-char! 0)
     *help-buffer*))
 
@@ -81,7 +85,8 @@
     (let ((buf (current-buffer)))
       ;; the buffer has no ".md" to read a renderer from — it says so
       (buffer-set-local! buf 'preview-renderer "markdown")
-      (buffer-set-local! buf 'render-mode "markdown")
+      (when (minor-mode-on? buf "preview-mode")
+        (preview-mode--apply! buf))
       (buffer-set-read-only! buf #t)
       (local-set-key* buf "q" "quit-window")
       ;; the name at point, in the file that defines it — the keyboard

@@ -285,13 +285,15 @@
 (define (writing--present! buf)
   ;; remember what we clobber, once — the saved alist persists, and the
   ;; restore path re-runs this fn, which must not re-save writing's own look
-  (unless (buffer-local buf 'writing-saved)
+  (let ((entering? (not (buffer-local buf 'writing-saved))))
+  (when entering?
     (buffer-set-local! buf 'writing-saved
       (list (list 'face-remap (or (buffer-local buf 'face-remap) '()))
             (list 'style (or (buffer-local buf 'style) #f))
             (list 'line-numbers (or (buffer-local buf 'line-numbers) #f))
             (list 'render-mode (or (buffer-local buf 'render-mode) #f))
             (list 'preview-renderer (or (buffer-local buf 'preview-renderer) #f))
+            (list 'preview-mode (minor-mode-on? buf "preview-mode"))
             (list 'visual-line-mode (or (buffer-local buf 'visual-line-mode) #f)))))
   ;; writing-mode changes the current buffer's presentation only. It never
   ;; creates a group, scratch, LLM session, or window layout.
@@ -299,8 +301,12 @@
   ;; so every ordinary edit, save, undo, and future narrowing command keeps
   ;; its normal editor semantics.
   (buffer-set-local! buf 'preview-renderer "markdown")
-  (preview-set-engine! buf)
-  (buffer-set-local! buf 'render-mode "markdown")
+  ;; The first entry chooses the writing surface. A reload only reapplies
+  ;; the modes the user left on, so source view remains source view.
+  (if entering?
+      (enable-minor-mode! buf "preview-mode")
+      (when (minor-mode-on? buf "preview-mode")
+        (preview-mode--apply! buf)))
   (buffer-set-local! buf 'visual-line-mode #t)
   (face-remap-in! buf 'default
     (list 'family writing-font-family
@@ -338,14 +344,15 @@
   (local-set-key* buf "C-S-<end>" "writing-select-buffer-end")
   (local-set-key* buf "s-a" "writing-select-all")
   (writing--ensure-hook! buf)
-  (writing--update-count! buf))
+  (writing--update-count! buf)))
 
 (define (writing--teardown! buf)
+  (let ((preview-was-on? (writing--saved buf 'preview-mode))
+        (saved-render (writing--saved buf 'render-mode)))
   (writing--remove-hook! buf)
   (buffer-set-local! buf 'face-remap (or (writing--saved buf 'face-remap) '()))
   (buffer-set-local! buf 'style (writing--saved buf 'style))
   (buffer-set-local! buf 'line-numbers (writing--saved buf 'line-numbers))
-  (buffer-set-local! buf 'render-mode (writing--saved buf 'render-mode))
   (buffer-set-local! buf 'preview-renderer (writing--saved buf 'preview-renderer))
   (buffer-set-local! buf 'visual-line-mode (writing--saved buf 'visual-line-mode))
   (buffer-set-local! buf 'window-class #f)
@@ -373,7 +380,17 @@
   (local-unset-key* buf "C-S-<home>")
   (local-unset-key* buf "C-S-<end>")
   (local-unset-key* buf "s-a")
-  (buffer-set-local! buf 'writing-saved #f))
+  (buffer-set-local! buf 'writing-saved #f)
+  (if preview-was-on?
+      (begin
+        (unless (minor-mode-on? buf "preview-mode")
+          (enable-minor-mode! buf "preview-mode"))
+        (preview-mode--apply! buf))
+      (when (minor-mode-on? buf "preview-mode")
+        (disable-minor-mode! buf "preview-mode")))
+  ;; Membership restores first because its setup and teardown derive this
+  ;; local. The saved presentation remains authoritative after they run.
+  (buffer-set-local! buf 'render-mode saved-render)))
 
 (register-minor-mode! "writing-mode" writing--apply! writing--teardown!)
 

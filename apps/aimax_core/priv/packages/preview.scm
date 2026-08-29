@@ -62,24 +62,50 @@
                 (cadr (car rs))
                 (loop (cdr rs)))))))
 
-(define-command "preview-mode" "Toggle rendered preview of the current buffer"
+(define (preview-mode--apply! buf)
+  (let ((renderer (preview-renderer-for buf)))
+    (if renderer
+        (begin
+          (buffer-set-local! buf 'preview-engine #f)
+          (when (equal? renderer "markdown") (preview-set-engine! buf))
+          (buffer-set-local! buf 'render-mode renderer))
+        ;; A renamed or restored buffer can lose its renderer. Remove the
+        ;; stale mode entry instead of leaving an enabled mode that draws
+        ;; nothing.
+        (begin
+          (buffer-set-local! buf 'minor-modes
+            (remove (lambda (name) (equal? name "preview-mode"))
+                    (or (buffer-local buf 'minor-modes) '())))
+          (buffer-set-local! buf 'preview-engine #f)
+          (buffer-set-local! buf 'render-mode #f)))))
+
+(define (preview-mode--teardown! buf)
+  (buffer-set-local! buf 'preview-engine #f)
+  (buffer-set-local! buf 'render-mode #f))
+
+(register-minor-mode! "preview-mode" preview-mode--apply! preview-mode--teardown!)
+
+(define-command "preview-mode" "Toggle a read-only rendered preview of the current buffer"
   (lambda ()
-    (if (equal? (buffer-local (current-buffer) 'mode-name) "chat-mode")
-        ;; a chat's rendered view is the rich transcript, not a markdown
-        ;; preview. A markdown render-mode here lost the chat UI with no
-        ;; way back — the chat's own toggle owns this buffer-local.
-        (run-command "chat-toggle-view")
-        (if (buffer-local (current-buffer) 'render-mode)
-            (begin
-              (buffer-set-local! (current-buffer) 'render-mode #f)
-              (message "Preview off"))
-            (let ((r (preview-renderer-for (current-buffer))))
-              (if r
-                  (begin
-                    (if (equal? r "markdown") (preview-set-engine! (current-buffer)))
-                    (buffer-set-local! (current-buffer) 'render-mode r)
-                    (message (string-append "Preview on (" r ") — C-c C-v toggles")))
-                  (message "No preview renderer for this buffer")))))))
+    (let ((buf (current-buffer)))
+      (if (equal? (buffer-local buf 'mode-name) "chat-mode")
+          ;; A chat's rendered view is the rich transcript. Its own command
+          ;; owns that view and its durable state.
+          (run-command "chat-toggle-view")
+          (if (minor-mode-on? buf "preview-mode")
+              (begin
+                (disable-minor-mode! buf "preview-mode")
+                (message "Preview off"))
+              (let ((renderer (preview-renderer-for buf)))
+                (if renderer
+                    (begin
+                      ;; Preview is a reading view. The user can make it
+                      ;; writable with read-only-mode when editing is needed.
+                      (buffer-set-read-only! buf #t)
+                      (enable-minor-mode! buf "preview-mode")
+                      (message
+                        (string-append "Preview on (" renderer ") — C-c C-v toggles")))
+                    (message "No preview renderer for this buffer"))))))))
 
 ;;; --- RET in a rendered page --------------------------------------------------
 ;;; RET edits source text. One press inserts one newline. The renderer decides

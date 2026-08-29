@@ -1724,6 +1724,7 @@ defmodule Aimax.EditorTest do
     press(["RET"])
     # a visited Morg file opens in writing-mode with the preview on
     assert Buffer.get_local(path, "render-mode") == "markdown"
+    assert "preview-mode" in Buffer.get_local(path, "minor-modes")
     {:ok, _} = Aimax.Core.Session.eval(~s{(set-mode! "rust-mode")})
     assert Buffer.get_local(path, "ts-lang") == "rust"
 
@@ -1738,44 +1739,37 @@ defmodule Aimax.EditorTest do
     assert Buffer.get_local(path, "mode-name") == "rust-mode"
     assert Buffer.get_local(path, "ts-lang") == "rust"
     assert Buffer.get_local(path, "render-mode") == "markdown"
+    assert "preview-mode" in Buffer.get_local(path, "minor-modes")
 
     File.rm!(path)
   end
 
-  test "a mode hook can open a file rendered and read-only; C-x C-q gives back the source" do
+  test "preview is read-only; read-only-mode gives back writable source" do
     path = Path.join(System.tmp_dir!(), "aimax-html-#{System.unique_integer([:positive])}.html")
     File.write!(path, "<h1>Hi</h1>\n")
     on_exit(fn -> File.rm(path) end)
-
-    # what a user config does: html-mode-hook renders and locks the buffer
-    {:ok, _} =
-      Aimax.Core.Session.eval(~s{(add-hook! 'html-mode-hook
-                                   (lambda ()
-                                     (buffer-set-local! (current-buffer) 'render-mode "html")
-                                     (buffer-set-read-only! (current-buffer) #t)))})
 
     press(["C-x", "C-f"])
     type(path)
     press(["RET"])
     assert Editor.current_buffer() == path
+
+    press(["C-c", "C-v"])
     assert Buffer.get_local(path, "render-mode") == "html"
+    assert "preview-mode" in Buffer.get_local(path, "minor-modes")
     assert Buffer.read_only?(path)
 
     # read-only means read-only: typing does not reach the file
     press(["x"])
     assert Buffer.text(path) == "<h1>Hi</h1>\n"
 
-    # C-x C-q to edit: the render goes with it, so you see the bytes
+    # C-x C-q to edit: the preview mode goes with it, so reload stays source
     press(["C-x", "C-q"])
     refute Buffer.read_only?(path)
     refute Buffer.get_local(path, "render-mode")
+    refute "preview-mode" in Buffer.get_local(path, "minor-modes")
     press(["x"])
     assert String.starts_with?(Buffer.text(path), "x<h1>")
-
-    {:ok, _} =
-      Aimax.Core.Session.eval(~s{(set! *hooks*
-                                   (remove (lambda (h) (equal? (car h) 'html-mode-hook))
-                                           *hooks*))})
 
     Aimax.Core.kill_buffer(path)
   end

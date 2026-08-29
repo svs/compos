@@ -26,6 +26,7 @@
       (buffer-set-local! b 'buffer-selected #f)
       (buffer-set-local! b 'scratch-buffer #f)
       (buffer-set-local! b 'scratch-owner #f)
+      (buffer-set-local! b 'scratch-from #f)
       (buffer-set-local! b 'transient #f))
     (list t--sw-first t--sw-second t--sw-third))
   (set! *group-records* '())
@@ -171,6 +172,38 @@
       (check-true! (buffer-in-group? t--sw-first id) "the owner joins")
       (check-true! (buffer-in-group? t--sw-second id) "the companion joins")
       (check-equal! (frame-group) id "the family context is entered"))
+    (t--sw-done!)))
+
+(deftest 'a-chat-opens-the-groups-shared-scratch
+  "the scratch belongs to the group and resolves through every work companion"
+  (lambda ()
+    (t--sw-setup!)
+    (let* ((id (group-record-create! "zzsw-shared-scratch"))
+           (chat (group-chat id))
+           (scratch "*scratch:zzsw-shared-scratch*"))
+      (buffer-add-group! t--sw-first id)
+      (switch-to-buffer! chat)
+      (run-command "scratch-buffer")
+
+      (check-equal! (current-buffer) scratch "the group scratch opens")
+      (check-equal! (buffer-group scratch) id "the group owns the scratch")
+      (check-equal! (buffer-group-role scratch id) "scratch"
+                    "the membership carries the scratch role")
+      (check-false! (buffer-local scratch 'scratch-owner)
+                    "the chat does not own the scratch")
+      (check-equal! (buffer-local scratch 'scratch-from) chat
+                    "navigation remembers where the user came from")
+      (check-equal! (buffer-local t--sw-first 'scratch-buffer) scratch
+                    "the work buffer points to the shared scratch")
+      (check-true! (member t--sw-first (buffer-family scratch))
+                   "the scratch resolves through the group to its work buffer")
+      (check-true! (member scratch (buffer-family chat))
+                   "the chat reaches the same group scratch")
+
+      (run-command "scratch-buffer")
+      (check-equal! (current-buffer) chat "toggle returns to the last source")
+      (when (buffer-known? scratch) (buffer-kill! scratch))
+      (when (buffer-known? chat) (buffer-kill! chat)))
     (t--sw-done!)))
 
 (deftest 'all-new-work-buffers-use-the-derived-current-group

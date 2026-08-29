@@ -386,7 +386,11 @@
       (check-true! (member scratch names) "and its scratch another")
 
       (check-equal! (buffer-local buf 'scratch-buffer) scratch "the document names its scratch")
-      (check-equal! (buffer-local scratch 'scratch-owner) buf "and the scratch its owner")
+      (check-false! (buffer-local scratch 'scratch-owner) "the document does not own it")
+      (check-equal! (buffer-group-role scratch (buffer-group buf)) "scratch"
+                    "the group membership owns the scratch")
+      (check-equal! (buffer-local scratch 'scratch-from) buf
+                    "navigation still returns to the document")
       ;; the ExUnit original read the LEGACY 'group local, which a group id
       ;; replaced; it has been asserting #f == buf ever since. What the
       ;; workspace means is that both sit in one group.

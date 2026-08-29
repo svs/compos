@@ -1,9 +1,10 @@
 ;;; scratch.scm --- one ordinary scratch buffer beside any buffer.
 ;;;
 ;;; `C-c s` is deliberately global: a scratch is editor furniture, not a
-;;; writing-mode feature.  The owner stays visible while its plain text
-;;; scratch opens in the other window.  A scratch follows its owner's group
-;;; and LLM session settings, but does not inherit presentation modes.
+;;; writing-mode feature. The source stays visible while its plain text scratch
+;;; opens in the other window. A grouped scratch belongs to the group, and every
+;;; work buffer in that group shares it. It inherits session settings from the
+;;; buffer that opened it, but it does not inherit presentation modes.
 
 (domain! 'buffers)
 (effects! '(write))
@@ -19,8 +20,12 @@
         name)))
 
 (define (scratch--name owner)
-  ;; Keep the full identity: two README.md buffers need different notes.
-  (string-append "*scratch:" owner "*"))
+  ;; A group is the durable identity. An ungrouped buffer still keeps its full
+  ;; identity, so two README.md buffers cannot receive the same notes.
+  (let ((group (buffer-group owner)))
+    (string-append "*scratch:"
+                   (if group (group-display-name group) owner)
+                   "*")))
 
 (define (scratch--legacy owner)
   ;; Writing mode used to own scratch buffers.  Adopt either its persisted
@@ -33,9 +38,12 @@
           (else #f))))
 
 (define (scratch--for owner)
-  (let ((saved (buffer-local owner 'scratch-buffer))
-        (legacy (scratch--legacy owner)))
-    (cond ((and saved (buffer-exists? saved)) saved)
+  (let* ((group (buffer-group owner))
+         (shared (and group (group-buffer-as group 'scratch)))
+         (saved (buffer-local owner 'scratch-buffer))
+         (legacy (scratch--legacy owner)))
+    (cond ((and shared (buffer-exists? shared)) shared)
+          ((and saved (buffer-exists? saved)) saved)
           (legacy legacy)
           (else (scratch--name owner)))))
 
@@ -52,9 +60,29 @@
 ;; the scratch buffer that already inherited the old ones. `C-c s` inherits
 ;; on every use, so this only matters for a scratch that is already open.
 (define (scratch-refresh-llm! owner)
-  (let ((scratch (buffer-local owner 'scratch-buffer)))
+  (let ((scratch (scratch--for owner)))
     (when (and scratch (buffer-exists? scratch))
       (scratch--inherit-llm! owner scratch))))
+
+(define (scratch--attach-group! from scratch group)
+  (buffer-add-group-as! scratch group 'scratch)
+  ;; Clear the short-lived duplicate from development hot loads. Membership
+  ;; and the role above are the single durable ownership record.
+  (buffer-set-local! scratch 'scratch-group-id #f)
+  (buffer-set-local! scratch 'scratch-from from)
+  (buffer-set-local! scratch 'scratch-owner #f)
+  (buffer-set-local! scratch 'scratch-buffer scratch)
+  ;; The group owns one scratch. Work buffers point to it for layouts and
+  ;; mode refreshes. Chats reach it through their group, not a private link.
+  (for-each
+    (lambda (member)
+      (cond ((chat-buffer? member)
+             (when (equal? (buffer-local member 'scratch-buffer) scratch)
+               (buffer-set-local! member 'scratch-buffer #f)))
+            ((not (equal? member scratch))
+             (buffer-set-local! member 'scratch-buffer scratch))))
+    (group-buffers group))
+  scratch)
 
 (define (scratch--prepare! owner scratch)
   (let ((existed (buffer-exists? scratch)))
@@ -66,9 +94,10 @@
     ;; not to a window: give a new scratch its mode without displaying it.
     (unless (buffer-local scratch 'mode-name)
       (with-current-buffer scratch (lambda () (set-mode! "text-mode"))))
-    (let ((already-managed
-            (and existed
-                 (equal? (buffer-local scratch 'scratch-owner) owner))))
+    (let* ((group (or (buffer-group owner) (group-ensure! owner)))
+           (already-managed
+             (and existed
+                  (equal? (buffer-group-role scratch group) "scratch"))))
       ;; A legacy writing scratch becomes an ordinary, unrendered text buffer
       ;; on first use. Disabling its old presentation preserves the text.
       (unless already-managed
@@ -76,13 +105,18 @@
           (disable-minor-mode! scratch "writing-mode"))
         (buffer-set-local! scratch 'render-mode #f)
         (buffer-set-local! scratch 'preview-renderer #f)
-        (buffer-set-local! scratch 'visual-line-mode #f)))
-    (let ((group (or (buffer-group owner) (group-ensure! owner))))
-      (buffer-set-local! owner 'scratch-buffer scratch)
-      (buffer-set-local! scratch 'scratch-owner owner)
-      (buffer-set-local! scratch 'scratch-buffer scratch)
-      (buffer-add-group-as! scratch group 'scratch))
+        (buffer-set-local! scratch 'visual-line-mode #f))
+      (scratch--attach-group! owner scratch group))
     (scratch--inherit-llm! owner scratch)))
+
+(define (scratch--return-buffer scratch group)
+  (let ((from (buffer-local scratch 'scratch-from)))
+    (if (and from (buffer-exists? from) (buffer-in-group? from group))
+        from
+        (let ((members
+                (filter (lambda (name) (not (equal? name scratch)))
+                        (group-buffers-mru group))))
+          (and (pair? members) (car members))))))
 
 (define (scratch--focus! buffer)
   (let ((shown (window-showing buffer)))
@@ -109,14 +143,24 @@
   "Toggle between this buffer and its plain scratch buffer"
   (lambda ()
     (let* ((here (current-buffer))
-           (owner (buffer-local here 'scratch-owner)))
-      (if owner
-          (if (buffer-exists? owner)
-              (scratch--focus! owner)
-              (message "This scratch buffer's owner no longer exists"))
-          (let ((scratch (scratch-open-beside! here)))
-            (scratch--focus! scratch)
-            (end-of-buffer!))))))
+           (membership (buffer-group here))
+           (group (and membership
+                       (equal? (buffer-group-role here membership) "scratch")
+                       membership))
+           (legacy-owner (buffer-local here 'scratch-owner)))
+      (cond (group
+             (let ((back (scratch--return-buffer here group)))
+               (if back
+                   (scratch--focus! back)
+                   (message "This scratch buffer's group has no other buffer"))))
+            (legacy-owner
+             (if (buffer-exists? legacy-owner)
+                 (scratch--focus! legacy-owner)
+                 (message "This scratch buffer's owner no longer exists")))
+            (else
+              (let ((scratch (scratch-open-beside! here)))
+                (scratch--focus! scratch)
+                (end-of-buffer!)))))))
 
 (global-set-key "C-c s" "scratch-buffer")
 
@@ -200,15 +244,18 @@
 
 (global-set-key "C-x p s" "project-scratch")
 
-;; A renamed scratch is still its owner's scratch: the link is the pointer,
-;; not the name, so move the pointer and `C-c s` keeps toggling. The same
-;; goes for the way back out of a project scratch.
+;; A renamed group scratch keeps its role. Move each work-buffer pointer and
+;; return pointer so `C-c s` keeps toggling. The same applies to the way back
+;; out of a project scratch.
 (on-buffer-renamed!
   (lambda (old new)
-    (let ((owner (buffer-local new 'scratch-owner)))
-      (when (and owner (buffer-exists? owner)
-                 (equal? (buffer-local owner 'scratch-buffer) old))
-        (buffer-set-local! owner 'scratch-buffer new)))
+    (for-each
+      (lambda (b)
+        (when (equal? (buffer-local b 'scratch-buffer) old)
+          (buffer-set-local! b 'scratch-buffer new))
+        (when (equal? (buffer-local b 'scratch-from) old)
+          (buffer-set-local! b 'scratch-from new)))
+      (buffer-list))
     (buffer-set-local! new 'scratch-buffer
       (if (equal? (buffer-local new 'scratch-buffer) old)
           new
@@ -219,9 +266,26 @@
           (buffer-set-local! b 'project-scratch-from new)))
       (buffer-list))))
 
+;; Desktop restore and hot reload can expose the old one-hop owner relation.
+;; The scratch role already names the group, so migrate without renaming or
+;; copying its text.
+(for-each
+  (lambda (scratch)
+    (let ((group (buffer-group scratch))
+          (owner (buffer-local scratch 'scratch-owner)))
+      (when (and group
+                 (equal? (buffer-group-role scratch group) "scratch"))
+        (scratch--attach-group!
+          (cond ((and owner (buffer-exists? owner)) owner)
+                ((buffer-local scratch 'scratch-from)
+                 (buffer-local scratch 'scratch-from))
+                (else scratch))
+          scratch group))))
+  (buffer-list))
+
 (category! 'buffers)
 (public! 'scratch-ensure!
-  "(scratch-ensure! OWNER) — OWNER's scratch buffer, prepared but not displayed")
+  "(scratch-ensure! SOURCE) — SOURCE's group scratch buffer, prepared but not displayed")
 (public! 'scratch-refresh-llm!
   "(scratch-refresh-llm! OWNER) — push OWNER's model and presets to its open scratch buffer")
 (effects! '(pure))

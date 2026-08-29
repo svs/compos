@@ -59,7 +59,8 @@ defmodule Aimax.ScratchTest do
     assert Editor.current_buffer() == scratch
     assert Buffer.text(scratch) == "# Scratch — #{owner}\n\n"
     assert Buffer.get_local(owner, "scratch-buffer") == scratch
-    assert Buffer.get_local(scratch, "scratch-owner") == owner
+    refute Buffer.get_local(scratch, "scratch-owner")
+    assert Buffer.get_local(scratch, "scratch-from") == owner
     assert group_of(scratch) == owner
     assert Buffer.get_local(scratch, "mode-name") == "text-mode"
     refute Buffer.get_local(scratch, "render-mode")
@@ -139,7 +140,8 @@ defmodule Aimax.ScratchTest do
     assert Editor.current_buffer() == legacy
     assert Buffer.text(legacy) == old_text
     assert Buffer.get_local(owner, "scratch-buffer") == legacy
-    assert Buffer.get_local(legacy, "scratch-owner") == owner
+    refute Buffer.get_local(legacy, "scratch-owner")
+    assert Buffer.get_local(legacy, "scratch-from") == owner
     refute Buffer.get_local(legacy, "render-mode")
     refute Buffer.get_local(legacy, "preview-renderer")
     refute Buffer.exists?("*scratch:#{owner}*")

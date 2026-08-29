@@ -1925,21 +1925,41 @@
       (group-read-new-name "New group from visible buffers: "
         (lambda (name) (group-create-and-enter! name buffers layout))))))
 
+(define (buffer-family--eligible? name)
+  (and (buffer-known? name)
+       (group-work-buffer? name)
+       (not (buffer-local name 'transient))))
+
+;; A grouped scratch belongs to its group. A chat or that scratch therefore
+;; resolves through the group's work buffers. An ordinary work buffer keeps a
+;; narrow family: itself and the group's scratch. The legacy owner pointers
+;; remain a fallback for buffers that have not reached the group migration yet.
 (define (buffer-family buf)
-  (let* ((owner (or (buffer-local buf 'scratch-owner) buf))
-         (scratch (and (buffer-known? owner)
-                       (buffer-local owner 'scratch-buffer)))
-         (candidates (append (list owner)
-                             (if (and scratch (buffer-known? scratch))
-                                 (list scratch)
-                                 '())
-                             (if (equal? owner buf) '() (list buf)))))
-    (dedupe-names
-      (filter (lambda (name)
-                (and (buffer-known? name)
-                     (group-work-buffer? name)
-                     (not (buffer-local name 'transient))))
-              candidates))))
+  (let* ((group (buffer-group buf))
+         (role (and group (buffer-group-role buf group)))
+         (through-group? (and group
+                              (or (chat-buffer? buf) (equal? role "scratch"))))
+         (owner (or (buffer-local buf 'scratch-owner) buf))
+         (legacy-scratch (and (buffer-known? owner)
+                              (buffer-local owner 'scratch-buffer)))
+         (group-scratches (if group (group-buffers-as group 'scratch) '()))
+         (candidates
+           (cond (through-group? (group-buffers-mru group))
+                 (group
+                   (append (list buf)
+                           group-scratches
+                           (if (and legacy-scratch
+                                    (buffer-known? legacy-scratch))
+                               (list legacy-scratch)
+                               '())))
+                 (else
+                   (append (list owner)
+                           (if (and legacy-scratch
+                                    (buffer-known? legacy-scratch))
+                               (list legacy-scratch)
+                               '())
+                           (if (equal? owner buf) '() (list buf)))))))
+    (dedupe-names (filter buffer-family--eligible? candidates))))
 
 (define (group-create-with-buffer! name buf source)
   (let ((id (group-record-create! name))
@@ -2500,7 +2520,7 @@
   "(group-current-recalculate!) -> derive the frame's current group from its visible buffers")
 (public! 'group-ids-mru "(group-ids-mru) -> all group IDs in most-recently-used order")
 (public! 'buffer-family
-  "(buffer-family BUFFER) -> BUFFER and its explicitly attached scratch companion")
+  "(buffer-family BUFFER) -> the group-relative work family, including its shared scratch companion")
 (public! 'buffer-add-group-as! "(buffer-add-group-as! BUFFER GROUP ROLE) — join GROUP with a semantic role")
 (public! 'group-record-create! "(group-record-create! NAME) -> new stable ID or #f")
 (public! 'group-read-or-create!

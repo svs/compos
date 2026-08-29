@@ -55,6 +55,19 @@ defmodule Compos.Ui.IslandTest do
     refute render(view) =~ "<img"
   end
 
+  test "whitespace-mode marks spaces and tabs as faces and flags the surface", %{conn: conn} do
+    buf = fresh_buffer("island-#{System.unique_integer([:positive])}", "a  b\tc\n")
+    {:ok, view, _} = live(conn, "/")
+    refute render(view) =~ "f-ws-space"
+    Buffer.set_local(buf, "whitespace-mode", true)
+    html = render(view)
+    assert html =~ ~s(data-ws="true")
+    # the test renderer collapses whitespace-only text; the class is the fact
+    assert html =~ ~r{<span class="f-ws-space">\s*</span><span class="">b}
+    assert html =~ ~r{<span class="f-ws-tab">\s*</span><span class="">c}
+    Buffer.set_local(buf, "whitespace-mode", false)
+  end
+
   test "an X post URL draws as a card island, pending until the fetch lands", %{conn: conn} do
     url = "https://x.com/svs/status/1234567890"
     buf = fresh_buffer("island-#{System.unique_integer([:positive])}", url <> "\n")

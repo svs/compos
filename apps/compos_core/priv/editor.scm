@@ -7586,8 +7586,11 @@
          ;; a rendered preview is a mode the reader can see. It rides
          ;; 'render-mode, not the minor-mode list, so read it here.
          (render (buffer-local buf 'render-mode))
+         ;; preview-mode already names itself when it is on; the render
+         ;; mode fills in only for a page some other route rendered
          (extra (if (and (string? render)
-                         (member render '("html" "markdown")))
+                         (member render '("html" "markdown"))
+                         (not (member "preview-mode" minors)))
                     (list "preview")
                     '())))
     (cons (list "dseg-strong" major)
@@ -8383,6 +8386,16 @@
        (input-intent--replace! from to text))
       ((member type '("insertParagraph" "insertLineBreak"))
        (input-intent--replace! from to "\n"))
+      ;; a collapsed delete acts at point through the command it stands for
+      ((and (= from to) (equal? type "deleteWordBackward"))
+       (run-command "backward-kill-word") #t)
+      ((and (= from to) (equal? type "deleteWordForward"))
+       (run-command "kill-word") #t)
+      ((and (= from to) (member type '("deleteSoftLineForward" "deleteHardLineForward")))
+       (run-command "kill-line") #t)
+      ((and (= from to) (member type '("deleteSoftLineBackward" "deleteHardLineBackward")))
+       (let ((bol (line-start-position (line-number-at-pos (point)))))
+         (input-intent--replace! bol (point) "")))
       ((string-prefix? "delete" type)
        (input-intent--replace! from to ""))
       ((equal? type "historyUndo") (run-command "undo") #t)

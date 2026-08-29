@@ -180,7 +180,17 @@ emphasis toggle. The server keeps every command, keymap, hook, and mode.
    file; a failed Loro call drops the mirror for that buffer instead of
    letting the next call panic inside the NIF.
 
-Still open after F1-F7: F4 (HTML files edited as themselves), F5 (rich
+8. F8 (shipped 2026-08-30): the browser owns caret motion on an editable
+   surface. Arrows, Home, End, Page keys, with or without Shift, stay with
+   the browser; `selectionchange` reports the caret as bytes; the server
+   never re-places a caret that already stands where it says. A collapsed
+   delete (Backspace, Delete, word and line deletes) acts at the server's
+   point, never at the DOM caret, which is one patch behind while typing.
+   An overlay change repaints the views that show the buffer, so a face
+   painted from the reactor (morg, markdown) covers the last typed letter.
+   `morg-mode` is the plain source mode again; `markdown-mode` is opt-in.
+
+Still open after F1-F8: F4 (HTML files edited as themselves), F5 (rich
 paste), row-level block styles and tables, `preview-mode` as rendered
 rows for Markdown (the iframe stays for now), C-c/C-x/C-v on an active
 region in `cua-mode`, and the wrap-map code that the markdown iframe

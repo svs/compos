@@ -268,7 +268,9 @@
       (enable-minor-mode! buf "preview-mode")
       (when (minor-mode-on? buf "preview-mode")
         (preview-mode--apply! buf)))
-  (buffer-set-local! buf 'visual-line-mode #t)
+  ;; the mode, not only its local: the dashboard names it, and M-x
+  ;; visual-line-mode toggles what writing turned on
+  (enable-minor-mode! buf "visual-line-mode")
   (face-remap-in! buf 'default
     (list 'family writing-font-family
           'size writing-font-size

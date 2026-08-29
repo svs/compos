@@ -969,13 +969,21 @@ defmodule Compos.Core.Buffer do
 
   defp on_call(:locals, _from, state), do: {:reply, state.locals, state}
 
+  # An overlay change repaints the views that show the buffer, the way a
+  # local does. A mode that paints from the reactor (morg, markdown) sets
+  # its overlays after the keystroke's own redraw; without this the last
+  # typed character wears the old face until the next key. The phantom
+  # :locals source triggers no reactor rule, so no paint loop starts.
   defp on_call({:set_overlays, tag, ranges}, _from, state) do
-    {:reply, :ok,
-     %{
-       state
-       | overlays: Map.put(state.overlays, tag, ranges),
-         overlay_gen: state.overlay_gen + 1
-     }}
+    state = %{
+      state
+      | overlays: Map.put(state.overlays, tag, ranges),
+        overlay_gen: state.overlay_gen + 1
+    }
+
+    Events.broadcast_editor(:locals)
+    broadcast(state, state.point, "", 0, :locals)
+    {:reply, :ok, state}
   end
 
   defp on_call({:clear_overlays, :all}, _from, state),

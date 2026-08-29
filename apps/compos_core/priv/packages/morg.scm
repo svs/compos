@@ -553,11 +553,88 @@
          (l2 (if a (cadr a) l)))
     (if (member l2 (ts-langs)) l2 #f)))
 
-;; The faces are markdown-mode's (cosmetic). This name stays for callers
-;; that ask morg to repaint: it repaints only when that mode is on.
+;; spans for one scan entry; block BODIES are highlighted per block in
+;; morg-refontify!, because a multi-line construct needs the whole body.
+;; This is the plain source view: every marker stays visible. markdown-mode
+;; is the drawn-in-place view, and it paints instead of this when it is on.
+(define (morg-line-spans e)
+  (let* ((start (car e)) (line (cadr e)) (k (morg-kind e))
+         (len (string-byte-length line))
+         (abs (lambda (r) (list (+ start (car r)) (+ start (cadr r))))))
+    (cond
+      ((= len 0) '())
+      ((equal? k 'heading)
+       (let* ((face (string-append "org-level-"
+                      (number->string (+ 1 (modulo (- (morg-info e) 1) 4)))))
+              (g (re-groups "^#{1,6}[ \t]+(TODO|DONE)[ \t]" line 0)))
+         (if (not g)
+             (list (list start (+ start len) face))
+             (let* ((r (nth 1 g))
+                    (ks (+ start (car r)))
+                    (ke (+ start (cadr r)))
+                    (todo (substring-bytes line (car r) (cadr r))))
+               (append
+                 (if (> ks start) (list (list start ks face)) '())
+                 (list (list ks ke (if (equal? todo "TODO")
+                                       "org-todo" "org-done")))
+                 (if (< ke (+ start len))
+                     (list (list ke (+ start len) face))
+                     '()))))))
+      ((equal? k 'open) (list (list start (+ start len) "org-meta")))
+      ((equal? k 'close) (list (list start (+ start len) "org-meta")))
+      ((equal? k 'code)
+       (cond ((equal? (morg-info e) "result-scheme") '())
+             ((member (morg-info e) '("result" "result-csv"))
+              (list (list start (+ start len) "morg-result")))
+             (else '())))
+      (else
+       (append
+         (map (lambda (r) (append (abs r) '("morg-code")))
+              (re-find* "`[^`\n]+`" line))
+         (map (lambda (r) (append (abs r) '("morg-bold")))
+              (re-find* "\\*\\*[^*\n]+\\*\\*" line))
+         (map (lambda (r) (append (abs r) '("morg-italic")))
+              (re-find* "\\b_[^_\n]+_\\b" line))
+         (map (lambda (r) (append (abs r) '("link")))
+              (re-find* "\\[[^\\]\n]+\\]\\([^)\n]+\\)" line)))))))
+
 (define (morg-refontify! buf)
-  (when (and (boundp 'markdown-refontify!) (minor-mode-on? buf "markdown-mode"))
-    (markdown-refontify! buf)))
+  ;; markdown-mode (drawn in place) paints through its own hook when it is on
+  (when (and (buffer-exists? buf)
+             (not (minor-mode-on? buf "markdown-mode")))
+    (let* ((scan (morg-scan buf))
+           (text (buffer-text buf))
+           (line-spans
+             (fold (lambda (acc e) (append acc (morg-line-spans e))) '() scan))
+           (code-spans
+             (fold
+               (lambda (acc b)
+                 (let* ((lang (cadr b))
+                        (bs (caddr b))
+                        (be (car (cdr (cdr (cdr b)))))
+                        (tsl (morg-ts-lang lang)))
+                   (if (and tsl (> be bs))
+                       (append acc
+                         (map (lambda (sp)
+                                (list (+ bs (car sp)) (+ bs (cadr sp))
+                                      (string-append "ts-" (caddr sp))))
+                              (ts-highlight-string tsl (substring-bytes text bs be))))
+                       acc)))
+               '()
+               (morg-blocks scan buf)))
+           (csv-header-spans
+             (fold
+               (lambda (acc b)
+                 (let ((lang (cadr b)) (bs (caddr b))
+                       (be (car (cdr (cdr (cdr b))))))
+                   (if (and (equal? lang "result-csv") (> be bs))
+                       (let* ((body (substring-bytes text bs be))
+                              (header (car (split-lines body))))
+                         (cons (list bs (+ bs (string-byte-length header)) "morg-bold") acc))
+                       acc)))
+               '()
+               (morg-blocks scan buf))))
+      (overlay-set! buf 'morg (append line-spans code-spans csv-header-spans)))))
 
 ;;; --- change hook -------------------------------------------------------------
 
@@ -577,7 +654,8 @@
             (buffer-set-local! buf 'morg-narrow-anchor
               (if (>= anchor pos) (max pos (+ anchor delta)) anchor))))))
     (morg-apply-folds! buf)
-    (morg-apply-narrow! buf)))
+    (morg-apply-narrow! buf)
+    (morg-refontify! buf)))
 
 ;;; --- the mode ----------------------------------------------------------------
 
@@ -619,16 +697,16 @@
 
 (define-mode "morg-mode"
   (lambda ()
-    ;; Morg owns structure. The faces are markdown-mode's, and the prose
-    ;; presentation is writing-mode's; neither is workspace layout.
-    (enable-minor-mode! (current-buffer) "markdown-mode")
+    ;; Morg owns structure and the plain faces. The prose presentation is
+    ;; writing-mode's; M-x markdown-mode draws the page in place.
     (enable-minor-mode! (current-buffer) "writing-mode")
     (morg-install-keys)
     (morg-ensure-hook! (current-buffer))
     ;; Hidden ranges die with the daemon; the 'morg-folds local survives.
     ;; Re-derive them here, or a restored buffer comes back unfolded.
     (morg-apply-folds! (current-buffer))
-    (morg-apply-narrow! (current-buffer))))
+    (morg-apply-narrow! (current-buffer))
+    (morg-refontify! (current-buffer))))
 
 (register-context-provider! "morg-mode"
   (lambda (buf)

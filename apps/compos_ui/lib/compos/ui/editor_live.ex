@@ -700,7 +700,8 @@ defmodule Compos.Ui.EditorLive do
     # the oembed generation moves when an X card lands: a line that drew
     # the pending URL must draw the card
     raw_key =
-      {leaf.buffer, leaf.version, leaf.ts_lang, leaf.overlay_gen, Compos.Ui.Oembed.generation()}
+      {leaf.buffer, leaf.version, leaf.ts_lang, leaf.overlay_gen, Compos.Ui.Oembed.generation(),
+       whitespace?(leaf)}
 
     static =
       case cache[leaf.id] do
@@ -818,6 +819,23 @@ defmodule Compos.Ui.EditorLive do
 
     ovs = Enum.map(leaf.overlays, fn {s, e, face} -> {s, e, "f-" <> face} end)
 
+    # whitespace-mode: a run of spaces and each tab wear a face the page
+    # marks; the newline mark is CSS on the row (see data-ws). The text
+    # keeps its own bytes.
+    ovs =
+      if whitespace?(leaf) do
+        ws =
+          Regex.scan(~r/ +|\t/, leaf.text, return: :index)
+          |> Enum.map(fn [{s, len}] ->
+            face = if binary_part(leaf.text, s, 1) == "\t", do: "f-ws-tab", else: "f-ws-space"
+            {s, s + len, face}
+          end)
+
+        ovs ++ ws
+      else
+        ovs
+      end
+
     # a tuple, not a list: decorate/3 slices this by scroll position on
     # every render, and elem/2 is O(1) where Enum.slice on a list is
     # O(top) — this is the buffer's full line count, walked once here,
@@ -856,6 +874,9 @@ defmodule Compos.Ui.EditorLive do
   # line renders as plain text.
   @max_styled_line 20_000
   @max_line_ranges 400
+
+  defp whitespace?(leaf),
+    do: Compos.Core.Buffer.get_local(leaf.buffer, "whitespace-mode") == true
 
   defp line_segs(part, start, line_ts, line_ov) do
     if byte_size(part) > @max_styled_line or
@@ -1431,6 +1452,7 @@ defmodule Compos.Ui.EditorLive do
         data-ctop={@node.ctop}
         data-manual={to_string(@node.manual)}
         data-visual-lines={to_string(@node.visual_line_mode)}
+        data-ws={to_string(whitespace?(@node))}
         data-v={@node.version}
         contenteditable={if @node.read_only, do: nil, else: "true"}
         spellcheck="true"
@@ -1446,6 +1468,7 @@ defmodule Compos.Ui.EditorLive do
           <span class="linenum" contenteditable="false">{ln.num}</span>
           <span class="line-content"><.seg :for={{txt, cls} <- ln.segs} txt={txt} cls={cls} base={@node.buffer} /><br
               :if={ln.segs == []}
+              class="empty-row"
             /><span
               :if={@active? && @completion && ln.current}
               class="cap-pop"
@@ -2657,18 +2680,20 @@ defmodule Compos.Ui.EditorLive do
        border from pushing the text along. */
     .pt{display:inline;border-left:2px solid #{accent};margin:0 -1px;
         animation:ptb 1.1s step-end infinite}
+    /* a zero-width character gives the caret a line box of its own after a
+       trailing break: RET at the end of a paragraph shows the new line */
+    .pt::after{content:"\\200B"}
     /* The window does not own the keyboard, so the caret stops blinking.
        It still draws: a reader who looks at the page from another window
        must still see where point stands. Emacs draws a hollow box here. */
     .pt.idle{animation:none;opacity:0.45}
     /* whitespace-mode: the newline the author typed, drawn where it is.
        Muted enough to read past, present enough to aim at. */
-    /* One Markdown separator is compact. Extra blank lines keep their full
-       height, and the separator expands while point stands on it. */
-    .gap{height:.5em}
-    .gap:has(.pt){height:1.7em}
+    /* A blank line the author typed is one line tall, always: a separator
+       that grew when point reached it moved every line below it. The
+       source shows one blank line between paragraphs, and so does the page. */
+    .gap{height:1.7em}
     .bl{height:1.7em}
-    .bl:has(.pt){height:1.7em}
     /* whitespace-mode. Every mark is a pseudo-element painted over the
        character the author typed, so the text keeps its own bytes and the
        page does not reflow when the marks come on. */

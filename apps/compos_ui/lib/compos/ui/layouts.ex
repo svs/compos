@@ -270,9 +270,30 @@ defmodule Compos.Ui.Layouts do
              point is on, where the source shows itself for editing */
           .f-md-marker { display: none; }
           .line.hl-line .f-md-marker { display: inline; }
+          /* visual-line-mode off: continuation lines, wrapped wherever the
+             window ends (Emacs's default); on: wrapped at words */
+          .buf[data-visual-lines="false"] .line-content { word-break: break-all; }
+          /* whitespace-mode: a dot per space, a mark per tab, a pilcrow
+             at the newline; every mark is paint, the text keeps its bytes */
+          .f-ws-space {
+            background-image: radial-gradient(circle, var(--dim-fg, #8a857a) 0.9px, transparent 1px);
+            background-size: .5em 100%; background-position: center; background-repeat: repeat-x;
+          }
+          .f-ws-tab { position: relative; }
+          .f-ws-tab::before {
+            content: "»"; position: absolute; left: 0; color: var(--dim-fg, #8a857a);
+            opacity: .6; pointer-events: none;
+          }
+          .buf[data-ws="true"] .line-content::after {
+            content: "¶"; color: var(--dim-fg, #8a857a); opacity: .45;
+            font-size: .85em; user-select: none; pointer-events: none;
+          }
           /* an X post island: the card in the URL's place */
+          /* inline-level on purpose: the browser's caret motion walks a line
+             of inline boxes; a block inside the row throws it off by lines */
           .x-card {
-            display: block; max-width: 480px; margin: 6px 0; padding: 12px 14px;
+            display: inline-block; width: 100%; max-width: 480px; margin: 6px 0; padding: 12px 14px;
+            vertical-align: top;
             border: 1px solid var(--border, #e2dbc9); border-radius: 12px;
             font-family: var(--font-sans); font-size: 14px; line-height: 1.4;
             user-select: all;
@@ -1045,12 +1066,19 @@ defmodule Compos.Ui.Layouts do
           // dead key or input-method key, and plain Enter, Backspace and
           // Delete. Everything with a modifier, TAB, ESC, and the motion
           // keys still travel as keys (keySpec).
+          // The browser also owns caret motion on that surface: the arrows,
+          // Home, End, Page keys, with or without Shift. It moves by its own
+          // layout, keeps the goal column across short lines, and the
+          // selection it leaves is reported as bytes (selectionchange).
+          const NATIVE_MOTION = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
+                                 "Home", "End", "PageUp", "PageDown"];
           function nativeTextKey(e) {
             const a = document.activeElement;
             if (!a || !a.closest || !a.closest(".buf[contenteditable]")) return false;
             if (e.ctrlKey || e.altKey || e.metaKey) return false;
             if (e.key === "Dead" || e.key === "Process" || e.key === "Unidentified") return true;
             if (e.key.length === 1) return true;
+            if (NATIVE_MOTION.includes(e.key)) return true;
             return !e.shiftKey && (e.key === "Enter" || e.key === "Backspace" || e.key === "Delete");
           }
 
@@ -2125,7 +2153,14 @@ defmodule Compos.Ui.Layouts do
                     return;
                   }
                   e.preventDefault();
-                  const range = e.getTargetRanges ? e.getTargetRanges()[0] : null;
+                  // With no selection, the intent acts at the server's point,
+                  // whatever the DOM caret says: the DOM caret is one patch
+                  // behind while you type, and a Backspace measured from it
+                  // deletes the wrong character. A real selection is a range.
+                  const domSel = window.getSelection();
+                  const collapsedDelete = e.inputType.startsWith("delete") &&
+                    domSel && domSel.isCollapsed;
+                  const range = !collapsedDelete && e.getTargetRanges ? e.getTargetRanges()[0] : null;
                   const from = range ? domByte(range.startContainer, range.startOffset) : null;
                   const to = range ? domByte(range.endContainer, range.endOffset) : null;
                   let text = e.data;
@@ -2173,8 +2208,14 @@ defmodule Compos.Ui.Layouts do
                   // segments tile the region exactly, and the cursor stands
                   // at the point end
                   const regs = buf.querySelectorAll(".region");
+                  this._settingSel = true;
                   try {
                     if (regs.length === 0) {
+                      // a caret that already stands where the server says
+                      // is left alone: the browser keeps its goal column
+                      // across short lines only while nobody moves it
+                      if (sel.isCollapsed && sel.focusNode && buf.contains(sel.focusNode) &&
+                          domByte(sel.focusNode, sel.focusOffset) === domByte(t, 0)) return;
                       sel.collapse(t, 0);
                       return;
                     }
@@ -2186,7 +2227,29 @@ defmodule Compos.Ui.Layouts do
                     if (atStart) sel.setBaseAndExtent(lastText, lastText.textContent.length, t, 0);
                     else sel.setBaseAndExtent(firstText, 0, t, 0);
                   } catch (_) { /* detached mid-patch */ }
+                  finally { this._settingSel = false; }
                 };
+                // The browser moved the caret (an arrow, Home, a Shift
+                // selection): report it as bytes. Our own placements and a
+                // composition in progress are not reports.
+                this.selChangeH = () => {
+                  if (this._settingSel) return;
+                  const a = document.activeElement;
+                  const buf = a && a.closest ? a.closest(".buf[contenteditable]") : null;
+                  if (!buf || buf.hasAttribute("phx-update")) return;
+                  clearTimeout(this._selt);
+                  this._selt = setTimeout(() => {
+                    if (this._settingSel) return;
+                    const cur = buf.querySelector(".cursor");
+                    const t = cur && cur.firstChild;
+                    const sel = window.getSelection();
+                    // a collapsed caret still on the server's cursor is no news
+                    if (sel && sel.isCollapsed && t && sel.focusNode && buf.contains(sel.focusNode) &&
+                        domByte(sel.focusNode, sel.focusOffset) === domByte(t, 0)) return;
+                    this.sendSelection(buf, false);
+                  }, 30);
+                };
+                document.addEventListener("selectionchange", this.selChangeH);
                 this.syncEditable();
                 // the selection of the active editable surface, as bytes
                 // KEEP: a keyboard motion leaves the mark alone (Emacs: the
@@ -2726,6 +2789,7 @@ defmodule Compos.Ui.Layouts do
                 window.removeEventListener("beforeinput", this.beforeInputH, true);
                 window.removeEventListener("compositionstart", this.compStartH, true);
                 window.removeEventListener("compositionend", this.compEndH, true);
+                document.removeEventListener("selectionchange", this.selChangeH);
                 window.removeEventListener("mouseup", this.mouseH);
                 if (this.sink) this.sink.remove();
               }

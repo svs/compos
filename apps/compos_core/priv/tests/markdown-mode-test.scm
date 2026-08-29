@@ -26,7 +26,7 @@
   (lambda ()
     (t--md-fresh! "# Title\n")
     (check-true! (t--md-has? '(0 2 "md-marker")) "the marker is a marker")
-    (check-true! (t--md-has? '(2 7 "org-level-1")) "the text is the heading")
+    (check-true! (t--md-has? '(2 7 "md-h1")) "the text is the heading")
     (t--md-done!)))
 
 (deftest 'emphasis-markers-step-back-around-the-emphasized-text
@@ -70,4 +70,4 @@
   (lambda ()
     (t--md-fresh! "# Title\n")
     (t--md-done!)
-    (check-false! (t--md-has? '(2 7 "org-level-1")) "no heading face is left")))
+    (check-false! (t--md-has? '(2 7 "md-h1")) "no heading face is left")))

@@ -59,10 +59,8 @@
     (t--morg! t--morg-fixture 0)
     (check-equal! (buffer-local t--morg-buf 'mode-name) "morg-mode" "the mode is set")
     (let ((ovs (buffer-overlays t--morg-buf)))
-      ;; the marker steps back (markdown-mode); the text takes the level
-      (check-true! (member '(0 2 "md-marker") ovs) "the top marker")
-      (check-true! (member '(2 3 "org-level-1") ovs) "the top heading")
-      (check-true! (member '(12 17 "org-level-2") ovs) "and the child"))
+      (check-true! (member '(0 3 "org-level-1") ovs) "the top heading")
+      (check-true! (member '(9 17 "org-level-2") ovs) "and the child"))
     (t--morg-done!)))
 
 ;;; --- folding ------------------------------------------------------------------
@@ -192,7 +190,7 @@
   (lambda ()
     (t--morg! "# real\n```sh\n# comment\n```\n" 0)
     (let ((ovs (buffer-overlays t--morg-buf)))
-      (check-true! (member '(2 6 "org-level-1") ovs) "the real heading")
+      (check-true! (member '(0 6 "org-level-1") ovs) "the real heading")
       (check-false! (fold (lambda (acc o)
                             (or acc (and (equal? (car o) 13)
                                          (string-prefix? "org-level" (caddr o)))))

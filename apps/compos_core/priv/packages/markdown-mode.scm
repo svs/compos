@@ -14,6 +14,12 @@
 (effects! '(write))
 
 (defface! 'md-marker 'fg "#b3ac9c")
+;; the drawn headings: a size per level. morg's plain org-level faces keep
+;; the source view one size, as they always were.
+(defface! 'md-h1 'size "1.6em" 'weight "700")
+(defface! 'md-h2 'size "1.3em" 'weight "700")
+(defface! 'md-h3 'size "1.12em" 'weight "600")
+(defface! 'md-h4 'size "1em" 'weight "600")
 
 (define (md--span start s e face)
   (list (+ start s) (+ start e) face))
@@ -66,7 +72,7 @@
 ;; a heading: the marker steps back, the text wears the level's face, and
 ;; a TODO keyword keeps its own face
 (define (md--heading start line e len)
-  (let* ((face (string-append "org-level-"
+  (let* ((face (string-append "md-h"
                  (number->string (+ 1 (modulo (- (morg-info e) 1) 4)))))
          (m (re-groups "^(#{1,6}[ \t]+)" line 0))
          (text-start (if m (cadr (nth 1 m)) 0))

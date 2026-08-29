@@ -142,7 +142,8 @@ defmodule Aimax.Ui.PreviewCursorTest do
       start = (:binary.match(@table, "| keys") |> elem(0)) + at
       html = EditorLive.preview_doc("markdown", @table, start, @faces, false)
 
-      assert length(Regex.scan(~r/<tr>/, html)) == 3, "point #{at} of the header row broke the table"
+      assert length(Regex.scan(~r/<tr>/, html)) == 3,
+             "point #{at} of the header row broke the table"
     end
   end
 
@@ -243,9 +244,9 @@ defmodule Aimax.Ui.PreviewCursorTest do
     refute html =~ ~s(class="inline")
   end
 
-  test "a tangled CSV block previews five rows with a header" do
+  test "a result CSV block previews five rows with a header" do
     text = """
-    ```csv :tangle data/people.csv
+    ```result-csv
     name,note
     Ada,"math, engines"
     Grace,compilers
@@ -267,15 +268,15 @@ defmodule Aimax.Ui.PreviewCursorTest do
     refute plain =~ ~s(<pre><code class="csv">)
   end
 
-  test "a CSV preview line limit is configurable" do
-    text = "```csv :tangle data.csv :lines 2\nname,value\none,1\ntwo,2\n```\n"
+  test "a result CSV preview line limit is configurable" do
+    text = "```result-csv :lines 2\nname,value\none,1\ntwo,2\n```\n"
     html = EditorLive.preview_doc("markdown", text, byte_size(text), @faces, false)
 
     assert html =~ "one"
     refute html =~ "two"
   end
 
-  test "a CSV preview prefers its existing tangle file" do
+  test "a tangled CSV source ignores the preview file reader" do
     text = "```csv :tangle data.csv\nstale_header,value\nstale_row,1\n```\n"
 
     html =
@@ -283,13 +284,13 @@ defmodule Aimax.Ui.PreviewCursorTest do
         csv_source: fn "data.csv" -> "fresh,value\nfile,2\n" end
       )
 
-    assert html =~ "fresh"
-    assert html =~ "file"
-    refute html =~ "stale_header"
-    refute html =~ "stale_row"
+    assert html =~ "stale_header"
+    assert html =~ "stale_row"
+    refute html =~ "fresh"
+    refute html =~ ~s(class="csv-preview")
   end
 
-  test "an empty CSV tangle file does not fall back to the block" do
+  test "a tangled CSV source remains code when its file is empty" do
     text = "```csv :tangle data.csv\nstale_header,value\nstale_row,1\n```\n"
 
     html =
@@ -297,8 +298,9 @@ defmodule Aimax.Ui.PreviewCursorTest do
         csv_source: fn "data.csv" -> "" end
       )
 
-    refute html =~ "stale_header"
-    refute html =~ "stale_row"
+    assert html =~ "stale_header"
+    assert html =~ "stale_row"
+    refute html =~ ~s(class="csv-preview")
   end
 
   test "a CSV fence without a tangle target remains code" do

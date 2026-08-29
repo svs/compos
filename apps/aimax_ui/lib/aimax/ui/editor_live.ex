@@ -547,7 +547,8 @@ defmodule Aimax.Ui.EditorLive do
     # placeholder misses and the card renders
     key =
       {leaf.buffer, leaf.version, rm, leaf.preview_authored, :erlang.phash2(faces), pt, mark,
-       :erlang.phash2(leaf.overlays), Aimax.Ui.Oembed.generation(), preview_engine(leaf.buffer, rm),
+       leaf.hidden_lines, :erlang.phash2(leaf.overlays), Aimax.Ui.Oembed.generation(),
+       preview_engine(leaf.buffer, rm),
        Aimax.Core.Buffer.get_local(leaf.buffer, "whitespace-mode"),
        csv_preview_file_key(leaf.buffer, leaf.text, rm)}
 
@@ -1890,6 +1891,53 @@ defmodule Aimax.Ui.EditorLive do
   # bare image URL into a picture and an x.com link into a card. A buffer
   # asks for it with the `preview-engine` local, and a page with no grammar
   # falls back to it on its own.
+  # Preview folds keep source byte offsets stable. Hidden lines become spaces.
+  # A closing fence stays present so the Markdown tree remains valid.
+  defp preview_fold_source("markdown", text, point, mark, hidden) do
+    folded =
+      text
+      |> String.split("\n", trim: false)
+      |> Enum.with_index()
+      |> Enum.map_join("\n", fn {line, index} ->
+        if MapSet.member?(hidden, index) and
+             not Regex.match?(~r/^\s*(?:```|~~~)/, line) do
+          String.duplicate(" ", byte_size(line))
+        else
+          line
+        end
+      end)
+
+    visible_point = preview_fold_point(text, point, hidden)
+
+    visible_mark =
+      if is_integer(mark), do: preview_fold_point(text, mark, hidden), else: mark
+
+    {folded, visible_point, visible_mark}
+  end
+
+  defp preview_fold_source(_mode, text, point, mark, _hidden),
+    do: {text, point, mark}
+
+  defp preview_fold_point(text, point, hidden) do
+    line = Aimax.Core.Text.line_index(text, point)
+
+    if MapSet.member?(hidden, line) do
+      first = preview_first_hidden_line(hidden, line)
+      starts = [0 | Enum.map(:binary.matches(text, "\n"), fn {at, _} -> at + 1 end)]
+      max(Enum.at(starts, first) - 1, 0)
+    else
+      point
+    end
+  end
+
+  defp preview_first_hidden_line(hidden, line) when line > 0 do
+    if MapSet.member?(hidden, line - 1),
+      do: preview_first_hidden_line(hidden, line - 1),
+      else: line
+  end
+
+  defp preview_first_hidden_line(_hidden, 0), do: 0
+
   defp preview_engine(buffer, "markdown") do
     case Aimax.Core.Buffer.get_local(buffer, "preview-engine") do
       "earmark" -> :earmark
@@ -1904,14 +1952,20 @@ defmodule Aimax.Ui.EditorLive do
   # the buffer's version: a keystroke that moves point redraws and nothing
   # more, and only an edit parses again.
   defp render_preview(:tree_sitter, rm, leaf, pt, mark, faces, cache) do
+    {text, pt, mark} =
+      preview_fold_source(rm, leaf.text, pt, mark, leaf.hidden_lines)
+
+    leaf = %{leaf | text: text}
+
     opts = [
       whitespace: Aimax.Core.Buffer.get_local(leaf.buffer, "whitespace-mode") == true,
+      hidden_lines: leaf.hidden_lines,
       # a pasted image is an absolute path, and a browser will not load one
       image_src: &local_image_src/1,
       csv_source: csv_source_reader(leaf.buffer)
     ]
 
-    tree_key = {leaf.buffer, leaf.version}
+    tree_key = {leaf.buffer, leaf.version, leaf.hidden_lines}
 
     case md_tree(leaf, tree_key, cache) do
       {nil, cache} ->
@@ -1925,6 +1979,11 @@ defmodule Aimax.Ui.EditorLive do
   end
 
   defp render_preview(:earmark, rm, leaf, pt, mark, faces, cache) do
+    {text, pt, mark} =
+      preview_fold_source(rm, leaf.text, pt, mark, leaf.hidden_lines)
+
+    leaf = %{leaf | text: text}
+
     html =
       preview_doc(rm, leaf.text, pt, mark, faces, leaf.preview_authored, leaf.overlays,
         csv_source: csv_source_reader(leaf.buffer)
@@ -2364,8 +2423,8 @@ defmodule Aimax.Ui.EditorLive do
   defp preview_html("markdown", text, faces, _authored, opts),
     do: markdown_page(earmark_body(text, opts), faces)
 
-  defp earmark_body(text, opts \\ []) do
-    fence_labels = markdown_fence_labels(text, opts[:csv_source])
+  defp earmark_body(text, _opts \\ []) do
+    fence_labels = markdown_fence_labels(text)
 
     case earmark_ast(markdown_preview_source(text)) do
       {:ok, ast} ->
@@ -2592,7 +2651,7 @@ defmodule Aimax.Ui.EditorLive do
     end
   end
 
-  defp markdown_fence_labels(text, csv_source) do
+  defp markdown_fence_labels(text) do
     Regex.scan(
       ~r/^[ \t]*```[ \t]*([A-Za-z0-9_+.-]+)([^\r\n]*)$/m,
       text,
@@ -2621,8 +2680,7 @@ defmodule Aimax.Ui.EditorLive do
         language: language,
         morg?: Regex.match?(~r/(^|\s):[A-Za-z]/, arguments),
         tangle: tangle,
-        lines: lines,
-        csv_source: if(tangle && is_function(csv_source, 1), do: csv_source.(tangle), else: nil)
+        lines: lines
       }
     end)
   end
@@ -2683,8 +2741,8 @@ defmodule Aimax.Ui.EditorLive do
        [{"span", [{"class", "code-lang"}], [label.language], %{}} | actions], %{}}
 
     content =
-      if String.downcase(label.language) == "csv" and label.tangle do
-        csv_preview(pre, label.lines, label.csv_source)
+      if String.downcase(label.language) == "result-csv" do
+        csv_preview(pre, label.lines, nil)
       else
         pre
       end

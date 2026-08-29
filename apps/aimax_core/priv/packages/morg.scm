@@ -545,7 +545,7 @@
 (define *morg-ts-aliases*
   '(("js" "javascript") ("jsx" "javascript") ("ts" "typescript")
     ("py" "python") ("sh" "bash") ("shell" "bash")
-    ("ex" "elixir") ("exs" "elixir")))
+    ("ex" "elixir") ("exs" "elixir") ("result-scheme" "scheme")))
 
 (define (morg-ts-lang lang)
   (let* ((l (string-downcase lang))
@@ -581,9 +581,10 @@
       ((equal? k 'open) (list (list start (+ start len) "org-meta")))
       ((equal? k 'close) (list (list start (+ start len) "org-meta")))
       ((equal? k 'code)
-       (if (member (morg-info e) '("result" "result-csv"))
-           (list (list start (+ start len) "morg-result"))
-           '()))
+       (cond ((equal? (morg-info e) "result-scheme") '())
+             ((member (morg-info e) '("result" "result-csv"))
+              (list (list start (+ start len) "morg-result")))
+             (else '())))
       (else
        (append
          (map (lambda (r) (append (abs r) '("morg-code")))

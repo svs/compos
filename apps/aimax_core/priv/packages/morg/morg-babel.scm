@@ -191,7 +191,7 @@
               (cond ((and (equal? k 'text) (equal? (string-trim (cadr e)) ""))
                      (loop (cdr es)))
                     ((and (equal? k 'open)
-                          (member (morg-info e) '("result" "result-csv")))
+                          (member (morg-info e) '("result" "result-scheme" "result-csv")))
                      (list (car e) (morg-block-close-end scan buf (car e))))
                     (else #f)))))))
 
@@ -250,14 +250,14 @@
     "result-csv"))
 
 ;; The command ended. Release the claim, find the block, write the result.
-(define (morg-babel-finish! buf idx lang body out)
+(define (morg-babel-finish! buf idx lang body out &optional result-lang)
   (morg-babel-release! buf (list lang body))
   (if (not (buffer-exists? buf))
       (message (string-append "The " lang " block's buffer is gone: " out))
       (let ((fstart (morg-babel-relocate buf idx lang body)))
         (if fstart
             (begin
-              (morg-babel-insert-result! buf fstart out)
+              (morg-babel-insert-result! buf fstart out result-lang)
               (message (string-append "Executed " lang " block")))
             (message (string-append "The " lang " block is gone: " out))))))
 
@@ -279,7 +279,7 @@
      (morg-babel-finish! buf idx lang body (cadr evaluated)))
     (else
       (morg-babel-finish! buf idx lang body
-        (morg-babel-scheme-pretty (cadr evaluated))))))
+        (morg-babel-scheme-pretty (cadr evaluated)) "result-scheme"))))
 
 (define (morg-babel-start-scheme! buf scan fstart lang body)
   (let ((idx (morg-babel-index scan buf fstart))
@@ -299,7 +299,7 @@
         (let* ((e (morg-entry-at scan a))
                (lang (morg-info e)))
           (cond
-            ((member lang '("result" "result-csv"))
+            ((member lang '("result" "result-scheme" "result-csv"))
              (list 'error "A result block does not run"))
             ((equal? lang "") (list 'error "The block names no language"))
             (else
@@ -313,7 +313,7 @@
                   ((and (equal? (string-downcase lang) "scheme")
                         (morg-babel-sync? e))
                    (morg-babel-insert-result! buf a
-                     (morg-babel-scheme-pretty (eval-string body)))
+                     (morg-babel-scheme-pretty (eval-string body)) "result-scheme")
                    (list 'ok lang))
                   ((equal? (string-downcase lang) "scheme")
                    (if (member (list lang body) (morg-babel-inflight buf))

@@ -774,14 +774,30 @@ defmodule Aimax.Core.Buffer do
     Map.put_new(state, :narrow_range, Map.get(state, :display_range))
   end
 
-  defp published({:reply, reply, state}, before), do: {:reply, reply, publish(state, before)}
+  defp published({:reply, reply, state}, before),
+    do: {:reply, reply, publish_and_notify(state, before)}
 
   defp published({:reply, reply, state, extra}, before),
-    do: {:reply, reply, publish(state, before), extra}
+    do: {:reply, reply, publish_and_notify(state, before), extra}
 
-  defp published({:noreply, state}, before), do: {:noreply, publish(state, before)}
-  defp published({:noreply, state, extra}, before), do: {:noreply, publish(state, before), extra}
+  defp published({:noreply, state}, before),
+    do: {:noreply, publish_and_notify(state, before)}
+
+  defp published({:noreply, state, extra}, before),
+    do: {:noreply, publish_and_notify(state, before), extra}
+
   defp published(other, _before), do: other
+
+  defp publish_and_notify(state, before) do
+    state = publish(state, before)
+
+    if state.hidden != before.hidden do
+      Events.broadcast_editor(:locals)
+      broadcast(state, state.point, "", 0, :locals)
+    end
+
+    state
+  end
 
   # The fields the view holds. An untouched field is the SAME term, so a
   # message that only reads costs one pointer comparison each and writes
@@ -969,17 +985,23 @@ defmodule Aimax.Core.Buffer do
 
   # an empty range list drops the tag: an owner with nothing folded costs
   # nothing to union
-  defp on_call({:set_hidden, tag, []}, _from, state),
-    do:
-      {:reply, :ok,
-       state |> Map.put(:hidden, Map.delete(state.hidden, tag)) |> checkpoint_later()}
+  defp on_call({:set_hidden, tag, []}, _from, state) do
+    state =
+      state
+      |> Map.put(:hidden, Map.delete(state.hidden, tag))
+      |> checkpoint_later()
 
-  defp on_call({:set_hidden, tag, ranges}, _from, state),
-    do:
-      {:reply, :ok,
-       state
-       |> Map.put(:hidden, Map.put(state.hidden, tag, Enum.sort(ranges)))
-       |> checkpoint_later()}
+    {:reply, :ok, state}
+  end
+
+  defp on_call({:set_hidden, tag, ranges}, _from, state) do
+    state =
+      state
+      |> Map.put(:hidden, Map.put(state.hidden, tag, Enum.sort(ranges)))
+      |> checkpoint_later()
+
+    {:reply, :ok, state}
+  end
 
   defp on_call({:hidden, :all}, _from, state), do: {:reply, hidden_union(state), state}
 

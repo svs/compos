@@ -14,7 +14,7 @@ defmodule Aimax.Core.Markdown.Html do
   cursor may stand.
   """
 
-  alias Aimax.Core.Markdown
+  alias Aimax.Core.{Markdown, TS}
 
   @csv_preview_lines 5
 
@@ -63,6 +63,7 @@ defmodule Aimax.Core.Markdown.Html do
     # nothing.
     Process.put(:aimax_md_image_src, opts[:image_src])
     Process.put(:aimax_md_csv_source, opts[:csv_source])
+    Process.put(:aimax_md_hidden_lines, opts[:hidden_lines] || MapSet.new())
 
     marks = Enum.sort_by(marks, &elem(&1, 0))
     {iodata, marks} = nodes(tree, text, 0, marks)
@@ -270,8 +271,7 @@ defmodule Aimax.Core.Markdown.Html do
          ], marks}
       end)
 
-    {[~s(<tr data-src="#{node.start}-#{node.stop}">), drawn, "</tr>"],
-     drop_marks(node, marks)}
+    {[~s(<tr data-src="#{node.start}-#{node.stop}">), drawn, "</tr>"], drop_marks(node, marks)}
   end
 
   # A link's brackets and parentheses are anonymous to the grammar, so they
@@ -280,6 +280,7 @@ defmodule Aimax.Core.Markdown.Html do
   defp node(%{kind: :link} = node, text, marks) do
     href = child_text(node, text, :link_destination)
     {inner, marks} = label(node, text, marks)
+
     {[~s(<a href="), escape(href), ~s(" data-src="#{node.start}-#{node.stop}">), inner, "</a>"],
      marks}
   end
@@ -322,7 +323,9 @@ defmodule Aimax.Core.Markdown.Html do
         {marks_only(node, marks), drop_marks(node, marks)}
 
       link_text ->
-        {before, marks} = {marks_before(node, link_text, marks), drop_before(node, link_text, marks)}
+        {before, marks} =
+          {marks_before(node, link_text, marks), drop_before(node, link_text, marks)}
+
         {inner, marks} = children(link_text, text, marks)
         {[before, inner, marks_only(node, marks)], drop_marks(node, marks)}
     end
@@ -344,20 +347,67 @@ defmodule Aimax.Core.Markdown.Html do
     {lang, args} = fence_info(child_text(node, text, :info))
 
     {content, marks} =
-      if String.downcase(lang) == "csv" and tangle_target(args) do
-        csv_preview(node, text, marks, csv_preview_lines(args), tangle_target(args))
-      else
-        # <pre> draws a newline as a line already. A break added inside one
-        # would draw the same newline twice and open the block by a line for
-        # every line it holds.
-        {inner, marks} = without_breaks(fn -> children(node, text, marks) end)
-        class = if lang == "", do: "", else: ~s( class="#{attr(lang)}")
+      cond do
+        String.downcase(lang) == "result-csv" ->
+          csv_preview(node, text, marks, csv_preview_lines(args), nil)
 
-        {[~s(<pre data-src="#{node.start}-#{node.stop}"><code#{class}>), inner, "</code></pre>"],
-         marks}
+        folded_code?(node, text) ->
+          {marks_only(node, marks), drop_marks(node, marks)}
+
+        true ->
+          # <pre> draws a newline as a line already. A break added inside one
+          # would draw the same newline twice and open the block by a line for
+          # every line it holds.
+          marks = scheme_result_marks(node, text, lang, marks)
+          {inner, marks} = without_breaks(fn -> children(node, text, marks) end)
+          class = if lang == "", do: "", else: ~s( class="#{attr(lang)}")
+
+          {[
+             ~s(<pre data-src="#{node.start}-#{node.stop}"><code#{class}>),
+             inner,
+             "</code></pre>"
+           ], marks}
       end
 
     {[~s(<div class="code-block">), code_head(lang, args), content, "</div>"], marks}
+  end
+
+  defp scheme_result_marks(node, text, "result-scheme", marks) do
+    case Enum.find(node.children, &(&1.kind == :code_text)) do
+      nil ->
+        marks
+
+      child ->
+        body = binary_part(text, child.start, child.stop - child.start)
+
+        syntax =
+          "scheme"
+          |> TS.ts_highlight(body)
+          |> Enum.flat_map(fn {start, stop, scope} ->
+            class = "f-ts-" <> attr(scope)
+            [{child.start + start, ~s(<span class="#{class}">)}, {child.start + stop, "</span>"}]
+          end)
+
+        Enum.sort_by(marks ++ syntax, fn {at, html} ->
+          {at, if(String.starts_with?(html, "</"), do: 0, else: 1)}
+        end)
+    end
+  end
+
+  defp scheme_result_marks(_node, _text, _lang, marks), do: marks
+
+  defp folded_code?(node, text) do
+    hidden = Process.get(:aimax_md_hidden_lines, MapSet.new())
+
+    case Enum.find(node.children, &(&1.kind == :code_text)) do
+      nil ->
+        false
+
+      child ->
+        first = Aimax.Core.Text.line_index(text, child.start)
+        last = Aimax.Core.Text.line_index(text, max(child.stop - 1, child.start))
+        Enum.any?(first..last, &MapSet.member?(hidden, &1))
+    end
   end
 
   defp csv_preview(node, text, marks, limit, target) do
@@ -399,7 +449,7 @@ defmodule Aimax.Core.Markdown.Html do
       |> List.last()
       |> then(&if(&1, do: &1.start, else: node.stop))
 
-    external = csv_external_source(target)
+    external = if target, do: csv_external_source(target), else: nil
 
     cond do
       is_binary(external) ->
@@ -649,18 +699,18 @@ defmodule Aimax.Core.Markdown.Html do
 
     marked =
       if Process.get(:aimax_md_whitespace) do
-      # Every mark is drawn by CSS, not written into the text: the space and
-      # the newline stay exactly as the author typed them. A glyph written
-      # as text would be counted as source when the page says where a caret
-      # landed, and every space would move point along by one.
-      # One pass, or the second replacement rewrites the markup the first
-      # one just wrote: a "ws nl" span is full of spaces.
-      #
-      # A mark for EVERY space cost a span per space: 8697 of them in one
-      # document, two thirds of the page, redrawn on every keystroke, and
-      # the judder was the cost. Emacs does not mark every space either.
-      # These are the spaces that carry something a reader cannot otherwise
-      # see: a run of two or more, and a space before a line break.
+        # Every mark is drawn by CSS, not written into the text: the space and
+        # the newline stay exactly as the author typed them. A glyph written
+        # as text would be counted as source when the page says where a caret
+        # landed, and every space would move point along by one.
+        # One pass, or the second replacement rewrites the markup the first
+        # one just wrote: a "ws nl" span is full of spaces.
+        #
+        # A mark for EVERY space cost a span per space: 8697 of them in one
+        # document, two thirds of the page, redrawn on every keystroke, and
+        # the judder was the cost. Emacs does not mark every space either.
+        # These are the spaces that carry something a reader cannot otherwise
+        # see: a run of two or more, and a space before a line break.
         Regex.replace(~r/\n|\t|  +|[ ](?=\n)|[ ]$/, escaped, fn
           "\n" -> ~s(<span class="ws nl"></span>\n)
           "\t" -> ~s(<span class="ws tab">\t</span>)

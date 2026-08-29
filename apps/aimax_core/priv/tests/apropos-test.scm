@@ -456,3 +456,25 @@
       (map car (filter (lambda (p) (not (boundp (string->symbol (car p)))))
                        (primitive-docs)))
       '() "every doc names a live primitive")))
+
+
+(deftest 'apropos-results-hide-ranking-metadata
+  "ranking details stay private after apropos orders the hits"
+  (lambda ()
+    (let ((hit (apropos--public-hit
+                 '(kind "function" name "read-csv"
+                   note "semantic match" semantic-score 0.91))))
+      (check-false! (plist-get hit 'note) "the note is not result data")
+      (check-false! (plist-get hit 'semantic-score) "the score is not result data")
+      (check-equal! (plist-get hit 'name) "read-csv" "public fields stay"))
+    (let ((duplicate
+            (apropos--public-hit
+              '(kind "function" name "read-csv"
+                sig "(read-csv PATH)" use "(read-csv PATH)")))
+          (example
+            (apropos--public-hit
+              '(kind "function" name "read-csv"
+                sig "(read-csv PATH)" use "(read-csv \"orders.csv\")"))))
+      (check-false! (plist-get duplicate 'use) "an identical use is omitted")
+      (check-equal! (plist-get example 'use) "(read-csv \"orders.csv\")"
+                    "a distinct example stays"))))

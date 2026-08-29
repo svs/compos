@@ -606,7 +606,7 @@
     (t--babel-scheme-now!)
     (t--morg! "```scheme\n(+ 1 2)\n```\n" 11)
     (t--morg-run! "morg-babel")
-    (check-equal! (buffer-text t--morg-buf) "```scheme\n(+ 1 2)\n```\n```result\n3\n```\n"
+    (check-equal! (buffer-text t--morg-buf) "```scheme\n(+ 1 2)\n```\n```result-scheme\n3\n```\n"
                   "the value came back")
     (t--babel-restore!)
     (t--morg-done!)))
@@ -622,7 +622,7 @@
                   "the result reports the pending Scheme work")
     (t--babel-scheme-answer!)
     (check-equal! (buffer-text t--morg-buf)
-                  "```scheme\n(+ 1 2)\n```\n```result\n3\n```\n"
+                  "```scheme\n(+ 1 2)\n```\n```result-scheme\n3\n```\n"
                   "the task result replaced running")
     (t--babel-restore!)
     (t--morg-done!)))
@@ -646,7 +646,7 @@
     (t--morg! "```scheme :sync\n(+ 1 2)\n```\n" 17)
     (t--morg-run! "morg-babel")
     (check-equal! (buffer-text t--morg-buf)
-                  "```scheme :sync\n(+ 1 2)\n```\n```result\n3\n```\n"
+                  "```scheme :sync\n(+ 1 2)\n```\n```result-scheme\n3\n```\n"
                   "the result is present when the command returns")
     (t--morg-done!)))
 
@@ -666,7 +666,7 @@
     (check-contains!
       (buffer-text t--morg-buf)
       (string-append
-        "```result\n"
+        "```result-scheme\n"
         "((kind \"function\"\n"
         "  name \"read-file-numbered\"\n"
         "  doc \"read source text files with stable line numbers for exact citations\")\n"
@@ -675,6 +675,8 @@
         "  doc \"read a workbook by buffer name without displaying it\"))\n"
         "```\n")
       "property keys stay beside their values and rows start on separate lines")
+    (check-equal! (morg-ts-lang "result-scheme") "scheme"
+                  "the Scheme result uses the Scheme highlighter")
     (t--morg-done!)))
 
 (deftest 'running-outside-a-block-does-not-edit-the-buffer

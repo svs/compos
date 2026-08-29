@@ -695,11 +695,27 @@
 ;; QUERY is words, not a regex: "split window", "open a file", "chat cost".
 ;; Recipes come first: a task-level hit beats four name-level ones, and it
 ;; is the answer the caller actually wanted.
+(define (apropos--public-hit hit)
+  (if (not hit)
+      #f
+      (let ((signature (plist-get hit 'sig)))
+        (let loop ((xs hit) (out '()))
+          (cond ((or (null? xs) (null? (cdr xs))) (reverse out))
+                ((or (member (car xs) '(note semantic-score))
+                     (and (equal? (car xs) 'use)
+                          signature
+                          (equal? (cadr xs) signature)))
+                 (loop (cdr (cdr xs)) out))
+                (else
+                  (loop (cdr (cdr xs))
+                        (cons (cadr xs) (cons (car xs) out)))))))))
+
 (define (apropos query &rest filters)
   ;; Build rows first. Their single-flight refresh also publishes the index.
   ;; The next lookup is then a cheap read of the same catalog generation.
   (let ((rows (apropos--rows-cached)))
-    (apropos--search query filters (apropos--index-cached) rows)))
+    (map apropos--public-hit
+         (apropos--search query filters (apropos--index-cached) rows))))
 
 ;; 'lexical #t asks for the catalog alone. The semantic pass embeds the
 ;; query through an external service: it spends money and waits for the

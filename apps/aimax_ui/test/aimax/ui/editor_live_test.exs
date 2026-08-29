@@ -296,6 +296,42 @@ defmodule Aimax.Ui.EditorLiveTest do
     assert Base.decode64!(encoded) =~ "Stable preview"
   end
 
+  test "TAB folds a Morg block in preview mode", %{conn: conn} do
+    buf = Aimax.Core.Editor.current_buffer()
+    text = "before\n\n```scheme\nsecret body\n```\n\nafter\n"
+    Aimax.Core.Buffer.append(buf, text, source: :editor)
+
+    {:ok, _} =
+      Aimax.Core.Session.eval(
+        ~s{(begin (set-mode! "morg-mode") (buffer-set-local! "#{buf}" 'preview-renderer "markdown") (enable-minor-mode! "#{buf}" "preview-mode"))}
+      )
+
+    :ok = Aimax.Core.Buffer.goto(buf, :binary.match(text, "secret body") |> elem(0))
+    {:ok, view, html} = live(conn, "/")
+    [_, frame] = Regex.run(~r/data-frame="([^"]+)"/, html)
+
+    decode = fn page ->
+      [_, encoded] = Regex.run(~r/data-doc="([^"]+)"/, page)
+      Base.decode64!(encoded)
+    end
+
+    assert decode.(html) =~ "secret body"
+
+    keys(view, ["TAB"])
+    assert Aimax.Core.Buffer.hidden(buf) != []
+    leaf = Aimax.Core.Editor.render_state(frame).tree
+    assert leaf.hidden_lines != MapSet.new()
+    html = render(view)
+    refute decode.(html) =~ "secret body"
+    refute decode.(html) =~ "<pre data-src="
+    assert decode.(html) =~ "after"
+
+    keys(view, ["TAB"])
+    assert Aimax.Core.Buffer.hidden(buf) == []
+    html = render(view)
+    assert decode.(html) =~ "secret body"
+  end
+
   test "an HTML preview click maps to source and the normal key path edits it", %{conn: conn} do
     buf = Aimax.Core.Editor.current_buffer()
     Aimax.Core.Buffer.insert(buf, "<p>alpha beta</p>", source: :editor)
@@ -328,7 +364,7 @@ defmodule Aimax.Ui.EditorLiveTest do
     assert Aimax.Core.Buffer.get_local(buf, "render-mode") == "html"
   end
 
-  test "a Morg CSV preview reads its tangle file relative to the document", %{conn: conn} do
+  test "a Morg CSV source preview does not read its tangle file", %{conn: conn} do
     dir = Path.join(System.tmp_dir!(), "aimax-csv-preview-#{System.unique_integer([:positive])}")
     document = Path.join(dir, "notes.md")
     csv = Path.join(dir, "data.csv")
@@ -350,10 +386,10 @@ defmodule Aimax.Ui.EditorLiveTest do
     [_, encoded] = Regex.run(~r/data-doc="([^"]+)"/, render(view))
     preview = Base.decode64!(encoded)
 
-    assert preview =~ "fresh_header"
-    assert preview =~ "fresh_row"
-    refute preview =~ "stale_header"
-    refute preview =~ "stale_row"
+    assert preview =~ "stale_header"
+    assert preview =~ "stale_row"
+    refute preview =~ "fresh_header"
+    refute preview =~ "fresh_row"
   end
 
   test "minibuffer shows on M-x with selectable candidates", %{conn: conn} do

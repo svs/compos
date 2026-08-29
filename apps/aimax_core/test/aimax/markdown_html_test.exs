@@ -180,6 +180,7 @@ defmodule Aimax.MarkdownHtmlTest do
       assert drawn =~ @pt, "the caret vanished at byte #{point}"
     end
   end
+
   test "a newline inside a paragraph draws as a line break" do
     # the author hard-wraps a paragraph; every line the author typed is a
     # line the reader sees, so the text never reflows away from its source
@@ -220,6 +221,19 @@ defmodule Aimax.MarkdownHtmlTest do
     refute code =~ "<br>"
     assert bare(code) =~ "echo one"
     assert bare(code) =~ "echo two"
+  end
+
+  test "a Scheme result fence uses syntax highlight spans" do
+    dir = Path.expand("~/.aimax/grammars")
+    ext = if :os.type() |> elem(1) == :darwin, do: ".dylib", else: ".so"
+    lib = Path.join(dir, "scheme" <> ext)
+    query = Path.join(dir, "scheme-highlights.scm")
+    assert Aimax.Core.TS.ts_load_grammar("scheme", lib, File.read!(query)) == "ok"
+
+    html = render!("```result-scheme\n(define answer 42)\n```\n")
+
+    assert html =~ ~r/class="f-ts-[^"]+"/
+    assert bare(html) =~ "(define answer 42)"
   end
 
   test "a list item keeps its own line and breaks nowhere" do
@@ -270,46 +284,47 @@ defmodule Aimax.MarkdownHtmlTest do
     assert html =~ "out.json"
   end
 
-  test "a tangled CSV block previews five rows with bold headers" do
+  test "only a result CSV block renders the preview table" do
     html =
       render!(
-        "```csv :tangle people.csv\nname,note\nAda,\"math, engines\"\nGrace,compilers\nMargaret,software\nBarbara,hardware\nCarol,networks\n```\n"
+        "```csv :tangle people.csv\nname,note\nsource,only\n```\n" <>
+          "```result-csv\nname,note\nAda,math\nGrace,compilers\nMargaret,software\nBarbara,hardware\nCarol,networks\n```\n"
       )
 
-    assert html =~ ~s(<table class="csv-preview")
-    assert html =~ "<th"
-    assert html =~ "name</th>"
-    assert html =~ "math, engines"
-    assert html =~ "Barbara"
-    refute html =~ "Carol"
-    refute html =~ ~s(<code class="csv">)
+    [table] = Regex.run(~r/<table class="csv-preview".*?<\/table>/s, html)
+
+    assert html =~ ~s(<code class="csv">)
+    assert length(Regex.scan(~r/class="csv-preview"/, html)) == 1
+    assert table =~ "<th"
+    assert table =~ "name</th>"
+    assert table =~ "Ada"
+    assert table =~ "Barbara"
+    refute table =~ "Carol"
   end
 
-  test "a tangled CSV block accepts a preview line limit" do
-    html = render!("```csv :tangle data.csv :lines 2\nname,value\none,1\ntwo,2\n```\n")
+  test "a result CSV block accepts a preview line limit" do
+    html = render!("```result-csv :lines 2\nname,value\none,1\ntwo,2\n```\n")
 
     assert html =~ "one"
     refute html =~ "two"
   end
 
-  test "a tangled CSV block prefers its existing file" do
+  test "a tangled CSV source remains ordinary code" do
     text = "```csv :tangle data.csv\nstale_header,value\nstale_row,1\n```\n"
+    {:ok, html} = Html.render(text, [], csv_source: fn "data.csv" -> "fresh,value\nfile,2\n" end)
 
-    {:ok, html} =
-      Html.render(text, [], csv_source: fn "data.csv" -> "fresh,value\nfile,2\n" end)
-
-    assert html =~ "fresh"
-    assert html =~ "file"
-    refute html =~ "stale_header"
-    refute html =~ "stale_row"
+    assert html =~ ~s(<code class="csv">)
+    assert html =~ "stale_header"
+    refute html =~ "fresh"
+    refute html =~ ~s(class="csv-preview")
   end
 
-  test "an empty tangled CSV file does not fall back to the block" do
-    text = "```csv :tangle data.csv\nstale_header,value\nstale_row,1\n```\n"
-    {:ok, html} = Html.render(text, [], csv_source: fn "data.csv" -> "" end)
+  test "a result CSV block renders without a source reader" do
+    {:ok, html} = Html.render("```result-csv\nname,value\none,1\n```\n", [])
 
-    refute html =~ "stale_header"
-    refute html =~ "stale_row"
+    assert html =~ ~s(class="csv-preview")
+    assert html =~ "name</th>"
+    assert html =~ "one"
   end
 
   test "a CSV block without a tangle target remains code" do
@@ -374,5 +389,4 @@ defmodule Aimax.MarkdownHtmlTest do
     refute html =~ ~s(src="<br>)
     refute html =~ ~s(alt="<br>)
   end
-
 end

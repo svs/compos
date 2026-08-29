@@ -49,6 +49,9 @@ if config_env() == :dev do
         ~r"apps/compos_ui/(lib|priv)/.*(ex|heex)$"
       ]
     ]
+
+  # Tidewave serves only its MCP endpoint. The editor page carries no toolbar.
+  config :tidewave, toolbar: false
 end
 
 # COMPOS_VERIFY=1 mix run --no-halt: an isolated daemon (own port, home,

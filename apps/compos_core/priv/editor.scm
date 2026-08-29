@@ -4429,11 +4429,19 @@
       (minibuffer-read (string-append "Kill buffer (default " cur "): ")
         (cons (list cur "current") (buffer-candidates))
         (lambda (name)
-          (let ((target (if (equal? name "") cur name)))
-            ;; a live process (shell, tail) dies with its buffer
-            (if (process-running? target) (process-kill! target))
-            (buffer-kill! target)
-            (message (string-append "Killed " target))))))))
+          (let* ((target (if (equal? name "") cur name))
+                 (kill! (lambda ()
+                          ;; a live process (shell, tail) dies with its buffer
+                          (if (process-running? target) (process-kill! target))
+                          (buffer-kill! target)
+                          (message (string-append "Killed " target)))))
+            ;; Emacs asks before it throws away edits to a file. A listing
+            ;; reports itself as modified and has no path, so it goes quietly.
+            (if (and (buffer-path target) (buffer-modified? target))
+                (y-or-n (string-append "Buffer " target " modified; kill anyway?")
+                        kill!
+                        (lambda () (message "Not killed")))
+                (kill!))))))))
 
 ;;; --- display-buffer & popups (popper) ----------------------------------------
 ;;; *display-buffer-alist* says WHERE a buffer goes. It is Emacs' alist of

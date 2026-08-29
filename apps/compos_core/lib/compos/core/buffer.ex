@@ -650,6 +650,14 @@ defmodule Compos.Core.Buffer do
   """
   def break_undo_chain(name), do: GenServer.call(via(name), :break_undo_chain)
 
+  @doc """
+  Open (true) or close (false) an undo group: the edits between the two
+  calls are one undo step, as one command is one step in Emacs. Opening
+  closes the step before it; closing commits the group.
+  """
+  def undo_group(name, on?) when is_boolean(on?),
+    do: GenServer.call(via(name), {:undo_group, on?})
+
   @doc "Write buffer to its path (or the given path). {:ok, path} | {:error, :no_path}."
   def save(name, path \\ nil), do: GenServer.call(via(name), {:save, path})
 
@@ -928,8 +936,12 @@ defmodule Compos.Core.Buffer do
   defp on_call(:modified?, _from, state),
     do: {:reply, state.version != state.saved_version, state}
 
+  # a jump (a click, goto-char) ends a run of line motions: the next C-n
+  # takes its column from where point now stands (Emacs: last-command)
   defp on_call({:goto, pos}, _from, state),
-    do: {:reply, :ok, state |> Map.put(:point, clamp(pos, state)) |> checkpoint_later()}
+    do:
+      {:reply, :ok,
+       state |> Map.put(:point, clamp(pos, state)) |> Map.put(:goal_col, nil) |> checkpoint_later()}
 
   defp on_call(:mark, _from, state), do: {:reply, state.mark, state}
 
@@ -1316,9 +1328,16 @@ defmodule Compos.Core.Buffer do
 
     state =
       if motion in [:next_line, :prev_line] do
-        # goal column: crossing a short line must not lose the column
+        # goal column: crossing a short line must not lose the column. The
+        # column counts graphemes, not bytes: a byte column lands inside a
+        # multibyte character on a line of CJK or emoji.
         {bol, _} = Text.line_bounds(text, state.point)
-        %{state | goal_col: state.goal_col || state.point - bol}
+
+        %{
+          state
+          | goal_col:
+              state.goal_col || String.length(binary_part(text, bol, state.point - bol))
+        }
       else
         %{state | goal_col: nil}
       end
@@ -1473,6 +1492,16 @@ defmodule Compos.Core.Buffer do
   defp on_call({:ts_children, kind, s, e}, _from, %{ts: ts} = state) do
     {text, state} = fetch_text(state)
     {:reply, TS.ts_state_children(ts.res, text, kind, s, e), state}
+  end
+
+  defp on_call({:undo_group, true}, _from, state) do
+    state = close_undo_step(state)
+    {:reply, :ok, Map.put(state, :undo_group, true)}
+  end
+
+  defp on_call({:undo_group, false}, _from, state) do
+    state = Map.put(state, :undo_group, false)
+    {:reply, :ok, close_undo_step(state)}
   end
 
   defp on_call(:break_undo_chain, _from, state),
@@ -1688,23 +1717,47 @@ defmodule Compos.Core.Buffer do
 
   # A failed mirror leaves the document behind the rope. The checkpoint
   # comparison finds that and resynchronizes, so log it and keep editing.
+  # A failed Loro call leaves the document behind: the NIF reported a
+  # poisoned lock once, and the next call into that document panicked
+  # inside Loro and aborted the VM. The text is the rope's; the weave is a
+  # mirror. Drop the mirror and keep editing; the checkpoint on disk holds
+  # the last good weave.
   defp history_result(state, {:error, reason}, what) do
-    Logger.error("loro #{what} failed for #{state.name}: #{inspect(reason)}")
-    state
+    Logger.error(
+      "loro #{what} failed for #{state.name}: #{inspect(reason)}; provenance mirroring stops for this buffer"
+    )
+
+    %{state | history: nil}
   end
 
   defp history_result(state, _ok, _what), do: state
 
   defp commit_history(%{history_actor: nil} = state), do: state
 
+  # inside an undo group (one command) the edits stay one step; the group's
+  # end commits them. Map.get: a hot swap keeps a state built before the key.
+  defp commit_history(%{undo_group: true} = state), do: state
+
   defp commit_history(state) do
-    if mirroring?(state) do
-      History.commit(
-        state.history,
-        history_origin(state.history_actor),
-        history_message(state.history_actor, state.history_group)
-      )
-    end
+    state =
+      if mirroring?(state) do
+        try do
+          History.commit(
+            state.history,
+            history_origin(state.history_actor),
+            history_message(state.history_actor, state.history_group)
+          )
+
+          state
+        rescue
+          e ->
+            # a panic inside the NIF surfaces here; the document is not to
+            # be touched again (see history_result)
+            history_result(state, {:error, Exception.message(e)}, "commit")
+        end
+      else
+        state
+      end
 
     %{state | history_actor: nil, history_group: nil}
   end
@@ -2809,26 +2862,37 @@ defmodule Compos.Core.Buffer do
 
   defp apply_motion(:next_line, text, pos, goal) do
     {bol, eol} = Text.line_bounds(text, pos)
-    col = goal || pos - bol
+    col = goal || String.length(binary_part(text, bol, pos - bol))
 
     if eol >= Kernel.byte_size(text) do
       pos
     else
       {nbol, neol} = Text.line_bounds(text, eol + 1)
-      min(nbol + col, neol)
+      column_pos(text, nbol, neol, col)
     end
   end
 
   defp apply_motion(:prev_line, text, pos, goal) do
     {bol, _eol} = Text.line_bounds(text, pos)
-    col = goal || pos - bol
+    col = goal || String.length(binary_part(text, bol, pos - bol))
 
     if bol == 0 do
       pos
     else
       {pbol, peol} = Text.line_bounds(text, bol - 1)
-      min(pbol + col, peol)
+      column_pos(text, pbol, peol, col)
     end
+  end
+
+  # the byte where grapheme column COL of the line BOL..EOL begins, or the
+  # end of the line when the line is shorter
+  defp column_pos(text, bol, eol, col) do
+    line = binary_part(text, bol, eol - bol)
+
+    line
+    |> String.graphemes()
+    |> Enum.take(col)
+    |> Enum.reduce(bol, fn g, acc -> acc + Kernel.byte_size(g) end)
   end
 
   # words: [A-Za-z0-9_] runs, Emacs-style — skip separators, then the word

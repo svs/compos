@@ -366,20 +366,30 @@ defmodule Compos.Core.KeyDispatch do
     # Emacs: any command except undo breaks the undo chain — a subsequent
     # undo then reverses the undos, which is how redo works. Commands that
     # manage their own boundaries (evil's dispatchers) register as exempt.
-    unless Editor.undo_exempt?(name) do
-      buffer = Editor.current_buffer()
-      if Buffer.exists?(buffer), do: Buffer.break_undo_chain(buffer)
+    buffer = Editor.current_buffer()
+    # one command is one undo step (Emacs): the edits a command makes of
+    # several primitives undo together. Undo itself walks the steps and
+    # must not open one.
+    grouped? = not Editor.undo_exempt?(name) and Buffer.exists?(buffer)
+
+    if grouped? do
+      Buffer.break_undo_chain(buffer)
+      Buffer.undo_group(buffer, true)
     end
 
-    case Session.run_command(name) do
-      :ok ->
-        keep_prefix = name in @prefix_commands
-        Editor.finish_command(name, keep_prefix)
-        if keep_prefix, do: show_prefix_arg()
+    try do
+      case Session.run_command(name) do
+        :ok ->
+          keep_prefix = name in @prefix_commands
+          Editor.finish_command(name, keep_prefix)
+          if keep_prefix, do: show_prefix_arg()
 
-      {:error, msg} ->
-        Editor.finish_command(name, false)
-        Editor.set_echo("#{name}: #{msg}")
+        {:error, msg} ->
+          Editor.finish_command(name, false)
+          Editor.set_echo("#{name}: #{msg}")
+      end
+    after
+      if grouped? and Buffer.exists?(buffer), do: Buffer.undo_group(buffer, false)
     end
   end
 

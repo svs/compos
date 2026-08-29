@@ -174,5 +174,14 @@ emphasis toggle. The server keeps every command, keymap, hook, and mode.
    globally by `M-x cua-mode`, and in writing buffers by writing-mode).
    Not yet: C-c/C-x/C-v acting on an active region, and `preview-mode`
    as rendered rows rather than the iframe.
-7. F7: the fidelity bugs the audit found: byte goal columns, per-command undo
-   boundaries, kill-buffer save prompt, Loro NIF panic isolation.
+7. F7 (shipped 2026-08-30): the goal column counts graphemes and a jump
+   resets it; one command is one undo step (`Buffer.undo_group/2` around
+   `KeyDispatch.run/1`); `kill-buffer` asks before it drops edits to a
+   file; a failed Loro call drops the mirror for that buffer instead of
+   letting the next call panic inside the NIF.
+
+Still open after F1-F7: F4 (HTML files edited as themselves), F5 (rich
+paste), row-level block styles and tables, `preview-mode` as rendered
+rows for Markdown (the iframe stays for now), C-c/C-x/C-v on an active
+region in `cua-mode`, and the wrap-map code that the markdown iframe
+still needs.

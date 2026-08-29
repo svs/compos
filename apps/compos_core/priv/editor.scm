@@ -2723,7 +2723,13 @@
 (define (visual--client? buf)
   (and (equal? (buffer-local buf 'visual-line-mode) #t)
        (not (buffer-read-only? buf))
-       (not (preview-buffer? buf))))
+       ;; a window that measured a map, fresh or stale, draws a page that
+       ;; measures; an editable surface never sends one
+       (not (window-wrap-map (active-window)))
+       ;; only the plain text view is an editable surface; a rendered page,
+       ;; a block view, a transcript, and a terminal draw something else
+       (not (member (buffer-local buf 'render-mode)
+                    '("markdown" "html" "app" "blocks" "agent" "terminal")))))
 
 (define (visual--client-move! alter dir granularity)
   (client-select! alter (if (< dir 0) "backward" "forward") granularity)
@@ -2734,8 +2740,10 @@
 ;; that way. The caller then moves by source line.
 (define (visual-row-move! dir extend)
   (let* ((buf (current-buffer))
-         (rows (and (not (visual--client? buf)) (visual-rows buf))))
-    (if (visual--client? buf)
+         (rows (visual-rows buf)))
+    ;; a fresh map answers first (a rendered page measures one; so does a
+    ;; test); an editable surface measures none and asks the browser
+    (if (and (not rows) (visual--client? buf))
         (visual--client-move! (if extend "extend" "move") dir "line")
     (and rows
          (let* ((pos (point))
@@ -2755,8 +2763,8 @@
 ;; the edge of the row point is on; #f when the map cannot answer
 (define (visual-row-edge! dir extend)
   (let* ((buf (current-buffer))
-         (rows (and (not (visual--client? buf)) (visual-rows buf))))
-    (if (visual--client? buf)
+         (rows (visual-rows buf)))
+    (if (and (not rows) (visual--client? buf))
         (visual--client-move! (if extend "extend" "move") dir "lineboundary")
     (and rows
          (let ((here (visual-row-bounds rows (point))))

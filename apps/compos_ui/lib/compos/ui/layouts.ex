@@ -266,6 +266,25 @@ defmodule Compos.Ui.Layouts do
           }
           .buf[contenteditable]:focus .region { background: transparent; }
           .buf[contenteditable] ::selection { background: var(--region-bg, #e7e9f1); }
+          /* markdown-mode: a marker steps back on every line but the one
+             point is on, where the source shows itself for editing */
+          .f-md-marker { display: none; }
+          .line.hl-line .f-md-marker { display: inline; }
+          /* an X post island: the card in the URL's place */
+          .x-card {
+            display: block; max-width: 480px; margin: 6px 0; padding: 12px 14px;
+            border: 1px solid var(--border, #e2dbc9); border-radius: 12px;
+            font-family: var(--font-sans); font-size: 14px; line-height: 1.4;
+            user-select: all;
+          }
+          .x-card .tw-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+          .x-card .tw-avatar { width: 36px; height: 36px; border-radius: 50%; }
+          .x-card .tw-name { font-weight: 700; }
+          .x-card .tw-handle { color: var(--dim-fg, #8a857a); margin-left: 6px; text-decoration: none; }
+          .x-card .tw-text { margin: 0 0 8px; }
+          .x-card .tw-media { max-width: 100%; border-radius: 8px; margin-top: 8px; }
+          .x-card .tw-date { color: var(--dim-fg, #8a857a); font-size: 12px; text-decoration: none; }
+          .x-card .x-pending { color: var(--dim-fg, #8a857a); font-family: var(--font-mono); font-size: 12px; }
           /* completion-at-point popup: inline card anchored under the prefix */
           .cap-pop {
             position: absolute; top: calc(100% + 3px); z-index: 15;
@@ -2072,10 +2091,22 @@ defmodule Compos.Ui.Layouts do
                     else { target = node.lastChild; after = true; }
                   }
                   let bytes = 0;
-                  const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+                  // an island (data-len) stands for its source bytes as one
+                  // unit; the text inside a card is not source
+                  const walker = document.createTreeWalker(content, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
                   let t;
                   while ((t = walker.nextNode())) {
-                    const inside = target && (t === target || (target.contains && target.contains(t)));
+                    const island = t.nodeType === 1 ? (t.dataset && t.dataset.len !== undefined ? t : null)
+                                                    : null;
+                    if (t.nodeType === 1 && !island) continue;
+                    if (t.nodeType === 3 && t.parentElement && t.parentElement.closest("[data-len]")) continue;
+                    const inside = target && (t === target || (t.contains && t.contains(target)) || (target.contains && target.contains(t)));
+                    if (island) {
+                      const len = parseInt(island.dataset.len, 10) || 0;
+                      if (inside) return start + bytes + (after || (target !== island && at > 0) ? len : 0);
+                      bytes += len;
+                      continue;
+                    }
                     if (inside && !after) {
                       if (countsBytes(t) && t === target) bytes += utf8.encode(t.textContent.slice(0, at)).length;
                       return start + bytes;

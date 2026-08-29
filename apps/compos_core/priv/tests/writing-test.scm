@@ -345,12 +345,12 @@
       (with-current-buffer buf
         (lambda ()
           (end-of-buffer!)
-          (run-command "writing-select-backward")
-          (run-command "writing-select-backward")
+          (run-command "cua-select-backward")
+          (run-command "cua-select-backward")
           (check-equal! (buffer-point buf) 11 "two characters back")
           (check-equal! (mark) 13 "and the mark held")
 
-          (run-command "writing-select-forward")
+          (run-command "cua-select-forward")
           (check-equal! (buffer-point buf) 12 "forward again")
           (check-equal! (mark) 13 "with the same mark")))
       (t--wr-done! buf))))
@@ -362,15 +362,15 @@
       (with-current-buffer buf
         (lambda ()
           (end-of-buffer!)
-          (run-command "writing-select-backward-word")
+          (run-command "cua-select-backward-word")
           (check-equal! (buffer-point buf) 8 "back one word")
 
           (goto-char! 4)
-          (run-command "writing-select-line-end")
+          (run-command "cua-select-line-end")
           (check-equal! (buffer-point buf) 13 "to the end of the line")
 
           (goto-char! 4)
-          (run-command "writing-select-buffer-start")
+          (run-command "cua-select-buffer-start")
           (check-equal! (buffer-point buf) 0 "and to the start of the document")))
       (t--wr-done! buf))))
 

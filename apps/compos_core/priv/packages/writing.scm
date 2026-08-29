@@ -187,45 +187,6 @@
 
 
 
-(define (writing--select! mover)
-  (unless (mark) (set-mark! (point)))
-  (mover))
-
-(define-command "writing-select-backward" "Extend the region one character left"
-  (lambda () (writing--select! backward-char!)))
-
-(define-command "writing-select-forward" "Extend the region one character right"
-  (lambda () (writing--select! forward-char!)))
-
-(define-command "writing-select-backward-word" "Extend the region one word left"
-  (lambda () (writing--select! backward-word!)))
-
-(define-command "writing-select-forward-word" "Extend the region one word right"
-  (lambda () (writing--select! forward-word!)))
-
-(define-command "writing-select-up" "Extend the region one visual line up"
-  (lambda () (visual-previous-line! #t)))
-
-(define-command "writing-select-down" "Extend the region one visual line down"
-  (lambda () (visual-next-line! #t)))
-
-(define-command "writing-select-line-start" "Extend the region to the start of the line"
-  (lambda () (visual-beginning-of-line! #t)))
-
-(define-command "writing-select-line-end" "Extend the region to the end of the line"
-  (lambda () (visual-end-of-line! #t)))
-
-(define-command "writing-select-buffer-start" "Extend the region to the start of the buffer"
-  (lambda () (writing--select! beginning-of-buffer!)))
-
-(define-command "writing-select-buffer-end" "Extend the region to the end of the buffer"
-  (lambda () (writing--select! end-of-buffer!)))
-
-(define-command "writing-select-all" "Select the entire buffer"
-  (lambda ()
-    (set-mark! 0)
-    (end-of-buffer!)))
-
 ;;; --- word count ---------------------------------------------------------------
 
 ;; change-hook registry keyed by buffer NAME in global state (org pattern):
@@ -317,14 +278,14 @@
   (face-remap-in! buf 'writing (list 'measure writing-measure))
   (buffer-set-local! buf 'line-numbers "off")
   (buffer-set-local! buf 'window-class "writing")
-  (local-set-key* buf "S-<left>" "writing-select-backward")
-  (local-set-key* buf "S-<right>" "writing-select-forward")
-  (local-set-key* buf "S-<up>" "writing-select-up")
-  (local-set-key* buf "S-<down>" "writing-select-down")
+  (local-set-key* buf "S-<left>" "cua-select-backward")
+  (local-set-key* buf "S-<right>" "cua-select-forward")
+  (local-set-key* buf "S-<up>" "cua-select-up")
+  (local-set-key* buf "S-<down>" "cua-select-down")
   (local-set-key* buf "M-<left>" "backward-word")
   (local-set-key* buf "M-<right>" "forward-word")
-  (local-set-key* buf "M-S-<left>" "writing-select-backward-word")
-  (local-set-key* buf "M-S-<right>" "writing-select-forward-word")
+  (local-set-key* buf "M-S-<left>" "cua-select-backward-word")
+  (local-set-key* buf "M-S-<right>" "cua-select-forward-word")
   ;; Platform-native prose movement. With visual-line-mode on, the line
   ;; commands read the wrap map the client measured and stop at the
   ;; visual row; without one they stop at the source line.
@@ -332,17 +293,17 @@
   (local-set-key* buf "s-<right>" "end-of-line")
   (local-set-key* buf "s-<up>" "beginning-of-buffer")
   (local-set-key* buf "s-<down>" "end-of-buffer")
-  (local-set-key* buf "s-S-<left>" "writing-select-line-start")
-  (local-set-key* buf "s-S-<right>" "writing-select-line-end")
-  (local-set-key* buf "s-S-<up>" "writing-select-buffer-start")
-  (local-set-key* buf "s-S-<down>" "writing-select-buffer-end")
-  (local-set-key* buf "S-<home>" "writing-select-line-start")
-  (local-set-key* buf "S-<end>" "writing-select-line-end")
-  (local-set-key* buf "C-S-<left>" "writing-select-backward-word")
-  (local-set-key* buf "C-S-<right>" "writing-select-forward-word")
-  (local-set-key* buf "C-S-<home>" "writing-select-buffer-start")
-  (local-set-key* buf "C-S-<end>" "writing-select-buffer-end")
-  (local-set-key* buf "s-a" "writing-select-all")
+  (local-set-key* buf "s-S-<left>" "cua-select-line-start")
+  (local-set-key* buf "s-S-<right>" "cua-select-line-end")
+  (local-set-key* buf "s-S-<up>" "cua-select-buffer-start")
+  (local-set-key* buf "s-S-<down>" "cua-select-buffer-end")
+  (local-set-key* buf "S-<home>" "cua-select-line-start")
+  (local-set-key* buf "S-<end>" "cua-select-line-end")
+  (local-set-key* buf "C-S-<left>" "cua-select-backward-word")
+  (local-set-key* buf "C-S-<right>" "cua-select-forward-word")
+  (local-set-key* buf "C-S-<home>" "cua-select-buffer-start")
+  (local-set-key* buf "C-S-<end>" "cua-select-buffer-end")
+  (local-set-key* buf "s-a" "cua-select-all")
   (writing--ensure-hook! buf)
   (writing--update-count! buf)))
 

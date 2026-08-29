@@ -50,6 +50,8 @@
 (load-bundled-package "mcp-hub.scm")
 (load-bundled-package "mcp.scm")
 (load-bundled-package "morg.scm")
+(load-bundled-package "markdown-mode.scm")
+(load-bundled-package "cua.scm")
 (load-bundled-package "notmuch.scm")
 (load-bundled-package "occur.scm")
 (load-bundled-package "org.scm")

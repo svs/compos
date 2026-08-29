@@ -140,6 +140,11 @@ defmodule Compos.Ui.IntentTest do
     Compos.Core.Session.run_command("previous-line")
     refute_push_event(view, "select", %{})
     Buffer.set_read_only(buf, false)
+    # so does a rendered page: the iframe replaced the surface
+    Buffer.set_local(buf, "render-mode", "markdown")
+    Compos.Core.Session.run_command("previous-line")
+    refute_push_event(view, "select", %{})
+    Buffer.set_local(buf, "render-mode", nil)
   end
 
   test "an unknown intent leaves the buffer alone and says so", %{conn: conn} do

@@ -149,14 +149,30 @@ emphasis toggle. The server keeps every command, keymap, hook, and mode.
    caret is needed; only a ranged intent carries bytes. Paste stays on the
    `paste` event. Not yet: native caret and selection as the region,
    `Selection.modify` motion, islands.
-2. F2: `Selection.modify` motion; delete the wrap map.
-3. F3: display-spec islands and row-level block styles (heading, list,
-   quote, code) rendered in place for morg and markdown.
+2. F2 (shipped 2026-08-30): the browser draws the caret and the
+   selection while the surface owns the keyboard; `sel` reports point and
+   mark as bytes (a motion keeps the mark, a click clears it);
+   `client-select!` asks `Selection.modify` for visual-line motion on an
+   editable surface. A fresh wrap map still answers first (a rendered page
+   measures one), so the map code stays until the markdown iframe goes.
+3. F3 (shipped 2026-08-30): `markdown-mode` (packages/markdown-mode.scm)
+   paints markers with `md-marker`, hidden by CSS on every line but the
+   cursor's; headings take a size from the theme; `![alt](path)` draws as an
+   `<img>` island (local paths through LocalImage), a bare X status URL as
+   an oembed card island. An island is `contenteditable=false` with
+   `data-len`, so the caret treats it as one character and the client's
+   byte mapping walks over it. Not yet: row-level block styles (quote, list
+   marker, code block chrome) and tables.
 4. F4: HTML files edited in place: tree-sitter-html gives byte positions, so
    an HTML document renders as itself with `data-s` on every text node.
 5. F5: rich paste (HTML to the buffer's format), file and image drop.
-6. F6: the mode split: morg (structure), markdown-mode (source faces),
-   preview-mode (rendered rows), writing-mode (typography, embedding),
-   cua-mode (shift-select, C-c/C-x/C-v on a region).
+6. F6 (shipped 2026-08-30): the mode split. `morg-mode` owns structure
+   (folds, narrowing, babel, TODO) and enables `markdown-mode` and
+   `writing-mode`; `markdown-mode` owns the faces and the islands;
+   `writing-mode` owns typography and the prose keys; `cua-mode`
+   (packages/cua.scm) owns the Shift selections (`cua-select-*`, bound
+   globally by `M-x cua-mode`, and in writing buffers by writing-mode).
+   Not yet: C-c/C-x/C-v acting on an active region, and `preview-mode`
+   as rendered rows rather than the iframe.
 7. F7: the fidelity bugs the audit found: byte goal columns, per-command undo
    boundaries, kill-buffer save prompt, Loro NIF panic isolation.

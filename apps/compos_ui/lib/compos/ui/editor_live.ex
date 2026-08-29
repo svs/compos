@@ -12,7 +12,7 @@ defmodule Compos.Ui.EditorLive do
 
   alias Compos.Core.{Events, Input}
   alias Compos.Scheme.Text
-  alias Compos.Ui.AppServer
+  alias Compos.Ui.{AppServer, LocalImage}
 
   # A normal space collapses inside an empty line, so it cannot give the
   # cursor a visible width. Keep the placeholder a non-breaking space.
@@ -697,7 +697,10 @@ defmodule Compos.Ui.EditorLive do
   @ship_all_threshold 3000
 
   defp decorate(%{type: :leaf} = leaf, cache, _faces) do
-    raw_key = {leaf.buffer, leaf.version, leaf.ts_lang, leaf.overlay_gen}
+    # the oembed generation moves when an X card lands: a line that drew
+    # the pending URL must draw the card
+    raw_key =
+      {leaf.buffer, leaf.version, leaf.ts_lang, leaf.overlay_gen, Compos.Ui.Oembed.generation()}
 
     static =
       case cache[leaf.id] do
@@ -1441,7 +1444,7 @@ defmodule Compos.Ui.EditorLive do
           data-s={ln.start}
         >
           <span class="linenum" contenteditable="false">{ln.num}</span>
-          <span class="line-content"><.seg :for={{txt, cls} <- ln.segs} txt={txt} cls={cls} /><br
+          <span class="line-content"><.seg :for={{txt, cls} <- ln.segs} txt={txt} cls={cls} base={@node.buffer} /><br
               :if={ln.segs == []}
             /><span
               :if={@active? && @completion && ln.current}
@@ -1602,23 +1605,51 @@ defmodule Compos.Ui.EditorLive do
   # ts class plus any active overlay classes
   # a seg whose overlay face says img-embed IS an image: the buffer text
   # stays the URL (the buffer is truth), the client draws the picture
+  # An island draws in the text's place and is one character to the caret
+  # (contenteditable=false): the picture for an image URL, the card for an
+  # X post URL. data-len says how many source bytes it stands for, so the
+  # client's byte mapping walks over it.
   attr(:txt, :string, required: true)
   attr(:cls, :string, required: true)
+  attr(:base, :string, default: nil)
 
   defp seg(%{cls: cls, txt: txt} = assigns)
        when is_binary(cls) and is_binary(txt) do
-    if cls =~ "img-embed" and String.starts_with?(txt, "http") do
-      avatar? = String.ends_with?(txt, "#compos-avatar")
+    src = if cls =~ "img-embed", do: image_src(txt, assigns.base)
 
-      assigns =
-        assign(assigns,
-          src: if(avatar?, do: String.trim_trailing(txt, "#compos-avatar"), else: txt),
-          image_class: if(avatar?, do: "img-embed img-avatar", else: "img-embed")
-        )
+    cond do
+      is_binary(src) ->
+        avatar? = String.ends_with?(txt, "#compos-avatar")
 
-      ~H|<img src={@src} class={@image_class} loading="lazy" />|
-    else
-      ~H|<span class={@cls}>{@txt}</span>|
+        assigns =
+          assign(assigns,
+            src: src,
+            len: byte_size(txt),
+            image_class: if(avatar?, do: "img-embed img-avatar", else: "img-embed")
+          )
+
+        ~H|<img src={@src} class={@image_class} loading="lazy" contenteditable="false" data-len={@len} />|
+
+      cls =~ "x-embed" ->
+        assigns = assign(assigns, len: byte_size(txt), card: Compos.Ui.Oembed.card(txt))
+
+        ~H"""
+        <span class="x-card" contenteditable="false" data-len={@len}><%= case @card do %><% {:ok, html} -> %>{Phoenix.HTML.raw(html)}<% _ -> %><span class="x-pending">{@txt}</span><% end %></span>
+        """
+
+      true ->
+        ~H|<span class={@cls}>{@txt}</span>|
+    end
+  end
+
+  # a URL draws as it is; a relative path resolves beside the buffer's
+  # file and is served signed (LocalImage); a path with no file has no picture
+  defp image_src(txt, base) do
+    cond do
+      String.starts_with?(txt, "http") -> String.trim_trailing(txt, "#compos-avatar")
+      is_binary(base) and String.starts_with?(base, "/") -> LocalImage.url(Path.expand(txt, Path.dirname(base)))
+      String.starts_with?(txt, "/") -> LocalImage.url(txt)
+      true -> nil
     end
   end
 

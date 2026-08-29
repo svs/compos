@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""Register aimax:// links with Launch Services on macOS."""
+
+import json
+import os
+import pathlib
+import shutil
+import subprocess
+import sys
+import tempfile
+
+
+def run(*args):
+    subprocess.run(args, check=True)
+
+
+def main():
+    if sys.platform != "darwin":
+        sys.exit("the aimax:// installer currently supports macOS")
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    cli = root / "bin" / "aimax"
+    applications = pathlib.Path.home() / "Applications"
+    app = applications / "Aimax URL Handler.app"
+    applications.mkdir(parents=True, exist_ok=True)
+
+    script = f'''on open location theURL
+  do shell script "exec " & quoted form of {json.dumps(str(cli))} & " open-url " & quoted form of theURL
+end open location
+
+on run
+end run
+'''
+
+    with tempfile.NamedTemporaryFile("w", suffix=".applescript", delete=False) as source:
+        source.write(script)
+        source_path = source.name
+
+    try:
+        if app.exists():
+            shutil.rmtree(app)
+        run("osacompile", "-o", str(app), source_path)
+    finally:
+        os.unlink(source_path)
+
+    plist = app / "Contents" / "Info.plist"
+    buddy = "/usr/libexec/PlistBuddy"
+    run(buddy, "-c", "Add :CFBundleIdentifier string com.aimax.url-handler", str(plist))
+    run(buddy, "-c", "Add :CFBundleURLTypes array", str(plist))
+    run(buddy, "-c", "Add :CFBundleURLTypes:0 dict", str(plist))
+    run(buddy, "-c", "Add :CFBundleURLTypes:0:CFBundleURLName string aimax", str(plist))
+    run(buddy, "-c", "Add :CFBundleURLTypes:0:CFBundleURLSchemes array", str(plist))
+    run(buddy, "-c", "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string aimax", str(plist))
+    run("codesign", "--force", "--deep", "--sign", "-", str(app))
+
+    lsregister = (
+        "/System/Library/Frameworks/CoreServices.framework/Frameworks/"
+        "LaunchServices.framework/Support/lsregister"
+    )
+    run(lsregister, "-f", str(app))
+    print(f"registered aimax:// with {app}")
+
+
+if __name__ == "__main__":
+    main()

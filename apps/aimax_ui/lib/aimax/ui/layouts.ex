@@ -1101,6 +1101,38 @@ defmodule Aimax.Ui.Layouts do
             return at + utf8.encode(upto.toString()).length;
           }
 
+          // Raw HTML has no renderer-owned source spans. Use the clicked
+          // text fragment and its page occurrence to find the same text in
+          // the source. This keeps HTML editing on the normal buffer path.
+          function previewSpot(d, node, off, dir) {
+            const t = node.textContent;
+            const before = t.slice(0, off);
+            const after = t.slice(off);
+            const wb = (before.match(/[\w-]*$/) || [""])[0];
+            const wa = (after.match(/^[\w-]*/) || [""])[0];
+            let page = "";
+            try {
+              const r = d.createRange();
+              r.setStart(d.body, 0);
+              r.setEnd(node, off);
+              page = r.toString();
+            } catch (_) { page = ""; }
+            const count = (needle, back) => {
+              if (!needle) return 0;
+              const upto = page.length - back;
+              let n = 0;
+              for (let i = page.indexOf(needle); i >= 0 && i < upto;
+                   i = page.indexOf(needle, i + 1)) n++;
+              return n;
+            };
+            return {
+              before: before, after: after, wb: wb, wa: wa,
+              nth: count(before + after, before.length),
+              wn: count(wb + wa, wb.length),
+              dir: dir
+            };
+          }
+
           // The image a probe landed on, and the source byte it names. A
           // probe over a picture answers with the element that holds it and
           // the index of the picture inside it, not with a text node.
@@ -1461,10 +1493,10 @@ defmodule Aimax.Ui.Layouts do
                 // listeners survive its tree replacement and must not stack.
                 if (this.wired === d) return;
                 this.wired = d;
-                // a markdown preview shows point and takes edits, so a
-                // click must move point. The caret API names the clicked
-                // text node; the daemon finds that text in the source.
-                if (this.el.dataset.rm === "markdown") {
+                // Markdown carries exact source offsets. HTML falls back to
+                // matching the clicked text. Both use the normal editor input
+                // path, so read-only remains the only edit permission.
+                if (["markdown", "html"].includes(this.el.dataset.rm)) {
                   // Text the renderer added — a code block's head, an embed
                   // card — names no source position. A caret there matches
                   // its short label text anywhere in the file, so it must
@@ -1521,11 +1553,16 @@ defmodule Aimax.Ui.Layouts do
                     // spot with no run under it selects the window and
                     // nothing more
                     const exact = exactSpot(d, node, off);
-                    if (exact === null) return;
-                    this.pushEvent("preview_goto_pos", {
-                      win: parseInt(this.el.dataset.win, 10),
-                      pos: exact, extend: false
-                    });
+                    if (exact !== null) {
+                      this.pushEvent("preview_goto_pos", {
+                        win: parseInt(this.el.dataset.win, 10),
+                        pos: exact, extend: false
+                      });
+                    } else {
+                      this.pushEvent("preview_goto", Object.assign(
+                        { win: parseInt(this.el.dataset.win, 10) },
+                        previewSpot(d, node, off, 0)));
+                    }
                   }, true);
                   // Clicking the preview gives keyboard focus to the iframe.
                   // Keyboard events do not cross that browsing-context boundary,
@@ -1568,12 +1605,18 @@ defmodule Aimax.Ui.Layouts do
                     if (!node || node.nodeType !== 3) return null;
                     if (chromeNode(node)) return null;
                     const off = c.startOffset !== undefined ? c.startOffset : c.offset;
-                    return exactSpot(d, node, off);
+                    const exact = exactSpot(d, node, off);
+                    return exact !== null ? exact : previewSpot(d, node, off, 0);
                   };
                   const dragExtend = (pos) => {
-                    this.pushEvent("preview_goto_pos", {
-                      win: parseInt(this.el.dataset.win, 10), pos: pos, extend: true
-                    });
+                    if (typeof pos === "number") {
+                      this.pushEvent("preview_goto_pos", {
+                        win: parseInt(this.el.dataset.win, 10), pos: pos, extend: true
+                      });
+                    } else {
+                      this.pushEvent("preview_goto", Object.assign(
+                        { win: parseInt(this.el.dataset.win, 10), extend: true }, pos));
+                    }
                   };
                   d.addEventListener("mousemove", (e) => {
                     if (!this.dragFrom || !(e.buttons & 1)) return;

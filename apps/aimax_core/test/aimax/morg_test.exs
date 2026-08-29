@@ -50,6 +50,24 @@ defmodule Aimax.MorgTest do
   #  0123 4..8 9......17 ...   24.. 28..
   defp fixture, do: "# a\nbody\n## child\ncbody\n# b\ntail\n"
 
+  test "morg-narrow and morg-widen run through key dispatch" do
+    buf = morg_buffer(fixture())
+    :ok = Buffer.goto(buf, 12)
+
+    press(["C-x", "n", "n"])
+    assert Buffer.narrow_range(buf) == {9, 24}
+    assert Buffer.hidden(buf) == []
+    assert Buffer.get_local(buf, "morg-narrow-anchor") == 9
+
+    %{tree: leaf} = Editor.render_state()
+    assert leaf.narrow_lines == {2, 3}
+
+    press(["C-x", "n", "w"])
+    assert Buffer.hidden(buf) == []
+    refute Buffer.narrow_range(buf)
+    refute Buffer.get_local(buf, "morg-narrow-anchor")
+  end
+
   test "Scheme Babel runs a blocking query off the UI lane" do
     buf =
       morg_buffer("""
@@ -63,6 +81,33 @@ defmodule Aimax.MorgTest do
 
     eventually(fn -> Buffer.text(buf) =~ "db: no connection morg-missing" end)
     assert Buffer.text(buf) =~ "```result\ndb-query: db: no connection morg-missing\n```"
+  end
+
+  test "CSV Babel previews its tangle file through key dispatch" do
+    dir = Path.join(System.tmp_dir!(), "aimax-morg-csv-#{System.unique_integer([:positive])}")
+    document = Path.join(dir, "notes.md")
+    csv = Path.join(dir, "data.csv")
+    File.mkdir_p!(dir)
+    File.write!(document, "```csv :tangle data.csv :lines 2\nstale_header,value\nstale_row,9\n```\n")
+    File.write!(csv, "disk_header,value\ndisk_row,1\nextra_row,2\n")
+    {:ok, ^document} = Aimax.Core.open_file(document)
+
+    on_exit(fn ->
+      Aimax.Core.kill_buffer(document)
+      File.rm_rf!(dir)
+    end)
+
+    Editor.minibuffer_close()
+    Editor.set_pending([])
+    Editor.delete_other_windows()
+    Editor.set_window_buffer(document)
+    {:ok, _} = Session.eval(~s{(set-mode! "morg-mode")})
+    :ok = Buffer.goto(document, 35)
+
+    press(["C-c", "C-c"])
+
+    assert Buffer.text(document) =~ "```result-csv\ndisk_header,value\ndisk_row,1\n```"
+    refute Buffer.text(document) =~ "No runner for csv"
   end
 
   # markdown-mode does not exist: no define-mode registers it, and set-mode!

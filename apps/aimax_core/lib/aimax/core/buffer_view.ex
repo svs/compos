@@ -158,6 +158,9 @@ defmodule Aimax.Core.BufferView do
       overlays: overlays(view),
       overlay_gen: view.overlay_gen,
       hidden: hidden(view),
+      # A hot-loaded daemon can still hold rows published under the first
+      # display-range name. Preserve that narrowing until the owner republishes.
+      narrow_range: Map.get(view, :narrow_range, Map.get(view, :display_range)),
       path: view.path,
       read_only: view.read_only,
       total_lines: Rope.line_count(view.rope),

@@ -100,3 +100,20 @@
                      "buffer-insert-after!" "apropos finds the helper")
     (check-contains! (value->string (catalog-entry 'function "buffer-delete-text!"))
                      "write" "and the catalog says it writes")))
+
+(deftest 'narrowing-is-a-core-buffer-operation
+  "every mode can narrow a region without changing the underlying text"
+  (lambda ()
+    (let ((buf (t--edit-buffer "zero\none\ntwo\n")))
+      (with-current-buffer buf
+        (lambda ()
+          (buffer-goto! buf 5)
+          (set-mark! 9)
+          (run-command "narrow-to-region")))
+      (check-equal! (buffer-narrow-range buf) '(5 9)
+                    "the core command narrows to point and mark")
+      (check-equal! (buffer-text buf) "zero\none\ntwo\n"
+                    "narrowing never changes buffer access or text")
+      (with-current-buffer buf (lambda () (run-command "widen")))
+      (check-false! (buffer-narrow-range buf) "the core command widens")
+      (t--drop-edit!))))

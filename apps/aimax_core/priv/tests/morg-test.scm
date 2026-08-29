@@ -86,6 +86,54 @@
     (check-equal! (buffer-hidden t--morg-buf) '() "show-all brings them back")
     (t--morg-done!)))
 
+(deftest 'morg-narrow-shows-one-heading-and-supplies-a-retrieval-hint
+  "narrowing hides other sections without attaching document text"
+  (lambda ()
+    (t--morg! t--morg-fixture 12)
+    (t--morg-run! "morg-narrow")
+    (let* ((anchor (buffer-local t--morg-buf 'morg-narrow-anchor))
+           (scan (morg-scan t--morg-buf))
+           (entry (morg-entry-at scan anchor))
+           (end (markdown--section-end scan t--morg-buf entry)))
+      (check-equal! (buffer-narrow-range t--morg-buf)
+                    (list anchor end)
+                    "only the selected section remains visible")
+      (check-contains! (buffer-context t--morg-buf) "markdown-outline"
+                       "the hint starts with the outline")
+      (check-contains! (buffer-context t--morg-buf) "markdown-read"
+                       "the hint directs section reads"))
+    ;; A daemon hot-loaded from the short-lived fold implementation may
+    ;; still carry these ranges. Widening must migrate them away.
+    (fold-set! t--morg-buf 'morg-narrow '((0 3)))
+    (t--morg-run! "morg-widen")
+    (check-false! (buffer-narrow-range t--morg-buf)
+                  "widening clears the cosmetic restriction")
+    (check-equal! (fold-get t--morg-buf 'morg-narrow) '()
+                  "widening clears the legacy fold tag")
+    (t--morg-done!)))
+
+(deftest 'morg-narrow-rebuilds-after-an-edit-and-mode-setup
+  "the durable anchor follows edits and setup restores its display range"
+  (lambda ()
+    (t--morg! t--morg-fixture 12)
+    (t--morg-run! "morg-narrow")
+    (let ((before (buffer-local t--morg-buf 'morg-narrow-anchor)))
+      (buffer-insert! t--morg-buf 0 "intro\n")
+      (check-true!
+        (wait-until
+          (lambda ()
+            (equal? (buffer-local t--morg-buf 'morg-narrow-anchor)
+                    (+ before 6)))
+          3000 20)
+        "the change hook completes")
+      (check-equal! (buffer-local t--morg-buf 'morg-narrow-anchor)
+                    (+ before 6) "the anchor follows an earlier edit")
+      (buffer-widen! t--morg-buf)
+      (with-current-buffer t--morg-buf (lambda () (set-mode! "morg-mode")))
+      (check-true! (pair? (buffer-narrow-range t--morg-buf))
+                   "mode setup rebuilds the display range"))
+    (t--morg-done!)))
+
 (deftest 'morg-outline-folds-every-heading-body
   "and running it again changes nothing"
   (lambda ()
@@ -348,15 +396,33 @@
                   '((1 1 "One") (3 2 "Child") (8 1 "Two")) "the outline")
     (check-equal! (markdown-find t--morg-buf "Child")
                   '((3 2 "Child")) "the search")
+    (check-contains!
+      (llm-tool-call "markdown-outline" (list 'buffer t--morg-buf))
+      "(3 2 \"Child\")" "the agent can outline without prompt instructions")
+    (check-equal!
+      (llm-tool-call "markdown-read" (list 'buffer t--morg-buf 'line 3))
+      "## Child\ntext\n```sh\n# not a heading\n```\n"
+      "the agent reads one relevant section")
     (t--morg-done!)))
 
 (deftest 'the-markdown-api-reads-the-section-that-holds-a-body-line
-  "a body line belongs to the nearest heading above it"
+  "a read is shallow unless the caller asks for the subtree"
   (lambda ()
     (t--morg-md! "# One\nbody\n## Child\ntext\n# Two\ntail\n")
     (check-equal! (markdown-read t--morg-buf 4) "## Child\ntext\n" "the child section")
-    (check-equal! (markdown-read t--morg-buf 1) "# One\nbody\n## Child\ntext\n"
-                  "the parent takes its children with it")
+    (check-equal! (markdown-read t--morg-buf 1) "# One\nbody\n"
+                  "the parent excludes its child by default")
+    (check-equal! (markdown-read t--morg-buf 1 #t)
+                  "# One\nbody\n## Child\ntext\n"
+                  "an explicit subtree includes the child")
+    (check-equal!
+      (llm-tool-call "markdown-read" (list 'buffer t--morg-buf 'line 1))
+      "# One\nbody\n" "the tool also defaults to the shallow section")
+    (check-equal!
+      (llm-tool-call "markdown-read"
+                     (list 'buffer t--morg-buf 'line 1 'subtree #t))
+      "# One\nbody\n## Child\ntext\n"
+      "the tool requires an explicit subtree request")
     (t--morg-done!)))
 
 (deftest 'the-markdown-api-replaces-one-duplicate-section-by-line
@@ -584,6 +650,33 @@
                   "the result is present when the command returns")
     (t--morg-done!)))
 
+(deftest 'a-scheme-result-pretty-prints-nested-property-lists
+  "long Scheme data stays readable in its Morg result block"
+  (lambda ()
+    (t--morg!
+      (string-append
+        "```scheme :sync\n"
+        "(list (list 'kind \"function\" 'name \"read-file-numbered\" "
+        "'doc \"read source text files with stable line numbers for exact citations\") "
+        "(list 'kind \"function\" 'name \"spreadsheet-read\" "
+        "'doc \"read a workbook by buffer name without displaying it\"))\n"
+        "```\n")
+      20)
+    (t--morg-run! "morg-babel")
+    (check-contains!
+      (buffer-text t--morg-buf)
+      (string-append
+        "```result\n"
+        "((kind \"function\"\n"
+        "  name \"read-file-numbered\"\n"
+        "  doc \"read source text files with stable line numbers for exact citations\")\n"
+        " (kind \"function\"\n"
+        "  name \"spreadsheet-read\"\n"
+        "  doc \"read a workbook by buffer name without displaying it\"))\n"
+        "```\n")
+      "property keys stay beside their values and rows start on separate lines")
+    (t--morg-done!)))
+
 (deftest 'running-outside-a-block-does-not-edit-the-buffer
   "there is nothing to run, so nothing happens"
   (lambda ()
@@ -598,6 +691,57 @@
     (t--morg! "```result\nold\n```\n" 11)
     (t--morg-run! "morg-babel")
     (check-equal! (buffer-text t--morg-buf) "```result\nold\n```\n" "nothing ran")
+    (t--morg-done!)))
+
+(deftest 'a-csv-block-previews-its-existing-tangle-file
+  "CSV is data, so Babel reads its file instead of asking for a runner"
+  (lambda ()
+    (let ((path (string-append (aimax-home) "/zz-morg-preview.csv")))
+      (write-file! path
+        "disk_header,value\ndisk_one,1\ndisk_two,2\ndisk_three,3\ndisk_four,4\ndisk_five,5\n")
+      (t--morg!
+        (string-append "```csv :tangle " path "\n"
+                       "stale_header,value\nstale_row,9\n```\n")
+        20)
+      (check-equal! (morg-babel-execute t--morg-buf 20) '(ok "csv")
+                    "CSV uses its preview handler")
+      (check-equal!
+        (buffer-text t--morg-buf)
+        (string-append
+          "```csv :tangle " path "\n"
+          "stale_header,value\nstale_row,9\n```\n"
+          "```result-csv\n"
+          "disk_header,value\ndisk_one,1\ndisk_two,2\ndisk_three,3\ndisk_four,4\n"
+          "```\n")
+        "the default preview contains five file lines")
+      (morg-refontify! t--morg-buf)
+      (check-true! (member "morg-bold" (t--morg-faces))
+                   "the CSV result header is bold in morg-mode")
+      (delete-file! path)
+      (t--morg-done!))))
+
+(deftest 'a-csv-block-falls-back-to-its-body-and-honors-lines
+  "a missing tangle file leaves the block useful"
+  (lambda ()
+    (let ((path (string-append (aimax-home) "/zz-morg-missing.csv")))
+      (when (file-exists? path) (delete-file! path))
+      (t--morg!
+        (string-append "```csv :tangle " path " :lines 2\n"
+                       "name,value\none,1\ntwo,2\n```\n")
+        20)
+      (check-equal! (morg-babel-execute t--morg-buf 20) '(ok "csv")
+                    "a missing file is not a runner error")
+      (check-contains! (buffer-text t--morg-buf)
+                       "```result-csv\nname,value\none,1\n```\n"
+                       "the preview uses two body lines")
+      (t--morg-done!))))
+
+(deftest 'a-csv-result-block-is-not-runnable
+  "a preview is output, not another CSV source block"
+  (lambda ()
+    (t--morg! "```result-csv\nname,value\n```\n" 18)
+    (check-equal! (car (morg-babel-execute t--morg-buf 18)) 'error
+                  "the result does not ask for a runner")
     (t--morg-done!)))
 
 (deftest 'tangle-writes-marked-blocks-relative-to-the-morg-file

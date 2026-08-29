@@ -1744,7 +1744,7 @@ defmodule Aimax.EditorTest do
     File.rm!(path)
   end
 
-  test "preview is read-only; read-only-mode gives back writable source" do
+  test "preview-mode and read-only-mode are independent" do
     path = Path.join(System.tmp_dir!(), "aimax-html-#{System.unique_integer([:positive])}.html")
     File.write!(path, "<h1>Hi</h1>\n")
     on_exit(fn -> File.rm(path) end)
@@ -1757,19 +1757,22 @@ defmodule Aimax.EditorTest do
     press(["C-c", "C-v"])
     assert Buffer.get_local(path, "render-mode") == "html"
     assert "preview-mode" in Buffer.get_local(path, "minor-modes")
+    refute Buffer.read_only?(path)
+
+    press(["C-x", "C-q"])
     assert Buffer.read_only?(path)
+    assert Buffer.get_local(path, "render-mode") == "html"
+    assert "preview-mode" in Buffer.get_local(path, "minor-modes")
 
-    # read-only means read-only: typing does not reach the file
-    press(["x"])
-    assert Buffer.text(path) == "<h1>Hi</h1>\n"
-
-    # C-x C-q to edit: the preview mode goes with it, so reload stays source
     press(["C-x", "C-q"])
     refute Buffer.read_only?(path)
+    assert Buffer.get_local(path, "render-mode") == "html"
+    assert "preview-mode" in Buffer.get_local(path, "minor-modes")
+
+    press(["C-c", "C-v"])
     refute Buffer.get_local(path, "render-mode")
     refute "preview-mode" in Buffer.get_local(path, "minor-modes")
-    press(["x"])
-    assert String.starts_with?(Buffer.text(path), "x<h1>")
+    refute Buffer.read_only?(path)
 
     Aimax.Core.kill_buffer(path)
   end
@@ -2825,9 +2828,7 @@ defmodule Aimax.EditorTest do
       """)
 
     on_exit(fn ->
-      Aimax.Core.Session.eval(
-        ~s[(begin (global-unset-key "<f9> a") (global-unset-key "<f9> b"))]
-      )
+      Aimax.Core.Session.eval(~s[(begin (global-unset-key "<f9> a") (global-unset-key "<f9> b"))])
     end)
 
     press(["<f9>"])
@@ -4325,8 +4326,7 @@ defmodule Aimax.MinibufferEditingTest do
     assert Buffer.text(Editor.minibuf_name()) == ""
   end
 
-  # a markdown preview shows point and takes edits, so motion keys move
-  # point; an html preview has no visible point, so they scroll instead
+  # A writable preview takes edits, so motion keys move through its source.
   test "motion keys move point in a markdown preview" do
     path = Path.join(System.tmp_dir!(), "aimax-prevmove-#{System.unique_integer([:positive])}.md")
     File.write!(path, "# Title\n\nbody\n")
@@ -4352,7 +4352,7 @@ defmodule Aimax.MinibufferEditingTest do
     File.rm!(path)
   end
 
-  test "motion keys still scroll an html preview" do
+  test "motion keys move through a writable html preview" do
     path =
       Path.join(System.tmp_dir!(), "aimax-prevhtml-#{System.unique_integer([:positive])}.html")
 
@@ -4366,7 +4366,7 @@ defmodule Aimax.MinibufferEditingTest do
 
     Buffer.goto(path, 0)
     press(["C-n"])
-    assert Buffer.point(path) == 0
+    assert Buffer.point(path) > 0
 
     press(["C-x", "1"])
     File.rm!(path)

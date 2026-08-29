@@ -77,6 +77,15 @@ defmodule Aimax.BufferViewTest do
       assert Buffer.hidden(name) == [1]
     end
 
+    test "narrowing lands in the row and old hot-loaded rows stay wide", %{name: name} do
+      old_view = name |> view!() |> Map.delete(:narrow_range)
+      assert BufferView.snapshot_of(old_view, nil).narrow_range == nil
+
+      :ok = Buffer.narrow(name, 6, 11)
+      assert view!(name).narrow_range == {6, 11}
+      assert Buffer.render_snapshot(name).narrow_range == {6, 11}
+    end
+
     test "the row is written before the write is answered", %{name: name} do
       # A caller that writes and then reads must never see the state it
       # replaced. The publish runs inside the callback, so the ETS row is

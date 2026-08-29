@@ -243,6 +243,72 @@ defmodule Aimax.Ui.PreviewCursorTest do
     refute html =~ ~s(class="inline")
   end
 
+  test "a tangled CSV block previews five rows with a header" do
+    text = """
+    ```csv :tangle data/people.csv
+    name,note
+    Ada,"math, engines"
+    Grace,compilers
+    Margaret,software
+    Barbara,hardware
+    Carol,networks
+    ```
+    """
+
+    html = EditorLive.preview_doc("markdown", text, 0, @faces, false)
+    plain = html |> strip_anchors() |> String.replace(@pt, "")
+
+    assert plain =~ ~s(<table class="csv-preview">)
+    assert plain =~ ~r/<th>\s*name\s*<\/th>/
+    assert plain =~ ~r/<th>\s*note\s*<\/th>/
+    assert plain =~ "math, engines"
+    assert plain =~ "Barbara"
+    refute plain =~ "Carol"
+    refute plain =~ ~s(<pre><code class="csv">)
+  end
+
+  test "a CSV preview line limit is configurable" do
+    text = "```csv :tangle data.csv :lines 2\nname,value\none,1\ntwo,2\n```\n"
+    html = EditorLive.preview_doc("markdown", text, byte_size(text), @faces, false)
+
+    assert html =~ "one"
+    refute html =~ "two"
+  end
+
+  test "a CSV preview prefers its existing tangle file" do
+    text = "```csv :tangle data.csv\nstale_header,value\nstale_row,1\n```\n"
+
+    html =
+      EditorLive.preview_doc("markdown", text, 0, nil, @faces, false, [],
+        csv_source: fn "data.csv" -> "fresh,value\nfile,2\n" end
+      )
+
+    assert html =~ "fresh"
+    assert html =~ "file"
+    refute html =~ "stale_header"
+    refute html =~ "stale_row"
+  end
+
+  test "an empty CSV tangle file does not fall back to the block" do
+    text = "```csv :tangle data.csv\nstale_header,value\nstale_row,1\n```\n"
+
+    html =
+      EditorLive.preview_doc("markdown", text, 0, nil, @faces, false, [],
+        csv_source: fn "data.csv" -> "" end
+      )
+
+    refute html =~ "stale_header"
+    refute html =~ "stale_row"
+  end
+
+  test "a CSV fence without a tangle target remains code" do
+    html =
+      EditorLive.preview_doc("markdown", "```csv\nname,value\none,1\n```\n", 0, @faces, false)
+
+    assert html =~ ~s(<pre><code class="csv">)
+    refute html =~ ~s(class="csv-preview")
+  end
+
   test "a plain fenced block names its language without Morg actions" do
     html = EditorLive.preview_doc("markdown", "```elixir\n:ok\n```\n", 0, @faces, false)
 

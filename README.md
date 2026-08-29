@@ -145,9 +145,16 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(buffer
   | nc -U ~/.aimax/sock
 ```
 
-A **buffer link** is one string that names a buffer. `C-c l` copies the link
-for the current buffer and line. Open the same name under `/raw/` to read the
-text:
+A **buffer link** is one string that names a buffer. `C-x l` copies an
+`aimax://` link for the current buffer and line. The link includes the daemon's
+socket, so it returns to the instance that created it. On macOS, register the
+protocol handler once:
+
+```sh
+bin/install-aimax-url-handler
+```
+
+Open the same buffer name under `/raw/` to read its text:
 
 ```sh
 curl -s http://localhost:4004/raw            # every buffer name, one per line

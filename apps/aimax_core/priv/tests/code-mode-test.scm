@@ -47,6 +47,22 @@
                        "display-buffer-other-window!"
                        "the public catalog remains complete"))))
 
+(deftest 'explicit-narrowing-and-widening-are-discoverable-as-presentation
+  "named-buffer presentation APIs stay quiet by default and direct when requested"
+  (lambda ()
+    (let ((quiet (llm-tool-call "apropos" (list 'query "widen")))
+          (present (llm-tool-call "apropos"
+                     (list 'query "widen" 'include-display #t))))
+      (check-false! (string-contains? quiet "buffer-widen!")
+                    "quiet discovery hides visible mutations")
+      (check-contains! present "buffer-widen!"
+                       "presentation discovery finds the named-buffer API")
+      (check-contains! present "(buffer-widen! BUF)"
+                       "the result gives the direct call shape")
+      (check-equal!
+        (plist-get (catalog-entry 'function "buffer-widen!") 'effects)
+        '("write" "display") "widening is correctly stamped"))))
+
 (deftest 'the-side-chat-prompt-distinguishes-display-from-buffer-history
   "open in the other buffer means another window; switch means buffer history"
   (lambda ()

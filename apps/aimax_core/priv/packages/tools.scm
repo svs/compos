@@ -526,6 +526,10 @@
 (define *apropos--texts-cache* #f)
 (define *apropos--sources-gen* -1)
 
+;; Keep query embedding behind one seam. Tests replace it without a network
+;; call, and the production path remains the cached embedding primitive.
+(define *apropos--embedding-search* embedding-search)
+
 (define (apropos--sources-cached rows)
   (let ((gen (catalog-generation)))
     (unless (and *apropos--sources-cache* (equal? gen *apropos--sources-gen*))
@@ -545,9 +549,11 @@
                (sources (car both))
                (texts (nth 1 both))
                (eligible (map (lambda (hit) (apropos--filter-match? hit filters)) sources))
-               (semantic-query (string-append "Find the editor API for this task: " query))
-               (scores (embedding-search semantic-query texts key
-                                         apropos-semantic-limit eligible)))
+               ;; The catalog texts already identify themselves as editor API
+               ;; candidates. A repeated instruction prefix overwhelms a short
+               ;; task query and changes its meaning in embedding space.
+               (scores (*apropos--embedding-search* query texts key
+                                                    apropos-semantic-limit eligible)))
           (map (lambda (score)
                  (append (nth (car score) sources)
                          (list 'note "semantic match" 'semantic-score (nth 1 score))))
@@ -602,7 +608,50 @@
                                                    "semantic match"))
                               hits)))
         (append (apropos--rank-by-name literal query)
-                semantic))))
+                (apropos--rank-semantic semantic query)))))
+
+;; Semantic similarity finds related candidates. Field coverage resolves close
+;; candidates. A word in the API name carries more intent than the same word
+;; in a long description or a metadata field.
+(define (apropos--field-coverage text words)
+  (if (null? words)
+      0.0
+      (let ((hay (string-downcase text)))
+        (/ (* 1.0
+              (length (filter (lambda (word) (string-contains? hay word)) words)))
+           (length words)))))
+
+(define (apropos--semantic-rank-score hit words)
+  (let ((name (string-append
+                (or (plist-get hit 'qualified-name) "") " "
+                (or (plist-get hit 'name) "") " "
+                (or (plist-get hit 'task) "")))
+        (signature (or (plist-get hit 'sig) ""))
+        (doc (or (plist-get hit 'doc) ""))
+        (metadata
+          (string-append
+            (apropos--embedding-field hit 'kind) " "
+            (apropos--embedding-field hit 'package) " "
+            (apropos--embedding-field hit 'namespace) " "
+            (apropos--embedding-field hit 'domain) " "
+            (apropos--embedding-field hit 'effects) " "
+            (or (plist-get hit 'use) (plist-get hit 'run) ""))))
+    (let ((name-coverage (apropos--field-coverage name words))
+          (signature-coverage (apropos--field-coverage signature words)))
+    (+ (or (plist-get hit 'semantic-score) 0.0)
+       (* 0.30 name-coverage name-coverage)
+       (* 0.12 signature-coverage signature-coverage)
+       (* 0.06 (apropos--field-coverage doc words))
+       (* 0.02 (apropos--field-coverage metadata words))))))
+
+(define (apropos--rank-semantic hits query)
+  (let ((words (apropos--words query)))
+    (map (lambda (row) (nth 1 row))
+         (reverse
+           (sort
+             (map (lambda (hit)
+                    (list (apropos--semantic-rank-score hit words) hit))
+                  hits))))))
 
 (define (apropos--rank-by-name hits query)
   (let* ((q (string-downcase (string-trim query)))
@@ -623,13 +672,25 @@
                             (and (not (exact? h)) (not (recipe? h)) (prefix? h))) hits))
          (rest (filter (lambda (h)
                          (and (not (exact? h)) (not (recipe? h)) (not (prefix? h)))) hits)))
-    (append exact recipes prefixes rest)))
+    (append exact recipes prefixes (apropos--rank-semantic rest query))))
 
-;; an internal entry carries its doc when the primitive has one; a bare
-;; userland define stays a bare name — describe-function has its source
-(define (apropos--internal n doc words)
+;; Scope "all" is the escape hatch for private globals. Keep every result
+;; structured, so discovery can distinguish a private implementation from a
+;; missing public declaration. Explicit declarations still own effects: the
+;; search must never infer permission metadata from a function name or doc.
+(define (apropos--internal n doc words catalogued-names)
   (and (apropos--hit? (if doc (string-append n " " doc) n) words)
-       (if doc (list 'kind "internal" 'name n 'doc doc) n)))
+       (let ((entry (append (list 'kind "internal" 'name n)
+                            (if doc (list 'doc doc) '()))))
+         (if (member n catalogued-names)
+             entry
+             (append entry
+               (list 'catalog-status "uncatalogued"
+                     'note
+                     (string-append
+                       "This global has no catalog declaration. "
+                       "Inspect its defining source. If you use it, add a durable "
+                       "declaration with explicit domain and effects.")))))))
 
 ;; QUERY is words, not a regex: "split window", "open a file", "chat cost".
 ;; Recipes come first: a task-level hit beats four name-level ones, and it
@@ -720,9 +781,12 @@
     "start. Nothing matched? You get the closest names instead. Pass "
     "kind/package/namespace/domain/effect narrow the catalog. Pass "
     "Display-effect operations stay hidden unless include-display is true. "
+    "When the user explicitly asks to open, show, switch, narrow, widen, or otherwise "
+    "change visible editor state, set include-display true on the first search. "
     "Pass category as a compatibility alias for domain, or scope \"all\" to include "
-    "the internal primitives, one-line docs only, which may change "
-    "without notice.")
+    "internal globals, which may change without notice. An uncatalogued result asks "
+    "you to inspect its source and add a durable declaration if you use it. Loading "
+    "that declaration updates the live catalog immediately.")
   (list (list 'query "string" "intent words, e.g. \"open a file\" or \"remove document\"")
         (list 'kind "string" "function, command, key, variable, recipe, mode, or component" 'optional)
         (list 'package "string" "owning load unit" 'optional)
@@ -751,11 +815,14 @@
                       (if include-display '() (list 'exclude-effect 'display)))))
         (value->string
           (if (equal? scope "all")
-              (let ((words (apropos--words q)))
+              (let ((words (apropos--words q))
+                    (catalogued-names
+                      (map (lambda (entry) (plist-get entry 'name)) (catalog))))
                 (list 'public (apply apropos (cons q filters))
                       'globals (apropos--compact
                                  (map (lambda (n)
-                                        (apropos--internal n (primitive-doc n) words))
+                                        (apropos--internal
+                                          n (primitive-doc n) words catalogued-names))
                                       (global-names)))))
               (apply apropos (cons q filters)))))))
   '(read external spend))
@@ -800,19 +867,32 @@
         (loop (cdr lines) (+ n 1)
               (cons (string-append (number->string n) "\t" (car lines)) out)))))
 
-(define (read-file-numbered path)
-  (let ((source (read-file path)))
-    (if source (line-numbered-text source) #f)))
+;; Keep the core file reader under a private name. Hot reload must not capture
+;; this wrapper when this form runs again.
+(unless (boundp 'read-file-source)
+  (define read-file-source read-file))
 
+(define (read-file path &optional line-numbers)
+  (let ((source (read-file-source path)))
+    (if (and source line-numbers) (line-numbered-text source) source)))
+
+(define (read-file-numbered path)
+  (read-file path #t))
+
+(public! 'read-file
+  "(read-file PATH [LINE-NUMBERS]) — read a text file; add stable line numbers when LINE-NUMBERS is true")
+(catalog-meta! 'function "read-file" 'domain 'discovery 'effects '(read))
 (public! 'read-file-numbered
   "(read-file-numbered PATH) — read source text files with stable line numbers for exact citations")
 (catalog-meta! 'function "read-file-numbered" 'domain 'discovery 'effects '(read))
 
 (define-tool! 'read-file
-  "Read one source file with stable line numbers for exact citations. Independent read-file, apropos, describe-function, code-outline, and code-read calls can be issued together and run concurrently."
-  (list (list 'path "string" "absolute or workspace-relative source file path"))
+  "Read one source file. Set line_numbers to true for stable line numbers. Independent read-file, apropos, describe-function, code-outline, and code-read calls can run concurrently."
+  (list (list 'path "string" "absolute or workspace-relative source file path")
+        (list 'line_numbers "boolean" "add stable line numbers" 'optional))
   (lambda (args)
-    (let ((result (read-file-numbered (custom--plist-get args 'path))))
+    (let ((result (read-file (custom--plist-get args 'path)
+                             (custom--plist-get args 'line_numbers))))
       (if result result "error: file does not exist or cannot be read")))
   '(read))
 

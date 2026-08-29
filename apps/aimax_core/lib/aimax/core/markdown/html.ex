@@ -16,6 +16,8 @@ defmodule Aimax.Core.Markdown.Html do
 
   alias Aimax.Core.Markdown
 
+  @csv_preview_lines 5
+
   # Source that is markup: consumed, never drawn. This is the grammar's own
   # vocabulary written down - the bytes it says are a marker - not a rule
   # about where a cursor may stand.
@@ -60,6 +62,7 @@ defmodule Aimax.Core.Markdown.Html do
     # absolute path, which a browser will not load: without this it drew
     # nothing.
     Process.put(:aimax_md_image_src, opts[:image_src])
+    Process.put(:aimax_md_csv_source, opts[:csv_source])
 
     marks = Enum.sort_by(marks, &elem(&1, 0))
     {iodata, marks} = nodes(tree, text, 0, marks)
@@ -340,16 +343,141 @@ defmodule Aimax.Core.Markdown.Html do
     # class made ":tangle" and its target into classes of their own.
     {lang, args} = fence_info(child_text(node, text, :info))
 
-    # <pre> draws a newline as a line already. A break added inside one
-    # would draw the same newline twice and open the block by a line for
-    # every line it holds.
-    {inner, marks} = without_breaks(fn -> children(node, text, marks) end)
-    class = if lang == "", do: "", else: ~s( class="#{attr(lang)}")
+    {content, marks} =
+      if String.downcase(lang) == "csv" and tangle_target(args) do
+        csv_preview(node, text, marks, csv_preview_lines(args), tangle_target(args))
+      else
+        # <pre> draws a newline as a line already. A break added inside one
+        # would draw the same newline twice and open the block by a line for
+        # every line it holds.
+        {inner, marks} = without_breaks(fn -> children(node, text, marks) end)
+        class = if lang == "", do: "", else: ~s( class="#{attr(lang)}")
 
-    pre = [~s(<pre data-src="#{node.start}-#{node.stop}"><code#{class}>), inner, "</code></pre>"]
+        {[~s(<pre data-src="#{node.start}-#{node.stop}"><code#{class}>), inner, "</code></pre>"],
+         marks}
+      end
 
-    {[~s(<div class="code-block">), code_head(lang, args), pre, "</div>"], marks}
+    {[~s(<div class="code-block">), code_head(lang, args), content, "</div>"], marks}
   end
+
+  defp csv_preview(node, text, marks, limit, target) do
+    rows = csv_source_rows(node, text, target) |> Enum.take(limit)
+
+    case rows do
+      [] ->
+        {marks_only(node, marks), drop_marks(node, marks)}
+
+      [headers | body] ->
+        {head, marks} = csv_html_row(headers, marks, "th")
+
+        {body, marks} =
+          Enum.map_reduce(body, marks, fn row, marks -> csv_html_row(row, marks, "td") end)
+
+        tail = marks_only(node, marks)
+
+        {[
+           ~s(<table class="csv-preview" data-src="#{node.start}-#{node.stop}"><thead>),
+           head,
+           "</thead><tbody>",
+           body,
+           "</tbody></table>",
+           tail
+         ], drop_marks(node, marks)}
+    end
+  end
+
+  defp csv_source_rows(node, text, target) do
+    first =
+      case :binary.match(text, "\n", scope: {node.start, node.stop - node.start}) do
+        {at, _} -> at + 1
+        :nomatch -> node.stop
+      end
+
+    last =
+      node.children
+      |> Enum.filter(&(&1.kind == :fence))
+      |> List.last()
+      |> then(&if(&1, do: &1.start, else: node.stop))
+
+    external = csv_external_source(target)
+
+    cond do
+      is_binary(external) ->
+        external
+        |> csv_lines()
+        |> Enum.map(&{&1, first, node.stop})
+
+      first >= last ->
+        []
+
+      true ->
+        text
+        |> binary_part(first, last - first)
+        |> :binary.split("\n", [:global])
+        |> Enum.map_reduce(first, fn line, at ->
+          line = String.trim_trailing(line, "\r")
+          {{csv_row(line), at, at + byte_size(line) + 1}, at + byte_size(line) + 1}
+        end)
+        |> elem(0)
+        |> Enum.reject(fn {fields, _start, _stop} -> fields == [""] end)
+    end
+  end
+
+  defp csv_lines(text) do
+    text
+    |> :binary.split("\n", [:global])
+    |> Enum.map(&(&1 |> String.trim_trailing("\r") |> csv_row()))
+    |> Enum.reject(&(&1 == [""]))
+  end
+
+  defp csv_external_source(target) do
+    case Process.get(:aimax_md_csv_source) do
+      fun when is_function(fun, 1) -> fun.(target)
+      _ -> nil
+    end
+  end
+
+  defp csv_html_row({fields, start, stop}, marks, cell) do
+    {here, marks} = Enum.split_while(marks, fn {off, _} -> off < stop end)
+
+    cells =
+      fields
+      |> Enum.with_index()
+      |> Enum.map(fn {field, index} ->
+        row_marks = if index == 0, do: Enum.map(here, &elem(&1, 1)), else: []
+        [~s(<#{cell} data-s="#{start}">), row_marks, escape(field), "</#{cell}>"]
+      end)
+
+    {[~s(<tr data-src="#{start}-#{stop}">), cells, "</tr>"], marks}
+  end
+
+  defp csv_preview_lines(args) do
+    case Regex.run(~r/:(?:lines|preview)[ \t]+([0-9]+)/i, args, capture: :all_but_first) do
+      [count] ->
+        case Integer.parse(count) do
+          {value, ""} when value > 0 -> value
+          _ -> @csv_preview_lines
+        end
+
+      _ ->
+        @csv_preview_lines
+    end
+  end
+
+  defp csv_row(line), do: csv_row(line, "", [], false)
+  defp csv_row(<<>>, field, fields, _quoted), do: Enum.reverse([field | fields])
+
+  defp csv_row(<<?", ?", rest::binary>>, field, fields, true),
+    do: csv_row(rest, field <> "\"", fields, true)
+
+  defp csv_row(<<?", rest::binary>>, field, fields, quoted),
+    do: csv_row(rest, field, fields, not quoted)
+
+  defp csv_row(<<?,, rest::binary>>, field, fields, false),
+    do: csv_row(rest, "", [field | fields], false)
+
+  defp csv_row(<<char::utf8, rest::binary>>, field, fields, quoted),
+    do: csv_row(rest, field <> <<char::utf8>>, fields, quoted)
 
   # The language is the first word of the info string; the rest are the
   # block's arguments.
@@ -397,20 +525,23 @@ defmodule Aimax.Core.Markdown.Html do
   end
 
   defp tangle_action(args) do
-    case Regex.run(~r/:tangle[ \t]+([^ \t]+)/i, args, capture: :all_but_first) do
-      [target] ->
-        if String.downcase(target) == "no" do
-          []
-        else
-          [
-            ~s(<span class="code-action"><kbd>C-c C-x</kbd> tangle &rarr; <code>),
-            escape(target),
-            "</code></span>"
-          ]
-        end
-
-      _ ->
+    case tangle_target(args) do
+      nil ->
         []
+
+      target ->
+        [
+          ~s(<span class="code-action"><kbd>C-c C-x</kbd> tangle &rarr; <code>),
+          escape(target),
+          "</code></span>"
+        ]
+    end
+  end
+
+  defp tangle_target(args) do
+    case Regex.run(~r/:tangle[ \t]+([^ \t]+)/i, args, capture: :all_but_first) do
+      [target] -> if(String.downcase(target) == "no", do: nil, else: target)
+      _ -> nil
     end
   end
 

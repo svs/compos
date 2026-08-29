@@ -1642,14 +1642,13 @@
   (lambda () (forward-char!)))
 (define-command "backward-char" "Move point one character backward"
   (lambda () (backward-char!)))
-;; An html or app window draws a document with no visible point, so the
-;; ordinary motion keys would move point and the page would sit still.
-;; Scroll the page instead. A markdown preview is different: it shows
-;; point as a cursor and takes edits, so motion keys move point there
-;; and the view follows the cursor on its own.
+;; An app owns its input, and a read-only HTML page is a reader. Scroll those
+;; pages instead of moving an invisible source point. A writable HTML preview
+;; takes edits, so its motion keys must move through the source.
 (define (preview-buffer? buf)
   (let ((rm (buffer-local buf 'render-mode)))
-    (or (equal? rm "html") (equal? rm "app"))))
+    (or (equal? rm "app")
+        (and (equal? rm "html") (buffer-read-only? buf)))))
 
 ;; #t when it scrolled, so a command can fall through to the point motion
 (define (preview-scroll! lines)
@@ -3336,6 +3335,24 @@
   (lambda ()
     (if (not (exchange-point-and-mark!))
         (message "No mark set in this buffer"))))
+
+(define-command "narrow-to-region" "Show only the text between point and mark"
+  (lambda ()
+    (if (and (mark) (< (region-beginning) (region-end)))
+        (begin
+          (buffer-narrow! (current-buffer) (region-beginning) (region-end))
+          (message "Narrowed to region"))
+        (message "No region — set the mark first (C-SPC)"))))
+
+(define-command "widen" "Show the complete current buffer"
+  (lambda ()
+    (buffer-widen! (current-buffer))
+    (message "Widened buffer")))
+
+(catalog-meta! 'command "narrow-to-region"
+  'domain 'buffers 'effects '(write display))
+(catalog-meta! 'command "widen"
+  'domain 'buffers 'effects '(write display))
 
 ;;; --- isearch ---------------------------------------------------------------
 ;;; ONE search engine (dup #13), two surfaces: C-s/C-r here, evil's
@@ -5361,14 +5378,6 @@
     (let* ((buf (current-buffer))
            (ro? (buffer-read-only? buf)))
       (buffer-set-read-only! buf (not ro?))
-      ;; Making a preview writable also leaves the reading view. Remove the
-      ;; mode entry so a reload does not restore preview while the user edits.
-      (when (and ro? (minor-mode-on? buf "preview-mode"))
-        (disable-minor-mode! buf "preview-mode"))
-      ;; Keep compatibility with rendered file views that do not use
-      ;; preview-mode yet.
-      (when (and ro? (buffer-path buf) (buffer-local buf 'render-mode))
-        (buffer-set-local! buf 'render-mode #f))
       (message (if ro? "writable" "read-only")))))
 
 (global-set-key "C-x C-q" "read-only-mode")
@@ -6280,10 +6289,8 @@
 ;;; here: one edit to a watched buffer used to invalidate the whole cached
 ;;; prefix, and the chat paid the cache-write surcharge again from turn
 ;;; one. So the system prompt names the group's buffers and states the
-;;; edit protocol — both stable for the life of the chat — and the live
-;;; document text rides the LAST user message instead (chat-context-block,
-;;; sent by agent-send-msg!). Older turns keep the text they were sent
-;;; with; only the newest message carries fresh bytes.
+;;; edit protocol. Both stay stable for the life of the chat. The agent reads
+;;; live context with tools on every turn. Chat never attaches document text.
 
 ;; how to read and change a live buffer. One string: the two copies of
 ;; this paragraph had drifted apart. Prompt composition adds it as the stable
@@ -6361,23 +6368,6 @@
          (chat-code-note docs)
          "\n\nThe chat transcript follows; reply to the last user turn "
          "only, in markdown.\n\n"))))
-
-;; the other half: the live text, on the LAST user message, where a change
-;; costs one turn's cache instead of the whole conversation's. With tools
-;; on there is nothing to push — the model reads the buffers itself, and a
-;; pulled read is never stale.
-(define (chat-context-block buf)
-  (let* ((tools? (and (boundp (quote chat-use-tools)) chat-use-tools))
-         (g (and (not tools?) (buffer-group buf)))
-         (docs (if g (group-docs g) '())))
-    (if (null? docs)
-        ""
-        (string-append
-          "[The group's buffers as they are right now:\n"
-          (fold (lambda (acc d)
-                  (string-append acc "\n\"" d "\":\n\n" (buffer-text d) "\n"))
-                "" docs)
-          "]\n\n"))))
 
 ;;; --- chat backends -------------------------------------------------------------
 ;;; A chat can ride an ACP agent (claude-code, codex — subscription billing)
@@ -8432,15 +8422,22 @@
     (string-append (editor-url) "/b/" (url-encode name)
                    (if n (string-append "?line=" (number->string n)) ""))))
 
+(define (aimax-link &optional buf line)
+  (let ((name (or buf (current-buffer)))
+        (n (or line (if buf #f (line-number-at-pos (point))))))
+    (string-append "aimax://open?path=" (url-encode name)
+                   "&socket=" (url-encode (aimax-socket-path))
+                   (if n (string-append "&line=" (number->string n)) ""))))
+
 (define (buffer-raw-link &optional buf)
   (string-append (editor-url) "/raw/" (url-encode (or buf (current-buffer)))))
 
 (effects! '(write))
 
 (define-command "copy-buffer-link"
-  "Copy a link to this buffer and line to the clipboard"
+  "Copy an aimax:// link to this buffer and line to the clipboard"
   (lambda ()
-    (let ((link (buffer-link)))
+    (let ((link (aimax-link)))
       ;; the kill ring too: a client with no clipboard permission still
       ;; pastes it with C-y
       (kill-push! link)
@@ -8575,6 +8572,8 @@
 (global-set-key "C-x C-w" "write-file")
 (global-set-key "C-x b" "switch-to-buffer")
 (global-set-key "C-x k" "kill-buffer")
+(global-set-key "C-x n n" "narrow-to-region")
+(global-set-key "C-x n w" "widen")
 
 (global-set-key "M-x" "execute-extended-command")
 (global-set-key "M-<" "beginning-of-buffer")
@@ -8661,6 +8660,7 @@
 (domain! 'unknown)
 (effects! '(read))
 (public! 'buffer-link "(buffer-link [NAME] [LINE]) -> a URL that opens the buffer here; no NAME means this buffer at point")
+(public! 'aimax-link "(aimax-link [NAME] [LINE]) -> an aimax:// URL for the buffer and line; no NAME means this buffer at point")
 (public! 'buffer-raw-link "(buffer-raw-link [NAME]) -> a URL that serves the buffer text as plain text")
 (effects! '(write))
 (public! 'open-buffer-link! "(open-buffer-link! NAME LINE) — show the buffer a link names; LINE may be #f")
@@ -8845,5 +8845,21 @@
 (public! 'fold-get "(fold-get BUF [TAG]) -> TAG's hidden ranges; no TAG, or 'all, gives the union")
 (public! 'fold-clear! "(fold-clear! BUF [TAG]) — drop TAG's folds; no TAG, or 'all, drops every owner's")
 (public! 'fold-toggle! "(fold-toggle! BUF TAG RANGE) — add or remove one (START END) in TAG; for owners whose state is the range list itself")
+(namespace! 'core)
+(effects! '(write display))
+(public! 'buffer-narrow! "(buffer-narrow! BUF START END) — narrow visible text to the exclusive byte range without changing buffer access" 'buffers)
+(effects! '(read))
+(public! 'buffer-narrow-range "(buffer-narrow-range BUF) -> active (START END) narrowing, or #f" 'buffers)
+(effects! '(write display))
+(public! 'buffer-widen! "(buffer-widen! BUF) — make the complete buffer visible" 'buffers)
+(catalog-meta! 'function "buffer-narrow!"
+  'namespace 'core 'qualified-name "core/buffer-narrow!"
+  'domain 'buffers 'effects '(write display))
+(catalog-meta! 'function "buffer-narrow-range"
+  'namespace 'core 'qualified-name "core/buffer-narrow-range"
+  'domain 'buffers 'effects '(read))
+(catalog-meta! 'function "buffer-widen!"
+  'namespace 'core 'qualified-name "core/buffer-widen!"
+  'domain 'buffers 'effects '(write display))
 
 (message "editor.scm loaded")

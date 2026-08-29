@@ -273,6 +273,29 @@ defmodule Aimax.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
+  # A click inside a rendered document can name a source fragment when the
+  # renderer does not provide exact source offsets. HTML uses this path.
+  def handle_event("preview_goto", %{"win" => win} = p, socket) do
+    with id when is_integer(id) <- safe_int(win) do
+      Input.run(socket.assigns.frame, fn ->
+        command = if p["extend"] == true, do: "preview-select!", else: "preview-goto!"
+
+        Aimax.Core.Session.call_named(command, [
+          id,
+          p["before"] || "",
+          p["after"] || "",
+          p["wb"] || "",
+          p["wa"] || "",
+          count_arg(p["nth"]),
+          count_arg(p["wn"]),
+          dir_arg(p["dir"])
+        ])
+      end)
+    end
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
   # a click or a visual-line key inside a markdown preview's iframe: the
   # hook sends the text node split at the caret, how many times that text
   # comes before it on the page, and which way the key moves. Scheme finds
@@ -525,7 +548,8 @@ defmodule Aimax.Ui.EditorLive do
     key =
       {leaf.buffer, leaf.version, rm, leaf.preview_authored, :erlang.phash2(faces), pt, mark,
        :erlang.phash2(leaf.overlays), Aimax.Ui.Oembed.generation(), preview_engine(leaf.buffer, rm),
-       Aimax.Core.Buffer.get_local(leaf.buffer, "whitespace-mode")}
+       Aimax.Core.Buffer.get_local(leaf.buffer, "whitespace-mode"),
+       csv_preview_file_key(leaf.buffer, leaf.text, rm)}
 
     {html, cache} =
       case cache[{:preview, leaf.id}] do
@@ -634,6 +658,7 @@ defmodule Aimax.Ui.EditorLive do
     # visible slice (+overscan) becomes DOM. leaf.top is in visible-line
     # space.
     hidden = leaf.hidden_lines
+    narrow_lines = Map.get(leaf, :narrow_lines)
     size = tuple_size(static)
     client_scroll? = size <= @ship_all_threshold
     # 3x overscan: leaf.rows is measured against WRAPPED line height (so
@@ -646,14 +671,18 @@ defmodule Aimax.Ui.EditorLive do
     visible =
       cond do
         client_scroll? ->
-          static |> Tuple.to_list() |> Enum.reject(&MapSet.member?(hidden, &1.num - 1))
+          static
+          |> Tuple.to_list()
+          |> restrict_lines(narrow_lines)
+          |> Enum.reject(&MapSet.member?(hidden, &1.num - 1))
 
         MapSet.size(hidden) == 0 ->
           # static is a tuple: elem/2 is O(1), so a deep scroll position
           # costs the same as line 1 — Enum.slice on a list re-walks from
           # element 0 every tick, so cost grows with leaf.top as you scroll
-          first = min(leaf.top, size)
-          last = min(first + want, size) - 1
+          {range_first, range_last} = narrow_lines || {0, size - 1}
+          first = min(range_first + leaf.top, min(range_last + 1, size))
+          last = min(first + want - 1, min(range_last, size - 1))
           if last < first, do: [], else: for(i <- first..last, do: elem(static, i))
 
         true ->
@@ -662,6 +691,7 @@ defmodule Aimax.Ui.EditorLive do
           # correctness over micro-perf here; folds are the uncommon case
           static
           |> Tuple.to_list()
+          |> restrict_lines(narrow_lines)
           |> Enum.reject(&MapSet.member?(hidden, &1.num - 1))
           |> Enum.slice(leaf.top, want)
       end
@@ -679,6 +709,27 @@ defmodule Aimax.Ui.EditorLive do
     leaf = Map.put(leaf, :client_scroll?, client_scroll?)
     {Map.put(leaf, :lines, lines), Map.put(cache, leaf.id, {raw_key, static})}
   end
+
+  defp csv_preview_file_key(_buffer, _text, rm) when rm != "markdown", do: nil
+
+  defp csv_preview_file_key(buffer, text, "markdown") do
+    Regex.scan(~r/^[ \t]*```[ \t]*csv[^\r\n]*:tangle[ \t]+([^ \t\r\n]+)/im, text,
+      capture: :all_but_first
+    )
+    |> Enum.map(fn [target] ->
+      path = csv_preview_path(buffer, target)
+
+      case File.stat(path) do
+        {:ok, stat} -> {path, stat.size, stat.mtime}
+        _ -> {path, nil}
+      end
+    end)
+  end
+
+  defp restrict_lines(lines, nil), do: lines
+
+  defp restrict_lines(lines, {first, last}),
+    do: Enum.filter(lines, &(&1.num - 1 >= first and &1.num - 1 <= last))
 
   defp block_open?([_s, _e, "tool", id | _], open_cards), do: id in open_cards
   defp block_open?(_, _), do: false
@@ -791,6 +842,11 @@ defmodule Aimax.Ui.EditorLive do
 
   # a client that cannot name its window sends null: no window, no crash
   defp safe_int(_), do: nil
+
+  defp count_arg(n) when is_integer(n) and n >= 0, do: n
+  defp count_arg(_), do: 0
+  defp dir_arg(d) when d in [-1, 0, 1], do: d
+  defp dir_arg(_), do: 0
 
   # --- rendering -------------------------------------------------------------
 
@@ -1824,6 +1880,7 @@ defmodule Aimax.Ui.EditorLive do
   @llm_start "\uE002"
   @llm_end "\uE003"
   @llm_meta_end "\uE004"
+  @csv_preview_lines 5
 
   @doc false
   # Which renderer draws a Markdown page. The tree-sitter one asks the
@@ -1850,7 +1907,8 @@ defmodule Aimax.Ui.EditorLive do
     opts = [
       whitespace: Aimax.Core.Buffer.get_local(leaf.buffer, "whitespace-mode") == true,
       # a pasted image is an absolute path, and a browser will not load one
-      image_src: &local_image_src/1
+      image_src: &local_image_src/1,
+      csv_source: csv_source_reader(leaf.buffer)
     ]
 
     tree_key = {leaf.buffer, leaf.version}
@@ -1866,9 +1924,33 @@ defmodule Aimax.Ui.EditorLive do
     end
   end
 
-  defp render_preview(:earmark, rm, leaf, pt, mark, faces, cache),
-    do:
-      {preview_doc(rm, leaf.text, pt, mark, faces, leaf.preview_authored, leaf.overlays), cache}
+  defp render_preview(:earmark, rm, leaf, pt, mark, faces, cache) do
+    html =
+      preview_doc(rm, leaf.text, pt, mark, faces, leaf.preview_authored, leaf.overlays,
+        csv_source: csv_source_reader(leaf.buffer)
+      )
+
+    {html, cache}
+  end
+
+  defp csv_source_reader(buffer) do
+    fn target ->
+      case File.read(csv_preview_path(buffer, target)) do
+        {:ok, text} -> text
+        _ -> nil
+      end
+    end
+  end
+
+  defp csv_preview_path(buffer, target) do
+    base =
+      case Aimax.Core.Buffer.path(buffer) do
+        path when is_binary(path) -> Path.dirname(path)
+        _ -> Aimax.Core.Buffer.get_local(buffer, "default-directory") || File.cwd!()
+      end
+
+    Path.expand(target, base)
+  end
 
   defp md_tree(leaf, tree_key, cache) do
     case cache[{:md_tree, leaf.id}] do
@@ -1937,6 +2019,13 @@ defmodule Aimax.Ui.EditorLive do
     do: preview_doc(rm, text, point, mark, faces, authored, [])
 
   def preview_doc("markdown", text, point, mark, faces, authored, overlays) do
+    preview_doc("markdown", text, point, mark, faces, authored, overlays, [])
+  end
+
+  def preview_doc(rm, text, _point, _mark, faces, authored, _overlays),
+    do: preview_html(rm, text, faces, authored)
+
+  def preview_doc("markdown", text, point, mark, faces, authored, overlays, opts) do
     p = point |> max(0) |> min(byte_size(text))
     m = if is_integer(mark), do: mark |> max(0) |> min(byte_size(text)), else: nil
 
@@ -1945,11 +2034,11 @@ defmodule Aimax.Ui.EditorLive do
     marked = mark_preview_positions(text, p, m, overlays, anchors, blank)
 
     "markdown"
-    |> preview_html(marked, faces, authored)
+    |> preview_html(marked, faces, authored, opts)
     |> place_anchors(anchors)
   end
 
-  def preview_doc(rm, text, _point, _mark, faces, authored, _overlays),
+  def preview_doc(rm, text, _point, _mark, faces, authored, _overlays, _opts),
     do: preview_html(rm, text, faces, authored)
 
   defp mark_preview_positions(text, point, mark, overlays, anchors, blank) do
@@ -2272,8 +2361,11 @@ defmodule Aimax.Ui.EditorLive do
   defp preview_html("markdown", text, faces, _authored),
     do: markdown_page(earmark_body(text), faces)
 
-  defp earmark_body(text) do
-    fence_labels = markdown_fence_labels(text)
+  defp preview_html("markdown", text, faces, _authored, opts),
+    do: markdown_page(earmark_body(text, opts), faces)
+
+  defp earmark_body(text, opts \\ []) do
+    fence_labels = markdown_fence_labels(text, opts[:csv_source])
 
     case earmark_ast(markdown_preview_source(text)) do
       {:ok, ast} ->
@@ -2500,7 +2592,7 @@ defmodule Aimax.Ui.EditorLive do
     end
   end
 
-  defp markdown_fence_labels(text) do
+  defp markdown_fence_labels(text, csv_source) do
     Regex.scan(
       ~r/^[ \t]*```[ \t]*([A-Za-z0-9_+.-]+)([^\r\n]*)$/m,
       text,
@@ -2513,7 +2605,25 @@ defmodule Aimax.Ui.EditorLive do
           _ -> nil
         end
 
-      %{language: language, morg?: Regex.match?(~r/(^|\s):[A-Za-z]/, arguments), tangle: tangle}
+      lines =
+        case Regex.run(~r/:(?:lines|preview)[ \t]+([0-9]+)/i, arguments, capture: :all_but_first) do
+          [count] ->
+            case Integer.parse(count) do
+              {value, ""} when value > 0 -> value
+              _ -> @csv_preview_lines
+            end
+
+          _ ->
+            @csv_preview_lines
+        end
+
+      %{
+        language: language,
+        morg?: Regex.match?(~r/(^|\s):[A-Za-z]/, arguments),
+        tangle: tangle,
+        lines: lines,
+        csv_source: if(tangle && is_function(csv_source, 1), do: csv_source.(tangle), else: nil)
+      }
     end)
   end
 
@@ -2572,8 +2682,64 @@ defmodule Aimax.Ui.EditorLive do
       {"div", [{"class", "code-block-head"}, {"data-chrome", "1"}],
        [{"span", [{"class", "code-lang"}], [label.language], %{}} | actions], %{}}
 
-    {"div", [{"class", "code-block"}], [header, pre], %{}}
+    content =
+      if String.downcase(label.language) == "csv" and label.tangle do
+        csv_preview(pre, label.lines, label.csv_source)
+      else
+        pre
+      end
+
+    {"div", [{"class", "code-block"}], [header, content], %{}}
   end
+
+  defp csv_preview({"pre", _, [{"code", _, children, _}], _} = pre, limit, source) do
+    rows =
+      (source || code_text(children))
+      |> String.split(~r/\r?\n/, trim: true)
+      |> Enum.take(limit)
+      |> Enum.map(&csv_row/1)
+
+    case rows do
+      [] when is_binary(source) ->
+        {"table", [{"class", "csv-preview"}], [], %{}}
+
+      [headers | body] ->
+        head =
+          {"thead", [], [{"tr", [], Enum.map(headers, &{"th", [], [&1], %{}}), %{}}], %{}}
+
+        body =
+          {"tbody", [],
+           Enum.map(body, fn row ->
+             {"tr", [], Enum.map(row, &{"td", [], [&1], %{}}), %{}}
+           end), %{}}
+
+        {"table", [{"class", "csv-preview"}], [head, body], %{}}
+
+      _ ->
+        pre
+    end
+  end
+
+  defp code_text(nodes) when is_list(nodes), do: Enum.map_join(nodes, &code_text/1)
+  defp code_text(text) when is_binary(text), do: text
+  defp code_text({_tag, _attrs, children, _meta}), do: code_text(children)
+  defp code_text(_), do: ""
+
+  defp csv_row(line), do: csv_row(line, "", [], false)
+
+  defp csv_row(<<>>, field, fields, _quoted), do: Enum.reverse([field | fields])
+
+  defp csv_row(<<?", ?", rest::binary>>, field, fields, true),
+    do: csv_row(rest, field <> "\"", fields, true)
+
+  defp csv_row(<<?", rest::binary>>, field, fields, quoted),
+    do: csv_row(rest, field, fields, not quoted)
+
+  defp csv_row(<<?,, rest::binary>>, field, fields, false),
+    do: csv_row(rest, "", [field | fields], false)
+
+  defp csv_row(<<char::utf8, rest::binary>>, field, fields, quoted),
+    do: csv_row(rest, field <> <<char::utf8>>, fields, quoted)
 
   defp tag_llm_responses(nodes) when is_list(nodes), do: Enum.map(nodes, &tag_llm_response/1)
 

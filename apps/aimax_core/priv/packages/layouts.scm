@@ -40,6 +40,36 @@
         (begin (message "Open at least two work buffers") #f)
         (tile-adaptive-windows! panes))))
 
+;; Tile the complete context, not only the buffers that are already visible.
+;; A group is the more specific context. A project supplies the context when
+;; the frame is not in a group. The project package loads after this package,
+;; so every project call uses its public runtime seam.
+(define (tile-all-context-buffers)
+  (let ((group (and (boundp (quote frame-group)) (frame-group))))
+    (cond
+      (group
+        (let ((members (group-buffers-mru group)))
+          ;; An empty durable group still has one reconstructable surface.
+          (if (pair? members) members (list (group-chat group)))))
+      ((and (boundp (quote project-current)) (project-current))
+        (let* ((root (project-current))
+               (members (project-buffers root))
+               (mru (buffer-list-mru)))
+          (append
+            (filter (lambda (buf) (member buf members)) mru)
+            (filter (lambda (buf) (not (member buf mru))) members))))
+      (else '()))))
+
+(define (tile-all!)
+  (let ((buffers (tile-all-context-buffers)))
+    (if (null? buffers)
+        (begin (message "Tile all is available only in a group or project") #f)
+        (tile-adaptive-windows! buffers))))
+
+(define-command "tile-all"
+  "Tile every buffer in the current group or project"
+  tile-all!)
+
 (define-command "window-layout-adaptive"
   "Tile visible buffers for the selected frame's usable width"
   (lambda () (tile-visible-adaptive!)))
@@ -51,6 +81,8 @@
 
 (catalog-meta! 'command "window-layout-adaptive"
   'domain 'windows 'effects '(write display))
+(catalog-meta! 'command "tile-all"
+  'domain 'windows 'effects '(write display))
 
 (effects! '(read))
 (public! 'window-layout-for-width
@@ -60,6 +92,10 @@
   "(tile-adaptive-windows! BUFFERS) — tile named buffers for the selected frame width")
 (public! 'tile-visible-adaptive!
   "(tile-visible-adaptive!) — tile visible work windows for the selected frame width")
+(public! 'tile-all-context-buffers
+  "(tile-all-context-buffers) — current group members, else current project buffers")
+(public! 'tile-all!
+  "(tile-all!) — tile every buffer in the current group or project")
 
 (domain! 'unknown)
 (effects! '(unknown))

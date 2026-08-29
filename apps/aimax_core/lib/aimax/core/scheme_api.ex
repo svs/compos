@@ -98,6 +98,11 @@ defmodule Aimax.Core.SchemeAPI do
         "(fold-get BUF [TAG]) — return TAG's hidden ranges; no TAG, or 'all, returns the union.",
       "fold-clear!" =>
         "(fold-clear! BUF [TAG]) — drop TAG's folds; no TAG, or 'all, drops every tag's.",
+      "buffer-narrow!" =>
+        "(buffer-narrow! BUF START END) — narrow visible text to the exclusive byte range without changing buffer access.",
+      "buffer-narrow-range" =>
+        "(buffer-narrow-range BUF) — return the active (START END) narrowing, or #f.",
+      "buffer-widen!" => "(buffer-widen! BUF) — make the complete buffer visible.",
       "buffer-goto!" => "(buffer-goto! BUF POS) — move the named buffer's point to byte POS.",
       "file-mtime" =>
         "(file-mtime PATH) — return the file's mtime in posix seconds, or 0 if it is gone.",
@@ -656,6 +661,20 @@ defmodule Aimax.Core.SchemeAPI do
         [name, tag] ->
           :ok = Buffer.clear_hidden(name, fold_tag(tag))
           :void
+      end,
+      "buffer-narrow!" => fn [name, start, stop] ->
+        :ok = Buffer.narrow(name, start, stop)
+        :void
+      end,
+      "buffer-narrow-range" => fn [name] ->
+        case Buffer.narrow_range(name) do
+          {start, stop} -> [start, stop]
+          nil -> false
+        end
+      end,
+      "buffer-widen!" => fn [name] ->
+        :ok = Buffer.widen(name)
+        :void
       end,
       "buffer-set-read-only!" => fn [name, bool] ->
         Buffer.set_read_only(name, bool == true)
@@ -1337,7 +1356,11 @@ defmodule Aimax.Core.SchemeAPI do
       # The swap is tree mechanics; which stores hold a layout is policy,
       # so Scheme owns the sweep and this returns one renamed copy.
       "window-tree-rename" => fn [%{tree: tree, active: active} = layout, old, new] ->
-        %{layout | tree: tree_rename(tree, old, new), active: if(active == old, do: new, else: active)}
+        %{
+          layout
+          | tree: tree_rename(tree, old, new),
+            active: if(active == old, do: new, else: active)
+        }
       end,
       "window-rects" => fn [] -> Editor.window_rects() end,
       "select-window!" => fn [id] -> Editor.set_active(id) == :ok end,

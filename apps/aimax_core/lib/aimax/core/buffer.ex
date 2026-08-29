@@ -87,6 +87,7 @@ defmodule Aimax.Core.Buffer do
             overlays: %{},
             overlay_gen: 0,
             hidden: %{},
+            narrow_range: nil,
             ts: nil,
             win_points: %{},
             authors: [],
@@ -250,6 +251,7 @@ defmodule Aimax.Core.Buffer do
 
   def read_only?(name),
     do: viewed(name, :read_only, fn -> dormant_read(name, :read_only, :read_only?) end)
+
   def set_read_only(name, bool), do: GenServer.call(via(name), {:set_read_only, bool})
 
   # buffer-local variables (mode name, mode state, anything Scheme wants)
@@ -269,6 +271,7 @@ defmodule Aimax.Core.Buffer do
   # on edits (like mark); modes replace their whole tag set on recompute.
   def set_overlays(name, tag, ranges), do: GenServer.call(via(name), {:set_overlays, tag, ranges})
   def clear_overlays(name, tag \\ :all), do: GenServer.call(via(name), {:clear_overlays, tag})
+
   def overlays(name) do
     case BufferView.fetch(name) do
       {:ok, view} -> BufferView.overlays(view)
@@ -307,6 +310,19 @@ defmodule Aimax.Core.Buffer do
   def hidden(name, tag), do: GenServer.call(via(name), {:hidden, tag})
 
   def clear_hidden(name, tag \\ :all), do: GenServer.call(via(name), {:clear_hidden, tag})
+
+  @doc "Narrow the buffer's visible text to an exclusive byte range."
+  def narrow(name, start, stop), do: GenServer.call(via(name), {:narrow, start, stop})
+
+  @doc "Widen the buffer so all of its text is visible."
+  def widen(name), do: GenServer.call(via(name), :widen)
+
+  def narrow_range(name) do
+    case BufferView.fetch(name) do
+      {:ok, view} -> Map.get(view, :narrow_range, Map.get(view, :display_range))
+      :error -> if exists?(name), do: GenServer.call(via(name), :narrow_range), else: nil
+    end
+  end
 
   def forward_word(name), do: GenServer.call(via(name), {:motion, :forward_word})
   def backward_word(name), do: GenServer.call(via(name), {:motion, :backward_word})
@@ -733,13 +749,30 @@ defmodule Aimax.Core.Buffer do
   # that writes and then reads always sees its own write.
 
   @impl true
-  def handle_call(msg, from, state), do: msg |> on_call(from, state) |> published(state)
+  def handle_call(msg, from, state) do
+    state = upgrade(state)
+    msg |> on_call(from, state) |> published(state)
+  end
 
   @impl true
-  def handle_cast(msg, state), do: msg |> on_cast(state) |> published(state)
+  def handle_cast(msg, state) do
+    state = upgrade(state)
+    msg |> on_cast(state) |> published(state)
+  end
 
   @impl true
-  def handle_info(msg, state), do: msg |> on_info(state) |> published(state)
+  def handle_info(msg, state) do
+    state = upgrade(state)
+    msg |> on_info(state) |> published(state)
+  end
+
+  # A hot reload can add a field to the state map. A buffer process that
+  # started before the reload still holds the old map, and the first
+  # message that reads the field would stop the process. Every entry
+  # point fills the field in first. Add a line here with the field.
+  defp upgrade(state) do
+    Map.put_new(state, :narrow_range, Map.get(state, :display_range))
+  end
 
   defp published({:reply, reply, state}, before), do: {:reply, reply, publish(state, before)}
 
@@ -754,7 +787,7 @@ defmodule Aimax.Core.Buffer do
   # message that only reads costs one pointer comparison each and writes
   # nothing.
   @view_fields ~w(name id rope bin version saved_version path read_only
-                  point mark locals overlays overlay_gen hidden win_points)a
+                  point mark locals overlays overlay_gen hidden narrow_range win_points)a
 
   defp publish(state, before) do
     if Enum.any?(@view_fields, &(Map.fetch!(state, &1) != Map.fetch!(before, &1))),
@@ -792,6 +825,7 @@ defmodule Aimax.Core.Buffer do
       overlays: state.overlays,
       overlay_gen: state.overlay_gen,
       hidden: state.hidden,
+      narrow_range: state.narrow_range,
       win_points: state.win_points
     }
   end
@@ -959,6 +993,18 @@ defmodule Aimax.Core.Buffer do
     do:
       {:reply, :ok,
        state |> Map.put(:hidden, Map.delete(state.hidden, tag)) |> checkpoint_later()}
+
+  defp on_call({:narrow, start, stop}, _from, state) do
+    size = Rope.byte_size(state.rope)
+    start = start |> max(0) |> min(size)
+    stop = stop |> max(start) |> min(size)
+    range = if start < stop, do: {start, stop}, else: nil
+    {:reply, :ok, %{state | narrow_range: range}}
+  end
+
+  defp on_call(:widen, _from, state), do: {:reply, :ok, %{state | narrow_range: nil}}
+
+  defp on_call(:narrow_range, _from, state), do: {:reply, state.narrow_range, state}
 
   # read-only blocks :user mutations only — programmatic sources (:editor,
   # :process, agents) are the inhibit-read-only path (dired regenerates its
@@ -1332,6 +1378,7 @@ defmodule Aimax.Core.Buffer do
        overlays: state.overlays |> Map.values() |> Enum.concat(),
        overlay_gen: state.overlay_gen,
        hidden: hidden_union(state),
+       narrow_range: state.narrow_range,
        path: state.path,
        read_only: state.read_only,
        total_lines: Rope.line_count(state.rope),
@@ -1430,6 +1477,7 @@ defmodule Aimax.Core.Buffer do
         state = %{state | path: path, saved_version: state.version}
         Events.broadcast_editor(:locals)
         broadcast(state, state.point, "", 0, :locals)
+
         state =
           state
           |> flush_provenance()
@@ -1596,7 +1644,8 @@ defmodule Aimax.Core.Buffer do
   # Who owns the operations sitting uncommitted in the document. Provenance
   # clears `pending_actor` on its own schedule, so the document keeps its own
   # answer and the two no longer have to flush together.
-  defp claim(state, actor), do: %{state | history_actor: actor, history_group: buffer_group(state)}
+  defp claim(state, actor),
+    do: %{state | history_actor: actor, history_group: buffer_group(state)}
 
   # A change holds one actor's work. A different actor closes the open one.
   defp commit_on_actor_change(%{history_actor: nil} = state, _actor), do: state
@@ -1735,7 +1784,8 @@ defmodule Aimax.Core.Buffer do
   @history_log_slack 4
 
   defp maybe_compact(state) do
-    if BufferHistoryStore.size(state.id) > max(@history_log_slack * Rope.byte_size(state.rope), 64 * 1024) do
+    if BufferHistoryStore.size(state.id) >
+         max(@history_log_slack * Rope.byte_size(state.rope), 64 * 1024) do
       case History.export_snapshot(state.history) do
         snapshot when is_binary(snapshot) ->
           BufferHistoryStore.compact(state.id, snapshot)
@@ -2231,8 +2281,6 @@ defmodule Aimax.Core.Buffer do
     state
   end
 
-  
-
   # trim lazily at 2x the cap: amortizes the O(limit) Enum.take so a burst of
   # keystrokes doesn't rebuild a 500-cons list on every edit
   # --- authorship ------------------------------------------------------------
@@ -2258,7 +2306,9 @@ defmodule Aimax.Core.Buffer do
 
   defp resolve_actor(nil, :user), do: local_actor("user:local", "user", "user", :user)
   defp resolve_actor(nil, :editor), do: local_actor("system:editor", "system", "editor", :editor)
-  defp resolve_actor(nil, :process), do: local_actor("process:local", "process", "process", :process)
+
+  defp resolve_actor(nil, :process),
+    do: local_actor("process:local", "process", "process", :process)
 
   defp resolve_actor(nil, {:agent, slug}) do
     local_actor("agent:" <> slug, "agent", "agent:" <> slug, {:agent, slug})
@@ -2272,6 +2322,7 @@ defmodule Aimax.Core.Buffer do
 
   defp resolve_actor(author, src) do
     label = to_string(author)
+
     kind =
       cond do
         String.starts_with?(label, "agent:") -> "agent"
@@ -2313,7 +2364,9 @@ defmodule Aimax.Core.Buffer do
     size = Kernel.byte_size(text)
 
     spans
-    |> Enum.flat_map(fn {s, e, id} -> span_line_bytes(starts, size, s, e, label_for(origins, id)) end)
+    |> Enum.flat_map(fn {s, e, id} ->
+      span_line_bytes(starts, size, s, e, label_for(origins, id))
+    end)
     |> Enum.reduce(%{}, fn {line, author, bytes}, acc ->
       Map.update(acc, {line, author}, bytes, &(&1 + bytes))
     end)
@@ -2596,7 +2649,18 @@ defmodule Aimax.Core.Buffer do
       |> Enum.reject(fn {_tag, ranges} -> ranges == [] end)
       |> Map.new()
 
-    %{state | overlays: overlays, hidden: hidden}
+    narrow_range =
+      case state.narrow_range do
+        {s, e} ->
+          s = fs.(s)
+          e = fe.(e)
+          if s < e, do: {s, e}, else: nil
+
+        nil ->
+          nil
+      end
+
+    %{state | overlays: overlays, hidden: hidden, narrow_range: narrow_range}
   end
 
   defp hidden_union(state),

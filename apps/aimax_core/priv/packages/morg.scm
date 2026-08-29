@@ -15,6 +15,7 @@
 ;;;   TAB fold cycle (heading subtree or code block) · S-TAB overview/show all
 ;;;   C-c C-t cycle the heading's TODO state
 ;;;   C-c C-c run the code block at point · C-c C-x tangle marked blocks
+;;;   C-x n n narrow to the heading · C-x n w widen
 
 (package! 'morg)
 (category! 'writing)
@@ -142,6 +143,15 @@
              (car (car entries)))
             (else (loop (cdr entries)))))))
 
+;; The end of this heading's own text. Any child starts another section.
+(define (markdown--section-body-end scan buf heading)
+  (let ((start (car heading)))
+    (let loop ((entries scan))
+      (cond ((null? entries) (buffer-size buf))
+            ((<= (car (car entries)) start) (loop (cdr entries)))
+            ((equal? (morg-kind (car entries)) 'heading) (car (car entries)))
+            (else (loop (cdr entries)))))))
+
 (define (markdown--line-count buf)
   (line-number-at-pos (buffer-size buf)))
 
@@ -164,12 +174,16 @@
                       (string-append "no Markdown section holds line "
                                      (number->string line)
                                      " — call (markdown-outline BUF)")
-                      (fn heading (markdown--section-end scan buf heading)))))))))))
+                      (fn heading (markdown--section-end scan buf heading)
+                          scan))))))))))
 
-(define (markdown-read buf line)
+(define (markdown-read buf line &optional subtree?)
   (markdown--with-section buf line
-    (lambda (heading end)
-      (substring-bytes (buffer-text buf) (car heading) end))))
+    (lambda (heading subtree-end scan)
+      (let ((end (if subtree?
+                     subtree-end
+                     (markdown--section-body-end scan buf heading))))
+        (substring-bytes (buffer-text buf) (car heading) end)))))
 
 (effects! '(write))
 
@@ -181,7 +195,7 @@
 
 (define (markdown-replace! buf line new)
   (markdown--with-section buf line
-    (lambda (heading end)
+    (lambda (heading end _scan)
       (let* ((start (car heading))
              (replacement (markdown--terminated new end (buffer-size buf))))
         (buffer-delete-range! buf start (- end start))
@@ -191,7 +205,7 @@
 
 (define (markdown-insert-after! buf line text)
   (markdown--with-section buf line
-    (lambda (_heading end)
+    (lambda (_heading end _scan)
       (let* ((source (buffer-text buf))
              (prefix (if (and (> end 0)
                               (not (equal? (substring-bytes source (- end 1) end)
@@ -209,12 +223,32 @@
 (public! 'markdown-find
   "(markdown-find BUF TEXT) — heading rows whose title contains TEXT")
 (public! 'markdown-read
-  "(markdown-read BUF LINE) — the complete Markdown section that holds LINE")
+  "(markdown-read BUF LINE [SUBTREE?]) — read one Markdown section; include descendants only when SUBTREE? is true")
 (effects! '(write))
 (public! 'markdown-replace!
   "(markdown-replace! BUF LINE NEW) — replace the complete section that holds LINE")
 (public! 'markdown-insert-after!
   "(markdown-insert-after! BUF LINE TEXT) — insert TEXT after the complete section that holds LINE")
+
+(effects! '(read))
+
+(define-tool! 'markdown-outline
+  "List a live Markdown document as (LINE LEVEL TITLE). Always call this first, then read only relevant sections."
+  (list (list 'buffer "string" "live Markdown buffer name"))
+  (lambda (args)
+    (value->string (markdown-outline (custom--plist-get args 'buffer))))
+  '(read))
+
+(define-tool! 'markdown-read
+  "Read one Markdown section. Call markdown-outline first. The default excludes child sections; set subtree true only when descendants are required."
+  (list (list 'buffer "string" "live Markdown buffer name")
+        (list 'line "number" "1-based line from markdown-outline")
+        (list 'subtree "boolean" "include child sections" 'optional))
+  (lambda (args)
+    (markdown-read (custom--plist-get args 'buffer)
+                   (custom--plist-get args 'line)
+                   (custom--plist-get args 'subtree)))
+  '(read))
 
 ;;; --- block geometry ----------------------------------------------------------
 
@@ -332,6 +366,51 @@
           (buffer-set-local! buf 'morg-folds folds)
           (morg-apply-folds! buf))
         (morg-set-folds! buf folds))))
+
+;;; --- cosmetic narrowing ------------------------------------------------------
+;;; Narrowing changes the visible document only. The context provider adds a
+;;; small focus hint. The agent reads the outline and selected sections.
+
+(define (morg-narrow-anchor buf)
+  (buffer-local buf 'morg-narrow-anchor))
+
+(define (morg-clear-narrow! buf)
+  (buffer-set-local! buf 'morg-narrow-anchor #f)
+  ;; Narrowing briefly used folds before it became a core buffer concept.
+  ;; A hot-loaded buffer can still carry that tag, which would keep hiding
+  ;; text after the real narrowing is widened and make TAB look ineffective.
+  (fold-clear! buf 'morg-narrow)
+  (buffer-widen! buf))
+
+(define (morg-apply-narrow! buf)
+  ;; Migrate live buffers created by the fold-based implementation.
+  (fold-clear! buf 'morg-narrow)
+  (let* ((anchor (morg-narrow-anchor buf))
+         (scan (morg-scan buf))
+         (entry (and anchor (morg-entry-at scan anchor))))
+    (if (not (and entry (= (car entry) anchor)
+                  (equal? (morg-kind entry) 'heading)))
+        (morg-clear-narrow! buf)
+        (let* ((end (markdown--section-end scan buf entry))
+               (size (buffer-size buf)))
+          (buffer-narrow! buf anchor (min end size))
+          entry))))
+
+(define-command "morg-narrow" "Show only the Morg heading at point"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (entry (morg-enclosing-heading (morg-scan buf) (point))))
+      (if (not entry)
+          (message "No Morg heading holds point")
+          (begin
+            (buffer-set-local! buf 'morg-narrow-anchor (car entry))
+            (morg-apply-narrow! buf)
+            (message (string-append "Narrowed to " (markdown--title entry))))))))
+
+(define-command "morg-widen" "Show the complete Morg document"
+  (lambda ()
+    (morg-clear-narrow! (current-buffer))
+    (message "Widened Morg document")))
 
 (define-command "morg-cycle" "Fold the heading or the code block at point, else indent"
   (lambda ()
@@ -502,7 +581,7 @@
       ((equal? k 'open) (list (list start (+ start len) "org-meta")))
       ((equal? k 'close) (list (list start (+ start len) "org-meta")))
       ((equal? k 'code)
-       (if (equal? (morg-info e) "result")
+       (if (member (morg-info e) '("result" "result-csv"))
            (list (list start (+ start len) "morg-result"))
            '()))
       (else
@@ -537,8 +616,20 @@
                               (ts-highlight-string tsl (substring-bytes text bs be))))
                        acc)))
                '()
+               (morg-blocks scan buf)))
+           (csv-header-spans
+             (fold
+               (lambda (acc b)
+                 (let ((lang (cadr b)) (bs (caddr b))
+                       (be (car (cdr (cdr (cdr b))))))
+                   (if (and (equal? lang "result-csv") (> be bs))
+                       (let* ((body (substring-bytes text bs be))
+                              (header (car (split-lines body))))
+                         (cons (list bs (+ bs (string-byte-length header)) "morg-bold") acc))
+                       acc)))
+               '()
                (morg-blocks scan buf))))
-      (overlay-set! buf 'morg (append line-spans code-spans)))))
+      (overlay-set! buf 'morg (append line-spans code-spans csv-header-spans)))))
 
 ;;; --- change hook -------------------------------------------------------------
 
@@ -552,8 +643,13 @@
       (unless (= delta 0)
         (buffer-set-local! buf 'morg-folds
           (map (lambda (h) (if (>= h pos) (max pos (+ h delta)) h))
-               (morg-folds buf)))))
+               (morg-folds buf)))
+        (let ((anchor (morg-narrow-anchor buf)))
+          (when anchor
+            (buffer-set-local! buf 'morg-narrow-anchor
+              (if (>= anchor pos) (max pos (+ anchor delta)) anchor))))))
     (morg-apply-folds! buf)
+    (morg-apply-narrow! buf)
     (morg-refontify! buf)))
 
 ;;; --- the mode ----------------------------------------------------------------
@@ -565,24 +661,30 @@
   (local-set-key "S-TAB" "morg-global-cycle")
   (local-set-key "C-c C-t" "morg-todo")
   (local-set-key "C-c C-c" "morg-babel")
-  (local-set-key "C-c C-x" "morg-tangle"))
+  (local-set-key "C-c C-x" "morg-tangle")
+  ;; The core chords keep their meaning while the mode supplies its own
+  ;; structural unit: heading instead of an arbitrary marked region.
+  (local-set-key "C-x n n" "morg-narrow")
+  (local-set-key "C-x n w" "morg-widen"))
 
-;; change-hook registry keyed by buffer NAME in global state (not a
-;; buffer-local): rules outlive buffer kill + recreate (revert-buffer),
-;; so re-entering the mode must not stack duplicates
+;; The reactor binds a rule to one buffer process. A killed and recreated
+;; buffer has a new reference, so mode setup replaces the old rule.
 (define *morg-hooks* '())
 
 (define (morg-ensure-hook! buf)
-  (unless (assoc buf *morg-hooks*)
+  (let ((old (assoc buf *morg-hooks*)))
+    (when old (remove-on-change! (cadr old)))
     (set! *morg-hooks*
       (cons (list buf
                   (on-change! buf
                     (lambda (pos inserted deleted source)
-                      (morg-after-change buf pos inserted deleted source))))
-            *morg-hooks*))))
+                      (morg-after-change buf pos inserted deleted source))
+                    'eager))
+            (remove (lambda (entry) (equal? (car entry) buf))
+                    *morg-hooks*)))))
 
 (mode-doc! "morg-mode"
-  "Markdown with org habits. `TAB` folds a heading or code block. `C-c C-c` runs a block, off the editor lane: the result fence says `running` until the output arrives. Add `:sync` after the language to wait for it. `C-c C-x` tangles marked blocks. `C-c C-v` renders the page.")
+  "Markdown with org habits. `TAB` folds a heading or code block. `C-x n n` shows one heading, and `C-x n w` widens. Narrowing gives chat an outline hint, not document text. `C-c C-c` runs a block. `C-c C-x` tangles marked blocks. `C-c C-v` renders the page.")
 
 (mode-icon! "morg-mode" "")
 
@@ -595,4 +697,20 @@
     ;; Hidden ranges die with the daemon; the 'morg-folds local survives.
     ;; Re-derive them here, or a restored buffer comes back unfolded.
     (morg-apply-folds! (current-buffer))
+    (morg-apply-narrow! (current-buffer))
     (morg-refontify! (current-buffer))))
+
+(register-context-provider! "morg-mode"
+  (lambda (buf)
+    (let* ((anchor (morg-narrow-anchor buf))
+           (entry (and anchor (morg-entry-at (morg-scan buf) anchor))))
+      (and entry
+           (string-append
+             "Morg buffer \"" buf "\" is visually narrowed to \""
+             (markdown--title entry) "\" at line "
+             (number->string
+               (length (string-split
+                         (substring-bytes (buffer-text buf) 0 anchor) "\n")))
+             ". No document text is attached. Call (markdown-outline \""
+             buf "\"), then call (markdown-read \"" buf
+             "\" LINE) for relevant sections.")))))

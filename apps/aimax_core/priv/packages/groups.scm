@@ -2468,15 +2468,7 @@
 
 (define-command "group-show-all"
   "Tile every buffer in the current group with the adaptive layout"
-  (lambda ()
-    (let ((group (frame-group)))
-      (if (not group)
-          (message "No current group")
-          (let ((buffers (group-buffers-mru group)))
-            ;; A durable group can outlive every work buffer. Its primary
-            ;; chat is the group surface that can always be reconstructed.
-            (tile-adaptive-windows!
-              (if (pair? buffers) buffers (list (group-chat group)))))))))
+  (lambda () (run-command "tile-all")))
 
 
 (mode-icon! "groups-mode" "")
@@ -2497,7 +2489,7 @@
   (global-set-key "C-x C-g n" "group-new")
   (global-set-key "C-x C-g v" "group-new-from-visible")
   (global-set-key "C-x C-g l" "groups")
-  (global-set-key "C-x C-g s" "group-show-all")
+  (global-set-key "C-x C-g s" "tile-all")
   (global-set-key "C-x C-g o" "opencode-in-group")
   (global-set-key "C-x C-g p" "group-pin"))
 

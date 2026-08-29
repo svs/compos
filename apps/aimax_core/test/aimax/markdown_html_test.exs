@@ -270,6 +270,67 @@ defmodule Aimax.MarkdownHtmlTest do
     assert html =~ "out.json"
   end
 
+  test "a tangled CSV block previews five rows with bold headers" do
+    html =
+      render!(
+        "```csv :tangle people.csv\nname,note\nAda,\"math, engines\"\nGrace,compilers\nMargaret,software\nBarbara,hardware\nCarol,networks\n```\n"
+      )
+
+    assert html =~ ~s(<table class="csv-preview")
+    assert html =~ "<th"
+    assert html =~ "name</th>"
+    assert html =~ "math, engines"
+    assert html =~ "Barbara"
+    refute html =~ "Carol"
+    refute html =~ ~s(<code class="csv">)
+  end
+
+  test "a tangled CSV block accepts a preview line limit" do
+    html = render!("```csv :tangle data.csv :lines 2\nname,value\none,1\ntwo,2\n```\n")
+
+    assert html =~ "one"
+    refute html =~ "two"
+  end
+
+  test "a tangled CSV block prefers its existing file" do
+    text = "```csv :tangle data.csv\nstale_header,value\nstale_row,1\n```\n"
+
+    {:ok, html} =
+      Html.render(text, [], csv_source: fn "data.csv" -> "fresh,value\nfile,2\n" end)
+
+    assert html =~ "fresh"
+    assert html =~ "file"
+    refute html =~ "stale_header"
+    refute html =~ "stale_row"
+  end
+
+  test "an empty tangled CSV file does not fall back to the block" do
+    text = "```csv :tangle data.csv\nstale_header,value\nstale_row,1\n```\n"
+    {:ok, html} = Html.render(text, [], csv_source: fn "data.csv" -> "" end)
+
+    refute html =~ "stale_header"
+    refute html =~ "stale_row"
+  end
+
+  test "a CSV block without a tangle target remains code" do
+    html = render!("```csv\nname,value\none,1\n```\n")
+
+    assert html =~ ~s(<code class="csv">)
+    refute html =~ ~s(class="csv-preview")
+  end
+
+  test "a CSV preview keeps the caret visible without changing the table" do
+    text = "```csv :tangle data.csv\nname,value\none,1\n```\n"
+    base = render!(text)
+
+    for point <- 0..byte_size(text)//1 do
+      drawn = render!(text, [{point, @pt}])
+
+      assert bare(drawn) == bare(base)
+      assert drawn =~ @pt
+    end
+  end
+
   test "a runnable block offers the run key with no argument" do
     # morg-babel runs a block by its language alone
     html = render!("```sh\necho hi\n```\n")

@@ -76,13 +76,10 @@
          ;; a one-shot note — a skill body a mode pushed — rides the next
          ;; message exactly once, then clears
          (once (or (buffer-local buf 'chat-note-once) ""))
-         ;; what the user is looking at in the other windows — "this" works
-         ;; — and, with tools off, the group's live text. Both ride the
-         ;; MESSAGE, never the system prompt: everything above this turn is
-         ;; already cached, and an edit must not cost that cache.
+         ;; What the user sees rides as a small navigation hint. Document text
+         ;; never rides in the message. The agent reads current context itself.
          (msg (string-append
                 (if (equal? once "") "" (string-append once "\n\n"))
-                (chat-context-block buf)
                 (editor-context-preamble buf) raw)))
     (buffer-set-local! buf 'chat-note-once #f)
     (if (buffer-local buf 'agent-seed-context)

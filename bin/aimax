@@ -7,6 +7,7 @@
     bin/aimax state                     frames, windows, buffers, browser
     bin/aimax keys C-x b                dispatch keys as if typed
     bin/aimax tabs                      what the browser says is open
+    bin/aimax open-url aimax://...      open an aimax link through its socket
 
 Every command takes --home (default ~/.aimax-web) or AIMAX_HOME, so it points
 at whichever daemon you mean.
@@ -16,7 +17,7 @@ LiveView keystrokes and the extension's own log lived in a devtools window
 nobody was looking at. `bridge` shows every op in and out; the extension
 forwards its errors here too, so one stream has the whole story.
 """
-import argparse, json, os, socket, subprocess, sys, time
+import argparse, json, os, socket, subprocess, sys, time, urllib.parse
 
 DEFAULT_HOME = os.environ.get("AIMAX_HOME", os.path.expanduser("~/.aimax-web"))
 
@@ -25,8 +26,7 @@ NOISE = ("HANDLE EVENT", "Replied in", "Parameters:", "Processing with",
          "Pipelines:", "[debug]")
 
 
-def rpc(home, code, timeout=30):
-    sock = os.path.join(home, "sock")
+def rpc_socket(sock, code, timeout=30):
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.settimeout(timeout)
     try:
@@ -46,6 +46,10 @@ def rpc(home, code, timeout=30):
     if "error" in r:
         sys.exit(f"error: {r['error'].get('message', r['error'])}")
     return r["result"]
+
+
+def rpc(home, code, timeout=30):
+    return rpc_socket(os.path.join(home, "sock"), code, timeout)
 
 
 def cmd_eval(a):
@@ -117,6 +121,31 @@ def cmd_tabs(a):
     print(rpc(a.home, "*chrome-tab-cache*"))
 
 
+def cmd_open_url(a):
+    url = urllib.parse.urlparse(a.url)
+    if url.scheme != "aimax" or url.netloc != "open":
+        sys.exit("expected aimax://open?path=...&socket=...[&line=N]")
+
+    query = urllib.parse.parse_qs(url.query)
+    path = query.get("path", [None])[0]
+    sock = query.get("socket", [os.path.join(a.home, "sock")])[0]
+    if not path:
+        sys.exit("aimax link has no path")
+
+    line = query.get("line", [None])[0]
+    if line is not None:
+        try:
+            line = int(line)
+        except ValueError:
+            sys.exit("aimax link line must be an integer")
+        if line < 1:
+            sys.exit("aimax link line must be positive")
+
+    line_expr = "#f" if line is None else str(line)
+    code = f"(open-buffer-link! {json.dumps(path, ensure_ascii=False)} {line_expr})"
+    print(rpc_socket(sock, code))
+
+
 def main():
     p = argparse.ArgumentParser(prog="aimax", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -133,6 +162,10 @@ def main():
 
     sub.add_parser("state").set_defaults(fn=cmd_state)
     sub.add_parser("tabs").set_defaults(fn=cmd_tabs)
+
+    u = sub.add_parser("open-url")
+    u.add_argument("url")
+    u.set_defaults(fn=cmd_open_url)
 
     k = sub.add_parser("keys"); k.add_argument("keys", nargs="+"); k.set_defaults(fn=cmd_keys)
 

@@ -25,6 +25,16 @@
     (check-equal! (window-layout-for-width 240 4) 'grid
                   "four panes become a balanced grid")))
 
+(deftest 'tile-all-requires-a-group-or-project
+  "an unrelated buffer does not replace the current layout"
+  (lambda ()
+    (let ((buf (test-buffer! "*zz-tile-all-outside*" "")))
+      (buffer-set-local! buf 'default-directory "/tmp/")
+      (switch-to-buffer! buf)
+      (set-frame-local! 'current-group #f)
+      (check-false! (tile-all!) "the layout is unavailable outside a context")
+      (buffer-kill! buf))))
+
 (deftest 'dashboard-one-line-keeps-the-expanded-dashboard-facts
   "the persistent modeline summary names the mode and input lane"
   (lambda ()

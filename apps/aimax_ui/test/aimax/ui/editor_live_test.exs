@@ -111,6 +111,28 @@ defmodule Aimax.Ui.EditorLiveTest do
     assert html =~ ~s(<span class="cursor"> </span>)
   end
 
+  test "narrowing clips both boundaries without fold ellipses", %{conn: conn} do
+    buf = Aimax.Core.Editor.current_buffer()
+
+    text =
+      "# morg-boundary-parent-9x\nmorg-prefix-only-9x\n## morg-chosen-9x\nmorg-inside-only-9x\n## morg-boundary-next-9x\nmorg-after-only-9x\n"
+
+    :ok = Aimax.Core.Buffer.insert(buf, text, source: :editor)
+    {start, _} = :binary.match(text, "## morg-chosen-9x")
+    {stop, _} = :binary.match(text, "## morg-boundary-next-9x")
+    :ok = Aimax.Core.Buffer.narrow(buf, start, stop)
+
+    {:ok, _view, html} = live(conn, "/")
+
+    assert html =~ "morg-chosen-9x"
+    assert html =~ "morg-inside-only-9x"
+    refute html =~ "morg-boundary-parent-9x"
+    refute html =~ "morg-prefix-only-9x"
+    refute html =~ "morg-boundary-next-9x"
+    refute html =~ "morg-after-only-9x"
+    refute html =~ ~s(class="f-fold-marker")
+  end
+
   test "a terminal renders a direct PTY surface instead of transcript lines", %{conn: conn} do
     buf = Aimax.Core.Editor.current_buffer()
     Aimax.Core.Buffer.set_local(buf, "render-mode", "terminal")
@@ -272,6 +294,66 @@ defmodule Aimax.Ui.EditorLiveTest do
 
     [_, encoded] = Regex.run(~r/data-doc="([^"]+)"/, html)
     assert Base.decode64!(encoded) =~ "Stable preview"
+  end
+
+  test "an HTML preview click maps to source and the normal key path edits it", %{conn: conn} do
+    buf = Aimax.Core.Editor.current_buffer()
+    Aimax.Core.Buffer.insert(buf, "<p>alpha beta</p>", source: :editor)
+    Aimax.Core.Buffer.set_local(buf, "render-mode", "html")
+
+    {:ok, view, html} = live(conn, "/")
+    [_, frame] = Regex.run(~r/data-frame="([^"]+)"/, html)
+    win = Aimax.Core.Editor.render_state(frame) |> Map.get(:tree) |> Map.get(:id)
+
+    view
+    |> element("#editor")
+    |> render_hook("preview_goto", %{
+      "win" => win,
+      "before" => "alpha ",
+      "after" => "beta",
+      "wb" => "",
+      "wa" => "beta",
+      "nth" => 0,
+      "wn" => 0,
+      "dir" => 0
+    })
+
+    assert Aimax.Core.Buffer.point(buf) == 9
+    keys(view, ["X"])
+    assert Aimax.Core.Buffer.text(buf) == "<p>alpha Xbeta</p>"
+
+    Aimax.Core.Buffer.set_read_only(buf, true)
+    keys(view, ["Y"])
+    assert Aimax.Core.Buffer.text(buf) == "<p>alpha Xbeta</p>"
+    assert Aimax.Core.Buffer.get_local(buf, "render-mode") == "html"
+  end
+
+  test "a Morg CSV preview reads its tangle file relative to the document", %{conn: conn} do
+    dir = Path.join(System.tmp_dir!(), "aimax-csv-preview-#{System.unique_integer([:positive])}")
+    document = Path.join(dir, "notes.md")
+    csv = Path.join(dir, "data.csv")
+    File.mkdir_p!(dir)
+    File.write!(document, "```csv :tangle data.csv\nstale_header,value\nstale_row,1\n```\n")
+    File.write!(csv, "fresh_header,value\nfresh_row,2\n")
+    {:ok, ^document} = Aimax.Core.open_file(document)
+
+    on_exit(fn ->
+      Aimax.Core.kill_buffer(document)
+      File.rm_rf!(dir)
+    end)
+
+    Aimax.Core.Editor.set_window_buffer(document)
+    Aimax.Core.Buffer.set_local(document, "render-mode", "markdown")
+    Aimax.Core.Buffer.set_local(document, "preview-engine", "earmark")
+
+    {:ok, view, _} = live(conn, "/")
+    [_, encoded] = Regex.run(~r/data-doc="([^"]+)"/, render(view))
+    preview = Base.decode64!(encoded)
+
+    assert preview =~ "fresh_header"
+    assert preview =~ "fresh_row"
+    refute preview =~ "stale_header"
+    refute preview =~ "stale_row"
   end
 
   test "minibuffer shows on M-x with selectable candidates", %{conn: conn} do

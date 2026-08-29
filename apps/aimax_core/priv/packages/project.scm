@@ -5,6 +5,9 @@
 ;;; prompt leads with the project's open buffers, and C-x p g searches the
 ;;; project with ripgrep.
 
+(domain! 'project)
+(effects! '(write execute))
+
 (define (strip-trailing-slash d)
   (if (and (> (string-length d) 1) (string-suffix? "/" d))
       (substring d 0 (- (string-length d) 1))
@@ -27,6 +30,117 @@
 (define (project-name root)
   (let ((i (string-rindex root "/")))
     (if i (substring root (+ i 1) (string-length root)) root)))
+
+;;; --- project defaults --------------------------------------------------------
+
+;; A project config uses this form:
+;;
+;;   (project-defaults!
+;;     'llm-connector "codex-app-server"
+;;     'llm-model "gpt-5.6-sol"
+;;     'llm-effort "high")
+;;
+;; Loading is staged. An evaluation failure does not replace the last valid
+;; defaults for that project. The file still runs in the live Scheme session,
+;; as requested, so it can also call normal configuration functions.
+(define *project-defaults* '())
+(define *project-default-root* #f)
+(define *project-default-pending* '())
+
+(define (project-defaults-for root)
+  (let ((entry (and root (assoc root *project-defaults*))))
+    (if entry (car (cdr entry)) '())))
+
+(define (project-defaults-put values key value)
+  (cond
+    ((null? values) (list key value))
+    ((equal? (car values) key)
+     (cons key (cons value (cdr (cdr values)))))
+    (else
+      (cons (car values)
+        (cons (car (cdr values))
+          (project-defaults-put (cdr (cdr values)) key value))))))
+
+(define (project-default! key value)
+  (if (not *project-default-root*)
+      (begin (message "project-default! is only valid inside .project.scm") #f)
+      (begin
+        (set! *project-default-pending*
+          (project-defaults-put *project-default-pending* key value))
+        value)))
+
+(define (project-defaults! &rest values)
+  (let loop ((rest values))
+    (cond
+      ((null? rest) *project-default-pending*)
+      ((null? (cdr rest))
+       (message "project-defaults! requires key and value pairs") #f)
+      (else
+        (project-default! (car rest) (car (cdr rest)))
+        (loop (cdr (cdr rest)))))))
+
+(define (project-default-chat? buf)
+  ;; Group chats receive chat-mode after buffer creation. Their initial name
+  ;; identifies them early enough for defaults to enter durable chat locals.
+  (or (chat-buffer? buf) (string-prefix? "*chat" buf)))
+
+(define (project-default-local-key buf key)
+  (if (project-default-chat? buf)
+      (cond ((equal? key 'llm-connector) 'agent-connector)
+            ((equal? key 'llm-model) 'agent-model)
+            ((equal? key 'llm-effort) 'agent-effort)
+            ((equal? key 'llm-presets) 'chat-presets)
+            ((equal? key 'llm-permission-mode) 'chat-permission-mode)
+            (else key))
+      key))
+
+(define (project-defaults-apply! buf root)
+  (let loop ((defaults (project-defaults-for root)))
+    (when (pair? defaults)
+      (let ((key (project-default-local-key buf (car defaults)))
+            (value (car (cdr defaults))))
+        ;; A local choice wins. Project values are defaults, not overrides.
+        (unless (buffer-local buf key)
+          (buffer-set-local! buf key value))
+        (loop (cdr (cdr defaults))))))
+  buf)
+
+(define (project-buffer-root buf)
+  (project-root-cached (strip-trailing-slash (buffer-directory buf))))
+
+(define (project-defaults-apply-project! root)
+  (for-each
+    (lambda (buf)
+      (when (equal? root (project-buffer-root buf))
+        (project-defaults-apply! buf root)))
+    (buffer-list)))
+
+(define (project-defaults-load! root)
+  (let ((path (and root (string-append root "/.project.scm"))))
+    (if (not (and path (file-exists? path)))
+        (begin
+          (set! *project-defaults*
+            (remove (lambda (entry) (equal? (car entry) root))
+                    *project-defaults*))
+          '())
+        (let ((source (read-file path)))
+          (set! *project-default-root* root)
+          (set! *project-default-pending* '())
+          (let ((result (eval-string-safe source)))
+            (set! *project-default-root* #f)
+            (if (equal? (car result) 'ok)
+                (begin
+                  (set! *project-defaults*
+                    (cons (list root *project-default-pending*)
+                          (remove (lambda (entry) (equal? (car entry) root))
+                                  *project-defaults*)))
+                  (project-defaults-apply-project! root)
+                  *project-default-pending*)
+                (begin
+                  (message
+                    (string-append ".project.scm error: "
+                                   (value->string (car (cdr result)))))
+                  #f)))))))
 
 ;; the buffer switcher asks for every buffer's project on each prompt
 ;; open. The .git walk runs once per directory; the cache holds the
@@ -186,6 +300,21 @@ finish, so \"the first match\" is whichever file the disk offered first."
   (lambda ()
     (project-remember! (project-current))
     (project-modeline-refresh!)))
+
+;; A file visit re-runs the project config. New non-file buffers use the last
+;; valid defaults through their inherited default-directory.
+(add-hook! 'find-file-hook
+  (lambda ()
+    (let ((root (project-current)))
+      (when root
+        (project-defaults-load! root)
+        (project-defaults-apply! (current-buffer) root)))))
+
+(on-buffer-created!
+  (lambda (buf)
+    (let ((root (project-buffer-root buf)))
+      (when (and root (pair? (project-defaults-for root)))
+        (project-defaults-apply! buf root)))))
 
 ;;; --- commands ----------------------------------------------------------------
 
@@ -529,6 +658,14 @@ finish, so \"the first match\" is whichever file the disk offered first."
   "(project-buffers ROOT) -> names of every buffer whose directory is inside ROOT")
 (catalog-meta! 'function "project-buffers" 'domain 'project 'effects '(read))
 (public! 'project-current "Root of the current project, #f when outside one")
+(public! 'project-default!
+  "(project-default! KEY VALUE) — set one default while .project.scm runs")
+(public! 'project-defaults!
+  "(project-defaults! KEY VALUE ...) — set project buffer defaults in .project.scm")
+(public! 'project-defaults-for
+  "(project-defaults-for ROOT) -> the last valid defaults loaded for ROOT")
+(public! 'project-defaults-load!
+  "(project-defaults-load! ROOT) — run ROOT/.project.scm and apply its defaults")
 (public! 'project-files "(project-files ROOT) -> project file paths, git-aware")
 (public! 'project-search-matches
   "(project-search-matches ROOT PATTERN) -> search project text files as (PATH:LINE PATH LINE TEXT) matches")

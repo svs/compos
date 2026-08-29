@@ -23,6 +23,14 @@
 (domain! 'writing)
 (effects! '(write execute))
 
+(defcustom 'morg-babel-csv-preview-lines 5
+  "The default number of CSV lines that morg-babel previews."
+  'group 'writing 'type 'number)
+
+(defcustom 'morg-babel-scheme-result-width 88
+  "The maximum line width for a Scheme Babel result when a list can wrap."
+  'group 'writing 'type 'number)
+
 ;; Markdown language -> the interpreter that runs the temporary file.
 (define *morg-babel-runners*
   '(("sh" "sh") ("bash" "bash") ("zsh" "zsh") ("shell" "sh")
@@ -52,6 +60,61 @@
 
 (define (morg-babel-output value)
   (if (string? value) value (value->string value)))
+
+;; A property list is the common result shape for discovery APIs. Keep each
+;; key beside its value when the value must wrap across lines.
+(define (morg-babel-scheme-plist? value)
+  (and (pair? value)
+       (= (modulo (length value) 2) 0)
+       (let loop ((xs value))
+         (or (null? xs)
+             (and (symbol? (car xs))
+                  (loop (cdr (cdr xs))))))))
+
+(define (morg-babel-scheme-pretty-plist value indent)
+  (let ((child (+ indent 1)))
+    (string-append
+      "("
+      (let loop ((xs value) (first #t) (out ""))
+        (if (null? xs)
+            out
+            (let* ((key (symbol->string (car xs)))
+                   (rendered
+                     (string-append
+                       key " "
+                       (morg-babel-scheme-pretty
+                         (cadr xs) (+ child (string-length key) 1))))
+                   (prefix (if first ""
+                               (string-append "\n" (string-repeat " " child)))))
+              (loop (cdr (cdr xs)) #f
+                    (string-append out prefix rendered)))))
+      ")")))
+
+(define (morg-babel-scheme-pretty-list value indent)
+  (let ((child (+ indent 1)))
+    (string-append
+      "("
+      (let loop ((xs value) (first #t) (out ""))
+        (if (null? xs)
+            out
+            (let ((prefix (if first ""
+                              (string-append "\n" (string-repeat " " child)))))
+              (loop (cdr xs) #f
+                    (string-append
+                      out prefix
+                      (morg-babel-scheme-pretty (car xs) child))))))
+      ")")))
+
+(define (morg-babel-scheme-pretty value &optional indent)
+  (let* ((at (or indent 0))
+         (plain (value->string value)))
+    (if (or (not (pair? value))
+            (null? value)
+            (<= (+ at (string-length plain)) morg-babel-scheme-result-width))
+        plain
+        (if (morg-babel-scheme-plist? value)
+            (morg-babel-scheme-pretty-plist value at)
+            (morg-babel-scheme-pretty-list value at)))))
 
 ;; The seam every asynchronous block runs through. K receives the output.
 ;; A test replaces this to answer without a shell.
@@ -127,20 +190,21 @@
             (let* ((e (car es)) (k (morg-kind e)))
               (cond ((and (equal? k 'text) (equal? (string-trim (cadr e)) ""))
                      (loop (cdr es)))
-                    ((and (equal? k 'open) (equal? (morg-info e) "result"))
+                    ((and (equal? k 'open)
+                          (member (morg-info e) '("result" "result-csv")))
                      (list (car e) (morg-block-close-end scan buf (car e))))
                     (else #f)))))))
 
 ;; The scan is read here, not passed in: a result written when a command
 ;; ends describes a document that moved since the command started.
-(define (morg-babel-insert-result! buf fstart out)
+(define (morg-babel-insert-result! buf fstart out &optional result-lang)
   (let* ((scan (morg-scan buf))
          (close-end (morg-block-close-end scan buf fstart))
          (existing (morg-babel-result-block scan buf close-end))
          (norm (if (or (equal? out "") (string-suffix? "\n" out))
                    out
                    (string-append out "\n")))
-         (res (string-append "```result\n" norm "```\n")))
+         (res (string-append "```" (or result-lang "result") "\n" norm "```\n")))
     (if existing
         (let* ((rs (car existing))
                (re (min (buffer-size buf) (+ (cadr existing) 1))))
@@ -156,6 +220,34 @@
 ;; `:sync` after the language holds the editor until the block ends.
 (define (morg-babel-sync? entry)
   (re-match ":[Ss][Yy][Nn][Cc]([ \t]|$)" (cadr entry)))
+
+(define (morg-babel-csv-limit entry)
+  (let ((g (re-groups ":[Ll][Ii][Nn][Ee][Ss][ \t]+([0-9]+)" (cadr entry) 0)))
+    (if g
+        (let* ((r (nth 1 g))
+               (n (string->number (substring-bytes (cadr entry) (car r) (cadr r)))))
+          (if (and n (> n 0)) n morg-babel-csv-preview-lines))
+        morg-babel-csv-preview-lines)))
+
+(define (morg-babel-csv-first-lines text n)
+  (let loop ((lines (split-lines text)) (left n) (out '()))
+    (if (or (= left 0) (null? lines))
+        (string-join (reverse out) "\n")
+        (loop (cdr lines) (- left 1) (cons (car lines) out)))))
+
+(define (morg-babel-csv-source buf entry body)
+  (let ((target (morg-tangle-target entry)))
+    (if target
+        (let ((path (morg-tangle-path buf target)))
+          (if (file-exists? path) (read-file path) body))
+        body)))
+
+(define (morg-babel-preview-csv! buf entry fstart body)
+  (morg-babel-insert-result! buf fstart
+    (morg-babel-csv-first-lines
+      (morg-babel-csv-source buf entry body)
+      (morg-babel-csv-limit entry))
+    "result-csv"))
 
 ;; The command ended. Release the claim, find the block, write the result.
 (define (morg-babel-finish! buf idx lang body out)
@@ -187,7 +279,7 @@
      (morg-babel-finish! buf idx lang body (cadr evaluated)))
     (else
       (morg-babel-finish! buf idx lang body
-        (morg-babel-output (cadr evaluated))))))
+        (morg-babel-scheme-pretty (cadr evaluated))))))
 
 (define (morg-babel-start-scheme! buf scan fstart lang body)
   (let ((idx (morg-babel-index scan buf fstart))
@@ -207,17 +299,21 @@
         (let* ((e (morg-entry-at scan a))
                (lang (morg-info e)))
           (cond
-            ((equal? lang "result") (list 'error "A result block does not run"))
+            ((member lang '("result" "result-csv"))
+             (list 'error "A result block does not run"))
             ((equal? lang "") (list 'error "The block names no language"))
             (else
               (let* ((body-r (morg-block-body scan buf a))
                      (body (substring-bytes (buffer-text buf)
                                             (car body-r) (cadr body-r))))
                 (cond
+                  ((equal? (string-downcase lang) "csv")
+                   (morg-babel-preview-csv! buf e a body)
+                   (list 'ok lang))
                   ((and (equal? (string-downcase lang) "scheme")
                         (morg-babel-sync? e))
                    (morg-babel-insert-result! buf a
-                     (value->string (eval-string body)))
+                     (morg-babel-scheme-pretty (eval-string body)))
                    (list 'ok lang))
                   ((equal? (string-downcase lang) "scheme")
                    (if (member (list lang body) (morg-babel-inflight buf))

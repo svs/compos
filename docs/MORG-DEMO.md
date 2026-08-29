@@ -53,6 +53,8 @@ interpreter evaluates it, so it can talk to the editor:
 ```
 
 The result below tells you how many buffers this daemon holds.
+Long list results wrap at `morg-babel-scheme-result-width`. Property-list
+keys stay beside their values.
 
 ## 5. Run an elixir block
 
@@ -103,6 +105,20 @@ stale output, no source block above
 Add `:tangle PATH` after the language. Relative paths start beside this
 Morg file. Blocks with the same path join in document order. Press
 `C-c C-x` or run `M-x morg-tangle` to write all marked blocks.
+
+A tangled `csv` block previews data in Morg without a language runner. Press
+`C-c C-c` to write a `result-csv` block with a bold header. The rendered Morg
+page also shows the CSV as a table. When the target file exists, both previews
+read it relative to the Morg document. Otherwise, they read the block body.
+The preview shows five CSV lines by default. Add `:lines N` to choose another
+limit.
+
+```csv :tangle demo/people.csv :lines 3
+name,role
+Ada Lovelace,mathematician
+Grace Hopper,computer scientist
+Margaret Hamilton,software engineer
+```
 
 ```elixir :tangle demo/generated.exs
 IO.puts("This file came from Morg")

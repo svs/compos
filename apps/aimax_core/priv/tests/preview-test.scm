@@ -199,34 +199,48 @@
                        "the enabled mode is durable")
           (check-equal! (buffer-local buf 'render-mode) "markdown"
                         "the setup draws the page")
-          (check-true! (buffer-read-only? buf)
-                       "preview starts as a reading view")
+          (check-false! (buffer-read-only? buf)
+                        "preview does not change edit permission")
           (run-command "preview-mode")
           (check-false! (minor-mode-on? buf "preview-mode")
                         "the disabled mode leaves no durable entry")
           (check-false! (buffer-local buf 'render-mode)
                         "the teardown shows the source")
+          (check-false! (buffer-read-only? buf)
+                        "unpreview also leaves edit permission alone")
+          (buffer-set-read-only! buf #t)
+          (run-command "preview-mode")
           (check-true! (buffer-read-only? buf)
-                       "unpreview does not imply permission to edit")))
+                       "preview preserves an existing read-only state")
+          (run-command "preview-mode")
+          (check-true! (buffer-read-only? buf)
+                       "unpreview preserves an existing read-only state")))
       (buffer-kill! buf))))
 
-(deftest 'making-a-preview-writable-also-unpreviews-it
-  "read-only-mode exposes editable source and removes the preview mode"
+(deftest 'read-only-mode-does-not-change-preview-mode
+  "edit permission and rendered preview are independent modes"
   (lambda ()
     (let ((buf (test-buffer! "zz-preview-edit.html" "<p>hi</p>\n")))
       (with-current-buffer buf
         (lambda ()
           (run-command "preview-mode")
           (run-command "read-only-mode")
+          (check-true! (buffer-read-only? buf)
+                       "read-only-mode controls edit permission")
+          (check-true! (minor-mode-on? buf "preview-mode")
+                       "the preview mode stays on")
+          (check-equal! (buffer-local buf 'render-mode) "html"
+                        "the rendered view stays visible")
+          (run-command "read-only-mode")
           (check-false! (buffer-read-only? buf)
-                        "the buffer is writable")
-          (check-false! (minor-mode-on? buf "preview-mode")
-                        "the reading mode is off")
-          (check-false! (buffer-local buf 'render-mode)
-                        "the editable source is visible")
+                        "the preview can also be writable")
+          (check-true! (minor-mode-on? buf "preview-mode")
+                       "making it writable leaves preview on")
           (restore-minor-modes! buf)
-          (check-false! (buffer-local buf 'render-mode)
-                        "reload does not restore the disabled preview")))
+          (check-equal! (buffer-local buf 'render-mode) "html"
+                        "reload reapplies preview without changing permission")
+          (check-false! (buffer-read-only? buf)
+                        "reload leaves edit permission alone")))
       (buffer-kill! buf))))
 
 (deftest 'preview-mode-reapply-preserves-the-last-choice

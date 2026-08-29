@@ -14,6 +14,10 @@
 (define (t--ap-names entries) (map (lambda (e) (plist-get e 'name)) entries))
 (define (t--ap-kinds entries) (map (lambda (e) (plist-get e 'kind)) entries))
 
+;; This plain definition becomes a live global when this file loads. It does
+;; not become public until a declaration registers it below.
+(define (zz-progressive-catalog-global) #t)
+
 (effects! '(write))
 
 (define (t--ap-forget-public! name)
@@ -22,6 +26,21 @@
   (test-forget-catalog! "function" name))
 
 ;;; --- the catalog --------------------------------------------------------------
+
+(deftest 'read-file-option-controls-line-numbers
+  "read-file returns raw text unless the caller requests stable line numbers"
+  (lambda ()
+    (let ((path "/tmp/aimax-read-file-option-test.txt"))
+      (write-file! path "alpha\nbeta\n")
+      (let* ((raw (read-file path))
+             (numbered (read-file path #t)))
+        (check-equal! raw "alpha\nbeta\n" "the default is raw text")
+        (check-true! (string-prefix? "1\talpha" numbered) "true adds line numbers")
+        (check-equal! (read-file-numbered path) numbered "the numbered helper delegates")
+        (check-equal! (nth 2 (public-entry "read-file"))
+                      "(read-file PATH [LINE-NUMBERS])"
+                      "the public signature shows the optional argument"))
+      (delete-file! path))))
 
 (deftest 'entries-carry-package-namespace-domain-and-effects
   "one entry answers where a name lives and what calling it costs"
@@ -121,7 +140,7 @@
                         (and (equal? (plist-get e 'origin) "bundled")
                              (equal? (plist-get e 'metadata-source) "unknown")))
                       (catalog)))
-      506 "the unstamped bundled entries")))
+      499 "the unstamped bundled entries")))
 
 (deftest 'no-entry-carries-the-same-key-twice
   "one entry, one answer per key: a duplicate hides from plist-get and not from a walker"
@@ -220,6 +239,23 @@
           (check-true! (member "buffer-kill!" (t--ap-names destroy))
                        "the effect filter keeps the destructive hit"))))))
 
+(deftest 'semantic-search-embeds-the-users-task-without-an-instruction-prefix
+  "the query vector represents the task, because catalog vectors already describe editor APIs"
+  (lambda ()
+    (let ((old-search *apropos--embedding-search*)
+          (old-key llm-key)
+          (seen #f))
+      (set! *apropos--embedding-search*
+        (lambda (query texts key limit eligible)
+          (set! seen query)
+          '()))
+      (set! llm-key (lambda (provider) "test-key"))
+      (apropos--semantic-hits "read csv file" (apropos--rows-cached) '())
+      (set! *apropos--embedding-search* old-search)
+      (set! llm-key old-key)
+      (check-equal! seen "read csv file"
+                    "the embedding receives only the user's task"))))
+
 (deftest 'embedding-rebuild-explains-a-missing-key
   "a manual rebuild clears the cache and reports why it cannot refill"
   (lambda ()
@@ -238,6 +274,30 @@
            (hits (apropos--rank (list semantic literal) "kill buffer")))
       (check-equal! (plist-get (car hits) 'name) "buffer-kill!"
                     "the literal hit is first"))))
+
+(deftest 'semantic-ranking-weights-the-name-above-the-description
+  "a task word in the API name beats the same word in prose"
+  (lambda ()
+    (let* ((named (list 'kind "function" 'name "read-csv-file"
+                        'doc "load tabular data" 'semantic-score 0.40
+                        'note "semantic match"))
+           (described (list 'kind "function" 'name "other-operation"
+                            'doc "read csv file" 'semantic-score 0.55
+                            'note "semantic match"))
+           (ranked (apropos--rank (list described named) "read csv file")))
+      (check-equal! (plist-get (car ranked) 'name) "read-csv-file"
+                    "the title match receives the larger field weight"))))
+
+(deftest 'literal-ranking-weights-the-name-above-the-description
+  "literal hits use the same field order as semantic hits"
+  (lambda ()
+    (let* ((named (list 'kind "function" 'name "read-csv-file"
+                        'doc "load tabular data"))
+           (described (list 'kind "function" 'name "other-operation"
+                            'doc "read csv file"))
+           (ranked (apropos--rank (list described named) "read csv file")))
+      (check-equal! (plist-get (car ranked) 'name) "read-csv-file"
+                    "the title match ranks first"))))
 
 (deftest 'punctuation-and-filler-words-do-not-block-intent
   "natural phrasing and compound words keep their meaningful terms"
@@ -341,6 +401,38 @@
     (let ((hello (hello)))
       (check-contains! hello "RECIPES" "the section")
       (check-contains! hello "(visit" "a working line"))))
+
+(deftest 'scope-all-asks-the-agent-to-catalog-a-useful-private-global
+  "a loaded plain define is live, and discovery identifies its declaration debt"
+  (lambda ()
+    (let ((uncatalogued
+            (llm-tool-call "apropos"
+              (list 'query "zz-progressive-catalog-global" 'scope "all"))))
+      (check-contains! uncatalogued "zz-progressive-catalog-global"
+                       "the loaded definition is discoverable")
+      (check-contains! uncatalogued "catalog-status \"uncatalogued\""
+                       "the result identifies the missing declaration")
+      (check-contains! uncatalogued "add a durable declaration"
+                       "the result asks the agent to fix the source"))
+
+    (domain! 'testing)
+    (effects! '(pure))
+    (public! 'zz-progressive-catalog-global
+      "(zz-progressive-catalog-global) — return true for catalog registration tests"
+      'testing)
+    (domain! 'unknown)
+    (effects! '(unknown))
+
+    (let ((catalogued
+            (llm-tool-call "apropos"
+              (list 'query "zz-progressive-catalog-global" 'scope "all"))))
+      (check-equal!
+        (plist-get (catalog-entry 'function "zz-progressive-catalog-global")
+                   'metadata-source)
+        "declared" "the declaration registers during the same session")
+      (check-false! (string-contains? catalogued "catalog-status \"uncatalogued\"")
+                    "the discovery debt clears immediately"))
+    (t--ap-forget-public! "zz-progressive-catalog-global")))
 
 ;;; --- internal primitives ------------------------------------------------------
 ;;; R7's last gap: scope "all" listed names with no docs. The sweep gave

@@ -85,7 +85,7 @@
 
 (register-minor-mode! "preview-mode" preview-mode--apply! preview-mode--teardown!)
 
-(define-command "preview-mode" "Toggle a read-only rendered preview of the current buffer"
+(define-command "preview-mode" "Toggle rendered preview of the current buffer"
   (lambda ()
     (let ((buf (current-buffer)))
       (if (equal? (buffer-local buf 'mode-name) "chat-mode")
@@ -99,9 +99,6 @@
               (let ((renderer (preview-renderer-for buf)))
                 (if renderer
                     (begin
-                      ;; Preview is a reading view. The user can make it
-                      ;; writable with read-only-mode when editing is needed.
-                      (buffer-set-read-only! buf #t)
                       (enable-minor-mode! buf "preview-mode")
                       (message
                         (string-append "Preview on (" renderer ") — C-c C-v toggles")))

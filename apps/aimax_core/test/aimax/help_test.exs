@@ -301,9 +301,7 @@ defmodule Aimax.HelpTest do
   defp find_ctop(%{type: :split, children: [a, b]}, buf),
     do: find_ctop(a, buf) || find_ctop(b, buf)
 
-  # A markdown preview draws the cursor and takes edits, so the motion keys
-  # move point there. Only an html or app window, which shows no point at
-  # all, scrolls instead — see preview-buffer? in editor.scm.
+  # A writable preview takes edits. A read-only HTML page remains a reader.
   test "the motion keys move point in the Help page, not the page itself" do
     eval!(~s{(begin (buffer-create "*zz-help*") (switch-to-buffer! "*zz-help*"))})
     press(["C-h", "b"])
@@ -321,6 +319,7 @@ defmodule Aimax.HelpTest do
   test "the scroll keys move an html preview page instead of point" do
     eval!(~s{(begin (buffer-create "*zz-html*") (switch-to-buffer! "*zz-html*")
                     (insert! "<h1>Hi</h1>")
+                    (buffer-set-read-only! "*zz-html*" #t)
                     (buffer-set-local! "*zz-html*" 'render-mode "html"))})
 
     assert ctop("*zz-html*") == 0

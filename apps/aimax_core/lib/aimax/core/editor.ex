@@ -2145,6 +2145,7 @@ defmodule Aimax.Core.Editor do
     overlays: [],
     overlay_gen: 0,
     hidden: [],
+    narrow_range: nil,
     path: nil,
     read_only: false,
     total_lines: 1,
@@ -2202,8 +2203,13 @@ defmodule Aimax.Core.Editor do
   # one still draws empty rather than waking.
   defp safe_snapshot(buffer, win_id) do
     case Aimax.Core.BufferView.snapshot(buffer, win_id) do
-      nil -> if Buffer.exists?(buffer), do: Buffer.render_snapshot(buffer, win_id), else: @empty_snapshot
-      snapshot -> snapshot
+      nil ->
+        if Buffer.exists?(buffer),
+          do: Buffer.render_snapshot(buffer, win_id),
+          else: @empty_snapshot
+
+      snapshot ->
+        snapshot
     end
   catch
     :exit, _ -> @empty_snapshot
@@ -2245,18 +2251,18 @@ defmodule Aimax.Core.Editor do
     # auto-follow math below then works unchanged. Line *numbers* stay
     # logical (folds show numbering gaps, like Emacs). The no-fold case is
     # O(log n) rope lookups from the snapshot; folds still scan.
-    {total_lines, cl, hidden_lines} =
+    {total_lines, cl, hidden_lines, narrow_lines} =
       cond do
         # the rich transcript renders blocks, not lines — fold geometry
         # is the plain view's cost, not this one's (S16)
         Map.get(locals, "render-mode") == "agent" ->
-          {snap.total_lines, snap.cursor_line, MapSet.new()}
+          {snap.total_lines, snap.cursor_line, MapSet.new(), nil}
 
-        snap.hidden == [] ->
-          {snap.total_lines, snap.cursor_line, MapSet.new()}
+        snap.hidden == [] and is_nil(snap.narrow_range) ->
+          {snap.total_lines, snap.cursor_line, MapSet.new(), nil}
 
         true ->
-          visible_geometry(text, point, snap.hidden)
+          visible_geometry(text, point, snap.hidden, snap.narrow_range)
       end
 
     # Clamped to the last SCREENFUL, not the last line. Scrolling had no upper
@@ -2316,6 +2322,7 @@ defmodule Aimax.Core.Editor do
       overlays: snap.overlays,
       overlay_gen: snap.overlay_gen,
       hidden_lines: hidden_lines,
+      narrow_lines: narrow_lines,
       line: snap.line,
       col: snap.col,
       style: Map.get(locals, "style"),
@@ -2428,7 +2435,7 @@ defmodule Aimax.Core.Editor do
 
   defp render_mode(locals), do: Map.get(locals, "render-mode")
 
-  defp visible_geometry(text, point, hidden) do
+  defp visible_geometry(text, point, hidden, narrow_range) do
     len = byte_size(text)
     starts = [0 | Enum.map(:binary.matches(text, "\n"), fn {p, _} -> p + 1 end)]
     ranges = for {s, e} <- hidden, s < len, do: {s, min(e, len)}
@@ -2439,12 +2446,25 @@ defmodule Aimax.Core.Editor do
           into: MapSet.new(),
           do: idx
 
+    narrow_lines =
+      case narrow_range do
+        {s, e} when s < e ->
+          {Aimax.Core.Text.line_index(text, s), Aimax.Core.Text.line_index(text, e - 1)}
+
+        _ ->
+          nil
+      end
+
+    {first, last} = narrow_lines || {0, length(starts) - 1}
+
+    visible =
+      first..last
+      |> Enum.reject(&MapSet.member?(hidden_lines, &1))
+
     logical_cl = Aimax.Core.Text.line_index(text, point)
+    visible_cl = Enum.count(visible, &(&1 < logical_cl)) |> min(max(length(visible) - 1, 0))
 
-    visible_cl =
-      Enum.count(0..(logical_cl - 1)//1, &(not MapSet.member?(hidden_lines, &1)))
-
-    {length(starts) - MapSet.size(hidden_lines), visible_cl, hidden_lines}
+    {max(length(visible), 1), visible_cl, hidden_lines, narrow_lines}
   end
 
   defp workspace_context do

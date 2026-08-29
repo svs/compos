@@ -51,11 +51,14 @@ defmodule Compos.Ui.Layouts do
           }
           .editor-root {
             display: flex; flex-direction: column; position: relative;
-            height: 100dvh; overflow: hidden;
+            overflow: hidden;
             /* the application text scale (appearance.scm ui-scale): the
                'ui face's zoom is a root variable, and the whole page
-               grows by it, rendered pages included */
+               grows by it, rendered pages included. A viewport unit does
+               not shrink under zoom, so the height divides by it, or the
+               modeline lands below the fold. */
             zoom: var(--ui-zoom, 1);
+            height: calc(100dvh / var(--ui-zoom, 1));
           }
           .editor-root.instance-identified::before {
             content: attr(data-instance);

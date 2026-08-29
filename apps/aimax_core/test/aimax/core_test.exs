@@ -299,9 +299,9 @@ defmodule Aimax.CoreTest do
       {:ok, _} = Session.eval(~s{(eval-region "#{name}" 0 18)})
     end
 
-    test "(message ...) lands in *messages*" do
+    test "(message ...) lands in *Messages*" do
       {:ok, _} = Session.eval(~s{(message "hello echo area")})
-      assert Buffer.text("*messages*") =~ "hello echo area"
+      assert Buffer.text("*Messages*") =~ "hello echo area"
     end
 
     test "errors are reported, session survives" do

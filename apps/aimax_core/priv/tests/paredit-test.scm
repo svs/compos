@@ -24,9 +24,9 @@
 ;; Run one command in the buffer and answer what it said. The echo area
 ;; is half of paredit's contract: a refusal has to say why.
 (define (t--par-run! cmd)
-  (let ((mark (string-length (buffer-text "*messages*"))))
+  (let ((mark (string-length (buffer-text "*Messages*"))))
     (with-current-buffer t--par-buf (lambda () (run-command cmd)))
-    (let ((said (buffer-text "*messages*")))
+    (let ((said (buffer-text "*Messages*")))
       (substring said mark (string-length said)))))
 
 (define (t--par-text) (buffer-text t--par-buf))
@@ -493,10 +493,10 @@
       (check-equal! (buffer-text buf) "(foo) bar\n" "nothing was killed")
 
       ;; C-M-f falls through to forward-sexp, which has no grammar here
-      (let ((mark (string-length (buffer-text "*messages*"))))
+      (let ((mark (string-length (buffer-text "*Messages*"))))
         (run-command "paredit--key-C-M-f")
         (check-equal! (buffer-point buf) 0 "point did not move")
-        (let ((said (buffer-text "*messages*")))
+        (let ((said (buffer-text "*Messages*")))
           (check-contains! (substring said mark (string-length said))
                            "No structural navigation" "and it said why")))
       (buffer-kill! buf))))

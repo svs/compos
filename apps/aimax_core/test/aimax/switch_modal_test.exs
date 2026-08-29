@@ -205,14 +205,14 @@ defmodule Aimax.SwitchModalTest do
     type("zz-ma")
     press(["C-k"])
     refute eval!(~s{(buffer-known? "*zz-ma*")}) == "#t"
-    assert Buffer.text("*messages*") =~ "killed 1 buffer"
+    assert Buffer.text("*Messages*") =~ "killed 1 buffer"
 
     # C-a marks every shown row, C-k kills them as a set
     press(["DEL", "DEL", "DEL", "DEL", "DEL", "DEL"])
     type("zz-m")
     press(["C-a"])
     press(["C-k"])
-    assert Buffer.text("*messages*") =~ "killed 2 buffers"
+    assert Buffer.text("*Messages*") =~ "killed 2 buffers"
     refute eval!(~s{(buffer-known? "*zz-mb*")}) == "#t"
     refute eval!(~s{(buffer-known? "*zz-md*")}) == "#t"
   end

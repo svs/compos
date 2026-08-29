@@ -113,15 +113,15 @@
       (buffer-set-local! buf 'chat-wire-turns
         (list (list 'role "user" 'blocks (list (t--heal-result "tu_z")))))
 
-      (let ((mark (string-length (buffer-text "*messages*"))))
+      (let ((mark (string-length (buffer-text "*Messages*"))))
         (run-command "chat-heal")
-        (let ((said (buffer-text "*messages*")))
+        (let ((said (buffer-text "*Messages*")))
           (check-contains! (substring said mark (string-length said))
                            "dropped 1 orphaned tool block" "the first report")))
 
-      (let ((mark (string-length (buffer-text "*messages*"))))
+      (let ((mark (string-length (buffer-text "*Messages*"))))
         (run-command "chat-heal")
-        (let ((said (buffer-text "*messages*")))
+        (let ((said (buffer-text "*Messages*")))
           (check-contains! (substring said mark (string-length said))
                            "record is whole" "the second report")))
 

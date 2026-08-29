@@ -46,7 +46,7 @@ defmodule Aimax.Core do
         # synchronous, so nobody observes a half-restored buffer.
         # `Process.whereis(Session)` answered yes too early: GenServer
         # registers the name before init/1 runs, so Session's own
-        # create_buffer("*messages*") asked its own init to restore a
+        # create_buffer("*Messages*") asked its own init to restore a
         # runtime. The lane worker then waited on :await_boot, Session was
         # still inside init, and every boot paid a fixed 60s timeout. Ask
         # whether the interpreter is ready, which is what this guard means.

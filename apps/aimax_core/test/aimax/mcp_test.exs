@@ -101,7 +101,7 @@ defmodule Aimax.MCPTest do
       {:ok, _} = MCP.connect("gone", %{"command" => "no-such-binary-zz"})
 
       wait_until(fn ->
-        {:ok, text} = Session.eval(~s{(buffer-text "*messages*")})
+        {:ok, text} = Session.eval(~s{(buffer-text "*Messages*")})
         text =~ "gone failed"
       end)
     end

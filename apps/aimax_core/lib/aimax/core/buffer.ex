@@ -711,7 +711,7 @@ defmodule Aimax.Core.Buffer do
 
     # A leading space is the Emacs convention for an internal buffer, and it
     # is the default answer. A caller that owns a visible but throwaway
-    # buffer, like *messages*, says so with :persistent.
+    # buffer, like *Messages*, says so with :persistent.
     persistent? = Keyword.get(opts, :persistent, not String.starts_with?(name, " "))
     state = %{state | persistent: persistent?}
     state = state |> attach_provenance() |> attach_history()

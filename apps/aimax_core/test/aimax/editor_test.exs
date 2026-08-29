@@ -317,7 +317,7 @@ defmodule Aimax.EditorTest do
     assert leaf.mode == "morg-mode"
 
     press(["C-x", "C-s"])
-    assert Buffer.text("*messages*") =~ "saved-hook-ran"
+    assert Buffer.text("*Messages*") =~ "saved-hook-ran"
     File.rm!(path)
   end
 
@@ -2108,8 +2108,8 @@ defmodule Aimax.EditorTest do
       Buffer.goto(other, 4)
       {:ok, from} = Aimax.Core.Session.eval("(active-window)")
 
-      {:ok, _} = Aimax.Core.Session.eval(~s{(display-buffer "*messages*")})
-      assert Editor.current_buffer() == "*messages*"
+      {:ok, _} = Aimax.Core.Session.eval(~s{(display-buffer "*Messages*")})
+      assert Editor.current_buffer() == "*Messages*"
 
       # something displaces the window we came from while the popup is up
       # (an ibuffer preview does exactly this)
@@ -2132,7 +2132,7 @@ defmodule Aimax.EditorTest do
     # or displaying its buffer splits the frame a SECOND time and the
     # layout grows a pane every time you open the list.
     test "a popup with no frame local is still the popup, not a new split", %{buf: buf} do
-      {:ok, _} = Aimax.Core.Session.eval(~s{(display-buffer "*messages*")})
+      {:ok, _} = Aimax.Core.Session.eval(~s{(display-buffer "*Messages*")})
       assert %{type: :split} = Editor.render_state().tree
       {:ok, w} = Aimax.Core.Session.eval("(active-window)")
 
@@ -2142,7 +2142,7 @@ defmodule Aimax.EditorTest do
       assert {:ok, "#t"} = Aimax.Core.Session.eval("(popup-open?)")
 
       # displaying it again reuses that window instead of splitting
-      {:ok, _} = Aimax.Core.Session.eval(~s{(display-buffer "*messages*")})
+      {:ok, _} = Aimax.Core.Session.eval(~s{(display-buffer "*Messages*")})
 
       assert %{type: :split, children: [%{type: :leaf}, %{type: :leaf}]} =
                Editor.render_state().tree
@@ -2158,7 +2158,7 @@ defmodule Aimax.EditorTest do
       press(["C-x", "3"])
       {:ok, from} = Aimax.Core.Session.eval("(active-window)")
 
-      {:ok, _} = Aimax.Core.Session.eval(~s{(display-buffer "*messages*")})
+      {:ok, _} = Aimax.Core.Session.eval(~s{(display-buffer "*Messages*")})
       {:ok, _} = Aimax.Core.Session.eval("(select-window! #{from})")
       assert Editor.current_buffer() == buf
 
@@ -2174,8 +2174,8 @@ defmodule Aimax.EditorTest do
       press(["C-x", "o"])
       {:ok, from} = Aimax.Core.Session.eval("(active-window)")
 
-      {:ok, _} = Aimax.Core.Session.eval(~s{(display-buffer "*messages*")})
-      assert Editor.current_buffer() == "*messages*"
+      {:ok, _} = Aimax.Core.Session.eval(~s{(display-buffer "*Messages*")})
+      assert Editor.current_buffer() == "*Messages*"
 
       press(["C-x", "0"])
       assert {:ok, ^from} = Aimax.Core.Session.eval("(active-window)")
@@ -2183,7 +2183,7 @@ defmodule Aimax.EditorTest do
 
       # and it stopped floating, or it would float in an ordinary window
       assert {:ok, "#f"} =
-               Aimax.Core.Session.eval(~s{(buffer-local "*messages*" 'window-class)})
+               Aimax.Core.Session.eval(~s{(buffer-local "*Messages*" 'window-class)})
 
       Editor.delete_other_windows()
     end

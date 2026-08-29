@@ -194,7 +194,7 @@ defmodule Aimax.ChatAgentTest do
     eval!(~s{(llm-inline-events! "inline-zz" (list (list 'type 'error 'text "model refused")))})
 
     assert eval!(~s{(assoc "inline-zz" *llm-inline-sends*)}) == "#f"
-    assert eval!(~s{(buffer-text "*messages*")}) =~ "LLM failed · model refused"
+    assert eval!(~s{(buffer-text "*Messages*")}) =~ "LLM failed · model refused"
   end
 
   test "an inline send answers the permission its own tool call raises" do

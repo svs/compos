@@ -116,7 +116,7 @@ share one eval:
 - a restore path that installs handlers and then rebuilds state
 - an agent tool call that does both in one `eval-scheme`
 
-and it breaks **silently** — no message, no echo, nothing in `*messages*`.
+and it breaks **silently** — no message, no echo, nothing in `*Messages*`.
 A crash report may reach the logger from the supervised task; nothing
 reaches the person.
 

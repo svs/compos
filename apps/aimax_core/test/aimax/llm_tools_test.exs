@@ -427,9 +427,9 @@ defmodule Aimax.LLMToolsTest do
 
       eval!(~s{(llm-with-tools "loop forever" (lambda (t) (set-symbol-value! 'zz-runaway t)))})
 
-      # error lands in *messages*, callback never fires
+      # error lands in *Messages*, callback never fires
       wait_until(fn ->
-        {:ok, text} = Session.eval(~s{(buffer-text "*messages*")})
+        {:ok, text} = Session.eval(~s{(buffer-text "*Messages*")})
         text =~ "exceeded"
       end)
 

@@ -40,7 +40,8 @@ defmodule Aimax.Core.SchemeTables do
   @doc """
   The named tables the Scheme world uses. Created here, emptied by Session.
   """
-  def named_tables, do: [Aimax.Core.SchemeAPI.commands_table(), :aimax_escaped_closures]
+  def named_tables,
+    do: [Aimax.Core.SchemeAPI.commands_table(), :aimax_escaped_closures, :aimax_messages]
 
   @doc """
   Make this process the heir of TID, so a Session crash hands the table over
@@ -69,18 +70,43 @@ defmodule Aimax.Core.SchemeTables do
     ArgumentError -> :ok
   end
 
+  @doc "Create one named table after a hot code reload, if necessary."
+  def ensure_table(table) do
+    case :ets.whereis(table) do
+      :undefined -> GenServer.call(__MODULE__, {:ensure_table, table})
+      _ -> :ok
+    end
+  end
+
   # --- server ----------------------------------------------------------------
 
   @impl true
   def init(_) do
     for table <- named_tables() do
-      case :ets.whereis(table) do
-        :undefined -> :ets.new(table, [:named_table, :public, :set, read_concurrency: true])
-        _ -> :ok
-      end
+      create_table(table)
     end
 
     {:ok, %{}}
+  end
+
+  defp table_options(:aimax_messages),
+    do: [:named_table, :public, :ordered_set, read_concurrency: true, write_concurrency: true]
+
+  defp table_options(_table), do: [:named_table, :public, :set, read_concurrency: true]
+
+  defp create_table(table) do
+    case :ets.whereis(table) do
+      :undefined -> :ets.new(table, table_options(table))
+      _ -> :ok
+    end
+
+    :ok
+  end
+
+  @impl true
+  def handle_call({:ensure_table, table}, _from, state) do
+    :ok = create_table(table)
+    {:reply, :ok, state}
   end
 
   @impl true

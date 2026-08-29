@@ -11,7 +11,7 @@ defmodule Aimax.Core.Session do
   `(define-command ...)`, executed via `run_command/1` (from KeyDispatch) or
   `(run-command ...)` (from Scheme, e.g. M-x's confirm callback).
 
-  The echo area is a view: `(message ...)` appends to `*messages*` and sets
+  The echo area is a view: `(message ...)` appends to `*Messages*` and sets
   the transient echo. One global session for now; per-client later.
   """
 
@@ -23,7 +23,9 @@ defmodule Aimax.Core.Session do
   alias Aimax.Scheme
   alias Aimax.Scheme.Reader
 
-  @messages "*messages*"
+  @messages "*Messages*"
+  @messages_table :aimax_messages
+  @messages_limit 2_000
 
   # closures that escaped the store into opaque Elixir funs (Reactor handlers,
   # LLM callbacks) — the GC can't see through funs, so they register here
@@ -232,17 +234,97 @@ defmodule Aimax.Core.Session do
 
   def eval_buffer(buffer), do: buffer |> Buffer.text() |> eval()
 
-  def message(text) do
-    # A buffer sweep can kill *messages*. Recreate it here, so every
+  def message(text, level \\ "info", context \\ %{}) do
+    # A buffer sweep can kill *Messages*. Recreate it here, so every
     # later (message ...) works instead of an exit through :noproc —
     # in a lane, that exit would kill the whole worker.
     unless Buffer.exists?(@messages), do: Aimax.Core.create_buffer(@messages, persistent: false)
 
+    :ok = Aimax.Core.SchemeTables.ensure_table(@messages_table)
+    context = Map.new(context)
+    level = normalize_message_level(level)
+    source = Map.get(context, :source, "")
+    group = Map.get(context, :group, "")
+    project = Map.get(context, :project, "")
+    id = System.unique_integer([:positive, :monotonic])
+
+    :ets.insert(
+      @messages_table,
+      {id, System.system_time(:millisecond), level, source, group, project, text}
+    )
+
+    trim_messages()
     Buffer.append(@messages, text <> "\n", source: :editor)
     # Emacs: echo in the frame that triggered; with no frame context (agent
-    # events, timers) every frame gets it — *messages* is shared either way
+    # events, timers) every frame gets it — *Messages* is shared either way
     if Frame.current(), do: Editor.set_echo(text), else: Editor.set_echo_all(text)
     :ok
+  end
+
+  def messages(limit \\ @messages_limit) do
+    :ok = Aimax.Core.SchemeTables.ensure_table(@messages_table)
+    limit = max(0, min(limit, @messages_limit))
+
+    @messages_table
+    |> :ets.tab2list()
+    |> Enum.take(-limit)
+  end
+
+  def clear_messages do
+    :ok = Aimax.Core.SchemeTables.ensure_table(@messages_table)
+    :ets.delete_all_objects(@messages_table)
+
+    if Buffer.exists?(@messages) do
+      size = Buffer.byte_size(@messages)
+      if size > 0, do: Buffer.delete_range(@messages, 0, size, source: :editor)
+    end
+
+    :ok
+  end
+
+  defp normalize_message_level({:sym, level}), do: normalize_message_level(level)
+
+  defp normalize_message_level(level) do
+    case level |> to_string() |> String.downcase() do
+      "debug" -> "debug"
+      "warning" -> "warning"
+      "warn" -> "warning"
+      "error" -> "error"
+      _ -> "info"
+    end
+  end
+
+  defp trim_messages do
+    overflow = :ets.info(@messages_table, :size) - @messages_limit
+
+    if overflow > 0 do
+      @messages_table
+      |> :ets.tab2list()
+      |> Enum.take(overflow)
+      |> Enum.each(fn {id, _, _, _, _, _, _} -> :ets.delete(@messages_table, id) end)
+    end
+  end
+
+  defp message_rows(limit) do
+    messages(limit)
+    |> Enum.map(fn {id, time_ms, level, source, group, project, text} ->
+      [
+        {:sym, "id"},
+        id,
+        {:sym, "time-ms"},
+        time_ms,
+        {:sym, "level"},
+        level,
+        {:sym, "source"},
+        source,
+        {:sym, "group"},
+        group,
+        {:sym, "project"},
+        project,
+        {:sym, "text"},
+        text
+      ]
+    end)
   end
 
   # Sorted by the downcased name: a plain sort is ASCII, and a mode command
@@ -264,9 +346,9 @@ defmodule Aimax.Core.Session do
     # then survives a crash here, and no lane worker holding the published
     # handle ever reads a dead table id.
     Enum.each(Aimax.Core.SchemeTables.named_tables(), &Aimax.Core.SchemeTables.reset/1)
-    # *messages* is this session's log, so it starts empty every boot. Drop
+    # *Messages* is this session's log, so it starts empty every boot. Drop
     # the row and the checkpoint an older daemon left: without this, the
-    # catalog still names *messages*, create_buffer restores last session's
+    # catalog still names *Messages*, create_buffer restores last session's
     # text, and boot pays for a restore nobody wants.
     Aimax.Core.BufferStore.forget(@messages)
 
@@ -833,7 +915,12 @@ defmodule Aimax.Core.Session do
         "(primitive-doc NAME) — return the one-line doc for an Elixir primitive, or #f.",
       "primitive-docs" =>
         "(primitive-docs) — return (NAME DOC) pairs for every Elixir primitive, sorted.",
-      "message" => "(message TEXT) — show TEXT in the echo area.",
+      "message" => "(message TEXT [LEVEL]) — log TEXT and show it in the echo area.",
+      "message-emit" =>
+        "(message-emit TEXT LEVEL SOURCE GROUP PROJECT) — record one structured editor message.",
+      "messages-snapshot" =>
+        "(messages-snapshot [LIMIT]) — return recent structured editor messages, oldest first.",
+      "messages-clear!" => "(messages-clear!) — discard every editor message.",
       "actor-spawn" =>
         "(actor-spawn BEHAVIOR STATE) — start an isolated Scheme actor; BEHAVIOR returns (NEW-STATE REPLY).",
       "actor-self" => "(actor-self) — return the current isolated actor, or #f.",
@@ -1087,8 +1174,30 @@ defmodule Aimax.Core.Session do
     end
 
     %{
-      "message" => fn [text] ->
-        message(to_string(text))
+      "message" => fn
+        [text] ->
+          message(to_string(text))
+          :void
+
+        [text, level] ->
+          message(to_string(text), level)
+          :void
+      end,
+      "message-emit" => fn [text, level, source, group, project] ->
+        message(to_string(text), level,
+          source: to_string(source),
+          group: to_string(group),
+          project: to_string(project)
+        )
+
+        :void
+      end,
+      "messages-snapshot" => fn
+        [] -> message_rows(@messages_limit)
+        [limit] -> message_rows(trunc(limit))
+      end,
+      "messages-clear!" => fn [] ->
+        clear_messages()
         :void
       end,
       "actor-spawn" => fn [behavior, initial_state], store ->

@@ -280,7 +280,7 @@ defmodule Aimax.Core.Hotload do
     :exit, _ -> "reload failed: the session did not answer"
   end
 
-  # The echo area and *messages*, the same report a command gives. Scheme
+  # The echo area and *Messages*, the same report a command gives. Scheme
   # owns the display; this passes the text as a value, never as source.
   defp announce(report) do
     if Session.ready?(), do: Session.call_named("message", [report])

@@ -58,6 +58,7 @@
 (load-bundled-package "pdf.scm")
 (load-bundled-package "peers.scm")
 (load-bundled-package "project.scm")
+(load-bundled-package "messages.scm")
 (load-bundled-package "provenance.scm")
 (load-bundled-package "scheme-ide.scm")
 (load-bundled-package "scratch.scm")

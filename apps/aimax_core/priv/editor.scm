@@ -4429,7 +4429,7 @@
 (define *display-buffer-alist*
   (list (list "*shell*" 'popup '())
         (list "*opencode" 'popup '())
-        (list "*messages*" 'popup '())
+        (list "*Messages*" 'popup '())
         (list "*llm*" 'popup '())))
 
 ;; PARAMS is optional, so every rule written before the params existed
@@ -5385,9 +5385,6 @@
     (buffer-set-read-only! (current-buffer) #t)))
 
 (public! 'browse-visit "(browse-visit PATH) — open a file the way the code browser does: read-only unless *browse-read-only* is #f. C-x C-q makes it writable")
-
-(define-command "view-messages" "Display the *messages* buffer"
-  (lambda () (display-buffer "*messages*")))
 
 ;; DELTA in lines, positive forward. A preview window has no lines, so
 ;; scroll-window! turns the count into pixels for it — the caller says
@@ -8743,7 +8740,7 @@
 (domain! 'unknown)
 (effects! '(unknown))
 (category! 'interaction)
-(public! 'message "(message TEXT) — echo area")
+(public! 'message "(message TEXT [LEVEL]) — log TEXT and show it in the echo area")
 (public! 'minibuffer-read "(minibuffer-read PROMPT CANDIDATES HANDLER) — async; HANDLER gets the choice")
 (public! 'debounce! "(debounce! KEY MS CALLBACK ARG) — after MS idle, call CALLBACK with ARG; rescheduling KEY cancels the older callback")
 (catalog-meta! 'function "debounce!" 'domain 'interaction 'effects '(write execute))

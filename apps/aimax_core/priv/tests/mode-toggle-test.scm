@@ -13,12 +13,12 @@
 (define t--mt-buf "zz-mode-toggle")
 
 ;; What the click leaves in the echo area. The message also lands in
-;; *messages*, and reading that needs no rendered frame.
+;; *Messages*, and reading that needs no rendered frame.
 (define (t--mt-click! mode)
-  (let ((mark (string-length (buffer-text "*messages*"))))
+  (let ((mark (string-length (buffer-text "*Messages*"))))
     (with-current-buffer t--mt-buf
       (lambda () (ui-command! (string-append "mode:" mode) #f)))
-    (let ((said (buffer-text "*messages*")))
+    (let ((said (buffer-text "*Messages*")))
       (substring said mark (string-length said)))))
 
 (deftest 'a-minor-mode-toggles-off-and-on-and-the-echo-states-each-result

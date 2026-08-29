@@ -70,7 +70,7 @@ Loro has no line index. It offers `insert_utf8`, `delete_utf8`, `len_utf8`, `spl
 `char_at`, and nothing equivalent to `rope_byte_to_line`, `rope_line_to_byte`, or
 `rope_line_count` (`rope_nif.ex:10-12`), which the point, the renderer, and every
 motion call constantly. ropey answers those in O(log n), so `rope.ex` and
-`apps/aimax_core/native/aimax_rope` stay untouched.
+`apps/compos_core/native/compos_rope` stay untouched.
 
 ## Actors, undo, and cursors
 
@@ -131,7 +131,7 @@ Two uses, neither of them an agent affordance:
 
 ## Design
 
-### New crate `apps/aimax_core/native/aimax_loro`
+### New crate `apps/compos_core/native/compos_loro`
 
 ```rust
 struct WeaveState {
@@ -142,7 +142,7 @@ struct WeaveState {
 struct WeaveRes(Mutex<WeaveState>);
 ```
 
-Mutable behind a `Mutex`, like `TsRes` in `aimax_ts/src/lib.rs:397`, not like
+Mutable behind a `Mutex`, like `TsRes` in `compos_ts/src/lib.rs:397`, not like
 `RopeRes`, which has immutable-value semantics.
 
 | NIF | Scheduler | Notes |
@@ -161,7 +161,7 @@ Mutable behind a `Mutex`, like `TsRes` in `aimax_ts/src/lib.rs:397`, not like
 
 **Pass text as `Binary`, never `String`.** Both existing crates take `text: String`,
 which copies the whole buffer into Rust on entry. `ts_state_highlight(res, text)`
-(`aimax_ts/src/lib.rs:454`) copies the entire buffer on every highlight and every
+(`compos_ts/src/lib.rs:454`) copies the entire buffer on every highlight and every
 structural motion keypress. Fix that in the same pass. It is the reason a NIF
 gets called slow.
 
@@ -194,8 +194,8 @@ The existing actor-change flush boundary already sits in the right place: `conti
 
 ### Naming
 
-The structure is `Aimax.Core.BufferHistory`, held as `state.history` and read as
-`Buffer.history/1`. `Aimax.Core.BufferHistoryStore` owns the files.
+The structure is `Compos.Core.BufferHistory`, held as `state.history` and read as
+`Buffer.history/1`. `Compos.Core.BufferHistoryStore` owns the files.
 
 Two cautions. `state.history` meant the undo snapshot stack until Phase 3 deleted it, so
 that field name means something else in commits before `502860d`. And
@@ -207,7 +207,7 @@ buffer names.
 `checkpoint/1` (`buffer.ex:1187`) serializes flattened text today, and
 `restored_state/1` (`:1161`) calls `Rope.new(cp[:text])`. Add exported history bytes
 beside the text, so history survives eviction while the text keeps its current recovery
-path. There is no database. `provenance.sqlite3` and `Aimax.Core.ProvenanceStore` are gone.
+path. There is no database. `provenance.sqlite3` and `Compos.Core.ProvenanceStore` are gone.
 
 The store's last job was the recording policy, which is four fields: whether to record,
 which policy said so, the retention, and whether there is a gap. The buffer checkpoint
@@ -265,7 +265,7 @@ on hex, so this NIF is code the project owns.
 ## Phase 0 results
 
 Run on 2026-08-23, loro 1.13.9, release build with LTO, from
-`apps/aimax_core/native/aimax_loro/src/main.rs`. The budget is 7 us, which is the
+`apps/compos_core/native/compos_loro/src/main.rs`. The budget is 7 us, which is the
 0.007 ms per keystroke the buffer meets today.
 
 ```
@@ -311,8 +311,8 @@ is one line repeated and compresses far better than real source.
 
 **Phase 0 - measure first. Done.** See the results above.
 
-**Phase 1 - the crate and the wrapper. Done.** `aimax_loro` is a rustler cdylib and
-`Aimax.Core.BufferHistory` wraps it, with 15 tests. Nothing calls it yet. Cursors and versions
+**Phase 1 - the crate and the wrapper. Done.** `compos_loro` is a rustler cdylib and
+`Compos.Core.BufferHistory` wraps it, with 15 tests. Nothing calls it yet. Cursors and versions
 cross the boundary as opaque binaries, because `Cursor` and `VersionVector` encode
 themselves. `history_register_actor` always excludes the `undo` origin, so the Phase 0 trap
 cannot be reintroduced by a caller.
@@ -406,7 +406,7 @@ that needs it.
 
 The database went with it. See "Persistence" above.
 
-`BufferHistoryStore` keeps one log file per buffer under `~/.aimax/history/`, a sequence
+`BufferHistoryStore` keeps one log file per buffer under `~/.compos/history/`, a sequence
 of length-prefixed blobs: a snapshot first, updates after. Measured on an 85 KB source
 file, a snapshot is 74 KB and 500 typed characters export as 1.2 KB, so appending on
 every checkpoint is affordable only in the update form. The log is rewritten as one
@@ -510,14 +510,14 @@ both sides finish with the same text, both actors are named in the merged histor
 continues over an arriving change, and undoing your own work after a merge does not take
 back theirs.
 
-**A home is a replica.** The peer id lives in `~/.aimax/peer-id` beside the buffers and
+**A home is a replica.** The peer id lives in `~/.compos/peer-id` beside the buffers and
 the logs, and everything in that directory belongs to the one writer it names. The
 corollary caught the first draft of the test: two buffers in one daemon share that id, so
 they are not two replicas, and a history exported from one cannot be merged into the
 other. A real peer has its own home.
 
 **The wire is the socket the daemon already listens on.** There is no Loro server: Loro
-emits bytes and something moves them, and eval is the API. `Aimax.Core.Peer` sends one
+emits bytes and something moves them, and eval is the API. `Compos.Core.Peer` sends one
 `eval` to another home's socket, locally or over ssh through the same `~/.ssh/config`
 remote buffers use. `priv/packages/peers.scm` holds the policy: `peer-pull!`,
 `peer-push!`, `peer-sync!`, and `M-x sync-buffer-with-peer`.
@@ -530,7 +530,7 @@ what am I missing?       (buffer-updates-since BUF TOKEN)
 here is what you missed  (buffer-merge! BUF UPDATES)
 ```
 
-Verified between two real daemons, `AIMAX_HOME=/tmp/peer-a` and `/tmp/peer-b`, each with
+Verified between two real daemons, `COMPOS_HOME=/tmp/peer-a` and `/tmp/peer-b`, each with
 its own home, socket and peer id. Both held "base". A appended " FROM-A" and B inserted
 "FROM-B " with neither having seen the other, so A read "base FROM-A" and B read
 "FROM-B base". One `peer-sync!` from B, and both read "FROM-B base FROM-A". A's history

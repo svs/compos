@@ -1,12 +1,12 @@
-//! ai-max desktop shell: a thin Tauri client over the editor daemon.
+//! compos desktop shell: a thin Tauri client over the editor daemon.
 //!
 //! The daemon owns all state (buffers, windows, desktop.etf) and serves any
 //! client — this shell, browser tabs, the RPC socket — so the shell's whole
 //! job is: make sure a daemon is running, then show a webview on it.
 //! Closing the shell leaves the daemon (and your buffers) running.
 //!
-//! AIMAX_URL points the shell at a daemon (default http://127.0.0.1:4004);
-//! a daemon is auto-spawned only for loopback hosts. AIMAX_DIR overrides
+//! COMPOS_URL points the shell at a daemon (default http://127.0.0.1:4004);
+//! a daemon is auto-spawned only for loopback hosts. COMPOS_DIR overrides
 //! the checkout the daemon is started from.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 use tauri::Manager;
 
 fn daemon_url() -> String {
-    std::env::var("AIMAX_URL").unwrap_or_else(|_| "http://127.0.0.1:4004".to_string())
+    std::env::var("COMPOS_URL").unwrap_or_else(|_| "http://127.0.0.1:4004".to_string())
 }
 
 /// (host, port) out of an http URL — enough parsing for a health check.
@@ -41,10 +41,10 @@ fn daemon_up(host: &str, port: u16) -> bool {
         .unwrap_or(false)
 }
 
-/// The umbrella checkout. AIMAX_DIR wins; the compile-time fallback (two
+/// The umbrella checkout. COMPOS_DIR wins; the compile-time fallback (two
 /// levels up from this crate) covers dev builds from the repo.
 fn project_root() -> PathBuf {
-    match std::env::var("AIMAX_DIR") {
+    match std::env::var("COMPOS_DIR") {
         Ok(dir) => PathBuf::from(dir),
         Err(_) => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."),
     }
@@ -52,15 +52,15 @@ fn project_root() -> PathBuf {
 
 fn spawn_daemon() {
     let root = project_root();
-    // same launch shape as the dev loop: log to ~/.aimax/daemon.log, detach
+    // same launch shape as the dev loop: log to ~/.compos/daemon.log, detach
     let spawned = Command::new("sh")
         .arg("-c")
-        .arg("mkdir -p ~/.aimax && exec mix run --no-halt >> ~/.aimax/daemon.log 2>&1")
+        .arg("mkdir -p ~/.compos && exec mix run --no-halt >> ~/.compos/daemon.log 2>&1")
         .current_dir(&root)
         .spawn();
 
     if let Err(e) = spawned {
-        eprintln!("aimax-shell: could not start daemon in {}: {e}", root.display());
+        eprintln!("compos-shell: could not start daemon in {}: {e}", root.display());
     }
 }
 
@@ -96,7 +96,7 @@ fn main() {
                 if let Some(w) = handle.get_webview_window("main") {
                     let _ = w.eval(
                         "var s = document.getElementById('status'); \
-                         if (s) { s.textContent = 'daemon did not come up — check ~/.aimax/daemon.log'; \
+                         if (s) { s.textContent = 'daemon did not come up — check ~/.compos/daemon.log'; \
                                   s.classList.remove('dot'); }",
                     );
                 }
@@ -105,5 +105,5 @@ fn main() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running aimax shell");
+        .expect("error while running compos shell");
 }

@@ -1,0 +1,15 @@
+[package]
+name = "compos_rope"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "compos_rope"
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.36"
+ropey = "1.6"
+
+[profile.release]
+lto = true

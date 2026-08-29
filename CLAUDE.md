@@ -1,4 +1,4 @@
-# ai-max.el — working instructions
+# compos.el — working instructions
 
 Emacs rebuilt on the BEAM, scripted in Scheme, rendered by Phoenix LiveView.
 Read `docs/ARCHITECTURE.md` once before making changes. `docs/HANDOFF.html` has the
@@ -11,7 +11,7 @@ current state, queue, and landmines (open it in the editor: `C-x C-f`, then
 
 Before adding Elixir code, ask: *can this be Scheme plus one small primitive?*
 Usually yes. Commands, keybindings, modes, hooks, themes, dired, chat, display
-rules — all live in `apps/aimax_core/priv/*.scm`. Elixir grows only for NIFs,
+rules — all live in `apps/compos_core/priv/*.scm`. Elixir grows only for NIFs,
 sockets, PTYs, parsers, schedulers, and raw buffer mechanics.
 
 ## Dev loop
@@ -24,12 +24,12 @@ Before an RL benchmark run or benchmark harness change, load
 ```sh
 bin/test-fast                               # the suite in 4 partitions; all four apps must stay green
 mix test                                    # one lane — use it when one readable log matters
-mix aimax.reload apps/aimax_core/priv/packages/foo.scm   # a file outside the watched roots
+mix compos.reload apps/compos_core/priv/packages/foo.scm   # a file outside the watched roots
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4004/
 ```
 
-**Do not restart to see a change.** `Aimax.Core.Hotload` watches `apps/*/lib`,
-`apps/aimax_core/priv`, and the config home. Saving a `.scm` reloads only the
+**Do not restart to see a change.** `Compos.Core.Hotload` watches `apps/*/lib`,
+`apps/compos_core/priv`, and the config home. Saving a `.scm` reloads only the
 top-level forms whose text changed, then re-runs mode setup on the buffers
 wearing a mode the reload redefined. Saving an `.ex` compiles in a child
 `mix compile` and swaps the changed modules into the VM with no gap; a compile
@@ -42,7 +42,7 @@ which saves the desktop first. Never `pkill` a daemon: the tree can hold other
 sessions and other worktrees.
 
 Browser clients reload themselves (boot-id). Editor state (buffers, windows, theme) is restored from
-`~/.aimax/desktop.etf`. **Rule: everything survives a reload** — file buffers
+`~/.compos/desktop.etf`. **Rule: everything survives a reload** — file buffers
 reopen via `(visit)`; non-file buffers (chat, agent threads, scratch) persist
 content+point+locals, and the mode setup fn rebuilds keys/overlays/folds from
 locals on restore. New buffer kinds must keep this true.
@@ -60,7 +60,7 @@ Drive the editor headlessly:
 
 ```sh
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(buffer-list)"}}' \
-  | nc -U ~/.aimax/sock
+  | nc -U ~/.compos/sock
 ```
 
 ## Buffer links
@@ -69,7 +69,7 @@ A buffer link is one string that names a buffer. `C-c l` (M-x
 `copy-buffer-link`) copies the link for the current buffer and line:
 
 ```
-http://localhost:4004/b/%2FUsers%2Fsvs%2Fsrc%2Fai-max.el%2FREADME.md?line=42
+http://localhost:4004/b/%2FUsers%2Fsvs%2Fsrc%2Fcompos.el%2FREADME.md?line=42
 ```
 
 The name is one percent-encoded path segment, so a file buffer keeps the
@@ -79,7 +79,7 @@ slashes in its path.
 name under `/raw/` and you get the text:
 
 ```sh
-curl -s http://localhost:4004/raw/%2FUsers%2Fsvs%2Fsrc%2Fai-max.el%2FREADME.md
+curl -s http://localhost:4004/raw/%2FUsers%2Fsvs%2Fsrc%2Fcompos.el%2FREADME.md
 curl -s http://localhost:4004/raw            # every buffer name, one per line
 ```
 
@@ -147,16 +147,16 @@ loader; call `namespace!` only when the public vocabulary differs.
 ## Layout
 
 ```
-apps/aimax_scheme   interpreter (values are BEAM terms; symbols are {:sym, _})
-apps/aimax_core     buffers, editor state, primitives, NIF, procs, LLM, desktop
+apps/compos_scheme   interpreter (values are BEAM terms; symbols are {:sym, _})
+apps/compos_core     buffers, editor state, primitives, NIF, procs, LLM, desktop
   priv/*.scm        the editor itself: commands, keymaps, modes, dired, themes
-  native/aimax_ts   tree-sitter Rustler NIF
-apps/aimax_ui       LiveView frontend (a client — no editor logic)
-apps/aimax_rpc      JSON-RPC over ~/.aimax/sock ("eval is the API")
+  native/compos_ts   tree-sitter Rustler NIF
+apps/compos_ui       LiveView frontend (a client — no editor logic)
+apps/compos_rpc      JSON-RPC over ~/.compos/sock ("eval is the API")
 ```
 
 Boot order is explicit: `editor.scm`, the small stdlib files, then stock
 `priv/init.scm`, which lists every bundled package in dependency order. After
-stock boot, user config runs as `~/.aimax/ai-config.scm`, `~/.aimax/init.scm`,
-then saved `~/.aimax/custom.scm`. User-installed packages load only when the
+stock boot, user config runs as `~/.compos/ai-config.scm`, `~/.compos/init.scm`,
+then saved `~/.compos/custom.scm`. User-installed packages load only when the
 user init names them with `(load "packages/name.scm")`.

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>ai-max.el — the MCP proxy</title>
+<title>compos.el — the MCP proxy</title>
 <style>
   :root{--paper:#fdfcf8;--ink:#1b1a17;--soft:#57534a;--faint:#8a857a;--rule:#cbc4b1;
         --indigo:#26356b;--green:#2e6b45;--amber:#7a5a1a;--red:#a83a2b;--wash:#e7e9f1;}
@@ -34,7 +34,7 @@
 
 <h1>The MCP proxy</h1>
 <p class="sub">How an external agent gets the editor's tools ·
-<code>priv/aimax-mcp-proxy.exs</code> + <code>priv/packages/tools.scm</code> ·
+<code>priv/compos-mcp-proxy.exs</code> + <code>priv/packages/tools.scm</code> ·
 updated 2026-08-14</p>
 
 <h2>What it is</h2>
@@ -43,7 +43,7 @@ served by <code>llm-tool-specs</code>). The in-editor chat reads that registry
 directly. An external ACP agent (claude-code, codex) runs as a subprocess and
 cannot — it speaks MCP. The proxy is the bridge: a small stdio MCP server that
 forwards each MCP request to the daemon's JSON-RPC socket. The agent sees a
-normal MCP server named <code>aimax</code>. The editor sees two evals.</p>
+normal MCP server named <code>compos</code>. The editor sees two evals.</p>
 
 <div class="box">
 Same registry, two consumers. The tool list an external agent gets from
@@ -56,8 +56,8 @@ no second registration.
 <pre><code>ACP agent (claude-code / codex)
    │  stdio MCP: initialize · tools/list · tools/call
    ▼
-aimax-mcp-proxy.exs           one process per agent session; OTP :json, no deps
-   │  JSON-RPC eval on ~/.aimax/sock (AIMAX_SOCK overrides)
+compos-mcp-proxy.exs           one process per agent session; OTP :json, no deps
+   │  JSON-RPC eval on ~/.compos/sock (COMPOS_SOCK overrides)
    ▼
 daemon Session ── (mcp-proxy-tools-json)          tools/list
               └── (mcp-proxy-call name args-b64)  tools/call
@@ -65,7 +65,7 @@ daemon Session ── (mcp-proxy-tools-json)          tools/list
                      ▼
                   llm-tool-call → the Scheme handler runs</code></pre>
 
-<p>The <code>mcp</code> package registers the proxy as the <code>aimax</code>
+<p>The <code>mcp</code> package registers the proxy as the <code>compos</code>
 entry in each agent's <code>session/new</code>, so every agent session spawns
 its own proxy process. The proxy handles four methods:
 <code>initialize</code>, <code>tools/list</code>, <code>tools/call</code>, and
@@ -120,8 +120,8 @@ is the last open piece of the AI-native refactor.</p>
 <h2>Where the code is</h2>
 <table>
 <tr><th>piece</th><th>file</th><th>role</th></tr>
-<tr><td><code>aimax-mcp-proxy.exs</code></td>
-    <td><code>apps/aimax_core/priv/</code></td>
+<tr><td><code>compos-mcp-proxy.exs</code></td>
+    <td><code>apps/compos_core/priv/</code></td>
     <td>The stdio MCP server. Spawned per agent session; forwards to the
     socket.</td></tr>
 <tr><td><code>mcp-proxy-tools-json</code></td>
@@ -131,7 +131,7 @@ is the last open piece of the AI-native refactor.</p>
     <td><code>priv/packages/tools.scm</code></td>
     <td>Permission gate + dispatch, for <code>tools/call</code>.</td></tr>
 <tr><td><code>permission_test.exs</code> "one gate"</td>
-    <td><code>apps/aimax_core/test/</code></td>
+    <td><code>apps/compos_core/test/</code></td>
     <td>Asserts the same payload is refused at all three chokepoints, and
     that ask mode holds on the proxy.</td></tr>
 </table>

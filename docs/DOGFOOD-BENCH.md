@@ -1,11 +1,11 @@
-# The ai-max dogfood benchmark
+# The compos dogfood benchmark
 
 This is a black-box benchmark for one internal question:
 
-> Does ai-max make real work noticeably better than using an editor, terminal,
+> Does compos make real work noticeably better than using an editor, terminal,
 > browser, and chat separately?
 
-The runner lives outside ai-max. It talks only to the public JSON-RPC socket,
+The runner lives outside compos. It talks only to the public JSON-RPC socket,
 creates an ordinary agent thread with `execute*`, and observes that thread via
 `agent-status`, `agent-buf`, and `buffer-text`. The product contains no
 benchmark-specific Scheme or Elixir.
@@ -16,12 +16,12 @@ human judgements.
 
 ## Start an isolated editor
 
-The default benchmark daemon uses `/tmp/aimax-bench-home`, port 4104, and app
+The default benchmark daemon uses `/tmp/compos-bench-home`, port 4104, and app
 port 4105:
 
 ```sh
-bench/aimax-bench --home /tmp/aimax-bench-home daemon start \
-  --config-from ~/.aimax
+bench/compos-bench --home /tmp/compos-bench-home daemon start \
+  --config-from ~/.compos
 ```
 
 `--config-from` symlinks `ai-config.scm` and its sibling `secrets.scm` into the
@@ -30,31 +30,31 @@ that option, the home needs its own provider configuration.
 You can instead point the runner at an existing daemon without starting one:
 
 ```sh
-bench/aimax-bench --home ~/.aimax list
+bench/compos-bench --home ~/.compos list
 ```
 
-`--socket PATH` overrides the derived `$AIMAX_HOME/sock` for unusual layouts.
+`--socket PATH` overrides the derived `$COMPOS_HOME/sock` for unusual layouts.
 
 ## Run a scenario
 
 List the stable scenarios:
 
 ```sh
-bench/aimax-bench list
-bench/aimax-bench list --cadence daily
-bench/aimax-bench list --area control
+bench/compos-bench list
+bench/compos-bench list --cadence daily
+bench/compos-bench list --area control
 ```
 
 Start a real task. `--objective` replaces the generic catalog prompt while the
 scenario's setup, acceptance criteria, and hard gates remain fixed:
 
 ```sh
-bench/aimax-bench --home /tmp/aimax-bench-home start small-feature \
+bench/compos-bench --home /tmp/compos-bench-home start small-feature \
   --objective "Add an RPC command that returns the active project root." \
   --connector api \
   --model anthropic:claude-sonnet-5 \
   --permission-mode ask \
-  --presets aimax,project \
+  --presets compos,project \
   --workspace "$PWD"
 ```
 
@@ -69,8 +69,8 @@ The command records the returned agent slug and an initial black-box
 observation. Follow the actual thread through renames and wait for it:
 
 ```sh
-bench/aimax-bench wait RUN_ID
-bench/aimax-bench show RUN_ID --transcript
+bench/compos-bench wait RUN_ID
+bench/compos-bench show RUN_ID --transcript
 ```
 
 `wait` returns when the agent becomes idle, dead, or needs attention. The
@@ -79,7 +79,7 @@ continue manually.
 
 ## Replay a saved chat
 
-Every completed conversation is archived under `<aimax-home>/chats/*.chat`.
+Every completed conversation is archived under `<compos-home>/chats/*.chat`.
 The public Scheme API lists and reads those portable records:
 
 ```scheme
@@ -90,8 +90,8 @@ The public Scheme API lists and reads those portable records:
 Send one archive through the editor's replay acceptance test:
 
 ```sh
-AIMAX_CHAT=/absolute/path.chat mix test \
-  apps/aimax_core/test/aimax/chat_acceptance_test.exs
+COMPOS_CHAT=/absolute/path.chat mix test \
+  apps/compos_core/test/compos/chat_acceptance_test.exs
 ```
 
 The replay drives recorded prompts through the real key dispatcher.
@@ -103,8 +103,8 @@ For the bundled synthetic code scenarios, copy a fixture into a new disposable
 Git repository. The command refuses to overwrite an existing destination:
 
 ```sh
-bench/aimax-bench fixture diagnose /tmp/aimax-diagnose-1
-bench/aimax-bench fixture small-feature /tmp/aimax-feature-1
+bench/compos-bench fixture diagnose /tmp/compos-diagnose-1
+bench/compos-bench fixture small-feature /tmp/compos-feature-1
 ```
 
 Use a fresh daemon home for each independent scenario. Reusing a home is
@@ -115,7 +115,7 @@ If setup failed before the scenario was meaningfully exercised, preserve the
 journal but exclude it from satisfaction metrics:
 
 ```sh
-bench/aimax-bench invalidate RUN_ID --reason "provider key was unavailable"
+bench/compos-bench invalidate RUN_ID --reason "provider key was unavailable"
 ```
 
 ## Restart and verify
@@ -123,9 +123,9 @@ bench/aimax-bench invalidate RUN_ID --reason "provider key was unavailable"
 Continuity scenarios use the same isolated home:
 
 ```sh
-bench/aimax-bench --home /tmp/aimax-bench-home daemon restart
-bench/aimax-bench --home /tmp/aimax-bench-home show RUN_ID --transcript
-bench/aimax-bench --home /tmp/aimax-bench-home continue RUN_ID \
+bench/compos-bench --home /tmp/compos-bench-home daemon restart
+bench/compos-bench --home /tmp/compos-bench-home show RUN_ID --transcript
+bench/compos-bench --home /tmp/compos-bench-home continue RUN_ID \
   --objective "Continue from the durable state already present."
 ```
 
@@ -137,7 +137,7 @@ RPC boundary. A Scheme false value fails a check; any other returned value
 passes. Use checks for observable outcomes, not private implementation details:
 
 ```sh
-bench/aimax-bench --home /tmp/aimax-bench-home finish RUN_ID \
+bench/compos-bench --home /tmp/compos-bench-home finish RUN_ID \
   --outcome pass \
   --intended-state yes \
   --interventions 0 \
@@ -159,10 +159,10 @@ the same score flags. It preserves the original observations and records a
 ## Read the result
 
 ```sh
-bench/aimax-bench report
-bench/aimax-bench report --task small-feature
-bench/aimax-bench report --json
-bench/aimax-bench render --output bench/results/core-suite.html
+bench/compos-bench report
+bench/compos-bench report --task small-feature
+bench/compos-bench report --json
+bench/compos-bench render --output bench/results/core-suite.html
 ```
 
 `render` selects the latest valid finished run for each of the six core
@@ -170,7 +170,7 @@ acceptance scenarios and writes a standalone HTML summary. Historical failures
 remain in `report`; infrastructure-invalid runs remain in their journals but
 are excluded from both views.
 
-Run journals default to `~/.aimax-bench/runs`; set `AIMAX_BENCH_HOME` or pass
+Run journals default to `~/.compos-bench/runs`; set `COMPOS_BENCH_HOME` or pass
 `--results PATH` to separate experiments.
 
 The primary measure is zero-intervention success. A successful run reaches the

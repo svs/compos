@@ -22,7 +22,7 @@ send copies the composed fragment into the conversation snapshot.
 ## Direct API turns
 
 At the start of every direct API turn, `Agent.send_prompt` asks
-`Aimax.Core.Agent.Backend.context/2` for context. The registered Scheme closure
+`Compos.Core.Agent.Backend.context/2` for context. The registered Scheme closure
 is `chat-thread-context` in `priv/packages/chat.scm`.
 
 The first turn stores `chat-prompt-snapshot` with the conversation.
@@ -102,7 +102,7 @@ each fragment, and the final canonical join.
 
 The page shows the frozen conversation prompt when one exists. Before the
 first send, it shows the prospective prompt from current sources. The ACP
-connector can also supply a system prompt that ai-max does not own.
+connector can also supply a system prompt that compos does not own.
 
 ## Stability and volatile context
 

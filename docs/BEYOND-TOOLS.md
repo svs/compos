@@ -201,7 +201,7 @@ The first property supports logging, provenance, and central policy. The second 
 
 ## 5. Prototype Architecture
 
-We implemented the architecture in a working editor and AI harness. The prototype currently uses the name AIMax. It rebuilds Emacs-like editor semantics on the BEAM and uses a small Scheme interpreter for policy.
+We implemented the architecture in a working editor and AI harness. The prototype currently uses the name Compos. It rebuilds Emacs-like editor semantics on the BEAM and uses a small Scheme interpreter for policy.
 
 The design rule is:
 

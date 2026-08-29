@@ -8,13 +8,13 @@ code. Nothing here is started unless marked LANDED.
 
 - **The one rule: Elixir supplies mechanism, Scheme decides policy.** This
   spec adds at most ONE Elixir primitive (C3). Everything else is Scheme in
-  `apps/aimax_core/priv/packages/*.scm`.
+  `apps/compos_core/priv/packages/*.scm`.
 - **Verify every name against the live editor before you use it.** The
   dialect is not Emacs Lisp and not R7RS. Use the socket:
 
   ```sh
-  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(filter (lambda (e) (re-match? \"preset\" (car e))) (public-api))"}}' | nc -U ~/.aimax/sock
-  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(describe-function (quote chat-extra-tool-specs))"}}' | nc -U ~/.aimax/sock
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(filter (lambda (e) (re-match? \"preset\" (car e))) (public-api))"}}' | nc -U ~/.compos/sock
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(describe-function (quote chat-extra-tool-specs))"}}' | nc -U ~/.compos/sock
   ```
 
 - **Dev loop**: `mix test`, then restart the daemon to reload `priv/*.scm`
@@ -123,7 +123,7 @@ should read over MEANING, not over tool names nobody can enumerate.
   LLM call (the resident) with the tool name, description, and input
   schema, answering with one word from the vocabulary. Batch all unseen
   tools of a server into one call.
-- Verdicts persist in `~/.aimax/tool-categories.etf` (survives reload,
+- Verdicts persist in `~/.compos/tool-categories.etf` (survives reload,
   survives reset — it is editor state, not chat state). The registry keeps
   `(name category source)` where source is `llm` or `manual`.
 - `M-x tool-categories` opens a list-mode buffer: every known tool, its
@@ -235,7 +235,7 @@ Principals today are not people. They are execution contexts:
 - Registries (`*bundles*`, `*control-groups*`, grants, categories) are
   editor state: definitions live in packages/init.scm and re-register on
   boot; only category verdicts persist to disk
-  (`~/.aimax/tool-categories.etf`), because they are learned, not
+  (`~/.compos/tool-categories.etf`), because they are learned, not
   declared.
 
 ### C8. Tests

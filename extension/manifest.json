@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "ai-max",
+  "name": "compos",
   "version": "0.5.9",
-  "description": "ai-max's keys and commands in every tab, and a wire so the editor can drive any of them.",
+  "description": "compos's keys and commands in every tab, and a wire so the editor can drive any of them.",
   "permissions": [
     "tabs",
     "scripting",
@@ -22,7 +22,7 @@
     "open_in_tab": true
   },
   "action": {
-    "default_title": "ai-max \u2014 click to toggle keys on this site"
+    "default_title": "compos \u2014 click to toggle keys on this site"
   },
   "content_scripts": [
     {
@@ -37,14 +37,14 @@
     }
   ],
   "omnibox": {
-    "keyword": "aimax"
+    "keyword": "compos"
   },
   "commands": {
-    "focus-aimax": {
+    "focus-compos": {
       "suggested_key": {
         "default": "Alt+Shift+A"
       },
-      "description": "Jump to ai-max in this window"
+      "description": "Jump to compos in this window"
     }
   }
 }

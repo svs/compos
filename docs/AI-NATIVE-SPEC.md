@@ -102,7 +102,7 @@ The worst, in order. Full details live in the per-item refactor entries.
 9. Dead code beside its replacement: `chat-transcript`, `chat-input`,
    `chat-clear-input!`, `chat-show-waiting!`, `chat-ready-message`,
    `chat-companion-show!`, first `yank` (`editor.scm:51`), `agent-mode` shim,
-   `aimax-home` registered twice.
+   `compos-home` registered twice.
 
 ### 1.4 Permissions: one policy, three gates
 
@@ -155,7 +155,7 @@ says which lane a chat is on. R6 should read that from the backend's
 declared capabilities and delete the `connector-api?` test. The `.chat` v2
 section is one JSON line below an unchanged v1 transcript, so v2 files
 still read as v1. New `json-encode` primitive (the printer's escapes do not
-round-trip `\r`). Tests: `test/aimax/chat_record_test.exs`.
+round-trip `\r`). Tests: `test/compos/chat_record_test.exs`.
 
 **Why.** A1/A2/A3 share one root: `'chat-turns` is display text, but the wire
 needs blocks. B5 (dedup drops a real turn) and C8 (persistence cannot
@@ -196,11 +196,11 @@ The compaction knobs are defcustoms in `tools.scm`, not `editor.scm`:
 head a running request already sent; the summary call is async, so the
 head is identified by count and replaced only if the record still ends
 with it. Everything structural is tested
-(`test/aimax/cache_economics_test.exs`).
+(`test/compos/cache_economics_test.exs`).
 
 **Empirical acceptance passed 2026-08-14.** A three-turn tool chat
 (companion chat, api lane, `claude-sonnet-5`, one `eval-scheme` tool call
-per turn) ran on an isolated `AIMAX_VERIFY` daemon with a real key. The
+per turn) ran on an isolated `COMPOS_VERIFY` daemon with a real key. The
 ledger rows: turn 1 `cache_write 2349, cache_read 2286` (the tool round
 already reads the just-written prefix), turn 2 `cache_read 4720`, turn 3
 `cache_read 4889`. Fresh `input` stays at 4 tokens on every request —
@@ -318,7 +318,7 @@ restore test for the new `shell-mode` setup.
 **Done when.** Restart the daemon with: a scrolled file buffer, an org file
 with folds, a `.chat` with expanded tool cards, a shell, the chat list, two
 browser tabs. Everything comes back where it was; the two tabs hold two
-frames. Add `test/aimax/desktop_restore_test.exs` covering each.
+frames. Add `test/compos/desktop_restore_test.exs` covering each.
 
 ### R4 — One chat surface implementation
 
@@ -326,7 +326,7 @@ frames. Add `test/aimax/desktop_restore_test.exs` covering each.
 is gone with the rest: pre-unification desktops are not a case we carry
 (decided 2026-08-13). `nth` was not duplicated; it moved to `editor.scm` beside
 `plist-get`, since this dialect has no `list-ref`. The one genuine
-duplicate registration was `aimax-home`, twice in the same `scheme_api.ex`
+duplicate registration was `compos-home`, twice in the same `scheme_api.ex`
 map. `chat-clear-input!` comes off the delete list: it is a two-line
 helper over the one `chat-input-region`, so it is part of the unification,
 not a casualty of it. The `models` key of a connector now accepts a thunk, which is how the
@@ -347,7 +347,7 @@ it — that also removes one `connector-api?` call site ahead of R6.
 - Delete: `chat-transcript`, `chat-input`,
   `chat-show-waiting!`, `chat-ready-message`, `chat-companion-show!`,
   `agent-toggle-view` (bind `chat-toggle-view` everywhere), first `yank`,
-  `agent-mode` shim, `nth`, `chat-history-take`, duplicate `aimax-home`
+  `agent-mode` shim, `nth`, `chat-history-take`, duplicate `compos-home`
   registration.
 - `agent-revive!` and `chat-ensure-runtime!` merge into one attach fn;
   `chat-switch!` calls `agent-reconnect!` instead of reimplementing it.
@@ -400,7 +400,7 @@ it up now). The fetch runs in a task and must, or the session waits on the
 thread while the thread waits on the session — so the context comes back
 stamped with its turn, and a cancel racing a fetch can no longer start a
 turn for a message the user took back (C9's guard, plus a `:busy` reply on
-a second prompt). `Aimax.Scheme.Text` replaces the four UTF-8 boundary
+a second prompt). `Compos.Scheme.Text` replaces the four UTF-8 boundary
 copies (dup #10).
 C6: `Backend.error_text/1` turns a crash reason into a sentence; an
 unrecognized reason falls back to a bounded `inspect` (limit 5, 200
@@ -554,7 +554,7 @@ Port dired, ibuffer, *chats*, mcp-hub, notmuch one per commit. One
 ### R9 — Housekeeping bundle
 
 *Partly done 2026-08-13.* Landed across the items that carried them:
-`Aimax.Scheme.Text` (dup #10, in R6), `Aimax.Core.Plist` (dup #11), one
+`Compos.Scheme.Text` (dup #10, in R6), `Compos.Core.Plist` (dup #11), one
 `plist-get` (dup #12 — `custom--plist-get` keeps its name for its 27 call
 sites and loses its body, which crashed on an odd-length plist),
 `mcp-status` delegates to the hub (dup #31), the window helpers (dup #16 —
@@ -581,7 +581,7 @@ chat setup owns the companion-of migration (#25) ·
 `switch-buffer-source` is the buffer prompt's seam — chrome adds tabs
 through it and its full command copy is deleted; one tab label
 (`chrome--tab-candidate`) and one `chrome--goto-tab!` (#6, #7) ·
-`define-theme-from` builds tokyo-night on aimax-dark, and paper names
+`define-theme-from` builds tokyo-night on compos-dark, and paper names
 its own `ts-*` faces so a theme switch cannot keep the previous theme's
 syntax colors (#33) · `kill-region-1` behind kill-word,
 backward-kill-word and kill-region; `llm-on-region` already existed
@@ -594,7 +594,7 @@ site appears.
 
 Small, independent, one commit each:
 - `Text.floor_utf8/2`/`ceil_utf8/2`; delete the other three (dup #10).
-- `Aimax.Core.Plist.to_json/2`; delete acp/session copies (dup #11).
+- `Compos.Core.Plist.to_json/2`; delete acp/session copies (dup #11).
 - One `plist-get` in editor.scm; delete custom/agent/chrome/notmuch copies
   (dup #12).
 - Window helpers (dup #16) — landed as four: `window-showing`,
@@ -668,7 +668,7 @@ file the agent writes renders as a page and re-renders on every edit.
   subscribers re-query.
 - **Sandboxed iframe preview** with a raw endpoint so relative assets work;
   a directory with `index.html` previews as a site.
-- **Artifacts as files in the repo** (later: generated docs under `.aimax/`,
+- **Artifacts as files in the repo** (later: generated docs under `.compos/`,
   the class-palette contract for LLM-written HTML).
 
 ### What we do not take
@@ -682,11 +682,11 @@ file the agent writes renders as a page and re-renders on every edit.
 ### Design
 
 Mechanism (Elixir), one module each, all off the Session process:
-- `Aimax.Core.Git` — status/diff/log/show via `System.cmd` in `Task`,
+- `Compos.Core.Git` — status/diff/log/show via `System.cmd` in `Task`,
   porcelain-z and unified-diff parsers. Parsers are mechanism.
-- `Aimax.Core.Watch` — one FileSystem subscription per watched root, 150 ms
+- `Compos.Core.Watch` — one FileSystem subscription per watched root, 150 ms
   debounce, broadcasts `{:fs_changed, root}` content-free.
-- `/raw/*path` in aimax_ui — traversal-guarded byte serving with MIME, for
+- `/raw/*path` in compos_ui — traversal-guarded byte serving with MIME, for
   iframes and images.
 
 Policy (Scheme, `priv/packages/`):

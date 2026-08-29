@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>ai-max.el — code-browse</title>
+<title>compos.el — code-browse</title>
 <style>
   :root{--paper:#fdfcf8;--ink:#1b1a17;--soft:#57534a;--faint:#8a857a;--rule:#cbc4b1;
         --indigo:#26356b;--green:#2e6b45;--amber:#7a5a1a;--red:#a83a2b;--wash:#e7e9f1;}
@@ -152,7 +152,7 @@ through it and folds the <code>def</code>s. A Rust file has its
 <p>After every motion the mode replaces one overlay under the tag
 <code>'code-scope</code>, using the face <code>code-scope</code> — a low-alpha
 background in all four base palettes (<code>tokyo-night</code> inherits from
-<code>aimax-dark</code>). There is no point-move hook: the tint is recomputed by
+<code>compos-dark</code>). There is no point-move hook: the tint is recomputed by
 the browse commands and by nothing else.</p>
 
 <p>A node that covers the whole buffer gets NO tint. A tint over every line
@@ -202,16 +202,16 @@ whose own parent is the root — the fold policy's entry point.</p>
 <h2>Where the code is</h2>
 <table>
 <tr><th>piece</th><th>file</th><th>role</th></tr>
-<tr><td><code>code.scm</code></td><td><code>apps/aimax_core/priv/packages/</code></td>
+<tr><td><code>code.scm</code></td><td><code>apps/compos_core/priv/packages/</code></td>
     <td>The whole mode: keys, motion policy, fold policy, both backends.</td></tr>
-<tr><td><code>ts_node</code></td><td><code>apps/aimax_core/native/aimax_ts/src/lib.rs</code></td>
+<tr><td><code>ts_node</code></td><td><code>apps/compos_core/native/compos_ts/src/lib.rs</code></td>
     <td>The node and its neighbours, by kind and byte range.</td></tr>
 <tr><td><code>ts-node</code>, <code>local-unset-key*</code></td>
-    <td><code>apps/aimax_core/lib/aimax/core/scheme_api.ex</code></td>
+    <td><code>apps/compos_core/lib/compos/core/scheme_api.ex</code></td>
     <td>The two new primitives.</td></tr>
-<tr><td><code>code-scope</code></td><td><code>apps/aimax_core/priv/themes.scm</code></td>
+<tr><td><code>code-scope</code></td><td><code>apps/compos_core/priv/themes.scm</code></td>
     <td>The tint, in all four base palettes.</td></tr>
-<tr><td><code>code_browse_test.exs</code></td><td><code>apps/aimax_core/test/aimax/</code></td>
+<tr><td><code>code_browse_test.exs</code></td><td><code>apps/compos_core/test/compos/</code></td>
     <td>Eleven tests through <code>KeyDispatch.handle_key/1</code>, over an
     Elixir fixture and an outline fixture, including the restore path.</td></tr>
 </table>

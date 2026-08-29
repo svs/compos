@@ -1,11 +1,11 @@
 ---
 name: rl-benchmark
-description: Run or revise ai-max reinforcement-learning benchmark and dogfood scenarios. Use for benchmark runs, scoring, reports, and scenario design. Do not use for repository unit or acceptance tests.
+description: Run or revise compos reinforcement-learning benchmark and dogfood scenarios. Use for benchmark runs, scoring, reports, and scenario design. Do not use for repository unit or acceptance tests.
 ---
 
 # RL Benchmark
 
-Measure whether ai-max makes real work better for its user.
+Measure whether compos makes real work better for its user.
 Optimize for internal confidence, not leaderboard comparison.
 
 Read `docs/DOGFOOD-BENCH.md` before operating or changing the harness.
@@ -13,18 +13,18 @@ Read the selected entry in `bench/scenarios.json` before starting a run.
 
 ## Keep the test black-box
 
-Drive the product through `bench/aimax-bench` and ai-max's public RPC boundary.
+Drive the product through `bench/compos-bench` and compos's public RPC boundary.
 Do not add benchmark-specific behavior to Scheme, Elixir, prompts, or tools.
 Do not inject this skill or scoring details into the agent under test.
 Do not reveal hidden checks or implementation hints in the task objective.
 
 Use an isolated daemon home for each independent run.
 Reuse one home only when the scenario tests continuity across a restart.
-Use `--config-from ~/.aimax` when the isolated daemon needs the user's provider configuration.
+Use `--config-from ~/.compos` when the isolated daemon needs the user's provider configuration.
 
-Verify editor behavior from within ai-max.
+Verify editor behavior from within compos.
 Use buffers, locals, overlays, render state, components, and key dispatch.
-Do not use Chrome or external browser automation as the ai-max verification surface.
+Do not use Chrome or external browser automation as the compos verification surface.
 
 ## Run a scenario
 
@@ -48,7 +48,7 @@ Do not erase or replace a failed journal with a cleaner rerun.
 
 ## Use saved chats
 
-ai-max archives completed conversations under `<aimax-home>/chats/*.chat`.
+compos archives completed conversations under `<compos-home>/chats/*.chat`.
 Use `(chat-log-files)` through RPC to list the current daemon's archives.
 Use `(chat-log-read PATH)` to read prompts, display turns, headers, and tool records.
 Prefer this structured record over Codex session files or rendered transcript scraping.
@@ -56,8 +56,8 @@ Prefer this structured record over Codex session files or rendered transcript sc
 Replay one archive through the real editor and key path with:
 
 ```sh
-AIMAX_CHAT=/absolute/path.chat mix test \
-  apps/aimax_core/test/aimax/chat_acceptance_test.exs
+COMPOS_CHAT=/absolute/path.chat mix test \
+  apps/compos_core/test/compos/chat_acceptance_test.exs
 ```
 
 Replay acceptance checks transport, rendering, tool cards, and conversation fidelity.
@@ -92,7 +92,7 @@ Increment the catalog version when the scenario contract changes.
 Update runner tests and `docs/DOGFOOD-BENCH.md` when their contracts change.
 
 Run `python3 -m unittest discover -s bench -p 'test_*.py'` after harness changes.
-Inspect the generated HTML inside ai-max when report rendering changes.
+Inspect the generated HTML inside compos when report rendering changes.
 
 ## Completion gate
 

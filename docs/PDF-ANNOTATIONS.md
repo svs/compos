@@ -14,7 +14,7 @@ a video frame, and a spreadsheet cell are the next ones.
 
 - `annotate.scm` owns the model: an annotation is a plist in the source
   buffer's `annotations` local. The store is one file per document, under
-  the project or under `<aimax-home>/annotations/`. `find-file-hook` turns
+  the project or under `<compos-home>/annotations/`. `find-file-hook` turns
   the mode on when a store exists.
 - The projections are the overlay paint, the `*annotations*` list, the
   margin cards, and the echo line. All read the same list.
@@ -22,7 +22,7 @@ a video frame, and a spreadsheet cell are the next ones.
   blocks, and every line its bbox in PDF points, top-left origin.
   `pdf-find-text` already reads that layout. `pdf-page-geometry` gives the
   page size and its rotation.
-- A rendered page reaches Scheme through one channel: an `aimax:VERB/ARG`
+- A rendered page reaches Scheme through one channel: an `compos:VERB/ARG`
   link. The href limit is 2000 bytes. The preview iframe runs no scripts.
 
 ## The anchor
@@ -71,14 +71,14 @@ Register them per major mode, the way a mode registers a context provider:
 annotation on the current page it emits one box:
 
     <a class="ann note" style="left:12.4%;top:31.0%;width:64.2%;height:1.9%"
-       href="aimax:pdf/note-a7"><span>7</span></a>
+       href="compos:pdf/note-a7"><span>7</span></a>
 
 The coordinates are percentages of the page size in points. A percentage
 needs no recompute when the zoom changes, and it survives the dark page
 filter. The severity supplies the colour, from the `ann-*` faces the
 annotate layer already declares.
 
-A click on the box sends `aimax:pdf/note-a7`. The existing
+A click on the box sends `compos:pdf/note-a7`. The existing
 `on-preview-link!` handler selects that note, echoes it, and shows the
 margin card.
 
@@ -89,7 +89,7 @@ Two gestures, neither one needs new client JS.
 **Click a line.** The same layer emits one transparent link per text line
 of the page, under the note boxes:
 
-    <a class="ann-target" style="..." href="aimax:pdf/annotate-3-17"></a>
+    <a class="ann-target" style="..." href="compos:pdf/annotate-3-17"></a>
 
 The argument is the page and the line index. Scheme reads the line text out
 of the layout, prompts in the minibuffer, and stores the note. This is the

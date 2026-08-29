@@ -1,9 +1,9 @@
 ---
 name: mode-create
-description: Design, create, or revise ai-max editor modes and their Scheme UI. Use for requests to add a major mode, list mode, app buffer, mode-specific commands, keymaps, views, or reusable UI components in ai-max. Require catalog discovery with apropos and apropos-components before implementation.
+description: Design, create, or revise compos editor modes and their Scheme UI. Use for requests to add a major mode, list mode, app buffer, mode-specific commands, keymaps, views, or reusable UI components in compos. Require catalog discovery with apropos and apropos-components before implementation.
 ---
 
-# Create an ai-max mode
+# Create an compos mode
 
 Build the mode in Scheme. Keep Elixir limited to mechanisms that Scheme cannot supply.
 
@@ -34,7 +34,7 @@ Define a component only when `apropos-components` finds no suitable part.
 2. Define it with `defcomponent` under a qualified namespace.
 3. Give it a short description, a complete prop schema, and a working example.
 4. Use namespace-owned classes. Reserve `c-` classes for `ui/*` components.
-5. Render its example in `M-x component-gallery` and inspect it through ai-max.
+5. Render its example in `M-x component-gallery` and inspect it through compos.
 
 Do not launch or control Chrome, another browser, or a browser automation stack.
 The mode, component gallery, buffers, render state, and key dispatcher are the
@@ -56,8 +56,8 @@ Do not create domain-specific page components when existing small components com
 1. Add focused tests that drive commands through `KeyDispatch.handle_key/1`.
 2. Test opening, interaction, refresh, and desktop restore behavior where applicable.
 3. Run the focused tests, then run the full test suite.
-4. Open the mode inside ai-max. Inspect its buffer text, overlays, render state,
+4. Open the mode inside compos. Inspect its buffer text, overlays, render state,
    selection, and buffer-local state as applicable.
 5. Drive navigation and actions through `KeyDispatch.handle_key/1`. Do not use
-   Chrome or external browser automation for ai-max UI verification.
+   Chrome or external browser automation for compos UI verification.
 6. Re-run `apropos` for the new public definitions and components. Confirm their metadata is correct.

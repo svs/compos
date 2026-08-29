@@ -1,4 +1,4 @@
-# ai-max.el architecture
+# compos.el architecture
 
 ## The one rule
 
@@ -6,9 +6,9 @@
 
 If it loops over bytes, parses, talks to an OS or a network — Elixir primitive.
 If it decides what a key means, what a command does, how a buffer is presented —
-Scheme, in `priv/*.scm` or your `~/.aimax/*.scm`.
+Scheme, in `priv/*.scm` or your `~/.compos/*.scm`.
 
-Policy is a convenience, not a security boundary. ai-max runs for a user who
+Policy is a convenience, not a security boundary. compos runs for a user who
 already controls the machine; that user, their init file, and their agents can
 invoke the mechanisms Scheme exposes, including processes and the shell. The
 permission policy supplies useful defaults, prompts, and auditability, but it
@@ -24,13 +24,13 @@ patterns are load-bearing here, and the rules a new mechanism must follow.
 ## Layers
 
 ```
-apps/aimax_scheme    the extension language (no editor knowledge)
-apps/aimax_core      buffers, editor state, primitives, NIFs, processes
-apps/aimax_ui        Phoenix LiveView frontend (a client, not the editor)
-apps/aimax_rpc       JSON-RPC over ~/.aimax/sock ("eval is the API")
+apps/compos_scheme    the extension language (no editor knowledge)
+apps/compos_core      buffers, editor state, primitives, NIFs, processes
+apps/compos_ui        Phoenix LiveView frontend (a client, not the editor)
+apps/compos_rpc       JSON-RPC over ~/.compos/sock ("eval is the API")
 ```
 
-### aimax_scheme
+### compos_scheme
 R7RS-subset interpreter. Values **are** BEAM terms; closures are Scheme values;
 TCO comes from
 the BEAM. Symbols are `{:sym, name}` — never atoms (user code must not grow the
@@ -41,7 +41,7 @@ Environment frames are reachability-collected. A closure exposed to a host
 primitive or shared binding is published immediately, before the primitive can
 dispatch it to another worker.
 
-### aimax_core
+### compos_core
 - **Buffer** — one GenServer per buffer: rope, point/mark, buffer-local vars,
   read-only flag, Emacs undo (undos push onto the same history; any other
   command breaks the chain, so undo-after-break = redo; 20-char insert
@@ -69,9 +69,9 @@ dispatch it to another worker.
   Session), so commands can call both freely. Routes: minibuffer → completion
   popup → buffer keymap; breaks the undo chain for non-undo commands.
 - **Session** — owns the Scheme interpreter; loads `priv/*.scm`, then
-  `~/.aimax/ai-config.scm`, then `~/.aimax/init.scm`. All commands are Scheme
+  `~/.compos/ai-config.scm`, then `~/.compos/init.scm`. All commands are Scheme
   closures in an ETS table. Ordinary evaluation can use compatibility lanes or
-  one serial worker (`AIMAX_SCHEME_EXECUTION=single_actor`).
+  one serial worker (`COMPOS_SCHEME_EXECUTION=single_actor`).
 - **SchemeActor** — optional isolated Scheme processes. Each owns a private
   environment and serial mailbox. Only data crosses actor boundaries; buffers
   and other editor mechanisms remain shared services. See
@@ -83,7 +83,7 @@ dispatch it to another worker.
   multiplying that without bound. Tasks do not copy the booted Scheme world.
 - **Telemetry** — a bounded core collector for lane and Scheme-task events.
   `telemetry.scm` owns the list mode, filtering, thresholds, and commands.
-- **TS** — Rustler NIF (`native/aimax_ts`): highlight, structural nav, queries.
+- **TS** — Rustler NIF (`native/compos_ts`): highlight, structural nav, queries.
 - **Proc** — PTY processes streaming into buffers (comint).
 - **Endpoint** — named long-lived connections to the world outside the
   editor. Two transports (`exec` a subprocess, `tcp` a socket) and five
@@ -109,12 +109,12 @@ dispatch it to another worker.
 - **Desktop** — snapshot/restore of buffers, every frame's window tree
   (with per-window points), faces. v2 format; reads v1 single-tree files.
 
-### aimax_ui
+### compos_ui
 Pure view. Receives the display payload, renders spans (font-lock scopes,
 region, cursor overlays), pushes keys/geometry/scroll events back. Knows no
 editor logic. A TUI or another frontend would consume the same payload.
 
-### aimax_rpc
+### compos_rpc
 `eval` is the whole API: agents script atomic multi-step actions in one
 round-trip. Everything the GUI can do, the socket can do.
 
@@ -127,15 +127,15 @@ completion. `priv/editor.scm`, `priv/dired.scm`, `priv/themes.scm`.
 
 ## LLM / agents: the plan
 
-Current: `Aimax.Core.LLM` — `(llm prompt handler)`, async, supervised, provider
+Current: `Compos.Core.LLM` — `(llm prompt handler)`, async, supervised, provider
 routing by model prefix (`openrouter:` / `openai:` / bare = anthropic), keys
-from env → `~/.aimax/<provider>-key` → doppler. Everything else (chat buffer,
+from env → `~/.compos/<provider>-key` → doppler. Everything else (chat buffer,
 `M-|` pipes, model menu) is Scheme.
 
 **Backend: adopt `req_llm`.** Hand-rolling providers stops paying as soon as we
 want streaming, tool-calls, and usage accounting. `req_llm` is Req-based (we
 already depend on Req), covers the providers, and keeps our surface intact:
-`Aimax.Core.LLM` stays the only Elixir-side LLM module and keeps exposing
+`Compos.Core.LLM` stays the only Elixir-side LLM module and keeps exposing
 `(llm ...)` — swapping the transport underneath changes no Scheme.
 
 **Agents: don't adopt `jido`.** It's a well-built agent framework, but it brings
@@ -146,11 +146,11 @@ would duplicate both. Revisit only if we want multi-node agent scheduling.
 
 **Driving external agent CLIs (pi, codex, claude):** two mechanisms, both mostly
 built:
-1. **PTY/comint** (`Aimax.Core.Proc`) — already works for any CLI; output
+1. **PTY/comint** (`Compos.Core.Proc`) — already works for any CLI; output
    streams into a buffer the reactor can watch. Good for chat-shaped tools.
 2. **ACP/JSON-RPC over a port** — structured: the editor mediates file reads,
    permission prompts become minibuffer gates, progress becomes buffer updates.
-   This is the aimax `docs/ACP.md` design and the right home for pi/codex.
+   This is the compos `docs/ACP.md` design and the right home for pi/codex.
    Needs: a `Port`-based JSON-RPC client primitive (~100 lines Elixir), then the
    session/permission/tool-dispatch logic in Scheme — `acp.scm` next to
    `dired.scm`.

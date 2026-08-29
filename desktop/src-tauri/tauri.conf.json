@@ -1,15 +1,15 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ai-max",
+  "productName": "compos",
   "version": "0.1.0",
-  "identifier": "io.svs.aimax",
+  "identifier": "io.svs.compos",
   "build": {
     "frontendDist": "ui"
   },
   "app": {
     "windows": [
       {
-        "title": "ai-max.el",
+        "title": "compos.el",
         "url": "splash.html",
         "width": 1280,
         "height": 860,

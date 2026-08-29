@@ -3,7 +3,7 @@
 Written 2026-08-16 (rewritten same day: "components" means UI components,
 not a general symbol catalog). Audience: a coding agent (or human) with NO
 prior context. Verify every name against the live editor
-(`nc -U ~/.aimax/sock`, see SIMPLIFY-SPEC.md Part 0) before you touch
+(`nc -U ~/.compos/sock`, see SIMPLIFY-SPEC.md Part 0) before you touch
 code.
 
 Implementation note, 2026-08-16: the registry, starter vocabulary, gallery,

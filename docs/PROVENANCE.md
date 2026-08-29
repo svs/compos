@@ -1,6 +1,6 @@
 # Provenance
 
-Provenance is the default revision and attribution system for ai-max buffers. It records how accepted content came to exist while allowing humans, agents, modes, and processes to work concurrently.
+Provenance is the default revision and attribution system for compos buffers. It records how accepted content came to exist while allowing humans, agents, modes, and processes to work concurrently.
 
 It is not tied to Git, files, celld, or a particular storage engine.
 

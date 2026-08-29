@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "aimax-shell"
+name = "compos-shell"
 version = "0.1.0"
 dependencies = [
  "tauri",

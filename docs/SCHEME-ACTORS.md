@@ -1,7 +1,7 @@
 # Scheme actors
 
 Scheme has three execution tools. Ordinary editor Scheme remains compatible
-with the lane scheduler. Set `AIMAX_SCHEME_EXECUTION=single_actor` to route all
+with the lane scheduler. Set `COMPOS_SCHEME_EXECUTION=single_actor` to route all
 ordinary evaluation through one serial worker. Shared-world tasks provide
 cheap parallel work; isolated actors provide private state and mailboxes. Both
 are optional in either scheduler mode.
@@ -74,13 +74,13 @@ add a competing transaction model.
 
 `apropos` is safe to run in parallel. Its Scheme rows support literal matching.
 OpenAI vectors add semantic recall when an OpenAI key exists. Catalog vectors
-persist by content hash under the ai-max home. The cache stores no keys or raw
+persist by content hash under the compos home. The cache stores no keys or raw
 catalog text. Searches fall back to lexical matching when embeddings fail.
 Run `M-x apropos-rebuild-embeddings` to clear and refill the complete cache.
 
 Lane telemetry reports execution duration, queue time, and backlog at
-`[:aimax, :lane, :job]`. Shared task telemetry reports duration and status at
-`[:aimax, :scheme, :task]`.
+`[:compos, :lane, :job]`. Shared task telemetry reports duration and status at
+`[:compos, :scheme, :task]`.
 
 Run `M-x telemetry` to open the Scheme-owned event list. `RET` opens every
 field for one event; use `g` to refresh, `/` to filter, and `c` to clear the

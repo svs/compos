@@ -104,7 +104,7 @@ Every work buffer can have a companion chat. The companion knows the buffer grou
 
 - `C-c w` opens the companion chat in its side window.
 - `C-c RET` asks the companion a question without leaving the work buffer.
-- [Ask the companion to summarize this major mode](aimax:training/summarize-mode).
+- [Ask the companion to summarize this major mode](compos:training/summarize-mode).
 
 Try asking: `What can I do in this mode?`, `Which keys matter here?`, or `Explain the text at point.`
 

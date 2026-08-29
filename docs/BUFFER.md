@@ -1,6 +1,6 @@
 # Buffer
 
-This document specifies how an ai-max buffer participates in Provenance. The normative history model is defined in [PROVENANCE.md](PROVENANCE.md).
+This document specifies how an compos buffer participates in Provenance. The normative history model is defined in [PROVENANCE.md](PROVENANCE.md).
 
 ## Identity
 

@@ -7,7 +7,7 @@ Flymake is the first client of that vocabulary.
 
 ## The test
 
-The user can override everything about an annotation from `~/.aimax/init.scm`:
+The user can override everything about an annotation from `~/.compos/init.scm`:
 
 - where it shows (inline, gutter, end of line, echo area, popup, list buffer)
 - how it shows (face, underline style, colour)

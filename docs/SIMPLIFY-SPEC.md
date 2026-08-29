@@ -8,7 +8,7 @@ before touching code. Nothing is started unless marked LANDED.
 
 - **The one rule: Elixir supplies mechanism, Scheme decides policy.**
   Commands, keybindings, modes, chat behavior live in
-  `apps/aimax_core/priv/*.scm`. Before adding Elixir, ask whether
+  `apps/compos_core/priv/*.scm`. Before adding Elixir, ask whether
   Scheme plus one small primitive does it. Usually yes.
 - **The Scheme dialect is NOT Emacs Lisp and NOT R7RS.** Symbols are
   `{:sym, _}` BEAM terms, plists are flat lists, there is no `nil`
@@ -17,11 +17,11 @@ before touching code. Nothing is started unless marked LANDED.
 
   ```sh
   # search the documented public API (name + one-line doc):
-  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(filter (lambda (e) (re-match? \"chat\" (car e))) (public-api))"}}' | nc -U ~/.aimax/sock
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(filter (lambda (e) (re-match? \"chat\" (car e))) (public-api))"}}' | nc -U ~/.compos/sock
   # search ALL globals (undocumented internals):
-  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(filter (lambda (n) (re-match? \"^agent-\" n)) (global-names))"}}' | nc -U ~/.aimax/sock
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(filter (lambda (n) (re-match? \"^agent-\" n)) (global-names))"}}' | nc -U ~/.compos/sock
   # read any userland function's real source:
-  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(describe-function (quote chat-reset))"}}' | nc -U ~/.aimax/sock
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(describe-function (quote chat-reset))"}}' | nc -U ~/.compos/sock
   ```
 
 - **Dev loop**:
@@ -29,21 +29,21 @@ before touching code. Nothing is started unless marked LANDED.
   ```sh
   mix test                                   # all four apps must stay green
   pkill -f "mix run"; sleep 1
-  (mix run --no-halt >> ~/.aimax/daemon.log 2>&1 &); sleep 6
+  (mix run --no-halt >> ~/.compos/daemon.log 2>&1 &); sleep 6
   curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4004/
   ```
 
   A daemon restart is REQUIRED to reload `priv/*.scm`. Editor state
-  restores from `~/.aimax/desktop.etf`.
+  restores from `~/.compos/desktop.etf`.
 - **Tests** drive the editor through `KeyDispatch.handle_key/1` — the
   same path the GUI uses. ACP is tested against `FakeTransport`
-  (`apps/aimax_core/test/aimax/agent_test.exs`) — no adapter binary,
+  (`apps/compos_core/test/compos/agent_test.exs`) — no adapter binary,
   no network. LLM wire is stubbed via app-env seams
   (`:llm_request_fun`, `:llm_chat_fun`). Keep all three seams working.
-- **Known test noise**: 8 aimax_core failures were parked untriaged on
-  2026-08-07, and the aimax_rpc suite flakes in full umbrella runs but
+- **Known test noise**: 8 compos_core failures were parked untriaged on
+  2026-08-07, and the compos_rpc suite flakes in full umbrella runs but
   passes in isolation. FIRST TASK of any session: run
-  `mix test apps/aimax_core/test`, triage what's red, and only then
+  `mix test apps/compos_core/test`, triage what's red, and only then
   trust green.
 - **House style**: terse commits, test everything, verify UI changes in
   a real browser before committing. svs runs MULTIPLE Claude sessions
@@ -56,7 +56,7 @@ before touching code. Nothing is started unless marked LANDED.
 
 ### The why
 
-ai-max talks to LLMs in two ways that grew separately:
+compos talks to LLMs in two ways that grew separately:
 
 1. **Direct API calls** ("the api lane"): the editor calls
    Anthropic/OpenAI over HTTP itself, runs its own tool loop, pays per
@@ -81,7 +81,7 @@ call.
 conversation. Every chat has a *backend*: either the direct API (via
 the `req_llm` library) or an ACP agent (claude-code, codex). The user
 switches a chat's backend at any moment and the conversation just
-continues. aimax — not the backend — decides which tools (MCP servers)
+continues. compos — not the backend — decides which tools (MCP servers)
 each chat sees and which actions need human approval; the default
 posture is "approve for me" (auto-answer everything except a short
 deny-list). Chats reset cleanly, save to files, and restore across
@@ -98,7 +98,7 @@ restart".
 
 **What the user sees**: a transcript above ONE chat box — the
 LiveView input row (`ag-inputrow` in
-`apps/aimax_ui/lib/aimax/ui/editor_live.ex:460`: "YOU … RET sends ·
+`apps/compos_ui/lib/compos/ui/editor_live.ex:460`: "YOU … RET sends ·
 C-RET interrupts"). There is no in-transcript prompt line; the box is
 the only input surface.
 
@@ -146,11 +146,11 @@ the buffer; do keep the marker out of anything a user or model sees
 
 - `'agent-slug` set → delegate to `agent-send`
   (priv/packages/agent.scm:499): the thread lane. A GenServer
-  (`Aimax.Core.Agent`, one per slug) owns the turn: prompt queue,
+  (`Compos.Core.Agent`, one per slug) owns the turn: prompt queue,
   streaming events, permissions, revive-on-dead.
 - else → `chat-send-rich!` (editor.scm:1557): the api lane, inline in
   Scheme: push turn onto `'chat-turns`, call the Elixir tool loop
-  (`Aimax.Core.LLM.complete_tools`), render the reply in a callback.
+  (`Compos.Core.LLM.complete_tools`), render the reply in a callback.
 
 Capability holes, all real:
 
@@ -171,7 +171,7 @@ half-built version of what W3 builds properly, and W3 deletes it.
 
 ### The Elixir pieces (where everything lives)
 
-- **`apps/aimax_core/lib/aimax/core/agent.ex`** (~690 lines) — one
+- **`apps/compos_core/lib/compos/core/agent.ex`** (~690 lines) — one
   GenServer per thread. Backend-agnostic machinery: status machine
   (`:starting → :idle → :running → :needs_attention → :dead`), prompt
   queue (`prompt_queue`, `pop_prompt_queue`), ordered event pipeline
@@ -184,29 +184,29 @@ half-built version of what W3 builds properly, and W3 deletes it.
   (300–350), `handle_frame`/`handle_update` (353–515), `acp_servers`
   config translation (539–563), the `initialize`→`session/new`
   handshake (140–150, 359–394).
-- **`apps/aimax_core/lib/aimax/core/agent/transport.ex`** — a
+- **`apps/compos_core/lib/compos/core/agent/transport.ex`** — a
   behaviour (real stdio Port vs test fake). Precedent for W2's seam.
   Note: the Port deletes `CLAUDECODE` from the child env (the adapter
   refuses to nest inside a Claude Code shell).
-- **`apps/aimax_core/lib/aimax/core/llm.ex`** (~460 lines) — the
+- **`apps/compos_core/lib/compos/core/llm.ex`** (~460 lines) — the
   direct-API engine. Hand-rolled Anthropic HTTP + an
   OpenAI-compatibility translation, the tool_use loop
   (`complete_tools/6`, `tool_loop`, max 25 rounds), prompt-cache
   breakpoints (`cache_last`, `cache_last_tool` — the api lane's
   economics: the whole transcript is re-sent every turn, the cached
-  prefix bills at ~10%), usage → `Aimax.Core.LLMDb` cost ledger. Tool
+  prefix bills at ~10%), usage → `Compos.Core.LLMDb` cost ledger. Tool
   *definitions* live in Scheme; llm.ex converts specs to JSON
   (`tool_json`) and dispatches calls back (`Session.call_fn` for
   Scheme tools; `MCP.call_qualified` in Elixir for `mcp__*` tools so a
   slow fetch never blocks a keystroke).
-- **`apps/aimax_core/lib/aimax/core/mcp.ex` + `mcp/conn.ex`** — MCP
+- **`apps/compos_core/lib/compos/core/mcp.ex` + `mcp/conn.ex`** — MCP
   *client*: stdio/http servers, tools bridged into the registry as
   `mcp__<server>__<tool>`.
-- **`apps/aimax_core/priv/aimax-mcp-proxy.exs`** — the editor as an
+- **`apps/compos_core/priv/compos-mcp-proxy.exs`** — the editor as an
   MCP *server*: stdio bridge to the daemon socket exposing the
   `define-tool!` registry (base64 payloads both ways). ACP agents get
-  aimax's tools by receiving this proxy as an entry in `mcpServers`.
-- **`apps/aimax_core/lib/aimax/core/desktop.ex`** — persistence:
+  compos's tools by receiving this proxy as an entry in `mcpServers`.
+- **`apps/compos_core/lib/compos/core/desktop.ex`** — persistence:
   file buffers save `{path, point, locals}`; non-file buffers save
   `{name, content, point, locals}` (`savable_locals` filters
   non-serializable values, e.g. closures drop out). Restore lays
@@ -241,7 +241,7 @@ half-built version of what W3 builds properly, and W3 deletes it.
 - **`priv/packages/mcp.scm`** — server registry (`mcp-register!`),
   presets (`define-preset!`, `'chat-presets` buffer-local,
   `chat-extra-tool-specs` pulls bridged specs at send time), and the
-  ACP translation (`mcp-acp-server(s)`, `presets-acp-servers` — aimax
+  ACP translation (`mcp-acp-server(s)`, `presets-acp-servers` — compos
   proxy always + preset servers; `"@VAR"` env values resolve to keys
   Elixir-side so config files stay secret-free).
 - **`priv/packages/tools.scm`** — `define-tool!` registry, the 14
@@ -271,7 +271,7 @@ Our posture today: we send `mcpServers`; we advertise
 `fs: {readTextFile: false, writeTextFile: false}` and refuse `fs/*`
 with -32601 (agent.ex:457–459) — this is DELIBERATE and stays: fs/*
 means files, and agents that want live editor state read it through
-the `mcp__aimax__` tools (eval-scheme → `buffer-text` etc.), not
+the `mcp__compos__` tools (eval-scheme → `buffer-text` etc.), not
 through a filesystem shim; we parse `models` from the session/new
 result but DROP `modes` (same payload); we send no `_meta`; every
 permission request blocks until a human presses `C-c C-y`.
@@ -292,7 +292,7 @@ permission request blocks until a human presses `C-c C-y`.
 6. Loading a preset on a live ACP chat silently does nothing
    (`mcpServers` is session-scoped). → W6
 7. claude-code loads the user's own `~/.claude` config (its own MCP
-   servers + permission settings) — aimax is NOT actually in control
+   servers + permission settings) — compos is NOT actually in control
    of the agent's tool surface. → W4
 8. llm.ex hand-rolls provider translation/tool-calling and lacks
    streaming; `req_llm` provides all of it maintained (HANDOFF #43,
@@ -309,7 +309,7 @@ permission request blocks until a human presses `C-c C-y`.
 2. **One send path.** RET always goes through the thread runtime; the
    runtime always has a backend; "api" is just another connector. This
    makes switching *transparent* (no rebinding, no capability cliffs).
-3. **aimax owns tools and permissions, identically on both lanes.**
+3. **compos owns tools and permissions, identically on both lanes.**
    Presets decide tools; ONE Scheme policy function decides
    permissions; backends are configured and answered accordingly.
 4. **Events are the contract.** The runtime emits plist events; Scheme
@@ -322,13 +322,13 @@ permission request blocks until a human presses `C-c C-y`.
 ```
             chat-mode buffer  ('chat-turns = truth, blocks = view, locals = state)
                    │ RET → agent-send, always
-            Aimax.Core.Agent (per-thread GenServer: status, queue, events, mark)
+            Compos.Core.Agent (per-thread GenServer: status, queue, events, mark)
                    │ Backend behaviour
       ┌────────────┴────────────┐
  Backend.ReqLLM            Backend.ACP
  req_llm library:          subprocess adapter (claude-code-acp, codex-acp)
  streams, tool loop,       session/new: mcpServers + _meta (client control)
- usage events              session modes; live editor state via mcp__aimax__
+ usage events              session modes; live editor state via mcp__compos__
       │                         │
       └──────── same tool registry (define-tool! + MCP bridge) ────────┘
              same permission policy (*permission-policy*, Scheme)
@@ -376,16 +376,16 @@ must sit behind a small seam to be interchangeable. Transport is the
 precedent one level down.
 
 **Where**: `agent.ex`; new files
-`lib/aimax/core/agent/backend.ex`,
-`lib/aimax/core/agent/backend/acp.ex`,
-`lib/aimax/core/agent/backend/stub.ex`; connectors in
+`lib/compos/core/agent/backend.ex`,
+`lib/compos/core/agent/backend/acp.ex`,
+`lib/compos/core/agent/backend/stub.ex`; connectors in
 `priv/packages/agent.scm:541–628`.
 
 **Steps**:
 1. Define the behaviour:
 
    ```elixir
-   defmodule Aimax.Core.Agent.Backend do
+   defmodule Compos.Core.Agent.Backend do
      @callback start(config :: map, owner :: pid) :: {:ok, handle :: term} | {:error, term}
      @callback prompt(handle, text :: String.t(), context :: map) :: :ok
      @callback cancel(handle) :: :ok
@@ -416,7 +416,7 @@ precedent one level down.
    user-msg turn-end error model-state status dead`. W3/W4 add
    `usage` and `mode-state`.
 
-**Done when**: `grep -n "jsonrpc\|sessionUpdate" lib/aimax/core/agent.ex`
+**Done when**: `grep -n "jsonrpc\|sessionUpdate" lib/compos/core/agent.ex`
 is empty; agent_test passes unmodified (FakeTransport now under
 Backend.ACP); a new Backend.Stub test drives chunks + a tool card + a
 permission round-trip into a real buffer with no wire.
@@ -430,7 +430,7 @@ hand-rolled lines with a maintained library that adds streaming; (c)
 with both lanes behind the seam, the RET fork — the root of the
 seam-bug class — can be deleted.
 
-**Where**: `llm.ex`; new `lib/aimax/core/agent/backend/req_llm.ex`;
+**Where**: `llm.ex`; new `lib/compos/core/agent/backend/req_llm.ex`;
 the fork in `priv/editor.scm` (chat-send 1277, chat-send-plain! 1414,
 rich helpers 1431–1580); `chat-set-backend` 1386; `agent.ex` llm?
 remnants.
@@ -477,7 +477,7 @@ remnants.
 
 **Done when**:
 `grep -n "chat-send\b\|chat-llm\b\|chat-send-plain\|chat-send-rich" priv/editor.scm`
-is empty and `grep -n "llm_reply\|llm?" lib/aimax/core/agent.ex` is
+is empty and `grep -n "llm_reply\|llm?" lib/compos/core/agent.ex` is
 empty; a test drives an api chat through: streamed reply renders
 incrementally, a tool runs showing a card, RET mid-turn queues and
 pops on turn-end, C-RET cancels, cost lands on `'chat-cost`; no chat
@@ -551,7 +551,7 @@ behaves exactly as today.
 **Why**: ACP's whole design is that the client's behavior is the
 policy — and we exercise one lever of three that matter here.
 Concretely: claude-code loads the user's `~/.claude` settings (own MCP
-servers, own permission config) unless told otherwise, so aimax does
+servers, own permission config) unless told otherwise, so compos does
 not control the agent's tool surface today.
 
 **Where**: `Backend.ACP` (post-W2); `initialize` params
@@ -571,7 +571,7 @@ buffer primitives for fs.
    forwarded VERBATIM as `_meta` in session/new (plist→JSON with the
    existing conventions). Ship the claude-code connector with
    `settingSources: []` inside `_meta.claudeCode.options` so the
-   adapter loads NO user-level config — aimax's mcpServers and answers
+   adapter loads NO user-level config — compos's mcpServers and answers
    are the only sources. (This is also the documented hook for
    per-connector permissionMode / allowedTools / systemPrompt from
    init.scm.) Verify against claude-agent-acp's README/source for the
@@ -579,7 +579,7 @@ buffer primitives for fs.
 **Explicit non-goal — fs/* stays refused.** An earlier draft proposed
 serving `fs/read_text_file`/`fs/write_text_file` from live buffers.
 Rejected: fs/* means files; agents that want live editor state already
-have it through the `mcp__aimax__` tools (eval-scheme, `buffer-text`,
+have it through the `mcp__compos__` tools (eval-scheme, `buffer-text`,
 the whole registry). Keep advertising `fs: false` and answering -32601
 so adapters use their own file access. Do not build a filesystem shim
 over buffers.
@@ -727,7 +727,7 @@ chat revives on RET with no stale queue/waiting/permission artifacts.
 
 - **The keymap lives only in Editor GenServer state**, bound at Scheme
   load. ANY Editor crash → every key "undefined" until daemon restart.
-  Durable fix (ETS like `:aimax_commands`, or replay on restart) is
+  Durable fix (ETS like `:compos_commands`, or replay on restart) is
   worth doing early — this work exercises Editor hard.
 - **claude-code-acp 0.4.5 does NOT stream** (whole-message chunks);
   codex-acp streams token deltas. The renderer must assume neither.
@@ -767,5 +767,5 @@ chat revives on RET with no stale queue/waiting/permission artifacts.
   (fresh session, deferred schemas). Cosmetic. A resume story (ACP
   `session/load`, `capabilities :resume`) would remove it — follow-up,
   NOT this spec.
-- 8 untriaged aimax_core failures parked 2026-08-07 — triage before
+- 8 untriaged compos_core failures parked 2026-08-07 — triage before
   starting, or green means nothing.

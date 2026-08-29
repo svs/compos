@@ -30,12 +30,12 @@ The rest come from reading the source.
    `meta` before the append in `catalog-register!`.
 
 4. **A failed `thread/start` wedges a chat at running forever.**
-   `lib/aimax/core/agent/backend/codex_app_server.ex:264`. Only a
+   `lib/compos/core/agent/backend/codex_app_server.ex:264`. Only a
    `turn/start` error emits `turn-failed`. Fix: widen the guard to any
    errored method that holds a `pending_prompt`, and clear it.
 
 5. **Mid-turn steering text reaches the model as Elixir inspect output.**
-   `lib/aimax/core/llm.ex:566`. `to_req_msg/1` matches only tool-result
+   `lib/compos/core/llm.ex:566`. `to_req_msg/1` matches only tool-result
    shapes, so a steered text block goes on the wire as
    `%{"text" => ...}`. The record keeps it, so every later turn replays
    it. Fix: add a text-block clause and make the fallback an error.
@@ -46,22 +46,22 @@ The rest come from reading the source.
    misses on another. Fix: `Jason.encode!(input || %{})`.
 
 7. **`Candidates.normalize/1` has no fallback clause and runs inside the
-   Editor process.** `lib/aimax/core/candidates.ex:43`. One odd candidate
+   Editor process.** `lib/compos/core/candidates.ex:43`. One odd candidate
    from Scheme takes down the Editor, which loses every frame's window
    tree, local keymaps, kill ring, and faces. Fix: a terminal clause.
 
 8. **A corrupt checkpoint reads as empty and then overwrites the good
-   copy.** `lib/aimax/core/buffer.ex:894` with `buffer_store.ex:209`.
+   copy.** `lib/compos/core/buffer.ex:894` with `buffer_store.ex:209`.
    Fix: log, rename the file to `.etf.bad`, and refuse to write a
    checkpoint for a buffer whose restore failed.
 
 9. **Buffer never traps exits, so `terminate/2` almost never
-   checkpoints.** `lib/aimax/core/buffer.ex:416`. A daemon restart loses
+   checkpoints.** `lib/compos/core/buffer.ex:416`. A daemon restart loses
    up to 1500ms of edits per buffer. Fix: trap exits, or fan out
    `Buffer.checkpoint_now/1` from `Daemon.restart/0`.
 
 10. **The RPC server interpolates a name into Scheme source.**
-    `apps/aimax_rpc/lib/aimax/rpc/server.ex:186`. A quote in the name
+    `apps/compos_rpc/lib/compos/rpc/server.ex:186`. A quote in the name
     injects code. Fix: pass it as an argument through `call_named`.
 
 11. **`list-row-line` applies `#f` as a procedure.**
@@ -76,17 +76,17 @@ The rest come from reading the source.
     for the reply to avoid it, which hides it rather than fixes it.
 
 13. **Server-initiated MCP requests get no reply.**
-    `lib/aimax/core/mcp/conn.ex:316`. Anything but `ping` is dropped, so
+    `lib/compos/core/mcp/conn.ex:316`. Anything but `ping` is dropped, so
     the server waits forever. `acp.ex:357` handles the same case with
     `-32601`. Fix: an id-bearing catch-all.
 
-14. **LSP requests have no timeout.** `lib/aimax/core/lsp/conn.ex:517`. A
+14. **LSP requests have no timeout.** `lib/compos/core/lsp/conn.ex:517`. A
     silent server roots a Scheme closure forever. `browser.ex:200` does
     this right. Fix: a per-request timer, plus a catch-all clause in
     `dispatch/2` for a response with neither error nor result.
 
 15. **The face CSS path escapes its own block.**
-    `apps/aimax_ui/lib/aimax/ui/editor_live.ex:2057`. `vars` interpolates
+    `apps/compos_ui/lib/compos/ui/editor_live.ex:2057`. `vars` interpolates
     a face name unfiltered while `classes` filters it. A name containing
     `}` rewrites the whole page's CSS. Fix: apply the same filter, and
     reject values matching `[;}{<]`.
@@ -189,13 +189,13 @@ The buffer, overlay, and fold layer is clean. No character count reaches
     Scheme-supplied descriptor per render mode, carried in the payload.
 
 35. **The browser arbitrates keymap precedence.**
-    `apps/aimax_ui/lib/aimax/ui/layouts.ex:856` keeps a hand-copy of
+    `apps/compos_ui/lib/compos/ui/layouts.ex:856` keeps a hand-copy of
     fifteen `s-*` bindings, and `:1494` intercepts arrows and `C-n` and
     `C-p` before the key event. A new binding in Scheme cannot fire and
     nothing says why. Fix: ship both lists in `render_state`.
 
 36. **`completion_key/2` hardcodes DEL and SPC three lines under a
-    comment saying it does not.** `lib/aimax/core/key_dispatch.ex:68`.
+    comment saying it does not.** `lib/compos/core/key_dispatch.ex:68`.
     Fix: bind them in the completion keymap and delete the branch.
 
 37. **Word motion and completion ranking are Elixir policy.**
@@ -223,7 +223,7 @@ The buffer, overlay, and fold layer is clean. No character count reaches
     columns differently, so anyone reading the dead one gets it wrong.
 
 41. `Keys` defines `updated()` twice in one object literal:
-    `apps/aimax_ui/lib/aimax/ui/layouts.ex:1288` and `:1779`. JavaScript
+    `apps/compos_ui/lib/compos/ui/layouts.ex:1288` and `:1779`. JavaScript
     discards the first, and the two bodies have drifted.
 
 42. `editor.ex:381` writes the frame map literal twice.

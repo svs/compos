@@ -21,9 +21,9 @@ erl_crash.dump
 
 
 # rust nif build artifacts
-apps/aimax_core/native/aimax_ts/target/
-apps/aimax_core/native/aimax_loro/target/
-apps/aimax_core/priv/native/
+apps/compos_core/native/compos_ts/target/
+apps/compos_core/native/compos_loro/target/
+apps/compos_core/priv/native/
 desktop/src-tauri/target/
 burrito_out/
 

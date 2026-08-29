@@ -1,4 +1,4 @@
-defmodule Aimax.MixProject do
+defmodule Compos.MixProject do
   use Mix.Project
 
   def project do
@@ -14,12 +14,12 @@ defmodule Aimax.MixProject do
 
   defp releases do
     [
-      aimax: [
+      compos: [
         applications: [
-          aimax_scheme: :permanent,
-          aimax_core: :permanent,
-          aimax_ui: :permanent,
-          aimax_rpc: :permanent
+          compos_scheme: :permanent,
+          compos_core: :permanent,
+          compos_ui: :permanent,
+          compos_rpc: :permanent
         ],
         include_executables_for: [:unix],
         steps: [:assemble, &Burrito.wrap/1],

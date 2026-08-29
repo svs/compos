@@ -1,6 +1,6 @@
 # Scheme threading
 
-ai-max evaluates Scheme in BEAM processes. The processes share one live Scheme
+compos evaluates Scheme in BEAM processes. The processes share one live Scheme
 world unless code starts an isolated actor. Buffers remain independent state
 owners.
 
@@ -18,7 +18,7 @@ The runtime has these execution paths:
 | `SchemeActor` | Private Scheme environment | Serial mailbox | Isolated long-lived state and supervision |
 | Buffer process | One buffer | Serial mailbox | Text, point, locals, provenance, and edits |
 
-`AIMAX_SCHEME_EXECUTION=single_actor` routes ordinary Scheme evaluation through
+`COMPOS_SCHEME_EXECUTION=single_actor` routes ordinary Scheme evaluation through
 one serial worker. Compatibility mode routes ordinary evaluation through serial
 lanes. Shared-world tasks and isolated actors remain available in both modes.
 
@@ -55,7 +55,7 @@ to `(read external)`. A missing or false hint stays `(unknown external)`.
 Trusted config can add `'read-only #t` to one MCP server spec. The setting
 marks every tool as read-only. A `'tool-effects` plist can declare exceptions.
 
-The ai-max MCP proxy emits `readOnlyHint` from each Scheme tool's effects.
+The compos MCP proxy emits `readOnlyHint` from each Scheme tool's effects.
 External agents such as Codex can therefore read the same declaration.
 The proxy starts consecutive read-only calls together. An unknown or write
 call waits for earlier reads and blocks later reads until it finishes.
@@ -166,7 +166,7 @@ signatures, commands, keys, settings, components, recipes, package metadata,
 domains, and effects.
 
 Literal search stays in Scheme. OpenAI embeddings add semantic results when a
-key exists. Catalog vectors persist by content hash in the ai-max home. API or
+key exists. Catalog vectors persist by content hash in the compos home. API or
 cache failures leave the literal result path unchanged.
 
 The current implementation derives normalized apropos rows from several
@@ -230,13 +230,13 @@ the displayed row count.
 
 | File | Responsibility |
 | --- | --- |
-| `apps/aimax_core/lib/aimax/core/lane.ex` | Ordinary queues, routing, timeouts, and lane telemetry |
-| `apps/aimax_core/lib/aimax/core/session.ex` | Scheme entry points, primitives, roots, and GC timer |
-| `apps/aimax_core/lib/aimax/core/scheme_task.ex` | Shared-world one-shot processes |
-| `apps/aimax_core/lib/aimax/core/scheme_read_limiter.ex` | Global read admission limit |
-| `apps/aimax_core/lib/aimax/core/scheme_actor.ex` | Private Scheme actors and mailboxes |
-| `apps/aimax_core/lib/aimax/core/llm.ex` | Effect-aware tool-round dispatch |
-| `apps/aimax_scheme/lib/aimax/scheme.ex` | The `Scheme.exec` boundary |
-| `apps/aimax_scheme/lib/aimax/scheme/env.ex` | Local frames, shared ETS rows, caches, publication, and GC coordination |
-| `apps/aimax_core/priv/packages/tools.scm` | Tool effects and apropos policy |
-| `apps/aimax_core/priv/packages/telemetry.scm` | Telemetry user interface |
+| `apps/compos_core/lib/compos/core/lane.ex` | Ordinary queues, routing, timeouts, and lane telemetry |
+| `apps/compos_core/lib/compos/core/session.ex` | Scheme entry points, primitives, roots, and GC timer |
+| `apps/compos_core/lib/compos/core/scheme_task.ex` | Shared-world one-shot processes |
+| `apps/compos_core/lib/compos/core/scheme_read_limiter.ex` | Global read admission limit |
+| `apps/compos_core/lib/compos/core/scheme_actor.ex` | Private Scheme actors and mailboxes |
+| `apps/compos_core/lib/compos/core/llm.ex` | Effect-aware tool-round dispatch |
+| `apps/compos_scheme/lib/compos/scheme.ex` | The `Scheme.exec` boundary |
+| `apps/compos_scheme/lib/compos/scheme/env.ex` | Local frames, shared ETS rows, caches, publication, and GC coordination |
+| `apps/compos_core/priv/packages/tools.scm` | Tool effects and apropos policy |
+| `apps/compos_core/priv/packages/telemetry.scm` | Telemetry user interface |

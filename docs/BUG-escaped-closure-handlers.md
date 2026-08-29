@@ -73,7 +73,7 @@ into its own eval and the same insert gives `"4 words · 1 min"`.
 
 ## Root cause
 
-`apps/aimax_scheme/lib/aimax/scheme/env.ex` is a two-tier store, and says
+`apps/compos_scheme/lib/compos/scheme/env.ex` is a two-tier store, and says
 so in its own moduledoc: new frames live in a process-local map during an
 eval and are bulk-flushed to the shared ETS table **when the eval exits**.
 That is deliberate — frame churn is the interpreter's hot path and an ETS
@@ -86,10 +86,10 @@ flush", which is true — but by then the event is gone.
 
 The path:
 
-1. `on-change!` (`apps/aimax_core/lib/aimax/core/session.ex:1800`) registers
+1. `on-change!` (`apps/compos_core/lib/compos/core/session.ex:1800`) registers
    the Scheme closure with `Reactor.on_change`, `debounce: 30`.
 2. The change fires the rule; `Reactor.handle_info({:fire, id}, …)`
-   (`apps/aimax_core/lib/aimax/core/reactor.ex:97`) clears `pending` and runs
+   (`apps/compos_core/lib/compos/core/reactor.ex:97`) clears `pending` and runs
    the handler in `Task.Supervisor.start_child(…)`.
 3. The handler resolves the closure's frame from another process. The frame
    is still in the registering eval's `local` map, so `env.ex` raises. The

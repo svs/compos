@@ -30,7 +30,7 @@ it accumulates across invocations rather than holding only the last run.
 Use it for the re-check loop after a fix:
 
 ```sh
-cd apps/aimax_core && mix test --failed
+cd apps/compos_core && mix test --failed
 ```
 
 It answers "what failed when I last ran it". It cannot answer "was this
@@ -46,7 +46,7 @@ suite and waiting to see if a name comes back costs four minutes a
 sample; this costs one test:
 
 ```sh
-cd apps/aimax_core && mix test --repeat-until-failure 50 test/aimax/switcher_sleep_test.exs
+cd apps/compos_core && mix test --repeat-until-failure 50 test/compos/switcher_sleep_test.exs
 ```
 
 ## How to use it
@@ -93,67 +93,67 @@ one run and not the next. Diff the NAMES, never the number.
 
 | count | test |
 |---|---|
-| 10/10 | `test C-h b lists local bindings before global ones (Aimax.HelpTest)` |
-| 10/10 | `test C-k kills the dormant buffer the row names (Aimax.SwitcherSleepTest)` |
-| 10/10 | `test C-x b is history first: previous buffer defaults, containers ride under it (Aimax.EditorTest)` |
-| 10/10 | `test C-x p s opens the project's scratch, tags the project's buffers, and toggles back (Aimax.ProjectScratchTest)` |
-| 10/10 | `test RET copies only the current secret value (Aimax.DopplerTest)` |
-| 10/10 | `test RET on a name that matches nothing founds a group from the windows (Aimax.EditorTest)` |
-| 10/10 | `test a group you switched to is a history row; its name finds it and its members (Aimax.EditorTest)` |
-| 10/10 | `test a killed file member comes back with content, not an empty shell (Aimax.EditorTest)` |
-| 10/10 | `test a project-rooted group offers its files, and the card defaults to dired (Aimax.SwitchModalTest)` |
-| 10/10 | `test a row for a buffer killed elsewhere leaves the list on the next command (Aimax.SwitcherSleepTest)` |
-| 10/10 | `test a stale off-screen buffer catches up when the switcher shows it (Aimax.EditorTest)` |
-| 10/10 | `test a verb acts on the nearest row when point sits in the chrome (Aimax.SwitcherSleepTest)` |
-| 10/10 | `test api -> codex -> claude-code -> api on ONE chat: everything survives (Aimax.SwitchTest)` |
-| 10/10 | `test buffer groups: C-c g tags members, C-c q talks to the group's one chat (Aimax.EditorTest)` |
-| 10/10 | `test dired (pure Scheme userland) / matches the marginalia too, and C-g puts the listing back (Aimax.EditorTest)` |
-| 10/10 | `test marginalia the switcher narrows by the annotation the marginalia supplies (Aimax.MarginaliaProjectTest)` |
-| 10/10 | `test mouse rows select and action controls run the keyboard commands (Aimax.DopplerTest)` |
-| 10/10 | `test narrowing to a dormant candidate wakes it; ESC puts it back to sleep (Aimax.SwitcherSleepTest)` |
-| 10/10 | `test opens as a grouped primary buffer, never a popup (Aimax.DopplerTest)` |
-| 10/10 | `test returning from a page C-x b is the editor's own command, redefined rather than rebound (Aimax.ChromeTest)` |
-| 10/10 | `test the modal switcher C-t puts the marked buffers in a group, and an empty answer removes it (Aimax.EditorTest)` |
-| 10/10 | `test the modal switcher lists with the buffer annotation, narrows by mode, C-k kills, RET visits (Aimax.EditorTest)` |
-| 10/10 | `test the modal switcher typing and the arrows preview the highlighted buffer in the home window (Aimax.EditorTest)` |
-| 10/10 | `test which-key panel appears for pending prefix (Aimax.EditorTest)` |
-| 9/10 | `test C-c s opens a plain scratch beside any ordinary buffer and toggles back (Aimax.ScratchTest)` |
-| 9/10 | `test RET opens distinct grouped detail buffers through the real key path (Aimax.SentryTest)` |
-| 9/10 | `test a save reloads every running app (Aimax.AppPreviewTest)` |
-| 8/10 | `test C-c s opens a scratch chat that carries the coding presets (Aimax.CodeModeTest)` |
-| 8/10 | `test M-x code-mode joins a group, loads the coding presets, and turns on llm-mode (Aimax.CodeModeTest)` |
-| 8/10 | `test marked switcher buffers pull as one operation (Aimax.GroupSwitchCommandTest)` |
-| 8/10 | `test restore-minor-modes! re-runs setup idempotently (reload path) (Aimax.CodeModeTest)` |
-| 7/10 | `test C-c RET talks to the companion without leaving the document (Aimax.EditorTest)` |
-| 7/10 | `test C-c w opens the optional companion for the writing workspace (Aimax.WritingTest)` |
-| 7/10 | `test code-mode asks before it assigns this frame a worktree, group, and chat (Aimax.CodeModeTest)` |
-| 7/10 | `test enabling writing mode opens its grouped plain scratch beside the preview (Aimax.WritingTest)` |
-| 5/10 | `test M-. in a help page opens the source of the name at point (Aimax.HelpTest)` |
-| 5/10 | `test a name in a help page is a link to its source, and the link opens it (Aimax.HelpTest)` |
-| 5/10 | `test pull adds the current group without switching context (Aimax.GroupSwitchCommandTest)` |
-| 4/10 | `test C-c q founds a group and asks its one chat from the minibuffer (Aimax.EditorTest)` |
-| 4/10 | `test openai models run the tool loop like every other model (Aimax.EditorTest)` |
-| 3/10 | `test chat opens the group companion; RET sends, reply appends (Aimax.EditorTest)` |
-| 3/10 | `test the scroll keys move an html preview page instead of point (Aimax.HelpTest)` |
-| 2/10 | `test M-? with no name at point still shows the buffer, its mode and its keys (Aimax.HelpTest)` |
-| 1/10 | `test *agents* fleet: sorted by attention, y answers the current line's thread (Aimax.AgentTest)` |
-| 1/10 | `test C-c C-v toggles the source of a generated page, C-h m describes a plain buffer (Aimax.HelpTest)` |
-| 1/10 | `test C-g cancels every queued turn and finalizes running tool cards (Aimax.AgentTest)` |
-| 1/10 | `test C-h a searches the editor and renders the hits as a page (Aimax.HelpTest)` |
-| 1/10 | `test C-h k over an unbound key says so, and the capture ends (Aimax.HelpTest)` |
-| 1/10 | `test M-? describes a public function at point by its signature (Aimax.HelpTest)` |
-| 1/10 | `test M-? over a name the editor does not know falls back to the apropos hits (Aimax.HelpTest)` |
-| 1/10 | `test M-? over prose says nothing about it and describes the buffer instead (Aimax.HelpTest)` |
-| 1/10 | `test a heading takes no selection and no count (Aimax.GroupSwitchCommandTest)` |
-| 1/10 | `test cancelled group creation changes no group state (Aimax.GroupSwitchCommandTest)` |
-| 1/10 | `test m marks; a verb acts on every marked chat, not the line at point (Aimax.AgentTest)` |
-| 1/10 | `test outbound — Scheme addresses a tab a message to a tab goes out as an overlay op (Aimax.ChromeTest)` |
-| 1/10 | `test pop removes only the current group and replaces a visible buffer (Aimax.GroupSwitchCommandTest)` |
-| 1/10 | `test project-ripgrep RET on the first match opens that file at that line (Aimax.ProjectSearchTest)` |
-| 1/10 | `test returning from a page a buffer already on screen is selected, not pulled somewhere else (Aimax.ChromeTest)` |
-| 1/10 | `test session/new carries our mcpServers and _meta; the adapter loads no user config (Aimax.AgentTest)` |
-| 1/10 | `test the activity row shows work in progress and clears at turn end (Aimax.Ui.EditorLiveTest)` |
-| 1/10 | `test the catalog new bundled declarations cannot silently expand the Luna backfill (Aimax.AproposTest)` |
-| 1/10 | `test the catalog the bundled backfill leaves no unknown metadata (Aimax.AproposTest)` |
-| 1/10 | `test the locals partition (W8) a restored chat sheds its dead runtime state; a live one keeps it (Aimax.ChatResetTest)` |
-| 1/10 | `test the mode setup rebuilds the buffer from its locals (Aimax.GitDiffTest)` |
+| 10/10 | `test C-h b lists local bindings before global ones (Compos.HelpTest)` |
+| 10/10 | `test C-k kills the dormant buffer the row names (Compos.SwitcherSleepTest)` |
+| 10/10 | `test C-x b is history first: previous buffer defaults, containers ride under it (Compos.EditorTest)` |
+| 10/10 | `test C-x p s opens the project's scratch, tags the project's buffers, and toggles back (Compos.ProjectScratchTest)` |
+| 10/10 | `test RET copies only the current secret value (Compos.DopplerTest)` |
+| 10/10 | `test RET on a name that matches nothing founds a group from the windows (Compos.EditorTest)` |
+| 10/10 | `test a group you switched to is a history row; its name finds it and its members (Compos.EditorTest)` |
+| 10/10 | `test a killed file member comes back with content, not an empty shell (Compos.EditorTest)` |
+| 10/10 | `test a project-rooted group offers its files, and the card defaults to dired (Compos.SwitchModalTest)` |
+| 10/10 | `test a row for a buffer killed elsewhere leaves the list on the next command (Compos.SwitcherSleepTest)` |
+| 10/10 | `test a stale off-screen buffer catches up when the switcher shows it (Compos.EditorTest)` |
+| 10/10 | `test a verb acts on the nearest row when point sits in the chrome (Compos.SwitcherSleepTest)` |
+| 10/10 | `test api -> codex -> claude-code -> api on ONE chat: everything survives (Compos.SwitchTest)` |
+| 10/10 | `test buffer groups: C-c g tags members, C-c q talks to the group's one chat (Compos.EditorTest)` |
+| 10/10 | `test dired (pure Scheme userland) / matches the marginalia too, and C-g puts the listing back (Compos.EditorTest)` |
+| 10/10 | `test marginalia the switcher narrows by the annotation the marginalia supplies (Compos.MarginaliaProjectTest)` |
+| 10/10 | `test mouse rows select and action controls run the keyboard commands (Compos.DopplerTest)` |
+| 10/10 | `test narrowing to a dormant candidate wakes it; ESC puts it back to sleep (Compos.SwitcherSleepTest)` |
+| 10/10 | `test opens as a grouped primary buffer, never a popup (Compos.DopplerTest)` |
+| 10/10 | `test returning from a page C-x b is the editor's own command, redefined rather than rebound (Compos.ChromeTest)` |
+| 10/10 | `test the modal switcher C-t puts the marked buffers in a group, and an empty answer removes it (Compos.EditorTest)` |
+| 10/10 | `test the modal switcher lists with the buffer annotation, narrows by mode, C-k kills, RET visits (Compos.EditorTest)` |
+| 10/10 | `test the modal switcher typing and the arrows preview the highlighted buffer in the home window (Compos.EditorTest)` |
+| 10/10 | `test which-key panel appears for pending prefix (Compos.EditorTest)` |
+| 9/10 | `test C-c s opens a plain scratch beside any ordinary buffer and toggles back (Compos.ScratchTest)` |
+| 9/10 | `test RET opens distinct grouped detail buffers through the real key path (Compos.SentryTest)` |
+| 9/10 | `test a save reloads every running app (Compos.AppPreviewTest)` |
+| 8/10 | `test C-c s opens a scratch chat that carries the coding presets (Compos.CodeModeTest)` |
+| 8/10 | `test M-x code-mode joins a group, loads the coding presets, and turns on llm-mode (Compos.CodeModeTest)` |
+| 8/10 | `test marked switcher buffers pull as one operation (Compos.GroupSwitchCommandTest)` |
+| 8/10 | `test restore-minor-modes! re-runs setup idempotently (reload path) (Compos.CodeModeTest)` |
+| 7/10 | `test C-c RET talks to the companion without leaving the document (Compos.EditorTest)` |
+| 7/10 | `test C-c w opens the optional companion for the writing workspace (Compos.WritingTest)` |
+| 7/10 | `test code-mode asks before it assigns this frame a worktree, group, and chat (Compos.CodeModeTest)` |
+| 7/10 | `test enabling writing mode opens its grouped plain scratch beside the preview (Compos.WritingTest)` |
+| 5/10 | `test M-. in a help page opens the source of the name at point (Compos.HelpTest)` |
+| 5/10 | `test a name in a help page is a link to its source, and the link opens it (Compos.HelpTest)` |
+| 5/10 | `test pull adds the current group without switching context (Compos.GroupSwitchCommandTest)` |
+| 4/10 | `test C-c q founds a group and asks its one chat from the minibuffer (Compos.EditorTest)` |
+| 4/10 | `test openai models run the tool loop like every other model (Compos.EditorTest)` |
+| 3/10 | `test chat opens the group companion; RET sends, reply appends (Compos.EditorTest)` |
+| 3/10 | `test the scroll keys move an html preview page instead of point (Compos.HelpTest)` |
+| 2/10 | `test M-? with no name at point still shows the buffer, its mode and its keys (Compos.HelpTest)` |
+| 1/10 | `test *agents* fleet: sorted by attention, y answers the current line's thread (Compos.AgentTest)` |
+| 1/10 | `test C-c C-v toggles the source of a generated page, C-h m describes a plain buffer (Compos.HelpTest)` |
+| 1/10 | `test C-g cancels every queued turn and finalizes running tool cards (Compos.AgentTest)` |
+| 1/10 | `test C-h a searches the editor and renders the hits as a page (Compos.HelpTest)` |
+| 1/10 | `test C-h k over an unbound key says so, and the capture ends (Compos.HelpTest)` |
+| 1/10 | `test M-? describes a public function at point by its signature (Compos.HelpTest)` |
+| 1/10 | `test M-? over a name the editor does not know falls back to the apropos hits (Compos.HelpTest)` |
+| 1/10 | `test M-? over prose says nothing about it and describes the buffer instead (Compos.HelpTest)` |
+| 1/10 | `test a heading takes no selection and no count (Compos.GroupSwitchCommandTest)` |
+| 1/10 | `test cancelled group creation changes no group state (Compos.GroupSwitchCommandTest)` |
+| 1/10 | `test m marks; a verb acts on every marked chat, not the line at point (Compos.AgentTest)` |
+| 1/10 | `test outbound — Scheme addresses a tab a message to a tab goes out as an overlay op (Compos.ChromeTest)` |
+| 1/10 | `test pop removes only the current group and replaces a visible buffer (Compos.GroupSwitchCommandTest)` |
+| 1/10 | `test project-ripgrep RET on the first match opens that file at that line (Compos.ProjectSearchTest)` |
+| 1/10 | `test returning from a page a buffer already on screen is selected, not pulled somewhere else (Compos.ChromeTest)` |
+| 1/10 | `test session/new carries our mcpServers and _meta; the adapter loads no user config (Compos.AgentTest)` |
+| 1/10 | `test the activity row shows work in progress and clears at turn end (Compos.Ui.EditorLiveTest)` |
+| 1/10 | `test the catalog new bundled declarations cannot silently expand the Luna backfill (Compos.AproposTest)` |
+| 1/10 | `test the catalog the bundled backfill leaves no unknown metadata (Compos.AproposTest)` |
+| 1/10 | `test the locals partition (W8) a restored chat sheds its dead runtime state; a live one keeps it (Compos.ChatResetTest)` |
+| 1/10 | `test the mode setup rebuilds the buffer from its locals (Compos.GitDiffTest)` |

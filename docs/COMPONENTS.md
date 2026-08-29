@@ -1,6 +1,6 @@
 # UI components
 
-This is the contract for agents building ai-max block-mode views. The live
+This is the contract for agents building compos block-mode views. The live
 catalog is authoritative; this file explains how to choose from it.
 
 ## Choose before inventing

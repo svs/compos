@@ -1,6 +1,6 @@
-# ai-max browser extension
+# compos browser extension
 
-ai-max's keys and commands in every tab, and a wire so the editor can drive any
+compos's keys and commands in every tab, and a wire so the editor can drive any
 of them.
 
 - <kbd>M-x</kbd> in any page completes over the editor's real command table.
@@ -11,7 +11,7 @@ of them.
   dispatcher the GUI uses.
 - From Scheme, any tab is addressable: run JS in it, read it, put a line on its
   screen, type into it for real.
-- `M-x browse` reads a page as text inside ai-max. ai-max embeds no live web
+- `M-x browse` reads a page as text inside compos. compos embeds no live web
   page. A live site belongs in a real tab: press <kbd>o</kbd> in a browse
   buffer to open it beside the editor.
 
@@ -23,26 +23,26 @@ of them.
 
 ## Getting there
 
-Type **`aimax`** in the address bar, then space or Tab. It lists the daemons
+Type **`compos`** in the address bar, then space or Tab. It lists the daemons
 that are actually running, by name, and Enter takes you to one — focusing an
-existing ai-max tab rather than opening a second (a second tab on the same
+existing compos tab rather than opening a second (a second tab on the same
 daemon is a second frame, which is rarely what you meant).
 
-**Alt+Shift+A** jumps to this window's ai-max directly. Rebind it at
+**Alt+Shift+A** jumps to this window's compos directly. Rebind it at
 `chrome://extensions/shortcuts`.
 
-## One window, one ai-max
+## One window, one compos
 
-Each ai-max page tells the extension which frame it is, and the extension tells
+Each compos page tells the extension which frame it is, and the extension tells
 the daemon which browser window that frame sits in. The binding decides where
 things happen:
 
 - `C-x b` in a page offers the tabs of **that** window, beside the buffers.
 - A tab the editor opens lands in the frame's own window. A chat on the left
   screen answers there, not in whichever window Chrome focused last.
-- **Alt+Shift+A** and a confirmed prompt raise that window's ai-max tab.
+- **Alt+Shift+A** and a confirmed prompt raise that window's compos tab.
 
-Drag the ai-max tab to another window and the binding follows it.
+Drag the compos tab to another window and the binding follows it.
 
 No `/etc/hosts` entry and no port-80 listener: a hosts file maps a name to an
 address, not a port, and Chrome treats a bare word as a search anyway.
@@ -57,11 +57,11 @@ connected, and turns key capture off if <kbd>C-x</kbd> is fighting a site.
 Run a second daemon like this:
 
 ```sh
-AIMAX_HOME=~/.aimax-work AIMAX_PORT=4005 AIMAX_NAME=work mix run --no-halt
+COMPOS_HOME=~/.compos-work COMPOS_PORT=4005 COMPOS_NAME=work mix run --no-halt
 ```
 
-`AIMAX_HOME` is enough on its own: the RPC socket and desktop file follow it, so
-two daemons never fight over `~/.aimax/sock`. See `config/runtime.exs`.
+`COMPOS_HOME` is enough on its own: the RPC socket and desktop file follow it, so
+two daemons never fight over `~/.compos/sock`. See `config/runtime.exs`.
 
 Unlike the earlier browse-in-a-buffer version, a daemon may address **any** tab,
 not only ones it opened — that's the point of an ambient layer.
@@ -70,7 +70,7 @@ not only ones it opened — that's the point of an ambient layer.
 
 The `gemini-nano` connector runs Chrome's built-in Prompt API in the active tab.
 Use a Chrome build with `LanguageModel` enabled, load this extension, then set
-the connector for new chats in `~/.aimax/init.scm`:
+the connector for new chats in `~/.compos/init.scm`:
 
 ```scheme
 (set! *default-connector* "gemini-nano")
@@ -105,7 +105,7 @@ Two mechanisms, deliberately:
   `el.click()` and `dispatchEvent` carry `isTrusted: false`, which a hardened
   page can check; `Input.dispatchKeyEvent` does not. The extension attaches on
   demand and **detaches after 30s idle**, so the "started debugging this
-  browser" bar isn't permanent — it appears while ai-max is typing and goes
+  browser" bar isn't permanent — it appears while compos is typing and goes
   away again.
 
 ## Limits

@@ -5,8 +5,8 @@ Paste everything below into a new session.
 ---
 
 Continue moving ExUnit tests that test **Scheme policy** into the Scheme
-test suite at `apps/aimax_core/priv/tests/*.scm`. Read
-`apps/aimax_core/priv/packages/test.scm` first — it is the framework, and
+test suite at `apps/compos_core/priv/tests/*.scm`. Read
+`apps/compos_core/priv/packages/test.scm` first — it is the framework, and
 its header explains the shape.
 
 ## Why
@@ -145,16 +145,16 @@ to show; mine passed until a buffer with a live isearch was on screen and
 Fast loop, no boot:
 
 ```sh
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(begin (load-tests!) (filter (lambda (r) (not (null? (nth 1 r)))) (map (lambda (n) (list n (run-test n))) (test-names))))"}}' | nc -U ~/.aimax/sock
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(begin (load-tests!) (filter (lambda (r) (not (null? (nth 1 r)))) (map (lambda (n) (list n (run-test n))) (test-names))))"}}' | nc -U ~/.compos/sock
 ```
 
 Then the bridge, which is what CI runs:
 
 ```sh
-MIX_TEST_PARTITION=1 mix test apps/aimax_core/test/aimax/scheme_suite_test.exs
+MIX_TEST_PARTITION=1 mix test apps/compos_core/test/compos/scheme_suite_test.exs
 ```
 
-`Aimax.SchemeSuiteTest` runs one eval per test, so a test that raises
+`Compos.SchemeSuiteTest` runs one eval per test, so a test that raises
 fails alone. It also asserts the canary
 (`priv/tests/canary-test.scm`, `zz-canary-always-fails`) loaded, ran, and
 came back red — that is what proves a file did not silently fail to load
@@ -235,7 +235,7 @@ Three limits decided every split:
   can therefore BUILD ITS OWN FIXTURE — write the stub, make it
   executable, point the package's Scheme seam at it, delete it after.
   That is how `notmuch_test` already works in ExUnit, and its seam
-  (`notmuch-program`) is Scheme. Prefer a path under `(aimax-home)`: the
+  (`notmuch-program`) is Scheme. Prefer a path under `(compos-home)`: the
   suite runs in a live editor, and `rm -rf` from a test wants a short
   leash. The four directory tests in `skills_test` and `mode_icon_test`
   moved on this, and each one builds and removes its own fixture.
@@ -279,7 +279,7 @@ Three limits decided every split:
 
 `mix test` is self-contained: the test env boots its own editor in its own
 BEAM, with `home:` and the socket keyed on the checkout and the partition
-(`config/config.exs`). It never opens `~/.aimax/sock`. That is the gate.
+(`config/config.exs`). It never opens `~/.compos/sock`. That is the gate.
 
 `M-x run-scheme-tests` runs the same files against YOUR daemon, and it is
 not free. Ten of the sixteen files move a window, open the switcher,
@@ -376,7 +376,7 @@ Blocked on a seam, not on judgement:
   movable today.
 - **A Scheme-visible LLM stub seam** unlocks `chat_compact_test` (12).
   It is pure policy otherwise, but the model is stubbed with
-  `Application.put_env(:aimax_core, :llm_request_fun, ...)`, which Scheme
+  `Application.put_env(:compos_core, :llm_request_fun, ...)`, which Scheme
   cannot reach. `sentry-test.scm` shows the shape a Scheme seam should
   take.
 
@@ -393,7 +393,7 @@ Confirmed staying:
 | `overlay_test`, `buffer_replace_test` | `Buffer` range mechanics |
 | `usage_shape_test` | `LLM.usage_strings/2` |
 | `session_safe_test` | proves the Session survives a bad eval |
-| the `aimax_scheme` suites | 76 tests of the interpreter, which is mechanism |
+| the `compos_scheme` suites | 76 tests of the interpreter, which is mechanism |
 
 ## Also open, unrelated to this task
 

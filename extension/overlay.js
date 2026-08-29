@@ -1,23 +1,23 @@
-// overlay.js — ai-max's minibuffer, in every tab.
+// overlay.js — compos's minibuffer, in every tab.
 //
 // M-x and C-x run the editor's own commands and render the editor's own
 // minibuffer. Nothing here filters, ranks or completes: the daemon does all of
-// it, so a prompt in a page behaves identically to the same prompt in ai-max,
+// it, so a prompt in a page behaves identically to the same prompt in compos,
 // down to the matcher. This file is a keyboard and a screen.
 //
 // The UI lives in a shadow root: pages have opinions about `div`, and none of
 // them should reach this. Everything is drawn from scratch so a page's CSS
 // reset, z-index stacking or font can't disturb it.
 
-const HOST_ID = "aimax-overlay-host";
+const HOST_ID = "compos-overlay-host";
 
 // Reloading the extension orphans every content script already running in an
 // open page: chrome.runtime.id goes undefined and every sendMessage throws
 // "Extension context invalidated". An orphan that keeps its keydown listener
 // is worse than no extension at all — it still swallows C-x and M-x and then
 // fails — so it tears itself down the moment it notices.
-if (window.__aimaxOverlay) throw new Error("ai-max overlay already in this page");
-window.__aimaxOverlay = true;
+if (window.__composOverlay) throw new Error("compos overlay already in this page");
+window.__composOverlay = true;
 
 const alive = () => {
   try {
@@ -35,7 +35,7 @@ let enabled = true;
 
 const topFrame = window === window.top;
 
-// Frames inside ai-max, and nested frames anywhere, need nothing from this
+// Frames inside compos, and nested frames anywhere, need nothing from this
 // file. Build the command overlay only once, in an ordinary top-level page.
 if (topFrame) {
 
@@ -92,7 +92,7 @@ function ask(msg) {
   return new Promise((resolve, reject) => {
     if (!alive()) {
       teardown();
-      return reject(new Error("ai-max was reloaded — refresh this page"));
+      return reject(new Error("compos was reloaded — refresh this page"));
     }
     try {
       chrome.runtime.sendMessage(msg, (r) => {
@@ -170,7 +170,7 @@ function closePalette() {
 // A renderer, nothing more. The daemon has already filtered, ranked and
 // chosen — this draws its answer. There is no second matcher here: the editor's
 // orderless+flex is the only one, so M-x in a page ranks exactly as M-x in
-// ai-max does.
+// compos does.
 function render() {
   if (!palette) return;
 
@@ -200,7 +200,7 @@ function render() {
 
 // --- keys ------------------------------------------------------------------
 
-// ai-max's own spelling, so a chord that leaves here is one KeyDispatch knows
+// compos's own spelling, so a chord that leaves here is one KeyDispatch knows
 function spec(e) {
   const mods = [];
   if (e.ctrlKey) mods.push("C");
@@ -397,7 +397,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     // which frame is this? The service worker forgets its window map every
     // time MV3 discards it, and this page still knows the answer.
     case "frame":
-      reply({ frame: isEditorPage() ? sessionStorage.getItem("aimax-frame") : null });
+      reply({ frame: isEditorPage() ? sessionStorage.getItem("compos-frame") : null });
       return false;
     default:
       reply({ error: `unknown ${msg.cmd}` });
@@ -407,7 +407,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
 
 // --- am I the editor? ------------------------------------------------------
 //
-// An ai-max page has its own minibuffer and its own key handling, so this
+// An compos page has its own minibuffer and its own key handling, so this
 // overlay must keep its hands off it entirely — M-x there belongs to the
 // editor. What the page does instead is announce which frame it is, so every
 // OTHER tab in this browser window knows where its commands should land.
@@ -421,7 +421,7 @@ function isEditorPage() {
 
 async function registerFrame(tries = 20) {
   for (let i = 0; i < tries; i++) {
-    const frame = sessionStorage.getItem("aimax-frame");
+    const frame = sessionStorage.getItem("compos-frame");
     if (frame) {
       try {
         await ask({ cmd: "register", frame });

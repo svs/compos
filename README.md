@@ -1,10 +1,10 @@
-# koel
+# compos
 
 Emacs rebuilt on the BEAM.
 
-Koel is a headless editor daemon in Elixir, scripted in Scheme, rendered
+Compos is a headless editor daemon in Elixir, scripted in Scheme, rendered
 by the browser. The code keeps its working name: the apps, the env vars,
-and `~/.aimax` all say `aimax`.
+and `~/.compos` all say `compos`.
 
 ## Philosophy
 
@@ -13,7 +13,7 @@ application state. Windows compose views. Named commands give people and
 agents one semantic action surface. Modes add contextual behavior, and the
 Lisp runtime keeps the whole environment open to inspection and change.
 
-The missing pieces are modern rendering and concurrency. Koel uses the
+The missing pieces are modern rendering and concurrency. Compos uses the
 browser as a renderer without adopting the browser's closed application model.
 The main window can show a rich application while chat remains beside it. The
 agent manipulates the same buffers, windows, and commands that the person uses.
@@ -39,7 +39,7 @@ Elixir owns the work that loops over bytes: ropes, tree-sitter, sockets,
 PTYs, schedulers, the LLM transport. Scheme owns everything a person calls
 "the editor": commands, keymaps, modes, hooks, themes, dired, org-mode,
 chat, mail. That is 17,000 lines of Scheme in
-`apps/aimax_core/priv/*.scm`, and 321 commands. You redefine any of them
+`apps/compos_core/priv/*.scm`, and 321 commands. You redefine any of them
 while the editor runs.
 
 Before we add Elixir code, we ask one question: can this be Scheme plus one
@@ -74,7 +74,7 @@ correct across edits.
 browser gets its own frame, its own window tree, and its own minibuffer.
 Clients reattach by frame id across page reloads and daemon restarts.
 
-**Persistence** — everything survives a restart. `~/.aimax/desktop.etf`
+**Persistence** — everything survives a restart. `~/.compos/desktop.etf`
 holds buffers, window trees, points, and faces. File buffers reopen from
 disk. Chat and agent buffers restore their content and their local state.
 
@@ -91,21 +91,21 @@ mail, git and diff-mode, project, per-agent git worktrees, an MCP client and
 server hub, a GraphQL client, a Spotify remote, a writing workspace, a code
 browser, dired, ibuffer, help, and Emacs-style customization.
 
-**Packaging** — `mix release` builds a daemon. `bin/aimax` starts it.
-`AIMAX_APP_PORT` sets the port.
+**Packaging** — `mix release` builds a daemon. `bin/compos` starts it.
+`COMPOS_APP_PORT` sets the port.
 
 ## Layout
 
 ```
-apps/aimax_scheme   the extension language: values are BEAM terms
-apps/aimax_core     buffers, editor state, primitives, NIFs, procs, LLM
+apps/compos_scheme   the extension language: values are BEAM terms
+apps/compos_core     buffers, editor state, primitives, NIFs, procs, LLM
   priv/*.scm        the editor itself
-  native/aimax_ts   tree-sitter Rustler NIF
-apps/aimax_ui       Phoenix LiveView frontend (a client — no editor logic)
-apps/aimax_rpc      JSON-RPC over ~/.aimax/sock ("eval is the API")
+  native/compos_ts   tree-sitter Rustler NIF
+apps/compos_ui       Phoenix LiveView frontend (a client — no editor logic)
+apps/compos_rpc      JSON-RPC over ~/.compos/sock ("eval is the API")
 ```
 
-Your config loads from `~/.aimax/ai-config.scm`, then `~/.aimax/init.scm`.
+Your config loads from `~/.compos/ai-config.scm`, then `~/.compos/init.scm`.
 Both are optional.
 
 ## Run it
@@ -119,17 +119,17 @@ open -na "Google Chrome" --args --app=http://localhost:4004
 The daemon reads `priv/*.scm` at boot, so a restart reloads them. Browser
 clients reload themselves through a boot-id check.
 
-Each daemon records its name and URL in `~/.aimax/daemons.json`. Run another
+Each daemon records its name and URL in `~/.compos/daemons.json`. Run another
 daemon with a different home and port, then use `C-x d` to switch the current
-browser tab. Set `AIMAX_DAEMON_REGISTRY` when the daemons must share another
+browser tab. Set `COMPOS_DAEMON_REGISTRY` when the daemons must share another
 registry path.
 
 ```sh
-AIMAX_HOME=~/.aimax-feature AIMAX_PORT=4014 AIMAX_APP_PORT=4015 \
-  AIMAX_NAME=feature AIMAX_ACCENT="#3f7cac" mix run --no-halt
+COMPOS_HOME=~/.compos-feature COMPOS_PORT=4014 COMPOS_APP_PORT=4015 \
+  COMPOS_NAME=feature COMPOS_ACCENT="#3f7cac" mix run --no-halt
 ```
 
-`AIMAX_ACCENT` adds a persistent colored frame and instance label. Use a
+`COMPOS_ACCENT` adds a persistent colored frame and instance label. Use a
 six-digit CSS hex color so each daemon has a stable visual identity.
 
 In the window: `C-x 2/3/o/1/0` splits windows, `C-x C-f` finds a file,
@@ -142,16 +142,16 @@ In the window: `C-x 2/3/o/1/0` splits windows, `C-x C-f` finds a file,
 
 ```sh
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"eval","params":{"code":"(buffer-list)"}}' \
-  | nc -U ~/.aimax/sock
+  | nc -U ~/.compos/sock
 ```
 
 A **buffer link** is one string that names a buffer. `C-x l` copies an
-`aimax://` link for the current buffer and line. The link includes the daemon's
+`compos://` link for the current buffer and line. The link includes the daemon's
 socket, so it returns to the instance that created it. On macOS, register the
 protocol handler once:
 
 ```sh
-bin/install-aimax-url-handler
+bin/install-compos-url-handler
 ```
 
 Open the same buffer name under `/raw/` to read its text:
@@ -212,5 +212,5 @@ current handoff. Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) first.
 
 ## License
 
-Koel is free software under the GNU General Public License, version 3 or later.
+Compos is free software under the GNU General Public License, version 3 or later.
 See [`LICENSE`](LICENSE).

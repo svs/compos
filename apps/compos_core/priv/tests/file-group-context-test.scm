@@ -1,0 +1,232 @@
+;;; file-group-context-test.scm --- File visits receive their context explicitly.
+
+(domain! 'testing)
+(effects! '(write))
+
+(define (t--fgc-drop-dispatcher! slug)
+  (set! *chat-dispatchers*
+    (remove (lambda (entry) (equal? (car entry) slug)) *chat-dispatchers*)))
+
+(define (t--fgc-confirm! text)
+  (minibuffer-change! text)
+  (run-command "minibuffer-confirm-input"))
+
+(define (t--fgc-cancel!)
+  (run-command "minibuffer-cancel"))
+
+(deftest 'an-explicit-file-group-adds-membership-without-moving-the-file
+  "an existing file can join another group while it keeps its first group"
+  (lambda ()
+    (let* ((path "/tmp/compos-zz-file-context.txt")
+           (first (group-record-create! "zz-file-context-first"))
+           (second (group-record-create! "zz-file-context-second")))
+      (write-file! path "context\n")
+      (visit path first)
+      (visit path second)
+      (check-true! (buffer-in-group? path first) "the first membership remains")
+      (check-true! (buffer-in-group? path second) "the second membership joins it")
+      (buffer-kill! path)
+      (delete-file! path)
+      (group-record-delete! first)
+      (group-record-delete! second))))
+
+(deftest 'a-new-file-visit-without-an-explicit-group-uses-current-group
+  "the shared creation hook places a new file in the visible context"
+  (lambda ()
+    (let* ((path "/tmp/compos-zz-raw-file-context.txt")
+           (work (test-buffer! "*zz-file-context-work*" ""))
+           (group (group-record-create! "zz-raw-file-context")))
+      (write-file! path "raw\n")
+      (buffer-add-group! work group)
+      (switch-to-buffer! work)
+      (set-frame-local! 'current-group group)
+      (visit path)
+      (check-true! (buffer-in-group? path group)
+                   "the new file inherits current-group")
+      (buffer-kill! path)
+      (buffer-kill! work)
+      (delete-file! path)
+      (group-record-delete! group))))
+
+(deftest 'interactive-find-file-groups-only-a-new-buffer
+  "new work joins the current group but reopening live work preserves membership"
+  (lambda ()
+    (let* ((new-path "/tmp/compos-zz-new-current-group.txt")
+           (live-path "/tmp/compos-zz-live-current-group.txt")
+           (current (group-record-create! "zz-find-current"))
+           (other (group-record-create! "zz-find-other")))
+      (write-file! new-path "new\n")
+      (write-file! live-path "live\n")
+      (visit live-path other)
+      (set-frame-local! 'current-group current)
+
+      (find-file-read current)
+      (t--fgc-confirm! new-path)
+      (check-true! (buffer-in-group? new-path current)
+                   "a newly opened buffer joins current-group")
+
+      (find-file-read current)
+      (t--fgc-confirm! live-path)
+      (check-true! (buffer-in-group? live-path other)
+                   "the live buffer keeps its existing group")
+      (check-false! (buffer-in-group? live-path current)
+                    "reopening does not silently add it to current-group")
+
+      (buffer-kill! new-path)
+      (buffer-kill! live-path)
+      (delete-file! new-path)
+      (delete-file! live-path)
+      (group-record-delete! current)
+      (group-record-delete! other))))
+
+(deftest 'cancelled-find-file-changes-no-membership
+  "cancelling the file prompt leaves the visible context unchanged"
+  (lambda ()
+    (let* ((path "/tmp/compos-zz-cancelled-current-group.txt")
+           (work (test-buffer! "*zz-cancelled-file-work*" ""))
+           (group (group-record-create! "zz-cancelled-file-group")))
+      (buffer-add-group! work group)
+      (switch-to-buffer! work)
+      (set-frame-local! 'current-group group)
+      (find-file-read group)
+      (minibuffer-change! path)
+      (t--fgc-cancel!)
+      (check-false! (buffer-known? path) "the cancelled file has no buffer")
+      (check-equal! (buffer-group-ids work) (list group)
+                    "the existing membership stays unchanged")
+      (check-equal! (frame-group) group "the visible context stays unchanged")
+      (buffer-kill! work)
+      (group-record-delete! group))))
+
+(deftest 'failed-find-file-changes-no-membership
+  "a malformed remote visit creates no buffer and changes no group"
+  (lambda ()
+    (let* ((path "/ssh::/compos-zz-failed-file")
+           (work (test-buffer! "*zz-failed-file-work*" ""))
+           (group (group-record-create! "zz-failed-file-group")))
+      (buffer-add-group! work group)
+      (switch-to-buffer! work)
+      (set-frame-local! 'current-group group)
+      (find-file-read group)
+      (t--fgc-confirm! path)
+      (check-false! (buffer-known? path) "the failed file has no buffer")
+      (check-equal! (buffer-group-ids work) (list group)
+                    "the existing membership stays unchanged")
+      (check-equal! (current-buffer) work "the failed visit keeps the work buffer")
+      (buffer-kill! work)
+      (group-record-delete! group))))
+
+(deftest 'find-file-in-new-group-creates-and-enters-the-context
+  "the direct new-context command creates the file and group as one action"
+  (lambda ()
+    (let ((path "/tmp/compos-zz-file-in-new-group.txt"))
+      (write-file! path "context\n")
+      (run-command "find-file-in-new-group")
+      (t--fgc-confirm! path)
+      (t--fgc-confirm! "zz-file-new-group")
+      (let ((id (group-resolve-id "zz-file-new-group")))
+        (check-true! id "the group was created")
+        (check-true! (buffer-in-group? path id) "the file belongs to it")
+        (check-equal! (frame-group) id "the new group was entered")
+        (check-equal! (current-buffer) path "the file is selected")
+        (buffer-kill! path)
+        (delete-file! path)
+        (group-record-delete! id)))))
+
+(deftest 'find-file-in-new-group-keeps-live-file-memberships
+  "a live file joins the new group without leaving its existing group"
+  (lambda ()
+    (let* ((path "/tmp/compos-zz-live-file-new-group.txt")
+           (old (group-record-create! "zz-live-file-old-group")))
+      (write-file! path "live\n")
+      (visit path old)
+      (run-command "find-file-in-new-group")
+      (t--fgc-confirm! path)
+      (t--fgc-confirm! "zz-live-file-new-group")
+      (let ((new (group-resolve-id "zz-live-file-new-group")))
+        (check-true! (buffer-in-group? path old) "the old membership remains")
+        (check-true! (buffer-in-group? path new) "the new membership is added")
+        (check-equal! (frame-group) new "the new group is entered")
+        (buffer-kill! path)
+        (delete-file! path)
+        (group-record-delete! old)
+        (group-record-delete! new)))))
+
+(deftest 'find-file-in-new-group-rejects-a-duplicate-before-visiting
+  "a duplicate name creates no file buffer and changes no group"
+  (lambda ()
+    (let* ((path "/tmp/compos-zz-duplicate-file-new-group.txt")
+           (existing (group-record-create! "zz-duplicate-file-group")))
+      (write-file! path "duplicate\n")
+      (run-command "find-file-in-new-group")
+      (t--fgc-confirm! path)
+      (t--fgc-confirm! "zz-duplicate-file-group")
+      (check-false! (buffer-known? path) "the command does not visit the file")
+      (check-equal! (group-resolve-id "zz-duplicate-file-group") existing
+                    "the existing record remains the only record")
+      (delete-file! path)
+      (group-record-delete! existing))))
+
+(deftest 'find-file-in-new-group-cancels-at-either-prompt
+  "cancelling either prompt creates no group and visits no file"
+  (lambda ()
+    (let ((path "/tmp/compos-zz-cancel-file-new-group.txt"))
+      (write-file! path "cancel\n")
+
+      (run-command "find-file-in-new-group")
+      (minibuffer-change! path)
+      (t--fgc-cancel!)
+      (check-false! (buffer-known? path) "file-prompt cancellation visits nothing")
+
+      (run-command "find-file-in-new-group")
+      (t--fgc-confirm! path)
+      (minibuffer-change! "zz-cancel-file-new-group")
+      (t--fgc-cancel!)
+      (check-false! (buffer-known? path) "group-prompt cancellation visits nothing")
+      (check-false! (group-resolve-id "zz-cancel-file-new-group")
+                    "group-prompt cancellation creates no record")
+      (delete-file! path))))
+
+(deftest 'find-file-in-new-group-rolls-back-a-failed-visit
+  "a failed visit removes the new record and keeps the current buffer"
+  (lambda ()
+    (let ((path "/ssh::/compos-zz-failed-new-group")
+          (work (test-buffer! "*zz-failed-new-group-work*" "")))
+      (switch-to-buffer! work)
+      (run-command "find-file-in-new-group")
+      (t--fgc-confirm! path)
+      (t--fgc-confirm! "zz-failed-new-group")
+      (check-false! (buffer-known? path) "the failed visit creates no buffer")
+      (check-false! (group-resolve-id "zz-failed-new-group")
+                    "the failed visit removes the group record")
+      (check-equal! (current-buffer) work "the failed visit keeps the work buffer")
+      (buffer-kill! work))))
+
+(deftest 'a-direct-agent-file-visit-uses-the-originating-chat-group
+  "the user can switch buffers while the agent keeps its chat context"
+  (lambda ()
+    (let* ((path "/tmp/compos-zz-agent-file-context.txt")
+           (slug "zz-file-context-agent")
+           (agent-group (group-record-create! "zz-agent-file-context"))
+           (user-group (group-record-create! "zz-user-file-context"))
+           (chat (group-chat agent-group))
+           (user (test-buffer! "*zz-file-context-user*" "")))
+      (write-file! path "agent\n")
+      (buffer-set-local! chat 'agent-slug slug)
+      (buffer-add-group! user user-group)
+      (switch-to-buffer! user)
+      (set-frame-local! 'current-group user-group)
+      (t--fgc-drop-dispatcher! slug)
+      ((chat-tool-dispatch slug) "eval-scheme"
+        (list 'code
+          "(visit \"/tmp/compos-zz-agent-file-context.txt\" (buffer-group (current-buffer)))"))
+      (check-true! (buffer-in-group? path agent-group) "the file joined the chat group")
+      (check-false! (buffer-in-group? path user-group) "the selected frame group did not leak")
+      (check-equal! (current-buffer) user "the tool did not replace the user's buffer")
+      (t--fgc-drop-dispatcher! slug)
+      (buffer-kill! path)
+      (buffer-kill! user)
+      (buffer-kill! chat)
+      (delete-file! path)
+      (group-record-delete! agent-group)
+      (group-record-delete! user-group))))

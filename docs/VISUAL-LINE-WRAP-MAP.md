@@ -26,7 +26,7 @@ and zoom, so the browser is the only place that knows it. That part is true and
 stays true.
 
 The mistake is what crosses the wire. The client currently sends decisions, not
-measurements. Five routines in `apps/aimax_ui/lib/aimax/ui/layouts.ex` each work
+measurements. Five routines in `apps/compos_ui/lib/compos/ui/layouts.ex` each work
 out what a key MEANS by firing pixel probes at the DOM:
 
 | routine | asked to answer |
@@ -38,7 +38,7 @@ out what a key MEANS by firing pixel probes at the DOM:
 | `previewSpot` | the same again, by matching text |
 
 None of them can be tested. The file has no coverage, and
-`.agents/skills/code-change/SKILL.md` forbids driving ai-max through a browser
+`.agents/skills/code-change/SKILL.md` forbids driving compos through a browser
 to get some. Deciding that `End` means "end of visual row" is policy, and the
 one rule of this repository puts policy in Scheme.
 
@@ -130,7 +130,7 @@ Found the hard way. Do not rediscover them.
 
 ## Out of scope
 
-- The `Aimax.Core.BufferView` read model. Done, and unrelated.
+- The `Compos.Core.BufferView` read model. Done, and unrelated.
 - The Earmark raise guard in `earmark_ast/1`. Done, and unrelated.
 - Fixes (1) and (2) above, already landed: the `mouse` event carries `extend`,
   and `visualLineMove` no longer refuses to extend. Build on them.
@@ -139,6 +139,6 @@ Found the hard way. Do not rediscover them.
 
 The suite is the only automated signal, and Scheme tests are the point of the
 exercise: write them first. A browser check needs a person, so batch the
-questions and ask once. Boot a daemon with `.claude/skills/aimax-boot` on its
+questions and ask once. Boot a daemon with `.claude/skills/compos-boot` on its
 own home and port, restart it on a committed tree before each round, and use
 its verification step: prove the config landed, not just that the port opened.

@@ -22,13 +22,13 @@ and one slow thing stops the world. Here we do not have to.
 Four properties do the work.
 
 **A process per real thing.** A buffer is a process. So is an agent, a
-terminal, an LSP connection. `Aimax.Core.Application` gives each kind its own
+terminal, an LSP connection. `Compos.Core.Application` gives each kind its own
 `Registry` and its own `DynamicSupervisor`. The registry is the name service,
 so `Buffer.exists?/1` is an ETS read and not a message. The supervisor is the
 failure boundary.
 
 **Preemptive scheduling.** The BEAM interrupts a process that runs too long.
-This is why `Aimax.Core.Lane` works: a Scheme evaluation that takes ten seconds
+This is why `Compos.Core.Lane` works: a Scheme evaluation that takes ten seconds
 holds its own lane, and a keystroke on the `:ui` lane still runs. No cooperative
 yield is needed, and none is possible to forget.
 
@@ -47,7 +47,7 @@ bug in this repository.
 
 ### Never call out of a process while it holds state others need
 
-`Aimax.Core.Editor` is one process holding every frame. It used to call each
+`Compos.Core.Editor` is one process holding every frame. It used to call each
 visible buffer from inside its own `handle_call` to build a render. One buffer
 busy with a reparse, a checkpoint or a save then stalled every frame of every
 client, because the Editor was still holding the editor while it waited.
@@ -58,7 +58,7 @@ read model, or return the inputs and let the caller do the fetching.
 
 ### Writes go to the process, reads go to a read model
 
-`Aimax.Core.BufferView` is the worked example. Each buffer publishes one public
+`Compos.Core.BufferView` is the worked example. Each buffer publishes one public
 ETS row. Every reader takes the row instead of sending a message. The buffer
 process is still the only writer, so there is exactly one place where state
 changes.
@@ -96,13 +96,13 @@ writer already had one. A reader that wants bytes flattens them itself.
 
 ### The process that owns hot ETS must not run risky code
 
-An ETS table dies with its owner. `Aimax.Core.BufferView` therefore creates the
+An ETS table dies with its owner. `Compos.Core.BufferView` therefore creates the
 table and does nothing else: it holds no buffer state and runs no buffer code.
 On restart it re-adopts every live buffer and asks each for its row, so the
 model heals instead of waiting for the next edit.
 
-`Aimax.Core.SchemeTables` is the same answer for the Scheme world.
-`Aimax.Core.Session` loads the stdlib, reloads files, rebinds primitives and
+`Compos.Core.SchemeTables` is the same answer for the Scheme world.
+`Compos.Core.Session` loads the stdlib, reloads files, rebinds primitives and
 sweeps frames, and it used to own all three of the Scheme tables as well. One
 crash there took every registered command and the whole environment with it,
 and every lane worker holding the published handle then read a dead table id.
@@ -116,7 +116,7 @@ replacement.
 
 ### Know which lane you are on
 
-`Aimax.Core.Lane` routes Scheme by owner: `:ui` for keystrokes, a group, agent
+`Compos.Core.Lane` routes Scheme by owner: `:ui` for keystrokes, a group, agent
 or connection lane for everything else. A callback that fires from a connection
 process must move to a lane before it evaluates Scheme. Callbacks that must
 reach the display take the `:ui` lane.
@@ -127,7 +127,7 @@ the decision in the module doc.
 ### Supervise every task, and let timeouts belong to the caller
 
 Background work goes through `Task.Supervisor` under
-`Aimax.Core.TaskSupervisor`. An unsupervised `Task.async` inside a GenServer
+`Compos.Core.TaskSupervisor`. An unsupervised `Task.async` inside a GenServer
 links to it, so the task's crash becomes the GenServer's crash.
 
 A `GenServer.call` timeout is the caller's statement about how long it is
@@ -136,7 +136,7 @@ seconds, so anything that can block inside one must give up sooner and say so.
 
 ### A cast to a process that is not up is dropped silently
 
-Child order in `Aimax.Core.Application` is real, and the comments there say
+Child order in `Compos.Core.Application` is real, and the comments there say
 why. If your mechanism registers a handler by cast during boot, it must start
 before the thing that casts to it.
 
@@ -146,10 +146,10 @@ A new mechanism module (`Endpoint`, `DB`, `WebServer` are the recent ones) is
 usually the same shape:
 
 1. A `Registry` for names and a `DynamicSupervisor` for lifetimes, in
-   `Aimax.Core.Application`.
+   `Compos.Core.Application`.
 2. One process per live connection, holding only that connection's state.
-3. A thin `Aimax.Core.<Thing>` module: start, stop, list, detail.
-4. Primitives in `Aimax.Core.SchemeAPI` that carry values and no policy.
+3. A thin `Compos.Core.<Thing>` module: start, stop, list, detail.
+4. Primitives in `Compos.Core.SchemeAPI` that carry values and no policy.
 5. A Scheme package that owns the registry of specs, the commands, the display
    and every decision.
 
@@ -160,7 +160,7 @@ that failure should take down with it, and which lane its callbacks run on.
 
 Named so a contributor can pick one up, not as a warning.
 
-- `Aimax.Core.Editor` is one global process for every frame. Frames are already
+- `Compos.Core.Editor` is one global process for every frame. Frames are already
   independent. They could be processes, with the shared parts (keymaps, faces,
   kill ring) in ETS.
 - Tree-sitter shares the buffer mailbox. `ts_node` is asked once per keypress
@@ -200,7 +200,7 @@ does not send the measurement. It sends the decision. Five separate routines
 in `layouts.ex` (`visualLineMove`, `visualLineEdge`, `exactSpot`,
 `sourceSpot`, `previewSpot`) each work out what a key MEANS by probing the
 DOM. Each can be wrong in its own way, and none can be tested from here: the
-file has no coverage, and the code-change skill forbids driving ai-max through
+file has no coverage, and the code-change skill forbids driving compos through
 a browser to get some.
 
 Four bugs found in one afternoon, one per routine: a goal column that survived

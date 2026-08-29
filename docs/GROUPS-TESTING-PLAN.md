@@ -11,7 +11,7 @@ Each TODO now lists its **Run** command or shortcut. Use `M-x` followed by the e
 Run this after each section of manual testing:
 
 ```sh
-mix test apps/aimax_core/test/aimax/group_switch_command_test.exs apps/aimax_core/test/aimax/desktop_restore_test.exs
+mix test apps/compos_core/test/compos/group_switch_command_test.exs apps/compos_core/test/compos/desktop_restore_test.exs
 ```
 
 ## Creation and identity
@@ -312,7 +312,7 @@ Kill and move member buffers while refreshing; confirm the board stays consisten
 
 ### TODO Restart with varied group state
 
-**Run:** Restart ai-max, then `M-x groups`.
+**Run:** Restart compos, then `M-x groups`.
 
 Use populated groups, an empty group, multiple chats, custom noise, and custom layouts.
 
@@ -330,18 +330,18 @@ Confirm group, chat, and membership identity does not depend on names.
 
 ### TODO Migrate a legacy name-based buffer
 
-**Run:** Restore the legacy desktop state, then restart ai-max.
+**Run:** Restore the legacy desktop state, then restart compos.
 
 Restore a buffer with the old `group` local and confirm it gains stable membership.
 
 ### TODO Repeat restart after migration
 
-**Run:** Restart ai-max again.
+**Run:** Restart compos again.
 
 Confirm migration is idempotent.
 
 ### TODO Recover from malformed persisted state
 
-**Run:** Restart ai-max with the malformed persisted state.
+**Run:** Restart compos with the malformed persisted state.
 
 Try missing group records, duplicate memberships, invalid frame references, and invalid noise values.

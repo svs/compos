@@ -89,6 +89,6 @@ The new browser I wanted was not a smarter collection of web pages. It was a liv
 ## Further reading
 
 - [GNU Emacs Lisp Reference Manual](https://www.gnu.org/software/emacs/manual/html_node/elisp/)
-- [ai-max.el architecture](ARCHITECTURE.md)
-- [ai-max.el AI-native plan](AI-NATIVE-SPEC.md)
-- [ai-max.el component system](COMPONENTS.md)
+- [compos.el architecture](ARCHITECTURE.md)
+- [compos.el AI-native plan](AI-NATIVE-SPEC.md)
+- [compos.el component system](COMPONENTS.md)

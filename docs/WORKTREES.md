@@ -1,8 +1,8 @@
 # Worktrees — spec and review (2026-08-20)
 
-Scope: `apps/aimax_core/priv/packages/worktrees.scm` (974 lines) and its
+Scope: `apps/compos_core/priv/packages/worktrees.scm` (974 lines) and its
 wiring in `editor.scm`, `packages/daemons.scm`, `packages/code.scm`,
-`packages/agent.scm`, and `test/aimax/worktrees_test.exs`.
+`packages/agent.scm`, and `test/compos/worktrees_test.exs`.
 
 What holds: the guards run in a safe order (unsaved → dirty → primary
 dirty → branch). The finish prompt dedups by fingerprint. Optional
@@ -21,7 +21,7 @@ isolation.
   to the root, never inside it: inside they would shadow project files
   and churn the file watchers.
 - One identity, three carriers: the worktree name, the branch, and the
-  agent slug are the same string. Buffer authors, `AIMAX_AGENT`, and
+  agent slug are the same string. Buffer authors, `COMPOS_AGENT`, and
   the branch all point at the same actor.
 
 ### Creation
@@ -70,7 +70,7 @@ Exactly one daemon owns a workspace. The registry (`daemons.scm`)
 records the owner. On stamp:
 
 - If another daemon owns it, navigate the browser to that daemon.
-- If this checkout runs ai-max, provision a dedicated daemon whose
+- If this checkout runs compos, provision a dedicated daemon whose
   code and cwd come from the workspace, and navigate to it.
 - Otherwise the current daemon claims it.
 

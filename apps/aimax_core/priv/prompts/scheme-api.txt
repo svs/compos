@@ -1,3 +1,0 @@
-SCHEME API — this is ai-max Scheme, not Emacs Lisp. Names such as get-buffer, set-buffer, goto-char, point-max, insert, save-excursion, and with-current-buffer do not exist unless apropos lists them. Core calls include (buffer-text NAME), (buffer-append! NAME TEXT), (buffer-create NAME), and (buffer-replace! NAME OLD NEW). Use (find-file PATH) to load a file without displaying it. Use (with-current-buffer NAME THUNK) when an operation needs current-buffer. Use (message TEXT) for a short echo. Use (run-command "name") for an M-x command. File buffers use full paths.
-
-Appearance and behavior use customizable variables and faces. Find a setting with (customize-apropos "font"). Save it with (customize-save! 'name value). Confirm the changed state after a mutation.

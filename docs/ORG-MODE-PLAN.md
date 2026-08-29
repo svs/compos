@@ -1,4 +1,4 @@
-# Org-mode for ai-max.el
+# Org-mode for compos.el
 
 > **Status (2026-08-06):** PR1–PR6 implemented on the `org-mode` branch —
 > interpreter additions, regex/time builtins, overlays, folding, S- keys,
@@ -14,12 +14,12 @@ Goal: make `.org` files first-class — outline folding, headline fontification,
 3. **No regex, no date/time, weak arithmetic in the Scheme** — interpreter has no `cond`/`let*`/`when`, no `modulo`, no forward `string-index`; org parsing/timestamps/agenda are blocked.
 4. **No after-change hook reachable from Scheme, and no Shift modifier in the key pipeline** — self-insert bypasses Scheme entirely (`key_dispatch.ex:190`), so typing can never trigger refontification; `S-TAB` is unbindable (`layouts.ex` `keySpec`).
 
-Tree-sitter-org was considered and **rejected**: scope names are truncated at the first `.` (`native/aimax_ts/src/lib.rs:50-54`) which collapses `title.1..6` into one scope, it needs a vendored grammar + Rust rebuild, and folding needs a Scheme outline model anyway. Regex-based fontification via overlays instead.
+Tree-sitter-org was considered and **rejected**: scope names are truncated at the first `.` (`native/compos_ts/src/lib.rs:50-54`) which collapses `title.1..6` into one scope, it needs a vendored grammar + Rust rebuild, and folding needs a Scheme outline model anyway. Regex-based fontification via overlays instead.
 
 ## Phase 0 — core primitives (Elixir)
 
 ### 0.1 Overlays
-`apps/aimax_core/lib/aimax/core/buffer.ex`:
+`apps/compos_core/lib/compos/core/buffer.ex`:
 - defstruct adds `overlays: %{}` (tag → `[{start, end, face}]`), `overlay_gen: 0`.
 - API: `set_overlays(name, tag, ranges)` (replace-per-tag, bump gen), `clear_overlays(name, tag \\ :all)`, `overlays(name)` (flat list), `overlay_gen(name)`.
 - In `do_insert/4` / `do_delete/4` (`buffer.ex:313-351`): map overlay endpoints through the existing `adjust_insert/adjust_delete` (`buffer.ex:374-383`), same as mark. Not snapshotted into undo history — desync heals via recompute (0.7).
@@ -41,7 +41,7 @@ Hidden **byte ranges** stored in Buffer, auto-adjusted like mark; converted to h
 - `editor.ex` `render_walk` leaf (`:632-668`): compute `hidden_lines` MapSet from ranges + text; `total_lines` and `cursor_line` become **visible-line** based so top clamp/auto-follow (`:640-648`) and modeline `pct` work unchanged; add `hidden_lines` to the leaf.
 - `editor_live.ex` `decorate` (`:98`): `static |> Enum.reject(hidden) |> Enum.slice(top, rows + 4)`. Static cache unaffected (hiding only filters the slice). Line numbers keep logical `num` (gaps, like Emacs). Optional: `" …"` fold-marker seg on lines whose successor is hidden.
 
-### 0.3 Regex builtins (`apps/aimax_scheme/lib/aimax/scheme/builtins.ex`)
+### 0.3 Regex builtins (`apps/compos_scheme/lib/compos/scheme/builtins.ex`)
 Over Elixir `Regex`, compiled-pattern cache in `:persistent_term`, **byte offsets** (compose with point/overlays/`buffer-substring`):
 `(re-match? pat s)`, `(re-match pat s)` → groups or `#f`, `(re-find pat s start)` → `(mstart mend)` or `#f`, `(re-find* pat s)`, `(re-groups pat s start)` → per-group `(gstart gend)`, `(re-replace pat s repl)`, `(re-replace-all pat s repl)`.
 
@@ -59,7 +59,7 @@ Over Elixir `Regex`, compiled-pattern cache in `:persistent_term`, **byte offset
 ### 0.7 After-change hook for Scheme (required, not deferrable — self-insert never touches Scheme)
 `session.ex` primitives: `(on-change! buf fn)` → rule id, `(remove-on-change! id)`. Wraps existing `Reactor.on_change` (`reactor.ex:31`) with `debounce: 30, sources: :all`; handler called back into Session after the triggering eval returns (Reactor handlers run in Tasks — no deadlock). Loop guard: hook edits use `:editor`-source primitives (`buffer-insert!` etc.) and the org handler refontifies on all sources but only *acts* (cookie updates) on non-editor sources. `:undo`-sourced events are what heal fold/overlay desync.
 
-## Phase 1 — `apps/aimax_core/priv/org.scm` (userland MVP)
+## Phase 1 — `apps/compos_core/priv/org.scm` (userland MVP)
 
 - **Load order** (`session.ex:113`): `editor.scm, dired.scm, org.scm, themes.scm`.
 - **auto-mode**: edit `editor.scm:62` in place — `(".org" "text-mode")` → `(".org" "org-mode")` (`auto-mode` applies *every* matching entry, so the stale entry can't just be shadowed).

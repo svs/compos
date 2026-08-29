@@ -1,4 +1,4 @@
-// sw.js — the extension half of the ai-max wire.
+// sw.js — the extension half of the compos wire.
 //
 // Two directions, one protocol. The daemon asks the browser to do things
 // (list tabs, run JS, read a page, type into it); the browser asks the daemon
@@ -8,7 +8,7 @@
 //
 // One extension, many daemons: people run one per life — work, personal — each
 // on its own port. Every daemon gets its own socket. Unlike v1, a daemon may
-// address ANY tab, not only tabs it opened: the whole point is that ai-max's
+// address ANY tab, not only tabs it opened: the whole point is that compos's
 // keys and commands are ambient.
 //
 // CDP is attached ON DEMAND and dropped when idle. Content scripts cover the
@@ -177,7 +177,7 @@ chrome.tabs.onRemoved.addListener((tabId) => attached.delete(tabId));
 
 async function tell(tabId, msg, tries = 8) {
   // fail immediately and legibly on a bad id, rather than retrying eight times
-  // and reporting "no ai-max in tab [object Object]" — that cost an assistant
+  // and reporting "no compos in tab [object Object]" — that cost an assistant
   // its whole turn budget
   if (typeof tabId !== "number") {
     throw new Error(`bad tab id ${JSON.stringify(tabId)} — pass the id, or a tab from tab-list`);
@@ -191,7 +191,7 @@ async function tell(tabId, msg, tries = 8) {
     }
     await new Promise((r) => setTimeout(r, 120));
   }
-  throw new Error(`no ai-max in tab ${tabId} (chrome:// page?)`);
+  throw new Error(`no compos in tab ${tabId} (chrome:// page?)`);
 }
 
 // --- ops the daemon can call ----------------------------------------------
@@ -309,10 +309,10 @@ const OPS = {
     }
   },
 
-  // Every ai-max tab answers a frame probe with its frame id. The daemon
+  // Every compos tab answers a frame probe with its frame id. The daemon
   // sweeps frames with M-x refresh-frames: a frame no tab answers for is
   // dead. Probe ALL localhost tabs, not the editors map — that map keeps
-  // one binding per window, and a background ai-max tab still holds a
+  // one binding per window, and a background compos tab still holds a
   // live frame.
   async frames() {
     const tabs = await chrome.tabs.query({ url: ["http://localhost/*", "http://127.0.0.1/*"] });
@@ -323,7 +323,7 @@ const OPS = {
           const r = await chrome.tabs.sendMessage(t.id, { cmd: "frame" });
           if (r?.frame) out.push({ window: t.windowId, tab: t.id, frame: r.frame });
         } catch {
-          /* not an ai-max page, or no content script in it */
+          /* not an compos page, or no content script in it */
         }
       })
     );
@@ -532,7 +532,7 @@ const OPS = {
 
 // --- the tab side ----------------------------------------------------------
 //
-// One browser window, one ai-max. A window's ai-max tab announces which frame
+// One browser window, one compos. A window's compos tab announces which frame
 // it is when it loads, and from then on every other tab in that window belongs
 // to that frame: M-x there runs against it, prompts open in it, and "raise"
 // brings it forward. That single binding is what makes C-x b from a random
@@ -546,7 +546,7 @@ function anyConn() {
   return null;
 }
 
-// the ai-max tab for a window, if this window has one
+// the compos tab for a window, if this window has one
 function editorFor(windowId) {
   return editors.get(windowId) || null;
 }
@@ -564,7 +564,7 @@ function announce(windowId, frame) {
 }
 
 // MV3 discards the worker after 30s and `editors` goes with it. The pages
-// themselves still know which frame they are, so ask them: every ai-max tab
+// themselves still know which frame they are, so ask them: every compos tab
 // answers a frame probe. This runs when a daemon connects, which is also when
 // the binding matters again.
 async function rediscoverEditors() {
@@ -577,7 +577,7 @@ async function rediscoverEditors() {
           editors.set(t.windowId, { tabId: t.id, frame: r.frame });
         }
       } catch {
-        /* not an ai-max page, or no content script in it */
+        /* not an compos page, or no content script in it */
       }
     })
   );
@@ -593,8 +593,8 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   for (const [win, ed] of editors) if (ed.tabId === tabId) editors.delete(win);
 });
 
-// A top-level navigation turns the old ai-max tab into an ordinary tab. A
-// newly loaded ai-max page registers itself again when its editor frame is
+// A top-level navigation turns the old compos tab into an ordinary tab. A
+// newly loaded compos page registers itself again when its editor frame is
 // ready.
 chrome.tabs.onUpdated.addListener((tabId, change) => {
   if (!change.url) return;
@@ -628,7 +628,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
 
     if (msg.cmd === "settings") return settings();
 
-    // an ai-max page telling us which frame it is
+    // an compos page telling us which frame it is
     if (msg.cmd === "register") {
       const was = editors.get(windowId);
       editors.set(windowId, { tabId: tab, frame: msg.frame });
@@ -639,12 +639,12 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     }
 
     const conn = anyConn();
-    if (!conn) throw new Error("no ai-max daemon running");
+    if (!conn) throw new Error("no compos daemon running");
 
     const ed = editorFor(windowId);
     const frame = ed?.frame;
 
-    // Bring this window's ai-max forward. The daemon says WHEN (a confirmed
+    // Bring this window's compos forward. The daemon says WHEN (a confirmed
     // prompt); the extension knows WHICH tab.
     const maybeRaise = async (result) => {
       if (result?.raise && ed) await chrome.tabs.update(ed.tabId, { active: true });
@@ -670,12 +670,12 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
 
 // --- getting there ---------------------------------------------------------
 //
-// Typing "aimax" in the address bar. /etc/hosts can't do this on its own — it
+// Typing "compos" in the address bar. /etc/hosts can't do this on its own — it
 // maps a name to an address, not a port — and dropping the port would mean
 // listening on 80. The omnibox needs neither, and unlike a bookmark it knows
 // which daemons are actually up, so it offers them by name.
 //
-// It focuses an existing ai-max tab rather than opening another: a second tab
+// It focuses an existing compos tab rather than opening another: a second tab
 // on the same daemon is a second frame, which is rarely what "take me to my
 // editor" means.
 
@@ -683,7 +683,7 @@ async function focusOrOpen(port, windowId) {
   const url = `http://localhost:${port}/`;
   const existing = await chrome.tabs.query({ url: `${url}*` });
 
-  // prefer one already in this window — one window, one ai-max
+  // prefer one already in this window — one window, one compos
   const here = existing.find((t) => t.windowId === windowId) || existing[0];
   if (here) {
     await chrome.tabs.update(here.id, { active: true });
@@ -706,8 +706,8 @@ chrome.omnibox.onInputChanged.addListener((text, suggest) => {
 
   chrome.omnibox.setDefaultSuggestion({
     description: live.length
-      ? `ai-max — ${live.length} running: ${live.map((c) => c.name).join(", ")}`
-      : "ai-max — nothing running"
+      ? `compos — ${live.length} running: ${live.map((c) => c.name).join(", ")}`
+      : "compos — nothing running"
   });
 
   suggest(
@@ -731,9 +731,9 @@ chrome.omnibox.onInputEntered.addListener(async (text) => {
   await focusOrOpen(pick ? pick.port : DEFAULTS.ports[0], win);
 });
 
-// Alt+Shift+A: this window's ai-max, or the nearest one.
+// Alt+Shift+A: this window's compos, or the nearest one.
 chrome.commands.onCommand.addListener(async (name) => {
-  if (name !== "focus-aimax") return;
+  if (name !== "focus-compos") return;
   const win = (await chrome.windows.getCurrent()).id;
   const ed = editorFor(win);
   if (ed) {
@@ -797,7 +797,7 @@ chrome.runtime.onStartup.addListener(reinject);
 // The service worker's console lives in a devtools window nobody has open, so
 // an error in here was simply invisible — every failure had to be inferred
 // from the daemon side. Forward it instead: one stream, both halves. See
-// `bin/aimax bridge`.
+// `bin/compos bridge`.
 function report(level, args) {
   const text = args
     .map((a) => (a instanceof Error ? `${a.message}` : typeof a === "string" ? a : JSON.stringify(a)))

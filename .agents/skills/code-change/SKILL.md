@@ -1,9 +1,9 @@
 ---
 name: code-change
-description: Implement or fix code in ai-max. Use for repository changes, bug fixes, and features. Do not use for read-only explanation or diagnosis.
+description: Implement or fix code in compos. Use for repository changes, bug fixes, and features. Do not use for read-only explanation or diagnosis.
 ---
 
-# Change ai-max code
+# Change compos code
 
 Complete the request as a durable repository change.
 
@@ -62,9 +62,9 @@ Run the focused tests first.
 Run the broad relevant suite when the focused tests pass.
 Report unrelated existing failures separately.
 
-Verify UI behavior from within ai-max.
+Verify UI behavior from within compos.
 Inspect buffer text, locals, overlays, render state, and key dispatch as applicable.
-Do not use Chrome or external browser automation for ai-max verification.
+Do not use Chrome or external browser automation for compos verification.
 
 ## Completion gate
 

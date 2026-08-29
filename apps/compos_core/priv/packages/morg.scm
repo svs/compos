@@ -666,7 +666,9 @@
   ;; The core chords keep their meaning while the mode supplies its own
   ;; structural unit: heading instead of an arbitrary marked region.
   (local-set-key "C-x n n" "morg-narrow")
-  (local-set-key "C-x n w" "morg-widen"))
+  (local-set-key "C-x n w" "morg-widen")
+  ;; prose names many definitions: look first, go on the second press
+  (local-set-key "M-." "definition-peek"))
 
 ;; The reactor binds a rule to one buffer process. A killed and recreated
 ;; buffer has a new reference, so mode setup replaces the old rule.

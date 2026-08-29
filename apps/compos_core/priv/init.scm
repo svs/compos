@@ -61,6 +61,7 @@
 (load-bundled-package "messages.scm")
 (load-bundled-package "provenance.scm")
 (load-bundled-package "scheme-ide.scm")
+(load-bundled-package "peek.scm")
 (load-bundled-package "scratch.scm")
 (load-bundled-package "sentry.scm")
 (load-bundled-package "setup.scm")

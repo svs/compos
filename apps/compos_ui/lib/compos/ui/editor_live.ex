@@ -753,7 +753,7 @@ defmodule Compos.Ui.EditorLive do
 
     lines =
       visible
-      |> render_pass(leaf.text, leaf.point, leaf.mark)
+      |> render_pass(leaf.text, leaf.point, leaf.mark, not leaf.read_only)
       |> Enum.map(fn ln ->
         # a visible line whose successor is folded gets a fold marker
         if MapSet.member?(hidden, ln.num),
@@ -1454,9 +1454,11 @@ defmodule Compos.Ui.EditorLive do
         data-visual-lines={to_string(@node.visual_line_mode)}
         data-ws={to_string(whitespace?(@node))}
         data-v={@node.version}
+        data-pt={@node.point}
+        data-mark={@node.mark}
         contenteditable={if @node.read_only, do: nil, else: "true"}
         spellcheck="true"
-        autocorrect="on"
+        autocorrect="off"
         autocapitalize="off"
       >
         <div
@@ -1532,7 +1534,11 @@ defmodule Compos.Ui.EditorLive do
 
   # --- per-line display list: numbers, hl-line, font-lock + overlays ----------
 
-  defp render_pass(static, text, point, mark) do
+  # An editable surface draws no cursor and no region of its own: the
+  # browser owns the caret and the selection there, and a row cut at
+  # point would split the text node under the native caret on every
+  # patch. The client places the selection from data-pt and data-mark.
+  defp render_pass(static, text, point, mark, editable?) do
     {rs, re} =
       case mark do
         nil -> {point, point}
@@ -1553,7 +1559,7 @@ defmodule Compos.Ui.EditorLive do
       touched? = current or (rs != re and rs < le + 1 and re > line.start)
 
       segs =
-        if touched? do
+        if touched? and not editable? do
           # Images are atomic display objects. Point may sit inside the URL
           # backing one, but the cursor must not split its scheme before the
           # image component sees it.

@@ -254,7 +254,14 @@ defmodule Compos.Ui.Layouts do
           .line-content { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; position: relative; }
           /* the editable surface: the browser's text pipeline feeds
              beforeinput intents; the server still draws the caret */
-          .buf[contenteditable] { outline: none; caret-color: transparent; }
+          .buf[contenteditable] { outline: none; caret-color: transparent; position: relative; }
+          /* the ghost caret: where point stands while the page does not own
+             the keyboard (a hollow box, as Emacs draws for an inactive frame) */
+          .buf[contenteditable] .caret-ghost {
+            display: none; position: absolute; width: 2px; pointer-events: none;
+            box-shadow: inset 0 0 0 1px var(--cursor-bg, #26356b);
+          }
+          body.unfocused .window.active .buf[contenteditable] .caret-ghost { display: block; }
           .buf[contenteditable] .linenum { user-select: none; }
           /* while the surface owns the keyboard the browser draws the caret
              and the selection; the server's cursor block and region fall
@@ -2034,6 +2041,11 @@ defmodule Compos.Ui.Layouts do
                   // pipeline turns this key into a beforeinput intent
                   // (accents, input methods, dictation, autocorrect).
                   // Chords, motion keys, and TAB still travel as keys.
+                  if (NATIVE_MOTION.includes(e.key)) {
+                    // the cause of the next selection report (wrapAffinity)
+                    this._lastMotion = e.key;
+                    this._caretTopBefore = caretTopNow();
+                  }
                   if (nativeTextKey(e)) return;
                   const spec = keySpec(e);
                   if (spec === null) return;
@@ -2144,6 +2156,137 @@ defmodule Compos.Ui.Layouts do
                   }
                   return start + bytes;
                 };
+                // the text node before NODE inside the same row content, or null
+                const prevTextNode = (node) => {
+                  const content = (node.nodeType === 1 ? node : node.parentElement).closest(".line-content");
+                  if (!content) return null;
+                  const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+                  let prev = null, n;
+                  while ((n = walker.nextNode())) {
+                    if (n === node) return prev;
+                    if (n.textContent.length > 0 && countsBytes(n)) prev = n;
+                  }
+                  return null;
+                };
+                // the box of the character before (NODE, OFF), crossing into
+                // the previous text node at a node start; null at a row start
+                const rectBefore = (node, off) => {
+                  try {
+                    let n = node, o = off;
+                    if (o === 0) { n = prevTextNode(node); if (!n) return null; o = n.textContent.length; }
+                    const r = document.createRange();
+                    r.setStart(n, o - 1); r.setEnd(n, o);
+                    const b = r.getBoundingClientRect();
+                    return b.height > 0 ? b : null;
+                  } catch (_) { return null; }
+                };
+                // the box of the character at (NODE, OFF), crossing into the
+                // next text node at a node end; null at a row end
+                const rectAfter = (node, off) => {
+                  try {
+                    let n = node, o = off;
+                    if (o >= n.textContent.length) {
+                      const content = n.parentElement.closest(".line-content");
+                      const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+                      let seen = false, m, next = null;
+                      while ((m = walker.nextNode())) {
+                        if (seen && m.textContent.length > 0 && countsBytes(m)) { next = m; break; }
+                        if (m === n) seen = true;
+                      }
+                      if (!next) return null;
+                      n = next; o = 0;
+                    }
+                    const r = document.createRange();
+                    r.setStart(n, o); r.setEnd(n, o + 1);
+                    const b = r.getBoundingClientRect();
+                    return b.height > 0 ? b : null;
+                  } catch (_) { return null; }
+                };
+                // Which row a caret at a soft wrap belongs to. A Range has no
+                // affinity and its box cannot say, so the cause says: End and
+                // a leftward step stay on the upper row, Home and a rightward
+                // step take the lower one, a vertical step or a click takes
+                // the row it aimed at.
+                const wrapAffinity = (sel) => {
+                  const f = sel.focusNode;
+                  if (!f || f.nodeType !== 3) return "down";
+                  const before = rectBefore(f, sel.focusOffset), after = rectAfter(f, sel.focusOffset);
+                  if (!before || !after) return "down";
+                  const h = before.height;
+                  if (Math.abs(before.top - after.top) < h / 2) return "down";
+                  const nearest = (y) => Math.abs(before.top - y) <= Math.abs(after.top - y) ? "up" : "down";
+                  switch (this._lastMotion) {
+                    case "End": case "ArrowLeft": return "up";
+                    case "Home": case "ArrowRight": return "down";
+                    case "ArrowDown": case "PageDown": return nearest(this._caretTopBefore + h);
+                    case "ArrowUp": case "PageUp": return nearest(this._caretTopBefore - h);
+                    case "Click": return nearest(this._clickY - h / 2);
+                    default: return "down";
+                  }
+                };
+                const caretTopNow = () => {
+                  try { return window.getSelection().getRangeAt(0).getBoundingClientRect().top; }
+                  catch (_) { return 0; }
+                };
+                // byte -> DOM position inside BUF: the row whose start is at
+                // or before the byte, then the text node that holds it; an
+                // island is one unit, so a byte inside it lands after it
+                const domPos = (buf, byte) => {
+                  const lines = Array.from(buf.querySelectorAll(":scope > .line"));
+                  let line = null;
+                  for (const l of lines) {
+                    const st = parseInt(l.dataset.s, 10);
+                    if (isNaN(st) || st > byte) break;
+                    line = l;
+                  }
+                  if (!line) return null;
+                  const content = line.querySelector(".line-content");
+                  if (!content) return null;
+                  let rem = byte - parseInt(line.dataset.s, 10);
+                  const walker = document.createTreeWalker(content, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+                  let t, last = null;
+                  while ((t = walker.nextNode())) {
+                    if (t.nodeType === 1) {
+                      if (!t.dataset || t.dataset.len === undefined) continue;
+                      const len = parseInt(t.dataset.len, 10) || 0;
+                      if (rem <= 0) return { node: t.parentNode, offset: Array.from(t.parentNode.childNodes).indexOf(t) };
+                      if (rem < len) return { node: t.parentNode, offset: Array.from(t.parentNode.childNodes).indexOf(t) + 1 };
+                      rem -= len; last = t;
+                      continue;
+                    }
+                    if (t.parentElement && t.parentElement.closest("[data-len]")) continue;
+                    if (!countsBytes(t)) continue;
+                    const bytes = utf8.encode(t.textContent).length;
+                    if (rem <= bytes) {
+                      // the character offset for REM bytes into this node
+                      let chars = 0, used = 0;
+                      for (const ch of t.textContent) {
+                        const b = utf8.encode(ch).length;
+                        if (used + b > rem) break;
+                        used += b; chars += ch.length;
+                      }
+                      return { node: t, offset: chars };
+                    }
+                    rem -= bytes; last = t;
+                  }
+                  if (last && last.nodeType === 3) return { node: last, offset: last.textContent.length };
+                  return { node: content, offset: content.childNodes.length };
+                };
+                // the ghost caret: a box at point, shown only while the page
+                // does not own the keyboard (the native caret is gone then)
+                const placeGhost = (buf, pos) => {
+                  let g = buf.querySelector(":scope > .caret-ghost");
+                  if (!g) { g = document.createElement("span"); g.className = "caret-ghost"; buf.appendChild(g); }
+                  try {
+                    const r = document.createRange(); r.setStart(pos.node, pos.offset); r.collapse(true);
+                    const b = r.getBoundingClientRect(), bb = buf.getBoundingClientRect();
+                    if (b.height > 0) {
+                      g.style.top = (b.top - bb.top + buf.scrollTop) + "px";
+                      g.style.left = (b.left - bb.left + buf.scrollLeft) + "px";
+                      g.style.height = b.height + "px";
+                    }
+                  } catch (_) { /* nothing to draw */ }
+                };
                 this.beforeInputH = (e) => {
                   const buf = editableOf(e.target);
                   if (!buf) return;
@@ -2199,33 +2342,45 @@ defmodule Compos.Ui.Layouts do
                   if (a && a.closest && a.closest(".terminal-view, iframe, input, textarea")) return;
                   if (a !== buf && !buf.contains(a)) buf.focus({ preventScroll: true });
                   if (buf.hasAttribute("phx-update")) return;
+                  const pt = parseInt(buf.dataset.pt, 10);
+                  if (isNaN(pt)) return;
+                  const markAttr = buf.dataset.mark;
+                  const mark = markAttr === undefined || markAttr === "" ? null : parseInt(markAttr, 10);
                   const sel = window.getSelection();
                   if (!sel) return;
-                  const cur = buf.querySelector(".cursor");
-                  const t = cur && cur.firstChild;
-                  if (!t || t.nodeType !== 3) return;
-                  // the region the server drew is the native selection: its
-                  // segments tile the region exactly, and the cursor stands
-                  // at the point end
-                  const regs = buf.querySelectorAll(".region");
+                  const ptPos = domPos(buf, pt);
+                  if (!ptPos) return;
+                  placeGhost(buf, ptPos);
+                  // the selection the page already has, as bytes; the same
+                  // bytes are left alone so the browser keeps its goal column
+                  // and its side of a soft wrap
+                  const focusByte = sel.focusNode && buf.contains(sel.focusNode) ? domByte(sel.focusNode, sel.focusOffset) : null;
+                  const anchorByte = sel.anchorNode && buf.contains(sel.anchorNode) ? domByte(sel.anchorNode, sel.anchorOffset) : null;
+                  const wantAnchor = mark === null || mark === pt ? pt : mark;
+                  if (focusByte === pt && anchorByte === wantAnchor) return;
                   this._settingSel = true;
                   try {
-                    if (regs.length === 0) {
-                      // a caret that already stands where the server says
-                      // is left alone: the browser keeps its goal column
-                      // across short lines only while nobody moves it
-                      if (sel.isCollapsed && sel.focusNode && buf.contains(sel.focusNode) &&
-                          domByte(sel.focusNode, sel.focusOffset) === domByte(t, 0)) return;
-                      sel.collapse(t, 0);
+                    if (wantAnchor !== pt) {
+                      const mPos = domPos(buf, wantAnchor);
+                      if (mPos) sel.setBaseAndExtent(mPos.node, mPos.offset, ptPos.node, ptPos.offset);
+                      else sel.collapse(ptPos.node, ptPos.offset);
                       return;
                     }
-                    const first = regs[0], last = regs[regs.length - 1];
-                    const lastText = last.lastChild;
-                    const firstText = first.firstChild;
-                    if (!lastText || !firstText) { sel.collapse(t, 0); return; }
-                    const atStart = cur === first || first.contains(cur) || cur.contains(first);
-                    if (atStart) sel.setBaseAndExtent(lastText, lastText.textContent.length, t, 0);
-                    else sel.setBaseAndExtent(firstText, 0, t, 0);
+                    sel.collapse(ptPos.node, ptPos.offset);
+                    // At a soft wrap the byte is drawn at the head of the
+                    // lower row by default. The caret came from the upper
+                    // row: the Selection API sets no affinity, so ask the
+                    // browser's own motion for it (one step back, then to
+                    // the row's end), which lands on the same byte.
+                    if (this._affinity === "up" && ptPos.node.nodeType === 3) {
+                      const before = rectBefore(ptPos.node, ptPos.offset);
+                      const here = sel.getRangeAt(0).getBoundingClientRect();
+                      if (before && here.top > before.top + before.height / 2) {
+                        sel.modify("move", "backward", "character");
+                        sel.modify("move", "forward", "lineboundary");
+                        if (domByte(sel.focusNode, sel.focusOffset) !== pt) sel.collapse(ptPos.node, ptPos.offset);
+                      }
+                    }
                   } catch (_) { /* detached mid-patch */ }
                   finally { this._settingSel = false; }
                 };
@@ -2240,12 +2395,11 @@ defmodule Compos.Ui.Layouts do
                   clearTimeout(this._selt);
                   this._selt = setTimeout(() => {
                     if (this._settingSel) return;
-                    const cur = buf.querySelector(".cursor");
-                    const t = cur && cur.firstChild;
                     const sel = window.getSelection();
-                    // a collapsed caret still on the server's cursor is no news
-                    if (sel && sel.isCollapsed && t && sel.focusNode && buf.contains(sel.focusNode) &&
-                        domByte(sel.focusNode, sel.focusOffset) === domByte(t, 0)) return;
+                    const pt = parseInt(buf.dataset.pt, 10);
+                    // a collapsed caret still on the server's point is no news
+                    if (sel && sel.isCollapsed && !isNaN(pt) && sel.focusNode && buf.contains(sel.focusNode) &&
+                        domByte(sel.focusNode, sel.focusOffset) === pt) return;
                     this.sendSelection(buf, false);
                   }, 30);
                 };
@@ -2260,6 +2414,13 @@ defmodule Compos.Ui.Layouts do
                   const point = domByte(sel.focusNode, sel.focusOffset);
                   const mark = sel.isCollapsed ? null : domByte(sel.anchorNode, sel.anchorOffset);
                   if (point == null) return false;
+                  // At a soft wrap the end of one row and the start of the
+                  // next are one byte. A caret at the end of its text node
+                  // sits on the upper row; remember that, so the redraw puts
+                  // it back there and not at the head of the row below.
+                  // upstream = the caret is drawn on the row of the character
+                  // before it; at a soft wrap that row is the upper one
+                  this._affinity = wrapAffinity(sel);
                   this.pushEvent("sel", { win: winIdOf(buf), point, mark, keep: !!keep });
                   return true;
                 };

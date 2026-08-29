@@ -9,8 +9,10 @@ defmodule Aimax.Core.Hotload do
     * `.scm` reloads through `Aimax.Core.Session.reload_files/1`. That
       evaluates only the top-level forms whose text changed, then re-runs
       mode setup on the buffers that wear a mode the reload redefined.
-    * `.ex` and `.heex` recompile through the Phoenix code reloader, which
-      purges and reloads the modules in place.
+    * `.ex` and `.heex` recompile through `Aimax.Core.Hotload.Compile`. A
+      child `mix compile` writes the new beams; the VM then swaps in only
+      the modules whose code changed, and it loads each new version before
+      it purges the old one. A compile error changes nothing in the VM.
 
   Neither path stops the VM. Buffers, windows, processes, agents, and the
   Scheme store all survive, so the change reaches the editor with no
@@ -28,6 +30,7 @@ defmodule Aimax.Core.Hotload do
 
   require Logger
 
+  alias Aimax.Core.Hotload.Compile
   alias Aimax.Core.Session
 
   # 200 ms after the last event in a burst. One editor save is one burst,
@@ -221,22 +224,30 @@ defmodule Aimax.Core.Hotload do
     end
   end
 
-  # The recompiler is configuration, not a call: aimax_core does not depend
-  # on phoenix or on aimax_ui, and it must compile and boot without either.
-  # config.exs names `{Phoenix.CodeReloader, :reload, [Aimax.Ui.Endpoint]}`
-  # for dev; a test names its own. An MFA that answers :ok or {:error, text}.
+  # The compiler is configuration, not a call, so a test can name a stub.
+  # config.exs names `{Aimax.Core.Hotload.Compile, :compile, []}` for dev:
+  # an MFA that writes new beams and answers :ok or {:error, text}. It must
+  # not touch the loaded code. The swap after it is the only step that does,
+  # and it never leaves a module missing. Never compile in this VM: an
+  # in-process `mix compile` unloads a stale module before it compiles the
+  # new one, and a compile error then leaves that module gone.
   defp recompile([]), do: nil
 
-  defp recompile(paths) do
+  defp recompile(_paths) do
     case Application.get_env(:aimax_core, :hotload_recompile) do
       {m, f, a} ->
         case apply(m, f, a) do
           :ok ->
-            # A recompile purges the module version the Scheme primitives
-            # were captured from. Rebind them before anything evaluates, or
-            # the next keystroke raises "function #Function<...> is invalid".
+            %{reloaded: reloaded, removed: removed} = Compile.swap(Compile.ebins())
+            # A swap replaces the module version the Scheme primitives were
+            # captured from. Rebind them before anything evaluates, or the
+            # next keystroke raises "function #Function<...> is invalid".
             refresh_primitives()
-            "#{count(paths, "module")} recompiled"
+
+            case length(reloaded) + length(removed) do
+              0 -> "recompiled, no module changed"
+              n -> "#{count(n, "module")} recompiled"
+            end
 
           {:error, output} ->
             Logger.error("Aimax.Core.Hotload: compile failed\n#{output}")

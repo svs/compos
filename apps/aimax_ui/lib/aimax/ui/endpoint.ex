@@ -49,13 +49,17 @@ defmodule Aimax.Ui.Endpoint do
 
   if code_reloading? do
     plug(Phoenix.LiveReloader)
-    plug(Phoenix.CodeReloader)
-    # Phoenix.CodeReloader can have just purged the module the Scheme
-    # primitives were captured from. A primitive is an anonymous fun, and a
-    # purged fun raises "function #Function<...> is invalid" on the next
-    # keystroke — the editor dead from one page load. Rebind before the
-    # request reaches a LiveView. Aimax.Core.Hotload usually gets there
-    # first; this closes the window when a page load recompiles instead.
+    # No Phoenix.CodeReloader here. That plug compiles in this VM on a page
+    # load, and an in-process compile unloads a stale module before it
+    # compiles the new one; Aimax.Core.Editor died in that gap. Only
+    # Aimax.Core.Hotload recompiles, out of process, and swaps the changed
+    # modules in with no gap.
+    #
+    # A swap replaces the module the Scheme primitives were captured from.
+    # A primitive is an anonymous fun, and a fun from a purged version
+    # raises "function #Function<...> is invalid" on the next keystroke.
+    # Hotload rebinds after every swap; this closes the window before a
+    # request reaches a LiveView.
     plug(:rebind_scheme_primitives)
   end
 

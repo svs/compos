@@ -33,12 +33,12 @@ config :phoenix, :json_library, Jason
 
 if config_env() == :dev do
   # A saved file reaches the running daemon with no restart: Scheme reloads
-  # its changed forms, Elixir recompiles in place. Aimax.Core.Hotload owns
-  # the watcher; the recompiler is named here because aimax_core depends on
-  # neither phoenix nor aimax_ui.
+  # its changed forms, Elixir recompiles in a child process and the VM swaps
+  # the changed modules in. Aimax.Core.Hotload owns the watcher; the
+  # compiler is named here so a test can name a stub.
   config :aimax_core,
     hotload: true,
-    hotload_recompile: {Phoenix.CodeReloader, :reload, [Aimax.Ui.Endpoint]}
+    hotload_recompile: {Aimax.Core.Hotload.Compile, :compile, []}
 
   config :aimax_ui, Aimax.Ui.Endpoint,
     code_reloader: true,

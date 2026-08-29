@@ -31,8 +31,9 @@ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:4004/
 **Do not restart to see a change.** `Aimax.Core.Hotload` watches `apps/*/lib`,
 `apps/aimax_core/priv`, and the config home. Saving a `.scm` reloads only the
 top-level forms whose text changed, then re-runs mode setup on the buffers
-wearing a mode the reload redefined. Saving an `.ex` recompiles the module in
-place through the Phoenix code reloader. The echo area states the result.
+wearing a mode the reload redefined. Saving an `.ex` compiles in a child
+`mix compile` and swaps the changed modules into the VM with no gap; a compile
+error changes nothing. The echo area states the result.
 `M-x reload-file` is the same reload, asked for by name.
 
 A restart is still required for exactly three changes: a new dependency, a

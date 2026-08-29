@@ -16,7 +16,7 @@ debounce, and the burst then goes to the reloader that fits the file.
 |---|---|---|
 | Any `priv/**/*.scm`, including `editor.scm` | the changed top-level forms evaluate; modes refresh | under 1s |
 | `~/.aimax/init.scm`, `ai-config.scm`, `~/.aimax/packages/*.scm` | the same | under 1s |
-| Any `.ex` or `.heex` under `apps/*/lib` | the Phoenix code reloader recompiles and reloads the modules | 1-3s |
+| Any `.ex` or `.heex` under `apps/*/lib` | a child `mix compile` writes the beams; the VM swaps in the changed modules, load before purge, so no call finds a module missing; a compile error changes nothing | 1-3s |
 
 The echo area states the result: `3 files, 12 forms reloaded`, `1 module
 recompiled`, or the first line of a compile error. The same line lands in

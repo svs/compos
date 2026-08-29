@@ -7,11 +7,17 @@ the screen shows what you left there, and you switch back.
 A group is a convenience for the user and for agents. It is not a security
 boundary. When a group is wrong, one command fixes it.
 
-This document is the specification. Section 1 is the model. Sections 2 to
-9 are the rules. Section 10 is the implementation contract. Section 11 is
-the acceptance list.
+This document is the specification, in this order:
 
-## 1. Model
+1. The model.
+2. The user stories.
+3. The rules: membership, verbs, selection, lists, projects, windows,
+   the scratch buffer, multi-membership, chats, persistence, the board.
+4. Architecture reserved for later.
+5. The implementation contract.
+6. The acceptance list.
+
+## Model
 
 ### Objects
 
@@ -24,9 +30,9 @@ the acceptance list.
   `previous` slot for the toggle.
 - A **project** is a root directory derived from a file path. A project
   is not a group. It has no tags, no layout, no ID, and no verbs. The
-  editor uses it as a fallback in two places (section 6).
-- A **selection** is a set of buffers or paths marked by the user
-  (section 4).
+  editor uses it as a fallback in two places (see Projects).
+- A **selection** is a set of buffers or paths marked by the user (see
+  Selection).
 
 ### The three rules
 
@@ -49,7 +55,205 @@ user tags of X  ->  project of X  ->  none
 The second step yields a root for narrowing and window fill. It never
 yields a group to switch to.
 
-## 2. Membership
+## User stories
+
+Read each story as a path:
+
+> As a user -> in this situation -> I want this outcome -> the editor
+> behaves this way -> I use this command.
+
+Some outcomes are automatic. Then the solution is a rule, not a command.
+
+### As a user working in a group
+
+#### I want to switch to another buffer in this group
+
+- The switcher lists this group's buffers first, in MRU order.
+- The project's other open files follow, then everything else.
+- `RET` shows the buffer and changes no tag.
+- **Command:** `switch-to-buffer`.
+
+#### I want to look at a buffer from outside this group
+
+- I pick it from the project or rest section.
+- Showing it changes no tag. The destination does not change.
+- The modeline indicator says "mixed" while it is visible.
+- When I kill it, the window shows the next buffer of this group.
+- **Command:** `switch-to-buffer`, then `RET`.
+
+#### I want that outside buffer in this group
+
+- I pick it and accept with `C-RET` instead of `RET`.
+- The buffer is shown and tagged with the destination group.
+- A mistake is one `remove` away.
+- **Command:** `switch-to-buffer`, then `C-RET`.
+
+#### I want to open a file and have it here
+
+- A file with no buffer joins the destination group when I visit it.
+- A file with a live buffer is shown and keeps its tags.
+- **Solution:** creation joins, display does not. No command.
+
+#### I want to jump to a definition and have it here
+
+- The jump opens a buffer. The buffer joins the destination group.
+- If the target is a live buffer, the jump shows it and changes no tag.
+- **Solution:** the same creation rule. No command.
+
+#### I want to clean junk out of this group
+
+- I mark rows in the switcher and run `remove`.
+- With no marks, `remove` acts on the current buffer.
+- Buffers stay open. Only the tag goes.
+- **Commands:** `buffer-select`, then `remove`.
+
+#### I want to switch to another group
+
+- Groups appear in this frame's MRU order, the current group excluded.
+- Accepting a group saves this layout and restores that group's layout.
+- **Command:** `switch`.
+
+#### I want to go back to the group I just left
+
+- One command flips to the previous group of this frame.
+- **Command:** `switch-last`.
+
+#### I want this buffer in another group too
+
+- The tag is added. Existing tags stay.
+- I remain in this group.
+- **Command:** `add`.
+
+#### I want this buffer out of here and into another group
+
+- All existing tags go. The destination tag is set.
+- Text, point, modified state, and undo survive.
+- **Command:** `move`.
+
+#### I want a fresh group
+
+- The group is created after I accept a unique name.
+- The current buffer is its seed. The group opens on that buffer.
+- **Command:** `new`.
+
+#### I want a fresh, empty group
+
+- I run `new` from a transient buffer, or with an empty selection.
+- The group opens on its scratch buffer.
+- **Command:** `new`.
+
+#### I want a group from these buffers
+
+- I mark buffers in any list and run `new`.
+- Every marked buffer is tagged. The layout shows them.
+- **Commands:** `buffer-select`, then `new`.
+
+#### I want a group from the files in this directory
+
+- In dired I mark files, or leave point on one, and run `new`.
+- The files are visited, tagged, and shown.
+- **Commands:** dired marks, then `new`.
+
+#### I want to manage this group
+
+- Rename it: `rename`.
+- Drop the grouping and keep the buffers: `dissolve`.
+- Kill the buffers that belong only to it: `kill`.
+- See all groups: `groups`.
+
+### As a user working in a buffer
+
+#### I want to go to this buffer's group
+
+- One tag: the frame switches to it.
+- Several tags: I choose one, always.
+- No tag: I name a new group and the buffer seeds it.
+- **Command:** `switch-to-buffer-group`.
+
+#### I want to change this buffer's tags by hand
+
+- Add one: `add`. Replace all: `move`. Drop one: `remove`.
+- These work when the frame has no destination too.
+
+### As a user working with several windows
+
+#### I want this arrangement to become a group
+
+- I mark the visible buffers and run `new`.
+- The layout is saved as the group's first layout.
+- Existing tags stay.
+- **Commands:** `buffer-select` on each window's buffer, then `new`.
+
+#### I want the layout remembered as I left it
+
+- Every switch saves the outgoing layout, mixed or not.
+- A pane whose buffer is gone is dropped on the next restore.
+- **Solution:** save on leave. No command.
+
+#### I want to kill a buffer and stay in my group
+
+- The window shows the next buffer of the destination group.
+- With none, the window closes. The last window shows the scratch.
+- **Solution:** window fill from the group. No command.
+
+### As a user working without a group
+
+#### I want the editor to stay focused on the project
+
+- The switcher lists the current buffer's project files first.
+- Killing a buffer fills the window from the same project.
+- Nothing is tagged. A project is not a group.
+- **Solution:** the project fallback. No command.
+
+#### I want the current buffer to start a group
+
+- **Command:** `new`, or `switch-to-buffer-group` on an untagged buffer.
+
+#### I want to enter a group
+
+- Groups appear in MRU order.
+- **Command:** `switch`.
+
+### As a user working with chats and agents
+
+#### I want a chat for this group
+
+- A chat created in the group is tagged like any buffer.
+- The agent's context is the group's members and the current buffer.
+- **Solution:** a chat is a buffer. No command.
+
+#### I want the files an agent opens to land here
+
+- Files an agent opens or edits from a chat on this frame join the
+  destination group.
+- Junk is removed with `remove`, the same as for a human.
+- **Solution:** the creation rule. No command.
+
+### As a user returning later or using several frames
+
+#### I want groups to survive a restart
+
+- Names, tags, layouts, scratch content, and frame slots persist.
+- A missing buffer or a malformed layout heals on restore.
+- **Solution:** persistence and recovery. No command.
+
+#### I want each frame to keep its own group
+
+- Each frame has its own destination and previous slots.
+- Two frames can show two groups, or one group with two layouts.
+- **Solution:** per-frame slots. No command.
+
+### Safety shared by every story
+
+- Showing or switching buffers never changes a tag.
+- Switching groups never changes a tag.
+- `add` never removes. `move` names one destination. `remove` drops one
+  tag.
+- No membership verb kills a buffer or changes a file.
+- Cancel changes nothing durable.
+- A wrong tag costs one command to fix.
+
+## Membership
 
 ### Creation joins
 
@@ -79,9 +283,9 @@ buffers the agent creates stay untagged.
 ### No destination
 
 When the frame has no destination, nothing joins anything. Lists and
-window fill use the project fallback (section 6).
+window fill use the project fallback (see Projects).
 
-## 3. Verbs
+## Verbs
 
 Every verb that takes buffers acts on the selection. With no selection it
 acts on the current buffer. A path in the selection is visited first.
@@ -117,7 +321,7 @@ as the seed.
 - Cancel before accept changes no record, tag, layout, or MRU.
 - Membership verbs preserve text, file, point, modified state, and undo.
 
-## 4. Selection
+## Selection
 
 `buffer-select` toggles a mark on the row at point in any buffer list. The
 selection is one set for the whole editor. A mark set in one list shows in
@@ -133,7 +337,7 @@ paths to buffers before it runs. Sources of a selection:
 
 A successful verb clears the selection. A cancel keeps it.
 
-## 5. Lists
+## Lists
 
 Every UI that lists buffers shows three sections. Each section is in MRU
 order. An empty section and its separator are omitted.
@@ -157,7 +361,7 @@ the buffer and adds it to the destination group. Both take the selection
 when one is marked. The switcher is not a special case; the same sections
 and verbs apply to every buffer list.
 
-## 6. Projects
+## Projects
 
 A project is the root directory of a file. The editor derives it from the
 path. A project acts in two places and nowhere else:
@@ -169,7 +373,7 @@ Visiting a file never changes the destination. A group made from files
 inside a project is a plain group; its buffers carry the tag and also fall
 under the root.
 
-## 7. Windows and switching
+## Windows and switching
 
 ### Restore
 
@@ -223,7 +427,7 @@ echo area, previews, and the groups board. Transient buffers are excluded
 from the indicator, from the seed of `new`, and from the selection. Every
 other buffer is a normal buffer.
 
-## 8. The scratch buffer
+## The scratch buffer
 
 Every group has one scratch buffer named `*scratch: NAME*`.
 
@@ -235,7 +439,7 @@ Every group has one scratch buffer named `*scratch: NAME*`.
 - Its content persists with the group. A restored group with a missing
   scratch buffer gets a new empty one.
 
-## 9. Multi-membership
+## Multi-membership
 
 A buffer can carry many tags. No tag is the owner.
 
@@ -251,7 +455,7 @@ A group grows only while it is the destination of some frame, or by an
 explicit `add`. A group shrinks only by `remove`, `move`, `kill-buffer`,
 `dissolve`, or `kill`.
 
-## 10. Chats and agents
+## Chats and agents
 
 A chat is a buffer with tags like any other. There is no chat ownership
 store and no primary chat.
@@ -259,7 +463,7 @@ store and no primary chat.
 At the start of a turn an agent reads one `context` value:
 
 - files: the members of the chat's group (the destination of the frame
-  that shows the chat; else the chat's tags per section 2).
+  that shows the chat; else the chat's tags, see Membership).
 - focus: the current buffer of that frame.
 
 Tools an agent calls to list, search, read, or open buffers use the same
@@ -267,7 +471,7 @@ three sections as the human's lists. The context is what the agent sees
 first, not what it is forbidden. Group membership never grants a tool
 permission.
 
-## 11. Persistence
+## Persistence
 
 `desktop.etf` stores, per group: ID, name, tags of its members, per-frame
 layouts, and scratch content. Per frame: `destination` and `previous`.
@@ -278,15 +482,15 @@ isolates a failure to one group. Restore never resurrects a killed buffer.
 
 Rename and restart never change a group's ID.
 
-## 12. The groups board
+## The groups board
 
 `groups` opens a list buffer with one row per group: name, member count,
 modified count, and the frames that show it. Row verbs: switch, rename,
 dissolve, kill, members. `members` opens the switcher on that group's
-members with the selection model of section 4. Refreshing the board
+members with the selection model of Selection. Refreshing the board
 changes no tag, layout, MRU, or destination.
 
-## 13. Architecture reserved for later
+## Architecture reserved for later
 
 These are not in this specification. The design leaves room for them.
 
@@ -298,7 +502,7 @@ These are not in this specification. The design leaves room for them.
   instead of the saved one, without saving it.
 - **Narrow.** A hard scope on top of the soft sections is parked.
 
-## 14. Implementation contract
+## Implementation contract
 
 ### Records
 
@@ -331,7 +535,7 @@ These are not in this specification. The design leaves room for them.
   group with no valid pane shows its scratch buffer.
 - One `switch` records one frame-local MRU entry.
 
-## 15. Acceptance list
+## Acceptance list
 
 Tests name commands, never keys. A test that needs a binding binds its own
 dummy key to its own dummy command.

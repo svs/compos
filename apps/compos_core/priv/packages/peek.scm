@@ -12,16 +12,17 @@
 ;;; command discards the window, and the buffer with it when the peek
 ;;; opened it.
 ;;;
-;;; The post-command hook runs before the editor records last-command, so
-;;; the peek arms a flag for the command that made or kept it. The hook
-;;; clears the flag, or discards the peek when no flag is set.
+;;; The post-command hook runs before the editor records last-command, and
+;;; it can run more than once per key. So the hook does not count
+;;; commands. It compares where the reader is with where the reader was
+;;; when the peek was made: the same window, buffer, and point keep the
+;;; peek; the peek window itself adopts it; anything else discards it.
 
 (domain! 'code)
 (effects! '(read))
 
-;; (name window origin prev split? opened? buffer) or #f
+;; (name window origin prev split? opened? buffer origin-buffer origin-point) or #f
 (define *peek* #f)
-(define *peek-armed* #f)
 
 (define (peek--chars)
   (if (boundp '*scheme-ide-chars*) *scheme-ide-chars* *symbol-chars*))
@@ -51,7 +52,10 @@
     (goto-char! pos)
     (let ((win (active-window)))
       (select-window! me)
-      (set! *peek* (list name win me prev (not other) opened? (if (equal? kind 'buffer) target (peek--buffer-of win))))
+      (let ((origin-buf (peek--buffer-of me)))
+        (set! *peek* (list name win me prev (not other) opened?
+                           (if (equal? kind 'buffer) target (peek--buffer-of win))
+                           origin-buf (buffer-point origin-buf))))
       win)))
 
 (define (peek--buffer-of win)
@@ -88,14 +92,35 @@
     (select-window! (list-ref p 1))
     (message (string-append "Definition of " (car p)))))
 
-(define (peek--post-command!)
-  (cond (*peek-armed* (set! *peek-armed* #f))
-        ((and *peek* (equal? (active-window) (list-ref *peek* 1)))
-         ;; the reader moved into the window by another road: it is theirs
-         (set! *peek* #f))
-        (*peek* (peek-discard!))))
+;; the reader is where the peek was made: the origin window is active, it
+;; still shows the origin buffer, and that buffer's point did not move.
+;; Everything is read by id or name, so the answer does not depend on
+;; which buffer the calling lane treats as current.
+(define (peek--still-here? p)
+  (let ((origin (list-ref p 2))
+        (buf (list-ref p 7)))
+    (and (equal? (active-window) origin)
+         (equal? (peek--buffer-of origin) buf)
+         (buffer-exists? buf)
+         (equal? (buffer-point buf) (list-ref p 8)))))
 
-(add-hook! 'post-command-hook peek--post-command!)
+(define (peek--post-command!)
+  (when *peek*
+    (cond ((equal? (active-window) (list-ref *peek* 1))
+           ;; the reader moved into the window by any road: it is theirs
+           (set! *peek* #f))
+          ((peek--still-here? *peek*) #t)
+          (else (peek-discard!)))))
+
+;; Register once. A reload re-runs only the forms whose text changed, so
+;; this flag survives it and the hook list gets no second entry. The
+;; lambda looks the hook up by name at run time, so a reloaded
+;; peek--post-command! is the one that runs.
+(define *peek-hook-installed* #f)
+
+(unless *peek-hook-installed*
+  (set! *peek-hook-installed* #t)
+  (add-hook! 'post-command-hook (lambda () (peek--post-command!))))
 
 
 (define-command "definition-peek"
@@ -105,14 +130,12 @@
       (cond
         ((not name) (message "No name at point"))
         ((and *peek* (equal? name (car *peek*)) (peek--window-live? (list-ref *peek* 1)))
-         (set! *peek-armed* #t)
          (peek-go!))
         (else
           (peek-discard!)
           (let ((hit (definition-locate name)))
             (cond
               (hit
-                (set! *peek-armed* #t)
                 (peek--show! name hit)
                 (message (string-append "Definition of " name " in the other window; press again to go there, any other key closes it")))
               ((and (boundp 'primitive-doc) (primitive-doc name))
@@ -123,7 +146,7 @@
   "Go to the definition the peek window shows"
   (lambda ()
     (if (and *peek* (peek--window-live? (list-ref *peek* 1)))
-        (begin (set! *peek-armed* #t) (peek-go!))
+        (peek-go!)
         (message "No peek to go to"))))
 
 (define-command "definition-peek-discard"

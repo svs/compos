@@ -2,10 +2,11 @@
 ;;;
 ;;; definition-peek shows the definition of the name at point in the
 ;;; other window and keeps focus. The post-command hook decides what
-;;; happens next: the command that made the peek keeps it, any other
-;;; command discards it, and the peek run again on the same name goes
-;;; there. The tests call the hook by hand, because run-command from
-;;; Scheme does not pass through the dispatcher that runs it.
+;;; happens next: while the reader stays where the peek was made it
+;;; stays, when the reader moves it is discarded, and the peek run again
+;;; on the same name goes there. The tests call the hook by hand, because
+;;; run-command from Scheme does not pass through the dispatcher that
+;;; runs it.
 
 (domain! 'testing)
 (effects! '(write))
@@ -44,6 +45,15 @@
       (check-equal! 12 (caddr hit) "the position is the defining form"))
     (t--peek-teardown!)))
 
+(deftest 'a-located-file-is-the-source-file
+  "a bundled definition resolves to the checkout's priv, not the build symlink"
+  (lambda ()
+    (let ((hit (definition-locate "definition-peek" 'command)))
+      (check-true! hit "a bundled command has a definition")
+      (check-equal! 'file (car hit) "it is a file source")
+      (check-false! (string-contains? (cadr hit) "_build") "the path names the source tree")
+      (check-true! (string-suffix? "priv/packages/peek.scm" (cadr hit)) "and the right file"))))
+
 (deftest 'definition-peek-shows-the-definition-and-keeps-focus
   "the other window shows the source at the definition; the active window does not change"
   (lambda ()
@@ -58,17 +68,19 @@
       (check-equal! t--peek-doc (current-buffer) "the doc is still current"))
     (t--peek-teardown!)))
 
-(deftest 'the-next-command-discards-the-peek
-  "the hook keeps the peek once for the command that made it, then closes it"
+(deftest 'moving-on-discards-the-peek
+  "the hook keeps the peek while the reader stays put, and closes it when point moves"
   (lambda ()
     (t--peek-setup!)
     (let ((origin (active-window))
           (before (length (window-list))))
       (run-command "definition-peek")
       (peek--post-command!)
-      (check-true! (window-showing t--peek-defs) "the peek survives its own command")
       (peek--post-command!)
-      (check-false! (window-showing t--peek-defs) "another command closes the window")
+      (check-true! (window-showing t--peek-defs) "the hook may run twice; the peek stays")
+      (buffer-goto! t--peek-doc 3)
+      (peek--post-command!)
+      (check-false! (window-showing t--peek-defs) "moving point closes the window")
       (check-equal! before (length (window-list)) "the split is gone")
       (check-equal! origin (active-window) "focus is where it was")
       (check-true! (buffer-exists? t--peek-defs) "a buffer that was open before stays open"))

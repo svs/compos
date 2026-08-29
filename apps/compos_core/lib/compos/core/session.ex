@@ -1809,8 +1809,11 @@ defmodule Compos.Core.Session do
         end)
         |> Jason.encode!()
       end,
+      # canonical: the build dir holds a symlink to the checkout's priv, and
+      # a path that names the source file is the one a reader can open,
+      # reload, and diff. A release has no link, so the path is unchanged.
       "priv-path" => fn [rel] ->
-        Path.join(Application.app_dir(:compos_core, "priv"), rel)
+        canonical(Path.join(Application.app_dir(:compos_core, "priv"), rel))
       end,
       # --- runtime tree-sitter grammars (Compos.Core.TreeSitter) --------------
       "ts-install-grammar!" => fn [name, url] ->

@@ -264,6 +264,8 @@ defmodule Compos.Core.SchemeAPI do
       "kill-top" => "(kill-top) — return the newest kill-ring entry, or \"\" when empty.",
       "kill-nth" => "(kill-nth I) — return kill-ring entry I (0 is newest), or \"\" when absent.",
       "kill-ring-size" => "(kill-ring-size) — return the number of kill-ring entries.",
+      "client-select!" =>
+        "(client-select! ALTER DIR GRANULARITY) — ask this frame's editable surface to move (\"move\") or extend (\"extend\") its selection \"forward\" or \"backward\" by \"character\", \"word\", \"line\", \"lineboundary\", \"paragraph\" or \"documentboundary\"; the client answers with point and mark.",
       "clipboard-put!" =>
         "(clipboard-put! TEXT) — put TEXT on the OS clipboard of this frame's client.",
       "editor-url" =>
@@ -1138,6 +1140,10 @@ defmodule Compos.Core.SchemeAPI do
       "kill-top" => fn [] -> Editor.kill_top() end,
       "kill-nth" => fn [i] -> Editor.kill_nth(i) end,
       "kill-ring-size" => fn [] -> Editor.kill_size() end,
+      "client-select!" => fn [alter, dir, granularity] ->
+        Editor.select_request(alter, dir, granularity)
+        :void
+      end,
       "clipboard-put!" => fn [text] ->
         Editor.put_clipboard(text)
         :void

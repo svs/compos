@@ -2717,12 +2717,26 @@
       (unless (mark) (set-mark! (point)))
       (set-mark! #f)))
 
+;; An editable surface asks the browser's own layout to move: it knows
+;; where every row wraps, so no map is measured or kept for it. A
+;; rendered page and a read-only buffer keep the wrap map.
+(define (visual--client? buf)
+  (and (equal? (buffer-local buf 'visual-line-mode) #t)
+       (not (buffer-read-only? buf))
+       (not (preview-buffer? buf))))
+
+(define (visual--client-move! alter dir granularity)
+  (client-select! alter (if (< dir 0) "backward" "forward") granularity)
+  #t)
+
 ;; One row up or down, holding the goal column. #f when the map cannot
 ;; answer: the mode is off, the map is stale, or no measured row lies
 ;; that way. The caller then moves by source line.
 (define (visual-row-move! dir extend)
   (let* ((buf (current-buffer))
-         (rows (visual-rows buf)))
+         (rows (and (not (visual--client? buf)) (visual-rows buf))))
+    (if (visual--client? buf)
+        (visual--client-move! (if extend "extend" "move") dir "line")
     (and rows
          (let* ((pos (point))
                 (here (visual-row-bounds rows pos)))
@@ -2736,12 +2750,14 @@
                          (visual--land! buf (car there)
                                         (visual-row-end-from (car there) (cadr there))
                                         goal)
-                         #t))))))))
+                         #t)))))))))
 
 ;; the edge of the row point is on; #f when the map cannot answer
 (define (visual-row-edge! dir extend)
   (let* ((buf (current-buffer))
-         (rows (visual-rows buf)))
+         (rows (and (not (visual--client? buf)) (visual-rows buf))))
+    (if (visual--client? buf)
+        (visual--client-move! (if extend "extend" "move") dir "lineboundary")
     (and rows
          (let ((here (visual-row-bounds rows (point))))
            (and here
@@ -2750,7 +2766,7 @@
                   (goto-char! (if (< dir 0)
                                   (car here)
                                   (visual-row-end-from (car here) (cadr here))))
-                  #t))))))
+                  #t)))))))
 
 ;; The motions the commands run. Each moves by visual row when the wrap
 ;; map can answer, and by source line otherwise, so a plain buffer moves

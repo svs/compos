@@ -256,6 +256,16 @@ defmodule Compos.Ui.Layouts do
              beforeinput intents; the server still draws the caret */
           .buf[contenteditable] { outline: none; caret-color: transparent; }
           .buf[contenteditable] .linenum { user-select: none; }
+          /* while the surface owns the keyboard the browser draws the caret
+             and the selection; the server's cursor block and region fall
+             silent. Away from the keyboard the server's drawing returns,
+             so a reader still sees where point stands. */
+          .buf[contenteditable]:focus { caret-color: var(--cursor-bg, #26356b); }
+          .buf[contenteditable]:focus .cursor {
+            background: transparent; color: inherit; animation: none;
+          }
+          .buf[contenteditable]:focus .region { background: transparent; }
+          .buf[contenteditable] ::selection { background: var(--region-bg, #e7e9f1); }
           /* completion-at-point popup: inline card anchored under the prefix */
           .cap-pop {
             position: absolute; top: calc(100% + 3px); z-index: 15;
@@ -2124,14 +2134,51 @@ defmodule Compos.Ui.Layouts do
                   if (a !== buf && !buf.contains(a)) buf.focus({ preventScroll: true });
                   if (buf.hasAttribute("phx-update")) return;
                   const sel = window.getSelection();
-                  if (!sel || !sel.isCollapsed) return;
+                  if (!sel) return;
                   const cur = buf.querySelector(".cursor");
                   const t = cur && cur.firstChild;
-                  if (t && t.nodeType === 3) {
-                    try { sel.collapse(t, 0); } catch (_) { /* detached mid-patch */ }
-                  }
+                  if (!t || t.nodeType !== 3) return;
+                  // the region the server drew is the native selection: its
+                  // segments tile the region exactly, and the cursor stands
+                  // at the point end
+                  const regs = buf.querySelectorAll(".region");
+                  try {
+                    if (regs.length === 0) {
+                      sel.collapse(t, 0);
+                      return;
+                    }
+                    const first = regs[0], last = regs[regs.length - 1];
+                    const lastText = last.lastChild;
+                    const firstText = first.firstChild;
+                    if (!lastText || !firstText) { sel.collapse(t, 0); return; }
+                    const atStart = cur === first || first.contains(cur) || cur.contains(first);
+                    if (atStart) sel.setBaseAndExtent(lastText, lastText.textContent.length, t, 0);
+                    else sel.setBaseAndExtent(firstText, 0, t, 0);
+                  } catch (_) { /* detached mid-patch */ }
                 };
                 this.syncEditable();
+                // the selection of the active editable surface, as bytes
+                // KEEP: a keyboard motion leaves the mark alone (Emacs: the
+                // region follows point); a click clears it
+                this.sendSelection = (buf, keep) => {
+                  const sel = window.getSelection();
+                  if (!sel || !sel.rangeCount || !buf.contains(sel.focusNode)) return false;
+                  const point = domByte(sel.focusNode, sel.focusOffset);
+                  const mark = sel.isCollapsed ? null : domByte(sel.anchorNode, sel.anchorOffset);
+                  if (point == null) return false;
+                  this.pushEvent("sel", { win: winIdOf(buf), point, mark, keep: !!keep });
+                  return true;
+                };
+                // a motion command asks the browser's layout to move the
+                // selection; the answer is the selection, as bytes
+                this.handleEvent("select", ({ alter, dir, granularity }) => {
+                  const buf = document.querySelector(".window.active .buf[contenteditable]");
+                  const sel = window.getSelection();
+                  if (!buf || !sel) return;
+                  if (!buf.contains(sel.focusNode)) this.syncEditable();
+                  try { sel.modify(alter, dir, granularity); } catch (_) { return; }
+                  this.sendSelection(buf, true);
+                });
 
                 this.handleEvent("clipboard", ({ text }) => {
                   if (text) navigator.clipboard.writeText(text);
@@ -2173,6 +2220,12 @@ defmodule Compos.Ui.Layouts do
                   if (!winEl) return;
                   const win = parseInt(winEl.dataset.winId, 10);
                   const sel = window.getSelection();
+                  // an editable surface: the browser placed the caret or the
+                  // selection, and it names bytes exactly
+                  const editable = winEl.querySelector(".buf[contenteditable]");
+                  if (editable && sel && sel.rangeCount && editable.contains(sel.focusNode)) {
+                    if (this.sendSelection(editable)) return;
+                  }
                   if (sel && !sel.isCollapsed &&
                       winEl.contains(sel.anchorNode) && winEl.contains(sel.focusNode)) {
                     const a = posIn(sel.anchorNode, sel.anchorOffset);
@@ -2366,6 +2419,9 @@ defmodule Compos.Ui.Layouts do
                     const buf = win.querySelector(".buf[data-visual-lines='true']");
                     const el = frame || buf;
                     if (!el) return;
+                    // an editable surface moves by the browser's own layout
+                    // (Selection.modify); no map is measured for it
+                    if (!frame && buf.hasAttribute("contenteditable")) return;
                     const v = parseInt(el.dataset.v, 10);
                     if (!Number.isFinite(v)) return;
                     const rows = frame ? measurePreview(frame) : measureRaw(buf);

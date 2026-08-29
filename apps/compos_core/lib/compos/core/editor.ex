@@ -180,6 +180,18 @@ defmodule Compos.Core.Editor do
   @doc "Take FRAME's pending navigation URL, or nil. The take clears it."
   def take_navigation(fid), do: GenServer.call(__MODULE__, {:take_navigation, fid(fid)})
 
+  @doc """
+  Ask one frame's editable surface to move or extend its selection by the
+  browser's own layout: ALTER is "move" or "extend", DIR "forward" or
+  "backward", GRANULARITY "character" | "word" | "line" | "lineboundary" |
+  "paragraph" | "documentboundary". The client answers with a `sel` event.
+  """
+  def select_request(alter, dir, granularity, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:select_request, {alter, dir, granularity}, fid(fid)})
+
+  @doc "Take FRAME's pending selection request, or nil. The take clears it."
+  def take_select(fid), do: GenServer.call(__MODULE__, {:take_select, fid(fid)})
+
   # one global always-visible segment in the echo bar (agent attention etc.)
   def set_modeline_extra(s), do: GenServer.call(__MODULE__, {:set_modeline_extra, s})
 
@@ -469,7 +481,9 @@ defmodule Compos.Core.Editor do
        # frame id => text a command wants on that client's OS clipboard
        clips: %{},
        # frame id => URL for same-tab navigation on the next client render
-       navigations: %{}
+       navigations: %{},
+       # frame id => a Selection.modify request for the editable surface
+       selects: %{}
      }}
   end
 
@@ -1167,6 +1181,22 @@ defmodule Compos.Core.Editor do
     case Map.pop(state.navigations, fid) do
       {nil, _} -> {:reply, nil, state}
       {url, navigations} -> {:reply, url, %{state | navigations: navigations}}
+    end
+  end
+
+  # Map.get, not state.selects: a hot swap keeps the state a running
+  # daemon built before this key existed, and a missing key here restarts
+  # the Editor with every keymap and style gone.
+  def handle_call({:select_request, req, fid}, _from, state) do
+    f = frame(state, fid)
+    selects = Map.get(state, :selects, %{})
+    changed(:ok, Map.put(state, :selects, Map.put(selects, f.id, req)), f.id)
+  end
+
+  def handle_call({:take_select, fid}, _from, state) do
+    case Map.pop(Map.get(state, :selects, %{}), fid) do
+      {nil, _} -> {:reply, nil, state}
+      {req, selects} -> {:reply, req, Map.put(state, :selects, selects)}
     end
   end
 

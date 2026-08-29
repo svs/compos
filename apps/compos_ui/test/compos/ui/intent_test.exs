@@ -103,6 +103,45 @@ defmodule Compos.Ui.IntentTest do
     view |> element("#editor") |> render_hook("key", %{"k" => "C-g"})
   end
 
+  test "the native selection sets point and mark as bytes", %{conn: conn} do
+    buf = fresh_buffer("hello brävo")
+    {:ok, view, _} = live(conn, "/")
+    win = Editor.render_state().tree.id
+    view |> element("#editor") |> render_hook("sel", %{"win" => win, "point" => 3, "mark" => nil})
+    assert Buffer.point(buf) == 3
+    assert Buffer.mark(buf) == nil
+    view |> element("#editor") |> render_hook("sel", %{"win" => win, "point" => 12, "mark" => 6})
+    assert Buffer.point(buf) == 12
+    assert Buffer.mark(buf) == 6
+    # a collapsed selection that names its anchor is no region
+    view |> element("#editor") |> render_hook("sel", %{"win" => win, "point" => 2, "mark" => 2})
+    assert Buffer.mark(buf) == nil
+    # a keyboard motion keeps the mark: the region follows point
+    Buffer.set_mark(buf, 1)
+    view |> element("#editor") |> render_hook("sel", %{"win" => win, "point" => 5, "mark" => nil, "keep" => true})
+    assert Buffer.point(buf) == 5
+    assert Buffer.mark(buf) == 1
+    # a click clears it
+    view |> element("#editor") |> render_hook("sel", %{"win" => win, "point" => 4, "mark" => nil})
+    assert Buffer.mark(buf) == nil
+  end
+
+  test "visual-line motion on an editable surface asks the browser's layout", %{conn: conn} do
+    buf = fresh_buffer("one\ntwo\nthree")
+    {:ok, view, _} = live(conn, "/")
+    Compos.Core.Session.eval(~s{(enable-minor-mode! "#{buf}" "visual-line-mode")})
+    # the command, not a key: the view's frame is the last-active one
+    Compos.Core.Session.run_command("previous-line")
+    assert_push_event(view, "select", %{alter: "move", dir: "backward", granularity: "line"})
+    Compos.Core.Session.run_command("beginning-of-line")
+    assert_push_event(view, "select", %{alter: "move", dir: "backward", granularity: "lineboundary"})
+    # a read-only buffer keeps the server's own motion
+    Buffer.set_read_only(buf, true)
+    Compos.Core.Session.run_command("previous-line")
+    refute_push_event(view, "select", %{})
+    Buffer.set_read_only(buf, false)
+  end
+
   test "an unknown intent leaves the buffer alone and says so", %{conn: conn} do
     buf = fresh_buffer("ab")
     {:ok, view, _} = live(conn, "/")

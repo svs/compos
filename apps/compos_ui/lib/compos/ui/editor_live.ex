@@ -102,6 +102,32 @@ defmodule Compos.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
+  # the native selection of an editable surface, as bytes: a click, a drag,
+  # a double-click, or the answer to a select request. Point is the focus
+  # end; the mark is the anchor when the selection is not collapsed.
+  def handle_event("sel", %{"win" => win, "point" => point} = p, socket)
+      when is_integer(point) and point >= 0 do
+    with id when is_integer(id) <- safe_int(win) do
+      Input.run(socket.assigns.frame, fn ->
+        Compos.Core.Session.eval("(mouse-select-window! #{id})")
+        buf = Compos.Core.Editor.current_buffer()
+
+        if Compos.Core.Buffer.exists?(buf) do
+          mark = if is_integer(p["mark"]) and p["mark"] != point, do: p["mark"], else: nil
+          # a keyboard motion keeps the mark (the region follows point, as
+          # in Emacs); a click or a drag says what the mark is
+          unless mark == nil and p["keep"] == true do
+            Compos.Core.Buffer.set_mark(buf, mark)
+          end
+
+          Compos.Core.Buffer.goto(buf, point)
+        end
+      end)
+    end
+
+    {:noreply, socket |> drain() |> refresh()}
+  end
+
   # one handler for every click that runs a command: a transcript button
   # sends a command name, the modeline-info segment sends its buffer.
   # The Scheme gate ui-command! holds the whitelist — no policy here.
@@ -497,9 +523,19 @@ defmodule Compos.Ui.EditorLive do
         _ -> socket
       end
 
-    case fid && Compos.Core.Editor.take_navigation(fid) do
-      url when is_binary(url) -> push_event(socket, "navigate", %{url: url})
-      _ -> socket
+    socket =
+      case fid && Compos.Core.Editor.take_navigation(fid) do
+        url when is_binary(url) -> push_event(socket, "navigate", %{url: url})
+        _ -> socket
+      end
+
+    # a motion command asked the browser's layout to move the selection
+    case fid && Compos.Core.Editor.take_select(fid) do
+      {alter, dir, gran} ->
+        push_event(socket, "select", %{alter: alter, dir: dir, granularity: gran})
+
+      _ ->
+        socket
     end
   end
 
@@ -1405,7 +1441,9 @@ defmodule Compos.Ui.EditorLive do
           data-s={ln.start}
         >
           <span class="linenum" contenteditable="false">{ln.num}</span>
-          <span class="line-content"><.seg :for={{txt, cls} <- ln.segs} txt={txt} cls={cls} /><span
+          <span class="line-content"><.seg :for={{txt, cls} <- ln.segs} txt={txt} cls={cls} /><br
+              :if={ln.segs == []}
+            /><span
               :if={@active? && @completion && ln.current}
               class="cap-pop"
               contenteditable="false"
@@ -2519,11 +2557,14 @@ defmodule Compos.Ui.EditorLive do
     p{margin:0}
     /* a heading must separate the sections, so its space above is much
        larger than the space below it */
-    h1,h2,h3,h4{font-family:#{family};line-height:1.25}
-    h1{font-size:29px;margin:0}
-    h2{font-size:22px;margin:0;border-bottom:1px solid #{border};padding-bottom:4px}
-    h3{font-size:18px;margin:0;color:#{accent}}
-    h4{font-size:15.5px;margin:0;color:#{dim}}
+    h1,h2,h3,h4{font-family:#{family};line-height:1.2;font-weight:700;letter-spacing:-0.012em}
+    h1{font-size:30px;margin:0}
+    /* one scale, no rules: a section heading is bigger and sits higher
+       above its text than a paragraph; the renderer's gap does the rest */
+    h2{font-size:23px;margin:0;padding-top:.45em}
+    h3{font-size:18.5px;margin:0;padding-top:.3em;color:#{accent}}
+    h4{font-size:15.5px;margin:0;padding-top:.2em;color:#{dim};font-weight:600;
+       text-transform:uppercase;letter-spacing:.06em;font-size:12.5px}
     /* the browser default indents a list 40px and puts no space between
        the items: a list of requirements then reads as one block */
     ul,ol{margin:0;padding-left:1.35em}

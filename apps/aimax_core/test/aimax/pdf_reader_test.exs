@@ -157,6 +157,25 @@ defmodule Aimax.Core.PdfReaderTest do
     refute Buffer.text(buf) =~ "Missing PDF"
   end
 
+  test "the reader adopts a path-named buffer that holds no file" do
+    # A Dired buffer named after a file left the document unopenable: the
+    # buffer holds no file association, so the reader had no path to render.
+    eval!(~S"""
+    (begin
+      (buffer-create "/tmp/orphan-name.pdf")
+      (switch-to-buffer! "/tmp/orphan-name.pdf")
+      (set-mode! "pdf-reader-mode"))
+    """)
+
+    buf = Editor.current_buffer()
+    assert buf == "/tmp/orphan-name.pdf"
+    refute Buffer.path(buf)
+    assert Buffer.get_local(buf, "pdf-path") == "/tmp/orphan-name.pdf"
+    assert Buffer.get_local(buf, "pdf-total") == 3
+    assert Buffer.text(buf) =~ "Page 1 of 3"
+    refute Buffer.text(buf) =~ "Missing PDF"
+  end
+
   test "package registration upgrades an existing PDF file buffer" do
     eval!(~S"""
     (begin

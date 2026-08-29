@@ -838,6 +838,13 @@
   ;; Old reader versions copied a file buffer's path into pdf-path. Keep the
   ;; file association as the single source for ordinary PDF buffers.
   (when (buffer-path buf) (buffer-set-local! buf 'pdf-path #f))
+  ;; A buffer can carry the document's path as its name and still hold no
+  ;; file association. Adopt the name so the reader renders the document
+  ;; instead of an empty page.
+  (when (and (not (buffer-path buf))
+             (not (buffer-local buf 'pdf-path))
+             (*pdf-file-exists?* buf))
+    (buffer-set-local! buf 'pdf-path buf))
   (buffer-set-local! buf 'transient #t)
   (buffer-set-local! buf 'preview-renderer "html")
   (buffer-set-local! buf 'render-mode "html")

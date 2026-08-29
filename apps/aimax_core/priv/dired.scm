@@ -468,8 +468,14 @@
         (unless (and (pair? answer) (equal? (car answer) 'error))
           (buffer-set-local! buf 'dired-watch-armed #t))))))
 
+;; A Dired buffer is a buffer that wears the mode. `dired-dir` alone is not
+;; enough: a mode change leaves the local behind, and the hooks below must
+;; not repaint a buffer that another mode now owns.
+(define (dired-buffer? buf)
+  (and (dired-dir buf) (equal? (buffer-local buf 'mode-name) "Dired")))
+
 (define (dired-refresh-buffer! buf)
-  (when (and (buffer-exists? buf) (dired-dir buf))
+  (when (and (buffer-exists? buf) (dired-buffer? buf))
     (dired-rescan! buf)
     (list-refresh! buf)))
 
@@ -477,7 +483,8 @@
   (lambda (root)
     (for-each
       (lambda (buf)
-        (when (and (equal? (dired-dir buf) root)
+        (when (and (dired-buffer? buf)
+                   (equal? (dired-dir buf) root)
                    (buffer-local buf 'dired-watch-armed))
           (if (window-showing buf)
               (begin
@@ -488,27 +495,44 @@
 
 (on-buffer-shown!
   (lambda (buf)
-    (when (dired-dir buf)
+    (when (dired-buffer? buf)
       (dired-skip-derived! buf)
       (dired-arm-watch! buf)
       (when (buffer-local buf 'dired-stale)
         (buffer-set-local! buf 'dired-stale #f)
         (dired-refresh-buffer! buf)))))
 
+;; A Dired buffer takes the directory path as its buffer name. A file path
+;; therefore takes the file's own buffer name, and the file can never open
+;; again. Emacs answers a file name with the parent listing, at that file.
+(define (dired-open-file-parent path)
+  (let* ((name (cadr (path-split path)))
+         (buf (dired-open (dired-parent path)))
+         (i (list-index-of buf (list-entries buf) name)))
+    (when i (list-goto-index! buf i))
+    buf))
+
 (define (dired-open dir0)
   (let ((dir (dired-normalize-dir dir0)))
-    (let ((buf dir))
-      (buffer-create buf)
-      ;; the dir local first: the mode setup's refresh reads it
-      (buffer-set-local! buf 'dired-dir dir)
-      (dired-skip-derived! buf)
-      ;; re-opening a directory re-reads what git and the sizes say
-      (dired-rescan! buf)
-      (switch-to-buffer! buf)
-      (set-mode! "Dired")
-      (dired-arm-watch! buf)
-      (dired-goto-first-entry)
-      buf)))
+    (if (and (not (remote-path? dir))
+             (file-exists? dir)
+             (not (file-directory? dir)))
+        (dired-open-file-parent dir)
+        (dired-open-directory dir))))
+
+(define (dired-open-directory dir)
+  (let ((buf dir))
+    (buffer-create buf)
+    ;; the dir local first: the mode setup's refresh reads it
+    (buffer-set-local! buf 'dired-dir dir)
+    (dired-skip-derived! buf)
+    ;; re-opening a directory re-reads what git and the sizes say
+    (dired-rescan! buf)
+    (switch-to-buffer! buf)
+    (set-mode! "Dired")
+    (dired-arm-watch! buf)
+    (dired-goto-first-entry)
+    buf))
 
 ;; the entry on the current line: a name, the ".." token, or #f above them
 (define (dired-entry) (list-current (current-buffer)))
@@ -532,7 +556,7 @@
 (define (default-directory) (buffer-directory (current-buffer)))
 
 (define (buffer-directory buf)
-  (let ((dd (dired-dir buf))
+  (let ((dd (and (dired-buffer? buf) (dired-dir buf)))
         (p (buffer-path buf))
         (born (buffer-local buf 'default-directory)))
     (cond (dd (string-append dd "/"))

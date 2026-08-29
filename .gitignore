@@ -26,3 +26,6 @@ apps/aimax_core/native/aimax_loro/target/
 apps/aimax_core/priv/native/
 desktop/src-tauri/target/
 burrito_out/
+
+# python bytecode from the bin/ scripts
+__pycache__/

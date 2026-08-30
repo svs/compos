@@ -47,8 +47,32 @@
               (or (plist-get info 'date) "?"))
         (file-stat (string-append (dired-dir buf) "/" e)))))
 
+;;; --- the draw's copy of the lists ---------------------------------------------
+;;; A draw asks for the info of every entry, and every ask read the whole
+;;; info list out of the buffer: 250 rows, four reads each, one copy of
+;;; 250 plists per read, eight seconds for a home directory. The scan
+;;; leaves a copy here, and the rows read from it. The buffer-locals stay
+;;; the durable record; this is the draw's working copy.
+(define *dired-lists* '())
+
+(define (dired-lists-prime! buf)
+  (set! *dired-lists*
+    (cons (list buf
+                (or (buffer-local buf 'dired-info) '())
+                (or (buffer-local buf 'dired-vc) '()))
+          (filter (lambda (entry)
+                    (and (not (equal? (car entry) buf))
+                         (buffer-exists? (car entry))))
+                  *dired-lists*))))
+
+(define (dired-lists buf)
+  (let ((entry (assoc buf *dired-lists*)))
+    (if entry
+        (cdr entry)
+        (begin (dired-lists-prime! buf) (dired-lists buf)))))
+
 (define (dired-info buf e)
-  (let ((found (assoc e (or (buffer-local buf 'dired-info) '()))))
+  (let ((found (assoc e (car (dired-lists buf)))))
     (if found (cadr found) #f)))
 
 ;;; --- sizes --------------------------------------------------------------------
@@ -173,7 +197,7 @@
             (shell-command->string "df -h . | tail -1 | awk '{print $4}'" dir))))))
 
 (define (dired-vc buf e)
-  (let ((m (assoc e (or (buffer-local buf 'dired-vc) '()))))
+  (let ((m (assoc e (cadr (dired-lists buf)))))
     (if m (cadr m) "")))
 
 (define (dired-vc-face label)
@@ -286,12 +310,15 @@
   (unless (buffer-local buf 'dired-scanned)
     (dired-read-directory! buf dir)
     (unless (buffer-local buf 'dired-error) (dired-vc-scan! buf dir))
-    (buffer-set-local! buf 'dired-scanned #t)))
+    (buffer-set-local! buf 'dired-scanned #t))
+  ;; the draw that follows reads the lists this scan (or a restore) left
+  (dired-lists-prime! buf))
 
 (define (dired-rescan! buf)
   (buffer-set-local! buf 'dired-scanned #f)
   (buffer-set-local! buf 'dired-vc '())
-  (buffer-set-local! buf 'list-source-entries #f))
+  (buffer-set-local! buf 'list-source-entries #f)
+  (dired-lists-prime! buf))
 
 (define (dired-skip-derived! buf)
   (for-each (lambda (key) (desktop-skip! buf key))

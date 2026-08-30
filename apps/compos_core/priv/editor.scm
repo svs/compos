@@ -1082,13 +1082,22 @@
 ;; one entry as its lines. The mark column belongs to the mechanism:
 ;; three renders were each prepending their own. The mark goes on the
 ;; first line, and the lines under it start where it does.
-(define (list-row-lines buf e)
-  (let ((mark (if (list-marks-column? buf) (list-mark-of buf e) "")))
-    (if (list-table? buf)
+;; CTX is (marks? column-lines), the answers every row of one draw
+;; shares. list-view-lines computes it once: each answer reads the
+;; buffer, and a draw of 250 rows asked 250 times.
+(define (list-row-ctx buf)
+  (list (list-marks-column? buf) (list-column-lines buf)))
+
+(define (list-row-lines buf e &optional ctx)
+  (let* ((ctx (or ctx (list-row-ctx buf)))
+         (marks? (car ctx))
+         (column-lines (car (cdr ctx)))
+         (mark (if marks? (list-mark-of buf e) "")))
+    (if (pair? column-lines)
         (let* ((head (string-append mark " "))
                (blank (string-repeat " " (string-length head))))
           (let loop ((cs (list-row-cells buf e))
-                     (ks (list-column-lines buf))
+                     (ks column-lines)
                      (first? #t)
                      (out '()))
             (if (or (null? cs) (null? ks))
@@ -1111,23 +1120,26 @@
 
 ;; the whole view, top to bottom
 (define (list-view-lines buf rows)
-  (append (list-head-lines buf)
-          (fold (lambda (acc e) (append acc (list-row-lines buf e))) '() rows)
-          (list-foot-lines buf)))
+  (let ((ctx (list-row-ctx buf)))
+    (append (list-head-lines buf)
+            (fold (lambda (acc e) (append acc (list-row-lines buf e ctx))) '() rows)
+            (list-foot-lines buf))))
 
 ;; write the lines, answer their overlays, and leave every row's byte
 ;; offset on the buffer — motion and the mode's own overlays then read
-;; the same numbers the text has
+;; the same numbers the text has. The text goes in as one append: an
+;; append per line was one change per row, and every overlay still on
+;; the buffer shifted on each one.
 (define (list-write! buf lines first-row n-rows per)
-  (let loop ((ls lines) (i 0) (off 0) (ovs '()) (offsets '()))
+  (let loop ((ls lines) (i 0) (off 0) (ovs '()) (offsets '()) (texts '()))
     (if (null? ls)
-        (begin (buffer-set-local! buf 'list-offsets (reverse offsets))
+        (begin (buffer-append! buf (string-join (reverse texts) ""))
+               (buffer-set-local! buf 'list-offsets (reverse offsets))
                (buffer-set-local! buf 'list-head-count first-row)
                (buffer-set-local! buf 'list-row-height per)
                (reverse ovs))
         (let ((text (car (car ls)))
               (spans (car (cdr (car ls)))))
-          (buffer-append! buf (string-append text "\n"))
           (loop (cdr ls) (+ i 1)
                 (+ off (string-byte-length text) 1)
                 (fold (lambda (acc s)
@@ -1141,7 +1153,8 @@
                 (if (and (>= i first-row) (< i (+ first-row (* n-rows per)))
                          (= 0 (modulo (- i first-row) per)))
                     (cons off offsets)
-                    offsets))))))
+                    offsets)
+                (cons (string-append text "\n") texts))))))
 
 ;;; --- where point is, in rows ---------------------------------------------------
 
@@ -1404,8 +1417,11 @@
            ;; is current (a hook, a prompt), and that list keeps its place
            (p (buffer-point buf))
            (ro (buffer-read-only? buf)))
-      ;; our own rewrite is not a user edit, and the buffer is read-only
+      ;; our own rewrite is not a user edit, and the buffer is read-only.
+      ;; The last draw's overlays go first: left on, each of them shifted
+      ;; under the delete and the write, and a wide list carries thousands.
       (buffer-set-read-only! buf #f)
+      (overlay-set! buf 'list '())
       (buffer-delete-range! buf 0 (buffer-size buf))
       ;; entries first: the header states the row count
       (buffer-set-local! buf 'list-entries rows)

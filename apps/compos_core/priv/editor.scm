@@ -1822,9 +1822,10 @@
       ;; mode-name so a desktop restore re-runs the setup above
       (buffer-set-local! buf 'mode-name name)
       (list-mode-init! buf name)
+      ;; current rows; the row stays where the reader left it. The point
+      ;; belongs to the reader, and the draw restores the row by its key.
       (when cached?
-        (list-refresh! buf)
-        (list-goto-index! buf 0)))
+        (list-refresh! buf)))
     (display-buffer buf)
     buf))
 

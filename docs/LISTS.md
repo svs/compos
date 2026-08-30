@@ -26,8 +26,8 @@ The list mode in `priv/editor.scm` draws every table in the editor: ibuffer, dir
 
 ## Point
 
-1. The point in a listing is the reader's: it moves only when the reader moves it. A draw restores the row by its key; a narrowing lands on the first row because the old row may be gone; nothing else moves it. A peek popup opening or closing beside the listing moves nothing (docs/POPUPS.md rule 10).
-2. Dired: a listing opened for the first time starts on its first entry; opened again, it keeps the row it was on. `^` and `RET` on `..` open the parent with point on the directory you came from (Emacs `dired-up-directory`).
+1. The point belongs to the reader. No process moves it: a draw restores the row by its key, a peek popup opening or closing beside the listing moves nothing (docs/POPUPS.md rule 10), an open of a list you already have keeps the row you left it on. A narrowing lands on the first row because the old row may be gone; that is the reader's own act.
+2. Remembering is enough. Dired: a listing opened for the first time starts on its first entry; opened again, it is where you left it. `^` and `RET` on `..` open the parent listing where it was — the row you left it on is the directory you went into, so nothing needs computing.
 
 ## Narrowing
 

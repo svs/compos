@@ -573,16 +573,13 @@
     (when i (list-goto-index! buf i))
     buf))
 
-;; up from DIR: the parent listing, with point on DIR's own row. Emacs
-;; dired-up-directory does this; a listing that opened at the top lost
-;; the place you came from.
+;; up from DIR: the parent listing, where it was. The point belongs to
+;; the reader: a listing you came down from remembers the row you left
+;; it on, which is the directory you went into, and no computation is
+;; needed to put it there. A parent never opened starts on its first
+;; entry.
 (define (dired-open-parent! dir0)
-  (let* ((dir (dired-normalize-dir dir0))
-         (name (string-append (cadr (path-split dir)) "/"))
-         (buf (dired-open (dired-parent dir)))
-         (i (list-index-of buf (list-entries buf) name)))
-    (when i (list-goto-index! buf i))
-    buf))
+  (dired-open (dired-parent (dired-normalize-dir dir0))))
 
 (define (dired-open dir0)
   (let ((dir (dired-normalize-dir dir0)))
@@ -731,7 +728,7 @@
       (dired-visit-with-group
         (or (frame-group) (buffer-group dired-buffer))))))
 
-(define-command "dired-up" "Open the parent directory in Dired, on the row you came from"
+(define-command "dired-up" "Open the parent directory in Dired, where it was"
   (lambda ()
     (dired-open-parent! (dired-dir (current-buffer)))))
 

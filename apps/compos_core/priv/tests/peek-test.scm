@@ -484,21 +484,27 @@
                 (check-equal! (active-window) me "in the same window")))
             (buffer-kill! d)))))))
 
-(deftest 'dired-up-lands-on-the-directory-you-came-from
-  "the parent listing opens with point on the child's row, from ^ and from RET on .."
+(deftest 'dired-up-returns-to-the-row-you-came-down-from
+  "the parent remembers: the row you left it on is the directory you went into"
   (lambda ()
     (t--peek-with
       (lambda ()
         (t--peek-file "a.txt" "alpha\n")
-        (dired-open t--peek-dir)
-        (let ((child (string-append (cadr (path-split (dired-normalize-dir t--peek-dir))) "/")))
-          (run-command "dired-up")
-          (check-equal! (dired-entry) child "^ lands on the directory you came from")
-          (dired-open t--peek-dir)
-          (list-goto-index! (current-buffer) 0)
-          (check-equal! (dired-entry) ".." "the first row is the parent")
-          (run-command "dired-visit")
-          (check-equal! (dired-entry) child "RET on .. lands there too"))))))
+        (let* ((parent (dired-parent (dired-normalize-dir t--peek-dir)))
+               (child (string-append (cadr (path-split (dired-normalize-dir t--peek-dir))) "/")))
+          (dired-open parent)
+          (let ((p (current-buffer)))
+            (let loop ((i 0))
+              (when (and (< i 40) (not (equal? (dired-entry) child)))
+                (list-move-in! p 1)
+                (loop (+ i 1))))
+            (check-equal! (dired-entry) child "the reader points at the child")
+            (run-command "dired-visit")
+            (check-equal! (dired-dir (current-buffer)) (dired-normalize-dir t--peek-dir) "and goes in")
+            (run-command "dired-up")
+            (check-equal! (current-buffer) p "up is the parent listing")
+            (check-equal! (dired-entry) child "on the row the reader left it on")
+            (buffer-kill! p)))))))
 
 (deftest 'dired-opened-again-keeps-its-row
   "the point is the reader's: a listing opened again stays on the row it was on"
@@ -518,6 +524,6 @@
           (dired-open t--peek-dir)
           (check-equal! (dired-entry) "b.txt" "opened again, still at b")
           (run-command "dired-up")
-          (run-command "dired-visit")
+          (dired-open t--peek-dir)
           (check-equal! (dired-entry) "b.txt" "back from the parent, still at b")
           (buffer-kill! d))))))

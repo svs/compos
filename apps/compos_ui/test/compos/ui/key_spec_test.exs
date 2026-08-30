@@ -116,6 +116,17 @@ defmodule Compos.Ui.KeySpecTest do
       assert plain["native"] == true
       assert shifted["native"] == true
     end
+
+    test "PageDown and PageUp are keys on an editable surface" do
+      [down, up] =
+        run([
+          %{event: event("PageDown", "PageDown"), editable: true},
+          %{event: event("PageUp", "PageUp"), editable: true}
+        ])
+
+      assert down == %{"spec" => "<next>", "native" => false}
+      assert up == %{"spec" => "<prior>", "native" => false}
+    end
   end
 
   describe "the Cmd claim" do

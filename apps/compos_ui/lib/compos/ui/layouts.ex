@@ -2537,8 +2537,8 @@ defmodule Compos.Ui.Layouts do
                   switch (this._lastMotion) {
                     case "End": case "ArrowLeft": return "up";
                     case "Home": case "ArrowRight": return "down";
-                    case "ArrowDown": case "PageDown": return nearest(this._caretTopBefore + h);
-                    case "ArrowUp": case "PageUp": return nearest(this._caretTopBefore - h);
+                    case "ArrowDown": return nearest(this._caretTopBefore + h);
+                    case "ArrowUp": return nearest(this._caretTopBefore - h);
                     case "Click": return nearest(this._clickY - h / 2);
                     default: return "down";
                   }

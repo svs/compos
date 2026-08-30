@@ -3001,6 +3001,11 @@
   (let ((restoring (not (buffer-exists? buf))))
     (window-switch-buffer! buf)
     (when restoring (restore-buffer-runtime! buf))
+    ;; a buffer floats only in the popup window: shown anywhere else it
+    ;; is an ordinary buffer again, whatever class it carried
+    (when (and (popup--class? buf)
+               (not (equal? (active-window) (frame-local 'popup-window))))
+      (popup-float! buf #f))
     (window-state-changed!)
     buf))
 
@@ -4966,9 +4971,14 @@
       (when layout (buffer-set-local! name 'popup-return-layout layout)))
     (popup-float! name side size)
     (if (popup-open?)
-        (begin
+        (let ((was (window-buffer (popup-window))))
           (select-window! (popup-window))
-          (switch-to-buffer! name))
+          (switch-to-buffer! name)
+          ;; the buffer this one replaces stops floating: the class is a
+          ;; buffer-local, and a buffer that kept it floated in every
+          ;; window it was shown in after
+          (when (and was (not (equal? was name)) (buffer-exists? was))
+            (popup-float! was #f)))
         (begin
           (popup--split-for side size)
           (set-frame-local! 'popup-window (active-window))

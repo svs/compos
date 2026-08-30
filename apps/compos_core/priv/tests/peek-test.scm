@@ -377,3 +377,24 @@
           (select-window! me)
           (dired--peek-now! (list a #f me "*scratch*"))
           (check-true! (peek-buffer? a) "back where it was scheduled, the look fires"))))))
+
+(deftest 'an-opened-peek-over-a-waiting-popup-stops-floating
+  "messages under the peek: open the peek, and it is a plain window while the popup shows messages"
+  (lambda ()
+    (t--peek-with
+      (lambda ()
+        (let ((a (t--peek-file "a.txt" "alpha\n")))
+          (buffer-create "*zz-under*")
+          (popup-show "*zz-under*")
+          (select-window! (car (car (window-list))))
+          (switch-to-buffer! "*scratch*")
+          (peek-file! a)
+          (check-equal! (popup-stack) (list "*zz-under*") "the popup buffer waits under the peek")
+          (peek-open! a (lambda () a))
+          (check-equal! (buffer-local a 'window-class) #f "opened, the buffer does not float")
+          (check-equal! (popup-buffer) "*zz-under*" "the popup shows what waited")
+          (check-equal! (length (filter (lambda (w) (popup--class? (cadr w))) (window-list))) 1
+                        "one floating window, not more")
+          (check-equal! (current-buffer) a "the reader is in the opened buffer")
+          (popup-close!)
+          (buffer-kill! "*zz-under*"))))))

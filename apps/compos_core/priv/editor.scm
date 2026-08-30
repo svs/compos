@@ -6080,10 +6080,6 @@
         (opencode-group-reader opencode-open!)
         (opencode-open! (frame-group)))))
 
-(define-command "opencode-in-group"
-  "Choose a group, then open its OpenCode terminal"
-  (lambda () (opencode-group-reader opencode-open!)))
-
 ;;; RET in a comint process sends the current line to the process. RET
 ;;; elsewhere inserts a newline.
 

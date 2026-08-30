@@ -2786,7 +2786,6 @@
   (global-set-key "C-x C-g b" "group-members")
   (global-set-key "C-x C-g l" "groups")
   (global-set-key "C-x C-g s" "tile-all")
-  (global-set-key "C-x C-g o" "opencode-in-group")
   (global-set-key "C-x C-g p" "group-pin"))
 
 (group-keymap-install!)
@@ -2802,8 +2801,10 @@
     "group-new-with-buffer" "group-new-from-buffer" "group-new-from-visible"
     "group-rename-at-point" "group-kill-at-point" "group-describe-at-point"
     "group-list" "group-show-all" "group-chat-new"
-    "switch-group" "ibuffer-group" "find-file-in-group"))
+    "switch-group" "ibuffer-group" "find-file-in-group"
+    "opencode-in-group"))
 (global-unset-key "C-x C-g v")
+(global-unset-key "C-x C-g o")
 
 (public! 'group-ids "(group-ids) -> durable opaque group IDs")
 (public! 'group-name "(group-name ID) -> the current display name")

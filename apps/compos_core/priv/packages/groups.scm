@@ -1261,6 +1261,21 @@
   (and (group-work-buffer? buf)
        (not (buffer-local buf 'transient))))
 
+(define (group-switch-new-action)
+  (let ((buf (current-buffer))
+        (current (frame-group)))
+    (cond ((not (group-seed-buffer? buf))
+           (list "Start an empty group" #f #f))
+          ((and current (buffer-in-group? buf current))
+           (list "Move this buffer into a new group" buf current))
+          (else
+            (list "Start a new group with this buffer" buf #f)))))
+
+;; The members of every group in one pass: ((ID BUF ...) ...). Members
+;; come in MRU order, and the buffers never visited this session trail,
+;; the order group-buffers-mru gives. The switcher lists every group at
+;; once, and one scan of every buffer per group cost the prompt 1.7s at
+;; 25 groups and 80 buffers.
 (define (group-members-index)
   (let loop ((bufs (dedupe-names (append (buffer-list-mru) (buffer-list))))
              (index '()))
@@ -1293,6 +1308,39 @@
 (define (group-switch-candidate g)
   (group-switch-candidate-in (group-members-index) g))
 
+(define (switch-to-group-candidates)
+  (let* ((current (frame-group))
+         (recent (filter (lambda (id) (not (equal? id current)))
+                         (group-ids-mru)))
+         (mine (group-buffer-memberships (current-buffer)))
+         (mine-recent (filter (lambda (id) (member id mine)) recent))
+         (others (filter (lambda (id) (not (member id mine))) recent))
+         (action (group-switch-new-action))
+         (action-row (list (car action) "new context"))
+         (index (group-members-index))
+         (candidate (lambda (g) (group-switch-candidate-in index g))))
+    (if (group-visible-homogeneous? current)
+        (append (map candidate recent) (list action-row))
+        (append (map candidate mine-recent)
+                (list action-row)
+                (map candidate others)))))
+
+(define (group-switch-run-new-action! action)
+  (let ((label (car action))
+        (buf (car (cdr action)))
+        (source (car (cdr (cdr action)))))
+    (group-read-new-name (string-append label ": ")
+      (lambda (name)
+        (if buf
+            (group-create-with-buffer! name buf source)
+            (group-create-and-enter! name '() #f))))))
+
+;; What the highlight shows while you move through the groups: the
+;; group's most recent member, in the window the prompt came from. The
+;; look uses window-preview-buffer!, so the MRU ring does not move and a
+;; cancel leaves the history as it was. A dormant member wakes for the
+;; look, and sleeps again when the prompt closes; buffer-sleep! refuses a
+;; buffer that is on screen, so the group you actually enter stays awake.
 (define (group-peek-buffer-in index g)
   (let loop ((members (group-members-in index g)))
     (cond ((null? members) #f)
@@ -1312,16 +1360,65 @@
 (define (in-groups-board?)
   (equal? (list-mode-of (current-buffer)) "groups-mode"))
 
-(define-command "group-switch" "Switch group or project in the switcher; type a name that is not there to found it"
+(define-command "group-switch" "Switch to a group and restore its layout"
   (lambda ()
     (if (in-groups-board?)
         (let ((g (groups--current)))
           (when g (switch-to-group! g)))
-        ;; one switcher: the modal, in its groups view (docs/groups.md
-        ;; "Lists"). RET on a card enters the group; RET with no match
-        ;; founds a group named the narrowing. The minibuffer prompt this
-        ;; command owned was a second switcher.
-        (switch-open! 'groups))))
+        (let* ((action (group-switch-new-action))
+               (candidates (switch-to-group-candidates))
+               (index (group-members-index))
+               (here (current-buffer))
+               ;; #f once the prompt closed: a look that was still
+               ;; waiting must not draw after it
+               (open #t)
+               (woken '())
+               (show-here!
+                 (lambda ()
+                   (when (buffer-known? here) (window-preview-buffer! here))))
+               (sleep-woken!
+                 (lambda ()
+                   (for-each (lambda (buf) (buffer-sleep! buf)) woken)
+                   (set! woken '())))
+               (peek-now!
+                 (lambda (name)
+                   (when open
+                   (let ((buf (group-peek-buffer-in index (string-trim name))))
+                     (if (and buf (buffer-known? buf))
+                         (let ((sleeping (not (buffer-exists? buf))))
+                           (window-preview-buffer! buf)
+                           (when (and sleeping (buffer-exists? buf))
+                             (restore-buffer-runtime! buf)
+                             (set! woken (cons buf woken))))
+                         ;; the new-context row previews nothing: it names
+                         ;; no group yet, so the window shows what it showed
+                         (show-here!))))))
+               ;; a look per highlight that RESTS: C-n held down moves the
+               ;; highlight faster than a window draws, and each look is a
+               ;; draw (and a wake, for a dormant member)
+               (peek!
+                 (lambda (name)
+                   (debounce! "group-switch-peek" group-switch-peek-ms peek-now! name))))
+          (if (null? candidates)
+              (message "No groups")
+              (minibuffer-read-preview "Switch group: " candidates
+                peek!
+                (lambda (name)
+                  (set! open #f)
+                  ;; the switch saves the layout you leave, so put the
+                  ;; window back before it looks: a peek is not the
+                  ;; arrangement you were working in
+                  (show-here!)
+                  (let ((id (group-resolve-id (string-trim name))))
+                    (cond (id (switch-to-group! id))
+                          ((equal? name (car action))
+                           (group-switch-run-new-action! action))
+                          (else (message "No such group"))))
+                  (sleep-woken!))
+                (lambda ()
+                  (set! open #f)
+                  (show-here!)
+                  (sleep-woken!))))))))
 
 (defcustom 'group-switch-peek-ms 120
   "How long the highlight rests on a group before the switcher previews it, in milliseconds."

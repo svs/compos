@@ -2649,6 +2649,12 @@ defmodule Compos.Ui.Layouts do
                   const a = document.activeElement;
                   const buf = a && a.closest ? a.closest(".buf[contenteditable]") : null;
                   if (!buf || buf.hasAttribute("phx-update")) return;
+                  // only the selected window's caret is news: a click
+                  // selects a window through "mouse" first, and a patch
+                  // that nudges the selection in another window is not a
+                  // move anyone made
+                  const win = buf.closest(".window");
+                  if (!win || !win.classList.contains("active")) return;
                   markCurrentRow(buf);
                   // report when the caret comes to rest: a held arrow moves
                   // it thirty times a second, and a server redraw per step

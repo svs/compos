@@ -113,11 +113,17 @@ defmodule Compos.Ui.EditorLive do
   # the native selection of an editable surface, as bytes: a click, a drag,
   # a double-click, or the answer to a select request. Point is the focus
   # end; the mark is the anchor when the selection is not collapsed.
+  # A selection report is a caret motion in the selected window. A click
+  # selects a window through "mouse" before its caret is reported, so a
+  # report for any other window is stray: the browser's selection lives
+  # in the last editable buffer, and a patch that nudges it - a popup
+  # opening, a scroll beside it - reported a move nobody made, and the
+  # server followed it there. Dropped.
   def handle_event("sel", %{"win" => win, "point" => point} = p, socket)
       when is_integer(point) and point >= 0 do
-    with id when is_integer(id) <- safe_int(win) do
+    with id when is_integer(id) <- safe_int(win),
+         true <- id == Compos.Core.Editor.active_window(socket.assigns.frame) do
       Input.run(socket.assigns.frame, fn ->
-        Compos.Core.Session.eval("(mouse-select-window! #{id})")
         buf = Compos.Core.Editor.current_buffer()
 
         if Compos.Core.Buffer.exists?(buf) do

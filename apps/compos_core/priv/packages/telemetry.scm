@@ -323,7 +323,8 @@
            "round trip of a push, or the input delay of a paint. The rows "
            "of one keystroke share a trace id: t narrows to the trace "
            "under point, k keeps every traced row, s keeps the slow rows, "
-           "and the same key again widens. RET shows every field; g "
+           "and the same key again widens. The list draws 60 rows; PgDn "
+           "and n draw more at the end. RET shows every field; g "
            "refreshes, c clears, and q quits.")
     'buffer *telemetry-buffer*
     'rows (lambda (buf) (telemetry-events))
@@ -343,6 +344,8 @@
     'no-marks #t
     'local-filter #t
     'filter telemetry--filter
+    ;; the newest rows first; the reader who wants older ones pages down
+    'page-size 60
     'footer (lambda (buf)
               '(("RET" "details") ("t" "trace") ("k" "keys") ("s" "slow")
                 ("/" "filter") ("g" "refresh") ("c" "clear") ("q" "quit")))

@@ -402,8 +402,11 @@
 
 (define (list-marks buf) (or (buffer-local buf 'list-marks) '()))
 
-(define (list-mark-of buf e)
-  (let ((m (assoc (list-key buf e) (list-marks buf))))
+(define (list-mark-of buf e &optional ctx)
+  (let* ((key (if ctx
+                  (let ((f (list-ctx-key ctx))) (if f (f buf e) e))
+                  (list-key buf e)))
+         (m (assoc key (if ctx (list-ctx-marks ctx) (list-marks buf)))))
     (if m (car (cdr m)) " ")))
 
 (define (list-mark! buf e ch)
@@ -707,30 +710,35 @@
 ;; the whole row as text: the lines you see, and what they mean. A table
 ;; row matches on its columns, because its columns are what it shows, and
 ;; a row of two lines matches on both of them.
-(define (list-row-text buf e)
-  (string-append (string-join (map car (list-row-lines buf e)) " ")
+(define (list-row-text buf e &optional ctx)
+  (string-append (string-join (map car (list-row-lines buf e ctx)) " ")
                  " " (list-annotation buf e)))
 
-(define (list-match? buf e input)
+(define (list-match? buf e input &optional ctx)
   (let ((m (list-opt buf 'match)))
-    (if m (m buf e input) (re-match? input (list-row-text buf e)))))
+    (if m (m buf e input) (re-match? input (list-row-text buf e ctx)))))
 
 ;; every list gets the "match" kind; the mode's own 'filter fn reads the
 ;; kinds it invented. A list with neither keeps every row.
-(define (list-filter-match? buf e f)
+(define (list-filter-match? buf e f &optional ctx)
   (if (equal? (car f) "match")
-      (list-match? buf e (car (cdr f)))
+      (list-match? buf e (car (cdr f)) ctx)
       (let ((m (list-opt buf 'filter)))
         (if m (m buf e f) #t))))
 
-;; the rows that survive the stack — the loop each list wrote by hand
+;; the rows that survive the stack — the loop each list wrote by hand.
+;; The filters and the row context are read once, not once per row.
 (define (list-keep buf entries)
-  (filter (lambda (e)
-            (let loop ((fs (list-filters buf)))
-              (cond ((null? fs) #t)
-                    ((list-filter-match? buf e (car fs)) (loop (cdr fs)))
-                    (else #f))))
-          entries))
+  (let ((filters (list-filters buf)))
+    (if (null? filters)
+        entries
+        (let ((ctx (list-row-ctx buf)))
+          (filter (lambda (e)
+                    (let loop ((fs filters))
+                      (cond ((null? fs) #t)
+                            ((list-filter-match? buf e (car fs) ctx) (loop (cdr fs)))
+                            (else #f))))
+                  entries)))))
 
 ;; A list that declares 'local-filter fetches its source once and runs
 ;; the filters on the cache: a keystroke in `/` must not call the source
@@ -945,17 +953,22 @@
 ;; how many things this list is showing. A row you cannot mark is not a
 ;; thing the list holds — dired's ".." is a way out of the directory.
 (define (list-count buf)
-  (length (filter (lambda (e) (list-markable? buf e)) (list-entries buf))))
+  (let ((f (list-opt buf 'markable?))
+        (es (list-entries buf)))
+    (if f (length (filter (lambda (e) (f buf e)) es)) (length es))))
 
+;; the chip counts only while the list is narrowed: the count asks the
+;; mode about every row, and a wide list of 400 rows paid 200ms per draw
+;; to show nothing
 (define (list-chip buf)
-  (let* ((fs (list-filters buf))
-         (n (list-count buf))
-         (tf (list-opt buf 'total))
-         (total (if tf (tf buf) n)))
+  (let ((fs (list-filters buf)))
     (if (null? fs)
         ""
-        (string-append (list-filters-text buf) "   "
-                       (number->string n) " of " (number->string total)))))
+        (let* ((n (list-count buf))
+               (tf (list-opt buf 'total))
+               (total (if tf (tf buf) n)))
+          (string-append (list-filters-text buf) "   "
+                         (number->string n) " of " (number->string total))))))
 
 ;; what you typed reads back as you typed it; a kind the mode invented
 ;; says its name
@@ -993,6 +1006,12 @@
 ;; title, and it says how to leave.
 (define (list-meta-line buf)
   (let* ((meta (list-say buf 'meta))
+         (meta (if (list-more? buf)
+                   (string-append meta (if (equal? meta "") "" " · ")
+                                  (number->string (list-shown-count buf)) " of "
+                                  (number->string (length (list-entries buf)))
+                                  " shown, PgDn draws more")
+                   meta))
          (note (if (null? (list-filters buf))
                    ""
                    (string-append "narrowed to " (list-filters-text buf)
@@ -1072,31 +1091,45 @@
                   (list-key-bar buf keys))))))
 
 ;; one entry's cells, one list per line of the row
-(define (list-row-cells buf e)
-  (let ((g (list-opt buf 'row-cells))
-        (f (list-opt buf 'cells)))
+(define (list-row-cells buf e &optional ctx)
+  (let ((g (if ctx (list-ctx-row-cells ctx) (list-opt buf 'row-cells)))
+        (f (if ctx (list-ctx-cells ctx) (list-opt buf 'cells))))
     (cond (g (g buf e))
           (f (list (f buf e)))
           (else '()))))
 
+;; CTX is the answers every row of one draw shares: the mark column,
+;; the column lines, the mode's cells, row-cells, render, and key fns,
+;; and the marks. One draw computes it once. Each answer reads the
+;; buffer or resolves the layout profile, and a buffer read is a call
+;; into the buffer's process: a row that asked ten times cost 6ms, and
+;; a draw of 400 rows took seconds.
+(define (list-row-ctx buf)
+  (list (list-marks-column? buf) (list-column-lines buf)
+        (list-opt buf 'cells) (list-opt buf 'row-cells) (list-opt buf 'render)
+        (list-marks buf) (list-opt buf 'key)))
+
+(define (list-ctx-marks? ctx) (car ctx))
+(define (list-ctx-column-lines ctx) (nth 1 ctx))
+(define (list-ctx-cells ctx) (nth 2 ctx))
+(define (list-ctx-row-cells ctx) (nth 3 ctx))
+(define (list-ctx-render ctx) (nth 4 ctx))
+(define (list-ctx-marks ctx) (nth 5 ctx))
+(define (list-ctx-key ctx) (nth 6 ctx))
+
 ;; one entry as its lines. The mark column belongs to the mechanism:
 ;; three renders were each prepending their own. The mark goes on the
 ;; first line, and the lines under it start where it does.
-;; CTX is (marks? column-lines), the answers every row of one draw
-;; shares. list-view-lines computes it once: each answer reads the
-;; buffer, and a draw of 250 rows asked 250 times.
-(define (list-row-ctx buf)
-  (list (list-marks-column? buf) (list-column-lines buf)))
 
 (define (list-row-lines buf e &optional ctx)
   (let* ((ctx (or ctx (list-row-ctx buf)))
-         (marks? (car ctx))
-         (column-lines (car (cdr ctx)))
-         (mark (if marks? (list-mark-of buf e) "")))
+         (marks? (list-ctx-marks? ctx))
+         (column-lines (list-ctx-column-lines ctx))
+         (mark (if marks? (list-mark-of buf e ctx) "")))
     (if (pair? column-lines)
         (let* ((head (string-append mark " "))
                (blank (string-repeat " " (string-length head))))
-          (let loop ((cs (list-row-cells buf e))
+          (let loop ((cs (list-row-cells buf e ctx))
                      (ks column-lines)
                      (first? #t)
                      (out '()))
@@ -1116,12 +1149,12 @@
                                                             "alert")))
                                             (list-shift-spans (car (cdr laid)) n)))
                               out))))))
-        (list (list (string-append mark ((list-opt buf 'render) buf e)) '())))))
+        (list (list (string-append mark ((list-ctx-render ctx) buf e)) '())))))
 
 ;; the whole view, top to bottom
-(define (list-view-lines buf rows)
+(define (list-view-lines buf rows &optional head)
   (let ((ctx (list-row-ctx buf)))
-    (append (list-head-lines buf)
+    (append (or head (list-head-lines buf))
             (fold (lambda (acc e) (append acc (list-row-lines buf e ctx))) '() rows)
             (list-foot-lines buf))))
 
@@ -1269,11 +1302,13 @@
 ;; the mover may not be in the list: the filter prompt is the current
 ;; buffer while its arrows move the rows of the list behind it
 (define (list-move-in! buf step)
-  (let ((i (list-clamped-index buf))
-        (n (length (list-entries buf))))
+  (let ((i (list-clamped-index buf)))
     (when i
-      (list-goto-index! buf (max 0 (min (- n 1) (+ i step))))
-      (list-preview! buf))))
+      ;; past the last drawn row of a paged list, the next page comes
+      (when (> step 0) (list-ensure-shown! buf (+ i step)))
+      (let ((n (list-shown-count buf)))
+        (list-goto-index! buf (max 0 (min (- n 1) (+ i step))))
+        (list-preview! buf)))))
 
 (define (list-move! step) (list-move-in! (current-buffer) step))
 
@@ -1285,6 +1320,22 @@
 
 (define-command "list-prev" "Move to the previous row of this list"
   (lambda () (list-move! -1)))
+
+;; a screen down in a paged list: the rows the screen lands on are drawn
+;; first, so the page never ends in the key bar with more rows to come
+(define-command "list-page-down" "Move a screen down this list; a paged list draws its next page"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (i (or (list-clamped-index buf) 0)))
+      (list-ensure-shown! buf (+ i (window-rows)))
+      (move-lines (- (window-rows) 2) next-line!)
+      (list-snap-point! buf))))
+
+(define-command "list-more" "Draw the next page of this list"
+  (lambda ()
+    (if (list-more? (current-buffer))
+        (list-more! (current-buffer))
+        (message "Every row is shown"))))
 
 (domain! 'unknown)
 (effects! '(unknown))
@@ -1400,6 +1451,52 @@
           ((equal? (list-key buf (car es)) key) i)
           (else (loop (cdr es) (+ i 1))))))
 
+;;; --- pages -------------------------------------------------------------------
+;;; A mode with many rows declares 'page-size N. The draw writes the first
+;;; page; the reader who moves past its end gets the next page, and the
+;;; header says how many rows the page holds of the whole. The entries
+;;; keep every row, so the counts, the filters, and the marks see them
+;;; all, and the drawn rows are a prefix of the entries, so an index means
+;;; the same row in both.
+
+(define (list-page-size buf) (list-opt buf 'page-size))
+
+;; how many rows the next draw writes: the pages opened so far, or one
+(define (list-page-limit buf)
+  (let ((size (list-page-size buf)))
+    (and size (max size (or (buffer-local buf 'list-page-limit) 0)))))
+
+(define (list-page-rows buf rows)
+  (let ((limit (list-page-limit buf)))
+    (if (and limit (> (length rows) limit))
+        (let loop ((rs rows) (k limit) (acc '()))
+          (if (or (null? rs) (= k 0))
+              (reverse acc)
+              (loop (cdr rs) (- k 1) (cons (car rs) acc))))
+        rows)))
+
+(define (list-shown-count buf)
+  (or (buffer-local buf 'list-shown-count) (length (list-entries buf))))
+
+;; only a paged list has more: a mode without pages may set its own
+;; entries after a draw, and the count of the last draw is not a page
+(define (list-more? buf)
+  (and (list-page-size buf)
+       (< (list-shown-count buf) (length (list-entries buf)))))
+
+;; draw enough pages to show row WANT (an index); nothing when it shows
+(define (list-ensure-shown! buf want)
+  (let ((size (list-page-size buf)))
+    (when (and size (list-more? buf) (>= want (list-shown-count buf)))
+      (let* ((total (length (list-entries buf)))
+             (pages (+ 1 (quotient want size)))
+             (limit (min total (* pages size))))
+        (buffer-set-local! buf 'list-page-limit limit)
+        (list-redraw! buf)))))
+
+(define (list-more! buf)
+  (list-ensure-shown! buf (list-shown-count buf)))
+
 (define (list-render! buf fetch)
   (when (buffer-exists? buf)
     (buffer-set-local! buf 'list-layout-cache #f)
@@ -1433,21 +1530,29 @@
       ;; rows that went. Every later call in this draw reads the cache,
       ;; so the mode's columns fn still runs once.
       (buffer-set-local! buf 'list-columns-cache #f)
-      (let ((base (list-write! buf (list-view-lines buf rows)
-                               (list-header-lines buf) (length rows)
-                               (list-row-height buf))))
-        (overlay-set! buf 'list (append base (list-row-overlays buf rows))))
+      ;; a paged list draws the first page of its rows; the entries keep
+      ;; every row, so the counts and the filters see them all
+      (let* ((shown (list-page-rows buf rows))
+             ;; the header once: its lines and their count are one answer
+             (head (begin
+                     (buffer-set-local! buf 'list-shown-count (length shown))
+                     (list-head-lines buf)))
+             (base (list-write! buf (list-view-lines buf shown head)
+                                (length head) (length shown)
+                                (list-row-height buf))))
+        (overlay-set! buf 'list (append base (list-row-overlays buf shown))))
       (buffer-set-read-only! buf ro)
       (when (list-table? buf)
         (buffer-set-local! buf 'list-width (list-view-width buf)))
       ;; the rows are now the rows this render shows: the stamp says so
       (list-stamp! buf)
-      (let ((i (and selected-key (list-index-of buf rows selected-key))))
-        (cond ((and i (pair? rows)) (list-goto-index! buf i))
+      (let ((i (and selected-key (list-index-of buf rows selected-key)))
+            (last (- (list-shown-count buf) 1)))
+        (cond ((and i (pair? rows)) (list-goto-index! buf (min i last)))
               ;; the rows may have shrunk under point — the key bar is
               ;; not a row
               ((and was (pair? rows))
-               (list-goto-index! buf (min was (- (length rows) 1))))
+               (list-goto-index! buf (min was last)))
               (else
                (let ((q (min p (buffer-size buf))))
                  (if cur? (goto-char! q) (buffer-goto! buf q))))))
@@ -1553,7 +1658,11 @@
     ;; explain them, and redrawing them from the source is the fetch a
     ;; preview must not pay.
     (unless *buffer-waking*
-      (set! widened (list-clear-query! buf)))
+      (set! widened (list-clear-query! buf))
+      ;; an open shows the first page; the pages you drew were for the
+      ;; question you asked last time
+      (buffer-set-local! buf 'list-page-limit #f))
+    (desktop-skip! buf 'list-shown-count)
     ;; a list buffer's text IS its view. A buffer keeps the locals of the
     ;; mode before it, so dired on a directory that once held a diff kept
     ;; 'render-mode "blocks" and the window drew no rows at all.
@@ -1571,7 +1680,8 @@
       (local-set-key* buf "n" "list-next")
       (local-set-key* buf "p" "list-prev")
       (local-remap*! buf "next-line" "list-next")
-      (local-remap*! buf "previous-line" "list-prev"))
+      (local-remap*! buf "previous-line" "list-prev")
+      (local-remap*! buf "scroll-up-command" "list-page-down"))
     ;; every list narrows the same way — `/` to type, `\` to widen. Both
     ;; go in before the mode's own keys, which may claim them for
     ;; something else.

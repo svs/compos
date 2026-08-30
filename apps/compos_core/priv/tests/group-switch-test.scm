@@ -1109,6 +1109,56 @@
         (check-equal! (current-buffer) t--sw-third "the picked buffer has focus")))
     (t--sw-done!)))
 
+(deftest 'switch-to-group-previews-the-group-under-the-highlight
+  "moving the highlight shows the group's most recent member"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((here (group-record-create! "zzsw-peek-here"))
+          (there (group-record-create! "zzsw-peek-there")))
+      (buffer-add-group! t--sw-first here)
+      (buffer-add-group! t--sw-second there)
+      (buffer-add-group! t--sw-third there)
+      (set-frame-local! 'current-group here)
+      (switch-to-buffer! t--sw-third)
+      (switch-to-buffer! t--sw-second)
+      (switch-to-buffer! t--sw-first)
+      (mru-note-group! there)
+      (mru-note-group! here)
+
+      (run-command "switch-to-group")
+      (t--sw-type! "zzsw-peek-there")
+      (check-equal! (cadr (car (window-list))) t--sw-second
+                    "the window shows the group's leading member")
+      (check-equal! (car (buffer-list-mru)) t--sw-first
+                    "and the preview moved no history")
+
+      (t--sw-key! "cancel")
+      (check-equal! (cadr (car (window-list))) t--sw-first
+                    "cancelling puts the buffer you came from back"))
+    (t--sw-done!)))
+
+(deftest 'switch-to-group-enters-the-group-it-previewed
+  "the peek is a look; RET is the switch, and it saves the layout you had"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((here (group-record-create! "zzsw-enter-here"))
+          (there (group-record-create! "zzsw-enter-there")))
+      (buffer-add-group! t--sw-first here)
+      (buffer-add-group! t--sw-second there)
+      (set-frame-local! 'current-group here)
+      (switch-to-buffer! t--sw-second)
+      (switch-to-buffer! t--sw-first)
+
+      (run-command "switch-to-group")
+      (t--sw-type! "zzsw-enter-there")
+      (t--sw-key! "confirm")
+
+      (check-equal! (frame-group) there "the previewed group was entered")
+      (check-equal! (current-buffer) t--sw-second "its member has focus")
+      (check-equal! (window-tree-buffers (group-layout here)) (list t--sw-first)
+                    "the group you left kept the arrangement you worked in"))
+    (t--sw-done!)))
+
 (deftest 'switch-to-group-can-move-the-current-buffer-into-a-new-context
   "the explicit action replaces memberships with the new group"
   (lambda ()

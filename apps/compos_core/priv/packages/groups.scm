@@ -1307,22 +1307,74 @@
             (group-create-with-buffer! name buf source)
             (group-create-and-enter! name '() #f))))))
 
+;; What the highlight shows while you move through the groups: the
+;; group's most recent member, in the window the prompt came from. The
+;; look uses window-preview-buffer!, so the MRU ring does not move and a
+;; cancel leaves the history as it was. A dormant member wakes for the
+;; look, and sleeps again when the prompt closes; buffer-sleep! refuses a
+;; buffer that is on screen, so the group you actually enter stays awake.
+(define (group-peek-buffer-in index g)
+  (let loop ((members (group-members-in index g)))
+    (cond ((null? members) #f)
+          ;; the work, not a companion: the group's chat and a scratch
+          ;; that belongs to a buffer are not where the work is
+          ((and (group-work-buffer? (car members))
+                (not (buffer-local (car members) 'scratch-owner)))
+           (car members))
+          (else (loop (cdr members))))))
+
+;; One index per prompt: group-buffers-mru scans every buffer twice per
+;; group, and the highlight moved one group per key.
+(define (group-peek-buffer g)
+  (group-peek-buffer-in (group-members-index) g))
+
 (define-command "switch-to-group" "Switch to a group and restore its layout"
   (lambda ()
     (if (equal? (list-mode-of (current-buffer)) "groups-mode")
         (let ((g (groups--current)))
           (when g (switch-to-group! g)))
         (let* ((action (group-switch-new-action))
-               (candidates (switch-to-group-candidates)))
+               (candidates (switch-to-group-candidates))
+               (index (group-members-index))
+               (here (current-buffer))
+               (woken '())
+               (show-here!
+                 (lambda ()
+                   (when (buffer-known? here) (window-preview-buffer! here))))
+               (sleep-woken!
+                 (lambda ()
+                   (for-each (lambda (buf) (buffer-sleep! buf)) woken)
+                   (set! woken '())))
+               (peek!
+                 (lambda (name)
+                   (let ((buf (group-peek-buffer-in index (string-trim name))))
+                     (if (and buf (buffer-known? buf))
+                         (let ((sleeping (not (buffer-exists? buf))))
+                           (window-preview-buffer! buf)
+                           (when (and sleeping (buffer-exists? buf))
+                             (restore-buffer-runtime! buf)
+                             (set! woken (cons buf woken))))
+                         ;; the new-context row previews nothing: it names
+                         ;; no group yet, so the window shows what it showed
+                         (show-here!))))))
           (if (null? candidates)
               (message "No groups")
-              (minibuffer-read "Switch group: " candidates
+              (minibuffer-read-preview "Switch group: " candidates
+                peek!
                 (lambda (name)
+                  ;; the switch saves the layout you leave, so put the
+                  ;; window back before it looks: a peek is not the
+                  ;; arrangement you were working in
+                  (show-here!)
                   (let ((id (group-resolve-id (string-trim name))))
                     (cond (id (switch-to-group! id))
                           ((equal? name (car action))
                            (group-switch-run-new-action! action))
-                          (else (message "No such group")))))))))))
+                          (else (message "No such group"))))
+                  (sleep-woken!))
+                (lambda ()
+                  (show-here!)
+                  (sleep-woken!))))))))
 
 ;; Compatibility name for existing configuration.
 (define-command "group-switch" "Switch to a group and restore its layout"
@@ -1557,12 +1609,17 @@
     (filter (lambda (row) (equal? (caddr row) frame))
             (window-list-all))))
 
+(define *group-dying* #f)
+
 (define (group-kill-replacement group frame)
   (let* ((visible (group-kill-visible-in-frame frame))
          (members (group-buffers-mru group))
          (hidden (filter (lambda (buf) (not (member buf visible))) members)))
     (cond ((pair? hidden) (car hidden))
           ((pair? members) (car members))
+          ;; no chat for a group that is being killed: the window falls
+          ;; to the next buffer instead
+          ((equal? (group-resolve-id group) *group-dying*) #f)
           (else (group-chat group)))))
 
 (define (group-buffer-kill-repair name)
@@ -1609,17 +1666,12 @@
   (let ((buffers (group-buffers-as g role)))
     (let loop ((windows (window-list)))
       (cond ((null? windows) #f)
-(define *group-dying* #f)
-
             ((member (car (cdr (car windows))) buffers) (car (car windows)))
             (else (loop (cdr windows)))))))
 
 (define (scene-buffer role)
   (let ((id (frame-local 'current-group)))
     (and id (group-buffer-as id role))))
-          ;; no chat for a group that is being killed: the window falls
-          ;; to the next buffer instead
-          ((equal? (group-resolve-id group) *group-dying*) #f)
 
 (define (scene-window role)
   (let ((id (frame-local 'current-group)))

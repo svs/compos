@@ -367,6 +367,10 @@ The active groups are derived the same way: `(active-groups)` answers every grou
 
 `switch` completes over groups in frame-local MRU order. The current group is excluded. Groups with no MRU entry trail in creation order. The last row is `new`.
 
+### Candidate preview
+
+Moving the highlight shows the group under it: its most recent member, in the window the prompt came from. The preview never moves the MRU ring and it saves no layout. `RET` puts that window back and then switches; `C-g` puts it back and changes nothing. The `new` row previews nothing.
+
 ### Transient buffers
 
 One predicate, `transient?`, is true for the minibuffer, `*switch*`, the echo area, previews, and the groups board. Transient buffers are excluded from the indicator, from the seed of `new`, and from the selection. Every other buffer is a normal buffer.

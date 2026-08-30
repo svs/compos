@@ -39,6 +39,9 @@
 (define (group-record-primary-chat-id record) (nth 5 record))
 (define (group-record-color record)
   (and (> (length record) 6) (nth 6 record)))
+;; the id of the group this one popped out of; dissolve merges back into it
+(define (group-record-parent record)
+  (and (> (length record) 7) (nth 7 record)))
 
 (define (group-color-face value)
   (let* ((record (and value
@@ -181,7 +184,9 @@
                       (if (equal? field 'primary-chat-id) new-value
                           (group-record-primary-chat-id record))
                       (if (equal? field 'color) new-value
-                          (group-record-color record)))))
+                          (group-record-color record))
+                      (if (equal? field 'parent) new-value
+                          (group-record-parent record)))))
           *group-records*))
       (desktop-dirty!)
       (when (member field '(name color))
@@ -207,7 +212,11 @@
                           (nth (modulo index (length *group-colors*))
                                *group-colors*))))
           (loop (cdr rest) (+ index 1)
-                (cons (append (take-n record 6) (list color)) out))))))
+                (cons (append (take-n record 6) (list color)
+                              (if (> (length record) 7)
+                                  (list (nth 7 record))
+                                  '()))
+                      out))))))
 
 (define (group-state-restore! saved)
   (when (and (pair? saved) (pair? (cdr saved)))
@@ -669,6 +678,17 @@
 
 (define (group-meta-set! g text)
   (group-record-update! (group-ensure-record! g) 'meta text))
+
+;; The parent is the group a pop-out came from. Only a live parent counts:
+;; a dissolved or renamed-away parent makes the child an ordinary group.
+(define (group-parent g)
+  (let ((record (and (group-resolve-id g)
+                     (group-record-by-id (group-resolve-id g)))))
+    (and record (group-resolve-id (group-record-parent record)))))
+
+(define (group-parent-set! g parent)
+  (let ((id (group-resolve-id g)))
+    (when id (group-record-update! id 'parent (group-resolve-id parent)))))
 
 
 (define (group-layout g)
@@ -1487,23 +1507,31 @@
                                     ((equal? cur "quiet") "loud")
                                     (else "off"))))))))
 
+;; A group with a parent came from a pop-out. Dissolving it merges the
+;; members back: each work buffer joins the parent. A group with no live
+;; parent dissolves as before, and the buffers keep only their other groups.
 (define (group-dissolve! g)
-  (let ((id (begin (group-migrate-live!) (group-resolve-id g))))
+  (let* ((id (begin (group-migrate-live!) (group-resolve-id g)))
+         (parent (and id (group-parent id))))
     (when id
       (for-each
         (lambda (b)
           (if (chat-buffer? b)
               (when (equal? (chat-group-id b) id)
                 (buffer-set-local! b 'group-id #f))
-              (buffer-remove-group! b id)))
+              (begin
+                (when parent (buffer-add-group! b parent))
+                (buffer-remove-group! b id))))
         (group-buffers id))
-      (when (equal? (frame-local 'current-group) id)
-        (set-frame-local! 'current-group #f))
-      (group-record-delete! id)
-      (frame-group-label-refresh!)
+      (let ((stood (equal? (frame-local 'current-group) id)))
+        (when stood (set-frame-local! 'current-group #f))
+        (group-record-delete! id)
+        (if (and stood parent)
+            (switch-to-group! parent)
+            (frame-group-label-refresh!)))
       #t)))
 
-(define-command "group-dissolve" "Dissolve a group without killing its buffers"
+(define-command "group-dissolve" "Dissolve a group; its members merge into the parent group when one exists"
   (lambda ()
     (if (in-groups-board?)
         (groups--act! "dissolved" group-dissolve!)
@@ -2904,6 +2932,8 @@
   "(buffer-family BUFFER) -> the group-relative work family, including its shared scratch companion")
 (public! 'buffer-add-group-as! "(buffer-add-group-as! BUFFER GROUP ROLE) — join GROUP with a semantic role")
 (public! 'group-record-create! "(group-record-create! NAME) -> new stable ID or #f")
+(public! 'group-parent "(group-parent G) -> the live parent group id, or #f")
+(public! 'group-parent-set! "(group-parent-set! G PARENT) — record PARENT as the group G popped out of")
 (public! 'group-read-or-create!
   "(group-read-or-create! PROMPT RECEIVE) — read an existing group or create the typed name")
 (public! 'buffer-group "(buffer-group NAME) -> the buffer's group tag or #f")

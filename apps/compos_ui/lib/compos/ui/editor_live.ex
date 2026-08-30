@@ -1141,7 +1141,7 @@ defmodule Compos.Ui.EditorLive do
           </div>
         </div>
       <% else %>
-        <%= if @state.transient do %>
+        <%= if @state.transient && @state.transient[:groups] do %>
           <div class="mb-panel palette transient-panel">
             <div class="transient-title">{@state.transient.title}</div>
             <div class="transient-groups">

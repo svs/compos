@@ -371,7 +371,7 @@ defmodule Compos.Core.SchemeAPI do
       "local-set-key*" => "(local-set-key* BUF SEQ COMMAND) — bind SEQ to COMMAND in buffer BUF.",
       "local-unset-key*" => "(local-unset-key* BUF SEQ) — drop BUF's own binding for SEQ.",
       "transient-show!" =>
-        "(transient-show! MENU) — show this frame's Transient modal; #f clears it.",
+        "(transient-show! MENU) — show this frame's Transient modal; #t locks keys with no menu; #f clears it.",
       "local-remap!" =>
         "(local-remap! FROM TO) — in the current buffer, every key bound to FROM runs TO.",
       "local-remap*!" =>
@@ -1542,6 +1542,12 @@ defmodule Compos.Core.SchemeAPI do
       "transient-show!" => fn
         [false] ->
           Editor.set_transient(nil)
+          :void
+
+        # #t locks key routing to the frame's transient keymap with no menu
+        # panel: the overview needs modal keys over a visible layout
+        [true] ->
+          Editor.set_transient(%{lock: true})
           :void
 
         [[title, groups]] ->

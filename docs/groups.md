@@ -324,7 +324,7 @@ Every verb that takes buffers acts on the selection. With no selection it acts o
 | `switch-last` | Swap `destination` and `previous`. |
 | `switch-to-buffer-group` | Read the current buffer's groups. 0: prompt for a name and run `new`. 1: switch to it. 2 or more: prompt, always. |
 | `new G` | Create G with its scratch buffer. Add the seed. Save a layout built from the seed. Switch to G. |
-| `dissolve G` | Remove every member from G. Remove the scratch buffer and the record. Frames on G go to `previous`, else none. |
+| `dissolve G` | When G has a live parent (see "The overview"): every member joins the parent, then leaves G, and a frame on G switches to the parent. Else: remove every member from G. Remove the scratch buffer and the record. Frames on G go to `previous`, else none. |
 | `kill G` | For each member: when it is in another group, remove it from G; else kill it under the normal modified-buffer protection. Then dissolve G. A frame on G follows the buffer its window fell to into that buffer's group, with the group's layout; a buffer in no group leaves the frame in none. `group-after-kill` is `follow` (this) or `stay`. The kill runs `group-kill-hook` last, with `*group-killed*` = `(ID NAME STOOD?)`. |
 | `rename G NAME` | Change the name. The ID, members, layouts, and MRU do not change. |
 | `revive G` | Make a killed G again from the graveyard: the record, its meta, layout, noise, chat id, and color. Every member that still exists comes back: a buffer that is open joins; a file that exists on disk is visited into G. A member with neither is missing; the revival says how many. Then switch to G. |
@@ -420,7 +420,16 @@ Visiting a file never changes the destination. A group made from files inside a 
 
 `switch G` restores, per frame: the window tree, the buffer in each window, point and scroll per window, and the selected window. A group with no layout on this frame shows its scratch buffer in one window.
 
-A group is sealed: a restored pane shows a member of G, or G's scratch as a blank pane. A pane that was saved with a foreign buffer keeps its place and shows a member that is not yet visible, else the scratch. A pane whose buffer is gone is filled the same way, so a saved peek heals on the next switch. A layout that tiles the group (`window-layout`, `tile-all`) fills the panes the members cannot fill with the scratch, never with a buffer from outside G.
+A group is sealed: a restored pane shows a member of G, or G's scratch as a blank pane. A pane that was saved with a foreign buffer keeps its place and shows a member that is not yet visible, else the scratch. A pane whose buffer is gone is filled the same way, so a saved peek heals on the next switch. A layout that tiles the group (`window-layout`) fills the panes the members cannot fill with the scratch, never with a buffer from outside G.
+
+### The overview
+
+`tile-all` is the overview, the editor's control center. It tiles every live work buffer in one grid and locks the frame: keys select a tile, they do not edit. The overview is a covering surface. It saves no group layout and it changes no membership by itself.
+
+- Arrow keys select a tile. `m` marks a tile. `q`, `C-g`, and `ESC` quit.
+- Quit restores the saved window tree and the saved current group.
+- `SPC` or `RET` pops the marked buffers, else the selected one, out into a new group. The new group takes the first buffer's short name. Each buffer leaves the origin group and joins the new one; a membership in any other group stays.
+- The new group records the origin group as its **parent**. `dissolve` on a group with a live parent merges the members back into the parent and the frame follows. A parent that is gone makes the child an ordinary group.
 
 ### Save
 
@@ -510,7 +519,7 @@ Rename and restart never change a group's ID.
 
 These are not in this specification. The design leaves room for them.
 
-- **Transient layouts.** A frame holds a base layout and, optionally, one transient layout on top. Save-on-leave saves the base. Leaving the transient restores the base. A future `tile-all` grid is a transient layout.
+- **Transient layouts.** A frame holds a base layout and, optionally, one transient layout on top. Save-on-leave saves the base. Leaving the transient restores the base. The `tile-all` overview carries its own base save and restore; a general mechanism is still open.
 - **Landing.** `switch G` may take an optional landing layout to show instead of the saved one, without saving it.
 - **Narrow.** A hard scope on top of the soft sections is parked.
 
@@ -521,6 +530,7 @@ These are not in this specification. The design leaves room for them.
 - Every group has one immutable opaque ID and one durable record.
 - Names are unique after trimming and are mutable.
 - A record survives with no members. `dissolve` and `kill` retire it.
+- A record made by an overview pop-out stores the parent group's ID. The reference is weak: a retired parent makes the child ordinary.
 - Code uses the ID for membership, MRU, layouts, and frame slots. Names are for display and completion.
 
 ### Membership storage
@@ -568,7 +578,7 @@ Tests name commands, never keys. A test that needs a binding binds its own dummy
 9. A saved layout with a dead buffer restores without that pane.
 10. Window fill order: group member, project file, delete window, scratch as last window, `other-buffer` with no context.
 11. Three-section lists: all combinations of destination and project present or absent; filter across sections; project section follows the current buffer.
-12. `dissolve` drops memberships and keeps buffers; frames go to `previous`.
+12. `dissolve` drops memberships and keeps buffers; frames go to `previous`. With a live parent, the members join the parent and the frame switches to it.
 13. `kill` drops the membership on shared buffers, kills exclusive ones, honours modified protection, switches frames to the next group.
 14. Scratch buffer refuses `kill-buffer`, `move`, `remove`; goes with `kill` and `dissolve`; persists content.
 15. Per-frame destination and `previous`; two frames on one group with two layouts.

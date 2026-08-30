@@ -4,7 +4,7 @@
 (effects! '(write execute))
 
 (tests-need-a-disposable-editor!
-  "tile-all replaces the frame layout and its Winner history")
+  "replaces the frame layout and its Winner history")
 
 (define t--project-defaults-root
   (string-append (compos-home) "/zz-project-defaults"))
@@ -81,44 +81,5 @@
       (buffer-kill! owner))
     (t--project-defaults-reset!)))
 
-(deftest 'tile-all-tiles-every-buffer-in-the-current-project
-  "project scope supplies every open project buffer when no group is active"
-  (lambda ()
-    (t--project-defaults-reset!)
-    (make-directory! (string-append t--project-defaults-root "/.git"))
-    (set! *project-root-cache* '())
-    (switch-to-buffer! "*scratch*")
-    (delete-other-windows!)
-    (buffer-set-local! "*scratch*" 'group-ids '())
-    (buffer-set-local! "*scratch*" 'group #f)
-    (set-frame-local! 'current-group #f)
-    (set-frame-local! 'pinned-group #f)
-    (group-current-recalculate!)
-    (let ((first "*zz-project-tile-first*")
-          (second "*zz-project-tile-second*")
-          (third "*zz-project-tile-third*"))
-      (for-each
-        (lambda (buf)
-          (test-buffer! buf "")
-          (buffer-set-local! buf 'default-directory
-            (string-append t--project-defaults-root "/")))
-        (list first second third))
-      (switch-to-buffer! first)
-      (delete-other-windows!)
-      (check-false! (frame-group) "the test frame has no group context")
-      (check-equal! (project-current) t--project-defaults-root
-                    "the first buffer supplies the project context")
-      (check-equal! (length (tile-all-context-buffers)) 3
-                    "tile-all selects all three project buffers")
-      (global-set-key "<f9> t" "tile-all")
-      (dispatch-keys '("<f9>" "t"))
-      (check-true!
-        (wait-until (lambda () (= (length (window-list)) 3)) 3000 20)
-        "each project buffer gets one window")
-      (for-each
-        (lambda (buf) (check-true! (window-showing buf) "the buffer is visible"))
-        (list first second third))
-      (switch-to-buffer! "*scratch*")
-      (delete-other-windows!)
-      (for-each buffer-kill! (list first second third)))
-    (t--project-defaults-reset!)))
+;; tile-all no longer scopes to a project: it is the overview of every
+;; live work buffer. overview-test.scm covers it.

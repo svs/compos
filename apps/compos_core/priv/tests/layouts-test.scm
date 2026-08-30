@@ -25,15 +25,19 @@
     (check-equal! (window-layout-for-width 240 4) 'grid
                   "four panes become a balanced grid")))
 
-(deftest 'tile-all-requires-a-group-or-project
-  "an unrelated buffer does not replace the current layout"
+(deftest 'overview-tiles-work-buffers-only
+  "the overview lists live work buffers, never chats, listings, or context"
   (lambda ()
-    (let ((buf (test-buffer! "*zz-tile-all-outside*" "")))
-      (buffer-set-local! buf 'default-directory "/tmp/")
-      (switch-to-buffer! buf)
-      (set-frame-local! 'current-group #f)
-      (check-false! (tile-all!) "the layout is unavailable outside a context")
-      (buffer-kill! buf))))
+    (let ((work (test-buffer! "*zz-ov-list-work*" ""))
+          (listing (test-buffer! "*zz-ov-list-transient*" ""))
+          (context (test-buffer! "*zz-ov-list-context*" "")))
+      (buffer-set-local! listing 'transient #t)
+      (buffer-context-only! context)
+      (let ((buffers (overview-buffers)))
+        (check-true! (member work buffers) "a work buffer tiles")
+        (check-false! (member listing buffers) "a transient listing does not")
+        (check-false! (member context buffers) "a context-only buffer does not"))
+      (for-each buffer-kill! (list work listing context)))))
 
 (deftest 'dashboard-one-line-keeps-the-expanded-dashboard-facts
   "the persistent modeline summary names the mode and input lane"

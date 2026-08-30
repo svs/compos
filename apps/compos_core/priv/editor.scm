@@ -4948,9 +4948,14 @@
 
 (define (popup-stack) (or (frame-local 'popup-stack) '()))
 
+;; a peek is a look: replaced, it is killed, so it never waits on the
+;; stack. Dead names are pruned as the stack is written, so it holds
+;; live buffers only and cannot grow past them.
 (define (popup-stack-push! name)
-  (set-frame-local! 'popup-stack
-    (cons name (remove (lambda (b) (equal? b name)) (popup-stack)))))
+  (unless (and (boundp 'peek-buffer?) (peek-buffer? name))
+    (set-frame-local! 'popup-stack
+      (cons name (filter (lambda (b) (and (not (equal? b name)) (buffer-known? b)))
+                         (popup-stack))))))
 
 (define (popup-stack-drop! name)
   (set-frame-local! 'popup-stack

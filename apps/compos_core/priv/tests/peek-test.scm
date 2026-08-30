@@ -425,3 +425,17 @@
           (run-command "other-window")
           (check-false! (equal? (active-window) me) "with a real window it moves")
           (check-true! (window-focusable? (active-window)) "to the real window, not the peek"))))))
+
+(deftest 'replaced-peeks-leave-nothing-on-the-popup-stack
+  "a look is killed when replaced, and the stack keeps live buffers only"
+  (lambda ()
+    (t--peek-with
+      (lambda ()
+        (let ((a (t--peek-file "a.txt" "alpha\n"))
+              (b (t--peek-file "b.txt" "beta\n"))
+              (c (t--peek-file "c.txt" "gamma\n")))
+          (peek-file! a) (peek-file! b) (peek-file! c)
+          (check-equal! (popup-stack) '() "no peek waits on the stack")
+          (check-equal! (length (peek-buffers)) 1 "one peek lives")
+          (check-false! (buffer-known? a) "the first is gone")
+          (check-false! (buffer-known? b) "and the second"))))))

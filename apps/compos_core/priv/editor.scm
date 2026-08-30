@@ -4803,7 +4803,23 @@
 ;; The window is read ONCE. popup-window can answer from the class, and
 ;; the first step clears the class — read again after it, the answer is
 ;; #f and the window never goes.
+;; Dismiss the popup's buffer: the one under it comes back, or the popup
+;; closes when nothing waits. `q` in a listing and the toggles use this;
+;; the popup toggle closes the whole popup.
+(define (popup-dismiss!)
+  (let loop ((stack (popup-stack)))
+    (cond ((null? stack)
+           (set-frame-local! 'popup-stack '())
+           (popup-close!))
+          ((buffer-known? (car stack))
+           (set-frame-local! 'popup-stack (cdr stack))
+           (set! *popup-dismissing* #t)
+           (popup-show (car stack))
+           (set! *popup-dismissing* #f))
+          (else (loop (cdr stack))))))
+
 (define (popup-close!)
+  (set-frame-local! 'popup-stack '())
   (let* ((w (popup-window))
          (mine? (equal? (active-window) w))
          (buf (and w (window-buffer w)))
@@ -4897,13 +4913,32 @@
     (other-window!)
     (if first? (window-swap! (if (equal? side 'left) 'left 'up)))))
 
+;; The popup shows one buffer at a time. A buffer shown over another
+;; keeps it underneath (popper's stack): dismiss the top one and the one
+;; under it comes back; close the popup and the stack empties.
+(define *popup-dismissing* #f)
+
+(define (popup-stack) (or (frame-local 'popup-stack) '()))
+
+(define (popup-stack-push! name)
+  (set-frame-local! 'popup-stack
+    (cons name (remove (lambda (b) (equal? b name)) (popup-stack)))))
+
+(define (popup-stack-drop! name)
+  (set-frame-local! 'popup-stack
+    (remove (lambda (b) (equal? b name)) (popup-stack))))
+
 (define (popup-show-on name side size)
     ;; before the focus moves: this is the place you come back to
     (popup-remember!)
     (let ((old (popup-buffer))
           (layout (popup-saved-layout)))
       (when (and old (not (equal? old name)) (buffer-known? old))
-        (buffer-set-local! old 'popup-return-layout #f))
+        (buffer-set-local! old 'popup-return-layout #f)
+        ;; the buffer this one covers waits underneath
+        (when (and (popup-open?) (not *popup-dismissing*))
+          (popup-stack-push! old)))
+      (popup-stack-drop! name)
       (set-frame-local! 'popup-buffer name)
       (when layout (buffer-set-local! name 'popup-return-layout layout)))
     (popup-float! name side size)
@@ -5399,7 +5434,7 @@
   (lambda ()
     (cond
       ((and (popup-open?) (equal? (active-window) (popup-window)))
-        (popup-close!))
+        (popup-dismiss!))
       (else
         (let ((cur (current-buffer)))
           ;; a file with edits you did not save is not a listing: say so and

@@ -418,10 +418,10 @@
 (define (telemetry-popup-open?)
   (and (popup-open?) (equal? (popup-buffer) *telemetry-buffer*)))
 
-(define-command "telemetry-toggle" "Show the telemetry popup, or close it"
+(define-command "telemetry-toggle" "Show the telemetry popup, or dismiss it"
   (lambda ()
     (if (telemetry-popup-open?)
-        (popup-close!)
+        (popup-dismiss!)
         (list-mode-show! "telemetry-mode"))))
 
 (catalog-meta! 'command "telemetry-toggle" 'domain 'diagnostics 'effects '(read display))

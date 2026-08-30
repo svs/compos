@@ -13,7 +13,8 @@ defmodule Compos.PopupMoveTest do
   test "the popup's side and its move keys" do
     for name <- [
           "the-popup-opens-on-the-right-and-moves-to-the-edge-you-name",
-          "a-move-outside-the-popup-does-nothing"
+          "a-move-outside-the-popup-does-nothing",
+          "dismissing-a-popup-brings-back-the-one-under-it"
         ] do
       assert {:ok, "()"} = Session.eval("(begin (load-tests!) (run-test '#{name}))"), name
     end

@@ -16,10 +16,14 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::Manager;
 
 fn daemon_url() -> String {
-    std::env::var("COMPOS_URL").unwrap_or_else(|_| "http://127.0.0.1:4004".to_string())
+    // localhost, not 127.0.0.1: origin-checked sockets (the PTY channel)
+    // compare the Origin header against the configured host, and the two
+    // loopback spellings do not match each other.
+    std::env::var("COMPOS_URL").unwrap_or_else(|_| "http://localhost:4004".to_string())
 }
 
 /// (host, port) out of an http URL — enough parsing for a health check.
@@ -33,11 +37,15 @@ fn host_port(url: &str) -> (String, u16) {
 }
 
 fn daemon_up(host: &str, port: u16) -> bool {
+    // try EVERY resolved address: localhost resolves to ::1 first on
+    // macOS, and the daemon listens on 127.0.0.1 — probing only the
+    // first address reported a running daemon as down (and spawned a
+    // doomed second one)
     (host, port)
         .to_socket_addrs()
-        .ok()
-        .and_then(|mut addrs| addrs.next())
-        .map(|addr| TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok())
+        .map(|mut addrs| {
+            addrs.any(|addr| TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok())
+        })
         .unwrap_or(false)
 }
 
@@ -75,6 +83,22 @@ fn main() {
 
     tauri::Builder::default()
         .setup(move |app| {
+            // the default menu, plus a Shell menu: Reload re-reads the page
+            // the way a browser tab would (Cmd-Shift-R)
+            let menu = Menu::default(app.handle())?;
+            let reload =
+                MenuItem::with_id(app, "reload", "Reload", true, Some("CmdOrCtrl+Shift+R"))?;
+            let shell_menu = Submenu::with_items(app, "Shell", true, &[&reload])?;
+            menu.append(&shell_menu)?;
+            app.set_menu(menu)?;
+            app.on_menu_event(|handle, event| {
+                if event.id() == "reload" {
+                    if let Some(w) = handle.get_webview_window("main") {
+                        let _ = w.eval("location.reload()");
+                    }
+                }
+            });
+
             let handle = app.handle().clone();
 
             // wait for the daemon, then send the splash window to it

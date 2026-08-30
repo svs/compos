@@ -9,10 +9,14 @@ Complete the request as a durable repository change.
 
 ## Establish the contract
 
-1. Read `CLAUDE.md` and the relevant architecture documents.
+1. Start from the context you already have: the chat group's buffers,
+   the visible windows, and the conversation.
 2. Inspect the current source, tests, and repository state.
 3. Convert the request into observable acceptance conditions.
 4. Continue through implementation when the user asks to build or fix something.
+
+Do not read `CLAUDE.md` or the architecture documents as a ritual.
+Open a document only when the task raises a question it answers.
 
 Do not stop after diagnosis, design, or a successful runtime experiment.
 

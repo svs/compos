@@ -37,6 +37,14 @@ The group is context, not identity. It does not change the buffer's cell, its
 history, or its actor. A buffer that moves to another group keeps every
 revision it already has, each still naming the group it was written in.
 
+## Text scale
+
+1. The buffer's text scale is the `text-scale` buffer-local: a step on the 1.2 ladder (Emacs `text-scale-mode-step`), 0 for normal. It rides the checkpoint, so it survives a restart and a wake.
+2. The remap and the window style derive from it. `text-scale-sync!` writes them again from the local; a mode that restores a remap it saved before the scale was set (writing-mode, the preview rows) calls it after the restore.
+3. A text window multiplies its default size by the factor; a rendered page (an iframe) zooms by it.
+4. The application scale is separate: the `ui` face's zoom, a saved setting (`ui-scale`).
+5. The chords: Cmd-= / Cmd-- / Cmd-0 scale the application; Cmd-Shift-= / Cmd-Shift-- / Cmd-Shift-0 scale one buffer. macOS reports a Cmd chord with the unshifted character, so the client reads a shifted Cmd chord from the physical key (`e.code`). Tests name the commands, never the chords.
+
 ## Effective policy
 
 The effective recording policy is resolved in this order:

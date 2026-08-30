@@ -130,6 +130,18 @@ hooks, dired (complete), themes, completion sources (capf), display-buffer
 rules and popups, quit-window, the chat buffer, LLM pipes, isearch, file
 completion. `priv/editor.scm`, `priv/dired.scm`, `priv/themes.scm`.
 
+The rules each subsystem keeps are written down beside it: `docs/groups.md`
+(groups and the current group), `docs/LISTS.md` (the list mode, pages, the
+telemetry), `docs/BUFFER.md` (buffer state, the text scale),
+`docs/EDITING-SURFACE-SPEC.md` (the input surface). When behaviour changes,
+the document changes in the same commit.
+
+One hook the editor itself runs: `window-configuration-changed!` (Emacs
+`window-configuration-change-hook`). `Compos.Core.Editor` calls it from
+its one commit point after every change of a frame's windows or their
+buffers, whoever made the change, on that frame, and never on its own
+process's time.
+
 ## LLM / agents: the plan
 
 Current: `Compos.Core.LLM` — `(llm prompt handler)`, async, supervised, provider

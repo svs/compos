@@ -330,6 +330,8 @@ every other buffer
 
 In the switcher, `RET` shows the buffer and changes no membership. `C-RET` shows the buffer and adds it to the destination group. Both take the selection when one is marked. The switcher is not a special case; the same sections and verbs apply to every buffer list.
 
+`ibuffer` is a buffer list too: the members of the frame's group lead the table, in their MRU order, and the rest follow in theirs. The order is fetched on open and on `g`. A mark, a flag, or a narrowing redraws the rows the table has, so a row never moves under the cursor. (A row's preview makes that buffer the most recent; a table that refetched on every mark moved the row you marked.)
+
 ## Projects
 
 A project is the root directory of a file. The editor derives it from the path. A project acts in two places and nowhere else:
@@ -452,8 +454,20 @@ These are not in this specification. The design leaves room for them.
 
 ### Frame slots
 
-- `destination` and `previous` are per-frame state. Only `switch`, `switch-last`, `new`, `dissolve`, and `kill` write them.
+- `previous` and `pinned` are per-frame state. `switch`, `switch-last`, `new`, `dissolve`, `kill`, and `group-pin` write them.
+- `destination` (the current group) is derived. The stored frame-local is the last answer of the derivation, not a standing context. See "The current group".
 - A frame with no destination is the plain editor plus the project fallback.
+
+### The current group
+
+The frame stands in the group its windows show. The rules:
+
+1. The current group is the group every work window's buffer shares. A window whose buffer is in no group makes the answer "no group". A window whose buffer is transient (a listing, a prompt) says nothing.
+2. A popup window says nothing. A listing, the messages buffer, or the telemetry floating over the group's panes is a visit, not a place. Opening and closing a popup changes no group.
+3. When several groups are shared by every window, the frame keeps its current one if it is among them, else the most recent of them.
+4. A pinned frame keeps its pinned group through every window change.
+5. The derivation runs after every change of the frame's windows or their buffers, whoever made the change. The editor calls `window-configuration-changed!` (Emacs `window-configuration-change-hook`) from its one commit point; a command, a kill that drops a window onto its next buffer, and an agent all reach it. The window commands also run it before they return, so their modeline is right at once.
+6. A visit to an ungrouped buffer in a work window leaves the group; killing that buffer drops the window onto its next buffer, and the frame is back in that buffer's group with no command involved.
 
 ### Layouts
 
@@ -482,3 +496,7 @@ Tests name commands, never keys. A test that needs a binding binds its own dummy
 15. Per-frame destination and `previous`; two frames on one group with two layouts.
 16. Persistence: groups, memberships, layouts, scratch, frame slots survive a restart; malformed state isolates to one group.
 17. Agent context: files and focus from the chat's frame, else from the chat's groups.
+18. The current group derives from the work windows: two windows in one group put the frame in it; a window on an ungrouped buffer takes it out.
+19. A popup over the group changes nothing: open, and closed again, the frame's group is the same.
+20. A kill from outside any command (the Elixir path) that drops a window onto a group's buffer puts the frame back in that group.
+21. `ibuffer` lists the frame's group first, and a mark does not reorder the rows.

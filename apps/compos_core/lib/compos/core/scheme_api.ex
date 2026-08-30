@@ -104,6 +104,8 @@ defmodule Compos.Core.SchemeAPI do
         "(buffer-narrow-range BUF) — return the active (START END) narrowing, or #f.",
       "buffer-widen!" => "(buffer-widen! BUF) — make the complete buffer visible.",
       "buffer-goto!" => "(buffer-goto! BUF POS) — move the named buffer's point to byte POS.",
+      "buffer-windows-follow-point!" =>
+        "(buffer-windows-follow-point! BUF) — every window that shows BUF drops its scroll pin and follows point again; call it after a page replaces its text and places point.",
       "file-mtime" =>
         "(file-mtime PATH) — return the file's mtime in posix seconds, or 0 if it is gone.",
       "git-root" =>
@@ -1074,6 +1076,9 @@ defmodule Compos.Core.SchemeAPI do
       "buffer-goto!" => fn [name, pos] ->
         Buffer.goto(name, pos)
         pos
+      end,
+      "buffer-windows-follow-point!" => fn [name] ->
+        Editor.windows_follow_point(name) == :ok
       end,
       "forward-char!" => fn [] -> Buffer.forward_char(Editor.current_buffer()) end,
       "backward-char!" => fn [] -> Buffer.backward_char(Editor.current_buffer()) end,

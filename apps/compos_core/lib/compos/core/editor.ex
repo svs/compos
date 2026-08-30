@@ -405,6 +405,15 @@ defmodule Compos.Core.Editor do
   def set_client_top(id, px, fid \\ nil),
     do: GenServer.call(__MODULE__, {:set_client_top, id, px, fid(fid)})
 
+  @doc """
+  Every window that shows BUFFER, in every frame, drops its scroll pin and
+  follows point again: `manual` off, `top` and `ctop` at 0. A page that
+  replaced its text and put point at the start calls this, so a window
+  the reader had scrolled down the old page opens the new one at the top.
+  """
+  def windows_follow_point(buffer),
+    do: GenServer.call(__MODULE__, {:windows_follow_point, buffer})
+
   # mouse: place point at (logical line, char col) in a window's buffer;
   # or set a region from a drag's anchor/focus positions
   def mouse_goto(id, line, col), do: GenServer.call(__MODULE__, {:mouse_goto, id, line, col})
@@ -1051,6 +1060,15 @@ defmodule Compos.Core.Editor do
           :exit, _ -> {:reply, {:error, :no_buffer}, state}
         end
     end
+  end
+
+  def handle_call({:windows_follow_point, buffer}, _from, state) do
+    frames =
+      Map.new(state.frames, fn {fid, f} ->
+        {fid, %{f | tree: unpin_buffer_leaves(f.tree, buffer)}}
+      end)
+
+    changed(:ok, %{state | frames: frames})
   end
 
   def handle_call({:user_acted, fid}, _from, state) do
@@ -2090,6 +2108,16 @@ defmodule Compos.Core.Editor do
 
   defp swap_buffer(%{type: :split} = split, from, to),
     do: %{split | children: Enum.map(split.children, &swap_buffer(&1, from, to))}
+
+  # a leaf on BUFFER follows point again: no pin, top and pixel offset at 0
+  defp unpin_buffer_leaves(%{type: :leaf} = leaf, buffer) do
+    if leaf.buffer == buffer,
+      do: %{leaf | top: 0, manual: false} |> Map.put(:ctop, 0),
+      else: leaf
+  end
+
+  defp unpin_buffer_leaves(%{type: :split} = split, buffer),
+    do: %{split | children: Enum.map(split.children, &unpin_buffer_leaves(&1, buffer))}
 
   defp release_buffer_from_tree(%{type: :leaf} = leaf, buffer, fallback) do
     leaf = Map.update(leaf, :history, [], &List.delete(&1, buffer))

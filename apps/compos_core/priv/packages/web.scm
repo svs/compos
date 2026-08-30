@@ -559,10 +559,13 @@
     (web--apply-meta-faces! buf)
     (web--apply-separator-faces! buf)
     ;; back, forward and a refetch put point where the reader left it;
-    ;; a new page starts at the top
+    ;; a new page starts at the top. The window follows: a wheel scroll
+    ;; down the old page pinned it, and a pinned window keeps its pixel
+    ;; offset over new text, so the page came up scrolled with point at 0.
     (let ((p (buffer-local buf 'browse-restore-point)))
       (buffer-set-local! buf 'browse-restore-point #f)
-      (buffer-goto! buf (min (or p 0) (buffer-size buf))))
+      (buffer-goto! buf (min (or p 0) (buffer-size buf)))
+      (buffer-windows-follow-point! buf))
     (web--update-modeline! buf)
     ;; the page is real now: it joins the visited list, title and all
     (let ((url (buffer-local buf 'browse-url)))

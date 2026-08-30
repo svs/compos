@@ -11,13 +11,13 @@ The new browser may not need a new browser model after all. It may need the Emac
 ## The two bad choices
 
 A conventional browser gives people a rich visual surface. Applications can display maps, tables, editors, timelines, diagrams, mail, dashboards, and media. However, the browser presents agents with the result of rendering rather than the meaning behind it. An agent often has to infer that a rectangle is a button, discover whether it is visible, click coordinates, wait for a transition, and inspect another rendered result.
-![image](/Users/svs/src/compos.el/docs/codex.png)
+![image](/Users/svs/src/compos/docs/codex.png)
 
 This process is useful when no other interface exists, but it is a poor foundation for an agent-native environment. Pixels lose intent. DOM structure leaks implementation details. Labels change. Responsive layouts move controls. Virtualized lists hide items. A modal can intercept a click without changing the underlying task. The agent spends attention operating the interface instead of solving the problem.
 
 Chat-first systems remove that friction by making language the main interface. The agent receives a request, calls tools, and returns text or a small rendered artifact. This works well for bounded tasks. It works less well when the user wants to inhabit an application for hours. A conversation is a weak substitute for a file manager, mail client, debugger, calendar, music library, or structured writing workspace.
 
-![image](/Users/svs/src/compos.el/docs/craft_Agents.png)
+![image](/Users/svs/src/compos/docs/craft_Agents.png)
 
 *Ok, now what? *
 

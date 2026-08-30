@@ -283,7 +283,26 @@
           scratch group))))
   (buffer-list))
 
+;; The blank pane of a sealed group: its scratch, made from its most
+;; recent work member when the group has none yet. A group with no work
+;; member has no blank pane; the layout stays short.
+(define (group-blank-buffer group)
+  (let ((shared (group-buffer-as group 'scratch)))
+    (cond ((and shared (buffer-known? shared)) shared)
+          (else
+            (let ((members (filter group-work-buffer? (group-buffers-mru group))))
+              (and (pair? members) (scratch-ensure! (car members))))))))
+
+;; a layout's blank pane (editor.scm window-fill-blank): in a group, the
+;; group's scratch; out of one, none
+(set! window-fill-blank
+  (lambda ()
+    (let ((g (frame-group)))
+      (and g (group-blank-buffer g)))))
+
 (category! 'buffers)
+(public! 'group-blank-buffer
+  "(group-blank-buffer GROUP) — GROUP's scratch buffer, the blank pane a layout fills when the members run out; #f for a group with no work member")
 (public! 'scratch-ensure!
   "(scratch-ensure! SOURCE) — SOURCE's group scratch buffer, prepared but not displayed")
 (public! 'scratch-refresh-llm!

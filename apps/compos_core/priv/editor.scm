@@ -5315,6 +5315,8 @@
 
 (public! 'window-fill-buffers
   "(window-fill-buffers) — the buffers a window in this frame may be filled with, most recent first: the frame's context, never the raw MRU ring")
+(public! 'window-fill-blank
+  "(window-fill-blank) — the blank pane a layout shows when the pool runs out, or #f; scratch.scm answers the group's scratch")
 (public! 'fill-candidate?
   "(fill-candidate? NAME) — #t when a window may be filled with NAME: known, not hidden, not the popup, not a peek")
 (public! 'peek!
@@ -5541,14 +5543,25 @@
 (define (window-fill-buffers)
   (filter fill-candidate? (window-fill-source)))
 
+;; The blank pane: the buffer a layout shows in a pane the pool cannot
+;; fill. editor.scm knows no groups, so the base answer is none, and a
+;; layout stays short; scratch.scm sets the source to the group's scratch
+;; when the frame stands in a group, so a sealed group's layout keeps its
+;; shape without a buffer from outside.
+(define window-fill-blank (lambda () #f))
+
 ;; The three-column command is useful as a quick workspace view. If fewer
 ;; than three work buffers are visible, the remaining columns come from
-;; the pool, and only the pool.
+;; the pool, and only the pool; when the pool runs out, one blank pane.
 (define (layout--three-columns buffers)
   (let loop ((rest (window-fill-buffers))
              (result buffers))
     (cond ((>= (length result) 3) result)
-          ((null? rest) result)
+          ((null? rest)
+           (let ((blank (window-fill-blank)))
+             (if (and blank (not (member blank result)))
+                 (append result (list blank))
+                 result)))
           ((member (car rest) result) (loop (cdr rest) result))
           (else (loop (cdr rest) (append result (list (car rest))))))))
 

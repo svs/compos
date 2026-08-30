@@ -760,13 +760,20 @@
                     (filter (lambda (candidate)
                               (not (member candidate shown)))
                             pool)))
-              (cond ((pair? hidden)
-                     (window-set-buffer! win (car hidden))
-                     (set! shown (cons (car hidden) shown)))
-                    ((> (length (window-list)) 1)
-                     (delete-window-id! win))
-                    (else
-                     (window-set-buffer! win (car pool))))))))
+              (let ((blank (and (boundp 'group-blank-buffer)
+                                (group-blank-buffer id))))
+                (cond ((pair? hidden)
+                       (window-set-buffer! win (car hidden))
+                       (set! shown (cons (car hidden) shown)))
+                      ;; sealed: the pane keeps its place as a blank pane,
+                      ;; the group's scratch, rather than a foreign buffer
+                      ((and blank (not (member blank shown)))
+                       (window-set-buffer! win blank)
+                       (set! shown (cons blank shown)))
+                      ((> (length (window-list)) 1)
+                       (delete-window-id! win))
+                      (else
+                       (window-set-buffer! win (car pool)))))))))
       (window-list))))
 
 ;; Scheme owns both sides of the modeline's group context: the frame's current
@@ -1001,6 +1008,13 @@
                      pinned
                      (group-current-choice (group-common-memberships rows) current))))
       (unless (equal? next current)
+        ;; Leaving a group because a pane shows a foreign buffer saves the
+        ;; layout as it is, foreign pane and all (docs/groups.md, Save),
+        ;; and remembers the group: a switch from a frame in no group has
+        ;; nothing to save, and coming back must find what you had.
+        (when (and current (not next) (group-uncovered? current))
+          (group-layout-save! current)
+          (set-frame-local! 'previous-group current))
         (set-frame-local! 'current-group next)
         (frame-group-label-refresh!))
       next)))

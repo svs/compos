@@ -1330,3 +1330,53 @@
       (check-false! (group-pinned) "the second command releases the pin")
       (check-equal! (frame-group) first "release derives context from visible work"))
     (t--sw-done!)))
+
+;;; --- leaving a group by a foreign pane ------------------------------------------
+
+(deftest 'a-foreign-pane-saves-the-layout-it-leaves-and-the-switch-back-restores-it
+  "showing an ungrouped buffer in a pane saves the group's layout as it is; a switch away and back finds it"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((home (group-record-create! "zzsw-seal-home"))
+          (away (group-record-create! "zzsw-seal-away")))
+      (buffer-add-group! t--sw-first home)
+      (buffer-add-group! t--sw-second home)
+      (buffer-add-group! t--sw-third away)
+      (switch-to-buffer! t--sw-first)
+      (split-window! 'h 0.5)
+      (other-window!)
+      (switch-to-buffer! t--sw-second)
+      (group-current-recalculate!)
+      (check-equal! (frame-group) home "two panes in one group put the frame in it")
+      ;; a third pane shows a buffer in no group: the frame leaves the group
+      (split-window! 'v 0.5)
+      (other-window!)
+      (let ((foreign (test-buffer! "zz-sw-seal-foreign" "")))
+        ;; a work buffer in no group: creation joined the destination, so
+        ;; take it out; a transient pane would say nothing
+        (buffer-set-local! foreign 'transient #f)
+        (for-each (lambda (id) (buffer-remove-group! foreign id))
+                  (buffer-group-ids foreign))
+        (switch-to-buffer! foreign)
+        (group-current-recalculate!)
+        (check-false! (frame-group) "the foreign pane takes the frame out of the group")
+        (let ((tree (window-tree)))
+          (check-equal! (group-layout home) tree "the layout was saved as it stood, foreign pane included")
+          (check-equal! (frame-local 'previous-group) home "and the group left is remembered")
+          ;; away and back: the arrangement returns
+          (switch-to-group! away)
+          (check-equal! (length (window-list)) 1 "the other group shows its own one pane")
+          (switch-to-group! home)
+          (check-equal! (length (window-list)) 3 "coming back restores the three panes")
+          ;; sealed: the pane that showed the foreign buffer is a blank
+          ;; pane now, the group's scratch, and the foreign buffer is out
+          (check-false! (window-showing foreign) "the foreign buffer is not shown")
+          (check-true! (let loop ((ws (window-list)))
+                         (cond ((null? ws) #f)
+                               ((string-prefix? "*scratch:" (cadr (car ws))) #t)
+                               (else (loop (cdr ws)))))
+                       "its pane shows the group's scratch"))
+        (buffer-kill! foreign)
+        (for-each (lambda (b) (when (buffer-known? b) (buffer-kill! b)))
+                  (group-buffers-as home 'scratch))))
+    (t--sw-done!)))

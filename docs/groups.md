@@ -370,9 +370,11 @@ Visiting a file never changes the destination. A group made from files inside a 
 
 `switch G` restores, per frame: the window tree, the buffer in each window, point and scroll per window, and the selected window. A group with no layout on this frame shows its scratch buffer in one window.
 
+A group is sealed: a restored pane shows a member of G, or G's scratch as a blank pane. A pane that was saved with a foreign buffer keeps its place and shows a member that is not yet visible, else the scratch. A pane whose buffer is gone is filled the same way, so a saved peek heals on the next switch. A layout that tiles the group (`window-layout`, `tile-all`) fills the panes the members cannot fill with the scratch, never with a buffer from outside G.
+
 ### Save
 
-`switch` saves the outgoing layout as it is, every time. A layout that shows a foreign buffer is saved with it. Restore drops a pane whose buffer is gone, so a saved peek heals on the next switch.
+`switch` saves the outgoing layout as it is, every time. A layout that shows a foreign buffer is saved with it. Showing a foreign buffer in a work window takes the frame out of G (see "The current group"); that moment saves G's layout as it stands and sets `previous` to G, so a switch from a frame in no group has nothing left to save, and a switch back to G finds the arrangement the reader left.
 
 ### Window fill
 

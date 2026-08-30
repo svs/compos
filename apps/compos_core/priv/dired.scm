@@ -464,7 +464,7 @@
               '(("RET" "peek, again opens") ("M-RET" "open") ("m" "mark") ("*" "all") ("d" "flag")
                 ("x" "trash") ("C" "copy") ("R" "rename") ("s" "sort")
                 ("/" "filter") ("." "dotfiles")
-                ("^" "up") ("g" "revert") ("q" "quit")))
+                ("^" "up") ("g" "revert") ("q" "quit peek, then dired")))
     ;; Marked rows go to trash by default. Permanent deletion uses `D`.
     'flags (list (list "d" "D" "trash"
                        (lambda (buf e)
@@ -483,7 +483,7 @@
     'markable? (lambda (buf e) (not (equal? e "..")))
     'keys '(("RET" "dired-visit") ("M-RET" "dired-open") ("q" "dired-quit") ("C-RET" "dired-visit-in-group")
             ("g" "dired-revert") ("^" "dired-up")
-            ("+" "dired-mkdir") ("R" "dired-rename") ("q" "quit-window")
+            ("+" "dired-mkdir") ("R" "dired-rename")
             ("C" "dired-copy") ("M" "dired-chmod") ("T" "dired-touch")
             ("L" "dired-symlink") ("s" "dired-sort-cycle")
             ("S" "dired-sort-reverse") ("G" "dired-dirs-first")

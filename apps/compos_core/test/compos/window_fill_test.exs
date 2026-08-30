@@ -14,7 +14,8 @@ defmodule Compos.WindowFillTest do
     for name <- [
           "the-pool-is-the-groups-members-and-nothing-from-elsewhere",
           "a-peek-and-a-popup-are-not-fill-candidates",
-          "a-listing-seeds-no-new-group"
+          "a-listing-seeds-no-new-group",
+          "the-visible-verbs-take-the-windows-as-they-stand"
         ] do
       {:ok, out} = Session.eval("(begin (load-tests!) (run-test '#{name}))")
       assert out == "()", "#{name}: #{out}"

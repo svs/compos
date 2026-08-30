@@ -2233,6 +2233,24 @@
                 ;; stand become the group's first layout
                 (else (group-create-and-enter! name seed (window-tree)))))))))
 
+;; The two "visible" verbs: the windows as they stand are the seed, with
+;; no marking. The verb table folded them into group-new and group-move
+;; (a selection, else the current buffer); a person wants them by name.
+(define-command "group-new-from-visible"
+  "Found a group from every visible work buffer, with the windows as its first layout"
+  (lambda ()
+    (if (null? (group-visible-work-buffers))
+        (message "No work buffers visible")
+        (group-read-new-name "New group from these windows: " group-found-from-windows!))))
+
+(define-command "group-move-visible"
+  "Move every visible work buffer to another group"
+  (lambda ()
+    (let ((buffers (group-visible-work-buffers)))
+      (if (null? buffers)
+          (message "No work buffers visible")
+          (group-move-read-destination! buffers)))))
+
 (define-command "buffer-new" "Create a buffer in the current group"
   (lambda ()
     (let ((group (frame-group)))
@@ -2818,13 +2836,13 @@
   '("group-pull-buffer" "group-push-buffer" "group-push-visible"
     "group-push-selected" "group-pop"
     "switch-to-group" "buffer-add-to-group" "buffer-move-to-group"
-    "buffer-remove-from-group" "group-join" "group-move-visible"
-    "group-new-with-buffer" "group-new-from-buffer" "group-new-from-visible"
+    "buffer-remove-from-group" "group-join"
+    "group-new-with-buffer" "group-new-from-buffer"
     "group-rename-at-point" "group-kill-at-point" "group-describe-at-point"
     "group-list" "group-show-all" "group-chat-new"
     "switch-group" "ibuffer-group" "find-file-in-group"
     "opencode-in-group"))
-(global-unset-key "C-x C-g v")
+(global-set-key "C-x C-g v" "group-new-from-visible")
 (global-unset-key "C-x C-g o")
 
 (public! 'group-ids "(group-ids) -> durable opaque group IDs")
@@ -2873,6 +2891,7 @@
 (for-each
   (lambda (name) (catalog-meta! 'command name 'domain 'buffers 'effects '(write)))
   '("group-add" "group-move" "group-remove" "group-new" "group-rename"
+    "group-new-from-visible" "group-move-visible"
     "group-dissolve" "group-revive"))
 (for-each
   (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))

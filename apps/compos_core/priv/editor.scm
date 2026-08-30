@@ -5112,6 +5112,21 @@
 ;; leaves no mark behind, and the next peek must still land in the
 ;; same window instead of splitting again. Keeping the buffer in the
 ;; slot releases the window (peek-keep!).
+;; any work window that is not ME: the popup is not one, and neither is
+;; the window the peek is asked from
+(define (other-work-window-id me)
+  (let ((popup (and (popup-open?) (popup-window))))
+    (let loop ((ws (window-list)))
+      (cond ((null? ws) #f)
+            ((and (not (equal? (car (car ws)) me))
+                  (not (equal? (car (car ws)) popup)))
+             (car (car ws)))
+            (else (loop (cdr ws)))))))
+
+;; Where a peek goes, in order: the window the last peek used, a window
+;; that shows a peek, the window a popup covers when the peek is asked
+;; from the popup, the other window. With no other window the answer is
+;; #f, and the peek opens the popup: a peek splits nothing.
 (define (peek-slot me)
   (let ((w (frame-local 'peek-window)))
     (cond ((and w (window-exists? w) (not (equal? w me))) w)
@@ -5119,26 +5134,49 @@
           ;; a popup floats over the layout: a peek from it goes to the
           ;; window it covers, never to a split beside the popup
           ((and (popup-open?) (equal? me (popup-window))) (other-window-id me))
-          (else #f))))
+          (else (other-work-window-id me)))))
 
-;; show NAME as the peek beside the selected window. The selected
-;; window and its point stay. Returns the window used.
+;; show NAME as the peek in the other window, or in the popup when the
+;; selected window is the only one. The selected window and its point
+;; stay. Returns the window used.
 (define (peek-show! name)
   (let* ((me (active-window))
          (already (window-showing-other name me))
-         (slot (or already (peek-slot me))))
-    ;; a look leaves no trace: the preview primitive shows NAME without
-    ;; touching the MRU ring or the window's history
-    (let ((win (if slot
-                   (begin (window-preview-buffer! name slot) slot)
-                   (begin
-                     (split-window! 'h 0.5)
-                     (other-window!)
-                     (window-preview-buffer! name)
-                     (let ((w (active-window)))
-                       (select-window! me)
-                       w)))))
+         (slot (or already (peek-slot me)))
+         (popup (and (popup-open?) (popup-window))))
+    ;; the buffer the slot showed loses its wire: a buffer that existed
+    ;; before the peek is not killed, and it must not keep pointing
+    (let ((old (and slot (window-buffer slot))))
+      (when (and old (not (equal? old name)) (buffer-exists? old))
+        (buffer-set-local! old 'peek-from #f)))
+    (let ((win (cond
+                 ;; the slot is the popup: the buffer floats there, and
+                 ;; the one it replaces stops floating
+                 ((and slot (equal? slot popup))
+                  (let ((old (window-buffer slot)))
+                    (popup-show-on name (popup-default-side)
+                                   (plist-get *display-buffer-defaults* 'size))
+                    ;; after the show: un-floated first, the popup read as
+                    ;; closed and the show split a new window
+                    (when (and old (not (equal? old name))) (popup-float! old #f))
+                    (select-window! me)
+                    slot))
+                 ;; a look leaves no trace: the preview primitive shows
+                 ;; NAME without touching the MRU ring or the window's
+                 ;; history
+                 (slot (window-preview-buffer! name slot) slot)
+                 (else
+                  (popup-show-on name (popup-default-side)
+                                 (plist-get *display-buffer-defaults* 'size))
+                  (let ((w (active-window)))
+                    (select-window! me)
+                    w)))))
       (set-frame-local! 'peek-window win)
+      ;; the wire: the page draws a line from the window the peek was
+      ;; asked from to the window that shows it. The local rides the
+      ;; buffer for the render and is not saved: a restart has no wire.
+      (desktop-skip! name 'peek-from)
+      (buffer-set-local! name 'peek-from me)
       (peek-drop-others! name)
       win)))
 
@@ -5177,6 +5215,8 @@
 (define (peek-keep! name)
   (when (peek-buffer? name)
     (buffer-set-local! name 'peek #f)
+    ;; kept, it is a buffer of its own: no wire
+    (buffer-set-local! name 'peek-from #f)
     ;; a kept buffer keeps its window: the slot moves on
     (let ((w (frame-local 'peek-window)))
       (when (and w (equal? (window-buffer w) name))
@@ -5654,20 +5694,24 @@
 (define-command "quit-window" "Close the popup, or kill this buffer and go back"
   (lambda ()
     (cond
-      ((and (popup-open?) (equal? (active-window) (popup-window)))
-        (popup-dismiss!))
-      ;; a peek goes with its window: the look is over, the layout is
-      ;; what it was before the peek split it
+      ;; a peek goes with its window: the look is over, and the layout
+      ;; is what it was. In the popup the popup is dismissed; in a split
+      ;; the split closes; alone, the window falls to the next buffer.
       ((peek-buffer? (current-buffer))
         (let ((cur (current-buffer)))
-          (if (other-window-id (active-window))
-              (delete-window!)
-              (let loop ((bs (buffer-list-mru)))
-                (cond ((null? bs) #t)
-                      ((and (not (equal? (car bs) cur)) (buffer-exists? (car bs)))
-                       (switch-to-buffer! (car bs)))
-                      (else (loop (cdr bs))))))
+          (cond ((and (popup-open?) (equal? (active-window) (popup-window)))
+                 (popup-dismiss!))
+                ((other-window-id (active-window))
+                 (delete-window!))
+                (else
+                 (let loop ((bs (buffer-list-mru)))
+                   (cond ((null? bs) #t)
+                         ((and (not (equal? (car bs) cur)) (buffer-exists? (car bs)))
+                          (switch-to-buffer! (car bs)))
+                         (else (loop (cdr bs)))))))
           (peek-drop! cur)))
+      ((and (popup-open?) (equal? (active-window) (popup-window)))
+        (popup-dismiss!))
       (else
         (let ((cur (current-buffer)))
           ;; a file with edits you did not save is not a listing: say so and

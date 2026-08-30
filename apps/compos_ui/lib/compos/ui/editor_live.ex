@@ -1355,6 +1355,7 @@ defmodule Compos.Ui.EditorLive do
       class={"window #{if @active?, do: "active", else: "inactive"} #{if @node.selected, do: "buffer-selected"} #{if !@node.line_numbers, do: "no-nums"} #{@node.window_class}"}
       style={window_style(@node)}
       data-win-id={@node.id}
+      data-peek-from={@node.peek_from}
       data-path={@path}
       data-read-only={to_string(@read_only)}
     >

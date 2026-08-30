@@ -745,23 +745,21 @@
 
 ;; Split at heading rows before filtering. A heading owns every row up to the
 ;; next heading. It stays only when at least one row in its section stays.
+(define (list-keep-section-emit buf heading rows filters ctx out)
+  (let ((kept (filter (lambda (e) (list-entry-kept? buf e filters ctx))
+                      (reverse rows))))
+    (if (null? kept)
+        out
+        (append out (if heading (cons heading kept) kept)))))
+
 (define (list-keep-sections buf entries filters ctx)
-  (letrec ((emit
-             (lambda (heading rows out)
-               (let ((kept (filter (lambda (e)
-                                     (list-entry-kept? buf e filters ctx))
-                                   (reverse rows))))
-                 (if (null? kept)
-                     out
-                     (append out (if heading (cons heading kept) kept))))))
-           (walk
-             (lambda (rest heading rows out)
-               (cond ((null? rest) (emit heading rows out))
-                     ((list-separator? buf (car rest))
-                      (walk (cdr rest) (car rest) '()
-                            (emit heading rows out)))
-                     (else (walk (cdr rest) heading (cons (car rest) rows) out))))))
-    (walk entries #f '() '())))
+  (let walk ((rest entries) (heading #f) (rows '()) (out '()))
+    (cond ((null? rest)
+           (list-keep-section-emit buf heading rows filters ctx out))
+          ((list-separator? buf (car rest))
+           (walk (cdr rest) (car rest) '()
+                 (list-keep-section-emit buf heading rows filters ctx out)))
+          (else (walk (cdr rest) heading (cons (car rest) rows) out)))))
 
 (define (list-keep buf entries)
   (let ((filters (list-filters buf)))
@@ -987,8 +985,11 @@
 ;; thing the list holds — dired's ".." is a way out of the directory.
 (define (list-count buf)
   (let ((f (list-opt buf 'markable?))
+        (separator? (list-opt buf 'separator?))
         (es (list-entries buf)))
-    (if f (length (filter (lambda (e) (f buf e)) es)) (length es))))
+    (if (or f separator?)
+        (length (filter (lambda (e) (list-markable? buf e)) es))
+        (length es))))
 
 ;; the chip counts only while the list is narrowed: the count asks the
 ;; mode about every row, and a wide list of 400 rows paid 200ms per draw
@@ -1069,6 +1070,12 @@
       '()
       (list (list-label-line buf cols))))
 
+;; the key bar, as header lines: the mode's 'footer keys, under the counts
+(define (list-key-lines buf)
+  (let* ((f (list-opt buf 'footer))
+         (keys (if f (f buf) '())))
+    (if (null? keys) '() (list (list-key-bar buf keys)))))
+
 (define (list-table-head buf)
   (let* ((cols (list-columns buf))
          (w (list-view-width buf))
@@ -1081,12 +1088,15 @@
                                                  (car meta))
                                   w 'middle)
                                 '()))
+                    (list-key-lines buf)
                     (list-label-lines buf cols))
             (append (list (list-title-line buf w))
                     (if (equal? (car meta) "") '() (list meta))
+                    (list-key-lines buf)
                     (list-label-lines buf cols)))
         (append (list (list-title-line buf w))
                 (if (equal? (car meta) "") '() (list meta))
+                (list-key-lines buf)
                 (list (list-rule-line w))
                 (list-label-lines buf cols)))))
 
@@ -1112,16 +1122,6 @@
                 (cons (list (+ at (string-byte-length key) 1)
                             (string-byte-length word) "dim")
                       (cons (list at (string-byte-length key) "accent") spans)))))))
-
-(define (list-foot-lines buf)
-  (let* ((f (list-opt buf 'footer))
-         (keys (if f (f buf) '())))
-    (if (null? keys)
-        '()
-        (if (list-opt buf 'compact)
-            (list (list-key-bar buf keys))
-            (list (list-rule-line (list-view-width buf))
-                  (list-key-bar buf keys))))))
 
 ;; one entry's cells, one list per line of the row
 (define (list-row-cells buf e &optional ctx)
@@ -1185,11 +1185,13 @@
         (list (list (string-append mark ((list-ctx-render ctx) buf e)) '())))))
 
 ;; the whole view, top to bottom
+;; the view: the header, then the rows. The key bar is in the header,
+;; under the counts, where the eye lands on an open: at the foot of the
+;; text it scrolled away with the rows.
 (define (list-view-lines buf rows &optional head)
   (let ((ctx (list-row-ctx buf)))
     (append (or head (list-head-lines buf))
-            (fold (lambda (acc e) (append acc (list-row-lines buf e ctx))) '() rows)
-            (list-foot-lines buf))))
+            (fold (lambda (acc e) (append acc (list-row-lines buf e ctx))) '() rows))))
 
 ;; write the lines, answer their overlays, and leave every row's byte
 ;; offset on the buffer — motion and the mode's own overlays then read
@@ -5288,6 +5290,9 @@
          (side (or (and old (popup-side-of old)) (peek-side-away-from me)))
          (win (popup-show-quietly name side (plist-get *display-buffer-defaults* 'size))))
     (set-frame-local! 'peek-window win)
+    ;; what the look put in the popup, by name: a buffer that existed
+    ;; before wears no mode, and q must still take it away
+    (set-frame-local! 'peek-shown name)
     (peek-drop-others! name)
     win))
 
@@ -5336,15 +5341,24 @@
       (peek-open! known open)
       (begin (peek! known open) 'peek)))
 
-;; dismiss every peek on screen: the popup gives it up and the buffer
-;; goes to recent. #t when there was one.
+;; the buffer the last look put in the popup, while the popup still
+;; shows it: a peek, or a buffer that existed before and only shows
+(define (peek-shown)
+  (let ((b (frame-local 'peek-shown)))
+    (and b (popup-open?) (equal? (popup-buffer) b) b)))
+
+;; dismiss the look on screen: the popup gives the buffer up, and a
+;; buffer the peek made goes to recent. #t when there was one.
 (define (peek-dismiss!)
-  (let ((shown (filter window-showing (peek-buffers))))
+  (let ((shown (dedupe-names
+                 (append (let ((b (peek-shown))) (if b (list b) '()))
+                         (filter window-showing (peek-buffers))))))
     (for-each (lambda (p)
                 (when (and (popup-open?) (equal? (popup-buffer) p))
                   (popup-dismiss!))
-                (peek-drop! p))
+                (when (peek-buffer? p) (peek-drop! p)))
               shown)
+    (set-frame-local! 'peek-shown #f)
     (pair? shown)))
 
 ;; any work window that is not ME: the popup is not one

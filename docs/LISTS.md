@@ -7,6 +7,7 @@ The list mode in `priv/editor.scm` draws every table in the editor: ibuffer, dir
 1. A draw reads the mode once. The row context (`list-row-ctx`) carries the mark column, the column lines, the mode's `cells`, `row-cells`, `render`, and `key` fns, and the marks. Every row reads the context. No row calls `list-opt` or reads a buffer-local: a buffer-local read is a call into the buffer's process (0.16 ms), and a row that asked ten times cost 6 ms.
 2. The header is computed once per draw and passed down with its line count.
 3. The chip (the narrowing and its count) is computed only while the list is narrowed. Counting asks the mode about every row.
+   The key bar (the mode's `'footer` keys) is a header line under the counts, where the eye lands on an open; at the foot of the text it scrolled away with the rows.
 4. A draw is few buffer changes: one `buffer-replace-range!` of the whole text, one `buffer-set-locals!` for the offsets, the head count, the row height, the width, and the stamp, one overlay set, one goto. Every change is a frame refresh and a render. A delete and then an append let a render between them see an empty buffer, reset the window's top, and write it back; the view jumped. `list_draw_test.exs` holds a redraw at eight changes or fewer.
 5. Numbers that hold this: 400 rows draw in about 330 ms and 60 rows in about 150 ms, on a laptop, with faces on every cell.
 

@@ -26,6 +26,7 @@ defmodule Compos.IbufferTest do
             "*switch*",
             "*zz-ibuffer-a*",
             "*zz-ibuffer-b*",
+            "*zz-ibuffer-c*",
             "*zz-collected-one*",
             "*zz-collected-two*",
             "*zz-unrelated*"
@@ -95,15 +96,74 @@ defmodule Compos.IbufferTest do
     assert eval!(~s{(plist-get (list-active-layout "*ibuffer*") 'name)}) == "compact"
 
     text = Buffer.text("*ibuffer*")
-    [headline, labels | _rows] = String.split(text, "\n")
+    # the key bar sits under the headline, above the column labels
+    [headline, keys, labels | _rows] = String.split(text, "\n")
+    assert keys =~ "RET visit"
 
     assert headline =~ ~r/^Buffers  \d+ buffers · \d+ modified · recent first$/
     assert labels =~ "BUFFER"
     assert labels =~ "DETAILS"
-    refute text =~ "─"
+    # compact omits the rule lines; a group section's "── name" is not one
+    refute text =~ ~r/^\s*─+\s*$/m
     refute labels =~ "SIZE"
     refute labels =~ "GROUP"
     assert text =~ ~r/\*zz-ibuffer-a\*\s+0 · example/
+  end
+
+  test "ibuffer groups rows under switcher-style headings" do
+    suffix = System.unique_integer([:positive])
+    current = "zz-ibuffer-current-#{suffix}"
+    foreign = "zz-ibuffer-foreign-#{suffix}"
+
+    on_exit(fn ->
+      Session.eval(~s{(begin
+        (group-record-delete! "#{current}")
+        (group-record-delete! "#{foreign}"))})
+    end)
+
+    eval!(~s{(begin
+      (buffer-create "*zz-ibuffer-a*")
+      (buffer-create "*zz-ibuffer-b*")
+      (buffer-create "*zz-ibuffer-c*")
+      (let ((current (group-record-create! "#{current}"))
+            (foreign (group-record-create! "#{foreign}")))
+        (buffer-add-group! "*zz-ibuffer-a*" current)
+        (buffer-add-group! "*zz-ibuffer-a*" foreign)
+        (buffer-add-group! "*zz-ibuffer-b*" foreign)
+        (set-frame-local! 'current-group current))
+      (switch-to-buffer! "*zz-ibuffer-a*")
+      (run-command "ibuffer")
+      (list-set-filters! "*ibuffer*" (list (list "match" "zz-ibuffer-"))))})
+
+    text = Buffer.text("*ibuffer*")
+    assert text =~ "── in this group"
+    assert text =~ "── #{foreign}"
+    assert text =~ "── ungrouped"
+    assert text =~ ~r/^3 buffers · 0 modified · recent first/m
+    assert :binary.match(text, "in this group") < :binary.match(text, "*zz-ibuffer-a*")
+    assert :binary.match(text, "*zz-ibuffer-a*") < :binary.match(text, foreign)
+    assert :binary.match(text, foreign) < :binary.match(text, "*zz-ibuffer-b*")
+    assert :binary.match(text, "*zz-ibuffer-b*") < :binary.match(text, "ungrouped")
+    assert :binary.match(text, "ungrouped") < :binary.match(text, "*zz-ibuffer-c*")
+    assert length(:binary.matches(text, "*zz-ibuffer-a*")) == 1
+
+    # The headings are labels. The live key path skips them in both directions.
+    assert eval!("(ibuffer-current)") == ~s{"*zz-ibuffer-a*"}
+    press("n")
+    assert eval!("(ibuffer-current)") == ~s{"*zz-ibuffer-b*"}
+    press("n")
+    assert eval!("(ibuffer-current)") == ~s{"*zz-ibuffer-c*"}
+    press("p")
+    assert eval!("(ibuffer-current)") == ~s{"*zz-ibuffer-b*"}
+
+    eval!(~s{(begin
+      (list-filter-clear! "*ibuffer*")
+      (ibuffer-filter-push! (list "match" "zz-ibuffer-b")))})
+
+    narrowed = Buffer.text("*ibuffer*")
+    refute narrowed =~ "in this group"
+    assert narrowed =~ "── #{foreign}"
+    refute narrowed =~ "ungrouped"
   end
 
   test "keyboard-quit dismisses scoped ibuffer and restores the covered layout" do

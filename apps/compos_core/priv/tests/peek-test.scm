@@ -439,3 +439,19 @@
           (check-equal! (length (peek-buffers)) 1 "one peek lives")
           (check-false! (buffer-known? a) "the first is gone")
           (check-false! (buffer-known? b) "and the second"))))))
+
+(deftest 'q-takes-a-shown-buffer-that-existed-before-the-peek
+  "a buffer that only shows wears no mode; q in the listing still takes it away"
+  (lambda ()
+    (t--peek-with
+      (lambda ()
+        (let ((c (t--peek-file "c.txt" "gamma\n")))
+          (visit c)
+          (switch-to-buffer! "*scratch*")
+          (run-command "delete-other-windows")
+          (peek-file! c)
+          (check-false! (peek-buffer? c) "it existed: not a peek")
+          (check-equal! (popup-buffer) c "but it is what the look shows")
+          (check-true! (peek-dismiss!) "q takes it")
+          (check-false! (popup-open?) "the popup is gone")
+          (check-true! (buffer-exists? c) "and the buffer, which was yours, stays"))))))

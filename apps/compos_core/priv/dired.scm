@@ -417,26 +417,34 @@
 
 ;; ".." is entry zero, so RET on it works through the same list-current
 ;; path as every real row; marks skip it
-;; The peek follows the highlight: rest on a file and it shows in the
-;; popup, so RET on it opens. Held down, the arrows move faster than a
-;; file opens, so the look waits for the highlight to rest.
+;; The popup opens on RET. While a peek shows, the highlight drives it:
+;; rest on a file and the popup shows that file instead, so RET on it
+;; opens. Held down, the arrows move faster than a file opens, so the
+;; look waits for the highlight to rest. With no peek showing, moving
+;; the highlight shows nothing.
 ;; plain defines: dired loads before custom.scm, so defcustom is not
 ;; here yet. Set them in init.scm.
-(define dired-peek-on-move #t)   ; peek the file under the highlight when it rests
+(define dired-peek-on-move #t)   ; a shown peek follows the highlight
 (define dired-peek-ms 120)       ; how long the highlight rests first, in ms
 
+;; the look the rest scheduled: only if the reader is still where the
+;; highlight rested. The rest fires later, and a reader who moved to
+;; another window or buffer must not be pulled back.
 (define (dired--peek-now! args)
-  (let ((p (car args)) (g (cadr args)))
-    (unless (and (peek-buffer? p) (window-showing p))
-      (peek! p (lambda () (visit p g))))))
+  (let ((p (car args)) (g (cadr args)) (me (caddr args)) (here (nth 3 args)))
+    (when (and (equal? (active-window) me) (equal? (current-buffer) here)
+               (not (and (peek-buffer? p) (window-showing p))))
+      (peek! p (lambda () (visit-quietly p g))))))
 
 (define (dired--preview buf entry)
-  (when (and dired-peek-on-move (equal? (current-buffer) buf))
+  (when (and dired-peek-on-move (equal? (current-buffer) buf)
+             ;; only a peek already on screen follows
+             (pair? (filter window-showing (peek-buffers))))
     (let ((p (dired-path-at-point)))
       (when (and p (string? entry) (not (equal? entry ".."))
                  (not (dired-directory? entry)))
         (debounce! "dired-peek" dired-peek-ms dired--peek-now!
-                   (list p (buffer-group buf)))))))
+                   (list p (buffer-group buf) (active-window) buf))))))
 
 (define-list-mode! "Dired"
   (list
@@ -672,7 +680,7 @@
         (if (or (equal? entry "..") (dired-directory? entry))
             (visit p group)
             (begin
-              (peek-or-open! p (lambda () (visit p group)))
+              (peek-or-open! p (lambda () (visit-quietly p group)))
               p))
         (message "No file on this line"))))
 

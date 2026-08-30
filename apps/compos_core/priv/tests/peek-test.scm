@@ -275,27 +275,35 @@
               (buffer-kill! a))
             (set! *web-fetch* saved)))))))
 
-(deftest 'dired-peeks-the-file-under-the-highlight-when-it-rests
-  "moving onto a file peeks it after the rest; RET on it then opens"
+(deftest 'a-shown-peek-follows-the-dired-highlight
+  "no popup until RET; then the file under the rested highlight replaces the peek"
   (lambda ()
     (t--peek-with
       (lambda ()
-        (let ((a (t--peek-file "a.txt" "alpha\n")))
+        (let ((a (t--peek-file "a.txt" "alpha\n"))
+              (b (t--peek-file "b.txt" "beta\n")))
           (dired-open t--peek-dir)
           (let ((d (current-buffer)))
             (let loop ((i 0))
               (when (and (< i 20) (not (equal? (dired-entry) "a.txt")))
                 (list-move-in! d 1)
                 (loop (+ i 1))))
+            ;; the highlight rests on a.txt with no peek showing: nothing
+            (dired--preview d (dired-entry))
+            (check-false! (peek-buffer? a) "moving the highlight opens no popup")
+            (run-command "dired-visit")
+            (check-true! (peek-buffer? a) "RET peeks it")
+            (list-move-in! d 1)
+            (check-equal! (dired-entry) "b.txt" "the highlight moved on")
             ;; the debounced look runs on this lane after the rest; the test
             ;; holds the lane, so it runs the look the highlight schedules
-            (dired--preview d (dired-entry))
-            (dired--peek-now! (list a (buffer-group d)))
-            (check-true! (peek-buffer? a) "the file under the highlight is the peek")
-            (check-equal! (current-buffer) d "and the reader stayed in dired")
+            (dired--peek-now! (list b (buffer-group d) (active-window) d))
+            (check-true! (peek-buffer? b) "the rested file replaced the peek")
+            (check-false! (buffer-exists? a) "and the old peek is gone")
+            (check-equal! (current-buffer) d "the reader stayed in dired")
             (run-command "dired-visit")
-            (check-equal! (current-buffer) a "RET on it opens it")
-            (check-false! (peek-buffer? a) "as your own")
+            (check-equal! (current-buffer) b "RET on it opens it")
+            (check-false! (peek-buffer? b) "as your own")
             (buffer-kill! d)))))))
 
 (deftest 'the-other-window-scroll-reads-the-peek-first
@@ -332,3 +340,40 @@
             (peek-file! a)
             (check-equal! (buffer-local a 'window-class) "popup popup-right"
                           "from the left window it floats right")))))))
+
+(deftest 'a-left-peek-leaves-the-listing-where-it-was
+  "the popup floats; the window it covers keeps its id and its place"
+  (lambda ()
+    (t--peek-with
+      (lambda ()
+        (let ((a (t--peek-file "a.txt" "alpha\n")))
+          (split-window! 'h 0.5)
+          (other-window!)
+          (let* ((me (active-window))
+                 (before (assoc me (window-rects))))
+            (peek-file! a)
+            (check-equal! (buffer-local a 'window-class) "popup popup-left" "it floats left")
+            (check-equal! (active-window) me "the reader's window is the same window")
+            (check-equal! (window-buffer me) "*scratch*" "and still shows the listing")
+            (check-equal! (nth 2 (assoc me (window-rects))) (nth 2 before)
+                          "and starts where it started")
+            ;; a second peek keeps the side, wherever it is asked from
+            (let ((b (t--peek-file "b.txt" "beta\n")))
+              (peek-file! b)
+              (check-equal! (buffer-local b 'window-class) "popup popup-left"
+                            "the side is chosen once"))))))))
+
+(deftest 'a-rested-look-fires-only-where-it-was-scheduled
+  "the reader moved on: the look does nothing"
+  (lambda ()
+    (t--peek-with
+      (lambda ()
+        (let ((a (t--peek-file "a.txt" "alpha\n"))
+              (me (active-window)))
+          (split-window! 'h 0.5)
+          (other-window!)
+          (dired--peek-now! (list a #f me "*scratch*"))
+          (check-false! (peek-buffer? a) "no peek: the reader is in another window")
+          (select-window! me)
+          (dired--peek-now! (list a #f me "*scratch*"))
+          (check-true! (peek-buffer? a) "back where it was scheduled, the look fires"))))))

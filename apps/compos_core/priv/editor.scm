@@ -4287,6 +4287,23 @@
     (visit-apply-group! buf group existing)
     buf))
 
+;; The same open, without a window: the buffer is made, joins the
+;; group, and takes its mode with the buffer current but not shown. A
+;; peek opens this way, so the selected window never shows the file on
+;; its way to the popup (find-file-noselect).
+(define (visit-quietly path0 &optional group)
+  (let* ((path (normalize-file-input path0))
+         (existing (buffer-known? path)))
+    (if (or (remote-path? path) (file-directory? path))
+        (visit path group)
+        (let ((file-buffer (find-file path)))
+          (visit-apply-group! file-buffer group existing)
+          (with-current-buffer file-buffer
+            (lambda ()
+              (auto-mode path)
+              (run-hooks 'find-file-hook)))
+          file-buffer))))
+
 ;; Compatibility name for packages and user config.
 (define (visit-in-group path group) (visit path group))
 
@@ -4902,16 +4919,22 @@
 (define-command "popup-move-down" "Float the popup against the bottom edge"
   (lambda () (popup-move! 'bottom)))
 
-;; split-window! always puts the new window SECOND, so a side window on
-;; the left or the top takes the ratio directly and then swaps into
-;; place. window-swap! follows the buffer, so the active window is the
-;; side window either way.
+;; The popup FLOATS: its class says which edge, and its place in the
+;; tree does not show. So the new window is always SECOND, whatever the
+;; side, and the window it covers keeps its id and its place. A swap
+;; into first place for the left and the top moved the covered window
+;; to the other side of its half and carried the ids with the buffers.
+;; popup-bufferize swaps when the popup becomes a real window.
 (define (popup--split-for side size)
-  (let ((first? (or (equal? side 'left) (equal? side 'top))))
-    (split-window! (if (or (equal? side 'top) (equal? side 'bottom)) 'v 'h)
-                   (if first? size (- 1 size)))
-    (other-window!)
-    (if first? (window-swap! (if (equal? side 'left) 'left 'up)))))
+  (split-window! (if (or (equal? side 'top) (equal? side 'bottom)) 'v 'h)
+                 (- 1 size))
+  (other-window!))
+
+;; the side a floating buffer wears, from its class, or #f
+(define (popup-side-of buf)
+  (let ((c (and buf (buffer-local buf 'window-class))))
+    (and c (string-prefix? "popup popup-" c)
+         (string->symbol (substring c (string-length "popup popup-") (string-length c))))))
 
 ;; The popup shows one buffer at a time. A buffer shown over another
 ;; keeps it underneath (popper's stack): dismiss the top one and the one
@@ -5137,19 +5160,17 @@
   (let ((r (assoc win (window-rects))))
     (if (and r (> (+ (nth 2 r) (* 0.5 (nth 4 r))) 0.5)) 'left 'right)))
 
+;; the side is chosen once, when the popup opens; a peek that replaces
+;; another keeps the side the popup has, so the popup never flips
 (define (peek-show! name)
-  (let ((me (active-window))
-        (here (current-buffer))
-        (old (and (popup-open?) (popup-buffer))))
-    (popup-show-on name (peek-side-away-from me)
-                   (plist-get *display-buffer-defaults* 'size))
+  (let* ((me (active-window))
+         (old (and (popup-open?) (popup-buffer)))
+         (side (or (and old (popup-side-of old)) (peek-side-away-from me))))
+    (popup-show-on name side (plist-get *display-buffer-defaults* 'size))
     (let ((win (active-window)))
       (when (and old (not (equal? old name)) (buffer-exists? old))
         (popup-float! old #f))
-      ;; back to the reader's window BY ITS BUFFER: a popup on the left
-      ;; is a split and a swap, and the swap carries the window ids with
-      ;; their buffers, so the id the reader had may now be the popup's
-      (select-window! (or (window-showing-other here win) me))
+      (select-window! me)
       (set-frame-local! 'peek-window win)
       (peek-drop-others! name)
       win)))
@@ -5173,7 +5194,7 @@
 
 ;; a file, peeked: the one opener every listing of files shares
 (define (peek-file! path)
-  (peek! path (lambda () (visit path))))
+  (peek! path (lambda () (visit-quietly path))))
 
 ;; RET twice: the first press peeks KNOWN, the second keeps it and goes
 ;; there. Returns 'peek or 'keep.
@@ -5711,8 +5732,13 @@
   (lambda ()
     (if (not (popup-open?))
         (message "No popup window")
-        (let ((buf (current-buffer)))
+        (let* ((buf (current-buffer))
+               (side (popup-side-of buf)))
           (popup-float! buf #f)
+          ;; a window on the left or the top takes that place in the tree
+          ;; now: floating, it sat second and the class placed it
+          (cond ((equal? side 'left) (window-swap! 'left))
+                ((equal? side 'top) (window-swap! 'up)))
           (set-frame-local! 'popup-window #f)
           ;; it is a window now, not a visit — there is nothing to go back from
           (popup-forget!)

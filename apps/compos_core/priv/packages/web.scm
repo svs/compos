@@ -2,9 +2,14 @@
 ;;;
 ;;; M-x browse fetches a page and renders it as readable text. Links show
 ;;; their label only; the target rides in 'web-links as byte ranges. RET
-;;; follows the link at point, TAB and n/p walk the links, l goes back,
-;;; g refetches, o opens the page in the real browser. C-s reaches any
-;;; link through the ordinary search.
+;;; follows the link at point, M-RET opens it in another window, TAB and
+;;; n/p walk the links, l goes back, r goes forward, g refetches, o opens
+;;; the page in the real browser. C-s reaches any link through the
+;;; ordinary search.
+;;;
+;;; Every tab keeps its own way back, with the point on each page, and
+;;; the desktop keeps it across a restart. Every page read joins one
+;;; history file; H lists it, and the browse prompt completes over it.
 ;;;
 ;;; The fetch is curl, the article extractor (readable), and pandoc,
 ;;; off the UI lane through the buffer cache: a restored or previewed
@@ -259,44 +264,78 @@
 
 (define *web-fetch* web--pipeline)
 
-;;; --- visited sites --------------------------------------------------------------
-;;; Every rendered page remembers itself: one "URL TITLE" line, newest
-;;; first. The browse prompt completes over them, and the title matches
-;;; what you type.
+;;; --- history --------------------------------------------------------------------
+;;; Every rendered page remembers itself in ONE file that outlives the
+;;; session: a "URL <TAB> TIME <TAB> TITLE" line per page, newest first.
+;;; The browse prompt completes over it, the title matches what you
+;;; type, and `H` lists it. A line with no tab is the old "URL TITLE"
+;;; shape; it reads with no time and rewrites in the new shape.
 
-(define *web-visited-file* (string-append (compos-home) "/web-visited"))
-(define *web-visited-max* 200)
+(define *web-visited-file* (string-append (compos-home) "/web-history"))
+(define *web-visited-legacy-file* (string-append (compos-home) "/web-visited"))
+(define *web-visited-max* 500)
 
-(define (web--visited)
-  (let ((text (read-file *web-visited-file*)))
+;; one line -> (URL TITLE TIME), or #f for a blank line
+(define (web--history-entry line)
+  (let ((l (string-trim line)))
+    (cond ((equal? l "") #f)
+          ((string-contains? l "\t")
+           (let* ((parts (string-split l "\t"))
+                  (time (and (> (length parts) 1) (string->number (nth 1 parts)))))
+             (list (car parts)
+                   (if (> (length parts) 2) (string-trim (nth 2 parts)) "")
+                   (if (number? time) time 0))))
+          (else
+            (let ((sp (string-index l " ")))
+              (if sp
+                  (list (substring-bytes l 0 sp)
+                        (substring-bytes l (+ sp 1) (string-byte-length l))
+                        0)
+                  (list l "" 0)))))))
+
+;; the history, newest first: (URL TITLE TIME) rows. The new file wins;
+;; before its first write the old visited file still answers.
+(define (web--history)
+  (let ((text (or (read-file *web-visited-file*)
+                  (read-file *web-visited-legacy-file*))))
     (if (string? text)
-        (filter pair?
-          (map (lambda (line)
-                 (let ((l (string-trim line)))
-                   (if (equal? l "")
-                       #f
-                       (let ((sp (string-index l " ")))
-                         (if sp
-                             (list (substring-bytes l 0 sp)
-                                   (substring-bytes l (+ sp 1)
-                                                    (string-byte-length l)))
-                             (list l ""))))))
-               (string-split text "\n")))
+        (filter pair? (map web--history-entry (string-split text "\n")))
         '())))
 
+;; the prompt's shape: (URL TITLE)
+(define (web--visited)
+  (map (lambda (e) (list (car e) (nth 1 e))) (web--history)))
+
+(define (web--history-write! rows)
+  (write-file! *web-visited-file*
+    (string-append
+      (string-join (map (lambda (e)
+                          (string-append (car e) "\t"
+                                         (number->string (nth 2 e)) "\t"
+                                         (nth 1 e)))
+                        rows)
+                   "\n")
+      "\n")))
+
 (define (web--remember-visit! url title)
-  (let ((all (take-n (cons (list url title)
-                           (filter (lambda (e) (not (equal? (car e) url)))
-                                   (web--visited)))
-                     *web-visited-max*)))
-    (write-file! *web-visited-file*
-      (string-append
-        (string-join (map (lambda (e)
-                            (string-trim
-                              (string-append (car e) " " (car (cdr e)))))
-                          all)
-                     "\n")
-        "\n"))))
+  (web--history-write!
+    (take-n (cons (list url title (current-time))
+                  (filter (lambda (e) (not (equal? (car e) url)))
+                          (web--history)))
+            *web-visited-max*)))
+
+(define (web--forget-visit! url)
+  (web--history-write!
+    (filter (lambda (e) (not (equal? (car e) url))) (web--history))))
+
+;; seconds -> "just now", "5m ago", "2h ago", "3d ago"; "" for no time
+(define (web--age-label time)
+  (let ((age (and (number? time) (> time 0) (- (current-time) time))))
+    (cond ((not age) "")
+          ((< age 60) "just now")
+          ((< age 3600) (string-append (number->string (quotient age 60)) "m ago"))
+          ((< age 86400) (string-append (number->string (quotient age 3600)) "h ago"))
+          (else (string-append (number->string (quotient age 86400)) "d ago")))))
 
 ;; the page's title: its first heading, else its first line of text
 (define (web--title md)
@@ -519,7 +558,11 @@
     (web--apply-link-faces! buf)
     (web--apply-meta-faces! buf)
     (web--apply-separator-faces! buf)
-    (buffer-goto! buf 0)
+    ;; back, forward and a refetch put point where the reader left it;
+    ;; a new page starts at the top
+    (let ((p (buffer-local buf 'browse-restore-point)))
+      (buffer-set-local! buf 'browse-restore-point #f)
+      (buffer-goto! buf (min (or p 0) (buffer-size buf))))
     (web--update-modeline! buf)
     ;; the page is real now: it joins the visited list, title and all
     (let ((url (buffer-local buf 'browse-url)))
@@ -646,14 +689,29 @@
 (define (web--page-cached buf url)
   (assoc url (or (buffer-local buf 'browse-pages) '())))
 
-(define (web--goto-url! buf url push?)
+;;; A tab's history is two stacks in the buffer, 'browse-history behind
+;;; and 'browse-forward ahead. An entry is (URL POINT): back and forward
+;;; return to the line the reader left, not to the top. Both stacks are
+;;; plain data, so the desktop saves them and a restart keeps every tab's
+;;; way back. An entry saved before this shape was a bare URL; it still
+;;; reads.
+
+(define (web--entry-url e) (if (pair? e) (car e) e))
+(define (web--entry-point e) (if (pair? e) (nth 1 e) 0))
+
+(define (web--history-push! buf key here)
+  (buffer-set-local! buf key
+    (cons (list here (buffer-point buf)) (or (buffer-local buf key) '()))))
+
+;; POINT, when given, is where the page opens once it renders
+(define (web--goto-url! buf url push? &optional point)
   (let ((here (buffer-local buf 'browse-url)))
     (when (and push? here (not (equal? here url)))
-      (buffer-set-local! buf 'browse-history
-        (cons here (or (buffer-local buf 'browse-history) '())))
+      (web--history-push! buf 'browse-history here)
       ;; a new page starts a new future: forward clears, like a browser
       (buffer-set-local! buf 'browse-forward '())))
   (buffer-set-local! buf 'browse-url url)
+  (buffer-set-local! buf 'browse-restore-point point)
   (let ((hit (web--page-cached buf url)))
     (if hit
         (begin
@@ -670,6 +728,28 @@
           (web--update-modeline! buf)
           (message (string-append "fetching " url " …"))
           (cache-refresh! buf)))))
+
+;; the page's URL split at its last path segment: "https://h/a/b" ->
+;; "https://h/a/", and the root of the site when nothing is left
+(define (web--origin url)
+  (let* ((scheme-end (string-index url "://"))
+         (host-end (and scheme-end (string-index url "/" (+ scheme-end 3)))))
+    (cond ((not scheme-end) url)
+          (host-end (substring-bytes url 0 host-end))
+          (else url))))
+
+(define (web--parent-url url)
+  (let* ((origin (web--origin url))
+         (q (string-index url "?"))
+         (clean (if q (substring-bytes url 0 q) url))
+         (trimmed (if (and (string-suffix? "/" clean)
+                           (> (string-byte-length clean) (+ (string-byte-length origin) 1)))
+                      (substring-bytes clean 0 (- (string-byte-length clean) 1))
+                      clean))
+         (slash (string-rindex trimmed "/")))
+    (if (and slash (>= slash (+ (string-byte-length origin) 1)))
+        (substring-bytes trimmed 0 (+ slash 1))
+        (string-append origin "/"))))
 
 (define (web--link-at buf p)
   (let loop ((ls (or (buffer-local buf 'web-links) '())))
@@ -743,11 +823,10 @@
       (if (null? h)
           (message "no earlier page")
           (begin
-            (when here
-              (buffer-set-local! buf 'browse-forward
-                (cons here (or (buffer-local buf 'browse-forward) '()))))
+            (when here (web--history-push! buf 'browse-forward here))
             (buffer-set-local! buf 'browse-history (cdr h))
-            (web--goto-url! buf (car h) #f))))))
+            (web--goto-url! buf (web--entry-url (car h)) #f
+                            (web--entry-point (car h))))))))
 
 (define-command "browse-forward" "Go forward to the page you came back from"
   (lambda ()
@@ -757,11 +836,27 @@
       (if (null? f)
           (message "no later page")
           (begin
-            (when here
-              (buffer-set-local! buf 'browse-history
-                (cons here (or (buffer-local buf 'browse-history) '()))))
+            (when here (web--history-push! buf 'browse-history here))
             (buffer-set-local! buf 'browse-forward (cdr f))
-            (web--goto-url! buf (car f) #f))))))
+            (web--goto-url! buf (web--entry-url (car f)) #f
+                            (web--entry-point (car f))))))))
+
+;; the parent path, and the site root: the two directions a URL has
+;; besides the links on the page
+(define-command "browse-up" "Go to the parent of this page's path"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (url (buffer-local buf 'browse-url)))
+      (cond ((not url) (message "no page here"))
+            ((equal? (web--parent-url url) url) (message "at the top"))
+            (else (web--goto-url! buf (web--parent-url url) #t))))))
+
+(define-command "browse-top" "Go to the root of this page's site"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (url (buffer-local buf 'browse-url)))
+      (cond ((not url) (message "no page here"))
+            (else (web--goto-url! buf (string-append (web--origin url) "/") #t))))))
 
 ;; g asks WHERE: this page leads as the default, so a plain RET
 ;; refetches it — and the visited sites complete, so g also goes
@@ -782,6 +877,9 @@
                           (let ((u (string-trim url)))
                             (cond ((or (equal? u "") (equal? u cur))
                                    (buffer-set-local! buf 'cache-time #f)
+                                   ;; the same page again: point stays
+                                   (buffer-set-local! buf 'browse-restore-point
+                                                      (buffer-point buf))
                                    (message "fetching…")
                                    (cache-refresh! buf))
                                   (else (browse u))))))))))))
@@ -829,17 +927,151 @@
     (let ((url (buffer-local (current-buffer) 'browse-url)))
       (when url (tab-open url)))))
 
+;; the link's page beside this one: the tab opens in another window and
+;; point stays here, so the reader keeps their place in the page
+(define-command "browse-follow-other-window"
+  "Open the link at point in another window; point stays here"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (l (web--link-at buf (point))))
+      (if (not l)
+          (message "no link here")
+          (let ((url (web--resolve (car (cdr (cdr l)))
+                                   (or (buffer-local buf 'browse-url) ""))))
+            (if (web--image-url? url)
+                (tab-open url)
+                (web--show-tab-other-window! url)))))))
+
+;; the link at point, else the page: eww's `w` does the same
+(define (web--url-at-point buf)
+  (let ((l (web--link-at buf (buffer-point buf))))
+    (if l
+        (web--resolve (car (cdr (cdr l))) (or (buffer-local buf 'browse-url) ""))
+        (buffer-local buf 'browse-url))))
+
+(define-command "browse-copy-url" "Copy the link at point, else the page URL"
+  (lambda ()
+    (let ((url (web--url-at-point (current-buffer))))
+      (if (not url)
+          (message "no page here")
+          (begin
+            ;; the kill ring too: a client with no clipboard permission
+            ;; still pastes it with C-y
+            (kill-push! url)
+            (clipboard-put! url)
+            (message url))))))
+
+;; the html the tab holds, in a buffer of its own. A page served from
+;; the session copy holds markdown only; it says so.
+(define-command "browse-view-source" "Show this page's html in a buffer"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (html (buffer-local buf 'browse-html))
+           (url (buffer-local buf 'browse-url)))
+      (cond ((not url) (message "no page here"))
+            ((not html) (message "no source held for this page; g refetches it"))
+            (else
+              (let ((name (string-append "*browse-source:" (web--slug url) "*")))
+                (buffer-create name)
+                (buffer-set-local! name 'group "browse")
+                (buffer-set-read-only! name #f)
+                (buffer-delete-range! name 0 (buffer-size name))
+                (buffer-insert! name 0 html)
+                (buffer-set-read-only! name #t)
+                (buffer-goto! name 0)
+                (switch-to-buffer! name)
+                (set-mode! "html-mode")))))))
+
+(defcustom 'browse-download-directory (string-append (getenv "HOME") "/Downloads")
+  "Where `d` saves a link or a page."
+  'group 'web 'type 'string)
+
+;; the URL's last path segment, or the host when the path is empty
+(define (web--download-name url)
+  (let* ((q (string-index url "?"))
+         (clean (if q (substring-bytes url 0 q) url))
+         (parts (filter (lambda (p) (not (equal? p "")))
+                        (string-split (car (reverse (string-split clean "://"))) "/"))))
+    (if (> (length parts) 1)
+        (car (reverse parts))
+        (string-append (if (pair? parts) (car parts) "page") ".html"))))
+
+(define (web--download! url)
+  (let* ((dir (if (boundp 'browse-download-directory)
+                  browse-download-directory
+                  (string-append (getenv "HOME") "/Downloads")))
+         (file (string-append dir "/" (web--download-name url))))
+    (message (string-append "downloading " url " …"))
+    (shell-command->string
+      (string-append "mkdir -p " (web--shell-quote dir) " && curl -sL --max-time 120 "
+                     (web--shell-quote url) " -o " (web--shell-quote file)
+                     " && printf ok")
+      (lambda (out)
+        (if (equal? (string-trim (or out "")) "ok")
+            (message (string-append "saved " file))
+            (message (string-append "download failed: " url)))))))
+
+(define-command "browse-download" "Save the link at point, else the page, to the download directory"
+  (lambda ()
+    (let ((url (web--url-at-point (current-buffer))))
+      (if url (web--download! url) (message "no page here")))))
+
+;; the browse tabs in buffer-list order: M-n and M-p walk them, the way
+;; a browser walks its tabs
+(define (web--tabs)
+  (filter web--buffer? (buffer-list)))
+
+(define (web--tab-step buf step)
+  (let* ((tabs (web--tabs))
+         (n (length tabs)))
+    (let loop ((ts tabs) (i 0))
+      (cond ((null? ts) #f)
+            ((equal? (car ts) buf)
+             (nth (modulo (+ i step n) n) tabs))
+            (else (loop (cdr ts) (+ i 1)))))))
+
+(define-command "browse-next-tab" "Switch to the next browse tab"
+  (lambda ()
+    (let ((next (web--tab-step (current-buffer) 1)))
+      (if next (switch-to-buffer! next) (message "no other tab")))))
+
+(define-command "browse-prev-tab" "Switch to the previous browse tab"
+  (lambda ()
+    (let ((prev (web--tab-step (current-buffer) -1)))
+      (if prev (switch-to-buffer! prev) (message "no other tab")))))
+
+;; the switcher, locked to the browse group: every tab, and nothing else
+(define-command "browse-list-tabs" "List the browse tabs in the switcher"
+  (lambda ()
+    (let ((g (buffer-group (current-buffer))))
+      (if (and g (boundp 'switch-open!))
+          (switch-open! (list 'locked g))
+          (run-command "switch-to-buffer")))))
+
 (define (web--install-keys! buf)
   (local-set-key* buf "RET" "browse-follow")
   (local-set-key* buf "s-RET" "browse-follow-new-tab")
+  (local-set-key* buf "M-RET" "browse-follow-other-window")
   (local-set-key* buf "TAB" "browse-next-link")
   (local-set-key* buf "n" "browse-next-link")
   (local-set-key* buf "p" "browse-prev-link")
   (local-set-key* buf "l" "browse-back")
+  (local-set-key* buf "r" "browse-forward")
   (local-set-key* buf "M-<left>" "browse-back")
   (local-set-key* buf "M-<right>" "browse-forward")
+  (local-set-key* buf "u" "browse-up")
+  (local-set-key* buf "t" "browse-top")
   (local-set-key* buf "g" "browse-refresh")
   (local-set-key* buf "o" "browse-open-external")
+  (local-set-key* buf "w" "browse-copy-url")
+  (local-set-key* buf "v" "browse-view-source")
+  (local-set-key* buf "d" "browse-download")
+  (local-set-key* buf "H" "browse-history")
+  (local-set-key* buf "b" "bookmark-set")
+  (local-set-key* buf "B" "list-bookmarks")
+  (local-set-key* buf "s" "browse-list-tabs")
+  (local-set-key* buf "M-n" "browse-next-tab")
+  (local-set-key* buf "M-p" "browse-prev-tab")
   ;; eww binds R to eww-readable; the same key, the same idea
   (local-set-key* buf "R" "browse-toggle-reading")
   ;; the preview chord: "show me the rendered thing" — the browser
@@ -879,12 +1111,17 @@
 (mode-doc! "browse-mode"
   "A web page as readable text, in one of two readings. Calm shows
 the article alone; full shows the whole document. R switches
-between them without fetching again. RET follows the link at point
-and s-RET opens it as its own tab, TAB and n/p walk the links,
-M-<left> and l go back, M-<right> goes forward, g asks where to go
-- RET refetches this page, a visited site or a fresh URL goes
-there - o opens the page in the real browser, and C-s searches to
-any link.")
+between them without fetching again. RET follows the link at point,
+s-RET opens it as its own tab, and M-RET opens it in another window
+while point stays here. TAB and n/p walk the links. l and M-<left>
+go back, r and M-<right> go forward, and both return to the line
+you left. u goes to the parent path, t to the site root. g asks
+where to go: RET refetches this page, a visited site or a fresh URL
+goes there. o opens the page in the real browser. w copies the link
+at point, else the page URL. v shows the html. d saves the link at
+point, else the page. H lists every page you read, b bookmarks this
+one, B lists the bookmarks. s lists the tabs, M-n and M-p walk them.
+C-s searches to any link.")
 
 ;; the one entry point: normalize, enter the mode, fetch
 ;; a tab's name: the host, and the page's last path segment
@@ -914,18 +1151,28 @@ any link.")
 ;; browser-tab semantics: inside a browse buffer the URL navigates IN
 ;; PLACE; outside, the page's own tab comes up — the one that already
 ;; shows it, or a fresh one, joined to the "browse" group
-;; the page's own tab: the one that already shows it, or a fresh one
+;; the page's own tab: the one that already shows it, or a fresh one.
+;; The tab is made and its fetch starts without a window move, so the
+;; caller decides where it shows.
+(define (web--tab-for! url)
+  (or (web--buffer-for url)
+      (let ((name (string-append "*browse:" (web--slug url) "*")))
+        (buffer-create name)
+        (buffer-set-local! name 'group "browse")
+        (with-current-buffer name (lambda () (set-mode! "browse-mode")))
+        (web--goto-url! name url #t)
+        name)))
+
 (define (web--open-tab! url)
-  (let ((existing (web--buffer-for url)))
-    (if existing
-        (begin (switch-to-buffer! existing) existing)
-        (let ((name (string-append "*browse:" (web--slug url) "*")))
-          (buffer-create name)
-          (buffer-set-local! name 'group "browse")
-          (switch-to-buffer! name)
-          (set-mode! "browse-mode")
-          (web--goto-url! name url #t)
-          name))))
+  (let ((tab (web--tab-for! url)))
+    (switch-to-buffer! tab)
+    tab))
+
+;; the tab in another window; the selected window and its point stay
+(define (web--show-tab-other-window! url)
+  (let ((tab (web--tab-for! url)))
+    (display-buffer-other-window! tab)
+    tab))
 
 ;;; --- what the person typed ------------------------------------------------------
 ;;; One prompt takes both a page and a question, the way a browser's
@@ -966,16 +1213,135 @@ any link.")
                (current-buffer))
         (web--open-tab! full))))
 
-;; the prompt completes over the visited sites, and a title matches
-;; what you type; a fresh URL still goes through as typed
+;; the C-x 4 shape: the page shows in another window, and the window
+;; you are in keeps its buffer and its point
+(define (browse-other-window url)
+  (web--show-tab-other-window! (web--target url)))
+
+;; one prompt for both commands: it completes over the history, a title
+;; matches what you type, and a fresh URL still goes through as typed
+(define (web--read-url! prompt open)
+  (minibuffer-read* prompt (web--visited)
+    (list (list 'match-hint 1)
+          (list 'confirm
+                (lambda (url)
+                  (unless (equal? (string-trim url) "")
+                    (open (string-trim url))))))))
+
 (define-command "browse" "Open a web page as readable text in a buffer"
+  (lambda () (web--read-url! "URL: " browse)))
+
+(define-command "browse-other-window" "Open a web page as readable text in another window"
+  (lambda () (web--read-url! "URL in other window: " browse-other-window)))
+
+;;; --- the history list -----------------------------------------------------------
+;;; Every page read, newest first, from the file the visits keep. RET
+;;; opens the page in its tab, M-RET beside this window, o in the real
+;;; browser; d forgets a page, D forgets them all.
+
+(define *web-history-buffer* "*browse-history*")
+
+(define (web--history-cells buf e)
+  (list (list (web--age-label (nth 2 e)) "dim")
+        (if (equal? (nth 1 e) "") (list (car e) "dim") (nth 1 e))
+        (list (car e) "dim")))
+
+(define-command "browse-history" "List every page you read, newest first"
+  (lambda () (list-mode-show! "browse-history-mode")))
+
+(define-command "browse-history-open" "Open the page on this row"
   (lambda ()
-    (minibuffer-read* "URL: " (web--visited)
-      (list (list 'match-hint 1)
-            (list 'confirm
-                  (lambda (url)
-                    (unless (equal? (string-trim url) "")
-                      (browse (string-trim url)))))))))
+    (let ((e (list-current *web-history-buffer*)))
+      (when e (web--open-tab! (car e))))))
+
+(define-command "browse-history-open-other-window" "Open the page on this row in another window"
+  (lambda ()
+    (let ((e (list-current *web-history-buffer*)))
+      (when e (web--show-tab-other-window! (car e))))))
+
+(define-command "browse-history-open-external" "Open the page on this row in the real browser"
+  (lambda ()
+    (let ((e (list-current *web-history-buffer*)))
+      (when e (tab-open (car e))))))
+
+(define-command "browse-history-forget" "Forget the page on this row"
+  (lambda ()
+    (let ((e (list-current *web-history-buffer*)))
+      (when e
+        (web--forget-visit! (car e))
+        (list-refresh! *web-history-buffer*)))))
+
+(define-command "browse-history-clear" "Forget every page"
+  (lambda ()
+    (web--history-write! '())
+    (list-refresh! *web-history-buffer*)
+    (message "history cleared")))
+
+(define-command "browse-history-refresh" "Read the history file again"
+  (lambda () (list-refresh! *web-history-buffer*)))
+
+(define-list-mode! "browse-history-mode"
+  (list
+    'doc (string-append
+           "Every page the reader opened, newest first. RET opens the page "
+           "in its tab, M-RET in another window, o in the real browser. "
+           "d forgets the page, D forgets them all, / filters.")
+    'buffer *web-history-buffer*
+    'rows (lambda (buf) (web--history))
+    'columns (lambda (buf)
+               (list (list "when" 10) (list "title" 48) (list "url" #f)))
+    'cells web--history-cells
+    'title (lambda (buf) "History")
+    'meta (lambda (buf)
+            (string-append (number->string (length (web--history))) " pages"))
+    'total (lambda (buf) (length (web--history)))
+    'footer (lambda (buf)
+              '(("RET" "open") ("M-RET" "other window") ("o" "browser")
+                ("d" "forget") ("D" "clear") ("/" "filter") ("q" "quit")))
+    'key (lambda (buf e) (car e))
+    'keys '(("RET" "browse-history-open")
+            ("M-RET" "browse-history-open-other-window")
+            ("o" "browse-history-open-external")
+            ("d" "browse-history-forget")
+            ("D" "browse-history-clear")
+            ("g" "browse-history-refresh")
+            ("q" "quit-window"))))
+
+;;; --- bookmarks ------------------------------------------------------------------
+;;; A browse tab bookmarks as its URL and point, not as a buffer name: the
+;;; tab may be gone by the time the bookmark jumps, and the page comes
+;;; back from the URL. The bookmark package owns the store and the list;
+;;; this is the one handler it needs for a page.
+
+(define (web--bookmark-record buf)
+  (list 'url (buffer-local buf 'browse-url)
+        'title (web--title (buffer-text buf))
+        'position (buffer-point buf)))
+
+;; WHERE is "current", "other" or "preview", the bookmark package's three
+;; dispositions. Returns the tab.
+(define (web--bookmark-jump! record where)
+  (let ((url (plist-get record 'url))
+        (pos (or (plist-get record 'position) 0)))
+    (and url
+         (let ((tab (web--tab-for! url)))
+           ;; a page that still has to fetch opens at POS when it renders;
+           ;; one already drawn moves now
+           (if (> (buffer-size tab) 0)
+               (buffer-goto! tab (min pos (buffer-size tab)))
+               (buffer-set-local! tab 'browse-restore-point pos))
+           (cond ((equal? where "current") (switch-to-buffer! tab))
+                 ((equal? where "other")
+                  (select-window! (display-buffer-other-window! tab)))
+                 (else (display-buffer-other-window! tab)))
+           tab))))
+
+(when (boundp 'bookmark-register-handler!)
+  (bookmark-register-handler! "browse"
+    web--bookmark-record
+    web--bookmark-jump!
+    (lambda (record) (or (plist-get record 'url) "")))
+  (bookmark-register-mode-handler! "browse-mode" "browse"))
 
 ;;; --- catalog ------------------------------------------------------------------
 
@@ -998,6 +1364,9 @@ any link.")
 
 (public! 'browse
   "(browse URL) — read URL as text in its own tab buffer (*browse:host/page*); a name that is not a host becomes a search; in a browse buffer it navigates in place")
+
+(public! 'browse-other-window
+  "(browse-other-window URL) — read URL as text in its tab, shown in another window; the selected window and its point stay")
 
 (public! 'url-resolve
   "(url-resolve URL BASE) — resolve a link target against the page it came from: absolute stays, //host takes the scheme, /path takes the origin, the rest appends to the page's directory")

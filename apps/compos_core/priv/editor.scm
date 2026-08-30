@@ -5066,20 +5066,18 @@
 ;; Show NAME in the popup without moving the selection: a preview takes
 ;; no focus. The popup window's buffer is set in place; a new popup is
 ;; split, filled, and the selection goes back where it was, in one
-;; step. The bookkeeping is popup-show-on's: the return place, the
-;; stack, the class.
+;; step. A quiet popup records no return place, no work windows, and no
+;; layout: nothing is restored when it closes, because nothing moved.
+;; The restores are for a popup you entered, and they carried every
+;; window's point back to the moment the popup opened.
 (define (popup-show-quietly name side size)
   (let ((me (active-window)))
-    (popup-remember!)
-    (let ((old (popup-buffer))
-          (layout (popup-saved-layout)))
+    (let ((old (popup-buffer)))
       (when (and old (not (equal? old name)) (buffer-known? old))
-        (buffer-set-local! old 'popup-return-layout #f)
         (when (and (popup-open?) (not *popup-dismissing*))
           (popup-stack-push! old)))
       (popup-stack-drop! name)
-      (set-frame-local! 'popup-buffer name)
-      (when layout (buffer-set-local! name 'popup-return-layout layout)))
+      (set-frame-local! 'popup-buffer name))
     (popup-float! name side size)
     (if (popup-open?)
         (let* ((w (popup-window))

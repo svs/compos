@@ -455,3 +455,31 @@
           (check-true! (peek-dismiss!) "q takes it")
           (check-false! (popup-open?) "the popup is gone")
           (check-true! (buffer-exists? c) "and the buffer, which was yours, stays"))))))
+
+(deftest 'closing-a-peek-restores-nothing
+  "dired moved on while the look was up: q leaves its point and the windows as they are"
+  (lambda ()
+    (t--peek-with
+      (lambda ()
+        (let ((a (t--peek-file "a.txt" "alpha\n"))
+              (b (t--peek-file "b.txt" "beta\n"))
+              (c (t--peek-file "c.txt" "gamma\n")))
+          (dired-open t--peek-dir)
+          (let ((d (current-buffer)) (me (active-window)))
+            ;; onto the first file: the first row is the parent, which opens
+            (let loop ((i 0))
+              (when (and (< i 20) (not (equal? (dired-entry) "a.txt")))
+                (list-move-in! d 1)
+                (loop (+ i 1))))
+            (run-command "dired-visit")
+            (let ((first (dired-entry)))
+              ;; the reader moves on while the look is up
+              (list-move-in! d 2)
+              (let ((moved (dired-entry)) (p (buffer-point d)))
+                (check-false! (equal? moved first) "a different row")
+                (run-command "dired-quit")
+                (check-equal! (current-buffer) d "dired stays")
+                (check-equal! (buffer-point d) p "and its point stays where the reader put it")
+                (check-equal! (dired-entry) moved "on the row the reader chose")
+                (check-equal! (active-window) me "in the same window")))
+            (buffer-kill! d)))))))

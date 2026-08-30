@@ -98,7 +98,7 @@
 (define (switch-locked-root g)
   (if (file-directory? g)
       g
-      (let loop ((bs (group-buffers-mru g)))
+      (let loop ((bs (group-user-buffers-mru g)))
         (cond ((null? bs) #f)
               ((let ((r (buffer-project-root (car bs))))
                  (and (string? r) (not (equal? r "")) r)))
@@ -122,7 +122,7 @@
   (let ((root (switch-locked-root g)))
     (if (not root)
         '()
-        (let ((open (group-buffers-mru g)))
+        (let ((open (group-user-buffers-mru g)))
           (map (lambda (f) (list f "" "file" root))
                (filter (lambda (f)
                          (not (member (string-append root "/" f) open)))
@@ -133,7 +133,7 @@
     (list (switch-locked-card g))
     (annotate 'buffer
       (filter (lambda (b) (not (string-prefix? " " b)))
-              (group-buffers-mru g)))
+              (group-user-buffers-mru g)))
     (switch-locked-file-rows g)))
 
 (define (switch-rows buf)

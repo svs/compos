@@ -202,8 +202,36 @@
       (check-equal! (current-buffer) work "the failed visit keeps the work buffer")
       (buffer-kill! work))))
 
+(deftest 'find-file-keeps-quiet-working-state-out-of-user-lists
+  "quiet file loads stay canonical but hidden until a user visit"
+  (lambda ()
+    (let* ((path "/tmp/compos-zz-quiet-file-context.txt")
+           (group (group-record-create! "zz-quiet-file-context"))
+           (user (test-buffer! "*zz-quiet-file-context-user*" "")))
+      (write-file! path "source\n")
+      (buffer-add-group! user group)
+      (switch-to-buffer! user)
+      (set-frame-local! 'current-group group)
+      (find-file path)
+      (check-true! (buffer-in-group? path group)
+                   "the quiet buffer still joins the working group")
+      (check-true! (buffer-context-only? path)
+                   "find-file creates context-only state")
+      (check-false! (member path (group-user-buffers-mru group))
+                    "the quiet buffer stays out of user lists")
+      (buffer-append! path "draft\n")
+      (visit path group)
+      (check-false! (buffer-context-only? path)
+                    "a user visit promotes the same buffer")
+      (check-equal! (buffer-text path) "source\ndraft\n"
+                    "promotion retains unsaved working state")
+      (buffer-kill! path)
+      (buffer-kill! user)
+      (delete-file! path)
+      (group-record-delete! group))))
+
 (deftest 'a-direct-agent-file-visit-uses-the-originating-chat-group
-  "the user can switch buffers while the agent keeps its chat context"
+  "the agent keeps an editable context-only buffer until the user visits it"
   (lambda ()
     (let* ((path "/tmp/compos-zz-agent-file-context.txt")
            (slug "zz-file-context-agent")
@@ -220,9 +248,29 @@
       ((chat-tool-dispatch slug) "eval-scheme"
         (list 'code
           "(visit \"/tmp/compos-zz-agent-file-context.txt\" (buffer-group (current-buffer)))"))
-      (check-true! (buffer-in-group? path agent-group) "the file joined the chat group")
-      (check-false! (buffer-in-group? path user-group) "the selected frame group did not leak")
-      (check-equal! (current-buffer) user "the tool did not replace the user's buffer")
+      (check-true! (buffer-in-group? path agent-group)
+                   "the file joined the chat group")
+      (check-false! (buffer-in-group? path user-group)
+                    "the selected frame group did not leak")
+      (check-equal! (current-buffer) user
+                    "the tool did not replace the user's buffer")
+      (check-true! (buffer-context-only? path)
+                   "an agent-created file stays context-only")
+      (check-false! (member path (group-user-buffers-mru agent-group))
+                    "the group user pool hides agent context")
+      (check-false! (member path (group-switch-all-buffers-but user))
+                    "the buffer switcher hides agent context")
+      (check-false! (ibuffer-row? path)
+                    "ibuffer hides agent context")
+      (with-edit-author "agent:zz-file-context-agent"
+        (lambda () (buffer-append! path "draft\n")))
+      (check-true! (buffer-modified? path)
+                   "context-only buffers keep unsaved edits")
+      (visit path agent-group)
+      (check-false! (buffer-context-only? path)
+                    "a user visit promotes the canonical buffer")
+      (check-equal! (buffer-text path) "agent\ndraft\n"
+                    "promotion keeps the unsaved working state")
       (t--fgc-drop-dispatcher! slug)
       (buffer-kill! path)
       (buffer-kill! user)

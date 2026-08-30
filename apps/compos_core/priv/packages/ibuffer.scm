@@ -32,6 +32,7 @@
   (and (buffer-known? b)
        (not (equal? b *ibuffer-buffer*))
        (not (string-prefix? " " b))
+       (not (buffer-context-only? b))
        (ibuffer-workspace-buffer? b)))
 
 ;; #f means the ordinary complete table. A list, including an empty list,
@@ -246,25 +247,34 @@
 
 (effects! '(destroy))
 
+(define (ibuffer-kill-targets! view targets killed kept)
+  ;; Confirm serially: one minibuffer question at a time, and every target
+  ;; goes through the same high-level policy as C-x k.
+  (if (null? targets)
+      (begin
+        (when (buffer-known? view) (list-refresh! view))
+        (message
+          (string-append "killed " (number->string killed) " buffers"
+                         (if (> kept 0)
+                             (string-append "; kept " (number->string kept))
+                             ""))))
+      (let ((target (car targets)))
+        (if (not (buffer-known? target))
+            (ibuffer-kill-targets! view (cdr targets) killed kept)
+            (kill-buffer-confirm! target
+              (lambda (killed?)
+                (when (and killed? (buffer-known? view))
+                  (list-unmark-key! view target))
+                (ibuffer-kill-targets! view
+                                      (cdr targets)
+                                      (+ killed (if killed? 1 0))
+                                      (+ kept (if killed? 0 1)))))))))
+
 (define-command "ibuffer-kill" "Kill the marked buffers, or the row at point"
   (lambda ()
-    (let* ((buf (current-buffer))
-           (targets (list-targets buf))
-           (n 0))
-      (when (buffer-known? "*scratch*")
-        (display-buffer-other-window! "*scratch*"))
-      (for-each (lambda (b)
-                  (when (buffer-known? b)
-                    (list-unmark-key! buf b)
-                    (if (process-running? b) (process-kill! b))
-                    (buffer-kill! b)
-                    (set! n (+ n 1))))
-                targets)
-      (list-refresh! buf)
-      (message (if (and (= n 0) (pair? targets))
-                   "already gone"
-                   (string-append "killed " (number->string n) " "
-                                  (list-noun buf n)))))))
+    (let ((view (current-buffer))
+          (targets (list-targets (current-buffer))))
+      (ibuffer-kill-targets! view targets 0 0))))
 
 
 (effects! '(read))

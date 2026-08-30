@@ -355,6 +355,24 @@
        (not (chat-buffer? b))
        (not (string-prefix? " " b))))
 
+(define (buffer-context-only? b)
+  (and (buffer-known? b)
+       (equal? (buffer-local b 'context-only) #t)))
+
+(define (buffer-context-only! b)
+  (when (buffer-known? b)
+    (buffer-set-local! b 'context-only #t))
+  b)
+
+(define (buffer-promote! b)
+  (when (buffer-context-only? b)
+    (buffer-set-local! b 'context-only #f))
+  b)
+
+(define (buffer-user-switchable? b)
+  (and (group-work-buffer? b)
+       (not (buffer-context-only? b))))
+
 (define (group-migrate-chat-state! b id)
   (let ((record (group-record-by-id id)))
     (when (and record (not (group-record-meta record))
@@ -368,17 +386,18 @@
     (when (and record (not (group-record-primary-chat-id record)))
       (group-record-update! id 'primary-chat-id (chat-stable-id! b)))))
 
-;; A chat names ONE group, and the id it holds may outlive the record:
-;; dissolve sweeps (group-buffers id), which only sees live buffers, so a
-;; sleeping chat keeps pointing at a group nobody can name. Resolve on
-;; every read and clear what no longer answers — buffer-group-ids has
-;; always done this for work buffers, and a chat must not be the one
-;; place a dangling id survives.
+;; A chat names ONE group, and the id it holds may outlive the record.
+;; A read must never erase the membership: the record table can be
+;; transiently wrong (a reload window, a stale lane view, a restore in
+;; progress), and a clear here made every such moment a permanent loss.
+;; An id that does not resolve is inert — the read answers #f and the
+;; local keeps the id. Only group-kill! and group-dissolve! clear
+;; members, and they sweep explicitly.
 (define (chat-group-id b)
   (let ((held (buffer-local b 'group-id)))
     (if held
         (let ((valid (group-resolve-id held)))
-          (cond ((not valid) (buffer-set-local! b 'group-id #f) #f)
+          (cond ((not valid) #f)
                 (else
                   (unless (equal? valid held)
                     (buffer-set-local! b 'group-id valid))
@@ -398,6 +417,10 @@
       '()
       (let ((ids (buffer-local b 'group-ids)))
         (if (pair? ids)
+            ;; The answer holds only ids that resolve now. The local is
+            ;; rewritten only when every id resolved: a transient
+            ;; resolution failure must not erase a membership (see
+            ;; chat-group-id above). Kill and dissolve sweep explicitly.
             (let ((normalized
                     (fold (lambda (out id)
                             (let ((valid (group-resolve-id id)))
@@ -405,7 +428,8 @@
                                   out
                                   (append out (list valid)))))
                           '() ids)))
-              (unless (equal? normalized ids)
+              (when (and (not (equal? normalized ids))
+                         (equal? (length normalized) (length ids)))
                 (buffer-set-local! b 'group-ids normalized))
               (buffer-set-local! b 'group #f)
               (buffer-set-local! b 'companion-of #f)
@@ -746,7 +770,7 @@
 
 (define (group-restore-sanitize! g)
   (let* ((id (group-resolve-id g))
-         (members (group-buffers-mru id))
+         (members (group-user-buffers-mru id))
          (pool (if (pair? members) members (list (group-chat id))))
          (shown
            (filter (lambda (buf) (buffer-in-group? buf id))
@@ -1000,6 +1024,8 @@
             (if (pair? recent) (car recent) (car common))))))
 
 (define (group-current-recalculate!)
+  ;; A buffer shown by any path is no longer context-only.
+  (for-each (lambda (row) (buffer-promote! (cadr row))) (window-list))
   (unless *group-current-inhibit*
     (let* ((pinned (group-pinned))
            (rows (group-visible-membership-rows))
@@ -1053,7 +1079,9 @@
     (let ((group (frame-group)))
       (when (and group (group-work-buffer? buf))
         (buffer-add-group! buf group)
-        (buffer-set-local! buf 'group-inherited group)))))
+        (buffer-set-local! buf 'group-inherited group)
+        (when (agent-edit-author? (current-edit-author))
+          (buffer-context-only! buf))))))
 
 ;; a layout snapshot is only true when the group is on screen: saving
 ;; a scratch detour AS the group's arrangement would overwrite the
@@ -1277,7 +1305,9 @@
 ;; once, and one scan of every buffer per group cost the prompt 1.7s at
 ;; 25 groups and 80 buffers.
 (define (group-members-index)
-  (let loop ((bufs (dedupe-names (append (buffer-list-mru) (buffer-list))))
+  (let loop ((bufs
+                    (filter (lambda (b) (not (buffer-context-only? b)))
+                            (dedupe-names (append (buffer-list-mru) (buffer-list)))))
              (index '()))
     (if (null? bufs)
         (map (lambda (cell) (cons (car cell) (reverse (cdr cell)))) index)
@@ -1743,6 +1773,10 @@
     (dedupe-names
       (append mru (remove (lambda (b) (member b mru)) (group-buffers id))))))
 
+(define (group-user-buffers-mru g)
+  (filter (lambda (b) (not (buffer-context-only? b)))
+          (group-buffers-mru g)))
+
 ;; A grouped frame never falls through to the global MRU when a visible
 ;; buffer dies. Capture each affected frame before the core removes the
 ;; buffer. Afterward, fill its windows from that frame's current group only.
@@ -1759,7 +1793,10 @@
 (set! window-fill-source
   (lambda ()
     (let ((g (frame-group)))
-      (if g (group-buffers-mru g) (buffer-list-mru)))))
+      (if g
+          (group-user-buffers-mru g)
+          (filter (lambda (b) (not (buffer-context-only? b)))
+                  (buffer-list-mru))))))
 
 ;; the next buffer for a window in no group: the first of the pool that
 ;; is not the dying buffer
@@ -1871,7 +1908,7 @@
 ;; work buffer
 (define (group-docs g)
   (remove (lambda (b) (or (chat-buffer? b) (equal? b (group-chat-name g))))
-          (group-buffers-mru g)))
+          (group-user-buffers-mru g)))
 
 ;; a buffer with no group founds one named after itself
 (define (group-ensure! b)
@@ -2362,7 +2399,7 @@
 (set! buffer-context-switch! group-buffer-context-switch!)
 
 (define (group-all-work-buffers)
-  (filter group-work-buffer? (buffer-list)))
+  (filter buffer-user-switchable? (buffer-list)))
 
 ;;; --- one buffer prompt, in sections ------------------------------------------
 ;;; C-x b lists the current group's buffers first, then every other buffer.
@@ -2386,6 +2423,7 @@
   (filter (lambda (b)
             (and (not (equal? b here))
                  (not (string-prefix? " " b))
+                 (not (buffer-context-only? b))
                  ;; a peek is a look, not a buffer of yours
                  (not (peek-buffer? b))))
           (dedupe-names
@@ -2848,6 +2886,12 @@
 (public! 'group-ids "(group-ids) -> durable opaque group IDs")
 (public! 'group-name "(group-name ID) -> the current display name")
 (public! 'buffer-group-ids "(buffer-group-ids NAME) -> work memberships")
+(public! 'buffer-context-only? "(buffer-context-only? NAME) — #t when NAME belongs to context but stays out of user buffer lists")
+(public! 'buffer-context-only! "(buffer-context-only! NAME) — keep NAME as editable context without listing it")
+(public! 'buffer-promote! "(buffer-promote! NAME) — make a context-only buffer user-switchable")
+(catalog-meta! 'function "buffer-context-only?" 'domain 'buffers 'effects '(read))
+(catalog-meta! 'function "buffer-context-only!" 'domain 'buffers 'effects '(write))
+(catalog-meta! 'function "buffer-promote!" 'domain 'buffers 'effects '(write))
 (public! 'buffer-in-group? "(buffer-in-group? NAME ID) -> membership")
 (public! 'buffer-group-role "(buffer-group-role BUFFER GROUP) -> semantic role string or #f; chats answer \"chat\"")
 (public! 'group-visible-homogeneous?

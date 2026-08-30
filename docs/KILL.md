@@ -30,12 +30,13 @@ choices, but it cannot leave a window on the dead buffer.
 ## One buffer
 
 `kill-buffer` defaults to the current buffer. The prompt can select another
-buffer. An explicit single-buffer kill discards unsaved text. The user can save
-the buffer before this command.
+buffer. When a file buffer has unsaved text, the high-level kill asks before
+discarding it.
 
-If the buffer owns a running process, the interactive command stops that process
-first. The low-level `buffer-kill!` operation only kills the buffer. Callers that
-own process policy must stop the process themselves.
+`kill-buffer-confirm!` is the shared named-buffer API for that policy. If the
+buffer owns a running process, it stops that process before killing. The
+low-level `buffer-kill!` operation only kills the buffer and deliberately does
+not confirm or stop processes.
 
 Killing an unknown buffer reports `not_found`. Killing a dormant known buffer
 forgets its saved identity without changing a layout.

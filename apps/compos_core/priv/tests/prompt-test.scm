@@ -50,14 +50,22 @@
                        "Scheme remains the default implementation language"))))
 
 (deftest 'chat-context-names-the-conversation-and-its-companions
-  "the structured context reports identity, group membership, and prompt state"
+  "the structured context reports identity and full ambient membership"
   (lambda ()
-    (let ((chat (t--prompt-chat "*prompt-context*" "api"))
-          (doc "prompt-context.md"))
+    (let ((stale (group-resolve-id "prompt-context-group")))
+      (when stale (group-record-delete! stale)))
+    (let ((id (group-record-create! "prompt-context-group"))
+          (chat (t--prompt-chat "*prompt-context*" "api"))
+          (doc "prompt-context.md")
+          (hidden "prompt-context-hidden.ex"))
       (test-buffer! doc "work")
-      (buffer-set-local! chat 'group "prompt-context-group")
-      (buffer-set-local! doc 'group "prompt-context-group")
+      (test-buffer! hidden "def hidden, do: :context")
+      (chat-set-group! chat id)
+      (buffer-add-group! doc id)
+      (buffer-add-group! hidden id)
       (buffer-set-local! doc 'mode-name "text-mode")
+      (buffer-set-local! hidden 'mode-name "elixir-mode")
+      (buffer-context-only! hidden)
       (buffer-set-local! chat 'agent-slug "prompt-agent")
       (buffer-set-local! chat 'default-directory "/tmp/prompt-context")
       (let ((ctx (with-current-buffer chat (lambda () (chat-context)))))
@@ -65,6 +73,10 @@
         (check-equal! (plist-get ctx 'agent) "prompt-agent" "the agent name")
         (check-true! (member chat (plist-get ctx 'group-members))
                      "the chat belongs to the group")
+        (check-true! (member hidden (plist-get ctx 'group-members))
+                     "context-only buffers remain agent context")
+        (check-true! (member hidden (group-buffers id))
+                     "context-only buffers remain raw group members")
         (check-true! (member doc (plist-get ctx 'companions))
                      "the work buffer is a companion")
         (check-equal! (plist-get ctx 'directory) "/tmp/prompt-context"
@@ -74,7 +86,8 @@
       (chat-prompt-freeze! chat)
       (check-equal! (plist-get (chat-context chat) 'prompt) 'frozen
                     "the context reports the frozen prompt")
-      (t--prompt-cleanup chat doc))))
+      (t--prompt-cleanup chat doc hidden)
+      (group-record-delete! id))))
 
 (deftest 'group-members-are-pulled-as-ambient-context
   "the chat names live context but does not attach member outlines or text"

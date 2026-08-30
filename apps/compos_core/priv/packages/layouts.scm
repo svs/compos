@@ -48,7 +48,7 @@
   (let ((group (and (boundp (quote frame-group)) (frame-group))))
     (cond
       (group
-        (let ((members (group-buffers-mru group)))
+        (let ((members (group-user-buffers-mru group)))
           ;; An empty durable group still has one reconstructable surface.
           (if (pair? members) members (list (group-chat group)))))
       ((and (boundp (quote project-current)) (project-current))

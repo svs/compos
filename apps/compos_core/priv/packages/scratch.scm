@@ -290,7 +290,7 @@
   (let ((shared (group-buffer-as group 'scratch)))
     (cond ((and shared (buffer-known? shared)) shared)
           (else
-            (let ((members (filter group-work-buffer? (group-buffers-mru group))))
+            (let ((members (filter group-work-buffer? (group-user-buffers-mru group))))
               (and (pair? members) (scratch-ensure! (car members))))))))
 
 ;; a layout's blank pane (editor.scm window-fill-blank): in a group, the

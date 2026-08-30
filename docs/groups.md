@@ -54,18 +54,16 @@ Some outcomes are automatic. Then the solution is a rule, not a command.
 These are the ways I can create my first group when no group exists yet:
 
 #### I want to create an empty new group
-- I want to say `new-group`, give it a name and be in a new group with its scratch buffer.
+- I want to say `group-new`, give it a name and be in a new group with its scratch buffer.
 - Any files I open should open in this group.
-- I can pull other buffers to this group.
-
-
-#### I want to start from the current buffer
-
+- I can pull other buffers to this group. `s-RET` after ` C-x b`
+#### I want to start a group by opening a buffer/file
 - I open a file, chat, or other useful buffer.
 - I choose to make it the start of a new group and give the group a unique name.
 - The current buffer becomes the first member and the new group becomes current.
 - The editor keeps me in the buffer I started from.
 
+Test: `group-new-creates-and-enters-an-empty-work-context`
 #### I want to start from a set of buffers
 
 #### selected buffers
@@ -258,9 +256,12 @@ I want to start from a project or directory
 
 #### I want the files an agent opens to land here
 
-- Files an agent opens or edits from a chat on this frame join the destination group.
-- Junk is removed with `remove`, the same as for a human.
-- **Solution:** the creation rule. No command.
+- A file that an agent opens or edits joins the chat's destination group.
+- A new agent file is context-only. It keeps text, undo, parser, modified, and save state.
+- Context-only buffers stay out of user switchers, window filling, and saved layouts.
+- The group and its agents can still read, edit, save, and remove these buffers.
+- A user visit promotes the canonical buffer. The visit keeps all unsaved state.
+- **Solution:** the creation rule and the context-only buffer state. No command.
 
 ### As a user returning later or using several frames
 
@@ -386,7 +387,7 @@ A successful verb clears the selection. A cancel keeps it.
 
 ## Lists
 
-The buffer switcher shows three sections. Each section is in MRU order. An empty section and its separator are omitted.
+The buffer switcher shows three sections. Each section is in MRU order. An empty section and its separator are omitted. Context-only buffers do not appear.
 
 ```
 members of the destination group
@@ -402,7 +403,7 @@ every other buffer
 
 In the switcher, `RET` shows the buffer and changes no membership. `C-RET` shows the buffer and adds it to the destination group. Both take the selection when one is marked. The same verbs apply to every buffer list.
 
-`ibuffer` is a buffer management list. The current group uses the `in this group` heading. Each other group uses its group name. Other groups sort by name. Ungrouped buffers come last. Empty sections omit their headings. A buffer with many memberships appears once. The current group wins, then the first group by name wins. Rows inside each section sort by buffer name. The order is fetched on open and on `g`. A mark, a flag, or a narrowing redraws the rows the table has, so a row never moves under the cursor.
+`ibuffer` is a buffer management list. Context-only buffers do not appear until a user visits them. The current group uses the `in this group` heading. Each other group uses its group name. Other groups sort by name. Ungrouped buffers come last. Empty sections omit their headings. A buffer with many memberships appears once. The current group wins, then the first group by name wins. Rows inside each section sort by buffer name. The order is fetched on open and on `g`. A mark, a flag, or a narrowing redraws the rows the table has, so a row never moves under the cursor.
 
 ## Projects
 
@@ -427,7 +428,7 @@ A group is sealed: a restored pane shows a member of G, or G's scratch as a blan
 
 ### Window fill
 
-One pool answers which buffers may fill a window in this frame: `window-fill-buffers` (`priv/editor.scm`). It is the frame's context, the way a completion source answers a prompt — in a group, the group's members (the switcher's members section reads the same list); out of one, the recency ring — minus every buffer that never fills a window: a hidden name, the popup's buffer, a peek. Every site that fills a window reads the pool and never the ring: the columns of a layout, the window a kill empties, the buffer `q` falls to. A layout that read the ring pulled buffers in from other groups.
+One pool answers which buffers may fill a window in this frame: `window-fill-buffers` (`priv/editor.scm`). It is the frame's context, the way a completion source answers a prompt — in a group, the group's members (the switcher's members section reads the same list); out of one, the recency ring — minus every buffer that never fills a window: a hidden name, a context-only buffer, the popup's buffer, or a peek. Every site that fills a window reads the pool and never the ring: the columns of a layout, the window a kill empties, the buffer `q` falls to. A layout that read the ring pulled buffers in from other groups.
 
 `kill-buffer` fills each affected window in this order:
 

@@ -72,6 +72,20 @@ defmodule Compos.ChatInputGuardTest do
     assert marker_at_mark(buf) == @marker
   end
 
+  test "typing from a stale transcript point returns to the complete input" do
+    buf = stub_chat()
+    before = Buffer.text(buf)
+
+    {:ok, _} =
+      Session.eval(~s[(with-current-buffer "#{buf}" (lambda () (beginning-of-buffer!)))])
+
+    press(["a", "b", "c", "d", "e", "f"])
+
+    {:ok, input} = Session.eval(~s[(chat-input-text "#{buf}")])
+    assert input == ~s["abcdef"]
+    assert Buffer.text(buf) == before <> "abcdef"
+  end
+
   test "a marker mangled by an older session heals on mode setup" do
     buf = stub_chat()
 

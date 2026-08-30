@@ -2086,19 +2086,21 @@ defmodule Compos.Ui.EditorLive do
     live_start = ag.input_start
     live = safe_slice(leaf.text, live_start, byte_size(leaf.text))
 
-    {pre, cur, post} =
+    # A restored window can carry an old transcript point. Rich chat hides
+    # that position, so draw the caret at the input end until Scheme repairs it.
+    rel =
       if leaf.point >= live_start do
-        rel =
-          (leaf.point - live_start) |> min(byte_size(live)) |> then(&Text.floor_utf8(live, &1))
-
-        rest = binary_part(live, rel, byte_size(live) - rel)
-
-        case String.next_grapheme(rest) do
-          nil -> {live, " ", ""}
-          {g, more} -> {binary_part(live, 0, rel), g, more}
-        end
+        (leaf.point - live_start) |> min(byte_size(live)) |> then(&Text.floor_utf8(live, &1))
       else
-        {live, "", ""}
+        byte_size(live)
+      end
+
+    rest = binary_part(live, rel, byte_size(live) - rel)
+
+    {pre, cur, post} =
+      case String.next_grapheme(rest) do
+        nil -> {live, " ", ""}
+        {g, more} -> {binary_part(live, 0, rel), g, more}
       end
 
     %{pre: pre, cur: cur, post: post}

@@ -341,6 +341,10 @@ defmodule Compos.Core.KeyDispatch do
     count = prefix_numeric_value(prefix_arg)
     inserted = if count > 0, do: String.duplicate(text, count), else: ""
 
+    # Self insertion bypasses a named Scheme command. Run the same
+    # pre-command policy explicitly before the direct buffer edit.
+    _ = Session.call_named("pre-command!", [])
+
     # A printable key replaces an active region in Emacs. The fast path used
     # to insert directly into the rope, which made mirrored selections from a
     # Markdown preview behave differently from delete commands.
@@ -363,6 +367,9 @@ defmodule Compos.Core.KeyDispatch do
   end
 
   defp run(name) do
+    # Scheme owns mode policy before a key-driven command changes the buffer.
+    _ = Session.call_named("pre-command!", [])
+
     # Emacs: any command except undo breaks the undo chain — a subsequent
     # undo then reverses the undos, which is how redo works. Commands that
     # manage their own boundaries (evil's dispatchers) register as exempt.

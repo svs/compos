@@ -85,6 +85,7 @@ defmodule Compos.Ui.AgentViewTest do
     # input row carries the typed tail; the hint yields its space while typing
     assert html =~ "half-typed"
     refute html =~ "RET sends"
+    assert has_element?(view, ".ag-input .cursor")
     # no raw marker rendered in rich mode
     refute html =~ ">>> you: profile"
   end

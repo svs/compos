@@ -337,6 +337,15 @@
           (message "this is the input marker")
           (unless (delete-active-region!) (delete-char! 1))))))
 
+(define (pre-command!)
+  (chat-snap-to-input!)
+  (run-hooks 'pre-command-hook))
+
+(define (chat-input-post-command!)
+  (chat-snap-to-input!))
+
+(add-hook! 'post-command-hook chat-input-post-command!)
+
 (define (agent-install-keys! buf)
   (local-set-key* buf "DEL" "chat-delete-backward")
   (local-set-key* buf "C-d" "chat-delete-forward")

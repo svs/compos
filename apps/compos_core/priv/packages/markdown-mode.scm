@@ -92,6 +92,25 @@
               (list (md--span start ks ke (if (equal? todo "TODO") "org-todo" "org-done")))
               (if (< ke len) (list (md--span start ke len face)) '())))))))
 
+;; a bullet or a quote marker steps back and the row takes the shape; an
+;; ordered item keeps its number, which is content
+(define (md--block-marker start line)
+  (let ((bullet (re-groups "^([ \t]*[-*+][ \t]+)" line 0))
+        (ordered (re-groups "^([ \t]*[0-9]+[.)][ \t]+)" line 0))
+        (quote (re-groups "^(>[ \t]?)" line 0)))
+    (cond
+      (bullet
+       (let ((m (nth 1 bullet)))
+         (list (md--span start (car m) (cadr m) "md-marker")
+               (list start (+ start (string-byte-length line)) "row-li"))))
+      (ordered
+       (list (list start (+ start (string-byte-length line)) "row-oli")))
+      (quote
+       (let ((m (nth 1 quote)))
+         (list (md--span start (car m) (cadr m) "md-marker")
+               (list start (+ start (string-byte-length line)) "row-quote"))))
+      (else '()))))
+
 ;; the spans for one scan entry; block BODIES are highlighted per block in
 ;; markdown-refontify!, because a multi-line construct needs the whole body
 (define (markdown--line-spans e)
@@ -100,18 +119,27 @@
     (cond
       ((= len 0) '())
       ((equal? k 'heading) (md--heading start line e len))
-      ((equal? k 'open) (list (list start (+ start len) "org-meta")))
-      ((equal? k 'close) (list (list start (+ start len) "org-meta")))
+      ;; a row face (row-*) shapes the whole row: the page reads it off the
+      ;; line, not the segment
+      ((equal? k 'open)
+       (list (list start (+ start len) "org-meta") (list start (+ start len) "row-fence")))
+      ((equal? k 'close)
+       (list (list start (+ start len) "org-meta") (list start (+ start len) "row-fence")))
       ((equal? k 'code)
-       (cond ((equal? (morg-info e) "result-scheme") '())
-             ((member (morg-info e) '("result" "result-csv"))
-              (list (list start (+ start len) "morg-result")))
-             (else '())))
+       (cons (list start (+ start len) "row-code")
+             (cond ((equal? (morg-info e) "result-scheme") '())
+                   ((member (morg-info e) '("result" "result-csv"))
+                    (list (list start (+ start len) "morg-result")))
+                   (else '()))))
+      ;; a rule: the dashes step back, the row draws the line
+      ((not (null? (re-find* "^(---+|\\*\\*\\*+|___+)[ \t]*$" line)))
+       (list (list start (+ start len) "md-marker") (list start (+ start len) "row-hr")))
       ;; re-find* answers '() for no match, and '() is true: ask null?
       ((not (null? (re-find* md--x-pattern line)))
        (list (list start (+ start len) "x-embed")))
       (else
        (append
+         (md--block-marker start line)
          (md--wrapped start line "`[^`\n]+`" 1 1 "morg-code")
          (md--wrapped start line "\\*\\*[^*\n]+\\*\\*" 2 2 "morg-bold")
          (md--wrapped start line "\\b_[^_\n]+_\\b" 1 1 "morg-italic")

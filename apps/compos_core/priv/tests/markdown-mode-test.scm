@@ -70,3 +70,15 @@
     (t--md-fresh! "# Title\n")
     (t--md-done!)
     (check-false! (t--md-has? '(2 7 "md-h1")) "no heading face is left")))
+
+(deftest 'a-bullet-and-a-quote-step-back-and-shape-the-row
+  "the marker wears md-marker and the whole row wears its row face"
+  (lambda ()
+    (t--md-fresh! "- item\n> said\n---\n1. one\n")
+    (check-true! (t--md-has? '(0 2 "md-marker")) "the bullet steps back")
+    (check-true! (t--md-has? '(0 6 "row-li")) "the row is a list item")
+    (check-true! (t--md-has? '(7 9 "md-marker")) "the quote marker steps back")
+    (check-true! (t--md-has? '(7 13 "row-quote")) "the row is a quote")
+    (check-true! (t--md-has? '(14 17 "row-hr")) "the rule row")
+    (check-true! (t--md-has? '(18 24 "row-oli")) "an ordered item keeps its number")
+    (t--md-done!)))

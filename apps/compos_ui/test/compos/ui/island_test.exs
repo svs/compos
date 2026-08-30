@@ -68,6 +68,15 @@ defmodule Compos.Ui.IslandTest do
     Buffer.set_local(buf, "whitespace-mode", false)
   end
 
+  test "a row face shapes the row", %{conn: conn} do
+    buf = fresh_buffer("island-#{System.unique_integer([:positive])}", "> said\nplain\n")
+    Session.eval(~s{(overlay-set! "#{buf}" 'markdown '((0 6 "row-quote")))})
+    {:ok, view, _} = live(conn, "/")
+    html = render(view)
+    assert html =~ ~s(class="line row-quote)
+    refute html =~ ~s(class="line row-quote hl-line" data-s="7")
+  end
+
   test "an X post URL draws as a card island, pending until the fetch lands", %{conn: conn} do
     url = "https://x.com/svs/status/1234567890"
     buf = fresh_buffer("island-#{System.unique_integer([:positive])}", url <> "\n")

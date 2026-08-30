@@ -277,6 +277,29 @@ defmodule Compos.Ui.Layouts do
              point is on, where the source shows itself for editing */
           .f-md-marker { display: none; }
           .line.hl-line .f-md-marker { display: inline; }
+          /* the block shapes of a drawn page: the marker stepped back, the
+             row takes the shape; on the cursor line the marker returns */
+          .line.row-li .line-content { padding-left: 1.4em; }
+          .line.row-li:not(.hl-line) .line-content::before {
+            content: "\2022"; display: inline-block; width: 1.4em; margin-left: -1.4em;
+            text-align: center; color: var(--dim-fg, #8a857a);
+          }
+          .line.row-oli .line-content { padding-left: 1.4em; text-indent: -1.4em; }
+          .line.row-quote .line-content {
+            border-left: 3px solid var(--border, #cfc8b6); padding-left: 12px;
+            color: var(--dim-fg, #57534a); font-style: italic;
+          }
+          .line.row-hr .line-content { position: relative; }
+          .line.row-hr:not(.hl-line) .line-content::after {
+            content: ""; position: absolute; left: 0; right: 0; top: 50%;
+            border-top: 1px solid var(--border, #cfc8b6);
+          }
+          .line.row-code .line-content, .line.row-fence .line-content {
+            font-family: var(--font-mono); background: var(--inset-bg, rgba(0, 0, 0, 0.035));
+            padding-left: 10px; padding-right: 10px;
+          }
+          .line.row-code .line-content { font-size: .88em; }
+          .line.row-fence .line-content { font-size: .72em; color: var(--dim-fg, #8a857a); }
           /* visual-line-mode off: continuation lines, wrapped wherever the
              window ends (Emacs's default); on: wrapped at words */
           .buf[data-visual-lines="false"] .line-content { word-break: break-all; }

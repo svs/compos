@@ -866,6 +866,9 @@ defmodule Compos.Ui.EditorLive do
         ts: line_ts,
         ov: line_ov,
         selected: Enum.any?(line_ov, fn {_, _, face} -> face == "f-select" end),
+        # a row face (f-row-*) covering the line's start shapes the row:
+        # a list item, a quote, a rule, a code line
+        row: row_class(line_ov, start),
         segs: line_segs(part, start, line_ts, line_ov)
       }
     end)
@@ -881,6 +884,12 @@ defmodule Compos.Ui.EditorLive do
   # line renders as plain text.
   @max_styled_line 20_000
   @max_line_ranges 400
+
+  defp row_class(line_ov, start) do
+    line_ov
+    |> Enum.filter(fn {s, _e, cls} -> is_binary(cls) and s <= start and String.starts_with?(cls, "f-row-") end)
+    |> Enum.map_join(" ", fn {_, _, cls} -> String.replace_prefix(cls, "f-", "") end)
+  end
 
   defp whitespace?(leaf),
     do: Compos.Core.Buffer.get_local(leaf.buffer, "whitespace-mode") == true
@@ -1471,7 +1480,7 @@ defmodule Compos.Ui.EditorLive do
         <div
           :for={ln <- @lines}
           id={"ln-#{@node.id}-#{ln.num}"}
-          class={"line #{if ln.current, do: "hl-line"} #{if ln.selected, do: "selected-line"}"}
+          class={"line #{ln.row} #{if ln.current, do: "hl-line"} #{if ln.selected, do: "selected-line"}"}
           data-s={ln.start}
         >
           <span class="linenum" contenteditable="false">{ln.num}</span>
@@ -1635,6 +1644,7 @@ defmodule Compos.Ui.EditorLive do
         current: current,
         selected: line.selected,
         start: line.start,
+        row: Map.get(line, :row, ""),
         segs: segs
       }
     end)

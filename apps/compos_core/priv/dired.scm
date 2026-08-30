@@ -460,7 +460,7 @@
     'meta dired-meta
     'total (lambda (buf) (or (buffer-local buf 'dired-total) 0))
     'footer (lambda (buf)
-              '(("RET" "visit") ("m" "mark") ("*" "all") ("d" "flag")
+              '(("RET" "peek, again keeps") ("m" "mark") ("*" "all") ("d" "flag")
                 ("x" "trash") ("C" "copy") ("R" "rename") ("s" "sort")
                 ("/" "filter") ("." "dotfiles")
                 ("^" "up") ("g" "revert") ("q" "quit")))

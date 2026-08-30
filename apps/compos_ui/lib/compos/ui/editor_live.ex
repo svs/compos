@@ -1311,7 +1311,31 @@ defmodule Compos.Ui.EditorLive do
     """
   end
 
+  # A pane is a stateful component so that a pane nobody touched costs
+  # nothing: the component's assign skips a value equal to the one it
+  # holds, and a component with no changed assign renders nothing and
+  # ships a skip placeholder. Without this, one keystroke in one window
+  # re-sent every line of every other window, because the parent handed
+  # each pane a new node map on every render.
   defp tree(%{node: %{type: :leaf}} = assigns) do
+    ~H"""
+    <.live_component
+      module={Compos.Ui.Pane}
+      id={"pane-#{@node.id}"}
+      node={@node}
+      active={@active}
+      completion={@completion}
+    />
+    """
+  end
+
+  @doc """
+  One window: its header, dashboard, body, and modeline.
+
+  `Compos.Ui.Pane` renders this. It stays here because the helpers it
+  calls (`blk`, `seg`, the modeline pieces) live here.
+  """
+  def pane(assigns) do
     assigns =
       assign(assigns,
         lines: assigns.node.lines,

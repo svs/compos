@@ -1307,6 +1307,9 @@ defmodule Compos.Ui.Layouts do
                 const onConn = sock.onConnMessage.bind(sock);
                 sock.onConnMessage = (raw) => {
                   Telem.lastRaw = { at: Telem.now(), bytes: raw && raw.data ? raw.data.length : 0 };
+                  // the biggest reply since the last look, for a person who
+                  // asks what a patch carried: composTelemetry.sample()
+                  if (Telem.lastRaw.bytes > (Telem.big ? Telem.big.length : 0)) Telem.big = raw.data;
                   return onConn(raw);
                 };
                 sock.onMessage((msg) => {
@@ -1370,6 +1373,17 @@ defmodule Compos.Ui.Layouts do
                 }).observe({ type: "longtask" });
               } catch (err) {}
             },
+            // one piece of the client's own work, by name: the row says
+            // what ran after a patch and how long it held the main thread.
+            // Under 4ms is noise and is not reported.
+            time(label, fn) {
+              const t0 = this.now();
+              try { return fn(); }
+              finally {
+                const ms = this.now() - t0;
+                if (ms >= 4) this.row("client", "client " + label, ms, 0, null, "", t0);
+              }
+            },
             // the report itself is not traced: the server records it and
             // renders nothing
             flush() {
@@ -1378,6 +1392,7 @@ defmodule Compos.Ui.Layouts do
               this.rows = [];
               try { this.hook.pushEvent("telemetry", { rows }); } catch (err) {}
             },
+            sample() { const b = this.big || ""; this.big = null; return b; },
             attach(hook) {
               this.hook = hook;
               if (!this.timer) {
@@ -2866,7 +2881,7 @@ defmodule Compos.Ui.Layouts do
                 // it asks for a measure through this one door
                 window.composRemeasure = () => {
                   clearTimeout(this._wmt);
-                  this._wmt = setTimeout(this.sendWrapMaps, 40);
+                  this._wmt = setTimeout(() => Telem.time("wrap-maps", this.sendWrapMaps), 40);
                 };
                 this.sendWinRows = () => {
                   const rows = {};
@@ -3076,6 +3091,9 @@ defmodule Compos.Ui.Layouts do
               },
               updated() {
                 if (this.bootCheck()) return;
+                Telem.time("updated", () => this.afterPatch());
+              },
+              afterPatch() {
                 this.applyWhichKeyFilter();
                 this.syncCursorFocus();
                 this.syncKeyboardOwner();
@@ -3083,7 +3101,7 @@ defmodule Compos.Ui.Layouts do
                 // re-measure after every patch: splits, buffer switches and
                 // per-buffer styles all change how many rows fit where
                 clearTimeout(this._wrt);
-                this._wrt = setTimeout(this.sendWinRows, 30);
+                this._wrt = setTimeout(() => Telem.time("win-rows", this.sendWinRows), 30);
                 window.composRemeasure();
 
                 // client-scrolled buffers (.buf.client-scroll) ship every

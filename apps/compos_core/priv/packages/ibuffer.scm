@@ -1,7 +1,7 @@
 ;;; ibuffer.scm --- the buffer list as a dired: filter, mark, act.
 ;;;
 ;;; C-x C-b and M-x ibuffer open *ibuffer*. The table shows one row per
-;;; buffer in MRU order. Compact rows combine size, mode, and group details.
+;;; buffer, grouped and sorted by name. Compact rows combine size, mode, and group details.
 ;;; Wide rows also show file status. The keys follow traditional Emacs ibuffer:
 ;;; m marks, * marks all rows, d flags for killing, x executes, u and U
 ;;; unmark, RET visits, g refreshes, and q quits. / narrows the table.
@@ -36,9 +36,14 @@
 
 ;; #f means the ordinary complete table. A list, including an empty list,
 ;; is the exact result set that a buffer prompt handed to ibuffer.
+(define (ibuffer-sort-names rows)
+  (map cadr
+    (sort (map (lambda (row) (list (string-downcase row) row)) rows))))
+
 (define (ibuffer-source)
   (let ((scope (buffer-local *ibuffer-buffer* 'ibuffer-scope)))
-    (filter ibuffer-row? (if (equal? scope #f) (buffer-list-mru) scope))))
+    (ibuffer-sort-names
+      (filter ibuffer-row? (if (equal? scope #f) (buffer-list-mru) scope)))))
 
 ;; the members of the group the frame stands in come first, in their
 ;; order; the rest follow in theirs
@@ -48,14 +53,56 @@
       (append (filter (lambda (b) (buffer-in-group? b group)) rows)
               (filter (lambda (b) (not (buffer-in-group? b group))) rows))))
 
-;; the rows in the order the open found them. The list fetches this on
-;; an open and on g, and a mark or a narrowing redraws the rows it has:
-;; the source is most-recent-first, a row's preview makes that row the
-;; most recent, and a table that refetched on every mark moved the row
-;; under the cursor.
+(define (ibuffer-separator label group) (list label "" "separator" group))
+
+(define (ibuffer-separator? buf row)
+  (and (pair? row) (> (length row) 2) (equal? (nth 2 row) "separator")))
+
+;; A buffer can belong to many groups, but an ibuffer row appears once. The
+;; current group wins. Otherwise, the first group by name owns the row.
+(define (ibuffer-row-group row ordered-groups)
+  (let ((memberships (group-buffer-memberships row)))
+    (let loop ((groups ordered-groups))
+      (cond ((null? groups) #f)
+            ((member (car groups) memberships) (car groups))
+            (else (loop (cdr groups)))))))
+
+(define (ibuffer-group-section rows id label ordered-groups)
+  (let ((members (filter (lambda (row)
+                           (equal? (ibuffer-row-group row ordered-groups) id))
+                         rows)))
+    (if (pair? members)
+        (cons (ibuffer-separator label id) members)
+        '())))
+
+;; Match C-x b for the current section, then continue group by group. Other
+;; groups sort by name. Buffers with no matching membership come last.
+(define (ibuffer-group-sections rows current)
+  (let* ((named (sort (map (lambda (id)
+                             (list (string-downcase (group-name id)) id))
+                           (filter (lambda (id) (not (equal? id current)))
+                                   (group-ids)))))
+         (ordered (append (if current (list current) '()) (map cadr named)))
+         (grouped
+           (fold (lambda (out id)
+                   (append out
+                     (ibuffer-group-section
+                       rows id
+                       (if (equal? id current) "in this group" (group-name id))
+                       ordered)))
+                 '() ordered))
+         (ungrouped
+           (filter (lambda (row) (not (ibuffer-row-group row ordered))) rows)))
+    (append grouped
+            (if (pair? ungrouped)
+                (cons (ibuffer-separator "ungrouped" #f) ungrouped)
+                '()))))
+
+;; The list fetches its name-sorted rows on open and on g. A mark or a
+;; narrowing redraws the rows it already has, so the cursor stays stable.
 (define (ibuffer-rows)
-  (ibuffer-promote-group (ibuffer-source)
-                         (and (boundp 'frame-group) (frame-group))))
+  (ibuffer-group-sections (ibuffer-source)
+                          (and (boundp 'frame-group) (frame-group))))
 
 (define (ibuffer-visible)
   (list-keep *ibuffer-buffer* (ibuffer-rows)))
@@ -106,25 +153,35 @@
         (list b (or (buffer-filename-face b)
                     (if (string-prefix? "*" b) "accent" #f)))))
 
+(define (ibuffer-separator-cell row)
+  (let ((group (and (> (length row) 3) (nth 3 row))))
+    (list (string-append "── " (car row) " ")
+          (or (and group (group-color-face group)) "accent"))))
+
 (define (ibuffer-compact-cells buf b)
-  (append (ibuffer-cell-head b)
-          (list (list (ibuffer-details b) "faint"))))
+  (if (ibuffer-separator? buf b)
+      (list "" "" (ibuffer-separator-cell b) "")
+      (append (ibuffer-cell-head b)
+              (list (list (ibuffer-details b) "faint")))))
 
 (define (ibuffer-wide-cells buf b)
-  (append (ibuffer-cell-head b)
-    (list (list (ibuffer-human (buffer-size b)) "dim")
-          (list (or (buffer-local b 'mode-name) "Fundamental") "faint")
-          (list (group-label (buffer-group b))
-                (and (buffer-group b) (group-color-face (buffer-group b))))
-          (list (if (buffer-path b) "✓" "") "ok"))))
+  (if (ibuffer-separator? buf b)
+      (list "" "" (ibuffer-separator-cell b) "" "" "" "")
+      (append (ibuffer-cell-head b)
+        (list (list (ibuffer-human (buffer-size b)) "dim")
+              (list (or (buffer-local b 'mode-name) "Fundamental") "faint")
+              (list (group-label (buffer-group b))
+                    (and (buffer-group b) (group-color-face (buffer-group b))))
+              (list (if (buffer-path b) "✓" "") "ok")))))
 
 (define (ibuffer-meta buf)
-  (let* ((rows (list-entries buf))
+  (let* ((rows (filter (lambda (row) (not (ibuffer-separator? buf row)))
+                       (list-entries buf)))
          (n (length rows))
          (dirty (length (filter buffer-modified? rows))))
     (string-append (number->string n) (if (= n 1) " buffer" " buffers")
                    " · " (number->string dirty) " modified"
-                   " · recent first")))
+                   " · grouped by group · name order")))
 
 (define (ibuffer-compact-footer buf)
   '(("RET" "visit") ("m" "mark") ("k" "kill") ("G" "group")
@@ -218,7 +275,8 @@
   (list
     'doc (string-append
            "A traditional buffer management table. Compact rows combine "
-           "size, mode, and group details. Wide rows also show file status. / narrows "
+           "size, mode, and group details. Rows sort by group and buffer name. "
+           "Wide rows also show file status. / narrows "
            "the table and \\ widens it. m marks one row, * marks all shown "
            "rows, u unmarks one row, and U clears all marks. k kills now. "
            "d flags rows for killing, and x executes the flags. G puts "
@@ -226,6 +284,7 @@
     'buffer *ibuffer-buffer*
     'category 'buffer
     'rows (lambda (buf) (ibuffer-rows))
+    'separator? ibuffer-separator?
     'local-filter #t
     'stamp (lambda (buf) (length (buffer-list-mru)))
     'layouts

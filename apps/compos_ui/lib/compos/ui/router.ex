@@ -36,4 +36,8 @@ defmodule Compos.Ui.Router do
   # image path before the browser requests it, so this route exposes only a
   # path the editor rendered and never accepts an arbitrary filename.
   forward("/local-image", Compos.Ui.LocalImage)
+
+  # A browser-file buffer gets the same signed-path protection. This route
+  # serves only image, audio, and video MIME types.
+  forward("/local-file", Compos.Ui.LocalFile)
 end

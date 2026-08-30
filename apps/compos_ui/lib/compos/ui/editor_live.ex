@@ -12,7 +12,7 @@ defmodule Compos.Ui.EditorLive do
 
   alias Compos.Core.{Events, Input}
   alias Compos.Scheme.Text
-  alias Compos.Ui.{AppServer, LocalImage}
+  alias Compos.Ui.{AppServer, LocalFile, LocalImage}
 
   # A normal space collapses inside an empty line, so it cannot give the
   # cursor a visible width. Keep the placeholder a non-breaking space.
@@ -662,6 +662,13 @@ defmodule Compos.Ui.EditorLive do
     {Map.merge(leaf, %{lines: [], app_url: AppServer.app_url(leaf.buffer, leaf.app_gen)}), cache}
   end
 
+  # Scheme selects browser-file-mode. The view only signs its local path and
+  # gives the browser an inert frame in which to use its native media viewer.
+  defp decorate(%{type: :leaf, render_mode: "file", path: path} = leaf, cache, _faces)
+       when is_binary(path) do
+    {Map.merge(leaf, %{lines: [], file_url: LocalFile.url(path)}), cache}
+  end
+
   # rich agent transcript: blocks (from agent.scm's block model) become
   # typed DOM — serif prose, tool cards, permission buttons. The buffer
   # text stays canonical; this is a pure view over byte ranges.
@@ -924,7 +931,9 @@ defmodule Compos.Ui.EditorLive do
 
   defp row_class(line_ov, start) do
     line_ov
-    |> Enum.filter(fn {s, _e, cls} -> is_binary(cls) and s <= start and String.starts_with?(cls, "f-row-") end)
+    |> Enum.filter(fn {s, _e, cls} ->
+      is_binary(cls) and s <= start and String.starts_with?(cls, "f-row-")
+    end)
     |> Enum.map_join(" ", fn {_, _, cls} -> String.replace_prefix(cls, "f-", "") end)
   end
 
@@ -1524,6 +1533,14 @@ defmodule Compos.Ui.EditorLive do
           </div>
         </div>
       <% else %>
+      <%= if @node.render_mode == "file" and Map.has_key?(@node, :file_url) do %>
+        <iframe
+          class="file-preview"
+          src={@node.file_url}
+          sandbox=""
+          title={@node.buffer}
+        ></iframe>
+      <% else %>
       <%= if @node.render_mode == "app" and Map.has_key?(@node, :app_url) do %>
         <%!-- An app runs its own scripts, so it must not share the editor's
              origin: it is served from 127.0.0.1:4005, and the parent is
@@ -1600,6 +1617,7 @@ defmodule Compos.Ui.EditorLive do
             ><span class="cap-label">{c.label}</span><span class="cap-kind">{c.hint}</span></span></span></span>
         </div>
       </div>
+      <% end %>
       <% end %>
       <% end %>
       <% end %>
@@ -1770,10 +1788,17 @@ defmodule Compos.Ui.EditorLive do
   # file and is served signed (LocalImage); a path with no file has no picture
   defp image_src(txt, base) do
     cond do
-      String.starts_with?(txt, "http") -> String.trim_trailing(txt, "#compos-avatar")
-      is_binary(base) and String.starts_with?(base, "/") -> LocalImage.url(Path.expand(txt, Path.dirname(base)))
-      String.starts_with?(txt, "/") -> LocalImage.url(txt)
-      true -> nil
+      String.starts_with?(txt, "http") ->
+        String.trim_trailing(txt, "#compos-avatar")
+
+      is_binary(base) and String.starts_with?(base, "/") ->
+        LocalImage.url(Path.expand(txt, Path.dirname(base)))
+
+      String.starts_with?(txt, "/") ->
+        LocalImage.url(txt)
+
+      true ->
+        nil
     end
   end
 

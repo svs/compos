@@ -23,6 +23,7 @@
 (load-bundled-package "recipes.scm")
 (load-bundled-package "components.scm")
 (load-bundled-package "preview.scm")
+(load-bundled-package "file-view.scm")
 (load-bundled-package "spreadsheet.scm")
 
 (load-bundled-package "agenda.scm")
@@ -62,6 +63,7 @@
 (load-bundled-package "project.scm")
 (load-bundled-package "messages.scm")
 (load-bundled-package "provenance.scm")
+(load-bundled-package "movie.scm")
 (load-bundled-package "scheme-ide.scm")
 (load-bundled-package "peek.scm")
 (load-bundled-package "scratch.scm")

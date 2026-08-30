@@ -133,6 +133,7 @@ completion. `priv/editor.scm`, `priv/dired.scm`, `priv/themes.scm`.
 The rules each subsystem keeps are written down beside it: `docs/groups.md`
 (groups and the current group), `docs/LISTS.md` (the list mode, pages, the
 telemetry), `docs/BUFFER.md` (buffer state, the text scale),
+`docs/FILE-VIEW.md` (file modes, JSON formatting, and browser-native media),
 `docs/MARKDOWN.md` (the rendered page, pictures and captions),
 `docs/POPUPS.md` (the floating window), `docs/PEEK.md` (look without keeping),
 `docs/EDITING-SURFACE-SPEC.md` (the input surface). When behaviour changes,

@@ -180,6 +180,8 @@ defmodule Compos.Core.SchemeAPI do
         "(json-parse STR) — parse JSON; objects become plists with symbol keys; #f on failure.",
       "json-encode" =>
         "(json-encode V [PRETTY]) — encode a Scheme value as a JSON string; a plist becomes an object. A truthy PRETTY indents the output.",
+      "json-format" =>
+        "(json-format STR) — indent valid JSON without changing its values or object key order; return #f on invalid input.",
       "write-file!" =>
         "(write-file! PATH TEXT) — write TEXT to PATH, create parent directories; return #t.",
       "start-process!" =>
@@ -877,6 +879,15 @@ defmodule Compos.Core.SchemeAPI do
         [v] -> Jason.encode!(Compos.Core.Session.scheme_to_json(v))
         [v, false] -> Jason.encode!(Compos.Core.Session.scheme_to_json(v))
         [v, _pretty] -> Jason.encode!(Compos.Core.Session.scheme_to_json(v), pretty: true)
+      end,
+      # Formatting is lexical. A Scheme parse and encode cannot preserve JSON
+      # null or object key order, so this narrow mechanism keeps the source
+      # values intact while Scheme decides when a buffer uses it.
+      "json-format" => fn [text] ->
+        case Jason.decode(text) do
+          {:ok, _value} -> Jason.Formatter.pretty_print(text) <> "\n"
+          {:error, _reason} -> false
+        end
       end,
       "write-file!" => fn [p, text] ->
         path = Path.expand(p)

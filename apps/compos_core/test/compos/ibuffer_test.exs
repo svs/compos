@@ -100,7 +100,9 @@ defmodule Compos.IbufferTest do
     [headline, keys, labels | _rows] = String.split(text, "\n")
     assert keys =~ "RET visit"
 
-    assert headline =~ ~r/^Buffers  \d+ buffers · \d+ modified · recent first$/
+    assert headline =~
+             ~r/^Buffers  \d+ buffers · \d+ modified · grouped by group · name order$/
+
     assert labels =~ "BUFFER"
     assert labels =~ "DETAILS"
     # compact omits the rule lines; a group section's "── name" is not one
@@ -139,7 +141,7 @@ defmodule Compos.IbufferTest do
     assert text =~ "── in this group"
     assert text =~ "── #{foreign}"
     assert text =~ "── ungrouped"
-    assert text =~ ~r/^3 buffers · 0 modified · recent first/m
+    assert text =~ ~r/^3 buffers · 0 modified · grouped by group · name order/m
     assert :binary.match(text, "in this group") < :binary.match(text, "*zz-ibuffer-a*")
     assert :binary.match(text, "*zz-ibuffer-a*") < :binary.match(text, foreign)
     assert :binary.match(text, foreign) < :binary.match(text, "*zz-ibuffer-b*")
@@ -164,6 +166,21 @@ defmodule Compos.IbufferTest do
     refute narrowed =~ "in this group"
     assert narrowed =~ "── #{foreign}"
     refute narrowed =~ "ungrouped"
+  end
+
+  test "ibuffer sorts buffer rows by name instead of MRU" do
+    eval!(~s{(begin
+      (buffer-create "*zz-ibuffer-a*")
+      (buffer-create "*zz-ibuffer-b*")
+      (set-frame-local! 'current-group #f)
+      (switch-to-buffer! "*zz-ibuffer-a*")
+      (switch-to-buffer! "*zz-ibuffer-b*")
+      (run-command "ibuffer")
+      (list-set-filters! "*ibuffer*" (list (list "match" "zz-ibuffer-"))))})
+
+    text = Buffer.text("*ibuffer*")
+    assert text =~ "grouped by group · name order"
+    assert :binary.match(text, "*zz-ibuffer-a*") < :binary.match(text, "*zz-ibuffer-b*")
   end
 
   test "keyboard-quit dismisses scoped ibuffer and restores the covered layout" do

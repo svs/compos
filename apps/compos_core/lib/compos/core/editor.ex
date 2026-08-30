@@ -936,7 +936,7 @@ defmodule Compos.Core.Editor do
   # the render modes the client draws in an iframe
   defp preview?(buffer) do
     try do
-      Buffer.locals(buffer)["render-mode"] in ["html", "markdown", "app"]
+      Buffer.locals(buffer)["render-mode"] in ["html", "markdown", "app", "file"]
     catch
       :exit, _ -> false
     end

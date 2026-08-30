@@ -466,6 +466,10 @@ defmodule Compos.Ui.Layouts do
             zoom: var(--text-scale-factor, 1);
           }
           .window.active .html-preview { background: var(--window-bg, #fdfcf8); }
+          .file-preview {
+            flex: 1; width: 100%; min-height: 0; border: 0;
+            background: var(--window-bg, #fdfcf8);
+          }
           /* an app paints its own background — the editor supplies none */
           .app-preview {
             flex: 1; width: 100%; min-height: 0; border: 0; background: #fff;

@@ -337,7 +337,7 @@ A successful verb clears the selection. A cancel keeps it.
 
 ## Lists
 
-Every UI that lists buffers shows three sections. Each section is in MRU order. An empty section and its separator are omitted.
+The buffer switcher shows three sections. Each section is in MRU order. An empty section and its separator are omitted.
 
 ```
 members of the destination group
@@ -351,15 +351,15 @@ every other buffer
 - The project section follows the current buffer's root. Peek at a file in another project and the middle section shows that project.
 - With a destination and no project: two sections. With no destination in a project: two sections. With neither: one section.
 
-In the switcher, `RET` shows the buffer and changes no membership. `C-RET` shows the buffer and adds it to the destination group. Both take the selection when one is marked. The switcher is not a special case; the same sections and verbs apply to every buffer list.
+In the switcher, `RET` shows the buffer and changes no membership. `C-RET` shows the buffer and adds it to the destination group. Both take the selection when one is marked. The same verbs apply to every buffer list.
 
-`ibuffer` is a buffer list too: the members of the frame's group lead the table, in their MRU order, and the rest follow in theirs. The order is fetched on open and on `g`. A mark, a flag, or a narrowing redraws the rows the table has, so a row never moves under the cursor. (A row's preview makes that buffer the most recent; a table that refetched on every mark moved the row you marked.)
+`ibuffer` is a buffer management list. The current group uses the `in this group` heading. Each other group uses its group name. Other groups sort by name. Ungrouped buffers come last. Empty sections omit their headings. A buffer with many memberships appears once. The current group wins, then the first group by name wins. Rows inside each section sort by buffer name. The order is fetched on open and on `g`. A mark, a flag, or a narrowing redraws the rows the table has, so a row never moves under the cursor.
 
 ## Projects
 
 A project is the root directory of a file. The editor derives it from the path. A project acts in two places and nowhere else:
 
-1. The middle section of every buffer list.
+1. The middle section of the buffer switcher.
 2. Window fill after `kill-buffer` when the frame has no destination.
 
 Visiting a file never changes the destination. A group made from files inside a project is a plain group; its buffers are in the group and also fall under the root.

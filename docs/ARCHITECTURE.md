@@ -134,6 +134,7 @@ The rules each subsystem keeps are written down beside it: `docs/groups.md`
 (groups and the current group), `docs/LISTS.md` (the list mode, pages, the
 telemetry), `docs/BUFFER.md` (buffer state, the text scale),
 `docs/MARKDOWN.md` (the rendered page, pictures and captions),
+`docs/POPUPS.md` (the floating window),
 `docs/EDITING-SURFACE-SPEC.md` (the input surface). When behaviour changes,
 the document changes in the same commit.
 

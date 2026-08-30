@@ -74,10 +74,11 @@
   "Tile visible buffers for the selected frame's usable width"
   (lambda () (tile-visible-adaptive!)))
 
-;; Explicit display rules still win. Only the default follows the frame.
-(set! popup-default-side
-  (lambda ()
-    (if (< (frame-cols) window-layout-compact-cols) 'bottom 'right)))
+;; The popup's default side is the right edge, on every frame: a compact
+;; frame once got the bottom edge, and the estimate of the frame's width
+;; read narrow after a stale window measurement, so the popup wandered.
+;; A rule names a side, and M-<arrows> in the popup move it.
+(set! popup-default-side (lambda () 'right))
 
 (catalog-meta! 'command "window-layout-adaptive"
   'domain 'windows 'effects '(write display))

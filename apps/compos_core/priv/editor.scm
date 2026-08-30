@@ -2726,7 +2726,9 @@
             (lambda ()
               (let ((mode (buffer-local buf 'mode-name)))
                 (when mode (set-mode! mode)))
-              (restore-minor-modes! buf)))))))
+              (restore-minor-modes! buf)
+              ;; a restored popup floats still, so its move keys come back
+              (when (popup--class? buf) (popup-keys! buf #t))))))))
   ;; The modeline is derived state. Rebuild it here so a restored desktop
   ;; shows its top line and its short name before the first command runs.
   (when (boundp (quote dashboard--sync!))
@@ -4834,14 +4836,55 @@
 ;; underneath. SIDE is the edge it floats against, or #f to stop
 ;; floating — `C-M-\`` passes #f and the popup becomes an ordinary split,
 ;; which is popper's toggle-type under popper's key.
+;; In the popup, M-<left>, M-<right>, M-<up>, and M-<down> move it to
+;; that edge. The keys are the popup's, not the buffer's: they go in
+;; when the buffer floats and out when it stops, and the mode setup then
+;; gives the buffer its own keys back.
+(define *popup-move-keys*
+  '(("M-<left>" "popup-move-left") ("M-<right>" "popup-move-right")
+    ("M-<up>" "popup-move-up") ("M-<down>" "popup-move-down")))
+
+(define (popup-keys! name floating?)
+  (for-each (lambda (k)
+              (if floating?
+                  (local-set-key* name (car k) (cadr k))
+                  (local-unset-key* name (car k))))
+            *popup-move-keys*)
+  (buffer-set-local! name 'popup-keys (and floating? #t)))
+
 (define (popup-float! name side &optional size)
-  (buffer-set-local! name 'window-class
-    (and side (string-append "popup popup-" (symbol->string side))))
-  ;; the share is a number, and CSS cannot read a Scheme list — hand it
-  ;; over as a custom property the stylesheet already reads
-  (buffer-set-local! name 'window-style
-    (and side size
-         (string-append "--popup-size:" (number->string (* 100 size)) "%"))))
+  (let ((had-keys (buffer-local name 'popup-keys)))
+    (buffer-set-local! name 'window-class
+      (and side (string-append "popup popup-" (symbol->string side))))
+    ;; the share is a number, and CSS cannot read a Scheme list — hand it
+    ;; over as a custom property the stylesheet already reads
+    (buffer-set-local! name 'window-style
+      (and side size
+           (string-append "--popup-size:" (number->string (* 100 size)) "%")))
+    (cond (side (popup-keys! name #t))
+          (had-keys
+           (popup-keys! name #f)
+           ;; the buffer's own M-arrows come back with its mode
+           (when (buffer-exists? name) (restore-buffer-runtime! name))))))
+
+(define (popup-move! side)
+  (let ((buf (current-buffer)))
+    (if (not (and (popup-open?) (equal? (active-window) (popup-window))))
+        (message "Not in the popup")
+        (begin
+          ;; the side a buffer was moved to is the side it opens on next
+          (buffer-set-local! buf 'popup-side side)
+          (popup-float! buf side (display-param buf 'size))
+          (message (string-append "Popup on the " (symbol->string side)))))))
+
+(define-command "popup-move-left" "Float the popup against the left edge"
+  (lambda () (popup-move! 'left)))
+(define-command "popup-move-right" "Float the popup against the right edge"
+  (lambda () (popup-move! 'right)))
+(define-command "popup-move-up" "Float the popup against the top edge"
+  (lambda () (popup-move! 'top)))
+(define-command "popup-move-down" "Float the popup against the bottom edge"
+  (lambda () (popup-move! 'bottom)))
 
 ;; split-window! always puts the new window SECOND, so a side window on
 ;; the left or the top takes the ratio directly and then swaps into
@@ -4873,9 +4916,13 @@
           (set-frame-local! 'popup-window (active-window))
           (switch-to-buffer! name))))
 
+;; where the popup floats: the rule's side, else the side the buffer was
+;; last moved to, else the default, which is the right edge
 (define (popup-show name)
   (popup-show-on name
-    (or (display-rule-param name 'side) (popup-default-side))
+    (or (display-rule-param name 'side)
+        (buffer-local name 'popup-side)
+        (popup-default-side))
     (display-param name 'size)))
 
 ;; Force any buffer into the popup without adding a durable display rule.

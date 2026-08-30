@@ -483,3 +483,41 @@
                 (check-equal! (dired-entry) moved "on the row the reader chose")
                 (check-equal! (active-window) me "in the same window")))
             (buffer-kill! d)))))))
+
+(deftest 'dired-up-lands-on-the-directory-you-came-from
+  "the parent listing opens with point on the child's row, from ^ and from RET on .."
+  (lambda ()
+    (t--peek-with
+      (lambda ()
+        (t--peek-file "a.txt" "alpha\n")
+        (dired-open t--peek-dir)
+        (let ((child (string-append (cadr (path-split (dired-normalize-dir t--peek-dir))) "/")))
+          (run-command "dired-up")
+          (check-equal! (dired-entry) child "^ lands on the directory you came from")
+          (dired-open t--peek-dir)
+          (list-goto-index! (current-buffer) 0)
+          (check-equal! (dired-entry) ".." "the first row is the parent")
+          (run-command "dired-visit")
+          (check-equal! (dired-entry) child "RET on .. lands there too"))))))
+
+(deftest 'dired-opened-again-keeps-its-row
+  "the point is the reader's: a listing opened again stays on the row it was on"
+  (lambda ()
+    (t--peek-with
+      (lambda ()
+        (t--peek-file "a.txt" "alpha\n")
+        (t--peek-file "b.txt" "beta\n")
+        (dired-open t--peek-dir)
+        (let ((d (current-buffer)))
+          (let loop ((i 0))
+            (when (and (< i 20) (not (equal? (dired-entry) "b.txt")))
+              (list-move-in! d 1)
+              (loop (+ i 1))))
+          (check-equal! (dired-entry) "b.txt" "the reader points at b")
+          (switch-to-buffer! "*scratch*")
+          (dired-open t--peek-dir)
+          (check-equal! (dired-entry) "b.txt" "opened again, still at b")
+          (run-command "dired-up")
+          (run-command "dired-visit")
+          (check-equal! (dired-entry) "b.txt" "back from the parent, still at b")
+          (buffer-kill! d))))))

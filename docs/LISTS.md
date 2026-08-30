@@ -24,6 +24,11 @@ The list mode in `priv/editor.scm` draws every table in the editor: ibuffer, dir
 1. A list with `'local-filter` fetches its rows on an open and on `g`, and a mark, a flag, or a narrowing redraws the rows it has. A source in MRU order changes under a row's preview; a table that refetched on every mark moved the row under the cursor.
 2. `ibuffer` puts the members of the frame's group first, in their order, and the rest after, in theirs.
 
+## Point
+
+1. The point in a listing is the reader's: it moves only when the reader moves it. A draw restores the row by its key; a narrowing lands on the first row because the old row may be gone; nothing else moves it. A peek popup opening or closing beside the listing moves nothing (docs/POPUPS.md rule 10).
+2. Dired: a listing opened for the first time starts on its first entry; opened again, it keeps the row it was on. `^` and `RET` on `..` open the parent with point on the directory you came from (Emacs `dired-up-directory`).
+
 ## Narrowing
 
 1. `/` narrows on every keystroke; `\` widens by one. The filters stack and persist with the buffer; an open clears the typed query and keeps the mode's own kinds.

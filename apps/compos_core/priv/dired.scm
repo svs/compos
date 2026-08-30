@@ -573,6 +573,17 @@
     (when i (list-goto-index! buf i))
     buf))
 
+;; up from DIR: the parent listing, with point on DIR's own row. Emacs
+;; dired-up-directory does this; a listing that opened at the top lost
+;; the place you came from.
+(define (dired-open-parent! dir0)
+  (let* ((dir (dired-normalize-dir dir0))
+         (name (string-append (cadr (path-split dir)) "/"))
+         (buf (dired-open (dired-parent dir)))
+         (i (list-index-of buf (list-entries buf) name)))
+    (when i (list-goto-index! buf i))
+    buf))
+
 (define (dired-open dir0)
   (let ((dir (dired-normalize-dir dir0)))
     (if (and (not (remote-path? dir))
@@ -581,8 +592,12 @@
         (dired-open-file-parent dir)
         (dired-open-directory dir))))
 
+;; The point in a listing is the reader's: it moves only when the
+;; reader moves it. A listing opened for the first time starts on its
+;; first entry; a listing opened again keeps the row it was on.
 (define (dired-open-directory dir)
-  (let ((buf dir))
+  (let* ((buf dir)
+         (fresh (not (buffer-known? buf))))
     (buffer-create buf)
     ;; the dir local first: the mode setup's refresh reads it
     (buffer-set-local! buf 'dired-dir dir)
@@ -592,7 +607,7 @@
     (switch-to-buffer! buf)
     (set-mode! "Dired")
     (dired-arm-watch! buf)
-    (dired-goto-first-entry)
+    (when fresh (dired-goto-first-entry))
     buf))
 
 ;; the entry on the current line: a name, the ".." token, or #f above them
@@ -679,11 +694,12 @@
   (let ((p (dired-path-at-point))
         (entry (dired-entry)))
     (if p
-        (if (or (equal? entry "..") (dired-directory? entry))
-            (visit p group)
-            (begin
-              (peek-or-open! p (lambda () (visit-quietly p group)))
-              p))
+        (cond ((equal? entry "..")
+               (dired-open-parent! (dired-dir (current-buffer))))
+              ((dired-directory? entry) (visit p group))
+              (else
+               (peek-or-open! p (lambda () (visit-quietly p group)))
+               p))
         (message "No file on this line"))))
 
 (define-command "dired-visit" "Peek the file on this line in the popup; RET again opens it here. A directory opens here"
@@ -715,9 +731,9 @@
       (dired-visit-with-group
         (or (frame-group) (buffer-group dired-buffer))))))
 
-(define-command "dired-up" "Open the parent directory in Dired"
+(define-command "dired-up" "Open the parent directory in Dired, on the row you came from"
   (lambda ()
-    (dired-open (dired-parent (dired-dir (current-buffer))))))
+    (dired-open-parent! (dired-dir (current-buffer)))))
 
 (define-command "dired-revert" "Re-read the directory and refresh the listing"
   (lambda ()

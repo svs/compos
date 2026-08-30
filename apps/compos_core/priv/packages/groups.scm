@@ -963,11 +963,17 @@
         ((group-work-buffer? buf) (buffer-group-ids buf))
         (else #f)))
 
+;; A popup is a visit, not a place: a listing or the messages floating
+;; over the group's panes says nothing about the group the frame is in.
 (define (group-visible-membership-rows)
-  (filter (lambda (ids) ids)
-          (map (lambda (window)
-                 (group-context-memberships (car (cdr window))))
-               (window-list))))
+  (let ((popup (popup-window)))
+    (filter (lambda (ids) ids)
+            (map (lambda (window)
+                   (if (or (equal? (car window) popup)
+                           (popup--class? (car (cdr window))))
+                       #f
+                       (group-context-memberships (car (cdr window)))))
+                 (window-list)))))
 
 (define (group-common-memberships rows)
   (if (null? rows)

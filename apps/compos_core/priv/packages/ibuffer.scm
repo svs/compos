@@ -40,8 +40,25 @@
   (let ((scope (buffer-local *ibuffer-buffer* 'ibuffer-scope)))
     (filter ibuffer-row? (if (equal? scope #f) (buffer-list-mru) scope))))
 
+;; the members of the group the frame stands in come first, in their
+;; order; the rest follow in theirs
+(define (ibuffer-promote-group rows group)
+  (if (not group)
+      rows
+      (append (filter (lambda (b) (buffer-in-group? b group)) rows)
+              (filter (lambda (b) (not (buffer-in-group? b group))) rows))))
+
+;; the rows in the order the open found them. The list fetches this on
+;; an open and on g, and a mark or a narrowing redraws the rows it has:
+;; the source is most-recent-first, a row's preview makes that row the
+;; most recent, and a table that refetched on every mark moved the row
+;; under the cursor.
+(define (ibuffer-rows)
+  (ibuffer-promote-group (ibuffer-source)
+                         (and (boundp 'frame-group) (frame-group))))
+
 (define (ibuffer-visible)
-  (list-keep *ibuffer-buffer* (ibuffer-source)))
+  (list-keep *ibuffer-buffer* (ibuffer-rows)))
 
 (define (ibuffer-total) (length (ibuffer-source)))
 
@@ -241,7 +258,8 @@
            "the targets in a group. RET visits, g refreshes, and q quits.")
     'buffer *ibuffer-buffer*
     'category 'buffer
-    'rows (lambda (buf) (ibuffer-visible))
+    'rows (lambda (buf) (ibuffer-rows))
+    'local-filter #t
     'stamp (lambda (buf) (length (buffer-list-mru)))
     'layouts
       (list

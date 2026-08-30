@@ -22,7 +22,10 @@ defmodule Compos.Core.Editor do
 
   use GenServer
 
-  alias Compos.Core.{Buffer, BufferStore, Candidates, Events, Frame}
+  alias Compos.Core.{Buffer, BufferStore, Candidates, Events, Frame, Session}
+
+  # Emacs window-configuration-change-hook, by its Scheme name
+  @config_hook "window-configuration-changed!"
 
   # every frame has its own minibuffer backing buffer, " *minibuf-<fid>*"
   # (Emacs-style: prompt input IS a buffer, so point motion, kill/yank, undo
@@ -1718,12 +1721,54 @@ defmodule Compos.Core.Editor do
   defp changed(reply, state, scope \\ :all) do
     Events.broadcast_editor(:changed)
 
-    case scope do
-      :all -> Enum.each(Map.keys(state.frames), &Events.broadcast_frame/1)
-      fid -> Events.broadcast_frame(fid)
+    fids =
+      case scope do
+        :all -> Map.keys(state.frames)
+        fid -> [fid]
+      end
+
+    Enum.each(fids, &Events.broadcast_frame/1)
+    {:reply, reply, notify_configuration(state, fids)}
+  end
+
+  # Every mutation commits through changed/3, so this is the one place
+  # that knows a frame's windows or their buffers changed, whoever changed
+  # them: a command, a kill that dropped a window onto its next buffer, an
+  # agent. Scheme hears it once per change, by the name Emacs gives the
+  # hook, on that frame, and never on this process's time: a call from
+  # here into the Session would wait on the Session's call back into
+  # this server.
+  defp notify_configuration(state, fids) do
+    keys = Map.get(state, :config_keys, %{})
+
+    {keys, changed} =
+      Enum.reduce(fids, {keys, []}, fn fid, {keys, acc} ->
+        case state.frames[fid] do
+          nil ->
+            {keys, acc}
+
+          f ->
+            key = {leaf_ids_buffers(f.tree), f.active}
+
+            if Map.get(keys, fid) == key,
+              do: {keys, acc},
+              else: {Map.put(keys, fid, key), [fid | acc]}
+        end
+      end)
+
+    if changed != [] and Session.ready?() do
+      for fid <- changed do
+        Task.start(fn ->
+          try do
+            Session.call_named(@config_hook, [], fid, 5_000)
+          catch
+            _, _ -> :ok
+          end
+        end)
+      end
     end
 
-    {:reply, reply, state}
+    Map.put(state, :config_keys, keys)
   end
 
   # --- frame helpers ---------------------------------------------------------

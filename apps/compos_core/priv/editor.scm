@@ -2982,6 +2982,16 @@
 ;; Preview uses a different primitive and does not call it.
 (define window-state-changed! (lambda () #t))
 
+;; Emacs window-configuration-change-hook. The editor calls this once for
+;; each change of a frame's windows or their buffers, whoever made it: a
+;; command, a kill that dropped a window onto its next buffer, an agent.
+;; The window commands below call window-state-changed! themselves too,
+;; so their own modeline is right before they return; this is the answer
+;; for every other path.
+(define (window-configuration-changed!)
+  (window-state-changed!)
+  (run-hooks 'window-configuration-change-hook))
+
 ;; The primitive changes the window and wakes the process; Scheme owns the
 ;; mode closures, so it also completes runtime restoration in this same
 ;; interpreter turn. A caller never sees the buffer between those two steps.

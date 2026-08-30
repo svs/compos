@@ -95,6 +95,7 @@ server commands. Proposal: native when `cua-mode` is on; server commands
 otherwise. Both update the same point.
 
 - A selection report (`sel`) is a caret motion in the selected window and nothing else. A click selects a window through `mouse` (window, line, column) before its caret is reported, so a `sel` for any other window is stray - the browser's selection lives in the last editable buffer, and a patch that nudges it (a popup opening, a scroll beside it) is not a move anyone made. The client reports only the active window's caret, and the server drops a report for another window.
+- Each visible window shows its point. The active editable window uses the native caret. Inactive windows use a steady hollow marker.
 
 ### Pending operations
 

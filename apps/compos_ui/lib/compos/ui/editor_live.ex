@@ -525,7 +525,9 @@ defmodule Compos.Ui.EditorLive do
 
     state_ms = System.monotonic_time(:millisecond) - t0
 
-    {tree, line_cache} = decorate(state.tree, socket.assigns.line_cache, state.faces)
+    {tree, line_cache} =
+      decorate(state.tree, socket.assigns.line_cache, state.faces, state.active)
+
     state = %{state | tree: tree}
 
     # cache entries for windows that left the tree die with them (S15)
@@ -618,12 +620,14 @@ defmodule Compos.Ui.EditorLive do
   # two-level cache: the raw line split is keyed by buffer VERSION only, so
   # cursor motion never re-splits the buffer; span decoration (cursor/region/
   # hl-line) is recomputed per render but only for lines it actually touches
-  defp decorate(%{type: :split} = split, cache, faces) do
-    {children, cache} = Enum.map_reduce(split.children, cache, &decorate(&1, &2, faces))
+  defp decorate(%{type: :split} = split, cache, faces, active) do
+    {children, cache} =
+      Enum.map_reduce(split.children, cache, &decorate(&1, &2, faces, active))
+
     {%{split | children: children}, cache}
   end
 
-  defp decorate(%{type: :leaf, render_mode: "terminal"} = leaf, cache, _faces) do
+  defp decorate(%{type: :leaf, render_mode: "terminal"} = leaf, cache, _faces, _active) do
     {Map.put(leaf, :lines, []), cache}
   end
 
@@ -632,7 +636,7 @@ defmodule Compos.Ui.EditorLive do
   # markdown keys on point too: the preview is editable, so the reader must
   # see where the next keystroke lands. html does not — an authored
   # document gets no marker injected into it.
-  defp decorate(%{type: :leaf, render_mode: rm} = leaf, cache, faces)
+  defp decorate(%{type: :leaf, render_mode: rm} = leaf, cache, faces, _active)
        when rm in ["html", "markdown"] do
     pt = if rm == "markdown", do: leaf.point, else: 0
     mark = if rm == "markdown", do: leaf.mark, else: nil
@@ -658,13 +662,13 @@ defmodule Compos.Ui.EditorLive do
 
   # an app is not rendered here at all: the app origin serves it, and the
   # window holds only the frame that points at it
-  defp decorate(%{type: :leaf, render_mode: "app"} = leaf, cache, _faces) do
+  defp decorate(%{type: :leaf, render_mode: "app"} = leaf, cache, _faces, _active) do
     {Map.merge(leaf, %{lines: [], app_url: AppServer.app_url(leaf.buffer, leaf.app_gen)}), cache}
   end
 
   # Scheme selects browser-file-mode. The view only signs its local path and
   # gives the browser an inert frame in which to use its native media viewer.
-  defp decorate(%{type: :leaf, render_mode: "file", path: path} = leaf, cache, _faces)
+  defp decorate(%{type: :leaf, render_mode: "file", path: path} = leaf, cache, _faces, _active)
        when is_binary(path) do
     {Map.merge(leaf, %{lines: [], file_url: LocalFile.url(path)}), cache}
   end
@@ -672,7 +676,12 @@ defmodule Compos.Ui.EditorLive do
   # rich agent transcript: blocks (from agent.scm's block model) become
   # typed DOM — serif prose, tool cards, permission buttons. The buffer
   # text stays canonical; this is a pure view over byte ranges.
-  defp decorate(%{type: :leaf, render_mode: "agent", agent: %{} = ag} = leaf, cache, _faces) do
+  defp decorate(
+         %{type: :leaf, render_mode: "agent", agent: %{} = ag} = leaf,
+         cache,
+         _faces,
+         _active
+       ) do
     # Input edits do not change the transcript mark or block model. Reuse the
     # complete block tree so typing and RET do not scan large tool results.
     old =
@@ -724,7 +733,7 @@ defmodule Compos.Ui.EditorLive do
   # a generic block tree the mode composed. This clause converts plists to
   # maps and finds the buffer line point is on; it does not know what any
   # block means.
-  defp decorate(%{type: :leaf, render_mode: "blocks"} = leaf, cache, _faces) do
+  defp decorate(%{type: :leaf, render_mode: "blocks"} = leaf, cache, _faces, _active) do
     raw = Map.get(leaf, :blocks) || []
     key = {leaf.buffer, leaf.version, :erlang.phash2(raw)}
 
@@ -747,7 +756,7 @@ defmodule Compos.Ui.EditorLive do
   # node count and per-render diff cost both scale with what we ship.
   @ship_all_threshold 3000
 
-  defp decorate(%{type: :leaf} = leaf, cache, _faces) do
+  defp decorate(%{type: :leaf} = leaf, cache, _faces, active) do
     # the oembed generation moves when an X card lands: a line that drew
     # the pending URL must draw the card
     raw_key =
@@ -804,7 +813,7 @@ defmodule Compos.Ui.EditorLive do
 
     lines =
       visible
-      |> render_pass(leaf.text, leaf.point, leaf.mark, not leaf.read_only)
+      |> render_pass(leaf.text, leaf.point, leaf.mark, leaf.id == active and not leaf.read_only)
       |> Enum.map(fn ln ->
         # a visible line whose successor is folded gets a fold marker
         if MapSet.member?(hidden, ln.num),
@@ -1630,11 +1639,10 @@ defmodule Compos.Ui.EditorLive do
 
   # --- per-line display list: numbers, hl-line, font-lock + overlays ----------
 
-  # An editable surface draws no cursor and no region of its own: the
-  # browser owns the caret and the selection there, and a row cut at
-  # point would split the text node under the native caret on every
-  # patch. The client places the selection from data-pt and data-mark.
-  defp render_pass(static, text, point, mark, editable?) do
+  # The focused editable surface draws no cursor and no region of its own.
+  # The browser owns the caret and selection there. An inactive editable
+  # surface draws the server marker, so its window still shows point.
+  defp render_pass(static, text, point, mark, native_caret?) do
     {rs, re} =
       case mark do
         nil -> {point, point}
@@ -1651,14 +1659,13 @@ defmodule Compos.Ui.EditorLive do
 
     Enum.map(static, fn line ->
       le = line.start + byte_size(line.part)
-      # an editable surface marks its own current row (the client knows
-      # where the caret is); nothing in these lines depends on point, so a
-      # caret move sends no line at all
-      current = not editable? and point >= line.start and point <= le
+      # The native-caret surface marks its current row in the client.
+      # Nothing in these lines depends on point, so caret motion sends no row.
+      current = not native_caret? and point >= line.start and point <= le
       touched? = current or (rs != re and rs < le + 1 and re > line.start)
 
       segs =
-        if touched? and not editable? do
+        if touched? and not native_caret? do
           # Images are atomic display objects. Point may sit inside the URL
           # backing one, but the cursor must not split its scheme before the
           # image component sees it.

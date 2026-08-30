@@ -415,7 +415,10 @@ defmodule Compos.Ui.Layouts do
           }
           .window.active .cursor { animation: blink 1.1s steps(1) infinite; }
           .window.inactive .cursor {
-            visibility: hidden; animation: none;
+            background: transparent;
+            color: inherit;
+            box-shadow: inset 0 0 0 1px var(--cursor-bg, #26356b);
+            animation: none;
           }
           /* The frame does not own the keyboard, so the cursor stops
              blinking and goes hollow. It does NOT go away: a reader who
@@ -1803,7 +1806,7 @@ defmodule Compos.Ui.Layouts do
                   // a window that does not own the keyboard draws the caret
                   // idle, never nothing: point is still somewhere, and the
                   // reader still has to see where
-                  pt.style.visibility = active ? "visible" : "hidden";
+                  pt.style.visibility = "visible";
                   pt.classList.toggle("idle", !(document.hasFocus() && active));
                 }
                 this.apply();
@@ -2164,7 +2167,7 @@ defmodule Compos.Ui.Layouts do
                     const pt = d && d.querySelector(".pt");
                     if (pt) {
                       const active = frame.closest(".window")?.classList.contains("active");
-                      pt.style.visibility = active ? "visible" : "hidden";
+                      pt.style.visibility = "visible";
                       pt.classList.toggle("idle", !(focused && active));
                     }
                   });

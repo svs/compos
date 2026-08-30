@@ -107,10 +107,29 @@ defmodule Compos.Ui.EditorLiveTest do
   test "keeps the cursor visible on a blank line", %{conn: conn} do
     buf = Compos.Core.Editor.current_buffer()
     Compos.Core.Buffer.insert(buf, "\ntext")
+    Compos.Core.Buffer.set_read_only(buf, true)
 
-    {:ok, _view, html} = live(conn, "/")
+    {:ok, view, _html} = live(conn, "/")
 
-    assert html =~ ~s(<span class="cursor"> </span>)
+    assert has_element?(view, ".cursor")
+  end
+
+  test "an inactive editable buffer shows its point", %{conn: conn} do
+    {:ok, view, mounted} = live(conn, "/")
+    [_, frame] = Regex.run(~r/data-frame="([^"]+)"/, mounted)
+    buf = "ui-inactive-#{System.unique_integer([:positive])}"
+    Compos.Core.Editor.set_window_buffer(buf, frame)
+    Compos.Core.Buffer.insert(buf, "inactive point")
+    Compos.Core.Editor.split(:h, 0.5, frame)
+    Compos.Core.Editor.other_window(frame)
+
+    Compos.Core.Editor.set_window_buffer(
+      "ui-active-#{System.unique_integer([:positive])}",
+      frame
+    )
+
+    assert has_element?(view, ".window.inactive .cursor")
+    refute has_element?(view, ".window.active .cursor")
   end
 
   test "narrowing clips both boundaries without fold ellipses", %{conn: conn} do

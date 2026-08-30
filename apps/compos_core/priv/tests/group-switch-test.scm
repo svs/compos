@@ -34,6 +34,7 @@
   (set-frame-local! 'current-group #f)
   (set-frame-local! 'previous-group #f)
   (set-frame-local! 'pinned-group #f)
+  (set-frame-local! 'groups '())
   (delete-other-windows!)
   (switch-to-buffer! t--sw-first))
 
@@ -180,6 +181,28 @@
       (check-equal! (filter group-work-buffer? (group-buffers id)) '()
                     "the group has no work members")
       (check-equal! (frame-group) id "the frame enters the empty context"))
+    (t--sw-done!)))
+
+(deftest 'the-frame-keeps-the-set-of-groups-it-entered
+  "every group the frame enters joins the frame-local groups set, once"
+  (lambda ()
+    (t--sw-setup!)
+    (run-command "group-new")
+    (t--sw-type! "zzsw-set-one")
+    (t--sw-key! "confirm")
+    (run-command "group-new")
+    (t--sw-type! "zzsw-set-two")
+    (t--sw-key! "confirm")
+    (let ((one (group-resolve-id "zzsw-set-one"))
+          (two (group-resolve-id "zzsw-set-two")))
+      (check-equal! (frame-group) two "the frame stands in the newest group")
+      (check-equal! (frame-groups) (list two one)
+                    "the set holds both groups, newest first")
+      (switch-to-group! one)
+      (check-equal! (frame-groups) (list two one)
+                    "entering a group again adds nothing")
+      (group-kill! two)
+      (check-equal! (frame-groups) (list one) "a killed group leaves the set"))
     (t--sw-done!)))
 
 (deftest 'group-new-with-buffer-includes-the-buffer-family

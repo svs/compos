@@ -124,6 +124,24 @@
         "preview mode repaints the restored URL")
       (t--md-done!))))
 
+(deftest 'a-table-takes-its-columns-from-the-bars
+  "the head, the rule and the body rows each take their row face; every bar
+   is a column boundary and the space that pads a cell steps back"
+  (lambda ()
+    (t--md-fresh! "| Path | Use |\n| --- | --- |\n| a | b |\n\n| lonely |\n")
+    (check-true! (t--md-has? '(0 14 "row-table")) "the head row is a table row")
+    (check-true! (t--md-has? '(0 14 "row-table-head")) "and it is the head")
+    (check-true! (t--md-has? '(0 1 "md-table-bar")) "the opening bar is a column")
+    (check-true! (t--md-has? '(7 8 "md-table-bar")) "so is the bar between cells")
+    (check-true! (t--md-has? '(1 2 "md-marker")) "the space before a cell steps back")
+    (check-true! (t--md-has? '(6 7 "md-marker")) "and the space after it")
+    (check-true! (t--md-has? '(15 28 "row-table-rule")) "the rule row draws the line")
+    (check-true! (t--md-has? '(15 28 "md-marker")) "and its dashes step back")
+    (check-true! (t--md-has? '(29 38 "row-table")) "a body row is a table row")
+    (check-false! (t--md-has? '(40 50 "row-table"))
+                  "a line of bars with no rule row under it stays text")
+    (t--md-done!)))
+
 (deftest 'turning-the-mode-off-takes-the-paint-with-it
   "teardown clears the markdown overlays"
   (lambda ()

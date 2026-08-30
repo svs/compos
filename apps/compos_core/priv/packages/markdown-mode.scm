@@ -139,6 +139,123 @@
           (md--span start (cadr words) len "md-marker")
           (list start (+ start len) "row-caption"))))
 
+;;; --- tables ------------------------------------------------------------
+;;; A table is a head row, a rule row of dashes under it, and the body rows
+;;; that follow. A line of bars with no rule row under it is ordinary text,
+;;; so a row is known only by reading the line below. That context belongs
+;;; to the run, not to one line, so markdown--table-spans walks the scan
+;;; instead of markdown--line-spans.
+;;;
+;;; The page draws one source line per row, so each row is its own table
+;;; box and the columns divide the width evenly. The bars carry those
+;;; columns: every bar is a cell box of its own, so the text between two
+;;; bars falls into a column of its own whatever faces the inline markup
+;;; left on it.
+
+(define md--table-row-pattern "^[ \t]*[|]")
+(define md--table-rule-cell-pattern "^[ \t]*:?-+:?[ \t]*$")
+
+(define (md--table-row? line) (re-match md--table-row-pattern line))
+
+;; the byte offset of every bar that divides cells. A bar the author
+;; escaped is text inside a cell.
+(define (md--table-bars line)
+  (filter (lambda (b)
+            (or (= b 0)
+                (not (equal? (substring-bytes line (- b 1) b) "\\"))))
+          (map car (re-find* "[|]" line))))
+
+;; (START END) per cell, in bytes. A row that closes with a bar ends
+;; there; a row without one keeps its last cell to the end of the line.
+(define (md--table-cells line)
+  (let ((len (string-byte-length line)) (bars (md--table-bars line)))
+    (let loop ((bs bars) (acc '()))
+      (cond ((null? bs) (reverse acc))
+            ((null? (cdr bs))
+             (let ((s (+ (car bs) 1)))
+               (reverse (if (< s len) (cons (list s len) acc) acc))))
+            (else (loop (cdr bs) (cons (list (+ (car bs) 1) (car (cdr bs))) acc)))))))
+
+(define (md--table-cell-text line cell)
+  (substring-bytes line (car cell) (cadr cell)))
+
+;; the rule row: every cell it holds is dashes, with an optional colon for
+;; the column's alignment. Trailing space after the last bar is not a cell.
+(define (md--table-rule? line)
+  (and (md--table-row? line)
+       (let ((cells (filter (lambda (c)
+                              (not (equal? (string-trim (md--table-cell-text line c)) "")))
+                            (md--table-cells line))))
+         (and (pair? cells)
+              (null? (filter (lambda (c)
+                               (not (re-match md--table-rule-cell-pattern
+                                              (md--table-cell-text line c))))
+                             cells))))))
+
+;; the space that pads a cell steps back, so a column starts at its text.
+;; A cell that is only space keeps it: the blank column must still draw a
+;; box, or the row loses a column and stops lining up with the rows above.
+(define (md--table-cell-spans start line cell)
+  (let* ((s (car cell)) (e (cadr cell))
+         (text (md--table-cell-text line cell)))
+    (if (equal? (string-trim text) "")
+        '()
+        (append
+          (let ((lead (re-find* "^[ \t]+" text)))
+            (if (null? lead)
+                '()
+                (list (md--span start s (+ s (cadr (car lead))) "md-marker"))))
+          (let ((trail (re-find* "[ \t]+$" text)))
+            (if (null? trail)
+                '()
+                (list (md--span start (+ s (car (car trail))) e "md-marker"))))))))
+
+(define (md--table-row-spans start line faces)
+  (let* ((len (string-byte-length line))
+         (bars (md--table-bars line))
+         (tail (+ (car (reverse bars)) 1)))
+    (append
+      (map (lambda (face) (list start (+ start len) face)) faces)
+      ;; what indents the row, and any space after the closing bar
+      (if (> (car bars) 0) (list (md--span start 0 (car bars) "md-marker")) '())
+      (if (and (< tail len) (equal? (string-trim (substring-bytes line tail len)) ""))
+          (list (md--span start tail len "md-marker"))
+          '())
+      (map (lambda (b) (md--span start b (+ b 1) "md-table-bar")) bars)
+      (apply append
+        (map (lambda (c) (md--table-cell-spans start line c)) (md--table-cells line))))))
+
+(define (md--table-entry-line es)
+  (and (pair? es) (equal? (morg-kind (car es)) 'text) (cadr (car es))))
+
+;; the spans every table row in the buffer takes. A run opens on a head row
+;; with a rule row under it and closes on the first line that is not a row.
+(define (markdown--table-spans scan)
+  (let loop ((es scan) (acc '()) (open #f))
+    (if (null? es)
+        (apply append (reverse acc))
+        (let* ((e (car es))
+               (start (car e))
+               (line (cadr e))
+               (next (md--table-entry-line (cdr es))))
+          (cond
+            ((not (equal? (morg-kind e) 'text)) (loop (cdr es) acc #f))
+            ((and (md--table-row? line) (not (md--table-rule? line))
+                  next (md--table-rule? next))
+             (loop (cdr es)
+                   (cons (md--table-row-spans start line '("row-table" "row-table-head")) acc)
+                   #t))
+            ((and open (md--table-rule? line))
+             (let ((len (string-byte-length line)))
+               (loop (cdr es)
+                     (cons (list (list start (+ start len) "md-marker")
+                                 (list start (+ start len) "row-table-rule"))
+                           acc)
+                     #t)))
+            ((and open (md--table-row? line))
+             (loop (cdr es) (cons (md--table-row-spans start line '("row-table")) acc) #t))
+            (else (loop (cdr es) acc #f)))))))
+
 ;; the spans for one scan entry; block BODIES are highlighted per block in
 ;; markdown-refontify!, because a multi-line construct needs the whole body.
 ;; PREV is the text of the line above, or #f on the first line.
@@ -202,6 +319,7 @@
                           (list (append (car acc) (markdown--line-spans e (cadr acc)))
                                 (cadr e)))
                         (list '() #f) scan)))
+           (table-spans (markdown--table-spans scan))
            (blocks (morg-blocks scan buf))
            (code-spans
              (fold
@@ -231,7 +349,8 @@
                        acc)))
                '()
                blocks)))
-      (overlay-set! buf 'markdown (append line-spans code-spans csv-header-spans)))))
+      (overlay-set! buf 'markdown
+        (append line-spans table-spans code-spans csv-header-spans)))))
 
 ;;; --- the mode ----------------------------------------------------------------
 

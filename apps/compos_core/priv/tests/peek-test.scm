@@ -398,3 +398,23 @@
           (check-equal! (current-buffer) a "the reader is in the opened buffer")
           (popup-close!)
           (buffer-kill! "*zz-under*"))))))
+
+(deftest 'a-peek-takes-no-focus
+  "showing and replacing a peek moves the selection nowhere; other-window passes the peek by"
+  (lambda ()
+    (t--peek-with
+      (lambda ()
+        (let ((a (t--peek-file "a.txt" "alpha\n"))
+              (b (t--peek-file "b.txt" "beta\n"))
+              (me (active-window)))
+          (peek-file! a)
+          (check-equal! (active-window) me "the selection stayed for the first peek")
+          (peek-file! b)
+          (check-equal! (active-window) me "and for the replacement")
+          (run-command "other-window")
+          (check-equal! (active-window) me "other-window with only a peek beside stays")
+          (split-window! 'h 0.5)
+          (select-window! me)
+          (run-command "other-window")
+          (check-false! (equal? (active-window) me) "with a real window it moves")
+          (check-true! (window-focusable? (active-window)) "to the real window, not the peek"))))))

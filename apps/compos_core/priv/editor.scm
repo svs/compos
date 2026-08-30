@@ -4986,6 +4986,39 @@
 
 ;; where the popup floats: the rule's side, else the side the buffer was
 ;; last moved to, else the default, which is the right edge
+;; Show NAME in the popup without moving the selection: a preview takes
+;; no focus. The popup window's buffer is set in place; a new popup is
+;; split, filled, and the selection goes back where it was, in one
+;; step. The bookkeeping is popup-show-on's: the return place, the
+;; stack, the class.
+(define (popup-show-quietly name side size)
+  (let ((me (active-window)))
+    (popup-remember!)
+    (let ((old (popup-buffer))
+          (layout (popup-saved-layout)))
+      (when (and old (not (equal? old name)) (buffer-known? old))
+        (buffer-set-local! old 'popup-return-layout #f)
+        (when (and (popup-open?) (not *popup-dismissing*))
+          (popup-stack-push! old)))
+      (popup-stack-drop! name)
+      (set-frame-local! 'popup-buffer name)
+      (when layout (buffer-set-local! name 'popup-return-layout layout)))
+    (popup-float! name side size)
+    (if (popup-open?)
+        (let* ((w (popup-window))
+               (was (window-buffer w)))
+          (window-set-buffer! w name)
+          (when (and was (not (equal? was name)) (buffer-exists? was))
+            (popup-float! was #f)))
+        (begin
+          (popup--split-for side size)
+          (let ((w (active-window)))
+            (set-frame-local! 'popup-window w)
+            (window-set-buffer! w name)
+            (select-window! me))))
+    (window-state-changed!)
+    (popup-window)))
+
 (define (popup-show name)
   (popup-show-on name
     (or (display-rule-param name 'side)
@@ -5172,18 +5205,21 @@
 
 ;; the side is chosen once, when the popup opens; a peek that replaces
 ;; another keeps the side the popup has, so the popup never flips
+;; A peek is a preview: it takes no focus. The popup shows it without
+;; a selection change, and the focus commands pass it by.
 (define (peek-show! name)
   (let* ((me (active-window))
          (old (and (popup-open?) (popup-buffer)))
-         (side (or (and old (popup-side-of old)) (peek-side-away-from me))))
-    (popup-show-on name side (plist-get *display-buffer-defaults* 'size))
-    (let ((win (active-window)))
-      (when (and old (not (equal? old name)) (buffer-exists? old))
-        (popup-float! old #f))
-      (select-window! me)
-      (set-frame-local! 'peek-window win)
-      (peek-drop-others! name)
-      win)))
+         (side (or (and old (popup-side-of old)) (peek-side-away-from me)))
+         (win (popup-show-quietly name side (plist-get *display-buffer-defaults* 'size))))
+    (set-frame-local! 'peek-window win)
+    (peek-drop-others! name)
+    win))
+
+;; a window the focus commands may land on: not a peek's
+(define (window-focusable? w)
+  (let ((b (window-buffer w)))
+    (not (and b (peek-buffer? b)))))
 
 ;; the peek verb. OPEN makes or finds the buffer and returns its name.
 ;; KNOWN is the name it will have, so "did the peek make it" is answered
@@ -8837,7 +8873,14 @@
 
 (define-command "other-window" "Select another window in cyclic order"
   (lambda ()
-    (other-window!)
+    ;; a peek's window is passed by: a preview takes no focus
+    (let ((start (active-window)))
+      (other-window!)
+      (let loop ((n (length (window-list))))
+        (when (and (> n 0) (not (window-focusable? (active-window)))
+                   (not (equal? (active-window) start)))
+          (other-window!)
+          (loop (- n 1)))))
     (chat-snap-to-input!)))
 (for-each
   (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
@@ -8888,14 +8931,23 @@
                (chat-snap-to-input!))
         (message (string-append "No window " (symbol->string dir))))))
 
+;; a move that lands on a peek's window goes back: a preview takes no
+;; focus. M-<down> scrolls it; RET on its row opens it.
+(define (windmove-focusable! dir)
+  (let ((from (active-window)))
+    (windmove! dir)
+    (unless (window-focusable? (active-window))
+      (select-window! from)
+      (message "A peek: RET on its row opens it, M-<down> scrolls it"))))
+
 (define-command "windmove-left" "Select the window to the left"
-  (lambda () (windmove! 'left)))
+  (lambda () (windmove-focusable! 'left)))
 (define-command "windmove-right" "Select the window to the right"
-  (lambda () (windmove! 'right)))
+  (lambda () (windmove-focusable! 'right)))
 (define-command "windmove-up" "Select the window above"
-  (lambda () (windmove! 'up)))
+  (lambda () (windmove-focusable! 'up)))
 (define-command "windmove-down" "Select the window below"
-  (lambda () (windmove! 'down)))
+  (lambda () (windmove-focusable! 'down)))
 
 ;; Swap this pane's buffer with the directional neighbor's and follow it
 ;; (Emacs windmove-swap-states-*)

@@ -5012,30 +5012,42 @@
 ;;;   ONE peek at a time. The next peek replaces the last one. A buffer
 ;;;     that a peek MADE is killed when it is replaced. A buffer that
 ;;;     existed before the peek is only shown, never killed.
-;;;   THE PEEK WINDOW is the window that shows the current peek. With
-;;;     none, a peek splits beside the selected window. A kept buffer
-;;;     keeps its window: the next peek splits beside it.
-;;;   KEEP is one buffer-local going away: RET again on the row, an edit,
-;;;     or M-x keep-buffer. Nothing else moves.
+;;;   THE PEEK WINDOW is the popup. A peek is a look, and the popup is
+;;;     where a look goes; the windows stay as they are. A popup buffer
+;;;     of its own waits under the peek and comes back when it goes.
+;;;   A PEEK IS READ-ONLY (peek-mode, a minor mode): a stray key changes
+;;;     nothing, and q dismisses it.
+;;;   OPEN is M-RET on the row (peek-open!): the mark goes, the popup
+;;;     gives the buffer up, and the selected window shows it as a visit
+;;;     would. KEEP alone is M-x keep-buffer, or a change from outside
+;;;     the keyboard.
 ;;;   A replaced peek leaves a row in RECENT. The switcher lists recent
 ;;;     below the live buffers, and RET there peeks it again.
 ;;;
-;;; The mark is 'peek. It is not saved: a peek that is on screen at a
-;;; restart comes back as an ordinary buffer, which is the safe error.
+;;; The mark is the minor mode, and it is saved with the buffer: a peek
+;;; on screen at a restart comes back as a peek, in the popup, read-only.
+
+;; The mode. A peek is read-only: a look changes nothing, and the
+;; read-only keymap gives it q. The setup runs on enable and again on a
+;; restore, so it records the buffer's own state once; keep puts that
+;; state back.
+(register-minor-mode! "peek-mode"
+  (lambda (buf)
+    (unless (buffer-local buf 'peek-own-read-only)
+      (buffer-set-local! buf 'peek-own-read-only
+        (if (buffer-read-only? buf) 'yes 'no)))
+    (buffer-set-read-only! buf #t))
+  (lambda (buf)
+    (buffer-set-read-only! buf (equal? (buffer-local buf 'peek-own-read-only) 'yes))
+    (buffer-set-local! buf 'peek-own-read-only #f)))
+
+(mode-doc! "peek-mode"
+  "A look at a buffer without keeping it: read-only, in the popup. q dismisses it; M-RET on the row opens it as your own.")
 
 (define (peek-buffer? name)
-  (and (string? name) (buffer-exists? name) (buffer-local name 'peek) #t))
+  (and (string? name) (buffer-exists? name) (minor-mode-on? name "peek-mode")))
 
 (define (peek-buffers) (filter peek-buffer? (buffer-list)))
-
-;; the window that shows a peek, other than ME
-(define (peek-window me)
-  (let loop ((ws (window-list)))
-    (cond ((null? ws) #f)
-          ((and (not (equal? (car (car ws)) me))
-                (peek-buffer? (cadr (car ws))))
-           (car (car ws)))
-          (else (loop (cdr ws))))))
 
 ;;; recent: what a peek showed and let go. An entry is
 ;;; (LABEL KIND KEY TIME): KIND names the reviver, KEY is what it needs.
@@ -5112,69 +5124,25 @@
 ;; leaves no mark behind, and the next peek must still land in the
 ;; same window instead of splitting again. Keeping the buffer in the
 ;; slot releases the window (peek-keep!).
-;; any work window that is not ME: the popup is not one, and neither is
-;; the window the peek is asked from
-(define (other-work-window-id me)
-  (let ((popup (and (popup-open?) (popup-window))))
-    (let loop ((ws (window-list)))
-      (cond ((null? ws) #f)
-            ((and (not (equal? (car (car ws)) me))
-                  (not (equal? (car (car ws)) popup)))
-             (car (car ws)))
-            (else (loop (cdr ws)))))))
-
-;; Where a peek goes, in order: the window the last peek used, a window
-;; that shows a peek, the window a popup covers when the peek is asked
-;; from the popup, the other window. With no other window the answer is
-;; #f, and the peek opens the popup: a peek splits nothing.
-(define (peek-slot me)
-  (let ((w (frame-local 'peek-window)))
-    (cond ((and w (window-exists? w) (not (equal? w me))) w)
-          ((peek-window me) (peek-window me))
-          ;; a popup floats over the layout: a peek from it goes to the
-          ;; window it covers, never to a split beside the popup
-          ((and (popup-open?) (equal? me (popup-window))) (other-window-id me))
-          (else (other-work-window-id me)))))
-
-;; show NAME as the peek in the other window, or in the popup when the
-;; selected window is the only one. The selected window and its point
-;; stay. Returns the window used.
+;; show NAME as the peek: in the popup, always. A peek is a look, and
+;; the popup is where a look goes; the windows stay as they are, and the
+;; selected window and its point stay. The buffer the popup showed
+;; stops floating; a popup buffer of its own (the messages) waits under
+;; the peek and comes back when the peek is dismissed. Returns the popup
+;; window.
 (define (peek-show! name)
-  (let* ((me (active-window))
-         (already (window-showing-other name me))
-         (slot (or already (peek-slot me)))
-         (popup (and (popup-open?) (popup-window))))
-    ;; the buffer the slot showed loses its wire: a buffer that existed
-    ;; before the peek is not killed, and it must not keep pointing
-    (let ((old (and slot (window-buffer slot))))
+  (let ((me (active-window))
+        (old (and (popup-open?) (popup-buffer))))
+    (popup-show-on name (popup-default-side)
+                   (plist-get *display-buffer-defaults* 'size))
+    (let ((win (active-window)))
       (when (and old (not (equal? old name)) (buffer-exists? old))
-        (buffer-set-local! old 'peek-from #f)))
-    (let ((win (cond
-                 ;; the slot is the popup: the buffer floats there, and
-                 ;; the one it replaces stops floating
-                 ((and slot (equal? slot popup))
-                  (let ((old (window-buffer slot)))
-                    (popup-show-on name (popup-default-side)
-                                   (plist-get *display-buffer-defaults* 'size))
-                    ;; after the show: un-floated first, the popup read as
-                    ;; closed and the show split a new window
-                    (when (and old (not (equal? old name))) (popup-float! old #f))
-                    (select-window! me)
-                    slot))
-                 ;; a look leaves no trace: the preview primitive shows
-                 ;; NAME without touching the MRU ring or the window's
-                 ;; history
-                 (slot (window-preview-buffer! name slot) slot)
-                 (else
-                  (popup-show-on name (popup-default-side)
-                                 (plist-get *display-buffer-defaults* 'size))
-                  (let ((w (active-window)))
-                    (select-window! me)
-                    w)))))
+        (popup-float! old #f)
+        ;; replaced, it no longer points at the window it came from
+        (buffer-set-local! old 'peek-from #f))
+      (select-window! me)
       (set-frame-local! 'peek-window win)
-      ;; the wire: the page draws a line from the window the peek was
-      ;; asked from to the window that shows it. The local rides the
-      ;; buffer for the render and is not saved: a restart has no wire.
+      ;; the window the peek was asked from, for the page
       (desktop-skip! name 'peek-from)
       (buffer-set-local! name 'peek-from me)
       (peek-drop-others! name)
@@ -5193,13 +5161,7 @@
       (unless (equal? (window-buffer me) here)
         (window-preview-buffer! here me))
       (select-window! me)
-      (unless existed?
-        (buffer-set-local! buf 'peek #t)
-        ;; a peek is a look: read-only, so q dismisses it from the
-        ;; read-only keymap and a stray key changes nothing. Keep gives
-        ;; the buffer back the state it had.
-        (buffer-set-local! buf 'peek-was-read-only (buffer-read-only? buf))
-        (buffer-set-read-only! buf #t))
+      (unless existed? (enable-minor-mode! buf "peek-mode"))
       (peek-show! buf))
     buf))
 
@@ -5217,13 +5179,42 @@
         'keep)
       (begin (peek! known open) 'peek)))
 
+;; RET on a row: peek KNOWN, or open it when it is the peek on screen
+(define (peek-or-open! known open)
+  (if (and (string? known) (peek-buffer? known) (window-showing known))
+      (peek-open! known open)
+      (begin (peek! known open) 'peek)))
+
+;; dismiss every peek on screen: the popup gives it up and the buffer
+;; goes to recent. #t when there was one.
+(define (peek-dismiss!)
+  (let ((shown (filter window-showing (peek-buffers))))
+    (for-each (lambda (p)
+                (when (and (popup-open?) (equal? (popup-buffer) p))
+                  (popup-dismiss!))
+                (peek-drop! p))
+              shown)
+    (pair? shown)))
+
+;; open KNOWN as a buffer of your own, here: the popup gives it up, the
+;; mark goes, and the selected window shows it as a visit would. Not a
+;; peek yet, it is an ordinary open.
+(define (peek-open! known open)
+  (if (and (string? known) (peek-buffer? known))
+      (let ((me (active-window)))
+        (peek-keep! known)
+        (when (and (popup-open?) (equal? (popup-buffer) known))
+          (popup-dismiss!))
+        (when (window-exists? me) (select-window! me))
+        (switch-to-buffer! known)
+        'open)
+      (begin (open) 'open)))
+
 (define (peek-keep! name)
   (when (peek-buffer? name)
-    (buffer-set-local! name 'peek #f)
-    ;; kept, it is a buffer of its own: no wire, and its own read-only state
+    (disable-minor-mode! name "peek-mode")
+    ;; kept, it is a buffer of its own: no wire
     (buffer-set-local! name 'peek-from #f)
-    (buffer-set-read-only! name (and (buffer-local name 'peek-was-read-only) #t))
-    (buffer-set-local! name 'peek-was-read-only #f)
     ;; a kept buffer keeps its window: the slot moves on
     (let ((w (frame-local 'peek-window)))
       (when (and w (equal? (window-buffer w) name))
@@ -5265,7 +5256,13 @@
 (public! 'peek!
   "(peek! KNOWN OPEN) — show the buffer OPEN returns beside the selected window as a peek; KNOWN is its name, so a buffer that already existed is only shown and never killed; the next peek replaces it")
 (public! 'peek-or-keep!
-  "(peek-or-keep! KNOWN OPEN) — RET twice: peek KNOWN, or keep it and go there when it is the peek on screen")
+  "(peek-or-keep! KNOWN OPEN) — peek KNOWN, or keep it and go there when it is the peek on screen (browse's M-RET twice)")
+(public! 'peek-or-open!
+  "(peek-or-open! KNOWN OPEN) — RET on a row: peek KNOWN, or open it as your own when it is the peek on screen")
+(public! 'peek-dismiss!
+  "(peek-dismiss!) — dismiss every peek on screen; #t when there was one")
+(public! 'peek-open!
+  "(peek-open! KNOWN OPEN) — open KNOWN as your own in the selected window: a peek is kept and the popup gives it up; not a peek yet, OPEN runs")
 (public! 'peek-file!
   "(peek-file! PATH) — peek the file at PATH")
 (public! 'peek-keep!
@@ -8170,7 +8167,7 @@
                       (substring path (+ 1 (string-length root)) (string-length path)))
                      (else (abbreviate-file-name path)))))
     ;; a peek says so where the name is: the one mark the feature has
-    (if (buffer-local buf 'peek)
+    (if (peek-buffer? buf)
         (string-append "peek · " name)
         name)))
 

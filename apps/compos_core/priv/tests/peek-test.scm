@@ -1,8 +1,8 @@
 ;;; peek-test.scm --- editor.scm's peek: look at a buffer without keeping it.
 ;;;
-;;; A peek shows beside the selected window. The next peek replaces it
-;;; and kills what the first peek made. A buffer that existed before is
-;;; only shown. RET twice keeps. q closes the peek and its window. A
+;;; A peek shows in the popup, read-only. The next peek replaces it and
+;;; kills what the first peek made. A buffer that existed before is only
+;;; shown. RET again, or M-RET, opens it as your own. q dismisses it. A
 ;;; replaced peek leaves a row in recent, and the switcher lists it.
 
 (domain! 'testing)
@@ -29,8 +29,8 @@
     (run-command "delete-other-windows")
     out))
 
-(deftest 'a-peek-shows-beside-and-the-selected-window-stays
-  "the file is on screen, marked, and the reader did not move"
+(deftest 'a-peek-shows-in-the-popup-and-the-selected-window-stays
+  "the file is in the popup, marked, read-only, and the reader did not move"
   (lambda ()
     (t--peek-with
       (lambda ()
@@ -40,8 +40,9 @@
           (check-equal! (current-buffer) "*scratch*" "the reader stays put")
           (check-equal! (active-window) me "in the same window")
           (check-true! (peek-buffer? a) "the file is a peek")
-          (check-true! (and (window-showing a) #t) "shown in a window")
-          (check-false! (equal? (window-showing a) me) "which is another one")
+          (check-true! (popup-open?) "the popup is open")
+          (check-equal! (popup-buffer) a "and shows the file")
+          (check-true! (buffer-read-only? a) "read-only")
           (check-contains! (buffer-modeline-name a) "peek" "and its modeline says so"))))))
 
 (deftest 'the-next-peek-replaces-the-last-and-kills-what-peek-made
@@ -88,28 +89,30 @@
             (check-true! (buffer-exists? a) "a existed before: not killed")
             (check-false! (peek-buffer? a) "and was never a peek")))))))
 
-(deftest 'ret-twice-keeps-and-goes-there
-  "peek-or-keep!: the first call peeks, the second keeps and selects"
+(deftest 'ret-again-opens-the-peek-here
+  "peek-or-open!: the first call peeks, the second opens it as your own in the selected window"
   (lambda ()
     (t--peek-with
       (lambda ()
         (let ((a (t--peek-file "a.txt" "alpha\n"))
               (me (active-window)))
-          (check-equal! (peek-or-keep! a (lambda () (visit a))) 'peek "first: a peek")
+          (check-equal! (peek-or-open! a (lambda () (visit a))) 'peek "first: a peek")
           (check-true! (peek-buffer? a) "marked")
           (check-equal! (current-buffer) "*scratch*" "reader stayed")
-          (check-equal! (peek-or-keep! a (lambda () (visit a))) 'keep "second: kept")
+          (check-equal! (peek-or-open! a (lambda () (visit a))) 'open "second: opened")
           (check-false! (peek-buffer? a) "the mark is gone")
-          (check-equal! (current-buffer) a "and the reader went there")
+          (check-equal! (current-buffer) a "and the reader is in it")
+          (check-equal! (active-window) me "in the window the peek was asked from")
+          (check-false! (popup-open?) "the popup gave it up")
+          (check-false! (buffer-read-only? a) "writable")
           (check-false! (string-contains? (buffer-modeline-name a) "peek")
                         "the modeline is plain again")
-          ;; a kept buffer keeps its window: the next peek splits beside
-          (select-window! me)
+          ;; the next peek gets a fresh popup; the opened buffer stays put
           (let ((b (t--peek-file "b.txt" "beta\n")))
             (peek-file! b)
-            (check-true! (and (window-showing a) #t) "a still has its window")
-            (check-true! (and (window-showing b) #t) "b has one too")
-            (check-equal! (length (window-list)) 3 "three windows")))))))
+            (check-true! (popup-open?) "a fresh popup")
+            (check-equal! (popup-buffer) b "with the new peek")
+            (check-equal! (current-buffer) a "and the opened buffer stays where it is")))))))
 
 (deftest 'a-peek-is-read-only-and-keep-makes-it-writable
   "a look changes nothing; kept, the file is yours to edit"
@@ -212,11 +215,34 @@
             (check-equal! (dired-entry) "a.txt" "point is on the file")
             (run-command "dired-visit")
             (check-equal! (current-buffer) d "still in dired")
-            (check-true! (peek-buffer? a) "the file is a peek beside")
+            (check-true! (peek-buffer? a) "the file is a peek in the popup")
+            (check-equal! (popup-buffer) a "in the popup")
             (run-command "dired-visit")
-            (check-equal! (current-buffer) a "the second RET went there")
-            (check-false! (peek-buffer? a) "and kept it")
+            (check-equal! (current-buffer) a "the second RET opened it here")
+            (check-false! (peek-buffer? a) "and it is no peek")
+            (check-false! (popup-open?) "the popup gave it up")
             (buffer-kill! d)))))))
+
+(deftest 'dired-q-dismisses-the-peek-and-then-leaves
+  "q with a peek showing takes the peek; q with none takes dired"
+  (lambda ()
+    (t--peek-with
+      (lambda ()
+        (let ((a (t--peek-file "a.txt" "alpha\n")))
+          (dired-open t--peek-dir)
+          (let ((d (current-buffer)))
+            (let loop ((i 0))
+              (when (and (< i 20) (not (equal? (dired-entry) "a.txt")))
+                (list-move-in! d 1)
+                (loop (+ i 1))))
+            (run-command "dired-visit")
+            (check-true! (peek-buffer? a) "a peek shows")
+            (run-command "dired-quit")
+            (check-false! (buffer-exists? a) "q took the peek")
+            (check-false! (popup-open?) "and the popup")
+            (check-equal! (current-buffer) d "dired stays")
+            (run-command "dired-quit")
+            (check-false! (equal? (current-buffer) d) "q again leaves dired")))))))
 
 (deftest 'browse-m-ret-peeks-the-link-and-again-keeps-it
   "the page beside the page"

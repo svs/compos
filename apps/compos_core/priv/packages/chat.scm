@@ -544,6 +544,8 @@
 (define (chat-context &optional buf)
   (let* ((chat (or buf (current-buffer)))
          (group (buffer-group chat))
+         ;; This is the agent's full ambient context, including quiet buffers.
+         ;; User-facing lists apply buffer-context-only? at their own boundary.
          (members (if group (group-buffers group) '()))
          (companions (if group (group-docs group) '())))
     (list

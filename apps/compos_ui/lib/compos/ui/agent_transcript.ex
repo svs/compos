@@ -19,7 +19,15 @@ defmodule Compos.Ui.AgentTranscript do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="ag-scroll">
+    <div
+      id={"ag-scroll-#{@win}"}
+      class="ag-scroll"
+      phx-hook="AgentScroll"
+      data-buf={@buf}
+      data-win={@win}
+      data-stick={to_string(@stick)}
+      data-scroll-top={@scroll_top}
+    >
       <%= for b <- @blocks do %>
         <%= case b.kind do %>
           <% :user -> %>

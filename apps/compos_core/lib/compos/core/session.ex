@@ -1112,6 +1112,8 @@ defmodule Compos.Core.Session do
         "(eval-resolve! TOKEN VALUE) — answer the deferred eval named by TOKEN with VALUE.",
       "with-edit-author" =>
         "(with-edit-author AUTHOR THUNK) — run THUNK; buffer edits it makes are attributed to the string AUTHOR.",
+      "current-edit-author" =>
+        "(current-edit-author) — the caller process's edit author string, or #f",
       "with-current-buffer" =>
         "(with-current-buffer BUF THUNK) — run THUNK with BUF current without displaying it or changing any window.",
       "with-scheme-lock" =>
@@ -2226,6 +2228,7 @@ defmodule Compos.Core.Session do
             else: Process.delete(:compos_edit_author)
         end
       end,
+      "current-edit-author" => fn [] -> Process.get(:compos_edit_author) || false end,
       # Emacs' logical current-buffer binding, deliberately separate from
       # window display. Tool evaluation uses this so visit/switch operations
       # can establish the buffer commands act on without hijacking the user's

@@ -63,6 +63,10 @@ defmodule Compos.Ui.AgentViewTest do
     {:ok, view, html} = live(conn, "/")
 
     assert html =~ "agent-view"
+    # The scroll lifecycle belongs to the async transcript component, so its
+    # mounted/updated callbacks see the child's final scroll height.
+    assert has_element?(view, ~s(.ag-scroll[phx-hook="AgentScroll"][data-stick="true"]))
+    refute has_element?(view, ~s(.agent-view[phx-hook="AgentScroll"]))
     assert html =~ "ag-user"
     assert html =~ "profile redisplay"
     # markdown became HTML in the prose block

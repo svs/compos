@@ -3973,7 +3973,12 @@
   (let* ((name (expand-path (normalize-file-input path)))
          (new (not (buffer-known? name)))
          (buf (raw-find-file name)))
-    (when new (buffer-created! buf))
+    (when new
+      (buffer-created! buf)
+      ;; find-file is the quiet loading boundary used by agent read/edit
+      ;; tools. A real user visit below promotes this canonical buffer.
+      (when (boundp (quote buffer-context-only!))
+        (buffer-context-only! buf)))
     buf))
 
 (define (path-split input)
@@ -4325,6 +4330,9 @@
                     (if (equal? r 'absent) (message "(New remote file)"))
                     (current-buffer)))))))))
 
+(define (agent-edit-author? author)
+  (and (string? author) (string-prefix? "agent:" author)))
+
 (define (visit-apply-group! buf group existing)
   (when (and buf group)
     (if existing
@@ -4356,6 +4364,12 @@
                  (auto-mode path)
                  (run-hooks 'find-file-hook)
                  (current-buffer))))))
+    ;; A user visit reveals the canonical buffer with all unsaved state.
+    ;; Agent visits keep context-only buffers out of user-facing lists.
+    (when (and buf
+               (boundp (quote buffer-promote!))
+               (not (agent-edit-author? (current-edit-author))))
+      (buffer-promote! buf))
     ;; A named destination overrides the inherited frame group for new work.
     ;; Existing work adds the destination without losing its memberships.
     (visit-apply-group! buf group existing)
@@ -4435,7 +4449,10 @@
 ;; Internals (space-prefixed) stay hidden, as ibuffer hides them.
 (define (buffer-candidates-all)
   (annotate 'buffer
-    (filter (lambda (b) (not (string-prefix? " " b))) (buffer-list-mru))))
+    (filter (lambda (b)
+              (and (not (string-prefix? " " b))
+                   (not (buffer-context-only? b))))
+            (buffer-list-mru))))
 
 ;; current excluded: first candidate = the buffer you just left, so
 ;; C-x b RET toggles between two buffers (Emacs buffer ring)
@@ -4483,7 +4500,7 @@
   (cons (group-container-candidate g)
         (annotate 'buffer
           (filter (lambda (b) (not (string-prefix? " " b)))
-                  (group-buffers-mru g)))))
+                  (group-user-buffers-mru g)))))
 
 ;; C-RET: the picked buffer's CONTEXT comes up — its group, or its
 ;; project materialized as one. A project is also a group: the first
@@ -4518,8 +4535,10 @@
 ;; group's card and its buffers all match the group's name, so one
 ;; search shows the context and its contents together.
 (define (switch-history-pool my-group)
-  (let* ((bufs (filter (lambda (b) (not (string-prefix? " " b)))
-                       (buffer-list-mru)))
+  (let* ((bufs (filter (lambda (b)
+                              (and (not (string-prefix? " " b))
+                                   (not (buffer-context-only? b))))
+                            (buffer-list-mru)))
          (annotated (annotate 'buffer bufs)))
     (let loop ((rows (mru-list)) (out '()))
       (if (null? rows)
@@ -4668,6 +4687,28 @@
     (buffer-kill-raw! name)
     (when repair (repair))))
 
+(define (kill-buffer-confirm! target done)
+  ;; The high-level named-buffer kill: process policy, modified-file
+  ;; confirmation, user feedback, and completion all live here.
+  (let* ((finish (lambda (killed?)
+                   (when done (done killed?))))
+         (kill! (lambda ()
+                  (if (process-running? target) (process-kill! target))
+                  (buffer-kill! target)
+                  (message (string-append "Killed " target))
+                  (finish #t))))
+    (cond
+      ((not (buffer-known? target))
+       (message (string-append "Buffer already gone: " target))
+       (finish #f))
+      ((and (buffer-path target) (buffer-modified? target))
+       (y-or-n (string-append "Buffer " target " modified; kill anyway?")
+               kill!
+               (lambda ()
+                 (message "Not killed")
+                 (finish #f))))
+      (else (kill!)))))
+
 (define-command "kill-buffer" "Kill a buffer, defaulting to the current one"
   (lambda ()
     (let ((cur (current-buffer)))
@@ -4675,19 +4716,8 @@
       (minibuffer-read (string-append "Kill buffer (default " cur "): ")
         (cons (list cur "current") (buffer-candidates))
         (lambda (name)
-          (let* ((target (if (equal? name "") cur name))
-                 (kill! (lambda ()
-                          ;; a live process (shell, tail) dies with its buffer
-                          (if (process-running? target) (process-kill! target))
-                          (buffer-kill! target)
-                          (message (string-append "Killed " target)))))
-            ;; Emacs asks before it throws away edits to a file. A listing
-            ;; reports itself as modified and has no path, so it goes quietly.
-            (if (and (buffer-path target) (buffer-modified? target))
-                (y-or-n (string-append "Buffer " target " modified; kill anyway?")
-                        kill!
-                        (lambda () (message "Not killed")))
-                (kill!))))))))
+          (kill-buffer-confirm! (if (equal? name "") cur name)
+                                (lambda (killed?) #t)))))))
 
 ;;; --- display-buffer & popups (popper) ----------------------------------------
 ;;; *display-buffer-alist* says WHERE a buffer goes. It is Emacs' alist of
@@ -9119,8 +9149,10 @@
   (unless (member (last-command) '("next-buffer" "previous-buffer"))
     (set! *buffer-cycle-ring*
       (cons (current-buffer)
-            (filter (lambda (b) (and (not (string-prefix? " " b))
-                                     (not (equal? b (current-buffer)))))
+            (filter (lambda (b)
+                      (and (not (string-prefix? " " b))
+                           (not (buffer-context-only? b))
+                           (not (equal? b (current-buffer)))))
                     (buffer-list-mru))))
     (set! *buffer-cycle-pos* 0))
   (let ((n (length *buffer-cycle-ring*)))
@@ -9530,6 +9562,8 @@
 (public! 'buffer-create "(buffer-create NAME) — create if missing")
 (effects! '(destroy))
 (public! 'buffer-kill! "(buffer-kill! NAME) — kill a buffer; repoint its windows first")
+(public! 'kill-buffer-confirm! "(kill-buffer-confirm! NAME DONE) — confirm before discarding modified file text, then call DONE with #t when killed")
+(catalog-meta! 'function "kill-buffer-confirm!" 'domain 'buffers 'effects '(destroy))
 (effects! '(write))
 (public! 'buffer-append! "(buffer-append! NAME TEXT) — append; the usual way to add text")
 (public! 'buffer-insert! "(buffer-insert! NAME BYTE-POS TEXT)")
@@ -9545,6 +9579,8 @@
 (public! 'buffer-provenance-stop! "(buffer-provenance-stop! NAME [ACTOR REASON POLICY]) -> stop without deleting history")
 (public! 'buffer-provenance-checkpoint! "(buffer-provenance-checkpoint! NAME) -> close the current changeset")
 (public! 'with-edit-author "(with-edit-author AUTHOR THUNK) — attribute THUNK's buffer edits to AUTHOR")
+(public! 'current-edit-author "(current-edit-author) — the caller process's edit author string, or #f")
+(catalog-meta! 'function "current-edit-author" 'domain 'buffers 'effects '(read))
 (effects! '(read))
 (public! 'buffer-path "(buffer-path NAME) -> file path or #f")
 (public! 'buffer-modified? "(buffer-modified? NAME) -> unsaved changes?")

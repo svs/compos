@@ -318,6 +318,13 @@ defmodule Compos.Ui.Layouts do
             content: "¶"; color: var(--dim-fg, #8a857a); opacity: .45;
             font-size: .85em; user-select: none; pointer-events: none;
           }
+          /* an empty line carries a <br> to hold the caret. An inline mark
+             after that <br> starts a second line box and makes the row twice
+             as tall. Take the mark out of the flow and paint it at column 0. */
+          .buf[data-ws="true"] .line-content:has(> .empty-row) { position: relative; }
+          .buf[data-ws="true"] .line-content:has(> .empty-row)::after {
+            position: absolute; left: 0; top: 0;
+          }
           /* an X post island: the card in the URL's place */
           /* inline-level on purpose: the browser's caret motion walks a line
              of inline boxes; a block inside the row throws it off by lines */

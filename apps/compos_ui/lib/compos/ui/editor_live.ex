@@ -1742,6 +1742,19 @@ defmodule Compos.Ui.EditorLive do
         <span class="x-card" contenteditable="false" data-len={@len}><%= case @card do %><% {:ok, html} -> %>{Phoenix.HTML.raw(html)}<% _ -> %><span class="x-pending">{@txt}</span><% end %></span>
         """
 
+      cls =~ "youtube-embed" and youtube_id(txt) ->
+        id = youtube_id(txt)
+
+        assigns =
+          assign(assigns,
+            len: byte_size(txt),
+            thumbnail: youtube_thumbnail(id)
+          )
+
+        ~H"""
+        <a class="youtube-card youtube-island" href={@txt} target="_blank" rel="noopener noreferrer" contenteditable="false" data-len={@len} aria-label="Watch this video on YouTube"><img src={@thumbnail} alt="YouTube video thumbnail" loading="lazy" /><span class="youtube-play" aria-hidden="true">▶</span></a>
+        """
+
       true ->
         ~H|<span class={@cls}>{@txt}</span>|
     end
@@ -2155,6 +2168,7 @@ defmodule Compos.Ui.EditorLive do
       hidden_lines: leaf.hidden_lines,
       # a pasted image is an absolute path, and a browser will not load one
       image_src: &local_image_src/1,
+      url_embed: &youtube_embed_html/1,
       csv_source: csv_source_reader(leaf.buffer)
     ]
 
@@ -2754,6 +2768,12 @@ defmodule Compos.Ui.EditorLive do
     .tw-text{margin:0 0 10px}
     .tweet .tw-media{width:100%;border-radius:8px;margin:2px 0 8px}
     .tw-date{color:#{dim};font-size:13px;text-decoration:none}
+    .youtube-card{position:relative;display:block;max-width:40em;margin:12px 0;
+      color:white;text-decoration:none;border-radius:8px;overflow:hidden;background:#111}
+    .youtube-card img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:0}
+    .youtube-play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+      display:grid;place-items:center;width:64px;height:44px;border-radius:12px;
+      background:#f00;color:white;font:24px/1 sans-serif;box-shadow:0 2px 10px #0008}
     ::highlight(region){background:color-mix(in srgb,#{accent} 32%,transparent)}
     /* The caret is an inline box with a painted left border and no content,
        so it is invisible to line breaking: an inline-block is an atomic
@@ -3083,6 +3103,7 @@ defmodule Compos.Ui.EditorLive do
       href != url -> [node]
       image_url?(url) -> [{"img", [{"src", url}, {"alt", ""}], [], meta} | tail]
       tweet_url?(url) -> tweet_card(url, meta) ++ tail
+      youtube_id(url) -> [youtube_card_node(url, youtube_id(url), meta) | tail]
       true -> [node]
     end
   end
@@ -3124,6 +3145,67 @@ defmodule Compos.Ui.EditorLive do
   end
 
   defp tweet_url?(url), do: Regex.match?(@tweet_re, url)
+
+  defp youtube_id(url) do
+    uri = URI.parse(url)
+    host = uri.host && String.downcase(uri.host)
+    path = String.split(uri.path || "", "/", trim: true)
+
+    id =
+      cond do
+        host in ["youtu.be", "www.youtu.be"] ->
+          List.first(path)
+
+        host in ["youtube.com", "www.youtube.com", "m.youtube.com"] and path == ["watch"] ->
+          youtube_query_id(uri.query)
+
+        host in ["youtube.com", "www.youtube.com", "m.youtube.com"] and
+            List.first(path) in ["shorts", "live", "embed"] ->
+          Enum.at(path, 1)
+
+        true ->
+          nil
+      end
+
+    if is_binary(id) and Regex.match?(~r/\A[A-Za-z0-9_-]{11}\z/, id), do: id
+  end
+
+  defp youtube_query_id(nil), do: nil
+
+  defp youtube_query_id(query) do
+    URI.decode_query(query)["v"]
+  rescue
+    ArgumentError -> nil
+  end
+
+  defp youtube_card_node(url, id, meta) do
+    {"a",
+     [
+       {"class", "youtube-card"},
+       {"href", url},
+       {"target", "_blank"},
+       {"rel", "noopener noreferrer"},
+       {"aria-label", "Watch this video on YouTube"}
+     ],
+     [
+       {"img", [{"src", youtube_thumbnail(id)}, {"alt", "YouTube video thumbnail"}], [], meta},
+       {"span", [{"class", "youtube-play"}, {"aria-hidden", "true"}], ["▶"], meta}
+     ], meta}
+  end
+
+  defp youtube_embed_html(url) do
+    case youtube_id(url) do
+      nil ->
+        nil
+
+      id ->
+        safe_url = url |> html_escape() |> String.replace("\"", "&quot;")
+
+        ~s(<a class="youtube-card" href="#{safe_url}" target="_blank" rel="noopener noreferrer" aria-label="Watch this video on YouTube"><img src="#{youtube_thumbnail(id)}" alt="YouTube video thumbnail"><span class="youtube-play" aria-hidden="true">▶</span></a>)
+    end
+  end
+
+  defp youtube_thumbnail(id), do: "https://i.ytimg.com/vi/#{id}/hqdefault.jpg"
 
   defp tweet_card(url, meta) do
     case Compos.Ui.Oembed.card(url) do

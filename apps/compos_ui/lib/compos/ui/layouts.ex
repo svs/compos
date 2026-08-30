@@ -343,6 +343,18 @@ defmodule Compos.Ui.Layouts do
           .x-card .tw-media { max-width: 100%; border-radius: 8px; margin-top: 8px; }
           .x-card .tw-date { color: var(--dim-fg, #8a857a); font-size: 12px; text-decoration: none; }
           .x-card .x-pending { color: var(--dim-fg, #8a857a); font-family: var(--font-mono); font-size: 12px; }
+          .youtube-card {
+            position: relative; display: inline-block; width: 100%; max-width: 640px;
+            margin: 6px 0; overflow: hidden; vertical-align: top;
+            border-radius: 8px; background: #111; color: white; text-decoration: none;
+          }
+          .youtube-card img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+          .youtube-play {
+            position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+            display: grid; place-items: center; width: 64px; height: 44px;
+            border-radius: 12px; background: #f00; color: white;
+            font: 24px/1 sans-serif; box-shadow: 0 2px 10px #0008;
+          }
           /* completion-at-point popup: inline card anchored under the prefix */
           .cap-pop {
             position: absolute; top: calc(100% + 3px); z-index: 15;

@@ -64,6 +64,13 @@
     (check-true! (t--md-has? '(0 35 "x-embed")) "the URL is the card")
     (t--md-done!)))
 
+(deftest 'a-line-that-is-one-youtube-url-draws-as-the-card
+  "the whole line wears youtube-embed and nothing else"
+  (lambda ()
+    (t--md-fresh! "https://youtu.be/dQw4w9WgXcQ?t=43\n")
+    (check-true! (t--md-has? '(0 33 "youtube-embed")) "the URL is the card")
+    (t--md-done!)))
+
 (deftest 'turning-the-mode-off-takes-the-paint-with-it
   "teardown clears the markdown overlays"
   (lambda ()

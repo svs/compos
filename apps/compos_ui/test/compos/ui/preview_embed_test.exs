@@ -3,6 +3,7 @@ defmodule Compos.Ui.PreviewEmbedTest do
 
   alias Compos.Ui.EditorLive
   alias Compos.Ui.Oembed
+  alias Compos.Core.Markdown.Html
 
   @faces %{}
   @pt ~s(<span class="pt"></span>)
@@ -42,6 +43,58 @@ defmodule Compos.Ui.PreviewEmbedTest do
 
     refute html =~ "<img"
     assert html =~ ~s(<a href="https://example.com/page")
+  end
+
+  test "a bare YouTube watch URL renders as a video card" do
+    url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=43"
+    html = EditorLive.preview_doc("markdown", url <> "\n", 0, @faces, false)
+
+    assert html =~ ~s(class="youtube-card")
+    assert html =~ ~s(src="https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg")
+    assert html =~ ~s(href="#{url}")
+  end
+
+  test "YouTube short, live, embed, and share URLs render as video cards" do
+    for url <- [
+          "https://youtube.com/shorts/dQw4w9WgXcQ",
+          "https://youtube.com/live/dQw4w9WgXcQ?feature=share",
+          "https://youtube.com/embed/dQw4w9WgXcQ",
+          "https://youtu.be/dQw4w9WgXcQ?t=43"
+        ] do
+      html = EditorLive.preview_doc("markdown", url <> "\n", 0, @faces, false)
+      assert html =~ ~s(class="youtube-card")
+    end
+  end
+
+  test "a written YouTube link stays a link" do
+    html =
+      EditorLive.preview_doc(
+        "markdown",
+        "[video](https://youtu.be/dQw4w9WgXcQ)\n",
+        0,
+        @faces,
+        false
+      )
+
+    refute html =~ ~s(class="youtube-card")
+    assert html =~ ">video</a>"
+  end
+
+  test "a malformed YouTube video id stays a link" do
+    url = "https://youtu.be/too-short"
+    html = EditorLive.preview_doc("markdown", url <> "\n", 0, @faces, false)
+
+    refute html =~ ~s(class="youtube-card")
+    assert html =~ ~s(href="#{url}")
+  end
+
+  test "the tree-sitter renderer accepts a bare URL card" do
+    url = "https://youtu.be/dQw4w9WgXcQ"
+    tree = [%{kind: :paragraph, start: 0, stop: byte_size(url), children: []}]
+
+    html = Html.render_tree(tree, url, [], url_embed: fn ^url -> "<youtube-card>" end)
+
+    assert html =~ "<youtube-card>"
   end
 
   test "an uncached tweet URL renders a pending card" do

@@ -62,6 +62,7 @@ defmodule Compos.Core.Markdown.Html do
     # absolute path, which a browser will not load: without this it drew
     # nothing.
     Process.put(:compos_md_image_src, opts[:image_src])
+    Process.put(:compos_md_url_embed, opts[:url_embed])
     Process.put(:compos_md_csv_source, opts[:csv_source])
     Process.put(:compos_md_hidden_lines, opts[:hidden_lines] || MapSet.new())
 
@@ -372,6 +373,26 @@ defmodule Compos.Core.Markdown.Html do
     {[~s(<div class="code-block">), code_head(lang, args), content, "</div>"], marks}
   end
 
+  # A caller can upgrade a paragraph that contains only one URL. The core
+  # renderer keeps URL policy outside this module and keeps source marks.
+  defp node(%{kind: :paragraph} = node, text, marks) do
+    source = binary_part(text, node.start, node.stop - node.start)
+    url = String.trim(source)
+
+    embedded =
+      case Process.get(:compos_md_url_embed) do
+        fun when is_function(fun, 1) -> fun.(url)
+        _ -> nil
+      end
+
+    if is_binary(embedded) do
+      {here, marks} = Enum.split_while(marks, fn {off, _} -> off < node.stop end)
+      {[embedded, Enum.map(here, &elem(&1, 1))], marks}
+    else
+      generic_node(node, text, marks)
+    end
+  end
+
   defp scheme_result_marks(node, text, "result-scheme", marks) do
     case Enum.find(node.children, &(&1.kind == :code_text)) do
       nil ->
@@ -595,7 +616,9 @@ defmodule Compos.Core.Markdown.Html do
     end
   end
 
-  defp node(node, text, marks) do
+  defp node(node, text, marks), do: generic_node(node, text, marks)
+
+  defp generic_node(node, text, marks) do
     case tag(node, text) do
       nil ->
         children(node, text, marks)

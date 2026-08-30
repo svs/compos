@@ -6,7 +6,8 @@
 ;;; on every line but the one point is on. A heading wears its level's
 ;;; face, and that face carries a size. An image URL wears img-embed and
 ;;; draws as the picture. A line that is one X post URL wears x-embed and
-;;; draws as the card.
+;;; draws as the card. A line that is one YouTube URL wears youtube-embed
+;;; and draws as a video card.
 ;;;
 ;;; preview-mode turns the paint on and off (markdown-paint-on!,
 ;;; markdown-paint-off!). morg-mode owns structure and the plain faces.
@@ -39,6 +40,8 @@
 (define md--link-pattern "\\[([^\\]\n]+)\\]\\(([^)\n]+)\\)")
 (define md--image-pattern "!\\[([^\\]\n]*)\\]\\(([^)\n]+)\\)")
 (define md--x-pattern "^https://(x|twitter)\\.com/[A-Za-z0-9_]+/status/[0-9]+/?$")
+(define md--youtube-pattern
+  "^https://((www|m)\\.)?(youtube\\.com/(watch\\?[^ \\t]*v=[A-Za-z0-9_-]{11}[^ \\t]*|(shorts|live|embed)/[A-Za-z0-9_-]{11}[^ \\t]*)|youtu\\.be/[A-Za-z0-9_-]{11}[^ \\t]*)$")
 
 ;; [text](url): the text is the link; the brackets and the target step
 ;; back. An image's link is not a link.
@@ -137,6 +140,8 @@
       ;; re-find* answers '() for no match, and '() is true: ask null?
       ((not (null? (re-find* md--x-pattern line)))
        (list (list start (+ start len) "x-embed")))
+      ((not (null? (re-find* md--youtube-pattern line)))
+       (list (list start (+ start len) "youtube-embed")))
       (else
        (append
          (md--block-marker start line)

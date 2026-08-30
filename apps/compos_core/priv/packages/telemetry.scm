@@ -259,9 +259,43 @@
     (telemetry--toggle-filter! (current-buffer) "slow"
       (string-append ">=" (number->string telemetry-slow-ms) "ms"))))
 
+;;; --- following the work ------------------------------------------------------
+;;; The collector says when rows arrive, once a second at most. The list
+;;; follows only the work the user causes: a keystroke or an intent (a
+;;; traced row) and a Scheme job. Its own refresh leaves live rows, browser
+;;; rows, and a lane job named after this package; those never refresh it,
+;;; so a quiet editor draws nothing.
+
+(define (telemetry--cause? row)
+  (or (not (equal? (telemetry--trace row) ""))
+      (and (equal? (telemetry--layer row) "scheme")
+           (not (string-contains? (or (plist-get row 'label) "") "telemetry")))))
+
+;; the time of the newest row the user caused; ROWS arrive newest first
+(define (telemetry--newest-cause rows)
+  (let loop ((rs rows))
+    (cond ((null? rs) 0)
+          ((telemetry--cause? (car rs)) (or (plist-get (car rs) 'time-ms) 0))
+          (else (loop (cdr rs))))))
+
+(define (telemetry--mark-seen! buf)
+  (buffer-set-local! buf 'telemetry-seen
+    (telemetry--newest-cause (telemetry-events 50))))
+
 (define (telemetry-refresh!)
   (when (buffer-exists? *telemetry-buffer*)
+    (telemetry--mark-seen! *telemetry-buffer*)
     (list-refresh! *telemetry-buffer*)))
+
+;; the collector's notice (Compos.Core.Telemetry): refresh the list when
+;; it shows and a row the user caused arrived since the last draw
+(define (telemetry-arrived!)
+  (let ((buf *telemetry-buffer*))
+    (when (and (buffer-exists? buf) (window-showing buf))
+      (let ((newest (telemetry--newest-cause (telemetry-events 50)))
+            (seen (or (buffer-local buf 'telemetry-seen) 0)))
+        (when (> newest seen)
+          (telemetry-refresh!))))))
 
 (define-command "telemetry-refresh" "Refresh the telemetry list"
   (lambda () (telemetry-refresh!)))
@@ -324,10 +358,11 @@
   (lambda () (list-mode-show! "telemetry-mode")))
 
 ;;; --- the popup ---------------------------------------------------------------
-;;; The list is a modal in the center of the screen, the switcher's
-;;; geometry. One chord opens it with current rows and closes it again.
+;;; The list is a popup with the default geometry, as ibuffer is: a side
+;;; window, and the bottom edge on a compact frame. One chord opens it
+;;; with current rows and closes it again.
 
-(add-display-rule! "*Telemetry*" 'popup '(side center size 0.7))
+(add-display-rule! "*Telemetry*" 'popup)
 
 (define (telemetry-popup-open?)
   (and (popup-open?) (equal? (popup-buffer) *telemetry-buffer*)))
@@ -346,5 +381,7 @@
   "(telemetry-events [LIMIT]) — return recent events of every layer, newest first")
 (public! 'telemetry-refresh!
   "(telemetry-refresh!) — refresh the telemetry buffer when it exists")
+(public! 'telemetry-arrived!
+  "(telemetry-arrived!) — the collector's notice: redraw the shown list for work the user caused")
 (public! 'telemetry-popup-open?
   "(telemetry-popup-open?) — #t while the telemetry popup shows")

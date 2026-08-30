@@ -149,7 +149,41 @@
     (when (telemetry-popup-open?) (popup-close!))
     (run-command "telemetry-toggle")
     (check-true! (telemetry-popup-open?) "the popup shows the telemetry list")
-    (check-equal! (buffer-local *telemetry-buffer* 'window-class) "popup popup-center"
-                  "the list is a modal in the center")
+    (check-true! (string-prefix? "popup" (or (buffer-local *telemetry-buffer* 'window-class) ""))
+                 "the list is a popup window")
     (run-command "telemetry-toggle")
     (check-true! (not (telemetry-popup-open?)) "the same command closes it")))
+
+(deftest 'telemetry-follows-the-work-the-user-causes
+  "a traced row or a Scheme job is a cause; the list's own refresh is not"
+  (lambda ()
+    (check-true! (telemetry--cause? (list 'layer "browser" 'label "key a" 'tid "ab:1"))
+                 "a keystroke")
+    (check-true! (telemetry--cause? (list 'layer "scheme" 'label "command other-window"))
+                 "a command")
+    (check-true! (not (telemetry--cause? (list 'layer "scheme" 'label "call telemetry-arrived!")))
+                 "the notice itself")
+    (check-true! (not (telemetry--cause? (list 'layer "live" 'label "render")))
+                 "a render nobody traced")
+    (check-true! (not (telemetry--cause? (list 'layer "browser" 'label "client updated")))
+                 "the patch of the list")
+    (check-equal! (telemetry--newest-cause
+                    (list (list 'layer "live" 'label "render" 'time-ms 30)
+                          (list 'layer "scheme" 'label "task" 'time-ms 20)
+                          (list 'layer "scheme" 'label "task" 'time-ms 10)))
+                  20 "the newest cause, past the noise")
+    (check-equal! (telemetry--newest-cause '()) 0 "no rows")))
+
+(deftest 'telemetry-list-redraws-on-its-own-while-it-shows
+  "a Scheme task after the list opens reaches the rows without a refresh key"
+  (lambda ()
+    (when (telemetry-popup-open?) (popup-close!))
+    (run-command "telemetry")
+    (let ((before (length (list-entries *telemetry-buffer*))))
+      (let ((task (task-spawn (lambda () 7))))
+        (task-await task)
+        (task-cancel! task))
+      (check-true!
+        (wait-until (lambda () (> (length (list-entries *telemetry-buffer*)) before)) 3000 50)
+        "the list grew on its own"))
+    (popup-close!)))

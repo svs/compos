@@ -20,6 +20,8 @@ defmodule Compos.Core.Telemetry do
 
   use GenServer
 
+  alias Compos.Core.Session
+
   @events [
     [:compos, :lane, :job],
     [:compos, :scheme, :task],
@@ -30,6 +32,9 @@ defmodule Compos.Core.Telemetry do
   ]
   @handler {__MODULE__, :collector}
   @max_events 2_000
+  # rows arrive in bursts; Scheme hears about them at most this often
+  @notify_ms 1_000
+  @notify_fn "telemetry-arrived!"
 
   # the process-dictionary key that carries a trace id from the LiveView
   # event that set it to the refresh and the render that follow it, in the
@@ -131,7 +136,7 @@ defmodule Compos.Core.Telemetry do
   @impl true
   def init(_opts) do
     :ok = attach()
-    {:ok, %{events: :queue.new(), size: 0}}
+    {:ok, %{events: :queue.new(), size: 0, notify: nil}}
   end
 
   defp attach do
@@ -161,8 +166,8 @@ defmodule Compos.Core.Telemetry do
     {:reply, events, state}
   end
 
-  def handle_call(:clear, _from, _state) do
-    {:reply, :ok, %{events: :queue.new(), size: 0}}
+  def handle_call(:clear, _from, state) do
+    {:reply, :ok, %{state | events: :queue.new(), size: 0}}
   end
 
   def handle_call(:reattach, _from, state) do
@@ -177,7 +182,34 @@ defmodule Compos.Core.Telemetry do
 
   def handle_info({:row, row}, state), do: {:noreply, put(state, row)}
 
+  # One notice per burst. The Scheme side decides what to do with it
+  # (packages/telemetry.scm telemetry-arrived!); this process only says
+  # that rows arrived, and never waits for the answer.
+  def handle_info(:notify, state) do
+    if Session.ready?() do
+      Task.start(fn ->
+        try do
+          Session.call_named(@notify_fn, [], nil, 5_000)
+        catch
+          _, _ -> :ok
+        end
+      end)
+    end
+
+    {:noreply, Map.put(state, :notify, nil)}
+  end
+
+  # Map.get and Map.put: a hot swap keeps the state of the running
+  # process, and a state from before this key has none
+  defp arm(state) do
+    case Map.get(state, :notify) do
+      nil -> Map.put(state, :notify, Process.send_after(self(), :notify, @notify_ms))
+      _ -> state
+    end
+  end
+
   defp put(state, row) do
+    state = arm(state)
     events = :queue.in(row, state.events)
     size = state.size + 1
 

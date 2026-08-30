@@ -39,6 +39,11 @@
             (or (buffer-local buf 'style) #f))))
   (buffer-set-local! buf 'preview-rows #t)
   (when (boundp 'markdown-paint-on!) (markdown-paint-on! buf))
+  (preview--rows-look! buf))
+
+;; the page's typography on the rows. writing-mode calls this too after its
+;; own setup, so the page's look wins while the rows are on.
+(define (preview--rows-look! buf)
   (face-remap-in! buf 'default
     (list 'family preview-font-family 'size preview-font-size 'line-height "1.7"))
   (when (minor-mode-on? buf "writing-mode")

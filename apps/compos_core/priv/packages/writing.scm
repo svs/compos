@@ -268,6 +268,9 @@
       (enable-minor-mode! buf "preview-mode")
       (when (minor-mode-on? buf "preview-mode")
         (preview-mode--apply! buf)))
+  ;; the drawn page keeps its own look over writing's typography
+  (when (and (buffer-local buf 'preview-rows) (boundp 'preview--rows-look!))
+    (preview--rows-look! buf))
   ;; the mode, not only its local: the dashboard names it, and M-x
   ;; visual-line-mode toggles what writing turned on
   (enable-minor-mode! buf "visual-line-mode")

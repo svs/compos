@@ -2357,7 +2357,9 @@ defmodule Compos.Ui.Layouts do
                   if (!sel) return;
                   const ptPos = domPos(buf, pt);
                   if (!ptPos) return;
-                  placeGhost(buf, ptPos);
+                  // the ghost is drawn only while the page has no keyboard;
+                  // measuring it on every patch is a forced layout
+                  if (document.body.classList.contains("unfocused")) placeGhost(buf, ptPos);
                   // the selection the page already has, as bytes; the same
                   // bytes are left alone so the browser keeps its goal column
                   // and its side of a soft wrap
@@ -2399,6 +2401,9 @@ defmodule Compos.Ui.Layouts do
                   const a = document.activeElement;
                   const buf = a && a.closest ? a.closest(".buf[contenteditable]") : null;
                   if (!buf || buf.hasAttribute("phx-update")) return;
+                  // report when the caret comes to rest: a held arrow moves
+                  // it thirty times a second, and a server redraw per step
+                  // starves the paint of the caret itself
                   clearTimeout(this._selt);
                   this._selt = setTimeout(() => {
                     if (this._settingSel) return;
@@ -2408,7 +2413,7 @@ defmodule Compos.Ui.Layouts do
                     if (sel && sel.isCollapsed && !isNaN(pt) && sel.focusNode && buf.contains(sel.focusNode) &&
                         domByte(sel.focusNode, sel.focusOffset) === pt) return;
                     this.sendSelection(buf, false);
-                  }, 30);
+                  }, 150);
                 };
                 document.addEventListener("selectionchange", this.selChangeH);
                 this.syncEditable();

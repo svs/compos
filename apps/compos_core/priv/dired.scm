@@ -451,7 +451,7 @@
     'preview dired--preview
     'doc (string-append
            "One directory as a table: name, size, modified, perms and what "
-           "git says. Mark files with `m` and the whole listing with `*`; "
+           "git says. Select files with `SPC` (or `m`) and the whole listing with `*`; "
            "`x` trashes what you marked, and `d` flags a file for the same "
            "`x`. `D` flags permanent deletion. `RET` on a file peeks it in the popup, "
            "read-only; `RET` again or `M-RET` opens it here as your own; `q` dismisses "
@@ -491,7 +491,7 @@
     'meta dired-meta
     'total (lambda (buf) (or (buffer-local buf 'dired-total) 0))
     'footer (lambda (buf)
-              '(("RET" "peek, again opens") ("M-RET" "open") ("m" "mark") ("*" "all") ("d" "flag")
+              '(("RET" "peek, again opens") ("M-RET" "open") ("SPC" "select") ("*" "all") ("d" "flag")
                 ("x" "trash") ("C" "copy") ("R" "rename") ("s" "sort")
                 ("/" "filter") ("." "dotfiles")
                 ("^" "up") ("g" "revert") ("q" "quit peek, then dired")))
@@ -512,6 +512,8 @@
     'noun "file"
     'markable? (lambda (buf e) (not (equal? e "..")))
     'keys '(("RET" "dired-visit") ("M-RET" "dired-open") ("q" "dired-quit") ("C-RET" "dired-visit-in-group")
+            ;; space selects the row: the mark m sets, on the thumb
+            ("SPC" "list-mark")
             ("g" "dired-revert") ("^" "dired-up")
             ("+" "dired-mkdir") ("R" "dired-rename")
             ("C" "dired-copy") ("M" "dired-chmod") ("T" "dired-touch")

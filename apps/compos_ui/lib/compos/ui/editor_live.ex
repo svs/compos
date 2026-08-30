@@ -1555,7 +1555,10 @@ defmodule Compos.Ui.EditorLive do
 
     Enum.map(static, fn line ->
       le = line.start + byte_size(line.part)
-      current = point >= line.start and point <= le
+      # an editable surface marks its own current row (the client knows
+      # where the caret is); nothing in these lines depends on point, so a
+      # caret move sends no line at all
+      current = not editable? and point >= line.start and point <= le
       touched? = current or (rs != re and rs < le + 1 and re > line.start)
 
       segs =

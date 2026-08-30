@@ -2294,6 +2294,17 @@ defmodule Compos.Ui.Layouts do
                     }
                   } catch (_) { /* nothing to draw */ }
                 };
+                // the current row is the client's mark on an editable
+                // surface: the server sends no line for a caret move, so the
+                // highlight follows the caret here, at once and after a patch
+                const markCurrentRow = (buf) => {
+                  const sel = window.getSelection();
+                  const f = sel && sel.focusNode;
+                  const el = f ? (f.nodeType === 1 ? f : f.parentElement) : null;
+                  const row = el && buf.contains(el) ? el.closest(".line") : null;
+                  buf.querySelectorAll(":scope > .line.hl-line").forEach((l) => { if (l !== row) l.classList.remove("hl-line"); });
+                  if (row) row.classList.add("hl-line");
+                };
                 this.beforeInputH = (e) => {
                   const buf = editableOf(e.target);
                   if (!buf) return;
@@ -2366,7 +2377,7 @@ defmodule Compos.Ui.Layouts do
                   const focusByte = sel.focusNode && buf.contains(sel.focusNode) ? domByte(sel.focusNode, sel.focusOffset) : null;
                   const anchorByte = sel.anchorNode && buf.contains(sel.anchorNode) ? domByte(sel.anchorNode, sel.anchorOffset) : null;
                   const wantAnchor = mark === null || mark === pt ? pt : mark;
-                  if (focusByte === pt && anchorByte === wantAnchor) return;
+                  if (focusByte === pt && anchorByte === wantAnchor) { markCurrentRow(buf); return; }
                   this._settingSel = true;
                   try {
                     if (wantAnchor !== pt) {
@@ -2391,7 +2402,7 @@ defmodule Compos.Ui.Layouts do
                       }
                     }
                   } catch (_) { /* detached mid-patch */ }
-                  finally { this._settingSel = false; }
+                  finally { this._settingSel = false; markCurrentRow(buf); }
                 };
                 // The browser moved the caret (an arrow, Home, a Shift
                 // selection): report it as bytes. Our own placements and a
@@ -2401,6 +2412,7 @@ defmodule Compos.Ui.Layouts do
                   const a = document.activeElement;
                   const buf = a && a.closest ? a.closest(".buf[contenteditable]") : null;
                   if (!buf || buf.hasAttribute("phx-update")) return;
+                  markCurrentRow(buf);
                   // report when the caret comes to rest: a held arrow moves
                   // it thirty times a second, and a server redraw per step
                   // starves the paint of the caret itself

@@ -5303,6 +5303,10 @@
                         (let ((e (peek-recent-find key)))
                           (when e (peek-revive! e))))))))))
 
+(public! 'window-fill-buffers
+  "(window-fill-buffers) — the buffers a window in this frame may be filled with, most recent first: the frame's context, never the raw MRU ring")
+(public! 'fill-candidate?
+  "(fill-candidate? NAME) — #t when a window may be filled with NAME: known, not hidden, not the popup, not a peek")
 (public! 'peek!
   "(peek! KNOWN OPEN) — show the buffer OPEN returns beside the selected window as a peek; KNOWN is its name, so a buffer that already existed is only shown and never killed; the next peek replaces it")
 (public! 'peek-or-keep!
@@ -5504,26 +5508,39 @@
                   acc
                   (append acc (list buf)))))))))
 
-;; The three-column command is useful as a quick workspace view. If fewer than
-;; three work buffers are visible, fill the remaining columns from the current
-;; group's MRU ring first, then from the global MRU ring.
+;;; --- the pool: which buffers belong in this frame's windows -------------
+;;; One source, the way a completion source answers a prompt. The buffers
+;;; a window in this frame may be filled with, most recent first, are the
+;;; frame's context: editor.scm knows no groups, so the base answer is the
+;;; MRU ring, and groups.scm sets the source to the group's members when
+;;; the frame stands in one. Every site that fills a window reads this
+;;; and never the ring itself: the columns of a layout, the window a kill
+;;; empties, the buffer q falls to. A layout that read the ring pulled
+;;; buffers in from other groups.
+
+;; a buffer a window may be filled with: known, not hidden, not floating
+;; as the popup, not a peek (a look, not a place)
+(define (fill-candidate? b)
+  (and (string? b) (buffer-known? b)
+       (not (string-prefix? " " b))
+       (not (popup--class? b))
+       (not (and (boundp 'peek-buffer?) (peek-buffer? b)))))
+
+(define window-fill-source (lambda () (buffer-list-mru)))
+
+(define (window-fill-buffers)
+  (filter fill-candidate? (window-fill-source)))
+
+;; The three-column command is useful as a quick workspace view. If fewer
+;; than three work buffers are visible, the remaining columns come from
+;; the pool, and only the pool.
 (define (layout--three-columns buffers)
-  (let* ((group (and (boundp (quote frame-group)) (frame-group)))
-         (group-buffers
-           (if (and group (boundp (quote group-buffers-mru)))
-               (group-buffers-mru group)
-               '()))
-         (rest (append group-buffers (buffer-list-mru))))
-    (let loop ((rest rest)
+  (let loop ((rest (window-fill-buffers))
              (result buffers))
-      (cond ((>= (length result) 3) result)
-            ((null? rest) result)
-            ((or (not (buffer-known? (car rest)))
-                 (string-prefix? " " (car rest))
-                 (member (car rest) result)
-                 (popup--class? (car rest)))
-             (loop (cdr rest) result))
-            (else (loop (cdr rest) (append result (list (car rest)))))))))
+    (cond ((>= (length result) 3) result)
+          ((null? rest) result)
+          ((member (car rest) result) (loop (cdr rest) result))
+          (else (loop (cdr rest) (append result (list (car rest))))))))
 
 ;; Validate each requested pane without removing duplicate buffer names.
 (define (layout--known-buffers buffers)
@@ -5763,7 +5780,7 @@
                 ((other-window-id (active-window))
                  (delete-window!))
                 (else
-                 (let loop ((bs (buffer-list-mru)))
+                 (let loop ((bs (window-fill-buffers)))
                    (cond ((null? bs) #t)
                          ((and (not (equal? (car bs) cur)) (buffer-exists? (car bs)))
                           (switch-to-buffer! (car bs)))
@@ -5784,7 +5801,7 @@
                 ;; put the window on a LIVE buffer before the kill. The
                 ;; kill-side fallback can land on a dormant checkpoint
                 ;; that has no process, and the next write is a noproc.
-                (let loop ((bs (buffer-list-mru)))
+                (let loop ((bs (window-fill-buffers)))
                   (cond ((null? bs) #t)
                         ((and (not (equal? (car bs) cur))
                               (buffer-exists? (car bs)))

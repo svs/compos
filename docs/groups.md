@@ -376,6 +376,8 @@ Visiting a file never changes the destination. A group made from files inside a 
 
 ### Window fill
 
+One pool answers which buffers may fill a window in this frame: `window-fill-buffers` (`priv/editor.scm`). It is the frame's context, the way a completion source answers a prompt — in a group, the group's members (the switcher's members section reads the same list); out of one, the recency ring — minus every buffer that never fills a window: a hidden name, the popup's buffer, a peek. Every site that fills a window reads the pool and never the ring: the columns of a layout, the window a kill empties, the buffer `q` falls to. A layout that read the ring pulled buffers in from other groups.
+
 `kill-buffer` fills each affected window in this order:
 
 1. The next MRU member of the frame's destination group.
@@ -524,3 +526,4 @@ Tests name commands, never keys. A test that needs a binding binds its own dummy
 19. A popup over the group changes nothing: open, and closed again, the frame's group is the same.
 20. A kill from outside any command (the Elixir path) that drops a window onto a group's buffer puts the frame back in that group.
 21. `ibuffer` lists the frame's group first, and a mark does not reorder the rows.
+22. A layout fills its panes from the pool: in a group, three columns come from the members and never from another group; a peek and the popup's buffer fill no window.

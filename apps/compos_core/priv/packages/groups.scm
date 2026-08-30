@@ -1733,24 +1733,25 @@
 
 (define *group-dying* #f)
 
-;; a peek is a look, not a place a window falls to
-(define (group-fill-candidate? b)
-  (not (and (boundp 'peek-buffer?) (peek-buffer? b))))
+;; The pool (editor.scm window-fill-buffers): in a group, the group's
+;; members; out of one, the ring. The switcher's members section and the
+;; windows' fill read the same list.
+(set! window-fill-source
+  (lambda ()
+    (let ((g (frame-group)))
+      (if g (group-buffers-mru g) (buffer-list-mru)))))
 
-;; the next buffer for a window in no group: the most recent one that is
-;; not the dying buffer and not a peek
+;; the next buffer for a window in no group: the first of the pool that
+;; is not the dying buffer
 (define (group-kill-plain-replacement name)
-  (let loop ((bs (buffer-list-mru)))
+  (let loop ((bs (window-fill-buffers)))
     (cond ((null? bs) #f)
-          ((and (not (equal? (car bs) name))
-                (buffer-exists? (car bs))
-                (group-fill-candidate? (car bs)))
-           (car bs))
+          ((and (not (equal? (car bs) name)) (buffer-exists? (car bs))) (car bs))
           (else (loop (cdr bs))))))
 
 (define (group-kill-replacement group frame)
   (let* ((visible (group-kill-visible-in-frame frame))
-         (members (filter group-fill-candidate? (group-buffers-mru group)))
+         (members (filter fill-candidate? (group-buffers-mru group)))
          (hidden (filter (lambda (buf) (not (member buf visible))) members)))
     (cond ((pair? hidden) (car hidden))
           ((pair? members) (car members))
@@ -1788,7 +1789,7 @@
               (cond (group
                      (let ((replacement (group-kill-replacement group frame)))
                        (when replacement (window-set-buffer! win replacement))))
-                    ((not (group-fill-candidate? (window-buffer win)))
+                    ((not (fill-candidate? (window-buffer win)))
                      (let ((replacement (group-kill-plain-replacement name)))
                        (when replacement (window-set-buffer! win replacement))))))))
         places)

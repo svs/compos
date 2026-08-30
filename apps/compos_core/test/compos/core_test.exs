@@ -301,6 +301,9 @@ defmodule Compos.CoreTest do
 
     test "(message ...) lands in *Messages*" do
       {:ok, _} = Session.eval(~s{(message "hello echo area")})
+      # *Messages* is a list over the message table; it draws on a refresh
+      # or when it is in a window
+      {:ok, _} = Session.eval(~s{(list-refresh! "*Messages*")})
       assert Buffer.text("*Messages*") =~ "hello echo area"
     end
 

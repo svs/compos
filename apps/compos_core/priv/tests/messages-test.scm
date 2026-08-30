@@ -66,3 +66,36 @@
     (check-false! (string-contains? (buffer-text "*Messages*") "hide this detail")
                   "other levels leave the view")
     (list-filter-clear! "*Messages*")))
+
+(deftest 'messages-buffer-is-the-list-from-the-start
+  "*Messages* wears messages-mode and is read-only before anyone runs view-messages"
+  (lambda ()
+    (messages-clear!)
+    (message "first row" 'info)
+    (check-equal! (buffer-local "*Messages*" 'mode-name) "messages-mode" "the mode is on")
+    (check-true! (buffer-read-only? "*Messages*") "the list is read-only")
+    (list-refresh! "*Messages*")
+    (check-true! (string-contains? (buffer-text "*Messages*") "first row")
+                 "the list draws the row")))
+
+(deftest 'a-killed-messages-buffer-returns-as-the-list
+  "after buffer-kill!, the next message makes *Messages* again in messages-mode"
+  (lambda ()
+    (messages-clear!)
+    (when (buffer-exists? "*Messages*") (buffer-kill! "*Messages*"))
+    (message "after the kill" 'info)
+    (check-true! (buffer-exists? "*Messages*") "the buffer is back")
+    (check-equal! (buffer-local "*Messages*" 'mode-name) "messages-mode" "in messages-mode")
+    (check-true! (buffer-read-only? "*Messages*") "and read-only")
+    (list-refresh! "*Messages*")
+    (check-true! (string-contains? (buffer-text "*Messages*") "after the kill")
+                 "with the row")))
+
+(deftest 'a-message-redraws-the-shown-list
+  "a message while *Messages* is in a window appears with no refresh"
+  (lambda ()
+    (messages-clear!)
+    (run-command "view-messages")
+    (message "live row" 'info)
+    (check-true! (string-contains? (buffer-text "*Messages*") "live row")
+                 "the shown list follows the log")))

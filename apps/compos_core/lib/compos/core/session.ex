@@ -11,8 +11,10 @@ defmodule Compos.Core.Session do
   `(define-command ...)`, executed via `run_command/1` (from KeyDispatch) or
   `(run-command ...)` (from Scheme, e.g. M-x's confirm callback).
 
-  The echo area is a view: `(message ...)` appends to `*Messages*` and sets
-  the transient echo. One global session for now; per-client later.
+  The echo area is a view: `(message ...)` records a row in the messages
+  table and sets the transient echo. `*Messages*` is a list over that table
+  (messages.scm, messages-mode); nothing writes its text directly. One
+  global session for now; per-client later.
   """
 
   use GenServer
@@ -234,12 +236,11 @@ defmodule Compos.Core.Session do
 
   def eval_buffer(buffer), do: buffer |> Buffer.text() |> eval()
 
+  # The row goes to the table only. *Messages* is messages-mode's list over
+  # the table: the Scheme `message` wrapper redraws it when it is in a
+  # window, and a command in it restamps. No buffer write happens here, so
+  # a killed *Messages* costs nothing until Scheme makes it again.
   def message(text, level \\ "info", context \\ %{}) do
-    # A buffer sweep can kill *Messages*. Recreate it here, so every
-    # later (message ...) works instead of an exit through :noproc —
-    # in a lane, that exit would kill the whole worker.
-    unless Buffer.exists?(@messages), do: Compos.Core.create_buffer(@messages, persistent: false)
-
     :ok = Compos.Core.SchemeTables.ensure_table(@messages_table)
     context = Map.new(context)
     level = normalize_message_level(level)
@@ -254,7 +255,6 @@ defmodule Compos.Core.Session do
     )
 
     trim_messages()
-    Buffer.append(@messages, text <> "\n", source: :editor)
     # Emacs: echo in the frame that triggered; with no frame context (agent
     # events, timers) every frame gets it — *Messages* is shared either way
     if Frame.current(), do: Editor.set_echo(text), else: Editor.set_echo_all(text)
@@ -273,12 +273,6 @@ defmodule Compos.Core.Session do
   def clear_messages do
     :ok = Compos.Core.SchemeTables.ensure_table(@messages_table)
     :ets.delete_all_objects(@messages_table)
-
-    if Buffer.exists?(@messages) do
-      size = Buffer.byte_size(@messages)
-      if size > 0, do: Buffer.delete_range(@messages, 0, size, source: :editor)
-    end
-
     :ok
   end
 

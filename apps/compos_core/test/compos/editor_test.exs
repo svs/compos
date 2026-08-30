@@ -317,6 +317,7 @@ defmodule Compos.EditorTest do
     assert leaf.mode == "morg-mode"
 
     press(["C-x", "C-s"])
+    {:ok, _} = Compos.Core.Session.eval(~s{(list-refresh! "*Messages*")})
     assert Buffer.text("*Messages*") =~ "saved-hook-ran"
     File.rm!(path)
   end

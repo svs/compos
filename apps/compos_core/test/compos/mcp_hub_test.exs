@@ -193,7 +193,7 @@ defmodule Compos.MCPHubTest do
       eval!(~s{(mcp-hub-show-detail "zznever")})
 
       assert eval!(~s{(buffer-exists? "*mcp: zznever*")}) == "#f"
-      assert eval!(~s{(buffer-text "*Messages*")}) =~ "has never been started"
+      assert eval!(~s{(begin (list-refresh! "*Messages*") (buffer-text "*Messages*"))}) =~ "has never been started"
     end
   end
 end

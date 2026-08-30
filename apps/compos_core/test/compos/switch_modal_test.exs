@@ -205,6 +205,8 @@ defmodule Compos.SwitchModalTest do
     type("zz-ma")
     press(["C-k"])
     refute eval!(~s{(buffer-known? "*zz-ma*")}) == "#t"
+    # *Messages* is a list over the message table; draw it to read it
+    eval!(~s{(list-refresh! "*Messages*")})
     assert Buffer.text("*Messages*") =~ "killed 1 buffer"
 
     # C-a marks every shown row, C-k kills them as a set
@@ -212,6 +214,7 @@ defmodule Compos.SwitchModalTest do
     type("zz-m")
     press(["C-a"])
     press(["C-k"])
+    eval!(~s{(list-refresh! "*Messages*")})
     assert Buffer.text("*Messages*") =~ "killed 2 buffers"
     refute eval!(~s{(buffer-known? "*zz-mb*")}) == "#t"
     refute eval!(~s{(buffer-known? "*zz-md*")}) == "#t"

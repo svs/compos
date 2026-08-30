@@ -10,6 +10,32 @@
 ;; Remove the pre-Emacs spelling when this package first loads.
 (when (buffer-exists? "*messages*") (buffer-kill! "*messages*"))
 
+;; *Messages* is the list, always. Emacs: *Messages* is never editable.
+;; Session makes the buffer at boot as a plain buffer, and a kill can make
+;; it go; this adoption puts messages-mode on the name at load and each
+;; time the name is created again, so no path shows the raw buffer.
+(define (messages--adopt! name)
+  (when (and (equal? name *messages-buffer*)
+             (not (equal? (buffer-local name 'mode-name) "messages-mode")))
+    (buffer-set-local! name 'mode-name "messages-mode")
+    (list-mode-init! name "messages-mode")
+    (list-refresh! name)))
+
+(define (messages--shown? name)
+  (let loop ((ws (window-list)))
+    (cond ((null? ws) #f)
+          ((equal? (car (cdr (car ws))) name) #t)
+          (else (loop (cdr ws))))))
+
+;; The list follows the log. A message while *Messages* is in a window
+;; redraws it. A message while it is out of sight costs nothing: the list
+;; restamps when a command runs in it.
+(define (messages--sync!)
+  (unless (buffer-exists? *messages-buffer*) (buffer-create *messages-buffer*))
+  (messages--adopt! *messages-buffer*)
+  (when (messages--shown? *messages-buffer*)
+    (list-restamp! *messages-buffer*)))
+
 ;; Keep the Emacs name. The wrapper adds editor context before the primitive
 ;; records the event and updates the echo area.
 (define (message text &optional level)
@@ -24,7 +50,8 @@
                            (buffer-known? source))
                       (buffer-project-label source)
                       "")))
-    (messages--primitive text (or level 'info) source group project)))
+    (messages--primitive text (or level 'info) source group project)
+    (messages--sync!)))
 
 (define (messages-events)
   (messages-snapshot *messages-limit*))
@@ -103,11 +130,14 @@
   (let ((rows (list-entries buf)))
     (string-append (number->string (length rows)) " messages")))
 
+;; The stamp runs after every command in the list and after every message
+;; while the list is shown, so it reads one row: the newest id moves on a
+;; message, and a clear moves it back to 0.
 (define (messages--stamp buf)
-  (let ((rows (messages-events)))
-    (if (null? rows)
-        '(0 0)
-        (list (length rows) (plist-get (car (reverse rows)) 'id)))))
+  (let ((last (messages-snapshot 1)))
+    (if (null? last)
+        '(0)
+        (list (plist-get (car last) 'id)))))
 
 (mode-icon! "messages-mode" "")
 
@@ -147,6 +177,14 @@
     (let ((buf (list-mode-show! "messages-mode")))
       (when (buffer-exists? "*messages*") (buffer-kill! "*messages*"))
       buf)))
+
+;; Emacs: C-h e is view-echo-area-messages
+(global-set-key "C-h e" "view-messages")
+
+;; The mode is defined above, so the adoption can run: on the buffer boot
+;; made, and on every later creation of the name.
+(on-buffer-created! messages--adopt!)
+(when (buffer-exists? *messages-buffer*) (messages--adopt! *messages-buffer*))
 
 (effects! '(read))
 (public! 'messages-events

@@ -429,7 +429,7 @@ defmodule Compos.LLMToolsTest do
 
       # error lands in *Messages*, callback never fires
       wait_until(fn ->
-        {:ok, text} = Session.eval(~s{(buffer-text "*Messages*")})
+        {:ok, text} = Session.eval(~s{(begin (list-refresh! "*Messages*") (buffer-text "*Messages*"))})
         text =~ "exceeded"
       end)
 

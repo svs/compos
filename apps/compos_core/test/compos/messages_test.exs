@@ -23,7 +23,8 @@ defmodule Compos.MessagesTest do
 
     on_exit(fn ->
       Editor.minibuffer_close()
-      Session.eval("(messages-clear!)")
+      # *Messages* is one list shared by every test: leave no narrowing on it
+      Session.eval(~S|(begin (list-filter-clear! "*Messages*") (messages-clear!))|)
     end)
 
     :ok

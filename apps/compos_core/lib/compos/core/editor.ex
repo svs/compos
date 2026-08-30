@@ -984,7 +984,10 @@ defmodule Compos.Core.Editor do
   end
 
   # Release every window from BUFFER before it dies. Remove its windows when
-  # another window can preserve the frame. A sole window needs a live buffer.
+  # another WORK window can preserve the frame: a popup floats over the
+  # frame and cannot, so a listing under a peek falls to its next buffer
+  # instead of leaving the peek as the only window. A sole window needs a
+  # live buffer.
   def handle_call({:release_buffer, buffer}, _from, state) do
     visible = Enum.flat_map(state.frames, fn {_id, f} -> visible_buffers(f.tree) end)
 
@@ -999,7 +1002,11 @@ defmodule Compos.Core.Editor do
     frames =
       Map.new(state.frames, fn {id, f} ->
         victim_ids = wins_showing(f.tree, buffer)
-        survivors = f.tree |> leaf_ids_buffers() |> Enum.reject(&(elem(&1, 1) == buffer))
+
+        survivors =
+          f.tree
+          |> leaf_ids_buffers()
+          |> Enum.reject(fn {_id, b} -> b == buffer or popup_buffer?(b) end)
 
         cond do
           victim_ids == [] ->
@@ -2156,6 +2163,18 @@ defmodule Compos.Core.Editor do
   end
 
   # returns the tree with the leaf removed, or nil if the tree IS that leaf
+  # a buffer floating as the popup wears the class Scheme gave it
+  defp popup_buffer?(b) when is_binary(b) do
+    case Buffer.get_local(b, "window-class") do
+      class when is_binary(class) -> String.starts_with?(class, "popup")
+      _ -> false
+    end
+  catch
+    :exit, _ -> false
+  end
+
+  defp popup_buffer?(_), do: false
+
   defp remove_leaf(%{type: :leaf, id: id}, id), do: nil
   defp remove_leaf(%{type: :leaf} = leaf, _id), do: leaf
 

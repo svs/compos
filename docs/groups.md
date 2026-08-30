@@ -359,6 +359,7 @@ Visiting a file never changes the destination. A group made from files inside a 
 2. When the frame has no destination: the next MRU open file under the current buffer's root.
 3. When a destination or a root exists and offers nothing: delete the window. The last window shows the group's scratch buffer.
 4. When neither a destination nor a root exists: `other-buffer`, as in Emacs.
+5. A popup does not count as another window: a window is deleted only when another work window can preserve the frame. A listing under a peek falls to its next buffer; the peek never becomes the only window. A peek is never a fill candidate, and the selection stays in the window that was selected.
 
 Rule 1 is what returns a peek to the previous state. Nothing else is needed.
 

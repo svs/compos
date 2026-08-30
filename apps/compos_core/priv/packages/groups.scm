@@ -1727,9 +1727,24 @@
 
 (define *group-dying* #f)
 
+;; a peek is a look, not a place a window falls to
+(define (group-fill-candidate? b)
+  (not (and (boundp 'peek-buffer?) (peek-buffer? b))))
+
+;; the next buffer for a window in no group: the most recent one that is
+;; not the dying buffer and not a peek
+(define (group-kill-plain-replacement name)
+  (let loop ((bs (buffer-list-mru)))
+    (cond ((null? bs) #f)
+          ((and (not (equal? (car bs) name))
+                (buffer-exists? (car bs))
+                (group-fill-candidate? (car bs)))
+           (car bs))
+          (else (loop (cdr bs))))))
+
 (define (group-kill-replacement group frame)
   (let* ((visible (group-kill-visible-in-frame frame))
-         (members (group-buffers-mru group))
+         (members (filter group-fill-candidate? (group-buffers-mru group)))
          (hidden (filter (lambda (buf) (not (member buf visible))) members)))
     (cond ((pair? hidden) (car hidden))
           ((pair? members) (car members))
@@ -1738,18 +1753,25 @@
           ((equal? (group-resolve-id group) *group-dying*) #f)
           (else (group-chat group)))))
 
+;; A window in a group fills from the group. A window in no group keeps
+;; the core's own fallback (the window's history), unless that fallback
+;; is a peek: a peek is a look, not a place to fall to, and the peek in
+;; the popup was the most recent buffer. The selection stays in the
+;; window that was selected: the core hands it to another window while
+;; the buffer dies, and that window was the popup.
 (define (group-buffer-kill-repair name)
   (let ((places
           (fold
             (lambda (found row)
-              (let* ((frame (caddr row))
-                     (group (and (equal? (cadr row) name)
-                                 (frame-local-in frame 'current-group))))
-                (if (group-resolve-id group)
-                    (cons (list (car row) frame group) found)
-                    found)))
+              (if (equal? (cadr row) name)
+                  (let ((frame (caddr row)))
+                    (cons (list (car row) frame
+                                (group-resolve-id (frame-local-in frame 'current-group)))
+                          found))
+                  found))
             '()
-            (window-list-all))))
+            (window-list-all)))
+        (active (active-window)))
     (lambda ()
       (for-each
         (lambda (place)
@@ -1757,10 +1779,16 @@
                 (frame (cadr place))
                 (group (caddr place)))
             (when (frame-of-window win)
-              (let ((replacement (group-kill-replacement group frame)))
-                (when replacement
-                  (window-set-buffer! win replacement))))))
-        places))))
+              (cond (group
+                     (let ((replacement (group-kill-replacement group frame)))
+                       (when replacement (window-set-buffer! win replacement))))
+                    ((not (group-fill-candidate? (window-buffer win)))
+                     (let ((replacement (group-kill-plain-replacement name)))
+                       (when replacement (window-set-buffer! win replacement))))))))
+        places)
+      (when (and (assoc active places) (window-exists? active)
+                 (not (equal? (active-window) active)))
+        (select-window! active)))))
 
 (set! buffer-kill-repair group-buffer-kill-repair)
 

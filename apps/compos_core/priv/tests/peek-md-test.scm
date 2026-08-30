@@ -40,3 +40,26 @@
             (check-equal! (current-buffer) d "dired stays")
             (buffer-kill! d)
             (group-record-delete! id)))))))
+
+(deftest 'a-peek-keeps-its-mode-when-the-listing-under-it-is-killed
+  "killing dired with a peek up leaves the peek a peek, in the popup"
+  (lambda ()
+    (t--peek-with
+      (lambda ()
+        (let ((a (t--peek-file "one.md" "# one\n\ntext\n")))
+          (dired-open t--peek-dir)
+          (let ((d (current-buffer))
+                (me (active-window)))
+            (let loop ((i 0))
+              (when (and (< i 20) (not (equal? (dired-entry) "one.md")))
+                (list-move-in! d 1)
+                (loop (+ i 1))))
+            (run-command "dired-visit")
+            (check-true! (peek-buffer? a) "a peek shows")
+            (buffer-kill! d)
+            (check-true! (peek-buffer? a) "the peek is still a peek")
+            (check-equal! (popup-buffer) a "still in the popup")
+            (check-false! (equal? (window-buffer me) a)
+                          (string-append "the work window did not fall onto it: " (or (window-buffer me) "none")))
+            (check-equal! (active-window) me
+                          (string-append "and stays selected; active " (number->string (active-window)) " popup " (number->string (or (popup-window) 0))))))))))

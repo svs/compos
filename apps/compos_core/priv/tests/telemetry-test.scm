@@ -196,3 +196,17 @@
     (check-true! (not (telemetry--noise? (list 'layer "live" 'label "render" 'tid "ab:1"))) "a traced render")
     (check-true! (not (telemetry--noise? (list 'layer "live" 'label "event sel"))) "an event")
     (check-true! (not (telemetry--noise? (list 'layer "scheme" 'label "refresh"))) "another layer")))
+
+(deftest 'telemetry-has-a-narrow-view-for-the-side-popup
+  "under the width the narrow profile shows five columns; the wide one shows eight"
+  (lambda ()
+    (let ((layouts (plist-get (list-mode-opts "telemetry-mode") 'layouts))
+          (row (list 'kind "push" 'layer "browser" 'time-ms 1000 'duration-ms 80
+                     'queue-ms 30 'owner "frame f-1" 'label "key a" 'tid "ab12:7")))
+      (check-equal! (plist-get (list-select-layout "*unused*" layouts 80) 'name) 'narrow "80 columns")
+      (check-equal! (plist-get (list-select-layout "*unused*" layouts 200) 'name) 'wide "200 columns")
+      (check-equal! (length (telemetry--narrow-columns "*unused*")) 5 "five columns")
+      (check-equal! (length (telemetry--narrow-cells "*unused*" row)) 5 "five cells")
+      (check-equal! (nth 2 (telemetry--narrow-cells "*unused*" row)) "key a" "the job is the third")
+      (check-equal! (length (telemetry--wide-columns "*unused*")) 8 "eight columns")
+      (check-equal! (display-rule-param *telemetry-buffer* 'side) 'right "the popup is on the side"))))

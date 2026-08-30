@@ -149,6 +149,32 @@
       (telemetry--queue row)
       (list (telemetry--trace row) "dim"))))
 
+;; Two views. A side popup is narrow: it shows the time, the layer, the
+;; job, the bar, and the number. The owner, the wait, and the trace stay
+;; in the wide view and in RET's details; t still narrows to the trace.
+(define telemetry-narrow-cols 100)
+
+(define (telemetry--wide-columns buf)
+  (list (list "time" 8)
+        (list "layer" 7)
+        (list "owner" 14)
+        (list "job" #f)
+        (list "" *telemetry-bar-width*)
+        (list "ms" 6 'right)
+        (list "wait" 5 'right)
+        (list "trace" 9)))
+
+(define (telemetry--narrow-columns buf)
+  (list (list "time" 8)
+        (list "layer" 7)
+        (list "job" #f)
+        (list "" *telemetry-bar-width*)
+        (list "ms" 6 'right)))
+
+(define (telemetry--narrow-cells buf row)
+  (let ((cells (telemetry--cells buf row)))
+    (list (nth 0 cells) (nth 1 cells) (nth 3 cells) (nth 4 cells) (nth 5 cells))))
+
 (define (telemetry--replace-buffer! buf text)
   (buffer-create buf)
   (buffer-set-read-only! buf #f)
@@ -351,16 +377,13 @@
            "field; g refreshes, c clears, and q quits.")
     'buffer *telemetry-buffer*
     'rows telemetry--rows
-    'columns (lambda (buf)
-               (list (list "time" 8)
-                     (list "layer" 7)
-                     (list "owner" 14)
-                     (list "job" #f)
-                     (list "" *telemetry-bar-width*)
-                     (list "ms" 6 'right)
-                     (list "wait" 5 'right)
-                     (list "trace" 9)))
+    'columns telemetry--wide-columns
     'cells telemetry--cells
+    'layouts (list (list 'name 'narrow
+                         'max-cols (- telemetry-narrow-cols 1)
+                         'columns telemetry--narrow-columns
+                         'cells telemetry--narrow-cells)
+                   (list 'name 'wide 'default #t))
     'title (lambda (buf) "Telemetry")
     'meta telemetry--meta
     'total (lambda (buf) (length (telemetry-events)))
@@ -385,11 +408,12 @@
   (lambda () (list-mode-show! "telemetry-mode")))
 
 ;;; --- the popup ---------------------------------------------------------------
-;;; The list is a popup with the default geometry, as ibuffer is: a side
-;;; window, and the bottom edge on a compact frame. One chord opens it
-;;; with current rows and closes it again.
+;;; The list is a side popup, always: the default side reads an estimate
+;;; of the frame's width, and a stale window measurement put the list on
+;;; the bottom edge. One chord opens it with current rows and closes it
+;;; again.
 
-(add-display-rule! "*Telemetry*" 'popup)
+(add-display-rule! "*Telemetry*" 'popup '(side right))
 
 (define (telemetry-popup-open?)
   (and (popup-open?) (equal? (popup-buffer) *telemetry-buffer*)))

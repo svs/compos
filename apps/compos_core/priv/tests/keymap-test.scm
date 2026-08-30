@@ -129,3 +129,23 @@
             (check-true! (member cmd names)
                          (string-append keys " runs \"" cmd "\", which no package defines"))))
         (global-keys)))))
+
+;;; --- the trace under the map ---------------------------------------------------
+;;; trace-key presses a key the same way the GUI does and returns a state
+;;; row per phase. The dummy binding keeps this free of any production key.
+
+(deftest 'trace-key-reports-the-phases-of-one-key
+  "the trace names the command it ran and ends on the after-command row"
+  (lambda ()
+    (global-set-key "<f9> a" "keymap-test-dummy-one")
+    (keymap-test-reset!)
+    (let ((rows (trace-key *keymap-test-key*)))
+      (check-true! (wait-until (lambda () (keymap-test-fired? 'one)) 3000 20)
+                    "the traced key ran its command")
+      (check-false! (null? (filter (lambda (r)
+                                     (and (equal? (plist-get r 'phase) "command")
+                                          (equal? (plist-get r 'name) "keymap-test-dummy-one")))
+                                   rows))
+                    "one row names the resolved command")
+      (check-equal! (plist-get (car (reverse rows)) 'phase) "after-command"
+                    "the last row reports the state after the command"))))

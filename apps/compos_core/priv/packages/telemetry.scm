@@ -436,3 +436,24 @@
   "(telemetry-arrived!) — the collector's notice: redraw the shown list for work the user caused")
 (public! 'telemetry-popup-open?
   "(telemetry-popup-open?) — #t while the telemetry popup shows")
+
+;;; --- one keystroke, phase by phase --------------------------------------------
+;;; The dispatch mechanism records a row per phase: the key, the resolved
+;;; command, the pre-command policy, and the state after the command. The
+;;; rows show which phase moved point. This fn adds the derived
+;;; input-start, so a point outside a chat's input region is visible in
+;;; the row itself.
+
+(effects! '(write))
+
+(define (trace-key keys)
+  (map (lambda (row)
+         (let ((mark (plist-get row 'mark))
+               (mb (plist-get row 'marker-bytes)))
+           (if (and (number? mark) (number? mb))
+               (append row (list 'input-start (+ mark mb)))
+               row)))
+       (trace-key! (if (string? keys) (list keys) keys))))
+
+(public! 'trace-key
+  "(trace-key KEYS) — dispatch KEYS; return a state row per phase: point, size, mark, input-start")

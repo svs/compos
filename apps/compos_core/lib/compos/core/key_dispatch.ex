@@ -34,6 +34,7 @@ defmodule Compos.Core.KeyDispatch do
   end
 
   def handle_key(key) do
+    note("key", key)
     snapshot = Editor.snapshot()
     %{minibuffer: mb, pending: pending, completion: completion} = snapshot
     transient = Map.get(snapshot, :transient)
@@ -341,9 +342,12 @@ defmodule Compos.Core.KeyDispatch do
     count = prefix_numeric_value(prefix_arg)
     inserted = if count > 0, do: String.duplicate(text, count), else: ""
 
+    note("self-insert", text)
+
     # Self insertion bypasses a named Scheme command. Run the same
     # pre-command policy explicitly before the direct buffer edit.
     _ = Session.call_named("pre-command!", [])
+    note("pre-command", "pre-command!")
 
     # A printable key replaces an active region in Emacs. The fast path used
     # to insert directly into the rope, which made mirrored selections from a
@@ -364,11 +368,14 @@ defmodule Compos.Core.KeyDispatch do
         Editor.finish_command("self-insert-command", false)
         Editor.set_echo("Buffer is read-only")
     end
+
+    note("after-command", "self-insert-command")
   end
 
   defp run(name) do
     # Scheme owns mode policy before a key-driven command changes the buffer.
     _ = Session.call_named("pre-command!", [])
+    note("pre-command", "pre-command!")
 
     # Emacs: any command except undo breaks the undo chain — a subsequent
     # undo then reverses the undos, which is how redo works. Commands that
@@ -385,6 +392,8 @@ defmodule Compos.Core.KeyDispatch do
     end
 
     try do
+      note("command", name)
+
       case Session.run_command(name) do
         :ok ->
           keep_prefix = name in @prefix_commands
@@ -395,6 +404,8 @@ defmodule Compos.Core.KeyDispatch do
           Editor.finish_command(name, false)
           Editor.set_echo("#{name}: #{msg}")
       end
+
+      note("after-command", name)
     after
       if grouped? and Buffer.exists?(buffer), do: Buffer.undo_group(buffer, false)
     end
@@ -423,5 +434,63 @@ defmodule Compos.Core.KeyDispatch do
   defp printable?(key) do
     key not in @named and not String.starts_with?(key, "C-") and
       not String.starts_with?(key, "M-") and String.length(key) == 1
+  end
+
+  # --- key tracing ------------------------------------------------------------
+  # The mechanism under Scheme's (trace-key): dispatch in this process and
+  # record the editor state at every phase boundary. Scheme owns the
+  # presentation and the derived fields (packages/telemetry.scm).
+
+  @trace :key_trace
+
+  @doc """
+  Dispatch KEYS in the calling process and record one row per phase: the
+  key, the resolved command, the pre-command policy, and the state after
+  the command. Each row is a Scheme plist with the current buffer, point,
+  size, and the chat mark locals, so a reader can see which phase moved
+  point.
+  """
+  def trace_keys(keys) do
+    Process.put(@trace, [])
+
+    try do
+      Enum.each(keys, &handle_key/1)
+      Process.get(@trace) |> Enum.reverse()
+    after
+      Process.delete(@trace)
+    end
+  end
+
+  # a row per phase, newest first — only while trace_keys/1 is collecting
+  defp note(phase, name) do
+    case Process.get(@trace) do
+      rows when is_list(rows) ->
+        buf = Editor.current_buffer()
+        alive = Buffer.exists?(buf)
+
+        row = [
+          {:sym, "phase"},
+          phase,
+          {:sym, "name"},
+          name,
+          {:sym, "buffer"},
+          buf,
+          {:sym, "point"},
+          if(alive, do: Buffer.point(buf), else: 0),
+          {:sym, "size"},
+          if(alive, do: Buffer.byte_size(buf), else: 0),
+          {:sym, "mark"},
+          (alive && Buffer.get_local(buf, "agent-saved-mark")) || false,
+          {:sym, "marker-bytes"},
+          (alive && Buffer.get_local(buf, "agent-marker-bytes")) || false
+        ]
+
+        Process.put(@trace, [row | rows])
+
+      _ ->
+        :ok
+    end
+
+    :ok
   end
 end

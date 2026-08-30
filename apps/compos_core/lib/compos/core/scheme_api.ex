@@ -382,6 +382,8 @@ defmodule Compos.Core.SchemeAPI do
         "(key-binding SEQ) — the command SEQ runs in this buffer: a name, 'prefix, or #f. SEQ is a list of keys.",
       "capture-key!" =>
         "(capture-key! COMMAND) — the next key sequence runs COMMAND instead of its own binding; COMMAND reads it with (last-keys). #f disarms.",
+      "trace-key!" =>
+        "(trace-key! KEYS) — dispatch the key list in this process; return one state row per phase.",
       "last-command" => "(last-command) — return the name of the last command that ran.",
       "last-keys" =>
         "(last-keys) — return the key sequence whose keymap lookup ran the current command.",
@@ -1604,6 +1606,13 @@ defmodule Compos.Core.SchemeAPI do
       "capture-key!" => fn [command] ->
         Editor.set_key_capture(command)
         :void
+      end,
+      # the mechanism under (trace-key): KeyDispatch records a row per phase
+      "trace-key!" => fn [specs] ->
+        specs
+        |> List.wrap()
+        |> Enum.flat_map(&String.split(plain(&1), " ", trim: true))
+        |> Compos.Core.KeyDispatch.trace_keys()
       end,
       # a mode's own stylesheet, rendered into the page beside the face
       # variables. Modes are trusted code — they can eval anything — so the

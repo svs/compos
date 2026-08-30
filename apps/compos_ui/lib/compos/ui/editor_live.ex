@@ -2769,6 +2769,9 @@ defmodule Compos.Ui.EditorLive do
     h1 code,h2 code,h3 code,h4 code{background:none;padding:0;font-size:.92em}
     pre{background:#{inset};padding:10px 12px;border-left:3px solid #{accent};overflow-x:auto}
     pre code{background:none;padding:0}
+    /* Plain-text blocks are prose-like payloads such as prompts and logs.
+       Wrap them to the page measure; source-code fences keep horizontal scroll. */
+    pre:has(> code.text){white-space:pre-wrap;overflow-wrap:anywhere;overflow-x:hidden}
     .code-block{margin:0;border:1px solid #{border};border-radius:6px;overflow:hidden;background:#{inset}}
     .code-block-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:6px 10px;
       border-bottom:1px solid #{border};color:#{dim};font:12px/1.4 "IBM Plex Mono",ui-monospace,Menlo,monospace}

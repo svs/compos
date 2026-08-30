@@ -311,6 +311,16 @@ defmodule Compos.Ui.PreviewCursorTest do
     refute html =~ ~s(class="csv-preview")
   end
 
+  test "shared Markdown page wraps plain-text fences" do
+    text = "```text\n" <> String.duplicate("long prompt text ", 20) <> "\n```\n"
+    html = EditorLive.preview_doc("markdown", text, 0, @faces, false)
+
+    assert html =~ ~s(<code class="text">)
+
+    assert html =~
+             "pre:has(> code.text){white-space:pre-wrap;overflow-wrap:anywhere;overflow-x:hidden}"
+  end
+
   test "a plain fenced block names its language without Morg actions" do
     html = EditorLive.preview_doc("markdown", "```elixir\n:ok\n```\n", 0, @faces, false)
 

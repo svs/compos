@@ -216,7 +216,7 @@ defmodule Compos.IbufferTest do
     press(["<f8>", "<f8>"])
     assert eval!(~s{(length (list-marked "*ibuffer*" "*"))}) == "2"
 
-    eval!(~s{(local-set-key* "*ibuffer*" "<f7>" "ibuffer-group")})
+    eval!(~s{(local-set-key* "*ibuffer*" "<f7>" "group-add")})
     press("<f7>")
     type(group)
     press("<f6>")

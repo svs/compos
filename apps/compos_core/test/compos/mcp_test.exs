@@ -101,7 +101,7 @@ defmodule Compos.MCPTest do
       {:ok, _} = MCP.connect("gone", %{"command" => "no-such-binary-zz"})
 
       wait_until(fn ->
-        {:ok, text} = Session.eval(~s{(begin (list-refresh! "*Messages*") (buffer-text "*Messages*"))})
+        {:ok, text} = Session.eval(~s{(messages-text)})
         text =~ "gone failed"
       end)
     end

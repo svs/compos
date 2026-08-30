@@ -131,8 +131,8 @@
 
 ;;; --- founding a group -----------------------------------------------------------
 
-(deftest 'new-from-visible-preserves-old-memberships-and-the-layout
-  "the new group takes what is on screen and leaves what was already true"
+(deftest 'new-from-a-selection-preserves-old-memberships-and-the-layout
+  "group-new on marked buffers takes the arrangement and leaves what was already true"
   (lambda ()
     (t--sw-setup!)
     (let ((old (group-record-create! "zzsw-old")))
@@ -142,7 +142,10 @@
       (split-window! 'h 0.5)
       (other-window!)
       (switch-to-buffer! t--sw-second)
-      (run-command "group-new-from-visible")
+      ;; the selection is the seed (docs/groups.md): both visible buffers
+      (buffer-set-local! t--sw-first 'buffer-selected #t)
+      (buffer-set-local! t--sw-second 'buffer-selected #t)
+      (run-command "group-new")
 
       (t--sw-type! "zzsw-visible")
       (t--sw-key! "confirm")
@@ -150,9 +153,11 @@
       (let ((id (group-resolve-id "zzsw-visible")))
         (check-true! (buffer-in-group? t--sw-first old) "the old membership is kept")
         (check-true! (buffer-in-group? t--sw-first id) "and the new one added")
-        (check-true! (buffer-in-group? t--sw-second id) "the other visible buffer joins")
+        (check-true! (buffer-in-group? t--sw-second id) "the other selected buffer joins")
         (check-equal! (frame-local 'current-group) id "the frame stands in it")
-        (check-equal! (group-layout id) (window-tree) "and it remembers this layout")))
+        (check-equal! (group-layout id) (window-tree) "and it remembers this layout"))
+      (buffer-set-local! t--sw-first 'buffer-selected #f)
+      (buffer-set-local! t--sw-second 'buffer-selected #f))
     (t--sw-done!)))
 
 (deftest 'cancelled-group-creation-changes-no-group-state
@@ -160,7 +165,7 @@
   (lambda ()
     (t--sw-setup!)
     (let ((before (window-tree)))
-      (run-command "group-new-from-buffer")
+      (run-command "group-new")
       (t--sw-key! "cancel")
       (check-equal! (group-ids) '() "no group was founded")
       (check-false! (frame-local 'current-group) "the frame stands in none")
@@ -169,12 +174,14 @@
     (t--sw-done!)))
 
 (deftest 'group-new-creates-and-enters-an-empty-work-context
-  "the empty-group command creates no work membership"
+  "group-new from a transient buffer seeds nothing (docs/groups.md: the empty seed)"
   (lambda ()
     (t--sw-setup!)
+    (buffer-set-local! t--sw-first 'transient #t)
     (run-command "group-new")
     (t--sw-type! "zzsw-empty-context")
     (t--sw-key! "confirm")
+    (buffer-set-local! t--sw-first 'transient #f)
     (let ((id (group-resolve-id "zzsw-empty-context")))
       (check-true! id "the group record exists")
       (check-equal! (filter group-work-buffer? (group-buffers id)) '()
@@ -187,16 +194,19 @@
   (lambda ()
     (t--sw-setup!)
     (switch-to-buffer! t--sw-first)
-    (run-command "group-new-with-buffer")
+    (run-command "group-new")
     (t--sw-type! "zzsw-active-one")
     (t--sw-key! "confirm")
     (switch-to-buffer! t--sw-second)
-    (run-command "group-new-with-buffer")
+    (run-command "group-new")
     (t--sw-type! "zzsw-active-two")
     (t--sw-key! "confirm")
+    ;; an empty group: group-new seeds nothing from a transient buffer
+    (buffer-set-local! t--sw-second 'transient #t)
     (run-command "group-new")
     (t--sw-type! "zzsw-active-empty")
     (t--sw-key! "confirm")
+    (buffer-set-local! t--sw-second 'transient #f)
     (let ((one (group-resolve-id "zzsw-active-one"))
           (two (group-resolve-id "zzsw-active-two"))
           (empty (group-resolve-id "zzsw-active-empty")))
@@ -220,11 +230,11 @@
                 (when (buffer-known? c) (buffer-kill! c))))
             (list one-name two-name))
   (switch-to-buffer! t--sw-second)
-  (run-command "group-new-with-buffer")
+  (run-command "group-new")
   (t--sw-type! two-name)
   (t--sw-key! "confirm")
   (switch-to-buffer! t--sw-first)
-  (run-command "group-new-with-buffer")
+  (run-command "group-new")
   (t--sw-type! one-name)
   (t--sw-key! "confirm")
   (split-window! 'v)
@@ -317,7 +327,7 @@
     (buffer-set-local! t--sw-first 'scratch-buffer t--sw-second)
     (buffer-set-local! t--sw-second 'scratch-owner t--sw-first)
     (switch-to-buffer! t--sw-first)
-    (run-command "group-new-with-buffer")
+    (run-command "group-new")
     (t--sw-type! "zzsw-family-context")
     (t--sw-key! "confirm")
     (let ((id (group-resolve-id "zzsw-family-context")))
@@ -411,7 +421,7 @@
       (buffer-add-group! t--sw-first source)
       (switch-to-buffer! t--sw-first)
       (buffer-set-local! t--sw-first 'buffer-selected #t)
-      (run-command "buffer-add-to-group")
+      (run-command "group-add")
       (t--sw-type! "zzsw-destination")
       (t--sw-key! "confirm")
 
@@ -429,7 +439,7 @@
       (buffer-add-group! t--sw-first source)
       (switch-to-buffer! t--sw-first)
       (buffer-set-local! t--sw-first 'buffer-selected #t)
-      (run-command "buffer-add-to-group")
+      (run-command "group-add")
       (t--sw-type! "zzsw-created")
       (t--sw-key! "confirm")
 
@@ -446,7 +456,7 @@
     (switch-to-buffer! t--sw-third)
     (set-frame-local! 'current-group #f)
     (buffer-set-local! t--sw-third 'buffer-selected #t)
-    (run-command "buffer-add-to-group")
+    (run-command "group-add")
     (t--sw-type! "zzsw-null-add")
     (t--sw-key! "confirm")
     (let ((id (group-resolve-id "zzsw-null-add")))
@@ -461,7 +471,7 @@
     (t--sw-setup!)
     (let ((destination (group-record-create! "zzsw-current-add")))
       (switch-to-buffer! t--sw-second)
-      (run-command "buffer-add-to-group")
+      (run-command "group-add")
       (check-true! (minibuffer-state) "the destination prompt opens")
       (t--sw-type! "zzsw-current-add")
       (t--sw-key! "confirm")
@@ -481,7 +491,7 @@
       (buffer-set-local! t--sw-first 'buffer-selected #t)
       (buffer-set-local! t--sw-second 'buffer-selected #t)
       (switch-to-buffer! t--sw-third)
-      (run-command "buffer-add-to-group")
+      (run-command "group-add")
       (t--sw-type! "zzsw-selected-add")
       (t--sw-key! "confirm")
       (check-true! (buffer-in-group? t--sw-first destination)
@@ -507,7 +517,7 @@
         ;; two buffer rows the user can actually see.
         (list (list t--sw-second *list-mark-char*)
               (list t--sw-third *list-mark-char*)))
-      (run-command "buffer-add-to-group")
+      (run-command "group-add")
       (t--sw-type! "zzsw-marked-add")
       (t--sw-key! "confirm")
       (check-true! (buffer-in-group? t--sw-second destination)
@@ -530,7 +540,7 @@
       (buffer-add-group! t--sw-first source)
       (buffer-add-group! t--sw-first kept)
       (switch-to-buffer! t--sw-first)
-      (run-command "buffer-move-to-group")
+      (run-command "group-move")
       (t--sw-type! "zzsw-destination")
       (t--sw-key! "confirm")
 
@@ -553,7 +563,7 @@
       (buffer-add-group! t--sw-first second)
       (switch-to-buffer! t--sw-first)
       (set-frame-local! 'current-group #f)
-      (run-command "buffer-move-to-group")
+      (run-command "group-move")
 
       (check-equal! (plist-get (minibuffer-state) 'prompt) "Move buffer to group: "
                     "the first prompt asks for the destination")
@@ -572,7 +582,7 @@
     (switch-to-buffer! t--sw-third)
     (check-equal! (buffer-group-ids t--sw-third) '()
                   "the buffer starts without a group")
-    (run-command "buffer-move-to-group")
+    (run-command "group-move")
     (t--sw-type! "zzsw-ungrouped-destination")
     (t--sw-key! "confirm")
 
@@ -605,7 +615,7 @@
       (buffer-add-group! t--sw-first kept)
       (switch-to-buffer! t--sw-first)
       (set-frame-local! 'current-group removed)
-      (run-command "buffer-remove-from-group")
+      (run-command "group-remove")
 
       (check-equal! (plist-get (minibuffer-state) 'prompt)
                     "Toggle group removal (C-g applies): "
@@ -632,7 +642,7 @@
       (buffer-add-group! t--sw-first kept)
       (switch-to-buffer! t--sw-first)
       (set-frame-local! 'current-group #f)
-      (run-command "buffer-remove-from-group")
+      (run-command "group-remove")
       (check-equal! (plist-get (minibuffer-state) 'prompt)
                     "Toggle group removal (C-g applies): "
                     "the command asks which membership to remove")
@@ -657,7 +667,7 @@
       (buffer-add-group! t--sw-first first)
       (buffer-add-group! t--sw-first second)
       (switch-to-buffer! t--sw-first)
-      (run-command "buffer-remove-from-group")
+      (run-command "group-remove")
       (t--sw-type! "zzsw-toggle-first")
       (t--sw-key! "confirm")
       (check-true! (buffer-in-group? t--sw-first first)
@@ -718,7 +728,7 @@
       (check-true! (buffer-in-group? t--sw-second moved) "the scratch buffer reaches the destination")
 
       (set-frame-local! 'current-group moved)
-      (run-command "buffer-remove-from-group")
+      (run-command "group-remove")
       (t--sw-type! "zzsw-family-moved")
       (t--sw-key! "confirm")
       (check-true! (buffer-in-group? t--sw-first moved)
@@ -1165,7 +1175,7 @@
       (mru-note-group! there)
       (mru-note-group! here)
 
-      (run-command "switch-to-group")
+      (run-command "group-switch")
       (t--sw-type! "zzsw-peek-there")
       ;; the look waits for the highlight to rest
       (check-true!
@@ -1191,7 +1201,7 @@
       (switch-to-buffer! t--sw-second)
       (switch-to-buffer! t--sw-first)
 
-      (run-command "switch-to-group")
+      (run-command "group-switch")
       (t--sw-type! "zzsw-enter-there")
       (t--sw-key! "confirm")
 
@@ -1211,7 +1221,7 @@
       (buffer-add-group! t--sw-first kept)
       (switch-to-buffer! t--sw-first)
       (set-frame-local! 'current-group source)
-      (run-command "switch-to-group")
+      (run-command "group-switch")
       (t--sw-type! "Move this buffer into a new group")
       (t--sw-key! "confirm")
       (t--sw-type! "zzsw-moved")

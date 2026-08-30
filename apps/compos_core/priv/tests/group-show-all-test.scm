@@ -23,7 +23,7 @@
       (set! *winner-inhibit* #f)
 
       ;; Test dispatch through a disposable binding. Production keys can move.
-      (global-set-key "<f9> s" "group-show-all")
+      (global-set-key "<f9> s" "tile-all")
       (dispatch-keys '("<f9>" "s"))
 
       (check-true!
@@ -59,7 +59,7 @@
         (check-true! (buffer-known? member) "the group can still find its checkpoint")
         (set-frame-local! 'current-group group)
 
-        (run-command "group-show-all")
+        (run-command "tile-all")
         (check-true! (buffer-exists? member) "show all woke the member")
         (check-true! (window-showing member) "show all gave it a window")
 
@@ -80,7 +80,7 @@
       (set-frame-local! 'winner-pos #f)
       (set! *winner-inhibit* #f)
 
-      (run-command "group-show-all")
+      (run-command "tile-all")
       (let ((chat (group-chat-name group)))
         (check-true! (buffer-in-group? chat group) "the primary chat belongs to the group")
         (check-true! (window-showing chat) "show all displayed the primary chat"))

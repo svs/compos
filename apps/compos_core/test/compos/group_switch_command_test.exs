@@ -190,7 +190,7 @@ defmodule Compos.GroupSwitchCommandTest do
       (buffer-add-group! "#{first}" "#{remove}")
       (buffer-add-group! "#{first}" "#{keep}")
       (switch-to-buffer! "#{first}")
-      (run-command "buffer-remove-from-group")
+      (run-command "group-remove")
       (minibuffer-change! "remove-on-close"))
     """)
 
@@ -228,23 +228,28 @@ defmodule Compos.GroupSwitchCommandTest do
     assert Editor.render_state().minibuffer == nil
   end
 
-  test "buffer-add-to-group changes selected buffers only", %{
+  test "group-add changes selected buffers only", %{
     first: first,
     second: second,
     third: third
   } do
     destination = group_id("selected-add")
 
+    # no default group: the frame stands in none and left none
     eval!("""
     (begin
+      (set-frame-local! 'current-group #f)
+      (set-frame-local! 'previous-group #f)
       (buffer-set-local! "#{first}" 'buffer-selected #t)
       (buffer-set-local! "#{second}" 'buffer-selected #t)
       (switch-to-buffer! "#{third}")
-      (run-command "buffer-add-to-group")
+      (run-command "group-add")
       (minibuffer-change! "selected-add"))
     """)
 
-    assert Editor.render_state().minibuffer.prompt == "Add buffers to group: "
+    # the prompt may name a default (the most recent group); the typed
+    # name wins over it
+    assert Editor.render_state().minibuffer.prompt =~ ~r/^Add buffers to group/
     KeyDispatch.handle_key("RET")
 
     assert eval!(~s[(buffer-in-group? "#{first}" "#{destination}")]) == "#t"

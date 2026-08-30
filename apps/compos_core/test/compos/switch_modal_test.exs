@@ -206,16 +206,14 @@ defmodule Compos.SwitchModalTest do
     press(["C-k"])
     refute eval!(~s{(buffer-known? "*zz-ma*")}) == "#t"
     # *Messages* is a list over the message table; draw it to read it
-    eval!(~s{(list-refresh! "*Messages*")})
-    assert Buffer.text("*Messages*") =~ "killed 1 buffer"
+    assert elem(Compos.Core.Session.eval("(messages-text)"), 1) =~ "killed 1 buffer"
 
     # C-a marks every shown row, C-k kills them as a set
     press(["DEL", "DEL", "DEL", "DEL", "DEL", "DEL"])
     type("zz-m")
     press(["C-a"])
     press(["C-k"])
-    eval!(~s{(list-refresh! "*Messages*")})
-    assert Buffer.text("*Messages*") =~ "killed 2 buffers"
+    assert elem(Compos.Core.Session.eval("(messages-text)"), 1) =~ "killed 2 buffers"
     refute eval!(~s{(buffer-known? "*zz-mb*")}) == "#t"
     refute eval!(~s{(buffer-known? "*zz-md*")}) == "#t"
   end

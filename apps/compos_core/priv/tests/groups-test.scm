@@ -154,7 +154,7 @@
       ;; the command acts on the selection, so make one: a person marks
       ;; the buffers first, in the switcher or with buffer-select
       (buffer-set-local! buf 'buffer-selected #t)
-      (run-command "buffer-add-to-group")
+      (run-command "group-add")
       (minibuffer-change! "zztest-added")
       (run-command "minibuffer-confirm")
       (let ((id (group-resolve-id "zztest-added")))

@@ -209,39 +209,6 @@
                    (string-append "killed " (number->string n) " "
                                   (list-noun buf n)))))))
 
-(define *ibuffer-no-group* "(none)")
-
-(define (ibuffer-group! buf targets g)
-  (let ((n (length targets))
-        (out? (equal? g *ibuffer-no-group*)))
-    (for-each (lambda (b)
-                (buffer-move-to-group! b (if out? #f g))
-                (list-unmark-key! buf b))
-              targets)
-    (list-refresh! buf)
-    (message (string-append (number->string n) " " (list-noun buf n)
-                            (if out? " left their group"
-                                (string-append " joined " g))))))
-
-(effects! '(write))
-
-(define-command "ibuffer-group"
-  "Put the marked buffers in a group, or take them out of one"
-  (lambda ()
-    (let* ((buf (current-buffer))
-           (targets (filter buffer-known? (list-targets buf)))
-           (n (length targets)))
-      (if (null? targets)
-          (message "no buffer here")
-          (minibuffer-read
-            (string-append "Group for " (number->string n) " "
-                           (list-noun buf n) ": ")
-            (cons (list *ibuffer-no-group* "remove from the group")
-                  (group-names))
-            (lambda (input)
-              (let ((g (string-trim input)))
-                (ibuffer-group! buf targets
-                  (if (equal? g "") *ibuffer-no-group* g)))))))))
 
 (effects! '(read))
 
@@ -290,13 +257,12 @@
                  (when (and w (buffer-known? b))
                    (window-preview-buffer! b w))))
     'keys '(("RET" "ibuffer-visit") ("k" "ibuffer-kill")
-            ("G" "ibuffer-group") ("g" "ibuffer-refresh")
+            ("G" "group-add") ("g" "ibuffer-refresh")
             ("q" "quit-window"))))
 
 (global-set-key "C-x C-b" "ibuffer")
 
 (category! 'buffers)
 (catalog-meta! 'command "ibuffer-kill" 'domain 'buffers 'effects '(destroy))
-(catalog-meta! 'command "ibuffer-group" 'domain 'buffers 'effects '(write))
 (public! 'ibuffer-refresh! "(ibuffer-refresh!) — rebuild the *ibuffer* table")
 (public! 'ibuffer-open-buffers! "(ibuffer-open-buffers! BUFFERS) — open ibuffer on exactly these known buffers")

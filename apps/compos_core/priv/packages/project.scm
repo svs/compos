@@ -499,14 +499,6 @@ finish, so \"the first match\" is whichever file the disk offered first."
   "Choose a project, then choose or create its destination group"
   (lambda () (project-switch-project-read #t)))
 
-(define-command "find-file-in-group"
-  "Choose or create a group, switch to it, then visit a file"
-  (lambda ()
-    (group-read-or-create! "Switch file to group: "
-      (lambda (g)
-        (switch-to-group! g)
-        (find-file-read g)))))
-
 (define-command "find-file-in-new-group"
   "Choose a file, create a group with it, and enter the group"
   (lambda ()

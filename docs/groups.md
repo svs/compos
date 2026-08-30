@@ -279,6 +279,29 @@ Every verb that takes buffers acts on the selection. With no selection it acts o
 | `rename G NAME` | Change the name. The ID, members, layouts, and MRU do not change. |
 | `revive G` | Make a killed G again from the graveyard: the record, its meta, layout, noise, chat id, and color. Every member that still exists comes back: a buffer that is open joins; a file that exists on disk is visited into G. A member with neither is missing; the revival says how many. Then switch to G. |
 
+### Command names
+
+One command per verb, in the `group` namespace. A verb that acts on a group reads the row or the marks when it runs in the groups board, and the frame's group elsewhere. No other command changes membership.
+
+| Verb | Command | Stock key |
+|---|---|---|
+| `add` | `group-add` | `C-c g`, `C-x C-g a`; `C-t` in the switcher; `G` in ibuffer |
+| `move` | `group-move` | `C-x C-g m` |
+| `remove` | `group-remove` | `C-x C-g r` |
+| `switch` | `group-switch` | `C-x g`, `C-x C-g g`; `RET` in the board |
+| `switch-last` | `group-switch-last` | `C-x C-g C-g` |
+| `switch-to-buffer-group` | `C-RET` in the switcher (`buffer-context-switch!`) | |
+| `new` | `group-new` | `C-x C-g n` |
+| `dissolve` | `group-dissolve` | `x` in the board |
+| `kill` | `group-kill` | `K` in the board |
+| `rename` | `group-rename` | `r` in the board |
+| `revive` | `group-revive` | `M-x` |
+| `groups` | `groups` | `C-x C-g l` |
+| `members` | `group-members` | `C-x C-g b`; `b` in the board |
+| `buffer-select` | `buffer-select`; `C-SPC` marks in the switcher, `m` in a list | |
+
+The `add` prompt names a default: the group the frame stands in, else the group it last stood in. A bare `RET` joins it; a typed name joins that group or founds it; the `New group` row founds one without entering it.
+
 ### Kill, follow, revive
 
 A kill is a scene change, not a window repair. The frame leaves G before the members die, so the window falls to the next buffer as any kill does, and the kill repair makes no chat for a group with seconds to live. Then `group-kill-hook` runs, with `*group-killed*` = `(ID NAME STOOD?)`. The default handler, `group-kill-follow!`, follows the buffer the window fell to into that buffer's group and restores the group's layout. `group-after-kill` turns it off (`stay`): the window still falls to the next buffer, and the frame derives its group from what it shows, but no layout is restored. An ungrouped buffer is not a second-class landing: the frame stands in no group and shows it.

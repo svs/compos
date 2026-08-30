@@ -132,9 +132,9 @@
     (let ((buf (test-buffer! "*zz-wr-chat-nodoc*" "")))
       (with-current-buffer buf (lambda () (set-mode! "chat-mode")))
       (buffer-set-local! buf 'render-mode "agent")
-      (let ((mark (string-length (buffer-text "*Messages*"))))
+      (let ((mark (string-length (messages-text))))
         (with-current-buffer buf (lambda () (run-command "write")))
-        (let ((said (buffer-text "*Messages*")))
+        (let ((said (messages-text)))
           (check-contains! (substring said mark (string-length said)) "no document"
                            "it says why")))
       (check-false! (member "writing-mode" (or (buffer-local buf 'minor-modes) '()))

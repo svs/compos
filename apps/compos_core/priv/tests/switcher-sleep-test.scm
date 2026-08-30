@@ -96,10 +96,10 @@
     (let ((dorm (t--ss-dormant! "kill")))
       (t--ss-open!)
       (t--ss-type! (substring dorm 1 (- (string-length dorm) 1)))
-      (let ((mark (string-length (buffer-text "*Messages*"))))
+      (let ((mark (string-length (messages-text))))
         (run-command "switch-kill")
         (check-false! (buffer-known? dorm) "the store no longer knows it")
-        (let ((said (buffer-text "*Messages*")))
+        (let ((said (messages-text)))
           (check-contains! (substring said mark (string-length said)) "killed 1 buffer"
                            "and it says what it did")))
       (run-command "switch-quit"))

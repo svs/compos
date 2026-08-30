@@ -1122,12 +1122,14 @@
            (list-refresh! *groups-buffer*))
          (message (string-append (group-label g) ": " (string-trim text))))))
 
-;; C-c d from a grouped buffer
+;; C-c d from a grouped buffer; in the board, the marked groups or the row
 (define-command "group-describe"
   "Ask the LLM to write this group's description"
   (lambda ()
-    (let ((g (buffer-group (current-buffer))))
-      (if g (group-describe! g) (message "Not in a group")))))
+    (if (in-groups-board?)
+        (groups--act! "describing" group-describe!)
+        (let ((g (buffer-group (current-buffer))))
+          (if g (group-describe! g) (message "Not in a group"))))))
 
 ;;; --- the groups board: C-x G --------------------------------------------------
 ;;; The command-palette design's second panel as a list: one row per group —
@@ -1334,9 +1336,13 @@
 (define (group-peek-buffer g)
   (group-peek-buffer-in (group-members-index) g))
 
-(define-command "switch-to-group" "Switch to a group and restore its layout"
+;; In the groups board a verb acts on the row; anywhere else it prompts.
+(define (in-groups-board?)
+  (equal? (list-mode-of (current-buffer)) "groups-mode"))
+
+(define-command "group-switch" "Switch to a group and restore its layout"
   (lambda ()
-    (if (equal? (list-mode-of (current-buffer)) "groups-mode")
+    (if (in-groups-board?)
         (let ((g (groups--current)))
           (when g (switch-to-group! g)))
         (let* ((action (group-switch-new-action))
@@ -1398,9 +1404,14 @@
   "How long the highlight rests on a group before the switcher previews it, in milliseconds."
   'group 'groups 'type 'number)
 
-;; Compatibility name for existing configuration.
-(define-command "group-switch" "Switch to a group and restore its layout"
-  (lambda () (run-command "switch-to-group")))
+;; Emacs-style toggle: the frame's previous group and its current one
+;; trade places. switch-to-group! writes 'previous-group on every switch.
+(define-command "group-switch-last" "Switch back to the group this frame just left"
+  (lambda ()
+    (let ((back (group-resolve-id (frame-local 'previous-group))))
+      (cond ((not back) (message "No previous group"))
+            ((equal? back (frame-group)) (message "Already in that group"))
+            (else (switch-to-group! back))))))
 
 ;; a verb here acts on every marked group, or on the row at point when
 ;; nothing is marked — the rule every list follows. The marks go when the
@@ -1416,9 +1427,6 @@
                (list-refresh! buf)
                (message (string-append word " " (number->string (length targets))
                                        " " (list-noun buf (length targets))))))))
-
-(define-command "group-describe-at-point" "LLM-describe the marked groups"
-  (lambda () (groups--act! "describing" group-describe!)))
 
 (define-command "group-noise-cycle" "Cycle the companion noise of the marked groups"
   (lambda ()
@@ -1447,7 +1455,13 @@
 
 (define-command "group-dissolve" "Dissolve a group without killing its buffers"
   (lambda ()
-    (groups--act! "dissolved" group-dissolve!)))
+    (if (in-groups-board?)
+        (groups--act! "dissolved" group-dissolve!)
+        (let ((g (frame-group)))
+          (if g
+              (begin (group-dissolve! g)
+                     (message (string-append "Dissolved group " (group-name g))))
+              (message "Not in a group"))))))
 
 ;; kill a whole context: every member buffer dies, except a modified
 ;; file buffer — unsaved work never dies silently
@@ -1613,10 +1627,12 @@
   (lambda () *group-graveyard*)
   (lambda (saved) (when (pair? saved) (set! *group-graveyard* saved))))
 
-(define-command "group-kill" "Kill every buffer in the current group"
+(define-command "group-kill" "Kill every buffer in the current group; in the board, the marked groups"
   (lambda ()
-    (let ((g (frame-group)))
-      (if g (group-kill! g) (message "Not in a group")))))
+    (if (in-groups-board?)
+        (groups--act! "killed" group-kill!)
+        (let ((g (frame-group)))
+          (if g (group-kill! g) (message "Not in a group"))))))
 
 ;; rename a context: every member retags, and the durable state
 ;; follows. The chat buffer keeps its NAME (there is no buffer
@@ -1638,26 +1654,16 @@
               (frame-group-label-refresh!)
               (message (string-append "Renamed group " before " to " clean)))))))
 
-(define-command "group-rename" "Rename the current group"
+(define-command "group-rename" "Rename the current group; in the board, the group at point"
   (lambda ()
-    (let ((g (frame-group)))
-      (if (not g)
-          (message "Not in a group")
-          (minibuffer-read (string-append "Rename " (group-label g) " to: ") '()
-            (lambda (new) (group-rename! g (string-trim new))))))))
-
-(define-command "group-rename-at-point" "Rename the group at point"
-  (lambda ()
-    (let ((g (groups--current)))
-      (when g
-        (minibuffer-read (string-append "Rename " (group-label g) " to: ") '()
-          (lambda (new)
-            (group-rename! g (string-trim new))
-            (when (buffer-exists? *groups-buffer*)
-              (list-refresh! *groups-buffer*))))))))
-
-(define-command "group-kill-at-point" "Kill every buffer of the marked groups"
-  (lambda () (groups--act! "killed" group-kill!)))
+    (let ((g (if (in-groups-board?) (groups--current) (frame-group))))
+      (cond ((and (not g) (not (in-groups-board?))) (message "Not in a group"))
+            (g
+             (minibuffer-read (string-append "Rename " (group-label g) " to: ") '()
+               (lambda (new)
+                 (group-rename! g (string-trim new))
+                 (when (buffer-exists? *groups-buffer*)
+                   (list-refresh! *groups-buffer*)))))))))
 
 (define-command "groups-refresh" "Refresh the groups board"
   (lambda () (list-refresh! *groups-buffer*)))
@@ -1690,14 +1696,14 @@
     'footer (lambda (buf)
               '(("RET" "switch") ("m" "mark") ("*" "all") ("r" "rename")
                 ("d" "describe") ("n" "noise") ("x" "dissolve")
-                ("K" "kill buffers") ("/" "filter") ("g" "refresh")
-                ("q" "quit")))
+                ("K" "kill buffers") ("b" "members") ("/" "filter")
+                ("g" "refresh") ("q" "quit")))
     'key (lambda (buf g) g)
     'noun "group"
-    'keys '(("RET" "group-switch") ("r" "group-rename-at-point")
-            ("d" "group-describe-at-point")
+    'keys '(("RET" "group-switch") ("r" "group-rename")
+            ("d" "group-describe")
             ("n" "group-noise-cycle") ("x" "group-dissolve")
-            ("K" "group-kill-at-point")
+            ("K" "group-kill") ("b" "group-members")
             ("g" "groups-refresh") ("q" "quit-window"))))
 
 (define (group-buffers g)
@@ -2069,14 +2075,6 @@
           (message "No current group")
           (group-chat-show! id)))))
 
-(define-command "group-chat-new" "Create a new primary chat in the current group"
-  (lambda ()
-    (let ((id (or (frame-local 'current-group)
-                  (buffer-group (current-buffer)))))
-      (if (not (group-resolve-id id))
-          (message "No current group")
-          (group-chat-new! id)))))
-
 (define (group-chat-buffer-show! buf)
   (let ((w (window-showing buf)))
     (if w
@@ -2132,8 +2130,12 @@
 ;; group is never the default — joining it is a no-op. The answer is a
 ;; display name, because the prompt and the candidate list show it.
 (define (group-join-default buf)
-  (let loop ((ids (list (frame-group)
-                        (group-resolve-id (frame-local 'previous-group)))))
+  ;; the frame leaves a group the moment a window shows an ungrouped
+  ;; buffer (window-configuration-changed!), so "the group you last stood
+  ;; in" is the MRU's head more often than the frame's slot
+  (let loop ((ids (append (list (frame-group)
+                                (group-resolve-id (frame-local 'previous-group)))
+                          (group-ids-mru))))
     (cond ((null? ids) #f)
           ((and (car ids) (not (buffer-in-group? buf (car ids))))
            (group-name (car ids)))
@@ -2189,10 +2191,26 @@
         (switch-to-group! group)
         (receive group)))))
 
-(define-command "group-new" "Create and enter an empty group"
+;; The seed of `new` (docs/groups.md): a marked selection is the seed; with
+;; none, the current work buffer and its family; a transient or other
+;; non-work buffer seeds nothing, and the group opens on its scratch.
+(define-command "group-new" "Create and enter a group seeded by the selection, else this buffer, else empty"
   (lambda ()
-    (group-read-new-name "New group: "
-      (lambda (name) (group-create-and-enter! name '() #f)))))
+    (let* ((buf (current-buffer))
+           (selected (group-command-selected-buffers))
+           (seed (cond ((pair? selected) selected)
+                       ((and (group-work-buffer? buf)
+                             (not (buffer-local buf 'transient)))
+                        (list buf))
+                       (else '()))))
+      (group-read-new-name "New group: "
+        (lambda (name)
+          (cond ((null? seed) (group-create-and-enter! name '() #f))
+                ((and (null? (cdr seed)) (equal? (car seed) buf))
+                 (group-create-with-buffer! name buf #f))
+                ;; a marked set is an arrangement: the windows as they
+                ;; stand become the group's first layout
+                (else (group-create-and-enter! name seed (window-tree)))))))))
 
 (define-command "buffer-new" "Create a buffer in the current group"
   (lambda ()
@@ -2207,14 +2225,6 @@
                     (buffer-create name)
                     (when group (buffer-add-group! name group))
                     (switch-to-buffer! name)))))))))
-
-(define-command "group-new-from-visible"
-  "Create and enter a group that contains the visible work buffers"
-  (lambda ()
-    (let ((buffers (group-visible-work-buffers))
-          (layout (window-tree)))
-      (group-read-new-name "New group from visible buffers: "
-        (lambda (name) (group-create-and-enter! name buffers layout))))))
 
 (define (buffer-family--eligible? name)
   (and (buffer-known? name)
@@ -2271,20 +2281,6 @@
           (let ((window (window-showing buf)))
             (if window (select-window! window) (switch-to-buffer! buf)))
           id))))
-
-(define-command "group-new-with-buffer"
-  "Create and enter a group with the current buffer family"
-  (lambda ()
-    (let ((buf (current-buffer)))
-      (if (not (group-work-buffer? buf))
-          (message "The current buffer is not a work buffer")
-          (group-read-new-name "New group with buffer: "
-            (lambda (name) (group-create-with-buffer! name buf #f)))))))
-
-;; Compatibility name for older configuration.
-(define-command "group-new-from-buffer"
-  "Create and enter a group with the current buffer family"
-  (lambda () (run-command "group-new-with-buffer")))
 
 (define (switch-buffer-to-group! buf id)
   (switch-to-group! id)
@@ -2469,32 +2465,30 @@
                     (message "No buffer candidates to collect")
                     (ibuffer-open-buffers! buffers)))))))))
 
-(define (group-command-work-buffers)
-  ;; C-SPC in the switcher and `buffer-select` are two views of the same
-  ;; selection.  A command invoked from the switcher must not lose selections
-  ;; made on ordinary buffers, and a repeated name must still be acted on once.
-  ;; With no selection at all, the command means the current buffer.
+;; The selection a membership verb acts on: C-SPC marks in the switcher,
+;; marks in ibuffer, and `buffer-select` are views of one selection. A
+;; command invoked from a list must not lose selections made on ordinary
+;; buffers, and a repeated name is acted on once.
+(define (group-command-selected-buffers)
   (let* ((buf (current-buffer))
-         (marked (if (equal? (buffer-local buf 'mode-name) "switch-mode")
-                     (list-live-marked buf *list-mark-char*)
-                     '()))
+         (mode (buffer-local buf 'mode-name))
+         (marked (cond ((equal? mode "switch-mode")
+                        (list-live-marked buf *list-mark-char*))
+                       ((equal? mode "ibuffer-mode")
+                        (filter buffer-known? (list-targets buf)))
+                       (else '())))
          (selected (filter (lambda (candidate)
                              (buffer-local candidate 'buffer-selected))
-                           (buffer-list-mru)))
-         (chosen (filter group-work-buffer?
-                         (dedupe-names (append marked selected)))))
+                           (buffer-list-mru))))
+    (filter group-work-buffer? (dedupe-names (append marked selected)))))
+
+;; With no selection at all, the command means the current buffer.
+(define (group-command-work-buffers)
+  (let ((buf (current-buffer))
+        (chosen (group-command-selected-buffers)))
     (cond ((pair? chosen) chosen)
           ((group-work-buffer? buf) (list buf))
           (else '()))))
-
-(define (group-selected-visible-work-buffers)
-  (filter (lambda (buf) (buffer-local buf 'buffer-selected))
-          (group-visible-work-buffers)))
-
-(define (group-command-selected-or-visible-buffers)
-  (let* ((visible (group-visible-work-buffers))
-         (selected (group-selected-visible-work-buffers)))
-    (if (pair? selected) selected visible)))
 
 ;; The prompt takes a typed name as well as a listed one, and a name it
 ;; does not know is a group to found — the same answer the "New group"
@@ -2541,19 +2535,38 @@
                              "\nContinue? ")
               continue)))))
 
+;; RET takes the default: the group the frame stands in, else the one it
+;; last left, so a stray buffer joins the group you work in with one
+;; press. A typed name joins that group, or founds it.
 (define (group-add-read-destination! buffers)
-  (minibuffer-read "Add buffers to group: "
-    (cons (list "New group" "create without entering") (group-names))
-    (lambda (destination)
-      (if (equal? destination "New group")
-          (group-read-new-name "New destination group: "
-            (lambda (name)
-              (let ((id (group-record-create! name)))
-                (when id (group-add-buffers-to! buffers id)))))
-          (let ((id (or (group-resolve-id destination)
-                        (group-record-create! destination))))
-            (group-confirm-target! id
-              (lambda () (group-add-buffers-to! buffers id))))))))
+  (let* ((default (group-join-default (current-buffer)))
+         (names (filter (lambda (g) (not (equal? g default))) (group-names))))
+    (minibuffer-read
+      (if default
+          (string-append "Add buffers to group (default " default "): ")
+          "Add buffers to group: ")
+      (append (if default (list (list default "last visited")) '())
+              (list (list "New group" "create without entering"))
+              names)
+      (lambda (input)
+        (let ((destination (if (equal? (string-trim input) "")
+                               (or default "")
+                               (string-trim input))))
+          (cond
+            ((equal? destination "") (message "Group needs a name"))
+            ((equal? destination "New group")
+             (group-read-new-name "New destination group: "
+               (lambda (name)
+                 (let ((id (group-record-create! name)))
+                   (when id (group-add-buffers-to! buffers id))))))
+            ;; add is additive and one `remove` undoes it (docs/groups.md),
+            ;; so no confirmation stands between RET and the join
+            (else
+              (let ((id (or (group-resolve-id destination)
+                            (group-record-create! destination))))
+                (if id
+                    (group-add-buffers-to! buffers id)
+                    (message "Group needs a name"))))))))))
 
 (define (group-move-buffers-to! buffers destination)
   (let ((id (group-ensure-record! destination)))
@@ -2603,7 +2616,7 @@
                                     " to " (group-name to)))
             family))))
 
-(define-command "buffer-add-to-group" "Add the selected buffers to a group"
+(define-command "group-add" "Add the selected buffers, else this buffer, to a group"
   (lambda ()
     (let ((buffers (group-command-work-buffers)))
       (if (null? buffers)
@@ -2614,12 +2627,17 @@
   (group-read-or-create! "Move buffer to group: "
     (lambda (group) (buffer-move-family-to-group! buf group))))
 
-(define-command "buffer-move-to-group" "Move the current buffer family to one group"
+;; A selection moves as a set; the current buffer alone moves with its
+;; family (its group scratch), so a lone buffer never leaves a scratch
+;; behind.
+(define-command "group-move" "Move the selected buffers, else this buffer family, to one group"
   (lambda ()
-    (let ((buf (current-buffer)))
-      (if (not (group-work-buffer? buf))
-          (message "The current buffer is not a work buffer")
-          (buffer-move-read-destination! buf)))))
+    (let ((buf (current-buffer))
+          (selected (group-command-selected-buffers)))
+      (cond ((pair? selected) (group-move-read-destination! selected))
+            ((not (group-work-buffer? buf))
+             (message "The current buffer is not a work buffer"))
+            (else (buffer-move-read-destination! buf))))))
 
 (define (buffer-family-remove-groups! buf ids)
   (for-each
@@ -2663,7 +2681,7 @@
       (list 'cancel (lambda () (buffer-family-remove-groups! buf pending)))
       (list 'style #f))))
 
-(define-command "buffer-remove-from-group"
+(define-command "group-remove"
   "Remove one or more group memberships from the current buffer family"
   (lambda ()
     (let* ((buf (current-buffer))
@@ -2685,54 +2703,17 @@
             (group-confirm-target! id
               (lambda () (group-move-buffers-to! buffers id))))))))
 
-(define-command "group-move-visible"
-  "Move selected buffers, or all visible work buffers, to another group"
+;; `members` (docs/groups.md): the switcher, narrowed to one group. In the
+;; board it is the group at point; elsewhere the current buffer's group.
+(define-command "group-members" "Open the switcher on this group's members"
   (lambda ()
-    (let ((buffers (group-command-selected-or-visible-buffers)))
-      (if (null? buffers)
-          (message "No work buffers selected or visible")
-          (group-move-read-destination! buffers)))))
-
-;; C-c g : join a group. RET takes the default — so a stray buffer
-;; moves into the group you last stood in with one press. A typed
-;; name joins that group, or founds it.
-(define-command "group-join" "Join a group; RET takes the last visited group; a new name founds one"
-  (lambda ()
-    (let* ((buf (current-buffer))
-           (default (group-join-default buf))
-           (names (filter (lambda (g) (not (equal? g default))) (group-names))))
-      (minibuffer-read
-        (if default
-            (string-append "Join group (default " (group-label default) "): ")
-            "Join group: ")
-        (if default
-            (cons (list default "last visited") names)
-            names)
-        (lambda (input)
-          (let ((g (if (equal? (string-trim input) "")
-                       (or default "")
-                       input)))
-            (cond
-              ((equal? g "") (message "Group needs a name"))
-              ;; a group is a set — joining twice is a no-op that says so
-              ((buffer-in-group? buf g)
-               (message (string-append buf " is already in " (group-label g))))
-              (else
-                (buffer-add-group! buf g)
-                (message (string-append buf " joined group " (group-label g)))))))))))
-
-(define-command "group-remove" "Select group memberships to remove from this buffer"
-  (lambda () (run-command "buffer-remove-from-group")))
-
-(define-command "group-list" "List the current buffer's group members"
-  (lambda ()
-    (let ((g (buffer-group (current-buffer))))
-      (if g
-          (message (string-append (group-display-name g) ": "
-                     (string-join (group-buffers-mru g) " · ")
-                     (let ((m (group-meta g)))
-                       (if m (string-append " — " m) ""))))
-          (message "Not in a group")))))
+    (let ((g (if (in-groups-board?)
+                 (groups--current)
+                 (or (buffer-group (current-buffer)) (frame-group)))))
+      (cond ((not g) (when (not (in-groups-board?)) (message "Not in a group")))
+            ((boundp 'switch-open!) (switch-open! (list 'locked (group-name g))))
+            (else (message (string-append (group-display-name g) ": "
+                                          (string-join (group-buffers-mru g) " · "))))))))
 
 ;; make an existing conversation a group's chat: pick a buffer, join its
 ;; group (founding one named after it if it has none)
@@ -2782,28 +2763,27 @@
           (run-command "agent-send")
           (group-ask! (group-ensure! cur))))))
 
-(define-command "group-show-all"
-  "Tile every buffer in the current group with the adaptive layout"
-  (lambda () (run-command "tile-all")))
 
 
 (mode-icon! "groups-mode" "")
 
+;; The verbs of docs/groups.md under one prefix. C-x G is the switcher's
+;; groups view (switch.scm); the board is C-x C-g l.
 (define (group-keymap-install!)
-  (global-set-key "C-c g" "group-join")
+  (global-set-key "C-c g" "group-add")
   (global-set-key "C-c d" "group-describe")
-  (global-set-key "C-x G" "groups")
   (global-set-key "C-x b" "group-switch-buffer")
-  (global-set-key "C-x g" "switch-to-group")
+  (global-set-key "C-x g" "group-switch")
 
   ;; A previous release bound the prefix itself. Remove it during hot reload.
   (global-unset-key "C-x C-g")
-  (global-set-key "C-x C-g g" "switch-to-group")
-  (global-set-key "C-x C-g a" "buffer-add-to-group")
-  (global-set-key "C-x C-g m" "buffer-move-to-group")
-  (global-set-key "C-x C-g r" "buffer-remove-from-group")
+  (global-set-key "C-x C-g g" "group-switch")
+  (global-set-key "C-x C-g C-g" "group-switch-last")
+  (global-set-key "C-x C-g a" "group-add")
+  (global-set-key "C-x C-g m" "group-move")
+  (global-set-key "C-x C-g r" "group-remove")
   (global-set-key "C-x C-g n" "group-new")
-  (global-set-key "C-x C-g v" "group-new-from-visible")
+  (global-set-key "C-x C-g b" "group-members")
   (global-set-key "C-x C-g l" "groups")
   (global-set-key "C-x C-g s" "tile-all")
   (global-set-key "C-x C-g o" "opencode-in-group")
@@ -2811,10 +2791,19 @@
 
 (group-keymap-install!)
 
-;; Remove the previous membership vocabulary from hot-reloaded sessions.
+;; Remove the previous vocabulary from hot-reloaded sessions: the names
+;; docs/groups.md folded into group-add, group-move, group-remove,
+;; group-switch, group-new, group-members, and the -at-point twins.
 (for-each undefine-command
   '("group-pull-buffer" "group-push-buffer" "group-push-visible"
-    "group-push-selected" "group-pop"))
+    "group-push-selected" "group-pop"
+    "switch-to-group" "buffer-add-to-group" "buffer-move-to-group"
+    "buffer-remove-from-group" "group-join" "group-move-visible"
+    "group-new-with-buffer" "group-new-from-buffer" "group-new-from-visible"
+    "group-rename-at-point" "group-kill-at-point" "group-describe-at-point"
+    "group-list" "group-show-all" "group-chat-new"
+    "switch-group" "ibuffer-group" "find-file-in-group"))
+(global-unset-key "C-x C-g v")
 
 (public! 'group-ids "(group-ids) -> durable opaque group IDs")
 (public! 'group-name "(group-name ID) -> the current display name")
@@ -2856,10 +2845,16 @@
   "(chat-reply-link LABEL REPLY) — a Markdown action link that fills a chat reply")
 
 (catalog-meta! 'command "group-describe" 'domain 'buffers 'effects '(write external spend))
-(catalog-meta! 'command "group-describe-at-point" 'domain 'buffers 'effects '(write external spend))
 (catalog-meta! 'command "group-kill" 'domain 'buffers 'effects '(destroy))
-(catalog-meta! 'command "group-kill-at-point" 'domain 'buffers 'effects '(destroy))
 (catalog-meta! 'command "groups" 'domain 'buffers 'effects '(read))
+(catalog-meta! 'command "group-members" 'domain 'buffers 'effects '(read display))
+(for-each
+  (lambda (name) (catalog-meta! 'command name 'domain 'buffers 'effects '(write)))
+  '("group-add" "group-move" "group-remove" "group-new" "group-rename"
+    "group-dissolve" "group-revive"))
+(for-each
+  (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
+  '("group-switch" "group-switch-last"))
 (catalog-meta! 'function "buffer-group" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "buffer-color-group" 'domain 'buffers 'effects '(read))
 (catalog-meta! 'function "buffer-filename-face" 'domain 'buffers 'effects '(read))

@@ -15,10 +15,10 @@
 ;; What the click leaves in the echo area. The message also lands in
 ;; *Messages*, and reading that needs no rendered frame.
 (define (t--mt-click! mode)
-  (let ((mark (string-length (buffer-text "*Messages*"))))
+  (let ((mark (string-length (messages-text))))
     (with-current-buffer t--mt-buf
       (lambda () (ui-command! (string-append "mode:" mode) #f)))
-    (let ((said (buffer-text "*Messages*")))
+    (let ((said (messages-text)))
       (substring said mark (string-length said)))))
 
 (deftest 'a-minor-mode-toggles-off-and-on-and-the-echo-states-each-result

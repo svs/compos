@@ -130,9 +130,9 @@
   "a name nobody registered is a message, not a crash"
   (lambda ()
     (check-equal! (preset-servers 'zz-none) '() "an unknown preset holds no servers")
-    (let ((mark (string-length (buffer-text "*Messages*"))))
+    (let ((mark (string-length (messages-text))))
       (mcp-ensure! 'zz-unregistered)
-      (let ((said (buffer-text "*Messages*")))
+      (let ((said (messages-text)))
         (check-contains! (substring said mark (string-length said))
                          "unknown server zz-unregistered" "and it says which one")))))
 

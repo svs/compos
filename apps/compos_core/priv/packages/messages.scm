@@ -29,12 +29,23 @@
 
 ;; The list follows the log. A message while *Messages* is in a window
 ;; redraws it. A message while it is out of sight costs nothing: the list
-;; restamps when a command runs in it.
+;; restamps when a command runs in it. Code that wants the log as text
+;; reads (messages-text), not the buffer: the list is paged, so its text
+;; is one page, not the log.
 (define (messages--sync!)
   (unless (buffer-exists? *messages-buffer*) (buffer-create *messages-buffer*))
   (messages--adopt! *messages-buffer*)
   (when (messages--shown? *messages-buffer*)
     (list-restamp! *messages-buffer*)))
+
+;; The log as the Emacs text buffer had it: one line per message, oldest
+;; first, newest last. A reader that remembers (string-length
+;; (messages-text)) and reads the substring past it sees what was said
+;; since.
+(define (messages-text)
+  (apply string-append
+         (map (lambda (row) (string-append (plist-get row 'text) "\n"))
+              (messages-events))))
 
 ;; Keep the Emacs name. The wrapper adds editor context before the primitive
 ;; records the event and updates the echo area.
@@ -189,6 +200,8 @@
 (effects! '(read))
 (public! 'messages-events
   "(messages-events) — return structured editor messages, oldest first")
+(public! 'messages-text
+  "(messages-text) — the log as text, one line per message, oldest first; read this, not the paged *Messages* list")
 (effects! '(write display))
 (public! 'message
   "(message TEXT [LEVEL]) — log TEXT with source context and show it in the echo area")

@@ -445,31 +445,7 @@
                          (string-append "killed " (number->string n) " "
                                         (list-noun buf n)))))))))
 
-;; C-t puts a SET in a group. The prompt offers the groups that exist; a
-;; name it does not know founds that group; "(none)" takes them out.
-(define *switch-no-group* "(none)")
-
-(define (switch-set-group! buf names g)
-  (let ((n (length names))
-        (out? (equal? g *switch-no-group*)))
-    ;; buffer-move-to-group! owns this: membership is 'group-ids, and the
-    ;; reader clears the legacy 'group local the moment a buffer has real
-    ;; memberships — so writing that local here left the buffers exactly
-    ;; where they were.
-    (for-each (lambda (b)
-                (buffer-move-to-group! b (if out? #f g))
-                (list-unmark-key! buf b))
-              names)
-    (list-refresh! buf)
-    (message (string-append (number->string n) " " (list-noun buf n)
-                            (if out? " left their group"
-                                (string-append " joined " g))))))
-
-(define-command "switch-group"
-  "Add the marked or otherwise selected buffers to another group"
-  (lambda () (run-command "buffer-add-to-group")))
-
-;; buffer-add-to-group prompts, so it changes membership inside a
+;; group-add prompts, so it changes membership inside a
 ;; minibuffer callback and returns long before. The switcher hears about
 ;; it the same way anything else does: the annotation reads a group, so a
 ;; changed membership makes the rows stale, and the marks that chose
@@ -545,7 +521,7 @@
           ;; select all: every row the narrowing shows; again unmarks
           (list "C-a" "list-mark-all")
           (list "C-k" "switch-kill")
-          (list "C-t" "switch-group")
+          (list "C-t" "group-add")
           (list "C-o" "switch-toggle-groups")
           (list "TAB" "switch-lock")
           (list "C-g" "switch-quit")
@@ -652,5 +628,4 @@
 
 (category! 'buffers)
 (catalog-meta! 'command "switch-kill" 'domain 'buffers 'effects '(destroy))
-(catalog-meta! 'command "switch-group" 'domain 'buffers 'effects '(write))
 (public! 'switch-open! "(switch-open! VIEW) — open the switcher on 'buffers, 'groups, or (locked GROUP)")

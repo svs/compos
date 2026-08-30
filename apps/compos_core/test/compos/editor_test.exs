@@ -317,8 +317,7 @@ defmodule Compos.EditorTest do
     assert leaf.mode == "morg-mode"
 
     press(["C-x", "C-s"])
-    {:ok, _} = Compos.Core.Session.eval(~s{(list-refresh! "*Messages*")})
-    assert Buffer.text("*Messages*") =~ "saved-hook-ran"
+    assert elem(Compos.Core.Session.eval("(messages-text)"), 1) =~ "saved-hook-ran"
     File.rm!(path)
   end
 
@@ -522,9 +521,13 @@ defmodule Compos.EditorTest do
         Editor.delete_other_windows()
       end)
 
+      # no group the frame stands in or just left: with a default, that
+      # group leads the candidates and RET joins it
       {:ok, _} = Compos.Core.Session.eval(~s{(begin
         (buffer-create "*zz-gr-a*")
-        (buffer-create "*zz-gr-b*"))})
+        (buffer-create "*zz-gr-b*")
+        (set-frame-local! 'current-group #f)
+        (set-frame-local! 'previous-group #f))})
 
       open_modal_switcher()
       type("zz-gr")
@@ -532,12 +535,13 @@ defmodule Compos.EditorTest do
       # the verbs by name: a key in this list is a preference and moves
       run("switch-mark")
       run("switch-mark")
-      run("switch-group")
+      run("group-add")
 
       assert Editor.render_state().minibuffer.prompt =~ "Add buffers to group"
 
-      # "New group" leads the candidates, so RET founds one and the next
-      # prompt takes its name
+      # the "New group" row founds one, and the next prompt takes its
+      # name; a default group may lead the candidates, so name the row
+      type("New group")
       press(["RET"])
       assert Editor.render_state().minibuffer.prompt =~ "New destination group"
       type("zz-crew")
@@ -2622,7 +2626,7 @@ defmodule Compos.EditorTest do
 
     # C-c g founds the group from the code buffer, then the notes join it
     press(["C-c", "g"])
-    assert Editor.snapshot().minibuffer.prompt =~ ~r/^Join group/
+    assert Editor.snapshot().minibuffer.prompt =~ ~r/^Add buffers to group/
     type(group)
     press(["RET"])
     assert in_group?(buf, group)
@@ -2710,7 +2714,7 @@ defmodule Compos.EditorTest do
 
     # the prompt names the default; a bare RET joins it
     press(["C-c", "g"])
-    assert Editor.snapshot().minibuffer.prompt == "Join group (default #{g}): "
+    assert Editor.snapshot().minibuffer.prompt == "Add buffers to group (default #{g}): "
     press(["RET"])
     assert group_name(buffer_group(stray)) == g
 

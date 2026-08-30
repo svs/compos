@@ -5130,15 +5130,26 @@
 ;; stops floating; a popup buffer of its own (the messages) waits under
 ;; the peek and comes back when the peek is dismissed. Returns the popup
 ;; window.
+;; the side away from the window the peek was asked from: the popup
+;; never covers the listing. A window on the right half of the frame
+;; gets the popup on the left; any other, the right.
+(define (peek-side-away-from win)
+  (let ((r (assoc win (window-rects))))
+    (if (and r (> (+ (nth 2 r) (* 0.5 (nth 4 r))) 0.5)) 'left 'right)))
+
 (define (peek-show! name)
   (let ((me (active-window))
+        (here (current-buffer))
         (old (and (popup-open?) (popup-buffer))))
-    (popup-show-on name (popup-default-side)
+    (popup-show-on name (peek-side-away-from me)
                    (plist-get *display-buffer-defaults* 'size))
     (let ((win (active-window)))
       (when (and old (not (equal? old name)) (buffer-exists? old))
         (popup-float! old #f))
-      (select-window! me)
+      ;; back to the reader's window BY ITS BUFFER: a popup on the left
+      ;; is a split and a swap, and the swap carries the window ids with
+      ;; their buffers, so the id the reader had may now be the popup's
+      (select-window! (or (window-showing-other here win) me))
       (set-frame-local! 'peek-window win)
       (peek-drop-others! name)
       win)))

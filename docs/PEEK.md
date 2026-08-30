@@ -4,7 +4,7 @@ A peek is a look at a buffer without keeping it. `RET` on a row in dired or the 
 
 ## Rules
 
-1. A peek shows in the popup, always. A peek is a look, and the popup is where a look goes; the windows stay as they are. A popup buffer of its own (the messages) waits under the peek and comes back when the peek goes.
+1. A peek shows in the popup, always, on the side away from the window it was asked from: it never covers the listing. A peek is a look, and the popup is where a look goes; the windows stay as they are. A popup buffer of its own (the messages) waits under the peek and comes back when the peek goes.
 2. One peek at a time. The next peek replaces the last one. A buffer that a peek made is killed when it is replaced; a buffer that existed before the peek is only shown, never killed.
 3. A peek is read-only. `peek-mode` is a minor mode: its setup makes the buffer read-only and records the state it had; keep puts that state back. The mode is saved with the buffer, so a peek on screen at a restart comes back as a peek.
 4. Open is `RET` again on the row, or `M-RET` (`peek-open!`): the mark goes, the popup gives the buffer up, and the selected window shows it as a visit would. `M-x keep-buffer` keeps without opening; a change from outside the keyboard (an agent's edit) keeps too.

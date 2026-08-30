@@ -313,3 +313,22 @@
           (popup-close!)
           (check-false! (equal? (scroll-other-window-target) me)
                         "with no peek, the next window is"))))))
+
+(deftest 'the-peek-floats-on-the-side-away-from-the-listing
+  "asked from the right window it floats left; from the left, right"
+  (lambda ()
+    (t--peek-with
+      (lambda ()
+        (let ((a (t--peek-file "a.txt" "alpha\n"))
+              (left (active-window)))
+          (split-window! 'h 0.5)
+          (other-window!)
+          (let ((right (active-window)))
+            (peek-file! a)
+            (check-equal! (buffer-local a 'window-class) "popup popup-left"
+                          "from the right window the popup floats left")
+            (popup-close!)
+            (select-window! left)
+            (peek-file! a)
+            (check-equal! (buffer-local a 'window-class) "popup popup-right"
+                          "from the left window it floats right")))))))

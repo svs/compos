@@ -10,8 +10,11 @@ defmodule Compos.Ui.Endpoint do
 
   socket("/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]])
 
+  # every loopback spelling is this machine: the Tauri shell dials
+  # 127.0.0.1 while a browser tab says localhost, and a PTY refused by
+  # origin renders as a dead terminal buffer
   socket("/terminal", Compos.Ui.TerminalSocket,
-    websocket: [check_origin: true],
+    websocket: [check_origin: ["//localhost", "//127.0.0.1", "//[::1]"]],
     longpoll: false
   )
 

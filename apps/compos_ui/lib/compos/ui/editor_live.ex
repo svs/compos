@@ -237,6 +237,12 @@ defmodule Compos.Ui.EditorLive do
     {:noreply, socket}
   end
 
+  # a client's JS failure, reported by the root hook: one line in *Messages*
+  def handle_event("client_error", %{"m" => m}, socket) when is_binary(m) do
+    Compos.Core.Session.call_named("message", ["browser: " <> String.slice(m, 0, 500)])
+    {:noreply, socket}
+  end
+
   def handle_event("viewport", %{"rows" => rows}, socket) when is_integer(rows) do
     Compos.Core.Editor.set_total_rows(rows, socket.assigns.frame)
     {:noreply, socket |> drain() |> refresh()}
@@ -1454,11 +1460,6 @@ defmodule Compos.Ui.EditorLive do
           class="agent-view"
           id={"agent-#{@node.id}"}
           style={@node.style}
-          phx-hook="AgentScroll"
-          data-buf={@node.buffer}
-          data-win={@node.id}
-          data-stick={to_string(@node.agent.stick)}
-          data-scroll-top={@node.agent.scroll_top}
         >
           <%!-- the transcript is its own component so a keystroke in the
                input row diffs to a skip placeholder: the client must not
@@ -1470,6 +1471,9 @@ defmodule Compos.Ui.EditorLive do
             id={"agtx-#{@node.id}"}
             blocks={@node.ag_blocks}
             win={@node.id}
+            buf={@node.buffer}
+            stick={@node.agent.stick}
+            scroll_top={@node.agent.scroll_top}
           />
           <%!-- messages queued mid-turn: muted rows from 'chat-queued,
                not transcript text. Outside the component, so a streamed

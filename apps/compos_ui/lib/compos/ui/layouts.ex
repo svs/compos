@@ -58,8 +58,13 @@ defmodule Compos.Ui.Layouts do
                not shrink under zoom, so the height divides by it, or the
                modeline lands below the fold. */
             zoom: var(--ui-zoom, 1);
-            height: calc(100dvh / var(--ui-zoom, 1));
+            height: 100dvh;
           }
+          /* Engines disagree on viewport units inside CSS zoom. A boot
+             probe measures this engine and stamps html with the class
+             its math needs; naming engines would age badly. */
+          html.zoom-divides .editor-root { height: calc(100dvh / var(--ui-zoom, 1)); }
+          html.zoom-multiplies .editor-root { height: calc(100dvh * var(--ui-zoom, 1)); }
           .editor-root.instance-identified::before {
             content: attr(data-instance);
             position: absolute; top: 0; right: 14px; z-index: 70;
@@ -314,6 +319,26 @@ defmodule Compos.Ui.Layouts do
           .line.row-picture .line-content { text-align: center; }
           .line.row-picture img.img-embed { margin: 6px 0; }
           .line.row-fence .line-content { font-size: .72em; color: var(--dim-fg, #8a857a); }
+          /* a table (markdown-mode md--table-row-spans): each source row is
+             its own table box, so the columns divide the width evenly and
+             line up down the run. Every bar is a cell of its own, which is
+             what puts the text between two bars in a column of its own —
+             a cell holding inline markup is several spans, and no one of
+             them could carry the column. */
+          .line.row-table .line-content {
+            display: table; width: 100%; table-layout: fixed;
+          }
+          .line.row-table .f-md-table-bar {
+            display: table-cell; width: 0; padding: 0 8px;
+            overflow: hidden; color: transparent;
+          }
+          .line.row-table-head .line-content { font-weight: 600; }
+          /* the rule row draws the line under the head, as row-hr does */
+          .line.row-table-rule .line-content { position: relative; }
+          .line.row-table-rule .line-content::after {
+            content: ""; position: absolute; left: 0; right: 0; top: 50%;
+            border-top: 1px solid var(--border, #cfc8b6);
+          }
           /* visual-line-mode off: continuation lines, wrapped wherever the
              window ends (Emacs's default); on: wrapped at words */
           .buf[data-visual-lines="false"] .line-content { word-break: break-all; }
@@ -1091,6 +1116,21 @@ defmodule Compos.Ui.Layouts do
         <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/addon-webgl.min.js"></script>
         <script>
+          // Which zoom math keeps the root exactly one viewport tall?
+          // Chrome leaves 100dvh unzoomed (the height must divide by the
+          // zoom); the observed WebKit shrinks it by the zoom (the height
+          // must multiply); a compensating engine needs neither. Measure a
+          // probe element once and stamp the class the CSS reads.
+          (() => {
+            const d = document.createElement("div");
+            d.style.cssText = "position:absolute;visibility:hidden;zoom:2;height:100dvh;";
+            document.body.appendChild(d);
+            const f = d.getBoundingClientRect().height / innerHeight;
+            d.remove();
+            if (f > 1.5) document.documentElement.classList.add("zoom-divides");
+            else if (f < 0.75) document.documentElement.classList.add("zoom-multiplies");
+          })();
+
           const NAMED = {
             "Enter": "RET", "Backspace": "DEL", "Delete": "<delete>", "Tab": "TAB", " ": "SPC",
             "Escape": "ESC", "ArrowLeft": "<left>", "ArrowRight": "<right>",
@@ -2028,7 +2068,11 @@ defmodule Compos.Ui.Layouts do
             // daemon restart resets to following.
             AgentScroll: {
               mounted() {
-                this.scroller = this.el.querySelector(".ag-scroll");
+                // The hook lives on the transcript LiveComponent itself.
+                // Its lifecycle therefore runs after the child patch has
+                // supplied the transcript's final scrollHeight.
+                this.scroller = this.el;
+                this.buf = this.el.dataset.buf;
                 this.stick = this.el.dataset.stick !== "false";
                 this.report = null;
                 this.linkH = (e) => {
@@ -2043,7 +2087,7 @@ defmodule Compos.Ui.Layouts do
                   });
                 };
                 this.el.addEventListener("click", this.linkH);
-                this.scroller.addEventListener("scroll", () => {
+                this.scrollH = () => {
                   const s = this.scroller;
                   this.stick = s.scrollHeight - s.scrollTop - s.clientHeight < 40;
                   clearTimeout(this.report);
@@ -2054,15 +2098,28 @@ defmodule Compos.Ui.Layouts do
                       top: Math.round(s.scrollTop)
                     });
                   }, 250);
-                });
+                };
+                this.scroller.addEventListener("scroll", this.scrollH);
                 if (this.stick) this.scroller.scrollTop = this.scroller.scrollHeight;
                 else this.scroller.scrollTop = parseInt(this.el.dataset.scrollTop || "0", 10);
               },
               updated() {
-                if (this.stick) this.scroller.scrollTop = this.scroller.scrollHeight;
+                // A window may show another chat without replacing the DOM
+                // id. Adopt that buffer's saved position once; within one
+                // chat the local flag wins over a lagging server patch.
+                const buf = this.el.dataset.buf;
+                if (buf !== this.buf) {
+                  this.buf = buf;
+                  this.stick = this.el.dataset.stick !== "false";
+                  if (this.stick) this.scroller.scrollTop = this.scroller.scrollHeight;
+                  else this.scroller.scrollTop = parseInt(this.el.dataset.scrollTop || "0", 10);
+                } else if (this.stick) {
+                  this.scroller.scrollTop = this.scroller.scrollHeight;
+                }
               },
               destroyed() {
                 this.el.removeEventListener("click", this.linkH);
+                this.scroller.removeEventListener("scroll", this.scrollH);
                 clearTimeout(this.report);
               }
             },
@@ -3020,6 +3077,17 @@ defmodule Compos.Ui.Layouts do
                   this._rt = setTimeout(this.sendViewport, 150);
                 };
                 window.addEventListener("resize", this.resizeH);
+
+                // Any client's JS failure lands in *Messages*: a webview
+                // has no extension and often no open inspector, and an
+                // unreported error reads as "the editor ignored me".
+                this.jsErrH = (e) => {
+                  const m = e.message || (e.reason && (e.reason.stack || e.reason.message)) || "unknown";
+                  const at = e.filename ? ` @${e.filename}:${e.lineno}` : "";
+                  this.pushEvent("client_error", { m: `${m}${at}`.slice(0, 500) });
+                };
+                window.addEventListener("error", this.jsErrH);
+                window.addEventListener("unhandledrejection", this.jsErrH);
 
                 // wheel scrolls the server-side viewport of the hovered window
                 // (falling back to the active one) — batched to one round-trip

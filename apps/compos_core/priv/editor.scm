@@ -5137,14 +5137,9 @@
                    (plist-get *display-buffer-defaults* 'size))
     (let ((win (active-window)))
       (when (and old (not (equal? old name)) (buffer-exists? old))
-        (popup-float! old #f)
-        ;; replaced, it no longer points at the window it came from
-        (buffer-set-local! old 'peek-from #f))
+        (popup-float! old #f))
       (select-window! me)
       (set-frame-local! 'peek-window win)
-      ;; the window the peek was asked from, for the page
-      (desktop-skip! name 'peek-from)
-      (buffer-set-local! name 'peek-from me)
       (peek-drop-others! name)
       win)))
 
@@ -5213,8 +5208,6 @@
 (define (peek-keep! name)
   (when (peek-buffer? name)
     (disable-minor-mode! name "peek-mode")
-    ;; kept, it is a buffer of its own: no wire
-    (buffer-set-local! name 'peek-from #f)
     ;; a kept buffer keeps its window: the slot moves on
     (let ((w (frame-local 'peek-window)))
       (when (and w (equal? (window-buffer w) name))
@@ -5714,6 +5707,9 @@
                           (switch-to-buffer! (car bs)))
                          (else (loop (cdr bs)))))))
           (peek-drop! cur)))
+      ;; from any other buffer, a peek on screen goes first: q in the
+      ;; listing that peeked takes the look, then the listing
+      ((peek-dismiss!) #t)
       ((and (popup-open?) (equal? (active-window) (popup-window)))
         (popup-dismiss!))
       (else

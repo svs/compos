@@ -2481,10 +2481,7 @@ defmodule Compos.Core.Editor do
       # inline style on the window itself. A popup hands its share of the
       # frame over this way: the stylesheet cannot read a number out of a
       # display rule, but it can read a custom property.
-      window_style: Map.get(locals, "window-style") || nil,
-      # the peek wire: the window this buffer was peeked from, or nil.
-      # The page draws a line from that window's current row to this one.
-      peek_from: Map.get(locals, "peek-from") || nil
+      window_style: Map.get(locals, "window-style") || nil
     }
 
     {%{leaf | top: top}, rendered}

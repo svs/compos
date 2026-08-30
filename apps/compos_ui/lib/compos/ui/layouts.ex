@@ -142,17 +142,6 @@ defmodule Compos.Ui.Layouts do
             border-radius: var(--chrome-radius, 0);
             animation: popup-rise var(--chrome-anim, 140ms) ease-out;
           }
-          /* the peek wire: from the window a peek was asked from to the
-             window that shows it, over the popups, touching nothing */
-          svg.peek-wires {
-            position: absolute; inset: 0; width: 100%; height: 100%;
-            pointer-events: none; z-index: 25; overflow: visible;
-          }
-          svg.peek-wires path {
-            fill: none; stroke: var(--accent-fg, #7a5a1a); stroke-width: 1.5;
-            stroke-linecap: round; opacity: 0.75;
-          }
-          svg.peek-wires circle { fill: var(--accent-fg, #7a5a1a); opacity: 0.85; }
           .window.popup-right,
           .window.popup-left {
             top: 0; bottom: 0;
@@ -1336,63 +1325,6 @@ defmodule Compos.Ui.Layouts do
 
           const PAGE_BOOT = document.querySelector("meta[name='boot-id']").getAttribute("content");
 
-          // The peek wire. A window whose buffer was peeked from another
-          // window says so (data-peek-from, the source window's id). The
-          // page draws a line from the source's current row to the near
-          // edge of the peek window, over everything, touching nothing.
-          // Drawn again after every patch, resize, and scroll.
-          const SVG_NS = "http://www.w3.org/2000/svg";
-          function drawPeekWires() {
-            const root = document.querySelector(".editor-root");
-            if (!root) return;
-            let svg = root.querySelector("svg.peek-wires");
-            const targets = root.querySelectorAll(".window[data-peek-from]");
-            if (targets.length === 0) { if (svg) svg.remove(); return; }
-            if (!svg) {
-              svg = document.createElementNS(SVG_NS, "svg");
-              svg.setAttribute("class", "peek-wires");
-              svg.setAttribute("id", "peek-wires");
-              svg.setAttribute("phx-update", "ignore");
-              root.appendChild(svg);
-            }
-            // rects are visual pixels; the root is zoomed (ui-scale), and
-            // the SVG lives inside it, so its units are layout pixels
-            const z = parseFloat(getComputedStyle(root).zoom) || 1;
-            const rr = root.getBoundingClientRect();
-            const px = (x) => (x - rr.left) / z;
-            const py = (y) => (y - rr.top) / z;
-            let out = "";
-            targets.forEach((t) => {
-              const from = root.querySelector('.window[data-win-id="' + t.dataset.peekFrom + '"]');
-              if (!from || from === t) return;
-              const fr = from.getBoundingClientRect();
-              const tr = t.getBoundingClientRect();
-              if (fr.width === 0 || tr.width === 0) return;
-              const row = from.querySelector(".line.hl-line");
-              const rowr = row ? row.getBoundingClientRect() : null;
-              const rowY = rowr
-                ? Math.min(Math.max(rowr.top + rowr.height / 2, fr.top + 10), fr.bottom - 10)
-                : fr.top + fr.height / 2;
-              let x1, y1, x2, y2;
-              if (tr.left >= fr.right - 2) {           // the peek is to the right
-                x1 = fr.right; y1 = rowY; x2 = tr.left; y2 = tr.top + Math.min(tr.height / 2, 48);
-              } else if (tr.right <= fr.left + 2) {    // to the left
-                x1 = fr.left; y1 = rowY; x2 = tr.right; y2 = tr.top + Math.min(tr.height / 2, 48);
-              } else if (tr.top >= fr.bottom - 2) {    // below
-                x1 = fr.left + fr.width / 2; y1 = fr.bottom; x2 = tr.left + tr.width / 2; y2 = tr.top;
-              } else {                                  // above, or overlapping
-                x1 = fr.left + fr.width / 2; y1 = fr.top; x2 = tr.left + tr.width / 2; y2 = tr.bottom;
-              }
-              const horizontal = Math.abs(x2 - x1) >= Math.abs(y2 - y1);
-              const c1 = horizontal ? [px((x1 + x2) / 2), py(y1)] : [px(x1), py((y1 + y2) / 2)];
-              const c2 = horizontal ? [px((x1 + x2) / 2), py(y2)] : [px(x2), py((y1 + y2) / 2)];
-              out += '<path d="M ' + px(x1) + ' ' + py(y1) + ' C ' + c1.join(" ") + ', ' + c2.join(" ") + ', ' + px(x2) + ' ' + py(y2) + '"/>';
-              out += '<circle cx="' + px(x1) + '" cy="' + py(y1) + '" r="3"/>';
-              out += '<circle cx="' + px(x2) + '" cy="' + py(y2) + '" r="3"/>';
-            });
-            svg.innerHTML = out;
-          }
-          window.composDrawPeekWires = drawPeekWires;
           // Telemetry, the browser's layer. Every key and intent push carries
           // a trace id, and this measures what the server cannot see: the
           // round trip of the push, the DOM patch after the reply, the paint
@@ -2169,14 +2101,10 @@ defmodule Compos.Ui.Layouts do
               updated() {
                 if (this.bootCheck()) return;
                 if (this.syncCursorFocus) this.syncCursorFocus();
-                drawPeekWires();
               },
               mounted() {
                 if (this.bootCheck()) return;
                 Telem.attach(this);
-                drawPeekWires();
-                window.addEventListener("resize", drawPeekWires);
-                window.addEventListener("scroll", () => requestAnimationFrame(drawPeekWires), true);
                 this.handleEvent("navigate", ({url}) => window.location.assign(url));
                 this.whichKeyHeld = new Set();
                 this.whichKeyQuery = "";

@@ -1032,6 +1032,7 @@ defmodule Compos.Ui.EditorLive do
         <span class="workspace-bar-root">{@state.workspace.root}</span>
         <span class="workspace-bar-help">C-x w new tab · C-x d switch daemon</span>
       </div>
+      <.frame_modeline state={@state} />
       <div class="windows">
         <.tree node={@state.tree} active={@state.active} completion={@state.completion} />
       </div>
@@ -1115,11 +1116,6 @@ defmodule Compos.Ui.EditorLive do
             <span class="mb-count">{count_text(@state.minibuffer)}</span>
           </div>
         </div>
-        <div :if={Map.get(@state.minibuffer, :style) == "palette"} class="echo-bar">
-          <span class="echo">{@state.echo}</span>
-          <span :if={frame_file_path(@state)} class="ml-frame-path" title={frame_file_path(@state)}>{frame_file_path(@state)}</span>
-          <span class="mb-spacer"></span>
-        </div>
       <% else %>
         <%= if @state.transient do %>
           <div class="mb-panel palette transient-panel">
@@ -1139,22 +1135,25 @@ defmodule Compos.Ui.EditorLive do
             </div>
             <div class="transient-help">RET invoke · C-g quit · C-q quit all · C-z suspend · ↑/↓ select · ? help</div>
           </div>
-          <div class="echo-bar">
-            <span class="echo">{@state.echo}</span>
-            <span :if={frame_file_path(@state)} class="ml-frame-path" title={frame_file_path(@state)}>{frame_file_path(@state)}</span>
-            <span class="mb-spacer"></span>
-          </div>
         <% else %>
-          <div class="echo-bar">
-            <span class="echo">{@state.echo}</span>
-            <span :if={frame_file_path(@state)} class="ml-frame-path" title={frame_file_path(@state)}>{frame_file_path(@state)}</span>
-            <span class="mb-spacer"></span>
-            <span :if={@state.frame_group} class="ml-frame-group">group {@state.frame_group}</span>
-            <span :if={@state.modeline_extra != ""} class="ml-extra">{@state.modeline_extra}</span>
-            <span class="echo-hint" :if={@state.echo == ""}>C-x C-f · C-x b · C-x d · C-c a n agent · M-x · C-g</span>
-          </div>
         <% end %>
       <% end %>
+    </div>
+    """
+  end
+
+  defp frame_modeline(assigns) do
+    ~H"""
+    <div
+      :if={@state.minibuffer == nil || Map.get(@state.minibuffer, :style) == "palette"}
+      class="echo-bar"
+    >
+      <span class="echo">{@state.echo}</span>
+      <span :if={frame_file_path(@state)} class="ml-frame-path" title={frame_file_path(@state)}>{frame_file_path(@state)}</span>
+      <span class="mb-spacer"></span>
+      <span :if={@state.minibuffer == nil && @state.transient == nil && @state.frame_group} class="ml-frame-group">group {@state.frame_group}</span>
+      <span :if={@state.minibuffer == nil && @state.transient == nil && @state.modeline_extra != ""} class="ml-extra">{@state.modeline_extra}</span>
+      <span class="echo-hint" :if={@state.minibuffer == nil && @state.transient == nil && @state.echo == ""}>C-x C-f · C-x b · C-x d · C-c a n agent · M-x · C-g</span>
     </div>
     """
   end
@@ -1337,7 +1336,7 @@ defmodule Compos.Ui.EditorLive do
   end
 
   @doc """
-  One window: its header, dashboard, body, and modeline.
+  One window: its modeline, header, dashboard, and body.
 
   `Compos.Ui.Window` renders this. It stays here because the helpers it
   calls (`blk`, `seg`, the modeline pieces) live here.
@@ -1364,6 +1363,46 @@ defmodule Compos.Ui.EditorLive do
       data-path={@path}
       data-read-only={to_string(@read_only)}
     >
+      <div class="modeline">
+        <span
+          class="ml-caret"
+          title="expand (C-x ?)"
+          phx-click="ui_cmd"
+          phx-value-win={@node.id}
+          phx-value-cmd="modeline-expand"
+        >{if @node.dash, do: "▾", else: "▸"}</span>
+        <span class={"ml-dot #{if @node.modified, do: "modified"}"}></span>
+        <span
+          class="name"
+          style="cursor:pointer"
+          title={@node.buffer}
+          phx-click="ui_cmd"
+          phx-value-win={@node.id}
+          phx-value-cmd="modeline-expand"
+        >{ml_name(@node)}</span>
+        <span :if={@node.modeline_project && @node.modeline_project != ""} class="ml-mode">
+          · {@node.modeline_project}
+        </span>
+        <span :if={@node.group} class="ml-group">· {@node.group}</span>
+        <span :if={@node.selected} class="ml-mode ml-selected">● selected</span>
+        <span :if={@node.render_mode in ["html", "markdown"]} class="ml-mode">preview</span>
+        <span
+          :if={@node.modeline_info}
+          class="ml-mode"
+          style="cursor:pointer"
+          phx-click="ui_cmd"
+          phx-value-win={@node.id}
+          phx-value-buf={@node.buffer}
+        >{@node.modeline_info}</span>
+        <span class="mb-spacer"></span>
+        <span class="ml-pos">
+          <%= if @node.render_mode == "terminal" do %>
+            <span class="ml-icon">▣</span> PTY · transcript {ml_bytes(@node.text)}
+          <% else %>
+            <span class="ml-icon">≡</span> {ml_bytes(@node.text)} · <span class="ml-icon">⌖</span> L{@line}:C{@col} · {pct(@node)}
+          <% end %>
+        </span>
+      </div>
       <div :if={@node.header_line} class="buffer-header">{@node.header_line}</div>
       <div :if={@node.dash || @node.dashboard_line_blocks} class="dash-top">
         <div
@@ -1567,46 +1606,6 @@ defmodule Compos.Ui.EditorLive do
       <% end %>
       <% end %>
       <div :if={@node.footer_line} class="buffer-footer">{@node.footer_line}</div>
-      <div class="modeline">
-        <span
-          class="ml-caret"
-          title="expand (C-x ?)"
-          phx-click="ui_cmd"
-          phx-value-win={@node.id}
-          phx-value-cmd="modeline-expand"
-        >{if @node.dash, do: "▾", else: "▸"}</span>
-        <span class={"ml-dot #{if @node.modified, do: "modified"}"}></span>
-        <span
-          class="name"
-          style="cursor:pointer"
-          title={@node.buffer}
-          phx-click="ui_cmd"
-          phx-value-win={@node.id}
-          phx-value-cmd="modeline-expand"
-        >{ml_name(@node)}</span>
-        <span :if={@node.modeline_project && @node.modeline_project != ""} class="ml-mode">
-          · {@node.modeline_project}
-        </span>
-        <span :if={@node.group} class="ml-group">· {@node.group}</span>
-        <span :if={@node.selected} class="ml-mode ml-selected">● selected</span>
-        <span :if={@node.render_mode in ["html", "markdown"]} class="ml-mode">preview</span>
-        <span
-          :if={@node.modeline_info}
-          class="ml-mode"
-          style="cursor:pointer"
-          phx-click="ui_cmd"
-          phx-value-win={@node.id}
-          phx-value-buf={@node.buffer}
-        >{@node.modeline_info}</span>
-        <span class="mb-spacer"></span>
-        <span class="ml-pos">
-          <%= if @node.render_mode == "terminal" do %>
-            <span class="ml-icon">▣</span> PTY · transcript {ml_bytes(@node.text)}
-          <% else %>
-            <span class="ml-icon">≡</span> {ml_bytes(@node.text)} · <span class="ml-icon">⌖</span> L{@line}:C{@col} · {pct(@node)}
-          <% end %>
-        </span>
-      </div>
     </div>
     """
   end

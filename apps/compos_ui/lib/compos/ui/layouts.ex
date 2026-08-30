@@ -776,7 +776,7 @@ defmodule Compos.Ui.Layouts do
             min-height: 30px; padding: 7px 14px 8px;
             flex-shrink: 0;
             background: var(--window-bg, #fdfcf8);
-            border-top: 1px solid var(--border, #cbc4b1);
+            border-bottom: 1px solid var(--border, #cbc4b1);
             font-family: var(--font-mono); font-size: 12.5px;
           }
           .echo { color: var(--dim-fg, #57534a); white-space: pre; }

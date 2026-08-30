@@ -23,9 +23,10 @@ defmodule Compos.Ui.EditorLiveTest do
     {:ok, conn: build_conn()}
   end
 
-  test "mounts and shows the window with modeline", %{conn: conn} do
-    {:ok, _view, html} = live(conn, "/")
-    assert html =~ "modeline"
+  test "mounts both modelines above the window content", %{conn: conn} do
+    {:ok, view, html} = live(conn, "/")
+    assert has_element?(view, "#editor > .echo-bar + .windows")
+    assert has_element?(view, ".window > .modeline:first-child")
     assert html =~ "ui-test-"
   end
 

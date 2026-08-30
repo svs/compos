@@ -1112,8 +1112,9 @@
   "A web page as readable text, in one of two readings. Calm shows
 the article alone; full shows the whole document. R switches
 between them without fetching again. RET follows the link at point,
-s-RET opens it as its own tab, and M-RET opens it in another window
-while point stays here. TAB and n/p walk the links. l and M-<left>
+s-RET opens it as its own tab, and M-RET peeks it beside this window:
+the next M-RET replaces the peek, and M-RET on the same link keeps
+it. TAB and n/p walk the links. l and M-<left>
 go back, r and M-<right> go forward, and both return to the line
 you left. u goes to the parent path, t to the site root. g asks
 where to go: RET refetches this page, a visited site or a fresh URL
@@ -1168,11 +1169,12 @@ C-s searches to any link.")
     (switch-to-buffer! tab)
     tab))
 
-;; the tab in another window; the selected window and its point stay
+;; the tab beside this window, as a PEEK: the next peek replaces it, and
+;; the same link again keeps it. A tab that already existed is only
+;; shown. The selected window and its point stay.
 (define (web--show-tab-other-window! url)
-  (let ((tab (web--tab-for! url)))
-    (display-buffer-other-window! tab)
-    tab))
+  (peek-or-keep! (web--buffer-for url) (lambda () (web--tab-for! url)))
+  (web--buffer-for url))
 
 ;;; --- what the person typed ------------------------------------------------------
 ;;; One prompt takes both a page and a question, the way a browser's

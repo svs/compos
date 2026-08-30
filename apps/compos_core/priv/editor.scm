@@ -4789,6 +4789,227 @@
             (select-window! me)
             w)))))
 
+;;; --- peek -----------------------------------------------------------------------
+;;; A peek shows a buffer to look at it, without adopting it into the
+;;; workspace. RET on a row peeks; RET again keeps. The rules:
+;;;
+;;;   ONE peek at a time. The next peek replaces the last one. A buffer
+;;;     that a peek MADE is killed when it is replaced. A buffer that
+;;;     existed before the peek is only shown, never killed.
+;;;   THE PEEK WINDOW is the window that shows the current peek. With
+;;;     none, a peek splits beside the selected window. A kept buffer
+;;;     keeps its window: the next peek splits beside it.
+;;;   KEEP is one buffer-local going away: RET again on the row, an edit,
+;;;     or M-x keep-buffer. Nothing else moves.
+;;;   A replaced peek leaves a row in RECENT. The switcher lists recent
+;;;     below the live buffers, and RET there peeks it again.
+;;;
+;;; The mark is 'peek. It is not saved: a peek that is on screen at a
+;;; restart comes back as an ordinary buffer, which is the safe error.
+
+(define (peek-buffer? name)
+  (and (string? name) (buffer-exists? name) (buffer-local name 'peek) #t))
+
+(define (peek-buffers) (filter peek-buffer? (buffer-list)))
+
+;; the window that shows a peek, other than ME
+(define (peek-window me)
+  (let loop ((ws (window-list)))
+    (cond ((null? ws) #f)
+          ((and (not (equal? (car (car ws)) me))
+                (peek-buffer? (cadr (car ws))))
+           (car (car ws)))
+          (else (loop (cdr ws))))))
+
+;;; recent: what a peek showed and let go. An entry is
+;;; (LABEL KIND KEY TIME): KIND names the reviver, KEY is what it needs.
+
+(define *peek-recent* '())
+(define *peek-recent-max* 50)
+
+(persist-global! 'peek-recent
+  (lambda () *peek-recent*)
+  (lambda (v) (set! *peek-recent* (if (or (pair? v) (null? v)) v '()))))
+
+(define (peek-recent-find key)
+  (let ((hits (filter (lambda (x) (equal? (nth 2 x) key)) *peek-recent*)))
+    (and (pair? hits) (car hits))))
+
+;; how NAME comes back: a file by its path, a page by its URL, a
+;; directory by its dir. #f for a buffer nothing can rebuild.
+(define (peek-recent-entry name)
+  (let ((path (buffer-path name))
+        (url (buffer-local name 'browse-url))
+        (dir (buffer-local name 'dired-dir)))
+    (cond ((and (string? url) (not (equal? url "")))
+           (list name 'browse url (current-time)))
+          ((and (string? dir) (not (equal? dir "")))
+           (list name 'dired dir (current-time)))
+          ((and (string? path) (not (equal? path "")))
+           (list name 'file path (current-time)))
+          (else #f))))
+
+(define (peek-remember! name)
+  (let ((e (peek-recent-entry name)))
+    (when e
+      (set! *peek-recent*
+        (take-n (cons e (filter (lambda (x) (not (equal? (nth 2 x) (nth 2 e))))
+                                *peek-recent*))
+                *peek-recent-max*)))))
+
+(define (peek-forget-recent! key)
+  (set! *peek-recent*
+    (filter (lambda (x) (not (equal? (nth 2 x) key))) *peek-recent*)))
+
+;; a recent row comes back as a peek: the same look, the same choice
+(define (peek-revive! entry)
+  (let ((kind (nth 1 entry))
+        (key (nth 2 entry)))
+    (cond ((and (equal? kind 'browse) (boundp 'web--tab-for!))
+           (peek! (web--buffer-for key) (lambda () (web--tab-for! key))))
+          ((equal? kind 'dired)
+           (peek! key (lambda () (dired-open key))))
+          ((equal? kind 'file)
+           (peek-file! key))
+          (else #f))))
+
+;; let NAME go: remember it, kill it. A buffer with a live process is
+;; never a peek, so nothing here stops one.
+(define (peek-drop! name)
+  (when (peek-buffer? name)
+    (peek-remember! name)
+    (buffer-kill! name)))
+
+;; every peek but KEEP-ONE and the buffer the reader is in goes
+(define (peek-drop-others! keep-one)
+  (let ((here (current-buffer)))
+    (for-each (lambda (b)
+                (unless (or (equal? b keep-one) (equal? b here)
+                            ;; a peek the reader put in a second window
+                            ;; is theirs to look at
+                            (window-showing b))
+                  (peek-drop! b)))
+              (peek-buffers))))
+
+;; The peek slot is the window the last peek used, per frame. It is
+;; remembered, not derived: a peek of a buffer that already existed
+;; leaves no mark behind, and the next peek must still land in the
+;; same window instead of splitting again. Keeping the buffer in the
+;; slot releases the window (peek-keep!).
+(define (peek-slot me)
+  (let ((w (frame-local 'peek-window)))
+    (cond ((and w (window-exists? w) (not (equal? w me))) w)
+          ((peek-window me) (peek-window me))
+          ;; a popup floats over the layout: a peek from it goes to the
+          ;; window it covers, never to a split beside the popup
+          ((and (popup-open?) (equal? me (popup-window))) (other-window-id me))
+          (else #f))))
+
+;; show NAME as the peek beside the selected window. The selected
+;; window and its point stay. Returns the window used.
+(define (peek-show! name)
+  (let* ((me (active-window))
+         (already (window-showing-other name me))
+         (slot (or already (peek-slot me))))
+    ;; a look leaves no trace: the preview primitive shows NAME without
+    ;; touching the MRU ring or the window's history
+    (let ((win (if slot
+                   (begin (window-preview-buffer! name slot) slot)
+                   (begin
+                     (split-window! 'h 0.5)
+                     (other-window!)
+                     (window-preview-buffer! name)
+                     (let ((w (active-window)))
+                       (select-window! me)
+                       w)))))
+      (set-frame-local! 'peek-window win)
+      (peek-drop-others! name)
+      win)))
+
+;; the peek verb. OPEN makes or finds the buffer and returns its name.
+;; KNOWN is the name it will have, so "did the peek make it" is answered
+;; before OPEN runs: a buffer that was known stays a real buffer. OPEN
+;; may move the selected window (visit does); the window is put back.
+(define (peek! known open)
+  (let* ((existed? (and (string? known) (buffer-known? known) #t))
+         (me (active-window))
+         (here (current-buffer))
+         (buf (open)))
+    (when (and (string? buf) (not (equal? buf here)))
+      (unless (equal? (window-buffer me) here)
+        (window-preview-buffer! here me))
+      (select-window! me)
+      (unless existed?
+        (buffer-set-local! buf 'peek #t))
+      (peek-show! buf))
+    buf))
+
+;; a file, peeked: the one opener every listing of files shares
+(define (peek-file! path)
+  (peek! path (lambda () (visit path))))
+
+;; RET twice: the first press peeks KNOWN, the second keeps it and goes
+;; there. Returns 'peek or 'keep.
+(define (peek-or-keep! known open)
+  (if (and (string? known) (peek-buffer? known) (window-showing known))
+      (begin
+        (peek-keep! known)
+        (select-window! (window-showing known))
+        'keep)
+      (begin (peek! known open) 'peek)))
+
+(define (peek-keep! name)
+  (when (peek-buffer? name)
+    (buffer-set-local! name 'peek #f)
+    ;; a kept buffer keeps its window: the slot moves on
+    (let ((w (frame-local 'peek-window)))
+      (when (and w (equal? (window-buffer w) name))
+        (set-frame-local! 'peek-window #f)))
+    (peek-forget-recent! (or (buffer-path name)
+                             (buffer-local name 'browse-url)
+                             (buffer-local name 'dired-dir)
+                             name))
+    (message (string-append "kept " name))))
+
+;; an edit keeps: a file you typed in is yours. A listing reports itself
+;; as modified and has no path, so only a file answers here.
+(define (peek-keep-if-edited! b)
+  (when (and (peek-buffer? b) (buffer-path b) (buffer-modified? b))
+    (peek-keep! b)))
+
+(add-hook! 'post-command-hook
+  (lambda () (peek-keep-if-edited! (current-buffer))))
+
+(define-command "keep-buffer" "Keep this peek: it becomes an ordinary buffer"
+  (lambda ()
+    (let ((b (current-buffer)))
+      (if (peek-buffer? b)
+          (peek-keep! b)
+          (message "not a peek")))))
+
+(define-command "peek-recent" "Peek a buffer you looked at and let go"
+  (lambda ()
+    (if (null? *peek-recent*)
+        (message "nothing recent")
+        (minibuffer-read* "Recent: "
+          (map (lambda (e) (list (nth 2 e) (car e))) *peek-recent*)
+          (list (list 'match-hint 1)
+                (list 'confirm
+                      (lambda (key)
+                        (let ((e (peek-recent-find key)))
+                          (when e (peek-revive! e))))))))))
+
+(public! 'peek!
+  "(peek! KNOWN OPEN) — show the buffer OPEN returns beside the selected window as a peek; KNOWN is its name, so a buffer that already existed is only shown and never killed; the next peek replaces it")
+(public! 'peek-or-keep!
+  "(peek-or-keep! KNOWN OPEN) — RET twice: peek KNOWN, or keep it and go there when it is the peek on screen")
+(public! 'peek-file!
+  "(peek-file! PATH) — peek the file at PATH")
+(public! 'peek-keep!
+  "(peek-keep! NAME) — keep a peek: clear the mark; the buffer and its window stay")
+(public! 'peek-buffer?
+  "(peek-buffer? NAME) — #t when NAME is a peek: shown to look at, killed when the next peek replaces it")
+
 ;;; --- mode layouts -------------------------------------------------------------
 ;;; A display rule says where ONE buffer goes. A mode that owns the frame needs
 ;;; more: writing mode is a document and its scratch, side by side, and nothing
@@ -5219,6 +5440,18 @@
     (cond
       ((and (popup-open?) (equal? (active-window) (popup-window)))
         (popup-close!))
+      ;; a peek goes with its window: the look is over, the layout is
+      ;; what it was before the peek split it
+      ((peek-buffer? (current-buffer))
+        (let ((cur (current-buffer)))
+          (if (other-window-id (active-window))
+              (delete-window!)
+              (let loop ((bs (buffer-list-mru)))
+                (cond ((null? bs) #t)
+                      ((and (not (equal? (car bs) cur)) (buffer-exists? (car bs)))
+                       (switch-to-buffer! (car bs)))
+                      (else (loop (cdr bs))))))
+          (peek-drop! cur)))
       (else
         (let ((cur (current-buffer)))
           ;; a file with edits you did not save is not a listing: say so and
@@ -7662,13 +7895,17 @@
         text)))
 
 (define (buffer-modeline-name buf)
-  (let ((path (buffer-path buf))
-        (root (buffer-project-root buf)))
-    (cond ((not (string? path)) (abbreviate-home-in buf))
-          ((and (string? root) (not (equal? root ""))
-                (string-prefix? (string-append root "/") path))
-           (substring path (+ 1 (string-length root)) (string-length path)))
-          (else (abbreviate-file-name path)))))
+  (let* ((path (buffer-path buf))
+         (root (buffer-project-root buf))
+         (name (cond ((not (string? path)) (abbreviate-home-in buf))
+                     ((and (string? root) (not (equal? root ""))
+                           (string-prefix? (string-append root "/") path))
+                      (substring path (+ 1 (string-length root)) (string-length path)))
+                     (else (abbreviate-file-name path)))))
+    ;; a peek says so where the name is: the one mark the feature has
+    (if (buffer-local buf 'peek)
+        (string-append "peek · " name)
+        name)))
 
 (define (dashboard--sync! buf)
   (desktop-skip! buf 'dashboard-line)

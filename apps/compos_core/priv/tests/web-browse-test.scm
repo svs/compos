@@ -323,3 +323,229 @@
             (check-equal! fetches 1 "still no fetch"))))
       (set! web--read saved-read))
     (t--web-kill-tabs!)))
+
+;;; --- history with point ---------------------------------------------------------
+
+(deftest 'back-and-forward-return-to-the-line-the-reader-left
+  "a history entry is (URL POINT); a bare URL from an old desktop still reads"
+  (lambda ()
+    (t--web-with-fetch
+      (lambda (url want k) (k (list want (t--web-pages url) #f)))
+      (lambda ()
+        (let ((buf (browse "https://site.test/index.html")))
+          (with-current-buffer buf
+            (lambda ()
+              (let ((l (web--link-after buf 0)))
+                (goto-char! (car l))
+                (run-command "browse-follow")
+                (check-equal! (buffer-local buf 'browse-url)
+                              "https://site.test/second.html" "the link was followed")
+                (check-equal! (car (buffer-local buf 'browse-history))
+                              (list "https://site.test/index.html" (car l))
+                              "the entry names the page and the point")
+                (run-command "browse-back")
+                (check-equal! (buffer-point buf) (car l) "back lands on the link")
+                (goto-char! 0)
+                (run-command "browse-forward")
+                (check-contains! (buffer-text buf) "Second page" "forward returns")
+                (run-command "browse-back")
+                (check-equal! (buffer-point buf) 0 "and back keeps the newer point"))))
+          ;; an entry from before this shape: a bare URL
+          (buffer-set-local! buf 'browse-history '("https://site.test/index.html"))
+          (buffer-set-local! buf 'browse-url "https://site.test/second.html")
+          (with-current-buffer buf (lambda () (run-command "browse-back")))
+          (check-equal! (buffer-local buf 'browse-url) "https://site.test/index.html"
+                        "a bare URL still goes back")
+          (check-equal! (buffer-point buf) 0 "and opens at the top"))))
+    (t--web-kill-tabs!)))
+
+(deftest 'a-refetch-of-the-same-page-keeps-the-point
+  "g on this page is a refresh, not a new page"
+  (lambda ()
+    (t--web-with-fetch
+      (lambda (url want k) (k (list want (t--web-pages url) #f)))
+      (lambda ()
+        (let ((buf (browse "https://site.test/index.html")))
+          (buffer-goto! buf 12)
+          (buffer-set-local! buf 'browse-restore-point (buffer-point buf))
+          (buffer-set-local! buf 'cache-time #f)
+          (cache-refresh! buf)
+          (check-equal! (buffer-point buf) 12 "point stayed"))))
+    (t--web-kill-tabs!)))
+
+;;; --- the other window -----------------------------------------------------------
+
+(deftest 'a-link-opens-beside-this-window-and-point-stays-here
+  "M-RET: the tab shows in another window; the selected window keeps its page"
+  (lambda ()
+    (run-command "delete-other-windows")
+    (t--web-with-fetch
+      (lambda (url want k) (k (list want (t--web-pages url) #f)))
+      (lambda ()
+        ;; browse selects the tab's window, so the command runs the way a
+        ;; key press runs it: in the selected window, not under a
+        ;; with-current-buffer, which binds the buffer and not the window
+        (let* ((a (browse "https://site.test/index.html"))
+               (l (web--link-after a 0)))
+          (goto-char! (car l))
+          (run-command "browse-follow-other-window")
+          (check-equal! (current-buffer) a "the reader stays in the page")
+          (check-equal! (buffer-point a) (car l) "at the link")
+          (let ((b (web--buffer-for "https://site.test/second.html")))
+            (check-true! (and b #t) "the link's tab exists")
+            (check-contains! (buffer-text b) "Second page" "and holds the page")
+            (check-true! (and (window-showing b) #t) "in a window of its own")
+            (check-false! (equal? (window-showing b) (active-window))
+                          "which is not the selected one")))))
+    (t--web-kill-tabs!)
+    (run-command "delete-other-windows")))
+
+(deftest 'browse-other-window-shows-the-page-and-leaves-the-window-alone
+  "the C-x 4 shape from any buffer"
+  (lambda ()
+    (run-command "delete-other-windows")
+    (t--web-with-fetch
+      (lambda (url want k) (k (list want (t--web-pages url) #f)))
+      (lambda ()
+        (switch-to-buffer! "*scratch*")
+        (let ((b (browse-other-window "https://site.test/index.html")))
+          (check-equal! (current-buffer) "*scratch*" "the selected window is untouched")
+          (check-contains! b "*browse:" "the page has its tab")
+          (check-true! (and (window-showing b) #t) "shown in another window"))))
+    (t--web-kill-tabs!)
+    (run-command "delete-other-windows")))
+
+;;; --- the history file -----------------------------------------------------------
+
+(deftest 'the-history-file-keeps-url-title-and-time-newest-first
+  "one line per page; a forgotten page is gone; the old shape still reads"
+  (lambda ()
+    (t--web-with-fetch
+      (lambda (url want k) (k (list want (t--web-pages url) #f)))
+      (lambda ()
+        (write-file! *web-visited-file* "https://old.test/a Old page\n")
+        (browse "https://site.test/index.html")
+        (let ((rows (web--history)))
+          (check-equal! (car (car rows)) "https://site.test/index.html" "newest first")
+          (check-equal! (nth 1 (car rows)) "Front page" "with its title")
+          (check-true! (> (nth 2 (car rows)) 0) "and its time")
+          (check-equal! (nth 1 rows) (list "https://old.test/a" "Old page" 0)
+                        "an old line reads with no time"))
+        (check-contains! (read-file *web-visited-file*) "\t" "the file rewrites in the new shape")
+        (web--forget-visit! "https://site.test/index.html")
+        (check-false! (assoc "https://site.test/index.html" (web--history))
+                      "the page is forgotten")
+        (check-equal! (web--visited) '(("https://old.test/a" "Old page"))
+                      "and the prompt sees (URL TITLE)")))
+    (t--web-kill-tabs!)))
+
+(deftest 'the-history-list-shows-the-pages-and-forgets-one
+  "H opens the list; d takes a row out"
+  (lambda ()
+    (run-command "delete-other-windows")
+    (t--web-with-fetch
+      (lambda (url want k) (k (list want (t--web-pages url) #f)))
+      (lambda ()
+        (write-file! *web-visited-file* "")
+        (browse "https://site.test/index.html")
+        (run-command "browse-history")
+        (check-true! (buffer-exists? *web-history-buffer*) "the list buffer exists")
+        (check-contains! (buffer-text *web-history-buffer*) "Front page" "with the page's title")
+        (check-contains! (buffer-text *web-history-buffer*) "site.test" "and its URL")
+        (with-current-buffer *web-history-buffer*
+          (lambda ()
+            (check-equal! (car (list-current *web-history-buffer*))
+                          "https://site.test/index.html" "the row is the page")
+            (run-command "browse-history-forget")))
+        (check-false! (string-contains? (buffer-text *web-history-buffer*) "site.test")
+                      "the row is gone")
+        (check-equal! (web--history) '() "and so is the line")))
+    (when (buffer-exists? *web-history-buffer*) (buffer-kill! *web-history-buffer*))
+    (t--web-kill-tabs!)
+    (run-command "delete-other-windows")))
+
+;;; --- the small verbs ------------------------------------------------------------
+
+(effects! '(pure))
+
+(deftest 'up-goes-to-the-parent-path-and-top-to-the-site-root
+  "u and t are URL arithmetic"
+  (lambda ()
+    (check-equal! (web--parent-url "https://h.test/a/b/c.html") "https://h.test/a/b/" "a page's directory")
+    (check-equal! (web--parent-url "https://h.test/a/b/") "https://h.test/a/" "a directory's parent")
+    (check-equal! (web--parent-url "https://h.test/a/b?x=1") "https://h.test/a/" "the query goes")
+    (check-equal! (web--parent-url "https://h.test/") "https://h.test/" "the root is its own parent")
+    (check-equal! (web--parent-url "https://h.test") "https://h.test/" "and so is a bare host")
+    (check-equal! (web--origin "https://h.test/a/b") "https://h.test" "the origin")
+    (check-equal! (web--download-name "https://h.test/files/paper.pdf?dl=1") "paper.pdf"
+                  "a download takes the last segment")
+    (check-equal! (web--download-name "https://h.test/") "h.test.html"
+                  "and a host names a page")))
+
+(deftest 'the-age-label-reads-in-minutes-hours-and-days
+  "the history column"
+  (lambda ()
+    (check-equal! (web--age-label 0) "" "no time, no label")
+    (check-equal! (web--age-label (current-time)) "just now" "now")
+    (check-equal! (web--age-label (- (current-time) 300)) "5m ago" "minutes")
+    (check-equal! (web--age-label (- (current-time) 7200)) "2h ago" "hours")
+    (check-equal! (web--age-label (- (current-time) 172800)) "2d ago" "days")))
+
+(effects! '(write))
+
+(deftest 'w-copies-the-link-at-point-else-the-page
+  "eww's w, both halves"
+  (lambda ()
+    (t--web-with-fetch
+      (lambda (url want k) (k (list want (t--web-pages url) #f)))
+      (lambda ()
+        (let ((buf (browse "https://site.test/index.html")))
+          (with-current-buffer buf
+            (lambda ()
+              (goto-char! (car (web--link-after buf 0)))
+              (run-command "browse-copy-url")
+              (check-equal! (kill-top) "https://site.test/second.html" "the link, resolved")
+              (goto-char! 0)
+              (run-command "browse-copy-url")
+              (check-equal! (kill-top) "https://site.test/index.html" "the page"))))))
+    (t--web-kill-tabs!)))
+
+(deftest 'm-n-and-m-p-walk-the-tabs-in-a-ring
+  "two tabs, both directions"
+  (lambda ()
+    (t--web-with-fetch
+      (lambda (url want k) (k (list want (t--web-pages url) #f)))
+      (lambda ()
+        (let ((a (browse "https://site.test/index.html")))
+          (switch-to-buffer! "*scratch*")
+          (let ((b (browse "https://site.test/second.html")))
+            (check-equal! (web--tab-step a 1) b "next from a is b")
+            (check-equal! (web--tab-step b 1) a "and next from b wraps to a")
+            (check-equal! (web--tab-step a -1) b "previous wraps the other way")
+            (switch-to-buffer! b)
+            (run-command "browse-next-tab")
+            (check-equal! (current-buffer) a "the command switches")))))
+    (t--web-kill-tabs!)))
+
+(deftest 'a-bookmark-records-the-url-and-point-and-jumps-back-to-them
+  "the tab may be gone; the page comes back from the URL"
+  (lambda ()
+    (when (boundp 'bookmark-register-handler!)
+      (t--web-with-fetch
+        (lambda (url want k) (k (list want (t--web-pages url) #f)))
+        (lambda ()
+          (check-equal! (bookmark--mode-handler "browse-mode") "browse"
+                        "browse-mode has its handler")
+          (let ((buf (browse "https://site.test/index.html")))
+            (buffer-goto! buf 7)
+            (let ((record (web--bookmark-record buf)))
+              (check-equal! (plist-get record 'url) "https://site.test/index.html" "the URL")
+              (check-equal! (plist-get record 'title) "Front page" "the title")
+              (check-equal! (plist-get record 'position) 7 "the point")
+              (buffer-kill! buf)
+              (switch-to-buffer! "*scratch*")
+              (let ((tab (web--bookmark-jump! record "current")))
+                (check-equal! (current-buffer) tab "the jump opens the page")
+                (check-contains! (buffer-text tab) "Front page" "fetched again")
+                (check-equal! (buffer-point tab) 7 "at the saved point")))))))
+    (t--web-kill-tabs!)))

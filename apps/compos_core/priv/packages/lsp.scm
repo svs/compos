@@ -276,12 +276,14 @@
                 (or (buffer-local buf 'lsp-diagnostics) '())))
          (filter (lambda (b) (buffer-local b 'lsp-diagnostics)) (buffer-list)))))
 
+;; a preview is a peek of the buffer the diagnostic names: shown in the
+;; peek slot, never made and never killed, because it exists already
 (define (lsp--diag-visit e select?)
   (let ((buf (plist-get e 'buf)))
     (when (buffer-exists? buf)
       (if select?
           (switch-to-buffer! buf)
-          (window-preview-buffer! buf))
+          (peek! buf (lambda () buf)))
       (buffer-goto! buf (plist-get e 'start)))))
 
 (define-list-mode! "lsp-diagnostics-mode"
@@ -377,14 +379,20 @@
         (start (plist-get loc 'startByte))
         (path (lsp--loc-path loc)))
     (cond ((and buf start (buffer-exists? buf))
-           (if select? (switch-to-buffer! buf) (window-preview-buffer! buf))
+           (if select? (switch-to-buffer! buf) (peek! buf (lambda () buf)))
            (buffer-goto! buf start)
            (when select? (goto-char! start)))
+          ;; a file nobody has open is a PEEK: it shows beside the list
+          ;; and goes when the next peek replaces it. RET keeps it.
           (path
            (if select?
-               (visit path)
-               (window-preview-buffer! (find-file path)))
-           (goto-char! (line-start-position (lsp--loc-line loc))))
+               (begin (visit path) (peek-keep! path)
+                      (goto-char! (line-start-position (lsp--loc-line loc))))
+               (let ((b (peek-file! path)))
+                 (when (string? b)
+                   (with-current-buffer b
+                     (lambda ()
+                       (buffer-goto! b (line-start-position (lsp--loc-line loc)))))))))
           (else (message "lsp: location without a place")))))
 
 (define (lsp--loc-label loc)

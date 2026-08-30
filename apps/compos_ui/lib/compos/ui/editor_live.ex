@@ -3074,8 +3074,9 @@ defmodule Compos.Ui.EditorLive do
   defp strip_llm_markers(other), do: other
 
   # A bare URL in the source becomes a link whose text is the URL
-  # (Earmark pure links). The preview upgrades image, X, and YouTube URLs.
-  # A written
+  # (Earmark pure links). Images and X posts upgrade automatically. A bare
+  # YouTube URL upgrades only as a complete paragraph. The #+embed directive
+  # also upgrades it. A written
   # link — [text](url) — has text different from the href and stays a
   # link. The point sentinel can sit inside the pasted URL; the compare
   # ignores it and the embed re-emits it as a sibling.
@@ -3085,6 +3086,23 @@ defmodule Compos.Ui.EditorLive do
   @tweet_re ~r{\Ahttps?://(?:mobile\.)?(?:twitter|x)\.com/[^/]+/status(?:es)?/\d+(?:[?#]\S*)?\z}
 
   defp embed_urls(nodes) when is_list(nodes), do: Enum.flat_map(nodes, &embed_node/1)
+
+  defp embed_node({"p", atts, children, meta}) do
+    source = llm_marker_text(children)
+
+    clean =
+      source
+      |> String.replace(@pt_sentinel, "")
+      |> String.replace("\uE001", "")
+      |> String.replace(@anchor, "")
+
+    url = embed_directive_url(clean) || String.trim(clean)
+
+    case youtube_id(url) do
+      nil -> [{"p", atts, embed_urls(children), meta}]
+      id -> [youtube_card_node(url, id, meta), preview_markers(source)]
+    end
+  end
 
   defp embed_node({"a", atts, [text], meta} = node) when is_binary(text) do
     url = String.replace(text, @pt_sentinel, "")
@@ -3107,7 +3125,6 @@ defmodule Compos.Ui.EditorLive do
       href != url -> [node]
       image_url?(url) -> [{"img", [{"src", url}, {"alt", ""}], [], meta} | tail]
       tweet_url?(url) -> tweet_card(url, meta) ++ tail
-      youtube_id(url) -> [youtube_card_node(url, youtube_id(url), meta) | tail]
       true -> [node]
     end
   end
@@ -3149,6 +3166,20 @@ defmodule Compos.Ui.EditorLive do
   end
 
   defp tweet_url?(url), do: Regex.match?(@tweet_re, url)
+
+  defp embed_directive_url(text) do
+    case Regex.run(~r/\A#\+embed:[ \t]+(\S+)[ \t]*\z/i, text, capture: :all_but_first) do
+      [url] -> url
+      _ -> nil
+    end
+  end
+
+  defp preview_markers(text) do
+    text
+    |> String.graphemes()
+    |> Enum.filter(&(&1 in [@pt_sentinel, "\uE001", @anchor]))
+    |> Enum.join()
+  end
 
   defp youtube_id(url) do
     uri = URI.parse(url)
@@ -3197,8 +3228,10 @@ defmodule Compos.Ui.EditorLive do
      ], meta}
   end
 
-  defp youtube_embed_html(url) do
-    case youtube_id(url) do
+  defp youtube_embed_html(source) do
+    url = embed_directive_url(source) || String.trim(source)
+
+    case url && youtube_id(url) do
       nil ->
         nil
 

@@ -67,6 +67,27 @@
       (check-true! (member '(9 17 "org-level-2") ovs) "and the child"))
     (t--morg-done!)))
 
+(deftest 'morg-scans-a-standalone-embed-directive
+  "a complete #+embed line is a directive with one value"
+  (lambda ()
+    (t--morg! "before\n#+embed: https://youtu.be/dQw4w9WgXcQ\nafter\n" 0)
+    (let ((entry (cadr (morg-scan t--morg-buf))))
+      (check-equal! (morg-kind entry) 'directive "the line is a directive")
+      (check-equal! (morg-info entry)
+                    '("embed" "https://youtu.be/dQw4w9WgXcQ")
+                    "the directive keeps its name and value")
+      (check-true! (member '(7 44 "org-meta") (buffer-overlays t--morg-buf))
+                   "plain Morg shows directive metadata"))
+    (t--morg-done!)))
+
+(deftest 'morg-does-not-scan-an-inline-embed-word-as-a-directive
+  "directive syntax must occupy the complete line"
+  (lambda ()
+    (t--morg! "text #+embed: https://youtu.be/dQw4w9WgXcQ\n" 0)
+    (check-equal! (morg-kind (car (morg-scan t--morg-buf))) 'text
+                  "inline syntax remains paragraph text")
+    (t--morg-done!)))
+
 ;;; --- folding ------------------------------------------------------------------
 
 (deftest 'morg-cycle-folds-and-unfolds-the-heading-subtree-at-point

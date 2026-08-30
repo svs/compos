@@ -282,8 +282,9 @@
                          (and (buffer-known? b)
                               (begin (buffer-kill! b) #t)))))
     'noun "buffer"
+    ;; a peek: an existing buffer is only shown, in the peek slot
     'preview (lambda (buf b)
-               (when (buffer-known? b) (display-buffer-other-window! b)))
+               (when (buffer-known? b) (peek! b (lambda () b))))
     'keys '(("RET" "ibuffer-visit") ("k" "ibuffer-kill")
             ("G" "ibuffer-group") ("g" "ibuffer-refresh")
             ("q" "quit-window"))))

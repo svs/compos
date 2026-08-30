@@ -6,8 +6,8 @@
 ;;; on every line but the one point is on. A heading wears its level's
 ;;; face, and that face carries a size. An image URL wears img-embed and
 ;;; draws as the picture. A line that is one X post URL wears x-embed and
-;;; draws as the card. A line that is one YouTube URL wears youtube-embed
-;;; and draws as a video card.
+;;; draws as the card. A standalone YouTube URL or #+embed directive wears
+;;; youtube-embed and draws a video card.
 ;;;
 ;;; preview-mode turns the paint on and off (markdown-paint-on!,
 ;;; markdown-paint-off!). morg-mode owns structure and the plain faces.
@@ -173,7 +173,15 @@
       ;; re-find* answers '() for no match, and '() is true: ask null?
       ((not (null? (re-find* md--x-pattern line)))
        (list (list start (+ start len) "x-embed")))
-      ((not (null? (re-find* md--youtube-pattern line)))
+      (embed
+       (let ((url (nth 1 embed)))
+         (append
+           (if (> (car url) 0)
+               (list (md--span start 0 (car url) "md-marker")) '())
+           (list (md--span start (car url) (cadr url) "youtube-embed"))
+           (if (< (cadr url) len)
+               (list (md--span start (cadr url) len "md-marker")) '()))))
+      ((re-match (string-append "^" md--youtube-url-pattern "$") line)
        (list (list start (+ start len) "youtube-embed")))
       (else
        (append

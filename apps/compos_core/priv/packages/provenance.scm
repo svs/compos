@@ -244,7 +244,9 @@
     (buffer-set-local! buf 'revision rev)
     (buffer-set-local! buf 'mode-name "revision-mode")
     (prov-revision-setup! buf)
-    (let ((win (display-buffer-other-window! buf)))
+    ;; one revision buffer, shown as a peek in the slot
+    (peek! buf (lambda () buf))
+    (let ((win (window-showing buf)))
       (when (and select? win (window-exists? win))
         (select-window! win)))))
 

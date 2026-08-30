@@ -45,7 +45,7 @@ defmodule Compos.Ui.PreviewEmbedTest do
     assert html =~ ~s(<a href="https://example.com/page")
   end
 
-  test "a bare YouTube watch URL renders as a video card" do
+  test "a standalone bare YouTube URL renders as a video card" do
     url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=43"
     html = EditorLive.preview_doc("markdown", url <> "\n", 0, @faces, false)
 
@@ -54,16 +54,44 @@ defmodule Compos.Ui.PreviewEmbedTest do
     assert html =~ ~s(href="#{url}")
   end
 
-  test "YouTube short, live, embed, and share URLs render as video cards" do
+  test "a standalone embed directive renders a YouTube video card" do
+    url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=43"
+    source = "#+embed: #{url}\n"
+    html = EditorLive.preview_doc("markdown", source, byte_size(source), @faces, false)
+
+    assert html =~ ~s(class="youtube-card")
+    assert html =~ ~s(src="https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg")
+    assert html =~ ~s(href="#{url}")
+    assert html =~ @pt
+  end
+
+  test "embed directives accept YouTube short, live, embed, and share URLs" do
     for url <- [
           "https://youtube.com/shorts/dQw4w9WgXcQ",
           "https://youtube.com/live/dQw4w9WgXcQ?feature=share",
           "https://youtube.com/embed/dQw4w9WgXcQ",
           "https://youtu.be/dQw4w9WgXcQ?t=43"
         ] do
-      html = EditorLive.preview_doc("markdown", url <> "\n", 0, @faces, false)
+      html = EditorLive.preview_doc("markdown", "#+embed: #{url}\n", 0, @faces, false)
       assert html =~ ~s(class="youtube-card")
     end
+  end
+
+  test "an embed word inside a paragraph stays text and a link" do
+    url = "https://youtu.be/dQw4w9WgXcQ"
+    html = EditorLive.preview_doc("markdown", "Use #+embed: #{url} here.\n", 0, @faces, false)
+
+    refute html =~ ~s(class="youtube-card")
+    assert html =~ "Use #+embed:"
+    assert html =~ ~s(href="#{url}")
+  end
+
+  test "a bare YouTube URL inside prose stays a link" do
+    url = "https://youtu.be/dQw4w9WgXcQ"
+    html = EditorLive.preview_doc("markdown", "Watch #{url} later.\n", 0, @faces, false)
+
+    refute html =~ ~s(class="youtube-card")
+    assert html =~ ~s(href="#{url}")
   end
 
   test "a written YouTube link stays a link" do
@@ -80,19 +108,21 @@ defmodule Compos.Ui.PreviewEmbedTest do
     assert html =~ ">video</a>"
   end
 
-  test "a malformed YouTube video id stays a link" do
+  test "an embed directive with a malformed video id stays text and a link" do
     url = "https://youtu.be/too-short"
-    html = EditorLive.preview_doc("markdown", url <> "\n", 0, @faces, false)
+    html = EditorLive.preview_doc("markdown", "#+embed: #{url}\n", 0, @faces, false)
 
     refute html =~ ~s(class="youtube-card")
+    assert html =~ "#+embed:"
     assert html =~ ~s(href="#{url}")
   end
 
-  test "the tree-sitter renderer accepts a bare URL card" do
+  test "the tree-sitter renderer delegates a complete directive paragraph" do
     url = "https://youtu.be/dQw4w9WgXcQ"
-    tree = [%{kind: :paragraph, start: 0, stop: byte_size(url), children: []}]
+    source = "#+embed: #{url}"
+    tree = [%{kind: :paragraph, start: 0, stop: byte_size(source), children: []}]
 
-    html = Html.render_tree(tree, url, [], url_embed: fn ^url -> "<youtube-card>" end)
+    html = Html.render_tree(tree, source, [], url_embed: fn ^source -> "<youtube-card>" end)
 
     assert html =~ "<youtube-card>"
   end

@@ -44,10 +44,21 @@
 (define (morg-fence-close? line)
   (re-match "^[ \t]*```[ \t]*$" line))
 
+;; A block directive occupies one complete line: #+name: value.
+(define (morg-directive-info line)
+  (let ((g (re-groups "^#\\+([A-Za-z0-9_-]+):[ \t]*(.*)$" line 0)))
+    (if g
+        (let ((name (nth 1 g)) (value (nth 2 g)))
+          (list
+            (string-downcase (substring-bytes line (car name) (cadr name)))
+            (substring-bytes line (car value) (cadr value))))
+        #f)))
+
 ;; entry accessors: an entry is (start line kind info)
 ;;   kind 'heading — info is the level (1..6)
 ;;   kind 'open    — info is the block's language ("" when unnamed)
 ;;   kind 'code    — info is the enclosing block's language
+;;   kind 'directive — info is (name value)
 ;;   kind 'close / 'text — info is #f
 (define (morg-kind e) (caddr e))
 (define (morg-info e) (car (cdr (cdr (cdr e)))))
@@ -67,6 +78,10 @@
             ((morg-fence-info line)
              (let ((lang (morg-fence-info line)))
                (loop (cdr ls) lang (cons (list start line 'open lang) acc))))
+            ((morg-directive-info line)
+             (loop (cdr ls) #f
+                   (cons (list start line 'directive
+                               (morg-directive-info line)) acc)))
             ((re-match "^#{1,6}[ \t]" line)
              (let ((m (re-groups "^(#+)" line 0)))
                (loop (cdr ls) #f
@@ -582,6 +597,7 @@
                      '()))))))
       ((equal? k 'open) (list (list start (+ start len) "org-meta")))
       ((equal? k 'close) (list (list start (+ start len) "org-meta")))
+      ((equal? k 'directive) (list (list start (+ start len) "org-meta")))
       ((equal? k 'code)
        (cond ((equal? (morg-info e) "result-scheme") '())
              ((member (morg-info e) '("result" "result-csv"))

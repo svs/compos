@@ -373,8 +373,8 @@ defmodule Compos.Core.Markdown.Html do
     {[~s(<div class="code-block">), code_head(lang, args), content, "</div>"], marks}
   end
 
-  # A caller can upgrade a paragraph that contains only one URL. The core
-  # renderer keeps URL policy outside this module and keeps source marks.
+  # A caller can upgrade one complete paragraph. The core renderer keeps
+  # directive policy outside this module and keeps source marks.
   defp node(%{kind: :paragraph} = node, text, marks) do
     source = binary_part(text, node.start, node.stop - node.start)
     url = String.trim(source)

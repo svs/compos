@@ -2322,9 +2322,19 @@
 (define (group-switch-all-buffers-but here)
   (filter (lambda (b)
             (and (not (equal? b here))
-                 (not (string-prefix? " " b))))
+                 (not (string-prefix? " " b))
+                 ;; a peek is a look, not a buffer of yours
+                 (not (peek-buffer? b))))
           (dedupe-names
             (append (window-buffer-history) (buffer-list-mru)))))
+
+;; what peeks showed and let go, as a last section. RET peeks it again.
+;; A row that is live again is not repeated.
+(define (group-switch-recent-rows)
+  (map (lambda (e)
+         (list (car e) (string-append "recent · " (symbol->string (nth 1 e)))))
+       (filter (lambda (e) (not (buffer-known? (car e))))
+               (if (boundp '*peek-recent*) *peek-recent* '()))))
 
 (define (group-switch-separator label) (list label "" "separator"))
 
@@ -2347,7 +2357,11 @@
           (cons (group-switch-separator
                   (if (pair? mine) "other buffers" "all buffers"))
                 others)
-          '()))))
+          '())
+      (let ((recent (group-switch-recent-rows)))
+        (if (pair? recent)
+            (cons (group-switch-separator "recent") recent)
+            '())))))
 
 (define (group-switch-adopt! buf id)
   (cond ((not id) (message "No current group"))
@@ -2364,11 +2378,17 @@
         (adopt (let ((x *mb-confirm-adopt*))
                  (set! *mb-confirm-adopt* #f)
                  x)))
-    (when (buffer-known? buf)
-      (cond (adopt (group-switch-adopt! buf id))
-            (context (buffer-context-switch! buf))
-            (else
-              (switch-to-buffer! buf))))))
+    (cond ((buffer-known? buf)
+           (cond (adopt (group-switch-adopt! buf id))
+                 (context (buffer-context-switch! buf))
+                 (else
+                   (switch-to-buffer! buf))))
+          ;; a recent row: what a peek let go comes back as a peek
+          ((and (boundp '*peek-recent*)
+                (let ((hits (filter (lambda (e) (equal? (car e) buf)) *peek-recent*)))
+                  (and (pair? hits) (begin (peek-revive! (car hits)) #t))))
+           #t)
+          (else #f))))
 
 (define-command "group-switch-buffer"
   "Switch to a buffer; C-RET enters its group, S-RET adds it to this one"
@@ -2396,6 +2416,11 @@
                     (restore-buffer-runtime! buf)
                     (set! woken (cons buf woken))))))
             (lambda (buf)
+              ;; a row that is not a live buffer (a recent peek) had no
+              ;; preview: put back what the window showed before the
+              ;; last preview, then bring the row back beside it
+              (unless (buffer-known? buf)
+                (when (buffer-known? here) (window-preview-buffer! here)))
               (group-switch-confirm! buf id)
               (sleep-woken! buf))
             (lambda ()

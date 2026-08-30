@@ -1,20 +1,28 @@
 # The New Browser Was Emacs All Along
 
-I have wanted to invent a new browser for years. Not another engine for HTML, CSS, and JavaScript, but a new environment for using software: a rendered application in the main area, a persistent conversation beside it, and an agent that can operate the application with me. The user should keep the visual interface. The agent should get a precise semantic interface. Both should act on the same state.
+I have wanted to invent a new browser for years. and years. Not another engine for HTML, CSS, and JavaScript, but a new environment for using~ software: a rendered application in the main area, a persistent conversation beside it, and an agent that can operate the application with me. The user should keep the visual interface. The agent should get a precise semantic interface. Both should act on the same state.
 
 Most attempts deliver only half of that idea. Browser agents preserve the rendered application, but they understand it through screenshots, accessibility trees, selectors, and simulated clicks. Chat applications give the agent a clean language interface, but reduce the application to messages and generated cards. One approach has a good interface for people and a poor interface for agents. The other has a good interface for agents and a poor environment for serious human work.
 
-Emacs suggests how to combine them. Its important idea is not that every application should look like a text editor. Its important idea is that an application can expose one live, programmable environment to users, extensions, and automation. Buffers hold durable state. Windows present buffers. Commands provide named actions. Modes supply contextual behavior. The evaluator can inspect and change the running system. An agent harness needs almost exactly these properties.
+Emacs suggests how to combine them. Its important idea is not that every other stupid application should look like a text editor. Its important idea is that an application can expose one live, programmable environment to users, extensions, and automation. Buffers hold durable state. Windows present buffers. Commands provide named actions. Modes supply contextual behavior. The evaluator can inspect and change the running system. An agent harness needs almost exactly these properties.
 
 The new browser may not need a new browser model after all. It may need the Emacs philosophy with modern rendering, concurrency, and agents.
 
 ## The two bad choices
 
 A conventional browser gives people a rich visual surface. Applications can display maps, tables, editors, timelines, diagrams, mail, dashboards, and media. However, the browser presents agents with the result of rendering rather than the meaning behind it. An agent often has to infer that a rectangle is a button, discover whether it is visible, click coordinates, wait for a transition, and inspect another rendered result.
+![image](/Users/svs/src/ai-max.el/docs/codex.png)
 
 This process is useful when no other interface exists, but it is a poor foundation for an agent-native environment. Pixels lose intent. DOM structure leaks implementation details. Labels change. Responsive layouts move controls. Virtualized lists hide items. A modal can intercept a click without changing the underlying task. The agent spends attention operating the interface instead of solving the problem.
 
 Chat-first systems remove that friction by making language the main interface. The agent receives a request, calls tools, and returns text or a small rendered artifact. This works well for bounded tasks. It works less well when the user wants to inhabit an application for hours. A conversation is a weak substitute for a file manager, mail client, debugger, calendar, music library, or structured writing workspace.
+
+![image](/Users/svs/src/ai-max.el/docs/craft_Agents.png)
+
+*Ok, now what? *
+
+Literally everything needs to be sent to the agent or you need to switch to the application where things get done. No in-between.
+
 
 The common response is to put a chat sidebar beside a normal application. That improves the layout, but not the architecture. The sidebar often belongs to a separate assistant service. It receives a summary of application state and invokes a narrow set of actions. The application remains closed, while the assistant remains outside it. They share a screen but not a runtime.
 
@@ -87,8 +95,8 @@ That is the best of both worlds. It keeps the rendered application, visual conte
 The new browser I wanted was not a smarter collection of web pages. It was a live application environment shared by the user and the agent. Emacs had already supplied the difficult idea: keep the system open, make actions semantic, and let every application participate in one programmable world. What remained was modern rendering, modern concurrency, and a model capable of using it.
 
 ## Further reading
-
+https://www.youtube.com/watch?v=DMbrNhx2zWQ
 - [GNU Emacs Lisp Reference Manual](https://www.gnu.org/software/emacs/manual/html_node/elisp/)
-- [compos.el architecture](ARCHITECTURE.md)
-- [compos.el AI-native plan](AI-NATIVE-SPEC.md)
-- [compos.el component system](COMPONENTS.md)
+- [ai-max.el architecture](ARCHITECTURE.md)
+- [ai-max.el AI-native plan](AI-NATIVE-SPEC.md)
+- [ai-max.el component system](COMPONENTS.md)

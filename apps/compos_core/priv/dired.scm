@@ -423,8 +423,9 @@
            "One directory as a table: name, size, modified, perms and what "
            "git says. Mark files with `m` and the whole listing with `*`; "
            "`x` trashes what you marked, and `d` flags a file for the same "
-           "`x`. `D` flags permanent deletion. `RET` "
-           "visits, `^` goes up. `/` narrows as you type — it matches the "
+           "`x`. `D` flags permanent deletion. `RET` on a file peeks it "
+           "beside the listing, and `RET` again keeps it and goes there; "
+           "`RET` on a directory opens it here. `^` goes up. `/` narrows as you type — it matches the "
            "perms, the size, the date, the name and the mode the file would "
            "open in. The arrows move the rows while you type, and `RET` "
            "keeps the narrowing and the row you chose. `\\` widens by one "
@@ -459,7 +460,7 @@
     'meta dired-meta
     'total (lambda (buf) (or (buffer-local buf 'dired-total) 0))
     'footer (lambda (buf)
-              '(("RET" "visit") ("m" "mark") ("*" "all") ("d" "flag")
+              '(("RET" "peek, again keeps") ("m" "mark") ("*" "all") ("d" "flag")
                 ("x" "trash") ("C" "copy") ("R" "rename") ("s" "sort")
                 ("/" "filter") ("." "dotfiles")
                 ("^" "up") ("g" "revert") ("q" "quit")))
@@ -638,21 +639,21 @@
 (define-command "dired-prev" "Move up to the previous line in the Dired buffer"
   (lambda () (list-move! -1)))
 
+;; A directory opens in place: a listing is yours. A file is a PEEK: the
+;; first RET shows it beside the listing, the second RET keeps it and
+;; goes there. A file that already had a buffer is only shown.
 (define (dired-visit-with-group group)
   (let ((p (dired-path-at-point))
         (entry (dired-entry)))
     (if p
         (if (or (equal? entry "..") (dired-directory? entry))
             (visit p group)
-            (let* ((dired-buffer (current-buffer))
-                   (file-buffer (visit p group)))
-              (when file-buffer
-                (switch-to-buffer! dired-buffer)
-                (display-buffer-other-window! file-buffer))
-              file-buffer))
+            (begin
+              (peek-or-keep! p (lambda () (visit p group)))
+              p))
         (message "No file on this line"))))
 
-(define-command "dired-visit" "Visit the file or directory named on this line"
+(define-command "dired-visit" "Peek the file on this line; RET again keeps it. A directory opens here"
   (lambda ()
     ;; The Dired buffer's group is more specific than a frame or project
     ;; fallback. An explicit visit also replaces inherited placement.

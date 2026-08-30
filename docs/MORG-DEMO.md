@@ -123,3 +123,18 @@ Margaret Hamilton,software engineer
 ```elixir :tangle demo/generated.exs
 IO.puts("This file came from Morg")
 ```
+
+## 10. Media previews
+
+Preview mode draws a standalone YouTube URL as a linked thumbnail. Paste and
+cut still edit only the URL text. A URL inside prose stays a normal link.
+
+https://youtu.be/dQw4w9WgXcQ
+
+Use an explicit directive when the document must state the display choice:
+
+#+embed: https://youtube.com/watch?v=dQw4w9WgXcQ
+
+Use ordinary Markdown when you want linked text instead of a card:
+
+[Watch the video](https://youtu.be/dQw4w9WgXcQ)

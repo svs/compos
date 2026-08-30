@@ -64,12 +64,46 @@
     (check-true! (t--md-has? '(0 35 "x-embed")) "the URL is the card")
     (t--md-done!)))
 
-(deftest 'a-line-that-is-one-youtube-url-draws-as-the-card
-  "the whole line wears youtube-embed and nothing else"
+(deftest 'a-youtube-embed-directive-draws-as-the-card
+  "the directive steps back and its URL wears youtube-embed"
+  (lambda ()
+    (t--md-fresh! "#+embed: https://youtu.be/dQw4w9WgXcQ?t=43\n")
+    (check-true! (t--md-has? '(0 9 "md-marker")) "the directive steps back")
+    (check-true! (t--md-has? '(9 42 "youtube-embed")) "the URL is the card")
+    (t--md-done!)))
+
+(deftest 'a-standalone-bare-youtube-url-draws-as-a-card
+  "a pasted URL embeds when it occupies the complete line"
   (lambda ()
     (t--md-fresh! "https://youtu.be/dQw4w9WgXcQ?t=43\n")
     (check-true! (t--md-has? '(0 33 "youtube-embed")) "the URL is the card")
     (t--md-done!)))
+
+(deftest 'an-inline-youtube-url-does-not-draw-as-a-card
+  "a URL inside prose stays a link"
+  (lambda ()
+    (t--md-fresh! "watch https://youtu.be/dQw4w9WgXcQ now\n")
+    (check-false! (t--md-has? '(6 34 "youtube-embed")) "the URL stays text")
+    (t--md-done!)))
+
+(deftest 'cutting-and-yanking-a-youtube-card-repaints-the-url
+  "cut and yank edit plain source; preview mode derives the card"
+  (lambda ()
+    (let ((url "https://youtu.be/dQw4w9WgXcQ"))
+      (t--md-fresh! (string-append url "\n"))
+      (with-current-buffer t--md-buf
+        (lambda ()
+          (set-mark! 0)
+          (goto-char! (string-byte-length url))
+          (run-command "kill-region")))
+      (check-equal! (buffer-text t--md-buf) "\n" "cut removes the source URL")
+      (with-current-buffer t--md-buf (lambda () (run-command "yank")))
+      (check-equal! (buffer-text t--md-buf) (string-append url "\n")
+                    "yank restores only the source URL")
+      (check-true!
+        (wait-until (lambda () (t--md-has? '(0 28 "youtube-embed"))) 2000 20)
+        "preview mode repaints the restored URL")
+      (t--md-done!))))
 
 (deftest 'turning-the-mode-off-takes-the-paint-with-it
   "teardown clears the markdown overlays"

@@ -1,132 +1,233 @@
-;;; peek-test.scm --- look at a definition, then go or discard.
+;;; peek-test.scm --- editor.scm's peek: look at a buffer without keeping it.
 ;;;
-;;; definition-peek shows the definition of the name at point in the
-;;; other window and keeps focus. The post-command hook decides what
-;;; happens next: while the reader stays where the peek was made it
-;;; stays, when the reader moves it is discarded, and the peek run again
-;;; on the same name goes there. The tests call the hook by hand, because
-;;; run-command from Scheme does not pass through the dispatcher that
-;;; runs it.
+;;; A peek shows beside the selected window. The next peek replaces it
+;;; and kills what the first peek made. A buffer that existed before is
+;;; only shown. RET twice keeps. q closes the peek and its window. A
+;;; replaced peek leaves a row in recent, and the switcher lists it.
 
 (domain! 'testing)
 (effects! '(write))
 
-(tests-need-a-disposable-editor!
-  "the tests split and delete windows and reset zz- buffers")
+(define t--peek-dir (string-append (compos-home) "/look-test"))
 
-(define t--peek-doc "zz-peek-doc.md")
-(define t--peek-defs "zz-peek-defs.scm")
+(define (t--peek-file name text)
+  (let ((p (string-append t--peek-dir "/" name)))
+    (write-file! p text)
+    p))
 
-;; the doc names the definition; point lands inside the name
-(define (t--peek-setup!)
-  (peek-discard!)
+;; every test starts from one window on *scratch* and ends there
+(define (t--peek-with thunk)
+  (make-directory! t--peek-dir)
+  (switch-to-buffer! "*scratch*")
   (run-command "delete-other-windows")
-  (test-buffer! t--peek-defs ";; a source\n(define (zz-peek-target) 1)\n")
-  (with-current-buffer t--peek-defs (lambda () (set-mode! "scheme-mode")))
-  (test-buffer! t--peek-doc "see `zz-peek-target` here\n")
-  (with-current-buffer t--peek-doc (lambda () (set-mode! "morg-mode")))
-  (switch-to-buffer! t--peek-doc)
-  (buffer-goto! t--peek-doc 8))
+  (let ((out (thunk)))
+    (for-each (lambda (b)
+                (when (string-prefix? t--peek-dir b) (buffer-kill! b)))
+              (buffer-list))
+    (set! *peek-recent* '())
+    (switch-to-buffer! "*scratch*")
+    (run-command "delete-other-windows")
+    out))
 
-(define (t--peek-teardown!)
-  (peek-discard!)
-  (run-command "delete-other-windows")
-  (when (buffer-exists? t--peek-doc) (buffer-kill! t--peek-doc))
-  (when (buffer-exists? t--peek-defs) (buffer-kill! t--peek-defs)))
-
-(deftest 'definition-locate-finds-a-definition-in-an-open-scheme-buffer
-  "the catalog chain answers with the source kind, the target, and the byte position"
+(deftest 'a-peek-shows-beside-and-the-selected-window-stays
+  "the file is on screen, marked, and the reader did not move"
   (lambda ()
-    (t--peek-setup!)
-    (let ((hit (definition-locate "zz-peek-target")))
-      (check-true! hit "the name has a definition")
-      (check-equal! 'buffer (car hit) "an open scheme buffer is a buffer source")
-      (check-equal! t--peek-defs (cadr hit) "the target is that buffer")
-      (check-equal! 12 (caddr hit) "the position is the defining form"))
-    (t--peek-teardown!)))
+    (t--peek-with
+      (lambda ()
+        (let* ((a (t--peek-file "a.txt" "alpha\n"))
+               (me (active-window)))
+          (peek-file! a)
+          (check-equal! (current-buffer) "*scratch*" "the reader stays put")
+          (check-equal! (active-window) me "in the same window")
+          (check-true! (peek-buffer? a) "the file is a peek")
+          (check-true! (and (window-showing a) #t) "shown in a window")
+          (check-false! (equal? (window-showing a) me) "which is another one")
+          (check-contains! (buffer-modeline-name a) "peek" "and its modeline says so"))))))
 
-(deftest 'a-located-file-is-the-source-file
-  "a bundled definition resolves to the checkout's priv, not the build symlink"
+(deftest 'the-next-peek-replaces-the-last-and-kills-what-peek-made
+  "one peek at a time; a buffer that existed before is only shown"
   (lambda ()
-    (let ((hit (definition-locate "definition-peek" 'command)))
-      (check-true! hit "a bundled command has a definition")
-      (check-equal! 'file (car hit) "it is a file source")
-      (check-false! (string-contains? (cadr hit) "_build") "the path names the source tree")
-      (check-true! (string-suffix? "priv/packages/peek.scm" (cadr hit)) "and the right file"))))
+    (t--peek-with
+      (lambda ()
+        (let* ((a (t--peek-file "a.txt" "alpha\n"))
+               (b (t--peek-file "b.txt" "beta\n"))
+               (c (t--peek-file "c.txt" "gamma\n")))
+          ;; c is a real buffer before any peek
+          (visit c)
+          (switch-to-buffer! "*scratch*")
+          (run-command "delete-other-windows")
+          (peek-file! a)
+          (let ((slot (window-showing a)))
+            (peek-file! b)
+            (check-equal! (window-showing b) slot "b took a's window")
+            (check-false! (buffer-exists? a) "a is gone")
+            (check-equal! (length (window-list)) 2 "and no third window opened")
+            (peek-file! c)
+            (check-equal! (window-showing c) slot "c shows in the slot")
+            (check-false! (peek-buffer? c) "but c is not a peek: it existed")
+            (check-false! (buffer-exists? b) "b is gone")
+            (peek-file! a)
+            (check-true! (buffer-exists? c) "c survives being replaced")
+            (check-true! (peek-buffer? a) "a is a peek again")))))))
 
-(deftest 'definition-peek-shows-the-definition-and-keeps-focus
-  "the other window shows the source at the definition; the active window does not change"
+(deftest 'peeks-of-existing-buffers-share-the-slot-window
+  "ibuffer walking ten buffers opens one window, not ten"
   (lambda ()
-    (t--peek-setup!)
-    (let ((origin (active-window))
-          (before (length (window-list))))
-      (run-command "definition-peek")
-      (check-equal! origin (active-window) "focus stays in the doc")
-      (check-equal! (+ before 1) (length (window-list)) "one window was added")
-      (check-true! (window-showing t--peek-defs) "the source is on screen")
-      (check-equal! 12 (buffer-point t--peek-defs) "at the definition")
-      (check-equal! t--peek-doc (current-buffer) "the doc is still current"))
-    (t--peek-teardown!)))
+    (t--peek-with
+      (lambda ()
+        (let ((a (t--peek-file "a.txt" "alpha\n"))
+              (b (t--peek-file "b.txt" "beta\n")))
+          (visit a) (visit b)
+          (switch-to-buffer! "*scratch*")
+          (run-command "delete-other-windows")
+          (peek! a (lambda () a))
+          (let ((slot (window-showing a)))
+            (peek! b (lambda () b))
+            (check-equal! (window-showing b) slot "b took the same slot")
+            (check-equal! (length (window-list)) 2 "two windows, not three")
+            (check-true! (buffer-exists? a) "a existed before: not killed")
+            (check-false! (peek-buffer? a) "and was never a peek")))))))
 
-(deftest 'moving-on-discards-the-peek
-  "the hook keeps the peek while the reader stays put, and closes it when point moves"
+(deftest 'ret-twice-keeps-and-goes-there
+  "peek-or-keep!: the first call peeks, the second keeps and selects"
   (lambda ()
-    (t--peek-setup!)
-    (let ((origin (active-window))
-          (before (length (window-list))))
-      (run-command "definition-peek")
-      (peek--post-command!)
-      (peek--post-command!)
-      (check-true! (window-showing t--peek-defs) "the hook may run twice; the peek stays")
-      (buffer-goto! t--peek-doc 3)
-      (peek--post-command!)
-      (check-false! (window-showing t--peek-defs) "moving point closes the window")
-      (check-equal! before (length (window-list)) "the split is gone")
-      (check-equal! origin (active-window) "focus is where it was")
-      (check-true! (buffer-exists? t--peek-defs) "a buffer that was open before stays open"))
-    (t--peek-teardown!)))
+    (t--peek-with
+      (lambda ()
+        (let ((a (t--peek-file "a.txt" "alpha\n"))
+              (me (active-window)))
+          (check-equal! (peek-or-keep! a (lambda () (visit a))) 'peek "first: a peek")
+          (check-true! (peek-buffer? a) "marked")
+          (check-equal! (current-buffer) "*scratch*" "reader stayed")
+          (check-equal! (peek-or-keep! a (lambda () (visit a))) 'keep "second: kept")
+          (check-false! (peek-buffer? a) "the mark is gone")
+          (check-equal! (current-buffer) a "and the reader went there")
+          (check-false! (string-contains? (buffer-modeline-name a) "peek")
+                        "the modeline is plain again")
+          ;; a kept buffer keeps its window: the next peek splits beside
+          (select-window! me)
+          (let ((b (t--peek-file "b.txt" "beta\n")))
+            (peek-file! b)
+            (check-true! (and (window-showing a) #t) "a still has its window")
+            (check-true! (and (window-showing b) #t) "b has one too")
+            (check-equal! (length (window-list)) 3 "three windows")))))))
 
-(deftest 'definition-peek-again-goes-there
-  "the second run on the same name selects the peek window and keeps it"
+(deftest 'an-edit-keeps-a-peeked-file
+  "typing in it makes it yours"
   (lambda ()
-    (t--peek-setup!)
-    (let ((origin (active-window)))
-      (run-command "definition-peek")
-      (peek--post-command!)
-      (run-command "definition-peek")
-      (peek--post-command!)
-      (check-false! (equal? origin (active-window)) "focus moved to the source")
-      (check-equal! t--peek-defs (current-buffer) "the source is current")
-      (check-equal! 12 (point) "at the definition")
-      (peek--post-command!)
-      (check-true! (window-showing t--peek-defs) "the window is kept after going there"))
-    (t--peek-teardown!)))
+    (t--peek-with
+      (lambda ()
+        (let ((a (t--peek-file "a.txt" "alpha\n")))
+          (peek-file! a)
+          (buffer-insert! a 0 "x")
+          ;; the post-command hook calls this after every key
+          (peek-keep-if-edited! a)
+          (check-false! (peek-buffer? a) "the edit kept it")
+          (check-true! (buffer-modified? a) "and the edit is still there"))))))
 
-(deftest 'a-peek-on-another-name-replaces-the-first
-  "one peek window at a time; the new name takes it over"
+(deftest 'q-closes-the-peek-and-its-window-and-remembers-it
+  "the layout is what it was; recent knows the file"
   (lambda ()
-    (t--peek-setup!)
-    (buffer-insert! t--peek-defs 0 "(define (zz-peek-other) 2)\n")
-    (buffer-goto! t--peek-doc 8)
-    (run-command "definition-peek")
-    (peek--post-command!)
-    (let ((count (length (window-list))))
-      (buffer-delete-range! t--peek-doc 0 (buffer-size t--peek-doc))
-      (buffer-insert! t--peek-doc 0 "see `zz-peek-other` here\n")
-      (buffer-goto! t--peek-doc 8)
-      (run-command "definition-peek")
-      (peek--post-command!)
-      (check-equal! count (length (window-list)) "no second window")
-      (check-equal! 0 (buffer-point t--peek-defs) "the window moved to the other definition"))
-    (t--peek-teardown!)))
+    (t--peek-with
+      (lambda ()
+        (let ((a (t--peek-file "a.txt" "alpha\n")))
+          (peek-file! a)
+          (select-window! (window-showing a))
+          (run-command "quit-window")
+          (check-false! (buffer-exists? a) "the peek is gone")
+          (check-equal! (length (window-list)) 1 "and so is its window")
+          (check-equal! (current-buffer) "*scratch*" "back where the reader was")
+          (let ((e (peek-recent-find a)))
+            (check-true! (and e #t) "recent has the file")
+            (check-equal! (nth 1 e) 'file "as a file")
+            (peek-revive! e)
+            (check-true! (peek-buffer? a) "and it comes back as a peek")))))))
 
-(deftest 'no-name-at-point-changes-nothing
-  "an empty spot leaves the windows alone"
+(deftest 'a-kept-buffer-leaves-recent
+  "keeping is the opposite of letting go"
   (lambda ()
-    (t--peek-setup!)
-    (buffer-goto! t--peek-doc 3)
-    (let ((before (length (window-list))))
-      (run-command "definition-peek")
-      (check-equal! before (length (window-list)) "no window was added")
-      (check-false! *peek* "no peek is recorded"))
-    (t--peek-teardown!)))
+    (t--peek-with
+      (lambda ()
+        (let ((a (t--peek-file "a.txt" "alpha\n"))
+              (b (t--peek-file "b.txt" "beta\n")))
+          (peek-file! a)
+          (peek-file! b)
+          (check-true! (and (peek-recent-find a) #t) "a went to recent")
+          (peek-file! a)
+          (peek-keep! a)
+          (check-false! (peek-recent-find a) "kept: out of recent"))))))
+
+(deftest 'the-switcher-hides-peeks-and-lists-recent
+  "a peek is a look, not a buffer of yours"
+  (lambda ()
+    (t--peek-with
+      (lambda ()
+        (let ((a (t--peek-file "a.txt" "alpha\n"))
+              (b (t--peek-file "b.txt" "beta\n")))
+          (peek-file! a)
+          (peek-file! b)
+          (buffer-create "*switch*")
+          (buffer-set-local! "*switch*" 'switch-here "*scratch*")
+          (let ((rows (map car (switch-buffer-rows "*switch*"))))
+            (check-false! (member b rows) "the live peek is not a row")
+            (check-true! (and (member a rows) #t) "the replaced one is a recent row"))
+          (let ((row (car (filter switch-recent-row? (switch-buffer-rows "*switch*")))))
+            (check-contains! (nth 1 row) "recent" "and says so"))
+          (buffer-kill! "*switch*")
+          ;; C-x b is group-switch-buffer: the same two rules there
+          (when (boundp 'group-buffer-switch-candidates)
+            (let ((names (map car (group-buffer-switch-candidates #f "*scratch*"))))
+              (check-false! (member b names) "the live peek is not a candidate")
+              (check-true! (and (member a names) #t) "the replaced one is")
+              (check-true! (and (member "recent" names) #t) "under a recent heading"))))))))
+
+(deftest 'dired-ret-peeks-a-file-and-ret-again-keeps-it
+  "the listing is yours; the file is a look until you say so"
+  (lambda ()
+    (t--peek-with
+      (lambda ()
+        (let ((a (t--peek-file "a.txt" "alpha\n")))
+          (dired-open t--peek-dir)
+          (let ((d (current-buffer)))
+            (check-equal! (buffer-local d 'mode-name) "Dired" "dired is open")
+            (check-false! (peek-buffer? d) "and is not a peek")
+            ;; put point on a.txt
+            (let loop ((i 0))
+              (when (and (< i 20) (not (equal? (dired-entry) "a.txt")))
+                (list-move-in! d 1)
+                (loop (+ i 1))))
+            (check-equal! (dired-entry) "a.txt" "point is on the file")
+            (run-command "dired-visit")
+            (check-equal! (current-buffer) d "still in dired")
+            (check-true! (peek-buffer? a) "the file is a peek beside")
+            (run-command "dired-visit")
+            (check-equal! (current-buffer) a "the second RET went there")
+            (check-false! (peek-buffer? a) "and kept it")
+            (buffer-kill! d)))))))
+
+(deftest 'browse-m-ret-peeks-the-link-and-again-keeps-it
+  "the page beside the page"
+  (lambda ()
+    (when (boundp 'web--tab-for!)
+      (t--peek-with
+        (lambda ()
+          (let ((saved *web-fetch*))
+            (set! *web-fetch*
+              (lambda (url want k)
+                (k (list want
+                         (if (string-contains? url "second")
+                             "# Second\n\nback [home](https://peek.test/)\n"
+                             "# First\n\nsee [second](https://peek.test/second.html)\n")
+                         #f))))
+            (let* ((a (browse "https://peek.test/index.html"))
+                   (l (web--link-after a 0)))
+              (goto-char! (car l))
+              (run-command "browse-follow-other-window")
+              (let ((b (web--buffer-for "https://peek.test/second.html")))
+                (check-true! (peek-buffer? b) "the linked page is a peek")
+                (check-equal! (current-buffer) a "the reader stays")
+                (run-command "browse-follow-other-window")
+                (check-false! (peek-buffer? b) "the same link again keeps it")
+                (check-equal! (current-buffer) b "and goes there")
+                (buffer-kill! b))
+              (buffer-kill! a))
+            (set! *web-fetch* saved)))))))

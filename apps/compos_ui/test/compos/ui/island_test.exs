@@ -87,10 +87,12 @@ defmodule Compos.Ui.IslandTest do
     assert html =~ "x-pending"
   end
 
-  test "a YouTube URL draws as a video card island", %{conn: conn} do
+  test "a standalone YouTube URL draws as a video card island", %{conn: conn} do
     url = "https://youtu.be/dQw4w9WgXcQ?t=43"
     buf = fresh_buffer("island-#{System.unique_integer([:positive])}", url <> "\n")
+
     Session.eval(~s{(overlay-set! "#{buf}" 'markdown '((0 #{byte_size(url)} "youtube-embed")))})
+
     {:ok, view, _} = live(conn, "/")
     html = render(view)
 

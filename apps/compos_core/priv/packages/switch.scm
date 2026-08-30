@@ -70,9 +70,26 @@
                    (switch-history-pool (buffer-local buf 'switch-group))))
          (pool (car source)))
     (set! *switch-pick* (nth 2 source))
-    (filter (lambda (c) (and (not (equal? (car c) here))
-                             (not (equal? (car c) *switch-buffer*))))
-            pool)))
+    (append
+      ;; a peek is a look, not a buffer of yours: the list skips it
+      (filter (lambda (c) (and (not (equal? (car c) here))
+                               (not (equal? (car c) *switch-buffer*))
+                               (not (peek-buffer? (car c)))))
+              pool)
+      (switch-recent-rows))))
+
+;; what peeks showed and let go, below the live buffers. RET peeks it
+;; again; a row that is live again is not repeated.
+(define (switch-recent-row? e)
+  (and (> (length e) 2) (equal? (nth 2 e) "recent")))
+
+(define (switch-recent-rows)
+  (map (lambda (e)
+         (list (car e)
+               (string-append "recent · " (symbol->string (nth 1 e)))
+               "recent" (nth 2 e)))
+       (filter (lambda (e) (not (buffer-known? (car e))))
+               (if (boundp '*peek-recent*) *peek-recent* '()))))
 
 ;; the locked view: ONE group, whole. The card leads as the default —
 ;; RET there keeps the group as it stands, or opens dired on a project
@@ -183,6 +200,8 @@
                    "dim")))
       ((switch-file-row? e)
        (list "" (list name #f) (list "file" "dim")))
+      ((switch-recent-row? e)
+       (list "" (list name "faint") (list ann "dim")))
       ((buffer-known? name)
        (list (if (and (buffer-exists? name) (buffer-modified? name))
                  (list "●" "warn") "")
@@ -337,6 +356,12 @@
          ;; default. A card in the recency stream stays a plain switch.
          (when groups-view?
            (switch-open! (list 'locked (nth 1 target))))))
+      ;; a recent row: what a peek let go comes back as a peek, in the
+      ;; home window's frame, beside where you were
+      ((switch-recent-row? e)
+       (let ((entry (peek-recent-find (nth 3 e))))
+         (switch-close! buf #f)
+         (when entry (peek-revive! entry))))
       ;; a project file nobody has open: visit it — it joins the group
       ((switch-file-row? e)
        (let* ((path (switch-file-path e))

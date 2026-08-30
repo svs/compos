@@ -528,7 +528,9 @@
 (define (annotate--show lb a select?)
   (let ((source (annotate--list-source lb)))
     (when (buffer-exists? source)
-      (let ((win (display-buffer-other-window! source)))
+      ;; a peek of the annotated buffer: it exists, so it is only shown
+      (peek! source (lambda () source))
+      (let ((win (window-showing source)))
         (annotate--goto! source a #f)
         (when (and select? win (window-exists? win))
           (select-window! win)

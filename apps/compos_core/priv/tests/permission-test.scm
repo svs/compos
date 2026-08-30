@@ -128,3 +128,68 @@
     (let* ((ok (base64-encode (json-encode (list 'code "(+ 20 22)"))))
            (out (base64-decode (mcp-proxy-call "eval-scheme" ok))))
       (check-contains! out "42" "an ordinary payload still runs"))))
+
+(deftest 'the-agent-writes-buffers-so-the-filesystem-verbs-are-refused
+  "a write that never touches a buffer has no provenance and leaves a stale one"
+  (lambda ()
+    (let ((buf (t--perm-buf "*zz-fs-policy*")))
+      ;; ACP labels what a call does to the workspace, whatever it is called
+      (for-each
+        (lambda (kind)
+          (check-equal! (*permission-policy* buf "some tool" kind "{}")
+                        'reject (string-append "refused by kind: " kind)))
+        '("edit" "delete" "move"))
+
+      ;; a lane that sends no kind is caught by the tool's own name
+      (for-each
+        (lambda (title)
+          (check-equal! (*permission-policy* buf title "" "{}")
+                        'reject (string-append "refused by name: " title)))
+        '("Edit" "Write" "MultiEdit" "NotebookEdit"
+          "apply_patch" "str_replace_editor" "fs/write_text_file"))
+
+      ;; reading a file is not writing one, and compos's own tools arrive
+      ;; as "other", so eval-scheme and the code editors keep working
+      (check-equal! (*permission-policy* buf "Read apps/x.scm" "read" "{}")
+                    'allow-always "reading a file is still allowed")
+      (check-equal! (*permission-policy* buf
+                      "compos:eval-scheme: (code-replace! ...)" "other" "{}")
+                    'allow-always "the editor's own tools keep working")
+
+      ;; the setting is the whole escape hatch
+      (let ((was agent-filesystem-tools))
+        (set! agent-filesystem-tools "ask")
+        (check-equal! (*permission-policy* buf "Write" "edit" "{}") 'ask
+                      "ask puts the write in front of the user")
+        (set! agent-filesystem-tools "allow")
+        (check-equal! (*permission-policy* buf "Write" "edit" "{}") 'allow-always
+                      "allow hands the filesystem back")
+        (set! agent-filesystem-tools was))
+      (buffer-kill! buf))))
+
+(deftest 'git-that-overwrites-the-work-tree-asks-first
+  "Reading, staging and committing pass. A verb that lands text the editor
+   never saw stops for the user, because it can lose an unsaved buffer."
+  (lambda ()
+    (let* ((buf (t--perm-buf "*zz-git-policy*"))
+           (g (lambda (verb)
+                (string-append "(shell-command->string \"git " verb "\" d)"))))
+      (for-each
+        (lambda (verb)
+          (check-equal! (*permission-policy* buf "eval-scheme" "tool" (g verb))
+                        'allow-always (string-append "git " verb " writes no working file")))
+        '("status --porcelain" "log --oneline -5" "diff HEAD"
+          "add -A" "commit -m x" "branch -a" "reset HEAD file"))
+
+      (for-each
+        (lambda (verb)
+          (check-equal! (*permission-policy* buf "eval-scheme" "tool" (g verb))
+                        'ask (string-append "git " verb " rewrites the work tree")))
+        '("checkout -- ." "restore src" "stash" "clean -fd"
+          "apply patch.diff" "pull --rebase" "merge main" "rebase main"
+          "revert HEAD" "reset --hard HEAD" "reset --merge"))
+
+      ;; the read side of git in Scheme is untouched
+      (check-equal! (*permission-policy* buf "eval-scheme" "tool" "(git-diff d)")
+                    'allow-always "the catalog's own git readers stay open")
+      (buffer-kill! buf))))

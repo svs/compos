@@ -30,6 +30,7 @@
 (load-bundled-package "agent.scm")
 (load-bundled-package "annotate.scm")
 (load-bundled-package "appearance.scm")
+(load-bundled-package "autorevert.scm")
 (load-bundled-package "bookmark.scm")
 (load-bundled-package "chat.scm")
 (load-bundled-package "code.scm")

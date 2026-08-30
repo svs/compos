@@ -14,7 +14,14 @@
       *permission-default-mode*))
 
 (define *permission-deny-patterns*
-  (list "send[-_ ]*mail" "sendmail" "mail[-_ ]*send" "smtp"
+  (list
+        ;; Git that rewrites the work tree is a file write by another name:
+        ;; it lands text the editor never saw, and it can lose an unsaved
+        ;; buffer. Reading git, staging it, and committing it change no
+        ;; working file, so they stay out of this list.
+        "git[-_ ]+(checkout|restore|stash|clean|apply|pull|merge|rebase|revert)"
+        "git[-_ ]+reset[-_ ]+--(hard|merge)"
+        "send[-_ ]*mail" "sendmail" "mail[-_ ]*send" "smtp"
         "send[-_ ]*(message|email|sms|text)"
         "(permanently|forever)[-_ ]*delete" "delete[-_ ]*(permanently|forever)"
         "empty[-_ ]*trash" "trash[-_ ]*empty" "expunge"
@@ -74,12 +81,55 @@
                      'allow-always)
                     (else #f))))))
 
+;;; --- the filesystem is not the agent's ----------------------------------------
+
+(defcustom 'agent-filesystem-tools "deny"
+  "What an agent's own filesystem tools may do. Use deny, ask, or allow."
+  'group 'chat 'type 'string)
+
+;; The agent edits BUFFERS. A write straight to a file goes around the
+;; editor, and provenance records the buffer process, so a change no
+;; buffer ever saw carries no revision, no actor and no weave entry: the
+;; file reads as though it had always looked that way. The same write
+;; leaves an open buffer holding the old text and still reporting itself
+;; unmodified, so the next save from that buffer puts the old text back.
+;; Both are silent, and the second one loses work.
+;;
+;; ACP labels what a tool call does to the workspace. "edit", "delete"
+;; and "move" are the filesystem verbs; "read" is not one, and compos's
+;; own MCP tools arrive as "other", so eval-scheme and the code editors
+;; keep working. The titles cover a lane that sends no kind.
+(define *filesystem-tool-kinds* '("edit" "delete" "move"))
+
+(define *filesystem-tool-patterns*
+  (list "^(edit|write|multiedit|notebookedit)\\b"
+        "apply[-_ ]*patch" "str[-_ ]*replace"
+        "(write|create|delete|move|rename)[-_ ]*(text[-_ ]*)?file"))
+
+(define (filesystem-tool? title kind)
+  (or (and kind (member kind *filesystem-tool-kinds*) #t)
+      (and title
+           (let ((t (string-downcase title)))
+             (let loop ((ps *filesystem-tool-patterns*))
+               (cond ((null? ps) #f)
+                     ((re-match? (car ps) t) #t)
+                     (else (loop (cdr ps)))))))))
+
+;; #f when this is not a filesystem tool, so the policy's cond falls
+;; through to the clauses after it.
+(define (filesystem-tool-verdict title kind)
+  (and (filesystem-tool? title kind)
+       (cond ((equal? agent-filesystem-tools "allow") #f)
+             ((equal? agent-filesystem-tools "ask") 'ask)
+             (else 'reject))))
+
 (define *permission-policy*
   (lambda (buf title kind raw)
     (let* ((text (string-append (or title "") " " (or kind "") " " (or raw "")))
            (profile (and buf (buffer-exists? buf)
                          (buffer-local buf 'agent-permission-profile))))
       (cond ((equal? kind "execute") 'reject)  ; no shell — compos is the only sandbox
+            ((filesystem-tool-verdict title kind))  ; no files either — buffers are
             ((permission-denied-verb? text) 'ask)
             ((profile-denies? profile text) 'reject)
             ((and (equal? kind "command")

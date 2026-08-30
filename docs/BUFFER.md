@@ -85,6 +85,20 @@ Saving writes the latest accepted text to the materialization target. A save doe
 
 External file changes are imported as proposals based on the last materialized revision. They must not overwrite newer accepted state without an explicit conflict decision.
 
+### Following the file
+
+A buffer follows its file when something outside the editor writes it: git, another session, a formatter. `autorevert.scm` implements it, frame-local and on by default.
+
+**The test is the text, never the modified flag.** A buffer records the text it last agreed with its file on, and follows only while it still holds that text. Inside compos a buffer is where code is written and saving is a separate decision, so buffers carry live unsaved work for hours; and the flag is the very thing that is wrong in this case, because a write behind the editor's back leaves a buffer reading unmodified while its text differs. A buffer that no longer matches its mark has work in it and is never written to, whatever the flag says. The mark is taken when the buffer is created, and moves forward on any file event that finds buffer and file equal, which is how a save is noticed.
+
+A buffer with no mark at all, for a file that has already moved, needs two independent records to agree that nothing was ever typed into it: an empty edit log, which is provenance and knows an agent's edits, and an unset modified flag. One of them alone is not enough to write over a buffer.
+
+**A revert writes only the lines that changed.** Replacing the whole text makes one delete and one insert, so the weave credits every byte of the file to whoever reverted: measured on a five line file, attribution went from the 23 bytes actually typed to all 40, including the line git wrote and three lines nobody in the editor had touched. The revert is a line diff applied as one `buffer-replace-range!` per hunk, authored `disk`, so an untouched line is not written and keeps its author. Spans are lines and `line-start-position` converts them to byte offsets, so no byte arithmetic on strings is done. If the hunks ever fail to reproduce the file, the whole text goes in as a fallback, which costs only the attribution.
+
+Every revert is logged, naming the file and how many changes it took.
+
+**Watching.** Every open file buffer is watched. A repository is watched deep, and one watch covers every file in it. A file outside a repository is watched through its own directory, and shallow, because a deep watch on a home directory is a recursive fsevents loop. A buffer remembers the root it was watched under, since the watcher can answer with a different name than the one asked for, and that is the name a file event arrives under.
+
 ### Rename and path changes
 
 Renaming a buffer, changing its path, or saving it under a new path updates materialization metadata. Immutable buffer and cell IDs remain unchanged.

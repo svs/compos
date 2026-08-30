@@ -1082,6 +1082,11 @@ defmodule Compos.Ui.Layouts do
           function nativeTextKey(e) {
             const a = document.activeElement;
             if (!a || !a.closest || !a.closest(".buf[contenteditable]")) return false;
+            // Cmd-Left/Right are the platform's line start and end; a server
+            // round trip for them read as lag. Cmd-Up/Down stay keys: they
+            // are window motion outside prose.
+            if (e.metaKey && !e.ctrlKey && !e.altKey &&
+                (e.key === "ArrowLeft" || e.key === "ArrowRight")) return true;
             if (e.ctrlKey || e.altKey || e.metaKey) return false;
             if (e.key === "Dead" || e.key === "Process" || e.key === "Unidentified") return true;
             if (e.key.length === 1) return true;
@@ -2042,8 +2047,10 @@ defmodule Compos.Ui.Layouts do
                   // (accents, input methods, dictation, autocorrect).
                   // Chords, motion keys, and TAB still travel as keys.
                   if (NATIVE_MOTION.includes(e.key)) {
-                    // the cause of the next selection report (wrapAffinity)
-                    this._lastMotion = e.key;
+                    // the cause of the next selection report (wrapAffinity);
+                    // Cmd-Left/Right are Home and End
+                    this._lastMotion = e.metaKey && e.key === "ArrowLeft" ? "Home"
+                      : e.metaKey && e.key === "ArrowRight" ? "End" : e.key;
                     this._caretTopBefore = caretTopNow();
                   }
                   if (nativeTextKey(e)) return;

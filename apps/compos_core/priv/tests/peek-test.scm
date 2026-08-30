@@ -111,15 +111,29 @@
             (check-true! (and (window-showing b) #t) "b has one too")
             (check-equal! (length (window-list)) 3 "three windows")))))))
 
-(deftest 'an-edit-keeps-a-peeked-file
-  "typing in it makes it yours"
+(deftest 'a-peek-is-read-only-and-keep-makes-it-writable
+  "a look changes nothing; kept, the file is yours to edit"
   (lambda ()
     (t--peek-with
       (lambda ()
         (let ((a (t--peek-file "a.txt" "alpha\n")))
           (peek-file! a)
+          (check-true! (buffer-read-only? a) "the peek is read-only")
+          (peek-keep! a)
+          (check-false! (peek-buffer? a) "kept")
+          (check-false! (buffer-read-only? a) "and writable again")
           (buffer-insert! a 0 "x")
-          ;; the post-command hook calls this after every key
+          (check-true! (buffer-modified? a) "so an edit lands"))))))
+
+(deftest 'an-agents-edit-keeps-a-peeked-file
+  "a change from outside the keyboard makes the buffer yours"
+  (lambda ()
+    (t--peek-with
+      (lambda ()
+        (let ((a (t--peek-file "a.txt" "alpha\n")))
+          (peek-file! a)
+          ;; the editor's own insert is not a keystroke: read-only stops keys
+          (buffer-insert! a 0 "x")
           (peek-keep-if-edited! a)
           (check-false! (peek-buffer? a) "the edit kept it")
           (check-true! (buffer-modified? a) "and the edit is still there"))))))

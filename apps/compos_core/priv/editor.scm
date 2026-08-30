@@ -5194,7 +5194,12 @@
         (window-preview-buffer! here me))
       (select-window! me)
       (unless existed?
-        (buffer-set-local! buf 'peek #t))
+        (buffer-set-local! buf 'peek #t)
+        ;; a peek is a look: read-only, so q dismisses it from the
+        ;; read-only keymap and a stray key changes nothing. Keep gives
+        ;; the buffer back the state it had.
+        (buffer-set-local! buf 'peek-was-read-only (buffer-read-only? buf))
+        (buffer-set-read-only! buf #t))
       (peek-show! buf))
     buf))
 
@@ -5215,8 +5220,10 @@
 (define (peek-keep! name)
   (when (peek-buffer? name)
     (buffer-set-local! name 'peek #f)
-    ;; kept, it is a buffer of its own: no wire
+    ;; kept, it is a buffer of its own: no wire, and its own read-only state
     (buffer-set-local! name 'peek-from #f)
+    (buffer-set-read-only! name (and (buffer-local name 'peek-was-read-only) #t))
+    (buffer-set-local! name 'peek-was-read-only #f)
     ;; a kept buffer keeps its window: the slot moves on
     (let ((w (frame-local 'peek-window)))
       (when (and w (equal? (window-buffer w) name))

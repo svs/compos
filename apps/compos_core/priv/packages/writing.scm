@@ -321,6 +321,8 @@
   (writing--remove-hook! buf)
   (buffer-set-local! buf 'face-remap (or (writing--saved buf 'face-remap) '()))
   (buffer-set-local! buf 'style (writing--saved buf 'style))
+  ;; the saved remap predates a scale set while writing; the local wins
+  (when (boundp 'text-scale-sync!) (text-scale-sync! buf))
   (buffer-set-local! buf 'line-numbers (writing--saved buf 'line-numbers))
   (buffer-set-local! buf 'preview-renderer (writing--saved buf 'preview-renderer))
   (buffer-set-local! buf 'visual-line-mode (writing--saved buf 'visual-line-mode))

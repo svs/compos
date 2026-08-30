@@ -1089,11 +1089,23 @@ defmodule Compos.Ui.Layouts do
             "Quote": ["'", "\""], "BracketLeft": ["[", "{"], "BracketRight": ["]", "}"],
             "Backquote": ["`", "~"] };
 
+          const SHIFTED_DIGITS = ")!@#$%^&*(";
+
           function baseKey(e) {
             if (e.altKey) {
               if (e.code.startsWith("Key")) return e.code.slice(3).toLowerCase();
               if (e.code.startsWith("Digit")) return e.code.slice(5);
               if (CODE_CHARS[e.code]) return CODE_CHARS[e.code][e.shiftKey ? 1 : 0];
+            }
+            // macOS reports a Cmd chord with the unshifted character:
+            // Cmd-Shift-= arrives as key "=" with shiftKey set, and the
+            // buffer scale on s-+ never fires. The physical key says
+            // which character shift makes, so a shifted Cmd chord reads
+            // its character from e.code, the way an Alt chord does.
+            if (e.metaKey && e.shiftKey) {
+              if (e.code.startsWith("Key")) return e.code.slice(3).toUpperCase();
+              if (e.code.startsWith("Digit")) return SHIFTED_DIGITS[Number(e.code.slice(5))];
+              if (CODE_CHARS[e.code]) return CODE_CHARS[e.code][1];
             }
             if (NAMED[e.key]) return NAMED[e.key];
             if (e.key.length === 1) return e.key;
@@ -1111,9 +1123,10 @@ defmodule Compos.Ui.Layouts do
 
           function keySpec(e) {
             if (["Control", "Meta", "Alt", "Shift"].includes(e.key)) return null;
-            if (e.metaKey && !CMD_KEYS.includes(e.key)) return null;
             const base = baseKey(e);
             if (base === null) return null;
+            // the claim reads the base, not e.key: Cmd-Shift-= is "+"
+            if (e.metaKey && !CMD_KEYS.includes(base)) return null;
             let spec = base;
             // S- only for named keys (TAB, arrows, RET...): printable chars
             // already encode shift in the character itself, Emacs-style

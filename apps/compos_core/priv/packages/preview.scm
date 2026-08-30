@@ -63,7 +63,9 @@
     (when saved
       (buffer-set-local! buf 'face-remap (car saved))
       (buffer-set-local! buf 'style (cadr saved))
-      (buffer-set-local! buf 'preview-rows-saved #f))))
+      (buffer-set-local! buf 'preview-rows-saved #f)
+      ;; the saved remap predates a scale set while the rows were on
+      (when (boundp 'text-scale-sync!) (text-scale-sync! buf)))))
 
 ;; Which renderer draws a Markdown page. Elixir owns both engines and reads
 ;; this choice from the 'preview-engine buffer-local; the choice itself is

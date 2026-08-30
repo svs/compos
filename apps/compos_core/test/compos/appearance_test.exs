@@ -8,7 +8,7 @@ defmodule Compos.AppearanceTest do
 
   use ExUnit.Case
 
-  alias Compos.Core.{Editor, Session}
+  alias Compos.Core.{Buffer, Editor, Session}
 
   defp eval!(code) do
     {:ok, out} = Session.eval(code)
@@ -76,6 +76,60 @@ defmodule Compos.AppearanceTest do
 
     {:ok, _} = Session.eval(~s{(text-scale-apply! "*zz-scale*" -99)})
     assert eval!(~s{(buffer-local "*zz-scale*" 'text-scale)}) == "-4"
+  end
+
+  # A restart or an idle eviction keeps the buffer's checkpoint; the wake
+  # reads it back and the runtime restore re-runs the mode setup.
+  defp evict(name) do
+    :ok = Buffer.checkpoint_now(name)
+    [{pid, _}] = Registry.lookup(Compos.Core.BufferRegistry, name)
+    :ok = DynamicSupervisor.terminate_child(Compos.Core.BufferSupervisor, pid)
+    assert eventually(fn -> not Buffer.exists?(name) end)
+  end
+
+  defp eventually(fun, tries \\ 50) do
+    cond do
+      fun.() -> true
+      tries == 0 -> false
+      true ->
+        Process.sleep(20)
+        eventually(fun, tries - 1)
+    end
+  end
+
+  test "the buffer scale is a buffer-local that survives eviction and wake" do
+    {:ok, _} =
+      Session.eval(~s{(begin
+        (buffer-create "*zz-scale*")
+        (switch-to-buffer! "*zz-scale*")
+        (text-scale-apply! "*zz-scale*" 2)
+        (switch-to-buffer! "*scratch*")
+        #t)})
+
+    evict("*zz-scale*")
+
+    Editor.set_window_buffer("*zz-scale*")
+    assert Buffer.exists?("*zz-scale*")
+    Compos.Core.restore_runtime("*zz-scale*")
+
+    assert eval!(~s{(buffer-local "*zz-scale*" 'text-scale)}) == "2"
+    assert eval!(~s{(buffer-local "*zz-scale*" 'style)}) =~ "--text-scale-factor:1.44;"
+    Editor.set_window_buffer("*scratch*")
+  end
+
+  test "a mode that restores a saved remap keeps the buffer's scale" do
+    {:ok, _} =
+      Session.eval(~s{(begin
+        (buffer-create "*zz-scale*")
+        (switch-to-buffer! "*zz-scale*")
+        (text-scale-apply! "*zz-scale*" 1)
+        ;; a mode teardown puts back the remap it saved before the scale
+        (buffer-set-local! "*zz-scale*" 'face-remap '())
+        (buffer-set-local! "*zz-scale*" 'style "")
+        (text-scale-sync! "*zz-scale*")
+        #t)})
+
+    assert eval!(~s{(buffer-local "*zz-scale*" 'style)}) =~ "--text-scale-factor:1.2;"
   end
 
   test "the application scale is the 'ui face's zoom and a saved setting" do

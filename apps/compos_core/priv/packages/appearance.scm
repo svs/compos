@@ -72,11 +72,19 @@
       (string-append what " scale reset")
       (string-append what " scale " (if (> n 0) "+" "") (number->string n))))
 
+;; The 'text-scale local is the truth. It rides the buffer's checkpoint,
+;; so the scale survives a restart and a wake. The remap and the window
+;; style derive from it: sync writes them again after a mode restores a
+;; remap it saved before the scale was set.
+(define (text-scale-sync! buf)
+  (let ((n (scale-clamp (or (buffer-local buf 'text-scale) 0))))
+    (face-remap-in! buf 'text-scale
+      (if (= n 0) '() (list 'factor (scale-factor n))))))
+
 (define (text-scale-apply! buf n0)
   (let ((n (scale-clamp n0)))
     (buffer-set-local! buf 'text-scale n)
-    (face-remap-in! buf 'text-scale
-      (if (= n 0) '() (list 'factor (scale-factor n))))
+    (text-scale-sync! buf)
     (message (scale-label "text" n))))
 
 (define (text-scale-step! d)
@@ -132,5 +140,7 @@
   "(run-command \"preview-font-toggle\") — flip rendered pages between serif and monospace")
 (public! 'text-scale-apply!
   "(text-scale-apply! BUF N) — set BUF's text scale to step N on the 1.2 ladder; 0 is normal")
+(public! 'text-scale-sync!
+  "(text-scale-sync! BUF) — write BUF's remap again from its 'text-scale local")
 (public! 'ui-scale-apply!
   "(ui-scale-apply! N) — set the whole application's text scale to step N; 0 is normal")

@@ -1117,9 +1117,11 @@ defmodule Compos.Ui.Layouts do
           // and cmd-p, claimed for the command palette
           // ...and the text-scale chords, claimed from the browser's
           // whole-page zoom: cmd-=/-/0 scale the application (appearance.scm
-          // ui-scale), and their shifted shapes cmd-+/_/) scale ONE buffer
-          const CMD_KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
-                            "a", "p", "+", "=", "-", "0", "_", ")", "Enter"];
+          // ui-scale), and their shifted shapes cmd-+/_/) scale ONE buffer.
+          // The list names the BASE the key travels as (baseKey), so a
+          // named key appears in its Emacs spelling: "<up>", not "ArrowUp".
+          const CMD_KEYS = ["<left>", "<right>", "<up>", "<down>",
+                            "a", "p", "+", "=", "-", "0", "_", ")", "RET"];
 
           function keySpec(e) {
             if (["Control", "Meta", "Alt", "Shift"].includes(e.key)) return null;
@@ -1153,7 +1155,10 @@ defmodule Compos.Ui.Layouts do
             if (!a || !a.closest || !a.closest(".buf[contenteditable]")) return false;
             // Cmd-Left/Right are the platform's line start and end; a server
             // round trip for them read as lag. Cmd-Up/Down stay keys: they
-            // are window motion outside prose.
+            // are window motion outside prose. Window motion left and right
+            // from an editable buffer is the command, windmove-left and
+            // windmove-right, on a chord a keymap picks
+            // (windmove-default-keybindings).
             if (e.metaKey && !e.ctrlKey && !e.altKey &&
                 (e.key === "ArrowLeft" || e.key === "ArrowRight")) return true;
             if (e.ctrlKey || e.altKey || e.metaKey) return false;

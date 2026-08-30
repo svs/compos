@@ -8411,8 +8411,8 @@
 (define-command "windmove-down" "Select the window below"
   (lambda () (windmove! 'down)))
 
-;; Cmd-Shift-arrows: carry the buffer over — swap this pane's buffer with
-;; the directional neighbor's and follow it (Emacs windmove-swap-states)
+;; Swap this pane's buffer with the directional neighbor's and follow it
+;; (Emacs windmove-swap-states-*)
 (define (window-swap! dir)
   (let ((nb (window-in-direction dir)))
     (if nb
@@ -8423,14 +8423,53 @@
           (chat-snap-to-input!))
         (message (string-append "No window " (symbol->string dir))))))
 
-(define-command "window-swap-left" "Swap this window's buffer leftward and follow it"
+(define-command "windmove-swap-states-left" "Swap this window's buffer leftward and follow it"
   (lambda () (window-swap! 'left)))
-(define-command "window-swap-right" "Swap this window's buffer rightward and follow it"
+(define-command "windmove-swap-states-right" "Swap this window's buffer rightward and follow it"
   (lambda () (window-swap! 'right)))
-(define-command "window-swap-up" "Swap this window's buffer upward and follow it"
+(define-command "windmove-swap-states-up" "Swap this window's buffer upward and follow it"
   (lambda () (window-swap! 'up)))
-(define-command "window-swap-down" "Swap this window's buffer downward and follow it"
+(define-command "windmove-swap-states-down" "Swap this window's buffer downward and follow it"
   (lambda () (window-swap! 'down)))
+(for-each
+  (lambda (name) (catalog-meta! 'command name 'domain 'windows 'effects '(write display)))
+  '("windmove-left" "windmove-right" "windmove-up" "windmove-down"
+    "windmove-swap-states-left" "windmove-swap-states-right"
+    "windmove-swap-states-up" "windmove-swap-states-down"))
+
+;; Emacs windmove has no default keys. A keymap installs them:
+;; (windmove-default-keybindings MODIFIERS) binds the four arrows with
+;; MODIFIERS to windmove-*. MODIFIERS is one symbol or a list of symbols
+;; from shift, control, meta, super; no argument means shift. A writing
+;; buffer gives Cmd-Left/Right to the line, so a user picks the chord that
+;; leaves it for the window beside it.
+(define *windmove-directions* '("left" "right" "up" "down"))
+
+(define (windmove-chord modifiers key)
+  (let* ((mods (cond ((or (not modifiers) (null? modifiers)) '(shift))
+                     ((symbol? modifiers) (list modifiers))
+                     (else modifiers)))
+         (has? (lambda (m) (member m mods))))
+    (string-append (if (has? 'super) "s-" "")
+                   (if (has? 'control) "C-" "")
+                   (if (has? 'meta) "M-" "")
+                   (if (has? 'shift) "S-" "")
+                   key)))
+
+(define (windmove-install-keybindings! modifiers prefix)
+  (for-each
+    (lambda (dir)
+      (global-set-key (windmove-chord modifiers (string-append "<" dir ">"))
+                      (string-append prefix dir)))
+    *windmove-directions*))
+
+(define (windmove-default-keybindings &optional modifiers)
+  (windmove-install-keybindings! modifiers "windmove-"))
+
+;; Emacs default for the swap: shift and super
+(define (windmove-swap-states-default-keybindings &optional modifiers)
+  (windmove-install-keybindings! (or modifiers '(shift super))
+                                 "windmove-swap-states-"))
 
 ;; S-<left>/<right>: walk buffer history — S-<left> goes to the buffer you
 ;; just left (MRU), pressing again goes deeper; S-<right> walks back. The
@@ -8820,14 +8859,9 @@
 (global-set-key "C-x o" "other-window")
 (global-set-key "C-x l" "window-layout")
 (global-set-key "C-c p" "popup-buffer")
-(global-set-key "s-<left>" "windmove-left")
-(global-set-key "s-<right>" "windmove-right")
-(global-set-key "s-<up>" "windmove-up")
-(global-set-key "s-<down>" "windmove-down")
-(global-set-key "s-S-<left>" "window-swap-left")
-(global-set-key "s-S-<right>" "window-swap-right")
-(global-set-key "s-S-<up>" "window-swap-up")
-(global-set-key "s-S-<down>" "window-swap-down")
+;; Cmd-arrows move between windows; Cmd-Shift-arrows carry the buffer over
+(windmove-default-keybindings 'super)
+(windmove-swap-states-default-keybindings '(shift super))
 (global-set-key "S-<left>" "previous-buffer")
 (global-set-key "S-<right>" "next-buffer")
 (global-set-key "C-x <left>" "previous-buffer")
@@ -9000,6 +9034,9 @@
 (public! 'key-for-command "(key-for-command NAME) -> its global keybinding (\"\" if none)")
 (public! 'global-set-key "(global-set-key KEYS COMMAND-NAME), e.g. \"C-c x\"")
 (public! 'global-unset-key "(global-unset-key KEYS) — remove one global binding")
+(public! 'windmove-default-keybindings "(windmove-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (shift control meta super; default shift) to windmove-left/right/up/down")
+(public! 'windmove-swap-states-default-keybindings "(windmove-swap-states-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to windmove-swap-states-*")
+(public! 'windmove-chord "(windmove-chord MODIFIERS KEY) — the key spec for KEY under MODIFIERS, e.g. (windmove-chord '(meta shift) \"<left>\") is \"M-S-<left>\"")
 (public! 'local-set-key "(local-set-key KEYS COMMAND-NAME) in the current buffer")
 (public! 'local-remap! "(local-remap! FROM-COMMAND TO-COMMAND) — Emacs [remap]: every key bound to FROM runs TO in this buffer (arrows, C-n/C-p, user bindings alike)")
 (public! 'local-remap*! "(local-remap*! BUF FROM-COMMAND TO-COMMAND) — remap in an explicit buffer")

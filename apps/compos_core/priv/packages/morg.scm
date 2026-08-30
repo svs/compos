@@ -699,6 +699,7 @@
   (lambda ()
     ;; Morg owns structure and the plain faces. The prose presentation is
     ;; writing-mode's; preview-mode draws the page in place.
+    (when (boundp 'preview-heal!) (preview-heal! (current-buffer)))
     (enable-minor-mode! (current-buffer) "writing-mode")
     (morg-install-keys)
     (morg-ensure-hook! (current-buffer))

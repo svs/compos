@@ -31,6 +31,11 @@
   (or (string-suffix? ".md" name) (string-suffix? ".markdown" name)))
 
 (define (preview--rows-on! buf)
+  ;; runtime state of the rows: never saved with the desktop. The mode
+  ;; list is what persists, and setup rebuilds the rest from it.
+  (desktop-skip! buf 'preview-rows)
+  (desktop-skip! buf 'preview-rows-saved)
+  (desktop-skip! buf 'markdown-paint)
   (buffer-set-local! buf 'render-mode #f)
   ;; the look the rows replace comes back exactly when they go
   (unless (buffer-local buf 'preview-rows)
@@ -100,6 +105,20 @@
                          (cadr (car rs))
                          (loop (cdr rs))))))))
     (if (and (equal? r "markdown") (preview--markdown-file? name)) "rows" r)))
+
+;; A buffer whose rows disagree with its mode list heals: rows without the
+;; mode go, the mode without rows draws. A restored desktop from before
+;; the rows were runtime-only is the case.
+(define (preview-heal! buf)
+  (let ((on (minor-mode-on? buf "preview-mode"))
+        (rows (equal? (buffer-local buf 'preview-rows) #t)))
+    (cond ((and rows (not on)) (preview--rows-off! buf))
+          ((and (not rows) (equal? (buffer-local buf 'markdown-paint) #t))
+           (when (boundp 'markdown-paint-off!) (markdown-paint-off! buf))
+           (when (and (boundp 'morg-refontify!) (equal? (buffer-local buf 'mode-name) "morg-mode"))
+             (morg-refontify! buf)))
+          (else #f))))
+(public! 'preview-heal! "(preview-heal! BUF) — make BUF's drawn rows agree with its preview-mode")
 
 (define (preview-mode--apply! buf)
   (let ((renderer (preview-renderer-for buf)))

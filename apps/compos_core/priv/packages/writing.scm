@@ -244,6 +244,7 @@
       (writing--present! buf)))
 
 (define (writing--present! buf)
+  (when (boundp 'preview-heal!) (preview-heal! buf))
   ;; remember what we clobber, once — the saved alist persists, and the
   ;; restore path re-runs this fn, which must not re-save writing's own look
   (let ((entering? (not (buffer-local buf 'writing-saved))))

@@ -309,7 +309,9 @@
   (local-set-key* buf "s-a" "cua-select-all")
   (writing--ensure-hook! buf)
   (writing--update-count! buf))
-  ;; last word: the drawn page keeps its own look over writing's typography
+  ;; last word: the rows agree with the mode list, and the drawn page keeps
+  ;; its own look over writing's typography
+  (when (boundp 'preview-heal!) (preview-heal! buf))
   (when (and (buffer-local buf 'preview-rows) (boundp 'preview--rows-look!))
     (preview--rows-look! buf)))
 

@@ -110,9 +110,14 @@
 ;; mode go, the mode without rows draws. A restored desktop from before
 ;; the rows were runtime-only is the case.
 (define (preview-heal! buf)
+  ;; "rows" is a renderer, never a render mode
+  (when (equal? (buffer-local buf 'render-mode) "rows")
+    (buffer-set-local! buf 'render-mode #f))
   (let ((on (minor-mode-on? buf "preview-mode"))
         (rows (equal? (buffer-local buf 'preview-rows) #t)))
     (cond ((and rows (not on)) (preview--rows-off! buf))
+          ((and on (not rows) (equal? (preview-renderer-for buf) "rows"))
+           (preview--rows-on! buf))
           ((and (not rows) (equal? (buffer-local buf 'markdown-paint) #t))
            (when (boundp 'markdown-paint-off!) (markdown-paint-off! buf))
            (when (and (boundp 'morg-refontify!) (equal? (buffer-local buf 'mode-name) "morg-mode"))
@@ -164,6 +169,7 @@
                 (if renderer
                     (begin
                       (enable-minor-mode! buf "preview-mode")
+                      (preview-heal! buf)
                       (message
                         (string-append "Preview on (" renderer ") — C-c C-v toggles")))
                     (message "No preview renderer for this buffer"))))))))

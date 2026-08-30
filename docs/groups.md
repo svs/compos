@@ -275,7 +275,7 @@ Every verb that takes buffers acts on the selection. With no selection it acts o
 | `switch-to-buffer-group` | Read the current buffer's groups. 0: prompt for a name and run `new`. 1: switch to it. 2 or more: prompt, always. |
 | `new G` | Create G with its scratch buffer. Add the seed. Save a layout built from the seed. Switch to G. |
 | `dissolve G` | Remove every member from G. Remove the scratch buffer and the record. Frames on G go to `previous`, else none. |
-| `kill G` | For each member: when it is in another group, remove it from G; else kill it under the normal modified-buffer protection. Then dissolve G. Frames on G switch to the next group in MRU order, else none. |
+| `kill G` | For each member: when it is in another group, remove it from G; else kill it under the normal modified-buffer protection. Then dissolve G. A frame on G follows the buffer its window fell to into that buffer's group, with the group's layout; a buffer in no group leaves the frame in none. `group-after-kill` is `follow` (this) or `stay`. The kill runs `group-kill-hook` last, with `*group-killed*` = `(ID NAME STOOD?)`. |
 | `rename G NAME` | Change the name. The ID, members, layouts, and MRU do not change. |
 
 ### The seed of `new`

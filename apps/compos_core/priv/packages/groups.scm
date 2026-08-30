@@ -1381,7 +1381,15 @@
   (let* ((id (begin (group-migrate-live!) (group-resolve-id g)))
          (name (or (group-name id) ""))
          (members (if id (group-buffers id) '()))
-         (survivors '()))
+         (survivors '())
+         (stood (and id (equal? (frame-local 'current-group) id))))
+    ;; The frame leaves the group before its members die. The kill
+    ;; repair fills a window from the frame's current group; a frame
+    ;; still standing in the dying group got the group's chat, a buffer
+    ;; made for a group with seconds to live. Out of the group, the
+    ;; window falls to the next buffer, as any kill does.
+    (when stood (set-frame-local! 'current-group #f))
+    (set! *group-dying* id)
     (for-each
       (lambda (b)
         (cond
@@ -1396,15 +1404,46 @@
       (lambda (b)
         (when (buffer-known? b) (buffer-remove-group! b id)))
       survivors)
-    (when (equal? (frame-local 'current-group) id)
-      (set-frame-local! 'current-group #f))
-    (when id (group-record-delete! id))
-    (frame-group-label-refresh!)
-    (message
-      (if (pair? survivors)
-          (string-append "Killed group " name ". Kept "
-                         (number->string (length survivors)) " buffers")
-          (string-append "Killed group " name)))))
+    (set! *group-dying* #f)
+    (begin
+      (when id (group-record-delete! id))
+      (frame-group-label-refresh!)
+      (message
+        (if (pair? survivors)
+            (string-append "Killed group " name ". Kept "
+                           (number->string (length survivors)) " buffers")
+            (string-append "Killed group " name)))
+      ;; what the hook handlers may ask about the kill that just happened
+      (set! *group-killed* (list id name stood))
+      (run-hooks 'group-kill-hook))))
+
+;; the last kill: (ID NAME STOOD?), for group-kill-hook handlers. STOOD?
+;; says whether the selected frame stood in the killed group.
+(define *group-killed* #f)
+
+(defgroup 'groups "Work contexts: groups of buffers and their layouts.")
+
+(defcustom 'group-after-kill "follow"
+  "After you kill the group you stand in: \"follow\" enters the group of the buffer the window fell to, with that group's layout; \"stay\" shows the buffer and no group."
+  'group 'groups 'type 'string)
+
+;; The kill left the window on the next buffer. The frame follows that
+;; buffer into its group: the next context, not a lone buffer. A buffer
+;; in no group leaves the frame in no group, showing that buffer.
+(define (group-kill-follow!)
+  (let ((killed *group-killed*))
+    ;; one kill, one follow: a reload registers the handler again
+    (set! *group-killed* #f)
+    (when (and killed (caddr killed) (equal? group-after-kill "follow"))
+      (let* ((ids (group-buffer-memberships (current-buffer)))
+             (recent (filter (lambda (g) (member g ids)) (group-ids-mru)))
+             (next (and (pair? recent) (car recent))))
+        (when next
+          (switch-to-group! next)
+          (message (string-append "Killed group " (cadr killed) ". Now in "
+                                  (or (group-name next) ""))))))))
+
+(add-hook! 'group-kill-hook group-kill-follow!)
 
 (define-command "group-kill" "Kill every buffer in the current group"
   (lambda ()
@@ -1570,12 +1609,17 @@
   (let ((buffers (group-buffers-as g role)))
     (let loop ((windows (window-list)))
       (cond ((null? windows) #f)
+(define *group-dying* #f)
+
             ((member (car (cdr (car windows))) buffers) (car (car windows)))
             (else (loop (cdr windows)))))))
 
 (define (scene-buffer role)
   (let ((id (frame-local 'current-group)))
     (and id (group-buffer-as id role))))
+          ;; no chat for a group that is being killed: the window falls
+          ;; to the next buffer instead
+          ((equal? (group-resolve-id group) *group-dying*) #f)
 
 (define (scene-window role)
   (let ((id (frame-local 'current-group)))

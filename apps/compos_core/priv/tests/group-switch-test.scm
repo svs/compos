@@ -209,6 +209,67 @@
                     "a killed group's buffers are gone, so it is not active"))
     (t--sw-done!)))
 
+;; Two groups for the kill tests. ONE-NAME holds first and third in two
+;; windows; TWO-NAME holds second in one window, and the frame stands in
+;; it. Leaving ONE with both windows on members is what saves its layout
+;; as two windows: a window that shows a non-member is dropped from it.
+(define (t--sw-two-groups! one-name two-name)
+  ;; a chat left by an earlier run would pass for the group's own
+  (for-each (lambda (name)
+              (let ((c (string-append "*chat:" name "*")))
+                (when (buffer-known? c) (buffer-kill! c))))
+            (list one-name two-name))
+  (switch-to-buffer! t--sw-second)
+  (run-command "group-new-with-buffer")
+  (t--sw-type! two-name)
+  (t--sw-key! "confirm")
+  (switch-to-buffer! t--sw-first)
+  (run-command "group-new-with-buffer")
+  (t--sw-type! one-name)
+  (t--sw-key! "confirm")
+  (split-window! 'v)
+  (switch-to-buffer! t--sw-third)
+  (buffer-add-group! t--sw-third (group-resolve-id one-name))
+  (switch-to-group! (group-resolve-id two-name))
+  (delete-other-windows!))
+
+(deftest 'killing-the-group-you-stand-in-falls-into-the-next-buffers-group
+  "after group-kill the frame enters the group of the buffer the window fell to"
+  (lambda ()
+    (t--sw-setup!)
+    ;; two groups: "two" shows one window, "one" shows two member windows
+    (t--sw-two-groups! "zzsw-fall-one" "zzsw-fall-two")
+    (let ((one (group-resolve-id "zzsw-fall-one"))
+          (two (group-resolve-id "zzsw-fall-two")))
+      (check-equal! (frame-group) two "the frame stands in the second group")
+      (check-equal! (length (window-list)) 1 "which shows one window")
+      (run-command "group-kill")
+      (check-false! (group-resolve-id "zzsw-fall-two") "the group is gone")
+      (check-false! (buffer-exists? "*chat:zzsw-fall-two*") "the dying group's chat is not left open")
+      (check-equal! (frame-group) one "the frame fell into the next buffer's group")
+      (check-true! (member (current-buffer) (list t--sw-first t--sw-third))
+                   "and shows that group's buffer")
+      (check-equal! (length (window-list)) 2 "with that group's layout")
+      (delete-other-windows!)
+      (run-command "group-kill")
+      (check-false! (frame-group) "with no grouped buffer left, the frame stands in none"))
+    (t--sw-done!)))
+
+(deftest 'group-after-kill-stay-keeps-the-frame-out-of-the-next-group
+  "the customisation turns the fall-through off"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((was group-after-kill))
+      (set! group-after-kill "stay")
+      (t--sw-two-groups! "zzsw-stay-one" "zzsw-stay-two")
+      (run-command "group-kill")
+      (check-false! (group-resolve-id "zzsw-stay-two") "the group is gone")
+      (check-true! (member (current-buffer) (list t--sw-first t--sw-third))
+                   "the window fell to the next buffer")
+      (check-equal! (length (window-list)) 1 "and no layout was restored")
+      (set! group-after-kill was))
+    (t--sw-done!)))
+
 (deftest 'group-new-with-buffer-includes-the-buffer-family
   "the buffer and its eligible scratch companion start one group"
   (lambda ()

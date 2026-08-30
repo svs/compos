@@ -2227,6 +2227,7 @@ defmodule Compos.Ui.Layouts do
                   const spec = keySpec(e);
                   if (spec === null) return;
                   e.preventDefault();
+                  if (e.altKey) this._chordAt = performance.now();
                   // every key goes to the editor as the key it is. A visual
                   // row move is Scheme reading the wrap map this client
                   // measured after the last paint; nothing is decided here.
@@ -2503,14 +2504,21 @@ defmodule Compos.Ui.Layouts do
                   });
                 };
                 window.addEventListener("beforeinput", this.beforeInputH, true);
+                // A chord with Option starts a macOS dead-key composition
+                // even when its keydown was prevented: M-x opened the prompt,
+                // and the composition then ended with a character, which
+                // went into the prompt as text. A composition that begins
+                // right after a chord we sent is the chord's, not text.
                 this.compStartH = (e) => {
                   const buf = editableOf(e.target);
-                  if (buf) buf.setAttribute("phx-update", "ignore");
+                  this._chordComp = performance.now() - (this._chordAt || 0) < 300;
+                  if (buf && !this._chordComp) buf.setAttribute("phx-update", "ignore");
                 };
                 this.compEndH = (e) => {
                   const buf = editableOf(e.target);
                   if (!buf) return;
                   buf.removeAttribute("phx-update");
+                  if (this._chordComp) { this._chordComp = false; return; }
                   Telem.push(this, "intent", {
                     win: winIdOf(buf), type: "insertCompositionText",
                     from: -1, to: -1, text: e.data || ""

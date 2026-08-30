@@ -303,8 +303,14 @@ defmodule Compos.Core.Telemetry do
     })
   end
 
-  defp event_label(event, %{"type" => type}) when event == "intent" and is_binary(type),
-    do: "event intent #{type}"
+  # the intent's text rides along, short: a stray character that reaches
+  # a prompt is then visible as the intent that carried it
+  defp event_label(event, %{"type" => type} = params) when event == "intent" and is_binary(type) do
+    case params["text"] do
+      text when is_binary(text) and text != "" -> "event intent #{type} #{inspect(String.slice(text, 0, 12))}"
+      _ -> "event intent #{type}"
+    end
+  end
 
   defp event_label(event, %{"k" => key}) when event == "key" and is_binary(key),
     do: "event key #{key}"

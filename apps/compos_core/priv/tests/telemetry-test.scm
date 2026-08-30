@@ -149,7 +149,7 @@
     (when (telemetry-popup-open?) (popup-close!))
     (run-command "telemetry-toggle")
     (check-true! (telemetry-popup-open?) "the popup shows the telemetry list")
-    (check-equal! (buffer-local *telemetry-buffer* 'window-class) "popup popup-bottom"
-                  "the list floats along the bottom edge")
+    (check-equal! (buffer-local *telemetry-buffer* 'window-class) "popup popup-center"
+                  "the list is a modal in the center")
     (run-command "telemetry-toggle")
     (check-true! (not (telemetry-popup-open?)) "the same command closes it")))

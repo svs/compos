@@ -324,10 +324,10 @@
   (lambda () (list-mode-show! "telemetry-mode")))
 
 ;;; --- the popup ---------------------------------------------------------------
-;;; The list is a popup along the bottom edge. One chord opens it with
-;;; current rows and closes it again.
+;;; The list is a modal in the center of the screen, the switcher's
+;;; geometry. One chord opens it with current rows and closes it again.
 
-(add-display-rule! "*Telemetry*" 'popup '(side bottom size 0.4))
+(add-display-rule! "*Telemetry*" 'popup '(side center size 0.7))
 
 (define (telemetry-popup-open?)
   (and (popup-open?) (equal? (popup-buffer) *telemetry-buffer*)))

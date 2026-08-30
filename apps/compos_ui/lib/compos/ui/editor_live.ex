@@ -102,6 +102,14 @@ defmodule Compos.Ui.EditorLive do
     {:noreply, socket |> drain() |> refresh()}
   end
 
+  # what the browser measured: round trips, patches, paints, long tasks.
+  # The rows go to the collector and nothing renders: this is a report,
+  # not an edit.
+  def handle_event("telemetry", %{"rows" => rows}, socket) when is_list(rows) do
+    Compos.Core.Telemetry.browser(rows, socket.assigns[:frame])
+    {:noreply, socket}
+  end
+
   # the native selection of an editable surface, as bytes: a click, a drag,
   # a double-click, or the answer to a select request. Point is the focus
   # end; the mark is the anchor when the selection is not collapsed.
@@ -476,8 +484,26 @@ defmodule Compos.Ui.EditorLive do
     end
   end
 
+  # timed as two halves: the editor state read (a call into the Editor
+  # server, which waits when a command holds it) and the decoration of
+  # the window tree (this process's own work)
   defp refresh(socket) do
+    t0 = System.monotonic_time(:millisecond)
+    {socket, state_ms} = refresh_state(socket)
+    total = System.monotonic_time(:millisecond) - t0
+
+    :telemetry.execute(
+      [:compos, :ui, :refresh],
+      %{duration: total, state: state_ms, decorate: total - state_ms},
+      %{frame: socket.assigns[:frame]}
+    )
+
+    socket
+  end
+
+  defp refresh_state(socket) do
     fid = socket.assigns[:frame]
+    t0 = System.monotonic_time(:millisecond)
     state = Compos.Core.Editor.render_state(fid)
 
     # our frame was deleted out from under us (M-x delete-frame elsewhere,
@@ -490,6 +516,8 @@ defmodule Compos.Ui.EditorLive do
       else
         state
       end
+
+    state_ms = System.monotonic_time(:millisecond) - t0
 
     {tree, line_cache} = decorate(state.tree, socket.assigns.line_cache, state.faces)
     state = %{state | tree: tree}
@@ -537,13 +565,16 @@ defmodule Compos.Ui.EditorLive do
       end
 
     # a motion command asked the browser's layout to move the selection
-    case fid && Compos.Core.Editor.take_select(fid) do
-      {alter, dir, gran} ->
-        push_event(socket, "select", %{alter: alter, dir: dir, granularity: gran})
+    socket =
+      case fid && Compos.Core.Editor.take_select(fid) do
+        {alter, dir, gran} ->
+          push_event(socket, "select", %{alter: alter, dir: dir, granularity: gran})
 
-      _ ->
-        socket
-    end
+        _ ->
+          socket
+      end
+
+    {socket, state_ms}
   end
 
   defp line_param(params) do

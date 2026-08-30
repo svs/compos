@@ -1266,6 +1266,131 @@ defmodule Compos.Ui.Layouts do
           }
 
           const PAGE_BOOT = document.querySelector("meta[name='boot-id']").getAttribute("content");
+          // Telemetry, the browser's layer. Every key and intent push carries
+          // a trace id, and this measures what the server cannot see: the
+          // round trip of the push, the DOM patch after the reply, the paint
+          // of an input event (Event Timing), and long tasks. The rows go to
+          // the daemon once a second and land in M-x telemetry beside the
+          // Scheme lanes and the LiveView events of the same trace id.
+          // Every step is guarded: a failure here must never cost a key.
+          const Telem = {
+            boot: Math.random().toString(36).slice(2, 6),
+            seq: 0,
+            rows: [],
+            open: {},
+            capture: null,
+            lastRaw: { at: 0, bytes: 0 },
+            hook: null,
+            wrapped: false,
+            tid() { return this.boot + ":" + (++this.seq); },
+            now() { return performance.now(); },
+            epoch(at) { return Math.round(performance.timeOrigin + at); },
+            row(kind, label, ms, wait, tid, detail, at) {
+              this.rows.push({
+                k: kind, l: label, ms: Math.round(ms), wait: Math.round(wait || 0),
+                tid: tid || null, d: detail || "", t: this.epoch(at == null ? this.now() : at)
+              });
+              if (this.rows.length > 500) this.rows.splice(0, this.rows.length - 500);
+            },
+            // the socket ref of the push is made inside pushEvent, so a
+            // wrapper on makeRef pairs the next ref with the open trace
+            wrap() {
+              if (this.wrapped) return;
+              try {
+                const sock = liveSocket.getSocket();
+                const makeRef = sock.makeRef.bind(sock);
+                sock.makeRef = () => {
+                  const ref = makeRef();
+                  if (Telem.capture) { Telem.open[Telem.capture].ref = ref; Telem.capture = null; }
+                  return ref;
+                };
+                const onConn = sock.onConnMessage.bind(sock);
+                sock.onConnMessage = (raw) => {
+                  Telem.lastRaw = { at: Telem.now(), bytes: raw && raw.data ? raw.data.length : 0 };
+                  return onConn(raw);
+                };
+                sock.onMessage((msg) => {
+                  if (!msg || !msg.ref) return;
+                  for (const tid in Telem.open) {
+                    const o = Telem.open[tid];
+                    if (o.ref === msg.ref) { o.recv = Telem.lastRaw.at; o.bytes = Telem.lastRaw.bytes; }
+                  }
+                });
+                this.wrapped = true;
+              } catch (err) {}
+            },
+            // a traced push: the label is the key or the intent type, the
+            // wait is the server round trip, the detail is the patch and
+            // the reply size
+            push(hook, event, payload) {
+              let tid = null;
+              try {
+                this.wrap();
+                tid = this.tid();
+                payload.tid = tid;
+                const t0 = this.now();
+                this.open[tid] = { t0, ref: null, recv: null, bytes: 0 };
+                this.capture = tid;
+                const label = event === "key" ? "key " + payload.k : "intent " + payload.type;
+                hook.pushEvent(event, payload, () => {
+                  try {
+                    const done = this.now();
+                    const o = this.open[tid] || { t0, recv: null, bytes: 0 };
+                    delete this.open[tid];
+                    const recv = o.recv == null ? done : o.recv;
+                    this.row("push", label, done - t0, recv - t0, tid,
+                      "patch " + Math.round(done - recv) + "ms " + o.bytes + "b", t0);
+                  } catch (err) {}
+                });
+              } catch (err) {
+                this.capture = null;
+                if (tid) delete this.open[tid];
+                hook.pushEvent(event, payload);
+              }
+            },
+            observe() {
+              try {
+                new PerformanceObserver((list) => {
+                  for (const e of list.getEntries()) {
+                    if (!/^(keydown|keypress|keyup|beforeinput|input|compositionupdate)$/.test(e.name)) continue;
+                    const delay = e.processingStart - e.startTime;
+                    const handlers = e.processingEnd - e.processingStart;
+                    const present = e.startTime + e.duration - e.processingEnd;
+                    Telem.row("paint", "paint " + e.name, e.duration, delay, null,
+                      "delay " + Math.round(delay) + "ms handlers " + Math.round(handlers) +
+                      "ms present " + Math.round(present) + "ms", e.startTime);
+                  }
+                }).observe({ type: "event", durationThreshold: 16 });
+              } catch (err) {}
+              try {
+                new PerformanceObserver((list) => {
+                  for (const e of list.getEntries()) {
+                    Telem.row("longtask", "longtask", e.duration, 0, null, "", e.startTime);
+                  }
+                }).observe({ type: "longtask" });
+              } catch (err) {}
+            },
+            // the report itself is not traced: the server records it and
+            // renders nothing
+            flush() {
+              if (!this.hook || this.rows.length === 0) return;
+              const rows = this.rows;
+              this.rows = [];
+              try { this.hook.pushEvent("telemetry", { rows }); } catch (err) {}
+            },
+            attach(hook) {
+              this.hook = hook;
+              if (!this.timer) {
+                this.observe();
+                this.timer = setInterval(() => this.flush(), 1000);
+              }
+            },
+            detach(hook) {
+              if (this.hook === hook) this.hook = null;
+            }
+          };
+          window.composTelemetry = Telem;
+
           const Hooks = {
             Terminal: {
               mounted() {
@@ -1346,7 +1471,7 @@ defmodule Compos.Ui.Layouts do
                   if (spec && (this.editorSequence || editorOpen || editorEntry)) {
                     e.preventDefault();
                     this.editorSequence = true;
-                    this.pushEvent("key", { k: spec });
+                    Telem.push(this, "key", { k: spec });
                     return false;
                   }
                   return true;
@@ -1899,6 +2024,7 @@ defmodule Compos.Ui.Layouts do
               },
               mounted() {
                 if (this.bootCheck()) return;
+                Telem.attach(this);
                 this.handleEvent("navigate", ({url}) => window.location.assign(url));
                 this.whichKeyHeld = new Set();
                 this.whichKeyQuery = "";
@@ -2083,7 +2209,7 @@ defmodule Compos.Ui.Layouts do
                   // every key goes to the editor as the key it is. A visual
                   // row move is Scheme reading the wrap map this client
                   // measured after the last paint; nothing is decided here.
-                  this.pushEvent("key", { k: spec });
+                  Telem.push(this, "key", { k: spec });
                 };
                 window.addEventListener("keydown", this.handler);
                 this.keyupH = (e) => {
@@ -2349,7 +2475,7 @@ defmodule Compos.Ui.Layouts do
                   const to = range ? domByte(range.endContainer, range.endOffset) : null;
                   let text = e.data;
                   if (text == null && e.dataTransfer) text = e.dataTransfer.getData("text/plain");
-                  this.pushEvent("intent", {
+                  Telem.push(this, "intent", {
                     win: winIdOf(buf), type: e.inputType,
                     from: from == null ? -1 : from, to: to == null ? -1 : to,
                     text: text || ""
@@ -2364,7 +2490,7 @@ defmodule Compos.Ui.Layouts do
                   const buf = editableOf(e.target);
                   if (!buf) return;
                   buf.removeAttribute("phx-update");
-                  this.pushEvent("intent", {
+                  Telem.push(this, "intent", {
                     win: winIdOf(buf), type: "insertCompositionText",
                     from: -1, to: -1, text: e.data || ""
                   });
@@ -2983,6 +3109,7 @@ defmodule Compos.Ui.Layouts do
                 });
               },
               destroyed() {
+                Telem.detach(this);
                 window.removeEventListener("keydown", this.handler);
                 window.removeEventListener("keyup", this.keyupH);
                 window.removeEventListener("resize", this.resizeH);

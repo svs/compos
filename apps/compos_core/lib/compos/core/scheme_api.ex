@@ -129,8 +129,8 @@ defmodule Compos.Core.SchemeAPI do
       "fs-on-change!" =>
         "(fs-on-change! FN) — register the ONE handler that gets a root when a watched tree changes.",
       "telemetry-snapshot" =>
-        "(telemetry-snapshot [LIMIT]) — return recent Scheme lane and task events, newest first.",
-      "telemetry-clear!" => "(telemetry-clear!) — discard retained Scheme telemetry events.",
+        "(telemetry-snapshot [LIMIT]) — return recent telemetry events of every layer, newest first.",
+      "telemetry-clear!" => "(telemetry-clear!) — discard retained telemetry events.",
       "embedding-search" =>
         "(embedding-search QUERY TEXTS KEY LIMIT ELIGIBLE) — embed QUERY and TEXTS with OpenAI, cache text vectors on disk, and return eligible cosine scores.",
       "embedding-cache-clear!" =>
@@ -470,7 +470,13 @@ defmodule Compos.Core.SchemeAPI do
         {:sym, "label"},
         event.label,
         {:sym, "status"},
-        event.status
+        event.status,
+        {:sym, "layer"},
+        Map.get(event, :layer, "scheme"),
+        {:sym, "tid"},
+        Map.get(event, :tid) || false,
+        {:sym, "detail"},
+        Map.get(event, :detail, "")
       ]
     end)
   end

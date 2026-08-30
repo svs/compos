@@ -81,8 +81,13 @@ dispatch it to another worker.
   primitives; an LLM round automatically runs up to four `pure`/`read` tools
   concurrently. A global admission limit prevents simultaneous agents from
   multiplying that without bound. Tasks do not copy the booted Scheme world.
-- **Telemetry** — a bounded core collector for lane and Scheme-task events.
-  `telemetry.scm` owns the list mode, filtering, thresholds, and commands.
+- **Telemetry** — a bounded core collector for every layer's events in one
+  stream: `scheme` (lane jobs, tasks), `live` (the LiveView event, the
+  EditorLive refresh split into state read and decorate, the render), and
+  `browser` (the round trip of one push, the DOM patch, the paint from Event
+  Timing, long tasks). A key or intent push carries a trace id, and the rows
+  of one keystroke share it. `telemetry.scm` owns the list mode (`M-x
+  telemetry`), filtering, thresholds, and commands.
 - **TS** — Rustler NIF (`native/compos_ts`): highlight, structural nav, queries.
 - **Proc** — PTY processes streaming into buffers (comint).
 - **Endpoint** — named long-lived connections to the world outside the

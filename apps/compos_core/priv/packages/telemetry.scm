@@ -1,21 +1,25 @@
-;;; telemetry.scm --- Scheme execution telemetry.
+;;; telemetry.scm --- the editor's telemetry, every layer in one list.
 ;;;
-;;; Elixir retains a bounded stream of raw scheduler events. This package owns
-;;; the policy: row shape, slow-job threshold, filtering, and commands.
+;;; Elixir retains a bounded stream of raw events from three layers: the
+;;; Scheme scheduler (lane jobs and tasks), LiveView (the event, the refresh,
+;;; the render), and the browser (the round trip of one push, the DOM patch,
+;;; the paint, long tasks). One keystroke leaves one row in each layer, and
+;;; the rows share a trace id. This package owns the policy: row shape,
+;;; slow threshold, filtering, and commands.
 
 (package! 'telemetry)
 (domain! 'diagnostics)
 (effects! '(read))
 
-(define *telemetry-buffer* "*Scheme Telemetry*")
-(define *telemetry-detail-buffer* "*Scheme Telemetry Event*")
+(define *telemetry-buffer* "*Telemetry*")
+(define *telemetry-detail-buffer* "*Telemetry Event*")
 
-(defcustom 'telemetry-event-limit 200
-  "The maximum number of Scheme telemetry events shown in the list."
+(defcustom 'telemetry-event-limit 400
+  "The maximum number of telemetry events shown in the list."
   'group 'telemetry 'type 'number)
 
 (defcustom 'telemetry-slow-ms 250
-  "A Scheme job with this duration is slow."
+  "An event with this duration is slow."
   'group 'telemetry 'type 'number)
 
 (define (telemetry-events &optional limit)
@@ -41,16 +45,31 @@
       (string-append "task " (plist-get row 'owner))
       (plist-get row 'owner)))
 
+(define (telemetry--layer row) (or (plist-get row 'layer) "scheme"))
+
+(define (telemetry--trace row) (or (plist-get row 'tid) ""))
+
+(define (telemetry--detail row) (or (plist-get row 'detail) ""))
+
+;; the job cell: the label, then the detail the layer added
+(define (telemetry--job row)
+  (let ((d (telemetry--detail row)))
+    (if (equal? d "")
+        (plist-get row 'label)
+        (string-append (plist-get row 'label) "  " d))))
+
 (define (telemetry--cells buf row)
   (list
     (list (telemetry--time row) "dim")
+    (telemetry--layer row)
     (telemetry--owner row)
-    (plist-get row 'label)
+    (telemetry--job row)
     (if (telemetry--slow? row)
         (list (telemetry--duration row) "warn")
         (telemetry--duration row))
     (telemetry--queue row)
-    (telemetry--backlog row)))
+    (telemetry--backlog row)
+    (list (telemetry--trace row) "dim")))
 
 (define (telemetry--replace-buffer! buf text)
   (buffer-create buf)
@@ -61,19 +80,22 @@
 
 (define (telemetry--detail-text row)
   (string-append
-    "Scheme Telemetry Event\n\n"
+    "Telemetry Event\n\n"
     "Time: " (telemetry--time row) "\n"
+    "Layer: " (telemetry--layer row) "\n"
     "Kind: " (plist-get row 'kind) "\n"
     "Owner: " (telemetry--owner row) "\n"
     "Job: " (plist-get row 'label) "\n"
+    "Detail: " (telemetry--detail row) "\n"
     "Duration: " (telemetry--duration row) " ms\n"
-    "Queue delay: " (telemetry--queue row) " ms\n"
+    "Wait: " (telemetry--queue row) " ms\n"
     "Backlog: " (telemetry--backlog row) "\n"
+    "Trace: " (telemetry--trace row) "\n"
     "Status: " (plist-get row 'status) "\n"))
 
 (define (telemetry--detail-blocks row)
   (list
-    (component 'ui/section (list 'title "Scheme Telemetry Event"))
+    (component 'ui/section (list 'title "Telemetry Event"))
     (component 'ui/card
       (list 'title (plist-get row 'label) 'open? #t
             'body
@@ -82,12 +104,15 @@
                 (list 'pairs
                   (list
                     (list "Time" (telemetry--time row))
+                    (list "Layer" (telemetry--layer row))
                     (list "Kind" (plist-get row 'kind))
                     (list "Owner" (telemetry--owner row))
                     (list "Job" (plist-get row 'label))
+                    (list "Detail" (telemetry--detail row))
                     (list "Duration" (string-append (telemetry--duration row) " ms"))
-                    (list "Queue delay" (string-append (telemetry--queue row) " ms"))
+                    (list "Wait" (string-append (telemetry--queue row) " ms"))
                     (list "Backlog" (telemetry--backlog row))
+                    (list "Trace" (telemetry--trace row))
                     (list "Status" (plist-get row 'status))))))))))
 
 (define (telemetry--detail-setup! buf)
@@ -106,7 +131,7 @@
   (lambda () (telemetry--detail-setup! (current-buffer))))
 
 (mode-doc! "telemetry-detail-mode"
-  "Complete fields for one Scheme telemetry event. `q` closes the window.")
+  "Complete fields for one telemetry event. `q` closes the window.")
 
 (define-command "telemetry-visit" "Show complete details for the event on this row"
   (lambda ()
@@ -136,16 +161,16 @@
   (when (buffer-exists? *telemetry-buffer*)
     (list-refresh! *telemetry-buffer*)))
 
-(define-command "telemetry-refresh" "Refresh the Scheme telemetry list"
+(define-command "telemetry-refresh" "Refresh the telemetry list"
   (lambda () (telemetry-refresh!)))
 
 (effects! '(write))
 
-(define-command "telemetry-clear" "Clear retained Scheme telemetry events"
+(define-command "telemetry-clear" "Clear retained telemetry events"
   (lambda ()
     (telemetry-clear!)
     (telemetry-refresh!)
-    (message "Scheme telemetry cleared")))
+    (message "Telemetry cleared")))
 
 (effects! '(read))
 
@@ -154,20 +179,28 @@
 (define-list-mode! "telemetry-mode"
   (list
     'doc (string-append
-           "Recent Scheme lane jobs and shared tasks. Duration and queue time "
-           "use milliseconds. Backlog is the lane mailbox length when the job starts. "
-           "RET shows every field; / filters, g refreshes, c clears, and q quits.")
+           "Recent events of every layer: scheme (lane jobs, tasks), live "
+           "(the LiveView event, the refresh, the render), and browser (the "
+           "round trip of one push, the DOM patch, the paint, long tasks). "
+           "Milliseconds throughout. Wait is the queue time of a job, the "
+           "server round trip of a push, or the input delay of a paint. "
+           "Backlog is the lane mailbox length when the job starts. The rows "
+           "of one keystroke share a trace id: / with the id shows the "
+           "keystroke end to end. RET shows every field; g refreshes, c "
+           "clears, and q quits.")
     'buffer *telemetry-buffer*
     'rows (lambda (buf) (telemetry-events))
     'columns (lambda (buf)
                (list (list "time" 8)
-                     (list "owner" 18)
+                     (list "layer" 7)
+                     (list "owner" 16)
                      (list "job" #f)
                      (list "ms" 6 'right)
                      (list "wait" 6 'right)
-                     (list "q" 4 'right)))
+                     (list "q" 4 'right)
+                     (list "trace" 9)))
     'cells telemetry--cells
-    'title (lambda (buf) "Scheme Telemetry")
+    'title (lambda (buf) "Telemetry")
     'meta telemetry--meta
     'total (lambda (buf) (length (telemetry-events)))
     'no-marks #t
@@ -180,10 +213,10 @@
             ("c" "telemetry-clear")
             ("q" "quit-window"))))
 
-(define-command "telemetry" "Show Scheme execution duration, queue time, and backlog"
+(define-command "telemetry" "Show the duration of every layer's work: scheme, live, browser"
   (lambda () (list-mode-show! "telemetry-mode")))
 
 (public! 'telemetry-events
-  "(telemetry-events [LIMIT]) — return recent Scheme lane and task events, newest first")
+  "(telemetry-events [LIMIT]) — return recent events of every layer, newest first")
 (public! 'telemetry-refresh!
-  "(telemetry-refresh!) — refresh the Scheme telemetry buffer when it exists")
+  "(telemetry-refresh!) — refresh the telemetry buffer when it exists")

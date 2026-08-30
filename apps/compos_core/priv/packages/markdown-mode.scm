@@ -1,13 +1,11 @@
 ;;; markdown-mode.scm --- Markdown drawn in place: the markup steps back.
 ;;;
 ;;; This is preview-mode's painter for Markdown. It paints faces on the
-;;; source and changes no byte. A marker (the # of a heading, the ** of
-;;; bold, the ]( of a link) wears md-marker, and the page hides md-marker
-;;; on every line but the one point is on. A heading wears its level's
-;;; face, and that face carries a size. An image URL wears img-embed and
-;;; draws as the picture. A line that is one X post URL wears x-embed and
-;;; draws as the card. A standalone YouTube URL or #+embed directive wears
-;;; youtube-embed and draws a video card.
+;;; source and changes no byte. Markup wears md-marker and stays hidden.
+;;; A heading wears its level's face, and that face carries a size. An
+;;; image URL wears img-embed and draws as the picture. A line that is one
+;;; X post URL wears x-embed and draws as the card. A standalone YouTube
+;;; URL or #+embed directive wears youtube-embed and draws a video card.
 ;;;
 ;;; preview-mode turns the paint on and off (markdown-paint-on!,
 ;;; markdown-paint-off!). morg-mode owns structure and the plain faces.
@@ -158,9 +156,9 @@
       ;; a row face (row-*) shapes the whole row: the page reads it off the
       ;; line, not the segment
       ((equal? k 'open)
-       (list (list start (+ start len) "org-meta") (list start (+ start len) "row-fence")))
+       (list (list start (+ start len) "md-marker") (list start (+ start len) "row-fence")))
       ((equal? k 'close)
-       (list (list start (+ start len) "org-meta") (list start (+ start len) "row-fence")))
+       (list (list start (+ start len) "md-marker") (list start (+ start len) "row-fence")))
       ((equal? k 'code)
        (cons (list start (+ start len) "row-code")
              (cond ((equal? (morg-info e) "result-scheme") '())

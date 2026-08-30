@@ -32,13 +32,17 @@
 
 (define (preview--rows-on! buf)
   ;; runtime state of the rows: never saved with the desktop. The mode
-  ;; list is what persists, and setup rebuilds the rest from it.
+  ;; list is what persists, and setup rebuilds the paint from it. The saved
+  ;; source look must persist because face-remap contains the drawn look.
   (desktop-skip! buf 'preview-rows)
-  (desktop-skip! buf 'preview-rows-saved)
   (desktop-skip! buf 'markdown-paint)
+  ;; Migrate buffers that marked the source look as runtime state.
+  (buffer-set-local! buf 'desktop-skip-locals
+    (remove (lambda (key) (equal? key 'preview-rows-saved))
+            (or (buffer-local buf 'desktop-skip-locals) '())))
   (buffer-set-local! buf 'render-mode #f)
   ;; the look the rows replace comes back exactly when they go
-  (unless (buffer-local buf 'preview-rows)
+  (unless (buffer-local buf 'preview-rows-saved)
     (buffer-set-local! buf 'preview-rows-saved
       (list (or (buffer-local buf 'face-remap) '())
             (or (buffer-local buf 'style) #f))))
@@ -53,6 +57,19 @@
   (face-remap-in! buf 'default
     (list 'family preview-font-family 'size preview-font-size 'line-height "1.7")))
 
+;; Old desktops did not save preview-rows-saved. Restore then captured the
+;; rendered font as the source font. That exact remap belongs to preview, so
+;; teardown removes it and lets the source font below it show again.
+(define (preview--own-default? entry)
+  (and (equal? (car entry) 'default)
+       (let ((attrs (cadr entry)))
+         (and (equal? (plist-get attrs 'family) preview-font-family)
+              (equal? (plist-get attrs 'size) preview-font-size)
+              (equal? (plist-get attrs 'line-height) "1.7")))))
+
+(define (preview--source-remap saved)
+  (filter (lambda (entry) (not (preview--own-default? entry))) saved))
+
 (define (preview--rows-off! buf)
   (buffer-set-local! buf 'preview-rows #f)
   (when (boundp 'markdown-paint-off!) (markdown-paint-off! buf))
@@ -61,8 +78,9 @@
     (morg-refontify! buf))
   (let ((saved (buffer-local buf 'preview-rows-saved)))
     (when saved
-      (buffer-set-local! buf 'face-remap (car saved))
-      (buffer-set-local! buf 'style (cadr saved))
+      (let ((source (preview--source-remap (car saved))))
+        (buffer-set-local! buf 'face-remap source)
+        (buffer-set-local! buf 'style (face-remap--css source)))
       (buffer-set-local! buf 'preview-rows-saved #f)
       ;; the saved remap predates a scale set while the rows were on
       (when (boundp 'text-scale-sync!) (text-scale-sync! buf)))))

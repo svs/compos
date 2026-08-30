@@ -116,6 +116,31 @@ defmodule Compos.Ui.AgentViewTest do
     refute Buffer.text(buf) =~ "wait for me"
   end
 
+  test "agent render-mode applies the buffer text scale to all chat text", %{conn: conn} do
+    buf = "*agent: scale-test*"
+    {:ok, _} = Compos.Core.create_buffer(buf)
+
+    Buffer.append(buf, "Scaled prose\n", source: :editor)
+    mark = Buffer.byte_size(buf)
+    Buffer.append(buf, "\n>>> you: draft", source: :editor)
+
+    Buffer.set_local(buf, "render-mode", "agent")
+    Buffer.set_local(buf, "agent-saved-mark", mark)
+    Buffer.set_local(buf, "agent-marker-bytes", byte_size("\n>>> you: "))
+    Buffer.set_local(buf, "agent-blocks", [[0, mark, "prose"]])
+
+    Editor.set_window_buffer(buf)
+    {:ok, _} = Session.eval(~s{(text-scale-apply! "#{buf}" 2)})
+    {:ok, view, html} = live(conn, "/")
+
+    assert has_element?(view, ~s(.agent-view[style*="--text-scale-factor:1.44"] .ag-prose))
+    assert has_element?(view, ~s(.agent-view[style*="--text-scale-factor:1.44"] .ag-input))
+    assert html =~ ~r/\.ag-prose \{[^}]*font-size: calc\(15px \* var\(--text-scale-factor, 1\)\)/s
+
+    assert html =~
+             ~r/\.ag-input \{[^}]*font-size: calc\(12\.5px \* var\(--text-scale-factor, 1\)\)/s
+  end
+
   # "name: arg" titles split into a muted tool name and a highlighted
   # argument; a bare title renders as one name span
   test "tool card highlights the call argument apart from the tool name", %{conn: conn} do

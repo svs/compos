@@ -282,14 +282,12 @@ defmodule Compos.Ui.Layouts do
           }
           .buf[contenteditable]:focus .region { background: transparent; }
           .buf[contenteditable] ::selection { background: var(--region-bg, #e7e9f1); }
-          /* markdown-mode: a marker steps back on every line but the one
-             point is on, where the source shows itself for editing */
+          /* Preview keeps markup hidden. Morg owns source editing. */
           .f-md-marker { display: none; }
-          .line.hl-line .f-md-marker { display: inline; }
           /* the block shapes of a drawn page: the marker stepped back, the
-             row takes the shape; on the cursor line the marker returns */
+             row takes the shape */
           .line.row-li .line-content { padding-left: 1.4em; }
-          .line.row-li:not(.hl-line) .line-content::before {
+          .line.row-li .line-content::before {
             content: "\2022"; display: inline-block; width: 1.4em; margin-left: -1.4em;
             text-align: center; color: var(--dim-fg, #8a857a);
           }
@@ -299,7 +297,7 @@ defmodule Compos.Ui.Layouts do
             color: var(--dim-fg, #57534a); font-style: italic;
           }
           .line.row-hr .line-content { position: relative; }
-          .line.row-hr:not(.hl-line) .line-content::after {
+          .line.row-hr .line-content::after {
             content: ""; position: absolute; left: 0; right: 0; top: 50%;
             border-top: 1px solid var(--border, #cfc8b6);
           }
@@ -486,10 +484,13 @@ defmodule Compos.Ui.Layouts do
           .blocks-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
           .blocks-scroll { flex: 1; overflow-y: auto; padding: 10px 12px 8px; }
           /* --- agent transcript (the Modern Emacs agent-chat design) ------- */
-          .agent-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+          .agent-view {
+            flex: 1; display: flex; flex-direction: column; min-height: 0;
+            font-size: calc(var(--default-size, 13px) * var(--text-scale-factor, 1));
+          }
           .ag-scroll { flex: 1; overflow-y: auto; padding: 14px 18px 6px; }
           .ag-label {
-            font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em;
+            font-family: var(--font-mono); font-size: calc(10px * var(--text-scale-factor, 1)); letter-spacing: 0.12em;
             color: var(--agent-meta-fg, #8a8577); flex-shrink: 0; padding-top: 3px;
           }
           .ag-user {
@@ -498,7 +499,7 @@ defmodule Compos.Ui.Layouts do
             border-radius: 8px; padding: 8px 12px;
           }
           .ag-user-text {
-            min-width: 0; font-family: var(--font-mono); font-size: 12.5px;
+            min-width: 0; font-family: var(--font-mono); font-size: calc(12.5px * var(--text-scale-factor, 1));
             white-space: pre-wrap; overflow-wrap: anywhere;
           }
           /* The measure belongs to the text, not to the block: five table
@@ -509,13 +510,13 @@ defmodule Compos.Ui.Layouts do
              `break-word` still breaks a long URL, and it leaves the
              minimum width alone. */
           .ag-prose {
-            font-family: var(--font-serif); font-size: 15px; line-height: 1.6;
+            font-family: var(--font-serif); font-size: calc(15px * var(--text-scale-factor, 1)); line-height: 1.6;
             margin: 8px 0; overflow-wrap: break-word;
           }
           .ag-prose > * { max-width: 62ch; }
           .ag-prose > pre, .ag-prose > .ag-table { max-width: 100%; }
           .ag-prose code, .ag-prose pre {
-            font-family: var(--font-mono); font-size: 12px;
+            font-family: var(--font-mono); font-size: calc(12px * var(--text-scale-factor, 1));
             background: var(--agent-code-bg, rgba(0,0,0,0.06)); border-radius: 4px;
           }
           .ag-prose code { padding: 1px 4px; }
@@ -543,7 +544,7 @@ defmodule Compos.Ui.Layouts do
           .ag-table { overflow-x: auto; margin: 10px 0; }
           .ag-prose table {
             width: auto; max-width: 100%; border-collapse: collapse;
-            font-family: var(--font-sans); font-size: 13px;
+            font-family: var(--font-sans); font-size: calc(13px * var(--text-scale-factor, 1));
             font-variant-numeric: tabular-nums;
           }
           .ag-prose th, .ag-prose td {
@@ -554,7 +555,7 @@ defmodule Compos.Ui.Layouts do
           .ag-prose th { font-weight: 600; white-space: nowrap; }
           .ag-tool, .ag-thought {
             margin: 5px 0; border: 1px solid var(--agent-card-border, rgba(0,0,0,0.10));
-            border-radius: 7px; font-family: var(--font-mono); font-size: 12px;
+            border-radius: 7px; font-family: var(--font-mono); font-size: calc(12px * var(--text-scale-factor, 1));
             background: color-mix(in srgb, var(--window-bg, #fdfcf8) 96%, var(--agent-tool-fg, #26356b));
           }
           .ag-tool summary, .ag-thought summary {
@@ -579,7 +580,7 @@ defmodule Compos.Ui.Layouts do
           }
           .ag-chevron {
             width: 11px; flex: 0 0 11px; color: var(--agent-meta-fg, #8a8577);
-            font-family: var(--font-sans); font-size: 17px; line-height: 1;
+            font-family: var(--font-sans); font-size: calc(17px * var(--text-scale-factor, 1)); line-height: 1;
             transform: rotate(0deg); transition: transform 100ms ease;
           }
           .ag-tool[open] .ag-chevron { transform: rotate(90deg); }
@@ -590,7 +591,7 @@ defmodule Compos.Ui.Layouts do
           .ag-kind {
             padding: 1px 5px; border-radius: 4px; color: var(--agent-tool-fg, #26356b);
             background: color-mix(in srgb, var(--agent-tool-fg, #26356b) 10%, transparent);
-            font-family: var(--font-sans); font-size: 9px; font-weight: 700;
+            font-family: var(--font-sans); font-size: calc(9px * var(--text-scale-factor, 1)); font-weight: 700;
             letter-spacing: 0.05em; text-transform: uppercase;
           }
           .ag-summary-copy {
@@ -599,7 +600,7 @@ defmodule Compos.Ui.Layouts do
           }
           .ag-title {
             display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-            white-space: nowrap; color: var(--window-fg, inherit); font-size: 11.5px;
+            white-space: nowrap; color: var(--window-fg, inherit); font-size: calc(11.5px * var(--text-scale-factor, 1));
           }
           /* the argument is the interesting part: the tool name steps back,
              the argument carries the accent. A card with no argument keeps
@@ -610,12 +611,12 @@ defmodule Compos.Ui.Layouts do
           .ag-preview {
             display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis;
             white-space: nowrap; color: var(--agent-meta-fg, #8a8577);
-            font-family: var(--font-mono); font-size: 10px; line-height: 1.25;
+            font-family: var(--font-mono); font-size: calc(10px * var(--text-scale-factor, 1)); line-height: 1.25;
           }
           .ag-preview::before { content: "↳ "; color: var(--agent-tool-fg, #26356b); }
           .ag-tstatus {
             color: var(--agent-meta-fg, #8a8577); font-family: var(--font-sans);
-            font-size: 9.5px; letter-spacing: 0.02em;
+            font-size: calc(9.5px * var(--text-scale-factor, 1)); letter-spacing: 0.02em;
           }
           .ag-tstatus.done::before { content: "✓ "; color: var(--string-fg, #4a7a4a); }
           .ag-tstatus.failed { color: var(--error-fg, #a8342a); }
@@ -625,17 +626,17 @@ defmodule Compos.Ui.Layouts do
             white-space: pre-wrap; overflow-wrap: anywhere; color: var(--agent-thought-fg, #6a675e);
             background: color-mix(in srgb, var(--agent-code-bg, rgba(0,0,0,0.06)) 60%, transparent);
           }
-          .ag-thought summary { color: var(--agent-thought-fg, #8a8577); font-size: 10.5px; }
+          .ag-thought summary { color: var(--agent-thought-fg, #8a8577); font-size: calc(10.5px * var(--text-scale-factor, 1)); }
           .ag-thought-text { padding: 6px 10px; white-space: pre-wrap; color: var(--agent-thought-fg, #8a8577); }
           .ag-plan {
-            font-family: var(--font-mono); font-size: 12px; margin: 8px 0;
+            font-family: var(--font-mono); font-size: calc(12px * var(--text-scale-factor, 1)); margin: 8px 0;
             padding: 8px 12px; border-left: 2px solid var(--agent-card-border, rgba(0,0,0,0.15));
             white-space: pre-wrap;
           }
           .ag-perm {
             display: flex; align-items: center; gap: 10px; margin: 10px 0;
             border: 1px solid var(--agent-permission-fg, #e0af68); border-radius: 8px;
-            padding: 8px 12px; font-family: var(--font-mono); font-size: 12px;
+            padding: 8px 12px; font-family: var(--font-mono); font-size: calc(12px * var(--text-scale-factor, 1));
           }
           .ag-perm-title { flex: 1; color: var(--agent-permission-fg, #a8741a); }
           .ag-question {
@@ -655,10 +656,10 @@ defmodule Compos.Ui.Layouts do
             color: var(--window-bg, #fdfcf8);
           }
           .ag-question-hint {
-            margin-top: 9px; color: var(--agent-meta-fg, #8a8577); font-size: 10px;
+            margin-top: 9px; color: var(--agent-meta-fg, #8a8577); font-size: calc(10px * var(--text-scale-factor, 1));
           }
           .ag-btn {
-            font-family: var(--font-mono); font-size: 11px; padding: 3px 12px;
+            font-family: var(--font-mono); font-size: calc(11px * var(--text-scale-factor, 1)); padding: 3px 12px;
             border-radius: 6px; border: 1px solid var(--agent-card-border, rgba(0,0,0,0.2));
             background: transparent; color: inherit; cursor: pointer;
           }
@@ -671,7 +672,7 @@ defmodule Compos.Ui.Layouts do
           .ag-btn.session { border-color: var(--string-fg, #4a7a4a); color: var(--string-fg, #4a7a4a); }
           .ag-btn.deny { border-color: transparent; color: var(--error-fg, #a8342a); opacity: 0.8; }
           .ag-wait {
-            font-family: var(--font-mono); font-size: 12px; margin: 8px 0;
+            font-family: var(--font-mono); font-size: calc(12px * var(--text-scale-factor, 1)); margin: 8px 0;
             color: var(--agent-thought-fg, #8a8577); animation: ag-pulse 1.4s ease-in-out infinite;
           }
           /* the turn pulse under the transcript: outside .ag-scroll, so it
@@ -681,7 +682,7 @@ defmodule Compos.Ui.Layouts do
             0%, 18% { transform: translateX(-120%); }
             82%, 100% { transform: translateX(120%); }
           }
-          .ag-meta { font-family: var(--font-mono); font-size: 11.5px; color: var(--agent-meta-fg, #8a8577); margin: 6px 0; }
+          .ag-meta { font-family: var(--font-mono); font-size: calc(11.5px * var(--text-scale-factor, 1)); color: var(--agent-meta-fg, #8a8577); margin: 6px 0; }
           @keyframes ag-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
           .ag-inputrow {
             display: flex; align-items: baseline; gap: 12px; margin: 6px 14px 12px;
@@ -690,14 +691,14 @@ defmodule Compos.Ui.Layouts do
             background: var(--window-bg, rgba(255,255,255,0.5));
           }
           .ag-input {
-            flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 12.5px;
+            flex: 1; min-width: 0; font-family: var(--font-mono); font-size: calc(12.5px * var(--text-scale-factor, 1));
             white-space: pre-wrap; overflow-wrap: anywhere;
           }
           .ag-queued { color: var(--agent-queued-fg, #9a958a); }
           /* queued rows under the transcript: outside .ag-scroll, so they
              align with the input row, not the padded scroll area */
           .ag-queued-row { margin: 2px 18px; flex-shrink: 0; }
-          .ag-hint { font-family: var(--font-mono); font-size: 10px; color: var(--agent-meta-fg, #8a8577); flex-shrink: 0; }
+          .ag-hint { font-family: var(--font-mono); font-size: calc(10px * var(--text-scale-factor, 1)); color: var(--agent-meta-fg, #8a8577); flex-shrink: 0; }
           .ml-extra {
             font-family: var(--font-mono); font-size: 11px; padding: 0 8px;
             color: var(--agent-permission-fg, #a8741a); font-weight: 600;

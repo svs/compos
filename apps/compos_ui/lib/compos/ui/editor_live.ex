@@ -1453,6 +1453,7 @@ defmodule Compos.Ui.EditorLive do
         <div
           class="agent-view"
           id={"agent-#{@node.id}"}
+          style={@node.style}
           phx-hook="AgentScroll"
           data-buf={@node.buffer}
           data-win={@node.id}

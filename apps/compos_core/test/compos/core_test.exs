@@ -50,6 +50,15 @@ defmodule Compos.CoreTest do
       assert Buffer.version(name) == 3
     end
 
+    test "reads the line at point atomically" do
+      name = uniq("line-at-point")
+      {:ok, ^name} = Core.create_buffer(name)
+      :ok = Buffer.append(name, "zero\nhéllo\nlast")
+      :ok = Buffer.goto(name, 8)
+
+      assert Buffer.line_at_point(name) == {2, "héllo"}
+    end
+
     test "change events carry provenance" do
       name = uniq("evt")
       {:ok, _} = Core.create_buffer(name)
@@ -285,6 +294,16 @@ defmodule Compos.CoreTest do
       assert Buffer.text(name) == "hello from scheme"
       {:ok, printed} = Session.eval(~s{(buffer-text "#{name}")})
       assert printed == inspect("hello from scheme")
+    end
+
+    test "scheme reads a named buffer's line at point" do
+      name = uniq("scheme-line-at-point")
+      {:ok, ^name} = Core.create_buffer(name)
+      :ok = Buffer.append(name, "alpha\nbeta\ngamma")
+      :ok = Buffer.goto(name, 7)
+
+      assert {:ok, "(2 \"beta\")"} =
+               Session.eval(~s{(buffer-line-at-point "#{name}")})
     end
 
     test "eval-region evaluates buffer text in the live interpreter" do

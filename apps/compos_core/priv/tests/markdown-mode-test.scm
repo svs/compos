@@ -21,11 +21,30 @@
   (if (member span (buffer-overlays t--md-buf)) #t #f))
 
 (deftest 'a-heading-marker-steps-back-and-the-text-takes-its-level
-  "the # and the space wear md-marker; the words wear org-level-1"
+  "the # and the space wear md-marker; the words wear md-h1"
   (lambda ()
     (t--md-fresh! "# Title\n")
-    (check-true! (t--md-has? '(0 2 "md-marker")) "the marker is a marker")
+    (check-true! (t--md-has? '(0 2 "md-marker")) "the marker steps back")
     (check-true! (t--md-has? '(2 7 "md-h1")) "the text is the heading")
+    (t--md-done!)))
+
+(deftest 'every-atx-heading-level-conceals-its-complete-prefix
+  "preview hides all heading hashes and the space after them"
+  (lambda ()
+    (t--md-fresh! "# One\n## Two\n### Three\n#### Four\n###### Six\n")
+    (check-true! (t--md-has? '(0 2 "md-marker")) "level one")
+    (check-true! (t--md-has? '(6 9 "md-marker")) "level two")
+    (check-true! (t--md-has? '(13 17 "md-marker")) "level three")
+    (check-true! (t--md-has? '(23 28 "md-marker")) "level four")
+    (check-true! (t--md-has? '(33 40 "md-marker")) "level six")
+    (t--md-done!)))
+
+(deftest 'fence-markers-step-back-with-other-preview-markup
+  "the opening and closing backticks use the concealed marker face"
+  (lambda ()
+    (t--md-fresh! "```elixir\n:ok\n```\n")
+    (check-true! (t--md-has? '(0 9 "md-marker")) "the opening fence")
+    (check-true! (t--md-has? '(14 17 "md-marker")) "the closing fence")
     (t--md-done!)))
 
 (deftest 'emphasis-markers-step-back-around-the-emphasized-text

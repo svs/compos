@@ -26,8 +26,8 @@ This document is the specification, in this order:
 ### The three rules
 
 1. A buffer that is **created** while the frame has an explicit destination joins that group.
-2. **Showing** an existing buffer never changes a buffer's groups.
-3. Every list of buffers puts the destination group first.
+2. Shoving it or any selection of buffers / visible buffers to another group is easy
+3. When in a group (current_group is set), most actions target the group. Buffers from outside the group may not join by default.
 
 Membership is decided once, at creation, by one value. Nothing later revisits it. Junk is removed after the fact with `remove`.
 
@@ -48,6 +48,55 @@ Read each story as a path:
 > As a user -> in this situation -> I want this outcome -> the editor behaves this way -> I use this command.
 
 Some outcomes are automatic. Then the solution is a rule, not a command.
+
+### As a user starting with a clean slate
+
+These are the ways I can create my first group when no group exists yet:
+
+#### I want to create an empty new group
+- I want to say `new-group`, give it a name and be in a new group with its scratch buffer.
+- Any files I open should open in this group.
+- I can pull other buffers to this group.
+
+
+#### I want to start from the current buffer
+
+- I open a file, chat, or other useful buffer.
+- I choose to make it the start of a new group and give the group a unique name.
+- The current buffer becomes the first member and the new group becomes current.
+- The editor keeps me in the buffer I started from.
+
+#### I want to start from a set of buffers
+
+#### selected buffers
+  - I select several buffers that belong to the same task.
+- I create a new group and give it a unique name.
+- All selected buffers become members of the new group.
+- The group opens on the buffer that I used to begin the action.
+#### visible buffers
+- I want to move all visible buffers to a new group.
+- I want to add all visible buffers to a new group.
+
+#### 
+I want to start from a project or directory
+
+- I choose a project or directory instead of selecting buffers one by one.
+- The editor offers the relevant files or buffers as the initial membership.
+- I confirm the selection and give the group a unique name.
+- The new group opens with a useful starting buffer.
+
+#### I want a completely empty group
+
+- I create a named group without choosing a starting buffer, file, or project.
+- The group is created with no members.
+- I can add the first buffer later, and that buffer becomes the useful place to start.
+
+#### I want the editor to help me create my first group
+
+- When I have no current group, the editor makes the create-group paths easy to discover.
+- It does not silently assign unrelated buffers to the group.
+- After creation, the group is current and its membership and name are visible.
+- If I cancel naming or selection, no partial or unnamed group remains.
 
 ### As a user working in a group
 
@@ -70,7 +119,7 @@ Some outcomes are automatic. Then the solution is a rule, not a command.
 
 - I pick it and accept with `C-RET` instead of `RET`.
 - The buffer is shown and added to the destination group.
-- A mistake is one `remove` away.
+- A mistake is one `group-remove` away.
 - **Command:** `switch-to-buffer`, then `C-RET`.
 
 #### I want to open a file and have it here
@@ -107,7 +156,7 @@ Some outcomes are automatic. Then the solution is a rule, not a command.
 
 - The group is added. Existing groups stay.
 - I remain in this group.
-- **Command:** `add`.
+- **Command:** `group-add`.
 
 #### I want this buffer out of here and into another group
 
@@ -116,8 +165,8 @@ Some outcomes are automatic. Then the solution is a rule, not a command.
 - **Command:** `move`.
 
 #### I want a fresh group
-
-- The group is created after I accept a unique name.
+        
+-   The group is created after I accept a unique name.
 - The current buffer is its seed. The group opens on that buffer.
 - **Command:** `new`.
 
@@ -157,7 +206,7 @@ Some outcomes are automatic. Then the solution is a rule, not a command.
 
 #### I want to change this buffer's groups by hand
 
-- Add one: `add`. Replace all: `move`. Drop one: `remove`.
+- Add one: `group-add`. Replace all: `group-move`. Drop one: `group-remove`.
 - These work when the frame has no destination too.
 
 ### As a user working with several windows
@@ -231,7 +280,7 @@ Some outcomes are automatic. Then the solution is a rule, not a command.
 
 - Showing or switching buffers never changes a buffer's groups.
 - Switching groups never changes a buffer's groups.
-- `add` never removes. `move` names one destination. `remove` drops one group.
+- `group-add` never removes. `group-move` names one destination. `group-remove` drops one group.
 - No membership verb kills a buffer or changes a file.
 - Cancel changes nothing durable.
 - A wrong membership costs one command to fix.
@@ -300,7 +349,7 @@ One command per verb, in the `group` namespace. A verb that acts on a group read
 | `members` | `group-members` | `C-x C-g b`; `b` in the board |
 | `buffer-select` | `buffer-select`; `C-SPC` marks in the switcher, `m` in a list | |
 
-The `add` prompt names a default: the group the frame stands in, else the group it last stood in. A bare `RET` joins it; a typed name joins that group or founds it; the `New group` row founds one without entering it.
+The `group-add` prompt names a default: the group the frame stands in, else the group it last stood in. A bare `RET` joins it; a typed name joins that group or founds it; the `New group` row founds one without entering it.
 
 ### Kill, follow, revive
 
@@ -427,11 +476,11 @@ Every group has one scratch buffer named `*scratch: NAME*`.
 A buffer can be in many groups. No group is the owner.
 
 - "Exclusive to G" is derived: the groups are exactly `{G}`.
-- `add` never removes. `move` names one destination and replaces every group. `remove` drops one group.
+- `group-add` never removes. `group-move` names one destination and replaces every group. `group-remove` drops one group.
 - Three places read a buffer's groups: list sectioning, window fill, and `switch-to-buffer-group`. Layouts store buffer names, not groups.
 - The one prompt in the system is `switch-to-buffer-group` with two or more groups. It always asks.
 
-A group grows only while it is the destination of some frame, or by an explicit `add`. A group shrinks only by `remove`, `move`, `kill-buffer`, `dissolve`, or `kill`.
+A group grows only while it is the destination of some frame, or by an explicit `group-add`. A group shrinks only by `group-remove`, `group-move`, `kill-buffer`, `group-dissolve`, or `group-kill`.
 
 ## Chats and agents
 
@@ -511,7 +560,7 @@ Tests name commands, never keys. A test that needs a binding binds its own dummy
 2. Creation with no destination stays ungrouped.
 3. Showing a live buffer changes no membership: switcher, `find-file`, jump.
 4. `C-RET` semantics in the switcher: show plus add, on one buffer and on a selection.
-5. `add`, `move`, `remove` on one buffer, on a selection, on a dired selection, on a path selection.
+5. `group-add`, `group-move`, `group-remove` on one buffer, on a selection, on a dired selection, on a path selection.
 6. `new` with a selection seed, a current-buffer seed, and an empty seed.
 7. `switch-to-buffer-group` with 0, 1, and many groups; the many case prompts.
 8. `switch` saves the outgoing layout as it is and restores tree, buffers, point, scroll, and selected window.

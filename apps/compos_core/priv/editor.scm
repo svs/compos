@@ -9579,6 +9579,9 @@
 (category! 'editing)
 (public! 'point "Point as a byte offset")
 (public! 'buffer-point "(buffer-point NAME) — a named buffer's point as a byte offset")
+(public! 'buffer-line-at-point
+         "(buffer-line-at-point NAME) — (LINE TEXT) at the named buffer's point")
+(catalog-meta! 'function "buffer-line-at-point" 'domain 'editing 'effects '(read))
 (public! 'json-parse "(json-parse STR) — JSON to Scheme: objects become plists with symbol keys, null becomes #f; #f on bad input")
 (public! 'register-context-provider! "(register-context-provider! MODE FN) — FN buf -> description of what the user is looking at, or #f; chat/agent sends prepend it")
 (public! 'editor-context "(editor-context EXCLUDE-BUF) — visible-window contexts from registered providers, \"\" if none")

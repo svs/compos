@@ -220,6 +220,37 @@
                        "unpreview preserves an existing read-only state")))
       (buffer-kill! buf))))
 
+(deftest 'turning-preview-off-restores-the-morg-source-font
+  "preview removes its variable font and preserves other source remaps"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-preview-font.md" "# title\n")))
+      (with-current-buffer buf
+        (lambda ()
+          (face-remap-in! buf 'default '(family "JetBrains Mono" size "13px"))
+          (buffer-set-local! buf 'text-scale 1)
+          (text-scale-sync! buf)
+          (run-command "preview-mode")
+          (check-contains! (buffer-local buf 'style) "--default-family:Spectral"
+                           "preview applies its variable font")
+          (run-command "preview-mode")
+          (check-contains! (buffer-local buf 'style) "--default-family:JetBrains Mono"
+                           "source restores its own font")
+          (run-command "preview-mode")
+          ;; This is the state an old desktop restored: its saved source
+          ;; look accidentally contains preview's derived default face.
+          (buffer-set-local! buf 'preview-rows-saved
+            (list (buffer-local buf 'face-remap) (buffer-local buf 'style)))
+          (run-command "preview-mode")
+          (check-false! (string-contains? (or (buffer-local buf 'style) "")
+                                          "--default-family:Spectral")
+                        "the variable font leaves with preview")
+          (check-contains! (buffer-local buf 'style) "--text-scale-factor:1.2"
+                           "an unrelated source remap remains")
+          (check-false! (member 'preview-rows-saved
+                                (or (buffer-local buf 'desktop-skip-locals) '()))
+                        "the source baseline persists across restore")))
+      (buffer-kill! buf))))
+
 (deftest 'read-only-mode-does-not-change-preview-mode
   "edit permission and rendered preview are independent modes"
   (lambda ()

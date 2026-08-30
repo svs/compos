@@ -204,6 +204,8 @@ defmodule Compos.Core.SchemeAPI do
       "current-buffer" => "(current-buffer) — return the name of the current buffer.",
       "point" => "(point) — return point in the current buffer as a byte offset.",
       "buffer-point" => "(buffer-point BUF) — return the buffer's point as a byte offset.",
+      "buffer-line-at-point" =>
+        "(buffer-line-at-point BUF) — return (LINE TEXT) for the buffer's point.",
       "compos-home" => "(compos-home) — return the compos home directory path (~/.compos).",
       "compos-priv-dir" =>
         "(compos-priv-dir) — return the bundled Scheme directory (the editor's priv dir).",
@@ -989,6 +991,10 @@ defmodule Compos.Core.SchemeAPI do
       "current-buffer" => fn [] -> Editor.current_buffer() end,
       "point" => fn [] -> Buffer.point(Editor.current_buffer()) end,
       "buffer-point" => fn [name] -> Buffer.point(name) end,
+      "buffer-line-at-point" => fn [name] ->
+        {line, text} = Buffer.line_at_point(name)
+        [line, text]
+      end,
       # ~/.compos in real life, a tmp dir in tests — config and user packages
       "compos-home" => fn [] -> Compos.Core.home() end,
       "compos-priv-dir" => fn [] -> Application.app_dir(:compos_core, "priv") end,

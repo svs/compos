@@ -9,6 +9,8 @@
 3. The newline that ends a block is the end of the block, not a line inside it: drawn as a byte a caret can stand on, never as a break. A newline the author typed inside a paragraph is a line the reader has to see.
 4. Markup is consumed and what it marked is drawn: the delimiters of emphasis, a fence's backticks, a link's destination are `@silent`.
 5. A caller can upgrade one complete paragraph (a URL alone on a line becomes an embed). The renderer keeps that policy outside itself.
+6. The rows renderer always hides Markdown markers. Toggle preview off to edit source syntax in Morg.
+7. Preview owns its page font. Its saved source typography survives restore, and preview teardown restores it.
 
 ## Pictures and captions
 

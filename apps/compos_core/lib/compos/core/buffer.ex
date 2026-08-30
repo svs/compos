@@ -585,6 +585,9 @@ defmodule Compos.Core.Buffer do
   @doc "1-based logical line -> {start_byte, line_text sans newline}, clamped."
   def line_at(name, line), do: GenServer.call(via(name), {:line_at, line})
 
+  @doc "The 1-based line and text at point, without the newline."
+  def line_at_point(name), do: GenServer.call(via(name), :line_at_point)
+
   @doc "The 1-based line byte offset POS is on (Emacs line-number-at-pos)."
   def line_of(name, pos), do: GenServer.call(via(name), {:line_of, pos})
 
@@ -1082,6 +1085,16 @@ defmodule Compos.Core.Buffer do
 
   defp on_call({:line_of, pos}, _from, state) do
     {:reply, Rope.byte_to_line(state.rope, clamp(pos, state)) + 1, state}
+  end
+
+  defp on_call(:line_at_point, _from, state) do
+    rope = state.rope
+    line = Rope.byte_to_line(rope, clamp(state.point, state)) + 1
+    count = Rope.line_count(rope)
+    start = Rope.line_to_byte(rope, line - 1)
+    stop = if line == count, do: Rope.byte_size(rope), else: Rope.line_to_byte(rope, line)
+    text = rope |> Rope.slice(start, stop - start) |> String.trim_trailing("\n")
+    {:reply, {line, text}, state}
   end
 
   defp on_call({:line_at, line}, _from, state) do

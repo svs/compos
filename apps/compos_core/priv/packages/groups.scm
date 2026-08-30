@@ -1255,10 +1255,16 @@
         (append (filter (lambda (id) (member id mine)) recent)
                 (filter (lambda (id) (not (member id mine))) recent)))))
 
+;; the seed is a work buffer of yours: a transient listing (the
+;; telemetry, ibuffer) seeds nothing, the same rule group-new keeps
+(define (group-seed-buffer? buf)
+  (and (group-work-buffer? buf)
+       (not (buffer-local buf 'transient))))
+
 (define (group-switch-new-action)
   (let ((buf (current-buffer))
         (current (frame-group)))
-    (cond ((not (group-work-buffer? buf))
+    (cond ((not (group-seed-buffer? buf))
            (list "Start an empty group" #f #f))
           ((and current (buffer-in-group? buf current))
            (list "Move this buffer into a new group" buf current))
@@ -2176,8 +2182,10 @@
               (switch-to-group! id)
               id)))))
 
+;; a new name is typed, not chosen: the prompt offers no candidates.
+;; Offered the existing names, RET on one answered "already exists".
 (define (group-read-new-name prompt receive)
-  (minibuffer-read prompt (group-names)
+  (minibuffer-read prompt '()
     (lambda (input)
       (let ((name (string-trim input)))
         (cond ((equal? name "") (message "Group needs a name"))
@@ -2214,9 +2222,7 @@
     (let* ((buf (current-buffer))
            (selected (group-command-selected-buffers))
            (seed (cond ((pair? selected) selected)
-                       ((and (group-work-buffer? buf)
-                             (not (buffer-local buf 'transient)))
-                        (list buf))
+                       ((group-seed-buffer? buf) (list buf))
                        (else '()))))
       (group-read-new-name "New group: "
         (lambda (name)

@@ -6080,17 +6080,12 @@
 ;; DELTA in lines, positive forward. A preview window has no lines, so
 ;; scroll-window! turns the count into pixels for it — the caller says
 ;; "a screen" and every kind of window understands.
-;; the window the other-window scroll moves: a peek on screen first
-;; (M-<down> from the listing reads the look), else the next window
+;; the window the other-window scroll moves: the popup when it shows
+;; and is not where you are (a peek, the messages, the telemetry: the
+;; look beside your work), else the next window
 (define (scroll-other-window-target)
   (let ((me (active-window)))
-    (or (let loop ((ws (window-list)))
-          (cond ((null? ws) #f)
-                ((and (not (equal? (car (car ws)) me))
-                      (boundp 'peek-buffer?)
-                      (peek-buffer? (cadr (car ws))))
-                 (car (car ws)))
-                (else (loop (cdr ws)))))
+    (or (and (popup-open?) (not (equal? (popup-window) me)) (popup-window))
         (let ((wins (window-list)))
           (and (pair? (cdr wins))
                (let loop ((ws wins))
@@ -6104,6 +6099,19 @@
     (if target
         (scroll-window! target delta)
         (message "No other window"))))
+
+;; the popup by name, for a binding of your own; nothing else scrolls
+(define-command "scroll-popup" "Scroll the popup up nearly a full screen"
+  (lambda ()
+    (if (popup-open?)
+        (scroll-window! (popup-window) (- (window-rows) 2))
+        (message "No popup"))))
+
+(define-command "scroll-popup-down" "Scroll the popup down nearly a full screen"
+  (lambda ()
+    (if (popup-open?)
+        (scroll-window! (popup-window) (- 2 (window-rows)))
+        (message "No popup"))))
 
 (define-command "scroll-other-window" "Scroll the next window up nearly a full screen"
   (lambda () (scroll-other-window-by! (- (window-rows) 2))))

@@ -306,8 +306,8 @@
             (check-false! (peek-buffer? b) "as your own")
             (buffer-kill! d)))))))
 
-(deftest 'the-other-window-scroll-reads-the-peek-first
-  "M-<down> from the listing scrolls the peek, not the next split"
+(deftest 'the-other-window-scroll-reads-the-popup-first
+  "M-<down> from the listing scrolls the popup (a peek, the messages), not the next split"
   (lambda ()
     (t--peek-with
       (lambda ()
@@ -320,7 +320,14 @@
                         "the peek's window is the target")
           (popup-close!)
           (check-false! (equal? (scroll-other-window-target) me)
-                        "with no peek, the next window is"))))))
+                        "with no popup, the next window is")
+          (buffer-create "*zz-plain-popup*")
+          (popup-show "*zz-plain-popup*")
+          (select-window! me)
+          (check-equal! (scroll-other-window-target) (popup-window)
+                        "any popup beside your work is the target")
+          (popup-close!)
+          (buffer-kill! "*zz-plain-popup*"))))))
 
 (deftest 'the-peek-floats-on-the-side-away-from-the-listing
   "asked from the right window it floats left; from the left, right"

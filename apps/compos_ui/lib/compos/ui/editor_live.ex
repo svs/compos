@@ -2756,6 +2756,9 @@ defmodule Compos.Ui.EditorLive do
        letter-spacing:.09em;text-transform:uppercase}
     tr:last-child td{border-bottom:0}
     img{max-width:100%;height:auto;border-radius:3px}
+    figure{margin:1.4em 0}
+    figure img{display:block;margin:0 auto}
+    figcaption{margin-top:.55em;text-align:center;font-size:.9em;font-style:italic;color:var(--dim-fg,#8a857a)}
     hr{border:0;border-top:1px solid #{border};margin:0}
     .tweet{margin:12px 0;padding:12px 16px;border:1px solid #{border};border-radius:10px;
            max-width:32em;background:#{inset};font-size:14.5px}

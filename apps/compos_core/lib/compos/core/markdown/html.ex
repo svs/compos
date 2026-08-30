@@ -385,12 +385,56 @@ defmodule Compos.Core.Markdown.Html do
         _ -> nil
       end
 
-    if is_binary(embedded) do
-      {here, marks} = Enum.split_while(marks, fn {off, _} -> off < node.stop end)
-      {[embedded, Enum.map(here, &elem(&1, 1))], marks}
-    else
-      generic_node(node, text, marks)
+    cond do
+      is_binary(embedded) ->
+        {here, marks} = Enum.split_while(marks, fn {off, _} -> off < node.stop end)
+        {[embedded, Enum.map(here, &elem(&1, 1))], marks}
+
+      figure = figure_parts(node, text) ->
+        figure(node, figure, text, marks)
+
+      true ->
+        generic_node(node, text, marks)
     end
+  end
+
+  # An image on a line of its own, and under it a line that is only
+  # emphasis, is a picture with a caption:
+  #
+  #     ![alt](picture.png)
+  #     *The caption.*
+  #
+  # Markdown has no caption syntax of its own, and this is the shape most
+  # renderers agree on. The page draws it as a figure with a figcaption.
+  # Anything else in the paragraph - text before the picture, a second
+  # line after the caption - keeps the paragraph as it is.
+  defp figure_parts(%{children: [%{kind: :inline} = inline]}, text) do
+    case inline.children do
+      # text before the picture or after the caption is a gap, not a
+      # child: the picture must open the line and the caption close it
+      [%{kind: :image} = image, %{kind: :emphasis} = caption]
+      when image.start == inline.start and caption.stop == inline.stop ->
+        if binary_part(text, image.stop, caption.start - image.stop) == "\n",
+          do: {image, caption},
+          else: nil
+
+      _ ->
+        nil
+    end
+  end
+
+  defp figure_parts(_node, _text), do: nil
+
+  defp figure(node, {image, caption}, text, marks) do
+    {open, close} = box("figure", node)
+    {picture, marks} = node(image, text, marks)
+    # the newline between them is a byte a caret can stand on, drawn
+    # without a break: the caption stands under the picture already
+    {gap, marks} = without_breaks(fn -> slice(text, image.stop, caption.start, marks) end)
+    {caption_open, caption_close} = box("figcaption", caption)
+    {words, marks} = children(caption, text, marks)
+    {tail, marks} = block_tail(text, caption.stop, node.stop, marks)
+    {[open, picture, gap, caption_open, words, caption_close, tail, close], marks}
   end
 
   defp scheme_result_marks(node, text, "result-scheme", marks) do

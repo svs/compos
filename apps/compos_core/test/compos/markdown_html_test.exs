@@ -383,6 +383,31 @@ defmodule Compos.MarkdownHtmlTest do
     assert html =~ ~s(<img )
   end
 
+  test "a picture with an emphasised line under it is a figure with a caption" do
+    html = render!("![alt](a.png)\n*A caption*\n")
+
+    assert bare(html) =~ ~r{<figure data-src="0-26"><img [^>]*src="a.png"[^>]*>\s*<figcaption data-src="14-25">A caption</figcaption>\s*</figure>}
+    refute html =~ "<em"
+    refute html =~ "<p "
+    refute html =~ "<br>", "the line between the picture and its caption is not a break"
+  end
+
+  test "a caret inside the caption is still drawn, and the figure stands" do
+    html = render!("![alt](a.png)\n*A caption*\n", [{16, @pt}])
+
+    assert html =~ @pt
+    assert html =~ "<figure "
+    assert html =~ "<figcaption "
+  end
+
+  test "a picture alone, or with text that is not a caption, keeps its paragraph" do
+    assert render!("![alt](a.png)\n") =~ "<p "
+    assert render!("![alt](a.png)\nplain words\n") =~ "<p "
+    assert render!("see ![alt](a.png)\n*not a caption*\n") =~ "<p "
+    assert render!("![alt](a.png)\n*caption*\nmore\n") =~ "<p "
+    refute render!("![alt](a.png)\n*caption*\nmore\n") =~ "<figure"
+  end
+
   test "an attribute holds a value, never a break" do
     html = render!("![a](/tmp/x.png)\n")
 

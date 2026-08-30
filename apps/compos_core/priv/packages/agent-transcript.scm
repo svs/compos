@@ -284,6 +284,40 @@
   (let ((json (plist-get e 'input)))
     (and (string? json) (json-parse json))))
 
+;; Every eval call in a session names the same tool. The code argument
+;; names the call better: its head symbol is the verb, the rest is the
+;; argument. So "compos/eval-scheme: (code-read X)" titles as
+;; "code-read: X".
+(define (agent-eval-tool? name)
+  (and (string? name) (string-suffix? "eval-scheme" name)))
+
+;; "(head rest...)" -> (head "rest...") when head is a plain symbol; #f
+;; when the text is not a call form. The outer closer leaves the rest.
+(define (agent-sexp-head-split v)
+  (let ((t (string-trim v)))
+    (and (string-prefix? "(" t)
+         (let* ((n (string-byte-length t))
+                (inner (substring-bytes t 1 n))
+                (isp (string-index inner " "))
+                (inl (string-index inner "\n"))
+                (i (cond ((and isp inl) (min isp inl))
+                         (isp isp)
+                         (else inl))))
+           (let* ((head (if i (substring-bytes inner 0 i) inner))
+                  (head (if (string-suffix? ")" head)
+                            (substring-bytes head 0 (- (string-byte-length head) 1))
+                            head))
+                  (rest (if i (string-trim (substring-bytes inner (+ i 1)
+                                             (string-byte-length inner)))
+                            ""))
+                  (rest (if (string-suffix? ")" rest)
+                            (substring-bytes rest 0 (- (string-byte-length rest) 1))
+                            rest)))
+             (and (> (string-byte-length head) 0)
+                  (not (string-index head "("))
+                  (not (string-index head "\""))
+                  (list head rest)))))))
+
 (define (agent-tool-title e)
   (let ((name (plist-get e 'name))
         (args (agent-tool-args e)))
@@ -292,8 +326,15 @@
         (let ((v (and args (agent-tool-primary args)))
               (shown (agent-tool-name-display name)))
           (if (and v (string? v) (not (equal? (string-trim v) "")))
-              (string-append shown ": "
-                (agent-clip (string-trim (agent-first-line v)) agent-tool-title-limit))
+              (let ((sx (and (agent-eval-tool? name) (agent-sexp-head-split v))))
+                (if sx
+                    (if (equal? (car (cdr sx)) "")
+                        (car sx)
+                        (string-append (car sx) ": "
+                          (agent-clip (string-trim (agent-first-line (car (cdr sx))))
+                                      agent-tool-title-limit)))
+                    (string-append shown ": "
+                      (agent-clip (string-trim (agent-first-line v)) agent-tool-title-limit))))
               shown)))))
 
 (define (agent-tool-input-text e)

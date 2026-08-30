@@ -49,7 +49,7 @@ defmodule Compos.Ui.AgentTranscript do
               >
                 <span class="ag-chevron" aria-hidden="true">›</span>
                 <span class={"ag-dot #{b.status}"}></span>
-                <span class="ag-verb ag-kind">{b.verb}</span>
+                <span :if={b.verb not in [nil, "", "tool", "mcp", "other"]} class="ag-verb ag-kind">{b.verb}</span>
                 <span class="ag-summary-copy">
                   <span class="ag-title" title={b.title}><span class="ag-tool-name">{b.name}</span><span
                       :if={b.arg != ""}
@@ -57,7 +57,7 @@ defmodule Compos.Ui.AgentTranscript do
                     >{b.arg}</span></span>
                   <span :if={!b.open && b.preview != ""} class="ag-preview">{b.preview}</span>
                 </span>
-                <span class={"ag-tstatus #{b.status}"}>{b.status}</span>
+                <span :if={b.status != "done"} class={"ag-tstatus #{b.status}"}>{b.status}</span>
               </summary>
               <pre :if={b.body != ""} class="ag-body">{b.body}</pre>
             </details>

@@ -141,3 +141,42 @@
           (check-equal! rows
             '("/tmp/zz-agent-one.chat" "/tmp/zz-agent-two.chat")
             "live and open logs stay out before the limit applies"))))))
+
+(deftest 'agent-eval-tool-title-uses-the-form-head
+  "an eval-scheme call titles by the head of its code, not the tool name"
+  (lambda ()
+    (check-equal!
+      (agent-tool-title
+        (list 'name "compos/eval-scheme"
+              'input (json-encode (list 'code "(code-read \"/x/web.scm\" 10)"))))
+      "code-read: \"/x/web.scm\" 10"
+      "the head symbol is the shown name, the rest is the argument")
+    (check-equal!
+      (agent-tool-title
+        (list 'name "mcp__compos__eval-scheme"
+              'input (json-encode (list 'code "(buffer-list)"))))
+      "buffer-list"
+      "a no-argument form titles as its head alone")
+    (check-equal!
+      (agent-tool-title
+        (list 'name "compos/eval-scheme"
+              'input (json-encode (list 'code "not a form"))))
+      "compos/eval-scheme: not a form"
+      "code that is not a call keeps the tool-name title")
+    (check-equal!
+      (agent-tool-title
+        (list 'name "mcp__compos__apropos"
+              'input (json-encode (list 'query "rename buffer"))))
+      "compos:apropos: rename buffer"
+      "a non-eval tool keeps its name")))
+
+(deftest 'agent-sexp-head-split-recognises-call-forms
+  "the head split takes only a plain leading symbol"
+  (lambda ()
+    (check-equal! (agent-sexp-head-split "(define (f x)\n  (+ x 1))")
+                  '("define" "(f x)\n  (+ x 1)")
+                  "a multi-line form splits at the first separator")
+    (check-equal! (agent-sexp-head-split "((kind \"cmd\"))") #f
+                  "a list of lists has no head symbol")
+    (check-equal! (agent-sexp-head-split "plain text") #f
+                  "prose is not a form")))

@@ -514,3 +514,53 @@
 (domain! 'chrome)
 (effects! '(read))
 (public! 'chrome-window "(chrome-window) — the browser window this frame is displayed in, or #f")
+
+;;; --- the editor page's own DOM ------------------------------------------------
+;;; A UI change is verified on the page the user looks at, not on a mock.
+;;; These fns address THIS frame's editor tab and answer synchronously, so
+;;; an agent reads the value instead of polling a buffer for a callback.
+
+(domain! 'chrome)
+(effects! '(read external))
+
+(define (dom--call op args ms)
+  (if (chrome--tool-allowed?)
+      (browser-call-sync op args ms)
+      (error
+        "browser category denied in code-mode; use compos state, or ask the user to enable M-x browser-mode as a last resort")))
+
+;; the tab that shows this frame; any editor tab when no row names it
+(define (dom--editor-tab)
+  (let* ((r (dom--call "frames" '() 3000))
+         (rows (or (chrome--get r 'frames) '()))
+         (here (selected-frame))
+         (mine (filter (lambda (e) (equal? (chrome--get e 'frame) here)) rows)))
+    (cond ((pair? mine) (chrome--get (car mine) 'tab))
+          ((pair? rows) (chrome--get (car rows) 'tab))
+          (else (error "no editor tab: is the compos extension attached?")))))
+
+(define (dom-eval js)
+  (chrome--get (dom--call "eval" (list 'tab (dom--editor-tab) 'code js) 5000)
+               'value))
+
+;; the probe is pure policy: one string, tested without a browser
+(define (dom-measure-js selector limit)
+  (string-append
+    "(() => { const out = [];"
+    " for (const el of document.querySelectorAll(" (json-encode selector) ")) {"
+    " if (out.length >= " (number->string limit) ") break;"
+    " const r = el.getBoundingClientRect(); const cs = getComputedStyle(el);"
+    " out.push({x: Math.round(r.x), y: Math.round(r.y),"
+    " w: Math.round(r.width), h: Math.round(r.height),"
+    " display: cs.display, font: cs.fontWeight + ' ' + cs.fontSize,"
+    " visible: !!(r.width || r.height)}); }"
+    " return JSON.stringify(out); })()"))
+
+(define (dom-measure selector &optional limit)
+  (let ((v (dom-eval (dom-measure-js selector (or limit 40)))))
+    (if (string? v) (json-parse v) '())))
+
+(public! 'dom-measure
+  "(dom-measure SELECTOR [LIMIT]) — measure matching elements in this frame's editor tab: rect, display, font, visible; synchronous")
+(public! 'dom-eval
+  "(dom-eval JS) — run JS in this frame's editor tab and return the value; synchronous")

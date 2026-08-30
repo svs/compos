@@ -91,3 +91,17 @@
           (check-equal! (map car (chrome--order bufs tabs))
                         '("*a*" "*b*" "🌐 News") "and the buffers lead again")
           (buffer-kill! "*zz-ring-moved*"))))))
+
+;;; --- the editor page's own DOM -------------------------------------------------
+;;; dom-measure sends one JS probe to the editor tab. The probe string is
+;;; pure policy, so the test reads the string instead of a browser.
+
+(deftest 'the-dom-probe-names-the-selector-and-caps-the-rows
+  "the selector rides quoted, the limit bounds the loop, rects are measured"
+  (lambda ()
+    (let ((js (dom-measure-js ".line.row-table" 7)))
+      (check-contains! js "querySelectorAll(\".line.row-table\")"
+                       "the selector is a quoted JS string")
+      (check-contains! js ">= 7" "the limit caps the element count")
+      (check-contains! js "getBoundingClientRect" "the probe measures rects")
+      (check-contains! js "getComputedStyle" "and the computed style"))))

@@ -22,6 +22,8 @@
 (defface! 'md-h2 'size "1.3em" 'weight "700")
 (defface! 'md-h3 'size "1.12em" 'weight "600")
 (defface! 'md-h4 'size "1em" 'weight "600")
+;; a picture's caption: the line of emphasis under the picture
+(defface! 'md-caption 'fg "#8a857a" 'style "italic")
 
 (define (md--span start s e face)
   (list (+ start s) (+ start e) face))
@@ -39,9 +41,16 @@
 
 (define md--link-pattern "\\[([^\\]\n]+)\\]\\(([^)\n]+)\\)")
 (define md--image-pattern "!\\[([^\\]\n]*)\\]\\(([^)\n]+)\\)")
+;; *text*: one star each side, and not the star of a **bold** pair
+(define md--emphasis-pattern "(?<!\\*)\\*(?!\\*)[^*\n]+(?<!\\*)\\*(?!\\*)")
+;; a line that is one picture, and a line that is one run of emphasis
+(define md--image-line-pattern "^!\\[[^\\]\n]*\\]\\([^)\n]+\\)[ \t]*$")
+(define md--caption-line-pattern "^\\*([^*\n]+)\\*[ \t]*$")
 (define md--x-pattern "^https://(x|twitter)\\.com/[A-Za-z0-9_]+/status/[0-9]+/?$")
-(define md--youtube-pattern
-  "^https://((www|m)\\.)?(youtube\\.com/(watch\\?[^ \\t]*v=[A-Za-z0-9_-]{11}[^ \\t]*|(shorts|live|embed)/[A-Za-z0-9_-]{11}[^ \\t]*)|youtu\\.be/[A-Za-z0-9_-]{11}[^ \\t]*)$")
+(define md--youtube-url-pattern
+  "https://((www|m)\\.)?(youtube\\.com/(watch\\?[^ \\t]*v=[A-Za-z0-9_-]{11}[^ \\t]*|(shorts|live|embed)/[A-Za-z0-9_-]{11}[^ \\t]*)|youtu\\.be/[A-Za-z0-9_-]{11}[^ \\t]*)")
+(define md--embed-pattern
+  (string-append "^#\\+embed:[ \\t]+(" md--youtube-url-pattern ")[ \\t]*$"))
 
 ;; [text](url): the text is the link; the brackets and the target step
 ;; back. An image's link is not a link.
@@ -114,13 +123,34 @@
                (list start (+ start (string-byte-length line)) "row-quote"))))
       (else '()))))
 
+;; Markdown has no caption syntax of its own. The shape most renderers
+;; agree on, and the one the page draws as a figure (docs/MARKDOWN.md):
+;; a picture on a line of its own, and under it a line that is only
+;; emphasis. The stars step back, the words wear md-caption, and the row
+;; wears row-caption: the page centres it under the picture.
+(define (md--caption? line prev)
+  (and prev
+       (not (null? (re-find* md--image-line-pattern prev)))
+       (not (null? (re-find* md--caption-line-pattern line)))))
+
+(define (md--caption start line len)
+  (let* ((g (re-groups md--caption-line-pattern line 0))
+         (words (nth 1 g)))
+    (list (md--span start 0 (car words) "md-marker")
+          (md--span start (car words) (cadr words) "md-caption")
+          (md--span start (cadr words) len "md-marker")
+          (list start (+ start len) "row-caption"))))
+
 ;; the spans for one scan entry; block BODIES are highlighted per block in
-;; markdown-refontify!, because a multi-line construct needs the whole body
-(define (markdown--line-spans e)
+;; markdown-refontify!, because a multi-line construct needs the whole body.
+;; PREV is the text of the line above, or #f on the first line.
+(define (markdown--line-spans e &optional prev)
   (let* ((start (car e)) (line (cadr e)) (k (morg-kind e))
-         (len (string-byte-length line)))
+         (len (string-byte-length line))
+         (embed (re-groups md--embed-pattern line 0)))
     (cond
       ((= len 0) '())
+      ((and (equal? k 'text) (md--caption? line prev)) (md--caption start line len))
       ((equal? k 'heading) (md--heading start line e len))
       ;; a row face (row-*) shapes the whole row: the page reads it off the
       ;; line, not the segment
@@ -148,6 +178,7 @@
          (md--wrapped start line "`[^`\n]+`" 1 1 "morg-code")
          (md--wrapped start line "\\*\\*[^*\n]+\\*\\*" 2 2 "morg-bold")
          (md--wrapped start line "\\b_[^_\n]+_\\b" 1 1 "morg-italic")
+         (md--wrapped start line md--emphasis-pattern 1 1 "morg-italic")
          (md--images start line)
          (md--links start line))))))
 
@@ -155,8 +186,13 @@
   (when (buffer-exists? buf)
     (let* ((scan (morg-scan buf))
            (text (buffer-text buf))
+           ;; each line sees the line above it: a caption is known by the
+           ;; picture over it
            (line-spans
-             (fold (lambda (acc e) (append acc (markdown--line-spans e))) '() scan))
+             (car (fold (lambda (acc e)
+                          (list (append (car acc) (markdown--line-spans e (cadr acc)))
+                                (cadr e)))
+                        (list '() #f) scan)))
            (blocks (morg-blocks scan buf))
            (code-spans
              (fold

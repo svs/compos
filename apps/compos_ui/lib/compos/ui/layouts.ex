@@ -308,6 +308,9 @@ defmodule Compos.Ui.Layouts do
             padding-left: 10px; padding-right: 10px;
           }
           .line.row-code .line-content { font-size: .88em; }
+          /* a picture's caption (markdown-mode md--caption): centred and
+             small under the picture, as the page draws its figcaption */
+          .line.row-caption .line-content { text-align: center; font-size: .9em; }
           .line.row-fence .line-content { font-size: .72em; color: var(--dim-fg, #8a857a); }
           /* visual-line-mode off: continuation lines, wrapped wherever the
              window ends (Emacs's default); on: wrapped at words */

@@ -23,6 +23,6 @@ Markdown has no caption syntax of its own. The page uses the shape most renderer
 2. The line between the picture and the caption is a byte a caret can stand on, drawn without a break.
 3. Anything else in the paragraph keeps it a paragraph: text before the picture, plain words under it, a line after the caption.
 4. A picture alone stays a paragraph with an image.
-5. The rows renderer (writing-mode, `markdown-paint`) paints the caption line as emphasis; it does not build a figure.
+5. The rows renderer (writing-mode, `markdown-paint`) paints the same shape: the stars step back, the words wear `md-caption`, and the row wears `row-caption`, which the page centres and shrinks under the picture. Away from a picture, `*text*` is emphasis (italic), as `_text_` is. The rows are lenient about a space before the closing star; the page's parser (CommonMark) is not, so write `*The caption.*` with no space inside the stars.
 
 Tests: `apps/compos_core/test/compos/markdown_html_test.exs`.

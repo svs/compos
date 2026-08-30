@@ -215,28 +215,7 @@
     (set! *group-records* (group-record-colors-restore (car (cdr saved))))
     (modeline-groups-refresh!)))
 
-(define *group-frame-context-keys* '(current-group previous-group pinned-group groups))
-
-;; The frame's active groups: every group this frame entered, as a set
-;; (a list with no repeats). A group joins when it becomes current and
-;; leaves when it is killed. current-group is the one the frame stands
-;; in; groups is every one it has open.
-(define (frame-groups-in frame)
-  (let ((gs (frame-local-in frame 'groups)))
-    (if (pair? gs) gs '())))
-
-(define (frame-groups) (frame-groups-in (selected-frame)))
-
-;; the one door to current-group: the group joins the frame's set here
-(define (group-frame-enter! id)
-  (set-frame-local! 'current-group id)
-  (when (and id (not (member id (frame-groups))))
-    (set-frame-local! 'groups (cons id (frame-groups)))))
-
-(public! 'frame-groups
-  "(frame-groups) — the set of groups the selected frame has entered, newest first")
-(public! 'frame-groups-in
-  "(frame-groups-in FRAME) — the set of groups FRAME has entered, newest first")
+(define *group-frame-context-keys* '(current-group previous-group pinned-group))
 
 (define (group-frame-style-set! frame value)
   (let* ((id (group-resolve-id value))
@@ -275,15 +254,10 @@
                                 (group-frame-context-id locals 'previous-group)))
                  (pinned (and (pair? locals)
                               (group-frame-context-id locals 'pinned-group)))
-                 (groups (if (pair? locals)
-                             (filter string?
-                               (map group-resolve-id (frame-groups-in (car entry))))
-                             '()))
                  (saved (append
                           (if current (list (list 'current-group current)) '())
                           (if previous (list (list 'previous-group previous)) '())
-                          (if pinned (list (list 'pinned-group pinned)) '())
-                          (if (pair? groups) (list (list 'groups groups)) '()))))
+                          (if pinned (list (list 'pinned-group pinned)) '()))))
             (loop (cdr entries)
                   (if (and valid? (pair? saved))
                       (cons (list (car entry) saved) out)
@@ -306,7 +280,6 @@
                  (current (assoc 'current-group pairs))
                  (previous (assoc 'previous-group pairs))
                  (pinned (assoc 'pinned-group pairs))
-                 (groups (assoc 'groups pairs))
                  (restored
                    (append
                      (if (and current (string? (car (cdr current))))
@@ -317,9 +290,6 @@
                          '())
                      (if (and pinned (string? (car (cdr pinned))))
                          (list (list 'pinned-group (car (cdr pinned))))
-                         '())
-                     (if (and groups (pair? (car (cdr groups))))
-                         (list (list 'groups (filter string? (car (cdr groups)))))
                          '())))
                  (old (assoc frame *frame-locals*))
                  (locals (if old (car (cdr old)) '()))
@@ -364,17 +334,8 @@
                     (and (pair? item)
                          (pair? (cdr item))
                          (member (car item) *group-frame-context-keys*)
-                         (not (equal? (car item) 'groups))
                          (equal? (group-resolve-id (car (cdr item))) id))))
-                (map
-                  (lambda (item)
-                    (if (and (pair? item) (pair? (cdr item))
-                             (equal? (car item) 'groups) (pair? (car (cdr item))))
-                        (list 'groups
-                          (filter (lambda (g) (not (equal? (group-resolve-id g) id)))
-                                  (car (cdr item))))
-                        item))
-                  (car (cdr entry)))))
+                (car (cdr entry))))
             entry))
       *frame-locals*)))
 
@@ -898,7 +859,7 @@
           (when (and from (not (equal? from (group-resolve-id name))))
             (group-layout-save-if-shown! from)
             (set-frame-local! 'previous-group from))
-          (group-frame-enter! id)
+          (set-frame-local! 'current-group id)
           (frame-group-label-refresh!)
           (let* ((resolved (scene--resolve id spec))
                  (anchor (layout--pane #f (car (cdr (cdr resolved)))))
@@ -960,7 +921,7 @@
             (when (and from (not (equal? from id)))
               (group-layout-save-if-shown! from)
               (set-frame-local! 'previous-group from)))
-          (group-frame-enter! id)
+          (set-frame-local! 'current-group id)
           ;; An explicit switch moves an active pin. The frame stays pinned,
           ;; but it does not trap the user in the old group.
           (when (group-pinned) (set-frame-local! 'pinned-group id))
@@ -989,7 +950,7 @@
          (resolved (group-resolve-id current)))
     (cond (resolved
            (unless (equal? current resolved)
-             (group-frame-enter! resolved))
+             (set-frame-local! 'current-group resolved))
            resolved)
           (else
             (when current (set-frame-local! 'current-group #f))
@@ -1034,7 +995,7 @@
                      pinned
                      (group-current-choice (group-common-memberships rows) current))))
       (unless (equal? next current)
-        (group-frame-enter! next)
+        (set-frame-local! 'current-group next)
         (frame-group-label-refresh!))
       next)))
 
@@ -1236,6 +1197,23 @@
                 (if (and id (not (member id found)))
                     (cons id found)
                     found))))))
+
+;; The active groups: every group with an open buffer, in the order the
+;; MRU gives (most recent first, then creation order). Derived from the
+;; buffers on every call and never stored: the buffer list already knows
+;; every open buffer, and each buffer knows its groups. The MRU only
+;; orders the answer; it truncates, so it never decides membership.
+(define (active-groups)
+  (let ((open (fold (lambda (out b)
+                      (fold (lambda (out id) (if (member id out) out (cons id out)))
+                            out
+                            (if (buffer-known? b) (buffer-group-ids b) '())))
+                    '()
+                    (buffer-list))))
+    (filter (lambda (id) (member id open)) (group-ids-mru))))
+
+(public! 'active-groups
+  "(active-groups) — every group with an open buffer, most recent first")
 
 (define (group-buffer-memberships buf)
   (if (chat-buffer? buf)

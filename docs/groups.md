@@ -361,7 +361,7 @@ The destination is per frame. Two frames can show two groups, or one group with 
 
 A frame derives `current-group` from its visible non-transient buffers: the intersection of their groups. The modeline shows the name, or "mixed". The indicator decides nothing. It does not gate the layout save, it does not choose where new work goes, and it is not stored.
 
-A frame also keeps `groups`, the set of every group it entered. A group joins the set when it becomes `current-group` and leaves when it is killed. `(frame-groups)` reads the set, newest first. The set persists with the frame's other group context.
+The active groups are derived the same way: `(active-groups)` answers every group with an open buffer, most recent first. The buffer list decides membership and the MRU only orders it; nothing is stored.
 
 ### Switch candidates
 

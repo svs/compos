@@ -34,7 +34,6 @@
   (set-frame-local! 'current-group #f)
   (set-frame-local! 'previous-group #f)
   (set-frame-local! 'pinned-group #f)
-  (set-frame-local! 'groups '())
   (delete-other-windows!)
   (switch-to-buffer! t--sw-first))
 
@@ -183,26 +182,31 @@
       (check-equal! (frame-group) id "the frame enters the empty context"))
     (t--sw-done!)))
 
-(deftest 'the-frame-keeps-the-set-of-groups-it-entered
-  "every group the frame enters joins the frame-local groups set, once"
+(deftest 'the-active-groups-are-the-groups-of-the-open-buffers
+  "a group is active while one of its buffers is open; the MRU only orders"
   (lambda ()
     (t--sw-setup!)
-    (run-command "group-new")
-    (t--sw-type! "zzsw-set-one")
+    (switch-to-buffer! t--sw-first)
+    (run-command "group-new-with-buffer")
+    (t--sw-type! "zzsw-active-one")
+    (t--sw-key! "confirm")
+    (switch-to-buffer! t--sw-second)
+    (run-command "group-new-with-buffer")
+    (t--sw-type! "zzsw-active-two")
     (t--sw-key! "confirm")
     (run-command "group-new")
-    (t--sw-type! "zzsw-set-two")
+    (t--sw-type! "zzsw-active-empty")
     (t--sw-key! "confirm")
-    (let ((one (group-resolve-id "zzsw-set-one"))
-          (two (group-resolve-id "zzsw-set-two")))
-      (check-equal! (frame-group) two "the frame stands in the newest group")
-      (check-equal! (frame-groups) (list two one)
-                    "the set holds both groups, newest first")
-      (switch-to-group! one)
-      (check-equal! (frame-groups) (list two one)
-                    "entering a group again adds nothing")
+    (let ((one (group-resolve-id "zzsw-active-one"))
+          (two (group-resolve-id "zzsw-active-two"))
+          (empty (group-resolve-id "zzsw-active-empty")))
+      (check-true! (member one (active-groups)) "a group with an open buffer is active")
+      (check-true! (member two (active-groups)) "so is the second")
+      (check-false! (member empty (active-groups)) "a group with no buffer is not")
+      (check-equal! (car (active-groups)) two "the most recent group comes first")
       (group-kill! two)
-      (check-equal! (frame-groups) (list one) "a killed group leaves the set"))
+      (check-false! (member two (active-groups))
+                    "a killed group's buffers are gone, so it is not active"))
     (t--sw-done!)))
 
 (deftest 'group-new-with-buffer-includes-the-buffer-family

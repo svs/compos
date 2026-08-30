@@ -25,6 +25,10 @@
 (define (t--morg! text point)
   (test-buffer! t--morg-buf text)
   (with-current-buffer t--morg-buf (lambda () (set-mode! "morg-mode")))
+  ;; these tests read morg's plain faces; preview-mode's painter would
+  ;; replace them, so the page it draws stays off here
+  (when (minor-mode-on? t--morg-buf "preview-mode")
+    (disable-minor-mode! t--morg-buf "preview-mode"))
   (buffer-goto! t--morg-buf point)
   t--morg-buf)
 

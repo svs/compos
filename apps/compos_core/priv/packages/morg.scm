@@ -555,8 +555,8 @@
 
 ;; spans for one scan entry; block BODIES are highlighted per block in
 ;; morg-refontify!, because a multi-line construct needs the whole body.
-;; This is the plain source view: every marker stays visible. markdown-mode
-;; is the drawn-in-place view, and it paints instead of this when it is on.
+;; This is the plain source view: every marker stays visible. preview-mode
+;; draws the page in place, and its painter replaces this when it is on.
 (define (morg-line-spans e)
   (let* ((start (car e)) (line (cadr e)) (k (morg-kind e))
          (len (string-byte-length line))
@@ -599,9 +599,9 @@
               (re-find* "\\[[^\\]\n]+\\]\\([^)\n]+\\)" line)))))))
 
 (define (morg-refontify! buf)
-  ;; markdown-mode (drawn in place) paints through its own hook when it is on
+  ;; preview-mode's painter (drawn in place) has its own hook when it is on
   (when (and (buffer-exists? buf)
-             (not (minor-mode-on? buf "markdown-mode")))
+             (not (equal? (buffer-local buf 'markdown-paint) #t)))
     (let* ((scan (morg-scan buf))
            (text (buffer-text buf))
            (line-spans
@@ -698,7 +698,7 @@
 (define-mode "morg-mode"
   (lambda ()
     ;; Morg owns structure and the plain faces. The prose presentation is
-    ;; writing-mode's; M-x markdown-mode draws the page in place.
+    ;; writing-mode's; preview-mode draws the page in place.
     (enable-minor-mode! (current-buffer) "writing-mode")
     (morg-install-keys)
     (morg-ensure-hook! (current-buffer))

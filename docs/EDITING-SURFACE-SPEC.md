@@ -190,7 +190,20 @@ emphasis toggle. The server keeps every command, keymap, hook, and mode.
    painted from the reactor (morg, markdown) covers the last typed letter.
    `morg-mode` is the plain source mode again; `markdown-mode` is opt-in.
 
-Still open after F1-F8: F4 (HTML files edited as themselves), F5 (rich
+9. F9 (shipped 2026-08-30): the modes, as the user stated them.
+   `preview-mode` on a Markdown file draws the page in place on the
+   editable rows: the preview typography, heading sizes, markup stepped
+   back off the cursor line, inline pictures, X cards, the native caret
+   (renderer "rows"; the iframe stays for `.org`, `.txt`, HTML and apps).
+   Without preview the file is the plain source in the editor font.
+   `morg-mode` is the Markdown major mode: folding, narrowing, babel,
+   TODO, plain faces. `writing-mode` is measure and layout. There is no
+   `markdown-mode`; packages/markdown-mode.scm is preview's painter
+   (`markdown-paint-on!`/`markdown-paint-off!`). The rows save the look
+   they replace and restore it when they go. A headless buffer (no client
+   has reported a caret) keeps the server's own visual-line motion.
+
+Still open after F1-F9: F4 (HTML files edited as themselves), F5 (rich
 paste), row-level block styles and tables, `preview-mode` as rendered
 rows for Markdown (the iframe stays for now), C-c/C-x/C-v on an active
 region in `cua-mode`, and the wrap-map code that the markdown iframe

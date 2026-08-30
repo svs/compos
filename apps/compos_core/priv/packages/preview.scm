@@ -19,8 +19,42 @@
 ;;   (set! *preview-renderers* (cons '(".rst" "markdown") *preview-renderers*))
 (define *preview-renderers*
   '((".html" "html") (".htm" "html") (".svg" "html")
-    (".md" "markdown") (".markdown" "markdown") (".org" "markdown")
+    (".md" "rows") (".markdown" "rows") (".org" "markdown")
     (".txt" "markdown")))
+
+;; "rows": Markdown drawn in place on the editable surface. The page is the
+;; buffer's own rows with the markup stepped back, the preview typography,
+;; inline pictures and cards, and the browser's caret. "markdown" is the
+;; older page in an iframe, which cannot hold a native caret; a saved
+;; buffer that still names it gets the rows.
+(define (preview--markdown-file? name)
+  (or (string-suffix? ".md" name) (string-suffix? ".markdown" name)))
+
+(define (preview--rows-on! buf)
+  (buffer-set-local! buf 'render-mode #f)
+  ;; the look the rows replace comes back exactly when they go
+  (unless (buffer-local buf 'preview-rows)
+    (buffer-set-local! buf 'preview-rows-saved
+      (list (or (buffer-local buf 'face-remap) '())
+            (or (buffer-local buf 'style) #f))))
+  (buffer-set-local! buf 'preview-rows #t)
+  (when (boundp 'markdown-paint-on!) (markdown-paint-on! buf))
+  (face-remap-in! buf 'default
+    (list 'family preview-font-family 'size preview-font-size 'line-height "1.7"))
+  (when (minor-mode-on? buf "writing-mode")
+    (face-remap-in! buf 'writing (list 'measure preview-measure))))
+
+(define (preview--rows-off! buf)
+  (buffer-set-local! buf 'preview-rows #f)
+  (when (boundp 'markdown-paint-off!) (markdown-paint-off! buf))
+  ;; the plain faces come back: morg skipped its paint while the rows drew
+  (when (and (boundp 'morg-refontify!) (equal? (buffer-local buf 'mode-name) "morg-mode"))
+    (morg-refontify! buf))
+  (let ((saved (buffer-local buf 'preview-rows-saved)))
+    (when saved
+      (buffer-set-local! buf 'face-remap (car saved))
+      (buffer-set-local! buf 'style (cadr saved))
+      (buffer-set-local! buf 'preview-rows-saved #f))))
 
 ;; Which renderer draws a Markdown page. Elixir owns both engines and reads
 ;; this choice from the 'preview-engine buffer-local; the choice itself is
@@ -54,21 +88,27 @@
 ;; text is markdown, the buffer is "*Help*", and C-c C-v must still toggle
 ;; between the source and the rendered page.
 (define (preview-renderer-for name)
-  (or (buffer-local name 'preview-renderer)
-      (let loop ((rs *preview-renderers*))
-        (if (null? rs)
-            #f
-            (if (string-suffix? (car (car rs)) name)
-                (cadr (car rs))
-                (loop (cdr rs)))))))
+  (let ((r (or (buffer-local name 'preview-renderer)
+               (let loop ((rs *preview-renderers*))
+                 (if (null? rs)
+                     #f
+                     (if (string-suffix? (car (car rs)) name)
+                         (cadr (car rs))
+                         (loop (cdr rs))))))))
+    (if (and (equal? r "markdown") (preview--markdown-file? name)) "rows" r)))
 
 (define (preview-mode--apply! buf)
   (let ((renderer (preview-renderer-for buf)))
     (if renderer
-        (begin
-          (buffer-set-local! buf 'preview-engine #f)
-          (when (equal? renderer "markdown") (preview-set-engine! buf))
-          (buffer-set-local! buf 'render-mode renderer))
+        (if (equal? renderer "rows")
+            (begin
+              (buffer-set-local! buf 'preview-engine #f)
+              (preview--rows-on! buf))
+            (begin
+              (when (buffer-local buf 'preview-rows) (preview--rows-off! buf))
+              (buffer-set-local! buf 'preview-engine #f)
+              (when (equal? renderer "markdown") (preview-set-engine! buf))
+              (buffer-set-local! buf 'render-mode renderer)))
         ;; A renamed or restored buffer can lose its renderer. Remove the
         ;; stale mode entry instead of leaving an enabled mode that draws
         ;; nothing.
@@ -80,6 +120,7 @@
           (buffer-set-local! buf 'render-mode #f)))))
 
 (define (preview-mode--teardown! buf)
+  (when (buffer-local buf 'preview-rows) (preview--rows-off! buf))
   (buffer-set-local! buf 'preview-engine #f)
   (buffer-set-local! buf 'render-mode #f))
 

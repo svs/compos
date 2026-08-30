@@ -121,6 +121,13 @@ defmodule Compos.Ui.EditorLive do
           end
 
           Compos.Core.Buffer.goto(buf, point)
+
+          # a client that reports its caret can be asked to move it: the
+          # visual-line commands take the browser's layout from here on,
+          # and a headless buffer keeps the server's own motion
+          if Compos.Core.Buffer.get_local(buf, "client-caret") != true do
+            Compos.Core.Buffer.set_local(buf, "client-caret", true)
+          end
         end
       end)
     end

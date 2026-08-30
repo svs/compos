@@ -1,14 +1,15 @@
 ;;; markdown-mode.scm --- Markdown drawn in place: the markup steps back.
 ;;;
-;;; markdown-mode is cosmetic. It paints faces on the source and changes no
-;;; byte. A marker (the # of a heading, the ** of bold, the ]( of a link)
-;;; wears md-marker, and the page hides md-marker on every line but the one
-;;; point is on. A heading wears its level's face, and that face carries a
-;;; size. An image URL wears img-embed and draws as the picture. A line that
-;;; is one X post URL wears x-embed and draws as the card.
+;;; This is preview-mode's painter for Markdown. It paints faces on the
+;;; source and changes no byte. A marker (the # of a heading, the ** of
+;;; bold, the ]( of a link) wears md-marker, and the page hides md-marker
+;;; on every line but the one point is on. A heading wears its level's
+;;; face, and that face carries a size. An image URL wears img-embed and
+;;; draws as the picture. A line that is one X post URL wears x-embed and
+;;; draws as the card.
 ;;;
-;;; morg-mode owns structure (folds, narrowing, babel) and turns this mode
-;;; on. A plain Markdown buffer can turn it on alone.
+;;; preview-mode turns the paint on and off (markdown-paint-on!,
+;;; markdown-paint-off!). morg-mode owns structure and the plain faces.
 
 (domain! 'writing)
 (effects! '(write))
@@ -188,16 +189,14 @@
   (markdown--remove-hook! buf)
   (overlay-set! buf 'markdown '()))
 
-(register-minor-mode! "markdown-mode" markdown--apply! markdown--teardown!)
+(define (markdown-paint-on! buf)
+  (buffer-set-local! buf 'markdown-paint #t)
+  (markdown--apply! buf))
 
-(mode-doc! "markdown-mode"
-  "Markdown drawn in place. Markers step back on every line but the current one, a heading takes its size, an image draws as the picture, and an X post URL draws as the card. Cosmetic only: no byte changes.")
+(define (markdown-paint-off! buf)
+  (buffer-set-local! buf 'markdown-paint #f)
+  (markdown--teardown! buf))
 
-(define-command "markdown-mode" "Toggle Markdown drawn in place in the current buffer"
-  (lambda ()
-    (if (toggle-minor-mode! "markdown-mode")
-        (message "Markdown mode enabled")
-        (message "Markdown mode disabled"))))
-
-(catalog-meta! 'mode "markdown-mode" 'domain 'writing 'effects '(write))
+(public! 'markdown-paint-on! "(markdown-paint-on! BUF) — draw BUF's Markdown in place (preview-mode's painter)")
+(public! 'markdown-paint-off! "(markdown-paint-off! BUF) — take the in-place drawing off BUF")
 (public! 'markdown-refontify! "(markdown-refontify! BUF) — repaint the Markdown faces of BUF")

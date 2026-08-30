@@ -2723,6 +2723,9 @@
 (define (visual--client? buf)
   (and (equal? (buffer-local buf 'visual-line-mode) #t)
        (not (buffer-read-only? buf))
+       ;; a client that has reported its caret is there to answer; a
+       ;; headless buffer keeps the server's own motion
+       (equal? (buffer-local buf 'client-caret) #t)
        ;; a window that measured a map, fresh or stale, draws a page that
        ;; measures; an editable surface never sends one
        (not (window-wrap-map (active-window)))

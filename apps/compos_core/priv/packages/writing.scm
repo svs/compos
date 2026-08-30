@@ -261,7 +261,7 @@
   ;; The preview is the writing surface. Markdown remains the buffer text,
   ;; so every ordinary edit, save, undo, and future narrowing command keeps
   ;; its normal editor semantics.
-  (buffer-set-local! buf 'preview-renderer "markdown")
+  (buffer-set-local! buf 'preview-renderer "rows")
   ;; The first entry chooses the writing surface. A reload only reapplies
   ;; the modes the user left on, so source view remains source view.
   (if entering?
@@ -318,6 +318,10 @@
   (buffer-set-local! buf 'line-numbers (writing--saved buf 'line-numbers))
   (buffer-set-local! buf 'preview-renderer (writing--saved buf 'preview-renderer))
   (buffer-set-local! buf 'visual-line-mode (writing--saved buf 'visual-line-mode))
+  (unless (writing--saved buf 'visual-line-mode)
+    (buffer-set-local! buf 'minor-modes
+      (remove (lambda (n) (equal? n "visual-line-mode"))
+              (or (buffer-local buf 'minor-modes) '()))))
   (buffer-set-local! buf 'window-class #f)
   (buffer-set-local! buf 'modeline-info #f)
   (local-unset-key* buf "S-<left>")

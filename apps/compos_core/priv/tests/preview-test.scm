@@ -176,7 +176,8 @@
 (deftest 'a-markdown-page-carries-the-configured-engine
   "the engine choice is policy, so Scheme puts it on the buffer"
   (lambda ()
-    (let ((buf (test-buffer! "zz-preview-engine.md" "# title\n")))
+    ;; an .org page still draws in the iframe; a Markdown file draws rows
+    (let ((buf (test-buffer! "zz-preview-engine.org" "* title\n")))
       (with-current-buffer buf
         (lambda ()
           (check-equal! (buffer-local buf 'preview-engine) #f
@@ -197,8 +198,10 @@
           (run-command "preview-mode")
           (check-true! (minor-mode-on? buf "preview-mode")
                        "the enabled mode is durable")
-          (check-equal! (buffer-local buf 'render-mode) "markdown"
-                        "the setup draws the page")
+          (check-false! (buffer-local buf 'render-mode)
+                        "a Markdown page is the buffer's own rows, not an iframe")
+          (check-true! (buffer-local buf 'preview-rows)
+                        "the setup draws the rows")
           (check-false! (buffer-read-only? buf)
                         "preview does not change edit permission")
           (run-command "preview-mode")

@@ -2,7 +2,7 @@
 ;;;
 ;;; The faces are policy: a marker steps back, a heading takes its level, an
 ;;; image URL draws as the picture, an X post URL draws as the card. The
-;;; test turns the mode on, then reads the overlays it painted.
+;;; test turns the paint on, then reads the overlays it painted.
 
 (domain! 'testing)
 (effects! '(write))
@@ -11,12 +11,11 @@
 
 (define (t--md-fresh! text)
   (test-buffer! t--md-buf text)
-  (enable-minor-mode! t--md-buf "markdown-mode")
-  (markdown-refontify! t--md-buf)
+  (markdown-paint-on! t--md-buf)
   t--md-buf)
 
 (define (t--md-done!)
-  (disable-minor-mode! t--md-buf "markdown-mode"))
+  (markdown-paint-off! t--md-buf))
 
 (define (t--md-has? span)
   (if (member span (buffer-overlays t--md-buf)) #t #f))

@@ -130,6 +130,8 @@ defmodule Compos.Ui.IntentTest do
     buf = fresh_buffer("one\ntwo\nthree")
     {:ok, view, _} = live(conn, "/")
     Compos.Core.Session.eval(~s{(enable-minor-mode! "#{buf}" "visual-line-mode")})
+    # a client that has reported its caret can be asked to move it
+    Buffer.set_local(buf, "client-caret", true)
     # the command, not a key: the view's frame is the last-active one
     Compos.Core.Session.run_command("previous-line")
     assert_push_event(view, "select", %{alter: "move", dir: "backward", granularity: "line"})

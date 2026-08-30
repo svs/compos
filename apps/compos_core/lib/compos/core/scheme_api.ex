@@ -281,6 +281,8 @@ defmodule Compos.Core.SchemeAPI do
         "(daemon-registry-path) — return the shared daemon registry file path.",
       "navigate-url!" => "(navigate-url! URL) — navigate this frame's browser tab to URL.",
       "buffer-set-local!" => "(buffer-set-local! BUF KEY VALUE) — set a buffer-local variable.",
+      "buffer-set-locals!" =>
+        "(buffer-set-locals! BUF PLIST) — set several buffer-locals in one change; the frame refreshes once, not once per key.",
       "buffer-local" =>
         "(buffer-local BUF KEY) — return a buffer-local variable's value, or #f if unset.",
       "buffer-locals" =>
@@ -1186,6 +1188,16 @@ defmodule Compos.Core.SchemeAPI do
       # buffer-local variables
       "buffer-set-local!" => fn [buf, k, v] ->
         Buffer.set_local(buf, plain(k), v)
+        :void
+      end,
+      "buffer-set-locals!" => fn [buf, plist] when is_list(plist) ->
+        locals =
+          plist
+          |> Enum.chunk_every(2)
+          |> Enum.map(fn [k, v] -> {plain(k), v} end)
+          |> Map.new()
+
+        Buffer.set_locals(buf, locals)
         :void
       end,
       "buffer-local" => fn [buf, k] -> Buffer.get_local(buf, plain(k)) || false end,

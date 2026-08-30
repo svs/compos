@@ -257,6 +257,13 @@ defmodule Compos.Core.Buffer do
   # buffer-local variables (mode name, mode state, anything Scheme wants)
   def set_local(name, key, val), do: GenServer.call(via(name), {:set_local, key, val})
 
+  @doc """
+  Set several locals in one message. One broadcast follows, not one per
+  key: a list draw that wrote nine locals one by one made the frame
+  refresh and render nine times.
+  """
+  def set_locals(name, %{} = locals), do: GenServer.call(via(name), {:set_locals, locals})
+
   def get_local(name, key), do: Map.get(locals(name), key)
 
   def locals(name) do
@@ -949,6 +956,20 @@ defmodule Compos.Core.Buffer do
 
   defp on_call({:set_read_only, bool}, _from, state),
     do: {:reply, :ok, state |> Map.put(:read_only, bool) |> checkpoint_later()}
+
+  defp on_call({:set_locals, locals}, _from, state) do
+    state = %{state | locals: Map.merge(state.locals, locals)}
+
+    state =
+      case Map.fetch(locals, "ts-lang") do
+        {:ok, lang} -> init_ts(state, lang)
+        :error -> state
+      end
+
+    Events.broadcast_editor(:locals)
+    broadcast(state, state.point, "", 0, :locals)
+    {:reply, :ok, checkpoint_later(state)}
+  end
 
   defp on_call({:set_local, key, val}, _from, state) do
     state = %{state | locals: Map.put(state.locals, key, val)}

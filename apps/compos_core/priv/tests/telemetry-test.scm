@@ -187,3 +187,12 @@
         (wait-until (lambda () (> (length (list-entries *telemetry-buffer*)) before)) 3000 50)
         "the list grew on its own"))
     (popup-close!)))
+
+(deftest 'telemetry-hides-the-editors-own-refresh-and-render-rows
+  "an untraced live refresh or render is noise; a shows it"
+  (lambda ()
+    (check-true! (telemetry--noise? (list 'layer "live" 'label "refresh")) "a refresh nobody traced")
+    (check-true! (telemetry--noise? (list 'layer "live" 'label "render Elixir.X")) "a component render")
+    (check-true! (not (telemetry--noise? (list 'layer "live" 'label "render" 'tid "ab:1"))) "a traced render")
+    (check-true! (not (telemetry--noise? (list 'layer "live" 'label "event sel"))) "an event")
+    (check-true! (not (telemetry--noise? (list 'layer "scheme" 'label "refresh"))) "another layer")))

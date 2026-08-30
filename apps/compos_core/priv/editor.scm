@@ -1160,16 +1160,23 @@
 
 ;; write the lines, answer their overlays, and leave every row's byte
 ;; offset on the buffer — motion and the mode's own overlays then read
-;; the same numbers the text has. The text goes in as one append: an
-;; append per line was one change per row, and every overlay still on
-;; the buffer shifted on each one.
-(define (list-write! buf lines first-row n-rows per)
+;; the same numbers the text has. The text goes in as ONE replace of the
+;; whole buffer: a delete and then an append let a render in between
+;; see an empty buffer, reset the window's top, and write it back, and
+;; the view jumped. The offsets, the head count, and the row height go
+;; in as one change too, with the locals the caller adds: every change
+;; is a frame refresh and a render, and a draw of twelve changes was
+;; twelve of each.
+(define (list-write! buf lines first-row n-rows per &optional extra-locals)
   (let loop ((ls lines) (i 0) (off 0) (ovs '()) (offsets '()) (texts '()))
     (if (null? ls)
-        (begin (buffer-append! buf (string-join (reverse texts) ""))
-               (buffer-set-local! buf 'list-offsets (reverse offsets))
-               (buffer-set-local! buf 'list-head-count first-row)
-               (buffer-set-local! buf 'list-row-height per)
+        (begin (buffer-replace-range! buf 0 (buffer-size buf)
+                                      (string-join (reverse texts) ""))
+               (buffer-set-locals! buf
+                 (append (list 'list-offsets (reverse offsets)
+                               'list-head-count first-row
+                               'list-row-height per)
+                         (or extra-locals '())))
                (reverse ovs))
         (let ((text (car (car ls)))
               (spans (car (cdr (car ls)))))
@@ -1222,7 +1229,11 @@
                (size (fold (lambda (n line)
                              (+ n (string-byte-length (car line)) 1))
                            0 (list-row-lines buf entry))))
-          (buffer-set-local! buf 'list-selection-key (list-key buf entry))
+          ;; the key is a change, and a change is a refresh: write it
+          ;; only when the selection moved
+          (let ((key (list-key buf entry)))
+            (unless (equal? key (buffer-local buf 'list-selection-key))
+              (buffer-set-local! buf 'list-selection-key key)))
           (if face
               (overlay-set! buf 'list-selection
                 (list (list start (+ start size) face)))
@@ -1499,7 +1510,8 @@
 
 (define (list-render! buf fetch)
   (when (buffer-exists? buf)
-    (buffer-set-local! buf 'list-layout-cache #f)
+    ;; the layout cache needs no reset here: it names the width it was
+    ;; laid out for, and a new width misses it
     ;; a rewrite dumps point to 0 — keep the reader's place. The place is
     ;; the ROW the reader is on, not the byte and not the number: a
     ;; reflowed table moves every byte, and a most-recently-used list
@@ -1515,37 +1527,39 @@
            (p (buffer-point buf))
            (ro (buffer-read-only? buf)))
       ;; our own rewrite is not a user edit, and the buffer is read-only.
-      ;; The last draw's overlays go first: left on, each of them shifted
-      ;; under the delete and the write, and a wide list carries thousands.
       (buffer-set-read-only! buf #f)
-      (overlay-set! buf 'list '())
-      (buffer-delete-range! buf 0 (buffer-size buf))
-      ;; entries first: the header states the row count
-      (buffer-set-local! buf 'list-entries rows)
-      ;; and the columns lay out against the rows this draw writes. The
-      ;; cache clears HERE, not before the fetch: reading point asks the
-      ;; header how many lines it has, and that laid the columns out
-      ;; while the rows they must fit were still the last draw's. A mode
-      ;; that measures its column against its rows then measured the
-      ;; rows that went. Every later call in this draw reads the cache,
-      ;; so the mode's columns fn still runs once.
-      (buffer-set-local! buf 'list-columns-cache #f)
       ;; a paged list draws the first page of its rows; the entries keep
       ;; every row, so the counts and the filters see them all
-      (let* ((shown (list-page-rows buf rows))
-             ;; the header once: its lines and their count are one answer
-             (head (begin
-                     (buffer-set-local! buf 'list-shown-count (length shown))
-                     (list-head-lines buf)))
-             (base (list-write! buf (list-view-lines buf shown head)
-                                (length head) (length shown)
-                                (list-row-height buf))))
-        (overlay-set! buf 'list (append base (list-row-overlays buf shown))))
+      (let* ((shown (list-page-rows buf rows)))
+        ;; entries first: the header states the row count. The columns
+        ;; lay out against the rows this draw writes: the cache clears
+        ;; HERE, not before the fetch. Reading point asks the header how
+        ;; many lines it has, and that laid the columns out while the
+        ;; rows they must fit were still the last draw's. Every later
+        ;; call in this draw reads the cache, so the mode's columns fn
+        ;; still runs once. One change for the three.
+        (buffer-set-locals! buf
+          (list 'list-entries rows
+                'list-columns-cache #f
+                'list-shown-count (length shown)))
+        (let* (;; the header once: its lines and their count are one answer
+               (head (list-head-lines buf))
+               (stamp-fn (list-opt buf 'stamp))
+               ;; the width and the stamp ride the write's own change: the
+               ;; rows are now the rows this render shows, and the stamp
+               ;; says so
+               (extra (append
+                        (if (list-table? buf)
+                            (list 'list-width (list-view-width buf))
+                            '())
+                        (if stamp-fn (list 'list-stamp (stamp-fn buf)) '())))
+               (base (list-write! buf (list-view-lines buf shown head)
+                                  (length head) (length shown)
+                                  (list-row-height buf) extra)))
+          ;; the tag's old ranges go with this set: one change, not a
+          ;; clear and then a set
+          (overlay-set! buf 'list (append base (list-row-overlays buf shown)))))
       (buffer-set-read-only! buf ro)
-      (when (list-table? buf)
-        (buffer-set-local! buf 'list-width (list-view-width buf)))
-      ;; the rows are now the rows this render shows: the stamp says so
-      (list-stamp! buf)
       (let ((i (and selected-key (list-index-of buf rows selected-key)))
             (last (- (list-shown-count buf) 1)))
         (cond ((and i (pair? rows)) (list-goto-index! buf (min i last)))

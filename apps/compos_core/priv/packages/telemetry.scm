@@ -25,6 +25,22 @@
 (define (telemetry-events &optional limit)
   (telemetry-snapshot (max 1 (min 1000 (or limit telemetry-event-limit)))))
 
+;; The editor's own reaction to a change: a live refresh and a render
+;; with no trace. Every buffer change makes one pair, so they are most
+;; of the stream, and they say nothing a traced row does not. The list
+;; hides them unless you ask for all.
+(define (telemetry--noise? row)
+  (and (equal? (telemetry--layer row) "live")
+       (equal? (telemetry--trace row) "")
+       (let ((l (or (plist-get row 'label) "")))
+         (or (string-prefix? "refresh" l) (string-prefix? "render" l)))))
+
+(define (telemetry--rows buf)
+  (let ((rows (telemetry-events)))
+    (if (buffer-local buf 'telemetry-all)
+        rows
+        (filter (lambda (r) (not (telemetry--noise? r))) rows))))
+
 (define (telemetry--time row)
   (format-time (quotient (plist-get row 'time-ms) 1000) "%H:%M:%S"))
 
@@ -214,7 +230,7 @@
          (keys (telemetry--newest-keys rows *telemetry-spark-keys*))
          (last (if (null? keys) #f (car (reverse keys)))))
     (string-append
-      (number->string count) " events · "
+      (number->string count) (if (buffer-local buf 'telemetry-all) " events · " " events, quiet · ")
       (number->string slow) " slow · "
       "p50 " (number->string (telemetry--percentile sorted 50)) "ms · "
       "p95 " (number->string (telemetry--percentile sorted 95)) "ms"
@@ -253,6 +269,12 @@
 
 (define-command "telemetry-keys" "Keep the traced rows: keystrokes and intents"
   (lambda () (telemetry--toggle-filter! (current-buffer) "keys" "traced")))
+
+(define-command "telemetry-all" "Show the editor's own refresh and render rows too; again hides them"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (buffer-set-local! buf 'telemetry-all (not (buffer-local buf 'telemetry-all)))
+      (list-refresh! buf))))
 
 (define-command "telemetry-slow" "Keep the rows over the slow threshold"
   (lambda ()
@@ -324,10 +346,11 @@
            "of one keystroke share a trace id: t narrows to the trace "
            "under point, k keeps every traced row, s keeps the slow rows, "
            "and the same key again widens. The list draws 60 rows; PgDn "
-           "and n draw more at the end. RET shows every field; g "
-           "refreshes, c clears, and q quits.")
+           "and n draw more at the end. The editor's own untraced refresh "
+           "and render rows are hidden; a shows them. RET shows every "
+           "field; g refreshes, c clears, and q quits.")
     'buffer *telemetry-buffer*
-    'rows (lambda (buf) (telemetry-events))
+    'rows telemetry--rows
     'columns (lambda (buf)
                (list (list "time" 8)
                      (list "layer" 7)
@@ -348,11 +371,12 @@
     'page-size 60
     'footer (lambda (buf)
               '(("RET" "details") ("t" "trace") ("k" "keys") ("s" "slow")
-                ("/" "filter") ("g" "refresh") ("c" "clear") ("q" "quit")))
+                ("a" "all") ("/" "filter") ("g" "refresh") ("c" "clear") ("q" "quit")))
     'keys '(("RET" "telemetry-visit")
             ("t" "telemetry-trace")
             ("k" "telemetry-keys")
             ("s" "telemetry-slow")
+            ("a" "telemetry-all")
             ("g" "telemetry-refresh")
             ("c" "telemetry-clear")
             ("q" "quit-window"))))

@@ -313,6 +313,8 @@
 ;;;             matches the annotation too — see list-match?
 ;;;   match   (buf entry input) -> #t to keep. What `/` means here.
 ;;;   filter  (buf entry filter) -> #t to keep. The mode's own filter kinds.
+;;;   separator? (buf entry) -> #t for a section heading. Headings are not
+;;;              choices. Filtering drops a heading when its section is empty.
 ;;;   selection-face  face name for the row at point. Omit it for no highlight.
 
 (define *list-modes* '())
@@ -393,10 +395,17 @@
 ;; a mouse click runs no command — so the row at point is the NEAREST
 ;; row. Every verb reads this one answer, so RET, `k` and a mark all act
 ;; on the row the highlight then rests on (post-command! moves it there).
+(define (list-separator? buf e)
+  (let ((f (list-opt buf 'separator?)))
+    (and f (f buf e))))
+
+(define (list-selectable? buf e) (not (list-separator? buf e)))
+
 (define (list-current buf)
   (let ((i (list-clamped-index buf))
         (es (list-entries buf)))
-    (and i (< i (length es)) (nth i es))))
+    (and i (< i (length es))
+         (let ((e (nth i es))) (and (list-selectable? buf e) e)))))
 
 ;;; marks — a list of (KEY CHAR), on the list buffer
 
@@ -449,7 +458,7 @@
 ;; a list may refuse to mark some rows (dired: "..")
 (define (list-markable? buf e)
   (let ((f (list-opt buf 'markable?)))
-    (if f (f buf e) #t)))
+    (and (list-selectable? buf e) (if f (f buf e) #t))))
 
 ;; a mark needs a column to show in. A list with flags has always had
 ;; one; a list with columns gets one too, because marking is what every
@@ -728,17 +737,41 @@
 
 ;; the rows that survive the stack — the loop each list wrote by hand.
 ;; The filters and the row context are read once, not once per row.
+(define (list-entry-kept? buf e filters ctx)
+  (let loop ((fs filters))
+    (cond ((null? fs) #t)
+          ((list-filter-match? buf e (car fs) ctx) (loop (cdr fs)))
+          (else #f))))
+
+;; Split at heading rows before filtering. A heading owns every row up to the
+;; next heading. It stays only when at least one row in its section stays.
+(define (list-keep-sections buf entries filters ctx)
+  (letrec ((emit
+             (lambda (heading rows out)
+               (let ((kept (filter (lambda (e)
+                                     (list-entry-kept? buf e filters ctx))
+                                   (reverse rows))))
+                 (if (null? kept)
+                     out
+                     (append out (if heading (cons heading kept) kept))))))
+           (walk
+             (lambda (rest heading rows out)
+               (cond ((null? rest) (emit heading rows out))
+                     ((list-separator? buf (car rest))
+                      (walk (cdr rest) (car rest) '()
+                            (emit heading rows out)))
+                     (else (walk (cdr rest) heading (cons (car rest) rows) out))))))
+    (walk entries #f '() '())))
+
 (define (list-keep buf entries)
   (let ((filters (list-filters buf)))
-    (if (null? filters)
-        entries
-        (let ((ctx (list-row-ctx buf)))
-          (filter (lambda (e)
-                    (let loop ((fs filters))
-                      (cond ((null? fs) #t)
-                            ((list-filter-match? buf e (car fs) ctx) (loop (cdr fs)))
-                            (else #f))))
-                  entries)))))
+    (let ((ctx (list-row-ctx buf)))
+      (if (list-opt buf 'separator?)
+          (list-keep-sections buf entries filters ctx)
+          (if (null? filters)
+              entries
+              (filter (lambda (e) (list-entry-kept? buf e filters ctx))
+                      entries))))))
 
 ;; A list that declares 'local-filter fetches its source once and runs
 ;; the filters on the cache: a keystroke in `/` must not call the source
@@ -1215,6 +1248,35 @@
         (if (equal? (current-buffer) buf) (goto-char! p) (buffer-goto! buf p))
         (list-update-selection! buf)))))
 
+(define (list-first-selectable-index buf)
+  (let loop ((es (list-entries buf)) (i 0))
+    (cond ((null? es) #f)
+          ((list-selectable? buf (car es)) i)
+          (else (loop (cdr es) (+ i 1))))))
+
+(define (list-nearest-selectable-index buf from)
+  (let* ((es (list-entries buf))
+         (n (length es)))
+    (if (= n 0)
+        #f
+        (let ((start (max 0 (min (- n 1) from))))
+          (let forward ((i start))
+            (cond ((>= i n)
+                   (let backward ((j (- start 1)))
+                     (cond ((< j 0) #f)
+                           ((list-selectable? buf (nth j es)) j)
+                           (else (backward (- j 1))))))
+                  ((list-selectable? buf (nth i es)) i)
+                  (else (forward (+ i 1)))))))))
+
+(define (list-step-selectable-index buf from step)
+  (let* ((es (list-entries buf))
+         (n (length es)))
+    (let loop ((i (+ from step)))
+      (cond ((or (< i 0) (>= i n)) from)
+            ((list-selectable? buf (nth i es)) i)
+            (else (loop (+ i step)))))))
+
 ;; Point is the live selection. Keep its row key as durable state, and paint
 ;; the complete row when the mode asks for a selection face. A row can use
 ;; more than one line, so the overlay follows the rendered row height.
@@ -1271,8 +1333,11 @@
   (let ((n (length (list-entries buf))))
     (when (> n 0)
       (let ((i (list-index buf)))
-        (cond ((not i) (list-goto-index! buf 0))
-              ((>= i n) (list-goto-index! buf (- n 1))))))))
+        (let ((target (list-nearest-selectable-index
+                        buf (cond ((not i) 0)
+                                  ((>= i n) (- n 1))
+                                  (else i)))))
+          (when target (list-goto-index! buf target)))))))
 
 ;; Some lists show state that other commands change: ibuffer shows the
 ;; buffers, and C-x k kills one from anywhere. Such a mode gives a
@@ -1315,10 +1380,10 @@
 (define (list-move-in! buf step)
   (let ((i (list-clamped-index buf)))
     (when i
-      ;; past the last drawn row of a paged list, the next page comes
-      (when (> step 0) (list-ensure-shown! buf (+ i step)))
-      (let ((n (list-shown-count buf)))
-        (list-goto-index! buf (max 0 (min (- n 1) (+ i step))))
+      (let ((target (list-step-selectable-index buf i step)))
+        ;; A skipped heading can put the target on the next page.
+        (when (> step 0) (list-ensure-shown! buf target))
+        (list-goto-index! buf target)
         (list-preview! buf)))))
 
 (define (list-move! step) (list-move-in! (current-buffer) step))
@@ -1360,7 +1425,8 @@
 ;; the list's own point rather than the current buffer's.
 (define (list-goto-first-entry buf)
   (if (pair? (list-offsets buf))
-      (list-goto-index! buf 0)
+      (let ((i (list-first-selectable-index buf)))
+        (when i (list-goto-index! buf i)))
       (let ((p (min (list-first-entry-pos buf) (buffer-size buf))))
         (if (equal? (current-buffer) buf)
             (goto-char! p)
@@ -4902,8 +4968,12 @@
     (cond (side (popup-keys! name #t))
           (had-keys
            (popup-keys! name #f)
-           ;; the buffer's own M-arrows come back with its mode
-           (when (buffer-exists? name) (restore-buffer-runtime! name))))))
+           ;; the buffer's own M-arrows come back with its mode. Not for a
+           ;; peek: it is read-only, it dies when replaced, and a mode
+           ;; setup is the one thing here that could move anything.
+           (when (and (buffer-exists? name)
+                      (not (and (boundp 'peek-buffer?) (peek-buffer? name))))
+             (restore-buffer-runtime! name))))))
 
 (define (popup-move! side)
   (let ((buf (current-buffer)))
@@ -5230,6 +5300,10 @@
 ;; KNOWN is the name it will have, so "did the peek make it" is answered
 ;; before OPEN runs: a buffer that was known stays a real buffer. OPEN
 ;; may move the selected window (visit does); the window is put back.
+;; A quiet popup is transparent to the point: nothing in this path
+;; selects a window. OPEN opens the buffer, best without a window
+;; (visit-quietly); an opener that showed it in the selected window has
+;; the listing put back there, in place, with no selection change.
 (define (peek! known open)
   (let* ((existed? (and (string? known) (buffer-known? known) #t))
          (me (active-window))
@@ -5238,7 +5312,6 @@
     (when (and (string? buf) (not (equal? buf here)))
       (unless (equal? (window-buffer me) here)
         (window-preview-buffer! here me))
-      (select-window! me)
       (unless existed? (enable-minor-mode! buf "peek-mode"))
       (peek-show! buf))
     buf))

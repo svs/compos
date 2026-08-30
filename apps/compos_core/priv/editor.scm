@@ -5655,10 +5655,7 @@
   (lambda ()
     (cond
       ((and (popup-open?) (equal? (active-window) (popup-window)))
-<<<<<<< HEAD
         (popup-dismiss!))
-=======
-        (popup-close!))
       ;; a peek goes with its window: the look is over, the layout is
       ;; what it was before the peek split it
       ((peek-buffer? (current-buffer))
@@ -5671,7 +5668,6 @@
                        (switch-to-buffer! (car bs)))
                       (else (loop (cdr bs))))))
           (peek-drop! cur)))
->>>>>>> worktree-browse
       (else
         (let ((cur (current-buffer)))
           ;; a file with edits you did not save is not a listing: say so and

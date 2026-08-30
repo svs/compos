@@ -54,8 +54,18 @@
            #t)
           (else (loop (cdr ws))))))
 
+;; A chat's file is a serialization of the conversation, never the buffer
+;; text, so buffer and file can never agree: a follow or a merge always
+;; writes the file format over the transcript. Any buffer whose save is a
+;; transform must opt out the same way, with 'auto-revert-exempt.
+(define (auto-revert-serialized? buf)
+  (or (equal? (buffer-local buf 'mode-name) "chat-mode")
+      (buffer-local buf 'auto-revert-exempt)))
+
 (define (auto-revert-follows? buf)
-  (and (auto-revert-any-frame?) (not (auto-revert-held? buf))))
+  (and (not (auto-revert-serialized? buf))
+       (auto-revert-any-frame?)
+       (not (auto-revert-held? buf))))
 
 ;; set-frame-local! only ever writes the selected frame, and a frame that
 ;; is not the selected one still has to be able to decide.

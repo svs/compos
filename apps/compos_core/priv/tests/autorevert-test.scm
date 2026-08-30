@@ -221,3 +221,23 @@
       (buffer-mark-saved! p)
       (buffer-kill! p)
       (shell-command->string (string-append "unlink " p) "/tmp"))))
+
+(deftest 'a-serialized-buffer-never-follows-its-file
+  "a chat's file is a serialization, so a follow is always a clobber"
+  (lambda ()
+    (let ((p "/tmp/compos-autorevert-chat-test.txt"))
+      (shell-command->string
+        (string-append "printf 'transcript\\n' > " p) "/tmp")
+      (find-file p)
+      (check-true! (auto-revert-follows? p)
+                   "a plain file buffer follows")
+      (buffer-set-local! p 'mode-name "chat-mode")
+      (check-false! (auto-revert-follows? p)
+                    "a chat buffer never follows")
+      (buffer-set-local! p 'mode-name #f)
+      (buffer-set-local! p 'auto-revert-exempt #t)
+      (check-false! (auto-revert-follows? p)
+                    "and neither does a buffer that opted out")
+      (buffer-mark-saved! p)
+      (buffer-kill! p)
+      (shell-command->string (string-append "unlink " p) "/tmp"))))

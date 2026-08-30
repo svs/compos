@@ -554,3 +554,17 @@ defmodule Compos.DesktopRestoreTest do
     assert File.stat!(file, time: :posix).mtime > stamp
   end
 end
+
+defmodule Compos.DesktopBackupTest do
+  use ExUnit.Case
+
+  alias Compos.Core.Desktop
+
+  test "a desktop save keeps a dated backup beside the file" do
+    Desktop.save_now()
+    Desktop.save_now()
+
+    dir = Path.join(Path.dirname(Desktop.path()), "desktop-backups")
+    assert Path.wildcard(Path.join(dir, "desktop-*.etf")) != []
+  end
+end

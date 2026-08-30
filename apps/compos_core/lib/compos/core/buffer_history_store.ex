@@ -94,6 +94,28 @@ defmodule Compos.Core.BufferHistoryStore do
 
   def forget(id), do: File.rm(path(id))
 
+  @doc """
+  Move the log to the graveyard instead of deleting it. True when a file moved.
+
+  A kill goes through this, never through `forget/1`: the log is the editor's
+  write-ahead history, and no editor gesture may erase it.
+  """
+  def entomb(id) do
+    src = path(id)
+
+    if File.exists?(src) do
+      dead = Path.join(dir(), "dead")
+      File.mkdir_p!(dead)
+      File.rename(src, Path.join(dead, id <> ".loro")) == :ok
+    else
+      false
+    end
+  rescue
+    e ->
+      Logger.error("could not entomb the document log for #{id}: #{inspect(e)}")
+      false
+  end
+
   def size(id) do
     case File.stat(path(id)) do
       {:ok, %{size: size}} -> size

@@ -184,3 +184,44 @@ defmodule Compos.BufferHistoryStoreTest do
     end
   end
 end
+
+defmodule Compos.BufferGraveyardTest do
+  @moduledoc """
+  A kill never erases. The checkpoint and the history log move to the
+  graveyard, with a burial line mapping id to name, so any killed buffer's
+  text and provenance stay recoverable.
+  """
+
+  use ExUnit.Case
+
+  alias Compos.Core.{Buffer, BufferHistoryStore, BufferStore}
+
+  test "a kill entombs the checkpoint and the log instead of erasing them" do
+    name = "zz-entomb-#{System.unique_integer([:positive])}"
+    {:ok, _} = Compos.Core.create_buffer(name, text: "precious\n")
+    id = Buffer.id(name)
+    :ok = Buffer.checkpoint_now(name)
+
+    assert File.exists?(BufferStore.checkpoint_path(id))
+
+    :ok = Compos.Core.kill_buffer(name)
+
+    refute File.exists?(BufferStore.checkpoint_path(id))
+    assert File.exists?(Path.join(BufferStore.graveyard_dir(), id <> ".etf"))
+    assert File.read!(BufferStore.graveyard_log()) =~ "#{id} #{name}"
+
+    # whatever log the buffer had written moved with it
+    refute File.exists?(BufferHistoryStore.path(id))
+  end
+
+  test "entomb moves a log to the dead directory" do
+    id = "zz-entomb-log-#{System.unique_integer([:positive])}"
+    BufferHistoryStore.append(id, "blob")
+
+    assert BufferHistoryStore.entomb(id)
+
+    refute File.exists?(BufferHistoryStore.path(id))
+    assert File.exists?(Path.join(Path.join(BufferHistoryStore.dir(), "dead"), id <> ".loro"))
+    refute BufferHistoryStore.entomb(id)
+  end
+end

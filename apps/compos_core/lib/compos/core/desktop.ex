@@ -102,12 +102,51 @@ defmodule Compos.Core.Desktop do
     }
 
     file = path()
+    rotate_backup(file)
     Compos.Core.BufferStore.atomic_write(file, :erlang.term_to_binary(desktop))
     {:ok, %{state | globals: globals}}
   rescue
     e ->
       Logger.warning("desktop save failed: #{Exception.message(e)}")
       {:error, state}
+  end
+
+  @backup_every 600
+  @backup_keep 50
+
+  # The desktop file is rewritten seconds after every change, so a bad state
+  # overwrites the only copy before anyone notices. A dated copy at most every
+  # ten minutes bounds a loss to that window; fifty copies bound the disk.
+  defp rotate_backup(file) do
+    if File.exists?(file) do
+      dir = Path.join(Path.dirname(file), "desktop-backups")
+      File.mkdir_p!(dir)
+      backups = dir |> Path.join("desktop-*.etf") |> Path.wildcard() |> Enum.sort()
+
+      fresh? =
+        case List.last(backups) do
+          nil ->
+            false
+
+          last ->
+            case File.stat(last, time: :posix) do
+              {:ok, %{mtime: t}} -> System.os_time(:second) - t < @backup_every
+              _ -> false
+            end
+        end
+
+      unless fresh? do
+        stamp = Calendar.strftime(NaiveDateTime.utc_now(), "%Y%m%d-%H%M%S")
+        File.cp(file, Path.join(dir, "desktop-" <> stamp <> ".etf"))
+        Enum.each(Enum.drop(backups, -(@backup_keep - 1)), &File.rm/1)
+      end
+    end
+
+    :ok
+  rescue
+    e ->
+      Logger.warning("desktop backup rotation failed: #{Exception.message(e)}")
+      :ok
   end
 
   # the leaf carries the per-window point and scroll state — saved so

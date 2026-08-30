@@ -101,9 +101,10 @@ defmodule Compos.Core.BufferStore do
   def handle_call({:forget, name}, _from, state) do
     case state.entries[name] do
       %{id: id} ->
-        File.rm(checkpoint_path(id))
-        # The history goes with the buffer it belonged to.
-        Compos.Core.BufferHistoryStore.forget(id)
+        # A kill never erases. The checkpoint and the history log move to
+        # the graveyard, and the burial line keeps the id -> name mapping
+        # that recovery needs.
+        entomb(id, name)
 
       _ ->
         :ok
@@ -192,6 +193,35 @@ defmodule Compos.Core.BufferStore do
     end
   catch
     :exit, _ -> false
+  end
+
+  def graveyard_dir, do: Path.join(dir(), "dead")
+
+  def graveyard_log, do: Path.join(dir(), "graveyard.log")
+
+  defp entomb(id, name) do
+    src = checkpoint_path(id)
+
+    moved_checkpoint =
+      if File.exists?(src) do
+        File.mkdir_p!(graveyard_dir())
+        File.rename(src, Path.join(graveyard_dir(), id <> ".etf")) == :ok
+      else
+        false
+      end
+
+    moved_log = Compos.Core.BufferHistoryStore.entomb(id)
+
+    if moved_checkpoint or moved_log do
+      line = "#{DateTime.to_iso8601(DateTime.utc_now())} #{id} #{name}\n"
+      File.write(graveyard_log(), line, [:append])
+    end
+
+    :ok
+  rescue
+    e ->
+      Logger.warning("could not entomb #{name}: #{Exception.message(e)}")
+      :ok
   end
 
   defp scan_checkpoints do

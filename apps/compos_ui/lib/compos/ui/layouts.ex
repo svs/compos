@@ -311,6 +311,10 @@ defmodule Compos.Ui.Layouts do
           /* a picture's caption (markdown-mode md--caption): centred and
              small under the picture, as the page draws its figcaption */
           .line.row-caption .line-content { text-align: center; font-size: .9em; }
+          /* a line that is one picture (row-picture): centred, as the
+             page centres a figure's image */
+          .line.row-picture .line-content { text-align: center; }
+          .line.row-picture img.img-embed { margin: 6px 0; }
           .line.row-fence .line-content { font-size: .72em; color: var(--dim-fg, #8a857a); }
           /* visual-line-mode off: continuation lines, wrapped wherever the
              window ends (Emacs's default); on: wrapped at words */

@@ -151,6 +151,9 @@
     (cond
       ((= len 0) '())
       ((and (equal? k 'text) (md--caption? line prev)) (md--caption start line len))
+      ;; a line that is one picture: the row centres it, as the page does
+      ((not (null? (re-find* md--image-line-pattern line)))
+       (cons (list start (+ start len) "row-picture") (md--images start line)))
       ((equal? k 'heading) (md--heading start line e len))
       ;; a row face (row-*) shapes the whole row: the page reads it off the
       ;; line, not the segment

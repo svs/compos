@@ -24,6 +24,8 @@
     (check-true! (t--cap-has? '(15 29 "md-caption")) "the words are the caption, space and all")
     (check-true! (t--cap-has? '(29 30 "md-marker")) "the closing star steps back")
     (check-true! (t--cap-has? '(14 30 "row-caption")) "the row is a caption row")
+    (check-true! (t--cap-has? '(0 13 "row-picture")) "the picture's row is a picture row")
+    (check-true! (t--cap-has? '(7 12 "img-embed")) "and still draws the picture")
     (t--cap-done!)))
 
 (deftest 'emphasis-away-from-a-picture-is-emphasis-and-not-a-caption

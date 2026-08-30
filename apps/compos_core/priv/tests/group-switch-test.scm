@@ -255,6 +255,46 @@
       (check-false! (frame-group) "with no grouped buffer left, the frame stands in none"))
     (t--sw-done!)))
 
+(deftest 'a-killed-group-revives-with-the-members-that-still-exist
+  "revive makes the record again; a member whose buffer and file are gone is missing"
+  (lambda ()
+    (t--sw-setup!)
+    (set! *group-graveyard* '())
+    (t--sw-two-groups! "zzsw-rev-one" "zzsw-rev-two")
+    (let ((one (group-resolve-id "zzsw-rev-one"))
+          (two (group-resolve-id "zzsw-rev-two")))
+      ;; second is in both groups, so the kill of two keeps it open
+      (buffer-add-group! t--sw-second one)
+      (let ((color (group-record-color (group-record-by-id two))))
+        (run-command "group-kill")
+        (check-false! (group-resolve-id "zzsw-rev-two") "the group is gone")
+        (check-equal! (car (car *group-graveyard*)) "zzsw-rev-two" "and lies in the graveyard")
+        (check-true! (group-revive! "zzsw-rev-two") "revive answers the new id")
+        (let ((again (group-resolve-id "zzsw-rev-two")))
+          (check-true! again "the record is back")
+          (check-equal! (group-record-color (group-record-by-id again)) color
+                        "with its color")
+          (check-true! (buffer-in-group? t--sw-second again) "the member that lived joins")
+          (check-equal! (frame-group) again "and the frame enters it")
+          (check-false! (assoc "zzsw-rev-two" *group-graveyard*) "the grave is empty"))))
+    (t--sw-done!)))
+
+(deftest 'reviving-a-group-whose-members-are-gone-is-not-an-error
+  "a member with no buffer and no file is missing, and the revival says so"
+  (lambda ()
+    (t--sw-setup!)
+    (set! *group-graveyard*
+      (list (list "zzsw-rev-ghost" #f #f "quiet" #f "#123456" 0
+                  (list (list "zz-sw-nobody" #f)
+                        (list "/tmp/zzsw-no-such-file.txt" "/tmp/zzsw-no-such-file.txt")))))
+    (check-true! (group-revive! "zzsw-rev-ghost") "revive still makes the group")
+    (let ((id (group-resolve-id "zzsw-rev-ghost")))
+      (check-true! id "the record exists")
+      (check-equal! (filter group-work-buffer? (group-buffers id)) '() "with no work members")
+      (check-equal! (frame-group) id "and the frame stands in it"))
+    (set! *group-graveyard* '())
+    (t--sw-done!)))
+
 (deftest 'group-after-kill-stay-keeps-the-frame-out-of-the-next-group
   "the customisation turns the fall-through off"
   (lambda ()
@@ -1127,8 +1167,10 @@
 
       (run-command "switch-to-group")
       (t--sw-type! "zzsw-peek-there")
-      (check-equal! (cadr (car (window-list))) t--sw-second
-                    "the window shows the group's leading member")
+      ;; the look waits for the highlight to rest
+      (check-true!
+        (wait-until (lambda () (equal? (cadr (car (window-list))) t--sw-second)) 1000 10)
+        "the window shows the group's leading member")
       (check-equal! (car (buffer-list-mru)) t--sw-first
                     "and the preview moved no history")
 

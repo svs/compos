@@ -1,8 +1,8 @@
 defmodule Compos.Ui.IslandTest do
   @moduledoc """
   An island draws in the text's place and is one character to the caret:
-  the picture for an image URL, the card for an X post URL. It says how
-  many source bytes it stands for, so the client's byte mapping walks it.
+  the picture for an image URL or a card for a media URL. It says how many
+  source bytes it stands for, so the client's byte mapping walks it.
   """
 
   use ExUnit.Case

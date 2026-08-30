@@ -343,6 +343,7 @@ defmodule Compos.Ui.Layouts do
           .x-card .tw-media { max-width: 100%; border-radius: 8px; margin-top: 8px; }
           .x-card .tw-date { color: var(--dim-fg, #8a857a); font-size: 12px; text-decoration: none; }
           .x-card .x-pending { color: var(--dim-fg, #8a857a); font-family: var(--font-mono); font-size: 12px; }
+          /* a YouTube island: an inert thumbnail that opens the video */
           .youtube-card {
             position: relative; display: inline-block; width: 100%; max-width: 640px;
             margin: 6px 0; overflow: hidden; vertical-align: top;

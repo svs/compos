@@ -1711,8 +1711,8 @@ defmodule Compos.Ui.EditorLive do
   # a seg whose overlay face says img-embed IS an image: the buffer text
   # stays the URL (the buffer is truth), the client draws the picture
   # An island draws in the text's place and is one character to the caret
-  # (contenteditable=false): the picture for an image URL, the card for an
-  # X post URL. data-len says how many source bytes it stands for, so the
+  # (contenteditable=false): an image, an X card, or a YouTube card.
+  # data-len says how many source bytes it stands for, so the
   # client's byte mapping walks over it.
   attr(:txt, :string, required: true)
   attr(:cls, :string, required: true)
@@ -3070,8 +3070,8 @@ defmodule Compos.Ui.EditorLive do
   defp strip_llm_markers(other), do: other
 
   # A bare URL in the source becomes a link whose text is the URL
-  # (Earmark pure links). The preview upgrades two kinds: an image URL
-  # becomes an inline image, a tweet URL becomes a tweet card. A written
+  # (Earmark pure links). The preview upgrades image, X, and YouTube URLs.
+  # A written
   # link — [text](url) — has text different from the href and stays a
   # link. The point sentinel can sit inside the pasted URL; the compare
   # ignores it and the embed re-emits it as a sibling.

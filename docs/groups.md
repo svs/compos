@@ -277,6 +277,13 @@ Every verb that takes buffers acts on the selection. With no selection it acts o
 | `dissolve G` | Remove every member from G. Remove the scratch buffer and the record. Frames on G go to `previous`, else none. |
 | `kill G` | For each member: when it is in another group, remove it from G; else kill it under the normal modified-buffer protection. Then dissolve G. A frame on G follows the buffer its window fell to into that buffer's group, with the group's layout; a buffer in no group leaves the frame in none. `group-after-kill` is `follow` (this) or `stay`. The kill runs `group-kill-hook` last, with `*group-killed*` = `(ID NAME STOOD?)`. |
 | `rename G NAME` | Change the name. The ID, members, layouts, and MRU do not change. |
+| `revive G` | Make a killed G again from the graveyard: the record, its meta, layout, noise, chat id, and color. Every member that still exists comes back: a buffer that is open joins; a file that exists on disk is visited into G. A member with neither is missing; the revival says how many. Then switch to G. |
+
+### Kill, follow, revive
+
+A kill is a scene change, not a window repair. The frame leaves G before the members die, so the window falls to the next buffer as any kill does, and the kill repair makes no chat for a group with seconds to live. Then `group-kill-hook` runs, with `*group-killed*` = `(ID NAME STOOD?)`. The default handler, `group-kill-follow!`, follows the buffer the window fell to into that buffer's group and restores the group's layout. `group-after-kill` turns it off (`stay`): the window still falls to the next buffer, and the frame derives its group from what it shows, but no layout is restored. An ungrouped buffer is not a second-class landing: the frame stands in no group and shows it.
+
+The kill buries a tombstone: the name, the record's fields, and each member's name and file. The graveyard keeps the last twenty tombstones and persists with the desktop. `group-revive` (`M-x`) completes over them, newest first, and shows each one's members. A name that an open group already has is refused. The switcher's preview waits for the highlight to rest (`group-switch-peek-ms`, 120 ms) before it draws a group, so holding `C-n` moves through the list without a draw per row.
 
 ### The seed of `new`
 

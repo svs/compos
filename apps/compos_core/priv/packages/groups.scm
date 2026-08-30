@@ -1337,6 +1337,9 @@
                (candidates (switch-to-group-candidates))
                (index (group-members-index))
                (here (current-buffer))
+               ;; #f once the prompt closed: a look that was still
+               ;; waiting must not draw after it
+               (open #t)
                (woken '())
                (show-here!
                  (lambda ()
@@ -1345,8 +1348,9 @@
                  (lambda ()
                    (for-each (lambda (buf) (buffer-sleep! buf)) woken)
                    (set! woken '())))
-               (peek!
+               (peek-now!
                  (lambda (name)
+                   (when open
                    (let ((buf (group-peek-buffer-in index (string-trim name))))
                      (if (and buf (buffer-known? buf))
                          (let ((sleeping (not (buffer-exists? buf))))
@@ -1357,11 +1361,18 @@
                          ;; the new-context row previews nothing: it names
                          ;; no group yet, so the window shows what it showed
                          (show-here!))))))
+               ;; a look per highlight that RESTS: C-n held down moves the
+               ;; highlight faster than a window draws, and each look is a
+               ;; draw (and a wake, for a dormant member)
+               (peek!
+                 (lambda (name)
+                   (debounce! "group-switch-peek" group-switch-peek-ms peek-now! name))))
           (if (null? candidates)
               (message "No groups")
               (minibuffer-read-preview "Switch group: " candidates
                 peek!
                 (lambda (name)
+                  (set! open #f)
                   ;; the switch saves the layout you leave, so put the
                   ;; window back before it looks: a peek is not the
                   ;; arrangement you were working in
@@ -1373,8 +1384,13 @@
                           (else (message "No such group"))))
                   (sleep-woken!))
                 (lambda ()
+                  (set! open #f)
                   (show-here!)
                   (sleep-woken!))))))))
+
+(defcustom 'group-switch-peek-ms 120
+  "How long the highlight rests on a group before the switcher previews it, in milliseconds."
+  'group 'groups 'type 'number)
 
 ;; Compatibility name for existing configuration.
 (define-command "group-switch" "Switch to a group and restore its layout"
@@ -1434,7 +1450,8 @@
          (name (or (group-name id) ""))
          (members (if id (group-buffers id) '()))
          (survivors '())
-         (stood (and id (equal? (frame-local 'current-group) id))))
+         (stood (and id (equal? (frame-local 'current-group) id)))
+         (tomb (and id (group-tombstone id members))))
     ;; The frame leaves the group before its members die. The kill
     ;; repair fills a window from the frame's current group; a frame
     ;; still standing in the dying group got the group's chat, a buffer
@@ -1459,6 +1476,7 @@
     (set! *group-dying* #f)
     (begin
       (when id (group-record-delete! id))
+      (group-bury! tomb)
       (frame-group-label-refresh!)
       (message
         (if (pair? survivors)
@@ -1496,6 +1514,98 @@
                                   (or (group-name next) ""))))))))
 
 (add-hook! 'group-kill-hook group-kill-follow!)
+
+;;; --- the graveyard: killed groups a person can revive ------------------------
+;;; A kill buries what the record knew and what the members were: the
+;;; name, the meta, the layout, the noise, the chat id, the color, and
+;;; each member's name and file. Revive makes the record again and brings
+;;; back every member it can: a buffer that still exists joins; a file
+;;; that still exists is visited; a member with neither is missing, and
+;;; the revival says how many. The graveyard keeps the last twenty and
+;;; persists with the desktop.
+
+(define *group-graveyard* '())
+(define *group-graveyard-depth* 20)
+
+;; (NAME META LAYOUT NOISE CHAT-ID COLOR KILLED-AT ((BUFFER PATH) ...))
+(define (group-tombstone id members)
+  (let ((record (group-record-by-id id)))
+    (and record
+         (list (group-record-name record)
+               (group-record-meta record)
+               (group-record-layout record)
+               (group-record-noise record)
+               (group-record-primary-chat-id record)
+               (group-record-color record)
+               (current-time)
+               (map (lambda (b) (list b (buffer-path b))) members)))))
+
+(define (group-bury! tomb)
+  (when tomb
+    (set! *group-graveyard*
+      (take-n (cons tomb
+                    (remove (lambda (t) (equal? (car t) (car tomb))) *group-graveyard*))
+              *group-graveyard-depth*))
+    (desktop-dirty!)))
+
+(define (group-tombstone-members tomb) (nth 7 tomb))
+
+;; every member the tombstone names that can come back: a known buffer,
+;; or a file that still exists
+(define (group-revive-member! id m)
+  (let ((b (car m)) (path (car (cdr m))))
+    (cond ((buffer-known? b) (buffer-add-group! b id) #t)
+          ((and (string? path) (file-exists? path)) (visit path id) #t)
+          (else #f))))
+
+(define (group-revive! name)
+  (let ((tomb (assoc name *group-graveyard*)))
+    (cond ((not tomb) (message (string-append "No killed group named " name)) #f)
+          ((group-record-by-name name)
+           (message (string-append "A group named " name " is open")) #f)
+          (else
+            (set! *group-graveyard*
+              (remove (lambda (t) (equal? (car t) name)) *group-graveyard*))
+            (let ((id (group-record-create! name)))
+              (group-record-update! id 'meta (nth 1 tomb))
+              (group-record-update! id 'layout (nth 2 tomb))
+              (group-record-update! id 'noise (or (nth 3 tomb) "quiet"))
+              (group-record-update! id 'primary-chat-id (nth 4 tomb))
+              (when (nth 5 tomb) (group-record-update! id 'color (nth 5 tomb)))
+              (let* ((members (group-tombstone-members tomb))
+                     (back (filter (lambda (m) (group-revive-member! id m)) members))
+                     (missing (- (length members) (length back))))
+                (desktop-dirty!)
+                (switch-to-group! id)
+                (message
+                  (string-append "Revived group " name ": "
+                                 (number->string (length back)) " members back"
+                                 (if (> missing 0)
+                                     (string-append ", " (number->string missing) " missing")
+                                     "")))
+                id))))))
+
+(define (group-graveyard-candidates)
+  (map (lambda (tomb)
+         (list (car tomb)
+               (let ((names (map car (group-tombstone-members tomb))))
+                 (if (pair? names) (string-join names " · ") "no members"))))
+       *group-graveyard*))
+
+(define-command "group-revive"
+  "Revive a killed group: its record, layout, and every member that still exists"
+  (lambda ()
+    (if (null? *group-graveyard*)
+        (message "No killed groups")
+        (minibuffer-read "Revive group: " (group-graveyard-candidates)
+          (lambda (name) (group-revive! (string-trim name)))))))
+
+(public! 'group-revive!
+  "(group-revive! NAME) — make the killed group NAME again, with every member that still exists; #f when none was killed by that name")
+
+(persist-global! 'group-graveyard
+  (lambda () *group-graveyard*)
+  (lambda (saved) (when (pair? saved) (set! *group-graveyard* saved))))
 
 (define-command "group-kill" "Kill every buffer in the current group"
   (lambda ()

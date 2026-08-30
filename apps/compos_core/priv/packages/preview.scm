@@ -44,10 +44,9 @@
 ;; the page's typography on the rows. writing-mode calls this too after its
 ;; own setup, so the page's look wins while the rows are on.
 (define (preview--rows-look! buf)
+  ;; the type is the page's; the width stays writing-mode's
   (face-remap-in! buf 'default
-    (list 'family preview-font-family 'size preview-font-size 'line-height "1.7"))
-  (when (minor-mode-on? buf "writing-mode")
-    (face-remap-in! buf 'writing (list 'measure preview-measure))))
+    (list 'family preview-font-family 'size preview-font-size 'line-height "1.7")))
 
 (define (preview--rows-off! buf)
   (buffer-set-local! buf 'preview-rows #f)

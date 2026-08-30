@@ -182,7 +182,8 @@
 
         ;; writing-mode toggles the look; write only ever enters the workspace
         (with-current-buffer buf (lambda () (run-command "writing-mode")))
-        (check-contains! (buffer-local buf 'style) "--default-size:17px;" "the prose size")
+        ;; writing draws the page, and the page's type is the preview's
+        (check-contains! (buffer-local buf 'style) "--default-family:Spectral" "the page's type")
 
         (with-current-buffer buf (lambda () (run-command "writing-mode")))
         (check-equal! (buffer-local buf 'style) org-style "org's look is back")

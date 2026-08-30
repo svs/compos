@@ -265,7 +265,8 @@ defmodule Compos.Core.Telemetry do
       duration_ms: native_ms(measurements.duration),
       owner: frame_owner(socket_frame(metadata[:socket])),
       label: event_label(metadata[:event], metadata[:params]),
-      tid: metadata[:tid]
+      tid: metadata[:tid],
+      detail: event_detail(metadata[:event], metadata[:params])
     })
   end
 
@@ -309,6 +310,13 @@ defmodule Compos.Core.Telemetry do
     do: "event key #{key}"
 
   defp event_label(event, _params), do: "event #{event}"
+
+  # a measurement the client sent: the row shows the numbers, so a
+  # measurement that repeats after every key is visible as one
+  defp event_detail(event, %{"rows" => rows}) when event == "win_rows", do: inspect(rows)
+  defp event_detail(event, %{"cols" => cols}) when event == "win_cols", do: inspect(cols)
+  defp event_detail(event, %{"rows" => rows}) when event == "viewport", do: "rows #{rows}"
+  defp event_detail(_event, _params), do: ""
 
   defp socket_frame(%{assigns: %{frame: frame}}), do: frame
   defp socket_frame(_), do: nil

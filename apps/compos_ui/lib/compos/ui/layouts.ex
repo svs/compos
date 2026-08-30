@@ -1368,7 +1368,13 @@ defmodule Compos.Ui.Layouts do
               try {
                 new PerformanceObserver((list) => {
                   for (const e of list.getEntries()) {
-                    Telem.row("longtask", "longtask", e.duration, 0, null, "", e.startTime);
+                    // which document ran it: the page itself, or an iframe
+                    // (a preview, an app, a PDF) named by its src or id
+                    const a = (e.attribution && e.attribution[0]) || {};
+                    const who = [a.containerType, a.containerName, a.containerId,
+                      a.containerSrc ? String(a.containerSrc).slice(0, 60) : ""]
+                      .filter((x) => x).join(" ");
+                    Telem.row("longtask", "longtask", e.duration, 0, null, who, e.startTime);
                   }
                 }).observe({ type: "longtask" });
               } catch (err) {}
@@ -2884,6 +2890,11 @@ defmodule Compos.Ui.Layouts do
                   this._wmt = setTimeout(() => Telem.time("wrap-maps", this.sendWrapMaps), 40);
                 };
                 this.sendWinRows = () => {
+                  // a which-key panel takes rows from every window while it
+                  // is up and gives them back when it goes. Reporting that
+                  // re-rendered every window twice per prefix key; the
+                  // measurement before the panel still holds after it.
+                  if (document.querySelector(".which-key")) return;
                   const rows = {};
                   const cols = {};
                   document.querySelectorAll(".window[data-win-id]").forEach((win) => {

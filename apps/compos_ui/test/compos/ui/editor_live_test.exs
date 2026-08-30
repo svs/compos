@@ -23,10 +23,11 @@ defmodule Compos.Ui.EditorLiveTest do
     {:ok, conn: build_conn()}
   end
 
-  test "mounts both modelines above the window content", %{conn: conn} do
+  test "mounts the frame modeline above and the buffer modeline below", %{conn: conn} do
     {:ok, view, html} = live(conn, "/")
     assert has_element?(view, "#editor > .echo-bar + .windows")
-    assert has_element?(view, ".window > .modeline:first-child")
+    assert has_element?(view, ".window > .modeline:last-child")
+    refute has_element?(view, ".window > .modeline:not(:last-child)")
     assert html =~ "ui-test-"
   end
 

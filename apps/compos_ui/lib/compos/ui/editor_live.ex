@@ -1345,7 +1345,7 @@ defmodule Compos.Ui.EditorLive do
   end
 
   @doc """
-  One window: its modeline, header, dashboard, and body.
+  One window: its header, dashboard, body, and modeline.
 
   `Compos.Ui.Window` renders this. It stays here because the helpers it
   calls (`blk`, `seg`, the modeline pieces) live here.
@@ -1372,46 +1372,6 @@ defmodule Compos.Ui.EditorLive do
       data-path={@path}
       data-read-only={to_string(@read_only)}
     >
-      <div class="modeline">
-        <span
-          class="ml-caret"
-          title="expand (C-x ?)"
-          phx-click="ui_cmd"
-          phx-value-win={@node.id}
-          phx-value-cmd="modeline-expand"
-        >{if @node.dash, do: "▾", else: "▸"}</span>
-        <span class={"ml-dot #{if @node.modified, do: "modified"}"}></span>
-        <span
-          class="name"
-          style="cursor:pointer"
-          title={@node.buffer}
-          phx-click="ui_cmd"
-          phx-value-win={@node.id}
-          phx-value-cmd="modeline-expand"
-        >{ml_name(@node)}</span>
-        <span :if={@node.modeline_project && @node.modeline_project != ""} class="ml-mode">
-          · {@node.modeline_project}
-        </span>
-        <span :if={@node.group} class="ml-group">· {@node.group}</span>
-        <span :if={@node.selected} class="ml-mode ml-selected">● selected</span>
-        <span :if={@node.render_mode in ["html", "markdown"]} class="ml-mode">preview</span>
-        <span
-          :if={@node.modeline_info}
-          class="ml-mode"
-          style="cursor:pointer"
-          phx-click="ui_cmd"
-          phx-value-win={@node.id}
-          phx-value-buf={@node.buffer}
-        >{@node.modeline_info}</span>
-        <span class="mb-spacer"></span>
-        <span class="ml-pos">
-          <%= if @node.render_mode == "terminal" do %>
-            <span class="ml-icon">▣</span> PTY · transcript {ml_bytes(@node.text)}
-          <% else %>
-            <span class="ml-icon">≡</span> {ml_bytes(@node.text)} · <span class="ml-icon">⌖</span> L{@line}:C{@col} · {pct(@node)}
-          <% end %>
-        </span>
-      </div>
       <div :if={@node.header_line} class="buffer-header">{@node.header_line}</div>
       <div :if={@node.dash || @node.dashboard_line_blocks} class="dash-top">
         <div
@@ -1624,6 +1584,46 @@ defmodule Compos.Ui.EditorLive do
       <% end %>
       <% end %>
       <div :if={@node.footer_line} class="buffer-footer">{@node.footer_line}</div>
+      <div class="modeline">
+        <span
+          class="ml-caret"
+          title="expand (C-x ?)"
+          phx-click="ui_cmd"
+          phx-value-win={@node.id}
+          phx-value-cmd="modeline-expand"
+        >{if @node.dash, do: "▾", else: "▸"}</span>
+        <span class={"ml-dot #{if @node.modified, do: "modified"}"}></span>
+        <span
+          class="name"
+          style="cursor:pointer"
+          title={@node.buffer}
+          phx-click="ui_cmd"
+          phx-value-win={@node.id}
+          phx-value-cmd="modeline-expand"
+        >{ml_name(@node)}</span>
+        <span :if={@node.modeline_project && @node.modeline_project != ""} class="ml-mode">
+          · {@node.modeline_project}
+        </span>
+        <span :if={@node.group} class="ml-group">· {@node.group}</span>
+        <span :if={@node.selected} class="ml-mode ml-selected">● selected</span>
+        <span :if={@node.render_mode in ["html", "markdown"]} class="ml-mode">preview</span>
+        <span
+          :if={@node.modeline_info}
+          class="ml-mode"
+          style="cursor:pointer"
+          phx-click="ui_cmd"
+          phx-value-win={@node.id}
+          phx-value-buf={@node.buffer}
+        >{@node.modeline_info}</span>
+        <span class="mb-spacer"></span>
+        <span class="ml-pos">
+          <%= if @node.render_mode == "terminal" do %>
+            <span class="ml-icon">▣</span> PTY · transcript {ml_bytes(@node.text)}
+          <% else %>
+            <span class="ml-icon">≡</span> {ml_bytes(@node.text)} · <span class="ml-icon">⌖</span> L{@line}:C{@col} · {pct(@node)}
+          <% end %>
+        </span>
+      </div>
     </div>
     """
   end

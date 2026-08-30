@@ -167,21 +167,6 @@
     (when (and (string? disk) (equal? disk (buffer-text buf)))
       (auto-revert-base! buf disk))))
 
-;; A buffer with no mark at all, for a file that has already moved. Two
-;; independent records have to agree that nothing was ever typed into it:
-;; the edit log, which is provenance and knows an agent's edits, and the
-;; modified flag, which is weaker but fails in the other direction. One
-;; of them alone is not enough to write over a buffer.
-(define (auto-revert-untouched? buf)
-  (and (null? (buffer-edit-log buf))
-       (not (buffer-modified? buf))))
-
-(define (auto-revert-may-take? buf text)
-  (let ((base (auto-revert-base buf)))
-    (if (string? base)
-        (equal? base text)
-        (auto-revert-untouched? buf))))
-
 ;;; --- the minimal edit ---------------------------------------------------------
 
 ;; A revert that deletes the whole buffer and inserts the file writes every
@@ -307,31 +292,44 @@
 (define (auto-revert-follow! buf)
   (let* ((path (buffer-path buf))
          (disk (and path (read-file path)))
-         (text (buffer-text buf)))
+         (text (buffer-text buf))
+         (base (auto-revert-base buf)))
     (cond
       ((not (string? disk)) #f)
       ;; Buffer and file agree, so the mark moves forward. This is also
       ;; how a save is noticed: the save's own file event lands here.
       ((equal? disk text)
        (auto-revert-base! buf text)
-       (buffer-set-local! buf 'auto-revert-conflict #f)
        #f)
-      ;; The buffer holds something the file never had. Whether it reads
-      ;; modified decides nothing: work is work. Say it once, not on
-      ;; every write the tree sees while the two stay apart.
-      ((not (auto-revert-may-take? buf text))
-       (unless (buffer-local buf 'auto-revert-conflict)
-         (buffer-set-local! buf 'auto-revert-conflict #t)
-         (message (string-append (abbreviate-file-name path)
-                                 " changed on disk, and this buffer has edits of its own")))
-       #f)
+      ;; The editor never saw these two agree, so there is no common text to
+      ;; describe either change against, and nothing safe to do.
+      ((not (string? base)) #f)
+      ;; The buffer has work of its own, so the file's change is merged into
+      ;; it. What lands beside that work goes in; what falls on the same
+      ;; lines is left, and the buffer keeps its version.
+      ((not (equal? base text))
+       (let* ((r (auto-revert-merge! buf base disk))
+              (took (car r))
+              (left (cadr r)))
+         (auto-revert-base! buf disk)
+         (when (> (+ took left) 0)
+           (message (string-append
+                      (abbreviate-file-name path) ": merged "
+                      (number->string took)
+                      (if (= took 1) " change" " changes")
+                      " from its file"
+                      (if (> left 0)
+                          (string-append ", " (number->string left)
+                                         (if (= left 1) " place" " places")
+                                         " this buffer also changed")
+                          ""))))
+         (> took 0)))
       (else
         ;; Every revert is said out loud. A buffer's text changing under the
         ;; user is not a quiet event, and the log is where they find out
         ;; which file moved and how much of it.
         (let ((n (auto-revert-take-file! buf disk)))
           (auto-revert-base! buf disk)
-          (buffer-set-local! buf 'auto-revert-conflict #f)
           (message (string-append (abbreviate-file-name path)
                                   " followed its file, "
                                   (number->string n)
@@ -411,3 +409,120 @@
     (catalog-meta! 'function name 'domain 'buffers 'effects '(write)))
   '("auto-revert-on?" "auto-revert-set!"
     "auto-revert-follows?" "auto-revert-follow!" "auto-revert-base"))
+
+;;; --- merging the file's change ------------------------------------------------
+
+;; A file that moved is not an authority. The buffer is the text, its history
+;; is the record, and a file is one more writer whose change has to land
+;; beside the buffer's own work rather than on top of it.
+;;
+;; Three texts: the mark, which is what the two last agreed on; the buffer
+;; now; and the file now. Both sides are diffed against the mark, so both
+;; changes are described in the same line coordinates. The file's hunks that
+;; fall on lines the buffer left alone are applied. The rest are left to the
+;; buffer, because the buffer is the one being worked in.
+
+;; A hunk that inserts occupies no lines, so it is given one for the purpose
+;; of asking whether the two sides landed in the same place.
+(define (auto-revert-spans-overlap? a b)
+  (let ((ae (+ (car a) (max (cadr a) 1)))
+        (be (+ (car b) (max (cadr b) 1))))
+    (and (< (car a) be) (< (car b) ae))))
+
+;; How far the buffer's own hunks have moved a line since the mark. Only the
+;; hunks that end before the line count, and they are the same for every
+;; hunk applied, because the file's hunks are applied last one first.
+(define (auto-revert-shift mine line)
+  (let loop ((hs mine) (d 0))
+    (cond ((null? hs) d)
+          ((<= (+ (car (car hs)) (cadr (car hs))) line)
+           (loop (cdr hs) (+ d (- (length (caddr (car hs))) (cadr (car hs))))))
+          (else (loop (cdr hs) d)))))
+
+(define (auto-revert-split-hunks theirs mine)
+  (let loop ((hs theirs) (take '()) (left '()))
+    (cond ((null? hs) (list (reverse take) (reverse left)))
+          ((null? (filter (lambda (b) (auto-revert-spans-overlap? (car hs) b)) mine))
+           (loop (cdr hs) (cons (car hs) take) left))
+          (else (loop (cdr hs) take (cons (car hs) left))))))
+
+;; (TAKEN LEFT): how many of the file's changes landed, and how many fell on
+;; lines the buffer had changed too. Point is not touched, because every
+;; hunk goes in as an ordinary buffer edit and the buffer moves point for
+;; its own edits already.
+(define (auto-revert-merge! buf base disk)
+  (let* ((base-lines (string-split base "\n"))
+         (now (string-split (buffer-text buf) "\n"))
+         (mine (auto-revert-hunks base-lines now))
+         (theirs (auto-revert-hunks base-lines (string-split disk "\n")))
+         (split (auto-revert-split-hunks theirs mine))
+         (moved (map (lambda (h)
+                       (list (+ (car h) (auto-revert-shift mine (car h)))
+                             (cadr h)
+                             (caddr h)))
+                     (car split))))
+    (when (pair? moved)
+      (with-edit-author "disk"
+        (lambda () (auto-revert-apply-hunks! buf moved (length now)))))
+    (list (length moved) (length (cadr split)))))
+
+;;; --- saving over a file that moved --------------------------------------------
+
+;; Following a file can always be too late: a buffer can sleep through the
+;; change, its directory can go unwatched, an event can be missed. The save
+;; is where being wrong costs the user something, and it is one comparison
+;; rather than a subscription. This is the August clobber: a buffer woke
+;; holding text older than the file, and a save from it put the old text
+;; back, silently.
+;;
+;; So a save first merges whatever the file did since this buffer read it.
+;; The buffer's own unsaved work is not in question, it is the ordinary
+;; state and it is what the save is for. Only lines both sides changed stop
+;; the save, because only there does the editor have no answer.
+
+(define *auto-revert-forcing-save* #f)
+
+(define (auto-revert-guard-save!)
+  (let* ((buf (current-buffer))
+         (path (buffer-path buf))
+         (base (auto-revert-base buf)))
+    (when (and path (string? base) (not *auto-revert-forcing-save*))
+      (let ((disk (read-file path)))
+        (when (and (string? disk) (not (equal? disk base)))
+          (let* ((r (auto-revert-merge! buf base disk))
+                 (took (car r))
+                 (left (cadr r)))
+            (auto-revert-base! buf disk)
+            (if (> left 0)
+                (error (string-append
+                         (abbreviate-file-name path) " changed on disk in "
+                         (number->string left)
+                         (if (= left 1) " place" " places")
+                         " this buffer also changed. The rest is merged in."
+                         " Resolve those lines, or save-buffer-anyway to"
+                         " write over the file."))
+                (message (string-append
+                           "Merged " (number->string took)
+                           (if (= took 1) " change" " changes")
+                           " from " (abbreviate-file-name path))))))))))
+
+(define-command "save-buffer-anyway" "Save over a file that changed on disk"
+  (lambda ()
+    (set! *auto-revert-forcing-save* #t)
+    ;; The flag is cleared whatever the save does, including raising: a
+    ;; one-shot override that survived its own save would disarm the guard
+    ;; for every save after it.
+    (let ((done (lambda ()
+                  (set! *auto-revert-forcing-save* #f)
+                  (auto-revert-base! (current-buffer) (buffer-text (current-buffer))))))
+      (run-command "save-buffer")
+      (done))))
+
+(auto-revert-install! 'before-save
+  (lambda () (add-hook! 'before-save-hook (lambda () (auto-revert-guard-save!)))))
+
+(public! 'auto-revert-merge!
+  "(auto-revert-merge! BUF BASE DISK) — land the file's changes beside the buffer's own; (TAKEN LEFT)")
+(public! 'auto-revert-guard-save!
+  "(auto-revert-guard-save!) — merge what the file did before a save, and stop the save on a line both sides changed")
+(catalog-meta! 'function "auto-revert-guard-save!" 'domain 'buffers 'effects '(read))

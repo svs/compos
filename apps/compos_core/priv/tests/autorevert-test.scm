@@ -3,13 +3,13 @@
 ;;; The watcher is debounced and asynchronous, so nothing here waits on
 ;;; it: the tests call the decision and the revert directly. What they
 ;;; hold is the contract. A buffer still holding the text it last agreed
-;;; with its file on takes the file. A buffer with edits of its own never
-;;; loses them, and that holds when the modified flag says otherwise,
-;;; which is the case this package exists for: inside compos code is
-;;; edited in the buffer and saving is a separate decision, so a buffer
-;;; carries live work for hours, and a write behind the editor's back is
-;;; exactly what leaves the flag wrong. The mode is frame-local, and a
-;;; frame that never spoke follows.
+;;; with its file on takes the file. A buffer with work of its own merges
+;;; the file's change into that work and never loses it, and that holds
+;;; when the modified flag says otherwise, which is the case this package
+;;; exists for: inside compos code is edited in the buffer and saving is a
+;;; separate decision, so a buffer carries live work for hours, and a write
+;;; behind the editor's back is exactly what leaves the flag wrong. The
+;;; mode is frame-local, and a frame that never spoke follows.
 
 (domain! 'testing)
 (effects! '(write))
@@ -50,14 +50,13 @@
       (check-false! (buffer-modified? p)
                     "and says so: a buffer that just took its file is not modified")
 
-      ;; now the buffer has edits of its own, and the file moves again
+      ;; now the buffer has work of its own, and the file moves elsewhere
       (buffer-append! p "mine\n")
       (shell-command->string
-        "printf 'four\\n' > /tmp/compos-autorevert-test.txt" "/tmp")
-      (check-false! (auto-revert-follow! p) "a buffer with edits never follows")
-      (check-equal! (buffer-text p) "two\nthree\nmine\n" "its edits survive")
-      (check-true! (buffer-local p 'auto-revert-conflict)
-                   "and the divergence is recorded, so it is said once")
+        "printf 'two\\nTHREE\\n' > /tmp/compos-autorevert-test.txt" "/tmp")
+      (check-true! (auto-revert-follow! p) "the file's change is merged in")
+      (check-equal! (buffer-text p) "two\nTHREE\nmine\n"
+                    "the buffer keeps its line and gains the file's")
 
       ;; saved, so the two agree again and the buffer may follow again
       (with-current-buffer p (lambda () (buffer-save! p)))
@@ -87,10 +86,9 @@
       (check-false! (buffer-modified? p) "the flag now says unmodified")
 
       (shell-command->string
-        "printf 'two\\n' > /tmp/compos-autorevert-flag-test.txt" "/tmp")
-      (check-false! (auto-revert-follow! p)
-                    "and the buffer still refuses to take the file")
-      (check-equal! (buffer-text p) "one\nlive work\n"
+        "printf 'ONE\\n' > /tmp/compos-autorevert-flag-test.txt" "/tmp")
+      (auto-revert-follow! p)
+      (check-equal! (buffer-text p) "ONE\nlive work\n"
                     "the work in the buffer is not written over")
 
       (buffer-mark-saved! p)
@@ -153,3 +151,73 @@
     (check-equal! (auto-revert-hunks '("a" "b" "") '("a" "b" ""))
                   '()
                   "an unchanged file is no work at all")))
+
+(deftest 'a-file-that-moved-is-merged-into-the-work-in-the-buffer
+  "the buffer is the text; a file is one more writer, not an authority"
+  (lambda ()
+    (let ((p "/tmp/compos-autorevert-merge-test.txt"))
+      (shell-command->string
+        (string-append "printf 'a\\nb\\nc\\nd\\ne\\nf\\n' > " p) "/tmp")
+      (find-file p)
+
+      ;; unsaved work in the buffer, the ordinary state of a compos buffer
+      (buffer-replace! p "b\n" "b-MINE\n")
+      ;; and the file moves somewhere else entirely
+      (shell-command->string
+        (string-append "printf 'a\\nb\\nc\\nd\\ne-THEIRS\\nf\\n' > " p) "/tmp")
+
+      (check-true! (auto-revert-follow! p) "the file's change lands")
+      (check-equal! (buffer-text p) "a\nb-MINE\nc\nd\ne-THEIRS\nf\n"
+                    "both changes are in the buffer, neither overwrote the other")
+
+      (let ((rows (buffer-author-lines p)))
+        (check-equal! (cadr (t--author-row rows 5)) "disk"
+                      "the file's line belongs to the disk")
+        (check-false! (equal? (cadr (t--author-row rows 2)) "disk")
+                      "and the buffer's line still belongs to whoever typed it"))
+
+      (buffer-mark-saved! p)
+      (buffer-kill! p)
+      (shell-command->string (string-append "unlink " p) "/tmp"))))
+
+(deftest 'a-line-both-sides-changed-is-left-to-the-buffer
+  "only where the editor has no answer does it decline, and it says how many"
+  (lambda ()
+    (let ((p "/tmp/compos-autorevert-conflict-test.txt"))
+      (shell-command->string
+        (string-append "printf 'a\\nb\\nc\\nd\\ne\\nf\\n' > " p) "/tmp")
+      (find-file p)
+      (buffer-replace! p "c\n" "c-MINE\n")
+      (buffer-replace! p "e\n" "e-MINE\n")
+      (shell-command->string
+        (string-append "printf 'a\\nb\\nc-THEIRS\\nd\\ne\\nF-THEIRS\\n' > " p) "/tmp")
+
+      (let ((r (auto-revert-merge! p (auto-revert-base p) (read-file p))))
+        (check-equal! (car r) 1 "the change that stands alone lands")
+        (check-equal! (cadr r) 1 "the line both sides changed is left")
+        (check-equal! (buffer-text p) "a\nb\nc-MINE\nd\ne-MINE\nF-THEIRS\n"
+                      "the buffer keeps its version of the contested line"))
+
+      (buffer-mark-saved! p)
+      (buffer-kill! p)
+      (shell-command->string (string-append "unlink " p) "/tmp"))))
+
+(deftest 'a-save-cannot-write-over-a-file-that-moved
+  "the clobber: a buffer holding text older than the file, saved"
+  (lambda ()
+    (let ((p "/tmp/compos-autorevert-save-test.txt"))
+      (shell-command->string
+        (string-append "printf 'a\\nb\\nc\\n' > " p) "/tmp")
+      (find-file p)
+
+      ;; the file moves while the buffer holds the old text, and the buffer
+      ;; never hears about it: no event, no follow
+      (shell-command->string
+        (string-append "printf 'a\\nb-THEIRS\\nc\\n' > " p) "/tmp")
+      (with-current-buffer p (lambda () (auto-revert-guard-save!)))
+      (check-equal! (buffer-text p) "a\nb-THEIRS\nc\n"
+                    "the save takes the file's change first, so it cannot lose it")
+
+      (buffer-mark-saved! p)
+      (buffer-kill! p)
+      (shell-command->string (string-append "unlink " p) "/tmp"))))

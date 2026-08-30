@@ -268,9 +268,6 @@
       (enable-minor-mode! buf "preview-mode")
       (when (minor-mode-on? buf "preview-mode")
         (preview-mode--apply! buf)))
-  ;; the drawn page keeps its own look over writing's typography
-  (when (and (buffer-local buf 'preview-rows) (boundp 'preview--rows-look!))
-    (preview--rows-look! buf))
   ;; the mode, not only its local: the dashboard names it, and M-x
   ;; visual-line-mode toggles what writing turned on
   (enable-minor-mode! buf "visual-line-mode")
@@ -310,7 +307,10 @@
   (local-set-key* buf "C-S-<end>" "cua-select-buffer-end")
   (local-set-key* buf "s-a" "cua-select-all")
   (writing--ensure-hook! buf)
-  (writing--update-count! buf)))
+  (writing--update-count! buf))
+  ;; last word: the drawn page keeps its own look over writing's typography
+  (when (and (buffer-local buf 'preview-rows) (boundp 'preview--rows-look!))
+    (preview--rows-look! buf)))
 
 (define (writing--teardown! buf)
   (let ((preview-was-on? (writing--saved buf 'preview-mode))
@@ -360,7 +360,8 @@
         (disable-minor-mode! buf "preview-mode")))
   ;; Membership restores first because its setup and teardown derive this
   ;; local. The saved presentation remains authoritative after they run.
-  (buffer-set-local! buf 'render-mode saved-render)))
+  ;; "rows" is a renderer name, never a render mode: a stale save of it is #f
+  (buffer-set-local! buf 'render-mode (if (equal? saved-render "rows") #f saved-render))))
 
 (register-minor-mode! "writing-mode" writing--apply! writing--teardown!)
 

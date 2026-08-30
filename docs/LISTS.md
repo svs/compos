@@ -30,7 +30,7 @@ The list mode in `priv/editor.scm` draws every table in the editor: ibuffer, dir
 
 ## The telemetry list
 
-1. `C-t` toggles `*Telemetry*` as a popup on the right side, always. The default side reads an estimate of the frame's width, and a stale window measurement put the list on the bottom edge.
+1. `C-t` shows `*Telemetry*` in the popup, on the right (docs/POPUPS.md). `C-t` on it dismisses it: a popup buffer under it comes back, else the popup closes.
 2. Two views by measured width: under 100 columns the time, the layer, the job, the bar, and the number; from 100 columns the owner, the wait, and the trace too. RET shows every field in either.
 3. A layer wears one colour. The bar beside a duration is on one scale: a full bar is the slow threshold. The meta line shows p50, p95, a sparkline of the newest 24 keystroke round trips (oldest on the left), and the last key with its time.
 4. The list follows the work the user causes. The collector sends Scheme one notice per burst of rows, once a second at most, and never waits. Scheme redraws only while the list shows and only when a row the user caused arrived since the last draw: a keystroke or an intent (a traced row) or a Scheme job. The list's own refresh leaves live rows, browser rows, and a lane job named after the package; those are not causes, so a quiet editor draws nothing.

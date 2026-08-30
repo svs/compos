@@ -102,7 +102,8 @@
           (check-equal! (peek-or-open! a (lambda () (visit a))) 'open "second: opened")
           (check-false! (peek-buffer? a) "the mark is gone")
           (check-equal! (current-buffer) a "and the reader is in it")
-          (check-equal! (active-window) me "in the window the peek was asked from")
+          (check-false! (equal? (active-window) me) "in another window: never on top of the listing")
+          (check-equal! (window-buffer me) "*scratch*" "the listing's window keeps the listing")
           (check-false! (popup-open?) "the popup gave it up")
           (check-false! (buffer-read-only? a) "writable")
           (check-false! (string-contains? (buffer-modeline-name a) "peek")
@@ -217,10 +218,12 @@
             (check-equal! (current-buffer) d "still in dired")
             (check-true! (peek-buffer? a) "the file is a peek in the popup")
             (check-equal! (popup-buffer) a "in the popup")
-            (run-command "dired-visit")
-            (check-equal! (current-buffer) a "the second RET opened it here")
-            (check-false! (peek-buffer? a) "and it is no peek")
-            (check-false! (popup-open?) "the popup gave it up")
+            (let ((me (active-window)))
+              (run-command "dired-visit")
+              (check-equal! (current-buffer) a "the second RET opened it")
+              (check-false! (peek-buffer? a) "and it is no peek")
+              (check-false! (popup-open?) "the popup gave it up")
+              (check-equal! (window-buffer me) d "beside dired, not on top of it"))
             (buffer-kill! d)))))))
 
 (deftest 'dired-q-dismisses-the-peek-and-then-leaves
@@ -271,3 +274,42 @@
                 (buffer-kill! b))
               (buffer-kill! a))
             (set! *web-fetch* saved)))))))
+
+(deftest 'dired-peeks-the-file-under-the-highlight-when-it-rests
+  "moving onto a file peeks it after the rest; RET on it then opens"
+  (lambda ()
+    (t--peek-with
+      (lambda ()
+        (let ((a (t--peek-file "a.txt" "alpha\n")))
+          (dired-open t--peek-dir)
+          (let ((d (current-buffer)))
+            (let loop ((i 0))
+              (when (and (< i 20) (not (equal? (dired-entry) "a.txt")))
+                (list-move-in! d 1)
+                (loop (+ i 1))))
+            ;; the debounced look runs on this lane after the rest; the test
+            ;; holds the lane, so it runs the look the highlight schedules
+            (dired--preview d (dired-entry))
+            (dired--peek-now! (list a (buffer-group d)))
+            (check-true! (peek-buffer? a) "the file under the highlight is the peek")
+            (check-equal! (current-buffer) d "and the reader stayed in dired")
+            (run-command "dired-visit")
+            (check-equal! (current-buffer) a "RET on it opens it")
+            (check-false! (peek-buffer? a) "as your own")
+            (buffer-kill! d)))))))
+
+(deftest 'the-other-window-scroll-reads-the-peek-first
+  "M-<down> from the listing scrolls the peek, not the next split"
+  (lambda ()
+    (t--peek-with
+      (lambda ()
+        (let ((a (t--peek-file "a.txt" "alpha\n"))
+              (me (active-window)))
+          (split-window! 'h 0.5)
+          (select-window! me)
+          (peek-file! a)
+          (check-equal! (scroll-other-window-target) (window-showing a)
+                        "the peek's window is the target")
+          (popup-close!)
+          (check-false! (equal? (scroll-other-window-target) me)
+                        "with no peek, the next window is"))))))

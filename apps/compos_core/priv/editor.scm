@@ -5191,19 +5191,44 @@
               shown)
     (pair? shown)))
 
-;; open KNOWN as a buffer of your own, here: the popup gives it up, the
-;; mark goes, and the selected window shows it as a visit would. Not a
-;; peek yet, it is an ordinary open.
+;; any work window that is not ME: the popup is not one
+(define (other-work-window-id me)
+  (let ((popup (and (popup-open?) (popup-window))))
+    (let loop ((ws (window-list)))
+      (cond ((null? ws) #f)
+            ((and (not (equal? (car (car ws)) me))
+                  (not (equal? (car (car ws)) popup)))
+             (car (car ws)))
+            (else (loop (cdr ws)))))))
+
+;; show NAME as your own beside the listing, never on top of it: the
+;; other work window when there is one, else a split beside this one
+;; (Emacs find-file-other-window). Selects the window it used.
+(define (show-in-other-work-window! name)
+  (let* ((me (active-window))
+         (w (other-work-window-id me)))
+    (if w
+        (begin (select-window! w) (switch-to-buffer! name))
+        (begin (split-window! 'h 0.5) (other-window!) (switch-to-buffer! name)))
+    (active-window)))
+
+;; open KNOWN as a buffer of your own, beside the listing: the popup
+;; gives it up, the mark goes, and the other work window shows it. Not a
+;; peek yet, it opens the same way.
 (define (peek-open! known open)
-  (if (and (string? known) (peek-buffer? known))
-      (let ((me (active-window)))
-        (peek-keep! known)
-        (when (and (popup-open?) (equal? (popup-buffer) known))
-          (popup-dismiss!))
-        (when (window-exists? me) (select-window! me))
-        (switch-to-buffer! known)
-        'open)
-      (begin (open) 'open)))
+  (let ((me (active-window)))
+    (when (and (string? known) (peek-buffer? known))
+      (peek-keep! known)
+      (when (and (popup-open?) (equal? (popup-buffer) known))
+        (popup-dismiss!))
+      (when (window-exists? me) (select-window! me)))
+    (let ((buf (if (and (string? known) (buffer-known? known)) known (open))))
+      (when (string? buf)
+        ;; an opener may have shown it here; the listing takes its window back
+        (when (and (window-exists? me) (not (equal? (window-buffer me) (current-buffer))))
+          #t)
+        (show-in-other-work-window! buf)))
+    'open))
 
 (define (peek-keep! name)
   (when (peek-buffer? name)
@@ -5942,15 +5967,30 @@
 ;; DELTA in lines, positive forward. A preview window has no lines, so
 ;; scroll-window! turns the count into pixels for it — the caller says
 ;; "a screen" and every kind of window understands.
+;; the window the other-window scroll moves: a peek on screen first
+;; (M-<down> from the listing reads the look), else the next window
+(define (scroll-other-window-target)
+  (let ((me (active-window)))
+    (or (let loop ((ws (window-list)))
+          (cond ((null? ws) #f)
+                ((and (not (equal? (car (car ws)) me))
+                      (boundp 'peek-buffer?)
+                      (peek-buffer? (cadr (car ws))))
+                 (car (car ws)))
+                (else (loop (cdr ws)))))
+        (let ((wins (window-list)))
+          (and (pair? (cdr wins))
+               (let loop ((ws wins))
+                 (cond ((null? ws) (car (car wins)))
+                       ((equal? (car (car ws)) me)
+                        (car (if (null? (cdr ws)) (car wins) (car (cdr ws)))))
+                       (else (loop (cdr ws))))))))))
+
 (define (scroll-other-window-by! delta)
-  (let ((wins (window-list)))
-    (if (null? (cdr wins))
-        (message "No other window")
-        (let loop ((ws wins))
-          (if (equal? (car (car ws)) (active-window))
-              (let ((next (if (null? (cdr ws)) (car wins) (car (cdr ws)))))
-                (scroll-window! (car next) delta))
-              (loop (cdr ws)))))))
+  (let ((target (scroll-other-window-target)))
+    (if target
+        (scroll-window! target delta)
+        (message "No other window"))))
 
 (define-command "scroll-other-window" "Scroll the next window up nearly a full screen"
   (lambda () (scroll-other-window-by! (- (window-rows) 2))))

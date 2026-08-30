@@ -417,8 +417,30 @@
 
 ;; ".." is entry zero, so RET on it works through the same list-current
 ;; path as every real row; marks skip it
+;; The peek follows the highlight: rest on a file and it shows in the
+;; popup, so RET on it opens. Held down, the arrows move faster than a
+;; file opens, so the look waits for the highlight to rest.
+;; plain defines: dired loads before custom.scm, so defcustom is not
+;; here yet. Set them in init.scm.
+(define dired-peek-on-move #t)   ; peek the file under the highlight when it rests
+(define dired-peek-ms 120)       ; how long the highlight rests first, in ms
+
+(define (dired--peek-now! args)
+  (let ((p (car args)) (g (cadr args)))
+    (unless (and (peek-buffer? p) (window-showing p))
+      (peek! p (lambda () (visit p g))))))
+
+(define (dired--preview buf entry)
+  (when (and dired-peek-on-move (equal? (current-buffer) buf))
+    (let ((p (dired-path-at-point)))
+      (when (and p (string? entry) (not (equal? entry ".."))
+                 (not (dired-directory? entry)))
+        (debounce! "dired-peek" dired-peek-ms dired--peek-now!
+                   (list p (buffer-group buf)))))))
+
 (define-list-mode! "Dired"
   (list
+    'preview dired--preview
     'doc (string-append
            "One directory as a table: name, size, modified, perms and what "
            "git says. Mark files with `m` and the whole listing with `*`; "

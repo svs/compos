@@ -170,7 +170,7 @@
     (else "")))
 
 (define-tool! 'eval-scheme
-  "Evaluate Scheme in the live editor session. Full editor API: buffers, windows, faces, modes, customize. NOT Emacs Lisp — verify unfamiliar names with apropos first. Returns the printed value; on an unbound name the error suggests the nearest real API."
+  "Evaluate Scheme in the live editor session. Full editor API: buffers, windows, faces, modes, customize. NOT Emacs Lisp — verify unfamiliar names with apropos first. Returns the printed value; on an unbound name the error suggests the nearest real API. Evaluation runs with this chat as the logical current buffer, so switch-to-buffer! retargets that context and changes no window; to change or observe the frame's real windows, wrap the code in (with-frame-windows (lambda () ...))."
   (list (list 'code "string" "Scheme source to evaluate"))
   (lambda (args)
     (let* ((code (custom--plist-get args 'code))

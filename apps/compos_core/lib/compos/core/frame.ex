@@ -22,6 +22,18 @@ defmodule Compos.Core.Frame do
   @doc "Change the process-local buffer without changing any window."
   def put_buffer(buffer), do: Process.put(@buffer_key, buffer)
 
+  @doc "Run fun with no buffer context, restoring the prior context after."
+  def without_buffer(fun) do
+    prev = Process.get(@buffer_key)
+    Process.delete(@buffer_key)
+
+    try do
+      fun.()
+    after
+      if prev, do: Process.put(@buffer_key, prev)
+    end
+  end
+
   @doc "Run fun with a logical current buffer, restoring the prior context."
   def with_buffer(buffer, fun) do
     prev = Process.get(@buffer_key)

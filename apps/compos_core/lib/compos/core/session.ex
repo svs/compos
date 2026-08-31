@@ -1116,6 +1116,8 @@ defmodule Compos.Core.Session do
         "(current-edit-author) — the caller process's edit author string, or #f",
       "with-current-buffer" =>
         "(with-current-buffer BUF THUNK) — run THUNK with BUF current without displaying it or changing any window.",
+      "with-frame-windows" =>
+        "(with-frame-windows THUNK) — run THUNK with no logical buffer context: current-buffer and switch-to-buffer! act on the frame's real windows.",
       "with-scheme-lock" =>
         "(with-scheme-lock KEY THUNK) — run THUNK once at a time for KEY across Scheme processes.",
       "eval-string-safe" =>
@@ -2241,6 +2243,15 @@ defmodule Compos.Core.Session do
         end
 
         Compos.Core.Frame.with_buffer(buffer, fn ->
+          Compos.Scheme.Eval.apply_fn(thunk, [], store)
+        end)
+      end,
+      # The deliberate exit from that binding. Inside the thunk,
+      # current-buffer and the switch primitives resolve through the
+      # frame's real windows, so a tool that intends a display change can
+      # make one and observe it truthfully.
+      "with-frame-windows" => fn [thunk], store ->
+        Compos.Core.Frame.without_buffer(fn ->
           Compos.Scheme.Eval.apply_fn(thunk, [], store)
         end)
       end,

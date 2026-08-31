@@ -104,6 +104,9 @@ defmodule Compos.SchemeSuiteTest do
            "the suite is skipping #{gated} tests it should be running"
   end
 
+  # The whole Scheme suite runs inside this one test, and it has grown
+  # past the 60s ExUnit default.
+  @tag timeout: 180_000
   test "the Scheme suite passes" do
     found = names()
 

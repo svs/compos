@@ -413,6 +413,79 @@ defmodule Compos.AgentTest do
     assert Backend.plist_get(update, "name") == "compos/eval-scheme"
     assert Backend.plist_get(update, "input") == ~s|{"code":"(buffer-list)"}|
     assert Backend.plist_get(update, "status") == "completed"
+    assert is_integer(Backend.plist_get(update, "duration-ms"))
+  end
+
+  # duration-ms is stamped where the events serialize, so each backend
+  # only has to thread its emit — the ACP lane proves the wire shape
+  test "an ACP tool completion carries duration-ms; the call itself does not" do
+    {:ok, backend} =
+      Compos.Core.Agent.Backend.ACP.start(%{"cmd" => "fake", "cwd" => File.cwd!()}, self())
+
+    on_exit(fn -> Compos.Core.Agent.Backend.ACP.close(backend) end)
+    assert_receive {:transport_open, ^backend}, 1_000
+
+    update(backend, "sess-1", %{
+      "sessionUpdate" => "tool_call",
+      "toolCallId" => "tc1",
+      "title" => "Read foo.ex",
+      "kind" => "read",
+      "status" => "pending"
+    })
+
+    assert_receive {:backend_event, call}, 1_000
+    assert Backend.event_type(call) == "tool-call"
+    assert Backend.plist_get(call, "duration-ms") == nil
+
+    update(backend, "sess-1", %{
+      "sessionUpdate" => "tool_call_update",
+      "toolCallId" => "tc1",
+      "status" => "in_progress"
+    })
+
+    assert_receive {:backend_event, progress}, 1_000
+    assert Backend.event_type(progress) == "tool-update"
+    assert Backend.plist_get(progress, "duration-ms") == nil
+
+    update(backend, "sess-1", %{
+      "sessionUpdate" => "tool_call_update",
+      "toolCallId" => "tc1",
+      "status" => "completed"
+    })
+
+    assert_receive {:backend_event, done}, 1_000
+    assert Backend.event_type(done) == "tool-update"
+    assert is_integer(Backend.plist_get(done, "duration-ms"))
+    assert Backend.plist_get(done, "duration-ms") >= 0
+  end
+
+  # the direct lane funnels turn-task events through its GenServer as
+  # {:turn_event, kvs} casts — the same funnel must stamp the duration
+  test "the ReqLLM event funnel stamps duration-ms on tool completion" do
+    {:ok, backend} =
+      Compos.Core.Agent.Backend.ReqLLM.start(%{"slug" => "req-timing"}, self())
+
+    on_exit(fn -> Compos.Core.Agent.Backend.ReqLLM.close(backend) end)
+    assert_receive {:backend_event, ready}, 1_000
+    assert Backend.event_type(ready) == "ready"
+
+    GenServer.cast(
+      backend,
+      {:turn_event,
+       [type: :"tool-call", id: "t1", name: "eval-scheme", input: "{}", kind: "tool", status: "pending"]}
+    )
+
+    assert_receive {:backend_event, call}, 1_000
+    assert Backend.plist_get(call, "duration-ms") == nil
+
+    GenServer.cast(
+      backend,
+      {:turn_event, [type: :"tool-update", id: "t1", status: "completed", output: "2"]}
+    )
+
+    assert_receive {:backend_event, done}, 1_000
+    assert Backend.event_type(done) == "tool-update"
+    assert is_integer(Backend.plist_get(done, "duration-ms"))
   end
 
   test "native Codex MCP tool approval elicitation rides the permission channel" do

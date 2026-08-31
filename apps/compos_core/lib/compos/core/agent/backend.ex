@@ -208,4 +208,32 @@ defmodule Compos.Core.Agent.Backend do
       _ -> nil
     end
   end
+
+  @doc """
+  Stamp tool durations onto the event stream. A backend passes every
+  outgoing event through here with its `tool_started` map: a `tool-call`
+  records its start time, and the `tool-update` that ends the call
+  (status "completed" or "failed") gains a `duration-ms` field. Every
+  other event passes through unchanged. Returns `{kvs, map}`.
+  """
+  def time_tool(kvs, started) do
+    id = Keyword.get(kvs, :id)
+
+    case {Keyword.get(kvs, :type), Keyword.get(kvs, :status)} do
+      {:"tool-call", _} when not is_nil(id) ->
+        {kvs, Map.put(started, id, System.monotonic_time(:millisecond))}
+
+      {:"tool-update", status} when status in ["completed", "failed"] ->
+        case Map.pop(started, id) do
+          {nil, started} ->
+            {kvs, started}
+
+          {t0, started} ->
+            {kvs ++ ["duration-ms": System.monotonic_time(:millisecond) - t0], started}
+        end
+
+      _ ->
+        {kvs, started}
+    end
+  end
 end

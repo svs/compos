@@ -180,3 +180,23 @@
                   "a list of lists has no head symbol")
     (check-equal! (agent-sexp-head-split "plain text") #f
                   "prose is not a form")))
+
+(deftest 'a-tool-close-keeps-the-backend-duration
+  "the completing close stores duration-ms; a #f close never erases it"
+  (lambda ()
+    (let ((buf (test-buffer! "*zz-agent-duration*" "abcdefghij")))
+      (buffer-set-local! buf 'agent-blocks
+        '((0 6 "tool" "tc" "Read" "read" "running" 4)))
+      (agent-block-close-tool! buf "tc" 8 "done" 1234)
+      (check-equal! (agent-blocks buf)
+        '((0 8 "tool" "tc" "Read" "read" "done" 4 1234))
+        "the close appends the duration")
+      (agent-block-close-tool! buf "tc" 9 "done" #f)
+      (check-equal! (agent-blocks buf)
+        '((0 9 "tool" "tc" "Read" "read" "done" 4 1234))
+        "a close without a duration keeps the stored one")
+      (agent-excise-range! buf 1 3)
+      (check-equal! (agent-blocks buf)
+        '((0 7 "tool" "tc" "Read" "read" "done" 2 1234))
+        "excision repairs offsets and keeps the duration")
+      (buffer-kill! buf))))

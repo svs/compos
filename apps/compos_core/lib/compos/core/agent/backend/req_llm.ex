@@ -86,7 +86,10 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
        turn_model: nil,
        # what the turn has spent so far, reported round by round. A turn
        # that is cancelled or crashes still spent it.
-       turn_usage: %{}
+       turn_usage: %{},
+       # monotonic start per running tool call id; the completing
+       # tool-update reads it to stamp duration-ms
+       tool_started: %{}
      }}
   end
 
@@ -135,8 +138,7 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
   # events from the turn task, forwarded in arrival order
   @impl GenServer
   def handle_cast({:turn_event, kvs}, state) do
-    emit(state, kvs)
-    {:noreply, state}
+    {:noreply, emit(state, kvs)}
   end
 
   # the running usage total, after every round of the loop
@@ -176,9 +178,12 @@ defmodule Compos.Core.Agent.Backend.ReqLLM do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
+  # Map.get/Map.put, not the struct-update syntax: a backend process
+  # started before a hot reload carries a state map without the key
   defp emit(state, kvs) do
+    {kvs, started} = Backend.time_tool(kvs, Map.get(state, :tool_started, %{}))
     send(state.owner, {:backend_event, Backend.plist(kvs)})
-    state
+    Map.put(state, :tool_started, started)
   end
 
   # Every path out of a turn passes through here — done, error, round cap,

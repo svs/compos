@@ -1912,12 +1912,9 @@ defmodule Compos.Ui.EditorLive do
   defp ag_block([s, e, "thought" | _], text, _open),
     do: %{kind: :thought, text: String.trim(safe_slice(text, s, e))}
 
-  defp ag_block([_s, e, "tool", id, title, kind, status, body_start | _], text, open_cards) do
-    body =
-      text
-      |> safe_slice(body_start, e)
-      |> String.trim_trailing()
-      |> tool_display_body()
+  defp ag_block([_s, e, "tool", id, title, kind, status, body_start | rest], text, open_cards) do
+    raw_body = String.trim_trailing(safe_slice(text, body_start, e))
+    body = tool_display_body(raw_body)
 
     # "name: arg" from agent-tool-title — the arg is the interesting part,
     # so the card styles it apart from the tool name
@@ -1937,7 +1934,10 @@ defmodule Compos.Ui.EditorLive do
       status: status,
       open: id in open_cards,
       body: body,
-      preview: tool_preview(body)
+      preview: tool_preview(body),
+      duration: tool_duration_label(List.first(rest)),
+      # what the call added to the context: its arguments and its result
+      tokens: token_estimate_label(byte_size(title) + byte_size(raw_body))
     }
   end
 
@@ -1959,6 +1959,30 @@ defmodule Compos.Ui.EditorLive do
     do: %{kind: :meta, text: String.trim(safe_slice(text, s, e))}
 
   defp ag_block(_, _, _), do: nil
+
+  # "340ms", "1.4s", "2m 05s" — nil when the block predates the field
+  defp tool_duration_label(ms) when is_integer(ms) and ms >= 0 do
+    cond do
+      ms < 1000 -> "#{ms}ms"
+      ms < 60_000 -> "#{Float.round(ms / 1000, 1)}s"
+      true -> "#{div(ms, 60_000)}m #{String.pad_leading("#{rem(div(ms, 1000), 60)}", 2, "0")}s"
+    end
+  end
+
+  defp tool_duration_label(_), do: nil
+
+  # bytes/4 is the standard rough token estimate; no tokenizer ships here
+  defp token_estimate_label(bytes) when bytes < 4, do: nil
+
+  defp token_estimate_label(bytes) do
+    tokens = div(bytes, 4)
+
+    if tokens < 1000 do
+      "~#{tokens} tok"
+    else
+      "~#{Float.round(tokens / 1000, 1)}k tok"
+    end
+  end
 
   # A folded call still says what it returned. New calls separate input and
   # output with a blank line. Older calls contain only their result.

@@ -645,6 +645,11 @@ defmodule Compos.Ui.Layouts do
           }
           .ag-tstatus.done::before { content: "✓ "; color: var(--string-fg, #4a7a4a); }
           .ag-tstatus.failed { color: var(--error-fg, #a8342a); }
+          .ag-duration {
+            color: var(--agent-meta-fg, #8a8577); font-family: var(--font-sans);
+            font-size: calc(9.5px * var(--text-scale-factor, 1)); letter-spacing: 0.02em;
+            white-space: nowrap;
+          }
           .ag-body {
             border-top: 1px solid var(--agent-card-border, rgba(0,0,0,0.08));
             margin: 0; padding: 10px 12px; overflow-x: auto; max-height: 320px; overflow-y: auto;

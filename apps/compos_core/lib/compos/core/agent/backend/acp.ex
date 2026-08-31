@@ -72,7 +72,10 @@ defmodule Compos.Core.Agent.Backend.ACP do
       # ACP session config options (opencode): which option ids the session
       # exposes, and the model id it currently runs
       config_option_ids: [],
-      config_model: nil
+      config_model: nil,
+      # monotonic start per running tool call id; the completing
+      # tool-update reads it to stamp duration-ms
+      tool_started: %{}
     }
 
     {:ok,
@@ -244,9 +247,12 @@ defmodule Compos.Core.Agent.Backend.ACP do
     state.transport.send_frame(state.tp, [Jason.encode!(frame), "\n"])
   end
 
+  # Map.get/Map.put, not the struct-update syntax: a backend process
+  # started before a hot reload carries a state map without the key
   defp emit(state, kvs) do
+    {kvs, started} = Backend.time_tool(kvs, Map.get(state, :tool_started, %{}))
     send(state.owner, {:backend_event, Backend.plist(kvs)})
-    state
+    Map.put(state, :tool_started, started)
   end
 
   # responses to our requests

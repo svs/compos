@@ -58,6 +58,8 @@ defmodule Compos.Ui.AgentTranscript do
                   <span :if={!b.open && b.preview != ""} class="ag-preview">{b.preview}</span>
                 </span>
                 <span :if={b.status != "done"} class={"ag-tstatus #{b.status}"}>{b.status}</span>
+                <span :if={b.duration} class="ag-duration">{b.duration}</span>
+                <span :if={b.tokens} class="ag-duration ag-tokens">{b.tokens}</span>
               </summary>
               <pre :if={b.body != ""} class="ag-body">{b.body}</pre>
             </details>

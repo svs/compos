@@ -121,7 +121,10 @@
                 (cdr bs)))
         (agent-block-push! buf start end kind '()))))
 
-(define (agent-block-close-tool! buf id end status)
+;; DURATION is the call's duration-ms from the backend, or #f. A #f
+;; keeps the value the block already holds, so an argument-only close
+;; never erases the timing a completion wrote.
+(define (agent-block-close-tool! buf id end status duration)
   (buffer-set-local! buf 'agent-blocks
     (let loop ((bs (agent-blocks buf)) (acc '()))
       (cond ((null? bs) (reverse acc))
@@ -130,7 +133,9 @@
              (let ((b (car bs)))
                (append (reverse acc)
                        (cons (list (nth 0 b) end "tool" id
-                                   (nth 4 b) (nth 5 b) status (nth 7 b))
+                                   (nth 4 b) (nth 5 b) status (nth 7 b)
+                                   (or duration
+                                       (and (> (length b) 8) (nth 8 b))))
                              (cdr bs)))))
             (else (loop (cdr bs) (cons (car bs) acc)))))))
 
@@ -209,9 +214,12 @@
   (let ((len (- end start)))
     (map (lambda (b)
            (if (and (equal? (nth 2 b) "tool") (number? (nth 7 b)))
-               (list (nth 0 b) (nth 1 b) "tool" (nth 3 b) (nth 4 b)
-                     (nth 5 b) (nth 6 b)
-                     (agent--excise-pos (nth 7 b) start end len))
+               (append
+                 (list (nth 0 b) (nth 1 b) "tool" (nth 3 b) (nth 4 b)
+                       (nth 5 b) (nth 6 b)
+                       (agent--excise-pos (nth 7 b) start end len))
+                 ;; keep the duration field an excise does not touch
+                 (if (> (length b) 8) (list (nth 8 b)) '()))
                b))
          (agent--excise-ranges blocks start end))))
 
@@ -367,7 +375,8 @@
               (agent-render! slug args #f)
               (agent-block-close-tool! buf (plist-get e 'id)
                 (agent-mark slug)
-                (nth 6 entry)))))))))
+                (nth 6 entry)
+                #f))))))))
 
 (define (agent-tool-update-text e)
   (let ((out (plist-get e 'output)))

@@ -74,7 +74,10 @@ defmodule Compos.Core.Agent.Backend.CodexAppServer do
       pending_steers: [],
       model: string_value(Map.get(config, "model")),
       effort: normalize_effort(Map.get(config, "effort")),
-      models: []
+      models: [],
+      # monotonic start per running tool call id; the completing
+      # tool-update reads it to stamp duration-ms
+      tool_started: %{}
     }
 
     {:ok,
@@ -243,9 +246,12 @@ defmodule Compos.Core.Agent.Backend.CodexAppServer do
   defp send_frame(state, frame),
     do: state.transport.send_frame(state.tp, [Jason.encode!(frame), "\n"])
 
+  # Map.get/Map.put, not the struct-update syntax: a backend process
+  # started before a hot reload carries a state map without the key
   defp emit(state, kvs) do
+    {kvs, started} = Backend.time_tool(kvs, Map.get(state, :tool_started, %{}))
     send(state.owner, {:backend_event, Backend.plist(kvs)})
-    state
+    Map.put(state, :tool_started, started)
   end
 
   # Responses to requests initiated here.

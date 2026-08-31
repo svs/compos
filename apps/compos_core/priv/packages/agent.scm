@@ -114,7 +114,7 @@
          (unless (equal? args "")
            (agent-render! slug args #f)
            (agent-block-close-tool! buf (plist-get e 'id)
-             (agent-mark slug) "running"))))
+             (agent-mark slug) "running" #f))))
 
       ((equal? type 'tool-update)
        (agent-tool-refine! slug buf e)
@@ -125,7 +125,8 @@
                    (equal? (plist-get e 'status) "failed"))
            (agent-block-close-tool! buf (plist-get e 'id)
              (agent-mark slug)
-             (if (equal? (plist-get e 'status) "failed") "failed" "done"))
+             (if (equal? (plist-get e 'status) "failed") "failed" "done")
+             (plist-get e 'duration-ms))
            (let ((entry (assoc (plist-get e 'id)
                                (or (buffer-local buf 'agent-tool-bodies) '()))))
              (when (and entry (> (agent-mark slug) (car (cdr entry))))

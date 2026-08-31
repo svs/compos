@@ -69,15 +69,20 @@
           (project-defaults-put *project-default-pending* key value))
         value)))
 
+(define (project-defaults-valid-pairs? values)
+  (or (null? values)
+      (and (pair? (cdr values))
+           (project-defaults-valid-pairs? (cdr (cdr values))))))
+
 (define (project-defaults! &rest values)
-  (let loop ((rest values))
-    (cond
-      ((null? rest) *project-default-pending*)
-      ((null? (cdr rest))
-       (message "project-defaults! requires key and value pairs") #f)
-      (else
-        (project-default! (car rest) (car (cdr rest)))
-        (loop (cdr (cdr rest)))))))
+  (if (not (project-defaults-valid-pairs? values))
+      (error "project-defaults! requires key and value pairs")
+      (let loop ((rest values))
+        (if (null? rest)
+            *project-default-pending*
+            (begin
+              (project-default! (car rest) (car (cdr rest)))
+              (loop (cdr (cdr rest))))))))
 
 (define (project-default-chat? buf)
   ;; Group chats receive chat-mode after buffer creation. Their initial name
@@ -94,15 +99,49 @@
             (else key))
       key))
 
+(define (project-defaults-mapped buf defaults)
+  (if (null? defaults)
+      '()
+      (cons (list (project-default-local-key buf (car defaults))
+                  (car (cdr defaults)))
+            (project-defaults-mapped buf (cdr (cdr defaults))))))
+
+(define (project-defaults-inherited buf)
+  (let ((state (buffer-local buf 'project-defaults-inherited)))
+    (if (and (pair? state) (pair? (cdr state)))
+        (car (cdr state))
+        '())))
+
+(define (project-defaults-clear-stale! buf inherited wanted)
+  (for-each
+    (lambda (entry)
+      (when (and (not (assoc (car entry) wanted))
+                 (equal? (buffer-local buf (car entry)) (car (cdr entry))))
+        (buffer-set-local! buf (car entry) #f)))
+    inherited))
+
 (define (project-defaults-apply! buf root)
-  (let loop ((defaults (project-defaults-for root)))
-    (when (pair? defaults)
-      (let ((key (project-default-local-key buf (car defaults)))
-            (value (car (cdr defaults))))
-        ;; A local choice wins. Project values are defaults, not overrides.
-        (unless (buffer-local buf key)
-          (buffer-set-local! buf key value))
-        (loop (cdr (cdr defaults))))))
+  (let* ((wanted (project-defaults-mapped buf (project-defaults-for root)))
+         (inherited (project-defaults-inherited buf))
+         (owned '()))
+    (project-defaults-clear-stale! buf inherited wanted)
+    (for-each
+      (lambda (entry)
+        (let* ((key (car entry))
+               (value (car (cdr entry)))
+               (old (assoc key inherited))
+               (current (buffer-local buf key)))
+          (cond
+            ((and old (equal? current (car (cdr old))))
+             (buffer-set-local! buf key value)
+             (set! owned (cons entry owned)))
+            (old #f)
+            ((not current)
+             (buffer-set-local! buf key value)
+             (set! owned (cons entry owned))))))
+      wanted)
+    (buffer-set-local! buf 'project-defaults-inherited
+      (if (null? owned) #f (list root (reverse owned)))))
   buf)
 
 (define (project-buffer-root buf)
@@ -122,6 +161,7 @@
           (set! *project-defaults*
             (remove (lambda (entry) (equal? (car entry) root))
                     *project-defaults*))
+          (project-defaults-apply-project! root)
           '())
         (let ((source (read-file path)))
           (set! *project-default-root* root)

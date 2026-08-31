@@ -41,18 +41,29 @@
         (tile-adaptive-windows! panes))))
 
 ;;; --- tile-all: the overview -------------------------------------------------
-;;; tile-all is the editor's control center. It tiles every live work
-;;; buffer in one grid and locks the frame: keys select a tile, they do
-;;; not edit. SPC pops the selection out into a new group. The new group
+;;; tile-all is the context overview. It tiles each buffer in the current
+;;; group or project and locks the frame. Keys select a tile and do not edit.
+;;; SPC pops the selection out into a new group. The new group
 ;;; records the group the frame was in as its parent, and group-dissolve
 ;;; merges the members back into that parent. q restores the layout and
 ;;; the group unchanged.
 
+(define (overview--project-buffers root)
+  (let ((members (project-buffers root))
+        (mru (buffer-list-mru)))
+    (append
+      (filter (lambda (buf) (member buf members)) mru)
+      (filter (lambda (buf) (not (member buf mru))) members))))
+
 (define (overview-buffers)
-  (filter (lambda (buf)
-            (and (group-seed-buffer? buf)
-                 (not (buffer-context-only? buf))))
-          (buffer-list-mru)))
+  (let ((group (frame-group)))
+    (cond
+      (group
+        (let ((members (group-buffers-mru group)))
+          (if (pair? members) members (list (group-chat group)))))
+      ((and (boundp (quote project-current)) (project-current))
+        (overview--project-buffers (project-current)))
+      (else '()))))
 
 (define (overview-active?) (equal? (frame-local 'overview-active) #t))
 
@@ -92,7 +103,8 @@
             (base (window-tree))
             (group (frame-group)))
         (cond
-          ((null? buffers) (message "No buffers to tile") #f)
+          ((null? buffers)
+           (message "Tile all is available only in a group or project") #f)
           ((not (tile-windows! 'grid buffers)) #f)
           (else
             (set-frame-local! 'overview-return (list base group))
@@ -177,7 +189,7 @@
                     (switch-to-group! id)))))))))
 
 (define-command "tile-all"
-  "Open the overview: every live work buffer in one locked grid"
+  "Open the current group or project in one locked grid"
   overview-enter!)
 (define-command "overview-left" "Select the overview tile to the left"
   (lambda () (overview--move! 'left)))
@@ -223,12 +235,12 @@
   "(tile-visible-adaptive!) — tile visible work windows for the selected frame width")
 (effects! '(read))
 (public! 'overview-buffers
-  "(overview-buffers) — the live work buffers the overview tiles, MRU order")
+  "(overview-buffers) — current group members, else current project buffers")
 (public! 'overview-active?
   "(overview-active?) — #t while this frame shows the locked overview")
 (effects! '(write))
 (public! 'overview-enter!
-  "(overview-enter!) — tile every live work buffer and lock the frame's keys")
+  "(overview-enter!) — tile the current group or project and lock the frame keys")
 
 (domain! 'unknown)
 (effects! '(unknown))

@@ -54,6 +54,69 @@
       (buffer-kill! path))
     (t--project-defaults-reset!)))
 
+(deftest 'project-defaults-refresh-inherited-values
+  "a reload updates inherited values on old and new project buffers"
+  (lambda ()
+    (t--project-defaults-reset!)
+    (make-directory! (string-append t--project-defaults-root "/.git"))
+    (let ((config (string-append t--project-defaults-root "/.project.scm"))
+          (first (string-append t--project-defaults-root "/refresh-one.scm"))
+          (second (string-append t--project-defaults-root "/refresh-two.scm"))
+          (chosen (string-append t--project-defaults-root "/refresh-chosen.scm")))
+      (write-file! config "(project-default! 'llm-model \"model-a\")\n")
+      (write-file! first "one\n")
+      (write-file! second "two\n")
+      (write-file! chosen "chosen\n")
+      (visit first)
+      (check-equal! (buffer-local first 'llm-model) "model-a"
+                    "the first load applies model A")
+      (visit chosen)
+      (buffer-set-local! chosen 'llm-model "chosen-model")
+      (write-file! config "(project-default! 'llm-model \"model-b\")\n")
+      (visit second)
+      (check-equal! (buffer-local first 'llm-model) "model-b"
+                    "the old buffer updates to model B")
+      (check-equal! (buffer-local second 'llm-model) "model-b"
+                    "the new buffer replaces its cached model A")
+      (check-equal! (buffer-local chosen 'llm-model) "chosen-model"
+                    "the changed buffer keeps its explicit model")
+      (for-each buffer-kill! (list first second chosen)))
+    (t--project-defaults-reset!)))
+
+(deftest 'invalid-project-defaults-preserve-the-last-valid-values
+  "an odd key and value list does not commit a partial configuration"
+  (lambda ()
+    (t--project-defaults-reset!)
+    (make-directory! (string-append t--project-defaults-root "/.git"))
+    (let ((config (string-append t--project-defaults-root "/.project.scm")))
+      (write-file! config "(project-default! 'llm-model \"valid-model\")\n")
+      (project-defaults-load! t--project-defaults-root)
+      (write-file! config
+        "(project-defaults! 'llm-model \"partial-model\" 'llm-effort)\n")
+      (check-false! (project-defaults-load! t--project-defaults-root)
+                    "the malformed file fails")
+      (check-equal! (project-defaults-for t--project-defaults-root)
+                    (list 'llm-model "valid-model")
+                    "the last valid defaults remain"))
+    (t--project-defaults-reset!)))
+
+(deftest 'removing-project-defaults-clears-inherited-values
+  "removing the project file clears values that no buffer changed"
+  (lambda ()
+    (t--project-defaults-reset!)
+    (make-directory! (string-append t--project-defaults-root "/.git"))
+    (let ((config (string-append t--project-defaults-root "/.project.scm"))
+          (path (string-append t--project-defaults-root "/removed.scm")))
+      (write-file! config "(project-default! 'llm-model \"removed-model\")\n")
+      (write-file! path "removed\n")
+      (visit path)
+      (delete-file! config)
+      (project-defaults-load! t--project-defaults-root)
+      (check-false! (buffer-local path 'llm-model)
+                    "the removed inherited model clears")
+      (buffer-kill! path))
+    (t--project-defaults-reset!)))
+
 (deftest 'project-defaults-map-llm-values-to-project-chats
   "a chat born in the project gets its agent configuration"
   (lambda ()

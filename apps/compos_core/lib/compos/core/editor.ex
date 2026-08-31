@@ -189,8 +189,15 @@ defmodule Compos.Core.Editor do
   "backward", GRANULARITY "character" | "word" | "line" | "lineboundary" |
   "paragraph" | "documentboundary". The client answers with a `sel` event.
   """
-  def select_request(alter, dir, granularity, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:select_request, {alter, dir, granularity}, fid(fid)})
+  # COUNT is part of the request, not a repeat of it: a frame holds ONE
+  # pending selection request, so N asks collapse to the last one and a
+  # page moved a single row. The client applies the move COUNT times.
+  def select_request(alter, dir, granularity, count \\ 1, fid \\ nil),
+    do:
+      GenServer.call(
+        __MODULE__,
+        {:select_request, {alter, dir, granularity, count}, fid(fid)}
+      )
 
   @doc "Take FRAME's pending selection request, or nil. The take clears it."
   def take_select(fid), do: GenServer.call(__MODULE__, {:take_select, fid(fid)})
@@ -1715,9 +1722,9 @@ defmodule Compos.Core.Editor do
       Buffer.touch(buffer)
     end)
 
-    # lay saved per-window points down; the active window's swaps into the
-    # buffer point via resync below
-    tree = apply_init_points(tree)
+    # No saved point is laid down. A layout arranges windows; it does not
+    # move point (S9). The old windows' points went above, so each window
+    # falls back to the buffer's own point — where the reader left it.
 
     active =
       Enum.find_value(leaf_ids_buffers(tree), fn {id, buffer} ->
@@ -2194,18 +2201,20 @@ defmodule Compos.Core.Editor do
   defp build_tree({:leaf, buffer, top}, n),
     do: {%{type: :leaf, id: n, buffer: buffer, history: [], top: top, manual: false}, n + 1}
 
-  # 4-tuple carries a saved window point (desktop v2); it rides on the leaf
-  # as :init_point until restore_tree writes it into the buffer
-  defp build_tree({:leaf, buffer, top, point}, n) do
-    {leaf, n} = build_tree({:leaf, buffer, top}, n)
-    {Map.put(leaf, :init_point, point), n}
-  end
+  # 4-tuple carries a saved window point (desktop v2). Older layouts and
+  # desktop files still hold one; it is read and discarded, because a
+  # restore never writes point into a buffer.
+  defp build_tree({:leaf, buffer, top, _point}, n), do: build_tree({:leaf, buffer, top}, n)
 
   # 6-tuple adds the scroll override and the client-scroll offset (S1):
-  # a manually scrolled window restores pinned where the reader left it
+  # a manually scrolled window restores pinned where the reader left it.
+  # A saved offset is itself the pin. `manual` is cleared by the key that
+  # reaches the active window (S9), and the key that starts a group
+  # switch is such a key — so the flag alone loses the reader's place.
   defp build_tree({:leaf, buffer, top, point, manual, ctop}, n) do
     {leaf, n} = build_tree({:leaf, buffer, top, point}, n)
-    {%{leaf | manual: manual == true} |> Map.put(:ctop, ctop || 0), n}
+    ctop = ctop || 0
+    {%{leaf | manual: manual == true or ctop > 0} |> Map.put(:ctop, ctop), n}
   end
 
   # 7-tuple keeps the window-local buffer history across layout and desktop
@@ -2222,22 +2231,6 @@ defmodule Compos.Core.Editor do
     {tb, n} = build_tree(b, n)
     {%{type: :split, dir: dir, ratio: ratio, children: [ta, tb]}, n}
   end
-
-  defp apply_init_points(%{type: :leaf} = leaf) do
-    case Map.pop(leaf, :init_point) do
-      {nil, leaf} ->
-        leaf
-
-      {point, leaf} ->
-        if Buffer.exists?(leaf.buffer),
-          do: wp_safely(fn -> Buffer.set_win_point(leaf.buffer, leaf.id, point) end)
-
-        leaf
-    end
-  end
-
-  defp apply_init_points(%{type: :split} = split),
-    do: %{split | children: Enum.map(split.children, &apply_init_points/1)}
 
   defp leaf_ids_buffers(%{type: :leaf, id: id, buffer: b}), do: [{id, b}]
 

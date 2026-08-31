@@ -10,14 +10,20 @@
   (let ((stale (group-resolve-id name)))
     (when stale (group-record-delete! stale))))
 
+(define t--ov-project-root
+  (string-append (compos-home) "/zz-overview-project"))
+
 (deftest 'overview-locks-the-frame-and-quit-restores
   "the overview shows every work buffer and no key edits until quit"
   (lambda ()
     (let* ((first (test-buffer! "*zz-ov-first*" "hello"))
            (second (test-buffer! "*zz-ov-second*" "")))
+      (t--ov-drop-group! "zz-ov-lock")
+      (let ((group (group-record-create! "zz-ov-lock")))
+        (for-each (lambda (buf) (buffer-add-group! buf group)) (list first second))
       (delete-other-windows!)
       (switch-to-buffer! first)
-      (set-frame-local! 'current-group #f)
+      (set-frame-local! 'current-group group)
 
       (run-command "tile-all")
       (check-true! (overview-active?) "the overview is on")
@@ -37,7 +43,52 @@
       (check-equal! (length (window-list)) 1 "quit restores the one-window layout")
       (check-equal! (window-buffer (active-window)) first "quit restores the buffer")
 
+        (set-frame-local! 'current-group #f)
+        (group-record-delete! group))
       (for-each buffer-kill! (list first second)))))
+
+(deftest 'tile-all-requires-a-group-or-project
+  "the command does not replace a layout outside a group or project"
+  (lambda ()
+    (let ((buf (test-buffer! "*zz-ov-outside*" "")))
+      (buffer-set-local! buf 'default-directory "/zz-no-project/")
+      (switch-to-buffer! buf)
+      (delete-other-windows!)
+      (set-frame-local! 'current-group #f)
+      (run-command "tile-all")
+      (check-false! (overview-active?) "the overview stays off")
+      (check-equal! (length (window-list)) 1 "the layout stays unchanged")
+      (buffer-kill! buf))))
+
+(deftest 'tile-all-uses-only-the-current-project
+  "project scope includes project buffers and excludes other buffers"
+  (lambda ()
+    (shell-command->string (string-append "rm -rf " t--ov-project-root))
+    (make-directory! (string-append t--ov-project-root "/.git"))
+    (set! *project-root-cache* '())
+    (let ((one (test-buffer! "*zz-ov-project-one*" ""))
+          (two (test-buffer! "*zz-ov-project-two*" ""))
+          (foreign (test-buffer! "*zz-ov-project-foreign*" "")))
+      (for-each
+        (lambda (buf)
+          (buffer-set-local! buf 'default-directory
+            (string-append t--ov-project-root "/")))
+        (list one two))
+      (buffer-set-local! foreign 'default-directory "/zz-no-project/")
+      (switch-to-buffer! one)
+      (delete-other-windows!)
+      (set-frame-local! 'current-group #f)
+      (global-set-key "<f9> t" "tile-all")
+      (dispatch-keys '("<f9>" "t"))
+      (wait-until overview-active? 3000 20)
+      (check-true! (overview-active?) "the overview starts")
+      (check-true! (window-showing one) "the first project buffer tiles")
+      (check-true! (window-showing two) "the second project buffer tiles")
+      (check-false! (window-showing foreign) "the foreign buffer stays out")
+      (run-command "overview-quit")
+      (for-each buffer-kill! (list one two foreign)))
+    (shell-command->string (string-append "rm -rf " t--ov-project-root))
+    (set! *project-root-cache* '())))
 
 (deftest 'overview-pop-out-founds-a-child-and-dissolve-merges-back
   "SPC pops the selection into a child group; dissolve returns it to the parent"
@@ -81,27 +132,31 @@
   (lambda ()
     (let* ((one (test-buffer! "*zz-ov-mark-one*" ""))
            (two (test-buffer! "*zz-ov-mark-two*" "")))
+      (t--ov-drop-group! "zz-ov-mark-origin")
       (t--ov-drop-group! "*zz-ov-mark-one*")
-      (delete-other-windows!)
-      (switch-to-buffer! two)
-      (switch-to-buffer! one)
-      (set-frame-local! 'current-group #f)
+      (let ((origin (group-record-create! "zz-ov-mark-origin")))
+        (for-each (lambda (buf) (buffer-add-group! buf origin)) (list one two))
+        (delete-other-windows!)
+        (switch-to-buffer! two)
+        (switch-to-buffer! one)
+        (set-frame-local! 'current-group origin)
 
-      (run-command "tile-all")
-      (run-command "overview-mark")
-      (select-window! (window-showing two))
-      (run-command "overview-mark")
-      (run-command "overview-pop-out")
+        (run-command "tile-all")
+        (run-command "overview-mark")
+        (select-window! (window-showing two))
+        (run-command "overview-mark")
+        (run-command "overview-pop-out")
 
-      (let ((child (group-resolve-id "*zz-ov-mark-one*")))
-        (check-true! child "the pop-out founded one group")
-        (check-true! (buffer-in-group? one child) "the first mark joined")
-        (check-true! (buffer-in-group? two child) "the second mark joined")
-        (check-false! (group-parent child) "no origin group means no parent"))
+        (let ((child (group-resolve-id "*zz-ov-mark-one*")))
+          (check-true! child "the pop-out founded one group")
+          (check-true! (buffer-in-group? one child) "the first mark joined")
+          (check-true! (buffer-in-group? two child) "the second mark joined")
+          (check-equal! (group-parent child) origin "the child records the origin"))
 
-      (switch-to-buffer! "*scratch*")
-      (delete-other-windows!)
-      (set-frame-local! 'current-group #f)
+        (switch-to-buffer! "*scratch*")
+        (delete-other-windows!)
+        (set-frame-local! 'current-group #f)
+        (group-record-delete! origin))
       (for-each buffer-kill! (list one two))
       (t--ov-drop-group! "*zz-ov-mark-one*"))))
 

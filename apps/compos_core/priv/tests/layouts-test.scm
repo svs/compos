@@ -25,19 +25,27 @@
     (check-equal! (window-layout-for-width 240 4) 'grid
                   "four panes become a balanced grid")))
 
-(deftest 'overview-tiles-work-buffers-only
-  "the overview lists live work buffers, never chats, listings, or context"
+(deftest 'overview-uses-only-the-current-group
+  "the overview includes each group member and excludes other buffers"
   (lambda ()
+    (let ((stale (group-resolve-id "zz-ov-list")))
+      (when stale (group-record-delete! stale)))
     (let ((work (test-buffer! "*zz-ov-list-work*" ""))
-          (listing (test-buffer! "*zz-ov-list-transient*" ""))
-          (context (test-buffer! "*zz-ov-list-context*" "")))
-      (buffer-set-local! listing 'transient #t)
-      (buffer-context-only! context)
-      (let ((buffers (overview-buffers)))
-        (check-true! (member work buffers) "a work buffer tiles")
-        (check-false! (member listing buffers) "a transient listing does not")
-        (check-false! (member context buffers) "a context-only buffer does not"))
-      (for-each buffer-kill! (list work listing context)))))
+          (foreign (test-buffer! "*zz-ov-list-foreign*" ""))
+          (group (group-record-create! "zz-ov-list"))
+          (origin (current-buffer)))
+      (buffer-add-group! work group)
+      (switch-to-buffer! work)
+      (set-frame-local! 'current-group group)
+      (let* ((chat (group-chat group))
+             (buffers (overview-buffers)))
+        (check-true! (member work buffers) "the work buffer tiles")
+        (check-true! (member chat buffers) "the group chat tiles")
+        (check-false! (member foreign buffers) "the foreign buffer stays out")
+        (switch-to-buffer! origin)
+        (set-frame-local! 'current-group #f)
+        (group-record-delete! group)
+        (for-each buffer-kill! (list work chat foreign))))))
 
 (deftest 'dashboard-one-line-keeps-the-expanded-dashboard-facts
   "the persistent modeline summary names the mode and input lane"

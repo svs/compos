@@ -241,3 +241,48 @@
       (buffer-mark-saved! p)
       (buffer-kill! p)
       (shell-command->string (string-append "unlink " p) "/tmp"))))
+
+(deftest 'a-buffer-that-wakes-catches-up-with-its-file
+  "a dormant buffer is not in (buffer-list), so it misses every pass"
+  (lambda ()
+    (let ((p "/tmp/compos-autorevert-wake-test.txt"))
+      (shell-command->string
+        (string-append "printf 'one\\ntwo\\nthree\\n' > " p) "/tmp")
+      (find-file p)
+      (check-true! (buffer-sleep! p) "the buffer sleeps")
+      (check-false! (if (member p (buffer-list)) #t #f)
+                    "and drops out of the open buffers while it sleeps")
+
+      ;; the file moves while nothing can see the buffer
+      (shell-command->string
+        (string-append "printf 'one\\nTWO-from-disk\\nthree\\n' > " p) "/tmp")
+      (find-file p)
+      (auto-revert-woken! p)
+      (check-equal! (buffer-text p) "one\nTWO-from-disk\nthree\n"
+                    "waking is when it catches up")
+      (check-equal! (auto-revert-base p) "one\nTWO-from-disk\nthree\n"
+                    "and the mark moves with it")
+      (check-false! (buffer-modified? p)
+                    "a buffer that just took its file is not modified")
+
+      ;; and the wake is wired, not just callable
+      (check-true! (pair? *buffer-woken-hooks*)
+                   "restore-buffer-runtime! has a handler to run")
+
+      (buffer-kill! p)
+      (shell-command->string (string-append "unlink " p) "/tmp"))))
+
+(deftest 'an-attaching-frame-catches-every-buffer-up
+  "no frame means no one has decided, so nothing follows until one attaches"
+  (lambda ()
+    (let ((p "/tmp/compos-autorevert-attach-test.txt"))
+      (shell-command->string
+        (string-append "printf 'p\\nq\\nr\\n' > " p) "/tmp")
+      (find-file p)
+      (shell-command->string
+        (string-append "printf 'p\\nQ-from-disk\\nr\\n' > " p) "/tmp")
+      (auto-revert-catch-up!)
+      (check-equal! (buffer-text p) "p\nQ-from-disk\nr\n"
+                    "every open file buffer follows, whatever root it is under")
+      (buffer-kill! p)
+      (shell-command->string (string-append "unlink " p) "/tmp"))))

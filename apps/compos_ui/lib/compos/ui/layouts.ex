@@ -1209,11 +1209,15 @@ defmodule Compos.Ui.Layouts do
           // Delete. Everything with a modifier, TAB, ESC, and the motion
           // keys still travel as keys (keySpec).
           // The browser also owns caret motion on that surface: the arrows,
-          // Home, End, Page keys, with or without Shift. It moves by its own
-          // layout, keeps the goal column across short lines, and the
-          // selection it leaves is reported as bytes (selectionchange).
+          // Home and End, with or without Shift. It moves by its own layout,
+          // keeps the goal column across short lines, and the selection it
+          // leaves is reported as bytes (selectionchange).
+          // The page keys are NOT its. Chrome scrolls the editable box and
+          // leaves the caret where it was, so a page key that stayed native
+          // moved point nowhere and reported no selection. They travel as
+          // <prior> and <next>, and Scheme pages by visual rows.
           const NATIVE_MOTION = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
-                                 "Home", "End", "PageUp", "PageDown"];
+                                 "Home", "End"];
           function nativeTextKey(e) {
             const a = document.activeElement;
             if (!a || !a.closest || !a.closest(".buf[contenteditable]")) return false;
@@ -1659,11 +1663,15 @@ defmodule Compos.Ui.Layouts do
                   this.lastDoc = null;
                   this.syncDoc();
                   this.attach();
+                  // the document is only now scrollable: put the reader's
+                  // saved offset back, the same as a line window does
+                  this.apply();
                   if (window.composRemeasure) window.composRemeasure();
                 };
                 this.el.addEventListener("load", this.onLoad);
                 this.syncDoc();
                 this.attach();
+                this.apply();
               },
               updated() {
                 this.syncDoc();
@@ -2767,12 +2775,20 @@ defmodule Compos.Ui.Layouts do
                 };
                 // a motion command asks the browser's layout to move the
                 // selection; the answer is the selection, as bytes
-                this.handleEvent("select", ({ alter, dir, granularity }) => {
+                this.handleEvent("select", ({ alter, dir, granularity, count }) => {
                   const buf = document.querySelector(".window.active .buf[contenteditable]");
                   const sel = window.getSelection();
                   if (!buf || !sel) return;
                   if (!buf.contains(sel.focusNode)) this.syncEditable();
-                  try { sel.modify(alter, dir, granularity); } catch (_) { return; }
+                  // A page is one request carrying many line moves. The
+                  // browser answers each from where the last one landed,
+                  // and only the caret it ends on travels back. The daemon
+                  // holds one pending request per frame, so N requests
+                  // would collapse to one row.
+                  const n = Math.max(1, Math.min(parseInt(count, 10) || 1, 1000));
+                  try {
+                    for (let i = 0; i < n; i++) sel.modify(alter, dir, granularity);
+                  } catch (_) { return; }
                   this.sendSelection(buf, true);
                 });
 
@@ -3167,9 +3183,7 @@ defmodule Compos.Ui.Layouts do
                   }, 250));
                 };
                 window.addEventListener("scroll", this.cscrollH, true);
-                document.querySelectorAll(".buf.client-scroll[data-manual='true']").forEach((el) => {
-                  el.scrollTop = parseInt(el.dataset.ctop || "0", 10);
-                });
+                this.restoreClientScroll();
 
                 this.focusH = () => {
                   document.body.classList.remove("unfocused");
@@ -3282,8 +3296,23 @@ defmodule Compos.Ui.Layouts do
                 if (this.bootCheck()) return;
                 Telem.time("updated", () => this.afterPatch());
               },
+              // A window the reader scrolled comes back from a layout
+              // restore as a NEW element, so its scrollTop is 0 and the
+              // saved offset (S1) has to go back on. Once per element:
+              // a later patch must not fight a live scroll. The expando
+              // lives exactly as long as the element does.
+              restoreClientScroll() {
+                document.querySelectorAll(".buf.client-scroll").forEach((el) => {
+                  if (el._composCtop) return;
+                  el._composCtop = true;
+                  if (el.dataset.manual !== "true") return;
+                  const want = parseInt(el.dataset.ctop || "0", 10);
+                  if (want > 0) el.scrollTop = want;
+                });
+              },
               afterPatch() {
                 this.applyWhichKeyFilter();
+                this.restoreClientScroll();
                 this.syncCursorFocus();
                 this.syncKeyboardOwner();
                 this.syncEditable();

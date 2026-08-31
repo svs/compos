@@ -2809,7 +2809,12 @@
   ;; The modeline is derived state. Rebuild it here so a restored desktop
   ;; shows its top line and its short name before the first command runs.
   (when (boundp (quote dashboard--sync!))
-    (dashboard--sync! buf)))
+    (dashboard--sync! buf))
+  ;; The buffer is whole again, so an owner can act on it. Outside
+  ;; with-buffer-waking on purpose: that flag is restored by hand, and a
+  ;; hook that throws inside it would leave every later wake believing it
+  ;; was still waking.
+  (buffer-woken! buf))
 
 ;;; Visual lines are a buffer capability, independent of the major mode.
 ;;; This minor mode owns the durable flag. The client measures where the
@@ -2953,34 +2958,49 @@
        (not (member (buffer-local buf 'render-mode)
                     '("markdown" "html" "app" "blocks" "agent" "terminal")))))
 
-(define (visual--client-move! alter dir granularity)
-  (client-select! alter (if (< dir 0) "backward" "forward") granularity)
+(define (visual--client-move! alter dir granularity &optional count)
+  (client-select! alter (if (< dir 0) "backward" "forward") granularity (or count 1))
   #t)
 
-;; One row up or down, holding the goal column. #f when the map cannot
-;; answer: the mode is off, the map is stale, or no measured row lies
-;; that way. The caller then moves by source line.
-(define (visual-row-move! dir extend)
+;; one measured row, from wherever point is now
+(define (visual--row-step! buf rows dir extend)
+  (let* ((pos (point))
+         (here (visual-row-bounds rows pos)))
+    (and here
+         (let* ((start (car here))
+                (goal (visual--goal buf start pos))
+                (target (if (> dir 0) (cadr here) (visual--row-before rows start))))
+           (and target
+                (let ((there (visual-row-bounds rows target)))
+                  (visual--mark! extend)
+                  (visual--land! buf (car there)
+                                 (visual-row-end-from (car there) (cadr there))
+                                 goal)
+                  #t))))))
+
+;; COUNT rows up or down, holding the goal column; one row by default.
+;; #f when the map cannot answer: the mode is off, the map is stale, or
+;; no measured row lies that way. The caller then moves by source line.
+;;
+;; COUNT is one call, never a loop of calls. The browser answers a whole
+;; page in one request; asking it COUNT times does not work, because a
+;; frame keeps ONE pending request and each ask overwrites the last, so a
+;; page moved one row.
+(define (visual-row-move! dir extend &optional count)
   (let* ((buf (current-buffer))
+         (n (max 1 (or count 1)))
          (rows (visual-rows buf)))
     ;; a fresh map answers first (a rendered page measures one; so does a
     ;; test); an editable surface measures none and asks the browser
     (if (and (not rows) (visual--client? buf))
-        (visual--client-move! (if extend "extend" "move") dir "line")
-    (and rows
-         (let* ((pos (point))
-                (here (visual-row-bounds rows pos)))
-           (and here
-                (let* ((start (car here))
-                       (goal (visual--goal buf start pos))
-                       (target (if (> dir 0) (cadr here) (visual--row-before rows start))))
-                  (and target
-                       (let ((there (visual-row-bounds rows target)))
-                         (visual--mark! extend)
-                         (visual--land! buf (car there)
-                                        (visual-row-end-from (car there) (cadr there))
-                                        goal)
-                         #t)))))))))
+        (visual--client-move! (if extend "extend" "move") dir "line" n)
+        (and rows
+             (let loop ((i 0) (moved #f))
+               (if (>= i n)
+                   moved
+                   (if (visual--row-step! buf rows dir extend)
+                       (loop (+ i 1) #t)
+                       moved)))))))
 
 ;; the edge of the row point is on; #f when the map cannot answer
 (define (visual-row-edge! dir extend)
@@ -3508,15 +3528,25 @@
     (if (< i n)
         (begin (mover) (loop (+ i 1))))))
 
+;; A page is a screenful of what the reader sees, so it steps by visual
+;; rows: a rendered page and a wrapped paragraph draw many rows for one
+;; source line, and paging by source lines there jumps several screens.
+;; One counted move, not a loop of single moves — see visual-row-move!.
+;; With no wrap map to read, the page is source lines again.
+(define (visual-page! dir)
+  (let ((n (- (window-rows) 2)))
+    (or (visual-row-move! dir #f n)
+        (move-lines n (if (> dir 0) next-line! previous-line!)))))
+
 (define-command "scroll-up-command" "Scroll text upward nearly a full screen"
   (lambda ()
     (or (preview-scroll! (- (window-rows) 2))
-        (move-lines (- (window-rows) 2) next-line!))))
+        (visual-page! 1))))
 
 (define-command "scroll-down-command" "Scroll text downward nearly a full screen"
   (lambda ()
     (or (preview-scroll! (- 2 (window-rows)))
-        (move-lines (- (window-rows) 2) previous-line!))))
+        (visual-page! -1))))
 
 (define-command "recenter-top-bottom" "Recenter point in the window"
   (lambda () (recenter!)))
@@ -3831,6 +3861,21 @@
 
 (define (buffer-created! name)
   (for-each (lambda (fn) (fn name)) *buffer-created-hooks*)
+  name)
+
+;; The other half. A dormant buffer is absent from (buffer-list), so a
+;; pass over the open buffers cannot reach it while it sleeps, and it
+;; missed every seam that ran meanwhile. This is where an owner catches
+;; that buffer up. It runs on a desktop restore too, which is the same
+;; event: state came back from a checkpoint, not from nothing.
+(define *buffer-woken-hooks* '())
+
+(define (on-buffer-woken! fn)
+  (set! *buffer-woken-hooks* (cons fn *buffer-woken-hooks*))
+  #t)
+
+(define (buffer-woken! name)
+  (for-each (lambda (fn) (fn name)) *buffer-woken-hooks*)
   name)
 
 ;; A new buffer inherits the directory of the buffer that made it (Emacs:

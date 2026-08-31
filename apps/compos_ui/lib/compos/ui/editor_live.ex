@@ -581,8 +581,16 @@ defmodule Compos.Ui.EditorLive do
     # a motion command asked the browser's layout to move the selection
     socket =
       case fid && Compos.Core.Editor.take_select(fid) do
+        {alter, dir, gran, count} ->
+          push_event(socket, "select", %{
+            alter: alter,
+            dir: dir,
+            granularity: gran,
+            count: count
+          })
+
         {alter, dir, gran} ->
-          push_event(socket, "select", %{alter: alter, dir: dir, granularity: gran})
+          push_event(socket, "select", %{alter: alter, dir: dir, granularity: gran, count: 1})
 
         _ ->
           socket

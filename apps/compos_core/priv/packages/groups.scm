@@ -2243,7 +2243,17 @@
            #f)
           (else
             (let ((id (group-record-create! clean)))
-              (for-each (lambda (buf) (buffer-add-group! buf id)) buffers)
+              (for-each
+                (lambda (buf)
+                  (buffer-add-group! buf id)
+                  ;; the mark that chose this buffer is spent, the same as
+                  ;; `add`. A switcher mark dies with its list, but
+                  ;; `buffer-select` writes the mark on the buffer and
+                  ;; nothing else clears it: an unspent mark founds the
+                  ;; NEXT group too, which reads as `new` moving a buffer
+                  ;; nobody named, with your windows as its layout.
+                  (buffer-set-local! buf 'buffer-selected #f))
+                buffers)
               (when layout (group-layout-set! id layout))
               (switch-to-group! id)
               id)))))

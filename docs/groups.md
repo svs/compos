@@ -41,6 +41,9 @@ groups of X  ->  project of X  ->  none
 
 The second step yields a root for narrowing and window fill. It never yields a group to switch to. Can be overridden with C-RET as seen later.
 
+
+
+
 ## User stories
 
 Read each story as a path:
@@ -282,6 +285,8 @@ I want to start from a project or directory
 - Cancel changes nothing durable.
 - A wrong membership costs one command to fix.
 
+
+
 ## Membership
 
 ### Creation joins
@@ -313,17 +318,17 @@ Every verb that takes buffers acts on the selection. With no selection it acts o
 
 | Verb | Effect |
 |---|---|
-| `add G` | Add the selection to G. Create G when the name is new. Adding a buffer that is in G is a no-op. |
-| `move G` | Remove the selection from every group, then add it to G. |
-| `remove G` | Remove the selection from G. The buffer stays open. |
-| `switch G` | Save the frame's layout into the outgoing group. Set `previous`. Set `destination` to G. Restore G's layout on this frame. |
-| `switch-last` | Swap `destination` and `previous`. |
-| `switch-to-buffer-group` | Read the current buffer's groups. 0: prompt for a name and run `new`. 1: switch to it. 2 or more: prompt, always. |
-| `new G` | Create G with its scratch buffer. Add the seed. Save a layout built from the seed. Switch to G. |
-| `dissolve G` | When G has a live parent (see "The overview"): every member joins the parent, then leaves G, and a frame on G switches to the parent. Else: remove every member from G. Remove the scratch buffer and the record. Frames on G go to `previous`, else none. |
-| `kill G` | For each member: when it is in another group, remove it from G; else kill it under the normal modified-buffer protection. Then dissolve G. A frame on G follows the buffer its window fell to into that buffer's group, with the group's layout; a buffer in no group leaves the frame in none. `group-after-kill` is `follow` (this) or `stay`. The kill runs `group-kill-hook` last, with `*group-killed*` = `(ID NAME STOOD?)`. |
-| `rename G NAME` | Change the name. The ID, members, layouts, and MRU do not change. |
-| `revive G` | Make a killed G again from the graveyard: the record, its meta, layout, noise, chat id, and color. Every member that still exists comes back: a buffer that is open joins; a file that exists on disk is visited into G. A member with neither is missing; the revival says how many. Then switch to G. |
+| `group-add` G | Add the selection to G. Create G when the name is new. Adding a buffer that is in G is a no-op. |
+| `group-move` G | Remove the selection from every group, then add it to G. |
+| `group-remove` G | Remove the selection from G. The buffer stays open. |
+| `group-switch` G | Save the frame's layout into the outgoing group. Set `previous`. Set `destination` to G. Restore G's layout on this frame. |
+| `group-switch-last` | Swap `destination` and `previous`. |
+| `buffer-context-switch!` | Read the current buffer's groups. 0: prompt for a name and run `group-new`. 1: switch to it. 2 or more: prompt, always. |
+| `group-new` G | Create G with its chat buffer. Add the seed. Save a layout built from the seed. Switch to G. |
+| `group-dissolve` G | When G has a live parent (see "The overview"): every member joins the parent, then leaves G, and a frame on G switches to the parent. Else: remove every member from G. Remove the scratch buffer and the record. Frames on G go to `previous`, else none. |
+| `group-kill` G | For each member: when it is in another group, remove it from G; else kill it under the normal modified-buffer protection. Then dissolve G. A frame on G follows the buffer its window fell to into that buffer's group, with the group's layout; a buffer in no group leaves the frame in none. `group-after-kill` is `follow` (this) or `stay`. The kill runs `group-kill-hook` last, with `*group-killed*` = `(ID NAME STOOD?)`. |
+| `group-rename` G NAME | Change the name. The ID, members, layouts, and MRU do not change. |
+| `group-revive` G | Make a killed G again from the graveyard: the record, its meta, layout, noise, chat id, and color. Every member that still exists comes back: a buffer that is open joins; a file that exists on disk is visited into G. A member with neither is missing; the revival says how many. Then switch to G. |
 
 ### Command names
 
@@ -358,6 +363,7 @@ The kill buries a tombstone: the name, the record's fields, and each member's na
 
 - A selection is marked: the seed is the selection.
 - No selection: the seed is empty.
+- The seed spends its marks. A switcher or ibuffer mark dies with its list, but `buffer-select` writes the mark on the buffer, so `new` clears it the way `add` does. An unspent mark would found the next group too.
 
 `switch-to-buffer-group` on an ungrouped buffer still starts a group with that buffer as the seed.
 
@@ -419,11 +425,11 @@ A group is sealed: a restored pane shows a member of G, or G's scratch as a blan
 
 ### The overview
 
-`tile-all` is the overview, the editor's control center. It tiles every live work buffer in one grid and locks the frame: keys select a tile, they do not edit. The overview is a covering surface. It saves no group layout and it changes no membership by itself.
+`tile-all` opens the context overview. It is available only in a group or project. A group takes priority and supplies all its buffers, including chats. Otherwise, the current project supplies all its open buffers. The overview locks the frame: keys select a tile and do not edit. It saves no group layout and changes no membership by itself.
 
 - Arrow keys select a tile. `m` marks a tile. `q`, `C-g`, and `ESC` quit.
 - Quit restores the saved window tree and the saved current group.
-- `SPC` or `RET` pops the marked buffers, else the selected one, out into a new group. The new group takes the first buffer's short name. Each buffer leaves the origin group and joins the new one; a membership in any other group stays.
+- `SPC` or `RET` pops the marked buffers, else the selected one, into a new group. The new group takes the first buffer's short name. Each buffer leaves the origin group when one exists. Membership in any other group stays.
 - The new group records the origin group as its **parent**. `dissolve` on a group with a live parent merges the members back into the parent and the frame follows. A parent that is gone makes the child an ordinary group.
 
 ### Save
@@ -584,4 +590,3 @@ Tests name commands, never keys. A test that needs a binding binds its own dummy
 20. A kill from outside any command (the Elixir path) that drops a window onto a group's buffer puts the frame back in that group.
 21. `ibuffer` lists the frame's group first, and a mark does not reorder the rows.
 22. A layout fills its panes from the pool: in a group, three columns come from the members and never from another group; a peek and the popup's buffer fill no window.
-            

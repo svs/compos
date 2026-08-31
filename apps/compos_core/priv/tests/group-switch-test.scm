@@ -155,9 +155,34 @@
         (check-true! (buffer-in-group? t--sw-first id) "and the new one added")
         (check-true! (buffer-in-group? t--sw-second id) "the other selected buffer joins")
         (check-equal! (frame-local 'current-group) id "the frame stands in it")
-        (check-equal! (group-layout id) (window-tree) "and it remembers this layout"))
-      (buffer-set-local! t--sw-first 'buffer-selected #f)
-      (buffer-set-local! t--sw-second 'buffer-selected #f))
+        (check-equal! (group-layout id) (window-tree) "and it remembers this layout")
+        (check-false! (buffer-local t--sw-first 'buffer-selected)
+                      "the mark that chose the buffer is spent")
+        (check-false! (buffer-local t--sw-second 'buffer-selected)
+                      "and so is the other one")))
+    (t--sw-done!)))
+
+(deftest 'a-spent-selection-does-not-found-the-next-group
+  "new founds a place to work: the mark is spent, so the next new is empty"
+  (lambda ()
+    (t--sw-setup!)
+    (buffer-set-local! t--sw-first 'buffer-selected #t)
+    (run-command "group-new")
+    (t--sw-type! "zzsw-seeded")
+    (t--sw-key! "confirm")
+
+    (run-command "group-new")
+    (t--sw-type! "zzsw-after")
+    (t--sw-key! "confirm")
+
+    (let ((seeded (group-resolve-id "zzsw-seeded"))
+          (after (group-resolve-id "zzsw-after")))
+      (check-true! (buffer-in-group? t--sw-first seeded) "the seed founded the first group")
+      (check-false! (buffer-in-group? t--sw-first after)
+                    "and the buffer you were in did not follow into the second")
+      (check-equal! (filter group-work-buffer? (group-buffers after)) '()
+                    "the second group starts empty"))
+    (buffer-set-local! t--sw-first 'buffer-selected #f)
     (t--sw-done!)))
 
 (deftest 'cancelled-group-creation-changes-no-group-state

@@ -278,6 +278,47 @@ defmodule Compos.DesktopRestoreTest do
     assert %{manual: true, top: 10} = leaf
   end
 
+  # S1: the offset IS the pin. A key clears `manual` in the window it
+  # reaches (S9), and the key that starts a group switch is such a key —
+  # so a saved offset has to restore pinned on its own, or the window
+  # reopens at the top of a page the reader had scrolled down.
+  test "a saved client offset restores pinned" do
+    name = "*ctop-#{System.unique_integer([:positive])}*"
+    on_exit(fn -> Compos.Core.kill_buffer(name) end)
+    Compos.Core.create_buffer(name)
+    Buffer.append(name, String.duplicate("line\n", 200))
+    Editor.set_window_buffer(name)
+
+    active = Editor.snapshot().active
+    :ok = Editor.set_client_top(active, 8330)
+    :ok = Editor.user_acted()
+
+    assert :ok = Desktop.save_now()
+    Editor.set_window_buffer("*scratch*")
+    assert :ok = Desktop.restore_now()
+
+    leaf = Editor.render_state().tree |> leaves() |> Enum.find(&(&1.buffer == name))
+    assert %{manual: true, ctop: 8330} = leaf
+  end
+
+  # S9: point belongs to the reader. A restore arranges windows; it does
+  # not carry a cursor. The buffer says where point is, and it keeps
+  # saying so across a layout restore or a group switch.
+  test "a restore does not move point" do
+    name = "*point-#{System.unique_integer([:positive])}*"
+    on_exit(fn -> Compos.Core.kill_buffer(name) end)
+    Compos.Core.create_buffer(name)
+    Buffer.append(name, String.duplicate("line\n", 200))
+    Editor.set_window_buffer(name)
+    Buffer.goto(name, 500)
+
+    assert :ok = Desktop.save_now()
+    Buffer.goto(name, 12)
+    assert :ok = Desktop.restore_now()
+
+    assert Buffer.point(name) == 12
+  end
+
   # S9: a key ends the manual override in the window that received it —
   # not in the other window, whose reading position is not the typist's
   test "a key unpins only the window it landed in" do

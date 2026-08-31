@@ -28,7 +28,10 @@ ANCHOR TEXT)`, `(buffer-insert-after! "BUF" ANCHOR TEXT)` or
 `(buffer-delete-text! "BUF" TEXT)`. Each of these takes text you have
 read, never a byte offset, and each one reports what it did.
 
-Every edit lands in the live buffer, never in the file — the user saves.
+Every edit lands in the live buffer, so the change is attributed and the
+open buffer stays true. Then save it: code you replaced in a file is not
+done until the file holds it, and Elixir, JavaScript and any other
+compiled source only reaches the running editor through a save.
 Make the smallest edit that does the job, and keep the file's style.
 
 Keep file and shell changes under `(default-directory)`. A workspace-id

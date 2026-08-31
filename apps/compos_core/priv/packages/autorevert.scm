@@ -153,6 +153,26 @@
 (define (auto-revert-visited!)
   (auto-revert-created! (current-buffer)))
 
+;; Waking is not creating, and a sleeping buffer is not in (buffer-list),
+;; so the pass over the open buffers never reached it. Everything it
+;; missed is caught up here: the watch it may never have taken, the mark
+;; it may never have had, and the file it has fallen behind.
+(define (auto-revert-woken! buf)
+  (when (buffer-path buf)
+    (auto-revert-watch-buffer! buf)
+    (auto-revert-seed-base! buf)
+    (when (auto-revert-follows? buf) (auto-revert-follow! buf))))
+
+;; No frame means no one has decided, and auto-revert-any-frame? answers
+;; #f, so a daemon that boots after a pull holds every buffer at the old
+;; text and no later fs event repairs the ones that already changed. A
+;; frame attaching is someone starting to look. That is when they catch up.
+(define (auto-revert-catch-up!)
+  (for-each (lambda (b)
+              (when (and (buffer-path b) (auto-revert-follows? b))
+                (auto-revert-follow! b)))
+            (buffer-list)))
+
 ;;; --- following the file -------------------------------------------------------
 
 ;; The text a buffer last agreed with its file on. A buffer still holding
@@ -398,6 +418,14 @@
   (lambda () (add-hook! 'after-save-hook (lambda () (auto-revert-saved!)))))
 (auto-revert-install! 'fs-change
   (lambda () (on-fs-change! (lambda (root) (auto-revert-fs-change root)))))
+;; boundp, not an unconditional install: an editor without the wake seam
+;; must be able to take it on the next load rather than record a
+;; registration that never happened.
+(when (boundp 'on-buffer-woken!)
+  (auto-revert-install! 'woken
+    (lambda () (on-buffer-woken! (lambda (name) (auto-revert-woken! name))))))
+(auto-revert-install! 'frame-attach
+  (lambda () (add-hook! 'frame-attach-hook (lambda () (auto-revert-catch-up!)))))
 
 (auto-revert-watch-open-buffers!)
 
@@ -411,6 +439,10 @@
   "(auto-revert-follow! BUF) — take the file's text when it differs and BUF still holds the text it last agreed with the file on")
 (public! 'auto-revert-base
   "(auto-revert-base BUF) — the text BUF last agreed with its file on, or #f")
+(public! 'auto-revert-woken!
+  "(auto-revert-woken! BUF) — catch a buffer up with its file after it wakes from a checkpoint")
+(public! 'auto-revert-catch-up!
+  "(auto-revert-catch-up!) — every open file buffer follows its file now")
 
 ;; public! alone leaves a function in the fallback domain; the catalog
 ;; entry is what files it with the rest of the buffer verbs.
@@ -418,7 +450,8 @@
   (lambda (name)
     (catalog-meta! 'function name 'domain 'buffers 'effects '(write)))
   '("auto-revert-on?" "auto-revert-set!"
-    "auto-revert-follows?" "auto-revert-follow!" "auto-revert-base"))
+    "auto-revert-follows?" "auto-revert-follow!" "auto-revert-base"
+    "auto-revert-woken!" "auto-revert-catch-up!"))
 
 ;;; --- merging the file's change ------------------------------------------------
 

@@ -86,6 +86,7 @@
 (define *web--sites*
   '(("https://substack.com" "substack.xsl" #t)
     ("https://html.duckduckgo.com" "duckduckgo.xsl" #f)
+    ("https://news.ycombinator.com" "hackernews.xsl" #f)
     ("https://mukeshbishnoi.com" "mukeshbishnoi.xsl" #f)
     ("https://www.mukeshbishnoi.com" "mukeshbishnoi.xsl" #f)))
 
@@ -1048,7 +1049,7 @@
             (else
               (let ((name (string-append "*browse-source:" (web--slug url) "*")))
                 (buffer-create name)
-                (buffer-set-local! name 'group "browse")
+                (buffer-add-group! name (web--browse-group!))
                 (buffer-set-read-only! name #f)
                 (buffer-delete-range! name 0 (buffer-size name))
                 (buffer-insert! name 0 html)
@@ -1123,6 +1124,45 @@
           (switch-open! (list 'locked g))
           (run-command "switch-to-buffer")))))
 
+(define (web--browse-group!)
+  (if (boundp 'group-ensure-record!)
+      (group-ensure-record! "browse")
+      "browse"))
+
+(define (web--view-label view)
+  (cond ((equal? view "mono") "rendered monospace")
+        ((equal? view "serif") "rendered serif")
+        (else "Markdown source")))
+
+(define (web--apply-view! buf view)
+  (buffer-set-local! buf 'browse-view view)
+  (if (equal? view "source")
+      (when (minor-mode-on? buf "preview-mode")
+        (with-current-buffer buf (lambda () (disable-minor-mode! buf "preview-mode"))))
+      (begin
+        ;; the page stays rendered Markdown; only its type changes
+        (preview-typography! view)
+        (with-current-buffer buf
+          (lambda ()
+            (unless (minor-mode-on? buf "preview-mode")
+              (enable-minor-mode! buf "preview-mode"))
+            (preview-heal! buf)))))
+  (web--update-modeline! buf)
+  (message (string-append "browse: " (web--view-label view))))
+
+(define-command "browse-cycle-view"
+  "Cycle browse between monospace, serif, and Markdown source"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (view (or (buffer-local buf 'browse-view) "mono"))
+           (next (cond ((equal? view "mono") "serif")
+                       ((equal? view "serif") "source")
+                       (else "mono"))))
+      (web--apply-view! buf next))))
+
+(public! 'browse-cycle-view
+  "(run-command \"browse-cycle-view\") — cycle rendered monospace, rendered serif, and Markdown source")
+
 (define (web--install-keys! buf)
   (local-set-key* buf "RET" "browse-follow")
   (local-set-key* buf "s-RET" "browse-follow-new-tab")
@@ -1148,7 +1188,7 @@
   (local-set-key* buf "M-n" "browse-next-tab")
   (local-set-key* buf "M-p" "browse-prev-tab")
   (local-set-key* buf "R" "browse-toggle-reading")
-  (local-set-key* buf "C-c C-v" "preview-mode")
+  (local-set-key* buf "C-c C-v" "browse-cycle-view")
   (local-set-key* buf "q" "quit-window"))
 
 (define-mode "browse-mode"
@@ -1168,11 +1208,17 @@
                 'size writing-font-size
                 'line-height writing-line-height)))
       ;; Generated browse buffers have no .md suffix, so declare the
-      ;; renderer. Preview is the default; C-c C-v toggles source.
+      ;; renderer. A page is rendered Markdown, in the type every rendered
+      ;; page uses.
       (buffer-set-local! buf 'preview-renderer "markdown")
-      (if (minor-mode-on? buf "preview-mode")
-          (preview-heal! buf)
-          (enable-minor-mode! buf "preview-mode"))
+      (unless (buffer-local buf 'browse-view)
+        (buffer-set-local! buf 'browse-view (preview-typography)))
+      (if (equal? (buffer-local buf 'browse-view) "source")
+          (when (minor-mode-on? buf "preview-mode")
+            (disable-minor-mode! buf "preview-mode"))
+          (if (minor-mode-on? buf "preview-mode")
+              (preview-heal! buf)
+              (enable-minor-mode! buf "preview-mode")))
       (web--install-keys! buf)
       (web--apply-meta-faces! buf)
       (web--apply-separator-faces! buf)
@@ -1231,12 +1277,14 @@ C-s searches to any link.")
   (or (web--buffer-for url)
       (let ((name (string-append "*browse:" (web--slug url) "*")))
         (buffer-create name)
-        (buffer-set-local! name 'group "browse")
+        (buffer-add-group! name (web--browse-group!))
         (with-current-buffer name (lambda () (set-mode! "browse-mode")))
         (web--goto-url! name url #t)
         name)))
 
 (define (web--open-tab! url)
+  (let ((group (web--browse-group!)))
+    (when (boundp 'switch-to-group!) (switch-to-group! group)))
   (let ((tab (web--tab-for! url)))
     (switch-to-buffer! tab)
     tab))

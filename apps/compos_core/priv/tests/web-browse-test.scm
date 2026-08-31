@@ -45,6 +45,44 @@
                 (buffer-kill! b)))
             (buffer-list)))
 
+(deftest 'browse-starts-in-the-browse-group-and-cycles-views
+  "browse starts in its named group and cycles both rendered types before source"
+  (lambda ()
+    ;; the type of a rendered page is a setting, so give it back
+    (let ((before (preview-typography)))
+      (preview-typography! "mono")
+      (t--web-with-fetch
+        (lambda (url want k) (k (list want (t--web-pages url) #f)))
+        (lambda ()
+          (let ((buf (browse "https://site.test/index.html")))
+            (check-equal! (group-name (buffer-group buf)) "browse"
+                          "the page belongs to the browse group")
+            (check-equal! (buffer-local buf 'browse-view) "mono"
+                          "browse opens in the type rendered pages use")
+            (check-true! (minor-mode-on? buf "preview-mode")
+                         "the default renders the Markdown")
+            (with-current-buffer buf (lambda () (run-command "browse-cycle-view")))
+            (check-equal! (buffer-local buf 'browse-view) "serif"
+                          "the first cycle selects serif")
+            (check-equal! (preview-typography) "serif"
+                          "the cycle changes the type of every rendered page")
+            (check-true! (minor-mode-on? buf "preview-mode")
+                         "serif still renders the Markdown")
+            (check-equal! (buffer-local buf 'render-mode) "markdown"
+                          "a type change never leaves the rendered page")
+            (with-current-buffer buf (lambda () (run-command "browse-cycle-view")))
+            (check-equal! (buffer-local buf 'browse-view) "source"
+                          "the second cycle selects source")
+            (check-false! (minor-mode-on? buf "preview-mode")
+                          "source is the only step that leaves the rendered page")
+            (with-current-buffer buf (lambda () (run-command "browse-cycle-view")))
+            (check-equal! (buffer-local buf 'browse-view) "mono"
+                          "the third cycle returns to monospace")
+            (check-true! (minor-mode-on? buf "preview-mode")
+                         "rendering returns without changing the Markdown"))))
+      (t--web-kill-tabs!)
+      (preview-typography! before))))
+
 ;;; --- the page -----------------------------------------------------------------
 
 (deftest 'a-page-keeps-markdown-and-preview-owns-the-rendering
@@ -64,6 +102,8 @@
                        "preview is the default view")
           (check-equal! (buffer-local buf 'render-mode) "markdown"
                         "preview owns the rendered view")
+          (check-false! (buffer-local buf 'preview-rows)
+                        "the page renders as a page, never as painted rows")
 
           ;; the reading look: centered writing measure, no line numbers
           (check-equal! (buffer-local buf 'window-class) "writing"

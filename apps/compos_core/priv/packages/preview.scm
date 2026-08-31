@@ -13,6 +13,70 @@
 (domain! 'interaction)
 (effects! '(write))
 
+(domain! 'ui)
+(effects! '(write))
+
+;;; --- rendered page typography -----------------------------------------------
+
+(define *preview-serif* "Spectral,Georgia,serif")
+(define *preview-mono* "'IBM Plex Mono',ui-monospace,Menlo,monospace")
+
+(defcustom 'preview-font-family *preview-serif*
+  "Font family for rendered preview pages."
+  'group 'preview
+  'set (lambda (v) (set-face-attribute! 'preview 'family v)))
+
+(defcustom 'preview-font-size "16.5px"
+  "Font size for rendered preview pages."
+  'group 'preview
+  'set (lambda (v) (set-face-attribute! 'preview 'size v)))
+
+(defcustom 'preview-measure "33em"
+  "Maximum line length for rendered preview pages."
+  'group 'preview
+  'set (lambda (v) (set-face-attribute! 'preview 'measure v)))
+
+(set-face-attribute! 'preview
+  'family preview-font-family
+  'size preview-font-size
+  'measure preview-measure)
+
+;; The type of a rendered page is one choice, "mono" or "serif", and every
+;; rendered page takes it: the renderer bakes the preview face into the page,
+;; so a buffer cannot hold a type of its own. Each choice carries its own size
+;; and measure, because a monospace character is wider and the same character
+;; count needs more em.
+(define (preview-typography)
+  (if (string-contains? preview-font-family "Mono") "mono" "serif"))
+
+(define (preview-typography! view)
+  (let ((mono? (equal? view "mono")))
+    (customize-set! 'preview-font-family (if mono? *preview-mono* *preview-serif*))
+    (customize-set! 'preview-font-size (if mono? "14.5px" "16.5px"))
+    (customize-set! 'preview-measure (if mono? "42em" "33em"))
+    ;; Rows draw on the text surface, so they read the setting themselves.
+    (for-each
+      (lambda (buf)
+        (when (buffer-local buf 'preview-rows)
+          (preview--rows-look! buf)))
+      (buffer-list))
+    view))
+
+(define-command "preview-font-toggle"
+  "Switch rendered preview pages between serif and monospace"
+  (lambda ()
+    (let ((view (if (equal? (preview-typography) "mono") "serif" "mono")))
+      (preview-typography! view)
+      (message (string-append "rendered pages: "
+                             (if (equal? view "mono") "monospace" "serif"))))))
+
+(public! 'preview-font-toggle
+  "(run-command \"preview-font-toggle\") — flip rendered pages between serif and monospace")
+(public! 'preview-typography
+  "(preview-typography) — the type rendered pages use now: \"mono\" or \"serif\"")
+(public! 'preview-typography!
+  "(preview-typography! VIEW) — set the type of every rendered page: \"mono\" or \"serif\"")
+
 ;; preview-mode: render the buffer instead of showing its source.
 ;; Renderer picked by *preview-renderers* (extension -> renderer); the
 ;; frontend knows "html" and "markdown". Add your own:

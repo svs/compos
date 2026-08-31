@@ -5157,25 +5157,21 @@
 ;; reuse a window already showing NAME, else the first other window, else
 ;; split. Returns the window used.
 (define (display-buffer-other-window! name)
+  ;; window-set-buffer! takes a window id. switch-to-buffer! cannot do this
+  ;; job: it answers a frame buffer-context before it looks at a window, so
+  ;; an agent asked to show a file moved only its own context and the window
+  ;; never changed. Nothing here selects a window, so point stays put.
   (let* ((me (active-window))
          (showing (window-showing name))
-         (target
-           (if (and showing (not (equal? showing me)))
-               showing
-               (other-window-id me))))
-    (if target
-        (begin
-          (select-window! target)
-          (switch-to-buffer! name)
-          (select-window! me)
-          target)
-        (begin
-          (split-window! 'h 0.5)
-          (other-window!)
-          (switch-to-buffer! name)
-          (let ((w (active-window)))
-            (select-window! me)
-            w)))))
+         (reuse (if (and showing (not (equal? showing me))) showing #f))
+         (target (or reuse
+                     (other-window-id me)
+                     (begin (split-window! 'h 0.5) (other-window-id me)))))
+    (when target
+      ;; a buffer the user can see must be a buffer the user can switch to
+      (when (boundp 'buffer-promote!) (buffer-promote! name))
+      (window-set-buffer! target name))
+    target))
 
 ;;; --- peek -----------------------------------------------------------------------
 ;;; A peek shows a buffer to look at it, without adopting it into the

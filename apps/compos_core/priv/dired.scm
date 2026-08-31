@@ -619,20 +619,43 @@
             (string-append dir "/" e))
         #f)))
 
-;; default-directory: dired's dir, else the file's dir, else a path-shaped
-;; buffer name, else the dir the buffer was born in (buffer-create copies
-;; it from the creating buffer), else ~
+;; default-directory: dired's dir, else the chat's companion project, else
+;; the file's dir, else a path-shaped buffer name, else the dir the buffer
+;; was born in (buffer-create copies it from the creating buffer), else ~
 (define (path-directory p)
   (let ((i (string-rindex p "/")))
     (if i (substring-bytes p 0 (+ i 1)) p)))
+
+;; A chat works in its companions' project. The group's first file member
+;; names the tree, and that tree's git root is the chat's directory. The
+;; chat's own save file lives under the chats home, and a search or a
+;; shell that starts there reads config, not the project.
+(define (buffer-companion-directory buf)
+  (and (boundp (quote buffer-group))
+       (buffer-local buf 'agent-slug)
+       (or
+         ;; an explicit spawn directory (a worktree, a foreign repo) is
+         ;; chat identity and beats the derivation
+         (buffer-local buf 'chat-directory)
+         (let ((g (buffer-group buf)))
+           (and g
+                (let loop ((ms (group-buffers g)))
+                  (cond ((null? ms) #f)
+                        ((and (not (equal? (car ms) buf)) (buffer-path (car ms)))
+                         (let* ((dir (path-directory (buffer-path (car ms))))
+                                (root (git-root dir)))
+                           (if (string? root) (string-append root "/") dir)))
+                        (else (loop (cdr ms))))))))))
 
 (define (default-directory) (buffer-directory (current-buffer)))
 
 (define (buffer-directory buf)
   (let ((dd (and (dired-buffer? buf) (dired-dir buf)))
+        (companion (buffer-companion-directory buf))
         (p (buffer-path buf))
         (born (buffer-local buf 'default-directory)))
     (cond (dd (string-append dd "/"))
+          (companion companion)
           (p (path-directory p))
           ((string-prefix? "/" buf) (path-directory buf))
           (born born)

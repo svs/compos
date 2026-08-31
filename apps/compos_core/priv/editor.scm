@@ -7456,11 +7456,13 @@
     chat-derived-name
     agent-connector agent-model agent-effort
     chat-presets chat-permission-mode render-mode default-directory
+    ;; the directory the spawner chose; group companions never override it
+    chat-directory
     agent-permission-profile window-class header-line
     code-agent-saved
     workspace-id workspace-name workspace-root workspace-project-root
     workspace-backend workspace-daemon workspace-llm-defaults
-    workspace-isolation-choice))
+    workspace-isolation-choice project-defaults-inherited))
 
 ;; what was SAID — survives restart and save; reset clears it
 ;; ('chat-turns is the pre-record shape: chat-record-migrate! reads it once

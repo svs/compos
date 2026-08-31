@@ -380,7 +380,11 @@
     ;; from. An explicit directory is ordinary chat identity policy and wins
     ;; over buffer-create's interactive inheritance.
     (let ((dir (plist-get opts 'directory)))
-      (when dir (buffer-set-local! buf 'default-directory dir)))
+      (when dir
+        (buffer-set-local! buf 'default-directory dir)
+        ;; the explicit marker: group companions must not override a
+        ;; directory the spawner chose
+        (buffer-set-local! buf 'chat-directory dir)))
     ;; a spawned chat may declare its permission posture up front — the
     ;; first turn can start before anyone could press C-c p
     (let ((pm (plist-get opts 'permission-mode)))

@@ -18,6 +18,24 @@
                   "<images/my sketch.png>"
                   "the destination is valid Markdown")))
 
+(deftest 'a-pasted-images-link-is-relative-to-the-document
+  "an absolute path names this disk only, and no other reader has it"
+  (lambda ()
+    (let* ((root (git-root (default-directory)))
+           (doc (string-append root "/docs/zz-notes.md")))
+      (check-equal! (clipboard-image-link doc (string-append root "/docs/pics/a.png"))
+                    "pics/a.png"
+                    "a picture beside the document")
+      (check-equal! (clipboard-image-link doc (string-append root "/pics/a.png"))
+                    "../pics/a.png"
+                    "and one elsewhere in the project, reached from the document")
+      (check-equal! (clipboard-image-link doc "/tmp/zz-a.png")
+                    "/tmp/zz-a.png"
+                    "a picture outside the project keeps its absolute path")
+      (check-equal! (clipboard-image-link #f "/tmp/zz-a.png")
+                    "/tmp/zz-a.png"
+                    "and so does one pasted into a document with no file"))))
+
 (deftest 'pasted-image-extension-follows-the-clipboard-mime-type
   "The default image name follows the clipboard type"
   (lambda ()

@@ -2232,11 +2232,13 @@ defmodule Compos.Ui.EditorLive do
 
     leaf = %{leaf | text: text}
 
+    dir = preview_dir(leaf.buffer)
+
     opts = [
       whitespace: Compos.Core.Buffer.get_local(leaf.buffer, "whitespace-mode") == true,
       hidden_lines: leaf.hidden_lines,
-      # a pasted image is an absolute path, and a browser will not load one
-      image_src: &local_image_src/1,
+      # a pasted image is a path, not a URL, and a browser will not load one
+      image_src: &local_image_src(&1, dir),
       url_embed: &youtube_embed_html/1,
       csv_source: csv_source_reader(leaf.buffer)
     ]
@@ -2262,7 +2264,8 @@ defmodule Compos.Ui.EditorLive do
 
     html =
       preview_doc(rm, leaf.text, pt, mark, faces, leaf.preview_authored, leaf.overlays,
-        csv_source: csv_source_reader(leaf.buffer)
+        csv_source: csv_source_reader(leaf.buffer),
+        base_dir: preview_dir(leaf.buffer)
       )
 
     {html, cache}
@@ -2277,14 +2280,15 @@ defmodule Compos.Ui.EditorLive do
     end
   end
 
-  defp csv_preview_path(buffer, target) do
-    base =
-      case Compos.Core.Buffer.path(buffer) do
-        path when is_binary(path) -> Path.dirname(path)
-        _ -> Compos.Core.Buffer.get_local(buffer, "default-directory") || File.cwd!()
-      end
+  defp csv_preview_path(buffer, target), do: Path.expand(target, preview_dir(buffer))
 
-    Path.expand(target, base)
+  # The document's own directory. A relative link is written relative to the
+  # file it sits in, so that is what it resolves against.
+  defp preview_dir(buffer) do
+    case Compos.Core.Buffer.path(buffer) do
+      path when is_binary(path) -> Path.dirname(path)
+      _ -> Compos.Core.Buffer.get_local(buffer, "default-directory") || File.cwd!()
+    end
   end
 
   defp md_tree(leaf, tree_key, cache) do
@@ -2699,15 +2703,16 @@ defmodule Compos.Ui.EditorLive do
   defp preview_html("markdown", text, faces, _authored, opts),
     do: markdown_page(earmark_body(text, opts), faces)
 
-  defp earmark_body(text, _opts \\ []) do
+  defp earmark_body(text, opts \\ []) do
     fence_labels = markdown_fence_labels(text)
+    dir = Keyword.get(opts, :base_dir)
 
     case earmark_ast(markdown_preview_source(text)) do
       {:ok, ast} ->
         ast
         |> label_code_blocks(fence_labels)
         |> tag_llm_responses()
-        |> embed_urls()
+        |> embed_urls(dir)
         |> Earmark.Transform.transform(compact_output: false)
         |> String.replace(@pt_sentinel, ~s(<span class="pt"></span>))
         |> String.replace("\uE001", ~s(<span class="mk"></span>))
@@ -3156,9 +3161,10 @@ defmodule Compos.Ui.EditorLive do
   # the status id still names the same tweet
   @tweet_re ~r{\Ahttps?://(?:mobile\.)?(?:twitter|x)\.com/[^/]+/status(?:es)?/\d+(?:[?#]\S*)?\z}
 
-  defp embed_urls(nodes) when is_list(nodes), do: Enum.flat_map(nodes, &embed_node/1)
+  defp embed_urls(nodes, dir) when is_list(nodes),
+    do: Enum.flat_map(nodes, &embed_node(&1, dir))
 
-  defp embed_node({"p", atts, children, meta}) do
+  defp embed_node({"p", atts, children, meta}, dir) do
     source = llm_marker_text(children)
 
     clean =
@@ -3170,12 +3176,12 @@ defmodule Compos.Ui.EditorLive do
     url = embed_directive_url(clean) || String.trim(clean)
 
     case youtube_id(url) do
-      nil -> [{"p", atts, embed_urls(children), meta}]
+      nil -> [{"p", atts, embed_urls(children, dir), meta}]
       id -> [youtube_card_node(url, id, meta), preview_markers(source)]
     end
   end
 
-  defp embed_node({"a", atts, [text], meta} = node) when is_binary(text) do
+  defp embed_node({"a", atts, [text], meta} = node, _dir) when is_binary(text) do
     url = String.replace(text, @pt_sentinel, "")
 
     # the href carries the sentinel percent-encoded; the text carries it raw
@@ -3200,22 +3206,25 @@ defmodule Compos.Ui.EditorLive do
     end
   end
 
-  defp embed_node({"img", atts, children, meta}) do
+  defp embed_node({"img", atts, children, meta}, dir) do
     atts =
       Enum.map(atts, fn
-        {"src", src} when is_binary(src) -> {"src", local_image_src(src)}
+        {"src", src} when is_binary(src) -> {"src", local_image_src(src, dir)}
         attr -> attr
       end)
 
     [{"img", atts, children, meta}]
   end
 
-  defp embed_node({tag, atts, children, meta}) when is_list(children),
-    do: [{tag, atts, embed_urls(children), meta}]
+  defp embed_node({tag, atts, children, meta}, dir) when is_list(children),
+    do: [{tag, atts, embed_urls(children, dir), meta}]
 
-  defp embed_node(other), do: [other]
+  defp embed_node(other, _dir), do: [other]
 
-  defp local_image_src(src) do
+  # A document's picture is a file path: absolute, or relative to the document
+  # itself. A relative link is the one that survives another checkout, so the
+  # preview resolves it against the document's directory. A URL is left alone.
+  defp local_image_src(src, dir) do
     path =
       if String.starts_with?(src, "<") and String.ends_with?(src, ">") do
         binary_part(src, 1, byte_size(src) - 2)
@@ -3223,7 +3232,12 @@ defmodule Compos.Ui.EditorLive do
         src
       end
 
-    if Path.type(path) == :absolute, do: Compos.Ui.LocalImage.url(path), else: src
+    cond do
+      Path.type(path) == :absolute -> Compos.Ui.LocalImage.url(path)
+      not is_nil(URI.parse(path).scheme) -> src
+      is_binary(dir) -> Compos.Ui.LocalImage.url(Path.expand(path, dir))
+      true -> src
+    end
   end
 
   defp image_url?(url) do

@@ -122,7 +122,9 @@ defmodule Compos.Ui.MouseClipboardTest do
     KeyDispatch.handle_key("y")
 
     assert File.read!(destination) == "png bytes"
-    assert Buffer.text(document) == "![image](#{destination})"
+    # the link is relative to the document: an absolute path names this
+    # machine, and the same file read anywhere else finds no picture
+    assert Buffer.text(document) == "![image](images/diagram.png)"
   end
 
   test "copy with an active region replies with it on the clipboard event", %{conn: conn} do

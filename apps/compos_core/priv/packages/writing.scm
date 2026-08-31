@@ -75,6 +75,34 @@
       (string-append "<" path ">")
       path))
 
+;; The picture is written where the writer chose, but the link is written
+;; relative to the document. An absolute path names this disk only: the same
+;; file read from another checkout, or on GitHub, finds no picture. A path
+;; that leaves the project stays absolute, because no relative link reaches it.
+(define (clipboard-image--parts path)
+  (filter (lambda (part) (not (equal? part "")))
+          (string-split path "/")))
+
+(define (clipboard-image--relative dir full)
+  (let loop ((d (clipboard-image--parts dir))
+             (f (clipboard-image--parts full)))
+    (if (and (pair? d) (pair? f) (equal? (car d) (car f)))
+        (loop (cdr d) (cdr f))
+        (string-join (append (map (lambda (up) "..") d) f) "/"))))
+
+(define (clipboard-image-link doc full)
+  (let ((dir (and (string? doc) (not (equal? doc "")) (car (path-split doc)))))
+    (cond ((not (string? dir)) full)
+          ((string-prefix? dir full)
+           (substring full (string-length dir) (string-length full)))
+          (else
+            (let ((root (git-root dir)))
+              (if (and (string? root)
+                       (string-prefix? (string-append root "/") dir)
+                       (string-prefix? (string-append root "/") full))
+                  (clipboard-image--relative dir full)
+                  full))))))
+
 (define (clipboard-image-save! buf data full)
   (let* ((dir (car (path-split full)))
          (shown-dir (if (and (> (string-length dir) 1)
@@ -87,7 +115,8 @@
           (with-current-buffer buf
             (lambda ()
               (insert! (string-append "![image]("
-                                      (clipboard-image-destination full)
+                                      (clipboard-image-destination
+                                        (clipboard-image-link (buffer-path buf) full))
                                       ")"))))
           (message (string-append "Saved pasted image to " full)))
         (y-or-n

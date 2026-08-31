@@ -22,7 +22,7 @@ defmodule Compos.Core.Agent do
 
   use GenServer, restart: :temporary
 
-  alias Compos.Core.{Buffer, Events, Session}
+  alias Compos.Core.{Buffer, Session}
   alias Compos.Core.Agent.Backend
 
   @registry Compos.Core.AgentRegistry
@@ -191,7 +191,6 @@ defmodule Compos.Core.Agent do
 
     Compos.Core.create_buffer(buffer)
     buffer_ref = Buffer.ref(buffer)
-    Events.subscribe(buffer_ref)
 
     # the agent's Scheme (renderer, policy and record fns) runs in this
     # lane: serial with itself and its group, concurrent with the UI
@@ -216,9 +215,6 @@ defmodule Compos.Core.Agent do
        backend: backend,
        handle: handle,
        status: :starting,
-       # scheme writes banner + steering marker before starting the runtime and
-       # tells us where output goes (just before the marker)
-       mark: Map.get(config, "mark", Buffer.byte_size(buffer)),
        events: [],
        in_flight: false,
        delivery_timer: nil,
@@ -474,20 +470,14 @@ defmodule Compos.Core.Agent do
   end
 
   def handle_call({:append_at_mark, text}, _from, state) do
-    mark = state.mark + byte_size(text)
-
-    # The renderer slices the input region from 'agent-saved-mark. The
-    # insert grows the transcript ABOVE that mark, so the mark has to
-    # advance in the same breath. Set from Scheme afterwards, it lagged by
-    # one frame, and the input row rendered the new transcript text and
-    # the ">>> you: " marker with it — the flash while a reply prints.
+    # The buffer-local 'agent-saved-mark is the one truth for where the
+    # transcript ends. This process held a second copy once, synced over
+    # change events; the copies drifted, and every later insert wrote
+    # transcript text into the input region. The buffer computes the
+    # position and advances the local inside one message.
     try do
-      Buffer.insert_at(state.buffer_ref, state.mark, text,
-        source: {:agent, state.slug},
-        locals: %{"agent-saved-mark" => mark}
-      )
-
-      {:reply, mark, %{state | mark: mark}}
+      {:reply, Buffer.insert_at_mark(state.buffer_ref, text, source: {:agent, state.slug}),
+       state}
     catch
       # Rendering is downstream of the backend. Killing the target buffer
       # must discard a late chunk, not kill the session process with :noproc.
@@ -495,7 +485,17 @@ defmodule Compos.Core.Agent do
     end
   end
 
-  def handle_call(:mark, _from, state), do: {:reply, state.mark, state}
+  def handle_call(:mark, _from, state) do
+    mark =
+      try do
+        Buffer.get_local(state.buffer_ref, "agent-saved-mark") ||
+          Buffer.byte_size(state.buffer_ref)
+      catch
+        :exit, _ -> 0
+      end
+
+    {:reply, mark, state}
+  end
 
   def handle_call(:info, _from, state) do
     {:reply,
@@ -585,19 +585,6 @@ defmodule Compos.Core.Agent do
 
   # ...and for one that was cancelled while we were fetching it
   def handle_info({:context, _epoch, _text, _display, _result}, state), do: {:noreply, state}
-
-  # keep the output mark ahead of user edits above it; our own inserts via
-  # append_at_mark already moved it
-  def handle_info({:buffer_change, ref, change}, %{buffer_ref: ref} = state) do
-    state =
-      if change.source == {:agent, state.slug} do
-        state
-      else
-        %{state | mark: adjust_mark(state.mark, change)}
-      end
-
-    {:noreply, state}
-  end
 
   # nobody is looking at this chat and nobody answered — deny and say so,
   # rather than leaving the turn wedged forever
@@ -1065,12 +1052,4 @@ defmodule Compos.Core.Agent do
   defp coalesce([e | rest]), do: [e | coalesce(rest)]
   defp coalesce([]), do: []
 
-  defp adjust_mark(mark, %{pos: pos, inserted: ins, deleted: del}) do
-    cond do
-      pos > mark -> mark
-      pos + del <= mark -> mark - del + byte_size(ins)
-      # deletion spans the mark — clamp to its start
-      true -> pos + byte_size(ins)
-    end
-  end
 end

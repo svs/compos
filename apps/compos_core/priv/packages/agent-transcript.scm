@@ -437,9 +437,11 @@
           ;; over the text that replaces the line
           (agent-excise-range! buf start end)))
       (agent-block-drop-kind! buf "waiting")
-      (buffer-set-local! buf 'agent-waiting #f)
-      (buffer-set-local! buf 'agent-saved-mark
-        (min (agent-mark slug) (buffer-size buf))))))
+      ;; the excise above already moved 'agent-saved-mark. Do not set it
+      ;; again from the runtime: the runtime's copy of the mark is gone,
+      ;; and a value written from anywhere but the excise put the mark
+      ;; outside the marker, which fed transcript text into the input row.
+      (buffer-set-local! buf 'agent-waiting #f))))
 
 (defcustom 'chat-stream-paragraphs #t
   "Reveal the reply one paragraph at a time. Set #f to reveal every chunk as it arrives."

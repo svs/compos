@@ -260,6 +260,9 @@
         (let ((effort (buffer-local buf 'agent-effort)))
           (if effort (string-append " · " effort) ""))
         (if cost (string-append " · " (format-usd cost)) "")
+        ;; how full the conversation is, when the backend counts it for us
+        (let ((ctx (and (boundp (quote chat-context-label)) (chat-context-label buf))))
+          (if ctx (string-append " · " ctx) ""))
         ;; what will and won't stop to ask — never leave this ambiguous
         " · " (symbol->string (chat-permission-mode buf))
         ;; the agent's own mode, when it is running something other than

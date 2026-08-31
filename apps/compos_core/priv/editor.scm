@@ -8627,13 +8627,23 @@
     (let* ((buf (current-buffer))
            (c (buffer-local buf 'chat-cost))
            (u (buffer-local buf 'chat-last-usage))
+           (ctx (chat-context-tokens buf))
            (total (chat-usage-total buf))
            (rate (chat-hit-rate total)))
-      (if (not (or c u))
-          (message "No priced requests in this chat yet")
+      (if (not (or c u ctx))
+          (message "No usage reported in this chat yet")
           (message
             (string-append
               "This chat: " (if c (format-usd c) "unpriced")
+              ;; what it occupies right now, which is the number a reader
+              ;; asks for when a conversation feels long
+              (if ctx
+                  (string-append " · context "
+                    (number->string (plist-get ctx 'used))
+                    (let ((size (plist-get ctx 'size)))
+                      (if size (string-append " of " (number->string size)) ""))
+                    " tokens")
+                  "")
               " · cache " (number->string (or (plist-get total 'cache-read) 0)) " read / "
               (number->string (or (plist-get total 'cache-write) 0)) " written"
               (if rate (string-append " · " rate " of input cached") "")

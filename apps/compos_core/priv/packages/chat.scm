@@ -487,6 +487,45 @@
     ;; hint, and an unpriced model must not hide it
     (agent-update-modeline! buf)))
 
+;; What the conversation occupies right now: tokens held, and the window
+;; they are held in. The backend reports this as the turn runs, so it is a
+;; count and not an estimate over the transcript. It is a snapshot, so the
+;; latest one replaces the last; only chat-usage-total adds up.
+(define (chat-context-note! buf used size)
+  (when (and (number? used) (> used 0))
+    (buffer-set-local! buf 'chat-context-used used)
+    (when (and (number? size) (> size 0))
+      (buffer-set-local! buf 'chat-context-size size))
+    (agent-update-modeline! buf)))
+
+;; 247773 of 1000000 reads as 248k/1M. The modeline has room for the shape
+;; of the answer, not for its digits.
+(define (chat-tokens-short n)
+  (cond ((>= n 1000000)
+         (let ((m (quotient n 1000000))
+               (frac (quotient (remainder n 1000000) 100000)))
+           (if (= frac 0)
+               (string-append (number->string m) "M")
+               (string-append (number->string m) "." (number->string frac) "M"))))
+        ((>= n 1000)
+         (string-append (number->string (quotient (+ n 500) 1000)) "k"))
+        (else (number->string n))))
+
+;; what the modeline says: how full this conversation is
+(define (chat-context-label buf)
+  (let ((ctx (chat-context-tokens buf)))
+    (and ctx
+         (let ((used (plist-get ctx 'used))
+               (size (plist-get ctx 'size)))
+           (string-append (chat-tokens-short used)
+                          (if size (string-append "/" (chat-tokens-short size)) ""))))))
+
+;; (used U size S), or #f when no backend has reported one
+(define (chat-context-tokens buf)
+  (let ((used (buffer-local buf 'chat-context-used)))
+    (and (number? used)
+         (list 'used used 'size (buffer-local buf 'chat-context-size)))))
+
 ;; the share of billed input that came from the cache, as a percentage
 ;; string, or #f when nothing was billed yet
 (define (chat-hit-rate total)
@@ -599,6 +638,8 @@
 (effects! '(read))
 (public! 'chat-context
   "(chat-context [BUF]) — chat identity, group, companions, workspace, visible context, and prompt state")
+(public! 'chat-context-tokens
+  "(chat-context-tokens BUF) — (used U size S): what this chat occupies of its context window, as the backend counted it")
 (public! 'chat-live-system-prompt-parts
   "(chat-live-system-prompt-parts BUF [TOOLS?]) — current direct prompt fragments before the conversation freeze")
 (effects! '(write))

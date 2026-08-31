@@ -20,7 +20,7 @@
          (type (plist-get e 'type)))
     ;; pending prose reveals before any other block lands, so the
     ;; transcript keeps the model's own order
-    (unless (member type '(chunk status model-state mode-state usage))
+    (unless (member type '(chunk status model-state mode-state usage context))
       (agent-flush-prose! slug #f))
     ;; any sign of life ends the waiting state; a pending chunk keeps the
     ;; waiting line until its first paragraph reveals
@@ -193,8 +193,15 @@
                       "agent-meta")))
          (agent-block-push! buf start (agent-mark slug) "meta" '())))
 
-      ;; the direct lane prices every turn; ACP rides a subscription and
-      ;; emits none, so its modeline stays connector · model
+      ;; what the conversation now occupies, from the backend itself: the
+      ;; ACP lane reports it as the turn runs, so the count is a fact and
+      ;; not an estimate over the transcript
+      ((equal? type 'context)
+       (chat-context-note! buf (plist-get e 'used) (plist-get e 'size)))
+
+      ;; every turn's own tally. The direct lane prices it as well; the ACP
+      ;; lane reports tokens on a subscription, so it counts without a price
+      ;; and its modeline says connector · model
       ((equal? type 'usage)
        (chat-usage-note! buf
          (list 'input (plist-get e 'input) 'output (plist-get e 'output)

@@ -334,7 +334,9 @@ defmodule Compos.Core.Agent.Backend.ACP do
         ingest_config_options(state, Map.get(result, "configOptions"))
 
       {"session/prompt", %{"result" => result}} ->
-        emit(state, type: :"turn-end", "stop-reason": Map.get(result, "stopReason", "end_turn"))
+        state
+        |> emit_usage(Map.get(result, "usage"))
+        |> emit(type: :"turn-end", "stop-reason": Map.get(result, "stopReason", "end_turn"))
 
       {{:steer, token, epoch}, %{"result" => %{"outcome" => "promptRequired"}}} ->
         emit(state, type: :"steering-fallback", token: token, epoch: epoch)
@@ -477,6 +479,16 @@ defmodule Compos.Core.Agent.Backend.ACP do
       "current_mode_update" ->
         emit(state, type: :"mode-state", current: Map.get(update, "currentModeId", ""))
 
+      # what this conversation now occupies, reported as the turn runs:
+      # tokens held and the window they are held in. It is a snapshot, not
+      # an increment — Scheme keeps the latest, it does not add them up.
+      "usage_update" ->
+        emit(state,
+          type: :context,
+          used: acp_int(update, "used"),
+          size: acp_int(update, "size")
+        )
+
       "config_option_update" ->
         ingest_config_options(state, Map.get(update, "configOptions"))
 
@@ -486,6 +498,30 @@ defmodule Compos.Core.Agent.Backend.ACP do
   end
 
   defp handle_update(state, _), do: state
+
+  # PromptResponse.usage is this turn's own tally: the adapter resets it
+  # when the turn activates, so a conversation's turns add up without
+  # counting a token twice. An adapter that sends none leaves the chat
+  # unpriced, exactly as before.
+  defp emit_usage(state, usage) when is_map(usage) do
+    emit(state,
+      type: :usage,
+      input: acp_int(usage, "inputTokens"),
+      output: acp_int(usage, "outputTokens"),
+      "cache-read": acp_int(usage, "cachedReadTokens"),
+      "cache-write": acp_int(usage, "cachedWriteTokens")
+    )
+  end
+
+  defp emit_usage(state, _), do: state
+
+  defp acp_int(map, key) do
+    case Map.get(map, key) do
+      n when is_integer(n) -> n
+      n when is_float(n) -> round(n)
+      _ -> 0
+    end
+  end
 
   defp present_text(value) when is_binary(value) and value != "", do: value
   defp present_text(_), do: nil

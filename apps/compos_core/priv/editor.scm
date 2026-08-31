@@ -6891,7 +6891,7 @@
 ;; Presets supply the complete tool surface. The runtime opens lazily on the
 ;; first send, stays attached to BUF, and (for Codex) records a native thread
 ;; id that a restored buffer resumes.
-(define (llm-mode--complete buf wire display model handler chunk-handler)
+(define (llm-mode--complete buf wire display model mark handler chunk-handler)
   (let* ((id (llm-mode--session-id buf))
          (connector (buffer-llm-connector buf))
          ;; the name this connector knows the model by: the API lane says
@@ -6901,7 +6901,7 @@
          (config (agent-resolve-config
                    (append
                      (list 'connector connector 'model model
-                           'buffer buf 'mark (point)
+                           'buffer buf 'mark mark
                            ;; ReqLLM consumes SPECS above directly. ACP
                            ;; sessions instead mount the MCP servers named by
                            ;; these same presets at session/new, exactly as a
@@ -6975,12 +6975,72 @@
           (if (equal? (string-trim tail) "") "" tail))
         snapshot)))
 
-(define-command "llm-send-buffer" "Send this document to the LLM and stream its reply below point"
+;; Where a reply goes. A reply is a block of its own, so it belongs after the
+;; block point sits in — never inside it, and never above the prompt just
+;; typed. The scan is fence-aware, so an answer cannot land between two
+;; backtick lines either.
+(define (llm-mode--lines buf)
+  ;; ((START END TEXT) ...) — every line of BUF with its byte range.
+  (let loop ((ls (string-split (buffer-text buf) "\n")) (start 0) (acc '()))
+    (if (null? ls)
+        (reverse acc)
+        (let ((end (+ start (string-byte-length (car ls)))))
+          (loop (cdr ls) (+ end 1) (cons (list start end (car ls)) acc))))))
+
+(define (llm-mode--blocks buf)
+  ;; The document as (START END) blocks. A fenced block runs from its opening
+  ;; fence to the end of its closing fence; any other run of non-blank lines
+  ;; is a paragraph; a blank line separates two of them.
+  (let loop ((ls (llm-mode--lines buf)) (open #f) (fence #f) (last 0) (acc '()))
+    (if (null? ls)
+        (reverse (if open (cons (list open last) acc) acc))
+        (let* ((l (car ls))
+               (start (car l))
+               (end (cadr l))
+               (trimmed (string-trim (caddr l)))
+               (fence-line (string-prefix? "```" trimmed))
+               (blank (equal? trimmed "")))
+          (cond
+            (fence
+              (if fence-line
+                  (loop (cdr ls) #f #f end (cons (list open end) acc))
+                  (loop (cdr ls) open #t end acc)))
+            (fence-line
+              (loop (cdr ls) start #t end
+                    (if open (cons (list open last) acc) acc)))
+            (blank
+              (loop (cdr ls) #f #f end
+                    (if open (cons (list open last) acc) acc)))
+            (else (loop (cdr ls) (or open start) #f end acc)))))))
+
+(define (llm-mode--insert-at buf pos)
+  ;; Between two blocks POS is already the right place.
+  (let* ((size (buffer-size buf))
+         (at (max 0 (min pos size))))
+    (let loop ((bs (llm-mode--blocks buf)))
+      (cond ((null? bs) at)
+            ((and (<= (car (car bs)) at) (<= at (cadr (car bs))))
+             (cadr (car bs)))
+            (else (loop (cdr bs)))))))
+
+(define (llm-mode--aim! buf at)
+  ;; The reply streams at the buffer's agent mark, and that mark otherwise
+  ;; only remembers where the last reply ended — above anything written
+  ;; since. A document aims it at this send. A chat's mark owns the input
+  ;; region and is never ours to move.
+  (unless (chat-buffer? buf)
+    (buffer-set-local! buf 'agent-saved-mark at)))
+
+(define-command "llm-send-buffer" "Send this document to the LLM and stream its reply below the block at point"
   (lambda ()
-    (let ((buf (current-buffer))
-          (at (point))
-          (context (buffer-text (current-buffer)))
-          (model (buffer-llm-model (current-buffer))))
+    (let* ((buf (current-buffer))
+           (at (point))
+           (context (buffer-text (current-buffer)))
+           ;; Where the answer belongs: after the block point sits in. The
+           ;; agent mark on its own only remembers where the last reply
+           ;; ended, so a prompt typed below it would be answered above.
+           (insert-at (llm-mode--insert-at buf at))
+           (model (buffer-llm-model (current-buffer))))
       ;; Like gptel-send, the first invocation turns on the buffer-local
       ;; interaction mode. writing-mode enables it eagerly.
       (unless (minor-mode-on? buf "llm-mode")
@@ -6998,8 +7058,9 @@
              (message "Nothing new to send"))
             (else
               (message (string-append "LLM thinking · " model))
+              (llm-mode--aim! buf insert-at)
               (let ((streamed #f))
-                (llm-mode--complete buf wire context model
+                (llm-mode--complete buf wire context model insert-at
                   (lambda (result error)
                     (if (not (buffer-exists? buf))
                         (message "LLM reply discarded — its buffer was killed")
@@ -7023,7 +7084,7 @@
                             ;; The untouched suffix was part of the sent
                             ;; snapshot when insertion happened in the middle.
                             (buffer-set-local! buf 'llm-session-dirty
-                              (< at (string-byte-length context))))
+                              (< insert-at (string-byte-length context))))
                           (when (not error) (message "LLM response inserted")))))
                   (lambda (chunk)
                     (when (buffer-exists? buf)

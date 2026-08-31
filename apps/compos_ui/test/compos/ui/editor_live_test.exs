@@ -317,6 +317,24 @@ defmodule Compos.Ui.EditorLiveTest do
     assert Base.decode64!(encoded) =~ "Stable preview"
   end
 
+  test "inline code is monospaced in the in-place Markdown preview", %{conn: conn} do
+    buf = "ui-preview-code-#{System.unique_integer([:positive])}.md"
+    Compos.Core.Editor.set_window_buffer(buf)
+    Compos.Core.Buffer.append(buf, "Use `group-add` here.\n", source: :editor)
+
+    {:ok, _} =
+      Compos.Core.Session.eval(
+        ~s{(begin (set-mode! "morg-mode") (enable-minor-mode! "#{buf}" "preview-mode"))}
+      )
+
+    {:ok, view, _} = live(conn, "/")
+    html = render(view)
+
+    assert html =~ ~s(<span class="f-morg-code">group-add</span>)
+    assert html =~ ~s(--morg-code-family:'IBM Plex Mono',ui-monospace,Menlo,monospace;)
+    assert html =~ "font-family:var(--morg-code-family);"
+  end
+
   test "TAB folds a Morg block in preview mode", %{conn: conn} do
     buf = Compos.Core.Editor.current_buffer()
     text = "before\n\n```scheme\nsecret body\n```\n\nafter\n"
@@ -351,6 +369,37 @@ defmodule Compos.Ui.EditorLiveTest do
     assert Compos.Core.Buffer.hidden(buf) == []
     html = render(view)
     assert decode.(html) =~ "secret body"
+  end
+
+  test "a preview point update lets TAB fold a Morg heading", %{conn: conn} do
+    buf = Compos.Core.Editor.current_buffer()
+    text = "# top\ntop section prose\n## child\nchild section prose\n# next\n"
+    Compos.Core.Buffer.append(buf, text, source: :editor)
+
+    {:ok, _} =
+      Compos.Core.Session.eval(
+        ~s{(begin (set-mode! "morg-mode") (buffer-set-local! "#{buf}" 'preview-renderer "markdown") (enable-minor-mode! "#{buf}" "preview-mode"))}
+      )
+
+    {:ok, view, html} = live(conn, "/")
+    [_, encoded] = Regex.run(~r/data-doc="([^"]+)"/, html)
+    assert Base.decode64!(encoded) =~ "child section prose"
+
+    win = Compos.Core.Editor.render_state().tree.id
+
+    view
+    |> element("#editor")
+    |> render_hook("preview_goto_pos", %{"win" => win, "pos" => 2})
+
+    assert Compos.Core.Buffer.point(buf) == 2
+    keys(view, ["TAB"])
+
+    assert Compos.Core.Buffer.hidden(buf) != []
+    [_, encoded] = Regex.run(~r/data-doc="([^"]+)"/, render(view))
+    page = Base.decode64!(encoded)
+    refute page =~ "top section prose"
+    refute page =~ "child section prose"
+    assert page =~ "next"
   end
 
   test "an HTML preview click maps to source and the normal key path edits it", %{conn: conn} do

@@ -551,7 +551,9 @@
 
 ;;; --- fontification -----------------------------------------------------------
 
-(defface! 'morg-code 'fg "#3d6b4f")
+(defface! 'morg-code
+  'fg "#3d6b4f"
+  'family "'IBM Plex Mono',ui-monospace,Menlo,monospace")
 (defface! 'morg-bold 'weight "700")
 (defface! 'morg-italic 'style "italic")
 (defface! 'morg-result 'fg "#8a857a")

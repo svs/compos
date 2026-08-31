@@ -347,6 +347,10 @@
 (add-hook! 'post-command-hook chat-input-post-command!)
 
 (define (agent-install-keys! buf)
+  ;; the mark is a marker: the buffer keeps the position current through
+  ;; every edit. Declared here because every chat passes through this fn,
+  ;; on setup, attach, and restore alike.
+  (buffer-marker-local! buf 'agent-saved-mark)
   (local-set-key* buf "DEL" "chat-delete-backward")
   (local-set-key* buf "C-d" "chat-delete-forward")
   (local-set-key* buf "RET" "agent-send")

@@ -53,12 +53,43 @@ defmodule Compos.ChatInputMarkerTest do
     assert Buffer.insert_at_local(name, "agent-saved-mark", "grow") == 8
     assert Buffer.text(name) == "headgrow#{@marker}draft"
     assert Buffer.get_local(name, "agent-saved-mark") == 8
+  end
 
-    # a second agent mark on the same buffer is just another local
-    Buffer.set_local(name, "other-mark", 0)
-    assert Buffer.insert_at_local(name, "other-mark", "pre|") == 4
-    assert Buffer.text(name) == "pre|headgrow#{@marker}draft"
-    assert Buffer.get_local(name, "other-mark") == 4
+  test "a marker local rides every edit; several stay solid at once" do
+    name = "*marker-test*"
+    Compos.Core.create_buffer(name)
+    on_exit(fn -> Compos.Core.kill_buffer(name) end)
+
+    Buffer.append(name, "aaaa|bbbb|cccc")
+    Buffer.set_local(name, "m1", 4)
+    Buffer.set_local(name, "m2", 9)
+    Buffer.declare_marker_local(name, "m1", :advance)
+    Buffer.declare_marker_local(name, "m2", :stay)
+
+    # an insert before both shifts both
+    Buffer.insert_at(name, 0, "..")
+    assert Buffer.get_local(name, "m1") == 6
+    assert Buffer.get_local(name, "m2") == 11
+
+    # text landing exactly on a marker: advance moves, stay does not
+    Buffer.insert_at(name, 6, "X")
+    assert Buffer.get_local(name, "m1") == 7
+    Buffer.insert_at(name, 11 + 1, "Y")
+    assert Buffer.get_local(name, "m2") == 12
+
+    # a delete before pulls back; one spanning clamps to its start
+    Buffer.delete_range(name, 0, 2)
+    assert Buffer.get_local(name, "m1") == 5
+    assert Buffer.get_local(name, "m2") == 10
+    Buffer.delete_range(name, 4, 3)
+    assert Buffer.get_local(name, "m1") == 4
+    assert Buffer.get_local(name, "m2") == 7
+
+    # insert_at_local on one marker shifts the other with it
+    pos = Buffer.insert_at_local(name, "m1", "zz")
+    assert pos == 6
+    assert Buffer.get_local(name, "m1") == 6
+    assert Buffer.get_local(name, "m2") == 9
   end
 
   test "the marker stays at the mark across transmits, and typed input survives" do

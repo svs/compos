@@ -370,6 +370,17 @@ defmodule Compos.Core.Buffer do
   def insert_at_local(name, local, text, opts \\ []),
     do: GenServer.call(via(name), {:insert_at_local, local, text, source(opts), author(opts)})
 
+  @doc """
+  Declare the buffer-local LOCAL a marker: a byte position this buffer keeps
+  current through every edit, the way it already keeps point. Nobody holds a
+  byte; a caller holds the name, and reads the local. TYPE :advance moves the
+  marker when text lands exactly on it; :stay leaves it before that text.
+  The declaration lives in the "marker-locals" local, so it survives a
+  restart with the rest of the buffer's locals.
+  """
+  def declare_marker_local(name, local, type \\ :advance) when type in [:advance, :stay],
+    do: GenServer.call(via(name), {:declare_marker_local, local, type})
+
   @doc "Replace LEN bytes at POS with TEXT as one undo step."
   def replace_range(name, pos, len, text, opts \\ []),
     do: GenServer.call(via(name), {:replace_range, pos, len, text, source(opts), author(opts)})
@@ -1183,12 +1194,36 @@ defmodule Compos.Core.Buffer do
     size = Rope.byte_size(state.rope)
     pos = min(Map.get(state.locals, local) || size, size)
     new_pos = pos + Kernel.byte_size(text)
-    # the local moves in the same message as the insert: a frame painted
-    # from the broadcast must not see a stale position
-    state = %{state | locals: Map.put(state.locals, local, new_pos)}
 
-    {:reply, new_pos,
-     state |> do_insert(pos, text, src, author) |> touch_state() |> checkpoint_later()}
+    state =
+      case marker_type(state, local) do
+        # a declared marker moves inside do_insert, before the broadcast —
+        # setting it here too would move it twice
+        :advance ->
+          do_insert(state, pos, text, src, author)
+
+        :stay ->
+          state |> do_insert(pos, text, src, author) |> put_local_state(local, new_pos)
+
+        # an undeclared local moves by hand, before the insert: the frame
+        # the broadcast paints must not see a stale position
+        nil ->
+          %{state | locals: Map.put(state.locals, local, new_pos)}
+          |> do_insert(pos, text, src, author)
+      end
+
+    {:reply, new_pos, state |> touch_state() |> checkpoint_later()}
+  end
+
+  defp on_call({:declare_marker_local, local, type}, _from, state) do
+    decl =
+      (Map.get(state.locals, "marker-locals") || [])
+      |> marker_pairs()
+      |> List.keystore(local, 0, {local, type})
+      |> Enum.flat_map(fn {n, t} -> [{:sym, n}, {:sym, to_string(t)}] end)
+
+    {:reply, :ok,
+     %{state | locals: Map.put(state.locals, "marker-locals", decl)} |> checkpoint_later()}
   end
 
   defp on_call({:delete_range, pos, len, src, author}, _from, state) do
@@ -2050,8 +2085,10 @@ defmodule Compos.Core.Buffer do
       state
       |> adjust_point_delete(pos, removed)
       |> adjust_ranges(&adjust_delete(&1, pos, removed), &adjust_delete(&1, pos, removed))
+      |> adjust_marker_locals(marker_delete(pos, removed))
       |> adjust_point_insert(pos, added)
       |> adjust_ranges(&adjust_insert(&1, pos, added), &adjust_insert_stay(&1, pos, added))
+      |> adjust_marker_locals(marker_insert(pos, added))
 
     # An undo authors what it restores: the actor who asked for it is
     # responsible for the text coming back. A merge authors nothing new, and
@@ -2336,6 +2373,70 @@ defmodule Compos.Core.Buffer do
   # --- mutation helpers ------------------------------------------------------
 
   # snap?: false only inside :replace_range, which snapshots once for the pair
+  # --- marker locals ---------------------------------------------------------
+  #
+  # A buffer-local named in "marker-locals" is a marker: a byte position the
+  # buffer keeps current through every edit, exactly as it keeps point.
+  # Holding a byte in a process of your own is holding a stale copy; hold the
+  # local's name and read it. When a buffer carries a live history weave, the
+  # same declaration can resolve through a CRDT cursor instead — the
+  # arithmetic below is the lane for buffers that record nothing.
+
+  defp marker_pairs([{:sym, n}, {:sym, t} | rest]),
+    do: [{n, if(t == "stay", do: :stay, else: :advance)} | marker_pairs(rest)]
+
+  defp marker_pairs(_), do: []
+
+  defp marker_type(state, local) do
+    case Map.get(state.locals, "marker-locals") do
+      nil -> nil
+      decl -> decl |> marker_pairs() |> List.keyfind(local, 0) |> then(&(&1 && elem(&1, 1)))
+    end
+  end
+
+  defp put_local_state(state, local, value),
+    do: %{state | locals: Map.put(state.locals, local, value)}
+
+  defp adjust_marker_locals(state, f) do
+    case Map.get(state.locals, "marker-locals") do
+      nil ->
+        state
+
+      decl ->
+        locals =
+          decl
+          |> marker_pairs()
+          |> Enum.reduce(state.locals, fn {name, type}, acc ->
+            case Map.get(acc, name) do
+              m when is_integer(m) -> Map.put(acc, name, f.(m, type))
+              _ -> acc
+            end
+          end)
+
+        %{state | locals: locals}
+    end
+  end
+
+  defp marker_insert(pos, len) do
+    fn m, type ->
+      cond do
+        pos < m -> m + len
+        pos == m and type == :advance -> m + len
+        true -> m
+      end
+    end
+  end
+
+  defp marker_delete(pos, len) do
+    fn m, _type ->
+      cond do
+        m <= pos -> m
+        m >= pos + len -> m - len
+        true -> pos
+      end
+    end
+  end
+
   defp do_insert(state, pos, text, src, author, snap? \\ true) do
     len = Kernel.byte_size(text)
     actor = resolve_actor(author, src)
@@ -2355,6 +2456,8 @@ defmodule Compos.Core.Buffer do
 
     state =
       adjust_ranges(state, &adjust_insert(&1, pos, len), &adjust_insert_stay(&1, pos, len))
+
+    state = adjust_marker_locals(state, marker_insert(pos, len))
 
     # After open_changeset, never before. Opening flushes the previous actor's
     # work, and a document operation applied before that flush would be
@@ -2410,6 +2513,7 @@ defmodule Compos.Core.Buffer do
     state = ts_track(state, old_rope, pos, pos + len, pos)
     state = adjust_point_delete(state, pos, len)
     state = adjust_ranges(state, &adjust_delete(&1, pos, len), &adjust_delete(&1, pos, len))
+    state = adjust_marker_locals(state, marker_delete(pos, len))
     # After open_changeset, for the reason given in do_insert.
     {_changeset, state} = open_changeset(state, actor, src)
     state = mirror_delete(state, pos, len, actor)

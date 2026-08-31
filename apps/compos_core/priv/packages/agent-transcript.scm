@@ -187,10 +187,10 @@
         (when p
           (cond ((>= p end) (buffer-set-local! buf 'agent-prose-from (- p len)))
                 ((> p start) (buffer-set-local! buf 'agent-prose-from start)))))
-      (let ((m (buffer-local buf 'agent-saved-mark)))
-        (when m
-          (cond ((>= m end) (buffer-set-local! buf 'agent-saved-mark (- m len)))
-                ((> m start) (buffer-set-local! buf 'agent-saved-mark start))))))))
+      ;; 'agent-saved-mark is a marker local now — the buffer moved it
+      ;; with the delete itself. A shift written here reads a value the
+      ;; buffer already adjusted and moves it twice.
+      )))
 
 (define (agent--excise-pos p start end len)
   (cond ((<= p start) p)

@@ -7508,6 +7508,9 @@
     ;; the directory the spawner chose; group companions never override it
     chat-directory
     agent-permission-profile window-class header-line
+    ;; which locals are markers is a fact about how the buffer works, so
+    ;; it survives a reset with the rest of the identity
+    marker-locals
     code-agent-saved
     workspace-id workspace-name workspace-root workspace-project-root
     workspace-backend workspace-daemon workspace-llm-defaults
@@ -7840,11 +7843,8 @@
 ;; append at the mark — after every recorded range, so stored offsets
 ;; never shift; the input region past the marker slides along
 (define (chat-render! buf text)
-  (let ((start (chat-mark buf)))
-    (buffer-insert! buf start text)
-    (buffer-set-local! buf 'agent-saved-mark
-      (+ start (string-byte-length text)))
-    start))
+  (- (buffer-insert-at-local! buf 'agent-saved-mark text)
+     (string-byte-length text)))
 
 ;;; --- the input region ------------------------------------------------------------
 ;;; Layout: [transcript … mark][marker][live input]

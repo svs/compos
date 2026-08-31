@@ -55,6 +55,8 @@ defmodule Compos.Core.SchemeAPI do
         "(buffer-insert! BUF POS TEXT) — insert TEXT at byte POS; ignores read-only.",
       "buffer-insert-at-local!" =>
         "(buffer-insert-at-local! BUF LOCAL TEXT) — insert TEXT at the byte position the buffer-local LOCAL names and advance the local, atomically; return the advanced position.",
+      "buffer-marker-local!" =>
+        "(buffer-marker-local! BUF LOCAL &optional TYPE) — declare LOCAL a marker: the buffer keeps the position current through every edit, as it keeps point. TYPE 'advance (default) moves it with text inserted exactly on it; 'stay does not.",
       "buffer-delete-range!" =>
         "(buffer-delete-range! BUF POS LEN) — delete LEN bytes at byte POS; ignores read-only.",
       "buffer-replace-range!" =>
@@ -538,6 +540,21 @@ defmodule Compos.Core.SchemeAPI do
       end,
       "buffer-insert-at-local!" => fn [name, local, text] ->
         Buffer.insert_at_local(name, plain(local), to_string(text), source: :editor)
+      end,
+      "buffer-marker-local!" => fn
+        [name, local] ->
+          :ok = Buffer.declare_marker_local(name, plain(local))
+          :void
+
+        [name, local, type] ->
+          :ok =
+            Buffer.declare_marker_local(
+              name,
+              plain(local),
+              if(plain(type) == "stay", do: :stay, else: :advance)
+            )
+
+          :void
       end,
       "buffer-delete-range!" => fn [name, pos, len] ->
         :ok = Buffer.delete_range(name, pos, len, source: :editor)

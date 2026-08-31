@@ -47,54 +47,71 @@
 
 ;;; --- the page -----------------------------------------------------------------
 
-(deftest 'a-page-renders-as-text-labels-stay-targets-hide-syntax-goes
-  "the reader gets prose; the targets live in a buffer-local"
+(deftest 'a-page-keeps-markdown-and-preview-owns-the-rendering
+  "the canonical page is Markdown; preview-mode draws it in the same tab"
   (lambda ()
     (t--web-with-fetch
       (lambda (url want k) (k (list want (t--web-pages url) #f)))
       (lambda ()
         (let* ((buf (browse "https://site.test/index.html"))
                (text (buffer-text buf)))
-          (check-contains! text "Front page" "the heading text")
-          (check-false! (string-contains? text "# Front page") "and not its mark")
-          (check-contains! text "second page" "the link label")
-          (check-false! (string-contains? text "](/second.html") "and not its target")
-          (check-false! (string-contains? text "(docs/intro.html") "nor a relative one")
-          (check-false! (buffer-local buf 'render-mode) "the page is text, not blocks")
+          (check-contains! text "# Front page" "the heading marker stays")
+          (check-contains! text "[second page](/second.html)"
+                           "the link target stays")
+          (check-equal! (buffer-local buf 'preview-renderer) "markdown"
+                        "the generated buffer declares Markdown")
+          (check-true! (minor-mode-on? buf "preview-mode")
+                       "preview is the default view")
+          (check-equal! (buffer-local buf 'render-mode) "markdown"
+                        "preview owns the rendered view")
 
           ;; the reading look: centered writing measure, no line numbers
-          (check-equal! (buffer-local buf 'window-class) "writing" "the writing measure")
-          (check-equal! (buffer-local buf 'line-numbers) "off" "no line numbers")
+          (check-equal! (buffer-local buf 'window-class) "writing"
+                        "the writing measure")
+          (check-equal! (buffer-local buf 'line-numbers) "off"
+                        "no line numbers")
 
+          ;; Keyboard navigation still uses positions in the same Markdown.
           (let ((links (value->string (buffer-local buf 'web-links))))
             (check-contains! links "/second.html" "the first target")
             (check-contains! links "docs/intro.html" "the second")
-            (check-contains! links "https://other.test/x" "and the one that leaves")))))
+            (check-contains! links "https://other.test/x"
+                             "and the one that leaves")))))
     (t--web-kill-tabs!)))
 
 (deftest 'every-page-is-its-own-tab-in-the-browse-group
-  "a url from outside returns to its tab; a url inside one navigates in place"
+  "outside returns to a tab; preview links navigate that tab in place"
   (lambda ()
     (t--web-with-fetch
       (lambda (url want k) (k (list want (t--web-pages url) #f)))
       (lambda ()
         (let ((a (browse "https://site.test/index.html")))
+          (check-contains! (buffer-local a 'modeline-name) "site.test/index.html"
+                           "the visible title names the first page")
           (switch-to-buffer! "*scratch*")
           (let ((b (browse "https://site.test/second.html")))
             (check-false! (equal? a b) "two pages, two tabs")
             (check-contains! a "*browse:" "the tab is named for the page")
-            ;; 'group is the legacy field: the first read migrates it into a
-            ;; group record and clears it. Ask the group.
             (check-equal! (group-name (buffer-group b)) "browse"
                           "both sit in the browse group")
 
-            ;; the same url from outside returns to its tab, not a new one
             (switch-to-buffer! "*scratch*")
-            (check-equal! (browse "https://site.test/second.html") b "the same url returns")
+            (check-equal! (browse "https://site.test/second.html") b
+                          "the same url returns")
 
-            ;; inside a tab, a url navigates IN PLACE
+            ;; The rendered preview sends relative links back through browse.
             (switch-to-buffer! a)
-            (check-equal! (browse "https://site.test/second.html") a "a tab navigates itself")))))
+            (buffer-goto! a 12)
+            (preview-follow-link! (active-window) "second.html")
+            (check-equal! (current-buffer) a "preview navigation stays in tab")
+            (check-equal! (buffer-local a 'browse-url)
+                          "https://site.test/second.html"
+                          "the relative target resolves against the page")
+            (check-equal! (buffer-point a) 0
+                          "new navigation starts at the top")
+            (check-contains! (buffer-local a 'modeline-name)
+                             "site.test/second.html"
+                             "the visible title follows navigation")))))
     (t--web-kill-tabs!)))
 
 ;;; --- the cache ----------------------------------------------------------------
@@ -143,12 +160,14 @@
 ;;; --- the pure passes ----------------------------------------------------------
 
 (deftest 'relative-links-resolve-against-the-page-directory-and-the-origin
-  "four shapes, one rule each"
+  "five shapes, one rule each"
   (lambda ()
     (check-equal! (web--resolve "/a/b.html" "https://h.test/x/y.html")
                   "https://h.test/a/b.html" "an absolute path")
     (check-equal! (web--resolve "b.html" "https://h.test/x/y.html")
                   "https://h.test/x/b.html" "a sibling")
+    (check-equal! (web--resolve "#part" "https://h.test/x/y.html")
+                  "https://h.test/x/y.html#part" "a heading on this page")
     (check-equal! (web--resolve "//cdn.test/z" "https://h.test/x")
                   "https://cdn.test/z" "a protocol-relative host")
     (check-equal! (web--resolve "https://abs.test/" "https://h.test/")
@@ -171,13 +190,23 @@
                   "A title\n\nsee | this [here]\n" "the tidied text")))
 
 (deftest 'an-image-stays-as-a-link-a-wrapped-pair-is-one-image-icons-go
-  "a link wrapped around its own image is one thing, not two"
+  "an image keeps its source; a link wrapped around its image is one thing"
   (lambda ()
     (let ((out (web--tidy
                  "[](https://c.test/a.jpeg)\n![](https://c.test/a-big.jpeg)\n\n[](https://c.test/icon-anchor)\n\ntext\n")))
       (check-contains! out "[https://c.test/a.jpeg](https://c.test/a.jpeg)" "the image reads as a link")
       (check-false! (string-contains? out "a-big") "the wrapped pair is one image")
-      (check-false! (string-contains? out "icon-anchor") "and the icon goes"))))
+      (check-false! (string-contains? out "icon-anchor") "and the icon goes"))
+    (let* ((parsed (web--parse
+                     "![Diagram](https://c.test/diagram.png \"Diagram title\")"))
+           (text (car parsed))
+           (links (value->string (car (cdr parsed)))))
+      (check-equal! text "https://c.test/diagram.png"
+                    "the overlaid text is the image source")
+      (check-contains! links "https://c.test/diagram.png"
+                       "the image source stays attached"))
+    (check-true! (web--image-url? "https://c.test/logo.svg")
+                 "SVG images draw too")))
 
 (deftest 'apropos-documents-the-xslt-custom-site-parsers
   "the next person adds a parser without reading the package"
@@ -218,12 +247,14 @@
                   "a lookalike host is not the site")))
 
 (deftest 'a-link-is-split-without-a-second-regex
-  "the label holds no ] and the target holds no ), so one index finds both"
+  "the label and target are split once; an optional title is not the URL"
   (lambda ()
     (check-equal! (web--link-parts "[label](https://x.test/a)")
                   (list "label" "https://x.test/a") "a plain link")
     (check-equal! (web--link-parts "![alt](https://x.test/a.png)")
                   (list "alt" "https://x.test/a.png") "an image")
+    (check-equal! (web--link-parts "![alt](https://x.test/a.png \"A title\")")
+                  (list "alt" "https://x.test/a.png") "an image with a title")
     (check-equal! (web--link-parts "[](https://x.test/a)")
                   (list "" "https://x.test/a") "an empty label")))
 

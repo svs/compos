@@ -427,7 +427,18 @@
          (if hit
              ((cadr hit) (cadr parts))
              (message (string-append "No handler for " href)))))
-      ((and (or (string-prefix? "http://" href) (string-prefix? "https://" href))
+      ;; A rendered browse page keeps web navigation in its own tab.
+      ;; Relative targets resolve against the current page, not local files.
+      ((and (equal? (buffer-local source 'mode-name) "browse-mode")
+            (boundp 'browse)
+            (boundp 'url-resolve)
+            (buffer-local source 'browse-url)
+            (or (string-prefix? "http://" href)
+                (string-prefix? "https://" href)
+                (not (re-match "^[A-Za-z][A-Za-z0-9+.-]*:" href))))
+       (browse (url-resolve href (buffer-local source 'browse-url))))
+      ((and (or (string-prefix? "http://" href)
+                (string-prefix? "https://" href))
             (boundp 'browse))
        (browse href))
       ((re-match "^[A-Za-z][A-Za-z0-9+.-]*:" href)

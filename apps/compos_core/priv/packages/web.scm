@@ -191,6 +191,16 @@
 ;; fetch then sends the page's saved ETag, and a 304 costs headers only
 (define *web--revalidate* #f)
 
+;; A hard refresh changes the request URL so the browser and HTTP caches
+;; cannot reuse the previous response. The displayed page URL remains clean.
+(define *web--hard-refresh-seq* 0)
+(define (web--cache-bust-url url)
+  (set! *web--hard-refresh-seq* (+ *web--hard-refresh-seq* 1))
+  (string-append url
+                 (if (string-contains? url "?") "&" "?")
+                 "_compos_refresh="
+                 (number->string *web--hard-refresh-seq*)))
+
 ;; URL -> the raw html. Tests replace this seam. REVALIDATE? sends the
 ;; page's saved ETag (curl --etag-compare): an unchanged page answers
 ;; 304 with no body — headers only — and the caller serves its copy.
@@ -381,7 +391,7 @@
   (or (string-contains? u ".png") (string-contains? u ".jpg")
       (string-contains? u ".jpeg") (string-contains? u ".gif")
       (string-contains? u ".webp") (string-contains? u ".avif")
-      (string-contains? u "/image/")))
+      (string-contains? u ".svg") (string-contains? u "/image/")))
 
 (define *web--empty-link-pattern* "!?\\[\\]\\(([^)\\s]*)\\)")
 
@@ -403,8 +413,13 @@
   (let ((close (string-index m "]"))
         (len (string-byte-length m)))
     (if (and close (< (+ close 2) len))
-        (list (substring-bytes m (if (string-prefix? "!" m) 2 1) close)
-              (substring-bytes m (+ close 2) (- len 1)))
+        (let* ((target (string-trim
+                         (substring-bytes m (+ close 2) (- len 1))))
+               ;; Pandoc may append a quoted title after the URL.
+               (space (string-index target " "))
+               (url (if space (substring-bytes target 0 space) target)))
+          (list (substring-bytes m (if (string-prefix? "!" m) 2 1) close)
+                url))
         (list "" ""))))
 
 (define (web--fix-empty-links s)
@@ -458,7 +473,7 @@
 
 ;; [label](url) and ![label](url) become the label; the output byte
 ;; range and the target collect in LINKS. Anchors (#...) stay plain.
-(define *web--link-pattern* "!?\\[([^]]*)\\]\\(([^)\\s]*)\\)")
+(define *web--link-pattern* "!?\\[([^]]*)\\]\\(([^)]*)\\)")
 
 ;; LEN counts the output bytes written so far, so a label's range is
 ;; arithmetic. Measuring one growing string instead rebuilds the page
@@ -473,9 +488,12 @@
               (reverse links))
         (let* ((ms (car (car hits)))
                (me (car (cdr (car hits))))
-               (parts (web--link-parts (substring-bytes md ms me)))
-               (label (car parts))
+               (raw (substring-bytes md ms me))
+               (parts (web--link-parts raw))
                (url (car (cdr parts)))
+               ;; An image segment must contain its URL: img-embed uses the
+               ;; overlaid text itself as the image source.
+               (label (if (string-prefix? "!" raw) url (car parts)))
                (before (substring-bytes md pos ms))
                (start (+ len (string-byte-length before)))
                (end (+ start (string-byte-length label))))
@@ -506,6 +524,12 @@
 (define (web--resolve raw base)
   (let ((url (web--unwrap raw)))
   (cond ((string-contains? url "://") url)
+        ;; A rendered Markdown heading link stays on this page.
+        ((string-prefix? "#" url)
+         (let ((hash (string-index base "#")))
+           (string-append
+             (if hash (substring-bytes base 0 hash) base)
+             url)))
         ((string-prefix? "//" url)
          (string-append (car (string-split base "://")) ":" url))
         ((string-prefix? "/" url)
@@ -538,36 +562,62 @@
           (else (string-append reading " (no article) · ")))))
 
 (define (web--update-modeline! buf)
-  (buffer-set-local! buf 'modeline-info
-    (string-append
-      (web--reading-label buf)
-      (or (buffer-local buf 'browse-url) "")
-      (let ((age (cache-age-label buf)))
-        (if age (string-append " · " age) "")))))
+  (let ((url (buffer-local buf 'browse-url)))
+    ;; The process keeps its stable buffer identity while the visible title
+    ;; follows in-place navigation.
+    (when url
+      (buffer-set-local! buf 'modeline-name
+        (string-append "*browse:" (web--slug url) "*")))
+    (buffer-set-local! buf 'modeline-info
+      (string-append
+        (web--reading-label buf)
+        (or url "")
+        (let ((age (cache-age-label buf)))
+          (if age (string-append " · " age) ""))))))
+
+
+
+(define (web--markdown-links md)
+  ;; Source ranges, not flattened-output ranges. preview-mode renders the
+  ;; same bytes, so keyboard navigation and point restoration stay aligned.
+  (let loop ((hits (re-find* *web--link-pattern* md)) (out '()))
+    (if (null? hits)
+        (reverse out)
+        (let* ((ms (car (car hits)))
+               (me (car (cdr (car hits))))
+               (raw (substring-bytes md ms me))
+               (image? (string-prefix? "!" raw))
+               (parts (web--link-parts raw))
+               (label (car parts))
+               (url (car (cdr parts)))
+               (start (+ ms (if image? 2 1))))
+          (loop (cdr hits)
+                (if (or (equal? label "")
+                        (string-prefix? "![" label)
+                        (string-prefix? "#" url))
+                    out
+                    (cons (list start
+                                (+ start (string-byte-length label))
+                                url)
+                          out)))))))
 
 (define (web--render! buf md)
-  (let* ((parsed (web--parse (web--tidy md)))
-         (text (car parsed))
-         (links (car (cdr parsed))))
+  (let ((links (web--markdown-links md)))
     (buffer-set-read-only! buf #f)
     (buffer-delete-range! buf 0 (buffer-size buf))
-    (buffer-insert! buf 0 text)
+    (buffer-insert! buf 0 md)
     (buffer-set-read-only! buf #t)
+    ;; Canonical Markdown stays in the buffer. preview-mode owns rendering;
+    ;; web-links only keeps source positions for TAB, n/p and RET.
     (buffer-set-local! buf 'web-links links)
-    (buffer-set-local! buf 'render-mode #f)
-    (web--apply-link-faces! buf)
+    (overlay-clear! buf 'web)
     (web--apply-meta-faces! buf)
     (web--apply-separator-faces! buf)
-    ;; back, forward and a refetch put point where the reader left it;
-    ;; a new page starts at the top. The window follows: a wheel scroll
-    ;; down the old page pinned it, and a pinned window keeps its pixel
-    ;; offset over new text, so the page came up scrolled with point at 0.
     (let ((p (buffer-local buf 'browse-restore-point)))
       (buffer-set-local! buf 'browse-restore-point #f)
       (buffer-goto! buf (min (or p 0) (buffer-size buf)))
       (buffer-windows-follow-point! buf))
     (web--update-modeline! buf)
-    ;; the page is real now: it joins the visited list, title and all
     (let ((url (buffer-local buf 'browse-url)))
       (when url (web--remember-visit! url (web--title md))))))
 
@@ -646,16 +696,18 @@
     ;; failed network — serves the copy we hold.
     (lambda (b k)
       (let* ((url (buffer-local b 'browse-url))
-             (hit (and url (web--page-cached b url))))
+             (hit (and url (web--page-cached b url)))
+             (request-url (if (buffer-local b 'web-hard-refresh)
+                              (web--cache-bust-url url)
+                              url)))
         (if (not url)
             (k #f)
             (begin
               (set! *web--revalidate* (and hit #t))
-              (*web-fetch* url (web--want b)
+              (*web-fetch* request-url (web--want b)
                 (lambda (found)
                   (let ((md (and (pair? found) (nth 1 found))))
                     (cond (md (k found))
-                          ;; the copy we hold beats an empty view
                           (hit (k (list (nth 1 hit) (nth 2 hit) #f)))
                           (else (k #f))))))))))
     ;; a fetch completion is the one moment a page enters the session
@@ -664,8 +716,8 @@
       (let ((reading (nth 0 found))
             (md (nth 1 found))
             (html (nth 2 found)))
+        (buffer-set-local! b 'web-hard-refresh #f)
         (buffer-set-local! b 'browse-reading reading)
-        ;; the html stays so `R` can re-read it without a fetch
         (buffer-set-local! b 'browse-html html)
         (web--page-remember! b (buffer-local b 'browse-url) reading md)
         (web--render! b md)))
@@ -715,6 +767,12 @@
       (buffer-set-local! buf 'browse-forward '())))
   (buffer-set-local! buf 'browse-url url)
   (buffer-set-local! buf 'browse-restore-point point)
+  (web--update-modeline! buf)
+  ;; A new destination starts at the top immediately, even while its
+  ;; fetch is pending. Back and forward pass an explicit saved point.
+  (when (not point)
+    (buffer-goto! buf 0)
+    (buffer-windows-follow-point! buf))
   (let ((hit (web--page-cached buf url)))
     (if hit
         (begin
@@ -728,7 +786,6 @@
         (begin
           ;; a new page: the old stamp must not satisfy the TTL
           (buffer-set-local! buf 'cache-time #f)
-          (web--update-modeline! buf)
           (message (string-append "fetching " url " …"))
           (cache-refresh! buf)))))
 
@@ -864,6 +921,21 @@
 ;; g asks WHERE: this page leads as the default, so a plain RET
 ;; refetches it — and the visited sites complete, so g also goes
 ;; elsewhere without leaving the buffer
+(define-command "browse-hard-refresh" "Refetch the current page while bypassing cached responses"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (url (buffer-local buf 'browse-url)))
+      (if (not url)
+          (message "no page here")
+          (begin
+            (buffer-set-local! buf 'cache-time #f)
+            (buffer-set-local! buf 'browse-restore-point (buffer-point buf))
+            (message "hard refreshing…")
+            ;; Do not mutate the canonical page URL. The cache-busting
+            ;; request is handled by the fetch pipeline instead.
+            (buffer-set-local! buf 'web-hard-refresh #t)
+            (cache-refresh! buf))))))
+
 (define-command "browse-refresh" "Fetch a page: this one again, or another"
   (lambda ()
     (let* ((buf (current-buffer))
@@ -1059,7 +1131,7 @@
   (local-set-key* buf "n" "browse-next-link")
   (local-set-key* buf "p" "browse-prev-link")
   (local-set-key* buf "l" "browse-back")
-  (local-set-key* buf "r" "browse-forward")
+  (local-set-key* buf "r" "browse-hard-refresh")
   (local-set-key* buf "M-<left>" "browse-back")
   (local-set-key* buf "M-<right>" "browse-forward")
   (local-set-key* buf "u" "browse-up")
@@ -1075,23 +1147,16 @@
   (local-set-key* buf "s" "browse-list-tabs")
   (local-set-key* buf "M-n" "browse-next-tab")
   (local-set-key* buf "M-p" "browse-prev-tab")
-  ;; eww binds R to eww-readable; the same key, the same idea
   (local-set-key* buf "R" "browse-toggle-reading")
-  ;; the preview chord: "show me the rendered thing" — the browser
-  (local-set-key* buf "C-c C-v" "browse-open-external")
+  (local-set-key* buf "C-c C-v" "preview-mode")
   (local-set-key* buf "q" "quit-window"))
 
 (define-mode "browse-mode"
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-read-only! buf #t)
-      ;; the session page cache and the held html are both heavy and
-      ;; both derive from the URL: a restart refetches, and the desktop
-      ;; must not carry either
       (desktop-skip! buf 'browse-pages)
       (desktop-skip! buf 'browse-html)
-      ;; the reading look is the WRITING look: one centered measure for
-      ;; prose everywhere — writing-mode owns the class and the setting
       (buffer-set-local! buf 'window-class "writing")
       (buffer-set-local! buf 'line-numbers "off")
       (buffer-set-local! buf 'visual-line-mode #t)
@@ -1102,13 +1167,17 @@
           (list 'family writing-font-family
                 'size writing-font-size
                 'line-height writing-line-height)))
+      ;; Generated browse buffers have no .md suffix, so declare the
+      ;; renderer. Preview is the default; C-c C-v toggles source.
+      (buffer-set-local! buf 'preview-renderer "markdown")
+      (if (minor-mode-on? buf "preview-mode")
+          (preview-heal! buf)
+          (enable-minor-mode! buf "preview-mode"))
       (web--install-keys! buf)
-      (web--apply-link-faces! buf)
       (web--apply-meta-faces! buf)
       (web--apply-separator-faces! buf)
       (web--declare-cache! buf)
       (web--update-modeline! buf)
-      ;; a restored page draws its saved text; only a stale one refetches
       (cache-wake! buf))))
 
 (mode-doc! "browse-mode"

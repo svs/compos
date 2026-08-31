@@ -81,6 +81,38 @@ defmodule Compos.WebBrowseTest do
     :ok
   end
 
+  test "browse keeps Markdown and toggles preview in the same tab" do
+    buf = browse!("https://site.test/index.html")
+    source = Buffer.text(buf)
+
+    assert source =~ "# Front page"
+    assert source =~ "[second page](/second.html)"
+    assert eval!(~s{(buffer-local "#{buf}" 'preview-renderer)}) == ~s{"markdown"}
+    assert eval!(~s{(buffer-local "#{buf}" 'render-mode)}) == ~s{"markdown"}
+
+    press(["C-c", "C-v"])
+    assert Buffer.text(buf) == source
+    assert eval!(~s{(buffer-local "#{buf}" 'render-mode)}) == "#f"
+
+    press(["C-c", "C-v"])
+    assert Buffer.text(buf) == source
+    assert eval!(~s{(buffer-local "#{buf}" 'render-mode)}) == ~s{"markdown"}
+  end
+
+  test "rendered relative links navigate the current browse tab" do
+    buf = browse!("https://site.test/index.html")
+
+    eval!(~S{(preview-follow-link! (active-window) "second.html")})
+
+    assert Editor.current_buffer() == buf
+    assert Buffer.text(buf) =~ "# Second page"
+
+    assert eval!(~s{(buffer-local "#{buf}" 'browse-url)}) ==
+             ~S["https://site.test/second.html"]
+
+    assert eval!(~s{(buffer-point "#{buf}")}) == "0"
+  end
+
   test "s-RET opens the link at point as its own tab; the page stays put" do
     a = browse!("https://site.test/index.html")
 

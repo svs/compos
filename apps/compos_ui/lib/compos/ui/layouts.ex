@@ -2833,9 +2833,12 @@ defmodule Compos.Ui.Layouts do
                   const win = parseInt(winEl.dataset.winId, 10);
                   const sel = window.getSelection();
                   // an editable surface: the browser placed the caret or the
-                  // selection, and it names bytes exactly
+                  // selection, and it names bytes exactly. The server accepts
+                  // a caret report only for the active window, so a click
+                  // into another window selects that window first.
                   const editable = winEl.querySelector(".buf[contenteditable]");
                   if (editable && sel && sel.rangeCount && editable.contains(sel.focusNode)) {
+                    if (!winEl.classList.contains("active")) this.pushEvent("mouse", { win });
                     if (this.sendSelection(editable)) return;
                   }
                   if (sel && !sel.isCollapsed &&

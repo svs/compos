@@ -174,7 +174,17 @@
       (or (and p (project-root-cached (parent-dir p))) ""))))
 
 ;; tracked + untracked-but-not-ignored, like projectile
+;; Every project-* entry point works inside a discoverable project. A
+;; caller outside one gets an error, never an empty answer that reads as
+;; "the project holds nothing".
+(define (project-require! root)
+  (unless (and (string? root)
+               (project-root-from (strip-trailing-slash root)))
+    (error "no project:" (if (string? root) root "#f")))
+  root)
+
 (define (project-files root)
+  (project-require! root)
   (filter (lambda (f) (not (equal? f "")))
           (string-split
             (shell-command->string
@@ -191,40 +201,56 @@
 
 (defcustom 'project-ripgrep-program "rg" "The ripgrep executable." 'group 'project)
 (defcustom 'project-ripgrep-args
-  "--line-number --no-heading --color never --smart-case --sort path"
+  "--line-number --no-heading --color never --smart-case --sort path --max-columns 240 --max-columns-preview"
   "Flags for every project-ripgrep run. --sort path makes the result order
 the same on every run: without it ripgrep answers in the order its threads
-finish, so \"the first match\" is whichever file the disk offered first."
+finish, so \"the first match\" is whichever file the disk offered first.
+--max-columns truncates a match on a long line: one minified or generated
+line can hold megabytes, and a match list is not the place to carry them."
   'group 'project)
 (defcustom 'project-ripgrep-limit 500
   "How many matches one search offers." 'group 'project)
+(defcustom 'project-ripgrep-max-text 300
+  "The longest match text one row keeps. The cap holds for every caller,
+with or without --max-columns in project-ripgrep-args." 'group 'project)
 
 ;; "./path:line:text" -> (LABEL PATH LINE TEXT); #f for any other line (rg
 ;; prints an error to stderr, and stderr is folded into the output)
 (define (rg--strip-dot p)
   (if (string-prefix? "./" p) (substring p 2 (string-length p)) p))
 
+(define (rg--clip text)
+  (if (> (string-length text) project-ripgrep-max-text)
+      (string-append (substring text 0 project-ripgrep-max-text) " …")
+      text))
+
 (define (rg--parse line)
   (let* ((parts (string-split line ":"))
          (n (and (> (length parts) 2) (string->number (nth 1 parts)))))
     (and (number? n)
          (let ((path (rg--strip-dot (nth 0 parts)))
-               (text (string-trim (string-join (cdr (cdr parts)) ":"))))
+               (text (rg--clip (string-trim (string-join (cdr (cdr parts)) ":")))))
            (list (string-append path ":" (nth 1 parts)) path n text)))))
 
-;; the search path is explicit: rg with no path and no terminal on stdin
-;; reads stdin and waits forever, which hangs the whole editor
+;; rg searches the files git names, the same list project-files offers:
+;; the project is the git checkout, not everything under root. A root
+;; that is not a checkout lists nothing, so it matches nothing — git's
+;; error line fails rg--parse and drops. xargs feeds rg explicit file
+;; arguments, so rg never falls back to reading stdin.
 (define (rg--matches root pattern)
   (let ((out (shell-command->string
-               (string-append project-ripgrep-program " " project-ripgrep-args
-                              " -e " (sh-quote pattern) " ."
-                              " | head -n " (number->string project-ripgrep-limit))
+               (string-append
+                 "git ls-files --cached --others --exclude-standard -z"
+                 " | xargs -0 " project-ripgrep-program " " project-ripgrep-args
+                 " -e " (sh-quote pattern)
+                 " | head -n " (number->string project-ripgrep-limit))
                root)))
     (filter (lambda (m) m) (map rg--parse (string-split out "\n")))))
 
 ;; The interactive command below adds preview and selection policy. Agents and
 ;; other Scheme callers often need the same search as plain structured data.
 (define (project-search-matches root pattern)
+  (project-require! root)
   (rg--matches root pattern))
 
 ;; preview borrows the window, the jump takes it. Both load the file once,
@@ -328,6 +354,7 @@ finish, so \"the first match\" is whichever file the disk offered first."
          (substring path (string-length prefix) (string-length path)))))
 
 (define (project-open-files root)
+  (project-require! root)
   (filter (lambda (f) f)
           (map (lambda (b)
                  (let ((p (buffer-path b))) (and p (project--relative root p))))

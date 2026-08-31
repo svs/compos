@@ -747,3 +747,41 @@ defmodule Compos.ProjectSearchTest do
     end
   end
 end
+
+defmodule Compos.ProjectScopeTest do
+  @moduledoc """
+  Project search stays inside the project. The Scheme tests cover the
+  git-scoped file list and the long-line clip; the no-project error can
+  only be asserted here, because Scheme has no catch form.
+  """
+
+  use ExUnit.Case
+
+  alias Compos.Core.Session
+
+  defp eval!(code) do
+    {:ok, out} = Session.eval(code, nil, 30_000)
+    out
+  end
+
+  test "the focused Scheme project-search tests pass" do
+    for name <- [
+          "a-search-row-clips-a-generated-line",
+          "a-project-search-reads-only-what-git-names"
+        ] do
+      assert eval!("(begin (load-tests!) (run-test '#{name}))") == "()", name
+    end
+  end
+
+  test "a root outside any checkout fails with no project" do
+    for call <- [
+          ~s{(project-search-matches "/tmp/zz-compos-nowhere" "x")},
+          ~s{(project-files "/tmp/zz-compos-nowhere")},
+          ~s{(project-open-files "/tmp/zz-compos-nowhere")},
+          ~s{(project-search-matches #f "x")}
+        ] do
+      assert {:error, msg} = Session.eval(call, nil, 30_000)
+      assert msg =~ "no project", call
+    end
+  end
+end

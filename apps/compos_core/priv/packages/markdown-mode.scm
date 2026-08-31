@@ -52,17 +52,29 @@
 
 ;; [text](url): the text is the link; the brackets and the target step
 ;; back. An image's link is not a link.
+;; The drawn text carries its own target, so a reader can click it. A span
+;; has one channel, its class, so the URL travels percent-encoded and the
+;; client decodes it. A target in angle brackets is a target with a space.
+(define (md--link-class url)
+  (let ((u (if (and (string-prefix? "<" url) (string-suffix? ">" url))
+               (substring url 1 (- (string-length url) 1))
+               url)))
+    (string-append "link link-to:" (url-encode u))))
+
 (define (md--links start line)
   (apply append
     (map (lambda (r)
            (let* ((s (car r)) (e (cadr r))
                   (image? (and (> s 0) (equal? (substring-bytes line (- s 1) s) "!")))
                   (g (re-groups md--link-pattern line s))
-                  (text (and g (nth 1 g))))
-             (if (or image? (not text))
+                  (text (and g (nth 1 g)))
+                  (url (and g (nth 2 g))))
+             (if (or image? (not text) (not url))
                  '()
                  (list (md--span start s (car text) "md-marker")
-                       (md--span start (car text) (cadr text) "link")
+                       (md--span start (car text) (cadr text)
+                                 (md--link-class
+                                   (substring-bytes line (car url) (cadr url))))
                        (md--span start (cadr text) e "md-marker")))))
          (re-find* md--link-pattern line))))
 

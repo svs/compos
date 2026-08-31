@@ -455,6 +455,10 @@ defmodule Compos.Ui.Layouts do
           }
           .no-nums .linenum { display: none; }
           /* an img-embed seg: the picture, in the text's place */
+          /* a drawn link says it can be followed */
+          .buf [data-href] { cursor: pointer; }
+          .buf [data-href]:hover { text-decoration: underline; }
+
           .line img.img-embed {
             display: inline-block; max-width: min(100%, 640px); height: auto;
             border-radius: 4px; margin: 6px 8px 6px 0; vertical-align: middle;
@@ -3243,6 +3247,26 @@ defmodule Compos.Ui.Layouts do
                 };
                 window.addEventListener("pointerdown", this.proveFocusH, true);
                 window.addEventListener("keydown", this.proveFocusH, true);
+
+                // A drawn Markdown link carries its target. Clicking the
+                // text follows the link instead of putting the caret inside
+                // it. The mousedown does it, not the click: following
+                // re-renders the document, and the span dies with it.
+                // Shift opens the target in the group, as it does in a
+                // rendered page.
+                this.linkDownH = (e) => {
+                  if (e.button !== 0) return;
+                  const el = e.target.closest && e.target.closest("[data-href]");
+                  if (!el || !el.closest(".buf")) return;
+                  const win = el.closest(".window");
+                  if (!win) return;
+                  e.preventDefault();
+                  this.pushEvent(e.shiftKey ? "preview_link_to_group" : "preview_link", {
+                    win: parseInt(win.dataset.winId, 10),
+                    href: el.dataset.href
+                  });
+                };
+                window.addEventListener("mousedown", this.linkDownH, true);
                 // a tab that comes back to the front re-reads the poll, and
                 // by then the answer is the true one
                 this.visibilityH = () => {
@@ -3302,6 +3326,7 @@ defmodule Compos.Ui.Layouts do
                 window.removeEventListener("blur", this.blurH);
                 window.removeEventListener("pointerdown", this.proveFocusH, true);
                 window.removeEventListener("keydown", this.proveFocusH, true);
+                window.removeEventListener("mousedown", this.linkDownH, true);
                 document.removeEventListener("visibilitychange", this.visibilityH);
                 window.removeEventListener("paste", this.pasteH);
                 window.removeEventListener("beforeinput", this.beforeInputH, true);

@@ -1757,6 +1757,7 @@ defmodule Compos.Ui.EditorLive do
   defp seg(%{cls: cls, txt: txt} = assigns)
        when is_binary(cls) and is_binary(txt) do
     src = if cls =~ "img-embed", do: image_src(txt, assigns.base)
+    assigns = assign(assigns, href: link_href(cls))
 
     cond do
       is_binary(src) ->
@@ -1792,7 +1793,7 @@ defmodule Compos.Ui.EditorLive do
         """
 
       true ->
-        ~H|<span class={@cls}>{@txt}</span>|
+        ~H|<span class={@cls} data-href={@href}>{@txt}</span>|
     end
   end
 
@@ -1812,6 +1813,18 @@ defmodule Compos.Ui.EditorLive do
       true ->
         nil
     end
+  end
+
+  # A drawn Markdown link carries its target in its class, because a class
+  # is the only channel a span has. The reader clicks the text; the client
+  # reads the target back off the element.
+  defp link_href(cls) do
+    cls
+    |> String.split(" ")
+    |> Enum.find_value(fn
+      "link-to:" <> encoded -> URI.decode(encoded)
+      _ -> nil
+    end)
   end
 
   defp seg_build(part, ls, ts_ranges, overlays) do

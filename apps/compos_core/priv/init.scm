@@ -39,6 +39,7 @@
 (load-bundled-package "diff-mode.scm")
 (load-bundled-package "doppler.scm")
 (load-bundled-package "endpoint.scm")
+(load-bundled-package "irc.scm")
 (load-bundled-package "evil.scm")
 (load-bundled-package "feeds.scm")
 (load-bundled-package "git.scm")

@@ -54,9 +54,10 @@ Some outcomes are automatic. Then the solution is a rule, not a command.
 These are the ways I can create my first group when no group exists yet:
 
 #### I want to create an empty new group
-- I want to say `group-new`, give it a name and be in a new group with its scratch buffer.
+- I want to say `group-new`, give it a name and be in a new group with its chat.
 - Any files I open should open in this group.
-- I can pull other buffers to this group. `s-RET` after ` C-x b`
+- I can pull other buffers to this group. `s-RET` from any minibuffer completion.
+
 #### I want to start a group by opening a buffer/file
 - I open a file, chat, or other useful buffer.
 - I choose to make it the start of a new group and give the group a unique name.
@@ -162,15 +163,10 @@ I want to start from a project or directory
 - Text, point, modified state, and undo survive.
 - **Command:** `move`.
 
-#### I want a fresh group
-        
--   The group is created after I accept a unique name.
-- The current buffer is its seed. The group opens on that buffer.
-- **Command:** `new`.
-
 #### I want a fresh, empty group
 
-- I run `new` from a transient buffer, or with an empty selection.
+- The group is created after I accept a unique name.
+- `new` never takes the current buffer. With no selection the group starts empty.
 - The group opens on its scratch buffer.
 - **Command:** `new`.
 
@@ -361,10 +357,9 @@ The kill buries a tombstone: the name, the record's fields, and each member's na
 ### The seed of `new`
 
 - A selection is marked: the seed is the selection.
-- No selection: the seed is the current buffer.
-- The current buffer is transient: the seed is empty. The group has only its scratch buffer.
+- No selection: the seed is empty.
 
-`switch-to-buffer-group` on an ungrouped buffer is `new` with that buffer as the seed.
+`switch-to-buffer-group` on an ungrouped buffer still starts a group with that buffer as the seed.
 
 ### Atomic operations
 
@@ -469,7 +464,7 @@ Moving the highlight shows the group under it: its most recent member, in the wi
 
 ### Transient buffers
 
-One predicate, `transient?`, is true for the minibuffer, `*switch*`, the echo area, previews, and the groups board. Transient buffers are excluded from the indicator, from the seed of `new`, and from the selection. Every other buffer is a normal buffer.
+One predicate, `transient?`, is true for the minibuffer, `*switch*`, the echo area, previews, and the groups board. Transient buffers are excluded from the indicator and from the selection. Every other buffer is a normal buffer.
 
 ## The scratch buffer
 
@@ -572,7 +567,7 @@ Tests name commands, never keys. A test that needs a binding binds its own dummy
 3. Showing a live buffer changes no membership: switcher, `find-file`, jump.
 4. `C-RET` semantics in the switcher: show plus add, on one buffer and on a selection.
 5. `group-add`, `group-move`, `group-remove` on one buffer, on a selection, on a dired selection, on a path selection.
-6. `new` with a selection seed, a current-buffer seed, and an empty seed.
+6. `new` with a selection seed and with an empty seed; the current buffer is never the seed.
 7. `switch-to-buffer-group` with 0, 1, and many groups; the many case prompts.
 8. `switch` saves the outgoing layout as it is and restores tree, buffers, point, scroll, and selected window.
 9. A saved layout with a dead buffer restores without that pane.
@@ -589,3 +584,4 @@ Tests name commands, never keys. A test that needs a binding binds its own dummy
 20. A kill from outside any command (the Elixir path) that drops a window onto a group's buffer puts the frame back in that group.
 21. `ibuffer` lists the frame's group first, and a mark does not reorder the rows.
 22. A layout fills its panes from the pool: in a group, three columns come from the members and never from another group; a peek and the popup's buffer fill no window.
+            

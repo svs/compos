@@ -320,20 +320,20 @@
       (set! group-after-kill was))
     (t--sw-done!)))
 
-(deftest 'group-new-with-buffer-includes-the-buffer-family
-  "the buffer and its eligible scratch companion start one group"
+(deftest 'group-new-without-selection-does-not-adopt-the-current-buffer
+  "group-new without a selection starts empty rather than moving the current buffer"
   (lambda ()
     (t--sw-setup!)
     (buffer-set-local! t--sw-first 'scratch-buffer t--sw-second)
     (buffer-set-local! t--sw-second 'scratch-owner t--sw-first)
     (switch-to-buffer! t--sw-first)
     (run-command "group-new")
-    (t--sw-type! "zzsw-family-context")
+    (t--sw-type! "zzsw-empty-from-current")
     (t--sw-key! "confirm")
-    (let ((id (group-resolve-id "zzsw-family-context")))
-      (check-true! (buffer-in-group? t--sw-first id) "the owner joins")
-      (check-true! (buffer-in-group? t--sw-second id) "the companion joins")
-      (check-equal! (frame-group) id "the family context is entered"))
+    (let ((id (group-resolve-id "zzsw-empty-from-current")))
+      (check-false! (buffer-in-group? t--sw-first id) "the current buffer stays out")
+      (check-false! (buffer-in-group? t--sw-second id) "its companion stays out")
+      (check-equal! (frame-group) id "the empty context is entered"))
     (t--sw-done!)))
 
 (deftest 'a-chat-opens-the-groups-shared-scratch

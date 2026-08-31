@@ -1303,8 +1303,9 @@
         (append (filter (lambda (id) (member id mine)) recent)
                 (filter (lambda (id) (not (member id mine))) recent)))))
 
-;; the seed is a work buffer of yours: a transient listing (the
-;; telemetry, ibuffer) seeds nothing, the same rule group-new keeps
+;; a seed buffer is a work buffer of yours: a transient listing (the
+;; telemetry, ibuffer) seeds nothing. The switcher's new-group action
+;; asks this; group-new never seeds itself from the current buffer.
 (define (group-seed-buffer? buf)
   (and (group-work-buffer? buf)
        (not (buffer-local buf 'transient))))
@@ -2279,28 +2280,23 @@
         (switch-to-group! group)
         (receive group)))))
 
-;; The seed of `new` (docs/groups.md): a marked selection is the seed; with
-;; none, the current work buffer and its family; a transient or other
-;; non-work buffer seeds nothing, and the group opens on its scratch.
-(define-command "group-new" "Create and enter a group seeded by the selection, else this buffer, else empty"
+;; The seed of `new` (docs/groups.md): a marked selection is the seed.
+;; With none the seed is empty and the group opens on its scratch: `new`
+;; founds a place to work, it never moves the buffer you were in.
+(define-command "group-new" "Create and enter an empty group, or seed it with the selection"
   (lambda ()
-    (let* ((buf (current-buffer))
-           (selected (group-command-selected-buffers))
-           (seed (cond ((pair? selected) selected)
-                       ((group-seed-buffer? buf) (list buf))
-                       (else '()))))
+    (let ((selected (group-command-selected-buffers)))
       (group-read-new-name "New group: "
         (lambda (name)
-          (cond ((null? seed) (group-create-and-enter! name '() #f))
-                ((and (null? (cdr seed)) (equal? (car seed) buf))
-                 (group-create-with-buffer! name buf #f))
-                ;; a marked set is an arrangement: the windows as they
-                ;; stand become the group's first layout
-                (else (group-create-and-enter! name seed (window-tree)))))))))
+          (if (null? selected)
+              (group-create-and-enter! name '() #f)
+              ;; a marked set is an arrangement: the windows as they
+              ;; stand become the group's first layout
+              (group-create-and-enter! name selected (window-tree))))))))
 
 ;; The two "visible" verbs: the windows as they stand are the seed, with
-;; no marking. The verb table folded them into group-new and group-move
-;; (a selection, else the current buffer); a person wants them by name.
+;; no marking. The verb table folded them into group-new (a selection,
+;; else nothing) and group-move; a person wants them by name.
 (define-command "group-new-from-visible"
   "Found a group from every visible work buffer, with the windows as its first layout"
   (lambda ()

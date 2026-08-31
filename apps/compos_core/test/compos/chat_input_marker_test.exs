@@ -42,7 +42,7 @@ defmodule Compos.ChatInputMarkerTest do
       binary_part(text, mark, mb) == @marker
   end
 
-  test "insert_at_mark moves the text and the local in one message" do
+  test "insert_at_local moves the text and the named local in one message" do
     name = "*mark-op-test*"
     Compos.Core.create_buffer(name)
     on_exit(fn -> Compos.Core.kill_buffer(name) end)
@@ -50,9 +50,15 @@ defmodule Compos.ChatInputMarkerTest do
     Buffer.append(name, "head#{@marker}draft")
     Buffer.set_local(name, "agent-saved-mark", 4)
 
-    assert Buffer.insert_at_mark(name, "grow") == 8
+    assert Buffer.insert_at_local(name, "agent-saved-mark", "grow") == 8
     assert Buffer.text(name) == "headgrow#{@marker}draft"
     assert Buffer.get_local(name, "agent-saved-mark") == 8
+
+    # a second agent mark on the same buffer is just another local
+    Buffer.set_local(name, "other-mark", 0)
+    assert Buffer.insert_at_local(name, "other-mark", "pre|") == 4
+    assert Buffer.text(name) == "pre|headgrow#{@marker}draft"
+    assert Buffer.get_local(name, "other-mark") == 4
   end
 
   test "the marker stays at the mark across transmits, and typed input survives" do

@@ -476,7 +476,10 @@ defmodule Compos.Core.Agent do
     # transcript text into the input region. The buffer computes the
     # position and advances the local inside one message.
     try do
-      {:reply, Buffer.insert_at_mark(state.buffer_ref, text, source: {:agent, state.slug}),
+      {:reply,
+       Buffer.insert_at_local(state.buffer_ref, "agent-saved-mark", text,
+         source: {:agent, state.slug}
+       ),
        state}
     catch
       # Rendering is downstream of the backend. Killing the target buffer

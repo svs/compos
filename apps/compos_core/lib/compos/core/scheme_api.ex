@@ -26,6 +26,7 @@ defmodule Compos.Core.SchemeAPI do
     |> Map.merge(watch_primitives())
     |> Map.merge(telemetry_primitives())
     |> Map.merge(discovery_primitives())
+    |> Map.merge(irc_primitives())
   end
 
   @doc "One-line doc for every primitive: signature, then an em dash, then one sentence."
@@ -52,6 +53,8 @@ defmodule Compos.Core.SchemeAPI do
         "(buffer-append! BUF TEXT) — append TEXT to the buffer's end; ignores read-only.",
       "buffer-insert!" =>
         "(buffer-insert! BUF POS TEXT) — insert TEXT at byte POS; ignores read-only.",
+      "buffer-insert-at-local!" =>
+        "(buffer-insert-at-local! BUF LOCAL TEXT) — insert TEXT at the byte position the buffer-local LOCAL names and advance the local, atomically; return the advanced position.",
       "buffer-delete-range!" =>
         "(buffer-delete-range! BUF POS LEN) — delete LEN bytes at byte POS; ignores read-only.",
       "buffer-replace-range!" =>
@@ -533,6 +536,9 @@ defmodule Compos.Core.SchemeAPI do
         :ok = Buffer.insert_at(name, pos, text, source: :editor)
         :void
       end,
+      "buffer-insert-at-local!" => fn [name, local, text] ->
+        Buffer.insert_at_local(name, plain(local), to_string(text), source: :editor)
+      end,
       "buffer-delete-range!" => fn [name, pos, len] ->
         :ok = Buffer.delete_range(name, pos, len, source: :editor)
         :void
@@ -959,6 +965,31 @@ defmodule Compos.Core.SchemeAPI do
         text = Buffer.text(buf)
         {bol, eol} = Compos.Core.Text.line_bounds(text, Buffer.point(buf))
         binary_part(text, bol, eol - bol)
+      end
+    }
+  end
+
+  defp irc_primitives do
+    %{
+      "irc-parse" => fn [line] ->
+        m = Compos.Core.IRC.parse(line)
+
+        [
+          {:sym, "prefix"},
+          m.prefix || false,
+          {:sym, "command"},
+          m.command,
+          {:sym, "params"},
+          m.params,
+          {:sym, "trailing"},
+          m.trailing || false,
+          {:sym, "raw"},
+          m.raw
+        ]
+      end,
+      "irc-format" => fn
+        [command, params] -> Compos.Core.IRC.format(command, params)
+        [command, params, trailing] -> Compos.Core.IRC.format(command, params, trailing)
       end
     }
   end

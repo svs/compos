@@ -360,14 +360,15 @@ defmodule Compos.Core.Buffer do
     do: GenServer.call(via(name), {:delete_range, pos, len, source(opts), author(opts)})
 
   @doc """
-  Insert TEXT at the byte position the "agent-saved-mark" local names, and
-  advance the local past the insertion, in one message. The local is the one
-  truth for the chat mark. A caller that computes the position in its own
-  process can interleave with another edit, and the copies drift. Returns
-  the advanced mark.
+  Insert TEXT at the byte position the buffer-local LOCAL names, and advance
+  the local past the insertion, in one message. This is how an agent mark
+  works: the local is the one truth for the position, distinct from the
+  user's region mark. A caller that computes the position in its own process
+  can interleave with another edit, and the copies drift. Returns the
+  advanced position.
   """
-  def insert_at_mark(name, text, opts \\ []),
-    do: GenServer.call(via(name), {:insert_at_mark, text, source(opts), author(opts)})
+  def insert_at_local(name, local, text, opts \\ []),
+    do: GenServer.call(via(name), {:insert_at_local, local, text, source(opts), author(opts)})
 
   @doc "Replace LEN bytes at POS with TEXT as one undo step."
   def replace_range(name, pos, len, text, opts \\ []),
@@ -1178,16 +1179,16 @@ defmodule Compos.Core.Buffer do
      state |> do_insert(pos, text, src, author) |> touch_state() |> checkpoint_later()}
   end
 
-  defp on_call({:insert_at_mark, text, src, author}, _from, state) do
+  defp on_call({:insert_at_local, local, text, src, author}, _from, state) do
     size = Rope.byte_size(state.rope)
-    mark = min(Map.get(state.locals, "agent-saved-mark") || size, size)
-    new_mark = mark + Kernel.byte_size(text)
+    pos = min(Map.get(state.locals, local) || size, size)
+    new_pos = pos + Kernel.byte_size(text)
     # the local moves in the same message as the insert: a frame painted
-    # from the broadcast must not see a stale mark
-    state = %{state | locals: Map.put(state.locals, "agent-saved-mark", new_mark)}
+    # from the broadcast must not see a stale position
+    state = %{state | locals: Map.put(state.locals, local, new_pos)}
 
-    {:reply, new_mark,
-     state |> do_insert(mark, text, src, author) |> touch_state() |> checkpoint_later()}
+    {:reply, new_pos,
+     state |> do_insert(pos, text, src, author) |> touch_state() |> checkpoint_later()}
   end
 
   defp on_call({:delete_range, pos, len, src, author}, _from, state) do

@@ -529,6 +529,20 @@
 ;; Keep query embedding behind one seam. Tests replace it without a network
 ;; call, and the production path remains the cached embedding primitive.
 (define *apropos--embedding-search* embedding-search)
+(define *apropos--embedding-sync* embedding-sync!)
+
+;; Catalog declarations arrive one form at a time. Keep that registration
+;; path local and cheap, then reconcile the durable vector index once after
+;; the burst. A foreground query reads the last complete index and embeds only
+;; its own text; it never repairs catalog vectors while an agent waits.
+(define *apropos--embedding-sync-running* #f)
+(define *apropos--embedding-sync-pending* #f)
+(define *apropos--embedding-synced-gen* -1)
+
+(define (apropos--embedding-key)
+  (and apropos-semantic-search
+       (boundp (quote llm-key))
+       (llm-key "openai")))
 
 (define (apropos--sources-cached rows)
   (let ((gen (catalog-generation)))
@@ -539,10 +553,57 @@
         (set! *apropos--sources-gen* gen)))
     (list *apropos--sources-cache* *apropos--texts-cache*)))
 
+(define (apropos--start-embedding-sync!)
+  (let ((key (apropos--embedding-key)))
+    (cond
+      ((or (not key) (equal? key "")) #f)
+      (*apropos--embedding-sync-running*
+       (set! *apropos--embedding-sync-pending* #t)
+       #f)
+      (else
+        (let* ((gen (catalog-generation))
+               (both (apropos--sources-cached (apropos--rows-cached)))
+               (texts (nth 1 both)))
+          (set! *apropos--embedding-sync-running* #t)
+          (set! *apropos--embedding-sync-pending* #f)
+          (task-run!
+            (lambda () (*apropos--embedding-sync* texts key))
+            (lambda (ok value)
+              (set! *apropos--embedding-sync-running* #f)
+              (when (and ok value)
+                (set! *apropos--embedding-synced-gen* gen))
+              ;; A declaration can land while this batch is in flight. The
+              ;; completed snapshot remains valid; schedule the next delta.
+              (when (or *apropos--embedding-sync-pending*
+                        (not (equal? gen (catalog-generation))))
+                (apropos--schedule-embedding-sync!)))
+            60000)
+          #t)))))
+
+(define (apropos--schedule-embedding-sync!)
+  (set! *apropos--embedding-sync-pending* #t)
+  (debounce! "apropos-embedding-sync" 250
+    (lambda (ignored) (apropos--start-embedding-sync!)) #f)
+  #t)
+
+;; catalog-register! calls this after the entry is complete. A reload batches
+;; all declarations until reload-finish!; an interactive declaration uses the
+;; same short debounce directly.
+(define (apropos-catalog-changed! entry)
+  (set! *apropos--embedding-sync-pending* #t)
+  (unless (and (boundp (quote *reloading?*)) *reloading?*)
+    (apropos--schedule-embedding-sync!))
+  entry)
+
+(define (apropos-reload-finished!)
+  (when *apropos--embedding-sync-pending*
+    (apropos--schedule-embedding-sync!)))
+
+(define (apropos-sync-embeddings!)
+  (apropos--schedule-embedding-sync!))
+
 (define (apropos--semantic-hits query rows filters)
-  (let ((key (and apropos-semantic-search
-                  (boundp (quote llm-key))
-                  (llm-key "openai"))))
+  (let ((key (apropos--embedding-key)))
     (if (or (not key) (equal? key "") (equal? (string-trim query) ""))
         '()
         (let* ((both (apropos--sources-cached rows))
@@ -562,13 +623,14 @@
 
 (define (apropos-rebuild-embeddings!)
   (let ((path (embedding-cache-clear!))
-        (key (and (boundp (quote llm-key)) (llm-key "openai"))))
+        (key (apropos--embedding-key)))
     (if (or (not key) (equal? key ""))
         (string-append "Cleared " path "; no OpenAI key is configured.")
-        (begin
-          ;; This result is discarded. The embedding mechanism still indexes
-          ;; every current source before it selects the small result set.
-          (apropos--semantic-hits "editor API discovery" (apropos--rows-cached) '())
+        (let* ((both (apropos--sources-cached (apropos--rows-cached)))
+               (texts (nth 1 both))
+               (count (*apropos--embedding-sync* texts key)))
+          (when count
+            (set! *apropos--embedding-synced-gen* (catalog-generation)))
           (if (file-exists? path)
               (string-append "Rebuilt " path ".")
               (string-append "Could not rebuild " path "; lexical apropos remains available."))))))

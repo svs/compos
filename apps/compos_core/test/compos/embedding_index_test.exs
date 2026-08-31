@@ -42,13 +42,20 @@ defmodule Compos.EmbeddingIndexTest do
     %{path: path}
   end
 
-  test "OpenAI vectors rank semantic catalog text and persist by content hash", %{path: path} do
+  test "catalog sync persists vectors and foreground search embeds only the query", %{path: path} do
     texts = [
       "function buffer-kill! Kill buffer B and remove its working copy.",
       "function load-theme Apply a named color theme."
     ]
 
     opts = [path: path, dimensions: 2]
+
+    assert {:ok, 2} = EmbeddingIndex.sync(texts, "test-key", opts)
+
+    assert_receive {:embedding_request, sync_request}
+    assert sync_request["model"] == "text-embedding-3-small"
+    assert sync_request["dimensions"] == 2
+    assert sync_request["input"] == texts
 
     assert {:ok, [{0, first_score}, {1, second_score}]} =
              EmbeddingIndex.search("remove the current document", texts, "test-key", opts)
@@ -59,10 +66,8 @@ defmodule Compos.EmbeddingIndexTest do
     refute cache_bytes =~ "test-key"
     refute cache_bytes =~ "buffer-kill!"
 
-    assert_receive {:embedding_request, request}
-    assert request["model"] == "text-embedding-3-small"
-    assert request["dimensions"] == 2
-    assert length(request["input"]) == 3
+    assert_receive {:embedding_request, query_request}
+    assert query_request["input"] == ["remove the current document"]
 
     assert {:ok, [{0, _}, {1, _}]} =
              EmbeddingIndex.search("remove the current document", texts, "test-key", opts)
@@ -79,20 +84,26 @@ defmodule Compos.EmbeddingIndexTest do
 
     changed = [hd(texts), "function load-theme Apply a changed color theme."]
 
-    assert {:ok, [{0, _}, {1, _}]} =
+    assert {:ok, [{0, _}]} =
              EmbeddingIndex.search("remove the current document", changed, "test-key", opts)
 
+    refute_receive {:embedding_request, _}
+
+    assert {:ok, 1} = EmbeddingIndex.sync(changed, "test-key", opts)
     assert_receive {:embedding_request, changed_request}
     assert changed_request["input"] == ["function load-theme Apply a changed color theme."]
 
     assert :ok = EmbeddingIndex.clear(path)
     refute File.exists?(path)
 
-    assert {:ok, [{0, _}, {1, _}]} =
+    assert {:ok, []} =
              EmbeddingIndex.search("remove the current document", changed, "test-key", opts)
 
+    refute_receive {:embedding_request, _}
+
+    assert {:ok, 2} = EmbeddingIndex.sync(changed, "test-key", opts)
     assert_receive {:embedding_request, rebuilt_request}
-    assert length(rebuilt_request["input"]) == 3
+    assert rebuilt_request["input"] == changed
   end
 
   test "a smaller corpus keeps the vectors it left out" do
@@ -105,16 +116,16 @@ defmodule Compos.EmbeddingIndexTest do
     theme = "function load-theme Apply a named color theme."
 
     # a package is loaded: both entries embed once
-    assert {:ok, _} = EmbeddingIndex.search("remove the current document", [kill, theme], "k", opts)
+    assert {:ok, 2} = EmbeddingIndex.sync([kill, theme], "k", opts)
     assert_receive {:embedding_request, _}
 
     # the package is unloaded, and a search runs against what is left
-    assert {:ok, _} = EmbeddingIndex.search("remove the current document", [kill], "k", opts)
+    assert {:ok, 0} = EmbeddingIndex.sync([kill], "k", opts)
     refute_receive {:embedding_request, _}
 
     # the package is loaded again. Its text did not change, so its vector is
     # still the one already paid for: loading a library embeds nothing.
-    assert {:ok, _} = EmbeddingIndex.search("remove the current document", [kill, theme], "k", opts)
+    assert {:ok, 0} = EmbeddingIndex.sync([kill, theme], "k", opts)
     refute_receive {:embedding_request, _}
   end
 
@@ -128,7 +139,7 @@ defmodule Compos.EmbeddingIndexTest do
     )
 
     assert {:error, {:http, 429, "nope"}} =
-             EmbeddingIndex.search("query", ["catalog row"], "test-key",
+             EmbeddingIndex.sync(["catalog row"], "test-key",
                path: path,
                dimensions: 2
              )

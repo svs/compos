@@ -4,18 +4,17 @@ defmodule Compos.Core.SchemeWarmup do
   alias Compos.Core.Session
 
   # The catalog is complete when Session publishes its interpreter. Build the
-  # immutable apropos rows in a shared-world task: application startup can
-  # finish, and the first agent does not inherit the lazy-build bill.
+  # immutable apropos rows and reconcile their vectors in a shared-world task:
+  # application startup can finish, and a foreground query embeds only itself.
   def start_link(_opts) do
     Task.start_link(fn ->
       Process.sleep(50)
 
       Session.eval(
         """
-        (task-run!
-          (lambda () (begin (apropos "__compos_catalog_warmup__") #t))
-          (lambda (ok value) #t)
-          30000)
+        (begin
+          (apropos--rows-cached)
+          (apropos-sync-embeddings!))
         """,
         nil,
         5_000,

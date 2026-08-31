@@ -3,8 +3,8 @@ defmodule Compos.Core.EmbeddingIndex do
   OpenAI embeddings for small local discovery indexes.
 
   Catalog vectors persist by content hash. Query vectors stay in bounded
-  memory. The caller owns ranking policy and can fall back when this module
-  returns an error.
+  memory. Catalog synchronization is separate from query search, so a
+  foreground lookup never waits while changed catalog entries embed.
   """
 
   require Logger
@@ -19,7 +19,7 @@ defmodule Compos.Core.EmbeddingIndex do
 
   @type score :: {non_neg_integer(), float()}
 
-  @doc "Embed TEXTS and QUERY, persist catalog vectors, and return cosine scores."
+  @doc "Embed QUERY only and score the catalog vectors already synchronized."
   @spec search(String.t(), [String.t()], String.t(), keyword()) ::
           {:ok, [score()]} | {:error, term()}
   def search(query, texts, api_key, opts \\ [])
@@ -33,13 +33,36 @@ defmodule Compos.Core.EmbeddingIndex do
       dimensions = Keyword.get(opts, :dimensions, @default_dimensions)
       path = Keyword.get(opts, :path, cache_path())
 
-      :global.trans({__MODULE__, path}, fn ->
+      query_hash = content_hash(model, dimensions, query)
+
+      :global.trans({{__MODULE__, :query, path, query_hash}, self()}, fn ->
         do_search(query, texts, api_key, model, dimensions, path, opts)
       end)
     end
   end
 
   def search(_, _, _, _), do: {:error, :invalid_arguments}
+
+  @doc "Embed catalog texts missing from the durable content-addressed index."
+  @spec sync([String.t()], String.t(), keyword()) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def sync(texts, api_key, opts \\ [])
+
+  def sync(texts, api_key, opts) when is_list(texts) and is_binary(api_key) do
+    if api_key == "" do
+      {:error, :missing_api_key}
+    else
+      model = Keyword.get(opts, :model, @default_model)
+      dimensions = Keyword.get(opts, :dimensions, @default_dimensions)
+      path = Keyword.get(opts, :path, cache_path())
+
+      :global.trans({{__MODULE__, :catalog, path}, self()}, fn ->
+        do_sync(texts, api_key, model, dimensions, path, opts)
+      end)
+    end
+  end
+
+  def sync(_, _, _), do: {:error, :invalid_arguments}
 
   @doc "Return the persistent embedding cache path."
   def cache_path, do: Path.join([Compos.Core.home(), "cache", "apropos-embeddings.etf"])
@@ -51,9 +74,9 @@ defmodule Compos.Core.EmbeddingIndex do
     :ok
   end
 
-  @doc "Delete persistent and in-memory vectors so the next search re-embeds them."
+  @doc "Delete persistent and in-memory vectors so the next sync rebuilds them."
   def clear(path \\ cache_path()) do
-    :global.trans({__MODULE__, path}, fn ->
+    :global.trans({{__MODULE__, :catalog, path}, self()}, fn ->
       forget_memory(path)
       File.rm(path)
       :ok
@@ -67,58 +90,76 @@ defmodule Compos.Core.EmbeddingIndex do
     query_hash = content_hash(model, dimensions, query)
     query_cache = :persistent_term.get({__MODULE__, :queries, path}, %{})
 
-    missing_entries =
+    available =
+      hashes
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {hash, index} ->
+        case Map.fetch(cache.vectors, hash) do
+          {:ok, vector} -> [{index, vector}]
+          :error -> []
+        end
+      end)
+
+    if available == [] do
+      {:ok, []}
+    else
+      missing =
+        if Map.has_key?(query_cache, query_hash),
+          do: %{},
+          else: %{query_hash => query}
+
+      with {:ok, fresh} <- embed_missing(missing, api_key, model, dimensions, opts) do
+        query_vector = Map.get(fresh, query_hash) || Map.fetch!(query_cache, query_hash)
+
+        put_query(path, query_hash, query_vector, query_cache)
+
+        scores =
+          available
+          |> Enum.map(fn {index, vector} -> {index, cosine(query_vector, vector)} end)
+          |> Enum.sort_by(fn {_index, score} -> -score end)
+
+        {:ok, scores}
+      else
+        {:error, reason} = error ->
+          Logger.warning("apropos query embedding unavailable: #{inspect(reason)}")
+          error
+      end
+    end
+  rescue
+    error -> embedding_error("query", error)
+  end
+
+  defp do_sync(texts, api_key, model, dimensions, path, opts) do
+    texts = Enum.map(texts, &to_string/1)
+    hashes = Enum.map(texts, &content_hash(model, dimensions, &1))
+    cache = load_cache(path, model, dimensions)
+
+    missing =
       hashes
       |> Enum.zip(texts)
       |> Enum.reject(fn {hash, _text} -> Map.has_key?(cache.vectors, hash) end)
-
-    missing =
-      if Map.has_key?(query_cache, query_hash) do
-        missing_entries
-      else
-        [{query_hash, query} | missing_entries]
-      end
       |> Map.new()
 
     with {:ok, fresh} <- embed_missing(missing, api_key, model, dimensions, opts) do
-      entry_vectors =
-        hashes
-        |> MapSet.new()
-        |> Map.new(fn hash -> {hash, Map.get(fresh, hash) || Map.fetch!(cache.vectors, hash)} end)
-
-      query_vector = Map.get(fresh, query_hash) || Map.fetch!(query_cache, query_hash)
-
-      # Keep every vector already paid for, not just this corpus. A search
-      # over fewer texts - a package unloaded, a filtered index - used to
-      # persist its own subset and drop the rest, so loading the package
-      # back embedded it again. A vector costs money once.
-      # apropos-rebuild-embeddings! clears what a changed doc leaves behind.
-      persisted = Map.merge(cache.vectors, entry_vectors)
-
-      if missing_entries != [] or cache.vectors != persisted do
-        write_cache!(path, model, dimensions, persisted)
+      if map_size(fresh) > 0 do
+        # Keep every vector already paid for. A package can unload and load
+        # again without embedding the same content a second time.
+        write_cache!(path, model, dimensions, Map.merge(cache.vectors, fresh))
       end
 
-      put_query(path, query_hash, query_vector, query_cache)
-
-      scores =
-        hashes
-        |> Enum.with_index()
-        |> Enum.map(fn {hash, index} ->
-          {index, cosine(query_vector, Map.fetch!(entry_vectors, hash))}
-        end)
-        |> Enum.sort_by(fn {_index, score} -> -score end)
-
-      {:ok, scores}
+      {:ok, map_size(fresh)}
     else
       {:error, reason} = error ->
-        Logger.warning("apropos embeddings unavailable: #{inspect(reason)}")
+        Logger.warning("apropos catalog embeddings unavailable: #{inspect(reason)}")
         error
     end
   rescue
-    error ->
-      Logger.warning("apropos embedding cache failed: #{Exception.message(error)}")
-      {:error, error}
+    error -> embedding_error("catalog", error)
+  end
+
+  defp embedding_error(part, error) do
+    Logger.warning("apropos #{part} embedding cache failed: #{Exception.message(error)}")
+    {:error, error}
   end
 
   defp embed_missing(missing, _key, _model, _dimensions, _opts) when map_size(missing) == 0,

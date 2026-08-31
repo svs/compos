@@ -166,8 +166,11 @@ signatures, commands, keys, settings, components, recipes, package metadata,
 domains, and effects.
 
 Literal search stays in Scheme. OpenAI embeddings add semantic results when a
-key exists. Catalog vectors persist by content hash in the compos home. API or
-cache failures leave the literal result path unchanged.
+key exists. Catalog vectors persist by content hash in the compos home and
+synchronize in a debounced background task after public catalog registration
+or reload completion. A foreground semantic lookup embeds only its query and
+scores the last synchronized catalog snapshot. API or cache failures leave the
+literal result path unchanged.
 
 The current implementation derives normalized apropos rows from several
 registries. It caches the rows by catalog generation. The first caller after a

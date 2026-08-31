@@ -134,7 +134,9 @@ defmodule Compos.Core.SchemeAPI do
         "(telemetry-snapshot [LIMIT]) — return recent telemetry events of every layer, newest first.",
       "telemetry-clear!" => "(telemetry-clear!) — discard retained telemetry events.",
       "embedding-search" =>
-        "(embedding-search QUERY TEXTS KEY LIMIT ELIGIBLE) — embed QUERY and TEXTS with OpenAI, cache text vectors on disk, and return eligible cosine scores.",
+        "(embedding-search QUERY TEXTS KEY LIMIT ELIGIBLE) — embed QUERY with OpenAI and return eligible cosine scores from the synchronized text vectors.",
+      "embedding-sync!" =>
+        "(embedding-sync! TEXTS KEY) — embed missing catalog TEXTS with OpenAI and persist their vectors by content hash.",
       "embedding-cache-clear!" =>
         "(embedding-cache-clear!) — delete cached apropos vectors from disk and memory; return the cache path.",
       "block-on-click!" =>
@@ -967,6 +969,12 @@ defmodule Compos.Core.SchemeAPI do
         path = Compos.Core.EmbeddingIndex.cache_path()
         :ok = Compos.Core.EmbeddingIndex.clear(path)
         path
+      end,
+      "embedding-sync!" => fn [texts, key] ->
+        case Compos.Core.EmbeddingIndex.sync(texts, to_string(key)) do
+          {:ok, count} -> count
+          {:error, _reason} -> false
+        end
       end,
       "embedding-search" => fn [query, texts, key, limit, eligible] ->
         case Compos.Core.EmbeddingIndex.search(to_string(query), texts, to_string(key)) do

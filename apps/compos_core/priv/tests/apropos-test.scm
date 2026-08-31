@@ -256,6 +256,39 @@
       (check-equal! seen "read csv file"
                     "the embedding receives only the user's task"))))
 
+(deftest 'catalog-registration-notifies-the-embedding-lifecycle
+  "the authoritative catalog write names the complete changed entry"
+  (lambda ()
+    (let ((old-hook apropos-catalog-changed!)
+          (seen #f))
+      (set! apropos-catalog-changed! (lambda (entry) (set! seen entry)))
+      (catalog-register! 'function "zz-embedding-notice" "A changed entry")
+      (set! apropos-catalog-changed! old-hook)
+      (check-equal! (plist-get seen 'name) "zz-embedding-notice"
+                    "registration sends the completed entry")
+      (test-forget-catalog! "function" "zz-embedding-notice"))))
+
+(deftest 'reload-batches-catalog-embedding-synchronization
+  "catalog writes during one reload schedule one background reconciliation"
+  (lambda ()
+    (let ((old-schedule apropos--schedule-embedding-sync!)
+          (old-reloading *reloading?*)
+          (old-pending *apropos--embedding-sync-pending*)
+          (scheduled 0))
+      (set! apropos--schedule-embedding-sync!
+        (lambda () (set! scheduled (+ scheduled 1))))
+      (set! *apropos--embedding-sync-pending* #f)
+      (set! *reloading?* #t)
+      (apropos-catalog-changed! '(kind "function" name "one"))
+      (apropos-catalog-changed! '(kind "function" name "two"))
+      (check-equal! scheduled 0 "the reload does not start a partial batch")
+      (set! *reloading?* #f)
+      (apropos-reload-finished!)
+      (check-equal! scheduled 1 "reload completion schedules one batch")
+      (set! apropos--schedule-embedding-sync! old-schedule)
+      (set! *reloading?* old-reloading)
+      (set! *apropos--embedding-sync-pending* old-pending))))
+
 (deftest 'embedding-rebuild-explains-a-missing-key
   "a manual rebuild clears the cache and reports why it cannot refill"
   (lambda ()

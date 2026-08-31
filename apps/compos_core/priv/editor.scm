@@ -120,6 +120,8 @@
             (set! *catalog* (cons entry *catalog*))
             (set! *catalog-keys* (cons key *catalog-keys*)))))
     (catalog--touch!)
+    (when (boundp (quote apropos-catalog-changed!))
+      (apropos-catalog-changed! entry))
     entry))
 
 (define (catalog) (reverse *catalog*))
@@ -173,6 +175,8 @@
                                          (catalog--get old 'qualified-name))))
                           *catalog*)))
           (catalog--touch!)
+          (when (boundp (quote apropos-catalog-changed!))
+            (apropos-catalog-changed! updated))
           updated))))
 
 ;; Commands are an Elixir registry underneath, but this wrapper gives every
@@ -198,6 +202,8 @@
                    (equal? (catalog--get entry 'name) name)))
             *catalog*))
   (catalog--touch!)
+  (when (boundp (quote apropos-catalog-changed!))
+    (apropos-catalog-changed! #f))
   name)
 
 ;;; --- public API registry -----------------------------------------------------
@@ -2380,6 +2386,8 @@
 
 (define (reload-finish!)
   (set! *reloading?* #f)
+  (when (boundp (quote apropos-reload-finished!))
+    (apropos-reload-finished!))
   (let* ((modes *reload-touched*)
          (bufs (reload--buffers-to-rebuild modes)))
     (set! *reload-touched* '())

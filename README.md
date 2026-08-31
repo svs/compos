@@ -179,8 +179,9 @@ has it — no restart, no compile step:
 Every public definition carries catalog metadata — a `domain!` and an
 `effects!` scope. `M-x apropos` searches that catalog by words and, when an
 OpenAI key is configured, by semantic similarity. Literal hits still rank
-first; catalog vectors are cached on disk and regenerated with
-`M-x apropos-rebuild-embeddings`. The Scheme API remains
+first; catalog vectors are synchronized in the background when public entries
+change, cached on disk, and regenerated explicitly with
+`M-x apropos-rebuild-embeddings`. Foreground lookup embeds only the query. The Scheme API remains
 `(apropos QUERY &rest FILTERS)`.
 
 ## Design commitments

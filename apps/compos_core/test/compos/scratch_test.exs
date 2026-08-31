@@ -62,7 +62,7 @@ defmodule Compos.ScratchTest do
     refute Buffer.get_local(scratch, "scratch-owner")
     assert Buffer.get_local(scratch, "scratch-from") == owner
     assert group_of(scratch) == owner
-    assert Buffer.get_local(scratch, "mode-name") == "text-mode"
+    assert Buffer.get_local(scratch, "mode-name") == "scratch-mode"
     refute Buffer.get_local(scratch, "render-mode")
     refute Buffer.get_local(scratch, "preview-renderer")
     refute Buffer.get_local(scratch, "visual-line-mode")

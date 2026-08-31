@@ -291,6 +291,43 @@
         (morg-babel-finish-scheme! buf idx lang body ok evaluated)))
     (list 'pending lang)))
 
+;;; --- the model ----------------------------------------------------------------
+;;; The LLM is one more block language. An `llm` block sends its body as the
+;;; prompt, and the answer arrives in the block's result like every other
+;;; result. The block asks its buffer which model it belongs to, so a scratch
+;;; that inherited its owner's model keeps that model here.
+
+(define morg-babel-llm-languages '("llm" "ask" "chat"))
+
+(define (morg-babel-llm? lang)
+  (and (member (string-downcase lang) morg-babel-llm-languages) #t))
+
+(define (morg-babel-buffer-model buf)
+  (let ((m (buffer-local buf 'llm-model)))
+    (and (string? m) (not (equal? m "")) m)))
+
+;; The seam every LLM block runs through. K receives the answer text.
+(define (morg-babel-llm-async prompt model k)
+  (if model (llm-with-model prompt model k) (llm prompt k)))
+
+;; A test replaces this to answer without a network.
+(define *morg-babel-llm* morg-babel-llm-async)
+
+;; What the result fence holds while the model works. It names the model, so
+;; the wait says who is thinking.
+(define (morg-babel-thinking-text model)
+  (if model (string-append "thinking: " model) "thinking"))
+
+(define (morg-babel-start-llm! buf scan fstart lang body)
+  (let ((idx (morg-babel-index scan buf fstart))
+        (key (list lang body))
+        (model (morg-babel-buffer-model buf)))
+    (morg-babel-claim! buf key)
+    (morg-babel-insert-result! buf fstart (morg-babel-thinking-text model))
+    (*morg-babel-llm* body model
+      (lambda (answer) (morg-babel-finish! buf idx lang body answer)))
+    (list 'pending lang)))
+
 (define (morg-babel-execute buf pos)
   (let* ((scan (morg-scan buf))
          (a (morg-block-open scan pos)))
@@ -319,6 +356,11 @@
                    (if (member (list lang body) (morg-babel-inflight buf))
                        (list 'error "The scheme block already runs")
                        (morg-babel-start-scheme! buf scan a lang body)))
+                  ((morg-babel-llm? lang)
+                   (if (member (list lang body) (morg-babel-inflight buf))
+                       (list 'error
+                             (string-append "The " lang " block already asks"))
+                       (morg-babel-start-llm! buf scan a lang body)))
                   ((not (morg-babel-runner lang))
                    (list 'error (string-append "No runner for " lang)))
                   ((morg-babel-sync? e)

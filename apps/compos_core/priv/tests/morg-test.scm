@@ -798,3 +798,121 @@
       (check-false! (file-exists? (string-append dir "/no")) "and the skipped block wrote nothing")
       (shell-command->string (string-append "rm -rf " dir))
       (t--morg-done!))))
+
+;;; --- motion -------------------------------------------------------------------
+;;; A note is read by jumping. Each motion command answers with the position
+;;; it landed on, and leaves point alone when there is nowhere to go.
+
+(define (t--morg-point) (buffer-point t--morg-buf))
+
+(deftest 'morg-next-heading-walks-every-heading
+  "C-c C-n takes the next heading whatever its depth"
+  (lambda ()
+    (t--morg! t--morg-fixture 0)
+    (t--morg-run! "morg-next-heading")
+    (check-equal! (t--morg-point) 9 "the child heading")
+    (t--morg-run! "morg-next-heading")
+    (check-equal! (t--morg-point) 24 "then the next top heading")
+    (t--morg-run! "morg-next-heading")
+    (check-equal! (t--morg-point) 24 "and the last heading stays put")
+    (t--morg-done!)))
+
+(deftest 'morg-previous-heading-walks-back
+  "C-c C-p takes the heading above point"
+  (lambda ()
+    (t--morg! t--morg-fixture 20)
+    (t--morg-run! "morg-previous-heading")
+    (check-equal! (t--morg-point) 9 "the heading this body belongs to")
+    (t--morg-done!)))
+
+(deftest 'morg-same-level-motion-stays-inside-its-parent
+  "a sibling motion gives up at a shallower heading rather than leaving"
+  (lambda ()
+    (t--morg! t--morg-fixture 0)
+    (t--morg-run! "morg-forward-same-level")
+    (check-equal! (t--morg-point) 24 "# a to # b, one level")
+    (t--morg! t--morg-fixture 9)
+    (t--morg-run! "morg-forward-same-level")
+    (check-equal! (t--morg-point) 9 "## child has no sibling, so point stays")
+    (t--morg-done!)))
+
+(deftest 'morg-link-motion-walks-the-links
+  "M-n and M-p take the next and previous markdown link"
+  (lambda ()
+    (t--morg! "see [one](http://a) and [two](http://b)\n" 0)
+    (t--morg-run! "morg-next-link")
+    (check-equal! (t--morg-point) 4 "the first link")
+    (t--morg-run! "morg-next-link")
+    (check-equal! (t--morg-point) 24 "the second")
+    (t--morg-run! "morg-previous-link")
+    (check-equal! (t--morg-point) 4 "and back again")
+    (t--morg-done!)))
+
+(deftest 'morg-landmarks-are-headings-paragraphs-blocks-and-links
+  "M-<down> walks every interesting place, each one once"
+  (lambda ()
+    (t--morg! t--morg-fixture 0)
+    (check-equal! (morg--landmarks t--morg-buf) '(0 4 9 18 24 28)
+                  "three headings and three paragraphs")
+    (t--morg! "para [l](http://a)\n\n```sh\necho hi\n```\n" 0)
+    (check-equal! (morg--landmarks t--morg-buf) '(0 5 20)
+                  "the paragraph, its link, and the fence")
+    (t--morg-done!)))
+
+;;; --- selection ----------------------------------------------------------------
+
+(deftest 'morg-select-block-takes-the-code-between-the-fences
+  "the region is the code itself, so the fences stay out of it"
+  (lambda ()
+    (t--morg! "# h\n\n```sh\necho hi\n```\n" 15)
+    (t--morg-run! "morg-select-block")
+    (check-equal! (with-current-buffer t--morg-buf (lambda () (mark))) 11
+                  "the mark sits after the open fence")
+    (check-equal! (t--morg-point) 19 "and point before the close fence")
+    (t--morg-done!)))
+
+(deftest 'morg-select-block-outside-a-block-takes-the-section
+  "prose has no fences, so the heading and its body are the unit"
+  (lambda ()
+    (t--morg! t--morg-fixture 5)
+    (t--morg-run! "morg-select-block")
+    (check-equal! (with-current-buffer t--morg-buf (lambda () (mark))) 0
+                  "the section starts at its heading")
+    (check-true! (> (t--morg-point) 5) "and runs past the point that asked")
+    (t--morg-done!)))
+
+;;; --- the llm block ------------------------------------------------------------
+;;; An llm block is a code block whose interpreter is the model. The seam
+;;; answers here, so the test needs no network.
+
+(deftest 'an-llm-block-asks-the-buffers-model-and-writes-the-answer
+  "the prompt is the body, and the result block holds the reply"
+  (lambda ()
+    (let ((seen #f) (saved *morg-babel-llm*))
+      (t--morg! "```llm\nwhat is 2 + 2?\n```\n" 8)
+      (buffer-set-local! t--morg-buf 'llm-model "test-model")
+      (set! *morg-babel-llm*
+        (lambda (prompt model k) (set! seen (list prompt model)) (k "four")))
+      (t--morg-run! "morg-babel")
+      (set! *morg-babel-llm* saved)
+      (check-equal! seen '("what is 2 + 2?\n" "test-model")
+                    "the body went to the buffer's own model")
+      (check-contains! (buffer-text t--morg-buf) "```result\nfour\n```"
+                       "the answer")
+      (t--morg-done!))))
+
+(deftest 'an-llm-block-shows-that-the-model-is-thinking
+  "the result block holds the status until the answer replaces it"
+  (lambda ()
+    (let ((k #f) (saved *morg-babel-llm*))
+      (t--morg! "```llm\nhello?\n```\n" 8)
+      (buffer-set-local! t--morg-buf 'llm-model "test-model")
+      (set! *morg-babel-llm* (lambda (prompt model cb) (set! k cb)))
+      (t--morg-run! "morg-babel")
+      (set! *morg-babel-llm* saved)
+      (check-contains! (buffer-text t--morg-buf) "thinking: test-model"
+                       "the wait names the model")
+      (k "the answer")
+      (check-contains! (buffer-text t--morg-buf) "```result\nthe answer\n```"
+                       "and the answer replaces the status")
+      (t--morg-done!))))

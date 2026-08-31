@@ -679,10 +679,200 @@
 
 (effects! '(write))
 
+;;; --- motion -----------------------------------------------------------------
+;;; A note is read by jumping: heading to heading, sibling to sibling, link to
+;;; link. A motion that finds nothing leaves point where it is and says so, so
+;;; a held key cannot walk off the end of the document.
+
+(define morg--link-pattern "\\[([^\\]\n]+)\\]\\(([^)\n]+)\\)")
+
+(define (morg--headings buf)
+  (filter (lambda (e) (equal? (morg-kind e) 'heading)) (morg-scan buf)))
+
+(define (morg--land! pos what)
+  (if pos
+      (begin (goto-char! pos) pos)
+      (begin (message (string-append "No " what)) #f)))
+
+;; LEVEL #f accepts the next heading of any depth. A number accepts one
+;; exactly that deep and gives up at a shallower one, so same-level motion
+;; stays inside its own parent instead of jumping to the next section.
+(define (morg--heading-after buf pos level)
+  (let loop ((es (morg--headings buf)))
+    (cond ((null? es) #f)
+          ((<= (car (car es)) pos) (loop (cdr es)))
+          ((not level) (car (car es)))
+          ((< (morg-info (car es)) level) #f)
+          ((equal? (morg-info (car es)) level) (car (car es)))
+          (else (loop (cdr es))))))
+
+(define (morg--heading-before buf pos level)
+  (let loop ((es (morg--headings buf)) (best #f))
+    (cond ((null? es) best)
+          ((>= (car (car es)) pos) best)
+          ((not level) (loop (cdr es) (car (car es))))
+          ((< (morg-info (car es)) level) (loop (cdr es) #f))
+          ((equal? (morg-info (car es)) level) (loop (cdr es) (car (car es))))
+          (else (loop (cdr es) best)))))
+
+(define (morg--level-here buf pos)
+  (let ((h (morg-enclosing-heading (morg-scan buf) pos)))
+    (and h (morg-info h))))
+
+(define (morg--link-positions buf)
+  (apply append
+    (map (lambda (e)
+           (let ((start (car e)) (line (cadr e)))
+             (map (lambda (r) (+ start (car r)))
+                  (re-find* morg--link-pattern line))))
+         (morg-lines buf))))
+
+(define (morg--first-after ps pos)
+  (let loop ((ps ps))
+    (cond ((null? ps) #f)
+          ((> (car ps) pos) (car ps))
+          (else (loop (cdr ps))))))
+
+(define (morg--last-before ps pos)
+  (let loop ((ps ps) (best #f))
+    (cond ((null? ps) best)
+          ((< (car ps) pos) (loop (cdr ps) (car ps)))
+          (else best))))
+
+;; What the reader means by "this": the code inside the fences when point
+;; is in a block, else the whole section under its heading. The fences stay
+;; out of the region, so the selection is the code itself.
+(define (morg--block-bounds buf pos)
+  (let* ((scan (morg-scan buf))
+         (open (morg-block-open scan pos)))
+    (and open (morg-block-body scan buf open))))
+
+(define (morg--section-bounds buf pos)
+  (let* ((scan (morg-scan buf))
+         (h (morg-enclosing-heading scan pos)))
+    (and h (list (car h) (morg-heading-body-end scan buf (car h))))))
+
+(define-command "morg-select-block"
+  "Select the code block at point, else the whole section"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (b (or (morg--block-bounds buf (point))
+                  (morg--section-bounds buf (point)))))
+      (if b
+          (begin (set-mark! (car b)) (goto-char! (cadr b)) b)
+          (begin (message "No block or section here") #f)))))
+
+;; The interesting places in a note: every heading, every paragraph, every
+;; fenced block whatever its language, and every link. One key walks them
+;; all, so a reader who does not know what lies above point still lands
+;; somewhere worth reading. Each list is already in document order, so the
+;; merge keeps them there and one position lands once.
+(define (morg--merge a b)
+  (cond ((null? a) b)
+        ((null? b) a)
+        ((< (car a) (car b)) (cons (car a) (morg--merge (cdr a) b)))
+        ((> (car a) (car b)) (cons (car b) (morg--merge a (cdr b))))
+        (else (cons (car a) (morg--merge (cdr a) (cdr b))))))
+
+(define (morg--blank-line? line) (and (re-match "^[ \t]*$" line) #t))
+
+;; A paragraph starts at a line with text on it that follows nothing, a
+;; blank line, a heading, or a closing fence.
+(define (morg--paragraph-starts scan)
+  (let loop ((es scan) (prev #f) (acc '()))
+    (if (null? es)
+        (reverse acc)
+        (let* ((e (car es))
+               (start?
+                 (and (equal? (morg-kind e) 'text)
+                      (not (morg--blank-line? (cadr e)))
+                      (or (not prev)
+                          (member (morg-kind prev) '(heading close))
+                          (and (equal? (morg-kind prev) 'text)
+                               (morg--blank-line? (cadr prev)))))))
+          (loop (cdr es) e (if start? (cons (car e) acc) acc))))))
+
+(define (morg--landmarks buf)
+  (let ((scan (morg-scan buf)))
+    (morg--merge
+      (morg--merge
+        (map car
+             (filter (lambda (e) (member (morg-kind e) '(heading open))) scan))
+        (morg--paragraph-starts scan))
+      (morg--link-positions buf))))
+
+(define-command "morg-next-heading"
+  "Move to the next heading"
+  (lambda ()
+    (morg--land! (morg--heading-after (current-buffer) (point) #f)
+                 "next heading")))
+
+(define-command "morg-previous-heading"
+  "Move to the previous heading"
+  (lambda ()
+    (morg--land! (morg--heading-before (current-buffer) (point) #f)
+                 "previous heading")))
+
+(define-command "morg-forward-same-level"
+  "Move to the next heading at this level"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (level (morg--level-here buf (point))))
+      (morg--land! (and level (morg--heading-after buf (point) level))
+                   "next heading at this level"))))
+
+(define-command "morg-backward-same-level"
+  "Move to the previous heading at this level"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (level (morg--level-here buf (point))))
+      (morg--land! (and level (morg--heading-before buf (point) level))
+                   "previous heading at this level"))))
+
+(define-command "morg-next-link"
+  "Move to the next link"
+  (lambda ()
+    (morg--land! (morg--first-after (morg--link-positions (current-buffer))
+                                    (point))
+                 "next link")))
+
+(define-command "morg-previous-link"
+  "Move to the previous link"
+  (lambda ()
+    (morg--land! (morg--last-before (morg--link-positions (current-buffer))
+                                    (point))
+                 "previous link")))
+
+(define-command "morg-next-landmark"
+  "Move down to the next heading, block or link"
+  (lambda ()
+    (morg--land! (morg--first-after (morg--landmarks (current-buffer)) (point))
+                 "next landmark")))
+
+(define-command "morg-previous-landmark"
+  "Move up to the previous heading, block or link"
+  (lambda ()
+    (morg--land! (morg--last-before (morg--landmarks (current-buffer)) (point))
+                 "previous landmark")))
+
 (define (morg-install-keys)
   (local-set-key "TAB" "morg-cycle")
   (local-set-key "S-TAB" "morg-global-cycle")
   (local-set-key "C-c C-t" "morg-todo")
+  ;; motion, org's own spelling: C-n/C-p walk every heading, C-f/C-b walk
+  ;; the siblings. Links take M-n and M-p, because C-c C-x is the tangler.
+  (local-set-key "C-c C-n" "morg-next-heading")
+  (local-set-key "C-c C-p" "morg-previous-heading")
+  (local-set-key "C-c C-f" "morg-forward-same-level")
+  (local-set-key "C-c C-b" "morg-backward-same-level")
+  ;; M-<up> and M-<down> shadow the global scroll-other-window pair here,
+  ;; the way org-mode shadows them for subtree motion. In a note, moving is
+  ;; what the reader wants from that key.
+  (local-set-key "M-<up>" "morg-previous-landmark")
+  (local-set-key "M-<down>" "morg-next-landmark")
+  (local-set-key "C-c SPC" "morg-select-block")
+  (local-set-key "M-n" "morg-next-link")
+  (local-set-key "M-p" "morg-previous-link")
   (local-set-key "C-c C-c" "morg-babel")
   (local-set-key "C-c C-x" "morg-tangle")
   ;; The core chords keep their meaning while the mode supplies its own

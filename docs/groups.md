@@ -476,6 +476,7 @@ One predicate, `transient?`, is true for the minibuffer, `*switch*`, the echo ar
 
 Every group has one scratch buffer named `*scratch: NAME*`.
 
+- It is in `scratch-mode`, a Morg note: headings fold, code blocks run, and the motions walk headings, siblings, and links.
 - It is always in the group. `move` and `remove` refuse it.
 - `kill-buffer` refuses it while the group exists. The echo area names the group.
 - `kill G` and `dissolve G` remove it.

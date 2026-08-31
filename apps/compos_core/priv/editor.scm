@@ -2471,6 +2471,37 @@
   (catalog-register! 'mode name "Major mode"
     'use (string-append "(run-command \"" name "\")")))
 
+;; A mode can say which mode it is built from. Emacs writes that into
+;; define-derived-mode; here the parent is a fact about the name, so a test
+;; asks mode-is? instead of comparing one string and missing every child.
+(define *mode-parents* '())
+
+(define (mode-parent! name parent)
+  (set! *mode-parents*
+    (cons (list name parent)
+          (remove (lambda (e) (equal? (car e) name)) *mode-parents*))))
+
+(define (mode-parent name)
+  (let ((e (assoc name *mode-parents*))) (and e (cadr e))))
+
+;; #t when MODE is NAME, or descends from it. The walk carries what it has
+;; seen, so a parent loop ends instead of hanging the editor.
+(define (mode-is? mode name)
+  (let loop ((m mode) (seen '()))
+    (cond ((not m) #f)
+          ((equal? m name) #t)
+          ((member m seen) #f)
+          (else (loop (mode-parent m) (cons m seen))))))
+
+(define (buffer-mode-is? buf name)
+  (mode-is? (buffer-local buf 'mode-name) name))
+
+;; Run another mode's setup. A derived mode inherits the behavior instead
+;; of copying it, so the two cannot drift apart.
+(define (mode-setup! name)
+  (let ((e (assoc name *mode-setups*)))
+    (when e ((cadr e)))))
+
 ;; What a mode is for, in the mode's own words. describe-mode prints it
 ;; above the key table. A mode without one still gets its keys.
 (define *mode-docs* '())
@@ -9371,7 +9402,8 @@
   name)
 
 (define (paste-mode-active? buf mode)
-  (or (equal? (buffer-local buf 'mode-name) mode)
+  ;; a derived major mode keeps the hooks of the mode it is built from
+  (or (buffer-mode-is? buf mode)
       (minor-mode-on? buf mode)))
 
 (define (run-paste-hooks! kind data mime)
@@ -9778,6 +9810,10 @@
 (public! 'local-remap! "(local-remap! FROM-COMMAND TO-COMMAND) — Emacs [remap]: every key bound to FROM runs TO in this buffer (arrows, C-n/C-p, user bindings alike)")
 (public! 'local-remap*! "(local-remap*! BUF FROM-COMMAND TO-COMMAND) — remap in an explicit buffer")
 (public! 'define-mode "(define-mode NAME SETUP) — major mode; SETUP must rebuild from locals")
+(public! 'mode-parent! "(mode-parent! NAME PARENT) — record that NAME is built from PARENT")
+(public! 'mode-is? "(mode-is? MODE NAME) — #t when MODE is NAME or descends from it")
+(public! 'buffer-mode-is? "(buffer-mode-is? BUF NAME) — #t when the buffer's major mode is NAME or descends from it")
+(public! 'mode-setup! "(mode-setup! NAME) — run NAME's setup in the current buffer, the way a derived mode inherits it")
 (public! 'define-list-mode!
   "(define-list-mode! NAME OPTS) — create a selectable text-table mode. Responsive layouts are ordered profiles selected by min-cols, max-cols, or default; profiles may override columns, cells, footer, and compact."
   'ui)

@@ -84,6 +84,25 @@
     (group-buffers group))
   scratch)
 
+;; A scratch is a Morg note that belongs to a group, so scratch-mode runs
+;; morg-mode's own setup instead of copying it, and mode-parent! tells every
+;; morg test that a scratch is one of its buffers.
+(mode-doc! "scratch-mode"
+  "The group's scratch. It is a Morg note: `TAB` folds a heading or a block, `C-c C-c` runs a block, `C-c C-n` and `C-c C-p` walk the headings, `C-c C-f` and `C-c C-b` walk the siblings, and `M-n` and `M-p` walk the links. It belongs to the group, and it is never a file.")
+
+(mode-parent! "scratch-mode" "morg-mode")
+
+(define-mode "scratch-mode"
+  (lambda ()
+    (mode-setup! "morg-mode")))
+
+;; scratch-mode is what a new scratch starts in, and that is the whole of
+;; it. A scratch that already has a mode keeps it: M-x morg-mode in a scratch
+;; means plain morg, and nothing here may take that back.
+(define (scratch--set-mode! scratch)
+  (unless (buffer-local scratch 'mode-name)
+    (with-current-buffer scratch (lambda () (set-mode! "scratch-mode")))))
+
 (define (scratch--prepare! owner scratch)
   (let ((existed (buffer-exists? scratch)))
     (unless (buffer-exists? scratch)
@@ -92,8 +111,7 @@
         (string-append "# Scratch — " (scratch--label owner) "\n\n")))
     ;; set-mode! is current-buffer based, and a mode belongs to the buffer,
     ;; not to a window: give a new scratch its mode without displaying it.
-    (unless (buffer-local scratch 'mode-name)
-      (with-current-buffer scratch (lambda () (set-mode! "text-mode"))))
+    (scratch--set-mode! scratch)
     (let* ((group (or (buffer-group owner) (group-ensure! owner)))
            (already-managed
              (and existed
@@ -217,6 +235,7 @@
   (buffer-set-local! scratch 'project-scratch-root root)
   (buffer-set-local! scratch 'group root)
   (project-scratch--tag! root)
+  (scratch--set-mode! scratch)
   ;; the way back: this scratch is reached from many buffers, so it
   ;; remembers the last one instead of owning one
   (when (and from (not (equal? from scratch)))
@@ -239,7 +258,6 @@
                 (let ((scratch (project-scratch-name root)))
                   (project-scratch--prepare! root here scratch)
                   (scratch--focus! scratch)
-                  (unless (buffer-local scratch 'mode-name) (set-mode! "text-mode"))
                   (end-of-buffer!)))))))))
 
 (global-set-key "C-x p s" "project-scratch")

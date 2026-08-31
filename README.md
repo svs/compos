@@ -1,3 +1,5 @@
+![compos](apps/compos_ui/priv/static/images/compos-study-symbolic-composition-v1.png)
+
 # compos
 
 Emacs rebuilt on the BEAM.

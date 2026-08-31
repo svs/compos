@@ -65,6 +65,7 @@
 (load-bundled-package "messages.scm")
 (load-bundled-package "provenance.scm")
 (load-bundled-package "movie.scm")
+(load-bundled-package "recording.scm")
 (load-bundled-package "scheme-ide.scm")
 (load-bundled-package "peek.scm")
 (load-bundled-package "scratch.scm")

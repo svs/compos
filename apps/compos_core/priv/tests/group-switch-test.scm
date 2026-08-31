@@ -629,7 +629,7 @@
       (check-false! (minibuffer-state) "move opens no prompt on the scratch")
       (check-true! (buffer-in-group? t--sw-second source)
                    "the scratch keeps its group")
-      (run-command "group-remove")
+      (run-command "remove-group-from-buffer")
       (check-false! (minibuffer-state) "remove opens no prompt on the scratch")
       (check-true! (buffer-in-group? t--sw-second source)
                    "remove changes nothing on the scratch")
@@ -680,7 +680,7 @@
       (buffer-add-group! t--sw-first kept)
       (switch-to-buffer! t--sw-first)
       (set-frame-local! 'current-group removed)
-      (run-command "group-remove")
+      (run-command "remove-group-from-buffer")
 
       (check-equal! (plist-get (minibuffer-state) 'prompt)
                     "Toggle group removal (C-g applies): "
@@ -707,7 +707,7 @@
       (buffer-add-group! t--sw-first kept)
       (switch-to-buffer! t--sw-first)
       (set-frame-local! 'current-group #f)
-      (run-command "group-remove")
+      (run-command "remove-group-from-buffer")
       (check-equal! (plist-get (minibuffer-state) 'prompt)
                     "Toggle group removal (C-g applies): "
                     "the command asks which membership to remove")
@@ -732,7 +732,7 @@
       (buffer-add-group! t--sw-first first)
       (buffer-add-group! t--sw-first second)
       (switch-to-buffer! t--sw-first)
-      (run-command "group-remove")
+      (run-command "remove-group-from-buffer")
       (t--sw-type! "zzsw-toggle-first")
       (t--sw-key! "confirm")
       (check-true! (buffer-in-group? t--sw-first first)
@@ -745,14 +745,14 @@
                    "the second selection clears the pending removal"))
     (t--sw-done!)))
 
-(deftest 'group-remove-opens-the-staged-picker-for-one-membership
+(deftest 'remove-group-from-buffer-opens-the-staged-picker-for-one-membership
   "the compatibility command never removes the only membership immediately"
   (lambda ()
     (t--sw-setup!)
     (let ((only (group-record-create! "zzsw-only-remove")))
       (buffer-add-group! t--sw-first only)
       (switch-to-buffer! t--sw-first)
-      (run-command "group-remove")
+      (run-command "remove-group-from-buffer")
       (check-equal! (plist-get (minibuffer-state) 'prompt)
                     "Toggle group removal (C-g applies): "
                     "the selector opens for one membership")
@@ -796,7 +796,7 @@
       (check-true! (buffer-in-group? t--sw-second moved) "the scratch buffer reaches the destination")
 
       (set-frame-local! 'current-group moved)
-      (run-command "group-remove")
+      (run-command "remove-group-from-buffer")
       (t--sw-type! "zzsw-family-moved")
       (t--sw-key! "confirm")
       (check-true! (buffer-in-group? t--sw-first moved)

@@ -121,7 +121,7 @@ I want to start from a project or directory
 
 - I pick it and accept with `C-RET` instead of `RET`.
 - The buffer is shown and added to the destination group.
-- A mistake is one `group-remove` away.
+- A mistake is one `remove-group-from-buffer` away.
 - **Command:** `switch-to-buffer`, then `C-RET`.
 
 #### I want to open a file and have it here
@@ -203,7 +203,7 @@ I want to start from a project or directory
 
 #### I want to change this buffer's groups by hand
 
-- Add one: `group-add`. Replace all: `group-move`. Drop one: `group-remove`.
+- Add one: `group-add`. Replace all: `group-move`. Drop one: `remove-group-from-buffer`.
 - These work when the frame has no destination too.
 
 ### As a user working with several windows
@@ -280,7 +280,7 @@ I want to start from a project or directory
 
 - Showing or switching buffers never changes a buffer's groups.
 - Switching groups never changes a buffer's groups.
-- `group-add` never removes. `group-move` names one destination. `group-remove` drops one group.
+- `group-add` never removes. `group-move` names one destination. `remove-group-from-buffer` drops one group.
 - No membership verb kills a buffer or changes a file.
 - Cancel changes nothing durable.
 - A wrong membership costs one command to fix.
@@ -320,7 +320,8 @@ Every verb that takes buffers acts on the selection. With no selection it acts o
 |---|---|
 | `group-add` G | Add the selection to G. Create G when the name is new. Adding a buffer that is in G is a no-op. |
 | `group-move` G | Remove the selection from every group, then add it to G. |
-| `group-remove` G | Remove the selection from G. The buffer stays open. |
+| `remove-buffers-from-group` G | Remove the chosen buffers from G. They stay open. |
+| `remove-group-from-buffer` B | Remove the chosen groups from B's family. B stays open. |
 | `group-switch` G | Save the frame's layout into the outgoing group. Set `previous`. Set `destination` to G. Restore G's layout on this frame. |
 | `group-switch-last` | Swap `destination` and `previous`. |
 | `buffer-context-switch!` | Read the current buffer's groups. 0: prompt for a name and run `group-new`. 1: switch to it. 2 or more: prompt, always. |
@@ -332,13 +333,14 @@ Every verb that takes buffers acts on the selection. With no selection it acts o
 
 ### Command names
 
-One command per verb, in the `group` namespace. A verb that acts on a group reads the row or the marks when it runs in the groups board, and the frame's group elsewhere. No other command changes membership.
+One command per verb. The name says which way the verb runs, so `remove-buffers-from-group` and `remove-group-from-buffer` are two commands, not one with an argument. A prefix is not what holds the family together: every command in this file carries the `groups` package and namespace in the catalog, so apropos finds them whatever they are called. A verb that acts on a group reads the row or the marks when it runs in the groups board, and the frame's group elsewhere. No other command changes membership.
 
 | Verb | Command | Stock key |
 |---|---|---|
 | `add` | `group-add` | `C-c g`, `C-x C-g a`; `C-t` in the switcher; `G` in ibuffer |
 | `move` | `group-move` | `C-x C-g m` |
-| `remove` | `group-remove` | `C-x C-g r` |
+| `remove-buffers` | `remove-buffers-from-group` | `M-x` |
+| `remove-group` | `remove-group-from-buffer` | `C-x C-g r` |
 | `switch` | `group-switch` | `C-x g`, `C-x C-g g`; `RET` in the board |
 | `switch-last` | `group-switch-last` | `C-x C-g C-g` |
 | `switch-to-buffer-group` | `C-RET` in the switcher (`buffer-context-switch!`) | |
@@ -488,11 +490,11 @@ Every group has one scratch buffer named `*scratch: NAME*`.
 A buffer can be in many groups. No group is the owner.
 
 - "Exclusive to G" is derived: the groups are exactly `{G}`.
-- `group-add` never removes. `group-move` names one destination and replaces every group. `group-remove` drops one group.
+- `group-add` never removes. `group-move` names one destination and replaces every group. The two removals drop a membership, one from each side.
 - Three places read a buffer's groups: list sectioning, window fill, and `switch-to-buffer-group`. Layouts store buffer names, not groups.
 - The one prompt in the system is `switch-to-buffer-group` with two or more groups. It always asks.
 
-A group grows only while it is the destination of some frame, or by an explicit `group-add`. A group shrinks only by `group-remove`, `group-move`, `kill-buffer`, `group-dissolve`, or `group-kill`.
+A group grows only while it is the destination of some frame, or by an explicit `group-add`. A group shrinks only by `remove-buffers-from-group`, `remove-group-from-buffer`, `group-move`, `kill-buffer`, `group-dissolve`, or `group-kill`.
 
 ## Chats and agents
 
@@ -573,7 +575,7 @@ Tests name commands, never keys. A test that needs a binding binds its own dummy
 2. Creation with no destination stays ungrouped.
 3. Showing a live buffer changes no membership: switcher, `find-file`, jump.
 4. `C-RET` semantics in the switcher: show plus add, on one buffer and on a selection.
-5. `group-add`, `group-move`, `group-remove` on one buffer, on a selection, on a dired selection, on a path selection.
+5. `group-add`, `group-move`, `remove-group-from-buffer` on one buffer, on a selection, on a dired selection, on a path selection.
 6. `new` with a selection seed and with an empty seed; the current buffer is never the seed.
 7. `switch-to-buffer-group` with 0, 1, and many groups; the many case prompts.
 8. `switch` saves the outgoing layout as it is and restores tree, buffers, point, scroll, and selected window.

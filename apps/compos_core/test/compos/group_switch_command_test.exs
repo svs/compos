@@ -190,7 +190,7 @@ defmodule Compos.GroupSwitchCommandTest do
       (buffer-add-group! "#{first}" "#{remove}")
       (buffer-add-group! "#{first}" "#{keep}")
       (switch-to-buffer! "#{first}")
-      (run-command "group-remove")
+      (run-command "remove-group-from-buffer")
       (minibuffer-change! "remove-on-close"))
     """)
 
@@ -206,14 +206,14 @@ defmodule Compos.GroupSwitchCommandTest do
     assert Editor.render_state().minibuffer == nil
   end
 
-  test "group-remove stages the only membership before C-g applies it", %{first: first} do
+  test "remove-group-from-buffer stages the only membership before C-g applies it", %{first: first} do
     only = group_id("remove-only-on-close")
 
     eval!("""
     (begin
       (buffer-add-group! "#{first}" "#{only}")
       (switch-to-buffer! "#{first}")
-      (run-command "group-remove"))
+      (run-command "remove-group-from-buffer"))
     """)
 
     assert Editor.render_state().minibuffer.prompt == "Toggle group removal (C-g applies): "

@@ -2824,8 +2824,8 @@
       (list 'cancel (lambda () (buffer-family-remove-groups! buf pending)))
       (list 'style #f))))
 
-(define-command "group-remove"
-  "Remove one or more group memberships from the current buffer family"
+(define-command "remove-group-from-buffer"
+  "Toggle this buffer out of the groups it belongs to; C-g applies"
   (lambda ()
     (let* ((buf (current-buffer))
            (ids (group-buffer-memberships buf)))
@@ -2833,6 +2833,64 @@
              (message "The group scratch stays with its group"))
             ((null? ids) (message "The buffer is not in a group"))
             (else (buffer-remove-read! buf ids '()))))))
+
+;; The other direction. One group is named by where the command runs, and the
+;; buffers are the rows. The chat and the group scratch never appear: they
+;; stay with their group (invariant 14).
+(define (group-remove-candidates names pending)
+  (map
+    (lambda (name)
+      (list name
+            (if (member name pending)
+                "remove on C-g · RET keeps"
+                "keep · RET removes")))
+    names))
+
+(define (group-remove-buffers! g names)
+  (for-each
+    (lambda (name)
+      (when (buffer-in-group? name g) (buffer-remove-group! name g)))
+    names)
+  (when (pair? names) (run-hooks 'group-membership-hook))
+  (message
+    (if (null? names)
+        "No group memberships changed"
+        (string-append "Removed " (number->string (length names))
+                       " buffer" (if (= (length names) 1) "" "s")
+                       " from " (group-display-name g))))
+  names)
+
+(define (group-remove-read! g names pending)
+  (minibuffer-read*
+    (string-append "Toggle removal from " (group-display-name g)
+                   " (C-g applies): ")
+    (group-remove-candidates names pending)
+    (list
+      (list 'confirm
+        (lambda (name)
+          (group-remove-read! g names
+            (cond ((member name pending)
+                   (remove (lambda (held) (equal? held name)) pending))
+                  ((member name names) (append pending (list name)))
+                  (else pending)))))
+      (list 'cancel (lambda () (group-remove-buffers! g pending)))
+      (list 'style #f))))
+
+(define-command "remove-buffers-from-group"
+  "Toggle buffers out of this group; C-g applies"
+  (lambda ()
+    (let* ((g (if (in-groups-board?)
+                  (groups--current)
+                  (or (buffer-group (current-buffer)) (frame-group))))
+           (names (if g
+                      (remove (lambda (name)
+                                (or (group-scratch-buffer? name)
+                                    (chat-buffer? name)))
+                              (group-buffers-mru g))
+                      '())))
+      (cond ((not g) (message "Not in a group"))
+            ((null? names) (message "The group has no buffer to remove"))
+            (else (group-remove-read! g names '()))))))
 
 (define (group-move-read-destination! buffers)
   (minibuffer-read "Move buffers to group: "
@@ -2926,7 +2984,7 @@
   (global-set-key "C-x C-g C-g" "group-switch-last")
   (global-set-key "C-x C-g a" "group-add")
   (global-set-key "C-x C-g m" "group-move")
-  (global-set-key "C-x C-g r" "group-remove")
+  (global-set-key "C-x C-g r" "remove-group-from-buffer")
   (global-set-key "C-x C-g n" "group-new")
   (global-set-key "C-x C-g b" "group-members")
   (global-set-key "C-x C-g l" "groups")
@@ -2936,7 +2994,7 @@
 (group-keymap-install!)
 
 ;; Remove the previous vocabulary from hot-reloaded sessions: the names
-;; docs/groups.md folded into group-add, group-move, group-remove,
+;; docs/groups.md folded into group-add, group-move, the two removals,
 ;; group-switch, group-new, group-members, and the -at-point twins.
 (for-each undefine-command
   '("group-pull-buffer" "group-push-buffer" "group-push-visible"
@@ -3004,7 +3062,8 @@
 (catalog-meta! 'command "group-members" 'domain 'buffers 'effects '(read display))
 (for-each
   (lambda (name) (catalog-meta! 'command name 'domain 'buffers 'effects '(write)))
-  '("group-add" "group-move" "group-remove" "group-new" "group-rename"
+  '("group-add" "group-move" "remove-group-from-buffer"
+    "remove-buffers-from-group" "group-new" "group-rename"
     "group-new-from-visible" "group-move-visible"
     "group-dissolve" "group-revive"))
 (for-each

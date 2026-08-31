@@ -617,6 +617,46 @@
                     "the destination becomes the only membership"))
     (t--sw-done!)))
 
+(deftest 'the-group-scratch-refuses-move
+  "the group's shared scratch keeps its membership through move and remove"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((source (group-record-create! "zzsw-scratch-home"))
+          (destination (group-record-create! "zzsw-scratch-away")))
+      (buffer-add-group-as! t--sw-second source 'scratch)
+      (switch-to-buffer! t--sw-second)
+      (run-command "group-move")
+      (check-false! (minibuffer-state) "move opens no prompt on the scratch")
+      (check-true! (buffer-in-group? t--sw-second source)
+                   "the scratch keeps its group")
+      (run-command "group-remove")
+      (check-false! (minibuffer-state) "remove opens no prompt on the scratch")
+      (check-true! (buffer-in-group? t--sw-second source)
+                   "remove changes nothing on the scratch")
+      (check-false! (buffer-in-group? t--sw-second destination)
+                    "the scratch reaches no other group"))
+    (t--sw-done!)))
+
+(deftest 'a-lone-move-leaves-the-group-scratch-behind
+  "moving one member does not drag the group's shared scratch along"
+  (lambda ()
+    (t--sw-setup!)
+    (let ((source (group-record-create! "zzsw-keeps-scratch"))
+          (destination (group-record-create! "zzsw-gains-doc")))
+      (buffer-add-group! t--sw-first source)
+      (buffer-add-group-as! t--sw-second source 'scratch)
+      (switch-to-buffer! t--sw-first)
+      (run-command "group-move")
+      (t--sw-type! "zzsw-gains-doc")
+      (t--sw-key! "confirm")
+      (check-true! (buffer-in-group? t--sw-first destination)
+                   "the document reaches the destination")
+      (check-false! (buffer-in-group? t--sw-second destination)
+                    "the group scratch stays out of the destination")
+      (check-true! (buffer-in-group? t--sw-second source)
+                   "the group scratch keeps its home group"))
+    (t--sw-done!)))
+
 (deftest 'a-failed-move-keeps-every-existing-membership
   "move changes no membership when it cannot resolve the destination"
   (lambda ()
@@ -745,6 +785,9 @@
       (check-true! (buffer-in-group? t--sw-second added) "the scratch buffer is added")
 
       (buffer-move-family-to-group! t--sw-first moved)
+      ;; the move sweeps the source group's panes, so the window no
+      ;; longer shows the moved document; stand on it again
+      (switch-to-buffer! t--sw-first)
       (check-false! (buffer-in-group? t--sw-first source) "the document leaves the source")
       (check-false! (buffer-in-group? t--sw-second source) "the scratch buffer leaves the source")
       (check-false! (buffer-in-group? t--sw-first added) "the document leaves another group")

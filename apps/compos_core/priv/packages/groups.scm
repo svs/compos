@@ -364,6 +364,14 @@
        (not (chat-buffer? b))
        (not (string-prefix? " " b))))
 
+;; the group's own scratch, its blank pane. It refuses move and remove
+;; (docs/groups.md, invariant 14): its name and its membership must
+;; agree, or the group's layout shows a foreign buffer and the frame
+;; loses its derived current group.
+(define (group-scratch-buffer? b)
+  (let ((g (buffer-group b)))
+    (and g (equal? (buffer-group-role b g) "scratch"))))
+
 (define (buffer-context-only? b)
   (and (buffer-known? b)
        (equal? (buffer-local b 'context-only) #t)))
@@ -2679,6 +2687,14 @@
                     (group-add-buffers-to! buffers id)
                     (message "Group needs a name"))))))))))
 
+;; A move must show: a pane of the group the frame stands in stops
+;; showing a buffer that left. The sweep is the same one a group switch
+;; runs, and the layout it leaves is saved as the group's own.
+(define (group-move-sweep! here to)
+  (when (and here (not (equal? here to)))
+    (group-restore-sanitize! here)
+    (group-layout-save! here)))
+
 (define (group-move-buffers-to! buffers destination)
   (let ((id (group-ensure-record! destination)))
     (cond
@@ -2687,9 +2703,15 @@
         (let ((eligible
                (filter (lambda (buf)
                          (and (buffer-known? buf)
-                              (group-work-buffer? buf)))
-                       buffers)))
+                              (group-work-buffer? buf)
+                              (not (group-scratch-buffer? buf))))
+                       buffers))
+              (here (frame-group)))
+          (set! *group-current-inhibit* #t)
           (for-each (lambda (buf) (buffer-move-to-group! buf id)) eligible)
+          (group-move-sweep! here id)
+          (set! *group-current-inhibit* #f)
+          (group-current-recalculate!)
           (run-hooks 'group-membership-hook)
           (message (string-append "Moved " (number->string (length eligible))
                                   " buffer"
@@ -2712,20 +2734,25 @@
           family))))
 
 (define (buffer-move-family-to-group! buf destination)
-  (let ((family (buffer-family buf))
+  ;; the group's shared scratch never travels (docs/groups.md, invariant
+  ;; 14); a legacy owner-companion pair still moves as one
+  (let ((family (remove group-scratch-buffer? (buffer-family buf)))
         (to (group-resolve-id destination)))
     (cond ((not to) (message "No destination group"))
+          ((null? family) (message "Nothing to move"))
           (else
-            (set! *group-current-inhibit* #t)
-            (for-each (lambda (member) (buffer-move-to-group! member to)) family)
-            (set! *group-current-inhibit* #f)
-            (group-current-recalculate!)
-            (run-hooks 'group-membership-hook)
-            (message (string-append "Moved " (number->string (length family))
-                                    " buffer"
-                                    (if (= (length family) 1) "" "s")
-                                    " to " (group-name to)))
-            family))))
+            (let ((here (frame-group)))
+              (set! *group-current-inhibit* #t)
+              (for-each (lambda (member) (buffer-move-to-group! member to)) family)
+              (group-move-sweep! here to)
+              (set! *group-current-inhibit* #f)
+              (group-current-recalculate!)
+              (run-hooks 'group-membership-hook)
+              (message (string-append "Moved " (number->string (length family))
+                                      " buffer"
+                                      (if (= (length family) 1) "" "s")
+                                      " to " (group-name to)))
+              family)))))
 
 (define-command "group-add" "Add the selected buffers, else this buffer, to a group"
   (lambda ()
@@ -2739,13 +2766,17 @@
     (lambda (group) (buffer-move-family-to-group! buf group))))
 
 ;; A selection moves as a set; the current buffer alone moves with its
-;; family (its group scratch), so a lone buffer never leaves a scratch
-;; behind.
-(define-command "group-move" "Move the selected buffers, else this buffer family, to one group"
+;; legacy companion. The group's shared scratch never moves: it is the
+;; group's blank pane, not a member passing through.
+(define-command "group-move" "Move the selected buffers, else this buffer, to one group"
   (lambda ()
     (let ((buf (current-buffer))
           (selected (group-command-selected-buffers)))
       (cond ((pair? selected) (group-move-read-destination! selected))
+            ((chat-buffer? buf)
+             (message "A chat stays with its group"))
+            ((group-scratch-buffer? buf)
+             (message "The group scratch stays with its group"))
             ((not (group-work-buffer? buf))
              (message "The current buffer is not a work buffer"))
             (else (buffer-move-read-destination! buf))))))
@@ -2757,7 +2788,8 @@
         (lambda (member)
           (when (buffer-in-group? member id)
             (buffer-remove-group! member id)))
-        (buffer-family buf)))
+        ;; the group's shared scratch keeps its membership (invariant 14)
+        (remove group-scratch-buffer? (buffer-family buf))))
     ids)
   (when (pair? ids) (run-hooks 'group-membership-hook))
   (message
@@ -2797,7 +2829,9 @@
   (lambda ()
     (let* ((buf (current-buffer))
            (ids (group-buffer-memberships buf)))
-      (cond ((null? ids) (message "The buffer is not in a group"))
+      (cond ((group-scratch-buffer? buf)
+             (message "The group scratch stays with its group"))
+            ((null? ids) (message "The buffer is not in a group"))
             (else (buffer-remove-read! buf ids '()))))))
 
 (define (group-move-read-destination! buffers)

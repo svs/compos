@@ -8715,11 +8715,17 @@
               rows))
       (switch-to-buffer! buf))))
 
-;; a fresh conversation on the same surface: open the group chat, wipe it
-(define-command "chat-new" "Start a fresh chat conversation"
+;; a fresh conversation on the same surface: open the current group's
+;; chat, wipe it. The frame's group wins; a buffer outside any group
+;; founds one only when the frame stands in none.
+(define-command "chat-new" "Start a fresh chat conversation in the current group"
   (lambda ()
-    (run-command "chat")
-    (run-command "chat-reset")))
+    (let ((g (or (frame-group) (group-ensure! (current-buffer)))))
+      (if (not g)
+          (message "No group for a chat")
+          (begin
+            (group-chat-show! g)
+            (run-command "chat-reset"))))))
 
 ;; C-c q from anywhere: the prompt becomes a turn in this buffer's group
 ;; chat (founding the group first if needed) — one chat interface, always
@@ -8728,6 +8734,7 @@
     (group-ask! (group-ensure! (current-buffer)))))
 
 (global-set-key "C-c c" "chat")
+(global-set-key "C-c n" "chat-new")
 (global-set-key "C-c r" "chat-send-region")
 (global-set-key "C-c q" "llm-ask")
 (global-set-key "C-c w" "chat-companion")

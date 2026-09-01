@@ -625,14 +625,11 @@ defmodule Compos.Core.Markdown.Html do
   # still runs.
   defp code_actions(lang, args), do: [run_action(lang), tangle_action(args)]
 
-  # The languages morg-babel runs: scheme, which it evaluates in the editor
-  # itself, and every language `*morg-babel-runners*` gives a shell runner.
-  # This repeats morg/morg-babel.scm, which is the one that decides. Keep
-  # the two the same, or the head offers a key that does nothing.
-  @runnable ~w(scheme sh bash zsh shell python py elixir exs js javascript node ruby)
-
+  # The languages that run: the fence-kind registry decides, and pushes the
+  # list through `preview-run-langs!` on every registration. An empty term
+  # means no registry has spoken, and no block offers a dead key.
   defp run_action(lang) do
-    if String.downcase(lang) in @runnable do
+    if String.downcase(lang) in :persistent_term.get({__MODULE__, :run_langs}, []) do
       ~s(<span class="code-action"><kbd>C-c C-c</kbd> run</span>)
     else
       []

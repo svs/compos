@@ -36,7 +36,20 @@
 (define (fence-kind--put! name plist)
   (set! *fence-kinds*
     (cons (cons name plist)
-          (remove (lambda (e) (equal? (car e) name)) *fence-kinds*))))
+          (remove (lambda (e) (equal? (car e) name)) *fence-kinds*)))
+  (fence-kind--push-run-langs!))
+
+;; The rendered page offers the run key by language. The registry owns
+;; that list, so every write pushes it to the renderer.
+(define (fence-kind--push-run-langs!)
+  (preview-run-langs!
+    (fold (lambda (acc e)
+            (if (and (fence-kind--value (cdr e) 'run #f)
+                     (not (equal? (fence-kind--value (cdr e) 'runnable 'yes) #f)))
+                (cons (car e) acc)
+                acc))
+          '()
+          *fence-kinds*)))
 
 (define (fence-kind name)
   (let ((e (assoc (string-downcase name) *fence-kinds*)))

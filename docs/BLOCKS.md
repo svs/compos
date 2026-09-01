@@ -69,16 +69,16 @@ rows. It does not run.
   same two functions for the preview rows.
 - `morg-babel.scm` (`morg-babel-execute`) asks `fence-kind-runnable?` and
   `fence-kind-run` to dispatch `C-c C-c`.
+- The rendered page (`markdown/html.ex`) offers the run key by the list the
+  registry pushes through `preview-run-langs!` on every registration.
+- `llm-mode--blocks` in `editor.scm` derives its reply-landing blocks from
+  `morg-scan`, the one fence-aware line scanner.
 
 ## Debt this registry names
 
-- The preview iframe's run affordance (`markdown/html.ex` `@runnable`) still
-  mirrors the runner list by hand. It should read the registry.
 - Block chrome (a painted fence-line header, zero-length overlay attachments)
   is designed but not built. See the fence-line paint in `markdown-mode.scm`
   as the seed.
-- `llm-mode--blocks` in `editor.scm` is a second block scanner. It should
-  share `morg-scan`.
 
 Tests: `priv/tests/morg-kinds-test.scm`, plus the babel and paint sections of
 `priv/tests/morg-test.scm` and `priv/tests/markdown-mode-test.scm`.

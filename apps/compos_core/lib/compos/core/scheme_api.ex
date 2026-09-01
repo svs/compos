@@ -148,6 +148,8 @@ defmodule Compos.Core.SchemeAPI do
         "(block-on-click! FN) — register the ONE handler that gets (BUF ID) when a block with a click id is clicked.",
       "define-style!" =>
         "(define-style! NAME CSS) — register a stylesheet the page renders; modes ship their own CSS with this.",
+      "preview-run-langs!" =>
+        "(preview-run-langs! LANGS) — name the block languages whose rendered page offers the run key; the fence-kind registry calls this.",
       "buffer-hidden" =>
         "(buffer-hidden BUF) — return the hidden (folded) byte ranges as (START END) pairs.",
       "buffer-set-read-only!" =>
@@ -1686,6 +1688,17 @@ defmodule Compos.Core.SchemeAPI do
       # CSS ships raw.
       "define-style!" => fn [name, css] ->
         Editor.set_style(plain(name), css)
+        :void
+      end,
+      # The languages whose blocks offer the run key in the rendered page.
+      # The fence-kind registry pushes the list on every registration, so
+      # the page never mirrors the registry by hand.
+      "preview-run-langs!" => fn [langs] ->
+        :persistent_term.put(
+          {Compos.Core.Markdown.Html, :run_langs},
+          Enum.map(langs, &String.downcase/1)
+        )
+
         :void
       end,
       "last-command" => fn [] -> Editor.last_command() end,

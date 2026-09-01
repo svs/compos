@@ -7508,41 +7508,29 @@
 
 ;; Where a reply goes. A reply is a block of its own, so it belongs after the
 ;; block point sits in — never inside it, and never above the prompt just
-;; typed. The scan is fence-aware, so an answer cannot land between two
-;; backtick lines either.
-(define (llm-mode--lines buf)
-  ;; ((START END TEXT) ...) — every line of BUF with its byte range.
-  (let loop ((ls (string-split (buffer-text buf) "\n")) (start 0) (acc '()))
-    (if (null? ls)
-        (reverse acc)
-        (let ((end (+ start (string-byte-length (car ls)))))
-          (loop (cdr ls) (+ end 1) (cons (list start end (car ls)) acc))))))
-
+;; typed. The scan is morg-scan, the one fence-aware line scanner, so an
+;; answer cannot land between two backtick lines, and the landing agrees
+;; with every Morg view of the same bytes.
 (define (llm-mode--blocks buf)
   ;; The document as (START END) blocks. A fenced block runs from its opening
   ;; fence to the end of its closing fence; any other run of non-blank lines
   ;; is a paragraph; a blank line separates two of them.
-  (let loop ((ls (llm-mode--lines buf)) (open #f) (fence #f) (last 0) (acc '()))
-    (if (null? ls)
+  (let loop ((es (morg-scan buf)) (open #f) (last 0) (acc '()))
+    (if (null? es)
         (reverse (if open (cons (list open last) acc) acc))
-        (let* ((l (car ls))
-               (start (car l))
-               (end (cadr l))
-               (trimmed (string-trim (caddr l)))
-               (fence-line (string-prefix? "```" trimmed))
-               (blank (equal? trimmed "")))
+        (let* ((e (car es))
+               (start (car e))
+               (k (morg-kind e))
+               (end (+ start (string-byte-length (cadr e))))
+               (flushed (if open (cons (list open last) acc) acc)))
           (cond
-            (fence
-              (if fence-line
-                  (loop (cdr ls) #f #f end (cons (list open end) acc))
-                  (loop (cdr ls) open #t end acc)))
-            (fence-line
-              (loop (cdr ls) start #t end
-                    (if open (cons (list open last) acc) acc)))
-            (blank
-              (loop (cdr ls) #f #f end
-                    (if open (cons (list open last) acc) acc)))
-            (else (loop (cdr ls) (or open start) #f end acc)))))))
+            ((equal? k 'open) (loop (cdr es) start end flushed))
+            ((equal? k 'code) (loop (cdr es) open end acc))
+            ((equal? k 'close)
+             (loop (cdr es) #f end (cons (list (or open start) end) acc)))
+            ((and (equal? k 'text) (equal? (string-trim (cadr e)) ""))
+             (loop (cdr es) #f end flushed))
+            (else (loop (cdr es) (or open start) end acc)))))))
 
 (define (llm-mode--insert-at buf pos)
   ;; Between two blocks POS is already the right place.

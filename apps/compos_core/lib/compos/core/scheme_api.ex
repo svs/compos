@@ -396,6 +396,27 @@ defmodule Compos.Core.SchemeAPI do
         "(key-for-command COMMAND [BUF]) — return the tersest key sequence bound to COMMAND, in BUF's keymap and the global one, or \"\".",
       "key-binding" =>
         "(key-binding SEQ) — the command SEQ runs in this buffer: a name, 'prefix, or #f. SEQ is a list of keys.",
+      "key-binding-source" =>
+        "(key-binding-source SEQ) — (COMMAND KEYMAP-NAME) for the binding SEQ resolves to here, 'prefix, or #f.",
+      "define-keymap!" =>
+        "(define-keymap! NAME [PARENT]) — a named keymap; PARENT answers the keys NAME does not bind. A buffer's own map is the keymap named after the buffer.",
+      "keymap-set!" => "(keymap-set! KEYMAP SEQ COMMAND) — bind SEQ to COMMAND in the named keymap.",
+      "keymap-unset!" => "(keymap-unset! KEYMAP SEQ) — drop the named keymap's own binding for SEQ.",
+      "define-key" => "(define-key KEYMAP SEQ COMMAND) — the Emacs name of keymap-set!.",
+      "keymap-parent!" => "(keymap-parent! KEYMAP PARENT) — PARENT (or #f) answers the keys KEYMAP does not bind.",
+      "keymap-parent" => "(keymap-parent KEYMAP) — the parent's name, or #f.",
+      "keymap-bindings" => "(keymap-bindings KEYMAP) — ((KEYS COMMAND) ...), the keymap's own bindings.",
+      "keymap-lookup" => "(keymap-lookup KEYMAP SEQ) — what SEQ means in the named keymap and its parents: a name, 'prefix, or #f.",
+      "keymap-names" => "(keymap-names) — every keymap the editor holds.",
+      "use-local-map!" => "(use-local-map! BUF KEYMAP) — BUF's own map takes KEYMAP as its parent: the mode's map.",
+      "buffer-local-map" => "(buffer-local-map BUF) — the parent of BUF's own map, or #f.",
+      "clear-local-map!" => "(clear-local-map! BUF) — forget BUF's own bindings, parent, and remaps.",
+      "buffer-minor-maps!" => "(buffer-minor-maps! BUF NAMES) — the minor-mode keymaps in force in BUF, first wins, ahead of its own map.",
+      "buffer-minor-maps" => "(buffer-minor-maps BUF) — the minor-mode keymaps in force in BUF.",
+      "global-minor-maps!" => "(global-minor-maps! NAMES) — the minor-mode keymaps in force in every buffer, after the buffer's own minor maps.",
+      "global-minor-maps" => "(global-minor-maps) — the keymaps in force in every buffer.",
+      "buffer-keymaps" => "(buffer-keymaps BUF) — the keymap names that answer for BUF, in precedence order, \"global\" last.",
+      "where-is-internal" => "(where-is-internal COMMAND [BUF]) — every key sequence bound to COMMAND, tersest first.",
       "capture-key!" =>
         "(capture-key! COMMAND) — the next key sequence runs COMMAND instead of its own binding; COMMAND reads it with (last-keys). #f disarms.",
       "trace-key!" =>
@@ -1695,6 +1716,70 @@ defmodule Compos.Core.SchemeAPI do
           :prefix -> {:sym, "prefix"}
           _ -> false
         end
+      end,
+      "key-binding-source" => fn [seq] ->
+        case Editor.lookup_key_source(key_seq(seq)) do
+          {:command, name, map} -> [name, map]
+          :prefix -> {:sym, "prefix"}
+          _ -> false
+        end
+      end,
+      # --- keymaps: named, with parents; a buffer's own map is named after it
+      "define-keymap!" => fn
+        [name] -> Editor.keymap_parent(plain(name), Editor.keymap_parent_of(plain(name)))
+        [name, parent] -> Editor.keymap_parent(plain(name), parent && plain(parent))
+      end,
+      "keymap-set!" => fn [name, seq, command] ->
+        Editor.keymap_set(plain(name), key_seq(seq), command)
+        :void
+      end,
+      "define-key" => fn [name, seq, command] ->
+        Editor.keymap_set(plain(name), key_seq(seq), command)
+        :void
+      end,
+      "keymap-unset!" => fn [name, seq] ->
+        Editor.keymap_unset(plain(name), key_seq(seq))
+        :void
+      end,
+      "keymap-parent!" => fn [name, parent] ->
+        Editor.keymap_parent(plain(name), parent && plain(parent))
+        :void
+      end,
+      "keymap-parent" => fn [name] -> Editor.keymap_parent_of(plain(name)) || false end,
+      "keymap-bindings" => fn [name] ->
+        Enum.map(Editor.keymap_bindings(plain(name)), fn {k, c} -> [k, c] end)
+      end,
+      "keymap-lookup" => fn [name, seq] ->
+        case Editor.lookup_keymap(plain(name), key_seq(seq)) do
+          {:command, cmd} -> cmd
+          :prefix -> {:sym, "prefix"}
+          _ -> false
+        end
+      end,
+      "keymap-names" => fn [] -> Editor.keymap_names() end,
+      "use-local-map!" => fn [buf, name] ->
+        Editor.use_local_map(buf, name && plain(name))
+        :void
+      end,
+      "buffer-local-map" => fn [buf] -> Editor.buffer_local_map(buf) || false end,
+      "clear-local-map!" => fn [buf] ->
+        Editor.clear_local_map(buf)
+        :void
+      end,
+      "buffer-minor-maps!" => fn [buf, names] ->
+        Editor.set_minor_maps(buf, Enum.map(names, &plain/1))
+        :void
+      end,
+      "buffer-minor-maps" => fn [buf] -> Editor.minor_maps(buf) end,
+      "global-minor-maps!" => fn [names] ->
+        Editor.set_global_minor_maps(Enum.map(names, &plain/1))
+        :void
+      end,
+      "global-minor-maps" => fn [] -> Editor.global_minor_maps() end,
+      "buffer-keymaps" => fn [buf] -> Editor.buffer_keymaps(buf) end,
+      "where-is-internal" => fn
+        [name] -> Editor.where_is(name, Editor.current_buffer())
+        [name, buf] -> Editor.where_is(name, buf)
       end,
       # describe-key arms this, then reads the sequence back with (last-keys)
       "capture-key!" => fn [command] ->

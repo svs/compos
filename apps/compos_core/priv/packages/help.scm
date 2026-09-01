@@ -546,12 +546,15 @@
 (domain! 'help)
 (effects! '(write))
 
-;; which map answered: a local binding shadows a global one, and the
-;; reader must know which one they changed if they rebind it
+;; which map answered: a minor mode's map, the buffer's own, the mode's,
+;; the read-only map or the global one. The reader must know which one
+;; they change if they rebind it.
 (define (help--key-source buf keys)
-  (cond ((assoc keys (local-keys buf)) "local to this buffer")
-        ((assoc keys (global-keys)) "global, in every buffer")
-        (else "")))
+  (let ((hit (key-binding-source (string-split keys " "))))
+    (cond ((not (pair? hit)) "")
+          ((equal? (cadr hit) "global") "global, in every buffer")
+          ((equal? (cadr hit) buf) "local to this buffer")
+          (else (string-append "in " (cadr hit))))))
 
 ;; The page is about one key, so the key is the title and the command is
 ;; the lead. Everything else is one line under it.

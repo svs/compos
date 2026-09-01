@@ -132,7 +132,7 @@ completion. `priv/editor.scm`, `priv/dired.scm`, `priv/themes.scm`.
 
 The rules each subsystem keeps are written down beside it: `docs/groups.md`
 (groups and the current group), `docs/LISTS.md` (the list mode, pages, the
-telemetry), `docs/BUFFER.md` (buffer state, the text scale), `docs/FACES.md` (faces, defaults, themes), `docs/HOOKS.md` (the hooks and their API),
+telemetry), `docs/BUFFER.md` (buffer state, the text scale), `docs/FACES.md` (faces, defaults, themes), `docs/HOOKS.md` (the hooks and their API), `docs/KEYMAPS.md` (named keymaps and the ladder),
 `docs/FILE-VIEW.md` (file modes, JSON formatting, and browser-native media),
 `docs/MARKDOWN.md` (the rendered page, pictures and captions),
 `docs/BLOCKS.md` (fenced-block kinds: one registration for paint and runner),

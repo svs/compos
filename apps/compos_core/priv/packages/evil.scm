@@ -716,8 +716,9 @@
 
 ;;; --- dispatch & wiring -------------------------------------------------------------
 
-;; keys stay bound when the minor mode is off (there is no unbind
-;; primitive) — the dispatcher then reproduces the default behavior
+;; the mode's keymap leaves with the mode, so this runs only for a key
+;; pressed between the map going and a stale dispatch landing; it
+;; reproduces the default behaviour
 (define (evil--passthrough k)
   (cond ((equal? k "RET") (run-command "newline-or-send"))
         ((equal? k "DEL") (delete-char! -1))
@@ -744,17 +745,20 @@
         (loop (+ i 1)
               (cons (substring evil--printables i (+ i 1)) acc)))))
 
+;; one keymap for the mode, built once: every printable and the four
+;; editing keys go to the dispatcher. The map is in force in a buffer
+;; while evil-local-mode is on there, ahead of the buffer's own map.
+(define-keymap! "evil-local-mode-map")
+
 (for-each
   (lambda (k)
     (let ((name (string-append "evil--key-" k)))
       (define-command name (lambda () (evil-dispatch! k)))
-      (undo-exempt! name)))
+      (undo-exempt! name)
+      (define-key "evil-local-mode-map" k name)))
   *evil-keys*)
 
 (define (evil--setup! buf)
-  (for-each
-    (lambda (k) (local-set-key* buf k (string-append "evil--key-" k)))
-    *evil-keys*)
   (unless (buffer-local buf 'evil-state)
     (buffer-set-local! buf 'evil-state "normal"))
   (evil--decorate! buf))
@@ -765,7 +769,7 @@
   (when (boundp (quote face-remap-in!))
     (face-remap-in! buf 'cursor '())))
 
-(register-minor-mode! "evil-local-mode" evil--setup! evil--teardown!)
+(register-minor-mode! "evil-local-mode" evil--setup! evil--teardown! "evil-local-mode-map")
 
 ;; vim keys make sense in text you edit — not in special surfaces that
 ;; carry their own single-key commands

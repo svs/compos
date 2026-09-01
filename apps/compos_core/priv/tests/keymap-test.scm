@@ -111,7 +111,9 @@
     (global-unset-key "<f9> a")
     (check-false! (key-binding "<f9> a") "the selected binding is gone")
     (check-equal! (key-binding "<f9> b") "keymap-test-dummy-two"
-                  "the sibling binding remains")))
+                  "the sibling binding remains")
+    ;; leave no global binding behind for the next test
+    (global-unset-key "<f9> b")))
 
 ;;; --- the map's own integrity --------------------------------------------------
 ;;;
@@ -163,3 +165,99 @@
       (check-equal! (key-for-command "keymap-test-dummy-two" buf) ""
                     "unbinding takes the answer with it")
       (buffer-kill! buf))))
+
+;;; --- keymaps are named, with parents ------------------------------------------
+;;; A mode's map answers for every buffer that wears the mode. A minor
+;;; mode's map answers ahead of the buffer's own. All on dummy keys.
+
+(define *keymap-test-mode-map* "zz-keymap-test-mode-map")
+(define *keymap-test-minor-map* "zz-keymap-test-minor-map")
+(define *keymap-test-key-c* (list "<f9>" "c"))
+
+(deftest 'a-mode-map-answers-for-the-buffer-and-the-buffers-own-map-wins
+  "use-local-map! chains the buffer's map to the mode's; local-set-key* shadows it"
+  (lambda ()
+    (define-keymap! *keymap-test-mode-map*)
+    (define-key *keymap-test-mode-map* "<f9> c" "keymap-test-dummy-one")
+    (let ((buf (test-buffer! "zz-keymap-mode" "x")))
+      (delete-other-windows!)
+      (switch-to-buffer! buf)
+      (use-local-map! buf *keymap-test-mode-map*)
+      (check-equal! (buffer-local-map buf) *keymap-test-mode-map* "the parent is the mode's map")
+      (check-equal! (key-binding *keymap-test-key-c*) "keymap-test-dummy-one"
+                    "the mode's binding answers in the buffer")
+      (check-equal! (key-binding-source *keymap-test-key-c*)
+                    (list "keymap-test-dummy-one" *keymap-test-mode-map*)
+                    "and the source names the mode's map")
+      (local-set-key* buf "<f9> c" "keymap-test-dummy-two")
+      (check-equal! (key-binding *keymap-test-key-c*) "keymap-test-dummy-two"
+                    "the buffer's own binding wins over the mode's")
+      (local-unset-key* buf "<f9> c")
+      (check-equal! (key-binding *keymap-test-key-c*) "keymap-test-dummy-one"
+                    "and unbinding gives the mode's back")
+      (buffer-kill! buf))
+    (keymap-unset! *keymap-test-mode-map* "<f9> c")))
+
+(deftest 'a-parent-chain-answers-what-the-child-does-not-bind
+  "keymap-lookup walks child, parent, grandparent"
+  (lambda ()
+    (define-keymap! "zz-keymap-test-grand")
+    (define-keymap! "zz-keymap-test-parent" "zz-keymap-test-grand")
+    (define-keymap! "zz-keymap-test-child" "zz-keymap-test-parent")
+    (define-key "zz-keymap-test-grand" "<f9> d" "keymap-test-dummy-one")
+    (define-key "zz-keymap-test-child" "<f9> e" "keymap-test-dummy-two")
+    (check-equal! (keymap-lookup "zz-keymap-test-child" "<f9> d") "keymap-test-dummy-one"
+                  "the grandparent answers through the chain")
+    (check-equal! (keymap-lookup "zz-keymap-test-child" "<f9>") 'prefix "and a prefix reads as a prefix")
+    (check-equal! (keymap-parent "zz-keymap-test-child") "zz-keymap-test-parent" "keymap-parent reads back")
+    (check-equal! (keymap-bindings "zz-keymap-test-child") '(("<f9> e" "keymap-test-dummy-two"))
+                  "keymap-bindings lists the map's own only")
+    (keymap-unset! "zz-keymap-test-grand" "<f9> d")
+    (keymap-unset! "zz-keymap-test-child" "<f9> e")))
+
+(deftest 'a-minor-mode-map-answers-ahead-of-the-buffers-own-and-leaves-with-the-mode
+  "register-minor-mode! with a keymap: on puts the map in force, off takes it away"
+  (lambda ()
+    (define-keymap! *keymap-test-minor-map*)
+    (define-key *keymap-test-minor-map* "<f9> c" "keymap-test-dummy-two")
+    (register-minor-mode! "zz-keymap-test-minor" (lambda (b) #t) (lambda (b) #t) *keymap-test-minor-map*)
+    (let ((buf (test-buffer! "zz-keymap-minor" "x")))
+      (delete-other-windows!)
+      (switch-to-buffer! buf)
+      (local-set-key* buf "<f9> c" "keymap-test-dummy-one")
+      (enable-minor-mode! buf "zz-keymap-test-minor")
+      (check-equal! (buffer-minor-maps buf) (list *keymap-test-minor-map*) "the map is in force")
+      (check-equal! (key-binding *keymap-test-key-c*) "keymap-test-dummy-two"
+                    "the minor mode's binding beats the buffer's own")
+      (keymap-test-press! *keymap-test-key-c*)
+      (check-true! (wait-until (lambda () (keymap-test-fired? 'two)) 3000 20)
+                   "and pressing the key ran it")
+      (disable-minor-mode! buf "zz-keymap-test-minor")
+      (check-equal! (buffer-minor-maps buf) '() "off takes the map away")
+      (check-equal! (key-binding *keymap-test-key-c*) "keymap-test-dummy-one"
+                    "and the buffer's own binding answers again")
+      (buffer-kill! buf))))
+
+(deftest 'a-global-minor-map-answers-everywhere-under-the-buffers-minor-maps
+  "global-minor-maps! puts a map in force in every buffer, and unsetting it restores the rest"
+  (lambda ()
+    (define-keymap! "zz-keymap-test-global-minor")
+    (define-key "zz-keymap-test-global-minor" "<f9> c" "keymap-test-dummy-two")
+    (global-set-key "<f9> c" "keymap-test-dummy-one")
+    (let ((before (global-minor-maps)))
+      (global-minor-maps! (cons "zz-keymap-test-global-minor" before))
+      (check-equal! (key-binding *keymap-test-key-c*) "keymap-test-dummy-two"
+                    "the global minor map beats the global map")
+      (global-minor-maps! before)
+      (check-equal! (key-binding *keymap-test-key-c*) "keymap-test-dummy-one"
+                    "taking it away gives the global binding back"))
+    (global-unset-key "<f9> c")))
+
+(deftest 'where-is-internal-lists-every-key-of-a-command
+  "two keys, one command, both reported, the tersest first"
+  (lambda ()
+    (global-set-key "<f9> a" "keymap-test-dummy-one")
+    (global-set-key "<f9> x y" "keymap-test-dummy-one")
+    (check-equal! (where-is-internal "keymap-test-dummy-one") '("<f9> a" "<f9> x y")
+                  "both keys, shortest first")
+    (global-unset-key "<f9> x y")))

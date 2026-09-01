@@ -2568,10 +2568,16 @@
 
 ;; Replace the entry by name. assoc reads the newest first either way, but
 ;; a reloader that runs on every save must not grow this list without end.
+;; the keymap a mode owns: MODE-map. set-mode! makes it the parent of
+;; the buffer's own map, so a binding made once on the mode's map answers
+;; in every buffer that wears the mode, and a buffer's own binding wins.
+(define (mode-keymap name) (string-append name "-map"))
+
 (define (define-mode name setup)
   (set! *mode-setups*
     (cons (list name setup)
           (remove (lambda (e) (equal? (car e) name)) *mode-setups*)))
+  (define-keymap! (mode-keymap name))
   (reload--touch! name)
   ;; every mode is an M-x command, like Emacs. The command toggles: the
   ;; command that puts you in a mode takes you out of it again.
@@ -2684,12 +2690,22 @@
 
 
 (define (set-mode! name)
-  (buffer-set-local! (current-buffer) 'mode-name name)
-  (let ((m (assoc name *mode-setups*)))
-    (if m ((cadr m))))
-  (run-hooks (string->symbol (string-append name "-hook")))
-  ;; the mode is on: if it declares a layout, the engine arranges the frame
-  (layout-enter! (current-buffer)))
+  (let* ((buf (current-buffer))
+         (old (buffer-local buf 'mode-name))
+         (changed (and old (not (equal? old name)))))
+    ;; a change of major mode starts the buffer's own map afresh, as
+    ;; use-local-map does in Emacs. The mode's setup puts its keys back,
+    ;; and the minor modes put theirs back after it.
+    (when changed (clear-local-map! buf))
+    (define-keymap! (mode-keymap name))
+    (use-local-map! buf (mode-keymap name))
+    (buffer-set-local! buf 'mode-name name)
+    (let ((m (assoc name *mode-setups*)))
+      (if m ((cadr m))))
+    (when changed (restore-minor-modes! buf))
+    (run-hooks (string->symbol (string-append name "-hook")))
+    ;; the mode is on: if it declares a layout, the engine arranges the frame
+    (layout-enter! buf)))
 
 ;; desktop restore's entry: set BUF's mode with BUF current, so the setup
 ;; fn rebuilds presentation from the locals restore already laid down.
@@ -2827,13 +2843,35 @@
 ;;; set-mode! re-runs major-mode setup — so setup fns must rebuild
 ;;; presentation from the locals they find, never stack hooks twice.
 
-(define *minor-mode-setups* '())   ; (name setup teardown)
+(define *minor-mode-setups* '())   ; (name setup teardown keymap)
 
-(define (register-minor-mode! name setup &optional teardown)
+;; KEYMAP, when given, is the name of a keymap the mode owns. While the
+;; mode is on in a buffer, that map answers ahead of the buffer's own map
+;; and the major mode's, and turning the mode off takes it away, as
+;; minor-mode-map-alist does in Emacs.
+(define (register-minor-mode! name setup &optional teardown keymap)
+  (when keymap (define-keymap! keymap))
   (set! *minor-mode-setups*
-    (cons (list name setup teardown)
+    (cons (list name setup teardown keymap)
           (remove (lambda (e) (equal? (car e) name)) *minor-mode-setups*)))
   (reload--touch! name))
+
+(define (minor-mode-keymap name)
+  (let ((m (assoc name *minor-mode-setups*)))
+    (and m (> (length m) 3) (nth 3 m))))
+
+;; the mode's map joins the buffer's minor maps, first
+(define (minor-mode--attach-map! buf name)
+  (let ((map (minor-mode-keymap name)))
+    (when map
+      (buffer-minor-maps! buf
+        (cons map (remove (lambda (m) (equal? m map)) (buffer-minor-maps buf)))))))
+
+(define (minor-mode--detach-map! buf name)
+  (let ((map (minor-mode-keymap name)))
+    (when map
+      (buffer-minor-maps! buf
+        (remove (lambda (m) (equal? m map)) (buffer-minor-maps buf))))))
 
 (define (minor-mode-on? buf name)
   (let ((ms (buffer-local buf 'minor-modes)))
@@ -2843,6 +2881,7 @@
   (let ((cur (or (buffer-local buf 'minor-modes) '())))
     (unless (member name cur)
       (buffer-set-local! buf 'minor-modes (cons name cur))))
+  (minor-mode--attach-map! buf name)
   (let ((m (assoc name *minor-mode-setups*)))
     (if m ((cadr m) buf)))
   ;; the setup fn named the buffers its layout wants; now place them
@@ -2852,6 +2891,7 @@
   (buffer-set-local! buf 'minor-modes
     (remove (lambda (n) (equal? n name))
             (or (buffer-local buf 'minor-modes) '())))
+  (minor-mode--detach-map! buf name)
   (let ((m (assoc name *minor-mode-setups*)))
     (if (and m (caddr m)) ((caddr m) buf))))
 
@@ -2910,12 +2950,15 @@
         (major-mode-off! buf name)
         (message (string-append name " off"))))))
 
+;; the minor maps live in the editor, not in the locals: put them back
+;; with the setup
 (define (restore-minor-modes! buf)
   (for-each
     (lambda (name)
+      (minor-mode--attach-map! buf name)
       (let ((m (assoc name *minor-mode-setups*)))
         (if m ((cadr m) buf))))
-    (or (buffer-local buf 'minor-modes) '())))
+    (reverse (or (buffer-local buf 'minor-modes) '()))))
 
 ;; #t while a wake rebuilds a buffer's runtime. A wake is not an open:
 ;; the switcher previews a dormant buffer by re-running its mode setup,
@@ -10035,7 +10078,9 @@
 (public! 'windmove-default-keybindings "(windmove-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (shift control meta super; default shift) to windmove-left/right/up/down")
 (public! 'windmove-swap-states-default-keybindings "(windmove-swap-states-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to windmove-swap-states-*")
 (public! 'windmove-chord "(windmove-chord MODIFIERS KEY) — the key spec for KEY under MODIFIERS, e.g. (windmove-chord '(meta shift) \"<left>\") is \"M-S-<left>\"")
-(public! 'local-set-key "(local-set-key KEYS COMMAND-NAME) in the current buffer")
+(public! 'local-set-key "(local-set-key KEYS COMMAND-NAME) in the current buffer's own map")
+(public! 'mode-keymap "(mode-keymap MODE) — the name of the keymap MODE owns, MODE-map; bind there with define-key and every buffer in the mode answers")
+(public! 'minor-mode-keymap "(minor-mode-keymap NAME) — the keymap a minor mode registered, or #f")
 (public! 'local-remap! "(local-remap! FROM-COMMAND TO-COMMAND) — Emacs [remap]: every key bound to FROM runs TO in this buffer (arrows, C-n/C-p, user bindings alike)")
 (public! 'local-remap*! "(local-remap*! BUF FROM-COMMAND TO-COMMAND) — remap in an explicit buffer")
 (public! 'define-mode "(define-mode NAME SETUP) — major mode; SETUP must rebuild from locals")

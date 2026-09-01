@@ -128,6 +128,32 @@ defmodule Compos.Core.Editor do
   def local_unbind_key(buffer, seq),
     do: GenServer.call(__MODULE__, {:local_unbind_key, buffer, seq})
 
+  @doc "Bind SEQ in the keymap NAME. A buffer's own map is the keymap named after it."
+  def keymap_set(name, seq, command), do: GenServer.call(__MODULE__, {:keymap_set, name, seq, command})
+  def keymap_unset(name, seq), do: GenServer.call(__MODULE__, {:keymap_unset, name, seq})
+  @doc "Create NAME if it is new and set its parent (nil for none)."
+  def keymap_parent(name, parent), do: GenServer.call(__MODULE__, {:keymap_parent, name, parent})
+  def keymap_parent_of(name), do: GenServer.call(__MODULE__, {:keymap_parent_of, name})
+  @doc "NAME's own bindings as {\"C-x b\", command}, parents excluded."
+  def keymap_bindings(name), do: GenServer.call(__MODULE__, {:keymap_bindings, name})
+  def keymap_names, do: GenServer.call(__MODULE__, :keymap_names)
+  @doc "The buffer's own map takes NAME as its parent: the mode's map."
+  def use_local_map(buffer, name), do: GenServer.call(__MODULE__, {:use_local_map, buffer, name})
+  def buffer_local_map(buffer), do: GenServer.call(__MODULE__, {:buffer_local_map, buffer})
+  @doc "Forget the buffer's own bindings, parent, and remaps: a change of major mode."
+  def clear_local_map(buffer), do: GenServer.call(__MODULE__, {:clear_local_map, buffer})
+  def set_minor_maps(buffer, names), do: GenServer.call(__MODULE__, {:set_minor_maps, buffer, names})
+  def minor_maps(buffer), do: GenServer.call(__MODULE__, {:minor_maps, buffer})
+  def set_global_minor_maps(names), do: GenServer.call(__MODULE__, {:set_global_minor_maps, names})
+  def global_minor_maps, do: GenServer.call(__MODULE__, :global_minor_maps)
+  @doc "The keymap names that answer for BUFFER, in precedence order, global last."
+  def buffer_keymaps(buffer), do: GenServer.call(__MODULE__, {:buffer_keymaps, buffer})
+  @doc "Every key sequence bound to COMMAND in BUFFER's ladder and the global map."
+  def where_is(command, buffer \\ nil), do: GenServer.call(__MODULE__, {:where_is, command, buffer})
+  @doc "Like lookup_key, and names the keymap that answered: {:command, name, map}."
+  def lookup_key_source(seq, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:lookup_key_source, seq, fid(fid)})
+
   @doc "Emacs [remap]: in BUFFER, any key that resolves to FROM runs TO instead."
   def local_remap(buffer, from, to),
     do: GenServer.call(__MODULE__, {:local_remap, buffer, from, to})
@@ -497,7 +523,13 @@ defmodule Compos.Core.Editor do
        modeline_extra: "",
        faces: %{},
        styles: %{},
-       local_keymaps: %{},
+       # keymaps: name -> %{bindings: %{seq => command}, parent: name | nil}.
+       # A buffer's own map is the keymap named after the buffer.
+       keymaps: %{},
+       # buffer -> the minor-mode keymap names in force there, first wins
+       minor_maps: %{},
+       # the minor-mode keymaps in force in every buffer (cua-mode)
+       global_minor_maps: [],
        remaps: %{},
        last_command: "",
        last_keys: [],
@@ -691,52 +723,18 @@ defmodule Compos.Core.Editor do
   end
 
   def handle_call({:lookup_key, seq, fid}, _from, state) do
-    f = frame(state, fid)
-    buffer = if f.minibuffer, do: minibuf_of(f), else: find_leaf(f.tree, f.active).buffer
-    local = Map.get(state.local_keymaps, keymap_key(buffer), %{})
+    {:reply, lookup(state, seq, fid, false), state}
+  end
 
-    # a read-only buffer takes a third map between the local one and the
-    # global one. What it holds is Scheme's business (dup #22): editor.scm
-    # binds q there, so every buffer you cannot type in quits the same way.
-    # The mode's own map still wins — code-mode keeps q for its exit. The
-    # buffer only answers read_only? for a key that map claims, so the
-    # other 200 keys per minute cost one map lookup.
-    ro = if readonly_hit?(state, seq, buffer), do: readonly_map(state), else: %{}
-
-    reply =
-      cond do
-        Map.has_key?(local, seq) -> {:command, local[seq]}
-        Map.has_key?(ro, seq) -> {:command, ro[seq]}
-        Map.has_key?(state.keymap, seq) -> {:command, state.keymap[seq]}
-        Enum.any?(Map.keys(local), &List.starts_with?(&1, seq)) -> :prefix
-        Enum.any?(Map.keys(ro), &List.starts_with?(&1, seq)) -> :prefix
-        Enum.any?(Map.keys(state.keymap), &List.starts_with?(&1, seq)) -> :prefix
-        true -> :none
-      end
-
-    # Emacs command remapping: the buffer substitutes its own command for
-    # a resolved one — every key bound to the original follows, arrows and
-    # C-n alike, including user rebindings
-    reply =
-      case reply do
-        {:command, name} ->
-          {:command, state.remaps |> Map.get(buffer, %{}) |> Map.get(name, name)}
-
-        other ->
-          other
-      end
-
-    {:reply, reply, state}
+  def handle_call({:lookup_key_source, seq, fid}, _from, state) do
+    {:reply, lookup(state, seq, fid, true), state}
   end
 
   def handle_call({:lookup_keymap, name, seq}, _from, state) do
-    local = Map.get(state.local_keymaps, name, %{})
-
     reply =
-      cond do
-        Map.has_key?(local, seq) -> {:command, local[seq]}
-        Enum.any?(Map.keys(local), &List.starts_with?(&1, seq)) -> :prefix
-        true -> :none
+      case resolve(chain(state, name), seq) do
+        {:command, {_map, cmd}} -> {:command, cmd}
+        other -> other
       end
 
     {:reply, reply, state}
@@ -759,19 +757,86 @@ defmodule Compos.Core.Editor do
     {:reply, :ok, %{state | remaps: remaps}}
   end
 
-  def handle_call({:local_bind_key, buffer, seq, command}, _from, state) do
-    buffer = keymap_key(buffer)
+  def handle_call({:local_bind_key, buffer, seq, command}, _from, state),
+    do: {:reply, :ok, update_bindings(state, keymap_key(buffer), &Map.put(&1, seq, command))}
 
-    local_keymaps =
-      Map.update(state.local_keymaps, buffer, %{seq => command}, &Map.put(&1, seq, command))
+  def handle_call({:local_unbind_key, buffer, seq}, _from, state),
+    do: {:reply, :ok, update_bindings(state, keymap_key(buffer), &Map.delete(&1, seq))}
 
-    {:reply, :ok, %{state | local_keymaps: local_keymaps}}
+  def handle_call({:keymap_set, name, seq, command}, _from, state),
+    do: {:reply, :ok, update_bindings(state, keymap_key(name), &Map.put(&1, seq, command))}
+
+  def handle_call({:keymap_unset, name, seq}, _from, state),
+    do: {:reply, :ok, update_bindings(state, keymap_key(name), &Map.delete(&1, seq))}
+
+  def handle_call({:keymap_parent, name, parent}, _from, state) do
+    name = keymap_key(name)
+    parent = parent && keymap_key(parent)
+    {:reply, :ok, put_keymap(state, name, %{keymap(state, name) | parent: parent})}
   end
 
-  def handle_call({:local_unbind_key, buffer, seq}, _from, state) do
-    buffer = keymap_key(buffer)
-    local_keymaps = Map.update(state.local_keymaps, buffer, %{}, &Map.delete(&1, seq))
-    {:reply, :ok, %{state | local_keymaps: local_keymaps}}
+  def handle_call({:keymap_parent_of, name}, _from, state),
+    do: {:reply, keymap(state, keymap_key(name)).parent, state}
+
+  def handle_call({:keymap_bindings, name}, _from, state),
+    do: {:reply, keymap(state, keymap_key(name)).bindings |> key_rows(), state}
+
+  def handle_call(:keymap_names, _from, state), do: {:reply, Map.keys(state.keymaps), state}
+
+  def handle_call({:use_local_map, buffer, name}, _from, state) do
+    key = keymap_key(buffer)
+    {:reply, :ok, put_keymap(state, key, %{keymap(state, key) | parent: name && keymap_key(name)})}
+  end
+
+  def handle_call({:buffer_local_map, buffer}, _from, state),
+    do: {:reply, keymap(state, keymap_key(buffer)).parent, state}
+
+  def handle_call({:clear_local_map, buffer}, _from, state) do
+    key = keymap_key(buffer)
+
+    state = %{
+      state
+      | keymaps: Map.delete(state.keymaps, key),
+        remaps: Map.delete(state.remaps, buffer)
+    }
+
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:set_minor_maps, buffer, names}, _from, state) do
+    key = keymap_key(buffer)
+    names = Enum.map(names, &keymap_key/1)
+
+    minor =
+      if names == [],
+        do: Map.delete(state.minor_maps, key),
+        else: Map.put(state.minor_maps, key, names)
+
+    {:reply, :ok, %{state | minor_maps: minor}}
+  end
+
+  def handle_call({:minor_maps, buffer}, _from, state),
+    do: {:reply, Map.get(state.minor_maps, keymap_key(buffer), []), state}
+
+  def handle_call({:set_global_minor_maps, names}, _from, state),
+    do: {:reply, :ok, %{state | global_minor_maps: Enum.map(names, &keymap_key/1)}}
+
+  def handle_call(:global_minor_maps, _from, state), do: {:reply, state.global_minor_maps, state}
+
+  def handle_call({:buffer_keymaps, buffer}, _from, state),
+    do: {:reply, state |> ladder(buffer, read_only_buffer?(buffer)) |> Enum.map(&elem(&1, 0)), state}
+
+  def handle_call({:where_is, command, buffer}, _from, state) do
+    ladder = if is_binary(buffer), do: ladder(state, buffer, read_only_buffer?(buffer)), else: [{"global", state.keymap}]
+
+    keys =
+      ladder
+      |> Enum.flat_map(fn {_name, b} -> Enum.filter(b, fn {_seq, cmd} -> cmd == command end) end)
+      |> Enum.map(fn {seq, _} -> Enum.join(seq, " ") end)
+      |> Enum.uniq()
+      |> Enum.sort_by(&{String.length(&1), &1})
+
+    {:reply, keys, state}
   end
 
   def handle_call({:render_state, fid}, _from, state) do
@@ -1055,13 +1120,28 @@ defmodule Compos.Core.Editor do
       Map.new(state.frames, fn {id, f} -> {id, %{f | tree: swap_buffer(f.tree, old, new)}} end)
 
     keymaps =
-      state.local_keymaps
-      |> Map.put(new, Map.get(state.local_keymaps, old, %{}))
-      |> Map.delete(old)
+      case Map.pop(state.keymaps, old) do
+        {nil, maps} -> maps
+        {map, maps} -> Map.put(maps, new, map)
+      end
+
+    minor =
+      case Map.pop(state.minor_maps, old) do
+        {nil, maps} -> maps
+        {names, maps} -> Map.put(maps, new, names)
+      end
 
     remaps = state.remaps |> Map.put(new, Map.get(state.remaps, old, %{})) |> Map.delete(old)
     mru = state.mru |> Enum.map(&if(&1 == old, do: new, else: &1)) |> Enum.uniq()
-    changed(:ok, %{state | frames: frames, local_keymaps: keymaps, remaps: remaps, mru: mru})
+
+    changed(:ok, %{
+      state
+      | frames: frames,
+        keymaps: keymaps,
+        minor_maps: minor,
+        remaps: remaps,
+        mru: mru
+    })
   end
 
   def handle_call({:mouse_region, id, al, ac, fl, fc}, _from, state) do
@@ -1499,33 +1579,34 @@ defmodule Compos.Core.Editor do
     {:reply, Enum.map(state.keymap, fn {seq, cmd} -> {Enum.join(seq, " "), cmd} end), state}
   end
 
-  # one buffer's own bindings, as {"RET", "ibuffer-visit"} — describe-mode
-  # reads the keymap the buffer really has, not a copy in the mode's source
+  # every binding that answers in BUFFER besides the global ones, as
+  # {"RET", "ibuffer-visit"} — describe-mode reads the ladder the buffer
+  # really has: its minor-mode maps, its own map, the mode's map, the
+  # read-only map. The winner of a shadowed key is the one shown.
   def handle_call({:local_keys, buffer}, _from, state) do
-    # a read-only buffer really does answer to the read-only map as well,
-    # and its own map wins — describe-mode must show the same ladder
-    ro = if read_only_buffer?(buffer), do: readonly_map(state), else: %{}
-
     keys =
-      ro
-      |> Map.merge(Map.get(state.local_keymaps, keymap_key(buffer), %{}))
-      |> Enum.map(fn {seq, cmd} -> {Enum.join(seq, " "), cmd} end)
+      state
+      |> ladder(buffer, read_only_buffer?(buffer))
+      |> Enum.reject(fn {name, _} -> name == "global" end)
+      |> Enum.reverse()
+      |> Enum.reduce(%{}, fn {_name, b}, acc -> Map.merge(acc, b) end)
+      |> key_rows()
 
     {:reply, keys, state}
   end
 
   def handle_call({:key_for_command, command, buffer}, _from, state) do
     # several keys may run one command (C-n and <down>) — show the tersest.
-    # A buffer's own keymap counts beside the global one, so a mode's
-    # binding answers for the buffers that wear the mode.
-    local =
+    # A buffer's ladder counts beside the global map, so a mode's binding
+    # answers for the buffers that wear the mode.
+    ladder =
       if is_binary(buffer),
-        do: Map.get(state.local_keymaps, keymap_key(buffer), %{}),
-        else: %{}
+        do: ladder(state, buffer, read_only_buffer?(buffer)),
+        else: [{"global", state.keymap}]
 
     reply =
-      (Enum.to_list(local) ++ Enum.to_list(state.keymap))
-      |> Enum.filter(fn {_seq, cmd} -> cmd == command end)
+      ladder
+      |> Enum.flat_map(fn {_name, b} -> Enum.filter(b, fn {_seq, cmd} -> cmd == command end) end)
       |> Enum.map(fn {seq, _} -> Enum.join(seq, " ") end)
       |> Enum.min_by(&{String.length(&1), &1}, fn -> "" end)
 
@@ -1944,7 +2025,98 @@ defmodule Compos.Core.Editor do
   defp keymap_key(" *minibuf" <> _), do: @minibuf
   defp keymap_key(name), do: name
 
-  defp readonly_map(state), do: Map.get(state.local_keymaps, @readonly_map, %{})
+  defp readonly_map(state), do: keymap(state, @readonly_map).bindings
+
+  # --- keymaps -----------------------------------------------------------------
+  # A keymap is a name, its own bindings, and a parent. A buffer's own map
+  # is the keymap named after the buffer; use-local-map! gives it the mode's
+  # map as its parent. A key resolves down this ladder:
+  #
+  #   the buffer's minor-mode maps, first wins
+  #   the global minor-mode maps (cua-mode)
+  #   the buffer's own map, then its parents
+  #   the read-only map, when the buffer is read-only
+  #   the global map
+  #
+  # An exact hit anywhere wins over a prefix anywhere. Emacs's
+  # minor-mode-map-alist, local map and global map, in that order.
+
+  defp keymap(state, name), do: Map.get(state.keymaps, name, %{bindings: %{}, parent: nil})
+
+  defp put_keymap(state, name, map), do: %{state | keymaps: Map.put(state.keymaps, name, map)}
+
+  defp update_bindings(state, name, fun) do
+    map = keymap(state, name)
+    put_keymap(state, name, %{map | bindings: fun.(map.bindings)})
+  end
+
+  # NAME's bindings and its parents', nearest first. A parent loop ends.
+  defp chain(state, name, seen \\ [])
+  defp chain(_state, nil, _seen), do: []
+
+  defp chain(state, name, seen) do
+    case Map.fetch(state.keymaps, name) do
+      {:ok, %{bindings: b, parent: p}} ->
+        if name in seen, do: [], else: [{name, b} | chain(state, p, [name | seen])]
+
+      :error ->
+        []
+    end
+  end
+
+  # the {name, bindings} that answer for BUFFER, in precedence order
+  defp ladder(state, buffer, read_only?) do
+    key = keymap_key(buffer)
+    minor = Map.get(state.minor_maps, key, []) ++ state.global_minor_maps
+    ro = if read_only?, do: chain(state, @readonly_map), else: []
+
+    Enum.flat_map(minor, &chain(state, &1)) ++
+      chain(state, key) ++ ro ++ [{"global", state.keymap}]
+  end
+
+  defp prefix?(bindings, seq), do: Enum.any?(Map.keys(bindings), &List.starts_with?(&1, seq))
+
+  defp resolve(ladder, seq) do
+    exact =
+      Enum.find_value(ladder, fn {name, b} ->
+        case Map.fetch(b, seq) do
+          {:ok, cmd} -> {name, cmd}
+          :error -> nil
+        end
+      end)
+
+    cond do
+      exact -> {:command, exact}
+      Enum.any?(ladder, fn {_, b} -> prefix?(b, seq) end) -> :prefix
+      true -> :none
+    end
+  end
+
+  defp lookup(state, seq, fid, with_source?) do
+    f = frame(state, fid)
+    buffer = if f.minibuffer, do: minibuf_of(f), else: find_leaf(f.tree, f.active).buffer
+
+    # a read-only buffer takes the read-only map between its own and the
+    # global one. What it holds is Scheme's business: editor.scm binds q
+    # there, so every buffer you cannot type in quits the same way. The
+    # buffer only answers read_only? for a key that map claims, so the
+    # other 200 keys per minute cost one map lookup.
+    ladder = ladder(state, buffer, readonly_hit?(state, seq, buffer))
+
+    # Emacs command remapping: the buffer substitutes its own command for
+    # a resolved one — every key bound to the original follows, arrows and
+    # C-n alike, including user rebindings
+    case resolve(ladder, seq) do
+      {:command, {map, name}} ->
+        name = state.remaps |> Map.get(buffer, %{}) |> Map.get(name, name)
+        if with_source?, do: {:command, name, map}, else: {:command, name}
+
+      other ->
+        other
+    end
+  end
+
+  defp key_rows(bindings), do: Enum.map(bindings, fn {seq, cmd} -> {Enum.join(seq, " "), cmd} end)
 
   defp read_only_buffer?(buffer), do: Buffer.exists?(buffer) and Buffer.read_only?(buffer)
 
@@ -2036,10 +2208,10 @@ defmodule Compos.Core.Editor do
     # while a prompt is active the minibuffer's map is the one in force,
     # and it is stored under the normalized key (S16)
     buffer = if f.minibuffer, do: minibuf_of(f), else: find_leaf(f.tree, f.active).buffer
-    local = Map.get(state.local_keymaps, keymap_key(buffer), %{})
 
-    [local, state.keymap]
-    |> Enum.flat_map(&Map.to_list/1)
+    state
+    |> ladder(buffer, read_only_buffer?(buffer))
+    |> Enum.flat_map(fn {_name, b} -> Map.to_list(b) end)
     |> Enum.filter(fn {seq, _} -> List.starts_with?(seq, f.pending) and seq != f.pending end)
     |> Enum.map(fn {seq, cmd} ->
       keys = Enum.drop(seq, length(f.pending))

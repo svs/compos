@@ -52,7 +52,8 @@
 (define-command "cua-select-page-down" "Extend the region one screen down"
   (lambda () (cua--select-page! 1)))
 
-;; the bindings cua-mode installs everywhere; a local map still wins
+;; the bindings cua-mode puts in force everywhere; a buffer's own minor
+;; modes still win, as in Emacs
 (define cua--keys
   '(("S-<left>" "cua-select-backward")
     ("S-<right>" "cua-select-forward")
@@ -78,12 +79,21 @@
 
 (define (cua-mode-on?) *cua-mode*)
 
+;; the mode owns one keymap and puts it in force in every buffer, as a
+;; global minor mode does in Emacs. Turning it off takes the map away and
+;; leaves every other binding of those keys as it was.
+(define-keymap! "cua-mode-map")
+(for-each (lambda (k) (define-key "cua-mode-map" (car k) (cadr k))) cua--keys)
+
+(define (cua--others)
+  (remove (lambda (m) (equal? m "cua-mode-map")) (global-minor-maps)))
+
 (define (cua--enable!)
-  (for-each (lambda (k) (global-set-key (car k) (cadr k))) cua--keys)
+  (global-minor-maps! (cons "cua-mode-map" (cua--others)))
   (set! *cua-mode* #t))
 
 (define (cua--disable!)
-  (for-each (lambda (k) (global-unset-key (car k))) cua--keys)
+  (global-minor-maps! (cua--others))
   (set! *cua-mode* #f))
 
 (define-command "cua-mode" "Toggle Shift-selection in every buffer"

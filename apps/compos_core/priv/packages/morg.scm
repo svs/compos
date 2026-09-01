@@ -575,7 +575,7 @@
 ;; morg-refontify!, because a multi-line construct needs the whole body.
 ;; This is the plain source view: every marker stays visible. preview-mode
 ;; draws the page in place, and its painter replaces this when it is on.
-(define (morg-line-spans e &optional fence-args)
+(define (morg-line-spans e &optional fence-args buf)
   (let* ((start (car e)) (line (cadr e)) (k (morg-kind e))
          (len (string-byte-length line))
          (abs (lambda (r) (list (+ start (car r)) (+ start (cadr r))))))
@@ -637,7 +637,7 @@
                                              (else #f))))
                             (list (append (car acc)
                                           (morg-line-spans
-                                            e (and (equal? k 'code) args)))
+                                            e (and (equal? k 'code) args) buf))
                                   args)))
                         (list '() #f) scan)))
            (block-spans (fence-kind-body-spans text (morg-blocks scan buf))))

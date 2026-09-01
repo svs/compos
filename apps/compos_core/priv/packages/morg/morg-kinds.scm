@@ -164,7 +164,9 @@
                 '() vs)))))
 
 ;; extra chips a kind draws on its open fence at START, from its own
-;; state: ((TEXT CLASS [CLICK]) ...)
+;; state: ((TEXT CLASS [CLICK]) ...). Chrome is preview display only:
+;; the system works whole in a text-only view, and the preview is a
+;; fancy rendering of the same block.
 (define (fence-kind-head-chrome lang buf start)
   (let ((f (fence-kind-get lang 'head-chrome #f)))
     (if (procedure? f) (f buf start) '())))
@@ -215,9 +217,10 @@
     ("llm-rewrite-reject" "puts it back")
     ("llm-rewrite-diff" "changes the view")))
 
-;; The chips a live diff wears in preview: the instruction that made it,
-;; and one clickable chip per verb whose command has a key here. They
-;; stand only on the block the record owns.
+;; The chips a live diff wears: the instruction that made it (preview
+;; only), and one clickable chip per verb whose command has a key here —
+;; the keys stand in every view. They stand only on the block the record
+;; owns.
 (define (fence-kind--diff-head-chrome buf start)
   (let ((p (and (boundp 'llm-rewrite-pending) (llm-rewrite-pending buf))))
     (if (not p)

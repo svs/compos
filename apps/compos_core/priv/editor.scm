@@ -6665,7 +6665,7 @@
     (and p
          (append (or (llm-rewrite--overlay buf "llm-rewrite-source")
                      (list (nth 0 p) (nth 1 p)))
-                 (or (llm-rewrite--overlay buf "llm-rewrite")
+                 (or (llm-rewrite--overlay buf "llm-rewrite-block")
                      (list (nth 2 p) (nth 3 p)))))))
 
 ;; The all view wears the add and delete faces by line prefix, so the two
@@ -6690,11 +6690,29 @@
           (loop (cdr ls) (+ end 1)
                 (append acc (llm-rewrite--row-faces at (car ls) view)))))))
 
+;; the block face covers the BODY alone: the fence lines keep the diff
+;; kind's own header color
+(define (llm-rewrite--body-span buf spans)
+  (let* ((bs (nth 2 spans)) (be (nth 3 spans))
+         (text (or (llm-rewrite--text-at buf bs be) ""))
+         (lines (string-split text "\n")))
+    (if (< (length lines) 2)
+        (list bs be)
+        (let* ((first-len (string-byte-length (car lines)))
+               (last-len (string-byte-length (car (reverse lines))))
+               (body-start (min be (+ bs first-len 1)))
+               (body-end (max body-start (- be (+ last-len 1)))))
+          (list body-start body-end)))))
+
 (define (llm-rewrite--paint! buf spans view)
   (overlay-set! buf 'llm-rewrite-source
     (list (list (nth 0 spans) (nth 1 spans) 'llm-rewrite-source)))
+  ;; the block's bounds ride a tracking face no theme colors, so the
+  ;; fence lines keep the diff kind's own header color; the visible face
+  ;; covers the body alone
   (overlay-set! buf 'llm-rewrite
-    (list (list (nth 2 spans) (nth 3 spans) 'llm-rewrite)))
+    (list (list (nth 2 spans) (nth 3 spans) 'llm-rewrite-block)
+          (append (llm-rewrite--body-span buf spans) (list 'llm-rewrite))))
   (overlay-set! buf 'llm-rewrite-diff
     (llm-rewrite--block-faces (nth 2 spans)
       (or (llm-rewrite--text-at buf (nth 2 spans) (nth 3 spans)) "")

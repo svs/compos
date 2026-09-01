@@ -72,9 +72,11 @@
 (define (morg-kind e) (caddr e))
 (define (morg-info e) (car (cdr (cdr (cdr e)))))
 
-;; classify every line with the fence state carried through the walk, so
-;; a `# comment` inside a code block never reads as a heading
-(define (morg-scan buf)
+;; classify every line, by the walk with the fence state carried through,
+;; so a `# comment` inside a code block never reads as a heading. This is
+;; the answer where the reader has no markdown grammar; morg-scan itself
+;; asks tree-sitter first.
+(define (morg-scan--walk buf)
   (let loop ((ls (morg-lines buf)) (in #f) (acc '()))
     (if (null? ls)
         (reverse acc)
@@ -99,6 +101,53 @@
                            acc))))
             (else
              (loop (cdr ls) #f (cons (list start line 'text #f) acc))))))))
+
+;; The scan, from the grammar. Tree-sitter parses the document — it
+;; already knows a # inside a fence is not a heading — and every line is
+;; classified from its tree: the blocks from block--ts-list, the headings
+;; from their markers. The entries are the same shape the walk answers,
+;; so every consumer reads either. Directives are our own syntax, which
+;; markdown reads as a paragraph, so their line regex stays.
+(define morg--heading-query
+  "(atx_h1_marker) @1 (atx_h2_marker) @2 (atx_h3_marker) @3 (atx_h4_marker) @4 (atx_h5_marker) @5 (atx_h6_marker) @6")
+
+(define (morg-scan--ts buf)
+  (let* ((text (buffer-text buf))
+         (blocks (block--ts-list text))
+         (heads (map (lambda (h) (list (cadr h) (string->number (car h))))
+                     (ts-query-string "markdown" text morg--heading-query))))
+    (let loop ((ls (morg-lines buf)) (bs blocks) (acc '()))
+      (if (null? ls)
+          (reverse acc)
+          (let* ((e (car ls)) (start (car e)) (line (cadr e))
+                 (bs (let drop ((bs bs))
+                       (if (and (pair? bs) (< (nth 1 (car bs)) start))
+                           (drop (cdr bs))
+                           bs)))
+                 (b (and (pair? bs)
+                         (<= (nth 0 (car bs)) start)
+                         (<= start (nth 1 (car bs)))
+                         (car bs)))
+                 (head (assoc start heads))
+                 (entry
+                   (cond
+                     ((and b (= start (nth 0 b)))
+                      (list start line 'open (block-lang b)))
+                     ((and b (morg-fence-close? line)
+                           (let ((le (+ start (string-byte-length line))))
+                             (and (<= start (nth 1 b)) (<= (nth 1 b) le))))
+                      (list start line 'close #f))
+                     (b (list start line 'code (block-lang b)))
+                     (head (list start line 'heading (cadr head)))
+                     ((morg-directive-info line)
+                      (list start line 'directive (morg-directive-info line)))
+                     (else (list start line 'text #f)))))
+            (loop (cdr ls) bs (cons entry acc)))))))
+
+(define (morg-scan buf)
+  (if (member "markdown" (ts-langs))
+      (morg-scan--ts buf)
+      (morg-scan--walk buf)))
 
 ;; the scan entry whose line contains byte pos
 (define (morg-entry-at scan pos)

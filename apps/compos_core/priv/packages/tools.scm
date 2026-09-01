@@ -440,7 +440,7 @@
 ;; before someone rebuilds what was already decided
 (define (apropos--catalog-entry e words)
   (let ((kind (catalog--get e 'kind)))
-    (and (member kind '("component" "mode" "note"))
+    (and (member kind '("component" "mode" "note" "fence-kind"))
          (apropos--hit?
            (string-append (apropos--catalog-field e 'name) " "
                           (apropos--catalog-field e 'qualified-name) " "

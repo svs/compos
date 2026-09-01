@@ -25,6 +25,15 @@
 
 ;;; --- the registry ------------------------------------------------------------
 
+(deftest 'a-kind-is-discoverable-in-the-catalog
+  "apropos answers a fence-kind search the way it answers a component search"
+  (lambda ()
+    (check-true!
+      (member "diff"
+        (map (lambda (e) (plist-get e 'name))
+             (apropos "unified diff" 'kind 'fence-kind)))
+      "the diff kind answers an apropos search")))
+
 (deftest 'a-kind-is-one-registration
   "define-fence-kind! stores the doc and the keys, and describe reads them back"
   (lambda ()

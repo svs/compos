@@ -149,3 +149,17 @@
                     "one row names the resolved command")
       (check-equal! (plist-get (car (reverse rows)) 'phase) "after-command"
                     "the last row reports the state after the command"))))
+
+(deftest 'key-for-command-reads-the-buffers-own-keymap
+  "the reverse lookup sees a local binding, and only in its buffer"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-keymap-reverse" "text")))
+      (local-set-key* buf "<f9> b" "keymap-test-dummy-two")
+      (check-equal! (key-for-command "keymap-test-dummy-two" buf) "<f9> b"
+                    "the buffer's map answers")
+      (check-equal! (key-for-command "keymap-test-dummy-two" "zz-keymap-elsewhere") ""
+                    "another buffer does not")
+      (local-unset-key* buf "<f9> b")
+      (check-equal! (key-for-command "keymap-test-dummy-two" buf) ""
+                    "unbinding takes the answer with it")
+      (buffer-kill! buf))))

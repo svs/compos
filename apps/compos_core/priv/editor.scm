@@ -10480,7 +10480,7 @@
 (public! 'run-command "(run-command NAME) — invoke any M-x command")
 (public! 'command-names "All M-x command names")
 (public! 'command-doc "(command-doc NAME) -> the command's docstring (\"\" if none)")
-(public! 'key-for-command "(key-for-command NAME) -> its global keybinding (\"\" if none)")
+(public! 'key-for-command "(key-for-command NAME [BUF]) -> the tersest key bound to NAME, in BUF's keymap and the global one (\"\" if none)")
 (public! 'global-set-key "(global-set-key KEYS COMMAND-NAME), e.g. \"C-c x\"")
 (public! 'global-unset-key "(global-unset-key KEYS) — remove one global binding")
 (public! 'windmove-default-keybindings "(windmove-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (shift control meta super; default shift) to windmove-left/right/up/down")

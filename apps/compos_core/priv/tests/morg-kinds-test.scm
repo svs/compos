@@ -85,6 +85,8 @@
   (lambda ()
     (check-equal! (fence-kind-chip "diff") "diff" "a paint kind is its name")
     (check-equal! (fence-kind-chip "sh") "sh · run" "a runner kind offers run")
+    (check-equal! (fence-kind-chip "sh" "<f9>") "sh · <f9> run"
+                  "a caller-supplied key names itself ahead of the word")
     (check-equal! (fence-kind-chip "") #f "a bare fence draws no chip")
     (define-fence-kind! "zz-chipped" "Chip test." 'chip "ZZ" 'runnable #f)
     (check-equal! (fence-kind-chip "zz-chipped") "ZZ"

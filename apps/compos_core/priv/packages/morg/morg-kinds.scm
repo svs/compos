@@ -141,13 +141,17 @@
 
 ;; The chip the preview draws on a block's fence line: the declared 'chip,
 ;; else the info string itself, with " · run" when the kind runs. A fence
-;; with no language draws no chip.
-(define (fence-kind-chip lang)
+;; with no language draws no chip. RUN-KEY, when the caller reads one from
+;; the buffer's keymap, names the key ahead of the word.
+(define (fence-kind-chip lang &optional run-key)
   (and (string? lang)
        (not (equal? lang ""))
        (let ((base (or (fence-kind-get lang 'chip #f) (string-downcase lang))))
          (if (and (fence-kind-runnable? lang) (fence-kind-run lang))
-             (string-append base " · run")
+             (string-append base " · "
+               (if (and (string? run-key) (not (equal? run-key "")))
+                   (string-append run-key " run")
+                   "run"))
              base))))
 
 (define (describe-fence-kind name)

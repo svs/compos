@@ -247,7 +247,9 @@ defmodule Compos.Core.Editor do
   def set_frame_group_style(label, color, fid \\ nil),
     do: GenServer.call(__MODULE__, {:set_group_style, label, color, fid(fid)})
 
-  def key_for_command(command), do: GenServer.call(__MODULE__, {:key_for_command, command})
+  @doc "The tersest key bound to COMMAND: BUFFER's keymap first, then the global one."
+  def key_for_command(command, buffer \\ nil),
+    do: GenServer.call(__MODULE__, {:key_for_command, command, buffer})
 
   @doc "Buffers in most-recently-displayed order (Emacs buffer list)."
   def buffer_mru, do: GenServer.call(__MODULE__, :buffer_mru)
@@ -1508,10 +1510,17 @@ defmodule Compos.Core.Editor do
     {:reply, keys, state}
   end
 
-  def handle_call({:key_for_command, command}, _from, state) do
-    # several keys may run one command (C-n and <down>) — show the tersest
+  def handle_call({:key_for_command, command, buffer}, _from, state) do
+    # several keys may run one command (C-n and <down>) — show the tersest.
+    # A buffer's own keymap counts beside the global one, so a mode's
+    # binding answers for the buffers that wear the mode.
+    local =
+      if is_binary(buffer),
+        do: Map.get(state.local_keymaps, keymap_key(buffer), %{}),
+        else: %{}
+
     reply =
-      state.keymap
+      (Enum.to_list(local) ++ Enum.to_list(state.keymap))
       |> Enum.filter(fn {_seq, cmd} -> cmd == command end)
       |> Enum.map(fn {seq, _} -> Enum.join(seq, " ") end)
       |> Enum.min_by(&{String.length(&1), &1}, fn -> "" end)

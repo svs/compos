@@ -89,14 +89,15 @@ routes a click through the same `on-block-click!` registry a block tree
 uses, so chrome verbs and block verbs are one vocabulary.
 
 The first user is the fence chip: in the preview rows, the open fence of a
-named block steps back and a chip names its kind — `diff`, `sh · run`.
-The chip text comes from `(fence-kind-chip LANG)`: the declared `'chip`,
-else the info string, with `· run` when the kind runs.
+named block steps back and a chip names its kind — `diff`, or
+`sh · C-c C-c run`. The chip text comes from `(fence-kind-chip LANG
+[RUN-KEY])`: the declared `'chip`, else the info string; a runnable kind
+adds the run key. The painter reads the key from the buffer's own keymap
+with `(key-for-command "morg-babel" BUF)`, so a rebind changes the page
+and no string hard-codes a key.
 
 ## Debt this registry names
 
-- The `· run` hint does not name its key. That needs a buffer-local
-  reverse key lookup (`key-for-command` reads only the global keymap).
 - The gutter and end-of-line vocabulary of `docs/ANNOTATIONS.md` can now
   be built on chrome attachments.
 

@@ -271,7 +271,7 @@
 ;; the spans for one scan entry; block BODIES are highlighted per block in
 ;; markdown-refontify!, because a multi-line construct needs the whole body.
 ;; PREV is the text of the line above, or #f on the first line.
-(define (markdown--line-spans e &optional prev)
+(define (markdown--line-spans e &optional prev run-key)
   (let* ((start (car e)) (line (cadr e)) (k (morg-kind e))
          (len (string-byte-length line))
          (embed (re-groups md--embed-pattern line 0)))
@@ -287,7 +287,7 @@
       ;; the fence line steps back and its kind stays: a chrome chip names
       ;; the block where the backticks were
       ((equal? k 'open)
-       (let ((chip (fence-kind-chip (morg-info e))))
+       (let ((chip (fence-kind-chip (morg-info e) run-key)))
          (append
            (list (list start (+ start len) "md-marker")
                  (list start (+ start len) "row-fence"))
@@ -330,11 +330,15 @@
   (when (buffer-exists? buf)
     (let* ((scan (morg-scan buf))
            (text (buffer-text buf))
+           ;; the fence chip names the run key from this buffer's own
+           ;; keymap, so a rebind changes the page and no test pins a key
+           (run-key (key-for-command "morg-babel" buf))
            ;; each line sees the line above it: a caption is known by the
            ;; picture over it
            (line-spans
              (car (fold (lambda (acc e)
-                          (list (append (car acc) (markdown--line-spans e (cadr acc)))
+                          (list (append (car acc)
+                                        (markdown--line-spans e (cadr acc) run-key))
                                 (cadr e)))
                         (list '() #f) scan)))
            (table-spans (markdown--table-spans scan))

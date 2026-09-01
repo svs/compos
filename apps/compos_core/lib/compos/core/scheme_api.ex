@@ -386,7 +386,7 @@ defmodule Compos.Core.SchemeAPI do
       "local-remap*!" =>
         "(local-remap*! BUF FROM TO) — in buffer BUF, every key bound to FROM runs TO.",
       "key-for-command" =>
-        "(key-for-command COMMAND) — return the tersest key sequence bound to COMMAND, or \"\".",
+        "(key-for-command COMMAND [BUF]) — return the tersest key sequence bound to COMMAND, in BUF's keymap and the global one, or \"\".",
       "key-binding" =>
         "(key-binding SEQ) — the command SEQ runs in this buffer: a name, 'prefix, or #f. SEQ is a list of keys.",
       "capture-key!" =>
@@ -1662,7 +1662,10 @@ defmodule Compos.Core.SchemeAPI do
         Editor.local_remap(buf, from, to)
         :void
       end,
-      "key-for-command" => fn [name] -> Editor.key_for_command(name) end,
+      "key-for-command" => fn
+        [name] -> Editor.key_for_command(name)
+        [name, buf] -> Editor.key_for_command(name, buf)
+      end,
       # what a key sequence means here, without pressing it
       "key-binding" => fn [seq] ->
         case Editor.lookup_key(key_seq(seq)) do

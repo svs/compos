@@ -22,7 +22,7 @@ what differs.
   "Renders the body as a diagram."
   'ts-lang #f
   'run (lambda (buf scan fstart e lang body)
-         (morg-babel-insert-result! buf fstart (mermaid-render body))
+         (result-block-insert! buf fstart (mermaid-render body))
          (list 'ok lang)))
 ```
 
@@ -54,8 +54,11 @@ Rules:
 
 - `morg-kinds.scm` registers the paint-only kinds: `result`, `result-scheme`,
   `result-csv`, `diff`, `patch`, and the grammar aliases `jsx`, `ts`, `ex`.
-- `morg-babel.scm` registers the runners: the shell rows of
-  `*morg-babel-runners*`, `scheme`, `llm`/`ask`/`chat`, and `csv`.
+- `editor/blocks/run-block.scm` registers the runners: the shell rows of
+  `*morg-babel-runners*`, `scheme`, `llm`/`ask`/`chat`, and `csv`. Its
+  result lands through `editor/blocks/result-block.scm`, and a running
+  block is found again by a `block.scm` tracking overlay, not a
+  remembered offset.
 
 A `diff` or `patch` fence paints with the theme's `diff-add`, `diff-del`,
 `diff-hunk`, and `diff-file` faces, in the source view and in the preview
@@ -67,7 +70,7 @@ rows. It does not run.
   `fence-kind-line-face` and `fence-kind-body-spans` for the plain source view.
 - `markdown-mode.scm` (`markdown--line-spans`, `markdown-refontify!`) asks the
   same two functions for the preview rows.
-- `morg-babel.scm` (`morg-babel-execute`) asks `fence-kind-runnable?` and
+- `run-block.scm` (`morg-babel-execute`) asks `fence-kind-runnable?` and
   `fence-kind-run` to dispatch `C-c C-c`.
 - The rendered page (`markdown/html.ex`) offers the run key by the list the
   registry pushes through `preview-run-langs!` on every registration.

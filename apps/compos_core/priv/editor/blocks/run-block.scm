@@ -1,4 +1,4 @@
-;;; morg-babel.scm --- execute Morg fenced code blocks.
+;;; run-block.scm --- execute a fenced block, off the editor lane.
 ;;;
 ;;; C-c C-c runs the block at point. Output goes to a result fence below
 ;;; the source block. A later run replaces that result fence.
@@ -11,8 +11,8 @@
 ;;; lane. Add `:sync` when it must run on the calling lane.
 ;;;
 ;;; The document can change while a block runs, so the block's place is
-;;; not its byte offset. morg-babel-relocate finds the block again by its
-;;; language and its body.
+;;; not its byte offset. A tracking overlay (block.scm) follows the rope,
+;;; and the result lands where it says.
 
 (define morg-babel-parent-package *loading-package*)
 (define morg-babel-parent-namespace *loading-namespace*)
@@ -153,71 +153,6 @@
     (filter (lambda (row) (not (equal? row key)))
             (morg-babel-inflight buf))))
 
-;;; --- finding the block again -------------------------------------------------
-
-;; the block's position among every block in BUF, in document order
-(define (morg-babel-index scan buf fstart)
-  (let loop ((bs (morg-blocks scan buf)) (i 0))
-    (cond ((null? bs) 0)
-          ((= (car (car bs)) fstart) i)
-          (else (loop (cdr bs) (+ i 1))))))
-
-;; The open-fence start of the block that ran, or #f when the block is
-;; gone. Identity is the language and the body. The ordinal breaks a tie
-;; between two blocks that hold the same text.
-(define (morg-babel-relocate buf idx lang body)
-  (let* ((scan (morg-scan buf))
-         (blocks (morg-blocks scan buf))
-         (text (buffer-text buf))
-         (same?
-           (lambda (b)
-             (and (equal? (nth 1 b) lang)
-                  (equal? (substring-bytes text (nth 2 b) (nth 3 b)) body)))))
-    (let loop ((bs blocks) (i 0) (best #f) (bestd #f))
-      (cond ((null? bs) best)
-            ((same? (car bs))
-             (let ((d (abs (- i idx))))
-               (if (or (not bestd) (< d bestd))
-                   (loop (cdr bs) (+ i 1) (car (car bs)) d)
-                   (loop (cdr bs) (+ i 1) best bestd))))
-            (else (loop (cdr bs) (+ i 1) best bestd))))))
-
-;;; --- the result fence --------------------------------------------------------
-
-;; Return the result block after CLOSE-END, or #f.
-(define (morg-babel-result-block scan buf close-end)
-  (let loop ((es scan))
-    (cond ((null? es) #f)
-          ((<= (car (car es)) close-end) (loop (cdr es)))
-          (else
-            (let* ((e (car es)) (k (morg-kind e)))
-              (cond ((and (equal? k 'text) (equal? (string-trim (cadr e)) ""))
-                     (loop (cdr es)))
-                    ((and (equal? k 'open)
-                          (member (morg-info e) '("result" "result-scheme" "result-csv")))
-                     (list (car e) (morg-block-close-end scan buf (car e))))
-                    (else #f)))))))
-
-;; The scan is read here, not passed in: a result written when a command
-;; ends describes a document that moved since the command started.
-(define (morg-babel-insert-result! buf fstart out &optional result-lang)
-  (let* ((scan (morg-scan buf))
-         (close-end (morg-block-close-end scan buf fstart))
-         (existing (morg-babel-result-block scan buf close-end))
-         (norm (if (or (equal? out "") (string-suffix? "\n" out))
-                   out
-                   (string-append out "\n")))
-         (res (string-append "```" (or result-lang "result") "\n" norm "```\n")))
-    (if existing
-        (let* ((rs (car existing))
-               (re (min (buffer-size buf) (+ (cadr existing) 1))))
-          (buffer-delete-range! buf rs (- re rs))
-          (buffer-insert! buf rs res))
-        (let* ((size (buffer-size buf))
-               (at (min (+ close-end 1) size)))
-          (buffer-insert! buf at
-            (string-append (if (>= close-end size) "\n" "") res))))))
-
 ;;; --- running -----------------------------------------------------------------
 
 ;; `:sync` after the language holds the editor until the block ends.
@@ -246,52 +181,84 @@
         body)))
 
 (define (morg-babel-preview-csv! buf entry fstart body)
-  (morg-babel-insert-result! buf fstart
+  (result-block-insert! buf fstart
     (morg-babel-csv-first-lines
       (morg-babel-csv-source buf entry body)
       (morg-babel-csv-limit entry))
     "result-csv"))
 
+;;; --- finding the block again -------------------------------------------------
+;;; The document can change while a block runs, so the block's place is
+;;; not its byte offset. A tracking overlay from block.scm follows the
+;;; rope through every edit, and the result lands where it says.
+
+(define *morg-babel-track-n* 0)
+
+;; the live tracks, read back from the overlays so every range carries
+;; the rope's own adjustment — never a remembered offset
+(define (morg-babel--track-ranges buf)
+  (filter (lambda (o) (string-prefix? "run-block:" (caddr o)))
+          (buffer-overlays buf)))
+
+(define (morg-babel-track! buf scan fstart)
+  (set! *morg-babel-track-n* (+ *morg-babel-track-n* 1))
+  (let ((id (string-append "run-block:" (number->string *morg-babel-track-n*)))
+        (close-end (morg-block-close-end scan buf fstart)))
+    (overlay-set! buf 'run-block
+      (cons (list fstart close-end id) (morg-babel--track-ranges buf)))
+    id))
+
+(define (morg-babel-untrack! buf id)
+  (overlay-set! buf 'run-block
+    (filter (lambda (r) (not (equal? (caddr r) id)))
+            (morg-babel--track-ranges buf))))
+
+;; the tracked block's open-fence start right now, or #f when it is gone
+(define (morg-babel-locate buf id)
+  (let ((span (block-overlay-span buf id)))
+    (and span (car span))))
+
 ;; The command ended. Release the claim, find the block, write the result.
-(define (morg-babel-finish! buf idx lang body out &optional result-lang)
+(define (morg-babel-finish! buf id lang body out &optional result-lang)
   (morg-babel-release! buf (list lang body))
   (if (not (buffer-exists? buf))
       (message (string-append "The " lang " block's buffer is gone: " out))
-      (let ((fstart (morg-babel-relocate buf idx lang body)))
+      (let ((fstart (morg-babel-locate buf id)))
+        (morg-babel-untrack! buf id)
         (if fstart
             (begin
-              (morg-babel-insert-result! buf fstart out result-lang)
+              (result-block-insert! buf fstart out result-lang)
               (message (string-append "Executed " lang " block")))
             (message (string-append "The " lang " block is gone: " out))))))
 
 (define (morg-babel-start! buf scan fstart lang body)
-  (let ((idx (morg-babel-index scan buf fstart))
+  (let ((id (morg-babel-track! buf scan fstart))
         (key (list lang body))
         (runner (morg-babel-runner lang)))
     (morg-babel-claim! buf key)
-    (morg-babel-insert-result! buf fstart morg-babel-running-text)
+    (result-block-insert! buf fstart morg-babel-running-text)
     (*morg-babel-shell* runner body
-      (lambda (out) (morg-babel-finish! buf idx lang body out)))
+      (lambda (out) (morg-babel-finish! buf id lang body out)))
     (list 'pending lang)))
 
-(define (morg-babel-finish-scheme! buf idx lang body task-ok evaluated)
+(define (morg-babel-finish-scheme! buf id lang body task-ok evaluated)
   (cond
     ((not task-ok)
-     (morg-babel-finish! buf idx lang body (morg-babel-output evaluated)))
+     (morg-babel-finish! buf id lang body (morg-babel-output evaluated)))
     ((equal? (car evaluated) 'error)
-     (morg-babel-finish! buf idx lang body (cadr evaluated)))
+     (morg-babel-finish! buf id lang body (cadr evaluated)))
     (else
-      (morg-babel-finish! buf idx lang body
+      (morg-babel-finish! buf id lang body
         (morg-babel-scheme-pretty (cadr evaluated)) "result-scheme"))))
 
 (define (morg-babel-start-scheme! buf scan fstart lang body)
-  (let ((idx (morg-babel-index scan buf fstart))
+  (let ((id (morg-babel-track! buf scan fstart))
         (key (list lang body)))
     (morg-babel-claim! buf key)
-    (morg-babel-insert-result! buf fstart morg-babel-running-text)
+    (result-block-insert! buf fstart morg-babel-running-text)
     (*morg-babel-scheme* body
       (lambda (ok evaluated)
-        (morg-babel-finish-scheme! buf idx lang body ok evaluated)))
+        (morg-babel-finish-scheme! buf id lang body ok evaluated)))
     (list 'pending lang)))
 
 ;;; --- the model ----------------------------------------------------------------
@@ -322,13 +289,13 @@
   (if model (string-append "thinking: " model) "thinking"))
 
 (define (morg-babel-start-llm! buf scan fstart lang body)
-  (let ((idx (morg-babel-index scan buf fstart))
+  (let ((id (morg-babel-track! buf scan fstart))
         (key (list lang body))
         (model (morg-babel-buffer-model buf)))
     (morg-babel-claim! buf key)
-    (morg-babel-insert-result! buf fstart (morg-babel-thinking-text model))
+    (result-block-insert! buf fstart (morg-babel-thinking-text model))
     (*morg-babel-llm* body model
-      (lambda (answer) (morg-babel-finish! buf idx lang body answer)))
+      (lambda (answer) (morg-babel-finish! buf id lang body answer)))
     (list 'pending lang)))
 
 ;;; --- the kind runners --------------------------------------------------------
@@ -339,7 +306,7 @@
 (define (morg-babel--shell-run buf scan fstart e lang body)
   (cond
     ((morg-babel-sync? e)
-     (morg-babel-insert-result! buf fstart
+     (result-block-insert! buf fstart
        (morg-babel-run-shell (morg-babel-runner lang) body))
      (list 'ok lang))
     ((member (list lang body) (morg-babel-inflight buf))
@@ -349,7 +316,7 @@
 (define (morg-babel--scheme-run buf scan fstart e lang body)
   (cond
     ((morg-babel-sync? e)
-     (morg-babel-insert-result! buf fstart
+     (result-block-insert! buf fstart
        (morg-babel-scheme-pretty (eval-string body)) "result-scheme")
      (list 'ok lang))
     ((member (list lang body) (morg-babel-inflight buf))

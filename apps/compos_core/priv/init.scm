@@ -87,5 +87,14 @@
 (load-bundled-package "worktrees.scm")
 (load-bundled-package "writing.scm")
 
-(load-bundled-package "morg/morg-babel.scm")
+(begin
+  ;; the run and result blocks live with the other blocks and lean on
+  ;; block.scm; they load here because their kind registrations need the
+  ;; registry, which boots with the packages
+  (origin! 'bundled)
+  (package! 'result-block)
+  (load (string-append (compos-priv-dir) "/editor/blocks/result-block.scm"))
+  (origin! 'bundled)
+  (package! 'run-block)
+  (load (string-append (compos-priv-dir) "/editor/blocks/run-block.scm")))
 (load-bundled-package "morg/morg-tangle.scm")

@@ -147,7 +147,7 @@
   (lambda ()
     (define-fence-kind! "zz-shout" "Uppercases the body."
       'run (lambda (buf scan fstart e lang body)
-             (morg-babel-insert-result! buf fstart (string-upcase body))
+             (result-block-insert! buf fstart (string-upcase body))
              (list 'ok lang)))
     (t--kinds! "```zz-shout\nquiet\n```\n" 14)
     (let ((r (morg-babel-execute t--kinds-buf 14)))

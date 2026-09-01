@@ -173,3 +173,13 @@
                   "```zz-shout\nquiet\n```\n```result\nQUIET\n```\n"
                   "the output landed in a result fence below the block")
     (t--kinds-done!)))
+
+(deftest 'a-kinds-fence-face-colors-the-header
+  "the open fence of a diff block wears its own face, apart from the markers"
+  (lambda ()
+    (t--kinds! "```diff x · all\n-a\n```\ntext\n```sh\ne\n```\n" 0)
+    (check-true! (member (list 0 16 "diff-hunk") (buffer-overlays t--kinds-buf))
+                 "the diff header wears diff-hunk")
+    (check-true! (member (list 29 34 "org-meta") (buffer-overlays t--kinds-buf))
+                 "a kind with no fence-face keeps the plain marker face")
+    (t--kinds-done!)))

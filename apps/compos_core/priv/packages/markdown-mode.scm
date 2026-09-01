@@ -299,12 +299,18 @@
                         (string-append chip " · " args)
                         chip))
               (run (and chip (fence-kind-runnable? lang) (fence-kind-run lang)))
-              (verbs (if buf (fence-kind-verb-chips lang buf) '())))
+              (verbs (if buf (fence-kind-verb-chips lang buf) '()))
+              ;; the header chip wears the kind's own fence-face color
+              (chip-class
+                (let ((ff (fence-kind-get lang 'fence-face #f)))
+                  (if ff
+                      (string-append "md-fence-chip f-" ff)
+                      "md-fence-chip"))))
          (append
            (list (list start le "md-marker")
                  (list start le "row-fence"))
            (if text
-               (list (chrome-after le text "md-fence-chip"))
+               (list (chrome-after le text chip-class))
                '())
            (if run
                (list (chrome-after le

@@ -598,7 +598,12 @@
                  (if (< ke (+ start len))
                      (list (list ke (+ start len) face))
                      '()))))))
-      ((equal? k 'open) (list (list start (+ start len) "org-meta")))
+      ;; the open fence is the block's header: a kind that declares a
+      ;; fence-face colors it apart from the plain markers
+      ((equal? k 'open)
+       (list (list start (+ start len)
+                   (or (fence-kind-get (morg-info e) 'fence-face #f)
+                       "org-meta"))))
       ((equal? k 'close) (list (list start (+ start len) "org-meta")))
       ((equal? k 'directive) (list (list start (+ start len) "org-meta")))
       ((equal? k 'code)

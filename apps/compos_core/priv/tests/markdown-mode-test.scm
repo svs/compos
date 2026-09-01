@@ -167,8 +167,8 @@
     (t--md-fresh! "```diff\n+x\n```\n")
     ;; the open fence is hidden and its chip stands behind its last byte
     (check-true! (t--md-has? '(0 7 "md-marker")) "the open fence steps back")
-    (check-true! (t--md-has? (chrome-after 7 "diff" "md-fence-chip"))
-                 "the chip stands at the fence line's end")
+    (check-true! (t--md-has? (chrome-after 7 "diff" "md-fence-chip f-diff-hunk"))
+                 "the chip stands at the fence line's end, in the kind's color")
     ;; a bare fence (the close) draws no chip of its own
     (check-equal!
       (length (filter (lambda (o) (and (= (car o) (cadr o)))) 

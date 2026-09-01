@@ -226,7 +226,8 @@
 (define-fence-kind! "diff"
   "A unified diff. Its lines wear the diff faces. It does not run."
   'runnable #f 'ts-lang #f 'line-face fence-kind--diff-line-face
-  'chip-args #t 'verbs fence-kind--rewrite-verbs)
+  'chip-args #t 'verbs fence-kind--rewrite-verbs
+  'fence-face "diff-hunk")
 
 (define-fence-kind! "patch"
   "A unified diff. The same paint as the diff kind."

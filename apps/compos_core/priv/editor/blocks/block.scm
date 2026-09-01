@@ -115,9 +115,19 @@
                         (not (morg-fence-close? last))))))
           (if (not unclosed)
               #f
-              (begin
-                (buffer-insert! buf pos "\n\n```")
-                (goto-char! (+ pos 1))
+              ;; the close is the block's landing: a runnable kind takes
+              ;; its instructions onto the fence line, keys from this
+              ;; buffer's keymap, the way every block's fence line speaks
+              (let* ((lang (morg-fence-info line))
+                     (key (and (fence-kind-runnable? lang)
+                               (fence-kind-run lang)
+                               (key-for-command "morg-babel" buf)))
+                     (hint (if (and (string? key) (not (equal? key "")))
+                               (string-append " · " key " run")
+                               ""))
+                     (body-at (+ pos (string-byte-length hint) 1)))
+                (buffer-insert! buf pos (string-append hint "\n\n```"))
+                (goto-char! body-at)
                 #t))))))
 
 ;;; --- the verb keys -----------------------------------------------------------

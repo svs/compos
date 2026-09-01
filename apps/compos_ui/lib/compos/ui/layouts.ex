@@ -311,8 +311,12 @@ defmodule Compos.Ui.Layouts do
             content: ""; position: absolute; left: 0; right: 0; top: 50%;
             border-top: 1px solid var(--border, #cfc8b6);
           }
+          /* a block reads as one shape: its rows share a background and a
+             left edge that hold in any theme (translucent grey) */
           .line.row-code .line-content, .line.row-fence .line-content {
-            font-family: var(--font-mono); background: var(--inset-bg, rgba(0, 0, 0, 0.035));
+            font-family: var(--font-mono);
+            background: var(--inset-bg, rgba(127, 127, 127, 0.09));
+            border-left: 3px solid rgba(127, 127, 127, 0.28);
             padding-left: 10px; padding-right: 10px;
           }
           .line.row-code .line-content { font-size: .88em; }

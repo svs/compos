@@ -170,14 +170,13 @@
                  "the info string stays visible in the kind's face")
     (t--md-done!)))
 
-(deftest 'a-plain-fence-stays-concealed
-  "a kind with no fence-face hides its fence line as before"
+(deftest 'a-named-fence-shows-its-info
+  "the backticks step back; the language stays, dim, and labels the block"
   (lambda ()
-    (t--md-fresh! "```scheme\n(+ 1 1)\n```\n")
-    (check-true! (t--md-has? '(0 9 "md-marker")) "the whole line steps back")
-    (check-false!
-      (pair? (filter (lambda (o) (= (car o) (cadr o)))
-                     (buffer-overlays t--md-buf)))
-      "and nothing synthesized stands beside it: the affordances are text")
+    (t--md-fresh! "```scheme\n(+ 1 1)\n```\n\n```result-scheme\n2\n```\n")
+    (check-true! (t--md-has? '(0 3 "md-marker")) "the backticks step back")
+    (check-true! (t--md-has? '(3 9 "md-fence")) "the language labels the block")
+    (check-true! (t--md-has? '(18 21 "md-marker")) "a bare close fence conceals whole")
+    (check-true! (t--md-has? '(26 39 "md-fence")) "and the result names itself")
     (t--md-done!)))
 

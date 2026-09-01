@@ -14,6 +14,9 @@
 (effects! '(write))
 
 (defface! 'md-marker 'fg "#b3ac9c")
+;; the visible half of an open fence: the block's own info string, worn
+;; dim on the shrunken fence row — the chrome IS the text
+(defface! 'md-fence 'fg "#8a857a")
 ;; the drawn headings: a size per level. morg's plain org-level faces keep
 ;; the source view one size, as they always were.
 (defface! 'md-h1 'size "1.6em" 'weight "700")
@@ -284,21 +287,22 @@
       ((equal? k 'heading) (md--heading start line e len))
       ;; a row face (row-*) shapes the whole row: the page reads it off the
       ;; line, not the segment
-      ;; the fence line renders as its own text: the backticks step back,
-      ;; and a kind with a fence-face keeps its info string visible in that
-      ;; face — the block's state and keys are text, and the preview draws
-      ;; them. A kind with no fence-face conceals the line as before.
+      ;; the fence line renders as its own text: the backticks step back
+      ;; and the info string stays — the language, a result's name, a diff
+      ;; block's state and keys are text, and the preview draws them. The
+      ;; kind's fence-face colors it, else it wears the dim fence face; a
+      ;; bare fence has nothing to say and conceals whole.
       ((equal? k 'open)
        (let* ((lang (morg-info e))
               (le (+ start len))
-              (ff (fence-kind-get lang 'fence-face #f))
+              (face (or (fence-kind-get lang 'fence-face #f) "md-fence"))
               (m (re-groups "^([ \t]*```[ \t]*)" line 0))
               (info-start (if m (cadr (nth 1 m)) 0)))
-         (if ff
-             (list (md--span start 0 info-start "md-marker")
-                   (md--span start info-start len ff)
-                   (list start le "row-fence"))
+         (if (equal? (string-trim (substring-bytes line info-start len)) "")
              (list (list start le "md-marker")
+                   (list start le "row-fence"))
+             (list (md--span start 0 info-start "md-marker")
+                   (md--span start info-start len face)
                    (list start le "row-fence")))))
       ((equal? k 'close)
        (list (list start (+ start len) "md-marker") (list start (+ start len) "row-fence")))

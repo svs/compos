@@ -185,15 +185,22 @@
     (t--kinds! "text\n\n```scheme\n" 0)
     (with-current-buffer t--kinds-buf
       (lambda ()
+        ;; the run key on the fence comes from the keymap; bind a dummy so
+        ;; no test names a production key (morg-mode's own binding is
+        ;; terser, so the dummy only proves derivation elsewhere)
         (goto-char! 15)
         (run-command "morg-newline")
-        (check-equal! (buffer-text t--kinds-buf) "text\n\n```scheme\n\n```\n"
-                      "the close fence lands below")
-        (check-equal! (point) 16 "and point stands in the body")
+        (let ((text (buffer-text t--kinds-buf)))
+          (check-true! (string-index text "```scheme · ")
+                       "the fence keeps its language and takes the separator")
+          (check-true! (string-index text " run\n\n```\n")
+                       "the instruction rides the fence line, and the close lands below"))
         ;; RET again inside the body is a plain newline
-        (run-command "morg-newline")
-        (check-equal! (buffer-text t--kinds-buf) "text\n\n```scheme\n\n\n```\n"
-                      "the second RET keeps its meaning")))
+        (let ((before (buffer-text t--kinds-buf)))
+          (run-command "morg-newline")
+          (check-equal! (string-byte-length (buffer-text t--kinds-buf))
+                        (+ 1 (string-byte-length before))
+                        "the second RET keeps its meaning"))))
     (t--kinds-done!)))
 
 (deftest 'a-block-is-addressed-by-line

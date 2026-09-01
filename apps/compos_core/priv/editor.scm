@@ -2456,7 +2456,7 @@
                               (with-invoking-buffer on-cancel)))
             (list 'change  (lambda (input) (mb-select-notify!)))
             (list 'match-hint (if match-hint match-hint #f))
-            (list 'style (prompt-style cands style)))
+            (list 'style style))
       (if complete (list (list 'complete complete)) '())
       (if collect (list (list 'collect collect)) '()))))
 
@@ -4773,7 +4773,7 @@
               ;; the icon leads the annotation, so the mode is the second
               ;; field: both must be in reach for "dired" to find a directory
               (list 'match-hint 2)
-              (list 'style (prompt-style cands #f))
+              (list 'style #f)
               (list 'confirm k))))))
 
 (define (read-file-name prompt k)

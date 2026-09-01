@@ -287,14 +287,26 @@ defmodule Compos.Core.Editor do
   def mru_all, do: GenServer.call(__MODULE__, :mru_all)
   def mru_note_group(g), do: GenServer.call(__MODULE__, {:mru_note_group, g})
 
-  # Emacs last-command (yank-pop and friends dispatch on it)
-  def set_last_command(name), do: GenServer.call(__MODULE__, {:set_last_command, name})
-  def last_command, do: GenServer.call(__MODULE__, :last_command)
+  # Emacs last-command (yank-pop and friends dispatch on it), per frame
+  def set_last_command(name, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_last_command, name, fid(fid)})
+
+  def last_command(fid \\ nil), do: GenServer.call(__MODULE__, {:last_command, fid(fid)})
+
+  # Emacs this-command: the command now running. KeyDispatch sets it as
+  # the command starts; the command may change it, and finish_command
+  # makes it the next last-command.
+  def set_this_command(name, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_this_command, name, fid(fid)})
+
+  def this_command(fid \\ nil), do: GenServer.call(__MODULE__, {:this_command, fid(fid)})
 
   # the key sequence whose keymap lookup ran the current command — one
   # command bound to many keys (the switcher's type-to-narrow) reads it
-  def set_last_keys(seq), do: GenServer.call(__MODULE__, {:set_last_keys, seq})
-  def last_keys, do: GenServer.call(__MODULE__, :last_keys)
+  def set_last_keys(seq, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_last_keys, seq, fid(fid)})
+
+  def last_keys(fid \\ nil), do: GenServer.call(__MODULE__, {:last_keys, fid(fid)})
 
   # commands that manage their own undo boundaries (Scheme registers them;
   # KeyDispatch skips its automatic break for these — "undo" is one from birth)
@@ -321,6 +333,7 @@ defmodule Compos.Core.Editor do
 
   # kill ring
   def kill_push(text), do: GenServer.call(__MODULE__, {:kill_push, text})
+  def kill_append(text, before?), do: GenServer.call(__MODULE__, {:kill_append, text, before?})
   def kill_top, do: GenServer.call(__MODULE__, :kill_top)
   def kill_nth(i), do: GenServer.call(__MODULE__, {:kill_nth, i})
   def kill_size, do: GenServer.call(__MODULE__, :kill_size)
@@ -495,6 +508,11 @@ defmodule Compos.Core.Editor do
       pending: [],
       prefix_arg: nil,
       key_capture: nil,
+      # Emacs this-command / last-command / last-keys, per frame: two clients
+      # are two users, and one's yank-pop must not read the other's yank
+      this_command: "",
+      last_command: "",
+      last_keys: [],
       transient: nil,
       minibuffer: nil,
       mb_redirect: true,
@@ -531,8 +549,7 @@ defmodule Compos.Core.Editor do
        # the minor-mode keymaps in force in every buffer (cua-mode)
        global_minor_maps: [],
        remaps: %{},
-       last_command: "",
-       last_keys: [],
+
        undo_exempt: MapSet.new(["undo"]),
        mru: Enum.uniq([@scratch | Compos.Core.BufferStore.history()]),
        # frame id => text a command wants on that client's OS clipboard
@@ -570,6 +587,11 @@ defmodule Compos.Core.Editor do
           pending: [],
           prefix_arg: nil,
           key_capture: nil,
+          # Emacs this-command / last-command / last-keys, per frame: two clients
+          # are two users, and one's yank-pop must not read the other's yank
+          this_command: "",
+          last_command: "",
+          last_keys: [],
           transient: nil,
           minibuffer: nil,
           mb_redirect: true,
@@ -1252,7 +1274,11 @@ defmodule Compos.Core.Editor do
   def handle_call({:finish_command, name, keep_prefix, fid}, _from, state) do
     f = frame(state, fid)
     f = if keep_prefix, do: f, else: Map.put(f, :prefix_arg, nil)
-    {:reply, :ok, %{put_frame(state, f) | last_command: name}}
+    # what the command said it was, when it said so (set-this-command!)
+    this = Map.get(f, :this_command) || ""
+    last = if this in ["", nil], do: name, else: this
+    f = f |> Map.put(:last_command, last) |> Map.put(:this_command, "")
+    {:reply, :ok, put_frame(state, f)}
   end
 
   # No render depends on the capture flag, so it never marks the frame
@@ -1491,15 +1517,23 @@ defmodule Compos.Core.Editor do
   def handle_call({:mru_note_group, g}, _from, state),
     do: changed(:ok, bump_mru(state, {:group, g}))
 
-  def handle_call({:set_last_command, name}, _from, state),
-    do: {:reply, :ok, %{state | last_command: name}}
+  def handle_call({:set_last_command, name, fid}, _from, state),
+    do: {:reply, :ok, put_frame(state, Map.put(frame(state, fid), :last_command, name))}
 
-  def handle_call(:last_command, _from, state), do: {:reply, state.last_command, state}
+  def handle_call({:last_command, fid}, _from, state),
+    do: {:reply, Map.get(frame(state, fid), :last_command) || "", state}
 
-  def handle_call({:set_last_keys, seq}, _from, state),
-    do: {:reply, :ok, %{state | last_keys: seq}}
+  def handle_call({:set_this_command, name, fid}, _from, state),
+    do: {:reply, :ok, put_frame(state, Map.put(frame(state, fid), :this_command, name))}
 
-  def handle_call(:last_keys, _from, state), do: {:reply, state.last_keys, state}
+  def handle_call({:this_command, fid}, _from, state),
+    do: {:reply, Map.get(frame(state, fid), :this_command) || "", state}
+
+  def handle_call({:set_last_keys, seq, fid}, _from, state),
+    do: {:reply, :ok, put_frame(state, Map.put(frame(state, fid), :last_keys, seq))}
+
+  def handle_call({:last_keys, fid}, _from, state),
+    do: {:reply, Map.get(frame(state, fid), :last_keys) || [], state}
 
   def handle_call({:add_undo_exempt, name}, _from, state),
     do: {:reply, :ok, %{state | undo_exempt: MapSet.put(state.undo_exempt, name)}}
@@ -1615,6 +1649,18 @@ defmodule Compos.Core.Editor do
 
   def handle_call({:kill_push, text}, _from, state),
     do: changed(:ok, %{state | kill_ring: Enum.take([text | state.kill_ring], 60)})
+
+  # Emacs kill-append: a kill that follows a kill grows the newest entry
+  # instead of adding one, so C-k C-k C-k yanks back as one piece
+  def handle_call({:kill_append, text, before?}, _from, state) do
+    ring =
+      case state.kill_ring do
+        [] -> [text]
+        [top | rest] -> [if(before?, do: text <> top, else: top <> text) | rest]
+      end
+
+    changed(:ok, %{state | kill_ring: ring})
+  end
 
   def handle_call({:set_face, name, attrs}, _from, state) do
     faces = Map.update(state.faces, name, attrs, &Map.merge(&1, attrs))

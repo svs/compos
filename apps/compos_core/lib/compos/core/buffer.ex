@@ -683,6 +683,12 @@ defmodule Compos.Core.Buffer do
   def break_undo_chain(name), do: GenServer.call(via(name), :break_undo_chain)
 
   @doc """
+  Emacs undo-boundary: close the undo step in progress, so the edits before
+  this call undo apart from the edits after it, even inside one command.
+  """
+  def undo_boundary(name), do: GenServer.call(via(name), :undo_boundary)
+
+  @doc """
   Open (true) or close (false) an undo group: the edits between the two
   calls are one undo step, as one command is one step in Emacs. Opening
   closes the step before it; closing commits the group.
@@ -1609,6 +1615,20 @@ defmodule Compos.Core.Buffer do
 
   defp on_call(:break_undo_chain, _from, state),
     do: {:reply, :ok, %{state | undo_run: false}}
+
+  # Emacs undo-boundary: the edits so far are one step, the edits after
+  # this are the next, inside the running command's group
+  defp on_call(:undo_boundary, _from, state) do
+    grouped? = Map.get(state, :undo_group, false)
+    state = state |> Map.put(:undo_group, false) |> close_undo_step()
+
+    if grouped? and mirroring?(state) do
+      History.group(state.history, false)
+      History.group(state.history, true)
+    end
+
+    {:reply, :ok, Map.put(state, :undo_group, grouped?)}
+  end
 
   # a save is not an edit, but the modified flag every view shows just
   # changed — repaint through the same phantom-change channel set_local

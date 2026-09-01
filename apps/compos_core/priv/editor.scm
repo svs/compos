@@ -182,16 +182,92 @@
 ;; Commands are an Elixir registry underneath, but this wrapper gives every
 ;; declaration the same package/domain/effect metadata as Scheme APIs.
 (define define-command--raw define-command)
+
+;;; --- interactive: how a command gets its arguments ----------------------------
+;;; Emacs's (interactive "p"). A command may take arguments; the spec says
+;;; where they come from when a key runs it, and command-call passes them
+;;; when Scheme does. Codes: 'p the numeric prefix argument; 'P the raw one;
+;;; 'r the region start and end, two arguments; 'b the current buffer; 'd
+;;; point; 'm the mark or point; a string "sPrompt: " reads a string from
+;;; the minibuffer ("n" a number, "f" a file, "b" a buffer name).
+;;;
+;;;   (define-command "next-line" "Move point down" (interactive 'p)
+;;;     (lambda (n) ...))
+
+(define (interactive &rest codes) (cons 'interactive codes))
+
+(define (interactive-spec? x) (and (pair? x) (equal? (car x) 'interactive)))
+
+(define *command-fns* '())              ; ((name spec fn) ...)
+
+(define (interactive--arg code k)
+  (cond ((equal? code 'p) (k (prefix-numeric-value (current-prefix-arg))))
+        ((equal? code 'P) (k (current-prefix-arg)))
+        ((equal? code 'r) (k (list (region-beginning) (region-end))))
+        ((equal? code 'b) (k (current-buffer)))
+        ((equal? code 'd) (k (point)))
+        ((equal? code 'm) (k (or (mark) (point))))
+        ((string? code)
+         (let ((kind (substring code 0 1))
+               (prompt (substring code 1 (string-length code))))
+           (cond ((equal? kind "n")
+                  (minibuffer-read prompt '()
+                    (lambda (v) (k (let ((n (string->number v))) (if (number? n) n 0))))))
+                 ((equal? kind "f") (read-file-name prompt k))
+                 ((equal? kind "b") (minibuffer-read prompt (buffer-list) k))
+                 (else (minibuffer-read prompt '() k)))))
+        (else (k #f))))
+
+;; the arguments collect left to right; a prompt is asynchronous, so the
+;; rest of the collection is its continuation
+(define (interactive--collect codes acc fn)
+  (if (null? codes)
+      (apply fn (reverse acc))
+      (interactive--arg (car codes)
+        (lambda (v)
+          (interactive--collect (cdr codes)
+                                (if (equal? (car codes) 'r)
+                                    (append (reverse v) acc)
+                                    (cons v acc))
+                                fn)))))
+
+(define (call-interactively--spec spec fn)
+  (interactive--collect (cdr spec) '() fn))
+
+;; (define-command NAME [DOC] [SPEC] FN)
 (define (define-command name &rest args)
-  (let* ((documented? (= (length args) 2))
-         (doc (if documented? (car args) ""))
-         (fn (if documented? (cadr args) (car args))))
-    (if documented?
-        (define-command--raw name doc fn)
-        (define-command--raw name fn))
+  (let* ((doc (if (and (pair? args) (string? (car args))) (car args) ""))
+         (rest (if (and (pair? args) (string? (car args))) (cdr args) args))
+         (spec (and (pair? rest) (interactive-spec? (car rest)) (car rest)))
+         (fn (if spec (cadr rest) (car rest)))
+         (thunk (if spec (lambda () (call-interactively--spec spec fn)) fn)))
+    (set! *command-fns*
+      (cons (list name spec fn)
+            (remove (lambda (e) (equal? (car e) name)) *command-fns*)))
+    (if (> (string-length doc) 0)
+        (define-command--raw name doc thunk)
+        (define-command--raw name thunk))
     (catalog-register! 'command name doc
       'use (string-append "(run-command \"" name "\")"))
     name))
+
+;; the function behind a command, and its spec
+(define (command-function name)
+  (let ((e (assoc name *command-fns*))) (and e (nth 2 e))))
+
+(define (command-interactive-spec name)
+  (let ((e (assoc name *command-fns*))) (and e (nth 1 e))))
+
+;; (command-call NAME ARG ...): run the command's function with ARGS. A
+;; command with no spec takes none.
+(define (command-call name &rest args)
+  (let ((fn (command-function name)))
+    (cond ((not fn) (run-command name))
+          ((command-interactive-spec name) (apply fn args))
+          (else (fn)))))
+
+;; Emacs call-interactively: run NAME as a key would
+(define (call-interactively name) (run-command name))
 
 (define undefine-command--raw undefine-command)
 (define (undefine-command name)
@@ -1853,10 +1929,15 @@
 
 ;;; --- editing commands ------------------------------------------------------
 
-(define-command "forward-char" "Move point one character forward"
-  (lambda () (forward-char!)))
-(define-command "backward-char" "Move point one character backward"
-  (lambda () (backward-char!)))
+;; (repeat-count N THUNK): THUNK N times; a negative N runs OPPOSITE -N times
+(define (repeat-count n thunk &optional opposite)
+  (cond ((and (< n 0) opposite) (repeat-count (- n) opposite))
+        (else (let loop ((i 0)) (when (< i n) (thunk) (loop (+ i 1)))))))
+
+(define-command "forward-char" "Move point one character forward" (interactive 'p)
+  (lambda (n) (repeat-count n forward-char! backward-char!)))
+(define-command "backward-char" "Move point one character backward" (interactive 'p)
+  (lambda (n) (repeat-count n backward-char! forward-char!)))
 ;; An app owns its input, and a read-only HTML page is a reader. Scroll those
 ;; pages instead of moving an invisible source point. A writable HTML preview
 ;; takes edits, so its motion keys must move through the source.
@@ -1870,10 +1951,15 @@
   (and (preview-buffer? (current-buffer))
        (begin (scroll-window! (active-window) lines) #t)))
 
-(define-command "next-line" "Move point down one line"
-  (lambda () (or (preview-scroll! 3) (visual-next-line!))))
-(define-command "previous-line" "Move point up one line"
-  (lambda () (or (preview-scroll! -3) (visual-previous-line!))))
+(define (next-line-n! n)
+  (repeat-count n
+    (lambda () (or (preview-scroll! 3) (visual-next-line!)))
+    (lambda () (or (preview-scroll! -3) (visual-previous-line!)))))
+
+(define-command "next-line" "Move point down one line" (interactive 'p)
+  (lambda (n) (next-line-n! n)))
+(define-command "previous-line" "Move point up one line" (interactive 'p)
+  (lambda (n) (next-line-n! (- n))))
 (define-command "beginning-of-line" "Move point to the beginning of the line"
   (lambda () (visual-beginning-of-line!)))
 (define-command "end-of-line" "Move point to the end of the line"
@@ -2022,7 +2108,8 @@
 (catalog-meta! 'function "on-preview-link!" 'domain 'interaction 'effects '(write))
 (catalog-meta! 'function "preview-follow-link!" 'domain 'interaction 'effects '(write))
 
-(define-command "newline" "Insert a newline at point" (lambda () (insert! "\n")))
+(define-command "newline" "Insert a newline at point" (interactive 'p)
+  (lambda (n) (repeat-count n (lambda () (insert! "\n")))))
 (define (delete-active-region!)
   (if (and (mark) (< (region-beginning) (region-end)))
       (begin
@@ -2031,21 +2118,54 @@
         #t)
       #f))
 
-(define-command "delete-backward-char" "Delete the character before point"
-  (lambda ()
-    (unless (delete-active-region!) (delete-char! -1))))
-(define-command "delete-char" "Delete the character after point"
-  (lambda ()
-    (unless (delete-active-region!) (delete-char! 1))))
+(define-command "delete-backward-char" "Delete the character before point" (interactive 'p)
+  (lambda (n)
+    (unless (delete-active-region!) (delete-char! (- n)))))
+(define-command "delete-char" "Delete the character after point" (interactive 'p)
+  (lambda (n)
+    (unless (delete-active-region!) (delete-char! n))))
 
-(define-command "kill-line" "Kill text from point to end of line"
-  (lambda ()
-    (let ((killed (kill-line!)))
-      (if (equal? killed "") #f (kill-push! killed)))))
+;;; --- the kill ring: a kill after a kill appends -------------------------------
+;;; Emacs: a kill command that follows a kill command grows the newest
+;;; entry, so C-k C-k C-k yanks back as one piece. A kill that follows
+;;; anything else starts an entry.
 
-(define-command "undo" "Undo the last change"
-  (lambda ()
-    (if (not (undo!)) (message "No further undo information"))))
+(define *kill-commands*
+  '("kill-line" "kill-region" "kill-word" "backward-kill-word" "kill-whole-line"
+    "kill-sexp" "backward-kill-sexp" "kill-paragraph"))
+
+(define (kill-appends?)
+  (and (member (last-command) *kill-commands*) #t))
+
+;; put TEXT on the ring: onto the newest entry after a kill, else as a
+;; new entry. BEFORE? puts it in front, for a backward kill.
+(define (kill-text! text &optional before?)
+  (if (kill-appends?)
+      (kill-append! text (if before? #t #f))
+      (kill-push! text))
+  text)
+
+;; the Emacs names
+(define (kill-new text) (kill-push! text))
+(define (current-kill n) (kill-nth n))
+
+(define-command "kill-line" "Kill text from point to end of line" (interactive 'p)
+  (lambda (n)
+    (let loop ((i 0) (acc ""))
+      (if (>= i n)
+          (if (equal? acc "") #f (kill-text! acc))
+          (let ((killed (kill-line!)))
+            (if (equal? killed "")
+                (if (equal? acc "") #f (kill-text! acc))
+                (loop (+ i 1) (string-append acc killed))))))))
+
+(define-command "undo" "Undo the last change" (interactive 'p)
+  (lambda (n)
+    (let loop ((i 0))
+      (when (< i n)
+        (if (undo!)
+            (loop (+ i 1))
+            (message "No further undo information"))))))
 
 ;;; --- minibuffer --------------------------------------------------------------
 ;;; The minibuffer is a real buffer (" *minibuf*"): point motion, kill/yank,
@@ -3725,10 +3845,10 @@
 
 ;; ONE kill: push S..E to the kill ring, then delete it (dup #30).
 ;; Returns #t when the range was non-empty.
-(define (kill-region-1 s e)
+(define (kill-region-1 s e &optional before?)
   (if (> e s)
       (begin
-        (kill-push! (buffer-substring s e))
+        (kill-text! (buffer-substring s e) before?)
         (delete-between! s e)
         #t)
       #f))
@@ -3752,19 +3872,27 @@
         ((cadr hit) buf start end)
         (list start end))))
 
-(define-command "forward-word" "Move point forward one word" (lambda () (forward-word!)))
-(define-command "backward-word" "Move point backward one word"
-  (lambda () (backward-word!)))
+(define-command "forward-word" "Move point forward one word" (interactive 'p)
+  (lambda (n) (repeat-count n forward-word! backward-word!)))
+(define-command "backward-word" "Move point backward one word" (interactive 'p)
+  (lambda (n) (repeat-count n backward-word! forward-word!)))
 
-(define-command "kill-word" "Kill characters forward to the end of a word"
-  (lambda ()
-    (let ((s (point)))
-      (kill-region-1 s (forward-word!)))))
+;; N words forward from point, killed as one entry
+(define (kill-words! n)
+  (let ((s (point)))
+    (repeat-count n forward-word!)
+    (kill-region-1 s (point))))
 
-(define-command "backward-kill-word" "Kill characters backward to the start of a word"
-  (lambda ()
-    (let ((e (point)))
-      (kill-region-1 (backward-word!) e))))
+(define (backward-kill-words! n)
+  (let ((e (point)))
+    (repeat-count n backward-word!)
+    (kill-region-1 (point) e #t)))
+
+(define-command "kill-word" "Kill characters forward to the end of a word" (interactive 'p)
+  (lambda (n) (if (< n 0) (backward-kill-words! (- n)) (kill-words! n))))
+
+(define-command "backward-kill-word" "Kill characters backward to the start of a word" (interactive 'p)
+  (lambda (n) (if (< n 0) (kill-words! (- n)) (backward-kill-words! n))))
 
 (define-command "transpose-chars" "Interchange characters around point"
   (lambda ()
@@ -3895,15 +4023,20 @@
     (or (visual-row-move! dir #f n)
         (move-lines n (if (> dir 0) next-line! previous-line!)))))
 
-(define-command "scroll-up-command" "Scroll text upward nearly a full screen"
-  (lambda ()
-    (or (preview-scroll! (- (window-rows) 2))
-        (visual-page! 1))))
+;; with an argument, scroll that many lines instead of a screen
+(define-command "scroll-up-command" "Scroll text upward nearly a full screen" (interactive 'P)
+  (lambda (arg)
+    (if arg
+        (scroll-window! (active-window) (prefix-numeric-value arg))
+        (or (preview-scroll! (- (window-rows) 2))
+            (visual-page! 1)))))
 
-(define-command "scroll-down-command" "Scroll text downward nearly a full screen"
-  (lambda ()
-    (or (preview-scroll! (- 2 (window-rows)))
-        (visual-page! -1))))
+(define-command "scroll-down-command" "Scroll text downward nearly a full screen" (interactive 'P)
+  (lambda (arg)
+    (if arg
+        (scroll-window! (active-window) (- (prefix-numeric-value arg)))
+        (or (preview-scroll! (- 2 (window-rows)))
+            (visual-page! -1)))))
 
 (define-command "recenter-top-bottom" "Recenter point in the window"
   (lambda () (recenter!)))
@@ -9466,7 +9599,9 @@
 (define-command "digit-argument" "Add a digit to the next command's prefix argument"
   (lambda ()
     (let* ((raw (current-prefix-arg))
-           (digit (string->number (car (reverse (last-keys)))))
+           (key (car (reverse (last-keys))))
+           ;; "1" after C-u, or "M-1" on its own: the digit is the last character
+           (digit (string->number (substring key (- (string-length key) 1) (string-length key))))
            (negative? (or (equal? raw '-) (and (number? raw) (< raw 0))))
            (base (if (number? raw) (abs raw) 0))
            (value (+ (* base 10) digit)))
@@ -9484,6 +9619,18 @@
 (undo-exempt! "digit-argument")
 (undo-exempt! "negative-argument")
 
+;; M-1 .. M-9, M-0 and M-- are the digit arguments, as in Emacs
+(for-each (lambda (d) (global-set-key (string-append "M-" d) "digit-argument"))
+          '("0" "1" "2" "3" "4" "5" "6" "7" "8" "9"))
+(global-set-key "M--" "negative-argument")
+
+(public! 'interactive "(interactive CODE ...) — a command's argument spec: 'p numeric prefix, 'P raw prefix, 'r region start and end, 'b buffer, 'd point, 'm mark, \"sPrompt: \" a string, \"nPrompt: \" a number, \"fPrompt: \" a file")
+(public! 'command-call "(command-call NAME ARG ...) — run a command's function with explicit arguments")
+(public! 'command-function "(command-function NAME) — the function behind a command, or #f")
+(public! 'call-interactively "(call-interactively NAME) — run NAME as a key would, collecting its arguments from the spec")
+(public! 'kill-text! "(kill-text! TEXT [BEFORE?]) — TEXT onto the kill ring: appended to the newest entry after a kill command, else as a new entry")
+(public! 'kill-new "(kill-new TEXT) — a new kill-ring entry")
+(public! 'current-kill "(current-kill N) — kill-ring entry N, 0 the newest")
 (public! 'prefix-numeric-value
   "(prefix-numeric-value RAW) -> RAW as an integer; #f becomes 1")
 

@@ -396,6 +396,7 @@ defmodule Compos.Core.KeyDispatch do
 
     try do
       note("command", name)
+      Editor.set_this_command(name)
 
       case Session.run_command(name) do
         :ok ->

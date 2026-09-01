@@ -270,7 +270,14 @@ defmodule Compos.Core.SchemeAPI do
         "(kill-line!) — delete from point to the line end, or the newline; return the text.",
       "undo!" => "(undo!) — undo one step in the current buffer; return #t on success.",
       "break-undo-chain!" =>
-        "(break-undo-chain!) — start a new undo group in the current buffer.",
+        "(break-undo-chain!) — end a run of undos, so the next undo reverses them (redo). It is not a boundary: see undo-boundary!.",
+      "undo-boundary!" =>
+        "(undo-boundary!) — Emacs undo-boundary: the edits so far are one undo step, the edits after this are the next, even inside one command.",
+      "this-command" => "(this-command) — the name of the command now running; \"\" outside a command.",
+      "set-this-command!" =>
+        "(set-this-command! NAME) — what the next command sees as last-command; yank-pop sets \"yank\".",
+      "kill-append!" =>
+        "(kill-append! TEXT BEFORE?) — grow the newest kill-ring entry with TEXT, in front when BEFORE? is true.",
       "undo-group!" =>
         "(undo-group! BUF ON) — while ON, BUF's edits stay one undo step; a block's replace uses this so one landing is one undo.",
       "undo-exempt!" =>
@@ -1228,7 +1235,7 @@ defmodule Compos.Core.SchemeAPI do
       "undo!" => fn [] ->
         Buffer.undo(Editor.current_buffer()) == :ok
       end,
-      # undo boundary control (evil et al. group their own edits)
+      # the redo-run flag only; undo-boundary! is the boundary
       "break-undo-chain!" => fn [] ->
         buf = Editor.current_buffer()
         if Buffer.exists?(buf), do: Buffer.break_undo_chain(buf)
@@ -1257,6 +1264,10 @@ defmodule Compos.Core.SchemeAPI do
       # kill ring
       "kill-push!" => fn [text] ->
         Editor.kill_push(text)
+        :void
+      end,
+      "kill-append!" => fn [text, before?] ->
+        Editor.kill_append(text, before? == true)
         :void
       end,
       "kill-top" => fn [] -> Editor.kill_top() end,
@@ -1812,6 +1823,15 @@ defmodule Compos.Core.SchemeAPI do
         :void
       end,
       "last-command" => fn [] -> Editor.last_command() end,
+      "this-command" => fn [] -> Editor.this_command() end,
+      "set-this-command!" => fn [name] ->
+        Editor.set_this_command(name)
+        :void
+      end,
+      "undo-boundary!" => fn [] ->
+        Buffer.undo_boundary(Editor.current_buffer())
+        :void
+      end,
       "last-keys" => fn [] -> Editor.last_keys() end,
       "current-prefix-arg" => fn [] -> Editor.prefix_arg() || false end,
       "set-prefix-arg!" => fn [arg] ->

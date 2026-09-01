@@ -74,6 +74,38 @@
   (buffer-insert! buf bstart text)
   (+ bstart (string-byte-length text)))
 
+;;; --- typing a block ----------------------------------------------------------
+;;; A block is recognized the moment its opening exists: the grammar
+;;; reads a fresh open fence as an unclosed block that swallows the rest
+;;; of the document. RET at the end of that line closes the fence, stands
+;;; point in the body, and makes sure the run key answers here.
+
+(define (block-electric-close!)
+  (let* ((buf (current-buffer))
+         (pos (point))
+         (text (buffer-text buf))
+         (size (string-byte-length text))
+         (bol (line-start-position (line-number-at-pos pos)))
+         (rest (substring-bytes text bol size))
+         (nl (string-index rest "\n"))
+         (eol (if nl (+ bol nl) size))
+         (line (substring-bytes text bol eol))
+         (b (and (= pos eol)
+                 (morg-fence-info line)
+                 (block-at buf pos))))
+    (if (not (and b (= (nth 0 b) bol)
+                  (let* ((btext (or (block-text-at buf (nth 0 b) (nth 1 b)) ""))
+                         (last (car (reverse (string-split btext "\n")))))
+                    (not (morg-fence-close? last)))))
+        #f
+        (begin
+          (buffer-insert! buf pos "\n\n```")
+          (goto-char! (+ pos 1))
+          ;; the block's key answers here even off morg-mode
+          (unless (buffer-mode-is? buf "morg-mode")
+            (local-set-key* buf "C-c C-c" "morg-babel"))
+          #t))))
+
 ;;; --- the verb keys -----------------------------------------------------------
 
 (define (block-bind-keys! buf pairs)
@@ -81,44 +113,6 @@
 
 (define (block-unbind-keys! buf pairs)
   (for-each (lambda (kv) (local-unset-key* buf (car kv))) pairs))
-
-;;; --- the line diff -----------------------------------------------------------
-;;; Two texts as head context, one hunk, tail context. A waiting block
-;;; holds one change by construction, so nothing matches line by line in
-;;; the middle: there is no second change in there to find.
-
-(define (block--common-head a b)
-  (let loop ((a a) (b b) (n 0))
-    (if (and (pair? a) (pair? b) (equal? (car a) (car b)))
-        (loop (cdr a) (cdr b) (+ n 1))
-        n)))
-
-(define (block--common-tail a b limit)
-  (let loop ((a (reverse a)) (b (reverse b)) (n 0))
-    (if (and (pair? a) (pair? b) (< n limit) (equal? (car a) (car b)))
-        (loop (cdr a) (cdr b) (+ n 1))
-        n)))
-
-(define (block--slice lines from to)
-  (let loop ((ls lines) (i 0) (acc '()))
-    (cond ((or (null? ls) (>= i to)) (reverse acc))
-          ((>= i from) (loop (cdr ls) (+ i 1) (cons (car ls) acc)))
-          (else (loop (cdr ls) (+ i 1) acc)))))
-
-(define (block-marked prefix lines)
-  (map (lambda (l) (string-append prefix l)) lines))
-
-;; -> (HEAD-CONTEXT OURS-HUNK THEIRS-HUNK TAIL-CONTEXT), as line lists
-(define (block-diff-parts ours theirs)
-  (let* ((a (string-split ours "\n"))
-         (b (string-split theirs "\n"))
-         (head (block--common-head a b))
-         (tail (block--common-tail a b
-                 (- (min (length a) (length b)) head))))
-    (list (block--slice a 0 head)
-          (block--slice a head (- (length a) tail))
-          (block--slice b head (- (length b) tail))
-          (block--slice a (- (length a) tail) (length a)))))
 
 ;;; --- finding blocks by the grammar -------------------------------------------
 ;;; The markdown grammar parses a fenced block as one node, so a block is
@@ -187,15 +181,30 @@
   (let ((info (string-trim (nth 2 b))))
     (car (append (string-split info " ") (list "")))))
 
+
+;; the block on LINE, addressed the way an outline addresses a section —
+;; by line number, never by byte
+(define (block-at-line buf line)
+  (with-current-buffer buf
+    (lambda () (block-at buf (line-start-position line)))))
+
+;; the block's whole text, by line. The finder knows the extent; no
+;; caller passes an end.
+(define (block-text buf line)
+  (let ((b (block-at-line buf line)))
+    (and b (block-text-at buf (nth 0 b) (nth 1 b)))))
+
 (public! 'block-list
   "(block-list BUF) — every fenced block as (START END INFO BODY-START BODY-END), found by the markdown grammar, or by the scan where no grammar is loaded")
 (public! 'block-at
-  "(block-at BUF POS) — the fenced block containing POS, or #f")
+  "(block-at BUF POS) — the fenced block containing byte POS, or #f")
+(public! 'block-at-line
+  "(block-at-line BUF LINE) — the fenced block on LINE, or #f")
+(public! 'block-text
+  "(block-text BUF LINE) — the whole text of the fenced block on LINE, or #f")
 
 (public! 'block-body
   "(block-body BLOCK) — the text between BLOCK's fences; a block without both fences is returned whole")
-(public! 'block-diff-parts
-  "(block-diff-parts OURS THEIRS) — (HEAD OURS-HUNK THEIRS-HUNK TAIL) as line lists")
 
 ;; Do not leak this layer's catalog context into the loader.
 (package! block-parent-package block-parent-namespace)

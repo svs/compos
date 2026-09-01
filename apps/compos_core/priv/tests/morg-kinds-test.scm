@@ -178,3 +178,31 @@
         (check-true! (pair? (block--scan-list t--kinds-buf))
                      "no grammar here: the scan answers alone"))
     (t--kinds-done!)))
+
+(deftest 'typing-a-fence-closes-itself
+  "RET at the end of a fresh open fence adds the close and enters the body"
+  (lambda ()
+    (t--kinds! "text\n\n```scheme\n" 0)
+    (with-current-buffer t--kinds-buf
+      (lambda ()
+        (goto-char! 15)
+        (preview-newline!)
+        (check-equal! (buffer-text t--kinds-buf) "text\n\n```scheme\n\n```\n"
+                      "the close fence lands below")
+        (check-equal! (point) 16 "and point stands in the body")
+        ;; RET again inside the body is a plain newline
+        (preview-newline!)
+        (check-equal! (buffer-text t--kinds-buf) "text\n\n```scheme\n\n\n```\n"
+                      "the second RET keeps its meaning")))
+    (t--kinds-done!)))
+
+(deftest 'a-block-is-addressed-by-line
+  "block-text takes a line number; the finder knows the extent"
+  (lambda ()
+    (t--kinds! "one\n\n```sh\necho hi\n```\ntail\n" 0)
+    (check-equal! (block-text t--kinds-buf 3) "```sh\necho hi\n```"
+                  "the whole block, from its line")
+    (check-equal! (block-text t--kinds-buf 4) "```sh\necho hi\n```"
+                  "any of its lines answers the same block")
+    (check-false! (block-text t--kinds-buf 1) "a prose line has no block")
+    (t--kinds-done!)))

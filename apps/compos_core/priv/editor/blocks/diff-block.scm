@@ -89,8 +89,43 @@
 
 ;;; --- rendering the states ----------------------------------------------------
 
+;;; --- the line diff -----------------------------------------------------------
+;;; Ours and theirs as head context, one hunk, tail context. A diff block
+;;; holds one change by construction, so nothing matches line by line in
+;;; the middle: there is no second change in there to find.
+
+(define (diff-block--common-head a b)
+  (let loop ((a a) (b b) (n 0))
+    (if (and (pair? a) (pair? b) (equal? (car a) (car b)))
+        (loop (cdr a) (cdr b) (+ n 1))
+        n)))
+
+(define (diff-block--common-tail a b limit)
+  (let loop ((a (reverse a)) (b (reverse b)) (n 0))
+    (if (and (pair? a) (pair? b) (< n limit) (equal? (car a) (car b)))
+        (loop (cdr a) (cdr b) (+ n 1))
+        n)))
+
+(define (diff-block--slice lines from to)
+  (let loop ((ls lines) (i 0) (acc '()))
+    (cond ((or (null? ls) (>= i to)) (reverse acc))
+          ((>= i from) (loop (cdr ls) (+ i 1) (cons (car ls) acc)))
+          (else (loop (cdr ls) (+ i 1) acc)))))
+
+(define (diff-block--marked prefix lines)
+  (map (lambda (l) (string-append prefix l)) lines))
+
+;; -> (HEAD-CONTEXT OURS-HUNK THEIRS-HUNK TAIL-CONTEXT), as line lists
 (define (diff-block--parts ours theirs)
-  (block-diff-parts ours theirs))
+  (let* ((a (string-split ours "\n"))
+         (b (string-split theirs "\n"))
+         (head (diff-block--common-head a b))
+         (tail (diff-block--common-tail a b
+                 (- (min (length a) (length b)) head))))
+    (list (diff-block--slice a 0 head)
+          (diff-block--slice a head (- (length a) tail))
+          (diff-block--slice b head (- (length b) tail))
+          (diff-block--slice a (- (length a) tail) (length a)))))
 
 (define (diff-block-theirs-text theirs buf)
   (block-fence "diff" (diff-block--fence-args buf 'theirs) theirs))
@@ -103,10 +138,10 @@
     (block-fence "diff" (diff-block--fence-args buf 'all)
       (string-join
         (append
-          (block-marked " " (nth 0 parts))
-          (block-marked "-" (nth 1 parts))
-          (block-marked "+" (nth 2 parts))
-          (block-marked " " (nth 3 parts)))
+          (diff-block--marked " " (nth 0 parts))
+          (diff-block--marked "-" (nth 1 parts))
+          (diff-block--marked "+" (nth 2 parts))
+          (diff-block--marked " " (nth 3 parts)))
         "\n"))))
 
 (define (diff-block--render p state buf)
@@ -245,7 +280,7 @@
       (else
         (let ((state (diff-block-state p)))
           (diff-block--put! buf p spans
-            (diff-block--render (append (block--slice p 0 6)
+            (diff-block--render (append (diff-block--slice p 0 6)
                                         (list theirs note state
                                               diff-block--format))
                                 state buf)

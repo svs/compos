@@ -295,15 +295,19 @@
          (not (buffer-read-only? buf)))))
 
 (define (preview-newline!)
-  (let* ((p (point))
-         (ls (line-start-position (line-number-at-pos p)))
-         (line (line-text)))
-    (if (preview--literal-line? ls line)
-        (insert! "\n")
-        (let ((item (preview--next-marker line)))
-          (if item
-              (preview--list-newline! line item)
-              (insert! "\n"))))))
+  ;; a freshly typed open fence closes itself first (block.scm); every
+  ;; other RET keeps its meaning
+  (if (block-electric-close!)
+      #t
+      (let* ((p (point))
+             (ls (line-start-position (line-number-at-pos p)))
+             (line (line-text)))
+        (if (preview--literal-line? ls line)
+            (insert! "\n")
+            (let ((item (preview--next-marker line)))
+              (if item
+                  (preview--list-newline! line item)
+                  (insert! "\n")))))))
 (public! 'preview-newline!
   "(preview-newline!) — insert one newline in a rendered Markdown page"
   'interaction)

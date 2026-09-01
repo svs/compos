@@ -144,10 +144,13 @@
   "the passage, the block and the break between them become one text"
   (lambda ()
     (t--rw-proposed!)
+    (with-current-buffer t--rw-buf (lambda () (set-mark! 3)))
     (llm-rewrite-accept! t--rw-buf)
     (check-equal! (buffer-text t--rw-buf) "One.\n\nDeux.\n"
                   "the rewrite stands where the passage did, header and all gone")
     (check-false! (llm-rewrite-pending t--rw-buf) "and nothing waits")
+    (check-false! (with-current-buffer t--rw-buf (lambda () (mark)))
+                  "and the decision cleared the mark")
     (t--rw-done!)))
 
 (deftest 'keeping-a-diff-block-lands-the-rewrite-it-describes
@@ -272,4 +275,17 @@
                   (t--rw-doc (llm-rewrite-theirs-block "Deux." t--rw-buf))
                   "the document stands")
     (check-true! (llm-rewrite-pending t--rw-buf) "and the rewrite still waits")
+    (t--rw-done!)))
+
+(deftest 'asking-for-a-rewrite-consumes-the-region
+  "the command has the region, so the selection does not linger"
+  (lambda ()
+    (t--rw! "One.\n\nTwo.\n")
+    (with-current-buffer t--rw-buf
+      (lambda ()
+        (goto-char! 10)
+        (set-mark! 6)
+        (llm-rewrite--start! t--rw-buf)
+        (check-false! (mark) "the mark is gone the moment the ask begins")
+        (run-command "minibuffer-cancel")))
     (t--rw-done!)))

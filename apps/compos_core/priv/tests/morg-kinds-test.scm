@@ -172,8 +172,8 @@
   "the open fence of a diff block wears its own face, apart from the markers"
   (lambda ()
     (t--kinds! "```diff all\n-a\n```\ntext\n```sh\ne\n```\n" 0)
-    (check-true! (member (list 0 11 "diff-hunk") (buffer-overlays t--kinds-buf))
-                 "the diff header wears diff-hunk")
+    (check-true! (member (list 0 11 "diff-file") (buffer-overlays t--kinds-buf))
+                 "the diff header wears the diff-file header face")
     (check-true! (member (list 24 29 "org-meta") (buffer-overlays t--kinds-buf))
                  "a kind with no fence-face keeps the plain marker face")
     (t--kinds-done!)))

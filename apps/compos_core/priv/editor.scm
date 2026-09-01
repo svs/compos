@@ -6956,12 +6956,16 @@
          (old (and start (llm-rewrite--text-at buf start end))))
     (if (or (not old) (equal? old ""))
         (message "No region — set the mark first (C-SPC)")
-        (minibuffer-read "Rewrite region: " (llm-rewrite-directives buf)
+        (begin
+          ;; the region is consumed: the command has it, so the selection
+          ;; does not linger under the caret
+          (set-mark! #f)
+          (minibuffer-read "Rewrite region: " (llm-rewrite-directives buf)
           (lambda (input)
             (let ((directive (llm-rewrite--directive buf input)))
               (llm-rewrite--ask! buf old directive
                 (lambda (new)
-                  (llm-rewrite--propose! buf start end old new directive)))))))))
+                  (llm-rewrite--propose! buf start end old new directive))))))))))
 
 ;; One key decides. `C-c y`, `C-c k` and `C-c d` live only in the buffer
 ;; that holds the rewrite, and a key nobody can reach from the window they
@@ -7047,6 +7051,8 @@
           (buffer-delete-range! buf from (- to from))
           (buffer-insert! buf from text)
           (llm-rewrite--release! buf)
+          ;; the decision ends the selection too: nothing lingers
+          (with-current-buffer buf (lambda () (set-mark! #f)))
           (message "Rewrite kept"))))))
 
 ;; Putting it back: only the block and its blank line go. A block you have
@@ -7069,6 +7075,7 @@
                           (string-byte-length (llm-rewrite--tail p))))))
           (buffer-delete-range! buf from (- to from))
           (llm-rewrite--release! buf)
+          (with-current-buffer buf (lambda () (set-mark! #f)))
           (message "Rewrite put back"))))))
 
 (define-command "llm-rewrite"

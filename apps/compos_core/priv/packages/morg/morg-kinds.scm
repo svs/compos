@@ -232,7 +232,7 @@
               '()
               (append
                 (list (list (llm-rewrite--view-name (llm-rewrite--view p))
-                            "md-fence-chip f-diff-hunk")
+                            "md-fence-chip f-diff-file")
                       (list (llm-rewrite--instruction p) "md-fence-note"))
                 (fold (lambda (acc v)
                         (let ((k (key-for-command (car v) buf)))
@@ -247,7 +247,7 @@
 (define-fence-kind! "diff"
   "A unified diff. Its lines wear the diff faces. It does not run."
   'runnable #f 'ts-lang #f 'line-face fence-kind--diff-line-face
-  'fence-face "diff-hunk"
+  'fence-face "diff-file"
   'head-chrome fence-kind--diff-head-chrome)
 
 (define-fence-kind! "patch"

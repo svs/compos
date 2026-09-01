@@ -7155,6 +7155,20 @@
 
 (public! 'browse-visit "(browse-visit PATH) — open a file the way the code browser does: read-only unless *browse-read-only* is #f. C-x C-q makes it writable")
 
+;; A file the process cannot write opens READ-ONLY, as in Emacs. A
+;; generated file (a Morg tangle) is write-protected on disk for this
+;; reason: the document is the source, and the buffer says so before a
+;; stray keystroke edits the copy. C-x C-q still makes the buffer
+;; writable; the save then fails on the mode bits.
+(define (write-protected--find-file-hook!)
+  (let* ((buf (current-buffer))
+         (path (buffer-path buf)))
+    (when (and path (file-exists? path) (not (file-writable? path)))
+      (buffer-set-read-only! buf #t)
+      (message "File is write-protected"))))
+
+(add-hook! 'find-file-hook 'write-protected--find-file-hook!)
+
 ;; DELTA in lines, positive forward. A preview window has no lines, so
 ;; scroll-window! turns the count into pixels for it — the caller says
 ;; "a screen" and every kind of window understands.

@@ -1,7 +1,10 @@
 ;;; morg-tangle.scm --- write Morg code blocks to source files.
 ;;;
 ;;; Add `:tangle PATH` after a fence language. M-x morg-tangle writes all
-;;; marked blocks. Blocks with one target join in document order.
+;;; marked blocks. Blocks with one target join in document order. The
+;;; written file is write-protected: the document is the source, and the
+;;; file opens read-only. There is no way back from the file to the
+;;; document.
 ;;;
 ;;; ```elixir :tangle lib/demo.ex
 ;;; IO.puts("hello")
@@ -56,9 +59,20 @@
       '()
       (morg-blocks scan buf))))
 
+;; The document is the source. The written file is write-protected on
+;; disk, so it opens read-only in the editor and refuses other editors
+;; too. A file from an earlier tangle is write-protected already; the
+;; write lifts that for one moment. A buffer that shows the file turns
+;; read-only at once, since a revert runs no find-file-hook.
+(define (morg-tangle-write! path text)
+  (when (file-exists? path) (set-file-mode! path "644"))
+  (write-file! path text)
+  (set-file-mode! path "444")
+  (when (buffer-exists? path) (buffer-set-read-only! path #t)))
+
 (define (morg-tangle-buffer! buf)
   (let ((specs (morg-tangle-specs buf)))
-    (for-each (lambda (row) (write-file! (car row) (cadr row))) specs)
+    (for-each (lambda (row) (morg-tangle-write! (car row) (cadr row))) specs)
     (map car specs)))
 
 (define-command "morg-tangle" "Write all Morg blocks with :tangle PATH headers"

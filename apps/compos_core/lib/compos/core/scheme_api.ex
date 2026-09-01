@@ -177,6 +177,8 @@ defmodule Compos.Core.SchemeAPI do
       "url-encode" => "(url-encode S) — percent-encode S as one URL path segment.",
       "url-decode" => "(url-decode S) — decode a percent-encoded URL segment.",
       "file-exists?" => "(file-exists? PATH) — return #t if PATH exists.",
+      "file-writable?" =>
+        "(file-writable? PATH) — return #t when the process can write PATH, or PATH does not exist yet.",
       "file-directory?" => "(file-directory? PATH) — return #t if PATH is a directory.",
       "read-file" => "(read-file PATH) — return the file's contents, or #f if unreadable.",
       "shell-command->string" =>
@@ -889,6 +891,13 @@ defmodule Compos.Core.SchemeAPI do
       "url-encode" => fn [s] -> URI.encode(s, &URI.char_unreserved?/1) end,
       "url-decode" => fn [s] -> URI.decode(s) end,
       "file-exists?" => fn [p] -> File.exists?(Path.expand(p)) end,
+      # a file that is not there yet can be created, so it counts as writable
+      "file-writable?" => fn [p] ->
+        case File.stat(Path.expand(p)) do
+          {:ok, stat} -> stat.access in [:write, :read_write]
+          {:error, _} -> true
+        end
+      end,
       "file-directory?" => fn [p] -> File.dir?(Path.expand(p)) end,
       # (read-file PATH) -> contents, or #f if unreadable
       "read-file" => fn [p] ->

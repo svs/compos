@@ -225,3 +225,21 @@
           (check-equal! (buffer-text buf) "```scheme\n"
                         "no mode asked for blocks, so no fence closed")))
       (buffer-kill! buf))))
+
+(deftest 'a-blocks-presence-arms-its-keys
+  "a kind declares keys, and a buffer holding its block binds them"
+  (lambda ()
+    (define-fence-kind! "zz-keyed-kind" "Keys test." 'runnable #f
+      'keys '(("<f9> k" "morg-babel")))
+    (t--kinds! "```zz-keyed-kind\nx\n```\n" 0)
+    ;; read the keymap as data, buffer-explicit: the reverse lookup
+    (check-true!
+      (string-index (key-for-command "morg-babel" t--kinds-buf) "<f9>")
+      "the block in the text armed the kind's key")
+    (t--kinds-done!)
+    (let ((b (test-buffer! "zz-no-keyed.md" "plain\n")))
+      (with-current-buffer b (lambda () (set-mode! "morg-mode")))
+      (check-false!
+        (string-index (key-for-command "morg-babel" b) "<f9>")
+        "a buffer without the block binds nothing")
+      (buffer-kill! b))))

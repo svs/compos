@@ -214,6 +214,7 @@
 (define (diff-block--bind-keys! buf)
   (block-bind-keys! buf diff-block--keys))
 
+
 (define (diff-block--hold! buf spans tail ours theirs note state)
   (buffer-set-local! buf 'diff-block
     (append spans (list tail ours theirs note state diff-block--format)))

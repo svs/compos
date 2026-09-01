@@ -711,7 +711,8 @@
               (if (>= anchor pos) (max pos (+ anchor delta)) anchor))))))
     (morg-apply-folds! buf)
     (morg-apply-narrow! buf)
-    (morg-refontify! buf)))
+    (morg-refontify! buf)
+    (morg-arm-block-keys! buf)))
 
 ;;; --- the mode ----------------------------------------------------------------
 
@@ -900,33 +901,33 @@
         #t
         (run-command "preview-newline"))))
 
-(define (morg-install-keys)
-  (local-set-key "RET" "morg-newline")
-  (local-set-key "TAB" "morg-cycle")
-  (local-set-key "S-TAB" "morg-global-cycle")
-  (local-set-key "C-c C-t" "morg-todo")
+(define (morg-install-keys buf)
+  (local-set-key* buf "RET" "morg-newline")
+  (local-set-key* buf "TAB" "morg-cycle")
+  (local-set-key* buf "S-TAB" "morg-global-cycle")
+  (local-set-key* buf "C-c C-t" "morg-todo")
   ;; motion, org's own spelling: C-n/C-p walk every heading, C-f/C-b walk
   ;; the siblings. Links take M-n and M-p, because C-c C-x is the tangler.
-  (local-set-key "C-c C-n" "morg-next-heading")
-  (local-set-key "C-c C-p" "morg-previous-heading")
-  (local-set-key "C-c C-f" "morg-forward-same-level")
-  (local-set-key "C-c C-b" "morg-backward-same-level")
+  (local-set-key* buf "C-c C-n" "morg-next-heading")
+  (local-set-key* buf "C-c C-p" "morg-previous-heading")
+  (local-set-key* buf "C-c C-f" "morg-forward-same-level")
+  (local-set-key* buf "C-c C-b" "morg-backward-same-level")
   ;; M-<up> and M-<down> shadow the global scroll-other-window pair here,
   ;; the way org-mode shadows them for subtree motion. In a note, moving is
   ;; what the reader wants from that key.
-  (local-set-key "M-<up>" "morg-previous-landmark")
-  (local-set-key "M-<down>" "morg-next-landmark")
-  (local-set-key "C-c SPC" "morg-select-block")
-  (local-set-key "M-n" "morg-next-link")
-  (local-set-key "M-p" "morg-previous-link")
-  (local-set-key "C-c C-c" "morg-babel")
-  (local-set-key "C-c C-x" "morg-tangle")
+  (local-set-key* buf "M-<up>" "morg-previous-landmark")
+  (local-set-key* buf "M-<down>" "morg-next-landmark")
+  (local-set-key* buf "C-c SPC" "morg-select-block")
+  (local-set-key* buf "M-n" "morg-next-link")
+  (local-set-key* buf "M-p" "morg-previous-link")
+  (local-set-key* buf "C-c C-c" "morg-babel")
+  (local-set-key* buf "C-c C-x" "morg-tangle")
   ;; The core chords keep their meaning while the mode supplies its own
   ;; structural unit: heading instead of an arbitrary marked region.
-  (local-set-key "C-x n n" "morg-narrow")
-  (local-set-key "C-x n w" "morg-widen")
+  (local-set-key* buf "C-x n n" "morg-narrow")
+  (local-set-key* buf "C-x n w" "morg-widen")
   ;; prose names many definitions: look first, go on the second press
-  (local-set-key "M-." "definition-peek"))
+  (local-set-key* buf "M-." "definition-peek"))
 
 ;; The reactor binds a rule to one buffer process. A killed and recreated
 ;; buffer has a new reference, so mode setup replaces the old rule.
@@ -949,13 +950,24 @@
 
 (mode-icon! "morg-mode" "")
 
+;; The blocks in the text arm their own keys: a kind can declare 'keys,
+;; and a buffer holding a block of that kind binds them — so the fence
+;; line's named keys answer even when no runtime record stands.
+(define (morg-arm-block-keys! buf)
+  (for-each
+    (lambda (b)
+      (let ((keys (fence-kind-get (block-lang b) 'keys #f)))
+        (when (pair? keys) (block-bind-keys! buf keys))))
+    (block-list buf)))
+
 (define-mode "morg-mode"
   (lambda ()
     ;; Morg owns structure and the plain faces. The prose presentation is
     ;; writing-mode's; preview-mode draws the page in place.
     (when (boundp 'preview-heal!) (preview-heal! (current-buffer)))
     (enable-minor-mode! (current-buffer) "writing-mode")
-    (morg-install-keys)
+    (morg-install-keys (current-buffer))
+    (morg-arm-block-keys! (current-buffer))
     (morg-ensure-hook! (current-buffer))
     ;; Hidden ranges die with the daemon; the 'morg-folds local survives.
     ;; Re-derive them here, or a restored buffer comes back unfolded.

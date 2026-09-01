@@ -77,28 +77,44 @@ rows. It does not run.
 - `llm-mode--blocks` in `editor.scm` derives its reply-landing blocks from
   `morg-scan`, the one fence-aware line scanner.
 
-## The diff block
+## The blocks
 
-A live diff block holds two texts and waits for a decision. It is
-indicated by text alone:
+Each block is its own file under `priv/editor/blocks/`, handles itself,
+and leans on `block.scm` for the common mechanics: reading and replacing
+its text, landing below a passage, fence build and strip by structure,
+finding itself again through edits by a tracking overlay, verb key
+binding, and the head-hunk-tail line diff.
 
-    ```diff <state> <keys from the keymap>
-    ...the state's rendering...
-    ```
+- **The babel block** (`run-block.scm`): a fenced block that runs.
+  `C-c C-c` dispatches through the kind registry; the output lands in
+  the result block below it. A running block is tracked by overlay, so
+  the document can move while the command works.
+- **The result block** (`result-block.scm`): the output below the block
+  that made it. `result-block-insert!` finds it and replaces it; a later
+  run lands in the same place. It does not run.
+- **The diff block** (`diff-block.scm`): two texts waiting for a
+  decision, indicated by text alone:
 
-The states are `theirs` (their text, the default), `all` (the unified
-diff), and `ours`. Changing state is a redraw of the same two texts.
-The fence line carries every affordance: the kind, the state, and the
-keys, read from the buffer's keymap at land time. Accepting lands theirs
-where ours stood; rejecting removes the block; an edited block is your
-text and stays. The block lives in `priv/editor/blocks/diff-block.scm`;
-llm-rewrite (`priv/editor/blocks/llm-rewrite.scm`) is one creator — a
-merge tool or an agent can call `diff-block-propose!` the same way.
+      ```diff <state> <keys from the keymap>
+      ...the state's rendering...
+      ```
 
-The preview adds no affordance. It renders the same text fancy: the
-backticks step back, and a kind that declares a `'fence-face` keeps its
-info string visible in that face. A plain patch pasted as ` ```diff ` is
-the other diff type: kind paint only, no record, no verbs.
+  The states are `theirs` (their text, the default), `all` (the unified
+  diff), and `ours`. Changing state is a redraw of the same two texts;
+  the fence line carries the kind, the state, and the keys, read from
+  the buffer's keymap at land time. Accepting lands theirs where ours
+  stood; rejecting removes the block; an edited block is your text and
+  stays. A plain ` ```diff ` pasted from git is only the kind's paint:
+  no record, no verbs.
+- **The rewrite block** (`llm-rewrite.scm`): region -> LLM -> a diff
+  block below the passage. It owns the directives, the prompt, the
+  reply cleaning, and the review loop `C-c e` opens; the block it lands
+  is a diff block. Any other maker — a merge tool, an agent — lands one
+  the same way, through `diff-block-propose!`.
+
+The preview adds no affordance to any of them. It renders the same text
+fancy: the backticks step back, and a kind that declares a `'fence-face`
+keeps its info string visible in that face.
 
 ## Chrome
 

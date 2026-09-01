@@ -758,13 +758,16 @@
   (let ((h (morg-enclosing-heading (morg-scan buf) pos)))
     (and h (morg-info h))))
 
+;; the links in the prose. A link inside a fenced block is code, not an
+;; anchor: in the page a block is one place to land, and M-<up> must not
+;; step into its body.
 (define (morg--link-positions buf)
   (apply append
     (map (lambda (e)
            (let ((start (car e)) (line (cadr e)))
              (map (lambda (r) (+ start (car r)))
                   (re-find* morg--link-pattern line))))
-         (morg-lines buf))))
+         (filter (lambda (e) (equal? (morg-kind e) 'text)) (morg-scan buf)))))
 
 (define (morg--first-after ps pos)
   (let loop ((ps ps))
@@ -801,11 +804,11 @@
           (begin (set-mark! (car b)) (goto-char! (cadr b)) b)
           (begin (message "No block or section here") #f)))))
 
-;; The interesting places in a note: every heading, every paragraph, every
-;; fenced block whatever its language, and every link. One key walks them
-;; all, so a reader who does not know what lies above point still lands
-;; somewhere worth reading. Each list is already in document order, so the
-;; merge keeps them there and one position lands once.
+;; The anchors of a note: every heading at any level, every paragraph,
+;; every fenced block whatever its language, and every link. One key
+;; walks them all, so a reader who does not know what lies above point
+;; still lands somewhere worth reading. Each list is already in document
+;; order, so the merge keeps them there and one position lands once.
 (define (morg--merge a b)
   (cond ((null? a) b)
         ((null? b) a)
@@ -839,6 +842,32 @@
              (filter (lambda (e) (member (morg-kind e) '(heading open))) scan))
         (morg--paragraph-starts scan))
       (morg--link-positions buf))))
+
+;; A page is what the reader sees. An anchor farther away than one page
+;; is a leap over text nobody read, so the key pages there instead, and
+;; the next press finds the anchor from the new place. With no anchor in
+;; that direction the key still pages while a page of text remains.
+(define (morg--page-lines) (max 1 (- (window-rows) 2)))
+
+(define (morg--lines-between a b)
+  (abs (- (line-number-at-pos a) (line-number-at-pos b))))
+
+(define (morg--landmark-step! dir what)
+  (let* ((buf (current-buffer))
+         (pos (point))
+         (marks (morg--landmarks buf))
+         (target (if (> dir 0)
+                     (morg--first-after marks pos)
+                     (morg--last-before marks pos)))
+         (edge (if (> dir 0) (buffer-size buf) 0))
+         (page (morg--page-lines)))
+    (cond ((and target (<= (morg--lines-between pos target) page))
+           (goto-char! target)
+           target)
+          ((> (morg--lines-between pos edge) page)
+           (visual-page! dir)
+           (point))
+          (else (morg--land! target what)))))
 
 (define-command "morg-next-heading"
   "Move to the next heading"
@@ -883,16 +912,12 @@
                  "previous link")))
 
 (define-command "morg-next-landmark"
-  "Move down to the next heading, block or link"
-  (lambda ()
-    (morg--land! (morg--first-after (morg--landmarks (current-buffer)) (point))
-                 "next landmark")))
+  "Move down to the next heading, paragraph, block or link, or one page when none is that near"
+  (lambda () (morg--landmark-step! 1 "next landmark")))
 
 (define-command "morg-previous-landmark"
-  "Move up to the previous heading, block or link"
-  (lambda ()
-    (morg--land! (morg--last-before (morg--landmarks (current-buffer)) (point))
-                 "previous landmark")))
+  "Move up to the previous heading, paragraph, block or link, or one page when none is that near"
+  (lambda () (morg--landmark-step! -1 "previous landmark")))
 
 (define-command "morg-newline"
   "Close a freshly typed fence, or insert the newline RET means here"

@@ -804,6 +804,8 @@
 ;;; it landed on, and leaves point alone when there is nowhere to go.
 
 (define (t--morg-point) (buffer-point t--morg-buf))
+(define (t--morg-line)
+  (with-current-buffer t--morg-buf (lambda () (line-number-at-pos (point)))))
 
 (deftest 'morg-next-heading-walks-every-heading
   "C-c C-n takes the next heading whatever its depth"
@@ -849,7 +851,7 @@
     (t--morg-done!)))
 
 (deftest 'morg-landmarks-are-headings-paragraphs-blocks-and-links
-  "M-<down> walks every interesting place, each one once"
+  "M-<down> and M-<up> walk the anchors: headings, paragraphs, fences, links"
   (lambda ()
     (t--morg! t--morg-fixture 0)
     (check-equal! (morg--landmarks t--morg-buf) '(0 4 9 18 24 28)
@@ -857,7 +859,43 @@
     (t--morg! "para [l](http://a)\n\n```sh\necho hi\n```\n" 0)
     (check-equal! (morg--landmarks t--morg-buf) '(0 5 20)
                   "the paragraph, its link, and the fence")
+    (t--morg! "# a\n\ntext\n\n## b\n\n```sh\nx\n```\n\n### c\n" 30)
+    (t--morg-run! "morg-previous-landmark")
+    (check-equal! (t--morg-point) 17 "M-<up> from the end lands on the fence")
+    (t--morg-run! "morg-previous-landmark")
+    (check-equal! (t--morg-point) 11 "then on the second-level heading")
+    (t--morg-run! "morg-previous-landmark")
+    (check-equal! (t--morg-point) 5 "then on the paragraph")
+    (t--morg-run! "morg-previous-landmark")
+    (check-equal! (t--morg-point) 0 "then on the top heading")
     (t--morg-done!)))
+
+(deftest 'a-landmark-farther-than-a-page-away-is-a-page
+  "when no anchor lies within one page, M-<up> and M-<down> page instead"
+  (lambda ()
+    ;; one paragraph of PAGE+8 lines: its first line is the only anchor
+    ;; between the two headings
+    (let* ((page (morg--page-lines))
+           (n (+ page 8))
+           (body (string-join (map (lambda (i) "l") (iota n)) "\n"))
+           (text (string-append "# a\n\n" body "\n\n# b\n"))
+           (b-pos (string-index text "# b")))
+      (t--morg! text b-pos)
+      (check-equal! (t--morg-line) (+ 4 n) "the fixture: the heading is the last line")
+      (t--morg-run! "morg-previous-landmark")
+      (check-equal! (t--morg-line) (- (+ 4 n) page)
+                    "the paragraph start is farther than a page: one page up")
+      (t--morg-run! "morg-previous-landmark")
+      (check-equal! (t--morg-point) 5
+                    "from there the paragraph start is near: it lands")
+      (t--morg! text 5)
+      (t--morg-run! "morg-next-landmark")
+      (check-equal! (t--morg-line) (+ 3 page)
+                    "downward the heading is a page and more away: one page down")
+      (t--morg! text 0)
+      (t--morg-run! "morg-next-landmark")
+      (check-equal! (t--morg-point) 5 "a near anchor still lands")
+      (t--morg-done!))))
 
 ;;; --- selection ----------------------------------------------------------------
 

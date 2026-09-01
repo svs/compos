@@ -180,18 +180,18 @@
     (t--kinds-done!)))
 
 (deftest 'typing-a-fence-closes-itself
-  "RET at the end of a fresh open fence adds the close and enters the body"
+  "in morg-mode, RET at the end of a fresh open fence closes it"
   (lambda ()
     (t--kinds! "text\n\n```scheme\n" 0)
     (with-current-buffer t--kinds-buf
       (lambda ()
         (goto-char! 15)
-        (run-command "preview-newline")
+        (run-command "morg-newline")
         (check-equal! (buffer-text t--kinds-buf) "text\n\n```scheme\n\n```\n"
                       "the close fence lands below")
         (check-equal! (point) 16 "and point stands in the body")
         ;; RET again inside the body is a plain newline
-        (run-command "preview-newline")
+        (run-command "morg-newline")
         (check-equal! (buffer-text t--kinds-buf) "text\n\n```scheme\n\n\n```\n"
                       "the second RET keeps its meaning")))
     (t--kinds-done!)))
@@ -206,3 +206,15 @@
                   "any of its lines answers the same block")
     (check-false! (block-text t--kinds-buf 1) "a prose line has no block")
     (t--kinds-done!)))
+
+(deftest 'blocks-are-active-only-where-the-mode-says
+  "a fundamental buffer's RET stays a plain newline on a fence line"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-no-blocks" "```scheme")))
+      (with-current-buffer buf
+        (lambda ()
+          (goto-char! 9)
+          (run-command "preview-newline")
+          (check-equal! (buffer-text buf) "```scheme\n"
+                        "no mode asked for blocks, so no fence closed")))
+      (buffer-kill! buf))))

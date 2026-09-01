@@ -77,8 +77,9 @@
 ;;; --- typing a block ----------------------------------------------------------
 ;;; A block is recognized the moment its opening exists: the grammar
 ;;; reads a fresh open fence as an unclosed block that swallows the rest
-;;; of the document. RET at the end of that line closes the fence, stands
-;;; point in the body, and makes sure the run key answers here.
+;;; of the document. RET at the end of that line closes the fence and
+;;; stands point in the body. A MODE decides whether blocks are active:
+;;; this is the mechanism, and morg-mode binds it.
 
 (define (block--find-in blocks bol)
   (let loop ((bs blocks))
@@ -96,10 +97,7 @@
          (nl (string-index rest "\n"))
          (eol (if nl (+ bol nl) size))
          (line (substring-bytes text bol eol)))
-    (if (not (and (= pos eol)
-                  (morg-fence-info line)
-                  ;; a chat's RET means send; its fences are message text
-                  (not (and (boundp 'chat-buffer?) (chat-buffer? buf)))))
+    (if (not (and (= pos eol) (morg-fence-info line)))
         #f
         ;; the fence just typed may not have its newline yet — the RET
         ;; being handled is that newline — so the grammar reads the text
@@ -120,9 +118,6 @@
               (begin
                 (buffer-insert! buf pos "\n\n```")
                 (goto-char! (+ pos 1))
-                ;; the block's key answers here even off morg-mode
-                (unless (buffer-mode-is? buf "morg-mode")
-                  (local-set-key* buf "C-c C-c" "morg-babel"))
                 #t))))))
 
 ;;; --- the verb keys -----------------------------------------------------------

@@ -311,13 +311,9 @@
 (define-command "preview-newline"
   "Insert one newline in a rendered page"
   (lambda ()
-    ;; a freshly typed open fence closes itself first, in any view — the
-    ;; block is text, and typing it works everywhere. Every other RET
-    ;; keeps its meaning.
-    (cond
-      ((block-electric-close!) #t)
-      ((preview--markdown-edit?) (preview-newline!))
-      (else (run-command "newline-or-send")))))
+    (if (preview--markdown-edit?)
+        (preview-newline!)
+        (run-command "newline-or-send"))))
 
 ;; preview.scm loads after editor.scm, so this takes RET from the plain
 ;; newline and hands back to it for every buffer that is not a Markdown

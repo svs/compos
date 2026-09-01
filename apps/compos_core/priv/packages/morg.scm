@@ -893,7 +893,15 @@
     (morg--land! (morg--last-before (morg--landmarks (current-buffer)) (point))
                  "previous landmark")))
 
+(define-command "morg-newline"
+  "Close a freshly typed fence, or insert the newline RET means here"
+  (lambda ()
+    (if (block-electric-close!)
+        #t
+        (run-command "preview-newline"))))
+
 (define (morg-install-keys)
+  (local-set-key "RET" "morg-newline")
   (local-set-key "TAB" "morg-cycle")
   (local-set-key "S-TAB" "morg-global-cycle")
   (local-set-key "C-c C-t" "morg-todo")

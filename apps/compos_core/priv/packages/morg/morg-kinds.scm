@@ -196,6 +196,10 @@
   "A unified diff. The same paint as the diff kind."
   'runnable #f 'ts-lang #f 'line-face fence-kind--diff-line-face)
 
+(define-fence-kind! "rewrite"
+  "A rewrite waiting for a decision. llm-rewrite lands one below the passage; its own keys decide it. It does not run."
+  'runnable #f 'ts-lang #f)
+
 ;; Info strings whose tree-sitter grammar wears another name and that
 ;; morg-babel gives no runner.
 (for-each

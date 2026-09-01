@@ -6622,9 +6622,16 @@
 ;; read. A hot reload can land between the proposal and the decision, and a
 ;; verb that reads the wrong field of the wrong shape edits the document by
 ;; arithmetic. A record of the wrong length is no record.
+;; The record ends with a format tag. A record without it comes from a
+;; build whose block wore another shape; a verb reading it would edit by
+;; arithmetic that no longer holds, so it is no record.
+(define llm-rewrite--format 'fenced)
+
 (define (llm-rewrite-pending buf)
   (let ((p (buffer-local buf 'llm-rewrite)))
-    (and (pair? p) (= (length p) 9) p)))
+    (and (pair? p) (= (length p) 10)
+         (equal? (nth 9 p) llm-rewrite--format)
+         p)))
 
 (define (llm-rewrite--tail p) (nth 4 p))
 (define (llm-rewrite--old p) (nth 5 p))
@@ -6692,23 +6699,11 @@
           (loop (cdr ls) (+ end 1)
                 (append acc (llm-rewrite--row-faces at (car ls) view)))))))
 
-;; The header is chrome, not text: it stands on the blank line above the
-;; block, names the instruction and the keys, and never holds a byte. The
-;; keys come from this buffer's own keymap, so a rebind changes the header.
-(define (llm-rewrite--header buf directive)
-  (string-append "@@ " directive " @@ "
-    (key-for-command "llm-rewrite-accept" buf) " keeps it · "
-    (key-for-command "llm-rewrite-reject" buf) " puts it back · "
-    (key-for-command "llm-rewrite-diff" buf) " changes the view"))
-
-(define (llm-rewrite--paint! buf spans directive view)
+(define (llm-rewrite--paint! buf spans view)
   (overlay-set! buf 'llm-rewrite-source
     (list (list (nth 0 spans) (nth 1 spans) 'llm-rewrite-source)))
   (overlay-set! buf 'llm-rewrite
-    (list (list (nth 2 spans) (nth 3 spans) 'llm-rewrite)
-          (chrome-before (max 0 (- (nth 2 spans) 1))
-            (llm-rewrite--header buf directive)
-            "f-diff-hunk llm-rewrite-head")))
+    (list (list (nth 2 spans) (nth 3 spans) 'llm-rewrite)))
   (overlay-set! buf 'llm-rewrite-diff
     (llm-rewrite--block-faces (nth 2 spans)
       (or (llm-rewrite--text-at buf (nth 2 spans) (nth 3 spans)) "")
@@ -6716,13 +6711,12 @@
 
 (define (llm-rewrite--hold! buf spans tail old new directive view)
   (buffer-set-local! buf 'llm-rewrite
-    (append spans (list tail old new directive view)))
+    (append spans (list tail old new directive view llm-rewrite--format)))
   (desktop-skip! buf 'llm-rewrite)
-  ;; the keys bind first: the header chrome reads them from this keymap
   (local-set-key* buf "C-c y" "llm-rewrite-accept")
   (local-set-key* buf "C-c k" "llm-rewrite-reject")
   (local-set-key* buf "C-c d" "llm-rewrite-diff")
-  (llm-rewrite--paint! buf spans directive view))
+  (llm-rewrite--paint! buf spans view))
 
 (define (llm-rewrite--release! buf)
   (buffer-set-local! buf 'llm-rewrite #f)
@@ -6767,8 +6761,9 @@
 ;;; the block came back whole. So a diff of the two is the lines they still
 ;;; share at each end and one hunk between them. Nothing matches line by
 ;;; line in the middle, because there is no second change in there to find.
-;;; Both blocks carry the same header, because a block you meet an hour
-;;; later has to say what it was asked for and what you can do with it.
+;;; Every view is one fenced block whose info string names the kind and the
+;;; instruction, because a block you meet an hour later has to say what it
+;;; was asked for — in bare text, with no renderer's help.
 
 (define (llm-rewrite--common-head a b)
   (let loop ((a a) (b b) (n 0))
@@ -6791,9 +6786,25 @@
 (define (llm-rewrite--marked prefix lines)
   (map (lambda (l) (string-append prefix l)) lines))
 
-;; The header is chrome (llm-rewrite--header), so a block is its text
-;; alone: nothing lands that was not asked for, and nothing needs a strip.
-(define (llm-rewrite-whole-block new directive) new)
+;; The block is a fenced block. Its delimiters are real text: the bare
+;; buffer says what the block is and what it was asked, morg folds and
+;; lifts it like any fence, and the preview paints it through the
+;; fence-kind registry. Accepting strips the fences by structure.
+(define (llm-rewrite--fence directive body)
+  (string-append "```rewrite " directive "\n" body "\n```"))
+
+;; the text between the fences; a block whose fences were edited away is
+;; your text, and stays whole
+(define (llm-rewrite--body block)
+  (let ((lines (string-split block "\n")))
+    (if (and (>= (length lines) 2)
+             (string-prefix? "```" (car lines))
+             (string-prefix? "```" (car (reverse lines))))
+        (string-join (reverse (cdr (reverse (cdr lines)))) "\n")
+        block)))
+
+(define (llm-rewrite-whole-block new directive)
+  (llm-rewrite--fence directive new))
 
 ;; the passage and the rewrite as head context, one hunk, tail context
 (define (llm-rewrite--parts old new)
@@ -6809,13 +6820,14 @@
 
 (define (llm-rewrite-diff-block old new directive)
   (let ((parts (llm-rewrite--parts old new)))
-    (string-join
-      (append
-        (llm-rewrite--marked " " (nth 0 parts))
-        (llm-rewrite--marked "-" (nth 1 parts))
-        (llm-rewrite--marked "+" (nth 2 parts))
-        (llm-rewrite--marked " " (nth 3 parts)))
-      "\n")))
+    (llm-rewrite--fence directive
+      (string-join
+        (append
+          (llm-rewrite--marked " " (nth 0 parts))
+          (llm-rewrite--marked "-" (nth 1 parts))
+          (llm-rewrite--marked "+" (nth 2 parts))
+          (llm-rewrite--marked " " (nth 3 parts)))
+        "\n"))))
 
 ;; --- side by side ---
 ;; The left column is as wide as its widest line, up to a limit; a line
@@ -6850,12 +6862,13 @@
                        (llm-rewrite--rows (nth 1 parts) (nth 2 parts))
                        (llm-rewrite--rows (nth 3 parts) (nth 3 parts))))
          (width (llm-rewrite--column-width (map car rows))))
-    (string-join
-      (map (lambda (row)
-             (string-append (llm-rewrite--pad (car row) width)
-                            " | " (cadr row)))
-           rows)
-      "\n")))
+    (llm-rewrite--fence directive
+      (string-join
+        (map (lambda (row)
+               (string-append (llm-rewrite--pad (car row) width)
+                              " | " (cadr row)))
+             rows)
+        "\n"))))
 
 ;; The reply arrives whenever it arrives, so it may only land under the
 ;; passage it was asked about. It never touches that passage: a blank line
@@ -7010,11 +7023,12 @@
           (lambda (input)
             (llm-rewrite--review! buf p spans (string-trim input)))))))
 
-;; A whole block is the text you see, edits and all. A diff block is a view
-;; of two strings, so what lands from it is the rewrite it describes.
+;; A whole block is the text you see between the fences, edits and all. A
+;; diff block is a view of two strings, so what lands from it is the
+;; rewrite it describes.
 (define (llm-rewrite--accept-text p block)
   (if (equal? (llm-rewrite--view p) 'whole)
-      block
+      (llm-rewrite--body block)
       (llm-rewrite--new p)))
 
 ;; Keeping it: the block takes the passage's place, and the passage and the

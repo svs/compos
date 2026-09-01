@@ -11,9 +11,10 @@ The registry lives in `priv/packages/morg/morg-kinds.scm`.
 3. Paint decorates ranges. It never replaces text.
 4. An action on a block lands text at the block: the result fence below it.
 
-The fence itself supplies the scan (`morg-scan`), folding, the region lift,
-relocation while a block runs, and the result landing. A kind declares only
-what differs.
+The fence itself supplies finding (`block-list`/`block-at`, by the
+markdown tree-sitter grammar, scan-walked where no grammar is loaded),
+folding, the region lift, tracking while a block runs, and the result
+landing. A kind declares only what differs.
 
 ## One registration
 
@@ -21,8 +22,8 @@ what differs.
 (define-fence-kind! "mermaid"
   "Renders the body as a diagram."
   'ts-lang #f
-  'run (lambda (buf scan fstart e lang body)
-         (result-block-insert! buf fstart (mermaid-render body))
+  'run (lambda (buf b lang body)
+         (result-block-insert! buf (nth 0 b) (mermaid-render body))
          (list 'ok lang)))
 ```
 
@@ -35,7 +36,7 @@ Keys a kind can declare:
 | `line-face` | fn | `(FN LINE)` -> a face for that line, or `#f` |
 | `header-face` | string | a face for the first body line |
 | `runnable` | `#f` | the kind refuses to run |
-| `run` | fn | `(FN BUF SCAN FSTART ENTRY LANG BODY)` -> `(ok LANG)`, `(pending LANG)`, or `(error MSG)` |
+| `run` | fn | `(FN BUF BLOCK LANG BODY)` -> `(ok LANG)`, `(pending LANG)`, or `(error MSG)`; BLOCK from the finder |
 | `interpreter` | string | the interpreter the shared shell runner uses |
 
 An unregistered info string still paints: its own name is tried as a

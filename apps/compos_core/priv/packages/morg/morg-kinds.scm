@@ -11,8 +11,9 @@
 ;;;   line-face   FN      (FN LINE) -> a face for that body line, or #f
 ;;;   header-face STRING  a face for the first body line
 ;;;   runnable    #f      the kind refuses to run (a kind runs by default)
-;;;   run         FN      (FN BUF SCAN FSTART ENTRY LANG BODY) -> (ok LANG),
-;;;                       (pending LANG), or (error MSG)
+;;;   run         FN      (FN BUF BLOCK LANG BODY) -> (ok LANG),
+;;;                       (pending LANG), or (error MSG); BLOCK is the
+;;;                       finder's (START END INFO BODY-START BODY-END)
 ;;;   interpreter STRING  the shell interpreter the shared shell runner uses
 ;;;
 ;;; morg.scm and markdown-mode.scm read the paint keys. morg-babel.scm reads

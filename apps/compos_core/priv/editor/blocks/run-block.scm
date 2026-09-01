@@ -156,14 +156,14 @@
 ;;; --- running -----------------------------------------------------------------
 
 ;; `:sync` after the language holds the editor until the block ends.
-(define (morg-babel-sync? entry)
-  (re-match ":[Ss][Yy][Nn][Cc]([ \t]|$)" (cadr entry)))
+(define (morg-babel-sync? info)
+  (re-match ":[Ss][Yy][Nn][Cc]([ \t]|$)" info))
 
-(define (morg-babel-csv-limit entry)
-  (let ((g (re-groups ":[Ll][Ii][Nn][Ee][Ss][ \t]+([0-9]+)" (cadr entry) 0)))
+(define (morg-babel-csv-limit info)
+  (let ((g (re-groups ":[Ll][Ii][Nn][Ee][Ss][ \t]+([0-9]+)" info 0)))
     (if g
         (let* ((r (nth 1 g))
-               (n (string->number (substring-bytes (cadr entry) (car r) (cadr r)))))
+               (n (string->number (substring-bytes info (car r) (cadr r)))))
           (if (and n (> n 0)) n morg-babel-csv-preview-lines))
         morg-babel-csv-preview-lines)))
 
@@ -173,18 +173,20 @@
         (string-join (reverse out) "\n")
         (loop (cdr lines) (- left 1) (cons (car lines) out)))))
 
-(define (morg-babel-csv-source buf entry body)
-  (let ((target (morg-tangle-target entry)))
+(define (morg-babel-csv-source buf info body)
+  ;; morg-tangle-target reads an entry's line; the info string is that line
+  ;; without its backticks, which the regex never needed
+  (let ((target (morg-tangle-target (list 0 info))))
     (if target
         (let ((path (morg-tangle-path buf target)))
           (if (file-exists? path) (read-file path) body))
         body)))
 
-(define (morg-babel-preview-csv! buf entry fstart body)
-  (result-block-insert! buf fstart
+(define (morg-babel-preview-csv! buf b body)
+  (result-block-insert! buf (nth 0 b)
     (morg-babel-csv-first-lines
-      (morg-babel-csv-source buf entry body)
-      (morg-babel-csv-limit entry))
+      (morg-babel-csv-source buf (nth 2 b) body)
+      (morg-babel-csv-limit (nth 2 b)))
     "result-csv"))
 
 ;;; --- finding the block again -------------------------------------------------
@@ -200,12 +202,11 @@
   (filter (lambda (o) (string-prefix? "run-block:" (caddr o)))
           (buffer-overlays buf)))
 
-(define (morg-babel-track! buf scan fstart)
+(define (morg-babel-track! buf b)
   (set! *morg-babel-track-n* (+ *morg-babel-track-n* 1))
-  (let ((id (string-append "run-block:" (number->string *morg-babel-track-n*)))
-        (close-end (morg-block-close-end scan buf fstart)))
+  (let ((id (string-append "run-block:" (number->string *morg-babel-track-n*))))
     (overlay-set! buf 'run-block
-      (cons (list fstart close-end id) (morg-babel--track-ranges buf)))
+      (cons (list (nth 0 b) (nth 1 b) id) (morg-babel--track-ranges buf)))
     id))
 
 (define (morg-babel-untrack! buf id)
@@ -231,12 +232,12 @@
               (message (string-append "Executed " lang " block")))
             (message (string-append "The " lang " block is gone: " out))))))
 
-(define (morg-babel-start! buf scan fstart lang body)
-  (let ((id (morg-babel-track! buf scan fstart))
+(define (morg-babel-start! buf b lang body)
+  (let ((id (morg-babel-track! buf b))
         (key (list lang body))
         (runner (morg-babel-runner lang)))
     (morg-babel-claim! buf key)
-    (result-block-insert! buf fstart morg-babel-running-text)
+    (result-block-insert! buf (nth 0 b) morg-babel-running-text)
     (*morg-babel-shell* runner body
       (lambda (out) (morg-babel-finish! buf id lang body out)))
     (list 'pending lang)))
@@ -251,11 +252,11 @@
       (morg-babel-finish! buf id lang body
         (morg-babel-scheme-pretty (cadr evaluated)) "result-scheme"))))
 
-(define (morg-babel-start-scheme! buf scan fstart lang body)
-  (let ((id (morg-babel-track! buf scan fstart))
+(define (morg-babel-start-scheme! buf b lang body)
+  (let ((id (morg-babel-track! buf b))
         (key (list lang body)))
     (morg-babel-claim! buf key)
-    (result-block-insert! buf fstart morg-babel-running-text)
+    (result-block-insert! buf (nth 0 b) morg-babel-running-text)
     (*morg-babel-scheme* body
       (lambda (ok evaluated)
         (morg-babel-finish-scheme! buf id lang body ok evaluated)))
@@ -288,12 +289,12 @@
 (define (morg-babel-thinking-text model)
   (if model (string-append "thinking: " model) "thinking"))
 
-(define (morg-babel-start-llm! buf scan fstart lang body)
-  (let ((id (morg-babel-track! buf scan fstart))
+(define (morg-babel-start-llm! buf b lang body)
+  (let ((id (morg-babel-track! buf b))
         (key (list lang body))
         (model (morg-babel-buffer-model buf)))
     (morg-babel-claim! buf key)
-    (result-block-insert! buf fstart (morg-babel-thinking-text model))
+    (result-block-insert! buf (nth 0 b) (morg-babel-thinking-text model))
     (*morg-babel-llm* body model
       (lambda (answer) (morg-babel-finish! buf id lang body answer)))
     (list 'pending lang)))
@@ -303,33 +304,33 @@
 ;;; (RUN BUF SCAN FSTART ENTRY LANG BODY) -> (ok LANG), (pending LANG),
 ;;; or (error MSG).
 
-(define (morg-babel--shell-run buf scan fstart e lang body)
+(define (morg-babel--shell-run buf b lang body)
   (cond
-    ((morg-babel-sync? e)
-     (result-block-insert! buf fstart
+    ((morg-babel-sync? (nth 2 b))
+     (result-block-insert! buf (nth 0 b)
        (morg-babel-run-shell (morg-babel-runner lang) body))
      (list 'ok lang))
     ((member (list lang body) (morg-babel-inflight buf))
      (list 'error (string-append "The " lang " block already runs")))
-    (else (morg-babel-start! buf scan fstart lang body))))
+    (else (morg-babel-start! buf b lang body))))
 
-(define (morg-babel--scheme-run buf scan fstart e lang body)
+(define (morg-babel--scheme-run buf b lang body)
   (cond
-    ((morg-babel-sync? e)
-     (result-block-insert! buf fstart
+    ((morg-babel-sync? (nth 2 b))
+     (result-block-insert! buf (nth 0 b)
        (morg-babel-scheme-pretty (eval-string body)) "result-scheme")
      (list 'ok lang))
     ((member (list lang body) (morg-babel-inflight buf))
      (list 'error "The scheme block already runs"))
-    (else (morg-babel-start-scheme! buf scan fstart lang body))))
+    (else (morg-babel-start-scheme! buf b lang body))))
 
-(define (morg-babel--llm-run buf scan fstart e lang body)
+(define (morg-babel--llm-run buf b lang body)
   (if (member (list lang body) (morg-babel-inflight buf))
       (list 'error (string-append "The " lang " block already asks"))
-      (morg-babel-start-llm! buf scan fstart lang body)))
+      (morg-babel-start-llm! buf b lang body)))
 
-(define (morg-babel--csv-run buf scan fstart e lang body)
-  (morg-babel-preview-csv! buf e fstart body)
+(define (morg-babel--csv-run buf b lang body)
+  (morg-babel-preview-csv! buf b body)
   (list 'ok lang))
 
 ;;; --- the bundled runner kinds ------------------------------------------------
@@ -359,23 +360,19 @@
   'run morg-babel--csv-run)
 
 (define (morg-babel-execute buf pos)
-  (let* ((scan (morg-scan buf))
-         (a (morg-block-open scan pos)))
-    (if (not a)
+  (let ((b (block-at buf pos)))
+    (if (not b)
         (list 'error "Point is not in a code block")
-        (let* ((e (morg-entry-at scan a))
-               (lang (morg-info e)))
+        (let ((lang (block-lang b)))
           (cond
             ((equal? lang "") (list 'error "The block names no language"))
             ((not (fence-kind-runnable? lang))
              (list 'error (string-append "A " lang " block does not run")))
             (else
-              (let* ((body-r (morg-block-body scan buf a))
-                     (body (substring-bytes (buffer-text buf)
-                                            (car body-r) (cadr body-r)))
-                     (run (fence-kind-run lang)))
+              (let ((body (or (block-text-at buf (nth 3 b) (nth 4 b)) ""))
+                    (run (fence-kind-run lang)))
                 (if run
-                    (run buf scan a e lang body)
+                    (run buf b lang body)
                     (list 'error (string-append "No runner for " lang))))))))))
 
 (define-command "morg-babel" "Run the Morg code block at point and replace its result block"

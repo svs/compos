@@ -120,6 +120,78 @@
           (block--slice b head (- (length b) tail))
           (block--slice a (- (length a) tail) (length a)))))
 
+;;; --- finding blocks by the grammar -------------------------------------------
+;;; The markdown grammar parses a fenced block as one node, so a block is
+;;; found by tree-sitter where the reader's grammar is loaded: one
+;;; (START END INFO BODY-START BODY-END) per block, END at the closing
+;;; fence's last byte, INFO the whole info string (language and args).
+;;; Where no grammar is installed, the morg scan answers with the same
+;;; shape, line-walked.
+
+(define block--query
+  "(fenced_code_block (info_string)? @info (code_fence_content)? @body) @block")
+
+(define (block--ts-list text)
+  (let loop ((hits (ts-query-string "markdown" text block--query))
+             (cur #f) (acc '()))
+    (if (null? hits)
+        (reverse (if cur (cons cur acc) acc))
+        (let* ((h (car hits)) (cap (car h)) (s (cadr h)) (e (caddr h)))
+          (cond
+            ((equal? cap "block")
+             (let ((e2 (if (and (> e s)
+                                (equal? (substring-bytes text (- e 1) e) "\n"))
+                           (- e 1)
+                           e)))
+               (loop (cdr hits) (list s e2 "" e2 e2)
+                     (if cur (cons cur acc) acc))))
+            ((and cur (equal? cap "info"))
+             (loop (cdr hits)
+                   (list (nth 0 cur) (nth 1 cur)
+                         (substring-bytes text s e)
+                         (nth 3 cur) (nth 4 cur))
+                   acc))
+            ((and cur (equal? cap "body"))
+             (loop (cdr hits)
+                   (list (nth 0 cur) (nth 1 cur) (nth 2 cur) s e)
+                   acc))
+            (else (loop (cdr hits) cur acc)))))))
+
+(define (block--scan-list buf)
+  (let ((scan (morg-scan buf)))
+    (map (lambda (b)
+           (let* ((start (nth 0 b))
+                  (open-line (cadr (morg-entry-at scan start)))
+                  (close-end (morg-block-close-end scan buf start))
+                  (info (string-trim
+                          (string-append (nth 1 b) " "
+                                         (morg-fence-args open-line)))))
+             (list start close-end info (nth 2 b) (nth 3 b))))
+         (morg-blocks scan buf))))
+
+(define (block-list buf)
+  (if (member "markdown" (ts-langs))
+      (block--ts-list (buffer-text buf))
+      (block--scan-list buf)))
+
+;; the block containing POS, or #f. A pos on either fence belongs to it.
+(define (block-at buf pos)
+  (let loop ((bs (block-list buf)))
+    (cond ((null? bs) #f)
+          ((and (<= (nth 0 (car bs)) pos) (<= pos (nth 1 (car bs))))
+           (car bs))
+          (else (loop (cdr bs))))))
+
+;; the block's language: the first word of its info string
+(define (block-lang b)
+  (let ((info (string-trim (nth 2 b))))
+    (car (append (string-split info " ") (list "")))))
+
+(public! 'block-list
+  "(block-list BUF) — every fenced block as (START END INFO BODY-START BODY-END), found by the markdown grammar, or by the scan where no grammar is loaded")
+(public! 'block-at
+  "(block-at BUF POS) — the fenced block containing POS, or #f")
+
 (public! 'block-body
   "(block-body BLOCK) — the text between BLOCK's fences; a block without both fences is returned whole")
 (public! 'block-diff-parts

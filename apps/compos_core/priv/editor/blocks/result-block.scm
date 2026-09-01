@@ -16,26 +16,32 @@
 (effects! '(write))
 
 
-;; Return the result block after CLOSE-END, or #f.
-(define (result-block--find scan buf close-end)
-  (let loop ((es scan))
-    (cond ((null? es) #f)
-          ((<= (car (car es)) close-end) (loop (cdr es)))
-          (else
-            (let* ((e (car es)) (k (morg-kind e)))
-              (cond ((and (equal? k 'text) (equal? (string-trim (cadr e)) ""))
-                     (loop (cdr es)))
-                    ((and (equal? k 'open)
-                          (member (morg-info e) '("result" "result-scheme" "result-csv")))
-                     (list (car e) (morg-block-close-end scan buf (car e))))
-                    (else #f)))))))
+;; the kinds a result fence wears
+(define result-block--kinds '("result" "result-scheme" "result-csv"))
 
-;; The scan is read here, not passed in: a result written when a command
-;; ends describes a document that moved since the command started.
+;; the result block after CLOSE-END with only blank text between, as
+;; (START END), or #f
+(define (result-block--find buf blocks close-end)
+  (let loop ((bs blocks))
+    (cond ((null? bs) #f)
+          ((<= (nth 0 (car bs)) close-end) (loop (cdr bs)))
+          (else
+            (let* ((b (car bs))
+                   (between (or (block-text-at buf (min (+ close-end 1) (nth 0 b))
+                                              (nth 0 b))
+                                "x")))
+              (if (and (equal? (string-trim between) "")
+                       (member (block-lang b) result-block--kinds))
+                  (list (nth 0 b) (nth 1 b))
+                  #f))))))
+
+;; The blocks are read here, not passed in: a result written when a
+;; command ends describes a document that moved since the command started.
 (define (result-block-insert! buf fstart out &optional result-lang)
-  (let* ((scan (morg-scan buf))
-         (close-end (morg-block-close-end scan buf fstart))
-         (existing (result-block--find scan buf close-end))
+  (let* ((blocks (block-list buf))
+         (here (assoc fstart blocks))
+         (close-end (if here (nth 1 here) fstart))
+         (existing (result-block--find buf blocks close-end))
          (norm (if (or (equal? out "") (string-suffix? "\n" out))
                    out
                    (string-append out "\n")))
@@ -49,9 +55,6 @@
                (at (min (+ close-end 1) size)))
           (buffer-insert! buf at
             (string-append (if (>= close-end size) "\n" "") res))))))
-
-;;; --- running -----------------------------------------------------------------
-
 
 (public! 'result-block-insert!
   "(result-block-insert! BUF FSTART OUT [KIND]) — land OUT in the result fence below the block at FSTART, replacing the one that stands there")

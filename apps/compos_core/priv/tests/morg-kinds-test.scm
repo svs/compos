@@ -146,8 +146,8 @@
   "one registration gives a fence its runner and its result landing"
   (lambda ()
     (define-fence-kind! "zz-shout" "Uppercases the body."
-      'run (lambda (buf scan fstart e lang body)
-             (result-block-insert! buf fstart (string-upcase body))
+      'run (lambda (buf b lang body)
+             (result-block-insert! buf (nth 0 b) (string-upcase body))
              (list 'ok lang)))
     (t--kinds! "```zz-shout\nquiet\n```\n" 14)
     (let ((r (morg-babel-execute t--kinds-buf 14)))
@@ -165,4 +165,16 @@
                  "the diff header wears the diff-file header face")
     (check-true! (member (list 24 29 "org-meta") (buffer-overlays t--kinds-buf))
                  "a kind with no fence-face keeps the plain marker face")
+    (t--kinds-done!)))
+
+(deftest 'the-two-block-finders-agree
+  "the grammar and the scan answer the same blocks, byte for byte"
+  (lambda ()
+    (t--kinds! "text\n\n```diff theirs x\n-a\n+b\n```\nmid\n\n```scheme :sync\n(+ 1 2)\n```\n" 0)
+    (if (member "markdown" (ts-langs))
+        (check-equal! (block--ts-list (buffer-text t--kinds-buf))
+                      (block--scan-list t--kinds-buf)
+                      "one truth, two readers")
+        (check-true! (pair? (block--scan-list t--kinds-buf))
+                     "no grammar here: the scan answers alone"))
     (t--kinds-done!)))

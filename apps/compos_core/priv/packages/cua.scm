@@ -39,6 +39,19 @@
     (set-mark! (buffer-size (current-buffer)))
     (goto-char! 0)))
 
+;; a page is a screenful of visual rows, the same page the plain motion
+;; steps by (visual-page!)
+(define (cua--select-page! dir)
+  (let ((n (- (window-rows) 2)))
+    (or (visual-row-move! dir #t n)
+        (begin (unless (mark) (set-mark! (point)))
+               (move-lines n (if (> dir 0) next-line! previous-line!))))))
+
+(define-command "cua-select-page-up" "Extend the region one screen up"
+  (lambda () (cua--select-page! -1)))
+(define-command "cua-select-page-down" "Extend the region one screen down"
+  (lambda () (cua--select-page! 1)))
+
 ;; the bindings cua-mode installs everywhere; a local map still wins
 (define cua--keys
   '(("S-<left>" "cua-select-backward")
@@ -54,7 +67,12 @@
     ("s-S-<left>" "cua-select-line-start")
     ("s-S-<right>" "cua-select-line-end")
     ("s-S-<up>" "cua-select-buffer-start")
-    ("s-S-<down>" "cua-select-buffer-end")))
+    ("s-S-<down>" "cua-select-buffer-end")
+    ("C-S-<home>" "cua-select-buffer-start")
+    ("C-S-<end>" "cua-select-buffer-end")
+    ("S-<prior>" "cua-select-page-up")
+    ("S-<next>" "cua-select-page-down")
+    ("s-a" "cua-select-all")))
 
 (define *cua-mode* #f)
 
@@ -75,7 +93,13 @@
         (begin (cua--enable!) (message "CUA mode enabled")))))
 
 (mode-doc! "cua-mode"
-  "Shift with a motion key extends the region, in every buffer. The commands are cua-select-*; writing-mode binds the same commands in its own buffers.")
+  "Shift with a motion key extends the region, in every buffer. On by default; M-x cua-mode toggles it. The commands are cua-select-*; writing-mode binds the same commands in its own buffers.")
+
+;; Shift-selection is on from the start. On an editable surface the
+;; browser answers the plain Shift motions natively; these bindings answer
+;; where the server owns the caret, and for the chords the client sends as
+;; keys (the Cmd arrows).
+(cua--enable!)
 
 (catalog-meta! 'command "cua-mode" 'domain 'editing 'effects '(write))
 (public! 'cua-mode-on? "(cua-mode-on?) — #t when cua-mode binds the Shift selections globally")

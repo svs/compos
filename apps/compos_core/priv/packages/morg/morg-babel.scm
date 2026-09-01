@@ -31,20 +31,23 @@
   "The maximum line width for a Scheme Babel result when a list can wrap."
   'group 'writing 'type 'number)
 
-;; Markdown language -> the interpreter that runs the temporary file.
+;; Markdown language -> the interpreter that runs the temporary file, and
+;; the tree-sitter language that paints the body. Each row becomes one
+;; fence-kind registration below.
 (define *morg-babel-runners*
-  '(("sh" "sh") ("bash" "bash") ("zsh" "zsh") ("shell" "sh")
-    ("python" "python3") ("py" "python3")
-    ("elixir" "elixir") ("exs" "elixir")
-    ("js" "node") ("javascript" "node") ("node" "node")
-    ("ruby" "ruby")))
+  '(("sh" "sh" "bash") ("bash" "bash" "bash") ("zsh" "zsh" "bash")
+    ("shell" "sh" "bash")
+    ("python" "python3" "python") ("py" "python3" "python")
+    ("elixir" "elixir" "elixir") ("exs" "elixir" "elixir")
+    ("js" "node" "javascript") ("javascript" "node" "javascript")
+    ("node" "node" "javascript")
+    ("ruby" "ruby" "ruby")))
 
 ;; What a result fence holds while its command runs.
 (define morg-babel-running-text "running")
 
 (define (morg-babel-runner lang)
-  (let ((r (assoc (string-downcase lang) *morg-babel-runners*)))
-    (and r (cadr r))))
+  (fence-kind-get lang 'interpreter #f))
 
 ;; BODY as one shell command. The shell folds stderr into the output.
 (define (morg-babel-script runner body)
@@ -328,6 +331,66 @@
       (lambda (answer) (morg-babel-finish! buf idx lang body answer)))
     (list 'pending lang)))
 
+;;; --- the kind runners --------------------------------------------------------
+;;; Each runner is the 'run of a fence-kind registration. The contract:
+;;; (RUN BUF SCAN FSTART ENTRY LANG BODY) -> (ok LANG), (pending LANG),
+;;; or (error MSG).
+
+(define (morg-babel--shell-run buf scan fstart e lang body)
+  (cond
+    ((morg-babel-sync? e)
+     (morg-babel-insert-result! buf fstart
+       (morg-babel-run-shell (morg-babel-runner lang) body))
+     (list 'ok lang))
+    ((member (list lang body) (morg-babel-inflight buf))
+     (list 'error (string-append "The " lang " block already runs")))
+    (else (morg-babel-start! buf scan fstart lang body))))
+
+(define (morg-babel--scheme-run buf scan fstart e lang body)
+  (cond
+    ((morg-babel-sync? e)
+     (morg-babel-insert-result! buf fstart
+       (morg-babel-scheme-pretty (eval-string body)) "result-scheme")
+     (list 'ok lang))
+    ((member (list lang body) (morg-babel-inflight buf))
+     (list 'error "The scheme block already runs"))
+    (else (morg-babel-start-scheme! buf scan fstart lang body))))
+
+(define (morg-babel--llm-run buf scan fstart e lang body)
+  (if (member (list lang body) (morg-babel-inflight buf))
+      (list 'error (string-append "The " lang " block already asks"))
+      (morg-babel-start-llm! buf scan fstart lang body)))
+
+(define (morg-babel--csv-run buf scan fstart e lang body)
+  (morg-babel-preview-csv! buf e fstart body)
+  (list 'ok lang))
+
+;;; --- the bundled runner kinds ------------------------------------------------
+
+(for-each
+  (lambda (row)
+    (define-fence-kind! (car row)
+      (string-append "Runs the body through " (cadr row)
+                     " and lands the output in a result fence.")
+      'interpreter (cadr row) 'ts-lang (caddr row)
+      'run morg-babel--shell-run))
+  *morg-babel-runners*)
+
+(define-fence-kind! "scheme"
+  "Runs the body as editor Scheme in a shared-world task. Add :sync to hold the editor."
+  'run morg-babel--scheme-run)
+
+(for-each
+  (lambda (name)
+    (define-fence-kind! name
+      "Sends the body to the buffer's model. The answer lands in the result fence."
+      'run morg-babel--llm-run))
+  morg-babel-llm-languages)
+
+(define-fence-kind! "csv"
+  "Previews the first body lines as a result-csv fence. :lines N sets the count."
+  'run morg-babel--csv-run)
+
 (define (morg-babel-execute buf pos)
   (let* ((scan (morg-scan buf))
          (a (morg-block-open scan pos)))
@@ -336,40 +399,17 @@
         (let* ((e (morg-entry-at scan a))
                (lang (morg-info e)))
           (cond
-            ((member lang '("result" "result-scheme" "result-csv"))
-             (list 'error "A result block does not run"))
             ((equal? lang "") (list 'error "The block names no language"))
+            ((not (fence-kind-runnable? lang))
+             (list 'error (string-append "A " lang " block does not run")))
             (else
               (let* ((body-r (morg-block-body scan buf a))
                      (body (substring-bytes (buffer-text buf)
-                                            (car body-r) (cadr body-r))))
-                (cond
-                  ((equal? (string-downcase lang) "csv")
-                   (morg-babel-preview-csv! buf e a body)
-                   (list 'ok lang))
-                  ((and (equal? (string-downcase lang) "scheme")
-                        (morg-babel-sync? e))
-                   (morg-babel-insert-result! buf a
-                     (morg-babel-scheme-pretty (eval-string body)) "result-scheme")
-                   (list 'ok lang))
-                  ((equal? (string-downcase lang) "scheme")
-                   (if (member (list lang body) (morg-babel-inflight buf))
-                       (list 'error "The scheme block already runs")
-                       (morg-babel-start-scheme! buf scan a lang body)))
-                  ((morg-babel-llm? lang)
-                   (if (member (list lang body) (morg-babel-inflight buf))
-                       (list 'error
-                             (string-append "The " lang " block already asks"))
-                       (morg-babel-start-llm! buf scan a lang body)))
-                  ((not (morg-babel-runner lang))
-                   (list 'error (string-append "No runner for " lang)))
-                  ((morg-babel-sync? e)
-                   (morg-babel-insert-result! buf a
-                     (morg-babel-run-shell (morg-babel-runner lang) body))
-                   (list 'ok lang))
-                  ((member (list lang body) (morg-babel-inflight buf))
-                   (list 'error (string-append "The " lang " block already runs")))
-                  (else (morg-babel-start! buf scan a lang body))))))))))
+                                            (car body-r) (cadr body-r)))
+                     (run (fence-kind-run lang)))
+                (if run
+                    (run buf scan a e lang body)
+                    (list 'error (string-append "No runner for " lang))))))))))
 
 (define-command "morg-babel" "Run the Morg code block at point and replace its result block"
   (lambda ()

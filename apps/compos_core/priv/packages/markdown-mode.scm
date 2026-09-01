@@ -290,10 +290,8 @@
        (list (list start (+ start len) "md-marker") (list start (+ start len) "row-fence")))
       ((equal? k 'code)
        (cons (list start (+ start len) "row-code")
-             (cond ((equal? (morg-info e) "result-scheme") '())
-                   ((member (morg-info e) '("result" "result-csv"))
-                    (list (list start (+ start len) "morg-result")))
-                   (else '()))))
+             (let ((f (fence-kind-line-face (morg-info e) line)))
+               (if f (list (list start (+ start len) f)) '()))))
       ;; a rule: the dashes step back, the row draws the line
       ((not (null? (re-find* "^(---+|\\*\\*\\*+|___+)[ \t]*$" line)))
        (list (list start (+ start len) "md-marker") (list start (+ start len) "row-hr")))
@@ -332,37 +330,9 @@
                                 (cadr e)))
                         (list '() #f) scan)))
            (table-spans (markdown--table-spans scan))
-           (blocks (morg-blocks scan buf))
-           (code-spans
-             (fold
-               (lambda (acc b)
-                 (let* ((lang (cadr b))
-                        (bs (caddr b))
-                        (be (car (cdr (cdr (cdr b)))))
-                        (tsl (morg-ts-lang lang)))
-                   (if (and tsl (> be bs))
-                       (append acc
-                         (map (lambda (sp)
-                                (list (+ bs (car sp)) (+ bs (cadr sp))
-                                      (string-append "ts-" (caddr sp))))
-                              (ts-highlight-string tsl (substring-bytes text bs be))))
-                       acc)))
-               '()
-               blocks))
-           (csv-header-spans
-             (fold
-               (lambda (acc b)
-                 (let ((lang (cadr b)) (bs (caddr b))
-                       (be (car (cdr (cdr (cdr b))))))
-                   (if (and (equal? lang "result-csv") (> be bs))
-                       (let* ((body (substring-bytes text bs be))
-                              (header (car (split-lines body))))
-                         (cons (list bs (+ bs (string-byte-length header)) "morg-bold") acc))
-                       acc)))
-               '()
-               blocks)))
+           (block-spans (fence-kind-body-spans text (morg-blocks scan buf))))
       (overlay-set! buf 'markdown
-        (append line-spans table-spans code-spans csv-header-spans)))))
+        (append line-spans table-spans block-spans)))))
 
 ;;; --- the mode ----------------------------------------------------------------
 

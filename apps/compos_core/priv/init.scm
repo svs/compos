@@ -52,6 +52,7 @@
 (load-bundled-package "lsp.scm")
 (load-bundled-package "mcp-hub.scm")
 (load-bundled-package "mcp.scm")
+(load-bundled-package "morg/morg-kinds.scm")
 (load-bundled-package "morg.scm")
 (load-bundled-package "markdown-mode.scm")
 (load-bundled-package "cua.scm")

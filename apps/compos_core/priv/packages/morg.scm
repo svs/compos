@@ -558,17 +558,9 @@
 (defface! 'morg-italic 'style "italic")
 (defface! 'morg-result 'fg "#8a857a")
 
-;; markdown info string -> loaded tree-sitter language, or #f
-(define *morg-ts-aliases*
-  '(("js" "javascript") ("jsx" "javascript") ("ts" "typescript")
-    ("py" "python") ("sh" "bash") ("shell" "bash")
-    ("ex" "elixir") ("exs" "elixir") ("result-scheme" "scheme")))
-
-(define (morg-ts-lang lang)
-  (let* ((l (string-downcase lang))
-         (a (assoc l *morg-ts-aliases*))
-         (l2 (if a (cadr a) l)))
-    (if (member l2 (ts-langs)) l2 #f)))
+;; markdown info string -> loaded tree-sitter language, or #f.
+;; The fence-kind registry (morg-kinds.scm) owns the mapping.
+(define (morg-ts-lang lang) (fence-kind-ts-lang lang))
 
 ;; spans for one scan entry; block BODIES are highlighted per block in
 ;; morg-refontify!, because a multi-line construct needs the whole body.
@@ -601,10 +593,8 @@
       ((equal? k 'close) (list (list start (+ start len) "org-meta")))
       ((equal? k 'directive) (list (list start (+ start len) "org-meta")))
       ((equal? k 'code)
-       (cond ((equal? (morg-info e) "result-scheme") '())
-             ((member (morg-info e) '("result" "result-csv"))
-              (list (list start (+ start len) "morg-result")))
-             (else '())))
+       (let ((f (fence-kind-line-face (morg-info e) line)))
+         (if f (list (list start (+ start len) f)) '())))
       (else
        (append
          (map (lambda (r) (append (abs r) '("morg-code")))
@@ -624,35 +614,8 @@
            (text (buffer-text buf))
            (line-spans
              (fold (lambda (acc e) (append acc (morg-line-spans e))) '() scan))
-           (code-spans
-             (fold
-               (lambda (acc b)
-                 (let* ((lang (cadr b))
-                        (bs (caddr b))
-                        (be (car (cdr (cdr (cdr b)))))
-                        (tsl (morg-ts-lang lang)))
-                   (if (and tsl (> be bs))
-                       (append acc
-                         (map (lambda (sp)
-                                (list (+ bs (car sp)) (+ bs (cadr sp))
-                                      (string-append "ts-" (caddr sp))))
-                              (ts-highlight-string tsl (substring-bytes text bs be))))
-                       acc)))
-               '()
-               (morg-blocks scan buf)))
-           (csv-header-spans
-             (fold
-               (lambda (acc b)
-                 (let ((lang (cadr b)) (bs (caddr b))
-                       (be (car (cdr (cdr (cdr b))))))
-                   (if (and (equal? lang "result-csv") (> be bs))
-                       (let* ((body (substring-bytes text bs be))
-                              (header (car (split-lines body))))
-                         (cons (list bs (+ bs (string-byte-length header)) "morg-bold") acc))
-                       acc)))
-               '()
-               (morg-blocks scan buf))))
-      (overlay-set! buf 'morg (append line-spans code-spans csv-header-spans)))))
+           (block-spans (fence-kind-body-spans text (morg-blocks scan buf))))
+      (overlay-set! buf 'morg (append line-spans block-spans)))))
 
 ;;; --- change hook -------------------------------------------------------------
 

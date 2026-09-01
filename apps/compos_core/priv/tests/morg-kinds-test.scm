@@ -80,17 +80,6 @@
     (check-equal! (fence-kind-ts-lang "zz-no-such-grammar") #f
                   "an unknown info string with no grammar paints nothing")))
 
-(deftest 'a-chip-names-the-block
-  "the preview's fence chip comes from the registry, not a hand-kept list"
-  (lambda ()
-    (check-equal! (fence-kind-chip "diff") "diff" "a paint kind is its name")
-    (check-equal! (fence-kind-chip "sh") "sh"
-                  "the run hint is its own clickable chip, not the name's tail")
-    (check-equal! (fence-kind-chip "") #f "a bare fence draws no chip")
-    (define-fence-kind! "zz-chipped" "Chip test." 'chip "ZZ" 'runnable #f)
-    (check-equal! (fence-kind-chip "zz-chipped") "ZZ"
-                  "a declared chip overrides the name")))
-
 (deftest 'a-one-sided-live-diff-takes-no-diff-paint
   "the fence args say theirs or ours, and prose stays prose"
   (lambda ()

@@ -161,67 +161,23 @@
     (check-true! (t--md-has? '(18 24 "row-oli")) "an ordered item keeps its number")
     (t--md-done!)))
 
-(deftest 'a-fence-line-wears-its-kind-as-a-chip
-  "the backticks step back and a chrome chip names the block"
+(deftest 'a-fence-with-a-fence-face-shows-its-own-line
+  "the backticks step back; the kind, state and keys stay, in the face"
   (lambda ()
-    (t--md-fresh! "```diff\n+x\n```\n")
-    ;; the open fence is hidden and its chip stands behind its last byte
-    (check-true! (t--md-has? '(0 7 "md-marker")) "the open fence steps back")
-    (check-true! (t--md-has? (chrome-after 7 "diff" "md-fence-chip f-diff-file"))
-                 "the chip stands at the fence line's end, in the kind's color")
-    ;; a bare fence (the close) draws no chip of its own
-    (check-equal!
-      (length (filter (lambda (o) (and (= (car o) (cadr o)))) 
-                      (buffer-overlays t--md-buf)))
-      1 "one chip: the close fence draws none")
+    (t--md-fresh! "```diff theirs\n+x\n```\n")
+    (check-true! (t--md-has? '(0 3 "md-marker")) "the backticks step back")
+    (check-true! (t--md-has? '(3 14 "diff-file"))
+                 "the info string stays visible in the kind's face")
     (t--md-done!)))
 
-(deftest 'a-rewrite-chip-carries-its-instruction
-  "a kind with chip-args says what the block was asked, in the preview"
+(deftest 'a-plain-fence-stays-concealed
+  "a kind with no fence-face hides its fence line as before"
   (lambda ()
-    (t--md-fresh! "```rewrite use sentence case\nbody\n```\n")
-    (check-true!
-      (member (chrome-after 28 "rewrite · use sentence case" "md-fence-chip")
-              (buffer-overlays t--md-buf))
-      "the chip holds the kind and the instruction")
-    (t--md-done!)))
-
-(deftest 'the-live-blocks-chrome-comes-from-its-record
-  "the instruction and the clickable verbs stand only on the waiting block"
-  (lambda ()
-    ;; a plain pasted diff: no record, no chrome beyond the chip
-    (t--md-fresh! "```diff all\n-a\n```\n")
+    (t--md-fresh! "```scheme\n(+ 1 1)\n```\n")
+    (check-true! (t--md-has? '(0 9 "md-marker")) "the whole line steps back")
     (check-false!
-      (pair? (filter (lambda (o) (or (string-contains? (caddr o) "md-fence-verb")
-                                     (string-contains? (caddr o) "md-fence-note")))
+      (pair? (filter (lambda (o) (= (car o) (cadr o)))
                      (buffer-overlays t--md-buf)))
-      "a pasted diff wears no verbs and no note")
-    ;; a waiting rewrite: the record supplies the instruction chip and the
-    ;; clickable verbs (their keys bound by the hold, read from the keymap)
-    (t--md-fresh! "One.\n\nTwo.\n")
-    (llm-rewrite--propose! t--md-buf 6 10 "Two." "Deux." "say it in French")
-    (markdown-refontify! t--md-buf)
-    (let ((chrome (map (lambda (o) (caddr o))
-                       (filter (lambda (o) (= (car o) (cadr o)))
-                               (buffer-overlays t--md-buf)))))
-      (check-true!
-        (pair? (filter (lambda (c) (string-contains? c "md-fence-note"))
-                       chrome))
-        "the instruction stands as a note chip")
-      (check-true!
-        (pair? (filter (lambda (c)
-                         (string-contains? c "fence-cmd:llm-rewrite-accept"))
-                       chrome))
-        "and the accept verb is a click away"))
-    (llm-rewrite--release! t--md-buf)
+      "and nothing synthesized stands beside it: the affordances are text")
     (t--md-done!)))
 
-(deftest 'a-runnable-fence-offers-a-clickable-run-chip
-  "the run chip carries the block's own position, so nothing moves point"
-  (lambda ()
-    (t--md-fresh! "text\n```sh\necho hi\n```\n")
-    (check-true!
-      (member (chrome-after 10 "run" "md-fence-verb" "fence-run:5")
-              (buffer-overlays t--md-buf))
-      "the sh fence offers run at its own start")
-    (t--md-done!)))

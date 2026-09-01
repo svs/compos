@@ -74,42 +74,35 @@ rows. It does not run.
 - `llm-mode--blocks` in `editor.scm` derives its reply-landing blocks from
   `morg-scan`, the one fence-aware line scanner.
 
+## The diff block
+
+A live diff block holds two texts and waits for a decision. It is
+indicated by text alone:
+
+    ```diff <state> <keys from the keymap>
+    ...the state's rendering...
+    ```
+
+The states are `theirs` (their text, the default), `all` (the unified
+diff), and `ours`. Changing state is a redraw of the same two texts.
+The fence line carries every affordance: the kind, the state, and the
+keys, read from the buffer's keymap at land time. Accepting lands theirs
+where ours stood; rejecting removes the block; an edited block is your
+text and stays. The block lives in `priv/editor/blocks/diff-block.scm`;
+llm-rewrite (`priv/editor/blocks/llm-rewrite.scm`) is one creator — a
+merge tool or an agent can call `diff-block-propose!` the same way.
+
+The preview adds no affordance. It renders the same text fancy: the
+backticks step back, and a kind that declares a `'fence-face` keeps its
+info string visible in that face. A plain patch pasted as ` ```diff ` is
+the other diff type: kind paint only, no record, no verbs.
+
 ## Chrome
 
-A chrome attachment draws text the buffer does not hold: a badge, a key
-hint, a chip. Build one with `(chrome-before POS TEXT CLASS)` or
-`(chrome-after POS TEXT CLASS)` and put it in an `overlay-set!` range list
-beside the face spans. It stands at one byte, holds zero bytes, and the
-caret walks over it: the renderer draws a zero-length island
-(`class="chrome-seg CLASS"`, `data-len="0"`), so the client's byte mapping
-skips it and the saved file never sees it.
-
-A fourth argument is a click id: `(chrome-after POS TEXT CLASS "verb:7")`
-routes a click through the same `on-block-click!` registry a block tree
-uses, so chrome verbs and block verbs are one vocabulary.
-
-Chrome is preview policy. The bare source view stays bare text: a block
-announces itself with real delimiters there, and the fancy drawing waits
-for `preview-mode`. llm-rewrite is the model case: it holds two texts and
-lands a live diff block with three views — theirs (the rewrite alone, the
-default, a ` ```rewrite DIRECTIVE ` fence), all (the unified diff, a
-` ```diff DIRECTIVE ` fence the diff kind paints), and ours (the passage
-alone). The kind follows the view, so diff paint never touches prose.
-Accept strips the fences by structure. A plain ` ```diff ` from git is
-the other diff type: inert paint, no verbs, no record.
-
-A kind can declare `'verbs` — `((COMMAND LABEL) ...)`. The preview shows
-them beside the chip as `KEY label · KEY label`, keys read live from the
-buffer's keymap, so the hints stand exactly while the verbs work and
-vanish with the decision.
-
-The chip is the first chrome user: in the preview rows, the open fence of a
-named block steps back and a chip names its kind — `diff`, or
-`sh · C-c C-c run`. The chip text comes from `(fence-kind-chip LANG
-[RUN-KEY])`: the declared `'chip`, else the info string; a runnable kind
-adds the run key. The painter reads the key from the buffer's own keymap
-with `(key-for-command "morg-babel" BUF)`, so a rebind changes the page
-and no string hard-codes a key.
+A chrome attachment draws text the buffer does not hold, as a zero-length
+island (`chrome-before` / `chrome-after` in an `overlay-set!` range list;
+optional click id through the block-click registry). The mechanism stands;
+no bundled feature uses it, because affordances come from the text.
 
 ## Debt this registry names
 

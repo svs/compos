@@ -293,24 +293,7 @@ defmodule Compos.Ui.Layouts do
              a zero-length island the caret walks over */
           .chrome-seg { user-select: none; white-space: nowrap; }
           .chrome-seg[phx-click] { cursor: pointer; }
-          .chrome-seg.md-fence-chip {
-            display: inline-block; padding: 0 7px; margin: 0 4px; border-radius: 9px;
-            border: 1px solid var(--border-bg, rgba(0,0,0,0.14));
-            background: var(--hl-line-bg, rgba(0,0,0,0.03));
-            font-family: var(--font-mono); font-size: .72em; line-height: 1.6;
-          }
-          /* zero specificity: a kind's own face class (f-*) wins the color */
-          :where(.chrome-seg.md-fence-chip) { color: var(--dim-fg, #8a857a); }
-          .chrome-seg.md-fence-note {
-            display: inline-block; margin: 0 4px;
-            color: var(--dim-fg, #8a857a); font-style: italic;
-            font-size: .78em;
-          }
-          .chrome-seg.md-fence-verbs {
-            display: inline-block; margin: 0 4px;
-            color: var(--faint-fg, var(--dim-fg, #8a857a));
-            font-family: var(--font-mono); font-size: .72em; line-height: 1.6;
-          }
+
           /* the block shapes of a drawn page: the marker stepped back, the
              row takes the shape */
           .line.row-li .line-content { padding-left: 1.4em; }

@@ -271,7 +271,7 @@
 ;; the spans for one scan entry; block BODIES are highlighted per block in
 ;; markdown-refontify!, because a multi-line construct needs the whole body.
 ;; PREV is the text of the line above, or #f on the first line.
-(define (markdown--line-spans e &optional prev run-key buf fence-args)
+(define (markdown--line-spans e &optional prev fence-args)
   (let* ((start (car e)) (line (cadr e)) (k (morg-kind e))
          (len (string-byte-length line))
          (embed (re-groups md--embed-pattern line 0)))
@@ -284,50 +284,22 @@
       ((equal? k 'heading) (md--heading start line e len))
       ;; a row face (row-*) shapes the whole row: the page reads it off the
       ;; line, not the segment
-      ;; the fence line steps back and its kind stays. The chip names the
-      ;; block (and its arguments, the verb phrases trimmed off); the run
-      ;; hint and each live verb are their own clickable chips, keys read
-      ;; from the buffer's keymap, commands routed through block-click.
+      ;; the fence line renders as its own text: the backticks step back,
+      ;; and a kind with a fence-face keeps its info string visible in that
+      ;; face — the block's state and keys are text, and the preview draws
+      ;; them. A kind with no fence-face conceals the line as before.
       ((equal? k 'open)
        (let* ((lang (morg-info e))
               (le (+ start len))
-              (chip (fence-kind-chip lang))
-              (args (and chip
-                         (fence-kind-get lang 'chip-args #f)
-                         (morg-fence-args line)))
-              (text (if (and (string? args) (not (equal? args "")))
-                        (string-append chip " · " args)
-                        chip))
-              (run (and chip (fence-kind-runnable? lang) (fence-kind-run lang)))
-              (verbs (if buf (fence-kind-verb-chips lang buf) '()))
-              ;; the header chip wears the kind's own fence-face color
-              (chip-class
-                (let ((ff (fence-kind-get lang 'fence-face #f)))
-                  (if ff
-                      (string-append "md-fence-chip f-" ff)
-                      "md-fence-chip"))))
-         (append
-           (list (list start le "md-marker")
-                 (list start le "row-fence"))
-           (if text
-               (list (chrome-after le text chip-class))
-               '())
-           (if run
-               (list (chrome-after le
-                       (if (and (string? run-key) (not (equal? run-key "")))
-                           (string-append run-key " run")
-                           "run")
-                       "md-fence-verb"
-                       (string-append "fence-run:" (number->string start))))
-               '())
-           (map (lambda (v)
-                  (chrome-after le (cadr v) "md-fence-verb"
-                                (string-append "fence-cmd:" (car v))))
-                verbs)
-           (map (lambda (c)
-                  (chrome-after le (car c) (cadr c)
-                                (if (pair? (cddr c)) (caddr c) #f)))
-                (if buf (fence-kind-head-chrome lang buf start) '())))))
+              (ff (fence-kind-get lang 'fence-face #f))
+              (m (re-groups "^([ \t]*```[ \t]*)" line 0))
+              (info-start (if m (cadr (nth 1 m)) 0)))
+         (if ff
+             (list (md--span start 0 info-start "md-marker")
+                   (md--span start info-start len ff)
+                   (list start le "row-fence"))
+             (list (list start le "md-marker")
+                   (list start le "row-fence")))))
       ((equal? k 'close)
        (list (list start (+ start len) "md-marker") (list start (+ start len) "row-fence")))
       ((equal? k 'code)
@@ -364,9 +336,6 @@
   (when (buffer-exists? buf)
     (let* ((scan (morg-scan buf))
            (text (buffer-text buf))
-           ;; the fence chip names the run key from this buffer's own
-           ;; keymap, so a rebind changes the page and no test pins a key
-           (run-key (key-for-command "morg-babel" buf))
            ;; each line sees the line above it: a caption is known by the
            ;; picture over it
            ;; each line sees the line above it and the open fence's args,
@@ -380,7 +349,7 @@
                                              (else #f))))
                             (list (append (car acc)
                                           (markdown--line-spans
-                                            e (cadr acc) run-key buf
+                                            e (cadr acc)
                                             (and (equal? k 'code) args)))
                                   (cadr e)
                                   args)))

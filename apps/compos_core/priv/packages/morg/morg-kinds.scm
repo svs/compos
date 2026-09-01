@@ -139,38 +139,6 @@
     '()
     blocks))
 
-;; The chip the preview draws on a block's fence line: the declared 'chip,
-;; else the info string itself. A fence with no language draws no chip.
-;; The run hint and the verbs are their own clickable chips beside it.
-(define (fence-kind-chip lang &optional run-key)
-  (and (string? lang)
-       (not (equal? lang ""))
-       (or (fence-kind-get lang 'chip #f) (string-downcase lang))))
-
-;; The verbs a kind offers on its block, one (COMMAND TEXT) per verb whose
-;; command has a key in BUF's keymap — so the chips stand exactly where
-;; the verbs work, and each one is a click away.
-(define (fence-kind-verb-chips lang buf)
-  (let ((vs (fence-kind-get lang 'verbs #f)))
-    (if (not (pair? vs))
-        '()
-        (reverse
-          (fold (lambda (acc v)
-                  (let ((k (key-for-command (car v) buf)))
-                    (if (equal? k "")
-                        acc
-                        (cons (list (car v) (string-append k " " (cadr v)))
-                              acc))))
-                '() vs)))))
-
-;; extra chips a kind draws on its open fence at START, from its own
-;; state: ((TEXT CLASS [CLICK]) ...). Chrome is preview display only:
-;; the system works whole in a text-only view, and the preview is a
-;; fancy rendering of the same block.
-(define (fence-kind-head-chrome lang buf start)
-  (let ((f (fence-kind-get lang 'head-chrome #f)))
-    (if (procedure? f) (f buf start) '())))
-
 (define (describe-fence-kind name)
   (let ((k (fence-kind name)))
     (and k
@@ -212,77 +180,24 @@
         ((string-prefix? "index " line) "diff-file")
         (else #f)))
 
-;; The rewrite verbs, drawn as preview chrome on the one block a live
-;; record owns — never on a plain pasted diff.
-(define fence-kind--rewrite-verbs
-  '(("llm-rewrite-accept" "keeps it")
-    ("llm-rewrite-reject" "puts it back")
-    ("llm-rewrite-diff" "changes the view")))
-
-;; The chips a live diff wears: the instruction that made it (preview
-;; only), and one clickable chip per verb whose command has a key here —
-;; the keys stand in every view. They stand only on the block the record
-;; owns.
-(define (fence-kind--diff-head-chrome buf start)
-  (let ((p (and (boundp 'llm-rewrite-pending) (llm-rewrite-pending buf))))
-    (if (not p)
-        '()
-        (let ((spans (llm-rewrite--spans buf)))
-          (if (not (and spans (= start (nth 2 spans))))
-              '()
-              (append
-                (list (list (llm-rewrite--view-name (llm-rewrite--view p))
-                            "md-fence-chip f-diff-file")
-                      (list (llm-rewrite--instruction p) "md-fence-note"))
-                (fold (lambda (acc v)
-                        (let ((k (key-for-command (car v) buf)))
-                          (if (equal? k "")
-                              acc
-                              (append acc
-                                (list (list (string-append k " " (cadr v))
-                                            "md-fence-verb"
-                                            (string-append "fence-cmd:" (car v))))))))
-                      '() fence-kind--rewrite-verbs)))))))
-
 (define-fence-kind! "diff"
   "A unified diff. Its lines wear the diff faces. It does not run."
   'runnable #f 'ts-lang #f 'line-face fence-kind--diff-line-face
-  'fence-face "diff-file"
-  'head-chrome fence-kind--diff-head-chrome)
+  'fence-face "diff-file")
 
 (define-fence-kind! "patch"
   "A unified diff. The same paint as the diff kind."
   'runnable #f 'ts-lang #f 'line-face fence-kind--diff-line-face)
 
 (define-fence-kind! "rewrite"
-  "A rewrite waiting for a decision. llm-rewrite lands one below the passage; its own keys decide it. It does not run."
-  'runnable #f 'ts-lang #f 'chip-args #t
-  'verbs fence-kind--rewrite-verbs)
+  "A legacy name for a hand-written waiting block. It does not run."
+  'runnable #f 'ts-lang #f)
 
 ;; Info strings whose tree-sitter grammar wears another name and that
 ;; morg-babel gives no runner.
 (for-each
   (lambda (row) (fence-kind-merge! (car row) 'ts-lang (cadr row)))
   '(("jsx" "javascript") ("ts" "typescript") ("ex" "elixir")))
-
-;;; --- preview actions ---------------------------------------------------------
-;;; A chip click is the verb it names. A verb chip carries its command; a
-;;; run chip carries the block's own position, so nothing moves point.
-
-(on-block-click! 'fence-kinds
-  (lambda (buf id)
-    (cond
-      ((string-prefix? "fence-cmd:" id)
-       (with-current-buffer buf
-         (lambda ()
-           (run-command (substring-bytes id 10 (string-byte-length id)))))
-       #t)
-      ((string-prefix? "fence-run:" id)
-       (let ((pos (string->number
-                    (substring-bytes id 10 (string-byte-length id)))))
-         (when (number? pos) (morg-babel-execute buf pos)))
-       #t)
-      (else #f))))
 
 ;;; --- the public vocabulary ---------------------------------------------------
 
@@ -294,8 +209,6 @@
   "(describe-fence-kind NAME) — the kind's doc, runnability, tree-sitter language, and declared keys, or #f")
 (public! 'fence-kind-ts-lang
   "(fence-kind-ts-lang LANG) — the loaded tree-sitter language for a fence body, or #f")
-(public! 'fence-kind-chip
-  "(fence-kind-chip LANG) — the chip the preview draws on the fence line, or #f for a bare fence")
 
 ;; Do not leak this extension's catalog context into the next package.
 (package! morg-kinds-parent-package morg-kinds-parent-namespace)

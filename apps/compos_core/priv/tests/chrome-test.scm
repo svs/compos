@@ -1,107 +1,65 @@
-;;; chrome-test.scm --- the browser side of C-x b, without a browser.
+;;; chrome-test.scm --- chrome attachments hold no bytes and move no caret.
 ;;;
-;;; A tab you can switch to belongs in the same list as the buffers. What
-;;; the editor decides — which tabs are beside you, what a tab's label is,
-;;; what order the list comes in — is Scheme, and needs no extension
-;;; attached.
-;;;
-;;; The wire itself stays in ExUnit: those tests attach a stub socket
-;;; process and assert on the frames the daemon pushes to it, which is
-;;; message passing and not policy. So does the one that splits the frame
-;;; and looks for the window showing a buffer — how a split lands differs
-;;; between a live frame and a test one, the same reason notmuch's
-;;; two-pane tests stayed.
+;;; A chrome attachment is display, not text. Point arithmetic, motion
+;;; commands, and saving must behave exactly as if it were not there.
 
 (domain! 'testing)
-(effects! '(read))
-
-(define t--chrome-tabs
-  '((id 7 title "Hacker News" url "https://news.ycombinator.com/" window 1)
-    (id 8 title "Luma" url "https://luma.com/" window 2)))
-
 (effects! '(write))
 
-;; The frame locals are the person's own browser state. Put them back.
-(define (t--chrome-with-frame thunk)
-  (let ((win (frame-local 'chrome-window))
-        (visit (frame-local 'chrome-tab-visit)))
-    (let ((out (thunk)))
-      (set-frame-local! 'chrome-window win)
-      (set-frame-local! 'chrome-tab-visit visit)
-      out)))
+(define t--chrome-buf "zz-chrome-motion.md")
 
-(deftest 'the-chord-handler-names-the-keys-it-would-dispatch
-  "the formatting half, with no dispatcher involved"
+(define (t--chrome! text point)
+  (test-buffer! t--chrome-buf text)
+  (with-current-buffer t--chrome-buf (lambda () (set-mode! "morg-mode")))
+  (when (minor-mode-on? t--chrome-buf "preview-mode")
+    (disable-minor-mode! t--chrome-buf "preview-mode"))
+  (buffer-goto! t--chrome-buf point)
+  t--chrome-buf)
+
+(define (t--chrome-run! cmd)
+  (with-current-buffer t--chrome-buf (lambda () (run-command cmd))))
+
+(define (t--chrome-point) (buffer-point t--chrome-buf))
+
+(deftest 'motion-walks-past-chrome-as-if-it-were-not-there
+  "left and right cross a chrome boundary one byte at a time"
   (lambda ()
-    (check-equal! (chrome--get (chrome--chord '()) 'message) "" "no keys, nothing to say")))
+    (t--chrome! "abcdef\n" 2)
+    (overlay-set! t--chrome-buf 'chrome
+      (list (chrome-after 3 "chip" "zz-badge")))
+    (t--chrome-run! "forward-char")
+    (check-equal! (t--chrome-point) 3 "one byte forward, onto the boundary")
+    (t--chrome-run! "forward-char")
+    (check-equal! (t--chrome-point) 4 "one byte past it, never inside it")
+    (t--chrome-run! "backward-char")
+    (t--chrome-run! "backward-char")
+    (check-equal! (t--chrome-point) 2 "and the same road back")
+    (buffer-kill! t--chrome-buf)))
 
-(deftest 'a-buffer-that-is-not-on-screen-has-no-window-to-go-to
-  "the answer is #f, so the caller opens one instead of guessing"
+(deftest 'line-motion-crosses-a-chrome-bearing-line
+  "up and down land where they land in a buffer with no chrome"
   (lambda ()
-    (test-buffer! "*zz-off-screen*" "")
-    (check-false! (chrome--window-showing "*zz-off-screen*") "nothing shows it")
-    (buffer-kill! "*zz-off-screen*")))
+    (t--chrome! "alpha\nbravo\ncharlie\n" 14)
+    (overlay-set! t--chrome-buf 'chrome
+      (list (chrome-after 5 "chip" "zz-badge")
+            (chrome-before 6 "mark" "zz-badge")))
+    (t--chrome-run! "previous-line")
+    (check-equal! (t--chrome-point) 8 "up keeps the column")
+    (t--chrome-run! "previous-line")
+    (check-equal! (t--chrome-point) 2 "up again, past the chrome line")
+    (t--chrome-run! "next-line")
+    (t--chrome-run! "next-line")
+    (check-equal! (t--chrome-point) 14 "and down comes back")
+    (buffer-kill! t--chrome-buf)))
 
-(deftest 'tabs-in-this-window-become-candidates-marked-with-a-globe
-  "C-x b offers what is beside you, not every tab in the browser"
+(deftest 'chrome-never-touches-the-text
+  "an attachment lives in the overlays; the bytes stay the bytes"
   (lambda ()
-    (t--chrome-with-frame
-      (lambda ()
-        (check-equal! (car (chrome--tab-candidate (car t--chrome-tabs)))
-                      "🌐 Hacker News" "the label carries a globe")
-
-        ;; only this browser window's tabs
-        (set-frame-local! 'chrome-window 1)
-        (check-equal! (length (chrome--here-tabs t--chrome-tabs)) 1 "one tab is beside us")
-
-        ;; and the label round-trips back to the tab it names
-        (check-equal! (chrome--get (chrome--tab-by-label "🌐 Luma" t--chrome-tabs) 'id) 8
-                      "the label finds its tab")
-        (check-false! (chrome--tab-by-label "*scratch*" t--chrome-tabs)
-                      "and a buffer name finds none")))))
-
-(deftest 'buffers-keep-the-editors-order-and-a-tab-leads-only-while-it-is-latest
-  "the editor's own MRU ring is the truth; a second history here drifted"
-  (lambda ()
-    ;; Buffers are not tracked here at all — buffer-list-mru is the
-    ;; editor's ring, updated wherever a buffer is displayed. The only
-    ;; fact kept is the tab you were last in and the ring's head at that
-    ;; moment; if the head has not moved, nothing has been displayed since
-    ;; and the tab still leads.
-    (t--chrome-with-frame
-      (lambda ()
-        (let ((bufs '(("*a*" "") ("*b*" "")))
-              (tabs '(("🌐 News" ""))))
-          (set-frame-local! 'chrome-tab-visit #f)
-          (check-equal! (map car (chrome--order bufs tabs))
-                        '("*a*" "*b*" "🌐 News") "with no tab visit, the buffers lead")
-
-          ;; a keypress in the tab: it is now the most recent place
-          (chrome--note-tab! "🌐 News")
-          (check-true! (chrome--tab-is-latest?) "the tab is the latest place")
-          (check-equal! (map car (chrome--order bufs tabs))
-                        '("🌐 News" "*a*" "*b*") "so it leads the list")
-
-          ;; display a buffer and the ring's head moves, so the tab is
-          ;; stale — the editor's own ring invalidates it, with no
-          ;; bookkeeping here
-          (test-buffer! "*zz-ring-moved*" "")
-          (switch-to-buffer! "*zz-ring-moved*")
-          (check-false! (chrome--tab-is-latest?) "the tab is no longer latest")
-          (check-equal! (map car (chrome--order bufs tabs))
-                        '("*a*" "*b*" "🌐 News") "and the buffers lead again")
-          (buffer-kill! "*zz-ring-moved*"))))))
-
-;;; --- the editor page's own DOM -------------------------------------------------
-;;; dom-measure sends one JS probe to the editor tab. The probe string is
-;;; pure policy, so the test reads the string instead of a browser.
-
-(deftest 'the-dom-probe-names-the-selector-and-caps-the-rows
-  "the selector rides quoted, the limit bounds the loop, rects are measured"
-  (lambda ()
-    (let ((js (dom-measure-js ".line.row-table" 7)))
-      (check-contains! js "querySelectorAll(\".line.row-table\")"
-                       "the selector is a quoted JS string")
-      (check-contains! js ">= 7" "the limit caps the element count")
-      (check-contains! js "getBoundingClientRect" "the probe measures rects")
-      (check-contains! js "getComputedStyle" "and the computed style"))))
+    (t--chrome! "body\n" 0)
+    (overlay-set! t--chrome-buf 'chrome
+      (list (chrome-after 4 "chip" "zz-badge")))
+    (check-equal! (buffer-text t--chrome-buf) "body\n"
+                  "the text holds no chrome")
+    (check-equal! (buffer-size t--chrome-buf) 5
+                  "and no byte was added")
+    (buffer-kill! t--chrome-buf)))

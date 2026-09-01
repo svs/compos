@@ -187,19 +187,31 @@
     (t--md-done!)))
 
 (deftest 'the-verbs-stand-on-the-fence-only-while-they-work
-  "a kind's verb hints name live keys, and say nothing where none are bound"
+  "a kind's verb chips name live keys and carry their commands as clicks"
   (lambda ()
-    (t--md-fresh! "```rewrite fix it\nbody\n```\n")
+    (t--md-fresh! "```diff fix it · theirs\nbody\n```\n")
     (check-false!
-      (pair? (filter (lambda (o) (string-contains? (caddr o) "md-fence-verbs"))
+      (pair? (filter (lambda (o) (string-contains? (caddr o) "md-fence-verb"))
                      (buffer-overlays t--md-buf)))
-      "no verb has a key here, so no hint stands")
-    ;; bind a dummy key to one verb and repaint: the hint appears with it
+      "no verb has a key here, so no chip stands")
+    ;; bind a dummy key to one verb and repaint: the chip appears with it,
+    ;; clickable through the block-click registry
     (local-set-key* t--md-buf "<f9> y" "llm-rewrite-accept")
     (markdown-refontify! t--md-buf)
     (check-true!
-      (member (chrome-after 17 "<f9> y keeps it" "md-fence-verbs")
+      (member (chrome-after 24 "<f9> y keeps it" "md-fence-verb"
+                            "fence-cmd:llm-rewrite-accept")
               (buffer-overlays t--md-buf))
-      "the bound verb stands with its own key")
+      "the bound verb stands with its key and its command")
     (local-unset-key* t--md-buf "<f9> y")
+    (t--md-done!)))
+
+(deftest 'a-runnable-fence-offers-a-clickable-run-chip
+  "the run chip carries the block's own position, so nothing moves point"
+  (lambda ()
+    (t--md-fresh! "text\n```sh\necho hi\n```\n")
+    (check-true!
+      (member (chrome-after 10 "run" "md-fence-verb" "fence-run:5")
+              (buffer-overlays t--md-buf))
+      "the sh fence offers run at its own start")
     (t--md-done!)))

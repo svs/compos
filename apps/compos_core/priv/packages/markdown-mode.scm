@@ -271,7 +271,7 @@
 ;; the spans for one scan entry; block BODIES are highlighted per block in
 ;; markdown-refontify!, because a multi-line construct needs the whole body.
 ;; PREV is the text of the line above, or #f on the first line.
-(define (markdown--line-spans e &optional prev run-key buf)
+(define (markdown--line-spans e &optional prev run-key buf fence-args)
   (let* ((start (car e)) (line (cadr e)) (k (morg-kind e))
          (len (string-byte-length line))
          (embed (re-groups md--embed-pattern line 0)))
@@ -284,35 +284,45 @@
       ((equal? k 'heading) (md--heading start line e len))
       ;; a row face (row-*) shapes the whole row: the page reads it off the
       ;; line, not the segment
-      ;; the fence line steps back and its kind stays: a chrome chip names
-      ;; the block where the backticks were. A kind that declares chip-args
-      ;; keeps its arguments on the chip — a rewrite says what it was asked.
-      ;; A kind with verbs shows them with their keys, read live from the
-      ;; buffer's keymap, so the hints stand exactly while the verbs work.
+      ;; the fence line steps back and its kind stays. The chip names the
+      ;; block (and its arguments, the verb phrases trimmed off); the run
+      ;; hint and each live verb are their own clickable chips, keys read
+      ;; from the buffer's keymap, commands routed through block-click.
       ((equal? k 'open)
        (let* ((lang (morg-info e))
-              (chip (fence-kind-chip lang run-key))
+              (le (+ start len))
+              (chip (fence-kind-chip lang))
               (args (and chip
                          (fence-kind-get lang 'chip-args #f)
-                         (morg-fence-args line)))
+                         (fence-kind-chip-args lang (morg-fence-args line))))
               (text (if (and (string? args) (not (equal? args "")))
                         (string-append chip " · " args)
                         chip))
-              (verbs (and buf (fence-kind-verbs lang buf))))
+              (run (and chip (fence-kind-runnable? lang) (fence-kind-run lang)))
+              (verbs (if buf (fence-kind-verb-chips lang buf) '())))
          (append
-           (list (list start (+ start len) "md-marker")
-                 (list start (+ start len) "row-fence"))
+           (list (list start le "md-marker")
+                 (list start le "row-fence"))
            (if text
-               (list (chrome-after (+ start len) text "md-fence-chip"))
+               (list (chrome-after le text "md-fence-chip"))
                '())
-           (if verbs
-               (list (chrome-after (+ start len) verbs "md-fence-verbs"))
-               '()))))
+           (if run
+               (list (chrome-after le
+                       (if (and (string? run-key) (not (equal? run-key "")))
+                           (string-append run-key " run")
+                           "run")
+                       "md-fence-verb"
+                       (string-append "fence-run:" (number->string start))))
+               '())
+           (map (lambda (v)
+                  (chrome-after le (cadr v) "md-fence-verb"
+                                (string-append "fence-cmd:" (car v))))
+                verbs))))
       ((equal? k 'close)
        (list (list start (+ start len) "md-marker") (list start (+ start len) "row-fence")))
       ((equal? k 'code)
        (cons (list start (+ start len) "row-code")
-             (let ((f (fence-kind-line-face (morg-info e) line)))
+             (let ((f (fence-kind-line-face (morg-info e) line fence-args)))
                (if f (list (list start (+ start len) f)) '()))))
       ;; a rule: the dashes step back, the row draws the line
       ((not (null? (re-find* "^(---+|\\*\\*\\*+|___+)[ \t]*$" line)))
@@ -349,12 +359,22 @@
            (run-key (key-for-command "morg-babel" buf))
            ;; each line sees the line above it: a caption is known by the
            ;; picture over it
+           ;; each line sees the line above it and the open fence's args,
+           ;; so a caption knows its picture and a body line its block
            (line-spans
              (car (fold (lambda (acc e)
-                          (list (append (car acc)
-                                        (markdown--line-spans e (cadr acc) run-key buf))
-                                (cadr e)))
-                        (list '() #f) scan)))
+                          (let* ((k (morg-kind e))
+                                 (args (cond ((equal? k 'open)
+                                              (morg-fence-args (cadr e)))
+                                             ((equal? k 'code) (caddr acc))
+                                             (else #f))))
+                            (list (append (car acc)
+                                          (markdown--line-spans
+                                            e (cadr acc) run-key buf
+                                            (and (equal? k 'code) args)))
+                                  (cadr e)
+                                  args)))
+                        (list '() #f #f) scan)))
            (table-spans (markdown--table-spans scan))
            (block-spans (fence-kind-body-spans text (morg-blocks scan buf))))
       (overlay-set! buf 'markdown

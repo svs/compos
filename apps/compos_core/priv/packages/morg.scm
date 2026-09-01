@@ -575,7 +575,7 @@
 ;; morg-refontify!, because a multi-line construct needs the whole body.
 ;; This is the plain source view: every marker stays visible. preview-mode
 ;; draws the page in place, and its painter replaces this when it is on.
-(define (morg-line-spans e)
+(define (morg-line-spans e &optional fence-args)
   (let* ((start (car e)) (line (cadr e)) (k (morg-kind e))
          (len (string-byte-length line))
          (abs (lambda (r) (list (+ start (car r)) (+ start (cadr r))))))
@@ -602,7 +602,7 @@
       ((equal? k 'close) (list (list start (+ start len) "org-meta")))
       ((equal? k 'directive) (list (list start (+ start len) "org-meta")))
       ((equal? k 'code)
-       (let ((f (fence-kind-line-face (morg-info e) line)))
+       (let ((f (fence-kind-line-face (morg-info e) line fence-args)))
          (if f (list (list start (+ start len) f)) '())))
       (else
        (append
@@ -621,8 +621,20 @@
              (not (equal? (buffer-local buf 'markdown-paint) #t)))
     (let* ((scan (morg-scan buf))
            (text (buffer-text buf))
+           ;; each body line sees its open fence's arguments, so a kind
+           ;; can paint by them (a live diff's one-sided views stay prose)
            (line-spans
-             (fold (lambda (acc e) (append acc (morg-line-spans e))) '() scan))
+             (car (fold (lambda (acc e)
+                          (let* ((k (morg-kind e))
+                                 (args (cond ((equal? k 'open)
+                                              (morg-fence-args (cadr e)))
+                                             ((equal? k 'code) (cadr acc))
+                                             (else #f))))
+                            (list (append (car acc)
+                                          (morg-line-spans
+                                            e (and (equal? k 'code) args)))
+                                  args)))
+                        (list '() #f) scan)))
            (block-spans (fence-kind-body-spans text (morg-blocks scan buf))))
       (overlay-set! buf 'morg (append line-spans block-spans)))))
 

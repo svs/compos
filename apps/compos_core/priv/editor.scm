@@ -6642,18 +6642,19 @@
 ;; The three views of a live diff: theirs is the rewrite alone (the
 ;; default), ours is the passage alone, all is the unified diff of the
 ;; two. A record from before the renaming reads as theirs.
-(define (llm-rewrite--render p view)
+(define (llm-rewrite--render p view buf)
   (cond ((equal? view 'all)
          (llm-rewrite-diff-block (llm-rewrite--old p) (llm-rewrite--new p)
-                                 (llm-rewrite--instruction p)))
+                                 (llm-rewrite--instruction p) buf))
         ((equal? view 'ours)
          (llm-rewrite-ours-block (llm-rewrite--old p)
-                                 (llm-rewrite--instruction p)))
+                                 (llm-rewrite--instruction p) buf))
         (else (llm-rewrite-theirs-block (llm-rewrite--new p)
-                                        (llm-rewrite--instruction p)))))
+                                        (llm-rewrite--instruction p) buf))))
 
 ;; what the block should hold right now
-(define (llm-rewrite--rendered p) (llm-rewrite--render p (llm-rewrite--view p)))
+(define (llm-rewrite--rendered p buf)
+  (llm-rewrite--render p (llm-rewrite--view p) buf))
 
 ;; Where the two texts are now. Both overlays follow the rope, so an edit
 ;; above them moves both; the record answers before they exist.
@@ -6702,13 +6703,16 @@
       (or (llm-rewrite--text-at buf (nth 2 spans) (nth 3 spans)) "")
       view)))
 
+(define (llm-rewrite--bind-keys! buf)
+  (local-set-key* buf "C-c y" "llm-rewrite-accept")
+  (local-set-key* buf "C-c k" "llm-rewrite-reject")
+  (local-set-key* buf "C-c d" "llm-rewrite-diff"))
+
 (define (llm-rewrite--hold! buf spans tail old new directive view)
   (buffer-set-local! buf 'llm-rewrite
     (append spans (list tail old new directive view llm-rewrite--format)))
   (desktop-skip! buf 'llm-rewrite)
-  (local-set-key* buf "C-c y" "llm-rewrite-accept")
-  (local-set-key* buf "C-c k" "llm-rewrite-reject")
-  (local-set-key* buf "C-c d" "llm-rewrite-diff")
+  (llm-rewrite--bind-keys! buf)
   (llm-rewrite--paint! buf spans view))
 
 (define (llm-rewrite--release! buf)
@@ -6799,11 +6803,27 @@
         (string-join (reverse (cdr (reverse (cdr lines)))) "\n")
         block)))
 
-(define (llm-rewrite-theirs-block new directive)
-  (llm-rewrite--fence "rewrite" directive new))
+;; The fence line is the block's own header: the instruction, the view,
+;; and the keys that decide it, as real text. The bare buffer shows it,
+;; the preview chips it, and accepting strips it with the fences. The
+;; keys come from BUF's keymap; a verb with no key there says nothing.
+(define (llm-rewrite--fence-args buf directive view)
+  (let* ((verb (lambda (cmd label)
+                 (let ((k (key-for-command cmd buf)))
+                   (if (equal? k "") #f (string-append k " " label)))))
+         (parts (filter (lambda (x) x)
+                        (list directive
+                              (llm-rewrite--view-name view)
+                              (verb "llm-rewrite-accept" "keeps it")
+                              (verb "llm-rewrite-reject" "puts it back")
+                              (verb "llm-rewrite-diff" "changes the view")))))
+    (string-join parts " · ")))
 
-(define (llm-rewrite-ours-block old directive)
-  (llm-rewrite--fence "rewrite" (string-append directive " · ours") old))
+(define (llm-rewrite-theirs-block new directive buf)
+  (llm-rewrite--fence "diff" (llm-rewrite--fence-args buf directive 'theirs) new))
+
+(define (llm-rewrite-ours-block old directive buf)
+  (llm-rewrite--fence "diff" (llm-rewrite--fence-args buf directive 'ours) old))
 
 ;; the passage and the rewrite as head context, one hunk, tail context
 (define (llm-rewrite--parts old new)
@@ -6817,9 +6837,9 @@
           (llm-rewrite--slice b head (- (length b) tail))
           (llm-rewrite--slice a (- (length a) tail) (length a)))))
 
-(define (llm-rewrite-diff-block old new directive)
+(define (llm-rewrite-diff-block old new directive buf)
   (let ((parts (llm-rewrite--parts old new)))
-    (llm-rewrite--fence "diff" directive
+    (llm-rewrite--fence "diff" (llm-rewrite--fence-args buf directive 'all)
       (string-join
         (append
           (llm-rewrite--marked " " (nth 0 parts))
@@ -6837,7 +6857,9 @@
     (if (not (equal? here original))
         (message "Rewrite dropped — that passage has changed")
         (let* ((tail (llm-rewrite--tail-for buf end))
-               (block (llm-rewrite-theirs-block new directive))
+               ;; the keys bind first: the fence line names them
+               (_ (llm-rewrite--bind-keys! buf))
+               (block (llm-rewrite-theirs-block new directive buf))
                (bstart (+ end 2))
                (bend (+ bstart (string-byte-length block))))
           (buffer-insert! buf end (string-append "\n\n" block tail))
@@ -6860,14 +6882,14 @@
          (block (and spans (llm-rewrite--text-at buf (nth 2 spans) (nth 3 spans)))))
     (cond
       ((not block) (message "The waiting rewrite is gone"))
-      ((not (equal? block (llm-rewrite--rendered p)))
+      ((not (equal? block (llm-rewrite--rendered p buf)))
        (message "The rewrite has been edited — the new version was dropped"))
       (else
         (let* ((view (llm-rewrite--view p))
                (next (append (llm-rewrite--slice p 0 6)
                              (list new directive view))))
           (llm-rewrite--put-block! buf p spans
-            (llm-rewrite--render next view) new directive view)
+            (llm-rewrite--render next view buf) new directive view)
           (message (string-append "Rewrite refined · "
                                   (key-for-command "llm-rewrite") " decides")))))))
 
@@ -6882,11 +6904,11 @@
       ((not block)
        (llm-rewrite--release! buf)
        (message "The waiting rewrite is gone"))
-      ((not (equal? block (llm-rewrite--rendered p)))
+      ((not (equal? block (llm-rewrite--rendered p buf)))
        (message "The rewrite has been edited — it stays as it is"))
       (else
         (llm-rewrite--put-block! buf p spans
-          (llm-rewrite--render p view)
+          (llm-rewrite--render p view buf)
           (llm-rewrite--new p) (llm-rewrite--instruction p) view)
         (message (string-append "Rewrite " (llm-rewrite--view-name view) " · "
                                 (key-for-command "llm-rewrite-diff" buf)
@@ -7023,7 +7045,7 @@
       ((not block)
        (llm-rewrite--release! buf)
        (message "The waiting rewrite is gone"))
-      ((not (equal? block (llm-rewrite--rendered p)))
+      ((not (equal? block (llm-rewrite--rendered p buf)))
        (message "The rewrite has been edited — it stays"))
       (else
         (let ((from (nth 1 spans))

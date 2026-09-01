@@ -103,11 +103,11 @@
     (and (string? t) (member t (ts-langs)) t)))
 
 ;; The face for one body line, or #f. A line-face function sees the line
-;; text; a body-face is one face for every line.
-(define (fence-kind-line-face lang line)
+;; text and the fence's arguments; a body-face is one face for every line.
+(define (fence-kind-line-face lang line &optional args)
   (let ((f (fence-kind-get lang 'line-face #f)))
     (if (procedure? f)
-        (f line)
+        (f line args)
         (fence-kind-get lang 'body-face #f))))
 
 (define (fence-kind-runnable? lang)
@@ -140,34 +140,40 @@
     blocks))
 
 ;; The chip the preview draws on a block's fence line: the declared 'chip,
-;; else the info string itself, with " · run" when the kind runs. A fence
-;; with no language draws no chip. RUN-KEY, when the caller reads one from
-;; the buffer's keymap, names the key ahead of the word.
+;; else the info string itself. A fence with no language draws no chip.
+;; The run hint and the verbs are their own clickable chips beside it.
 (define (fence-kind-chip lang &optional run-key)
   (and (string? lang)
        (not (equal? lang ""))
-       (let ((base (or (fence-kind-get lang 'chip #f) (string-downcase lang))))
-         (if (and (fence-kind-runnable? lang) (fence-kind-run lang))
-             (string-append base " · "
-               (if (and (string? run-key) (not (equal? run-key "")))
-                   (string-append run-key " run")
-                   "run"))
-             base))))
+       (or (fence-kind-get lang 'chip #f) (string-downcase lang))))
 
-;; The verbs a kind offers on its block, as "KEY label · KEY label". The
-;; keys come from BUF's own keymap, and a verb whose command has no key
-;; there says nothing — so the hints stand exactly where the verbs work.
-(define (fence-kind-verbs lang buf)
+;; the args as the chip shows them: a verb phrase leaves the chip, because
+;; the clickable verb chips carry it instead
+(define (fence-kind-chip-args lang args)
+  (let* ((vs (or (fence-kind-get lang 'verbs #f) '()))
+         (labels (map cadr vs))
+         (kept (filter
+                 (lambda (part)
+                   (not (fold (lambda (acc l) (or acc (string-suffix? l part)))
+                              #f labels)))
+                 (string-split args " · "))))
+    (string-join kept " · ")))
+
+;; The verbs a kind offers on its block, one (COMMAND TEXT) per verb whose
+;; command has a key in BUF's keymap — so the chips stand exactly where
+;; the verbs work, and each one is a click away.
+(define (fence-kind-verb-chips lang buf)
   (let ((vs (fence-kind-get lang 'verbs #f)))
-    (and (pair? vs)
-         (let ((parts
-                 (fold (lambda (acc v)
-                         (let ((k (key-for-command (car v) buf)))
-                           (if (equal? k "")
-                               acc
-                               (cons (string-append k " " (cadr v)) acc))))
-                       '() vs)))
-           (and (pair? parts) (string-join (reverse parts) " · "))))))
+    (if (not (pair? vs))
+        '()
+        (reverse
+          (fold (lambda (acc v)
+                  (let ((k (key-for-command (car v) buf)))
+                    (if (equal? k "")
+                        acc
+                        (cons (list (car v) (string-append k " " (cadr v)))
+                              acc))))
+                '() vs)))))
 
 (define (describe-fence-kind name)
   (let ((k (fence-kind name)))
@@ -193,8 +199,14 @@
   "A CSV preview below the block that made it. It does not run."
   'runnable #f 'body-face "morg-result" 'header-face "morg-bold")
 
-(define (fence-kind--diff-line-face line)
-  (cond ((string-prefix? "+++" line) "diff-file")
+;; A live diff's one-sided views (the fence args say theirs or ours) are
+;; prose: a dash there is a dash, and no line wears a diff face.
+(define (fence-kind--diff-line-face line &optional args)
+  (cond ((and (string? args)
+              (or (string-contains? args "· theirs")
+                  (string-contains? args "· ours")))
+         #f)
+        ((string-prefix? "+++" line) "diff-file")
         ((string-prefix? "---" line) "diff-file")
         ((string-prefix? "@@" line) "diff-hunk")
         ((string-prefix? "+" line) "diff-add")
@@ -230,6 +242,25 @@
 (for-each
   (lambda (row) (fence-kind-merge! (car row) 'ts-lang (cadr row)))
   '(("jsx" "javascript") ("ts" "typescript") ("ex" "elixir")))
+
+;;; --- preview actions ---------------------------------------------------------
+;;; A chip click is the verb it names. A verb chip carries its command; a
+;;; run chip carries the block's own position, so nothing moves point.
+
+(on-block-click! 'fence-kinds
+  (lambda (buf id)
+    (cond
+      ((string-prefix? "fence-cmd:" id)
+       (with-current-buffer buf
+         (lambda ()
+           (run-command (substring-bytes id 10 (string-byte-length id)))))
+       #t)
+      ((string-prefix? "fence-run:" id)
+       (let ((pos (string->number
+                    (substring-bytes id 10 (string-byte-length id)))))
+         (when (number? pos) (morg-babel-execute buf pos)))
+       #t)
+      (else #f))))
 
 ;;; --- the public vocabulary ---------------------------------------------------
 

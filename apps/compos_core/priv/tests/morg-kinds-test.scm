@@ -186,12 +186,12 @@
     (with-current-buffer t--kinds-buf
       (lambda ()
         (goto-char! 15)
-        (preview-newline!)
+        (run-command "preview-newline")
         (check-equal! (buffer-text t--kinds-buf) "text\n\n```scheme\n\n```\n"
                       "the close fence lands below")
         (check-equal! (point) 16 "and point stands in the body")
         ;; RET again inside the body is a plain newline
-        (preview-newline!)
+        (run-command "preview-newline")
         (check-equal! (buffer-text t--kinds-buf) "text\n\n```scheme\n\n\n```\n"
                       "the second RET keeps its meaning")))
     (t--kinds-done!)))

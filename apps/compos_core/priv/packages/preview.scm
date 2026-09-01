@@ -295,19 +295,15 @@
          (not (buffer-read-only? buf)))))
 
 (define (preview-newline!)
-  ;; a freshly typed open fence closes itself first (block.scm); every
-  ;; other RET keeps its meaning
-  (if (block-electric-close!)
-      #t
-      (let* ((p (point))
-             (ls (line-start-position (line-number-at-pos p)))
-             (line (line-text)))
-        (if (preview--literal-line? ls line)
-            (insert! "\n")
-            (let ((item (preview--next-marker line)))
-              (if item
-                  (preview--list-newline! line item)
-                  (insert! "\n")))))))
+  (let* ((p (point))
+         (ls (line-start-position (line-number-at-pos p)))
+         (line (line-text)))
+    (if (preview--literal-line? ls line)
+        (insert! "\n")
+        (let ((item (preview--next-marker line)))
+          (if item
+              (preview--list-newline! line item)
+              (insert! "\n"))))))
 (public! 'preview-newline!
   "(preview-newline!) — insert one newline in a rendered Markdown page"
   'interaction)
@@ -315,9 +311,13 @@
 (define-command "preview-newline"
   "Insert one newline in a rendered page"
   (lambda ()
-    (if (preview--markdown-edit?)
-        (preview-newline!)
-        (run-command "newline-or-send"))))
+    ;; a freshly typed open fence closes itself first, in any view — the
+    ;; block is text, and typing it works everywhere. Every other RET
+    ;; keeps its meaning.
+    (cond
+      ((block-electric-close!) #t)
+      ((preview--markdown-edit?) (preview-newline!))
+      (else (run-command "newline-or-send")))))
 
 ;; preview.scm loads after editor.scm, so this takes RET from the plain
 ;; newline and hands back to it for every buffer that is not a Markdown

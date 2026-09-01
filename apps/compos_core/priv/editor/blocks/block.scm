@@ -80,6 +80,12 @@
 ;;; of the document. RET at the end of that line closes the fence, stands
 ;;; point in the body, and makes sure the run key answers here.
 
+(define (block--find-in blocks bol)
+  (let loop ((bs blocks))
+    (cond ((null? bs) #f)
+          ((= (nth 0 (car bs)) bol) (car bs))
+          (else (loop (cdr bs))))))
+
 (define (block-electric-close!)
   (let* ((buf (current-buffer))
          (pos (point))
@@ -89,22 +95,35 @@
          (rest (substring-bytes text bol size))
          (nl (string-index rest "\n"))
          (eol (if nl (+ bol nl) size))
-         (line (substring-bytes text bol eol))
-         (b (and (= pos eol)
-                 (morg-fence-info line)
-                 (block-at buf pos))))
-    (if (not (and b (= (nth 0 b) bol)
-                  (let* ((btext (or (block-text-at buf (nth 0 b) (nth 1 b)) ""))
-                         (last (car (reverse (string-split btext "\n")))))
-                    (not (morg-fence-close? last)))))
+         (line (substring-bytes text bol eol)))
+    (if (not (and (= pos eol)
+                  (morg-fence-info line)
+                  ;; a chat's RET means send; its fences are message text
+                  (not (and (boundp 'chat-buffer?) (chat-buffer? buf)))))
         #f
-        (begin
-          (buffer-insert! buf pos "\n\n```")
-          (goto-char! (+ pos 1))
-          ;; the block's key answers here even off morg-mode
-          (unless (buffer-mode-is? buf "morg-mode")
-            (local-set-key* buf "C-c C-c" "morg-babel"))
-          #t))))
+        ;; the fence just typed may not have its newline yet — the RET
+        ;; being handled is that newline — so the grammar reads the text
+        ;; as it is about to be
+        (let* ((text2 (if (= eol size) (string-append text "\n") text))
+               (blocks (if (member "markdown" (ts-langs))
+                           (block--ts-list text2)
+                           (block--scan-list buf)))
+               (b (block--find-in blocks bol))
+               (unclosed
+                 (and b
+                      (let* ((btext (substring-bytes text2 (nth 0 b)
+                                      (min (nth 1 b) (string-byte-length text2))))
+                             (last (car (reverse (string-split btext "\n")))))
+                        (not (morg-fence-close? last))))))
+          (if (not unclosed)
+              #f
+              (begin
+                (buffer-insert! buf pos "\n\n```")
+                (goto-char! (+ pos 1))
+                ;; the block's key answers here even off morg-mode
+                (unless (buffer-mode-is? buf "morg-mode")
+                  (local-set-key* buf "C-c C-c" "morg-babel"))
+                #t))))))
 
 ;;; --- the verb keys -----------------------------------------------------------
 

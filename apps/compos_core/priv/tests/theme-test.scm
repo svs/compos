@@ -36,6 +36,18 @@
     (check-equal! (theme-test-face-attr 'tt-face 'fg) "#111111" "and the theme wins the colour")
     (theme-test-restore!)))
 
+(deftest 'the-default-face-size-is-the-setting-and-survives-a-theme
+  "buffer text reads at default-font-size in every theme"
+  (lambda ()
+    (check-equal! (theme-test-face-attr 'default 'size) default-font-size
+                  "the default face carries the setting")
+    (load-theme "tt-theme-a")
+    (check-equal! (theme-test-face-attr 'default 'size) default-font-size
+                  "a theme load keeps the size: no theme names one")
+    (check-equal! default-font-size "18.7px"
+                  "the stock size is two steps up the 1.2 ladder from 13px")
+    (theme-test-restore!)))
+
 (deftest 'inherit-and-priority-reach-the-face-table
   "a default may name a parent face and a priority"
   (lambda ()

@@ -566,18 +566,10 @@
 ;;; --- the mode ----------------------------------------------------------------
 
 (define (agenda--install-keys!)
-  (local-set-key "n" "agenda-next")
-  (local-set-key "p" "agenda-prev")
   (local-remap! "next-line" "agenda-next")
   (local-remap! "previous-line" "agenda-prev")
-  (local-set-key "TAB" "agenda-toggle-day")
-  (local-set-key "RET" "agenda-visit")
-  (local-set-key "[" "agenda-week-prev")
-  (local-set-key "]" "agenda-week-next")
-  (local-set-key "." "agenda-today")
-  (local-set-key "g" "agenda-refresh")
-  (local-set-key "q" "quit-window")
-  (local-set-key "C-c C-v" "agenda-toggle-view"))
+  
+  )
 
 (mode-icon! "morg-agenda-mode" "")
 
@@ -593,6 +585,19 @@
         '(render-blocks agenda-index agenda-day-lines))
       (buffer-set-local! buf 'render-mode "blocks")
       (agenda--render! buf))))
+
+(mode-keys! "morg-agenda-mode"
+  '(
+    ("n" "agenda-next")
+    ("p" "agenda-prev")
+    ("TAB" "agenda-toggle-day")
+    ("RET" "agenda-visit")
+    ("[" "agenda-week-prev")
+    ("]" "agenda-week-next")
+    ("." "agenda-today")
+    ("g" "agenda-refresh")
+    ("q" "quit-window")
+    ("C-c C-v" "agenda-toggle-view")))
 
 (mode-doc! "morg-agenda-mode"
   "The week from your morg files, as day cards. `n` and `p` step over entries, `TAB` folds a day, and `RET` opens the entry's file. `[` and `]` move by one week; `.` returns to today. `g` re-reads the files. `C-c C-v` shows the plain listing.")

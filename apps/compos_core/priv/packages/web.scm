@@ -1164,32 +1164,13 @@
   "(run-command \"browse-cycle-view\") — cycle rendered monospace, rendered serif, and Markdown source")
 
 (define (web--install-keys! buf)
-  (local-set-key* buf "RET" "browse-follow")
-  (local-set-key* buf "s-RET" "browse-follow-new-tab")
-  (local-set-key* buf "M-RET" "browse-follow-other-window")
-  (local-set-key* buf "TAB" "browse-next-link")
-  (local-set-key* buf "n" "browse-next-link")
-  (local-set-key* buf "p" "browse-prev-link")
-  (local-set-key* buf "l" "browse-back")
-  (local-set-key* buf "r" "browse-hard-refresh")
-  (local-set-key* buf "M-<left>" "browse-back")
-  (local-set-key* buf "M-<right>" "browse-forward")
-  (local-set-key* buf "u" "browse-up")
-  (local-set-key* buf "t" "browse-top")
-  (local-set-key* buf "g" "browse-refresh")
-  (local-set-key* buf "o" "browse-open-external")
-  (local-set-key* buf "w" "browse-copy-url")
-  (local-set-key* buf "v" "browse-view-source")
-  (local-set-key* buf "d" "browse-download")
-  (local-set-key* buf "H" "browse-history")
-  (local-set-key* buf "b" "bookmark-set")
-  (local-set-key* buf "B" "list-bookmarks")
-  (local-set-key* buf "s" "browse-list-tabs")
-  (local-set-key* buf "M-n" "browse-next-tab")
-  (local-set-key* buf "M-p" "browse-prev-tab")
-  (local-set-key* buf "R" "browse-toggle-reading")
-  (local-set-key* buf "C-c C-v" "browse-cycle-view")
-  (local-set-key* buf "q" "quit-window"))
+  
+  
+  
+  
+  
+  
+   #t)
 
 (define-mode "browse-mode"
   (lambda ()
@@ -1225,6 +1206,35 @@
       (web--declare-cache! buf)
       (web--update-modeline! buf)
       (cache-wake! buf))))
+
+(mode-keys! "browse-mode"
+  '(
+    ("RET" "browse-follow")
+    ("s-RET" "browse-follow-new-tab")
+    ("M-RET" "browse-follow-other-window")
+    ("TAB" "browse-next-link")
+    ("n" "browse-next-link")
+    ("p" "browse-prev-link")
+    ("l" "browse-back")
+    ("r" "browse-hard-refresh")
+    ("M-<left>" "browse-back")
+    ("M-<right>" "browse-forward")
+    ("u" "browse-up")
+    ("t" "browse-top")
+    ("g" "browse-refresh")
+    ("o" "browse-open-external")
+    ("w" "browse-copy-url")
+    ("v" "browse-view-source")
+    ("d" "browse-download")
+    ("H" "browse-history")
+    ("b" "bookmark-set")
+    ("B" "list-bookmarks")
+    ("s" "browse-list-tabs")
+    ("M-n" "browse-next-tab")
+    ("M-p" "browse-prev-tab")
+    ("R" "browse-toggle-reading")
+    ("C-c C-v" "browse-cycle-view")
+    ("q" "quit-window")))
 
 (mode-doc! "browse-mode"
   "A web page as readable text, in one of two readings. Calm shows

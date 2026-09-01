@@ -870,7 +870,6 @@
 ;; buffer refuses typing from its first frame, not only after a restore
 (define (annotate--margin-init! buf)
   (buffer-set-read-only! buf #t)
-  (local-set-key* buf "C-c C-v" "annotate-store-visit")
   (annotate--margin-render! buf))
 
 (define (annotate--margin-ensure! src)
@@ -888,6 +887,10 @@
       (if (buffer-local buf 'ann-source)
           (annotate--margin-init! buf)
           (message "annotate-margin-mode is the margin's internal mode — C-c ! m (annotate-margin) toggles the margin")))))
+
+(mode-keys! "annotate-margin-mode"
+  '(
+    ("C-c C-v" "annotate-store-visit")))
 
 ;; annotate-mode owns a frame arrangement: the document and its margin
 (define-mode-layout! "annotate-mode" '(h 0.7 self "*margin*"))
@@ -971,23 +974,12 @@
 
 (register-minor-mode! "annotate-mode"
   (lambda (buf)
-    (local-set-key* buf "M-n" "annotate-next")
-    (local-set-key* buf "M-p" "annotate-prev")
-    ;; also global — bound here so describe-mode's key table shows it
-    (local-set-key* buf "C-c ! a" "annotate-add")
-    (local-set-key* buf "C-c ! l" "annotate-list")
-    (local-set-key* buf "C-c ! m" "annotate-margin")
     (annotate--store-load! buf)
     (annotate--ensure-hook! buf)
     (annotate--check! buf)
     (annotate--margin-ensure! buf)
     (annotate--paint! buf))
   (lambda (buf)
-    (local-unset-key* buf "M-n")
-    (local-unset-key* buf "M-p")
-    (local-unset-key* buf "C-c ! a")
-    (local-unset-key* buf "C-c ! l")
-    (local-unset-key* buf "C-c ! m")
     (overlay-clear! buf 'annotate)
     ;; the margin belongs to the mode: turning the mode off takes the
     ;; margin window with it
@@ -995,6 +987,14 @@
                (equal? (buffer-local *ann-margin* 'ann-source) buf))
       (let ((win (window-showing *ann-margin*)))
         (when win (delete-window-id! win))))))
+
+(minor-mode-keys! "annotate-mode"
+  '(
+    ("M-n" "annotate-next")
+    ("M-p" "annotate-prev")
+    ("C-c ! a" "annotate-add")
+    ("C-c ! l" "annotate-list")
+    ("C-c ! m" "annotate-margin")))
 
 (define-command "annotate-mode" "Toggle annotations in this buffer"
   (lambda ()

@@ -19,6 +19,14 @@ defmodule Compos.TransientTest do
     Editor.set_pending([])
     Editor.delete_other_windows()
     Editor.set_window_buffer("transient-source-#{System.unique_integer([:positive])}")
+
+    # a menu left open holds the frame's overriding map, and every key of
+    # the next test module would answer to it
+    on_exit(fn ->
+      Session.run_command("transient-quit-all")
+      Editor.minibuffer_close()
+    end)
+
     :ok
   end
 

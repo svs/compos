@@ -685,12 +685,7 @@
                 (else #f))))))
   *paredit-keys*)
 
-(define (paredit--setup! buf)
-  (for-each
-    (lambda (entry)
-      (local-set-key* buf (car entry)
-                      (string-append "paredit--key-" (car entry))))
-    *paredit-keys*))
+(define (paredit--setup! buf) #t)
 
 (define (paredit--teardown! buf)
   (overlay-clear! buf 'paren))
@@ -730,6 +725,10 @@
 ")
 
 (register-minor-mode! "paredit-mode" paredit--setup! paredit--teardown!)
+;; the mode's keys are its map, in force while the mode is on
+(minor-mode-keys! "paredit-mode"
+  (map (lambda (entry) (list (car entry) (string-append "paredit--key-" (car entry))))
+       *paredit-keys*))
 
 (define-command "paredit-mode" "Toggle structural s-expression editing"
   (lambda ()

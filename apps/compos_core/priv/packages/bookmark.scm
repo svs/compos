@@ -698,8 +698,12 @@
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-read-only! buf #t)
-      (local-set-key* buf "q" "quit-window")
-      (local-set-key* buf "e" "bookmark-annotation-edit-current"))))
+      )))
+
+(mode-keys! "bookmark-annotation-view-mode"
+  '(
+    ("q" "quit-window")
+    ("e" "bookmark-annotation-edit-current")))
 
 (mode-doc! "bookmark-annotation-view-mode"
   "A read-only bookmark annotation. Use q to close it.")
@@ -709,8 +713,12 @@
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-read-only! buf #f)
-      (local-set-key* buf "C-c C-c" "bookmark-annotation-save")
-      (local-set-key* buf "C-c C-k" "bookmark-annotation-abort"))))
+      )))
+
+(mode-keys! "bookmark-annotation-edit-mode"
+  '(
+    ("C-c C-c" "bookmark-annotation-save")
+    ("C-c C-k" "bookmark-annotation-abort")))
 
 (mode-doc! "bookmark-annotation-edit-mode"
   "Edit a bookmark annotation. Use C-c C-c to save or C-c C-k to discard.")

@@ -152,8 +152,25 @@
                         (transient--item-default item))
                       values))))))))
 
-(define (transient--close-menu!)
+;; The menu's keys are one keymap, transient-map, in force as the frame's
+;; overriding map and locked: the ladder answers the menu's keys and
+;; nothing else, and an unbound key says so. Emacs's Transient does the
+;; same through overriding-terminal-local-map.
+(define-keymap! "transient-map")
+
+(define (transient-keymap-install! bindings)
+  (for-each (lambda (row) (keymap-unset! "transient-map" (car row)))
+            (keymap-bindings "transient-map"))
+  (for-each (lambda (row) (define-key "transient-map" (car row) (cadr row))) bindings)
+  (set-frame-local! 'transient-keymap bindings)
+  (overriding-map! "transient-map" #t))
+
+(define (transient-keymap-clear!)
   (set-frame-local! 'transient-keymap #f)
+  (overriding-map! #f))
+
+(define (transient--close-menu!)
+  (transient-keymap-clear!)
   (transient-show! #f))
 
 (define (transient--choice-pair choice)
@@ -207,17 +224,11 @@
           (list "C-x C-s" "transient-save")
           (list "C-x C-k" "transient-reset"))))
 
+;; what SEQUENCE means in the menu, read off the keymap
 (define (transient-dispatch-key sequence)
-  (let* ((key (string-join sequence " "))
-         (bindings (or (frame-local 'transient-keymap) '()))
-         (exact (assoc key bindings))
-         (prefix (string-append key " ")))
-    (cond (exact (list "command" (cadr exact)))
-          ((let loop ((xs bindings))
-             (and (pair? xs)
-                  (or (string-prefix? prefix (car (car xs)))
-                      (loop (cdr xs)))))
-           (list "prefix"))
+  (let ((hit (keymap-lookup "transient-map" sequence)))
+    (cond ((string? hit) (list "command" hit))
+          ((equal? hit 'prefix) (list "prefix"))
           (else (list "none")))))
 
 (define (transient--menu-groups groups state)
@@ -254,7 +265,7 @@
                             (max 0 (- (length items) 1))))
              (state (transient--put state 'selected selected)))
         (transient--set-active! state)
-        (set-frame-local! 'transient-keymap (transient--bindings groups))
+        (transient-keymap-install! (transient--bindings groups))
         (transient-show!
           (list (cadr prefix) (transient--menu-groups groups state)))))))
 

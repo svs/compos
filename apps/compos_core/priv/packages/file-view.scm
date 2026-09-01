@@ -33,11 +33,11 @@
 
 (define (json-mode-setup)
   ((ts-mode "json"))
-  (local-set-key "C-c C-f" "json-pretty-print-buffer")
   (when json-auto-pretty-print
     (json-pretty-print! (current-buffer))))
 
 (define-mode "json-mode" json-mode-setup)
+(mode-keys! "json-mode" '(("C-c C-f" "json-pretty-print-buffer")))
 (mode-doc! "json-mode"
   "Editable JSON with syntax colors and structural motion. The mode indents valid compact JSON. Use `C-c C-f` to format again.")
 

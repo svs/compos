@@ -310,32 +310,14 @@
   (face-remap-in! buf 'writing (list 'measure writing-measure))
   (buffer-set-local! buf 'line-numbers "off")
   (buffer-set-local! buf 'window-class "writing")
-  (local-set-key* buf "S-<left>" "cua-select-backward")
-  (local-set-key* buf "S-<right>" "cua-select-forward")
-  (local-set-key* buf "S-<up>" "cua-select-up")
-  (local-set-key* buf "S-<down>" "cua-select-down")
-  (local-set-key* buf "M-<left>" "backward-word")
-  (local-set-key* buf "M-<right>" "forward-word")
-  (local-set-key* buf "M-S-<left>" "cua-select-backward-word")
-  (local-set-key* buf "M-S-<right>" "cua-select-forward-word")
+  
+  
   ;; Platform-native prose movement. With visual-line-mode on, the line
   ;; commands read the wrap map the client measured and stop at the
   ;; visual row; without one they stop at the source line.
-  (local-set-key* buf "s-<left>" "beginning-of-line")
-  (local-set-key* buf "s-<right>" "end-of-line")
-  (local-set-key* buf "s-<up>" "beginning-of-buffer")
-  (local-set-key* buf "s-<down>" "end-of-buffer")
-  (local-set-key* buf "s-S-<left>" "cua-select-line-start")
-  (local-set-key* buf "s-S-<right>" "cua-select-line-end")
-  (local-set-key* buf "s-S-<up>" "cua-select-buffer-start")
-  (local-set-key* buf "s-S-<down>" "cua-select-buffer-end")
-  (local-set-key* buf "S-<home>" "cua-select-line-start")
-  (local-set-key* buf "S-<end>" "cua-select-line-end")
-  (local-set-key* buf "C-S-<left>" "cua-select-backward-word")
-  (local-set-key* buf "C-S-<right>" "cua-select-forward-word")
-  (local-set-key* buf "C-S-<home>" "cua-select-buffer-start")
-  (local-set-key* buf "C-S-<end>" "cua-select-buffer-end")
-  (local-set-key* buf "s-a" "cua-select-all")
+  
+  
+  
   (writing--ensure-hook! buf)
   (writing--update-count! buf))
   ;; last word: the rows agree with the mode list, and the drawn page keeps
@@ -361,29 +343,6 @@
               (or (buffer-local buf 'minor-modes) '()))))
   (buffer-set-local! buf 'window-class #f)
   (buffer-set-local! buf 'modeline-info #f)
-  (local-unset-key* buf "S-<left>")
-  (local-unset-key* buf "S-<right>")
-  (local-unset-key* buf "S-<up>")
-  (local-unset-key* buf "S-<down>")
-  (local-unset-key* buf "M-<left>")
-  (local-unset-key* buf "M-<right>")
-  (local-unset-key* buf "M-S-<left>")
-  (local-unset-key* buf "M-S-<right>")
-  (local-unset-key* buf "s-<left>")
-  (local-unset-key* buf "s-<right>")
-  (local-unset-key* buf "s-<up>")
-  (local-unset-key* buf "s-<down>")
-  (local-unset-key* buf "s-S-<left>")
-  (local-unset-key* buf "s-S-<right>")
-  (local-unset-key* buf "s-S-<up>")
-  (local-unset-key* buf "s-S-<down>")
-  (local-unset-key* buf "S-<home>")
-  (local-unset-key* buf "S-<end>")
-  (local-unset-key* buf "C-S-<left>")
-  (local-unset-key* buf "C-S-<right>")
-  (local-unset-key* buf "C-S-<home>")
-  (local-unset-key* buf "C-S-<end>")
-  (local-unset-key* buf "s-a")
   (buffer-set-local! buf 'writing-saved #f)
   (if preview-was-on?
       (begin
@@ -398,6 +357,36 @@
   (buffer-set-local! buf 'render-mode (if (equal? saved-render "rows") #f saved-render))))
 
 (register-minor-mode! "writing-mode" writing--apply! writing--teardown!)
+
+(minor-mode-keys! "writing-mode"
+  '(
+    ("S-<left>" "cua-select-backward")
+    ("S-<right>" "cua-select-forward")
+    ("S-<up>" "cua-select-up")
+    ("S-<down>" "cua-select-down")
+    ("M-<left>" "backward-word")
+    ("M-<right>" "forward-word")
+    ("M-S-<left>" "cua-select-backward-word")
+    ("M-S-<right>" "cua-select-forward-word")
+    ("s-<left>" "beginning-of-line")
+    ("s-<right>" "end-of-line")
+    ("s-<up>" "beginning-of-buffer")
+    ("s-<down>" "end-of-buffer")
+    ("s-S-<left>" "cua-select-line-start")
+    ("s-S-<right>" "cua-select-line-end")
+    ("s-S-<up>" "cua-select-buffer-start")
+    ("s-S-<down>" "cua-select-buffer-end")
+    ("S-<home>" "cua-select-line-start")
+    ("S-<end>" "cua-select-line-end")
+    ("C-S-<left>" "cua-select-backward-word")
+    ("C-S-<right>" "cua-select-forward-word")
+    ("C-S-<home>" "cua-select-buffer-start")
+    ("C-S-<end>" "cua-select-buffer-end")
+    ("s-a" "cua-select-all")))
+
+(minor-mode-keys! "writing-mode"
+  '(
+))
 
 ;;; --- writing-layout ---------------------------------------------------------
 ;;; `write` presents the document, its writing scratch, and the group chat

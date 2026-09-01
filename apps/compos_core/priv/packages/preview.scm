@@ -443,10 +443,25 @@
 (domain! 'interaction)
 (effects! '(write))
 
+;; "path?line=12" -> 12; a link with no line -> #f
+(define (preview--line-param href)
+  (let ((g (re-groups "[?&]line=([0-9]+)" href 0)))
+    (and g
+         (let ((n (string->number (substring-bytes href (car (nth 1 g)) (cadr (nth 1 g))))))
+           (and (number? n) (> n 0) n)))))
+
 ;; A document follows the receiving frame by default. The explicit form
 ;; enters its chosen group first, then gives the document that membership.
+;; A ?line= query lands point on that line, as a buffer link does.
 (define (preview--follow-document! source href group)
-  (visit (preview--file-target source href) group))
+  (let ((buf (visit (preview--file-target source href) group))
+        (line (preview--line-param href)))
+    (when (and line (buffer-exists? buf))
+      (with-current-buffer buf
+        (lambda ()
+          (goto-char! (line-start-position line))
+          (recenter!))))
+    buf))
 
 (define (link-follow-to-group win href)
   (mouse-select-window! win)

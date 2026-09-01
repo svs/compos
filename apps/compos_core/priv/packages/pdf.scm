@@ -852,23 +852,10 @@
   ;; still its own rendered image and can use pdf-toggle-dark independently.
   (buffer-set-local! buf 'preview-authored #f)
   (buffer-set-read-only! buf #t)
-  (local-set-key* buf "n" "pdf-next-page")
-  (local-set-key* buf "p" "pdf-previous-page")
-  (local-set-key* buf "<right>" "pdf-next-page")
-  (local-set-key* buf "<left>" "pdf-previous-page")
-  (local-set-key* buf "SPC" "pdf-next-page")
-  (local-set-key* buf "DEL" "pdf-previous-page")
-  (local-set-key* buf "<next>" "pdf-next-page")
-  (local-set-key* buf "<prior>" "pdf-previous-page")
-  (local-set-key* buf "<home>" "pdf-first-page")
-  (local-set-key* buf "<end>" "pdf-last-page")
-  (local-set-key* buf "+" "pdf-zoom-in")
-  (local-set-key* buf "=" "pdf-zoom-in")
-  (local-set-key* buf "-" "pdf-zoom-out")
-  (local-set-key* buf "0" "pdf-zoom-reset")
-  (local-set-key* buf "i" "pdf-toggle-dark")
-  (local-set-key* buf "g" "pdf-refresh")
-  (local-set-key* buf "q" "quit-window")
+  
+  
+  
+  
   (pdf--render! buf (not (> (pdf--total buf) 0))))
 
 (mode-icon! "pdf-reader-mode" "")
@@ -876,22 +863,48 @@
 (define-mode "pdf-reader-mode"
   (lambda () (pdf-reader-setup! (current-buffer))))
 
+(mode-keys! "pdf-reader-mode"
+  '(
+    ("n" "pdf-next-page")
+    ("p" "pdf-previous-page")
+    ("<right>" "pdf-next-page")
+    ("<left>" "pdf-previous-page")
+    ("SPC" "pdf-next-page")
+    ("DEL" "pdf-previous-page")
+    ("<next>" "pdf-next-page")
+    ("<prior>" "pdf-previous-page")
+    ("<home>" "pdf-first-page")
+    ("<end>" "pdf-last-page")
+    ("+" "pdf-zoom-in")
+    ("=" "pdf-zoom-in")
+    ("-" "pdf-zoom-out")
+    ("0" "pdf-zoom-reset")
+    ("i" "pdf-toggle-dark")
+    ("g" "pdf-refresh")
+    ("q" "quit-window")))
+
 (mode-doc! "pdf-reader-mode"
   "A rendered PDF document. `n` and `p` change pages. `+` and `-` change size. `i` changes the page theme.")
 
 (define (pdf-edit-setup! buf)
   (pdf-reader-setup! buf)
-  (local-set-key* buf "[" "pdf-edit-move-page-backward")
-  (local-set-key* buf "]" "pdf-edit-move-page-forward")
-  (local-set-key* buf "D" "pdf-edit-duplicate-page")
-  (local-set-key* buf "d" "pdf-edit-delete-page")
-  (local-set-key* buf "u" "pdf-edit-undo")
-  (local-set-key* buf "R" "pdf-edit-reset"))
+  
+  )
 
 (mode-icon! "pdf-edit-mode" "")
 
 (define-mode "pdf-edit-mode"
   (lambda () (pdf-edit-setup! (current-buffer))))
+
+(mode-keys! "pdf-edit-mode"
+  '(
+    ("[" "pdf-edit-move-page-backward")
+    ("]" "pdf-edit-move-page-forward")
+    ("D" "pdf-edit-duplicate-page")
+    ("d" "pdf-edit-delete-page")
+    ("u" "pdf-edit-undo")
+    ("R" "pdf-edit-reset")))
+(keymap-parent! (mode-keymap "pdf-edit-mode") (mode-keymap "pdf-reader-mode"))
 
 (mode-doc! "pdf-edit-mode"
   "Edit a generated PDF copy without overwriting its original. `[` and `]` reorder the page; `D` duplicates it; `d` deletes it; `u` swaps undo/redo; `R` resets from the original.")

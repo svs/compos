@@ -235,8 +235,8 @@
     (let ((buf (current-buffer)))
       (buffer-set-read-only! buf #t)
       (buffer-set-local! buf 'render-mode "blocks")
-      (buffer-set-local! buf 'render-blocks (component-gallery-blocks))
-      (local-set-key* buf "q" "quit-window"))))
+      (buffer-set-local! buf 'render-blocks (component-gallery-blocks)))))
+(mode-keys! "component-gallery-mode" '(("q" "quit-window")))
 
 (mode-doc! "component-gallery-mode"
   "Every registered block-mode UI component, rendered from its declared example.")

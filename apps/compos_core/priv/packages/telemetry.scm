@@ -227,12 +227,16 @@
   (buffer-set-local! buf 'render-mode "blocks")
   (buffer-set-local! buf 'render-blocks
     (telemetry--detail-blocks (buffer-local buf 'telemetry-detail-row)))
-  (local-set-key* buf "q" "quit-window"))
+  )
 
 (mode-icon! "telemetry-detail-mode" "")
 
 (define-mode "telemetry-detail-mode"
   (lambda () (telemetry--detail-setup! (current-buffer))))
+
+(mode-keys! "telemetry-detail-mode"
+  '(
+    ("q" "quit-window")))
 
 (mode-doc! "telemetry-detail-mode"
   "Complete fields for one telemetry event. `q` closes the window.")

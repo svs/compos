@@ -342,10 +342,14 @@
     ;; the buffer is a transcript, so it is read-only; you type in the
     ;; minibuffer, the way every client has always asked you to
     (buffer-set-read-only! (current-buffer) #t)
-    (local-set-key "C-c C-c" "irc-connect")
-    (local-set-key "C-c C-j" "irc-join")
-    (local-set-key "g" "irc-redraw")
-    (local-set-key "RET" "irc-send")))
+    ))
+
+(mode-keys! "irc-mode"
+  '(
+    ("C-c C-c" "irc-connect")
+    ("C-c C-j" "irc-join")
+    ("g" "irc-redraw")
+    ("RET" "irc-send")))
 
 (public! 'irc "M-x irc — open the IRC client buffer")
 (public! 'irc-connect "M-x irc-connect — connect to Libera.Chat anonymously")

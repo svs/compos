@@ -1,0 +1,116 @@
+;;; goto-address-test.scm --- URLs and file paths are links in any buffer.
+
+(domain! 'testing)
+(effects! '(write))
+
+(define t--ga-buf "zz-goto-address.txt")
+
+(define (t--ga! text)
+  (test-buffer! t--ga-buf text)
+  ;; the change hook is debounced; paint now so the test reads the truth
+  (goto-address-paint! t--ga-buf)
+  t--ga-buf)
+
+(define (t--ga-links)
+  (filter (lambda (o) (string-prefix? "link goto-address link-to:" (caddr o)))
+          (buffer-overlays t--ga-buf)))
+
+(define (t--ga-done!) (when (buffer-known? t--ga-buf) (buffer-kill! t--ga-buf)))
+
+(define t--ga-file (string-append (compos-priv-dir) "/init.scm"))
+
+(deftest 'a-url-in-plain-text-is-a-link
+  "a fundamental buffer paints its URL with the link face and its target"
+  (lambda ()
+    (t--ga! "see https://example.com/a?b=1. and more\n")
+    (let ((ls (t--ga-links)))
+      (check-equal! (length ls) 1 "one link")
+      (check-equal! (list (car (car ls)) (cadr (car ls))) '(4 29)
+                    "the range covers the URL and not the period")
+      (check-equal! (goto-address-href-at t--ga-buf 10) "https://example.com/a?b=1"
+                    "the target reads back off the overlay"))
+    (t--ga-done!)))
+
+(deftest 'a-file-path-that-exists-is-a-link-with-its-line
+  "path:LINE paints as a link whose target carries ?line="
+  (lambda ()
+    (t--ga! (string-append "at " t--ga-file ":3 here\n"))
+    (let ((ls (t--ga-links)))
+      (check-equal! (length ls) 1 "the path is one link")
+      (check-equal! (goto-address-href-at t--ga-buf 5)
+                    (string-append t--ga-file "?line=3")
+                    "the target is the path with its line as a query"))
+    (t--ga-done!)))
+
+(deftest 'a-path-that-names-no-file-is-prose
+  "a path-shaped word that is not on disk paints nothing"
+  (lambda ()
+    (t--ga! "/no/such/dir/zz-file.txt and apps/zz-nope/x.ex:9\n")
+    (check-equal! (length (t--ga-links)) 0 "no link for a missing file")
+    (t--ga-done!)))
+
+(deftest 'a-relative-path-resolves-beside-the-file-then-from-the-project-root
+  "docs/BLOCKS.md in a file deep in the repo is the repository's docs/BLOCKS.md"
+  (lambda ()
+    (let ((name (string-append (compos-priv-dir) "/editor/zz-ga-relative.txt")))
+      (test-buffer! name "see docs/BLOCKS.md and ./blocks/block.scm here\n")
+      (goto-address-paint! name)
+      (check-equal! (goto-address-href-at name 5)
+                    (string-append (project-root-cached (compos-priv-dir)) "/docs/BLOCKS.md")
+                    "not beside the file, so the project root answers")
+      (check-equal! (goto-address-href-at name 24)
+                    (string-append (compos-priv-dir) "/editor/blocks/block.scm")
+                    "beside the file wins")
+      (buffer-kill! name))))
+
+(deftest 'a-change-repaints-only-the-lines-it-touched
+  "the untouched links stay, the touched line is read again"
+  (lambda ()
+    (t--ga! "a https://one.example\nplain\nb https://three.example\n")
+    (check-equal! (length (t--ga-links)) 2 "the first paint: two links")
+    ;; line 2 gains a URL at its end: the change is inside that line
+    (buffer-insert! t--ga-buf 27 " https://two.example")
+    (goto-address-repaint! t--ga-buf 27 " https://two.example")
+    (let ((ls (t--ga-links)))
+      (check-equal! (length ls) 3 "one link per line")
+      (check-equal! (goto-address-href-at t--ga-buf 2) "https://one.example"
+                    "the line above kept its link")
+      (check-equal! (goto-address-href-at t--ga-buf 30) "https://two.example"
+                    "the touched line has its new link")
+      (check-equal! (goto-address-href-at t--ga-buf 52) "https://three.example"
+                    "the line below followed the rope"))
+    ;; the first URL loses its scheme: a deletion touches line 1 alone
+    (buffer-delete-range! t--ga-buf 2 8)
+    (goto-address-repaint! t--ga-buf 2 "")
+    (check-equal! (length (t--ga-links)) 2 "the broken URL is prose again")
+    (check-equal! (goto-address-href-at t--ga-buf 22) "https://two.example"
+                  "the second line still answers, at its moved offset")
+    (t--ga-done!)))
+
+(deftest 'path-parts-split-the-line-and-column
+  "path:LINE:COL -> (PATH LINE); a bare path has no line"
+  (lambda ()
+    (check-equal! (goto-address-path-parts "a/b.ex:12:4") '("a/b.ex" 12) "line and column")
+    (check-equal! (goto-address-path-parts "a/b.ex:12") '("a/b.ex" 12) "line alone")
+    (check-equal! (goto-address-path-parts "a/b.ex") '("a/b.ex" #f) "no line")))
+
+(deftest 'a-new-buffer-is-watched-without-asking
+  "no mode to turn on: a buffer that appears has its change hook"
+  (lambda ()
+    (t--ga! "https://example.com\n")
+    (check-true! (assoc t--ga-buf *goto-address-hooks*) "the buffer is watched")
+    (check-equal! (length (t--ga-links)) 1 "and painted")
+    (goto-address-unwatch! t--ga-buf)
+    (check-equal! (length (t--ga-links)) 0 "unwatch clears the links")
+    (t--ga-done!)))
+
+(deftest 'a-document-link-with-a-line-lands-on-it
+  "following path?line=N visits the file and puts point on line N"
+  (lambda ()
+    (let ((known (buffer-known? t--ga-file)))
+      (t--ga! (string-append t--ga-file ":4\n"))
+      (preview--follow-document! t--ga-buf (goto-address-href-at t--ga-buf 1) #f)
+      (check-equal! (current-buffer) t--ga-file "the file is current")
+      (check-equal! (line-number-at-pos (point)) 4 "point stands on line 4")
+      (unless known (buffer-kill! t--ga-file))
+      (t--ga-done!))))

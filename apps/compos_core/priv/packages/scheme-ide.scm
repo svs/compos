@@ -190,8 +190,6 @@
 
 (define (scheme-ide--mode-hook!)
     (let ((buf (current-buffer)))
-      (local-set-key "M-." "scheme-goto-definition")
-      (local-set-key "C-c C-d" "scheme-doc")
       (let ((cur (or (buffer-local buf 'capf-sources) '())))
         (unless (member scheme-ide--capf cur)
           (buffer-set-local! buf 'capf-sources (cons scheme-ide--capf cur))))
@@ -206,6 +204,11 @@
               (debounce! (string-append "scheme-ide:" buf) 400
                          scheme-ide--check! buf)))))
       (scheme-ide--check! buf)))
+
+(mode-keys! "scheme-mode"
+  '(
+    ("M-." "scheme-goto-definition")
+    ("C-c C-d" "scheme-doc")))
 
 (add-hook! 'scheme-mode-hook 'scheme-ide--mode-hook!)
 

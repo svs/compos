@@ -558,20 +558,10 @@
 ;;; --- the mode ----------------------------------------------------------------
 
 (define (org-install-keys)
-  (local-set-key "TAB" "org-cycle")
-  (local-set-key "S-TAB" "org-global-cycle")
-  (local-set-key "C-c C-t" "org-todo")
-  (local-set-key "M-RET" "org-meta-return")
-  (local-set-key "C-RET" "org-insert-heading-after-subtree")
-  (local-set-key "M-<left>" "org-promote")
-  (local-set-key "M-<right>" "org-demote")
-  (local-set-key "M-S-<left>" "org-promote-subtree")
-  (local-set-key "M-S-<right>" "org-demote-subtree")
-  (local-set-key "M-<up>" "org-move-subtree-up")
-  (local-set-key "M-<down>" "org-move-subtree-down")
-  (local-set-key "S-<up>" "org-priority-up")
-  (local-set-key "S-<down>" "org-priority-down")
-  (local-set-key "C-c C-c" "org-ctrl-c-ctrl-c"))
+  
+  
+  
+   #t)
 
 ;; change-hook registry keyed by buffer NAME in global state (not a
 ;; buffer-local): rules outlive buffer kill + recreate (revert-buffer),
@@ -628,3 +618,20 @@
     ;; unfolded and stays that way until the next edit.
     (org-apply-folds! (current-buffer))
     (org-refontify! (current-buffer))))
+
+(mode-keys! "org-mode"
+  '(
+    ("TAB" "org-cycle")
+    ("S-TAB" "org-global-cycle")
+    ("C-c C-t" "org-todo")
+    ("M-RET" "org-meta-return")
+    ("C-RET" "org-insert-heading-after-subtree")
+    ("M-<left>" "org-promote")
+    ("M-<right>" "org-demote")
+    ("M-S-<left>" "org-promote-subtree")
+    ("M-S-<right>" "org-demote-subtree")
+    ("M-<up>" "org-move-subtree-up")
+    ("M-<down>" "org-move-subtree-down")
+    ("S-<up>" "org-priority-up")
+    ("S-<down>" "org-priority-down")
+    ("C-c C-c" "org-ctrl-c-ctrl-c")))

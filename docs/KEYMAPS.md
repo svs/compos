@@ -9,15 +9,23 @@ Emacs writes it (`"C-x C-f"`, `"<f9> a"`), to a command name.
 A key resolves down this ladder. An exact binding anywhere wins over a
 prefix anywhere. A remap applies to the result.
 
-1. The buffer's minor-mode maps, in order, first wins.
-2. The global minor-mode maps (`cua-mode`).
-3. The buffer's own map, then its parents.
-4. The read-only map, when the buffer is read-only.
-5. The global map.
+1. The frame's overriding map: Transient's menu, or the prefix
+   argument's `universal-argument-map`. A locked overriding map is the
+   whole ladder, so an unbound key is undefined. While a prompt is up
+   the overriding map waits, as Transient's does in Emacs.
+2. The keymap of the thing at point: a fenced block's kind declares one,
+   and morg sets it after every command. Emacs's overlay keymap.
+3. The buffer's minor-mode maps, in order, first wins.
+4. The global minor-mode maps (`cua-mode`).
+5. The buffer's own map, then its parents.
+6. The read-only map, when the buffer is read-only.
+7. The global map.
 
-This is Emacs's `minor-mode-map-alist`, then the local map, then the
-global map. Transient and the key capture sit above the ladder in
-`KeyDispatch`, as `overriding-terminal-local-map` does.
+Every printable key and SPC are bound to `self-insert-command` in the
+global map, as in Emacs, so a key that inserts itself reaches a command
+through a keymap like any other, and a mode can rebind a letter. The
+same bindings in the ` *completion*` map make typing narrow the popup.
+Only the key capture of `describe-key` sits above the ladder.
 
 ## Whose map is which
 
@@ -32,9 +40,21 @@ the minor modes put their keys back.
 (define-key (mode-keymap "scheme-mode") "M-." "scheme-goto-definition")
 ```
 
-A minor mode registers its map with `register-minor-mode!`. While the
-mode is on in a buffer, the map is in force there and leaves with the
-mode. A global minor mode puts its map in `global-minor-maps!`.
+A core package binds on a map, never on a buffer. `mode-keys!` binds
+once on the mode's map at load; `minor-mode-keys!` gives a minor mode
+its map, in force while the mode is on and gone when it is off, so a
+teardown unbinds nothing. A global minor mode puts its map in
+`global-minor-maps!`. A buffer's own map is for the buffer itself: a
+special buffer that is not a mode, or a user's one-off binding.
+
+```scheme
+(mode-keys! "pdf-reader-mode" '(("n" "pdf-next-page") ("p" "pdf-previous-page")))
+(minor-mode-keys! "writing-mode" '(("M-<left>" "backward-word")))
+```
+
+`priv/tests/keys-sweep-test.scm` enters every major mode and every
+minor mode in a fresh buffer and resolves each of its keys through the
+ladder, so a dead key fails the sweep.
 
 ```scheme
 (define-keymap! "evil-local-mode-map")
@@ -46,6 +66,10 @@ mode. A global minor mode puts its map in `global-minor-maps!`.
 
 | form | meaning |
 |------|---------|
+| `(mode-keys! MODE ((KEYS COMMAND) ...))` | bind once on the mode's map |
+| `(minor-mode-keys! NAME ((KEYS COMMAND) ...))` | the minor mode's map |
+| `(overriding-map! KEYMAP [LOCK?] [UNTIL-COMMAND?])` | the frame's overriding map |
+| `(buffer-at-point-map! BUF KEYMAP)` | the keymap at point |
 | `(define-keymap! NAME [PARENT])` | a named keymap |
 | `(define-key KEYMAP KEYS COMMAND)`, `(keymap-set! ...)` | one binding |
 | `(keymap-unset! KEYMAP KEYS)` | drop the keymap's own binding |

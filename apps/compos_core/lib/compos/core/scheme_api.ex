@@ -426,6 +426,14 @@ defmodule Compos.Core.SchemeAPI do
       "global-minor-maps" => "(global-minor-maps) — the keymaps in force in every buffer.",
       "buffer-keymaps" => "(buffer-keymaps BUF) — the keymap names that answer for BUF, in precedence order, \"global\" last.",
       "where-is-internal" => "(where-is-internal COMMAND [BUF]) — every key sequence bound to COMMAND, tersest first.",
+      "overriding-map!" =>
+        "(overriding-map! KEYMAP [LOCK?] [UNTIL-COMMAND?]) — the frame's overriding keymap, ahead of every other; #f clears it. LOCK? makes an unbound key undefined (Transient). UNTIL-COMMAND? drops it when the next command finishes (the prefix argument).",
+      "overriding-map" => "(overriding-map) — the frame's overriding keymap, or #f.",
+      "buffer-at-point-map!" =>
+        "(buffer-at-point-map! BUF KEYMAP) — the keymap of the thing at point in BUF (a block), ahead of the minor maps; #f clears it. Emacs's overlay keymap.",
+      "buffer-at-point-map" => "(buffer-at-point-map BUF) — the keymap at point in BUF, or #f.",
+      "completion-requery!" => "(completion-requery!) — narrow the popup to the text between its start and point.",
+      "ignore-errors" => "(ignore-errors THUNK) — THUNK's value, or #f when it raises.",
       "capture-key!" =>
         "(capture-key! COMMAND) — the next key sequence runs COMMAND instead of its own binding; COMMAND reads it with (last-keys). #f disarms.",
       "trace-key!" =>
@@ -1806,6 +1814,31 @@ defmodule Compos.Core.SchemeAPI do
       "where-is-internal" => fn
         [name] -> Editor.where_is(name, Editor.current_buffer())
         [name, buf] -> Editor.where_is(name, buf)
+      end,
+      "overriding-map!" => fn
+        [false] -> Editor.set_overriding_map(nil)
+        [name] -> Editor.set_overriding_map(plain(name))
+        [name, lock] -> Editor.set_overriding_map(plain(name), lock == true)
+        [name, lock, until] -> Editor.set_overriding_map(plain(name), lock == true, until == true)
+      end,
+      "overriding-map" => fn [] -> Editor.overriding_map() || false end,
+      "buffer-at-point-map!" => fn [buf, name] ->
+        Editor.set_at_point_map(buf, name && plain(name))
+        :void
+      end,
+      "buffer-at-point-map" => fn [buf] -> Editor.at_point_map(buf) || false end,
+      "completion-requery!" => fn [] ->
+        Compos.Core.KeyDispatch.requery_completion()
+        :void
+      end,
+      "ignore-errors" => fn [thunk], store ->
+        try do
+          Compos.Scheme.Eval.apply_fn(thunk, [], store)
+        rescue
+          _ -> {false, store}
+        catch
+          _, _ -> {false, store}
+        end
       end,
       # describe-key arms this, then reads the sequence back with (last-keys)
       "capture-key!" => fn [command] ->

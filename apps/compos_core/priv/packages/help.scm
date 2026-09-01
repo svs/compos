@@ -88,10 +88,14 @@
       (when (minor-mode-on? buf "preview-mode")
         (preview-mode--apply! buf))
       (buffer-set-read-only! buf #t)
-      (local-set-key* buf "q" "quit-window")
       ;; the name at point, in the file that defines it — the keyboard
       ;; half of the links the page draws
-      (local-set-key* buf "M-." "help-goto-source"))))
+      )))
+
+(mode-keys! "help-mode"
+  '(
+    ("q" "quit-window")
+    ("M-." "help-goto-source")))
 
 (mode-doc! "help-mode"
   "A help page: markdown, rendered. `q` closes it, `C-c C-v` shows the source.")

@@ -859,6 +859,7 @@
       (diff--fontify! buf)
       (diff--refold! buf)
       (diff--reblock! buf))))
+(keymap-parent! (mode-keymap "diff-show") (mode-keymap "diff-mode"))
 
 (mode-doc! "diff-show"
   "One commit, already written. Every card starts open. `n` and `p` step over hunks, and `RET` opens the file at that line. Nothing refreshes, because a commit does not change.")
@@ -982,19 +983,11 @@
 ;;; --- the mode -----------------------------------------------------------------
 
 (define (diff--install-keys!)
-  (local-set-key "n" "diff-next-hunk")
-  (local-set-key "p" "diff-prev-hunk")
   (local-remap! "next-line" "diff-next-hunk")
   (local-remap! "previous-line" "diff-prev-hunk")
-  (local-set-key "N" "diff-next-file")
-  (local-set-key "P" "diff-prev-file")
-  (local-set-key "TAB" "diff-toggle-fold")
-  (local-set-key "RET" "diff-visit")
-  (local-set-key "g" "diff-revert")
-  (local-set-key "w" "diff-toggle-watch")
-  (local-set-key "m" "diff-toggle-conflicts")
-  (local-set-key "q" "quit-window")
-  (local-set-key "C-c C-v" "diff-toggle-view"))
+  
+  
+  )
 
 (define-command "diff-revert" "Re-read the diff from its backend"
   (lambda () (diff-refresh (current-buffer))))
@@ -1019,6 +1012,20 @@
       (when (and (buffer-local buf 'diff-watch) (buffer-local buf 'diff-root))
         (watch-path! (buffer-local buf 'diff-root) 'deep))
       (diff-refresh buf))))
+
+(mode-keys! "diff-mode"
+  '(
+    ("n" "diff-next-hunk")
+    ("p" "diff-prev-hunk")
+    ("N" "diff-next-file")
+    ("P" "diff-prev-file")
+    ("TAB" "diff-toggle-fold")
+    ("RET" "diff-visit")
+    ("g" "diff-revert")
+    ("w" "diff-toggle-watch")
+    ("m" "diff-toggle-conflicts")
+    ("q" "quit-window")
+    ("C-c C-v" "diff-toggle-view")))
 
 (mode-doc! "diff-mode"
   "The changes you have not committed, as cards. `n` and `p` step over hunks, `N` and `P` over files. `TAB` folds a card and `RET` opens the file at that line. `g` re-reads the diff, and `w` follows the tree. A merge in conflict shows a bar above the cards; `m`, or clicking it, narrows the view to only those files.")

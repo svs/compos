@@ -349,21 +349,28 @@
   ;; every edit. Declared here because every chat passes through this fn,
   ;; on setup, attach, and restore alike.
   (buffer-marker-local! buf 'agent-saved-mark)
-  (local-set-key* buf "DEL" "chat-delete-backward")
-  (local-set-key* buf "C-d" "chat-delete-forward")
-  (local-set-key* buf "RET" "agent-send")
-  (local-set-key* buf "C-RET" "agent-interrupt-send")
-  (local-set-key* buf "C-g" "chat-abort")
-  (local-set-key* buf "TAB" "agent-toggle-fold")
-  (local-set-key* buf "<up>" "chat-history-previous")
-  (local-set-key* buf "<down>" "chat-history-next")
-  (local-set-key* buf "C-c C-y" "agent-permission-allow")
-  (local-set-key* buf "C-c C-a" "agent-permission-always")
-  (local-set-key* buf "C-c C-n" "agent-permission-deny")
-  (local-set-key* buf "C-c p" "chat-set-permission-mode")
-  (local-set-key* buf "C-c t" "chat-refresh-tools")
-  (local-set-key* buf "C-c C-d" "chat-unqueue")
-  (local-set-key* buf "C-c C-v" "chat-toggle-view"))
+  
+  
+  
+  )
+
+(mode-keys! "chat-mode"
+  '(
+    ("DEL" "chat-delete-backward")
+    ("C-d" "chat-delete-forward")
+    ("RET" "agent-send")
+    ("C-RET" "agent-interrupt-send")
+    ("C-g" "chat-abort")
+    ("TAB" "agent-toggle-fold")
+    ("<up>" "chat-history-previous")
+    ("<down>" "chat-history-next")
+    ("C-c C-y" "agent-permission-allow")
+    ("C-c C-a" "agent-permission-always")
+    ("C-c C-n" "agent-permission-deny")
+    ("C-c p" "chat-set-permission-mode")
+    ("C-c t" "chat-refresh-tools")
+    ("C-c C-d" "chat-unqueue")
+    ("C-c C-v" "chat-toggle-view")))
 
 (category! 'chat)
 

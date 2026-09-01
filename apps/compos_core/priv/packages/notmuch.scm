@@ -957,11 +957,7 @@ when a message has no text/plain part." 'group 'notmuch)
   (lambda ()
     (let ((buf (current-buffer)))
       (buffer-set-read-only! buf #t)
-      (local-set-key "a" "notmuch-show-archive")
-      (local-set-key "r" "notmuch-show-reply")
-      (local-set-key "v" "notmuch-show-toggle-view")
-      (local-set-key "j" "notmuch-jump")
-      (local-set-key "q" "quit-window")
+      
       (let ((th (buffer-local buf 'notmuch-thread)))
         (when th
           (let* ((subject (or (buffer-local buf 'notmuch-subject) ""))
@@ -995,6 +991,14 @@ when a message has no text/plain part." 'group 'notmuch)
                   (buffer-set-local! buf 'render-mode #f)
                   (buffer-set-local! buf 'notmuch-msgs (cadr rendered))))
             (goto-char! 0)))))))
+
+(mode-keys! "notmuch-show-mode"
+  '(
+    ("a" "notmuch-show-archive")
+    ("r" "notmuch-show-reply")
+    ("v" "notmuch-show-toggle-view")
+    ("j" "notmuch-jump")
+    ("q" "quit-window")))
 
 ;; ONE show buffer, reused — it is a view, not a document. The subject
 ;; lives in the modeline; 'transient keeps its derived content out of the
@@ -1067,8 +1071,12 @@ when a message has no text/plain part." 'group 'notmuch)
 
 (define-mode "mail-compose-mode"
   (lambda ()
-    (local-set-key "C-c C-c" "mail-send")
-    (local-set-key "C-c C-k" "mail-abort")))
+    ))
+
+(mode-keys! "mail-compose-mode"
+  '(
+    ("C-c C-c" "mail-send")
+    ("C-c C-k" "mail-abort")))
 
 (mode-doc! "mail-compose-mode"
   "A message you are writing. The headers sit above the separator line and the body below it. `C-c C-c` sends the message, and `C-c C-k` abandons it.")

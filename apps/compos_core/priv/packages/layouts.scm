@@ -110,14 +110,14 @@
             (set-frame-local! 'overview-return (list base group))
             (set-frame-local! 'overview-marked '())
             (set-frame-local! 'overview-active #t)
-            (set-frame-local! 'transient-keymap (overview--bindings))
+            (transient-keymap-install! (overview--bindings))
             (transient-show! #t)
             (overview--hint!)
             #t)))))
 
 (define (overview--unlock!)
   (transient-show! #f)
-  (set-frame-local! 'transient-keymap #f)
+  (transient-keymap-clear!)
   (set-frame-local! 'overview-active #f)
   (set-frame-local! 'overview-marked '()))
 

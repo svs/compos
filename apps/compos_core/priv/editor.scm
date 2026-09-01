@@ -3266,6 +3266,31 @@
   (let ((m (assoc name *minor-mode-setups*)))
     (and m (> (length m) 3) (nth 3 m))))
 
+;; give a registered minor mode its keymap after the fact
+(define (minor-mode-keymap! name map)
+  (define-keymap! map)
+  (let ((m (assoc name *minor-mode-setups*)))
+    (when m
+      (set! *minor-mode-setups*
+        (cons (list name (nth 1 m) (nth 2 m) map)
+              (remove (lambda (e) (equal? (car e) name)) *minor-mode-setups*))))))
+
+;; (mode-keys! MODE ((KEYS COMMAND) ...)): bind once on MODE's map, at
+;; load; every buffer that wears the mode answers, and a buffer's own
+;; binding still wins
+(define (mode-keys! mode pairs)
+  (define-keymap! (mode-keymap mode))
+  (for-each (lambda (p) (define-key (mode-keymap mode) (car p) (cadr p))) pairs)
+  mode)
+
+;; (minor-mode-keys! NAME ((KEYS COMMAND) ...)): the minor mode's map,
+;; NAME-map, in force while the mode is on and gone when it is off
+(define (minor-mode-keys! name pairs)
+  (let ((map (string-append name "-map")))
+    (minor-mode-keymap! name map)
+    (for-each (lambda (p) (define-key map (car p) (cadr p))) pairs)
+    map))
+
 ;; the mode's map joins the buffer's minor maps, first
 (define (minor-mode--attach-map! buf name)
   (let ((map (minor-mode-keymap name)))
@@ -4238,6 +4263,13 @@
 (local-set-key* " *completion*" "TAB" "completion-accept")
 (local-set-key* " *completion*" "C-g" "completion-quit")
 (local-set-key* " *completion*" "ESC" "completion-quit")
+;; a printable inserts and the popup narrows; DEL widens it. Both are
+;; bindings, so a package can change what typing into the popup does.
+(define-command "completion-delete-backward" "Delete the character before point and narrow the popup"
+  (lambda ()
+    (delete-char! -1)
+    (completion-requery!)))
+(local-set-key* " *completion*" "DEL" "completion-delete-backward")
 
 ;; dabbrev: complete the word before point from words in this buffer
 (define (capf-dabbrev)
@@ -7411,6 +7443,7 @@
 (load (string-append (compos-priv-dir) "/editor/blocks/block.scm"))
 (load (string-append (compos-priv-dir) "/editor/blocks/diff-block.scm"))
 (load (string-append (compos-priv-dir) "/editor/blocks/llm-rewrite.scm"))
+(load (string-append (compos-priv-dir) "/editor/goto-address.scm"))
 (global-set-key "M-|" "llm-pipe-region")
 
 ;; gptel's most Emacs-shaped operation: the buffer is both the prompt and
@@ -10021,6 +10054,7 @@
 
 (define-command "universal-argument" "Start or multiply the next command's prefix argument"
   (lambda ()
+    (run-hooks 'universal-argument-hook)
     (let ((raw (current-prefix-arg)))
       (set-prefix-arg!
         (cond ((number? raw) (list (* raw 4)))
@@ -10030,6 +10064,7 @@
 
 (define-command "digit-argument" "Add a digit to the next command's prefix argument"
   (lambda ()
+    (run-hooks 'universal-argument-hook)
     (let* ((raw (current-prefix-arg))
            (key (car (reverse (last-keys))))
            ;; "1" after C-u, or "M-1" on its own: the digit is the last character
@@ -10041,6 +10076,7 @@
 
 (define-command "negative-argument" "Negate the next command's prefix argument"
   (lambda ()
+    (run-hooks 'universal-argument-hook)
     (let ((raw (current-prefix-arg)))
       (set-prefix-arg!
         (cond ((number? raw) (- raw))
@@ -10051,10 +10087,55 @@
 (undo-exempt! "digit-argument")
 (undo-exempt! "negative-argument")
 
+;; Emacs's universal-argument-map: while a prefix argument is pending, the
+;; digits, - and C-u come from this map, the frame's overriding map until
+;; the next command. Every prefix command arms it.
+(define-keymap! "universal-argument-map")
+(for-each (lambda (d) (define-key "universal-argument-map" d "digit-argument"))
+          '("0" "1" "2" "3" "4" "5" "6" "7" "8" "9"))
+(define-key "universal-argument-map" "-" "negative-argument")
+(define-key "universal-argument-map" "C-u" "universal-argument")
+
+(define (universal-argument--arm!)
+  (overriding-map! "universal-argument-map" #f #t))
+
+(add-hook! 'universal-argument-hook 'universal-argument--arm!)
+
 ;; M-1 .. M-9, M-0 and M-- are the digit arguments, as in Emacs
 (for-each (lambda (d) (global-set-key (string-append "M-" d) "digit-argument"))
           '("0" "1" "2" "3" "4" "5" "6" "7" "8" "9"))
 (global-set-key "M--" "negative-argument")
+
+;;; --- self-insert-command --------------------------------------------------------
+;;; Every printable key and SPC are bound to self-insert-command in the
+;;; global map, as in Emacs, so a key that inserts itself reaches that
+;;; command through a keymap like any other, and a mode can rebind a
+;;; letter. The dispatcher inserts the key itself, with the count and
+;;; the region rule; the command body below serves M-x and command-call.
+
+(define self-insert--printables
+  (string-append
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"))
+
+(define (self-insert--keys)
+  (let loop ((i 0) (acc (list "SPC")))
+    (if (>= i (string-length self-insert--printables))
+        (reverse acc)
+        (loop (+ i 1) (cons (substring self-insert--printables i (+ i 1)) acc)))))
+
+(define-command "self-insert-command" "Insert the character you typed" (interactive 'p)
+  (lambda (n)
+    (let* ((ks (last-keys))
+           (k (if (pair? ks) (car (reverse ks)) ""))
+           (ch (cond ((equal? k "SPC") " ")
+                     ((= (string-length k) 1) k)
+                     (else ""))))
+      (repeat-count n (lambda () (insert! ch))))))
+
+(for-each (lambda (k) (global-set-key k "self-insert-command")) (self-insert--keys))
+;; and into the completion popup: typing narrows it in place
+(for-each (lambda (k) (local-set-key* " *completion*" k "self-insert-command")) (self-insert--keys))
 
 (public! 'interactive "(interactive CODE ...) — a command's argument spec: 'p numeric prefix, 'P raw prefix, 'r region start and end, 'b buffer, 'd point, 'm mark, \"sPrompt: \" a string, \"nPrompt: \" a number, \"fPrompt: \" a file")
 (public! 'command-call "(command-call NAME ARG ...) — run a command's function with explicit arguments")
@@ -10842,6 +10923,9 @@
 (public! 'define-globalized-minor-mode! "(define-globalized-minor-mode! GLOBAL LOCAL ELIGIBLE? [DOC]) — the command GLOBAL turns LOCAL on in every buffer ELIGIBLE? accepts, now and as buffers appear")
 (public! 'globalized-minor-mode-on? "(globalized-minor-mode-on? GLOBAL) — #t while the globalized mode is on")
 (public! 'auto-mode-for-buffer "(auto-mode-for-buffer BUF [NAME]) — the mode BUF would open in: magic-mode-alist, then the interpreter line, then the name")
+(public! 'mode-keys! "(mode-keys! MODE ((KEYS COMMAND) ...)) — bind once on MODE's map; every buffer in the mode answers")
+(public! 'minor-mode-keys! "(minor-mode-keys! NAME ((KEYS COMMAND) ...)) — the minor mode's map, in force while the mode is on")
+(public! 'minor-mode-keymap! "(minor-mode-keymap! NAME KEYMAP) — give a registered minor mode its keymap")
 (public! 'mode-keymap "(mode-keymap MODE) — the name of the keymap MODE owns, MODE-map; bind there with define-key and every buffer in the mode answers")
 (public! 'minor-mode-keymap "(minor-mode-keymap NAME) — the keymap a minor mode registered, or #f")
 (public! 'local-remap! "(local-remap! FROM-COMMAND TO-COMMAND) — Emacs [remap]: every key bound to FROM runs TO in this buffer (arrows, C-n/C-p, user bindings alike)")
@@ -10876,6 +10960,8 @@
 (public! 'font-lock-disable! "(font-lock-disable! BUF) — stop painting BUF's keywords")
 (public! 'isearch-matches "(isearch-matches Q) — every (START END) of Q in the current buffer, up to isearch-lazy-highlight-max")
 (public! 'hl-line-on? "(hl-line-on? BUF) — #t unless hl-line-mode turned the line highlight off in BUF")
+(public! 'overriding-map! "(overriding-map! KEYMAP [LOCK?] [UNTIL-COMMAND?]) — the frame's overriding keymap; #f clears it")
+(public! 'buffer-at-point-map! "(buffer-at-point-map! BUF KEYMAP) — the keymap of the thing at point in BUF, ahead of the minor maps; #f clears it")
 (public! 'defvar "(defvar NAME DEFAULT [DOC]) — NAME takes DEFAULT unless it is bound already")
 (public! 'defvar-local "(defvar-local NAME DEFAULT [DOC]) — defvar, and variable-set! writes the current buffer's own value")
 (public! 'default-value "(default-value NAME) — the global value, or #f")

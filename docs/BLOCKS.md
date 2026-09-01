@@ -38,6 +38,7 @@ Keys a kind can declare:
 | `runnable` | `#f` | the kind refuses to run |
 | `run` | fn | `(FN BUF BLOCK LANG BODY)` -> `(ok LANG)`, `(pending LANG)`, or `(error MSG)`; BLOCK from the finder |
 | `interpreter` | string | the interpreter the shared shell runner uses |
+| `keymap` | string | the keymap in force while point is inside a block of this kind; a kind with `keys` and no keymap gets one built from them |
 | `row-spans` | fn | `(FN START LINE LEN HEAD?)` -> the spans that draw one body line in the page instead of the code row |
 
 An unregistered info string still paints: its own name is tried as a

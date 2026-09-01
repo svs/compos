@@ -212,13 +212,18 @@
       (buffer-set-local! movie key (buffer-local source key)))
     '(default-directory render-mode preview-renderer ts-lang text-scale)))
 
+;; the playback keys are a minor mode's map over the source's own mode:
+;; the movie buffer wears the source mode for its look, and this map for
+;; its keys
+(register-minor-mode! "movie-mode" (lambda (buf) #t) (lambda (buf) #t))
+(minor-mode-keys! "movie-mode"
+  '(("SPC" "movie-toggle-play")
+    ("n" "movie-next") ("<right>" "movie-next")
+    ("p" "movie-previous") ("<left>" "movie-previous")
+    ("q" "movie-quit")))
+
 (define (movie-install-keys! movie)
-  (for-each
-    (lambda (row) (local-set-key* movie (car row) (cadr row)))
-    '(("SPC" "movie-toggle-play")
-      ("n" "movie-next") ("<right>" "movie-next")
-      ("p" "movie-previous") ("<left>" "movie-previous")
-      ("q" "movie-quit"))))
+  (enable-minor-mode! movie "movie-mode"))
 
 (define (movie-open-stream! movie index)
   (buffer-create *movie-stream-buffer*)

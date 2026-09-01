@@ -232,7 +232,6 @@
     (buffer-set-read-only! buf #t)))
 
 (define (prov-revision-setup! buf)
-  (local-set-key* buf "q" "quit-window")
   (let ((rev (buffer-local buf 'revision)))
     (when rev (prov-render-revision! buf rev))))
 
@@ -257,6 +256,7 @@
 (mode-icon! "revision-mode" "")
 
 (define-mode "revision-mode" (lambda () (prov-revision-setup! (current-buffer))))
+(mode-keys! "revision-mode" '(("q" "quit-window")))
 
 (mode-doc! "revision-mode"
   "One revision of one buffer: its actor, its group, and every operation it holds, with the text each one inserted and deleted.")

@@ -485,12 +485,7 @@
   (unless (buffer-local buf 'code-saved)
     (buffer-set-local! buf 'code-saved
       (list (list 'read-only (buffer-read-only? buf))
-            (list 'modeline-info (buffer-local buf 'modeline-info))
-            (list 'keys (map (lambda (k)
-                               (let ((hit (assoc (car k) (local-keys buf))))
-                                 (list (car k) (if hit (cadr hit) #f))))
-                             code--keys)))))
-  (for-each (lambda (k) (local-set-key* buf (car k) (cadr k))) code--keys)
+            (list 'modeline-info (buffer-local buf 'modeline-info)))))
   (buffer-set-read-only! buf #t)
   ;; the node questions read the CURRENT buffer, so a restore of a buffer
   ;; that is not on screen rebuilds from the locals alone
@@ -519,12 +514,7 @@
     (and hit (cadr hit))))
 
 (define (code--teardown! buf)
-  (for-each
-    (lambda (k)
-      (if (cadr k)
-          (local-set-key* buf (car k) (cadr k))
-          (local-unset-key* buf (car k))))
-    (or (code--saved buf 'keys) '()))
+  ;; the keys are the mode's map, and it leaves with the mode
   (buffer-set-read-only! buf (code--saved buf 'read-only))
   (buffer-set-local! buf 'modeline-info (code--saved buf 'modeline-info))
   (overlay-clear! buf 'code-scope)
@@ -535,6 +525,7 @@
   (buffer-set-local! buf 'code-saved #f))
 
 (register-minor-mode! "code-browse-mode" code--setup! code--teardown!)
+(minor-mode-keys! "code-browse-mode" code--keys)
 
 ;; A surface that already answers single keys must keep them. The diff
 ;; buffer reads n and TAB, dired reads d and m, the chat reads RET — and

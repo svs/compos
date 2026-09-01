@@ -126,29 +126,37 @@ defmodule Compos.Core.KeyDispatch do
 
   defp completion_key(key, pending) do
     case Editor.lookup_keymap(@completion_map, [key]) do
+      # a printable is bound to self-insert-command in the popup's map:
+      # it inserts and the popup narrows in place
+      {:command, "self-insert-command"} ->
+        self_insert(key)
+        requery_completion()
+
       {:command, name} ->
         run(name)
 
       _ ->
-        cond do
-          key == "DEL" ->
-            # narrow in place: the popup's query shrinks with the buffer text
-            Buffer.delete_char(Editor.current_buffer(), -1)
-            requery_completion()
+        # any other key dismisses and acts normally
+        Editor.completion_dismiss()
+        buffer_key(key, pending)
+    end
+  end
 
-          key == "SPC" ->
-            Editor.completion_dismiss()
-            self_insert(" ")
+  @doc "Narrow the popup to the text between its start and point; Scheme calls this after its own edit."
+  def requery_completion do
+    case Editor.snapshot().completion do
+      %{start: start} ->
+        buf = Editor.current_buffer()
+        point = Buffer.point(buf)
 
-          printable?(key) ->
-            self_insert(key)
-            requery_completion()
-
-          true ->
-            # any other key dismisses and acts normally
-            Editor.completion_dismiss()
-            buffer_key(key, pending)
+        if point > start do
+          Editor.completion_query(binary_part(Buffer.text(buf), start, point - start))
+        else
+          Editor.completion_dismiss()
         end
+
+      _ ->
+        :ok
     end
   end
 
@@ -207,24 +215,19 @@ defmodule Compos.Core.KeyDispatch do
 
   # Scheme owns the active Transient keymap and resolves the sequence. The
   # core only maintains the pending chord and invokes the returned command.
+  # Transient's map is the frame's overriding map, locked: the ladder
+  # answers its keys and nothing else, and an unbound key says so
   defp transient_key(key, pending) do
     Editor.user_acted()
     Editor.set_echo("")
-    seq = pending ++ [key]
 
-    case Session.call_named("transient-dispatch-key", [seq]) do
-      {:ok, ["command", name]} ->
-        Editor.set_pending([])
-        run(name)
-
-      {:ok, ["prefix"]} ->
-        Editor.set_pending(seq)
-        Editor.set_echo(Enum.join(seq, " ") <> "-")
-
-      _ ->
-        Editor.set_pending([])
-        Editor.set_echo(Enum.join(seq, " ") <> " is not a transient suffix")
-    end
+    resolve_and_run(
+      key,
+      pending,
+      fn seq -> Editor.set_echo(Enum.join(seq, " ") <> " is not a transient suffix") end,
+      nil,
+      false
+    )
   end
 
   defp buffer_key(key, pending), do: buffer_key(key, pending, Editor.prefix_arg())
@@ -234,20 +237,17 @@ defmodule Compos.Core.KeyDispatch do
     Editor.user_acted()
     Editor.set_echo("")
 
-    if prefix_arg != nil and pending == [] and argument_key?(key) do
-      Editor.set_last_keys([key])
-      run(if(key == "-", do: "negative-argument", else: "digit-argument"))
-    else
-      resolve_and_run(
-        key,
-        pending,
-        fn seq ->
-          Editor.set_prefix_arg(nil)
-          Editor.set_echo(Enum.join(seq, " ") <> " is undefined")
-        end,
-        prefix_arg
-      )
-    end
+    # after C-u the digits and - come from universal-argument-map, the
+    # frame's overriding map until the next command
+    resolve_and_run(
+      key,
+      pending,
+      fn seq ->
+        Editor.set_prefix_arg(nil)
+        Editor.set_echo(Enum.join(seq, " ") <> " is undefined")
+      end,
+      prefix_arg
+    )
   end
 
   # THE lookup ladder (dup #21) — every surface resolves a key the same
@@ -255,10 +255,19 @@ defmodule Compos.Core.KeyDispatch do
   # through. A command runs; a prefix accumulates and echoes; anything
   # else clears the prefix, self-inserts a printable, and otherwise defers
   # to UNDEFINED — the one point where the surfaces differ.
-  defp resolve_and_run(key, pending, undefined, prefix_arg \\ nil) do
+  # INSERT? false (Transient) keeps an unbound printable from inserting.
+  defp resolve_and_run(key, pending, undefined, prefix_arg \\ nil, insert? \\ true) do
     seq = pending ++ [key]
 
     case lookup_esc_meta(seq) do
+      # the global map binds every printable to self-insert-command, as
+      # Emacs does; the fast path inserts the key itself, with the count
+      # and the region rule
+      {:command, "self-insert-command"} ->
+        Editor.set_pending([])
+        Editor.set_last_keys(seq)
+        self_insert(if(key == "SPC", do: " ", else: key), prefix_arg)
+
       {:command, name} ->
         Editor.set_pending([])
         # the sequence that ran the command: one command bound to many
@@ -277,9 +286,11 @@ defmodule Compos.Core.KeyDispatch do
       :none ->
         Editor.set_pending([])
 
+        # a printable no map binds still inserts, so a mode that unbinds
+        # a letter does not lose the letter
         cond do
-          pending == [] and key == "SPC" -> self_insert(" ", prefix_arg)
-          pending == [] and printable?(key) -> self_insert(key, prefix_arg)
+          insert? and pending == [] and key == "SPC" -> self_insert(" ", prefix_arg)
+          insert? and pending == [] and printable?(key) -> self_insert(key, prefix_arg)
           true -> undefined.(seq)
         end
     end
@@ -321,22 +332,6 @@ defmodule Compos.Core.KeyDispatch do
   end
 
   # text typed since the popup opened is the popup's query (orderless narrowing)
-  defp requery_completion do
-    case Editor.snapshot().completion do
-      %{start: start} ->
-        buf = Editor.current_buffer()
-        point = Buffer.point(buf)
-
-        if point > start do
-          Editor.completion_query(binary_part(Buffer.text(buf), start, point - start))
-        else
-          Editor.completion_dismiss()
-        end
-
-      _ ->
-        :ok
-    end
-  end
 
   defp self_insert(text, prefix_arg \\ nil) do
     count = prefix_numeric_value(prefix_arg)
@@ -414,8 +409,6 @@ defmodule Compos.Core.KeyDispatch do
       if grouped? and Buffer.exists?(buffer), do: Buffer.undo_group(buffer, false)
     end
   end
-
-  defp argument_key?(key), do: key in ~w(0 1 2 3 4 5 6 7 8 9 -)
 
   defp prefix_numeric_value(nil), do: 1
   defp prefix_numeric_value([n]) when is_integer(n), do: n

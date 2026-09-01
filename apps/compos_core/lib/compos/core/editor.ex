@@ -146,6 +146,23 @@ defmodule Compos.Core.Editor do
   def minor_maps(buffer), do: GenServer.call(__MODULE__, {:minor_maps, buffer})
   def set_global_minor_maps(names), do: GenServer.call(__MODULE__, {:set_global_minor_maps, names})
   def global_minor_maps, do: GenServer.call(__MODULE__, :global_minor_maps)
+  @doc """
+  The frame's overriding map, or nil to clear it. LOCK? makes an unbound
+  key undefined instead of falling through (Transient). UNTIL_COMMAND?
+  drops the map when the next ordinary command finishes (the prefix
+  argument's map).
+  """
+  def set_overriding_map(name, lock? \\ false, until_command? \\ false, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:set_overriding_map, name, lock?, until_command?, fid(fid)})
+
+  def overriding_map(fid \\ nil), do: GenServer.call(__MODULE__, {:overriding_map, fid(fid)})
+
+  @doc "The keymap of the thing at point in BUFFER (a block), or nil."
+  def set_at_point_map(buffer, name),
+    do: GenServer.call(__MODULE__, {:set_at_point_map, buffer, name})
+
+  def at_point_map(buffer), do: GenServer.call(__MODULE__, {:at_point_map, buffer})
+
   @doc "The keymap names that answer for BUFFER, in precedence order, global last."
   def buffer_keymaps(buffer), do: GenServer.call(__MODULE__, {:buffer_keymaps, buffer})
   @doc "Every key sequence bound to COMMAND in BUFFER's ladder and the global map."
@@ -513,6 +530,8 @@ defmodule Compos.Core.Editor do
       this_command: "",
       last_command: "",
       last_keys: [],
+      # Emacs overriding-terminal-local-map: %{map:, lock:, until_command:}
+      overriding: nil,
       transient: nil,
       minibuffer: nil,
       mb_redirect: true,
@@ -546,6 +565,9 @@ defmodule Compos.Core.Editor do
        keymaps: %{},
        # buffer -> the minor-mode keymap names in force there, first wins
        minor_maps: %{},
+       # buffer -> the keymap of the thing at point (a block); Emacs's
+       # overlay keymap, set by Scheme after every command
+       at_point_maps: %{},
        # the minor-mode keymaps in force in every buffer (cua-mode)
        global_minor_maps: [],
        remaps: %{},
@@ -592,6 +614,8 @@ defmodule Compos.Core.Editor do
           this_command: "",
           last_command: "",
           last_keys: [],
+          # Emacs overriding-terminal-local-map: %{map:, lock:, until_command:}
+          overriding: nil,
           transient: nil,
           minibuffer: nil,
           mb_redirect: true,
@@ -844,6 +868,40 @@ defmodule Compos.Core.Editor do
     do: {:reply, :ok, %{state | global_minor_maps: Enum.map(names, &keymap_key/1)}}
 
   def handle_call(:global_minor_maps, _from, state), do: {:reply, state.global_minor_maps, state}
+
+  def handle_call({:set_overriding_map, name, lock?, until?, fid}, _from, state) do
+    f = frame(state, fid)
+
+    over =
+      if name,
+        do: %{map: keymap_key(name), lock: lock? == true, until_command: until? == true},
+        else: nil
+
+    {:reply, :ok, put_frame(state, Map.put(f, :overriding, over))}
+  end
+
+  def handle_call({:overriding_map, fid}, _from, state) do
+    case Map.get(frame(state, fid), :overriding) do
+      %{map: m} -> {:reply, m, state}
+      _ -> {:reply, nil, state}
+    end
+  end
+
+  def handle_call({:set_at_point_map, buffer, name}, _from, state) do
+    key = keymap_key(buffer)
+
+    current = Map.get(state, :at_point_maps, %{})
+
+    maps =
+      if name,
+        do: Map.put(current, key, keymap_key(name)),
+        else: Map.delete(current, key)
+
+    {:reply, :ok, Map.put(state, :at_point_maps, maps)}
+  end
+
+  def handle_call({:at_point_map, buffer}, _from, state),
+    do: {:reply, Map.get(Map.get(state, :at_point_maps, %{}), keymap_key(buffer)), state}
 
   def handle_call({:buffer_keymaps, buffer}, _from, state),
     do: {:reply, state |> ladder(buffer, read_only_buffer?(buffer)) |> Enum.map(&elem(&1, 0)), state}
@@ -1274,6 +1332,14 @@ defmodule Compos.Core.Editor do
   def handle_call({:finish_command, name, keep_prefix, fid}, _from, state) do
     f = frame(state, fid)
     f = if keep_prefix, do: f, else: Map.put(f, :prefix_arg, nil)
+
+    # the prefix argument's map goes with the prefix argument
+    f =
+      case Map.get(f, :overriding) do
+        %{until_command: true} when not keep_prefix -> Map.put(f, :overriding, nil)
+        _ -> f
+      end
+
     # what the command said it was, when it said so (set-this-command!)
     this = Map.get(f, :this_command) || ""
     last = if this in ["", nil], do: name, else: this
@@ -2083,6 +2149,9 @@ defmodule Compos.Core.Editor do
   # is the keymap named after the buffer; use-local-map! gives it the mode's
   # map as its parent. A key resolves down this ladder:
   #
+  #   the frame's overriding map (Transient, the prefix argument's map);
+  #     locked, an unbound key is undefined
+  #   the keymap of the thing at point (a block)
   #   the buffer's minor-mode maps, first wins
   #   the global minor-mode maps (cua-mode)
   #   the buffer's own map, then its parents
@@ -2092,9 +2161,12 @@ defmodule Compos.Core.Editor do
   # An exact hit anywhere wins over a prefix anywhere. Emacs's
   # minor-mode-map-alist, local map and global map, in that order.
 
-  defp keymap(state, name), do: Map.get(state.keymaps, name, %{bindings: %{}, parent: nil})
+  # Map.get with a default: a hot swap keeps a state built before the key
+  defp keymap(state, name),
+    do: Map.get(Map.get(state, :keymaps, %{}), name, %{bindings: %{}, parent: nil})
 
-  defp put_keymap(state, name, map), do: %{state | keymaps: Map.put(state.keymaps, name, map)}
+  defp put_keymap(state, name, map),
+    do: Map.put(state, :keymaps, Map.put(Map.get(state, :keymaps, %{}), name, map))
 
   defp update_bindings(state, name, fun) do
     map = keymap(state, name)
@@ -2106,7 +2178,7 @@ defmodule Compos.Core.Editor do
   defp chain(_state, nil, _seen), do: []
 
   defp chain(state, name, seen) do
-    case Map.fetch(state.keymaps, name) do
+    case Map.fetch(Map.get(state, :keymaps, %{}), name) do
       {:ok, %{bindings: b, parent: p}} ->
         if name in seen, do: [], else: [{name, b} | chain(state, p, [name | seen])]
 
@@ -2118,11 +2190,27 @@ defmodule Compos.Core.Editor do
   # the {name, bindings} that answer for BUFFER, in precedence order
   defp ladder(state, buffer, read_only?) do
     key = keymap_key(buffer)
-    minor = Map.get(state.minor_maps, key, []) ++ state.global_minor_maps
+    at_point = Map.get(Map.get(state, :at_point_maps, %{}), key)
+    minor = Map.get(Map.get(state, :minor_maps, %{}), key, []) ++ Map.get(state, :global_minor_maps, [])
     ro = if read_only?, do: chain(state, @readonly_map), else: []
 
-    Enum.flat_map(minor, &chain(state, &1)) ++
+    chain(state, at_point) ++
+      Enum.flat_map(minor, &chain(state, &1)) ++
       chain(state, key) ++ ro ++ [{"global", state.keymap}]
+  end
+
+  # the frame's overriding map ahead of everything; locked, it is the
+  # whole ladder
+  defp frame_ladder(state, f, buffer, read_only?) do
+    # a prompt reads its own keys: Transient's map waits while the
+    # minibuffer is up, as transient--suspend-override does in Emacs
+    over = if f.minibuffer, do: nil, else: Map.get(f, :overriding)
+
+    case over do
+      %{map: m, lock: true} -> chain(state, m)
+      %{map: m} -> chain(state, m) ++ ladder(state, buffer, read_only?)
+      _ -> ladder(state, buffer, read_only?)
+    end
   end
 
   defp prefix?(bindings, seq), do: Enum.any?(Map.keys(bindings), &List.starts_with?(&1, seq))
@@ -2152,7 +2240,7 @@ defmodule Compos.Core.Editor do
     # there, so every buffer you cannot type in quits the same way. The
     # buffer only answers read_only? for a key that map claims, so the
     # other 200 keys per minute cost one map lookup.
-    ladder = ladder(state, buffer, readonly_hit?(state, seq, buffer))
+    ladder = frame_ladder(state, f, buffer, readonly_hit?(state, seq, buffer))
 
     # Emacs command remapping: the buffer substitutes its own command for
     # a resolved one — every key bound to the original follows, arrows and

@@ -104,6 +104,21 @@ defmodule Compos.CoreTest do
       refute_receive {:fired, _}, 100
     end
 
+    test "a buffer killed inside the debounce ends its rule, not the Reactor" do
+      name = uniq("short-lived")
+      {:ok, _} = Core.create_buffer(name)
+      reactor = Process.whereis(Reactor)
+
+      # not eager: the fire path reads the buffer's name to ask if it is on screen
+      {:ok, id} = Reactor.on_change(name, :any, fn _ -> :ok end, debounce: 30)
+      Buffer.append(name, "one line\n")
+      :ok = Core.kill_buffer(name)
+
+      Process.sleep(120)
+      assert Process.whereis(Reactor) == reactor, "the Reactor survived the dead buffer"
+      refute Enum.any?(Reactor.rules(), &(&1.id == id)), "the dead buffer's rule is gone"
+    end
+
     test "ignores agent-sourced edits by default (loop prevention)" do
       name = uniq("loop")
       {:ok, _} = Core.create_buffer(name)

@@ -582,10 +582,7 @@
         (set-mode! "json-mode")
         (message "Use spreadsheet-open to open this workbook as a grid"))
       (begin
-        (local-set-key* buffer "C-x C-s" "spreadsheet-save")
-        (local-set-key* buffer "g" "spreadsheet-reload")
-        (local-set-key* buffer "v" "spreadsheet-visit-source")
-        (local-set-key* buffer "q" "quit-window")
+        
         (spreadsheet--render! buffer))))
 
 (define (spreadsheet--refresh-theme!)
@@ -616,6 +613,13 @@
 
 (define-mode "spreadsheet-mode"
   (lambda () (spreadsheet--setup! (current-buffer))))
+
+(mode-keys! "spreadsheet-mode"
+  '(
+    ("C-x C-s" "spreadsheet-save")
+    ("g" "spreadsheet-reload")
+    ("v" "spreadsheet-visit-source")
+    ("q" "quit-window")))
 
 (mode-doc! "spreadsheet-mode"
   "Edit a workbook grid. Changes save to its backend. Press `C-g`, then `g`, to reload. Press `v` to visit the data file.")

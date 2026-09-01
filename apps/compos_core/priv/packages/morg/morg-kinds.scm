@@ -15,6 +15,9 @@
 ;;;                       (pending LANG), or (error MSG); BLOCK is the
 ;;;                       finder's (START END INFO BODY-START BODY-END)
 ;;;   interpreter STRING  the shell interpreter the shared shell runner uses
+;;;   keymap      STRING  the keymap in force while point is inside a block
+;;;                       of this kind (Emacs's overlay keymap); a kind that
+;;;                       declares 'keys and no keymap gets one built from them
 ;;;   row-spans   FN      (FN START LINE LEN HEAD?) -> the spans that draw
 ;;;                       one body line in the page, instead of the code
 ;;;                       row; HEAD? is #t on the first row after the fence
@@ -142,6 +145,20 @@
               '()))))
     '()
     blocks))
+
+;; the keymap in force inside a block of LANG, or #f: the declared one,
+;; else one built once from the kind's keys
+(define (fence-kind-keymap lang)
+  (let ((declared (fence-kind-get lang 'keymap #f))
+        (keys (fence-kind-get lang 'keys #f)))
+    (cond (declared declared)
+          ((pair? keys)
+           (let ((name (string-append (string-downcase lang) "-block-map")))
+             (define-keymap! name)
+             (for-each (lambda (kv) (define-key name (car kv) (cadr kv))) keys)
+             (fence-kind-merge! lang 'keymap name)
+             name))
+          (else #f))))
 
 (define (describe-fence-kind name)
   (let ((k (fence-kind name)))

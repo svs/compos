@@ -277,14 +277,17 @@
 ;; live rather than as a frozen screenshot of a dead session
 (define (mcp-hub-detail-setup! buf)
   (let ((name (buffer-local buf 'mcp-hub-name)))
-    (local-set-key* buf "g" "mcp-hub-detail-refresh")
-    (local-set-key* buf "l" "mcp-hub-detail-log")
-    (local-set-key* buf "q" "quit-window")
     (when name (mcp-hub-render-detail! buf name))))
 
 (mode-icon! "mcp-detail-mode" "")
 
 (define-mode "mcp-detail-mode" (lambda () (mcp-hub-detail-setup! (current-buffer))))
+
+(mode-keys! "mcp-detail-mode"
+  '(
+    ("g" "mcp-hub-detail-refresh")
+    ("l" "mcp-hub-detail-log")
+    ("q" "quit-window")))
 
 (mode-doc! "mcp-detail-mode"
   "What one MCP server serves: its tools, its resources and its prompts. `g` re-reads them from the server, and `l` shows the wire log.")
@@ -336,13 +339,16 @@
 
 (define (mcp-hub-log-setup! buf)
   (let ((name (buffer-local buf 'mcp-hub-name)))
-    (local-set-key* buf "g" "mcp-hub-log-refresh")
-    (local-set-key* buf "q" "quit-window")
     (when name (mcp-hub-render-log! buf name))))
 
 (mode-icon! "mcp-log-mode" "")
 
 (define-mode "mcp-log-mode" (lambda () (mcp-hub-log-setup! (current-buffer))))
+
+(mode-keys! "mcp-log-mode"
+  '(
+    ("g" "mcp-hub-log-refresh")
+    ("q" "quit-window")))
 
 (mode-doc! "mcp-log-mode"
   "The JSON-RPC frames between the editor and one MCP server, oldest first. `g` re-reads them. The server's error output is not here — it goes to `~/.compos/daemon.log`.")

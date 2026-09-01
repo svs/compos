@@ -557,12 +557,7 @@
   (sentry--join-group! buf)
   (desktop-skip! buf 'render-blocks)
   (desktop-skip! buf 'sentry-detail-issue)
-  (local-set-key* buf "a" "sentry-ask-agent")
-  (local-set-key* buf "o" "sentry-open-web")
-  (local-set-key* buf "R" "sentry-resolve")
-  (local-set-key* buf "g" "sentry-detail-refresh")
-  (local-set-key* buf "e" "sentry-events")
-  (local-set-key* buf "q" "quit-window")
+  
   ;; the issue comes through the buffer cache: a wake draws what the
   ;; buffer holds and fetches only past the TTL. An empty buffer, or one
   ;; whose blocks source did not survive a restart, fetches now — off
@@ -602,8 +597,6 @@
 
 (define (sentry--events-setup! buf)
   (sentry--join-group! buf)
-  (local-set-key* buf "g" "sentry-events-refresh")
-  (local-set-key* buf "q" "quit-window")
   ;; same wake rule as the detail view: no fetch when text is cached
   (let ((issue-id (buffer-local buf 'sentry-issue-id)))
     (when (and issue-id (= (buffer-size buf) 0))
@@ -798,6 +791,15 @@
 (define-mode "sentry-detail-mode"
   (lambda () (sentry--detail-setup! (current-buffer))))
 
+(mode-keys! "sentry-detail-mode"
+  '(
+    ("a" "sentry-ask-agent")
+    ("o" "sentry-open-web")
+    ("R" "sentry-resolve")
+    ("g" "sentry-detail-refresh")
+    ("e" "sentry-events")
+    ("q" "quit-window")))
+
 (mode-doc! "sentry-detail-mode"
   "An actionable Sentry issue workspace. `a` asks the agent. `R` resolves after confirmation.")
 
@@ -826,6 +828,11 @@
 
 (define-mode "sentry-events-mode"
   (lambda () (sentry--events-setup! (current-buffer))))
+
+(mode-keys! "sentry-events-mode"
+  '(
+    ("g" "sentry-events-refresh")
+    ("q" "quit-window")))
 
 (mode-doc! "sentry-events-mode"
   "Safe event identifiers for one Sentry issue. `g` refreshes the list.")

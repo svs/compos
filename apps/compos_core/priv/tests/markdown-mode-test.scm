@@ -170,6 +170,21 @@
                  "the info string stays visible in the kind's face")
     (t--md-done!)))
 
+(deftest 'a-csv-block-draws-as-a-table
+  "commas are column bars, the first row is the head, the rows wear row-csv"
+  (lambda ()
+    (t--md-fresh! "```result-csv\nname,\"a,b\",n\nx,y,1\n```\n")
+    ;; the head row starts at byte 14: name,"a,b",n
+    (check-true! (t--md-has? '(14 27 "row-table")) "the head row is a table row")
+    (check-true! (t--md-has? '(14 27 "row-table-head")) "and it is the head")
+    (check-true! (t--md-has? '(14 27 "row-csv")) "and a csv row")
+    (check-true! (t--md-has? '(18 19 "md-table-bar")) "the first comma is a bar")
+    (check-false! (t--md-has? '(21 22 "md-table-bar")) "a comma inside quotes is text")
+    (check-true! (t--md-has? '(24 25 "md-table-bar")) "the comma after the quoted field is a bar")
+    (check-true! (t--md-has? '(28 33 "row-table")) "the body row is a table row")
+    (check-false! (t--md-has? '(28 33 "row-table-head")) "and not a head")
+    (t--md-done!)))
+
 (deftest 'a-named-fence-shows-its-info
   "the backticks step back; the language stays, dim, and labels the block"
   (lambda ()

@@ -306,6 +306,11 @@
                    (list start le "row-fence")))))
       ((equal? k 'close)
        (list (list start (+ start len) "md-marker") (list start (+ start len) "row-fence")))
+      ;; a kind may draw its own rows (blocks/csv-block.scm draws a table):
+      ;; (FN START LINE LEN HEAD?), HEAD? on the first row after the fence
+      ((and (equal? k 'code) (fence-kind-get (morg-info e) 'row-spans #f))
+       ((fence-kind-get (morg-info e) 'row-spans #f)
+        start line len (and prev (string-prefix? "```" (string-trim prev)) #t)))
       ((equal? k 'code)
        (cons (list start (+ start len) "row-code")
              (let ((f (fence-kind-line-face (morg-info e) line fence-args)))

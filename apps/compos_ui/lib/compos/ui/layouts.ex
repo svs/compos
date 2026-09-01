@@ -235,7 +235,9 @@ defmodule Compos.Ui.Layouts do
           }
           .buf {
             flex: 1;
-            overflow: hidden; /* the server owns scrolling (viewport windowing) */
+            /* the server owns vertical scrolling (viewport windowing); a row
+               wider than the window (a CSV table) scrolls right */
+            overflow: auto hidden;
             padding: 12px 0 22px;
             /* default face drives the text font; themes/customize set the
                vars, buffer-face! overrides them per window via inline style */
@@ -258,7 +260,7 @@ defmodule Compos.Ui.Layouts do
           /* buffers under the ship-all threshold get every line at once
              (editor_live.ex) — the browser owns scroll position natively
              here, no server round-trip per scroll tick */
-          .buf.client-scroll { overflow: hidden auto; }
+          .buf.client-scroll { overflow: auto auto; }
           .line { display: flex; align-items: flex-start; gap: 12px; padding: 0 16px 0 8px;
                   /* empty lines must keep their height even with .linenum hidden (no-nums, writing-mode) */
                   min-height: 1lh; }
@@ -351,6 +353,12 @@ defmodule Compos.Ui.Layouts do
             overflow: hidden; color: transparent;
           }
           .line.row-table-head .line-content { font-weight: 600; }
+          /* a CSV row keeps its columns at their width: the sheet scrolls
+             right instead of folding into the window */
+          .line.row-csv .line-content {
+            width: max-content; min-width: 100%; table-layout: auto; white-space: nowrap;
+          }
+          .line.row-csv .f-md-table-bar { width: auto; padding: 0 12px; }
           /* the rule row draws the line under the head, as row-hr does */
           .line.row-table-rule .line-content { position: relative; }
           .line.row-table-rule .line-content::after {

@@ -15,6 +15,9 @@
 ;;;                       (pending LANG), or (error MSG); BLOCK is the
 ;;;                       finder's (START END INFO BODY-START BODY-END)
 ;;;   interpreter STRING  the shell interpreter the shared shell runner uses
+;;;   row-spans   FN      (FN START LINE LEN HEAD?) -> the spans that draw
+;;;                       one body line in the page, instead of the code
+;;;                       row; HEAD? is #t on the first row after the fence
 ;;;
 ;;; morg.scm and markdown-mode.scm read the paint keys. morg-babel.scm reads
 ;;; the run keys and registers the bundled runners.

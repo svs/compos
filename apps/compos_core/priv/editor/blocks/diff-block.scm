@@ -216,9 +216,10 @@
 
 
 (define (diff-block--hold! buf spans tail ours theirs note state)
+  ;; the record rides the buffer's checkpoint: text and locals snapshot
+  ;; together, so its byte offsets stay true across a restart
   (buffer-set-local! buf 'diff-block
     (append spans (list tail ours theirs note state diff-block--format)))
-  (desktop-skip! buf 'diff-block)
   (diff-block--bind-keys! buf)
   (diff-block--paint! buf spans state))
 

@@ -301,6 +301,10 @@ defmodule Compos.Core.Editor do
 
   # faces: name -> attrs map, merged; frontends map them to CSS vars
   def set_face(name, attrs), do: GenServer.call(__MODULE__, {:set_face, name, attrs})
+  @doc "Forget every attribute of a face. load-theme clears before it applies."
+  def clear_face(name), do: GenServer.call(__MODULE__, {:clear_face, name})
+  @doc "The face table: name -> attrs."
+  def faces, do: GenServer.call(__MODULE__, :faces)
 
   # styles: name -> a stylesheet the mode wrote; the page renders them all.
   # Faces carry colors; styles carry structure (grids, cards, spacing).
@@ -1534,6 +1538,14 @@ defmodule Compos.Core.Editor do
   def handle_call({:set_face, name, attrs}, _from, state) do
     faces = Map.update(state.faces, name, attrs, &Map.merge(&1, attrs))
     changed(:ok, %{state | faces: faces})
+  end
+
+  def handle_call(:faces, _from, state), do: {:reply, state.faces, state}
+
+  def handle_call({:clear_face, name}, _from, state) do
+    if Map.has_key?(state.faces, name),
+      do: changed(:ok, %{state | faces: Map.delete(state.faces, name)}),
+      else: {:reply, :ok, state}
   end
 
   def handle_call({:set_style, name, css}, _from, state),

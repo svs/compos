@@ -97,7 +97,6 @@ defmodule Compos.Core.Desktop do
     desktop = %{
       version: 3,
       frames: frames,
-      faces: views |> List.first({nil, %{faces: %{}}}) |> elem(1) |> Map.get(:faces),
       globals: globals
     }
 
@@ -211,9 +210,10 @@ defmodule Compos.Core.Desktop do
       |> Enum.uniq()
       |> Enum.each(&Compos.Core.restore_runtime/1)
 
-      for {face, attrs} <- desktop[:faces] || %{} do
-        Editor.set_face(face, attrs)
-      end
+      # Faces are not restored. themes.scm persists the theme NAME and
+      # derives the faces at boot, so a theme edit applies on restart.
+      # Replaying the saved face table put the previous session's colours
+      # over the freshly derived theme.
 
       # Seed the cache: a save that runs before the Session is free again
       # writes these back, not an empty list.

@@ -21,6 +21,15 @@ defmodule Compos.Ui.Layouts do
           href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css"
         />
         <meta name="theme-color" content="#e6e0d2" />
+        <script>
+          // the browser chrome follows the theme's default background;
+          // the faces arrive with the LiveView, so read them after each load
+          window.addEventListener("phx:page-loading-stop", () => {
+            const bg = getComputedStyle(document.documentElement).getPropertyValue("--default-bg").trim();
+            const meta = document.querySelector('meta[name="theme-color"]');
+            if (bg && meta) meta.setAttribute("content", bg);
+          });
+        </script>
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
           href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
@@ -84,10 +93,10 @@ defmodule Compos.Ui.Layouts do
           .workspace-bar {
             flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
             min-height: 38px; padding: 7px 14px;
-            border-bottom: 2px solid color-mix(in srgb, var(--error-fg, #d13b32) 72%, #111);
+            border-bottom: 2px solid color-mix(in srgb, var(--alert-fg, #d13b32) 72%, #111);
             background:
               linear-gradient(90deg,
-                color-mix(in srgb, var(--error-fg, #d13b32) 22%, #171312),
+                color-mix(in srgb, var(--alert-fg, #d13b32) 22%, #171312),
                 #171312 62%);
             color: #fff8ee; font: 600 11px/1.25 var(--font-mono);
             letter-spacing: 0.015em;
@@ -96,7 +105,7 @@ defmodule Compos.Ui.Layouts do
           }
           .workspace-bar-kind, .workspace-bar-port {
             padding: 4px 8px; border-radius: 999px;
-            background: var(--error-fg, #d13b32); color: white;
+            background: var(--alert-fg, #d13b32); color: white;
             font-weight: 750; letter-spacing: 0.08em;
           }
           .workspace-bar-root {
@@ -174,7 +183,7 @@ defmodule Compos.Ui.Layouts do
             background: var(--window-inactive-bg, #f4f0e6);
             border: var(--chrome-border, none);
             border-radius: var(--chrome-radius, 0);
-            box-shadow: var(--chrome-shadow, inset -1px -1px 0 0 var(--border, #d5cdb9));
+            box-shadow: var(--chrome-shadow, inset -1px -1px 0 0 var(--border-bg, #d5cdb9));
             overflow: hidden;
             min-width: 0; min-height: 0;
             animation: win-in var(--chrome-anim, 140ms) ease-out;
@@ -183,27 +192,27 @@ defmodule Compos.Ui.Layouts do
           .window.workspace-pending {
             position: relative;
             box-shadow:
-              inset 0 0 0 2px var(--error-fg, #d13b32),
-              inset 0 0 22px color-mix(in srgb, var(--error-fg, #d13b32) 18%, transparent),
-              0 0 18px color-mix(in srgb, var(--error-fg, #d13b32) 24%, transparent);
+              inset 0 0 0 2px var(--alert-fg, #d13b32),
+              inset 0 0 22px color-mix(in srgb, var(--alert-fg, #d13b32) 18%, transparent),
+              0 0 18px color-mix(in srgb, var(--alert-fg, #d13b32) 24%, transparent);
           }
           .window.workspace-pending::before {
             content: "UNMERGED WORKTREE";
             position: absolute; z-index: 18; top: 8px; right: 10px;
             padding: 4px 10px;
-            border: 1px solid color-mix(in srgb, var(--error-fg, #d13b32) 72%, white);
+            border: 1px solid color-mix(in srgb, var(--alert-fg, #d13b32) 72%, white);
             border-radius: 999px;
-            background: var(--error-fg, #d13b32);
+            background: var(--alert-fg, #d13b32);
             color: white;
             font: 700 10px/1.2 var(--font-mono);
             letter-spacing: 0.09em;
-            box-shadow: 0 3px 14px color-mix(in srgb, var(--error-fg, #d13b32) 42%, transparent);
+            box-shadow: 0 3px 14px color-mix(in srgb, var(--alert-fg, #d13b32) 42%, transparent);
             pointer-events: none;
           }
           .buffer-header {
             flex: 0 0 auto;
             padding: 7px 14px;
-            border-bottom: 1px solid var(--border, #cbc4b1);
+            border-bottom: 1px solid var(--border-bg, #cbc4b1);
             background: var(--modeline-active-bg, #e7e9f1);
             color: var(--modeline-active-fg, #1b1a17);
             font: 650 11px/1.3 var(--font-mono);
@@ -212,7 +221,7 @@ defmodule Compos.Ui.Layouts do
           .buffer-footer {
             flex: 0 0 auto;
             padding: 6px 14px;
-            border-top: 1px solid var(--border, #cbc4b1);
+            border-top: 1px solid var(--border-bg, #cbc4b1);
             background: var(--modeline-inactive-bg, var(--window-inactive-bg, #f4f0e6));
             color: var(--dim-fg, #6b6a66);
             font: 550 11px/1.3 var(--font-mono);
@@ -220,9 +229,9 @@ defmodule Compos.Ui.Layouts do
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
           }
           .window.workspace-pending .buffer-header {
-            border-bottom-color: color-mix(in srgb, var(--error-fg, #d13b32) 68%, transparent);
-            background: color-mix(in srgb, var(--error-fg, #d13b32) 12%, var(--window-bg, #fdfcf8));
-            color: var(--error-fg, #a8342a);
+            border-bottom-color: color-mix(in srgb, var(--alert-fg, #d13b32) 68%, transparent);
+            background: color-mix(in srgb, var(--alert-fg, #d13b32) 12%, var(--window-bg, #fdfcf8));
+            color: var(--alert-fg, #a8342a);
           }
           .buf {
             flex: 1;
@@ -241,7 +250,7 @@ defmodule Compos.Ui.Layouts do
           .terminal-view {
             flex: 1; min-width: 0; min-height: 0; overflow: hidden;
             padding: 7px 8px;
-            background: #111318;
+            background: var(--window-bg, #111318);
           }
           .terminal-view .xterm { height: 100%; }
           .terminal-view .xterm-viewport { overflow-y: auto !important; }
@@ -303,19 +312,19 @@ defmodule Compos.Ui.Layouts do
           }
           .line.row-oli .line-content { padding-left: 1.4em; text-indent: -1.4em; }
           .line.row-quote .line-content {
-            border-left: 3px solid var(--border, #cfc8b6); padding-left: 12px;
+            border-left: 3px solid var(--border-bg, #cfc8b6); padding-left: 12px;
             color: var(--dim-fg, #57534a); font-style: italic;
           }
           .line.row-hr .line-content { position: relative; }
           .line.row-hr .line-content::after {
             content: ""; position: absolute; left: 0; right: 0; top: 50%;
-            border-top: 1px solid var(--border, #cfc8b6);
+            border-top: 1px solid var(--border-bg, #cfc8b6);
           }
           /* a block reads as one shape: its rows share a background and a
              left edge that hold in any theme (translucent grey) */
           .line.row-code .line-content, .line.row-fence .line-content {
             font-family: var(--font-mono);
-            background: var(--inset-bg, rgba(127, 127, 127, 0.09));
+            background: var(--window-inactive-bg, rgba(127, 127, 127, 0.09));
             border-left: 3px solid rgba(127, 127, 127, 0.28);
             padding-left: 10px; padding-right: 10px;
           }
@@ -346,7 +355,7 @@ defmodule Compos.Ui.Layouts do
           .line.row-table-rule .line-content { position: relative; }
           .line.row-table-rule .line-content::after {
             content: ""; position: absolute; left: 0; right: 0; top: 50%;
-            border-top: 1px solid var(--border, #cfc8b6);
+            border-top: 1px solid var(--border-bg, #cfc8b6);
           }
           /* visual-line-mode off: continuation lines, wrapped wherever the
              window ends (Emacs's default); on: wrapped at words */
@@ -379,7 +388,7 @@ defmodule Compos.Ui.Layouts do
           .x-card {
             display: inline-block; width: 100%; max-width: 480px; margin: 6px 0; padding: 12px 14px;
             vertical-align: top;
-            border: 1px solid var(--border, #e2dbc9); border-radius: 12px;
+            border: 1px solid var(--border-bg, #e2dbc9); border-radius: 12px;
             font-family: var(--font-sans); font-size: 14px; line-height: 1.4;
             user-select: all;
           }
@@ -416,7 +425,7 @@ defmodule Compos.Ui.Layouts do
           }
           .cap-title {
             display: flex; padding: 4px 10px 5px;
-            border-bottom: 1px solid var(--border, #e2dbc9);
+            border-bottom: 1px solid var(--border-bg, #e2dbc9);
             font-size: 10px; letter-spacing: 0.13em; text-transform: uppercase;
             color: var(--dim-fg, #8a857a);
           }
@@ -625,8 +634,8 @@ defmodule Compos.Ui.Layouts do
           .ag-tool[open] .ag-chevron { transform: rotate(90deg); }
           .ag-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--agent-meta-fg, #999); }
           .ag-dot.running { background: var(--warn-fg, #e0af68); animation: ag-pulse 1.2s ease-in-out infinite; }
-          .ag-dot.done { background: var(--string-fg, #4a7a4a); }
-          .ag-dot.failed { background: var(--error-fg, #a8342a); }
+          .ag-dot.done { background: var(--ok-fg, #4a7a4a); }
+          .ag-dot.failed { background: var(--alert-fg, #a8342a); }
           .ag-kind {
             padding: 1px 5px; border-radius: 4px; color: var(--agent-tool-fg, #26356b);
             background: color-mix(in srgb, var(--agent-tool-fg, #26356b) 10%, transparent);
@@ -657,8 +666,8 @@ defmodule Compos.Ui.Layouts do
             color: var(--agent-meta-fg, #8a8577); font-family: var(--font-sans);
             font-size: calc(9.5px * var(--text-scale-factor, 1)); letter-spacing: 0.02em;
           }
-          .ag-tstatus.done::before { content: "✓ "; color: var(--string-fg, #4a7a4a); }
-          .ag-tstatus.failed { color: var(--error-fg, #a8342a); }
+          .ag-tstatus.done::before { content: "✓ "; color: var(--ok-fg, #4a7a4a); }
+          .ag-tstatus.failed { color: var(--alert-fg, #a8342a); }
           .ag-duration {
             color: var(--agent-meta-fg, #8a8577); font-family: var(--font-sans);
             font-size: calc(9.5px * var(--text-scale-factor, 1)); letter-spacing: 0.02em;
@@ -710,11 +719,11 @@ defmodule Compos.Ui.Layouts do
           /* bb's hierarchy: affirmative filled, session-scope outlined, deny
              a quiet ghost that stays visible without competing */
           .ag-btn.allow {
-            background: var(--string-fg, #4a7a4a); border-color: var(--string-fg, #4a7a4a);
+            background: var(--ok-fg, #4a7a4a); border-color: var(--ok-fg, #4a7a4a);
             color: var(--window-bg, #fdfcf8); font-weight: 600;
           }
-          .ag-btn.session { border-color: var(--string-fg, #4a7a4a); color: var(--string-fg, #4a7a4a); }
-          .ag-btn.deny { border-color: transparent; color: var(--error-fg, #a8342a); opacity: 0.8; }
+          .ag-btn.session { border-color: var(--ok-fg, #4a7a4a); color: var(--ok-fg, #4a7a4a); }
+          .ag-btn.deny { border-color: transparent; color: var(--alert-fg, #a8342a); opacity: 0.8; }
           .ag-wait {
             font-family: var(--font-mono); font-size: calc(12px * var(--text-scale-factor, 1)); margin: 8px 0;
             color: var(--agent-thought-fg, #8a8577); animation: ag-pulse 1.4s ease-in-out infinite;
@@ -747,23 +756,9 @@ defmodule Compos.Ui.Layouts do
             font-family: var(--font-mono); font-size: 11px; padding: 0 8px;
             color: var(--agent-permission-fg, #a8741a); font-weight: 600;
           }
-          /* font-lock scopes (tree-sitter) — themeable via --ts-<scope>-fg */
-          .ts-keyword { color: var(--ts-keyword-fg, #26356b); font-weight: 600; }
-          .ts-function { color: var(--ts-function-fg, #1b1a17); font-weight: 500; }
-          .ts-string { color: var(--ts-string-fg, #2e6b45); }
-          .ts-comment { color: var(--ts-comment-fg, #8a857a); font-style: italic; }
-          .ts-number { color: var(--ts-number-fg, #7a5a1a); }
-          .ts-constant { color: var(--ts-constant-fg, #7a5a1a); }
-          .ts-type { color: var(--ts-type-fg, #7a5a1a); font-weight: 500; }
-          .ts-module { color: var(--ts-module-fg, #7a5a1a); font-weight: 500; }
-          .ts-variable { color: var(--ts-variable-fg, inherit); }
-          .ts-property { color: var(--ts-property-fg, #57534a); }
-          .ts-attribute { color: var(--ts-attribute-fg, #7a5a1a); }
-          .ts-tag { color: var(--ts-tag-fg, #26356b); font-weight: 600; }
-          .ts-operator { color: var(--ts-operator-fg, #a09a8b); }
-          .ts-punctuation { color: var(--ts-punctuation-fg, #a09a8b); }
-          .ts-escape { color: var(--ts-escape-fg, #7a5a1a); }
-          .ts-embedded { color: inherit; }
+          /* font-lock scopes (tree-sitter): the .ts-SCOPE rules come from the
+             ts-SCOPE faces, see Compos.Ui.FaceCSS. A theme or a defface! owns
+             every syntax colour, weight and slant. */
           .modeline {
             display: flex; align-items: center; gap: 8px;
             min-height: 32px; padding: 0 12px;
@@ -790,13 +785,13 @@ defmodule Compos.Ui.Layouts do
             display: flex; gap: 16px; padding: 6px 16px;
             font-family: var(--font-mono); font-size: 10.5px;
             color: var(--dim-fg, #8a857a);
-            border-bottom: 1px solid var(--border, #e2dbc9);
+            border-bottom: 1px solid var(--border-bg, #e2dbc9);
           }
           .dash-live-mod { color: var(--warn-fg, #7a5a1a); }
           .dash-top {
             flex: 0 0 auto; max-height: 46%; overflow-y: auto;
             background: var(--window-inactive-bg, #f4f0e6);
-            border-bottom: 1px solid var(--border, #e2dbc9);
+            border-bottom: 1px solid var(--border-bg, #e2dbc9);
           }
           .ml-caret {
             font-family: var(--font-mono); font-size: 9px; cursor: pointer;
@@ -828,7 +823,7 @@ defmodule Compos.Ui.Layouts do
             min-height: 30px; padding: 7px 14px 8px;
             flex-shrink: 0;
             background: var(--window-bg, #fdfcf8);
-            border-bottom: 1px solid var(--border, #cbc4b1);
+            border-bottom: 1px solid var(--border-bg, #cbc4b1);
             font-family: var(--font-mono); font-size: 12.5px;
           }
           .echo { color: var(--dim-fg, #57534a); white-space: pre; }
@@ -870,7 +865,7 @@ defmodule Compos.Ui.Layouts do
             width: min(1100px, 96vw);
             height: 62dvh;
             display: flex; flex-direction: column;
-            border: 1px solid var(--border, #e2dbc9);
+            border: 1px solid var(--border-bg, #e2dbc9);
             border-top: 2px solid var(--accent-fg, #26356b);
             border-radius: 10px;
             box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
@@ -884,7 +879,7 @@ defmodule Compos.Ui.Layouts do
           .mb-panel.palette .mb-input-row {
             order: -1;
             border-top: none;
-            border-bottom: 1px solid var(--border, #e2dbc9);
+            border-bottom: 1px solid var(--border-bg, #e2dbc9);
             flex: 0 0 auto;
           }
           .mb-panel.palette .mb-label-row { order: -2; flex: 0 0 auto; }
@@ -898,7 +893,7 @@ defmodule Compos.Ui.Layouts do
           .mb-panel.palette .mb-label { max-width: 80ch; }
           .mb-panel.palette.transient-panel { height: auto; max-height: 62dvh; }
           .transient-title {
-            padding: 13px 16px 11px; border-bottom: 1px solid var(--border, #e2dbc9);
+            padding: 13px 16px 11px; border-bottom: 1px solid var(--border-bg, #e2dbc9);
             font-size: 14px; font-weight: 650; color: var(--accent-fg, #26356b);
           }
           .transient-groups {
@@ -920,7 +915,7 @@ defmodule Compos.Ui.Layouts do
           .transient-description { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
           .transient-value { color: var(--dim-fg, #8a857a); white-space: nowrap; }
           .transient-help {
-            padding: 9px 16px 10px; border-top: 1px solid var(--border, #e2dbc9);
+            padding: 9px 16px 10px; border-top: 1px solid var(--border-bg, #e2dbc9);
             color: var(--dim-fg, #8a857a); font-family: var(--font-mono); font-size: 10.5px;
           }
           /* the palette body: candidates left, the facts panel right */
@@ -931,7 +926,7 @@ defmodule Compos.Ui.Layouts do
             /* min-width:auto would let the long title win over the
                basis and swallow half the palette */
             min-width: 0; overflow: hidden;
-            border-left: 1px solid var(--border, #e2dbc9);
+            border-left: 1px solid var(--border-bg, #e2dbc9);
             background: var(--default-bg, #efeadf);
             padding: 11px 12px 12px;
             display: flex; flex-direction: column; gap: 6px;
@@ -953,7 +948,7 @@ defmodule Compos.Ui.Layouts do
           .mb-container {
             grid-column: 1 / -1;
             margin: 2px 8px 3px;
-            border: 1px solid var(--border, #e2dbc9); border-radius: 10px;
+            border: 1px solid var(--border-bg, #e2dbc9); border-radius: 10px;
             background: var(--default-bg, #efeadf);
             overflow: hidden;
           }
@@ -988,7 +983,7 @@ defmodule Compos.Ui.Layouts do
           }
           .mb-chip {
             font-size: 10.5px; padding: 1px 8px; border-radius: 20px;
-            border: 1px solid var(--border, #e2dbc9);
+            border: 1px solid var(--border-bg, #e2dbc9);
             background: var(--window-bg, #fdfcf8);
           }
 
@@ -1028,7 +1023,7 @@ defmodule Compos.Ui.Layouts do
           }
           .mb-sep::after {
             content: ""; flex: 1; height: 1px;
-            background: var(--border, #e2dbc9);
+            background: var(--border-bg, #e2dbc9);
           }
           .mb-cand {
             display: grid; grid-template-columns: subgrid; grid-column: 1 / -1;
@@ -1062,7 +1057,7 @@ defmodule Compos.Ui.Layouts do
           .mb-input-row {
             display: flex; align-items: baseline;
             padding: 7px 14px 8px;
-            border-top: 1px solid var(--border, #e2dbc9);
+            border-top: 1px solid var(--border-bg, #e2dbc9);
             background: var(--default-bg, #efeadf);
           }
           /* the prompt line holds the selection: the input names a directory */
@@ -1096,7 +1091,7 @@ defmodule Compos.Ui.Layouts do
           .wk-group-title {
             display: flex; align-items: baseline; gap: 7px;
             margin: 0 0 4px; padding-bottom: 3px;
-            border-bottom: 1px solid var(--border, #e2dbc9);
+            border-bottom: 1px solid var(--border-bg, #e2dbc9);
             color: var(--accent-fg, #26356b);
             font-family: var(--font-mono); font-size: 11px;
             letter-spacing: 0.08em; text-transform: uppercase;
@@ -1117,7 +1112,7 @@ defmodule Compos.Ui.Layouts do
           .wk-key {
             justify-self: start;
             min-width: 3ch; padding: 1px 5px;
-            border: 1px solid var(--border, #d8d0c0); border-radius: 3px;
+            border: 1px solid var(--border-bg, #d8d0c0); border-radius: 3px;
             background: var(--select-bg, #e7e9f1);
             color: var(--accent-fg, #26356b); font-weight: 700;
           }
@@ -1559,8 +1554,8 @@ defmodule Compos.Ui.Layouts do
                   fontSize: 13,
                   lineHeight: 1.15,
                   theme: {
-                    background: "#111318",
-                    foreground: "#e6e1d8",
+                    background: color("--window-bg", "#111318"),
+                    foreground: color("--default-fg", "#e6e1d8"),
                     cursor: color("--cursor-bg", "#d6b95e"),
                     selectionBackground: color("--select-bg", "#36405a")
                   }

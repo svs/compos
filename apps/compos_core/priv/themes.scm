@@ -76,21 +76,52 @@
                (blue (theme--hex-byte background 5)))
            (< (+ (* red 299) (* green 587) (* blue 114)) 128000)))))
 
+;; the keys of a plist (K V K V ...)
+(define (theme--plist-keys plist)
+  (if (or (null? plist) (null? (cdr plist)))
+      '()
+      (cons (car plist) (theme--plist-keys (cddr plist)))))
+
+;; the pairs of PLIST whose key is not in KEYS
+(define (theme--plist-without plist keys)
+  (if (or (null? plist) (null? (cdr plist)))
+      '()
+      (let ((rest (theme--plist-without (cddr plist) keys)))
+        (if (member (car plist) keys)
+            rest
+            (cons (car plist) (cons (cadr plist) rest))))))
+
+;; A default applies attribute by attribute, as in Emacs: the theme sets
+;; the colour of ts-keyword and the package sets its weight, and both
+;; hold. Only an attribute the theme names for this face is skipped.
 (define (defface! face &rest attrs)
   (set! *face-defaults*
         (cons (cons face attrs)
               (filter (lambda (d) (not (equal? (car d) face))) *face-defaults*)))
-  (if (theme-face-spec face)
-      #f
-      (apply set-face-attribute! (cons face attrs))))
+  (let* ((spec (theme-face-spec face))
+         (named (if spec (theme--plist-keys (cdr spec)) '()))
+         (free (theme--plist-without attrs named)))
+    (if (null? free)
+        #f
+        (apply set-face-attribute! (cons face free)))))
+
+;; the members of A, then the members of B that are not in A
+(define (theme--union a b)
+  (append a (filter (lambda (x) (not (member x a))) b)))
 
 (define (load-theme name)
   (let ((t (assoc name *themes*)))
     (if t
         (begin
+          ;; a face starts empty: an attribute the last theme set and this
+          ;; one does not must not survive. set-face-attribute! merges, so
+          ;; every face either theme or a default names is cleared first,
+          ;; then the package defaults apply, then the theme on top.
+          (for-each face-clear!
+            (theme--union (map car *face-defaults*)
+                          (theme--union (map car (theme-faces *current-theme*))
+                                        (map car (cadr t)))))
           (set! *current-theme* name)
-          ;; the package defaults first: a face the new theme does not name
-          ;; falls back to its default, not to the last theme's color
           (for-each (lambda (d) (apply set-face-attribute! d)) *face-defaults*)
           (for-each (lambda (spec) (apply set-face-attribute! spec)) (cadr t))
           (persist-theme! name)
@@ -117,6 +148,9 @@
     (list 'ts-punctuation 'fg "#57534a")
     (list 'ts-tag 'fg "#26356b")
     (list 'ts-attribute 'fg "#7a5a1a")
+    (list 'ts-variable 'fg "#3b3a35")
+    (list 'ts-property 'fg "#57534a")
+    (list 'ts-escape 'fg "#7a5a1a")
     (list 'default 'bg "#e6e0d2" 'fg "#1b1a17")
     (list 'window 'bg "#fdfcf8")
     (list 'window-inactive 'bg "#f4f0e6")
@@ -186,6 +220,9 @@
     (list 'ts-punctuation 'fg "#9a9182")
     (list 'ts-tag 'fg "#9fb0ea")
     (list 'ts-attribute 'fg "#d5ac66")
+    (list 'ts-variable 'fg "#d8d0c0")
+    (list 'ts-property 'fg "#c2b8a3")
+    (list 'ts-escape 'fg "#d5ac66")
     (list 'default 'bg "#100f0c" 'fg "#efe9dc")
     (list 'window 'bg "#201d18")
     (list 'window-inactive 'bg "#161410")
@@ -254,6 +291,9 @@
     (list 'ts-punctuation 'fg "#8b8fa3")
     (list 'ts-tag 'fg "#7aa2f7")
     (list 'ts-attribute 'fg "#e0af68")
+    (list 'ts-variable 'fg "#c8ccd4")
+    (list 'ts-property 'fg "#a9b1d6")
+    (list 'ts-escape 'fg "#e0af68")
     (list 'default 'bg "#1e1f22" 'fg "#d6d8de")
     (list 'window 'bg "#23242a")
     (list 'window-inactive 'bg "#1e1f22")
@@ -309,6 +349,9 @@
     (list 'ts-punctuation 'fg "#9399b2")
     (list 'ts-tag 'fg "#89b4fa")
     (list 'ts-attribute 'fg "#f9e2af")
+    (list 'ts-variable 'fg "#cdd6f4")
+    (list 'ts-property 'fg "#b4befe")
+    (list 'ts-escape 'fg "#f2cdcd")
     (list 'default 'bg "#1e1e2e" 'fg "#cdd6f4")
     (list 'window 'bg "#181825")
     (list 'window-inactive 'bg "#11111b")
@@ -377,6 +420,81 @@
           'border "1px solid #101014"
           'shadow "0 2px 14px rgba(0, 0, 0, 0.4)")))
 
+;;; --- the faces a package can count on -------------------------------------
+;;; The theme owns the colours. These defaults own the shape of the syntax
+;;; faces and give the Emacs names a home, so a package written for Emacs
+;;; finds font-lock-keyword-face and a list can say "success". Each Emacs
+;;; name inherits the compos face that draws the same thing; a theme that
+;;; names the compos face restyles both.
+
+;; syntax: weight and slant are shape, and a theme may override them
+(defface! 'ts-keyword 'weight "600")
+(defface! 'ts-function 'weight "500")
+(defface! 'ts-comment 'style "italic")
+(defface! 'ts-type 'weight "500")
+(defface! 'ts-module 'weight "500")
+(defface! 'ts-tag 'weight "600")
+
+;; the capture heads a grammar emits beyond the ones every theme colours;
+;; each takes the colour of the nearest face a theme does name
+(defface! 'ts-label 'inherit 'ts-keyword)
+(defface! 'ts-conditional 'inherit 'ts-keyword)
+(defface! 'ts-repeat 'inherit 'ts-keyword)
+(defface! 'ts-include 'inherit 'ts-keyword)
+(defface! 'ts-exception 'inherit 'ts-keyword)
+(defface! 'ts-parameter 'inherit 'ts-variable)
+(defface! 'ts-field 'inherit 'ts-property)
+(defface! 'ts-constructor 'inherit 'ts-type)
+(defface! 'ts-boolean 'inherit 'ts-constant)
+(defface! 'ts-float 'inherit 'ts-number)
+(defface! 'ts-character 'inherit 'ts-string)
+(defface! 'ts-namespace 'inherit 'ts-module)
+(defface! 'ts-delimiter 'inherit 'ts-punctuation)
+(defface! 'ts-method 'inherit 'ts-function)
+(defface! 'ts-macro 'inherit 'ts-function)
+
+;; the Emacs faces, on the compos faces that draw the same thing
+(defface! 'font-lock-keyword-face 'inherit 'ts-keyword)
+(defface! 'font-lock-function-name-face 'inherit 'ts-function)
+(defface! 'font-lock-string-face 'inherit 'ts-string)
+(defface! 'font-lock-comment-face 'inherit 'ts-comment)
+(defface! 'font-lock-doc-face 'inherit 'ts-comment)
+(defface! 'font-lock-constant-face 'inherit 'ts-constant)
+(defface! 'font-lock-type-face 'inherit 'ts-type)
+(defface! 'font-lock-variable-name-face 'inherit 'ts-variable)
+(defface! 'font-lock-builtin-face 'inherit 'ts-keyword)
+(defface! 'font-lock-preprocessor-face 'inherit 'ts-attribute)
+(defface! 'font-lock-warning-face 'inherit 'alert)
+(defface! 'mode-line 'inherit 'modeline)
+(defface! 'mode-line-active 'inherit 'modeline-active)
+(defface! 'modeline-inactive 'inherit 'window-inactive)
+(defface! 'mode-line-inactive 'inherit 'modeline-inactive)
+(defface! 'header-line 'inherit 'modeline)
+(defface! 'line-number 'inherit 'linenum)
+(defface! 'highlight 'inherit 'hl-line)
+(defface! 'shadow 'inherit 'dim)
+(defface! 'error 'inherit 'alert)
+(defface! 'warning 'inherit 'warn)
+(defface! 'success 'inherit 'ok)
+(defface! 'minibuffer-prompt 'inherit 'accent)
+(defface! 'isearch 'inherit 'region)
+(defface! 'lazy-highlight 'inherit 'select)
+(defface! 'match 'inherit 'select)
+(defface! 'vertical-border 'inherit 'border)
+(defface! 'bold 'weight "700")
+(defface! 'italic 'style "italic")
+(defface! 'underline 'decoration "underline")
+(defface! 'bold-italic 'weight "700" 'style "italic")
+(defface! 'fixed-pitch 'family "var(--font-mono)")
+(defface! 'variable-pitch 'family "var(--font-sans)")
+
+;; the chat transcript reads these by variable; each is a compos face
+(defface! 'agent-meta 'inherit 'dim)
+(defface! 'agent-thought 'inherit 'dim)
+(defface! 'agent-queued 'inherit 'faint)
+(defface! 'agent-tool 'inherit 'accent)
+(defface! 'agent-permission 'inherit 'warn)
+
 (define-command "load-theme" "Prompt for a color theme and apply it"
   (lambda ()
     (minibuffer-read "Load theme: " (history-order 'theme (theme-names))
@@ -389,7 +507,8 @@
 
 (category! 'faces)
 (public! 'load-theme "(load-theme NAME) — switch color theme (persists)")
-(public! 'defface! "(defface! FACE ATTR VALUE ...) — a package's default face; the theme wins")
+(public! 'defface! "(defface! FACE ATTR VALUE ...) — a package's default face, attribute by attribute; an attribute the theme names wins. 'inherit names a face or a list of faces; 'priority orders overlapping overlays")
+(public! 'face-clear! "(face-clear! FACE) — forget every attribute of FACE")
 (public! 'theme-faces "(theme-faces NAME) -> the theme's face specs")
 (public! 'theme-dark? "(theme-dark?) -> #t when the current theme has a dark default background")
 (public! '*themes* "The theme registry: ((name . spec) ...)")

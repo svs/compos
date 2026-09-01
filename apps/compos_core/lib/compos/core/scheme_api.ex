@@ -332,6 +332,11 @@ defmodule Compos.Core.SchemeAPI do
         "(buffer-search-backward Q FROM) — search backward from byte FROM; return (START END) or #f.",
       "set-face-attribute!" =>
         "(set-face-attribute! FACE KEY VALUE ...) — set the face's attributes from key-value pairs.",
+      "face-clear!" =>
+        "(face-clear! FACE) — forget every attribute of FACE; load-theme clears a face before it applies the theme.",
+      "face-attribute" =>
+        "(face-attribute FACE ATTR) — the value FACE sets for ATTR, or #f. Inheritance is resolved by the display, not here.",
+      "face-list" => "(face-list) — the names of every face the editor holds.",
       "split-window!" =>
         "(split-window! DIR [RATIO]) — split the active window 'h or 'v at RATIO (default 0.5).",
       "delete-window!" => "(delete-window!) — delete the active window; return #t on success.",
@@ -1438,6 +1443,17 @@ defmodule Compos.Core.SchemeAPI do
         Editor.set_face(plain(face), attrs)
         :void
       end,
+      "face-clear!" => fn [face] ->
+        Editor.clear_face(plain(face))
+        :void
+      end,
+      "face-attribute" => fn [face, attr] ->
+        case get_in(Editor.faces(), [plain(face), plain(attr)]) do
+          nil -> false
+          v -> v
+        end
+      end,
+      "face-list" => fn [] -> Map.keys(Editor.faces()) end,
 
       # windows (tiling tree)
       "split-window!" => fn

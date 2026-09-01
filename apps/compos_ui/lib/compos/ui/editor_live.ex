@@ -1157,7 +1157,7 @@ defmodule Compos.Ui.EditorLive do
       data-frame={@frame}
       data-instance={@instance_name}
     >
-      <style :if={@state.faces != %{}}><%= Phoenix.HTML.raw(face_css(@state.faces)) %></style>
+      <style :if={@state.faces != %{}}><%= Phoenix.HTML.raw(Compos.Ui.FaceCSS.css(@state.faces)) %></style>
     <style :if={@state.styles != %{}}><%= Phoenix.HTML.raw(Enum.join(Map.values(@state.styles), "\n")) %></style>
       <div :if={@state.workspace} class="workspace-bar">
         <span class="workspace-bar-kind">WORKTREE</span>
@@ -3550,48 +3550,4 @@ defmodule Compos.Ui.EditorLive do
     }
   end
 
-  defp face_css(faces) do
-    vars =
-      Enum.map_join(faces, "", fn {face, attrs} ->
-        Enum.map_join(attrs, "", fn {k, v} -> "--#{face}-#{k}:#{v};" end)
-      end)
-
-    # every registered face is also a span class (.f-NAME) so Scheme can
-    # define new faces and put them on overlay ranges with zero CSS edits.
-    #
-    # A face writes ONLY the attributes it declares. Writing them all put
-    # `color:inherit` on a face that names no foreground, and a span
-    # carries both classes — so a background-only overlay (the browse
-    # scope tint) erased the syntax color under it. Emacs reads an
-    # unspecified attribute as "leave it alone"; so does this.
-    classes =
-      faces
-      |> Enum.filter(fn {face, _} -> face =~ ~r/^[a-zA-Z0-9_-]+$/ end)
-      |> Enum.map_join("", fn {face, attrs} ->
-        body =
-          attrs
-          |> Enum.map(fn {k, _} -> face_prop(face, to_string(k)) end)
-          |> Enum.reject(&is_nil/1)
-          |> Enum.join("")
-
-        if body == "", do: "", else: ".f-#{face}{#{body}}"
-      end)
-
-    ":root{#{vars}}#{classes}"
-  end
-
-  # one face attribute -> one CSS declaration, reading the face's own var.
-  # An attribute with no CSS meaning (writing-mode's 'measure) stays a var.
-  defp face_prop(face, attr) do
-    case attr do
-      "fg" -> "color:var(--#{face}-fg);"
-      "bg" -> "background:var(--#{face}-bg);"
-      "weight" -> "font-weight:var(--#{face}-weight);"
-      "style" -> "font-style:var(--#{face}-style);"
-      "family" -> "font-family:var(--#{face}-family);"
-      "size" -> "font-size:var(--#{face}-size);"
-      "decoration" -> "text-decoration:var(--#{face}-decoration);"
-      _ -> nil
-    end
-  end
 end

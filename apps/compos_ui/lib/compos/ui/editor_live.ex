@@ -1676,6 +1676,7 @@ defmodule Compos.Ui.EditorLive do
         data-ctop={@node.ctop}
         data-manual={to_string(@node.manual)}
         data-visual-lines={to_string(@node.visual_line_mode)}
+        data-hl-line={to_string(Map.get(@node, :hl_line, true))}
         data-ws={to_string(whitespace?(@node))}
         data-v={@node.version}
         data-pt={@node.point}

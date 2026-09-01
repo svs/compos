@@ -2687,6 +2687,9 @@ defmodule Compos.Core.Editor do
       style: Map.get(locals, "style"),
       render_mode: render_mode(locals),
       visual_line_mode: Map.get(locals, "visual-line-mode") == true,
+      # hl-line-mode: the page highlights the current line unless the
+      # buffer turned it off
+      hl_line: Map.get(locals, "hl-line-mode") != "off",
       # the page carries this so the wrap map it measures can name the
       # text it measured
       version: Buffer.version(buffer) || 0,

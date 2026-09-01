@@ -3087,6 +3087,8 @@
     (let ((m (assoc name *mode-setups*)))
       (if m ((cadr m))))
     (when changed (restore-minor-modes! buf))
+    ;; a mode with font-lock keywords is painted from here on
+    (when (pair? (font-lock-keywords name)) (font-lock-enable! buf))
     ;; the parent's hook runs before the child's, as in Emacs
     (apply run-hooks (mode-hook-chain name))
     (run-hooks 'after-change-major-mode-hook)
@@ -4546,8 +4548,36 @@
 (catalog-meta! 'command "isearch-repeat-forward" 'domain 'targets 'effects '(write))
 (catalog-meta! 'command "isearch-repeat-backward" 'domain 'targets 'effects '(write))
 
+;;; --- lazy highlight -------------------------------------------------------
+;;; Emacs paints every other match of the search in lazy-highlight and the
+;;; current one in isearch, so the reader sees where C-s will go next.
+;;; The paint is an overlay tag of its own, cleared when the search ends.
+
+(define isearch-lazy-highlight-max 300)
+
+;; every (START END) of Q in the buffer, at most the limit, in order
+(define (isearch-matches q)
+  (if (equal? q "")
+      '()
+      (let loop ((from 0) (acc '()) (n 0))
+        (let ((m (and (< n isearch-lazy-highlight-max) (buffer-search q from))))
+          (if (or (not m) (<= (cadr m) (car m)))
+              (reverse acc)
+              (loop (cadr m) (cons m acc) (+ n 1)))))))
+
+(define (isearch--paint! q m)
+  (overlay-set! (current-buffer) 'isearch
+    (map (lambda (r)
+           (list (car r) (cadr r)
+                 (if (and m (equal? r m)) "isearch" "lazy-highlight")))
+         (isearch-matches q))))
+
+(define (isearch--unpaint!)
+  (overlay-set! (current-buffer) 'isearch '()))
+
 ;; Emacs surface: the current match is the region (mark at one end, point
-;; at the other), a miss says so, RET keeps the point and drops the region.
+;; at the other), the other matches wear lazy-highlight, a miss says so,
+;; RET keeps the point and drops the region.
 (define (isearch backward)
   (isearch-loop (if backward "I-search backward: " "I-search: ") backward
     (lambda (m q origin)
@@ -4555,13 +4585,93 @@
       ;; inside a forward search turns it around, and the point must land
       ;; at the end the reader now moves toward
       (let ((back (isearch--field 'backward)))
+        (isearch--paint! q m)
         (cond ((equal? q "") (set-mark! #f) (goto-char! origin))
               (m (if back
                      (begin (set-mark! (cadr m)) (goto-char! (car m)))
                      (begin (set-mark! (car m)) (goto-char! (cadr m)))))
               (else (message (string-append "Failing I-search: " q))))))
-    (lambda (q origin) (set-mark! #f))
-    (lambda (origin) (set-mark! #f))))
+    (lambda (q origin) (with-window-buffer isearch--unpaint!) (set-mark! #f))
+    (lambda (origin) (with-window-buffer isearch--unpaint!) (set-mark! #f))))
+
+;;; --- hl-line-mode ------------------------------------------------------------
+;;; The page highlights the line point is on. Emacs makes that a minor
+;;; mode; here it is on by default, and the mode turns it off and on for
+;;; one buffer. The local reads "off" when it is off: a local holding #f
+;;; reads as absent.
+
+(define (hl-line-on? buf)
+  (not (equal? (buffer-local buf 'hl-line-mode) "off")))
+
+(define-command "hl-line-mode" "Toggle the highlight of the current line in this buffer"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (if (hl-line-on? buf)
+          (begin (buffer-set-local! buf 'hl-line-mode "off") (message "hl-line-mode off"))
+          (begin (buffer-set-local! buf 'hl-line-mode "on") (message "hl-line-mode on"))))))
+
+;;; --- font-lock keywords -------------------------------------------------------
+;;; Emacs's font-lock-keywords for a mode without a grammar: a list of
+;;; (REGEXP FACE). Every match in the buffer wears the face, under the
+;;; font-lock overlay tag, and the paint follows every change. A derived
+;;; mode inherits its parent's keywords. A mode with keywords is painted
+;;; from set-mode! on; a package may call font-lock-refontify! itself.
+
+(define *font-lock-keywords* '())     ; ((MODE (REGEXP FACE) ...) ...)
+(define *font-lock-hooks* '())        ; ((BUF HANDLE) ...)
+
+(define (font-lock-add-keywords! mode keywords)
+  (set! *font-lock-keywords*
+    (hook--alist-put *font-lock-keywords* mode
+      (append (hook--alist-get *font-lock-keywords* mode)
+              (filter (lambda (k) (not (member k (hook--alist-get *font-lock-keywords* mode))))
+                      keywords))))
+  mode)
+
+(define (font-lock-set-keywords! mode keywords)
+  (set! *font-lock-keywords* (hook--alist-put *font-lock-keywords* mode keywords))
+  mode)
+
+;; the keywords of MODE and its parents, the parent's first
+(define (font-lock-keywords mode)
+  (let loop ((m mode) (acc '()) (seen '()))
+    (if (or (not m) (member m seen))
+        acc
+        (loop (mode-parent m) (append (hook--alist-get *font-lock-keywords* m) acc) (cons m seen)))))
+
+(define (font-lock--spans text keywords)
+  (apply append
+    (map (lambda (k)
+           (map (lambda (r) (list (car r) (cadr r) (cadr k)))
+                (re-find* (car k) text)))
+         keywords)))
+
+(define (font-lock-refontify! buf)
+  (when (buffer-exists? buf)
+    (let ((kws (font-lock-keywords (buffer-local buf 'mode-name))))
+      (overlay-set! buf 'font-lock
+        (if (null? kws) '() (font-lock--spans (buffer-text buf) kws))))))
+
+;; the reactor binds a rule to one buffer process, so setup replaces the
+;; old rule, as markdown-mode does
+(define (font-lock-enable! buf)
+  (let ((old (assoc buf *font-lock-hooks*)))
+    (when old (remove-on-change! (cadr old)))
+    (set! *font-lock-hooks*
+      (cons (list buf
+                  (on-change! buf
+                    (lambda (pos inserted deleted source)
+                      (unless (equal? source "locals") (font-lock-refontify! buf)))
+                    'eager))
+            (remove (lambda (e) (equal? (car e) buf)) *font-lock-hooks*)))
+    (font-lock-refontify! buf)))
+
+(define (font-lock-disable! buf)
+  (let ((old (assoc buf *font-lock-hooks*)))
+    (when old
+      (remove-on-change! (cadr old))
+      (set! *font-lock-hooks* (remove (lambda (e) (equal? (car e) buf)) *font-lock-hooks*)))
+    (overlay-set! buf 'font-lock '())))
 
 (define-command "isearch-forward" "Do incremental search forward"
   (lambda () (isearch #f)))
@@ -10744,6 +10854,14 @@
 (catalog-meta! 'function "mode-label" 'domain 'interaction 'effects '(pure))
 (catalog-meta! 'function "buffer-icon" 'domain 'interaction 'effects '(read))
 (catalog-meta! 'function "file-icon" 'domain 'interaction 'effects '(pure))
+(public! 'font-lock-add-keywords! "(font-lock-add-keywords! MODE ((REGEXP FACE) ...)) — every match wears FACE in MODE's buffers; a derived mode inherits")
+(public! 'font-lock-set-keywords! "(font-lock-set-keywords! MODE KEYWORDS) — replace MODE's keywords")
+(public! 'font-lock-keywords "(font-lock-keywords MODE) — the keywords of MODE and its parents")
+(public! 'font-lock-refontify! "(font-lock-refontify! BUF) — paint BUF's font-lock keywords now")
+(public! 'font-lock-enable! "(font-lock-enable! BUF) — paint BUF's keywords and repaint on every change")
+(public! 'font-lock-disable! "(font-lock-disable! BUF) — stop painting BUF's keywords")
+(public! 'isearch-matches "(isearch-matches Q) — every (START END) of Q in the current buffer, up to isearch-lazy-highlight-max")
+(public! 'hl-line-on? "(hl-line-on? BUF) — #t unless hl-line-mode turned the line highlight off in BUF")
 (public! 'defvar "(defvar NAME DEFAULT [DOC]) — NAME takes DEFAULT unless it is bound already")
 (public! 'defvar-local "(defvar-local NAME DEFAULT [DOC]) — defvar, and variable-set! writes the current buffer's own value")
 (public! 'default-value "(default-value NAME) — the global value, or #f")

@@ -339,6 +339,8 @@ defmodule Compos.Ui.Layouts do
           .line.row-picture .line-content { text-align: center; }
           .line.row-picture img.img-embed { margin: 6px 0; }
           .line.row-fence .line-content { font-size: .72em; color: var(--dim-fg, #8a857a); }
+          /* hl-line-mode off: the current line draws like any other */
+          .buf[data-hl-line="false"] .line.hl-line { background: transparent; }
           /* a table (markdown-mode md--table-row-spans): each source row is
              its own table box, so the columns divide the width evenly and
              line up down the run. Every bar is a cell of its own, which is

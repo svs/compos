@@ -71,3 +71,21 @@ for Emacs can name them and get the theme's colour.
 `(face-attribute FACE ATTR)` returns the value the face sets, or `#f`.
 `(face-list)` returns every face name. `(face-clear! FACE)` forgets a
 face.
+
+## Font-lock keywords
+
+A mode without a grammar names its keywords: a list of `(REGEXP FACE)`.
+Every match wears the face, under the `font-lock` overlay tag, and the
+paint follows every change. A derived mode inherits its parent's
+keywords. `set-mode!` paints a mode that has keywords.
+
+```scheme
+(font-lock-add-keywords! "log-mode" '(("^ERROR.*$" "alert") ("[0-9]+" "ts-number")))
+```
+
+## The search and the current line
+
+isearch paints the current match with `isearch` and every other match
+with `lazy-highlight`, up to `isearch-lazy-highlight-max`. The page
+highlights the line point is on with `hl-line`; `hl-line-mode` turns
+that off and on for one buffer.

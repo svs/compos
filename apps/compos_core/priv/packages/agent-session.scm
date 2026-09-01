@@ -376,10 +376,11 @@
 (define (execute prompt) (execute* prompt '()))
 
 (define (execute* prompt opts)
-  (let* ((slug (agent-next-slug))
-         (buf (string-append "*chat:" slug "*")))
+  ;; agent-next-slug only names the buffer now; the session slug is the
+  ;; chat's durable id, assigned by chat-attach-agent!
+  (let* ((name (agent-next-slug))
+         (buf (string-append "*chat:" name "*")))
     (buffer-create buf)
-    (buffer-set-local! buf 'agent-slug slug)
     ;; Callers over RPC have no meaningful selected file buffer to inherit
     ;; from. An explicit directory is ordinary chat identity policy and wins
     ;; over buffer-create's interactive inheritance.
@@ -400,18 +401,18 @@
     ;; starts with the right extra servers and loses them at first revive.
     (let ((ps (plist-get opts 'presets)))
       (when ps (buffer-set-local! buf 'chat-presets ps)))
-    (chat-task-init! buf slug)
-    (chat-attach-agent! buf
-      (or (plist-get opts 'connector) *default-connector*)
-      (plist-get opts 'model)
-      opts)
-    (display-buffer buf)
-    (when (equal? (current-buffer) buf)
-      (set-mode! "chat-mode")
-      (end-of-buffer!))
-    (unless (equal? prompt "")
-      (llm-session-send! slug prompt))
-    slug))
+    (chat-task-init! buf name)
+    (let ((slug (chat-attach-agent! buf
+                  (or (plist-get opts 'connector) *default-connector*)
+                  (plist-get opts 'model)
+                  opts)))
+      (display-buffer buf)
+      (when (equal? (current-buffer) buf)
+        (set-mode! "chat-mode")
+        (end-of-buffer!))
+      (unless (equal? prompt "")
+        (llm-session-send! slug prompt))
+      slug)))
 
 (define-command "agent-open" "Prompt for a task and spawn a new agent thread"
   (lambda ()

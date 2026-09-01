@@ -22,10 +22,17 @@
 (define (agent-buffer slug) (string-append "*agent: " slug "*"))
 
 (define (agent-buf slug)
-  (let loop ((bs (buffer-list)))
-    (cond ((null? bs) (agent-buffer slug))
-          ((equal? (buffer-local (car bs) 'agent-slug) slug) (car bs))
-          (else (loop (cdr bs))))))
+  ;; the runtime is the authority on its own buffer. Slugs restart at a1
+  ;; on every boot, so a restored buffer can carry a stale local that
+  ;; claims a live slug; the scan alone then routes events to the wrong
+  ;; chat. The scan stays as the fallback for a slug with no live runtime.
+  (or (and (member slug (agent-list))
+           (let ((b (plist-get (agent-info slug) 'buffer)))
+             (and b (buffer-exists? b) b)))
+      (let loop ((bs (buffer-list)))
+        (cond ((null? bs) (agent-buffer slug))
+              ((equal? (buffer-local (car bs) 'agent-slug) slug) (car bs))
+              (else (loop (cdr bs)))))))
 
 (define (agent-slug-of buf) (buffer-local buf 'agent-slug))
 
@@ -453,7 +460,16 @@
 
 (define (agent-flush-prose! slug partial?)
   (let* ((buf (agent-buf slug))
-         (from0 (buffer-local buf 'agent-prose-from)))
+         (raw (buffer-local buf 'agent-prose-from))
+         ;; a stale local — restored from an older, longer incarnation of
+         ;; the buffer — can point past the text. It can only throw below,
+         ;; and the throw kills the event that carried it: drop it instead.
+         (from0 (and raw
+                     (if (and (<= raw (agent-mark slug))
+                              (<= (agent-mark slug) (buffer-size buf)))
+                         raw
+                         (begin (buffer-set-local! buf 'agent-prose-from #f)
+                                #f)))))
     (when from0
       (let* ((tail (substring-bytes (buffer-text buf) from0 (agent-mark slug)))
              (keep (if partial?

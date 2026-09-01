@@ -7131,11 +7131,45 @@
              (buffer-local buf 'chat-turn-active)
              (not (chat-live-runtime? buf)))
     (if (boundp (quote agent-send-msg!))
-        (let ((slug (chat-attach! buf)))
-          (agent-send-msg! slug *chat-restart-message*)
-          (message (string-append "agent " slug ": continuing after restart")))
+        (begin
+          (chat-finalize-hung-tools! buf)
+          (let ((slug (chat-attach! buf)))
+            (agent-send-msg! slug *chat-restart-message*)
+            (message (string-append "agent " slug ": continuing after restart"))))
         (debounce! (string-append "chat-recover:" buf) 100
                    chat-recover-interrupted! buf))))
+
+;; the transcript half of a lost turn: tool cards still "running", and
+;; permission or question blocks that nobody can answer any more.
+;; agent-transcript.scm owns these fns and loads later, so guard each call.
+(define (chat-finalize-hung-tools! buf)
+  (when (boundp (quote agent-finalize-running-tools!))
+    (agent-finalize-running-tools! buf "failed"))
+  (when (boundp (quote agent-block-drop-kind!))
+    (agent-block-drop-kind! buf "permission")
+    (agent-block-drop-kind! buf "question"))
+  (when (boundp (quote chat-activity!))
+    (chat-activity! buf #f)))
+
+;; #t when the buffer says a turn runs and its live runtime says none does.
+;; A real turn holds the agent in 'running or 'needs_attention, so 'idle
+;; under the flag means the turn-end event was lost — a reload mid-turn,
+;; or a crashed event handler. A restart cannot clear this state: the flag
+;; is a conversation local, and the dead-runtime recovery does not fire
+;; because the runtime is alive.
+(define (chat-turn-stale? buf)
+  (and (buffer-local buf 'chat-turn-active)
+       (chat-live-runtime? buf)
+       (equal? (agent-status (buffer-local buf 'agent-slug)) 'idle)))
+
+;; land what the lost turn-end would have landed. Never invents a reply.
+(define (chat-drop-stale-turn! buf)
+  (buffer-set-local! buf 'chat-turn-active #f)
+  (buffer-set-local! buf 'agent-cancelling #f)
+  (buffer-set-local! buf 'agent-turn-text #f)
+  (buffer-set-local! buf 'agent-turn-any #f)
+  (chat-finalize-hung-tools! buf)
+  (message "chat unstuck: the hung turn is cleared, RET sends again"))
 
 (define-mode "chat-mode"
   (lambda ()
@@ -7153,9 +7187,13 @@
       ;; same setup fn also runs via set-mode! on LIVE chats, where the
       ;; slug is the only handle on a running thread.
       (chat-sweep-runtime-locals! buf)
-      (when (and interrupted? (not (chat-live-runtime? buf)))
-        (debounce! (string-append "chat-recover:" buf) 100
-                   chat-recover-interrupted! buf))
+      (when interrupted?
+        (if (chat-live-runtime? buf)
+            ;; the runtime survived but its turn did not: land the lost
+            ;; turn-end so the chat does not stay hung on a tool call
+            (when (chat-turn-stale? buf) (chat-drop-stale-turn! buf))
+            (debounce! (string-append "chat-recover:" buf) 100
+                       chat-recover-interrupted! buf)))
       ;; a chat saved before the conversation of record existed carries the
       ;; old (role text) pairs — read them once, here, so a restored chat
       ;; has a record like any other
@@ -7340,8 +7378,16 @@
 
 ;; opts (a config plist) rides in front, so per-call keys — cmd, model,
 ;; cwd — win over the connector's declared config, first-wins
+;; the slug IS the chat's durable id ('chat-id), made git-ref safe for
+;; the agent/<slug> worktree branch. A per-boot counter collides across
+;; restarts — a restored buffer can claim a live slug and take its
+;; events — and a stale 'agent-slug local from an old boot is just as
+;; wrong, so neither is consulted: the chat's runtime belongs to the chat.
+(define (chat-runtime-slug buf)
+  (string-join (string-split (chat-stable-id! buf) ":") "-"))
+
 (define (chat-attach-agent! buf connector &optional model opts)
-  (let ((slug (or (buffer-local buf 'agent-slug) (agent-next-slug)))
+  (let ((slug (chat-runtime-slug buf))
         ;; a model pinned on the buffer (C-c m before the first send, or a
         ;; .chat header) is part of the chat's identity — carry it in, but
         ;; only if it actually belongs to THIS connector: a bare id left
@@ -7365,6 +7411,11 @@
       (buffer-set-local! buf 'agent-saved-mark mark)
       (agent-install-keys! buf)
       (agent-update-modeline! buf)
+      ;; the previous incarnation of this chat's session can still be
+      ;; registered — a dead backend keeps its process. Free the id so the
+      ;; same chat can open it again.
+      (when (member slug (agent-list))
+        (llm-session-close! slug))
       (llm-session-open! slug
         (append (list 'buffer buf 'mark mark)
                 (agent-resolve-config
@@ -7659,6 +7710,11 @@
     (and slug
          (boundp (quote agent-list))
          (member slug (agent-list))
+         ;; slugs restart at a1 on every boot: a live slug bound to a
+         ;; DIFFERENT buffer is another chat's runtime, not this one's.
+         ;; Say #f so the sweep clears the stale local.
+         (let ((owner (plist-get (agent-info slug) 'buffer)))
+           (or (not owner) (equal? owner buf)))
          #t)))
 
 (define (chat-sweep-runtime-locals! buf)
@@ -7692,6 +7748,21 @@
             (set-mode! "chat-mode")
             (end-of-buffer!)
             (message "Chat reset"))))))
+
+;; the manual door for the same repair the mode setup runs on restore. A
+;; turn that shows as running while the runtime is idle or gone stays hung
+;; forever without it, because no event will ever clear the flag.
+(define-command "chat-unstick" "Clear a turn this chat shows as running when no runtime runs one"
+  (lambda ()
+    (let ((buf (current-buffer)))
+      (cond
+        ((not (or (chat-buffer? buf) (buffer-local buf 'agent-saved-mark)))
+         (message "not a chat buffer"))
+        ((not (buffer-local buf 'chat-turn-active))
+         (message "no turn is stuck in this chat"))
+        ((and (chat-live-runtime? buf) (not (chat-turn-stale? buf)))
+         (message "this turn is live: C-g cancels it"))
+        (else (chat-drop-stale-turn! buf))))))
 
 ;;; --- switching, transparently ---------------------------------------------------
 ;;; "Transparent" means testable: the buffer, its group, the record,

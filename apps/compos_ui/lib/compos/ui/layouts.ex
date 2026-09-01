@@ -543,7 +543,8 @@ defmodule Compos.Ui.Layouts do
             margin: 8px 0; overflow-wrap: break-word;
           }
           .ag-prose > * { max-width: 62ch; }
-          .ag-prose > pre, .ag-prose > .ag-table { max-width: 100%; }
+          .ag-prose > pre, .ag-prose > .ag-table, .ag-prose > .code-block { max-width: 100%; }
+          .ag-prose .code-block pre { margin: 6px 0; }
           .ag-prose code, .ag-prose pre {
             font-family: var(--font-mono); font-size: calc(12px * var(--text-scale-factor, 1));
             background: var(--agent-code-bg, rgba(0,0,0,0.06)); border-radius: 4px;

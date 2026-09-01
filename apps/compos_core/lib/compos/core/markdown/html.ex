@@ -65,6 +65,13 @@ defmodule Compos.Core.Markdown.Html do
     Process.put(:compos_md_url_embed, opts[:url_embed])
     Process.put(:compos_md_csv_source, opts[:csv_source])
     Process.put(:compos_md_hidden_lines, opts[:hidden_lines] || MapSet.new())
+    # A transcript wants CommonMark reflow: a newline inside a paragraph
+    # folds into a space. The editable page wants the line the author
+    # typed. The caller says which page this is.
+    Process.put(:compos_md_nobreak, opts[:soft_breaks] == true)
+    # The code-block head (language, run and tangle keys) is chrome for a
+    # document the reader edits. A read-only page can decline it.
+    Process.put(:compos_md_chrome, opts[:chrome] != false)
 
     marks = Enum.sort_by(marks, &elem(&1, 0))
     {iodata, marks} = nodes(tree, text, 0, marks)
@@ -610,6 +617,12 @@ defmodule Compos.Core.Markdown.Html do
   defp code_head("", _args), do: []
 
   defp code_head(lang, args) do
+    if Process.get(:compos_md_chrome, true),
+      do: code_head_chrome(lang, args),
+      else: []
+  end
+
+  defp code_head_chrome(lang, args) do
     [
       ~s(<div class="code-block-head" data-chrome="1">),
       ~s(<span class="code-lang">),

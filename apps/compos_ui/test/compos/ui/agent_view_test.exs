@@ -69,8 +69,10 @@ defmodule Compos.Ui.AgentViewTest do
     refute has_element?(view, ~s(.agent-view[phx-hook="AgentScroll"]))
     assert html =~ "ag-user"
     assert html =~ "profile redisplay"
-    # markdown became HTML in the prose block
-    assert html =~ "<strong>0.6ms</strong>"
+    # markdown became HTML in the prose block; the assertion holds for the
+    # page renderer (data-src attributes, byte spans) and for the Earmark
+    # fallback (bare tags) alike
+    assert html =~ ~r/<strong[^>]*>(<span[^>]*>)?0\.6ms/
     # tool card with verb, title, status; body present
     assert html =~ "ag-verb"
     assert html =~ "ag-chevron"
@@ -373,7 +375,7 @@ defmodule Compos.Ui.AgentViewTest do
     Editor.set_window_buffer(buf)
     {:ok, _view, html} = live(conn, "/")
 
-    assert html =~ ~s(<div class="ag-table"><table>)
+    assert html =~ ~s(<div class="ag-table"><table)
     assert html =~ "</table></div>"
     assert html =~ "Amandeep Yadav"
     # every wrapper opens and closes: an unbalanced replace breaks the layout

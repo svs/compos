@@ -1913,21 +1913,27 @@ defmodule Compos.Ui.EditorLive do
   end
 
   defp ag_block([s, e, "prose" | _], text, _open) do
-    md = safe_slice(text, s, e)
+    %{kind: :prose, html: text |> safe_slice(s, e) |> prose_html() |> wrap_tables()}
+  end
 
-    # same raise as `earmark_ast/1`: one bad block must not kill the
-    # transcript that holds it
-    html =
-      try do
-        case Earmark.as_html(md, compact_output: false) do
-          {:ok, html, _} -> html
-          {:error, html, _} -> html
-        end
-      rescue
-        _ -> "<pre>" <> html_escape(md) <> "</pre>"
-      end
+  # The transcript is markdown, and the page renderer draws it: the same
+  # renderer as the preview, with CommonMark reflow and no block chrome.
+  # Earmark remains only where the markdown grammar is not installed. One
+  # bad block must not kill the transcript that holds it.
+  defp prose_html(md) do
+    case Compos.Core.Markdown.Html.render(md, [], soft_breaks: true, chrome: false) do
+      {:ok, html} -> html
+      {:error, _} -> prose_html_fallback(md)
+    end
+  rescue
+    _ -> "<pre>" <> html_escape(md) <> "</pre>"
+  end
 
-    %{kind: :prose, html: wrap_tables(html)}
+  defp prose_html_fallback(md) do
+    case Earmark.as_html(md, compact_output: false) do
+      {:ok, html, _} -> html
+      {:error, html, _} -> html
+    end
   end
 
   defp ag_block([s, e, "thought" | _], text, _open),
@@ -2123,10 +2129,10 @@ defmodule Compos.Ui.EditorLive do
 
   # A table always shrinks to the width it is given, and then clips what
   # does not fit. So the scrollbar must sit on an element OUTSIDE the
-  # table. Earmark emits a bare <table>; give each one a box to scroll in.
+  # table. The renderer emits a bare <table>; give each one a box to scroll in.
   defp wrap_tables(html) do
     html
-    |> String.replace("<table>", ~s(<div class="ag-table"><table>))
+    |> String.replace(~r/<table(?=[\s>])/, ~s(<div class="ag-table"><table))
     |> String.replace("</table>", "</table></div>")
   end
 

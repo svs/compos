@@ -6541,6 +6541,7 @@
 ;; The block subsystems: a block that waits in the document with a record
 ;; and verbs, indicated by its fence line alone. One file per block under
 ;; editor/blocks/; an action that creates a block loads after it.
+(load (string-append (compos-priv-dir) "/editor/blocks/block.scm"))
 (load (string-append (compos-priv-dir) "/editor/blocks/diff-block.scm"))
 (load (string-append (compos-priv-dir) "/editor/blocks/llm-rewrite.scm"))
 (global-set-key "M-|" "llm-pipe-region")

@@ -81,10 +81,10 @@
                     "the bound verb stands on the fence with its key")
       (local-unset-key* b "<f9>")
       (buffer-kill! b))
-    (check-equal! (diff-block-body (diff-block-theirs-text "new text" "zz-rw-nokeys"))
+    (check-equal! (block-body (diff-block-theirs-text "new text" "zz-rw-nokeys"))
                   "new text"
                   "and the fences come off by structure")
-    (check-equal! (diff-block-body "no fences here")
+    (check-equal! (block-body "no fences here")
                   "no fences here"
                   "a block whose fences were edited away stays whole")))
 

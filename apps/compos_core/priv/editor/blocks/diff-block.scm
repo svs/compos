@@ -72,19 +72,6 @@
 
 ;;; --- the fence ---------------------------------------------------------------
 
-(define (diff-block--fence args body)
-  (string-append "```diff " args "\n" body "\n```"))
-
-;; the text between the fences; a block whose fences were edited away is
-;; your text, and stays whole
-(define (diff-block-body block)
-  (let ((lines (string-split block "\n")))
-    (if (and (>= (length lines) 2)
-             (string-prefix? "```" (car lines))
-             (string-prefix? "```" (car (reverse lines))))
-        (string-join (reverse (cdr (reverse (cdr lines)))) "\n")
-        block)))
-
 ;; The fence line is the diff, its state, and the keys that decide it:
 ;; ```diff theirs · C-c y keeps it · ... The keys come from BUF's own
 ;; keymap at land time, so a text-only view is complete; a verb with no
@@ -102,56 +89,24 @@
 
 ;;; --- rendering the states ----------------------------------------------------
 
-(define (diff-block--common-head a b)
-  (let loop ((a a) (b b) (n 0))
-    (if (and (pair? a) (pair? b) (equal? (car a) (car b)))
-        (loop (cdr a) (cdr b) (+ n 1))
-        n)))
-
-(define (diff-block--common-tail a b limit)
-  (let loop ((a (reverse a)) (b (reverse b)) (n 0))
-    (if (and (pair? a) (pair? b) (< n limit) (equal? (car a) (car b)))
-        (loop (cdr a) (cdr b) (+ n 1))
-        n)))
-
-(define (diff-block--slice lines from to)
-  (let loop ((ls lines) (i 0) (acc '()))
-    (cond ((or (null? ls) (>= i to)) (reverse acc))
-          ((>= i from) (loop (cdr ls) (+ i 1) (cons (car ls) acc)))
-          (else (loop (cdr ls) (+ i 1) acc)))))
-
-(define (diff-block--marked prefix lines)
-  (map (lambda (l) (string-append prefix l)) lines))
-
-;; ours and theirs as head context, one hunk, tail context. A diff block
-;; holds one change by construction, so nothing matches line by line in
-;; the middle: there is no second change in there to find.
 (define (diff-block--parts ours theirs)
-  (let* ((a (string-split ours "\n"))
-         (b (string-split theirs "\n"))
-         (head (diff-block--common-head a b))
-         (tail (diff-block--common-tail a b
-                 (- (min (length a) (length b)) head))))
-    (list (diff-block--slice a 0 head)
-          (diff-block--slice a head (- (length a) tail))
-          (diff-block--slice b head (- (length b) tail))
-          (diff-block--slice a (- (length a) tail) (length a)))))
+  (block-diff-parts ours theirs))
 
 (define (diff-block-theirs-text theirs buf)
-  (diff-block--fence (diff-block--fence-args buf 'theirs) theirs))
+  (block-fence "diff" (diff-block--fence-args buf 'theirs) theirs))
 
 (define (diff-block-ours-text ours buf)
-  (diff-block--fence (diff-block--fence-args buf 'ours) ours))
+  (block-fence "diff" (diff-block--fence-args buf 'ours) ours))
 
 (define (diff-block-all-text ours theirs buf)
   (let ((parts (diff-block--parts ours theirs)))
-    (diff-block--fence (diff-block--fence-args buf 'all)
+    (block-fence "diff" (diff-block--fence-args buf 'all)
       (string-join
         (append
-          (diff-block--marked " " (nth 0 parts))
-          (diff-block--marked "-" (nth 1 parts))
-          (diff-block--marked "+" (nth 2 parts))
-          (diff-block--marked " " (nth 3 parts)))
+          (block-marked " " (nth 0 parts))
+          (block-marked "-" (nth 1 parts))
+          (block-marked "+" (nth 2 parts))
+          (block-marked " " (nth 3 parts)))
         "\n"))))
 
 (define (diff-block--render p state buf)
@@ -192,7 +147,7 @@
 ;; kind's own header color
 (define (diff-block--body-span buf spans)
   (let* ((bs (nth 2 spans)) (be (nth 3 spans))
-         (text (or (diff-block--text-at buf bs be) ""))
+         (text (or (block-text-at buf bs be) ""))
          (lines (string-split text "\n")))
     (if (< (length lines) 2)
         (list bs be)
@@ -211,15 +166,18 @@
           (append (diff-block--body-span buf spans) (list 'diff-block))))
   (overlay-set! buf 'diff-block-faces
     (diff-block--block-faces (nth 2 spans)
-      (or (diff-block--text-at buf (nth 2 spans) (nth 3 spans)) "")
+      (or (block-text-at buf (nth 2 spans) (nth 3 spans)) "")
       state)))
 
 ;;; --- hold and release --------------------------------------------------------
 
+(define diff-block--keys
+  '(("C-c y" "diff-block-accept")
+    ("C-c k" "diff-block-reject")
+    ("C-c d" "diff-block-cycle")))
+
 (define (diff-block--bind-keys! buf)
-  (local-set-key* buf "C-c y" "diff-block-accept")
-  (local-set-key* buf "C-c k" "diff-block-reject")
-  (local-set-key* buf "C-c d" "diff-block-cycle"))
+  (block-bind-keys! buf diff-block--keys))
 
 (define (diff-block--hold! buf spans tail ours theirs note state)
   (buffer-set-local! buf 'diff-block
@@ -233,44 +191,17 @@
   (overlay-clear! buf 'diff-block)
   (overlay-clear! buf 'diff-block-source)
   (overlay-clear! buf 'diff-block-faces)
-  (local-unset-key* buf "C-c y")
-  (local-unset-key* buf "C-c k")
-  (local-unset-key* buf "C-c d"))
+  (block-unbind-keys! buf diff-block--keys))
 
-;;; --- where the two texts are now ---------------------------------------------
 ;; Both overlays follow the rope, so an edit above them moves both; the
 ;; record answers before they exist.
-
-(define (diff-block--text-at buf start end)
-  (let ((text (buffer-text buf)))
-    (and (<= start end)
-         (<= end (string-byte-length text))
-         (substring-bytes text start end))))
-
-(define (diff-block--overlay buf face)
-  (let ((hits (filter (lambda (ov) (equal? (caddr ov) face))
-                      (buffer-overlays buf))))
-    (and (pair? hits) (list (car (car hits)) (cadr (car hits))))))
-
 (define (diff-block--spans buf)
   (let ((p (diff-block-pending buf)))
     (and p
-         (append (or (diff-block--overlay buf "diff-block-source")
+         (append (or (block-overlay-span buf "diff-block-source")
                      (list (nth 0 p) (nth 1 p)))
-                 (or (diff-block--overlay buf "diff-block-span")
+                 (or (block-overlay-span buf "diff-block-span")
                      (list (nth 2 p) (nth 3 p)))))))
-
-;; What the block needs after it. A document that already has a blank line
-;; there needs nothing; a line that runs straight on needs one.
-(define (diff-block--tail-for buf end)
-  (let* ((text (buffer-text buf))
-         (size (string-byte-length text))
-         (rest (substring-bytes text (min end size) (min (+ end 2) size))))
-    (cond ((equal? rest "") "")
-          ((equal? rest "\n") "")
-          ((string-prefix? "\n\n" rest) "")
-          ((string-prefix? "\n" rest) "\n")
-          (else "\n\n"))))
 
 ;; Replacing what the block holds: one delete, one insert, and the record
 ;; follows the new length. Every verb that changes the block goes through
@@ -289,17 +220,15 @@
 ;; arrives, so it may only land if ours still reads as it did: the answer
 ;; is 'ok or 'changed, and the creator says what happened.
 (define (diff-block-propose! buf start end ours theirs note)
-  (let ((here (diff-block--text-at buf start end)))
+  (let ((here (block-text-at buf start end)))
     (if (not (equal? here ours))
         'changed
-        (let* ((tail (diff-block--tail-for buf end))
+        (let* ((tail (block-tail-for buf end))
                ;; the keys bind first: the fence line names them
                (_ (diff-block--bind-keys! buf))
                (block (diff-block-theirs-text theirs buf))
-               (bstart (+ end 2))
-               (bend (+ bstart (string-byte-length block))))
-          (buffer-insert! buf end (string-append "\n\n" block tail))
-          (diff-block--hold! buf (list start end bstart bend)
+               (bounds (block-land! buf end block tail)))
+          (diff-block--hold! buf (append (list start end) bounds)
                              tail ours theirs note 'theirs)
           'ok))))
 
@@ -309,14 +238,14 @@
 (define (diff-block-update! buf theirs note)
   (let* ((p (diff-block-pending buf))
          (spans (and p (diff-block--spans buf)))
-         (block (and spans (diff-block--text-at buf (nth 2 spans) (nth 3 spans)))))
+         (block (and spans (block-text-at buf (nth 2 spans) (nth 3 spans)))))
     (cond
       ((not block) 'gone)
       ((not (equal? block (diff-block--rendered p buf))) 'edited)
       (else
         (let ((state (diff-block-state p)))
           (diff-block--put! buf p spans
-            (diff-block--render (append (diff-block--slice p 0 6)
+            (diff-block--render (append (block--slice p 0 6)
                                         (list theirs note state
                                               diff-block--format))
                                 state buf)
@@ -330,7 +259,7 @@
 (define (diff-block-set-state! buf state)
   (let* ((p (diff-block-pending buf))
          (spans (and p (diff-block--spans buf)))
-         (block (and spans (diff-block--text-at buf (nth 2 spans) (nth 3 spans)))))
+         (block (and spans (block-text-at buf (nth 2 spans) (nth 3 spans)))))
     (cond
       ((not p) (message "No block is waiting"))
       ((not block)
@@ -357,7 +286,7 @@
 ;; from them is theirs as the record holds it.
 (define (diff-block--accept-text p block)
   (if (equal? (diff-block-state p) 'theirs)
-      (diff-block-body block)
+      (block-body block)
       (diff-block-theirs p)))
 
 ;; Keeping it: theirs takes ours's place, and ours and the blank line
@@ -365,7 +294,7 @@
 (define (diff-block-accept! buf)
   (let* ((p (diff-block-pending buf))
          (spans (and p (diff-block--spans buf)))
-         (block (and spans (diff-block--text-at buf (nth 2 spans) (nth 3 spans)))))
+         (block (and spans (block-text-at buf (nth 2 spans) (nth 3 spans)))))
     (cond
       ((not p) (message "No block is waiting"))
       ((not block)
@@ -389,7 +318,7 @@
 (define (diff-block-reject! buf)
   (let* ((p (diff-block-pending buf))
          (spans (and p (diff-block--spans buf)))
-         (block (and spans (diff-block--text-at buf (nth 2 spans) (nth 3 spans)))))
+         (block (and spans (block-text-at buf (nth 2 spans) (nth 3 spans)))))
     (cond
       ((not p) (message "No block is waiting"))
       ((not block)

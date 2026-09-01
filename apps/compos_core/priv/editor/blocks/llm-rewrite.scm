@@ -113,7 +113,7 @@
 (define (llm-rewrite--start! buf)
   (let* ((start (and (mark) (region-beginning)))
          (end (and start (region-end)))
-         (old (and start (diff-block--text-at buf start end))))
+         (old (and start (block-text-at buf start end))))
     (if (or (not old) (equal? old ""))
         (message "No region — set the mark first (C-SPC)")
         (begin

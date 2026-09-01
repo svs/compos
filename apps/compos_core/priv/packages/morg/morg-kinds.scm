@@ -195,11 +195,13 @@
   "A CSV preview below the block that made it. It does not run."
   'runnable #f 'body-face "morg-result" 'header-face "morg-bold")
 
-;; A live diff's one-sided views (the fence args are the view: theirs or
-;; ours) are prose: a dash there is a dash, and no line wears a diff face.
+;; A live diff's one-sided views (the fence args lead with the view:
+;; theirs or ours) are prose: a dash there is a dash, and no line wears
+;; a diff face.
 (define (fence-kind--diff-line-face line &optional args)
   (cond ((and (string? args)
-              (member (string-trim args) '("theirs" "ours")))
+              (let ((a (string-trim args)))
+                (or (string-prefix? "theirs" a) (string-prefix? "ours" a))))
          #f)
         ((string-prefix? "+++" line) "diff-file")
         ((string-prefix? "---" line) "diff-file")
@@ -229,7 +231,9 @@
           (if (not (and spans (= start (nth 2 spans))))
               '()
               (append
-                (list (list (llm-rewrite--instruction p) "md-fence-note"))
+                (list (list (llm-rewrite--view-name (llm-rewrite--view p))
+                            "md-fence-chip f-diff-hunk")
+                      (list (llm-rewrite--instruction p) "md-fence-note"))
                 (fold (lambda (acc v)
                         (let ((k (key-for-command (car v) buf)))
                           (if (equal? k "")
@@ -243,7 +247,7 @@
 (define-fence-kind! "diff"
   "A unified diff. Its lines wear the diff faces. It does not run."
   'runnable #f 'ts-lang #f 'line-face fence-kind--diff-line-face
-  'chip-args #t 'fence-face "diff-hunk"
+  'fence-face "diff-hunk"
   'head-chrome fence-kind--diff-head-chrome)
 
 (define-fence-kind! "patch"

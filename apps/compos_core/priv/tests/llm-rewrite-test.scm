@@ -62,13 +62,23 @@
                   "a source file leads with code")
     (t--rw-done!)))
 
-(deftest 'the-fence-line-is-just-a-diff-and-its-view
-  "no instruction, no keys: the record carries those, the fence says diff"
+(deftest 'the-fence-line-is-the-diff-its-view-and-its-keys
+  "diff, the view, then the keys from the buffer's own keymap"
   (lambda ()
-    (check-equal! (llm-rewrite-theirs-block "new text")
+    ;; no verb key is bound in this buffer, so the line is view alone
+    (check-equal! (llm-rewrite-theirs-block "new text" "zz-rw-nokeys")
                   "```diff theirs\nnew text\n```"
                   "theirs: the rewrite alone")
-    (check-equal! (llm-rewrite--body (llm-rewrite-theirs-block "new text"))
+    ;; bind a dummy key to one verb: the fence names it — no test names
+    ;; a production key
+    (let ((b (test-buffer! "zz-rw-keyed" "x")))
+      (local-set-key* b "<f9>" "llm-rewrite-accept")
+      (check-equal! (llm-rewrite-theirs-block "new" b)
+                    "```diff theirs · <f9> keeps it\nnew\n```"
+                    "the bound verb stands on the fence with its key")
+      (local-unset-key* b "<f9>")
+      (buffer-kill! b))
+    (check-equal! (llm-rewrite--body (llm-rewrite-theirs-block "new text" "zz-rw-nokeys"))
                   "new text"
                   "and the fences come off by structure")
     (check-equal! (llm-rewrite--body "no fences here")
@@ -78,14 +88,14 @@
 (deftest 'the-all-view-is-a-diff-fence
   "old lines over new, with the shared ends as context, in a ```diff block"
   (lambda ()
-    (check-equal! (llm-rewrite-diff-block "a\nb\nc" "a\nX\nc")
+    (check-equal! (llm-rewrite-diff-block "a\nb\nc" "a\nX\nc" "zz-rw-nokeys")
                   "```diff all\n a\n-b\n+X\n c\n```"
                   "one hunk between the shared ends, and the kind says diff")))
 
 (deftest 'the-ours-view-is-the-passage-alone
   "a one-sided view is prose in the diff fence, never diff paint"
   (lambda ()
-    (check-equal! (llm-rewrite-ours-block "Two.")
+    (check-equal! (llm-rewrite-ours-block "Two." "zz-rw-nokeys")
                   "```diff ours\nTwo.\n```"
                   "the fence args say which side this is")))
 
@@ -104,7 +114,7 @@
   (lambda ()
     (t--rw-proposed!)
     (check-equal! (buffer-text t--rw-buf)
-                  (t--rw-doc (llm-rewrite-theirs-block "Deux."))
+                  (t--rw-doc (llm-rewrite-theirs-block "Deux." t--rw-buf))
                   "the block sits under the passage, one blank line down")
     (check-equal! (llm-rewrite--view (llm-rewrite-pending t--rw-buf)) 'theirs
                   "and it reads as theirs: the new text, not a diff")
@@ -118,15 +128,15 @@
     (t--rw-proposed!)
     (llm-rewrite-cycle-view! t--rw-buf)
     (check-equal! (buffer-text t--rw-buf)
-                  (t--rw-doc (llm-rewrite-diff-block "Two." "Deux."))
+                  (t--rw-doc (llm-rewrite-diff-block "Two." "Deux." t--rw-buf))
                   "first all: the unified diff")
     (llm-rewrite-cycle-view! t--rw-buf)
     (check-equal! (buffer-text t--rw-buf)
-                  (t--rw-doc (llm-rewrite-ours-block "Two."))
+                  (t--rw-doc (llm-rewrite-ours-block "Two." t--rw-buf))
                   "then ours: the passage alone")
     (llm-rewrite-cycle-view! t--rw-buf)
     (check-equal! (buffer-text t--rw-buf)
-                  (t--rw-doc (llm-rewrite-theirs-block "Deux."))
+                  (t--rw-doc (llm-rewrite-theirs-block "Deux." t--rw-buf))
                   "and back to theirs")
     (t--rw-done!)))
 
@@ -176,7 +186,7 @@
     (t--rw-proposed!)
     (llm-rewrite--refine! t--rw-buf "Zwei." "now in German")
     (check-equal! (buffer-text t--rw-buf)
-                  (t--rw-doc (llm-rewrite-theirs-block "Zwei."))
+                  (t--rw-doc (llm-rewrite-theirs-block "Zwei." t--rw-buf))
                   "the second round replaced the first, and says so")
     (llm-rewrite-reject! t--rw-buf)
     (check-equal! (buffer-text t--rw-buf) "One.\n\nTwo.\n"
@@ -200,7 +210,7 @@
     (buffer-replace! t--rw-buf "Deux." "Deux!")
     (llm-rewrite-reject! t--rw-buf)
     (check-equal! (buffer-text t--rw-buf)
-                  (t--rw-doc (llm-rewrite-theirs-block "Deux!"))
+                  (t--rw-doc (llm-rewrite-theirs-block "Deux!" t--rw-buf))
                   "a reject takes back nothing you wrote")
     (check-true! (llm-rewrite-pending t--rw-buf) "and it still waits")
     (t--rw-done!)))
@@ -249,7 +259,7 @@
                   "a theirs block offers the diff and the passage")
     (t--rw-review! "show all")
     (check-equal! (buffer-text t--rw-buf)
-                  (t--rw-doc (llm-rewrite-diff-block "Two." "Deux."))
+                  (t--rw-doc (llm-rewrite-diff-block "Two." "Deux." t--rw-buf))
                   "and the answer is the view")
     (t--rw-done!)))
 
@@ -259,7 +269,7 @@
     (t--rw-proposed!)
     (t--rw-review! "")
     (check-equal! (buffer-text t--rw-buf)
-                  (t--rw-doc (llm-rewrite-theirs-block "Deux."))
+                  (t--rw-doc (llm-rewrite-theirs-block "Deux." t--rw-buf))
                   "the document stands")
     (check-true! (llm-rewrite-pending t--rw-buf) "and the rewrite still waits")
     (t--rw-done!)))

@@ -96,6 +96,9 @@
   (lambda ()
     (check-equal! (fence-kind-line-face "diff" "- a bullet" "theirs")
                   #f "theirs is prose")
+    (check-equal! (fence-kind-line-face "diff" "- a bullet"
+                                        "theirs · C-c y keeps it")
+                  #f "the keys on the line change nothing")
     (check-equal! (fence-kind-line-face "diff" "- a bullet" "ours")
                   #f "ours is prose")
     (check-equal! (fence-kind-line-face "diff" "-gone" "all")

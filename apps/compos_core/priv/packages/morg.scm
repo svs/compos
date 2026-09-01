@@ -41,6 +41,15 @@
           (substring-bytes line (car r) (cadr r)))
         #f)))
 
+;; what follows the language on an open fence: ":tangle out.scm", a
+;; rewrite's instruction, ":sync" — the block's own arguments, trimmed
+(define (morg-fence-args line)
+  (let ((g (re-groups "^[ \t]*```[ \t]*[A-Za-z0-9_+.-]*[ \t]*(.*)$" line 0)))
+    (if g
+        (let ((r (cadr g)))
+          (string-trim (substring-bytes line (car r) (cadr r))))
+        "")))
+
 (define (morg-fence-close? line)
   (re-match "^[ \t]*```[ \t]*$" line))
 

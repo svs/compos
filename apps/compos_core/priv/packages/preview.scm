@@ -168,7 +168,12 @@
                      (if (string-suffix? (car (car rs)) name)
                          (cadr (car rs))
                          (loop (cdr rs))))))))
-    (if (and (equal? r "markdown") (preview--markdown-file? name)) "rows" r)))
+    (cond ((and (equal? r "markdown") (preview--markdown-file? name)) "rows")
+          (r r)
+          ;; the mode is the truth, not the name: a scratch or any other
+          ;; unnamed morg buffer previews as rows like a .md file does
+          ((buffer-mode-is? name "morg-mode") "rows")
+          (else #f))))
 
 ;; A buffer whose rows disagree with its mode list heals: rows without the
 ;; mode go, the mode without rows draws. A restored desktop from before

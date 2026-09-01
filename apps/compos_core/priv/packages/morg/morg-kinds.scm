@@ -198,7 +198,7 @@
 
 (define-fence-kind! "rewrite"
   "A rewrite waiting for a decision. llm-rewrite lands one below the passage; its own keys decide it. It does not run."
-  'runnable #f 'ts-lang #f)
+  'runnable #f 'ts-lang #f 'chip-args #t)
 
 ;; Info strings whose tree-sitter grammar wears another name and that
 ;; morg-babel gives no runner.

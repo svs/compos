@@ -285,14 +285,22 @@
       ;; a row face (row-*) shapes the whole row: the page reads it off the
       ;; line, not the segment
       ;; the fence line steps back and its kind stays: a chrome chip names
-      ;; the block where the backticks were
+      ;; the block where the backticks were. A kind that declares chip-args
+      ;; keeps its arguments on the chip — a rewrite says what it was asked.
       ((equal? k 'open)
-       (let ((chip (fence-kind-chip (morg-info e) run-key)))
+       (let* ((lang (morg-info e))
+              (chip (fence-kind-chip lang run-key))
+              (args (and chip
+                         (fence-kind-get lang 'chip-args #f)
+                         (morg-fence-args line)))
+              (text (if (and (string? args) (not (equal? args "")))
+                        (string-append chip " · " args)
+                        chip)))
          (append
            (list (list start (+ start len) "md-marker")
                  (list start (+ start len) "row-fence"))
-           (if chip
-               (list (chrome-after (+ start len) chip "md-fence-chip"))
+           (if text
+               (list (chrome-after (+ start len) text "md-fence-chip"))
                '()))))
       ((equal? k 'close)
        (list (list start (+ start len) "md-marker") (list start (+ start len) "row-fence")))

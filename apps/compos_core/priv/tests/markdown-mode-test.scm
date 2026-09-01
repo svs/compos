@@ -175,3 +175,13 @@
                       (buffer-overlays t--md-buf)))
       1 "one chip: the close fence draws none")
     (t--md-done!)))
+
+(deftest 'a-rewrite-chip-carries-its-instruction
+  "a kind with chip-args says what the block was asked, in the preview"
+  (lambda ()
+    (t--md-fresh! "```rewrite use sentence case\nbody\n```\n")
+    (check-true!
+      (member (chrome-after 28 "rewrite · use sentence case" "md-fence-chip")
+              (buffer-overlays t--md-buf))
+      "the chip holds the kind and the instruction")
+    (t--md-done!)))

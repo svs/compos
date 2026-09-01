@@ -299,3 +299,17 @@
           (check-equal! (buffer-local buf 'render-mode) "html"
                         "the page renders as html")))
       (buffer-kill! buf))))
+
+(deftest 'a-morg-buffer-previews-by-its-mode-not-its-name
+  "a scratch has no extension, and the mode is the truth"
+  (lambda ()
+    (let ((buf (test-buffer! "zz-preview-unnamed" "# t\n")))
+      (with-current-buffer buf
+        (lambda ()
+          (set-mode! "morg-mode")
+          (check-equal! (preview-renderer-for buf) "rows"
+                        "an unnamed morg buffer takes the rows renderer")
+          (enable-minor-mode! buf "preview-mode")
+          (check-true! (equal? (buffer-local buf 'preview-rows) #t)
+                       "and preview-mode draws the rows in place")))
+      (buffer-kill! buf))))

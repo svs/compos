@@ -126,6 +126,35 @@ defmodule Compos.Ui.IslandTest do
     assert html =~ ~r{data-len="0"[^>]*>HERE</span><span class="">def}
   end
 
+  test "a chrome click routes through the block-click registry", %{conn: conn} do
+    buf = fresh_buffer("island-#{System.unique_integer([:positive])}", "abc\n")
+
+    Session.eval(~s{
+      (begin
+        (define *zz-chrome-click* #f)
+        (on-block-click! 'zz-chrome
+          (lambda (b id)
+            (if (equal? id "zz:verb:7")
+                (begin (set! *zz-chrome-click* (list b id)) #t)
+                #f)))
+        (overlay-set! "#{buf}" 'chrome
+          (list (chrome-after 3 "act" "zz-verb" "zz:verb:7"))))
+    })
+
+    {:ok, view, _} = live(conn, "/")
+    html = render(view)
+
+    assert html =~ ~s(phx-click="block_click")
+    assert html =~ ~s(phx-value-id="zz:verb:7")
+    # the shown class keeps only the styling tokens
+    assert html =~ ~s(class="chrome-seg zz-verb")
+    refute html =~ "chrome-click:"
+
+    view |> element(~s(span[phx-value-id="zz:verb:7"])) |> render_click()
+    want = ~s{("#{buf}" "zz:verb:7")}
+    assert {:ok, ^want} = Session.eval("*zz-chrome-click*")
+  end
+
   test "chrome survives the cursor pass on a server-caret surface", %{conn: conn} do
     buf = fresh_buffer("island-#{System.unique_integer([:positive])}", "abc\n")
     Session.eval(~s{(overlay-set! "#{buf}" 'chrome (list (chrome-after 3 "chip" "zz-badge")))})

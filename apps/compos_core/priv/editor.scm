@@ -2241,17 +2241,21 @@
 ;;; with the class "chrome-seg CLASS". A before attachment draws ahead of
 ;;; its byte, an after attachment behind it.
 
-(define (chrome--spec side pos text class)
+(define (chrome--spec side pos text class click)
   (list pos pos
-        (string-append "chrome-" side ":" class ":" (url-encode text))))
+        (string-append "chrome-" side ":" class ":" (url-encode text)
+                       (if click (string-append ":" click) ""))))
 
-(define (chrome-before pos text class) (chrome--spec "b" pos text class))
-(define (chrome-after pos text class) (chrome--spec "a" pos text class))
+(define (chrome-before pos text class &optional click)
+  (chrome--spec "b" pos text class click))
+
+(define (chrome-after pos text class &optional click)
+  (chrome--spec "a" pos text class click))
 
 (public! 'chrome-before
-  "(chrome-before POS TEXT CLASS) — an overlay range that draws TEXT ahead of byte POS as zero-length chrome with the class CLASS")
+  "(chrome-before POS TEXT CLASS [CLICK]) — an overlay range that draws TEXT ahead of byte POS as zero-length chrome with the class CLASS; a CLICK id routes through the block-click registry")
 (public! 'chrome-after
-  "(chrome-after POS TEXT CLASS) — an overlay range that draws TEXT behind byte POS as zero-length chrome with the class CLASS")
+  "(chrome-after POS TEXT CLASS [CLICK]) — an overlay range that draws TEXT behind byte POS as zero-length chrome with the class CLASS; a CLICK id routes through the block-click registry")
 
 ;;; --- the filesystem-change hook ----------------------------------------------
 ;;; run-hooks calls its handlers with no arguments, and this one carries the

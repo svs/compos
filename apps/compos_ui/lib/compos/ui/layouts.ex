@@ -292,6 +292,7 @@ defmodule Compos.Ui.Layouts do
           /* chrome: text the buffer does not hold, drawn beside the text;
              a zero-length island the caret walks over */
           .chrome-seg { user-select: none; white-space: nowrap; }
+          .chrome-seg[phx-click] { cursor: pointer; }
           .chrome-seg.md-fence-chip {
             display: inline-block; padding: 0 7px; margin: 0 4px; border-radius: 9px;
             border: 1px solid var(--border-bg, rgba(0,0,0,0.14));

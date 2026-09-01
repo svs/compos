@@ -954,17 +954,20 @@ defmodule Compos.Ui.EditorLive do
     |> List.to_tuple()
   end
 
-  # One chrome overlay -> {pos, side, class, text}. The face string is
-  # "chrome-b:CLASS:ENCODED-TEXT" (before the byte) or "chrome-a:..."
-  # (after it); Scheme builds it with chrome-before / chrome-after.
+  # One chrome overlay -> {pos, side, class, text, click}. The face string
+  # is "chrome-b:CLASS:ENCODED-TEXT[:CLICK]" (before the byte) or
+  # "chrome-a:..." (after it); Scheme builds it with chrome-before /
+  # chrome-after. The encoded text cannot hold a bare colon, so the split
+  # is unambiguous; a click id keeps every colon it carries.
   defp chrome_item({pos, _e, "chrome-b:" <> rest}), do: [chrome_parts(pos, :before, rest)]
   defp chrome_item({pos, _e, "chrome-a:" <> rest}), do: [chrome_parts(pos, :after, rest)]
   defp chrome_item(_), do: []
 
   defp chrome_parts(pos, side, rest) do
-    case String.split(rest, ":", parts: 2) do
-      [cls, text] -> {pos, side, cls, URI.decode(text)}
-      [cls] -> {pos, side, cls, ""}
+    case String.split(rest, ":", parts: 3) do
+      [cls, text, click] -> {pos, side, cls, URI.decode(text), click}
+      [cls, text] -> {pos, side, cls, URI.decode(text), nil}
+      [cls] -> {pos, side, cls, "", nil}
     end
   end
 
@@ -982,7 +985,7 @@ defmodule Compos.Ui.EditorLive do
     |> Enum.map(fn {{{part, start}, _num}, i} ->
       le = start + byte_size(part)
 
-      Enum.filter(chrome, fn {pos, side, _cls, _text} ->
+      Enum.filter(chrome, fn {pos, side, _cls, _text, _click} ->
         pos >= start and pos <= le and
           case side do
             :before -> pos < le or i == last or start == le
@@ -1034,17 +1037,24 @@ defmodule Compos.Ui.EditorLive do
     # at one byte, what precedes draws its :after chrome before what
     # follows draws its :before chrome
     ordered =
-      Enum.sort_by(chrome, fn {pos, side, _, _} -> {pos, if(side == :after, do: 0, else: 1)} end)
+      Enum.sort_by(chrome, fn {pos, side, _, _, _} -> {pos, if(side == :after, do: 0, else: 1)} end)
 
     {done, rest, _off} =
-      Enum.reduce(ordered, {[], segs, 0}, fn {pos, _side, cls, text}, {done, rest, off} ->
+      Enum.reduce(ordered, {[], segs, 0}, fn {pos, _side, cls, text, click}, {done, rest, off} ->
         at = Text.floor_utf8(part, min(max(pos - start, 0), byte_size(part)))
         {before, tail, off} = segs_split(rest, off, at)
-        {done ++ before ++ [{text, "chrome-seg " <> cls}], tail, off}
+        {done ++ before ++ [{text, chrome_class(cls, click)}], tail, off}
       end)
 
     done ++ rest
   end
+
+  # the click id rides the class the way a link target does — a seg's class
+  # is its only channel — and the seg renderer takes it back off
+  defp chrome_class(cls, nil), do: "chrome-seg " <> cls
+
+  defp chrome_class(cls, click),
+    do: "chrome-seg #{cls} chrome-click:#{URI.encode(click, &URI.char_unreserved?/1)}"
 
   # split SEGS at in-line byte AT; OFF is the byte where SEGS begins
   defp segs_split(segs, off, at), do: segs_split(segs, off, at, [])
@@ -1682,7 +1692,7 @@ defmodule Compos.Ui.EditorLive do
           data-s={ln.start}
         >
           <span class="linenum" contenteditable="false">{ln.num}</span>
-          <span class="line-content"><.seg :for={{txt, cls} <- ln.segs} txt={txt} cls={cls} base={@node.buffer} /><br
+          <span class="line-content"><.seg :for={{txt, cls} <- ln.segs} txt={txt} cls={cls} base={@node.buffer} win={@node.id} /><br
               :if={ln.segs == []}
               class="empty-row"
             /><span
@@ -1859,6 +1869,7 @@ defmodule Compos.Ui.EditorLive do
   attr(:txt, :string, required: true)
   attr(:cls, :string, required: true)
   attr(:base, :string, default: nil)
+  attr(:win, :any, default: nil)
 
   defp seg(%{cls: cls, txt: txt} = assigns)
        when is_binary(cls) and is_binary(txt) do
@@ -1867,9 +1878,23 @@ defmodule Compos.Ui.EditorLive do
 
     cond do
       # chrome: text the buffer does not hold, standing at one byte and
-      # holding zero bytes; the byte walker skips it by its data-len
+      # holding zero bytes; the byte walker skips it by its data-len.
+      # A click id routes through the block-click registry like a block
+      # tree's click.
       String.starts_with?(cls, "chrome-seg") ->
-        ~H|<span class={@cls} contenteditable="false" data-len="0">{@txt}</span>|
+        {shown, click} = chrome_click_off(cls)
+        assigns = assign(assigns, cls: shown, click: click)
+
+        ~H"""
+        <span
+          class={@cls}
+          contenteditable="false"
+          data-len="0"
+          phx-click={@click && "block_click"}
+          phx-value-win={@click && @win}
+          phx-value-id={@click}
+        >{@txt}</span>
+        """
       is_binary(src) ->
         avatar? = String.ends_with?(txt, "#compos-avatar")
 
@@ -1923,6 +1948,21 @@ defmodule Compos.Ui.EditorLive do
       true ->
         nil
     end
+  end
+
+  # take the click id back off a chrome seg's class; the shown class keeps
+  # only the styling tokens
+  defp chrome_click_off(cls) do
+    {clicks, rest} =
+      cls |> String.split(" ") |> Enum.split_with(&String.starts_with?(&1, "chrome-click:"))
+
+    click =
+      case clicks do
+        ["chrome-click:" <> id | _] -> URI.decode(id)
+        [] -> nil
+      end
+
+    {Enum.join(rest, " "), click}
   end
 
   # A drawn Markdown link carries its target in its class, because a class

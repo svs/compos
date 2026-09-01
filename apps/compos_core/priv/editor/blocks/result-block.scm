@@ -49,8 +49,7 @@
     (if existing
         (let* ((rs (car existing))
                (re (min (buffer-size buf) (+ (cadr existing) 1))))
-          (buffer-delete-range! buf rs (- re rs))
-          (buffer-insert! buf rs res))
+          (block-replace! buf rs re res))
         (let* ((size (buffer-size buf))
                (at (min (+ close-end 1) size)))
           (buffer-insert! buf at

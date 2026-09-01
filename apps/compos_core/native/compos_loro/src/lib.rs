@@ -27,6 +27,8 @@ struct WeaveState {
     doc: LoroDoc,
     text: LoroText,
     undo: HashMap<String, UndoManager>,
+    // an undo group is open: managers registered now must join it
+    grouping: bool,
 }
 
 struct WeaveRes(Mutex<WeaveState>);
@@ -66,6 +68,7 @@ fn build(peer: u64) -> WeaveState {
         doc,
         text,
         undo: HashMap::new(),
+        grouping: false,
     }
 }
 
@@ -111,6 +114,11 @@ fn history_register_actor(
     m.add_exclude_origin_prefix(UNDO_ORIGIN);
     for prefix in &exclude {
         m.add_exclude_origin_prefix(prefix);
+    }
+    // an actor is registered lazily, on its first operation — which may be
+    // inside an open group; the late manager joins it
+    if st.grouping {
+        let _ = m.group_start();
     }
     st.undo.insert(actor, m);
     Ok(atoms::ok())
@@ -215,6 +223,23 @@ fn history_redo(res: ResourceArc<WeaveRes>, actor: String) -> NifResult<bool> {
         .get_mut(&actor)
         .ok_or_else(|| err(format!("no undo manager for actor {actor}")))?;
     m.redo().map_err(err)
+}
+
+/// Open or close an undo group on every registered manager. While a group is
+/// open, each manager merges the changes it records into one undo step. A
+/// manager that is not ready, or already grouping, keeps its current state.
+#[rustler::nif]
+fn history_group(res: ResourceArc<WeaveRes>, on: bool) -> NifResult<Atom> {
+    let mut st = state(&res)?;
+    st.grouping = on;
+    for m in st.undo.values_mut() {
+        if on {
+            let _ = m.group_start();
+        } else {
+            m.group_end();
+        }
+    }
+    Ok(atoms::ok())
 }
 
 #[rustler::nif]

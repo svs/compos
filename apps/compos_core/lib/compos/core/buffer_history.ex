@@ -160,6 +160,14 @@ defmodule Compos.Core.BufferHistory do
   @doc "Undo one change by `actor`. Returns whether anything was undone."
   def undo(%__MODULE__{res: res}, actor), do: BufferHistoryNif.history_undo(res, actor)
 
+  @doc """
+  Open (`true`) or close (`false`) an undo group on every registered undo
+  manager. While a group is open, the changes each manager records merge
+  into one undo step.
+  """
+  def group(%__MODULE__{res: res}, on) when is_boolean(on),
+    do: BufferHistoryNif.history_group(res, on)
+
   def redo(%__MODULE__{res: res}, actor), do: BufferHistoryNif.history_redo(res, actor)
 
   @doc "`{undo_count, redo_count}` for one actor."

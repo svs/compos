@@ -243,3 +243,21 @@
         (string-index (key-for-command "morg-babel" b) "<f9>")
         "a buffer without the block binds nothing")
       (buffer-kill! b))))
+
+(deftest 'a-replaced-result-is-one-undo-step
+  "undo after a rerun brings the previous result back whole"
+  (lambda ()
+    (define-fence-kind! "zz-shout" "Uppercases the body."
+      'run (lambda (buf b lang body)
+             (result-block-insert! buf (nth 0 b) (string-upcase body))
+             (list 'ok lang)))
+    (t--kinds! "```zz-shout\nquiet\n```\n" 14)
+    (morg-babel-execute t--kinds-buf 14)
+    (buffer-replace! t--kinds-buf "quiet" "loud")
+    (morg-babel-execute t--kinds-buf 14)
+    (check-true! (string-index (buffer-text t--kinds-buf) "LOUD")
+                 "the rerun replaced the result")
+    (with-current-buffer t--kinds-buf (lambda () (run-command "undo")))
+    (check-true! (string-index (buffer-text t--kinds-buf) "QUIET")
+                 "one undo restores the previous result whole")
+    (t--kinds-done!)))

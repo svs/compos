@@ -101,6 +101,21 @@ defmodule Compos.BufferHistoryMirrorTest do
       assert_mirrored(name)
     end
 
+    # A block replaces its text as delete + insert. The group makes the pair
+    # one undo step, so one undo restores the previous text whole.
+    test "a grouped delete and insert undo as one step" do
+      name = new_buffer("hello world\n")
+      Buffer.undo_group(name, true)
+      Buffer.delete_range(name, 0, 5, source: :editor)
+      Buffer.insert_at(name, 0, "HOWDY", source: :editor)
+      Buffer.undo_group(name, false)
+      assert Buffer.text(name) == "HOWDY world\n"
+
+      assert :ok = Buffer.undo(name)
+      assert Buffer.text(name) == "hello world\n"
+      assert_mirrored(name)
+    end
+
     # Emacs semantics: consecutive undos keep walking back, and only a command
     # that breaks the chain turns the next undo into a redo. `editor_test`
     # owns that behaviour; this checks the document follows it either way.

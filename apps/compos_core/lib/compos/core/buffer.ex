@@ -1596,12 +1596,15 @@ defmodule Compos.Core.Buffer do
 
   defp on_call({:undo_group, true}, _from, state) do
     state = close_undo_step(state)
+    if mirroring?(state), do: History.group(state.history, true)
     {:reply, :ok, Map.put(state, :undo_group, true)}
   end
 
   defp on_call({:undo_group, false}, _from, state) do
     state = Map.put(state, :undo_group, false)
-    {:reply, :ok, close_undo_step(state)}
+    state = close_undo_step(state)
+    if mirroring?(state), do: History.group(state.history, false)
+    {:reply, :ok, state}
   end
 
   defp on_call(:break_undo_chain, _from, state),

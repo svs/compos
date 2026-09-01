@@ -68,10 +68,12 @@
     (buffer-insert! buf end (string-append "\n\n" block tail))
     (list bstart bend)))
 
-;; replace the block's text in place. -> the new BEND
+;; replace the block's text in place, as ONE undo step. -> the new BEND
 (define (block-replace! buf bstart bend text)
+  (undo-group! buf #t)
   (buffer-delete-range! buf bstart (- bend bstart))
   (buffer-insert! buf bstart text)
+  (undo-group! buf #f)
   (+ bstart (string-byte-length text)))
 
 ;;; --- typing a block ----------------------------------------------------------

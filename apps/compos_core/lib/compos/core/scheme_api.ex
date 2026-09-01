@@ -271,6 +271,8 @@ defmodule Compos.Core.SchemeAPI do
       "undo!" => "(undo!) — undo one step in the current buffer; return #t on success.",
       "break-undo-chain!" =>
         "(break-undo-chain!) — start a new undo group in the current buffer.",
+      "undo-group!" =>
+        "(undo-group! BUF ON) — while ON, BUF's edits stay one undo step; a block's replace uses this so one landing is one undo.",
       "undo-exempt!" =>
         "(undo-exempt! COMMAND) — exempt COMMAND from the automatic undo-chain break.",
       "buffer-save!" =>
@@ -1204,6 +1206,10 @@ defmodule Compos.Core.SchemeAPI do
       "break-undo-chain!" => fn [] ->
         buf = Editor.current_buffer()
         if Buffer.exists?(buf), do: Buffer.break_undo_chain(buf)
+        :void
+      end,
+      "undo-group!" => fn [name, on] ->
+        if Compos.Core.Buffer.exists?(name), do: Compos.Core.Buffer.undo_group(name, on == true)
         :void
       end,
       "undo-exempt!" => fn [name] ->

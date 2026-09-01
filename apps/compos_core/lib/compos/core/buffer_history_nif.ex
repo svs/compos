@@ -17,6 +17,7 @@ defmodule Compos.Core.BufferHistoryNif do
   def history_len(_d), do: :erlang.nif_error(:nif_not_loaded)
 
   def history_undo(_d, _actor), do: :erlang.nif_error(:nif_not_loaded)
+  def history_group(_d, _on), do: :erlang.nif_error(:nif_not_loaded)
   def history_redo(_d, _actor), do: :erlang.nif_error(:nif_not_loaded)
   def history_undo_count(_d, _actor), do: :erlang.nif_error(:nif_not_loaded)
 

@@ -369,6 +369,9 @@ defmodule Compos.Core.KeyDispatch do
         Editor.set_echo("Buffer is read-only")
     end
 
+    # Emacs runs post-command-hook after self-insert-command like after
+    # any command: the paren highlight and the peek follow typing too.
+    _ = Session.call_named("post-command!", [])
     note("after-command", "self-insert-command")
   end
 

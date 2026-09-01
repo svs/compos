@@ -16,22 +16,24 @@ defmodule Compos.ThemeSchemeTest do
     out
   end
 
+  # the names come from the file, not from (test-names): another test in
+  # the same VM may have loaded every file already
   defp names do
-    eval!("(test-names)")
-    |> String.trim_leading("(")
-    |> String.trim_trailing(")")
-    |> String.split(" ", trim: true)
+    Regex.scan(~r/\(deftest '([^\s()]+)/, File.read!(@file_))
+    |> Enum.map(fn [_, name] -> name end)
   end
 
   test "theme-test.scm passes" do
-    before = names()
     eval!(~s{(load "#{@file_}")})
-    names = names() -- before
-
-    assert names != [], "the file registered no test"
+    names = names()
+    assert names != [], "the file declares no test"
 
     for name <- names do
-      assert eval!("(run-test '#{name})") == "()", "#{name} failed"
+      case Session.eval("(run-test '#{name})", nil, 30_000, @lane) do
+        {:ok, "()"} -> :ok
+        {:ok, failures} -> flunk("#{name} failed: #{failures}")
+        {:error, err} -> flunk("#{name} raised: #{err}")
+      end
     end
   end
 end

@@ -362,19 +362,21 @@ with or without --max-columns in project-ripgrep-args." 'group 'project)
       (if root (project-name root) ""))))
 
 ;; every visited file teaches the editor its project
-(add-hook! 'find-file-hook
-  (lambda ()
+(define (project--remember-hook!)
     (project-remember! (project-current))
-    (project-modeline-refresh!)))
+    (project-modeline-refresh!))
+
+(add-hook! 'find-file-hook 'project--remember-hook!)
 
 ;; A file visit re-runs the project config. New non-file buffers use the last
 ;; valid defaults through their inherited default-directory.
-(add-hook! 'find-file-hook
-  (lambda ()
+(define (project--defaults-hook!)
     (let ((root (project-current)))
       (when root
         (project-defaults-load! root)
-        (project-defaults-apply! (current-buffer) root)))))
+        (project-defaults-apply! (current-buffer) root))))
+
+(add-hook! 'find-file-hook 'project--defaults-hook!)
 
 (on-buffer-created!
   (lambda (buf)

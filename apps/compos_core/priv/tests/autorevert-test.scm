@@ -266,7 +266,7 @@
                     "a buffer that just took its file is not modified")
 
       ;; and the wake is wired, not just callable
-      (check-true! (pair? *buffer-woken-hooks*)
+      (check-true! (pair? (hook-functions 'buffer-woken-hook))
                    "restore-buffer-runtime! has a handler to run")
 
       (buffer-kill! p)

@@ -388,44 +388,19 @@
                     (+ n 1)
                     n))))))
 
-;;; --- installed once -----------------------------------------------------------
-
-;; Loading this file again must not add a second handler. The reverts are
-;; idempotent, but the message is not, and hot reload is how the package
-;; gets updated. The hooks call named functions, so a reload still
-;; replaces the behaviour without replacing the registration.
-(define *auto-revert-installed*
-  (if (and (boundp '*auto-revert-installed*)
-           (or (null? *auto-revert-installed*) (pair? *auto-revert-installed*)))
-      *auto-revert-installed*
-      '()))
-
-(define (auto-revert-install! name thunk)
-  (unless (member name *auto-revert-installed*)
-    (set! *auto-revert-installed* (cons name *auto-revert-installed*))
-    (thunk)))
-
+;; Each hook takes the NAME of a function, so loading this file again
+;; adds nothing, and a reload that redefines a function changes what runs.
+;;
 ;; find-file-hook is run by the visit command, not by the visit
 ;; function, so an agent or a script opening a file never reaches it.
-;; buffer-created! is the seam every new buffer passes through, and it
+;; buffer-created-hook is the seam every new buffer passes through, and it
 ;; runs after the text is loaded, which is exactly when buffer and file
 ;; agree.
-(auto-revert-install! 'created
-  (lambda ()
-    (set! *buffer-created-hooks*
-      (cons (lambda (name) (auto-revert-created! name)) *buffer-created-hooks*))))
-(auto-revert-install! 'after-save
-  (lambda () (add-hook! 'after-save-hook (lambda () (auto-revert-saved!)))))
-(auto-revert-install! 'fs-change
-  (lambda () (on-fs-change! (lambda (root) (auto-revert-fs-change root)))))
-;; boundp, not an unconditional install: an editor without the wake seam
-;; must be able to take it on the next load rather than record a
-;; registration that never happened.
-(when (boundp 'on-buffer-woken!)
-  (auto-revert-install! 'woken
-    (lambda () (on-buffer-woken! (lambda (name) (auto-revert-woken! name))))))
-(auto-revert-install! 'frame-attach
-  (lambda () (add-hook! 'frame-attach-hook (lambda () (auto-revert-catch-up!)))))
+(add-hook! 'buffer-created-hook 'auto-revert-created!)
+(add-hook! 'after-save-hook 'auto-revert-saved!)
+(add-hook! 'fs-change-hook 'auto-revert-fs-change)
+(add-hook! 'buffer-woken-hook 'auto-revert-woken!)
+(add-hook! 'frame-attach-hook 'auto-revert-catch-up!)
 
 (auto-revert-watch-open-buffers!)
 
@@ -561,8 +536,7 @@
       (run-command "save-buffer")
       (done))))
 
-(auto-revert-install! 'before-save
-  (lambda () (add-hook! 'before-save-hook (lambda () (auto-revert-guard-save!)))))
+(add-hook! 'before-save-hook 'auto-revert-guard-save!)
 
 (public! 'auto-revert-merge!
   "(auto-revert-merge! BUF BASE DISK) — land the file's changes beside the buffer's own; (TAKEN LEFT)")

@@ -337,14 +337,12 @@
           (message "this is the input marker")
           (unless (delete-active-region!) (delete-char! 1))))))
 
-(define (pre-command!)
-  (chat-snap-to-input!)
-  (run-hooks 'pre-command-hook))
-
+;; the chat keeps point in its input around every command
 (define (chat-input-post-command!)
   (chat-snap-to-input!))
 
-(add-hook! 'post-command-hook chat-input-post-command!)
+(add-hook! 'pre-command-hook 'chat-snap-to-input!)
+(add-hook! 'post-command-hook 'chat-input-post-command!)
 
 (define (agent-install-keys! buf)
   ;; the mark is a marker: the buffer keeps the position current through

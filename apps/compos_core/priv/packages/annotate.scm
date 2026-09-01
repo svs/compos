@@ -312,15 +312,16 @@
                   0 v)))))))
 
 ;; a file that carries annotations opens with them showing
-(add-hook! 'find-file-hook
-  (lambda ()
+(define (annotate--find-file-hook!)
     (let* ((buf (current-buffer))
            (path (annotate--store-file buf))
            (legacy (annotate--home-store-file buf)))
       (when (and (or (and path (file-exists? path))
                      (and legacy (file-exists? legacy)))
                  (not (minor-mode-on? buf "annotate-mode")))
-        (enable-minor-mode! buf "annotate-mode")))))
+        (enable-minor-mode! buf "annotate-mode"))))
+
+(add-hook! 'find-file-hook 'annotate--find-file-hook!)
 
 (define-command "annotate-store-visit" "Visit this buffer's annotations file"
   (lambda ()

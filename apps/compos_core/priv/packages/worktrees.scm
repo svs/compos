@@ -254,8 +254,10 @@
             (workspace--stamp! buf id checkout primary)
             (buffer-set-local! buf 'group checkout)))))))
 
-(add-hook! 'find-file-hook
-  (lambda () (worktree-mode--maybe-enable! (current-buffer))))
+(define (worktree--find-file-hook!)
+    (worktree-mode--maybe-enable! (current-buffer)))
+
+(add-hook! 'find-file-hook 'worktree--find-file-hook!)
 
 (set! buffer-workspace-label
   (lambda (b)

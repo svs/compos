@@ -32,7 +32,7 @@
     (lambda (mode)
       (unless (member mode *lsp-hooked-modes*)
         (set! *lsp-hooked-modes* (cons mode *lsp-hooked-modes*))
-        (add-hook! (string->symbol (string-append mode "-hook")) lsp--maybe-attach!)))
+        (add-hook! (string->symbol (string-append mode "-hook")) 'lsp--maybe-attach!)))
     (or (plist-get spec 'modes) '()))
   name)
 
@@ -548,14 +548,15 @@
 
 ;;; save notification
 
-(add-hook! 'after-save-hook
-  (lambda ()
+(define (lsp--after-save-hook!)
     (let* ((buf (current-buffer))
            (id (buffer-local buf 'lsp-server)))
       (when (and id (minor-mode-on? buf "lsp-mode") (lsp--connection? id))
         (lsp-notify! id "textDocument/didSave"
           (list 'textDocument
-                (list 'uri (string-append "file://" buf))))))))
+                (list 'uri (string-append "file://" buf)))))))
+
+(add-hook! 'after-save-hook 'lsp--after-save-hook!)
 
 (global-set-key "M-." "code-goto-definition")
 (global-set-key "M-," "lsp-pop-marker")

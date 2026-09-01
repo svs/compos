@@ -723,7 +723,7 @@
                     (list (cadr pair) (+ (cadr pair) 1) "paren-match")))
             (overlay-clear! buf 'paren))))))
 
-(add-hook! 'post-command-hook paredit--show-paren!)
+(add-hook! 'post-command-hook 'paredit--show-paren!)
 
 (define-style! 'paredit "
 .f-paren-match{background:color-mix(in srgb, var(--accent-fg,#4a6a8a) 32%, transparent);border-radius:2px}
@@ -745,10 +745,11 @@
   "Enable paredit-mode in scheme-mode buffers."
   'group 'paredit 'type 'boolean)
 
-(add-hook! 'scheme-mode-hook
-  (lambda ()
+(define (paredit--scheme-mode-hook!)
     (when paredit-in-scheme-mode
-      (enable-minor-mode! (current-buffer) "paredit-mode"))))
+      (enable-minor-mode! (current-buffer) "paredit-mode")))
+
+(add-hook! 'scheme-mode-hook 'paredit--scheme-mode-hook!)
 
 (public! 'par-scan-forward
   "(par-scan-forward TEXT POS) — byte end of the datum at or after POS, or #f")

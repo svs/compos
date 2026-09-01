@@ -188,8 +188,7 @@
 
 ;;; --- wiring ------------------------------------------------------------------
 
-(add-hook! 'scheme-mode-hook
-  (lambda ()
+(define (scheme-ide--mode-hook!)
     (let ((buf (current-buffer)))
       (local-set-key "M-." "scheme-goto-definition")
       (local-set-key "C-c C-d" "scheme-doc")
@@ -206,7 +205,9 @@
             (lambda (pos inserted deleted source)
               (debounce! (string-append "scheme-ide:" buf) 400
                          scheme-ide--check! buf)))))
-      (scheme-ide--check! buf))))
+      (scheme-ide--check! buf)))
+
+(add-hook! 'scheme-mode-hook 'scheme-ide--mode-hook!)
 
 (public! 'scheme-ide--find-def
   "(scheme-ide--find-def SYM) — (SOURCE NAME BYTE-POS) of a scheme definition, or #f")

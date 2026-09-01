@@ -549,7 +549,10 @@
 ;; a save is the reload signal: you save the buffer, the app runs the new
 ;; code. The app server reads buffers, not files, so an unsaved edit in a
 ;; sibling file shows on the next reload too.
-(add-hook! 'after-save-hook (lambda () (for-each app-reload! (app-buffers))))
+(define (preview--after-save-hook!)
+  (for-each app-reload! (app-buffers)))
+
+(add-hook! 'after-save-hook 'preview--after-save-hook!)
 
 ;;; --- whitespace-mode ---------------------------------------------------------
 ;;; A rendered page hides the newline the author typed, so a reader cannot

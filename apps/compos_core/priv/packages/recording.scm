@@ -62,8 +62,10 @@
       (unless (equal? snapshot *recording-last*)
         (recording--log! snapshot)))))
 
-(add-hook! 'window-configuration-change-hook
-  (lambda () (recording-note!)))
+(define (recording--configuration-hook!)
+    (recording-note!))
+
+(add-hook! 'window-configuration-change-hook 'recording--configuration-hook!)
 
 (public! 'recording-start!
   "(recording-start! [PATH]) — start the window recording and log the current arrangement")

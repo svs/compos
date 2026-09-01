@@ -450,11 +450,12 @@
 ;; it the same way anything else does: the annotation reads a group, so a
 ;; changed membership makes the rows stale, and the marks that chose
 ;; those buffers are spent.
-(add-hook! 'group-membership-hook
-  (lambda ()
+(define (switch--membership-hook!)
     (when (buffer-known? *switch-buffer*)
       (list-clear-marks! *switch-buffer*)
-      (list-refresh! *switch-buffer*))))
+      (list-refresh! *switch-buffer*)))
+
+(add-hook! 'group-membership-hook 'switch--membership-hook!)
 
 (effects! '(read))
 

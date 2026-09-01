@@ -792,13 +792,14 @@
         (disable-minor-mode! b "evil-local-mode")))
     (buffer-list)))
 
-(add-hook! 'find-file-hook
-  (lambda ()
+(define (evil--find-file-hook!)
     (let ((buf (current-buffer)))
       (when (and *evil-enabled*
                  (evil--eligible? buf)
                  (not (minor-mode-on? buf "evil-local-mode")))
-        (enable-minor-mode! buf "evil-local-mode")))))
+        (enable-minor-mode! buf "evil-local-mode"))))
+
+(add-hook! 'find-file-hook 'evil--find-file-hook!)
 
 (define-command "evil-mode" "Toggle Vim emulation everywhere (files + *scratch*)"
   (lambda ()

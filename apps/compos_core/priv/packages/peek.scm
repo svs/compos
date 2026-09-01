@@ -118,9 +118,7 @@
 ;; peek--post-command! is the one that runs.
 (define *peek-hook-installed* #f)
 
-(unless *peek-hook-installed*
-  (set! *peek-hook-installed* #t)
-  (add-hook! 'post-command-hook (lambda () (peek--post-command!))))
+(add-hook! 'post-command-hook 'peek--post-command!)
 
 
 (define-command "definition-peek"

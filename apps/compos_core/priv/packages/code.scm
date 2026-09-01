@@ -1366,8 +1366,10 @@
 
 ;; Every chat is an agent surface. Its mode setup installs the matching prompt
 ;; fragment and connector policy before the first turn.
-(add-hook! 'chat-mode-hook
-  (lambda () (enable-minor-mode! (current-buffer) "code-agent-mode")))
+(define (code-agent--chat-mode-hook!)
+    (enable-minor-mode! (current-buffer) "code-agent-mode"))
+
+(add-hook! 'chat-mode-hook 'code-agent--chat-mode-hook!)
 
 ;; agent.scm reports every tool call here (boundp-guarded: this package
 ;; loads after it). The first call that edits code turns the mode on.

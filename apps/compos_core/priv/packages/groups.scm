@@ -837,7 +837,7 @@
 
 ;; a reattached frame keeps its group in *frame-locals*, but the Elixir
 ;; frame behind it is new and its label is empty — so push it on attach
-(add-hook! 'frame-attach-hook frame-group-label-refresh!)
+(add-hook! 'frame-attach-hook 'frame-group-label-refresh!)
 
 ;;; --- scenes: a declared group arrangement -------------------------------------
 ;;; A scene is a DECLARATION, not a script: the group, the arrangement, and
@@ -1620,7 +1620,7 @@
           (message (string-append "Killed group " (cadr killed) ". Now in "
                                   (or (group-name next) ""))))))))
 
-(add-hook! 'group-kill-hook group-kill-follow!)
+(add-hook! 'group-kill-hook 'group-kill-follow!)
 
 ;;; --- the graveyard: killed groups a person can revive ------------------------
 ;;; A kill buries what the record knew and what the members were: the

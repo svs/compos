@@ -597,7 +597,7 @@
         (spreadsheet--render! buffer)))
     (buffer-list)))
 
-(add-hook! 'theme-change-hook spreadsheet--refresh-theme!)
+(add-hook! 'theme-change-hook 'spreadsheet--refresh-theme!)
 
 ;; A stale app renderer once put its HTML into a file-backed workbook buffer.
 ;; Refuse that payload at the final save boundary, even if locals are corrupt.
@@ -610,7 +610,7 @@
                    (string-prefix? "<html" (string-downcase text))))
       (error "Refusing to save spreadsheet app HTML as workbook JSON"))))
 
-(add-hook! 'before-save-hook spreadsheet--guard-html-save!)
+(add-hook! 'before-save-hook 'spreadsheet--guard-html-save!)
 
 (mode-icon! "spreadsheet-mode" "󰈛")
 

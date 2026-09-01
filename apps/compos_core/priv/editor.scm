@@ -2201,10 +2201,101 @@
   (local-set-key* mb "DEL" "minibuffer-delete-backward"))
 
 ;;; --- hooks (Emacs-style, all Scheme) ----------------------------------------
+;;; A hook is a name and a list of functions. add-hook! puts a function on
+;;; the list once. Give it the NAME of a function, quoted: the name is
+;;; looked up when the hook runs, so a reload that redefines the function
+;;; changes what runs, and adding the name again is a no-op. A closure is
+;;; a fresh value after every reload, so a closure is added again each
+;;; time the file loads; prefer the name.
+;;;
+;;; A hook with LOCAL set lives on the current buffer, and runs before
+;;; the global list. run-hooks calls with no arguments; the
+;;; run-hook-with-args family carries arguments and stops on the first
+;;; success or the first failure, as in Emacs.
 
-(define *hooks* '())
+(define *hooks* '())                    ; ((HOOK FN ...) ...)
+(define *local-hooks* '())              ; ((BUFFER (HOOK FN ...) ...) ...)
 
-(define (add-hook! hook fn) (set! *hooks* (cons (list hook fn) *hooks*)))
+(define (hook--alist-get alist key)
+  (let ((e (assoc key alist))) (if e (cdr e) '())))
+
+(define (hook--alist-put alist key value)
+  (cons (cons key value)
+        (filter (lambda (e) (not (equal? (car e) key))) alist)))
+
+(define (hook--global hook) (hook--alist-get *hooks* hook))
+
+(define (hook--set-global! hook fns)
+  (set! *hooks* (hook--alist-put *hooks* hook fns)))
+
+(define (hook--local buf hook)
+  (hook--alist-get (hook--alist-get *local-hooks* buf) hook))
+
+(define (hook--set-local! buf hook fns)
+  (set! *local-hooks*
+    (hook--alist-put *local-hooks* buf
+      (hook--alist-put (hook--alist-get *local-hooks* buf) hook fns))))
+
+;; a name resolves when the hook runs; an unbound name runs nothing
+(define (hook--fn f)
+  (cond ((procedure? f) f)
+        ((symbol? f) (and (boundp f) (symbol-value f)))
+        ((string? f) (hook--fn (string->symbol f)))
+        (else #f)))
+
+(define (hook--add fns fn at-end)
+  (cond ((member fn fns) fns)
+        (at-end (append fns (list fn)))
+        (else (cons fn fns))))
+
+(define (hook--remove fns fn)
+  (filter (lambda (f) (not (equal? f fn))) fns))
+
+(define (add-hook! hook fn &optional at-end local)
+  (if local
+      (let ((buf (current-buffer)))
+        (hook--set-local! buf hook (hook--add (hook--local buf hook) fn at-end)))
+      (hook--set-global! hook (hook--add (hook--global hook) fn at-end)))
+  fn)
+
+(define (remove-hook! hook fn &optional local)
+  (if local
+      (let ((buf (current-buffer)))
+        (hook--set-local! buf hook (hook--remove (hook--local buf hook) fn)))
+      (hook--set-global! hook (hook--remove (hook--global hook) fn)))
+  fn)
+
+;; the functions HOOK runs, in order: the current buffer's, then the global
+(define (hook-functions hook)
+  (append (hook--local (current-buffer) hook) (hook--global hook)))
+
+(define (run-hook-with-args hook &rest args)
+  (for-each (lambda (f)
+              (let ((p (hook--fn f)))
+                (when p (apply p args))))
+            (hook-functions hook))
+  #f)
+
+(define (run-hooks &rest hooks)
+  (for-each (lambda (h) (run-hook-with-args h)) hooks))
+
+;; the first function that answers a true value ends the run
+(define (run-hook-with-args-until-success hook &rest args)
+  (let loop ((fs (hook-functions hook)))
+    (if (null? fs)
+        #f
+        (let* ((p (hook--fn (car fs)))
+               (v (and p (apply p args))))
+          (if v v (loop (cdr fs)))))))
+
+;; the first function that answers #f ends the run
+(define (run-hook-with-args-until-failure hook &rest args)
+  (let loop ((fs (hook-functions hook)))
+    (if (null? fs)
+        #t
+        (let* ((p (hook--fn (car fs)))
+               (v (if p (apply p args) #t)))
+          (if v (loop (cdr fs)) #f)))))
 
 ;; a client attached a frame: the Elixir side built it fresh, so anything
 ;; a frame CARRIES for display — the group it stands in, and whatever a
@@ -2212,9 +2303,6 @@
 ;; once per mount, inside that frame's input context.
 (define (frame-attached!)
   (run-hooks 'frame-attach-hook))
-
-(define (run-hooks hook)
-  (for-each (lambda (h) (if (equal? (car h) hook) ((cadr h)))) *hooks*))
 
 ;;; --- folds --------------------------------------------------------------------
 ;;; Folds are tagged, because a buffer has several fold owners: org folds
@@ -2258,20 +2346,16 @@
   "(chrome-after POS TEXT CLASS [CLICK]) — an overlay range that draws TEXT behind byte POS as zero-length chrome with the class CLASS; a CLICK id routes through the block-click registry")
 
 ;;; --- the filesystem-change hook ----------------------------------------------
-;;; run-hooks calls its handlers with no arguments, and this one carries the
-;;; root, so it keeps its own list. Elixir holds ONE handler (fs-on-change!)
-;;; and this dispatcher fans it out. Keep the handlers small: they schedule a
+;;; Elixir holds ONE handler (fs-on-change!) and this dispatcher fans it
+;;; out over fs-change-hook, whose functions take the root. Keep the handlers small: they schedule a
 ;;; refresh, they do not do the work. Watch debounces, but a slow handler
 ;;; still runs once per burst per root.
 
-(define *fs-change-hooks* '())
-
-(define (on-fs-change! fn)
-  (set! *fs-change-hooks* (cons fn *fs-change-hooks*)))
+;; fs-change-hook: (FN ROOT). on-fs-change! is the older spelling.
+(define (on-fs-change! fn) (add-hook! 'fs-change-hook fn))
 
 (fs-on-change!
-  (lambda (root)
-    (for-each (lambda (fn) (fn root)) *fs-change-hooks*)))
+  (lambda (root) (run-hook-with-args 'fs-change-hook root)))
 
 ;;; --- marginalia ---------------------------------------------------------------
 ;;; What a candidate MEANS, beside the candidate. A prompt names the
@@ -3102,10 +3186,9 @@
 ;;; state OTHER things key by the old name — a change hook, a pointer from
 ;;; another buffer. Each owner fixes its own, here.
 
-(define *buffer-renamed-hooks* '())
-
+;; buffer-renamed-hook: (FN OLD NEW). on-buffer-renamed! is the older spelling.
 (define (on-buffer-renamed! fn)
-  (set! *buffer-renamed-hooks* (cons fn *buffer-renamed-hooks*))
+  (add-hook! 'buffer-renamed-hook fn)
   #t)
 
 ;; the rename the editor uses: mechanism, then every owner of name-keyed
@@ -3113,7 +3196,7 @@
 (define (rename-buffer! old new)
   (let ((done (buffer-rename! old new)))
     (when done
-      (for-each (lambda (fn) (fn old new)) *buffer-renamed-hooks*))
+      (run-hook-with-args 'buffer-renamed-hook old new))
     done))
 
 (define-command "buffer-rename" "Rename the current buffer without changing its file"
@@ -3908,14 +3991,13 @@
 
 ;; Every owner can apply policy to one truly new buffer. Waking a dormant
 ;; buffer does not run these hooks because that buffer already has state.
-(define *buffer-created-hooks* '())
-
+;; buffer-created-hook: (FN NAME). on-buffer-created! is the older spelling.
 (define (on-buffer-created! fn)
-  (set! *buffer-created-hooks* (cons fn *buffer-created-hooks*))
+  (add-hook! 'buffer-created-hook fn)
   #t)
 
 (define (buffer-created! name)
-  (for-each (lambda (fn) (fn name)) *buffer-created-hooks*)
+  (run-hook-with-args 'buffer-created-hook name)
   name)
 
 ;; The other half. A dormant buffer is absent from (buffer-list), so a
@@ -3923,14 +4005,13 @@
 ;; missed every seam that ran meanwhile. This is where an owner catches
 ;; that buffer up. It runs on a desktop restore too, which is the same
 ;; event: state came back from a checkpoint, not from nothing.
-(define *buffer-woken-hooks* '())
-
+;; buffer-woken-hook: (FN NAME). on-buffer-woken! is the older spelling.
 (define (on-buffer-woken! fn)
-  (set! *buffer-woken-hooks* (cons fn *buffer-woken-hooks*))
+  (add-hook! 'buffer-woken-hook fn)
   #t)
 
 (define (buffer-woken! name)
-  (for-each (lambda (fn) (fn name)) *buffer-woken-hooks*)
+  (run-hook-with-args 'buffer-woken-hook name)
   name)
 
 ;; A new buffer inherits the directory of the buffer that made it (Emacs:
@@ -5552,8 +5633,10 @@
   (when (and (peek-buffer? b) (buffer-path b) (buffer-modified? b))
     (peek-keep! b)))
 
-(add-hook! 'post-command-hook
-  (lambda () (peek-keep-if-edited! (current-buffer))))
+(define (peek--keep-if-edited-hook!)
+    (peek-keep-if-edited! (current-buffer)))
+
+(add-hook! 'post-command-hook 'peek--keep-if-edited-hook!)
 
 (define-command "keep-buffer" "Keep this peek: it becomes an ordinary buffer"
   (lambda ()
@@ -8063,14 +8146,11 @@
 ;; here; the switcher runs it for every window it just (re)filled.
 ;; diff-mode uses it: hidden diffs skip the expensive re-render and
 ;; catch up the moment they show.
-(define *buffer-shown-hooks* '())
-(define (on-buffer-shown! fn)
-  (set! *buffer-shown-hooks* (cons fn *buffer-shown-hooks*)))
+;; buffer-shown-hook: (FN BUFFER). on-buffer-shown! is the older spelling.
+(define (on-buffer-shown! fn) (add-hook! 'buffer-shown-hook fn))
 
 (define (windows-shown-catchup!)
-  (for-each (lambda (w)
-              (let ((b (car (cdr w))))
-                (for-each (lambda (fn) (fn b)) *buffer-shown-hooks*)))
+  (for-each (lambda (w) (run-hook-with-args 'buffer-shown-hook (car (cdr w))))
             (window-list)))
 
 ;;; --- winner: layout undo ------------------------------------------------------
@@ -8708,6 +8788,12 @@
             (buffer-set-local! buf 'modeline-dash-fp (dash--fingerprint buf))
             (buffer-set-local! buf 'modeline-dash-blocks (dashboard-blocks buf))
             (buffer-set-local! buf 'modeline-expanded #t))))))
+
+;; before every command and every self-insert: packages that must act
+;; before the buffer changes (the chat keeps point in its input) hang
+;; on pre-command-hook
+(define (pre-command!)
+  (run-hooks 'pre-command-hook))
 
 ;; after every command: an expanded panel that no longer matches its
 ;; buffer rebuilds itself — modes, group, model all change under it
@@ -9974,7 +10060,12 @@
 (catalog-meta! 'function "mode-label" 'domain 'interaction 'effects '(pure))
 (catalog-meta! 'function "buffer-icon" 'domain 'interaction 'effects '(read))
 (catalog-meta! 'function "file-icon" 'domain 'interaction 'effects '(pure))
-(public! 'add-hook! "(add-hook! 'name-hook FN)")
+(public! 'add-hook! "(add-hook! 'name-hook FN [APPEND] [LOCAL]) — put FN on the hook once; FN is a quoted function name, resolved when the hook runs, or a closure. APPEND puts it last. LOCAL puts it on the current buffer's own list, which runs first")
+(public! 'remove-hook! "(remove-hook! 'name-hook FN [LOCAL]) — take FN off the hook")
+(public! 'run-hook-with-args "(run-hook-with-args 'name-hook ARG ...) — run every function of the hook with ARGS")
+(public! 'run-hook-with-args-until-success "(run-hook-with-args-until-success 'name-hook ARG ...) — run until one answers a true value; that value")
+(public! 'run-hook-with-args-until-failure "(run-hook-with-args-until-failure 'name-hook ARG ...) — run until one answers #f; #t when none did")
+(public! 'hook-functions "(hook-functions 'name-hook) — the functions the hook runs here, local then global")
 (public! 'add-paste-hook! "(add-paste-hook! MODE NAME FN) — for a major or minor MODE, register named FN(kind data mime); #t consumes the paste")
 (public! 'remove-paste-hook! "(remove-paste-hook! MODE NAME) — remove a named paste handler")
 (public! 'layout-arranging? "(layout-arranging?) — #t while the layout engine is building the frame; a package that moves windows must stand down")

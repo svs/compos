@@ -149,32 +149,12 @@
       ;; the saved remap predates a scale set while the rows were on
       (when (boundp 'text-scale-sync!) (text-scale-sync! buf)))))
 
-;; Which renderer draws a Markdown page. Elixir owns both engines and reads
-;; this choice from the 'preview-engine buffer-local; the choice itself is
-;; policy, so it is made here.
-;;
-;; The tree-sitter engine draws from the grammar's own tree, so it knows
-;; where every byte was drawn: the caret lands on the byte it belongs to,
-;; and a click maps back to the source. Earmark cannot answer that question.
-;; Earmark still carries the code-block heads, the llm-response blockquotes
-;; and the URL embeds, so a page that uses those loses them until they are
-;; ported. Set this to "earmark" to get them back.
-;;
-;; A buffer with no grammar falls back to Earmark rather than drawing
-;; nothing, so this is safe to set on a machine with no markdown grammar.
+;; One renderer draws a Markdown page: the tree-sitter engine. It draws
+;; from the grammar's own tree, so it knows where every byte was drawn:
+;; the caret lands on the byte it belongs to, and a click maps back to the
+;; source. Elixir falls back to Earmark only where the markdown grammar is
+;; not installed, and that fallback is mechanism, not a choice.
 (defgroup 'preview "Rendered pages.")
-
-(defcustom 'markdown-preview-engine "tree-sitter"
-  "Which renderer draws a Markdown page: \"tree-sitter\" or \"earmark\"."
-  'group 'preview 'type 'string)
-
-(public! 'preview-set-engine!
-  "(preview-set-engine! BUF) — put the configured Markdown engine on BUF")
-
-;; Called wherever a buffer starts rendering as markdown. Elixir reads the
-;; local per render, so a change reaches the page on the next draw.
-(define (preview-set-engine! buf)
-  (buffer-set-local! buf 'preview-engine markdown-preview-engine))
 
 ;; A generated buffer has no extension to read a renderer from, so it says
 ;; which renderer it wants in a buffer-local. Help docs are the case: the
@@ -213,13 +193,9 @@
   (let ((renderer (preview-renderer-for buf)))
     (if renderer
         (if (equal? renderer "rows")
-            (begin
-              (buffer-set-local! buf 'preview-engine #f)
-              (preview--rows-on! buf))
+            (preview--rows-on! buf)
             (begin
               (when (buffer-local buf 'preview-rows) (preview--rows-off! buf))
-              (buffer-set-local! buf 'preview-engine #f)
-              (when (equal? renderer "markdown") (preview-set-engine! buf))
               (buffer-set-local! buf 'render-mode renderer)))
         ;; A renamed or restored buffer can lose its renderer. Remove the
         ;; stale mode entry instead of leaving an enabled mode that draws
@@ -228,12 +204,10 @@
           (buffer-set-local! buf 'minor-modes
             (remove (lambda (name) (equal? name "preview-mode"))
                     (or (buffer-local buf 'minor-modes) '())))
-          (buffer-set-local! buf 'preview-engine #f)
           (buffer-set-local! buf 'render-mode #f)))))
 
 (define (preview-mode--teardown! buf)
   (when (buffer-local buf 'preview-rows) (preview--rows-off! buf))
-  (buffer-set-local! buf 'preview-engine #f)
   (buffer-set-local! buf 'render-mode #f))
 
 (register-minor-mode! "preview-mode" preview-mode--apply! preview-mode--teardown!)

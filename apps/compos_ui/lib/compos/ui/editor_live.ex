@@ -1916,26 +1916,6 @@ defmodule Compos.Ui.EditorLive do
     %{kind: :prose, html: text |> safe_slice(s, e) |> prose_html() |> wrap_tables()}
   end
 
-  # The transcript is markdown, and the page renderer draws it: the same
-  # renderer as the preview, with CommonMark reflow and no block chrome.
-  # Earmark remains only where the markdown grammar is not installed. One
-  # bad block must not kill the transcript that holds it.
-  defp prose_html(md) do
-    case Compos.Core.Markdown.Html.render(md, [], soft_breaks: true, chrome: false) do
-      {:ok, html} -> html
-      {:error, _} -> prose_html_fallback(md)
-    end
-  rescue
-    _ -> "<pre>" <> html_escape(md) <> "</pre>"
-  end
-
-  defp prose_html_fallback(md) do
-    case Earmark.as_html(md, compact_output: false) do
-      {:ok, html, _} -> html
-      {:error, html, _} -> html
-    end
-  end
-
   defp ag_block([s, e, "thought" | _], text, _open),
     do: %{kind: :thought, text: String.trim(safe_slice(text, s, e))}
 
@@ -1986,6 +1966,26 @@ defmodule Compos.Ui.EditorLive do
     do: %{kind: :meta, text: String.trim(safe_slice(text, s, e))}
 
   defp ag_block(_, _, _), do: nil
+
+  # The transcript is markdown, and the page renderer draws it: the same
+  # renderer as the preview, with CommonMark reflow and no block chrome.
+  # Earmark remains only where the markdown grammar is not installed. One
+  # bad block must not kill the transcript that holds it.
+  defp prose_html(md) do
+    case Compos.Core.Markdown.Html.render(md, [], soft_breaks: true, chrome: false) do
+      {:ok, html} -> html
+      {:error, _} -> prose_html_fallback(md)
+    end
+  rescue
+    _ -> "<pre>" <> html_escape(md) <> "</pre>"
+  end
+
+  defp prose_html_fallback(md) do
+    case Earmark.as_html(md, compact_output: false) do
+      {:ok, html, _} -> html
+      {:error, html, _} -> html
+    end
+  end
 
   # "340ms", "1.4s", "2m 05s" — nil when the block predates the field
   defp tool_duration_label(ms) when is_integer(ms) and ms >= 0 do
@@ -2186,13 +2186,6 @@ defmodule Compos.Ui.EditorLive do
   @csv_preview_lines 5
 
   @doc false
-  # Which renderer draws a Markdown page. The tree-sitter one asks the
-  # document where a byte was drawn, so the caret stands on its own byte and
-  # every line the author typed draws as a line. It is the default. Earmark
-  # still carries the llm-response blockquotes, and the embeds that turn a
-  # bare image URL into a picture and an x.com link into a card. A buffer
-  # asks for it with the `preview-engine` local, and a page with no grammar
-  # falls back to it on its own.
   # Preview folds keep source byte offsets stable. Hidden lines become spaces.
   # A closing fence stays present so the Markdown tree remains valid.
   defp preview_fold_source("markdown", text, point, mark, hidden) do
@@ -2240,13 +2233,10 @@ defmodule Compos.Ui.EditorLive do
 
   defp preview_first_hidden_line(_hidden, 0), do: 0
 
-  defp preview_engine(buffer, "markdown") do
-    case Compos.Core.Buffer.get_local(buffer, "preview-engine") do
-      "earmark" -> :earmark
-      _ -> :tree_sitter
-    end
-  end
-
+  # One engine draws a Markdown page. The Earmark pipeline remains as the
+  # mechanical fallback where the markdown grammar is not installed, and as
+  # the path for the non-markdown render modes.
+  defp preview_engine(_buffer, "markdown"), do: :tree_sitter
   defp preview_engine(_buffer, _rm), do: :earmark
 
   # Parsing a document costs a hundred times what drawing it does, and the

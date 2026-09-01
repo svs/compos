@@ -2388,6 +2388,20 @@
 ;; (read-char-choice PROMPT CHARS K): one key from CHARS, a list of
 ;; one-character strings; K gets the character. Any other key asks again.
 ;; C-g cancels and K gets #f.
+;; (read-char PROMPT K): the next key, whatever it is; K gets the
+;; character, or #f on C-g. A register name is read this way.
+(define (read-char prompt k)
+  (let ((answer (lambda (ch) (minibuffer-detach!) (k ch))))
+    (minibuffer-read* prompt '()
+      (list (list 'change
+              (lambda (input)
+                (when (> (string-length input) 0)
+                  (answer (substring input (- (string-length input) 1)
+                                     (string-length input))))))
+            (list 'confirm (lambda (v) (answer (if (equal? v "") "RET" v))))
+            (list 'cancel (lambda () (k #f)))
+            (list 'style "question")))))
+
 (define (read-char-choice prompt chars k)
   (let ((answer (lambda (ch) (minibuffer-detach!) (k ch))))
     (minibuffer-read* prompt '()
@@ -2583,6 +2597,77 @@
 ;; once per mount, inside that frame's input context.
 (define (frame-attached!)
   (run-hooks 'frame-attach-hook))
+
+;;; --- variables: a default and a buffer-local value --------------------------
+;;; Emacs gives a variable one default and, in a buffer that set it, a
+;;; local value. Here a global is a Scheme binding and a buffer-local is a
+;;; key in the buffer; these forms tie the two together. variable-value
+;;; reads the buffer's value when it has one, else the default, and
+;;; variable-set! writes locally when the variable is automatically
+;;; buffer-local (defvar-local) and globally otherwise.
+
+(define *automatically-local* '())
+(define *variable-docs* '())
+
+(define (variable-doc! name doc)
+  (set! *variable-docs* (hook--alist-put *variable-docs* name (list doc)))
+  name)
+
+(define (variable-doc name)
+  (let ((e (assoc name *variable-docs*))) (and e (cadr e))))
+
+;; (defvar NAME DEFAULT [DOC]): NAME takes DEFAULT unless it is bound
+;; already, as in Emacs; a reload keeps the value a session set
+(define (defvar name default &optional doc)
+  (unless (boundp name) (set-symbol-value! name default))
+  (when doc (variable-doc! name doc))
+  name)
+
+(define (make-variable-buffer-local! name)
+  (unless (member name *automatically-local*)
+    (set! *automatically-local* (cons name *automatically-local*)))
+  name)
+
+(define (automatically-local? name)
+  (and (member name *automatically-local*) #t))
+
+(define (defvar-local name default &optional doc)
+  (defvar name default doc)
+  (make-variable-buffer-local! name))
+
+(define (default-value name)
+  (and (boundp name) (symbol-value name)))
+
+(define (set-default! name value)
+  (set-symbol-value! name value)
+  value)
+
+;; #t when BUF holds its own value for NAME. A local set to #f reads as
+;; absent, as buffer-local answers #f for both.
+(define (local-variable-p name &optional buf)
+  (let ((e (assoc name (buffer-locals (or buf (current-buffer))))))
+    (and e (cadr e) #t)))
+
+(define (buffer-local-value name &optional buf)
+  (let* ((b (or buf (current-buffer)))
+         (v (buffer-local b name)))
+    (if v v (default-value name))))
+
+(define (setq-local! name value)
+  (buffer-set-local! (current-buffer) name value)
+  value)
+
+(define (kill-local-variable! name &optional buf)
+  (buffer-set-local! (or buf (current-buffer)) name #f)
+  name)
+
+;; the Emacs variable reference and assignment
+(define (variable-value name) (buffer-local-value name))
+
+(define (variable-set! name value)
+  (if (automatically-local? name)
+      (setq-local! name value)
+      (set-default! name value)))
 
 ;;; --- folds --------------------------------------------------------------------
 ;;; Folds are tagged, because a buffer has several fold owners: org folds
@@ -4256,10 +4341,67 @@
 
 ;;; --- mark & region ---------------------------------------------------------
 
-(define-command "set-mark-command" "Set the mark where point is"
+;;; --- the mark ring ---------------------------------------------------------
+;;; Emacs keeps the marks a buffer had: C-SPC pushes the old mark onto the
+;;; buffer's ring and sets a new one, and C-u C-SPC goes back to the mark
+;;; and pops the ring. The global mark ring remembers the buffer too, so
+;;; C-x C-SPC walks back across buffers. Here a set mark is an active
+;;; region, so a pop lands point on the old mark and leaves no region.
+
+(define mark-ring-max 16)
+(define *global-mark-ring* '())    ; ((BUF POS) ...), newest first
+
+(define (mark-ring &optional buf)
+  (or (buffer-local (or buf (current-buffer)) 'mark-ring) '()))
+
+(define (global-mark-ring) *global-mark-ring*)
+
+;; the old mark joins the ring, and the global ring when the buffer is
+;; not the newest entry's
+(define (push-mark! &optional pos nomsg)
+  (let* ((buf (current-buffer))
+         (old (mark))
+         (at (or pos (point))))
+    (when old
+      (buffer-set-local! buf 'mark-ring (take-n (cons old (mark-ring buf)) mark-ring-max)))
+    (unless (and (pair? *global-mark-ring*) (equal? (car (car *global-mark-ring*)) buf))
+      (set! *global-mark-ring* (take-n (cons (list buf (or old at)) *global-mark-ring*) mark-ring-max)))
+    (set-mark! at)
+    (unless nomsg (message "Mark set"))
+    at))
+
+;; back to the mark, and the ring turns: the next pop reaches the one
+;; before. With no mark the newest ring entry is the target.
+(define (pop-to-mark!)
+  (let* ((buf (current-buffer))
+         (m (mark))
+         (ring (mark-ring buf))
+         (target (or m (and (pair? ring) (car ring)))))
+    (cond ((not target) (message "No mark set in this buffer") #f)
+          (else
+            (goto-char! target)
+            (set-mark! #f)
+            (buffer-set-local! buf 'mark-ring
+              (if m
+                  (append ring (list m))
+                  (append (cdr ring) (list target))))
+            target))))
+
+(define-command "set-mark-command" "Set the mark where point is; with a prefix, go back to the previous mark"
+  (interactive 'P)
+  (lambda (arg)
+    (if arg (pop-to-mark!) (push-mark!))))
+
+(define-command "pop-global-mark" "Go back to the last mark set in any buffer"
   (lambda ()
-    (set-mark! (point))
-    (message "Mark set")))
+    (if (null? *global-mark-ring*)
+        (message "No global mark set")
+        (let* ((e (car *global-mark-ring*))
+               (buf (car e)) (pos (cadr e)))
+          (set! *global-mark-ring* (append (cdr *global-mark-ring*) (list e)))
+          (if (buffer-known? buf)
+              (begin (switch-to-buffer! buf) (goto-char! pos))
+              (run-command "pop-global-mark"))))))
 
 (define-command "kill-region" "Kill the text between point and mark"
   (lambda ()
@@ -10357,6 +10499,7 @@
 (global-set-key "C-w" "kill-region")
 (global-set-key "M-w" "copy-region-as-kill")
 (global-set-key "C-x C-x" "exchange-point-and-mark")
+(global-set-key "C-x C-SPC" "pop-global-mark")
 (global-set-key "C-s" "isearch-forward")
 (global-set-key "C-r" "isearch-backward")
 (global-set-key "M-%" "query-replace")
@@ -10601,6 +10744,19 @@
 (catalog-meta! 'function "mode-label" 'domain 'interaction 'effects '(pure))
 (catalog-meta! 'function "buffer-icon" 'domain 'interaction 'effects '(read))
 (catalog-meta! 'function "file-icon" 'domain 'interaction 'effects '(pure))
+(public! 'defvar "(defvar NAME DEFAULT [DOC]) — NAME takes DEFAULT unless it is bound already")
+(public! 'defvar-local "(defvar-local NAME DEFAULT [DOC]) — defvar, and variable-set! writes the current buffer's own value")
+(public! 'default-value "(default-value NAME) — the global value, or #f")
+(public! 'set-default! "(set-default! NAME VALUE) — the global value")
+(public! 'buffer-local-value "(buffer-local-value NAME [BUF]) — BUF's own value, else the default")
+(public! 'setq-local! "(setq-local! NAME VALUE) — the current buffer's own value")
+(public! 'kill-local-variable! "(kill-local-variable! NAME [BUF]) — forget the buffer's own value")
+(public! 'local-variable-p "(local-variable-p NAME [BUF]) — #t when the buffer holds its own value")
+(public! 'variable-value "(variable-value NAME) — the current buffer's own value, else the default")
+(public! 'variable-set! "(variable-set! NAME VALUE) — locally for a defvar-local, else globally")
+(public! 'push-mark! "(push-mark! [POS] [NOMSG]) — the old mark goes on the ring, the mark is set at POS or point")
+(public! 'pop-to-mark! "(pop-to-mark!) — point goes to the mark, the ring turns, no region stays")
+(public! 'read-char "(read-char PROMPT K) — the next key; K gets the character, or #f on C-g")
 (public! 'completing-read "(completing-read PROMPT COLLECTION K 'predicate FN 'require-match #t 'initial TEXT 'default TEXT 'history SYM 'category SYM 'style SYM) — Emacs's completing-read, asynchronous: K gets the choice. COLLECTION is rows or a procedure of the input")
 (public! 'read-string "(read-string PROMPT K [OPTS ...]) — a line of text; K gets it")
 (public! 'read-number "(read-number PROMPT K [OPTS ...]) — a number; K gets it, 0 for not a number")

@@ -32,6 +32,7 @@
 (load-bundled-package "appearance.scm")
 (load-bundled-package "autorevert.scm")
 (load-bundled-package "bookmark.scm")
+(load-bundled-package "register.scm")
 (load-bundled-package "chat.scm")
 (load-bundled-package "code.scm")
 (load-bundled-package "daemons.scm")

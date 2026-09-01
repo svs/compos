@@ -57,3 +57,19 @@ One command is one undo step. `undo-boundary!` splits the step in
 progress, so the edits before it undo apart from the edits after it.
 `break-undo-chain!` does not make a boundary: it ends a run of undos,
 so the next undo reverses them, which is redo.
+
+## The mark ring
+
+`C-SPC` pushes the old mark onto the buffer's ring and sets a new one.
+`C-u C-SPC` goes back to the mark and pops the ring; a set mark is an
+active region here, so the pop leaves no region behind. `C-x C-SPC`
+walks the global mark ring back across buffers. `push-mark!` and
+`pop-to-mark!` are the functions.
+
+## Registers
+
+A register is one character. `C-x r SPC` saves point and the buffer,
+`C-x r j` jumps back to it or restores saved windows, `C-x r s` saves the
+region's text, `C-x r +` appends to it, `C-x r i` inserts it, `C-x r w`
+saves the frame's windows, `C-x r v` says what a register holds. The
+registers persist with the desktop. packages/register.scm.

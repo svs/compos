@@ -449,11 +449,14 @@ defmodule Compos.Core.SchemeAPI do
         "(buffer-cols BUF) — return the text columns of a window showing BUF, else the active window's.",
       "recenter!" => "(recenter!) — center the active window on the cursor line.",
       "completion-show!" =>
-        "(completion-show! START END CANDIDATES) — show the completion popup for byte START.",
+        "(completion-show! START END CANDIDATES) — show the completion popup for the text START..END; accept replaces that range, and END may lie past point.",
       "completion-dismiss!" => "(completion-dismiss!) — dismiss the completion popup.",
       "completion-move!" => "(completion-move! DELTA) — move the popup selection by DELTA rows.",
       "completion-accept!" =>
-        "(completion-accept!) — close the popup; return (START LABEL) of the selection, or #f.",
+        "(completion-accept!) — close the popup; return (START END LABEL) of the selection, END as of now, or #f.",
+      "completion-match?" =>
+        "(completion-match? LABEL QUERY [STYLE]) — does QUERY match LABEL the way a prompt matches: 'flex (default), 'substring, 'prefix, 'regexp, 'exact.",
+      "regexp-quote" => "(regexp-quote TEXT) — TEXT with every regexp character escaped.",
       "buffer-words" =>
         "(buffer-words PREFIX) — return the buffer's words with PREFIX, sorted, without PREFIX itself.",
       "count-words" => "(count-words BUF) — return the buffer's whitespace-separated word count.",
@@ -1636,6 +1639,9 @@ defmodule Compos.Core.SchemeAPI do
               # A dynamic provider has already filtered/ranked its results.
               "filter" -> {:filter, v}
               "match-hint" -> {:match_hint, v}
+              # how the input matches a candidate: flex, substring, prefix,
+              # regexp, exact. The prompt chooses; the engine applies.
+              "completion-style" -> {:completion_style, Compos.Core.Candidates.style(v)}
               # A prompt can reuse a domain list when its filtered result is
               # collected. Scheme decides the target and receives the rows.
               "collect" -> {:on_collect, v}
@@ -1872,8 +1878,10 @@ defmodule Compos.Core.SchemeAPI do
       end,
 
       # completion popup: candidates = strings or (label hint) pairs
-      "completion-show!" => fn [start, _end, candidates] ->
-        Editor.completion_show(start, candidates)
+      "completion-show!" => fn [start, end_, candidates] ->
+        point = Buffer.point(Editor.current_buffer())
+        tail = if is_integer(end_), do: end_ - point, else: 0
+        Editor.completion_show(start, tail, candidates)
         :void
       end,
       "completion-move!" => fn [delta] ->
@@ -1882,10 +1890,16 @@ defmodule Compos.Core.SchemeAPI do
       end,
       "completion-accept!" => fn [] ->
         case Editor.completion_accept() do
-          {start, label} -> [start, label]
+          {start, tail, label} -> [start, Buffer.point(Editor.current_buffer()) + tail, label]
           nil -> false
         end
       end,
+      # the one matcher every surface narrows with; STYLE as in completion-style
+      "completion-match?" => fn
+        [label, query] -> Compos.Core.Candidates.matches?(label, query, [], :flex)
+        [label, query, style] -> Compos.Core.Candidates.matches?(label, query, [], Compos.Core.Candidates.style(style))
+      end,
+      "regexp-quote" => fn [text] -> Regex.escape(text) end,
       "completion-dismiss!" => fn [] ->
         Editor.completion_dismiss()
         :void

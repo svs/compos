@@ -22,7 +22,31 @@ defmodule Compos.Core.Candidates do
 
   @window 8
 
-  defstruct items: [], query: "", sel: 0, touched: false, filtered: [], match_hint: 0
+  defstruct items: [],
+            query: "",
+            sel: 0,
+            touched: false,
+            filtered: [],
+            match_hint: 0,
+            style: :flex
+
+  @doc """
+  The match styles a prompt can ask for, Emacs's completion-styles:
+
+    * `:flex` (default) — one term is a subsequence, several terms are
+      orderless substrings; case-insensitive
+    * `:substring` — every term is a substring; case-insensitive
+    * `:prefix` — the query is a prefix of the label; case-insensitive
+    * `:regexp` — every term is a regexp; a bad one matches nothing
+    * `:exact` — the label is the query
+  """
+  @styles [:flex, :substring, :prefix, :regexp, :exact]
+  def styles, do: @styles
+
+  def style(name) when name in @styles, do: name
+  def style(name) when is_binary(name), do: style(String.to_atom(name))
+  def style({:sym, name}), do: style(name)
+  def style(_), do: :flex
 
   @doc "Build from raw candidates: strings or [label, hint] pairs."
   def new(candidates, opts \\ []) do
@@ -31,9 +55,12 @@ defmodule Compos.Core.Candidates do
       query: Keyword.get(opts, :query, ""),
       sel: 0,
       touched: false,
-      match_hint: hint_fields(Keyword.get(opts, :match_hint, false))
+      match_hint: hint_fields(Keyword.get(opts, :match_hint, false)),
+      style: style(Keyword.get(opts, :style, :flex))
     })
   end
+
+  def put_style(list, style), do: refilter(%{list | style: style(style)})
 
   defp hint_fields(true), do: 1
   defp hint_fields(n) when is_integer(n) and n > 0, do: n
@@ -159,7 +186,7 @@ defmodule Compos.Core.Candidates do
       |> Enum.flat_map(fn {separator, rows} ->
         kept =
           rows
-          |> Enum.filter(&matches?(&1.label, list.query, hint_of(list, &1)))
+          |> Enum.filter(&matches?(&1.label, list.query, hint_of(list, &1), list.style))
           |> Enum.sort_by(&rank(&1.label, list.query))
 
         case {separator, kept} do
@@ -270,11 +297,11 @@ defmodule Compos.Core.Candidates do
   `elixir-mode`, `chat-mode`, a group, a project. A prompt that does not
   widen the filter passes [].
   """
-  def matches?(label, query, kinds \\ [])
+  def matches?(label, query, kinds \\ [], style \\ :flex)
 
-  def matches?(_label, "", _kinds), do: true
+  def matches?(_label, "", _kinds, _style), do: true
 
-  def matches?(label, query, kinds) do
+  def matches?(label, query, kinds, :flex) do
     dl = String.downcase(label)
     ks = List.wrap(kinds)
 
@@ -284,6 +311,40 @@ defmodule Compos.Core.Candidates do
       terms -> Enum.all?(terms, &(String.contains?(dl, String.downcase(&1)) or kind?(ks, &1)))
     end
   end
+
+  def matches?(label, query, kinds, :substring) do
+    dl = String.downcase(label)
+    ks = List.wrap(kinds)
+
+    query
+    |> String.split(" ", trim: true)
+    |> Enum.all?(&(String.contains?(dl, String.downcase(&1)) or kind?(ks, &1)))
+  end
+
+  def matches?(label, query, kinds, :prefix) do
+    String.starts_with?(String.downcase(label), String.downcase(query)) or
+      kind?(List.wrap(kinds), query)
+  end
+
+  def matches?(label, query, _kinds, :exact), do: label == query
+
+  # a term that is not a regexp matches nothing, and never raises: the
+  # query is what a person is typing, and "(" is half of a pattern
+  def matches?(label, query, kinds, :regexp) do
+    ks = List.wrap(kinds)
+
+    query
+    |> String.split(" ", trim: true)
+    |> Enum.all?(fn term ->
+      kind?(ks, term) or
+        case Regex.compile(term, "iu") do
+          {:ok, re} -> Regex.match?(re, label)
+          _ -> false
+        end
+    end)
+  end
+
+  def matches?(label, query, kinds, style), do: matches?(label, query, kinds, style(style))
 
   # The first N annotation fields, which the annotator writes as the kinds
   # of the thing: the mode a buffer is in, its group, its project. Padding

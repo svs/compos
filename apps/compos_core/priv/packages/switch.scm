@@ -219,14 +219,12 @@
 ;; annotation, and a card's member chips. Orderless: every
 ;; space-separated term must match somewhere, in any order, so
 ;; "text-mode notes" and "notes text-mode" find the same row.
+;; the switcher narrows the way the prompt does: one matcher, so
+;; "*scratch*" is a name and "Foo" finds foo
 (define (switch-match? buf e input)
   (let ((text (string-join
                 (cons (car e) (cons (switch-ann e) (switch-chips e))) " ")))
-    (let loop ((ts (filter (lambda (t) (not (equal? t "")))
-                           (string-split input " "))))
-      (cond ((null? ts) #t)
-            ((re-match? (car ts) text) (loop (cdr ts)))
-            (else #f)))))
+    (completion-match? text input 'substring)))
 
 (define (switch-meta buf)
   (let* ((view (or (buffer-local buf 'switch-view) 'buffers))

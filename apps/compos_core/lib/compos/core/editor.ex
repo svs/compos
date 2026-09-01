@@ -314,8 +314,8 @@ defmodule Compos.Core.Editor do
   def undo_exempt?(name), do: GenServer.call(__MODULE__, {:undo_exempt?, name})
 
   # completion-at-point popup (anchored at a buffer position)
-  def completion_show(start, candidates, fid \\ nil),
-    do: GenServer.call(__MODULE__, {:completion_show, start, candidates, fid(fid)})
+  def completion_show(start, tail, candidates, fid \\ nil),
+    do: GenServer.call(__MODULE__, {:completion_show, start, tail, candidates, fid(fid)})
 
   def completion_move(delta, fid \\ nil),
     do: GenServer.call(__MODULE__, {:completion_move, delta, fid(fid)})
@@ -1371,7 +1371,8 @@ defmodule Compos.Core.Editor do
         input: "",
         filter: true,
         match_hint: false,
-        style: nil
+        style: nil,
+        completion_style: :flex
       }
       |> Map.merge(handlers)
       |> Map.put(:prompt, prompt)
@@ -1382,7 +1383,11 @@ defmodule Compos.Core.Editor do
       Map.put(
         mb,
         :list,
-        Candidates.new(candidates, query: mb_query(mb), match_hint: mb.match_hint)
+        Candidates.new(candidates,
+          query: mb_query(mb),
+          match_hint: mb.match_hint,
+          style: mb.completion_style
+        )
       )
 
     changed(:ok, put_frame(state, %{f | minibuffer: mb}), f.id)
@@ -1541,7 +1546,10 @@ defmodule Compos.Core.Editor do
   def handle_call({:undo_exempt?, name}, _from, state),
     do: {:reply, MapSet.member?(state.undo_exempt, name), state}
 
-  def handle_call({:completion_show, start, candidates, fid}, _from, state) do
+  # TAIL is how far END lies past point: a capf that completes over a
+  # suffix (an LSP textEdit) names the whole word, and accept replaces
+  # it. Narrowing inserts at point, so the tail keeps its length.
+  def handle_call({:completion_show, start, tail, candidates, fid}, _from, state) do
     f = frame(state, fid)
 
     case Candidates.normalize(candidates) do
@@ -1549,11 +1557,8 @@ defmodule Compos.Core.Editor do
         changed(:ok, put_frame(state, %{f | completion: nil}), f.id)
 
       _ ->
-        changed(
-          :ok,
-          put_frame(state, %{f | completion: %{start: start, list: Candidates.new(candidates)}}),
-          f.id
-        )
+        completion = %{start: start, tail: max(tail, 0), list: Candidates.new(candidates)}
+        changed(:ok, put_frame(state, %{f | completion: completion}), f.id)
     end
   end
 
@@ -1592,7 +1597,7 @@ defmodule Compos.Core.Editor do
         reply =
           case Candidates.selected(c.list) do
             nil -> nil
-            label -> {c.start, label}
+            label -> {c.start, Map.get(c, :tail, 0), label}
           end
 
         changed(reply, put_frame(state, %{f | completion: nil}), f.id)

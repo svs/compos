@@ -805,9 +805,12 @@
   (string-append (string-join (map car (list-row-lines buf e ctx)) " ")
                  " " (list-annotation buf e)))
 
+;; a list narrows the way a prompt does: one matcher, case-insensitive,
+;; every term a substring of the row, and a "(" in the input is a
+;; character, not half of a regexp
 (define (list-match? buf e input &optional ctx)
   (let ((m (list-opt buf 'match)))
-    (if m (m buf e input) (re-match? input (list-row-text buf e ctx)))))
+    (if m (m buf e input) (completion-match? (list-row-text buf e ctx) input 'substring))))
 
 ;; every list gets the "match" kind; the mode's own 'filter fn reads the
 ;; kinds it invented. A list with neither keeps every row.
@@ -2239,28 +2242,183 @@
 ;; highlight move, ON-CONFIRM with the choice, ON-CANCEL on C-g (restore
 ;; whatever the preview displaced there). All three run against the
 ;; invoking buffer, not the minibuffer's — see with-invoking-buffer.
+;; One prompt at a time, as in Emacs without enable-recursive-minibuffers.
+;; A prompt that opens while another is up cancels the outer one first,
+;; so its cancel handler restores what it displaced, instead of the
+;; outer prompt vanishing with its closures.
+(define minibuffer-read*--raw minibuffer-read*)
+
+(define (minibuffer-active?) (if (minibuffer-state) #t #f))
+
+;; what the prompt holds now, "" without a prompt
+(define (minibuffer-input)
+  (let ((st (minibuffer-state)))
+    (if st (plist-get st 'input) "")))
+
+(define (minibuffer-read* prompt cands handlers)
+  (when (minibuffer-active?)
+    (minibuffer-cancel!)
+    (message "Quit the outer prompt"))
+  (minibuffer-read*--raw prompt cands handlers))
+
 ;; one interaction model: a completion prompt is the BOTTOM bar, like
 ;; Emacs — the candidates sit above the input and the input sits on the
 ;; last row. Only a prompt that asks for "palette" by name floats: the
-;; switcher, the command palette, and the LLM config menus. Candidates
-;; alone never promote a prompt to the centered card.
-(define (prompt-style cands style)
-  style)
-
+;; switcher, the command palette, and the LLM config menus.
+;;
 ;; the builtin reads (prompt cands confirm) or (prompt cands complete
-;; confirm); this wrapper keeps both shapes and adds the palette rule
+;; confirm); this wrapper keeps both shapes
 (define (minibuffer-read prompt cands a &optional b)
   (minibuffer-read* prompt cands
     (append
       (list (list 'confirm (if b b a)))
       (if b (list (list 'complete a)) '())
-      (list (list 'style (prompt-style cands #f))))))
+      (list (list 'style #f)))))
+
+;;; --- completing-read ----------------------------------------------------------
+;;; Emacs's completing-read, asynchronous: K gets the choice. COLLECTION is
+;;; a list of candidates (strings or (label hint) rows) or a procedure of
+;;; the input that answers the rows. OPTS is a plist:
+;;;   'predicate FN       keep the candidates FN accepts
+;;;   'require-match #t   RET takes a candidate only; free text says [No match]
+;;;   'initial TEXT       the input to start with
+;;;   'default TEXT       the answer to an empty input, listed first
+;;;   'history SYM        the history to read and to push the choice on
+;;;   'category SYM       the marginalia annotator to use
+;;;   'style SYM          how the input matches: flex, substring, prefix, regexp
+;;;   'annotate? #f       the rows are annotated already
+
+(define *mb-history-key* #f)          ; the history the active prompt walks
+(define *mb-history-pos* -1)          ; -1 is the input, 0 the newest item
+(define *mb-history-input* "")        ; what was typed before M-p
+
+(define (completing-read--rows collection input)
+  (if (procedure? collection) (collection input) collection))
+
+(define (completing-read--label row) (if (pair? row) (car row) row))
+
+(define (completing-read--prepare rows opts)
+  (let* ((pred (plist-get opts 'predicate))
+         (kept (if pred (filter (lambda (r) (pred (completing-read--label r))) rows) rows))
+         (default (plist-get opts 'default))
+         (led (if (and default (member default (map completing-read--label kept)))
+                  (cons (let loop ((rs kept))
+                          (if (equal? (completing-read--label (car rs)) default) (car rs) (loop (cdr rs))))
+                        (filter (lambda (r) (not (equal? (completing-read--label r) default))) kept))
+                  kept))
+         (hist (plist-get opts 'history))
+         (ordered (if (and hist (not (pair? (car (or (and (pair? led) led) '("")))))) (history-order hist led) led))
+         (category (plist-get opts 'category)))
+    (if (and category (not (equal? (plist-get opts 'annotate?) #f)))
+        (annotate category ordered)
+        ordered)))
+
+(define (completing-read prompt collection k &rest opts)
+  (let* ((hist (plist-get opts 'history))
+         (default (plist-get opts 'default))
+         (require? (plist-get opts 'require-match))
+         (rows (completing-read--prepare (completing-read--rows collection "") opts))
+         (labels (lambda () (map completing-read--label
+                                (completing-read--prepare
+                                  (completing-read--rows collection (minibuffer-input)) opts))))
+         (confirm
+           (lambda (v)
+             (let ((v (if (and default (equal? v "")) default v)))
+               (cond ((and require? (not (member v (labels))))
+                      (message "[No match]")
+                      (apply completing-read (append (list prompt collection k) opts)))
+                     (else
+                       (when hist (history-push! hist v))
+                       (set! *mb-history-key* #f)
+                       (k v)))))))
+    (set! *mb-history-key* hist)
+    (set! *mb-history-pos* -1)
+    (minibuffer-read* prompt rows
+      (append
+        (list (list 'confirm confirm)
+              (list 'cancel (lambda () (set! *mb-history-key* #f))))
+        (if (procedure? collection)
+            (list (list 'change
+                        (lambda (input)
+                          (minibuffer-set-candidates!
+                            (completing-read--prepare (collection input) opts)))))
+            '())
+        (if (plist-get opts 'initial) (list (list 'initial (plist-get opts 'initial))) '())
+        (if (plist-get opts 'style) (list (list 'completion-style (plist-get opts 'style))) '())
+        (list (list 'style #f))))))
+
+;; the Emacs readers, each a completing-read of one kind
+(define (read-string prompt k &rest opts)
+  (apply completing-read (append (list prompt '() k) opts)))
+
+(define (read-number prompt k &rest opts)
+  (apply completing-read
+    (append (list prompt '()
+                  (lambda (v) (let ((n (string->number v))) (k (if (number? n) n 0)))))
+            opts)))
+
+(define (read-buffer prompt k &rest opts)
+  (apply completing-read (append (list prompt (buffer-list) k 'category 'buffer) opts)))
+
+;; the history ring: M-p walks back through what this prompt was answered
+;; with, M-n forward, and past the newest the input comes back
+(define (minibuffer-history-step! delta)
+  (let ((items (if *mb-history-key* (history-items *mb-history-key*) '())))
+    (cond ((null? items) (message "End of history; no default available"))
+          (else
+            (when (= *mb-history-pos* -1) (set! *mb-history-input* (minibuffer-input)))
+            (let ((next (+ *mb-history-pos* delta)))
+              (cond ((< next -1) (message "End of history; no default available"))
+                    ((>= next (length items)) (message "End of history; no default available"))
+                    (else
+                      (set! *mb-history-pos* next)
+                      (minibuffer-input!
+                        (if (= next -1) *mb-history-input* (nth next items))))))))))
+
+(define-command "previous-history-element" "Put the previous history item in the minibuffer"
+  (lambda () (minibuffer-history-step! 1)))
+(define-command "next-history-element" "Put the next history item in the minibuffer"
+  (lambda () (minibuffer-history-step! -1)))
 
 ;; y-or-n-p: a question that takes ONE key. "y" runs YES, "n" and C-g
 ;; run NO, and any other key clears the input, so the question stands
 ;; until it gets an answer. A question is not a completion prompt: it
 ;; offers no candidates, so it stays on the bottom bar and it never
 ;; grows a palette of two words.
+;; (read-char-choice PROMPT CHARS K): one key from CHARS, a list of
+;; one-character strings; K gets the character. Any other key asks again.
+;; C-g cancels and K gets #f.
+(define (read-char-choice prompt chars k)
+  (let ((answer (lambda (ch) (minibuffer-detach!) (k ch))))
+    (minibuffer-read* prompt '()
+      (list (list 'change
+              (lambda (input)
+                (let ((ch (if (> (string-length input) 0)
+                              (substring input (- (string-length input) 1) (string-length input))
+                              "")))
+                  (if (member ch chars)
+                      (answer ch)
+                      (minibuffer-input! "")))))
+            (list 'confirm (lambda (v) (read-char-choice prompt chars k)))
+            (list 'cancel (lambda () (k #f)))
+            (list 'style "question")))))
+
+;; the Emacs names: K gets #t or #f
+(define (y-or-n-p prompt k)
+  (y-or-n prompt (lambda () (k #t)) (lambda () (k #f))))
+
+;; a question that takes the word: "yes" or "no", RET after it
+(define (yes-or-no-p prompt k)
+  (minibuffer-read* (string-append prompt " (yes or no) ") '()
+    (list (list 'confirm
+            (lambda (v)
+              (cond ((equal? v "yes") (k #t))
+                    ((equal? v "no") (k #f))
+                    (else (message "Please answer yes or no.")
+                          (yes-or-no-p prompt k)))))
+          (list 'cancel (lambda () (k #f)))
+          (list 'style "question"))))
+
 (define (y-or-n prompt yes &optional no)
   (let* ((no (if no no (lambda () #f)))
          ;; the prompt closes BEFORE the answer runs: an answer may ask
@@ -2313,6 +2471,8 @@
   (local-set-key* mb "<down>" "minibuffer-next-candidate")
   (local-set-key* mb "C-p" "minibuffer-previous-candidate")
   (local-set-key* mb "<up>" "minibuffer-previous-candidate")
+  (local-set-key* mb "M-p" "previous-history-element")
+  (local-set-key* mb "M-n" "next-history-element")
   ;; a search repeats from inside its own prompt
   (local-set-key* mb "C-s" "isearch-repeat-forward")
   (local-set-key* mb "C-r" "isearch-repeat-backward")
@@ -2965,33 +3125,19 @@
 (define (desktop-clear--ask-save dirty kept members)
   (if (null? dirty)
       (desktop-clear--finish kept members)
-      (let* ((b (car dirty))
-             (answer (lambda (k) (lambda () (minibuffer-detach!) (k)))))
-        (minibuffer-read*
-          (string-append "Save " b "? (y, n, A all, N none) ") '()
-          (list
-            (list 'change
-              (lambda (input)
-                (cond
-                  ((string-suffix? "y" input)
-                   ((answer
-                      (lambda ()
-                        (save-buffer-named! b)
-                        (desktop-clear--ask-save (cdr dirty) kept members)))))
-                  ((string-suffix? "n" input)
-                   ((answer
-                      (lambda ()
-                        (desktop-clear--ask-save
-                          (cdr dirty) (cons b kept) members)))))
-                  ((string-suffix? "A" input)
-                   ((answer (lambda () (desktop-clear--save-all dirty members)))))
-                  ((string-suffix? "N" input)
-                   ((answer (lambda () (desktop-clear--finish '() members)))))
-                  (else (minibuffer-input! "")))))
-            (list 'confirm
-              (lambda (v) (desktop-clear--ask-save dirty kept members)))
-            (list 'cancel (lambda () #f))
-            (list 'style "question"))))))
+      (let ((b (car dirty)))
+        (read-char-choice
+          (string-append "Save " b "? (y, n, A all, N none) ")
+          '("y" "n" "A" "N")
+          (lambda (ch)
+            (cond ((equal? ch "y")
+                   (save-buffer-named! b)
+                   (desktop-clear--ask-save (cdr dirty) kept members))
+                  ((equal? ch "n")
+                   (desktop-clear--ask-save (cdr dirty) (cons b kept) members))
+                  ((equal? ch "A") (desktop-clear--save-all dirty members))
+                  ((equal? ch "N") (desktop-clear--finish '() members))
+                  (else #f)))))))
 
 (domain! 'desktop)
 (effects! '(destroy))
@@ -3934,8 +4080,13 @@
 ;;;   #f                                — source has nothing here
 ;;;   (list start end candidates)      — region to replace + candidates,
 ;;;                                       each a string or (label hint) pair
-;;; Sources are tried in order; first non-#f wins (Emacs capf semantics).
-;;; An LSP client is just another source returning the same shape.
+;;;   (list start end candidates 'exclusive 'no)
+;;;                                    — the same, and when CANDIDATES is
+;;;                                       empty the next source is tried
+;;; Sources are tried in order; the first that answers wins (Emacs capf).
+;;; END may lie past point: accept replaces START..END, so a source that
+;;; completes over a suffix names the whole word. An LSP client is just
+;;; another source returning the same shape.
 ;;; Buffer-local sources: (buffer-set-local! buf 'capf-sources (list fn ...))
 
 (define *capf-sources* '())
@@ -3947,17 +4098,31 @@
   (let ((local (buffer-local (current-buffer) 'capf-sources)))
     (if local (append local *capf-sources*) *capf-sources*)))
 
+;; a source that says 'exclusive 'no yields to the next when it has nothing
+(define (capf-result-yields? r)
+  (let ((props (cdr (cdr (cdr r)))))
+    (and (null? (caddr r))
+         (pair? props)
+         (equal? (plist-get props 'exclusive) 'no))))
+
+;; the first answer among SOURCES, or #f
+(define (capf-collect sources)
+  (let loop ((sources sources))
+    (if (null? sources)
+        #f
+        (let ((r ((car sources))))
+          (if (and r (not (capf-result-yields? r)))
+              r
+              (loop (cdr sources)))))))
+
 (define-command "completion-at-point" "Perform completion on the text around point"
   (lambda ()
-    (let loop ((sources (capf-sources)))
-      (if (null? sources)
+    (let ((r (capf-collect (capf-sources))))
+      (if r
+          (completion-show! (car r) (cadr r) (caddr r))
           (begin
             (completion-dismiss!)
-            (message "No completions here"))
-          (let ((r ((car sources))))
-            (if r
-                (completion-show! (car r) (cadr r) (caddr r))
-                (loop (cdr sources))))))))
+            (message "No completions here"))))))
 
 ;; The popup's keys are policy (dup #22): while it shows, KeyDispatch
 ;; consults this map first. Unbound printables narrow; anything else
@@ -3970,9 +4135,10 @@
   (lambda ()
     (let ((a (completion-accept!)))
       (when a
-        (let ((start (car a)) (label (car (cdr a))))
-          (when (> (point) start)
-            (buffer-delete-range! (current-buffer) start (- (point) start)))
+        (let ((start (car a)) (end (cadr a)) (label (caddr a)))
+          (when (> end start)
+            (buffer-delete-range! (current-buffer) start (- end start)))
+          (goto-char! start)
           (insert! label))))))
 (define-command "completion-quit" "Dismiss the completion popup"
   (lambda () (completion-dismiss!) (message "")))
@@ -10435,6 +10601,15 @@
 (catalog-meta! 'function "mode-label" 'domain 'interaction 'effects '(pure))
 (catalog-meta! 'function "buffer-icon" 'domain 'interaction 'effects '(read))
 (catalog-meta! 'function "file-icon" 'domain 'interaction 'effects '(pure))
+(public! 'completing-read "(completing-read PROMPT COLLECTION K 'predicate FN 'require-match #t 'initial TEXT 'default TEXT 'history SYM 'category SYM 'style SYM) — Emacs's completing-read, asynchronous: K gets the choice. COLLECTION is rows or a procedure of the input")
+(public! 'read-string "(read-string PROMPT K [OPTS ...]) — a line of text; K gets it")
+(public! 'read-number "(read-number PROMPT K [OPTS ...]) — a number; K gets it, 0 for not a number")
+(public! 'read-buffer "(read-buffer PROMPT K [OPTS ...]) — a buffer name; K gets it")
+(public! 'read-char-choice "(read-char-choice PROMPT CHARS K) — one key from CHARS; K gets it, or #f on C-g")
+(public! 'y-or-n-p "(y-or-n-p PROMPT K) — one key; K gets #t for y, #f for n or C-g")
+(public! 'yes-or-no-p "(yes-or-no-p PROMPT K) — the word yes or no; K gets #t or #f")
+(public! 'minibuffer-active? "(minibuffer-active?) — #t while a prompt is up")
+(public! 'capf-collect "(capf-collect SOURCES) — the first capf answer among SOURCES, honouring 'exclusive 'no, or #f")
 (public! 'add-hook! "(add-hook! 'name-hook FN [APPEND] [LOCAL]) — put FN on the hook once; FN is a quoted function name, resolved when the hook runs, or a closure. APPEND puts it last. LOCAL puts it on the current buffer's own list, which runs first")
 (public! 'remove-hook! "(remove-hook! 'name-hook FN [LOCAL]) — take FN off the hook")
 (public! 'run-hook-with-args "(run-hook-with-args 'name-hook ARG ...) — run every function of the hook with ARGS")

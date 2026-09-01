@@ -186,24 +186,34 @@
       "the chip holds the kind and the instruction")
     (t--md-done!)))
 
-(deftest 'the-verbs-stand-on-the-fence-only-while-they-work
-  "a kind's verb chips name live keys and carry their commands as clicks"
+(deftest 'the-live-blocks-chrome-comes-from-its-record
+  "the instruction and the clickable verbs stand only on the waiting block"
   (lambda ()
-    (t--md-fresh! "```diff fix it · theirs\nbody\n```\n")
+    ;; a plain pasted diff: no record, no chrome beyond the chip
+    (t--md-fresh! "```diff all\n-a\n```\n")
     (check-false!
-      (pair? (filter (lambda (o) (string-contains? (caddr o) "md-fence-verb"))
+      (pair? (filter (lambda (o) (or (string-contains? (caddr o) "md-fence-verb")
+                                     (string-contains? (caddr o) "md-fence-note")))
                      (buffer-overlays t--md-buf)))
-      "no verb has a key here, so no chip stands")
-    ;; bind a dummy key to one verb and repaint: the chip appears with it,
-    ;; clickable through the block-click registry
-    (local-set-key* t--md-buf "<f9> y" "llm-rewrite-accept")
+      "a pasted diff wears no verbs and no note")
+    ;; a waiting rewrite: the record supplies the instruction chip and the
+    ;; clickable verbs (their keys bound by the hold, read from the keymap)
+    (t--md-fresh! "One.\n\nTwo.\n")
+    (llm-rewrite--propose! t--md-buf 6 10 "Two." "Deux." "say it in French")
     (markdown-refontify! t--md-buf)
-    (check-true!
-      (member (chrome-after 24 "<f9> y keeps it" "md-fence-verb"
-                            "fence-cmd:llm-rewrite-accept")
-              (buffer-overlays t--md-buf))
-      "the bound verb stands with its key and its command")
-    (local-unset-key* t--md-buf "<f9> y")
+    (let ((chrome (map (lambda (o) (caddr o))
+                       (filter (lambda (o) (= (car o) (cadr o)))
+                               (buffer-overlays t--md-buf)))))
+      (check-true!
+        (pair? (filter (lambda (c) (string-contains? c "md-fence-note"))
+                       chrome))
+        "the instruction stands as a note chip")
+      (check-true!
+        (pair? (filter (lambda (c)
+                         (string-contains? c "fence-cmd:llm-rewrite-accept"))
+                       chrome))
+        "and the accept verb is a click away"))
+    (llm-rewrite--release! t--md-buf)
     (t--md-done!)))
 
 (deftest 'a-runnable-fence-offers-a-clickable-run-chip

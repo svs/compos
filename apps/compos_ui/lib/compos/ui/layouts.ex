@@ -297,8 +297,14 @@ defmodule Compos.Ui.Layouts do
             display: inline-block; padding: 0 7px; margin: 0 4px; border-radius: 9px;
             border: 1px solid var(--border-bg, rgba(0,0,0,0.14));
             background: var(--hl-line-bg, rgba(0,0,0,0.03));
-            color: var(--dim-fg, #8a857a);
             font-family: var(--font-mono); font-size: .72em; line-height: 1.6;
+          }
+          /* zero specificity: a kind's own face class (f-*) wins the color */
+          :where(.chrome-seg.md-fence-chip) { color: var(--dim-fg, #8a857a); }
+          .chrome-seg.md-fence-note {
+            display: inline-block; margin: 0 4px;
+            color: var(--dim-fg, #8a857a); font-style: italic;
+            font-size: .78em;
           }
           .chrome-seg.md-fence-verbs {
             display: inline-block; margin: 0 4px;

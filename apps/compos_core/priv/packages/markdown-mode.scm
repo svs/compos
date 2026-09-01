@@ -294,7 +294,7 @@
               (chip (fence-kind-chip lang))
               (args (and chip
                          (fence-kind-get lang 'chip-args #f)
-                         (fence-kind-chip-args lang (morg-fence-args line))))
+                         (morg-fence-args line)))
               (text (if (and (string? args) (not (equal? args "")))
                         (string-append chip " · " args)
                         chip))
@@ -323,7 +323,11 @@
            (map (lambda (v)
                   (chrome-after le (cadr v) "md-fence-verb"
                                 (string-append "fence-cmd:" (car v))))
-                verbs))))
+                verbs)
+           (map (lambda (c)
+                  (chrome-after le (car c) (cadr c)
+                                (if (pair? (cddr c)) (caddr c) #f)))
+                (if buf (fence-kind-head-chrome lang buf start) '())))))
       ((equal? k 'close)
        (list (list start (+ start len) "md-marker") (list start (+ start len) "row-fence")))
       ((equal? k 'code)

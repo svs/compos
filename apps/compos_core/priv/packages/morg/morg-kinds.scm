@@ -147,18 +147,6 @@
        (not (equal? lang ""))
        (or (fence-kind-get lang 'chip #f) (string-downcase lang))))
 
-;; the args as the chip shows them: a verb phrase leaves the chip, because
-;; the clickable verb chips carry it instead
-(define (fence-kind-chip-args lang args)
-  (let* ((vs (or (fence-kind-get lang 'verbs #f) '()))
-         (labels (map cadr vs))
-         (kept (filter
-                 (lambda (part)
-                   (not (fold (lambda (acc l) (or acc (string-suffix? l part)))
-                              #f labels)))
-                 (string-split args " · "))))
-    (string-join kept " · ")))
-
 ;; The verbs a kind offers on its block, one (COMMAND TEXT) per verb whose
 ;; command has a key in BUF's keymap — so the chips stand exactly where
 ;; the verbs work, and each one is a click away.
@@ -174,6 +162,12 @@
                         (cons (list (car v) (string-append k " " (cadr v)))
                               acc))))
                 '() vs)))))
+
+;; extra chips a kind draws on its open fence at START, from its own
+;; state: ((TEXT CLASS [CLICK]) ...)
+(define (fence-kind-head-chrome lang buf start)
+  (let ((f (fence-kind-get lang 'head-chrome #f)))
+    (if (procedure? f) (f buf start) '())))
 
 (define (describe-fence-kind name)
   (let ((k (fence-kind name)))
@@ -199,12 +193,11 @@
   "A CSV preview below the block that made it. It does not run."
   'runnable #f 'body-face "morg-result" 'header-face "morg-bold")
 
-;; A live diff's one-sided views (the fence args say theirs or ours) are
-;; prose: a dash there is a dash, and no line wears a diff face.
+;; A live diff's one-sided views (the fence args are the view: theirs or
+;; ours) are prose: a dash there is a dash, and no line wears a diff face.
 (define (fence-kind--diff-line-face line &optional args)
   (cond ((and (string? args)
-              (or (string-contains? args "· theirs")
-                  (string-contains? args "· ours")))
+              (member (string-trim args) '("theirs" "ours")))
          #f)
         ((string-prefix? "+++" line) "diff-file")
         ((string-prefix? "---" line) "diff-file")
@@ -215,19 +208,40 @@
         ((string-prefix? "index " line) "diff-file")
         (else #f)))
 
-;; The rewrite verbs. They stand on both kinds a live diff lands as, and
-;; the live-key gate keeps them quiet everywhere else: the commands have
-;; keys only in a buffer where a rewrite waits.
+;; The rewrite verbs, drawn as preview chrome on the one block a live
+;; record owns — never on a plain pasted diff.
 (define fence-kind--rewrite-verbs
   '(("llm-rewrite-accept" "keeps it")
     ("llm-rewrite-reject" "puts it back")
     ("llm-rewrite-diff" "changes the view")))
 
+;; The chips a live diff wears in preview: the instruction that made it,
+;; and one clickable chip per verb whose command has a key here. They
+;; stand only on the block the record owns.
+(define (fence-kind--diff-head-chrome buf start)
+  (let ((p (and (boundp 'llm-rewrite-pending) (llm-rewrite-pending buf))))
+    (if (not p)
+        '()
+        (let ((spans (llm-rewrite--spans buf)))
+          (if (not (and spans (= start (nth 2 spans))))
+              '()
+              (append
+                (list (list (llm-rewrite--instruction p) "md-fence-note"))
+                (fold (lambda (acc v)
+                        (let ((k (key-for-command (car v) buf)))
+                          (if (equal? k "")
+                              acc
+                              (append acc
+                                (list (list (string-append k " " (cadr v))
+                                            "md-fence-verb"
+                                            (string-append "fence-cmd:" (car v))))))))
+                      '() fence-kind--rewrite-verbs)))))))
+
 (define-fence-kind! "diff"
   "A unified diff. Its lines wear the diff faces. It does not run."
   'runnable #f 'ts-lang #f 'line-face fence-kind--diff-line-face
-  'chip-args #t 'verbs fence-kind--rewrite-verbs
-  'fence-face "diff-hunk")
+  'chip-args #t 'fence-face "diff-hunk"
+  'head-chrome fence-kind--diff-head-chrome)
 
 (define-fence-kind! "patch"
   "A unified diff. The same paint as the diff kind."

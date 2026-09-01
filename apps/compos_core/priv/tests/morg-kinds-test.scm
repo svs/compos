@@ -94,23 +94,14 @@
 (deftest 'a-one-sided-live-diff-takes-no-diff-paint
   "the fence args say theirs or ours, and prose stays prose"
   (lambda ()
-    (check-equal! (fence-kind-line-face "diff" "- a bullet" "fix it · theirs")
+    (check-equal! (fence-kind-line-face "diff" "- a bullet" "theirs")
                   #f "theirs is prose")
-    (check-equal! (fence-kind-line-face "diff" "- a bullet" "fix it · ours")
+    (check-equal! (fence-kind-line-face "diff" "- a bullet" "ours")
                   #f "ours is prose")
-    (check-equal! (fence-kind-line-face "diff" "-gone" "fix it · all")
+    (check-equal! (fence-kind-line-face "diff" "-gone" "all")
                   "diff-del" "the all view reads by prefix")
     (check-equal! (fence-kind-line-face "diff" "-gone" #f)
                   "diff-del" "a plain patch reads by prefix too")))
-
-(deftest 'the-chip-args-drop-the-verb-phrases
-  "the clickable chips carry the verbs; the chip keeps the rest"
-  (lambda ()
-    (check-equal!
-      (fence-kind-chip-args "diff"
-        "fix it · theirs · C-c y keeps it · C-c k puts it back")
-      "fix it · theirs"
-      "the instruction and the view stay; the verb phrases leave")))
 
 ;;; --- the paint ---------------------------------------------------------------
 
@@ -177,9 +168,9 @@
 (deftest 'a-kinds-fence-face-colors-the-header
   "the open fence of a diff block wears its own face, apart from the markers"
   (lambda ()
-    (t--kinds! "```diff x · all\n-a\n```\ntext\n```sh\ne\n```\n" 0)
-    (check-true! (member (list 0 16 "diff-hunk") (buffer-overlays t--kinds-buf))
+    (t--kinds! "```diff all\n-a\n```\ntext\n```sh\ne\n```\n" 0)
+    (check-true! (member (list 0 11 "diff-hunk") (buffer-overlays t--kinds-buf))
                  "the diff header wears diff-hunk")
-    (check-true! (member (list 29 34 "org-meta") (buffer-overlays t--kinds-buf))
+    (check-true! (member (list 24 29 "org-meta") (buffer-overlays t--kinds-buf))
                  "a kind with no fence-face keeps the plain marker face")
     (t--kinds-done!)))

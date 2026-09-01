@@ -88,7 +88,12 @@ A fourth argument is a click id: `(chrome-after POS TEXT CLASS "verb:7")`
 routes a click through the same `on-block-click!` registry a block tree
 uses, so chrome verbs and block verbs are one vocabulary.
 
-The first user is the fence chip: in the preview rows, the open fence of a
+The llm-rewrite header is chrome: `@@ directive @@ … keeps it …` stands on
+the blank line above the waiting block, holds no byte, and derives its
+keys from the buffer's keymap. Nothing strips on accept because nothing
+landed. It draws in any buffer, because chrome rides the plain renderer.
+
+The second user is the fence chip: in the preview rows, the open fence of a
 named block steps back and a chip names its kind — `diff`, or
 `sh · C-c C-c run`. The chip text comes from `(fence-kind-chip LANG
 [RUN-KEY])`: the declared `'chip`, else the info string; a runnable kind

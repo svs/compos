@@ -1,11 +1,12 @@
 ;;; llm-rewrite-test.scm --- a rewrite waits below the passage it rewrites.
 ;;;
 ;;; Nothing is replaced while you decide: the passage stays, and the model's
-;;; version sits in a block under it. The block arrives whole, and C-c d
-;;; asks for the same two texts as a stacked diff or side by side. Every
-;;; view carries a header naming the instruction and the actions, and that
-;;; header never lands in the document. Keeping the block puts it in the
-;;; passage's place; putting it back removes only the block.
+;;; version sits in a block under it. The block arrives whole, and one key
+;;; asks for the same two texts as a stacked diff or side by side. The
+;;; header naming the instruction and the actions is chrome on the blank
+;;; line above the block: it holds no byte, so nothing strips and nothing
+;;; can land. Keeping the block puts it in the passage's place; putting it
+;;; back removes only the block.
 
 (domain! 'testing)
 (effects! '(write))
@@ -61,45 +62,48 @@
     (t--rw-done!)))
 
 (deftest 'every-block-says-what-it-was-asked-and-what-you-can-do
-  "a block you meet an hour later has to explain itself"
+  "the header is chrome above the block: it explains, and it never lands"
   (lambda ()
-    (let ((head (llm-rewrite-block-header "make it X")))
-      (check-contains! head "make it X" "the instruction that made it")
-      (check-contains! head "C-c y" "and the actions on it")
-      (check-equal! (llm-rewrite-whole-block "new text" "make it X")
-                    (string-append head "\nnew text")
-                    "the plain block is the header and the text")
-      (check-equal! (llm-rewrite--strip-header
-                      (llm-rewrite-whole-block "new text" "make it X"))
-                    "new text"
-                    "and the header comes off again"))))
+    (t--rw-proposed!)
+    ;; the header derives its keys from this buffer's own keymap: bind a
+    ;; terser dummy and the header follows it — no production key is named
+    (local-set-key* t--rw-buf "<f9>" "llm-rewrite-accept")
+    (let ((head (llm-rewrite--header t--rw-buf t--rw-what)))
+      (check-contains! head t--rw-what "the instruction that made it")
+      (check-contains! head "<f9> keeps it" "the keys come from the keymap"))
+    ;; the block itself is the text alone, so there is nothing to strip
+    (check-equal! (llm-rewrite-whole-block "new text" "make it X") "new text"
+                  "the plain block is the text")
+    (check-true!
+      (pair? (filter (lambda (o) (and (= (car o) (cadr o))
+                                      (string-prefix? "chrome-b:" (caddr o))))
+                     (buffer-overlays t--rw-buf)))
+      "and the header stands as chrome on the line above the block")
+    (t--rw-done!)))
 
 (deftest 'a-stacked-block-puts-the-old-lines-over-the-new
   "with the lines the two still share as context"
   (lambda ()
     (check-equal! (llm-rewrite-diff-block "a\nb\nc" "a\nX\nc" "make it X")
-                  (string-append (llm-rewrite-block-header "make it X")
-                                 "\n a\n-b\n+X\n c")
+                  " a\n-b\n+X\n c"
                   "one hunk between the shared ends")))
 
 (deftest 'a-side-by-side-block-puts-them-in-columns
   "same hunk, two columns, the left one padded to its widest line"
   (lambda ()
     (check-equal! (llm-rewrite-side-block "a\nbb\nc" "a\nX\nc" "make it X")
-                  (string-append (llm-rewrite-block-header "make it X")
-                                 "\na  | a\nbb | X\nc  | c")
+                  "a  | a\nbb | X\nc  | c"
                   "every row is the passage beside its rewrite")))
 
 (deftest 'the-block-faces-follow-the-view
   "a stacked block reads by prefix; a plain one must not"
   (lambda ()
-    (let ((head (llm-rewrite-block-header "x")))
-      (check-equal! (llm-rewrite--block-faces 0 "@@ x @@\n-b\n+X" 'stacked)
-                    '((0 7 diff-hunk) (8 10 diff-del) (11 13 diff-add))
-                    "the header, the old line and the new one")
-      (check-equal! (llm-rewrite--block-faces 0 "@@ x @@\n- a bullet" 'whole)
-                    '((0 7 diff-hunk))
-                    "a dash in prose is not a deleted line"))))
+    (check-equal! (llm-rewrite--block-faces 0 "-b\n+X" 'stacked)
+                  '((0 2 diff-del) (3 5 diff-add))
+                  "the old line and the new one")
+    (check-equal! (llm-rewrite--block-faces 0 "- a bullet" 'whole)
+                  '()
+                  "a dash in prose is not a deleted line")))
 
 (deftest 'a-rewrite-lands-below-the-passage
   "whole by default, with the passage untouched above it"

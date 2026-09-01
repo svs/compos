@@ -6666,7 +6666,6 @@
 ;; no face.
 (define (llm-rewrite--row-faces at line view)
   (cond
-    ((string-prefix? "@@" line) (list (list at (+ at (string-byte-length line)) 'diff-hunk)))
     ((equal? view 'side)
      (let ((cut (string-index line " | ")))
        (if (not cut)
@@ -6693,11 +6692,23 @@
           (loop (cdr ls) (+ end 1)
                 (append acc (llm-rewrite--row-faces at (car ls) view)))))))
 
-(define (llm-rewrite--paint! buf spans view)
+;; The header is chrome, not text: it stands on the blank line above the
+;; block, names the instruction and the keys, and never holds a byte. The
+;; keys come from this buffer's own keymap, so a rebind changes the header.
+(define (llm-rewrite--header buf directive)
+  (string-append "@@ " directive " @@ "
+    (key-for-command "llm-rewrite-accept" buf) " keeps it · "
+    (key-for-command "llm-rewrite-reject" buf) " puts it back · "
+    (key-for-command "llm-rewrite-diff" buf) " changes the view"))
+
+(define (llm-rewrite--paint! buf spans directive view)
   (overlay-set! buf 'llm-rewrite-source
     (list (list (nth 0 spans) (nth 1 spans) 'llm-rewrite-source)))
   (overlay-set! buf 'llm-rewrite
-    (list (list (nth 2 spans) (nth 3 spans) 'llm-rewrite)))
+    (list (list (nth 2 spans) (nth 3 spans) 'llm-rewrite)
+          (chrome-before (max 0 (- (nth 2 spans) 1))
+            (llm-rewrite--header buf directive)
+            "f-diff-hunk llm-rewrite-head")))
   (overlay-set! buf 'llm-rewrite-diff
     (llm-rewrite--block-faces (nth 2 spans)
       (or (llm-rewrite--text-at buf (nth 2 spans) (nth 3 spans)) "")
@@ -6707,10 +6718,11 @@
   (buffer-set-local! buf 'llm-rewrite
     (append spans (list tail old new directive view)))
   (desktop-skip! buf 'llm-rewrite)
-  (llm-rewrite--paint! buf spans view)
+  ;; the keys bind first: the header chrome reads them from this keymap
   (local-set-key* buf "C-c y" "llm-rewrite-accept")
   (local-set-key* buf "C-c k" "llm-rewrite-reject")
-  (local-set-key* buf "C-c d" "llm-rewrite-diff"))
+  (local-set-key* buf "C-c d" "llm-rewrite-diff")
+  (llm-rewrite--paint! buf spans directive view))
 
 (define (llm-rewrite--release! buf)
   (buffer-set-local! buf 'llm-rewrite #f)
@@ -6779,20 +6791,9 @@
 (define (llm-rewrite--marked prefix lines)
   (map (lambda (l) (string-append prefix l)) lines))
 
-;; The header is decoration, not text: every block wears one, and it never
-;; lands in the document.
-(define (llm-rewrite-whole-block new directive)
-  (string-append (llm-rewrite-block-header directive) "\n" new))
-
-(define (llm-rewrite--strip-header text)
-  (let ((lines (string-split text "\n")))
-    (if (and (pair? lines) (string-prefix? "@@" (car lines)))
-        (string-join (cdr lines) "\n")
-        text)))
-
-(define (llm-rewrite-block-header directive)
-  (string-append "@@ " directive
-                 " @@ C-c y keeps it · C-c k puts it back · C-c d changes the view"))
+;; The header is chrome (llm-rewrite--header), so a block is its text
+;; alone: nothing lands that was not asked for, and nothing needs a strip.
+(define (llm-rewrite-whole-block new directive) new)
 
 ;; the passage and the rewrite as head context, one hunk, tail context
 (define (llm-rewrite--parts old new)
@@ -6810,7 +6811,6 @@
   (let ((parts (llm-rewrite--parts old new)))
     (string-join
       (append
-        (list (llm-rewrite-block-header directive))
         (llm-rewrite--marked " " (nth 0 parts))
         (llm-rewrite--marked "-" (nth 1 parts))
         (llm-rewrite--marked "+" (nth 2 parts))
@@ -6851,11 +6851,10 @@
                        (llm-rewrite--rows (nth 3 parts) (nth 3 parts))))
          (width (llm-rewrite--column-width (map car rows))))
     (string-join
-      (cons (llm-rewrite-block-header directive)
-            (map (lambda (row)
-                   (string-append (llm-rewrite--pad (car row) width)
-                                  " | " (cadr row)))
-                 rows))
+      (map (lambda (row)
+             (string-append (llm-rewrite--pad (car row) width)
+                            " | " (cadr row)))
+           rows)
       "\n")))
 
 ;; The reply arrives whenever it arrives, so it may only land under the
@@ -6875,7 +6874,9 @@
           (message (string-append
                      "Rewrite waiting below the passage in "
                      (buffer-modeline-name buf)
-                     " · there C-c e decides and C-c d shows the diff"))))))
+                     " · there " (key-for-command "llm-rewrite") " decides and "
+                     (key-for-command "llm-rewrite-diff" buf)
+                     " shows the diff"))))))
 
 ;; Asking again rewrites the block, never the passage: the reject that comes
 ;; after any number of rounds still has the original to put back. The new
@@ -6895,7 +6896,8 @@
                              (list new directive view))))
           (llm-rewrite--put-block! buf p spans
             (llm-rewrite--render next view) new directive view)
-          (message "Rewrite refined · C-c e decides"))))))
+          (message (string-append "Rewrite refined · "
+                                  (key-for-command "llm-rewrite") " decides")))))))
 
 ;; Every view is a rendering of the same two strings, so changing view is a
 ;; redraw, not a decision.
@@ -6914,8 +6916,9 @@
         (llm-rewrite--put-block! buf p spans
           (llm-rewrite--render p view)
           (llm-rewrite--new p) (llm-rewrite--instruction p) view)
-        (message (string-append "Rewrite " (llm-rewrite--view-name view)
-                                " · C-c d changes the view"))))))
+        (message (string-append "Rewrite " (llm-rewrite--view-name view) " · "
+                                (key-for-command "llm-rewrite-diff" buf)
+                                " changes the view"))))))
 
 (define (llm-rewrite-cycle-view! buf)
   (let ((p (llm-rewrite-pending buf)))
@@ -7011,7 +7014,7 @@
 ;; of two strings, so what lands from it is the rewrite it describes.
 (define (llm-rewrite--accept-text p block)
   (if (equal? (llm-rewrite--view p) 'whole)
-      (llm-rewrite--strip-header block)
+      block
       (llm-rewrite--new p)))
 
 ;; Keeping it: the block takes the passage's place, and the passage and the

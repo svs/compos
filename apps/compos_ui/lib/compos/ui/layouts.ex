@@ -2363,6 +2363,13 @@ defmodule Compos.Ui.Layouts do
                     this._lastMotion = e.metaKey && e.key === "ArrowLeft" ? "Home"
                       : e.metaKey && e.key === "ArrowRight" ? "End" : e.key;
                     this._caretTopBefore = caretTopNow();
+                    // The mark is the user's. In Emacs a keyboard motion
+                    // extends the region from it, so the selection report
+                    // this key is about to cause must not clear it. The
+                    // arrows never reach the server on an editable surface,
+                    // so this timestamp is the only thing that can tell a
+                    // caret move from a click down there.
+                    this._motionAt = performance.now();
                   }
                   if (nativeTextKey(e)) return;
                   const spec = keySpec(e);
@@ -2749,7 +2756,10 @@ defmodule Compos.Ui.Layouts do
                     // a collapsed caret still on the server's point is no news
                     if (sel && sel.isCollapsed && !isNaN(pt) && sel.focusNode && buf.contains(sel.focusNode) &&
                         domByte(sel.focusNode, sel.focusOffset) === pt) return;
-                    this.sendSelection(buf, false);
+                    // keep the mark when a motion key caused this report;
+                    // a click, which sets no timestamp, still clears it
+                    this.sendSelection(buf,
+                      performance.now() - (this._motionAt || 0) < 1200);
                   }, 150);
                 };
                 document.addEventListener("selectionchange", this.selChangeH);
@@ -3265,6 +3275,11 @@ defmodule Compos.Ui.Layouts do
                 window.addEventListener("pointerdown", this.proveFocusH, true);
                 window.addEventListener("keydown", this.proveFocusH, true);
 
+                // a click is the one thing that says the mark is gone: it
+                // ends the run of keyboard motion the report above keeps
+                this.pointerMarkH = () => { this._motionAt = 0; };
+                window.addEventListener("pointerdown", this.pointerMarkH, true);
+
                 // A drawn Markdown link carries its target. Clicking the
                 // text follows the link instead of putting the caret inside
                 // it. The mousedown does it, not the click: following
@@ -3357,6 +3372,7 @@ defmodule Compos.Ui.Layouts do
                 window.removeEventListener("focus", this.focusH);
                 window.removeEventListener("blur", this.blurH);
                 window.removeEventListener("pointerdown", this.proveFocusH, true);
+                window.removeEventListener("pointerdown", this.pointerMarkH, true);
                 window.removeEventListener("keydown", this.proveFocusH, true);
                 window.removeEventListener("mousedown", this.linkDownH, true);
                 document.removeEventListener("visibilitychange", this.visibilityH);

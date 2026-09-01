@@ -2579,9 +2579,10 @@
           (remove (lambda (e) (equal? (car e) name)) *mode-setups*)))
   (define-keymap! (mode-keymap name))
   (reload--touch! name)
-  ;; every mode is an M-x command, like Emacs. The command toggles: the
-  ;; command that puts you in a mode takes you out of it again.
-  (define-command name (lambda () (modeline-toggle-mode! name)))
+  ;; every mode is an M-x command, like Emacs, and like Emacs the command
+  ;; puts the buffer in the mode; running it again keeps it there. The
+  ;; modeline click is the toggle (modeline-toggle-mode!).
+  (define-command name (lambda () (major-mode-set! name)))
   (catalog-register! 'mode name "Major mode"
     'use (string-append "(run-command \"" name "\")")))
 
@@ -2593,7 +2594,24 @@
 (define (mode-parent! name parent)
   (set! *mode-parents*
     (cons (list name parent)
-          (remove (lambda (e) (equal? (car e) name)) *mode-parents*))))
+          (remove (lambda (e) (equal? (car e) name)) *mode-parents*)))
+  ;; the child's map falls back to the parent's
+  (keymap-parent! (mode-keymap name) (mode-keymap parent)))
+
+;; (define-derived-mode NAME PARENT SETUP): NAME is PARENT with SETUP on
+;; top. Its keymap falls back to PARENT-map, its setup runs PARENT's
+;; setup first, and set-mode! runs PARENT-hook before NAME-hook, as
+;; Emacs's define-derived-mode does.
+(define (define-derived-mode name parent setup)
+  (mode-parent! name parent)
+  (define-mode name (lambda () (mode-setup! parent) (setup))))
+
+;; the hooks a mode runs, the root's first: fundamental has none
+(define (mode-hook-chain name)
+  (let loop ((m name) (acc '()) (seen '()))
+    (if (or (not m) (member m seen))
+        (map (lambda (n) (string->symbol (string-append n "-hook"))) acc)
+        (loop (mode-parent m) (cons m acc) (cons m seen)))))
 
 (define (mode-parent name)
   (let ((e (assoc name *mode-parents*))) (and e (cadr e))))
@@ -2693,6 +2711,7 @@
   (let* ((buf (current-buffer))
          (old (buffer-local buf 'mode-name))
          (changed (and old (not (equal? old name)))))
+    (when changed (run-hooks 'change-major-mode-hook))
     ;; a change of major mode starts the buffer's own map afresh, as
     ;; use-local-map does in Emacs. The mode's setup puts its keys back,
     ;; and the minor modes put theirs back after it.
@@ -2703,9 +2722,43 @@
     (let ((m (assoc name *mode-setups*)))
       (if m ((cadr m))))
     (when changed (restore-minor-modes! buf))
-    (run-hooks (string->symbol (string-append name "-hook")))
+    ;; the parent's hook runs before the child's, as in Emacs
+    (apply run-hooks (mode-hook-chain name))
+    (run-hooks 'after-change-major-mode-hook)
     ;; the mode is on: if it declares a layout, the engine arranges the frame
     (layout-enter! buf)))
+
+;; the M-x form of a major mode: enter it, and say so. Running it in a
+;; buffer that wears the mode already keeps the mode.
+(define (major-mode-set! name)
+  (set-mode! name)
+  (message (string-append name " on")))
+
+;;; --- kill-all-local-variables ---------------------------------------------------
+;;; Emacs forgets a buffer's locals when the major mode changes, and keeps
+;;; the ones marked permanent-local. Here a local can hold what a buffer
+;;; IS (a chat's identity, its file), so set-mode! does not call this. It
+;;; is the mechanism for a mode or a command that wants a clean buffer.
+
+(define *permanent-locals* '(mode-name minor-modes))
+
+(define (permanent-local! name)
+  (unless (member name *permanent-locals*)
+    (set! *permanent-locals* (cons name *permanent-locals*))))
+
+(define (permanent-local? name)
+  (or (member name *permanent-locals*)
+      (and (boundp 'chat-identity-locals) (member name chat-identity-locals))))
+
+;; forget every local that is not permanent, and the buffer's own keys
+(define (kill-all-local-variables! buf)
+  (for-each
+    (lambda (entry)
+      (unless (permanent-local? (car entry))
+        (buffer-set-local! buf (car entry) #f)))
+    (buffer-locals buf))
+  (clear-local-map! buf)
+  buf)
 
 ;; desktop restore's entry: set BUF's mode with BUF current, so the setup
 ;; fn rebuilds presentation from the locals restore already laid down.
@@ -2884,6 +2937,9 @@
   (minor-mode--attach-map! buf name)
   (let ((m (assoc name *minor-mode-setups*)))
     (if m ((cadr m) buf)))
+  ;; NAME-hook runs in the buffer, as a minor mode's hook does in Emacs
+  (with-current-buffer buf
+    (lambda () (run-hooks (string->symbol (string-append name "-hook")))))
   ;; the setup fn named the buffers its layout wants; now place them
   (layout-enter! buf))
 
@@ -2900,6 +2956,66 @@
     (if (minor-mode-on? buf name)
         (begin (disable-minor-mode! buf name) #f)
         (begin (enable-minor-mode! buf name) #t))))
+
+;;; --- globalized minor modes ---------------------------------------------------
+;;; (define-globalized-minor-mode! GLOBAL LOCAL ELIGIBLE?): the command
+;;; GLOBAL turns LOCAL on in every buffer ELIGIBLE? accepts, now and as
+;;; buffers appear, and off everywhere. Emacs's define-globalized-minor-mode.
+
+(define *globalized-minor-modes* '())   ; ((global local eligible? on?) ...)
+
+(define (globalized-minor-mode-on? global)
+  (let ((e (assoc global *globalized-minor-modes*)))
+    (and e (nth 3 e))))
+
+(define (globalized-minor-mode--set! global on?)
+  (let ((e (assoc global *globalized-minor-modes*)))
+    (when e
+      (set! *globalized-minor-modes*
+        (cons (list global (nth 1 e) (nth 2 e) on?)
+              (remove (lambda (x) (equal? (car x) global)) *globalized-minor-modes*))))))
+
+(define (globalized-minor-mode--apply! e buf)
+  (let ((local (nth 1 e)) (eligible? (nth 2 e)))
+    (when (and (eligible? buf) (not (minor-mode-on? buf local)))
+      (enable-minor-mode! buf local))))
+
+(define (globalized-minor-mode-on! global)
+  (globalized-minor-mode--set! global #t)
+  (let ((e (assoc global *globalized-minor-modes*)))
+    (when e (for-each (lambda (b) (globalized-minor-mode--apply! e b)) (buffer-list)))))
+
+(define (globalized-minor-mode-off! global)
+  (globalized-minor-mode--set! global #f)
+  (let ((e (assoc global *globalized-minor-modes*)))
+    (when e
+      (for-each (lambda (b)
+                  (when (minor-mode-on? b (nth 1 e))
+                    (disable-minor-mode! b (nth 1 e))))
+                (buffer-list)))))
+
+;; a buffer that appears while a globalized mode is on gets the mode
+(define (globalized-minor-mode--new-buffer! name)
+  (for-each (lambda (e) (when (nth 3 e) (globalized-minor-mode--apply! e name)))
+            *globalized-minor-modes*))
+
+(define (globalized-minor-mode--find-file-hook!)
+  (globalized-minor-mode--new-buffer! (current-buffer)))
+
+(add-hook! 'buffer-created-hook 'globalized-minor-mode--new-buffer!)
+(add-hook! 'find-file-hook 'globalized-minor-mode--find-file-hook!)
+
+(define (define-globalized-minor-mode! global local eligible? &optional doc)
+  (set! *globalized-minor-modes*
+    (cons (list global local eligible? (globalized-minor-mode-on? global))
+          (remove (lambda (x) (equal? (car x) global)) *globalized-minor-modes*)))
+  (define-command global (or doc (string-append "Toggle " local " in every buffer"))
+    (lambda ()
+      (if (globalized-minor-mode-on? global)
+          (begin (globalized-minor-mode-off! global)
+                 (message (string-append global " disabled")))
+          (begin (globalized-minor-mode-on! global)
+                 (message (string-append global " enabled")))))))
 
 ;; Fundamental, the state a buffer has before any mode claims it. Nothing
 ;; remembers the mode you left, as in Emacs. normal-mode reads the file
@@ -3298,16 +3414,76 @@
 
 ;; the mode a file name would open in, without switching anything —
 ;; dired filters by it, and (auto-mode) applies it
-(define (auto-mode-for name)
-  (let loop ((es *auto-mode-alist*))
+;; an entry is a suffix (".scm") or a regexp ("\\.scm$", "^Makefile"), as
+;; auto-mode-alist takes a regexp in Emacs. A pattern with a regexp
+;; character is a regexp; a plain suffix compares case-insensitively.
+(define (auto-mode--regexp? pattern)
+  (or (string-contains? pattern "\\")
+      (string-contains? pattern "^")
+      (string-contains? pattern "$")
+      (string-contains? pattern "[")
+      (string-contains? pattern "(")
+      (string-contains? pattern "*")
+      (string-contains? pattern "?")))
+
+(define (auto-mode--matches? pattern name)
+  (if (auto-mode--regexp? pattern)
+      (re-match? pattern name)
+      (string-suffix? (string-downcase pattern) (string-downcase name))))
+
+(define (auto-mode--lookup alist name)
+  (let loop ((es alist))
     (cond ((null? es) #f)
-          ((string-suffix? (string-downcase (car (car es)))
-                           (string-downcase name))
-           (car (cdr (car es))))
+          ((auto-mode--matches? (car (car es)) name) (car (cdr (car es))))
           (else (loop (cdr es))))))
 
+(define (auto-mode-for name)
+  (auto-mode--lookup *auto-mode-alist* name))
+
+;; the mode for a script by the interpreter its first line names:
+;; #!/usr/bin/env guile, #!/bin/sh. Emacs's interpreter-mode-alist.
+(define *interpreter-mode-alist*
+  '(("guile" "scheme-mode") ("scheme" "scheme-mode") ("chibi-scheme" "scheme-mode")
+    ("elixir" "elixir-mode")))
+
+;; the mode for a buffer by a regexp on its first line: Emacs's
+;; magic-mode-alist. Empty by default; a package adds its own.
+(define *magic-mode-alist* '())
+
+(define (auto-mode--first-line buf)
+  (let* ((size (buffer-size buf))
+         (text (with-current-buffer buf
+                 (lambda () (buffer-substring 0 (if (< size 256) size 256)))))
+         (lines (string-split text "\n")))
+    (if (pair? lines) (car lines) "")))
+
+;; the program a shebang names: the last word of the line, after the
+;; last slash. "#!/usr/bin/env guile" and "#!/usr/local/bin/guile" both
+;; answer guile.
+(define (auto-mode--interpreter line)
+  (and (string-prefix? "#!" line)
+       (let* ((words (filter (lambda (w) (> (string-length w) 0))
+                             (string-split (substring line 2 (string-length line)) " ")))
+              (last (if (pair? words) (car (reverse words)) ""))
+              (prog (car (reverse (string-split last "/")))))
+         (let loop ((es *interpreter-mode-alist*))
+           (cond ((null? es) #f)
+                 ((equal? (car (car es)) prog) (car (cdr (car es))))
+                 (else (loop (cdr es))))))))
+
+;; the mode a buffer would open in: its first line first (magic, then the
+;; interpreter), then its name
+(define (auto-mode-for-buffer buf &optional name)
+  (let ((line (auto-mode--first-line buf)))
+    (or (let loop ((es *magic-mode-alist*))
+          (cond ((null? es) #f)
+                ((re-match? (car (car es)) line) (car (cdr (car es))))
+                (else (loop (cdr es)))))
+        (auto-mode--interpreter line)
+        (auto-mode-for (or name buf)))))
+
 (define (auto-mode path)
-  (let ((m (auto-mode-for path)))
+  (let ((m (auto-mode-for-buffer (current-buffer) path)))
     (when m (set-mode! m))))
 
 ;; The directory the file candidates come from. A candidate is a bare
@@ -10079,6 +10255,13 @@
 (public! 'windmove-swap-states-default-keybindings "(windmove-swap-states-default-keybindings &optional MODIFIERS) — bind the arrows with MODIFIERS (default shift super) to windmove-swap-states-*")
 (public! 'windmove-chord "(windmove-chord MODIFIERS KEY) — the key spec for KEY under MODIFIERS, e.g. (windmove-chord '(meta shift) \"<left>\") is \"M-S-<left>\"")
 (public! 'local-set-key "(local-set-key KEYS COMMAND-NAME) in the current buffer's own map")
+(public! 'define-derived-mode "(define-derived-mode NAME PARENT SETUP) — NAME is PARENT with SETUP on top: PARENT's setup, keymap and hook come first")
+(public! 'major-mode-set! "(major-mode-set! NAME) — enter the major mode NAME and say so; the M-x form of a mode")
+(public! 'kill-all-local-variables! "(kill-all-local-variables! BUF) — forget every local that is not permanent, and the buffer's own keys")
+(public! 'permanent-local! "(permanent-local! NAME) — kill-all-local-variables! keeps the local NAME")
+(public! 'define-globalized-minor-mode! "(define-globalized-minor-mode! GLOBAL LOCAL ELIGIBLE? [DOC]) — the command GLOBAL turns LOCAL on in every buffer ELIGIBLE? accepts, now and as buffers appear")
+(public! 'globalized-minor-mode-on? "(globalized-minor-mode-on? GLOBAL) — #t while the globalized mode is on")
+(public! 'auto-mode-for-buffer "(auto-mode-for-buffer BUF [NAME]) — the mode BUF would open in: magic-mode-alist, then the interpreter line, then the name")
 (public! 'mode-keymap "(mode-keymap MODE) — the name of the keymap MODE owns, MODE-map; bind there with define-key and every buffer in the mode answers")
 (public! 'minor-mode-keymap "(minor-mode-keymap NAME) — the keymap a minor mode registered, or #f")
 (public! 'local-remap! "(local-remap! FROM-COMMAND TO-COMMAND) — Emacs [remap]: every key bound to FROM runs TO in this buffer (arrows, C-n/C-p, user bindings alike)")

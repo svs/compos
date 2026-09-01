@@ -23,7 +23,6 @@
 
 ;;; --- state -------------------------------------------------------------------
 
-(define *evil-enabled* #f)          ; global switch (find-file hook consults it)
 (define *evil-count* #f)            ; count before operator, #f = none
 (define *evil-count2* #f)           ; count after operator
 (define *evil-operator* #f)         ; "d" | "c" | "y" | #f
@@ -780,38 +779,14 @@
        (not (member (or (buffer-local buf 'mode-name) "")
                     '("chat-mode" "dired-mode" "notmuch-mode")))))
 
-(define (evil-mode-on!)
-  (set! *evil-enabled* #t)
-  (for-each
-    (lambda (b)
-      (when (and (evil--eligible? b) (not (minor-mode-on? b "evil-local-mode")))
-        (enable-minor-mode! b "evil-local-mode")))
-    (buffer-list)))
+;; evil-mode is evil-local-mode in every eligible buffer, now and as
+;; buffers appear. The globalized mode owns the flag and the sweep.
+(define-globalized-minor-mode! "evil-mode" "evil-local-mode" evil--eligible?
+  "Toggle Vim emulation everywhere (files + *scratch*)")
 
-(define (evil-mode-off!)
-  (set! *evil-enabled* #f)
-  (for-each
-    (lambda (b)
-      (when (minor-mode-on? b "evil-local-mode")
-        (disable-minor-mode! b "evil-local-mode")))
-    (buffer-list)))
+(define (evil-mode-on!) (globalized-minor-mode-on! "evil-mode"))
+(define (evil-mode-off!) (globalized-minor-mode-off! "evil-mode"))
 
-(define (evil--find-file-hook!)
-    (let ((buf (current-buffer)))
-      (when (and *evil-enabled*
-                 (evil--eligible? buf)
-                 (not (minor-mode-on? buf "evil-local-mode")))
-        (enable-minor-mode! buf "evil-local-mode"))))
-
-(add-hook! 'find-file-hook 'evil--find-file-hook!)
-
-(define-command "evil-mode" "Toggle Vim emulation everywhere (files + *scratch*)"
-  (lambda ()
-    (if *evil-enabled*
-        (begin (evil-mode-off!) (message "Evil mode disabled"))
-        (begin
-          (evil-mode-on!)
-          (message "Evil mode — ESC normal · i insert · :q closes the window")))))
 
 (define-command "evil-local-mode" "Toggle Vim emulation in this buffer"
   (lambda ()

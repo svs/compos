@@ -81,20 +81,20 @@ defmodule Compos.ModeToggleTest do
     refute Buffer.read_only?(name)
   end
 
-  test "M-x for a mode toggles it: the command that enters the mode leaves it" do
+  test "M-x for a mode enters it, and running it again keeps it (Emacs: the command is a setter)" do
     name = fresh_buffer("defmodule Foo do\nend\n")
     eval!(~s{(with-current-buffer "#{name}" (lambda () (run-command "elixir-mode")))})
     assert eval!(~s{(buffer-local "#{name}" 'mode-name)}) == ~s("elixir-mode")
     assert eval!(~s{(buffer-local "#{name}" 'ts-lang)}) == ~s("elixir")
 
     eval!(~s{(with-current-buffer "#{name}" (lambda () (run-command "elixir-mode")))})
+    assert eval!(~s{(buffer-local "#{name}" 'mode-name)}) == ~s("elixir-mode")
+    assert eval!(~s{(buffer-local "#{name}" 'ts-lang)}) == ~s("elixir")
+
+    # the modeline click is the toggle: it leaves the mode
+    assert click(name, "elixir-mode") =~ "elixir-mode off"
     assert eval!(~s{(buffer-local "#{name}" 'mode-name)}) == "#f"
     assert eval!(~s{(buffer-local "#{name}" 'ts-lang)}) == "#f"
     assert Buffer.ts_highlight(name) == []
-
-    # and the same command puts it back
-    eval!(~s{(with-current-buffer "#{name}" (lambda () (run-command "elixir-mode")))})
-    assert eval!(~s{(buffer-local "#{name}" 'mode-name)}) == ~s("elixir-mode")
   end
-
 end

@@ -90,11 +90,7 @@
 (mode-doc! "scratch-mode"
   "The group's scratch. It is a Morg note: `TAB` folds a heading or a block, `C-c C-c` runs a block, `C-c C-n` and `C-c C-p` walk the headings, `C-c C-f` and `C-c C-b` walk the siblings, and `M-n` and `M-p` walk the links. It belongs to the group, and it is never a file.")
 
-(mode-parent! "scratch-mode" "morg-mode")
-
-(define-mode "scratch-mode"
-  (lambda ()
-    (mode-setup! "morg-mode")))
+(define-derived-mode "scratch-mode" "morg-mode" (lambda () #t))
 
 ;; scratch-mode is what a new scratch starts in, and that is the whole of
 ;; it. A scratch that already has a mode keeps it: M-x morg-mode in a scratch

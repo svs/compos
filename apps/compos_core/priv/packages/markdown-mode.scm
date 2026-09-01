@@ -284,8 +284,16 @@
       ((equal? k 'heading) (md--heading start line e len))
       ;; a row face (row-*) shapes the whole row: the page reads it off the
       ;; line, not the segment
+      ;; the fence line steps back and its kind stays: a chrome chip names
+      ;; the block where the backticks were
       ((equal? k 'open)
-       (list (list start (+ start len) "md-marker") (list start (+ start len) "row-fence")))
+       (let ((chip (fence-kind-chip (morg-info e))))
+         (append
+           (list (list start (+ start len) "md-marker")
+                 (list start (+ start len) "row-fence"))
+           (if chip
+               (list (chrome-after (+ start len) chip "md-fence-chip"))
+               '()))))
       ((equal? k 'close)
        (list (list start (+ start len) "md-marker") (list start (+ start len) "row-fence")))
       ((equal? k 'code)

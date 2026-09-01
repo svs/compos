@@ -891,7 +891,17 @@ defmodule Compos.Ui.EditorLive do
           |> Enum.map(fn {{s, e, scope}, i} -> {s, e, "ts-" <> scope, i} end)
       end
 
-    ovs = Enum.map(leaf.overlays, fn {s, e, face} -> {s, e, "f-" <> face} end)
+    # A chrome attachment stands at one byte and holds zero bytes: text the
+    # buffer does not hold, drawn beside the text it decorates. It rides the
+    # overlay list as a zero-length range whose face starts with "chrome-".
+    {chrome_raw, plain_ov} =
+      Enum.split_with(leaf.overlays, fn {_s, _e, face} ->
+        is_binary(face) and String.starts_with?(face, "chrome-")
+      end)
+
+    chrome = Enum.flat_map(chrome_raw, &chrome_item/1)
+
+    ovs = Enum.map(plain_ov, fn {s, e, face} -> {s, e, "f-" <> face} end)
 
     # whitespace-mode: a run of spaces and each tab wear a face the page
     # marks; the newline mark is CSS on the row (see data-ws). The text
@@ -923,23 +933,63 @@ defmodule Compos.Ui.EditorLive do
 
     ts_per_line = stab(spans, lines, fn {s, _, _, _} -> s end, fn {_, e, _, _} -> e end)
     ov_per_line = stab(ovs, lines, fn {s, _, _} -> s end, fn {_, e, _} -> e end)
+    chrome_per_line = chrome_lines(chrome, lines)
 
-    [lines, ts_per_line, ov_per_line]
-    |> Enum.zip_with(fn [{{part, start}, num}, line_ts, line_ov] ->
+    [lines, ts_per_line, ov_per_line, chrome_per_line]
+    |> Enum.zip_with(fn [{{part, start}, num}, line_ts, line_ov, line_chrome] ->
       %{
         part: part,
         start: start,
         num: num,
         ts: line_ts,
         ov: line_ov,
+        chrome: line_chrome,
         selected: Enum.any?(line_ov, fn {_, _, face} -> face == "f-select" end),
         # a row face (f-row-*) covering the line's start shapes the row:
         # a list item, a quote, a rule, a code line
         row: row_class(line_ov, start),
-        segs: line_segs(part, start, line_ts, line_ov)
+        segs: line_segs(part, start, line_ts, line_ov, line_chrome)
       }
     end)
     |> List.to_tuple()
+  end
+
+  # One chrome overlay -> {pos, side, class, text}. The face string is
+  # "chrome-b:CLASS:ENCODED-TEXT" (before the byte) or "chrome-a:..."
+  # (after it); Scheme builds it with chrome-before / chrome-after.
+  defp chrome_item({pos, _e, "chrome-b:" <> rest}), do: [chrome_parts(pos, :before, rest)]
+  defp chrome_item({pos, _e, "chrome-a:" <> rest}), do: [chrome_parts(pos, :after, rest)]
+  defp chrome_item(_), do: []
+
+  defp chrome_parts(pos, side, rest) do
+    case String.split(rest, ":", parts: 2) do
+      [cls, text] -> {pos, side, cls, URI.decode(text)}
+      [cls] -> {pos, side, cls, ""}
+    end
+  end
+
+  # Which line a chrome attachment stands on. A boundary byte is shared:
+  # a :before attachment belongs to what follows it, an :after attachment
+  # to what precedes it; an empty line takes both, and the first and last
+  # lines take what would otherwise fall off the ends.
+  defp chrome_lines([], lines), do: List.duplicate([], length(lines))
+
+  defp chrome_lines(chrome, lines) do
+    last = length(lines) - 1
+
+    lines
+    |> Enum.with_index()
+    |> Enum.map(fn {{{part, start}, _num}, i} ->
+      le = start + byte_size(part)
+
+      Enum.filter(chrome, fn {pos, side, _cls, _text} ->
+        pos >= start and pos <= le and
+          case side do
+            :before -> pos < le or i == last or start == le
+            :after -> pos > start or i == 0 or start == le
+          end
+      end)
+    end)
   end
 
   # Emacs stops font-locking a line once the work outgrows the reading, and
@@ -963,12 +1013,59 @@ defmodule Compos.Ui.EditorLive do
   defp whitespace?(leaf),
     do: Compos.Core.Buffer.get_local(leaf.buffer, "whitespace-mode") == true
 
-  defp line_segs(part, start, line_ts, line_ov) do
-    if byte_size(part) > @max_styled_line or
-         length(line_ts) + length(line_ov) > @max_line_ranges do
-      [{part, ""}]
-    else
-      seg_build(part, start, line_ts, line_ov)
+  defp line_segs(part, start, line_ts, line_ov, chrome \\ []) do
+    segs =
+      if byte_size(part) > @max_styled_line or
+           length(line_ts) + length(line_ov) > @max_line_ranges do
+        [{part, ""}]
+      else
+        seg_build(part, start, line_ts, line_ov)
+      end
+
+    splice_chrome(segs, part, start, chrome)
+  end
+
+  # A chrome attachment becomes a seg whose class starts with "chrome-seg".
+  # The seg renderer draws it as a zero-length island (data-len 0), so the
+  # caret walks over it and its text never counts as source bytes.
+  defp splice_chrome(segs, _part, _start, []), do: segs
+
+  defp splice_chrome(segs, part, start, chrome) do
+    # at one byte, what precedes draws its :after chrome before what
+    # follows draws its :before chrome
+    ordered =
+      Enum.sort_by(chrome, fn {pos, side, _, _} -> {pos, if(side == :after, do: 0, else: 1)} end)
+
+    {done, rest, _off} =
+      Enum.reduce(ordered, {[], segs, 0}, fn {pos, _side, cls, text}, {done, rest, off} ->
+        at = Text.floor_utf8(part, min(max(pos - start, 0), byte_size(part)))
+        {before, tail, off} = segs_split(rest, off, at)
+        {done ++ before ++ [{text, "chrome-seg " <> cls}], tail, off}
+      end)
+
+    done ++ rest
+  end
+
+  # split SEGS at in-line byte AT; OFF is the byte where SEGS begins
+  defp segs_split(segs, off, at), do: segs_split(segs, off, at, [])
+
+  defp segs_split([], off, _at, acc), do: {Enum.reverse(acc), [], off}
+
+  defp segs_split([{txt, cls} = seg | rest], off, at, acc) do
+    len = byte_size(txt)
+
+    cond do
+      off + len <= at ->
+        segs_split(rest, off + len, at, [seg | acc])
+
+      off >= at ->
+        {Enum.reverse(acc), [seg | rest], off}
+
+      true ->
+        cut = at - off
+
+        {Enum.reverse([{binary_part(txt, 0, cut), cls} | acc]),
+         [{binary_part(txt, cut, len - cut), cls} | rest], at}
     end
   end
 
@@ -1703,7 +1800,8 @@ defmodule Compos.Ui.EditorLive do
           # through line_segs, not seg_build: the cursor's own line takes the
           # same long-line guard as every other one, and on a one-line buffer
           # this is the only line there is
-          segs = line_segs(line.part, line.start, line.ts, line.ov ++ overlays)
+          segs =
+            line_segs(line.part, line.start, line.ts, line.ov ++ overlays, Map.get(line, :chrome, []))
 
           segs =
             case image_at_point do
@@ -1768,6 +1866,10 @@ defmodule Compos.Ui.EditorLive do
     assigns = assign(assigns, href: link_href(cls))
 
     cond do
+      # chrome: text the buffer does not hold, standing at one byte and
+      # holding zero bytes; the byte walker skips it by its data-len
+      String.starts_with?(cls, "chrome-seg") ->
+        ~H|<span class={@cls} contenteditable="false" data-len="0">{@txt}</span>|
       is_binary(src) ->
         avatar? = String.ends_with?(txt, "#compos-avatar")
 

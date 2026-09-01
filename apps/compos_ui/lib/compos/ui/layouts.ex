@@ -289,6 +289,16 @@ defmodule Compos.Ui.Layouts do
           .buf[contenteditable] ::selection { background: var(--region-bg, #e7e9f1); }
           /* Preview keeps markup hidden. Morg owns source editing. */
           .f-md-marker { display: none; }
+          /* chrome: text the buffer does not hold, drawn beside the text;
+             a zero-length island the caret walks over */
+          .chrome-seg { user-select: none; white-space: nowrap; }
+          .chrome-seg.md-fence-chip {
+            display: inline-block; padding: 0 7px; margin: 0 4px; border-radius: 9px;
+            border: 1px solid var(--border-bg, rgba(0,0,0,0.14));
+            background: var(--hl-line-bg, rgba(0,0,0,0.03));
+            color: var(--dim-fg, #8a857a);
+            font-family: var(--font-mono); font-size: .72em; line-height: 1.6;
+          }
           /* the block shapes of a drawn page: the marker stepped back, the
              row takes the shape */
           .line.row-li .line-content { padding-left: 1.4em; }
@@ -2440,6 +2450,8 @@ defmodule Compos.Ui.Layouts do
                 const countsBytes = (t) => {
                   const p = t.parentElement;
                   if (!p || p.closest(".cap-pop")) return false;
+                  // text inside an island (data-len) is display, not source
+                  if (p.closest("[data-len]")) return false;
                   return !(p.classList.contains("cursor") && t.textContent === " ");
                 };
                 const domByte = (node, offset) => {

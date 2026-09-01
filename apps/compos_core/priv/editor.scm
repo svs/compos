@@ -2233,6 +2233,26 @@
           (filter (lambda (r) (not (equal? r range))) cur)
           (cons range cur)))))
 
+;;; --- overlay chrome ----------------------------------------------------------
+;;; A chrome attachment draws text the buffer does not hold: a badge, a key
+;;; hint, a chip. It stands at one byte, holds zero bytes, and the caret
+;;; walks over it. Build one here and put it in an overlay-set! range list
+;;; beside the face spans; the renderer draws it as a zero-length island
+;;; with the class "chrome-seg CLASS". A before attachment draws ahead of
+;;; its byte, an after attachment behind it.
+
+(define (chrome--spec side pos text class)
+  (list pos pos
+        (string-append "chrome-" side ":" class ":" (url-encode text))))
+
+(define (chrome-before pos text class) (chrome--spec "b" pos text class))
+(define (chrome-after pos text class) (chrome--spec "a" pos text class))
+
+(public! 'chrome-before
+  "(chrome-before POS TEXT CLASS) — an overlay range that draws TEXT ahead of byte POS as zero-length chrome with the class CLASS")
+(public! 'chrome-after
+  "(chrome-after POS TEXT CLASS) — an overlay range that draws TEXT behind byte POS as zero-length chrome with the class CLASS")
+
 ;;; --- the filesystem-change hook ----------------------------------------------
 ;;; run-hooks calls its handlers with no arguments, and this one carries the
 ;;; root, so it keeps its own list. Elixir holds ONE handler (fs-on-change!)

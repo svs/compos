@@ -160,3 +160,18 @@
     (check-true! (t--md-has? '(14 17 "row-hr")) "the rule row")
     (check-true! (t--md-has? '(18 24 "row-oli")) "an ordered item keeps its number")
     (t--md-done!)))
+
+(deftest 'a-fence-line-wears-its-kind-as-a-chip
+  "the backticks step back and a chrome chip names the block"
+  (lambda ()
+    (t--md-fresh! "```diff\n+x\n```\n")
+    ;; the open fence is hidden and its chip stands behind its last byte
+    (check-true! (t--md-has? '(0 7 "md-marker")) "the open fence steps back")
+    (check-true! (t--md-has? (chrome-after 7 "diff" "md-fence-chip"))
+                 "the chip stands at the fence line's end")
+    ;; a bare fence (the close) draws no chip of its own
+    (check-equal!
+      (length (filter (lambda (o) (and (= (car o) (cadr o)))) 
+                      (buffer-overlays t--md-buf)))
+      1 "one chip: the close fence draws none")
+    (t--md-done!)))

@@ -74,11 +74,29 @@ rows. It does not run.
 - `llm-mode--blocks` in `editor.scm` derives its reply-landing blocks from
   `morg-scan`, the one fence-aware line scanner.
 
+## Chrome
+
+A chrome attachment draws text the buffer does not hold: a badge, a key
+hint, a chip. Build one with `(chrome-before POS TEXT CLASS)` or
+`(chrome-after POS TEXT CLASS)` and put it in an `overlay-set!` range list
+beside the face spans. It stands at one byte, holds zero bytes, and the
+caret walks over it: the renderer draws a zero-length island
+(`class="chrome-seg CLASS"`, `data-len="0"`), so the client's byte mapping
+skips it and the saved file never sees it.
+
+The first user is the fence chip: in the preview rows, the open fence of a
+named block steps back and a chip names its kind — `diff`, `sh · run`.
+The chip text comes from `(fence-kind-chip LANG)`: the declared `'chip`,
+else the info string, with `· run` when the kind runs.
+
 ## Debt this registry names
 
-- Block chrome (a painted fence-line header, zero-length overlay attachments)
-  is designed but not built. See the fence-line paint in `markdown-mode.scm`
-  as the seed.
+- Chrome takes no clicks yet. A verb chip needs a click channel the way a
+  block tree has `block_click`.
+- The `· run` hint does not name its key. That needs a buffer-local
+  reverse key lookup (`key-for-command` reads only the global keymap).
+- The gutter and end-of-line vocabulary of `docs/ANNOTATIONS.md` can now
+  be built on chrome attachments.
 
 Tests: `priv/tests/morg-kinds-test.scm`, plus the babel and paint sections of
 `priv/tests/morg-test.scm` and `priv/tests/markdown-mode-test.scm`.

@@ -139,6 +139,17 @@
     '()
     blocks))
 
+;; The chip the preview draws on a block's fence line: the declared 'chip,
+;; else the info string itself, with " · run" when the kind runs. A fence
+;; with no language draws no chip.
+(define (fence-kind-chip lang)
+  (and (string? lang)
+       (not (equal? lang ""))
+       (let ((base (or (fence-kind-get lang 'chip #f) (string-downcase lang))))
+         (if (and (fence-kind-runnable? lang) (fence-kind-run lang))
+             (string-append base " · run")
+             base))))
+
 (define (describe-fence-kind name)
   (let ((k (fence-kind name)))
     (and k
@@ -197,6 +208,8 @@
   "(describe-fence-kind NAME) — the kind's doc, runnability, tree-sitter language, and declared keys, or #f")
 (public! 'fence-kind-ts-lang
   "(fence-kind-ts-lang LANG) — the loaded tree-sitter language for a fence body, or #f")
+(public! 'fence-kind-chip
+  "(fence-kind-chip LANG) — the chip the preview draws on the fence line, or #f for a bare fence")
 
 ;; Do not leak this extension's catalog context into the next package.
 (package! morg-kinds-parent-package morg-kinds-parent-namespace)

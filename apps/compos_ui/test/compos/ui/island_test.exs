@@ -100,4 +100,42 @@ defmodule Compos.Ui.IslandTest do
     assert html =~ ~s(contenteditable="false" data-len="#{byte_size(url)}")
     assert html =~ "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"
   end
+
+  # Chrome: text the buffer does not hold, standing at one byte and holding
+  # zero bytes. The caret walks over it because it is an island of length 0.
+  test "an after attachment draws behind its byte as zero-length chrome", %{conn: conn} do
+    buf = fresh_buffer("island-#{System.unique_integer([:positive])}", "abc\ndef\n")
+    Session.eval(~s{(overlay-set! "#{buf}" 'chrome (list (chrome-after 3 "chip" "zz-badge")))})
+    {:ok, view, _} = live(conn, "/")
+    html = render(view)
+
+    assert html =~
+             ~s(<span class="chrome-seg zz-badge" contenteditable="false" data-len="0">chip</span>)
+
+    # behind byte 3: after "abc", on the first line
+    assert html =~ ~r{>abc</span><span class="chrome-seg zz-badge"}
+  end
+
+  test "a before attachment splits the seg it lands inside", %{conn: conn} do
+    buf = fresh_buffer("island-#{System.unique_integer([:positive])}", "abcdef\n")
+    Session.eval(~s{(overlay-set! "#{buf}" 'chrome (list (chrome-before 3 "HERE" "zz-mark")))})
+    {:ok, view, _} = live(conn, "/")
+    html = render(view)
+
+    assert html =~ ~r{>abc</span><span class="chrome-seg zz-mark"[^>]*>HERE</span>}
+    assert html =~ ~r{data-len="0"[^>]*>HERE</span><span class="">def}
+  end
+
+  test "chrome survives the cursor pass on a server-caret surface", %{conn: conn} do
+    buf = fresh_buffer("island-#{System.unique_integer([:positive])}", "abc\n")
+    Session.eval(~s{(overlay-set! "#{buf}" 'chrome (list (chrome-after 3 "chip" "zz-badge")))})
+    # read-only keeps the server-drawn caret, so the cursor pass rebuilds
+    # this line's segs; the chrome must ride through it
+    Session.eval(~s{(buffer-set-read-only! "#{buf}" #t)})
+    {:ok, view, _} = live(conn, "/")
+    html = render(view)
+
+    assert html =~ ~s(class="chrome-seg zz-badge")
+    Session.eval(~s{(buffer-set-read-only! "#{buf}" #f)})
+  end
 end

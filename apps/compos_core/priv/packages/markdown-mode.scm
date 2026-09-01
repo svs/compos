@@ -271,7 +271,7 @@
 ;; the spans for one scan entry; block BODIES are highlighted per block in
 ;; markdown-refontify!, because a multi-line construct needs the whole body.
 ;; PREV is the text of the line above, or #f on the first line.
-(define (markdown--line-spans e &optional prev run-key)
+(define (markdown--line-spans e &optional prev run-key buf)
   (let* ((start (car e)) (line (cadr e)) (k (morg-kind e))
          (len (string-byte-length line))
          (embed (re-groups md--embed-pattern line 0)))
@@ -287,6 +287,8 @@
       ;; the fence line steps back and its kind stays: a chrome chip names
       ;; the block where the backticks were. A kind that declares chip-args
       ;; keeps its arguments on the chip — a rewrite says what it was asked.
+      ;; A kind with verbs shows them with their keys, read live from the
+      ;; buffer's keymap, so the hints stand exactly while the verbs work.
       ((equal? k 'open)
        (let* ((lang (morg-info e))
               (chip (fence-kind-chip lang run-key))
@@ -295,12 +297,16 @@
                          (morg-fence-args line)))
               (text (if (and (string? args) (not (equal? args "")))
                         (string-append chip " · " args)
-                        chip)))
+                        chip))
+              (verbs (and buf (fence-kind-verbs lang buf))))
          (append
            (list (list start (+ start len) "md-marker")
                  (list start (+ start len) "row-fence"))
            (if text
                (list (chrome-after (+ start len) text "md-fence-chip"))
+               '())
+           (if verbs
+               (list (chrome-after (+ start len) verbs "md-fence-verbs"))
                '()))))
       ((equal? k 'close)
        (list (list start (+ start len) "md-marker") (list start (+ start len) "row-fence")))
@@ -346,7 +352,7 @@
            (line-spans
              (car (fold (lambda (acc e)
                           (list (append (car acc)
-                                        (markdown--line-spans e (cadr acc) run-key))
+                                        (markdown--line-spans e (cadr acc) run-key buf))
                                 (cadr e)))
                         (list '() #f) scan)))
            (table-spans (markdown--table-spans scan))

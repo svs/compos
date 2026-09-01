@@ -185,3 +185,21 @@
               (buffer-overlays t--md-buf))
       "the chip holds the kind and the instruction")
     (t--md-done!)))
+
+(deftest 'the-verbs-stand-on-the-fence-only-while-they-work
+  "a kind's verb hints name live keys, and say nothing where none are bound"
+  (lambda ()
+    (t--md-fresh! "```rewrite fix it\nbody\n```\n")
+    (check-false!
+      (pair? (filter (lambda (o) (string-contains? (caddr o) "md-fence-verbs"))
+                     (buffer-overlays t--md-buf)))
+      "no verb has a key here, so no hint stands")
+    ;; bind a dummy key to one verb and repaint: the hint appears with it
+    (local-set-key* t--md-buf "<f9> y" "llm-rewrite-accept")
+    (markdown-refontify! t--md-buf)
+    (check-true!
+      (member (chrome-after 17 "<f9> y keeps it" "md-fence-verbs")
+              (buffer-overlays t--md-buf))
+      "the bound verb stands with its own key")
+    (local-unset-key* t--md-buf "<f9> y")
+    (t--md-done!)))

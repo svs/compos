@@ -300,6 +300,11 @@ defmodule Compos.Ui.Layouts do
             color: var(--dim-fg, #8a857a);
             font-family: var(--font-mono); font-size: .72em; line-height: 1.6;
           }
+          .chrome-seg.md-fence-verbs {
+            display: inline-block; margin: 0 4px;
+            color: var(--faint-fg, var(--dim-fg, #8a857a));
+            font-family: var(--font-mono); font-size: .72em; line-height: 1.6;
+          }
           /* the block shapes of a drawn page: the marker stepped back, the
              row takes the shape */
           .line.row-li .line-content { padding-left: 1.4em; }

@@ -90,10 +90,18 @@ uses, so chrome verbs and block verbs are one vocabulary.
 
 Chrome is preview policy. The bare source view stays bare text: a block
 announces itself with real delimiters there, and the fancy drawing waits
-for `preview-mode`. llm-rewrite is the model case: the waiting block is a
-` ```rewrite DIRECTIVE ` fence, so the bare buffer says what it is and
-what it was asked, morg folds and lifts it like any fence, accept strips
-the fences by structure, and the preview draws its chip like any kind's.
+for `preview-mode`. llm-rewrite is the model case: it holds two texts and
+lands a live diff block with three views — theirs (the rewrite alone, the
+default, a ` ```rewrite DIRECTIVE ` fence), all (the unified diff, a
+` ```diff DIRECTIVE ` fence the diff kind paints), and ours (the passage
+alone). The kind follows the view, so diff paint never touches prose.
+Accept strips the fences by structure. A plain ` ```diff ` from git is
+the other diff type: inert paint, no verbs, no record.
+
+A kind can declare `'verbs` — `((COMMAND LABEL) ...)`. The preview shows
+them beside the chip as `KEY label · KEY label`, keys read live from the
+buffer's keymap, so the hints stand exactly while the verbs work and
+vanish with the decision.
 
 The chip is the first chrome user: in the preview rows, the open fence of a
 named block steps back and a chip names its kind — `diff`, or

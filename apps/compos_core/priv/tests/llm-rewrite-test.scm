@@ -3,9 +3,11 @@
 ;;; Nothing is replaced while you decide: the passage stays, and the model's
 ;;; version sits in a fenced block under it. The fence is a real delimiter:
 ;;; the bare buffer says what the block is and what it was asked, and no
-;;; renderer is needed to read it. One key asks for the same two texts as a
-;;; stacked diff or side by side. Keeping the block puts the text between
-;;; the fences in the passage's place; putting it back removes the block.
+;;; renderer is needed to read it. The block has three views of the same
+;;; two texts: theirs (the rewrite, the default), all (the unified diff,
+;;; a ```diff fence), and ours (the passage). Keeping the block puts the
+;;; text between the fences in the passage's place; putting it back
+;;; removes the block.
 
 (domain! 'testing)
 (effects! '(write))
@@ -63,70 +65,70 @@
 (deftest 'every-block-says-what-it-was-asked-and-what-you-can-do
   "the fence line names the kind and the instruction, in bare text"
   (lambda ()
-    (check-equal! (llm-rewrite-whole-block "new text" "make it X")
+    (check-equal! (llm-rewrite-theirs-block "new text" "make it X")
                   "```rewrite make it X\nnew text\n```"
                   "the block is a fence whose info string explains it")
     (check-equal! (llm-rewrite--body
-                    (llm-rewrite-whole-block "new text" "make it X"))
+                    (llm-rewrite-theirs-block "new text" "make it X"))
                   "new text"
                   "and the fences come off by structure")
     (check-equal! (llm-rewrite--body "no fences here")
                   "no fences here"
                   "a block whose fences were edited away stays whole")))
 
-(deftest 'a-stacked-block-puts-the-old-lines-over-the-new
-  "with the lines the two still share as context"
+(deftest 'the-all-view-is-a-diff-fence
+  "old lines over new, with the shared ends as context, in a ```diff block"
   (lambda ()
     (check-equal! (llm-rewrite-diff-block "a\nb\nc" "a\nX\nc" "make it X")
-                  "```rewrite make it X\n a\n-b\n+X\n c\n```"
-                  "one hunk between the shared ends")))
+                  "```diff make it X\n a\n-b\n+X\n c\n```"
+                  "one hunk between the shared ends, and the kind says diff")))
 
-(deftest 'a-side-by-side-block-puts-them-in-columns
-  "same hunk, two columns, the left one padded to its widest line"
+(deftest 'the-ours-view-is-the-passage-alone
+  "a one-sided view is prose in a rewrite fence, never diff paint"
   (lambda ()
-    (check-equal! (llm-rewrite-side-block "a\nbb\nc" "a\nX\nc" "make it X")
-                  "```rewrite make it X\na  | a\nbb | X\nc  | c\n```"
-                  "every row is the passage beside its rewrite")))
+    (check-equal! (llm-rewrite-ours-block "Two." "make it X")
+                  "```rewrite make it X · ours\nTwo.\n```"
+                  "the fence args say which side this is")))
 
 (deftest 'the-block-faces-follow-the-view
-  "a stacked block reads by prefix; a plain one must not"
+  "the all view reads by prefix; a one-sided view must not"
   (lambda ()
-    (check-equal! (llm-rewrite--block-faces 0 "-b\n+X" 'stacked)
+    (check-equal! (llm-rewrite--block-faces 0 "-b\n+X" 'all)
                   '((0 2 diff-del) (3 5 diff-add))
                   "the old line and the new one")
-    (check-equal! (llm-rewrite--block-faces 0 "- a bullet" 'whole)
+    (check-equal! (llm-rewrite--block-faces 0 "- a bullet" 'theirs)
                   '()
                   "a dash in prose is not a deleted line")))
 
 (deftest 'a-rewrite-lands-below-the-passage
-  "whole by default, with the passage untouched above it"
+  "theirs by default, with the passage untouched above it"
   (lambda ()
     (t--rw-proposed!)
     (check-equal! (buffer-text t--rw-buf)
-                  (t--rw-doc (llm-rewrite-whole-block "Deux." t--rw-what))
+                  (t--rw-doc (llm-rewrite-theirs-block "Deux." t--rw-what))
                   "the block sits under the passage, one blank line down")
-    (check-equal! (llm-rewrite--view (llm-rewrite-pending t--rw-buf)) 'whole
-                  "and it reads as the new text, not as a diff")
+    (check-equal! (llm-rewrite--view (llm-rewrite-pending t--rw-buf)) 'theirs
+                  "and it reads as theirs: the new text, not a diff")
     (check-equal! (llm-rewrite--old (llm-rewrite-pending t--rw-buf)) "Two."
                   "the passage is remembered as it was asked about")
     (t--rw-done!)))
 
-(deftest 'the-key-cycles-whole-stacked-side
+(deftest 'the-key-cycles-theirs-all-ours
   "the diff is a key away, and every view comes from the same two strings"
   (lambda ()
     (t--rw-proposed!)
     (llm-rewrite-cycle-view! t--rw-buf)
     (check-equal! (buffer-text t--rw-buf)
                   (t--rw-doc (llm-rewrite-diff-block "Two." "Deux." t--rw-what))
-                  "first the stacked diff")
+                  "first all: the unified diff")
     (llm-rewrite-cycle-view! t--rw-buf)
     (check-equal! (buffer-text t--rw-buf)
-                  (t--rw-doc (llm-rewrite-side-block "Two." "Deux." t--rw-what))
-                  "then side by side")
+                  (t--rw-doc (llm-rewrite-ours-block "Two." t--rw-what))
+                  "then ours: the passage alone")
     (llm-rewrite-cycle-view! t--rw-buf)
     (check-equal! (buffer-text t--rw-buf)
-                  (t--rw-doc (llm-rewrite-whole-block "Deux." t--rw-what))
-                  "and back to the whole text")
+                  (t--rw-doc (llm-rewrite-theirs-block "Deux." t--rw-what))
+                  "and back to theirs")
     (t--rw-done!)))
 
 (deftest 'keeping-a-rewrite-puts-it-in-the-passages-place
@@ -175,7 +177,7 @@
     (t--rw-proposed!)
     (llm-rewrite--refine! t--rw-buf "Zwei." "now in German")
     (check-equal! (buffer-text t--rw-buf)
-                  (t--rw-doc (llm-rewrite-whole-block "Zwei." "now in German"))
+                  (t--rw-doc (llm-rewrite-theirs-block "Zwei." "now in German"))
                   "the second round replaced the first, and says so")
     (llm-rewrite-reject! t--rw-buf)
     (check-equal! (buffer-text t--rw-buf) "One.\n\nTwo.\n"
@@ -199,7 +201,7 @@
     (buffer-replace! t--rw-buf "Deux." "Deux!")
     (llm-rewrite-reject! t--rw-buf)
     (check-equal! (buffer-text t--rw-buf)
-                  (t--rw-doc (llm-rewrite-whole-block "Deux!" t--rw-what))
+                  (t--rw-doc (llm-rewrite-theirs-block "Deux!" t--rw-what))
                   "a reject takes back nothing you wrote")
     (check-true! (llm-rewrite-pending t--rw-buf) "and it still waits")
     (t--rw-done!)))
@@ -243,12 +245,12 @@
   "two answers, and each says which view it gives"
   (lambda ()
     (t--rw-proposed!)
-    (check-equal! (llm-rewrite--view-answers 'whole)
-                  '("show it stacked" "show it side by side")
-                  "a whole block offers the two diffs")
-    (t--rw-review! "show it side by side")
+    (check-equal! (llm-rewrite--view-answers 'theirs)
+                  '("show all" "show ours")
+                  "a theirs block offers the diff and the passage")
+    (t--rw-review! "show all")
     (check-equal! (buffer-text t--rw-buf)
-                  (t--rw-doc (llm-rewrite-side-block "Two." "Deux." t--rw-what))
+                  (t--rw-doc (llm-rewrite-diff-block "Two." "Deux." t--rw-what))
                   "and the answer is the view")
     (t--rw-done!)))
 
@@ -258,7 +260,7 @@
     (t--rw-proposed!)
     (t--rw-review! "")
     (check-equal! (buffer-text t--rw-buf)
-                  (t--rw-doc (llm-rewrite-whole-block "Deux." t--rw-what))
+                  (t--rw-doc (llm-rewrite-theirs-block "Deux." t--rw-what))
                   "the document stands")
     (check-true! (llm-rewrite-pending t--rw-buf) "and the rewrite still waits")
     (t--rw-done!)))

@@ -154,6 +154,21 @@
                    "run"))
              base))))
 
+;; The verbs a kind offers on its block, as "KEY label · KEY label". The
+;; keys come from BUF's own keymap, and a verb whose command has no key
+;; there says nothing — so the hints stand exactly where the verbs work.
+(define (fence-kind-verbs lang buf)
+  (let ((vs (fence-kind-get lang 'verbs #f)))
+    (and (pair? vs)
+         (let ((parts
+                 (fold (lambda (acc v)
+                         (let ((k (key-for-command (car v) buf)))
+                           (if (equal? k "")
+                               acc
+                               (cons (string-append k " " (cadr v)) acc))))
+                       '() vs)))
+           (and (pair? parts) (string-join (reverse parts) " · "))))))
+
 (define (describe-fence-kind name)
   (let ((k (fence-kind name)))
     (and k
@@ -188,9 +203,18 @@
         ((string-prefix? "index " line) "diff-file")
         (else #f)))
 
+;; The rewrite verbs. They stand on both kinds a live diff lands as, and
+;; the live-key gate keeps them quiet everywhere else: the commands have
+;; keys only in a buffer where a rewrite waits.
+(define fence-kind--rewrite-verbs
+  '(("llm-rewrite-accept" "keeps it")
+    ("llm-rewrite-reject" "puts it back")
+    ("llm-rewrite-diff" "changes the view")))
+
 (define-fence-kind! "diff"
   "A unified diff. Its lines wear the diff faces. It does not run."
-  'runnable #f 'ts-lang #f 'line-face fence-kind--diff-line-face)
+  'runnable #f 'ts-lang #f 'line-face fence-kind--diff-line-face
+  'chip-args #t 'verbs fence-kind--rewrite-verbs)
 
 (define-fence-kind! "patch"
   "A unified diff. The same paint as the diff kind."
@@ -198,7 +222,8 @@
 
 (define-fence-kind! "rewrite"
   "A rewrite waiting for a decision. llm-rewrite lands one below the passage; its own keys decide it. It does not run."
-  'runnable #f 'ts-lang #f 'chip-args #t)
+  'runnable #f 'ts-lang #f 'chip-args #t
+  'verbs fence-kind--rewrite-verbs)
 
 ;; Info strings whose tree-sitter grammar wears another name and that
 ;; morg-babel gives no runner.

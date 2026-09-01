@@ -6611,12 +6611,12 @@
 ;; (OSTART OEND BSTART BEND TAIL OLD NEW DIRECTIVE VIEW) — one rewrite
 ;; waits per buffer. The passage stays where it is and the model's version
 ;; sits in a block below it, so nothing is lost while you decide. VIEW is
-;; how that block reads: 'stacked (the old lines over the new ones),
-;; 'side (the two in columns), or 'whole (the new text, all together). A
-;; diff view is a rendering of OLD and NEW, so changing view costs nothing
-;; and loses nothing. The decision does not outlive the session: a restart
-;; leaves both texts in the document, which is where doing nothing leaves
-;; them too.
+;; how that block reads: 'theirs (the rewrite alone, the default), 'ours
+;; (the passage alone), or 'all (the unified diff of the two). A view is a
+;; rendering of OLD and NEW, so changing view costs nothing and loses
+;; nothing. The decision does not outlive the session: a restart leaves
+;; both texts in the document, which is where doing nothing leaves them
+;; too.
 ;;
 ;; A record written by an older build of this file is not this build's to
 ;; read. A hot reload can land between the proposal and the decision, and a
@@ -6639,15 +6639,18 @@
 (define (llm-rewrite--instruction p) (nth 7 p))
 (define (llm-rewrite--view p) (nth 8 p))
 
+;; The three views of a live diff: theirs is the rewrite alone (the
+;; default), ours is the passage alone, all is the unified diff of the
+;; two. A record from before the renaming reads as theirs.
 (define (llm-rewrite--render p view)
-  (cond ((equal? view 'stacked)
+  (cond ((equal? view 'all)
          (llm-rewrite-diff-block (llm-rewrite--old p) (llm-rewrite--new p)
                                  (llm-rewrite--instruction p)))
-        ((equal? view 'side)
-         (llm-rewrite-side-block (llm-rewrite--old p) (llm-rewrite--new p)
+        ((equal? view 'ours)
+         (llm-rewrite-ours-block (llm-rewrite--old p)
                                  (llm-rewrite--instruction p)))
-        (else (llm-rewrite-whole-block (llm-rewrite--new p)
-                                       (llm-rewrite--instruction p)))))
+        (else (llm-rewrite-theirs-block (llm-rewrite--new p)
+                                        (llm-rewrite--instruction p)))))
 
 ;; what the block should hold right now
 (define (llm-rewrite--rendered p) (llm-rewrite--render p (llm-rewrite--view p)))
@@ -6667,24 +6670,14 @@
                  (or (llm-rewrite--overlay buf "llm-rewrite")
                      (list (nth 2 p) (nth 3 p)))))))
 
-;; A diff block wears the hunk, add and delete faces, so its parts read
-;; apart at a glance: by line prefix when it is stacked, and by column when
-;; it is side by side. A row whose two columns agree is context and takes
-;; no face.
+;; The all view wears the add and delete faces by line prefix, so the two
+;; sides read apart at a glance. The one-sided views are prose and take
+;; none: a dash there is a dash. In a morg buffer the diff kind paints
+;; the same faces through the registry; this overlay is for the buffers
+;; no painter covers.
 (define (llm-rewrite--row-faces at line view)
   (cond
-    ((equal? view 'side)
-     (let ((cut (string-index line " | ")))
-       (if (not cut)
-           '()
-           (let ((left (substring-bytes line 0 cut))
-                 (right (substring-bytes line (+ cut 3) (string-byte-length line))))
-             (if (equal? (string-trim left) (string-trim right))
-                 '()
-                 (list (list at (+ at cut) 'diff-del)
-                       (list (+ at cut 3) (+ at (string-byte-length line))
-                             'diff-add)))))))
-    ((not (equal? view 'stacked)) '())
+    ((not (equal? view 'all)) '())
     ((string-prefix? "-" line)
      (list (list at (+ at (string-byte-length line)) 'diff-del)))
     ((string-prefix? "+" line)
@@ -6786,12 +6779,15 @@
 (define (llm-rewrite--marked prefix lines)
   (map (lambda (l) (string-append prefix l)) lines))
 
-;; The block is a fenced block. Its delimiters are real text: the bare
-;; buffer says what the block is and what it was asked, morg folds and
-;; lifts it like any fence, and the preview paints it through the
-;; fence-kind registry. Accepting strips the fences by structure.
-(define (llm-rewrite--fence directive body)
-  (string-append "```rewrite " directive "\n" body "\n```"))
+;; The block is a fenced block, and its kind follows its view: a diff
+;; view lands a ```diff fence the diff kind paints, and the whole view
+;; lands ```rewrite, so diff paint never touches plain prose. The
+;; delimiters are real text: the bare buffer says what the block is and
+;; what it was asked, morg folds and lifts it like any fence, and the
+;; preview paints it through the fence-kind registry. Accepting strips
+;; the fences by structure.
+(define (llm-rewrite--fence kind directive body)
+  (string-append "```" kind " " directive "\n" body "\n```"))
 
 ;; the text between the fences; a block whose fences were edited away is
 ;; your text, and stays whole
@@ -6803,8 +6799,11 @@
         (string-join (reverse (cdr (reverse (cdr lines)))) "\n")
         block)))
 
-(define (llm-rewrite-whole-block new directive)
-  (llm-rewrite--fence directive new))
+(define (llm-rewrite-theirs-block new directive)
+  (llm-rewrite--fence "rewrite" directive new))
+
+(define (llm-rewrite-ours-block old directive)
+  (llm-rewrite--fence "rewrite" (string-append directive " · ours") old))
 
 ;; the passage and the rewrite as head context, one hunk, tail context
 (define (llm-rewrite--parts old new)
@@ -6820,7 +6819,7 @@
 
 (define (llm-rewrite-diff-block old new directive)
   (let ((parts (llm-rewrite--parts old new)))
-    (llm-rewrite--fence directive
+    (llm-rewrite--fence "diff" directive
       (string-join
         (append
           (llm-rewrite--marked " " (nth 0 parts))
@@ -6829,46 +6828,6 @@
           (llm-rewrite--marked " " (nth 3 parts)))
         "\n"))))
 
-;; --- side by side ---
-;; The left column is as wide as its widest line, up to a limit; a line
-;; longer than that pushes its own row out rather than losing text, because
-;; a review block that hides a word is worse than a ragged one.
-(define *llm-rewrite-column-width* 72)
-
-(define (llm-rewrite--column-width lines)
-  (let loop ((ls lines) (w 1))
-    (if (null? ls)
-        (min w *llm-rewrite-column-width*)
-        (loop (cdr ls) (max w (string-length (car ls)))))))
-
-(define (llm-rewrite--pad text width)
-  (let loop ((s text))
-    (if (>= (string-length s) width) s (loop (string-append s " ")))))
-
-(define (llm-rewrite--rows left right)
-  ;; one row per line, the shorter side running out into blanks
-  (let loop ((l left) (r right) (acc '()))
-    (if (and (null? l) (null? r))
-        (reverse acc)
-        (loop (if (null? l) l (cdr l))
-              (if (null? r) r (cdr r))
-              (cons (list (if (null? l) "" (car l))
-                          (if (null? r) "" (car r)))
-                    acc)))))
-
-(define (llm-rewrite-side-block old new directive)
-  (let* ((parts (llm-rewrite--parts old new))
-         (rows (append (llm-rewrite--rows (nth 0 parts) (nth 0 parts))
-                       (llm-rewrite--rows (nth 1 parts) (nth 2 parts))
-                       (llm-rewrite--rows (nth 3 parts) (nth 3 parts))))
-         (width (llm-rewrite--column-width (map car rows))))
-    (llm-rewrite--fence directive
-      (string-join
-        (map (lambda (row)
-               (string-append (llm-rewrite--pad (car row) width)
-                              " | " (cadr row)))
-             rows)
-        "\n"))))
 
 ;; The reply arrives whenever it arrives, so it may only land under the
 ;; passage it was asked about. It never touches that passage: a blank line
@@ -6878,12 +6837,12 @@
     (if (not (equal? here original))
         (message "Rewrite dropped — that passage has changed")
         (let* ((tail (llm-rewrite--tail-for buf end))
-               (block (llm-rewrite-whole-block new directive))
+               (block (llm-rewrite-theirs-block new directive))
                (bstart (+ end 2))
                (bend (+ bstart (string-byte-length block))))
           (buffer-insert! buf end (string-append "\n\n" block tail))
           (llm-rewrite--hold! buf (list start end bstart bend)
-                              tail original new directive 'whole)
+                              tail original new directive 'theirs)
           (message (string-append
                      "Rewrite waiting below the passage in "
                      (buffer-modeline-name buf)
@@ -6976,25 +6935,25 @@
 (define *llm-rewrite-back-answer* "put it back")
 
 (define (llm-rewrite--view-name view)
-  (cond ((equal? view 'stacked) "stacked")
-        ((equal? view 'side) "side by side")
-        (else "whole")))
+  (cond ((equal? view 'all) "all")
+        ((equal? view 'ours) "ours")
+        (else "theirs")))
 
 (define (llm-rewrite--view-answer view)
-  (string-append "show it " (llm-rewrite--view-name view)))
+  (string-append "show " (llm-rewrite--view-name view)))
 
 (define (llm-rewrite--next-view view)
-  (cond ((equal? view 'stacked) 'side)
-        ((equal? view 'side) 'whole)
-        (else 'stacked)))
+  (cond ((equal? view 'theirs) 'all)
+        ((equal? view 'all) 'ours)
+        (else 'theirs)))
 
 ;; the two views the block is not in, as answers
 (define (llm-rewrite--view-answers view)
   (map llm-rewrite--view-answer
-       (filter (lambda (v) (not (equal? v view))) '(stacked side whole))))
+       (filter (lambda (v) (not (equal? v view))) '(all ours theirs))))
 
 (define (llm-rewrite--answer-view answer)
-  (let loop ((vs '(stacked side whole)))
+  (let loop ((vs '(all ours theirs)))
     (cond ((null? vs) #f)
           ((equal? answer (llm-rewrite--view-answer (car vs))) (car vs))
           (else (loop (cdr vs))))))
@@ -7023,11 +6982,11 @@
           (lambda (input)
             (llm-rewrite--review! buf p spans (string-trim input)))))))
 
-;; A whole block is the text you see between the fences, edits and all. A
-;; diff block is a view of two strings, so what lands from it is the
-;; rewrite it describes.
+;; A theirs block is the text you see between the fences, edits and all.
+;; The all and ours views are renderings of two strings, so what lands
+;; from them is the rewrite the block describes.
 (define (llm-rewrite--accept-text p block)
-  (if (equal? (llm-rewrite--view p) 'whole)
+  (if (equal? (llm-rewrite--view p) 'theirs)
       (llm-rewrite--body block)
       (llm-rewrite--new p)))
 
@@ -7089,7 +7048,7 @@
   (lambda () (llm-rewrite-reject! (current-buffer))))
 
 (define-command "llm-rewrite-diff"
-  "Show the waiting rewrite stacked, side by side, or whole"
+  "Show the waiting rewrite as theirs, all, or ours"
   (lambda () (llm-rewrite-cycle-view! (current-buffer))))
 
 (global-set-key "M-|" "llm-pipe-region")

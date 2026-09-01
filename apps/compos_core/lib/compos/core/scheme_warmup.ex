@@ -10,6 +10,10 @@ defmodule Compos.Core.SchemeWarmup do
     Task.start_link(fn ->
       Process.sleep(50)
 
+      # The embedding sync can call the network once per missing vector, so
+      # the first boot after the catalog grows runs for minutes. The task is
+      # temporary and owns its lane, so a long wait blocks nothing; a short
+      # timeout kills the task and leaves the caches cold.
       Session.eval(
         """
         (begin
@@ -17,7 +21,7 @@ defmodule Compos.Core.SchemeWarmup do
           (apropos-sync-embeddings!))
         """,
         nil,
-        5_000,
+        300_000,
         {:system, :scheme_warmup}
       )
     end)

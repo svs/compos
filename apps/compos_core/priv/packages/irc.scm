@@ -650,8 +650,8 @@
     'no-marks #t
     'local-filter #t
     'key (lambda (buf e) (car e))
-    'footer (lambda (buf) '(("RET" "join") ("/" "filter") ("q" "quit")))
-    'keys '(("RET" "irc-channels-join") ("q" "quit-window"))))
+    'footer (lambda (buf) '(("RET" "join") ("/" "filter") ("g" "refresh") ("q" "quit")))
+    'keys '(("RET" "irc-channels-join") ("g" "irc-channels-refresh") ("q" "quit-window"))))
 
 (define-command "irc-channels-join" "Join the channel on this row"
   (lambda ()
@@ -661,6 +661,18 @@
       (if (and e name)
           (irc-join! name (car e) "")
           (message "no channel on this line")))))
+
+;; `g` asks the server again, with the pattern the /list that made this
+;; buffer used; the rows land when 323 closes the reply
+(define-command "irc-channels-refresh" "Ask the server for this channel list again"
+  (lambda ()
+    (let* ((buf (current-buffer))
+           (name (irc-buf-server buf)))
+      (if (and name (irc-connected? name))
+          (let ((pat (or (irc-conn-get name 'list-pattern) "")))
+            (message (string-append "asking " name " for the channel list"))
+            (irc-send! name (string-append "LIST" (if (equal? pat "") "" (string-append " " pat)))))
+          (message "not connected: /connect")))))
 
 ;;; --- the servers list -------------------------------------------------------
 
@@ -913,6 +925,8 @@
 (irc-defcommand! "list" "/list [PATTERN] — list the server's channels in a buffer"
   (lambda (buf rest)
     (irc-note! buf "asking for the channel list")
+    (let ((name (irc-buf-server buf)))
+      (when name (irc-conn-put! name 'list-pattern rest)))
     (irc-raw! buf (string-append "LIST" (if (equal? rest "") "" (string-append " " rest))))))
 
 (irc-defcommand! "quit" "/quit [REASON] — disconnect from the server"

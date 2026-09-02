@@ -125,8 +125,17 @@
 (define (group-display-name g)
   (or (group-name g) (and (string? g) g) ""))
 
-(define (group-display-label-in g frame)
+;; A group founded by a directory or a file carries the full path as its
+;; name. On screen it wears the last segment: the modeline says journal,
+;; not /Users/svs/docs/journal. Prompts and messages keep the full name.
+(define (group-short-name g)
   (let ((name (group-display-name g)))
+    (if (equal? name "")
+        ""
+        (car (reverse (string-split name "/"))))))
+
+(define (group-display-label-in g frame)
+  (let ((name (group-short-name g)))
     (if (and (not (equal? name ""))
              (equal? (group-resolve-id g) (group-pinned-in frame)))
         (string-append name " " *group-pin-icon*)
@@ -642,13 +651,10 @@
 ;; The short name a card wears. A project root is not a group yet, so it
 ;; keeps its own basename rather than going blank.
 (define (group-label g)
-  (let ((name (group-display-name g)))
-    (if (equal? name "")
-        ""
-        (let ((short (car (reverse (string-split name "/")))))
-          (if (group-pinned? g)
-              (string-append short " " *group-pin-icon*)
-              short)))))
+  (let ((short (group-short-name g)))
+    (cond ((equal? short "") "")
+          ((group-pinned? g) (string-append short " " *group-pin-icon*))
+          (else short))))
 
 
 ;; a group's metadata lives on its chat buffer: the chat is the group's

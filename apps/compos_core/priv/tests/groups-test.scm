@@ -57,6 +57,16 @@
       (check-equal! (group-display-name #f) "" "#f prints as the empty string")
       (t--drop! id))))
 
+(deftest 'the-modeline-label-is-the-short-name
+  "a path-named group shows its last segment in the frame's group label"
+  (lambda ()
+    (let ((id (group-record-create! "/zztest/docs/journal")))
+      (check-equal! (group-display-label-in id (selected-frame)) "journal"
+                    "the modeline says journal, not the path")
+      (check-equal! (group-display-name id) "/zztest/docs/journal"
+                    "prompts and messages keep the full name")
+      (group-record-delete! id))))
+
 (deftest 'group-label-shortens-a-path
   "a card wears the last segment, and a project root keeps its basename"
   (lambda ()
